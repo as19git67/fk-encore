@@ -4,3 +4,7 @@ encore.gen.cue
 /.encore
 node_modules
 /encore.gen
+.mcp.json
+data/*.db
+data/*.db-wal
+data/*.db-shm
