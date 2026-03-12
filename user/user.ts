@@ -12,7 +12,7 @@ import {
   listUsersLogic,
   updateUserLogic,
   deleteUserLogic,
-} from "./user.logic";
+} from "./user.service";
 import { requirePermission } from "./auth-handler";
 import { getAuthData } from "~encore/auth";
 

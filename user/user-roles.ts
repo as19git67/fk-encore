@@ -8,7 +8,7 @@ import {
   assignRoleLogic,
   removeRoleLogic,
   getUserRolesLogic,
-} from "./user-roles.logic";
+} from "./user-roles.service";
 import { requirePermission } from "./auth-handler";
 import { getAuthData } from "~encore/auth";
 

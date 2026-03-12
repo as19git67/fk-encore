@@ -20,7 +20,7 @@ import {
   listPermissionsLogic,
   assignPermissionLogic,
   revokePermissionLogic,
-} from "./role.logic";
+} from "./role.service";
 import { requirePermission } from "../user/auth-handler";
 import { getAuthData } from "~encore/auth";
 
