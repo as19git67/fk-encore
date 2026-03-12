@@ -89,6 +89,9 @@ export const deleteUser = api(
       if (err.message?.includes("not found")) {
         throw APIError.notFound(err.message);
       }
+      if (err.message?.includes("Cannot delete")) {
+        throw APIError.failedPrecondition(err.message);
+      }
       throw err;
     }
   }

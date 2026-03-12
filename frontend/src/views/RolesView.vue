@@ -34,6 +34,10 @@ const creating = ref(false)
 const showPermDialog = ref(false)
 const selectedRole = ref<RoleWithPermissions | null>(null)
 
+// Delete-Confirmation-Dialog
+const showDeleteConfirm = ref(false)
+const roleToDelete = ref<RoleWithPermissions | null>(null)
+
 const permissionGroups = computed(() => {
   const groups = new Map<string, Permission[]>()
   for (const p of allPermissions.value) {
@@ -78,12 +82,21 @@ async function handleCreate() {
   }
 }
 
-async function handleDelete(id: number) {
+function confirmDeleteRole(role: RoleWithPermissions) {
+  roleToDelete.value = role
+  showDeleteConfirm.value = true
+}
+
+async function handleDelete() {
+  if (!roleToDelete.value) return
   error.value = ''
   try {
-    await deleteRole(id)
+    await deleteRole(roleToDelete.value.id)
+    showDeleteConfirm.value = false
+    roleToDelete.value = null
     await loadData()
   } catch (err: any) {
+    showDeleteConfirm.value = false
     error.value = err.message || 'Rolle konnte nicht gelöscht werden'
   }
 }
@@ -168,12 +181,21 @@ onMounted(loadData)
               severity="danger"
               text
               rounded
-              @click="handleDelete(data.id)"
+              @click="confirmDeleteRole(data)"
             />
           </div>
         </template>
       </Column>
     </DataTable>
+
+    <!-- Delete Confirmation Dialog -->
+    <Dialog v-model:visible="showDeleteConfirm" header="Rolle löschen" :modal="true" :style="{ width: '400px' }">
+      <p>Rolle <strong>{{ roleToDelete?.name }}</strong> wirklich löschen?</p>
+      <template #footer>
+        <Button label="Abbrechen" severity="secondary" @click="showDeleteConfirm = false" />
+        <Button label="Löschen" severity="danger" @click="handleDelete" />
+      </template>
+    </Dialog>
 
     <!-- Permission-Dialog -->
     <Dialog
