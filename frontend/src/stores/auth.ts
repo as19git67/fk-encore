@@ -2,6 +2,8 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { UserWithRoles } from '../api/users'
 import * as usersApi from '../api/users'
+import { startAuthentication } from '@simplewebauthn/browser'
+import { passkeyAuthOptions, passkeyAuthVerify } from '../api/passkeys'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<UserWithRoles | null>(null)
@@ -22,12 +24,23 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  function setSession(responseToken: string, responseUser: UserWithRoles) {
+    token.value = responseToken
+    user.value = responseUser
+    localStorage.setItem('auth_token', responseToken)
+    localStorage.setItem('auth_user', JSON.stringify(responseUser))
+  }
+
   async function login(email: string, password: string) {
     const response = await usersApi.login(email, password)
-    token.value = response.token
-    user.value = response.user
-    localStorage.setItem('auth_token', response.token)
-    localStorage.setItem('auth_user', JSON.stringify(response.user))
+    setSession(response.token, response.user)
+  }
+
+  async function loginWithPasskey() {
+    const { challengeId, options } = await passkeyAuthOptions()
+    const credential = await startAuthentication({ optionsJSON: options })
+    const response = await passkeyAuthVerify(challengeId, credential)
+    setSession(response.token, response.user)
   }
 
   async function register(email: string, name: string, password: string) {
@@ -48,6 +61,5 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('auth_user')
   }
 
-  return { user, token, isAuthenticated, loadFromStorage, login, register, logout }
+  return { user, token, isAuthenticated, loadFromStorage, login, loginWithPasskey, register, logout }
 })
-

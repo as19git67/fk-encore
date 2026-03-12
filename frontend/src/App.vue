@@ -11,6 +11,7 @@ const router = useRouter()
 const menuItems = computed(() => [
   { label: 'Benutzer', icon: 'pi pi-users', command: () => router.push('/users') },
   { label: 'Rollen', icon: 'pi pi-shield', command: () => router.push('/roles') },
+  { label: 'Profil', icon: 'pi pi-user', command: () => router.push('/profile') },
 ])
 
 async function handleLogout() {

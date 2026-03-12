@@ -46,6 +46,53 @@ export interface LogoutResponse {
   message: string;
 }
 
+// ========== Passkey Types ==========
+
+export interface PasskeyRow {
+  credential_id: string;
+  user_id: number;
+  public_key: string;
+  counter: number;
+  device_type: string;
+  backed_up: number;
+  transports: string;
+  name: string;
+  created_at: string;
+}
+
+export interface PasskeyInfo {
+  credential_id: string;
+  name: string;
+  device_type: string;
+  backed_up: boolean;
+  created_at: string;
+}
+
+export interface PasskeyRegistrationOptionsResponse {
+  challengeId: string;
+  options: any;
+}
+
+export interface PasskeyRegistrationVerifyRequest {
+  challengeId: string;
+  credential: any;
+  name?: string;
+}
+
+export interface PasskeyAuthOptionsResponse {
+  challengeId: string;
+  options: any;
+}
+
+export interface PasskeyAuthVerifyRequest {
+  challengeId: string;
+  credential: any;
+}
+
+export interface ListPasskeysResponse {
+  passkeys: PasskeyInfo[];
+}
+
 // ========== Role Types ==========
 
 export interface Role {

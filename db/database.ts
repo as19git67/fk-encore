@@ -35,6 +35,28 @@ const SCHEMA = `
     expires_at TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
+
+  CREATE TABLE IF NOT EXISTS passkeys (
+    credential_id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    public_key TEXT NOT NULL,
+    counter INTEGER NOT NULL DEFAULT 0,
+    device_type TEXT NOT NULL DEFAULT 'singleDevice',
+    backed_up INTEGER NOT NULL DEFAULT 0,
+    transports TEXT DEFAULT '[]',
+    name TEXT NOT NULL DEFAULT 'Passkey',
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS challenges (
+    id TEXT PRIMARY KEY,
+    challenge TEXT NOT NULL,
+    user_id INTEGER,
+    created_at TEXT DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
 `;
 
 function initDb(database: DatabaseType): void {
