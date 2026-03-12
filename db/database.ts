@@ -1,6 +1,8 @@
 import Database, { type Database as DatabaseType } from "better-sqlite3";
 import path from "path";
 import fs from "fs";
+import "dotenv/config";
+import { seed } from "./seed";
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS users (
@@ -62,5 +64,8 @@ function createDb(): DatabaseType {
 }
 
 const db: DatabaseType = createDb();
+
+// Seed initial data (roles, admin user)
+seed(db);
 
 export default db;
