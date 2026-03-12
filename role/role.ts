@@ -15,9 +15,9 @@ import {
   deleteRoleLogic,
 } from "./role.logic";
 
-/** Create a new role */
+/** Create a new role — auth required */
 export const createRole = api(
-  { expose: true, method: "POST", path: "/roles" },
+  { expose: true, auth: true, method: "POST", path: "/roles" },
   async (req: CreateRoleRequest): Promise<Role> => {
     try {
       return createRoleLogic(req);
@@ -33,9 +33,9 @@ export const createRole = api(
   }
 );
 
-/** Get a single role by ID (with assigned users) */
+/** Get a single role by ID — auth required */
 export const getRole = api(
-  { expose: true, method: "GET", path: "/roles/:id" },
+  { expose: true, auth: true, method: "GET", path: "/roles/:id" },
   async ({ id }: { id: number }): Promise<RoleWithUsers> => {
     try {
       return getRoleLogic(id);
@@ -48,17 +48,17 @@ export const getRole = api(
   }
 );
 
-/** List all roles */
+/** List all roles — auth required */
 export const listRoles = api(
-  { expose: true, method: "GET", path: "/roles" },
+  { expose: true, auth: true, method: "GET", path: "/roles" },
   async (): Promise<ListRolesResponse> => {
     return listRolesLogic();
   }
 );
 
-/** Update an existing role */
+/** Update an existing role — auth required */
 export const updateRole = api(
-  { expose: true, method: "PUT", path: "/roles/:id" },
+  { expose: true, auth: true, method: "PUT", path: "/roles/:id" },
   async (req: UpdateRoleRequest): Promise<Role> => {
     try {
       return updateRoleLogic(req);
@@ -74,9 +74,9 @@ export const updateRole = api(
   }
 );
 
-/** Delete a role */
+/** Delete a role — auth required */
 export const deleteRole = api(
-  { expose: true, method: "DELETE", path: "/roles/:id" },
+  { expose: true, auth: true, method: "DELETE", path: "/roles/:id" },
   async ({ id }: { id: number }): Promise<DeleteResponse> => {
     try {
       return deleteRoleLogic(id);

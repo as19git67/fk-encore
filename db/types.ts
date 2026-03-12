@@ -29,6 +29,23 @@ export interface UserWithRoles extends User {
   roles: Role[];
 }
 
+// ========== Auth Types ==========
+
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+export interface LoginResponse {
+  user: UserWithRoles;
+  token: string;
+}
+
+export interface LogoutResponse {
+  success: boolean;
+  message: string;
+}
+
 // ========== Role Types ==========
 
 export interface Role {
@@ -78,4 +95,3 @@ export interface DeleteResponse {
   success: boolean;
   message: string;
 }
-

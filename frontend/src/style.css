@@ -1,0 +1,13 @@
+/* Minimal reset — PrimeVue handles the rest */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+a {
+  color: var(--p-primary-color);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}

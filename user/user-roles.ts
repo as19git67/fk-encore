@@ -10,9 +10,9 @@ import {
   getUserRolesLogic,
 } from "./user-roles.logic";
 
-/** Assign a role to a user */
+/** Assign a role to a user — auth required */
 export const assignRole = api(
-  { expose: true, method: "POST", path: "/users/:userId/roles" },
+  { expose: true, auth: true, method: "POST", path: "/users/:userId/roles" },
   async (req: AssignRoleRequest): Promise<UserRolesResponse> => {
     try {
       return assignRoleLogic(req);
@@ -28,9 +28,9 @@ export const assignRole = api(
   }
 );
 
-/** Remove a role from a user */
+/** Remove a role from a user — auth required */
 export const removeRole = api(
-  { expose: true, method: "DELETE", path: "/users/:userId/roles/:roleId" },
+  { expose: true, auth: true, method: "DELETE", path: "/users/:userId/roles/:roleId" },
   async ({ userId, roleId }: { userId: number; roleId: number }): Promise<DeleteResponse> => {
     try {
       return removeRoleLogic(userId, roleId);
@@ -43,9 +43,9 @@ export const removeRole = api(
   }
 );
 
-/** Get all roles for a user */
+/** Get all roles for a user — auth required */
 export const getUserRoles = api(
-  { expose: true, method: "GET", path: "/users/:userId/roles" },
+  { expose: true, auth: true, method: "GET", path: "/users/:userId/roles" },
   async ({ userId }: { userId: number }): Promise<UserRolesResponse> => {
     try {
       return getUserRolesLogic(userId);
