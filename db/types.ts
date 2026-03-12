@@ -41,6 +41,16 @@ export interface RoleWithPermissions extends Role {
   permissions: Permission[];
 }
 
+export interface AssignPermissionRequest {
+  roleId: number;
+  permissionId: number;
+}
+
+export interface RolePermissionsResponse {
+  roleId: number;
+  permissions: Permission[];
+}
+
 export interface UserWithRolesAndPermissions extends User {
   roles: Role[];
   permissions: string[];
@@ -152,7 +162,11 @@ export interface ListUsersResponse {
 }
 
 export interface ListRolesResponse {
-  roles: Role[];
+  roles: RoleWithPermissions[];
+}
+
+export interface ListPermissionsResponse {
+  permissions: Permission[];
 }
 
 export interface DeleteResponse {
