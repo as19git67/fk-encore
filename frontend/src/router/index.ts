@@ -5,6 +5,7 @@ import RegisterView from '../views/RegisterView.vue'
 import UserListView from '../views/UserListView.vue'
 import UserDetailView from '../views/UserDetailView.vue'
 import RolesView from '../views/RolesView.vue'
+import ProfileView from '../views/ProfileView.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -15,6 +16,7 @@ const router = createRouter({
     { path: '/users', name: 'users', component: UserListView },
     { path: '/users/:id', name: 'user-detail', component: UserDetailView },
     { path: '/roles', name: 'roles', component: RolesView },
+    { path: '/profile', name: 'profile', component: ProfileView },
   ],
 })
 
@@ -29,4 +31,3 @@ router.beforeEach((to) => {
 })
 
 export default router
-
