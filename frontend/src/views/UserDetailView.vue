@@ -73,8 +73,8 @@ async function handleRemoveRole() {
   } catch (err: any) {
     showRemoveRoleConfirm.value = false
     roleToRemove.value = null
-    error.value = err.message || 'Rolle konnte nicht entfernt werden'
     await loadData()
+    error.value = err.message || 'Rolle konnte nicht entfernt werden'
   }
 }
 
