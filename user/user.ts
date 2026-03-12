@@ -14,7 +14,7 @@ import {
   deleteUserLogic,
 } from "./user.logic";
 
-/** Create a new user */
+/** Create a new user (Register) — no auth required */
 export const createUser = api(
   { expose: true, method: "POST", path: "/users" },
   async (req: CreateUserRequest): Promise<UserWithRoles> => {
@@ -32,9 +32,9 @@ export const createUser = api(
   }
 );
 
-/** Get a single user by ID (with roles) */
+/** Get a single user by ID (with roles) — auth required */
 export const getUser = api(
-  { expose: true, method: "GET", path: "/users/:id" },
+  { expose: true, auth: true, method: "GET", path: "/users/:id" },
   async ({ id }: { id: number }): Promise<UserWithRoles> => {
     try {
       return getUserLogic(id);
@@ -47,17 +47,17 @@ export const getUser = api(
   }
 );
 
-/** List all users */
+/** List all users — auth required */
 export const listUsers = api(
-  { expose: true, method: "GET", path: "/users" },
+  { expose: true, auth: true, method: "GET", path: "/users" },
   async (): Promise<ListUsersResponse> => {
     return listUsersLogic();
   }
 );
 
-/** Update an existing user */
+/** Update an existing user — auth required */
 export const updateUser = api(
-  { expose: true, method: "PUT", path: "/users/:id" },
+  { expose: true, auth: true, method: "PUT", path: "/users/:id" },
   async (req: UpdateUserRequest): Promise<UserWithRoles> => {
     try {
       return updateUserLogic(req);
@@ -73,9 +73,9 @@ export const updateUser = api(
   }
 );
 
-/** Delete a user */
+/** Delete a user — auth required */
 export const deleteUser = api(
-  { expose: true, method: "DELETE", path: "/users/:id" },
+  { expose: true, auth: true, method: "DELETE", path: "/users/:id" },
   async ({ id }: { id: number }): Promise<DeleteResponse> => {
     try {
       return deleteUserLogic(id);
