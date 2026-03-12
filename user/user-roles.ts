@@ -9,11 +9,14 @@ import {
   removeRoleLogic,
   getUserRolesLogic,
 } from "./user-roles.logic";
+import { requirePermission } from "./auth-handler";
+import { getAuthData } from "~encore/auth";
 
-/** Assign a role to a user — auth required */
+/** Assign a role to a user — requires roles.assign */
 export const assignRole = api(
   { expose: true, auth: true, method: "POST", path: "/users/:userId/roles" },
   async (req: AssignRoleRequest): Promise<UserRolesResponse> => {
+    requirePermission(getAuthData()!, "roles.assign");
     try {
       return assignRoleLogic(req);
     } catch (err: any) {
@@ -28,10 +31,11 @@ export const assignRole = api(
   }
 );
 
-/** Remove a role from a user — auth required */
+/** Remove a role from a user — requires roles.revoke */
 export const removeRole = api(
   { expose: true, auth: true, method: "DELETE", path: "/users/:userId/roles/:roleId" },
   async ({ userId, roleId }: { userId: number; roleId: number }): Promise<DeleteResponse> => {
+    requirePermission(getAuthData()!, "roles.revoke");
     try {
       return removeRoleLogic(userId, roleId);
     } catch (err: any) {
@@ -43,10 +47,11 @@ export const removeRole = api(
   }
 );
 
-/** Get all roles for a user — auth required */
+/** Get all roles for a user — requires users.read */
 export const getUserRoles = api(
   { expose: true, auth: true, method: "GET", path: "/users/:userId/roles" },
   async ({ userId }: { userId: number }): Promise<UserRolesResponse> => {
+    requirePermission(getAuthData()!, "users.read");
     try {
       return getUserRolesLogic(userId);
     } catch (err: any) {

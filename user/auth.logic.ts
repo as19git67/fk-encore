@@ -3,12 +3,12 @@ import { compareSync } from "bcryptjs";
 import db from "../db/database";
 import type {
   UserRow,
-  UserWithRoles,
+  UserWithRolesAndPermissions,
   LoginRequest,
   LoginResponse,
   LogoutResponse,
 } from "../db/types";
-import { toUser, getRolesForUser } from "./user.logic";
+import { toUser, getRolesForUser, getPermissionsForUser } from "./user.logic";
 
 // ---------- Helpers ----------
 
@@ -46,9 +46,10 @@ export function loginLogic(req: LoginRequest): LoginResponse {
     `INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, datetime('now', '+24 hours'))`
   ).run(token, row.id);
 
-  const user: UserWithRoles = {
+  const user: UserWithRolesAndPermissions = {
     ...toUser(row),
     roles: getRolesForUser(row.id),
+    permissions: getPermissionsForUser(row.id),
   };
 
   return { user, token };
@@ -59,7 +60,7 @@ export function logoutLogic(token: string): LogoutResponse {
   return { success: true, message: "Logged out successfully" };
 }
 
-export function validateToken(token: string): { userID: string } {
+export function validateToken(token: string): { userID: string; permissions: string[] } {
   const session = db
     .prepare(
       `SELECT user_id FROM sessions WHERE token = ? AND expires_at > datetime('now')`
@@ -70,5 +71,6 @@ export function validateToken(token: string): { userID: string } {
     throw new Error("invalid or expired token");
   }
 
-  return { userID: String(session.user_id) };
+  const permissions = getPermissionsForUser(session.user_id);
+  return { userID: String(session.user_id), permissions };
 }

@@ -21,7 +21,7 @@ import type {
   DeleteResponse,
   UserRow,
 } from "../db/types";
-import { toUser, getRolesForUser } from "./user.logic";
+import { toUser, getRolesForUser, getPermissionsForUser } from "./user.logic";
 
 // ---------- RP Config ----------
 
@@ -240,7 +240,7 @@ export async function passkeyAuthVerifyLogic(
   const token = createSession(userRow.id);
 
   return {
-    user: { ...toUser(userRow), roles: getRolesForUser(userRow.id) },
+    user: { ...toUser(userRow), roles: getRolesForUser(userRow.id), permissions: getPermissionsForUser(userRow.id) },
     token,
   };
 }

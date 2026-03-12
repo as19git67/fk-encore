@@ -8,11 +8,17 @@ import { useAuthStore } from './stores/auth'
 const auth = useAuthStore()
 const router = useRouter()
 
-const menuItems = computed(() => [
-  { label: 'Benutzer', icon: 'pi pi-users', command: () => router.push('/users') },
-  { label: 'Rollen', icon: 'pi pi-shield', command: () => router.push('/roles') },
-  { label: 'Profil', icon: 'pi pi-user', command: () => router.push('/profile') },
-])
+const menuItems = computed(() => {
+  const items = []
+  if (auth.hasPermission('users.list')) {
+    items.push({ label: 'Benutzer', icon: 'pi pi-users', command: () => router.push('/users') })
+  }
+  if (auth.hasPermission('roles.list')) {
+    items.push({ label: 'Rollen', icon: 'pi pi-shield', command: () => router.push('/roles') })
+  }
+  items.push({ label: 'Profil', icon: 'pi pi-user', command: () => router.push('/profile') })
+  return items
+})
 
 async function handleLogout() {
   await auth.logout()

@@ -61,5 +61,9 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('auth_user')
   }
 
-  return { user, token, isAuthenticated, loadFromStorage, login, loginWithPasskey, register, logout }
+  function hasPermission(permission: string): boolean {
+    return user.value?.permissions?.includes(permission) ?? false
+  }
+
+  return { user, token, isAuthenticated, hasPermission, loadFromStorage, login, loginWithPasskey, register, logout }
 })

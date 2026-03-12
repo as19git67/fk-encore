@@ -29,6 +29,23 @@ export interface UserWithRoles extends User {
   roles: Role[];
 }
 
+// ========== Permission Types ==========
+
+export interface Permission {
+  id: number;
+  key: string;
+  description: string;
+}
+
+export interface RoleWithPermissions extends Role {
+  permissions: Permission[];
+}
+
+export interface UserWithRolesAndPermissions extends User {
+  roles: Role[];
+  permissions: string[];
+}
+
 // ========== Auth Types ==========
 
 export interface LoginRequest {
@@ -37,7 +54,7 @@ export interface LoginRequest {
 }
 
 export interface LoginResponse {
-  user: UserWithRoles;
+  user: UserWithRolesAndPermissions;
   token: string;
 }
 

@@ -7,7 +7,9 @@ import Button from 'primevue/button'
 import Message from 'primevue/message'
 import { listRoles, createRole, deleteRole } from '../api/roles'
 import type { Role } from '../api/users'
+import { useAuthStore } from '../stores/auth'
 
+const auth = useAuthStore()
 const roles = ref<Role[]>([])
 const loading = ref(true)
 const error = ref('')
@@ -63,7 +65,7 @@ onMounted(loadRoles)
 
     <Message v-if="error" severity="error" :closable="false" class="mb">{{ error }}</Message>
 
-    <div class="create-form mb">
+    <div v-if="auth.hasPermission('roles.create')" class="create-form mb">
       <InputText v-model="newRoleName" placeholder="Rollenname" />
       <InputText v-model="newRoleDescription" placeholder="Beschreibung (optional)" />
       <Button
@@ -86,7 +88,7 @@ onMounted(loadRoles)
       <Column field="id" header="ID" sortable style="width: 5rem" />
       <Column field="name" header="Name" sortable />
       <Column field="description" header="Beschreibung" />
-      <Column header="Aktionen" style="width: 8rem">
+      <Column v-if="auth.hasPermission('roles.delete')" header="Aktionen" style="width: 8rem">
         <template #body="{ data }">
           <Button
             icon="pi pi-trash"
