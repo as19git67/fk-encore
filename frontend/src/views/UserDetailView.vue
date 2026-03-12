@@ -10,7 +10,9 @@ import Message from 'primevue/message'
 import { getUser, deleteUser, type UserWithRoles } from '../api/users'
 import { listRoles, assignRole, removeRole } from '../api/roles'
 import type { Role } from '../api/users'
+import { useAuthStore } from '../stores/auth'
 
+const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 
@@ -84,7 +86,7 @@ onMounted(loadData)
   <div v-else-if="user">
     <div class="header-row">
       <h1>{{ user.name }}</h1>
-      <Button label="Benutzer löschen" icon="pi pi-trash" severity="danger" outlined @click="showDeleteConfirm = true" />
+      <Button v-if="auth.hasPermission('users.delete')" label="Benutzer löschen" icon="pi pi-trash" severity="danger" outlined @click="showDeleteConfirm = true" />
     </div>
 
     <Message v-if="error" severity="error" :closable="false" class="mb">{{ error }}</Message>
@@ -124,13 +126,13 @@ onMounted(loadData)
             v-for="role in user.roles"
             :key="role.id"
             :label="role.name"
-            removable
+            :removable="auth.hasPermission('roles.revoke')"
             @remove="handleRemoveRole(role.id)"
           />
         </div>
         <p v-else class="no-roles">Keine Rollen zugewiesen.</p>
 
-        <div class="assign-form" v-if="availableRoles.length > 0">
+        <div class="assign-form" v-if="auth.hasPermission('roles.assign') && availableRoles.length > 0">
           <Select
             v-model="selectedRole"
             :options="availableRoles"

@@ -13,6 +13,8 @@ import {
   updateUserLogic,
   deleteUserLogic,
 } from "./user.logic";
+import { requirePermission } from "./auth-handler";
+import { getAuthData } from "~encore/auth";
 
 /** Create a new user (Register) — no auth required */
 export const createUser = api(
@@ -32,10 +34,11 @@ export const createUser = api(
   }
 );
 
-/** Get a single user by ID (with roles) — auth required */
+/** Get a single user by ID (with roles) — requires users.read */
 export const getUser = api(
   { expose: true, auth: true, method: "GET", path: "/users/:id" },
   async ({ id }: { id: number }): Promise<UserWithRoles> => {
+    requirePermission(getAuthData()!, "users.read");
     try {
       return getUserLogic(id);
     } catch (err: any) {
@@ -47,18 +50,20 @@ export const getUser = api(
   }
 );
 
-/** List all users — auth required */
+/** List all users — requires users.list */
 export const listUsers = api(
   { expose: true, auth: true, method: "GET", path: "/users" },
   async (): Promise<ListUsersResponse> => {
+    requirePermission(getAuthData()!, "users.list");
     return listUsersLogic();
   }
 );
 
-/** Update an existing user — auth required */
+/** Update an existing user — requires users.update */
 export const updateUser = api(
   { expose: true, auth: true, method: "PUT", path: "/users/:id" },
   async (req: UpdateUserRequest): Promise<UserWithRoles> => {
+    requirePermission(getAuthData()!, "users.update");
     try {
       return updateUserLogic(req);
     } catch (err: any) {
@@ -73,10 +78,11 @@ export const updateUser = api(
   }
 );
 
-/** Delete a user — auth required */
+/** Delete a user — requires users.delete */
 export const deleteUser = api(
   { expose: true, auth: true, method: "DELETE", path: "/users/:id" },
   async ({ id }: { id: number }): Promise<DeleteResponse> => {
+    requirePermission(getAuthData()!, "users.delete");
     try {
       return deleteUserLogic(id);
     } catch (err: any) {

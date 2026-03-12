@@ -8,6 +8,7 @@ interface AuthParams {
 
 interface AuthData {
   userID: string;
+  permissions: string[];
 }
 
 // Store the current token so logout can access it
@@ -17,7 +18,14 @@ export function getAuthToken(): string | undefined {
   return currentToken;
 }
 
-export const auth = authHandler<AuthParams, AuthData>(async (params) => {
+/** Check if the current auth data has a specific permission. Throws APIError.permissionDenied if not. */
+export function requirePermission(authData: AuthData, permission: string): void {
+  if (!authData.permissions.includes(permission)) {
+    throw APIError.permissionDenied(`missing permission: ${permission}`);
+  }
+}
+
+export const auth = authHandler<AuthParams, AuthData>(async (params): Promise<AuthData> => {
   const header = params.authorization;
   if (!header) {
     throw APIError.unauthenticated("missing Authorization header");
@@ -41,4 +49,3 @@ export const auth = authHandler<AuthParams, AuthData>(async (params) => {
 export const gateway = new Gateway({
   authHandler: auth,
 });
-

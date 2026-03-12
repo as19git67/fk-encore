@@ -16,6 +16,7 @@ export interface Role {
 
 export interface UserWithRoles extends User {
   roles: Role[]
+  permissions: string[]
 }
 
 export interface LoginResponse {

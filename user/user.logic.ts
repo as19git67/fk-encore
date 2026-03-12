@@ -29,6 +29,20 @@ export function getRolesForUser(userId: number): Role[] {
     .all(userId) as Role[];
 }
 
+export function getPermissionsForUser(userId: number): string[] {
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT p.key
+       FROM permissions p
+       JOIN role_permissions rp ON rp.permission_id = p.id
+       JOIN user_roles ur ON ur.role_id = rp.role_id
+       WHERE ur.user_id = ?
+       ORDER BY p.key`
+    )
+    .all(userId) as { key: string }[];
+  return rows.map((r) => r.key);
+}
+
 // ---------- Business Logic ----------
 
 export function createUserLogic(req: CreateUserRequest): UserWithRoles {
@@ -101,4 +115,3 @@ export function deleteUserLogic(id: number): DeleteResponse {
 
   return { success: true, message: `User ${id} deleted` };
 }
-

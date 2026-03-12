@@ -10,12 +10,12 @@ import ProfileView from '../views/ProfileView.vue'
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', redirect: '/users' },
+    { path: '/', redirect: '/profile' },
     { path: '/login', name: 'login', component: LoginView },
     { path: '/register', name: 'register', component: RegisterView },
-    { path: '/users', name: 'users', component: UserListView },
-    { path: '/users/:id', name: 'user-detail', component: UserDetailView },
-    { path: '/roles', name: 'roles', component: RolesView },
+    { path: '/users', name: 'users', component: UserListView, meta: { permission: 'users.list' } },
+    { path: '/users/:id', name: 'user-detail', component: UserDetailView, meta: { permission: 'users.read' } },
+    { path: '/roles', name: 'roles', component: RolesView, meta: { permission: 'roles.list' } },
     { path: '/profile', name: 'profile', component: ProfileView },
   ],
 })
@@ -27,6 +27,12 @@ router.beforeEach((to) => {
   const publicRoutes = ['login', 'register']
   if (!auth.isAuthenticated && !publicRoutes.includes(to.name as string)) {
     return { name: 'login' }
+  }
+
+  // Check route-level permission
+  const requiredPermission = to.meta.permission as string | undefined
+  if (requiredPermission && !auth.hasPermission(requiredPermission)) {
+    return { name: 'profile' }
   }
 })
 
