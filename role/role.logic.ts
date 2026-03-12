@@ -97,6 +97,24 @@ export function updateRoleLogic(req: UpdateRoleRequest): Role {
 }
 
 export function deleteRoleLogic(id: number): DeleteResponse {
+  const role = db.prepare(`SELECT name FROM roles WHERE id = ?`).get(id) as { name: string } | undefined;
+
+  if (!role) {
+    throw new Error(`Role with id ${id} not found`);
+  }
+
+  if (role.name === "Admin") {
+    const adminUserCount = db
+      .prepare(
+        `SELECT COUNT(*) as count FROM user_roles WHERE role_id = ?`
+      )
+      .get(id) as { count: number };
+
+    if (adminUserCount.count > 0) {
+      throw new Error("Cannot delete the Admin role while users are assigned to it");
+    }
+  }
+
   const result = db.prepare(`DELETE FROM roles WHERE id = ?`).run(id);
 
   if (result.changes === 0) {

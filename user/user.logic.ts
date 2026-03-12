@@ -112,6 +112,25 @@ export function updateUserLogic(req: UpdateUserRequest): UserWithRoles {
 }
 
 export function deleteUserLogic(id: number): DeleteResponse {
+  // Check if this user has the Admin role
+  const roles = getRolesForUser(id);
+  const isAdmin = roles.some((r) => r.name === "Admin");
+
+  if (isAdmin) {
+    // Count how many users have the Admin role
+    const adminCount = db
+      .prepare(
+        `SELECT COUNT(*) as count FROM user_roles ur
+         JOIN roles r ON r.id = ur.role_id
+         WHERE r.name = 'Admin'`
+      )
+      .get() as { count: number };
+
+    if (adminCount.count <= 1) {
+      throw new Error("Cannot delete the last admin user");
+    }
+  }
+
   const result = db.prepare(`DELETE FROM users WHERE id = ?`).run(id);
 
   if (result.changes === 0) {

@@ -22,6 +22,8 @@ const selectedRole = ref<Role | null>(null)
 const loading = ref(true)
 const error = ref('')
 const showDeleteConfirm = ref(false)
+const showRemoveRoleConfirm = ref(false)
+const roleToRemove = ref<Role | null>(null)
 
 const userId = Number(route.params.id)
 
@@ -56,11 +58,20 @@ async function handleAssignRole() {
   }
 }
 
-async function handleRemoveRole(roleId: number) {
+function confirmRemoveRole(role: Role) {
+  roleToRemove.value = role
+  showRemoveRoleConfirm.value = true
+}
+
+async function handleRemoveRole() {
+  if (!roleToRemove.value) return
   try {
-    await removeRole(userId, roleId)
+    await removeRole(userId, roleToRemove.value.id)
+    showRemoveRoleConfirm.value = false
+    roleToRemove.value = null
     await loadData()
   } catch (err: any) {
+    showRemoveRoleConfirm.value = false
     error.value = err.message || 'Rolle konnte nicht entfernt werden'
   }
 }
@@ -70,6 +81,7 @@ async function handleDelete() {
     await deleteUser(userId)
     router.push('/users')
   } catch (err: any) {
+    showDeleteConfirm.value = false
     error.value = err.message || 'Benutzer konnte nicht gelöscht werden'
   }
 }
@@ -100,6 +112,15 @@ onMounted(loadData)
       </template>
     </Dialog>
 
+    <!-- Confirm Remove Role Dialog -->
+    <Dialog v-model:visible="showRemoveRoleConfirm" header="Rolle entfernen" :modal="true" :style="{ width: '400px' }">
+      <p>Rolle <strong>{{ roleToRemove?.name }}</strong> von Benutzer <strong>{{ user.name }}</strong> wirklich entfernen?</p>
+      <template #footer>
+        <Button label="Abbrechen" severity="secondary" @click="showRemoveRoleConfirm = false" />
+        <Button label="Entfernen" severity="danger" @click="handleRemoveRole" />
+      </template>
+    </Dialog>
+
     <Card class="mb">
       <template #title>Benutzerdetails</template>
       <template #content>
@@ -127,7 +148,7 @@ onMounted(loadData)
             :key="role.id"
             :label="role.name"
             :removable="auth.hasPermission('roles.revoke')"
-            @remove="handleRemoveRole(role.id)"
+            @remove="confirmRemoveRole(role)"
           />
         </div>
         <p v-else class="no-roles">Keine Rollen zugewiesen.</p>

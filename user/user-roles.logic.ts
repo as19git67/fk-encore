@@ -35,6 +35,23 @@ export function assignRoleLogic(req: AssignRoleRequest): UserRolesResponse {
 }
 
 export function removeRoleLogic(userId: number, roleId: number): DeleteResponse {
+  // Check if this is the Admin role
+  const role = db.prepare(`SELECT name FROM roles WHERE id = ?`).get(roleId) as { name: string } | undefined;
+
+  if (role?.name === "Admin") {
+    const adminCount = db
+      .prepare(
+        `SELECT COUNT(*) as count FROM user_roles ur
+         JOIN roles r ON r.id = ur.role_id
+         WHERE r.name = 'Admin'`
+      )
+      .get() as { count: number };
+
+    if (adminCount.count <= 1) {
+      throw new Error("Cannot remove the Admin role from the last admin user");
+    }
+  }
+
   const result = db
     .prepare(`DELETE FROM user_roles WHERE user_id = ? AND role_id = ?`)
     .run(userId, roleId);

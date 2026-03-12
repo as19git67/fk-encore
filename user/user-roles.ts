@@ -42,6 +42,9 @@ export const removeRole = api(
       if (err.message?.includes("does not exist")) {
         throw APIError.notFound(err.message);
       }
+      if (err.message?.includes("Cannot remove")) {
+        throw APIError.failedPrecondition(err.message);
+      }
       throw err;
     }
   }
