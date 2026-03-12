@@ -72,7 +72,9 @@ async function handleRemoveRole() {
     await loadData()
   } catch (err: any) {
     showRemoveRoleConfirm.value = false
+    roleToRemove.value = null
     error.value = err.message || 'Rolle konnte nicht entfernt werden'
+    await loadData()
   }
 }
 
@@ -143,13 +145,18 @@ onMounted(loadData)
       <template #title>Rollen</template>
       <template #content>
         <div class="roles-list" v-if="user.roles.length > 0">
-          <Chip
-            v-for="role in user.roles"
-            :key="role.id"
-            :label="role.name"
-            :removable="auth.hasPermission('roles.revoke')"
-            @remove="confirmRemoveRole(role)"
-          />
+          <div v-for="role in user.roles" :key="role.id" class="role-item">
+            <Chip :label="role.name" />
+            <Button
+              v-if="auth.hasPermission('roles.revoke')"
+              icon="pi pi-times"
+              severity="danger"
+              text
+              rounded
+              size="small"
+              @click="confirmRemoveRole(role)"
+            />
+          </div>
         </div>
         <p v-else class="no-roles">Keine Rollen zugewiesen.</p>
 
@@ -195,6 +202,12 @@ onMounted(loadData)
   flex-wrap: wrap;
   gap: 0.5rem;
   margin-bottom: 1rem;
+}
+
+.role-item {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
 }
 
 .no-roles {

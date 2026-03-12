@@ -97,7 +97,9 @@ async function handleDelete() {
     await loadData()
   } catch (err: any) {
     showDeleteConfirm.value = false
+    roleToDelete.value = null
     error.value = err.message || 'Rolle konnte nicht gelöscht werden'
+    await loadData()
   }
 }
 
