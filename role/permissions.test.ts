@@ -8,9 +8,9 @@ import {
   assignPermissionLogic,
   revokePermissionLogic,
   getPermissionsForRole,
-} from "./role.logic";
-import { createUserLogic, getPermissionsForUser } from "../user/user.logic";
-import { assignRoleLogic } from "../user/user-roles.logic";
+} from "./role.service";
+import { createUserLogic, getPermissionsForUser } from "../user/user.service";
+import { assignRoleLogic } from "../user/user-roles.service";
 
 function seedPermissions() {
   const perms = [

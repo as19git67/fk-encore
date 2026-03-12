@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import db from "../db/database";
-import { loginLogic, logoutLogic, validateToken } from "./auth.logic";
-import { createUserLogic, getPermissionsForUser } from "./user.logic";
-import { createRoleLogic } from "../role/role.logic";
-import { assignRoleLogic } from "./user-roles.logic";
-import { assignPermissionLogic } from "../role/role.logic";
+import { loginLogic, logoutLogic, validateToken } from "./auth.service";
+import { createUserLogic, getPermissionsForUser } from "./user.service";
+import { createRoleLogic } from "../role/role.service";
+import { assignRoleLogic } from "./user-roles.service";
+import { assignPermissionLogic } from "../role/role.service";
 
 function seedPermissions() {
   const perms = [

@@ -8,7 +8,7 @@ import type {
   LoginResponse,
   LogoutResponse,
 } from "../db/types";
-import { toUser, getRolesForUser, getPermissionsForUser } from "./user.logic";
+import { toUser, getRolesForUser, getPermissionsForUser } from "./user.service";
 
 // ---------- Helpers ----------
 

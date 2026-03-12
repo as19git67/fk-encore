@@ -16,7 +16,7 @@ import {
   passkeyAuthVerifyLogic,
   listPasskeysLogic,
   deletePasskeyLogic,
-} from "./passkey.logic";
+} from "./passkey.service";
 import { getAuthData } from "~encore/auth";
 
 // ========== Registration (auth required — user must be logged in to add a passkey) ==========

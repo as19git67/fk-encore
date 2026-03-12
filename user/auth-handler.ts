@@ -1,6 +1,6 @@
 import { Header, Gateway, APIError } from "encore.dev/api";
 import { authHandler } from "encore.dev/auth";
-import { validateToken } from "./auth.logic";
+import { validateToken } from "./auth.service";
 
 interface AuthParams {
   authorization: Header<"Authorization">;

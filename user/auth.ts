@@ -1,6 +1,6 @@
 import { api, APIError } from "encore.dev/api";
 import type { LoginRequest, LoginResponse, LogoutResponse } from "../db/types";
-import { loginLogic, logoutLogic } from "./auth.logic";
+import { loginLogic, logoutLogic } from "./auth.service";
 import { getAuthToken } from "./auth-handler";
 
 /** Login — no auth required */

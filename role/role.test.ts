@@ -6,7 +6,7 @@ import {
   listRolesLogic,
   updateRoleLogic,
   deleteRoleLogic,
-} from "./role.logic";
+} from "./role.service";
 
 // Clean up tables before each test
 beforeEach(() => {

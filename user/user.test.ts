@@ -6,7 +6,7 @@ import {
   listUsersLogic,
   updateUserLogic,
   deleteUserLogic,
-} from "./user.logic";
+} from "./user.service";
 
 // Clean up tables before each test
 beforeEach(() => {

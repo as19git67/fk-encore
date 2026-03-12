@@ -4,9 +4,9 @@ import {
   assignRoleLogic,
   removeRoleLogic,
   getUserRolesLogic,
-} from "./user-roles.logic";
-import { createUserLogic, deleteUserLogic } from "./user.logic";
-import { createRoleLogic } from "../role/role.logic";
+} from "./user-roles.service";
+import { createUserLogic, deleteUserLogic } from "./user.service";
+import { createRoleLogic } from "../role/role.service";
 
 beforeEach(() => {
   db.exec(`DELETE FROM role_permissions`);

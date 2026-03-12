@@ -21,7 +21,7 @@ import type {
   DeleteResponse,
   UserRow,
 } from "../db/types";
-import { toUser, getRolesForUser, getPermissionsForUser } from "./user.logic";
+import { toUser, getRolesForUser, getPermissionsForUser } from "./user.service";
 
 // ---------- RP Config ----------
 
