@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import Card from 'primevue/card'
+import Chip from 'primevue/chip'
 import Button from 'primevue/button'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -92,6 +93,11 @@ onMounted(loadPasskeys)
           <div>{{ auth.user?.name }}</div>
           <div class="detail-label">E-Mail</div>
           <div>{{ auth.user?.email }}</div>
+          <div class="detail-label">Rollen</div>
+          <div class="roles-chips">
+            <Chip v-for="role in auth.user?.roles" :key="role.id" :label="role.name" />
+            <span v-if="!auth.user?.roles?.length" class="no-roles">Keine Rollen zugewiesen.</span>
+          </div>
         </div>
       </template>
     </Card>
@@ -192,6 +198,18 @@ onMounted(loadPasskeys)
 
 .mb {
   margin-bottom: 1rem;
+}
+
+.roles-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.no-roles {
+  color: var(--text-color-secondary);
+  font-style: italic;
 }
 </style>
 

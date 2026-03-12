@@ -3,10 +3,11 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
-import { listUsers, type User } from '../api/users'
+import Chip from 'primevue/chip'
+import { listUsers, type UserWithRoles } from '../api/users'
 
 const router = useRouter()
-const users = ref<User[]>([])
+const users = ref<UserWithRoles[]>([])
 const loading = ref(true)
 
 onMounted(async () => {
@@ -44,6 +45,13 @@ function formatDate(dateStr: string) {
       <Column field="id" header="ID" sortable style="width: 5rem" />
       <Column field="name" header="Name" sortable />
       <Column field="email" header="E-Mail" sortable />
+      <Column header="Rollen">
+        <template #body="{ data }">
+          <div class="roles-chips">
+            <Chip v-for="role in data.roles" :key="role.id" :label="role.name" />
+          </div>
+        </template>
+      </Column>
       <Column field="created_at" header="Erstellt am" sortable>
         <template #body="{ data }">
           {{ formatDate(data.created_at) }}
@@ -56,6 +64,12 @@ function formatDate(dateStr: string) {
 <style scoped>
 :deep(.cursor-pointer) {
   cursor: pointer;
+}
+
+.roles-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
 }
 </style>
 

@@ -77,7 +77,12 @@ export function getUserLogic(id: number): UserWithRoles {
 
 export function listUsersLogic(): ListUsersResponse {
   const rows = db.prepare(`SELECT * FROM users ORDER BY id`).all() as UserRow[];
-  return { users: rows.map(toUser) };
+  return {
+    users: rows.map((row) => ({
+      ...toUser(row),
+      roles: getRolesForUser(row.id),
+    })),
+  };
 }
 
 export function updateUserLogic(req: UpdateUserRequest): UserWithRoles {

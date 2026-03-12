@@ -148,7 +148,7 @@ export interface UserRolesResponse {
 // ========== Generic Responses ==========
 
 export interface ListUsersResponse {
-  users: User[];
+  users: UserWithRoles[];
 }
 
 export interface ListRolesResponse {

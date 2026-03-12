@@ -25,7 +25,7 @@ export interface LoginResponse {
 }
 
 export interface ListUsersResponse {
-  users: User[]
+  users: UserWithRoles[]
 }
 
 export interface DeleteResponse {
