@@ -151,7 +151,9 @@ export async function passkeyRegisterVerifyLogic(
   const { credential, credentialDeviceType, credentialBackedUp } =
     verification.registrationInfo;
 
-  const credentialIdBase64 = Buffer.from(credential.id).toString("base64url");
+  // credential.id is already a Base64URL string in @simplewebauthn/server v11+
+  const credentialId = credential.id;
+  // credential.publicKey is still a Uint8Array
   const publicKeyBase64 = Buffer.from(credential.publicKey).toString("base64url");
   const transports = JSON.stringify(req.credential.response?.transports ?? []);
   const name = req.name || "Passkey";
@@ -160,7 +162,7 @@ export async function passkeyRegisterVerifyLogic(
     `INSERT INTO passkeys (credential_id, user_id, public_key, counter, device_type, backed_up, transports, name)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    credentialIdBase64,
+    credentialId,
     userId,
     publicKeyBase64,
     credential.counter,
@@ -171,7 +173,7 @@ export async function passkeyRegisterVerifyLogic(
   );
 
   return {
-    credential_id: credentialIdBase64,
+    credential_id: credentialId,
     name,
     device_type: credentialDeviceType,
     backed_up: credentialBackedUp,
