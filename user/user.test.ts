@@ -10,8 +10,11 @@ import {
 
 // Clean up tables before each test
 beforeEach(() => {
+  db.exec(`DELETE FROM role_permissions`);
   db.exec(`DELETE FROM user_roles`);
+  db.exec(`DELETE FROM sessions`);
   db.exec(`DELETE FROM users`);
+  db.exec(`DELETE FROM permissions`);
   db.exec(`DELETE FROM roles`);
 });
 
