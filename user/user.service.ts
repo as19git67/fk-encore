@@ -1,8 +1,9 @@
 import { hashSync } from "bcryptjs";
+import { eq, sql, count } from "drizzle-orm";
 import db from "../db/database";
+import { users, roles, userRoles, permissions, rolePermissions } from "../db/schema";
 import type {
   User,
-  UserRow,
   UserWithRoles,
   CreateUserRequest,
   UpdateUserRequest,
@@ -13,33 +14,40 @@ import type {
 
 // ---------- Helpers ----------
 
-export function toUser(row: UserRow): User {
+export function toUser(row: typeof users.$inferSelect): User {
   const { password_hash, ...user } = row;
-  return user;
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    created_at: user.created_at ?? "",
+    updated_at: user.updated_at ?? "",
+  };
 }
 
 export function getRolesForUser(userId: number): Role[] {
   return db
-    .prepare(
-      `SELECT r.id, r.name, r.description
-       FROM roles r
-       JOIN user_roles ur ON ur.role_id = r.id
-       WHERE ur.user_id = ?`
-    )
-    .all(userId) as Role[];
+    .select({
+      id: roles.id,
+      name: roles.name,
+      description: roles.description,
+    })
+    .from(roles)
+    .innerJoin(userRoles, eq(userRoles.role_id, roles.id))
+    .where(eq(userRoles.user_id, userId))
+    .all()
+    .map((r) => ({ id: r.id, name: r.name, description: r.description ?? "" }));
 }
 
 export function getPermissionsForUser(userId: number): string[] {
   const rows = db
-    .prepare(
-      `SELECT DISTINCT p.key
-       FROM permissions p
-       JOIN role_permissions rp ON rp.permission_id = p.id
-       JOIN user_roles ur ON ur.role_id = rp.role_id
-       WHERE ur.user_id = ?
-       ORDER BY p.key`
-    )
-    .all(userId) as { key: string }[];
+    .selectDistinct({ key: permissions.key })
+    .from(permissions)
+    .innerJoin(rolePermissions, eq(rolePermissions.permission_id, permissions.id))
+    .innerJoin(userRoles, eq(userRoles.role_id, rolePermissions.role_id))
+    .where(eq(userRoles.user_id, userId))
+    .orderBy(permissions.key)
+    .all();
   return rows.map((r) => r.key);
 }
 
@@ -52,21 +60,21 @@ export function createUserLogic(req: CreateUserRequest): UserWithRoles {
 
   const passwordHash = hashSync(req.password, 10);
 
-  const result = db
-    .prepare(`INSERT INTO users (email, name, password_hash) VALUES (?, ?, ?)`)
-    .run(req.email, req.name, passwordHash);
-
   const row = db
-    .prepare(`SELECT * FROM users WHERE id = ?`)
-    .get(result.lastInsertRowid) as UserRow;
+    .insert(users)
+    .values({ email: req.email, name: req.name, password_hash: passwordHash })
+    .returning()
+    .get();
 
   return { ...toUser(row), roles: [] };
 }
 
 export function getUserLogic(id: number): UserWithRoles {
   const row = db
-    .prepare(`SELECT * FROM users WHERE id = ?`)
-    .get(id) as UserRow | undefined;
+    .select()
+    .from(users)
+    .where(eq(users.id, id))
+    .get();
 
   if (!row) {
     throw new Error(`User with id ${id} not found`);
@@ -76,7 +84,7 @@ export function getUserLogic(id: number): UserWithRoles {
 }
 
 export function listUsersLogic(): ListUsersResponse {
-  const rows = db.prepare(`SELECT * FROM users ORDER BY id`).all() as UserRow[];
+  const rows = db.select().from(users).orderBy(users.id).all();
   return {
     users: rows.map((row) => ({
       ...toUser(row),
@@ -87,8 +95,10 @@ export function listUsersLogic(): ListUsersResponse {
 
 export function updateUserLogic(req: UpdateUserRequest): UserWithRoles {
   const existing = db
-    .prepare(`SELECT * FROM users WHERE id = ?`)
-    .get(req.id) as UserRow | undefined;
+    .select()
+    .from(users)
+    .where(eq(users.id, req.id))
+    .get();
 
   if (!existing) {
     throw new Error(`User with id ${req.id} not found`);
@@ -100,38 +110,41 @@ export function updateUserLogic(req: UpdateUserRequest): UserWithRoles {
     ? hashSync(req.password, 10)
     : existing.password_hash;
 
-  db.prepare(
-    `UPDATE users SET email = ?, name = ?, password_hash = ?, updated_at = datetime('now') WHERE id = ?`
-  ).run(newEmail, newName, newHash, req.id);
+  db.update(users)
+    .set({
+      email: newEmail,
+      name: newName,
+      password_hash: newHash,
+      updated_at: sql`datetime('now')`,
+    })
+    .where(eq(users.id, req.id))
+    .run();
 
-  const updated = db
-    .prepare(`SELECT * FROM users WHERE id = ?`)
-    .get(req.id) as UserRow;
+  const updated = db.select().from(users).where(eq(users.id, req.id)).get()!;
 
   return { ...toUser(updated), roles: getRolesForUser(req.id) };
 }
 
 export function deleteUserLogic(id: number): DeleteResponse {
   // Check if this user has the Admin role
-  const roles = getRolesForUser(id);
-  const isAdmin = roles.some((r) => r.name === "Admin");
+  const userRolesList = getRolesForUser(id);
+  const isAdmin = userRolesList.some((r) => r.name === "Admin");
 
   if (isAdmin) {
     // Count how many users have the Admin role
-    const adminCount = db
-      .prepare(
-        `SELECT COUNT(*) as count FROM user_roles ur
-         JOIN roles r ON r.id = ur.role_id
-         WHERE r.name = 'Admin'`
-      )
-      .get() as { count: number };
+    const result = db
+      .select({ count: count() })
+      .from(userRoles)
+      .innerJoin(roles, eq(roles.id, userRoles.role_id))
+      .where(eq(roles.name, "Admin"))
+      .get();
 
-    if (adminCount.count <= 1) {
+    if (result && result.count <= 1) {
       throw new Error("Cannot delete the last admin user");
     }
   }
 
-  const result = db.prepare(`DELETE FROM users WHERE id = ?`).run(id);
+  const result = db.delete(users).where(eq(users.id, id)).run();
 
   if (result.changes === 0) {
     throw new Error(`User with id ${id} not found`);

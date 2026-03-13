@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import db from "../db/database";
+import { rolePermissions, userRoles, users, permissions, roles } from "../db/schema";
 import {
   createRoleLogic,
   getRoleLogic,
@@ -10,11 +11,11 @@ import {
 
 // Clean up tables before each test
 beforeEach(() => {
-  db.exec(`DELETE FROM role_permissions`);
-  db.exec(`DELETE FROM user_roles`);
-  db.exec(`DELETE FROM users`);
-  db.exec(`DELETE FROM permissions`);
-  db.exec(`DELETE FROM roles`);
+  db.delete(rolePermissions).run();
+  db.delete(userRoles).run();
+  db.delete(users).run();
+  db.delete(permissions).run();
+  db.delete(roles).run();
 });
 
 describe("Role Service", () => {

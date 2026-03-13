@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import db from "../db/database";
+import { rolePermissions, userRoles, users, permissions, roles } from "../db/schema";
 import {
   createRoleLogic,
   deleteRoleLogic,
@@ -21,16 +22,16 @@ function seedPermissions() {
     { key: "roles.read", description: "View role details" },
   ];
   for (const p of perms) {
-    db.prepare(`INSERT INTO permissions (key, description) VALUES (?, ?)`).run(p.key, p.description);
+    db.insert(permissions).values(p).run();
   }
 }
 
 beforeEach(() => {
-  db.exec(`DELETE FROM role_permissions`);
-  db.exec(`DELETE FROM user_roles`);
-  db.exec(`DELETE FROM users`);
-  db.exec(`DELETE FROM permissions`);
-  db.exec(`DELETE FROM roles`);
+  db.delete(rolePermissions).run();
+  db.delete(userRoles).run();
+  db.delete(users).run();
+  db.delete(permissions).run();
+  db.delete(roles).run();
 });
 
 describe("Permission Management", () => {

@@ -1,105 +1,99 @@
-import Database, { type Database as DatabaseType } from "better-sqlite3";
+import Database from "better-sqlite3";
+import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import path from "path";
 import fs from "fs";
 import "dotenv/config";
+import * as schema from "./schema";
 import { seed } from "./seed";
 
-const SCHEMA = `
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT UNIQUE NOT NULL,
-    name TEXT NOT NULL,
-    password_hash TEXT NOT NULL,
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS roles (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT UNIQUE NOT NULL,
-    description TEXT DEFAULT ''
-  );
-
-  CREATE TABLE IF NOT EXISTS user_roles (
-    user_id INTEGER NOT NULL,
-    role_id INTEGER NOT NULL,
-    PRIMARY KEY (user_id, role_id),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS sessions (
-    token TEXT PRIMARY KEY,
-    user_id INTEGER NOT NULL,
-    created_at TEXT DEFAULT (datetime('now')),
-    expires_at TEXT NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS passkeys (
-    credential_id TEXT PRIMARY KEY,
-    user_id INTEGER NOT NULL,
-    public_key TEXT NOT NULL,
-    counter INTEGER NOT NULL DEFAULT 0,
-    device_type TEXT NOT NULL DEFAULT 'singleDevice',
-    backed_up INTEGER NOT NULL DEFAULT 0,
-    transports TEXT DEFAULT '[]',
-    name TEXT NOT NULL DEFAULT 'Passkey',
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS challenges (
-    id TEXT PRIMARY KEY,
-    challenge TEXT NOT NULL,
-    user_id INTEGER,
-    created_at TEXT DEFAULT (datetime('now')),
-    expires_at TEXT NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS permissions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    key TEXT UNIQUE NOT NULL,
-    description TEXT DEFAULT ''
-  );
-
-  CREATE TABLE IF NOT EXISTS role_permissions (
-    role_id INTEGER NOT NULL,
-    permission_id INTEGER NOT NULL,
-    PRIMARY KEY (role_id, permission_id),
-    FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
-    FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE
-  );
-`;
-
-function initDb(database: DatabaseType): void {
-  database.pragma("foreign_keys = ON");
-  database.exec(SCHEMA);
-}
-
-function createDb(): DatabaseType {
+function createDb(): BetterSQLite3Database<typeof schema> {
   const isTest = process.env.NODE_ENV === "test" || process.env.VITEST;
 
+  let sqlite: InstanceType<typeof Database>;
+
   if (isTest) {
-    const database = new Database(":memory:");
-    initDb(database);
-    return database;
+    sqlite = new Database(":memory:");
+  } else {
+    const dataDir = path.join(process.cwd(), "data");
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    const dbPath = path.join(dataDir, "app.db");
+    sqlite = new Database(dbPath);
+    sqlite.pragma("journal_mode = WAL");
   }
 
-  const dataDir = path.join(process.cwd(), "data");
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-  }
+  sqlite.pragma("foreign_keys = ON");
 
-  const dbPath = path.join(dataDir, "app.db");
-  const database = new Database(dbPath);
-  database.pragma("journal_mode = WAL");
-  initDb(database);
-  return database;
+  const db = drizzle(sqlite, { schema });
+
+  // Create tables using raw SQL (Drizzle doesn't auto-create for SQLite)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT UNIQUE NOT NULL,
+      name TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS roles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE NOT NULL,
+      description TEXT DEFAULT ''
+    );
+    CREATE TABLE IF NOT EXISTS user_roles (
+      user_id INTEGER NOT NULL,
+      role_id INTEGER NOT NULL,
+      PRIMARY KEY (user_id, role_id),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS sessions (
+      token TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      expires_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS passkeys (
+      credential_id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      public_key TEXT NOT NULL,
+      counter INTEGER NOT NULL DEFAULT 0,
+      device_type TEXT NOT NULL DEFAULT 'singleDevice',
+      backed_up INTEGER NOT NULL DEFAULT 0,
+      transports TEXT DEFAULT '[]',
+      name TEXT NOT NULL DEFAULT 'Passkey',
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS challenges (
+      id TEXT PRIMARY KEY,
+      challenge TEXT NOT NULL,
+      user_id INTEGER,
+      created_at TEXT DEFAULT (datetime('now')),
+      expires_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS permissions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      key TEXT UNIQUE NOT NULL,
+      description TEXT DEFAULT ''
+    );
+    CREATE TABLE IF NOT EXISTS role_permissions (
+      role_id INTEGER NOT NULL,
+      permission_id INTEGER NOT NULL,
+      PRIMARY KEY (role_id, permission_id),
+      FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
+      FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE
+    );
+  `);
+
+  return db;
 }
 
-const db: DatabaseType = createDb();
+const db = createDb();
 
 // Seed initial data (roles, admin user)
 seed(db);
