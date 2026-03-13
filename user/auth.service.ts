@@ -1,8 +1,9 @@
 import crypto from "crypto";
 import { compareSync } from "bcryptjs";
+import { eq, and, lt, gt, sql } from "drizzle-orm";
 import db from "../db/database";
+import { users, sessions } from "../db/schema";
 import type {
-  UserRow,
   UserWithRolesAndPermissions,
   LoginRequest,
   LoginResponse,
@@ -13,7 +14,9 @@ import { toUser, getRolesForUser, getPermissionsForUser } from "./user.service";
 // ---------- Helpers ----------
 
 function cleanupExpiredSessions(): void {
-  db.prepare(`DELETE FROM sessions WHERE expires_at < datetime('now')`).run();
+  db.delete(sessions)
+    .where(lt(sessions.expires_at, sql`datetime('now')`))
+    .run();
 }
 
 // ---------- Business Logic ----------
@@ -24,8 +27,10 @@ export function loginLogic(req: LoginRequest): LoginResponse {
   }
 
   const row = db
-    .prepare(`SELECT * FROM users WHERE email = ?`)
-    .get(req.email) as UserRow | undefined;
+    .select()
+    .from(users)
+    .where(eq(users.email, req.email))
+    .get();
 
   if (!row) {
     throw new Error("invalid credentials");
@@ -42,9 +47,13 @@ export function loginLogic(req: LoginRequest): LoginResponse {
   // Generate opaque token
   const token = crypto.randomBytes(32).toString("base64url");
 
-  db.prepare(
-    `INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, datetime('now', '+24 hours'))`
-  ).run(token, row.id);
+  db.insert(sessions)
+    .values({
+      token,
+      user_id: row.id,
+      expires_at: sql`datetime('now', '+24 hours')`,
+    })
+    .run();
 
   const user: UserWithRolesAndPermissions = {
     ...toUser(row),
@@ -56,21 +65,26 @@ export function loginLogic(req: LoginRequest): LoginResponse {
 }
 
 export function logoutLogic(token: string): LogoutResponse {
-  db.prepare(`DELETE FROM sessions WHERE token = ?`).run(token);
+  db.delete(sessions).where(eq(sessions.token, token)).run();
   return { success: true, message: "Logged out successfully" };
 }
 
 export function validateToken(token: string): { userID: string; permissions: string[] } {
   const session = db
-    .prepare(
-      `SELECT user_id FROM sessions WHERE token = ? AND expires_at > datetime('now')`
+    .select({ user_id: sessions.user_id })
+    .from(sessions)
+    .where(
+      and(
+        eq(sessions.token, token),
+        gt(sessions.expires_at, sql`datetime('now')`)
+      )
     )
-    .get(token) as { user_id: number } | undefined;
+    .get();
 
   if (!session) {
     throw new Error("invalid or expired token");
   }
 
-  const permissions = getPermissionsForUser(session.user_id);
-  return { userID: String(session.user_id), permissions };
+  const perms = getPermissionsForUser(session.user_id);
+  return { userID: String(session.user_id), permissions: perms };
 }

@@ -1,10 +1,12 @@
 import { hashSync } from "bcryptjs";
-import type { Database as DatabaseType } from "better-sqlite3";
+import { eq, and } from "drizzle-orm";
+import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import * as schema from "./schema";
 
 /**
  * Seeds the database with initial roles, permissions, and an admin user.
  */
-export function seed(db: DatabaseType): void {
+export function seed(db: BetterSQLite3Database<typeof schema>): void {
   const isTest = process.env.NODE_ENV === "test" || process.env.VITEST;
   if (isTest) return;
 
@@ -16,13 +18,12 @@ export function seed(db: DatabaseType): void {
 
   for (const role of defaultRoles) {
     const existing = db
-      .prepare(`SELECT id FROM roles WHERE name = ?`)
-      .get(role.name);
+      .select({ id: schema.roles.id })
+      .from(schema.roles)
+      .where(eq(schema.roles.name, role.name))
+      .get();
     if (!existing) {
-      db.prepare(`INSERT INTO roles (name, description) VALUES (?, ?)`).run(
-        role.name,
-        role.description
-      );
+      db.insert(schema.roles).values(role).run();
       console.log(`[seed] Created role: ${role.name}`);
     }
   }
@@ -45,36 +46,41 @@ export function seed(db: DatabaseType): void {
 
   for (const perm of allPermissions) {
     const existing = db
-      .prepare(`SELECT id FROM permissions WHERE key = ?`)
-      .get(perm.key);
+      .select({ id: schema.permissions.id })
+      .from(schema.permissions)
+      .where(eq(schema.permissions.key, perm.key))
+      .get();
     if (!existing) {
-      db.prepare(`INSERT INTO permissions (key, description) VALUES (?, ?)`).run(
-        perm.key,
-        perm.description
-      );
+      db.insert(schema.permissions).values(perm).run();
       console.log(`[seed] Created permission: ${perm.key}`);
     }
   }
 
   // --- Assign all permissions to Admin role ---
   const adminRole = db
-    .prepare(`SELECT id FROM roles WHERE name = 'Admin'`)
-    .get() as { id: number } | undefined;
+    .select({ id: schema.roles.id })
+    .from(schema.roles)
+    .where(eq(schema.roles.name, "Admin"))
+    .get();
 
   if (adminRole) {
-    const permissions = db
-      .prepare(`SELECT id FROM permissions`)
-      .all() as { id: number }[];
+    const perms = db.select({ id: schema.permissions.id }).from(schema.permissions).all();
 
-    for (const perm of permissions) {
+    for (const perm of perms) {
       const existing = db
-        .prepare(`SELECT 1 FROM role_permissions WHERE role_id = ? AND permission_id = ?`)
-        .get(adminRole.id, perm.id);
+        .select({ role_id: schema.rolePermissions.role_id })
+        .from(schema.rolePermissions)
+        .where(
+          and(
+            eq(schema.rolePermissions.role_id, adminRole.id),
+            eq(schema.rolePermissions.permission_id, perm.id)
+          )
+        )
+        .get();
       if (!existing) {
-        db.prepare(`INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)`).run(
-          adminRole.id,
-          perm.id
-        );
+        db.insert(schema.rolePermissions)
+          .values({ role_id: adminRole.id, permission_id: perm.id })
+          .run();
       }
     }
     console.log(`[seed] Assigned all permissions to Admin role`);
@@ -82,24 +88,34 @@ export function seed(db: DatabaseType): void {
 
   // --- Assign basic permissions to User role ---
   const userRole = db
-    .prepare(`SELECT id FROM roles WHERE name = 'User'`)
-    .get() as { id: number } | undefined;
+    .select({ id: schema.roles.id })
+    .from(schema.roles)
+    .where(eq(schema.roles.name, "User"))
+    .get();
 
   if (userRole) {
     const userPermissions = ["users.read"];
     for (const key of userPermissions) {
       const perm = db
-        .prepare(`SELECT id FROM permissions WHERE key = ?`)
-        .get(key) as { id: number } | undefined;
+        .select({ id: schema.permissions.id })
+        .from(schema.permissions)
+        .where(eq(schema.permissions.key, key))
+        .get();
       if (perm) {
         const existing = db
-          .prepare(`SELECT 1 FROM role_permissions WHERE role_id = ? AND permission_id = ?`)
-          .get(userRole.id, perm.id);
+          .select({ role_id: schema.rolePermissions.role_id })
+          .from(schema.rolePermissions)
+          .where(
+            and(
+              eq(schema.rolePermissions.role_id, userRole.id),
+              eq(schema.rolePermissions.permission_id, perm.id)
+            )
+          )
+          .get();
         if (!existing) {
-          db.prepare(`INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)`).run(
-            userRole.id,
-            perm.id
-          );
+          db.insert(schema.rolePermissions)
+            .values({ role_id: userRole.id, permission_id: perm.id })
+            .run();
         }
       }
     }
@@ -120,23 +136,24 @@ export function seed(db: DatabaseType): void {
   }
 
   const existingUser = db
-    .prepare(`SELECT id FROM users WHERE email = ?`)
-    .get(adminEmail) as { id: number } | undefined;
+    .select({ id: schema.users.id })
+    .from(schema.users)
+    .where(eq(schema.users.email, adminEmail))
+    .get();
 
   if (!existingUser) {
     const passwordHash = hashSync(adminPassword, 10);
     const result = db
-      .prepare(`INSERT INTO users (email, name, password_hash) VALUES (?, ?, ?)`)
-      .run(adminEmail, adminName, passwordHash);
-
-    const adminUserId = result.lastInsertRowid;
+      .insert(schema.users)
+      .values({ email: adminEmail, name: adminName, password_hash: passwordHash })
+      .returning({ id: schema.users.id })
+      .get();
 
     // Assign Admin role
     if (adminRole) {
-      db.prepare(`INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`).run(
-        adminUserId,
-        adminRole.id
-      );
+      db.insert(schema.userRoles)
+        .values({ user_id: result.id, role_id: adminRole.id })
+        .run();
     }
 
     console.log(`[seed] Created admin user: ${adminEmail}`);

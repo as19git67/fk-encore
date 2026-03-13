@@ -1,4 +1,12 @@
+import { eq, and, count } from "drizzle-orm";
 import db from "../db/database";
+import {
+  users,
+  roles,
+  userRoles,
+  permissions,
+  rolePermissions,
+} from "../db/schema";
 import type {
   Role,
   RoleWithUsers,
@@ -16,25 +24,39 @@ import type {
 
 export function getUsersForRole(roleId: number): User[] {
   return db
-    .prepare(
-      `SELECT u.id, u.email, u.name, u.created_at, u.updated_at
-       FROM users u
-       JOIN user_roles ur ON ur.user_id = u.id
-       WHERE ur.role_id = ?`
-    )
-    .all(roleId) as User[];
+    .select({
+      id: users.id,
+      email: users.email,
+      name: users.name,
+      created_at: users.created_at,
+      updated_at: users.updated_at,
+    })
+    .from(users)
+    .innerJoin(userRoles, eq(userRoles.user_id, users.id))
+    .where(eq(userRoles.role_id, roleId))
+    .all()
+    .map((u) => ({
+      id: u.id,
+      email: u.email,
+      name: u.name,
+      created_at: u.created_at ?? "",
+      updated_at: u.updated_at ?? "",
+    }));
 }
 
 export function getPermissionsForRole(roleId: number): Permission[] {
   return db
-    .prepare(
-      `SELECT p.id, p.key, p.description
-       FROM permissions p
-       JOIN role_permissions rp ON rp.permission_id = p.id
-       WHERE rp.role_id = ?
-       ORDER BY p.key`
-    )
-    .all(roleId) as Permission[];
+    .select({
+      id: permissions.id,
+      key: permissions.key,
+      description: permissions.description,
+    })
+    .from(permissions)
+    .innerJoin(rolePermissions, eq(rolePermissions.permission_id, permissions.id))
+    .where(eq(rolePermissions.role_id, roleId))
+    .orderBy(permissions.key)
+    .all()
+    .map((p) => ({ id: p.id, key: p.key, description: p.description ?? "" }));
 }
 
 // ---------- Business Logic ----------
@@ -44,41 +66,44 @@ export function createRoleLogic(req: CreateRoleRequest): Role {
     throw new Error("name is required");
   }
 
-  const result = db
-    .prepare(`INSERT INTO roles (name, description) VALUES (?, ?)`)
-    .run(req.name, req.description ?? "");
+  const row = db
+    .insert(roles)
+    .values({ name: req.name, description: req.description ?? "" })
+    .returning()
+    .get();
 
-  return db
-    .prepare(`SELECT * FROM roles WHERE id = ?`)
-    .get(result.lastInsertRowid) as Role;
+  return { id: row.id, name: row.name, description: row.description ?? "" };
 }
 
 export function getRoleLogic(id: number): RoleWithUsers {
-  const role = db
-    .prepare(`SELECT * FROM roles WHERE id = ?`)
-    .get(id) as Role | undefined;
+  const role = db.select().from(roles).where(eq(roles.id, id)).get();
 
   if (!role) {
     throw new Error(`Role with id ${id} not found`);
   }
 
-  return { ...role, users: getUsersForRole(id) };
+  return {
+    id: role.id,
+    name: role.name,
+    description: role.description ?? "",
+    users: getUsersForRole(id),
+  };
 }
 
 export function listRolesLogic(): ListRolesResponse {
-  const roles = db.prepare(`SELECT * FROM roles ORDER BY id`).all() as Role[];
+  const allRoles = db.select().from(roles).orderBy(roles.id).all();
   return {
-    roles: roles.map((role) => ({
-      ...role,
+    roles: allRoles.map((role) => ({
+      id: role.id,
+      name: role.name,
+      description: role.description ?? "",
       permissions: getPermissionsForRole(role.id),
     })),
   };
 }
 
 export function updateRoleLogic(req: UpdateRoleRequest): Role {
-  const existing = db
-    .prepare(`SELECT * FROM roles WHERE id = ?`)
-    .get(req.id) as Role | undefined;
+  const existing = db.select().from(roles).where(eq(roles.id, req.id)).get();
 
   if (!existing) {
     throw new Error(`Role with id ${req.id} not found`);
@@ -87,35 +112,39 @@ export function updateRoleLogic(req: UpdateRoleRequest): Role {
   const newName = req.name ?? existing.name;
   const newDescription = req.description ?? existing.description;
 
-  db.prepare(`UPDATE roles SET name = ?, description = ? WHERE id = ?`).run(
-    newName,
-    newDescription,
-    req.id
-  );
+  db.update(roles)
+    .set({ name: newName, description: newDescription })
+    .where(eq(roles.id, req.id))
+    .run();
 
-  return db.prepare(`SELECT * FROM roles WHERE id = ?`).get(req.id) as Role;
+  const updated = db.select().from(roles).where(eq(roles.id, req.id)).get()!;
+  return { id: updated.id, name: updated.name, description: updated.description ?? "" };
 }
 
 export function deleteRoleLogic(id: number): DeleteResponse {
-  const role = db.prepare(`SELECT name FROM roles WHERE id = ?`).get(id) as { name: string } | undefined;
+  const role = db
+    .select({ name: roles.name })
+    .from(roles)
+    .where(eq(roles.id, id))
+    .get();
 
   if (!role) {
     throw new Error(`Role with id ${id} not found`);
   }
 
   if (role.name === "Admin") {
-    const adminUserCount = db
-      .prepare(
-        `SELECT COUNT(*) as count FROM user_roles WHERE role_id = ?`
-      )
-      .get(id) as { count: number };
+    const result = db
+      .select({ count: count() })
+      .from(userRoles)
+      .where(eq(userRoles.role_id, id))
+      .get();
 
-    if (adminUserCount.count > 0) {
+    if (result && result.count > 0) {
       throw new Error("Cannot delete the Admin role while users are assigned to it");
     }
   }
 
-  const result = db.prepare(`DELETE FROM roles WHERE id = ?`).run(id);
+  const result = db.delete(roles).where(eq(roles.id, id)).run();
 
   if (result.changes === 0) {
     throw new Error(`Role with id ${id} not found`);
@@ -125,39 +154,62 @@ export function deleteRoleLogic(id: number): DeleteResponse {
 }
 
 export function listPermissionsLogic(): ListPermissionsResponse {
-  const permissions = db
-    .prepare(`SELECT * FROM permissions ORDER BY key`)
-    .all() as Permission[];
-  return { permissions };
+  const allPerms = db.select().from(permissions).orderBy(permissions.key).all();
+  return {
+    permissions: allPerms.map((p) => ({
+      id: p.id,
+      key: p.key,
+      description: p.description ?? "",
+    })),
+  };
 }
 
 export function assignPermissionLogic(roleId: number, permissionId: number): RolePermissionsResponse {
-  const role = db.prepare(`SELECT id FROM roles WHERE id = ?`).get(roleId) as Role | undefined;
+  const role = db.select({ id: roles.id }).from(roles).where(eq(roles.id, roleId)).get();
   if (!role) {
     throw new Error(`Role with id ${roleId} not found`);
   }
 
-  const permission = db.prepare(`SELECT id FROM permissions WHERE id = ?`).get(permissionId) as Permission | undefined;
-  if (!permission) {
+  const perm = db
+    .select({ id: permissions.id })
+    .from(permissions)
+    .where(eq(permissions.id, permissionId))
+    .get();
+  if (!perm) {
     throw new Error(`Permission with id ${permissionId} not found`);
   }
 
   const existing = db
-    .prepare(`SELECT 1 FROM role_permissions WHERE role_id = ? AND permission_id = ?`)
-    .get(roleId, permissionId);
+    .select({ role_id: rolePermissions.role_id })
+    .from(rolePermissions)
+    .where(
+      and(
+        eq(rolePermissions.role_id, roleId),
+        eq(rolePermissions.permission_id, permissionId)
+      )
+    )
+    .get();
   if (existing) {
     throw new Error("Permission already assigned to this role");
   }
 
-  db.prepare(`INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)`).run(roleId, permissionId);
+  db.insert(rolePermissions)
+    .values({ role_id: roleId, permission_id: permissionId })
+    .run();
 
   return { roleId, permissions: getPermissionsForRole(roleId) };
 }
 
 export function revokePermissionLogic(roleId: number, permissionId: number): DeleteResponse {
   const result = db
-    .prepare(`DELETE FROM role_permissions WHERE role_id = ? AND permission_id = ?`)
-    .run(roleId, permissionId);
+    .delete(rolePermissions)
+    .where(
+      and(
+        eq(rolePermissions.role_id, roleId),
+        eq(rolePermissions.permission_id, permissionId)
+      )
+    )
+    .run();
 
   if (result.changes === 0) {
     throw new Error("Permission assignment does not exist");
@@ -165,4 +217,3 @@ export function revokePermissionLogic(roleId: number, permissionId: number): Del
 
   return { success: true, message: `Permission revoked from role ${roleId}` };
 }
-

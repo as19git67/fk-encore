@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import db from "../db/database";
+import { sessions, rolePermissions, userRoles, users, permissions, roles } from "../db/schema";
 import { loginLogic, logoutLogic, validateToken } from "./auth.service";
 import { createUserLogic, getPermissionsForUser } from "./user.service";
 import { createRoleLogic } from "../role/role.service";
@@ -12,17 +13,17 @@ function seedPermissions() {
     { key: "users.read", description: "View user details" },
   ];
   for (const p of perms) {
-    db.prepare(`INSERT INTO permissions (key, description) VALUES (?, ?)`).run(p.key, p.description);
+    db.insert(permissions).values(p).run();
   }
 }
 
 beforeEach(() => {
-  db.exec(`DELETE FROM sessions`);
-  db.exec(`DELETE FROM role_permissions`);
-  db.exec(`DELETE FROM user_roles`);
-  db.exec(`DELETE FROM users`);
-  db.exec(`DELETE FROM permissions`);
-  db.exec(`DELETE FROM roles`);
+  db.delete(sessions).run();
+  db.delete(rolePermissions).run();
+  db.delete(userRoles).run();
+  db.delete(users).run();
+  db.delete(permissions).run();
+  db.delete(roles).run();
 });
 
 describe("Auth Logic", () => {
@@ -30,7 +31,7 @@ describe("Auth Logic", () => {
     seedPermissions();
     const user = createUserLogic({ email: "u@test.com", name: "User", password: "secret123" });
     const role = createRoleLogic({ name: "Editor" });
-    const perms = db.prepare(`SELECT * FROM permissions`).all() as { id: number; key: string }[];
+    const perms = db.select().from(permissions).all();
     assignPermissionLogic(role.id, perms[0].id);
     assignRoleLogic({ userId: user.id, roleId: role.id });
 
@@ -62,7 +63,7 @@ describe("Auth Logic", () => {
     seedPermissions();
     const user = createUserLogic({ email: "u@test.com", name: "User", password: "pw" });
     const role = createRoleLogic({ name: "Viewer" });
-    const perms = db.prepare(`SELECT * FROM permissions`).all() as { id: number; key: string }[];
+    const perms = db.select().from(permissions).all();
     assignPermissionLogic(role.id, perms[0].id);
     assignRoleLogic({ userId: user.id, roleId: role.id });
 
@@ -95,4 +96,3 @@ describe("Auth Logic", () => {
     expect(authData.permissions).toHaveLength(0);
   });
 });
-
