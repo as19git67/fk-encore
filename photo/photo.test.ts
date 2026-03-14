@@ -169,6 +169,29 @@ describe("Photo Module", () => {
       expect(result.user_id).toBe(user2.id);
       expect(result.original_name).toBe("u2.jpg");
     });
+
+    it("should refresh photo metadata", async () => {
+      const fileData = Buffer.from("data");
+      const photo = await service.uploadPhotoLogic(user1.id, {
+        data: fileData,
+        name: "test.jpg",
+        mimeType: "image/jpeg",
+      });
+
+      // Initially taken_at might be null for fake data
+      const idsRes = service.getPhotosToRefreshMetadataLogic(user1.id);
+      expect(idsRes.ids).toContain(photo.id);
+
+      const refreshRes = await service.refreshPhotoMetadataLogic(user1.id, photo.id);
+      expect(refreshRes.success).toBe(true);
+
+      // Verify it's still in the DB
+      const list = service.listPhotosLogic(user1.id);
+      expect(list.photos[0].id).toBe(photo.id);
+      
+      // Cleanup
+      fs.unlinkSync(path.join(UPLOAD_DIR, photo.filename));
+    });
   });
 
   describe("Albums", () => {

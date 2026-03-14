@@ -8,6 +8,7 @@ export interface Photo {
   mime_type: string
   size: number
   hash?: string
+  taken_at?: string
   created_at: string
 }
 
@@ -45,4 +46,14 @@ export function getPhotoUrl(filename: string) {
   // We need an endpoint to serve the photo. 
   // For now we assume /api/photos/file/:filename exists or will be added.
   return `/api/photos/file/${filename}`
+}
+
+export function getPhotosToRefreshMetadata() {
+  return apiFetch<{ ids: number[] }>('/photos/refresh-metadata')
+}
+
+export function refreshPhotoMetadata(id: number) {
+  return apiFetch<{ success: boolean; taken_at?: string }>(`/photos/${id}/refresh-metadata`, {
+    method: 'POST'
+  })
 }

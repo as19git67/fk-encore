@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
+import exifr from "exifr";
 import { eq, and, or, sql, inArray } from "drizzle-orm";
 import db from "../db/database";
 import type { IncomingMessage } from "http";
@@ -30,6 +31,21 @@ if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
 
+async function getExifDate(filePath: string): Promise<string | null> {
+  try {
+    const data = await exifr.parse(filePath);
+    if (data && data.DateTimeOriginal) {
+      return new Date(data.DateTimeOriginal).toISOString();
+    }
+    if (data && data.CreateDate) {
+        return new Date(data.CreateDate).toISOString();
+    }
+  } catch (err) {
+    console.error("Error parsing EXIF data:", err);
+  }
+  return null;
+}
+
 // ---------- Photos ----------
 
 export async function uploadPhotoStream(
@@ -53,6 +69,9 @@ export async function uploadPhotoStream(
 
   await pipeline(stream, fileStream);
   const digest = hash.digest('hex');
+
+  // Extraction of EXIF data after the file is saved
+  const takenAt = await getExifDate(filePath);
 
   // Check for duplicate for this user
   const existing = db
@@ -78,6 +97,7 @@ export async function uploadPhotoStream(
       mime_type: mimeType,
       size: size,
       hash: digest,
+      taken_at: takenAt,
     })
     .returning()
     .get();
@@ -90,6 +110,7 @@ export async function uploadPhotoStream(
     mime_type: row.mime_type,
     size: row.size,
     hash: row.hash ?? undefined,
+    taken_at: row.taken_at ?? undefined,
     created_at: row.created_at ?? "",
   };
 }
@@ -116,6 +137,9 @@ export async function uploadPhotoLogic(
 
   fs.writeFileSync(filePath, file.data);
 
+  // Extraction of EXIF data
+  const takenAt = await getExifDate(filePath);
+
   const row = db
     .insert(photos)
     .values({
@@ -125,6 +149,7 @@ export async function uploadPhotoLogic(
       mime_type: file.mimeType,
       size: file.data.length,
       hash: digest,
+      taken_at: takenAt,
     })
     .returning()
     .get();
@@ -137,6 +162,7 @@ export async function uploadPhotoLogic(
     mime_type: row.mime_type,
     size: row.size,
     hash: row.hash ?? undefined,
+    taken_at: row.taken_at ?? undefined,
     created_at: row.created_at ?? "",
   };
 }
@@ -146,7 +172,7 @@ export function listPhotosLogic(userId: number): ListPhotosResponse {
     .select()
     .from(photos)
     .where(eq(photos.user_id, userId))
-    .orderBy(sql`${photos.created_at} DESC`)
+    .orderBy(sql`COALESCE(${photos.taken_at}, ${photos.created_at}) DESC`)
     .all();
 
   return {
@@ -158,6 +184,7 @@ export function listPhotosLogic(userId: number): ListPhotosResponse {
       mime_type: r.mime_type,
       size: r.size,
       hash: r.hash ?? undefined,
+      taken_at: r.taken_at ?? undefined,
       created_at: r.created_at ?? "",
     })),
   };
@@ -183,6 +210,43 @@ export function deletePhotoLogic(userId: number, photoId: number): DeleteRespons
   db.delete(photos).where(eq(photos.id, photoId)).run();
 
   return { success: true, message: "Photo deleted" };
+}
+
+export function getPhotosToRefreshMetadataLogic(userId: number): { ids: number[] } {
+  const rows = db
+    .select({ id: photos.id })
+    .from(photos)
+    .where(eq(photos.user_id, userId))
+    .all();
+
+  return { ids: rows.map((r) => r.id) };
+}
+
+export async function refreshPhotoMetadataLogic(userId: number, photoId: number): Promise<{ success: boolean; taken_at?: string }> {
+  const photo = db
+    .select()
+    .from(photos)
+    .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+    .get();
+
+  if (!photo) {
+    throw new Error("Photo not found or unauthorized");
+  }
+
+  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  if (!fs.existsSync(filePath)) {
+    throw new Error("File not found on disk");
+  }
+
+  const takenAt = await getExifDate(filePath);
+
+  // Always update, even if takenAt is null (to sync with current logic if it was different before)
+  db.update(photos)
+    .set({ taken_at: takenAt })
+    .where(eq(photos.id, photoId))
+    .run();
+
+  return { success: true, taken_at: takenAt ?? undefined };
 }
 
 export function getPhotoFileLogic(filename: string): { data: string; mimeType: string } {
@@ -273,6 +337,8 @@ export function getAlbumLogic(userId: number, albumId: number): AlbumWithPhotos 
       original_name: photos.original_name,
       mime_type: photos.mime_type,
       size: photos.size,
+      hash: photos.hash,
+      taken_at: photos.taken_at,
       created_at: photos.created_at,
     })
     .from(photos)
@@ -293,6 +359,8 @@ export function getAlbumLogic(userId: number, albumId: number): AlbumWithPhotos 
       original_name: r.original_name,
       mime_type: r.mime_type,
       size: r.size,
+      hash: r.hash ?? undefined,
+      taken_at: r.taken_at ?? undefined,
       created_at: r.created_at ?? "",
     })),
   };
