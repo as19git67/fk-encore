@@ -167,6 +167,8 @@ export const getPhotoFile = api.raw(
       else if (ext === ".png") mimeType = "image/png";
       else if (ext === ".gif") mimeType = "image/gif";
       else if (ext === ".webp") mimeType = "image/webp";
+      else if (ext === ".heic") mimeType = "image/heic";
+      else if (ext === ".heif") mimeType = "image/heif";
 
       res.setHeader("Content-Type", mimeType);
       res.setHeader("Cache-Control", "public, max-age=31536000, immutable");

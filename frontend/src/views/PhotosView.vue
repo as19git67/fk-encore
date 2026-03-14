@@ -4,6 +4,7 @@ import Button from 'primevue/button'
 import FileUpload from 'primevue/fileupload'
 import Message from 'primevue/message'
 import ProgressBar from 'primevue/progressbar'
+import HeicImage from '../components/HeicImage.vue'
 import { listPhotos, uploadPhoto, deletePhoto, getPhotoUrl, getPhotosToRefreshMetadata, refreshPhotoMetadata, type Photo } from '../api/photos'
 import { useAuthStore } from '../stores/auth'
 
@@ -23,6 +24,7 @@ const refreshingMetadata = ref(false)
 const refreshProgress = ref(0)
 const refreshTotal = ref(0)
 const refreshCurrent = ref(0)
+const activeSection = ref('')
 
 interface PhotoItem {
   photo: Photo;
@@ -75,6 +77,13 @@ async function loadPhotos() {
     error.value = err.message || 'Fehler beim Laden der Fotos'
   } finally {
     loading.value = false
+  }
+}
+
+function scrollToSection(id: string) {
+  const el = document.getElementById(id)
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 }
 
@@ -226,6 +235,25 @@ watch(selectedIndex, (newIdx) => {
 onMounted(() => {
   loadPhotos()
   window.addEventListener('keydown', handleKeydown)
+  
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        activeSection.value = entry.target.id
+      }
+    })
+  }, { threshold: 0.5, rootMargin: '-50px 0px -50% 0px' })
+  
+  // Observe headers when they are available
+  watch(groupedPhotos, (newGroups) => {
+    if (newGroups.length > 0) {
+      nextTick(() => {
+        document.querySelectorAll('.grid-header').forEach(header => {
+          observer.observe(header)
+        })
+      })
+    }
+  }, { immediate: true })
 })
 
 onUnmounted(() => {
@@ -275,43 +303,68 @@ onUnmounted(() => {
     <div v-else-if="loading" class="info-text">Lade Fotos...</div>
     <div v-else-if="photos.length === 0" class="info-text">Keine Fotos hochgeladen.</div>
 
-    <div v-else class="photo-grid">
-      <template v-for="yearGroup in groupedPhotos" :key="yearGroup.year">
-        <h2 class="grid-header year-title">{{ yearGroup.year }}</h2>
-        <template v-for="monthGroup in yearGroup.months" :key="yearGroup.year + monthGroup.month">
-          <h3 class="grid-header month-title">{{ monthGroup.month }}</h3>
-          <div 
-            v-for="item in monthGroup.photos" 
-            :key="item.photo.id" 
-            class="photo-item"
-            :class="{ selected: item.index === selectedIndex }"
-            @click="selectedIndex = item.index; isFullscreen = true"
-          >
-            <img :src="getPhotoUrl(item.photo.filename)" :alt="item.photo.original_name" loading="lazy" />
-            <div class="photo-info">
-              <span class="name">{{ item.photo.original_name }}</span>
-              <Button 
-                v-if="canDelete"
-                icon="pi pi-trash" 
-                severity="danger" 
-                text 
-                rounded 
-                @click.stop="handleDelete(item.photo.id)" 
-              />
+    <div v-else class="gallery-container">
+      <div class="photo-grid">
+        <template v-for="yearGroup in groupedPhotos" :key="yearGroup.year">
+          <h2 :id="'year-' + yearGroup.year" class="grid-header year-title">{{ yearGroup.year }}</h2>
+          <template v-for="monthGroup in yearGroup.months" :key="yearGroup.year + monthGroup.month">
+            <h3 :id="'month-' + yearGroup.year + '-' + monthGroup.month" class="grid-header month-title">{{ monthGroup.month }}</h3>
+            <div 
+              v-for="item in monthGroup.photos" 
+              :key="item.photo.id" 
+              class="photo-item"
+              :class="{ selected: item.index === selectedIndex }"
+              @click="selectedIndex = item.index; isFullscreen = true"
+            >
+              <HeicImage :src="getPhotoUrl(item.photo.filename)" :alt="item.photo.original_name" loading="lazy" />
+              <div class="photo-info">
+                <span class="name">{{ item.photo.original_name }}</span>
+                <Button 
+                  v-if="canDelete"
+                  icon="pi pi-trash" 
+                  severity="danger" 
+                  text 
+                  rounded 
+                  @click.stop="handleDelete(item.photo.id)" 
+                />
+              </div>
             </div>
-          </div>
+          </template>
         </template>
-      </template>
+      </div>
+
+      <nav class="timeline-nav">
+        <div v-for="yearGroup in groupedPhotos" :key="'nav-' + yearGroup.year" class="nav-year-group">
+          <a 
+            @click.prevent="scrollToSection('year-' + yearGroup.year)" 
+            class="nav-year"
+            :class="{ active: activeSection === 'year-' + yearGroup.year }"
+          >
+            {{ yearGroup.year }}
+          </a>
+          <div class="nav-months">
+            <a 
+              v-for="monthGroup in yearGroup.months" 
+              :key="'nav-' + yearGroup.year + monthGroup.month"
+              @click.prevent="scrollToSection('month-' + yearGroup.year + '-' + monthGroup.month)"
+              class="nav-month"
+              :class="{ active: activeSection === 'month-' + yearGroup.year + '-' + monthGroup.month }"
+            >
+              {{ monthGroup.month.substring(0, 3) }}
+            </a>
+          </div>
+        </div>
+      </nav>
     </div>
 
     <div v-if="isFullscreen && selectedIndex !== -1" class="fullscreen-overlay" @click="isFullscreen = false">
       <!-- Preload next and previous image -->
       <div style="display: none">
-        <img v-if="selectedIndex > 0" :src="getPhotoUrl(photos[selectedIndex - 1].filename)" />
-        <img v-if="selectedIndex < photos.length - 1" :src="getPhotoUrl(photos[selectedIndex + 1].filename)" />
+        <HeicImage v-if="selectedIndex > 0" :src="getPhotoUrl(photos[selectedIndex - 1].filename)" />
+        <HeicImage v-if="selectedIndex < photos.length - 1" :src="getPhotoUrl(photos[selectedIndex + 1].filename)" />
       </div>
       <div class="fullscreen-content" @click.stop>
-        <img :src="getPhotoUrl(photos[selectedIndex].filename)" :alt="photos[selectedIndex].original_name" />
+        <HeicImage :src="getPhotoUrl(photos[selectedIndex].filename)" :alt="photos[selectedIndex].original_name" />
         <div class="fullscreen-nav">
             <Button icon="pi pi-chevron-left" rounded text @click="selectedIndex > 0 && selectedIndex--" :disabled="selectedIndex === 0" />
             <div class="fullscreen-title">{{ photos[selectedIndex].original_name }}</div>
@@ -365,6 +418,80 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 1rem;
+  flex: 1;
+}
+
+.gallery-container {
+  display: flex;
+  gap: 2rem;
+  align-items: flex-start;
+  position: relative;
+}
+
+.timeline-nav {
+  position: sticky;
+  top: 1rem;
+  width: 80px;
+  background: var(--surface-card);
+  padding: 1rem 0.5rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  z-index: 100;
+}
+
+.nav-year-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.nav-year {
+  font-weight: bold;
+  font-size: 0.9rem;
+  color: var(--p-primary-color);
+  cursor: pointer;
+  text-decoration: none;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.nav-year:hover {
+  background: var(--p-primary-50);
+}
+
+.nav-months {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  align-items: center;
+}
+
+.nav-month {
+  font-size: 0.75rem;
+  color: var(--text-color-secondary);
+  cursor: pointer;
+  text-decoration: none;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  transition: color 0.2s;
+}
+
+.nav-year.active {
+  background: var(--p-primary-color);
+  color: white;
+}
+
+.nav-month.active {
+  color: var(--p-primary-color);
+  font-weight: bold;
+  background: var(--p-primary-50);
 }
 
 .grid-header {

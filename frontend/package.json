@@ -12,6 +12,7 @@
     "@primeuix/styles": "2.0.3",
     "@primeuix/themes": "^2.0.3",
     "@simplewebauthn/browser": "^13.3.0",
+    "heic2any": "^0.0.4",
     "pinia": "^3.0.4",
     "primeicons": "^7.0.0",
     "primevue": "^4.5.4",
