@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
 import { eq, and, or, sql, inArray } from "drizzle-orm";
 import db from "../db/database";
 import type { IncomingMessage } from "http";
@@ -42,13 +43,31 @@ export async function uploadPhotoStream(
 
   const fileStream = fs.createWriteStream(filePath);
   let size = 0;
+  const hash = crypto.createHash('sha256');
 
-  // We need to track the size while streaming
+  // We need to track the size and calculate hash while streaming
   stream.on('data', (chunk) => {
     size += chunk.length;
+    hash.update(chunk);
   });
 
   await pipeline(stream, fileStream);
+  const digest = hash.digest('hex');
+
+  // Check for duplicate for this user
+  const existing = db
+    .select()
+    .from(photos)
+    .where(and(eq(photos.user_id, userId), eq(photos.hash, digest)))
+    .get();
+
+  if (existing) {
+    // Delete the temporary file
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+    throw new Error("PHOTO_ALREADY_EXISTS");
+  }
 
   const row = db
     .insert(photos)
@@ -58,6 +77,7 @@ export async function uploadPhotoStream(
       original_name: originalName,
       mime_type: mimeType,
       size: size,
+      hash: digest,
     })
     .returning()
     .get();
@@ -69,6 +89,7 @@ export async function uploadPhotoStream(
     original_name: row.original_name,
     mime_type: row.mime_type,
     size: row.size,
+    hash: row.hash ?? undefined,
     created_at: row.created_at ?? "",
   };
 }
@@ -77,6 +98,19 @@ export async function uploadPhotoLogic(
   userId: number,
   file: { data: Buffer; name: string; mimeType: string }
 ): Promise<Photo> {
+  const digest = crypto.createHash('sha256').update(file.data).digest('hex');
+
+  // Check for duplicate for this user
+  const existing = db
+    .select()
+    .from(photos)
+    .where(and(eq(photos.user_id, userId), eq(photos.hash, digest)))
+    .get();
+
+  if (existing) {
+    throw new Error("PHOTO_ALREADY_EXISTS");
+  }
+
   const filename = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}${path.extname(file.name)}`;
   const filePath = path.join(UPLOAD_DIR, filename);
 
@@ -90,6 +124,7 @@ export async function uploadPhotoLogic(
       original_name: file.name,
       mime_type: file.mimeType,
       size: file.data.length,
+      hash: digest,
     })
     .returning()
     .get();
@@ -101,6 +136,7 @@ export async function uploadPhotoLogic(
     original_name: row.original_name,
     mime_type: row.mime_type,
     size: row.size,
+    hash: row.hash ?? undefined,
     created_at: row.created_at ?? "",
   };
 }
@@ -121,6 +157,7 @@ export function listPhotosLogic(userId: number): ListPhotosResponse {
       original_name: r.original_name,
       mime_type: r.mime_type,
       size: r.size,
+      hash: r.hash ?? undefined,
       created_at: r.created_at ?? "",
     })),
   };

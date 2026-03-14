@@ -67,10 +67,16 @@ export const uploadPhoto = api.raw(
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(photo));
     } catch (err: any) {
+      if (err.message === "PHOTO_ALREADY_EXISTS") {
+        res.statusCode = 409;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "Duplicate photo", message: "Foto wurde bereits hochgeladen." }));
+        return;
+      }
       console.error("Upload error:", err);
       res.statusCode = 500;
       res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ error: err.message || "Internal Server Error" }));
+      res.end(JSON.stringify({ error: err.message || "Internal Server Error", message: err.message || "Interner Server-Fehler" }));
     }
   }
 );

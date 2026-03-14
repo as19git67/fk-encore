@@ -134,6 +134,41 @@ describe("Photo Module", () => {
       // Cleanup
       fs.unlinkSync(filePath);
     });
+
+    it("should not allow duplicate uploads for the same user", async () => {
+      const fileData = Buffer.from("identical-data");
+      await service.uploadPhotoLogic(user1.id, {
+        data: fileData,
+        name: "test1.jpg",
+        mimeType: "image/jpeg",
+      });
+
+      // Same user, same data -> should throw
+      await expect(service.uploadPhotoLogic(user1.id, {
+        data: fileData,
+        name: "test2.jpg",
+        mimeType: "image/jpeg",
+      })).rejects.toThrow("PHOTO_ALREADY_EXISTS");
+    });
+
+    it("should allow same photo for different users", async () => {
+      const fileData = Buffer.from("shared-identical-data");
+      await service.uploadPhotoLogic(user1.id, {
+        data: fileData,
+        name: "u1.jpg",
+        mimeType: "image/jpeg",
+      });
+
+      // Different user, same data -> should succeed
+      const result = await service.uploadPhotoLogic(user2.id, {
+        data: fileData,
+        name: "u2.jpg",
+        mimeType: "image/jpeg",
+      });
+
+      expect(result.user_id).toBe(user2.id);
+      expect(result.original_name).toBe("u2.jpg");
+    });
   });
 
   describe("Albums", () => {
