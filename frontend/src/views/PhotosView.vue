@@ -14,6 +14,7 @@ const selectedIndex = ref(-1)
 const isFullscreen = ref(false)
 
 const canUpload = computed(() => auth.hasPermission('photos.upload'))
+const canDelete = computed(() => auth.hasPermission('photos.delete'))
 
 async function loadPhotos() {
   loading.value = true
@@ -139,6 +140,7 @@ onUnmounted(() => {
         <div class="photo-info">
           <span class="name">{{ photo.original_name }}</span>
           <Button 
+            v-if="canDelete"
             icon="pi pi-trash" 
             severity="danger" 
             text 
