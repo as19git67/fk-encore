@@ -139,6 +139,7 @@ export const getPhotoFile = api.raw(
       else if (ext === ".webp") mimeType = "image/webp";
 
       res.setHeader("Content-Type", mimeType);
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
       fs.createReadStream(filePath).pipe(res);
     } catch (err: any) {
       console.error("Error serving photo file:", err);
