@@ -88,6 +88,39 @@ function createDb(): BetterSQLite3Database<typeof schema> {
       FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
       FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS photos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      filename TEXT NOT NULL,
+      original_name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS albums (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS album_photos (
+      album_id INTEGER NOT NULL,
+      photo_id INTEGER NOT NULL,
+      PRIMARY KEY (album_id, photo_id),
+      FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE,
+      FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS album_shares (
+      album_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      access_level TEXT NOT NULL DEFAULT 'read',
+      PRIMARY KEY (album_id, user_id),
+      FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
   `);
 
   return db;

@@ -6,6 +6,7 @@ import UserListView from '../views/UserListView.vue'
 import UserDetailView from '../views/UserDetailView.vue'
 import RolesView from '../views/RolesView.vue'
 import ProfileView from '../views/ProfileView.vue'
+import PhotosView from '../views/PhotosView.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -17,6 +18,7 @@ const router = createRouter({
     { path: '/users/:id', name: 'user-detail', component: UserDetailView, meta: { permission: 'users.read' } },
     { path: '/roles', name: 'roles', component: RolesView, meta: { permission: 'roles.list' } },
     { path: '/profile', name: 'profile', component: ProfileView },
+    { path: '/photos', name: 'photos', component: PhotosView, meta: { permission: 'photos.view' } },
   ],
 })
 

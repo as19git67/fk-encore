@@ -7,8 +7,12 @@ export async function apiFetch<T>(
   const token = localStorage.getItem('auth_token')
 
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> || {}),
+  }
+
+  // Set default content type only if not already specified and body is not binary/form
+  if (!headers['Content-Type'] && !(options.body instanceof FormData || options.body instanceof Blob || options.body instanceof File)) {
+    headers['Content-Type'] = 'application/json'
   }
 
   if (token) {
