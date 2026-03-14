@@ -15,12 +15,12 @@ import {
   rolePermissions,
   userRoles,
 } from "../db/schema";
+import { UPLOAD_DIR } from "./photo.service";
 import * as service from "./photo.service";
 import { createUserLogic, getPermissionsForUser } from "../user/user.service";
 import { createRoleLogic, assignPermissionLogic } from "../role/role.service";
 import { assignRoleLogic } from "../user/user-roles.service";
 
-const UPLOAD_DIR = "uploads/photos";
 
 describe("Photo Module", () => {
   let user1: any;

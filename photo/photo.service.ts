@@ -25,7 +25,7 @@ import type {
   DeleteResponse,
 } from "../db/types";
 
-export const UPLOAD_DIR = "uploads/photos";
+export const UPLOAD_DIR = path.resolve(process.env.PHOTO_UPLOAD_DIR || "uploads/photos");
 
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
