@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import Button from 'primevue/button'
 import FileUpload from 'primevue/fileupload'
 import Message from 'primevue/message'
@@ -52,6 +52,8 @@ async function handleUpload(event: any) {
       }
     }
     
+    await loadPhotos()
+    
     if (duplicates.length > 0 || errors.length > 0) {
       let msg = ''
       if (duplicates.length > 0) {
@@ -62,8 +64,6 @@ async function handleUpload(event: any) {
       }
       error.value = msg
     }
-    
-    await loadPhotos()
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Hochladen'
   } finally {
@@ -127,6 +127,16 @@ function handleKeydown(e: KeyboardEvent) {
   }
 }
 
+watch(selectedIndex, (newIdx) => {
+  if (newIdx === -1 || isFullscreen.value) return
+  nextTick(() => {
+    const el = document.querySelector('.photo-item.selected')
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+  })
+})
+
 onMounted(() => {
   loadPhotos()
   window.addEventListener('keydown', handleKeydown)
@@ -154,7 +164,7 @@ onUnmounted(() => {
       />
     </div>
 
-    <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
+    <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
 
     <div v-if="uploading" class="info-text">Fotos werden hochgeladen...</div>
     <div v-else-if="loading" class="info-text">Lade Fotos...</div>
@@ -226,7 +236,7 @@ onUnmounted(() => {
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
   cursor: pointer;
   transition: transform 0.2s;
-  border: 3px solid transparent;
+  border: 4px solid transparent;
 }
 
 .photo-item:hover {
@@ -234,7 +244,19 @@ onUnmounted(() => {
 }
 
 .photo-item.selected {
-  border-color: var(--primary-color);
+  border-color: var(--p-primary-color);
+  transform: scale(1.05);
+  box-shadow: 0 0 15px var(--p-primary-color);
+  z-index: 10;
+}
+
+.photo-item.selected img {
+  filter: brightness(1.1);
+}
+
+.photo-grid:has(.photo-item.selected) .photo-item:not(.selected) {
+  opacity: 0.7;
+  filter: grayscale(0.2);
 }
 
 .photo-item img {
