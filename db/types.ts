@@ -184,6 +184,7 @@ export interface Photo {
   mime_type: string;
   size: number;
   hash?: string;
+  taken_at?: string;
   created_at: string;
 }
 

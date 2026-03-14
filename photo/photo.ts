@@ -112,6 +112,36 @@ export const deletePhoto = api(
 );
 
 /**
+ * Get all photo IDs for metadata refresh.
+ */
+export const getPhotosToRefreshMetadata = api(
+  { expose: true, method: "GET", path: "/photos/refresh-metadata", auth: true },
+  async (): Promise<{ ids: number[] }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.refresh_metadata");
+
+    return service.getPhotosToRefreshMetadataLogic(userId);
+  }
+);
+
+/**
+ * Refresh metadata for a specific photo.
+ */
+export const refreshPhotoMetadata = api(
+  { expose: true, method: "POST", path: "/photos/:id/refresh-metadata", auth: true },
+  async ({ id }: { id: number }): Promise<{ success: boolean; taken_at?: string }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.refresh_metadata");
+
+    return service.refreshPhotoMetadataLogic(userId, id);
+  }
+);
+
+/**
  * Serve a photo file.
  */
 export const getPhotoFile = api.raw(

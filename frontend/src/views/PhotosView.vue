@@ -3,7 +3,8 @@ import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import Button from 'primevue/button'
 import FileUpload from 'primevue/fileupload'
 import Message from 'primevue/message'
-import { listPhotos, uploadPhoto, deletePhoto, getPhotoUrl, type Photo } from '../api/photos'
+import ProgressBar from 'primevue/progressbar'
+import { listPhotos, uploadPhoto, deletePhoto, getPhotoUrl, getPhotosToRefreshMetadata, refreshPhotoMetadata, type Photo } from '../api/photos'
 import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
@@ -16,6 +17,53 @@ const isFullscreen = ref(false)
 
 const canUpload = computed(() => auth.hasPermission('photos.upload'))
 const canDelete = computed(() => auth.hasPermission('photos.delete'))
+const canRefreshMetadata = computed(() => auth.hasPermission('photos.refresh_metadata'))
+
+const refreshingMetadata = ref(false)
+const refreshProgress = ref(0)
+const refreshTotal = ref(0)
+const refreshCurrent = ref(0)
+
+interface PhotoItem {
+  photo: Photo;
+  index: number;
+}
+
+interface MonthGroup {
+  month: string;
+  photos: PhotoItem[];
+}
+
+interface YearGroup {
+  year: string;
+  months: MonthGroup[];
+}
+
+const groupedPhotos = computed(() => {
+  const groups: YearGroup[] = [];
+  
+  photos.value.forEach((photo, index) => {
+    const date = new Date(photo.taken_at || photo.created_at);
+    const year = date.getFullYear().toString();
+    const month = date.toLocaleString('de-DE', { month: 'long' });
+    
+    let yearGroup = groups.find(g => g.year === year);
+    if (!yearGroup) {
+      yearGroup = { year, months: [] };
+      groups.push(yearGroup);
+    }
+    
+    let monthGroup = yearGroup.months.find(m => m.month === month);
+    if (!monthGroup) {
+      monthGroup = { month, photos: [] };
+      yearGroup.months.push(monthGroup);
+    }
+    
+    monthGroup.photos.push({ photo, index });
+  });
+  
+  return groups;
+});
 
 async function loadPhotos() {
   loading.value = true
@@ -81,6 +129,44 @@ async function handleDelete(id: number) {
     }
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Löschen'
+  }
+}
+
+async function handleRefreshMetadata() {
+  if (refreshingMetadata.value) return
+  
+  refreshingMetadata.value = true
+  refreshProgress.value = 0
+  refreshCurrent.value = 0
+  refreshTotal.value = 0
+  error.value = ''
+  
+  try {
+    const res = await getPhotosToRefreshMetadata()
+    const ids = res.ids
+    
+    if (ids.length === 0) {
+      refreshingMetadata.value = false
+      return
+    }
+    
+    refreshTotal.value = ids.length
+    
+    for (const id of ids) {
+      try {
+        await refreshPhotoMetadata(id)
+      } catch (err) {
+        console.error(`Fehler beim Aktualisieren der Metadaten für Foto ${id}:`, err)
+      }
+      refreshCurrent.value++
+      refreshProgress.value = Math.round((refreshCurrent.value / refreshTotal.value) * 100)
+    }
+    
+    await loadPhotos()
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Aktualisieren der Metadaten'
+  } finally {
+    refreshingMetadata.value = false
   }
 }
 
@@ -151,46 +237,71 @@ onUnmounted(() => {
   <div class="photos-view">
     <div class="header">
       <h1>Meine Fotos</h1>
-      <FileUpload 
-        v-if="canUpload"
-        mode="basic" 
-        name="file" 
-        accept="image/*" 
-        :auto="true" 
-        customUpload 
-        multiple
-        @uploader="handleUpload" 
-        chooseLabel="Fotos hochladen" 
-      />
+      <div class="actions">
+        <Button 
+          v-if="canRefreshMetadata"
+          label="Metadaten aktualisieren" 
+          icon="pi pi-refresh" 
+          severity="secondary" 
+          :loading="refreshingMetadata"
+          @click="handleRefreshMetadata"
+          class="refresh-btn"
+        />
+        <FileUpload 
+          v-if="canUpload"
+          mode="basic" 
+          name="file" 
+          accept="image/*" 
+          :auto="true" 
+          customUpload 
+          multiple
+          @uploader="handleUpload" 
+          chooseLabel="Fotos hochladen" 
+        />
+      </div>
     </div>
 
     <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
+
+    <div v-if="refreshingMetadata" class="progress-container">
+      <div class="progress-info">
+        <span>Metadaten werden aktualisiert...</span>
+        <span>{{ refreshCurrent }} / {{ refreshTotal }}</span>
+      </div>
+      <ProgressBar :value="refreshProgress"></ProgressBar>
+    </div>
 
     <div v-if="uploading" class="info-text">Fotos werden hochgeladen...</div>
     <div v-else-if="loading" class="info-text">Lade Fotos...</div>
     <div v-else-if="photos.length === 0" class="info-text">Keine Fotos hochgeladen.</div>
 
     <div v-else class="photo-grid">
-      <div 
-        v-for="(photo, index) in photos" 
-        :key="photo.id" 
-        class="photo-item"
-        :class="{ selected: index === selectedIndex }"
-        @click="selectedIndex = index; isFullscreen = true"
-      >
-        <img :src="getPhotoUrl(photo.filename)" :alt="photo.original_name" loading="lazy" />
-        <div class="photo-info">
-          <span class="name">{{ photo.original_name }}</span>
-          <Button 
-            v-if="canDelete"
-            icon="pi pi-trash" 
-            severity="danger" 
-            text 
-            rounded 
-            @click.stop="handleDelete(photo.id)" 
-          />
-        </div>
-      </div>
+      <template v-for="yearGroup in groupedPhotos" :key="yearGroup.year">
+        <h2 class="grid-header year-title">{{ yearGroup.year }}</h2>
+        <template v-for="monthGroup in yearGroup.months" :key="yearGroup.year + monthGroup.month">
+          <h3 class="grid-header month-title">{{ monthGroup.month }}</h3>
+          <div 
+            v-for="item in monthGroup.photos" 
+            :key="item.photo.id" 
+            class="photo-item"
+            :class="{ selected: item.index === selectedIndex }"
+            @click="selectedIndex = item.index; isFullscreen = true"
+          >
+            <img :src="getPhotoUrl(item.photo.filename)" :alt="item.photo.original_name" loading="lazy" />
+            <div class="photo-info">
+              <span class="name">{{ item.photo.original_name }}</span>
+              <Button 
+                v-if="canDelete"
+                icon="pi pi-trash" 
+                severity="danger" 
+                text 
+                rounded 
+                @click.stop="handleDelete(item.photo.id)" 
+              />
+            </div>
+          </div>
+        </template>
+      </template>
     </div>
 
     <div v-if="isFullscreen && selectedIndex !== -1" class="fullscreen-overlay" @click="isFullscreen = false">
@@ -218,6 +329,30 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 2rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.progress-container {
+  margin-bottom: 2rem;
+  background: var(--surface-card);
+  padding: 1rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.progress-info {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+  color: var(--text-color-secondary);
 }
 
 .info-text {
@@ -230,6 +365,28 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 1rem;
+}
+
+.grid-header {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--text-color);
+}
+
+.year-title {
+  border-bottom: 2px solid var(--p-primary-color);
+  padding-bottom: 0.5rem;
+  margin-top: 2.5rem;
+  margin-bottom: 0.5rem;
+  font-size: 1.5rem;
+}
+
+.month-title {
+  color: var(--text-color-secondary);
+  font-weight: 500;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  font-size: 1.1rem;
 }
 
 .photo-item {

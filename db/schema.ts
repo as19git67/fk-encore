@@ -109,6 +109,7 @@ export const photos = sqliteTable("photos", {
   mime_type: text("mime_type").notNull(),
   size: integer("size").notNull(),
   hash: text("hash"),
+  taken_at: text("taken_at"),
   created_at: text("created_at").default(sql`(datetime('now'))`),
 });
 
