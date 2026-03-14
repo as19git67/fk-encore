@@ -98,6 +98,9 @@ export const deletePhoto = api(
   async ({ id }: { id: number }): Promise<DeleteResponse> => {
     checkModule();
     const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.delete");
+
     return service.deletePhotoLogic(userId, id);
   }
 );

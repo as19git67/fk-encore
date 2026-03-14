@@ -45,6 +45,7 @@ export function seed(db: BetterSQLite3Database<typeof schema>): void {
     { key: "module.photos", description: "Enable photos module" },
     { key: "photos.upload", description: "Upload photos" },
     { key: "photos.view", description: "View photos" },
+    { key: "photos.delete", description: "Delete photos" },
     { key: "albums.manage", description: "Manage albums" },
   ];
 
@@ -98,7 +99,7 @@ export function seed(db: BetterSQLite3Database<typeof schema>): void {
     .get();
 
   if (userRole) {
-    const userPermissions = ["users.read", "module.photos", "photos.view", "photos.upload"];
+    const userPermissions = ["users.read", "module.photos", "photos.view", "photos.upload", "photos.delete"];
     for (const key of userPermissions) {
       const perm = db
         .select({ id: schema.permissions.id })
