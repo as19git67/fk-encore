@@ -97,3 +97,60 @@ export const rolePermissions = sqliteTable(
   (table) => [primaryKey({ columns: [table.role_id, table.permission_id] })]
 );
 
+// ========== Photos ==========
+
+export const photos = sqliteTable("photos", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  filename: text("filename").notNull(),
+  original_name: text("original_name").notNull(),
+  mime_type: text("mime_type").notNull(),
+  size: integer("size").notNull(),
+  created_at: text("created_at").default(sql`(datetime('now'))`),
+});
+
+// ========== Albums ==========
+
+export const albums = sqliteTable("albums", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  created_at: text("created_at").default(sql`(datetime('now'))`),
+  updated_at: text("updated_at").default(sql`(datetime('now'))`),
+});
+
+// ========== Album Photos (Many-to-Many) ==========
+
+export const albumPhotos = sqliteTable(
+  "album_photos",
+  {
+    album_id: integer("album_id")
+      .notNull()
+      .references(() => albums.id, { onDelete: "cascade" }),
+    photo_id: integer("photo_id")
+      .notNull()
+      .references(() => photos.id, { onDelete: "cascade" }),
+  },
+  (table) => [primaryKey({ columns: [table.album_id, table.photo_id] })]
+);
+
+// ========== Album Shares ==========
+
+export const albumShares = sqliteTable(
+  "album_shares",
+  {
+    album_id: integer("album_id")
+      .notNull()
+      .references(() => albums.id, { onDelete: "cascade" }),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    access_level: text("access_level").notNull().default("read"),
+  },
+  (table) => [primaryKey({ columns: [table.album_id, table.user_id] })]
+);
+

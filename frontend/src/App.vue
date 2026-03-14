@@ -16,6 +16,9 @@ const menuItems = computed(() => {
   if (auth.hasPermission('roles.list')) {
     items.push({ label: 'Rollen', icon: 'pi pi-shield', command: () => router.push('/roles') })
   }
+  if (auth.hasPermission('photos.view')) {
+    items.push({ label: 'Fotos', icon: 'pi pi-images', command: () => router.push('/photos') })
+  }
   items.push({ label: 'Profil', icon: 'pi pi-user', command: () => router.push('/profile') })
   return items
 })

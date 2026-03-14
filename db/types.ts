@@ -173,3 +173,61 @@ export interface DeleteResponse {
   success: boolean;
   message: string;
 }
+
+// ========== Photo Types ==========
+
+export interface Photo {
+  id: number;
+  user_id: number;
+  filename: string;
+  original_name: string;
+  mime_type: string;
+  size: number;
+  created_at: string;
+}
+
+export interface Album {
+  id: number;
+  user_id: number;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AlbumWithPhotos extends Album {
+  photos: Photo[];
+}
+
+export interface AlbumShare {
+  album_id: number;
+  user_id: number;
+  access_level: "read" | "write";
+}
+
+export interface CreateAlbumRequest {
+  name: string;
+}
+
+export interface UpdateAlbumRequest {
+  id: number;
+  name: string;
+}
+
+export interface AddPhotoToAlbumRequest {
+  albumId: number;
+  photoId: number;
+}
+
+export interface ShareAlbumRequest {
+  albumId: number;
+  userId: number;
+  accessLevel: "read" | "write";
+}
+
+export interface ListAlbumsResponse {
+  albums: Album[];
+}
+
+export interface ListPhotosResponse {
+  photos: Photo[];
+}
