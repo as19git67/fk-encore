@@ -6,6 +6,7 @@ const props = defineProps<{
   src: string;
   alt?: string;
   loading?: 'lazy' | 'eager';
+  objectFit?: 'cover' | 'contain' | 'fill' | 'none' | 'scale-down';
 }>();
 
 const displaySrc = ref<string>('');
@@ -63,6 +64,7 @@ watch(() => props.src, checkAndConvert);
       :alt="alt" 
       :loading="loading" 
       :class="{ 'is-loading': isLoading }"
+      :style="{ objectFit: props.objectFit || 'cover' }"
     />
     <div v-if="isLoading" class="heic-loader">
        <i class="pi pi-spin pi-spinner"></i>
@@ -80,7 +82,6 @@ watch(() => props.src, checkAndConvert);
 img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
 }
 img.is-loading {
   opacity: 0.5;

@@ -364,7 +364,7 @@ onUnmounted(() => {
         <HeicImage v-if="selectedIndex < photos.length - 1" :src="getPhotoUrl(photos[selectedIndex + 1].filename)" />
       </div>
       <div class="fullscreen-content" @click.stop>
-        <HeicImage :src="getPhotoUrl(photos[selectedIndex].filename)" :alt="photos[selectedIndex].original_name" />
+        <HeicImage :src="getPhotoUrl(photos[selectedIndex].filename)" :alt="photos[selectedIndex].original_name" objectFit="contain" />
         <div class="fullscreen-nav">
             <Button icon="pi pi-chevron-left" rounded text @click="selectedIndex > 0 && selectedIndex--" :disabled="selectedIndex === 0" />
             <div class="fullscreen-title">{{ photos[selectedIndex].original_name }}</div>
@@ -538,7 +538,7 @@ onUnmounted(() => {
   z-index: 10;
 }
 
-.photo-item.selected img {
+.photo-item.selected :deep(img) {
   filter: brightness(1.1);
 }
 
@@ -547,11 +547,9 @@ onUnmounted(() => {
   filter: grayscale(0.2);
 } */
 
-.photo-item img {
+.photo-item :deep(.heic-image-container) {
   width: 100%;
   height: 200px;
-  object-fit: cover;
-  display: block;
 }
 
 .photo-info {
@@ -602,10 +600,9 @@ onUnmounted(() => {
   align-items: center;
 }
 
-.fullscreen-content img {
-  max-width: 100%;
-  max-height: 85vh;
-  object-fit: contain;
+.fullscreen-content :deep(.heic-image-container) {
+  width: 95vw;
+  height: 85vh;
 }
 
 .fullscreen-nav {
