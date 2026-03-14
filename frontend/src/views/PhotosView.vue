@@ -132,7 +132,7 @@ watch(selectedIndex, (newIdx) => {
   nextTick(() => {
     const el = document.querySelector('.photo-item.selected')
     if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      el.scrollIntoView({ behavior: 'auto', block: 'nearest' })
     }
   })
 })
@@ -178,7 +178,7 @@ onUnmounted(() => {
         :class="{ selected: index === selectedIndex }"
         @click="selectedIndex = index; isFullscreen = true"
       >
-        <img :src="getPhotoUrl(photo.filename)" :alt="photo.original_name" />
+        <img :src="getPhotoUrl(photo.filename)" :alt="photo.original_name" loading="lazy" />
         <div class="photo-info">
           <span class="name">{{ photo.original_name }}</span>
           <Button 
@@ -193,8 +193,12 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Fullscreen Modal -->
     <div v-if="isFullscreen && selectedIndex !== -1" class="fullscreen-overlay" @click="isFullscreen = false">
+      <!-- Preload next and previous image -->
+      <div style="display: none">
+        <img v-if="selectedIndex > 0" :src="getPhotoUrl(photos[selectedIndex - 1].filename)" />
+        <img v-if="selectedIndex < photos.length - 1" :src="getPhotoUrl(photos[selectedIndex + 1].filename)" />
+      </div>
       <div class="fullscreen-content" @click.stop>
         <img :src="getPhotoUrl(photos[selectedIndex].filename)" :alt="photos[selectedIndex].original_name" />
         <div class="fullscreen-nav">
@@ -254,10 +258,10 @@ onUnmounted(() => {
   filter: brightness(1.1);
 }
 
-.photo-grid:has(.photo-item.selected) .photo-item:not(.selected) {
+/* .photo-grid:has(.photo-item.selected) .photo-item:not(.selected) {
   opacity: 0.7;
   filter: grayscale(0.2);
-}
+} */
 
 .photo-item img {
   width: 100%;
