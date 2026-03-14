@@ -95,6 +95,7 @@ function createDb(): BetterSQLite3Database<typeof schema> {
       original_name TEXT NOT NULL,
       mime_type TEXT NOT NULL,
       size INTEGER NOT NULL,
+      hash TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
@@ -122,6 +123,13 @@ function createDb(): BetterSQLite3Database<typeof schema> {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
   `);
+
+  // Ensure hash column exists in case the table already existed without it
+  try {
+    sqlite.exec("ALTER TABLE photos ADD COLUMN hash TEXT;");
+  } catch (e) {
+    // Column probably already exists
+  }
 
   return db;
 }

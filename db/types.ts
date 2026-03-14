@@ -183,6 +183,7 @@ export interface Photo {
   original_name: string;
   mime_type: string;
   size: number;
+  hash?: string;
   created_at: string;
 }
 

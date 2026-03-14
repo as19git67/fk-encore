@@ -9,6 +9,7 @@ import { useAuthStore } from '../stores/auth'
 const auth = useAuthStore()
 const photos = ref<Photo[]>([])
 const loading = ref(true)
+const uploading = ref(false)
 const error = ref('')
 const selectedIndex = ref(-1)
 const isFullscreen = ref(false)
@@ -30,14 +31,43 @@ async function loadPhotos() {
 }
 
 async function handleUpload(event: any) {
-  const file = event.files[0]
-  if (!file) return
+  const files = event.files
+  if (!files || files.length === 0) return
   
+  uploading.value = true
+  error.value = ''
+  let duplicates = []
+  let errors = []
+
   try {
-    await uploadPhoto(file)
+    for (const file of files) {
+      try {
+        await uploadPhoto(file)
+      } catch (err: any) {
+        if (err.message?.includes('Foto wurde bereits hochgeladen')) {
+          duplicates.push(file.name)
+        } else {
+          errors.push(`${file.name}: ${err.message}`)
+        }
+      }
+    }
+    
+    if (duplicates.length > 0 || errors.length > 0) {
+      let msg = ''
+      if (duplicates.length > 0) {
+        msg += `Folgende Fotos wurden übersprungen, da sie bereits vorhanden sind: ${duplicates.join(', ')}. `
+      }
+      if (errors.length > 0) {
+        msg += `Fehler bei: ${errors.join('; ')}.`
+      }
+      error.value = msg
+    }
+    
     await loadPhotos()
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Hochladen'
+  } finally {
+    uploading.value = false
   }
 }
 
@@ -118,14 +148,16 @@ onUnmounted(() => {
         accept="image/*" 
         :auto="true" 
         customUpload 
+        multiple
         @uploader="handleUpload" 
-        chooseLabel="Foto hochladen" 
+        chooseLabel="Fotos hochladen" 
       />
     </div>
 
     <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
 
-    <div v-if="loading" class="info-text">Lade Fotos...</div>
+    <div v-if="uploading" class="info-text">Fotos werden hochgeladen...</div>
+    <div v-else-if="loading" class="info-text">Lade Fotos...</div>
     <div v-else-if="photos.length === 0" class="info-text">Keine Fotos hochgeladen.</div>
 
     <div v-else class="photo-grid">
