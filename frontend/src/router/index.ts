@@ -12,7 +12,7 @@ import PersonsView from '../views/PersonsView.vue'
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', redirect: '/profile' },
+    { path: '/', redirect: '/photos' },
     { path: '/login', name: 'login', component: LoginView },
     { path: '/register', name: 'register', component: RegisterView },
     { path: '/users', name: 'users', component: UserListView, meta: { permission: 'users.list' } },

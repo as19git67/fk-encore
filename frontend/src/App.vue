@@ -10,19 +10,18 @@ const router = useRouter()
 
 const menuItems = computed(() => {
   const items = []
-  if (auth.hasPermission('users.list')) {
-    items.push({ label: 'Benutzer', icon: 'pi pi-users', command: () => router.push('/users') })
-  }
-  if (auth.hasPermission('roles.list')) {
-    items.push({ label: 'Rollen', icon: 'pi pi-shield', command: () => router.push('/roles') })
-  }
   if (auth.hasPermission('photos.view')) {
     items.push({ label: 'Fotos', icon: 'pi pi-images', command: () => router.push('/photos') })
   }
   if (auth.hasPermission('people.view')) {
     items.push({ label: 'Personen', icon: 'pi pi-users', command: () => router.push('/people') })
   }
-  items.push({ label: 'Profil', icon: 'pi pi-user', command: () => router.push('/profile') })
+  if (auth.hasPermission('users.list')) {
+    items.push({ label: 'Benutzer', icon: 'pi pi-users', command: () => router.push('/users') })
+  }
+  if (auth.hasPermission('roles.list')) {
+    items.push({ label: 'Rollen', icon: 'pi pi-shield', command: () => router.push('/roles') })
+  }
   return items
 })
 
@@ -38,6 +37,7 @@ async function handleLogout() {
       <template #end>
         <div class="menu-end">
           <span class="user-name">{{ auth.user?.name }}</span>
+          <Button label="Profil" icon="pi pi-user" severity="secondary" text @click="router.push('/profile')" />
           <Button label="Abmelden" icon="pi pi-sign-out" severity="secondary" text @click="handleLogout" />
         </div>
       </template>
