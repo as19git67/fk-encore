@@ -70,6 +70,7 @@ export interface Face {
   person_id?: number
   quality?: number
   created_at: string
+  photo?: Photo
 }
 
 export interface Person {

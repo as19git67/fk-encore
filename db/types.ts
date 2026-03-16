@@ -199,6 +199,14 @@ export interface Face {
   person_id?: number;
   quality?: number;
   created_at: string;
+  photo?: {
+    id: number;
+    user_id: number;
+    filename: string;
+    original_name: string;
+    taken_at?: string;
+    created_at: string;
+  };
 }
 
 export interface Person {
