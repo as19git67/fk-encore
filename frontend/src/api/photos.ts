@@ -57,3 +57,72 @@ export function refreshPhotoMetadata(id: number) {
     method: 'POST'
   })
 }
+
+// ---------- People & Faces ----------
+
+export interface FaceBBox { x: number; y: number; width: number; height: number }
+
+export interface Face {
+  id: number
+  user_id: number
+  photo_id: number
+  bbox: FaceBBox
+  person_id?: number
+  quality?: number
+  created_at: string
+}
+
+export interface Person {
+  id: number
+  user_id: number
+  name: string
+  cover_face_id?: number
+  cover_filename?: string
+  cover_bbox?: FaceBBox
+  created_at: string
+  updated_at: string
+  faceCount?: number
+}
+
+export interface ListPersonsResponse {
+  persons: Person[]
+}
+
+export interface PersonDetails extends Person {
+  faces: Face[]
+}
+
+export function listPersons() {
+  return apiFetch<ListPersonsResponse>('/persons')
+}
+
+export function getPersonDetails(id: number) {
+  return apiFetch<PersonDetails>(`/persons/${id}`)
+}
+
+export function updatePerson(id: number, name: string) {
+  return apiFetch<Person>(`/persons/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name })
+  })
+}
+
+export function mergePersons(sourceIds: number[], targetId: number) {
+  return apiFetch<{ success: boolean }>('/persons/merge', {
+    method: 'POST',
+    body: JSON.stringify({ sourceIds, targetId })
+  })
+}
+
+export function assignFaceToPerson(faceId: number, personId: number) {
+  return apiFetch<{ success: boolean }>(`/faces/${faceId}/assign`, {
+    method: 'POST',
+    body: JSON.stringify({ personId })
+  })
+}
+
+export function reindexAllPhotos() {
+  return apiFetch<{ count: number }>('/photos/reindex-all', {
+    method: 'POST'
+  })
+}

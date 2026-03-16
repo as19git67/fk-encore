@@ -123,6 +123,28 @@ function createDb(): BetterSQLite3Database<typeof schema> {
       FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS persons (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      name TEXT NOT NULL DEFAULT 'Unbenannt',
+      cover_face_id INTEGER,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS faces (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      photo_id INTEGER NOT NULL,
+      bbox TEXT NOT NULL,
+      embedding TEXT NOT NULL,
+      person_id INTEGER,
+      quality INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE,
+      FOREIGN KEY (person_id) REFERENCES persons(id) ON DELETE SET NULL
+    );
   `);
 
   // Ensure hash column exists in case the table already existed without it
@@ -132,6 +154,15 @@ function createDb(): BetterSQLite3Database<typeof schema> {
 
   try {
     sqlite.exec("ALTER TABLE photos ADD COLUMN taken_at TEXT;");
+  } catch (e) {}
+
+  // Ensure new tables/columns for people feature (idempotent guards)
+  try {
+    sqlite.exec("ALTER TABLE persons ADD COLUMN cover_face_id INTEGER;");
+  } catch (e) {}
+
+  try {
+    sqlite.exec("ALTER TABLE faces ADD COLUMN quality INTEGER DEFAULT 0;");
   } catch (e) {}
 
   return db;

@@ -158,3 +158,13 @@ To run tests, configure the `test` command in your `package.json` to the test ru
 ```bash
 encore test
 ```
+
+## Personen-Erkennung (KI)
+
+Die Personen-Erkennung nutzt `face-api.js` lokal auf dem Server (CPU). Damit dies funktioniert, müssen die vortrainierten KI-Modelle heruntergeladen werden:
+
+1. Führen Sie das Download-Skript aus:
+   ```bash
+   ./scripts/download_models.sh
+   ```
+2. Stellen Sie sicher, dass in Ihrer `.env` Datei `ENABLE_LOCAL_FACES=true` gesetzt ist.
