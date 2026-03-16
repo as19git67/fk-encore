@@ -220,7 +220,10 @@ export interface Person {
   updated_at: string;
 }
 
-export interface ListPersonsResponse { persons: (Person & { faceCount: number })[] }
+export interface ListPersonsResponse { 
+  persons: (Person & { faceCount: number })[];
+  enableLocalFaces: boolean;
+}
 export interface PersonDetails extends Person { faces: Face[] }
 
 export interface AssignFaceRequest { faceId: number; personId: number }
