@@ -26,7 +26,6 @@ import type {
   ListPhotosResponse,
   DeleteResponse,
   Person,
-  Face,
   ListPersonsResponse,
   PersonDetails,
   MergePersonsRequest,
@@ -66,7 +65,10 @@ if (!(util as any).isArray) {
 
 export const UPLOAD_DIR = path.resolve(process.env.PHOTO_UPLOAD_DIR || "uploads/photos");
 export const MODEL_DIR = path.resolve(process.env.FACE_MODEL_DIR || "data/models");
-const FACE_THRESHOLD = parseFloat(process.env.FACE_SIMILARITY_THRESHOLD || "0.65");
+// Euclidean distance threshold for face matching (face-api.js standard: 0.6)
+// Lower value = stricter matching (fewer false positives, more separate persons)
+// Higher value = looser matching (more false positives, fewer persons)
+const FACE_DISTANCE_THRESHOLD = parseFloat(process.env.FACE_DISTANCE_THRESHOLD || "0.6");
 const ENABLE_LOCAL_FACES = process.env.ENABLE_LOCAL_FACES === "true";
 
 if (!fs.existsSync(UPLOAD_DIR)) {
@@ -537,6 +539,7 @@ export function shareAlbumLogic(userId: number, req: ShareAlbumRequest): { succe
       user_id: req.userId,
       access_level: req.accessLevel,
     })
+    .run();
   return { success: true };
 }
 
@@ -599,7 +602,7 @@ export async function indexPhotoFaces(userId: number, photoId: number): Promise<
     };
     const embedding = Array.from(det.descriptor);
 
-    // Find best matching person (using a slightly higher threshold for initial matching)
+    // Find best matching person (using Euclidean distance, threshold from FACE_DISTANCE_THRESHOLD)
     const match = await findBestPersonMatch(userId, embedding);
 
     let personId = match?.personId;
@@ -660,7 +663,7 @@ export async function indexPhotoFaces(userId: number, photoId: number): Promise<
 async function findBestPersonMatch(
   userId: number,
   embedding: number[]
-): Promise<{ personId: number; score: number } | null> {
+): Promise<{ personId: number; distance: number } | null> {
   const allFaces = db
     .select({
       person_id: faces.person_id,
@@ -670,7 +673,7 @@ async function findBestPersonMatch(
     .where(and(eq(faces.user_id, userId), sql`${faces.person_id} IS NOT NULL`))
     .all();
 
-  // Group embeddings by person for more robust matching
+  // Group embeddings by person
   const personEmbeddings: Record<number, number[][]> = {};
   for (const face of allFaces) {
     if (!personEmbeddings[face.person_id!]) {
@@ -679,24 +682,20 @@ async function findBestPersonMatch(
     personEmbeddings[face.person_id!].push(JSON.parse(face.embedding as string) as number[]);
   }
 
-  let bestMatch: { personId: number; score: number } | null = null;
+  let bestMatch: { personId: number; distance: number } | null = null;
 
   for (const [personIdStr, embeddings] of Object.entries(personEmbeddings)) {
     const personId = parseInt(personIdStr);
-    
-    // Check similarity against each face of this person
-    // and take the maximum similarity
-    let maxPersonScore = 0;
-    for (const faceEmbedding of embeddings) {
-      const score = cosineSimilarity(embedding, faceEmbedding);
-      if (score > maxPersonScore) {
-        maxPersonScore = score;
-      }
-    }
 
-    if (maxPersonScore > FACE_THRESHOLD) {
-      if (!bestMatch || maxPersonScore > bestMatch.score) {
-        bestMatch = { personId, score: maxPersonScore };
+    // Compare against the centroid (mean embedding) of this person.
+    // This prevents chain-matching where a cluster gradually drifts
+    // to include very different faces through intermediate matches.
+    const centroid = computeCentroid(embeddings);
+    const dist = euclideanDistance(embedding, centroid);
+
+    if (dist < FACE_DISTANCE_THRESHOLD) {
+      if (!bestMatch || dist < bestMatch.distance) {
+        bestMatch = { personId, distance: dist };
       }
     }
   }
@@ -704,16 +703,34 @@ async function findBestPersonMatch(
   return bestMatch;
 }
 
-function cosineSimilarity(v1: number[], v2: number[]): number {
-  let dotProduct = 0;
-  let normA = 0;
-  let normB = 0;
-  for (let i = 0; i < v1.length; i++) {
-    dotProduct += v1[i] * v2[i];
-    normA += v1[i] * v1[i];
-    normB += v2[i] * v2[i];
+/**
+ * Compute the centroid (mean) of a set of embedding vectors.
+ */
+function computeCentroid(embeddings: number[][]): number[] {
+  const dim = embeddings[0].length;
+  const centroid = new Array(dim).fill(0);
+  for (const emb of embeddings) {
+    for (let i = 0; i < dim; i++) {
+      centroid[i] += emb[i];
+    }
   }
-  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+  for (let i = 0; i < dim; i++) {
+    centroid[i] /= embeddings.length;
+  }
+  return centroid;
+}
+
+/**
+ * Euclidean distance between two face descriptor vectors.
+ * face-api.js uses this metric: distance < 0.6 typically means same person.
+ */
+function euclideanDistance(v1: number[], v2: number[]): number {
+  let sum = 0;
+  for (let i = 0; i < v1.length; i++) {
+    const diff = v1[i] - v2[i];
+    sum += diff * diff;
+  }
+  return Math.sqrt(sum);
 }
 
 export function listPersonsLogic(userId: number): ListPersonsResponse {
@@ -725,9 +742,9 @@ export function listPersonsLogic(userId: number): ListPersonsResponse {
       cover_face_id: persons.cover_face_id,
       created_at: persons.created_at,
       updated_at: persons.updated_at,
-      faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM ${faces} f WHERE f.${faces.person_id} = ${persons.id}), 0) AS INTEGER)`,
-      cover_filename: sql<string>`COALESCE((SELECT p.${photos.filename} FROM ${photos} p INNER JOIN ${faces} f ON f.${faces.photo_id} = p.${photos.id} WHERE f.${faces.id} = ${persons.cover_face_id} LIMIT 1), '')`,
-      cover_bbox: sql<string>`COALESCE((SELECT f.${faces.bbox} FROM ${faces} f WHERE f.${faces.id} = ${persons.cover_face_id} LIMIT 1), '')`,
+      faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM faces f WHERE f.person_id = persons.id), 0) AS INTEGER)`,
+      cover_filename: sql<string>`COALESCE((SELECT p.filename FROM photos p INNER JOIN faces f ON f.photo_id = p.id WHERE f.id = persons.cover_face_id LIMIT 1), '')`,
+      cover_bbox: sql<string>`COALESCE((SELECT f.bbox FROM faces f WHERE f.id = persons.cover_face_id LIMIT 1), '')`,
     })
     .from(persons)
     .where(eq(persons.user_id, userId))
@@ -758,8 +775,21 @@ export function getPersonDetailsLogic(userId: number, personId: number): PersonD
   if (!person) throw new Error("Person not found");
 
   const faceRows = db
-    .select()
+    .select({
+      id: faces.id,
+      user_id: faces.user_id,
+      photo_id: faces.photo_id,
+      bbox: faces.bbox,
+      embedding: faces.embedding,
+      person_id: faces.person_id,
+      quality: faces.quality,
+      created_at: faces.created_at,
+      filename: photos.filename,
+      original_name: photos.original_name,
+      taken_at: photos.taken_at,
+    })
     .from(faces)
+    .innerJoin(photos, eq(faces.photo_id, photos.id))
     .where(and(eq(faces.person_id, personId), eq(faces.user_id, userId)))
     .all();
 
@@ -779,6 +809,14 @@ export function getPersonDetailsLogic(userId: number, personId: number): PersonD
       person_id: r.person_id ?? undefined,
       quality: r.quality ?? undefined,
       created_at: r.created_at ?? "",
+      photo: {
+        id: r.photo_id,
+        user_id: r.user_id,
+        filename: r.filename,
+        original_name: r.original_name,
+        taken_at: r.taken_at ?? undefined,
+        created_at: "", // Not strictly needed here, but part of the type
+      },
     })),
   };
 }
@@ -797,9 +835,9 @@ export function updatePersonLogic(userId: number, personId: number, name: string
       cover_face_id: persons.cover_face_id,
       created_at: persons.created_at,
       updated_at: persons.updated_at,
-      faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM ${faces} f WHERE f.${faces.person_id} = ${persons.id}), 0) AS INTEGER)`,
-      cover_filename: sql<string>`COALESCE((SELECT p.${photos.filename} FROM ${photos} p INNER JOIN ${faces} f ON f.${faces.photo_id} = p.${photos.id} WHERE f.${faces.id} = ${persons.cover_face_id} LIMIT 1), '')`,
-      cover_bbox: sql<string>`COALESCE((SELECT f.${faces.bbox} FROM ${faces} f WHERE f.${faces.id} = ${persons.cover_face_id} LIMIT 1), '')`,
+      faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM faces f WHERE f.person_id = persons.id), 0) AS INTEGER)`,
+      cover_filename: sql<string>`COALESCE((SELECT p.filename FROM photos p INNER JOIN faces f ON f.photo_id = p.id WHERE f.id = persons.cover_face_id LIMIT 1), '')`,
+      cover_bbox: sql<string>`COALESCE((SELECT f.bbox FROM faces f WHERE f.id = persons.cover_face_id LIMIT 1), '')`,
     })
     .from(persons)
     .where(eq(persons.id, personId))
@@ -855,16 +893,45 @@ export async function reindexAllPhotosLogic(userId: number): Promise<{ count: nu
 
   console.log(`Starting re-index for ${allPhotos.length} photos for user ${userId}`);
 
-  // Process in background
-  for (const p of allPhotos) {
-    indexPhotoFaces(userId, p.id).catch((err) => {
-      if (err.message && err.message.includes("FACE_MODELS_NOT_LOADED")) {
+  // Process sequentially in background to avoid race conditions
+  // (concurrent processing deletes all faces before new ones are created,
+  //  breaking person matching)
+  (async () => {
+    let processed = 0;
+    let errors = 0;
+    for (const p of allPhotos) {
+      try {
+        await indexPhotoFaces(userId, p.id);
+        processed++;
+      } catch (err: any) {
+        errors++;
+        if (err.message && err.message.includes("FACE_MODELS_NOT_LOADED")) {
           console.error(`Skipping reindex for photo ${p.id}: Modelle nicht geladen.`);
-      } else {
+        } else {
           console.error(`Error reindexing photo ${p.id}:`, err);
+        }
       }
-    });
-  }
+    }
+    // Clean up orphaned persons (persons with 0 associated faces)
+    cleanupOrphanedPersons(userId);
+    console.log(`Re-index complete for user ${userId}: ${processed} processed, ${errors} errors, orphaned persons cleaned up.`);
+  })();
 
   return { count: allPhotos.length };
 }
+
+/**
+ * Remove persons that have no associated faces (orphaned after re-indexing).
+ */
+function cleanupOrphanedPersons(userId: number): void {
+  const deleted = db.delete(persons)
+    .where(
+      and(
+        eq(persons.user_id, userId),
+        sql`NOT EXISTS (SELECT 1 FROM faces WHERE faces.person_id = persons.id)`
+      )
+    )
+    .run();
+  console.log(`Cleaned up ${deleted.changes} orphaned persons for user ${userId}`);
+}
+
