@@ -20,6 +20,19 @@ const canUpload = computed(() => auth.hasPermission('photos.upload'))
 const canDelete = computed(() => auth.hasPermission('photos.delete'))
 const canRefreshMetadata = computed(() => auth.hasPermission('photos.refresh_metadata'))
 
+const formatPhotoDate = (photo: Photo) => {
+  const dateStr = photo.taken_at || photo.created_at;
+  if (!dateStr) return '';
+  const date = new Date(dateStr);
+  return new Intl.DateTimeFormat(navigator.language, {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(date);
+};
+
 const refreshingMetadata = ref(false)
 const refreshProgress = ref(0)
 const refreshTotal = ref(0)
@@ -367,7 +380,10 @@ onUnmounted(() => {
         <HeicImage :src="getPhotoUrl(photos[selectedIndex].filename)" :alt="photos[selectedIndex].original_name" objectFit="contain" />
         <div class="fullscreen-nav">
             <Button icon="pi pi-chevron-left" rounded text @click="selectedIndex > 0 && selectedIndex--" :disabled="selectedIndex === 0" />
-            <div class="fullscreen-title">{{ photos[selectedIndex].original_name }}</div>
+            <div class="fullscreen-info">
+              <div class="fullscreen-title">{{ photos[selectedIndex].original_name }}</div>
+              <div class="fullscreen-date">{{ formatPhotoDate(photos[selectedIndex]) }}</div>
+            </div>
             <Button icon="pi pi-chevron-right" rounded text @click="selectedIndex < photos.length - 1 && selectedIndex++" :disabled="selectedIndex === photos.length - 1" />
         </div>
         <Button icon="pi pi-times" class="close-btn" rounded severity="secondary" @click="isFullscreen = false" />
@@ -613,14 +629,28 @@ onUnmounted(() => {
     color: white;
 }
 
+.fullscreen-info {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+}
+
 .fullscreen-title {
     font-size: 1.1rem;
+    font-weight: 500;
+}
+
+.fullscreen-date {
+    font-size: 0.9rem;
+    opacity: 0.8;
 }
 
 .close-btn {
   position: absolute;
-  top: 0;
-  right: -3rem;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 10;
 }
 
 @media (max-width: 640px) {
@@ -628,8 +658,8 @@ onUnmounted(() => {
     grid-template-columns: repeat(2, 1fr);
   }
   .close-btn {
-    right: 0;
-    top: -3rem;
+    right: 0.5rem;
+    top: 0.5rem;
   }
 }
 </style>
