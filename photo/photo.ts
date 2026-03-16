@@ -15,6 +15,12 @@ import type {
   ListAlbumsResponse,
   ListPhotosResponse,
   DeleteResponse,
+  Person,
+  Face,
+  ListPersonsResponse,
+  PersonDetails,
+  MergePersonsRequest,
+  AssignFaceRequest,
 } from "../db/types";
 
 // Helper to get userId as number
@@ -172,6 +178,13 @@ export const getPhotoFile = api.raw(
 
       res.setHeader("Content-Type", mimeType);
       res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      
+      const widthStr = url.searchParams.get("w");
+      if (widthStr && ENABLE_LOCAL_FACES) {
+          // Implement simple thumbnail resizing if canvas is available
+          // For now just serve original to keep it simple, but we could add it here
+      }
+      
       fs.createReadStream(filePath).pipe(res);
     } catch (err: any) {
       console.error("Error serving photo file:", err);
@@ -180,6 +193,8 @@ export const getPhotoFile = api.raw(
     }
   }
 );
+
+const ENABLE_LOCAL_FACES = process.env.ENABLE_LOCAL_FACES === "true";
 
 // ---------- Albums ----------
 
@@ -267,5 +282,91 @@ export const shareAlbum = api(
     checkModule();
     const userId = getUserId();
     return service.shareAlbumLogic(userId, req);
+  }
+);
+
+// ---------- People & Faces ----------
+
+/**
+ * List all persons owned by the user.
+ */
+export const listPersons = api(
+  { expose: true, method: "GET", path: "/persons", auth: true },
+  async (): Promise<ListPersonsResponse> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "people.view");
+    return service.listPersonsLogic(userId);
+  }
+);
+
+/**
+ * Get person details with their faces.
+ */
+export const getPersonDetails = api(
+  { expose: true, method: "GET", path: "/persons/:id", auth: true },
+  async ({ id }: { id: number }): Promise<PersonDetails> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "people.view");
+    return service.getPersonDetailsLogic(userId, id);
+  }
+);
+
+/**
+ * Update person (rename).
+ */
+export const updatePerson = api(
+  { expose: true, method: "PATCH", path: "/persons/:id", auth: true },
+  async ({ id, name }: { id: number; name: string }): Promise<Person & { faceCount: number }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "people.edit");
+    return service.updatePersonLogic(userId, id, name);
+  }
+);
+
+/**
+ * Merge multiple persons into one.
+ */
+export const mergePersons = api(
+  { expose: true, method: "POST", path: "/persons/merge", auth: true },
+  async (req: MergePersonsRequest): Promise<{ success: boolean }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "people.edit");
+    return service.mergePersonsLogic(userId, req);
+  }
+);
+
+/**
+ * Assign a face to a person.
+ */
+export const assignFaceToPerson = api(
+  { expose: true, method: "POST", path: "/faces/:faceId/assign", auth: true },
+  async ({ faceId, personId }: AssignFaceRequest): Promise<{ success: boolean }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "people.edit");
+    return service.assignFaceToPersonLogic(userId, faceId, personId);
+  }
+);
+
+/**
+ * Reindex all photos (background job).
+ */
+export const reindexAllPhotos = api(
+  { expose: true, method: "POST", path: "/photos/reindex-all", auth: true },
+  async (): Promise<{ count: number }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.refresh_metadata");
+    return service.reindexAllPhotosLogic(userId);
   }
 );
