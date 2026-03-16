@@ -22,7 +22,7 @@ async function handleRegister() {
   loading.value = true
   try {
     await auth.register(email.value, name.value, password.value)
-    router.push('/users')
+    router.push('/photos')
   } catch (err: any) {
     error.value = err.message || 'Registrierung fehlgeschlagen'
   } finally {
