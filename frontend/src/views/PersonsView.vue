@@ -8,6 +8,7 @@ import HeicImage from '../components/HeicImage.vue'
 import { listPersons, updatePerson, mergePersons, getPhotoUrl, listPhotos, reindexAllPhotos, getPersonDetails, type Person, type Photo, type PersonDetails } from '../api/photos'
 
 const persons = ref<Person[]>([])
+const enableLocalFaces = ref(true)
 const loading = ref(true)
 const error = ref('')
 
@@ -42,6 +43,7 @@ async function loadData() {
   error.value = ''
   try {
     const res = await listPersons()
+    enableLocalFaces.value = res.enableLocalFaces
     // Filter out persons with 0 faces (orphans) to keep the list clean
     // Some backend databases might return faceCount as string, ensure it's a number
     persons.value = res.persons.filter(p => {
@@ -230,7 +232,7 @@ onUnmounted(() => {
           </div>
           <div class="flex gap-4">
               <Button v-if="selectedPersonDetail" icon="pi pi-pencil" label="Umbenennen" class="p-button-outlined" @click="openRename(selectedPersonDetail)" />
-              <Button icon="pi pi-images" label="Alle neu scannen" class="p-button-outlined" @click="handleReindex" :disabled="reindexing" />
+              <Button icon="pi pi-images" label="Alle neu scannen" class="p-button-outlined" @click="handleReindex" :disabled="reindexing || !enableLocalFaces" :tooltip="!enableLocalFaces ? 'Lokale Gesichtserkennung ist deaktiviert' : ''" />
               <Button icon="pi pi-refresh" label="Aktualisieren" @click="loadData" :loading="loading" :disabled="reindexing" />
           </div>
       </div>

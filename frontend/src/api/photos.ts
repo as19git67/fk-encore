@@ -87,6 +87,7 @@ export interface Person {
 
 export interface ListPersonsResponse {
   persons: Person[]
+  enableLocalFaces: boolean
 }
 
 export interface PersonDetails extends Person {

@@ -69,7 +69,7 @@ export const MODEL_DIR = path.resolve(process.env.FACE_MODEL_DIR || "data/models
 // Lower value = stricter matching (fewer false positives, more separate persons)
 // Higher value = looser matching (more false positives, fewer persons)
 const FACE_DISTANCE_THRESHOLD = parseFloat(process.env.FACE_DISTANCE_THRESHOLD || "0.6");
-const ENABLE_LOCAL_FACES = process.env.ENABLE_LOCAL_FACES === "true";
+export const ENABLE_LOCAL_FACES = process.env.ENABLE_LOCAL_FACES === "true";
 
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -763,6 +763,7 @@ export function listPersonsLogic(userId: number): ListPersonsResponse {
       cover_filename: r.cover_filename ?? undefined,
       cover_bbox: r.cover_bbox ? JSON.parse(r.cover_bbox) : undefined,
     })),
+    enableLocalFaces: ENABLE_LOCAL_FACES,
   };
 }
 
