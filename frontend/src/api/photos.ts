@@ -58,6 +58,13 @@ export function refreshPhotoMetadata(id: number) {
   })
 }
 
+export function updatePhotoDate(id: number, taken_at: string) {
+  return apiFetch<{ success: boolean; taken_at: string }>(`/photos/${id}/date`, {
+    method: 'PATCH',
+    body: JSON.stringify({ taken_at })
+  })
+}
+
 // ---------- People & Faces ----------
 
 export interface FaceBBox { x: number; y: number; width: number; height: number }

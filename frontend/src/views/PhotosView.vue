@@ -4,8 +4,9 @@ import Button from 'primevue/button'
 import FileUpload from 'primevue/fileupload'
 import Message from 'primevue/message'
 import ProgressBar from 'primevue/progressbar'
+import DatePicker from 'primevue/datepicker'
 import HeicImage from '../components/HeicImage.vue'
-import { listPhotos, uploadPhoto, deletePhoto, getPhotoUrl, getPhotosToRefreshMetadata, refreshPhotoMetadata, type Photo } from '../api/photos'
+import { listPhotos, uploadPhoto, deletePhoto, getPhotoUrl, getPhotosToRefreshMetadata, refreshPhotoMetadata, updatePhotoDate, type Photo } from '../api/photos'
 import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
@@ -34,6 +35,11 @@ const formatPhotoDate = (photo: Photo) => {
 };
 
 const refreshingMetadata = ref(false)
+const isDragging = ref(false)
+const dragCounter = ref(0)
+const isEditingDate = ref(false)
+const editDate = ref<Date | null>(null)
+const updatingDate = ref(false)
 const refreshProgress = ref(0)
 const refreshTotal = ref(0)
 const refreshCurrent = ref(0)
@@ -85,7 +91,11 @@ async function loadPhotos() {
   error.value = ''
   try {
     const res = await listPhotos()
-    photos.value = res.photos
+    photos.value = res.photos.sort((a, b) => {
+      const dateA = new Date(a.taken_at || a.created_at).getTime();
+      const dateB = new Date(b.taken_at || b.created_at).getTime();
+      return dateB - dateA;
+    });
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Fotos'
   } finally {
@@ -101,7 +111,15 @@ function scrollToSection(id: string) {
 }
 
 async function handleUpload(event: any) {
-  const files = event.files
+  let files: any[] = []
+  if (event.files) {
+    files = event.files
+  } else if (event instanceof FileList) {
+    files = Array.from(event)
+  } else if (event.dataTransfer) {
+    files = Array.from(event.dataTransfer.files)
+  }
+
   if (!files || files.length === 0) return
   
   uploading.value = true
@@ -192,7 +210,72 @@ async function handleRefreshMetadata() {
   }
 }
 
+function startEditingDate() {
+  const photo = photos.value[selectedIndex.value]
+  if (!photo) return
+  editDate.value = new Date(photo.taken_at || photo.created_at)
+  isEditingDate.value = true
+}
+
+async function handleUpdateDate() {
+  if (!editDate.value || selectedIndex.value === -1) return
+  
+  const photo = photos.value[selectedIndex.value]
+  updatingDate.value = true
+  try {
+    // Convert to ISO string for backend
+    const takenAt = editDate.value.toISOString()
+    await updatePhotoDate(photo.id, takenAt)
+    
+    // Update local photo object
+    photo.taken_at = takenAt
+    isEditingDate.value = false
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Aktualisieren des Datums'
+  } finally {
+    updatingDate.value = false
+  }
+}
+
+function handleDragEnter(e: DragEvent) {
+  if (!canUpload.value) return
+  e.preventDefault()
+  dragCounter.value++
+  isDragging.value = true
+}
+
+function handleDragLeave(e: DragEvent) {
+  if (!canUpload.value) return
+  e.preventDefault()
+  dragCounter.value--
+  if (dragCounter.value === 0) {
+    isDragging.value = false
+  }
+}
+
+function handleDragOver(e: DragEvent) {
+  if (!canUpload.value) return
+  e.preventDefault()
+  if (e.dataTransfer) {
+    e.dataTransfer.dropEffect = 'copy'
+  }
+}
+
+async function handleDrop(e: DragEvent) {
+  if (!canUpload.value) return
+  e.preventDefault()
+  isDragging.value = false
+  dragCounter.value = 0
+  
+  const files = e.dataTransfer?.files
+  if (files && files.length > 0) {
+    await handleUpload(files)
+  }
+}
+
 function handleKeydown(e: KeyboardEvent) {
+  if (isEditingDate.value) return
+
   if (isFullscreen.value) {
     if (e.key === 'Escape' || e.key === ' ') {
       isFullscreen.value = false
@@ -236,6 +319,7 @@ function handleKeydown(e: KeyboardEvent) {
 }
 
 watch(selectedIndex, (newIdx) => {
+  isEditingDate.value = false
   if (newIdx === -1 || isFullscreen.value) return
   nextTick(() => {
     const el = document.querySelector('.photo-item.selected')
@@ -243,6 +327,10 @@ watch(selectedIndex, (newIdx) => {
       el.scrollIntoView({ behavior: 'auto', block: 'nearest' })
     }
   })
+})
+
+watch(isFullscreen, (val) => {
+  if (!val) isEditingDate.value = false
 })
 
 onMounted(() => {
@@ -275,7 +363,19 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="photos-view">
+  <div 
+    class="photos-view" 
+    @dragenter="handleDragEnter" 
+    @dragover="handleDragOver" 
+    @dragleave="handleDragLeave" 
+    @drop="handleDrop"
+  >
+    <div v-if="isDragging" class="drag-overlay">
+      <div class="drag-message">
+        <i class="pi pi-upload"></i>
+        <span>Fotos zum Hochladen hier ablegen</span>
+      </div>
+    </div>
     <div class="header">
       <h1>Meine Fotos</h1>
       <div class="actions">
@@ -327,7 +427,8 @@ onUnmounted(() => {
               :key="item.photo.id" 
               class="photo-item"
               :class="{ selected: item.index === selectedIndex }"
-              @click="selectedIndex = item.index; isFullscreen = true"
+              @click="selectedIndex = item.index"
+              @dblclick="isFullscreen = true"
             >
               <HeicImage :src="getPhotoUrl(item.photo.filename)" :alt="item.photo.original_name" loading="lazy" />
               <div class="photo-info">
@@ -368,6 +469,75 @@ onUnmounted(() => {
           </div>
         </div>
       </nav>
+
+      <div class="details-sidebar" v-if="selectedIndex !== -1">
+        <div class="sidebar-header">
+          <h3>Details</h3>
+          <Button icon="pi pi-times" text rounded size="small" @click="selectedIndex = -1" />
+        </div>
+        
+        <div class="sidebar-content">
+          <div class="preview-container" @click="isFullscreen = true" title="Klicken für Vollbild">
+            <HeicImage :src="getPhotoUrl(photos[selectedIndex].filename)" :alt="photos[selectedIndex].original_name" />
+            <div class="preview-overlay">
+              <i class="pi pi-expand"></i>
+            </div>
+          </div>
+          
+          <div class="info-group">
+            <label>Dateiname</label>
+            <div class="value">{{ photos[selectedIndex].original_name }}</div>
+          </div>
+          
+          <div class="info-group">
+            <label>Aufnahmedatum</label>
+            <div v-if="!isEditingDate" class="date-display">
+              <div class="value">{{ formatPhotoDate(photos[selectedIndex]) }}</div>
+              <Button 
+                v-if="canUpload"
+                icon="pi pi-pencil" 
+                text 
+                rounded 
+                size="small" 
+                @click="startEditingDate" 
+                class="edit-btn" 
+              />
+            </div>
+            <div v-else class="date-editor">
+              <DatePicker v-model="editDate" showTime hourFormat="24" fluid />
+              <div class="edit-actions">
+                <Button icon="pi pi-check" severity="success" text rounded @click="handleUpdateDate" :loading="updatingDate" />
+                <Button icon="pi pi-times" severity="danger" text rounded @click="isEditingDate = false" :disabled="updatingDate" />
+              </div>
+            </div>
+          </div>
+
+          <div class="info-group" v-if="photos[selectedIndex].size">
+            <label>Größe</label>
+            <div class="value">{{ (photos[selectedIndex].size / 1024 / 1024).toFixed(2) }} MB</div>
+          </div>
+
+          <div class="sidebar-actions">
+            <Button 
+              label="Vollbild" 
+              icon="pi pi-expand" 
+              @click="isFullscreen = true" 
+              class="w-full" 
+              severity="secondary"
+            />
+            
+            <Button 
+              v-if="canDelete"
+              label="Foto löschen" 
+              icon="pi pi-trash" 
+              @click="handleDelete(photos[selectedIndex].id)" 
+              class="w-full" 
+              severity="danger" 
+              text
+            />
+          </div>
+        </div>
+      </div>
     </div>
 
     <div v-if="isFullscreen && selectedIndex !== -1" class="fullscreen-overlay" @click="isFullscreen = false">
@@ -382,7 +552,9 @@ onUnmounted(() => {
             <Button icon="pi pi-chevron-left" rounded text @click="selectedIndex > 0 && selectedIndex--" :disabled="selectedIndex === 0" />
             <div class="fullscreen-info">
               <div class="fullscreen-title">{{ photos[selectedIndex].original_name }}</div>
-              <div class="fullscreen-date">{{ formatPhotoDate(photos[selectedIndex]) }}</div>
+              <div class="fullscreen-date">
+                {{ formatPhotoDate(photos[selectedIndex]) }}
+              </div>
             </div>
             <Button icon="pi pi-chevron-right" rounded text @click="selectedIndex < photos.length - 1 && selectedIndex++" :disabled="selectedIndex === photos.length - 1" />
         </div>
@@ -458,6 +630,120 @@ onUnmounted(() => {
   max-height: calc(100vh - 2rem);
   overflow-y: auto;
   z-index: 100;
+  flex-shrink: 0;
+}
+
+.details-sidebar {
+  position: sticky;
+  top: 1rem;
+  width: 300px;
+  background: var(--surface-card);
+  padding: 1.5rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  z-index: 90;
+  flex-shrink: 0;
+}
+
+.sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--surface-border);
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.sidebar-header h3 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.preview-container {
+  position: relative;
+  cursor: pointer;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+
+.preview-container :deep(.heic-image-container) {
+  height: 180px;
+  width: 100%;
+}
+
+.preview-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.3);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 0.2s;
+  color: white;
+  font-size: 1.5rem;
+}
+
+.preview-container:hover .preview-overlay {
+  opacity: 1;
+}
+
+.info-group {
+  margin-bottom: 1.25rem;
+}
+
+.info-group label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-color-secondary);
+  margin-bottom: 0.25rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.info-group .value {
+  font-size: 0.95rem;
+  word-break: break-all;
+  color: var(--text-color);
+}
+
+.date-display {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.date-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  background: var(--surface-ground);
+  border-radius: 6px;
+}
+
+.sidebar-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: auto;
+  padding-top: 1rem;
+}
+
+.w-full {
+  width: 100%;
 }
 
 .nav-year-group {
@@ -644,6 +930,33 @@ onUnmounted(() => {
 .fullscreen-date {
     font-size: 0.9rem;
     opacity: 0.8;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.edit-date-btn {
+  color: white !important;
+  opacity: 0.6;
+}
+
+.edit-date-btn:hover {
+  opacity: 1;
+}
+
+.date-edit-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.1);
+  padding: 0.5rem;
+  border-radius: 8px;
+}
+
+.edit-actions {
+  display: flex;
+  gap: 0.5rem;
 }
 
 .close-btn {
@@ -651,6 +964,38 @@ onUnmounted(() => {
   top: 0.5rem;
   right: 0.5rem;
   z-index: 10;
+}
+
+@media (max-width: 1200px) {
+  .details-sidebar {
+    width: 250px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .gallery-container {
+    flex-direction: column;
+  }
+  .timeline-nav {
+    width: 100%;
+    position: static;
+    max-height: none;
+    flex-direction: row;
+    overflow-x: auto;
+    padding: 0.5rem;
+  }
+  .nav-year-group {
+    flex-direction: row;
+    white-space: nowrap;
+  }
+  .nav-months {
+    flex-direction: row;
+  }
+  .details-sidebar {
+    width: 100%;
+    position: static;
+    max-height: none;
+  }
 }
 
 @media (max-width: 640px) {
@@ -661,5 +1006,43 @@ onUnmounted(() => {
     right: 0.5rem;
     top: 0.5rem;
   }
+}
+
+.drag-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 119, 255, 0.15);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  pointer-events: none;
+  border: 4px dashed var(--p-primary-color);
+  margin: 10px;
+  width: calc(100% - 20px);
+  height: calc(100% - 20px);
+  border-radius: 16px;
+}
+
+.drag-message {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  background: var(--surface-card);
+  padding: 2rem 3rem;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+  color: var(--p-primary-color);
+  font-size: 1.5rem;
+  font-weight: bold;
+}
+
+.drag-message i {
+  font-size: 3rem;
 }
 </style>

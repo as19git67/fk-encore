@@ -148,6 +148,21 @@ export const refreshPhotoMetadata = api(
 );
 
 /**
+ * Update the "taken at" date of a photo.
+ */
+export const updatePhotoDate = api(
+  { expose: true, method: "PATCH", path: "/photos/:id/date", auth: true },
+  async ({ id, taken_at }: { id: number; taken_at: string }): Promise<{ success: boolean; taken_at: string }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.upload");
+
+    return service.updatePhotoDateLogic(userId, id, taken_at);
+  }
+);
+
+/**
  * Serve a photo file.
  */
 export const getPhotoFile = api.raw(
