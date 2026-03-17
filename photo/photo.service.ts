@@ -30,13 +30,7 @@ import type {
   PersonDetails,
   MergePersonsRequest,
 } from "../db/types";
-import * as faceapi from "@vladmandic/face-api";
-import { Canvas, Image, loadImage } from "canvas";
 import heicConvert from "heic-convert";
-
-// Patch face-api for Node.js
-// @ts-ignore
-faceapi.env.monkeyPatch({ Canvas, Image });
 
 // Fix for newer Node.js versions (e.g. v24) where tfjs-node relies on removed util functions
 import * as util from "util";
@@ -64,32 +58,159 @@ if (!(util as any).isArray) {
 }
 
 export const UPLOAD_DIR = path.resolve(process.env.PHOTO_UPLOAD_DIR || "uploads/photos");
-export const MODEL_DIR = path.resolve(process.env.FACE_MODEL_DIR || "data/models");
-// Euclidean distance threshold for face matching (face-api.js standard: 0.6)
-// Lower value = stricter matching (fewer false positives, more separate persons)
-// Higher value = looser matching (more false positives, fewer persons)
-const FACE_DISTANCE_THRESHOLD = parseFloat(process.env.FACE_DISTANCE_THRESHOLD || "0.6");
+const INSIGHTFACE_SERVICE_URL = process.env.INSIGHTFACE_SERVICE_URL || "http://localhost:8000";
+
+// Distance threshold for face matching.
+// InsightFace uses cosine similarity (higher is better, 1.0 is identical).
+// We convert it to a "distance" if we want, or just use similarity directly.
+// The config value is now treated as minimum similarity for a match.
+const FACE_SIMILARITY_THRESHOLD = parseFloat(process.env.FACE_DISTANCE_THRESHOLD || "0.45");
 export const ENABLE_LOCAL_FACES = process.env.ENABLE_LOCAL_FACES === "true";
 
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
-if (!fs.existsSync(MODEL_DIR)) {
-    fs.mkdirSync(MODEL_DIR, { recursive: true });
+
+// ---------- People & Faces ----------
+
+async function callInsightFaceDetect(filePath: string): Promise<any[]> {
+  const formData = new FormData();
+  const fileData = await fs.promises.readFile(filePath);
+  const blob = new Blob([fileData], { type: 'image/jpeg' });
+  formData.append('file', blob, path.basename(filePath));
+
+  const response = await fetch(`${INSIGHTFACE_SERVICE_URL}/detect`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error(`InsightFace service returned ${response.status}: ${await response.text()}`);
+  }
+
+  const data = await response.json() as { faces: any[] };
+  return data.faces;
 }
 
-let modelsLoaded = false;
-async function ensureModelsLoaded() {
-    if (modelsLoaded) return;
+export async function indexPhotoFaces(userId: number, photoId: number): Promise<void> {
+  if (!ENABLE_LOCAL_FACES) {
+    console.log("Local face indexing is disabled via ENABLE_LOCAL_FACES=false");
+    return;
+  }
+
+  const photo = db
+    .select()
+    .from(photos)
+    .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+    .get();
+  if (!photo) return;
+
+  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  if (!fs.existsSync(filePath)) return;
+
+  let processingPath = filePath;
+  let tempPath: string | null = null;
+
+  // Check if it's a HEIC file
+  const ext = path.extname(photo.filename).toLowerCase();
+  if (ext === ".heic" || ext === ".heif") {
     try {
-        await faceapi.nets.ssdMobilenetv1.loadFromDisk(MODEL_DIR);
-        await faceapi.nets.faceLandmark68Net.loadFromDisk(MODEL_DIR);
-        await faceapi.nets.faceRecognitionNet.loadFromDisk(MODEL_DIR);
-        modelsLoaded = true;
+      const inputBuffer = await fs.promises.readFile(filePath);
+      const outputBuffer = await heicConvert({
+        buffer: inputBuffer,
+        format: 'JPEG',
+        quality: 1
+      });
+      tempPath = path.join(UPLOAD_DIR, `temp_${photoId}_${Date.now()}.jpg`);
+      await fs.promises.writeFile(tempPath, outputBuffer as Buffer);
+      processingPath = tempPath;
     } catch (err) {
-        console.error("Error loading face models from", MODEL_DIR, ":", err);
-        throw new Error("FACE_MODELS_NOT_LOADED: Bitte führen Sie './scripts/download_models.sh' aus, um die KI-Modelle herunterzuladen.");
+      console.error(`Error converting HEIC photo ${photoId}:`, err);
     }
+  }
+
+  try {
+    const facesDetected = await callInsightFaceDetect(processingPath);
+    console.log(`Detected ${facesDetected.length} faces in photo ${photoId}`);
+
+    // Remove existing faces for this photo
+    db.delete(faces).where(eq(faces.photo_id, photoId)).run();
+
+    for (const f of facesDetected) {
+      const bbox = {
+        x: f.bbox[0],
+        y: f.bbox[1],
+        width: f.bbox[2] - f.bbox[0],
+        height: f.bbox[3] - f.bbox[1],
+        isAbsolute: true 
+      };
+      const embedding = f.embedding;
+
+      // Find best matching person (using cosine similarity)
+      const match = await findBestPersonMatch(userId, embedding);
+
+      let personId = match?.personId;
+      if (!personId) {
+        // Create new person
+        const newPerson = db
+          .insert(persons)
+          .values({
+            user_id: userId,
+            name: "Unbenannt",
+          })
+          .returning()
+          .get();
+        personId = newPerson.id;
+      }
+
+      const faceResult = db.insert(faces)
+        .values({
+          user_id: userId,
+          photo_id: photoId,
+          bbox: JSON.stringify(bbox),
+          embedding: JSON.stringify(embedding),
+          person_id: personId,
+          quality: 100, 
+        })
+        .returning()
+        .get();
+
+      // Set cover_face_id if not set for person OR if it refers to a non-existent face
+      const currentPerson = db.select().from(persons).where(eq(persons.id, personId)).get();
+      let needsCoverUpdate = false;
+      if (currentPerson) {
+          if (!currentPerson.cover_face_id) {
+              needsCoverUpdate = true;
+          } else {
+              const coverFaceExists = db.select({ id: faces.id }).from(faces).where(eq(faces.id, currentPerson.cover_face_id)).get();
+              if (!coverFaceExists) {
+                  needsCoverUpdate = true;
+              }
+          }
+      }
+
+      if (needsCoverUpdate) {
+          db.update(persons).set({ 
+              cover_face_id: faceResult.id,
+              updated_at: sql`datetime('now')`
+          }).where(eq(persons.id, personId)).run();
+      } else {
+          db.update(persons).set({ 
+              updated_at: sql`datetime('now')`
+          }).where(eq(persons.id, personId)).run();
+      }
+    }
+  } catch (err) {
+    console.error(`Error indexing faces for photo ${photoId}:`, err);
+  } finally {
+    if (tempPath && fs.existsSync(tempPath)) {
+      try {
+        await fs.promises.unlink(tempPath);
+      } catch (e) {
+        // Ignore
+      }
+    }
+  }
 }
 
 async function getExifDate(filePath: string): Promise<string | null> {
@@ -166,11 +287,7 @@ export async function uploadPhotoStream(
   if (ENABLE_LOCAL_FACES) {
     // Run face detection in background
     indexPhotoFaces(userId, row.id).catch(err => {
-        if (err.message.includes("FACE_MODELS_NOT_LOADED")) {
-            console.error("Gesichtserkennung übersprungen: Modelle nicht geladen. Führen Sie ./scripts/download_models.sh aus.");
-        } else {
-            console.error("Face indexing error:", err);
-        }
+        console.error("Face indexing error:", err);
     });
   }
 
@@ -229,11 +346,7 @@ export async function uploadPhotoLogic(
   if (ENABLE_LOCAL_FACES) {
     // Run face detection in background
     indexPhotoFaces(userId, row.id).catch(err => {
-        if (err.message.includes("FACE_MODELS_NOT_LOADED")) {
-            console.error("Gesichtserkennung übersprungen: Modelle nicht geladen. Führen Sie ./scripts/download_models.sh aus.");
-        } else {
-            console.error("Face indexing error:", err);
-        }
+        console.error("Face indexing error:", err);
     });
   }
 
@@ -543,123 +656,6 @@ export function shareAlbumLogic(userId: number, req: ShareAlbumRequest): { succe
   return { success: true };
 }
 
-// ---------- People & Faces ----------
-
-export async function indexPhotoFaces(userId: number, photoId: number): Promise<void> {
-  if (!ENABLE_LOCAL_FACES) {
-    console.log("Local face indexing is disabled via ENABLE_LOCAL_FACES=false");
-    return;
-  }
-
-  const photo = db
-    .select()
-    .from(photos)
-    .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
-    .get();
-  if (!photo) return;
-
-  const filePath = path.join(UPLOAD_DIR, photo.filename);
-  if (!fs.existsSync(filePath)) return;
-
-  await ensureModelsLoaded();
-
-  let imgData: Buffer | string = filePath;
-
-  // Check if it's a HEIC file
-  const ext = path.extname(photo.filename).toLowerCase();
-  if (ext === ".heic" || ext === ".heif") {
-    try {
-      const inputBuffer = await fs.promises.readFile(filePath);
-      const outputBuffer = await heicConvert({
-        buffer: inputBuffer,
-        format: 'JPEG',
-        quality: 1
-      });
-      imgData = outputBuffer as Buffer;
-    } catch (err) {
-      console.error(`Error converting HEIC photo ${photoId}:`, err);
-      // Fallback to original path, though it will likely fail in loadImage
-    }
-  }
-
-  const img = await loadImage(imgData);
-  const detections = await faceapi
-    .detectAllFaces(img as any)
-    .withFaceLandmarks()
-    .withFaceDescriptors();
-
-  console.log(`Detected ${detections.length} faces in photo ${photoId}`);
-
-  // Remove existing faces for this photo
-  db.delete(faces).where(eq(faces.photo_id, photoId)).run();
-
-  for (const det of detections) {
-    const bbox = {
-      x: det.detection.relativeBox.x,
-      y: det.detection.relativeBox.y,
-      width: det.detection.relativeBox.width,
-      height: det.detection.relativeBox.height,
-    };
-    const embedding = Array.from(det.descriptor);
-
-    // Find best matching person (using Euclidean distance, threshold from FACE_DISTANCE_THRESHOLD)
-    const match = await findBestPersonMatch(userId, embedding);
-
-    let personId = match?.personId;
-    if (!personId) {
-      // Create new person
-      const newPerson = db
-        .insert(persons)
-        .values({
-          user_id: userId,
-          name: "Unbenannt",
-        })
-        .returning()
-        .get();
-      personId = newPerson.id;
-    }
-
-    const faceResult = db.insert(faces)
-      .values({
-        user_id: userId,
-        photo_id: photoId,
-        bbox: JSON.stringify(bbox),
-        embedding: JSON.stringify(embedding),
-        person_id: personId,
-        quality: Math.round(det.detection.score * 100),
-      })
-      .returning()
-      .get();
-
-    // Set cover_face_id if not set for person OR if it refers to a non-existent face
-    const currentPerson = db.select().from(persons).where(eq(persons.id, personId)).get();
-    let needsCoverUpdate = false;
-    if (currentPerson) {
-        if (!currentPerson.cover_face_id) {
-            needsCoverUpdate = true;
-        } else {
-            // Check if the current cover_face_id still exists in the faces table
-            const coverFaceExists = db.select({ id: faces.id }).from(faces).where(eq(faces.id, currentPerson.cover_face_id)).get();
-            if (!coverFaceExists) {
-                needsCoverUpdate = true;
-            }
-        }
-    }
-
-    if (needsCoverUpdate) {
-        db.update(persons).set({ 
-            cover_face_id: faceResult.id,
-            updated_at: sql`datetime('now')`
-        }).where(eq(persons.id, personId)).run();
-    } else {
-        // Still update updated_at to show activity
-        db.update(persons).set({ 
-            updated_at: sql`datetime('now')`
-        }).where(eq(persons.id, personId)).run();
-    }
-  }
-}
-
 async function findBestPersonMatch(
   userId: number,
   embedding: number[]
@@ -687,15 +683,12 @@ async function findBestPersonMatch(
   for (const [personIdStr, embeddings] of Object.entries(personEmbeddings)) {
     const personId = parseInt(personIdStr);
 
-    // Compare against the centroid (mean embedding) of this person.
-    // This prevents chain-matching where a cluster gradually drifts
-    // to include very different faces through intermediate matches.
     const centroid = computeCentroid(embeddings);
-    const dist = euclideanDistance(embedding, centroid);
+    const similarity = cosineSimilarity(embedding, centroid);
 
-    if (dist < FACE_DISTANCE_THRESHOLD) {
-      if (!bestMatch || dist < bestMatch.distance) {
-        bestMatch = { personId, distance: dist };
+    if (similarity > FACE_SIMILARITY_THRESHOLD) {
+      if (!bestMatch || similarity > bestMatch.distance) {
+        bestMatch = { personId, distance: similarity };
       }
     }
   }
@@ -721,16 +714,19 @@ function computeCentroid(embeddings: number[][]): number[] {
 }
 
 /**
- * Euclidean distance between two face descriptor vectors.
- * face-api.js uses this metric: distance < 0.6 typically means same person.
+ * Cosine similarity between two vectors.
  */
-function euclideanDistance(v1: number[], v2: number[]): number {
-  let sum = 0;
+function cosineSimilarity(v1: number[], v2: number[]): number {
+  let dotProduct = 0;
+  let norm1 = 0;
+  let norm2 = 0;
   for (let i = 0; i < v1.length; i++) {
-    const diff = v1[i] - v2[i];
-    sum += diff * diff;
+    dotProduct += v1[i] * v2[i];
+    norm1 += v1[i] * v1[i];
+    norm2 += v2[i] * v2[i];
   }
-  return Math.sqrt(sum);
+  if (norm1 === 0 || norm2 === 0) return 0;
+  return dotProduct / (Math.sqrt(norm1) * Math.sqrt(norm2));
 }
 
 export function listPersonsLogic(userId: number): ListPersonsResponse {

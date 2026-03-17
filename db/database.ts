@@ -1,8 +1,21 @@
 import Database from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import { config } from "dotenv";
 import path from "path";
 import fs from "fs";
-import "dotenv/config";
+
+// Load .env from project root
+const rootDir = process.cwd();
+const envPath = path.resolve(rootDir, ".env");
+if (fs.existsSync(envPath)) {
+  config({ path: envPath });
+} else {
+  // Try one level up if we are inside a subdirectory (e.g. during build/test)
+  const altEnvPath = path.resolve(rootDir, "..", ".env");
+  if (fs.existsSync(altEnvPath)) {
+    config({ path: altEnvPath });
+  }
+}
 import * as schema from "./schema";
 import { seed } from "./seed";
 

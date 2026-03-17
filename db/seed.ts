@@ -138,7 +138,7 @@ export function seed(db: BetterSQLite3Database<typeof schema>): void {
   if (!adminPassword) {
     console.warn(
       "[seed] ADMIN_PASSWORD not set — skipping initial admin user creation. " +
-        "Set ADMIN_PASSWORD environment variable to create the admin user."
+        "Make sure to set it in your .env file."
     );
     return;
   }
