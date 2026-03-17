@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 import exifr from "exifr";
+import { exiftool } from "exiftool-vendored";
 import { eq, and, or, sql, inArray } from "drizzle-orm";
 import db from "../db/database";
 import type { IncomingMessage } from "http";
@@ -447,6 +448,57 @@ export async function refreshPhotoMetadataLogic(userId: number, photoId: number)
     .run();
 
   return { success: true, taken_at: takenAt ?? undefined };
+}
+
+export async function updatePhotoDateLogic(
+  userId: number,
+  photoId: number,
+  takenAt: string
+): Promise<{ success: boolean; taken_at: string }> {
+  const photo = db
+    .select()
+    .from(photos)
+    .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+    .get();
+
+  if (!photo) {
+    throw new Error("Photo not found or unauthorized");
+  }
+
+  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  if (!fs.existsSync(filePath)) {
+    throw new Error("File not found on disk");
+  }
+
+  // 1. Update database
+  db.update(photos)
+    .set({ taken_at: takenAt })
+    .where(eq(photos.id, photoId))
+    .run();
+
+  // 2. Update file metadata
+  try {
+    const date = new Date(takenAt);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    const formattedDate = `${year}:${month}:${day} ${hours}:${minutes}:${seconds}`;
+
+    // Write to multiple tags to ensure compatibility
+    await exiftool.write(filePath, {
+      DateTimeOriginal: formattedDate,
+      CreateDate: formattedDate,
+      ModifyDate: formattedDate,
+    }, ["-overwrite_original"]);
+  } catch (err) {
+    console.error("Error updating EXIF data with exiftool:", err);
+    // Don't throw error if DB update succeeded, but log it
+  }
+
+  return { success: true, taken_at: takenAt };
 }
 
 export function getPhotoFileLogic(filename: string): { data: string; mimeType: string } {
