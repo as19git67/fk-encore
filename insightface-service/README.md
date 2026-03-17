@@ -1,4 +1,5 @@
-# Docker engine on macos
+# Build and run the service using Docker Compose
 
-```brew install docker colima```
-```colima start```
+```
+docker-compose up --build
+```
