@@ -73,7 +73,7 @@ if (!fs.existsSync(UPLOAD_DIR)) {
 
 // ---------- People & Faces ----------
 
-async function callInsightFaceDetect(filePath: string): Promise<any[]> {
+async function callInsightFaceDetect(filePath: string): Promise<{ faces: any[], width: number, height: number }> {
   const formData = new FormData();
   const fileData = await fs.promises.readFile(filePath);
   const blob = new Blob([fileData], { type: 'image/jpeg' });
@@ -88,8 +88,8 @@ async function callInsightFaceDetect(filePath: string): Promise<any[]> {
     throw new Error(`InsightFace service returned ${response.status}: ${await response.text()}`);
   }
 
-  const data = await response.json() as { faces: any[] };
-  return data.faces;
+  const data = await response.json() as { faces: any[], width: number, height: number };
+  return data;
 }
 
 export async function indexPhotoFaces(userId: number, photoId: number): Promise<void> {
@@ -130,19 +130,23 @@ export async function indexPhotoFaces(userId: number, photoId: number): Promise<
   }
 
   try {
-    const facesDetected = await callInsightFaceDetect(processingPath);
-    console.log(`Detected ${facesDetected.length} faces in photo ${photoId}`);
+    const detectResult = await callInsightFaceDetect(processingPath);
+    const facesDetected = detectResult.faces;
+    const imgWidth = detectResult.width;
+    const imgHeight = detectResult.height;
+    
+    console.log(`Detected ${facesDetected.length} faces in photo ${photoId} (size: ${imgWidth}x${imgHeight})`);
 
     // Remove existing faces for this photo
     db.delete(faces).where(eq(faces.photo_id, photoId)).run();
 
     for (const f of facesDetected) {
+      // Normalize bbox to 0..1 relative values
       const bbox = {
-        x: f.bbox[0],
-        y: f.bbox[1],
-        width: f.bbox[2] - f.bbox[0],
-        height: f.bbox[3] - f.bbox[1],
-        isAbsolute: true 
+        x: f.bbox[0] / imgWidth,
+        y: f.bbox[1] / imgHeight,
+        width: (f.bbox[2] - f.bbox[0]) / imgWidth,
+        height: (f.bbox[3] - f.bbox[1]) / imgHeight
       };
       const embedding = f.embedding;
 
@@ -854,21 +858,52 @@ export function updatePersonLogic(userId: number, personId: number, name: string
 }
 
 export function mergePersonsLogic(userId: number, req: MergePersonsRequest): { success: boolean } {
+  const targetId = req.targetId;
+  const sourceIds = req.sourceIds.filter(id => id !== targetId);
+
+  if (sourceIds.length === 0) {
+    return { success: true };
+  }
+
   const target = db
     .select()
     .from(persons)
-    .where(and(eq(persons.id, req.targetId), eq(persons.user_id, userId)))
+    .where(and(eq(persons.id, targetId), eq(persons.user_id, userId)))
     .get();
   if (!target) throw new Error("Target person not found");
 
-  for (const sourceId of req.sourceIds) {
-    if (sourceId === req.targetId) continue;
-    db.update(faces)
-      .set({ person_id: req.targetId })
-      .where(and(eq(faces.person_id, sourceId), eq(faces.user_id, userId)))
-      .run();
-    db.delete(persons).where(and(eq(persons.id, sourceId), eq(persons.user_id, userId))).run();
+  // Move all faces from source persons to target person
+  db.update(faces)
+    .set({ person_id: targetId })
+    .where(and(inArray(faces.person_id, sourceIds), eq(faces.user_id, userId)))
+    .run();
+
+  // Update target person's cover face if it doesn't have one
+  if (!target.cover_face_id) {
+    const firstFace = db
+      .select({ id: faces.id })
+      .from(faces)
+      .where(and(eq(faces.person_id, targetId), eq(faces.user_id, userId)))
+      .limit(1)
+      .get();
+    if (firstFace) {
+      db.update(persons)
+        .set({ cover_face_id: firstFace.id })
+        .where(eq(persons.id, targetId))
+        .run();
+    }
   }
+
+  // Set updated_at for target person
+  db.update(persons)
+    .set({ updated_at: sql`datetime('now')` })
+    .where(eq(persons.id, targetId))
+    .run();
+
+  // Delete source persons
+  db.delete(persons)
+    .where(and(inArray(persons.id, sourceIds), eq(persons.user_id, userId)))
+    .run();
 
   return { success: true };
 }

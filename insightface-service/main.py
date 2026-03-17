@@ -49,6 +49,7 @@ async def verify(file1: UploadFile = File(...), file2: UploadFile = File(...)):
 @app.post("/detect")
 async def detect(file: UploadFile = File(...)):
     img = read_image(file)
+    height, width, _ = img.shape
     faces = app_state.get(img)
 
     result = []
@@ -59,4 +60,8 @@ async def detect(file: UploadFile = File(...)):
             "embedding": f.embedding.tolist()
         })
 
-    return {"faces": result}
+    return {
+        "faces": result,
+        "width": width,
+        "height": height
+    }
