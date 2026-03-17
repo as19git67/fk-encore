@@ -5,7 +5,7 @@ import Message from 'primevue/message'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import HeicImage from '../components/HeicImage.vue'
-import { listPersons, updatePerson, mergePersons, getPhotoUrl, listPhotos, reindexAllPhotos, getPersonDetails, type Person, type Photo, type PersonDetails } from '../api/photos'
+import { listPersons, updatePerson, mergePersons, getPhotoUrl, reindexAllPhotos, getPersonDetails, type Person, type Photo, type PersonDetails } from '../api/photos'
 
 const persons = ref<Person[]>([])
 const enableLocalFaces = ref(true)
@@ -34,6 +34,54 @@ const newName = ref('')
 const showMergeDialog = ref(false)
 const mergeSourceIds = ref<number[]>([])
 const mergeTargetId = ref<number | null>(null)
+
+const selectedPersonIds = ref<number[]>([])
+const multiSelectMode = ref(false)
+
+function toggleSelect(id: number) {
+    if (!multiSelectMode.value) return
+    const index = selectedPersonIds.value.indexOf(id)
+    if (index === -1) {
+        selectedPersonIds.value.push(id)
+    } else {
+        selectedPersonIds.value.splice(index, 1)
+    }
+}
+
+function startMultiSelect(id: number) {
+    multiSelectMode.value = true
+    selectedPersonIds.value = [id]
+}
+
+function cancelMultiSelect() {
+    multiSelectMode.value = false
+    selectedPersonIds.value = []
+}
+
+function openMergeDialog() {
+    if (selectedPersonIds.value.length < 2) return
+    mergeSourceIds.value = [...selectedPersonIds.value]
+    // Default target: first selected (can be changed in dialog)
+    mergeTargetId.value = mergeSourceIds.value[0]
+    showMergeDialog.value = true
+}
+
+async function handleMerge() {
+    if (!mergeTargetId.value || mergeSourceIds.value.length < 2) return
+    
+    // sourceIds for backend should not include targetId (backend handles it anyway, but cleaner)
+    const sources = mergeSourceIds.value.filter(id => id !== mergeTargetId.value)
+    
+    try {
+        await mergePersons(sources, mergeTargetId.value)
+        showMergeDialog.value = false
+        multiSelectMode.value = false
+        selectedPersonIds.value = []
+        await loadData()
+    } catch (err: any) {
+        error.value = err.message || 'Fehler beim Zusammenführen'
+    }
+}
 
 const reindexing = ref(false)
 let reindexInterval: any = null
@@ -66,8 +114,7 @@ async function openPersonDetails(person: Person) {
     loadingDetails.value = true
     error.value = ''
     try {
-        const details = await getPersonDetails(person.id)
-        selectedPersonDetail.value = details
+        selectedPersonDetail.value = await getPersonDetails(person.id)
     } catch (err: any) {
         error.value = err.message || 'Fehler beim Laden der Details'
     } finally {
@@ -160,8 +207,13 @@ function getCoverUrl(person: Person) {
 function getFaceStyle(person: Person | { cover_bbox?: any }) {
     if (!person.cover_bbox) return {}
     
-    // cover_bbox values are relative (0..1)
+    // cover_bbox values should be relative (0..1)
     const { x, y, width, height } = person.cover_bbox
+    
+    // If we have absolute values (likely old data), fallback to cover
+    if (x > 1.1 || y > 1.1 || width > 1.1 || height > 1.1) {
+        return { objectFit: 'cover' }
+    }
     
     // We want to center the face. 
     // The center of the face in relative coordinates:
@@ -179,6 +231,36 @@ function getFaceStyle(person: Person | { cover_bbox?: any }) {
         objectFit: 'cover',
         display: 'block'
     }
+}
+
+function getFaceHighlightStyle(bbox: any, isGridItem: boolean = false) {
+    if (!bbox || isGridItem) return { display: 'none' }
+    
+    // bbox values should be relative (0..1)
+    // If they are > 1, they are likely old absolute pixel values (e.g. 2793)
+    // In that case, we can't display them correctly without image dimensions.
+    // We cap them to avoid UI explosion (like 279345%).
+    const { x, y, width, height } = bbox
+    
+    // Check if values are likely absolute pixel values
+    const isAbsolute = x > 1.1 || y > 1.1 || width > 1.1 || height > 1.1
+    
+    if (isAbsolute) {
+        // Return a dummy style or something that indicates an error
+        // But better to just not show it or try to guess if it's very large
+        return { display: 'none' }
+    }
+    
+    const style: any = {
+        left: `${x * 100}%`,
+        top: `${y * 100}%`,
+        width: `${width * 100}%`,
+        height: `${height * 100}%`,
+        position: 'absolute',
+        pointerEvents: 'none'
+    }
+
+    return style
 }
 
 const formatPhotoDate = (photo: Photo) => {
@@ -211,7 +293,6 @@ onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
 })
 
-import { onUnmounted } from 'vue'
 onUnmounted(() => {
     if (reindexInterval) clearInterval(reindexInterval)
     window.removeEventListener('keydown', handleKeydown)
@@ -224,6 +305,10 @@ onUnmounted(() => {
       <div class="flex items-center gap-4">
           <Button v-if="selectedPersonDetail" icon="pi pi-arrow-left" class="p-button-text p-button-rounded" @click="closePersonDetails" />
           <h1 class="text-3xl font-bold">{{ selectedPersonDetail ? selectedPersonDetail.name : 'Personen' }}</h1>
+          <div v-if="!selectedPersonDetail && multiSelectMode" class="flex items-center gap-2 ml-4">
+              <span class="text-lg font-medium">{{ selectedPersonIds.length }} ausgewählt</span>
+              <Button label="Abbrechen" class="p-button-text p-button-sm" @click="cancelMultiSelect" />
+          </div>
       </div>
       <div class="flex items-center gap-4">
           <div v-if="reindexing" class="flex items-center gap-3 text-primary animate-pulse mr-4">
@@ -231,6 +316,10 @@ onUnmounted(() => {
               <span class="text-sm font-medium">Scannen läuft...</span>
           </div>
           <div class="flex gap-4">
+              <template v-if="!selectedPersonDetail">
+                  <Button v-if="multiSelectMode" icon="pi pi-clone" label="Zusammenführen" class="p-button-success" @click="openMergeDialog" :disabled="selectedPersonIds.length < 2" />
+                  <Button v-else-if="persons.length > 0" icon="pi pi-check-square" label="Auswählen" class="p-button-outlined" @click="multiSelectMode = true" />
+              </template>
               <Button v-if="selectedPersonDetail" icon="pi pi-pencil" label="Umbenennen" class="p-button-outlined" @click="openRename(selectedPersonDetail)" />
               <Button icon="pi pi-images" label="Alle neu scannen" class="p-button-outlined" @click="handleReindex" :disabled="reindexing || !enableLocalFaces" :tooltip="!enableLocalFaces ? 'Lokale Gesichtserkennung ist deaktiviert' : ''" />
               <Button icon="pi pi-refresh" label="Aktualisieren" @click="loadData" :loading="loading" :disabled="reindexing" />
@@ -242,6 +331,12 @@ onUnmounted(() => {
 
     <!-- Person List View -->
     <div v-if="!selectedPersonDetail">
+        <div v-if="persons.some(p => p.cover_bbox && (p.cover_bbox.x > 1.1 || p.cover_bbox.width > 1.1))" class="mb-4">
+            <Message severity="warn" :closable="false">
+                Einige Gesichtskoordinaten scheinen veraltet zu sein. Bitte klicken Sie auf <b>"Alle neu scannen"</b>, um die Ansicht zu korrigieren.
+            </Message>
+        </div>
+
         <div v-if="loading && persons.length === 0" class="text-center p-8">
           <i class="pi pi-spin pi-spinner text-4xl mb-2"></i>
           <p>Personen werden geladen...</p>
@@ -258,7 +353,8 @@ onUnmounted(() => {
             v-for="person in persons" 
             :key="person.id"
             class="person-item"
-            @click="openPersonDetails(person)"
+            :class="{ 'selected': selectedPersonIds.includes(person.id) }"
+            @click="multiSelectMode ? toggleSelect(person.id) : openPersonDetails(person)"
           >
             <div class="person-cover">
               <HeicImage 
@@ -267,12 +363,27 @@ onUnmounted(() => {
                 class="person-img"
                 :imageStyle="getFaceStyle(person)"
               />
-              <div class="person-overlay">
-                 <Button 
-                    icon="pi pi-pencil" 
-                    class="p-button-rounded p-button-white" 
-                    @click.stop="openRename(person)"
-                 />
+              <div class="face-highlight" :style="getFaceHighlightStyle(person.cover_bbox, true)" style="border: none !important; box-shadow: none !important;"></div>
+              <div v-if="!multiSelectMode" class="person-overlay">
+                 <div class="flex gap-2">
+                    <Button 
+                        icon="pi pi-pencil" 
+                        class="p-button-rounded p-button-white" 
+                        @click.stop="openRename(person)"
+                        v-tooltip="'Umbenennen'"
+                    />
+                    <Button 
+                        icon="pi pi-check-square" 
+                        class="p-button-rounded p-button-white" 
+                        @click.stop="startMultiSelect(person.id)"
+                        v-tooltip="'Auswählen'"
+                    />
+                 </div>
+              </div>
+              <div v-else class="selection-overlay">
+                  <div class="selection-checkbox" :class="{ 'checked': selectedPersonIds.includes(person.id) }">
+                      <i v-if="selectedPersonIds.includes(person.id)" class="pi pi-check"></i>
+                  </div>
               </div>
               <div class="person-badge">
                 {{ person.faceCount }} {{ person.faceCount === 1 ? 'Foto' : 'Fotos' }}
@@ -300,6 +411,7 @@ onUnmounted(() => {
                 @click="selectedIndex = idx; isFullscreen = true"
             >
                 <HeicImage :src="getPhotoUrl(photo.filename)" :alt="photo.original_name" />
+                <div class="face-highlight" :style="getFaceHighlightStyle(selectedPersonDetail.faces[idx].bbox, true)"></div>
                 <div class="photo-overlay">
                     <div class="photo-name">{{ photo.original_name }}</div>
                 </div>
@@ -314,7 +426,10 @@ onUnmounted(() => {
         <HeicImage v-if="selectedIndex < personPhotos.length - 1" :src="getPhotoUrl(personPhotos[selectedIndex + 1].filename)" />
       </div>
       <div class="fullscreen-content" @click.stop>
-        <HeicImage :src="getPhotoUrl(personPhotos[selectedIndex].filename)" :alt="personPhotos[selectedIndex].original_name" objectFit="contain" />
+        <div class="relative flex-1 overflow-hidden flex items-center justify-center">
+            <HeicImage :src="getPhotoUrl(personPhotos[selectedIndex].filename)" :alt="personPhotos[selectedIndex].original_name" objectFit="contain" />
+            <div class="face-highlight" :style="getFaceHighlightStyle(selectedPersonDetail.faces[selectedIndex].bbox)"></div>
+        </div>
         <div class="fullscreen-nav">
             <Button icon="pi pi-chevron-left" rounded text @click="selectedIndex > 0 && selectedIndex--" :disabled="selectedIndex === 0" />
             <div class="fullscreen-info">
@@ -327,10 +442,45 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <Dialog v-model:visible="showMergeDialog" header="Personen zusammenführen" :modal="true" class="w-full max-w-lg">
+        <div class="flex flex-col gap-4 mt-2">
+            <p>Es werden {{ mergeSourceIds.length }} Personen zusammengeführt. Alle Fotos werden der Zielperson zugeordnet.</p>
+            
+            <div class="mt-2">
+                <label class="font-bold block mb-2">Zielperson auswählen:</label>
+                <div class="flex flex-col gap-2 max-h-60 overflow-y-auto border rounded p-2">
+                    <div 
+                        v-for="id in mergeSourceIds" 
+                        :key="id"
+                        class="flex items-center gap-3 p-2 hover:bg-gray-100 rounded cursor-pointer"
+                        @click="mergeTargetId = id"
+                    >
+                        <input type="radio" :id="'target-' + id" name="mergeTarget" :value="id" v-model="mergeTargetId" />
+                        <label :for="'target-' + id" class="flex items-center gap-3 cursor-pointer flex-1">
+                            <HeicImage 
+                                :src="getCoverUrl(persons.find(p => p.id === id)!)" 
+                                class="w-10 h-10 rounded-full overflow-hidden flex-shrink-0"
+                                :imageStyle="getFaceStyle(persons.find(p => p.id === id)!)"
+                            />
+                            <span class="font-medium">{{ persons.find(p => p.id === id)?.name }}</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-2 mt-4">
+                <Button label="Abbrechen" icon="pi pi-times" class="p-button-text" @click="showMergeDialog = false" />
+                <Button label="Zusammenführen" icon="pi pi-clone" class="p-button-success" @click="handleMerge" :disabled="!mergeTargetId" />
+            </div>
+        </div>
+    </Dialog>
+
     <Dialog v-model:visible="showRenameDialog" header="Person umbenennen" :modal="true" class="w-full max-w-md">
         <div class="flex flex-col gap-4 mt-2">
-            <label for="name">Name</label>
-            <InputText id="name" v-model="newName" autofocus @keyup.enter="handleRename" />
+            <div class="flex flex-col gap-2">
+                <label for="name" class="font-bold">Name</label>
+                <InputText id="name" v-model="newName" class="flex-auto" autocomplete="off" @keyup.enter="handleRename" />
+            </div>
             <div class="flex justify-end gap-2 mt-4">
                 <Button label="Abbrechen" icon="pi pi-times" class="p-button-text" @click="showRenameDialog = false" />
                 <Button label="Speichern" icon="pi pi-check" @click="handleRename" :disabled="!newName" />
@@ -364,6 +514,38 @@ onUnmounted(() => {
 .person-item:hover {
   transform: translateY(-4px);
   box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
+
+.person-item.selected {
+  border-color: #3b82f6;
+  background-color: rgba(59, 130, 246, 0.05);
+  box-shadow: 0 0 0 2px #3b82f6;
+}
+
+.selection-overlay {
+    position: absolute;
+    inset: 0;
+    padding: 0.5rem;
+    pointer-events: none;
+}
+
+.selection-checkbox {
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    background: white;
+    border: 2px solid rgba(0,0,0,0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.selection-checkbox.checked {
+    background: #3b82f6;
+    border-color: #3b82f6;
+    color: white;
 }
 
 .person-cover {
@@ -449,6 +631,11 @@ onUnmounted(() => {
     border: 1px solid #e5e7eb;
 }
 
+.photo-item :deep(.heic-image-container) {
+    position: absolute;
+    inset: 0;
+}
+
 .photo-item :deep(img) {
     width: 100%;
     height: 100%;
@@ -503,9 +690,16 @@ onUnmounted(() => {
   flex-direction: column;
 }
 
-.fullscreen-content :deep(img) {
+.fullscreen-content :deep(.heic-image-container) {
   flex: 1;
-  max-width: 100%;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.fullscreen-content :deep(img) {
+  width: 100%;
+  height: 100%;
   max-height: calc(100vh - 80px);
   object-fit: contain;
 }
@@ -550,5 +744,17 @@ onUnmounted(() => {
 .gap-4 { column-gap: 1rem; row-gap: 1rem; }
 .gap-3 { column-gap: 0.75rem; row-gap: 0.75rem; }
 .mr-4 { margin-right: 1rem; }
+
+.face-highlight {
+    pointer-events: none;
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(0,0,0,0.5);
+    border: 2px solid #ffff00 !important;
+    z-index: 50;
+}
+
+.relative { position: relative; }
+.overflow-hidden { overflow: hidden; }
+.flex-1 { flex: 1; }
+.justify-center { justify-content: center; }
 
 </style>
