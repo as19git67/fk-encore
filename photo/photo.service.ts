@@ -33,31 +33,6 @@ import type {
 } from "../db/types";
 import heicConvert from "heic-convert";
 
-// Fix for newer Node.js versions (e.g. v24) where tfjs-node relies on removed util functions
-import * as util from "util";
-if (!(util as any).isNullOrUndefined) {
-    try {
-        Object.defineProperty(util, 'isNullOrUndefined', {
-            value: (val: any) => val === null || val === undefined,
-            writable: true,
-            configurable: true
-        });
-    } catch (e) {
-        // Fallback for environments where util is not extensible
-    }
-}
-if (!(util as any).isArray) {
-    try {
-        Object.defineProperty(util, 'isArray', {
-            value: Array.isArray,
-            writable: true,
-            configurable: true
-        });
-    } catch (e) {
-        // Fallback
-    }
-}
-
 export const UPLOAD_DIR = path.resolve(process.env.PHOTO_UPLOAD_DIR || "uploads/photos");
 const INSIGHTFACE_SERVICE_URL = process.env.INSIGHTFACE_SERVICE_URL || "http://localhost:8000";
 
@@ -93,7 +68,7 @@ async function callInsightFaceDetect(filePath: string): Promise<{ faces: any[], 
   return data;
 }
 
-export async function indexPhotoFaces(userId: number, photoId: number): Promise<void> {
+export async function indexPhotoFaces(userId: number, photoId: number, resetIgnored: boolean = false): Promise<void> {
   if (!ENABLE_LOCAL_FACES) {
     console.log("Local face indexing is disabled via ENABLE_LOCAL_FACES=false");
     return;
@@ -130,6 +105,18 @@ export async function indexPhotoFaces(userId: number, photoId: number): Promise<
     }
   }
 
+  // Get existing ignored faces for this photo to preserve them (if not resetting)
+  const ignoredFaces = resetIgnored ? [] : db.select().from(faces).where(and(eq(faces.photo_id, photoId), eq(faces.ignored, true))).all();
+
+  // Remove faces for this photo
+  if (resetIgnored) {
+    // Remove ALL faces (including ignored ones)
+    db.delete(faces).where(eq(faces.photo_id, photoId)).run();
+  } else {
+    // Only remove non-ignored faces
+    db.delete(faces).where(and(eq(faces.photo_id, photoId), eq(faces.ignored, false))).run();
+  }
+
   try {
     const detectResult = await callInsightFaceDetect(processingPath);
     const facesDetected = detectResult.faces;
@@ -137,9 +124,6 @@ export async function indexPhotoFaces(userId: number, photoId: number): Promise<
     const imgHeight = detectResult.height;
     
     console.log(`Detected ${facesDetected.length} faces in photo ${photoId} (size: ${imgWidth}x${imgHeight})`);
-
-    // Remove existing faces for this photo
-    db.delete(faces).where(eq(faces.photo_id, photoId)).run();
 
     for (const f of facesDetected) {
       // Normalize bbox to 0..1 relative values
@@ -149,6 +133,15 @@ export async function indexPhotoFaces(userId: number, photoId: number): Promise<
         width: (f.bbox[2] - f.bbox[0]) / imgWidth,
         height: (f.bbox[3] - f.bbox[1]) / imgHeight
       };
+
+      // Check if this face matches an ignored one (by bbox overlap)
+      const isIgnored = ignoredFaces.some(iface => {
+        const iBbox = JSON.parse(iface.bbox);
+        return calculateOverlap(bbox, iBbox) > 0.8; // 80% overlap threshold
+      });
+
+      if (isIgnored) continue;
+
       const embedding = f.embedding;
 
       // Find best matching person (using cosine similarity)
@@ -732,7 +725,7 @@ async function findBestPersonMatch(
       embedding: faces.embedding,
     })
     .from(faces)
-    .where(and(eq(faces.user_id, userId), sql`${faces.person_id} IS NOT NULL`))
+    .where(and(eq(faces.user_id, userId), sql`${faces.person_id} IS NOT NULL`, eq(faces.ignored, false)))
     .all();
 
   // Group embeddings by person
@@ -795,6 +788,23 @@ function cosineSimilarity(v1: number[], v2: number[]): number {
   return dotProduct / (Math.sqrt(norm1) * Math.sqrt(norm2));
 }
 
+function calculateOverlap(b1: any, b2: any): number {
+  const x1 = Math.max(b1.x, b2.x);
+  const y1 = Math.max(b1.y, b2.y);
+  const x2 = Math.min(b1.x + b1.width, b2.x + b2.width);
+  const y2 = Math.min(b1.y + b1.height, b2.y + b2.height);
+
+  if (x1 >= x2 || y1 >= y2) return 0;
+
+  const intersectionArea = (x2 - x1) * (y2 - y1);
+  const area1 = b1.width * b1.height;
+  const area2 = b2.width * b2.height;
+  const unionArea = area1 + area2 - intersectionArea;
+
+  if (unionArea === 0) return 0;
+  return intersectionArea / unionArea;
+}
+
 export function listPersonsLogic(userId: number): ListPersonsResponse {
   const rows = db
     .select({
@@ -846,6 +856,7 @@ export function getPersonDetailsLogic(userId: number, personId: number): PersonD
       embedding: faces.embedding,
       person_id: faces.person_id,
       quality: faces.quality,
+      ignored: faces.ignored,
       created_at: faces.created_at,
       filename: photos.filename,
       original_name: photos.original_name,
@@ -871,6 +882,7 @@ export function getPersonDetailsLogic(userId: number, personId: number): PersonD
       embedding: JSON.parse(r.embedding),
       person_id: r.person_id ?? undefined,
       quality: r.quality ?? undefined,
+      ignored: !!r.ignored,
       created_at: r.created_at ?? "",
       photo: {
         id: r.photo_id,
@@ -983,9 +995,71 @@ export function assignFaceToPersonLogic(
   personId: number
 ): { success: boolean } {
   db.update(faces)
-    .set({ person_id: personId })
+    .set({ person_id: personId, ignored: false })
     .where(and(eq(faces.id, faceId), eq(faces.user_id, userId)))
     .run();
+  return { success: true };
+}
+
+export function ignoreFaceLogic(
+  userId: number,
+  faceId: number
+): { success: boolean } {
+  db.update(faces)
+    .set({ ignored: true, person_id: null })
+    .where(and(eq(faces.id, faceId), eq(faces.user_id, userId)))
+    .run();
+  return { success: true };
+}
+
+export function ignorePersonFacesLogic(
+  userId: number,
+  personId: number
+): { success: boolean } {
+  db.update(faces)
+    .set({ ignored: true, person_id: null })
+    .where(and(eq(faces.person_id, personId), eq(faces.user_id, userId)))
+    .run();
+
+  // Also cleanup the person since they no longer have any associated faces
+  cleanupOrphanedPersons(userId);
+
+  return { success: true };
+}
+
+export function getPhotoFacesLogic(
+  userId: number,
+  photoId: number
+): { faces: Face[] } {
+  const rows = db
+    .select()
+    .from(faces)
+    .where(and(eq(faces.photo_id, photoId), eq(faces.user_id, userId)))
+    .all();
+
+  return {
+    faces: rows.map((r) => ({
+      id: r.id,
+      user_id: r.user_id,
+      photo_id: r.photo_id,
+      bbox: JSON.parse(r.bbox),
+      embedding: JSON.parse(r.embedding),
+      person_id: r.person_id ?? undefined,
+      quality: r.quality ?? undefined,
+      ignored: !!r.ignored,
+      created_at: r.created_at ?? "",
+    })),
+  };
+}
+
+export async function reindexPhotoLogic(
+  userId: number,
+  photoId: number
+): Promise<{ success: boolean }> {
+  const photo = db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId))).get();
+  if (!photo) throw new Error("Photo not found");
+
+  await indexPhotoFaces(userId, photoId, true);
   return { success: true };
 }
 
@@ -1002,7 +1076,7 @@ export async function reindexAllPhotosLogic(userId: number): Promise<{ count: nu
     let errors = 0;
     for (const p of allPhotos) {
       try {
-        await indexPhotoFaces(userId, p.id);
+        await indexPhotoFaces(userId, p.id, false);
         processed++;
       } catch (err: any) {
         errors++;

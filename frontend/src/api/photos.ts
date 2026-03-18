@@ -76,6 +76,7 @@ export interface Face {
   bbox: FaceBBox
   person_id?: number
   quality?: number
+  ignored: boolean
   created_at: string
   photo?: Photo
 }
@@ -134,4 +135,26 @@ export function reindexAllPhotos() {
   return apiFetch<{ count: number }>('/photos/reindex-all', {
     method: 'POST'
   })
+}
+
+export function reindexPhoto(id: number) {
+  return apiFetch<{ success: boolean }>(`/photos/${id}/reindex`, {
+    method: 'POST'
+  })
+}
+
+export function ignoreFace(faceId: number) {
+  return apiFetch<{ success: boolean }>(`/faces/${faceId}/ignore`, {
+    method: 'POST'
+  })
+}
+
+export function ignorePersonFaces(personId: number) {
+  return apiFetch<{ success: boolean }>(`/persons/${personId}/ignore`, {
+    method: 'POST'
+  })
+}
+
+export function getPhotoFaces(id: number) {
+  return apiFetch<{ faces: Face[] }>(`/photos/${id}/faces`)
 }

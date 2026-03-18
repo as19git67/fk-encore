@@ -5,7 +5,7 @@ import Message from 'primevue/message'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import HeicImage from '../components/HeicImage.vue'
-import { listPersons, updatePerson, mergePersons, getPhotoUrl, reindexAllPhotos, getPersonDetails, type Person, type Photo, type PersonDetails } from '../api/photos'
+import { listPersons, updatePerson, mergePersons, getPhotoUrl, reindexAllPhotos, getPersonDetails, ignoreFace, ignorePersonFaces, type Person, type Photo, type PersonDetails } from '../api/photos'
 
 const persons = ref<Person[]>([])
 const enableLocalFaces = ref(true)
@@ -143,10 +143,18 @@ async function loadData() {
     enableLocalFaces.value = res.enableLocalFaces
     // Filter out persons with 0 faces (orphans) to keep the list clean
     // Some backend databases might return faceCount as string, ensure it's a number
-    persons.value = res.persons.filter(p => {
-        const count = Number(p.faceCount || 0)
-        return count > 0
-    })
+    persons.value = res.persons
+        .filter(p => {
+            const count = Number(p.faceCount || 0)
+            return count > 0
+        })
+        .sort((a, b) => {
+            if (a.name === 'Unbenannt' && b.name !== 'Unbenannt') return 1
+            if (a.name !== 'Unbenannt' && b.name === 'Unbenannt') return -1
+            const countA = Number(a.faceCount || 0)
+            const countB = Number(b.faceCount || 0)
+            return countB - countA
+        })
     
     // Refresh detailed view if open
     if (selectedPersonDetail.value) {
@@ -218,6 +226,51 @@ async function handleRename() {
         }
     } catch (err: any) {
         error.value = err.message || 'Fehler beim Umbenennen'
+    }
+}
+
+async function handleIgnoreFace(faceId: number) {
+    if (!confirm('Dieses Gesicht wirklich ignorieren? Es wird aus allen Personenlisten entfernt.')) return
+    
+    try {
+        await ignoreFace(faceId)
+        
+        // Remove from current detail view
+        if (selectedPersonDetail.value) {
+            selectedPersonDetail.value.faces = selectedPersonDetail.value.faces.filter(f => f.id !== faceId)
+            
+            // If no faces left, close details and refresh list
+            if (selectedPersonDetail.value.faces.length === 0) {
+                closePersonDetails()
+                await loadData()
+            } else {
+                // Adjust selected index if needed
+                if (selectedIndex.value >= selectedPersonDetail.value.faces.length) {
+                    selectedIndex.value = selectedPersonDetail.value.faces.length - 1
+                }
+                if (selectedIndex.value === -1 && selectedPersonDetail.value.faces.length > 0) {
+                     // No need to change index if it was -1
+                }
+            }
+        }
+        
+        // Also update the main persons list (face counts might have changed)
+        // We don't want a full loadData() if we are in details, but face counts on main view would be stale.
+        // For simplicity, let's just refresh when closing or when we have time.
+    } catch (err: any) {
+        error.value = err.message || 'Fehler beim Ignorieren des Gesichts'
+    }
+}
+
+async function handleIgnorePerson(personId: number) {
+    if (!confirm('Diese Person und alle ihre Gesichtserkennungen wirklich ignorieren?')) return
+    
+    try {
+        await ignorePersonFaces(personId)
+        closePersonDetails()
+        await loadData()
+    } catch (err: any) {
+        error.value = err.message || 'Fehler beim Ignorieren der Person'
     }
 }
 
@@ -438,7 +491,10 @@ onUnmounted(() => {
                   <Button v-if="multiSelectMode" icon="pi pi-clone" label="Zusammenführen" class="p-button-success" @click="openMergeDialog" :disabled="selectedPersonIds.length < 2" />
                   <Button v-else-if="persons.length > 0" icon="pi pi-check-square" label="Auswählen" class="p-button-outlined" @click="multiSelectMode = true" />
               </template>
-              <Button v-if="selectedPersonDetail" icon="pi pi-pencil" label="Umbenennen" class="p-button-outlined" @click="openRename(selectedPersonDetail)" />
+              <template v-if="selectedPersonDetail">
+                  <Button icon="pi pi-pencil" label="Umbenennen" class="p-button-outlined" @click="openRename(selectedPersonDetail)" />
+                  <Button icon="pi pi-trash" label="Ignorieren" class="p-button-outlined p-button-danger" @click="handleIgnorePerson(selectedPersonDetail.id)" v-tooltip="'Diese Person und alle ihre Gesichtserkennungen dauerhaft ignorieren'" />
+              </template>
               <Button icon="pi pi-images" label="Alle neu scannen" class="p-button-outlined" @click="handleReindex" :disabled="reindexing || !enableLocalFaces" :tooltip="!enableLocalFaces ? 'Lokale Gesichtserkennung ist deaktiviert' : ''" />
               <Button icon="pi pi-refresh" label="Aktualisieren" @click="loadData" :loading="loading" :disabled="reindexing" />
           </div>
@@ -551,6 +607,12 @@ onUnmounted(() => {
                 </HeicImage>
                 <div class="photo-overlay">
                     <div class="photo-name">{{ item.photo.original_name }}</div>
+                    <Button 
+                        icon="pi pi-trash" 
+                        class="p-button-rounded p-button-danger p-button-text ignore-btn" 
+                        @click.stop="handleIgnoreFace(item.face.id)"
+                        v-tooltip="'Gesicht ignorieren'"
+                    />
                 </div>
             </div>
             </div>
@@ -574,6 +636,13 @@ onUnmounted(() => {
             <div class="fullscreen-info">
               <div class="fullscreen-title">{{ selectedPersonPhoto.original_name }}</div>
               <div class="fullscreen-date">{{ formatPhotoDate(selectedPersonPhoto) }}</div>
+              <Button 
+                  v-if="selectedPersonFace"
+                  label="Gesicht ignorieren" 
+                  icon="pi pi-trash" 
+                  class="p-button-danger p-button-text p-button-sm mt-1" 
+                  @click.stop="handleIgnoreFace(selectedPersonFace.id)" 
+              />
             </div>
             <Button icon="pi pi-chevron-right" rounded text @click="selectedIndex < personPhotos.length - 1 && selectedIndex++" :disabled="selectedIndex === personPhotos.length - 1" />
         </div>
@@ -847,6 +916,17 @@ onUnmounted(() => {
     color: white;
     opacity: 0;
     transition: opacity 0.2s;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+}
+
+.ignore-btn {
+    color: white !important;
+}
+
+.ignore-btn:hover {
+    background: rgba(255, 255, 255, 0.2) !important;
 }
 
 .photo-item:hover .photo-overlay {
@@ -858,6 +938,8 @@ onUnmounted(() => {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    padding-bottom: 0.25rem;
+    flex: 1;
 }
 
 /* Fullscreen Viewer */

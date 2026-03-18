@@ -142,6 +142,7 @@ export const faces = sqliteTable("faces", {
   embedding: text("embedding").notNull(),
   person_id: integer("person_id").references(() => persons.id, { onDelete: "set null" }),
   quality: integer("quality").default(0),
+  ignored: integer("ignored", { mode: "boolean" }).notNull().default(false),
   created_at: text("created_at").default(sql`(datetime('now'))`),
 });
 

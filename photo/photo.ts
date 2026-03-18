@@ -387,6 +387,62 @@ export const assignFaceToPerson = api(
 );
 
 /**
+ * Ignore a face (manual removal).
+ */
+export const ignoreFace = api(
+  { expose: true, method: "POST", path: "/faces/:faceId/ignore", auth: true },
+  async ({ faceId }: { faceId: number }): Promise<{ success: boolean }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "people.edit");
+    return service.ignoreFaceLogic(userId, faceId);
+  }
+);
+
+/**
+ * Ignore all faces of a person (manual removal).
+ */
+export const ignorePersonFaces = api(
+  { expose: true, method: "POST", path: "/persons/:id/ignore", auth: true },
+  async ({ id }: { id: number }): Promise<{ success: boolean }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "people.edit");
+    return service.ignorePersonFacesLogic(userId, id);
+  }
+);
+
+/**
+ * Reindex a single photo.
+ */
+export const reindexPhoto = api(
+  { expose: true, method: "POST", path: "/photos/:id/reindex", auth: true },
+  async ({ id }: { id: number }): Promise<{ success: boolean }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.refresh_metadata");
+    return service.reindexPhotoLogic(userId, id);
+  }
+);
+
+/**
+ * Get faces for a specific photo.
+ */
+export const getPhotoFaces = api(
+  { expose: true, method: "GET", path: "/photos/:id/faces", auth: true },
+  async ({ id }: { id: number }): Promise<{ faces: Face[] }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "people.view");
+    return service.getPhotoFacesLogic(userId, id);
+  }
+);
+
+/**
  * Reindex all photos (background job).
  */
 export const reindexAllPhotos = api(

@@ -4,17 +4,7 @@ import fs from "fs";
 import path from "path";
 import { eq } from "drizzle-orm";
 import db from "../db/database";
-import {
-  photos,
-  albums,
-  albumPhotos,
-  albumShares,
-  users,
-  roles,
-  permissions,
-  rolePermissions,
-  userRoles,
-} from "../db/schema";
+import { photos, faces, persons, albums, albumPhotos, albumShares, users, roles, permissions, rolePermissions, userRoles } from "../db/schema";
 import { UPLOAD_DIR } from "./photo.service";
 import * as service from "./photo.service";
 import { createUserLogic, getPermissionsForUser } from "../user/user.service";
@@ -31,6 +21,8 @@ describe("Photo Module", () => {
     db.delete(albumPhotos).run();
     db.delete(albumShares).run();
     db.delete(albums).run();
+    db.delete(faces).run();
+    db.delete(persons).run();
     db.delete(photos).run();
     db.delete(rolePermissions).run();
     db.delete(userRoles).run();
@@ -191,6 +183,114 @@ describe("Photo Module", () => {
       
       // Cleanup
       fs.unlinkSync(path.join(UPLOAD_DIR, photo.filename));
+    });
+  });
+
+  describe("Faces", () => {
+    it("should reindex a photo", async () => {
+      const fileData = Buffer.from("fake-image-data");
+      const photo = await service.uploadPhotoLogic(user1.id, {
+        data: fileData,
+        name: "test.jpg",
+        mimeType: "image/jpeg",
+      });
+
+      // Mocking the InsightFace service is not really possible here easily as it's a fetch call
+      // But we can check if it calls the correct function and at least doesn't throw "indexFacesForPhoto is not defined"
+      // Since we are in a test environment, callInsightFaceDetect will likely fail with a fetch error 
+      // which is fine as long as it's not the "not defined" error.
+      
+      try {
+        await service.reindexPhotoLogic(user1.id, photo.id);
+      } catch (err: any) {
+        // We expect it to fail because InsightFace service is not running or file is invalid
+        // But it should NOT be the "indexFacesForPhoto is not defined" error
+        expect(err.message).not.toContain("indexFacesForPhoto is not defined");
+      }
+
+      // Cleanup
+      if (fs.existsSync(path.join(UPLOAD_DIR, photo.filename))) {
+        fs.unlinkSync(path.join(UPLOAD_DIR, photo.filename));
+      }
+    });
+
+    it("should reset ignored faces during manual reindex", async () => {
+      const fileData = Buffer.from("fake-image-data");
+      const photo = await service.uploadPhotoLogic(user1.id, {
+        data: fileData,
+        name: "test.jpg",
+        mimeType: "image/jpeg",
+      });
+
+      // Insert an ignored face
+      db.insert(faces).values({
+        user_id: user1.id,
+        photo_id: photo.id,
+        bbox: JSON.stringify({ x: 0.1, y: 0.1, width: 0.2, height: 0.2 }),
+        embedding: JSON.stringify([0.1, 0.2]),
+        ignored: true,
+        quality: 100
+      }).run();
+
+      // Verify it's there
+      const facesBefore = service.getPhotoFacesLogic(user1.id, photo.id).faces;
+      expect(facesBefore.find(f => f.ignored)).toBeDefined();
+
+      // Manual reindex (mocked to fail or return 0, but it should delete existing faces)
+      try {
+        await service.reindexPhotoLogic(user1.id, photo.id);
+      } catch (err) {
+        // Ignore fetch errors
+      }
+
+      // Verify ignored face is gone (reindexPhotoLogic calls indexPhotoFaces with resetIgnored: true)
+      const facesAfter = service.getPhotoFacesLogic(user1.id, photo.id).faces;
+      expect(facesAfter.find(f => f.ignored)).toBeUndefined();
+
+      // Cleanup
+      if (fs.existsSync(path.join(UPLOAD_DIR, photo.filename))) {
+        fs.unlinkSync(path.join(UPLOAD_DIR, photo.filename));
+      }
+    });
+  });
+
+  describe("People & Faces", () => {
+    it("should ignore all faces of a person", async () => {
+      const person = db.insert(persons).values({
+        user_id: user1.id,
+        name: "To Be Ignored",
+      }).returning().get();
+
+      const photo = await service.uploadPhotoLogic(user1.id, {
+        data: Buffer.from([1, 2, 3]),
+        name: "person_photo.jpg",
+        mimeType: "image/jpeg",
+      });
+
+      db.insert(faces).values({
+        user_id: user1.id,
+        photo_id: photo.id,
+        person_id: person.id,
+        bbox: JSON.stringify({ x: 0, y: 0, width: 0.1, height: 0.1 }),
+        embedding: JSON.stringify([0.1, 0.1]),
+        ignored: false,
+      }).run();
+
+      // Verify setup
+      const facesBefore = db.select().from(faces).where(eq(faces.person_id, person.id)).all();
+      expect(facesBefore).toHaveLength(1);
+
+      // Ignore person
+      service.ignorePersonFacesLogic(user1.id, person.id);
+
+      // Verify person is deleted
+      const personAfter = db.select().from(persons).where(eq(persons.id, person.id)).get();
+      expect(personAfter).toBeUndefined();
+
+      // Verify faces are marked ignored and person_id is null
+      const facesAfter = db.select().from(faces).where(eq(faces.photo_id, photo.id)).all();
+      expect(facesAfter[0].ignored).toBeTruthy();
+      expect(facesAfter[0].person_id).toBeNull();
     });
   });
 

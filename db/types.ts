@@ -198,6 +198,7 @@ export interface Face {
   embedding: number[]; // Float32-Werte
   person_id?: number;
   quality?: number;
+  ignored: boolean;
   created_at: string;
   photo?: {
     id: number;
