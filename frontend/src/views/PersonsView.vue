@@ -355,16 +355,21 @@ function getCoverUrl(person: Person) {
 
 function getFaceStyle(
     person: Person | { cover_bbox?: any },
-    options?: { targetFaceRatio?: number; maxZoom?: number }
+    options?: {
+        targetFaceRatio?: number
+        maxZoom?: number
+        objectFit?: 'cover' | 'contain' | 'fill' | 'none' | 'scale-down'
+    }
 ) {
     if (!person.cover_bbox) return {}
     
     // cover_bbox values should be relative (0..1)
     const { x, y, width, height } = person.cover_bbox
+    const objectFit = options?.objectFit ?? 'cover'
     
     // If we have absolute values (likely old data), fallback to cover
     if (x > 1.1 || y > 1.1 || width > 1.1 || height > 1.1) {
-        return { objectFit: 'cover' }
+        return { objectFit }
     }
     
     // We want to center the face. 
@@ -380,7 +385,7 @@ function getFaceStyle(
     return {
         transform: `scale(${zoom})`,
         transformOrigin: `${centerX * 100}% ${centerY * 100}%`,
-        objectFit: 'cover',
+        objectFit,
         display: 'block'
     }
 }
@@ -554,7 +559,8 @@ onUnmounted(() => {
                 :src="getCoverUrl(person)" 
                 :alt="person.name"
                 class="person-img"
-                :imageStyle="getFaceStyle(person)"
+                objectFit="scale-down"
+                :imageStyle="getFaceStyle(person, { objectFit: 'scale-down' })"
               >
                 <div class="face-highlight" :style="getFaceHighlightStyle(person.cover_bbox, true)" style="border: none !important; box-shadow: none !important;"></div>
               </HeicImage>
