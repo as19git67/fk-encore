@@ -1,4 +1,4 @@
-FROM node:bookworm-slim
+FROM node:24-bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -23,7 +23,7 @@ ENV PATH="/root/.encore/bin:${PATH}"
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --omit=optional
 
 COPY frontend/package.json frontend/package-lock.json frontend/
 RUN npm --prefix frontend ci
