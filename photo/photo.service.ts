@@ -811,12 +811,48 @@ export function listPersonsLogic(userId: number): ListPersonsResponse {
       id: persons.id,
       user_id: persons.user_id,
       name: persons.name,
-      cover_face_id: persons.cover_face_id,
+      cover_face_id: sql<number>`COALESCE(
+        (
+          SELECT f.id
+          FROM faces f
+          INNER JOIN photos p ON p.id = f.photo_id
+          WHERE f.person_id = persons.id
+            AND f.user_id = persons.user_id
+            AND f.ignored = 0
+          ORDER BY COALESCE(julianday(p.taken_at), julianday(p.created_at), 0) DESC, f.id DESC
+          LIMIT 1
+        ),
+        persons.cover_face_id
+      )`,
       created_at: persons.created_at,
       updated_at: persons.updated_at,
       faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM faces f WHERE f.person_id = persons.id), 0) AS INTEGER)`,
-      cover_filename: sql<string>`COALESCE((SELECT p.filename FROM photos p INNER JOIN faces f ON f.photo_id = p.id WHERE f.id = persons.cover_face_id LIMIT 1), '')`,
-      cover_bbox: sql<string>`COALESCE((SELECT f.bbox FROM faces f WHERE f.id = persons.cover_face_id LIMIT 1), '')`,
+      cover_filename: sql<string>`COALESCE(
+        (
+          SELECT p.filename
+          FROM faces f
+          INNER JOIN photos p ON p.id = f.photo_id
+          WHERE f.person_id = persons.id
+            AND f.user_id = persons.user_id
+            AND f.ignored = 0
+          ORDER BY COALESCE(julianday(p.taken_at), julianday(p.created_at), 0) DESC, f.id DESC
+          LIMIT 1
+        ),
+        ''
+      )`,
+      cover_bbox: sql<string>`COALESCE(
+        (
+          SELECT f.bbox
+          FROM faces f
+          INNER JOIN photos p ON p.id = f.photo_id
+          WHERE f.person_id = persons.id
+            AND f.user_id = persons.user_id
+            AND f.ignored = 0
+          ORDER BY COALESCE(julianday(p.taken_at), julianday(p.created_at), 0) DESC, f.id DESC
+          LIMIT 1
+        ),
+        ''
+      )`,
     })
     .from(persons)
     .where(eq(persons.user_id, userId))
@@ -865,6 +901,7 @@ export function getPersonDetailsLogic(userId: number, personId: number): PersonD
     .from(faces)
     .innerJoin(photos, eq(faces.photo_id, photos.id))
     .where(and(eq(faces.person_id, personId), eq(faces.user_id, userId)))
+    .orderBy(sql`COALESCE(julianday(${photos.taken_at}), julianday(${photos.created_at}), 0) DESC`, sql`${faces.id} DESC`)
     .all();
 
   return {
@@ -1109,4 +1146,3 @@ function cleanupOrphanedPersons(userId: number): void {
     .run();
   console.log(`Cleaned up ${deleted.changes} orphaned persons for user ${userId}`);
 }
-
