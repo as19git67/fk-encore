@@ -412,13 +412,9 @@ function getHeroImageStyle(bbox: any) {
 }
 
 function getHeroFaceHighlightStyle(bbox: any) {
-    const baseStyle = getFaceHighlightStyle(bbox)
-    if ((baseStyle as any).display === 'none') return baseStyle
-
-    return {
-        ...baseStyle,
-        ...getHeroFaceTransform(bbox)
-    }
+    // Use only the base style without additional transform
+    // The image itself is already transformed, so the highlight should stay in place
+    return getFaceHighlightStyle(bbox)
 }
 
 function handleResize() {
@@ -884,7 +880,7 @@ onUnmounted(() => {
 .person-hero-image :deep(img) {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: scale-down;
 }
 
 @media (max-width: 640px) {

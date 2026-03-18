@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, computed } from 'vue';
+import { ref, watch, onMounted, onBeforeUnmount, computed, nextTick } from 'vue';
 
 const props = defineProps<{
   src: string;
@@ -13,6 +13,15 @@ const displaySrc = ref<string>('');
 const isHeic = ref(false);
 const isLoading = ref(false);
 const naturalAspectRatio = ref<number | null>(null);
+const imageContentWrapperRef = ref<HTMLElement | null>(null);
+const imgRef = ref<HTMLImageElement | null>(null);
+const slotContainerStyle = ref<Record<string, string>>({
+  top: '0px',
+  left: '0px',
+  width: '100%',
+  height: '100%',
+});
+let resizeObserver: ResizeObserver | null = null;
 
 const objectFitClass = computed(() => {
   return `fit-${props.objectFit || 'cover'}`;
@@ -20,7 +29,7 @@ const objectFitClass = computed(() => {
 
 const contentWrapperStyle = computed(() => {
   const fit = props.objectFit || 'cover';
-  if (fit === 'contain' && naturalAspectRatio.value) {
+  if ((fit === 'contain' || fit === 'scale-down') && naturalAspectRatio.value) {
     return {
       aspectRatio: `${naturalAspectRatio.value}`,
       maxWidth: '100%',
@@ -38,6 +47,7 @@ const contentWrapperStyle = computed(() => {
 
 const checkAndConvert = async () => {
   if (!props.src) return;
+  naturalAspectRatio.value = null;
 
   const lowerSrc = props.src.toLowerCase();
   isHeic.value = lowerSrc.endsWith('.heic') || lowerSrc.endsWith('.heif');
@@ -65,13 +75,140 @@ const checkAndConvert = async () => {
 const onImageLoad = (event: Event) => {
   isLoading.value = false;
   const img = event.target as HTMLImageElement;
+  imgRef.value = img;
+  if (resizeObserver) {
+    resizeObserver.observe(img);
+  }
   if (img.naturalWidth && img.naturalHeight) {
     naturalAspectRatio.value = img.naturalWidth / img.naturalHeight;
+  }
+  updateSlotBounds();
+};
+
+const getRenderedObjectRectInImageBox = (img: HTMLImageElement) => {
+  const boxWidth = img.clientWidth;
+  const boxHeight = img.clientHeight;
+  const naturalWidth = img.naturalWidth;
+  const naturalHeight = img.naturalHeight;
+
+  if (!boxWidth || !boxHeight || !naturalWidth || !naturalHeight) {
+    return {
+      x: 0,
+      y: 0,
+      width: boxWidth,
+      height: boxHeight,
+      boxWidth,
+      boxHeight,
+    };
+  }
+
+  const computedFit = window.getComputedStyle(img).objectFit || 'fill';
+  let renderedWidth = boxWidth;
+  let renderedHeight = boxHeight;
+
+  if (computedFit === 'contain') {
+    const scale = Math.min(boxWidth / naturalWidth, boxHeight / naturalHeight);
+    renderedWidth = naturalWidth * scale;
+    renderedHeight = naturalHeight * scale;
+  } else if (computedFit === 'cover') {
+    const scale = Math.max(boxWidth / naturalWidth, boxHeight / naturalHeight);
+    renderedWidth = naturalWidth * scale;
+    renderedHeight = naturalHeight * scale;
+  } else if (computedFit === 'none') {
+    renderedWidth = naturalWidth;
+    renderedHeight = naturalHeight;
+  } else if (computedFit === 'scale-down') {
+    const containScale = Math.min(boxWidth / naturalWidth, boxHeight / naturalHeight);
+    const scale = Math.min(1, containScale);
+    renderedWidth = naturalWidth * scale;
+    renderedHeight = naturalHeight * scale;
+  }
+
+  return {
+    x: (boxWidth - renderedWidth) / 2,
+    y: (boxHeight - renderedHeight) / 2,
+    width: renderedWidth,
+    height: renderedHeight,
+    boxWidth,
+    boxHeight,
+  };
+};
+
+const updateSlotBounds = () => {
+  const wrapper = imageContentWrapperRef.value;
+  const img = imgRef.value;
+
+  if (!wrapper || !img) {
+    slotContainerStyle.value = {
+      top: '0px',
+      left: '0px',
+      width: '100%',
+      height: '100%',
+    };
+    return;
+  }
+
+  const wrapperRect = wrapper.getBoundingClientRect();
+  const imgRect = img.getBoundingClientRect();
+  const renderedRectInImageBox = getRenderedObjectRectInImageBox(img);
+
+  if (imgRect.width <= 0 || imgRect.height <= 0 || wrapperRect.width <= 0 || wrapperRect.height <= 0) {
+    slotContainerStyle.value = {
+      top: '0px',
+      left: '0px',
+      width: '100%',
+      height: '100%',
+    };
+    return;
+  }
+
+  const scaleX = renderedRectInImageBox.boxWidth > 0
+    ? imgRect.width / renderedRectInImageBox.boxWidth
+    : 1;
+  const scaleY = renderedRectInImageBox.boxHeight > 0
+    ? imgRect.height / renderedRectInImageBox.boxHeight
+    : 1;
+
+  slotContainerStyle.value = {
+    left: `${imgRect.left - wrapperRect.left + renderedRectInImageBox.x * scaleX}px`,
+    top: `${imgRect.top - wrapperRect.top + renderedRectInImageBox.y * scaleY}px`,
+    width: `${renderedRectInImageBox.width * scaleX}px`,
+    height: `${renderedRectInImageBox.height * scaleY}px`,
+  };
+};
+
+const setupResizeObserver = () => {
+  if (typeof ResizeObserver === 'undefined') return;
+
+  resizeObserver = new ResizeObserver(() => {
+    updateSlotBounds();
+  });
+
+  if (imageContentWrapperRef.value) {
+    resizeObserver.observe(imageContentWrapperRef.value);
+  }
+  if (imgRef.value) {
+    resizeObserver.observe(imgRef.value);
   }
 };
 
 onMounted(checkAndConvert);
+onMounted(() => {
+  setupResizeObserver();
+  window.addEventListener('resize', updateSlotBounds);
+  void nextTick(updateSlotBounds);
+});
+onBeforeUnmount(() => {
+  if (resizeObserver) {
+    resizeObserver.disconnect();
+    resizeObserver = null;
+  }
+  window.removeEventListener('resize', updateSlotBounds);
+});
 watch(() => props.src, checkAndConvert);
+watch(() => props.objectFit, () => void nextTick(updateSlotBounds));
+watch(() => props.imageStyle, () => void nextTick(updateSlotBounds), { deep: true });
+watch(() => naturalAspectRatio.value, () => void nextTick(updateSlotBounds));
 </script>
 
 <template>
@@ -79,11 +216,13 @@ watch(() => props.src, checkAndConvert);
     <div class="image-wrapper">
       <div 
         class="image-content-wrapper" 
+        ref="imageContentWrapperRef"
         :class="objectFitClass"
         :style="contentWrapperStyle"
       >
         <img 
           v-if="displaySrc" 
+          ref="imgRef"
           :src="displaySrc" 
           :alt="alt" 
           :loading="loading" 
@@ -92,7 +231,7 @@ watch(() => props.src, checkAndConvert);
           @load="onImageLoad"
           @error="isLoading = false"
         />
-        <div class="slot-container">
+        <div class="slot-container" :style="slotContainerStyle">
           <slot></slot>
         </div>
       </div>
