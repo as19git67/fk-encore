@@ -895,16 +895,18 @@ onUnmounted(() => {
 
 .fullscreen-content {
   position: relative;
-  max-width: 95vw;
-  max-height: 95vh;
+  width: 95vh;
+  height: 95vh;
   display: flex;
   flex-direction: column;
   align-items: center;
 }
 
 .fullscreen-content :deep(.heic-image-container) {
-  width: 95vw;
-  height: 85vh;
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 
 .fullscreen-nav {

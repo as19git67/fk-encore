@@ -362,8 +362,9 @@ onUnmounted(() => {
                 :alt="person.name"
                 class="person-img"
                 :imageStyle="getFaceStyle(person)"
-              />
-              <div class="face-highlight" :style="getFaceHighlightStyle(person.cover_bbox, true)" style="border: none !important; box-shadow: none !important;"></div>
+              >
+                <div class="face-highlight" :style="getFaceHighlightStyle(person.cover_bbox, true)" style="border: none !important; box-shadow: none !important;"></div>
+              </HeicImage>
               <div v-if="!multiSelectMode" class="person-overlay">
                  <div class="flex gap-2">
                     <Button 
@@ -410,8 +411,9 @@ onUnmounted(() => {
                 class="photo-item"
                 @click="selectedIndex = idx; isFullscreen = true"
             >
-                <HeicImage :src="getPhotoUrl(photo.filename)" :alt="photo.original_name" />
-                <div class="face-highlight" :style="getFaceHighlightStyle(selectedPersonDetail.faces[idx].bbox, true)"></div>
+                <HeicImage :src="getPhotoUrl(photo.filename)" :alt="photo.original_name">
+                    <div class="face-highlight" :style="getFaceHighlightStyle(selectedPersonDetail.faces[idx].bbox, true)"></div>
+                </HeicImage>
                 <div class="photo-overlay">
                     <div class="photo-name">{{ photo.original_name }}</div>
                 </div>
@@ -427,8 +429,9 @@ onUnmounted(() => {
       </div>
       <div class="fullscreen-content" @click.stop>
         <div class="relative flex-1 overflow-hidden flex items-center justify-center">
-            <HeicImage :src="getPhotoUrl(personPhotos[selectedIndex].filename)" :alt="personPhotos[selectedIndex].original_name" objectFit="contain" />
-            <div class="face-highlight" :style="getFaceHighlightStyle(selectedPersonDetail.faces[selectedIndex].bbox)"></div>
+            <HeicImage :src="getPhotoUrl(personPhotos[selectedIndex].filename)" :alt="personPhotos[selectedIndex].original_name" objectFit="contain">
+                <div class="face-highlight" :style="getFaceHighlightStyle(selectedPersonDetail.faces[selectedIndex].bbox)"></div>
+            </HeicImage>
         </div>
         <div class="fullscreen-nav">
             <Button icon="pi pi-chevron-left" rounded text @click="selectedIndex > 0 && selectedIndex--" :disabled="selectedIndex === 0" />
@@ -684,10 +687,11 @@ onUnmounted(() => {
 
 .fullscreen-content {
   position: relative;
-  width: 100%;
-  height: 100%;
+  width: 95vh;
+  height: 95vh;
   display: flex;
   flex-direction: column;
+  align-items: center;
 }
 
 .fullscreen-content :deep(.heic-image-container) {
@@ -695,13 +699,6 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   overflow: hidden;
-}
-
-.fullscreen-content :deep(img) {
-  width: 100%;
-  height: 100%;
-  max-height: calc(100vh - 80px);
-  object-fit: contain;
 }
 
 .fullscreen-nav {
