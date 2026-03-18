@@ -27,9 +27,45 @@ const personPhotos = computed(() => {
         .map(f => f.photo as Photo)
 })
 
+const selectedPersonPhoto = computed(() => {
+    if (selectedIndex.value < 0) return null
+    return personPhotos.value[selectedIndex.value] ?? null
+})
+
+const prevPersonPhoto = computed(() => {
+    if (selectedIndex.value <= 0) return null
+    return personPhotos.value[selectedIndex.value - 1] ?? null
+})
+
+const nextPersonPhoto = computed(() => {
+    if (selectedIndex.value < 0 || selectedIndex.value >= personPhotos.value.length - 1) return null
+    return personPhotos.value[selectedIndex.value + 1] ?? null
+})
+
+const selectedPersonFace = computed(() => {
+    if (!selectedPersonDetail.value || selectedIndex.value < 0) return null
+    return selectedPersonDetail.value.faces[selectedIndex.value] ?? null
+})
+
 const showRenameDialog = ref(false)
 const personToRename = ref<Person | null>(null)
 const newName = ref('')
+
+function normalizePersonName(name: string) {
+    return name.trim().toLocaleLowerCase()
+}
+
+const duplicateNamePerson = computed(() => {
+    if (!personToRename.value) return null
+    const normalized = normalizePersonName(newName.value)
+    if (!normalized) return null
+
+    return persons.value.find(
+        p => p.id !== personToRename.value!.id && normalizePersonName(p.name) === normalized
+    ) ?? null
+})
+
+const renameWillMerge = computed(() => !!duplicateNamePerson.value)
 
 const showMergeDialog = ref(false)
 const mergeSourceIds = ref<number[]>([])
@@ -62,13 +98,13 @@ function openMergeDialog() {
     if (selectedPersonIds.value.length < 2) return
     mergeSourceIds.value = [...selectedPersonIds.value]
     // Default target: first selected (can be changed in dialog)
-    mergeTargetId.value = mergeSourceIds.value[0]
+    mergeTargetId.value = mergeSourceIds.value[0] ?? null
     showMergeDialog.value = true
 }
 
 async function handleMerge() {
-    if (!mergeTargetId.value || mergeSourceIds.value.length < 2) return
-    
+    if (mergeTargetId.value == null || mergeSourceIds.value.length < 2) return
+
     // sourceIds for backend should not include targetId (backend handles it anyway, but cleaner)
     const sources = mergeSourceIds.value.filter(id => id !== mergeTargetId.value)
     
@@ -110,7 +146,7 @@ async function loadData() {
   }
 }
 
-async function openPersonDetails(person: Person) {
+async function openPersonDetails(person: Pick<Person, 'id'>) {
     loadingDetails.value = true
     error.value = ''
     try {
@@ -135,14 +171,38 @@ function openRename(person: Person) {
 }
 
 async function handleRename() {
-    if (!personToRename.value || !newName.value) return
-    try {
-        await updatePerson(personToRename.value.id, newName.value)
-        showRenameDialog.value = false
-        if (selectedPersonDetail.value && selectedPersonDetail.value.id === personToRename.value.id) {
-            selectedPersonDetail.value.name = newName.value
+    if (!personToRename.value) return
+
+    const sourcePersonId = personToRename.value.id
+    const trimmedName = newName.value.trim()
+    if (!trimmedName) return
+
+    const mergeCandidate = duplicateNamePerson.value
+    let detailIdToReload: number | null = null
+
+    if (selectedPersonDetail.value) {
+        const selectedId = selectedPersonDetail.value.id
+        if (selectedId === sourcePersonId || (mergeCandidate && selectedId === mergeCandidate.id)) {
+            detailIdToReload = sourcePersonId
         }
+    }
+
+    try {
+        await updatePerson(sourcePersonId, trimmedName)
+
+        // If another person already has this name, merge both identities into the renamed one.
+        if (mergeCandidate) {
+            await mergePersons([mergeCandidate.id], sourcePersonId)
+        }
+
+        showRenameDialog.value = false
         await loadData()
+
+        if (detailIdToReload) {
+            await openPersonDetails({ id: detailIdToReload })
+        } else if (selectedPersonDetail.value && selectedPersonDetail.value.id === sourcePersonId) {
+            selectedPersonDetail.value.name = trimmedName
+        }
     } catch (err: any) {
         error.value = err.message || 'Fehler beim Umbenennen'
     }
@@ -412,7 +472,7 @@ onUnmounted(() => {
                 @click="selectedIndex = idx; isFullscreen = true"
             >
                 <HeicImage :src="getPhotoUrl(photo.filename)" :alt="photo.original_name">
-                    <div class="face-highlight" :style="getFaceHighlightStyle(selectedPersonDetail.faces[idx].bbox, true)"></div>
+                    <div class="face-highlight" :style="getFaceHighlightStyle(selectedPersonDetail?.faces?.[idx]?.bbox, true)"></div>
                 </HeicImage>
                 <div class="photo-overlay">
                     <div class="photo-name">{{ photo.original_name }}</div>
@@ -422,22 +482,22 @@ onUnmounted(() => {
     </div>
 
     <!-- Fullscreen Overlay -->
-    <div v-if="isFullscreen && selectedIndex !== -1" class="fullscreen-overlay" @click="isFullscreen = false">
+    <div v-if="isFullscreen && selectedPersonPhoto" class="fullscreen-overlay" @click="isFullscreen = false">
       <div style="display: none">
-        <HeicImage v-if="selectedIndex > 0" :src="getPhotoUrl(personPhotos[selectedIndex - 1].filename)" />
-        <HeicImage v-if="selectedIndex < personPhotos.length - 1" :src="getPhotoUrl(personPhotos[selectedIndex + 1].filename)" />
+        <HeicImage v-if="prevPersonPhoto" :src="getPhotoUrl(prevPersonPhoto.filename)" />
+        <HeicImage v-if="nextPersonPhoto" :src="getPhotoUrl(nextPersonPhoto.filename)" />
       </div>
       <div class="fullscreen-content" @click.stop>
         <div class="relative flex-1 overflow-hidden flex items-center justify-center">
-            <HeicImage :src="getPhotoUrl(personPhotos[selectedIndex].filename)" :alt="personPhotos[selectedIndex].original_name" objectFit="contain">
-                <div class="face-highlight" :style="getFaceHighlightStyle(selectedPersonDetail.faces[selectedIndex].bbox)"></div>
+            <HeicImage :src="getPhotoUrl(selectedPersonPhoto.filename)" :alt="selectedPersonPhoto.original_name" objectFit="contain">
+                <div class="face-highlight" :style="getFaceHighlightStyle(selectedPersonFace?.bbox)"></div>
             </HeicImage>
         </div>
         <div class="fullscreen-nav">
             <Button icon="pi pi-chevron-left" rounded text @click="selectedIndex > 0 && selectedIndex--" :disabled="selectedIndex === 0" />
             <div class="fullscreen-info">
-              <div class="fullscreen-title">{{ personPhotos[selectedIndex].original_name }}</div>
-              <div class="fullscreen-date">{{ formatPhotoDate(personPhotos[selectedIndex]) }}</div>
+              <div class="fullscreen-title">{{ selectedPersonPhoto.original_name }}</div>
+              <div class="fullscreen-date">{{ formatPhotoDate(selectedPersonPhoto) }}</div>
             </div>
             <Button icon="pi pi-chevron-right" rounded text @click="selectedIndex < personPhotos.length - 1 && selectedIndex++" :disabled="selectedIndex === personPhotos.length - 1" />
         </div>
@@ -484,9 +544,13 @@ onUnmounted(() => {
                 <label for="name" class="font-bold">Name</label>
                 <InputText id="name" v-model="newName" class="flex-auto" autocomplete="off" @keyup.enter="handleRename" />
             </div>
+            <Message v-if="renameWillMerge" severity="warn" :closable="false">
+                Eine andere Person heißt bereits <b>{{ duplicateNamePerson?.name }}</b>.
+                Beim Speichern werden beide Personen zusammengeführt.
+            </Message>
             <div class="flex justify-end gap-2 mt-4">
                 <Button label="Abbrechen" icon="pi pi-times" class="p-button-text" @click="showRenameDialog = false" />
-                <Button label="Speichern" icon="pi pi-check" @click="handleRename" :disabled="!newName" />
+                <Button :label="renameWillMerge ? 'Zusammenführen' : 'Speichern'" :icon="renameWillMerge ? 'pi pi-clone' : 'pi pi-check'" @click="handleRename" :disabled="!newName.trim()" />
             </div>
         </div>
     </Dialog>
