@@ -517,6 +517,16 @@ export function getPhotoFileLogic(filename: string): { data: string; mimeType: s
   return { data, mimeType };
 }
 
+export async function convertHeicToJpeg(filePath: string): Promise<Buffer> {
+  const inputBuffer = await fs.promises.readFile(filePath);
+  const outputBuffer = await heicConvert({
+    buffer: inputBuffer,
+    format: 'JPEG',
+    quality: 0.9
+  });
+  return outputBuffer as Buffer;
+}
+
 // ---------- Albums ----------
 
 export function createAlbumLogic(userId: number, req: CreateAlbumRequest): Album {
