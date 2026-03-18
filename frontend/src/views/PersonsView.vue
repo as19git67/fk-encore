@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, onUnmounted } from 'vue'
+import { ref, onMounted, computed, onUnmounted, nextTick } from 'vue'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import Dialog from 'primevue/dialog'
@@ -59,6 +59,10 @@ const selectedPersonFace = computed(() => {
 const showRenameDialog = ref(false)
 const personToRename = ref<Person | null>(null)
 const newName = ref('')
+const inlineRenamePersonId = ref<number | null>(null)
+const inlineRenameValue = ref('')
+const inlineRenameSaving = ref(false)
+const inlineRenameInputRef = ref<HTMLInputElement | null>(null)
 
 function normalizePersonName(name: string) {
     return name.trim().toLocaleLowerCase()
@@ -92,11 +96,6 @@ function toggleSelect(id: number) {
     } else {
         selectedPersonIds.value.splice(index, 1)
     }
-}
-
-function startMultiSelect(id: number) {
-    multiSelectMode.value = true
-    selectedPersonIds.value = [id]
 }
 
 function cancelMultiSelect() {
@@ -193,12 +192,63 @@ function openRename(person: Person) {
     showRenameDialog.value = true
 }
 
-async function handleRename() {
-    if (!personToRename.value) return
+function startInlineRename(person: Person) {
+    if (multiSelectMode.value || inlineRenameSaving.value) return
+    inlineRenamePersonId.value = person.id
+    inlineRenameValue.value = person.name === 'Unbenannt' ? '' : person.name
+    void nextTick(() => {
+        inlineRenameInputRef.value?.focus()
+        inlineRenameInputRef.value?.select()
+    })
+}
+
+function cancelInlineRename() {
+    if (inlineRenameSaving.value) return
+    inlineRenamePersonId.value = null
+    inlineRenameValue.value = ''
+}
+
+async function submitInlineRename() {
+    if (inlineRenamePersonId.value == null || inlineRenameSaving.value) return
+    const person = persons.value.find((p) => p.id === inlineRenamePersonId.value)
+    if (!person) {
+        cancelInlineRename()
+        return
+    }
+
+    const trimmedName = inlineRenameValue.value.trim()
+    if (!trimmedName || trimmedName.toLowerCase() === 'unbenannt') return
+    if (trimmedName === person.name.trim()) {
+        cancelInlineRename()
+        return
+    }
+
+    personToRename.value = person
+    newName.value = inlineRenameValue.value
+    inlineRenameSaving.value = true
+    const renamed = await handleRename()
+    inlineRenameSaving.value = false
+
+    if (renamed) {
+        inlineRenamePersonId.value = null
+        inlineRenameValue.value = ''
+    }
+}
+
+function handlePersonInfoClick(person: Person) {
+    if (multiSelectMode.value) {
+        toggleSelect(person.id)
+        return
+    }
+    startInlineRename(person)
+}
+
+async function handleRename(): Promise<boolean> {
+    if (!personToRename.value) return false
 
     const sourcePersonId = personToRename.value.id
     const trimmedName = newName.value.trim()
-    if (!trimmedName || trimmedName.toLowerCase() === 'unbenannt') return
+    if (!trimmedName || trimmedName.toLowerCase() === 'unbenannt') return false
 
     const mergeCandidate = duplicateNamePerson.value
     let detailIdToReload: number | null = null
@@ -226,8 +276,10 @@ async function handleRename() {
         } else if (selectedPersonDetail.value && selectedPersonDetail.value.id === sourcePersonId) {
             selectedPersonDetail.value.name = trimmedName
         }
+        return true
     } catch (err: any) {
         error.value = err.message || 'Fehler beim Umbenennen'
+        return false
     }
 }
 
@@ -564,23 +616,7 @@ onUnmounted(() => {
               >
                 <div class="face-highlight" :style="getFaceHighlightStyle(person.cover_bbox, true)" style="border: none !important; box-shadow: none !important;"></div>
               </HeicImage>
-              <div v-if="!multiSelectMode" class="person-overlay">
-                 <div class="flex gap-2">
-                    <Button 
-                        icon="pi pi-pencil" 
-                        class="p-button-rounded p-button-white" 
-                        @click.stop="openRename(person)"
-                        v-tooltip="'Umbenennen'"
-                    />
-                    <Button 
-                        icon="pi pi-check-square" 
-                        class="p-button-rounded p-button-white" 
-                        @click.stop="startMultiSelect(person.id)"
-                        v-tooltip="'Auswählen'"
-                    />
-                 </div>
-              </div>
-              <div v-else class="selection-overlay">
+              <div v-if="multiSelectMode" class="selection-overlay">
                   <div class="selection-checkbox" :class="{ 'checked': selectedPersonIds.includes(person.id) }">
                       <i v-if="selectedPersonIds.includes(person.id)" class="pi pi-check"></i>
                   </div>
@@ -589,9 +625,33 @@ onUnmounted(() => {
                 {{ person.faceCount }} {{ person.faceCount === 1 ? 'Foto' : 'Fotos' }}
               </div>
             </div>
-            <div class="person-info">
-              <h3 class="person-name truncate">{{ person.name }}</h3>
-              <p class="person-date mt-1">Aktualisiert {{ new Date(person.updated_at).toLocaleDateString() }}</p>
+            <div class="person-info" @click.stop="handlePersonInfoClick(person)">
+              <div v-if="inlineRenamePersonId === person.id" class="person-rename-row">
+                <input
+                  ref="inlineRenameInputRef"
+                  v-model="inlineRenameValue"
+                  class="person-name-input"
+                  type="text"
+                  autocomplete="off"
+                  :disabled="inlineRenameSaving"
+                  @click.stop
+                  @keydown.enter.prevent.stop="submitInlineRename"
+                  @keydown.esc.prevent.stop="cancelInlineRename"
+                />
+                <Button
+                  icon="pi pi-check"
+                  class="person-rename-btn p-button-rounded p-button-sm p-button-text"
+                  :disabled="inlineRenameSaving || !inlineRenameValue.trim() || inlineRenameValue.trim().toLowerCase() === 'unbenannt'"
+                  @click.stop="submitInlineRename"
+                />
+                <Button
+                  icon="pi pi-times"
+                  class="person-rename-btn p-button-rounded p-button-sm p-button-text"
+                  :disabled="inlineRenameSaving"
+                  @click.stop="cancelInlineRename"
+                />
+              </div>
+              <h3 v-else class="person-name truncate">{{ person.name }}</h3>
             </div>
           </div>
         </div>
@@ -808,22 +868,6 @@ onUnmounted(() => {
   transition: transform 0.5s;
 }
 
-.person-overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: all 0.2s;
-}
-
-.person-item:hover .person-overlay {
-  background: rgba(0, 0, 0, 0.2);
-  opacity: 1;
-}
-
 .person-badge {
   position: absolute;
   bottom: 0.5rem;
@@ -837,26 +881,53 @@ onUnmounted(() => {
 }
 
 .person-info {
-  padding: 0.75rem;
+  min-height: 2.2rem;
+  padding: 0.25rem 0.55rem;
+  display: flex;
+  align-items: center;
+  cursor: text;
 }
 
 .person-name {
   font-weight: 600;
   color: #111827;
+  margin: 0;
+  line-height: 1.1;
+  width: 100%;
 }
 
-.person-date {
-  font-size: 0.75rem;
-  color: #6b7280;
+.person-rename-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  width: 100%;
+  min-width: 0;
 }
 
-.p-button-white {
-    background: white;
-    color: #333;
-    border: none;
+.person-name-input {
+  flex: 1 1 auto;
+  width: 0;
+  min-width: 0;
+  font-weight: 600;
+  color: #111827;
+  border: 1px solid #d1d5db;
+  border-radius: 0.375rem;
+  padding: 0.2rem 0.4rem;
+  line-height: 1.1;
+  outline: none;
 }
-.p-button-white:hover {
-    background: #f0f0f0;
+
+.person-name-input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+
+.person-rename-btn {
+  width: 1.55rem;
+  height: 1.55rem;
+  min-width: 1.55rem;
+  padding: 0;
+  flex: 0 0 auto;
 }
 
 /* Photo Grid (for Details) */
