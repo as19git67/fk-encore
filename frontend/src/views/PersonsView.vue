@@ -20,11 +20,19 @@ const loadingDetails = ref(false)
 const isFullscreen = ref(false)
 const selectedIndex = ref(-1)
 
-const personPhotos = computed(() => {
+const personFaceItems = computed(() => {
     if (!selectedPersonDetail.value) return []
     return selectedPersonDetail.value.faces
         .filter(f => !!f.photo)
-        .map(f => f.photo as Photo)
+        .map(f => ({ face: f, photo: f.photo as Photo }))
+})
+
+const personPhotos = computed(() => {
+    return personFaceItems.value.map(item => item.photo)
+})
+
+const firstPersonFaceItem = computed(() => {
+    return personFaceItems.value[0] ?? null
 })
 
 const selectedPersonPhoto = computed(() => {
@@ -43,8 +51,8 @@ const nextPersonPhoto = computed(() => {
 })
 
 const selectedPersonFace = computed(() => {
-    if (!selectedPersonDetail.value || selectedIndex.value < 0) return null
-    return selectedPersonDetail.value.faces[selectedIndex.value] ?? null
+    if (selectedIndex.value < 0) return null
+    return personFaceItems.value[selectedIndex.value]?.face ?? null
 })
 
 const showRenameDialog = ref(false)
@@ -121,6 +129,7 @@ async function handleMerge() {
 
 const reindexing = ref(false)
 let reindexInterval: any = null
+const viewportWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1024)
 
 async function loadData() {
   loading.value = true
@@ -264,7 +273,10 @@ function getCoverUrl(person: Person) {
     return 'https://www.primefaces.org/wp-content/uploads/2020/05/placeholder.png'
 }
 
-function getFaceStyle(person: Person | { cover_bbox?: any }) {
+function getFaceStyle(
+    person: Person | { cover_bbox?: any },
+    options?: { targetFaceRatio?: number; maxZoom?: number }
+) {
     if (!person.cover_bbox) return {}
     
     // cover_bbox values should be relative (0..1)
@@ -280,17 +292,57 @@ function getFaceStyle(person: Person | { cover_bbox?: any }) {
     const centerX = x + width / 2
     const centerY = y + height / 2
     
-    // Zoom factor: how much of the image width should the face occupy?
-    // If face is 0.1 wide, and we want it to be 0.5 of the container, zoom is 5x.
-    // Let's aim for the face to be roughly 60% of the container.
-    const zoom = Math.max(1, Math.min(4, 0.6 / Math.max(width, height)))
-    
+    // Tune zoom so large hero images do not over-zoom on small/very tight detections.
+    const targetFaceRatio = options?.targetFaceRatio ?? 0.6
+    const maxZoom = options?.maxZoom ?? 4
+    const zoom = Math.max(1, Math.min(maxZoom, targetFaceRatio / Math.max(width, height)))
+
     return {
         transform: `scale(${zoom})`,
         transformOrigin: `${centerX * 100}% ${centerY * 100}%`,
         objectFit: 'cover',
         display: 'block'
     }
+}
+
+function getHeroFaceTransform(bbox: any) {
+    if (!bbox) return {}
+
+    const { x, y, width, height } = bbox
+    if (x > 1.1 || y > 1.1 || width > 1.1 || height > 1.1) return {}
+
+    const centerX = x + width / 2
+    const centerY = y + height / 2
+    const heroWidth = Math.min(1024, Math.max(320, viewportWidth.value - 32))
+    const targetFaceRatio = Math.max(0.25, Math.min(0.35, 300 / heroWidth))
+    const zoom = Math.max(1, Math.min(2.4, targetFaceRatio / Math.max(width, height, 0.01)))
+
+    return {
+        transform: `scale(${zoom})`,
+        transformOrigin: `${centerX * 100}% ${centerY * 100}%`
+    }
+}
+
+function getHeroImageStyle(bbox: any) {
+    return {
+        objectFit: 'scale-down',
+        display: 'block',
+        ...getHeroFaceTransform(bbox)
+    }
+}
+
+function getHeroFaceHighlightStyle(bbox: any) {
+    const baseStyle = getFaceHighlightStyle(bbox)
+    if ((baseStyle as any).display === 'none') return baseStyle
+
+    return {
+        ...baseStyle,
+        ...getHeroFaceTransform(bbox)
+    }
+}
+
+function handleResize() {
+    viewportWidth.value = window.innerWidth
 }
 
 function getFaceHighlightStyle(bbox: any, isGridItem: boolean = false) {
@@ -351,11 +403,13 @@ function handleKeydown(e: KeyboardEvent) {
 onMounted(() => {
   loadData()
   window.addEventListener('keydown', handleKeydown)
+  window.addEventListener('resize', handleResize)
 })
 
 onUnmounted(() => {
     if (reindexInterval) clearInterval(reindexInterval)
     window.removeEventListener('keydown', handleKeydown)
+    window.removeEventListener('resize', handleResize)
 })
 </script>
 
@@ -464,19 +518,37 @@ onUnmounted(() => {
             <i class="pi pi-spin pi-spinner text-4xl mb-2"></i>
             <p>Fotos werden geladen...</p>
         </div>
-        <div v-else class="photo-grid">
-            <div 
-                v-for="(photo, idx) in personPhotos" 
-                :key="photo.id" 
+        <div v-else>
+            <div
+                v-if="firstPersonFaceItem"
+                class="person-hero"
+                @click="selectedIndex = 0; isFullscreen = true"
+            >
+                <HeicImage
+                    :src="getPhotoUrl(firstPersonFaceItem.photo.filename)"
+                    :alt="firstPersonFaceItem.photo.original_name"
+                    class="person-hero-image"
+                    objectFit="scale-down"
+                    :imageStyle="getHeroImageStyle(firstPersonFaceItem.face.bbox)"
+                >
+                    <div class="face-highlight" :style="getHeroFaceHighlightStyle(firstPersonFaceItem.face.bbox)"></div>
+                </HeicImage>
+            </div>
+
+            <div class="photo-grid">
+            <div
+                v-for="(item, idx) in personFaceItems"
+                :key="item.face.id"
                 class="photo-item"
                 @click="selectedIndex = idx; isFullscreen = true"
             >
-                <HeicImage :src="getPhotoUrl(photo.filename)" :alt="photo.original_name">
-                    <div class="face-highlight" :style="getFaceHighlightStyle(selectedPersonDetail?.faces?.[idx]?.bbox, true)"></div>
+                <HeicImage :src="getPhotoUrl(item.photo.filename)" :alt="item.photo.original_name">
+                    <div class="face-highlight" :style="getFaceHighlightStyle(item.face.bbox, true)"></div>
                 </HeicImage>
                 <div class="photo-overlay">
-                    <div class="photo-name">{{ photo.original_name }}</div>
+                    <div class="photo-name">{{ item.photo.original_name }}</div>
                 </div>
+            </div>
             </div>
         </div>
     </div>
@@ -539,20 +611,24 @@ onUnmounted(() => {
     </Dialog>
 
     <Dialog v-model:visible="showRenameDialog" header="Person umbenennen" :modal="true" class="w-full max-w-md">
-        <div class="flex flex-col gap-4 mt-2">
-            <div class="flex flex-col gap-2">
-                <label for="name" class="font-bold">Name</label>
-                <InputText id="name" v-model="newName" class="flex-auto" autocomplete="off" @keyup.enter="handleRename" />
-            </div>
-            <Message v-if="renameWillMerge" severity="warn" :closable="false">
-                Eine andere Person heißt bereits <b>{{ duplicateNamePerson?.name }}</b>.
-                Beim Speichern werden beide Personen zusammengeführt.
-            </Message>
-            <div class="flex justify-end gap-2 mt-4">
-                <Button label="Abbrechen" icon="pi pi-times" class="p-button-text" @click="showRenameDialog = false" />
-                <Button :label="renameWillMerge ? 'Zusammenführen' : 'Speichern'" :icon="renameWillMerge ? 'pi pi-clone' : 'pi pi-check'" @click="handleRename" :disabled="!newName.trim()" />
-            </div>
+      <div class="rename-rows">
+        <div class="rename-field-row">
+          <label for="name" class="font-bold rename-field-label">Name</label>
+          <InputText id="name" v-model="newName" class="flex-auto" autocomplete="off" @keyup.enter="handleRename"/>
+          <div class="flex justify-end gap-2 mt-4">
+            <Button label="Abbrechen" icon="pi pi-times" class="p-button-text" @click="showRenameDialog = false"/>
+            <Button :label="renameWillMerge ? 'Zusammenführen' : 'Speichern'"
+                    :icon="renameWillMerge ? 'pi pi-clone' : 'pi pi-check'" @click="handleRename"
+                    :disabled="!newName.trim()"/>
+          </div>
         </div>
+        <div class="rename-field-row">
+          <Message v-if="renameWillMerge" severity="warn" :closable="false">
+            <div>Eine andere Person heißt bereits <b>{{ duplicateNamePerson?.name }}</b>.</div>
+            <div class="merge-warning-line">Beim Speichern werden beide Personen zusammengeführt.</div>
+          </Message>
+        </div>
+      </div>
     </Dialog>
   </div>
 </template>
@@ -688,6 +764,45 @@ onUnmounted(() => {
     gap: 1rem;
 }
 
+.person-hero {
+    width: 100%;
+    max-width: 1024px;
+    margin: 0 auto 1.25rem;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #f3f4f6;
+    border: 1px solid #e5e7eb;
+    cursor: pointer;
+    aspect-ratio: 16 / 9;
+}
+
+.person-hero-image :deep(.heic-image-container) {
+    width: 100%;
+    height: clamp(220px, 52vw, 620px);
+}
+
+.person-hero-image :deep(img) {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+@media (max-width: 640px) {
+    .person-hero {
+        aspect-ratio: 4 / 3;
+    }
+
+    .person-hero-image :deep(.heic-image-container) {
+        height: clamp(220px, 62vw, 360px);
+    }
+}
+
+@media (min-width: 1024px) {
+    .person-hero-image :deep(.heic-image-container) {
+        height: clamp(420px, 58vh, 760px);
+    }
+}
+
 .photo-item {
     position: relative;
     aspect-ratio: 1;
@@ -805,6 +920,28 @@ onUnmounted(() => {
 .gap-4 { column-gap: 1rem; row-gap: 1rem; }
 .gap-3 { column-gap: 0.75rem; row-gap: 0.75rem; }
 .mr-4 { margin-right: 1rem; }
+
+
+.rename-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.rename-field-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.rename-field-label {
+    min-width: 52px;
+    line-height: 1;
+}
+
+.merge-warning-line {
+    margin-top: 0.35rem;
+}
 
 .face-highlight {
     pointer-events: none;
