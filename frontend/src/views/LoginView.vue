@@ -25,7 +25,7 @@ async function handleLogin() {
   loading.value = true
   try {
     await auth.login(email.value, password.value)
-    router.push('/users')
+    router.push('/photos')
   } catch (err: any) {
     error.value = err.message || 'Anmeldung fehlgeschlagen'
   } finally {
@@ -38,7 +38,7 @@ async function handlePasskeyLogin() {
   passkeyLoading.value = true
   try {
     await auth.loginWithPasskey()
-    router.push('/users')
+    router.push('/photos')
   } catch (err: any) {
     if (err.name === 'NotAllowedError') {
       error.value = 'Passkey-Anmeldung abgebrochen'

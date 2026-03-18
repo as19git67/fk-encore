@@ -1,8 +1,21 @@
 import Database from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import { config } from "dotenv";
 import path from "path";
 import fs from "fs";
-import "dotenv/config";
+
+// Load .env from project root
+const rootDir = process.cwd();
+const envPath = path.resolve(rootDir, ".env");
+if (fs.existsSync(envPath)) {
+  config({ path: envPath });
+} else {
+  // Try one level up if we are inside a subdirectory (e.g. during build/test)
+  const altEnvPath = path.resolve(rootDir, "..", ".env");
+  if (fs.existsSync(altEnvPath)) {
+    config({ path: altEnvPath });
+  }
+}
 import * as schema from "./schema";
 import { seed } from "./seed";
 
@@ -123,6 +136,29 @@ function createDb(): BetterSQLite3Database<typeof schema> {
       FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS persons (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      name TEXT NOT NULL DEFAULT 'Unbenannt',
+      cover_face_id INTEGER,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS faces (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      photo_id INTEGER NOT NULL,
+      bbox TEXT NOT NULL,
+      embedding TEXT NOT NULL,
+      person_id INTEGER,
+      quality INTEGER DEFAULT 0,
+      ignored INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE,
+      FOREIGN KEY (person_id) REFERENCES persons(id) ON DELETE SET NULL
+    );
   `);
 
   // Ensure hash column exists in case the table already existed without it
@@ -132,6 +168,19 @@ function createDb(): BetterSQLite3Database<typeof schema> {
 
   try {
     sqlite.exec("ALTER TABLE photos ADD COLUMN taken_at TEXT;");
+  } catch (e) {}
+
+  // Ensure new tables/columns for people feature (idempotent guards)
+  try {
+    sqlite.exec("ALTER TABLE persons ADD COLUMN cover_face_id INTEGER;");
+  } catch (e) {}
+
+  try {
+    sqlite.exec("ALTER TABLE faces ADD COLUMN quality INTEGER DEFAULT 0;");
+  } catch (e) {}
+
+  try {
+    sqlite.exec("ALTER TABLE faces ADD COLUMN ignored INTEGER NOT NULL DEFAULT 0;");
   } catch (e) {}
 
   return db;

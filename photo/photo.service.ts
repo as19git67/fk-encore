@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 import exifr from "exifr";
+import { exiftool } from "exiftool-vendored";
 import { eq, and, or, sql, inArray } from "drizzle-orm";
 import db from "../db/database";
 import type { IncomingMessage } from "http";
@@ -11,6 +12,8 @@ import {
   albums,
   albumPhotos,
   albumShares,
+  persons,
+  faces,
 } from "../db/schema";
 import type {
   Photo,
@@ -23,12 +26,189 @@ import type {
   ListAlbumsResponse,
   ListPhotosResponse,
   DeleteResponse,
+  Person,
+  ListPersonsResponse,
+  PersonDetails,
+  MergePersonsRequest,
 } from "../db/types";
+import heicConvert from "heic-convert";
 
 export const UPLOAD_DIR = path.resolve(process.env.PHOTO_UPLOAD_DIR || "uploads/photos");
+const INSIGHTFACE_SERVICE_URL = process.env.INSIGHTFACE_SERVICE_URL || "http://localhost:8000";
+
+// Distance threshold for face matching.
+// InsightFace uses cosine similarity (higher is better, 1.0 is identical).
+// We convert it to a "distance" if we want, or just use similarity directly.
+// The config value is now treated as minimum similarity for a match.
+const FACE_SIMILARITY_THRESHOLD = parseFloat(process.env.FACE_DISTANCE_THRESHOLD || "0.45");
+export const ENABLE_LOCAL_FACES = process.env.ENABLE_LOCAL_FACES === "true";
 
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
+
+// ---------- People & Faces ----------
+
+async function callInsightFaceDetect(filePath: string): Promise<{ faces: any[], width: number, height: number }> {
+  const formData = new FormData();
+  const fileData = await fs.promises.readFile(filePath);
+  const blob = new Blob([fileData], { type: 'image/jpeg' });
+  formData.append('file', blob, path.basename(filePath));
+
+  const response = await fetch(`${INSIGHTFACE_SERVICE_URL}/detect`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error(`InsightFace service returned ${response.status}: ${await response.text()}`);
+  }
+
+  const data = await response.json() as { faces: any[], width: number, height: number };
+  return data;
+}
+
+export async function indexPhotoFaces(userId: number, photoId: number, resetIgnored: boolean = false): Promise<void> {
+  if (!ENABLE_LOCAL_FACES) {
+    console.log("Local face indexing is disabled via ENABLE_LOCAL_FACES=false");
+    return;
+  }
+
+  const photo = db
+    .select()
+    .from(photos)
+    .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+    .get();
+  if (!photo) return;
+
+  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  if (!fs.existsSync(filePath)) return;
+
+  let processingPath = filePath;
+  let tempPath: string | null = null;
+
+  // Check if it's a HEIC file
+  const ext = path.extname(photo.filename).toLowerCase();
+  if (ext === ".heic" || ext === ".heif") {
+    try {
+      const inputBuffer = await fs.promises.readFile(filePath);
+      const outputBuffer = await heicConvert({
+        buffer: inputBuffer,
+        format: 'JPEG',
+        quality: 1
+      });
+      tempPath = path.join(UPLOAD_DIR, `temp_${photoId}_${Date.now()}.jpg`);
+      await fs.promises.writeFile(tempPath, outputBuffer as Buffer);
+      processingPath = tempPath;
+    } catch (err) {
+      console.error(`Error converting HEIC photo ${photoId}:`, err);
+    }
+  }
+
+  // Get existing ignored faces for this photo to preserve them (if not resetting)
+  const ignoredFaces = resetIgnored ? [] : db.select().from(faces).where(and(eq(faces.photo_id, photoId), eq(faces.ignored, true))).all();
+
+  // Remove faces for this photo
+  if (resetIgnored) {
+    // Remove ALL faces (including ignored ones)
+    db.delete(faces).where(eq(faces.photo_id, photoId)).run();
+  } else {
+    // Only remove non-ignored faces
+    db.delete(faces).where(and(eq(faces.photo_id, photoId), eq(faces.ignored, false))).run();
+  }
+
+  try {
+    const detectResult = await callInsightFaceDetect(processingPath);
+    const facesDetected = detectResult.faces;
+    const imgWidth = detectResult.width;
+    const imgHeight = detectResult.height;
+    
+    console.log(`Detected ${facesDetected.length} faces in photo ${photoId} (size: ${imgWidth}x${imgHeight})`);
+
+    for (const f of facesDetected) {
+      // Normalize bbox to 0..1 relative values
+      const bbox = {
+        x: f.bbox[0] / imgWidth,
+        y: f.bbox[1] / imgHeight,
+        width: (f.bbox[2] - f.bbox[0]) / imgWidth,
+        height: (f.bbox[3] - f.bbox[1]) / imgHeight
+      };
+
+      // Check if this face matches an ignored one (by bbox overlap)
+      const isIgnored = ignoredFaces.some(iface => {
+        const iBbox = JSON.parse(iface.bbox);
+        return calculateOverlap(bbox, iBbox) > 0.8; // 80% overlap threshold
+      });
+
+      if (isIgnored) continue;
+
+      const embedding = f.embedding;
+
+      // Find best matching person (using cosine similarity)
+      const match = await findBestPersonMatch(userId, embedding);
+
+      let personId = match?.personId;
+      if (!personId) {
+        // Create new person
+        const newPerson = db
+          .insert(persons)
+          .values({
+            user_id: userId,
+            name: "Unbenannt",
+          })
+          .returning()
+          .get();
+        personId = newPerson.id;
+      }
+
+      const faceResult = db.insert(faces)
+        .values({
+          user_id: userId,
+          photo_id: photoId,
+          bbox: JSON.stringify(bbox),
+          embedding: JSON.stringify(embedding),
+          person_id: personId,
+          quality: 100, 
+        })
+        .returning()
+        .get();
+
+      // Set cover_face_id if not set for person OR if it refers to a non-existent face
+      const currentPerson = db.select().from(persons).where(eq(persons.id, personId)).get();
+      let needsCoverUpdate = false;
+      if (currentPerson) {
+          if (!currentPerson.cover_face_id) {
+              needsCoverUpdate = true;
+          } else {
+              const coverFaceExists = db.select({ id: faces.id }).from(faces).where(eq(faces.id, currentPerson.cover_face_id)).get();
+              if (!coverFaceExists) {
+                  needsCoverUpdate = true;
+              }
+          }
+      }
+
+      if (needsCoverUpdate) {
+          db.update(persons).set({ 
+              cover_face_id: faceResult.id,
+              updated_at: sql`datetime('now')`
+          }).where(eq(persons.id, personId)).run();
+      } else {
+          db.update(persons).set({ 
+              updated_at: sql`datetime('now')`
+          }).where(eq(persons.id, personId)).run();
+      }
+    }
+  } catch (err) {
+    console.error(`Error indexing faces for photo ${photoId}:`, err);
+  } finally {
+    if (tempPath && fs.existsSync(tempPath)) {
+      try {
+        await fs.promises.unlink(tempPath);
+      } catch (e) {
+        // Ignore
+      }
+    }
+  }
 }
 
 async function getExifDate(filePath: string): Promise<string | null> {
@@ -102,6 +282,13 @@ export async function uploadPhotoStream(
     .returning()
     .get();
 
+  if (ENABLE_LOCAL_FACES) {
+    // Run face detection in background
+    indexPhotoFaces(userId, row.id).catch(err => {
+        console.error("Face indexing error:", err);
+    });
+  }
+
   return {
     id: row.id,
     user_id: row.user_id,
@@ -153,6 +340,13 @@ export async function uploadPhotoLogic(
     })
     .returning()
     .get();
+
+  if (ENABLE_LOCAL_FACES) {
+    // Run face detection in background
+    indexPhotoFaces(userId, row.id).catch(err => {
+        console.error("Face indexing error:", err);
+    });
+  }
 
   return {
     id: row.id,
@@ -249,6 +443,57 @@ export async function refreshPhotoMetadataLogic(userId: number, photoId: number)
   return { success: true, taken_at: takenAt ?? undefined };
 }
 
+export async function updatePhotoDateLogic(
+  userId: number,
+  photoId: number,
+  takenAt: string
+): Promise<{ success: boolean; taken_at: string }> {
+  const photo = db
+    .select()
+    .from(photos)
+    .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+    .get();
+
+  if (!photo) {
+    throw new Error("Photo not found or unauthorized");
+  }
+
+  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  if (!fs.existsSync(filePath)) {
+    throw new Error("File not found on disk");
+  }
+
+  // 1. Update database
+  db.update(photos)
+    .set({ taken_at: takenAt })
+    .where(eq(photos.id, photoId))
+    .run();
+
+  // 2. Update file metadata
+  try {
+    const date = new Date(takenAt);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    const formattedDate = `${year}:${month}:${day} ${hours}:${minutes}:${seconds}`;
+
+    // Write to multiple tags to ensure compatibility
+    await exiftool.write(filePath, {
+      DateTimeOriginal: formattedDate,
+      CreateDate: formattedDate,
+      ModifyDate: formattedDate,
+    }, ["-overwrite_original"]);
+  } catch (err) {
+    console.error("Error updating EXIF data with exiftool:", err);
+    // Don't throw error if DB update succeeded, but log it
+  }
+
+  return { success: true, taken_at: takenAt };
+}
+
 export function getPhotoFileLogic(filename: string): { data: string; mimeType: string } {
   const filePath = path.join(UPLOAD_DIR, filename);
   if (!fs.existsSync(filePath)) {
@@ -263,6 +508,16 @@ export function getPhotoFileLogic(filename: string): { data: string; mimeType: s
   else if (ext === ".webp") mimeType = "image/webp";
 
   return { data, mimeType };
+}
+
+export async function convertHeicToJpeg(filePath: string): Promise<Buffer> {
+  const inputBuffer = await fs.promises.readFile(filePath);
+  const outputBuffer = await heicConvert({
+    buffer: inputBuffer,
+    format: 'JPEG',
+    quality: 0.9
+  });
+  return outputBuffer as Buffer;
 }
 
 // ---------- Albums ----------
@@ -456,11 +711,438 @@ export function shareAlbumLogic(userId: number, req: ShareAlbumRequest): { succe
       user_id: req.userId,
       access_level: req.accessLevel,
     })
-    .onConflictDoUpdate({
-      target: [albumShares.album_id, albumShares.user_id],
-      set: { access_level: req.accessLevel },
+    .run();
+  return { success: true };
+}
+
+async function findBestPersonMatch(
+  userId: number,
+  embedding: number[]
+): Promise<{ personId: number; distance: number } | null> {
+  const allFaces = db
+    .select({
+      person_id: faces.person_id,
+      embedding: faces.embedding,
     })
+    .from(faces)
+    .where(and(eq(faces.user_id, userId), sql`${faces.person_id} IS NOT NULL`, eq(faces.ignored, false)))
+    .all();
+
+  // Group embeddings by person
+  const personEmbeddings: Record<number, number[][]> = {};
+  for (const face of allFaces) {
+    if (!personEmbeddings[face.person_id!]) {
+      personEmbeddings[face.person_id!] = [];
+    }
+    personEmbeddings[face.person_id!].push(JSON.parse(face.embedding as string) as number[]);
+  }
+
+  let bestMatch: { personId: number; distance: number } | null = null;
+
+  for (const [personIdStr, embeddings] of Object.entries(personEmbeddings)) {
+    const personId = parseInt(personIdStr);
+
+    const centroid = computeCentroid(embeddings);
+    const similarity = cosineSimilarity(embedding, centroid);
+
+    if (similarity > FACE_SIMILARITY_THRESHOLD) {
+      if (!bestMatch || similarity > bestMatch.distance) {
+        bestMatch = { personId, distance: similarity };
+      }
+    }
+  }
+
+  return bestMatch;
+}
+
+/**
+ * Compute the centroid (mean) of a set of embedding vectors.
+ */
+function computeCentroid(embeddings: number[][]): number[] {
+  const dim = embeddings[0].length;
+  const centroid = new Array(dim).fill(0);
+  for (const emb of embeddings) {
+    for (let i = 0; i < dim; i++) {
+      centroid[i] += emb[i];
+    }
+  }
+  for (let i = 0; i < dim; i++) {
+    centroid[i] /= embeddings.length;
+  }
+  return centroid;
+}
+
+/**
+ * Cosine similarity between two vectors.
+ */
+function cosineSimilarity(v1: number[], v2: number[]): number {
+  let dotProduct = 0;
+  let norm1 = 0;
+  let norm2 = 0;
+  for (let i = 0; i < v1.length; i++) {
+    dotProduct += v1[i] * v2[i];
+    norm1 += v1[i] * v1[i];
+    norm2 += v2[i] * v2[i];
+  }
+  if (norm1 === 0 || norm2 === 0) return 0;
+  return dotProduct / (Math.sqrt(norm1) * Math.sqrt(norm2));
+}
+
+function calculateOverlap(b1: any, b2: any): number {
+  const x1 = Math.max(b1.x, b2.x);
+  const y1 = Math.max(b1.y, b2.y);
+  const x2 = Math.min(b1.x + b1.width, b2.x + b2.width);
+  const y2 = Math.min(b1.y + b1.height, b2.y + b2.height);
+
+  if (x1 >= x2 || y1 >= y2) return 0;
+
+  const intersectionArea = (x2 - x1) * (y2 - y1);
+  const area1 = b1.width * b1.height;
+  const area2 = b2.width * b2.height;
+  const unionArea = area1 + area2 - intersectionArea;
+
+  if (unionArea === 0) return 0;
+  return intersectionArea / unionArea;
+}
+
+export function listPersonsLogic(userId: number): ListPersonsResponse {
+  const rows = db
+    .select({
+      id: persons.id,
+      user_id: persons.user_id,
+      name: persons.name,
+      cover_face_id: sql<number>`COALESCE(
+        (
+          SELECT f.id
+          FROM faces f
+          INNER JOIN photos p ON p.id = f.photo_id
+          WHERE f.person_id = persons.id
+            AND f.user_id = persons.user_id
+            AND f.ignored = 0
+          ORDER BY COALESCE(julianday(p.taken_at), julianday(p.created_at), 0) DESC, f.id DESC
+          LIMIT 1
+        ),
+        persons.cover_face_id
+      )`,
+      created_at: persons.created_at,
+      updated_at: persons.updated_at,
+      faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM faces f WHERE f.person_id = persons.id), 0) AS INTEGER)`,
+      cover_filename: sql<string>`COALESCE(
+        (
+          SELECT p.filename
+          FROM faces f
+          INNER JOIN photos p ON p.id = f.photo_id
+          WHERE f.person_id = persons.id
+            AND f.user_id = persons.user_id
+            AND f.ignored = 0
+          ORDER BY COALESCE(julianday(p.taken_at), julianday(p.created_at), 0) DESC, f.id DESC
+          LIMIT 1
+        ),
+        ''
+      )`,
+      cover_bbox: sql<string>`COALESCE(
+        (
+          SELECT f.bbox
+          FROM faces f
+          INNER JOIN photos p ON p.id = f.photo_id
+          WHERE f.person_id = persons.id
+            AND f.user_id = persons.user_id
+            AND f.ignored = 0
+          ORDER BY COALESCE(julianday(p.taken_at), julianday(p.created_at), 0) DESC, f.id DESC
+          LIMIT 1
+        ),
+        ''
+      )`,
+    })
+    .from(persons)
+    .where(eq(persons.user_id, userId))
+    .orderBy(sql`${persons.updated_at} DESC`)
+    .all();
+
+  return {
+    persons: rows.map((r) => ({
+      id: r.id,
+      user_id: r.user_id,
+      name: r.name,
+      cover_face_id: r.cover_face_id ?? undefined,
+      created_at: r.created_at ?? "",
+      updated_at: r.updated_at ?? "",
+      faceCount: r.faceCount,
+      cover_filename: r.cover_filename ?? undefined,
+      cover_bbox: r.cover_bbox ? JSON.parse(r.cover_bbox) : undefined,
+    })),
+    enableLocalFaces: ENABLE_LOCAL_FACES,
+  };
+}
+
+export function getPersonDetailsLogic(userId: number, personId: number): PersonDetails {
+  const person = db
+    .select()
+    .from(persons)
+    .where(and(eq(persons.id, personId), eq(persons.user_id, userId)))
+    .get();
+  if (!person) throw new Error("Person not found");
+
+  const faceRows = db
+    .select({
+      id: faces.id,
+      user_id: faces.user_id,
+      photo_id: faces.photo_id,
+      bbox: faces.bbox,
+      embedding: faces.embedding,
+      person_id: faces.person_id,
+      quality: faces.quality,
+      ignored: faces.ignored,
+      created_at: faces.created_at,
+      filename: photos.filename,
+      original_name: photos.original_name,
+      taken_at: photos.taken_at,
+    })
+    .from(faces)
+    .innerJoin(photos, eq(faces.photo_id, photos.id))
+    .where(and(eq(faces.person_id, personId), eq(faces.user_id, userId)))
+    .orderBy(sql`COALESCE(julianday(${photos.taken_at}), julianday(${photos.created_at}), 0) DESC`, sql`${faces.id} DESC`)
+    .all();
+
+  return {
+    id: person.id,
+    user_id: person.user_id,
+    name: person.name,
+    cover_face_id: person.cover_face_id ?? undefined,
+    created_at: person.created_at ?? "",
+    updated_at: person.updated_at ?? "",
+    faces: faceRows.map((r) => ({
+      id: r.id,
+      user_id: r.user_id,
+      photo_id: r.photo_id,
+      bbox: JSON.parse(r.bbox),
+      embedding: JSON.parse(r.embedding),
+      person_id: r.person_id ?? undefined,
+      quality: r.quality ?? undefined,
+      ignored: !!r.ignored,
+      created_at: r.created_at ?? "",
+      photo: {
+        id: r.photo_id,
+        user_id: r.user_id,
+        filename: r.filename,
+        original_name: r.original_name,
+        taken_at: r.taken_at ?? undefined,
+        created_at: "", // Not strictly needed here, but part of the type
+      },
+    })),
+  };
+}
+
+export function updatePersonLogic(userId: number, personId: number, name: string): Person & { faceCount: number } {
+  if (name.trim().toLowerCase() === "unbenannt") {
+    throw new Error("Person kann nicht in 'Unbenannt' umbenannt werden");
+  }
+
+  db.update(persons)
+    .set({ name, updated_at: sql`datetime('now')` })
+    .where(and(eq(persons.id, personId), eq(persons.user_id, userId)))
+    .run();
+
+  const updated = db
+    .select({
+      id: persons.id,
+      user_id: persons.user_id,
+      name: persons.name,
+      cover_face_id: persons.cover_face_id,
+      created_at: persons.created_at,
+      updated_at: persons.updated_at,
+      faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM faces f WHERE f.person_id = persons.id), 0) AS INTEGER)`,
+      cover_filename: sql<string>`COALESCE((SELECT p.filename FROM photos p INNER JOIN faces f ON f.photo_id = p.id WHERE f.id = persons.cover_face_id LIMIT 1), '')`,
+      cover_bbox: sql<string>`COALESCE((SELECT f.bbox FROM faces f WHERE f.id = persons.cover_face_id LIMIT 1), '')`,
+    })
+    .from(persons)
+    .where(eq(persons.id, personId))
+    .get()!;
+
+  return {
+    id: updated.id,
+    user_id: updated.user_id,
+    name: updated.name,
+    cover_face_id: updated.cover_face_id ?? undefined,
+    cover_filename: updated.cover_filename ?? undefined,
+    cover_bbox: updated.cover_bbox ? JSON.parse(updated.cover_bbox) : undefined,
+    created_at: updated.created_at ?? "",
+    updated_at: updated.updated_at ?? "",
+    faceCount: updated.faceCount,
+  };
+}
+
+export function mergePersonsLogic(userId: number, req: MergePersonsRequest): { success: boolean } {
+  const targetId = req.targetId;
+  const sourceIds = req.sourceIds.filter(id => id !== targetId);
+
+  if (sourceIds.length === 0) {
+    return { success: true };
+  }
+
+  const target = db
+    .select()
+    .from(persons)
+    .where(and(eq(persons.id, targetId), eq(persons.user_id, userId)))
+    .get();
+  if (!target) throw new Error("Target person not found");
+  if (target.name === "Unbenannt") {
+    throw new Error("Kann nicht zu einer unbenannten Person zusammenführen");
+  }
+
+  // Move all faces from source persons to target person
+  db.update(faces)
+    .set({ person_id: targetId })
+    .where(and(inArray(faces.person_id, sourceIds), eq(faces.user_id, userId)))
+    .run();
+
+  // Update target person's cover face if it doesn't have one
+  if (!target.cover_face_id) {
+    const firstFace = db
+      .select({ id: faces.id })
+      .from(faces)
+      .where(and(eq(faces.person_id, targetId), eq(faces.user_id, userId)))
+      .limit(1)
+      .get();
+    if (firstFace) {
+      db.update(persons)
+        .set({ cover_face_id: firstFace.id })
+        .where(eq(persons.id, targetId))
+        .run();
+    }
+  }
+
+  // Set updated_at for target person
+  db.update(persons)
+    .set({ updated_at: sql`datetime('now')` })
+    .where(eq(persons.id, targetId))
+    .run();
+
+  // Delete source persons
+  db.delete(persons)
+    .where(and(inArray(persons.id, sourceIds), eq(persons.user_id, userId)))
     .run();
 
   return { success: true };
+}
+
+export function assignFaceToPersonLogic(
+  userId: number,
+  faceId: number,
+  personId: number
+): { success: boolean } {
+  db.update(faces)
+    .set({ person_id: personId, ignored: false })
+    .where(and(eq(faces.id, faceId), eq(faces.user_id, userId)))
+    .run();
+  return { success: true };
+}
+
+export function ignoreFaceLogic(
+  userId: number,
+  faceId: number
+): { success: boolean } {
+  db.update(faces)
+    .set({ ignored: true, person_id: null })
+    .where(and(eq(faces.id, faceId), eq(faces.user_id, userId)))
+    .run();
+  return { success: true };
+}
+
+export function ignorePersonFacesLogic(
+  userId: number,
+  personId: number
+): { success: boolean } {
+  db.update(faces)
+    .set({ ignored: true, person_id: null })
+    .where(and(eq(faces.person_id, personId), eq(faces.user_id, userId)))
+    .run();
+
+  // Also cleanup the person since they no longer have any associated faces
+  cleanupOrphanedPersons(userId);
+
+  return { success: true };
+}
+
+export function getPhotoFacesLogic(
+  userId: number,
+  photoId: number
+): { faces: Face[] } {
+  const rows = db
+    .select()
+    .from(faces)
+    .where(and(eq(faces.photo_id, photoId), eq(faces.user_id, userId)))
+    .all();
+
+  return {
+    faces: rows.map((r) => ({
+      id: r.id,
+      user_id: r.user_id,
+      photo_id: r.photo_id,
+      bbox: JSON.parse(r.bbox),
+      embedding: JSON.parse(r.embedding),
+      person_id: r.person_id ?? undefined,
+      quality: r.quality ?? undefined,
+      ignored: !!r.ignored,
+      created_at: r.created_at ?? "",
+    })),
+  };
+}
+
+export async function reindexPhotoLogic(
+  userId: number,
+  photoId: number
+): Promise<{ success: boolean }> {
+  const photo = db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId))).get();
+  if (!photo) throw new Error("Photo not found");
+
+  await indexPhotoFaces(userId, photoId, true);
+  return { success: true };
+}
+
+export async function reindexAllPhotosLogic(userId: number): Promise<{ count: number }> {
+  const allPhotos = db.select({ id: photos.id }).from(photos).where(eq(photos.user_id, userId)).all();
+
+  console.log(`Starting re-index for ${allPhotos.length} photos for user ${userId}`);
+
+  // Process sequentially in background to avoid race conditions
+  // (concurrent processing deletes all faces before new ones are created,
+  //  breaking person matching)
+  (async () => {
+    let processed = 0;
+    let errors = 0;
+    for (const p of allPhotos) {
+      try {
+        await indexPhotoFaces(userId, p.id, false);
+        processed++;
+      } catch (err: any) {
+        errors++;
+        if (err.message && err.message.includes("FACE_MODELS_NOT_LOADED")) {
+          console.error(`Skipping reindex for photo ${p.id}: Modelle nicht geladen.`);
+        } else {
+          console.error(`Error reindexing photo ${p.id}:`, err);
+        }
+      }
+    }
+    // Clean up orphaned persons (persons with 0 associated faces)
+    cleanupOrphanedPersons(userId);
+    console.log(`Re-index complete for user ${userId}: ${processed} processed, ${errors} errors, orphaned persons cleaned up.`);
+  })();
+
+  return { count: allPhotos.length };
+}
+
+/**
+ * Remove persons that have no associated faces (orphaned after re-indexing).
+ */
+function cleanupOrphanedPersons(userId: number): void {
+  const deleted = db.delete(persons)
+    .where(
+      and(
+        eq(persons.user_id, userId),
+        sql`NOT EXISTS (SELECT 1 FROM faces WHERE faces.person_id = persons.id)`
+      )
+    )
+    .run();
+  console.log(`Cleaned up ${deleted.changes} orphaned persons for user ${userId}`);
 }

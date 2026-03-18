@@ -188,6 +188,48 @@ export interface Photo {
   created_at: string;
 }
 
+export interface FaceBBox { x: number; y: number; width: number; height: number; }
+
+export interface Face {
+  id: number;
+  user_id: number;
+  photo_id: number;
+  bbox: FaceBBox; // relativ (0..1)
+  embedding: number[]; // Float32-Werte
+  person_id?: number;
+  quality?: number;
+  ignored: boolean;
+  created_at: string;
+  photo?: {
+    id: number;
+    user_id: number;
+    filename: string;
+    original_name: string;
+    taken_at?: string;
+    created_at: string;
+  };
+}
+
+export interface Person {
+  id: number;
+  user_id: number;
+  name: string;
+  cover_face_id?: number;
+  cover_filename?: string;
+  cover_bbox?: FaceBBox;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ListPersonsResponse { 
+  persons: (Person & { faceCount: number })[];
+  enableLocalFaces: boolean;
+}
+export interface PersonDetails extends Person { faces: Face[] }
+
+export interface AssignFaceRequest { faceId: number; personId: number }
+export interface MergePersonsRequest { sourceIds: number[]; targetId: number }
+
 export interface Album {
   id: number;
   user_id: number;
