@@ -105,8 +105,12 @@ function cancelMultiSelect() {
 function openMergeDialog() {
     if (selectedPersonIds.value.length < 2) return
     mergeSourceIds.value = [...selectedPersonIds.value]
-    // Default target: first selected (can be changed in dialog)
-    mergeTargetId.value = mergeSourceIds.value[0] ?? null
+    // Default target: first selected named person (can be changed in dialog)
+    const firstNamed = mergeSourceIds.value.find(id => {
+        const p = persons.value.find(p => p.id === id)
+        return p && p.name !== 'Unbenannt'
+    })
+    mergeTargetId.value = firstNamed ?? null
     showMergeDialog.value = true
 }
 
@@ -175,7 +179,7 @@ function closePersonDetails() {
 
 function openRename(person: Person) {
     personToRename.value = person
-    newName.value = person.name
+    newName.value = person.name === 'Unbenannt' ? '' : person.name
     showRenameDialog.value = true
 }
 
@@ -184,7 +188,7 @@ async function handleRename() {
 
     const sourcePersonId = personToRename.value.id
     const trimmedName = newName.value.trim()
-    if (!trimmedName) return
+    if (!trimmedName || trimmedName.toLowerCase() === 'unbenannt') return
 
     const mergeCandidate = duplicateNamePerson.value
     let detailIdToReload: number | null = null
@@ -587,6 +591,7 @@ onUnmounted(() => {
                     <div 
                         v-for="id in mergeSourceIds" 
                         :key="id"
+                        v-show="persons.find(p => p.id === id)?.name !== 'Unbenannt'"
                         class="flex items-center gap-3 p-2 hover:bg-gray-100 rounded cursor-pointer"
                         @click="mergeTargetId = id"
                     >
@@ -605,7 +610,7 @@ onUnmounted(() => {
 
             <div class="flex justify-end gap-2 mt-4">
                 <Button label="Abbrechen" icon="pi pi-times" class="p-button-text" @click="showMergeDialog = false" />
-                <Button label="Zusammenführen" icon="pi pi-clone" class="p-button-success" @click="handleMerge" :disabled="!mergeTargetId" />
+                <Button label="Zusammenführen" icon="pi pi-clone" class="p-button-success" @click="handleMerge" :disabled="!mergeTargetId || persons.find(p => p.id === mergeTargetId)?.name === 'Unbenannt'" />
             </div>
         </div>
     </Dialog>
@@ -619,11 +624,14 @@ onUnmounted(() => {
             <Button label="Abbrechen" icon="pi pi-times" class="p-button-text" @click="showRenameDialog = false"/>
             <Button :label="renameWillMerge ? 'Zusammenführen' : 'Speichern'"
                     :icon="renameWillMerge ? 'pi pi-clone' : 'pi pi-check'" @click="handleRename"
-                    :disabled="!newName.trim()"/>
+                    :disabled="!newName.trim() || newName.trim().toLowerCase() === 'unbenannt'"/>
           </div>
         </div>
         <div class="rename-field-row">
-          <Message v-if="renameWillMerge" severity="warn" :closable="false">
+          <Message v-if="newName.trim().toLowerCase() === 'unbenannt'" severity="error" :closable="false">
+            Der Name "Unbenannt" ist nicht zulässig.
+          </Message>
+          <Message v-if="renameWillMerge && newName.trim().toLowerCase() !== 'unbenannt'" severity="warn" :closable="false">
             <div>Eine andere Person heißt bereits <b>{{ duplicateNamePerson?.name }}</b>.</div>
             <div class="merge-warning-line">Beim Speichern werden beide Personen zusammengeführt.</div>
           </Message>

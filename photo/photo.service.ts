@@ -885,6 +885,10 @@ export function getPersonDetailsLogic(userId: number, personId: number): PersonD
 }
 
 export function updatePersonLogic(userId: number, personId: number, name: string): Person & { faceCount: number } {
+  if (name.trim().toLowerCase() === "unbenannt") {
+    throw new Error("Person kann nicht in 'Unbenannt' umbenannt werden");
+  }
+
   db.update(persons)
     .set({ name, updated_at: sql`datetime('now')` })
     .where(and(eq(persons.id, personId), eq(persons.user_id, userId)))
@@ -933,6 +937,9 @@ export function mergePersonsLogic(userId: number, req: MergePersonsRequest): { s
     .where(and(eq(persons.id, targetId), eq(persons.user_id, userId)))
     .get();
   if (!target) throw new Error("Target person not found");
+  if (target.name === "Unbenannt") {
+    throw new Error("Kann nicht zu einer unbenannten Person zusammenführen");
+  }
 
   // Move all faces from source persons to target person
   db.update(faces)
