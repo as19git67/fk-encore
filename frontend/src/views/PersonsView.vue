@@ -3,6 +3,7 @@ import { ref, onMounted, computed, onUnmounted } from 'vue'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import Dialog from 'primevue/dialog'
+import { useConfirm } from 'primevue/useconfirm'
 import InputText from 'primevue/inputtext'
 import HeicImage from '../components/HeicImage.vue'
 import { listPersons, updatePerson, mergePersons, getPhotoUrl, reindexAllPhotos, getPersonDetails, ignoreFace, ignorePersonFaces, type Person, type Photo, type PersonDetails } from '../api/photos'
@@ -81,6 +82,7 @@ const mergeTargetId = ref<number | null>(null)
 
 const selectedPersonIds = ref<number[]>([])
 const multiSelectMode = ref(false)
+const confirm = useConfirm()
 
 function toggleSelect(id: number) {
     if (!multiSelectMode.value) return
@@ -230,48 +232,69 @@ async function handleRename() {
 }
 
 async function handleIgnoreFace(faceId: number) {
-    if (!confirm('Dieses Gesicht wirklich ignorieren? Es wird aus allen Personenlisten entfernt.')) return
-    
-    try {
-        await ignoreFace(faceId)
-        
-        // Remove from current detail view
-        if (selectedPersonDetail.value) {
-            selectedPersonDetail.value.faces = selectedPersonDetail.value.faces.filter(f => f.id !== faceId)
-            
-            // If no faces left, close details and refresh list
-            if (selectedPersonDetail.value.faces.length === 0) {
-                closePersonDetails()
-                await loadData()
-            } else {
-                // Adjust selected index if needed
-                if (selectedIndex.value >= selectedPersonDetail.value.faces.length) {
-                    selectedIndex.value = selectedPersonDetail.value.faces.length - 1
+    confirm.require({
+        message: 'Dieses Gesicht wirklich ignorieren? Es wird aus allen Personenlisten entfernt.',
+        header: 'Bestätigung',
+        icon: 'pi pi-exclamation-triangle',
+        rejectProps: {
+            label: 'Abbrechen',
+            severity: 'secondary',
+            outlined: true
+        },
+        acceptProps: {
+            label: 'Ignorieren',
+            severity: 'danger'
+        },
+        accept: async () => {
+            try {
+                await ignoreFace(faceId)
+
+                // Remove from current detail view
+                if (selectedPersonDetail.value) {
+                    selectedPersonDetail.value.faces = selectedPersonDetail.value.faces.filter(f => f.id !== faceId)
+
+                    // If no faces left, close details and refresh list
+                    if (selectedPersonDetail.value.faces.length === 0) {
+                        closePersonDetails()
+                        await loadData()
+                    } else {
+                        // Adjust selected index if needed
+                        if (selectedIndex.value >= selectedPersonDetail.value.faces.length) {
+                            selectedIndex.value = selectedPersonDetail.value.faces.length - 1
+                        }
+                    }
                 }
-                if (selectedIndex.value === -1 && selectedPersonDetail.value.faces.length > 0) {
-                     // No need to change index if it was -1
-                }
+            } catch (err: any) {
+                error.value = err.message || 'Fehler beim Ignorieren des Gesichts'
             }
         }
-        
-        // Also update the main persons list (face counts might have changed)
-        // We don't want a full loadData() if we are in details, but face counts on main view would be stale.
-        // For simplicity, let's just refresh when closing or when we have time.
-    } catch (err: any) {
-        error.value = err.message || 'Fehler beim Ignorieren des Gesichts'
-    }
+    })
 }
 
 async function handleIgnorePerson(personId: number) {
-    if (!confirm('Diese Person und alle ihre Gesichtserkennungen wirklich ignorieren?')) return
-    
-    try {
-        await ignorePersonFaces(personId)
-        closePersonDetails()
-        await loadData()
-    } catch (err: any) {
-        error.value = err.message || 'Fehler beim Ignorieren der Person'
-    }
+    confirm.require({
+        message: 'Diese Person und alle ihre Gesichtserkennungen wirklich ignorieren?',
+        header: 'Bestätigung',
+        icon: 'pi pi-exclamation-triangle',
+        rejectProps: {
+            label: 'Abbrechen',
+            severity: 'secondary',
+            outlined: true
+        },
+        acceptProps: {
+            label: 'Ignorieren',
+            severity: 'danger'
+        },
+        accept: async () => {
+            try {
+                await ignorePersonFaces(personId)
+                closePersonDetails()
+                await loadData()
+            } catch (err: any) {
+                error.value = err.message || 'Fehler beim Ignorieren der Person'
+            }
+        }
+    })
 }
 
 async function handleReindex() {
@@ -597,10 +620,10 @@ onUnmounted(() => {
 
             <div class="photo-grid">
             <div
-                v-for="(item, idx) in personFaceItems"
+                v-for="(item, idx) in personFaceItems.slice(1)"
                 :key="item.face.id"
                 class="photo-item"
-                @click="selectedIndex = idx; isFullscreen = true"
+                @click="selectedIndex = idx + 1; isFullscreen = true"
             >
                 <HeicImage :src="getPhotoUrl(item.photo.filename)" :alt="item.photo.original_name">
                     <div class="face-highlight" :style="getFaceHighlightStyle(item.face.bbox, true)"></div>

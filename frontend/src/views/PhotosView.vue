@@ -4,6 +4,7 @@ import Button from 'primevue/button'
 import FileUpload from 'primevue/fileupload'
 import Message from 'primevue/message'
 import ProgressBar from 'primevue/progressbar'
+import { useConfirm } from 'primevue/useconfirm'
 import DatePicker from 'primevue/datepicker'
 import HeicImage from '../components/HeicImage.vue'
 import { 
@@ -71,6 +72,7 @@ const editDate = ref<Date | null>(null)
 const updatingDate = ref(false)
 const refreshProgress = ref(0)
 const refreshTotal = ref(0)
+const confirm = useConfirm()
 const refreshCurrent = ref(0)
 const activeSection = ref('')
 
@@ -253,16 +255,31 @@ async function handleUpload(event: any) {
 }
 
 async function handleDelete(id: number) {
-  if (!confirm('Foto wirklich löschen?')) return
-  try {
-    await deletePhoto(id)
-    await loadPhotos()
-    if (selectedIndex.value >= photos.value.length) {
-        selectedIndex.value = photos.value.length - 1
+  confirm.require({
+    message: 'Foto wirklich löschen?',
+    header: 'Bestätigung',
+    icon: 'pi pi-exclamation-triangle',
+    rejectProps: {
+      label: 'Abbrechen',
+      severity: 'secondary',
+      outlined: true
+    },
+    acceptProps: {
+      label: 'Löschen',
+      severity: 'danger'
+    },
+    accept: async () => {
+      try {
+        await deletePhoto(id)
+        await loadPhotos()
+        if (selectedIndex.value >= photos.value.length) {
+          selectedIndex.value = photos.value.length - 1
+        }
+      } catch (err: any) {
+        error.value = err.message || 'Fehler beim Löschen'
+      }
     }
-  } catch (err: any) {
-    error.value = err.message || 'Fehler beim Löschen'
-  }
+  })
 }
 
 async function handleRefreshMetadata() {
