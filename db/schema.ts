@@ -113,6 +113,39 @@ export const photos = sqliteTable("photos", {
   created_at: text("created_at").default(sql`(datetime('now'))`),
 });
 
+// ========== Persons ==========
+
+export const persons = sqliteTable("persons", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull().default("Unbenannt"),
+  cover_face_id: integer("cover_face_id"),
+  created_at: text("created_at").default(sql`(datetime('now'))`),
+  updated_at: text("updated_at").default(sql`(datetime('now'))`),
+});
+
+// ========== Faces ==========
+
+export const faces = sqliteTable("faces", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  photo_id: integer("photo_id")
+    .notNull()
+    .references(() => photos.id, { onDelete: "cascade" }),
+  // Bounding box as JSON string: { x, y, width, height } relativ zu Bildgröße (0..1)
+  bbox: text("bbox").notNull(),
+  // Embedding als JSON-kodierte Float32-Liste (z. B. 128/512 Dimensionen)
+  embedding: text("embedding").notNull(),
+  person_id: integer("person_id").references(() => persons.id, { onDelete: "set null" }),
+  quality: integer("quality").default(0),
+  ignored: integer("ignored", { mode: "boolean" }).notNull().default(false),
+  created_at: text("created_at").default(sql`(datetime('now'))`),
+});
+
 // ========== Albums ==========
 
 export const albums = sqliteTable("albums", {
