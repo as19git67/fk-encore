@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, computed } from 'vue';
-import heic2any from 'heic2any';
 
 const props = defineProps<{
   src: string;
@@ -26,6 +25,7 @@ const checkAndConvert = async () => {
 
   if (!isHeic.value) {
     displaySrc.value = props.src;
+    isLoading.value = true;
     return;
   }
 
@@ -33,28 +33,14 @@ const checkAndConvert = async () => {
   const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
   if (isSafari) {
     displaySrc.value = props.src;
+    isLoading.value = true;
     return;
   }
 
+  // Request converted version from server
+  const separator = props.src.includes('?') ? '&' : '?';
+  displaySrc.value = `${props.src}${separator}convert=true`;
   isLoading.value = true;
-  try {
-    const response = await fetch(props.src);
-    const blob = await response.blob();
-    const convertedBlob = await heic2any({
-      blob,
-      toType: 'image/jpeg',
-      quality: 0.8
-    });
-
-    const url = URL.createObjectURL(Array.isArray(convertedBlob) ? convertedBlob[0] : convertedBlob);
-    displaySrc.value = url;
-  } catch (err) {
-    console.error('Error converting HEIC:', err);
-    // Fallback to original src, maybe the browser can handle it after all or shows a broken image
-    displaySrc.value = props.src;
-  } finally {
-    isLoading.value = false;
-  }
 };
 
 onMounted(checkAndConvert);
@@ -71,6 +57,8 @@ watch(() => props.src, checkAndConvert);
         :loading="loading" 
         :class="['full-image', objectFitClass, { 'is-loading': isLoading }]"
         :style="imageStyle"
+        @load="isLoading = false"
+        @error="isLoading = false"
       />
       <slot></slot>
     </div>

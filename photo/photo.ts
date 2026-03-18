@@ -191,10 +191,24 @@ export const getPhotoFile = api.raw(
       else if (ext === ".heic") mimeType = "image/heic";
       else if (ext === ".heif") mimeType = "image/heif";
 
+      const widthStr = url.searchParams.get("w");
+      const shouldConvert = url.searchParams.get("convert") === "true";
+
+      if ((ext === ".heic" || ext === ".heif") && shouldConvert) {
+          try {
+              const jpegBuffer = await service.convertHeicToJpeg(filePath);
+              res.setHeader("Content-Type", "image/jpeg");
+              res.end(jpegBuffer);
+              return;
+          } catch (err) {
+              console.error("Error converting HEIC on-the-fly:", err);
+              // Fallback to original
+          }
+      }
+
       res.setHeader("Content-Type", mimeType);
       res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
       
-      const widthStr = url.searchParams.get("w");
       if (widthStr && ENABLE_LOCAL_FACES) {
           // Implement simple thumbnail resizing if canvas is available
           // For now just serve original to keep it simple, but we could add it here
