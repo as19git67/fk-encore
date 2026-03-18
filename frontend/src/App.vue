@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import Menubar from 'primevue/menubar'
 import Button from 'primevue/button'
+import ConfirmDialog from 'primevue/confirmdialog'
 import { useAuthStore } from './stores/auth'
 
 const auth = useAuthStore()
@@ -45,6 +46,7 @@ async function handleLogout() {
     <main class="content">
       <router-view />
     </main>
+    <ConfirmDialog />
   </div>
 </template>
 
