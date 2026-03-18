@@ -153,6 +153,7 @@ function createDb(): BetterSQLite3Database<typeof schema> {
       embedding TEXT NOT NULL,
       person_id INTEGER,
       quality INTEGER DEFAULT 0,
+      ignored INTEGER NOT NULL DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE,
@@ -176,6 +177,10 @@ function createDb(): BetterSQLite3Database<typeof schema> {
 
   try {
     sqlite.exec("ALTER TABLE faces ADD COLUMN quality INTEGER DEFAULT 0;");
+  } catch (e) {}
+
+  try {
+    sqlite.exec("ALTER TABLE faces ADD COLUMN ignored INTEGER NOT NULL DEFAULT 0;");
   } catch (e) {}
 
   return db;

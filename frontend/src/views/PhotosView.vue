@@ -6,7 +6,21 @@ import Message from 'primevue/message'
 import ProgressBar from 'primevue/progressbar'
 import DatePicker from 'primevue/datepicker'
 import HeicImage from '../components/HeicImage.vue'
-import { listPhotos, uploadPhoto, deletePhoto, getPhotoUrl, getPhotosToRefreshMetadata, refreshPhotoMetadata, updatePhotoDate, type Photo } from '../api/photos'
+import { 
+  listPhotos, 
+  uploadPhoto, 
+  deletePhoto, 
+  getPhotoUrl, 
+  getPhotosToRefreshMetadata, 
+  refreshPhotoMetadata, 
+  updatePhotoDate, 
+  reindexPhoto,
+  ignoreFace,
+  getPhotoFaces,
+  type Photo,
+  type Face
+} from '../api/photos'
+import { listPersons, type Person } from '../api/photos'
 import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
@@ -59,6 +73,70 @@ const refreshProgress = ref(0)
 const refreshTotal = ref(0)
 const refreshCurrent = ref(0)
 const activeSection = ref('')
+
+const detectedFaces = ref<Face[]>([])
+const loadingFaces = ref(false)
+const reindexingPhoto = ref(false)
+const persons = ref<Person[]>([])
+
+async function loadPersons() {
+  try {
+    const res = await listPersons()
+    persons.value = res.persons
+  } catch (err) {
+    console.error('Failed to load persons:', err)
+  }
+}
+
+function getPersonName(personId?: number) {
+  if (!personId) return 'Unbekannt'
+  const person = persons.value.find(p => p.id === personId)
+  return person ? person.name : 'Unbekannt'
+}
+
+async function loadDetectedFaces(photoId: number) {
+  loadingFaces.value = true
+  try {
+    const res = await getPhotoFaces(photoId)
+    detectedFaces.value = res.faces
+  } catch (err) {
+    console.error('Failed to load faces:', err)
+  } finally {
+    loadingFaces.value = false
+  }
+}
+
+async function handleIgnoreFace(faceId: number) {
+  if (!selectedPhoto.value) return
+  try {
+    await ignoreFace(faceId)
+    await loadDetectedFaces(selectedPhoto.value.id)
+  } catch (err) {
+    console.error('Failed to ignore face:', err)
+  }
+}
+
+async function handleReindexPhoto() {
+  if (!selectedPhoto.value) return
+  reindexingPhoto.value = true
+  try {
+    await reindexPhoto(selectedPhoto.value.id)
+    await loadDetectedFaces(selectedPhoto.value.id)
+  } catch (err) {
+    console.error('Failed to reindex photo:', err)
+  } finally {
+    reindexingPhoto.value = false
+  }
+}
+
+watch(selectedPhoto, (newPhoto) => {
+  if (newPhoto) {
+    loadDetectedFaces(newPhoto.id)
+    loadPersons()
+  } else {
+    detectedFaces.value = []
+  }
+})
 
 interface PhotoItem {
   photo: Photo;
@@ -549,6 +627,46 @@ onUnmounted(() => {
               class="w-full"
               severity="danger" 
               text
+            />
+          </div>
+
+          <div class="info-group mt-4" v-if="auth.hasPermission('people.view')">
+            <label>Erkannte Personen</label>
+            <div v-if="loadingFaces" class="flex items-center gap-2 text-sm text-gray-500">
+              <i class="pi pi-spin pi-spinner"></i>
+              Lade Personen...
+            </div>
+            <div v-else-if="detectedFaces.filter(f => !f.ignored).length === 0" class="text-sm text-gray-500 italic">
+              Keine Personen erkannt
+            </div>
+            <div v-else class="flex flex-col gap-2 mt-1">
+              <div 
+                v-for="face in detectedFaces.filter(f => !f.ignored)" 
+                :key="face.id"
+                class="flex items-center justify-between p-2 bg-gray-50 rounded border"
+              >
+                <span class="text-sm font-medium">{{ getPersonName(face.person_id) }}</span>
+                <Button 
+                  icon="pi pi-user-minus" 
+                  severity="secondary" 
+                  text 
+                  rounded 
+                  size="small"
+                  @click="handleIgnoreFace(face.id)"
+                  v-tooltip="'Person aus Bild entfernen'"
+                />
+              </div>
+            </div>
+            
+            <Button 
+              label="Gesichter neu suchen" 
+              icon="pi pi-search" 
+              @click="handleReindexPhoto"
+              :loading="reindexingPhoto"
+              class="w-full mt-4"
+              severity="secondary"
+              outlined
+              size="small"
             />
           </div>
         </div>
