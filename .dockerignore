@@ -12,3 +12,4 @@ data/*.db-shm
 data/*.db-wal
 uploads
 .DS_Store
+vitest.config.ts
