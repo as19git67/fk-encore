@@ -21,6 +21,21 @@ const canUpload = computed(() => auth.hasPermission('photos.upload'))
 const canDelete = computed(() => auth.hasPermission('photos.delete'))
 const canRefreshMetadata = computed(() => auth.hasPermission('photos.refresh_metadata'))
 
+const selectedPhoto = computed(() => {
+  if (selectedIndex.value < 0) return null
+  return photos.value[selectedIndex.value] ?? null
+})
+
+const prevPhoto = computed(() => {
+  if (selectedIndex.value <= 0) return null
+  return photos.value[selectedIndex.value - 1] ?? null
+})
+
+const nextPhoto = computed(() => {
+  if (selectedIndex.value < 0 || selectedIndex.value >= photos.value.length - 1) return null
+  return photos.value[selectedIndex.value + 1] ?? null
+})
+
 const formatPhotoDate = (photo: Photo) => {
   const dateStr = photo.taken_at || photo.created_at;
   if (!dateStr) return '';
@@ -211,16 +226,16 @@ async function handleRefreshMetadata() {
 }
 
 function startEditingDate() {
-  const photo = photos.value[selectedIndex.value]
+  const photo = selectedPhoto.value
   if (!photo) return
   editDate.value = new Date(photo.taken_at || photo.created_at)
   isEditingDate.value = true
 }
 
 async function handleUpdateDate() {
-  if (!editDate.value || selectedIndex.value === -1) return
-  
-  const photo = photos.value[selectedIndex.value]
+  const photo = selectedPhoto.value
+  if (!editDate.value || !photo) return
+
   updatingDate.value = true
   try {
     // Convert to ISO string for backend
@@ -470,7 +485,7 @@ onUnmounted(() => {
         </div>
       </nav>
 
-      <div class="details-sidebar" v-if="selectedIndex !== -1">
+      <div class="details-sidebar" v-if="selectedPhoto">
         <div class="sidebar-header">
           <h3>Details</h3>
           <Button icon="pi pi-times" text rounded size="small" @click="selectedIndex = -1" />
@@ -478,7 +493,7 @@ onUnmounted(() => {
         
         <div class="sidebar-content">
           <div class="preview-container" @click="isFullscreen = true" title="Klicken für Vollbild">
-            <HeicImage :src="getPhotoUrl(photos[selectedIndex].filename)" :alt="photos[selectedIndex].original_name" />
+            <HeicImage :src="getPhotoUrl(selectedPhoto.filename)" :alt="selectedPhoto.original_name" />
             <div class="preview-overlay">
               <i class="pi pi-expand"></i>
             </div>
@@ -486,14 +501,14 @@ onUnmounted(() => {
           
           <div class="info-group">
             <label>Dateiname</label>
-            <div class="value">{{ photos[selectedIndex].original_name }}</div>
+            <div class="value">{{ selectedPhoto.original_name }}</div>
           </div>
           
           <div class="info-group">
             <label>Aufnahmedatum</label>
             <div v-if="!isEditingDate" class="date-display">
-              <div class="value">{{ formatPhotoDate(photos[selectedIndex]) }}</div>
-              <Button 
+              <div class="value">{{ formatPhotoDate(selectedPhoto) }}</div>
+              <Button
                 v-if="canUpload"
                 icon="pi pi-pencil" 
                 text 
@@ -512,9 +527,9 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <div class="info-group" v-if="photos[selectedIndex].size">
+          <div class="info-group" v-if="selectedPhoto.size">
             <label>Größe</label>
-            <div class="value">{{ (photos[selectedIndex].size / 1024 / 1024).toFixed(2) }} MB</div>
+            <div class="value">{{ (selectedPhoto.size / 1024 / 1024).toFixed(2) }} MB</div>
           </div>
 
           <div class="sidebar-actions">
@@ -530,8 +545,8 @@ onUnmounted(() => {
               v-if="canDelete"
               label="Foto löschen" 
               icon="pi pi-trash" 
-              @click="handleDelete(photos[selectedIndex].id)" 
-              class="w-full" 
+              @click="handleDelete(selectedPhoto.id)"
+              class="w-full"
               severity="danger" 
               text
             />
@@ -540,20 +555,20 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div v-if="isFullscreen && selectedIndex !== -1" class="fullscreen-overlay" @click="isFullscreen = false">
+    <div v-if="isFullscreen && selectedPhoto" class="fullscreen-overlay" @click="isFullscreen = false">
       <!-- Preload next and previous image -->
       <div style="display: none">
-        <HeicImage v-if="selectedIndex > 0" :src="getPhotoUrl(photos[selectedIndex - 1].filename)" />
-        <HeicImage v-if="selectedIndex < photos.length - 1" :src="getPhotoUrl(photos[selectedIndex + 1].filename)" />
+        <HeicImage v-if="prevPhoto" :src="getPhotoUrl(prevPhoto.filename)" />
+        <HeicImage v-if="nextPhoto" :src="getPhotoUrl(nextPhoto.filename)" />
       </div>
       <div class="fullscreen-content" @click.stop>
-        <HeicImage :src="getPhotoUrl(photos[selectedIndex].filename)" :alt="photos[selectedIndex].original_name" objectFit="contain" />
+        <HeicImage :src="getPhotoUrl(selectedPhoto.filename)" :alt="selectedPhoto.original_name" objectFit="contain" />
         <div class="fullscreen-nav">
             <Button icon="pi pi-chevron-left" rounded text @click="selectedIndex > 0 && selectedIndex--" :disabled="selectedIndex === 0" />
             <div class="fullscreen-info">
-              <div class="fullscreen-title">{{ photos[selectedIndex].original_name }}</div>
+              <div class="fullscreen-title">{{ selectedPhoto.original_name }}</div>
               <div class="fullscreen-date">
-                {{ formatPhotoDate(photos[selectedIndex]) }}
+                {{ formatPhotoDate(selectedPhoto) }}
               </div>
             </div>
             <Button icon="pi pi-chevron-right" rounded text @click="selectedIndex < photos.length - 1 && selectedIndex++" :disabled="selectedIndex === photos.length - 1" />
