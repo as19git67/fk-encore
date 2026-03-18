@@ -255,6 +255,71 @@ describe("Photo Module", () => {
   });
 
   describe("People & Faces", () => {
+    it("should use newest taken_at face for cover and person details ordering", () => {
+      const person = db.insert(persons).values({
+        user_id: user1.id,
+        name: "Sorted Person",
+      }).returning().get();
+
+      const olderPhoto = db.insert(photos).values({
+        user_id: user1.id,
+        filename: "older.jpg",
+        original_name: "older.jpg",
+        mime_type: "image/jpeg",
+        size: 123,
+        taken_at: "2024-01-01T10:00:00.000Z",
+      }).returning().get();
+
+      const newerPhoto = db.insert(photos).values({
+        user_id: user1.id,
+        filename: "newer.jpg",
+        original_name: "newer.jpg",
+        mime_type: "image/jpeg",
+        size: 456,
+        taken_at: "2025-06-15T12:30:00.000Z",
+      }).returning().get();
+
+      const olderBbox = { x: 0.1, y: 0.1, width: 0.2, height: 0.2 };
+      const newerBbox = { x: 0.3, y: 0.2, width: 0.15, height: 0.15 };
+
+      const olderFace = db.insert(faces).values({
+        user_id: user1.id,
+        photo_id: olderPhoto.id,
+        person_id: person.id,
+        bbox: JSON.stringify(olderBbox),
+        embedding: JSON.stringify([0.1, 0.2]),
+        ignored: false,
+      }).returning().get();
+
+      const newerFace = db.insert(faces).values({
+        user_id: user1.id,
+        photo_id: newerPhoto.id,
+        person_id: person.id,
+        bbox: JSON.stringify(newerBbox),
+        embedding: JSON.stringify([0.3, 0.4]),
+        ignored: false,
+      }).returning().get();
+
+      // Intentionally point persisted cover to the older face.
+      // listPersons/getPersonDetails should still resolve the newest face by taken_at.
+      db.update(persons)
+        .set({ cover_face_id: olderFace.id })
+        .where(eq(persons.id, person.id))
+        .run();
+
+      const listRes = service.listPersonsLogic(user1.id);
+      const listedPerson = listRes.persons.find((p) => p.id === person.id);
+
+      expect(listedPerson).toBeDefined();
+      expect(listedPerson!.cover_face_id).toBe(newerFace.id);
+      expect(listedPerson!.cover_filename).toBe("newer.jpg");
+      expect(listedPerson!.cover_bbox).toEqual(newerBbox);
+
+      const details = service.getPersonDetailsLogic(user1.id, person.id);
+      expect(details.faces.map((f) => f.id)).toEqual([newerFace.id, olderFace.id]);
+      expect(details.faces[0].photo?.filename).toBe("newer.jpg");
+    });
+
     it("should ignore all faces of a person", async () => {
       const person = db.insert(persons).values({
         user_id: user1.id,
