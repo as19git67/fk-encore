@@ -12,9 +12,28 @@ const props = defineProps<{
 const displaySrc = ref<string>('');
 const isHeic = ref(false);
 const isLoading = ref(false);
+const naturalAspectRatio = ref<number | null>(null);
 
 const objectFitClass = computed(() => {
   return `fit-${props.objectFit || 'cover'}`;
+});
+
+const contentWrapperStyle = computed(() => {
+  const fit = props.objectFit || 'cover';
+  if (fit === 'contain' && naturalAspectRatio.value) {
+    return {
+      aspectRatio: `${naturalAspectRatio.value}`,
+      maxWidth: '100%',
+      maxHeight: '100%',
+      width: '100%',
+      height: 'auto',
+    };
+  }
+  // For other modes, we keep the default 100% x 100%
+  return {
+    width: '100%',
+    height: '100%',
+  };
 });
 
 const checkAndConvert = async () => {
@@ -43,6 +62,14 @@ const checkAndConvert = async () => {
   isLoading.value = true;
 };
 
+const onImageLoad = (event: Event) => {
+  isLoading.value = false;
+  const img = event.target as HTMLImageElement;
+  if (img.naturalWidth && img.naturalHeight) {
+    naturalAspectRatio.value = img.naturalWidth / img.naturalHeight;
+  }
+};
+
 onMounted(checkAndConvert);
 watch(() => props.src, checkAndConvert);
 </script>
@@ -50,17 +77,25 @@ watch(() => props.src, checkAndConvert);
 <template>
   <div class="heic-image-container">
     <div class="image-wrapper">
-      <img 
-        v-if="displaySrc" 
-        :src="displaySrc" 
-        :alt="alt" 
-        :loading="loading" 
-        :class="['full-image', objectFitClass, { 'is-loading': isLoading }]"
-        :style="imageStyle"
-        @load="isLoading = false"
-        @error="isLoading = false"
-      />
-      <slot></slot>
+      <div 
+        class="image-content-wrapper" 
+        :class="objectFitClass"
+        :style="contentWrapperStyle"
+      >
+        <img 
+          v-if="displaySrc" 
+          :src="displaySrc" 
+          :alt="alt" 
+          :loading="loading" 
+          :class="['full-image', objectFitClass, { 'is-loading': isLoading }]"
+          :style="imageStyle"
+          @load="onImageLoad"
+          @error="isLoading = false"
+        />
+        <div class="slot-container">
+          <slot></slot>
+        </div>
+      </div>
     </div>
     <div v-if="isLoading" class="heic-loader">
        <i class="pi pi-spin pi-spinner"></i>
@@ -84,6 +119,21 @@ watch(() => props.src, checkAndConvert);
   display: flex;
   justify-content: center;
   align-items: center;
+}
+.image-content-wrapper {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.slot-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
 }
 .full-image {
   width: 100%;
