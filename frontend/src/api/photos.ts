@@ -1,4 +1,4 @@
-import { apiFetch } from './client'
+import { API_BASE_URL, apiFetch } from './client'
 
 export interface Photo {
   id: number
@@ -43,9 +43,7 @@ export function deletePhoto(id: number) {
 }
 
 export function getPhotoUrl(filename: string) {
-  // We need an endpoint to serve the photo. 
-  // For now we assume /api/photos/file/:filename exists or will be added.
-  return `/api/photos/file/${filename}`
+  return `${API_BASE_URL}/photos/file/${filename}`
 }
 
 export function getPhotosToRefreshMetadata() {

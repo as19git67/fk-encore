@@ -5,7 +5,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
-    nginx \
     python3 \
     make \
     g++ \
@@ -32,18 +31,21 @@ COPY . .
 
 RUN npm --prefix frontend run build
 
-COPY docker/nginx.conf /etc/nginx/nginx.conf
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh \
-    && mkdir -p /app/uploads/photos /app/data
+    && mkdir -p /mnt/data/photos /mnt/data/db /app/data
 
-ENV PHOTO_UPLOAD_DIR=/app/uploads/photos \
-    BACKEND_PORT=4000 \
+ENV DB_TYPE=sqlite \
+    SQLITE_DB_PATH=/mnt/data/db/app.db \
+    PHOTO_UPLOAD_DIR=/mnt/data/photos \
     PORT=8080 \
     RP_ID=localhost \
     RP_NAME="FK Encore App" \
-    RP_ORIGIN=http://localhost:8080
+    RP_ORIGIN=http://localhost:8080 \
+    ENABLE_LOCAL_FACES=true \
+    INSIGHTFACE_SERVICE_URL=http://localhost:8000 \
+    FACE_DISTANCE_THRESHOLD=0.45
 
-EXPOSE 8080 4000
+EXPOSE 8080
 
 CMD ["/entrypoint.sh"]
