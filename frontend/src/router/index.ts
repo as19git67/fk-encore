@@ -10,7 +10,7 @@ import PhotosView from '../views/PhotosView.vue'
 import PersonsView from '../views/PersonsView.vue'
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     { path: '/', redirect: '/photos' },
     { path: '/login', name: 'login', component: LoginView },

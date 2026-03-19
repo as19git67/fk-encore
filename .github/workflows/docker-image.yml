@@ -45,6 +45,20 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
+      - name: Build smoke-test image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          tags: fk-encore:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run container smoke test
+        run: bash scripts/container-smoke-test.sh fk-encore:smoke
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
