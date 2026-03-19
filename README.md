@@ -122,34 +122,35 @@ There are many more features to explore in Encore.ts, for example:
 
 ## Deployment
 
-### Self-hosting
+### Docker Runtime
 
-See the [self-hosting instructions](https://encore.dev/docs/self-host/docker-build) for how to use `encore build docker` to create a Docker image and configure it.
+The container runs a single `encore run` process. Encore serves both:
 
-### Encore Cloud Platform
+- the frontend SPA under `/app/`
+- all API endpoints on the same origin (no reverse proxy rewrite required)
 
-Deploy your application to a free staging environment in Encore's development cloud using `git push encore`:
+If the browser opens the container root `/`, it is redirected to `/app/`.
+
+The container also exposes a lightweight health endpoint:
+
+- `GET /healthz` returns `{ "status": "ok" }`
+- `GET /health` returns the same payload (alias for compatibility)
+
+Run a local container smoke-test (health + redirect + SPA index):
 
 ```bash
-git add -A .
-git commit -m 'Commit message'
-git push encore
+bash scripts/container-smoke-test.sh fk-encore:smoke
 ```
 
-You can also open your app in the [Cloud Dashboard](https://app.encore.dev) to integrate with GitHub, or connect your AWS/GCP account, enabling Encore to automatically handle cloud deployments for you.
+### Self-hosting
+
+```
+docker run -d --name my-encore-app -p 8080:8080 -e ADMIN_EMAIL=abc@example.com -e ADMIN_NAME=abc -e ADMIN_PASSWORD=secret7! -e RP_NAME="My Encore App" -e RP_ORIGIN=http://localhost:8080 -e ENABLE_LOCAL_FACES=true -e INSIGHTFACE_SERVICE_URL=http://localhost:8000 -e FACE_DISTANCE_THRESHOLD=0.45 -v /Users/example/fk-encore_data/photos:/mnt/data/photos -v /Users/example/fk-encore_data/db:/mnt/data/db fk-encore
+```
 
 ## Link to GitHub
 
-Follow these steps to link your app to GitHub:
-
-1. Create a GitHub repo, commit and push the app.
-2. Open your app in the [Cloud Dashboard](https://app.encore.dev).
-3. Go to **Settings ➔ GitHub** and click on **Link app to GitHub** to link your app to GitHub and select the repo you just created.
-4. To configure Encore to automatically trigger deploys when you push to a specific branch name, go to the **Overview** page for your intended environment. Click on **Settings** and then in the section **Branch Push** configure the **Branch name** and hit **Save**.
-5. Commit and push a change to GitHub to trigger a deploy.
-
-[Learn more in the docs](https://encore.dev/docs/how-to/github)
-
+github
 
 ## Testing
 
@@ -158,13 +159,3 @@ To run tests, configure the `test` command in your `package.json` to the test ru
 ```bash
 encore test
 ```
-
-## Personen-Erkennung (KI)
-
-Die Personen-Erkennung nutzt `face-api.js` lokal auf dem Server (CPU). Damit dies funktioniert, müssen die vortrainierten KI-Modelle heruntergeladen werden:
-
-1. Führen Sie das Download-Skript aus:
-   ```bash
-   ./scripts/download_models.sh
-   ```
-2. Stellen Sie sicher, dass in Ihrer `.env` Datei `ENABLE_LOCAL_FACES=true` gesetzt ist.

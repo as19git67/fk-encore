@@ -1,4 +1,4 @@
-const BASE_URL = '/api'
+export const API_BASE_URL = import.meta.env.PROD ? '' : '/api'
 
 export async function apiFetch<T>(
   path: string,
@@ -19,7 +19,7 @@ export async function apiFetch<T>(
     headers['Authorization'] = `Bearer ${token}`
   }
 
-  const response = await fetch(`${BASE_URL}${path}`, {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers,
   })
@@ -27,7 +27,7 @@ export async function apiFetch<T>(
   if (response.status === 401) {
     localStorage.removeItem('auth_token')
     localStorage.removeItem('auth_user')
-    window.location.href = '/login'
+    window.location.href = `${import.meta.env.BASE_URL}login`
     throw new Error('Unauthorized')
   }
 
