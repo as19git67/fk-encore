@@ -1,5 +1,5 @@
 # ── Stage 1: build dependencies ──────────────────────────────────────────────
-FROM python:3.11-slim AS builder
+FROM python:slim-bookworm AS builder
 
 WORKDIR /build
 
@@ -16,7 +16,7 @@ RUN pip install --upgrade pip \
     && pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 # ── Stage 2: runtime image ───────────────────────────────────────────────────
-FROM python:3.11-slim
+FROM python:slim-bookworm
 
 WORKDIR /app
 
