@@ -36,10 +36,7 @@ services:
       DINO_MODEL_NAME: facebook/dinov2-base
       LOG_LEVEL: INFO
     ports:
-      - "8000:8000"
-    volumes:
-      # Mount your photo storage so the service can read image files
-      - /photos:/photos:ro
+      - "8001:8000"
 
 volumes:
   pgdata:
