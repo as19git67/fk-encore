@@ -35,6 +35,7 @@ import heicConvert from "heic-convert";
 
 export const UPLOAD_DIR = path.resolve(process.env.PHOTO_UPLOAD_DIR || "uploads/photos");
 const INSIGHTFACE_SERVICE_URL = process.env.INSIGHTFACE_SERVICE_URL || "http://localhost:8000";
+const EMBEDDING_SERVICE_URL = process.env.EMBEDDING_SERVICE_URL || "http://localhost:8001";
 
 // Distance threshold for face matching.
 // InsightFace uses cosine similarity (higher is better, 1.0 is identical).
@@ -66,6 +67,59 @@ async function callInsightFaceDetect(filePath: string): Promise<{ faces: any[], 
 
   const data = await response.json() as { faces: any[], width: number, height: number };
   return data;
+}
+
+async function callEmbeddingServiceUpload(
+  photoId: string,
+  filePath: string,
+  metadata: { timestamp?: string; camera_id?: string; face_ids?: string[] }
+): Promise<void> {
+  const formData = new FormData();
+  const fileData = await fs.promises.readFile(filePath);
+  const blob = new Blob([fileData], { type: 'image/jpeg' });
+  
+  formData.append('file', blob, path.basename(filePath));
+  formData.append('photo_id', photoId);
+  formData.append('file_path', filePath);
+  if (metadata.timestamp) formData.append('timestamp', metadata.timestamp);
+  if (metadata.camera_id) formData.append('camera_id', metadata.camera_id);
+  if (metadata.face_ids && metadata.face_ids.length > 0) {
+    formData.append('face_ids', metadata.face_ids.join(','));
+  }
+
+  const response = await fetch(`${EMBEDDING_SERVICE_URL}/upload`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`Embedding service returned ${response.status}: ${errorText}`);
+    // Don't throw, just log for now to not break the upload flow
+  } else {
+    console.log(`Successfully uploaded photo ${photoId} to embedding service.`);
+  }
+}
+
+export async function indexPhotoEmbeddings(userId: number, photoId: number): Promise<void> {
+  const photo = db
+    .select()
+    .from(photos)
+    .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+    .get();
+  if (!photo) return;
+
+  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  if (!fs.existsSync(filePath)) return;
+
+  // Get face IDs for this photo (optional, but good for completeness if we have them)
+  const photoFaces = db.select({ id: faces.id }).from(faces).where(eq(faces.photo_id, photoId)).all();
+  const faceIds = photoFaces.map(f => f.id.toString());
+
+  await callEmbeddingServiceUpload(photoId.toString(), filePath, {
+    timestamp: photo.taken_at ?? photo.created_at ?? undefined,
+    face_ids: faceIds,
+  });
 }
 
 export async function indexPhotoFaces(userId: number, photoId: number, resetIgnored: boolean = false): Promise<void> {
@@ -289,6 +343,11 @@ export async function uploadPhotoStream(
     });
   }
 
+  // Run embedding generation in background
+  indexPhotoEmbeddings(userId, row.id).catch(err => {
+      console.error("Embedding indexing error:", err);
+  });
+
   return {
     id: row.id,
     user_id: row.user_id,
@@ -347,6 +406,11 @@ export async function uploadPhotoLogic(
         console.error("Face indexing error:", err);
     });
   }
+
+  // Run embedding generation in background
+  indexPhotoEmbeddings(userId, row.id).catch(err => {
+      console.error("Embedding indexing error:", err);
+  });
 
   return {
     id: row.id,
@@ -1097,6 +1161,7 @@ export async function reindexPhotoLogic(
   if (!photo) throw new Error("Photo not found");
 
   await indexPhotoFaces(userId, photoId, true);
+  await indexPhotoEmbeddings(userId, photoId);
   return { success: true };
 }
 
@@ -1114,6 +1179,7 @@ export async function reindexAllPhotosLogic(userId: number): Promise<{ count: nu
     for (const p of allPhotos) {
       try {
         await indexPhotoFaces(userId, p.id, false);
+        await indexPhotoEmbeddings(userId, p.id);
         processed++;
       } catch (err: any) {
         errors++;

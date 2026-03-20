@@ -40,14 +40,10 @@ class CLIPEmbedder:
         return cls._instance
 
     @torch.no_grad()
-    def embed(self, image_paths: List[str]) -> List[List[float]]:
-        """Return normalized CLIP embeddings for a list of image file paths."""
-        images = []
-        for path in image_paths:
-            img = Image.open(path).convert("RGB")
-            images.append(self.preprocess(img))
-
-        batch = torch.stack(images).to(self.device)
+    def embed(self, images: List[Image.Image]) -> List[List[float]]:
+        """Return normalized CLIP embeddings for a list of PIL Image objects."""
+        preprocessed_images = [self.preprocess(img.convert("RGB")) for img in images]
+        batch = torch.stack(preprocessed_images).to(self.device)
         features = self.model.encode_image(batch)
         features = features / features.norm(dim=-1, keepdim=True)
         return features.cpu().float().tolist()
@@ -75,10 +71,9 @@ class DINOv2Embedder:
         return cls._instance
 
     @torch.no_grad()
-    def embed(self, image_paths: List[str]) -> List[List[float]]:
-        """Return normalized DINOv2 CLS-token embeddings for a list of image file paths."""
-        images = [Image.open(p).convert("RGB") for p in image_paths]
-        inputs = self.processor(images=images, return_tensors="pt")
+    def embed(self, images: List[Image.Image]) -> List[List[float]]:
+        """Return normalized DINOv2 CLS-token embeddings for a list of PIL Image objects."""
+        inputs = self.processor(images=[img.convert("RGB") for img in images], return_tensors="pt")
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
         outputs = self.model(**inputs)
         # CLS token is the first token
