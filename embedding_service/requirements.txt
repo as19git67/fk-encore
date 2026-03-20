@@ -1,0 +1,31 @@
+# Web framework
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+python-multipart==0.0.9
+
+# Settings
+pydantic-settings==2.3.0
+
+# Database
+asyncpg==0.29.0
+sqlalchemy[asyncio]==2.0.31
+pgvector==0.3.2
+
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# ML – install CPU torch by default; override with GPU wheel in Dockerfile if needed
+torch==2.10.0+cpu
+torchvision==0.25.0+cpu
+
+# OpenCLIP
+open-clip-torch==2.26.1
+
+# DINOv2 via HuggingFace Transformers
+transformers==4.43.3
+accelerate==0.32.0
+
+# Image processing
+Pillow==10.4.0
+
+# Utilities
+numpy==1.26.4
