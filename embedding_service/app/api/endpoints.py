@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import io
 import logging
-from typing import Annotated
+from datetime import datetime
+from typing import Annotated, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Form
+from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -71,8 +74,9 @@ async def embed(request: EmbedRequest, db: DbDep) -> EmbedResponse:
         )
         dino_embedder = DINOv2Embedder.get_instance(model_name=settings.dino_model_name)
 
-        clip_embeddings = clip_embedder.embed(file_paths)
-        dino_embeddings = dino_embedder.embed(file_paths)
+        images = [Image.open(p).convert("RGB") for p in file_paths]
+        clip_embeddings = clip_embedder.embed(images)
+        dino_embeddings = dino_embedder.embed(images)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     except Exception as exc:
@@ -95,6 +99,59 @@ async def embed(request: EmbedRequest, db: DbDep) -> EmbedResponse:
 
     inserted = await repository.upsert_photos(db, rows)
     logger.info("Inserted %d / %d photos.", inserted, len(new_photos))
+    return EmbedResponse(status="ok", processed=inserted)
+
+
+# ---------------------------------------------------------------------------
+# /upload
+# ---------------------------------------------------------------------------
+
+@router.post("/upload", response_model=EmbedResponse, tags=["embeddings"])
+async def upload_photo(
+    db: DbDep,
+    photo_id: str = Form(...),
+    file_path: str = Form(...),
+    timestamp: Optional[datetime] = Form(None),
+    camera_id: Optional[str] = Form(None),
+    face_ids: Optional[str] = Form(None),  # Comma-separated list
+    file: UploadFile = File(...),
+) -> EmbedResponse:
+    """Generate CLIP + DINOv2 embeddings for an uploaded photo and persist them."""
+    # Skip if photo already in DB
+    existing = await repository.get_existing_photo_ids(db, [photo_id])
+    if photo_id in existing:
+        logger.info("Photo %s already exists – skipping.", photo_id)
+        return EmbedResponse(status="ok", processed=0)
+
+    try:
+        content = await file.read()
+        image = Image.open(io.BytesIO(content)).convert("RGB")
+
+        clip_embedder = CLIPEmbedder.get_instance(
+            model_name=settings.clip_model_name, pretrained=settings.clip_pretrained
+        )
+        dino_embedder = DINOv2Embedder.get_instance(model_name=settings.dino_model_name)
+
+        clip_embeddings = clip_embedder.embed([image])
+        dino_embeddings = dino_embedder.embed([image])
+    except Exception as exc:
+        logger.exception("Embedding generation failed")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Embedding error") from exc
+
+    faces = face_ids.split(",") if face_ids else []
+
+    row = {
+        "photo_id": photo_id,
+        "file_path": file_path,
+        "timestamp": timestamp,
+        "camera_id": camera_id,
+        "face_ids": faces,
+        "embedding_clip": clip_embeddings[0],
+        "embedding_dino": dino_embeddings[0],
+    }
+
+    inserted = await repository.upsert_photos(db, [row])
+    logger.info("Uploaded photo %s processed and stored.", photo_id)
     return EmbedResponse(status="ok", processed=inserted)
 
 
