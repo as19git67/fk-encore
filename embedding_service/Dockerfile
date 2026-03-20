@@ -1,5 +1,5 @@
 # ── Stage 1: build dependencies ──────────────────────────────────────────────
-FROM python:slim-bookworm AS builder
+FROM python:3.12-slim-bookworm AS builder
 
 WORKDIR /build
 
@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
     git \
+    zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -16,7 +17,7 @@ RUN pip install --upgrade pip \
     && pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 # ── Stage 2: runtime image ───────────────────────────────────────────────────
-FROM python:slim-bookworm
+FROM python:3.12-slim-bookworm
 
 WORKDIR /app
 
