@@ -10,10 +10,11 @@ asyncpg==0.29.0
 sqlalchemy[asyncio]==2.0.31
 pgvector==0.3.2
 
-# ML – install CPU torch by default; override with GPU wheel in Dockerfile if needed
-torch==2.3.1+cpu
-torchvision==0.18.1+cpu
 --extra-index-url https://download.pytorch.org/whl/cpu
+
+# ML – install CPU torch by default; override with GPU wheel in Dockerfile if needed
+torch==2.10.0+cpu
+torchvision==0.25.0+cpu
 
 # OpenCLIP
 open-clip-torch==2.26.1
