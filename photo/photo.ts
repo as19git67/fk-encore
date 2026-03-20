@@ -21,6 +21,7 @@ import type {
   PersonDetails,
   MergePersonsRequest,
   AssignFaceRequest,
+  PhotoGroupsResponse,
 } from "../db/types";
 
 // Helper to get userId as number
@@ -224,6 +225,22 @@ export const getPhotoFile = api.raw(
 );
 
 const ENABLE_LOCAL_FACES = process.env.ENABLE_LOCAL_FACES === "true";
+
+// ---------- Photo Grouping ----------
+
+/**
+ * Get photos grouped by person with similarity suggestions.
+ */
+export const getPhotoGroups = api(
+  { expose: true, method: "GET", path: "/photos/groups", auth: true },
+  async (): Promise<PhotoGroupsResponse> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "people.view");
+    return service.getPhotoGroupsLogic(userId);
+  }
+);
 
 // ---------- Albums ----------
 
