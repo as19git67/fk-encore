@@ -63,6 +63,33 @@ export function updatePhotoDate(id: number, taken_at: string) {
   })
 }
 
+// ---------- Photo Grouping ----------
+
+export interface PhotoGroupItem {
+  photo: Photo
+  face: Face
+}
+
+export interface PhotoGroup {
+  person: Person & { faceCount?: number }
+  photos: PhotoGroupItem[]
+}
+
+export interface SimilarPersonPair {
+  person1: Person & { faceCount?: number }
+  person2: Person & { faceCount?: number }
+  similarity: number
+}
+
+export interface PhotoGroupsResponse {
+  groups: PhotoGroup[]
+  suggestions: SimilarPersonPair[]
+}
+
+export function getPhotoGroups() {
+  return apiFetch<PhotoGroupsResponse>('/photos/groups')
+}
+
 // ---------- People & Faces ----------
 
 export interface FaceBBox { x: number; y: number; width: number; height: number }
