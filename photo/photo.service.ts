@@ -30,6 +30,9 @@ import type {
   ListPersonsResponse,
   PersonDetails,
   MergePersonsRequest,
+  PhotoGroupsResponse,
+  SimilarPersonPair,
+  PhotoGroup,
 } from "../db/types";
 import heicConvert from "heic-convert";
 
@@ -1130,6 +1133,165 @@ export async function reindexAllPhotosLogic(userId: number): Promise<{ count: nu
   })();
 
   return { count: allPhotos.length };
+}
+
+// ---------- Photo Grouping ----------
+
+/**
+ * Similarity threshold for suggesting person merges.
+ * Lower than auto-match threshold to catch "maybe the same person" cases.
+ */
+const SUGGESTION_SIMILARITY_THRESHOLD = Math.max(0.25, FACE_SIMILARITY_THRESHOLD - 0.15);
+
+export function getPhotoGroupsLogic(userId: number): PhotoGroupsResponse {
+  // 1. Get all persons with face counts
+  const personRows = db
+    .select({
+      id: persons.id,
+      user_id: persons.user_id,
+      name: persons.name,
+      cover_face_id: persons.cover_face_id,
+      created_at: persons.created_at,
+      updated_at: persons.updated_at,
+      faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM faces f WHERE f.person_id = persons.id AND f.ignored = 0), 0) AS INTEGER)`,
+      cover_filename: sql<string>`COALESCE(
+        (SELECT p.filename FROM faces f INNER JOIN photos p ON p.id = f.photo_id
+         WHERE f.person_id = persons.id AND f.user_id = persons.user_id AND f.ignored = 0
+         ORDER BY COALESCE(julianday(p.taken_at), julianday(p.created_at), 0) DESC, f.id DESC LIMIT 1), '')`,
+      cover_bbox: sql<string>`COALESCE(
+        (SELECT f.bbox FROM faces f INNER JOIN photos p ON p.id = f.photo_id
+         WHERE f.person_id = persons.id AND f.user_id = persons.user_id AND f.ignored = 0
+         ORDER BY COALESCE(julianday(p.taken_at), julianday(p.created_at), 0) DESC, f.id DESC LIMIT 1), '')`,
+    })
+    .from(persons)
+    .where(eq(persons.user_id, userId))
+    .all()
+    .filter(r => r.faceCount > 0);
+
+  // 2. Load faces with photos for each person (top 6 per person for preview)
+  const groups: PhotoGroup[] = personRows
+    .sort((a, b) => b.faceCount - a.faceCount)
+    .map(r => {
+      const faceRows = db
+        .select({
+          faceId: faces.id,
+          faceUserId: faces.user_id,
+          photoId: faces.photo_id,
+          bbox: faces.bbox,
+          personId: faces.person_id,
+          quality: faces.quality,
+          ignored: faces.ignored,
+          faceCreatedAt: faces.created_at,
+          filename: photos.filename,
+          originalName: photos.original_name,
+          mimeType: photos.mime_type,
+          size: photos.size,
+          hash: photos.hash,
+          takenAt: photos.taken_at,
+          photoCreatedAt: photos.created_at,
+          photoUserId: photos.user_id,
+        })
+        .from(faces)
+        .innerJoin(photos, eq(faces.photo_id, photos.id))
+        .where(and(eq(faces.person_id, r.id), eq(faces.user_id, userId), eq(faces.ignored, false)))
+        .orderBy(sql`COALESCE(julianday(${photos.taken_at}), julianday(${photos.created_at}), 0) DESC`)
+        .limit(6)
+        .all();
+
+      return {
+        person: {
+          id: r.id,
+          user_id: r.user_id,
+          name: r.name,
+          cover_face_id: r.cover_face_id ?? undefined,
+          cover_filename: r.cover_filename || undefined,
+          cover_bbox: r.cover_bbox ? JSON.parse(r.cover_bbox) : undefined,
+          created_at: r.created_at ?? "",
+          updated_at: r.updated_at ?? "",
+          faceCount: r.faceCount,
+        },
+        photos: faceRows.map(fr => ({
+          photo: {
+            id: fr.photoId,
+            user_id: fr.photoUserId,
+            filename: fr.filename,
+            original_name: fr.originalName,
+            mime_type: fr.mimeType,
+            size: fr.size,
+            hash: fr.hash ?? undefined,
+            taken_at: fr.takenAt ?? undefined,
+            created_at: fr.photoCreatedAt ?? "",
+          },
+          face: {
+            id: fr.faceId,
+            user_id: fr.faceUserId,
+            photo_id: fr.photoId,
+            bbox: JSON.parse(fr.bbox),
+            embedding: [], // Don't send embeddings to frontend
+            person_id: fr.personId ?? undefined,
+            quality: fr.quality ?? undefined,
+            ignored: !!fr.ignored,
+            created_at: fr.faceCreatedAt ?? "",
+          },
+        })),
+      };
+    });
+
+  // 3. Compute similarity suggestions between persons
+  const allFaces = db
+    .select({ person_id: faces.person_id, embedding: faces.embedding })
+    .from(faces)
+    .where(and(eq(faces.user_id, userId), sql`${faces.person_id} IS NOT NULL`, eq(faces.ignored, false)))
+    .all();
+
+  const personEmbeddings: Record<number, number[][]> = {};
+  for (const f of allFaces) {
+    if (!f.person_id) continue;
+    if (!personEmbeddings[f.person_id]) personEmbeddings[f.person_id] = [];
+    personEmbeddings[f.person_id].push(JSON.parse(f.embedding as string));
+  }
+
+  const centroids: Record<number, number[]> = {};
+  for (const [pid, embs] of Object.entries(personEmbeddings)) {
+    centroids[parseInt(pid)] = computeCentroid(embs);
+  }
+
+  const suggestions: SimilarPersonPair[] = [];
+  const personList = personRows.filter(p => centroids[p.id]);
+
+  for (let i = 0; i < personList.length; i++) {
+    for (let j = i + 1; j < personList.length; j++) {
+      const p1 = personList[i];
+      const p2 = personList[j];
+      const sim = cosineSimilarity(centroids[p1.id], centroids[p2.id]);
+
+      if (sim >= SUGGESTION_SIMILARITY_THRESHOLD && sim < FACE_SIMILARITY_THRESHOLD) {
+        suggestions.push({
+          person1: {
+            id: p1.id, user_id: p1.user_id, name: p1.name,
+            cover_face_id: p1.cover_face_id ?? undefined,
+            cover_filename: p1.cover_filename || undefined,
+            cover_bbox: p1.cover_bbox ? JSON.parse(p1.cover_bbox) : undefined,
+            created_at: p1.created_at ?? "", updated_at: p1.updated_at ?? "",
+            faceCount: p1.faceCount,
+          },
+          person2: {
+            id: p2.id, user_id: p2.user_id, name: p2.name,
+            cover_face_id: p2.cover_face_id ?? undefined,
+            cover_filename: p2.cover_filename || undefined,
+            cover_bbox: p2.cover_bbox ? JSON.parse(p2.cover_bbox) : undefined,
+            created_at: p2.created_at ?? "", updated_at: p2.updated_at ?? "",
+            faceCount: p2.faceCount,
+          },
+          similarity: Math.round(sim * 100) / 100,
+        });
+      }
+    }
+  }
+
+  suggestions.sort((a, b) => b.similarity - a.similarity);
+
+  return { groups, suggestions };
 }
 
 /**
