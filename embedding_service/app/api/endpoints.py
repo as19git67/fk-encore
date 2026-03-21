@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Form
+from PIL import UnidentifiedImageError
 from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -134,6 +135,8 @@ async def upload_photo(
 
         clip_embeddings = clip_embedder.embed([image])
         dino_embeddings = dino_embedder.embed([image])
+    except UnidentifiedImageError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported or corrupted image format") from exc
     except Exception as exc:
         logger.exception("Embedding generation failed")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Embedding error") from exc
