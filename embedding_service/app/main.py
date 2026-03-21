@@ -7,6 +7,9 @@ import logging.config
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pillow_heif import register_heif_opener
+
+register_heif_opener()
 
 from app.api.endpoints import router
 from app.config import settings
