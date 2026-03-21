@@ -83,13 +83,13 @@ const selectedForCompare = ref<Set<number>>(new Set())
 
 onMounted(() => {
   if (isTwoPhotos.value) {
-    comparePair.value = [groupPhotos.value[0].id, groupPhotos.value[1].id]
+    comparePair.value = [groupPhotos.value[0]!.id, groupPhotos.value[1]!.id]
   }
 })
 watch(() => props.group.id, () => {
   selectedForCompare.value = new Set()
   if (isTwoPhotos.value) {
-    comparePair.value = [groupPhotos.value[0].id, groupPhotos.value[1].id]
+    comparePair.value = [groupPhotos.value[0]!.id, groupPhotos.value[1]!.id]
   } else {
     comparePair.value = null
   }
