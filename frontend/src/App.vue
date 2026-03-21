@@ -16,7 +16,6 @@ const menuItems = computed(() => {
   }
   if (auth.hasPermission('people.view')) {
     items.push({ label: 'Personen', icon: 'pi pi-users', command: () => router.push('/people') })
-    items.push({ label: 'Gruppen', icon: 'pi pi-th-large', command: () => router.push('/groups') })
   }
   if (auth.hasPermission('users.list')) {
     items.push({ label: 'Benutzer', icon: 'pi pi-users', command: () => router.push('/users') })
