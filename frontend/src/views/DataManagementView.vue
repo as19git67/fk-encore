@@ -3,11 +3,13 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import Button from 'primevue/button'
 import ProgressBar from 'primevue/progressbar'
 import Message from 'primevue/message'
-import { reindexAllPhotos, getReindexStatus, type ReindexStatus } from '../api/photos'
+import { reindexAllPhotos, getReindexStatus, findPhotoGroups, type ReindexStatus } from '../api/photos'
 
 const status = ref<ReindexStatus>({ inProgress: false, total: 0, processed: 0, errors: 0 })
 const error = ref('')
 const loading = ref(false)
+const groupingLoading = ref(false)
+const groupingResult = ref<{ groups_created: number; total_photos_grouped: number } | null>(null)
 let pollInterval: ReturnType<typeof setInterval> | null = null
 
 const progress = computed(() => {
@@ -50,6 +52,19 @@ async function handleReindex() {
     }
   } finally {
     loading.value = false
+  }
+}
+
+async function handleFindGroups() {
+  error.value = ''
+  groupingLoading.value = true
+  groupingResult.value = null
+  try {
+    groupingResult.value = await findPhotoGroups()
+  } catch (err: any) {
+    error.value = err.message || 'Fehler bei der Gruppierung'
+  } finally {
+    groupingLoading.value = false
   }
 }
 
@@ -114,6 +129,28 @@ onUnmounted(() => clearInterval(checkCompletion))
         @click="handleReindex"
         :disabled="status.inProgress"
         :loading="loading"
+      />
+    </div>
+
+    <div class="card p-4 mb-4 surface-card border-round shadow-1">
+      <h3 class="mt-0 mb-3">Ähnliche Fotos gruppieren</h3>
+      <p class="text-secondary mb-4">
+        Fotos werden anhand visueller Ähnlichkeit und zeitlicher Nähe automatisch gruppiert.
+        Bereits bearbeitete Gruppen bleiben erhalten.
+      </p>
+
+      <div v-if="groupingResult" class="mb-4">
+        <Message severity="success" :closable="false">
+          {{ groupingResult.groups_created }} neue Gruppen erstellt
+          ({{ groupingResult.total_photos_grouped }} Fotos gruppiert).
+        </Message>
+      </div>
+
+      <Button
+        icon="pi pi-objects-column"
+        label="Gruppen aktualisieren"
+        @click="handleFindGroups"
+        :loading="groupingLoading"
       />
     </div>
   </div>

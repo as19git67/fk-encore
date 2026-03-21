@@ -272,6 +272,36 @@ export interface ListAlbumsResponse {
   albums: Album[];
 }
 
+export type CurationStatus = "visible" | "hidden" | "favorite";
+
+export interface PhotoWithCuration extends Photo {
+  curation_status: CurationStatus;
+}
+
 export interface ListPhotosResponse {
-  photos: Photo[];
+  photos: PhotoWithCuration[];
+}
+
+export interface PhotoGroup {
+  id: number;
+  user_id: number;
+  cover_photo_id?: number;
+  reviewed_at?: string;
+  created_at: string;
+  member_count: number;
+  photo_ids: number[];
+}
+
+export interface ListGroupsResponse {
+  groups: PhotoGroup[];
+}
+
+export interface FindGroupsResponse {
+  groups_created: number;
+  total_photos_grouped: number;
+}
+
+export interface UpdateCurationRequest {
+  id: number;
+  status: CurationStatus;
 }

@@ -175,6 +175,32 @@ function createSqliteDb(isTest: boolean): BetterSQLite3Database<typeof schema> {
       FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE,
       FOREIGN KEY (person_id) REFERENCES persons(id) ON DELETE SET NULL
     );
+    CREATE TABLE IF NOT EXISTS photo_curation (
+      user_id INTEGER NOT NULL,
+      photo_id INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'visible',
+      updated_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, photo_id),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS photo_groups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      cover_photo_id INTEGER,
+      reviewed_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (cover_photo_id) REFERENCES photos(id) ON DELETE SET NULL
+    );
+    CREATE TABLE IF NOT EXISTS photo_group_members (
+      group_id INTEGER NOT NULL,
+      photo_id INTEGER NOT NULL,
+      similarity_rank INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (group_id, photo_id),
+      FOREIGN KEY (group_id) REFERENCES photo_groups(id) ON DELETE CASCADE,
+      FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE
+    );
   `);
 
   // Ensure hash column exists in case the table already existed without it
@@ -340,6 +366,32 @@ function createPostgresDb(isTest: boolean): ReturnType<typeof drizzlePostgres<ty
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE,
       FOREIGN KEY (person_id) REFERENCES persons(id) ON DELETE SET NULL
+    );
+    CREATE TABLE IF NOT EXISTS photo_curation (
+      user_id INTEGER NOT NULL,
+      photo_id INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'visible',
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (user_id, photo_id),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS photo_groups (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      cover_photo_id INTEGER,
+      reviewed_at TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (cover_photo_id) REFERENCES photos(id) ON DELETE SET NULL
+    );
+    CREATE TABLE IF NOT EXISTS photo_group_members (
+      group_id INTEGER NOT NULL,
+      photo_id INTEGER NOT NULL,
+      similarity_rank INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (group_id, photo_id),
+      FOREIGN KEY (group_id) REFERENCES photo_groups(id) ON DELETE CASCADE,
+      FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE
     );
   `).catch(err => {
     console.error("Error creating PostgreSQL tables:", err);

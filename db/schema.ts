@@ -146,6 +146,50 @@ export const faces = sqliteTable("faces", {
   created_at: text("created_at").default(sql`(datetime('now'))`),
 });
 
+// ========== Photo Curation (per-user visibility) ==========
+
+export const photoCuration = sqliteTable(
+  "photo_curation",
+  {
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    photo_id: integer("photo_id")
+      .notNull()
+      .references(() => photos.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("visible"), // 'visible' | 'hidden' | 'favorite'
+    updated_at: text("updated_at").default(sql`(datetime('now'))`),
+  },
+  (table) => [primaryKey({ columns: [table.user_id, table.photo_id] })]
+);
+
+// ========== Photo Groups (similar photo stacks) ==========
+
+export const photoGroups = sqliteTable("photo_groups", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  cover_photo_id: integer("cover_photo_id")
+    .references(() => photos.id, { onDelete: "set null" }),
+  reviewed_at: text("reviewed_at"),
+  created_at: text("created_at").default(sql`(datetime('now'))`),
+});
+
+export const photoGroupMembers = sqliteTable(
+  "photo_group_members",
+  {
+    group_id: integer("group_id")
+      .notNull()
+      .references(() => photoGroups.id, { onDelete: "cascade" }),
+    photo_id: integer("photo_id")
+      .notNull()
+      .references(() => photos.id, { onDelete: "cascade" }),
+    similarity_rank: integer("similarity_rank").notNull().default(0),
+  },
+  (table) => [primaryKey({ columns: [table.group_id, table.photo_id] })]
+);
+
 // ========== Albums ==========
 
 export const albums = sqliteTable("albums", {

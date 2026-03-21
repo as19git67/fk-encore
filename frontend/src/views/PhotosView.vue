@@ -6,20 +6,27 @@ import Message from 'primevue/message'
 import ProgressBar from 'primevue/progressbar'
 import { useConfirm } from 'primevue/useconfirm'
 import DatePicker from 'primevue/datepicker'
+import ToggleSwitch from 'primevue/toggleswitch'
 import HeicImage from '../components/HeicImage.vue'
-import { 
-  listPhotos, 
-  uploadPhoto, 
-  deletePhoto, 
-  getPhotoUrl, 
-  getPhotosToRefreshMetadata, 
-  refreshPhotoMetadata, 
-  updatePhotoDate, 
+import PhotoCompareView from '../components/PhotoCompareView.vue'
+import {
+  listPhotos,
+  uploadPhoto,
+  deletePhoto,
+  getPhotoUrl,
+  getPhotosToRefreshMetadata,
+  refreshPhotoMetadata,
+  updatePhotoDate,
   reindexPhoto,
   ignoreFace,
   getPhotoFaces,
+  updatePhotoCuration,
+  listPhotoGroups,
+  reviewPhotoGroup,
   type Photo,
-  type Face
+  type Face,
+  type CurationStatus,
+  type PhotoGroup,
 } from '../api/photos'
 import { listPersons, type Person } from '../api/photos'
 import { useAuthStore } from '../stores/auth'
@@ -35,6 +42,51 @@ const isFullscreen = ref(false)
 const canUpload = computed(() => auth.hasPermission('photos.upload'))
 const canDelete = computed(() => auth.hasPermission('photos.delete'))
 const canRefreshMetadata = computed(() => auth.hasPermission('photos.refresh_metadata'))
+const showHidden = ref(false)
+
+// Photo groups (stacks)
+const photoGroupsList = ref<PhotoGroup[]>([])
+const activeGroup = ref<PhotoGroup | null>(null)
+
+// Map: photoId -> group
+const photoToGroup = computed(() => {
+  const map = new Map<number, PhotoGroup>()
+  for (const group of photoGroupsList.value) {
+    for (const pid of group.photo_ids) {
+      map.set(pid, group)
+    }
+  }
+  return map
+})
+
+const unreviewedGroupCount = computed(() =>
+  photoGroupsList.value.filter((g) => !g.reviewed_at).length
+)
+
+// Set of photo IDs that are in an UNREVIEWED group but NOT the cover
+// Reviewed groups show all photos individually
+const hiddenByStack = computed(() => {
+  const set = new Set<number>()
+  for (const group of photoGroupsList.value) {
+    if (group.reviewed_at) continue // reviewed → show all individually
+    for (const pid of group.photo_ids) {
+      if (pid !== group.cover_photo_id) set.add(pid)
+    }
+  }
+  return set
+})
+
+// Set of photo IDs that are in an unreviewed stack (no curation in grid)
+const inUnreviewedStack = computed(() => {
+  const set = new Set<number>()
+  for (const group of photoGroupsList.value) {
+    if (group.reviewed_at) continue
+    for (const pid of group.photo_ids) {
+      set.add(pid)
+    }
+  }
+  return set
+})
 
 const selectedPhoto = computed(() => {
   if (selectedIndex.value < 0) return null
@@ -143,6 +195,7 @@ watch(selectedPhoto, (newPhoto) => {
 interface PhotoItem {
   photo: Photo;
   index: number;
+  group?: PhotoGroup;
 }
 
 interface MonthGroup {
@@ -157,27 +210,33 @@ interface YearGroup {
 
 const groupedPhotos = computed(() => {
   const groups: YearGroup[] = [];
-  
+
   photos.value.forEach((photo, index) => {
+    // Skip photos hidden by stack (non-cover group members)
+    if (hiddenByStack.value.has(photo.id)) return;
+
     const date = new Date(photo.taken_at || photo.created_at);
     const year = date.getFullYear().toString();
     const month = date.toLocaleString('de-DE', { month: 'long' });
-    
+
     let yearGroup = groups.find(g => g.year === year);
     if (!yearGroup) {
       yearGroup = { year, months: [] };
       groups.push(yearGroup);
     }
-    
+
     let monthGroup = yearGroup.months.find(m => m.month === month);
     if (!monthGroup) {
       monthGroup = { month, photos: [] };
       yearGroup.months.push(monthGroup);
     }
-    
-    monthGroup.photos.push({ photo, index });
+
+    const group = photoToGroup.value.get(photo.id);
+    // Only show as stack if group is unreviewed
+    const stackGroup = group && !group.reviewed_at ? group : undefined;
+    monthGroup.photos.push({ photo, index, group: stackGroup });
   });
-  
+
   return groups;
 });
 
@@ -185,12 +244,16 @@ async function loadPhotos() {
   loading.value = true
   error.value = ''
   try {
-    const res = await listPhotos()
-    photos.value = res.photos.sort((a, b) => {
+    const [photosRes, groupsRes] = await Promise.all([
+      listPhotos(showHidden.value),
+      listPhotoGroups().catch(() => ({ groups: [] })),
+    ])
+    photos.value = photosRes.photos.sort((a, b) => {
       const dateA = new Date(a.taken_at || a.created_at).getTime();
       const dateB = new Date(b.taken_at || b.created_at).getTime();
       return dateB - dateA;
     });
+    photoGroupsList.value = groupsRes.groups
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Fotos'
   } finally {
@@ -256,30 +319,98 @@ async function handleUpload(event: any) {
 
 async function handleDelete(id: number) {
   confirm.require({
-    message: 'Foto wirklich löschen?',
-    header: 'Bestätigung',
-    icon: 'pi pi-exclamation-triangle',
+    message: 'Foto ausblenden? Es kann jederzeit wiederhergestellt werden.',
+    header: 'Foto ausblenden',
+    icon: 'pi pi-eye-slash',
     rejectProps: {
       label: 'Abbrechen',
       severity: 'secondary',
       outlined: true
     },
     acceptProps: {
-      label: 'Löschen',
-      severity: 'danger'
+      label: 'Ausblenden',
+      severity: 'warn'
     },
     accept: async () => {
       try {
         await deletePhoto(id)
-        await loadPhotos()
+        await reloadPhotosInPlace()
         if (selectedIndex.value >= photos.value.length) {
           selectedIndex.value = photos.value.length - 1
         }
       } catch (err: any) {
-        error.value = err.message || 'Fehler beim Löschen'
+        error.value = err.message || 'Fehler beim Ausblenden'
       }
     }
   })
+}
+
+// Fix #6: Reload photos without losing scroll position
+async function reloadPhotosInPlace() {
+  try {
+    const [photosRes, groupsRes] = await Promise.all([
+      listPhotos(showHidden.value),
+      listPhotoGroups().catch(() => ({ groups: [] })),
+    ])
+    photos.value = photosRes.photos.sort((a, b) => {
+      const dateA = new Date(a.taken_at || a.created_at).getTime();
+      const dateB = new Date(b.taken_at || b.created_at).getTime();
+      return dateB - dateA;
+    });
+    photoGroupsList.value = groupsRes.groups
+  } catch {
+    // Silently fail — non-critical
+  }
+}
+
+async function handleRestore(id: number) {
+  try {
+    await updatePhotoCuration(id, 'visible')
+    await reloadPhotosInPlace()
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Wiederherstellen'
+  }
+}
+
+async function handleToggleFavorite(id: number, currentStatus: CurationStatus) {
+  try {
+    const newStatus = currentStatus === 'favorite' ? 'visible' : 'favorite'
+    await updatePhotoCuration(id, newStatus)
+    await reloadPhotosInPlace()
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Ändern des Favoriten-Status'
+  }
+}
+
+// Fix #1: Scroll to a photo by ID after reload
+function scrollToPhoto(photoId: number) {
+  nextTick(() => {
+    const el = document.querySelector(`[data-photo-id="${photoId}"]`)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  })
+}
+
+function handleGroupClose() {
+  const coverId = activeGroup.value?.cover_photo_id
+  activeGroup.value = null
+  reloadPhotosInPlace().then(() => {
+    if (coverId) scrollToPhoto(coverId)
+  })
+}
+
+// Fix #2: "Weiter" = mark reviewed + advance to next unreviewed group
+function handleGroupNext(reviewedGroupId: number) {
+  const next = photoGroupsList.value.find((g) => !g.reviewed_at && g.id !== reviewedGroupId)
+  if (next) {
+    activeGroup.value = next
+    reloadPhotosInPlace()
+  } else {
+    const coverId = activeGroup.value?.cover_photo_id
+    activeGroup.value = null
+    reloadPhotosInPlace().then(() => {
+      if (coverId) scrollToPhoto(coverId)
+    })
+  }
 }
 
 async function handleRefreshMetadata() {
@@ -489,11 +620,15 @@ onUnmounted(() => {
     <div class="header">
       <h1>Meine Fotos</h1>
       <div class="actions">
-        <Button 
+        <div v-if="canDelete" class="toggle-hidden">
+          <label for="showHidden" class="text-sm">Ausgeblendete</label>
+          <ToggleSwitch v-model="showHidden" inputId="showHidden" @update:modelValue="loadPhotos" />
+        </div>
+        <Button
           v-if="canRefreshMetadata"
-          label="Metadaten aktualisieren" 
-          icon="pi pi-refresh" 
-          severity="secondary" 
+          label="Metadaten aktualisieren"
+          icon="pi pi-refresh"
+          severity="secondary"
           :loading="refreshingMetadata"
           @click="handleRefreshMetadata"
           class="refresh-btn"
@@ -532,25 +667,57 @@ onUnmounted(() => {
           <h2 :id="'year-' + yearGroup.year" class="grid-header year-title">{{ yearGroup.year }}</h2>
           <template v-for="monthGroup in yearGroup.months" :key="yearGroup.year + monthGroup.month">
             <h3 :id="'month-' + yearGroup.year + '-' + monthGroup.month" class="grid-header month-title">{{ monthGroup.month }}</h3>
-            <div 
-              v-for="item in monthGroup.photos" 
-              :key="item.photo.id" 
+            <div
+              v-for="item in monthGroup.photos"
+              :key="item.photo.id"
+              :data-photo-id="item.photo.id"
               class="photo-item"
-              :class="{ selected: item.index === selectedIndex }"
-              @click="selectedIndex = item.index"
-              @dblclick="isFullscreen = true"
+              :class="{
+                selected: item.index === selectedIndex,
+                'is-hidden': item.photo.curation_status === 'hidden',
+                'is-favorite': item.photo.curation_status === 'favorite',
+                'is-stack': !!item.group
+              }"
+              @click="item.group ? (activeGroup = item.group) : (selectedIndex = item.index)"
+              @dblclick="!item.group && (isFullscreen = true)"
             >
               <HeicImage :src="getPhotoUrl(item.photo.filename)" :alt="item.photo.original_name" loading="lazy" />
+              <span v-if="item.group" class="stack-badge">{{ item.group.member_count }}</span>
+              <i v-if="item.group?.reviewed_at" class="pi pi-check stack-reviewed-badge"></i>
+              <i v-if="item.photo.curation_status === 'favorite'" class="pi pi-heart-fill favorite-badge"></i>
+              <i v-if="item.photo.curation_status === 'hidden'" class="pi pi-eye-slash hidden-badge"></i>
               <div class="photo-info">
-                <span class="name">{{ item.photo.original_name }}</span>
-                <Button 
-                  v-if="canDelete"
-                  icon="pi pi-trash" 
-                  severity="danger" 
-                  text 
-                  rounded 
-                  @click.stop="handleDelete(item.photo.id)" 
-                />
+                <span class="name">{{ item.group ? `${item.group.member_count} ähnliche Fotos` : item.photo.original_name }}</span>
+                <!-- Fix #4: No curation buttons on unreviewed stacks -->
+                <div v-if="!inUnreviewedStack.has(item.photo.id)" class="photo-actions">
+                  <Button
+                    v-if="canDelete && item.photo.curation_status === 'hidden'"
+                    icon="pi pi-eye"
+                    severity="info"
+                    text
+                    rounded
+                    v-tooltip="'Wiederherstellen'"
+                    @click.stop="handleRestore(item.photo.id)"
+                  />
+                  <Button
+                    v-if="canDelete && item.photo.curation_status !== 'hidden'"
+                    :icon="item.photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
+                    :severity="item.photo.curation_status === 'favorite' ? 'warn' : 'secondary'"
+                    text
+                    rounded
+                    v-tooltip="'Favorit'"
+                    @click.stop="handleToggleFavorite(item.photo.id, item.photo.curation_status)"
+                  />
+                  <Button
+                    v-if="canDelete && item.photo.curation_status !== 'hidden'"
+                    icon="pi pi-eye-slash"
+                    severity="danger"
+                    text
+                    rounded
+                    v-tooltip="'Ausblenden'"
+                    @click.stop="handleDelete(item.photo.id)"
+                  />
+                </div>
               </div>
             </div>
           </template>
@@ -636,13 +803,31 @@ onUnmounted(() => {
               severity="secondary"
             />
             
-            <Button 
-              v-if="canDelete"
-              label="Foto löschen" 
-              icon="pi pi-trash" 
+            <Button
+              v-if="canDelete && selectedPhoto.curation_status === 'hidden'"
+              label="Wiederherstellen"
+              icon="pi pi-eye"
+              @click="handleRestore(selectedPhoto.id)"
+              class="w-full"
+              severity="info"
+              text
+            />
+            <Button
+              v-if="canDelete && selectedPhoto.curation_status !== 'hidden'"
+              :label="selectedPhoto.curation_status === 'favorite' ? 'Kein Favorit' : 'Favorit'"
+              :icon="selectedPhoto.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
+              @click="handleToggleFavorite(selectedPhoto.id, selectedPhoto.curation_status)"
+              class="w-full"
+              severity="warn"
+              text
+            />
+            <Button
+              v-if="canDelete && selectedPhoto.curation_status !== 'hidden'"
+              label="Ausblenden"
+              icon="pi pi-eye-slash"
               @click="handleDelete(selectedPhoto.id)"
               class="w-full"
-              severity="danger" 
+              severity="danger"
               text
             />
           </div>
@@ -711,6 +896,16 @@ onUnmounted(() => {
         <Button icon="pi pi-times" class="close-btn" rounded severity="secondary" @click="isFullscreen = false" />
       </div>
     </div>
+
+    <!-- Photo Compare Mode -->
+    <PhotoCompareView
+      v-if="activeGroup"
+      :group="activeGroup"
+      :allPhotos="photos"
+      :totalUnreviewed="unreviewedGroupCount"
+      @close="handleGroupClose"
+      @next="handleGroupNext"
+    />
   </div>
 </template>
 
@@ -1005,11 +1200,12 @@ onUnmounted(() => {
 }
 
 .photo-info {
-  padding: 0.5rem;
+  padding: 0.25rem 0.5rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
   position: absolute;
   bottom: 0;
   left: 0;
@@ -1028,6 +1224,117 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
+  color: white;
+}
+
+.photo-actions {
+  display: flex;
+  gap: 0;
+}
+
+.photo-item.is-hidden {
+  opacity: 0.35;
+}
+
+.photo-item.is-hidden:hover {
+  opacity: 0.7;
+}
+
+.photo-item.is-favorite {
+  border-color: var(--p-yellow-500);
+}
+
+.favorite-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  color: var(--p-yellow-500);
+  font-size: 1.2rem;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
+  z-index: 5;
+}
+
+.hidden-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  color: white;
+  font-size: 1.2rem;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
+  z-index: 5;
+}
+
+.toggle-hidden {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Stack styles — layered cards behind the cover photo */
+.photo-item.is-stack {
+  position: relative;
+  margin: 6px 6px 6px 6px;
+}
+
+.photo-item.is-stack::before,
+.photo-item.is-stack::after {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  bottom: -2px;
+  background: var(--surface-card);
+  border-radius: 8px;
+  z-index: -1;
+  border: 1px solid var(--surface-300);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+}
+
+.photo-item.is-stack::before {
+  transform: rotate(-3deg);
+  top: -4px;
+  left: -5px;
+}
+
+.photo-item.is-stack::after {
+  transform: rotate(2.5deg);
+  top: -3px;
+  right: -5px;
+}
+
+.stack-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: var(--p-primary-color);
+  color: white;
+  font-size: 0.8rem;
+  font-weight: 700;
+  min-width: 24px;
+  height: 24px;
+  line-height: 24px;
+  text-align: center;
+  padding: 0 6px;
+  border-radius: 12px;
+  z-index: 5;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+.stack-reviewed-badge {
+  position: absolute;
+  top: 8px;
+  left: 42px;
+  background: var(--p-green-500);
+  color: white;
+  width: 22px;
+  height: 22px;
+  line-height: 22px;
+  text-align: center;
+  font-size: 0.7rem;
+  border-radius: 11px;
+  z-index: 5;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
 }
 
 .fullscreen-overlay {
