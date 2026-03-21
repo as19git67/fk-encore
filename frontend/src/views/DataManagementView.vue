@@ -3,13 +3,24 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import Button from 'primevue/button'
 import ProgressBar from 'primevue/progressbar'
 import Message from 'primevue/message'
-import { reindexAllPhotos, getReindexStatus, findPhotoGroups, type ReindexStatus } from '../api/photos'
+import PhotoCompareView from '../components/PhotoCompareView.vue'
+import {
+  reindexAllPhotos, getReindexStatus, findPhotoGroups,
+  listPhotoGroups, listPhotos, getNextUnreviewedGroup,
+  type ReindexStatus, type PhotoGroup, type Photo,
+} from '../api/photos'
 
 const status = ref<ReindexStatus>({ inProgress: false, total: 0, processed: 0, errors: 0 })
 const error = ref('')
 const loading = ref(false)
 const groupingLoading = ref(false)
 const groupingResult = ref<{ groups_created: number; total_photos_grouped: number } | null>(null)
+
+// Group review wizard
+const allGroups = ref<PhotoGroup[]>([])
+const allPhotos = ref<Photo[]>([])
+const activeGroup = ref<PhotoGroup | null>(null)
+const unreviewedCount = computed(() => allGroups.value.filter(g => !g.reviewed_at).length)
 let pollInterval: ReturnType<typeof setInterval> | null = null
 
 const progress = computed(() => {
@@ -68,11 +79,49 @@ async function handleFindGroups() {
   }
 }
 
+async function loadGroupData() {
+  try {
+    const [groupsRes, photosRes] = await Promise.all([
+      listPhotoGroups(),
+      listPhotos(true),
+    ])
+    allGroups.value = groupsRes.groups
+    allPhotos.value = photosRes.photos
+  } catch {
+    // non-critical
+  }
+}
+
+async function handleStartReview() {
+  await loadGroupData()
+  const first = allGroups.value.find(g => !g.reviewed_at)
+  if (first) {
+    activeGroup.value = first
+  }
+}
+
+function handleReviewClose() {
+  activeGroup.value = null
+  loadGroupData()
+}
+
+function handleReviewNext(reviewedGroupId: number) {
+  loadGroupData().then(() => {
+    const next = allGroups.value.find(g => !g.reviewed_at && g.id !== reviewedGroupId)
+    if (next) {
+      activeGroup.value = next
+    } else {
+      activeGroup.value = null
+    }
+  })
+}
+
 onMounted(async () => {
   await fetchStatus()
   if (status.value.inProgress) {
     startPolling()
   }
+  await loadGroupData()
 })
 
 onUnmounted(() => {
@@ -146,12 +195,30 @@ onUnmounted(() => clearInterval(checkCompletion))
         </Message>
       </div>
 
-      <Button
-        icon="pi pi-objects-column"
-        label="Gruppen aktualisieren"
-        @click="handleFindGroups"
-        :loading="groupingLoading"
-      />
+      <div class="flex gap-2">
+        <Button
+          icon="pi pi-objects-column"
+          label="Gruppen aktualisieren"
+          @click="handleFindGroups"
+          :loading="groupingLoading"
+        />
+        <Button
+          v-if="unreviewedCount > 0"
+          icon="pi pi-images"
+          :label="`Gruppen bearbeiten (${unreviewedCount} offen)`"
+          severity="success"
+          @click="handleStartReview"
+        />
+      </div>
     </div>
+
+    <PhotoCompareView
+      v-if="activeGroup"
+      :group="activeGroup"
+      :allPhotos="allPhotos"
+      :totalUnreviewed="unreviewedCount"
+      @close="handleReviewClose"
+      @next="handleReviewNext"
+    />
   </div>
 </template>
