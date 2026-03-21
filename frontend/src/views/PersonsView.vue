@@ -6,7 +6,7 @@ import Dialog from 'primevue/dialog'
 import { useConfirm } from 'primevue/useconfirm'
 import InputText from 'primevue/inputtext'
 import HeicImage from '../components/HeicImage.vue'
-import { listPersons, updatePerson, mergePersons, getPhotoUrl, reindexAllPhotos, getPersonDetails, ignoreFace, ignorePersonFaces, type Person, type Photo, type PersonDetails } from '../api/photos'
+import { listPersons, updatePerson, mergePersons, getPhotoUrl, getPersonDetails, ignoreFace, ignorePersonFaces, type Person, type Photo, type PersonDetails } from '../api/photos'
 
 const persons = ref<Person[]>([])
 const enableLocalFaces = ref(true)
@@ -132,8 +132,6 @@ async function handleMerge() {
     }
 }
 
-const reindexing = ref(false)
-let reindexInterval: any = null
 const viewportWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1024)
 
 async function loadData() {
@@ -349,54 +347,6 @@ async function handleIgnorePerson(personId: number) {
     })
 }
 
-async function handleReindex() {
-    reindexing.value = true
-    error.value = ''
-    try {
-        const res = await reindexAllPhotos()
-        
-        // If there are no photos to reindex, we are done immediately
-        if (!res.count || res.count === 0) {
-            reindexing.value = false
-            await loadData()
-            return
-        }
-
-        // Start polling for data updates while reindexing is happening in background
-        // Sequential processing can take a while, so poll for up to 2 minutes
-        if (reindexInterval) clearInterval(reindexInterval)
-        
-        let count = 0
-        let lastPersonCount = persons.value.length
-        let stableCount = 0
-        const maxPolls = 60 // 60 × 2s = 120 seconds
-        
-        reindexInterval = setInterval(async () => {
-            await loadData()
-            count++
-            
-            // Check if data has stabilized (same number of persons for 5 consecutive polls)
-            // This is a heuristic to stop polling early when background job likely finished
-            if (persons.value.length === lastPersonCount && persons.value.length > 0) {
-                stableCount++
-            } else {
-                stableCount = 0
-                lastPersonCount = persons.value.length
-            }
-
-            // Stop polling after max duration or if data is stable for 10 seconds
-            if (count > maxPolls || stableCount >= 5) {
-                clearInterval(reindexInterval)
-                reindexInterval = null
-                reindexing.value = false
-            }
-        }, 2000)
-        
-    } catch (err: any) {
-        error.value = err.message || 'Fehler beim Re-Indexing'
-        reindexing.value = false
-    }
-}
 
 function getCoverUrl(person: Person) {
     if (person.cover_filename) {
@@ -540,7 +490,6 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-    if (reindexInterval) clearInterval(reindexInterval)
     window.removeEventListener('keydown', handleKeydown)
     window.removeEventListener('resize', handleResize)
 })
@@ -558,10 +507,6 @@ onUnmounted(() => {
           </div>
       </div>
       <div class="flex items-center gap-4">
-          <div v-if="reindexing" class="flex items-center gap-3 text-primary animate-pulse mr-4">
-              <i class="pi pi-spin pi-spinner"></i>
-              <span class="text-sm font-medium">Scannen läuft...</span>
-          </div>
           <div class="flex gap-4">
               <template v-if="!selectedPersonDetail">
                   <Button v-if="multiSelectMode" icon="pi pi-clone" label="Zusammenführen" class="p-button-success" @click="openMergeDialog" :disabled="selectedPersonIds.length < 2" />
@@ -571,8 +516,7 @@ onUnmounted(() => {
                   <Button icon="pi pi-pencil" label="Umbenennen" class="p-button-outlined" @click="openRename(selectedPersonDetail)" />
                   <Button icon="pi pi-trash" label="Ignorieren" class="p-button-outlined p-button-danger" @click="handleIgnorePerson(selectedPersonDetail.id)" v-tooltip="'Diese Person und alle ihre Gesichtserkennungen dauerhaft ignorieren'" />
               </template>
-              <Button icon="pi pi-images" label="Alle neu scannen" class="p-button-outlined" @click="handleReindex" :disabled="reindexing || !enableLocalFaces" :tooltip="!enableLocalFaces ? 'Lokale Gesichtserkennung ist deaktiviert' : ''" />
-              <Button icon="pi pi-refresh" label="Aktualisieren" @click="loadData" :loading="loading" :disabled="reindexing" />
+              <Button icon="pi pi-refresh" label="Aktualisieren" @click="loadData" :loading="loading" />
           </div>
       </div>
     </div>
@@ -583,7 +527,7 @@ onUnmounted(() => {
     <div v-if="!selectedPersonDetail">
         <div v-if="persons.some(p => p.cover_bbox && (p.cover_bbox.x > 1.1 || p.cover_bbox.width > 1.1))" class="mb-4">
             <Message severity="warn" :closable="false">
-                Einige Gesichtskoordinaten scheinen veraltet zu sein. Bitte klicken Sie auf <b>"Alle neu scannen"</b>, um die Ansicht zu korrigieren.
+                Einige Gesichtskoordinaten scheinen veraltet zu sein. Bitte scannen Sie alle Fotos erneut unter <b>Datenverwaltung</b>.
             </Message>
         </div>
 

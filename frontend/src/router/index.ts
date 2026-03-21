@@ -8,6 +8,7 @@ import RolesView from '../views/RolesView.vue'
 import ProfileView from '../views/ProfileView.vue'
 import PhotosView from '../views/PhotosView.vue'
 import PersonsView from '../views/PersonsView.vue'
+import DataManagementView from '../views/DataManagementView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -21,6 +22,7 @@ const router = createRouter({
     { path: '/profile', name: 'profile', component: ProfileView },
     { path: '/photos', name: 'photos', component: PhotosView, meta: { permission: 'photos.view' } },
     { path: '/people', name: 'people', component: PersonsView, meta: { permission: 'people.view' } },
+    { path: '/data-management', name: 'data-management', component: DataManagementView, meta: { permission: 'data.manage' } },
   ],
 })
 

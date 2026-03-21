@@ -135,6 +135,17 @@ export function reindexAllPhotos() {
   })
 }
 
+export interface ReindexStatus {
+  inProgress: boolean
+  total: number
+  processed: number
+  errors: number
+}
+
+export function getReindexStatus() {
+  return apiFetch<ReindexStatus>('/photos/reindex-status')
+}
+
 export function reindexPhoto(id: number) {
   return apiFetch<{ success: boolean }>(`/photos/${id}/reindex`, {
     method: 'POST'

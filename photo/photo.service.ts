@@ -1165,8 +1165,29 @@ export async function reindexPhotoLogic(
   return { success: true };
 }
 
+// In-memory reindex progress per user
+interface ReindexState {
+  inProgress: boolean;
+  total: number;
+  processed: number;
+  errors: number;
+}
+const reindexStateMap = new Map<number, ReindexState>();
+
+export function getReindexStatusForUser(userId: number): ReindexState {
+  return reindexStateMap.get(userId) ?? { inProgress: false, total: 0, processed: 0, errors: 0 };
+}
+
 export async function reindexAllPhotosLogic(userId: number): Promise<{ count: number }> {
+  const existing = reindexStateMap.get(userId);
+  if (existing?.inProgress) {
+    throw new Error("Reindex already in progress");
+  }
+
   const allPhotos = db.select({ id: photos.id }).from(photos).where(eq(photos.user_id, userId)).all();
+
+  const state: ReindexState = { inProgress: true, total: allPhotos.length, processed: 0, errors: 0 };
+  reindexStateMap.set(userId, state);
 
   console.log(`Starting re-index for ${allPhotos.length} photos for user ${userId}`);
 
@@ -1174,15 +1195,13 @@ export async function reindexAllPhotosLogic(userId: number): Promise<{ count: nu
   // (concurrent processing deletes all faces before new ones are created,
   //  breaking person matching)
   (async () => {
-    let processed = 0;
-    let errors = 0;
     for (const p of allPhotos) {
       try {
         await indexPhotoFaces(userId, p.id, false);
         await indexPhotoEmbeddings(userId, p.id);
-        processed++;
+        state.processed++;
       } catch (err: any) {
-        errors++;
+        state.errors++;
         if (err.message && err.message.includes("FACE_MODELS_NOT_LOADED")) {
           console.error(`Skipping reindex for photo ${p.id}: Modelle nicht geladen.`);
         } else {
@@ -1192,7 +1211,8 @@ export async function reindexAllPhotosLogic(userId: number): Promise<{ count: nu
     }
     // Clean up orphaned persons (persons with 0 associated faces)
     cleanupOrphanedPersons(userId);
-    console.log(`Re-index complete for user ${userId}: ${processed} processed, ${errors} errors, orphaned persons cleaned up.`);
+    state.inProgress = false;
+    console.log(`Re-index complete for user ${userId}: ${state.processed} processed, ${state.errors} errors, orphaned persons cleaned up.`);
   })();
 
   return { count: allPhotos.length };
