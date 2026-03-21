@@ -22,7 +22,6 @@ import {
   getPhotoFaces,
   updatePhotoCuration,
   listPhotoGroups,
-  reviewPhotoGroup,
   type Photo,
   type Face,
   type CurationStatus,

@@ -6,7 +6,7 @@ import Message from 'primevue/message'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
 import {
   reindexAllPhotos, getReindexStatus, findPhotoGroups,
-  listPhotoGroups, listPhotos, getNextUnreviewedGroup,
+  listPhotoGroups, listPhotos,
   type ReindexStatus, type PhotoGroup, type Photo,
 } from '../api/photos'
 
