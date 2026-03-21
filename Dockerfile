@@ -22,7 +22,7 @@ ENV PATH="/root/.encore/bin:${PATH}"
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --omit=optional
+RUN npm install --omit=dev --omit=optional
 
 COPY frontend/package.json frontend/package-lock.json frontend/
 RUN npm --prefix frontend ci

@@ -26,6 +26,7 @@ accelerate==0.32.0
 
 # Image processing
 Pillow==10.4.0
+pillow-heif==0.18.0
 
 # Utilities
 numpy==1.26.4
