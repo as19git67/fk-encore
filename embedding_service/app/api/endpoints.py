@@ -86,11 +86,14 @@ async def embed(request: EmbedRequest, db: DbDep) -> EmbedResponse:
 
     rows = []
     for photo, clip_vec, dino_vec in zip(new_photos, clip_embeddings, dino_embeddings):
+        ts = photo.timestamp
+        if ts and ts.tzinfo is not None:
+            ts = ts.replace(tzinfo=None)
         rows.append(
             {
                 "photo_id": photo.photo_id,
                 "file_path": photo.file_path,
-                "timestamp": photo.timestamp,
+                "timestamp": ts,
                 "camera_id": photo.camera_id,
                 "face_ids": photo.face_ids or [],
                 "embedding_clip": clip_vec,
@@ -142,6 +145,9 @@ async def upload_photo(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Embedding error") from exc
 
     faces = face_ids.split(",") if face_ids else []
+
+    if timestamp and timestamp.tzinfo is not None:
+        timestamp = timestamp.replace(tzinfo=None)
 
     row = {
         "photo_id": photo_id,
