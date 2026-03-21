@@ -451,7 +451,21 @@ export const reindexAllPhotos = api(
     checkModule();
     const userId = getUserId();
     const authData = getAuthData()!;
-    requirePermission(authData, "photos.refresh_metadata");
+    requirePermission(authData, "data.manage");
     return service.reindexAllPhotosLogic(userId);
+  }
+);
+
+/**
+ * Get reindex progress for the current user.
+ */
+export const getReindexStatus = api(
+  { expose: true, method: "GET", path: "/photos/reindex-status", auth: true },
+  async (): Promise<{ inProgress: boolean; total: number; processed: number; errors: number }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "data.manage");
+    return service.getReindexStatusForUser(userId);
   }
 );

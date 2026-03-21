@@ -23,6 +23,9 @@ const menuItems = computed(() => {
   if (auth.hasPermission('roles.list')) {
     items.push({ label: 'Rollen', icon: 'pi pi-shield', command: () => router.push('/roles') })
   }
+  if (auth.hasPermission('data.manage')) {
+    items.push({ label: 'Datenverwaltung', icon: 'pi pi-database', command: () => router.push('/data-management') })
+  }
   return items
 })
 
