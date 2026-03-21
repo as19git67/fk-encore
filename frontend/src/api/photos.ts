@@ -1,5 +1,7 @@
 import { API_BASE_URL, apiFetch } from './client'
 
+export type CurationStatus = 'visible' | 'hidden' | 'favorite'
+
 export interface Photo {
   id: number
   user_id: number
@@ -10,6 +12,7 @@ export interface Photo {
   hash?: string
   taken_at?: string
   created_at: string
+  curation_status: CurationStatus
 }
 
 export interface ListPhotosResponse {
@@ -21,8 +24,9 @@ export interface DeleteResponse {
   message: string
 }
 
-export function listPhotos() {
-  return apiFetch<ListPhotosResponse>('/photos')
+export function listPhotos(showHidden: boolean = false) {
+  const query = showHidden ? '?showHidden=true' : ''
+  return apiFetch<ListPhotosResponse>(`/photos${query}`)
 }
 
 export async function uploadPhoto(file: File) {
@@ -166,4 +170,51 @@ export function ignorePersonFaces(personId: number) {
 
 export function getPhotoFaces(id: number) {
   return apiFetch<{ faces: Face[] }>(`/photos/${id}/faces`)
+}
+
+// ---------- Curation ----------
+
+export function updatePhotoCuration(id: number, status: CurationStatus) {
+  return apiFetch<{ success: boolean }>(`/photos/${id}/curation`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status })
+  })
+}
+
+export function hardDeletePhoto(id: number) {
+  return apiFetch<DeleteResponse>(`/photos/${id}/hard`, {
+    method: 'DELETE'
+  })
+}
+
+// ---------- Photo Groups ----------
+
+export interface PhotoGroup {
+  id: number
+  user_id: number
+  cover_photo_id?: number
+  reviewed_at?: string
+  created_at: string
+  member_count: number
+  photo_ids: number[]
+}
+
+export function findPhotoGroups() {
+  return apiFetch<{ groups_created: number; total_photos_grouped: number }>('/photos/find-groups', {
+    method: 'POST'
+  })
+}
+
+export function listPhotoGroups() {
+  return apiFetch<{ groups: PhotoGroup[] }>('/photos/groups')
+}
+
+export function getNextUnreviewedGroup() {
+  return apiFetch<PhotoGroup | null>('/photos/groups/next-unreviewed')
+}
+
+export function reviewPhotoGroup(id: number) {
+  return apiFetch<{ success: boolean }>(`/photos/groups/${id}/review`, {
+    method: 'POST'
+  })
 }

@@ -14,9 +14,14 @@ import {
   albumShares,
   persons,
   faces,
+  photoCuration,
+  photoGroups,
+  photoGroupMembers,
 } from "../db/schema";
 import type {
   Photo,
+  PhotoWithCuration,
+  CurationStatus,
   Album,
   AlbumWithPhotos,
   CreateAlbumRequest,
@@ -30,6 +35,9 @@ import type {
   ListPersonsResponse,
   PersonDetails,
   MergePersonsRequest,
+  PhotoGroup,
+  ListGroupsResponse,
+  FindGroupsResponse,
 } from "../db/types";
 import heicConvert from "heic-convert";
 
@@ -343,10 +351,12 @@ export async function uploadPhotoStream(
     });
   }
 
-  // Run embedding generation in background
-  indexPhotoEmbeddings(userId, row.id).catch(err => {
-      console.error("Embedding indexing error:", err);
-  });
+  // Run embedding generation in background, then re-group similar photos
+  indexPhotoEmbeddings(userId, row.id)
+    .then(() => findPhotoGroupsLogic(userId))
+    .catch(err => {
+      console.error("Embedding/grouping error:", err);
+    });
 
   return {
     id: row.id,
@@ -407,10 +417,12 @@ export async function uploadPhotoLogic(
     });
   }
 
-  // Run embedding generation in background
-  indexPhotoEmbeddings(userId, row.id).catch(err => {
-      console.error("Embedding indexing error:", err);
-  });
+  // Run embedding generation in background, then re-group similar photos
+  indexPhotoEmbeddings(userId, row.id)
+    .then(() => findPhotoGroupsLogic(userId))
+    .catch(err => {
+      console.error("Embedding/grouping error:", err);
+    });
 
   return {
     id: row.id,
@@ -425,16 +437,33 @@ export async function uploadPhotoLogic(
   };
 }
 
-export function listPhotosLogic(userId: number): ListPhotosResponse {
+export function listPhotosLogic(userId: number, showHidden: boolean = false): ListPhotosResponse {
   const rows = db
-    .select()
+    .select({
+      id: photos.id,
+      user_id: photos.user_id,
+      filename: photos.filename,
+      original_name: photos.original_name,
+      mime_type: photos.mime_type,
+      size: photos.size,
+      hash: photos.hash,
+      taken_at: photos.taken_at,
+      created_at: photos.created_at,
+      curation_status: photoCuration.status,
+    })
     .from(photos)
+    .leftJoin(
+      photoCuration,
+      and(eq(photos.id, photoCuration.photo_id), eq(photoCuration.user_id, userId))
+    )
     .where(eq(photos.user_id, userId))
     .orderBy(sql`COALESCE(${photos.taken_at}, ${photos.created_at}) DESC`)
     .all();
 
+  const filtered = showHidden ? rows : rows.filter((r) => (r.curation_status ?? "visible") !== "hidden");
+
   return {
-    photos: rows.map((r) => ({
+    photos: filtered.map((r) => ({
       id: r.id,
       user_id: r.user_id,
       filename: r.filename,
@@ -444,6 +473,7 @@ export function listPhotosLogic(userId: number): ListPhotosResponse {
       hash: r.hash ?? undefined,
       taken_at: r.taken_at ?? undefined,
       created_at: r.created_at ?? "",
+      curation_status: (r.curation_status as CurationStatus) ?? "visible",
     })),
   };
 }
@@ -459,15 +489,72 @@ export function deletePhotoLogic(userId: number, photoId: number): DeleteRespons
     throw new Error("Photo not found or unauthorized");
   }
 
-  // Delete file
+  // Soft-delete: set curation status to 'hidden'
+  db.insert(photoCuration)
+    .values({ user_id: userId, photo_id: photoId, status: "hidden" })
+    .onConflictDoUpdate({
+      target: [photoCuration.user_id, photoCuration.photo_id],
+      set: { status: "hidden", updated_at: sql`(datetime('now'))` },
+    })
+    .run();
+
+  return { success: true, message: "Photo hidden" };
+}
+
+export function hardDeletePhotoLogic(userId: number, photoId: number): DeleteResponse {
+  const photo = db
+    .select()
+    .from(photos)
+    .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+    .get();
+
+  if (!photo) {
+    throw new Error("Photo not found or unauthorized");
+  }
+
+  // Delete file from disk
   const filePath = path.join(UPLOAD_DIR, photo.filename);
   if (fs.existsSync(filePath)) {
     fs.unlinkSync(filePath);
   }
 
+  // Hard delete from DB (cascades to curation, faces, album_photos, group_members)
   db.delete(photos).where(eq(photos.id, photoId)).run();
 
-  return { success: true, message: "Photo deleted" };
+  return { success: true, message: "Photo permanently deleted" };
+}
+
+export function updatePhotoCurationLogic(
+  userId: number,
+  photoId: number,
+  status: CurationStatus
+): { success: boolean } {
+  const photo = db
+    .select({ id: photos.id })
+    .from(photos)
+    .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+    .get();
+
+  if (!photo) {
+    throw new Error("Photo not found or unauthorized");
+  }
+
+  if (status === "visible") {
+    // Remove the curation row entirely (visible is the default)
+    db.delete(photoCuration)
+      .where(and(eq(photoCuration.user_id, userId), eq(photoCuration.photo_id, photoId)))
+      .run();
+  } else {
+    db.insert(photoCuration)
+      .values({ user_id: userId, photo_id: photoId, status })
+      .onConflictDoUpdate({
+        target: [photoCuration.user_id, photoCuration.photo_id],
+        set: { status, updated_at: sql`(datetime('now'))` },
+      })
+      .run();
+  }
+
+  return { success: true };
 }
 
 export function getPhotosToRefreshMetadataLogic(userId: number): { ids: number[] } {
@@ -1231,4 +1318,291 @@ function cleanupOrphanedPersons(userId: number): void {
     )
     .run();
   console.log(`Cleaned up ${deleted.changes} orphaned persons for user ${userId}`);
+}
+
+// ========== Photo Groups (Clustering) ==========
+
+class UnionFind {
+  parent: number[];
+  rank: number[];
+  constructor(n: number) {
+    this.parent = Array.from({ length: n }, (_, i) => i);
+    this.rank = new Array(n).fill(0);
+  }
+  find(x: number): number {
+    if (this.parent[x] !== x) this.parent[x] = this.find(this.parent[x]);
+    return this.parent[x];
+  }
+  union(x: number, y: number): void {
+    const rx = this.find(x), ry = this.find(y);
+    if (rx === ry) return;
+    if (this.rank[rx] < this.rank[ry]) { this.parent[rx] = ry; }
+    else if (this.rank[rx] > this.rank[ry]) { this.parent[ry] = rx; }
+    else { this.parent[ry] = rx; this.rank[rx]++; }
+  }
+}
+
+const SIMILARITY_THRESHOLD = 0.90;
+const TIME_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+
+export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsResponse> {
+  // 1. Get all user photos with timestamps
+  const allPhotos = db
+    .select({ id: photos.id, taken_at: photos.taken_at, created_at: photos.created_at })
+    .from(photos)
+    .where(eq(photos.user_id, userId))
+    .all();
+
+  if (allPhotos.length < 2) {
+    return { groups_created: 0, total_photos_grouped: 0 };
+  }
+
+  // 2. Fetch DINOv2 embeddings from embedding service
+  const photoIds = allPhotos.map((p) => p.id.toString());
+  let embeddingMap: Map<number, { embedding: number[]; timestamp: number }>;
+  try {
+    const response = await fetch(`${EMBEDDING_SERVICE_URL}/get`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ photo_ids: photoIds }),
+    });
+    if (!response.ok) throw new Error(`Embedding service returned ${response.status}`);
+    const data = await response.json() as {
+      photos: Array<{ photo_id: string; embedding_dino: number[] | null }>;
+    };
+
+    embeddingMap = new Map();
+    for (const rec of data.photos) {
+      if (!rec.embedding_dino) continue;
+      const id = parseInt(rec.photo_id);
+      const photo = allPhotos.find((p) => p.id === id);
+      const ts = photo ? new Date(photo.taken_at || photo.created_at || 0).getTime() : 0;
+      embeddingMap.set(id, { embedding: rec.embedding_dino, timestamp: ts });
+    }
+  } catch (err: any) {
+    console.error("Failed to fetch embeddings:", err.message);
+    throw new Error("Embedding service unavailable");
+  }
+
+  if (embeddingMap.size < 2) {
+    return { groups_created: 0, total_photos_grouped: 0 };
+  }
+
+  // 3. Sort by timestamp for windowed comparison
+  const indexed = Array.from(embeddingMap.entries())
+    .map(([id, data]) => ({ id, ...data }))
+    .sort((a, b) => a.timestamp - b.timestamp);
+
+  // 4. Windowed pairwise comparison + Union-Find
+  const idToIdx = new Map(indexed.map((item, idx) => [item.id, idx]));
+  const uf = new UnionFind(indexed.length);
+
+  for (let i = 0; i < indexed.length; i++) {
+    for (let j = i + 1; j < indexed.length; j++) {
+      // Stop if outside time window
+      if (indexed[j].timestamp - indexed[i].timestamp > TIME_WINDOW_MS) break;
+
+      const sim = cosineSimilarity(indexed[i].embedding, indexed[j].embedding);
+      if (sim >= SIMILARITY_THRESHOLD) {
+        uf.union(i, j);
+      }
+    }
+  }
+
+  // 5. Collect connected components
+  const components = new Map<number, number[]>();
+  for (let i = 0; i < indexed.length; i++) {
+    const root = uf.find(i);
+    if (!components.has(root)) components.set(root, []);
+    components.get(root)!.push(i);
+  }
+
+  // Filter to groups of 2+
+  const groups = Array.from(components.values()).filter((g) => g.length >= 2);
+
+  // 6. Delete old un-reviewed groups, preserve reviewed ones
+  const reviewedGroups = db
+    .select({ id: photoGroups.id })
+    .from(photoGroups)
+    .where(and(eq(photoGroups.user_id, userId), sql`${photoGroups.reviewed_at} IS NOT NULL`))
+    .all();
+  const reviewedIds = new Set(reviewedGroups.map((g) => g.id));
+
+  // Get reviewed group member sets for comparison
+  const reviewedMemberSets = new Map<number, Set<number>>();
+  for (const gid of reviewedIds) {
+    const members = db
+      .select({ photo_id: photoGroupMembers.photo_id })
+      .from(photoGroupMembers)
+      .where(eq(photoGroupMembers.group_id, gid))
+      .all();
+    reviewedMemberSets.set(gid, new Set(members.map((m) => m.photo_id)));
+  }
+
+  // Delete un-reviewed groups
+  db.delete(photoGroups)
+    .where(
+      and(
+        eq(photoGroups.user_id, userId),
+        sql`${photoGroups.reviewed_at} IS NULL`
+      )
+    )
+    .run();
+
+  // 7. Insert new groups (skip if matching a reviewed group)
+  let groupsCreated = 0;
+  let totalPhotosGrouped = 0;
+
+  for (const memberIndices of groups) {
+    const memberPhotoIds = memberIndices.map((idx) => indexed[idx].id);
+    const memberSet = new Set(memberPhotoIds);
+
+    // Check if this group matches an existing reviewed group
+    let alreadyReviewed = false;
+    for (const [, reviewedSet] of reviewedMemberSets) {
+      // Consider it a match if sets are identical
+      if (memberSet.size === reviewedSet.size && [...memberSet].every((id) => reviewedSet.has(id))) {
+        alreadyReviewed = true;
+        break;
+      }
+    }
+    if (alreadyReviewed) continue;
+
+    // Compute center photo (highest avg similarity to others in group)
+    let bestCenter = memberIndices[0];
+    let bestAvgSim = -1;
+    for (const i of memberIndices) {
+      let totalSim = 0;
+      for (const j of memberIndices) {
+        if (i !== j) totalSim += cosineSimilarity(indexed[i].embedding, indexed[j].embedding);
+      }
+      const avgSim = totalSim / (memberIndices.length - 1);
+      if (avgSim > bestAvgSim) {
+        bestAvgSim = avgSim;
+        bestCenter = i;
+      }
+    }
+    const coverPhotoId = indexed[bestCenter].id;
+
+    // Sort members by similarity to center (descending)
+    const centerEmb = indexed[bestCenter].embedding;
+    const ranked = memberIndices
+      .map((idx) => ({
+        photoId: indexed[idx].id,
+        sim: cosineSimilarity(indexed[idx].embedding, centerEmb),
+      }))
+      .sort((a, b) => b.sim - a.sim);
+
+    // Insert group
+    const group = db
+      .insert(photoGroups)
+      .values({ user_id: userId, cover_photo_id: coverPhotoId })
+      .returning({ id: photoGroups.id })
+      .get();
+
+    // Insert members with similarity rank
+    for (let rank = 0; rank < ranked.length; rank++) {
+      db.insert(photoGroupMembers)
+        .values({
+          group_id: group.id,
+          photo_id: ranked[rank].photoId,
+          similarity_rank: rank,
+        })
+        .run();
+    }
+
+    groupsCreated++;
+    totalPhotosGrouped += memberIndices.length;
+  }
+
+  console.log(`Photo grouping for user ${userId}: ${groupsCreated} groups created, ${totalPhotosGrouped} photos grouped`);
+  return { groups_created: groupsCreated, total_photos_grouped: totalPhotosGrouped };
+}
+
+export function listPhotoGroupsLogic(userId: number): ListGroupsResponse {
+  const groups = db
+    .select({
+      id: photoGroups.id,
+      user_id: photoGroups.user_id,
+      cover_photo_id: photoGroups.cover_photo_id,
+      reviewed_at: photoGroups.reviewed_at,
+      created_at: photoGroups.created_at,
+    })
+    .from(photoGroups)
+    .where(eq(photoGroups.user_id, userId))
+    .orderBy(photoGroups.created_at)
+    .all();
+
+  const result: PhotoGroup[] = groups.map((g) => {
+    const members = db
+      .select({ photo_id: photoGroupMembers.photo_id })
+      .from(photoGroupMembers)
+      .where(eq(photoGroupMembers.group_id, g.id))
+      .orderBy(photoGroupMembers.similarity_rank)
+      .all();
+
+    return {
+      id: g.id,
+      user_id: g.user_id,
+      cover_photo_id: g.cover_photo_id ?? undefined,
+      reviewed_at: g.reviewed_at ?? undefined,
+      created_at: g.created_at ?? "",
+      member_count: members.length,
+      photo_ids: members.map((m) => m.photo_id),
+    };
+  });
+
+  return { groups: result };
+}
+
+export function getNextUnreviewedGroupLogic(userId: number): PhotoGroup | null {
+  const group = db
+    .select({
+      id: photoGroups.id,
+      user_id: photoGroups.user_id,
+      cover_photo_id: photoGroups.cover_photo_id,
+      reviewed_at: photoGroups.reviewed_at,
+      created_at: photoGroups.created_at,
+    })
+    .from(photoGroups)
+    .where(and(eq(photoGroups.user_id, userId), sql`${photoGroups.reviewed_at} IS NULL`))
+    .orderBy(photoGroups.created_at)
+    .limit(1)
+    .get();
+
+  if (!group) return null;
+
+  const members = db
+    .select({ photo_id: photoGroupMembers.photo_id })
+    .from(photoGroupMembers)
+    .where(eq(photoGroupMembers.group_id, group.id))
+    .orderBy(photoGroupMembers.similarity_rank)
+    .all();
+
+  return {
+    id: group.id,
+    user_id: group.user_id,
+    cover_photo_id: group.cover_photo_id ?? undefined,
+    reviewed_at: undefined,
+    created_at: group.created_at ?? "",
+    member_count: members.length,
+    photo_ids: members.map((m) => m.photo_id),
+  };
+}
+
+export function reviewPhotoGroupLogic(userId: number, groupId: number): { success: boolean } {
+  const group = db
+    .select({ id: photoGroups.id })
+    .from(photoGroups)
+    .where(and(eq(photoGroups.id, groupId), eq(photoGroups.user_id, userId)))
+    .get();
+
+  if (!group) throw new Error("Group not found");
+
+  db.update(photoGroups)
+    .set({ reviewed_at: sql`(datetime('now'))` })
+    .where(eq(photoGroups.id, groupId))
+    .run();
+
+  return { success: true };
 }

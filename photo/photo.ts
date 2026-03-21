@@ -21,7 +21,10 @@ import type {
   PersonDetails,
   MergePersonsRequest,
   AssignFaceRequest,
+  CurationStatus,
+  UpdateCurationRequest,
 } from "../db/types";
+import { Query } from "encore.dev/api";
 
 // Helper to get userId as number
 function getUserId(): number {
@@ -92,13 +95,13 @@ export const uploadPhoto = api.raw(
  */
 export const listPhotos = api(
   { expose: true, method: "GET", path: "/photos", auth: true },
-  async (): Promise<ListPhotosResponse> => {
+  async ({ showHidden }: { showHidden?: Query<boolean> }): Promise<ListPhotosResponse> => {
     checkModule();
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "photos.view");
-    
-    return service.listPhotosLogic(userId);
+
+    return service.listPhotosLogic(userId, showHidden ?? false);
   }
 );
 
@@ -114,6 +117,34 @@ export const deletePhoto = api(
     requirePermission(authData, "photos.delete");
 
     return service.deletePhotoLogic(userId, id);
+  }
+);
+
+/**
+ * Permanently delete a photo (file + DB record).
+ */
+export const hardDeletePhoto = api(
+  { expose: true, method: "DELETE", path: "/photos/:id/hard", auth: true },
+  async ({ id }: { id: number }): Promise<DeleteResponse> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "data.manage");
+    return service.hardDeletePhotoLogic(userId, id);
+  }
+);
+
+/**
+ * Update curation status for a photo (visible/hidden/favorite).
+ */
+export const updatePhotoCuration = api(
+  { expose: true, method: "PATCH", path: "/photos/:id/curation", auth: true },
+  async ({ id, status }: UpdateCurationRequest): Promise<{ success: boolean }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.delete");
+    return service.updatePhotoCurationLogic(userId, id, status);
   }
 );
 
@@ -467,5 +498,69 @@ export const getReindexStatus = api(
     const authData = getAuthData()!;
     requirePermission(authData, "data.manage");
     return service.getReindexStatusForUser(userId);
+  }
+);
+
+// ========== Photo Groups ==========
+
+import type {
+  PhotoGroup,
+  ListGroupsResponse,
+  FindGroupsResponse,
+} from "../db/types";
+
+/**
+ * Find similar photo groups using DINOv2 embeddings.
+ */
+export const findPhotoGroups = api(
+  { expose: true, method: "POST", path: "/photos/find-groups", auth: true },
+  async (): Promise<FindGroupsResponse> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "data.manage");
+    return service.findPhotoGroupsLogic(userId);
+  }
+);
+
+/**
+ * List all photo groups for the current user.
+ */
+export const listPhotoGroups = api(
+  { expose: true, method: "GET", path: "/photos/groups", auth: true },
+  async (): Promise<ListGroupsResponse> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    return service.listPhotoGroupsLogic(userId);
+  }
+);
+
+/**
+ * Get the next unreviewed photo group.
+ */
+export const getNextUnreviewedGroup = api(
+  { expose: true, method: "GET", path: "/photos/groups/next-unreviewed", auth: true },
+  async (): Promise<{ group: PhotoGroup | null }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    return { group: service.getNextUnreviewedGroupLogic(userId) };
+  }
+);
+
+/**
+ * Mark a photo group as reviewed.
+ */
+export const reviewPhotoGroup = api(
+  { expose: true, method: "POST", path: "/photos/groups/:id/review", auth: true },
+  async ({ id }: { id: number }): Promise<{ success: boolean }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.delete");
+    return service.reviewPhotoGroupLogic(userId, id);
   }
 );
