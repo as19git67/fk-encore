@@ -275,3 +275,21 @@ export interface ListAlbumsResponse {
 export interface ListPhotosResponse {
   photos: Photo[];
 }
+
+// ========== Photo Grouping Types ==========
+
+export interface SimilarPersonPair {
+  person1: Person & { faceCount: number };
+  person2: Person & { faceCount: number };
+  similarity: number;
+}
+
+export interface PhotoGroup {
+  person: Person & { faceCount: number };
+  photos: { photo: Photo; face: Face }[];
+}
+
+export interface PhotoGroupsResponse {
+  groups: PhotoGroup[];
+  suggestions: SimilarPersonPair[];
+}
