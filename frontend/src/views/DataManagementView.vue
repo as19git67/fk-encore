@@ -155,12 +155,11 @@ onUnmounted(() => clearInterval(checkCompletion))
           <span class="font-medium">Fortschritt</span>
           <span class="text-secondary">
             {{ status.processed }} von {{ status.total }} Fotos
-            <template v-if="status.errors > 0">
-              ({{ status.errors }} Fehler)
-            </template>
+            <template v-if="status.errors > 0"> ({{ status.errors }} Fehler)</template>
           </span>
+          <span class="text-secondary">{{ progress }} %</span>
         </div>
-        <ProgressBar :value="progress" :showValue="true" />
+        <ProgressBar :value="progress" :showValue="false" />
       </div>
 
       <div v-else-if="status.total > 0 && !status.inProgress" class="mb-4">
@@ -195,7 +194,7 @@ onUnmounted(() => clearInterval(checkCompletion))
         </Message>
       </div>
 
-      <div class="flex gap-2">
+      <div class="button-row">
         <Button
           icon="pi pi-objects-column"
           label="Gruppen aktualisieren"
@@ -222,3 +221,11 @@ onUnmounted(() => clearInterval(checkCompletion))
     />
   </div>
 </template>
+
+<style scoped>
+.button-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+</style>

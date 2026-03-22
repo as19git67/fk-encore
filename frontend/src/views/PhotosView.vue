@@ -521,13 +521,19 @@ function handleKeydown(e: KeyboardEvent) {
       isFullscreen.value = false
       e.preventDefault()
     } else if (e.key === 'ArrowLeft') {
-      if (selectedIndex.value > 0) {
-        selectedIndex.value--
-      }
+      if (selectedIndex.value > 0) selectedIndex.value--
     } else if (e.key === 'ArrowRight') {
-      if (selectedIndex.value < photos.value.length - 1) {
-        selectedIndex.value++
+      if (selectedIndex.value < photos.value.length - 1) selectedIndex.value++
+    } else if ((e.key === 'x' || e.key === 'X') && selectedPhoto.value) {
+      if (selectedPhoto.value.curation_status !== 'hidden') {
+        handleDelete(selectedPhoto.value.id)
+      } else {
+        handleRestore(selectedPhoto.value.id)
       }
+      e.preventDefault()
+    } else if ((e.key === 'f' || e.key === 'F') && selectedPhoto.value) {
+      handleToggleFavorite(selectedPhoto.value.id, selectedPhoto.value.curation_status)
+      e.preventDefault()
     }
     return
   }
@@ -882,17 +888,50 @@ onUnmounted(() => {
       </div>
       <div class="fullscreen-content" @click.stop>
         <HeicImage :src="getPhotoUrl(selectedPhoto.filename)" :alt="selectedPhoto.original_name" objectFit="contain" />
-        <div class="fullscreen-nav">
-            <Button icon="pi pi-chevron-left" rounded text @click="selectedIndex > 0 && selectedIndex--" :disabled="selectedIndex === 0" />
-            <div class="fullscreen-info">
-              <div class="fullscreen-title">{{ selectedPhoto.original_name }}</div>
-              <div class="fullscreen-date">
-                {{ formatPhotoDate(selectedPhoto) }}
-              </div>
-            </div>
-            <Button icon="pi pi-chevron-right" rounded text @click="selectedIndex < photos.length - 1 && selectedIndex++" :disabled="selectedIndex === photos.length - 1" />
+
+        <!-- Close -->
+        <Button icon="pi pi-times" class="fs-close-btn" rounded text @click="isFullscreen = false" />
+
+        <!-- Left/right navigation -->
+        <Button icon="pi pi-chevron-left" class="fs-nav-left" rounded text
+          :disabled="selectedIndex === 0"
+          @click="selectedIndex > 0 && selectedIndex--" />
+        <Button icon="pi pi-chevron-right" class="fs-nav-right" rounded text
+          :disabled="selectedIndex === photos.length - 1"
+          @click="selectedIndex < photos.length - 1 && selectedIndex++" />
+
+        <!-- Bottom bar: info + actions -->
+        <div class="fs-bottom">
+          <div class="fs-info">
+            <div class="fs-title">{{ selectedPhoto.original_name }}</div>
+            <div class="fs-date">{{ formatPhotoDate(selectedPhoto) }}</div>
+          </div>
+          <div class="fs-actions">
+            <Button
+              v-if="selectedPhoto.curation_status === 'hidden'"
+              icon="pi pi-eye"
+              label="Wiederherstellen"
+              size="small"
+              severity="info"
+              @click="handleRestore(selectedPhoto.id)"
+            />
+            <Button
+              v-else
+              icon="pi pi-eye-slash"
+              label="Ausblenden (X)"
+              size="small"
+              severity="warn"
+              @click="handleDelete(selectedPhoto.id)"
+            />
+            <Button
+              :icon="selectedPhoto.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
+              :label="selectedPhoto.curation_status === 'favorite' ? 'Kein Favorit' : 'Favorit (F)'"
+              size="small"
+              :severity="selectedPhoto.curation_status === 'favorite' ? 'warn' : 'secondary'"
+              @click="handleToggleFavorite(selectedPhoto.id, selectedPhoto.curation_status)"
+            />
+          </div>
         </div>
-        <Button icon="pi pi-times" class="close-btn" rounded severity="secondary" @click="isFullscreen = false" />
       </div>
     </div>
 
@@ -1342,55 +1381,95 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.9);
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  background: rgba(0, 0, 0, 0.95);
   z-index: 1100;
 }
 
 .fullscreen-content {
   position: relative;
-  width: 95vh;
-  height: 95vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  width: 100%;
+  height: 100%;
 }
 
 .fullscreen-content :deep(.heic-image-container) {
-  flex: 1;
   width: 100%;
   height: 100%;
   overflow: hidden;
 }
 
-.fullscreen-nav {
-    display: flex;
-    align-items: center;
-    gap: 1.5rem;
-    margin-top: 1rem;
-    color: white;
+.fullscreen-content :deep(img) {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
-.fullscreen-info {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.25rem;
+.fs-close-btn {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 10;
+  color: white !important;
 }
 
-.fullscreen-title {
-    font-size: 1.1rem;
-    font-weight: 500;
+.fs-nav-left {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
+  color: white !important;
+  font-size: 1.5rem !important;
 }
 
-.fullscreen-date {
-    font-size: 0.9rem;
-    opacity: 0.8;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
+.fs-nav-right {
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
+  color: white !important;
+  font-size: 1.5rem !important;
+}
+
+.fs-bottom {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 1.25rem 1.5rem;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.75));
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  z-index: 10;
+  gap: 1rem;
+}
+
+.fs-info {
+  color: white;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.fs-title {
+  font-size: 1rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fs-date {
+  font-size: 0.85rem;
+  opacity: 0.75;
+}
+
+.fs-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
 }
 
 .edit-date-btn {
@@ -1415,13 +1494,6 @@ onUnmounted(() => {
 .edit-actions {
   display: flex;
   gap: 0.5rem;
-}
-
-.close-btn {
-  position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  z-index: 10;
 }
 
 @media (max-width: 1200px) {
