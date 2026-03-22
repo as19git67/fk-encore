@@ -35,9 +35,7 @@ services:
 
   # ── InsightFace Service (Face Detection) ───────────────────────────────────
   insightface:
-    build:
-      context: ./insightface-service
-      dockerfile: Dockerfile
+    image: ${INSIGHTFACE_IMAGE:-ghcr.io/as19git67/fk-encore-insightface:latest}
     container_name: fk-encore-insightface
     restart: unless-stopped
     environment:
@@ -45,9 +43,7 @@ services:
 
   # ── Embedding Service (CLIP + DINOv2) ──────────────────────────────────────
   embedding_service:
-    build:
-      context: ./embedding_service
-      dockerfile: Dockerfile
+    image: ${EMBEDDING_IMAGE:-ghcr.io/as19git67/fk-encore-embedding:latest}
     container_name: fk-encore-embedding
     restart: unless-stopped
     depends_on:
