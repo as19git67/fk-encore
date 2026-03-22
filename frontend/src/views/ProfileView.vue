@@ -6,6 +6,7 @@ import Button from 'primevue/button'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import InputText from 'primevue/inputtext'
+import Password from 'primevue/password'
 import Message from 'primevue/message'
 import { useAuthStore } from '../stores/auth'
 import {
@@ -15,6 +16,7 @@ import {
   deletePasskey,
   type PasskeyInfo,
 } from '../api/passkeys'
+import { changePassword } from '../api/users'
 import {
   startRegistration,
   browserSupportsWebAuthn,
@@ -76,6 +78,41 @@ function formatDate(dateStr: string) {
   return new Date(dateStr).toLocaleString('de-DE')
 }
 
+// ── Password change ──────────────────────────────────────────────────────────
+const pwCurrent = ref('')
+const pwNew = ref('')
+const pwConfirm = ref('')
+const pwLoading = ref(false)
+const pwError = ref('')
+const pwSuccess = ref(false)
+
+async function handleChangePassword() {
+  pwError.value = ''
+  pwSuccess.value = false
+
+  if (pwNew.value !== pwConfirm.value) {
+    pwError.value = 'Neues Passwort und Bestätigung stimmen nicht überein.'
+    return
+  }
+  if (pwNew.value.length < 8) {
+    pwError.value = 'Das neue Passwort muss mindestens 8 Zeichen lang sein.'
+    return
+  }
+
+  pwLoading.value = true
+  try {
+    await changePassword(pwCurrent.value, pwNew.value)
+    pwSuccess.value = true
+    pwCurrent.value = ''
+    pwNew.value = ''
+    pwConfirm.value = ''
+  } catch (err: any) {
+    pwError.value = err.message || 'Passwort konnte nicht geändert werden.'
+  } finally {
+    pwLoading.value = false
+  }
+}
+
 onMounted(loadPasskeys)
 </script>
 
@@ -98,6 +135,42 @@ onMounted(loadPasskeys)
             <Chip v-for="role in auth.user?.roles" :key="role.id" :label="role.name" />
             <span v-if="!auth.user?.roles?.length" class="no-roles">Keine Rollen zugewiesen.</span>
           </div>
+        </div>
+      </template>
+    </Card>
+
+    <Card class="mb">
+      <template #title>Passwort ändern</template>
+      <template #content>
+        <Message v-if="pwError" severity="error" :closable="false" class="mb">{{ pwError }}</Message>
+        <Message v-if="pwSuccess" severity="success" :closable="false" class="mb">Passwort erfolgreich geändert.</Message>
+        <div class="pw-form">
+          <Password
+            v-model="pwCurrent"
+            placeholder="Aktuelles Passwort"
+            :feedback="false"
+            toggleMask
+            class="pw-input"
+          />
+          <Password
+            v-model="pwNew"
+            placeholder="Neues Passwort"
+            toggleMask
+            class="pw-input"
+          />
+          <Password
+            v-model="pwConfirm"
+            placeholder="Neues Passwort bestätigen"
+            :feedback="false"
+            toggleMask
+            class="pw-input"
+          />
+          <Button
+            label="Passwort ändern"
+            icon="pi pi-lock"
+            :loading="pwLoading"
+            @click="handleChangePassword"
+          />
         </div>
       </template>
     </Card>
@@ -210,6 +283,17 @@ onMounted(loadPasskeys)
 .no-roles {
   color: var(--text-color-secondary);
   font-style: italic;
+}
+
+.pw-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 22rem;
+}
+
+.pw-input {
+  width: 100%;
 }
 </style>
 

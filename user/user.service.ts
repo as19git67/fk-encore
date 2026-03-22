@@ -1,4 +1,4 @@
-import { hashSync } from "bcryptjs";
+import { hashSync, compareSync } from "bcryptjs";
 import { eq, sql, count } from "drizzle-orm";
 import db from "../db/database";
 import { users, roles, userRoles, permissions, rolePermissions } from "../db/schema";
@@ -123,6 +123,23 @@ export function updateUserLogic(req: UpdateUserRequest): UserWithRoles {
   const updated = db.select().from(users).where(eq(users.id, req.id)).get()!;
 
   return { ...toUser(updated), roles: getRolesForUser(req.id) };
+}
+
+export function changePasswordLogic(userId: number, currentPassword: string, newPassword: string): void {
+  const row = db.select().from(users).where(eq(users.id, userId)).get();
+
+  if (!row) {
+    throw new Error(`User not found`);
+  }
+
+  if (!compareSync(currentPassword, row.password_hash)) {
+    throw new Error("Current password is incorrect");
+  }
+
+  db.update(users)
+    .set({ password_hash: hashSync(newPassword, 10), updated_at: sql`datetime('now')` })
+    .where(eq(users.id, userId))
+    .run();
 }
 
 export function deleteUserLogic(id: number): DeleteResponse {

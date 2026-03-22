@@ -5,6 +5,7 @@ import type {
   UpdateUserRequest,
   ListUsersResponse,
   DeleteResponse,
+  ChangePasswordRequest,
 } from "../db/types";
 import {
   createUserLogic,
@@ -12,6 +13,7 @@ import {
   listUsersLogic,
   updateUserLogic,
   deleteUserLogic,
+  changePasswordLogic,
 } from "./user.service";
 import { requirePermission } from "./auth-handler";
 import { getAuthData } from "~encore/auth";
@@ -72,6 +74,23 @@ export const updateUser = api(
       }
       if (err.message?.includes("already exists")) {
         throw APIError.alreadyExists(err.message);
+      }
+      throw err;
+    }
+  }
+);
+
+/** Change own password — only requires authentication */
+export const changePassword = api(
+  { expose: true, auth: true, method: "POST", path: "/auth/password" },
+  async (req: ChangePasswordRequest): Promise<{ success: boolean }> => {
+    const authData = getAuthData()!;
+    try {
+      changePasswordLogic(Number(authData.userID), req.current_password, req.new_password);
+      return { success: true };
+    } catch (err: any) {
+      if (err.message?.includes("incorrect")) {
+        throw APIError.invalidArgument(err.message);
       }
       throw err;
     }

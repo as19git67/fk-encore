@@ -58,6 +58,12 @@ export interface UserWithRolesAndPermissions extends User {
 
 // ========== Auth Types ==========
 
+export interface ChangePasswordRequest {
+  current_password: string;
+  new_password: string;
+}
+
+
 export interface LoginRequest {
   email: string;
   password: string;

@@ -68,6 +68,13 @@ export function updateUser(id: number, data: { email?: string; name?: string; pa
   })
 }
 
+export function changePassword(currentPassword: string, newPassword: string) {
+  return apiFetch<{ success: boolean }>('/auth/password', {
+    method: 'POST',
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  })
+}
+
 export function deleteUser(id: number) {
   return apiFetch<DeleteResponse>(`/users/${id}`, {
     method: 'DELETE',
