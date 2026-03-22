@@ -1,11 +1,7 @@
-version: "3.9"
-
 services:
   # ── Main Encore.ts Application ─────────────────────────────────────────────
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/as19git67/fk-encore:latest
     container_name: fk-encore-app
     restart: unless-stopped
     depends_on:
@@ -14,28 +10,29 @@ services:
       embedding_service:
         condition: service_started
     ports:
-      - "${APP_PORT:-8080}:8080"
+      - "8080:8080"
     environment:
       PORT: "8080"
-      DB_TYPE: ${DB_TYPE:-sqlite}
+      DB_TYPE: sqlite
       SQLITE_DB_PATH: /mnt/data/db/app.db
       PHOTO_UPLOAD_DIR: /mnt/data/photos
-      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
-      ADMIN_NAME: ${ADMIN_NAME:-Admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD must be set}
-      RP_ID: ${RP_ID:-localhost}
-      RP_NAME: ${RP_NAME:-FK Encore App}
-      RP_ORIGIN: ${RP_ORIGIN:-http://localhost:8080}
-      ENABLE_LOCAL_FACES: ${ENABLE_LOCAL_FACES:-true}
-      FACE_DISTANCE_THRESHOLD: ${FACE_DISTANCE_THRESHOLD:-0.42}
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_NAME: Admin
+      ADMIN_PASSWORD: changeme   # <-- hier anpassen!
+      RP_ID: localhost
+      RP_NAME: Vivanty App
+      RP_ORIGIN: http://localhost:8080
+      ENABLE_LOCAL_FACES: "true"
+      FACE_DISTANCE_THRESHOLD: "0.42"
       INSIGHTFACE_SERVICE_URL: http://insightface:8000
       EMBEDDING_SERVICE_URL: http://embedding_service:8000
     volumes:
-      - app-data:/mnt/data
+      - photos:/mnt/data/photos
+      - db:/mnt/data/db
 
   # ── InsightFace Service (Face Detection) ───────────────────────────────────
   insightface:
-    image: ${INSIGHTFACE_IMAGE:-ghcr.io/as19git67/fk-encore-insightface:latest}
+    image: ghcr.io/as19git67/fk-encore-insightface:latest
     container_name: fk-encore-insightface
     restart: unless-stopped
     environment:
@@ -43,18 +40,18 @@ services:
 
   # ── Embedding Service (CLIP + DINOv2) ──────────────────────────────────────
   embedding_service:
-    image: ${EMBEDDING_IMAGE:-ghcr.io/as19git67/fk-encore-embedding:latest}
+    image: ghcr.io/as19git67/fk-encore-embedding:latest
     container_name: fk-encore-embedding
     restart: unless-stopped
     depends_on:
       embedding_postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:${EMBEDDING_DB_PASSWORD:-postgres}@embedding_postgres:5432/embeddings
-      CLIP_MODEL_NAME: ${CLIP_MODEL_NAME:-ViT-B-32}
-      CLIP_PRETRAINED: ${CLIP_PRETRAINED:-openai}
-      DINO_MODEL_NAME: ${DINO_MODEL_NAME:-facebook/dinov2-base}
-      LOG_LEVEL: ${EMBEDDING_LOG_LEVEL:-INFO}
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@embedding_postgres:5432/embeddings
+      CLIP_MODEL_NAME: ViT-B-32
+      CLIP_PRETRAINED: openai
+      DINO_MODEL_NAME: facebook/dinov2-base
+      LOG_LEVEL: INFO
 
   # ── PostgreSQL for Embedding Service (pgvector) ────────────────────────────
   embedding_postgres:
@@ -63,11 +60,10 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${EMBEDDING_DB_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: postgres
       POSTGRES_DB: embeddings
     volumes:
       - embedding-pgdata:/var/lib/postgresql/data
-      - ./embedding_service/migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -75,5 +71,21 @@ services:
       retries: 10
 
 volumes:
-  app-data:
+  photos:
+    driver: local
+    driver_opts:
+      device: /mnt/data/vivanty/photos
+      o: bind
+      type: none
+  db:
+    driver: local
+    driver_opts:
+      device: /mnt/data/vivanty/db
+      o: bind
+      type: none
   embedding-pgdata:
+    driver: local
+    driver_opts:
+      device: /mnt/data/vivanty/embedding-pgdata
+      o: bind
+      type: none

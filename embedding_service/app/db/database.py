@@ -46,6 +46,34 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
+async def run_migrations() -> None:
+    """Create schema objects if they don't exist yet (idempotent)."""
+    from sqlalchemy import text
+
+    statements = [
+        "CREATE EXTENSION IF NOT EXISTS vector",
+        """
+        CREATE TABLE IF NOT EXISTS photos (
+            photo_id        TEXT PRIMARY KEY,
+            file_path       TEXT NOT NULL,
+            timestamp       TIMESTAMP,
+            camera_id       TEXT,
+            face_ids        TEXT[],
+            embedding_clip  VECTOR(512),
+            embedding_dino  VECTOR(768),
+            created_at      TIMESTAMP DEFAULT NOW()
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_clip_embedding ON photos USING hnsw (embedding_clip vector_cosine_ops)",
+        "CREATE INDEX IF NOT EXISTS idx_dino_embedding ON photos USING hnsw (embedding_dino vector_cosine_ops)",
+    ]
+
+    async with engine.begin() as conn:
+        for stmt in statements:
+            await conn.execute(text(stmt))
+    logger.info("Database migrations applied.")
+
+
 async def check_db_connection() -> bool:
     """Return True if the database is reachable."""
     from sqlalchemy import text
