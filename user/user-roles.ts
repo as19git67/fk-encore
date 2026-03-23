@@ -18,7 +18,7 @@ export const assignRole = api(
   async (req: AssignRoleRequest): Promise<UserRolesResponse> => {
     requirePermission(getAuthData()!, "roles.assign");
     try {
-      return assignRoleLogic(req);
+      return await assignRoleLogic(req);
     } catch (err: any) {
       if (err.message?.includes("not found")) {
         throw APIError.notFound(err.message);
@@ -37,7 +37,7 @@ export const removeRole = api(
   async ({ userId, roleId }: { userId: number; roleId: number }): Promise<DeleteResponse> => {
     requirePermission(getAuthData()!, "roles.revoke");
     try {
-      return removeRoleLogic(userId, roleId);
+      return await removeRoleLogic(userId, roleId);
     } catch (err: any) {
       if (err.message?.includes("does not exist")) {
         throw APIError.notFound(err.message);
@@ -56,7 +56,7 @@ export const getUserRoles = api(
   async ({ userId }: { userId: number }): Promise<UserRolesResponse> => {
     requirePermission(getAuthData()!, "users.read");
     try {
-      return getUserRolesLogic(userId);
+      return await getUserRolesLogic(userId);
     } catch (err: any) {
       if (err.message?.includes("not found")) {
         throw APIError.notFound(err.message);

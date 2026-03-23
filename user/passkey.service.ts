@@ -11,6 +11,7 @@ type AuthenticatorTransportFuture = 'ble' | 'cable' | 'hybrid' | 'internal' | 'n
 import { eq, and, lt, sql } from "drizzle-orm";
 import db from "../db/database";
 import { users, sessions, passkeys, challenges } from "../db/schema";
+import { dbFirst, dbAll, dbExec, dbInsertReturning } from '../db/adapter';
 import type {
   PasskeyInfo,
   PasskeyRegistrationOptionsResponse,
@@ -22,6 +23,9 @@ import type {
   DeleteResponse,
 } from "../db/types";
 import { toUser, getRolesForUser, getPermissionsForUser } from "./user.service";
+
+const isPg = process.env.DB_TYPE?.toLowerCase() === 'postgres'
+const nowSql = isPg ? sql`NOW()` : sql`datetime('now')`
 
 // ---------- RP Config ----------
 
@@ -39,50 +43,53 @@ function getRpOrigin(): string {
 
 // ---------- Helpers ----------
 
-function cleanupExpiredChallenges(): void {
-  db.delete(challenges)
-    .where(lt(challenges.expires_at, sql`datetime('now')`))
-    .run();
+async function cleanupExpiredChallenges(): Promise<void> {
+  await dbExec(
+    db.delete(challenges).where(lt(challenges.expires_at, nowSql))
+  );
 }
 
-function storeChallenge(challenge: string, userId?: number): string {
-  cleanupExpiredChallenges();
+async function storeChallenge(challenge: string, userId?: number): Promise<string> {
+  await cleanupExpiredChallenges();
   const id = crypto.randomBytes(16).toString("base64url");
-  db.insert(challenges)
-    .values({
+  await dbExec(
+    db.insert(challenges).values({
       id,
       challenge,
       user_id: userId ?? null,
-      expires_at: sql`datetime('now', '+5 minutes')`,
+      expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
     })
-    .run();
+  );
   return id;
 }
 
-function getAndDeleteChallenge(
+async function getAndDeleteChallenge(
   challengeId: string
-): { challenge: string; user_id: number | null } {
-  const row = db
-    .select({ challenge: challenges.challenge, user_id: challenges.user_id })
-    .from(challenges)
-    .where(
-      and(
-        eq(challenges.id, challengeId),
-        sql`${challenges.expires_at} > datetime('now')`
+): Promise<{ challenge: string; user_id: number | null }> {
+  const row = await dbFirst<{ challenge: string; user_id: number | null }>(
+    db
+      .select({ challenge: challenges.challenge, user_id: challenges.user_id })
+      .from(challenges)
+      .where(
+        and(
+          eq(challenges.id, challengeId),
+          sql`${challenges.expires_at} > ${nowSql}`
+        )
       )
-    )
-    .get();
+  );
 
   if (!row) {
     throw new Error("challenge expired or invalid");
   }
 
-  db.delete(challenges).where(eq(challenges.id, challengeId)).run();
+  await dbExec(db.delete(challenges).where(eq(challenges.id, challengeId)));
   return row;
 }
 
-function getPasskeysForUser(userId: number) {
-  return db.select().from(passkeys).where(eq(passkeys.user_id, userId)).all();
+async function getPasskeysForUser(userId: number) {
+  return dbAll<typeof passkeys.$inferSelect>(
+    db.select().from(passkeys).where(eq(passkeys.user_id, userId))
+  );
 }
 
 function toPasskeyInfo(row: typeof passkeys.$inferSelect): PasskeyInfo {
@@ -95,15 +102,15 @@ function toPasskeyInfo(row: typeof passkeys.$inferSelect): PasskeyInfo {
   };
 }
 
-function createSession(userId: number): string {
+async function createSession(userId: number): Promise<string> {
   const token = crypto.randomBytes(32).toString("base64url");
-  db.insert(sessions)
-    .values({
+  await dbExec(
+    db.insert(sessions).values({
       token,
       user_id: userId,
-      expires_at: sql`datetime('now', '+24 hours')`,
+      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
     })
-    .run();
+  );
   return token;
 }
 
@@ -112,13 +119,15 @@ function createSession(userId: number): string {
 export async function passkeyRegisterOptionsLogic(
   userId: number
 ): Promise<PasskeyRegistrationOptionsResponse> {
-  const userRow = db.select().from(users).where(eq(users.id, userId)).get();
+  const userRow = await dbFirst<typeof users.$inferSelect>(
+    db.select().from(users).where(eq(users.id, userId))
+  );
 
   if (!userRow) {
     throw new Error(`User with id ${userId} not found`);
   }
 
-  const existingPasskeys = getPasskeysForUser(userId);
+  const existingPasskeys = await getPasskeysForUser(userId);
 
   const options = await generateRegistrationOptions({
     rpName: getRpName(),
@@ -136,7 +145,7 @@ export async function passkeyRegisterOptionsLogic(
     },
   });
 
-  const challengeId = storeChallenge(options.challenge, userId);
+  const challengeId = await storeChallenge(options.challenge, userId);
 
   return { challengeId, options };
 }
@@ -145,7 +154,7 @@ export async function passkeyRegisterVerifyLogic(
   req: PasskeyRegistrationVerifyRequest,
   userId: number
 ): Promise<PasskeyInfo> {
-  const { challenge } = getAndDeleteChallenge(req.challengeId);
+  const { challenge } = await getAndDeleteChallenge(req.challengeId);
 
   const verification = await verifyRegistrationResponse({
     response: req.credential,
@@ -166,8 +175,8 @@ export async function passkeyRegisterVerifyLogic(
   const transports = JSON.stringify(req.credential.response?.transports ?? []);
   const name = req.name || "Passkey";
 
-  db.insert(passkeys)
-    .values({
+  await dbExec(
+    db.insert(passkeys).values({
       credential_id: credentialId,
       user_id: userId,
       public_key: publicKeyBase64,
@@ -177,7 +186,7 @@ export async function passkeyRegisterVerifyLogic(
       transports,
       name,
     })
-    .run();
+  );
 
   return {
     credential_id: credentialId,
@@ -196,7 +205,7 @@ export async function passkeyAuthOptionsLogic(): Promise<PasskeyAuthOptionsRespo
     userVerification: "preferred",
   });
 
-  const challengeId = storeChallenge(options.challenge);
+  const challengeId = await storeChallenge(options.challenge);
 
   return { challengeId, options };
 }
@@ -204,15 +213,16 @@ export async function passkeyAuthOptionsLogic(): Promise<PasskeyAuthOptionsRespo
 export async function passkeyAuthVerifyLogic(
   req: PasskeyAuthVerifyRequest
 ): Promise<LoginResponse> {
-  const { challenge } = getAndDeleteChallenge(req.challengeId);
+  const { challenge } = await getAndDeleteChallenge(req.challengeId);
 
   const credentialId = req.credential.id;
 
-  const passkey = db
-    .select()
-    .from(passkeys)
-    .where(eq(passkeys.credential_id, credentialId))
-    .get();
+  const passkey = await dbFirst<typeof passkeys.$inferSelect>(
+    db
+      .select()
+      .from(passkeys)
+      .where(eq(passkeys.credential_id, credentialId))
+  );
 
   if (!passkey) {
     throw new Error("invalid credentials");
@@ -236,21 +246,24 @@ export async function passkeyAuthVerifyLogic(
   }
 
   // Update counter
-  db.update(passkeys)
-    .set({ counter: verification.authenticationInfo.newCounter })
-    .where(eq(passkeys.credential_id, credentialId))
-    .run();
+  await dbExec(
+    db.update(passkeys)
+      .set({ counter: verification.authenticationInfo.newCounter })
+      .where(eq(passkeys.credential_id, credentialId))
+  );
 
   // Create session
-  const userRow = db.select().from(users).where(eq(users.id, passkey.user_id)).get()!;
+  const userRow = (await dbFirst<typeof users.$inferSelect>(
+    db.select().from(users).where(eq(users.id, passkey.user_id))
+  ))!;
 
-  const token = createSession(userRow.id);
+  const token = await createSession(userRow.id);
 
   return {
     user: {
       ...toUser(userRow),
-      roles: getRolesForUser(userRow.id),
-      permissions: getPermissionsForUser(userRow.id),
+      roles: await getRolesForUser(userRow.id),
+      permissions: await getPermissionsForUser(userRow.id),
     },
     token,
   };
@@ -258,24 +271,25 @@ export async function passkeyAuthVerifyLogic(
 
 // ---------- Management ----------
 
-export function listPasskeysLogic(userId: number): ListPasskeysResponse {
-  const rows = getPasskeysForUser(userId);
+export async function listPasskeysLogic(userId: number): Promise<ListPasskeysResponse> {
+  const rows = await getPasskeysForUser(userId);
   return { passkeys: rows.map(toPasskeyInfo) };
 }
 
-export function deletePasskeyLogic(
+export async function deletePasskeyLogic(
   userId: number,
   credentialId: string
-): DeleteResponse {
-  const result = db
-    .delete(passkeys)
-    .where(
-      and(
-        eq(passkeys.credential_id, credentialId),
-        eq(passkeys.user_id, userId)
+): Promise<DeleteResponse> {
+  const result = await dbExec(
+    db
+      .delete(passkeys)
+      .where(
+        and(
+          eq(passkeys.credential_id, credentialId),
+          eq(passkeys.user_id, userId)
+        )
       )
-    )
-    .run();
+  );
 
   if (result.changes === 0) {
     throw new Error("passkey not found");

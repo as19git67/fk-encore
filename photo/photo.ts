@@ -101,7 +101,7 @@ export const listPhotos = api(
     const authData = getAuthData()!;
     requirePermission(authData, "photos.view");
 
-    return service.listPhotosLogic(userId, showHidden ?? false);
+    return await service.listPhotosLogic(userId, showHidden ?? false);
   }
 );
 
@@ -116,7 +116,7 @@ export const deletePhoto = api(
     const authData = getAuthData()!;
     requirePermission(authData, "photos.delete");
 
-    return service.deletePhotoLogic(userId, id);
+    return await service.deletePhotoLogic(userId, id);
   }
 );
 
@@ -130,7 +130,7 @@ export const hardDeletePhoto = api(
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "data.manage");
-    return service.hardDeletePhotoLogic(userId, id);
+    return await service.hardDeletePhotoLogic(userId, id);
   }
 );
 
@@ -144,7 +144,7 @@ export const updatePhotoCuration = api(
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "photos.delete");
-    return service.updatePhotoCurationLogic(userId, id, status);
+    return await service.updatePhotoCurationLogic(userId, id, status);
   }
 );
 
@@ -159,7 +159,7 @@ export const getPhotosToRefreshMetadata = api(
     const authData = getAuthData()!;
     requirePermission(authData, "photos.refresh_metadata");
 
-    return service.getPhotosToRefreshMetadataLogic(userId);
+    return await service.getPhotosToRefreshMetadataLogic(userId);
   }
 );
 
@@ -174,7 +174,7 @@ export const refreshPhotoMetadata = api(
     const authData = getAuthData()!;
     requirePermission(authData, "photos.refresh_metadata");
 
-    return service.refreshPhotoMetadataLogic(userId, id);
+    return await service.refreshPhotoMetadataLogic(userId, id);
   }
 );
 
@@ -189,7 +189,7 @@ export const updatePhotoDate = api(
     const authData = getAuthData()!;
     requirePermission(authData, "photos.upload");
 
-    return service.updatePhotoDateLogic(userId, id, taken_at);
+    return await service.updatePhotoDateLogic(userId, id, taken_at);
   }
 );
 
@@ -269,7 +269,7 @@ export const createAlbum = api(
     const authData = getAuthData()!;
     requirePermission(authData, "albums.manage");
     
-    return service.createAlbumLogic(userId, req);
+    return await service.createAlbumLogic(userId, req);
   }
 );
 
@@ -281,7 +281,7 @@ export const listAlbums = api(
   async (): Promise<ListAlbumsResponse> => {
     checkModule();
     const userId = getUserId();
-    return service.listAlbumsLogic(userId);
+    return await service.listAlbumsLogic(userId);
   }
 );
 
@@ -293,7 +293,7 @@ export const getAlbum = api(
   async ({ id }: { id: number }): Promise<AlbumWithPhotos> => {
     checkModule();
     const userId = getUserId();
-    return service.getAlbumLogic(userId, id);
+    return await service.getAlbumLogic(userId, id);
   }
 );
 
@@ -305,7 +305,7 @@ export const updateAlbum = api(
   async (req: UpdateAlbumRequest): Promise<Album> => {
     checkModule();
     const userId = getUserId();
-    return service.updateAlbumLogic(userId, req);
+    return await service.updateAlbumLogic(userId, req);
   }
 );
 
@@ -317,7 +317,7 @@ export const deleteAlbum = api(
   async ({ id }: { id: number }): Promise<DeleteResponse> => {
     checkModule();
     const userId = getUserId();
-    return service.deleteAlbumLogic(userId, id);
+    return await service.deleteAlbumLogic(userId, id);
   }
 );
 
@@ -329,7 +329,7 @@ export const addPhotoToAlbum = api(
   async (req: AddPhotoToAlbumRequest): Promise<{ success: boolean }> => {
     checkModule();
     const userId = getUserId();
-    return service.addPhotoToAlbumLogic(userId, req);
+    return await service.addPhotoToAlbumLogic(userId, req);
   }
 );
 
@@ -341,7 +341,7 @@ export const shareAlbum = api(
   async (req: ShareAlbumRequest): Promise<{ success: boolean }> => {
     checkModule();
     const userId = getUserId();
-    return service.shareAlbumLogic(userId, req);
+    return await service.shareAlbumLogic(userId, req);
   }
 );
 
@@ -357,7 +357,7 @@ export const listPersons = api(
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "people.view");
-    return service.listPersonsLogic(userId);
+    return await service.listPersonsLogic(userId);
   }
 );
 
@@ -371,7 +371,7 @@ export const getPersonDetails = api(
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "people.view");
-    return service.getPersonDetailsLogic(userId, id);
+    return await service.getPersonDetailsLogic(userId, id);
   }
 );
 
@@ -385,7 +385,7 @@ export const updatePerson = api(
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "people.edit");
-    return service.updatePersonLogic(userId, id, name);
+    return await service.updatePersonLogic(userId, id, name);
   }
 );
 
@@ -399,7 +399,7 @@ export const mergePersons = api(
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "people.edit");
-    return service.mergePersonsLogic(userId, req);
+    return await service.mergePersonsLogic(userId, req);
   }
 );
 
@@ -413,7 +413,7 @@ export const assignFaceToPerson = api(
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "people.edit");
-    return service.assignFaceToPersonLogic(userId, faceId, personId);
+    return await service.assignFaceToPersonLogic(userId, faceId, personId);
   }
 );
 
@@ -427,7 +427,7 @@ export const ignoreFace = api(
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "people.edit");
-    return service.ignoreFaceLogic(userId, faceId);
+    return await service.ignoreFaceLogic(userId, faceId);
   }
 );
 
@@ -441,7 +441,7 @@ export const ignorePersonFaces = api(
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "people.edit");
-    return service.ignorePersonFacesLogic(userId, id);
+    return await service.ignorePersonFacesLogic(userId, id);
   }
 );
 
@@ -455,7 +455,7 @@ export const reindexPhoto = api(
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "photos.refresh_metadata");
-    return service.reindexPhotoLogic(userId, id);
+    return await service.reindexPhotoLogic(userId, id);
   }
 );
 
@@ -469,7 +469,7 @@ export const getPhotoFaces = api(
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "people.view");
-    return service.getPhotoFacesLogic(userId, id);
+    return await service.getPhotoFacesLogic(userId, id);
   }
 );
 
@@ -483,7 +483,7 @@ export const reindexAllPhotos = api(
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "data.manage");
-    return service.reindexAllPhotosLogic(userId);
+    return await service.reindexAllPhotosLogic(userId);
   }
 );
 
@@ -497,7 +497,7 @@ export const getReindexStatus = api(
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "data.manage");
-    return service.getReindexStatusForUser(userId);
+    return await service.getReindexStatusForUser(userId);
   }
 );
 
@@ -519,7 +519,7 @@ export const findPhotoGroups = api(
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "data.manage");
-    return service.findPhotoGroupsLogic(userId);
+    return await service.findPhotoGroupsLogic(userId);
   }
 );
 
@@ -533,7 +533,7 @@ export const listPhotoGroups = api(
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "photos.view");
-    return service.listPhotoGroupsLogic(userId);
+    return await service.listPhotoGroupsLogic(userId);
   }
 );
 
@@ -547,7 +547,7 @@ export const getNextUnreviewedGroup = api(
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "photos.view");
-    return { group: service.getNextUnreviewedGroupLogic(userId) };
+    return { group: await service.getNextUnreviewedGroupLogic(userId) };
   }
 );
 
@@ -561,6 +561,6 @@ export const reviewPhotoGroup = api(
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "photos.delete");
-    return service.reviewPhotoGroupLogic(userId, id);
+    return await service.reviewPhotoGroupLogic(userId, id);
   }
 );
