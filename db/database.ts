@@ -239,15 +239,10 @@ async function ensureDatabaseExists(connectionString: string): Promise<void> {
   adminUrl.pathname = '/postgres';
   const adminPool = new Pool({ connectionString: adminUrl.toString() });
   try {
-    await adminPool.query(
-      `SELECT 'CREATE DATABASE "${targetDb}"' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = $1)`,
-      [targetDb]
-    ).then(async (res) => {
-      if (res.rows[0]) {
-        await adminPool.query(res.rows[0]['?column?']);
-        console.log(`[db] Created database: ${targetDb}`);
-      }
-    });
+    await adminPool.query(`CREATE DATABASE "${targetDb}"`);
+    console.log(`[db] Created database: ${targetDb}`);
+  } catch (err: any) {
+    if (err.code !== '42P04') throw err; // 42P04 = duplicate_database, ignore it
   } finally {
     await adminPool.end();
   }

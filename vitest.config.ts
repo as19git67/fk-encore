@@ -7,6 +7,8 @@ export default defineConfig({
       "node_modules/**",
       "encore.gen/**",
     ],
+    // Run test files sequentially to avoid DB data races (shared Postgres instance)
+    fileParallelism: false,
   },
 });
 

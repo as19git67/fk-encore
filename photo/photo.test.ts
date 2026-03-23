@@ -332,11 +332,18 @@ describe("Photo Module", () => {
         db.insert(persons).values({ user_id: user1.id, name: "To Be Ignored" }).returning()
       );
 
-      const photo = await service.uploadPhotoLogic(user1.id, {
-        data: Buffer.from([1, 2, 3]),
-        name: "person_photo.jpg",
-        mimeType: "image/jpeg",
-      });
+      // Insert photo directly to avoid triggering background face indexing (race condition)
+      const photoRow = await dbInsertReturning<{ id: number }>(
+        db.insert(photos).values({
+          user_id: user1.id,
+          filename: "person_photo.jpg",
+          original_name: "person_photo.jpg",
+          mime_type: "image/jpeg",
+          size: 3,
+          hash: "test-ignore-hash",
+        }).returning()
+      );
+      const photo = { id: photoRow!.id };
 
       await db.insert(faces).values({
         user_id: user1.id,

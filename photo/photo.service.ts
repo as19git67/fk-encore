@@ -945,7 +945,7 @@ export async function listPersonsLogic(userId: number): Promise<ListPersonsRespo
           WHERE f.person_id = persons.id
             AND f.user_id = persons.user_id
             AND f.ignored = 0
-          ORDER BY COALESCE(julianday(p.taken_at), julianday(p.created_at), 0) DESC, f.id DESC
+          ORDER BY COALESCE(p.taken_at, p.created_at) DESC NULLS LAST, f.id DESC
           LIMIT 1
         ),
         persons.cover_face_id
@@ -961,7 +961,7 @@ export async function listPersonsLogic(userId: number): Promise<ListPersonsRespo
           WHERE f.person_id = persons.id
             AND f.user_id = persons.user_id
             AND f.ignored = 0
-          ORDER BY COALESCE(julianday(p.taken_at), julianday(p.created_at), 0) DESC, f.id DESC
+          ORDER BY COALESCE(p.taken_at, p.created_at) DESC NULLS LAST, f.id DESC
           LIMIT 1
         ),
         ''
@@ -974,7 +974,7 @@ export async function listPersonsLogic(userId: number): Promise<ListPersonsRespo
           WHERE f.person_id = persons.id
             AND f.user_id = persons.user_id
             AND f.ignored = 0
-          ORDER BY COALESCE(julianday(p.taken_at), julianday(p.created_at), 0) DESC, f.id DESC
+          ORDER BY COALESCE(p.taken_at, p.created_at) DESC NULLS LAST, f.id DESC
           LIMIT 1
         ),
         ''
@@ -983,7 +983,7 @@ export async function listPersonsLogic(userId: number): Promise<ListPersonsRespo
     .from(persons)
     .where(eq(persons.user_id, userId))
     .orderBy(sql`${persons.updated_at} DESC`)
-  ));
+  );
 
   return {
     persons: rows.map((r) => ({
@@ -1030,7 +1030,7 @@ export async function getPersonDetailsLogic(userId: number, personId: number): P
       .from(faces)
       .innerJoin(photos, eq(faces.photo_id, photos.id))
       .where(and(eq(faces.person_id, personId), eq(faces.user_id, userId)))
-      .orderBy(sql`COALESCE(julianday(${photos.taken_at}), julianday(${photos.created_at}), 0) DESC`, sql`${faces.id} DESC`)
+      .orderBy(sql`COALESCE(${photos.taken_at}, ${photos.created_at}) DESC NULLS LAST`, sql`${faces.id} DESC`)
   );
 
   return {
