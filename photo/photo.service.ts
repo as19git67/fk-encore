@@ -1426,77 +1426,80 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
     reviewedMemberSets.set(gid, new Set(members.map((m) => m.photo_id)));
   }
 
-  // Delete un-reviewed groups
-  await dbExec(
-    db.delete(photoGroups)
-      .where(and(eq(photoGroups.user_id, userId), sql`${photoGroups.reviewed_at} IS NULL`))
-  );
-
-  // 7. Insert new groups (skip if matching a reviewed group)
-  let groupsCreated = 0;
-  let totalPhotosGrouped = 0;
-
-  for (const memberIndices of groups) {
-    const memberPhotoIds = memberIndices.map((idx) => indexed[idx].id);
-    const memberSet = new Set(memberPhotoIds);
-
-    // Check if this group matches an existing reviewed group
-    let alreadyReviewed = false;
-    for (const [, reviewedSet] of reviewedMemberSets) {
-      // Consider it a match if sets are identical
-      if (memberSet.size === reviewedSet.size && [...memberSet].every((id) => reviewedSet.has(id))) {
-        alreadyReviewed = true;
-        break;
-      }
-    }
-    if (alreadyReviewed) continue;
-
-    // Compute center photo (highest avg similarity to others in group)
-    let bestCenter = memberIndices[0];
-    let bestAvgSim = -1;
-    for (const i of memberIndices) {
-      let totalSim = 0;
-      for (const j of memberIndices) {
-        if (i !== j) totalSim += cosineSimilarity(indexed[i].embedding, indexed[j].embedding);
-      }
-      const avgSim = totalSim / (memberIndices.length - 1);
-      if (avgSim > bestAvgSim) {
-        bestAvgSim = avgSim;
-        bestCenter = i;
-      }
-    }
-    const coverPhotoId = indexed[bestCenter].id;
-
-    // Sort members by similarity to center (descending)
-    const centerEmb = indexed[bestCenter].embedding;
-    const ranked = memberIndices
-      .map((idx) => ({
-        photoId: indexed[idx].id,
-        sim: cosineSimilarity(indexed[idx].embedding, centerEmb),
-      }))
-      .sort((a, b) => b.sim - a.sim);
-
-    // Insert group
-    const group = await dbInsertReturning<{ id: number }>(
-      db.insert(photoGroups)
-        .values({ user_id: userId, cover_photo_id: coverPhotoId })
-        .returning({ id: photoGroups.id })
+  // 7. Delete un-reviewed groups and insert new ones atomically to prevent race conditions
+  // (concurrent calls can otherwise delete a group between INSERT group and INSERT members)
+  const doGroupingWork = async (tx: typeof db | any) => {
+    await dbExec(
+      tx.delete(photoGroups)
+        .where(and(eq(photoGroups.user_id, userId), sql`${photoGroups.reviewed_at} IS NULL`))
     );
 
-    // Insert members with similarity rank
-    for (let rank = 0; rank < ranked.length; rank++) {
-      await dbExec(
-        db.insert(photoGroupMembers).values({
-          group_id: group!.id,
-          photo_id: ranked[rank].photoId,
-          similarity_rank: rank,
-        })
+    let created = 0;
+    let grouped = 0;
+
+    for (const memberIndices of groups) {
+      const memberPhotoIds = memberIndices.map((idx) => indexed[idx].id);
+      const memberSet = new Set(memberPhotoIds);
+
+      let alreadyReviewed = false;
+      for (const [, reviewedSet] of reviewedMemberSets) {
+        if (memberSet.size === reviewedSet.size && [...memberSet].every((id) => reviewedSet.has(id))) {
+          alreadyReviewed = true;
+          break;
+        }
+      }
+      if (alreadyReviewed) continue;
+
+      let bestCenter = memberIndices[0];
+      let bestAvgSim = -1;
+      for (const i of memberIndices) {
+        let totalSim = 0;
+        for (const j of memberIndices) {
+          if (i !== j) totalSim += cosineSimilarity(indexed[i].embedding, indexed[j].embedding);
+        }
+        const avgSim = totalSim / (memberIndices.length - 1);
+        if (avgSim > bestAvgSim) {
+          bestAvgSim = avgSim;
+          bestCenter = i;
+        }
+      }
+      const coverPhotoId = indexed[bestCenter].id;
+
+      const centerEmb = indexed[bestCenter].embedding;
+      const ranked = memberIndices
+        .map((idx) => ({
+          photoId: indexed[idx].id,
+          sim: cosineSimilarity(indexed[idx].embedding, centerEmb),
+        }))
+        .sort((a, b) => b.sim - a.sim);
+
+      const group = await dbInsertReturning<{ id: number }>(
+        tx.insert(photoGroups)
+          .values({ user_id: userId, cover_photo_id: coverPhotoId })
+          .returning({ id: photoGroups.id })
       );
+
+      for (let rank = 0; rank < ranked.length; rank++) {
+        await dbExec(
+          tx.insert(photoGroupMembers).values({
+            group_id: group!.id,
+            photo_id: ranked[rank].photoId,
+            similarity_rank: rank,
+          })
+        );
+      }
+
+      created++;
+      grouped += memberIndices.length;
     }
 
-    groupsCreated++;
-    totalPhotosGrouped += memberIndices.length;
-  }
+    return { created, grouped };
+  };
+
+  const isPg = process.env.DB_TYPE?.toLowerCase() === 'postgres';
+  const { created: groupsCreated, grouped: totalPhotosGrouped } = isPg
+    ? await (db as any).transaction(doGroupingWork)
+    : await doGroupingWork(db);
 
   console.log(`Photo grouping for user ${userId}: ${groupsCreated} groups created, ${totalPhotosGrouped} photos grouped`);
   return { groups_created: groupsCreated, total_photos_grouped: totalPhotosGrouped };
