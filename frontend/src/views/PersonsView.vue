@@ -986,7 +986,7 @@ onUnmounted(() => {
 .fullscreen-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.95);
+  background: var(--p-slate-950);
   z-index: 1000;
   display: flex;
   flex-direction: column;
