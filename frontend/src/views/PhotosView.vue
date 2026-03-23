@@ -115,6 +115,20 @@ const formatPhotoDate = (photo: Photo) => {
   }).format(date);
 };
 
+const formatPhotoDateFull = (photo: Photo) => {
+  const dateStr = photo.taken_at || photo.created_at;
+  if (!dateStr) return '';
+  const date = new Date(dateStr);
+  return new Intl.DateTimeFormat(navigator.language, {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  }).format(date);
+};
+
 const refreshingMetadata = ref(false)
 const isDragging = ref(false)
 const dragCounter = ref(0)
@@ -372,11 +386,14 @@ async function handleRestore(id: number) {
 }
 
 async function handleToggleFavorite(id: number, currentStatus: CurationStatus) {
+  const newStatus = currentStatus === 'favorite' ? 'visible' : 'favorite'
+  const photo = photos.value.find(p => p.id === id)
+  if (photo) photo.curation_status = newStatus
   try {
-    const newStatus = currentStatus === 'favorite' ? 'visible' : 'favorite'
     await updatePhotoCuration(id, newStatus)
     await reloadPhotosInPlace()
   } catch (err: any) {
+    if (photo) photo.curation_status = currentStatus
     error.value = err.message || 'Fehler beim Ändern des Favoriten-Status'
   }
 }
@@ -889,49 +906,46 @@ onUnmounted(() => {
       <div class="fullscreen-content" @click.stop>
         <HeicImage :src="getPhotoUrl(selectedPhoto.filename)" :alt="selectedPhoto.original_name" objectFit="contain" />
 
-        <!-- Close -->
-        <Button icon="pi pi-times" class="fs-close-btn" rounded text @click="isFullscreen = false" />
-
-        <!-- Left/right navigation -->
-        <Button icon="pi pi-chevron-left" class="fs-nav-left" rounded text
-          :disabled="selectedIndex === 0"
-          @click="selectedIndex > 0 && selectedIndex--" />
-        <Button icon="pi pi-chevron-right" class="fs-nav-right" rounded text
-          :disabled="selectedIndex === photos.length - 1"
-          @click="selectedIndex < photos.length - 1 && selectedIndex++" />
-
-        <!-- Bottom bar: info + actions -->
-        <div class="fs-bottom">
-          <div class="fs-info">
-            <div class="fs-title">{{ selectedPhoto.original_name }}</div>
-            <div class="fs-date">{{ formatPhotoDate(selectedPhoto) }}</div>
-          </div>
-          <div class="fs-actions">
+        <!-- Top bar: back | date | toolbar -->
+        <div class="fs-topbar">
+          <Button icon="pi pi-arrow-left" class="fs-topbar-btn" rounded text
+            aria-label="Zurück"
+            @click="isFullscreen = false" />
+          <div class="fs-date-bar">{{ formatPhotoDateFull(selectedPhoto) }}</div>
+          <div class="fs-toolbar">
             <Button
               v-if="selectedPhoto.curation_status === 'hidden'"
               icon="pi pi-eye"
-              label="Wiederherstellen"
-              size="small"
-              severity="info"
+              class="fs-topbar-btn" rounded text
+              severity="warn"
+              aria-label="Auswählen, um das Bild wieder anzuzeigen"
               @click="handleRestore(selectedPhoto.id)"
             />
             <Button
               v-else
               icon="pi pi-eye-slash"
-              label="Ausblenden (X)"
-              size="small"
-              severity="warn"
+              class="fs-topbar-btn" rounded text
+              severity="info"
+              aria-label="Auswählen, um das Bild auszublenden"
               @click="handleDelete(selectedPhoto.id)"
             />
             <Button
               :icon="selectedPhoto.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
-              :label="selectedPhoto.curation_status === 'favorite' ? 'Kein Favorit' : 'Favorit (F)'"
-              size="small"
+              class="fs-topbar-btn" rounded text
               :severity="selectedPhoto.curation_status === 'favorite' ? 'warn' : 'secondary'"
+              :aria-label="selectedPhoto.curation_status === 'favorite' ? 'Auswählen, um den Favoritenstatus zu entfernen' : 'Auswählen, um als Favorit zu markieren'"
               @click="handleToggleFavorite(selectedPhoto.id, selectedPhoto.curation_status)"
             />
           </div>
         </div>
+
+        <!-- Left/right navigation -->
+        <Button icon="pi pi-chevron-left" class="fs-nav-left-right fs-nav-left" rounded text
+          :disabled="selectedIndex === 0"
+          @click="selectedIndex > 0 && selectedIndex--" />
+        <Button icon="pi pi-chevron-right" class="fs-nav-left-right  fs-nav-right" rounded text
+          :disabled="selectedIndex === photos.length - 1"
+          @click="selectedIndex < photos.length - 1 && selectedIndex++" />
       </div>
     </div>
 
@@ -1381,7 +1395,7 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.95);
+  background: var(--p-slate-950);
   z-index: 1100;
 }
 
@@ -1403,92 +1417,49 @@ onUnmounted(() => {
   object-fit: contain;
 }
 
-.fs-close-btn {
+.fs-topbar {
   position: absolute;
-  top: 0.75rem;
-  right: 0.75rem;
+  top: 0;
+  left: 0;
+  right: 0;
   z-index: 10;
-  color: white !important;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.25rem;
+  pointer-events: none;
+  background-color: var(--p-neutral-50);
+}
+
+.fs-topbar > * {
+  display: flex;
+  pointer-events: auto;
+  color: var(--p-text-color);
+}
+
+.fs-date-bar {
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.fs-toolbar {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.fs-nav-left-right {
+  position: absolute;
+  top: 50%;
+  z-index: 10;
+  transform: translateY(-50%);
 }
 
 .fs-nav-left {
-  position: absolute;
   left: 0.75rem;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 10;
-  color: white !important;
-  font-size: 1.5rem !important;
 }
 
 .fs-nav-right {
-  position: absolute;
   right: 0.75rem;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 10;
-  color: white !important;
-  font-size: 1.5rem !important;
-}
-
-.fs-bottom {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  padding: 1.25rem 1.5rem;
-  background: linear-gradient(transparent, rgba(0, 0, 0, 0.75));
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  z-index: 10;
-  gap: 1rem;
-}
-
-.fs-info {
-  color: white;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  min-width: 0;
-}
-
-.fs-title {
-  font-size: 1rem;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.fs-date {
-  font-size: 0.85rem;
-  opacity: 0.75;
-}
-
-.fs-actions {
-  display: flex;
-  gap: 0.5rem;
-  flex-shrink: 0;
-}
-
-.edit-date-btn {
-  color: white !important;
-  opacity: 0.6;
-}
-
-.edit-date-btn:hover {
-  opacity: 1;
-}
-
-.date-edit-container {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  align-items: center;
-  background: rgba(255, 255, 255, 0.1);
-  padding: 0.5rem;
-  border-radius: 8px;
 }
 
 .edit-actions {
