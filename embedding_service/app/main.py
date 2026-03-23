@@ -13,7 +13,7 @@ register_heif_opener()
 
 from app.api.endpoints import router
 from app.config import settings
-from app.db.database import run_migrations
+from app.db.database import ensure_database_exists, run_migrations
 
 logging.basicConfig(
     level=settings.log_level.upper(),
@@ -39,5 +39,6 @@ app.include_router(router)
 
 @app.on_event("startup")
 async def _on_startup() -> None:
+    await ensure_database_exists()
     await run_migrations()
     logger.info("Embedding Service started (log_level=%s).", settings.log_level)
