@@ -5,6 +5,8 @@ services:
     container_name: fk-encore-app
     restart: unless-stopped
     depends_on:
+      postgres:
+        condition: service_healthy
       insightface:
         condition: service_started
       embedding_service:
@@ -13,8 +15,12 @@ services:
       - "8080:8080"
     environment:
       PORT: "8080"
-      DB_TYPE: sqlite
-      SQLITE_DB_PATH: /mnt/data/db/app.db
+      DB_TYPE: postgres
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DATABASE: encore
       PHOTO_UPLOAD_DIR: /mnt/data/photos
       ADMIN_EMAIL: admin@example.com
       ADMIN_NAME: Admin
@@ -28,7 +34,6 @@ services:
       EMBEDDING_SERVICE_URL: http://embedding_service:8000
     volumes:
       - photos:/mnt/data/photos
-      - db:/mnt/data/db
 
   # ── InsightFace Service (Face Detection) ───────────────────────────────────
   insightface:
@@ -44,28 +49,30 @@ services:
     container_name: fk-encore-embedding
     restart: unless-stopped
     depends_on:
-      embedding_postgres:
+      postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@embedding_postgres:5432/embeddings
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/embeddings
       CLIP_MODEL_NAME: ViT-B-32
       CLIP_PRETRAINED: openai
       DINO_MODEL_NAME: facebook/dinov2-base
       LOG_LEVEL: INFO
 
-  # ── PostgreSQL for Embedding Service (pgvector) ────────────────────────────
-  embedding_postgres:
+  # ── PostgreSQL (shared instance for both app and embedding service) ─────────
+  postgres:
     image: pgvector/pgvector:pg16
-    container_name: fk-encore-embedding-db
+    container_name: fk-encore-db
     restart: unless-stopped
+    ports:
+      - "5432:5432"
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: embeddings
+      POSTGRES_DB: encore          # primary database for the app
     volumes:
-      - embedding-pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d encore"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -74,18 +81,12 @@ volumes:
   photos:
     driver: local
     driver_opts:
-      device: /mnt/data/vivanty/photos
+      device: /Users/anton/vivanty_data/photos
       o: bind
       type: none
-  db:
+  pgdata:
     driver: local
     driver_opts:
-      device: /mnt/data/vivanty/db
-      o: bind
-      type: none
-  embedding-pgdata:
-    driver: local
-    driver_opts:
-      device: /mnt/data/vivanty/embedding-pgdata
+      device: /Users/anton/vivanty_data/pgdata
       o: bind
       type: none
