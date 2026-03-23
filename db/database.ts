@@ -412,7 +412,7 @@ function buildPostgresConnectionString(): string {
 
 const db = createDb();
 
-// Seed initial data (roles, admin user)
-seed(db);
+// Seed initial data (roles, admin user) — top-level await works in ESM
+await seed(db);
 
 export default db;
