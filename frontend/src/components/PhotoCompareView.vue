@@ -76,7 +76,6 @@ async function handleDoneAndNext() {
   }
 }
 
-// Fix #1: For 2-photo groups, go directly to side-by-side
 const isTwoPhotos = computed(() => groupPhotos.value.length === 2)
 const comparePair = ref<[number, number] | null>(null)
 const selectedForCompare = ref<Set<number>>(new Set())
@@ -85,7 +84,10 @@ onMounted(() => {
   if (isTwoPhotos.value) {
     comparePair.value = [groupPhotos.value[0]!.id, groupPhotos.value[1]!.id]
   }
+  // Lock body scroll
+  document.body.style.overflow = 'hidden'
 })
+
 watch(() => props.group.id, () => {
   selectedForCompare.value = new Set()
   if (isTwoPhotos.value) {
@@ -93,6 +95,10 @@ watch(() => props.group.id, () => {
   } else {
     comparePair.value = null
   }
+})
+
+onUnmounted(() => {
+  document.body.style.overflow = ''
 })
 
 function toggleCompareSelect(id: number) {
@@ -142,71 +148,76 @@ const columnClass = computed(() => {
 </script>
 
 <template>
-  <!-- Fix #2: prevent background scroll -->
   <Teleport to="body">
-    <div class="compare-overlay" @click.self="$emit('close')" @wheel.prevent @touchmove.prevent>
-      <div class="compare-panel" @wheel.stop>
-        <!-- Header -->
-        <div class="compare-header">
-          <div class="compare-title">
-            <span class="font-semibold">{{ group.member_count }} ähnliche Fotos</span>
-            <span v-if="totalUnreviewed > 0" class="text-secondary text-sm ml-2">
-              ({{ totalUnreviewed }} Gruppen offen)
-            </span>
-          </div>
-          <!-- Fix #7: Separate Fertig and Weiter buttons -->
-          <div class="compare-actions">
-            <Button label="Fertig" icon="pi pi-check" @click="handleDone" severity="success" size="small" />
-            <Button
-              v-if="totalUnreviewed > 1"
-              label="Fertig + Weiter"
-              icon="pi pi-arrow-right"
-              iconPos="right"
-              @click="handleDoneAndNext"
-              severity="success"
-              outlined
-              size="small"
-            />
-            <Button icon="pi pi-times" @click="$emit('close')" text rounded severity="secondary" />
-          </div>
+    <div class="compare-overlay">
+      <!-- Header -->
+      <div class="compare-header">
+        <div class="compare-header-left">
+          <Button
+            v-if="comparePair && !isTwoPhotos"
+            label="Zurück zur Übersicht"
+            icon="pi pi-arrow-left"
+            @click="closeCompare"
+            text
+            size="small"
+          />
         </div>
+        <div class="compare-title">
+          <span class="font-semibold">{{ group.member_count }} ähnliche Fotos</span>
+          <span v-if="totalUnreviewed > 0" class="text-secondary text-sm ml-2">
+            ({{ totalUnreviewed }} Gruppen offen)
+          </span>
+        </div>
+        <div class="compare-actions">
+          <Button label="Fertig" icon="pi pi-check" @click="handleDone" severity="success" size="small" />
+          <Button
+            v-if="totalUnreviewed > 1"
+            label="Fertig + Weiter"
+            icon="pi pi-arrow-right"
+            iconPos="right"
+            @click="handleDoneAndNext"
+            severity="success"
+            outlined
+            size="small"
+          />
+          <Button icon="pi pi-times" @click="$emit('close')" text rounded severity="secondary" />
+        </div>
+      </div>
 
-        <!-- Side-by-side detail compare -->
-        <div v-if="comparePair" class="side-by-side">
-          <div v-if="!isTwoPhotos" class="side-by-side-header">
-            <span class="font-medium">Detailvergleich</span>
-            <Button label="Zurück zur Übersicht" icon="pi pi-arrow-left" @click="closeCompare" text size="small" />
-          </div>
-          <div class="side-by-side-photos">
-            <div v-for="photoId in comparePair" :key="photoId" class="side-by-side-item"
-              :class="{ 'is-hidden': getCuration(photoId) === 'hidden', 'is-favorite': getCuration(photoId) === 'favorite' }"
-            >
-              <HeicImage :src="getPhotoUrl(allPhotos.find(p => p.id === photoId)!.filename)" alt="" />
-              <!-- Fix #4: Colored, solid buttons -->
-              <div class="side-by-side-controls">
-                <Button
-                  icon="pi pi-eye-slash"
-                  label="Ausblenden"
-                  :severity="getCuration(photoId) === 'hidden' ? 'danger' : 'secondary'"
-                  :outlined="getCuration(photoId) !== 'hidden'"
-                  size="small"
-                  @click="setCuration(photoId, 'hidden')"
-                />
-                <Button
-                  icon="pi pi-heart"
-                  label="Favorit"
-                  :severity="getCuration(photoId) === 'favorite' ? 'warn' : 'secondary'"
-                  :outlined="getCuration(photoId) !== 'favorite'"
-                  size="small"
-                  @click="setCuration(photoId, 'favorite')"
-                />
-              </div>
+      <!-- Side-by-side detail compare -->
+      <div v-if="comparePair" class="side-by-side">
+        <div class="side-by-side-photos">
+          <div v-for="photoId in comparePair" :key="photoId" class="side-by-side-item"
+            :class="{ 'is-hidden': getCuration(photoId) === 'hidden', 'is-favorite': getCuration(photoId) === 'favorite' }"
+          >
+            <div class="side-by-side-image">
+              <HeicImage :src="getPhotoUrl(allPhotos.find(p => p.id === photoId)!.filename)" alt="" objectFit="contain" />
+            </div>
+            <div class="side-by-side-controls">
+              <Button
+                icon="pi pi-eye-slash"
+                label="Ausblenden"
+                :severity="getCuration(photoId) === 'hidden' ? 'danger' : 'secondary'"
+                :outlined="getCuration(photoId) !== 'hidden'"
+                size="small"
+                @click="setCuration(photoId, 'hidden')"
+              />
+              <Button
+                icon="pi pi-heart"
+                label="Favorit"
+                :severity="getCuration(photoId) === 'favorite' ? 'warn' : 'secondary'"
+                :outlined="getCuration(photoId) !== 'favorite'"
+                size="small"
+                @click="setCuration(photoId, 'favorite')"
+              />
             </div>
           </div>
         </div>
+      </div>
 
-        <!-- Grid triage view (3+ photos) -->
-        <div v-else class="compare-body" :class="columnClass">
+      <!-- Grid triage view (3+ photos) -->
+      <div v-else class="compare-scroll">
+        <div class="compare-body" :class="columnClass">
           <div
             v-for="photo in groupPhotos"
             :key="photo.id"
@@ -223,7 +234,6 @@ const columnClass = computed(() => {
                 <i class="pi pi-search-plus"></i>
               </div>
             </div>
-            <!-- Fix #4: Colored, distinct buttons -->
             <div class="compare-photo-controls">
               <Button
                 icon="pi pi-eye-slash"
@@ -245,8 +255,7 @@ const columnClass = computed(() => {
             <div class="compare-photo-name text-sm text-secondary">{{ photo.original_name }}</div>
           </div>
         </div>
-
-        <div v-if="!comparePair" class="compare-footer text-sm text-secondary">
+        <div class="compare-footer text-sm text-secondary">
           Klicke 2 Fotos an, um sie im Detailvergleich nebeneinander zu sehen.
         </div>
       </div>
@@ -258,49 +267,114 @@ const columnClass = computed(() => {
 .compare-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.85);
+  background: #0a0a0a;
   z-index: 1000;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
+  flex-direction: column;
   overflow: hidden;
 }
 
-.compare-panel {
-  background: var(--surface-ground);
-  border-radius: 12px;
-  max-width: 95vw;
-  max-height: 95vh;
-  width: 100%;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
+.compare-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  background: #0a0a0a;
+  flex-shrink: 0;
+  z-index: 10;
 }
 
-.compare-header {
+.compare-header-left {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 1rem 1.5rem;
-  border-bottom: 1px solid var(--surface-border);
-  position: sticky;
-  top: 0;
-  background: var(--surface-ground);
-  z-index: 10;
+}
+
+.compare-title {
+  color: #e5e7eb;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .compare-actions {
   display: flex;
   gap: 0.5rem;
   align-items: center;
+  justify-content: flex-end;
+}
+
+/* Side-by-side fullscreen layout */
+.side-by-side {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+
+.side-by-side-photos {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  min-height: 0;
+}
+
+.side-by-side-item {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #111;
+  transition: opacity 0.2s;
+}
+
+.side-by-side-item.is-hidden {
+  opacity: 0.3;
+}
+
+.side-by-side-item.is-favorite {
+  outline: 3px solid var(--p-yellow-500);
+}
+
+.side-by-side-image {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.side-by-side-image :deep(.heic-image-container) {
+  width: 100%;
+  height: 100%;
+}
+
+.side-by-side-image :deep(img) {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.side-by-side-controls {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  justify-content: center;
+  flex-shrink: 0;
+  background: #111;
+}
+
+/* Grid triage view (3+ photos) */
+.compare-scroll {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .compare-body {
   display: grid;
   gap: 1rem;
-  padding: 1.5rem;
-  flex: 1;
+  padding: 1rem;
 }
 
 .compare-grid-2 { grid-template-columns: repeat(2, 1fr); }
@@ -310,7 +384,7 @@ const columnClass = computed(() => {
 .compare-photo {
   border-radius: 8px;
   overflow: hidden;
-  background: var(--surface-card);
+  background: #1a1a1a;
   transition: opacity 0.2s, box-shadow 0.2s;
 }
 
@@ -365,62 +439,13 @@ const columnClass = computed(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  color: #9ca3af;
 }
 
 .compare-footer {
   padding: 0.75rem 1.5rem;
   text-align: center;
-  border-top: 1px solid var(--surface-border);
-}
-
-/* Side-by-side */
-.side-by-side {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-
-.side-by-side-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.75rem 1.5rem;
-  border-bottom: 1px solid var(--surface-border);
-}
-
-.side-by-side-photos {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  flex: 1;
-  padding: 1rem;
-}
-
-.side-by-side-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  transition: opacity 0.2s;
-}
-
-.side-by-side-item.is-hidden {
-  opacity: 0.3;
-}
-
-.side-by-side-item.is-favorite {
-  box-shadow: 0 0 0 3px var(--p-yellow-500);
-  border-radius: 8px;
-}
-
-.side-by-side-item :deep(img) {
-  width: 100%;
-  max-height: 70vh;
-  object-fit: contain;
-}
-
-.side-by-side-controls {
-  display: flex;
-  gap: 0.5rem;
-  padding: 0.75rem;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  color: #9ca3af;
 }
 </style>
