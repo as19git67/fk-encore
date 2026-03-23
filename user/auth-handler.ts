@@ -40,7 +40,7 @@ export const auth = authHandler<AuthParams, AuthData>(async (params): Promise<Au
   currentToken = token;
 
   try {
-    return validateToken(token);
+    return await validateToken(token);
   } catch {
     throw APIError.unauthenticated("invalid or expired token");
   }

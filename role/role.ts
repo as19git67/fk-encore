@@ -30,7 +30,7 @@ export const createRole = api(
   async (req: CreateRoleRequest): Promise<Role> => {
     requirePermission(getAuthData()!, "roles.create");
     try {
-      return createRoleLogic(req);
+      return await createRoleLogic(req);
     } catch (err: any) {
       if (err.message?.includes("already exists")) {
         throw APIError.alreadyExists(err.message);
@@ -49,7 +49,7 @@ export const getRole = api(
   async ({ id }: { id: number }): Promise<RoleWithUsers> => {
     requirePermission(getAuthData()!, "roles.read");
     try {
-      return getRoleLogic(id);
+      return await getRoleLogic(id);
     } catch (err: any) {
       if (err.message?.includes("not found")) {
         throw APIError.notFound(err.message);
@@ -64,7 +64,7 @@ export const listRoles = api(
   { expose: true, auth: true, method: "GET", path: "/roles" },
   async (): Promise<ListRolesResponse> => {
     requirePermission(getAuthData()!, "roles.list");
-    return listRolesLogic();
+    return await listRolesLogic();
   }
 );
 
@@ -74,7 +74,7 @@ export const updateRole = api(
   async (req: UpdateRoleRequest): Promise<Role> => {
     requirePermission(getAuthData()!, "roles.update");
     try {
-      return updateRoleLogic(req);
+      return await updateRoleLogic(req);
     } catch (err: any) {
       if (err.message?.includes("not found")) {
         throw APIError.notFound(err.message);
@@ -93,7 +93,7 @@ export const deleteRole = api(
   async ({ id }: { id: number }): Promise<DeleteResponse> => {
     requirePermission(getAuthData()!, "roles.delete");
     try {
-      return deleteRoleLogic(id);
+      return await deleteRoleLogic(id);
     } catch (err: any) {
       if (err.message?.includes("not found")) {
         throw APIError.notFound(err.message);
@@ -111,7 +111,7 @@ export const listPermissions = api(
   { expose: true, auth: true, method: "GET", path: "/permissions" },
   async (): Promise<ListPermissionsResponse> => {
     requirePermission(getAuthData()!, "roles.read");
-    return listPermissionsLogic();
+    return await listPermissionsLogic();
   }
 );
 
@@ -121,7 +121,7 @@ export const assignPermission = api(
   async (req: AssignPermissionRequest): Promise<RolePermissionsResponse> => {
     requirePermission(getAuthData()!, "roles.update");
     try {
-      return assignPermissionLogic(req.roleId, req.permissionId);
+      return await assignPermissionLogic(req.roleId, req.permissionId);
     } catch (err: any) {
       if (err.message?.includes("not found")) {
         throw APIError.notFound(err.message);
@@ -140,7 +140,7 @@ export const revokePermission = api(
   async ({ roleId, permissionId }: { roleId: number; permissionId: number }): Promise<DeleteResponse> => {
     requirePermission(getAuthData()!, "roles.update");
     try {
-      return revokePermissionLogic(roleId, permissionId);
+      return await revokePermissionLogic(roleId, permissionId);
     } catch (err: any) {
       if (err.message?.includes("does not exist")) {
         throw APIError.notFound(err.message);

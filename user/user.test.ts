@@ -10,18 +10,18 @@ import {
 } from "./user.service";
 
 // Clean up tables before each test
-beforeEach(() => {
-  db.delete(rolePermissions).run();
-  db.delete(userRoles).run();
-  db.delete(sessions).run();
-  db.delete(users).run();
-  db.delete(permissions).run();
-  db.delete(roles).run();
+beforeEach(async () => {
+  await db.delete(rolePermissions);
+  await db.delete(userRoles);
+  await db.delete(sessions);
+  await db.delete(users);
+  await db.delete(permissions);
+  await db.delete(roles);
 });
 
 describe("User Service", () => {
-  it("should create a user", () => {
-    const user = createUserLogic({
+  it("should create a user", async () => {
+    const user = await createUserLogic({
       email: "test@example.com",
       name: "Test User",
       password: "securepassword123",
@@ -35,34 +35,34 @@ describe("User Service", () => {
     expect((user as any).password_hash).toBeUndefined();
   });
 
-  it("should get a user by ID", () => {
-    const created = createUserLogic({
+  it("should get a user by ID", async () => {
+    const created = await createUserLogic({
       email: "get@example.com",
       name: "Get User",
       password: "password",
     });
 
-    const fetched = getUserLogic(created.id);
+    const fetched = await getUserLogic(created.id);
     expect(fetched.id).toBe(created.id);
     expect(fetched.email).toBe(created.email);
   });
 
-  it("should list users", () => {
-    createUserLogic({ email: "a@example.com", name: "A", password: "pw" });
-    createUserLogic({ email: "b@example.com", name: "B", password: "pw" });
+  it("should list users", async () => {
+    await createUserLogic({ email: "a@example.com", name: "A", password: "pw" });
+    await createUserLogic({ email: "b@example.com", name: "B", password: "pw" });
 
-    const result = listUsersLogic();
+    const result = await listUsersLogic();
     expect(result.users).toHaveLength(2);
   });
 
-  it("should update a user", () => {
-    const created = createUserLogic({
+  it("should update a user", async () => {
+    const created = await createUserLogic({
       email: "update@example.com",
       name: "Before Update",
       password: "password",
     });
 
-    const updated = updateUserLogic({
+    const updated = await updateUserLogic({
       id: created.id,
       name: "After Update",
     });
@@ -71,29 +71,29 @@ describe("User Service", () => {
     expect(updated.email).toBe("update@example.com");
   });
 
-  it("should delete a user", () => {
-    const created = createUserLogic({
+  it("should delete a user", async () => {
+    const created = await createUserLogic({
       email: "delete@example.com",
       name: "Delete Me",
       password: "password",
     });
 
-    const result = deleteUserLogic(created.id);
+    const result = await deleteUserLogic(created.id);
     expect(result.success).toBe(true);
 
-    expect(() => getUserLogic(created.id)).toThrow("not found");
+    await expect(getUserLogic(created.id)).rejects.toThrow("not found");
   });
 
-  it("should throw on duplicate email", () => {
-    createUserLogic({ email: "dup@example.com", name: "A", password: "pw" });
-    expect(() =>
+  it("should throw on duplicate email", async () => {
+    await createUserLogic({ email: "dup@example.com", name: "A", password: "pw" });
+    await expect(
       createUserLogic({ email: "dup@example.com", name: "B", password: "pw" })
-    ).toThrow();
+    ).rejects.toThrow();
   });
 
-  it("should throw on missing fields", () => {
-    expect(() =>
+  it("should throw on missing fields", async () => {
+    await expect(
       createUserLogic({ email: "", name: "X", password: "pw" })
-    ).toThrow("required");
+    ).rejects.toThrow("required");
   });
 });
