@@ -91,7 +91,7 @@ export const listPasskeys = api(
   { expose: true, auth: true, method: "GET", path: "/auth/passkeys" },
   async (): Promise<ListPasskeysResponse> => {
     const authData = getAuthData()!;
-    return listPasskeysLogic(Number(authData.userID));
+    return await listPasskeysLogic(Number(authData.userID));
   }
 );
 
@@ -101,7 +101,7 @@ export const deletePasskey = api(
   async ({ credentialId }: { credentialId: string }): Promise<DeleteResponse> => {
     const authData = getAuthData()!;
     try {
-      return deletePasskeyLogic(Number(authData.userID), credentialId);
+      return await deletePasskeyLogic(Number(authData.userID), credentialId);
     } catch (err: any) {
       if (err.message?.includes("not found")) {
         throw APIError.notFound(err.message);

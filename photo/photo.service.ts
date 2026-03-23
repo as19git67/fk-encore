@@ -5,6 +5,7 @@ import exifr from "exifr";
 import { exiftool } from "exiftool-vendored";
 import { eq, and, or, sql, inArray } from "drizzle-orm";
 import db from "../db/database";
+import { dbFirst, dbAll, dbExec, dbInsertReturning } from '../db/adapter';
 import type { IncomingMessage } from "http";
 import { pipeline } from "stream/promises";
 import {
@@ -40,6 +41,9 @@ import type {
   FindGroupsResponse,
 } from "../db/types";
 import heicConvert from "heic-convert";
+
+const isPg = process.env.DB_TYPE?.toLowerCase() === 'postgres'
+const nowSql = isPg ? sql`NOW()` : sql`datetime('now')`
 
 export const UPLOAD_DIR = path.resolve(process.env.PHOTO_UPLOAD_DIR || "uploads/photos");
 const INSIGHTFACE_SERVICE_URL = process.env.INSIGHTFACE_SERVICE_URL || "http://localhost:8000";
@@ -110,18 +114,16 @@ async function callEmbeddingServiceUpload(
 }
 
 export async function indexPhotoEmbeddings(userId: number, photoId: number): Promise<void> {
-  const photo = db
-    .select()
-    .from(photos)
-    .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
-    .get();
+  const photo = await dbFirst<typeof photos.$inferSelect>(
+    db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+  );
   if (!photo) return;
 
   const filePath = path.join(UPLOAD_DIR, photo.filename);
   if (!fs.existsSync(filePath)) return;
 
   // Get face IDs for this photo (optional, but good for completeness if we have them)
-  const photoFaces = db.select({ id: faces.id }).from(faces).where(eq(faces.photo_id, photoId)).all();
+  const photoFaces = await dbAll<{ id: number }>(db.select({ id: faces.id }).from(faces).where(eq(faces.photo_id, photoId)));
   const faceIds = photoFaces.map(f => f.id.toString());
 
   await callEmbeddingServiceUpload(photoId.toString(), filePath, {
@@ -136,11 +138,9 @@ export async function indexPhotoFaces(userId: number, photoId: number, resetIgno
     return;
   }
 
-  const photo = db
-    .select()
-    .from(photos)
-    .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
-    .get();
+  const photo = await dbFirst<typeof photos.$inferSelect>(
+    db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+  );
   if (!photo) return;
 
   const filePath = path.join(UPLOAD_DIR, photo.filename);
@@ -168,15 +168,15 @@ export async function indexPhotoFaces(userId: number, photoId: number, resetIgno
   }
 
   // Get existing ignored faces for this photo to preserve them (if not resetting)
-  const ignoredFaces = resetIgnored ? [] : db.select().from(faces).where(and(eq(faces.photo_id, photoId), eq(faces.ignored, true))).all();
+  const ignoredFaces = resetIgnored ? [] : await dbAll<typeof faces.$inferSelect>(db.select().from(faces).where(and(eq(faces.photo_id, photoId), eq(faces.ignored, true))));
 
   // Remove faces for this photo
   if (resetIgnored) {
     // Remove ALL faces (including ignored ones)
-    db.delete(faces).where(eq(faces.photo_id, photoId)).run();
+    await dbExec(db.delete(faces).where(eq(faces.photo_id, photoId)));
   } else {
     // Only remove non-ignored faces
-    db.delete(faces).where(and(eq(faces.photo_id, photoId), eq(faces.ignored, false))).run();
+    await dbExec(db.delete(faces).where(and(eq(faces.photo_id, photoId), eq(faces.ignored, false))));
   }
 
   try {
@@ -212,37 +212,33 @@ export async function indexPhotoFaces(userId: number, photoId: number, resetIgno
       let personId = match?.personId;
       if (!personId) {
         // Create new person
-        const newPerson = db
-          .insert(persons)
-          .values({
-            user_id: userId,
-            name: "Unbenannt",
-          })
-          .returning()
-          .get();
-        personId = newPerson.id;
+        const newPerson = await dbInsertReturning<typeof persons.$inferSelect>(
+          db.insert(persons).values({ user_id: userId, name: "Unbenannt" }).returning()
+        );
+        personId = newPerson!.id;
       }
 
-      const faceResult = db.insert(faces)
-        .values({
-          user_id: userId,
-          photo_id: photoId,
-          bbox: JSON.stringify(bbox),
-          embedding: JSON.stringify(embedding),
-          person_id: personId,
-          quality: 100, 
-        })
-        .returning()
-        .get();
+      const faceResult = await dbInsertReturning<typeof faces.$inferSelect>(
+        db.insert(faces)
+          .values({
+            user_id: userId,
+            photo_id: photoId,
+            bbox: JSON.stringify(bbox),
+            embedding: JSON.stringify(embedding),
+            person_id: personId,
+            quality: 100,
+          })
+          .returning()
+      );
 
       // Set cover_face_id if not set for person OR if it refers to a non-existent face
-      const currentPerson = db.select().from(persons).where(eq(persons.id, personId)).get();
+      const currentPerson = await dbFirst<typeof persons.$inferSelect>(db.select().from(persons).where(eq(persons.id, personId)));
       let needsCoverUpdate = false;
       if (currentPerson) {
           if (!currentPerson.cover_face_id) {
               needsCoverUpdate = true;
           } else {
-              const coverFaceExists = db.select({ id: faces.id }).from(faces).where(eq(faces.id, currentPerson.cover_face_id)).get();
+              const coverFaceExists = await dbFirst<{ id: number }>(db.select({ id: faces.id }).from(faces).where(eq(faces.id, currentPerson.cover_face_id)));
               if (!coverFaceExists) {
                   needsCoverUpdate = true;
               }
@@ -250,14 +246,14 @@ export async function indexPhotoFaces(userId: number, photoId: number, resetIgno
       }
 
       if (needsCoverUpdate) {
-          db.update(persons).set({ 
-              cover_face_id: faceResult.id,
-              updated_at: sql`datetime('now')`
-          }).where(eq(persons.id, personId)).run();
+          await dbExec(db.update(persons).set({
+              cover_face_id: faceResult!.id,
+              updated_at: new Date().toISOString(),
+          }).where(eq(persons.id, personId)));
       } else {
-          db.update(persons).set({ 
-              updated_at: sql`datetime('now')`
-          }).where(eq(persons.id, personId)).run();
+          await dbExec(db.update(persons).set({
+              updated_at: new Date().toISOString(),
+          }).where(eq(persons.id, personId)));
       }
     }
   } catch (err) {
@@ -316,11 +312,9 @@ export async function uploadPhotoStream(
   const takenAt = await getExifDate(filePath);
 
   // Check for duplicate for this user
-  const existing = db
-    .select()
-    .from(photos)
-    .where(and(eq(photos.user_id, userId), eq(photos.hash, digest)))
-    .get();
+  const existing = await dbFirst<typeof photos.$inferSelect>(
+    db.select().from(photos).where(and(eq(photos.user_id, userId), eq(photos.hash, digest)))
+  );
 
   if (existing) {
     // Delete the temporary file
@@ -330,9 +324,8 @@ export async function uploadPhotoStream(
     throw new Error("PHOTO_ALREADY_EXISTS");
   }
 
-  const row = db
-    .insert(photos)
-    .values({
+  const row = await dbInsertReturning<typeof photos.$inferSelect>(
+    db.insert(photos).values({
       user_id: userId,
       filename: filename,
       original_name: originalName,
@@ -340,34 +333,33 @@ export async function uploadPhotoStream(
       size: size,
       hash: digest,
       taken_at: takenAt,
-    })
-    .returning()
-    .get();
+    }).returning()
+  );
 
   if (ENABLE_LOCAL_FACES) {
     // Run face detection in background
-    indexPhotoFaces(userId, row.id).catch(err => {
+    indexPhotoFaces(userId, row!.id).catch(err => {
         console.error("Face indexing error:", err);
     });
   }
 
   // Run embedding generation in background, then re-group similar photos
-  indexPhotoEmbeddings(userId, row.id)
+  indexPhotoEmbeddings(userId, row!.id)
     .then(() => findPhotoGroupsLogic(userId))
     .catch(err => {
       console.error("Embedding/grouping error:", err);
     });
 
   return {
-    id: row.id,
-    user_id: row.user_id,
-    filename: row.filename,
-    original_name: row.original_name,
-    mime_type: row.mime_type,
-    size: row.size,
-    hash: row.hash ?? undefined,
-    taken_at: row.taken_at ?? undefined,
-    created_at: row.created_at ?? "",
+    id: row!.id,
+    user_id: row!.user_id,
+    filename: row!.filename,
+    original_name: row!.original_name,
+    mime_type: row!.mime_type,
+    size: row!.size,
+    hash: row!.hash ?? undefined,
+    taken_at: row!.taken_at ?? undefined,
+    created_at: row!.created_at ?? "",
   };
 }
 
@@ -378,13 +370,11 @@ export async function uploadPhotoLogic(
   const digest = crypto.createHash('sha256').update(file.data).digest('hex');
 
   // Check for duplicate for this user
-  const existing = db
-    .select()
-    .from(photos)
-    .where(and(eq(photos.user_id, userId), eq(photos.hash, digest)))
-    .get();
+  const existing2 = await dbFirst<typeof photos.$inferSelect>(
+    db.select().from(photos).where(and(eq(photos.user_id, userId), eq(photos.hash, digest)))
+  );
 
-  if (existing) {
+  if (existing2) {
     throw new Error("PHOTO_ALREADY_EXISTS");
   }
 
@@ -396,9 +386,8 @@ export async function uploadPhotoLogic(
   // Extraction of EXIF data
   const takenAt = await getExifDate(filePath);
 
-  const row = db
-    .insert(photos)
-    .values({
+  const row2 = await dbInsertReturning<typeof photos.$inferSelect>(
+    db.insert(photos).values({
       user_id: userId,
       filename: filename,
       original_name: file.name,
@@ -406,59 +395,63 @@ export async function uploadPhotoLogic(
       size: file.data.length,
       hash: digest,
       taken_at: takenAt,
-    })
-    .returning()
-    .get();
+    }).returning()
+  );
 
   if (ENABLE_LOCAL_FACES) {
     // Run face detection in background
-    indexPhotoFaces(userId, row.id).catch(err => {
+    indexPhotoFaces(userId, row2!.id).catch(err => {
         console.error("Face indexing error:", err);
     });
   }
 
   // Run embedding generation in background, then re-group similar photos
-  indexPhotoEmbeddings(userId, row.id)
+  indexPhotoEmbeddings(userId, row2!.id)
     .then(() => findPhotoGroupsLogic(userId))
     .catch(err => {
       console.error("Embedding/grouping error:", err);
     });
 
   return {
-    id: row.id,
-    user_id: row.user_id,
-    filename: row.filename,
-    original_name: row.original_name,
-    mime_type: row.mime_type,
-    size: row.size,
-    hash: row.hash ?? undefined,
-    taken_at: row.taken_at ?? undefined,
-    created_at: row.created_at ?? "",
+    id: row2!.id,
+    user_id: row2!.user_id,
+    filename: row2!.filename,
+    original_name: row2!.original_name,
+    mime_type: row2!.mime_type,
+    size: row2!.size,
+    hash: row2!.hash ?? undefined,
+    taken_at: row2!.taken_at ?? undefined,
+    created_at: row2!.created_at ?? "",
   };
 }
 
-export function listPhotosLogic(userId: number, showHidden: boolean = false): ListPhotosResponse {
-  const rows = db
-    .select({
-      id: photos.id,
-      user_id: photos.user_id,
-      filename: photos.filename,
-      original_name: photos.original_name,
-      mime_type: photos.mime_type,
-      size: photos.size,
-      hash: photos.hash,
-      taken_at: photos.taken_at,
-      created_at: photos.created_at,
-      curation_status: photoCuration.status,
-    })
-    .from(photos)
-    .leftJoin(
-      photoCuration,
-      and(eq(photos.id, photoCuration.photo_id), eq(photoCuration.user_id, userId))
-    )
-    .where(eq(photos.user_id, userId))
-    .orderBy(sql`COALESCE(${photos.taken_at}, ${photos.created_at}) DESC`)
-    .all();
+export async function listPhotosLogic(userId: number, showHidden: boolean = false): Promise<ListPhotosResponse> {
+  const rows = await dbAll<{
+    id: number; user_id: number; filename: string; original_name: string;
+    mime_type: string; size: number; hash: string | null; taken_at: string | null;
+    created_at: string | null; curation_status: string | null;
+  }>(
+    db
+      .select({
+        id: photos.id,
+        user_id: photos.user_id,
+        filename: photos.filename,
+        original_name: photos.original_name,
+        mime_type: photos.mime_type,
+        size: photos.size,
+        hash: photos.hash,
+        taken_at: photos.taken_at,
+        created_at: photos.created_at,
+        curation_status: photoCuration.status,
+      })
+      .from(photos)
+      .leftJoin(
+        photoCuration,
+        and(eq(photos.id, photoCuration.photo_id), eq(photoCuration.user_id, userId))
+      )
+      .where(eq(photos.user_id, userId))
+      .orderBy(sql`COALESCE(${photos.taken_at}, ${photos.created_at}) DESC`)
+  );
 
   const filtered = showHidden ? rows : rows.filter((r) => (r.curation_status ?? "visible") !== "hidden");
 
@@ -478,35 +471,32 @@ export function listPhotosLogic(userId: number, showHidden: boolean = false): Li
   };
 }
 
-export function deletePhotoLogic(userId: number, photoId: number): DeleteResponse {
-  const photo = db
-    .select()
-    .from(photos)
-    .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
-    .get();
+export async function deletePhotoLogic(userId: number, photoId: number): Promise<DeleteResponse> {
+  const photo = await dbFirst<typeof photos.$inferSelect>(
+    db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+  );
 
   if (!photo) {
     throw new Error("Photo not found or unauthorized");
   }
 
   // Soft-delete: set curation status to 'hidden'
-  db.insert(photoCuration)
-    .values({ user_id: userId, photo_id: photoId, status: "hidden" })
-    .onConflictDoUpdate({
-      target: [photoCuration.user_id, photoCuration.photo_id],
-      set: { status: "hidden", updated_at: sql`(datetime('now'))` },
-    })
-    .run();
+  await dbExec(
+    db.insert(photoCuration)
+      .values({ user_id: userId, photo_id: photoId, status: "hidden" })
+      .onConflictDoUpdate({
+        target: [photoCuration.user_id, photoCuration.photo_id],
+        set: { status: "hidden", updated_at: new Date().toISOString() },
+      })
+  );
 
   return { success: true, message: "Photo hidden" };
 }
 
-export function hardDeletePhotoLogic(userId: number, photoId: number): DeleteResponse {
-  const photo = db
-    .select()
-    .from(photos)
-    .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
-    .get();
+export async function hardDeletePhotoLogic(userId: number, photoId: number): Promise<DeleteResponse> {
+  const photo = await dbFirst<typeof photos.$inferSelect>(
+    db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+  );
 
   if (!photo) {
     throw new Error("Photo not found or unauthorized");
@@ -519,21 +509,19 @@ export function hardDeletePhotoLogic(userId: number, photoId: number): DeleteRes
   }
 
   // Hard delete from DB (cascades to curation, faces, album_photos, group_members)
-  db.delete(photos).where(eq(photos.id, photoId)).run();
+  await dbExec(db.delete(photos).where(eq(photos.id, photoId)));
 
   return { success: true, message: "Photo permanently deleted" };
 }
 
-export function updatePhotoCurationLogic(
+export async function updatePhotoCurationLogic(
   userId: number,
   photoId: number,
   status: CurationStatus
-): { success: boolean } {
-  const photo = db
-    .select({ id: photos.id })
-    .from(photos)
-    .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
-    .get();
+): Promise<{ success: boolean }> {
+  const photo = await dbFirst<{ id: number }>(
+    db.select({ id: photos.id }).from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+  );
 
   if (!photo) {
     throw new Error("Photo not found or unauthorized");
@@ -541,38 +529,35 @@ export function updatePhotoCurationLogic(
 
   if (status === "visible") {
     // Remove the curation row entirely (visible is the default)
-    db.delete(photoCuration)
-      .where(and(eq(photoCuration.user_id, userId), eq(photoCuration.photo_id, photoId)))
-      .run();
+    await dbExec(
+      db.delete(photoCuration)
+        .where(and(eq(photoCuration.user_id, userId), eq(photoCuration.photo_id, photoId)))
+    );
   } else {
-    db.insert(photoCuration)
-      .values({ user_id: userId, photo_id: photoId, status })
-      .onConflictDoUpdate({
-        target: [photoCuration.user_id, photoCuration.photo_id],
-        set: { status, updated_at: sql`(datetime('now'))` },
-      })
-      .run();
+    await dbExec(
+      db.insert(photoCuration)
+        .values({ user_id: userId, photo_id: photoId, status })
+        .onConflictDoUpdate({
+          target: [photoCuration.user_id, photoCuration.photo_id],
+          set: { status, updated_at: new Date().toISOString() },
+        })
+    );
   }
 
   return { success: true };
 }
 
-export function getPhotosToRefreshMetadataLogic(userId: number): { ids: number[] } {
-  const rows = db
-    .select({ id: photos.id })
-    .from(photos)
-    .where(eq(photos.user_id, userId))
-    .all();
-
+export async function getPhotosToRefreshMetadataLogic(userId: number): Promise<{ ids: number[] }> {
+  const rows = await dbAll<{ id: number }>(
+    db.select({ id: photos.id }).from(photos).where(eq(photos.user_id, userId))
+  );
   return { ids: rows.map((r) => r.id) };
 }
 
 export async function refreshPhotoMetadataLogic(userId: number, photoId: number): Promise<{ success: boolean; taken_at?: string }> {
-  const photo = db
-    .select()
-    .from(photos)
-    .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
-    .get();
+  const photo = await dbFirst<typeof photos.$inferSelect>(
+    db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+  );
 
   if (!photo) {
     throw new Error("Photo not found or unauthorized");
@@ -586,10 +571,7 @@ export async function refreshPhotoMetadataLogic(userId: number, photoId: number)
   const takenAt = await getExifDate(filePath);
 
   // Always update, even if takenAt is null (to sync with current logic if it was different before)
-  db.update(photos)
-    .set({ taken_at: takenAt })
-    .where(eq(photos.id, photoId))
-    .run();
+  await dbExec(db.update(photos).set({ taken_at: takenAt }).where(eq(photos.id, photoId)));
 
   return { success: true, taken_at: takenAt ?? undefined };
 }
@@ -599,11 +581,9 @@ export async function updatePhotoDateLogic(
   photoId: number,
   takenAt: string
 ): Promise<{ success: boolean; taken_at: string }> {
-  const photo = db
-    .select()
-    .from(photos)
-    .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
-    .get();
+  const photo = await dbFirst<typeof photos.$inferSelect>(
+    db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+  );
 
   if (!photo) {
     throw new Error("Photo not found or unauthorized");
@@ -615,10 +595,7 @@ export async function updatePhotoDateLogic(
   }
 
   // 1. Update database
-  db.update(photos)
-    .set({ taken_at: takenAt })
-    .where(eq(photos.id, photoId))
-    .run();
+  await dbExec(db.update(photos).set({ taken_at: takenAt }).where(eq(photos.id, photoId)));
 
   // 2. Update file metadata
   try {
@@ -673,37 +650,30 @@ export async function convertHeicToJpeg(filePath: string): Promise<Buffer> {
 
 // ---------- Albums ----------
 
-export function createAlbumLogic(userId: number, req: CreateAlbumRequest): Album {
-  const row = db
-    .insert(albums)
-    .values({
-      user_id: userId,
-      name: req.name,
-    })
-    .returning()
-    .get();
+export async function createAlbumLogic(userId: number, req: CreateAlbumRequest): Promise<Album> {
+  const row = await dbInsertReturning<typeof albums.$inferSelect>(
+    db.insert(albums).values({ user_id: userId, name: req.name }).returning()
+  );
 
   return {
-    id: row.id,
-    user_id: row.user_id,
-    name: row.name,
-    created_at: row.created_at ?? "",
-    updated_at: row.updated_at ?? "",
+    id: row!.id,
+    user_id: row!.user_id,
+    name: row!.name,
+    created_at: row!.created_at ?? "",
+    updated_at: row!.updated_at ?? "",
   };
 }
 
-export function listAlbumsLogic(userId: number): ListAlbumsResponse {
+export async function listAlbumsLogic(userId: number): Promise<ListAlbumsResponse> {
   // Albums owned by user OR shared with user
-  const sharedAlbumIds = db
-    .select({ album_id: albumShares.album_id })
-    .from(albumShares)
-    .where(eq(albumShares.user_id, userId))
-    .all()
-    .map((s) => s.album_id);
+  const sharedAlbumIdsRows = await dbAll<{ album_id: number }>(
+    db.select({ album_id: albumShares.album_id }).from(albumShares).where(eq(albumShares.user_id, userId))
+  );
+  const sharedAlbumIds = sharedAlbumIdsRows.map((s) => s.album_id);
 
-  let query = db.select().from(albums).where(or(eq(albums.user_id, userId), sharedAlbumIds.length > 0 ? inArray(albums.id, sharedAlbumIds) : undefined));
-
-  const rows = query.all();
+  const rows = await dbAll<typeof albums.$inferSelect>(
+    db.select().from(albums).where(or(eq(albums.user_id, userId), sharedAlbumIds.length > 0 ? inArray(albums.id, sharedAlbumIds) : undefined))
+  );
 
   return {
     albums: rows.map((r) => ({
@@ -716,8 +686,10 @@ export function listAlbumsLogic(userId: number): ListAlbumsResponse {
   };
 }
 
-export function getAlbumLogic(userId: number, albumId: number): AlbumWithPhotos {
-  const album = db.select().from(albums).where(eq(albums.id, albumId)).get();
+export async function getAlbumLogic(userId: number, albumId: number): Promise<AlbumWithPhotos> {
+  const album = await dbFirst<typeof albums.$inferSelect>(
+    db.select().from(albums).where(eq(albums.id, albumId))
+  );
 
   if (!album) {
     throw new Error("Album not found");
@@ -725,32 +697,34 @@ export function getAlbumLogic(userId: number, albumId: number): AlbumWithPhotos 
 
   // Check access
   const isOwner = album.user_id === userId;
-  const share = db
-    .select()
-    .from(albumShares)
-    .where(and(eq(albumShares.album_id, albumId), eq(albumShares.user_id, userId)))
-    .get();
+  const share = await dbFirst<typeof albumShares.$inferSelect>(
+    db.select().from(albumShares).where(and(eq(albumShares.album_id, albumId), eq(albumShares.user_id, userId)))
+  );
 
   if (!isOwner && !share) {
     throw new Error("Unauthorized access to album");
   }
 
-  const photoRows = db
-    .select({
-      id: photos.id,
-      user_id: photos.user_id,
-      filename: photos.filename,
-      original_name: photos.original_name,
-      mime_type: photos.mime_type,
-      size: photos.size,
-      hash: photos.hash,
-      taken_at: photos.taken_at,
-      created_at: photos.created_at,
-    })
-    .from(photos)
-    .innerJoin(albumPhotos, eq(albumPhotos.photo_id, photos.id))
-    .where(eq(albumPhotos.album_id, albumId))
-    .all();
+  const photoRows = await dbAll<{
+    id: number; user_id: number; filename: string; original_name: string;
+    mime_type: string; size: number; hash: string | null; taken_at: string | null; created_at: string | null;
+  }>(
+    db
+      .select({
+        id: photos.id,
+        user_id: photos.user_id,
+        filename: photos.filename,
+        original_name: photos.original_name,
+        mime_type: photos.mime_type,
+        size: photos.size,
+        hash: photos.hash,
+        taken_at: photos.taken_at,
+        created_at: photos.created_at,
+      })
+      .from(photos)
+      .innerJoin(albumPhotos, eq(albumPhotos.photo_id, photos.id))
+      .where(eq(albumPhotos.album_id, albumId))
+  );
 
   return {
     id: album.id,
@@ -772,28 +746,29 @@ export function getAlbumLogic(userId: number, albumId: number): AlbumWithPhotos 
   };
 }
 
-export function updateAlbumLogic(userId: number, req: UpdateAlbumRequest): Album {
-  const album = db.select().from(albums).where(eq(albums.id, req.id)).get();
+export async function updateAlbumLogic(userId: number, req: UpdateAlbumRequest): Promise<Album> {
+  const album = await dbFirst<typeof albums.$inferSelect>(
+    db.select().from(albums).where(eq(albums.id, req.id))
+  );
   if (!album) throw new Error("Album not found");
 
   // Check write access
   const isOwner = album.user_id === userId;
-  const share = db
-    .select()
-    .from(albumShares)
-    .where(and(eq(albumShares.album_id, req.id), eq(albumShares.user_id, userId)))
-    .get();
+  const share = await dbFirst<typeof albumShares.$inferSelect>(
+    db.select().from(albumShares).where(and(eq(albumShares.album_id, req.id), eq(albumShares.user_id, userId)))
+  );
 
   if (!isOwner && (!share || share.access_level !== "write")) {
     throw new Error("Unauthorized to update album");
   }
 
-  db.update(albums)
-    .set({ name: req.name, updated_at: sql`datetime('now')` })
-    .where(eq(albums.id, req.id))
-    .run();
+  await dbExec(
+    db.update(albums).set({ name: req.name, updated_at: new Date().toISOString() }).where(eq(albums.id, req.id))
+  );
 
-  const updated = db.select().from(albums).where(eq(albums.id, req.id)).get()!;
+  const updated = (await dbFirst<typeof albums.$inferSelect>(
+    db.select().from(albums).where(eq(albums.id, req.id))
+  ))!;
   return {
     id: updated.id,
     user_id: updated.user_id,
@@ -803,29 +778,31 @@ export function updateAlbumLogic(userId: number, req: UpdateAlbumRequest): Album
   };
 }
 
-export function deleteAlbumLogic(userId: number, albumId: number): DeleteResponse {
-  const album = db.select().from(albums).where(eq(albums.id, albumId)).get();
+export async function deleteAlbumLogic(userId: number, albumId: number): Promise<DeleteResponse> {
+  const album = await dbFirst<typeof albums.$inferSelect>(
+    db.select().from(albums).where(eq(albums.id, albumId))
+  );
   if (!album) throw new Error("Album not found");
 
   if (album.user_id !== userId) {
     throw new Error("Only owner can delete album");
   }
 
-  db.delete(albums).where(eq(albums.id, albumId)).run();
+  await dbExec(db.delete(albums).where(eq(albums.id, albumId)));
   return { success: true, message: "Album deleted" };
 }
 
-export function addPhotoToAlbumLogic(userId: number, req: AddPhotoToAlbumRequest): { success: boolean } {
-  const album = db.select().from(albums).where(eq(albums.id, req.albumId)).get();
+export async function addPhotoToAlbumLogic(userId: number, req: AddPhotoToAlbumRequest): Promise<{ success: boolean }> {
+  const album = await dbFirst<typeof albums.$inferSelect>(
+    db.select().from(albums).where(eq(albums.id, req.albumId))
+  );
   if (!album) throw new Error("Album not found");
 
   // Check write access
   const isOwner = album.user_id === userId;
-  const share = db
-    .select()
-    .from(albumShares)
-    .where(and(eq(albumShares.album_id, req.albumId), eq(albumShares.user_id, userId)))
-    .get();
+  const share = await dbFirst<typeof albumShares.$inferSelect>(
+    db.select().from(albumShares).where(and(eq(albumShares.album_id, req.albumId), eq(albumShares.user_id, userId)))
+  );
 
   if (!isOwner && (!share || share.access_level !== "write")) {
     throw new Error("Unauthorized to add photos to album");
@@ -833,36 +810,33 @@ export function addPhotoToAlbumLogic(userId: number, req: AddPhotoToAlbumRequest
 
   // Photo must be accessible to user (either owner or album is shared - wait, photo ownership is separate)
   // For now, let's say user can only add their OWN photos to albums they have write access to.
-  const photo = db.select().from(photos).where(eq(photos.id, req.photoId)).get();
+  const photo = await dbFirst<typeof photos.$inferSelect>(
+    db.select().from(photos).where(eq(photos.id, req.photoId))
+  );
   if (!photo || photo.user_id !== userId) {
     throw new Error("Photo not found or not owned by user");
   }
 
-  db.insert(albumPhotos)
-    .values({
-      album_id: req.albumId,
-      photo_id: req.photoId,
-    })
-    .run();
+  await dbExec(
+    db.insert(albumPhotos).values({ album_id: req.albumId, photo_id: req.photoId })
+  );
 
   return { success: true };
 }
 
-export function shareAlbumLogic(userId: number, req: ShareAlbumRequest): { success: boolean } {
-  const album = db.select().from(albums).where(eq(albums.id, req.albumId)).get();
+export async function shareAlbumLogic(userId: number, req: ShareAlbumRequest): Promise<{ success: boolean }> {
+  const album = await dbFirst<typeof albums.$inferSelect>(
+    db.select().from(albums).where(eq(albums.id, req.albumId))
+  );
   if (!album) throw new Error("Album not found");
 
   if (album.user_id !== userId) {
     throw new Error("Only owner can share album");
   }
 
-  db.insert(albumShares)
-    .values({
-      album_id: req.albumId,
-      user_id: req.userId,
-      access_level: req.accessLevel,
-    })
-    .run();
+  await dbExec(
+    db.insert(albumShares).values({ album_id: req.albumId, user_id: req.userId, access_level: req.accessLevel })
+  );
   return { success: true };
 }
 
@@ -870,14 +844,12 @@ async function findBestPersonMatch(
   userId: number,
   embedding: number[]
 ): Promise<{ personId: number; distance: number } | null> {
-  const allFaces = db
-    .select({
-      person_id: faces.person_id,
-      embedding: faces.embedding,
-    })
-    .from(faces)
-    .where(and(eq(faces.user_id, userId), sql`${faces.person_id} IS NOT NULL`, eq(faces.ignored, false)))
-    .all();
+  const allFaces = await dbAll<{ person_id: number | null; embedding: string }>(
+    db
+      .select({ person_id: faces.person_id, embedding: faces.embedding })
+      .from(faces)
+      .where(and(eq(faces.user_id, userId), sql`${faces.person_id} IS NOT NULL`, eq(faces.ignored, false)))
+  );
 
   // Group embeddings by person
   const personEmbeddings: Record<number, number[][]> = {};
@@ -956,9 +928,12 @@ function calculateOverlap(b1: any, b2: any): number {
   return intersectionArea / unionArea;
 }
 
-export function listPersonsLogic(userId: number): ListPersonsResponse {
-  const rows = db
-    .select({
+export async function listPersonsLogic(userId: number): Promise<ListPersonsResponse> {
+  const rows = await dbAll<{
+    id: number; user_id: number; name: string; cover_face_id: number | null;
+    created_at: string | null; updated_at: string | null; faceCount: number;
+    cover_filename: string | null; cover_bbox: string | null;
+  }>(db.select({
       id: persons.id,
       user_id: persons.user_id,
       name: persons.name,
@@ -1008,7 +983,7 @@ export function listPersonsLogic(userId: number): ListPersonsResponse {
     .from(persons)
     .where(eq(persons.user_id, userId))
     .orderBy(sql`${persons.updated_at} DESC`)
-    .all();
+  ));
 
   return {
     persons: rows.map((r) => ({
@@ -1026,34 +1001,37 @@ export function listPersonsLogic(userId: number): ListPersonsResponse {
   };
 }
 
-export function getPersonDetailsLogic(userId: number, personId: number): PersonDetails {
-  const person = db
-    .select()
-    .from(persons)
-    .where(and(eq(persons.id, personId), eq(persons.user_id, userId)))
-    .get();
+export async function getPersonDetailsLogic(userId: number, personId: number): Promise<PersonDetails> {
+  const person = await dbFirst<typeof persons.$inferSelect>(
+    db.select().from(persons).where(and(eq(persons.id, personId), eq(persons.user_id, userId)))
+  );
   if (!person) throw new Error("Person not found");
 
-  const faceRows = db
-    .select({
-      id: faces.id,
-      user_id: faces.user_id,
-      photo_id: faces.photo_id,
-      bbox: faces.bbox,
-      embedding: faces.embedding,
-      person_id: faces.person_id,
-      quality: faces.quality,
-      ignored: faces.ignored,
-      created_at: faces.created_at,
-      filename: photos.filename,
-      original_name: photos.original_name,
-      taken_at: photos.taken_at,
-    })
-    .from(faces)
-    .innerJoin(photos, eq(faces.photo_id, photos.id))
-    .where(and(eq(faces.person_id, personId), eq(faces.user_id, userId)))
-    .orderBy(sql`COALESCE(julianday(${photos.taken_at}), julianday(${photos.created_at}), 0) DESC`, sql`${faces.id} DESC`)
-    .all();
+  const faceRows = await dbAll<{
+    id: number; user_id: number; photo_id: number; bbox: string; embedding: string;
+    person_id: number | null; quality: number | null; ignored: boolean | null;
+    created_at: string | null; filename: string; original_name: string; taken_at: string | null;
+  }>(
+    db
+      .select({
+        id: faces.id,
+        user_id: faces.user_id,
+        photo_id: faces.photo_id,
+        bbox: faces.bbox,
+        embedding: faces.embedding,
+        person_id: faces.person_id,
+        quality: faces.quality,
+        ignored: faces.ignored,
+        created_at: faces.created_at,
+        filename: photos.filename,
+        original_name: photos.original_name,
+        taken_at: photos.taken_at,
+      })
+      .from(faces)
+      .innerJoin(photos, eq(faces.photo_id, photos.id))
+      .where(and(eq(faces.person_id, personId), eq(faces.user_id, userId)))
+      .orderBy(sql`COALESCE(julianday(${photos.taken_at}), julianday(${photos.created_at}), 0) DESC`, sql`${faces.id} DESC`)
+  );
 
   return {
     id: person.id,
@@ -1084,31 +1062,37 @@ export function getPersonDetailsLogic(userId: number, personId: number): PersonD
   };
 }
 
-export function updatePersonLogic(userId: number, personId: number, name: string): Person & { faceCount: number } {
+export async function updatePersonLogic(userId: number, personId: number, name: string): Promise<Person & { faceCount: number }> {
   if (name.trim().toLowerCase() === "unbenannt") {
     throw new Error("Person kann nicht in 'Unbenannt' umbenannt werden");
   }
 
-  db.update(persons)
-    .set({ name, updated_at: sql`datetime('now')` })
-    .where(and(eq(persons.id, personId), eq(persons.user_id, userId)))
-    .run();
+  await dbExec(
+    db.update(persons)
+      .set({ name, updated_at: new Date().toISOString() })
+      .where(and(eq(persons.id, personId), eq(persons.user_id, userId)))
+  );
 
-  const updated = db
-    .select({
-      id: persons.id,
-      user_id: persons.user_id,
-      name: persons.name,
-      cover_face_id: persons.cover_face_id,
-      created_at: persons.created_at,
-      updated_at: persons.updated_at,
-      faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM faces f WHERE f.person_id = persons.id), 0) AS INTEGER)`,
-      cover_filename: sql<string>`COALESCE((SELECT p.filename FROM photos p INNER JOIN faces f ON f.photo_id = p.id WHERE f.id = persons.cover_face_id LIMIT 1), '')`,
-      cover_bbox: sql<string>`COALESCE((SELECT f.bbox FROM faces f WHERE f.id = persons.cover_face_id LIMIT 1), '')`,
-    })
-    .from(persons)
-    .where(eq(persons.id, personId))
-    .get()!;
+  const updated = (await dbFirst<{
+    id: number; user_id: number; name: string; cover_face_id: number | null;
+    created_at: string | null; updated_at: string | null; faceCount: number;
+    cover_filename: string; cover_bbox: string;
+  }>(
+    db
+      .select({
+        id: persons.id,
+        user_id: persons.user_id,
+        name: persons.name,
+        cover_face_id: persons.cover_face_id,
+        created_at: persons.created_at,
+        updated_at: persons.updated_at,
+        faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM faces f WHERE f.person_id = persons.id), 0) AS INTEGER)`,
+        cover_filename: sql<string>`COALESCE((SELECT p.filename FROM photos p INNER JOIN faces f ON f.photo_id = p.id WHERE f.id = persons.cover_face_id LIMIT 1), '')`,
+        cover_bbox: sql<string>`COALESCE((SELECT f.bbox FROM faces f WHERE f.id = persons.cover_face_id LIMIT 1), '')`,
+      })
+      .from(persons)
+      .where(eq(persons.id, personId))
+  ))!;
 
   return {
     id: updated.id,
@@ -1123,7 +1107,7 @@ export function updatePersonLogic(userId: number, personId: number, name: string
   };
 }
 
-export function mergePersonsLogic(userId: number, req: MergePersonsRequest): { success: boolean } {
+export async function mergePersonsLogic(userId: number, req: MergePersonsRequest): Promise<{ success: boolean }> {
   const targetId = req.targetId;
   const sourceIds = req.sourceIds.filter(id => id !== targetId);
 
@@ -1131,99 +1115,97 @@ export function mergePersonsLogic(userId: number, req: MergePersonsRequest): { s
     return { success: true };
   }
 
-  const target = db
-    .select()
-    .from(persons)
-    .where(and(eq(persons.id, targetId), eq(persons.user_id, userId)))
-    .get();
+  const target = await dbFirst<typeof persons.$inferSelect>(
+    db.select().from(persons).where(and(eq(persons.id, targetId), eq(persons.user_id, userId)))
+  );
   if (!target) throw new Error("Target person not found");
   if (target.name === "Unbenannt") {
     throw new Error("Kann nicht zu einer unbenannten Person zusammenführen");
   }
 
   // Move all faces from source persons to target person
-  db.update(faces)
-    .set({ person_id: targetId })
-    .where(and(inArray(faces.person_id, sourceIds), eq(faces.user_id, userId)))
-    .run();
+  await dbExec(
+    db.update(faces)
+      .set({ person_id: targetId })
+      .where(and(inArray(faces.person_id, sourceIds), eq(faces.user_id, userId)))
+  );
 
   // Update target person's cover face if it doesn't have one
   if (!target.cover_face_id) {
-    const firstFace = db
-      .select({ id: faces.id })
-      .from(faces)
-      .where(and(eq(faces.person_id, targetId), eq(faces.user_id, userId)))
-      .limit(1)
-      .get();
+    const firstFace = await dbFirst<{ id: number }>(
+      db.select({ id: faces.id })
+        .from(faces)
+        .where(and(eq(faces.person_id, targetId), eq(faces.user_id, userId)))
+        .limit(1)
+    );
     if (firstFace) {
-      db.update(persons)
-        .set({ cover_face_id: firstFace.id })
-        .where(eq(persons.id, targetId))
-        .run();
+      await dbExec(
+        db.update(persons).set({ cover_face_id: firstFace.id }).where(eq(persons.id, targetId))
+      );
     }
   }
 
   // Set updated_at for target person
-  db.update(persons)
-    .set({ updated_at: sql`datetime('now')` })
-    .where(eq(persons.id, targetId))
-    .run();
+  await dbExec(
+    db.update(persons).set({ updated_at: new Date().toISOString() }).where(eq(persons.id, targetId))
+  );
 
   // Delete source persons
-  db.delete(persons)
-    .where(and(inArray(persons.id, sourceIds), eq(persons.user_id, userId)))
-    .run();
+  await dbExec(
+    db.delete(persons).where(and(inArray(persons.id, sourceIds), eq(persons.user_id, userId)))
+  );
 
   return { success: true };
 }
 
-export function assignFaceToPersonLogic(
+export async function assignFaceToPersonLogic(
   userId: number,
   faceId: number,
   personId: number
-): { success: boolean } {
-  db.update(faces)
-    .set({ person_id: personId, ignored: false })
-    .where(and(eq(faces.id, faceId), eq(faces.user_id, userId)))
-    .run();
+): Promise<{ success: boolean }> {
+  await dbExec(
+    db.update(faces)
+      .set({ person_id: personId, ignored: false })
+      .where(and(eq(faces.id, faceId), eq(faces.user_id, userId)))
+  );
   return { success: true };
 }
 
-export function ignoreFaceLogic(
+export async function ignoreFaceLogic(
   userId: number,
   faceId: number
-): { success: boolean } {
-  db.update(faces)
-    .set({ ignored: true, person_id: null })
-    .where(and(eq(faces.id, faceId), eq(faces.user_id, userId)))
-    .run();
+): Promise<{ success: boolean }> {
+  await dbExec(
+    db.update(faces)
+      .set({ ignored: true, person_id: null })
+      .where(and(eq(faces.id, faceId), eq(faces.user_id, userId)))
+  );
   return { success: true };
 }
 
-export function ignorePersonFacesLogic(
+export async function ignorePersonFacesLogic(
   userId: number,
   personId: number
-): { success: boolean } {
-  db.update(faces)
-    .set({ ignored: true, person_id: null })
-    .where(and(eq(faces.person_id, personId), eq(faces.user_id, userId)))
-    .run();
+): Promise<{ success: boolean }> {
+  await dbExec(
+    db.update(faces)
+      .set({ ignored: true, person_id: null })
+      .where(and(eq(faces.person_id, personId), eq(faces.user_id, userId)))
+  );
 
   // Also cleanup the person since they no longer have any associated faces
-  cleanupOrphanedPersons(userId);
+  await cleanupOrphanedPersons(userId);
 
   return { success: true };
 }
 
-export function getPhotoFacesLogic(
+export async function getPhotoFacesLogic(
   userId: number,
   photoId: number
-): { faces: Face[] } {
-  const rows = db
-    .select()
-    .from(faces)
-    .where(and(eq(faces.photo_id, photoId), eq(faces.user_id, userId)))
-    .all();
+): Promise<{ faces: Face[] }> {
+  const rows = await dbAll<typeof faces.$inferSelect>(
+    db.select().from(faces).where(and(eq(faces.photo_id, photoId), eq(faces.user_id, userId)))
+  );
 
   return {
     faces: rows.map((r) => ({
@@ -1244,7 +1226,9 @@ export async function reindexPhotoLogic(
   userId: number,
   photoId: number
 ): Promise<{ success: boolean }> {
-  const photo = db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId))).get();
+  const photo = await dbFirst<typeof photos.$inferSelect>(
+    db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+  );
   if (!photo) throw new Error("Photo not found");
 
   await indexPhotoFaces(userId, photoId, true);
@@ -1271,7 +1255,9 @@ export async function reindexAllPhotosLogic(userId: number): Promise<{ count: nu
     throw new Error("Reindex already in progress");
   }
 
-  const allPhotos = db.select({ id: photos.id }).from(photos).where(eq(photos.user_id, userId)).all();
+  const allPhotos = await dbAll<{ id: number }>(
+    db.select({ id: photos.id }).from(photos).where(eq(photos.user_id, userId))
+  );
 
   const state: ReindexState = { inProgress: true, total: allPhotos.length, processed: 0, errors: 0 };
   reindexStateMap.set(userId, state);
@@ -1308,15 +1294,16 @@ export async function reindexAllPhotosLogic(userId: number): Promise<{ count: nu
 /**
  * Remove persons that have no associated faces (orphaned after re-indexing).
  */
-function cleanupOrphanedPersons(userId: number): void {
-  const deleted = db.delete(persons)
-    .where(
-      and(
-        eq(persons.user_id, userId),
-        sql`NOT EXISTS (SELECT 1 FROM faces WHERE faces.person_id = persons.id)`
+async function cleanupOrphanedPersons(userId: number): Promise<void> {
+  const deleted = await dbExec(
+    db.delete(persons)
+      .where(
+        and(
+          eq(persons.user_id, userId),
+          sql`NOT EXISTS (SELECT 1 FROM faces WHERE faces.person_id = persons.id)`
+        )
       )
-    )
-    .run();
+  );
   console.log(`Cleaned up ${deleted.changes} orphaned persons for user ${userId}`);
 }
 
@@ -1347,11 +1334,11 @@ const TIME_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
 
 export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsResponse> {
   // 1. Get all user photos with timestamps
-  const allPhotos = db
-    .select({ id: photos.id, taken_at: photos.taken_at, created_at: photos.created_at })
-    .from(photos)
-    .where(eq(photos.user_id, userId))
-    .all();
+  const allPhotos = await dbAll<{ id: number; taken_at: string | null; created_at: string | null }>(
+    db.select({ id: photos.id, taken_at: photos.taken_at, created_at: photos.created_at })
+      .from(photos)
+      .where(eq(photos.user_id, userId))
+  );
 
   if (allPhotos.length < 2) {
     return { groups_created: 0, total_photos_grouped: 0 };
@@ -1421,33 +1408,29 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
   const groups = Array.from(components.values()).filter((g) => g.length >= 2);
 
   // 6. Delete old un-reviewed groups, preserve reviewed ones
-  const reviewedGroups = db
-    .select({ id: photoGroups.id })
-    .from(photoGroups)
-    .where(and(eq(photoGroups.user_id, userId), sql`${photoGroups.reviewed_at} IS NOT NULL`))
-    .all();
+  const reviewedGroups = await dbAll<{ id: number }>(
+    db.select({ id: photoGroups.id })
+      .from(photoGroups)
+      .where(and(eq(photoGroups.user_id, userId), sql`${photoGroups.reviewed_at} IS NOT NULL`))
+  );
   const reviewedIds = new Set(reviewedGroups.map((g) => g.id));
 
   // Get reviewed group member sets for comparison
   const reviewedMemberSets = new Map<number, Set<number>>();
   for (const gid of reviewedIds) {
-    const members = db
-      .select({ photo_id: photoGroupMembers.photo_id })
-      .from(photoGroupMembers)
-      .where(eq(photoGroupMembers.group_id, gid))
-      .all();
+    const members = await dbAll<{ photo_id: number }>(
+      db.select({ photo_id: photoGroupMembers.photo_id })
+        .from(photoGroupMembers)
+        .where(eq(photoGroupMembers.group_id, gid))
+    );
     reviewedMemberSets.set(gid, new Set(members.map((m) => m.photo_id)));
   }
 
   // Delete un-reviewed groups
-  db.delete(photoGroups)
-    .where(
-      and(
-        eq(photoGroups.user_id, userId),
-        sql`${photoGroups.reviewed_at} IS NULL`
-      )
-    )
-    .run();
+  await dbExec(
+    db.delete(photoGroups)
+      .where(and(eq(photoGroups.user_id, userId), sql`${photoGroups.reviewed_at} IS NULL`))
+  );
 
   // 7. Insert new groups (skip if matching a reviewed group)
   let groupsCreated = 0;
@@ -1494,21 +1477,21 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
       .sort((a, b) => b.sim - a.sim);
 
     // Insert group
-    const group = db
-      .insert(photoGroups)
-      .values({ user_id: userId, cover_photo_id: coverPhotoId })
-      .returning({ id: photoGroups.id })
-      .get();
+    const group = await dbInsertReturning<{ id: number }>(
+      db.insert(photoGroups)
+        .values({ user_id: userId, cover_photo_id: coverPhotoId })
+        .returning({ id: photoGroups.id })
+    );
 
     // Insert members with similarity rank
     for (let rank = 0; rank < ranked.length; rank++) {
-      db.insert(photoGroupMembers)
-        .values({
-          group_id: group.id,
+      await dbExec(
+        db.insert(photoGroupMembers).values({
+          group_id: group!.id,
           photo_id: ranked[rank].photoId,
           similarity_rank: rank,
         })
-        .run();
+      );
     }
 
     groupsCreated++;
@@ -1519,29 +1502,34 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
   return { groups_created: groupsCreated, total_photos_grouped: totalPhotosGrouped };
 }
 
-export function listPhotoGroupsLogic(userId: number): ListGroupsResponse {
-  const groups = db
-    .select({
-      id: photoGroups.id,
-      user_id: photoGroups.user_id,
-      cover_photo_id: photoGroups.cover_photo_id,
-      reviewed_at: photoGroups.reviewed_at,
-      created_at: photoGroups.created_at,
-    })
-    .from(photoGroups)
-    .where(eq(photoGroups.user_id, userId))
-    .orderBy(photoGroups.created_at)
-    .all();
+export async function listPhotoGroupsLogic(userId: number): Promise<ListGroupsResponse> {
+  const groups = await dbAll<{
+    id: number; user_id: number; cover_photo_id: number | null;
+    reviewed_at: string | null; created_at: string | null;
+  }>(
+    db
+      .select({
+        id: photoGroups.id,
+        user_id: photoGroups.user_id,
+        cover_photo_id: photoGroups.cover_photo_id,
+        reviewed_at: photoGroups.reviewed_at,
+        created_at: photoGroups.created_at,
+      })
+      .from(photoGroups)
+      .where(eq(photoGroups.user_id, userId))
+      .orderBy(photoGroups.created_at)
+  );
 
-  const result: PhotoGroup[] = groups.map((g) => {
-    const members = db
-      .select({ photo_id: photoGroupMembers.photo_id })
-      .from(photoGroupMembers)
-      .where(eq(photoGroupMembers.group_id, g.id))
-      .orderBy(photoGroupMembers.similarity_rank)
-      .all();
+  const result: PhotoGroup[] = [];
+  for (const g of groups) {
+    const members = await dbAll<{ photo_id: number }>(
+      db.select({ photo_id: photoGroupMembers.photo_id })
+        .from(photoGroupMembers)
+        .where(eq(photoGroupMembers.group_id, g.id))
+        .orderBy(photoGroupMembers.similarity_rank)
+    );
 
-    return {
+    result.push({
       id: g.id,
       user_id: g.user_id,
       cover_photo_id: g.cover_photo_id ?? undefined,
@@ -1549,35 +1537,39 @@ export function listPhotoGroupsLogic(userId: number): ListGroupsResponse {
       created_at: g.created_at ?? "",
       member_count: members.length,
       photo_ids: members.map((m) => m.photo_id),
-    };
-  });
+    });
+  }
 
   return { groups: result };
 }
 
-export function getNextUnreviewedGroupLogic(userId: number): PhotoGroup | null {
-  const group = db
-    .select({
-      id: photoGroups.id,
-      user_id: photoGroups.user_id,
-      cover_photo_id: photoGroups.cover_photo_id,
-      reviewed_at: photoGroups.reviewed_at,
-      created_at: photoGroups.created_at,
-    })
-    .from(photoGroups)
-    .where(and(eq(photoGroups.user_id, userId), sql`${photoGroups.reviewed_at} IS NULL`))
-    .orderBy(photoGroups.created_at)
-    .limit(1)
-    .get();
+export async function getNextUnreviewedGroupLogic(userId: number): Promise<PhotoGroup | null> {
+  const group = await dbFirst<{
+    id: number; user_id: number; cover_photo_id: number | null;
+    reviewed_at: string | null; created_at: string | null;
+  }>(
+    db
+      .select({
+        id: photoGroups.id,
+        user_id: photoGroups.user_id,
+        cover_photo_id: photoGroups.cover_photo_id,
+        reviewed_at: photoGroups.reviewed_at,
+        created_at: photoGroups.created_at,
+      })
+      .from(photoGroups)
+      .where(and(eq(photoGroups.user_id, userId), sql`${photoGroups.reviewed_at} IS NULL`))
+      .orderBy(photoGroups.created_at)
+      .limit(1)
+  );
 
   if (!group) return null;
 
-  const members = db
-    .select({ photo_id: photoGroupMembers.photo_id })
-    .from(photoGroupMembers)
-    .where(eq(photoGroupMembers.group_id, group.id))
-    .orderBy(photoGroupMembers.similarity_rank)
-    .all();
+  const members = await dbAll<{ photo_id: number }>(
+    db.select({ photo_id: photoGroupMembers.photo_id })
+      .from(photoGroupMembers)
+      .where(eq(photoGroupMembers.group_id, group.id))
+      .orderBy(photoGroupMembers.similarity_rank)
+  );
 
   return {
     id: group.id,
@@ -1590,19 +1582,20 @@ export function getNextUnreviewedGroupLogic(userId: number): PhotoGroup | null {
   };
 }
 
-export function reviewPhotoGroupLogic(userId: number, groupId: number): { success: boolean } {
-  const group = db
-    .select({ id: photoGroups.id })
-    .from(photoGroups)
-    .where(and(eq(photoGroups.id, groupId), eq(photoGroups.user_id, userId)))
-    .get();
+export async function reviewPhotoGroupLogic(userId: number, groupId: number): Promise<{ success: boolean }> {
+  const group = await dbFirst<{ id: number }>(
+    db.select({ id: photoGroups.id })
+      .from(photoGroups)
+      .where(and(eq(photoGroups.id, groupId), eq(photoGroups.user_id, userId)))
+  );
 
   if (!group) throw new Error("Group not found");
 
-  db.update(photoGroups)
-    .set({ reviewed_at: sql`(datetime('now'))` })
-    .where(eq(photoGroups.id, groupId))
-    .run();
+  await dbExec(
+    db.update(photoGroups)
+      .set({ reviewed_at: new Date().toISOString() })
+      .where(eq(photoGroups.id, groupId))
+  );
 
   return { success: true };
 }

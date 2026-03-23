@@ -23,7 +23,7 @@ export const createUser = api(
   { expose: true, method: "POST", path: "/users" },
   async (req: CreateUserRequest): Promise<UserWithRoles> => {
     try {
-      return createUserLogic(req);
+      return await createUserLogic(req);
     } catch (err: any) {
       if (err.message?.includes("already exists")) {
         throw APIError.alreadyExists(err.message);
@@ -42,7 +42,7 @@ export const getUser = api(
   async ({ id }: { id: number }): Promise<UserWithRoles> => {
     requirePermission(getAuthData()!, "users.read");
     try {
-      return getUserLogic(id);
+      return await getUserLogic(id);
     } catch (err: any) {
       if (err.message?.includes("not found")) {
         throw APIError.notFound(err.message);
@@ -57,7 +57,7 @@ export const listUsers = api(
   { expose: true, auth: true, method: "GET", path: "/users" },
   async (): Promise<ListUsersResponse> => {
     requirePermission(getAuthData()!, "users.list");
-    return listUsersLogic();
+    return await listUsersLogic();
   }
 );
 
@@ -67,7 +67,7 @@ export const updateUser = api(
   async (req: UpdateUserRequest): Promise<UserWithRoles> => {
     requirePermission(getAuthData()!, "users.update");
     try {
-      return updateUserLogic(req);
+      return await updateUserLogic(req);
     } catch (err: any) {
       if (err.message?.includes("not found")) {
         throw APIError.notFound(err.message);
@@ -86,7 +86,7 @@ export const changePassword = api(
   async (req: ChangePasswordRequest): Promise<{ success: boolean }> => {
     const authData = getAuthData()!;
     try {
-      changePasswordLogic(Number(authData.userID), req.current_password, req.new_password);
+      await changePasswordLogic(Number(authData.userID), req.current_password, req.new_password);
       return { success: true };
     } catch (err: any) {
       if (err.message?.includes("incorrect")) {
@@ -103,7 +103,7 @@ export const deleteUser = api(
   async ({ id }: { id: number }): Promise<DeleteResponse> => {
     requirePermission(getAuthData()!, "users.delete");
     try {
-      return deleteUserLogic(id);
+      return await deleteUserLogic(id);
     } catch (err: any) {
       if (err.message?.includes("not found")) {
         throw APIError.notFound(err.message);
