@@ -476,10 +476,13 @@ function handleKeydown(e: KeyboardEvent) {
 
   if (e.key === 'ArrowRight') {
     if (selectedIndex.value < personPhotos.value.length - 1) selectedIndex.value++
+    e.preventDefault()
   } else if (e.key === 'ArrowLeft') {
     if (selectedIndex.value > 0) selectedIndex.value--
-  } else if (e.key === 'Escape') {
+    e.preventDefault()
+  } else if (e.key === 'Escape' || e.key === ' ') {
     isFullscreen.value = false
+    e.preventDefault()
   }
 }
 
@@ -655,27 +658,36 @@ onUnmounted(() => {
         <HeicImage v-if="nextPersonPhoto" :src="getPhotoUrl(nextPersonPhoto.filename)" />
       </div>
       <div class="fullscreen-content" @click.stop>
-        <div class="relative flex-1 overflow-hidden flex items-center justify-center">
-            <HeicImage :src="getPhotoUrl(selectedPersonPhoto.filename)" :alt="selectedPersonPhoto.original_name" objectFit="contain">
-                <div class="face-highlight" :style="getFaceHighlightStyle(selectedPersonFace?.bbox)"></div>
-            </HeicImage>
+        <HeicImage :src="getPhotoUrl(selectedPersonPhoto.filename)" :alt="selectedPersonPhoto.original_name" objectFit="contain">
+          <div class="face-highlight" :style="getFaceHighlightStyle(selectedPersonFace?.bbox)"></div>
+        </HeicImage>
+
+        <!-- Top bar: back | date | toolbar -->
+        <div class="fs-topbar">
+          <Button icon="pi pi-arrow-left" class="fs-topbar-btn" rounded text
+            aria-label="Zurück"
+            @click="isFullscreen = false" />
+          <div class="fs-date-bar">{{ formatPhotoDate(selectedPersonPhoto) }}</div>
+          <div class="fs-toolbar">
+            <Button
+              v-if="selectedPersonFace"
+              icon="pi pi-trash"
+              label="Gesicht ignorieren"
+              class="fs-topbar-btn" rounded text
+              severity="danger"
+              aria-label="Gesicht ignorieren"
+              @click.stop="handleIgnoreFace(selectedPersonFace.id)"
+            />
+          </div>
         </div>
-        <div class="fullscreen-nav">
-            <Button icon="pi pi-chevron-left" rounded text @click="selectedIndex > 0 && selectedIndex--" :disabled="selectedIndex === 0" />
-            <div class="fullscreen-info">
-              <div class="fullscreen-title">{{ selectedPersonPhoto.original_name }}</div>
-              <div class="fullscreen-date">{{ formatPhotoDate(selectedPersonPhoto) }}</div>
-              <Button 
-                  v-if="selectedPersonFace"
-                  label="Gesicht ignorieren" 
-                  icon="pi pi-trash" 
-                  class="p-button-danger p-button-text p-button-sm mt-1" 
-                  @click.stop="handleIgnoreFace(selectedPersonFace.id)" 
-              />
-            </div>
-            <Button icon="pi pi-chevron-right" rounded text @click="selectedIndex < personPhotos.length - 1 && selectedIndex++" :disabled="selectedIndex === personPhotos.length - 1" />
-        </div>
-        <Button icon="pi pi-times" class="close-btn" rounded severity="secondary" @click="isFullscreen = false" />
+
+        <!-- Left/right navigation -->
+        <Button icon="pi pi-chevron-left" class="fs-nav-left-right fs-nav-left" rounded text
+          :disabled="selectedIndex === 0"
+          @click="selectedIndex > 0 && selectedIndex--" />
+        <Button icon="pi pi-chevron-right" class="fs-nav-left-right fs-nav-right" rounded text
+          :disabled="selectedIndex === personPhotos.length - 1"
+          @click="selectedIndex < personPhotos.length - 1 && selectedIndex++" />
       </div>
     </div>
 
@@ -985,61 +997,81 @@ onUnmounted(() => {
 /* Fullscreen Viewer */
 .fullscreen-overlay {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   background: var(--p-slate-950);
-  z-index: 1000;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  z-index: 1100;
 }
 
 .fullscreen-content {
   position: relative;
-  width: 95vh;
-  height: 95vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  width: 100%;
+  height: 100%;
 }
 
 .fullscreen-content :deep(.heic-image-container) {
-  flex: 1;
   width: 100%;
   height: 100%;
   overflow: hidden;
 }
 
-.fullscreen-nav {
-  height: 80px;
+.fullscreen-content :deep(img) {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.fs-topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 2rem;
-  background: rgba(0,0,0,0.5);
-  color: white;
+  padding: 0.25rem;
+  pointer-events: none;
+  background-color: var(--p-neutral-50);
 }
 
-.fullscreen-info {
-  text-align: center;
+.fs-topbar > * {
+  display: flex;
+  pointer-events: auto;
+  color: var(--p-text-color);
 }
 
-.fullscreen-title {
-  font-weight: bold;
+.fs-date-bar {
+  white-space: nowrap;
+  pointer-events: none;
 }
 
-.fullscreen-date {
-  font-size: 0.8rem;
-  opacity: 0.8;
+.fs-toolbar {
+  display: flex;
+  gap: 0.25rem;
 }
 
-.close-btn {
+.fs-nav-left-right {
   position: absolute;
-  top: 1rem;
-  right: 1rem;
-  background: rgba(255,255,255,0.1);
-  border: none;
-  color: white;
+  top: 50%;
+  z-index: 10;
+  transform: translateY(-50%);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.fullscreen-content:hover .fs-nav-left-right {
+  opacity: 1;
+}
+
+.fs-nav-left {
+  left: 0.75rem;
+}
+
+.fs-nav-right {
+  right: 0.75rem;
 }
 
 /* Utility-Fallbacks (Tailwind nicht aktiv in diesem Projekt) */
@@ -1049,8 +1081,6 @@ onUnmounted(() => {
 .mb-6 { margin-bottom: 1.5rem; }
 .gap-4 { column-gap: 1rem; row-gap: 1rem; }
 .gap-3 { column-gap: 0.75rem; row-gap: 0.75rem; }
-.mr-4 { margin-right: 1rem; }
-
 
 .rename-rows {
   display: flex;
