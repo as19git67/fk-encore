@@ -6,7 +6,7 @@ import Dialog from 'primevue/dialog'
 import { useConfirm } from 'primevue/useconfirm'
 import InputText from 'primevue/inputtext'
 import HeicImage from '../components/HeicImage.vue'
-import { listPersons, updatePerson, mergePersons, getPhotoUrl, getPersonDetails, ignoreFace, ignorePersonFaces, type Person, type Photo, type PersonDetails } from '../api/photos'
+import { listPersons, updatePerson, mergePersons, getPhotoUrl, getPersonDetails, ignoreFace, ignorePersonFaces, updatePhotoCuration, deletePhoto, type CurationStatus, type Person, type Photo, type PersonDetails } from '../api/photos'
 
 const persons = ref<Person[]>([])
 const enableLocalFaces = ref(true)
@@ -471,6 +471,49 @@ const formatPhotoDate = (photo: Photo) => {
   }).format(date);
 };
 
+async function handleHidePhoto(id: number) {
+  confirm.require({
+    message: 'Foto ausblenden? Es kann jederzeit wiederhergestellt werden.',
+    header: 'Foto ausblenden',
+    icon: 'pi pi-eye-slash',
+    rejectProps: { label: 'Abbrechen', severity: 'secondary', outlined: true },
+    acceptProps: { label: 'Ausblenden', severity: 'warn' },
+    accept: async () => {
+      try {
+        await deletePhoto(id)
+        if (selectedPersonDetail.value) {
+          const photo = personPhotos.value[selectedIndex.value]
+          if (photo) photo.curation_status = 'hidden'
+        }
+      } catch (err: any) {
+        error.value = err.message || 'Fehler beim Ausblenden'
+      }
+    }
+  })
+}
+
+async function handleRestorePhoto(id: number) {
+  try {
+    await updatePhotoCuration(id, 'visible')
+    const photo = personPhotos.value[selectedIndex.value]
+    if (photo) photo.curation_status = 'visible'
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Wiederherstellen'
+  }
+}
+
+async function handleToggleFavorite(id: number, currentStatus: CurationStatus) {
+  const newStatus = currentStatus === 'favorite' ? 'visible' : 'favorite'
+  const photo = personPhotos.value[selectedIndex.value]
+  if (photo) photo.curation_status = newStatus
+  try {
+    await updatePhotoCuration(id, newStatus)
+  } catch (err: any) {
+    if (photo) photo.curation_status = currentStatus
+    error.value = err.message || 'Fehler beim Ändern des Favoriten-Status'
+  }
+}
+
 function handleKeydown(e: KeyboardEvent) {
   if (!isFullscreen.value || selectedIndex.value === -1) return
 
@@ -482,6 +525,16 @@ function handleKeydown(e: KeyboardEvent) {
     e.preventDefault()
   } else if (e.key === 'Escape' || e.key === ' ') {
     isFullscreen.value = false
+    e.preventDefault()
+  } else if ((e.key === 'x' || e.key === 'X') && selectedPersonPhoto.value) {
+    if (selectedPersonPhoto.value.curation_status !== 'hidden') {
+      handleHidePhoto(selectedPersonPhoto.value.id)
+    } else {
+      handleRestorePhoto(selectedPersonPhoto.value.id)
+    }
+    e.preventDefault()
+  } else if ((e.key === 'f' || e.key === 'F') && selectedPersonPhoto.value) {
+    handleToggleFavorite(selectedPersonPhoto.value.id, selectedPersonPhoto.value.curation_status)
     e.preventDefault()
   }
 }
@@ -669,6 +722,29 @@ onUnmounted(() => {
             @click="isFullscreen = false" />
           <div class="fs-date-bar">{{ formatPhotoDate(selectedPersonPhoto) }}</div>
           <div class="fs-toolbar">
+            <Button
+              v-if="selectedPersonPhoto.curation_status === 'hidden'"
+              icon="pi pi-eye"
+              class="fs-topbar-btn" rounded text
+              severity="info"
+              aria-label="Auswählen, um das Bild wieder anzuzeigen"
+              @click.stop="handleRestorePhoto(selectedPersonPhoto.id)"
+            />
+            <Button
+              v-else
+              icon="pi pi-eye-slash"
+              class="fs-topbar-btn" rounded text
+              severity="warn"
+              aria-label="Auswählen, um das Bild auszublenden"
+              @click.stop="handleHidePhoto(selectedPersonPhoto.id)"
+            />
+            <Button
+              :icon="selectedPersonPhoto.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
+              class="fs-topbar-btn" rounded text
+              :severity="selectedPersonPhoto.curation_status === 'favorite' ? 'warn' : 'secondary'"
+              :aria-label="selectedPersonPhoto.curation_status === 'favorite' ? 'Auswählen, um den Favoritenstatus zu entfernen' : 'Auswählen, um als Favorit zu markieren'"
+              @click.stop="handleToggleFavorite(selectedPersonPhoto.id, selectedPersonPhoto.curation_status)"
+            />
             <Button
               v-if="selectedPersonFace"
               icon="pi pi-trash"
