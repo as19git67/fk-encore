@@ -345,7 +345,7 @@ function getPhotoById(id: number): Photo | undefined {
           <div class="compare-header-left">
             <Button
               icon="pi pi-eye-slash"
-              label="Links ausblenden (1)"
+              label="ausblenden (1)"
               severity="warn"
               size="small"
               @click="chooseHide(currentPair[0])"
@@ -373,7 +373,7 @@ function getPhotoById(id: number): Photo | undefined {
           <div class="compare-header-right">
             <Button
               icon="pi pi-eye-slash"
-              label="Rechts ausblenden (2)"
+              label="ausblenden (2)"
               severity="warn"
               size="small"
               @click="chooseHide(currentPair[1])"
@@ -531,6 +531,7 @@ function getPhotoById(id: number): Photo | undefined {
   align-items: center;
   justify-content: flex-start;
   gap: 0.5rem;
+  white-space: nowrap;
 }
 
 .compare-header-center {
@@ -546,15 +547,16 @@ function getPhotoById(id: number): Photo | undefined {
   align-items: center;
   justify-content: flex-end;
   gap: 0.5rem;
+  white-space: nowrap;
 }
 
 .compare-progress {
-  color: var(--p-text-color-secondary);
+  color: var(--p-slate-950);
   font-variant-numeric: tabular-nums;
 }
 
 .review-title {
-  color: var(--p-text-color-primary);
+  color: var(--p-slate-950);
 }
 
 /* ── Side-by-side (compare phase) ── */
