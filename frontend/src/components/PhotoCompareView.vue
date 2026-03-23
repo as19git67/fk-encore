@@ -29,7 +29,7 @@ const groupPhotos = computed(() => {
     .filter((p): p is Photo => !!p)
 })
 
-// Local curation state (synced from photo data, updated optimistically)
+// ── Local curation state ──
 const localCuration = ref(new Map<number, CurationStatus>())
 
 function syncCuration() {
@@ -39,9 +39,6 @@ function syncCuration() {
   }
   localCuration.value = map
 }
-
-onMounted(syncCuration)
-watch(() => props.group.id, syncCuration)
 
 function getCuration(id: number): CurationStatus {
   return localCuration.value.get(id) ?? 'visible'
@@ -57,6 +54,213 @@ async function setCuration(id: number, status: CurationStatus) {
     localCuration.value = new Map(localCuration.value).set(id, current)
   }
 }
+
+// ── Swiss-system pairwise comparison ──
+
+// Score per photo: higher = more likely to keep
+const scores = ref(new Map<number, number>())
+// Set of completed pair keys ("idA-idB" where idA < idB)
+const comparedPairs = ref(new Set<string>())
+// Current pair being compared
+const currentPair = ref<[number, number] | null>(null)
+// Phase: 'compare' = pairwise phase, 'review' = summary phase
+const phase = ref<'compare' | 'review'>('compare')
+// Whether the user has accepted or rejected the suggestion
+const reviewDecided = ref(false)
+// Total comparisons done (for progress display)
+const comparisonsDone = ref(0)
+
+function pairKey(a: number, b: number): string {
+  return a < b ? `${a}-${b}` : `${b}-${a}`
+}
+
+// Estimated total comparisons needed (~n to 1.5n)
+const estimatedTotal = computed(() => {
+  const n = groupPhotos.value.length
+  if (n <= 2) return 1
+  return Math.ceil(n * 1.3)
+})
+
+// Swiss-system: pick the best next pair (closest scores, not yet compared)
+function pickNextPair(): [number, number] | null {
+  const photos = groupPhotos.value
+  if (photos.length < 2) return null
+
+  // Build candidates: all pairs not yet compared
+  const candidates: { pair: [number, number]; scoreDiff: number }[] = []
+  for (let i = 0; i < photos.length; i++) {
+    for (let j = i + 1; j < photos.length; j++) {
+      const a = photos[i]!.id
+      const b = photos[j]!.id
+      if (comparedPairs.value.has(pairKey(a, b))) continue
+      const sa = scores.value.get(a) ?? 0
+      const sb = scores.value.get(b) ?? 0
+      candidates.push({ pair: [a, b], scoreDiff: Math.abs(sa - sb) })
+    }
+  }
+
+  if (candidates.length === 0) return null
+
+  // Sort by score difference (Swiss: pair similar scores first)
+  candidates.sort((a, b) => a.scoreDiff - b.scoreDiff)
+  return candidates[0]!.pair
+}
+
+function initScores() {
+  const map = new Map<number, number>()
+  for (const photo of groupPhotos.value) {
+    map.set(photo.id, 0)
+  }
+  scores.value = map
+  comparedPairs.value = new Set()
+  comparisonsDone.value = 0
+  phase.value = 'compare'
+  reviewDecided.value = false
+  currentPair.value = pickNextPair()
+  // If only 1 photo or no pairs possible, go straight to review
+  if (!currentPair.value) {
+    phase.value = 'review'
+  }
+}
+
+function advanceToNext() {
+  const next = pickNextPair()
+  if (next) {
+    currentPair.value = next
+  } else {
+    // All pairs compared or enough rounds done — go to review
+    phase.value = 'review'
+    currentPair.value = null
+  }
+}
+
+function checkAutoAdvance() {
+  // After ~n comparisons, if there's a clear separation, auto-advance to review
+  const n = groupPhotos.value.length
+  if (comparisonsDone.value >= n) {
+    const sortedScores = [...scores.value.entries()].sort((a, b) => a[1] - b[1])
+    if (sortedScores.length >= 3) {
+      // Check if there's a gap between the lowest and the rest
+      const lowest = sortedScores[0]![1]
+      const secondLowest = sortedScores[1]![1]
+      if (secondLowest - lowest >= 2) {
+        // Clear separation exists — suggest review
+        phase.value = 'review'
+        currentPair.value = null
+        return true
+      }
+    }
+  }
+  return false
+}
+
+function chooseHide(photoId: number) {
+  if (!currentPair.value) return
+  const [a, b] = currentPair.value
+  const otherId = photoId === a ? b : a
+
+  // Loser gets -1, winner gets +1
+  scores.value = new Map(scores.value)
+    .set(photoId, (scores.value.get(photoId) ?? 0) - 1)
+    .set(otherId, (scores.value.get(otherId) ?? 0) + 1)
+
+  comparedPairs.value = new Set(comparedPairs.value).add(pairKey(a, b))
+  comparisonsDone.value++
+
+  if (!checkAutoAdvance()) {
+    advanceToNext()
+  }
+}
+
+function chooseDraw() {
+  if (!currentPair.value) return
+  const [a, b] = currentPair.value
+
+  // Both scores unchanged, just mark as compared
+  comparedPairs.value = new Set(comparedPairs.value).add(pairKey(a, b))
+  comparisonsDone.value++
+
+  if (!checkAutoAdvance()) {
+    advanceToNext()
+  }
+}
+
+function skipPair() {
+  // Don't mark as compared, just pick a different pair
+  if (!currentPair.value) return
+  const skippedKey = pairKey(currentPair.value[0], currentPair.value[1])
+
+  // Temporarily add to compared to pick a different pair, then remove
+  const tempCompared = new Set(comparedPairs.value)
+  tempCompared.add(skippedKey)
+
+  const photos = groupPhotos.value
+  let best: [number, number] | null = null
+  let bestDiff = Infinity
+  for (let i = 0; i < photos.length; i++) {
+    for (let j = i + 1; j < photos.length; j++) {
+      const a = photos[i]!.id
+      const b = photos[j]!.id
+      if (tempCompared.has(pairKey(a, b))) continue
+      const sa = scores.value.get(a) ?? 0
+      const sb = scores.value.get(b) ?? 0
+      const diff = Math.abs(sa - sb)
+      if (diff < bestDiff) {
+        bestDiff = diff
+        best = [a, b]
+      }
+    }
+  }
+
+  if (best) {
+    currentPair.value = best
+  } else {
+    // No other pairs available, go to review
+    phase.value = 'review'
+    currentPair.value = null
+  }
+}
+
+// Photos sorted by score (lowest first = candidates for hiding)
+const sortedPhotos = computed(() => {
+  return [...groupPhotos.value].sort((a, b) => {
+    const sa = scores.value.get(a.id) ?? 0
+    const sb = scores.value.get(b.id) ?? 0
+    return sa - sb
+  })
+})
+
+// Suggested hide threshold: photos with negative score
+const suggestedHideIds = computed(() => {
+  return sortedPhotos.value
+    .filter(p => (scores.value.get(p.id) ?? 0) < 0)
+    .map(p => p.id)
+})
+
+function applySuggestions() {
+  for (const id of suggestedHideIds.value) {
+    if (getCuration(id) !== 'hidden') {
+      setCuration(id, 'hidden')
+    }
+  }
+  reviewDecided.value = true
+}
+
+function rejectSuggestions() {
+  reviewDecided.value = true
+}
+
+function goBackToCompare() {
+  phase.value = 'compare'
+  reviewDecided.value = false
+  currentPair.value = pickNextPair()
+  if (!currentPair.value) {
+    // All pairs exhausted, stay in review
+    phase.value = 'review'
+  }
+}
+
+// ── Done / Next ──
 
 async function handleDone() {
   try {
@@ -76,189 +280,224 @@ async function handleDoneAndNext() {
   }
 }
 
-const isTwoPhotos = computed(() => groupPhotos.value.length === 2)
-const comparePair = ref<[number, number] | null>(null)
-const selectedForCompare = ref<Set<number>>(new Set())
+// ── Keyboard shortcuts ──
+
+function handleKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    if (phase.value === 'review') {
+      goBackToCompare()
+    } else {
+      emit('close')
+    }
+    return
+  }
+
+  // During compare phase: arrow keys / number keys
+  if (phase.value === 'compare' && currentPair.value) {
+    if (e.key === 'ArrowLeft' || e.key === '1') {
+      chooseHide(currentPair.value[0])
+      e.preventDefault()
+    } else if (e.key === 'ArrowRight' || e.key === '2') {
+      chooseHide(currentPair.value[1])
+      e.preventDefault()
+    } else if (e.key === ' ' || e.key === 'u' || e.key === 'U') {
+      chooseDraw()
+      e.preventDefault()
+    } else if (e.key === 's' || e.key === 'S') {
+      skipPair()
+      e.preventDefault()
+    }
+  }
+}
+
+// ── Lifecycle ──
 
 onMounted(() => {
-  if (isTwoPhotos.value) {
-    comparePair.value = [groupPhotos.value[0]!.id, groupPhotos.value[1]!.id]
-  }
-  // Lock body scroll
+  syncCuration()
+  initScores()
   document.body.style.overflow = 'hidden'
-})
-
-watch(() => props.group.id, () => {
-  selectedForCompare.value = new Set()
-  if (isTwoPhotos.value) {
-    comparePair.value = [groupPhotos.value[0]!.id, groupPhotos.value[1]!.id]
-  } else {
-    comparePair.value = null
-  }
+  window.addEventListener('keydown', handleKeydown)
 })
 
 onUnmounted(() => {
   document.body.style.overflow = ''
+  window.removeEventListener('keydown', handleKeydown)
 })
 
-function toggleCompareSelect(id: number) {
-  const newSet = new Set(selectedForCompare.value)
-  if (newSet.has(id)) {
-    newSet.delete(id)
-  } else {
-    if (newSet.size >= 2) {
-      const first = newSet.values().next().value!
-      newSet.delete(first)
-    }
-    newSet.add(id)
-  }
-  selectedForCompare.value = newSet
-  if (newSet.size === 2) {
-    comparePair.value = [...newSet] as [number, number]
-  } else {
-    comparePair.value = null
-  }
-}
-
-function closeCompare() {
-  comparePair.value = null
-  selectedForCompare.value = new Set()
-}
-
-// Keyboard shortcuts
-function handleKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape') {
-    if (comparePair.value && !isTwoPhotos.value) {
-      closeCompare()
-    } else {
-      emit('close')
-    }
-  }
-}
-
-onMounted(() => window.addEventListener('keydown', handleKeydown))
-onUnmounted(() => window.removeEventListener('keydown', handleKeydown))
-
-const columnClass = computed(() => {
-  const count = groupPhotos.value.length
-  if (count <= 2) return 'compare-grid-2'
-  if (count <= 3) return 'compare-grid-3'
-  return 'compare-grid-4'
+watch(() => props.group.id, () => {
+  syncCuration()
+  initScores()
 })
+
+function getPhotoById(id: number): Photo | undefined {
+  return props.allPhotos.find(p => p.id === id)
+}
 </script>
 
 <template>
   <Teleport to="body">
     <div class="compare-overlay">
-      <!-- Header -->
-      <div class="compare-header">
-        <div class="compare-header-left">
-          <Button
-            v-if="comparePair && !isTwoPhotos"
-            label="Zurück zur Übersicht"
-            icon="pi pi-arrow-left"
-            @click="closeCompare"
-            text
-            size="small"
-          />
-        </div>
-        <div class="compare-title">
-          <span class="font-semibold">{{ group.member_count }} ähnliche Fotos</span>
-          <span v-if="totalUnreviewed > 0" class="text-secondary text-sm ml-2">
-            ({{ totalUnreviewed }} Gruppen offen)
-          </span>
-        </div>
-        <div class="compare-actions">
-          <Button label="Fertig" icon="pi pi-check" @click="handleDone" severity="success" size="small" />
-          <Button
-            v-if="totalUnreviewed > 1"
-            label="Fertig + Weiter"
-            icon="pi pi-arrow-right"
-            iconPos="right"
-            @click="handleDoneAndNext"
-            severity="success"
-            outlined
-            size="small"
-          />
-          <Button icon="pi pi-times" @click="$emit('close')" text rounded severity="secondary" />
-        </div>
-      </div>
 
-      <!-- Side-by-side detail compare -->
-      <div v-if="comparePair" class="side-by-side">
-        <div class="side-by-side-photos">
-          <div v-for="photoId in comparePair" :key="photoId" class="side-by-side-item"
-            :class="{ 'is-hidden': getCuration(photoId) === 'hidden', 'is-favorite': getCuration(photoId) === 'favorite' }"
-          >
-            <div class="side-by-side-image">
-              <HeicImage :src="getPhotoUrl(allPhotos.find(p => p.id === photoId)!.filename)" alt="" objectFit="contain" />
-            </div>
-            <div class="side-by-side-controls">
-              <Button
-                icon="pi pi-eye-slash"
-                label="Ausblenden"
-                :severity="getCuration(photoId) === 'hidden' ? 'danger' : 'secondary'"
-                :outlined="getCuration(photoId) !== 'hidden'"
-                size="small"
-                @click="setCuration(photoId, 'hidden')"
-              />
-              <Button
-                icon="pi pi-heart"
-                label="Favorit"
-                :severity="getCuration(photoId) === 'favorite' ? 'warn' : 'secondary'"
-                :outlined="getCuration(photoId) !== 'favorite'"
-                size="small"
-                @click="setCuration(photoId, 'favorite')"
-              />
-            </div>
+      <!-- ── COMPARE PHASE ── -->
+      <template v-if="phase === 'compare' && currentPair">
+        <!-- Header -->
+        <div class="compare-header">
+          <div class="compare-header-left">
+            <Button
+              icon="pi pi-eye-slash"
+              label="Links ausblenden (1)"
+              severity="warn"
+              size="small"
+              @click="chooseHide(currentPair[0])"
+            />
+          </div>
+          <div class="compare-header-center">
+            <Button
+              icon="pi pi-equals"
+              label="Unentschieden (U, Leertaste)"
+              severity="info"
+              size="small"
+              @click="chooseDraw"
+            />
+            <Button
+              icon="pi pi-forward"
+              label="Überspringen (S)"
+              severity="info"
+              size="small"
+              @click="skipPair"
+            />
+            <span class="compare-progress">
+              {{ comparisonsDone }}/{{ estimatedTotal }}
+            </span>
+          </div>
+          <div class="compare-header-right">
+            <Button
+              icon="pi pi-eye-slash"
+              label="Rechts ausblenden (2)"
+              severity="warn"
+              size="small"
+              @click="chooseHide(currentPair[1])"
+            />
           </div>
         </div>
-      </div>
 
-      <!-- Grid triage view (3+ photos) -->
-      <div v-else class="compare-scroll">
-        <div class="compare-body" :class="columnClass">
-          <div
-            v-for="photo in groupPhotos"
-            :key="photo.id"
-            class="compare-photo"
-            :class="{
-              'is-hidden': getCuration(photo.id) === 'hidden',
-              'is-favorite': getCuration(photo.id) === 'favorite',
-              'compare-selected': selectedForCompare.has(photo.id)
-            }"
-          >
-            <div class="compare-photo-image" @click="toggleCompareSelect(photo.id)">
-              <HeicImage :src="getPhotoUrl(photo.filename)" :alt="photo.original_name" />
-              <div v-if="selectedForCompare.has(photo.id)" class="compare-select-indicator">
-                <i class="pi pi-search-plus"></i>
+        <!-- Side-by-side photos -->
+        <div class="side-by-side">
+          <div class="side-by-side-photos">
+            <div
+              v-for="photoId in currentPair"
+              :key="photoId"
+              class="side-by-side-item"
+              :class="{ 'is-hidden': getCuration(photoId) === 'hidden' }"
+            >
+              <div class="side-by-side-image">
+                <HeicImage
+                  v-if="getPhotoById(photoId)"
+                  :src="getPhotoUrl(getPhotoById(photoId)!.filename)"
+                  alt=""
+                  objectFit="contain"
+                />
               </div>
             </div>
-            <div class="compare-photo-controls">
-              <Button
-                icon="pi pi-eye-slash"
-                label="Ausblenden"
-                :severity="getCuration(photo.id) === 'hidden' ? 'danger' : 'contrast'"
-                :outlined="getCuration(photo.id) !== 'hidden'"
-                size="small"
-                @click="setCuration(photo.id, 'hidden')"
-              />
-              <Button
-                icon="pi pi-heart"
-                label="Favorit"
-                :severity="getCuration(photo.id) === 'favorite' ? 'warn' : 'success'"
-                :outlined="getCuration(photo.id) !== 'favorite'"
-                size="small"
-                @click="setCuration(photo.id, 'favorite')"
-              />
-            </div>
-            <div class="compare-photo-name text-sm text-secondary">{{ photo.original_name }}</div>
           </div>
         </div>
-        <div class="compare-footer text-sm text-secondary">
-          Klicke 2 Fotos an, um sie im Detailvergleich nebeneinander zu sehen.
+      </template>
+
+      <!-- ── REVIEW PHASE ── -->
+      <template v-else-if="phase === 'review'">
+        <div class="compare-header">
+          <div class="compare-header-left">
+            <Button
+              icon="pi pi-arrow-left"
+              label="Weiter vergleichen"
+              text
+              size="small"
+              @click="goBackToCompare"
+              :disabled="!pickNextPair()"
+            />
+          </div>
+          <div class="compare-header-center">
+            <span class="review-title">
+              Vorschlag: {{ suggestedHideIds.length }} von {{ groupPhotos.length }} ausblenden
+            </span>
+          </div>
+          <div class="compare-header-right">
+            <template v-if="!reviewDecided">
+              <Button
+                v-if="suggestedHideIds.length > 0"
+                label="Vorschlag übernehmen"
+                icon="pi pi-check"
+                severity="warn"
+                size="small"
+                @click="applySuggestions"
+              />
+              <Button
+                label="Vorschlag ablehnen"
+                icon="pi pi-times"
+                severity="secondary"
+                outlined
+                size="small"
+                @click="rejectSuggestions"
+              />
+            </template>
+            <template v-else>
+              <Button label="Fertig" icon="pi pi-check" @click="handleDone" severity="success" size="small" />
+              <Button
+                v-if="totalUnreviewed > 1"
+                label="Fertig + Weiter"
+                icon="pi pi-arrow-right"
+                iconPos="right"
+                @click="handleDoneAndNext"
+                severity="success"
+                outlined
+                size="small"
+              />
+              <Button icon="pi pi-times" @click="$emit('close')" text rounded severity="secondary" />
+            </template>
+          </div>
         </div>
-      </div>
+
+        <!-- Review grid -->
+        <div class="review-scroll">
+          <div class="review-grid">
+            <div
+              v-for="photo in sortedPhotos"
+              :key="photo.id"
+              class="review-photo"
+              :class="{
+                'is-hidden': getCuration(photo.id) === 'hidden',
+                'is-suggested-hide': suggestedHideIds.includes(photo.id) && getCuration(photo.id) !== 'hidden',
+                'is-favorite': getCuration(photo.id) === 'favorite'
+              }"
+            >
+              <div class="review-photo-image">
+                <HeicImage :src="getPhotoUrl(photo.filename)" :alt="photo.original_name" />
+                <div class="review-score" :class="{ negative: (scores.get(photo.id) ?? 0) < 0 }">
+                  {{ (scores.get(photo.id) ?? 0) > 0 ? '+' : '' }}{{ scores.get(photo.id) ?? 0 }}
+                </div>
+              </div>
+              <div class="review-photo-controls">
+                <Button
+                  icon="pi pi-eye-slash"
+                  :label="getCuration(photo.id) === 'hidden' ? 'Ausgeblendet' : 'Ausblenden'"
+                  :severity="getCuration(photo.id) === 'hidden' ? 'danger' : 'secondary'"
+                  :outlined="getCuration(photo.id) !== 'hidden'"
+                  size="small"
+                  @click="setCuration(photo.id, 'hidden')"
+                />
+                <Button
+                  icon="pi pi-heart"
+                  :severity="getCuration(photo.id) === 'favorite' ? 'warn' : 'secondary'"
+                  :outlined="getCuration(photo.id) !== 'favorite'"
+                  size="small"
+                  @click="setCuration(photo.id, 'favorite')"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
     </div>
   </Teleport>
 </template>
@@ -274,43 +513,57 @@ const columnClass = computed(() => {
   overflow: hidden;
 }
 
+/* ── Header (shared between phases) ── */
 .compare-header {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  padding: 0.5rem 1rem;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
-  background: #0a0a0a;
+  padding-inline: 0.75rem;
+  height: 2.5rem;
+  background-color: var(--p-neutral-50);
   flex-shrink: 0;
   z-index: 10;
+  gap: 0.5rem;
 }
 
 .compare-header-left {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
+  gap: 0.5rem;
 }
 
-.compare-title {
-  color: #e5e7eb;
-  text-align: center;
+.compare-header-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
   white-space: nowrap;
 }
 
-.compare-actions {
+.compare-header-right {
   display: flex;
-  gap: 0.5rem;
   align-items: center;
   justify-content: flex-end;
+  gap: 0.5rem;
 }
 
-/* Side-by-side fullscreen layout */
+.compare-progress {
+  color: var(--p-text-color-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.review-title {
+  color: var(--p-text-color-primary);
+}
+
+/* ── Side-by-side (compare phase) ── */
 .side-by-side {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
-
 
 .side-by-side-photos {
   flex: 1;
@@ -332,10 +585,6 @@ const columnClass = computed(() => {
   opacity: 0.3;
 }
 
-.side-by-side-item.is-favorite {
-  outline: 3px solid var(--p-yellow-500);
-}
-
 .side-by-side-image {
   flex: 1;
   min-height: 0;
@@ -355,97 +604,70 @@ const columnClass = computed(() => {
   display: block;
 }
 
-.side-by-side-controls {
-  display: flex;
-  gap: 0.5rem;
-  padding: 0.5rem;
-  justify-content: center;
-  flex-shrink: 0;
-  background: #111;
-}
-
-/* Grid triage view (3+ photos) */
-.compare-scroll {
+/* ── Review phase ── */
+.review-scroll {
   flex: 1;
   overflow-y: auto;
   min-height: 0;
-}
-
-.compare-body {
-  display: grid;
-  gap: 1rem;
   padding: 1rem;
 }
 
-.compare-grid-2 { grid-template-columns: repeat(2, 1fr); }
-.compare-grid-3 { grid-template-columns: repeat(3, 1fr); }
-.compare-grid-4 { grid-template-columns: repeat(2, 1fr); }
+.review-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
+}
 
-.compare-photo {
+.review-photo {
   border-radius: 8px;
   overflow: hidden;
   background: #1a1a1a;
   transition: opacity 0.2s, box-shadow 0.2s;
 }
 
-.compare-photo.is-hidden {
+.review-photo.is-hidden {
   opacity: 0.3;
 }
 
-.compare-photo.is-favorite {
+.review-photo.is-suggested-hide {
+  box-shadow: 0 0 0 3px rgba(234, 88, 12, 0.6);
+}
+
+.review-photo.is-favorite {
   box-shadow: 0 0 0 3px var(--p-yellow-500);
 }
 
-.compare-photo.compare-selected {
-  box-shadow: 0 0 0 3px var(--p-primary-color);
-}
-
-.compare-photo-image {
+.review-photo-image {
   position: relative;
-  cursor: pointer;
 }
 
-.compare-photo-image :deep(img) {
+.review-photo-image :deep(img) {
   width: 100%;
   height: auto;
   display: block;
 }
 
-.compare-select-indicator {
+.review-score {
   position: absolute;
-  inset: 0;
-  background: rgba(59, 130, 246, 0.15);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  top: 0.4rem;
+  right: 0.4rem;
+  background: rgba(0, 0, 0, 0.7);
+  color: #22c55e;
+  padding: 0.15rem 0.5rem;
+  border-radius: 1rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
-.compare-select-indicator i {
-  font-size: 2rem;
-  color: var(--p-primary-color);
-  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+.review-score.negative {
+  color: #ef4444;
 }
 
-.compare-photo-controls {
+.review-photo-controls {
   display: flex;
   gap: 0.5rem;
-  padding: 0.75rem;
+  padding: 0.5rem;
   justify-content: center;
-}
-
-.compare-photo-name {
-  padding: 0 0.5rem 0.5rem;
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: #9ca3af;
-}
-
-.compare-footer {
-  padding: 0.75rem 1.5rem;
-  text-align: center;
-  border-top: 1px solid rgba(255,255,255,0.08);
-  color: #9ca3af;
 }
 </style>
