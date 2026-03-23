@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import Button from 'primevue/button'
+import Popover from 'primevue/popover'
 import HeicImage from './HeicImage.vue'
 import {
   getPhotoUrl,
@@ -10,6 +11,8 @@ import {
   type PhotoGroup,
   type CurationStatus,
 } from '../api/photos'
+
+const helpPopover = ref()
 
 const props = defineProps<{
   group: PhotoGroup
@@ -366,6 +369,44 @@ function getPhotoById(id: number): Photo | undefined {
               size="small"
               @click="skipPair"
             />
+            <Button
+              icon="pi pi-question-circle"
+              text
+              rounded
+              severity="secondary"
+              size="small"
+              @click="helpPopover.toggle($event)"
+              aria-label="Hilfe"
+            />
+            <Popover ref="helpPopover">
+              <div class="help-popover">
+                <h4>Tastaturkürzel & Aktionen</h4>
+                <table class="help-table">
+                  <tbody>
+                    <tr>
+                      <td><kbd>1</kbd> oder <kbd>←</kbd></td>
+                      <td><strong>Linkes Foto ausblenden</strong></td>
+                      <td class="help-desc">Das linke Foto erhält einen schlechteren Score und wird als Kandidat zum Ausblenden markiert.</td>
+                    </tr>
+                    <tr>
+                      <td><kbd>2</kbd> oder <kbd>→</kbd></td>
+                      <td><strong>Rechtes Foto ausblenden</strong></td>
+                      <td class="help-desc">Das rechte Foto erhält einen schlechteren Score und wird als Kandidat zum Ausblenden markiert.</td>
+                    </tr>
+                    <tr>
+                      <td><kbd>U</kbd> oder <kbd>Leertaste</kbd></td>
+                      <td><strong>Unentschieden</strong></td>
+                      <td class="help-desc">Beide Fotos sind gleichwertig. Kein Score ändert sich, das Paar gilt als verglichen.</td>
+                    </tr>
+                    <tr>
+                      <td><kbd>S</kbd></td>
+                      <td><strong>Überspringen</strong></td>
+                      <td class="help-desc">Das aktuelle Paar wird vorerst übersprungen – kein Score ändert sich, das Paar bleibt unentschieden und kann später wieder erscheinen.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </Popover>
             <span class="compare-progress">
               {{ comparisonsDone }}/{{ estimatedTotal }}
             </span>
@@ -671,5 +712,51 @@ function getPhotoById(id: number): Photo | undefined {
   gap: 0.5rem;
   padding: 0.5rem;
   justify-content: center;
+}
+
+.help-popover {
+  padding: 0.25rem 0.25rem;
+  max-width: 540px;
+}
+
+.help-popover h4 {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--p-text-color);
+}
+
+.help-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.82rem;
+}
+
+.help-table tr + tr td {
+  border-top: 1px solid var(--p-content-border-color);
+}
+
+.help-table td {
+  padding: 0.45rem 0.6rem;
+  vertical-align: top;
+}
+
+.help-table td:first-child {
+  white-space: nowrap;
+}
+
+kbd {
+  display: inline-block;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.78rem;
+  font-family: monospace;
+  background: var(--p-surface-100, #f3f4f6);
+  border: 1px solid var(--p-surface-300, #d1d5db);
+  border-radius: 4px;
+  line-height: 1.4;
+}
+
+.help-desc {
+  color: var(--p-text-muted-color);
 }
 </style>
