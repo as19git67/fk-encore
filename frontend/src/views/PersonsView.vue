@@ -3,6 +3,7 @@ import { ref, onMounted, computed, onUnmounted, nextTick } from 'vue'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import Dialog from 'primevue/dialog'
+import ToggleSwitch from 'primevue/toggleswitch'
 import { useConfirm } from 'primevue/useconfirm'
 import InputText from 'primevue/inputtext'
 import HeicImage from '../components/HeicImage.vue'
@@ -21,15 +22,46 @@ const loadingDetails = ref(false)
 const isFullscreen = ref(false)
 const selectedIndex = ref(-1)
 
+// Show hidden photos toggle (like in PhotosView)
+const showHidden = ref(false)
+
 const personFaceItems = computed(() => {
+    if (!selectedPersonDetail.value) return []
+    return selectedPersonDetail.value.faces
+        .filter(f => !!f.photo && (showHidden.value || f.photo.curation_status !== 'hidden'))
+        .map(f => ({ face: f, photo: f.photo as Photo }))
+})
+
+// All face items including hidden — used for fullscreen so photos don't disappear while viewing
+const allPersonFaceItems = computed(() => {
     if (!selectedPersonDetail.value) return []
     return selectedPersonDetail.value.faces
         .filter(f => !!f.photo)
         .map(f => ({ face: f, photo: f.photo as Photo }))
 })
 
+// Deduplicated by photo ID — used for fullscreen navigation so each photo appears once
+const uniquePhotoFaceItems = computed(() => {
+    const seen = new Set<number>()
+    return personFaceItems.value.filter(item => {
+        if (seen.has(item.photo.id)) return false
+        seen.add(item.photo.id)
+        return true
+    })
+})
+
+// Deduplicated including hidden — for fullscreen navigation
+const allUniquePhotoFaceItems = computed(() => {
+    const seen = new Set<number>()
+    return allPersonFaceItems.value.filter(item => {
+        if (seen.has(item.photo.id)) return false
+        seen.add(item.photo.id)
+        return true
+    })
+})
+
 const personPhotos = computed(() => {
-    return personFaceItems.value.map(item => item.photo)
+    return allUniquePhotoFaceItems.value.map(item => item.photo)
 })
 
 const firstPersonFaceItem = computed(() => {
@@ -53,8 +85,13 @@ const nextPersonPhoto = computed(() => {
 
 const selectedPersonFace = computed(() => {
     if (selectedIndex.value < 0) return null
-    return personFaceItems.value[selectedIndex.value]?.face ?? null
+    return allUniquePhotoFaceItems.value[selectedIndex.value]?.face ?? null
 })
+
+function getUniquePhotoIndex(photoId: number): number {
+    const idx = allUniquePhotoFaceItems.value.findIndex(item => item.photo.id === photoId)
+    return idx === -1 ? 0 : idx
+}
 
 const showRenameDialog = ref(false)
 const personToRename = ref<Person | null>(null)
@@ -182,6 +219,7 @@ function closePersonDetails() {
     selectedPersonDetail.value = null
     isFullscreen.value = false
     selectedIndex.value = -1
+    showHidden.value = false
 }
 
 function openRename(person: Person) {
@@ -471,32 +509,26 @@ const formatPhotoDate = (photo: Photo) => {
   }).format(date);
 };
 
+function setPhotoStatus(id: number, status: CurationStatus) {
+  if (!selectedPersonDetail.value) return
+  selectedPersonDetail.value.faces = selectedPersonDetail.value.faces.map(f =>
+    f.photo?.id === id ? { ...f, photo: { ...f.photo!, curation_status: status } } : f
+  )
+}
+
 async function handleHidePhoto(id: number) {
-  confirm.require({
-    message: 'Foto ausblenden? Es kann jederzeit wiederhergestellt werden.',
-    header: 'Foto ausblenden',
-    icon: 'pi pi-eye-slash',
-    rejectProps: { label: 'Abbrechen', severity: 'secondary', outlined: true },
-    acceptProps: { label: 'Ausblenden', severity: 'warn' },
-    accept: async () => {
-      try {
-        await deletePhoto(id)
-        if (selectedPersonDetail.value) {
-          const photo = personPhotos.value[selectedIndex.value]
-          if (photo) photo.curation_status = 'hidden'
-        }
-      } catch (err: any) {
-        error.value = err.message || 'Fehler beim Ausblenden'
-      }
-    }
-  })
+  try {
+    await deletePhoto(id)
+    setPhotoStatus(id, 'hidden')
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Ausblenden'
+  }
 }
 
 async function handleRestorePhoto(id: number) {
   try {
     await updatePhotoCuration(id, 'visible')
-    const photo = personPhotos.value[selectedIndex.value]
-    if (photo) photo.curation_status = 'visible'
+    setPhotoStatus(id, 'visible')
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Wiederherstellen'
   }
@@ -504,12 +536,11 @@ async function handleRestorePhoto(id: number) {
 
 async function handleToggleFavorite(id: number, currentStatus: CurationStatus) {
   const newStatus = currentStatus === 'favorite' ? 'visible' : 'favorite'
-  const photo = personPhotos.value[selectedIndex.value]
-  if (photo) photo.curation_status = newStatus
+  setPhotoStatus(id, newStatus)
   try {
     await updatePhotoCuration(id, newStatus)
   } catch (err: any) {
-    if (photo) photo.curation_status = currentStatus
+    setPhotoStatus(id, currentStatus)
     error.value = err.message || 'Fehler beim Ändern des Favoriten-Status'
   }
 }
@@ -569,6 +600,10 @@ onUnmounted(() => {
                   <Button v-else-if="persons.length > 0" icon="pi pi-check-square" label="Auswählen" class="p-button-outlined" @click="multiSelectMode = true" />
               </template>
               <template v-if="selectedPersonDetail">
+                  <div class="toggle-hidden">
+                    <label for="showHiddenPersons" class="text-sm">Ausgeblendete</label>
+                    <ToggleSwitch v-model="showHidden" inputId="showHiddenPersons" />
+                  </div>
                   <Button icon="pi pi-pencil" label="Umbenennen" class="p-button-outlined" @click="openRename(selectedPersonDetail)" />
                   <Button icon="pi pi-trash" label="Ignorieren" class="p-button-outlined p-button-danger" @click="handleIgnorePerson(selectedPersonDetail.id)" v-tooltip="'Diese Person und alle ihre Gesichtserkennungen dauerhaft ignorieren'" />
               </template>
@@ -667,7 +702,8 @@ onUnmounted(() => {
             <div
                 v-if="firstPersonFaceItem"
                 class="person-hero"
-                @click="selectedIndex = 0; isFullscreen = true"
+                :class="{ 'photo-hidden': firstPersonFaceItem.photo.curation_status === 'hidden' }"
+                @click="selectedIndex = getUniquePhotoIndex(firstPersonFaceItem!.photo.id); isFullscreen = true"
             >
                 <HeicImage
                     :src="getPhotoUrl(firstPersonFaceItem.photo.filename)"
@@ -678,18 +714,25 @@ onUnmounted(() => {
                 >
                     <div class="face-highlight" :style="getHeroFaceHighlightStyle(firstPersonFaceItem.face.bbox)"></div>
                 </HeicImage>
+                <div v-if="firstPersonFaceItem.photo.curation_status === 'hidden'" class="hidden-badge">
+                    <i class="pi pi-eye-slash"></i>
+                </div>
             </div>
 
             <div class="photo-grid">
             <div
-                v-for="(item, idx) in personFaceItems.slice(1)"
+                v-for="item in uniquePhotoFaceItems.slice(1)"
                 :key="item.face.id"
                 class="photo-item"
-                @click="selectedIndex = idx + 1; isFullscreen = true"
+                :class="{ 'photo-hidden': item.photo.curation_status === 'hidden' }"
+                @click="selectedIndex = getUniquePhotoIndex(item.photo.id); isFullscreen = true"
             >
                 <HeicImage :src="getPhotoUrl(item.photo.filename)" :alt="item.photo.original_name">
                     <div class="face-highlight" :style="getFaceHighlightStyle(item.face.bbox, true)"></div>
                 </HeicImage>
+                <div v-if="item.photo.curation_status === 'hidden'" class="hidden-badge">
+                    <i class="pi pi-eye-slash"></i>
+                </div>
                 <div class="photo-overlay">
                     <div class="photo-name">{{ item.photo.original_name }}</div>
                     <Button 
@@ -1034,6 +1077,27 @@ onUnmounted(() => {
     transform: scale(1.05);
 }
 
+.photo-item.photo-hidden,
+.person-hero.photo-hidden {
+    opacity: 0.45;
+}
+
+.hidden-badge {
+    position: absolute;
+    top: 0.4rem;
+    right: 0.4rem;
+    background: rgba(0, 0, 0, 0.55);
+    color: white;
+    border-radius: 50%;
+    width: 1.5rem;
+    height: 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    z-index: 5;
+}
+
 .photo-overlay {
     position: absolute;
     bottom: 0;
@@ -1085,6 +1149,7 @@ onUnmounted(() => {
   position: relative;
   width: 100%;
   height: 100%;
+  outline: none;
 }
 
 .fullscreen-content :deep(.heic-image-container) {
@@ -1184,6 +1249,12 @@ onUnmounted(() => {
     box-shadow: 0 0 0 1px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(0,0,0,0.5);
     border: 2px solid #ffff00 !important;
     z-index: 50;
+}
+
+.toggle-hidden {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .relative { position: relative; }
