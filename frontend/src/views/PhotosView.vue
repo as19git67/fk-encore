@@ -1452,6 +1452,12 @@ onUnmounted(() => {
   top: 50%;
   z-index: 10;
   transform: translateY(-50%);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.fullscreen-content:hover .fs-nav-left-right {
+  opacity: 1;
 }
 
 .fs-nav-left {
