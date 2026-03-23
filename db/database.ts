@@ -23,7 +23,7 @@ import { seed } from "./seed";
 
 type DbInstance = BetterSQLite3Database<typeof schema> | ReturnType<typeof drizzlePostgres<typeof schema>>;
 
-function createDb(): DbInstance {
+async function createDb(): Promise<DbInstance> {
   const isTest = process.env.NODE_ENV === "test" || process.env.VITEST;
   const dbType = process.env.DB_TYPE?.toLowerCase() || "sqlite";
 
@@ -228,7 +228,7 @@ function createSqliteDb(isTest: boolean): BetterSQLite3Database<typeof schema> {
   return db;
 }
 
-function createPostgresDb(isTest: boolean): ReturnType<typeof drizzlePostgres<typeof schema>> {
+async function createPostgresDb(isTest: boolean): Promise<ReturnType<typeof drizzlePostgres<typeof schema>>> {
   let connectionString: string;
 
   if (isTest) {
@@ -249,7 +249,7 @@ function createPostgresDb(isTest: boolean): ReturnType<typeof drizzlePostgres<ty
 
   // For PostgreSQL, create tables using SQL
   // Note: In production, you should use proper migrations instead
-  pool.query(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
       email TEXT UNIQUE NOT NULL,
@@ -393,9 +393,7 @@ function createPostgresDb(isTest: boolean): ReturnType<typeof drizzlePostgres<ty
       FOREIGN KEY (group_id) REFERENCES photo_groups(id) ON DELETE CASCADE,
       FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE
     );
-  `).catch(err => {
-    console.error("Error creating PostgreSQL tables:", err);
-  });
+  `);
 
   return db;
 }
@@ -410,7 +408,7 @@ function buildPostgresConnectionString(): string {
   return `postgres://${user}:${password}@${host}:${port}/${database}`;
 }
 
-const db = createDb();
+const db = await createDb();
 
 // Seed initial data (roles, admin user) — top-level await works in ESM
 await seed(db);
