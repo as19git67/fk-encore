@@ -228,6 +228,31 @@ function createSqliteDb(isTest: boolean): BetterSQLite3Database<typeof schema> {
   return db;
 }
 
+async function ensureDatabaseExists(connectionString: string): Promise<void> {
+  // Extract target database name from connection string
+  const url = new URL(connectionString);
+  const targetDb = url.pathname.replace(/^\//, '');
+  if (!targetDb || targetDb === 'postgres') return;
+
+  // Connect to the default 'postgres' database to create the target DB
+  const adminUrl = new URL(connectionString);
+  adminUrl.pathname = '/postgres';
+  const adminPool = new Pool({ connectionString: adminUrl.toString() });
+  try {
+    await adminPool.query(
+      `SELECT 'CREATE DATABASE "${targetDb}"' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = $1)`,
+      [targetDb]
+    ).then(async (res) => {
+      if (res.rows[0]) {
+        await adminPool.query(res.rows[0]['?column?']);
+        console.log(`[db] Created database: ${targetDb}`);
+      }
+    });
+  } finally {
+    await adminPool.end();
+  }
+}
+
 async function createPostgresDb(isTest: boolean): Promise<ReturnType<typeof drizzlePostgres<typeof schema>>> {
   let connectionString: string;
 
@@ -240,6 +265,8 @@ async function createPostgresDb(isTest: boolean): Promise<ReturnType<typeof driz
     // Use connection string if provided, otherwise build from individual parameters
     connectionString = process.env.POSTGRES_CONNECTION_STRING || buildPostgresConnectionString();
   }
+
+  await ensureDatabaseExists(connectionString);
 
   const pool = new Pool({
     connectionString,

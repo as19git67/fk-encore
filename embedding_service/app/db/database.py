@@ -46,6 +46,32 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
+async def ensure_database_exists() -> None:
+    """Create the target database if it does not exist yet."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from urllib.parse import urlparse, urlunparse
+
+    url = urlparse(str(settings.database_url))
+    target_db = url.path.lstrip("/")
+    if not target_db or target_db == "postgres":
+        return
+
+    admin_url = urlunparse(url._replace(path="/postgres"))
+    admin_engine = create_async_engine(admin_url, isolation_level="AUTOCOMMIT")
+    try:
+        async with admin_engine.connect() as conn:
+            result = await conn.execute(
+                text("SELECT 1 FROM pg_database WHERE datname = :db"),
+                {"db": target_db},
+            )
+            if not result.fetchone():
+                await conn.execute(text(f'CREATE DATABASE "{target_db}"'))
+                logger.info("Created database: %s", target_db)
+    finally:
+        await admin_engine.dispose()
+
+
 async def run_migrations() -> None:
     """Create schema objects if they don't exist yet (idempotent)."""
     from sqlalchemy import text

@@ -49,27 +49,14 @@ services:
     container_name: fk-encore-embedding
     restart: unless-stopped
     depends_on:
-      postgres-init:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/embeddings
       CLIP_MODEL_NAME: ViT-B-32
       CLIP_PRETRAINED: openai
       DINO_MODEL_NAME: facebook/dinov2-base
       LOG_LEVEL: INFO
-
-  # ── One-shot: create 'embeddings' DB if it doesn't exist ───────────────────
-  postgres-init:
-    image: pgvector/pgvector:pg16
-    container_name: fk-encore-db-init
-    restart: "no"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      PGPASSWORD: postgres
-    command: >
-      sh -c 'psql -h postgres -U postgres -c "CREATE DATABASE embeddings" 2>/dev/null || true'
 
   # ── PostgreSQL (shared instance for both app and embedding service) ─────────
   postgres:
