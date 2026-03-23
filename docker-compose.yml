@@ -69,9 +69,7 @@ services:
     environment:
       PGPASSWORD: postgres
     command: >
-      psql -h postgres -U postgres
-      -c "SELECT 'CREATE DATABASE embeddings'
-          WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'embeddings')\gexec"
+      sh -c 'psql -h postgres -U postgres -c "CREATE DATABASE embeddings" 2>/dev/null || true'
 
   # ── PostgreSQL (shared instance for both app and embedding service) ─────────
   postgres:
