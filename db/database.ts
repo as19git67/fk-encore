@@ -94,6 +94,7 @@ function createSqliteDb(isTest: boolean): BetterSQLite3Database<typeof schema> {
       backed_up INTEGER NOT NULL DEFAULT 0,
       transports TEXT DEFAULT '[]',
       name TEXT NOT NULL DEFAULT 'Passkey',
+      disabled INTEGER NOT NULL DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
@@ -203,6 +204,11 @@ function createSqliteDb(isTest: boolean): BetterSQLite3Database<typeof schema> {
     );
   `);
 
+  // Ensure disabled column exists on passkeys (idempotent migration)
+  try {
+    sqlite.exec("ALTER TABLE passkeys ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0;");
+  } catch (e) {}
+
   // Ensure hash column exists in case the table already existed without it
   try {
     sqlite.exec("ALTER TABLE photos ADD COLUMN hash TEXT;");
@@ -308,6 +314,7 @@ async function createPostgresDb(isTest: boolean): Promise<ReturnType<typeof driz
       backed_up INTEGER NOT NULL DEFAULT 0,
       transports TEXT DEFAULT '[]',
       name TEXT NOT NULL DEFAULT 'Passkey',
+      disabled INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
