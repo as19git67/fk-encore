@@ -59,6 +59,7 @@ export const passkeys = sqliteTable("passkeys", {
   backed_up: integer("backed_up").notNull().default(0),
   transports: text("transports").default("[]"),
   name: text("name").notNull().default("Passkey"),
+  disabled: integer("disabled").notNull().default(0),
   created_at: text("created_at").default(sql`(datetime('now'))`),
 });
 

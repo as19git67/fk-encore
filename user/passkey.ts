@@ -18,6 +18,7 @@ import {
   deletePasskeyLogic,
 } from "./passkey.service";
 import { getAuthData } from "~encore/auth";
+import { checkRateLimit, resetRateLimit, getClientIp } from "./rateLimiter";
 
 // ========== Registration (auth required — user must be logged in to add a passkey) ==========
 
@@ -70,14 +71,21 @@ export const passkeyAuthOptions = api(
 export const passkeyAuthVerify = api(
   { expose: true, method: "POST", path: "/auth/passkey/login/verify" },
   async (req: PasskeyAuthVerifyRequest): Promise<LoginResponse> => {
+    const ip = getClientIp();
+    checkRateLimit(ip);
     try {
-      return await passkeyAuthVerifyLogic(req);
+      const result = await passkeyAuthVerifyLogic(req);
+      resetRateLimit(ip);
+      return result;
     } catch (err: any) {
       if (err.message?.includes("invalid credentials")) {
         throw APIError.unauthenticated(err.message);
       }
       if (err.message?.includes("expired")) {
         throw APIError.invalidArgument(err.message);
+      }
+      if (err.message?.includes("counter regression")) {
+        throw APIError.unauthenticated("Credential disabled due to security anomaly.");
       }
       throw err;
     }

@@ -5,6 +5,10 @@ import {
   generateAuthenticationOptions,
   verifyAuthenticationResponse,
 } from "@simplewebauthn/server";
+import { validateAuthEnvironment } from "./startupValidation";
+
+// Validate RP_ORIGIN / RP_NAME at service startup
+validateAuthEnvironment();
 
 type AuthenticatorTransportFuture = 'ble' | 'cable' | 'hybrid' | 'internal' | 'nfc' | 'smart-card' | 'usb';
 
@@ -202,7 +206,7 @@ export async function passkeyRegisterVerifyLogic(
 export async function passkeyAuthOptionsLogic(): Promise<PasskeyAuthOptionsResponse> {
   const options = await generateAuthenticationOptions({
     rpID: getRpId(),
-    userVerification: "preferred",
+    userVerification: "required",
   });
 
   const challengeId = await storeChallenge(options.challenge);
@@ -228,6 +232,10 @@ export async function passkeyAuthVerifyLogic(
     throw new Error("invalid credentials");
   }
 
+  if (passkey.disabled) {
+    throw new Error("invalid credentials");
+  }
+
   const verification = await verifyAuthenticationResponse({
     response: req.credential,
     expectedChallenge: challenge,
@@ -245,10 +253,22 @@ export async function passkeyAuthVerifyLogic(
     throw new Error("invalid credentials");
   }
 
+  // Validate counter to detect cloned authenticators
+  const newCounter = verification.authenticationInfo.newCounter;
+  if (newCounter !== 0 && newCounter <= passkey.counter) {
+    // Counter regression: disable the credential immediately
+    await dbExec(
+      db.update(passkeys)
+        .set({ disabled: 1 })
+        .where(eq(passkeys.credential_id, credentialId))
+    );
+    throw new Error("authenticator counter regression detected – credential disabled");
+  }
+
   // Update counter
   await dbExec(
     db.update(passkeys)
-      .set({ counter: verification.authenticationInfo.newCounter })
+      .set({ counter: newCounter })
       .where(eq(passkeys.credential_id, credentialId))
   );
 
