@@ -152,12 +152,11 @@ onUnmounted(() => clearInterval(checkCompletion))
 
       <div v-if="status.inProgress" class="mb-4">
         <div class="flex justify-between mb-2">
-          <span class="font-medium">Fortschritt</span>
           <span class="text-secondary">
-            {{ status.processed }} von {{ status.total }} Fotos
+            Fortschritt: {{ status.processed }} von {{ status.total }} Fotos
             <template v-if="status.errors > 0"> ({{ status.errors }} Fehler)</template>
+            {{ progress }} %
           </span>
-          <span class="text-secondary">{{ progress }} %</span>
         </div>
         <ProgressBar :value="progress" :showValue="false" />
       </div>

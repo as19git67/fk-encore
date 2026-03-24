@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, HTTPException
 import numpy as np
 import insightface
 from insightface.app import FaceAnalysis
@@ -11,8 +11,16 @@ app_state.prepare(ctx_id=0, det_size=(640, 640))
 
 
 def read_image(file: UploadFile):
-    data = np.frombuffer(file.file.read(), np.uint8)
-    return cv2.imdecode(data, cv2.IMREAD_COLOR)
+    raw = file.file.read()
+    if not raw:
+        raise HTTPException(status_code=422, detail="empty image upload")
+
+    data = np.frombuffer(raw, np.uint8)
+    img = cv2.imdecode(data, cv2.IMREAD_COLOR)
+    if img is None:
+        raise HTTPException(status_code=422, detail="invalid or unsupported image data")
+
+    return img
 
 
 @app.post("/embedding")
