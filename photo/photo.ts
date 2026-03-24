@@ -234,6 +234,7 @@ export const getPhotoFile = api.raw(
           try {
               const jpegBuffer = await service.convertHeicToJpeg(filePath);
               res.setHeader("Content-Type", "image/jpeg");
+              res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
               res.end(jpegBuffer);
               return;
           } catch (err) {

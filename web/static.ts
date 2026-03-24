@@ -67,6 +67,15 @@ export const frontend = api.raw(
 
     res.statusCode = 200;
     res.setHeader("Content-Type", contentTypeFor(filePath));
+    
+    // Add caching headers for static assets
+    // We use a shorter TTL for index.html than for hashed assets
+    if (requested === "index.html" || !filePath.includes("assets")) {
+      res.setHeader("Cache-Control", "public, max-age=3600"); // 1 hour for non-hashed files
+    } else {
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable"); // 1 year for hashed assets
+    }
+
     fs.createReadStream(filePath).pipe(res);
   }
 );
