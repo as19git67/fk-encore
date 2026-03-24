@@ -272,17 +272,34 @@ watch(
 
 // ResizeObserver: track container width and scrollMargin
 let resizeObserver: ResizeObserver | null = null
+
+function updateGridMetrics(el: HTMLElement) {
+  containerWidth.value = el.clientWidth
+  // Use document offset (not offsetParent-relative offsetTop) for stable virtualizer positioning.
+  scrollMargin.value = el.getBoundingClientRect().top + window.scrollY
+}
+
+function refreshVirtualLayout() {
+  const el = gridContainerRef.value
+  if (!el) return
+  updateGridMetrics(el)
+  virtualizer.value.measure()
+}
+
 watch(gridContainerRef, (el) => {
   resizeObserver?.disconnect()
   resizeObserver = null
   if (!el) return
-  containerWidth.value = el.clientWidth
-  scrollMargin.value = el.offsetTop
+  updateGridMetrics(el)
   resizeObserver = new ResizeObserver(() => {
-    containerWidth.value = el.clientWidth
-    scrollMargin.value = el.offsetTop
+    updateGridMetrics(el)
+    virtualizer.value.measure()
   })
   resizeObserver.observe(el)
+})
+
+watch(columnCount, () => {
+  virtualizer.value.measure()
 })
 
 async function loadPersons() {
@@ -692,10 +709,12 @@ watch(isFullscreen, (val) => {
 onMounted(() => {
   loadPhotos()
   window.addEventListener('keydown', handleKeydown)
+  window.addEventListener('resize', refreshVirtualLayout)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('resize', refreshVirtualLayout)
   resizeObserver?.disconnect()
 })
 </script>
@@ -1583,22 +1602,38 @@ onUnmounted(() => {
 @media (max-width: 1024px) {
   .gallery-container {
     flex-direction: column;
+    gap: 1rem;
   }
+
+  .photo-grid-virtual {
+    width: 100%;
+  }
+
   .timeline-nav {
     width: 100%;
-    position: static;
+    order: -1;
+    position: sticky;
+    top: 0.5rem;
     max-height: none;
     flex-direction: row;
     overflow-x: auto;
+    overflow-y: hidden;
     padding: 0.5rem;
+    gap: 0.75rem;
+    z-index: 120;
   }
+
   .nav-year-group {
+    flex-direction: row;
+    align-items: center;
+    white-space: nowrap;
+  }
+
+  .nav-months {
     flex-direction: row;
     white-space: nowrap;
   }
-  .nav-months {
-    flex-direction: row;
-  }
+
   .details-sidebar {
     width: 100%;
     position: static;
@@ -1607,6 +1642,75 @@ onUnmounted(() => {
 }
 
 @media (max-width: 640px) {
+  .gallery-container {
+    gap: 0.75rem;
+  }
+
+  .timeline-nav {
+    top: 0;
+    padding: 0.4rem;
+    gap: 0.5rem;
+    border-radius: 6px;
+  }
+
+  .nav-year-group {
+    gap: 0.35rem;
+  }
+
+  .nav-year {
+    font-size: 0.8rem;
+    padding: 0.15rem 0.35rem;
+  }
+
+  .nav-months {
+    gap: 0.15rem;
+  }
+
+  .nav-month {
+    font-size: 0.68rem;
+    padding: 0.1rem 0.25rem;
+  }
+
+  .photo-row {
+    gap: 0.625rem;
+    padding-bottom: 0.75rem;
+  }
+
+  .photo-item {
+    border-radius: 6px;
+  }
+
+  .photo-item :deep(.heic-image-container) {
+    height: 170px;
+  }
+
+  .details-sidebar {
+    padding: 1rem;
+    gap: 0.75rem;
+    border-radius: 6px;
+  }
+
+  .sidebar-header h3 {
+    font-size: 1.05rem;
+  }
+
+  .info-group {
+    margin-bottom: 0.9rem;
+  }
+
+  .info-group label {
+    font-size: 0.7rem;
+  }
+
+  .info-group .value {
+    font-size: 0.9rem;
+  }
+
+  .sidebar-actions {
+    gap: 0.4rem;
+    padding-top: 0.75rem;
+  }
+
   .close-btn {
     right: 0.5rem;
     top: 0.5rem;
