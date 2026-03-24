@@ -156,6 +156,54 @@ const scrollMargin = ref(0)
 // 200px item + 16px gap = 216px per column slot
 const columnCount = computed(() => Math.max(1, Math.floor((containerWidth.value + 16) / 216)))
 
+interface PhotoItem {
+  photo: Photo;
+  index: number;
+  group?: PhotoGroup;
+}
+
+interface MonthGroup {
+  month: string;
+  photos: PhotoItem[];
+}
+
+interface YearGroup {
+  year: string;
+  months: MonthGroup[];
+}
+
+const groupedPhotos = computed(() => {
+  const groups: YearGroup[] = [];
+
+  photos.value.forEach((photo, index) => {
+    // Skip photos hidden by stack (non-cover group members)
+    if (hiddenByStack.value.has(photo.id)) return;
+
+    const date = new Date(photo.taken_at || photo.created_at);
+    const year = date.getFullYear().toString();
+    const month = date.toLocaleString('de-DE', { month: 'long' });
+
+    let yearGroup = groups.find(g => g.year === year);
+    if (!yearGroup) {
+      yearGroup = { year, months: [] };
+      groups.push(yearGroup);
+    }
+
+    let monthGroup = yearGroup.months.find(m => m.month === month);
+    if (!monthGroup) {
+      monthGroup = { month, photos: [] };
+      yearGroup.months.push(monthGroup);
+    }
+
+    const group = photoToGroup.value.get(photo.id);
+    // Only show as stack if group is unreviewed
+    const stackGroup = group && !group.reviewed_at ? group : undefined;
+    monthGroup.photos.push({ photo, index, group: stackGroup });
+  });
+
+  return groups;
+});
+
 type VirtualRow =
   | { type: 'year-header'; year: string }
   | { type: 'month-header'; year: string; month: string }
@@ -296,53 +344,6 @@ watch(selectedPhoto, (newPhoto) => {
   }
 })
 
-interface PhotoItem {
-  photo: Photo;
-  index: number;
-  group?: PhotoGroup;
-}
-
-interface MonthGroup {
-  month: string;
-  photos: PhotoItem[];
-}
-
-interface YearGroup {
-  year: string;
-  months: MonthGroup[];
-}
-
-const groupedPhotos = computed(() => {
-  const groups: YearGroup[] = [];
-
-  photos.value.forEach((photo, index) => {
-    // Skip photos hidden by stack (non-cover group members)
-    if (hiddenByStack.value.has(photo.id)) return;
-
-    const date = new Date(photo.taken_at || photo.created_at);
-    const year = date.getFullYear().toString();
-    const month = date.toLocaleString('de-DE', { month: 'long' });
-
-    let yearGroup = groups.find(g => g.year === year);
-    if (!yearGroup) {
-      yearGroup = { year, months: [] };
-      groups.push(yearGroup);
-    }
-
-    let monthGroup = yearGroup.months.find(m => m.month === month);
-    if (!monthGroup) {
-      monthGroup = { month, photos: [] };
-      yearGroup.months.push(monthGroup);
-    }
-
-    const group = photoToGroup.value.get(photo.id);
-    // Only show as stack if group is unreviewed
-    const stackGroup = group && !group.reviewed_at ? group : undefined;
-    monthGroup.photos.push({ photo, index, group: stackGroup });
-  });
-
-  return groups;
-});
 
 async function loadPhotos() {
   loading.value = true
