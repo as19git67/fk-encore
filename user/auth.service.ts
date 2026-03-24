@@ -11,6 +11,7 @@ import type {
   LogoutResponse,
 } from "../db/types";
 import { toUser, getRolesForUser, getPermissionsForUser } from "./user.service";
+import { checkRateLimit, resetRateLimit, getClientIp } from "./rateLimiter";
 
 const isPg = process.env.DB_TYPE?.toLowerCase() === 'postgres'
 const nowSql = isPg ? sql`NOW()` : sql`datetime('now')`
@@ -26,6 +27,9 @@ async function cleanupExpiredSessions(): Promise<void> {
 // ---------- Business Logic ----------
 
 export async function loginLogic(req: LoginRequest): Promise<LoginResponse> {
+  const ip = getClientIp();
+  checkRateLimit(ip);
+
   if (!req.email || !req.password) {
     throw new Error("email and password are required");
   }
@@ -42,6 +46,8 @@ export async function loginLogic(req: LoginRequest): Promise<LoginResponse> {
   if (!valid) {
     throw new Error("invalid credentials");
   }
+
+  resetRateLimit(ip);
 
   // Cleanup expired sessions
   await cleanupExpiredSessions();
