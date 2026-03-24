@@ -733,7 +733,7 @@ onUnmounted(() => {
           >
             <div
               v-for="vRow in virtualizer.getVirtualItems()"
-              :key="vRow.key"
+              :key="String(vRow.key)"
               style="position: absolute; top: 0; left: 0; width: 100%;"
               :style="{ transform: `translateY(${vRow.start - scrollMargin}px)` }"
             >
@@ -813,7 +813,7 @@ onUnmounted(() => {
           >
             <div
               v-for="vRow in virtualizer.getVirtualItems()"
-              :key="vRow.key"
+              :key="String(vRow.key)"
               style="position: absolute; top: 0; left: 0; width: 100%;"
               :style="{ transform: `translateY(${vRow.start - scrollMargin}px)` }"
             >
