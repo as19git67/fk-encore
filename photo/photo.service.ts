@@ -49,6 +49,14 @@ export const UPLOAD_DIR = path.resolve(process.env.PHOTO_UPLOAD_DIR || "uploads/
 const INSIGHTFACE_SERVICE_URL = process.env.INSIGHTFACE_SERVICE_URL || "http://localhost:8000";
 const EMBEDDING_SERVICE_URL = process.env.EMBEDDING_SERVICE_URL || "http://localhost:8001";
 
+function getUploadMimeType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === ".png") return "image/png";
+  if (ext === ".webp") return "image/webp";
+  if (ext === ".bmp") return "image/bmp";
+  return "image/jpeg";
+}
+
 // Distance threshold for face matching.
 // InsightFace uses cosine similarity (higher is better, 1.0 is identical).
 // We convert it to a "distance" if we want, or just use similarity directly.
@@ -65,7 +73,7 @@ if (!fs.existsSync(UPLOAD_DIR)) {
 async function callInsightFaceDetect(filePath: string): Promise<{ faces: any[], width: number, height: number }> {
   const formData = new FormData();
   const fileData = await fs.promises.readFile(filePath);
-  const blob = new Blob([fileData], { type: 'image/jpeg' });
+  const blob = new Blob([fileData], { type: getUploadMimeType(filePath) });
   formData.append('file', blob, path.basename(filePath));
 
   const response = await fetch(`${INSIGHTFACE_SERVICE_URL}/detect`, {
@@ -88,7 +96,7 @@ async function callEmbeddingServiceUpload(
 ): Promise<void> {
   const formData = new FormData();
   const fileData = await fs.promises.readFile(filePath);
-  const blob = new Blob([fileData], { type: 'image/jpeg' });
+  const blob = new Blob([fileData], { type: getUploadMimeType(filePath) });
   
   formData.append('file', blob, path.basename(filePath));
   formData.append('photo_id', photoId);
@@ -164,6 +172,7 @@ export async function indexPhotoFaces(userId: number, photoId: number, resetIgno
       processingPath = tempPath;
     } catch (err) {
       console.error(`Error converting HEIC photo ${photoId}:`, err);
+      return;
     }
   }
 

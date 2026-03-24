@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, computed, onUnmounted, nextTick, type ComponentPublicInstance } from 'vue'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import Dialog from 'primevue/dialog'
@@ -100,6 +100,10 @@ const inlineRenamePersonId = ref<number | null>(null)
 const inlineRenameValue = ref('')
 const inlineRenameSaving = ref(false)
 const inlineRenameInputRef = ref<HTMLInputElement | null>(null)
+
+function setInlineRenameInputRef(el: Element | ComponentPublicInstance | null) {
+    inlineRenameInputRef.value = el instanceof HTMLInputElement ? el : null
+}
 
 function normalizePersonName(name: string) {
     return name.trim().toLocaleLowerCase()
@@ -584,7 +588,7 @@ onUnmounted(() => {
 
 <template>
   <div class="p-4">
-    <div class="flex justify-between items-center mb-6">
+    <div class="content-header">
       <div class="flex items-center gap-4">
           <Button v-if="selectedPersonDetail" icon="pi pi-arrow-left" class="p-button-text p-button-rounded" @click="closePersonDetails" />
           <h1 class="text-3xl font-bold">{{ selectedPersonDetail ? selectedPersonDetail.name : 'Personen' }}</h1>
@@ -663,7 +667,7 @@ onUnmounted(() => {
             <div class="person-info" @click.stop="handlePersonInfoClick(person)">
               <div v-if="inlineRenamePersonId === person.id" class="person-rename-row">
                 <input
-                  ref="inlineRenameInputRef"
+                  :ref="setInlineRenameInputRef"
                   v-model="inlineRenameValue"
                   class="person-name-input"
                   type="text"
@@ -871,6 +875,13 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.content-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  gap: 1em;
+}
 .persons-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -983,18 +994,9 @@ onUnmounted(() => {
   flex: 1 1 auto;
   width: 0;
   min-width: 0;
-  font-weight: 600;
-  color: #111827;
-  border: 1px solid #d1d5db;
-  border-radius: 0.375rem;
-  padding: 0.2rem 0.4rem;
-  line-height: 1.1;
-  outline: none;
 }
 
 .person-name-input:focus {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
 }
 
 .person-rename-btn {
