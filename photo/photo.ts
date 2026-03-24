@@ -189,6 +189,11 @@ export const updatePhotoDate = api(
     const authData = getAuthData()!;
     requirePermission(authData, "photos.upload");
 
+    const parsed = new Date(taken_at);
+    if (!taken_at || Number.isNaN(parsed.getTime())) {
+      throw APIError.invalidArgument("taken_at must be a valid ISO datetime");
+    }
+
     return await service.updatePhotoDateLogic(userId, id, taken_at);
   }
 );
