@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, onUnmounted, nextTick, type ComponentPublicInstance } from 'vue'
+import { ref, onMounted, computed, onUnmounted, nextTick, watch, type ComponentPublicInstance } from 'vue'
+import { useWindowVirtualizer } from '@tanstack/vue-virtual'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import Dialog from 'primevue/dialog'
@@ -24,6 +25,91 @@ const selectedIndex = ref(-1)
 
 // Show hidden photos toggle (like in PhotosView)
 const showHidden = ref(false)
+
+// ── Virtual Scrolling ──────────────────────────────────────────────────────
+const gridContainerRef = ref<HTMLElement | null>(null)
+const containerWidth = ref(1024)
+const scrollMargin = ref(0)
+
+// Person Grid: 200px item + 24px gap (1.5rem) = 224px
+const personColumnCount = computed(() => Math.max(1, Math.floor((containerWidth.value + 24) / 224)))
+
+// Detail Photo Grid: 180px item + 16px gap (1rem) = 196px
+const photoColumnCount = computed(() => Math.max(1, Math.floor((containerWidth.value + 16) / 196)))
+
+type VirtualRow =
+  | { type: 'persons'; items: Person[] }
+  | { type: 'detail-hero'; item: { face: any; photo: Photo } }
+  | { type: 'detail-photos'; items: { face: any; photo: Photo }[] }
+
+const virtualRows = computed<VirtualRow[]>(() => {
+  const rows: VirtualRow[] = []
+  
+  if (!selectedPersonDetail.value) {
+    // Main person list
+    for (let i = 0; i < persons.value.length; i += personColumnCount.value) {
+      rows.push({ type: 'persons', items: persons.value.slice(i, i + personColumnCount.value) })
+    }
+  } else if (!loadingDetails.value) {
+    // Person detail view
+    if (firstPersonFaceItem.value) {
+      rows.push({ type: 'detail-hero', item: firstPersonFaceItem.value })
+    }
+    
+    const otherPhotos = uniquePhotoFaceItems.value.slice(1)
+    for (let i = 0; i < otherPhotos.length; i += photoColumnCount.value) {
+      rows.push({ type: 'detail-photos', items: otherPhotos.slice(i, i + photoColumnCount.value) })
+    }
+  }
+  
+  return rows
+})
+
+const virtualizer = useWindowVirtualizer(computed(() => ({
+  count: virtualRows.value.length,
+  estimateSize: (i: number) => {
+    const row = virtualRows.value[i]
+    if (!row) return 260
+    if (row.type === 'persons') return 260
+    if (row.type === 'detail-hero') {
+        const vw = containerWidth.value
+        return Math.max(220, Math.min(620, vw * 0.52)) + 24
+    }
+    if (row.type === 'detail-photos') return 180 + 16
+    return 260
+  },
+  overscan: 5,
+  scrollMargin: scrollMargin.value,
+})))
+
+let resizeObserver: ResizeObserver | null = null
+
+function updateGridMetrics(el: HTMLElement) {
+  containerWidth.value = el.clientWidth
+  scrollMargin.value = el.getBoundingClientRect().top + window.scrollY
+}
+
+watch(gridContainerRef, (el) => {
+  resizeObserver?.disconnect()
+  resizeObserver = null
+  if (!el) return
+  updateGridMetrics(el)
+  resizeObserver = new ResizeObserver(() => {
+    updateGridMetrics(el)
+    virtualizer.value.measure()
+  })
+  resizeObserver.observe(el)
+})
+
+// Re-measure when switching views or changing hidden filter
+watch([selectedPersonDetail, showHidden, loadingDetails], () => {
+  nextTick(() => {
+    if (gridContainerRef.value) {
+      updateGridMetrics(gridContainerRef.value)
+      virtualizer.value.measure()
+    }
+  })
+})
 
 const personFaceItems = computed(() => {
     if (!selectedPersonDetail.value) return []
@@ -208,6 +294,7 @@ async function loadData() {
 }
 
 async function openPersonDetails(person: Pick<Person, 'id'>) {
+    window.scrollTo(0, 0)
     loadingDetails.value = true
     error.value = ''
     try {
@@ -220,6 +307,7 @@ async function openPersonDetails(person: Pick<Person, 'id'>) {
 }
 
 function closePersonDetails() {
+    window.scrollTo(0, 0)
     selectedPersonDetail.value = null
     isFullscreen.value = false
     selectedIndex.value = -1
@@ -637,60 +725,75 @@ onUnmounted(() => {
           <p class="text-gray-400">Lade Fotos hoch, um die automatische Erkennung zu starten.</p>
         </div>
 
-        <div v-else class="persons-grid">
-          <div 
-            v-for="person in persons" 
-            :key="person.id"
-            class="person-item"
-            :class="{ 'selected': selectedPersonIds.includes(person.id) }"
-            @click="multiSelectMode ? toggleSelect(person.id) : openPersonDetails(person)"
+        <div v-else class="gallery-container">
+          <div
+            ref="gridContainerRef"
+            class="virtual-grid-container"
+            :style="{ height: virtualizer.getTotalSize() + 'px', position: 'relative' }"
           >
-            <div class="person-cover">
-              <HeicImage 
-                :src="getCoverUrl(person)" 
-                :alt="person.name"
-                class="person-img"
-                objectFit="scale-down"
-                :imageStyle="getFaceStyle(person, { objectFit: 'scale-down' })"
-              >
-                <div class="face-highlight" :style="getFaceHighlightStyle(person.cover_bbox, true)" style="border: none !important; box-shadow: none !important;"></div>
-              </HeicImage>
-              <div v-if="multiSelectMode" class="selection-overlay">
-                  <div class="selection-checkbox" :class="{ 'checked': selectedPersonIds.includes(person.id) }">
-                      <i v-if="selectedPersonIds.includes(person.id)" class="pi pi-check"></i>
+            <div
+              v-for="vRow in virtualizer.getVirtualItems()"
+              :key="vRow.key"
+              style="position: absolute; top: 0; left: 0; width: 100%;"
+              :style="{ transform: `translateY(${vRow.start - scrollMargin}px)` }"
+            >
+              <div v-if="virtualRows[vRow.index]?.type === 'persons'" class="persons-grid-row">
+                <div 
+                  v-for="person in (virtualRows[vRow.index] as { type: 'persons'; items: Person[] }).items" 
+                  :key="person.id"
+                  class="person-item"
+                  :class="{ 'selected': selectedPersonIds.includes(person.id) }"
+                  @click="multiSelectMode ? toggleSelect(person.id) : openPersonDetails(person)"
+                >
+                  <div class="person-cover">
+                    <HeicImage 
+                      :src="getCoverUrl(person)" 
+                      :alt="person.name"
+                      class="person-img"
+                      objectFit="scale-down"
+                      :imageStyle="getFaceStyle(person, { objectFit: 'scale-down' })"
+                    >
+                      <div class="face-highlight" :style="getFaceHighlightStyle(person.cover_bbox, true)" style="border: none !important; box-shadow: none !important;"></div>
+                    </HeicImage>
+                    <div v-if="multiSelectMode" class="selection-overlay">
+                        <div class="selection-checkbox" :class="{ 'checked': selectedPersonIds.includes(person.id) }">
+                            <i v-if="selectedPersonIds.includes(person.id)" class="pi pi-check"></i>
+                        </div>
+                    </div>
+                    <div class="person-badge">
+                      {{ person.faceCount }} {{ person.faceCount === 1 ? 'Foto' : 'Fotos' }}
+                    </div>
                   </div>
+                  <div class="person-info" @click.stop="handlePersonInfoClick(person)">
+                    <div v-if="inlineRenamePersonId === person.id" class="person-rename-row">
+                      <input
+                        :ref="setInlineRenameInputRef"
+                        v-model="inlineRenameValue"
+                        class="person-name-input"
+                        type="text"
+                        autocomplete="off"
+                        :disabled="inlineRenameSaving"
+                        @click.stop
+                        @keydown.enter.prevent.stop="submitInlineRename"
+                        @keydown.esc.prevent.stop="cancelInlineRename"
+                      />
+                      <Button
+                        icon="pi pi-check"
+                        class="person-rename-btn p-button-rounded p-button-sm p-button-text"
+                        :disabled="inlineRenameSaving || !inlineRenameValue.trim() || inlineRenameValue.trim().toLowerCase() === 'unbenannt'"
+                        @click.stop="submitInlineRename"
+                      />
+                      <Button
+                        icon="pi pi-times"
+                        class="person-rename-btn p-button-rounded p-button-sm p-button-text"
+                        :disabled="inlineRenameSaving"
+                        @click.stop="cancelInlineRename"
+                      />
+                    </div>
+                    <h3 v-else class="person-name truncate">{{ person.name }}</h3>
+                  </div>
+                </div>
               </div>
-              <div class="person-badge">
-                {{ person.faceCount }} {{ person.faceCount === 1 ? 'Foto' : 'Fotos' }}
-              </div>
-            </div>
-            <div class="person-info" @click.stop="handlePersonInfoClick(person)">
-              <div v-if="inlineRenamePersonId === person.id" class="person-rename-row">
-                <input
-                  :ref="setInlineRenameInputRef"
-                  v-model="inlineRenameValue"
-                  class="person-name-input"
-                  type="text"
-                  autocomplete="off"
-                  :disabled="inlineRenameSaving"
-                  @click.stop
-                  @keydown.enter.prevent.stop="submitInlineRename"
-                  @keydown.esc.prevent.stop="cancelInlineRename"
-                />
-                <Button
-                  icon="pi pi-check"
-                  class="person-rename-btn p-button-rounded p-button-sm p-button-text"
-                  :disabled="inlineRenameSaving || !inlineRenameValue.trim() || inlineRenameValue.trim().toLowerCase() === 'unbenannt'"
-                  @click.stop="submitInlineRename"
-                />
-                <Button
-                  icon="pi pi-times"
-                  class="person-rename-btn p-button-rounded p-button-sm p-button-text"
-                  :disabled="inlineRenameSaving"
-                  @click.stop="cancelInlineRename"
-                />
-              </div>
-              <h3 v-else class="person-name truncate">{{ person.name }}</h3>
             </div>
           </div>
         </div>
@@ -702,52 +805,67 @@ onUnmounted(() => {
             <i class="pi pi-spin pi-spinner text-4xl mb-2"></i>
             <p>Fotos werden geladen...</p>
         </div>
-        <div v-else>
+        <div v-else class="gallery-container">
+          <div
+            ref="gridContainerRef"
+            class="virtual-grid-container"
+            :style="{ height: virtualizer.getTotalSize() + 'px', position: 'relative' }"
+          >
             <div
-                v-if="firstPersonFaceItem"
-                class="person-hero"
-                :class="{ 'photo-hidden': firstPersonFaceItem.photo.curation_status === 'hidden' }"
-                @click="selectedIndex = getUniquePhotoIndex(firstPersonFaceItem!.photo.id); isFullscreen = true"
+              v-for="vRow in virtualizer.getVirtualItems()"
+              :key="vRow.key"
+              style="position: absolute; top: 0; left: 0; width: 100%;"
+              :style="{ transform: `translateY(${vRow.start - scrollMargin}px)` }"
             >
+              <!-- Hero section -->
+              <div
+                v-if="virtualRows[vRow.index]?.type === 'detail-hero'"
+                class="person-hero"
+                :class="{ 'photo-hidden': (virtualRows[vRow.index] as { type: 'detail-hero'; item: { face: any; photo: Photo } }).item.photo.curation_status === 'hidden' }"
+                @click="selectedIndex = getUniquePhotoIndex((virtualRows[vRow.index] as { type: 'detail-hero'; item: { face: any; photo: Photo } }).item.photo.id); isFullscreen = true"
+              >
                 <HeicImage
-                    :src="getPhotoUrl(firstPersonFaceItem.photo.filename)"
-                    :alt="firstPersonFaceItem.photo.original_name"
+                    :src="getPhotoUrl((virtualRows[vRow.index] as { type: 'detail-hero'; item: { face: any; photo: Photo } }).item.photo.filename)"
+                    :alt="(virtualRows[vRow.index] as { type: 'detail-hero'; item: { face: any; photo: Photo } }).item.photo.original_name"
                     class="person-hero-image"
                     objectFit="scale-down"
-                    :imageStyle="getHeroImageStyle(firstPersonFaceItem.face.bbox)"
+                    :imageStyle="getHeroImageStyle((virtualRows[vRow.index] as { type: 'detail-hero'; item: { face: any; photo: Photo } }).item.face.bbox)"
                 >
-                    <div class="face-highlight" :style="getHeroFaceHighlightStyle(firstPersonFaceItem.face.bbox)"></div>
+                    <div class="face-highlight" :style="getHeroFaceHighlightStyle((virtualRows[vRow.index] as { type: 'detail-hero'; item: { face: any; photo: Photo } }).item.face.bbox)"></div>
                 </HeicImage>
-                <div v-if="firstPersonFaceItem.photo.curation_status === 'hidden'" class="hidden-badge">
+                <div v-if="(virtualRows[vRow.index] as { type: 'detail-hero'; item: { face: any; photo: Photo } }).item.photo.curation_status === 'hidden'" class="hidden-badge">
                     <i class="pi pi-eye-slash"></i>
                 </div>
-            </div>
+              </div>
 
-            <div class="photo-grid">
-            <div
-                v-for="item in uniquePhotoFaceItems.slice(1)"
-                :key="item.face.id"
-                class="photo-item"
-                :class="{ 'photo-hidden': item.photo.curation_status === 'hidden' }"
-                @click="selectedIndex = getUniquePhotoIndex(item.photo.id); isFullscreen = true"
-            >
-                <HeicImage :src="getPhotoUrl(item.photo.filename)" :alt="item.photo.original_name">
-                    <div class="face-highlight" :style="getFaceHighlightStyle(item.face.bbox, true)"></div>
-                </HeicImage>
-                <div v-if="item.photo.curation_status === 'hidden'" class="hidden-badge">
-                    <i class="pi pi-eye-slash"></i>
+              <!-- Photo grid row -->
+              <div v-else-if="virtualRows[vRow.index]?.type === 'detail-photos'" class="photo-grid-row">
+                <div
+                    v-for="item in (virtualRows[vRow.index] as { type: 'detail-photos'; items: { face: any; photo: Photo }[] }).items"
+                    :key="item.face.id"
+                    class="photo-item"
+                    :class="{ 'photo-hidden': item.photo.curation_status === 'hidden' }"
+                    @click="selectedIndex = getUniquePhotoIndex(item.photo.id); isFullscreen = true"
+                >
+                    <HeicImage :src="getPhotoUrl(item.photo.filename)" :alt="item.photo.original_name">
+                        <div class="face-highlight" :style="getFaceHighlightStyle(item.face.bbox, true)"></div>
+                    </HeicImage>
+                    <div v-if="item.photo.curation_status === 'hidden'" class="hidden-badge">
+                        <i class="pi pi-eye-slash"></i>
+                    </div>
+                    <div class="photo-overlay">
+                        <div class="photo-name">{{ item.photo.original_name }}</div>
+                        <Button 
+                            icon="pi pi-trash" 
+                            class="p-button-rounded p-button-danger p-button-text ignore-btn" 
+                            @click.stop="handleIgnoreFace(item.face.id)"
+                            v-tooltip="'Gesicht ignorieren'"
+                        />
+                    </div>
                 </div>
-                <div class="photo-overlay">
-                    <div class="photo-name">{{ item.photo.original_name }}</div>
-                    <Button 
-                        icon="pi pi-trash" 
-                        class="p-button-rounded p-button-danger p-button-text ignore-btn" 
-                        @click.stop="handleIgnoreFace(item.face.id)"
-                        v-tooltip="'Gesicht ignorieren'"
-                    />
-                </div>
+              </div>
             </div>
-            </div>
+          </div>
         </div>
     </div>
 
@@ -882,6 +1000,30 @@ onUnmounted(() => {
   margin-bottom: 1.5rem;
   gap: 1em;
 }
+
+.gallery-container {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.virtual-grid-container {
+  width: 100%;
+}
+
+.persons-grid-row {
+  display: flex;
+  gap: 1.5rem;
+  padding: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.photo-grid-row {
+  display: flex;
+  gap: 1rem;
+  padding-bottom: 1rem;
+}
+
 .persons-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -900,6 +1042,8 @@ onUnmounted(() => {
   cursor: pointer;
   transition: all 0.2s ease-in-out;
   border: 1px solid #e5e7eb;
+  width: 200px;
+  flex: 0 0 auto;
 }
 
 .person-item:hover {
@@ -1061,6 +1205,8 @@ onUnmounted(() => {
     cursor: pointer;
     background: #f3f4f6;
     border: 1px solid #e5e7eb;
+    width: 180px;
+    flex: 0 0 auto;
 }
 
 .photo-item :deep(.heic-image-container) {
