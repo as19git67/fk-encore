@@ -48,6 +48,8 @@ const nowSql = isPg ? sql`NOW()` : sql`datetime('now')`
 export const UPLOAD_DIR = path.resolve(process.env.PHOTO_UPLOAD_DIR || "uploads/photos");
 const INSIGHTFACE_SERVICE_URL = process.env.INSIGHTFACE_SERVICE_URL || "http://localhost:8000";
 const EMBEDDING_SERVICE_URL = process.env.EMBEDDING_SERVICE_URL || "http://localhost:8001";
+const EXIF_WRITE_TIMEOUT_MS = parseInt(process.env.EXIF_WRITE_TIMEOUT_MS || "8000", 10);
+const EXIF_WRITABLE_EXTENSIONS = new Set([".jpg", ".jpeg", ".tif", ".tiff", ".png"]);
 
 function getUploadMimeType(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
@@ -603,26 +605,40 @@ export async function updatePhotoDateLogic(
     throw new Error("File not found on disk");
   }
 
+  const parsedDate = new Date(takenAt);
+  if (Number.isNaN(parsedDate.getTime())) {
+    throw new Error("Invalid taken_at date");
+  }
+
   // 1. Update database
   await dbExec(db.update(photos).set({ taken_at: takenAt }).where(eq(photos.id, photoId)));
 
   // 2. Update file metadata
   try {
-    const date = new Date(takenAt);
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    const seconds = String(date.getSeconds()).padStart(2, '0');
+    const ext = path.extname(filePath).toLowerCase();
+    if (!EXIF_WRITABLE_EXTENSIONS.has(ext)) {
+      return { success: true, taken_at: takenAt };
+    }
+
+    const year = parsedDate.getFullYear();
+    const month = String(parsedDate.getMonth() + 1).padStart(2, '0');
+    const day = String(parsedDate.getDate()).padStart(2, '0');
+    const hours = String(parsedDate.getHours()).padStart(2, '0');
+    const minutes = String(parsedDate.getMinutes()).padStart(2, '0');
+    const seconds = String(parsedDate.getSeconds()).padStart(2, '0');
     const formattedDate = `${year}:${month}:${day} ${hours}:${minutes}:${seconds}`;
 
     // Write to multiple tags to ensure compatibility
-    await exiftool.write(filePath, {
-      DateTimeOriginal: formattedDate,
-      CreateDate: formattedDate,
-      ModifyDate: formattedDate,
-    }, ["-overwrite_original"]);
+    await Promise.race([
+      exiftool.write(filePath, {
+        DateTimeOriginal: formattedDate,
+        CreateDate: formattedDate,
+        ModifyDate: formattedDate,
+      }, ["-overwrite_original"]),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(`EXIF_WRITE_TIMEOUT after ${EXIF_WRITE_TIMEOUT_MS}ms`)), EXIF_WRITE_TIMEOUT_MS);
+      })
+    ]);
   } catch (err) {
     console.error("Error updating EXIF data with exiftool:", err);
     // Don't throw error if DB update succeeded, but log it
