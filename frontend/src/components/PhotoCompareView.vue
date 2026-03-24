@@ -109,6 +109,8 @@ function pickNextPair(): [number, number] | null {
   return candidates[0]!.pair
 }
 
+const hasNextPair = computed(() => !!pickNextPair())
+
 function initScores() {
   const map = new Map<number, number>()
   for (const photo of groupPhotos.value) {
@@ -239,6 +241,8 @@ const suggestedHideIds = computed(() => {
     .filter(p => (scores.value.get(p.id) ?? 0) < 0)
     .map(p => p.id)
 })
+
+const hasSuggestions = computed(() => suggestedHideIds.value.length > 0)
 
 function applySuggestions() {
   for (const id of suggestedHideIds.value) {
@@ -449,37 +453,57 @@ function getPhotoById(id: number): Photo | undefined {
         <div class="compare-header">
           <div class="compare-header-left">
             <Button
+              v-if="hasNextPair"
               icon="pi pi-arrow-left"
               label="Weiter vergleichen"
               text
               size="small"
               @click="goBackToCompare"
-              :disabled="!pickNextPair()"
             />
           </div>
           <div class="compare-header-center">
             <span class="review-title">
-              Vorschlag: {{ suggestedHideIds.length }} von {{ groupPhotos.length }} ausblenden
+              <template v-if="hasSuggestions">
+                Vorschlag: {{ suggestedHideIds.length }} von {{ groupPhotos.length }} ausblenden
+              </template>
+              <template v-else>
+                Kein Ausblenden vorgeschlagen (0 von {{ groupPhotos.length }})
+              </template>
             </span>
           </div>
           <div class="compare-header-right">
             <template v-if="!reviewDecided">
-              <Button
-                v-if="suggestedHideIds.length > 0"
-                label="Vorschlag übernehmen"
-                icon="pi pi-check"
-                severity="warn"
-                size="small"
-                @click="applySuggestions"
-              />
-              <Button
-                label="Vorschlag ablehnen"
-                icon="pi pi-times"
-                severity="secondary"
-                outlined
-                size="small"
-                @click="rejectSuggestions"
-              />
+              <template v-if="hasSuggestions">
+                <Button
+                  label="Vorschlag übernehmen"
+                  icon="pi pi-check"
+                  severity="warn"
+                  size="small"
+                  @click="applySuggestions"
+                />
+                <Button
+                  label="Vorschlag ablehnen"
+                  icon="pi pi-times"
+                  severity="secondary"
+                  outlined
+                  size="small"
+                  @click="rejectSuggestions"
+                />
+              </template>
+              <template v-else>
+                <span class="no-suggestion-hint">Keine Aktion erforderlich</span>
+                <Button label="Fertig" icon="pi pi-check" @click="handleDone" severity="success" size="small" />
+                <Button
+                  v-if="totalUnreviewed > 1"
+                  label="Fertig + Weiter"
+                  icon="pi pi-arrow-right"
+                  iconPos="right"
+                  @click="handleDoneAndNext"
+                  severity="success"
+                  outlined
+                  size="small"
+                />
+              </template>
             </template>
             <template v-else>
               <Button label="Fertig" icon="pi pi-check" @click="handleDone" severity="success" size="small" />
@@ -598,6 +622,11 @@ function getPhotoById(id: number): Photo | undefined {
 
 .review-title {
   color: var(--p-slate-950);
+}
+
+.no-suggestion-hint {
+  color: var(--p-text-muted-color);
+  font-size: 0.82rem;
 }
 
 /* ── Side-by-side (compare phase) ── */
