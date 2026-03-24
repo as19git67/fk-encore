@@ -1,0 +1,61 @@
+services:
+  # ── Main Encore.ts Application ─────────────────────────────────────────────
+  # ── InsightFace Service (Face Detection) ───────────────────────────────────
+  insightface:
+    ports:
+      - "8000:8000"
+    image: ghcr.io/as19git67/fk-encore-insightface:latest
+    container_name: fk-encore-insightface
+    restart: unless-stopped
+    environment:
+      ORT_LOGGING_LEVEL: "3"
+
+  # ── Embedding Service (CLIP + DINOv2) ──────────────────────────────────────
+  embedding_service:
+    ports:
+      - "8001:8000"
+    image: ghcr.io/as19git67/fk-encore-embedding:latest
+    container_name: fk-encore-embedding
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/embeddings
+      CLIP_MODEL_NAME: ViT-B-32
+      CLIP_PRETRAINED: openai
+      DINO_MODEL_NAME: facebook/dinov2-base
+      LOG_LEVEL: INFO
+
+  # ── PostgreSQL (shared instance for both app and embedding service) ─────────
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: fk-encore-db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: encore          # primary database for the app
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d encore"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  photos:
+    driver: local
+    driver_opts:
+      device: /Users/aschegg/fk-encore_data/photos
+      o: bind
+      type: none
+  pgdata:
+    driver: local
+    driver_opts:
+      device: /Users/aschegg/fk-encore_data/pgdata
+      o: bind
+      type: none
