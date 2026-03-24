@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { useWindowVirtualizer } from '@tanstack/vue-virtual'
 import Button from 'primevue/button'
 import FileUpload from 'primevue/fileupload'
 import Message from 'primevue/message'
@@ -146,6 +147,96 @@ const loadingFaces = ref(false)
 const reindexingPhoto = ref(false)
 const persons = ref<Person[]>([])
 
+// ── Virtual Scrolling ──────────────────────────────────────────────────────
+
+const gridContainerRef = ref<HTMLElement | null>(null)
+const containerWidth = ref(800)
+const scrollMargin = ref(0)
+
+// 200px item + 16px gap = 216px per column slot
+const columnCount = computed(() => Math.max(1, Math.floor((containerWidth.value + 16) / 216)))
+
+type VirtualRow =
+  | { type: 'year-header'; year: string }
+  | { type: 'month-header'; year: string; month: string }
+  | { type: 'photos'; items: PhotoItem[] }
+
+const virtualRows = computed<VirtualRow[]>(() => {
+  const rows: VirtualRow[] = []
+  for (const yearGroup of groupedPhotos.value) {
+    rows.push({ type: 'year-header', year: yearGroup.year })
+    for (const monthGroup of yearGroup.months) {
+      rows.push({ type: 'month-header', year: yearGroup.year, month: monthGroup.month })
+      const items = monthGroup.photos
+      for (let i = 0; i < items.length; i += columnCount.value) {
+        rows.push({ type: 'photos', items: items.slice(i, i + columnCount.value) })
+      }
+    }
+  }
+  return rows
+})
+
+// Fast lookup: section-id → row index
+const sectionToRowIndex = computed(() => {
+  const map = new Map<string, number>()
+  virtualRows.value.forEach((row, i) => {
+    if (row.type === 'year-header') map.set('year-' + row.year, i)
+    else if (row.type === 'month-header') map.set('month-' + row.year + '-' + row.month, i)
+  })
+  return map
+})
+
+// Fast lookup: photoId → row index
+const photoIdToRowIndex = computed(() => {
+  const map = new Map<number, number>()
+  virtualRows.value.forEach((row, i) => {
+    if (row.type === 'photos') row.items.forEach(item => map.set(item.photo.id, i))
+  })
+  return map
+})
+
+const virtualizer = useWindowVirtualizer(computed(() => ({
+  count: virtualRows.value.length,
+  estimateSize: (i: number) => {
+    const row = virtualRows.value[i]
+    if (!row) return 224
+    if (row.type === 'year-header') return 90
+    if (row.type === 'month-header') return 56
+    return 224 // photo row: 200px image + gap
+  },
+  overscan: 3,
+  scrollMargin: scrollMargin.value,
+})))
+
+// Update active section based on which virtual rows are currently visible
+watch(
+  () => virtualizer.value.getVirtualItems(),
+  (items) => {
+    let current = activeSection.value
+    for (const vItem of items) {
+      const row = virtualRows.value[vItem.index]
+      if (row?.type === 'year-header') current = 'year-' + row.year
+      else if (row?.type === 'month-header') current = 'month-' + row.year + '-' + row.month
+    }
+    if (current !== activeSection.value) activeSection.value = current
+  }
+)
+
+// ResizeObserver: track container width and scrollMargin
+let resizeObserver: ResizeObserver | null = null
+watch(gridContainerRef, (el) => {
+  resizeObserver?.disconnect()
+  resizeObserver = null
+  if (!el) return
+  containerWidth.value = el.clientWidth
+  scrollMargin.value = el.offsetTop
+  resizeObserver = new ResizeObserver(() => {
+    containerWidth.value = el.clientWidth
+    scrollMargin.value = el.offsetTop
+  })
+  resizeObserver.observe(el)
+})
+
 async function loadPersons() {
   try {
     const res = await listPersons()
@@ -275,9 +366,10 @@ async function loadPhotos() {
 }
 
 function scrollToSection(id: string) {
-  const el = document.getElementById(id)
-  if (el) {
-    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  const index = sectionToRowIndex.value.get(id)
+  if (index !== undefined) {
+    virtualizer.value.scrollToIndex(index, { align: 'start', behavior: 'smooth' })
+    activeSection.value = id
   }
 }
 
@@ -398,12 +490,11 @@ async function handleToggleFavorite(id: number, currentStatus: CurationStatus) {
   }
 }
 
-// Fix #1: Scroll to a photo by ID after reload
 function scrollToPhoto(photoId: number) {
-  nextTick(() => {
-    const el = document.querySelector(`[data-photo-id="${photoId}"]`)
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  })
+  const index = photoIdToRowIndex.value.get(photoId)
+  if (index !== undefined) {
+    virtualizer.value.scrollToIndex(index, { align: 'center', behavior: 'smooth' })
+  }
 }
 
 function handleGroupClose() {
@@ -584,12 +675,13 @@ function handleKeydown(e: KeyboardEvent) {
 watch(selectedIndex, (newIdx) => {
   isEditingDate.value = false
   if (newIdx === -1 || isFullscreen.value) return
-  nextTick(() => {
-    const el = document.querySelector('.photo-item.selected')
-    if (el) {
-      el.scrollIntoView({ behavior: 'auto', block: 'nearest' })
+  const photo = photos.value[newIdx]
+  if (photo) {
+    const rowIndex = photoIdToRowIndex.value.get(photo.id)
+    if (rowIndex !== undefined) {
+      virtualizer.value.scrollToIndex(rowIndex, { align: 'auto', behavior: 'auto' })
     }
-  })
+  }
 })
 
 watch(isFullscreen, (val) => {
@@ -599,29 +691,11 @@ watch(isFullscreen, (val) => {
 onMounted(() => {
   loadPhotos()
   window.addEventListener('keydown', handleKeydown)
-  
-  const observer = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        activeSection.value = entry.target.id
-      }
-    })
-  }, { threshold: 0.5, rootMargin: '-50px 0px -50% 0px' })
-  
-  // Observe headers when they are available
-  watch(groupedPhotos, (newGroups) => {
-    if (newGroups.length > 0) {
-      nextTick(() => {
-        document.querySelectorAll('.grid-header').forEach(header => {
-          observer.observe(header)
-        })
-      })
-    }
-  }, { immediate: true })
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
+  resizeObserver?.disconnect()
 })
 </script>
 
@@ -684,13 +758,41 @@ onUnmounted(() => {
     <div v-else-if="photos.length === 0" class="info-text">Keine Fotos hochgeladen.</div>
 
     <div v-else class="gallery-container">
-      <div class="photo-grid">
-        <template v-for="yearGroup in groupedPhotos" :key="yearGroup.year">
-          <h2 :id="'year-' + yearGroup.year" class="grid-header year-title">{{ yearGroup.year }}</h2>
-          <template v-for="monthGroup in yearGroup.months" :key="yearGroup.year + monthGroup.month">
-            <h3 :id="'month-' + yearGroup.year + '-' + monthGroup.month" class="grid-header month-title">{{ monthGroup.month }}</h3>
+      <!-- Virtual scrolling container -->
+      <div
+        ref="gridContainerRef"
+        class="photo-grid-virtual"
+        :style="{ height: virtualizer.getTotalSize() + 'px', position: 'relative' }"
+      >
+        <div
+          v-for="vRow in virtualizer.getVirtualItems()"
+          :key="String(vRow.key)"
+          :data-index="vRow.index"
+          style="position: absolute; top: 0; left: 0; width: 100%;"
+          :style="{ transform: `translateY(${vRow.start - scrollMargin}px)` }"
+        >
+          <!-- Year header -->
+          <h2
+            v-if="virtualRows[vRow.index]?.type === 'year-header'"
+            :id="'year-' + (virtualRows[vRow.index] as { type: 'year-header'; year: string }).year"
+            class="year-title"
+          >
+            {{ (virtualRows[vRow.index] as { type: 'year-header'; year: string }).year }}
+          </h2>
+
+          <!-- Month header -->
+          <h3
+            v-else-if="virtualRows[vRow.index]?.type === 'month-header'"
+            :id="'month-' + (virtualRows[vRow.index] as { type: 'month-header'; year: string; month: string }).year + '-' + (virtualRows[vRow.index] as { type: 'month-header'; year: string; month: string }).month"
+            class="month-title"
+          >
+            {{ (virtualRows[vRow.index] as { type: 'month-header'; year: string; month: string }).month }}
+          </h3>
+
+          <!-- Photo row -->
+          <div v-else class="photo-row">
             <div
-              v-for="item in monthGroup.photos"
+              v-for="item in (virtualRows[vRow.index] as { type: 'photos'; items: PhotoItem[] } | undefined)?.items ?? []"
               :key="item.photo.id"
               :data-photo-id="item.photo.id"
               class="photo-item"
@@ -710,7 +812,6 @@ onUnmounted(() => {
               <i v-if="item.photo.curation_status === 'hidden'" class="pi pi-eye-slash hidden-badge"></i>
               <div class="photo-info">
                 <span class="name">{{ item.group ? `${item.group.member_count} ähnliche Fotos` : item.photo.original_name }}</span>
-                <!-- Fix #4: No curation buttons on unreviewed stacks -->
                 <div v-if="!inUnreviewedStack.has(item.photo.id)" class="photo-actions">
                   <Button
                     v-if="canDelete && item.photo.curation_status === 'hidden'"
@@ -742,8 +843,8 @@ onUnmounted(() => {
                 </div>
               </div>
             </div>
-          </template>
-        </template>
+          </div>
+        </div>
       </div>
 
       <nav class="timeline-nav">
@@ -999,11 +1100,16 @@ onUnmounted(() => {
   color: var(--text-color-secondary);
 }
 
-.photo-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 1rem;
+.photo-grid-virtual {
   flex: 1;
+  min-width: 0;
+}
+
+.photo-row {
+  display: grid;
+  grid-template-columns: repeat(v-bind(columnCount), 1fr);
+  gap: 1rem;
+  padding-bottom: 1rem;
 }
 
 .gallery-container {
@@ -1191,12 +1297,6 @@ onUnmounted(() => {
   color: var(--p-primary-color);
   font-weight: bold;
   background: var(--p-primary-50);
-}
-
-.grid-header {
-  grid-column: 1 / -1;
-  margin: 0;
-  color: var(--text-color);
 }
 
 .year-title {
@@ -1506,9 +1606,6 @@ onUnmounted(() => {
 }
 
 @media (max-width: 640px) {
-  .photo-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
   .close-btn {
     right: 0.5rem;
     top: 0.5rem;
