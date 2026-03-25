@@ -114,7 +114,7 @@ watch([selectedPersonDetail, showHidden, loadingDetails], () => {
 const personFaceItems = computed(() => {
     if (!selectedPersonDetail.value) return []
     return selectedPersonDetail.value.faces
-        .filter(f => !!f.photo && (showHidden.value || f.photo.curation_status !== 'hidden'))
+        .filter(f => !!f.photo && !f.ignored && (showHidden.value || f.photo.curation_status !== 'hidden'))
         .map(f => ({ face: f, photo: f.photo as Photo }))
 })
 
@@ -267,12 +267,13 @@ async function loadData() {
   try {
     const res = await listPersons()
     enableLocalFaces.value = res.enableLocalFaces
-    // Filter out persons with 0 faces (orphans) to keep the list clean
+    // Filter out persons with 0 or 1 face: orphans and single-detection noise
+    // Single-face persons are typically misidentifications and clutter the list
     // Some backend databases might return faceCount as string, ensure it's a number
     persons.value = res.persons
         .filter(p => {
             const count = Number(p.faceCount || 0)
-            return count > 0
+            return count > 1
         })
         .sort((a, b) => {
             if (a.name === 'Unbenannt' && b.name !== 'Unbenannt') return 1
@@ -293,14 +294,17 @@ async function loadData() {
   }
 }
 
-async function openPersonDetails(person: Pick<Person, 'id'>) {
+async function openPersonDetails(person: Person) {
     window.scrollTo(0, 0)
+    // Set a placeholder immediately so the detail view renders and shows the loading spinner
+    selectedPersonDetail.value = { ...person, faces: [] }
     loadingDetails.value = true
     error.value = ''
     try {
         selectedPersonDetail.value = await getPersonDetails(person.id)
     } catch (err: any) {
         error.value = err.message || 'Fehler beim Laden der Details'
+        selectedPersonDetail.value = null
     } finally {
         loadingDetails.value = false
     }
@@ -480,7 +484,7 @@ async function handleIgnorePerson(personId: number) {
 
 function getCoverUrl(person: Person) {
     if (person.cover_filename) {
-        return getPhotoUrl(person.cover_filename)
+        return getPhotoUrl(person.cover_filename, 400)
     }
     return 'https://www.primefaces.org/wp-content/uploads/2020/05/placeholder.png'
 }
@@ -847,7 +851,7 @@ onUnmounted(() => {
                     :class="{ 'photo-hidden': item.photo.curation_status === 'hidden' }"
                     @click="selectedIndex = getUniquePhotoIndex(item.photo.id); isFullscreen = true"
                 >
-                    <HeicImage :src="getPhotoUrl(item.photo.filename)" :alt="item.photo.original_name">
+                    <HeicImage :src="getPhotoUrl(item.photo.filename, 360)" :alt="item.photo.original_name">
                         <div class="face-highlight" :style="getFaceHighlightStyle(item.face.bbox, true)"></div>
                     </HeicImage>
                     <div v-if="item.photo.curation_status === 'hidden'" class="hidden-badge">
