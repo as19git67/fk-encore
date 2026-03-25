@@ -20,10 +20,12 @@ import {
   getPhotoFaces,
   updatePhotoCuration,
   listPhotoGroups,
+  searchPhotos,
   type Photo,
   type Face,
   type CurationStatus,
   type PhotoGroup,
+  type PhotoSearchResult,
 } from '../api/photos'
 import { listPersons, type Person } from '../api/photos'
 import { useAuthStore } from '../stores/auth'
@@ -44,6 +46,44 @@ const showHidden = ref(false)
 // Photo groups (stacks)
 const photoGroupsList = ref<PhotoGroup[]>([])
 const activeGroup = ref<PhotoGroup | null>(null)
+
+// ── Semantic Search ─────────────────────────────────────────────────────────
+const searchQuery = ref('')
+const searchResults = ref<PhotoSearchResult[] | null>(null)
+const searchLoading = ref(false)
+const searchError = ref('')
+
+// IDs der gefundenen Fotos in Score-Reihenfolge (null = kein aktiver Suchfilter)
+const searchResultIds = computed<number[] | null>(() => {
+  if (searchResults.value === null) return null
+  return searchResults.value.map(r => r.photoId)
+})
+
+async function executeSearch() {
+  const q = searchQuery.value.trim()
+  if (!q) {
+    searchResults.value = null
+    searchError.value = ''
+    return
+  }
+  searchLoading.value = true
+  searchError.value = ''
+  try {
+    const res = await searchPhotos(q)
+    searchResults.value = res.results
+  } catch (err) {
+    searchError.value = 'Suche fehlgeschlagen. Ist der Embedding-Service erreichbar?'
+    console.error('Search failed:', err)
+  } finally {
+    searchLoading.value = false
+  }
+}
+
+function clearSearch() {
+  searchQuery.value = ''
+  searchResults.value = null
+  searchError.value = ''
+}
 
 // Map: photoId -> group
 const photoToGroup = computed(() => {
@@ -167,10 +207,17 @@ interface YearGroup {
 
 const groupedPhotos = computed(() => {
   const groups: YearGroup[] = [];
+  const ids = searchResultIds.value;
 
-  photos.value.forEach((photo, index) => {
-    // Skip photos hidden by stack (non-cover group members)
-    if (hiddenByStack.value.has(photo.id)) return;
+  // In search mode: show results sorted by score (no date grouping headers needed,
+  // but we reuse the same year/month grouping structure for display consistency).
+  const orderedPhotos = ids !== null
+    ? ids.map(id => photos.value.find(p => p.id === id)).filter((p): p is Photo => p !== undefined)
+    : photos.value;
+
+  orderedPhotos.forEach((photo, index) => {
+    // Skip photos hidden by stack only when NOT in search mode
+    if (ids === null && hiddenByStack.value.has(photo.id)) return;
 
     const date = new Date(photo.taken_at || photo.created_at);
     const year = date.getFullYear().toString();
@@ -189,8 +236,8 @@ const groupedPhotos = computed(() => {
     }
 
     const group = photoToGroup.value.get(photo.id);
-    // Only show as stack if group is unreviewed
-    const stackGroup = group && !group.reviewed_at ? group : undefined;
+    // Only show as stack if group is unreviewed and not in search mode
+    const stackGroup = ids === null && group && !group.reviewed_at ? group : undefined;
     monthGroup.photos.push({ photo, index, group: stackGroup });
   });
 
@@ -722,6 +769,34 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <div class="search-bar">
+      <div class="search-input-wrapper">
+        <i class="pi pi-search search-icon" />
+        <input
+          v-model="searchQuery"
+          type="text"
+          class="search-input"
+          placeholder="Fotos suchen, z.B. &quot;Kinder im Garten mit Hund&quot;"
+          @keyup.enter="executeSearch"
+          @keyup.escape="clearSearch"
+        />
+        <button v-if="searchQuery" class="search-clear" @click="clearSearch" aria-label="Suche leeren">
+          <i class="pi pi-times" />
+        </button>
+      </div>
+      <Button
+        icon="pi pi-search"
+        label="Suchen"
+        :loading="searchLoading"
+        :disabled="!searchQuery.trim()"
+        @click="executeSearch"
+      />
+      <span v-if="searchResults !== null && !searchLoading" class="search-result-count">
+        {{ searchResults.length }} {{ searchResults.length === 1 ? 'Treffer' : 'Treffer' }}
+      </span>
+    </div>
+
+    <Message v-if="searchError" severity="error" @close="searchError = ''">{{ searchError }}</Message>
     <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
 
     <div v-if="uploading" class="info-text">Fotos werden hochgeladen...</div>
@@ -1391,6 +1466,76 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+/* Semantic Search Bar */
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 0 0.5rem;
+  flex-wrap: wrap;
+}
+
+.search-input-wrapper {
+  position: relative;
+  flex: 1;
+  min-width: 240px;
+  max-width: 600px;
+}
+
+.search-icon {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-color-secondary);
+  pointer-events: none;
+  font-size: 0.9rem;
+}
+
+.search-input {
+  width: 100%;
+  padding: 0.5rem 2.25rem 0.5rem 2.25rem;
+  border: 1px solid var(--surface-300);
+  border-radius: 6px;
+  background: var(--surface-0);
+  color: var(--text-color);
+  font-size: 0.95rem;
+  outline: none;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+
+.search-input:focus {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 2px var(--primary-200, rgba(99, 102, 241, 0.2));
+}
+
+.search-clear {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-color-secondary);
+  padding: 0.2rem;
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+}
+
+.search-clear:hover {
+  color: var(--text-color);
+  background: var(--surface-100);
+}
+
+.search-result-count {
+  font-size: 0.875rem;
+  color: var(--text-color-secondary);
+  white-space: nowrap;
 }
 
 /* Stack styles — layered cards behind the cover photo */
