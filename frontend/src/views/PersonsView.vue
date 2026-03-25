@@ -73,15 +73,9 @@ const virtualizer = useWindowVirtualizer(computed(() => ({
     if (row.type === 'persons') return 260
     if (row.type === 'detail-hero') {
         const vw = containerWidth.value
-        const vh = viewportHeight.value
-        let imgHeight: number
-        if (vw >= 1024) {
-            imgHeight = Math.max(420, Math.min(760, vh * 0.58))
-        } else if (vw < 640) {
-            imgHeight = Math.max(220, Math.min(360, vw * 0.62))
-        } else {
-            imgHeight = Math.max(220, Math.min(620, vw * 0.52))
-        }
+        const heroWidth = Math.min(1024, vw)
+        // Match the CSS aspect-ratio: 4/3 on mobile, 16/9 otherwise
+        const imgHeight = vw < 640 ? heroWidth * (3 / 4) : heroWidth * (9 / 16)
         return imgHeight + 20 + 16 // image height + bottom margin + buffer
     }
     if (row.type === 'detail-photos') return 180 + 16
@@ -1189,11 +1183,12 @@ onUnmounted(() => {
     background: #f3f4f6;
     border: 1px solid #e5e7eb;
     cursor: pointer;
+    aspect-ratio: 16 / 9;
 }
 
 .person-hero-image :deep(.heic-image-container) {
     width: 100%;
-    height: clamp(220px, 52vw, 620px);
+    height: 100%;
 }
 
 .person-hero-image :deep(img) {
@@ -1205,16 +1200,6 @@ onUnmounted(() => {
 @media (max-width: 640px) {
     .person-hero {
         aspect-ratio: 4 / 3;
-    }
-
-    .person-hero-image :deep(.heic-image-container) {
-        height: clamp(220px, 62vw, 360px);
-    }
-}
-
-@media (min-width: 1024px) {
-    .person-hero-image :deep(.heic-image-container) {
-        height: clamp(420px, 58vh, 760px);
     }
 }
 
