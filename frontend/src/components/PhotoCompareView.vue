@@ -77,7 +77,15 @@ function pairKey(a: number, b: number): string {
   return a < b ? `${a}-${b}` : `${b}-${a}`
 }
 
-// Estimated total comparisons needed (~n to 1.5n)
+// Exact total unique pairs: n * (n - 1) / 2
+// Also keep the previous heuristic as an "estimated" value for quick-progress hints.
+const pairCount = computed(() => {
+  const n = groupPhotos.value.length
+  if (n < 2) return 0
+  return (n * (n - 1)) / 2
+})
+
+// Heuristic estimate (~n to 1.5n) kept for quick estimation if desired
 const estimatedTotal = computed(() => {
   const n = groupPhotos.value.length
   if (n <= 2) return 1
@@ -412,7 +420,8 @@ function getPhotoById(id: number): Photo | undefined {
               </div>
             </Popover>
             <span class="compare-progress">
-              {{ comparisonsDone }}/{{ estimatedTotal }}
+              {{ comparisonsDone }}/{{ pairCount }}
+              <span class="compare-progress-note" v-if="estimatedTotal !== pairCount">(~{{ estimatedTotal }})</span>
             </span>
           </div>
           <div class="compare-header-right">
