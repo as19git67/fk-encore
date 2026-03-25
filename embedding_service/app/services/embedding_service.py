@@ -26,6 +26,7 @@ class CLIPEmbedder:
 
         device = _get_device()
         logger.info("Loading OpenCLIP model '%s' (pretrained=%s) on %s", model_name, pretrained, device)
+        self.model_name = model_name
         self.model, _, self.preprocess = open_clip.create_model_and_transforms(
             model_name, pretrained=pretrained
         )
@@ -47,6 +48,16 @@ class CLIPEmbedder:
         features = self.model.encode_image(batch)
         features = features / features.norm(dim=-1, keepdim=True)
         return features.cpu().float().tolist()
+
+    @torch.no_grad()
+    def embed_text(self, text: str) -> List[float]:
+        """Return a normalized CLIP text embedding for a natural language query."""
+        import open_clip
+        tokenizer = open_clip.get_tokenizer(self.model_name)
+        tokens = tokenizer([text]).to(self.device)
+        features = self.model.encode_text(tokens)
+        features = features / features.norm(dim=-1, keepdim=True)
+        return features[0].cpu().float().tolist()
 
 
 class DINOv2Embedder:

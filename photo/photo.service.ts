@@ -1649,3 +1649,71 @@ export async function reviewPhotoGroupLogic(userId: number, groupId: number): Pr
 
   return { success: true };
 }
+
+export interface PhotoSearchResult {
+  photoId: number;
+  score: number;
+  filename: string;
+  taken_at?: string;
+  created_at: string;
+}
+
+export async function searchPhotosLogic(
+  userId: number,
+  query: string,
+  limit: number = 20,
+  threshold: number = 0.20
+): Promise<{ results: PhotoSearchResult[] }> {
+  // 1. Call embedding service text search
+  let embeddingResults: Array<{ photo_id: string; score: number }>;
+  try {
+    const response = await fetch(`${EMBEDDING_SERVICE_URL}/search/text`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, k: limit, threshold }),
+    });
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Embedding service returned ${response.status}: ${errText}`);
+    }
+    const data = await response.json() as { results: Array<{ photo_id: string; score: number }> };
+    embeddingResults = data.results;
+  } catch (err) {
+    console.error("Text search via embedding service failed:", err);
+    throw err;
+  }
+
+  if (embeddingResults.length === 0) {
+    return { results: [] };
+  }
+
+  // 2. Map numeric photo IDs and verify ownership
+  const photoIdNumbers = embeddingResults
+    .map(r => parseInt(r.photo_id, 10))
+    .filter(id => !isNaN(id));
+
+  const userPhotos = await dbAll<{ id: number; filename: string; taken_at: string | null; created_at: string }>(
+    db.select({ id: photos.id, filename: photos.filename, taken_at: photos.taken_at, created_at: photos.created_at })
+      .from(photos)
+      .where(and(eq(photos.user_id, userId), inArray(photos.id, photoIdNumbers)))
+  );
+
+  const photoMap = new Map(userPhotos.map(p => [p.id, p]));
+
+  // 3. Build results preserving embedding score order
+  const results: PhotoSearchResult[] = [];
+  for (const r of embeddingResults) {
+    const id = parseInt(r.photo_id, 10);
+    const photo = photoMap.get(id);
+    if (!photo) continue; // skip photos not belonging to user
+    results.push({
+      photoId: photo.id,
+      score: r.score,
+      filename: photo.filename,
+      taken_at: photo.taken_at ?? undefined,
+      created_at: photo.created_at,
+    });
+  }
+
+  return { results };
+}
