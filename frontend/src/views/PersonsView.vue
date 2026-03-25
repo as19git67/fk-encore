@@ -484,7 +484,7 @@ async function handleIgnorePerson(personId: number) {
 
 function getCoverUrl(person: Person) {
     if (person.cover_filename) {
-        return getPhotoUrl(person.cover_filename)
+        return getPhotoUrl(person.cover_filename, 400)
     }
     return 'https://www.primefaces.org/wp-content/uploads/2020/05/placeholder.png'
 }
@@ -851,7 +851,7 @@ onUnmounted(() => {
                     :class="{ 'photo-hidden': item.photo.curation_status === 'hidden' }"
                     @click="selectedIndex = getUniquePhotoIndex(item.photo.id); isFullscreen = true"
                 >
-                    <HeicImage :src="getPhotoUrl(item.photo.filename)" :alt="item.photo.original_name">
+                    <HeicImage :src="getPhotoUrl(item.photo.filename, 360)" :alt="item.photo.original_name">
                         <div class="face-highlight" :style="getFaceHighlightStyle(item.face.bbox, true)"></div>
                     </HeicImage>
                     <div v-if="item.photo.curation_status === 'hidden'" class="hidden-badge">
