@@ -41,6 +41,7 @@ import type {
   FindGroupsResponse,
 } from "../db/types";
 import heicConvert from "heic-convert";
+import { createCanvas, loadImage } from "canvas";
 
 const isPg = process.env.DB_TYPE?.toLowerCase() === 'postgres'
 const nowSql = isPg ? sql`NOW()` : sql`datetime('now')`
@@ -673,6 +674,27 @@ export async function convertHeicToJpeg(filePath: string): Promise<Buffer> {
   return outputBuffer as Buffer;
 }
 
+/**
+ * Resize an image buffer to the given target width, preserving aspect ratio.
+ * Always outputs JPEG. If the image is already smaller than targetWidth, it is
+ * returned as-is (no upscaling). Returns a JPEG buffer.
+ */
+export async function resizeImage(imageBuffer: Buffer, targetWidth: number): Promise<Buffer> {
+  const img = await loadImage(imageBuffer);
+  if (img.width <= targetWidth) {
+    // Already small enough — re-encode as JPEG to normalise the output type
+    const canvas = createCanvas(img.width, img.height);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    return canvas.toBuffer('image/jpeg', { quality: 0.85 });
+  }
+  const targetHeight = Math.round((img.height / img.width) * targetWidth);
+  const canvas = createCanvas(targetWidth, targetHeight);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+  return canvas.toBuffer('image/jpeg', { quality: 0.85 });
+}
+
 // ---------- Albums ----------
 
 export async function createAlbumLogic(userId: number, req: CreateAlbumRequest): Promise<Album> {
@@ -977,7 +999,7 @@ export async function listPersonsLogic(userId: number): Promise<ListPersonsRespo
       )`,
       created_at: persons.created_at,
       updated_at: persons.updated_at,
-      faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM faces f WHERE f.person_id = persons.id), 0) AS INTEGER)`,
+      faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM faces f WHERE f.person_id = persons.id AND f.ignored = 0), 0) AS INTEGER)`,
       cover_filename: sql<string>`COALESCE(
         (
           SELECT p.filename
@@ -1111,7 +1133,7 @@ export async function updatePersonLogic(userId: number, personId: number, name: 
         cover_face_id: persons.cover_face_id,
         created_at: persons.created_at,
         updated_at: persons.updated_at,
-        faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM faces f WHERE f.person_id = persons.id), 0) AS INTEGER)`,
+        faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM faces f WHERE f.person_id = persons.id AND f.ignored = 0), 0) AS INTEGER)`,
         cover_filename: sql<string>`COALESCE((SELECT p.filename FROM photos p INNER JOIN faces f ON f.photo_id = p.id WHERE f.id = persons.cover_face_id LIMIT 1), '')`,
         cover_bbox: sql<string>`COALESCE((SELECT f.bbox FROM faces f WHERE f.id = persons.cover_face_id LIMIT 1), '')`,
       })

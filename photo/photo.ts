@@ -229,28 +229,39 @@ export const getPhotoFile = api.raw(
 
       const widthStr = url.searchParams.get("w");
       const shouldConvert = url.searchParams.get("convert") === "true";
+      const targetWidth = widthStr ? parseInt(widthStr, 10) : null;
 
-      if ((ext === ".heic" || ext === ".heif") && shouldConvert) {
+      const isHeicFile = ext === ".heic" || ext === ".heif";
+      const needsConvert = isHeicFile && shouldConvert;
+      const needsResize = targetWidth !== null && !isNaN(targetWidth) && targetWidth > 0;
+
+      if (needsConvert || needsResize) {
           try {
-              const jpegBuffer = await service.convertHeicToJpeg(filePath);
+              let buffer: Buffer;
+
+              // HEIC must be decoded to JPEG before canvas can process it
+              if (isHeicFile) {
+                  buffer = await service.convertHeicToJpeg(filePath);
+              } else {
+                  buffer = await fs.promises.readFile(filePath);
+              }
+
+              if (needsResize) {
+                  buffer = await service.resizeImage(buffer, targetWidth!);
+              }
+
               res.setHeader("Content-Type", "image/jpeg");
               res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-              res.end(jpegBuffer);
+              res.end(buffer);
               return;
           } catch (err) {
-              console.error("Error converting HEIC on-the-fly:", err);
-              // Fallback to original
+              console.error("Error processing image:", err);
+              // Fallback to original below
           }
       }
 
       res.setHeader("Content-Type", mimeType);
       res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-      
-      if (widthStr && ENABLE_LOCAL_FACES) {
-          // Implement simple thumbnail resizing if canvas is available
-          // For now just serve original to keep it simple, but we could add it here
-      }
-      
       fs.createReadStream(filePath).pipe(res);
     } catch (err: any) {
       console.error("Error serving photo file:", err);

@@ -46,8 +46,9 @@ export function deletePhoto(id: number) {
   })
 }
 
-export function getPhotoUrl(filename: string) {
-  return `${API_BASE_URL}/photos/file/${filename}`
+export function getPhotoUrl(filename: string, width?: number) {
+  const base = `${API_BASE_URL}/photos/file/${filename}`
+  return width ? `${base}?w=${width}` : base
 }
 
 export function getPhotosToRefreshMetadata() {
