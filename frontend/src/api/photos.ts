@@ -219,3 +219,20 @@ export function reviewPhotoGroup(id: number) {
     method: 'POST'
   })
 }
+
+// ---------- Semantic Search ----------
+
+export interface PhotoSearchResult {
+  photoId: number
+  score: number
+  filename: string
+  taken_at?: string
+  created_at: string
+}
+
+export function searchPhotos(query: string, limit: number = 20, threshold: number = 0.20) {
+  return apiFetch<{ results: PhotoSearchResult[] }>('/photos/search', {
+    method: 'POST',
+    body: JSON.stringify({ query, limit, threshold })
+  })
+}

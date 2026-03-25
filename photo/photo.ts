@@ -581,3 +581,25 @@ export const reviewPhotoGroup = api(
     return await service.reviewPhotoGroupLogic(userId, id);
   }
 );
+
+/**
+ * Semantic photo search using natural language query via CLIP text embeddings.
+ */
+export const searchPhotos = api(
+  { expose: true, method: "POST", path: "/photos/search", auth: true },
+  async ({
+    query,
+    limit,
+    threshold,
+  }: {
+    query: string;
+    limit?: number;
+    threshold?: number;
+  }): Promise<{ results: service.PhotoSearchResult[] }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    return await service.searchPhotosLogic(userId, query, limit ?? 20, threshold ?? 0.20);
+  }
+);
