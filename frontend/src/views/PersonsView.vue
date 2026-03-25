@@ -404,7 +404,8 @@ async function handleRename(): Promise<boolean> {
         await loadData()
 
         if (detailIdToReload) {
-            await openPersonDetails({ id: detailIdToReload })
+            const reloadPerson = persons.value.find(p => p.id === detailIdToReload)
+            if (reloadPerson) await openPersonDetails(reloadPerson)
         } else if (selectedPersonDetail.value && selectedPersonDetail.value.id === sourcePersonId) {
             selectedPersonDetail.value.name = trimmedName
         }
