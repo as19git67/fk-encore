@@ -25,6 +25,7 @@ from app.models.schemas import (
     SearchRequest,
     SearchResponse,
     SearchResult,
+    TextSearchRequest,
 )
 from app.services.embedding_service import CLIPEmbedder, DINOv2Embedder
 
@@ -207,6 +208,31 @@ async def search(request: SearchRequest, db: DbDep) -> SearchResponse:
         sorted_results = sorted(scores.items(), key=lambda x: x[1], reverse=True)[: request.k]
         results = [SearchResult(photo_id=pid, score=score) for pid, score in sorted_results]
 
+    return SearchResponse(results=results)
+
+
+# ---------------------------------------------------------------------------
+# /search/text
+# ---------------------------------------------------------------------------
+
+@router.post("/search/text", response_model=SearchResponse, tags=["search"])
+async def search_by_text(request: TextSearchRequest, db: DbDep) -> SearchResponse:
+    """Perform semantic image search using a natural language query via CLIP text embeddings."""
+    try:
+        clip_embedder = CLIPEmbedder.get_instance(
+            model_name=settings.clip_model_name, pretrained=settings.clip_pretrained
+        )
+        query_vector = clip_embedder.embed_text(request.query)
+    except Exception as exc:
+        logger.exception("Text embedding generation failed")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Text embedding error") from exc
+
+    rows = await repository.search_by_clip(db, query_vector, request.k)
+    results = [
+        SearchResult(photo_id=pid, score=score)
+        for pid, score in rows
+        if score >= request.threshold
+    ]
     return SearchResponse(results=results)
 
 
