@@ -977,7 +977,7 @@ export async function listPersonsLogic(userId: number): Promise<ListPersonsRespo
       )`,
       created_at: persons.created_at,
       updated_at: persons.updated_at,
-      faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM faces f WHERE f.person_id = persons.id), 0) AS INTEGER)`,
+      faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM faces f WHERE f.person_id = persons.id AND f.ignored = 0), 0) AS INTEGER)`,
       cover_filename: sql<string>`COALESCE(
         (
           SELECT p.filename
@@ -1111,7 +1111,7 @@ export async function updatePersonLogic(userId: number, personId: number, name: 
         cover_face_id: persons.cover_face_id,
         created_at: persons.created_at,
         updated_at: persons.updated_at,
-        faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM faces f WHERE f.person_id = persons.id), 0) AS INTEGER)`,
+        faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM faces f WHERE f.person_id = persons.id AND f.ignored = 0), 0) AS INTEGER)`,
         cover_filename: sql<string>`COALESCE((SELECT p.filename FROM photos p INNER JOIN faces f ON f.photo_id = p.id WHERE f.id = persons.cover_face_id LIMIT 1), '')`,
         cover_bbox: sql<string>`COALESCE((SELECT f.bbox FROM faces f WHERE f.id = persons.cover_face_id LIMIT 1), '')`,
       })
