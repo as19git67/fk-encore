@@ -3,24 +3,25 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import Button from 'primevue/button'
 import ProgressBar from 'primevue/progressbar'
 import Message from 'primevue/message'
-import PhotoCompareView from '../components/PhotoCompareView.vue'
 import {
   reindexAllPhotos, getReindexStatus, findPhotoGroups,
-  listPhotoGroups, listPhotos,
-  type ReindexStatus, type PhotoGroup, type Photo,
+  getPhotosToRefreshMetadata, refreshPhotoMetadata,
+  type ReindexStatus,
 } from '../api/photos'
 
 const status = ref<ReindexStatus>({ inProgress: false, total: 0, processed: 0, errors: 0 })
 const error = ref('')
 const loading = ref(false)
-const groupingLoading = ref(false)
 const groupingResult = ref<{ groups_created: number; total_photos_grouped: number } | null>(null)
+const groupingLoading = ref(false)
 
-// Group review wizard
-const allGroups = ref<PhotoGroup[]>([])
-const allPhotos = ref<Photo[]>([])
-const activeGroup = ref<PhotoGroup | null>(null)
-const unreviewedCount = computed(() => allGroups.value.filter(g => !g.reviewed_at).length)
+// Metadata refresh
+const refreshingMetadata = ref(false)
+const refreshProgress = ref(0)
+const refreshTotal = ref(0)
+const refreshCurrent = ref(0)
+const metaError = ref('')
+
 let pollInterval: ReturnType<typeof setInterval> | null = null
 
 const progress = computed(() => {
@@ -30,9 +31,27 @@ const progress = computed(() => {
 
 async function fetchStatus() {
   try {
+    const prevInProgress = status.value.inProgress
     status.value = await getReindexStatus()
+    // Auto-find groups when reindex completes
+    if (prevInProgress && !status.value.inProgress) {
+      stopPolling()
+      await autoFindGroups()
+    }
   } catch (err: any) {
     // ignore polling errors
+  }
+}
+
+async function autoFindGroups() {
+  groupingResult.value = null
+  groupingLoading.value = true
+  try {
+    groupingResult.value = await findPhotoGroups()
+  } catch (err: any) {
+    // non-critical — silently ignore
+  } finally {
+    groupingLoading.value = false
   }
 }
 
@@ -51,6 +70,7 @@ function stopPolling() {
 async function handleReindex() {
   error.value = ''
   loading.value = true
+  groupingResult.value = null
   try {
     await reindexAllPhotos()
     await fetchStatus()
@@ -66,54 +86,40 @@ async function handleReindex() {
   }
 }
 
-async function handleFindGroups() {
-  error.value = ''
-  groupingLoading.value = true
-  groupingResult.value = null
+async function handleRefreshMetadata() {
+  if (refreshingMetadata.value) return
+
+  refreshingMetadata.value = true
+  refreshProgress.value = 0
+  refreshCurrent.value = 0
+  refreshTotal.value = 0
+  metaError.value = ''
+
   try {
-    groupingResult.value = await findPhotoGroups()
-  } catch (err: any) {
-    error.value = err.message || 'Fehler bei der Gruppierung'
-  } finally {
-    groupingLoading.value = false
-  }
-}
+    const res = await getPhotosToRefreshMetadata()
+    const ids = res.ids
 
-async function loadGroupData() {
-  try {
-    const [groupsRes, photosRes] = await Promise.all([
-      listPhotoGroups(),
-      listPhotos(true),
-    ])
-    allGroups.value = groupsRes.groups
-    allPhotos.value = photosRes.photos
-  } catch {
-    // non-critical
-  }
-}
-
-async function handleStartReview() {
-  await loadGroupData()
-  const first = allGroups.value.find(g => !g.reviewed_at)
-  if (first) {
-    activeGroup.value = first
-  }
-}
-
-function handleReviewClose() {
-  activeGroup.value = null
-  loadGroupData()
-}
-
-function handleReviewNext(reviewedGroupId: number) {
-  loadGroupData().then(() => {
-    const next = allGroups.value.find(g => !g.reviewed_at && g.id !== reviewedGroupId)
-    if (next) {
-      activeGroup.value = next
-    } else {
-      activeGroup.value = null
+    if (ids.length === 0) {
+      refreshingMetadata.value = false
+      return
     }
-  })
+
+    refreshTotal.value = ids.length
+
+    for (const id of ids) {
+      try {
+        await refreshPhotoMetadata(id)
+      } catch (err) {
+        console.error(`Fehler beim Aktualisieren der Metadaten für Foto ${id}:`, err)
+      }
+      refreshCurrent.value++
+      refreshProgress.value = Math.round((refreshCurrent.value / refreshTotal.value) * 100)
+    }
+  } catch (err: any) {
+    metaError.value = err.message || 'Fehler beim Aktualisieren der Metadaten'
+  } finally {
+    refreshingMetadata.value = false
+  }
 }
 
 onMounted(async () => {
@@ -121,20 +127,11 @@ onMounted(async () => {
   if (status.value.inProgress) {
     startPolling()
   }
-  await loadGroupData()
 })
 
 onUnmounted(() => {
   stopPolling()
 })
-
-// Watch for completion and stop polling
-const checkCompletion = setInterval(() => {
-  if (!status.value.inProgress && pollInterval) {
-    stopPolling()
-  }
-}, 1000)
-onUnmounted(() => clearInterval(checkCompletion))
 </script>
 
 <template>
@@ -147,7 +144,7 @@ onUnmounted(() => clearInterval(checkCompletion))
       <h3 class="mt-0 mb-3">Fotos neu scannen</h3>
       <p class="text-secondary mb-4">
         Alle Fotos werden erneut durch die Gesichtserkennung und Embedding-Berechnung geschickt.
-        Bestehende Zuordnungen werden dabei aktualisiert.
+        Bestehende Zuordnungen werden dabei aktualisiert. Anschließend werden ähnliche Fotos automatisch gruppiert.
       </p>
 
       <div v-if="status.inProgress" class="mb-4">
@@ -170,54 +167,53 @@ onUnmounted(() => clearInterval(checkCompletion))
         </Message>
       </div>
 
-      <Button
-        icon="pi pi-images"
-        label="Alle neu scannen"
-        @click="handleReindex"
-        :disabled="status.inProgress"
-        :loading="loading"
-      />
-    </div>
-
-    <div class="card p-4 mb-4 surface-card border-round shadow-1">
-      <h3 class="mt-0 mb-3">Ähnliche Fotos gruppieren</h3>
-      <p class="text-secondary mb-4">
-        Fotos werden anhand visueller Ähnlichkeit und zeitlicher Nähe automatisch gruppiert.
-        Bereits bearbeitete Gruppen bleiben erhalten.
-      </p>
+      <div v-if="groupingLoading" class="mb-4">
+        <span class="text-secondary">
+          <i class="pi pi-spin pi-spinner mr-2"></i>Ähnliche Fotos werden gruppiert…
+        </span>
+      </div>
 
       <div v-if="groupingResult" class="mb-4">
-        <Message severity="success" :closable="false">
+        <Message severity="info" :closable="false">
           {{ groupingResult.groups_created }} neue Gruppen erstellt
           ({{ groupingResult.total_photos_grouped }} Fotos gruppiert).
         </Message>
       </div>
 
-      <div class="button-row">
-        <Button
-          icon="pi pi-objects-column"
-          label="Gruppen aktualisieren"
-          @click="handleFindGroups"
-          :loading="groupingLoading"
-        />
-        <Button
-          v-if="unreviewedCount > 0"
-          icon="pi pi-images"
-          :label="`Gruppen bearbeiten (${unreviewedCount} offen)`"
-          severity="success"
-          @click="handleStartReview"
-        />
-      </div>
+      <Button
+        icon="pi pi-images"
+        label="Alle neu scannen"
+        @click="handleReindex"
+        :disabled="status.inProgress || groupingLoading"
+        :loading="loading"
+      />
     </div>
 
-    <PhotoCompareView
-      v-if="activeGroup"
-      :group="activeGroup"
-      :allPhotos="allPhotos"
-      :totalUnreviewed="unreviewedCount"
-      @close="handleReviewClose"
-      @next="handleReviewNext"
-    />
+    <div class="card p-4 mb-4 surface-card border-round shadow-1">
+      <h3 class="mt-0 mb-3">Metadaten aktualisieren</h3>
+      <p class="text-secondary mb-4">
+        Aufnahmedatum und andere EXIF-Metadaten werden für Fotos ohne gespeichertes Datum neu eingelesen.
+      </p>
+
+      <Message v-if="metaError" severity="error" sticky class="mb-4">{{ metaError }}</Message>
+
+      <div v-if="refreshingMetadata" class="mb-4">
+        <div class="flex justify-between mb-2">
+          <span class="text-secondary">
+            Metadaten werden aktualisiert… {{ refreshCurrent }} / {{ refreshTotal }}
+          </span>
+        </div>
+        <ProgressBar :value="refreshProgress" :showValue="false" />
+      </div>
+
+      <Button
+        icon="pi pi-refresh"
+        label="Metadaten aktualisieren"
+        @click="handleRefreshMetadata"
+        :disabled="refreshingMetadata"
+        :loading="refreshingMetadata"
+      />
+    </div>
   </div>
 </template>
 

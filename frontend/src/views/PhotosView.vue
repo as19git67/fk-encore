@@ -4,7 +4,6 @@ import { useWindowVirtualizer } from '@tanstack/vue-virtual'
 import Button from 'primevue/button'
 import FileUpload from 'primevue/fileupload'
 import Message from 'primevue/message'
-import ProgressBar from 'primevue/progressbar'
 import { useConfirm } from 'primevue/useconfirm'
 import DatePicker from 'primevue/datepicker'
 import ToggleSwitch from 'primevue/toggleswitch'
@@ -15,8 +14,6 @@ import {
   uploadPhoto,
   deletePhoto,
   getPhotoUrl,
-  getPhotosToRefreshMetadata,
-  refreshPhotoMetadata,
   updatePhotoDate,
   reindexPhoto,
   ignoreFace,
@@ -41,7 +38,7 @@ const isFullscreen = ref(false)
 
 const canUpload = computed(() => auth.hasPermission('photos.upload'))
 const canDelete = computed(() => auth.hasPermission('photos.delete'))
-const canRefreshMetadata = computed(() => auth.hasPermission('photos.refresh_metadata'))
+const canManageData = computed(() => auth.hasPermission('data.manage'))
 const showHidden = ref(false)
 
 // Photo groups (stacks)
@@ -130,16 +127,12 @@ const formatPhotoDateFull = (photo: Photo) => {
   }).format(date);
 };
 
-const refreshingMetadata = ref(false)
 const isDragging = ref(false)
 const dragCounter = ref(0)
 const isEditingDate = ref(false)
 const editDate = ref<Date | null>(null)
 const updatingDate = ref(false)
-const refreshProgress = ref(0)
-const refreshTotal = ref(0)
 const confirm = useConfirm()
-const refreshCurrent = ref(0)
 const activeSection = ref('')
 
 const detectedFaces = ref<Face[]>([])
@@ -538,42 +531,9 @@ function handleGroupNext(reviewedGroupId: number) {
   }
 }
 
-async function handleRefreshMetadata() {
-  if (refreshingMetadata.value) return
-  
-  refreshingMetadata.value = true
-  refreshProgress.value = 0
-  refreshCurrent.value = 0
-  refreshTotal.value = 0
-  error.value = ''
-  
-  try {
-    const res = await getPhotosToRefreshMetadata()
-    const ids = res.ids
-    
-    if (ids.length === 0) {
-      refreshingMetadata.value = false
-      return
-    }
-    
-    refreshTotal.value = ids.length
-    
-    for (const id of ids) {
-      try {
-        await refreshPhotoMetadata(id)
-      } catch (err) {
-        console.error(`Fehler beim Aktualisieren der Metadaten für Foto ${id}:`, err)
-      }
-      refreshCurrent.value++
-      refreshProgress.value = Math.round((refreshCurrent.value / refreshTotal.value) * 100)
-    }
-    
-    await loadPhotos()
-  } catch (err: any) {
-    error.value = err.message || 'Fehler beim Aktualisieren der Metadaten'
-  } finally {
-    refreshingMetadata.value = false
-  }
+function handleStartGroupReview() {
+  const first = photoGroupsList.value.find(g => !g.reviewed_at)
+  if (first) activeGroup.value = first
 }
 
 function startEditingDate() {
@@ -604,7 +564,7 @@ async function handleUpdateDate() {
 }
 
 function handleDragEnter(e: DragEvent) {
-  if (!canUpload.value) return
+  if (!canUpload.value || uploading.value) return
   e.preventDefault()
   dragCounter.value++
   isDragging.value = true
@@ -620,7 +580,7 @@ function handleDragLeave(e: DragEvent) {
 }
 
 function handleDragOver(e: DragEvent) {
-  if (!canUpload.value) return
+  if (!canUpload.value || uploading.value) return
   e.preventDefault()
   if (e.dataTransfer) {
     e.dataTransfer.dropEffect = 'copy'
@@ -628,7 +588,7 @@ function handleDragOver(e: DragEvent) {
 }
 
 async function handleDrop(e: DragEvent) {
-  if (!canUpload.value) return
+  if (!canUpload.value || uploading.value) return
   e.preventDefault()
   isDragging.value = false
   dragCounter.value = 0
@@ -741,37 +701,28 @@ onUnmounted(() => {
           <ToggleSwitch v-model="showHidden" inputId="showHidden" @update:modelValue="loadPhotos" />
         </div>
         <Button
-          v-if="canRefreshMetadata"
-          label="Metadaten aktualisieren"
-          icon="pi pi-refresh"
-          severity="secondary"
-          :loading="refreshingMetadata"
-          @click="handleRefreshMetadata"
-          class="refresh-btn"
+          v-if="canManageData && unreviewedGroupCount > 0"
+          :label="`Gruppen bearbeiten (${unreviewedGroupCount} offen)`"
+          icon="pi pi-images"
+          severity="success"
+          @click="handleStartGroupReview"
         />
-        <FileUpload 
+        <FileUpload
           v-if="canUpload"
-          mode="basic" 
-          name="file" 
-          accept="image/*" 
-          :auto="true" 
-          customUpload 
+          mode="basic"
+          name="file"
+          accept="image/*"
+          :auto="true"
+          customUpload
           multiple
-          @uploader="handleUpload" 
-          chooseLabel="Fotos hochladen" 
+          :disabled="uploading"
+          @uploader="handleUpload"
+          chooseLabel="Fotos hochladen"
         />
       </div>
     </div>
 
     <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
-
-    <div v-if="refreshingMetadata" class="progress-container">
-      <div class="progress-info">
-        <span>Metadaten werden aktualisiert...</span>
-        <span>{{ refreshCurrent }} / {{ refreshTotal }}</span>
-      </div>
-      <ProgressBar :value="refreshProgress"></ProgressBar>
-    </div>
 
     <div v-if="uploading" class="info-text">Fotos werden hochgeladen...</div>
     <div v-else-if="loading" class="info-text">Lade Fotos...</div>

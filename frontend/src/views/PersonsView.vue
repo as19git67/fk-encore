@@ -73,7 +73,16 @@ const virtualizer = useWindowVirtualizer(computed(() => ({
     if (row.type === 'persons') return 260
     if (row.type === 'detail-hero') {
         const vw = containerWidth.value
-        return Math.max(220, Math.min(620, vw * 0.52)) + 24
+        const vh = viewportHeight.value
+        let imgHeight: number
+        if (vw >= 1024) {
+            imgHeight = Math.max(420, Math.min(760, vh * 0.58))
+        } else if (vw < 640) {
+            imgHeight = Math.max(220, Math.min(360, vw * 0.62))
+        } else {
+            imgHeight = Math.max(220, Math.min(620, vw * 0.52))
+        }
+        return imgHeight + 20 + 16 // image height + bottom margin + buffer
     }
     if (row.type === 'detail-photos') return 180 + 16
     return 260
@@ -151,6 +160,12 @@ const personPhotos = computed(() => {
 })
 
 const firstPersonFaceItem = computed(() => {
+    if (!selectedPersonDetail.value) return null
+    const coverFaceId = selectedPersonDetail.value.cover_face_id
+    if (coverFaceId) {
+        const coverItem = personFaceItems.value.find(item => item.face.id === coverFaceId)
+        if (coverItem) return coverItem
+    }
     return personFaceItems.value[0] ?? null
 })
 
@@ -260,6 +275,7 @@ async function handleMerge() {
 }
 
 const viewportWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1024)
+const viewportHeight = ref(typeof window !== 'undefined' ? window.innerHeight : 768)
 
 async function loadData() {
   loading.value = true
@@ -561,6 +577,7 @@ function getHeroFaceHighlightStyle(bbox: any) {
 
 function handleResize() {
     viewportWidth.value = window.innerWidth
+    viewportHeight.value = window.innerHeight
 }
 
 function getFaceHighlightStyle(bbox: any, isGridItem: boolean = false) {
@@ -1172,7 +1189,6 @@ onUnmounted(() => {
     background: #f3f4f6;
     border: 1px solid #e5e7eb;
     cursor: pointer;
-    aspect-ratio: 16 / 9;
 }
 
 .person-hero-image :deep(.heic-image-container) {
