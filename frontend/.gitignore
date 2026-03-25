@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# vue-tsc build output
+src/**/*.js
+src/**/*.d.ts
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
