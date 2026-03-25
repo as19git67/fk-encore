@@ -825,7 +825,7 @@ onUnmounted(() => {
               @click="item.group ? (activeGroup = item.group) : (selectedIndex = item.index)"
               @dblclick="!item.group && (isFullscreen = true)"
             >
-              <HeicImage :src="getPhotoUrl(item.photo.filename)" :alt="item.photo.original_name" loading="lazy" />
+              <HeicImage :src="getPhotoUrl(item.photo.filename, 400)" :alt="item.photo.original_name" loading="lazy" />
               <span v-if="item.group" class="stack-badge">{{ item.group.member_count }}</span>
               <i v-if="item.group?.reviewed_at" class="pi pi-check stack-reviewed-badge"></i>
               <i v-if="item.photo.curation_status === 'favorite'" class="pi pi-heart-fill favorite-badge"></i>
