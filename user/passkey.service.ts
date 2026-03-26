@@ -29,7 +29,7 @@ import type {
 import { toUser, getRolesForUser, getPermissionsForUser } from "./user.service";
 
 const isPg = process.env.DB_TYPE?.toLowerCase() === 'postgres'
-const nowSql = isPg ? sql`NOW()` : sql`datetime('now')`
+const nowSql = isPg ? sql`NOW()::text` : sql`datetime('now')`
 
 // ---------- RP Config ----------
 

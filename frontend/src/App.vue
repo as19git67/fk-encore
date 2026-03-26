@@ -63,12 +63,13 @@ body {
 
 .app-container {
   min-height: 100vh;
+  --menubar-height: 3.5rem;
 }
 
 .sticky-menubar {
   position: sticky;
   top: 0;
-  z-index: 100;
+  z-index: 200;
 }
 
 .content {

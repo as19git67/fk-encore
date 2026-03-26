@@ -44,7 +44,17 @@ import heicConvert from "heic-convert";
 import { createCanvas, loadImage } from "canvas";
 
 const isPg = process.env.DB_TYPE?.toLowerCase() === 'postgres'
-const nowSql = isPg ? sql`NOW()` : sql`datetime('now')`
+const nowSql = isPg ? sql`NOW()::text` : sql`datetime('now')`
+/** COALESCE(taken_at, created_at::text) – both sides must be text in PG */
+const photoDateOrder = isPg
+  ? sql`COALESCE(${photos.taken_at}, ${photos.created_at}::text)`
+  : sql`COALESCE(${photos.taken_at}, ${photos.created_at})`
+/** Raw SQL fragment for use inside subqueries referencing the photos table alias "p" */
+const rawCoalesceDate = sql.raw(isPg
+  ? 'COALESCE(p.taken_at, p.created_at::text)'
+  : 'COALESCE(p.taken_at, p.created_at)')
+/** Boolean false literal – PG uses TRUE/FALSE, SQLite uses 1/0 */
+const rawFalse = sql.raw(isPg ? 'false' : '0')
 
 export const UPLOAD_DIR = path.resolve(process.env.PHOTO_UPLOAD_DIR || "uploads/photos");
 const INSIGHTFACE_SERVICE_URL = process.env.INSIGHTFACE_SERVICE_URL || "http://localhost:8000";
@@ -462,7 +472,7 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
         and(eq(photos.id, photoCuration.photo_id), eq(photoCuration.user_id, userId))
       )
       .where(eq(photos.user_id, userId))
-      .orderBy(sql`COALESCE(${photos.taken_at}, ${photos.created_at}) DESC`)
+      .orderBy(sql`${photoDateOrder} DESC`)
   );
 
   const filtered = showHidden ? rows : rows.filter((r) => (r.curation_status ?? "visible") !== "hidden");
@@ -991,15 +1001,15 @@ export async function listPersonsLogic(userId: number): Promise<ListPersonsRespo
           INNER JOIN photos p ON p.id = f.photo_id
           WHERE f.person_id = persons.id
             AND f.user_id = persons.user_id
-            AND f.ignored = 0
-          ORDER BY COALESCE(p.taken_at, p.created_at) DESC NULLS LAST, f.id DESC
+            AND f.ignored = ${rawFalse}
+          ORDER BY ${rawCoalesceDate} DESC NULLS LAST, f.id DESC
           LIMIT 1
         ),
         persons.cover_face_id
       )`,
       created_at: persons.created_at,
       updated_at: persons.updated_at,
-      faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM faces f WHERE f.person_id = persons.id AND f.ignored = 0), 0) AS INTEGER)`,
+      faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM faces f WHERE f.person_id = persons.id AND f.ignored = ${rawFalse}), 0) AS INTEGER)`,
       cover_filename: sql<string>`COALESCE(
         (
           SELECT p.filename
@@ -1007,8 +1017,8 @@ export async function listPersonsLogic(userId: number): Promise<ListPersonsRespo
           INNER JOIN photos p ON p.id = f.photo_id
           WHERE f.person_id = persons.id
             AND f.user_id = persons.user_id
-            AND f.ignored = 0
-          ORDER BY COALESCE(p.taken_at, p.created_at) DESC NULLS LAST, f.id DESC
+            AND f.ignored = ${rawFalse}
+          ORDER BY ${rawCoalesceDate} DESC NULLS LAST, f.id DESC
           LIMIT 1
         ),
         ''
@@ -1020,8 +1030,8 @@ export async function listPersonsLogic(userId: number): Promise<ListPersonsRespo
           INNER JOIN photos p ON p.id = f.photo_id
           WHERE f.person_id = persons.id
             AND f.user_id = persons.user_id
-            AND f.ignored = 0
-          ORDER BY COALESCE(p.taken_at, p.created_at) DESC NULLS LAST, f.id DESC
+            AND f.ignored = ${rawFalse}
+          ORDER BY ${rawCoalesceDate} DESC NULLS LAST, f.id DESC
           LIMIT 1
         ),
         ''
@@ -1077,7 +1087,7 @@ export async function getPersonDetailsLogic(userId: number, personId: number): P
       .from(faces)
       .innerJoin(photos, eq(faces.photo_id, photos.id))
       .where(and(eq(faces.person_id, personId), eq(faces.user_id, userId)))
-      .orderBy(sql`COALESCE(${photos.taken_at}, ${photos.created_at}) DESC NULLS LAST`, sql`${faces.id} DESC`)
+      .orderBy(sql`${photoDateOrder} DESC NULLS LAST`, sql`${faces.id} DESC`)
   );
 
   return {
@@ -1133,7 +1143,7 @@ export async function updatePersonLogic(userId: number, personId: number, name: 
         cover_face_id: persons.cover_face_id,
         created_at: persons.created_at,
         updated_at: persons.updated_at,
-        faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM faces f WHERE f.person_id = persons.id AND f.ignored = 0), 0) AS INTEGER)`,
+        faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM faces f WHERE f.person_id = persons.id AND f.ignored = ${rawFalse}), 0) AS INTEGER)`,
         cover_filename: sql<string>`COALESCE((SELECT p.filename FROM photos p INNER JOIN faces f ON f.photo_id = p.id WHERE f.id = persons.cover_face_id LIMIT 1), '')`,
         cover_bbox: sql<string>`COALESCE((SELECT f.bbox FROM faces f WHERE f.id = persons.cover_face_id LIMIT 1), '')`,
       })
