@@ -9,6 +9,12 @@ services:
     restart: unless-stopped
     environment:
       ORT_LOGGING_LEVEL: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   # ── Embedding Service (CLIP + DINOv2) ──────────────────────────────────────
   embedding_service:
@@ -26,6 +32,12 @@ services:
       CLIP_PRETRAINED: openai
       DINO_MODEL_NAME: facebook/dinov2-base
       LOG_LEVEL: INFO
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   # ── PostgreSQL (shared instance for both app and embedding service) ─────────
   postgres:
