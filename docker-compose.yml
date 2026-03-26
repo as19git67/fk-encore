@@ -72,7 +72,7 @@ services:
 
   # ── PostgreSQL (shared instance for both app and embedding service) ─────────
   postgres:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:pg18
     container_name: fk-encore-db
     restart: unless-stopped
     ports:
