@@ -939,11 +939,9 @@ onUnmounted(() => {
         </div>
 
         <!-- Left/right navigation -->
-        <Button icon="pi pi-chevron-left" class="fs-nav-left-right fs-nav-left" rounded text
-          :disabled="selectedIndex === 0"
+        <Button v-if="selectedIndex > 0" icon="pi pi-chevron-left" class="fs-nav-left-right fs-nav-left" rounded text
           @click="selectedIndex > 0 && selectedIndex--" />
-        <Button icon="pi pi-chevron-right" class="fs-nav-left-right fs-nav-right" rounded text
-          :disabled="selectedIndex === personPhotos.length - 1"
+        <Button v-if="selectedIndex < personPhotos.length - 1" icon="pi pi-chevron-right" class="fs-nav-left-right fs-nav-right" rounded text
           @click="selectedIndex < personPhotos.length - 1 && selectedIndex++" />
       </div>
     </div>
