@@ -12,3 +12,4 @@ data/*.db-wal
 data/*.db-shm
 frontend/dist
 /tsconfig.tsbuildinfo
+/test_output.txt
