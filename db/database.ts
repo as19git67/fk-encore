@@ -111,15 +111,7 @@ async function createPostgresDb(isTest: boolean): Promise<ReturnType<typeof driz
   // Run migrations
   const migrationsFolder = path.join(process.cwd(), "db", "migrations", "postgres");
   if (fs.existsSync(migrationsFolder)) {
-    try {
-      await migratePostgres(db, { migrationsFolder });
-    } catch (err: any) {
-      if (err.message?.includes('already exists')) {
-        console.warn('[db] Migration table may be missing or inconsistent, but tables already exist. Skipping initial migration.');
-      } else {
-        throw err;
-      }
-    }
+    await migratePostgres(db, { migrationsFolder });
   }
 
   return db;
@@ -135,9 +127,37 @@ function buildPostgresConnectionString(): string {
   return `postgres://${user}:${password}@${host}:${port}/${database}`;
 }
 
-const db = await createDb();
+let dbInstance: DbInstance | null = null;
+let initializationPromise: Promise<DbInstance> | null = null;
 
-// Seed initial data (roles, admin user) — top-level await works in ESM
-await seed(db);
+/**
+ * Initializes the database and runs migrations.
+ * This can be called multiple times, but will only initialize once.
+ */
+export async function initializeDb(): Promise<DbInstance> {
+  if (dbInstance) return dbInstance;
+  if (initializationPromise) return initializationPromise;
+
+  initializationPromise = (async () => {
+    try {
+      const db = await createDb();
+      // Seed initial data (roles, admin user)
+      await seed(db);
+      dbInstance = db;
+      return db;
+    } finally {
+      initializationPromise = null;
+    }
+  })();
+
+  return initializationPromise;
+}
+
+/**
+ * The database instance. 
+ * Note: When using this at top-level in other modules, ensure initializeDb() has been called 
+ * or that the first access is awaited if it's used inside an async function.
+ */
+const db = await initializeDb();
 
 export default db;
