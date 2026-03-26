@@ -43,6 +43,7 @@ class _Settings:
     clip_model_name = "ViT-B-32"
     clip_pretrained = "openai"
     dino_model_name = "facebook/dinov2-base"
+    lazy_load_models = False
 
 config_stub.settings = _Settings()
 sys.modules["app.config"] = config_stub
@@ -109,6 +110,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from app.api.endpoints import router
+import app.api.endpoints as endpoints_module
 
 app = FastAPI()
 app.include_router(router)
@@ -128,24 +130,47 @@ app.dependency_overrides[get_db] = override_get_db
 # ---------------------------------------------------------------------------
 
 class TestHealthEndpoint:
-    def test_returns_ok_when_db_healthy(self):
-        db_database_stub.check_db_connection = AsyncMock(return_value=True)
-        response = client.get("/health")
-        assert response.status_code == 200
-        body = response.json()
-        assert body["status"] == "ok"
-        assert body["db"] == "ok"
-        assert "models" in body
+    def test_returns_ok_when_everything_healthy(self):
+        with patch("app.api.endpoints.check_db_connection", AsyncMock(return_value=True)):
+            with patch("app.api.endpoints.CLIPEmbedder._instance", MagicMock()):
+                with patch("app.api.endpoints.DINOv2Embedder._instance", MagicMock()):
+                    response = client.get("/health")
+                    assert response.status_code == 200
+                    body = response.json()
+                    assert body["status"] == "ok"
+                    assert body["db"] == "ok"
+                    assert body["models"]["clip"] == "loaded"
+                    assert body["models"]["dino"] == "loaded"
 
-    def test_returns_degraded_when_db_down(self):
-        db_database_stub.check_db_connection = AsyncMock(return_value=False)
-        response = client.get("/health")
-        assert response.status_code == 200
-        body = response.json()
-        assert body["status"] == "degraded"
-        assert body["db"] == "error"
-        # restore
-        db_database_stub.check_db_connection = AsyncMock(return_value=True)
+    def test_returns_degraded_when_models_not_loaded_but_required(self):
+        with patch("app.api.endpoints.check_db_connection", AsyncMock(return_value=True)):
+            with patch("app.api.endpoints.CLIPEmbedder._instance", None):
+                with patch("app.api.endpoints.DINOv2Embedder._instance", None):
+                    with patch("app.api.endpoints.settings.lazy_load_models", False):
+                        response = client.get("/health")
+                        assert response.status_code == 200
+                        body = response.json()
+                        assert body["status"] == "degraded"
+                        assert body["models"]["clip"] == "not_loaded"
+
+    def test_returns_ok_when_models_not_loaded_but_lazy_loading_enabled(self):
+        with patch("app.api.endpoints.check_db_connection", AsyncMock(return_value=True)):
+            with patch("app.api.endpoints.CLIPEmbedder._instance", None):
+                with patch("app.api.endpoints.DINOv2Embedder._instance", None):
+                    with patch("app.api.endpoints.settings.lazy_load_models", True):
+                        response = client.get("/health")
+                        assert response.status_code == 200
+                        body = response.json()
+                        assert body["status"] == "ok"
+                        assert body["models"]["clip"] == "not_loaded"
+
+    def test_returns_error_when_db_down(self):
+        with patch("app.api.endpoints.check_db_connection", AsyncMock(return_value=False)):
+            response = client.get("/health")
+            assert response.status_code == 200
+            body = response.json()
+            assert body["status"] == "error"
+            assert body["db"] == "error"
 
 
 class TestEmbedEndpoint:

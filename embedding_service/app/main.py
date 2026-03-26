@@ -41,4 +41,9 @@ app.include_router(router)
 async def _on_startup() -> None:
     await ensure_database_exists()
     await run_migrations()
-    logger.info("Embedding Service started (log_level=%s).", settings.log_level)
+    if not settings.lazy_load_models:
+        logger.info("Preloading models...")
+        from app.services.embedding_service import CLIPEmbedder, DINOv2Embedder
+        await CLIPEmbedder.preload(model_name=settings.clip_model_name, pretrained=settings.clip_pretrained)
+        await DINOv2Embedder.preload(model_name=settings.dino_model_name)
+    logger.info("Embedding Service started (log_level=%s, lazy_load_models=%s).", settings.log_level, settings.lazy_load_models)
