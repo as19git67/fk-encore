@@ -2,7 +2,6 @@
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useWindowVirtualizer } from '@tanstack/vue-virtual'
 import Button from 'primevue/button'
-import FileUpload from 'primevue/fileupload'
 import Message from 'primevue/message'
 import { useConfirm } from 'primevue/useconfirm'
 import DatePicker from 'primevue/datepicker'
@@ -34,6 +33,7 @@ const auth = useAuthStore()
 const photos = ref<Photo[]>([])
 const loading = ref(true)
 const uploading = ref(false)
+const uploadAbortController = ref<AbortController | null>(null)
 const error = ref('')
 const selectedIndex = ref(-1)
 const isFullscreen = ref(false)
@@ -442,7 +442,9 @@ async function handleUpload(event: any) {
   }
 
   if (!files || files.length === 0) return
-  
+
+  const abortController = new AbortController()
+  uploadAbortController.value = abortController
   uploading.value = true
   error.value = ''
   let duplicates = []
@@ -450,9 +452,11 @@ async function handleUpload(event: any) {
 
   try {
     for (const file of files) {
+      if (abortController.signal.aborted) break
       try {
-        await uploadPhoto(file)
+        await uploadPhoto(file, abortController.signal)
       } catch (err: any) {
+        if (abortController.signal.aborted) break
         if (err.message?.includes('Foto wurde bereits hochgeladen')) {
           duplicates.push(file.name)
         } else {
@@ -460,10 +464,12 @@ async function handleUpload(event: any) {
         }
       }
     }
-    
+
     await loadPhotos()
-    
-    if (duplicates.length > 0 || errors.length > 0) {
+
+    if (abortController.signal.aborted) {
+      error.value = 'Hochladen wurde abgebrochen.'
+    } else if (duplicates.length > 0 || errors.length > 0) {
       let msg = ''
       if (duplicates.length > 0) {
         msg += `Folgende Fotos wurden übersprungen, da sie bereits vorhanden sind: ${duplicates.join(', ')}. `
@@ -474,10 +480,17 @@ async function handleUpload(event: any) {
       error.value = msg
     }
   } catch (err: any) {
-    error.value = err.message || 'Fehler beim Hochladen'
+    if (!abortController.signal.aborted) {
+      error.value = err.message || 'Fehler beim Hochladen'
+    }
   } finally {
     uploading.value = false
+    uploadAbortController.value = null
   }
+}
+
+function cancelUpload() {
+  uploadAbortController.value?.abort()
 }
 
 async function handleDelete(id: number) {
@@ -740,36 +753,47 @@ onUnmounted(() => {
         <span>Fotos zum Hochladen hier ablegen</span>
       </div>
     </div>
-    <div class="header">
-      <h1>Meine Fotos</h1>
-      <div class="actions">
-        <div v-if="canDelete" class="toggle-hidden">
-          <label for="showHidden" class="text-sm">Ausgeblendete</label>
-          <ToggleSwitch v-model="showHidden" inputId="showHidden" @update:modelValue="loadPhotos" />
+    <div class="sticky-subheader">
+      <div class="header">
+        <h1>Meine Fotos</h1>
+        <div class="actions">
+          <div v-if="canDelete" class="toggle-hidden">
+            <label for="showHidden" class="text-sm">Ausgeblendete</label>
+            <ToggleSwitch v-model="showHidden" inputId="showHidden" @update:modelValue="loadPhotos" />
+          </div>
+          <Button
+            v-if="canManageData && unreviewedGroupCount > 0"
+            :label="`Gruppen bearbeiten (${unreviewedGroupCount} offen)`"
+            icon="pi pi-images"
+            severity="success"
+            :disabled="uploading"
+            @click="handleStartGroupReview"
+          />
+          <Button
+            v-if="canUpload && uploading"
+            label="Hochladen abbrechen"
+            icon="pi pi-times"
+            severity="danger"
+            @click="cancelUpload"
+          />
+          <label v-else-if="canUpload" class="upload-button-label">
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              class="upload-input-hidden"
+              @change="handleUpload({ files: ($event.target as HTMLInputElement).files ? Array.from(($event.target as HTMLInputElement).files!) : [] })"
+            />
+            <Button
+              label="Fotos hochladen"
+              icon="pi pi-upload"
+              as="span"
+            />
+          </label>
         </div>
-        <Button
-          v-if="canManageData && unreviewedGroupCount > 0"
-          :label="`Gruppen bearbeiten (${unreviewedGroupCount} offen)`"
-          icon="pi pi-images"
-          severity="success"
-          @click="handleStartGroupReview"
-        />
-        <FileUpload
-          v-if="canUpload"
-          mode="basic"
-          name="file"
-          accept="image/*"
-          :auto="true"
-          customUpload
-          multiple
-          :disabled="uploading"
-          @uploader="handleUpload"
-          chooseLabel="Fotos hochladen"
-        />
       </div>
-    </div>
 
-    <div class="search-bar">
+      <div class="search-bar">
       <div class="search-input-wrapper">
         <i class="pi pi-search search-icon" />
         <input
@@ -794,6 +818,7 @@ onUnmounted(() => {
       <span v-if="searchResults !== null && !searchLoading" class="search-result-count">
         {{ searchResults.length }} {{ searchResults.length === 1 ? 'Treffer' : 'Treffer' }}
       </span>
+      </div>
     </div>
 
     <Message v-if="searchError" severity="error" @close="searchError = ''">{{ searchError }}</Message>
@@ -1107,13 +1132,31 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.sticky-subheader {
+  position: sticky;
+  top: var(--menubar-height, 3.5rem);
+  z-index: 110;
+  background: var(--surface-ground);
+  margin: -2rem -1rem 0;
+  padding: 1rem 1rem 0.5rem;
+}
+
 .header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 2rem;
+  margin-bottom: 0.75rem;
   flex-wrap: wrap;
   gap: 1rem;
+}
+
+.upload-button-label {
+  display: inline-flex;
+  cursor: pointer;
+}
+
+.upload-input-hidden {
+  display: none;
 }
 
 .actions {

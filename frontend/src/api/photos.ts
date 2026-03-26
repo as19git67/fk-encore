@@ -29,10 +29,11 @@ export function listPhotos(showHidden: boolean = false) {
   return apiFetch<ListPhotosResponse>(`/photos${query}`)
 }
 
-export async function uploadPhoto(file: File) {
+export async function uploadPhoto(file: File, signal?: AbortSignal) {
   return apiFetch<Photo>('/photos', {
     method: 'POST',
     body: file,
+    signal,
     headers: {
       'Content-Type': file.type,
       'X-File-Name': file.name
