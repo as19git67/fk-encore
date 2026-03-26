@@ -40,6 +40,11 @@ class CLIPEmbedder:
             cls._instance = cls(model_name=model_name, pretrained=pretrained)
         return cls._instance
 
+    @classmethod
+    async def preload(cls, model_name: str = "ViT-B-32", pretrained: str = "openai") -> None:
+        """Explicitly load the CLIP model into memory."""
+        cls.get_instance(model_name=model_name, pretrained=pretrained)
+
     @torch.no_grad()
     def embed(self, images: List[Image.Image]) -> List[List[float]]:
         """Return normalized CLIP embeddings for a list of PIL Image objects."""
@@ -80,6 +85,11 @@ class DINOv2Embedder:
         if cls._instance is None:
             cls._instance = cls(model_name=model_name)
         return cls._instance
+
+    @classmethod
+    async def preload(cls, model_name: str = "facebook/dinov2-base") -> None:
+        """Explicitly load the DINOv2 model into memory."""
+        cls.get_instance(model_name=model_name)
 
     @torch.no_grad()
     def embed(self, images: List[Image.Image]) -> List[List[float]]:
