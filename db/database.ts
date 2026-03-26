@@ -59,7 +59,7 @@ function createSqliteDb(isTest: boolean): BetterSQLite3Database<typeof schema> {
   const db = drizzleSqlite(sqlite, { schema });
 
   // Run migrations
-  const migrationsFolder = path.join(process.cwd(), "db", "migrations");
+  const migrationsFolder = path.join(process.cwd(), "db", "migrations", "sqlite");
   if (fs.existsSync(migrationsFolder)) {
     migrateSqlite(db, { migrationsFolder });
   }
@@ -109,7 +109,7 @@ async function createPostgresDb(isTest: boolean): Promise<ReturnType<typeof driz
   const db = drizzlePostgres(pool, { schema });
 
   // Run migrations
-  const migrationsFolder = path.join(process.cwd(), "db", "migrations");
+  const migrationsFolder = path.join(process.cwd(), "db", "migrations", "postgres");
   if (fs.existsSync(migrationsFolder)) {
     await migratePostgres(db, { migrationsFolder });
   }
