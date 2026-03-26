@@ -24,7 +24,7 @@ CREATE TABLE "challenges" (
 	"challenge" text NOT NULL,
 	"user_id" integer,
 	"created_at" timestamp DEFAULT now(),
-	"expires_at" text NOT NULL
+	"expires_at" timestamp NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "faces" (
@@ -72,7 +72,7 @@ CREATE TABLE "photo_curation" (
 	"user_id" integer NOT NULL,
 	"photo_id" integer NOT NULL,
 	"status" text DEFAULT 'visible' NOT NULL,
-	"created_at" timestamp DEFAULT now(),
+	"updated_at" timestamp DEFAULT now(),
 	CONSTRAINT "photo_curation_user_id_photo_id_pk" PRIMARY KEY("user_id","photo_id")
 );
 --> statement-breakpoint
@@ -87,7 +87,7 @@ CREATE TABLE "photo_groups" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"user_id" integer NOT NULL,
 	"cover_photo_id" integer,
-	"reviewed_at" text,
+	"reviewed_at" timestamp,
 	"created_at" timestamp DEFAULT now()
 );
 --> statement-breakpoint
@@ -99,7 +99,7 @@ CREATE TABLE "photos" (
 	"mime_type" text NOT NULL,
 	"size" integer NOT NULL,
 	"hash" text,
-	"taken_at" text,
+	"taken_at" timestamp,
 	"created_at" timestamp DEFAULT now()
 );
 --> statement-breakpoint
@@ -120,7 +120,7 @@ CREATE TABLE "sessions" (
 	"token" text PRIMARY KEY NOT NULL,
 	"user_id" integer NOT NULL,
 	"created_at" timestamp DEFAULT now(),
-	"expires_at" text NOT NULL
+	"expires_at" timestamp NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "user_roles" (

@@ -39,22 +39,17 @@ import type {
   PhotoGroup,
   ListGroupsResponse,
   FindGroupsResponse,
+  Face,
 } from "../db/types";
 import heicConvert from "heic-convert";
 import { createCanvas, loadImage } from "canvas";
 
-const isPg = process.env.DB_TYPE?.toLowerCase() === 'postgres'
-const nowSql = isPg ? sql`NOW()::text` : sql`datetime('now')`
-/** COALESCE(taken_at, created_at::text) – both sides must be text in PG */
-const photoDateOrder = isPg
-  ? sql`COALESCE(${photos.taken_at}, ${photos.created_at}::text)`
-  : sql`COALESCE(${photos.taken_at}, ${photos.created_at})`
+const nowSql = sql`NOW()`
+/** COALESCE(taken_at, created_at) – fallback to upload date if no EXIF date available */
+const photoDateOrder = sql`COALESCE(${photos.taken_at}, ${photos.created_at})`
 /** Raw SQL fragment for use inside subqueries referencing the photos table alias "p" */
-const rawCoalesceDate = sql.raw(isPg
-  ? 'COALESCE(p.taken_at, p.created_at::text)'
-  : 'COALESCE(p.taken_at, p.created_at)')
-/** Boolean false literal – PG uses TRUE/FALSE, SQLite uses 1/0 */
-const rawFalse = sql.raw(isPg ? 'false' : '0')
+const rawCoalesceDate = sql.raw('COALESCE(p.taken_at, p.created_at)')
+const rawFalse = sql.raw('false')
 
 export const UPLOAD_DIR = path.resolve(process.env.PHOTO_UPLOAD_DIR || "uploads/photos");
 const INSIGHTFACE_SERVICE_URL = process.env.INSIGHTFACE_SERVICE_URL || "http://localhost:8000";
@@ -521,7 +516,7 @@ export async function deletePhotoLogic(userId: number, photoId: number): Promise
       .values({ user_id: userId, photo_id: photoId, status: "hidden" })
       .onConflictDoUpdate({
         target: [photoCuration.user_id, photoCuration.photo_id],
-        set: { status: "hidden", updated_at: new Date().toISOString() },
+        set: { status: "hidden", updated_at: sql`NOW()` },
       })
   );
 
@@ -574,7 +569,7 @@ export async function updatePhotoCurationLogic(
         .values({ user_id: userId, photo_id: photoId, status })
         .onConflictDoUpdate({
           target: [photoCuration.user_id, photoCuration.photo_id],
-          set: { status, updated_at: new Date().toISOString() },
+          set: { status, updated_at: sql`NOW()` },
         })
     );
   }
