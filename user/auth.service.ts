@@ -13,8 +13,7 @@ import type {
 import { toUser, getRolesForUser, getPermissionsForUser } from "./user.service";
 import { checkRateLimit, resetRateLimit, getClientIp } from "./rateLimiter";
 
-const isPg = process.env.DB_TYPE?.toLowerCase() === 'postgres'
-const nowSql = isPg ? sql`NOW()::text` : sql`datetime('now')`
+const nowSql = sql`NOW()`
 
 // ---------- Helpers ----------
 
