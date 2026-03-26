@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     # DINOv2 model
     dino_model_name: str = "facebook/dinov2-base"
 
+    # Lazy loading models (default: false, meaning preloading is the default)
+    lazy_load_models: bool = False
+
     # Logging
     log_level: str = "INFO"
 

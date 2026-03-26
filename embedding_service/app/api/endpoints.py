@@ -44,8 +44,15 @@ async def health(db: DbDep) -> HealthResponse:
     db_ok = await check_db_connection()
     clip_loaded = CLIPEmbedder._instance is not None
     dino_loaded = DINOv2Embedder._instance is not None
+    
+    # If lazy loading is disabled (default), we consider the service "ok" only if models are loaded.
+    # Otherwise, "ok" (or "degraded") reflects the DB status.
+    is_ok = db_ok
+    if not settings.lazy_load_models and (not clip_loaded or not dino_loaded):
+        is_ok = False
+        
     return HealthResponse(
-        status="ok" if db_ok else "degraded",
+        status="ok" if is_ok else ("degraded" if db_ok else "error"),
         db="ok" if db_ok else "error",
         models={"clip": "loaded" if clip_loaded else "not_loaded", "dino": "loaded" if dino_loaded else "not_loaded"},
     )
