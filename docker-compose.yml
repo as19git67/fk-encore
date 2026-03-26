@@ -59,7 +59,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/embeddings
-      CLIP_MODEL_NAME: ViT-B-32
+      CLIP_MODEL_NAME: ViT-L-14
       CLIP_PRETRAINED: openai
       DINO_MODEL_NAME: facebook/dinov2-base
       LOG_LEVEL: INFO
@@ -82,7 +82,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: encore          # primary database for the app
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d encore"]
       interval: 5s
