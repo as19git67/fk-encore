@@ -1013,6 +1013,11 @@ onUnmounted(() => {
   align-items: center;
   margin-bottom: 1.5rem;
   gap: 1em;
+  position: sticky;
+  top: var(--menubar-height, 3.5rem);
+  z-index: 110;
+  background: var(--surface-ground);
+  padding: 0.75rem 0;
 }
 
 .gallery-container {
