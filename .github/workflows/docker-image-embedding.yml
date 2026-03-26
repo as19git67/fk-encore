@@ -37,7 +37,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install test dependencies
-        run: pip install fastapi httpx pytest pytest-asyncio pydantic pydantic-settings Pillow sqlalchemy[asyncio]
+        run: pip install fastapi httpx pytest pytest-asyncio pydantic pydantic-settings python-multipart Pillow sqlalchemy[asyncio]
         working-directory: embedding_service
 
       - name: Run tests
