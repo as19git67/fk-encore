@@ -695,7 +695,7 @@ onUnmounted(() => {
     <div class="content-header">
       <div class="flex items-center gap-4">
           <Button v-if="selectedPersonDetail" icon="pi pi-arrow-left" class="p-button-text p-button-rounded" @click="closePersonDetails" />
-          <h1 class="text-3xl font-bold">{{ selectedPersonDetail ? selectedPersonDetail.name : 'Personen' }}</h1>
+          <h1 class="text-xl font-semibold">{{ selectedPersonDetail ? selectedPersonDetail.name : 'Personen' }}</h1>
           <div v-if="!selectedPersonDetail && multiSelectMode" class="flex items-center gap-2 ml-4">
               <span class="text-lg font-medium">{{ selectedPersonIds.length }} ausgewählt</span>
               <Button label="Abbrechen" class="p-button-text p-button-sm" @click="cancelMultiSelect" />
@@ -1011,13 +1011,17 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1.5rem;
-  gap: 1em;
+  margin-bottom: 1rem;
+  gap: 0.75rem;
   position: sticky;
   top: var(--menubar-height, 3.5rem);
   z-index: 110;
-  background: var(--surface-ground);
-  padding: 0.75rem 0;
+  background: var(--surface-card);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  /* Extend to full viewport width (cancel p-4 + .content padding = 2rem each side) */
+  margin-left: calc(-1 * max(0px, (100vw - 960px) / 2) - 2rem);
+  margin-right: calc(-1 * max(0px, (100vw - 960px) / 2) - 2rem);
+  padding: 0.4rem calc(max(0px, (100vw - 960px) / 2) + 2rem);
 }
 
 .gallery-container {

@@ -128,6 +128,33 @@ describe("Photo Module", () => {
       fs.unlinkSync(filePath);
     });
 
+    it("should reject unsupported MIME types without saving a file", async () => {
+      const filesBefore = fs.readdirSync(UPLOAD_DIR).length;
+      const fileData = Buffer.from("not-an-image");
+      await expect(service.uploadPhotoLogic(user1.id, {
+        data: fileData,
+        name: "document.pdf",
+        mimeType: "application/pdf",
+      })).rejects.toThrow("UNSUPPORTED_FILE_TYPE");
+
+      // No new files should have been written to disk
+      const filesAfter = fs.readdirSync(UPLOAD_DIR).length;
+      expect(filesAfter).toBe(filesBefore);
+    });
+
+    it("should reject unsupported MIME types in stream upload without saving a file", async () => {
+      const filesBefore = fs.readdirSync(UPLOAD_DIR).length;
+      const fileData = Buffer.from("not-an-image");
+      const stream = Readable.from(fileData) as any;
+
+      await expect(service.uploadPhotoStream(user1.id, stream, "document.pdf", "application/pdf"))
+        .rejects.toThrow("UNSUPPORTED_FILE_TYPE");
+
+      // No new files should have been written to disk
+      const filesAfter = fs.readdirSync(UPLOAD_DIR).length;
+      expect(filesAfter).toBe(filesBefore);
+    });
+
     it("should not allow duplicate uploads for the same user", async () => {
       const fileData = Buffer.from("identical-data");
       await service.uploadPhotoLogic(user1.id, {
