@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     db_echo: bool = False
 
     # CLIP model
-    clip_model_name: str = "ViT-B-32"
+    clip_model_name: str = "ViT-L-14"
     clip_pretrained: str = "openai"
 
     # DINOv2 model
