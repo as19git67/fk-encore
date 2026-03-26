@@ -111,7 +111,15 @@ async function createPostgresDb(isTest: boolean): Promise<ReturnType<typeof driz
   // Run migrations
   const migrationsFolder = path.join(process.cwd(), "db", "migrations", "postgres");
   if (fs.existsSync(migrationsFolder)) {
-    await migratePostgres(db, { migrationsFolder });
+    try {
+      await migratePostgres(db, { migrationsFolder });
+    } catch (err: any) {
+      if (err.message?.includes('already exists')) {
+        console.warn('[db] Migration table may be missing or inconsistent, but tables already exist. Skipping initial migration.');
+      } else {
+        throw err;
+      }
+    }
   }
 
   return db;
