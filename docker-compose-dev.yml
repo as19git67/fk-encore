@@ -28,7 +28,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/embeddings
-      CLIP_MODEL_NAME: ViT-B-32
+      CLIP_MODEL_NAME: ViT-B-16
       CLIP_PRETRAINED: openai
       DINO_MODEL_NAME: facebook/dinov2-base
       LOG_LEVEL: INFO
