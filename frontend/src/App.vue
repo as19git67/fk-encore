@@ -37,7 +37,7 @@ async function handleLogout() {
 
 <template>
   <div class="app-container">
-    <Menubar v-if="auth.isAuthenticated" :model="menuItems">
+    <Menubar v-if="auth.isAuthenticated" :model="menuItems" class="sticky-menubar">
       <template #end>
         <div class="menu-end">
           <span class="user-name">{{ auth.user?.name }}</span>
@@ -63,6 +63,12 @@ body {
 
 .app-container {
   min-height: 100vh;
+}
+
+.sticky-menubar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
 }
 
 .content {
