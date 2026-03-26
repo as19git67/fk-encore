@@ -59,7 +59,7 @@ function createSqliteDb(isTest: boolean): BetterSQLite3Database<typeof schema> {
   const db = drizzleSqlite(sqlite, { schema });
 
   // Run migrations
-  const migrationsFolder = path.join(process.cwd(), "db", "migrations");
+  const migrationsFolder = path.join(process.cwd(), "db", "migrations", "sqlite");
   if (fs.existsSync(migrationsFolder)) {
     migrateSqlite(db, { migrationsFolder });
   }
@@ -109,7 +109,7 @@ async function createPostgresDb(isTest: boolean): Promise<ReturnType<typeof driz
   const db = drizzlePostgres(pool, { schema });
 
   // Run migrations
-  const migrationsFolder = path.join(process.cwd(), "db", "migrations");
+  const migrationsFolder = path.join(process.cwd(), "db", "migrations", "postgres");
   if (fs.existsSync(migrationsFolder)) {
     await migratePostgres(db, { migrationsFolder });
   }
@@ -127,9 +127,37 @@ function buildPostgresConnectionString(): string {
   return `postgres://${user}:${password}@${host}:${port}/${database}`;
 }
 
-const db = await createDb();
+let dbInstance: DbInstance | null = null;
+let initializationPromise: Promise<DbInstance> | null = null;
 
-// Seed initial data (roles, admin user) — top-level await works in ESM
-await seed(db);
+/**
+ * Initializes the database and runs migrations.
+ * This can be called multiple times, but will only initialize once.
+ */
+export async function initializeDb(): Promise<DbInstance> {
+  if (dbInstance) return dbInstance;
+  if (initializationPromise) return initializationPromise;
+
+  initializationPromise = (async () => {
+    try {
+      const db = await createDb();
+      // Seed initial data (roles, admin user)
+      await seed(db);
+      dbInstance = db;
+      return db;
+    } finally {
+      initializationPromise = null;
+    }
+  })();
+
+  return initializationPromise;
+}
+
+/**
+ * The database instance. 
+ * Note: When using this at top-level in other modules, ensure initializeDb() has been called 
+ * or that the first access is awaited if it's used inside an async function.
+ */
+const db = await initializeDb();
 
 export default db;
