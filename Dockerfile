@@ -33,14 +33,18 @@ RUN npm --prefix frontend run build
 
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh \
-    && mkdir -p /mnt/data/photos /mnt/data/db /app/data
+    && mkdir -p /mnt/data/photos /app/data
 
-ENV DB_TYPE=sqlite \
-    SQLITE_DB_PATH=/mnt/data/db/app.db \
+ENV DB_TYPE=postgres \
+    POSTGRES_HOST=localhost \
+    POSTGRES_PORT=5432 \
+    POSTGRES_USER=postgres \
+    POSTGRES_PASSWORD=postgres \
+    POSTGRES_DATABASE=fk_encore \
     PHOTO_UPLOAD_DIR=/mnt/data/photos \
     PORT=8080 \
     RP_ID=localhost \
-    RP_NAME="FK Encore App" \
+    RP_NAME="Vivanty App" \
     RP_ORIGIN=http://localhost:8080 \
     ENABLE_LOCAL_FACES=true \
     INSIGHTFACE_SERVICE_URL=http://localhost:8000 \

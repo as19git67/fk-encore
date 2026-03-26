@@ -221,7 +221,7 @@
         },
         "expires_at": {
           "name": "expires_at",
-          "type": "text",
+          "type": "timestamp",
           "primaryKey": false,
           "notNull": true
         }
@@ -581,8 +581,8 @@
           "notNull": true,
           "default": "'visible'"
         },
-        "created_at": {
-          "name": "created_at",
+        "updated_at": {
+          "name": "updated_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": false,
@@ -723,7 +723,7 @@
         },
         "reviewed_at": {
           "name": "reviewed_at",
-          "type": "text",
+          "type": "timestamp",
           "primaryKey": false,
           "notNull": false
         },
@@ -818,7 +818,7 @@
         },
         "taken_at": {
           "name": "taken_at",
-          "type": "text",
+          "type": "timestamp",
           "primaryKey": false,
           "notNull": false
         },
@@ -977,7 +977,7 @@
         },
         "expires_at": {
           "name": "expires_at",
-          "type": "text",
+          "type": "timestamp",
           "primaryKey": false,
           "notNull": true
         }

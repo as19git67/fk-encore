@@ -2,37 +2,12 @@ import { hashSync } from "bcryptjs";
 import { eq, and } from "drizzle-orm";
 import * as schema from "./schema";
 
-// Thin adapter so seed works with both SQLite (sync) and Postgres (async) drizzle instances.
-function makeAdapter(db: any) {
-  const isPg = process.env.DB_TYPE?.toLowerCase() === 'postgres'
-  return {
-    async first<T>(q: any): Promise<T | undefined> {
-      if (isPg) return (await q)[0]
-      return q.get()
-    },
-    async all<T>(q: any): Promise<T[]> {
-      if (isPg) return await q
-      return q.all()
-    },
-    async exec(q: any): Promise<void> {
-      if (isPg) { await q } else { q.run() }
-    },
-    async insertReturning<T>(q: any): Promise<T | undefined> {
-      if (isPg) return (await q)[0]
-      return q.get()
-    },
-  }
-}
-
 /**
  * Seeds the database with initial roles, permissions, and an admin user.
- * Works with both SQLite (better-sqlite3) and PostgreSQL (node-postgres) drizzle instances.
  */
 export async function seed(db: any): Promise<void> {
-  const isTest = process.env.NODE_ENV === "test" || process.env.VITEST;
+  const isTest = process.env.NODE_ENV === "test" || !!process.env.VITEST;
   if (isTest) return;
-
-  const { first, all, exec, insertReturning } = makeAdapter(db)
 
   // --- Seed default roles ---
   const defaultRoles = [
@@ -41,11 +16,9 @@ export async function seed(db: any): Promise<void> {
   ];
 
   for (const role of defaultRoles) {
-    const existing = await first(
-      db.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.name, role.name))
-    )
+    const existing = (await db.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.name, role.name)))[0];
     if (!existing) {
-      await exec(db.insert(schema.roles).values(role))
+      await db.insert(schema.roles).values(role);
       console.log(`[seed] Created role: ${role.name}`);
     }
   }
@@ -76,63 +49,49 @@ export async function seed(db: any): Promise<void> {
   ];
 
   for (const perm of allPermissions) {
-    const existing = await first(
-      db.select({ id: schema.permissions.id }).from(schema.permissions).where(eq(schema.permissions.key, perm.key))
-    )
+    const existing = (await db.select({ id: schema.permissions.id }).from(schema.permissions).where(eq(schema.permissions.key, perm.key)))[0];
     if (!existing) {
-      await exec(db.insert(schema.permissions).values(perm))
+      await db.insert(schema.permissions).values(perm);
       console.log(`[seed] Created permission: ${perm.key}`);
     }
   }
 
   // --- Assign all permissions to Admin role ---
-  const adminRole = await first<{ id: number }>(
-    db.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.name, "Admin"))
-  )
+  const adminRole = (await db.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.name, "Admin")))[0] as { id: number } | undefined;
 
   if (adminRole) {
-    const perms = await all<{ id: number }>(
-      db.select({ id: schema.permissions.id }).from(schema.permissions)
-    )
+    const perms = await db.select({ id: schema.permissions.id }).from(schema.permissions) as { id: number }[];
 
     for (const perm of perms) {
-      const existing = await first(
-        db.select({ role_id: schema.rolePermissions.role_id })
-          .from(schema.rolePermissions)
-          .where(and(
-            eq(schema.rolePermissions.role_id, adminRole.id),
-            eq(schema.rolePermissions.permission_id, perm.id)
-          ))
-      )
+      const existing = (await db.select({ role_id: schema.rolePermissions.role_id })
+        .from(schema.rolePermissions)
+        .where(and(
+          eq(schema.rolePermissions.role_id, adminRole.id),
+          eq(schema.rolePermissions.permission_id, perm.id)
+        )))[0];
       if (!existing) {
-        await exec(db.insert(schema.rolePermissions).values({ role_id: adminRole.id, permission_id: perm.id }))
+        await db.insert(schema.rolePermissions).values({ role_id: adminRole.id, permission_id: perm.id });
       }
     }
     console.log(`[seed] Assigned all permissions to Admin role`);
   }
 
   // --- Assign basic permissions to User role ---
-  const userRole = await first<{ id: number }>(
-    db.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.name, "User"))
-  )
+  const userRole = (await db.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.name, "User")))[0] as { id: number } | undefined;
 
   if (userRole) {
     const userPermissions = ["users.read", "module.photos", "photos.view", "photos.upload", "photos.delete", "people.view", "people.edit"];
     for (const key of userPermissions) {
-      const perm = await first<{ id: number }>(
-        db.select({ id: schema.permissions.id }).from(schema.permissions).where(eq(schema.permissions.key, key))
-      )
+      const perm = (await db.select({ id: schema.permissions.id }).from(schema.permissions).where(eq(schema.permissions.key, key)))[0] as { id: number } | undefined;
       if (perm) {
-        const existing = await first(
-          db.select({ role_id: schema.rolePermissions.role_id })
-            .from(schema.rolePermissions)
-            .where(and(
-              eq(schema.rolePermissions.role_id, userRole.id),
-              eq(schema.rolePermissions.permission_id, perm.id)
-            ))
-        )
+        const existing = (await db.select({ role_id: schema.rolePermissions.role_id })
+          .from(schema.rolePermissions)
+          .where(and(
+            eq(schema.rolePermissions.role_id, userRole.id),
+            eq(schema.rolePermissions.permission_id, perm.id)
+          )))[0];
         if (!existing) {
-          await exec(db.insert(schema.rolePermissions).values({ role_id: userRole.id, permission_id: perm.id }))
+          await db.insert(schema.rolePermissions).values({ role_id: userRole.id, permission_id: perm.id });
         }
       }
     }
@@ -152,20 +111,16 @@ export async function seed(db: any): Promise<void> {
     return;
   }
 
-  const existingUser = await first(
-    db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.email, adminEmail))
-  )
+  const existingUser = (await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.email, adminEmail)))[0];
 
   if (!existingUser) {
     const passwordHash = hashSync(adminPassword, 10);
-    const result = await insertReturning<{ id: number }>(
-      db.insert(schema.users)
-        .values({ email: adminEmail, name: adminName, password_hash: passwordHash })
-        .returning({ id: schema.users.id })
-    )
+    const result = (await db.insert(schema.users)
+      .values({ email: adminEmail, name: adminName, password_hash: passwordHash })
+      .returning({ id: schema.users.id }))[0] as { id: number } | undefined;
 
     if (adminRole && result) {
-      await exec(db.insert(schema.userRoles).values({ user_id: result.id, role_id: adminRole.id }))
+      await db.insert(schema.userRoles).values({ user_id: result.id, role_id: adminRole.id });
     }
 
     console.log(`[seed] Created admin user: ${adminEmail}`);

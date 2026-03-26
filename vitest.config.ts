@@ -2,15 +2,21 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
+    globalSetup: ["./vitest.globalsetup.ts"],
     env: {
       ENABLE_LOCAL_FACES: "false",
-      DB_TYPE: "sqlite",
+      DB_TYPE: "postgres",
+      POSTGRES_HOST: "localhost",
+      POSTGRES_PORT: "5432",
+      POSTGRES_USER: "postgres",
+      POSTGRES_PASSWORD: "postgres",
+      POSTGRES_TEST_DB: "encore_test",
+      POSTGRES_TEST_CONNECTION_STRING: "postgres://postgres:postgres@localhost:5432/encore_test",
       RP_ID: "localhost",
       RP_NAME: "FK Encore App",
       RP_ORIGIN: "http://localhost:5173",
       NODE_ENV: "test",
     },
-    // Exclude tests that import from encore.dev (require Encore runtime)
     exclude: [
       "node_modules/**",
       "encore.gen/**",
@@ -33,4 +39,3 @@ export default defineConfig({
     },
   },
 });
-
