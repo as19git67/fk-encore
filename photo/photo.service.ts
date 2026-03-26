@@ -3,7 +3,7 @@ import path from "path";
 import crypto from "crypto";
 import exifr from "exifr";
 import { exiftool } from "exiftool-vendored";
-import { eq, and, or, sql, inArray } from "drizzle-orm";
+import { eq, and, or, sql, inArray, ilike } from "drizzle-orm";
 import db from "../db/database";
 import { dbFirst, dbAll, dbExec, dbInsertReturning } from '../db/adapter';
 import type { IncomingMessage } from "http";
@@ -105,12 +105,13 @@ async function callInsightFaceDetect(filePath: string): Promise<{ faces: any[], 
 async function callEmbeddingServiceUpload(
   photoId: string,
   filePath: string,
-  metadata: { timestamp?: string; camera_id?: string; face_ids?: string[] }
+  metadata: { timestamp?: string; camera_id?: string; face_ids?: string[] },
+  force: boolean = false
 ): Promise<void> {
   const formData = new FormData();
   const fileData = await fs.promises.readFile(filePath);
   const blob = new Blob([fileData], { type: getUploadMimeType(filePath) });
-  
+
   formData.append('file', blob, path.basename(filePath));
   formData.append('photo_id', photoId);
   formData.append('file_path', filePath);
@@ -119,6 +120,7 @@ async function callEmbeddingServiceUpload(
   if (metadata.face_ids && metadata.face_ids.length > 0) {
     formData.append('face_ids', metadata.face_ids.join(','));
   }
+  if (force) formData.append('force', 'true');
 
   const response = await fetch(`${EMBEDDING_SERVICE_URL}/upload`, {
     method: 'POST',
@@ -134,7 +136,7 @@ async function callEmbeddingServiceUpload(
   }
 }
 
-export async function indexPhotoEmbeddings(userId: number, photoId: number): Promise<void> {
+export async function indexPhotoEmbeddings(userId: number, photoId: number, force: boolean = false): Promise<void> {
   const photo = await dbFirst<typeof photos.$inferSelect>(
     db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
   );
@@ -150,7 +152,7 @@ export async function indexPhotoEmbeddings(userId: number, photoId: number): Pro
   await callEmbeddingServiceUpload(photoId.toString(), filePath, {
     timestamp: photo.taken_at ?? photo.created_at ?? undefined,
     face_ids: faceIds,
-  });
+  }, force);
 }
 
 export async function indexPhotoFaces(userId: number, photoId: number, resetIgnored: boolean = false): Promise<void> {
@@ -1297,7 +1299,7 @@ export async function reindexPhotoLogic(
   if (!photo) throw new Error("Photo not found");
 
   await indexPhotoFaces(userId, photoId, true);
-  await indexPhotoEmbeddings(userId, photoId);
+  await indexPhotoEmbeddings(userId, photoId, true);
   return { success: true };
 }
 
@@ -1336,7 +1338,7 @@ export async function reindexAllPhotosLogic(userId: number): Promise<{ count: nu
     for (const p of allPhotos) {
       try {
         await indexPhotoFaces(userId, p.id, false);
-        await indexPhotoEmbeddings(userId, p.id);
+        await indexPhotoEmbeddings(userId, p.id, true);
         state.processed++;
       } catch (err: any) {
         state.errors++;
@@ -1682,6 +1684,39 @@ export async function searchPhotosLogic(
   limit: number = 20,
   threshold: number = 0.20
 ): Promise<{ results: PhotoSearchResult[] }> {
+  // 0. Check if query matches a known person name
+  const matchedPerson = await dbFirst<{ id: number }>(
+    db.select({ id: persons.id })
+      .from(persons)
+      .where(and(eq(persons.user_id, userId), ilike(persons.name, `%${query}%`)))
+      .limit(1)
+  );
+
+  if (matchedPerson) {
+    const personFaces = await dbAll<{ photo_id: number }>(
+      db.select({ photo_id: faces.photo_id })
+        .from(faces)
+        .where(and(eq(faces.person_id, matchedPerson.id), eq(faces.ignored, false)))
+    );
+    const uniquePhotoIds = [...new Set(personFaces.map(f => f.photo_id))];
+    if (uniquePhotoIds.length === 0) return { results: [] };
+
+    const userPhotos = await dbAll<{ id: number; filename: string; taken_at: string | null; created_at: string }>(
+      db.select({ id: photos.id, filename: photos.filename, taken_at: photos.taken_at, created_at: photos.created_at })
+        .from(photos)
+        .where(and(eq(photos.user_id, userId), inArray(photos.id, uniquePhotoIds)))
+    );
+    return {
+      results: userPhotos.map(p => ({
+        photoId: p.id,
+        score: 1.0,
+        filename: p.filename,
+        taken_at: p.taken_at ?? undefined,
+        created_at: p.created_at,
+      })),
+    };
+  }
+
   // 1. Call embedding service text search
   let embeddingResults: Array<{ photo_id: string; score: number }>;
   try {

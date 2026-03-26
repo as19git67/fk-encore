@@ -126,14 +126,16 @@ async def upload_photo(
     timestamp: Optional[datetime] = Form(None),
     camera_id: Optional[str] = Form(None),
     face_ids: Optional[str] = Form(None),  # Comma-separated list
+    force: bool = Form(False),
     file: UploadFile = File(...),
 ) -> EmbedResponse:
     """Generate CLIP + DINOv2 embeddings for an uploaded photo and persist them."""
-    # Skip if photo already in DB
-    existing = await repository.get_existing_photo_ids(db, [photo_id])
-    if photo_id in existing:
-        logger.info("Photo %s already exists – skipping.", photo_id)
-        return EmbedResponse(status="ok", processed=0)
+    # Skip if photo already in DB (unless force re-embed is requested)
+    if not force:
+        existing = await repository.get_existing_photo_ids(db, [photo_id])
+        if photo_id in existing:
+            logger.info("Photo %s already exists – skipping.", photo_id)
+            return EmbedResponse(status="ok", processed=0)
 
     try:
         content = await file.read()
@@ -167,7 +169,7 @@ async def upload_photo(
         "embedding_dino": dino_embeddings[0],
     }
 
-    inserted = await repository.upsert_photos(db, [row])
+    inserted = await repository.upsert_photos(db, [row], overwrite=force)
     logger.info("Uploaded photo %s processed and stored.", photo_id)
     return EmbedResponse(status="ok", processed=inserted)
 

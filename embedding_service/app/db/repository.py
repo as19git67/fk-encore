@@ -22,19 +22,26 @@ async def get_existing_photo_ids(session: AsyncSession, photo_ids: List[str]) ->
     return {row[0] for row in result.fetchall()}
 
 
-async def upsert_photos(session: AsyncSession, photos: List[dict]) -> int:
-    """Insert photos, skipping rows whose photo_id already exists.
+async def upsert_photos(session: AsyncSession, photos: List[dict], overwrite: bool = False) -> int:
+    """Insert photos. When overwrite=True, update embeddings on conflict.
 
-    Returns the number of rows actually inserted.
+    Returns the number of rows actually inserted or updated.
     """
     if not photos:
         return 0
 
-    stmt = (
-        pg_insert(Photo)
-        .values(photos)
-        .on_conflict_do_nothing(index_elements=["photo_id"])
-    )
+    insert_stmt = pg_insert(Photo).values(photos)
+    if overwrite:
+        stmt = insert_stmt.on_conflict_do_update(
+            index_elements=["photo_id"],
+            set_={
+                "embedding_clip": insert_stmt.excluded.embedding_clip,
+                "embedding_dino": insert_stmt.excluded.embedding_dino,
+                "face_ids": insert_stmt.excluded.face_ids,
+            },
+        )
+    else:
+        stmt = insert_stmt.on_conflict_do_nothing(index_elements=["photo_id"])
     result = await session.execute(stmt)
     await session.flush()
     return result.rowcount
