@@ -23,6 +23,14 @@ def read_image(file: UploadFile):
     return img
 
 
+@app.get("/health")
+async def health():
+    # Simple check for the model initialization
+    if app_state is None:
+        return {"status": "error", "message": "FaceAnalysis model not initialized"}
+    return {"status": "ok"}
+
+
 @app.post("/embedding")
 async def get_embedding(file: UploadFile = File(...)):
     img = read_image(file)
