@@ -82,6 +82,12 @@ export const uploadPhoto = api.raw(
         res.end(JSON.stringify({ error: "Duplicate photo", message: "Foto wurde bereits hochgeladen." }));
         return;
       }
+      if (err.message === "UNSUPPORTED_FILE_TYPE") {
+        res.statusCode = 415;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "Unsupported file type", message: "Dateiformat wird nicht unterstützt." }));
+        return;
+      }
       console.error("Upload error:", err);
       res.statusCode = 500;
       res.setHeader("Content-Type", "application/json");

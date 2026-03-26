@@ -58,6 +58,11 @@ const rawFalse = sql.raw(isPg ? 'false' : '0')
 
 export const UPLOAD_DIR = path.resolve(process.env.PHOTO_UPLOAD_DIR || "uploads/photos");
 const INSIGHTFACE_SERVICE_URL = process.env.INSIGHTFACE_SERVICE_URL || "http://localhost:8000";
+
+const SUPPORTED_MIME_TYPES = new Set([
+  "image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp",
+  "image/heic", "image/heif", "image/tiff", "image/bmp", "image/svg+xml",
+]);
 const EMBEDDING_SERVICE_URL = process.env.EMBEDDING_SERVICE_URL || "http://localhost:8001";
 const EXIF_WRITE_TIMEOUT_MS = parseInt(process.env.EXIF_WRITE_TIMEOUT_MS || "8000", 10);
 const EXIF_WRITABLE_EXTENSIONS = new Set([".jpg", ".jpeg", ".tif", ".tiff", ".png"]);
@@ -314,6 +319,10 @@ export async function uploadPhotoStream(
   originalName: string,
   mimeType: string
 ): Promise<Photo> {
+  if (!SUPPORTED_MIME_TYPES.has(mimeType.toLowerCase().split(";")[0].trim())) {
+    throw new Error("UNSUPPORTED_FILE_TYPE");
+  }
+
   const filename = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}${path.extname(originalName)}`;
   const filePath = path.join(UPLOAD_DIR, filename);
 
@@ -389,6 +398,10 @@ export async function uploadPhotoLogic(
   userId: number,
   file: { data: Buffer; name: string; mimeType: string }
 ): Promise<Photo> {
+  if (!SUPPORTED_MIME_TYPES.has(file.mimeType.toLowerCase().split(";")[0].trim())) {
+    throw new Error("UNSUPPORTED_FILE_TYPE");
+  }
+
   const digest = crypto.createHash('sha256').update(file.data).digest('hex');
 
   // Check for duplicate for this user

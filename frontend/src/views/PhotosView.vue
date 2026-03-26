@@ -169,6 +169,25 @@ const formatPhotoDateFull = (photo: Photo) => {
 
 const isDragging = ref(false)
 const dragCounter = ref(0)
+
+// ── Subheader height tracking for sticky nav positioning ────────────────────
+const subheaderRef = ref<HTMLElement | null>(null)
+const subheaderHeight = ref(0)
+let subheaderObserver: ResizeObserver | null = null
+
+watch(subheaderRef, (el) => {
+  subheaderObserver?.disconnect()
+  subheaderObserver = null
+  if (!el) return
+  subheaderHeight.value = el.offsetHeight
+  subheaderObserver = new ResizeObserver(() => {
+    subheaderHeight.value = el.offsetHeight
+  })
+  subheaderObserver.observe(el)
+})
+
+const navTop = computed(() => `calc(var(--menubar-height, 3.5rem) + ${subheaderHeight.value}px + 0.5rem)`)
+const navMaxHeight = computed(() => `calc(100vh - var(--menubar-height, 3.5rem) - ${subheaderHeight.value}px - 1rem)`)
 const isEditingDate = ref(false)
 const editDate = ref<Date | null>(null)
 const updatingDate = ref(false)
@@ -447,8 +466,9 @@ async function handleUpload(event: any) {
   uploadAbortController.value = abortController
   uploading.value = true
   error.value = ''
-  let duplicates = []
-  let errors = []
+  let duplicates: string[] = []
+  let unsupportedTypes: string[] = []
+  let errors: string[] = []
 
   try {
     for (const file of files) {
@@ -459,6 +479,8 @@ async function handleUpload(event: any) {
         if (abortController.signal.aborted) break
         if (err.message?.includes('Foto wurde bereits hochgeladen')) {
           duplicates.push(file.name)
+        } else if (err.message?.includes('Dateiformat wird nicht unterstützt')) {
+          unsupportedTypes.push(file.name)
         } else {
           errors.push(`${file.name}: ${err.message}`)
         }
@@ -469,10 +491,13 @@ async function handleUpload(event: any) {
 
     if (abortController.signal.aborted) {
       error.value = 'Hochladen wurde abgebrochen.'
-    } else if (duplicates.length > 0 || errors.length > 0) {
+    } else if (duplicates.length > 0 || unsupportedTypes.length > 0 || errors.length > 0) {
       let msg = ''
       if (duplicates.length > 0) {
         msg += `Folgende Fotos wurden übersprungen, da sie bereits vorhanden sind: ${duplicates.join(', ')}. `
+      }
+      if (unsupportedTypes.length > 0) {
+        msg += `Folgende Dateien haben ein nicht unterstütztes Format: ${unsupportedTypes.join(', ')}. `
       }
       if (errors.length > 0) {
         msg += `Fehler bei: ${errors.join('; ')}.`
@@ -736,6 +761,7 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
   window.removeEventListener('resize', refreshVirtualLayout)
   resizeObserver?.disconnect()
+  subheaderObserver?.disconnect()
 })
 </script>
 
@@ -753,7 +779,7 @@ onUnmounted(() => {
         <span>Fotos zum Hochladen hier ablegen</span>
       </div>
     </div>
-    <div class="sticky-subheader">
+    <div class="sticky-subheader" ref="subheaderRef">
       <div class="header">
         <h1>Meine Fotos</h1>
         <div class="actions">
@@ -1136,18 +1162,28 @@ onUnmounted(() => {
   position: sticky;
   top: var(--menubar-height, 3.5rem);
   z-index: 110;
-  background: var(--surface-ground);
-  margin: -2rem -1rem 0;
-  padding: 1rem 1rem 0.5rem;
+  background: var(--surface-card);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  /* Extend to full viewport width */
+  margin-top: -2rem;
+  margin-left: calc(-1 * max(0px, (100vw - 960px) / 2) - 1rem);
+  margin-right: calc(-1 * max(0px, (100vw - 960px) / 2) - 1rem);
+  padding: 0.4rem calc(max(0px, (100vw - 960px) / 2) + 1rem);
 }
 
 .header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.4rem;
   flex-wrap: wrap;
-  gap: 1rem;
+  gap: 0.5rem;
+}
+
+.sticky-subheader h1 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0;
 }
 
 .upload-button-label {
@@ -1208,7 +1244,7 @@ onUnmounted(() => {
 
 .timeline-nav {
   position: sticky;
-  top: 1rem;
+  top: v-bind(navTop);
   width: 80px;
   background: var(--surface-card);
   padding: 1rem 0.5rem;
@@ -1217,7 +1253,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
-  max-height: calc(100vh - 2rem);
+  max-height: v-bind(navMaxHeight);
   overflow-y: auto;
   z-index: 100;
   flex-shrink: 0;
@@ -1225,7 +1261,7 @@ onUnmounted(() => {
 
 .details-sidebar {
   position: sticky;
-  top: 1rem;
+  top: v-bind(navTop);
   width: 300px;
   background: var(--surface-card);
   padding: 1.5rem;
@@ -1234,7 +1270,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  max-height: calc(100vh - 2rem);
+  max-height: v-bind(navMaxHeight);
   overflow-y: auto;
   z-index: 90;
   flex-shrink: 0;
@@ -1514,7 +1550,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.75rem 0 0.5rem;
+  padding: 0.25rem 0 0;
   flex-wrap: wrap;
 }
 
