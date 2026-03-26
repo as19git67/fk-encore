@@ -14,6 +14,7 @@ import { createUserLogic } from "./user.service";
 import {
   passkeyRegisterOptionsLogic,
   passkeyAuthOptionsLogic,
+  passkeyAuthVerifyLogic,
   listPasskeysLogic,
   deletePasskeyLogic,
 } from "./passkey.service";
@@ -99,6 +100,37 @@ describe("Passkey Registration Options", () => {
 
     const excluded = result.options.excludeCredentials ?? [];
     expect(excluded.some((c: { id: string }) => c.id === "existing-credential-id")).toBe(true);
+  });
+
+  it("throws when passkey is disabled", async () => {
+    const user = await createUserLogic({
+      email: "disabled@example.com",
+      name: "Disabled User",
+      password: "pw",
+    });
+    const credId = "disabled_cred_id";
+    await db.insert(passkeys).values({
+      credential_id: credId,
+      user_id: user.id,
+      public_key: "...",
+      counter: 0,
+      name: "Disabled Passkey",
+      disabled: 1,
+    });
+
+    const { challengeId } = await passkeyAuthOptionsLogic();
+
+    await expect(passkeyAuthVerifyLogic({
+      challengeId,
+      credential: {
+        id: credId,
+        rawId: credId,
+        type: 'public-key',
+        response: {} as any,
+        clientExtensionResults: {},
+        authenticatorAttachment: 'platform'
+      }
+    })).rejects.toThrow("invalid credentials");
   });
 });
 
