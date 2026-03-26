@@ -13,3 +13,4 @@ data/*.db-shm
 frontend/dist
 /tsconfig.tsbuildinfo
 /test_output.txt
+/docker-compose-otdev.yml
