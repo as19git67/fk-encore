@@ -7,6 +7,7 @@
   "type": "module",
   "scripts": {
     "test": "vitest",
+    "test:coverage": "vitest run --coverage",
     "dev:frontend": "cd frontend && npm run dev"
   },
   "devDependencies": {
@@ -16,7 +17,8 @@
     "@types/pg": "^8.18.0",
     "drizzle-kit": "^0.31.9",
     "typescript": "^5.2.2",
-    "vitest": "^4.1.0"
+    "vitest": "^4.1.0",
+    "@vitest/coverage-v8": "^4.1.0"
   },
   "dependencies": {
     "@simplewebauthn/server": "^13.3.0",

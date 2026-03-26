@@ -39,6 +39,15 @@ jobs:
         with:
           version: 10
 
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run tests
+        run: pnpm test --run
+        env:
+          NODE_ENV: test
+          VITEST: true
+
       - name: Log in to the container registry
         uses: docker/login-action@v3
         with:
