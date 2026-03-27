@@ -41,6 +41,8 @@ services:
 
   # ── Landmark Detection Service (Grounding DINO) ────────────────────────────
   landmark:
+    ports:
+      - "8002:8000"
     image: ghcr.io/as19git67/fk-encore-landmark:latest
     container_name: fk-encore-landmark
     restart: unless-stopped
