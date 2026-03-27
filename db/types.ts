@@ -192,6 +192,11 @@ export interface Photo {
   hash?: string;
   taken_at?: string;
   created_at: string;
+  latitude?: number;
+  longitude?: number;
+  location_name?: string;
+  location_city?: string;
+  location_country?: string;
 }
 
 export interface FaceBBox { x: number; y: number; width: number; height: number; }
@@ -305,6 +310,20 @@ export interface ListGroupsResponse {
 export interface FindGroupsResponse {
   groups_created: number;
   total_photos_grouped: number;
+}
+
+// ========== Landmark Types ==========
+
+export interface LandmarkBBox { x: number; y: number; width: number; height: number; }
+
+export interface Landmark {
+  id: number;
+  photo_id: number;
+  user_id: number;
+  label: string;
+  confidence: number;
+  bbox: LandmarkBBox;
+  created_at?: string;
 }
 
 export interface UpdateCurationRequest {
