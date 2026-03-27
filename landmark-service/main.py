@@ -5,7 +5,6 @@ from __future__ import annotations
 import io
 import logging
 import os
-
 import torch
 from fastapi import FastAPI, File, Form, UploadFile
 from PIL import Image
