@@ -25,7 +25,7 @@ COPY package.json package-lock.json ./
 RUN npm install --omit=dev --omit=optional
 
 COPY frontend/package.json frontend/package-lock.json frontend/
-RUN npm --prefix frontend install
+RUN npm --prefix frontend install --legacy-peer-deps
 
 COPY . .
 
