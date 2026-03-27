@@ -1394,6 +1394,9 @@ export async function reindexPhotoLogic(
 
   await indexPhotoFaces(userId, photoId, true);
   await indexPhotoEmbeddings(userId, photoId, true);
+  if (ENABLE_LANDMARKS) {
+    await indexPhotoLandmarks(userId, photoId);
+  }
   return { success: true };
 }
 
@@ -1433,6 +1436,9 @@ export async function reindexAllPhotosLogic(userId: number): Promise<{ count: nu
       try {
         await indexPhotoFaces(userId, p.id, false);
         await indexPhotoEmbeddings(userId, p.id, true);
+        if (ENABLE_LANDMARKS) {
+          await indexPhotoLandmarks(userId, p.id);
+        }
         state.processed++;
       } catch (err: any) {
         state.errors++;
