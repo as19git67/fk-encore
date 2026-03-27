@@ -23,8 +23,8 @@ export const Leer: Story = {
   parameters: {
     msw: {
       handlers: [
-        ...defaultHandlers,
         http.get('/api/roles', () => HttpResponse.json({ roles: [] })),
+        ...defaultHandlers,
       ],
     },
   },

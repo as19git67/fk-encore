@@ -24,8 +24,8 @@ export const Leer: Story = {
   parameters: {
     msw: {
       handlers: [
-        ...defaultHandlers,
         http.get('/api/users', () => HttpResponse.json({ users: [] })),
+        ...defaultHandlers,
       ],
     },
   },
@@ -36,8 +36,8 @@ export const EinBenutzer: Story = {
   parameters: {
     msw: {
       handlers: [
-        ...defaultHandlers,
         http.get('/api/users', () => HttpResponse.json({ users: [MOCK_USERS[0]!] })),
+        ...defaultHandlers,
       ],
     },
   },

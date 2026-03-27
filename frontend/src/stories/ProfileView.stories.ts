@@ -23,8 +23,8 @@ export const OhnePasskeys: Story = {
   parameters: {
     msw: {
       handlers: [
-        ...defaultHandlers,
         http.get('/api/auth/passkeys', () => HttpResponse.json({ passkeys: [] })),
+        ...defaultHandlers,
       ],
     },
   },

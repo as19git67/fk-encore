@@ -23,10 +23,10 @@ export const Leer: Story = {
   parameters: {
     msw: {
       handlers: [
-        ...defaultHandlers,
         http.get('/api/persons', () =>
           HttpResponse.json({ persons: [], enableLocalFaces: false }),
         ),
+        ...defaultHandlers,
       ],
     },
   },

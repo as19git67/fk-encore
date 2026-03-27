@@ -24,12 +24,12 @@ export const NurSichtbare: Story = {
   parameters: {
     msw: {
       handlers: [
-        ...defaultHandlers,
         http.get('/api/photos', () =>
           HttpResponse.json({
             photos: MOCK_PHOTOS.filter((p) => p.curation_status !== 'hidden'),
           }),
         ),
+        ...defaultHandlers,
       ],
     },
   },
@@ -40,8 +40,8 @@ export const Leer: Story = {
   parameters: {
     msw: {
       handlers: [
-        ...defaultHandlers,
         http.get('/api/photos', () => HttpResponse.json({ photos: [] })),
+        ...defaultHandlers,
       ],
     },
   },

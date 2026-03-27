@@ -23,7 +23,6 @@ export const ReindexLaeuft: Story = {
   parameters: {
     msw: {
       handlers: [
-        ...defaultHandlers,
         http.get('/api/photos/reindex-status', () =>
           HttpResponse.json({
             inProgress: true,
@@ -32,6 +31,7 @@ export const ReindexLaeuft: Story = {
             errors: 0,
           }),
         ),
+        ...defaultHandlers,
       ],
     },
   },
