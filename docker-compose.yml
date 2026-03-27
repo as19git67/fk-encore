@@ -11,6 +11,8 @@ services:
         condition: service_healthy
       embedding_service:
         condition: service_healthy
+      landmark:
+        condition: service_healthy
     ports:
       - "8080:8080"
     environment:
@@ -32,6 +34,8 @@ services:
       FACE_DISTANCE_THRESHOLD: "0.42"
       INSIGHTFACE_SERVICE_URL: http://insightface:8000
       EMBEDDING_SERVICE_URL: http://embedding_service:8000
+      LANDMARK_SERVICE_URL: http://landmark:8000
+      ENABLE_LANDMARKS: "true"
     volumes:
       - photos:/mnt/data/photos
 
@@ -59,8 +63,8 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/embeddings
-      CLIP_MODEL_NAME: ViT-L-14
-      CLIP_PRETRAINED: openai
+      CLIP_MODEL_NAME: xlm-roberta-large-ViT-H-14
+      CLIP_PRETRAINED: frozen_laion5b_s13b_b90k
       DINO_MODEL_NAME: facebook/dinov2-base
       LOG_LEVEL: INFO
     healthcheck:
@@ -69,6 +73,21 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+
+  # ── Landmark Detection Service (Grounding DINO) ────────────────────────────
+  landmark:
+    image: ghcr.io/as19git67/fk-encore-landmark:latest
+    container_name: fk-encore-landmark
+    restart: unless-stopped
+    environment:
+      LANDMARK_THRESHOLD: "0.35"
+      LOG_LEVEL: INFO
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
 
   # ── PostgreSQL (shared instance for both app and embedding service) ─────────
   postgres:

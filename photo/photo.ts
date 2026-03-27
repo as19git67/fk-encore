@@ -23,6 +23,7 @@ import type {
   AssignFaceRequest,
   CurationStatus,
   UpdateCurationRequest,
+  PhotoWithCuration,
 } from "../db/types";
 import { Query } from "encore.dev/api";
 
@@ -607,5 +608,103 @@ export const searchPhotos = api(
     const authData = getAuthData()!;
     requirePermission(authData, "photos.view");
     return await service.searchPhotosLogic(userId, query, limit ?? 20, threshold ?? 0.20);
+  }
+);
+
+/**
+ * Search photos by date range, year, or year+month.
+ * Parameters: from, to (ISO 8601 strings), year, month, limit
+ */
+export const searchPhotosByDate = api(
+  { expose: true, method: "GET", path: "/photos/search/date", auth: true },
+  async ({
+    from,
+    to,
+    year,
+    month,
+    limit,
+  }: {
+    from?: Query<string>;
+    to?: Query<string>;
+    year?: Query<number>;
+    month?: Query<number>;
+    limit?: Query<number>;
+  }): Promise<{ photos: PhotoWithCuration[] }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    return await service.searchByDateRangeLogic(userId, { from, to, year, month, limit });
+  }
+);
+
+/**
+ * Search photos by location: city/country name or GPS coordinates with radius (km).
+ */
+export const searchPhotosByLocation = api(
+  { expose: true, method: "GET", path: "/photos/search/location", auth: true },
+  async ({
+    city,
+    country,
+    lat,
+    lon,
+    radius,
+    limit,
+  }: {
+    city?: Query<string>;
+    country?: Query<string>;
+    lat?: Query<number>;
+    lon?: Query<number>;
+    radius?: Query<number>;
+    limit?: Query<number>;
+  }): Promise<{ photos: PhotoWithCuration[] }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    return await service.searchByLocationLogic(userId, { city, country, lat, lon, radius, limit });
+  }
+);
+
+/**
+ * Search photos by landmark label (e.g. "kirche", "brücke", "eiffel").
+ */
+export const searchPhotosByLandmark = api(
+  { expose: true, method: "POST", path: "/photos/search/landmarks", auth: true },
+  async ({ query, limit }: { query: string; limit?: number }): Promise<{ results: service.LandmarkSearchResult[] }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    return await service.searchByLandmarkLogic(userId, query, limit ?? 50);
+  }
+);
+
+/**
+ * Get all detected landmarks for a specific photo.
+ */
+export const getPhotoLandmarks = api(
+  { expose: true, method: "GET", path: "/photos/:id/landmarks", auth: true },
+  async ({ id }: { id: number }): Promise<{ landmarks: service.LandmarkItem[] }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    return await service.getLandmarksForPhotoLogic(userId, id);
+  }
+);
+
+/**
+ * Trigger landmark re-detection for a specific photo.
+ */
+export const reindexPhotoLandmarks = api(
+  { expose: true, method: "POST", path: "/photos/:id/index-landmarks", auth: true },
+  async ({ id }: { id: number }): Promise<{ success: boolean }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.edit");
+    await service.indexPhotoLandmarks(userId, id);
+    return { success: true };
   }
 );
