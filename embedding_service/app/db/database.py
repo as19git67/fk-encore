@@ -92,6 +92,7 @@ async def run_migrations() -> None:
         """,
         "CREATE INDEX IF NOT EXISTS idx_dino_embedding ON photos USING hnsw (embedding_dino vector_cosine_ops)",
         # Migrate embedding_clip to 1024 dimensions (xlm-roberta-large-ViT-H-14) on existing installations
+        # Existing embeddings must be cleared first since pgvector rejects dimension mismatches on ALTER
         """
         DO $$
         BEGIN
@@ -100,8 +101,9 @@ async def run_migrations() -> None:
                 FROM pg_attribute
                 WHERE attrelid = 'photos'::regclass AND attname = 'embedding_clip'
             ) != 'vector(1024)' THEN
-                ALTER TABLE photos ALTER COLUMN embedding_clip TYPE vector(1024);
+                UPDATE photos SET embedding_clip = NULL;
                 DROP INDEX IF EXISTS idx_clip_embedding;
+                ALTER TABLE photos ALTER COLUMN embedding_clip TYPE vector(1024);
                 CREATE INDEX idx_clip_embedding ON photos USING hnsw (embedding_clip vector_cosine_ops);
             END IF;
         END$$;
