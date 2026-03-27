@@ -24,6 +24,19 @@ WORKDIR /app
 # Copy installed packages from builder
 COPY --from=builder /install /usr/local
 
+# Pre-download model weights at build time to avoid cold-start delays
+RUN python -c "\
+import open_clip; \
+open_clip.create_model_and_transforms('xlm-roberta-large-ViT-H-14', pretrained='frozen_laion5b_s13b_b90k'); \
+print('OpenCLIP model pre-downloaded.') \
+"
+RUN python -c "\
+from transformers import AutoImageProcessor, AutoModel; \
+AutoImageProcessor.from_pretrained('facebook/dinov2-base'); \
+AutoModel.from_pretrained('facebook/dinov2-base'); \
+print('DINOv2 model pre-downloaded.') \
+"
+
 # Copy application source
 COPY app/ ./app/
 
