@@ -85,13 +85,13 @@ async def run_migrations() -> None:
             timestamp       TIMESTAMP,
             camera_id       TEXT,
             face_ids        TEXT[],
-            embedding_clip  VECTOR(768),
+            embedding_clip  VECTOR(1024),
             embedding_dino  VECTOR(768),
             created_at      TIMESTAMP DEFAULT NOW()
         )
         """,
         "CREATE INDEX IF NOT EXISTS idx_dino_embedding ON photos USING hnsw (embedding_dino vector_cosine_ops)",
-        # Migrate embedding_clip from 512 → 768 on existing installations
+        # Migrate embedding_clip to 1024 dimensions (xlm-roberta-large-ViT-H-14) on existing installations
         """
         DO $$
         BEGIN
@@ -99,8 +99,8 @@ async def run_migrations() -> None:
                 SELECT pg_catalog.format_type(atttypid, atttypmod)
                 FROM pg_attribute
                 WHERE attrelid = 'photos'::regclass AND attname = 'embedding_clip'
-            ) != 'vector(768)' THEN
-                ALTER TABLE photos ALTER COLUMN embedding_clip TYPE vector(768);
+            ) != 'vector(1024)' THEN
+                ALTER TABLE photos ALTER COLUMN embedding_clip TYPE vector(1024);
                 DROP INDEX IF EXISTS idx_clip_embedding;
                 CREATE INDEX idx_clip_embedding ON photos USING hnsw (embedding_clip vector_cosine_ops);
             END IF;
