@@ -6,8 +6,8 @@ python-multipart==0.0.9
 --extra-index-url https://download.pytorch.org/whl/cpu
 
 # ML – CPU build by default; override with GPU wheel in Dockerfile if needed
-torch==2.3.0+cpu
-torchvision==0.18.0+cpu
+torch==2.9.1+cpu
+torchvision==0.24.1+cpu
 
 # Grounding DINO via HuggingFace Transformers
 transformers==4.43.3
