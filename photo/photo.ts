@@ -708,3 +708,30 @@ export const reindexPhotoLandmarks = api(
     return { success: true };
   }
 );
+
+/**
+ * Combined natural language photo search.
+ * Parses German queries like "Kirchen in München von 2004 bis 2017" into:
+ *   - a semantic CLIP query ("Kirchen")
+ *   - a location filter ("München")
+ *   - a date range filter (2004-01-01 – 2017-12-31)
+ * Returns results and the parsed query components for transparency.
+ */
+export const searchPhotosNatural = api(
+  { expose: true, method: "POST", path: "/photos/search/natural", auth: true },
+  async ({
+    query,
+    limit,
+    threshold,
+  }: {
+    query: string;
+    limit?: number;
+    threshold?: number;
+  }): Promise<{ results: service.NaturalSearchResult[]; parsed: service.ParsedQuery }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    return await service.searchPhotosNaturalLogic(userId, query, limit ?? 30, threshold ?? 0.18);
+  }
+);

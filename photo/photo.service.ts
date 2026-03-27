@@ -2164,3 +2164,281 @@ export async function searchByLandmarkLogic(
 
   return { results };
 }
+
+// ---------- Natural Language Query Parser ----------
+
+const GERMAN_MONTHS: Record<string, number> = {
+  januar: 1, jan: 1, jänner: 1,
+  februar: 2, feb: 2,
+  märz: 3, maerz: 3, mar: 3,
+  april: 4, apr: 4,
+  mai: 5,
+  juni: 6, jun: 6,
+  juli: 7, jul: 7,
+  august: 8, aug: 8,
+  september: 9, sep: 9, sept: 9,
+  oktober: 10, okt: 10, oct: 10,
+  november: 11, nov: 11,
+  dezember: 12, dez: 12,
+};
+
+// Serializable form returned to API callers
+export interface ParsedQuery {
+  semanticQuery: string;
+  fromDate?: string;       // ISO 8601 string
+  toDate?: string;
+  location?: string;
+}
+
+// Internal form used during parsing (uses Date objects)
+interface ParsedQueryInternal {
+  semanticQuery: string;
+  fromDate?: Date;
+  toDate?: Date;
+  location?: string;
+}
+
+/**
+ * Parse a German natural language photo search query into structured components.
+ *
+ * Patterns recognized (case-insensitive):
+ *   "von 2004 bis 2017"        → fromDate=2004-01-01, toDate=2017-12-31
+ *   "zwischen 2004 und 2017"   → same
+ *   "2004-2017" / "2004 – 2017" → same
+ *   "aus dem Jahr 2019" / "im Jahr 2019" → single year
+ *   "im März 2019" / "März 2019" → month + year
+ *   "in München" / "aus Berlin" / "bei Hamburg" → location
+ */
+function parseNaturalQueryInternal(raw: string): ParsedQueryInternal {
+  let text = raw.trim();
+  let fromDate: Date | undefined;
+  let toDate: Date | undefined;
+  let location: string | undefined;
+
+  const strip = (match: RegExpExecArray) => {
+    text = (text.slice(0, match.index) + " " + text.slice(match.index + match[0].length))
+      .replace(/\s{2,}/g, " ").trim();
+  };
+
+  // 1. Year range: "von 2004 bis 2017" | "zwischen 2004 und 2017" | "2004-2017"
+  const rangePatterns = [
+    /\bvon\s+(\d{4})\s+bis\s+(\d{4})\b/i,
+    /\bzwischen\s+(\d{4})\s+und\s+(\d{4})\b/i,
+    /\b(\d{4})\s*[-–]\s*(\d{4})\b/,
+    /\b(\d{4})\s+bis\s+(\d{4})\b/i,
+  ];
+  for (const pattern of rangePatterns) {
+    const m = pattern.exec(text);
+    if (m) {
+      fromDate = new Date(`${m[1]}-01-01T00:00:00`);
+      toDate = new Date(`${m[2]}-12-31T23:59:59`);
+      strip(m);
+      break;
+    }
+  }
+
+  // 2. Month + year: "im März 2019" | "März 2019"
+  if (!fromDate) {
+    const monthNames = Object.keys(GERMAN_MONTHS).join("|");
+    const monthYearRx = new RegExp(
+      `\\b(?:im\\s+|im\\s+monat\\s+)?(${monthNames})(?:\\s+(\\d{4}))?\\b`, "i"
+    );
+    const m = monthYearRx.exec(text);
+    if (m) {
+      const month = GERMAN_MONTHS[m[1].toLowerCase()];
+      const year = m[2] ? parseInt(m[2]) : new Date().getFullYear();
+      fromDate = new Date(year, month - 1, 1);
+      toDate = new Date(year, month, 0, 23, 59, 59, 999);
+      strip(m);
+    }
+  }
+
+  // 3. Single year: "aus dem Jahr 2019" | "im Jahr 2019" | bare "2019"
+  if (!fromDate) {
+    const singleYearPatterns = [
+      /\b(?:aus\s+dem\s+jahr|im\s+jahr|vom\s+jahr|von)\s+(\d{4})\b/i,
+      /\b(\d{4})\b/,
+    ];
+    for (const pattern of singleYearPatterns) {
+      const m = pattern.exec(text);
+      if (m) {
+        const year = parseInt(m[1]);
+        if (year >= 1800 && year <= 2100) {
+          fromDate = new Date(`${year}-01-01T00:00:00`);
+          toDate = new Date(`${year}-12-31T23:59:59`);
+          strip(m);
+          break;
+        }
+      }
+    }
+  }
+
+  // 4. Location: "in München" | "aus Berlin" | "bei Hamburg" | "in der Schweiz"
+  const locationRx = /\b(?:in\s+(?:der\s+|den\s+|dem\s+)?|aus\s+(?:der\s+|den\s+|dem\s+)?|bei\s+|nahe\s+)([A-ZÄÖÜ][a-zäöüA-ZÄÖÜ\s]{1,30}?)(?=\s|,|$|\.)/;
+  const lm = locationRx.exec(text);
+  if (lm) {
+    location = lm[1].trim();
+    strip(lm);
+  }
+
+  // Strip leftover German stop words so CLIP gets clean semantic input
+  const semanticQuery = text
+    .replace(/\b(von|bis|und|im|in|aus|bei|der|die|das|dem|den|nahe|zwischen|jahr|monat|an|am)\b/gi, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  return { semanticQuery, fromDate, toDate, location };
+}
+
+/** Public wrapper: converts internal Date fields to ISO strings for API serialization. */
+export function parseNaturalQuery(raw: string): ParsedQuery {
+  const internal = parseNaturalQueryInternal(raw);
+  return {
+    semanticQuery: internal.semanticQuery,
+    fromDate: internal.fromDate?.toISOString(),
+    toDate: internal.toDate?.toISOString(),
+    location: internal.location,
+  };
+}
+
+// ---------- Combined Natural Language Search ----------
+
+export interface NaturalSearchResult extends PhotoSearchResult {
+  location_city?: string;
+  location_country?: string;
+}
+
+export async function searchPhotosNaturalLogic(
+  userId: number,
+  query: string,
+  limit: number = 30,
+  threshold: number = 0.18
+): Promise<{ results: NaturalSearchResult[]; parsed: ParsedQuery }> {
+  const parsed = parseNaturalQueryInternal(query);
+  const parsedPublic: ParsedQuery = {
+    semanticQuery: parsed.semanticQuery,
+    fromDate: parsed.fromDate?.toISOString(),
+    toDate: parsed.toDate?.toISOString(),
+    location: parsed.location,
+  };
+
+  // DB conditions for date + location structural filters
+  const dbConditions: ReturnType<typeof and>[] = [
+    eq(photos.user_id, userId),
+    or(sql`${photoCuration.status} IS NULL`, sql`${photoCuration.status} != 'hidden'`),
+  ];
+  if (parsed.fromDate) {
+    dbConditions.push(sql`COALESCE(${photos.taken_at}, ${photos.created_at}) >= ${parsed.fromDate.toISOString()}`);
+  }
+  if (parsed.toDate) {
+    dbConditions.push(sql`COALESCE(${photos.taken_at}, ${photos.created_at}) <= ${parsed.toDate.toISOString()}`);
+  }
+  if (parsed.location) {
+    dbConditions.push(
+      or(
+        ilike(photos.location_city, `%${parsed.location}%`),
+        ilike(photos.location_country, `%${parsed.location}%`),
+        ilike(photos.location_name, `%${parsed.location}%`),
+      )
+    );
+  }
+
+  const hasStructuredFilter = !!(parsed.fromDate || parsed.location);
+  const hasSemanticQuery = parsed.semanticQuery.length > 0;
+
+  const selectFields = {
+    id: photos.id, filename: photos.filename, taken_at: photos.taken_at,
+    created_at: photos.created_at, location_city: photos.location_city,
+    location_country: photos.location_country,
+  };
+
+  type PhotoRow = {
+    id: number; filename: string; taken_at: string | null; created_at: string | null;
+    location_city: string | null; location_country: string | null;
+  };
+
+  const toResult = (p: PhotoRow, score: number): NaturalSearchResult => ({
+    photoId: p.id, score, filename: p.filename,
+    taken_at: p.taken_at ?? undefined, created_at: p.created_at ?? "",
+    location_city: p.location_city ?? undefined, location_country: p.location_country ?? undefined,
+  });
+
+  // Case A: no semantic part → pure DB filter (date/location only)
+  if (!hasSemanticQuery) {
+    const rows = await dbAll<PhotoRow>(
+      db.select(selectFields)
+        .from(photos)
+        .leftJoin(photoCuration, and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)))
+        .where(and(...dbConditions))
+        .orderBy(photoDateOrder)
+        .limit(limit)
+    );
+    return { parsed: parsedPublic, results: rows.map(r => toResult(r, 1.0)) };
+  }
+
+  // Case B: semantic only, no structural filters → pure CLIP
+  if (!hasStructuredFilter) {
+    const response = await fetch(`${EMBEDDING_SERVICE_URL}/search/text`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: parsed.semanticQuery, k: limit, threshold }),
+    });
+    if (!response.ok) throw new Error(`Embedding service error: ${response.status}`);
+    const clipData = await response.json() as { results: Array<{ photo_id: string; score: number }> };
+    const ids = clipData.results.map(r => parseInt(r.photo_id, 10)).filter(id => !isNaN(id));
+    if (ids.length === 0) return { results: [], parsed: parsedPublic };
+    const rows = await dbAll<PhotoRow>(
+      db.select(selectFields).from(photos)
+        .leftJoin(photoCuration, and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)))
+        .where(and(eq(photos.user_id, userId), inArray(photos.id, ids)))
+    );
+    const photoMap = new Map(rows.map(p => [p.id, p]));
+    return {
+      parsed: parsedPublic,
+      results: clipData.results
+        .map(r => { const p = photoMap.get(parseInt(r.photo_id, 10)); return p ? toResult(p, r.score) : null; })
+        .filter((r): r is NaturalSearchResult => r !== null),
+    };
+  }
+
+  // Case C: semantic + structural filters → CLIP results intersected with DB filter
+  // Pre-fetch candidate IDs matching date + location constraints
+  const candidateRows = await dbAll<{ id: number }>(
+    db.select({ id: photos.id })
+      .from(photos)
+      .leftJoin(photoCuration, and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)))
+      .where(and(...dbConditions))
+  );
+  const candidateSet = new Set(candidateRows.map(r => r.id));
+  if (candidateSet.size === 0) return { results: [], parsed: parsedPublic };
+
+  // Request enlarged k so intersection still yields enough results
+  const clipK = Math.min(candidateSet.size, limit * 5);
+  const response = await fetch(`${EMBEDDING_SERVICE_URL}/search/text`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: parsed.semanticQuery, k: clipK, threshold }),
+  });
+  if (!response.ok) throw new Error(`Embedding service error: ${response.status}`);
+  const clipData = await response.json() as { results: Array<{ photo_id: string; score: number }> };
+
+  // Keep only CLIP results that also match the structural filter
+  const intersected = clipData.results
+    .filter(r => candidateSet.has(parseInt(r.photo_id, 10)))
+    .slice(0, limit);
+  if (intersected.length === 0) return { results: [], parsed: parsedPublic };
+
+  const ids = intersected.map(r => parseInt(r.photo_id, 10));
+  const rows = await dbAll<PhotoRow>(
+    db.select(selectFields).from(photos)
+      .where(and(eq(photos.user_id, userId), inArray(photos.id, ids)))
+  );
+  const photoMap = new Map(rows.map(p => [p.id, p]));
+
+  return {
+    parsed: parsedPublic,
+    results: intersected
+      .map(r => { const p = photoMap.get(parseInt(r.photo_id, 10)); return p ? toResult(p, r.score) : null; })
+      .filter((r): r is NaturalSearchResult => r !== null),
+  };
+}
