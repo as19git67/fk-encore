@@ -18,6 +18,7 @@ import {
   photoCuration,
   photoGroups,
   photoGroupMembers,
+  photoLandmarks,
 } from "../db/schema";
 import type {
   Photo,
@@ -40,6 +41,8 @@ import type {
   ListGroupsResponse,
   FindGroupsResponse,
   Face,
+  FaceBBox,
+  LandmarkBBox,
 } from "../db/types";
 import heicConvert from "heic-convert";
 import { createCanvas, loadImage } from "canvas";
@@ -76,6 +79,8 @@ function getUploadMimeType(filePath: string): string {
 // The config value is now treated as minimum similarity for a match.
 const FACE_SIMILARITY_THRESHOLD = parseFloat(process.env.FACE_DISTANCE_THRESHOLD || "0.45");
 export const ENABLE_LOCAL_FACES = process.env.ENABLE_LOCAL_FACES === "true";
+const LANDMARK_SERVICE_URL = process.env.LANDMARK_SERVICE_URL || "http://localhost:8002";
+export const ENABLE_LANDMARKS = process.env.ENABLE_LANDMARKS === "true";
 
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -293,19 +298,72 @@ export async function indexPhotoFaces(userId: number, photoId: number, resetIgno
   }
 }
 
-async function getExifDate(filePath: string): Promise<string | null> {
+interface ExifMetadata {
+  takenAt: string | null;
+  latitude: number | null;
+  longitude: number | null;
+}
+
+async function getExifMetadata(filePath: string): Promise<ExifMetadata> {
   try {
-    const data = await exifr.parse(filePath);
-    if (data && data.DateTimeOriginal) {
-      return new Date(data.DateTimeOriginal).toISOString();
+    const data = await exifr.parse(filePath, { gps: true });
+    let takenAt: string | null = null;
+    if (data?.DateTimeOriginal) {
+      takenAt = new Date(data.DateTimeOriginal).toISOString();
+    } else if (data?.CreateDate) {
+      takenAt = new Date(data.CreateDate).toISOString();
     }
-    if (data && data.CreateDate) {
-        return new Date(data.CreateDate).toISOString();
-    }
+    return {
+      takenAt,
+      latitude: data?.latitude ?? null,
+      longitude: data?.longitude ?? null,
+    };
   } catch (err) {
     console.error("Error parsing EXIF data:", err);
+    return { takenAt: null, latitude: null, longitude: null };
   }
-  return null;
+}
+
+async function getExifDate(filePath: string): Promise<string | null> {
+  return (await getExifMetadata(filePath)).takenAt;
+}
+
+interface GeocodeResult {
+  displayName: string;
+  city: string | null;
+  country: string | null;
+}
+
+async function reverseGeocode(lat: number, lon: number): Promise<GeocodeResult> {
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&accept-language=de`;
+    const res = await fetch(url, {
+      headers: { "User-Agent": "fk-encore-photo-app/1.0" },
+    });
+    if (!res.ok) return { displayName: "", city: null, country: null };
+    const data = await res.json() as Record<string, any>;
+    return {
+      displayName: data.display_name ?? "",
+      city: data.address?.city ?? data.address?.town ?? data.address?.village ?? null,
+      country: data.address?.country ?? null,
+    };
+  } catch (err) {
+    console.error("Nominatim reverse geocoding failed:", err);
+    return { displayName: "", city: null, country: null };
+  }
+}
+
+async function geocodePhotoLocation(userId: number, photoId: number, lat: number, lon: number): Promise<void> {
+  const geo = await reverseGeocode(lat, lon);
+  await dbExec(
+    db.update(photos)
+      .set({
+        location_name: geo.displayName || null,
+        location_city: geo.city,
+        location_country: geo.country,
+      })
+      .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+  );
 }
 
 // ---------- Photos ----------
@@ -336,8 +394,8 @@ export async function uploadPhotoStream(
   await pipeline(stream, fileStream);
   const digest = hash.digest('hex');
 
-  // Extraction of EXIF data after the file is saved
-  const takenAt = await getExifDate(filePath);
+  // Extraction of EXIF data (date + GPS) after the file is saved
+  const exifMeta = await getExifMetadata(filePath);
 
   // Check for duplicate for this user
   const existing = await dbFirst<typeof photos.$inferSelect>(
@@ -360,7 +418,9 @@ export async function uploadPhotoStream(
       mime_type: mimeType,
       size: size,
       hash: digest,
-      taken_at: takenAt,
+      taken_at: exifMeta.takenAt,
+      latitude: exifMeta.latitude,
+      longitude: exifMeta.longitude,
     }).returning()
   );
 
@@ -378,6 +438,20 @@ export async function uploadPhotoStream(
       console.error("Embedding/grouping error:", err);
     });
 
+  // Reverse-geocode GPS coordinates in background
+  if (exifMeta.latitude !== null && exifMeta.longitude !== null) {
+    geocodePhotoLocation(userId, row!.id, exifMeta.latitude, exifMeta.longitude).catch(err => {
+      console.error("Geocoding error:", err);
+    });
+  }
+
+  // Run landmark detection in background
+  if (ENABLE_LANDMARKS) {
+    indexPhotoLandmarks(userId, row!.id).catch(err => {
+      console.error("Landmark indexing error:", err);
+    });
+  }
+
   return {
     id: row!.id,
     user_id: row!.user_id,
@@ -388,6 +462,8 @@ export async function uploadPhotoStream(
     hash: row!.hash ?? undefined,
     taken_at: row!.taken_at ?? undefined,
     created_at: row!.created_at ?? "",
+    latitude: row!.latitude ?? undefined,
+    longitude: row!.longitude ?? undefined,
   };
 }
 
@@ -415,8 +491,8 @@ export async function uploadPhotoLogic(
 
   fs.writeFileSync(filePath, file.data);
 
-  // Extraction of EXIF data
-  const takenAt = await getExifDate(filePath);
+  // Extraction of EXIF data (date + GPS)
+  const exifMeta2 = await getExifMetadata(filePath);
 
   const row2 = await dbInsertReturning<typeof photos.$inferSelect>(
     db.insert(photos).values({
@@ -426,7 +502,9 @@ export async function uploadPhotoLogic(
       mime_type: file.mimeType,
       size: file.data.length,
       hash: digest,
-      taken_at: takenAt,
+      taken_at: exifMeta2.takenAt,
+      latitude: exifMeta2.latitude,
+      longitude: exifMeta2.longitude,
     }).returning()
   );
 
@@ -444,6 +522,20 @@ export async function uploadPhotoLogic(
       console.error("Embedding/grouping error:", err);
     });
 
+  // Reverse-geocode GPS coordinates in background
+  if (exifMeta2.latitude !== null && exifMeta2.longitude !== null) {
+    geocodePhotoLocation(userId, row2!.id, exifMeta2.latitude, exifMeta2.longitude).catch(err => {
+      console.error("Geocoding error:", err);
+    });
+  }
+
+  // Run landmark detection in background
+  if (ENABLE_LANDMARKS) {
+    indexPhotoLandmarks(userId, row2!.id).catch(err => {
+      console.error("Landmark indexing error:", err);
+    });
+  }
+
   return {
     id: row2!.id,
     user_id: row2!.user_id,
@@ -454,6 +546,8 @@ export async function uploadPhotoLogic(
     hash: row2!.hash ?? undefined,
     taken_at: row2!.taken_at ?? undefined,
     created_at: row2!.created_at ?? "",
+    latitude: row2!.latitude ?? undefined,
+    longitude: row2!.longitude ?? undefined,
   };
 }
 
@@ -1769,4 +1863,582 @@ export async function searchPhotosLogic(
   }
 
   return { results };
+}
+
+// ---------- Date Range Search ----------
+
+export async function searchByDateRangeLogic(
+  userId: number,
+  params: { from?: string; to?: string; year?: number; month?: number; limit?: number }
+): Promise<{ photos: PhotoWithCuration[] }> {
+  let fromDate: Date | undefined;
+  let toDate: Date | undefined;
+
+  if (params.from) fromDate = new Date(params.from);
+  if (params.to) toDate = new Date(params.to);
+
+  if (params.year !== undefined && !params.from) {
+    if (params.month !== undefined) {
+      fromDate = new Date(params.year, params.month - 1, 1);
+      toDate = new Date(params.year, params.month, 0, 23, 59, 59, 999);
+    } else {
+      fromDate = new Date(`${params.year}-01-01T00:00:00`);
+      toDate = new Date(`${params.year}-12-31T23:59:59`);
+    }
+  }
+
+  const conditions: ReturnType<typeof and>[] = [
+    eq(photos.user_id, userId),
+    or(sql`${photoCuration.status} IS NULL`, sql`${photoCuration.status} != 'hidden'`),
+  ];
+  if (fromDate) {
+    conditions.push(sql`COALESCE(${photos.taken_at}, ${photos.created_at}) >= ${fromDate.toISOString()}`);
+  }
+  if (toDate) {
+    conditions.push(sql`COALESCE(${photos.taken_at}, ${photos.created_at}) <= ${toDate.toISOString()}`);
+  }
+
+  const rows = await dbAll<{
+    id: number; user_id: number; filename: string; original_name: string;
+    mime_type: string; size: number; hash: string | null; taken_at: string | null;
+    created_at: string | null; curation_status: string | null;
+    latitude: number | null; longitude: number | null;
+    location_city: string | null; location_country: string | null; location_name: string | null;
+  }>(
+    db.select({
+      id: photos.id, user_id: photos.user_id, filename: photos.filename,
+      original_name: photos.original_name, mime_type: photos.mime_type,
+      size: photos.size, hash: photos.hash, taken_at: photos.taken_at,
+      created_at: photos.created_at, curation_status: photoCuration.status,
+      latitude: photos.latitude, longitude: photos.longitude,
+      location_city: photos.location_city, location_country: photos.location_country,
+      location_name: photos.location_name,
+    })
+    .from(photos)
+    .leftJoin(photoCuration, and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)))
+    .where(and(...conditions))
+    .orderBy(photoDateOrder)
+    .limit(params.limit ?? 200)
+  );
+
+  return {
+    photos: rows.map(r => ({
+      id: r.id, user_id: r.user_id, filename: r.filename, original_name: r.original_name,
+      mime_type: r.mime_type, size: r.size, hash: r.hash ?? undefined,
+      taken_at: r.taken_at ?? undefined, created_at: r.created_at ?? "",
+      curation_status: (r.curation_status as CurationStatus) ?? "visible",
+      latitude: r.latitude ?? undefined, longitude: r.longitude ?? undefined,
+      location_city: r.location_city ?? undefined, location_country: r.location_country ?? undefined,
+      location_name: r.location_name ?? undefined,
+    })),
+  };
+}
+
+// ---------- Location Search ----------
+
+export async function searchByLocationLogic(
+  userId: number,
+  params: { city?: string; country?: string; lat?: number; lon?: number; radius?: number; limit?: number }
+): Promise<{ photos: PhotoWithCuration[] }> {
+  const conditions: ReturnType<typeof and>[] = [
+    eq(photos.user_id, userId),
+    or(sql`${photoCuration.status} IS NULL`, sql`${photoCuration.status} != 'hidden'`),
+  ];
+
+  if (params.city) {
+    conditions.push(ilike(photos.location_city, `%${params.city}%`));
+  }
+  if (params.country) {
+    conditions.push(ilike(photos.location_country, `%${params.country}%`));
+  }
+  if (params.lat !== undefined && params.lon !== undefined) {
+    const radius = params.radius ?? 10;
+    // Bounding box pre-filter (Haversine-Näherung)
+    const latDelta = radius / 111.0;
+    const lonDelta = radius / (111.0 * Math.cos(params.lat * Math.PI / 180));
+    conditions.push(sql`${photos.latitude} IS NOT NULL`);
+    conditions.push(sql`${photos.latitude} BETWEEN ${params.lat - latDelta} AND ${params.lat + latDelta}`);
+    conditions.push(sql`${photos.longitude} BETWEEN ${params.lon - lonDelta} AND ${params.lon + lonDelta}`);
+  }
+
+  const rows = await dbAll<{
+    id: number; user_id: number; filename: string; original_name: string;
+    mime_type: string; size: number; hash: string | null; taken_at: string | null;
+    created_at: string | null; curation_status: string | null;
+    latitude: number | null; longitude: number | null;
+    location_city: string | null; location_country: string | null; location_name: string | null;
+  }>(
+    db.select({
+      id: photos.id, user_id: photos.user_id, filename: photos.filename,
+      original_name: photos.original_name, mime_type: photos.mime_type,
+      size: photos.size, hash: photos.hash, taken_at: photos.taken_at,
+      created_at: photos.created_at, curation_status: photoCuration.status,
+      latitude: photos.latitude, longitude: photos.longitude,
+      location_city: photos.location_city, location_country: photos.location_country,
+      location_name: photos.location_name,
+    })
+    .from(photos)
+    .leftJoin(photoCuration, and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)))
+    .where(and(...conditions))
+    .orderBy(photoDateOrder)
+    .limit(params.limit ?? 200)
+  );
+
+  return {
+    photos: rows.map(r => ({
+      id: r.id, user_id: r.user_id, filename: r.filename, original_name: r.original_name,
+      mime_type: r.mime_type, size: r.size, hash: r.hash ?? undefined,
+      taken_at: r.taken_at ?? undefined, created_at: r.created_at ?? "",
+      curation_status: (r.curation_status as CurationStatus) ?? "visible",
+      latitude: r.latitude ?? undefined, longitude: r.longitude ?? undefined,
+      location_city: r.location_city ?? undefined, location_country: r.location_country ?? undefined,
+      location_name: r.location_name ?? undefined,
+    })),
+  };
+}
+
+// ---------- Landmark Detection & Search ----------
+
+export interface LandmarkItem {
+  id: number;
+  label: string;
+  confidence: number;
+  bbox: LandmarkBBox;
+}
+
+export interface LandmarkSearchResult {
+  photoId: number;
+  filename: string;
+  taken_at?: string;
+  created_at: string;
+  landmarks: Array<{ label: string; confidence: number; bbox: LandmarkBBox }>;
+}
+
+async function callLandmarkService(
+  filePath: string
+): Promise<{ landmarks: Array<{ label: string; confidence: number; bbox: { x: number; y: number; width: number; height: number } }> }> {
+  const formData = new FormData();
+  const fileData = await fs.promises.readFile(filePath);
+  const blob = new Blob([fileData], { type: getUploadMimeType(filePath) });
+  formData.append("file", blob, path.basename(filePath));
+
+  const response = await fetch(`${LANDMARK_SERVICE_URL}/detect-landmarks`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Landmark service returned ${response.status}: ${await response.text()}`);
+  }
+  return response.json() as Promise<{ landmarks: Array<{ label: string; confidence: number; bbox: { x: number; y: number; width: number; height: number } }> }>;
+}
+
+export async function indexPhotoLandmarks(userId: number, photoId: number): Promise<void> {
+  const photo = await dbFirst<typeof photos.$inferSelect>(
+    db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+  );
+  if (!photo) return;
+
+  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  if (!fs.existsSync(filePath)) return;
+
+  let processingPath = filePath;
+  let tempPath: string | null = null;
+
+  const ext = path.extname(photo.filename).toLowerCase();
+  if (ext === ".heic" || ext === ".heif") {
+    try {
+      const inputBuffer = await fs.promises.readFile(filePath);
+      const outputBuffer = await heicConvert({ buffer: inputBuffer, format: "JPEG", quality: 1 });
+      tempPath = path.join(UPLOAD_DIR, `temp_lm_${photoId}_${Date.now()}.jpg`);
+      await fs.promises.writeFile(tempPath, outputBuffer as Buffer);
+      processingPath = tempPath;
+    } catch (err) {
+      console.error(`HEIC conversion for landmark detection failed (photo ${photoId}):`, err);
+      return;
+    }
+  }
+
+  try {
+    const result = await callLandmarkService(processingPath);
+    if (result.landmarks.length > 0) {
+      await dbExec(db.delete(photoLandmarks).where(eq(photoLandmarks.photo_id, photoId)));
+      for (const lm of result.landmarks) {
+        await dbExec(
+          db.insert(photoLandmarks).values({
+            photo_id: photoId,
+            user_id: userId,
+            label: lm.label,
+            confidence: lm.confidence,
+            bbox: JSON.stringify(lm.bbox),
+          })
+        );
+      }
+      console.log(`Stored ${result.landmarks.length} landmarks for photo ${photoId}`);
+    }
+  } catch (err) {
+    console.error(`Landmark detection failed for photo ${photoId}:`, err);
+  } finally {
+    if (tempPath && fs.existsSync(tempPath)) {
+      fs.unlinkSync(tempPath);
+    }
+  }
+}
+
+export async function getLandmarksForPhotoLogic(
+  userId: number,
+  photoId: number
+): Promise<{ landmarks: LandmarkItem[] }> {
+  const photo = await dbFirst<{ id: number }>(
+    db.select({ id: photos.id }).from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+  );
+  if (!photo) throw new Error("Photo not found");
+
+  const rows = await dbAll<{ id: number; label: string; confidence: number; bbox: string }>(
+    db.select({ id: photoLandmarks.id, label: photoLandmarks.label, confidence: photoLandmarks.confidence, bbox: photoLandmarks.bbox })
+      .from(photoLandmarks)
+      .where(eq(photoLandmarks.photo_id, photoId))
+      .orderBy(sql`${photoLandmarks.confidence} DESC`)
+  );
+
+  return {
+    landmarks: rows.map(r => ({
+      id: r.id,
+      label: r.label,
+      confidence: r.confidence,
+      bbox: JSON.parse(r.bbox) as LandmarkBBox,
+    })),
+  };
+}
+
+export async function searchByLandmarkLogic(
+  userId: number,
+  query: string,
+  limit: number = 50
+): Promise<{ results: LandmarkSearchResult[] }> {
+  const lmRows = await dbAll<{ photo_id: number; label: string; confidence: number; bbox: string }>(
+    db.select({
+      photo_id: photoLandmarks.photo_id,
+      label: photoLandmarks.label,
+      confidence: photoLandmarks.confidence,
+      bbox: photoLandmarks.bbox,
+    })
+    .from(photoLandmarks)
+    .where(and(eq(photoLandmarks.user_id, userId), ilike(photoLandmarks.label, `%${query}%`)))
+    .orderBy(sql`${photoLandmarks.confidence} DESC`)
+  );
+
+  if (lmRows.length === 0) return { results: [] };
+
+  const uniquePhotoIds = [...new Set(lmRows.map(r => r.photo_id))].slice(0, limit);
+  const userPhotos = await dbAll<{ id: number; filename: string; taken_at: string | null; created_at: string | null }>(
+    db.select({ id: photos.id, filename: photos.filename, taken_at: photos.taken_at, created_at: photos.created_at })
+      .from(photos)
+      .where(and(eq(photos.user_id, userId), inArray(photos.id, uniquePhotoIds)))
+  );
+
+  const photoMap = new Map(userPhotos.map(p => [p.id, p]));
+  const grouped = new Map<number, typeof lmRows>();
+  for (const lm of lmRows) {
+    if (!grouped.has(lm.photo_id)) grouped.set(lm.photo_id, []);
+    grouped.get(lm.photo_id)!.push(lm);
+  }
+
+  const results: LandmarkSearchResult[] = [];
+  for (const photoId of uniquePhotoIds) {
+    const photo = photoMap.get(photoId);
+    if (!photo) continue;
+    const landmarks = grouped.get(photoId) ?? [];
+    results.push({
+      photoId,
+      filename: photo.filename,
+      taken_at: photo.taken_at ?? undefined,
+      created_at: photo.created_at ?? "",
+      landmarks: landmarks.map(lm => ({
+        label: lm.label,
+        confidence: lm.confidence,
+        bbox: JSON.parse(lm.bbox) as LandmarkBBox,
+      })),
+    });
+  }
+
+  return { results };
+}
+
+// ---------- Natural Language Query Parser ----------
+
+const GERMAN_MONTHS: Record<string, number> = {
+  januar: 1, jan: 1, jänner: 1,
+  februar: 2, feb: 2,
+  märz: 3, maerz: 3, mar: 3,
+  april: 4, apr: 4,
+  mai: 5,
+  juni: 6, jun: 6,
+  juli: 7, jul: 7,
+  august: 8, aug: 8,
+  september: 9, sep: 9, sept: 9,
+  oktober: 10, okt: 10, oct: 10,
+  november: 11, nov: 11,
+  dezember: 12, dez: 12,
+};
+
+// Serializable form returned to API callers
+export interface ParsedQuery {
+  semanticQuery: string;
+  fromDate?: string;       // ISO 8601 string
+  toDate?: string;
+  location?: string;
+}
+
+// Internal form used during parsing (uses Date objects)
+interface ParsedQueryInternal {
+  semanticQuery: string;
+  fromDate?: Date;
+  toDate?: Date;
+  location?: string;
+}
+
+/**
+ * Parse a German natural language photo search query into structured components.
+ *
+ * Patterns recognized (case-insensitive):
+ *   "von 2004 bis 2017"        → fromDate=2004-01-01, toDate=2017-12-31
+ *   "zwischen 2004 und 2017"   → same
+ *   "2004-2017" / "2004 – 2017" → same
+ *   "aus dem Jahr 2019" / "im Jahr 2019" → single year
+ *   "im März 2019" / "März 2019" → month + year
+ *   "in München" / "aus Berlin" / "bei Hamburg" → location
+ */
+function parseNaturalQueryInternal(raw: string): ParsedQueryInternal {
+  let text = raw.trim();
+  let fromDate: Date | undefined;
+  let toDate: Date | undefined;
+  let location: string | undefined;
+
+  const strip = (match: RegExpExecArray) => {
+    text = (text.slice(0, match.index) + " " + text.slice(match.index + match[0].length))
+      .replace(/\s{2,}/g, " ").trim();
+  };
+
+  // 1. Year range: "von 2004 bis 2017" | "zwischen 2004 und 2017" | "2004-2017"
+  const rangePatterns = [
+    /\bvon\s+(\d{4})\s+bis\s+(\d{4})\b/i,
+    /\bzwischen\s+(\d{4})\s+und\s+(\d{4})\b/i,
+    /\b(\d{4})\s*[-–]\s*(\d{4})\b/,
+    /\b(\d{4})\s+bis\s+(\d{4})\b/i,
+  ];
+  for (const pattern of rangePatterns) {
+    const m = pattern.exec(text);
+    if (m) {
+      fromDate = new Date(`${m[1]}-01-01T00:00:00`);
+      toDate = new Date(`${m[2]}-12-31T23:59:59`);
+      strip(m);
+      break;
+    }
+  }
+
+  // 2. Month + year: "im März 2019" | "März 2019"
+  if (!fromDate) {
+    const monthNames = Object.keys(GERMAN_MONTHS).join("|");
+    const monthYearRx = new RegExp(
+      `\\b(?:im\\s+|im\\s+monat\\s+)?(${monthNames})(?:\\s+(\\d{4}))?\\b`, "i"
+    );
+    const m = monthYearRx.exec(text);
+    if (m) {
+      const month = GERMAN_MONTHS[m[1].toLowerCase()];
+      const year = m[2] ? parseInt(m[2]) : new Date().getFullYear();
+      fromDate = new Date(year, month - 1, 1);
+      toDate = new Date(year, month, 0, 23, 59, 59, 999);
+      strip(m);
+    }
+  }
+
+  // 3. Single year: "aus dem Jahr 2019" | "im Jahr 2019" | bare "2019"
+  if (!fromDate) {
+    const singleYearPatterns = [
+      /\b(?:aus\s+dem\s+jahr|im\s+jahr|vom\s+jahr|von)\s+(\d{4})\b/i,
+      /\b(\d{4})\b/,
+    ];
+    for (const pattern of singleYearPatterns) {
+      const m = pattern.exec(text);
+      if (m) {
+        const year = parseInt(m[1]);
+        if (year >= 1800 && year <= 2100) {
+          fromDate = new Date(`${year}-01-01T00:00:00`);
+          toDate = new Date(`${year}-12-31T23:59:59`);
+          strip(m);
+          break;
+        }
+      }
+    }
+  }
+
+  // 4. Location: "in München" | "aus Berlin" | "bei Hamburg" | "in der Schweiz"
+  const locationRx = /\b(?:in\s+(?:der\s+|den\s+|dem\s+)?|aus\s+(?:der\s+|den\s+|dem\s+)?|bei\s+|nahe\s+)([A-ZÄÖÜ][a-zäöüA-ZÄÖÜ\s]{1,30}?)(?=\s|,|$|\.)/;
+  const lm = locationRx.exec(text);
+  if (lm) {
+    location = lm[1].trim();
+    strip(lm);
+  }
+
+  // Strip leftover German stop words so CLIP gets clean semantic input
+  const semanticQuery = text
+    .replace(/\b(von|bis|und|im|in|aus|bei|der|die|das|dem|den|nahe|zwischen|jahr|monat|an|am)\b/gi, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  return { semanticQuery, fromDate, toDate, location };
+}
+
+/** Public wrapper: converts internal Date fields to ISO strings for API serialization. */
+export function parseNaturalQuery(raw: string): ParsedQuery {
+  const internal = parseNaturalQueryInternal(raw);
+  return {
+    semanticQuery: internal.semanticQuery,
+    fromDate: internal.fromDate?.toISOString(),
+    toDate: internal.toDate?.toISOString(),
+    location: internal.location,
+  };
+}
+
+// ---------- Combined Natural Language Search ----------
+
+export interface NaturalSearchResult extends PhotoSearchResult {
+  location_city?: string;
+  location_country?: string;
+}
+
+export async function searchPhotosNaturalLogic(
+  userId: number,
+  query: string,
+  limit: number = 30,
+  threshold: number = 0.18
+): Promise<{ results: NaturalSearchResult[]; parsed: ParsedQuery }> {
+  const parsed = parseNaturalQueryInternal(query);
+  const parsedPublic: ParsedQuery = {
+    semanticQuery: parsed.semanticQuery,
+    fromDate: parsed.fromDate?.toISOString(),
+    toDate: parsed.toDate?.toISOString(),
+    location: parsed.location,
+  };
+
+  // DB conditions for date + location structural filters
+  const dbConditions: ReturnType<typeof and>[] = [
+    eq(photos.user_id, userId),
+    or(sql`${photoCuration.status} IS NULL`, sql`${photoCuration.status} != 'hidden'`),
+  ];
+  if (parsed.fromDate) {
+    dbConditions.push(sql`COALESCE(${photos.taken_at}, ${photos.created_at}) >= ${parsed.fromDate.toISOString()}`);
+  }
+  if (parsed.toDate) {
+    dbConditions.push(sql`COALESCE(${photos.taken_at}, ${photos.created_at}) <= ${parsed.toDate.toISOString()}`);
+  }
+  if (parsed.location) {
+    dbConditions.push(
+      or(
+        ilike(photos.location_city, `%${parsed.location}%`),
+        ilike(photos.location_country, `%${parsed.location}%`),
+        ilike(photos.location_name, `%${parsed.location}%`),
+      )
+    );
+  }
+
+  const hasStructuredFilter = !!(parsed.fromDate || parsed.location);
+  const hasSemanticQuery = parsed.semanticQuery.length > 0;
+
+  const selectFields = {
+    id: photos.id, filename: photos.filename, taken_at: photos.taken_at,
+    created_at: photos.created_at, location_city: photos.location_city,
+    location_country: photos.location_country,
+  };
+
+  type PhotoRow = {
+    id: number; filename: string; taken_at: string | null; created_at: string | null;
+    location_city: string | null; location_country: string | null;
+  };
+
+  const toResult = (p: PhotoRow, score: number): NaturalSearchResult => ({
+    photoId: p.id, score, filename: p.filename,
+    taken_at: p.taken_at ?? undefined, created_at: p.created_at ?? "",
+    location_city: p.location_city ?? undefined, location_country: p.location_country ?? undefined,
+  });
+
+  // Case A: no semantic part → pure DB filter (date/location only)
+  if (!hasSemanticQuery) {
+    const rows = await dbAll<PhotoRow>(
+      db.select(selectFields)
+        .from(photos)
+        .leftJoin(photoCuration, and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)))
+        .where(and(...dbConditions))
+        .orderBy(photoDateOrder)
+        .limit(limit)
+    );
+    return { parsed: parsedPublic, results: rows.map(r => toResult(r, 1.0)) };
+  }
+
+  // Case B: semantic only, no structural filters → pure CLIP
+  if (!hasStructuredFilter) {
+    const response = await fetch(`${EMBEDDING_SERVICE_URL}/search/text`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: parsed.semanticQuery, k: limit, threshold }),
+    });
+    if (!response.ok) throw new Error(`Embedding service error: ${response.status}`);
+    const clipData = await response.json() as { results: Array<{ photo_id: string; score: number }> };
+    const ids = clipData.results.map(r => parseInt(r.photo_id, 10)).filter(id => !isNaN(id));
+    if (ids.length === 0) return { results: [], parsed: parsedPublic };
+    const rows = await dbAll<PhotoRow>(
+      db.select(selectFields).from(photos)
+        .leftJoin(photoCuration, and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)))
+        .where(and(eq(photos.user_id, userId), inArray(photos.id, ids)))
+    );
+    const photoMap = new Map(rows.map(p => [p.id, p]));
+    return {
+      parsed: parsedPublic,
+      results: clipData.results
+        .map(r => { const p = photoMap.get(parseInt(r.photo_id, 10)); return p ? toResult(p, r.score) : null; })
+        .filter((r): r is NaturalSearchResult => r !== null),
+    };
+  }
+
+  // Case C: semantic + structural filters → CLIP results intersected with DB filter
+  // Pre-fetch candidate IDs matching date + location constraints
+  const candidateRows = await dbAll<{ id: number }>(
+    db.select({ id: photos.id })
+      .from(photos)
+      .leftJoin(photoCuration, and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)))
+      .where(and(...dbConditions))
+  );
+  const candidateSet = new Set(candidateRows.map(r => r.id));
+  if (candidateSet.size === 0) return { results: [], parsed: parsedPublic };
+
+  // Request enlarged k so intersection still yields enough results
+  const clipK = Math.min(candidateSet.size, limit * 5);
+  const response = await fetch(`${EMBEDDING_SERVICE_URL}/search/text`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: parsed.semanticQuery, k: clipK, threshold }),
+  });
+  if (!response.ok) throw new Error(`Embedding service error: ${response.status}`);
+  const clipData = await response.json() as { results: Array<{ photo_id: string; score: number }> };
+
+  // Keep only CLIP results that also match the structural filter
+  const intersected = clipData.results
+    .filter(r => candidateSet.has(parseInt(r.photo_id, 10)))
+    .slice(0, limit);
+  if (intersected.length === 0) return { results: [], parsed: parsedPublic };
+
+  const ids = intersected.map(r => parseInt(r.photo_id, 10));
+  const rows = await dbAll<PhotoRow>(
+    db.select(selectFields).from(photos)
+      .where(and(eq(photos.user_id, userId), inArray(photos.id, ids)))
+  );
+  const photoMap = new Map(rows.map(p => [p.id, p]));
+
+  return {
+    parsed: parsedPublic,
+    results: intersected
+      .map(r => { const p = photoMap.get(parseInt(r.photo_id, 10)); return p ? toResult(p, r.score) : null; })
+      .filter((r): r is NaturalSearchResult => r !== null),
+  };
 }

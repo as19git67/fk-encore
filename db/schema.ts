@@ -1,4 +1,4 @@
-import { pgTable, text, integer, primaryKey, serial, boolean, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, primaryKey, serial, boolean, timestamp, real, doublePrecision } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 // ========== Users ==========
@@ -112,6 +112,11 @@ export const photos = pgTable("photos", {
   hash: text("hash"),
   taken_at: timestamp("taken_at", { mode: "string" }),
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
+  latitude: doublePrecision("latitude"),
+  longitude: doublePrecision("longitude"),
+  location_name: text("location_name"),
+  location_city: text("location_city"),
+  location_country: text("location_country"),
 });
 
 // ========== Persons ==========
@@ -233,3 +238,20 @@ export const albumShares = pgTable(
   },
   (table) => [primaryKey({ columns: [table.album_id, table.user_id] })]
 );
+
+// ========== Photo Landmarks (Grounding DINO detection results) ==========
+
+export const photoLandmarks = pgTable("photo_landmarks", {
+  id: serial("id").primaryKey(),
+  photo_id: integer("photo_id")
+    .notNull()
+    .references(() => photos.id, { onDelete: "cascade" }),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  label: text("label").notNull(),
+  confidence: real("confidence").notNull(),
+  // Bounding box as JSON string: { x, y, width, height } normalized to image size (0..1)
+  bbox: text("bbox").notNull(),
+  created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
+});

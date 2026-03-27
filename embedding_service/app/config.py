@@ -12,9 +12,9 @@ class Settings(BaseSettings):
     db_max_overflow: int = 10
     db_echo: bool = False
 
-    # CLIP model
-    clip_model_name: str = "ViT-L-14"
-    clip_pretrained: str = "openai"
+    # CLIP model – multilingual ViT-H-14 (XLM-RoBERTa-Large text encoder, 1024-dim)
+    clip_model_name: str = "xlm-roberta-large-ViT-H-14"
+    clip_pretrained: str = "frozen_laion5b_s13b_b90k"
 
     # DINOv2 model
     dino_model_name: str = "facebook/dinov2-base"
