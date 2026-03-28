@@ -6,7 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "storybook": "storybook dev -p 6006",
+    "storybook:build": "storybook build",
+    "storybook:setup": "msw init public/",
+    "screenshot": "test-storybook --url http://localhost:6006 --config-dir .storybook"
   },
   "dependencies": {
     "@primeuix/styles": "2.0.3",
@@ -20,9 +24,16 @@
     "vue-router": "^4.6.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.50.0",
+    "@storybook/addon-essentials": "^8.6.0",
+    "@storybook/test-runner": "^0.22.0",
+    "@storybook/vue3-vite": "^8.6.0",
     "@types/node": "^24.10.1",
     "@vitejs/plugin-vue": "^6.0.2",
     "@vue/tsconfig": "^0.8.1",
+    "msw": "^2.7.0",
+    "msw-storybook-addon": "^2.0.4",
+    "storybook": "^8.6.0",
     "typescript": "~5.9.3",
     "vite": "^7.3.1",
     "vue-tsc": "^3.1.5"
