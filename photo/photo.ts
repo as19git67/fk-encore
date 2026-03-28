@@ -497,31 +497,41 @@ export const getPhotoFaces = api(
   }
 );
 
-/**
- * Reindex all photos (background job).
- */
-export const reindexAllPhotos = api(
-  { expose: true, method: "POST", path: "/photos/reindex-all", auth: true },
-  async (): Promise<{ count: number }> => {
+
+// ========== Scan Queue ==========
+
+import type { QueueStatus } from "./scan-queue";
+
+export const getScanQueueStatus = api(
+  { expose: true, method: "GET", path: "/photos/scan-queue/status", auth: true },
+  async (): Promise<QueueStatus> => {
     checkModule();
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "data.manage");
-    return await service.reindexAllPhotosLogic(userId);
+    return await service.getScanQueueStatusLogic(userId);
   }
 );
 
-/**
- * Get reindex progress for the current user.
- */
-export const getReindexStatus = api(
-  { expose: true, method: "GET", path: "/photos/reindex-status", auth: true },
-  async (): Promise<{ inProgress: boolean; total: number; processed: number; errors: number }> => {
+export const rescanPhotos = api(
+  { expose: true, method: "POST", path: "/photos/rescan", auth: true },
+  async ({ force }: { force: boolean }): Promise<{ queued: number }> => {
     checkModule();
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "data.manage");
-    return await service.getReindexStatusForUser(userId);
+    return await service.rescanPhotosLogic(userId, force);
+  }
+);
+
+export const retryFailedScans = api(
+  { expose: true, method: "POST", path: "/photos/scan-queue/retry-failed", auth: true },
+  async (): Promise<{ retried: number }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "data.manage");
+    return await service.retryFailedScansLogic(userId);
   }
 );
 

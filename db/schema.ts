@@ -1,4 +1,4 @@
-import { pgTable, text, integer, primaryKey, serial, boolean, timestamp, real, doublePrecision } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, primaryKey, serial, boolean, timestamp, real, doublePrecision, pgEnum } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 // ========== Users ==========
@@ -254,4 +254,27 @@ export const photoLandmarks = pgTable("photo_landmarks", {
   // Bounding box as JSON string: { x, y, width, height } normalized to image size (0..1)
   bbox: text("bbox").notNull(),
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
+});
+
+// ========== Scan Queue ==========
+
+export const scanServiceEnum = pgEnum("scan_service", ["embedding", "face_detection", "landmark"]);
+export const scanStatusEnum = pgEnum("scan_status", ["pending", "processing", "failed", "done"]);
+
+export const photoScanQueue = pgTable("photo_scan_queue", {
+  id: serial("id").primaryKey(),
+  photo_id: integer("photo_id")
+    .notNull()
+    .references(() => photos.id, { onDelete: "cascade" }),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  service: scanServiceEnum("service").notNull(),
+  status: scanStatusEnum("status").notNull().default("pending"),
+  force: boolean("force").notNull().default(false),
+  attempts: integer("attempts").notNull().default(0),
+  error_msg: text("error_msg"),
+  enqueued_at: timestamp("enqueued_at", { mode: "string" }).notNull().defaultNow(),
+  started_at: timestamp("started_at", { mode: "string" }),
+  finished_at: timestamp("finished_at", { mode: "string" }),
 });

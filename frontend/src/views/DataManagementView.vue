@@ -1,63 +1,50 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import Button from 'primevue/button'
 import ProgressBar from 'primevue/progressbar'
 import Message from 'primevue/message'
 import {
-  reindexAllPhotos, getReindexStatus, findPhotoGroups,
+  getScanQueueStatus, rescanPhotos, retryFailedScans, findPhotoGroups,
   getPhotosToRefreshMetadata, refreshPhotoMetadata,
-  type ReindexStatus,
+  type ScanQueueStatus,
 } from '../api/photos'
 
-const status = ref<ReindexStatus>({ inProgress: false, total: 0, processed: 0, errors: 0 })
-const error = ref('')
-const loading = ref(false)
-const groupingResult = ref<{ groups_created: number; total_photos_grouped: number } | null>(null)
-const groupingLoading = ref(false)
+// ── Scan Queue ────────────────────────────────────────────────────────────────
 
-// Metadata refresh
-const refreshingMetadata = ref(false)
-const refreshProgress = ref(0)
-const refreshTotal = ref(0)
-const refreshCurrent = ref(0)
-const metaError = ref('')
-
+const queueStatus = ref<ScanQueueStatus>({ services: [] })
+const queueError = ref('')
+const rescanLoading = ref(false)
+const retryLoading = ref(false)
 let pollInterval: ReturnType<typeof setInterval> | null = null
 
-const progress = computed(() => {
-  if (!status.value.total) return 0
-  return Math.round((status.value.processed / status.value.total) * 100)
-})
-
-async function fetchStatus() {
-  try {
-    const prevInProgress = status.value.inProgress
-    status.value = await getReindexStatus()
-    // Auto-find groups when reindex completes
-    if (prevInProgress && !status.value.inProgress) {
-      stopPolling()
-      await autoFindGroups()
-    }
-  } catch (err: any) {
-    // ignore polling errors
-  }
+const serviceLabels: Record<string, string> = {
+  embedding: 'Embeddings',
+  face_detection: 'Gesichtserkennung',
+  landmark: 'Sehenswürdigkeiten',
 }
 
-async function autoFindGroups() {
-  groupingResult.value = null
-  groupingLoading.value = true
+const totalPending = computed(() =>
+  queueStatus.value.services.reduce((s, svc) => s + svc.pending, 0)
+)
+const totalProcessing = computed(() =>
+  queueStatus.value.services.reduce((s, svc) => s + svc.processing, 0)
+)
+const totalFailed = computed(() =>
+  queueStatus.value.services.reduce((s, svc) => s + svc.failed, 0)
+)
+const isActive = computed(() => totalPending.value > 0 || totalProcessing.value > 0)
+
+async function fetchQueueStatus() {
   try {
-    groupingResult.value = await findPhotoGroups()
-  } catch (err: any) {
-    // non-critical — silently ignore
-  } finally {
-    groupingLoading.value = false
+    queueStatus.value = await getScanQueueStatus()
+  } catch {
+    // ignore polling errors
   }
 }
 
 function startPolling() {
   if (pollInterval) return
-  pollInterval = setInterval(fetchStatus, 2000)
+  pollInterval = setInterval(fetchQueueStatus, 5000)
 }
 
 function stopPolling() {
@@ -67,51 +54,74 @@ function stopPolling() {
   }
 }
 
-async function handleReindex() {
-  error.value = ''
-  loading.value = true
-  groupingResult.value = null
+async function handleRescan(force: boolean) {
+  queueError.value = ''
+  rescanLoading.value = true
   try {
-    await reindexAllPhotos()
-    await fetchStatus()
+    await rescanPhotos(force)
+    await fetchQueueStatus()
     startPolling()
   } catch (err: any) {
-    if (err.message?.includes('already in progress')) {
-      error.value = 'Ein Scan-Vorgang läuft bereits.'
-    } else {
-      error.value = err.message || 'Fehler beim Starten des Re-Indexings'
-    }
+    queueError.value = err.message || 'Fehler beim Starten des Scans'
   } finally {
-    loading.value = false
+    rescanLoading.value = false
   }
 }
 
+async function handleRetry() {
+  queueError.value = ''
+  retryLoading.value = true
+  try {
+    await retryFailedScans()
+    await fetchQueueStatus()
+    startPolling()
+  } catch (err: any) {
+    queueError.value = err.message || 'Fehler beim Wiederholen'
+  } finally {
+    retryLoading.value = false
+  }
+}
+
+// ── Foto-Gruppen ──────────────────────────────────────────────────────────────
+
+const groupingResult = ref<{ groups_created: number; total_photos_grouped: number } | null>(null)
+const groupingLoading = ref(false)
+const groupingError = ref('')
+
+async function handleFindGroups() {
+  groupingResult.value = null
+  groupingError.value = ''
+  groupingLoading.value = true
+  try {
+    groupingResult.value = await findPhotoGroups()
+  } catch (err: any) {
+    groupingError.value = err.message || 'Fehler beim Gruppieren'
+  } finally {
+    groupingLoading.value = false
+  }
+}
+
+// ── Metadaten ─────────────────────────────────────────────────────────────────
+
+const refreshingMetadata = ref(false)
+const refreshProgress = ref(0)
+const refreshTotal = ref(0)
+const refreshCurrent = ref(0)
+const metaError = ref('')
+
 async function handleRefreshMetadata() {
   if (refreshingMetadata.value) return
-
   refreshingMetadata.value = true
   refreshProgress.value = 0
   refreshCurrent.value = 0
   refreshTotal.value = 0
   metaError.value = ''
-
   try {
     const res = await getPhotosToRefreshMetadata()
-    const ids = res.ids
-
-    if (ids.length === 0) {
-      refreshingMetadata.value = false
-      return
-    }
-
-    refreshTotal.value = ids.length
-
-    for (const id of ids) {
-      try {
-        await refreshPhotoMetadata(id)
-      } catch (err) {
-        console.error(`Fehler beim Aktualisieren der Metadaten für Foto ${id}:`, err)
-      }
+    if (res.ids.length === 0) { refreshingMetadata.value = false; return }
+    refreshTotal.value = res.ids.length
+    for (const id of res.ids) {
+      try { await refreshPhotoMetadata(id) } catch {}
       refreshCurrent.value++
       refreshProgress.value = Math.round((refreshCurrent.value / refreshTotal.value) * 100)
     }
@@ -122,58 +132,114 @@ async function handleRefreshMetadata() {
   }
 }
 
+// ── Lifecycle ─────────────────────────────────────────────────────────────────
+
 onMounted(async () => {
-  await fetchStatus()
-  if (status.value.inProgress) {
-    startPolling()
-  }
+  await fetchQueueStatus()
+  if (isActive.value) startPolling()
 })
 
-onUnmounted(() => {
-  stopPolling()
-})
+onUnmounted(() => stopPolling())
 </script>
 
 <template>
   <div>
     <h2>Datenverwaltung</h2>
 
-    <Message v-if="error" severity="error" sticky class="mb-4">{{ error }}</Message>
-
+    <!-- Scan Queue -->
     <div class="card p-4 mb-4 surface-card border-round shadow-1">
-      <h3 class="mt-0 mb-3">Fotos neu scannen</h3>
-      <p class="text-secondary mb-4">
-        Alle Fotos werden erneut durch die Gesichtserkennung und Embedding-Berechnung geschickt.
-        Bestehende Zuordnungen werden dabei aktualisiert. Anschließend werden ähnliche Fotos automatisch gruppiert.
+      <h3 class="mt-0 mb-1">Scan-Queue</h3>
+      <p class="text-secondary mb-3">
+        Hochgeladene Fotos werden im Hintergrund durch Gesichtserkennung, Embedding-Berechnung
+        und Sehenswürdigkeiten-Erkennung geschickt.
       </p>
 
-      <div v-if="status.inProgress" class="mb-4">
-        <div class="flex justify-between mb-2">
-          <span class="text-secondary">
-            Fortschritt: {{ status.processed }} von {{ status.total }} Fotos
-            <template v-if="status.errors > 0"> ({{ status.errors }} Fehler)</template>
-            {{ progress }} %
-          </span>
-        </div>
-        <ProgressBar :value="progress" :showValue="false" />
-      </div>
+      <Message v-if="queueError" severity="error" class="mb-3" @close="queueError = ''">{{ queueError }}</Message>
 
-      <div v-else-if="status.total > 0 && !status.inProgress" class="mb-4">
-        <Message severity="success" :closable="false">
-          Letzter Scan abgeschlossen: {{ status.processed }} von {{ status.total }} Fotos verarbeitet.
-          <template v-if="status.errors > 0">
-            {{ status.errors }} Fehler aufgetreten.
-          </template>
-        </Message>
-      </div>
+      <!-- Status-Tabelle -->
+      <table class="queue-table mb-4">
+        <thead>
+          <tr>
+            <th>Service</th>
+            <th>Ausstehend</th>
+            <th>Läuft</th>
+            <th>Fehler</th>
+            <th>Erledigt</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="svc in queueStatus.services" :key="svc.service">
+            <td>{{ serviceLabels[svc.service] ?? svc.service }}</td>
+            <td>
+              <span v-if="svc.pending > 0" class="badge badge-pending">{{ svc.pending }}</span>
+              <span v-else class="text-secondary">—</span>
+            </td>
+            <td>
+              <span v-if="svc.processing > 0" class="badge badge-processing">
+                <i class="pi pi-spin pi-spinner" style="font-size:0.7rem" />
+                {{ svc.processing }}
+              </span>
+              <span v-else class="text-secondary">—</span>
+            </td>
+            <td>
+              <span v-if="svc.failed > 0" class="badge badge-failed">{{ svc.failed }}</span>
+              <span v-else class="text-secondary">—</span>
+            </td>
+            <td class="text-secondary">{{ svc.done }}</td>
+          </tr>
+          <tr v-if="queueStatus.services.length === 0">
+            <td colspan="5" class="text-secondary" style="text-align:center">Keine Daten</td>
+          </tr>
+        </tbody>
+      </table>
 
-      <div v-if="groupingLoading" class="mb-4">
-        <span class="text-secondary">
-          <i class="pi pi-spin pi-spinner mr-2"></i>Ähnliche Fotos werden gruppiert…
+      <div v-if="isActive" class="mb-3">
+        <span class="text-secondary" style="font-size:0.85rem">
+          <i class="pi pi-spin pi-spinner mr-1" />
+          {{ totalProcessing }} werden verarbeitet, {{ totalPending }} warten…
         </span>
+        <ProgressBar mode="indeterminate" style="height:4px;margin-top:0.5rem" />
       </div>
 
-      <div v-if="groupingResult" class="mb-4">
+      <div class="button-row">
+        <Button
+          icon="pi pi-search-plus"
+          label="Fehlende Scans starten"
+          severity="secondary"
+          :loading="rescanLoading"
+          :disabled="rescanLoading || retryLoading"
+          @click="handleRescan(false)"
+        />
+        <Button
+          icon="pi pi-refresh"
+          label="Alles neu scannen"
+          severity="secondary"
+          :loading="rescanLoading"
+          :disabled="rescanLoading || retryLoading"
+          @click="handleRescan(true)"
+        />
+        <Button
+          v-if="totalFailed > 0"
+          icon="pi pi-replay"
+          :label="`${totalFailed} Fehler wiederholen`"
+          severity="warn"
+          :loading="retryLoading"
+          :disabled="rescanLoading || retryLoading"
+          @click="handleRetry"
+        />
+      </div>
+    </div>
+
+    <!-- Foto-Gruppen -->
+    <div class="card p-4 mb-4 surface-card border-round shadow-1">
+      <h3 class="mt-0 mb-1">Ähnliche Fotos gruppieren</h3>
+      <p class="text-secondary mb-3">
+        Ähnliche Fotos werden anhand der Embeddings automatisch zu Gruppen zusammengefasst.
+      </p>
+
+      <Message v-if="groupingError" severity="error" class="mb-3" @close="groupingError = ''">{{ groupingError }}</Message>
+
+      <div v-if="groupingResult" class="mb-3">
         <Message severity="info" :closable="false">
           {{ groupingResult.groups_created }} neue Gruppen erstellt
           ({{ groupingResult.total_photos_grouped }} Fotos gruppiert).
@@ -182,36 +248,33 @@ onUnmounted(() => {
 
       <Button
         icon="pi pi-images"
-        label="Alle neu scannen"
-        @click="handleReindex"
-        :disabled="status.inProgress || groupingLoading"
-        :loading="loading"
+        label="Gruppen neu berechnen"
+        :loading="groupingLoading"
+        :disabled="groupingLoading"
+        @click="handleFindGroups"
       />
     </div>
 
+    <!-- Metadaten -->
     <div class="card p-4 mb-4 surface-card border-round shadow-1">
-      <h3 class="mt-0 mb-3">Metadaten aktualisieren</h3>
-      <p class="text-secondary mb-4">
+      <h3 class="mt-0 mb-1">Metadaten aktualisieren</h3>
+      <p class="text-secondary mb-3">
         Aufnahmedatum und andere EXIF-Metadaten werden für Fotos ohne gespeichertes Datum neu eingelesen.
       </p>
 
-      <Message v-if="metaError" severity="error" sticky class="mb-4">{{ metaError }}</Message>
+      <Message v-if="metaError" severity="error" class="mb-3" @close="metaError = ''">{{ metaError }}</Message>
 
-      <div v-if="refreshingMetadata" class="mb-4">
-        <div class="flex justify-between mb-2">
-          <span class="text-secondary">
-            Metadaten werden aktualisiert… {{ refreshCurrent }} / {{ refreshTotal }}
-          </span>
-        </div>
-        <ProgressBar :value="refreshProgress" :showValue="false" />
+      <div v-if="refreshingMetadata" class="mb-3">
+        <span class="text-secondary">Metadaten werden aktualisiert… {{ refreshCurrent }} / {{ refreshTotal }}</span>
+        <ProgressBar :value="refreshProgress" :showValue="false" style="margin-top:0.5rem" />
       </div>
 
       <Button
         icon="pi pi-refresh"
         label="Metadaten aktualisieren"
-        @click="handleRefreshMetadata"
         :disabled="refreshingMetadata"
         :loading="refreshingMetadata"
+        @click="handleRefreshMetadata"
       />
     </div>
   </div>
@@ -223,4 +286,35 @@ onUnmounted(() => {
   gap: 0.5rem;
   flex-wrap: wrap;
 }
+
+.queue-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.queue-table th,
+.queue-table td {
+  padding: 0.4rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--surface-border);
+}
+.queue-table th {
+  color: var(--text-color-secondary);
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 1rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.badge-pending  { background: var(--blue-100);   color: var(--blue-700); }
+.badge-processing { background: var(--yellow-100); color: var(--yellow-700); }
+.badge-failed   { background: var(--red-100);    color: var(--red-700); }
 </style>
