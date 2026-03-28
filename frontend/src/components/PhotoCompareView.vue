@@ -58,6 +58,50 @@ async function setCuration(id: number, status: CurationStatus) {
   }
 }
 
+// ── AI quality score helpers ──
+
+/** Returns the ai_quality_score for a photo, or null if not yet scored. */
+function getAiScore(photoId: number): number | null {
+  const photo = getPhotoById(photoId)
+  return photo?.ai_quality_score ?? null
+}
+
+/** CSS class for the quality badge colour: green / yellow / red. */
+function aiScoreClass(photoId: number): string {
+  const s = getAiScore(photoId)
+  if (s === null) return 'ai-score-unknown'
+  if (s >= 0.65) return 'ai-score-good'
+  if (s >= 0.40) return 'ai-score-medium'
+  return 'ai-score-poor'
+}
+
+/** Human-readable label (percentage). */
+function aiScoreLabel(photoId: number): string {
+  const s = getAiScore(photoId)
+  if (s === null) return '?'
+  return `${Math.round(s * 100)}%`
+}
+
+/**
+ * Pre-populate comparison scores from AI quality so the user can skip the
+ * manual pairwise phase and jump straight to the review grid.
+ * Score is mapped linearly: ai=0.0 → -3, ai=0.5 → 0, ai=1.0 → +3.
+ */
+function applyAiPreselection(): void {
+  const map = new Map<number, number>()
+  for (const photo of groupPhotos.value) {
+    const s = photo.ai_quality_score
+    if (s !== undefined && s !== null) {
+      map.set(photo.id, Math.round((s - 0.5) * 6))
+    } else {
+      map.set(photo.id, 0)
+    }
+  }
+  scores.value = map
+  phase.value = 'review'
+  currentPair.value = null
+}
+
 // ── Swiss-system pairwise comparison ──
 
 // Score per photo: higher = more likely to keep
@@ -382,6 +426,15 @@ function getPhotoById(id: number): Photo | undefined {
               @click="skipPair"
             />
             <Button
+              icon="pi pi-sparkles"
+              label="KI-Vorauswahl"
+              severity="secondary"
+              size="small"
+              outlined
+              v-tooltip.bottom="'Vergleich überspringen und Fotos nach KI-Qualitätsbewertung vorauswählen'"
+              @click="applyAiPreselection"
+            />
+            <Button
               icon="pi pi-question-circle"
               text
               rounded
@@ -414,6 +467,11 @@ function getPhotoById(id: number): Photo | undefined {
                       <td><kbd>S</kbd></td>
                       <td><strong>Überspringen</strong></td>
                       <td class="help-desc">Das aktuelle Paar wird vorerst übersprungen – kein Score ändert sich, das Paar bleibt unentschieden und kann später wieder erscheinen.</td>
+                    </tr>
+                    <tr>
+                      <td>KI-Vorauswahl</td>
+                      <td><strong>KI-Bewertung anwenden</strong></td>
+                      <td class="help-desc">Überspringt den manuellen Vergleich. Die KI bewertet jedes Foto technisch (Schärfe, Belichtung, Bildqualität via CLIP) und schlägt die schlechtesten Fotos zum Ausblenden vor.</td>
                     </tr>
                   </tbody>
                 </table>
@@ -451,6 +509,14 @@ function getPhotoById(id: number): Photo | undefined {
                   alt=""
                   objectFit="contain"
                 />
+                <div
+                  class="ai-quality-badge"
+                  :class="aiScoreClass(photoId)"
+                  v-tooltip.top="'KI-Qualitätsbewertung: ' + aiScoreLabel(photoId)"
+                >
+                  <i class="pi pi-sparkles" style="font-size: 0.65rem" />
+                  {{ aiScoreLabel(photoId) }}
+                </div>
               </div>
             </div>
           </div>
@@ -548,6 +614,15 @@ function getPhotoById(id: number): Photo | undefined {
                 <HeicImage :src="getPhotoUrl(photo.filename)" :alt="photo.original_name" />
                 <div class="review-score" :class="{ negative: (scores.get(photo.id) ?? 0) < 0 }">
                   {{ (scores.get(photo.id) ?? 0) > 0 ? '+' : '' }}{{ scores.get(photo.id) ?? 0 }}
+                </div>
+                <div
+                  v-if="photo.ai_quality_score !== undefined"
+                  class="review-ai-score"
+                  :class="aiScoreClass(photo.id)"
+                  v-tooltip.right="'KI-Qualität'"
+                >
+                  <i class="pi pi-sparkles" style="font-size: 0.6rem" />
+                  {{ aiScoreLabel(photo.id) }}
                 </div>
               </div>
               <div class="review-photo-controls">
@@ -797,4 +872,48 @@ kbd {
 .help-desc {
   color: var(--p-text-muted-color);
 }
+
+/* ── AI quality badge (compare phase, overlaid on photo) ── */
+.ai-quality-badge {
+  position: absolute;
+  bottom: 0.4rem;
+  left: 0.4rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 1rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+}
+
+.ai-quality-badge.ai-score-good  { color: #22c55e; }
+.ai-quality-badge.ai-score-medium { color: #eab308; }
+.ai-quality-badge.ai-score-poor  { color: #ef4444; }
+.ai-quality-badge.ai-score-unknown { color: #9ca3af; }
+
+/* ── AI score in review grid ── */
+.review-ai-score {
+  position: absolute;
+  bottom: 0.4rem;
+  left: 0.4rem;
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 1rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+}
+
+.review-ai-score.ai-score-good   { color: #22c55e; }
+.review-ai-score.ai-score-medium { color: #eab308; }
+.review-ai-score.ai-score-poor   { color: #ef4444; }
+.review-ai-score.ai-score-unknown { color: #9ca3af; }
 </style>

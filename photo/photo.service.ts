@@ -83,6 +83,7 @@ const FACE_SIMILARITY_THRESHOLD = parseFloat(process.env.FACE_DISTANCE_THRESHOLD
 export const ENABLE_LOCAL_FACES = process.env.ENABLE_LOCAL_FACES === "true";
 const LANDMARK_SERVICE_URL = process.env.LANDMARK_SERVICE_URL || "http://localhost:8002";
 export const ENABLE_LANDMARKS = process.env.ENABLE_LANDMARKS === "true";
+export const ENABLE_QUALITY = process.env.ENABLE_QUALITY !== "false"; // enabled by default
 
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -528,6 +529,7 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
     created_at: string | null; curation_status: string | null;
     latitude: number | null; longitude: number | null;
     location_name: string | null; location_city: string | null; location_country: string | null;
+    ai_quality_score: number | null;
   }>(
     db
       .select({
@@ -546,6 +548,7 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
         location_name: photos.location_name,
         location_city: photos.location_city,
         location_country: photos.location_country,
+        ai_quality_score: photos.ai_quality_score,
       })
       .from(photos)
       .leftJoin(
@@ -575,6 +578,7 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
       location_name: r.location_name ?? undefined,
       location_city: r.location_city ?? undefined,
       location_country: r.location_country ?? undefined,
+      ai_quality_score: r.ai_quality_score ?? undefined,
     })),
   };
 }
@@ -2049,6 +2053,70 @@ export async function indexPhotoLandmarks(userId: number, photoId: number): Prom
     }
   } catch (err) {
     console.error(`Landmark detection failed for photo ${photoId}:`, err);
+  } finally {
+    if (tempPath && fs.existsSync(tempPath)) {
+      fs.unlinkSync(tempPath);
+    }
+  }
+}
+
+// ---------- AI Quality Scoring ----------
+
+export async function indexPhotoQuality(userId: number, photoId: number): Promise<void> {
+  if (!ENABLE_QUALITY) return;
+
+  const photo = await dbFirst<typeof photos.$inferSelect>(
+    db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+  );
+  if (!photo) return;
+
+  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  if (!fs.existsSync(filePath)) return;
+
+  let processingPath = filePath;
+  let tempPath: string | null = null;
+
+  // HEIC files must be converted before sending to the embedding service
+  const ext = path.extname(photo.filename).toLowerCase();
+  if (ext === ".heic" || ext === ".heif") {
+    try {
+      const inputBuffer = await fs.promises.readFile(filePath);
+      const outputBuffer = await heicConvert({ buffer: inputBuffer, format: "JPEG", quality: 1 });
+      tempPath = path.join(UPLOAD_DIR, `temp_q_${photoId}_${Date.now()}.jpg`);
+      await fs.promises.writeFile(tempPath, outputBuffer as Buffer);
+      processingPath = tempPath;
+    } catch (err) {
+      console.error(`HEIC conversion for quality scoring failed (photo ${photoId}):`, err);
+      return;
+    }
+  }
+
+  try {
+    const formData = new FormData();
+    const fileData = await fs.promises.readFile(processingPath);
+    const blob = new Blob([fileData], { type: getUploadMimeType(processingPath) });
+    formData.append("file", blob, path.basename(processingPath));
+
+    const response = await fetch(`${EMBEDDING_SERVICE_URL}/quality`, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Quality service returned ${response.status} for photo ${photoId}: ${errorText}`);
+      return;
+    }
+
+    const result = await response.json() as { score: number };
+    await db
+      .update(photos)
+      .set({ ai_quality_score: result.score })
+      .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)));
+
+    console.log(`[quality] photo ${photoId} scored ${result.score}`);
+  } catch (err) {
+    console.error(`Quality scoring failed for photo ${photoId}:`, err);
   } finally {
     if (tempPath && fs.existsSync(tempPath)) {
       fs.unlinkSync(tempPath);

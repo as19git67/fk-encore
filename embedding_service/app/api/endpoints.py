@@ -249,6 +249,108 @@ async def search_by_text(request: TextSearchRequest, db: DbDep) -> SearchRespons
 # /get
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# /quality
+# ---------------------------------------------------------------------------
+
+@router.post("/quality", tags=["quality"])
+async def compute_quality(file: UploadFile = File(...)) -> dict:
+    """Compute an AI quality score (0.0–1.0) for a photo.
+
+    Combines three signals – all computed from already-loaded models/libraries:
+    - CLIP text-image similarity against positive/negative quality prompts
+    - Laplacian variance (blur) via NumPy (higher variance → sharper image)
+    - Mean brightness (exposure) via NumPy (penalise very dark / very bright)
+
+    No new dependencies are required.
+    """
+    import numpy as np
+
+    try:
+        content = await file.read()
+        image = Image.open(io.BytesIO(content)).convert("RGB")
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Cannot read image: {exc}",
+        ) from exc
+
+    # ── CLIP quality score ──────────────────────────────────────────────────
+    try:
+        clip_embedder = CLIPEmbedder.get_instance(
+            model_name=settings.clip_model_name, pretrained=settings.clip_pretrained
+        )
+        img_vec = np.array(clip_embedder.embed([image])[0], dtype=np.float32)
+
+        good_prompts = [
+            "a sharp in-focus high quality photograph",
+            "a well-exposed bright clear photograph",
+        ]
+        bad_prompts = [
+            "a blurry out-of-focus photograph",
+            "a dark noisy low quality photo",
+        ]
+
+        good_sims = [
+            float(np.dot(img_vec, np.array(clip_embedder.embed_text(t), dtype=np.float32)))
+            for t in good_prompts
+        ]
+        bad_sims = [
+            float(np.dot(img_vec, np.array(clip_embedder.embed_text(t), dtype=np.float32)))
+            for t in bad_prompts
+        ]
+
+        clip_diff = sum(good_sims) / len(good_sims) - sum(bad_sims) / len(bad_sims)
+        # CLIP cosine diffs cluster in roughly [-0.15, +0.15]; map to [0, 1]
+        clip_score = float(max(0.0, min(1.0, (clip_diff + 0.15) / 0.30)))
+    except Exception as exc:
+        logger.exception("CLIP quality scoring failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Quality scoring error",
+        ) from exc
+
+    # ── Blur score via Laplacian variance (NumPy only) ──────────────────────
+    try:
+        sample_size = 256
+        gray = image.convert("L").resize((sample_size, sample_size), Image.LANCZOS)
+        arr = np.array(gray, dtype=np.float64)
+        # Discrete Laplacian: shifted-array approximation
+        lap = (
+            np.roll(arr, 1, axis=0) + np.roll(arr, -1, axis=0)
+            + np.roll(arr, 1, axis=1) + np.roll(arr, -1, axis=1)
+            - 4.0 * arr
+        )
+        blur_variance = float(lap.var())
+        # Typical range: blurry photos < 100, sharp photos > 500
+        blur_score = float(min(1.0, blur_variance / 500.0))
+    except Exception:
+        blur_score = 0.5
+
+    # ── Exposure score ──────────────────────────────────────────────────────
+    try:
+        gray_arr = np.array(image.convert("L"), dtype=np.float64)
+        mean_brightness = float(gray_arr.mean()) / 255.0
+        # Penalise very dark (<0.2) and very bright (>0.8); peak at 0.5
+        exposure_score = float(max(0.0, 1.0 - 2.5 * abs(mean_brightness - 0.5)))
+    except Exception:
+        exposure_score = 0.5
+
+    # ── Composite ───────────────────────────────────────────────────────────
+    composite = 0.4 * clip_score + 0.4 * blur_score + 0.2 * exposure_score
+
+    return {
+        "score": round(composite, 4),
+        "blur_score": round(blur_score, 4),
+        "exposure_score": round(exposure_score, 4),
+        "clip_score": round(clip_score, 4),
+    }
+
+
+# ---------------------------------------------------------------------------
+# /get
+# ---------------------------------------------------------------------------
+
 @router.post("/get", response_model=GetResponse, tags=["embeddings"])
 async def get_photos(request: GetRequest, db: DbDep) -> GetResponse:
     """Retrieve embeddings and metadata for a list of photo IDs."""
