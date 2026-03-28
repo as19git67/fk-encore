@@ -33,7 +33,7 @@ class SearchRequest(BaseModel):
 
 class TextSearchRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=500, description="Natural language search query")
-    k: int = Field(default=20, ge=1, le=100, description="Number of nearest neighbours to return")
+    k: int = Field(default=20, ge=1, le=1000, description="Number of nearest neighbours to return")
     threshold: float = Field(default=0.20, ge=0.0, le=1.0, description="Minimum cosine similarity score")
 
 
