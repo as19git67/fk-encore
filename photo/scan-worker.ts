@@ -11,6 +11,7 @@
 
 import {
   dequeueNextJob,
+  enqueuePhotoScan,
   markJobDone,
   markJobFailed,
   resetStuckJobs,
@@ -65,11 +66,17 @@ class ScanWorker {
         );
       }
 
-      // After face detection completes, clean up orphaned persons
+      // After face detection completes, clean up orphaned persons and
+      // re-score quality so the face composition signal is incorporated.
       if (this.service === "face_detection") {
         cleanupOrphanedPersons(job.user_id).catch((err) =>
           console.error(`[scan-worker] cleanup error after face job ${job.id}:`, err),
         );
+        enqueuePhotoScan(job.photo_id, job.user_id, ["quality"], true)
+          .then(() => qualityWorker.tick())
+          .catch((err) =>
+            console.error(`[scan-worker] re-queue quality after face job ${job.id}:`, err),
+          );
       }
     } catch (err: any) {
       const msg = err?.message ?? String(err);

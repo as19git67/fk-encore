@@ -253,16 +253,29 @@ async def search_by_text(request: TextSearchRequest, db: DbDep) -> SearchRespons
 # /quality
 # ---------------------------------------------------------------------------
 
+def _clip_dimension_score(img_vec: "np.ndarray", embedder: "CLIPEmbedder", positive: list, negative: list) -> float:
+    """Return a [0, 1] score for one quality dimension via CLIP text-image similarity."""
+    import numpy as np
+    pos_sims = [float(np.dot(img_vec, np.array(embedder.embed_text(t), dtype=np.float32))) for t in positive]
+    neg_sims = [float(np.dot(img_vec, np.array(embedder.embed_text(t), dtype=np.float32))) for t in negative]
+    diff = sum(pos_sims) / len(pos_sims) - sum(neg_sims) / len(neg_sims)
+    # CLIP cosine diffs for image-text pairs cluster roughly in [-0.15, +0.15]
+    return float(max(0.0, min(1.0, (diff + 0.15) / 0.30)))
+
+
 @router.post("/quality", tags=["quality"])
 async def compute_quality(file: UploadFile = File(...)) -> dict:
     """Compute an AI quality score (0.0–1.0) for a photo.
 
-    Combines three signals – all computed from already-loaded models/libraries:
-    - CLIP text-image similarity against positive/negative quality prompts
-    - Laplacian variance (blur) via NumPy (higher variance → sharper image)
-    - Mean brightness (exposure) via NumPy (penalise very dark / very bright)
+    Combines six signals – all computed from already-loaded models/libraries:
+    - CLIP aesthetics:   text-image similarity for overall aesthetic appeal
+    - CLIP composition:  text-image similarity for framing and subject placement
+    - CLIP technical:    text-image similarity for sharpness, noise, and exposure
+    - Laplacian blur:    NumPy-based blur detection (Laplacian variance)
+    - Contrast:          luminance std dev (penalises flat/washed-out images)
+    - Exposure:          mean brightness (penalises very dark / very bright)
 
-    No new dependencies are required.
+    No new dependencies are required beyond what the embedding service already uses.
     """
     import numpy as np
 
@@ -275,34 +288,51 @@ async def compute_quality(file: UploadFile = File(...)) -> dict:
             detail=f"Cannot read image: {exc}",
         ) from exc
 
-    # ── CLIP quality score ──────────────────────────────────────────────────
+    # ── CLIP multi-dimensional aesthetic scoring ────────────────────────────
     try:
         clip_embedder = CLIPEmbedder.get_instance(
             model_name=settings.clip_model_name, pretrained=settings.clip_pretrained
         )
         img_vec = np.array(clip_embedder.embed([image])[0], dtype=np.float32)
 
-        good_prompts = [
-            "a sharp in-focus high quality photograph",
-            "a well-exposed bright clear photograph",
-        ]
-        bad_prompts = [
-            "a blurry out-of-focus photograph",
-            "a dark noisy low quality photo",
-        ]
+        # Dimension 1 – overall aesthetics
+        clip_aesthetics = _clip_dimension_score(
+            img_vec, clip_embedder,
+            positive=[
+                "a beautiful aesthetically pleasing photograph",
+                "a stunning artistic photo with emotional impact",
+            ],
+            negative=[
+                "an ugly snapshot with no artistic merit",
+                "a boring uninteresting photograph",
+            ],
+        )
 
-        good_sims = [
-            float(np.dot(img_vec, np.array(clip_embedder.embed_text(t), dtype=np.float32)))
-            for t in good_prompts
-        ]
-        bad_sims = [
-            float(np.dot(img_vec, np.array(clip_embedder.embed_text(t), dtype=np.float32)))
-            for t in bad_prompts
-        ]
+        # Dimension 2 – composition and framing
+        clip_composition = _clip_dimension_score(
+            img_vec, clip_embedder,
+            positive=[
+                "a well-composed photograph with clear subject and good framing",
+                "a photo with balanced composition and pleasing visual flow",
+            ],
+            negative=[
+                "a poorly framed photograph with distracting cluttered background",
+                "a photo where the main subject is cut off or poorly positioned",
+            ],
+        )
 
-        clip_diff = sum(good_sims) / len(good_sims) - sum(bad_sims) / len(bad_sims)
-        # CLIP cosine diffs cluster in roughly [-0.15, +0.15]; map to [0, 1]
-        clip_score = float(max(0.0, min(1.0, (clip_diff + 0.15) / 0.30)))
+        # Dimension 3 – technical quality (sharpness, noise, exposure)
+        clip_technical = _clip_dimension_score(
+            img_vec, clip_embedder,
+            positive=[
+                "a sharp in-focus high resolution photograph",
+                "a clean crisp photograph with excellent detail",
+            ],
+            negative=[
+                "a blurry out-of-focus grainy photograph",
+                "an overexposed washed-out or heavily underexposed dark photo",
+            ],
+        )
     except Exception as exc:
         logger.exception("CLIP quality scoring failed")
         raise HTTPException(
@@ -315,7 +345,7 @@ async def compute_quality(file: UploadFile = File(...)) -> dict:
         sample_size = 256
         gray = image.convert("L").resize((sample_size, sample_size), Image.LANCZOS)
         arr = np.array(gray, dtype=np.float64)
-        # Discrete Laplacian: shifted-array approximation
+        # Discrete Laplacian via shifted-array approximation
         lap = (
             np.roll(arr, 1, axis=0) + np.roll(arr, -1, axis=0)
             + np.roll(arr, 1, axis=1) + np.roll(arr, -1, axis=1)
@@ -327,7 +357,22 @@ async def compute_quality(file: UploadFile = File(...)) -> dict:
     except Exception:
         blur_score = 0.5
 
-    # ── Exposure score ──────────────────────────────────────────────────────
+    # ── Contrast score (luminance std dev) ─────────────────────────────────
+    # Low contrast = flat/washed-out; very high contrast = possibly over-processed.
+    # Sweet spot: std dev 40-80 out of 255 → normalised ~0.55-0.80 on a 0-255 scale.
+    try:
+        gray_arr = np.array(image.convert("L"), dtype=np.float64)
+        std_lum = float(gray_arr.std())
+        # Map: 0→0, 60→1.0, 120+→0.8 (slight penalty for extreme contrast)
+        if std_lum <= 60.0:
+            contrast_score = std_lum / 60.0
+        else:
+            contrast_score = max(0.5, 1.0 - (std_lum - 60.0) / 300.0)
+        contrast_score = float(max(0.0, min(1.0, contrast_score)))
+    except Exception:
+        contrast_score = 0.5
+
+    # ── Exposure score (mean brightness) ────────────────────────────────────
     try:
         gray_arr = np.array(image.convert("L"), dtype=np.float64)
         mean_brightness = float(gray_arr.mean()) / 255.0
@@ -337,13 +382,25 @@ async def compute_quality(file: UploadFile = File(...)) -> dict:
         exposure_score = 0.5
 
     # ── Composite ───────────────────────────────────────────────────────────
-    composite = 0.4 * clip_score + 0.4 * blur_score + 0.2 * exposure_score
+    # Weights chosen so aesthetic/composition signals dominate (50 %) and
+    # pixel-level signals (blur, contrast, exposure) supply grounding (50 %).
+    composite = (
+        0.30 * clip_aesthetics
+        + 0.20 * clip_composition
+        + 0.10 * clip_technical
+        + 0.25 * blur_score
+        + 0.10 * contrast_score
+        + 0.05 * exposure_score
+    )
 
     return {
         "score": round(composite, 4),
+        "clip_aesthetics": round(clip_aesthetics, 4),
+        "clip_composition": round(clip_composition, 4),
+        "clip_technical": round(clip_technical, 4),
         "blur_score": round(blur_score, 4),
+        "contrast_score": round(contrast_score, 4),
         "exposure_score": round(exposure_score, 4),
-        "clip_score": round(clip_score, 4),
     }
 
 

@@ -2062,6 +2062,53 @@ export async function indexPhotoLandmarks(userId: number, photoId: number): Prom
 
 // ---------- AI Quality Scoring ----------
 
+interface FaceBBoxNorm { x: number; y: number; width: number; height: number }
+
+/**
+ * Score how well a set of detected face bounding boxes are composed within
+ * the frame.  Returns a value in [0, 1], or null when no faces are present
+ * (so the caller can omit the signal entirely rather than penalising photos
+ * that have not yet been face-scanned or that intentionally contain no faces).
+ *
+ * Criteria:
+ *  - Face size relative to the image (ideal 5–45 % of image area)
+ *  - Proximity of the face centre to image edges (cropped faces score lower)
+ */
+function computeFaceCompositionScore(bboxes: FaceBBoxNorm[]): number | null {
+  const visible = bboxes.filter(b => b.width > 0 && b.height > 0);
+  if (visible.length === 0) return null;
+
+  // Use the largest face as the main subject
+  const main = visible.reduce((best, f) =>
+    f.width * f.height > best.width * best.height ? f : best
+  );
+
+  const area = main.width * main.height;
+
+  // Area score: ideal range 0.05–0.45 (5–45 % of image)
+  let areaScore: number;
+  if (area < 0.005) {
+    areaScore = 0.2;                                              // very distant
+  } else if (area < 0.05) {
+    areaScore = 0.2 + ((area - 0.005) / 0.045) * 0.7;           // ramp up
+  } else if (area <= 0.45) {
+    areaScore = 0.9;                                              // ideal
+  } else if (area <= 0.75) {
+    areaScore = 0.9 - ((area - 0.45) / 0.30) * 0.4;             // ramp down (very close)
+  } else {
+    areaScore = 0.5;                                              // face fills most of frame
+  }
+
+  // Position score: penalise face centres that are very close to any edge
+  const cx = main.x + main.width / 2;
+  const cy = main.y + main.height / 2;
+  const minEdgeDist = Math.min(cx, 1 - cx, cy, 1 - cy);
+  // Full score if centre is >0.15 from any edge; zero at the edge
+  const positionScore = Math.min(1.0, minEdgeDist / 0.15);
+
+  return areaScore * 0.65 + positionScore * 0.35;
+}
+
 export async function indexPhotoQuality(userId: number, photoId: number): Promise<void> {
   if (!ENABLE_QUALITY) return;
 
@@ -2109,12 +2156,38 @@ export async function indexPhotoQuality(userId: number, photoId: number): Promis
     }
 
     const result = await response.json() as { score: number };
+    let compositeScore = result.score;
+
+    // ── Optional face composition signal ───────────────────────────────────
+    // Query any already-detected non-ignored face bboxes for this photo.
+    // If face detection has not yet run the result is empty and the signal
+    // is skipped rather than penalising the photo.
+    try {
+      const faceRows = await dbAll<{ bbox: string }>(
+        db.select({ bbox: faces.bbox })
+          .from(faces)
+          .where(and(eq(faces.photo_id, photoId), eq(faces.ignored, false)))
+      );
+
+      const bboxes = faceRows.map(r => JSON.parse(r.bbox) as FaceBBoxNorm);
+      const faceScore = computeFaceCompositionScore(bboxes);
+
+      if (faceScore !== null) {
+        // Blend: base score 85 %, face composition 15 %
+        compositeScore = compositeScore * 0.85 + faceScore * 0.15;
+        console.log(`[quality] photo ${photoId} face composition score ${faceScore.toFixed(3)} → blended ${compositeScore.toFixed(3)}`);
+      }
+    } catch (faceErr) {
+      // Non-fatal: proceed with embedding-service score only
+      console.warn(`[quality] face composition query failed for photo ${photoId}:`, faceErr);
+    }
+
     await db
       .update(photos)
-      .set({ ai_quality_score: result.score })
+      .set({ ai_quality_score: compositeScore })
       .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)));
 
-    console.log(`[quality] photo ${photoId} scored ${result.score}`);
+    console.log(`[quality] photo ${photoId} final score ${compositeScore.toFixed(3)}`);
   } catch (err) {
     console.error(`Quality scoring failed for photo ${photoId}:`, err);
   } finally {
