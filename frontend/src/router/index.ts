@@ -20,7 +20,7 @@ const router = createRouter({
     { path: '/users/:id', name: 'user-detail', component: UserDetailView, meta: { permission: 'users.read' } },
     { path: '/roles', name: 'roles', component: RolesView, meta: { permission: 'roles.list' } },
     { path: '/profile', name: 'profile', component: ProfileView },
-    { path: '/photos', name: 'photos', component: PhotosView, meta: { permission: 'photos.view' } },
+    { path: '/photos', name: 'photos', component: PhotosView, meta: { permission: 'photos.view', fullWidth: true } },
     { path: '/people', name: 'people', component: PersonsView, meta: { permission: 'people.view' } },
     { path: '/data-management', name: 'data-management', component: DataManagementView, meta: { permission: 'data.manage' } },
   ],

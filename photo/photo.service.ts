@@ -556,6 +556,8 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
     id: number; user_id: number; filename: string; original_name: string;
     mime_type: string; size: number; hash: string | null; taken_at: string | null;
     created_at: string | null; curation_status: string | null;
+    latitude: number | null; longitude: number | null;
+    location_name: string | null; location_city: string | null; location_country: string | null;
   }>(
     db
       .select({
@@ -569,6 +571,11 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
         taken_at: photos.taken_at,
         created_at: photos.created_at,
         curation_status: photoCuration.status,
+        latitude: photos.latitude,
+        longitude: photos.longitude,
+        location_name: photos.location_name,
+        location_city: photos.location_city,
+        location_country: photos.location_country,
       })
       .from(photos)
       .leftJoin(
@@ -593,6 +600,11 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
       taken_at: r.taken_at ?? undefined,
       created_at: r.created_at ?? "",
       curation_status: (r.curation_status as CurationStatus) ?? "visible",
+      latitude: r.latitude ?? undefined,
+      longitude: r.longitude ?? undefined,
+      location_name: r.location_name ?? undefined,
+      location_city: r.location_city ?? undefined,
+      location_country: r.location_country ?? undefined,
     })),
   };
 }
@@ -1397,6 +1409,24 @@ export async function reindexPhotoLogic(
   if (ENABLE_LANDMARKS) {
     await indexPhotoLandmarks(userId, photoId);
   }
+  let lat = photo.latitude;
+  let lon = photo.longitude;
+
+  if (lat === null || lon === null) {
+    const filePath = path.join(UPLOAD_DIR, photo.filename);
+    const exifMeta = await getExifMetadata(filePath);
+    if (exifMeta.latitude !== null && exifMeta.longitude !== null) {
+      lat = exifMeta.latitude;
+      lon = exifMeta.longitude;
+      await dbExec(
+        db.update(photos).set({ latitude: lat, longitude: lon }).where(eq(photos.id, photoId))
+      );
+    }
+  }
+
+  if (lat !== null && lon !== null && !photo.location_name) {
+    await geocodePhotoLocation(userId, photoId, lat, lon);
+  }
   return { success: true };
 }
 
@@ -1419,8 +1449,9 @@ export async function reindexAllPhotosLogic(userId: number): Promise<{ count: nu
     throw new Error("Reindex already in progress");
   }
 
-  const allPhotos = await dbAll<{ id: number }>(
-    db.select({ id: photos.id }).from(photos).where(eq(photos.user_id, userId))
+  const allPhotos = await dbAll<{ id: number; filename: string; latitude: number | null; longitude: number | null; location_name: string | null }>(
+    db.select({ id: photos.id, filename: photos.filename, latitude: photos.latitude, longitude: photos.longitude, location_name: photos.location_name })
+      .from(photos).where(eq(photos.user_id, userId))
   );
 
   const state: ReindexState = { inProgress: true, total: allPhotos.length, processed: 0, errors: 0 };
@@ -1438,6 +1469,22 @@ export async function reindexAllPhotosLogic(userId: number): Promise<{ count: nu
         await indexPhotoEmbeddings(userId, p.id, true);
         if (ENABLE_LANDMARKS) {
           await indexPhotoLandmarks(userId, p.id);
+        }
+        let lat = p.latitude;
+        let lon = p.longitude;
+        if (lat === null || lon === null) {
+          const filePath = path.join(UPLOAD_DIR, p.filename);
+          const exifMeta = await getExifMetadata(filePath);
+          if (exifMeta.latitude !== null && exifMeta.longitude !== null) {
+            lat = exifMeta.latitude;
+            lon = exifMeta.longitude;
+            await dbExec(
+              db.update(photos).set({ latitude: lat, longitude: lon }).where(eq(photos.id, p.id))
+            );
+          }
+        }
+        if (lat !== null && lon !== null && !p.location_name) {
+          await geocodePhotoLocation(userId, p.id, lat, lon);
         }
         state.processed++;
       } catch (err: any) {
@@ -2091,12 +2138,20 @@ export async function indexPhotoLandmarks(userId: number, photoId: number): Prom
   }
 }
 
+export interface PhotoLocation {
+  name?: string;
+  city?: string;
+  country?: string;
+}
+
 export async function getLandmarksForPhotoLogic(
   userId: number,
   photoId: number
-): Promise<{ landmarks: LandmarkItem[] }> {
-  const photo = await dbFirst<{ id: number }>(
-    db.select({ id: photos.id }).from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+): Promise<{ landmarks: LandmarkItem[]; location?: PhotoLocation }> {
+  const photo = await dbFirst<{ id: number; location_name: string | null; location_city: string | null; location_country: string | null }>(
+    db.select({ id: photos.id, location_name: photos.location_name, location_city: photos.location_city, location_country: photos.location_country })
+      .from(photos)
+      .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
   );
   if (!photo) throw new Error("Photo not found");
 
@@ -2107,6 +2162,8 @@ export async function getLandmarksForPhotoLogic(
       .orderBy(sql`${photoLandmarks.confidence} DESC`)
   );
 
+  const hasLocation = photo.location_name || photo.location_city || photo.location_country;
+
   return {
     landmarks: rows.map(r => ({
       id: r.id,
@@ -2114,6 +2171,11 @@ export async function getLandmarksForPhotoLogic(
       confidence: r.confidence,
       bbox: JSON.parse(r.bbox) as LandmarkBBox,
     })),
+    location: hasLocation ? {
+      name: photo.location_name ?? undefined,
+      city: photo.location_city ?? undefined,
+      country: photo.location_country ?? undefined,
+    } : undefined,
   };
 }
 

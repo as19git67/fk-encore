@@ -13,6 +13,11 @@ export interface Photo {
   taken_at?: string
   created_at: string
   curation_status: CurationStatus
+  latitude?: number
+  longitude?: number
+  location_name?: string
+  location_city?: string
+  location_country?: string
 }
 
 export interface ListPhotosResponse {
@@ -236,4 +241,25 @@ export function searchPhotos(query: string, limit: number = 20, threshold: numbe
     method: 'POST',
     body: JSON.stringify({ query, limit, threshold })
   })
+}
+
+// ---------- Landmarks ----------
+
+export interface LandmarkBBox { x: number; y: number; width: number; height: number }
+
+export interface LandmarkItem {
+  id: number
+  label: string
+  confidence: number
+  bbox: LandmarkBBox
+}
+
+export interface PhotoLocation {
+  name?: string
+  city?: string
+  country?: string
+}
+
+export function getPhotoLandmarks(id: number) {
+  return apiFetch<{ landmarks: LandmarkItem[]; location?: PhotoLocation }>(`/photos/${id}/landmarks`)
 }
