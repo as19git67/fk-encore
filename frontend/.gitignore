@@ -27,3 +27,4 @@ src/**/*.d.ts
 *.sln
 *.sw?
 /storybook-static/**/*
+/screenshots/*

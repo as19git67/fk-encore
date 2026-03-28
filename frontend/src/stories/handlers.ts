@@ -126,4 +126,8 @@ export const defaultHandlers = [
   http.post('/api/faces/:id/ignore', () => HttpResponse.json({ success: true })),
   http.post('/api/persons/:id/ignore', () => HttpResponse.json({ success: true })),
   http.get('/api/photos/:id/faces', () => HttpResponse.json({ faces: [] })),
+  http.get('/api/photos/:id/landmarks', () =>
+    HttpResponse.json({ landmarks: [], location: undefined }),
+  ),
+  http.post('/api/photos/:id/reindex', () => HttpResponse.json({ success: true })),
 ]
