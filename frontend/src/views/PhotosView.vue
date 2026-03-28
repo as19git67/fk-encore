@@ -341,6 +341,9 @@ async function loadPhotos() {
     await nextTick()
     setupObservers()
     updateColumnCount()
+    // Select first visible photo on initial load
+    const firstVisible = photos.value.findIndex(p => !hiddenByStack.value.has(p.id))
+    selectedIndex.value = firstVisible >= 0 ? firstVisible : (photos.value.length > 0 ? 0 : -1)
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Fotos'
     loading.value = false
@@ -476,12 +479,41 @@ async function handleToggleFavorite(id: number, currentStatus: CurationStatus) {
   }
 }
 
+function selectAfterGroup(group: PhotoGroup | null) {
+  if (!group || photos.value.length === 0) {
+    selectedIndex.value = photos.value.length > 0 ? 0 : -1
+    return
+  }
+  const groupPhotoIds = new Set(group.photo_ids)
+  // First visible photo from the group that is still in the grid
+  const visibleGroupItems = photos.value
+    .map((p, i) => ({ photo: p, index: i }))
+    .filter(({ photo }) => groupPhotoIds.has(photo.id) && !hiddenByStack.value.has(photo.id))
+  if (visibleGroupItems.length > 0) {
+    selectedIndex.value = visibleGroupItems[0].index
+    scrollToPhoto(visibleGroupItems[0].photo.id)
+    return
+  }
+  // All group photos gone — select the photo that follows the group's last position
+  const allGroupItems = photos.value
+    .map((p, i) => ({ photo: p, index: i }))
+    .filter(({ photo }) => groupPhotoIds.has(photo.id))
+  const maxIdx = allGroupItems.length > 0 ? Math.max(...allGroupItems.map(gi => gi.index)) : -1
+  for (let i = maxIdx + 1; i < photos.value.length; i++) {
+    if (!hiddenByStack.value.has(photos.value[i].id)) {
+      selectedIndex.value = i
+      scrollToPhoto(photos.value[i].id)
+      return
+    }
+  }
+  const firstVisible = photos.value.findIndex(p => !hiddenByStack.value.has(p.id))
+  selectedIndex.value = firstVisible >= 0 ? firstVisible : 0
+}
+
 function handleGroupClose() {
-  const coverId = activeGroup.value?.cover_photo_id
+  const group = activeGroup.value
   activeGroup.value = null
-  reloadPhotosInPlace().then(() => {
-    if (coverId) scrollToPhoto(coverId)
-  })
+  reloadPhotosInPlace().then(() => selectAfterGroup(group))
 }
 
 function handleGroupNext(reviewedGroupId: number) {
@@ -490,11 +522,9 @@ function handleGroupNext(reviewedGroupId: number) {
     activeGroup.value = next
     reloadPhotosInPlace()
   } else {
-    const coverId = activeGroup.value?.cover_photo_id
+    const group = activeGroup.value
     activeGroup.value = null
-    reloadPhotosInPlace().then(() => {
-      if (coverId) scrollToPhoto(coverId)
-    })
+    reloadPhotosInPlace().then(() => selectAfterGroup(group))
   }
 }
 
@@ -831,7 +861,6 @@ onUnmounted(() => {
       <aside class="details-sidebar" v-if="selectedPhoto">
         <div class="sidebar-header">
           <span class="sidebar-title">Details</span>
-          <Button icon="pi pi-times" text rounded size="small" @click="selectedIndex = -1" />
         </div>
         <div class="sidebar-scroll">
           <div class="preview-container" @click="isFullscreen = true" title="Vollbild">
@@ -879,10 +908,11 @@ onUnmounted(() => {
             <div class="sidebar-divider" />
             <div class="sidebar-section">
               <div class="section-label"><i class="pi pi-map-marker" /> Ort</div>
-              <div v-if="selectedPhoto.location_city || selectedPhoto.location_name" class="location-pill">
-                <template v-if="selectedPhoto.location_city && selectedPhoto.location_country">{{ selectedPhoto.location_city }}, {{ selectedPhoto.location_country }}</template>
-                <template v-else-if="selectedPhoto.location_city">{{ selectedPhoto.location_city }}</template>
-                <template v-else>{{ selectedPhoto.location_name }}</template>
+              <div v-if="selectedPhoto.location_name || selectedPhoto.location_city" class="location-pill">
+                <template v-if="selectedPhoto.location_name && selectedPhoto.location_country">{{ selectedPhoto.location_name }}, {{ selectedPhoto.location_country }}</template>
+                <template v-else-if="selectedPhoto.location_name">{{ selectedPhoto.location_name }}</template>
+                <template v-else-if="selectedPhoto.location_city && selectedPhoto.location_country">{{ selectedPhoto.location_city }}, {{ selectedPhoto.location_country }}</template>
+                <template v-else>{{ selectedPhoto.location_city }}</template>
               </div>
               <div v-if="loadingLandmarks" class="loading-row"><i class="pi pi-spin pi-spinner" /> Gebäude werden erkannt…</div>
               <div v-else-if="detectedLandmarks.length > 0" class="landmark-chips">
