@@ -26,3 +26,4 @@ src/**/*.d.ts
 *.njsproj
 *.sln
 *.sw?
+/storybook-static/**/*

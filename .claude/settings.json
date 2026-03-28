@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "file=$(jq -r '.tool_input.file_path // .tool_response.filePath'); echo \"$file\" | grep -q 'frontend/src/.*\\.vue$' && echo 'Frontend-Datei geändert – führe '\"'\"'npm run screenshot'\"'\"' in frontend/ aus, um Screenshots zu aktualisieren.' || true"
+          }
+        ]
+      }
+    ]
+  }
+}
