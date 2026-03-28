@@ -19,6 +19,10 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 MODEL_ID = os.environ.get("MODEL_ID", "IDEA-Research/grounding-dino-base")
 DEFAULT_THRESHOLD = float(os.environ.get("LANDMARK_THRESHOLD", "0.35"))
 
+# Grounding DINO's BERT encoder has a hard limit of 256 tokens.
+# Labels are split into batches that each fit within MAX_TOKENS_PER_BATCH tokens.
+MAX_TOKENS_PER_BATCH = 200  # conservative limit, leaving room for special tokens
+
 # Default prompt covers common landmark and architectural categories.
 # Entries are separated by " . " as required by Grounding DINO.
 DEFAULT_CLASSES = (
@@ -75,40 +79,36 @@ model.eval()
 logger.info("Grounding DINO model loaded.")
 
 
-@app.get("/health")
-async def health() -> dict:
-    return {"status": "ok", "device": str(DEVICE), "model": MODEL_ID}
-
-
-@app.post("/detect-landmarks")
-async def detect_landmarks(
-    file: UploadFile = File(...),
-    classes: str = Form(DEFAULT_CLASSES),
-    threshold: float = Form(DEFAULT_THRESHOLD),
-) -> dict:
-    """Detect landmarks in an uploaded image and return bounding boxes.
-
-    Response format:
-    {
-        "landmarks": [
-            {
-                "label": "church",
-                "confidence": 0.87,
-                "bbox": {"x": 0.1, "y": 0.05, "width": 0.3, "height": 0.6}
-            }
-        ],
-        "width": 1920,
-        "height": 1080
-    }
-
-    All bbox values are normalized to [0, 1] relative to image dimensions,
-    matching the same format used by the InsightFace face detection service.
+def split_classes_into_batches(classes: str) -> list[str]:
     """
-    content = await file.read()
-    image = Image.open(io.BytesIO(content)).convert("RGB")
-    width, height = image.size
+    Split a '. '-separated class string into batches that each fit within
+    MAX_TOKENS_PER_BATCH tokens (Grounding DINO BERT limit is 256).
+    """
+    labels = [l.strip() for l in classes.split(".") if l.strip()]
+    batches: list[str] = []
+    current: list[str] = []
+    current_tokens = 0
 
-    inputs = processor(images=image, text=classes, return_tensors="pt").to(DEVICE)
+    for label in labels:
+        # +2 for the ' . ' separator tokens (approximate)
+        token_count = len(processor.tokenizer.tokenize(label)) + 2
+        if current and current_tokens + token_count > MAX_TOKENS_PER_BATCH:
+            batches.append(" . ".join(current))
+            current = []
+            current_tokens = 0
+        current.append(label)
+        current_tokens += token_count
+
+    if current:
+        batches.append(" . ".join(current))
+
+    return batches
+
+
+def run_inference(image: Image.Image, text: str, threshold: float) -> list[dict]:
+    """Run a single Grounding DINO inference pass and return raw landmark dicts."""
+    width, height = image.size
+    inputs = processor(images=image, text=text, return_tensors="pt").to(DEVICE)
 
     with torch.no_grad():
         outputs = model(**inputs)
@@ -141,5 +141,52 @@ async def detect_landmarks(
                 },
             }
         )
+    return landmarks
 
-    return {"landmarks": landmarks, "width": width, "height": height}
+
+@app.get("/health")
+async def health() -> dict:
+    return {"status": "ok", "device": str(DEVICE), "model": MODEL_ID}
+
+
+@app.post("/detect-landmarks")
+async def detect_landmarks(
+    file: UploadFile = File(...),
+    classes: str = Form(DEFAULT_CLASSES),
+    threshold: float = Form(DEFAULT_THRESHOLD),
+) -> dict:
+    """Detect landmarks in an uploaded image and return bounding boxes.
+
+    The class list is automatically split into token-safe batches to stay within
+    Grounding DINO's 256-token BERT encoder limit. Results from all batches are merged.
+
+    Response format:
+    {
+        "landmarks": [
+            {
+                "label": "Kirche",
+                "confidence": 0.87,
+                "bbox": {"x": 0.1, "y": 0.05, "width": 0.3, "height": 0.6}
+            }
+        ],
+        "width": 1920,
+        "height": 1080
+    }
+
+    All bbox values are normalized to [0, 1] relative to image dimensions.
+    """
+    content = await file.read()
+    image = Image.open(io.BytesIO(content)).convert("RGB")
+    width, height = image.size
+
+    batches = split_classes_into_batches(classes)
+    logger.debug("Split %d labels into %d batches", len(classes.split(".")), len(batches))
+
+    all_landmarks: list[dict] = []
+    for batch_text in batches:
+        all_landmarks.extend(run_inference(image, batch_text, threshold))
+
+    # Sort by confidence descending
+    all_landmarks.sort(key=lambda x: x["confidence"], reverse=True)
+
+    return {"landmarks": all_landmarks, "width": width, "height": height}
