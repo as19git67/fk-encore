@@ -22,10 +22,50 @@ DEFAULT_THRESHOLD = float(os.environ.get("LANDMARK_THRESHOLD", "0.35"))
 # Default prompt covers common landmark and architectural categories.
 # Entries are separated by " . " as required by Grounding DINO.
 DEFAULT_CLASSES = (
-    "church . cathedral . castle . mosque . temple . synagogue . "
-    "tower . bridge . monument . statue . lighthouse . palace . "
-    "ruins . museum . stadium . historic building . famous landmark . "
-    "windmill . city hall . opera house . parliament building"
+    # Religiöse Bauwerke
+    "Kirche . Kathedrale . Basilika . Kapelle . Kloster . Abtei . Stift . "
+    "Moschee . Tempel . Synagoge . Pagode . Schrein . Minarett . Baptisterium . "
+    # Burgen, Schlösser, Paläste
+    "Schloss . Burg . Festung . Zitadelle . Palast . Residenz . Ruine . Bergfried . "
+    "Herrenhaus . Villa . Landsitz . Wasserschloss . "
+    # Denkmäler & Skulpturen
+    "Denkmal . Statue . Obelisk . Triumphbogen . Gedenkstätte . Skulptur . "
+    "Siegessäule . Ehrensäule . Kriegerdenkmal . Ehrenmal . Gedenkstein . "
+    # Türme & Hochbauten
+    "Turm . Leuchtturm . Fernsehturm . Aussichtsturm . Wolkenkratzer . "
+    "Wohnturm . Bergfried . Wasserturm . Glockenturm . Campanile . "
+    # Brücken & Verkehr
+    "Brücke . Aquädukt . Viadukt . Hängebrücke . Steinbrücke . "
+    "Hafen . Bahnhof . Flughafen . Kanal . Schleuse . "
+    # Kultur & Bildung
+    "Museum . Opernhaus . Theater . Philharmonie . Konzerthalle . "
+    "Bibliothek . Kunstgalerie . Amphitheater . Universität . Hochschule . "
+    "Kino . Planetarium . Observatorium . Sternwarte . "
+    # Historische Stätten
+    "Ausgrabungsstätte . Archäologische Stätte . Megalith . Forum . "
+    "Nekropole . Mausoleum . Grabanlage . Katakomben . Freilichtmuseum . "
+    # Städtische Strukturen
+    "Rathaus . Parlamentsgebäude . Marktplatz . Stadttor . Stadtmauer . "
+    "Brunnen . Promenade . Altstadt . Fachwerkhäuser . Dorfplatz . "
+    "Kurhaus . Kurpark . Spielbank . Grand Hotel . "
+    # Natursehenswürdigkeiten
+    "Wasserfall . Kaskade . Gletscher . Vulkan . Schlucht . Klamm . "
+    "Fjord . Klippe . Höhle . Tropfsteinhöhle . Eishöhle . "
+    "Felsformation . Felsentor . natürlicher Bogen . Geysir . heiße Quelle . "
+    "Strand . See . Fluss . Stausee . Talsperre . Delta . Lagune . Bucht . Kap . "
+    "Berggipfel . Bergpass . Bergkamm . Gipfelkreuz . Düne . "
+    # Parks, Gärten & Freizeitanlagen
+    "Park . botanischer Garten . Nationalpark . Schlosspark . Rosengarten . "
+    "Tierpark . Zoo . Aquarium . Wildpark . Freizeitpark . "
+    "Weinberg . Weingut . Obstplantage . "
+    # Bergbau & Industrie
+    "Bergwerk . Industriedenkmal . Fabrik . Zeughaus . Mühle . Wassermühle . "
+    # Sport & Freizeit
+    "Stadion . Olympiastadion . Arena . Rennstrecke . Skigebiet . "
+    "Seilbahn . Bergstation . Sprungschanze . "
+    # Sonstiges
+    "Windmühle . Pyramide . Welterbe . Aussichtspunkt . Panoramapunkt . "
+    "Hafenanlage . Werft . Fischerort . Leuchtturm . Pier . Steg"
 )
 
 logger.info("Loading Grounding DINO model '%s' on %s ...", MODEL_ID, DEVICE)
