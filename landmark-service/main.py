@@ -79,6 +79,15 @@ model.eval()
 logger.info("Grounding DINO model loaded.")
 
 
+def _estimate_tokens(label: str) -> int:
+    """
+    Estimate BERT subword token count without calling the tokenizer.
+    German compound words are often split into 2-3 subwords each.
+    Using 3 tokens/word + 2 for the ' . ' separator is a safe overestimate.
+    """
+    return len(label.split()) * 3 + 2
+
+
 def split_classes_into_batches(classes: str) -> list[str]:
     """
     Split a '. '-separated class string into batches that each fit within
@@ -90,8 +99,7 @@ def split_classes_into_batches(classes: str) -> list[str]:
     current_tokens = 0
 
     for label in labels:
-        # +2 for the ' . ' separator tokens (approximate)
-        token_count = len(processor.tokenizer.tokenize(label)) + 2
+        token_count = _estimate_tokens(label)
         if current and current_tokens + token_count > MAX_TOKENS_PER_BATCH:
             batches.append(" . ".join(current))
             current = []
