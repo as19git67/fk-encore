@@ -490,8 +490,9 @@ function selectAfterGroup(group: PhotoGroup | null) {
     .map((p, i) => ({ photo: p, index: i }))
     .filter(({ photo }) => groupPhotoIds.has(photo.id) && !hiddenByStack.value.has(photo.id))
   if (visibleGroupItems.length > 0) {
-    selectedIndex.value = visibleGroupItems[0].index
-    scrollToPhoto(visibleGroupItems[0].photo.id)
+    const first = visibleGroupItems[0]!
+    selectedIndex.value = first.index
+    scrollToPhoto(first.photo.id)
     return
   }
   // All group photos gone — select the photo that follows the group's last position
@@ -500,9 +501,10 @@ function selectAfterGroup(group: PhotoGroup | null) {
     .filter(({ photo }) => groupPhotoIds.has(photo.id))
   const maxIdx = allGroupItems.length > 0 ? Math.max(...allGroupItems.map(gi => gi.index)) : -1
   for (let i = maxIdx + 1; i < photos.value.length; i++) {
-    if (!hiddenByStack.value.has(photos.value[i].id)) {
+    const photo = photos.value[i]!
+    if (!hiddenByStack.value.has(photo.id)) {
       selectedIndex.value = i
-      scrollToPhoto(photos.value[i].id)
+      scrollToPhoto(photo.id)
       return
     }
   }
