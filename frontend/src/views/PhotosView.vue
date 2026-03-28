@@ -627,7 +627,7 @@ function handleKeydown(e: KeyboardEvent) {
   } else if (e.key === ' ') {
     if (selectedIndex.value !== -1) { isFullscreen.value = !isFullscreen.value; e.preventDefault() }
   } else if (e.key === 'Enter') {
-    if (selectedIndex.value !== -1) isFullscreen.value = true
+    if (selectedIndex.value !== -1 && document.activeElement?.tagName !== 'INPUT') isFullscreen.value = true
   }
 }
 
