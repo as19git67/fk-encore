@@ -25,7 +25,7 @@ COPY package.json package-lock.json ./
 RUN npm install --omit=dev --omit=optional
 
 COPY frontend/package.json frontend/package-lock.json frontend/
-RUN npm --prefix frontend ci
+RUN npm --prefix frontend install --legacy-peer-deps
 
 COPY . .
 
@@ -39,7 +39,7 @@ ENV DB_TYPE=postgres \
     POSTGRES_HOST=localhost \
     POSTGRES_PORT=5432 \
     POSTGRES_USER=postgres \
-    POSTGRES_PASSWORD=postgres \
+    POSTGRES_PASSWORD= \
     POSTGRES_DATABASE=fk_encore \
     PHOTO_UPLOAD_DIR=/mnt/data/photos \
     PORT=8080 \
