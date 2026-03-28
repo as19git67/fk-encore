@@ -4,6 +4,8 @@ import crypto from "crypto";
 import exifr from "exifr";
 import { exiftool } from "exiftool-vendored";
 import { eq, and, or, sql, inArray, ilike } from "drizzle-orm";
+import { enqueuePhotoScan } from "./scan-queue";
+import { triggerWorkers } from "./scan-worker";
 import db from "../db/database";
 import { dbFirst, dbAll, dbExec, dbInsertReturning } from '../db/adapter';
 import type { IncomingMessage } from "http";
@@ -424,31 +426,15 @@ export async function uploadPhotoStream(
     }).returning()
   );
 
-  if (ENABLE_LOCAL_FACES) {
-    // Run face detection in background
-    indexPhotoFaces(userId, row!.id).catch(err => {
-        console.error("Face indexing error:", err);
-    });
-  }
-
-  // Run embedding generation in background, then re-group similar photos
-  indexPhotoEmbeddings(userId, row!.id)
-    .then(() => findPhotoGroupsLogic(userId))
-    .catch(err => {
-      console.error("Embedding/grouping error:", err);
-    });
+  // Add to scan queue and wake workers — upload returns immediately
+  enqueuePhotoScan(row!.id, userId).then(() => triggerWorkers()).catch(err => {
+    console.error("Enqueue error:", err);
+  });
 
   // Reverse-geocode GPS coordinates in background
   if (exifMeta.latitude !== null && exifMeta.longitude !== null) {
     geocodePhotoLocation(userId, row!.id, exifMeta.latitude, exifMeta.longitude).catch(err => {
       console.error("Geocoding error:", err);
-    });
-  }
-
-  // Run landmark detection in background
-  if (ENABLE_LANDMARKS) {
-    indexPhotoLandmarks(userId, row!.id).catch(err => {
-      console.error("Landmark indexing error:", err);
     });
   }
 
@@ -508,31 +494,15 @@ export async function uploadPhotoLogic(
     }).returning()
   );
 
-  if (ENABLE_LOCAL_FACES) {
-    // Run face detection in background
-    indexPhotoFaces(userId, row2!.id).catch(err => {
-        console.error("Face indexing error:", err);
-    });
-  }
-
-  // Run embedding generation in background, then re-group similar photos
-  indexPhotoEmbeddings(userId, row2!.id)
-    .then(() => findPhotoGroupsLogic(userId))
-    .catch(err => {
-      console.error("Embedding/grouping error:", err);
-    });
+  // Add to scan queue and wake workers — upload returns immediately
+  enqueuePhotoScan(row2!.id, userId).then(() => triggerWorkers()).catch(err => {
+    console.error("Enqueue error:", err);
+  });
 
   // Reverse-geocode GPS coordinates in background
   if (exifMeta2.latitude !== null && exifMeta2.longitude !== null) {
     geocodePhotoLocation(userId, row2!.id, exifMeta2.latitude, exifMeta2.longitude).catch(err => {
       console.error("Geocoding error:", err);
-    });
-  }
-
-  // Run landmark detection in background
-  if (ENABLE_LANDMARKS) {
-    indexPhotoLandmarks(userId, row2!.id).catch(err => {
-      console.error("Landmark indexing error:", err);
     });
   }
 
@@ -1430,85 +1400,33 @@ export async function reindexPhotoLogic(
   return { success: true };
 }
 
-// In-memory reindex progress per user
-interface ReindexState {
-  inProgress: boolean;
-  total: number;
-  processed: number;
-  errors: number;
-}
-const reindexStateMap = new Map<number, ReindexState>();
 
-export function getReindexStatusForUser(userId: number): ReindexState {
-  return reindexStateMap.get(userId) ?? { inProgress: false, total: 0, processed: 0, errors: 0 };
+// ── Scan Queue API helpers ───────────────────────────────────────────────────
+
+import { getQueueStatus, requeueFailed, requeueForRescan } from "./scan-queue";
+
+export async function getScanQueueStatusLogic(userId: number) {
+  return getQueueStatus(userId);
 }
 
-export async function reindexAllPhotosLogic(userId: number): Promise<{ count: number }> {
-  const existing = reindexStateMap.get(userId);
-  if (existing?.inProgress) {
-    throw new Error("Reindex already in progress");
-  }
-
-  const allPhotos = await dbAll<{ id: number; filename: string; latitude: number | null; longitude: number | null; location_name: string | null }>(
-    db.select({ id: photos.id, filename: photos.filename, latitude: photos.latitude, longitude: photos.longitude, location_name: photos.location_name })
-      .from(photos).where(eq(photos.user_id, userId))
-  );
-
-  const state: ReindexState = { inProgress: true, total: allPhotos.length, processed: 0, errors: 0 };
-  reindexStateMap.set(userId, state);
-
-  console.log(`Starting re-index for ${allPhotos.length} photos for user ${userId}`);
-
-  // Process sequentially in background to avoid race conditions
-  // (concurrent processing deletes all faces before new ones are created,
-  //  breaking person matching)
-  (async () => {
-    for (const p of allPhotos) {
-      try {
-        await indexPhotoFaces(userId, p.id, false);
-        await indexPhotoEmbeddings(userId, p.id, true);
-        if (ENABLE_LANDMARKS) {
-          await indexPhotoLandmarks(userId, p.id);
-        }
-        let lat = p.latitude;
-        let lon = p.longitude;
-        if (lat === null || lon === null) {
-          const filePath = path.join(UPLOAD_DIR, p.filename);
-          const exifMeta = await getExifMetadata(filePath);
-          if (exifMeta.latitude !== null && exifMeta.longitude !== null) {
-            lat = exifMeta.latitude;
-            lon = exifMeta.longitude;
-            await dbExec(
-              db.update(photos).set({ latitude: lat, longitude: lon }).where(eq(photos.id, p.id))
-            );
-          }
-        }
-        if (lat !== null && lon !== null && !p.location_name) {
-          await geocodePhotoLocation(userId, p.id, lat, lon);
-        }
-        state.processed++;
-      } catch (err: any) {
-        state.errors++;
-        if (err.message && err.message.includes("FACE_MODELS_NOT_LOADED")) {
-          console.error(`Skipping reindex for photo ${p.id}: Modelle nicht geladen.`);
-        } else {
-          console.error(`Error reindexing photo ${p.id}:`, err);
-        }
-      }
-    }
-    // Clean up orphaned persons (persons with 0 associated faces)
-    cleanupOrphanedPersons(userId);
-    state.inProgress = false;
-    console.log(`Re-index complete for user ${userId}: ${state.processed} processed, ${state.errors} errors, orphaned persons cleaned up.`);
-  })();
-
-  return { count: allPhotos.length };
+export async function rescanPhotosLogic(userId: number, force: boolean): Promise<{ queued: number }> {
+  const queued = await requeueForRescan(userId, force);
+  triggerWorkers();
+  return { queued };
 }
+
+export async function retryFailedScansLogic(userId: number): Promise<{ retried: number }> {
+  const retried = await requeueFailed(userId);
+  triggerWorkers();
+  return { retried };
+}
+
+// ── Orphaned person cleanup ──────────────────────────────────────────────────
 
 /**
  * Remove persons that have no associated faces (orphaned after re-indexing).
  */
-async function cleanupOrphanedPersons(userId: number): Promise<void> {
+export async function cleanupOrphanedPersons(userId: number): Promise<void> {
   const deleted = await dbExec(
     db.delete(persons)
       .where(

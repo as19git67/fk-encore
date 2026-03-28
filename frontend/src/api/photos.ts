@@ -140,21 +140,33 @@ export function assignFaceToPerson(faceId: number, personId: number) {
   })
 }
 
-export function reindexAllPhotos() {
-  return apiFetch<{ count: number }>('/photos/reindex-all', {
-    method: 'POST'
+export interface ScanQueueServiceStatus {
+  service: 'embedding' | 'face_detection' | 'landmark'
+  pending: number
+  processing: number
+  failed: number
+  done: number
+}
+
+export interface ScanQueueStatus {
+  services: ScanQueueServiceStatus[]
+}
+
+export function getScanQueueStatus() {
+  return apiFetch<ScanQueueStatus>('/photos/scan-queue/status')
+}
+
+export function rescanPhotos(force: boolean) {
+  return apiFetch<{ queued: number }>('/photos/rescan', {
+    method: 'POST',
+    body: JSON.stringify({ force })
   })
 }
 
-export interface ReindexStatus {
-  inProgress: boolean
-  total: number
-  processed: number
-  errors: number
-}
-
-export function getReindexStatus() {
-  return apiFetch<ReindexStatus>('/photos/reindex-status')
+export function retryFailedScans() {
+  return apiFetch<{ retried: number }>('/photos/scan-queue/retry-failed', {
+    method: 'POST'
+  })
 }
 
 export function reindexPhoto(id: number) {
