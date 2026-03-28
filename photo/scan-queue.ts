@@ -166,24 +166,20 @@ export async function requeueForRescan(userId: number, force: boolean): Promise<
 
     for (const photoId of photoIds) {
       if (force) {
-        // Upsert: update existing pending/processing/failed rows, insert otherwise
-        await db.execute(sql`
-          INSERT INTO photo_scan_queue (photo_id, user_id, service, status, force, enqueued_at, started_at, finished_at, error_msg, attempts)
-          VALUES (${photoId}, ${userId}, ${service}, 'pending', true, NOW(), NULL, NULL, NULL, 0)
-          ON CONFLICT ON CONSTRAINT uq_active_scan DO UPDATE
-            SET force = true
-        `);
-        // Also reset failed rows
-        await db
+        // Reset any existing row (pending/processing/failed/done) to pending with force=true
+        const updated = await db
           .update(photoScanQueue)
           .set({ status: "pending", force: true, error_msg: null, started_at: null, finished_at: null, attempts: 0 })
           .where(
-            and(
-              eq(photoScanQueue.photo_id, photoId),
-              eq(photoScanQueue.service, service),
-              eq(photoScanQueue.status, "failed"),
-            ),
+            and(eq(photoScanQueue.photo_id, photoId), eq(photoScanQueue.service, service)),
           );
+        // No existing row → insert fresh
+        if (((updated as any).rowCount ?? 0) === 0) {
+          await db
+            .insert(photoScanQueue)
+            .values({ photo_id: photoId, user_id: userId, service, force: true })
+            .onConflictDoNothing();
+        }
       } else {
         await db
           .insert(photoScanQueue)
