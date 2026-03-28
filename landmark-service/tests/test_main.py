@@ -223,9 +223,12 @@ class TestDetectLandmarksEndpoint:
         assert body["height"] == 240
 
     def test_detections_count_matches_model_output(self):
+        # Use a short custom class string so only one batch is needed,
+        # making the expected count predictable (= 2 from _DEFAULT_DETECTIONS).
         files = {"file": ("photo.jpg", _make_image_bytes(), "image/jpeg")}
-        response = client.post("/detect-landmarks", files=files)
-        # _DEFAULT_DETECTIONS has 2 results
+        data = {"classes": "church . tower"}
+        response = client.post("/detect-landmarks", files=files, data=data)
+        # _DEFAULT_DETECTIONS has 2 results and one batch → 2 landmarks
         assert len(response.json()["landmarks"]) == 2
 
     def test_no_detections_returns_empty_list(self):
@@ -273,7 +276,7 @@ class TestDetectLandmarksEndpoint:
             return_value=single,
         ):
             files = {"file": ("photo.jpg", _make_image_bytes(width=200, height=150), "image/jpeg")}
-            response = client.post("/detect-landmarks", files=files)
+            response = client.post("/detect-landmarks", files=files, data={"classes": "bridge"})
 
         body = response.json()
         assert len(body["landmarks"]) == 1
