@@ -218,11 +218,22 @@ async function loadData() {
       })
     if (selectedPerson.value) {
       const still = persons.value.find(p => p.id === selectedPerson.value!.id)
-      if (still) await selectPerson(still)
-      else if (persons.value.length > 0) await selectPerson(persons.value[0]!)
-      else selectedPerson.value = null
+      if (still) {
+        await selectPerson(still)
+        await nextTick()
+        const idx = persons.value.findIndex(p => p.id === still.id)
+        getPersonEntries()[Math.max(0, idx)]?.focus()
+      } else if (persons.value.length > 0) {
+        await selectPerson(persons.value[0]!)
+        await nextTick()
+        getPersonEntries()[0]?.focus()
+      } else {
+        selectedPerson.value = null
+      }
     } else if (persons.value.length > 0) {
       await selectPerson(persons.value[0]!)
+      await nextTick()
+      getPersonEntries()[0]?.focus()
     }
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Personen'
@@ -388,15 +399,27 @@ function validBbox(bbox: FaceBBox | undefined | null): FaceBBox | null {
   return bbox
 }
 
+// Returns zoom factor for a given face bbox
+function thumbnailZoom(bbox: FaceBBox | undefined | null): number {
+  const b = validBbox(bbox)
+  if (!b) return 1
+  return Math.min(4, Math.max(1.5, 0.4 / Math.max(b.width, b.height)))
+}
+
+// imageStyle for <img> that centers the face via object-position + scale transform.
+// HeicImage reads object-position from getComputedStyle, so the slot overlay stays in sync.
 function thumbnailImageStyle(bbox: FaceBBox | undefined | null): Record<string, string> {
   const b = validBbox(bbox)
   if (!b) return {}
   const cx = b.x + b.width / 2
   const cy = b.y + b.height / 2
-  const zoom = Math.min(4, Math.max(1, 0.4 / Math.max(b.width, b.height)))
+  const zoom = thumbnailZoom(bbox)
+  // object-position: cx% cy% → face appears at (cx*W, cy*H) in the element box
+  // translate((0.5-cx)*100%, (0.5-cy)*100%) then scale(zoom) with origin 50% 50% → face ends up at center
   return {
-    transform: `scale(${zoom.toFixed(2)})`,
-    transformOrigin: `${(cx * 100).toFixed(1)}% ${(cy * 100).toFixed(1)}%`,
+    objectPosition: `${(cx * 100).toFixed(1)}% ${(cy * 100).toFixed(1)}%`,
+    transform: `scale(${zoom.toFixed(2)}) translate(${((0.5 - cx) * 100).toFixed(1)}%, ${((0.5 - cy) * 100).toFixed(1)}%)`,
+    transformOrigin: '50% 50%',
   }
 }
 
@@ -411,9 +434,20 @@ function faceBoxStyle(bbox: FaceBBox | undefined | null): Record<string, string>
   }
 }
 
+// Photo URL with higher resolution when zooming in significantly
+function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): string {
+  const zoom = thumbnailZoom(bbox)
+  const width = zoom >= 2 ? 800 : zoom >= 1.5 ? 600 : 400
+  return getPhotoUrl(filename, width)
+}
+
 // ── Keyboard navigation ───────────────────────────────────────────────────────
 function getPersonEntries(): HTMLElement[] {
   return Array.from(document.querySelectorAll<HTMLElement>('.person-entry[tabindex]'))
+}
+
+function getPhotoElements(): HTMLElement[] {
+  return Array.from(gridScrollRef.value?.querySelectorAll<HTMLElement>('[data-photo-id]') ?? [])
 }
 
 function onEntryKeydown(e: KeyboardEvent, person: Person, idx: number) {
@@ -436,7 +470,43 @@ function onEntryKeydown(e: KeyboardEvent, person: Person, idx: number) {
 function onPencilTab(e: KeyboardEvent) {
   if (e.key === 'Tab' && !e.shiftKey) {
     e.preventDefault()
-    gridScrollRef.value?.querySelector<HTMLElement>('[data-photo-id]')?.focus()
+    getPhotoElements()[0]?.focus()
+  }
+}
+
+function onPhotoKeydown(e: KeyboardEvent, idx: number) {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault()
+    selectedIndex.value = idx
+    isFullscreen.value = true
+  } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+    e.preventDefault()
+    const next = idx + 1
+    if (next < uniquePhotoFaceItems.value.length) {
+      selectedIndex.value = next
+      void nextTick(() => getPhotoElements()[next]?.focus())
+    }
+  } else if (e.key === 'ArrowLeft') {
+    e.preventDefault()
+    const prev = idx - 1
+    if (prev >= 0) {
+      selectedIndex.value = prev
+      void nextTick(() => getPhotoElements()[prev]?.focus())
+    } else {
+      // Back to person panel
+      const personIdx = persons.value.findIndex(p => p.id === selectedPerson.value?.id)
+      getPersonEntries()[Math.max(0, personIdx)]?.focus()
+    }
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    const prev = idx - 1
+    if (prev >= 0) {
+      selectedIndex.value = prev
+      void nextTick(() => getPhotoElements()[prev]?.focus())
+    } else {
+      const personIdx = persons.value.findIndex(p => p.id === selectedPerson.value?.id)
+      getPersonEntries()[Math.max(0, personIdx)]?.focus()
+    }
   }
 }
 
@@ -446,11 +516,6 @@ function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'ArrowRight' && selectedIndex.value < personPhotos.value.length - 1) { selectedIndex.value++; e.preventDefault() }
     else if (e.key === 'ArrowLeft' && selectedIndex.value > 0) { selectedIndex.value--; e.preventDefault() }
     else if (e.key === 'Escape' || e.key === ' ') { isFullscreen.value = false; e.preventDefault() }
-    return
-  }
-  if ((e.key === 'Enter' || e.key === ' ') && selectedIndex.value !== -1) {
-    isFullscreen.value = true
-    e.preventDefault()
   }
 }
 
@@ -478,7 +543,10 @@ onUnmounted(() => {
             <label for="showHiddenPersons" class="text-sm">Ausgeblendete</label>
             <ToggleSwitch v-model="showHidden" inputId="showHiddenPersons" />
           </div>
-          <Button v-if="selectedPerson" icon="pi pi-trash" label="Ignorieren" outlined severity="danger" @click="handleIgnorePerson(selectedPerson)" v-tooltip="'Person und alle Gesichter dauerhaft ignorieren'" />
+          <template v-if="selectedPerson">
+            <Button icon="pi pi-pencil" label="Umbenennen" outlined @click="openRename(selectedPerson)" />
+            <Button icon="pi pi-trash" label="Ignorieren" outlined severity="danger" @click="handleIgnorePerson(selectedPerson)" v-tooltip="'Person und alle Gesichter dauerhaft ignorieren'" />
+          </template>
         </div>
       </div>
     </div>
@@ -562,13 +630,12 @@ onUnmounted(() => {
             }"
             @click="selectedIndex = idx"
             @dblclick="isFullscreen = true"
-            @keydown.enter.prevent="isFullscreen = true"
-            @keydown.space.prevent="isFullscreen = true"
+            @keydown="onPhotoKeydown($event, idx)"
           >
             <div class="photo-thumb">
               <HeicImage
                 v-if="visiblePhotoIds.has(item.photo.id)"
-                :src="getPhotoUrl(item.photo.filename, 400)"
+                :src="thumbnailSrc(item.photo.filename, item.face.bbox)"
                 :alt="item.photo.original_name"
                 objectFit="cover"
                 :imageStyle="thumbnailImageStyle(item.face.bbox)"
