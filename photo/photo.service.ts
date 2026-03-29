@@ -2075,7 +2075,8 @@ interface FaceBBoxNorm { x: number; y: number; width: number; height: number }
  *  - Face size relative to the image (ideal 5–45 % of image area)
  *  - Proximity of the face centre to image edges (cropped faces score lower)
  */
-function computeFaceCompositionScore(bboxes: FaceBBoxNorm[]): number | null {
+/** Exported for testing. */
+export function computeFaceCompositionScore(bboxes: FaceBBoxNorm[]): number | null {
   const visible = bboxes.filter(b => b.width > 0 && b.height > 0);
   if (visible.length === 0) return null;
 
