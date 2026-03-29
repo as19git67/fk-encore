@@ -578,6 +578,8 @@ async function handleDrop(e: DragEvent) {
 
 function handleKeydown(e: KeyboardEvent) {
   if (isEditingDate.value) return
+  const activeTag = document.activeElement?.tagName
+  if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return
 
   if (isFullscreen.value) {
     if (e.key === 'Escape' || e.key === ' ') {
