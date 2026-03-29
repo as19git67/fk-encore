@@ -4,7 +4,7 @@ import crypto from "crypto";
 import exifr from "exifr";
 import { exiftool } from "exiftool-vendored";
 import { eq, and, or, sql, inArray, ilike } from "drizzle-orm";
-import { enqueuePhotoScan } from "./scan-queue";
+import { enqueuePhotoScan, DeferJobError } from "./scan-queue";
 import { triggerWorkers } from "./scan-worker";
 import db from "../db/database";
 import { dbFirst, dbAll, dbExec, dbInsertReturning } from '../db/adapter';
@@ -21,6 +21,7 @@ import {
   photoGroups,
   photoGroupMembers,
   photoLandmarks,
+  photoScanQueue,
 } from "../db/schema";
 import type {
   Photo,
@@ -2111,6 +2112,26 @@ function computeFaceCompositionScore(bboxes: FaceBBoxNorm[]): number | null {
 
 export async function indexPhotoQuality(userId: number, photoId: number): Promise<void> {
   if (!ENABLE_QUALITY) return;
+
+  // If face detection is enabled, wait until its job is no longer active before
+  // scoring.  Throwing DeferJobError puts this job back to pending so it is
+  // retried on the next worker poll cycle — no double CLIP call needed.
+  if (ENABLE_LOCAL_FACES) {
+    const faceJobRow = await dbFirst<{ status: string }>(
+      db.select({ status: photoScanQueue.status })
+        .from(photoScanQueue)
+        .where(and(
+          eq(photoScanQueue.photo_id, photoId),
+          eq(photoScanQueue.service, "face_detection"),
+        ))
+    );
+    // Defer only when a face job actively exists but hasn't finished yet.
+    // If no job exists, or it is done/failed, proceed so quality scoring is
+    // never blocked indefinitely.
+    if (faceJobRow && (faceJobRow.status === "pending" || faceJobRow.status === "processing")) {
+      throw new DeferJobError("waiting for face_detection to complete");
+    }
+  }
 
   const photo = await dbFirst<typeof photos.$inferSelect>(
     db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))

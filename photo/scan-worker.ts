@@ -11,10 +11,11 @@
 
 import {
   dequeueNextJob,
-  enqueuePhotoScan,
+  deferJob,
   markJobDone,
   markJobFailed,
   resetStuckJobs,
+  DeferJobError,
   type ScanService,
 } from "./scan-queue";
 import {
@@ -66,22 +67,24 @@ class ScanWorker {
         );
       }
 
-      // After face detection completes, clean up orphaned persons and
-      // re-score quality so the face composition signal is incorporated.
+      // After face detection completes, clean up orphaned persons.
+      // Quality re-scoring is handled automatically: the quality worker defers
+      // its job while face detection is still running and retries on the next
+      // poll cycle — no explicit re-trigger needed here.
       if (this.service === "face_detection") {
         cleanupOrphanedPersons(job.user_id).catch((err) =>
           console.error(`[scan-worker] cleanup error after face job ${job.id}:`, err),
         );
-        enqueuePhotoScan(job.photo_id, job.user_id, ["quality"], true)
-          .then(() => qualityWorker.tick())
-          .catch((err) =>
-            console.error(`[scan-worker] re-queue quality after face job ${job.id}:`, err),
-          );
       }
     } catch (err: any) {
-      const msg = err?.message ?? String(err);
-      console.error(`[scan-worker] ${this.service} job ${job.id} failed:`, msg);
-      await markJobFailed(job.id, msg).catch(() => {});
+      if (err instanceof DeferJobError) {
+        console.log(`[scan-worker] deferring ${this.service} job ${job.id}: ${err.message}`);
+        await deferJob(job.id).catch(() => {});
+      } else {
+        const msg = err?.message ?? String(err);
+        console.error(`[scan-worker] ${this.service} job ${job.id} failed:`, msg);
+        await markJobFailed(job.id, msg).catch(() => {});
+      }
     }
   }
 

@@ -11,6 +11,17 @@ import { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY } from "./photo.se
 export type ScanService = "embedding" | "face_detection" | "landmark" | "quality";
 export type ScanStatus = "pending" | "processing" | "failed" | "done";
 
+/**
+ * Thrown by a job handler to signal "not ready yet — put me back in the queue".
+ * The worker resets the job to pending without counting it as a failed attempt.
+ */
+export class DeferJobError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "DeferJobError";
+  }
+}
+
 export interface QueueServiceStatus {
   service: ScanService;
   pending: number;
@@ -98,6 +109,22 @@ export async function markJobDone(id: number): Promise<void> {
   await db
     .update(photoScanQueue)
     .set({ status: "done", finished_at: sql`NOW()` })
+    .where(eq(photoScanQueue.id, id));
+}
+
+/**
+ * Reset a processing job back to pending without incrementing the attempt
+ * counter.  Used when a job cannot run yet because a prerequisite scan has
+ * not finished — the job will be retried on the next worker poll cycle.
+ */
+export async function deferJob(id: number): Promise<void> {
+  await db
+    .update(photoScanQueue)
+    .set({
+      status: "pending",
+      started_at: null,
+      attempts: sql`GREATEST(0, attempts - 1)`,
+    })
     .where(eq(photoScanQueue.id, id));
 }
 
