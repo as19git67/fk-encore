@@ -14,3 +14,5 @@ frontend/dist
 /tsconfig.tsbuildinfo
 /test_output.txt
 /docker-compose-otdev.yml
+__pycache__/
+*.py[cod]

@@ -117,6 +117,7 @@ export const photos = pgTable("photos", {
   location_name: text("location_name"),
   location_city: text("location_city"),
   location_country: text("location_country"),
+  ai_quality_score: real("ai_quality_score"),
 });
 
 // ========== Persons ==========
@@ -258,7 +259,7 @@ export const photoLandmarks = pgTable("photo_landmarks", {
 
 // ========== Scan Queue ==========
 
-export const scanServiceEnum = pgEnum("scan_service", ["embedding", "face_detection", "landmark"]);
+export const scanServiceEnum = pgEnum("scan_service", ["embedding", "face_detection", "landmark", "quality"]);
 export const scanStatusEnum = pgEnum("scan_status", ["pending", "processing", "failed", "done"]);
 
 export const photoScanQueue = pgTable("photo_scan_queue", {
