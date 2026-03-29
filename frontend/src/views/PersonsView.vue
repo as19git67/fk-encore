@@ -290,22 +290,6 @@ function toggleSelect(id: number) {
   else selectedPersonIds.value.splice(index, 1)
 }
 
-function cancelMultiSelect() {
-  multiSelectMode.value = false
-  selectedPersonIds.value = []
-}
-
-function xxxopenMergeDialog() {
-  if (selectedPersonIds.value.length < 2) return
-  mergeSourceIds.value = [...selectedPersonIds.value]
-  const firstNamed = mergeSourceIds.value.find(id => {
-    const p = persons.value.find(p => p.id === id)
-    return p && p.name !== 'Unbenannt'
-  })
-  mergeTargetId.value = firstNamed ?? null
-  showMergeDialog.value = true
-}
-
 async function handleMerge() {
   if (mergeTargetId.value == null || mergeSourceIds.value.length < 2) return
   const sources = mergeSourceIds.value.filter(id => id !== mergeTargetId.value)
