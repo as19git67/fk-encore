@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRouter } from 'vue-router'
 import Menubar from 'primevue/menubar'
 import Button from 'primevue/button'
 import ConfirmDialog from 'primevue/confirmdialog'
@@ -8,9 +8,6 @@ import { useAuthStore } from './stores/auth'
 
 const auth = useAuthStore()
 const router = useRouter()
-const route = useRoute()
-
-const isFullWidth = computed(() => route.meta.fullWidth === true)
 
 const menuItems = computed(() => {
   const items = []
@@ -49,7 +46,7 @@ async function handleLogout() {
         </div>
       </template>
     </Menubar>
-    <main class="content" :class="{ 'full-width': isFullWidth }">
+    <main class="content">
       <router-view />
     </main>
     <ConfirmDialog />
@@ -76,13 +73,8 @@ body {
 }
 
 .content {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 2rem 1rem;
-}
-
-.content.full-width {
   max-width: none;
+  margin: 0 auto;
   padding: 0;
 }
 

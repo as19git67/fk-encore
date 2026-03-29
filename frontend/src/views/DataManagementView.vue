@@ -193,15 +193,15 @@ onUnmounted(() => stopPolling())
         </tbody>
       </table>
 
-      <div v-if="isActive" class="mb-3">
+      <div v-if="isActive" class="status-progress">
         <span class="text-secondary" style="font-size:0.85rem">
           <i class="pi pi-spin pi-spinner mr-1" />
           {{ totalProcessing }} werden verarbeitet, {{ totalPending }} warten…
         </span>
-        <ProgressBar mode="indeterminate" style="height:4px;margin-top:0.5rem" />
+        <ProgressBar class="status-progress__bar" mode="indeterminate" />
       </div>
 
-      <div class="button-row">
+      <div v-if="!isActive" class="button-row">
         <Button
           icon="pi pi-search-plus"
           label="Fehlende Scans starten"
@@ -250,7 +250,7 @@ onUnmounted(() => stopPolling())
         icon="pi pi-images"
         label="Gruppen neu berechnen"
         :loading="groupingLoading"
-        :disabled="groupingLoading"
+        :disabled="groupingLoading || isActive"
         @click="handleFindGroups"
       />
     </div>
@@ -272,7 +272,7 @@ onUnmounted(() => stopPolling())
       <Button
         icon="pi pi-refresh"
         label="Metadaten aktualisieren"
-        :disabled="refreshingMetadata"
+        :disabled="refreshingMetadata || isActive"
         :loading="refreshingMetadata"
         @click="handleRefreshMetadata"
       />
@@ -281,6 +281,24 @@ onUnmounted(() => stopPolling())
 </template>
 
 <style scoped>
+.status-progress {
+  display: flex;
+  flex-direction: column;
+  margin-block: 0.25em;
+}
+
+.status-progress .text-secondary {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
+
+.status-progress .status-progress__bar {
+  display: flex;
+  margin-block: 0.5em;
+  height: 4px;
+}
+
 .button-row {
   display: flex;
   gap: 0.5rem;

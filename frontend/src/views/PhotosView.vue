@@ -3,10 +3,10 @@ import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import { useConfirm } from 'primevue/useconfirm'
-import DatePicker from 'primevue/datepicker'
 import ToggleSwitch from 'primevue/toggleswitch'
 import HeicImage from '../components/HeicImage.vue'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
+import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import {
   listPhotos,
   uploadPhoto,
@@ -137,15 +137,6 @@ const nextPhoto = computed(() => {
   return photos.value[selectedIndex.value + 1] ?? null
 })
 
-const formatPhotoDate = (photo: Photo) => {
-  const dateStr = photo.taken_at || photo.created_at
-  if (!dateStr) return ''
-  return new Intl.DateTimeFormat(navigator.language, {
-    year: 'numeric', month: 'long', day: 'numeric',
-    hour: '2-digit', minute: '2-digit'
-  }).format(new Date(dateStr))
-}
-
 const formatPhotoDateFull = (photo: Photo) => {
   const dateStr = photo.taken_at || photo.created_at
   if (!dateStr) return ''
@@ -254,12 +245,6 @@ async function loadPersons() {
   } catch (err) {
     console.error('Failed to load persons:', err)
   }
-}
-
-function getPersonName(personId?: number) {
-  if (!personId) return 'Unbekannt'
-  const person = persons.value.find(p => p.id === personId)
-  return person ? person.name : 'Unbekannt'
 }
 
 async function loadDetectedFaces(photoId: number) {
@@ -848,9 +833,9 @@ onUnmounted(() => {
                 <div class="photo-info">
                   <span class="name">{{ item.group ? `${item.group.member_count} ähnliche Fotos` : item.photo.original_name }}</span>
                   <div v-if="!inUnreviewedStack.has(item.photo.id)" class="photo-actions">
-                    <Button v-if="canDelete && item.photo.curation_status === 'hidden'" icon="pi pi-eye" severity="info" text rounded v-tooltip="'Wiederherstellen'" @click.stop="handleRestore(item.photo.id)" />
-                    <Button v-if="canDelete && item.photo.curation_status !== 'hidden'" :icon="item.photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'" :severity="item.photo.curation_status === 'favorite' ? 'warn' : 'secondary'" text rounded v-tooltip="'Favorit'" @click.stop="handleToggleFavorite(item.photo.id, item.photo.curation_status)" />
-                    <Button v-if="canDelete && item.photo.curation_status !== 'hidden'" icon="pi pi-eye-slash" severity="danger" text rounded v-tooltip="'Ausblenden'" @click.stop="handleDelete(item.photo.id)" />
+                    <Button v-if="canDelete && item.photo.curation_status === 'hidden'" size="small" icon="pi pi-eye" severity="info" text rounded v-tooltip="'Wiederherstellen'" @click.stop="handleRestore(item.photo.id)" />
+                    <Button v-if="canDelete && item.photo.curation_status !== 'hidden'" size="small" :icon="item.photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'" :severity="item.photo.curation_status === 'favorite' ? 'warn' : 'secondary'" text rounded v-tooltip="'Favorit'" @click.stop="handleToggleFavorite(item.photo.id, item.photo.curation_status)" />
+                    <Button v-if="canDelete && item.photo.curation_status !== 'hidden'" size="small" icon="pi pi-eye-slash" severity="danger" text rounded v-tooltip="'Ausblenden'" @click.stop="handleDelete(item.photo.id)" />
                   </div>
                 </div>
               </div>
@@ -860,89 +845,31 @@ onUnmounted(() => {
       </div>
 
       <!-- RIGHT: Details sidebar -->
-      <aside class="details-sidebar" v-if="selectedPhoto">
-        <div class="sidebar-header">
-          <span class="sidebar-title">Details</span>
-        </div>
-        <div class="sidebar-scroll">
-          <div class="preview-container" @click="isFullscreen = true" title="Vollbild">
-            <HeicImage :src="getPhotoUrl(selectedPhoto.filename)" :alt="selectedPhoto.original_name" />
-            <div class="preview-overlay"><i class="pi pi-expand"></i></div>
-          </div>
-
-          <div class="quick-actions">
-            <Button icon="pi pi-expand" v-tooltip.bottom="'Vollbild'" @click="isFullscreen = true" severity="secondary" text rounded />
-            <Button v-if="canDelete && selectedPhoto.curation_status === 'hidden'" icon="pi pi-eye" v-tooltip.bottom="'Wiederherstellen'" @click="handleRestore(selectedPhoto.id)" severity="info" text rounded />
-            <template v-if="canDelete && selectedPhoto.curation_status !== 'hidden'">
-              <Button :icon="selectedPhoto.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'" v-tooltip.bottom="selectedPhoto.curation_status === 'favorite' ? 'Kein Favorit' : 'Favorit'" @click="handleToggleFavorite(selectedPhoto.id, selectedPhoto.curation_status)" :severity="selectedPhoto.curation_status === 'favorite' ? 'warn' : 'secondary'" text rounded />
-              <Button icon="pi pi-eye-slash" v-tooltip.bottom="'Ausblenden'" @click="handleDelete(selectedPhoto.id)" severity="danger" text rounded />
-            </template>
-          </div>
-
-          <div class="sidebar-divider" />
-
-          <div class="meta-list">
-            <div class="meta-row">
-              <i class="pi pi-file meta-icon" />
-              <span class="meta-value" :title="selectedPhoto.original_name">{{ selectedPhoto.original_name }}</span>
-            </div>
-            <div class="meta-row">
-              <i class="pi pi-calendar meta-icon" />
-              <span class="meta-value date-value">
-                {{ formatPhotoDate(selectedPhoto) }}
-                <Button v-if="canUpload && !isEditingDate" icon="pi pi-pencil" text rounded size="small" @click="startEditingDate" class="edit-btn" />
-              </span>
-            </div>
-            <div v-if="isEditingDate" class="date-editor">
-              <DatePicker v-model="editDate" showTime hourFormat="24" fluid />
-              <div class="edit-actions">
-                <Button icon="pi pi-check" severity="success" text rounded @click="handleUpdateDate" :loading="updatingDate" />
-                <Button icon="pi pi-times" severity="danger" text rounded @click="isEditingDate = false" :disabled="updatingDate" />
-              </div>
-            </div>
-            <div v-if="selectedPhoto.size" class="meta-row">
-              <i class="pi pi-database meta-icon" />
-              <span class="meta-value">{{ (selectedPhoto.size / 1024 / 1024).toFixed(2) }} MB</span>
-            </div>
-          </div>
-
-          <template v-if="selectedPhoto.location_city || selectedPhoto.location_name || loadingLandmarks || detectedLandmarks.length > 0">
-            <div class="sidebar-divider" />
-            <div class="sidebar-section">
-              <div class="section-label"><i class="pi pi-map-marker" /> Ort</div>
-              <div v-if="selectedPhoto.location_name || selectedPhoto.location_city" class="location-pill">
-                <template v-if="selectedPhoto.location_name && selectedPhoto.location_country">{{ selectedPhoto.location_name }}, {{ selectedPhoto.location_country }}</template>
-                <template v-else-if="selectedPhoto.location_name">{{ selectedPhoto.location_name }}</template>
-                <template v-else-if="selectedPhoto.location_city && selectedPhoto.location_country">{{ selectedPhoto.location_city }}, {{ selectedPhoto.location_country }}</template>
-                <template v-else>{{ selectedPhoto.location_city }}</template>
-              </div>
-              <div v-if="loadingLandmarks" class="loading-row"><i class="pi pi-spin pi-spinner" /> Gebäude werden erkannt…</div>
-              <div v-else-if="detectedLandmarks.length > 0" class="landmark-chips">
-                <span v-for="lm in detectedLandmarks" :key="lm.id" class="landmark-tag" :title="`${Math.round(lm.confidence * 100)}%`">
-                  <i class="pi pi-building" /> {{ lm.label }} <span class="landmark-confidence">{{ Math.round(lm.confidence * 100) }}%</span>
-                </span>
-              </div>
-            </div>
-          </template>
-
-          <template v-if="auth.hasPermission('people.view')">
-            <div class="sidebar-divider" />
-            <div class="sidebar-section">
-              <div class="section-label"><i class="pi pi-users" /> Personen</div>
-              <div v-if="loadingFaces" class="loading-row"><i class="pi pi-spin pi-spinner" /> Lade…</div>
-              <div v-else-if="detectedFaces.filter(f => !f.ignored).length === 0" class="empty-hint">Keine Personen erkannt</div>
-              <div v-else class="person-list">
-                <div v-for="face in detectedFaces.filter(f => !f.ignored)" :key="face.id" class="person-row">
-                  <i class="pi pi-user person-icon" />
-                  <span class="person-name">{{ getPersonName(face.person_id) }}</span>
-                  <Button icon="pi pi-times" severity="secondary" text rounded size="small" @click="handleIgnoreFace(face.id)" v-tooltip="'Entfernen'" />
-                </div>
-              </div>
-              <Button label="Neu erkennen" icon="pi pi-refresh" @click="handleReindexPhoto" :loading="reindexingPhoto" class="w-full mt-2" severity="secondary" outlined size="small" />
-            </div>
-          </template>
-        </div>
-      </aside>
+      <PhotoDetailSidebar
+        v-if="selectedPhoto"
+        :photo="selectedPhoto"
+        :faces="detectedFaces"
+        :loading-faces="loadingFaces"
+        :landmarks="detectedLandmarks"
+        :loading-landmarks="loadingLandmarks"
+        :persons="persons"
+        :can-delete="canDelete"
+        :can-upload="canUpload"
+        :reindexing-photo="reindexingPhoto"
+        :is-editing-date="isEditingDate"
+        v-model:editDate="editDate"
+        :updating-date="updatingDate"
+        :show-persons="auth.hasPermission('people.view')"
+        @fullscreen="isFullscreen = true"
+        @toggle-favorite="handleToggleFavorite"
+        @hide="handleDelete"
+        @restore="handleRestore"
+        @start-edit-date="startEditingDate"
+        @update-date="handleUpdateDate"
+        @cancel-edit-date="isEditingDate = false"
+        @ignore-face="handleIgnoreFace"
+        @reindex="handleReindexPhoto"
+      />
     </div>
 
     <!-- Fullscreen -->
@@ -1237,194 +1164,6 @@ onUnmounted(() => {
   z-index: 5;
 }
 
-/* ── Details Sidebar (right) ─────────────────────────────────────────────── */
-.details-sidebar {
-  width: 280px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  background: var(--surface-card);
-  border-left: 1px solid var(--surface-border);
-  overflow: hidden;
-}
-
-.sidebar-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--surface-border);
-  flex-shrink: 0;
-}
-
-.sidebar-title {
-  font-size: 0.8rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  color: var(--text-color-secondary);
-}
-
-.sidebar-scroll {
-  flex: 1;
-  overflow-y: auto;
-}
-
-.preview-container {
-  position: relative;
-  cursor: pointer;
-  background: var(--surface-ground);
-}
-
-.preview-container :deep(.heic-image-container) {
-  height: 200px;
-  width: 100%;
-}
-
-.preview-overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(0,0,0,0.3);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  opacity: 0;
-  transition: opacity 0.2s;
-  color: white;
-  font-size: 1.5rem;
-}
-.preview-container:hover .preview-overlay { opacity: 1; }
-
-.quick-actions {
-  display: flex;
-  justify-content: center;
-  gap: 0.25rem;
-  padding: 0.5rem 1rem;
-}
-
-.sidebar-divider { height: 1px; background: var(--surface-border); }
-
-.sidebar-section { padding: 0.75rem 1rem; }
-
-.section-label {
-  font-size: 0.72rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-  color: var(--text-color-secondary);
-  margin-bottom: 0.5rem;
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-.section-label .pi { font-size: 0.75rem; }
-
-.meta-list {
-  padding: 0.75rem 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.meta-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.6rem;
-  font-size: 0.875rem;
-}
-
-.meta-icon {
-  font-size: 0.8rem;
-  color: var(--text-color-secondary);
-  margin-top: 0.15rem;
-  flex-shrink: 0;
-}
-
-.meta-value {
-  flex: 1;
-  min-width: 0;
-  word-break: break-word;
-  line-height: 1.4;
-}
-
-.date-value {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  flex-wrap: wrap;
-}
-
-.edit-btn { flex-shrink: 0; opacity: 0.6; }
-.edit-btn:hover { opacity: 1; }
-
-.date-editor {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  margin: 0.5rem 0;
-  padding: 0.75rem;
-  background: var(--surface-ground);
-  border-radius: 6px;
-}
-
-.edit-actions { display: flex; gap: 0.5rem; }
-
-.location-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  background: var(--surface-100);
-  border: 1px solid var(--surface-300);
-  border-radius: 1rem;
-  padding: 0.25rem 0.75rem;
-  font-size: 0.82rem;
-  margin-bottom: 0.5rem;
-}
-
-.landmark-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-
-.landmark-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  background: var(--surface-100);
-  border: 1px solid var(--surface-300);
-  border-radius: 1rem;
-  padding: 0.2rem 0.6rem;
-  font-size: 0.8rem;
-  cursor: default;
-}
-.landmark-tag .pi-building { font-size: 0.7rem; color: var(--text-color-secondary); }
-.landmark-confidence { font-size: 0.7rem; color: var(--text-color-secondary); }
-
-.loading-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.82rem;
-  color: var(--text-color-secondary);
-}
-
-.empty-hint {
-  font-size: 0.82rem;
-  color: var(--text-color-secondary);
-  font-style: italic;
-}
-
-.person-list { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 0.25rem; }
-.person-row {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.4rem 0.6rem;
-  background: var(--surface-ground);
-  border-radius: 6px;
-  border: 1px solid var(--surface-border);
-}
-.person-icon { font-size: 0.8rem; color: var(--text-color-secondary); }
-.person-name { flex: 1; font-size: 0.875rem; }
-
-.w-full { width: 100%; }
 
 /* ── Search Bar ──────────────────────────────────────────────────────────── */
 .search-bar {
