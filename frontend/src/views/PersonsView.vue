@@ -13,7 +13,7 @@ import {
   ignoreFace, ignorePersonFaces, updatePhotoCuration, deletePhoto, reindexPhoto,
   getPhotoFaces, getPhotoLandmarks,
   type CurationStatus, type Person, type Photo, type PersonDetails,
-  type Face, type LandmarkItem,
+  type Face, type LandmarkItem, type FaceBBox,
 } from '../api/photos'
 import { useAuthStore } from '../stores/auth'
 
@@ -216,7 +216,6 @@ async function loadData() {
         if (a.name !== 'Unbenannt' && b.name === 'Unbenannt') return -1
         return Number(b.faceCount || 0) - Number(a.faceCount || 0)
       })
-    // Auto-select: restore selection or pick first
     if (selectedPerson.value) {
       const still = persons.value.find(p => p.id === selectedPerson.value!.id)
       if (still) await selectPerson(still)
@@ -249,7 +248,7 @@ async function selectPerson(person: Person) {
   }
 }
 
-// ── Rename / Merge ────────────────────────────────────────────────────────────
+// ── Rename ────────────────────────────────────────────────────────────────────
 const showRenameDialog = ref(false)
 const personToRename = ref<Person | null>(null)
 const newName = ref('')
@@ -257,6 +256,7 @@ const inlineRenamePersonId = ref<number | null>(null)
 const inlineRenameValue = ref('')
 const inlineRenameSaving = ref(false)
 const inlineRenameInputRef = ref<HTMLInputElement | null>(null)
+const confirm = useConfirm()
 
 function setInlineRenameInputRef(el: Element | ComponentPublicInstance | null) {
   inlineRenameInputRef.value = el instanceof HTMLInputElement ? el : null
@@ -277,33 +277,6 @@ const duplicateNamePerson = computed(() => {
 
 const renameWillMerge = computed(() => !!duplicateNamePerson.value)
 
-const showMergeDialog = ref(false)
-const mergeSourceIds = ref<number[]>([])
-const mergeTargetId = ref<number | null>(null)
-const selectedPersonIds = ref<number[]>([])
-const multiSelectMode = ref(false)
-const confirm = useConfirm()
-
-function toggleSelect(id: number) {
-  const index = selectedPersonIds.value.indexOf(id)
-  if (index === -1) selectedPersonIds.value.push(id)
-  else selectedPersonIds.value.splice(index, 1)
-}
-
-async function handleMerge() {
-  if (mergeTargetId.value == null || mergeSourceIds.value.length < 2) return
-  const sources = mergeSourceIds.value.filter(id => id !== mergeTargetId.value)
-  try {
-    await mergePersons(sources, mergeTargetId.value)
-    showMergeDialog.value = false
-    multiSelectMode.value = false
-    selectedPersonIds.value = []
-    await loadData()
-  } catch (err: any) {
-    error.value = err.message || 'Fehler beim Zusammenführen'
-  }
-}
-
 function openRename(person: Person) {
   personToRename.value = person
   newName.value = person.name === 'Unbenannt' ? '' : person.name
@@ -311,7 +284,7 @@ function openRename(person: Person) {
 }
 
 function startInlineRename(person: Person) {
-  if (multiSelectMode.value || inlineRenameSaving.value) return
+  if (inlineRenameSaving.value) return
   inlineRenamePersonId.value = person.id
   inlineRenameValue.value = person.name === 'Unbenannt' ? '' : person.name
   void nextTick(() => {
@@ -408,25 +381,74 @@ function getCoverUrl(person: Person) {
   return 'https://www.primefaces.org/wp-content/uploads/2020/05/placeholder.png'
 }
 
-function getFaceStyle(person: Person | { cover_bbox?: any }) {
-  if (!person.cover_bbox) return {}
-  const { x, y, width, height } = person.cover_bbox
-  if (x > 1.1 || y > 1.1 || width > 1.1 || height > 1.1) return { objectFit: 'cover' }
-  const centerX = x + width / 2
-  const centerY = y + height / 2
-  const zoom = Math.max(1, Math.min(4, 0.6 / Math.max(width, height)))
-  return { transform: `scale(${zoom})`, transformOrigin: `${centerX * 100}% ${centerY * 100}%`, objectFit: 'cover', display: 'block' }
+// ── Face bbox helpers ─────────────────────────────────────────────────────────
+function validBbox(bbox: FaceBBox | undefined | null): FaceBBox | null {
+  if (!bbox) return null
+  if (bbox.x > 1.1 || bbox.y > 1.1) return null
+  return bbox
+}
+
+function thumbnailImageStyle(bbox: FaceBBox | undefined | null): Record<string, string> {
+  const b = validBbox(bbox)
+  if (!b) return {}
+  const cx = b.x + b.width / 2
+  const cy = b.y + b.height / 2
+  const zoom = Math.min(4, Math.max(1, 0.4 / Math.max(b.width, b.height)))
+  return {
+    transform: `scale(${zoom.toFixed(2)})`,
+    transformOrigin: `${(cx * 100).toFixed(1)}% ${(cy * 100).toFixed(1)}%`,
+  }
+}
+
+function faceBoxStyle(bbox: FaceBBox | undefined | null): Record<string, string> {
+  const b = validBbox(bbox)
+  if (!b) return { display: 'none' }
+  return {
+    left: `${(b.x * 100).toFixed(2)}%`,
+    top: `${(b.y * 100).toFixed(2)}%`,
+    width: `${(b.width * 100).toFixed(2)}%`,
+    height: `${(b.height * 100).toFixed(2)}%`,
+  }
 }
 
 // ── Keyboard navigation ───────────────────────────────────────────────────────
+function getPersonEntries(): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>('.person-entry[tabindex]'))
+}
+
+function onEntryKeydown(e: KeyboardEvent, person: Person, idx: number) {
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    const entries = getPersonEntries()
+    entries[idx + 1]?.focus()
+    if (persons.value[idx + 1]) selectPerson(persons.value[idx + 1]!)
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    const entries = getPersonEntries()
+    entries[idx - 1]?.focus()
+    if (persons.value[idx - 1]) selectPerson(persons.value[idx - 1]!)
+  } else if ((e.key === 'Enter' || e.key === ' ') && document.activeElement === e.currentTarget) {
+    e.preventDefault()
+    selectPerson(person)
+  }
+}
+
+function onPencilTab(e: KeyboardEvent) {
+  if (e.key === 'Tab' && !e.shiftKey) {
+    e.preventDefault()
+    gridScrollRef.value?.querySelector<HTMLElement>('[data-photo-id]')?.focus()
+  }
+}
+
 function handleKeydown(e: KeyboardEvent) {
+  if (document.activeElement?.tagName === 'INPUT') return
   if (isFullscreen.value) {
     if (e.key === 'ArrowRight' && selectedIndex.value < personPhotos.value.length - 1) { selectedIndex.value++; e.preventDefault() }
     else if (e.key === 'ArrowLeft' && selectedIndex.value > 0) { selectedIndex.value--; e.preventDefault() }
     else if (e.key === 'Escape' || e.key === ' ') { isFullscreen.value = false; e.preventDefault() }
     return
   }
-  if (e.key === 'Enter' && selectedIndex.value !== -1 && document.activeElement?.tagName !== 'INPUT') {
+  if ((e.key === 'Enter' || e.key === ' ') && selectedIndex.value !== -1) {
     isFullscreen.value = true
     e.preventDefault()
   }
@@ -450,26 +472,19 @@ onUnmounted(() => {
       <div class="header">
         <div class="header-left">
           <h1>{{ selectedPersonDetail ? selectedPersonDetail.name : 'Personen' }}</h1>
-          <span v-if="multiSelectMode && selectedPersonIds.length > 0" class="select-count">
-            {{ selectedPersonIds.length }} ausgewählt
-          </span>
         </div>
         <div class="actions">
           <div v-if="selectedPersonDetail" class="toggle-hidden">
             <label for="showHiddenPersons" class="text-sm">Ausgeblendete</label>
             <ToggleSwitch v-model="showHidden" inputId="showHiddenPersons" />
           </div>
-          <template v-if="selectedPerson">
-            <Button icon="pi pi-pencil" label="Umbenennen" outlined @click="openRename(selectedPerson)" />
-            <Button icon="pi pi-trash" label="Ignorieren" outlined severity="danger" @click="handleIgnorePerson(selectedPerson)" v-tooltip="'Person und alle Gesichter dauerhaft ignorieren'" />
-          </template>
+          <Button v-if="selectedPerson" icon="pi pi-trash" label="Ignorieren" outlined severity="danger" @click="handleIgnorePerson(selectedPerson)" v-tooltip="'Person und alle Gesichter dauerhaft ignorieren'" />
         </div>
       </div>
     </div>
 
     <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
 
-    <!-- Loading state -->
     <div v-if="loading && persons.length === 0" class="info-text">
       <i class="pi pi-spin pi-spinner" /> Personen werden geladen…
     </div>
@@ -481,27 +496,23 @@ onUnmounted(() => {
       <!-- LEFT: Person list panel -->
       <nav class="person-panel">
         <div
-          v-for="person in persons"
+          v-for="(person, idx) in persons"
           :key="person.id"
           class="person-entry"
-          :class="{
-            active: selectedPerson?.id === person.id && !multiSelectMode,
-            selected: selectedPersonIds.includes(person.id)
-          }"
-          @click="multiSelectMode ? toggleSelect(person.id) : selectPerson(person)"
+          tabindex="0"
+          :class="{ active: selectedPerson?.id === person.id }"
+          @click="selectPerson(person)"
+          @keydown="onEntryKeydown($event, person, idx)"
         >
           <div class="person-avatar">
             <HeicImage
               :src="getCoverUrl(person)"
               :alt="person.name"
               objectFit="cover"
-              :imageStyle="getFaceStyle(person)"
+              :imageStyle="thumbnailImageStyle(person.cover_bbox)"
             />
-            <div v-if="multiSelectMode" class="select-check" :class="{ checked: selectedPersonIds.includes(person.id) }">
-              <i v-if="selectedPersonIds.includes(person.id)" class="pi pi-check" />
-            </div>
           </div>
-          <div class="person-entry-info" @click.stop="!multiSelectMode && startInlineRename(person)">
+          <div class="person-entry-info">
             <div v-if="inlineRenamePersonId === person.id" class="rename-inline" @click.stop>
               <input
                 :ref="setInlineRenameInputRef"
@@ -516,9 +527,20 @@ onUnmounted(() => {
               <Button icon="pi pi-check" text rounded size="small" :disabled="inlineRenameSaving || !inlineRenameValue.trim() || inlineRenameValue.trim().toLowerCase() === 'unbenannt'" @click.stop="submitInlineRename" />
               <Button icon="pi pi-times" text rounded size="small" :disabled="inlineRenameSaving" @click.stop="cancelInlineRename" />
             </div>
-            <span v-else class="person-entry-name">{{ person.name }}</span>
-            <span class="person-entry-count">{{ person.faceCount }} Fotos</span>
+            <template v-else>
+              <span class="person-entry-name">{{ person.name }}</span>
+              <span class="person-entry-count">{{ person.faceCount }} Fotos</span>
+            </template>
           </div>
+          <Button
+            v-if="inlineRenamePersonId !== person.id"
+            class="pencil-btn"
+            icon="pi pi-pencil"
+            text rounded size="small"
+            tabindex="0"
+            @click.stop="startInlineRename(person)"
+            @keydown="onPencilTab($event)"
+          />
         </div>
       </nav>
 
@@ -532,6 +554,7 @@ onUnmounted(() => {
             :key="item.photo.id"
             :data-photo-id="item.photo.id"
             class="photo-item"
+            tabindex="0"
             :class="{
               selected: idx === selectedIndex,
               'is-hidden': item.photo.curation_status === 'hidden',
@@ -539,13 +562,19 @@ onUnmounted(() => {
             }"
             @click="selectedIndex = idx"
             @dblclick="isFullscreen = true"
+            @keydown.enter.prevent="isFullscreen = true"
+            @keydown.space.prevent="isFullscreen = true"
           >
             <div class="photo-thumb">
               <HeicImage
                 v-if="visiblePhotoIds.has(item.photo.id)"
                 :src="getPhotoUrl(item.photo.filename, 400)"
                 :alt="item.photo.original_name"
-              />
+                objectFit="cover"
+                :imageStyle="thumbnailImageStyle(item.face.bbox)"
+              >
+                <div class="face-box" :style="faceBoxStyle(item.face.bbox)" />
+              </HeicImage>
             </div>
             <i v-if="item.photo.curation_status === 'favorite'" class="pi pi-heart-fill favorite-badge" />
             <i v-if="item.photo.curation_status === 'hidden'" class="pi pi-eye-slash hidden-badge" />
@@ -592,10 +621,15 @@ onUnmounted(() => {
         <HeicImage v-if="nextPersonPhoto" :src="getPhotoUrl(nextPersonPhoto.filename)" />
       </div>
       <div class="fullscreen-content" @click.stop>
-        <HeicImage :src="getPhotoUrl(selectedPhoto.filename)" :alt="selectedPhoto.original_name" objectFit="contain" />
+        <HeicImage :src="getPhotoUrl(selectedPhoto.filename)" :alt="selectedPhoto.original_name" objectFit="contain">
+          <div class="face-box face-box-fullscreen" :style="faceBoxStyle(selectedPersonFace?.bbox)" />
+        </HeicImage>
         <div class="fs-topbar">
           <Button icon="pi pi-arrow-left" class="fs-topbar-btn" rounded text @click="isFullscreen = false" />
-          <div class="fs-date-bar">{{ selectedPhoto.taken_at || selectedPhoto.created_at }}</div>
+          <div class="fs-center">
+            <span class="fs-person-name">{{ selectedPerson?.name }}</span>
+            <Button v-if="selectedPerson" icon="pi pi-pencil" class="fs-topbar-btn" rounded text size="small" @click.stop="openRename(selectedPerson)" />
+          </div>
           <div class="fs-toolbar">
             <Button v-if="selectedPhoto.curation_status === 'hidden'" icon="pi pi-eye" class="fs-topbar-btn" rounded text severity="info" @click.stop="handleRestorePhoto(selectedPhoto.id)" />
             <Button v-else icon="pi pi-eye-slash" class="fs-topbar-btn" rounded text severity="warn" @click.stop="handleHidePhoto(selectedPhoto.id)" />
@@ -607,29 +641,6 @@ onUnmounted(() => {
         <Button v-if="selectedIndex < personPhotos.length - 1" icon="pi pi-chevron-right" class="fs-nav fs-nav-right" rounded text @click="selectedIndex < personPhotos.length - 1 && selectedIndex++" />
       </div>
     </div>
-
-    <!-- Merge dialog -->
-    <Dialog v-model:visible="showMergeDialog" header="Personen zusammenführen" :modal="true" style="width: min(100%, 32rem)">
-      <div class="dialog-body">
-        <p>{{ mergeSourceIds.length }} Personen zusammenführen. Alle Fotos werden der Zielperson zugeordnet.</p>
-        <div>
-          <label class="dialog-label">Zielperson:</label>
-          <div class="merge-options">
-            <div v-for="id in mergeSourceIds" :key="id" v-show="persons.find(p => p.id === id)?.name !== 'Unbenannt'" class="merge-option" @click="mergeTargetId = id">
-              <input type="radio" :id="'target-' + id" name="mergeTarget" :value="id" v-model="mergeTargetId" />
-              <label :for="'target-' + id" class="merge-option-label">
-                <HeicImage :src="getCoverUrl(persons.find(p => p.id === id)!)" class="merge-avatar" :imageStyle="getFaceStyle(persons.find(p => p.id === id)!)" />
-                <span>{{ persons.find(p => p.id === id)?.name }}</span>
-              </label>
-            </div>
-          </div>
-        </div>
-        <div class="dialog-actions">
-          <Button label="Abbrechen" text @click="showMergeDialog = false" />
-          <Button label="Zusammenführen" icon="pi pi-clone" severity="success" @click="handleMerge" :disabled="!mergeTargetId || persons.find(p => p.id === mergeTargetId)?.name === 'Unbenannt'" />
-        </div>
-      </div>
-    </Dialog>
 
     <!-- Rename dialog -->
     <Dialog v-model:visible="showRenameDialog" header="Person umbenennen" :modal="true" style="width: min(100%, 28rem)">
@@ -701,11 +712,6 @@ onUnmounted(() => {
   gap: 0.5rem;
 }
 
-.select-count {
-  font-size: 0.9rem;
-  color: var(--text-color-secondary);
-}
-
 .info-text {
   display: flex;
   justify-content: center;
@@ -741,17 +747,14 @@ onUnmounted(() => {
   cursor: pointer;
   border-left: 3px solid transparent;
   transition: background 0.15s;
+  outline: none;
 }
 
-.person-entry:hover { background: var(--surface-hover); }
+.person-entry:hover,
+.person-entry:focus { background: var(--surface-hover); }
 
 .person-entry.active {
   background: var(--p-primary-50);
-  border-left-color: var(--p-primary-color);
-}
-
-.person-entry.selected {
-  background: rgba(var(--p-primary-color-rgb, 99,102,241), 0.08);
   border-left-color: var(--p-primary-color);
 }
 
@@ -776,24 +779,9 @@ onUnmounted(() => {
   object-fit: cover;
 }
 
-.select-check {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  background: rgba(0,0,0,0.35);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  font-size: 0.75rem;
-}
-
-.select-check.checked { background: var(--p-primary-color); }
-
 .person-entry-info {
   flex: 1;
   min-width: 0;
-  cursor: text;
 }
 
 .person-entry-name {
@@ -832,6 +820,34 @@ onUnmounted(() => {
 
 .rename-input:focus { border-color: var(--p-primary-color); }
 
+.pencil-btn {
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+}
+
+.person-entry:hover .pencil-btn,
+.person-entry:focus-within .pencil-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ── Face bbox overlay ───────────────────────────────────────────────────── */
+.face-box {
+  position: absolute;
+  border: 2px solid #eab308;
+  box-sizing: border-box;
+  pointer-events: none;
+  z-index: 2;
+  border-radius: 2px;
+}
+
+.face-box-fullscreen {
+  border-width: 3px;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.4);
+}
+
 /* ── Photo grid (center) ─────────────────────────────────────────────────── */
 .photo-grid-scroll {
   flex: 1;
@@ -855,9 +871,12 @@ onUnmounted(() => {
   cursor: pointer;
   transition: transform 0.2s;
   border: 4px solid transparent;
+  outline: none;
 }
 
 .photo-item:hover { transform: scale(1.02); }
+
+.photo-item:focus { border-color: var(--p-primary-300); }
 
 .photo-item.selected {
   border-color: var(--p-primary-color);
@@ -870,6 +889,7 @@ onUnmounted(() => {
   width: 100%;
   height: 200px;
   background: var(--surface-ground);
+  overflow: hidden;
 }
 
 .photo-thumb :deep(.heic-image-container) { width: 100%; height: 100%; }
@@ -947,8 +967,22 @@ onUnmounted(() => {
   background-color: var(--p-neutral-50);
 }
 .fs-topbar > * { display: flex; pointer-events: auto; color: var(--p-text-color); }
+
 .fs-topbar-btn { pointer-events: auto; }
-.fs-date-bar { white-space: nowrap; pointer-events: none; }
+
+.fs-center {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  pointer-events: auto;
+}
+
+.fs-person-name {
+  font-size: 1rem;
+  font-weight: 600;
+  pointer-events: none;
+}
+
 .fs-toolbar { display: flex; gap: 0.25rem; }
 
 .fs-nav {
@@ -972,37 +1006,6 @@ onUnmounted(() => {
 }
 
 .dialog-label { font-weight: 700; display: block; margin-bottom: 0.5rem; }
-
-.merge-options {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  max-height: 15rem;
-  overflow-y: auto;
-  border: 1px solid var(--surface-border);
-  border-radius: 6px;
-  padding: 0.5rem;
-}
-
-.merge-option { cursor: pointer; }
-
-.merge-option-label {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.4rem;
-  border-radius: 4px;
-  cursor: pointer;
-}
-.merge-option-label:hover { background: var(--surface-100); }
-
-.merge-avatar {
-  width: 2.5rem;
-  height: 2.5rem;
-  border-radius: 50%;
-  overflow: hidden;
-  flex-shrink: 0;
-}
 
 .rename-row { display: flex; flex-direction: column; gap: 0.5rem; }
 
