@@ -6,10 +6,21 @@
 import { eq, and, inArray, sql, not } from "drizzle-orm";
 import db from "../db/database";
 import { photoScanQueue, photos, faces, photoLandmarks } from "../db/schema";
-import { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS } from "./photo.service";
+import { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY } from "./photo.service";
 
-export type ScanService = "embedding" | "face_detection" | "landmark";
+export type ScanService = "embedding" | "face_detection" | "landmark" | "quality";
 export type ScanStatus = "pending" | "processing" | "failed" | "done";
+
+/**
+ * Thrown by a job handler to signal "not ready yet — put me back in the queue".
+ * The worker resets the job to pending without counting it as a failed attempt.
+ */
+export class DeferJobError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "DeferJobError";
+  }
+}
 
 export interface QueueServiceStatus {
   service: ScanService;
@@ -28,6 +39,7 @@ function enabledServices(): ScanService[] {
   const services: ScanService[] = ["embedding"];
   if (ENABLE_LOCAL_FACES) services.push("face_detection");
   if (ENABLE_LANDMARKS) services.push("landmark");
+  if (ENABLE_QUALITY) services.push("quality");
   return services;
 }
 
@@ -100,6 +112,22 @@ export async function markJobDone(id: number): Promise<void> {
     .where(eq(photoScanQueue.id, id));
 }
 
+/**
+ * Reset a processing job back to pending without incrementing the attempt
+ * counter.  Used when a job cannot run yet because a prerequisite scan has
+ * not finished — the job will be retried on the next worker poll cycle.
+ */
+export async function deferJob(id: number): Promise<void> {
+  await db
+    .update(photoScanQueue)
+    .set({
+      status: "pending",
+      started_at: null,
+      attempts: sql`GREATEST(0, attempts - 1)`,
+    })
+    .where(eq(photoScanQueue.id, id));
+}
+
 export async function markJobFailed(id: number, error: string): Promise<void> {
   await db
     .update(photoScanQueue)
@@ -117,7 +145,7 @@ export async function getQueueStatus(userId: number): Promise<QueueStatus> {
   `);
 
   const map = new Map<ScanService, QueueServiceStatus>();
-  for (const svc of (["embedding", "face_detection", "landmark"] as ScanService[])) {
+  for (const svc of (["embedding", "face_detection", "landmark", "quality"] as ScanService[])) {
     map.set(svc, { service: svc, pending: 0, processing: 0, failed: 0, done: 0 });
   }
 
@@ -214,6 +242,16 @@ async function getMissingPhotoIds(userId: number, service: ScanService): Promise
         AND NOT EXISTS (
           SELECT 1 FROM photo_landmarks l WHERE l.photo_id = p.id
         )
+    `);
+    return rows.rows.map((r) => r.id);
+  }
+
+  if (service === "quality") {
+    // Photos with no AI quality score yet
+    const rows = await db.execute<{ id: number }>(sql`
+      SELECT p.id FROM photos p
+      WHERE p.user_id = ${userId}
+        AND p.ai_quality_score IS NULL
     `);
     return rows.rows.map((r) => r.id);
   }

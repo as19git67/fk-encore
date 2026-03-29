@@ -243,3 +243,99 @@ class TestTextSearchEndpoint:
         assert len(results) == 1
         assert results[0]["photo_id"] == "p1"
         repo_stub.search_by_clip = AsyncMock(return_value=[])
+
+
+# ---------------------------------------------------------------------------
+# Helpers shared by quality tests
+# ---------------------------------------------------------------------------
+
+def _make_jpeg_bytes(width: int = 16, height: int = 16, color=(128, 100, 80)) -> bytes:
+    """Return a tiny valid JPEG image as bytes (no filesystem I/O)."""
+    import io
+    from PIL import Image as PILImage
+    img = PILImage.new("RGB", (width, height), color=color)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG")
+    return buf.getvalue()
+
+
+class TestQualityEndpoint:
+    """Tests for POST /quality.
+
+    The CLIP embedder is mocked via the stub set up at module level.
+    The fake embedder returns constant vectors so score values are
+    deterministic; tests verify structure, ranges, and error handling
+    rather than exact numeric values.
+    """
+
+    def test_valid_image_returns_all_score_fields(self):
+        jpeg = _make_jpeg_bytes()
+        response = client.post(
+            "/quality",
+            files={"file": ("test.jpg", jpeg, "image/jpeg")},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        for key in ("score", "clip_aesthetics", "clip_composition", "clip_technical",
+                    "blur_score", "contrast_score", "exposure_score"):
+            assert key in body, f"Missing key: {key}"
+
+    def test_all_scores_are_in_unit_range(self):
+        jpeg = _make_jpeg_bytes()
+        response = client.post(
+            "/quality",
+            files={"file": ("test.jpg", jpeg, "image/jpeg")},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        for key, value in body.items():
+            assert 0.0 <= value <= 1.0, f"{key}={value} is outside [0, 1]"
+
+    def test_bright_image_has_low_exposure_score(self):
+        """A fully white image should score lower on exposure than a mid-tone image."""
+        white_jpeg = _make_jpeg_bytes(color=(255, 255, 255))
+        mid_jpeg = _make_jpeg_bytes(color=(128, 128, 128))
+
+        white_score = client.post(
+            "/quality", files={"file": ("w.jpg", white_jpeg, "image/jpeg")}
+        ).json()["exposure_score"]
+        mid_score = client.post(
+            "/quality", files={"file": ("m.jpg", mid_jpeg, "image/jpeg")}
+        ).json()["exposure_score"]
+
+        assert white_score < mid_score
+
+    def test_dark_image_has_low_exposure_score(self):
+        """A nearly black image should score lower on exposure than a mid-tone image."""
+        dark_jpeg = _make_jpeg_bytes(color=(5, 5, 5))
+        mid_jpeg = _make_jpeg_bytes(color=(128, 128, 128))
+
+        dark_score = client.post(
+            "/quality", files={"file": ("d.jpg", dark_jpeg, "image/jpeg")}
+        ).json()["exposure_score"]
+        mid_score = client.post(
+            "/quality", files={"file": ("m.jpg", mid_jpeg, "image/jpeg")}
+        ).json()["exposure_score"]
+
+        assert dark_score < mid_score
+
+    def test_flat_image_has_low_contrast_score(self):
+        """A uniform-colour image should have near-zero contrast score."""
+        flat_jpeg = _make_jpeg_bytes(color=(128, 128, 128))
+        response = client.post(
+            "/quality",
+            files={"file": ("flat.jpg", flat_jpeg, "image/jpeg")},
+        )
+        assert response.status_code == 200
+        assert response.json()["contrast_score"] < 0.15
+
+    def test_invalid_file_returns_422(self):
+        response = client.post(
+            "/quality",
+            files={"file": ("bad.jpg", b"not-an-image", "image/jpeg")},
+        )
+        assert response.status_code == 422
+
+    def test_missing_file_returns_422(self):
+        response = client.post("/quality")
+        assert response.status_code == 422

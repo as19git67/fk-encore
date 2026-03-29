@@ -1,24 +1,28 @@
 /**
- * Background scan workers — one per service (embedding, face_detection, landmark).
+ * Background scan workers — one per service (embedding, face_detection, landmark, quality).
  * Workers are started as a side-effect of importing this module (via encore.service.ts).
  *
  * Concurrency per worker is configurable via environment variables:
  *   SCAN_EMBEDDING_CONCURRENCY   (default: 1)
  *   SCAN_FACE_CONCURRENCY        (default: 1)
  *   SCAN_LANDMARK_CONCURRENCY    (default: 1)
+ *   SCAN_QUALITY_CONCURRENCY     (default: 1)
  */
 
 import {
   dequeueNextJob,
+  deferJob,
   markJobDone,
   markJobFailed,
   resetStuckJobs,
+  DeferJobError,
   type ScanService,
 } from "./scan-queue";
 import {
   indexPhotoEmbeddings,
   indexPhotoFaces,
   indexPhotoLandmarks,
+  indexPhotoQuality,
   findPhotoGroupsLogic,
   cleanupOrphanedPersons,
 } from "./photo.service";
@@ -63,16 +67,24 @@ class ScanWorker {
         );
       }
 
-      // After face detection completes, clean up orphaned persons
+      // After face detection completes, clean up orphaned persons.
+      // Quality re-scoring is handled automatically: the quality worker defers
+      // its job while face detection is still running and retries on the next
+      // poll cycle — no explicit re-trigger needed here.
       if (this.service === "face_detection") {
         cleanupOrphanedPersons(job.user_id).catch((err) =>
           console.error(`[scan-worker] cleanup error after face job ${job.id}:`, err),
         );
       }
     } catch (err: any) {
-      const msg = err?.message ?? String(err);
-      console.error(`[scan-worker] ${this.service} job ${job.id} failed:`, msg);
-      await markJobFailed(job.id, msg).catch(() => {});
+      if (err instanceof DeferJobError) {
+        console.log(`[scan-worker] deferring ${this.service} job ${job.id}: ${err.message}`);
+        await deferJob(job.id).catch(() => {});
+      } else {
+        const msg = err?.message ?? String(err);
+        console.error(`[scan-worker] ${this.service} job ${job.id} failed:`, msg);
+        await markJobFailed(job.id, msg).catch(() => {});
+      }
     }
   }
 
@@ -86,6 +98,9 @@ class ScanWorker {
         break;
       case "landmark":
         await indexPhotoLandmarks(job.user_id, job.photo_id);
+        break;
+      case "quality":
+        await indexPhotoQuality(job.user_id, job.photo_id);
         break;
     }
   }
@@ -108,16 +123,19 @@ class ScanWorker {
 const embeddingConcurrency = parseInt(process.env.SCAN_EMBEDDING_CONCURRENCY ?? "1", 10);
 const faceConcurrency = parseInt(process.env.SCAN_FACE_CONCURRENCY ?? "1", 10);
 const landmarkConcurrency = parseInt(process.env.SCAN_LANDMARK_CONCURRENCY ?? "1", 10);
+const qualityConcurrency = parseInt(process.env.SCAN_QUALITY_CONCURRENCY ?? "1", 10);
 
 const embeddingWorker = new ScanWorker("embedding", embeddingConcurrency);
 const faceWorker = new ScanWorker("face_detection", faceConcurrency);
 const landmarkWorker = new ScanWorker("landmark", landmarkConcurrency);
+const qualityWorker = new ScanWorker("quality", qualityConcurrency);
 
 /** Wake all workers to check for new work. Non-blocking. */
 export function triggerWorkers(): void {
   embeddingWorker.tick();
   faceWorker.tick();
   landmarkWorker.tick();
+  qualityWorker.tick();
 }
 
 export async function startWorkers(): Promise<void> {
@@ -127,8 +145,9 @@ export async function startWorkers(): Promise<void> {
   embeddingWorker.start();
   faceWorker.start();
   landmarkWorker.start();
+  qualityWorker.start();
   console.log(
-    `[scan-worker] embedding(c=${embeddingConcurrency}), face_detection(c=${faceConcurrency}), landmark(c=${landmarkConcurrency})`,
+    `[scan-worker] embedding(c=${embeddingConcurrency}), face_detection(c=${faceConcurrency}), landmark(c=${landmarkConcurrency}), quality(c=${qualityConcurrency})`,
   );
 }
 

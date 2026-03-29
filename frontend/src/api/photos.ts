@@ -18,6 +18,7 @@ export interface Photo {
   location_name?: string
   location_city?: string
   location_country?: string
+  ai_quality_score?: number
 }
 
 export interface ListPhotosResponse {

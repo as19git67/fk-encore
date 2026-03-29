@@ -4,7 +4,7 @@ import crypto from "crypto";
 import exifr from "exifr";
 import { exiftool } from "exiftool-vendored";
 import { eq, and, or, sql, inArray, ilike } from "drizzle-orm";
-import { enqueuePhotoScan } from "./scan-queue";
+import { enqueuePhotoScan, DeferJobError } from "./scan-queue";
 import { triggerWorkers } from "./scan-worker";
 import db from "../db/database";
 import { dbFirst, dbAll, dbExec, dbInsertReturning } from '../db/adapter';
@@ -21,6 +21,7 @@ import {
   photoGroups,
   photoGroupMembers,
   photoLandmarks,
+  photoScanQueue,
 } from "../db/schema";
 import type {
   Photo,
@@ -83,6 +84,7 @@ const FACE_SIMILARITY_THRESHOLD = parseFloat(process.env.FACE_DISTANCE_THRESHOLD
 export const ENABLE_LOCAL_FACES = process.env.ENABLE_LOCAL_FACES === "true";
 const LANDMARK_SERVICE_URL = process.env.LANDMARK_SERVICE_URL || "http://localhost:8002";
 export const ENABLE_LANDMARKS = process.env.ENABLE_LANDMARKS === "true";
+export const ENABLE_QUALITY = process.env.ENABLE_QUALITY !== "false"; // enabled by default
 
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -528,6 +530,7 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
     created_at: string | null; curation_status: string | null;
     latitude: number | null; longitude: number | null;
     location_name: string | null; location_city: string | null; location_country: string | null;
+    ai_quality_score: number | null;
   }>(
     db
       .select({
@@ -546,6 +549,7 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
         location_name: photos.location_name,
         location_city: photos.location_city,
         location_country: photos.location_country,
+        ai_quality_score: photos.ai_quality_score,
       })
       .from(photos)
       .leftJoin(
@@ -575,6 +579,7 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
       location_name: r.location_name ?? undefined,
       location_city: r.location_city ?? undefined,
       location_country: r.location_country ?? undefined,
+      ai_quality_score: r.ai_quality_score ?? undefined,
     })),
   };
 }
@@ -2049,6 +2054,164 @@ export async function indexPhotoLandmarks(userId: number, photoId: number): Prom
     }
   } catch (err) {
     console.error(`Landmark detection failed for photo ${photoId}:`, err);
+  } finally {
+    if (tempPath && fs.existsSync(tempPath)) {
+      fs.unlinkSync(tempPath);
+    }
+  }
+}
+
+// ---------- AI Quality Scoring ----------
+
+interface FaceBBoxNorm { x: number; y: number; width: number; height: number }
+
+/**
+ * Score how well a set of detected face bounding boxes are composed within
+ * the frame.  Returns a value in [0, 1], or null when no faces are present
+ * (so the caller can omit the signal entirely rather than penalising photos
+ * that have not yet been face-scanned or that intentionally contain no faces).
+ *
+ * Criteria:
+ *  - Face size relative to the image (ideal 5–45 % of image area)
+ *  - Proximity of the face centre to image edges (cropped faces score lower)
+ */
+/** Exported for testing. */
+export function computeFaceCompositionScore(bboxes: FaceBBoxNorm[]): number | null {
+  const visible = bboxes.filter(b => b.width > 0 && b.height > 0);
+  if (visible.length === 0) return null;
+
+  // Use the largest face as the main subject
+  const main = visible.reduce((best, f) =>
+    f.width * f.height > best.width * best.height ? f : best
+  );
+
+  const area = main.width * main.height;
+
+  // Area score: ideal range 0.05–0.45 (5–45 % of image)
+  let areaScore: number;
+  if (area < 0.005) {
+    areaScore = 0.2;                                              // very distant
+  } else if (area < 0.05) {
+    areaScore = 0.2 + ((area - 0.005) / 0.045) * 0.7;           // ramp up
+  } else if (area <= 0.45) {
+    areaScore = 0.9;                                              // ideal
+  } else if (area <= 0.75) {
+    areaScore = 0.9 - ((area - 0.45) / 0.30) * 0.4;             // ramp down (very close)
+  } else {
+    areaScore = 0.5;                                              // face fills most of frame
+  }
+
+  // Position score: penalise face centres that are very close to any edge
+  const cx = main.x + main.width / 2;
+  const cy = main.y + main.height / 2;
+  const minEdgeDist = Math.min(cx, 1 - cx, cy, 1 - cy);
+  // Full score if centre is >0.15 from any edge; zero at the edge
+  const positionScore = Math.min(1.0, minEdgeDist / 0.15);
+
+  return areaScore * 0.65 + positionScore * 0.35;
+}
+
+export async function indexPhotoQuality(userId: number, photoId: number): Promise<void> {
+  if (!ENABLE_QUALITY) return;
+
+  // If face detection is enabled, wait until its job is no longer active before
+  // scoring.  Throwing DeferJobError puts this job back to pending so it is
+  // retried on the next worker poll cycle — no double CLIP call needed.
+  if (ENABLE_LOCAL_FACES) {
+    const faceJobRow = await dbFirst<{ status: string }>(
+      db.select({ status: photoScanQueue.status })
+        .from(photoScanQueue)
+        .where(and(
+          eq(photoScanQueue.photo_id, photoId),
+          eq(photoScanQueue.service, "face_detection"),
+        ))
+    );
+    // Defer only when a face job actively exists but hasn't finished yet.
+    // If no job exists, or it is done/failed, proceed so quality scoring is
+    // never blocked indefinitely.
+    if (faceJobRow && (faceJobRow.status === "pending" || faceJobRow.status === "processing")) {
+      throw new DeferJobError("waiting for face_detection to complete");
+    }
+  }
+
+  const photo = await dbFirst<typeof photos.$inferSelect>(
+    db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+  );
+  if (!photo) return;
+
+  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  if (!fs.existsSync(filePath)) return;
+
+  let processingPath = filePath;
+  let tempPath: string | null = null;
+
+  // HEIC files must be converted before sending to the embedding service
+  const ext = path.extname(photo.filename).toLowerCase();
+  if (ext === ".heic" || ext === ".heif") {
+    try {
+      const inputBuffer = await fs.promises.readFile(filePath);
+      const outputBuffer = await heicConvert({ buffer: inputBuffer, format: "JPEG", quality: 1 });
+      tempPath = path.join(UPLOAD_DIR, `temp_q_${photoId}_${Date.now()}.jpg`);
+      await fs.promises.writeFile(tempPath, outputBuffer as Buffer);
+      processingPath = tempPath;
+    } catch (err) {
+      console.error(`HEIC conversion for quality scoring failed (photo ${photoId}):`, err);
+      return;
+    }
+  }
+
+  try {
+    const formData = new FormData();
+    const fileData = await fs.promises.readFile(processingPath);
+    const blob = new Blob([fileData], { type: getUploadMimeType(processingPath) });
+    formData.append("file", blob, path.basename(processingPath));
+
+    const response = await fetch(`${EMBEDDING_SERVICE_URL}/quality`, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Quality service returned ${response.status} for photo ${photoId}: ${errorText}`);
+      return;
+    }
+
+    const result = await response.json() as { score: number };
+    let compositeScore = result.score;
+
+    // ── Optional face composition signal ───────────────────────────────────
+    // Query any already-detected non-ignored face bboxes for this photo.
+    // If face detection has not yet run the result is empty and the signal
+    // is skipped rather than penalising the photo.
+    try {
+      const faceRows = await dbAll<{ bbox: string }>(
+        db.select({ bbox: faces.bbox })
+          .from(faces)
+          .where(and(eq(faces.photo_id, photoId), eq(faces.ignored, false)))
+      );
+
+      const bboxes = faceRows.map(r => JSON.parse(r.bbox) as FaceBBoxNorm);
+      const faceScore = computeFaceCompositionScore(bboxes);
+
+      if (faceScore !== null) {
+        // Blend: base score 85 %, face composition 15 %
+        compositeScore = compositeScore * 0.85 + faceScore * 0.15;
+        console.log(`[quality] photo ${photoId} face composition score ${faceScore.toFixed(3)} → blended ${compositeScore.toFixed(3)}`);
+      }
+    } catch (faceErr) {
+      // Non-fatal: proceed with embedding-service score only
+      console.warn(`[quality] face composition query failed for photo ${photoId}:`, faceErr);
+    }
+
+    await db
+      .update(photos)
+      .set({ ai_quality_score: compositeScore })
+      .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)));
+
+    console.log(`[quality] photo ${photoId} final score ${compositeScore.toFixed(3)}`);
+  } catch (err) {
+    console.error(`Quality scoring failed for photo ${photoId}:`, err);
   } finally {
     if (tempPath && fs.existsSync(tempPath)) {
       fs.unlinkSync(tempPath);

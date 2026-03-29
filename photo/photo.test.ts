@@ -6,8 +6,9 @@ import { eq } from "drizzle-orm";
 import db from "../db/database";
 import { photos, faces, persons, albums, albumPhotos, albumShares, users, roles, permissions, rolePermissions, userRoles } from "../db/schema";
 import { dbInsertReturning, dbExec } from "../db/adapter";
-import { UPLOAD_DIR } from "./photo.service";
+import { UPLOAD_DIR, computeFaceCompositionScore } from "./photo.service";
 import * as service from "./photo.service";
+import { DeferJobError } from "./scan-queue";
 import { createUserLogic, getPermissionsForUser } from "../user/user.service";
 import { createRoleLogic, assignPermissionLogic } from "../role/role.service";
 import { assignRoleLogic } from "../user/user-roles.service";
@@ -487,5 +488,110 @@ describe("Photo Module", () => {
       const albumDetails = await service.getAlbumLogic(user1.id, album.id);
       expect(albumDetails.photos).toHaveLength(1);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pure-function unit tests — no DB required
+// ---------------------------------------------------------------------------
+
+describe("computeFaceCompositionScore", () => {
+  it("returns null when no bboxes provided", () => {
+    expect(computeFaceCompositionScore([])).toBeNull();
+  });
+
+  it("returns null when all bboxes have zero dimensions", () => {
+    expect(computeFaceCompositionScore([
+      { x: 0.1, y: 0.1, width: 0, height: 0 },
+      { x: 0.2, y: 0.2, width: 0, height: 0 },
+    ])).toBeNull();
+  });
+
+  it("returns a value in [0, 1] for a well-centred face in ideal area range", () => {
+    // 0.25 × 0.25 = 0.0625 → ideal area; centre at (0.25+0.125, 0.25+0.125) = (0.375, 0.375)
+    const score = computeFaceCompositionScore([
+      { x: 0.25, y: 0.25, width: 0.25, height: 0.25 },
+    ]);
+    expect(score).not.toBeNull();
+    expect(score!).toBeGreaterThanOrEqual(0);
+    expect(score!).toBeLessThanOrEqual(1);
+  });
+
+  it("scores a well-centred ideal-size face higher than a face at the edge", () => {
+    const centred = computeFaceCompositionScore([
+      { x: 0.375, y: 0.375, width: 0.25, height: 0.25 },
+    ])!;
+    // Face centre very close to the left edge
+    const edgeFace = computeFaceCompositionScore([
+      { x: 0.0, y: 0.375, width: 0.25, height: 0.25 },
+    ])!;
+    expect(centred).toBeGreaterThan(edgeFace);
+  });
+
+  it("gives a low area score for a very tiny face (area < 0.005)", () => {
+    // 0.05 × 0.05 = 0.0025 < 0.005
+    const tiny = computeFaceCompositionScore([
+      { x: 0.475, y: 0.475, width: 0.05, height: 0.05 },
+    ])!;
+    const ideal = computeFaceCompositionScore([
+      { x: 0.375, y: 0.375, width: 0.25, height: 0.25 },
+    ])!;
+    expect(tiny).toBeLessThan(ideal);
+  });
+
+  it("gives a lower area score when the face fills most of the frame (area > 0.75)", () => {
+    // 0.9 × 0.9 = 0.81 > 0.75
+    const huge = computeFaceCompositionScore([
+      { x: 0.05, y: 0.05, width: 0.9, height: 0.9 },
+    ])!;
+    const ideal = computeFaceCompositionScore([
+      { x: 0.375, y: 0.375, width: 0.25, height: 0.25 },
+    ])!;
+    expect(huge).toBeLessThan(ideal);
+  });
+
+  it("selects the largest face as the main subject when multiple bboxes are present", () => {
+    // Two faces: a tiny one and a big one.  Score should be driven by the big face.
+    const multipleWithBig = computeFaceCompositionScore([
+      { x: 0.0, y: 0.0, width: 0.05, height: 0.05 },   // tiny, corner
+      { x: 0.375, y: 0.375, width: 0.25, height: 0.25 }, // big, centred
+    ])!;
+    const singleBig = computeFaceCompositionScore([
+      { x: 0.375, y: 0.375, width: 0.25, height: 0.25 },
+    ])!;
+    expect(multipleWithBig).toBeCloseTo(singleBig, 5);
+  });
+
+  it("ignores zero-size bboxes mixed with valid ones", () => {
+    const withZero = computeFaceCompositionScore([
+      { x: 0.1, y: 0.1, width: 0, height: 0 },
+      { x: 0.375, y: 0.375, width: 0.25, height: 0.25 },
+    ])!;
+    const withoutZero = computeFaceCompositionScore([
+      { x: 0.375, y: 0.375, width: 0.25, height: 0.25 },
+    ])!;
+    expect(withZero).toBeCloseTo(withoutZero, 5);
+  });
+});
+
+describe("DeferJobError", () => {
+  it("is an instance of Error", () => {
+    const err = new DeferJobError("test reason");
+    expect(err).toBeInstanceOf(Error);
+  });
+
+  it("is an instance of DeferJobError", () => {
+    const err = new DeferJobError("test reason");
+    expect(err).toBeInstanceOf(DeferJobError);
+  });
+
+  it("has name DeferJobError", () => {
+    const err = new DeferJobError("test reason");
+    expect(err.name).toBe("DeferJobError");
+  });
+
+  it("carries the provided message", () => {
+    const err = new DeferJobError("waiting for face_detection");
+    expect(err.message).toBe("waiting for face_detection");
   });
 });
