@@ -201,15 +201,53 @@ interface YearGroup {
   months: MonthGroup[]
 }
 
-const groupedPhotos = computed(() => {
-  const groups: YearGroup[] = []
-  const ids = searchResultIds.value
+const sortBy = ref<'date' | 'quality'>('date')
 
-  const orderedPhotos = ids !== null
+const groupedPhotos = computed(() => {
+  const ids = searchResultIds.value
+  const basePhotos = ids !== null
     ? ids.map(id => photos.value.find(p => p.id === id)).filter((p): p is Photo => p !== undefined)
     : photos.value
 
-  orderedPhotos.forEach((photo, index) => {
+  if (sortBy.value === 'quality') {
+    const tiers = [
+      { label: 'Gut (≥ 65 %)', test: (s: number) => s >= 0.65 },
+      { label: 'Mittel (40–64 %)', test: (s: number) => s >= 0.40 && s < 0.65 },
+      { label: 'Schlecht (< 40 %)', test: (s: number) => s < 0.40 },
+    ]
+    const unscored: Photo[] = []
+    const buckets: Photo[][] = [[], [], []]
+
+    basePhotos.forEach(photo => {
+      if (ids === null && hiddenByStack.value.has(photo.id)) return
+      const s = photo.ai_quality_score
+      if (s === undefined || s === null) { unscored.push(photo); return }
+      for (let i = 0; i < tiers.length; i++) {
+        if (tiers[i].test(s)) { buckets[i].push(photo); return }
+      }
+    })
+
+    const groups: YearGroup[] = []
+    tiers.forEach((tier, i) => {
+      const tierPhotos = buckets[i].sort((a, b) => (b.ai_quality_score ?? 0) - (a.ai_quality_score ?? 0))
+      if (tierPhotos.length === 0) return
+      groups.push({
+        year: tier.label,
+        months: [{ month: '', photos: tierPhotos.map(photo => ({ photo, index: photos.value.indexOf(photo) })) }],
+      })
+    })
+    if (unscored.length > 0) {
+      groups.push({
+        year: 'Nicht bewertet',
+        months: [{ month: '', photos: unscored.map(photo => ({ photo, index: photos.value.indexOf(photo) })) }],
+      })
+    }
+    return groups
+  }
+
+  // ── Date grouping (default) ──
+  const groups: YearGroup[] = []
+  basePhotos.forEach((photo, index) => {
     if (ids === null && hiddenByStack.value.has(photo.id)) return
 
     const date = new Date(photo.taken_at || photo.created_at)
@@ -217,22 +255,15 @@ const groupedPhotos = computed(() => {
     const month = date.toLocaleString('de-DE', { month: 'long' })
 
     let yearGroup = groups.find(g => g.year === year)
-    if (!yearGroup) {
-      yearGroup = { year, months: [] }
-      groups.push(yearGroup)
-    }
+    if (!yearGroup) { yearGroup = { year, months: [] }; groups.push(yearGroup) }
 
     let monthGroup = yearGroup.months.find(m => m.month === month)
-    if (!monthGroup) {
-      monthGroup = { month, photos: [] }
-      yearGroup.months.push(monthGroup)
-    }
+    if (!monthGroup) { monthGroup = { month, photos: [] }; yearGroup.months.push(monthGroup) }
 
     const group = photoToGroup.value.get(photo.id)
     const stackGroup = ids === null && group && !group.reviewed_at ? group : undefined
     monthGroup.photos.push({ photo, index, group: stackGroup })
   })
-
   return groups
 })
 
@@ -763,6 +794,16 @@ onUnmounted(() => {
         <span v-if="searchResults !== null && !searchLoading" class="search-result-count">
           {{ searchResults.length }} Treffer
         </span>
+        <div class="sort-toggle">
+          <Button
+            :icon="sortBy === 'date' ? 'pi pi-calendar' : 'pi pi-star'"
+            :label="sortBy === 'date' ? 'Datum' : 'Qualität'"
+            size="small"
+            severity="secondary"
+            outlined
+            @click="sortBy = sortBy === 'date' ? 'quality' : 'date'"
+          />
+        </div>
       </div>
     </div>
 
@@ -800,7 +841,7 @@ onUnmounted(() => {
           <h2 class="year-title" :id="'year-' + yearGroup.year" data-section-header>{{ yearGroup.year }}</h2>
 
           <template v-for="monthGroup in yearGroup.months" :key="yearGroup.year + monthGroup.month">
-            <h3 class="month-title"
+            <h3 v-if="monthGroup.month" class="month-title"
               :id="'month-' + yearGroup.year + '-' + monthGroup.month"
               data-section-header>
               {{ monthGroup.month }}
@@ -1229,6 +1270,10 @@ onUnmounted(() => {
   font-size: 0.875rem;
   color: var(--text-color-secondary);
   white-space: nowrap;
+}
+
+.sort-toggle {
+  margin-left: auto;
 }
 
 /* ── Upload ──────────────────────────────────────────────────────────────── */

@@ -144,7 +144,7 @@ onUnmounted(() => stopPolling())
 </script>
 
 <template>
-  <div>
+  <div class="data-management-view">
     <h2>Datenverwaltung</h2>
 
     <!-- Scan Queue -->
@@ -282,6 +282,12 @@ onUnmounted(() => stopPolling())
 </template>
 
 <style scoped>
+@media (min-width: 800px) {
+  .data-management-view {
+    margin-inline: 0.5em;
+  }
+}
+
 .status-progress {
   display: flex;
   flex-direction: column;
