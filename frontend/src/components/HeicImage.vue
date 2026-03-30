@@ -127,8 +127,8 @@ const getRenderedObjectRectInImageBox = (img: HTMLImageElement) => {
   // Read object-position from computed style (supports inline style set via imageStyle prop)
   const computedPos = window.getComputedStyle(img).objectPosition || '50% 50%'
   const posParts = computedPos.split(' ')
-  const opX = Math.max(0, Math.min(100, parseFloat(posParts[0]) || 50)) / 100
-  const opY = Math.max(0, Math.min(100, parseFloat(posParts[1] ?? posParts[0]) || 50)) / 100
+  const opX = Math.max(0, Math.min(100, parseFloat(posParts[0] ?? '50') || 50)) / 100
+  const opY = Math.max(0, Math.min(100, parseFloat(posParts[1] ?? posParts[0] ?? '50') || 50)) / 100
 
   return {
     x: (boxWidth - renderedWidth) * opX,
