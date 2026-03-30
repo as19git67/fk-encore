@@ -509,7 +509,7 @@ function onPhotoKeydown(e: KeyboardEvent, idx: number) {
     e.preventDefault()
     e.stopPropagation()
     selectedIndex.value = idx
-    isFullscreen.value = true
+    isFullscreen.value = !isFullscreen.value
   } else if (e.key === 'ArrowRight') {
     e.preventDefault()
     const next = idx + 1 < total ? idx + 1 : 0
