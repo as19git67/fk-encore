@@ -1,4 +1,4 @@
-import { pgTable, text, integer, primaryKey, serial, boolean, timestamp, real, doublePrecision, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, primaryKey, serial, boolean, timestamp, real, doublePrecision, pgEnum, jsonb } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 // ========== Users ==========
@@ -118,6 +118,7 @@ export const photos = pgTable("photos", {
   location_city: text("location_city"),
   location_country: text("location_country"),
   ai_quality_score: real("ai_quality_score"),
+  ai_quality_details: jsonb("ai_quality_details").$type<Record<string, number>>(),
 });
 
 // ========== Persons ==========
