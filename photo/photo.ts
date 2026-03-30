@@ -13,6 +13,8 @@ import type {
   CreateAlbumRequest,
   UpdateAlbumRequest,
   AddPhotoToAlbumRequest,
+  BatchAlbumPhotosRequest,
+  ListPhotoAlbumsResponse,
   ShareAlbumRequest,
   ListAlbumsResponse,
   ListPhotosResponse,
@@ -356,6 +358,31 @@ export const addPhotoToAlbum = api(
     checkModule();
     const userId = getUserId();
     return await service.addPhotoToAlbumLogic(userId, req);
+  }
+);
+
+/**
+ * Get album IDs for a list of photos.
+ */
+export const getPhotosAlbums = api(
+  { expose: true, method: "GET", path: "/photos/albums", auth: true },
+  async ({ ids }: { ids: Query<string> }): Promise<ListPhotoAlbumsResponse> => {
+    checkModule();
+    const userId = getUserId();
+    const photoIds = ids.split(",").map(id => parseInt(id)).filter(id => !isNaN(id));
+    return await service.getPhotoAlbumsLogic(userId, photoIds);
+  }
+);
+
+/**
+ * Batch add/remove photos to/from albums.
+ */
+export const batchUpdateAlbumPhotos = api(
+  { expose: true, method: "POST", path: "/albums/photos/batch", auth: true },
+  async (req: BatchAlbumPhotosRequest): Promise<{ success: boolean }> => {
+    checkModule();
+    const userId = getUserId();
+    return await service.batchUpdateAlbumPhotosLogic(userId, req);
   }
 );
 

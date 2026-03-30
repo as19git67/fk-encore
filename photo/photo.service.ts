@@ -36,6 +36,8 @@ import type {
   CreateAlbumRequest,
   UpdateAlbumRequest,
   AddPhotoToAlbumRequest,
+  BatchAlbumPhotosRequest,
+  ListPhotoAlbumsResponse,
   ShareAlbumRequest,
   ListAlbumsResponse,
   ListPhotosResponse,
@@ -872,7 +874,32 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
   }
 
   // Build photo query based on settings
-  let query = db
+  const conditions = [eq(albumPhotos.album_id, albumId)];
+
+  // Apply curation filter (hide mode)
+  if (settings.hide_mode === "mine") {
+    // Hide if current user hid it
+    conditions.push(or(isNull(photoCuration.status), sql`${photoCuration.status} != 'hidden'`) as any);
+  } else if (settings.hide_mode === "all") {
+    // Hide if ANYONE who is part of the album hid it
+    // For simplicity, we hide if it's hidden in the global curation table for this photo at all
+    // A more precise version would check only album participants
+    const hiddenSubquery = db
+      .select({ photo_id: photoCuration.photo_id })
+      .from(photoCuration)
+      .where(eq(photoCuration.status, "hidden"));
+    
+    conditions.push(sql`${photos.id} NOT IN (${hiddenSubquery})`);
+  }
+
+  // Apply active view
+  if (settings.active_view === "favorites") {
+    conditions.push(eq(photoCuration.status, "favorite"));
+  } else if (settings.active_view === "by_user" && settings.view_config && (settings.view_config as any).userId) {
+    conditions.push(eq(albumPhotos.added_by_user_id, (settings.view_config as any).userId));
+  }
+
+  const query = db
     .select({
       id: photos.id,
       user_id: photos.user_id,
@@ -890,30 +917,7 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     .from(photos)
     .innerJoin(albumPhotos, eq(albumPhotos.photo_id, photos.id))
     .leftJoin(photoCuration, and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)))
-    .where(eq(albumPhotos.album_id, albumId));
-
-  // Apply curation filter (hide mode)
-  if (settings.hide_mode === "mine") {
-    // Hide if current user hid it
-    query = query.where(or(isNull(photoCuration.status), sql`${photoCuration.status} != 'hidden'`));
-  } else if (settings.hide_mode === "all") {
-    // Hide if ANYONE who is part of the album hid it
-    // For simplicity, we hide if it's hidden in the global curation table for this photo at all
-    // A more precise version would check only album participants
-    const hiddenSubquery = db
-      .select({ photo_id: photoCuration.photo_id })
-      .from(photoCuration)
-      .where(eq(photoCuration.status, "hidden"));
-    
-    query = query.where(sql`${photos.id} NOT IN (${hiddenSubquery})`);
-  }
-
-  // Apply active view
-  if (settings.active_view === "favorites") {
-    query = query.where(eq(photoCuration.status, "favorite"));
-  } else if (settings.active_view === "by_user" && settings.view_config && (settings.view_config as any).userId) {
-    query = query.where(eq(albumPhotos.added_by_user_id, (settings.view_config as any).userId));
-  }
+    .where(and(...conditions));
 
   const photoRows = await dbAll<any>(query);
 
@@ -1054,6 +1058,94 @@ export async function addPhotoToAlbumLogic(userId: number, req: AddPhotoToAlbumR
       added_at: new Date().toISOString()
     })
   );
+
+  return { success: true };
+}
+
+export async function getPhotoAlbumsLogic(userId: number, photoIds: number[]): Promise<ListPhotoAlbumsResponse> {
+  if (photoIds.length === 0) return { results: [] };
+
+  const res = await dbAll<{ photo_id: number, album_id: number }>(
+    db.select({ photo_id: albumPhotos.photo_id, album_id: albumPhotos.album_id })
+      .from(albumPhotos)
+      .innerJoin(albums, eq(albums.id, albumPhotos.album_id))
+      .where(and(
+        inArray(albumPhotos.photo_id, photoIds),
+        or(
+          eq(albums.user_id, userId),
+          sql`EXISTS (SELECT 1 FROM ${albumShares} WHERE ${albumShares.album_id} = ${albums.id} AND ${albumShares.user_id} = ${userId})`
+        )
+      ))
+  );
+
+  const map = new Map<number, number[]>();
+  photoIds.forEach(id => map.set(id, []));
+  res.forEach(r => {
+    map.get(r.photo_id)?.push(r.album_id);
+  });
+
+  return {
+    results: Array.from(map.entries()).map(([photoId, albumIds]) => ({ photoId, albumIds }))
+  };
+}
+
+export async function batchUpdateAlbumPhotosLogic(userId: number, req: BatchAlbumPhotosRequest): Promise<{ success: boolean }> {
+  const { albumIds, photoIds, action } = req;
+  if (albumIds.length === 0 || photoIds.length === 0) return { success: true };
+
+  // Check write access for all albums
+  for (const albumId of albumIds) {
+    const album = await dbFirst<typeof albums.$inferSelect>(
+      db.select().from(albums).where(eq(albums.id, albumId))
+    );
+    if (!album) throw new Error(`Album ${albumId} not found`);
+
+    const isOwner = album.user_id === userId;
+    const share = await dbFirst<typeof albumShares.$inferSelect>(
+      db.select().from(albumShares).where(and(eq(albumShares.album_id, albumId), eq(albumShares.user_id, userId)))
+    );
+
+    if (!isOwner && (!share || share.access_level !== "write")) {
+      throw new Error(`Unauthorized to modify album ${albumId}`);
+    }
+  }
+
+  // Check photo ownership
+  const ownedPhotos = await dbAll<{ id: number }>(
+    db.select({ id: photos.id })
+      .from(photos)
+      .where(and(inArray(photos.id, photoIds), eq(photos.user_id, userId)))
+  );
+  if (ownedPhotos.length !== photoIds.length) {
+    throw new Error("One or more photos not found or not owned by user");
+  }
+
+  if (action === "add") {
+    for (const albumId of albumIds) {
+      for (const photoId of photoIds) {
+        const exists = await dbFirst(
+          db.select().from(albumPhotos).where(and(eq(albumPhotos.album_id, albumId), eq(albumPhotos.photo_id, photoId)))
+        );
+        if (!exists) {
+          await dbExec(
+            db.insert(albumPhotos).values({
+              album_id: albumId,
+              photo_id: photoId,
+              added_by_user_id: userId,
+              added_at: new Date().toISOString()
+            })
+          );
+        }
+      }
+    }
+  } else if (action === "remove") {
+    await dbExec(
+      db.delete(albumPhotos).where(and(
+        inArray(albumPhotos.album_id, albumIds),
+        inArray(albumPhotos.photo_id, photoIds)
+      ))
+    );
+  }
 
   return { success: true };
 }
