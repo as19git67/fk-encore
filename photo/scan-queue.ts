@@ -194,7 +194,20 @@ export async function requeueForRescan(userId: number, force: boolean): Promise<
 
     for (const photoId of photoIds) {
       if (force) {
-        // Reset any existing row (pending/processing/failed/done) to pending with force=true
+        // Remove all done/failed rows first so at most one row (the active one)
+        // remains. Without this, updating multiple rows to 'pending' would
+        // violate the partial unique index uq_active_scan.
+        await db
+          .delete(photoScanQueue)
+          .where(
+            and(
+              eq(photoScanQueue.photo_id, photoId),
+              eq(photoScanQueue.service, service),
+              not(inArray(photoScanQueue.status, ["pending", "processing"])),
+            ),
+          );
+
+        // Reset any surviving active row to pending with force=true
         const updated = await db
           .update(photoScanQueue)
           .set({ status: "pending", force: true, error_msg: null, started_at: null, finished_at: null, attempts: 0 })
