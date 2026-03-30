@@ -75,7 +75,14 @@ const uniquePhotoFaceItems = computed(() => {
   })
 })
 
-watch(uniquePhotoFaceItems, () => nextTick(setupPhotoObserver))
+// Ensure selectedIndex is always valid when photos are available
+watch(uniquePhotoFaceItems, (items) => {
+  if (items.length > 0) {
+    if (selectedIndex.value < 0) selectedIndex.value = 0
+    else if (selectedIndex.value >= items.length) selectedIndex.value = items.length - 1
+  }
+  void nextTick(setupPhotoObserver)
+})
 
 const allUniquePhotoFaceItems = computed(() => {
   const seen = new Set<number>()
@@ -229,6 +236,7 @@ async function loadData() {
         getPersonEntries()[0]?.focus()
       } else {
         selectedPerson.value = null
+        selectedPersonDetail.value = null
       }
     } else if (persons.value.length > 0) {
       await selectPerson(persons.value[0]!)
@@ -251,6 +259,10 @@ async function selectPerson(person: Person) {
   loadingDetails.value = true
   try {
     selectedPersonDetail.value = await getPersonDetails(person.id)
+    // Always select first photo — never leave grid without a selection
+    if (uniquePhotoFaceItems.value.length > 0) {
+      selectedIndex.value = 0
+    }
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden'
     selectedPersonDetail.value = null
@@ -369,6 +381,10 @@ async function handleIgnoreFace(faceId: number) {
 }
 
 async function handleIgnorePerson(person: Person) {
+  // Pre-select the next (or previous) person so loadData restores the right selection
+  const currentIdx = persons.value.findIndex(p => p.id === person.id)
+  const fallback = persons.value[currentIdx + 1] ?? persons.value[currentIdx - 1] ?? null
+
   confirm.require({
     message: `Person "${person.name}" und alle ihre Gesichtserkennungen dauerhaft ignorieren?`,
     header: 'Bestätigung',
@@ -377,6 +393,7 @@ async function handleIgnorePerson(person: Person) {
     acceptProps: { label: 'Ignorieren', severity: 'danger' },
     accept: async () => {
       try {
+        if (fallback) selectedPerson.value = fallback
         await ignorePersonFaces(person.id)
         await loadData()
       } catch (err: any) {
@@ -399,23 +416,18 @@ function validBbox(bbox: FaceBBox | undefined | null): FaceBBox | null {
   return bbox
 }
 
-// Returns zoom factor for a given face bbox
 function thumbnailZoom(bbox: FaceBBox | undefined | null): number {
   const b = validBbox(bbox)
   if (!b) return 1
   return Math.min(4, Math.max(1.5, 0.4 / Math.max(b.width, b.height)))
 }
 
-// imageStyle for <img> that centers the face via object-position + scale transform.
-// HeicImage reads object-position from getComputedStyle, so the slot overlay stays in sync.
 function thumbnailImageStyle(bbox: FaceBBox | undefined | null): Record<string, string> {
   const b = validBbox(bbox)
   if (!b) return {}
   const cx = b.x + b.width / 2
   const cy = b.y + b.height / 2
   const zoom = thumbnailZoom(bbox)
-  // object-position: cx% cy% → face appears at (cx*W, cy*H) in the element box
-  // translate((0.5-cx)*100%, (0.5-cy)*100%) then scale(zoom) with origin 50% 50% → face ends up at center
   return {
     objectPosition: `${(cx * 100).toFixed(1)}% ${(cy * 100).toFixed(1)}%`,
     transform: `scale(${zoom.toFixed(2)}) translate(${((0.5 - cx) * 100).toFixed(1)}%, ${((0.5 - cy) * 100).toFixed(1)}%)`,
@@ -434,7 +446,6 @@ function faceBoxStyle(bbox: FaceBBox | undefined | null): Record<string, string>
   }
 }
 
-// Photo URL with higher resolution when zooming in significantly
 function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): string {
   const zoom = thumbnailZoom(bbox)
   const width = zoom >= 2 ? 800 : zoom >= 1.5 ? 600 : 400
@@ -450,62 +461,78 @@ function getPhotoElements(): HTMLElement[] {
   return Array.from(gridScrollRef.value?.querySelectorAll<HTMLElement>('[data-photo-id]') ?? [])
 }
 
-function onEntryKeydown(e: KeyboardEvent, person: Person, idx: number) {
+async function onEntryKeydown(e: KeyboardEvent, person: Person, idx: number) {
   if (e.key === 'ArrowDown') {
     e.preventDefault()
-    const entries = getPersonEntries()
-    entries[idx + 1]?.focus()
-    if (persons.value[idx + 1]) selectPerson(persons.value[idx + 1]!)
+    if (persons.value[idx + 1]) {
+      getPersonEntries()[idx + 1]?.focus()
+      void selectPerson(persons.value[idx + 1]!)
+    }
   } else if (e.key === 'ArrowUp') {
     e.preventDefault()
-    const entries = getPersonEntries()
-    entries[idx - 1]?.focus()
-    if (persons.value[idx - 1]) selectPerson(persons.value[idx - 1]!)
+    if (persons.value[idx - 1]) {
+      getPersonEntries()[idx - 1]?.focus()
+      void selectPerson(persons.value[idx - 1]!)
+    }
+  } else if (e.key === 'ArrowRight') {
+    e.preventDefault()
+    const total = uniquePhotoFaceItems.value.length
+    if (total === 0) return
+    const next = selectedIndex.value + 1 < total ? selectedIndex.value + 1 : 0
+    selectedIndex.value = next
+    await nextTick()
+    getPhotoElements()[next]?.focus()
+  } else if (e.key === 'ArrowLeft') {
+    e.preventDefault()
+    const total = uniquePhotoFaceItems.value.length
+    if (total === 0) return
+    const prev = selectedIndex.value - 1 >= 0 ? selectedIndex.value - 1 : total - 1
+    selectedIndex.value = prev
+    await nextTick()
+    getPhotoElements()[prev]?.focus()
   } else if ((e.key === 'Enter' || e.key === ' ') && document.activeElement === e.currentTarget) {
     e.preventDefault()
-    selectPerson(person)
-  }
-}
-
-function onPencilTab(e: KeyboardEvent) {
-  if (e.key === 'Tab' && !e.shiftKey) {
-    e.preventDefault()
-    getPhotoElements()[0]?.focus()
+    // Activate person (load if not already selected) and move focus to first thumbnail
+    if (selectedPerson.value?.id !== person.id) {
+      await selectPerson(person)
+    }
+    await nextTick()
+    const photoEls = getPhotoElements()
+    const targetIdx = selectedIndex.value >= 0 ? selectedIndex.value : 0
+    photoEls[targetIdx]?.focus()
   }
 }
 
 function onPhotoKeydown(e: KeyboardEvent, idx: number) {
+  const total = uniquePhotoFaceItems.value.length
   if (e.key === 'Enter' || e.key === ' ') {
     e.preventDefault()
+    e.stopPropagation()
     selectedIndex.value = idx
     isFullscreen.value = true
-  } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+  } else if (e.key === 'ArrowRight') {
     e.preventDefault()
-    const next = idx + 1
-    if (next < uniquePhotoFaceItems.value.length) {
-      selectedIndex.value = next
-      void nextTick(() => getPhotoElements()[next]?.focus())
-    }
+    const next = idx + 1 < total ? idx + 1 : 0
+    selectedIndex.value = next
+    void nextTick(() => getPhotoElements()[next]?.focus())
   } else if (e.key === 'ArrowLeft') {
     e.preventDefault()
-    const prev = idx - 1
-    if (prev >= 0) {
-      selectedIndex.value = prev
-      void nextTick(() => getPhotoElements()[prev]?.focus())
-    } else {
-      // Back to person panel
-      const personIdx = persons.value.findIndex(p => p.id === selectedPerson.value?.id)
-      getPersonEntries()[Math.max(0, personIdx)]?.focus()
+    const prev = idx - 1 >= 0 ? idx - 1 : total - 1
+    selectedIndex.value = prev
+    void nextTick(() => getPhotoElements()[prev]?.focus())
+  } else if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    const personIdx = persons.value.findIndex(p => p.id === selectedPerson.value?.id)
+    if (personIdx >= 0 && persons.value[personIdx + 1]) {
+      void selectPerson(persons.value[personIdx + 1]!)
+      void nextTick(() => getPersonEntries()[personIdx + 1]?.focus())
     }
   } else if (e.key === 'ArrowUp') {
     e.preventDefault()
-    const prev = idx - 1
-    if (prev >= 0) {
-      selectedIndex.value = prev
-      void nextTick(() => getPhotoElements()[prev]?.focus())
-    } else {
-      const personIdx = persons.value.findIndex(p => p.id === selectedPerson.value?.id)
-      getPersonEntries()[Math.max(0, personIdx)]?.focus()
+    const personIdx = persons.value.findIndex(p => p.id === selectedPerson.value?.id)
+    if (personIdx > 0 && persons.value[personIdx - 1]) {
+      void selectPerson(persons.value[personIdx - 1]!)
+      void nextTick(() => getPersonEntries()[personIdx - 1]?.focus())
     }
   }
 }
@@ -605,9 +632,8 @@ onUnmounted(() => {
             class="pencil-btn"
             icon="pi pi-pencil"
             text rounded size="small"
-            tabindex="0"
+            tabindex="-1"
             @click.stop="startInlineRename(person)"
-            @keydown="onPencilTab($event)"
           />
         </div>
       </nav>
@@ -817,8 +843,16 @@ onUnmounted(() => {
   outline: none;
 }
 
-.person-entry:hover,
-.person-entry:focus { background: var(--surface-hover); }
+.person-entry:hover { background: var(--surface-hover); }
+
+/* Subtle background for any focused entry (keyboard traversal) */
+.person-entry:focus-visible { background: var(--surface-hover); }
+
+/* Strong focus ring only on the active (selected) entry */
+.person-entry.active:focus-visible {
+  outline: 2px solid var(--p-primary-color);
+  outline-offset: -2px;
+}
 
 .person-entry.active {
   background: var(--p-primary-50);
@@ -887,6 +921,7 @@ onUnmounted(() => {
 
 .rename-input:focus { border-color: var(--p-primary-color); }
 
+/* Pencil: visible on hover, or when the active entry has focus */
 .pencil-btn {
   flex-shrink: 0;
   opacity: 0;
@@ -895,7 +930,7 @@ onUnmounted(() => {
 }
 
 .person-entry:hover .pencil-btn,
-.person-entry:focus-within .pencil-btn {
+.person-entry.active:focus-within .pencil-btn {
   opacity: 1;
   pointer-events: auto;
 }
@@ -943,7 +978,10 @@ onUnmounted(() => {
 
 .photo-item:hover { transform: scale(1.02); }
 
-.photo-item:focus { border-color: var(--p-primary-300); }
+.photo-item:focus-visible {
+  outline: 2px solid var(--p-primary-300);
+  outline-offset: -2px;
+}
 
 .photo-item.selected {
   border-color: var(--p-primary-color);
@@ -977,7 +1015,8 @@ onUnmounted(() => {
 }
 
 .photo-item:hover .photo-info,
-.photo-item.selected .photo-info { opacity: 1; }
+.photo-item.selected .photo-info,
+.photo-item:focus-within .photo-info { opacity: 1; }
 
 .photo-info .name {
   font-size: 0.8rem;
