@@ -252,13 +252,35 @@ export interface Album {
 }
 
 export interface AlbumWithPhotos extends Album {
-  photos: Photo[];
+  photos: AlbumPhotoWithMeta[];
+  settings?: AlbumUserSettings;
+  role: "owner" | "admin" | "contributor" | "viewer";
+}
+
+export interface AlbumPhotoWithMeta extends PhotoWithCuration {
+  added_by_user_id?: number;
+  added_at: string;
 }
 
 export interface AlbumShare {
   album_id: number;
   user_id: number;
   access_level: "read" | "write";
+}
+
+export interface AlbumUserSettings {
+  album_id: number;
+  user_id: number;
+  hide_mode: "mine" | "all";
+  active_view: "all" | "favorites" | "by_user";
+  view_config?: any;
+}
+
+export interface UpdateAlbumUserSettingsRequest {
+  albumId: number;
+  hideMode?: "mine" | "all";
+  activeView?: "all" | "favorites" | "by_user";
+  viewConfig?: any;
 }
 
 export interface CreateAlbumRequest {
