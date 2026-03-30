@@ -264,7 +264,10 @@ def _clip_dimension_score(img_vec: "np.ndarray", embedder: "CLIPEmbedder", posit
 
 
 @router.post("/quality", tags=["quality"])
-async def compute_quality(file: UploadFile = File(...)) -> dict:
+async def compute_quality(
+    file: UploadFile = File(...),
+    face_bboxes: str = Form(default="[]"),
+) -> dict:
     """Compute an AI quality score (0.0–1.0) for a photo.
 
     Combines six signals – all computed from already-loaded models/libraries:
@@ -278,6 +281,7 @@ async def compute_quality(file: UploadFile = File(...)) -> dict:
     No new dependencies are required beyond what the embedding service already uses.
     """
     import numpy as np
+    import json
 
     try:
         content = await file.read()
@@ -287,6 +291,11 @@ async def compute_quality(file: UploadFile = File(...)) -> dict:
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Cannot read image: {exc}",
         ) from exc
+
+    try:
+        parsed_bboxes = json.loads(face_bboxes)
+    except Exception:
+        parsed_bboxes = []
 
     # ── CLIP multi-dimensional aesthetic scoring ────────────────────────────
     try:
@@ -333,6 +342,39 @@ async def compute_quality(file: UploadFile = File(...)) -> dict:
                 "an overexposed washed-out or heavily underexposed dark photo",
             ],
         )
+        # ── Eyes-open score via CLIP on face crops ─────────────────────────
+        eyes_open_score: float | None = None
+        img_w, img_h = image.size
+        eyes_scores_list: list[float] = []
+        for bbox in parsed_bboxes:
+            try:
+                bx = float(bbox.get("x", 0))
+                by = float(bbox.get("y", 0))
+                bw = float(bbox.get("width", 0))
+                bh = float(bbox.get("height", 0))
+                if bw <= 0 or bh <= 0:
+                    continue
+                pad = 0.25
+                x1 = max(0, int((bx - bw * pad) * img_w))
+                y1 = max(0, int((by - bh * pad) * img_h))
+                x2 = min(img_w, int((bx + bw * (1 + pad)) * img_w))
+                y2 = min(img_h, int((by + bh * (1 + pad)) * img_h))
+                if x2 - x1 < 16 or y2 - y1 < 16:
+                    continue
+                face_crop = image.crop((x1, y1, x2, y2)).resize((224, 224), Image.LANCZOS)
+                face_vec = np.array(clip_embedder.embed([face_crop])[0], dtype=np.float32)
+                s = _clip_dimension_score(
+                    face_vec, clip_embedder,
+                    positive=["a person with open eyes looking at the camera", "alert face with clearly open eyes"],
+                    negative=["a person with closed eyes blinking", "face with shut eyes asleep or blinking"],
+                )
+                eyes_scores_list.append(s)
+            except Exception:
+                continue
+        if eyes_scores_list:
+            # Use the minimum — if any face has closed eyes the photo is poor
+            eyes_open_score = min(eyes_scores_list)
+
     except Exception as exc:
         logger.exception("CLIP quality scoring failed")
         raise HTTPException(
@@ -354,8 +396,40 @@ async def compute_quality(file: UploadFile = File(...)) -> dict:
         blur_variance = float(lap.var())
         # Typical range: blurry photos < 100, sharp photos > 500
         blur_score = float(min(1.0, blur_variance / 500.0))
+
+        # ── Face-region sharpness (replaces full-image blur when faces present)
+        face_sharpness: float | None = None
+        face_sharp_list: list[float] = []
+        for bbox in parsed_bboxes:
+            try:
+                bx = float(bbox.get("x", 0))
+                by = float(bbox.get("y", 0))
+                bw = float(bbox.get("width", 0))
+                bh = float(bbox.get("height", 0))
+                if bw <= 0 or bh <= 0:
+                    continue
+                x1 = max(0, int(bx * img_w))
+                y1 = max(0, int(by * img_h))
+                x2 = min(img_w, int((bx + bw) * img_w))
+                y2 = min(img_h, int((by + bh) * img_h))
+                if x2 - x1 < 10 or y2 - y1 < 10:
+                    continue
+                face_gray = image.crop((x1, y1, x2, y2)).convert("L").resize((128, 128), Image.LANCZOS)
+                fa = np.array(face_gray, dtype=np.float64)
+                flap = (
+                    np.roll(fa, 1, axis=0) + np.roll(fa, -1, axis=0)
+                    + np.roll(fa, 1, axis=1) + np.roll(fa, -1, axis=1)
+                    - 4.0 * fa
+                )
+                face_sharp_list.append(float(min(1.0, flap.var() / 500.0)))
+            except Exception:
+                continue
+        if face_sharp_list:
+            # Worst face matters most — if any face is blurry the photo is poor
+            face_sharpness = min(face_sharp_list)
     except Exception:
         blur_score = 0.5
+        face_sharpness = None
 
     # ── Contrast score (luminance std dev) ─────────────────────────────────
     # Low contrast = flat/washed-out; very high contrast = possibly over-processed.
@@ -382,18 +456,29 @@ async def compute_quality(file: UploadFile = File(...)) -> dict:
         exposure_score = 0.5
 
     # ── Composite ───────────────────────────────────────────────────────────
-    # Weights chosen so aesthetic/composition signals dominate (50 %) and
-    # pixel-level signals (blur, contrast, exposure) supply grounding (50 %).
+    # When face data is available, blend face-region sharpness with full-image
+    # blur (face sharpness is a stronger signal for portrait quality).
+    effective_blur = (
+        0.35 * blur_score + 0.65 * face_sharpness
+        if face_sharpness is not None
+        else blur_score
+    )
+
     composite = (
         0.30 * clip_aesthetics
         + 0.20 * clip_composition
         + 0.10 * clip_technical
-        + 0.25 * blur_score
+        + 0.25 * effective_blur
         + 0.10 * contrast_score
         + 0.05 * exposure_score
     )
 
-    return {
+    # Closed-eyes penalty: up to -25 % if eyes are clearly shut
+    if eyes_open_score is not None:
+        composite *= (0.75 + 0.25 * eyes_open_score)
+        composite = min(1.0, composite)
+
+    result: dict = {
         "score": round(composite, 4),
         "clip_aesthetics": round(clip_aesthetics, 4),
         "clip_composition": round(clip_composition, 4),
@@ -402,6 +487,11 @@ async def compute_quality(file: UploadFile = File(...)) -> dict:
         "contrast_score": round(contrast_score, 4),
         "exposure_score": round(exposure_score, 4),
     }
+    if face_sharpness is not None:
+        result["face_sharpness"] = round(face_sharpness, 4)
+    if eyes_open_score is not None:
+        result["eyes_open_score"] = round(eyes_open_score, 4)
+    return result
 
 
 # ---------------------------------------------------------------------------

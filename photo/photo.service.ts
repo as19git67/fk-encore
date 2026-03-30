@@ -2160,11 +2160,27 @@ export async function indexPhotoQuality(userId: number, photoId: number): Promis
     }
   }
 
+  // Query face bboxes upfront — used both for the quality API and composition scoring
+  let bboxes: FaceBBoxNorm[] = [];
+  try {
+    const faceRows = await dbAll<{ bbox: string }>(
+      db.select({ bbox: faces.bbox })
+        .from(faces)
+        .where(and(eq(faces.photo_id, photoId), eq(faces.ignored, false)))
+    );
+    bboxes = faceRows.map(r => JSON.parse(r.bbox) as FaceBBoxNorm);
+  } catch (faceErr) {
+    console.warn(`[quality] face bbox query failed for photo ${photoId}:`, faceErr);
+  }
+
   try {
     const formData = new FormData();
     const fileData = await fs.promises.readFile(processingPath);
     const blob = new Blob([fileData], { type: getUploadMimeType(processingPath) });
     formData.append("file", blob, path.basename(processingPath));
+    if (bboxes.length > 0) {
+      formData.append("face_bboxes", JSON.stringify(bboxes));
+    }
 
     const response = await fetch(`${EMBEDDING_SERVICE_URL}/quality`, {
       method: "POST",
@@ -2177,31 +2193,24 @@ export async function indexPhotoQuality(userId: number, photoId: number): Promis
       return;
     }
 
-    const result = await response.json() as { score: number };
+    const result = await response.json() as { score: number; face_sharpness?: number; eyes_open_score?: number };
     let compositeScore = result.score;
+    if (result.face_sharpness !== undefined) {
+      console.log(`[quality] photo ${photoId} face_sharpness=${result.face_sharpness.toFixed(3)}`);
+    }
+    if (result.eyes_open_score !== undefined) {
+      console.log(`[quality] photo ${photoId} eyes_open_score=${result.eyes_open_score.toFixed(3)}`);
+    }
 
-    // ── Optional face composition signal ───────────────────────────────────
-    // Query any already-detected non-ignored face bboxes for this photo.
-    // If face detection has not yet run the result is empty and the signal
-    // is skipped rather than penalising the photo.
+    // ── Face composition signal (position + area) ──────────────────────────
     try {
-      const faceRows = await dbAll<{ bbox: string }>(
-        db.select({ bbox: faces.bbox })
-          .from(faces)
-          .where(and(eq(faces.photo_id, photoId), eq(faces.ignored, false)))
-      );
-
-      const bboxes = faceRows.map(r => JSON.parse(r.bbox) as FaceBBoxNorm);
       const faceScore = computeFaceCompositionScore(bboxes);
-
       if (faceScore !== null) {
-        // Blend: base score 85 %, face composition 15 %
         compositeScore = compositeScore * 0.85 + faceScore * 0.15;
         console.log(`[quality] photo ${photoId} face composition score ${faceScore.toFixed(3)} → blended ${compositeScore.toFixed(3)}`);
       }
     } catch (faceErr) {
-      // Non-fatal: proceed with embedding-service score only
-      console.warn(`[quality] face composition query failed for photo ${photoId}:`, faceErr);
+      console.warn(`[quality] face composition scoring failed for photo ${photoId}:`, faceErr);
     }
 
     await db
