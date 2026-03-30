@@ -157,6 +157,16 @@ export function getScanQueueStatus() {
   return apiFetch<ScanQueueStatus>('/photos/scan-queue/status')
 }
 
+export function getPhotosNeedingGpsRescan() {
+  return apiFetch<{ ids: number[] }>('/photos/needs-gps-rescan')
+}
+
+export function rescanPhotoGps(id: number) {
+  return apiFetch<{ gpsFound: boolean; geocoded: boolean; scansQueued: boolean }>(
+    `/photos/${id}/rescan-gps`, { method: 'POST' }
+  )
+}
+
 export function rescanPhotos(force: boolean) {
   return apiFetch<{ queued: number }>('/photos/rescan', {
     method: 'POST',
