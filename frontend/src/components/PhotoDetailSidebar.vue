@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import Button from 'primevue/button'
 import DatePicker from 'primevue/datepicker'
+import Select from 'primevue/select'
 import HeicImage from './HeicImage.vue'
-import { getPhotoUrl } from '../api/photos'
+import { getPhotoUrl, listAlbums, addPhotoToAlbum, type Album } from '../api/photos'
 import type { Photo, Face, LandmarkItem, Person, CurationStatus } from '../api/photos'
+import { ref, onMounted, watch } from 'vue'
 
 const props = defineProps<{
   photo: Photo
@@ -21,6 +23,37 @@ const props = defineProps<{
 }>()
 
 const editDate = defineModel<Date | null>('editDate', { default: null })
+
+const albums = ref<Album[]>([])
+const loadingAlbums = ref(false)
+const selectedAlbum = ref<number | null>(null)
+
+async function loadAlbums() {
+  loadingAlbums.value = true
+  try {
+    const res = await listAlbums()
+    albums.value = res.albums
+  } finally {
+    loadingAlbums.value = false
+  }
+}
+
+// Reset selected album when photo changes
+watch(() => props.photo.id, () => {
+  selectedAlbum.value = null
+})
+
+async function handleAddToAlbum(albumId: number) {
+  try {
+    await addPhotoToAlbum(albumId, props.photo.id)
+    // Clear selection after successful add
+    selectedAlbum.value = null
+  } catch (err) {
+    console.error('Failed to add to album:', err)
+  }
+}
+
+onMounted(loadAlbums)
 
 const emit = defineEmits<{
   fullscreen: []
@@ -94,6 +127,23 @@ function getPersonName(personId?: number) {
         <div v-if="photo.size" class="meta-row">
           <i class="pi pi-database meta-icon" />
           <span class="meta-value">{{ (photo.size / 1024 / 1024).toFixed(2) }} MB</span>
+        </div>
+      </div>
+
+      <div class="sidebar-divider" />
+      <div class="sidebar-section">
+        <div class="section-label"><i class="pi pi-folder-open" /> Album</div>
+        <div class="album-selector">
+          <Select
+            v-model="selectedAlbum"
+            :options="albums"
+            optionLabel="name"
+            optionValue="id"
+            placeholder="Zu Album hinzufügen"
+            @change="(e) => handleAddToAlbum(e.value)"
+            class="w-full"
+            :loading="loadingAlbums"
+          />
         </div>
       </div>
 

@@ -9,6 +9,8 @@ import ProfileView from '../views/ProfileView.vue'
 import PhotosView from '../views/PhotosView.vue'
 import PersonsView from '../views/PersonsView.vue'
 import DataManagementView from '../views/DataManagementView.vue'
+import AlbumsView from '../views/AlbumsView.vue'
+import AlbumDetailView from '../views/AlbumDetailView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -21,6 +23,8 @@ const router = createRouter({
     { path: '/roles', name: 'roles', component: RolesView, meta: { permission: 'roles.list' } },
     { path: '/profile', name: 'profile', component: ProfileView },
     { path: '/photos', name: 'photos', component: PhotosView, meta: { permission: 'photos.view' } },
+    { path: '/albums', name: 'albums', component: AlbumsView, meta: { permission: 'photos.view' } },
+    { path: '/albums/:id', name: 'album-detail', component: AlbumDetailView, meta: { permission: 'photos.view' } },
     { path: '/people', name: 'people', component: PersonsView, meta: { permission: 'people.view' } },
     { path: '/data-management', name: 'data-management', component: DataManagementView, meta: { permission: 'data.manage' } },
   ],

@@ -22,6 +22,7 @@ import {
   photoGroupMembers,
   photoLandmarks,
   photoScanQueue,
+  albumUserSettings,
 } from "../db/schema";
 import type {
   Photo,
@@ -29,6 +30,9 @@ import type {
   CurationStatus,
   Album,
   AlbumWithPhotos,
+  AlbumPhotoWithMeta,
+  AlbumUserSettings,
+  UpdateAlbumUserSettingsRequest,
   CreateAlbumRequest,
   UpdateAlbumRequest,
   AddPhotoToAlbumRequest,
@@ -854,26 +858,64 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     throw new Error("Unauthorized access to album");
   }
 
-  const photoRows = await dbAll<{
-    id: number; user_id: number; filename: string; original_name: string;
-    mime_type: string; size: number; hash: string | null; taken_at: string | null; created_at: string | null;
-  }>(
-    db
-      .select({
-        id: photos.id,
-        user_id: photos.user_id,
-        filename: photos.filename,
-        original_name: photos.original_name,
-        mime_type: photos.mime_type,
-        size: photos.size,
-        hash: photos.hash,
-        taken_at: photos.taken_at,
-        created_at: photos.created_at,
-      })
-      .from(photos)
-      .innerJoin(albumPhotos, eq(albumPhotos.photo_id, photos.id))
-      .where(eq(albumPhotos.album_id, albumId))
+  const role: "owner" | "admin" | "contributor" | "viewer" = isOwner ? "owner" : (share!.access_level === "write" ? "contributor" : "viewer");
+
+  // Get user settings for this album
+  let settings = await dbFirst<typeof albumUserSettings.$inferSelect>(
+    db.select().from(albumUserSettings).where(and(eq(albumUserSettings.album_id, albumId), eq(albumUserSettings.user_id, userId)))
   );
+
+  if (!settings) {
+    // Create default settings if they don't exist
+    await dbExec(db.insert(albumUserSettings).values({ album_id: albumId, user_id: userId, hide_mode: "mine", active_view: "all" }));
+    settings = { album_id: albumId, user_id: userId, hide_mode: "mine", active_view: "all", view_config: null };
+  }
+
+  // Build photo query based on settings
+  let query = db
+    .select({
+      id: photos.id,
+      user_id: photos.user_id,
+      filename: photos.filename,
+      original_name: photos.original_name,
+      mime_type: photos.mime_type,
+      size: photos.size,
+      hash: photos.hash,
+      taken_at: photos.taken_at,
+      created_at: photos.created_at,
+      curation_status: photoCuration.status,
+      added_by_user_id: albumPhotos.added_by_user_id,
+      added_at: albumPhotos.added_at,
+    })
+    .from(photos)
+    .innerJoin(albumPhotos, eq(albumPhotos.photo_id, photos.id))
+    .leftJoin(photoCuration, and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)))
+    .where(eq(albumPhotos.album_id, albumId));
+
+  // Apply curation filter (hide mode)
+  if (settings.hide_mode === "mine") {
+    // Hide if current user hid it
+    query = query.where(or(isNull(photoCuration.status), sql`${photoCuration.status} != 'hidden'`));
+  } else if (settings.hide_mode === "all") {
+    // Hide if ANYONE who is part of the album hid it
+    // For simplicity, we hide if it's hidden in the global curation table for this photo at all
+    // A more precise version would check only album participants
+    const hiddenSubquery = db
+      .select({ photo_id: photoCuration.photo_id })
+      .from(photoCuration)
+      .where(eq(photoCuration.status, "hidden"));
+    
+    query = query.where(sql`${photos.id} NOT IN (${hiddenSubquery})`);
+  }
+
+  // Apply active view
+  if (settings.active_view === "favorites") {
+    query = query.where(eq(photoCuration.status, "favorite"));
+  } else if (settings.active_view === "by_user" && settings.view_config && (settings.view_config as any).userId) {
+    query = query.where(eq(albumPhotos.added_by_user_id, (settings.view_config as any).userId));
+  }
+
+  const photoRows = await dbAll<any>(query);
 
   return {
     id: album.id,
@@ -881,7 +923,15 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     name: album.name,
     created_at: album.created_at ?? "",
     updated_at: album.updated_at ?? "",
-    photos: photoRows.map((r) => ({
+    role,
+    settings: {
+      album_id: settings.album_id,
+      user_id: settings.user_id,
+      hide_mode: settings.hide_mode as "mine" | "all",
+      active_view: settings.active_view as "all" | "favorites" | "by_user",
+      view_config: settings.view_config,
+    },
+    photos: photoRows.map((r: any) => ({
       id: r.id,
       user_id: r.user_id,
       filename: r.filename,
@@ -891,7 +941,37 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
       hash: r.hash ?? undefined,
       taken_at: r.taken_at ?? undefined,
       created_at: r.created_at ?? "",
+      curation_status: (r.curation_status as CurationStatus) ?? "visible",
+      added_by_user_id: r.added_by_user_id ?? undefined,
+      added_at: r.added_at ?? "",
     })),
+  };
+}
+
+export async function updateAlbumUserSettingsLogic(userId: number, req: UpdateAlbumUserSettingsRequest): Promise<AlbumUserSettings> {
+  const values: any = {};
+  if (req.hideMode) values.hide_mode = req.hideMode;
+  if (req.activeView) values.active_view = req.activeView;
+  if (req.viewConfig !== undefined) values.view_config = req.viewConfig;
+
+  await dbExec(
+    db.update(albumUserSettings)
+      .set(values)
+      .where(and(eq(albumUserSettings.album_id, req.albumId), eq(albumUserSettings.user_id, userId)))
+  );
+
+  const updated = await dbFirst<typeof albumUserSettings.$inferSelect>(
+    db.select().from(albumUserSettings).where(and(eq(albumUserSettings.album_id, req.albumId), eq(albumUserSettings.user_id, userId)))
+  );
+
+  if (!updated) throw new Error("Settings not found");
+
+  return {
+    album_id: updated.album_id,
+    user_id: updated.user_id,
+    hide_mode: updated.hide_mode as "mine" | "all",
+    active_view: updated.active_view as "all" | "favorites" | "by_user",
+    view_config: updated.view_config,
   };
 }
 
@@ -967,7 +1047,12 @@ export async function addPhotoToAlbumLogic(userId: number, req: AddPhotoToAlbumR
   }
 
   await dbExec(
-    db.insert(albumPhotos).values({ album_id: req.albumId, photo_id: req.photoId })
+    db.insert(albumPhotos).values({ 
+      album_id: req.albumId, 
+      photo_id: req.photoId,
+      added_by_user_id: userId,
+      added_at: new Date().toISOString()
+    })
   );
 
   return { success: true };

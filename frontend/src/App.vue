@@ -13,6 +13,7 @@ const menuItems = computed(() => {
   const items = []
   if (auth.hasPermission('photos.view')) {
     items.push({ label: 'Fotos', icon: 'pi pi-images', command: () => router.push('/photos') })
+    items.push({ label: 'Alben', icon: 'pi pi-folder-open', command: () => router.push('/albums') })
   }
   if (auth.hasPermission('people.view')) {
     items.push({ label: 'Personen', icon: 'pi pi-users', command: () => router.push('/people') })
