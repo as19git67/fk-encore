@@ -198,6 +198,7 @@ export interface Photo {
   location_city?: string;
   location_country?: string;
   ai_quality_score?: number;
+  ai_quality_details?: Record<string, number>;
 }
 
 export interface FaceBBox { x: number; y: number; width: number; height: number; }

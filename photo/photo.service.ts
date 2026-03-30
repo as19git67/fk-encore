@@ -129,7 +129,7 @@ async function callEmbeddingServiceUpload(
   if (metadata.face_ids && metadata.face_ids.length > 0) {
     formData.append('face_ids', metadata.face_ids.join(','));
   }
-  if (force) formData.append('force', 'true');
+  if (force) formData.append('force', '1');
 
   const response = await fetch(`${EMBEDDING_SERVICE_URL}/upload`, {
     method: 'POST',
@@ -138,11 +138,9 @@ async function callEmbeddingServiceUpload(
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error(`Embedding service returned ${response.status}: ${errorText}`);
-    // Don't throw, just log for now to not break the upload flow
-  } else {
-    console.log(`Successfully uploaded photo ${photoId} to embedding service.`);
+    throw new Error(`Embedding service returned ${response.status}: ${errorText}`);
   }
+  console.log(`Successfully uploaded photo ${photoId} to embedding service.`);
 }
 
 export async function indexPhotoEmbeddings(userId: number, photoId: number, force: boolean = false): Promise<void> {
@@ -531,6 +529,7 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
     latitude: number | null; longitude: number | null;
     location_name: string | null; location_city: string | null; location_country: string | null;
     ai_quality_score: number | null;
+    ai_quality_details: Record<string, number> | null;
   }>(
     db
       .select({
@@ -550,6 +549,7 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
         location_city: photos.location_city,
         location_country: photos.location_country,
         ai_quality_score: photos.ai_quality_score,
+        ai_quality_details: photos.ai_quality_details,
       })
       .from(photos)
       .leftJoin(
@@ -580,6 +580,7 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
       location_city: r.location_city ?? undefined,
       location_country: r.location_country ?? undefined,
       ai_quality_score: r.ai_quality_score ?? undefined,
+      ai_quality_details: r.ai_quality_details ?? undefined,
     })),
   };
 }
@@ -2266,12 +2267,31 @@ export async function indexPhotoQuality(userId: number, photoId: number): Promis
       return;
     }
 
-    const result = await response.json() as { score: number; face_sharpness?: number; eyes_open_score?: number };
+    const result = await response.json() as {
+      score: number;
+      blur_score?: number;
+      contrast_score?: number;
+      exposure_score?: number;
+      clip_aesthetics?: number;
+      clip_composition?: number;
+      clip_technical?: number;
+      face_sharpness?: number;
+      eyes_open_score?: number;
+    };
     let compositeScore = result.score;
+    const details: Record<string, number> = {};
+    if (result.blur_score !== undefined) details.sharpness = Math.round(result.blur_score * 100) / 100;
+    if (result.contrast_score !== undefined) details.contrast = Math.round(result.contrast_score * 100) / 100;
+    if (result.exposure_score !== undefined) details.exposure = Math.round(result.exposure_score * 100) / 100;
+    if (result.clip_aesthetics !== undefined) details.clip_aesthetics = Math.round(result.clip_aesthetics * 100) / 100;
+    if (result.clip_composition !== undefined) details.clip_composition = Math.round(result.clip_composition * 100) / 100;
+    if (result.clip_technical !== undefined) details.clip_technical = Math.round(result.clip_technical * 100) / 100;
     if (result.face_sharpness !== undefined) {
+      details.face_sharpness = Math.round(result.face_sharpness * 100) / 100;
       console.log(`[quality] photo ${photoId} face_sharpness=${result.face_sharpness.toFixed(3)}`);
     }
     if (result.eyes_open_score !== undefined) {
+      details.eyes_open = Math.round(result.eyes_open_score * 100) / 100;
       console.log(`[quality] photo ${photoId} eyes_open_score=${result.eyes_open_score.toFixed(3)}`);
     }
 
@@ -2279,6 +2299,7 @@ export async function indexPhotoQuality(userId: number, photoId: number): Promis
     try {
       const faceScore = computeFaceCompositionScore(bboxes);
       if (faceScore !== null) {
+        details.face_composition = Math.round(faceScore * 100) / 100;
         compositeScore = compositeScore * 0.85 + faceScore * 0.15;
         console.log(`[quality] photo ${photoId} face composition score ${faceScore.toFixed(3)} → blended ${compositeScore.toFixed(3)}`);
       }
@@ -2288,7 +2309,10 @@ export async function indexPhotoQuality(userId: number, photoId: number): Promis
 
     await db
       .update(photos)
-      .set({ ai_quality_score: compositeScore })
+      .set({
+        ai_quality_score: compositeScore,
+        ai_quality_details: Object.keys(details).length > 0 ? details : null,
+      })
       .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)));
 
     console.log(`[quality] photo ${photoId} final score ${compositeScore.toFixed(3)}`);

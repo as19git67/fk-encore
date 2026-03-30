@@ -608,6 +608,7 @@ async function handleDrop(e: DragEvent) {
 // ── Keyboard Navigation ─────────────────────────────────────────────────────
 
 function handleKeydown(e: KeyboardEvent) {
+  if (activeGroup.value) return
   if (isEditingDate.value) return
   const activeTag = document.activeElement?.tagName
   if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return
