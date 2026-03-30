@@ -21,6 +21,7 @@ const serviceLabels: Record<string, string> = {
   embedding: 'Embeddings',
   face_detection: 'Gesichtserkennung',
   landmark: 'Sehenswürdigkeiten',
+  quality: 'Qualität',
 }
 
 const totalPending = computed(() =>
