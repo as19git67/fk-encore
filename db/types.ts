@@ -297,6 +297,21 @@ export interface AddPhotoToAlbumRequest {
   photoId: number;
 }
 
+export interface BatchAlbumPhotosRequest {
+  albumIds: number[];
+  photoIds: number[];
+  action: "add" | "remove";
+}
+
+export interface PhotoAlbumsResponse {
+  photoId: number;
+  albumIds: number[];
+}
+
+export interface ListPhotoAlbumsResponse {
+  results: PhotoAlbumsResponse[];
+}
+
 export interface ShareAlbumRequest {
   albumId: number;
   userId: number;

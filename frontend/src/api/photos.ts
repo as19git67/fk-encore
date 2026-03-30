@@ -277,6 +277,17 @@ export function addPhotoToAlbum(albumId: number, photoId: number) {
   })
 }
 
+export function getPhotosAlbums(ids: number[]) {
+  return apiFetch<{ results: { photoId: number; albumIds: number[] }[] }>(`/photos/albums?ids=${ids.join(',')}`)
+}
+
+export function batchUpdateAlbumPhotos(albumIds: number[], photoIds: number[], action: 'add' | 'remove') {
+  return apiFetch<{ success: boolean }>('/albums/photos/batch', {
+    method: 'POST',
+    body: JSON.stringify({ albumIds, photoIds, action })
+  })
+}
+
 export function shareAlbum(albumId: number, userId: number, accessLevel: 'read' | 'write') {
   return apiFetch<{ success: boolean }>('/albums/share', {
     method: 'POST',

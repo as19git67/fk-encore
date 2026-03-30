@@ -37,6 +37,7 @@ const uploading = ref(false)
 const uploadAbortController = ref<AbortController | null>(null)
 const error = ref('')
 const selectedIndex = ref(-1)
+const selectedPhotoIds = ref<Set<number>>(new Set())
 const isFullscreen = ref(false)
 
 const canUpload = computed(() => auth.hasPermission('photos.upload'))
@@ -125,6 +126,30 @@ const inUnreviewedStack = computed(() => {
 const selectedPhoto = computed(() => {
   if (selectedIndex.value < 0) return null
   return photos.value[selectedIndex.value] ?? null
+})
+
+const selectedPhotos = computed(() => {
+  if (selectedPhotoIds.value.size === 0) return []
+  // If only one, return it (to maintain behavior)
+  if (selectedPhotoIds.value.size === 1) {
+    const id = Array.from(selectedPhotoIds.value)[0]
+    const photo = photos.value.find(p => p.id === id)
+    return photo ? [photo] : []
+  }
+  // Maintain order as in the photos array for multi-selection
+  return photos.value.filter(p => selectedPhotoIds.value.has(p.id))
+})
+
+watch(selectedIndex, (newIdx) => {
+  if (newIdx >= 0 && photos.value[newIdx]) {
+    const photoId = photos.value[newIdx].id
+    if (!selectedPhotoIds.value.has(photoId)) {
+      selectedPhotoIds.value.clear()
+      selectedPhotoIds.value.add(photoId)
+    }
+  } else if (newIdx < 0) {
+    selectedPhotoIds.value.clear()
+  }
 })
 
 const prevPhoto = computed(() => {
@@ -546,6 +571,44 @@ function handleGroupNext(reviewedGroupId: number) {
   }
 }
 
+function handlePhotoClick(item: any, event: MouseEvent) {
+  const index = item.index
+  const photoId = item.photo.id
+
+  if (event.shiftKey && !event.ctrlKey && !event.metaKey && selectedIndex.value !== -1) {
+    // Range selection: expand by all photos in between
+    const start = Math.min(selectedIndex.value, index)
+    const end = Math.max(selectedIndex.value, index)
+    
+    for (let i = start; i <= end; i++) {
+      const p = photos.value[i]
+      if (p) selectedPhotoIds.value.add(p.id)
+    }
+  } else if (event.ctrlKey || event.metaKey) {
+    // Toggle selection
+    if (selectedPhotoIds.value.has(photoId)) {
+      selectedPhotoIds.value.delete(photoId)
+      if (selectedIndex.value === index) {
+        // If we deselected the "main" selected photo, pick another one or reset
+        if (selectedPhotoIds.value.size > 0) {
+          const firstId = Array.from(selectedPhotoIds.value)[0]
+          selectedIndex.value = photos.value.findIndex(p => p.id === firstId)
+        } else {
+          selectedIndex.value = -1
+        }
+      }
+    } else {
+      selectedPhotoIds.value.add(photoId)
+      selectedIndex.value = index
+    }
+  } else {
+    // Single selection
+    selectedPhotoIds.value.clear()
+    selectedPhotoIds.value.add(photoId)
+    selectedIndex.value = index
+  }
+}
+
 function handleStartGroupReview() {
   const first = photoGroupsList.value.find(g => !g.reviewed_at)
   if (first) activeGroup.value = first
@@ -868,12 +931,12 @@ onUnmounted(() => {
                 :data-photo-id="item.photo.id"
                 class="photo-item"
                 :class="{
-                  selected: item.index === selectedIndex,
+                  selected: selectedPhotoIds.has(item.photo.id),
                   'is-hidden': item.photo.curation_status === 'hidden',
                   'is-favorite': item.photo.curation_status === 'favorite',
                   'is-stack': !!item.group
                 }"
-                @click="item.group ? (activeGroup = item.group) : (selectedIndex = item.index)"
+                @click="item.group ? (activeGroup = item.group) : handlePhotoClick(item, $event)"
                 @dblclick="!item.group && (isFullscreen = true)"
               >
                 <div class="photo-thumb">
@@ -903,8 +966,9 @@ onUnmounted(() => {
 
       <!-- RIGHT: Details sidebar -->
       <PhotoDetailSidebar
-        v-if="selectedPhoto"
-        :photo="selectedPhoto"
+        v-if="selectedPhotos.length > 0"
+        :photo="(selectedPhoto || selectedPhotos[0])!"
+        :selectedPhotos="selectedPhotos"
         :faces="detectedFaces"
         :loading-faces="loadingFaces"
         :landmarks="detectedLandmarks"

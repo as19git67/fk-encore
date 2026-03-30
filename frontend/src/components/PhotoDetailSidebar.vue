@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import Button from 'primevue/button'
 import DatePicker from 'primevue/datepicker'
-import Select from 'primevue/select'
+import MultiSelect from 'primevue/multiselect'
 import HeicImage from './HeicImage.vue'
-import { getPhotoUrl, listAlbums, addPhotoToAlbum, type Album } from '../api/photos'
+import { getPhotoUrl, listAlbums, getPhotosAlbums, batchUpdateAlbumPhotos, type Album } from '../api/photos'
 import type { Photo, Face, LandmarkItem, Person, CurationStatus } from '../api/photos'
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 
 const props = defineProps<{
   photo: Photo
+  selectedPhotos?: Photo[]
   faces: Face[]
   loadingFaces: boolean
   landmarks: LandmarkItem[]
@@ -26,30 +27,134 @@ const editDate = defineModel<Date | null>('editDate', { default: null })
 
 const albums = ref<Album[]>([])
 const loadingAlbums = ref(false)
-const selectedAlbum = ref<number | null>(null)
+const photoAlbumMap = ref<Record<number, number[]>>({}) // photoId -> albumIds[]
+const pendingAlbumChanges = ref<Record<number, 'add' | 'remove'>>({})
+const savingAlbums = ref(false)
 
 async function loadAlbums() {
   loadingAlbums.value = true
   try {
     const res = await listAlbums()
-    albums.value = res.albums
+    albums.value = res.albums.sort((a, b) => a.name.localeCompare(b.name))
   } finally {
     loadingAlbums.value = false
   }
 }
 
+async function loadPhotosAlbums() {
+  const photoIds = props.selectedPhotos && props.selectedPhotos.length > 0
+    ? props.selectedPhotos.map(p => p.id)
+    : [props.photo.id]
+    
+  try {
+    const res = await getPhotosAlbums(photoIds)
+    const map: Record<number, number[]> = {}
+    res.results.forEach(r => {
+      map[r.photoId] = r.albumIds
+    })
+    photoAlbumMap.value = map
+  } catch (err) {
+    console.error('Failed to load photos albums:', err)
+  }
+}
+
 // Reset selected album when photo changes
 watch(() => props.photo.id, () => {
-  selectedAlbum.value = null
+  pendingAlbumChanges.value = {}
+  loadPhotosAlbums()
+}, { immediate: true })
+
+watch(() => props.selectedPhotos, () => {
+  pendingAlbumChanges.value = {}
+  if (props.selectedPhotos && props.selectedPhotos.length > 0) {
+    loadPhotosAlbums()
+  }
 })
 
-async function handleAddToAlbum(albumId: number) {
+
+function getAlbumCheckState(albumId: number) {
+  const photoIds = props.selectedPhotos && props.selectedPhotos.length > 0
+    ? props.selectedPhotos.map(p => p.id)
+    : [props.photo.id]
+    
+  if (photoIds.length === 0) return false
+  
+  let count = 0
+  photoIds.forEach(pid => {
+    if (photoAlbumMap.value[pid]?.includes(albumId)) {
+      count++
+    }
+  })
+  
+  if (count === 0) return false
+  if (count === photoIds.length) return true
+  return null // indeterminate
+}
+
+function getEffectiveAlbumCheckState(albumId: number) {
+  if (pendingAlbumChanges.value[albumId]) {
+    return pendingAlbumChanges.value[albumId] === 'add' ? true : false
+  }
+  return getAlbumCheckState(albumId)
+}
+
+const selectedAlbumIds = computed({
+  get: () => {
+    if (albums.value.length === 0) return []
+    
+    // Wir nehmen nur die Alben, die für ALLE Bilder ausgewählt sind (effektiv)
+    return albums.value
+      .filter(album => getEffectiveAlbumCheckState(album.id) === true)
+      .map(a => a.id)
+  },
+  set: (newVal: number[]) => {
+    albums.value.forEach(album => {
+      const isSelected = newVal.includes(album.id)
+      const currentState = getEffectiveAlbumCheckState(album.id)
+      
+      if (isSelected && currentState !== true) {
+        pendingAlbumChanges.value[album.id] = 'add'
+      } else if (!isSelected && currentState !== false) {
+        pendingAlbumChanges.value[album.id] = 'remove'
+      }
+      
+      // Wenn die Änderung dem Originalzustand entspricht, können wir sie aus pending entfernen
+      const originalState = getAlbumCheckState(album.id)
+      if (pendingAlbumChanges.value[album.id] === 'add' && originalState === true) {
+        delete pendingAlbumChanges.value[album.id]
+      } else if (pendingAlbumChanges.value[album.id] === 'remove' && originalState === false) {
+        delete pendingAlbumChanges.value[album.id]
+      }
+    })
+  }
+})
+
+async function saveAlbumChanges() {
+  const photoIds = props.selectedPhotos && props.selectedPhotos.length > 0
+    ? props.selectedPhotos.map(p => p.id)
+    : [props.photo.id]
+    
+  if (photoIds.length === 0) return
+  savingAlbums.value = true
+  
+  const adds = Object.entries(pendingAlbumChanges.value)
+    .filter(([_, action]) => action === 'add')
+    .map(([id]) => parseInt(id))
+    
+  const removes = Object.entries(pendingAlbumChanges.value)
+    .filter(([_, action]) => action === 'remove')
+    .map(([id]) => parseInt(id))
+    
   try {
-    await addPhotoToAlbum(albumId, props.photo.id)
-    // Clear selection after successful add
-    selectedAlbum.value = null
+    if (adds.length > 0) await batchUpdateAlbumPhotos(adds, photoIds, 'add')
+    if (removes.length > 0) await batchUpdateAlbumPhotos(removes, photoIds, 'remove')
+    
+    pendingAlbumChanges.value = {}
+    await loadPhotosAlbums()
   } catch (err) {
-    console.error('Failed to add to album:', err)
+    console.error('Failed to save album changes:', err)
+  } finally {
+    savingAlbums.value = false
   }
 }
 
@@ -88,7 +193,46 @@ function getPersonName(personId?: number) {
     <div class="sidebar-header">
       <span class="sidebar-title">Details</span>
     </div>
-    <div class="sidebar-scroll">
+    <div v-if="selectedPhotos && selectedPhotos.length > 1" class="sidebar-scroll">
+      <div class="sidebar-section">
+        <div class="section-label">
+          <i class="pi pi-images" />
+          <span>{{ selectedPhotos.length }} Fotos ausgewählt</span>
+        </div>
+        
+        <div class="album-list-container">
+          <div class="section-label" style="margin-top: 1rem">
+            <i class="pi pi-book" />
+            <span>Alben</span>
+          </div>
+          <MultiSelect 
+            v-model="selectedAlbumIds" 
+            :options="albums" 
+            optionLabel="name" 
+            optionValue="id" 
+            placeholder="Alben auswählen"
+            :filter="true"
+            display="chip"
+            class="w-full"
+            :loading="loadingAlbums"
+          />
+        </div>
+
+        <div class="sidebar-divider" style="margin: 1.5rem 0" />
+        
+        <div class="multi-actions">
+          <Button 
+            label="Speichern" 
+            icon="pi pi-save" 
+            class="w-full" 
+            :disabled="Object.keys(pendingAlbumChanges).length === 0"
+            :loading="savingAlbums"
+            @click="saveAlbumChanges" 
+          />
+        </div>
+      </div>
+    </div>
+    <div v-else class="sidebar-scroll">
       <div class="preview-container" @click="emit('fullscreen')" title="Vollbild">
         <HeicImage :src="getPhotoUrl(photo.filename)" :alt="photo.original_name" />
         <div class="preview-overlay"><i class="pi pi-expand"></i></div>
@@ -132,17 +276,27 @@ function getPersonName(personId?: number) {
 
       <div class="sidebar-divider" />
       <div class="sidebar-section">
-        <div class="section-label"><i class="pi pi-folder-open" /> Album</div>
-        <div class="album-selector">
-          <Select
-            v-model="selectedAlbum"
-            :options="albums"
-            optionLabel="name"
-            optionValue="id"
-            placeholder="Zu Album hinzufügen"
-            @change="(e) => handleAddToAlbum(e.value)"
-            class="w-full"
-            :loading="loadingAlbums"
+        <div class="section-label"><i class="pi pi-book" /> Alben</div>
+        <MultiSelect 
+          v-model="selectedAlbumIds" 
+          :options="albums" 
+          optionLabel="name" 
+          optionValue="id" 
+          placeholder="Alben auswählen"
+          :filter="true"
+          display="chip"
+          class="w-full"
+          :loading="loadingAlbums"
+        />
+        <div class="multi-actions" style="margin-top: 0.75rem">
+          <Button 
+            label="Speichern" 
+            icon="pi pi-save" 
+            class="w-full" 
+            size="small"
+            :disabled="Object.keys(pendingAlbumChanges).length === 0"
+            :loading="savingAlbums"
+            @click="saveAlbumChanges" 
           />
         </div>
       </div>
@@ -374,4 +528,10 @@ function getPersonName(personId?: number) {
 .person-name { flex: 1; font-size: 0.875rem; }
 
 .reindex-btn { width: 100%; margin-top: 0.5rem; }
+
+.multi-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
 </style>
