@@ -14,6 +14,12 @@ import {
 
 const helpPopover = ref()
 
+// ── Responsive width tracking ──
+const windowWidth = ref(window.innerWidth)
+function onResize() { windowWidth.value = window.innerWidth }
+const isNarrow = computed(() => windowWidth.value < 900)
+const isVeryNarrow = computed(() => windowWidth.value < 500)
+
 const props = defineProps<{
   group: PhotoGroup
   allPhotos: Photo[]
@@ -80,6 +86,31 @@ function aiScoreLabel(photoId: number): string {
   const s = getAiScore(photoId)
   if (s === null) return '?'
   return `${Math.round(s * 100)}%`
+}
+
+const detailLabels: Record<string, string> = {
+  sharpness: 'Schärfe',
+  contrast: 'Kontrast',
+  exposure: 'Belichtung',
+  clip_aesthetics: 'Ästhetik',
+  clip_composition: 'Komposition',
+  clip_technical: 'Technik',
+  face_sharpness: 'Gesichtsschärfe',
+  eyes_open: 'Augen offen',
+  face_composition: 'Gesichtsposition',
+}
+
+function aiScoreTooltip(photoId: number): string {
+  const photo = getPhotoById(photoId)
+  const s = photo?.ai_quality_score
+  let text = `KI-Qualität: ${s !== undefined && s !== null ? Math.round(s * 100) + '%' : '?'}`
+  const details = photo?.ai_quality_details
+  if (details && Object.keys(details).length > 0) {
+    const lines = Object.entries(details)
+      .map(([k, v]) => `${detailLabels[k] ?? k}: ${Math.round(v * 100)}%`)
+    text += '\n' + lines.join(' · ')
+  }
+  return text
 }
 
 /**
@@ -400,11 +431,13 @@ onMounted(() => {
   initScores()
   document.body.style.overflow = 'hidden'
   window.addEventListener('keydown', handleKeydown)
+  window.addEventListener('resize', onResize)
 })
 
 onUnmounted(() => {
   document.body.style.overflow = ''
   window.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('resize', onResize)
 })
 
 watch(() => props.group.id, () => {
@@ -428,7 +461,8 @@ function getPhotoById(id: number): Photo | undefined {
           <div class="compare-header-left">
             <Button
               icon="pi pi-eye-slash"
-              label="ausblenden (1)"
+              :label="isVeryNarrow ? undefined : isNarrow ? '1' : 'ausblenden (1)'"
+              v-tooltip.bottom="isVeryNarrow ? 'Linkes ausblenden (1)' : undefined"
               severity="warn"
               size="small"
               @click="chooseHide(currentPair[0])"
@@ -437,24 +471,25 @@ function getPhotoById(id: number): Photo | undefined {
           <div class="compare-header-center">
             <Button
               icon="pi pi-equals"
-              label="Unentschieden (U, Leertaste)"
+              :label="isVeryNarrow ? undefined : isNarrow ? 'U' : 'Unentschieden (U, Leertaste)'"
+              v-tooltip.bottom="isVeryNarrow ? 'Unentschieden (U)' : undefined"
               severity="info"
               size="small"
               @click="chooseDraw"
             />
             <Button
               icon="pi pi-forward"
-              label="Überspringen (S)"
+              :label="isVeryNarrow ? undefined : isNarrow ? 'S' : 'Überspringen (S)'"
+              v-tooltip.bottom="isVeryNarrow ? 'Überspringen (S)' : undefined"
               severity="info"
               size="small"
               @click="skipPair"
             />
             <Button
               icon="pi pi-sparkles"
-              label="KI-Vorauswahl"
-              severity="secondary"
+              :label="isVeryNarrow ? undefined : isNarrow ? 'KI' : 'KI-Vorauswahl'"
+              severity="warn"
               size="small"
-              outlined
               v-tooltip.bottom="'Vergleich überspringen und Fotos nach KI-Qualitätsbewertung vorauswählen'"
               @click="applyAiPreselection"
             />
@@ -509,10 +544,21 @@ function getPhotoById(id: number): Photo | undefined {
           <div class="compare-header-right">
             <Button
               icon="pi pi-eye-slash"
-              label="ausblenden (2)"
+              :label="isVeryNarrow ? undefined : isNarrow ? '2' : 'ausblenden (2)'"
+              v-tooltip.bottom="isVeryNarrow ? 'Rechtes ausblenden (2)' : undefined"
               severity="warn"
               size="small"
               @click="chooseHide(currentPair[1])"
+            />
+            <Button
+              icon="pi pi-times"
+              text
+              rounded
+              severity="secondary"
+              size="small"
+              v-tooltip.bottom="'Schließen'"
+              @click="$emit('close')"
+              aria-label="Schließen"
             />
           </div>
         </div>
@@ -536,7 +582,7 @@ function getPhotoById(id: number): Photo | undefined {
                 <div
                   class="ai-quality-badge"
                   :class="aiScoreClass(photoId)"
-                  v-tooltip.top="'KI-Qualitätsbewertung: ' + aiScoreLabel(photoId)"
+                  v-tooltip.top="aiScoreTooltip(photoId)"
                 >
                   <i class="pi pi-sparkles" style="font-size: 0.65rem" />
                   {{ aiScoreLabel(photoId) }}
@@ -554,14 +600,15 @@ function getPhotoById(id: number): Photo | undefined {
             <Button
               v-if="hasNextPair"
               icon="pi pi-arrow-left"
-              label="Weiter vergleichen"
+              :label="isVeryNarrow ? undefined : isNarrow ? 'Vergleichen' : 'Weiter vergleichen'"
+              v-tooltip.bottom="isVeryNarrow ? 'Weiter vergleichen' : undefined"
               text
               size="small"
               @click="goBackToCompare"
             />
           </div>
           <div class="compare-header-center">
-            <span class="review-title">
+            <span class="review-title" v-if="!isVeryNarrow">
               <template v-if="hasSuggestions">
                 Vorschlag: {{ suggestedHideIds.length }} von {{ groupPhotos.length }} ausblenden
               </template>
@@ -571,22 +618,24 @@ function getPhotoById(id: number): Photo | undefined {
             </span>
             <span v-if="aiPreselectionIsRelative" class="relative-score-hint"
               v-tooltip.bottom="'Die KI-Scores lagen nah beieinander — die Vorauswahl basiert auf dem relativen Vergleich innerhalb der Gruppe.'">
-              <i class="pi pi-info-circle" /> Relative Bewertung
+              <i class="pi pi-info-circle" /> <span v-if="!isVeryNarrow">Relative Bewertung</span>
             </span>
           </div>
           <div class="compare-header-right">
             <template v-if="!reviewDecided">
               <template v-if="hasSuggestions">
                 <Button
-                  label="Vorschlag übernehmen"
+                  :label="isVeryNarrow ? undefined : isNarrow ? 'OK' : 'Vorschlag übernehmen'"
                   icon="pi pi-check"
+                  v-tooltip.bottom="isVeryNarrow ? 'Vorschlag übernehmen' : undefined"
                   severity="warn"
                   size="small"
                   @click="applySuggestions"
                 />
                 <Button
-                  label="Vorschlag ablehnen"
+                  :label="isVeryNarrow ? undefined : isNarrow ? 'Nein' : 'Vorschlag ablehnen'"
                   icon="pi pi-times"
+                  v-tooltip.bottom="isVeryNarrow ? 'Vorschlag ablehnen' : undefined"
                   severity="secondary"
                   outlined
                   size="small"
@@ -594,13 +643,21 @@ function getPhotoById(id: number): Photo | undefined {
                 />
               </template>
               <template v-else>
-                <span class="no-suggestion-hint">Keine Aktion erforderlich</span>
-                <Button label="Fertig" icon="pi pi-check" @click="handleDone" severity="success" size="small" />
+                <span class="no-suggestion-hint" v-if="!isNarrow">Keine Aktion erforderlich</span>
+                <Button
+                  :label="isVeryNarrow ? undefined : 'Fertig'"
+                  icon="pi pi-check"
+                  v-tooltip.bottom="isVeryNarrow ? 'Fertig' : undefined"
+                  @click="handleDone"
+                  severity="success"
+                  size="small"
+                />
                 <Button
                   v-if="totalUnreviewed > 1"
-                  label="Fertig + Weiter"
+                  :label="isVeryNarrow ? undefined : isNarrow ? 'Weiter' : 'Fertig + Weiter'"
                   icon="pi pi-arrow-right"
                   iconPos="right"
+                  v-tooltip.bottom="isVeryNarrow ? 'Fertig + Weiter' : undefined"
                   @click="handleDoneAndNext"
                   severity="success"
                   outlined
@@ -609,19 +666,27 @@ function getPhotoById(id: number): Photo | undefined {
               </template>
             </template>
             <template v-else>
-              <Button label="Fertig" icon="pi pi-check" @click="handleDone" severity="success" size="small" />
+              <Button
+                :label="isVeryNarrow ? undefined : 'Fertig'"
+                icon="pi pi-check"
+                v-tooltip.bottom="isVeryNarrow ? 'Fertig' : undefined"
+                @click="handleDone"
+                severity="success"
+                size="small"
+              />
               <Button
                 v-if="totalUnreviewed > 1"
-                label="Fertig + Weiter"
+                :label="isVeryNarrow ? undefined : isNarrow ? 'Weiter' : 'Fertig + Weiter'"
                 icon="pi pi-arrow-right"
                 iconPos="right"
+                v-tooltip.bottom="isVeryNarrow ? 'Fertig + Weiter' : undefined"
                 @click="handleDoneAndNext"
                 severity="success"
                 outlined
                 size="small"
               />
-              <Button icon="pi pi-times" @click="$emit('close')" text rounded severity="secondary" />
             </template>
+            <Button icon="pi pi-times" @click="$emit('close')" text rounded severity="secondary" v-tooltip.bottom="'Schließen'" />
           </div>
         </div>
 
@@ -647,7 +712,7 @@ function getPhotoById(id: number): Photo | undefined {
                   v-if="photo.ai_quality_score !== undefined"
                   class="review-ai-score"
                   :class="aiScoreClass(photo.id)"
-                  v-tooltip.right="'KI-Qualität'"
+                  v-tooltip.right="aiScoreTooltip(photo.id)"
                 >
                   <i class="pi pi-sparkles" style="font-size: 0.6rem" />
                   {{ aiScoreLabel(photo.id) }}
@@ -926,6 +991,7 @@ kbd {
   background: rgba(0, 0, 0, 0.65);
   backdrop-filter: blur(4px);
   pointer-events: none;
+  --p-tooltip-background: white;
 }
 
 .ai-quality-badge.ai-score-good  { color: #22c55e; }

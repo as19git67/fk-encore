@@ -42,6 +42,7 @@ function setupPhotoObserver() {
   photoObserver?.disconnect()
   visiblePhotoIds.value = new Set()
   if (!gridScrollRef.value) return
+  gridScrollRef.value.scrollTop = 0
   photoObserver = new IntersectionObserver(
     (entries) => {
       for (const entry of entries) {

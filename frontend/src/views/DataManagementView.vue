@@ -196,9 +196,9 @@ onUnmounted(() => stopPolling())
     <h2>Datenverwaltung</h2>
 
     <!-- Scan Queue -->
-    <div class="card p-4 mb-4 surface-card border-round shadow-1">
-      <h3 class="mt-0 mb-1">Scan-Queue</h3>
-      <p class="text-secondary mb-3">
+    <div class="data-management-group">
+      <h3>Scan-Queue</h3>
+      <p>
         Hochgeladene Fotos werden im Hintergrund durch Gesichtserkennung, Embedding-Berechnung
         und Sehenswürdigkeiten-Erkennung geschickt.
       </p>
@@ -280,22 +280,22 @@ onUnmounted(() => stopPolling())
     </div>
 
     <!-- Foto-Gruppen -->
-    <div class="card p-4 mb-4 surface-card border-round shadow-1">
-      <h3 class="mt-0 mb-1">Ähnliche Fotos gruppieren</h3>
-      <p class="text-secondary mb-3">
+    <div class="data-management-group">
+      <h3>Ähnliche Fotos gruppieren</h3>
+      <p>
         Ähnliche Fotos werden anhand der Embeddings automatisch zu Gruppen zusammengefasst.
       </p>
 
-      <Message v-if="groupingError" severity="error" class="mb-3" @close="groupingError = ''">{{ groupingError }}</Message>
+      <Message v-if="groupingError" severity="error" class="data-management-group__item" @close="groupingError = ''">{{ groupingError }}</Message>
 
-      <div v-if="groupingResult" class="mb-3">
+      <div v-if="groupingResult" class="data-management-group__item">
         <Message severity="info" :closable="false">
           {{ groupingResult.groups_created }} neue Gruppen erstellt
           ({{ groupingResult.total_photos_grouped }} Fotos gruppiert).
         </Message>
       </div>
 
-      <Button
+      <Button class="data-management-group__item"
         icon="pi pi-images"
         label="Gruppen neu berechnen"
         :loading="groupingLoading"
@@ -305,18 +305,18 @@ onUnmounted(() => stopPolling())
     </div>
 
     <!-- GPS Re-Extraktion -->
-    <div class="card p-4 mb-4 surface-card border-round shadow-1">
-      <h3 class="mt-0 mb-1">GPS-Koordinaten neu einlesen</h3>
-      <p class="text-secondary mb-3">
+    <div class="data-management-group">
+      <h3>GPS-Koordinaten neu einlesen</h3>
+      <p>
         Liest GPS-Daten aus Fotos neu ein, bei denen die Extraktion beim Upload fehlgeschlagen ist,
         und wiederholt das Reverse-Geocoding für Fotos ohne Ortsbezeichnung.
         Wenn GPS-Koordinaten neu gefunden werden, werden alle anderen Scans (Embeddings,
         Gesichtserkennung, Qualität) ebenfalls neu gestartet.
       </p>
 
-      <Message v-if="gpsRescanError" severity="error" class="mb-3" @close="gpsRescanError = ''">{{ gpsRescanError }}</Message>
+      <Message v-if="gpsRescanError" severity="error" class="data-management-group__item" @close="gpsRescanError = ''">{{ gpsRescanError }}</Message>
 
-      <div v-if="gpsRescanResult" class="mb-3">
+      <div v-if="gpsRescanResult" class="data-management-group__item">
         <Message severity="info" :closable="false">
           {{ gpsRescanResult.gpsFound }} Fotos mit neuen GPS-Koordinaten ·
           {{ gpsRescanResult.geocoded }} Fotos geocodiert ·
@@ -324,15 +324,14 @@ onUnmounted(() => stopPolling())
         </Message>
       </div>
 
-      <div v-if="gpsRescanLoading" class="mb-3">
+      <div v-if="gpsRescanLoading" class="data-management-group__item">
         <span class="text-secondary">GPS wird verarbeitet… {{ gpsRescanCurrent }} / {{ gpsRescanTotal }}</span>
         <ProgressBar :value="gpsRescanProgress" :showValue="false" style="margin-top:0.5rem" />
       </div>
 
-      <Button
+      <Button class="data-management-group__item"
         icon="pi pi-map-marker"
         label="GPS neu einlesen"
-        severity="secondary"
         :disabled="gpsRescanLoading || isActive"
         :loading="gpsRescanLoading"
         @click="handleGpsRescan"
@@ -340,20 +339,20 @@ onUnmounted(() => stopPolling())
     </div>
 
     <!-- Metadaten -->
-    <div class="card p-4 mb-4 surface-card border-round shadow-1">
-      <h3 class="mt-0 mb-1">Metadaten aktualisieren</h3>
-      <p class="text-secondary mb-3">
+    <div class="data-management-group">
+      <h3>Metadaten aktualisieren</h3>
+      <p>
         Aufnahmedatum und andere EXIF-Metadaten werden für Fotos ohne gespeichertes Datum neu eingelesen.
       </p>
 
-      <Message v-if="metaError" severity="error" class="mb-3" @close="metaError = ''">{{ metaError }}</Message>
+      <Message v-if="metaError" severity="error" class="data-management-group__item" @close="metaError = ''">{{ metaError }}</Message>
 
-      <div v-if="refreshingMetadata" class="mb-3">
+      <div v-if="refreshingMetadata" class="data-management-group__item">
         <span class="text-secondary">Metadaten werden aktualisiert… {{ refreshCurrent }} / {{ refreshTotal }}</span>
         <ProgressBar :value="refreshProgress" :showValue="false" style="margin-top:0.5rem" />
       </div>
 
-      <Button
+      <Button class="data-management-group__item"
         icon="pi pi-refresh"
         label="Metadaten aktualisieren"
         :disabled="refreshingMetadata || isActive"
@@ -365,10 +364,34 @@ onUnmounted(() => stopPolling())
 </template>
 
 <style scoped>
+.data-management-view {
+  gap: 1rem;
+  display: flex;
+  flex-direction: column;
+}
+
 @media (min-width: 800px) {
   .data-management-view {
     margin-inline: 0.5em;
   }
+}
+
+.data-management-view h2 {
+  margin-block: 0.25em;
+}
+
+.data-management-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5em;
+}
+
+.data-management-group h3, .data-management-group p {
+  margin-block: 0;
+}
+
+.data-management-group .data-management-group__item {
 }
 
 .status-progress {

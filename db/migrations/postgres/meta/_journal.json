@@ -29,6 +29,13 @@
       "when": 1774800000000,
       "tag": "0003_ai_quality_score",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1774900000000,
+      "tag": "0004_ai_quality_details",
+      "breakpoints": true
     }
   ]
 }
