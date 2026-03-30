@@ -85,18 +85,42 @@ function aiScoreLabel(photoId: number): string {
 /**
  * Pre-populate comparison scores from AI quality so the user can skip the
  * manual pairwise phase and jump straight to the review grid.
- * Score is mapped linearly: ai=0.0 → -3, ai=0.5 → 0, ai=1.0 → +3.
+ *
+ * When all photos have similar absolute scores (range < 0.12), scores are
+ * normalised within the group so small differences become visible.
+ * Otherwise the absolute mapping (ai=0.0→-3, ai=0.5→0, ai=1.0→+3) is used.
  */
+const aiPreselectionIsRelative = ref(false)
+
 function applyAiPreselection(): void {
   const map = new Map<number, number>()
+  const scored = groupPhotos.value.filter(p => p.ai_quality_score !== undefined && p.ai_quality_score !== null)
+
+  let useRelative = false
+  let minScore = 0
+  let range = 0
+
+  if (scored.length >= 2) {
+    minScore = Math.min(...scored.map(p => p.ai_quality_score!))
+    const maxScore = Math.max(...scored.map(p => p.ai_quality_score!))
+    range = maxScore - minScore
+    useRelative = range > 0 && range < 0.12
+  }
+
   for (const photo of groupPhotos.value) {
     const s = photo.ai_quality_score
-    if (s !== undefined && s !== null) {
-      map.set(photo.id, Math.round((s - 0.5) * 6))
-    } else {
+    if (s === undefined || s === null) {
       map.set(photo.id, 0)
+    } else if (useRelative) {
+      // Normalize within group: worst → -3, best → +3
+      const rel = (s - minScore) / range
+      map.set(photo.id, Math.round((rel - 0.5) * 6))
+    } else {
+      map.set(photo.id, Math.round((s - 0.5) * 6))
     }
   }
+
+  aiPreselectionIsRelative.value = useRelative
   scores.value = map
   phase.value = 'review'
   currentPair.value = null
@@ -545,6 +569,10 @@ function getPhotoById(id: number): Photo | undefined {
                 Kein Ausblenden vorgeschlagen (0 von {{ groupPhotos.length }})
               </template>
             </span>
+            <span v-if="aiPreselectionIsRelative" class="relative-score-hint"
+              v-tooltip.bottom="'Die KI-Scores lagen nah beieinander — die Vorauswahl basiert auf dem relativen Vergleich innerhalb der Gruppe.'">
+              <i class="pi pi-info-circle" /> Relative Bewertung
+            </span>
           </div>
           <div class="compare-header-right">
             <template v-if="!reviewDecided">
@@ -706,6 +734,16 @@ function getPhotoById(id: number): Photo | undefined {
 
 .review-title {
   color: var(--p-slate-950);
+}
+
+.relative-score-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--text-color-secondary);
+  cursor: default;
+  margin-left: 0.5rem;
 }
 
 .no-suggestion-hint {
