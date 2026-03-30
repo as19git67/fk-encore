@@ -665,26 +665,40 @@ watch(isFullscreen, (val) => {
 
 // ── IntersectionObserver setup ──────────────────────────────────────────────
 
+let debounceTimeout: ReturnType<typeof setTimeout> | null = null
+const pendingVisibleIds = new Set<number>()
+
+function applyVisiblePhotos() {
+  visiblePhotoIds.value = new Set(pendingVisibleIds)
+}
+
 function setupObservers() {
   // Clean up old observers
   photoObserver?.disconnect()
   sectionObserver?.disconnect()
+  if (debounceTimeout) clearTimeout(debounceTimeout)
 
   const root = gridScrollRef.value
   if (!root) return
 
   // Photo visibility observer — controls which images get rendered
   visiblePhotoIds.value = new Set()
+  pendingVisibleIds.clear()
+
   photoObserver = new IntersectionObserver(
     (entries) => {
-      const next = new Set(visiblePhotoIds.value)
       for (const entry of entries) {
         const id = Number((entry.target as HTMLElement).dataset.photoId)
         if (!id) continue
-        if (entry.isIntersecting) next.add(id)
-        else next.delete(id)
+        if (entry.isIntersecting) pendingVisibleIds.add(id)
+        else pendingVisibleIds.delete(id)
       }
-      visiblePhotoIds.value = next
+
+      if (debounceTimeout) clearTimeout(debounceTimeout)
+      debounceTimeout = setTimeout(() => {
+        applyVisiblePhotos()
+        debounceTimeout = null
+      }, 150)
     },
     { root, rootMargin: '300px 0px' }
   )
@@ -694,15 +708,14 @@ function setupObservers() {
   // Fallback: immediately mark items that are in the initial viewport as visible
   // (IntersectionObserver callbacks are async and may not fire before first paint)
   const rootRect = root.getBoundingClientRect()
-  const initial = new Set(visiblePhotoIds.value)
   photoEls.forEach(el => {
     const rect = el.getBoundingClientRect()
     if (rect.bottom > rootRect.top - 300 && rect.top < rootRect.bottom + 300) {
       const id = Number((el as HTMLElement).dataset.photoId)
-      if (id) initial.add(id)
+      if (id) pendingVisibleIds.add(id)
     }
   })
-  visiblePhotoIds.value = initial
+  applyVisiblePhotos()
 
   // Section header observer — tracks active year/month for timeline nav
   sectionObserver = new IntersectionObserver(

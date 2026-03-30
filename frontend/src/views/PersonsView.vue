@@ -37,18 +37,41 @@ const selectedIndex = ref(-1)
 const gridScrollRef = ref<HTMLElement | null>(null)
 const visiblePhotoIds = ref(new Set<number>())
 let photoObserver: IntersectionObserver | null = null
+let debounceTimeout: ReturnType<typeof setTimeout> | null = null
 
-function setupPhotoObserver() {
+const pendingVisibleIds = new Set<number>()
+
+function applyVisiblePhotos() {
+  visiblePhotoIds.value = new Set(pendingVisibleIds)
+}
+
+function setupPhotoObserver(options?: { resetScroll?: boolean }) {
   photoObserver?.disconnect()
   visiblePhotoIds.value = new Set()
+  pendingVisibleIds.clear()
+  if (debounceTimeout) clearTimeout(debounceTimeout)
+
   if (!gridScrollRef.value) return
-  gridScrollRef.value.scrollTop = 0
+  if (options?.resetScroll !== false) {
+    gridScrollRef.value.scrollTop = 0
+  }
+
   photoObserver = new IntersectionObserver(
     (entries) => {
       for (const entry of entries) {
         const id = Number((entry.target as HTMLElement).dataset.photoId)
-        if (entry.isIntersecting) visiblePhotoIds.value.add(id)
+        if (entry.isIntersecting) {
+          pendingVisibleIds.add(id)
+        } else {
+          pendingVisibleIds.delete(id)
+        }
       }
+
+      if (debounceTimeout) clearTimeout(debounceTimeout)
+      debounceTimeout = setTimeout(() => {
+        applyVisiblePhotos()
+        debounceTimeout = null
+      }, 150)
     },
     { root: gridScrollRef.value, rootMargin: '200px' }
   )
@@ -57,7 +80,7 @@ function setupPhotoObserver() {
   }
 }
 
-watch(gridScrollRef, () => nextTick(setupPhotoObserver))
+watch(gridScrollRef, () => nextTick(() => setupPhotoObserver()))
 
 // ── Person face / photo items ─────────────────────────────────────────────────
 const personFaceItems = computed(() => {
@@ -82,7 +105,7 @@ watch(uniquePhotoFaceItems, (items) => {
     if (selectedIndex.value < 0) selectedIndex.value = 0
     else if (selectedIndex.value >= items.length) selectedIndex.value = items.length - 1
   }
-  void nextTick(setupPhotoObserver)
+  void nextTick(() => setupPhotoObserver({ resetScroll: false }))
 })
 
 const allUniquePhotoFaceItems = computed(() => {
