@@ -990,8 +990,7 @@ kbd {
   font-weight: 600;
   background: rgba(0, 0, 0, 0.65);
   backdrop-filter: blur(4px);
-  pointer-events: none;
-  --p-tooltip-background: white;
+  cursor: help;
 }
 
 .ai-quality-badge.ai-score-good  { color: #22c55e; }
@@ -1013,7 +1012,7 @@ kbd {
   font-weight: 600;
   background: rgba(0, 0, 0, 0.65);
   backdrop-filter: blur(4px);
-  pointer-events: none;
+  cursor: help;
 }
 
 .review-ai-score.ai-score-good   { color: #22c55e; }
