@@ -513,6 +513,28 @@ export const getScanQueueStatus = api(
   }
 );
 
+export const getPhotosNeedingGpsRescan = api(
+  { expose: true, method: "GET", path: "/photos/needs-gps-rescan", auth: true },
+  async (): Promise<{ ids: number[] }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "data.manage");
+    return await service.getPhotosNeedingGpsRescanLogic(userId);
+  }
+);
+
+export const rescanPhotoGps = api(
+  { expose: true, method: "POST", path: "/photos/:id/rescan-gps", auth: true },
+  async ({ id }: { id: number }): Promise<{ gpsFound: boolean; geocoded: boolean; scansQueued: boolean }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "data.manage");
+    return await service.rescanPhotoGpsLogic(userId, id);
+  }
+);
+
 export const rescanPhotos = api(
   { expose: true, method: "POST", path: "/photos/rescan", auth: true },
   async ({ force }: { force: boolean }): Promise<{ queued: number }> => {

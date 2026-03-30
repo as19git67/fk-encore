@@ -3,7 +3,7 @@ import path from "path";
 import crypto from "crypto";
 import exifr from "exifr";
 import { exiftool } from "exiftool-vendored";
-import { eq, and, or, sql, inArray, ilike } from "drizzle-orm";
+import { eq, and, or, sql, inArray, ilike, isNull, isNotNull } from "drizzle-orm";
 import { enqueuePhotoScan, DeferJobError } from "./scan-queue";
 import { triggerWorkers } from "./scan-worker";
 import db from "../db/database";
@@ -1405,6 +1405,79 @@ export async function reindexPhotoLogic(
   return { success: true };
 }
 
+
+// ── GPS Rescan ───────────────────────────────────────────────────────────────
+
+/**
+ * Returns IDs of photos that need GPS processing:
+ * - latitude IS NULL  → EXIF extraction never succeeded, worth retrying
+ * - latitude set but location_name IS NULL → geocoding failed, worth retrying
+ */
+export async function getPhotosNeedingGpsRescanLogic(userId: number): Promise<{ ids: number[] }> {
+  const rows = await dbAll<{ id: number }>(
+    db.select({ id: photos.id })
+      .from(photos)
+      .where(
+        and(
+          eq(photos.user_id, userId),
+          or(
+            isNull(photos.latitude),
+            and(isNotNull(photos.latitude), isNull(photos.location_name)),
+          ),
+        )
+      )
+  );
+  return { ids: rows.map(r => r.id) };
+}
+
+/**
+ * Re-extracts GPS for a single photo and reverse-geocodes if needed.
+ * When GPS coordinates are newly found the photo is also enqueued for all
+ * other scan services — a failed EXIF extraction suggests the photo may not
+ * have been fully processed on upload.
+ */
+export async function rescanPhotoGpsLogic(
+  userId: number,
+  photoId: number,
+): Promise<{ gpsFound: boolean; geocoded: boolean; scansQueued: boolean }> {
+  const photo = await dbFirst<typeof photos.$inferSelect>(
+    db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+  );
+  if (!photo) throw new Error("Photo not found");
+
+  let lat = photo.latitude;
+  let lon = photo.longitude;
+  let gpsFound = false;
+  let geocoded = false;
+  let scansQueued = false;
+
+  if (lat === null || lon === null) {
+    const filePath = path.join(UPLOAD_DIR, photo.filename);
+    if (!fs.existsSync(filePath)) {
+      return { gpsFound: false, geocoded: false, scansQueued: false };
+    }
+    const exifMeta = await getExifMetadata(filePath);
+    if (exifMeta.latitude !== null && exifMeta.longitude !== null) {
+      lat = exifMeta.latitude;
+      lon = exifMeta.longitude;
+      await dbExec(
+        db.update(photos).set({ latitude: lat, longitude: lon }).where(eq(photos.id, photoId))
+      );
+      gpsFound = true;
+      // EXIF parsing previously failed → re-queue all scan services
+      await enqueuePhotoScan(photoId, userId);
+      triggerWorkers();
+      scansQueued = true;
+    }
+  }
+
+  if (lat !== null && lon !== null && !photo.location_name) {
+    await geocodePhotoLocation(userId, photoId, lat, lon);
+    geocoded = true;
+  }
+
+  return { gpsFound, geocoded, scansQueued };
+}
 
 // ── Scan Queue API helpers ───────────────────────────────────────────────────
 

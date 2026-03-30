@@ -223,13 +223,13 @@ const groupedPhotos = computed(() => {
       const s = photo.ai_quality_score
       if (s === undefined || s === null) { unscored.push(photo); return }
       for (let i = 0; i < tiers.length; i++) {
-        if (tiers[i].test(s)) { buckets[i].push(photo); return }
+        if (tiers[i]!.test(s)) { buckets[i]!.push(photo); return }
       }
     })
 
     const groups: YearGroup[] = []
     tiers.forEach((tier, i) => {
-      const tierPhotos = buckets[i].sort((a, b) => (b.ai_quality_score ?? 0) - (a.ai_quality_score ?? 0))
+      const tierPhotos = (buckets[i] ?? []).sort((a, b) => (b.ai_quality_score ?? 0) - (a.ai_quality_score ?? 0))
       if (tierPhotos.length === 0) return
       groups.push({
         year: tier.label,
