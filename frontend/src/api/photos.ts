@@ -218,6 +218,85 @@ export function hardDeletePhoto(id: number) {
   })
 }
 
+// ---------- Albums ----------
+
+export interface Album {
+  id: number
+  user_id: number
+  name: string
+  created_at: string
+  updated_at: string
+}
+
+export interface AlbumUserSettings {
+  album_id: number
+  user_id: number
+  hide_mode: 'mine' | 'all'
+  active_view: 'all' | 'favorites' | 'by_user'
+  view_config?: any
+}
+
+export interface AlbumWithPhotos extends Album {
+  photos: (Photo & { added_by_user_id?: number, added_at: string })[]
+  settings?: AlbumUserSettings
+  role: 'owner' | 'admin' | 'contributor' | 'viewer'
+}
+
+export function listAlbums() {
+  return apiFetch<{ albums: Album[] }>('/albums')
+}
+
+export function getAlbum(id: number) {
+  return apiFetch<AlbumWithPhotos>(`/albums/${id}`)
+}
+
+export function createAlbum(name: string) {
+  return apiFetch<Album>('/albums', {
+    method: 'POST',
+    body: JSON.stringify({ name })
+  })
+}
+
+export function updateAlbum(id: number, name: string) {
+  return apiFetch<Album>('/albums', {
+    method: 'PATCH',
+    body: JSON.stringify({ id, name })
+  })
+}
+
+export function deleteAlbum(id: number) {
+  return apiFetch<DeleteResponse>(`/albums/${id}`, {
+    method: 'DELETE'
+  })
+}
+
+export function addPhotoToAlbum(albumId: number, photoId: number) {
+  return apiFetch<{ success: boolean }>('/albums/photos', {
+    method: 'POST',
+    body: JSON.stringify({ albumId, photoId })
+  })
+}
+
+export function shareAlbum(albumId: number, userId: number, accessLevel: 'read' | 'write') {
+  return apiFetch<{ success: boolean }>('/albums/share', {
+    method: 'POST',
+    body: JSON.stringify({ albumId, userId, accessLevel })
+  })
+}
+
+export function updateAlbumUserSettings(albumId: number, settings: Partial<AlbumUserSettings>) {
+  const { album_id, user_id, ...rest } = settings as any
+  const req: any = {}
+  if (rest.hide_mode) req.hideMode = rest.hide_mode
+  if (rest.active_view) req.activeView = rest.active_view
+  if (rest.view_config !== undefined) req.viewConfig = rest.view_config
+
+  return apiFetch<AlbumUserSettings>(`/albums/${albumId}/settings`, {
+    method: 'PATCH',
+    body: JSON.stringify(req)
+  })
+}
+
 // ---------- Photo Groups ----------
 
 export interface PhotoGroup {

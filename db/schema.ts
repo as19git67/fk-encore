@@ -221,6 +221,8 @@ export const albumPhotos = pgTable(
     photo_id: integer("photo_id")
       .notNull()
       .references(() => photos.id, { onDelete: "cascade" }),
+    added_by_user_id: integer("added_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    added_at: timestamp("added_at", { mode: "string" }).defaultNow(),
   },
   (table) => [primaryKey({ columns: [table.album_id, table.photo_id] })]
 );
@@ -237,6 +239,24 @@ export const albumShares = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     access_level: text("access_level").notNull().default("read"),
+  },
+  (table) => [primaryKey({ columns: [table.album_id, table.user_id] })]
+);
+
+// ========== Album User Settings (Preferences) ==========
+
+export const albumUserSettings = pgTable(
+  "album_user_settings",
+  {
+    album_id: integer("album_id")
+      .notNull()
+      .references(() => albums.id, { onDelete: "cascade" }),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    hide_mode: text("hide_mode").notNull().default("mine"), // 'mine' | 'all'
+    active_view: text("active_view").notNull().default("all"), // 'all' | 'favorites' | 'by_user'
+    view_config: jsonb("view_config"),
   },
   (table) => [primaryKey({ columns: [table.album_id, table.user_id] })]
 );

@@ -8,6 +8,8 @@ import { UPLOAD_DIR } from "./photo.service";
 import type {
   Album,
   AlbumWithPhotos,
+  AlbumUserSettings,
+  UpdateAlbumUserSettingsRequest,
   CreateAlbumRequest,
   UpdateAlbumRequest,
   AddPhotoToAlbumRequest,
@@ -366,6 +368,18 @@ export const shareAlbum = api(
     checkModule();
     const userId = getUserId();
     return await service.shareAlbumLogic(userId, req);
+  }
+);
+
+/**
+ * Update personal settings/preferences for an album.
+ */
+export const updateAlbumUserSettings = api(
+  { expose: true, method: "PATCH", path: "/albums/:id/settings", auth: true },
+  async ({ id, ...req }: { id: number } & Omit<UpdateAlbumUserSettingsRequest, "albumId">): Promise<AlbumUserSettings> => {
+    checkModule();
+    const userId = getUserId();
+    return await service.updateAlbumUserSettingsLogic(userId, { ...req, albumId: id });
   }
 );
 
