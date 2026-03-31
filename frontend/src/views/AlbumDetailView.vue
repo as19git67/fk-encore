@@ -1,25 +1,39 @@
 <script lang="ts" setup>
-import {computed, nextTick, onMounted, ref, watch} from 'vue'
+import {computed, nextTick, onMounted, onUnmounted, ref, watch} from 'vue'
 import {useRoute, useRouter} from 'vue-router'
 import SelectButton from 'primevue/selectbutton'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
+import GalleryLayout from '../components/GalleryLayout.vue'
 import HeicImage from '../components/HeicImage.vue'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import {
   type AlbumWithPhotos,
+  deletePhoto,
   deleteAlbum,
+  getPhotoFaces,
   getAlbum,
+  getPhotoLandmarks,
   getPhotoUrl,
+  ignoreFace,
+  listPersons,
+  reindexPhoto,
+  type CurationStatus,
+  type Face,
+  type LandmarkItem,
+  type Person,
+  updatePhotoCuration,
   updateAlbum,
   updateAlbumUserSettings
 } from '../api/photos'
+import {useAuthStore} from '../stores/auth'
 
 const route = useRoute()
 const router = useRouter()
 const albumId = Number(route.params.id)
+const auth = useAuthStore()
 
 const album = ref<AlbumWithPhotos | null>(null)
 const loading = ref(true)
@@ -27,6 +41,7 @@ const error = ref('')
 
 const selectedIndex = ref(-1)
 const isFullscreen = ref(false)
+const activeSection = ref('')
 
 const viewOptions = [
   {label: 'Alle', value: 'all'},
@@ -42,6 +57,7 @@ async function loadData() {
   loading.value = true
   try {
     album.value = await getAlbum(albumId)
+    selectedIndex.value = album.value.photos.length > 0 ? 0 : -1
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden des Albums'
   } finally {
@@ -60,13 +76,120 @@ async function handleSettingsChange() {
   }
 }
 
+async function loadPersons() {
+  try {
+    const res = await listPersons()
+    persons.value = res.persons
+  } catch (err) {
+    console.error('Failed to load persons:', err)
+  }
+}
+
+async function loadSidebarData(photoId: number) {
+  loadingFaces.value = true
+  loadingLandmarks.value = true
+  try {
+    const [facesRes, landmarksRes] = await Promise.all([
+      getPhotoFaces(photoId),
+      getPhotoLandmarks(photoId),
+    ])
+    detectedFaces.value = facesRes.faces
+    detectedLandmarks.value = landmarksRes.landmarks
+  } catch (err) {
+    console.error('Failed to load sidebar data:', err)
+  } finally {
+    loadingFaces.value = false
+    loadingLandmarks.value = false
+  }
+}
+
 const selectedPhoto = computed(() => {
   if (selectedIndex.value < 0 || !album.value) return null
   return album.value.photos[selectedIndex.value] || null
 })
 
+function scrollToPhoto(photoId: number) {
+  const el = gridScrollRef.value?.querySelector(`[data-photo-id="${photoId}"]`)
+  el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+function scrollToSection(id: string) {
+  const el = document.getElementById(id)
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    activeSection.value = id
+  }
+}
+
+watch(selectedPhoto, (photo) => {
+  if (photo) {
+    loadSidebarData(photo.id)
+    if (showPersons.value) void loadPersons()
+  } else {
+    detectedFaces.value = []
+    detectedLandmarks.value = []
+  }
+})
+
+watch(selectedIndex, (newIdx) => {
+  const photo = album.value?.photos[newIdx]
+  if (photo) scrollToPhoto(photo.id)
+})
+
 const canWrite = computed(() => album.value?.role === 'owner' || album.value?.role === 'contributor')
-const canDelete = computed(() => album.value?.role === 'owner')
+const canDeleteAlbum = computed(() => album.value?.role === 'owner')
+const canDeletePhotos = computed(() => auth.hasPermission('photos.delete'))
+const canUploadPhotos = computed(() => auth.hasPermission('photos.upload'))
+const showPersons = computed(() => auth.hasPermission('people.view'))
+
+const detectedFaces = ref<Face[]>([])
+const loadingFaces = ref(false)
+const detectedLandmarks = ref<LandmarkItem[]>([])
+const loadingLandmarks = ref(false)
+const reindexingPhoto = ref(false)
+const persons = ref<Person[]>([])
+
+interface PhotoItem {
+  photo: NonNullable<AlbumWithPhotos['photos']>[number]
+  index: number
+}
+
+interface MonthGroup {
+  month: string
+  photos: PhotoItem[]
+}
+
+interface YearGroup {
+  year: string
+  months: MonthGroup[]
+}
+
+const groupedPhotos = computed<YearGroup[]>(() => {
+  const groups: YearGroup[] = []
+  if (!album.value) return groups
+
+  for (const [index, photo] of album.value.photos.entries()) {
+    const date = new Date(photo.taken_at || photo.created_at)
+    const year = date.getFullYear().toString()
+    const month = date.toLocaleString('de-DE', { month: 'long' })
+
+    let yearGroup = groups.find(g => g.year === year)
+    if (!yearGroup) {
+      yearGroup = { year, months: [] }
+      groups.push(yearGroup)
+    }
+
+    let monthGroup = yearGroup.months.find(m => m.month === month)
+    if (!monthGroup) {
+      monthGroup = { month, photos: [] }
+      yearGroup.months.push(monthGroup)
+    }
+
+    monthGroup.photos.push({ photo, index })
+  }
+
+  return groups
+})
 
 // Rename & description state
 const showRenameDialog = ref(false)
@@ -118,15 +241,76 @@ async function saveDescription() {
   }
 }
 
-async function setAsCover() {
-  if (!album.value || !selectedPhoto.value) return
+function handleCoverPhotoIdUpdate(id: number | null) {
+  if (!album.value) return
+  album.value.cover_photo_id = id ?? undefined
+}
+
+function updatePhotoStatus(id: number, status: CurationStatus) {
+  if (!album.value) return
+  album.value.photos = album.value.photos.map(photo => (
+    photo.id === id ? { ...photo, curation_status: status } : photo
+  ))
+}
+
+async function handleIgnoreFaceInSidebar(faceId: number) {
   try {
-    updatingAlbum.value = true
-    await updateAlbum(albumId, {coverPhotoId: selectedPhoto.value.id})
+    await ignoreFace(faceId)
+    detectedFaces.value = detectedFaces.value.filter(f => f.id !== faceId)
   } catch (err: any) {
-    error.value = err.message || 'Fehler beim Setzen des Covers'
+    error.value = err.message || 'Fehler beim Ignorieren des Gesichts'
+  }
+}
+
+async function handleReindexPhoto() {
+  if (!selectedPhoto.value) return
+  reindexingPhoto.value = true
+  try {
+    await reindexPhoto(selectedPhoto.value.id)
+    await loadSidebarData(selectedPhoto.value.id)
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Neu-Erkennen'
   } finally {
-    updatingAlbum.value = false
+    reindexingPhoto.value = false
+  }
+}
+
+async function handleHidePhoto(id: number) {
+  try {
+    await deletePhoto(id)
+    updatePhotoStatus(id, 'hidden')
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Ausblenden'
+  }
+}
+
+async function handleRestorePhoto(id: number) {
+  try {
+    await updatePhotoCuration(id, 'visible')
+    updatePhotoStatus(id, 'visible')
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Wiederherstellen'
+  }
+}
+
+async function handleToggleFavorite(id: number, currentStatus: CurationStatus) {
+  const newStatus = currentStatus === 'favorite' ? 'visible' : 'favorite'
+  updatePhotoStatus(id, newStatus)
+  try {
+    await updatePhotoCuration(id, newStatus)
+  } catch (err: any) {
+    updatePhotoStatus(id, currentStatus)
+    error.value = err.message || 'Fehler beim Ändern des Favoriten-Status'
+  }
+}
+
+async function scrollToCover() {
+  if (!album.value?.cover_photo_id) return
+  const idx = album.value.photos.findIndex(p => p.id === album.value!.cover_photo_id)
+  if (idx >= 0) {
+    selectedIndex.value = idx
+    await nextTick()
+    scrollToPhoto(album.value.cover_photo_id)
   }
 }
 
@@ -145,15 +329,24 @@ async function doDelete() {
   }
 }
 
-onMounted(loadData)
+onMounted(() => {
+  void loadData()
+  if (showPersons.value) void loadPersons()
+})
 
 // Reuse observer logic for performance
 const visiblePhotoIds = ref(new Set<number>())
 const gridScrollRef = ref<HTMLElement | null>(null)
 let photoObserver: IntersectionObserver | null = null
+let sectionObserver: IntersectionObserver | null = null
 
-function setupObserver() {
+function setGridScrollRef(el: HTMLElement | null) {
+  gridScrollRef.value = el
+}
+
+function setupObservers() {
   photoObserver?.disconnect()
+  sectionObserver?.disconnect()
   visiblePhotoIds.value = new Set()
   if (!gridScrollRef.value) return
 
@@ -165,17 +358,45 @@ function setupObserver() {
           else visiblePhotoIds.value.delete(id)
         }
       },
-      {root: gridScrollRef.value, rootMargin: '200px'}
+      {root: gridScrollRef.value, rootMargin: '300px 0px'}
   )
-  for (const el of gridScrollRef.value.querySelectorAll('[data-photo-id]')) {
-    photoObserver.observe(el)
-  }
+  const photoEls = gridScrollRef.value.querySelectorAll('[data-photo-id]')
+  photoEls.forEach(el => photoObserver!.observe(el))
+
+  const rootRect = gridScrollRef.value.getBoundingClientRect()
+  photoEls.forEach(el => {
+    const rect = el.getBoundingClientRect()
+    if (rect.bottom > rootRect.top - 300 && rect.top < rootRect.bottom + 300) {
+      const id = Number((el as HTMLElement).dataset.photoId)
+      if (id) visiblePhotoIds.value.add(id)
+    }
+  })
+
+  sectionObserver = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          activeSection.value = (entry.target as HTMLElement).id
+        }
+      }
+    },
+    { root: gridScrollRef.value, rootMargin: '-5% 0px -90% 0px' }
+  )
+  gridScrollRef.value.querySelectorAll('[data-section-header]').forEach(el => sectionObserver!.observe(el))
 }
 
-watch([album, gridScrollRef], () => {
-  if (album.value && gridScrollRef.value) {
-    nextTick(setupObserver)
-  }
+watch(groupedPhotos, async () => {
+  await nextTick()
+  setupObservers()
+})
+
+watch(gridScrollRef, () => {
+  nextTick(() => setupObservers())
+})
+
+onUnmounted(() => {
+  photoObserver?.disconnect()
+  sectionObserver?.disconnect()
 })
 </script>
 
@@ -185,13 +406,20 @@ watch([album, gridScrollRef], () => {
       <div class="header">
         <div class="header-left">
           <h1 class="title">{{ album.name }}</h1>
-          <span :class="album.role" class="role-badge">{{ album.role }}</span>
+          <span :class="['role-badge', `role-badge--${album.role}`]">{{ album.role }}</span>
         </div>
         <div class="controls">
+          <Button
+            v-if="album.cover_photo_id"
+            icon="pi pi-image"
+            label="Cover fokussieren"
+            size="small"
+            text
+            @click="scrollToCover"
+            title="Zum Cover-Foto springen"
+          />
           <Button v-if="canWrite" icon="pi pi-pencil" label="Umbenennen" size="small" text @click="openRename"/>
-          <Button v-if="canWrite && selectedPhoto" :loading="updatingAlbum" icon="pi pi-image" label="Als Cover setzen" size="small"
-                  text @click="setAsCover"/>
-          <Button v-if="canDelete" icon="pi pi-trash" label="Löschen" severity="danger" size="small" text
+          <Button v-if="canDeleteAlbum" icon="pi pi-trash" label="Löschen" severity="danger" size="small" text
                   @click="showDeleteDialog = true"/>
           <div v-if="album.settings" class="control-group">
             <label>Ansicht:</label>
@@ -224,83 +452,128 @@ watch([album, gridScrollRef], () => {
     </div>
 
     <div v-if="album" class="album-info-block">
-      <div class="desc-row">
-        <label class="desc-label">Infos</label>
-        <div class="desc-content">
-          <span class="desc-text">
-            {{ album.photo_count }} {{ album.photo_count === 1 ? 'Foto' : 'Fotos' }}
-            <template v-if="album.oldest_photo_at && album.newest_photo_at">
-              • {{ new Date(album.oldest_photo_at).toLocaleDateString() }} - {{ new Date(album.newest_photo_at).toLocaleDateString() }}
-            </template>
+      <div class="album-info-block__description">
+        <div v-if="!editingDescription" class="album-info-block__description-content">
+          <span :class="{ 'album-info-block__description-text--empty': !album.description }" class="album-info-block__description-text">
+            {{ album.description || 'Keine Beschreibung' }}
           </span>
+          <Button v-if="canWrite" icon="pi pi-pencil" size="small" text @click="startEditDesc" class="album-info-block__edit-btn"/>
         </div>
-      </div>
-      <div class="desc-row">
-        <label class="desc-label">Beschreibung</label>
-        <div v-if="!editingDescription" class="desc-content">
-          <span :class="{ empty: !album.description }" class="desc-text">{{
-              album.description || 'Keine Beschreibung'
-            }}</span>
-          <Button v-if="canWrite" icon="pi pi-pencil" size="small" text @click="startEditDesc"/>
-        </div>
-        <div v-else class="desc-edit">
-          <textarea v-model="descDraft" class="p-inputtextarea p-inputtext" rows="3" style="width: 100%"></textarea>
-          <div class="desc-actions">
-            <Button :loading="updatingAlbum" icon="pi pi-check" label="Speichern" size="small"
-                    @click="saveDescription"/>
-            <Button :disabled="updatingAlbum" icon="pi pi-times" label="Abbrechen" size="small" text
-                    @click="editingDescription = false"/>
+        <div v-else class="album-info-block__edit">
+          <textarea v-model="descDraft" class="p-inputtextarea p-inputtext" rows="2"></textarea>
+          <div class="album-info-block__edit-actions">
+            <Button :loading="updatingAlbum" icon="pi pi-check" size="small" @click="saveDescription"/>
+            <Button :disabled="updatingAlbum" icon="pi pi-times" size="small" text @click="editingDescription = false"/>
           </div>
         </div>
+      </div>
+
+      <div class="album-info-block__meta">
+        <span class="album-info-block__meta-text">
+          {{ album.photo_count }} {{ album.photo_count === 1 ? 'Foto' : 'Fotos' }}
+          <template v-if="album.oldest_photo_at && album.newest_photo_at">
+            • {{ new Date(album.oldest_photo_at).toLocaleDateString() }} - {{ new Date(album.newest_photo_at).toLocaleDateString() }}
+          </template>
+        </span>
       </div>
     </div>
 
-    <div v-if="album" class="album-layout">
-      <div ref="gridScrollRef" class="photo-grid-scroll">
-        <div v-if="album.photos.length === 0" class="info-text">
-          Keine Fotos in dieser Ansicht.
-        </div>
-        <div v-else class="photo-grid">
-          <div
-              v-for="(photo, idx) in album.photos"
-              :key="photo.id"
-              :class="{ selected: idx === selectedIndex }"
-              :data-photo-id="photo.id"
-              class="photo-item"
-              @click="selectedIndex = idx"
+    <GalleryLayout v-if="album && groupedPhotos.length > 0" :center-ref="setGridScrollRef">
+      <template #left>
+        <div v-for="yearGroup in groupedPhotos" :key="'nav-' + yearGroup.year" class="nav-year-group">
+          <a
+            @click.prevent="scrollToSection('year-' + yearGroup.year)"
+            class="nav-year"
+            :class="{ active: activeSection === 'year-' + yearGroup.year }"
           >
-            <div class="photo-thumb">
-              <HeicImage
-                  v-if="visiblePhotoIds.has(photo.id)"
-                  :alt="photo.original_name"
-                  :src="getPhotoUrl(photo.filename, 400)"
-                  objectFit="cover"
-              />
-              <div v-else class="thumb-placeholder"/>
-            </div>
-            <div class="photo-meta">
-              <span class="photo-name">{{ photo.original_name }}</span>
-            </div>
+            {{ yearGroup.year }}
+          </a>
+          <div class="nav-months">
+            <a
+              v-for="monthGroup in yearGroup.months"
+              :key="'nav-' + yearGroup.year + monthGroup.month"
+              @click.prevent="scrollToSection('month-' + yearGroup.year + '-' + monthGroup.month)"
+              class="nav-month"
+              :class="{ active: activeSection === 'month-' + yearGroup.year + '-' + monthGroup.month }"
+            >
+              {{ monthGroup.month.substring(0, 3) }}
+            </a>
           </div>
         </div>
-      </div>
+      </template>
 
-      <div v-if="selectedPhoto" class="sidebar-container">
+      <template #default>
+        <template v-for="yearGroup in groupedPhotos" :key="yearGroup.year">
+          <h2 class="year-title" :id="'year-' + yearGroup.year" data-section-header>{{ yearGroup.year }}</h2>
+
+          <template v-for="monthGroup in yearGroup.months" :key="yearGroup.year + monthGroup.month">
+            <h3
+              v-if="monthGroup.month"
+              class="month-title"
+              :id="'month-' + yearGroup.year + '-' + monthGroup.month"
+              data-section-header
+            >
+              {{ monthGroup.month }}
+            </h3>
+
+            <div class="photo-grid">
+              <div
+                v-for="item in monthGroup.photos"
+                :key="item.photo.id"
+                :data-photo-id="item.photo.id"
+                class="photo-item"
+                :class="{ selected: item.index === selectedIndex }"
+                @click="selectedIndex = item.index"
+              >
+                <div class="photo-thumb">
+                  <HeicImage
+                    v-if="visiblePhotoIds.has(item.photo.id)"
+                    :alt="item.photo.original_name"
+                    :src="getPhotoUrl(item.photo.filename, 400)"
+                    objectFit="cover"
+                  />
+                  <div v-else class="thumb-placeholder" />
+                </div>
+                <div class="photo-meta">
+                  <span class="photo-name">{{ item.photo.original_name }}</span>
+                </div>
+              </div>
+            </div>
+          </template>
+        </template>
+      </template>
+
+      <template #right>
         <PhotoDetailSidebar
-            :can-delete="false"
-            :can-upload="false"
-            :faces="[]"
-            :is-editing-date="false"
-            :landmarks="[]"
-            :loading-faces="false"
-            :loading-landmarks="false"
-            :persons="[]"
-            :photo="selectedPhoto"
-            :reindexing-photo="false"
-            :updating-date="false"
-            @fullscreen="isFullscreen = true"
+          v-if="selectedPhoto"
+          :can-delete="canDeletePhotos"
+          :can-upload="canUploadPhotos"
+          :faces="detectedFaces"
+          :is-editing-date="false"
+          :landmarks="detectedLandmarks"
+          :loading-faces="loadingFaces"
+          :loading-landmarks="loadingLandmarks"
+          :persons="persons"
+          :photo="selectedPhoto"
+          :reindexing-photo="reindexingPhoto"
+          :updating-date="false"
+          :album-id="albumId"
+          :cover-photo-id="album.cover_photo_id"
+          :show-persons="showPersons"
+          :limit-albums-shown="true"
+          @update:cover-photo-id="handleCoverPhotoIdUpdate"
+          @fullscreen="isFullscreen = true"
+          @toggle-favorite="handleToggleFavorite"
+          @hide="handleHidePhoto"
+          @restore="handleRestorePhoto"
+          @ignore-face="handleIgnoreFaceInSidebar"
+          @reindex="handleReindexPhoto"
         />
-      </div>
+      </template>
+    </GalleryLayout>
+
+    <div v-else-if="album" class="info-text">
+      Keine Fotos in dieser Ansicht.
     </div>
     <Dialog v-model:visible="showRenameDialog" :modal="true" header="Album umbenennen" style="width: min(100%, 26rem)">
       <div class="dialog-body">
@@ -340,38 +613,64 @@ watch([album, gridScrollRef], () => {
 }
 
 .album-info-block {
-  padding: 0 1rem;
-  border-bottom: 1px solid var(--p-content-border-color);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--surface-border);
 }
 
-.desc-row {
-  display: grid;
-  grid-template-columns: 120px 1fr;
-  gap: 0.5rem 1rem;
-  align-items: start;
-  padding: 0.75rem 0;
+.album-info-block__description {
+  flex: 1 1 24rem;
+  min-width: 16rem;
+  display: flex;
+  align-items: center;
 }
 
-.desc-label {
-  font-size: 0.85rem;
-  color: var(--p-text-muted-color);
-}
-
-.desc-content {
+.album-info-block__description-content {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  width: 100%;
 }
 
-.desc-text.empty {
-  color: var(--p-text-muted-color);
+.album-info-block__description-text {
+  font-size: 0.9rem;
+}
+
+.album-info-block__description-text--empty {
+  color: var(--text-color-secondary);
   font-style: italic;
 }
 
-.desc-actions {
+.album-info-block__edit {
   display: flex;
+  align-items: center;
   gap: 0.5rem;
-  margin-top: 0.5rem;
+  width: 100%;
+}
+
+.album-info-block__edit textarea {
+  flex: 1;
+  min-height: 2.5rem;
+}
+
+.album-info-block__edit-actions {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.album-info-block__meta {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.album-info-block__meta-text {
+  font-size: 0.85rem;
+  color: var(--text-color-secondary);
+  white-space: nowrap;
 }
 
 .album-detail-view {
@@ -399,7 +698,7 @@ watch([album, gridScrollRef], () => {
   align-items: center;
   padding: 1rem;
   gap: 0.5em;
-  border-bottom: 1px solid var(--p-content-border-color);
+  border-bottom: 1px solid var(--surface-border);
 }
 
 .header-left {
@@ -412,16 +711,16 @@ watch([album, gridScrollRef], () => {
   font-size: 0.75rem;
   padding: 0.2rem 0.5rem;
   border-radius: 4px;
-  background: var(--p-surface-200);
+  background: var(--surface-200);
   text-transform: uppercase;
 }
 
-.role-badge.owner {
+.role-badge--owner {
   background: #fee2e2;
   color: #991b1b;
 }
 
-.role-badge.contributor {
+.role-badge--contributor {
   background: #dcfce7;
   color: #166534;
 }
@@ -439,24 +738,67 @@ watch([album, gridScrollRef], () => {
 
 .control-group label {
   font-size: 0.85rem;
-  color: var(--p-text-muted-color);
+  color: var(--text-color-secondary);
 }
 
-.album-layout {
+.year-title {
+  border-bottom: 2px solid #3b82f6;
+  padding-bottom: 0.5rem;
+}
+
+.month-title {
+  border-bottom: 1px solid var(--surface-border);
+  color: #3b82f6;
+  margin-top: 1rem;
+}
+
+.nav-year-group {
   display: flex;
-  flex: 1;
-  overflow: hidden;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
 }
 
-.photo-grid-scroll {
-  flex: 1;
-  overflow-y: auto;
-  padding: 1rem;
+.nav-year {
+  font-weight: bold;
+  font-size: 0.9rem;
+  color: #3b82f6;
+  cursor: pointer;
+  text-decoration: none;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.nav-year:hover { background: #eff6ff; }
+.nav-year.active { background: #3b82f6; color: white; }
+
+.nav-months {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  align-items: center;
+}
+
+.nav-month {
+  font-size: 0.75rem;
+  color: var(--text-color-secondary);
+  cursor: pointer;
+  text-decoration: none;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  transition: color 0.2s;
+}
+
+.nav-month.active {
+  color: #3b82f6;
+  font-weight: bold;
+  background: #eff6ff;
 }
 
 .photo-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 1rem;
 }
 
@@ -467,11 +809,11 @@ watch([album, gridScrollRef], () => {
   overflow: hidden;
   cursor: pointer;
   position: relative;
-  background: var(--p-surface-100);
+  background: var(--surface-100);
 }
 
 .photo-item.selected {
-  border-color: var(--p-primary-color);
+  border-color: #3b82f6;
 }
 
 .photo-thumb {
@@ -482,7 +824,7 @@ watch([album, gridScrollRef], () => {
 .thumb-placeholder {
   width: 100%;
   height: 100%;
-  background: var(--p-surface-200);
+  background: var(--surface-200);
 }
 
 .photo-meta {
@@ -501,13 +843,13 @@ watch([album, gridScrollRef], () => {
 
 .sidebar-container {
   width: 320px;
-  border-left: 1px solid var(--p-content-border-color);
-  background: var(--p-surface-card);
+  border-left: 1px solid var(--surface-border);
+  background: var(--surface-card);
 }
 
 .info-text {
   text-align: center;
-  margin-top: 4rem;
-  color: var(--p-text-muted-color);
+  padding: 3rem 1rem;
+  color: var(--text-color-secondary);
 }
 </style>
