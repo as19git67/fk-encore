@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import Button from 'primevue/button'
 import DatePicker from 'primevue/datepicker'
-import MultiSelect from 'primevue/multiselect'
+import Checkbox from 'primevue/checkbox'
 import HeicImage from './HeicImage.vue'
 import { getPhotoUrl, listAlbums, getPhotosAlbums, batchUpdateAlbumPhotos, type Album } from '../api/photos'
+import { getAlbumCheckState as calculateAlbumCheckState, getNewPendingAction } from '../utils/albumSelection'
 import type { Photo, Face, LandmarkItem, Person, CurationStatus } from '../api/photos'
 import { ref, onMounted, watch, computed } from 'vue'
 
@@ -77,18 +78,7 @@ function getAlbumCheckState(albumId: number) {
     ? props.selectedPhotos.map(p => p.id)
     : [props.photo.id]
     
-  if (photoIds.length === 0) return false
-  
-  let count = 0
-  photoIds.forEach(pid => {
-    if (photoAlbumMap.value[pid]?.includes(albumId)) {
-      count++
-    }
-  })
-  
-  if (count === 0) return false
-  if (count === photoIds.length) return true
-  return null // indeterminate
+  return calculateAlbumCheckState(albumId, photoIds, photoAlbumMap.value)
 }
 
 function getEffectiveAlbumCheckState(albumId: number) {
@@ -98,36 +88,16 @@ function getEffectiveAlbumCheckState(albumId: number) {
   return getAlbumCheckState(albumId)
 }
 
-const selectedAlbumIds = computed({
-  get: () => {
-    if (albums.value.length === 0) return []
-    
-    // Wir nehmen nur die Alben, die für ALLE Bilder ausgewählt sind (effektiv)
-    return albums.value
-      .filter(album => getEffectiveAlbumCheckState(album.id) === true)
-      .map(a => a.id)
-  },
-  set: (newVal: number[]) => {
-    albums.value.forEach(album => {
-      const isSelected = newVal.includes(album.id)
-      const currentState = getEffectiveAlbumCheckState(album.id)
-      
-      if (isSelected && currentState !== true) {
-        pendingAlbumChanges.value[album.id] = 'add'
-      } else if (!isSelected && currentState !== false) {
-        pendingAlbumChanges.value[album.id] = 'remove'
-      }
-      
-      // Wenn die Änderung dem Originalzustand entspricht, können wir sie aus pending entfernen
-      const originalState = getAlbumCheckState(album.id)
-      if (pendingAlbumChanges.value[album.id] === 'add' && originalState === true) {
-        delete pendingAlbumChanges.value[album.id]
-      } else if (pendingAlbumChanges.value[album.id] === 'remove' && originalState === false) {
-        delete pendingAlbumChanges.value[album.id]
-      }
-    })
+function handleAlbumChange(albumId: number, checked: boolean) {
+  const originalState = getAlbumCheckState(albumId)
+  const action = getNewPendingAction(checked, originalState)
+  
+  if (action === 'delete_pending') {
+    delete pendingAlbumChanges.value[albumId]
+  } else {
+    pendingAlbumChanges.value[albumId] = action
   }
-})
+}
 
 async function saveAlbumChanges() {
   const photoIds = props.selectedPhotos && props.selectedPhotos.length > 0
@@ -205,17 +175,19 @@ function getPersonName(personId?: number) {
             <i class="pi pi-book" />
             <span>Alben</span>
           </div>
-          <MultiSelect 
-            v-model="selectedAlbumIds" 
-            :options="albums" 
-            optionLabel="name" 
-            optionValue="id" 
-            placeholder="Alben auswählen"
-            :filter="true"
-            display="chip"
-            class="w-full"
-            :loading="loadingAlbums"
-          />
+          <div v-if="loadingAlbums" class="loading-row"><i class="pi pi-spin pi-spinner" /> Lade Alben…</div>
+          <div v-else class="album-checkbox-list">
+            <div v-for="album in albums" :key="album.id" class="album-checkbox-item">
+              <Checkbox 
+                :modelValue="getEffectiveAlbumCheckState(album.id) === true" 
+                :indeterminate="getEffectiveAlbumCheckState(album.id) === null"
+                @update:modelValue="(val) => handleAlbumChange(album.id, val)"
+                :binary="true"
+                :id="'album-multi-' + album.id"
+              />
+              <label :for="'album-multi-' + album.id">{{ album.name }}</label>
+            </div>
+          </div>
         </div>
 
         <div class="sidebar-divider" style="margin: 1.5rem 0" />
@@ -277,17 +249,19 @@ function getPersonName(personId?: number) {
       <div class="sidebar-divider" />
       <div class="sidebar-section">
         <div class="section-label"><i class="pi pi-book" /> Alben</div>
-        <MultiSelect 
-          v-model="selectedAlbumIds" 
-          :options="albums" 
-          optionLabel="name" 
-          optionValue="id" 
-          placeholder="Alben auswählen"
-          :filter="true"
-          display="chip"
-          class="w-full"
-          :loading="loadingAlbums"
-        />
+        <div v-if="loadingAlbums" class="loading-row"><i class="pi pi-spin pi-spinner" /> Lade Alben…</div>
+        <div v-else class="album-checkbox-list">
+          <div v-for="album in albums" :key="album.id" class="album-checkbox-item">
+            <Checkbox 
+              :modelValue="getEffectiveAlbumCheckState(album.id) === true" 
+              :indeterminate="getEffectiveAlbumCheckState(album.id) === null"
+              @update:modelValue="(val) => handleAlbumChange(album.id, val)"
+              :binary="true"
+              :id="'album-single-' + album.id"
+            />
+            <label :for="'album-single-' + album.id">{{ album.name }}</label>
+          </div>
+        </div>
         <div class="multi-actions" style="margin-top: 0.75rem">
           <Button 
             label="Speichern" 
@@ -533,5 +507,35 @@ function getPersonName(personId?: number) {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+.album-checkbox-list {
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 0.25rem;
+  border: 1px solid var(--surface-border);
+  border-radius: 6px;
+  background: var(--surface-ground);
+}
+
+.album-checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.875rem;
+  border-radius: 4px;
+}
+
+.album-checkbox-item:hover {
+  background: var(--surface-hover);
+}
+
+.album-checkbox-item label {
+  cursor: pointer;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>
