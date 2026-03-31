@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {onMounted, ref} from 'vue'
+import {onMounted, ref, computed, watch, nextTick} from 'vue'
 import {useRouter} from 'vue-router'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
@@ -11,6 +11,29 @@ import {type Album, createAlbum, listAlbums, getPhotoUrl} from '../api/photos'
 const albums = ref<Album[]>([])
 const loading = ref(true)
 const error = ref('')
+
+const firstAlbumRef = ref<HTMLElement | null>(null)
+
+const sortedAlbums = computed(() => {
+  return [...albums.value].sort((a, b) => {
+    const dateA = a.newest_photo_at ? new Date(a.newest_photo_at).getTime() : 0
+    const dateB = b.newest_photo_at ? new Date(b.newest_photo_at).getTime() : 0
+
+    if (dateA !== dateB) {
+      return dateB - dateA // Newest first
+    }
+
+    return a.name.localeCompare(b.name)
+  })
+})
+
+watch(loading, (newLoading) => {
+  if (!newLoading && sortedAlbums.value.length > 0) {
+    nextTick(() => {
+      firstAlbumRef.value?.focus()
+    })
+  }
+})
 
 const showCreateDialog = ref(false)
 const newAlbumName = ref('')
@@ -71,10 +94,14 @@ onMounted(loadData)
 
     <div v-else class="albums-grid">
       <div
-          v-for="album in albums"
+          v-for="(album, index) in sortedAlbums"
           :key="album.id"
+          :ref="el => { if (index === 0) firstAlbumRef = (el as HTMLElement) }"
           class="album-card"
+          tabindex="0"
           @click="router.push(`/albums/${album.id}`)"
+          @keydown.enter="router.push(`/albums/${album.id}`)"
+          @keydown.space.prevent="router.push(`/albums/${album.id}`)"
       >
         <div class="album-cover">
           <HeicImage
@@ -88,7 +115,12 @@ onMounted(loadData)
         <div class="album-info">
           <span class="album-name">{{ album.name }}</span>
           <span v-if="album.description" class="album-desc">{{ album.description }}</span>
-          <span class="album-meta">Erstellt am {{ new Date(album.created_at).toLocaleDateString() }}</span>
+          <span class="album-meta">
+            {{ album.photo_count }} {{ album.photo_count === 1 ? 'Foto' : 'Fotos' }}
+            <template v-if="album.oldest_photo_at && album.newest_photo_at">
+              • {{ new Date(album.oldest_photo_at).toLocaleDateString() }} - {{ new Date(album.newest_photo_at).toLocaleDateString() }}
+            </template>
+          </span>
         </div>
       </div>
     </div>
@@ -123,11 +155,14 @@ onMounted(loadData)
   flex-direction: column;
   height: calc(100vh - var(--menubar-height, 3.5rem));
   overflow: hidden;
+  margin-inline: -0.25em;
+  padding-inline: 0.5em;
 }
 
 @media (min-width: 800px) {
   .albums-view {
-    margin-inline: 0.5em;
+    margin-inline: -0.5em;
+    padding-inline: 1em;
   }
 }
 
@@ -148,7 +183,7 @@ onMounted(loadData)
 .albums-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 1.5rem;
+  gap: 1rem;
 }
 
 .album-card {
@@ -163,15 +198,19 @@ onMounted(loadData)
   overflow: hidden;
 }
 
-.album-card:hover {
+.album-card:hover,
+.album-card:focus-visible {
   transform: translateY(-4px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  outline: 2px solid var(--p-primary-color);
+  outline-offset: 2px;
 }
 
 .album-cover {
   width: 100%;
-  aspect-ratio: 16 / 9;
+  height: 200px;
   background: var(--p-surface-100);
+  overflow: hidden;
 }
 .album-cover :deep(.heic-image-container) {
   width: 100%;

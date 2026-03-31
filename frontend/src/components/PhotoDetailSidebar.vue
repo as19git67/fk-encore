@@ -22,6 +22,7 @@ const props = defineProps<{
   isEditingDate: boolean
   updatingDate: boolean
   showPersons?: boolean
+  limitAlbumsShown?: boolean
 }>()
 
 const editDate = defineModel<Date | null>('editDate', { default: null })
@@ -31,6 +32,7 @@ const loadingAlbums = ref(false)
 const photoAlbumMap = ref<Record<number, number[]>>({}) // photoId -> albumIds[]
 const pendingAlbumChanges = ref<Record<number, 'add' | 'remove'>>({})
 const savingAlbums = ref(false)
+const isAlbumsExpanded = ref(false)
 
 async function loadAlbums() {
   loadingAlbums.value = true
@@ -177,7 +179,7 @@ function getPersonName(personId?: number) {
           </div>
           <div v-if="loadingAlbums" class="loading-row"><i class="pi pi-spin pi-spinner" /> Lade Alben…</div>
           <div v-else class="album-checkbox-list">
-            <div v-for="album in albums" :key="album.id" class="album-checkbox-item">
+            <div v-for="album in (limitAlbumsShown && !isAlbumsExpanded ? albums.slice(0, 3) : albums)" :key="album.id" class="album-checkbox-item">
               <Checkbox 
                 :modelValue="getEffectiveAlbumCheckState(album.id) === true" 
                 :indeterminate="getEffectiveAlbumCheckState(album.id) === null"
@@ -186,6 +188,16 @@ function getPersonName(personId?: number) {
                 :id="'album-multi-' + album.id"
               />
               <label :for="'album-multi-' + album.id">{{ album.name }}</label>
+            </div>
+            <div v-if="limitAlbumsShown && albums.length > 3" class="expand-toggle">
+              <Button 
+                :label="isAlbumsExpanded ? 'Weniger anzeigen' : 'Mehr anzeigen'" 
+                :icon="isAlbumsExpanded ? 'pi pi-chevron-up' : 'pi pi-chevron-down'" 
+                text 
+                size="small" 
+                @click="isAlbumsExpanded = !isAlbumsExpanded"
+                class="p-0"
+              />
             </div>
           </div>
         </div>
@@ -251,7 +263,7 @@ function getPersonName(personId?: number) {
         <div class="section-label"><i class="pi pi-book" /> Alben</div>
         <div v-if="loadingAlbums" class="loading-row"><i class="pi pi-spin pi-spinner" /> Lade Alben…</div>
         <div v-if="!loadingAlbums && albums.length > 0" class="album-checkbox-list">
-          <div v-for="album in albums" :key="album.id" class="album-checkbox-item">
+          <div v-for="album in (limitAlbumsShown && !isAlbumsExpanded ? albums.slice(0, 3) : albums)" :key="album.id" class="album-checkbox-item">
             <Checkbox 
               :modelValue="getEffectiveAlbumCheckState(album.id) === true" 
               :indeterminate="getEffectiveAlbumCheckState(album.id) === null"
@@ -260,6 +272,16 @@ function getPersonName(personId?: number) {
               :id="'album-single-' + album.id"
             />
             <label :for="'album-single-' + album.id">{{ album.name }}</label>
+          </div>
+          <div v-if="limitAlbumsShown && albums.length > 3" class="expand-toggle">
+            <Button 
+              :label="isAlbumsExpanded ? 'Weniger anzeigen' : 'Mehr anzeigen'" 
+              :icon="isAlbumsExpanded ? 'pi pi-chevron-up' : 'pi pi-chevron-down'" 
+              text 
+              size="small" 
+              @click="isAlbumsExpanded = !isAlbumsExpanded"
+              class="p-0"
+            />
           </div>
         </div>
         <div class="multi-actions" style="margin-top: 0.75rem">
@@ -527,6 +549,11 @@ function getPersonName(personId?: number) {
 
 .album-checkbox-item:hover {
   background: var(--surface-hover);
+}
+
+.expand-toggle {
+  padding-inline: 0.5rem;
+  margin-top: 0.25rem;
 }
 
 .album-checkbox-item label {

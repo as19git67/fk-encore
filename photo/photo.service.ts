@@ -3,7 +3,7 @@ import path from "path";
 import crypto from "crypto";
 import exifr from "exifr";
 import { exiftool } from "exiftool-vendored";
-import { eq, and, or, sql, inArray, ilike, isNull, isNotNull } from "drizzle-orm";
+import { eq, and, or, sql, inArray, ilike, isNull, isNotNull, desc } from "drizzle-orm";
 import { enqueuePhotoScan, DeferJobError } from "./scan-queue";
 import { triggerWorkers } from "./scan-worker";
 import db from "../db/database";
@@ -805,6 +805,39 @@ export async function resizeImage(imageBuffer: Buffer, targetWidth: number): Pro
 
 // ---------- Albums ----------
 
+async function getAlbumStats(albumId: number): Promise<{ newest_photo_at?: string, oldest_photo_at?: string, photo_count: number, newest_photo_filename?: string }> {
+  const stats = await dbFirst<any>(
+    db.select({
+      newest_photo_at: sql<string>`MAX(COALESCE(${photos.taken_at}, ${photos.created_at}))`,
+      oldest_photo_at: sql<string>`MIN(COALESCE(${photos.taken_at}, ${photos.created_at}))`,
+      photo_count: sql<number>`COUNT(*)`,
+    })
+    .from(albumPhotos)
+    .innerJoin(photos, eq(albumPhotos.photo_id, photos.id))
+    .where(eq(albumPhotos.album_id, albumId))
+  );
+
+  let newestFilename: string | undefined = undefined;
+  if (stats && Number(stats.photo_count) > 0) {
+    const newest = await dbFirst<any>(
+      db.select({ filename: photos.filename })
+      .from(albumPhotos)
+      .innerJoin(photos, eq(albumPhotos.photo_id, photos.id))
+      .where(eq(albumPhotos.album_id, albumId))
+      .orderBy(desc(sql`COALESCE(${photos.taken_at}, ${photos.created_at})`))
+      .limit(1)
+    );
+    newestFilename = newest?.filename;
+  }
+
+  return {
+    newest_photo_at: stats?.newest_photo_at ?? undefined,
+    oldest_photo_at: stats?.oldest_photo_at ?? undefined,
+    photo_count: Number(stats?.photo_count || 0),
+    newest_photo_filename: newestFilename
+  };
+}
+
 export async function createAlbumLogic(userId: number, req: CreateAlbumRequest): Promise<Album> {
   const row = await dbInsertReturning<typeof albums.$inferSelect>(
     db.insert(albums).values({ user_id: userId, name: req.name, description: req.description ?? null }).returning()
@@ -816,6 +849,8 @@ export async function createAlbumLogic(userId: number, req: CreateAlbumRequest):
     name: row!.name,
     description: row!.description ?? undefined,
     cover_photo_id: row!.cover_photo_id ?? undefined,
+    cover_filename: undefined,
+    photo_count: 0,
     created_at: row!.created_at ?? "",
     updated_at: row!.updated_at ?? "",
   };
@@ -838,7 +873,34 @@ export async function listAlbumsLogic(userId: number): Promise<ListAlbumsRespons
         cover_photo_id: albums.cover_photo_id,
         created_at: albums.created_at,
         updated_at: albums.updated_at,
-        cover_filename: photos.filename,
+        cover_filename: sql<string>`COALESCE(
+          ${photos.filename},
+          (
+            SELECT ${photos.filename}
+            FROM ${albumPhotos}
+            JOIN ${photos} ON ${albumPhotos.photo_id} = ${photos.id}
+            WHERE ${albumPhotos.album_id} = ${albums.id}
+            ORDER BY COALESCE(${photos.taken_at}, ${photos.created_at}) DESC
+            LIMIT 1
+          )
+        )`,
+        newest_photo_at: sql<string>`(
+          SELECT MAX(COALESCE(${photos.taken_at}, ${photos.created_at}))
+          FROM ${albumPhotos}
+          JOIN ${photos} ON ${albumPhotos.photo_id} = ${photos.id}
+          WHERE ${albumPhotos.album_id} = ${albums.id}
+        )`,
+        oldest_photo_at: sql<string>`(
+          SELECT MIN(COALESCE(${photos.taken_at}, ${photos.created_at}))
+          FROM ${albumPhotos}
+          JOIN ${photos} ON ${albumPhotos.photo_id} = ${photos.id}
+          WHERE ${albumPhotos.album_id} = ${albums.id}
+        )`,
+        photo_count: sql<number>`(
+          SELECT COUNT(*)
+          FROM ${albumPhotos}
+          WHERE ${albumPhotos.album_id} = ${albums.id}
+        )`,
       })
       .from(albums)
       .leftJoin(photos, eq(photos.id, albums.cover_photo_id))
@@ -853,6 +915,9 @@ export async function listAlbumsLogic(userId: number): Promise<ListAlbumsRespons
       description: r.description ?? undefined,
       cover_photo_id: r.cover_photo_id ?? undefined,
       cover_filename: r.cover_filename ?? undefined,
+      newest_photo_at: r.newest_photo_at ?? undefined,
+      oldest_photo_at: r.oldest_photo_at ?? undefined,
+      photo_count: Number(r.photo_count || 0),
       created_at: r.created_at ?? "",
       updated_at: r.updated_at ?? "",
     })),
@@ -938,6 +1003,14 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     .where(and(...conditions));
 
   const photoRows = await dbAll<any>(query);
+  const stats = await getAlbumStats(albumId);
+  let coverFilename: string | undefined = undefined;
+  if (album.cover_photo_id) {
+    const cp = await dbFirst<any>(db.select({ filename: photos.filename }).from(photos).where(eq(photos.id, album.cover_photo_id)));
+    coverFilename = cp?.filename;
+  } else {
+    coverFilename = stats.newest_photo_filename;
+  }
 
   return {
     id: album.id,
@@ -945,6 +1018,10 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     name: album.name,
     description: album.description ?? undefined,
     cover_photo_id: album.cover_photo_id ?? undefined,
+    cover_filename: coverFilename,
+    newest_photo_at: stats.newest_photo_at,
+    oldest_photo_at: stats.oldest_photo_at,
+    photo_count: stats.photo_count,
     created_at: album.created_at ?? "",
     updated_at: album.updated_at ?? "",
     role,
@@ -1038,12 +1115,25 @@ export async function updateAlbumLogic(userId: number, req: UpdateAlbumRequest):
   const updated = (await dbFirst<typeof albums.$inferSelect>(
     db.select().from(albums).where(eq(albums.id, req.id))
   ))!;
+  const stats = await getAlbumStats(req.id);
+  let coverFilename: string | undefined = undefined;
+  if (updated.cover_photo_id) {
+    const cp = await dbFirst<any>(db.select({ filename: photos.filename }).from(photos).where(eq(photos.id, updated.cover_photo_id)));
+    coverFilename = cp?.filename;
+  } else {
+    coverFilename = stats.newest_photo_filename;
+  }
+
   return {
     id: updated.id,
     user_id: updated.user_id,
     name: updated.name,
     description: updated.description ?? undefined,
     cover_photo_id: updated.cover_photo_id ?? undefined,
+    cover_filename: coverFilename,
+    newest_photo_at: stats.newest_photo_at,
+    oldest_photo_at: stats.oldest_photo_at,
+    photo_count: stats.photo_count,
     created_at: updated.created_at ?? "",
     updated_at: updated.updated_at ?? "",
   };
