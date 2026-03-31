@@ -837,7 +837,7 @@ onUnmounted(() => {
     <!-- Subheader (not sticky — only the grid scrolls) -->
     <div class="subheader">
       <div class="header">
-        <h1>Meine Fotos</h1>
+        <h1 class="title">Meine Fotos</h1>
         <div class="actions">
           <div v-if="canDelete" class="toggle-hidden">
             <label for="showHidden" class="text-sm">Ausgeblendete</label>
@@ -1028,6 +1028,12 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
+.photos-view .title {
+  font-size: 1.5em;
+  font-weight: 600;
+  margin: 0;
+}
+
 .subheader {
   flex-shrink: 0;
   background: var(--surface-card);
@@ -1041,12 +1047,6 @@ onUnmounted(() => {
   align-items: center;
   flex-wrap: wrap;
   gap: 0.5rem;
-}
-
-.header h1 {
-  font-size: 1.1rem;
-  font-weight: 600;
-  margin: 0;
 }
 
 .actions {

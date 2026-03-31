@@ -29,8 +29,8 @@ function formatDate(dateStr: string) {
 </script>
 
 <template>
-  <div>
-    <h1>Benutzer</h1>
+  <div class="user-list-view">
+    <h1 class="title">Benutzer</h1>
     <DataTable
       :value="users"
       :loading="loading"
@@ -62,6 +62,24 @@ function formatDate(dateStr: string) {
 </template>
 
 <style scoped>
+.user-list-view {
+  gap: 1rem;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (min-width: 800px) {
+  .user-list-view {
+    margin-inline: 0.5em;
+  }
+}
+
+.user-list-view .title {
+  font-size: 1.5em;
+  font-weight: 600;
+  margin-block: 0.25em;
+}
+
 :deep(.cursor-pointer) {
   cursor: pointer;
 }
