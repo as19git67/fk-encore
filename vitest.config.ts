@@ -20,6 +20,7 @@ export default defineConfig({
     exclude: [
       "node_modules/**",
       "encore.gen/**",
+      "frontend/**",
     ],
     setupFiles: ["./vitest.setup.ts"],
     // Run test files sequentially to avoid DB data races (shared Postgres instance)
