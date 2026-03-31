@@ -3,7 +3,7 @@ import Button from 'primevue/button'
 import DatePicker from 'primevue/datepicker'
 import Checkbox from 'primevue/checkbox'
 import HeicImage from './HeicImage.vue'
-import { getPhotoUrl, listAlbums, getPhotosAlbums, batchUpdateAlbumPhotos, type Album } from '../api/photos'
+import { getPhotoUrl, listAlbums, getPhotosAlbums, batchUpdateAlbumPhotos, updateAlbum, type Album } from '../api/photos'
 import { getAlbumCheckState as calculateAlbumCheckState, getNewPendingAction } from '../utils/albumSelection'
 import type { Photo, Face, LandmarkItem, Person, CurationStatus } from '../api/photos'
 import { ref, onMounted, watch } from 'vue'
@@ -23,6 +23,8 @@ const props = defineProps<{
   updatingDate: boolean
   showPersons?: boolean
   limitAlbumsShown?: boolean
+  albumId?: number
+  coverPhotoId?: number | null
 }>()
 
 const editDate = defineModel<Date | null>('editDate', { default: null })
@@ -130,9 +132,28 @@ async function saveAlbumChanges() {
   }
 }
 
+const togglingCover = ref(false)
+async function toggleCover() {
+  if (!props.albumId || togglingCover.value) return
+
+  const isCurrentlyCover = props.coverPhotoId === props.photo.id
+  const newCoverId = isCurrentlyCover ? null : props.photo.id
+
+  togglingCover.value = true
+  try {
+    await updateAlbum(props.albumId, { coverPhotoId: newCoverId })
+    emit('update:coverPhotoId', newCoverId)
+  } catch (err) {
+    console.error('Failed to update album cover:', err)
+  } finally {
+    togglingCover.value = false
+  }
+}
+
 onMounted(loadAlbums)
 
 const emit = defineEmits<{
+  'update:coverPhotoId': [id: number | null]
   fullscreen: []
   'ignore-face': [faceId: number]
   reindex: []
@@ -255,6 +276,18 @@ function getPersonName(personId?: number) {
         <div v-if="photo.size" class="meta-row">
           <i class="pi pi-database meta-icon" />
           <span class="meta-value">{{ (photo.size / 1024 / 1024).toFixed(2) }} MB</span>
+        </div>
+        <div v-if="albumId" class="meta-row cover-action">
+           <Button 
+            :icon="coverPhotoId === photo.id ? 'pi pi-image' : 'pi pi-image'" 
+            :label="coverPhotoId === photo.id ? 'Vom Cover entfernen' : 'Als Cover setzen'" 
+            :severity="coverPhotoId === photo.id ? 'warn' : 'secondary'"
+            text 
+            size="small" 
+            :loading="togglingCover"
+            @click="toggleCover"
+            class="p-0"
+          />
         </div>
       </div>
 
@@ -427,7 +460,7 @@ function getPersonName(personId?: number) {
 
 .meta-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 0.6rem;
   font-size: 0.875rem;
 }
@@ -444,6 +477,11 @@ function getPersonName(personId?: number) {
   min-width: 0;
   word-break: break-word;
   line-height: 1.4;
+}
+
+.cover-action {
+  margin-top: 0.25rem;
+  padding-left: 1.25rem;
 }
 
 .date-value {
