@@ -43,6 +43,13 @@
       "when": 1774893232587,
       "tag": "0005_green_cammi",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1774947601728,
+      "tag": "0006_albums_desc_cover",
+      "breakpoints": true
     }
   ]
 }

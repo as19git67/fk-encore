@@ -807,13 +807,15 @@ export async function resizeImage(imageBuffer: Buffer, targetWidth: number): Pro
 
 export async function createAlbumLogic(userId: number, req: CreateAlbumRequest): Promise<Album> {
   const row = await dbInsertReturning<typeof albums.$inferSelect>(
-    db.insert(albums).values({ user_id: userId, name: req.name }).returning()
+    db.insert(albums).values({ user_id: userId, name: req.name, description: req.description ?? null }).returning()
   );
 
   return {
     id: row!.id,
     user_id: row!.user_id,
     name: row!.name,
+    description: row!.description ?? undefined,
+    cover_photo_id: row!.cover_photo_id ?? undefined,
     created_at: row!.created_at ?? "",
     updated_at: row!.updated_at ?? "",
   };
@@ -826,15 +828,31 @@ export async function listAlbumsLogic(userId: number): Promise<ListAlbumsRespons
   );
   const sharedAlbumIds = sharedAlbumIdsRows.map((s) => s.album_id);
 
-  const rows = await dbAll<typeof albums.$inferSelect>(
-    db.select().from(albums).where(or(eq(albums.user_id, userId), sharedAlbumIds.length > 0 ? inArray(albums.id, sharedAlbumIds) : undefined))
+  const rows = await dbAll<any>(
+    db
+      .select({
+        id: albums.id,
+        user_id: albums.user_id,
+        name: albums.name,
+        description: albums.description,
+        cover_photo_id: albums.cover_photo_id,
+        created_at: albums.created_at,
+        updated_at: albums.updated_at,
+        cover_filename: photos.filename,
+      })
+      .from(albums)
+      .leftJoin(photos, eq(photos.id, albums.cover_photo_id))
+      .where(or(eq(albums.user_id, userId), sharedAlbumIds.length > 0 ? inArray(albums.id, sharedAlbumIds) : undefined))
   );
 
   return {
-    albums: rows.map((r) => ({
+    albums: rows.map((r: any) => ({
       id: r.id,
       user_id: r.user_id,
       name: r.name,
+      description: r.description ?? undefined,
+      cover_photo_id: r.cover_photo_id ?? undefined,
+      cover_filename: r.cover_filename ?? undefined,
       created_at: r.created_at ?? "",
       updated_at: r.updated_at ?? "",
     })),
@@ -925,6 +943,8 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     id: album.id,
     user_id: album.user_id,
     name: album.name,
+    description: album.description ?? undefined,
+    cover_photo_id: album.cover_photo_id ?? undefined,
     created_at: album.created_at ?? "",
     updated_at: album.updated_at ?? "",
     role,
@@ -995,8 +1015,24 @@ export async function updateAlbumLogic(userId: number, req: UpdateAlbumRequest):
     throw new Error("Unauthorized to update album");
   }
 
+  const values: any = { updated_at: new Date().toISOString() };
+  if (req.name !== undefined) values.name = req.name;
+  if (req.description !== undefined) values.description = req.description;
+  if (req.coverPhotoId !== undefined) {
+    if (req.coverPhotoId === null) {
+      values.cover_photo_id = null;
+    } else {
+      // ensure the photo belongs to this album
+      const ap = await dbFirst<typeof albumPhotos.$inferSelect>(
+        db.select().from(albumPhotos).where(and(eq(albumPhotos.album_id, req.id), eq(albumPhotos.photo_id, req.coverPhotoId)))
+      );
+      if (!ap) throw new Error("Cover photo must be part of the album");
+      values.cover_photo_id = req.coverPhotoId;
+    }
+  }
+
   await dbExec(
-    db.update(albums).set({ name: req.name, updated_at: new Date().toISOString() }).where(eq(albums.id, req.id))
+    db.update(albums).set(values).where(eq(albums.id, req.id))
   );
 
   const updated = (await dbFirst<typeof albums.$inferSelect>(
@@ -1006,6 +1042,8 @@ export async function updateAlbumLogic(userId: number, req: UpdateAlbumRequest):
     id: updated.id,
     user_id: updated.user_id,
     name: updated.name,
+    description: updated.description ?? undefined,
+    cover_photo_id: updated.cover_photo_id ?? undefined,
     created_at: updated.created_at ?? "",
     updated_at: updated.updated_at ?? "",
   };
