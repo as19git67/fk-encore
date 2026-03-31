@@ -327,6 +327,20 @@ export interface ShareAlbumRequest {
   accessLevel: "read" | "write";
 }
 
+export interface AlbumShareWithUser extends AlbumShare {
+  user_name: string;
+  user_email: string;
+}
+
+export interface GetAlbumSharesResponse {
+  shares: AlbumShareWithUser[];
+}
+
+export interface RemoveAlbumShareRequest {
+  albumId: number;
+  userId: number;
+}
+
 export interface ListAlbumsResponse {
   albums: Album[];
 }

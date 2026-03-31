@@ -4,19 +4,25 @@ import {useRoute} from 'vue-router'
 import SelectButton from 'primevue/selectbutton'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
+import Dialog from 'primevue/dialog'
+import Select from 'primevue/select'
 import GalleryLayout from '../components/GalleryLayout.vue'
 import HeicImage from '../components/HeicImage.vue'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import {
   type AlbumWithPhotos,
+  type AlbumShareWithUser,
   deletePhoto,
   getPhotoFaces,
   getAlbum,
+  getAlbumShares,
   getPhotoLandmarks,
   getPhotoUrl,
   ignoreFace,
   listPersons,
   reindexPhoto,
+  removeAlbumShare,
+  shareAlbum,
   type CurationStatus,
   type Face,
   type LandmarkItem,
@@ -25,6 +31,7 @@ import {
   updateAlbum,
   updateAlbumUserSettings
 } from '../api/photos'
+import { listUsers, type UserWithRoles } from '../api/users'
 import {useAuthStore} from '../stores/auth'
 
 const route = useRoute()
@@ -65,7 +72,6 @@ async function handleSettingsChange() {
   if (!album.value?.settings) return
   try {
     await updateAlbumUserSettings(albumId, album.value.settings)
-    // After changing settings, re-fetch album to get filtered photo list from server
     await loadData()
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Speichern der Einstellungen'
@@ -104,6 +110,16 @@ const selectedPhoto = computed(() => {
   return album.value.photos[selectedIndex.value] || null
 })
 
+const prevPhoto = computed(() => {
+  if (!album.value || selectedIndex.value <= 0) return null
+  return album.value.photos[selectedIndex.value - 1] || null
+})
+
+const nextPhoto = computed(() => {
+  if (!album.value || selectedIndex.value >= album.value.photos.length - 1) return null
+  return album.value.photos[selectedIndex.value + 1] || null
+})
+
 function scrollToPhoto(photoId: number) {
   const el = gridScrollRef.value?.querySelector(`[data-photo-id="${photoId}"]`)
   el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -129,10 +145,11 @@ watch(selectedPhoto, (photo) => {
 
 watch(selectedIndex, (newIdx) => {
   const photo = album.value?.photos[newIdx]
-  if (photo) scrollToPhoto(photo.id)
+  if (photo && !isFullscreen.value) scrollToPhoto(photo.id)
 })
 
 const canWrite = computed(() => album.value?.role === 'owner' || album.value?.role === 'contributor')
+const isOwner = computed(() => album.value?.role === 'owner')
 const canDeletePhotos = computed(() => auth.hasPermission('photos.delete'))
 const canUploadPhotos = computed(() => auth.hasPermission('photos.upload'))
 const showPersons = computed(() => auth.hasPermission('people.view'))
@@ -183,8 +200,79 @@ const groupedPhotos = computed<YearGroup[]>(() => {
     monthGroup.photos.push({ photo, index })
   }
 
+  // Newest year/month at top
+  groups.reverse()
+  for (const yg of groups) yg.months.reverse()
+
   return groups
 })
+
+// Flat list of section first-photo-indices for up/down keyboard nav
+const flatSectionFirstIndices = computed<number[]>(() => {
+  const indices: number[] = []
+  for (const yg of groupedPhotos.value) {
+    for (const mg of yg.months) {
+      if (mg.photos.length > 0) {
+        indices.push(mg.photos[0].index)
+      }
+    }
+  }
+  return indices
+})
+
+// ── Column count tracking ────────────────────────────────────────────────────
+const columnCount = ref(4)
+const gridScrollRef = ref<HTMLElement | null>(null)
+let gridResizeObserver: ResizeObserver | null = null
+
+function updateColumnCount() {
+  const grid = gridScrollRef.value?.querySelector('.photo-grid')
+  if (grid) {
+    const cols = getComputedStyle(grid).gridTemplateColumns.split(' ').length
+    if (cols > 0) columnCount.value = cols
+  }
+}
+
+// ── Keyboard navigation ──────────────────────────────────────────────────────
+function handleKeydown(e: KeyboardEvent) {
+  if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return
+
+  if (isFullscreen.value) {
+    if (e.key === 'Escape' || e.key === ' ') {
+      isFullscreen.value = false
+      e.preventDefault()
+    } else if (e.key === 'ArrowLeft') {
+      if (selectedIndex.value > 0) selectedIndex.value--
+    } else if (e.key === 'ArrowRight') {
+      if (album.value && selectedIndex.value < album.value.photos.length - 1) selectedIndex.value++
+    }
+    return
+  }
+
+  if (!album.value || album.value.photos.length === 0) return
+
+  if (e.key === 'ArrowRight') {
+    if (selectedIndex.value < album.value.photos.length - 1) selectedIndex.value++
+    else selectedIndex.value = 0
+  } else if (e.key === 'ArrowLeft') {
+    if (selectedIndex.value > 0) selectedIndex.value--
+    else selectedIndex.value = album.value.photos.length - 1
+  } else if (e.key === 'ArrowDown') {
+    // Jump to first photo of next section
+    const indices = flatSectionFirstIndices.value
+    const next = indices.find(idx => idx > selectedIndex.value)
+    if (next !== undefined) selectedIndex.value = next
+    e.preventDefault()
+  } else if (e.key === 'ArrowUp') {
+    // Jump to first photo of previous section
+    const indices = flatSectionFirstIndices.value
+    const prev = [...indices].reverse().find(idx => idx < selectedIndex.value)
+    if (prev !== undefined) selectedIndex.value = prev
+    e.preventDefault()
+  } else if (e.key === ' ') {
+    if (selectedIndex.value !== -1) { isFullscreen.value = true; e.preventDefault() }
+  }
+}
 
 const updatingAlbum = ref(false)
 
@@ -284,15 +372,84 @@ async function scrollToCover() {
   }
 }
 
+// ── Album Sharing ────────────────────────────────────────────────────────────
+const showShareDialog = ref(false)
+const albumShares = ref<AlbumShareWithUser[]>([])
+const allUsers = ref<UserWithRoles[]>([])
+const shareUserId = ref<number | null>(null)
+const shareAccessLevel = ref<'read' | 'write'>('read')
+const sharing = ref(false)
+const loadingShares = ref(false)
 
+const accessLevelOptions = [
+  { label: 'Nur lesen', value: 'read' },
+  { label: 'Bearbeiten', value: 'write' },
+]
+
+const usersNotShared = computed(() => {
+  const sharedIds = new Set(albumShares.value.map(s => s.user_id))
+  const currentUserId = auth.user?.id
+  return allUsers.value.filter(u => u.id !== currentUserId && !sharedIds.has(u.id))
+})
+
+async function openShareDialog() {
+  showShareDialog.value = true
+  loadingShares.value = true
+  try {
+    const [sharesRes, usersRes] = await Promise.all([
+      getAlbumShares(albumId),
+      auth.hasPermission('users.list') ? listUsers() : Promise.resolve({ users: [] }),
+    ])
+    albumShares.value = sharesRes.shares
+    allUsers.value = usersRes.users
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Laden der Freigaben'
+  } finally {
+    loadingShares.value = false
+  }
+}
+
+async function handleShare() {
+  if (!shareUserId.value) return
+  sharing.value = true
+  try {
+    await shareAlbum(albumId, shareUserId.value, shareAccessLevel.value)
+    const sharesRes = await getAlbumShares(albumId)
+    albumShares.value = sharesRes.shares
+    shareUserId.value = null
+    shareAccessLevel.value = 'read'
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Freigeben'
+  } finally {
+    sharing.value = false
+  }
+}
+
+async function handleRemoveShare(userId: number) {
+  try {
+    await removeAlbumShare(albumId, userId)
+    albumShares.value = albumShares.value.filter(s => s.user_id !== userId)
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Entfernen der Freigabe'
+  }
+}
+
+// ── Lifecycle ────────────────────────────────────────────────────────────────
 onMounted(() => {
   void loadData()
   if (showPersons.value) void loadPersons()
+  window.addEventListener('keydown', handleKeydown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeydown)
+  photoObserver?.disconnect()
+  sectionObserver?.disconnect()
+  gridResizeObserver?.disconnect()
 })
 
 // Reuse observer logic for performance
 const visiblePhotoIds = ref(new Set<number>())
-const gridScrollRef = ref<HTMLElement | null>(null)
 let photoObserver: IntersectionObserver | null = null
 let sectionObserver: IntersectionObserver | null = null
 
@@ -303,6 +460,7 @@ function setGridScrollRef(el: HTMLElement | null) {
 function setupObservers() {
   photoObserver?.disconnect()
   sectionObserver?.disconnect()
+  gridResizeObserver?.disconnect()
   visiblePhotoIds.value = new Set()
   if (!gridScrollRef.value) return
 
@@ -339,6 +497,11 @@ function setupObservers() {
     { root: gridScrollRef.value, rootMargin: '-5% 0px -90% 0px' }
   )
   gridScrollRef.value.querySelectorAll('[data-section-header]').forEach(el => sectionObserver!.observe(el))
+
+  gridResizeObserver = new ResizeObserver(() => updateColumnCount())
+  const grid = gridScrollRef.value.querySelector('.photo-grid')
+  if (grid) gridResizeObserver.observe(grid)
+  updateColumnCount()
 }
 
 watch(groupedPhotos, async () => {
@@ -348,11 +511,6 @@ watch(groupedPhotos, async () => {
 
 watch(gridScrollRef, () => {
   nextTick(() => setupObservers())
-})
-
-onUnmounted(() => {
-  photoObserver?.disconnect()
-  sectionObserver?.disconnect()
 })
 </script>
 
@@ -373,6 +531,15 @@ onUnmounted(() => {
             text
             @click="scrollToCover"
             title="Zum Cover-Foto springen"
+          />
+          <Button
+            v-if="isOwner"
+            icon="pi pi-share-alt"
+            label="Freigeben"
+            size="small"
+            text
+            @click="openShareDialog"
+            title="Album freigeben"
           />
           <div v-if="album.settings" class="control-group">
             <label>Ansicht:</label>
@@ -476,7 +643,7 @@ onUnmounted(() => {
                 :data-photo-id="item.photo.id"
                 class="photo-item"
                 :class="{ selected: item.index === selectedIndex }"
-                @click="selectedIndex = item.index"
+                @click="selectedIndex = item.index; isFullscreen = true"
               >
                 <div class="photo-thumb">
                   <HeicImage
@@ -528,6 +695,120 @@ onUnmounted(() => {
     <div v-else-if="album" class="info-text">
       Keine Fotos in dieser Ansicht.
     </div>
+
+    <!-- Fullscreen overlay -->
+    <div v-if="isFullscreen && selectedPhoto" class="fullscreen-overlay" @click="isFullscreen = false">
+      <div style="display: none">
+        <HeicImage v-if="prevPhoto" :src="getPhotoUrl(prevPhoto.filename)" />
+        <HeicImage v-if="nextPhoto" :src="getPhotoUrl(nextPhoto.filename)" />
+      </div>
+      <div class="fullscreen-content" @click.stop>
+        <HeicImage :src="getPhotoUrl(selectedPhoto.filename)" :alt="selectedPhoto.original_name" objectFit="contain" />
+        <div class="fs-topbar">
+          <Button icon="pi pi-arrow-left" class="fs-topbar-btn" rounded text @click="isFullscreen = false" />
+          <div class="fs-date-bar">
+            {{ selectedPhoto.taken_at ? new Date(selectedPhoto.taken_at).toLocaleDateString('de-DE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : '' }}
+          </div>
+          <div class="fs-toolbar">
+            <Button
+              v-if="selectedPhoto.curation_status === 'hidden'"
+              icon="pi pi-eye"
+              class="fs-topbar-btn"
+              rounded text severity="warn"
+              @click="handleRestorePhoto(selectedPhoto.id)"
+            />
+            <Button
+              v-else
+              icon="pi pi-eye-slash"
+              class="fs-topbar-btn"
+              rounded text severity="info"
+              @click="handleHidePhoto(selectedPhoto.id)"
+            />
+            <Button
+              :icon="selectedPhoto.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
+              class="fs-topbar-btn"
+              rounded text
+              :severity="selectedPhoto.curation_status === 'favorite' ? 'warn' : 'secondary'"
+              @click="handleToggleFavorite(selectedPhoto.id, selectedPhoto.curation_status)"
+            />
+          </div>
+        </div>
+        <Button
+          v-if="selectedIndex > 0"
+          icon="pi pi-chevron-left"
+          class="fs-nav fs-nav-left"
+          rounded text
+          @click="selectedIndex--"
+        />
+        <Button
+          v-if="album && selectedIndex < album.photos.length - 1"
+          icon="pi pi-chevron-right"
+          class="fs-nav fs-nav-right"
+          rounded text
+          @click="selectedIndex++"
+        />
+      </div>
+    </div>
+
+    <!-- Share Dialog -->
+    <Dialog v-model:visible="showShareDialog" header="Album freigeben" modal style="width: 480px">
+      <div v-if="loadingShares" class="share-loading">
+        <i class="pi pi-spin pi-spinner" /> Lädt…
+      </div>
+      <template v-else>
+        <!-- Existing shares -->
+        <div class="share-section">
+          <h4 class="share-section-title">Aktuelle Freigaben</h4>
+          <div v-if="albumShares.length === 0" class="share-empty">Noch keine Freigaben.</div>
+          <div v-for="share in albumShares" :key="share.user_id" class="share-row">
+            <div class="share-user-info">
+              <span class="share-user-name">{{ share.user_name }}</span>
+              <span class="share-user-email">{{ share.user_email }}</span>
+            </div>
+            <span :class="['share-badge', share.access_level === 'write' ? 'share-badge--write' : 'share-badge--read']">
+              {{ share.access_level === 'write' ? 'Bearbeiten' : 'Nur lesen' }}
+            </span>
+            <Button icon="pi pi-times" size="small" text severity="danger" @click="handleRemoveShare(share.user_id)" />
+          </div>
+        </div>
+
+        <!-- Add new share -->
+        <div class="share-section">
+          <h4 class="share-section-title">Benutzer hinzufügen</h4>
+          <div class="share-add-form">
+            <Select
+              v-if="allUsers.length > 0"
+              v-model="shareUserId"
+              :options="usersNotShared"
+              optionLabel="name"
+              optionValue="id"
+              placeholder="Benutzer auswählen…"
+              class="share-user-select"
+            />
+            <input
+              v-else
+              v-model.number="shareUserId"
+              type="number"
+              placeholder="Benutzer-ID"
+              class="p-inputtext share-userid-input"
+            />
+            <SelectButton
+              v-model="shareAccessLevel"
+              :options="accessLevelOptions"
+              optionLabel="label"
+              optionValue="value"
+            />
+            <Button
+              label="Freigeben"
+              icon="pi pi-check"
+              :loading="sharing"
+              :disabled="!shareUserId"
+              @click="handleShare"
+            />
+          </div>
+        </div>
+      </template>
+    </Dialog>
   </div>
 </template>
 
@@ -649,6 +930,8 @@ onUnmounted(() => {
 .controls {
   display: flex;
   gap: 2rem;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .control-group {
@@ -772,5 +1055,143 @@ onUnmounted(() => {
   text-align: center;
   padding: 3rem 1rem;
   color: var(--text-color-secondary);
+}
+
+/* ── Fullscreen ──────────────────────────────────────────────────────────── */
+.fullscreen-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.95);
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fullscreen-content {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fs-topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.7), transparent);
+  z-index: 10;
+}
+
+.fs-topbar-btn {
+  color: white !important;
+}
+
+.fs-date-bar {
+  flex: 1;
+  color: white;
+  font-size: 0.95rem;
+  text-align: center;
+}
+
+.fs-toolbar {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.fs-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  color: white !important;
+  background: rgba(0,0,0,0.4) !important;
+  z-index: 10;
+}
+
+.fs-nav-left { left: 1rem; }
+.fs-nav-right { right: 1rem; }
+
+/* ── Share Dialog ────────────────────────────────────────────────────────── */
+.share-loading {
+  padding: 1rem;
+  text-align: center;
+  color: var(--text-color-secondary);
+}
+
+.share-section {
+  margin-bottom: 1.5rem;
+}
+
+.share-section-title {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-color-secondary);
+  margin-bottom: 0.75rem;
+}
+
+.share-empty {
+  font-size: 0.9rem;
+  color: var(--text-color-secondary);
+  font-style: italic;
+}
+
+.share-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--surface-border);
+}
+
+.share-user-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.share-user-name {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.share-user-email {
+  font-size: 0.75rem;
+  color: var(--text-color-secondary);
+}
+
+.share-badge {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.share-badge--read {
+  background: var(--surface-200);
+  color: var(--text-color-secondary);
+}
+
+.share-badge--write {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.share-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.share-user-select,
+.share-userid-input {
+  width: 100%;
 }
 </style>
