@@ -735,6 +735,7 @@ onUnmounted(() => {
         :is-editing-date="false"
         :updating-date="false"
         :show-persons="auth.hasPermission('people.view')"
+        :limit-albums-shown="true"
         @fullscreen="isFullscreen = true"
         @toggle-favorite="handleToggleFavorite"
         @hide="handleHidePhoto"

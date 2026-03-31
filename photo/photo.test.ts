@@ -2,7 +2,7 @@ import { Readable } from "stream";
 import { describe, it, expect, beforeEach } from "vitest";
 import fs from "fs";
 import path from "path";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import db from "../db/database";
 import { photos, faces, persons, albums, albumPhotos, albumShares, users, roles, permissions, rolePermissions, userRoles } from "../db/schema";
 import { dbInsertReturning, dbExec } from "../db/adapter";
@@ -437,6 +437,71 @@ describe("Photo Module", () => {
       expect(found!.description).toBe("My trip to the mountains");
       expect(found!.cover_photo_id).toBe(photo.id);
       expect(found!.cover_filename).toBeDefined();
+    });
+
+    it("should include stats (newest, oldest, count) in album logic", async () => {
+      const album = await service.createAlbumLogic(user1.id, { name: "Time Album" });
+      const photo1 = await service.uploadPhotoLogic(user1.id, {
+        data: Buffer.from([1]),
+        name: "old.jpg",
+        mimeType: "image/jpeg",
+      });
+      // Mocking taken_at for photo1
+      await db.update(photos).set({ taken_at: '2020-01-01 10:00:00' }).where(eq(photos.id, photo1.id));
+
+      const photo2 = await service.uploadPhotoLogic(user1.id, {
+        data: Buffer.from([2]),
+        name: "new.jpg",
+        mimeType: "image/jpeg",
+      });
+      // Mocking taken_at for photo2
+      await db.update(photos).set({ taken_at: '2023-01-01 10:00:00' }).where(eq(photos.id, photo2.id));
+
+      await service.addPhotoToAlbumLogic(user1.id, { albumId: album.id, photoId: photo1.id });
+      await service.addPhotoToAlbumLogic(user1.id, { albumId: album.id, photoId: photo2.id });
+
+      const response = await service.listAlbumsLogic(user1.id);
+      const found = response.albums.find(a => a.id === album.id);
+      expect(found).toBeDefined();
+      expect(found!.newest_photo_at).toBeDefined();
+      expect(found!.oldest_photo_at).toBeDefined();
+      expect(found!.photo_count).toBe(2);
+      // It should be the date of photo2 (2023) and photo1 (2020)
+      expect(new Date(found!.newest_photo_at!).getFullYear()).toBe(2023);
+      expect(new Date(found!.oldest_photo_at!).getFullYear()).toBe(2020);
+
+      const details = await service.getAlbumLogic(user1.id, album.id);
+      expect(details.photo_count).toBe(2);
+      expect(new Date(details.newest_photo_at!).getFullYear()).toBe(2023);
+      expect(new Date(details.oldest_photo_at!).getFullYear()).toBe(2020);
+    });
+
+    it("should use newest photo as cover if no cover_photo_id is set", async () => {
+      const album = await service.createAlbumLogic(user1.id, { name: "Default Cover Album" });
+      const photo1 = await service.uploadPhotoLogic(user1.id, {
+        data: Buffer.from([1]),
+        name: "old.jpg",
+        mimeType: "image/jpeg",
+      });
+      await db.update(photos).set({ taken_at: "2020-01-01 10:00:00" }).where(eq(photos.id, photo1.id));
+
+      const photo2 = await service.uploadPhotoLogic(user1.id, {
+        data: Buffer.from([2]),
+        name: "new.jpg",
+        mimeType: "image/jpeg",
+      });
+      await db.update(photos).set({ taken_at: "2023-01-01 10:00:00" }).where(eq(photos.id, photo2.id));
+
+      await service.addPhotoToAlbumLogic(user1.id, { albumId: album.id, photoId: photo1.id });
+      await service.addPhotoToAlbumLogic(user1.id, { albumId: album.id, photoId: photo2.id });
+
+      const response = await service.listAlbumsLogic(user1.id);
+      const found = response.albums.find(a => a.id === album.id);
+
+      expect(found).toBeDefined();
+      expect(found!.cover_photo_id).toBeUndefined();
+      // It should return the filename of the newest photo (photo2)
+      expect(found!.cover_filename).toBe(photo2.filename);
     });
 
     it("should add a photo to an album", async () => {

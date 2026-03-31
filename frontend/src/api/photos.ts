@@ -227,6 +227,9 @@ export interface Album {
   description?: string
   cover_photo_id?: number
   cover_filename?: string
+  newest_photo_at?: string
+  oldest_photo_at?: string
+  photo_count: number
   created_at: string
   updated_at: string
 }
