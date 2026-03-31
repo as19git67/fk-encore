@@ -225,6 +225,17 @@ watch([album, gridScrollRef], () => {
 
     <div v-if="album" class="album-info-block">
       <div class="desc-row">
+        <label class="desc-label">Infos</label>
+        <div class="desc-content">
+          <span class="desc-text">
+            {{ album.photo_count }} {{ album.photo_count === 1 ? 'Foto' : 'Fotos' }}
+            <template v-if="album.oldest_photo_at && album.newest_photo_at">
+              • {{ new Date(album.oldest_photo_at).toLocaleDateString() }} - {{ new Date(album.newest_photo_at).toLocaleDateString() }}
+            </template>
+          </span>
+        </div>
+      </div>
+      <div class="desc-row">
         <label class="desc-label">Beschreibung</label>
         <div v-if="!editingDescription" class="desc-content">
           <span :class="{ empty: !album.description }" class="desc-text">{{

@@ -972,6 +972,7 @@ onUnmounted(() => {
         :faces="detectedFaces"
         :loading-faces="loadingFaces"
         :landmarks="detectedLandmarks"
+        :limitAlbumsShown="true"
         :loading-landmarks="loadingLandmarks"
         :persons="persons"
         :can-delete="canDelete"
