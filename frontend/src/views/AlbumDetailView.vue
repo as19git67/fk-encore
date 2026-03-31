@@ -213,7 +213,7 @@ const flatSectionFirstIndices = computed<number[]>(() => {
   for (const yg of groupedPhotos.value) {
     for (const mg of yg.months) {
       if (mg.photos.length > 0) {
-        indices.push(mg.photos[0].index)
+        indices.push(mg.photos[0]!.index)
       }
     }
   }
