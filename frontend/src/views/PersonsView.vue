@@ -303,6 +303,7 @@ const inlineRenamePersonId = ref<number | null>(null)
 const inlineRenameValue = ref('')
 const inlineRenameSaving = ref(false)
 const inlineRenameInputRef = ref<HTMLInputElement | null>(null)
+const renameInputRef = ref<ComponentPublicInstance | null>(null)
 const confirm = useConfirm()
 
 function setInlineRenameInputRef(el: Element | ComponentPublicInstance | null) {
@@ -328,6 +329,18 @@ function openRename(person: Person) {
   personToRename.value = person
   newName.value = person.name === 'Unbenannt' ? '' : person.name
   showRenameDialog.value = true
+}
+
+function onRenameDialogShow() {
+  // Focus the input in the dialog
+  const input = (renameInputRef.value as any)?.$el || renameInputRef.value
+  if (input instanceof HTMLInputElement) {
+    input.focus()
+    input.select()
+  } else if (input && typeof input.focus === 'function') {
+    input.focus()
+    if (typeof input.select === 'function') input.select()
+  }
 }
 
 function startInlineRename(person: Person) {
@@ -760,11 +773,11 @@ onUnmounted(() => {
     </div>
 
     <!-- Rename dialog -->
-    <Dialog v-model:visible="showRenameDialog" header="Person umbenennen" :modal="true" style="width: min(100%, 28rem)">
+    <Dialog v-model:visible="showRenameDialog" header="Person umbenennen" :modal="true" style="width: min(100%, 28rem)" @show="onRenameDialogShow">
       <div class="dialog-body">
         <div class="rename-row">
           <label for="rename-name" class="dialog-label">Name</label>
-          <InputText id="rename-name" v-model="newName" fluid autocomplete="off" @keyup.enter="handleRename" />
+          <InputText ref="renameInputRef" id="rename-name" v-model="newName" fluid autocomplete="off" @keyup.enter="handleRename" autofocus />
         </div>
         <Message v-if="newName.trim().toLowerCase() === 'unbenannt'" severity="error" :closable="false">
           Der Name "Unbenannt" ist nicht zulässig.
