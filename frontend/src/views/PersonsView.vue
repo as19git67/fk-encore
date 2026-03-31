@@ -600,7 +600,7 @@ onUnmounted(() => {
     <div class="subheader">
       <div class="header">
         <div class="header-left">
-          <h1>{{ selectedPersonDetail ? selectedPersonDetail.name : 'Personen' }}</h1>
+          <h1 class="title">{{ selectedPersonDetail ? selectedPersonDetail.name : 'Personen' }}</h1>
         </div>
         <div class="actions">
           <div v-if="selectedPersonDetail" class="toggle-hidden">
@@ -801,6 +801,12 @@ onUnmounted(() => {
   flex-direction: column;
   height: calc(100vh - var(--menubar-height, 3.5rem));
   overflow: hidden;
+}
+
+.persons-view .title {
+  font-size: 1.5em;
+  font-weight: 600;
+  margin: 0;
 }
 
 .subheader {

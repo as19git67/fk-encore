@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import {onMounted, ref} from 'vue'
+import {useRouter} from 'vue-router'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
-import { listAlbums, createAlbum, type Album } from '../api/photos'
+import {type Album, createAlbum, listAlbums} from '../api/photos'
 
 const albums = ref<Album[]>([])
 const loading = ref(true)
@@ -52,15 +52,15 @@ onMounted(loadData)
   <div class="albums-view">
     <div class="subheader">
       <div class="header">
-        <h1>Meine Alben</h1>
-        <Button label="Neues Album" icon="pi pi-plus" @click="showCreateDialog = true" />
+        <h1 class="title">Meine Alben</h1>
+        <Button label="Neues Album" icon="pi pi-plus" @click="showCreateDialog = true"/>
       </div>
     </div>
 
     <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
 
     <div v-if="loading" class="info-text">
-      <i class="pi pi-spin pi-spinner" /> Alben werden geladen…
+      <i class="pi pi-spin pi-spinner"/> Alben werden geladen…
     </div>
     <div v-else-if="albums.length === 0" class="info-text">
       Keine Alben vorhanden. Erstelle dein erstes Album!
@@ -68,13 +68,13 @@ onMounted(loadData)
 
     <div v-else class="albums-grid">
       <div
-        v-for="album in albums"
-        :key="album.id"
-        class="album-card"
-        @click="router.push(`/albums/${album.id}`)"
+          v-for="album in albums"
+          :key="album.id"
+          class="album-card"
+          @click="router.push(`/albums/${album.id}`)"
       >
         <div class="album-icon">
-          <i class="pi pi-images" />
+          <i class="pi pi-images"/>
         </div>
         <div class="album-info">
           <span class="album-name">{{ album.name }}</span>
@@ -84,33 +84,59 @@ onMounted(loadData)
     </div>
 
     <Dialog v-model:visible="showCreateDialog" header="Neues Album erstellen" :modal="true">
-      <div class="flex flex-column gap-3">
+      <div class="dialog-content">
         <label for="albumName">Name des Albums</label>
-        <InputText id="albumName" v-model="newAlbumName" autofocus @keydown.enter="handleCreateAlbum" />
+        <InputText id="albumName" v-model="newAlbumName" autofocus @keydown.enter="handleCreateAlbum"/>
       </div>
       <template #footer>
-        <Button label="Abbrechen" text @click="showCreateDialog = false" />
-        <Button label="Erstellen" :loading="creating" @click="handleCreateAlbum" />
+        <Button label="Abbrechen" text @click="showCreateDialog = false"/>
+        <Button label="Erstellen" :loading="creating" @click="handleCreateAlbum"/>
       </template>
     </Dialog>
   </div>
 </template>
 
 <style scoped>
-.albums-view {
-  padding: 1rem;
+.dialog-content {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5em;
 }
+
+.albums-view {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--menubar-height, 3.5rem));
+  overflow: hidden;
+}
+
+@media (min-width: 800px) {
+  .albums-view {
+    margin-inline: 0.5em;
+  }
+}
+
+.albums-view .title {
+  font-size: 1.5em;
+  font-weight: 600;
+  margin-block: 0.25em;
+}
+
 .header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 2rem;
+  margin-block: 0.25rem;
+  margin-bottom: 1rem;
 }
+
 .albums-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 1.5rem;
 }
+
 .album-card {
   background: var(--p-surface-card);
   border: 1px solid var(--p-content-border-color);
@@ -124,22 +150,27 @@ onMounted(loadData)
   text-align: center;
   gap: 1rem;
 }
+
 .album-card:hover {
   transform: translateY(-4px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
+
 .album-icon {
   font-size: 3rem;
   color: var(--p-primary-color);
 }
+
 .album-name {
   font-weight: 600;
   display: block;
 }
+
 .album-meta {
   font-size: 0.85rem;
   color: var(--p-text-muted-color);
 }
+
 .info-text {
   text-align: center;
   margin-top: 4rem;

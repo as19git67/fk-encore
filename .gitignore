@@ -16,4 +16,4 @@ frontend/dist
 /docker-compose-otdev.yml
 __pycache__/
 *.py[cod]
-/.idea/misc.xml
+/.idea/*

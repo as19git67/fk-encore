@@ -193,7 +193,7 @@ onUnmounted(() => stopPolling())
 
 <template>
   <div class="data-management-view">
-    <h2>Datenverwaltung</h2>
+    <h1 class="title">Datenverwaltung</h1>
 
     <!-- Scan Queue -->
     <div class="data-management-group">
@@ -376,7 +376,9 @@ onUnmounted(() => stopPolling())
   }
 }
 
-.data-management-view h2 {
+.data-management-view .title {
+  font-size: 1.5em;
+  font-weight: 600;
   margin-block: 0.25em;
 }
 
