@@ -1,0 +1,23 @@
+# Node modules and .git
+node_modules/
+.git/
+
+# Frontend
+frontend/
+
+# Python Services (separate images)
+embedding_service/
+insightface-service/
+landmark-service/
+
+# Tests and Test Configuration
+**/*.test.ts
+**/*.spec.ts
+vitest.config.ts
+vitest.setup.ts
+vitest.globalsetup.ts
+
+# Configuration and scripts
+drizzle.config.ts
+scripts/
+data/
