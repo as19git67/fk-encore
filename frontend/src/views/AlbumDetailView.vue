@@ -1,10 +1,8 @@
 <script lang="ts" setup>
 import {computed, nextTick, onMounted, onUnmounted, ref, watch} from 'vue'
-import {useRoute, useRouter} from 'vue-router'
+import {useRoute} from 'vue-router'
 import SelectButton from 'primevue/selectbutton'
 import Button from 'primevue/button'
-import Dialog from 'primevue/dialog'
-import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import GalleryLayout from '../components/GalleryLayout.vue'
 import HeicImage from '../components/HeicImage.vue'
@@ -12,7 +10,6 @@ import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import {
   type AlbumWithPhotos,
   deletePhoto,
-  deleteAlbum,
   getPhotoFaces,
   getAlbum,
   getPhotoLandmarks,
@@ -31,7 +28,6 @@ import {
 import {useAuthStore} from '../stores/auth'
 
 const route = useRoute()
-const router = useRouter()
 const albumId = Number(route.params.id)
 const auth = useAuthStore()
 
@@ -137,7 +133,6 @@ watch(selectedIndex, (newIdx) => {
 })
 
 const canWrite = computed(() => album.value?.role === 'owner' || album.value?.role === 'contributor')
-const canDeleteAlbum = computed(() => album.value?.role === 'owner')
 const canDeletePhotos = computed(() => auth.hasPermission('photos.delete'))
 const canUploadPhotos = computed(() => auth.hasPermission('photos.upload'))
 const showPersons = computed(() => auth.hasPermission('people.view'))
@@ -191,35 +186,10 @@ const groupedPhotos = computed<YearGroup[]>(() => {
   return groups
 })
 
-// Rename & description state
-const showRenameDialog = ref(false)
-const renameValue = ref('')
 const updatingAlbum = ref(false)
 
 const editingDescription = ref(false)
 const descDraft = ref('')
-
-function openRename() {
-  if (!album.value) return
-  renameValue.value = album.value.name
-  showRenameDialog.value = true
-}
-
-async function saveRename() {
-  if (!album.value) return
-  const newName = renameValue.value.trim()
-  if (!newName) return
-  try {
-    updatingAlbum.value = true
-    await updateAlbum(albumId, {name: newName})
-    album.value.name = newName
-    showRenameDialog.value = false
-  } catch (err: any) {
-    error.value = err.message || 'Fehler beim Umbenennen'
-  } finally {
-    updatingAlbum.value = false
-  }
-}
 
 function startEditDesc() {
   if (!album.value) return
@@ -314,20 +284,6 @@ async function scrollToCover() {
   }
 }
 
-const showDeleteDialog = ref(false)
-
-async function doDelete() {
-  try {
-    updatingAlbum.value = true
-    await deleteAlbum(albumId)
-    router.push('/albums')
-  } catch (err: any) {
-    error.value = err.message || 'Fehler beim Löschen des Albums'
-  } finally {
-    updatingAlbum.value = false
-    showDeleteDialog.value = false
-  }
-}
 
 onMounted(() => {
   void loadData()
@@ -418,9 +374,6 @@ onUnmounted(() => {
             @click="scrollToCover"
             title="Zum Cover-Foto springen"
           />
-          <Button v-if="canWrite" icon="pi pi-pencil" label="Umbenennen" size="small" text @click="openRename"/>
-          <Button v-if="canDeleteAlbum" icon="pi pi-trash" label="Löschen" severity="danger" size="small" text
-                  @click="showDeleteDialog = true"/>
           <div v-if="album.settings" class="control-group">
             <label>Ansicht:</label>
             <SelectButton
@@ -575,42 +528,10 @@ onUnmounted(() => {
     <div v-else-if="album" class="info-text">
       Keine Fotos in dieser Ansicht.
     </div>
-    <Dialog v-model:visible="showRenameDialog" :modal="true" header="Album umbenennen" style="width: min(100%, 26rem)">
-      <div class="dialog-body">
-        <label class="dialog-label" for="rename-input">Name</label>
-        <InputText id="rename-input" v-model="renameValue" autocomplete="off" fluid @keyup.enter="saveRename"/>
-        <div class="dialog-actions">
-          <Button label="Abbrechen" text @click="showRenameDialog = false"/>
-          <Button :disabled="!renameValue.trim()" :loading="updatingAlbum" icon="pi pi-check" label="Speichern"
-                  @click="saveRename"/>
-        </div>
-      </div>
-    </Dialog>
-
-    <Dialog v-model:visible="showDeleteDialog" :modal="true" header="Album löschen" style="width: min(100%, 28rem)">
-      <div class="dialog-body">
-        <p>Willst du dieses Album wirklich löschen?</p>
-        <p class="muted">Es werden keine Fotos gelöscht. Sie bleiben unter <b>Alle Fotos</b> erhalten.</p>
-        <div class="dialog-actions">
-          <Button label="Abbrechen" text @click="showDeleteDialog = false"/>
-          <Button :loading="updatingAlbum" icon="pi pi-trash" label="Löschen" severity="danger" @click="doDelete"/>
-        </div>
-      </div>
-    </Dialog>
   </div>
 </template>
 
 <style scoped>
-.dialog-body {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5em;
-}
-
-.dialog-body .dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-}
 
 .album-info-block {
   display: flex;
