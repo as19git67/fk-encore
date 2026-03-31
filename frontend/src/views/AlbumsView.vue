@@ -6,11 +6,13 @@ import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import HeicImage from '../components/HeicImage.vue'
-import {type Album, createAlbum, listAlbums, getPhotoUrl} from '../api/photos'
+import {type Album, createAlbum, listAlbums, getPhotoUrl, updateAlbum, deleteAlbum} from '../api/photos'
+import { useAuthStore } from '../stores/auth'
 
 const albums = ref<Album[]>([])
 const loading = ref(true)
 const error = ref('')
+const auth = useAuthStore()
 
 const firstAlbumRef = ref<HTMLElement | null>(null)
 
@@ -39,6 +41,11 @@ const showCreateDialog = ref(false)
 const newAlbumName = ref('')
 const newAlbumDesc = ref('')
 const creating = ref(false)
+const showRenameDialog = ref(false)
+const showDeleteDialog = ref(false)
+const renameValue = ref('')
+const updatingAlbum = ref(false)
+const selectedAlbum = ref<Album | null>(null)
 
 const router = useRouter()
 
@@ -68,6 +75,55 @@ async function handleCreateAlbum() {
     error.value = err.message || 'Fehler beim Erstellen des Albums'
   } finally {
     creating.value = false
+  }
+}
+
+function canManageAlbum(album: Album) {
+  return auth.user?.id === album.user_id
+}
+
+function openRenameDialog(album: Album) {
+  selectedAlbum.value = album
+  renameValue.value = album.name
+  showRenameDialog.value = true
+}
+
+function openDeleteDialog(album: Album) {
+  selectedAlbum.value = album
+  showDeleteDialog.value = true
+}
+
+async function handleRenameAlbum() {
+  if (!selectedAlbum.value) return
+  const newName = renameValue.value.trim()
+  if (!newName) return
+
+  updatingAlbum.value = true
+  try {
+    await updateAlbum(selectedAlbum.value.id, { name: newName })
+    showRenameDialog.value = false
+    selectedAlbum.value = null
+    await loadData()
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Umbenennen des Albums'
+  } finally {
+    updatingAlbum.value = false
+  }
+}
+
+async function handleDeleteAlbum() {
+  if (!selectedAlbum.value) return
+
+  updatingAlbum.value = true
+  try {
+    await deleteAlbum(selectedAlbum.value.id)
+    showDeleteDialog.value = false
+    selectedAlbum.value = null
+    await loadData()
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Löschen des Albums'
+  } finally {
+    updatingAlbum.value = false
   }
 }
 
@@ -103,6 +159,10 @@ onMounted(loadData)
           @keydown.enter="router.push(`/albums/${album.id}`)"
           @keydown.space.prevent="router.push(`/albums/${album.id}`)"
       >
+        <div v-if="canManageAlbum(album)" class="album-actions" @click.stop>
+          <Button icon="pi pi-pencil" text rounded size="small" v-tooltip="'Umbenennen'" @click="openRenameDialog(album)" />
+          <Button icon="pi pi-trash" text rounded size="small" severity="danger" v-tooltip="'Löschen'" @click="openDeleteDialog(album)" />
+        </div>
         <div class="album-cover">
           <HeicImage
             v-if="album.cover_filename"
@@ -137,6 +197,28 @@ onMounted(loadData)
       <template #footer>
         <Button label="Abbrechen" text @click="showCreateDialog = false"/>
         <Button label="Erstellen" :loading="creating" @click="handleCreateAlbum"/>
+      </template>
+    </Dialog>
+
+    <Dialog v-model:visible="showRenameDialog" header="Album umbenennen" :modal="true">
+      <div class="dialog-content">
+        <label for="renameAlbumName">Name des Albums</label>
+        <InputText id="renameAlbumName" v-model="renameValue" autofocus @keydown.enter="handleRenameAlbum" />
+      </div>
+      <template #footer>
+        <Button label="Abbrechen" text @click="showRenameDialog = false" />
+        <Button label="Speichern" :disabled="!renameValue.trim()" :loading="updatingAlbum" @click="handleRenameAlbum" />
+      </template>
+    </Dialog>
+
+    <Dialog v-model:visible="showDeleteDialog" header="Album löschen" :modal="true" style="width: min(100%, 28rem)">
+      <div class="dialog-body">
+        <p>Willst du dieses Album wirklich löschen?</p>
+        <p class="muted">Es werden keine Fotos gelöscht. Sie bleiben unter <b>Alle Fotos</b> erhalten.</p>
+      </div>
+      <template #footer>
+        <Button label="Abbrechen" text @click="showDeleteDialog = false" />
+        <Button label="Löschen" severity="danger" :loading="updatingAlbum" @click="handleDeleteAlbum" />
       </template>
     </Dialog>
   </div>
@@ -187,6 +269,7 @@ onMounted(loadData)
 }
 
 .album-card {
+  position: relative;
   background: var(--p-surface-card);
   border: 1px solid var(--p-content-border-color);
   border-radius: 8px;
@@ -196,6 +279,19 @@ onMounted(loadData)
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.album-actions {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 1;
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--p-surface-card) 82%, transparent);
+  backdrop-filter: blur(4px);
 }
 
 .album-card:hover,
