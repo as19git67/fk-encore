@@ -206,6 +206,9 @@ export const albums = pgTable("albums", {
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
+  description: text("description"),
+  cover_photo_id: integer("cover_photo_id")
+    .references(() => photos.id, { onDelete: "set null" }),
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
   updated_at: timestamp("updated_at", { mode: "string" }).defaultNow(),
 });

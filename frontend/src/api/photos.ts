@@ -224,6 +224,9 @@ export interface Album {
   id: number
   user_id: number
   name: string
+  description?: string
+  cover_photo_id?: number
+  cover_filename?: string
   created_at: string
   updated_at: string
 }
@@ -250,17 +253,17 @@ export function getAlbum(id: number) {
   return apiFetch<AlbumWithPhotos>(`/albums/${id}`)
 }
 
-export function createAlbum(name: string) {
+export function createAlbum(name: string, description?: string) {
   return apiFetch<Album>('/albums', {
     method: 'POST',
-    body: JSON.stringify({ name })
+    body: JSON.stringify({ name, description })
   })
 }
 
-export function updateAlbum(id: number, name: string) {
+export function updateAlbum(id: number, patch: { name?: string; description?: string; coverPhotoId?: number | null }) {
   return apiFetch<Album>('/albums', {
     method: 'PATCH',
-    body: JSON.stringify({ id, name })
+    body: JSON.stringify({ id, ...patch })
   })
 }
 

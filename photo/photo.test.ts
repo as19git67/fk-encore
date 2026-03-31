@@ -414,6 +414,31 @@ describe("Photo Module", () => {
       expect(album.user_id).toBe(user1.id);
     });
 
+    it("should list albums with cover photo and description", async () => {
+      const album = await service.createAlbumLogic(user1.id, { 
+        name: "Vacation with Cover", 
+        description: "My trip to the mountains" 
+      });
+      const photo = await service.uploadPhotoLogic(user1.id, {
+        data: Buffer.from([1, 2, 3]),
+        name: "mountains.jpg",
+        mimeType: "image/jpeg",
+      });
+      
+      // Add photo to album first
+      await service.addPhotoToAlbumLogic(user1.id, { albumId: album.id, photoId: photo.id });
+
+      // Set as cover
+      await service.updateAlbumLogic(user1.id, { id: album.id, coverPhotoId: photo.id });
+      
+      const response = await service.listAlbumsLogic(user1.id);
+      const found = response.albums.find(a => a.id === album.id);
+      expect(found).toBeDefined();
+      expect(found!.description).toBe("My trip to the mountains");
+      expect(found!.cover_photo_id).toBe(photo.id);
+      expect(found!.cover_filename).toBeDefined();
+    });
+
     it("should add a photo to an album", async () => {
       const album = await service.createAlbumLogic(user1.id, { name: "Vacation" });
       const photo = await service.uploadPhotoLogic(user1.id, {
