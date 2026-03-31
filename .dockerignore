@@ -4,12 +4,27 @@
 .encore/build
 .env
 node_modules
+# Python Services (separate images)
+embedding_service
+insightface-service
+landmark-service
+
+# Frontend
 frontend/node_modules
 frontend/dist
-insightface-service/.venv
-data/*.db
-data/*.db-shm
-data/*.db-wal
+
+# Tests and Test Configuration
+vitest.config.ts
+vitest.setup.ts
+vitest.globalsetup.ts
+drizzle.config.ts
+**/*.test.ts
+**/*.spec.ts
+
+# Configuration and scripts
+scripts
+test_output.txt
+tsconfig.tsbuildinfo
+data
 uploads
 .DS_Store
-vitest.config.ts
