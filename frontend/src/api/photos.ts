@@ -301,6 +301,24 @@ export function shareAlbum(albumId: number, userId: number, accessLevel: 'read' 
   })
 }
 
+export interface AlbumShareWithUser {
+  album_id: number
+  user_id: number
+  access_level: 'read' | 'write'
+  user_name: string
+  user_email: string
+}
+
+export function getAlbumShares(albumId: number) {
+  return apiFetch<{ shares: AlbumShareWithUser[] }>(`/albums/${albumId}/shares`)
+}
+
+export function removeAlbumShare(albumId: number, userId: number) {
+  return apiFetch<{ success: boolean }>(`/albums/${albumId}/shares/${userId}`, {
+    method: 'DELETE'
+  })
+}
+
 export function updateAlbumUserSettings(albumId: number, settings: Partial<AlbumUserSettings>) {
   const { album_id, user_id, ...rest } = settings as any
   const req: any = {}
