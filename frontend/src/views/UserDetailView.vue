@@ -97,9 +97,9 @@ onMounted(loadData)
 
 <template>
   <div v-if="loading" class="loading">Laden...</div>
-  <div v-else-if="user">
+  <div class="user-detail-view" v-else-if="user">
     <div class="header-row">
-      <h1>{{ user.name }}</h1>
+      <h1 class="title">{{ user.name }}</h1>
       <Button v-if="auth.hasPermission('users.delete')" label="Benutzer löschen" icon="pi pi-trash" severity="danger" outlined @click="showDeleteConfirm = true" />
     </div>
 
@@ -179,10 +179,29 @@ onMounted(loadData)
 </template>
 
 <style scoped>
+.user-detail-view {
+  gap: 1rem;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (min-width: 800px) {
+  .user-detail-view {
+    margin-inline: 0.5em;
+  }
+}
+
+.user-detail-view .title {
+  font-size: 1.5em;
+  font-weight: 600;
+  margin-block: 0.25em;
+}
+
 .header-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  margin-block: 0.25rem;
   margin-bottom: 1rem;
 }
 

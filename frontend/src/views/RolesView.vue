@@ -129,8 +129,8 @@ onMounted(loadData)
 </script>
 
 <template>
-  <div>
-    <h1>Rollen & Berechtigungen</h1>
+  <div class="role-management-view">
+    <h1 class="title">Rollen & Berechtigungen</h1>
 
     <Message v-if="error" severity="error" :closable="false" class="mb">{{ error }}</Message>
 
@@ -228,6 +228,24 @@ onMounted(loadData)
 </template>
 
 <style scoped>
+.role-management-view {
+  gap: 1rem;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (min-width: 800px) {
+  .role-management-view {
+    margin-inline: 0.5em;
+  }
+}
+
+.role-management-view .title {
+  font-size: 1.5em;
+  font-weight: 600;
+  margin-block: 0.25em;
+}
+
 .create-form {
   display: flex;
   gap: 0.5rem;
