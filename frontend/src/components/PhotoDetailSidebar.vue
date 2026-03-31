@@ -250,7 +250,7 @@ function getPersonName(personId?: number) {
       <div class="sidebar-section">
         <div class="section-label"><i class="pi pi-book" /> Alben</div>
         <div v-if="loadingAlbums" class="loading-row"><i class="pi pi-spin pi-spinner" /> Lade Alben…</div>
-        <div v-else class="album-checkbox-list">
+        <div v-if="!loadingAlbums && albums.length > 0" class="album-checkbox-list">
           <div v-for="album in albums" :key="album.id" class="album-checkbox-item">
             <Checkbox 
               :modelValue="getEffectiveAlbumCheckState(album.id) === true" 
@@ -263,7 +263,7 @@ function getPersonName(personId?: number) {
           </div>
         </div>
         <div class="multi-actions" style="margin-top: 0.75rem">
-          <Button 
+          <Button v-if="Object.keys(pendingAlbumChanges).length > 0"
             label="Speichern" 
             icon="pi pi-save" 
             class="w-full" 
@@ -510,8 +510,6 @@ function getPersonName(personId?: number) {
 }
 
 .album-checkbox-list {
-  max-height: 200px;
-  overflow-y: auto;
   padding: 0.25rem;
   border: 1px solid var(--surface-border);
   border-radius: 6px;

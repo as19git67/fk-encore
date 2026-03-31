@@ -247,6 +247,9 @@ export interface Album {
   id: number;
   user_id: number;
   name: string;
+  description?: string;
+  cover_photo_id?: number;
+  cover_filename?: string;
   created_at: string;
   updated_at: string;
 }
@@ -285,11 +288,14 @@ export interface UpdateAlbumUserSettingsRequest {
 
 export interface CreateAlbumRequest {
   name: string;
+  description?: string;
 }
 
 export interface UpdateAlbumRequest {
   id: number;
-  name: string;
+  name?: string;
+  description?: string;
+  coverPhotoId?: number | null;
 }
 
 export interface AddPhotoToAlbumRequest {
