@@ -23,6 +23,7 @@ import {
   photoLandmarks,
   photoScanQueue,
   albumUserSettings,
+  users,
 } from "../db/schema";
 import type {
   Photo,
@@ -39,6 +40,8 @@ import type {
   BatchAlbumPhotosRequest,
   ListPhotoAlbumsResponse,
   ShareAlbumRequest,
+  GetAlbumSharesResponse,
+  RemoveAlbumShareRequest,
   ListAlbumsResponse,
   ListPhotosResponse,
   DeleteResponse,
@@ -1289,7 +1292,53 @@ export async function shareAlbumLogic(userId: number, req: ShareAlbumRequest): P
   }
 
   await dbExec(
-    db.insert(albumShares).values({ album_id: req.albumId, user_id: req.userId, access_level: req.accessLevel })
+    db.insert(albumShares)
+      .values({ album_id: req.albumId, user_id: req.userId, access_level: req.accessLevel })
+      .onConflictDoUpdate({ target: [albumShares.album_id, albumShares.user_id], set: { access_level: req.accessLevel } })
+  );
+  return { success: true };
+}
+
+export async function getAlbumSharesLogic(userId: number, albumId: number): Promise<GetAlbumSharesResponse> {
+  const album = await dbFirst<typeof albums.$inferSelect>(
+    db.select().from(albums).where(eq(albums.id, albumId))
+  );
+  if (!album) throw new Error("Album not found");
+  if (album.user_id !== userId) throw new Error("Only owner can view shares");
+
+  const rows = await dbAll<{ album_id: number; user_id: number; access_level: string; name: string; email: string }>(
+    db.select({
+      album_id: albumShares.album_id,
+      user_id: albumShares.user_id,
+      access_level: albumShares.access_level,
+      name: users.name,
+      email: users.email,
+    })
+    .from(albumShares)
+    .innerJoin(users, eq(users.id, albumShares.user_id))
+    .where(eq(albumShares.album_id, albumId))
+  );
+
+  return {
+    shares: rows.map(r => ({
+      album_id: r.album_id,
+      user_id: r.user_id,
+      access_level: r.access_level as "read" | "write",
+      user_name: r.name,
+      user_email: r.email,
+    })),
+  };
+}
+
+export async function removeAlbumShareLogic(userId: number, req: RemoveAlbumShareRequest): Promise<{ success: boolean }> {
+  const album = await dbFirst<typeof albums.$inferSelect>(
+    db.select().from(albums).where(eq(albums.id, req.albumId))
+  );
+  if (!album) throw new Error("Album not found");
+  if (album.user_id !== userId) throw new Error("Only owner can remove shares");
+
+  await dbExec(
+    db.delete(albumShares).where(and(eq(albumShares.album_id, req.albumId), eq(albumShares.user_id, req.userId)))
   );
   return { success: true };
 }

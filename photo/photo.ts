@@ -16,6 +16,8 @@ import type {
   BatchAlbumPhotosRequest,
   ListPhotoAlbumsResponse,
   ShareAlbumRequest,
+  GetAlbumSharesResponse,
+  RemoveAlbumShareRequest,
   ListAlbumsResponse,
   ListPhotosResponse,
   DeleteResponse,
@@ -395,6 +397,30 @@ export const shareAlbum = api(
     checkModule();
     const userId = getUserId();
     return await service.shareAlbumLogic(userId, req);
+  }
+);
+
+/**
+ * Get all shares for an album (owner only).
+ */
+export const getAlbumShares = api(
+  { expose: true, method: "GET", path: "/albums/:id/shares", auth: true },
+  async ({ id }: { id: number }): Promise<GetAlbumSharesResponse> => {
+    checkModule();
+    const userId = getUserId();
+    return await service.getAlbumSharesLogic(userId, id);
+  }
+);
+
+/**
+ * Remove a share from an album (owner only).
+ */
+export const removeAlbumShare = api(
+  { expose: true, method: "DELETE", path: "/albums/:albumId/shares/:userId", auth: true },
+  async ({ albumId, userId: sharedUserId }: { albumId: number; userId: number }): Promise<{ success: boolean }> => {
+    checkModule();
+    const userId = getUserId();
+    return await service.removeAlbumShareLogic(userId, { albumId, userId: sharedUserId });
   }
 );
 
