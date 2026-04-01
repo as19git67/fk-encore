@@ -642,12 +642,37 @@ export async function updatePhotoCurationLogic(
   photoId: number,
   status: CurationStatus
 ): Promise<{ success: boolean }> {
-  const photo = await dbFirst<{ id: number }>(
-    db.select({ id: photos.id }).from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+  // Fetch the photo record regardless of ownership. Users who do not own the
+  // photo are allowed to change their OWN curation status for it if the photo
+  // appears in an album that has been shared with them.
+  const photo = await dbFirst<typeof photos.$inferSelect>(
+    db.select().from(photos).where(eq(photos.id, photoId))
   );
 
   if (!photo) {
-    throw new Error("Photo not found or unauthorized");
+    throw new Error("Photo not found");
+  }
+
+  // If the requester is not the owner, allow the action only when the photo
+  // is part of an album that has been shared with the requester.
+  if (photo.user_id !== userId) {
+    // Only allow non-owners to change curation when they have WRITE access to
+    // an album that contains the photo. View-only (read) shares are not
+    // permitted to hide/curate photos.
+    const shared = await dbFirst(
+      db
+        .select({ album_id: albumPhotos.album_id })
+        .from(albumPhotos)
+        .innerJoin(albumShares, eq(albumShares.album_id, albumPhotos.album_id))
+        .where(and(
+          eq(albumPhotos.photo_id, photoId),
+          eq(albumShares.user_id, userId),
+          eq(albumShares.access_level, "write")
+        ))
+    );
+    if (!shared) {
+      throw new Error("Photo not found or unauthorized");
+    }
   }
 
   if (status === "visible") {

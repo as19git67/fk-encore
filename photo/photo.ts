@@ -156,8 +156,17 @@ export const updatePhotoCuration = api(
     checkModule();
     const userId = getUserId();
     const authData = getAuthData()!;
-    requirePermission(authData, "photos.delete");
-    return await service.updatePhotoCurationLogic(userId, id, status);
+    // Hiding/curation is a view-level action — require view permission, not delete.
+    requirePermission(authData, "photos.view");
+    try {
+      return await service.updatePhotoCurationLogic(userId, id, status);
+    } catch (err: any) {
+      // Map service-layer unauthorized errors to a structured 403 API error
+      if (err && (err.message === "Photo not found or unauthorized" || err.message === "Photo not found or unauthorized")) {
+        throw APIError.permissionDenied('Nicht berechtigt, Foto-Ausblendung vorzunehmen');
+      }
+      throw err;
+    }
   }
 );
 
