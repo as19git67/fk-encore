@@ -56,8 +56,7 @@ import type {
   FaceBBox,
   LandmarkBBox,
 } from "../db/types";
-import heicConvert from "heic-convert";
-import { createCanvas, loadImage } from "canvas";
+import sharp from "sharp";
 
 const nowSql = sql`NOW()`
 /** COALESCE(taken_at, created_at) – fallback to upload date if no EXIF date available */
@@ -67,6 +66,7 @@ const rawCoalesceDate = sql.raw('COALESCE(p.taken_at, p.created_at)')
 const rawFalse = sql.raw('false')
 
 export const UPLOAD_DIR = path.resolve(process.env.PHOTO_UPLOAD_DIR || "uploads/photos");
+export const THUMBNAIL_DIR = path.resolve(process.env.PHOTO_THUMBNAIL_DIR || "uploads/thumbnails");
 const INSIGHTFACE_SERVICE_URL = process.env.INSIGHTFACE_SERVICE_URL || "http://localhost:8000";
 
 const SUPPORTED_MIME_TYPES = new Set([
@@ -97,6 +97,9 @@ export const ENABLE_QUALITY = process.env.ENABLE_QUALITY !== "false"; // enabled
 
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
+if (!fs.existsSync(THUMBNAIL_DIR)) {
+  fs.mkdirSync(THUMBNAIL_DIR, { recursive: true });
 }
 
 // ---------- People & Faces ----------
@@ -192,14 +195,8 @@ export async function indexPhotoFaces(userId: number, photoId: number, resetIgno
   const ext = path.extname(photo.filename).toLowerCase();
   if (ext === ".heic" || ext === ".heif") {
     try {
-      const inputBuffer = await fs.promises.readFile(filePath);
-      const outputBuffer = await heicConvert({
-        buffer: inputBuffer,
-        format: 'JPEG',
-        quality: 1
-      });
       tempPath = path.join(UPLOAD_DIR, `temp_${photoId}_${Date.now()}.jpg`);
-      await fs.promises.writeFile(tempPath, outputBuffer as Buffer);
+      await sharp(filePath).jpeg({ quality: 100 }).toFile(tempPath);
       processingPath = tempPath;
     } catch (err) {
       console.error(`Error converting HEIC photo ${photoId}:`, err);
@@ -801,13 +798,7 @@ export function getPhotoFileLogic(filename: string): { data: string; mimeType: s
 }
 
 export async function convertHeicToJpeg(filePath: string): Promise<Buffer> {
-  const inputBuffer = await fs.promises.readFile(filePath);
-  const outputBuffer = await heicConvert({
-    buffer: inputBuffer,
-    format: 'JPEG',
-    quality: 0.9
-  });
-  return outputBuffer as Buffer;
+  return sharp(filePath).jpeg({ quality: 90 }).toBuffer();
 }
 
 /**
@@ -816,19 +807,10 @@ export async function convertHeicToJpeg(filePath: string): Promise<Buffer> {
  * returned as-is (no upscaling). Returns a JPEG buffer.
  */
 export async function resizeImage(imageBuffer: Buffer, targetWidth: number): Promise<Buffer> {
-  const img = await loadImage(imageBuffer);
-  if (img.width <= targetWidth) {
-    // Already small enough — re-encode as JPEG to normalise the output type
-    const canvas = createCanvas(img.width, img.height);
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0);
-    return canvas.toBuffer('image/jpeg', { quality: 0.85 });
-  }
-  const targetHeight = Math.round((img.height / img.width) * targetWidth);
-  const canvas = createCanvas(targetWidth, targetHeight);
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
-  return canvas.toBuffer('image/jpeg', { quality: 0.85 });
+  return sharp(imageBuffer)
+    .resize(targetWidth, null, { withoutEnlargement: true })
+    .jpeg({ quality: 85 })
+    .toBuffer();
 }
 
 // ---------- Albums ----------
@@ -2485,10 +2467,8 @@ export async function indexPhotoLandmarks(userId: number, photoId: number): Prom
   const ext = path.extname(photo.filename).toLowerCase();
   if (ext === ".heic" || ext === ".heif") {
     try {
-      const inputBuffer = await fs.promises.readFile(filePath);
-      const outputBuffer = await heicConvert({ buffer: inputBuffer, format: "JPEG", quality: 1 });
       tempPath = path.join(UPLOAD_DIR, `temp_lm_${photoId}_${Date.now()}.jpg`);
-      await fs.promises.writeFile(tempPath, outputBuffer as Buffer);
+      await sharp(filePath).jpeg({ quality: 100 }).toFile(tempPath);
       processingPath = tempPath;
     } catch (err) {
       console.error(`HEIC conversion for landmark detection failed (photo ${photoId}):`, err);
@@ -2610,10 +2590,8 @@ export async function indexPhotoQuality(userId: number, photoId: number): Promis
   const ext = path.extname(photo.filename).toLowerCase();
   if (ext === ".heic" || ext === ".heif") {
     try {
-      const inputBuffer = await fs.promises.readFile(filePath);
-      const outputBuffer = await heicConvert({ buffer: inputBuffer, format: "JPEG", quality: 1 });
       tempPath = path.join(UPLOAD_DIR, `temp_q_${photoId}_${Date.now()}.jpg`);
-      await fs.promises.writeFile(tempPath, outputBuffer as Buffer);
+      await sharp(filePath).jpeg({ quality: 100 }).toFile(tempPath);
       processingPath = tempPath;
     } catch (err) {
       console.error(`HEIC conversion for quality scoring failed (photo ${photoId}):`, err);

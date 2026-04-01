@@ -4,7 +4,7 @@ import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import * as service from "./photo.service";
-import { UPLOAD_DIR } from "./photo.service";
+import { UPLOAD_DIR, THUMBNAIL_DIR } from "./photo.service";
 import type {
   Album,
   AlbumWithPhotos,
@@ -259,9 +259,22 @@ export const getPhotoFile = api.raw(
 
       if (needsConvert || needsResize) {
           try {
+              // Build a deterministic cache key: <basename>_<width>w.jpg or <basename>_converted.jpg
+              const baseName = path.basename(filename, path.extname(filename));
+              const cacheKey = needsResize
+                ? `${baseName}_${targetWidth}w.jpg`
+                : `${baseName}_converted.jpg`;
+              const cachePath = path.resolve(THUMBNAIL_DIR, cacheKey);
+
+              if (fs.existsSync(cachePath)) {
+                  res.setHeader("Content-Type", "image/jpeg");
+                  res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+                  fs.createReadStream(cachePath).pipe(res);
+                  return;
+              }
+
               let buffer: Buffer;
 
-              // HEIC must be decoded to JPEG before canvas can process it
               if (isHeicFile) {
                   buffer = await service.convertHeicToJpeg(filePath);
               } else {
@@ -271,6 +284,11 @@ export const getPhotoFile = api.raw(
               if (needsResize) {
                   buffer = await service.resizeImage(buffer, targetWidth!);
               }
+
+              // Persist to thumbnail cache (fire-and-forget, don't block the response)
+              fs.promises.writeFile(cachePath, buffer).catch((err) =>
+                console.error("Failed to write thumbnail cache:", err)
+              );
 
               res.setHeader("Content-Type", "image/jpeg");
               res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
