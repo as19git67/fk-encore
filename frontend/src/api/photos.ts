@@ -401,3 +401,19 @@ export interface PhotoLocation {
 export function getPhotoLandmarks(id: number) {
   return apiFetch<{ landmarks: LandmarkItem[]; location?: PhotoLocation }>(`/photos/${id}/landmarks`)
 }
+
+// ---------- Service Health ----------
+
+export type ExternalServiceName = 'insightface' | 'embedding' | 'landmark'
+
+export interface ExternalServiceHealth {
+  name: ExternalServiceName
+  available: boolean
+  lastChecked: string | null
+  lastError: string | null
+}
+
+export function getExternalServiceHealth() {
+  return apiFetch<{ services: ExternalServiceHealth[] }>('/photos/service-health')
+}
+

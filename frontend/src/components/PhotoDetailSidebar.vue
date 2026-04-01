@@ -25,6 +25,8 @@ const props = defineProps<{
   limitAlbumsShown?: boolean
   albumId?: number
   coverPhotoId?: number | null
+  /** When false the "Neu erkennen" button is disabled (insightface not reachable). */
+  faceServiceAvailable?: boolean
 }>()
 
 const editDate = defineModel<Date | null>('editDate', { default: null })
@@ -362,7 +364,7 @@ function getPersonName(personId?: number) {
               <Button icon="pi pi-times" severity="secondary" text rounded size="small" @click="emit('ignore-face', face.id)" v-tooltip="'Entfernen'" />
             </div>
           </div>
-          <Button label="Neu erkennen" icon="pi pi-refresh" @click="emit('reindex')" :loading="reindexingPhoto" class="reindex-btn" severity="secondary" outlined size="small" />
+          <Button label="Neu erkennen" icon="pi pi-refresh" @click="emit('reindex')" :loading="reindexingPhoto" :disabled="faceServiceAvailable === false" class="reindex-btn" severity="secondary" outlined size="small" :title="faceServiceAvailable === false ? 'Gesichtserkennungs-Dienst nicht verfügbar' : undefined" />
         </div>
       </template>
     </div>

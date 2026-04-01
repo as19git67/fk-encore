@@ -75,27 +75,39 @@ async function createDb(): Promise<DbInstance> {
   return db;
 }
 
+const DB_RETRY_INITIAL_DELAY_MS = 2_000;
+const DB_RETRY_MAX_DELAY_MS = 30_000;
+
 let dbInstance: DbInstance | null = null;
-let initializationPromise: Promise<DbInstance> | null = null;
 
 export async function initializeDb(): Promise<DbInstance> {
   if (dbInstance) return dbInstance;
-  if (initializationPromise) return initializationPromise;
 
-  initializationPromise = (async () => {
+  let delay = DB_RETRY_INITIAL_DELAY_MS;
+  let attempt = 0;
+
+  while (true) {
+    attempt++;
     try {
       const db = await createDb();
       await seed(db);
       dbInstance = db;
+      if (attempt > 1) {
+        console.log(`[db] Connected successfully after ${attempt} attempt(s).`);
+      }
       return db;
-    } finally {
-      initializationPromise = null;
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      console.error(`[db] Connection failed (attempt ${attempt}): ${msg}`);
+      console.log(`[db] Retrying in ${delay / 1000}s…`);
+      await new Promise<void>((resolve) => setTimeout(resolve, delay));
+      delay = Math.min(delay * 2, DB_RETRY_MAX_DELAY_MS);
     }
-  })();
-
-  return initializationPromise;
+  }
 }
 
+// Top-level await: blocks module load until DB is ready.
+// The process will NOT crash on ECONNREFUSED — it retries until the DB is up.
 const db = await initializeDb();
 
 export default db;
