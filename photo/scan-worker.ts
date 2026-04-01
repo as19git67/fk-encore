@@ -26,8 +26,23 @@ import {
   findPhotoGroupsLogic,
   cleanupOrphanedPersons,
 } from "./photo.service";
+import {
+  assertServiceAvailable,
+  ServiceUnavailableError,
+  onServiceRecovered,
+  startHealthChecks,
+  type ExternalServiceName,
+} from "./service-health";
 
 const POLL_INTERVAL_MS = 30_000; // fallback poll when idle
+
+/** Maps each scan-service to the external ML-service it depends on. */
+const SERVICE_DEPENDENCY: Partial<Record<ScanService, ExternalServiceName>> = {
+  embedding: "embedding",
+  face_detection: "insightface",
+  landmark: "landmark",
+  quality: "embedding",
+};
 
 class ScanWorker {
   private running = 0;
@@ -68,16 +83,13 @@ class ScanWorker {
       }
 
       // After face detection completes, clean up orphaned persons.
-      // Quality re-scoring is handled automatically: the quality worker defers
-      // its job while face detection is still running and retries on the next
-      // poll cycle — no explicit re-trigger needed here.
       if (this.service === "face_detection") {
         cleanupOrphanedPersons(job.user_id).catch((err) =>
           console.error(`[scan-worker] cleanup error after face job ${job.id}:`, err),
         );
       }
     } catch (err: any) {
-      if (err instanceof DeferJobError) {
+      if (err instanceof DeferJobError || err instanceof ServiceUnavailableError) {
         console.log(`[scan-worker] deferring ${this.service} job ${job.id}: ${err.message}`);
         await deferJob(job.id).catch(() => {});
       } else {
@@ -89,6 +101,11 @@ class ScanWorker {
   }
 
   private async runJob(job: { photo_id: number; user_id: number; force: boolean }): Promise<void> {
+    // Check that the required external service is reachable before doing any work.
+    // If it is not, throws ServiceUnavailableError which is caught above as a defer.
+    const dep = SERVICE_DEPENDENCY[this.service];
+    if (dep) assertServiceAvailable(dep);
+
     switch (this.service) {
       case "embedding":
         await indexPhotoEmbeddings(job.user_id, job.photo_id, job.force);
@@ -141,6 +158,23 @@ export function triggerWorkers(): void {
 export async function startWorkers(): Promise<void> {
   // Reset jobs that were stuck in 'processing' state when the server last stopped
   await resetStuckJobs();
+
+  // Start external-service health-checks first.
+  // Workers will defer (not fail) jobs when a required service is down.
+  startHealthChecks();
+
+  // Wake the relevant workers whenever a service comes back up.
+  onServiceRecovered((name) => {
+    if (name === "embedding") {
+      embeddingWorker.tick();
+      qualityWorker.tick();
+    } else if (name === "insightface") {
+      faceWorker.tick();
+    } else if (name === "landmark") {
+      landmarkWorker.tick();
+    }
+  });
+
   console.log("[scan-worker] Workers starting...");
   embeddingWorker.start();
   faceWorker.start();

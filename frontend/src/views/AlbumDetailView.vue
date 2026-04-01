@@ -33,10 +33,13 @@ import {
 } from '../api/photos'
 import { listUsers, type UserWithRoles } from '../api/users'
 import {useAuthStore} from '../stores/auth'
+import { useServiceHealthStore } from '../stores/serviceHealth'
+import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 
 const route = useRoute()
 const albumId = Number(route.params.id)
 const auth = useAuthStore()
+const serviceHealth = useServiceHealthStore()
 
 const album = ref<AlbumWithPhotos | null>(null)
 const loading = ref(true)
@@ -439,6 +442,7 @@ onMounted(() => {
   void loadData()
   if (showPersons.value) void loadPersons()
   window.addEventListener('keydown', handleKeydown)
+  serviceHealth.startPolling()
 })
 
 onUnmounted(() => {
@@ -446,6 +450,7 @@ onUnmounted(() => {
   photoObserver?.disconnect()
   sectionObserver?.disconnect()
   gridResizeObserver?.disconnect()
+  serviceHealth.stopPolling()
 })
 
 // Reuse observer logic for performance
@@ -565,6 +570,8 @@ watch(gridScrollRef, () => {
       </div>
     </div>
 
+    <ServiceStatusBar />
+
     <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
 
     <div v-if="loading && !album" class="info-text">
@@ -681,6 +688,7 @@ watch(gridScrollRef, () => {
           :cover-photo-id="album.cover_photo_id"
           :show-persons="showPersons"
           :limit-albums-shown="true"
+          :face-service-available="serviceHealth.faceServiceAvailable"
           @update:cover-photo-id="handleCoverPhotoIdUpdate"
           @fullscreen="isFullscreen = true"
           @toggle-favorite="handleToggleFavorite"
