@@ -602,6 +602,10 @@ onUnmounted(() => {
 
 <template>
   <div class="persons-view">
+
+    <!-- Service status warning bar -->
+    <ServiceStatusBar />
+
     <!-- Subheader -->
     <div class="subheader">
       <div class="header">
@@ -620,8 +624,6 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
-
-    <ServiceStatusBar />
 
     <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
 

@@ -252,15 +252,22 @@ function getPersonName(personId?: number) {
           <Button :icon="photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'" v-tooltip.bottom="photo.curation_status === 'favorite' ? 'Kein Favorit' : 'Favorit'" @click="emit('toggle-favorite', photo.id, photo.curation_status)" :severity="photo.curation_status === 'favorite' ? 'warn' : 'secondary'" text rounded />
           <Button icon="pi pi-eye-slash" v-tooltip.bottom="'Ausblenden'" @click="emit('hide', photo.id)" severity="danger" text rounded />
         </template>
+        <template v-if="albumId" class="meta-row cover-action">
+          <Button
+              :icon="coverPhotoId === photo.id ? 'pi pi-image' : 'pi pi-image'"
+              v-tooltip.bottom="coverPhotoId === photo.id ? 'Vom Cover entfernen' : 'Als Cover setzen'"
+              :severity="coverPhotoId === photo.id ? 'warn' : 'secondary'"
+              text
+              rounded
+              :loading="togglingCover"
+              @click="toggleCover"
+          />
+        </template>
       </div>
 
       <div class="sidebar-divider" />
 
       <div class="meta-list">
-        <div class="meta-row">
-          <i class="pi pi-file meta-icon" />
-          <span class="meta-value" :title="photo.original_name">{{ photo.original_name }}</span>
-        </div>
         <div class="meta-row">
           <i class="pi pi-calendar meta-icon" />
           <span class="meta-value date-value">
@@ -275,62 +282,9 @@ function getPersonName(personId?: number) {
             <Button icon="pi pi-times" severity="danger" text rounded @click="emit('cancel-edit-date')" :disabled="updatingDate" />
           </div>
         </div>
-        <div v-if="photo.size" class="meta-row">
-          <i class="pi pi-database meta-icon" />
-          <span class="meta-value">{{ (photo.size / 1024 / 1024).toFixed(2) }} MB</span>
-        </div>
-        <div v-if="albumId" class="meta-row cover-action">
-           <Button 
-            :icon="coverPhotoId === photo.id ? 'pi pi-image' : 'pi pi-image'" 
-            :label="coverPhotoId === photo.id ? 'Vom Cover entfernen' : 'Als Cover setzen'" 
-            :severity="coverPhotoId === photo.id ? 'warn' : 'secondary'"
-            text 
-            size="small" 
-            :loading="togglingCover"
-            @click="toggleCover"
-            class="p-0"
-          />
-        </div>
       </div>
 
       <div class="sidebar-divider" />
-      <div class="sidebar-section">
-        <div class="section-label"><i class="pi pi-book" /> Alben</div>
-        <div v-if="loadingAlbums" class="loading-row"><i class="pi pi-spin pi-spinner" /> Lade Alben…</div>
-        <div v-if="!loadingAlbums && albums.length > 0" class="album-checkbox-list">
-          <div v-for="album in (limitAlbumsShown && !isAlbumsExpanded ? albums.slice(0, 3) : albums)" :key="album.id" class="album-checkbox-item">
-            <Checkbox 
-              :modelValue="getEffectiveAlbumCheckState(album.id) === true" 
-              :indeterminate="getEffectiveAlbumCheckState(album.id) === null"
-              @update:modelValue="(val) => handleAlbumChange(album.id, val)"
-              :binary="true"
-              :id="'album-single-' + album.id"
-            />
-            <label :for="'album-single-' + album.id">{{ album.name }}</label>
-          </div>
-          <div v-if="limitAlbumsShown && albums.length > 3" class="expand-toggle">
-            <Button 
-              :label="isAlbumsExpanded ? 'Weniger anzeigen' : 'Mehr anzeigen'" 
-              :icon="isAlbumsExpanded ? 'pi pi-chevron-up' : 'pi pi-chevron-down'" 
-              text 
-              size="small" 
-              @click="isAlbumsExpanded = !isAlbumsExpanded"
-              class="p-0"
-            />
-          </div>
-        </div>
-        <div class="multi-actions" style="margin-top: 0.75rem">
-          <Button v-if="Object.keys(pendingAlbumChanges).length > 0"
-            label="Speichern" 
-            icon="pi pi-save" 
-            class="w-full" 
-            size="small"
-            :disabled="Object.keys(pendingAlbumChanges).length === 0"
-            :loading="savingAlbums"
-            @click="saveAlbumChanges" 
-          />
-        </div>
-      </div>
 
       <template v-if="photo.location_city || photo.location_name || loadingLandmarks || landmarks.length > 0">
         <div class="sidebar-divider" />
@@ -367,6 +321,57 @@ function getPersonName(personId?: number) {
           <Button label="Neu erkennen" icon="pi pi-refresh" @click="emit('reindex')" :loading="reindexingPhoto" :disabled="faceServiceAvailable === false" class="reindex-btn" severity="secondary" outlined size="small" :title="faceServiceAvailable === false ? 'Gesichtserkennungs-Dienst nicht verfügbar' : undefined" />
         </div>
       </template>
+
+      <div class="sidebar-section">
+        <div class="section-label"><i class="pi pi-book" /> Alben</div>
+        <div v-if="loadingAlbums" class="loading-row"><i class="pi pi-spin pi-spinner" /> Lade Alben…</div>
+        <div v-if="!loadingAlbums && albums.length > 0" class="album-checkbox-list">
+          <div v-for="album in (limitAlbumsShown && !isAlbumsExpanded ? albums.slice(0, 3) : albums)" :key="album.id" class="album-checkbox-item">
+            <Checkbox
+                :modelValue="getEffectiveAlbumCheckState(album.id) === true"
+                :indeterminate="getEffectiveAlbumCheckState(album.id) === null"
+                @update:modelValue="(val) => handleAlbumChange(album.id, val)"
+                :binary="true"
+                :id="'album-single-' + album.id"
+            />
+            <label :for="'album-single-' + album.id">{{ album.name }}</label>
+          </div>
+          <div v-if="limitAlbumsShown && albums.length > 3" class="expand-toggle">
+            <Button
+                :label="isAlbumsExpanded ? 'Weniger anzeigen' : 'Mehr anzeigen'"
+                :icon="isAlbumsExpanded ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"
+                text
+                size="small"
+                @click="isAlbumsExpanded = !isAlbumsExpanded"
+                class="p-0"
+            />
+          </div>
+        </div>
+        <div class="multi-actions" style="margin-top: 0.75rem">
+          <Button v-if="Object.keys(pendingAlbumChanges).length > 0"
+                  label="Speichern"
+                  icon="pi pi-save"
+                  class="w-full"
+                  size="small"
+                  :disabled="Object.keys(pendingAlbumChanges).length === 0"
+                  :loading="savingAlbums"
+                  @click="saveAlbumChanges"
+          />
+        </div>
+      </div>
+
+      <div class="sidebar-divider" />
+
+      <div class="meta-list">
+        <div class="meta-row">
+          <i class="pi pi-file meta-icon" />
+          <span class="meta-value" :title="photo.original_name">{{ photo.original_name }}</span>
+        </div>
+        <div v-if="photo.size" class="meta-row">
+          <i class="pi pi-database meta-icon" />
+          <span class="meta-value">{{ (photo.size / 1024 / 1024).toFixed(2) }} MB</span>
+        </div>
+      </div>
     </div>
   </aside>
 </template>

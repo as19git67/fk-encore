@@ -8,6 +8,7 @@ import Message from 'primevue/message'
 import HeicImage from '../components/HeicImage.vue'
 import {type Album, createAlbum, listAlbums, getPhotoUrl, updateAlbum, deleteAlbum} from '../api/photos'
 import { useAuthStore } from '../stores/auth'
+import ServiceStatusBar from "../components/ServiceStatusBar.vue";
 
 const albums = ref<Album[]>([])
 const loading = ref(true)
@@ -132,6 +133,10 @@ onMounted(loadData)
 
 <template>
   <div class="albums-view">
+
+    <!-- Service status warning bar -->
+    <ServiceStatusBar />
+
     <div class="subheader">
       <div class="header">
         <h1 class="title">Meine Alben</h1>
