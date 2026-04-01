@@ -29,8 +29,11 @@ import {
 } from '../api/photos'
 import { listPersons, type Person } from '../api/photos'
 import { useAuthStore } from '../stores/auth'
+import { useServiceHealthStore } from '../stores/serviceHealth'
+import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 
 const auth = useAuthStore()
+const serviceHealth = useServiceHealthStore()
 const photos = ref<Photo[]>([])
 const loading = ref(true)
 const uploading = ref(false)
@@ -804,6 +807,7 @@ watch(groupedPhotos, async () => {
 onMounted(() => {
   loadPhotos()
   window.addEventListener('keydown', handleKeydown)
+  serviceHealth.startPolling()
 
   // Track column count on resize
   gridResizeObserver = new ResizeObserver(() => updateColumnCount())
@@ -815,6 +819,7 @@ onUnmounted(() => {
   photoObserver?.disconnect()
   sectionObserver?.disconnect()
   gridResizeObserver?.disconnect()
+  serviceHealth.stopPolling()
 })
 </script>
 
@@ -833,6 +838,9 @@ onUnmounted(() => {
         <span>Fotos zum Hochladen hier ablegen</span>
       </div>
     </div>
+
+    <!-- Service status warning bar -->
+    <ServiceStatusBar />
 
     <!-- Subheader (not sticky — only the grid scrolls) -->
     <div class="subheader">
@@ -982,6 +990,7 @@ onUnmounted(() => {
         v-model:editDate="editDate"
         :updating-date="updatingDate"
         :show-persons="auth.hasPermission('people.view')"
+        :face-service-available="serviceHealth.faceServiceAvailable"
         @fullscreen="isFullscreen = true"
         @toggle-favorite="handleToggleFavorite"
         @hide="handleDelete"

@@ -16,8 +16,11 @@ import {
   type Face, type LandmarkItem, type FaceBBox,
 } from '../api/photos'
 import { useAuthStore } from '../stores/auth'
+import { useServiceHealthStore } from '../stores/serviceHealth'
+import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 
 const auth = useAuthStore()
+const serviceHealth = useServiceHealthStore()
 const canDelete = computed(() => auth.hasPermission('photos.delete'))
 
 const persons = ref<Person[]>([])
@@ -586,11 +589,13 @@ function handleKeydown(e: KeyboardEvent) {
 onMounted(() => {
   loadData()
   window.addEventListener('keydown', handleKeydown)
+  serviceHealth.startPolling()
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
   photoObserver?.disconnect()
+  serviceHealth.stopPolling()
 })
 </script>
 
@@ -614,6 +619,8 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+
+    <ServiceStatusBar />
 
     <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
 
@@ -736,6 +743,7 @@ onUnmounted(() => {
         :updating-date="false"
         :show-persons="auth.hasPermission('people.view')"
         :limit-albums-shown="true"
+        :face-service-available="serviceHealth.faceServiceAvailable"
         @fullscreen="isFullscreen = true"
         @toggle-favorite="handleToggleFavorite"
         @hide="handleHidePhoto"

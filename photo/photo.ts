@@ -565,6 +565,18 @@ export const getPhotoFaces = api(
 );
 
 
+// ========== Service Health ==========
+
+import { getAllServiceHealthStatuses, type ServiceHealthStatus } from "./service-health";
+
+export const getExternalServiceHealth = api(
+  { expose: true, method: "GET", path: "/photos/service-health", auth: true },
+  async (): Promise<{ services: ServiceHealthStatus[] }> => {
+    checkModule();
+    return { services: getAllServiceHealthStatuses() };
+  }
+);
+
 // ========== Scan Queue ==========
 
 import type { QueueStatus } from "./scan-queue";
