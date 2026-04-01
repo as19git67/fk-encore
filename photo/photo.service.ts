@@ -980,8 +980,8 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
 
   if (!settings) {
     // Create default settings if they don't exist
-    await dbExec(db.insert(albumUserSettings).values({ album_id: albumId, user_id: userId, hide_mode: "mine", active_view: "all" }));
-    settings = { album_id: albumId, user_id: userId, hide_mode: "mine", active_view: "all", view_config: null };
+    await dbExec(db.insert(albumUserSettings).values({ album_id: albumId, user_id: userId, hide_mode: "mine", active_view: "all", cover_photo_id: null }));
+    settings = { album_id: albumId, user_id: userId, hide_mode: "mine", active_view: "all", view_config: null, cover_photo_id: undefined };
   }
 
   // Build photo query based on settings
@@ -1032,9 +1032,14 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
 
   const photoRows = await dbAll<any>(query);
   const stats = await getAlbumStats(albumId);
+  // Determine cover photo: prefer user-specific cover, then album's cover, then newest in album
   let coverFilename: string | undefined = undefined;
-  if (album.cover_photo_id) {
-    const cp = await dbFirst<any>(db.select({ filename: photos.filename }).from(photos).where(eq(photos.id, album.cover_photo_id)));
+  let coverPhotoIdToUse: number | null | undefined = (settings as any).cover_photo_id;
+  if (!coverPhotoIdToUse) {
+    coverPhotoIdToUse = album.cover_photo_id ?? null;
+  }
+  if (coverPhotoIdToUse) {
+    const cp = await dbFirst<any>(db.select({ filename: photos.filename }).from(photos).where(eq(photos.id, coverPhotoIdToUse)));
     coverFilename = cp?.filename;
   } else {
     coverFilename = stats.newest_photo_filename;
@@ -1059,6 +1064,7 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
       hide_mode: settings.hide_mode as "mine" | "all",
       active_view: settings.active_view as "all" | "favorites" | "by_user",
       view_config: settings.view_config,
+      cover_photo_id: settings.cover_photo_id ?? undefined,
     },
     photos: photoRows.map((r: any) => ({
       id: r.id,
@@ -1082,6 +1088,7 @@ export async function updateAlbumUserSettingsLogic(userId: number, req: UpdateAl
   if (req.hideMode) values.hide_mode = req.hideMode;
   if (req.activeView) values.active_view = req.activeView;
   if (req.viewConfig !== undefined) values.view_config = req.viewConfig;
+  if ((req as any).coverPhotoId !== undefined) values.cover_photo_id = (req as any).coverPhotoId;
 
   await dbExec(
     db.update(albumUserSettings)
@@ -1101,6 +1108,7 @@ export async function updateAlbumUserSettingsLogic(userId: number, req: UpdateAl
     hide_mode: updated.hide_mode as "mine" | "all",
     active_view: updated.active_view as "all" | "favorites" | "by_user",
     view_config: updated.view_config,
+    cover_photo_id: updated.cover_photo_id ?? undefined,
   };
 }
 

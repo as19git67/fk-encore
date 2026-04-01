@@ -280,6 +280,7 @@ export interface AlbumUserSettings {
   hide_mode: "mine" | "all";
   active_view: "all" | "favorites" | "by_user";
   view_config?: any;
+  cover_photo_id?: number;
 }
 
 export interface UpdateAlbumUserSettingsRequest {
@@ -287,6 +288,7 @@ export interface UpdateAlbumUserSettingsRequest {
   hideMode?: "mine" | "all";
   activeView?: "all" | "favorites" | "by_user";
   viewConfig?: any;
+  coverPhotoId?: number | null;
 }
 
 export interface CreateAlbumRequest {
