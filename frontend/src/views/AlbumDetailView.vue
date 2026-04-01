@@ -521,6 +521,10 @@ watch(gridScrollRef, () => {
 
 <template>
   <div class="album-detail-view">
+
+    <!-- Service status warning bar -->
+    <ServiceStatusBar />
+
     <div v-if="album" class="subheader">
       <div class="header">
         <div class="header-left">
@@ -569,8 +573,6 @@ watch(gridScrollRef, () => {
         </div>
       </div>
     </div>
-
-    <ServiceStatusBar />
 
     <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
 
