@@ -10,7 +10,7 @@ import HeicImage from '../components/HeicImage.vue'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import {
   listPersons, updatePerson, mergePersons, getPhotoUrl, getPersonDetails,
-  ignoreFace, ignorePersonFaces, updatePhotoCuration, deletePhoto, reindexPhoto,
+  ignoreFace, ignorePersonFaces, updatePhotoCuration, reindexPhoto,
   getPhotoFaces, getPhotoLandmarks,
   type CurationStatus, type Person, type Photo, type PersonDetails,
   type Face, type LandmarkItem, type FaceBBox,
@@ -210,7 +210,8 @@ function setPhotoStatus(id: number, status: CurationStatus) {
 
 async function handleHidePhoto(id: number) {
   try {
-    await deletePhoto(id)
+    // Use the curation API (soft-hide) instead of the owner-only delete endpoint
+    await updatePhotoCuration(id, 'hidden')
     setPhotoStatus(id, 'hidden')
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Ausblenden'
