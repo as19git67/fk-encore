@@ -239,6 +239,7 @@ onMounted(loadData)
   overflow: hidden;
   margin-inline: -0.25em;
   padding-inline: 0.5em;
+  width: 100%;
 }
 
 @media (min-width: 800px) {
