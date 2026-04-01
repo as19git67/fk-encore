@@ -12,7 +12,6 @@ import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import {
   type AlbumWithPhotos,
   type AlbumShareWithUser,
-  deletePhoto,
   getPhotoFaces,
   getAlbum,
   getAlbumShares,
@@ -338,7 +337,8 @@ async function handleReindexPhoto() {
 
 async function handleHidePhoto(id: number) {
   try {
-    await deletePhoto(id)
+    // Soft-hide using curation endpoint so non-owners with write access can hide
+    await updatePhotoCuration(id, 'hidden')
     updatePhotoStatus(id, 'hidden')
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Ausblenden'
@@ -671,9 +671,9 @@ watch(gridScrollRef, () => {
       </template>
 
       <template #right>
-        <PhotoDetailSidebar
-          v-if="selectedPhoto"
-          :can-delete="canDeletePhotos"
+              <PhotoDetailSidebar
+                      v-if="selectedPhoto"
+                      :can-delete="canDeletePhotos || canWrite"
           :can-upload="canUploadPhotos"
           :faces="detectedFaces"
           :is-editing-date="false"
@@ -719,14 +719,14 @@ watch(gridScrollRef, () => {
           </div>
           <div class="fs-toolbar">
             <Button
-              v-if="selectedPhoto.curation_status === 'hidden'"
+              v-if="selectedPhoto.curation_status === 'hidden' && (canWrite || canDeletePhotos)"
               icon="pi pi-eye"
               class="fs-topbar-btn"
               rounded text severity="warn"
               @click="handleRestorePhoto(selectedPhoto.id)"
             />
             <Button
-              v-else
+              v-else-if="canWrite || canDeletePhotos"
               icon="pi pi-eye-slash"
               class="fs-topbar-btn"
               rounded text severity="info"

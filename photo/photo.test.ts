@@ -578,6 +578,25 @@ describe("Photo Module", () => {
       const albumDetails = await service.getAlbumLogic(user1.id, album.id);
       expect(albumDetails.photos).toHaveLength(1);
     });
+
+    it("should only allow hiding photos for users with write access", async () => {
+      const album = await service.createAlbumLogic(user1.id, { name: "Curation Access" });
+      const photo = await service.uploadPhotoLogic(user1.id, {
+        data: Buffer.from([1,2,3]),
+        name: "c.jpg",
+        mimeType: "image/jpeg",
+      });
+      await service.addPhotoToAlbumLogic(user1.id, { albumId: album.id, photoId: photo.id });
+
+      // Share with user2 as read -> should NOT be able to hide
+      await service.shareAlbumLogic(user1.id, { albumId: album.id, userId: user2.id, accessLevel: "read" });
+      await expect(service.updatePhotoCurationLogic(user2.id, photo.id, 'hidden')).rejects.toThrow("Photo not found or unauthorized");
+
+      // Change to write -> should be able to hide
+      await service.shareAlbumLogic(user1.id, { albumId: album.id, userId: user2.id, accessLevel: "write" });
+      const res = await service.updatePhotoCurationLogic(user2.id, photo.id, 'hidden');
+      expect(res.success).toBe(true);
+    });
   });
 });
 

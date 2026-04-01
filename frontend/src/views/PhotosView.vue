@@ -10,7 +10,6 @@ import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import {
   listPhotos,
   uploadPhoto,
-  deletePhoto,
   getPhotoUrl,
   updatePhotoDate,
   reindexPhoto,
@@ -491,11 +490,12 @@ async function handleDelete(id: number) {
     acceptProps: { label: 'Ausblenden', severity: 'warn' },
     accept: async () => {
       try {
-        await deletePhoto(id)
+        // Use curation API (soft-hide) instead of owner-only delete endpoint.
+        await updatePhotoCuration(id, 'hidden')
         await reloadPhotosInPlace()
         if (selectedIndex.value >= photos.value.length) selectedIndex.value = photos.value.length - 1
       } catch (err: any) {
-        error.value = err.message || 'Fehler beim Ausblenden'
+        error.value = err.message || 'Fehler beim Ausblenden (Curation)'
       }
     }
   })
