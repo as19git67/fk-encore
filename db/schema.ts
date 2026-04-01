@@ -260,6 +260,7 @@ export const albumUserSettings = pgTable(
     hide_mode: text("hide_mode").notNull().default("mine"), // 'mine' | 'all'
     active_view: text("active_view").notNull().default("all"), // 'all' | 'favorites' | 'by_user'
     view_config: jsonb("view_config"),
+        cover_photo_id: integer("cover_photo_id").references(() => photos.id, { onDelete: "set null" }),
   },
   (table) => [primaryKey({ columns: [table.album_id, table.user_id] })]
 );
