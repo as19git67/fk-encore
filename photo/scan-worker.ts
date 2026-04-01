@@ -53,23 +53,35 @@ class ScanWorker {
     readonly concurrency: number,
   ) {}
 
-  /** Called after enqueueing new work or on a timer. Fills concurrency slots. */
+  /**
+   * Called after enqueueing new work or on a timer. Fills concurrency slots.
+   * Only reschedules immediately if a job was actually processed; otherwise
+   * the worker goes idle and waits for the next timer tick or triggerWorkers().
+   * This prevents a busy-loop of DB queries when the queue is empty.
+   */
   tick(): void {
     while (this.running < this.concurrency) {
       this.running++;
-      this.processNext().finally(() => {
+      this.processNext().then((hadWork) => {
         this.running--;
-        // If we just finished work there might be more — try again immediately
-        if (this.running < this.concurrency) {
+        // Only chase more work immediately when there was something to process.
+        // If the queue was empty, stop here — the periodic timer will wake us.
+        if (hadWork && this.running < this.concurrency) {
           this.tick();
         }
+      }).catch(() => {
+        this.running--;
       });
     }
   }
 
-  private async processNext(): Promise<void> {
+  /**
+   * Dequeues and processes one job.
+   * Returns true if a job was found and processed (or failed), false if the queue was empty.
+   */
+  private async processNext(): Promise<boolean> {
     const job = await dequeueNextJob(this.service);
-    if (!job) return; // queue empty
+    if (!job) return false; // queue empty — stop polling
 
     try {
       await this.runJob(job);
@@ -98,6 +110,8 @@ class ScanWorker {
         await markJobFailed(job.id, msg).catch(() => {});
       }
     }
+
+    return true; // a job was dequeued (regardless of success/failure)
   }
 
   private async runJob(job: { photo_id: number; user_id: number; force: boolean }): Promise<void> {
