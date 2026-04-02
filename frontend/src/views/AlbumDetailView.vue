@@ -54,8 +54,13 @@ const selectedIndex = ref(-1)
 const isFullscreen = ref(false)
 const activeSection = ref('')
 
-// Flat Photo[] for composables (album photos are compatible with Photo)
-const albumPhotos = computed<Photo[]>(() => (album.value?.photos ?? []) as Photo[])
+// Flat Photo[] for composables, sorted newest-first
+const albumPhotos = computed<Photo[]>(() =>
+  [...((album.value?.photos ?? []) as Photo[])].sort((a, b) =>
+    new Date(b.taken_at || b.created_at).getTime() -
+    new Date(a.taken_at || a.created_at).getTime()
+  )
+)
 
 // ── Grouping (via composable) ─────────────────────────────────────────────────
 const { groupedPhotos } = usePhotoGrouping(albumPhotos)

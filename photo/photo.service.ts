@@ -798,7 +798,8 @@ export function getPhotoFileLogic(filename: string): { data: string; mimeType: s
 }
 
 export async function convertHeicToJpeg(filePath: string): Promise<Buffer> {
-  return sharp(filePath).jpeg({ quality: 90 }).toBuffer();
+  // .rotate() with no arguments auto-orients based on EXIF orientation tag
+  return sharp(filePath).rotate().jpeg({ quality: 90 }).toBuffer();
 }
 
 /**
@@ -807,7 +808,9 @@ export async function convertHeicToJpeg(filePath: string): Promise<Buffer> {
  * returned as-is (no upscaling). Returns a JPEG buffer.
  */
 export async function resizeImage(imageBuffer: Buffer, targetWidth: number): Promise<Buffer> {
+  // .rotate() with no arguments auto-orients based on EXIF orientation tag
   return sharp(imageBuffer)
+    .rotate()
     .resize(targetWidth, null, { withoutEnlargement: true })
     .jpeg({ quality: 85 })
     .toBuffer();

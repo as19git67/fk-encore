@@ -153,6 +153,7 @@ defineExpose({
                 v-if="visiblePhotoIds.has(item.photo.id)"
                 :src="getPhotoUrl(item.photo.filename, 400)"
                 :alt="item.photo.original_name"
+                objectFit="cover"
               />
             </div>
 
@@ -265,6 +266,8 @@ defineExpose({
   background: var(--surface-ground);
   overflow: hidden;
 }
+
+.photo-thumb :deep(.heic-image-container) { width: 100%; height: 100%; }
 
 /* ── Badges ──────────────────────────────────────────────────────────────── */
 .stack-badge {
