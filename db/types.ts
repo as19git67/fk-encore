@@ -286,6 +286,7 @@ export interface AlbumWithPhotos extends Album {
 export interface AlbumPhotoWithMeta extends PhotoWithCuration {
   added_by_user_id?: number;
   added_at: string;
+  curation_stats?: PhotoCurationStats;
 }
 
 export interface AlbumShare {
@@ -294,20 +295,45 @@ export interface AlbumShare {
   access_level: "read" | "write";
 }
 
+// ── View Config for Album Views ──────────────────────────────────────────────
+
+export type ActiveView = "all" | "favorites" | "consensus" | "custom";
+
+export interface ViewConfig {
+  /** Which hidden photos to filter out */
+  hideFilter: "none" | "mine" | "consensus";
+  /** Minimum number of users who hid a photo for consensus hide */
+  hideConsensusMin?: number;
+  /** Which favorites filter to apply */
+  favFilter: "all" | "mine" | "any" | "consensus";
+  /** Minimum number of users who favorited for consensus favorites */
+  favConsensusMin?: number;
+}
+
+/** Anonymized curation statistics for a photo within a shared album */
+export interface PhotoCurationStats {
+  /** Number of album participants who favorited this photo */
+  fav_count: number;
+  /** Number of album participants who hid this photo */
+  hide_count: number;
+  /** Total number of album participants (owner + shared users) */
+  member_count: number;
+}
+
 export interface AlbumUserSettings {
   album_id: number;
   user_id: number;
   hide_mode: "mine" | "all";
-  active_view: "all" | "favorites" | "by_user";
-  view_config?: any;
+  active_view: ActiveView;
+  view_config?: ViewConfig | null;
   cover_photo_id?: number;
 }
 
 export interface UpdateAlbumUserSettingsRequest {
   albumId: number;
   hideMode?: "mine" | "all";
-  activeView?: "all" | "favorites" | "by_user";
-  viewConfig?: any;
+  activeView?: ActiveView;
+  viewConfig?: ViewConfig | null;
   coverPhotoId?: number | null;
 }
 

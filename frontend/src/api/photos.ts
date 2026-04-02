@@ -235,16 +235,37 @@ export interface Album {
   updated_at: string
 }
 
+export type ActiveView = 'all' | 'favorites' | 'consensus' | 'custom'
+
+export interface ViewConfig {
+  hideFilter: 'none' | 'mine' | 'consensus'
+  hideConsensusMin?: number
+  favFilter: 'all' | 'mine' | 'any' | 'consensus'
+  favConsensusMin?: number
+}
+
+export interface PhotoCurationStats {
+  fav_count: number
+  hide_count: number
+  member_count: number
+}
+
 export interface AlbumUserSettings {
   album_id: number
   user_id: number
   hide_mode: 'mine' | 'all'
-  active_view: 'all' | 'favorites' | 'by_user'
-  view_config?: any
+  active_view: ActiveView
+  view_config?: ViewConfig | null
+}
+
+export interface AlbumPhoto extends Photo {
+  added_by_user_id?: number
+  added_at: string
+  curation_stats?: PhotoCurationStats
 }
 
 export interface AlbumWithPhotos extends Album {
-  photos: (Photo & { added_by_user_id?: number, added_at: string })[]
+  photos: AlbumPhoto[]
   settings?: AlbumUserSettings
   role: 'owner' | 'admin' | 'contributor' | 'viewer'
 }
@@ -322,7 +343,7 @@ export function removeAlbumShare(albumId: number, userId: number) {
 
 export function updateAlbumUserSettings(albumId: number, settings: Partial<AlbumUserSettings>) {
   const { album_id, user_id, ...rest } = settings as any
-  const req: any = {}
+  const req: Record<string, unknown> = {}
   if (rest.hide_mode) req.hideMode = rest.hide_mode
   if (rest.active_view) req.activeView = rest.active_view
   if (rest.view_config !== undefined) req.viewConfig = rest.view_config
