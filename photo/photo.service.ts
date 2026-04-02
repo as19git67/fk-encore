@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
+import { createRequire } from "module";
 import exifr from "exifr";
 import { exiftool } from "exiftool-vendored";
 import { eq, and, or, sql, inArray, ilike, isNull, isNotNull, desc } from "drizzle-orm";
@@ -57,6 +58,11 @@ import type {
   LandmarkBBox,
 } from "../db/types";
 import sharp from "sharp";
+
+// heic-convert is a CJS module without TS types; load via createRequire
+const _require = createRequire(import.meta.url);
+type HeicConvertFn = (opts: { buffer: ArrayBuffer | Buffer; format: 'JPEG' | 'PNG'; quality: number }) => Promise<ArrayBuffer>;
+const heicConvert: HeicConvertFn = _require('heic-convert');
 
 const nowSql = sql`NOW()`
 /** COALESCE(taken_at, created_at) – fallback to upload date if no EXIF date available */
@@ -191,12 +197,13 @@ export async function indexPhotoFaces(userId: number, photoId: number, resetIgno
   let processingPath = filePath;
   let tempPath: string | null = null;
 
-  // Check if it's a HEIC file
+  // Check if it's a HEIC file – use heif-convert (libheif) since sharp may lack HEIC support
   const ext = path.extname(photo.filename).toLowerCase();
   if (ext === ".heic" || ext === ".heif") {
     try {
       tempPath = path.join(UPLOAD_DIR, `temp_${photoId}_${Date.now()}.jpg`);
-      await sharp(filePath).jpeg({ quality: 100 }).toFile(tempPath);
+      const jpegBuffer = await convertHeicToJpeg(filePath);
+      await fs.promises.writeFile(tempPath, jpegBuffer);
       processingPath = tempPath;
     } catch (err) {
       console.error(`Error converting HEIC photo ${photoId}:`, err);
@@ -613,6 +620,29 @@ export async function deletePhotoLogic(userId: number, photoId: number): Promise
   return { success: true, message: "Photo hidden" };
 }
 
+/** Returns the 2-char hex shard subdirectory for a thumbnail baseName (MD5-based, 256 buckets). */
+export function thumbnailShardPath(baseName: string): string {
+  const shard = crypto.createHash('md5').update(baseName).digest('hex').slice(0, 2);
+  return path.join(THUMBNAIL_DIR, shard);
+}
+
+/** Delete all cached thumbnail variants for a given photo filename. */
+async function deleteCachedThumbnails(filename: string): Promise<void> {
+  const baseName = path.basename(filename, path.extname(filename));
+  const prefix = `${baseName}_`;
+  const shardPath = thumbnailShardPath(baseName);
+  try {
+    const entries = await fs.promises.readdir(shardPath);
+    await Promise.all(
+      entries
+        .filter(f => f.startsWith(prefix) && f.endsWith('.jpg'))
+        .map(f => fs.promises.unlink(path.join(shardPath, f)).catch(() => {}))
+    );
+  } catch {
+    // shard dir missing or unreadable — nothing to clean up
+  }
+}
+
 export async function hardDeletePhotoLogic(userId: number, photoId: number): Promise<DeleteResponse> {
   const photo = await dbFirst<typeof photos.$inferSelect>(
     db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
@@ -622,11 +652,12 @@ export async function hardDeletePhotoLogic(userId: number, photoId: number): Pro
     throw new Error("Photo not found or unauthorized");
   }
 
-  // Delete file from disk
+  // Delete original file and all cached thumbnails from disk
   const filePath = path.join(UPLOAD_DIR, photo.filename);
   if (fs.existsSync(filePath)) {
     fs.unlinkSync(filePath);
   }
+  await deleteCachedThumbnails(photo.filename);
 
   // Hard delete from DB (cascades to curation, faces, album_photos, group_members)
   await dbExec(db.delete(photos).where(eq(photos.id, photoId)));
@@ -798,7 +829,10 @@ export function getPhotoFileLogic(filename: string): { data: string; mimeType: s
 }
 
 export async function convertHeicToJpeg(filePath: string): Promise<Buffer> {
-  return sharp(filePath).jpeg({ quality: 90 }).toBuffer();
+  // sharp's bundled libvips lacks HEIC decode support; use heic-convert (libheif via WASM) instead.
+  const inputBuffer = await fs.promises.readFile(filePath);
+  const outputBuffer = await heicConvert({ buffer: inputBuffer, format: 'JPEG', quality: 0.9 });
+  return Buffer.from(outputBuffer);
 }
 
 /**
@@ -807,7 +841,9 @@ export async function convertHeicToJpeg(filePath: string): Promise<Buffer> {
  * returned as-is (no upscaling). Returns a JPEG buffer.
  */
 export async function resizeImage(imageBuffer: Buffer, targetWidth: number): Promise<Buffer> {
+  // .rotate() with no arguments auto-orients based on EXIF orientation tag
   return sharp(imageBuffer)
+    .rotate()
     .resize(targetWidth, null, { withoutEnlargement: true })
     .jpeg({ quality: 85 })
     .toBuffer();
