@@ -46,7 +46,7 @@ function formatDate(photo: Photo) {
 
       <!-- Top bar -->
       <div class="fs-topbar">
-        <Button icon="pi pi-arrow-left" class="fs-topbar-btn" rounded text @click="emit('close')" />
+        <Button icon="pi pi-arrow-left" rounded text @click="emit('close')" />
 
         <div class="fs-center">
           <!-- Slot for custom center content (e.g. person name + rename btn) -->
@@ -59,18 +59,18 @@ function formatDate(photo: Photo) {
           <slot name="topbar-actions">
             <Button
               v-if="canDelete && photo.curation_status === 'hidden'"
-              icon="pi pi-eye" class="fs-topbar-btn" rounded text severity="warn"
+              icon="pi pi-eye" rounded text severity="warn"
               @click="emit('restore', photo.id)"
             />
             <Button
               v-else-if="canDelete"
-              icon="pi pi-eye-slash" class="fs-topbar-btn" rounded text severity="info"
+              icon="pi pi-eye-slash" rounded text severity="info"
               @click="emit('hide', photo.id)"
             />
             <Button
               v-if="canDelete"
               :icon="photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
-              class="fs-topbar-btn" rounded text
+              rounded text
               :severity="photo.curation_status === 'favorite' ? 'warn' : 'secondary'"
               @click="emit('toggle-favorite', photo.id, photo.curation_status)"
             />
@@ -126,31 +126,27 @@ function formatDate(photo: Photo) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.5rem 1rem;
-  background: linear-gradient(rgba(0,0,0,0.6), transparent);
+  padding-inline: 0.5em;
+  background: var(--p-dialog-background);
   z-index: 10;
-}
-
-.fs-topbar-btn {
-  color: white !important;
 }
 
 .fs-center {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.5em;
   flex: 1;
   justify-content: center;
 }
 
 .fs-date-bar {
   color: rgba(255,255,255,0.85);
-  font-size: 0.9rem;
+  font-size: 0.9em;
 }
 
 .fs-toolbar {
   display: flex;
-  gap: 0.25rem;
+  gap: 0.25em;
 }
 
 /* ── Prev/Next nav buttons ──────────────────────────────────────────────── */
