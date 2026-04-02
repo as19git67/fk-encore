@@ -1,11 +1,7 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
-import os from "os";
-import { execFile } from "child_process";
-import { promisify } from "util";
-
-const execFileAsync = promisify(execFile);
+import { createRequire } from "module";
 import exifr from "exifr";
 import { exiftool } from "exiftool-vendored";
 import { eq, and, or, sql, inArray, ilike, isNull, isNotNull, desc } from "drizzle-orm";
@@ -62,6 +58,11 @@ import type {
   LandmarkBBox,
 } from "../db/types";
 import sharp from "sharp";
+
+// heic-convert is a CJS module without TS types; load via createRequire
+const _require = createRequire(import.meta.url);
+type HeicConvertFn = (opts: { buffer: ArrayBuffer | Buffer; format: 'JPEG' | 'PNG'; quality: number }) => Promise<ArrayBuffer>;
+const heicConvert: HeicConvertFn = _require('heic-convert');
 
 const nowSql = sql`NOW()`
 /** COALESCE(taken_at, created_at) – fallback to upload date if no EXIF date available */
@@ -804,14 +805,10 @@ export function getPhotoFileLogic(filename: string): { data: string; mimeType: s
 }
 
 export async function convertHeicToJpeg(filePath: string): Promise<Buffer> {
-  // sharp's bundled libvips may lack HEIC support; use system heif-convert instead.
-  const tempFile = path.join(os.tmpdir(), `heic_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.jpg`);
-  try {
-    await execFileAsync('/usr/bin/heif-convert', ['-q', '90', filePath, tempFile]);
-    return await fs.promises.readFile(tempFile);
-  } finally {
-    fs.promises.unlink(tempFile).catch(() => {});
-  }
+  // sharp's bundled libvips lacks HEIC decode support; use heic-convert (libheif via WASM) instead.
+  const inputBuffer = await fs.promises.readFile(filePath);
+  const outputBuffer = await heicConvert({ buffer: inputBuffer, format: 'JPEG', quality: 0.9 });
+  return Buffer.from(outputBuffer);
 }
 
 /**
