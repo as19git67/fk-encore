@@ -28,6 +28,7 @@ import {
 } from "./photo.service";
 import {
   assertServiceAvailable,
+  isServiceAvailable,
   ServiceUnavailableError,
   onServiceRecovered,
   startHealthChecks,
@@ -77,9 +78,19 @@ class ScanWorker {
 
   /**
    * Dequeues and processes one job.
-   * Returns true if a job was found and processed (or failed), false if the queue was empty.
+   * Returns true if a job was found and processed (or failed), false if the
+   * queue was empty or the job was deferred (service unavailable).
+   * Returning false on defer prevents a busy-loop: the worker stops chasing
+   * work and waits for the service-recovery callback or the next timer tick.
    */
   private async processNext(): Promise<boolean> {
+    // Pre-check: if the required service is down, don't even dequeue.
+    // This avoids the dequeue→defer→re-dequeue busy-loop entirely.
+    const dep = SERVICE_DEPENDENCY[this.service];
+    if (dep && !isServiceAvailable(dep)) {
+      return false;
+    }
+
     const job = await dequeueNextJob(this.service);
     if (!job) return false; // queue empty — stop polling
 
@@ -104,6 +115,9 @@ class ScanWorker {
       if (err instanceof DeferJobError || err instanceof ServiceUnavailableError) {
         console.log(`[scan-worker] deferring ${this.service} job ${job.id}: ${err.message}`);
         await deferJob(job.id).catch(() => {});
+        // Return false so the worker stops chasing work immediately.
+        // The service-recovery callback will wake us when the service is back.
+        return false;
       } else {
         const msg = err?.message ?? String(err);
         console.error(`[scan-worker] ${this.service} job ${job.id} failed:`, msg);
@@ -111,7 +125,7 @@ class ScanWorker {
       }
     }
 
-    return true; // a job was dequeued (regardless of success/failure)
+    return true; // a job was dequeued and completed (or permanently failed)
   }
 
   private async runJob(job: { photo_id: number; user_id: number; force: boolean }): Promise<void> {
