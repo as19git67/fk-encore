@@ -437,13 +437,13 @@ onUnmounted(() => serviceHealth.stopPolling())
       <div class="face-box face-box-fullscreen" :style="faceBoxStyle(selectedPersonFace?.bbox)" />
       <template #topbar-center>
         <span class="fs-person-name">{{ selectedPerson?.name }}</span>
-        <Button v-if="selectedPerson" icon="pi pi-pencil" class="fs-topbar-btn" rounded text size="small" @click.stop="openRename(selectedPerson)" />
+        <Button v-if="selectedPerson" icon="pi pi-pencil" rounded text size="small" @click.stop="openRename(selectedPerson)" />
       </template>
       <template #topbar-actions>
-        <Button v-if="canDelete && selectedPhoto.curation_status === 'hidden'" icon="pi pi-eye" class="fs-topbar-btn" rounded text severity="info" @click.stop="handleRestorePhoto(selectedPhoto.id)" />
-        <Button v-else-if="canDelete" icon="pi pi-eye-slash" class="fs-topbar-btn" rounded text severity="warn" @click.stop="handleHidePhoto(selectedPhoto.id)" />
-        <Button v-if="canDelete" :icon="selectedPhoto.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'" class="fs-topbar-btn" rounded text :severity="selectedPhoto.curation_status === 'favorite' ? 'warn' : 'secondary'" @click.stop="handleToggleFavorite(selectedPhoto.id, selectedPhoto.curation_status)" />
-        <Button v-if="selectedPersonFace" icon="pi pi-trash" label="Gesicht ignorieren" class="fs-topbar-btn" rounded text severity="danger" @click.stop="handleIgnoreFace(selectedPersonFace.id)" />
+        <Button v-if="canDelete && selectedPhoto.curation_status === 'hidden'" icon="pi pi-eye" rounded text severity="info" @click.stop="handleRestorePhoto(selectedPhoto.id)" />
+        <Button v-else-if="canDelete" icon="pi pi-eye-slash" rounded text severity="warn" @click.stop="handleHidePhoto(selectedPhoto.id)" />
+        <Button v-if="canDelete" :icon="selectedPhoto.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'" rounded text :severity="selectedPhoto.curation_status === 'favorite' ? 'warn' : 'secondary'" @click.stop="handleToggleFavorite(selectedPhoto.id, selectedPhoto.curation_status)" />
+        <Button v-if="selectedPersonFace" icon="pi pi-trash" label="Gesicht ignorieren" rounded text severity="danger" @click.stop="handleIgnoreFace(selectedPersonFace.id)" />
       </template>
     </FullscreenOverlay>
 
@@ -535,8 +535,6 @@ onUnmounted(() => serviceHealth.stopPolling())
   font-weight: 600;
   color: var(--text-color);
 }
-
-.fs-topbar-btn { color: var(--text-color) !important; }
 
 /* ── Rename dialog ───────────────────────────────────────────────────────── */
 .dialog-body { display: flex; flex-direction: column; gap: 1rem; padding: 0.5rem 0; }
