@@ -1,18 +1,18 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, type ComponentPublicInstance } from 'vue'
+import { ref, computed, watch, type ComponentPublicInstance } from 'vue'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import Dialog from 'primevue/dialog'
 import ToggleSwitch from 'primevue/toggleswitch'
 import InputText from 'primevue/inputtext'
 import { useConfirm } from 'primevue/useconfirm'
-import HeicImage from '../components/HeicImage.vue'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import PersonNav from '../components/PersonNav.vue'
+import FacePhotoGrid from '../components/FacePhotoGrid.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import {
-  listPersons, updatePerson, mergePersons, getPhotoUrl, getPersonDetails,
+  listPersons, updatePerson, mergePersons, getPersonDetails,
   ignoreFace, ignorePersonFaces, updatePhotoCuration, reindexPhoto,
   getPhotoFaces, getPhotoLandmarks,
   type CurationStatus, type Person, type Photo, type PersonDetails,
@@ -20,7 +20,6 @@ import {
 } from '../api/photos'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
-import { usePhotoLazyLoad } from '../composables/usePhotoLazyLoad'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 
 const auth = useAuthStore()
@@ -38,12 +37,6 @@ const loadingDetails = ref(false)
 const showHidden = ref(false)
 const isFullscreen = ref(false)
 const selectedIndex = ref(-1)
-
-// ── Lazy loading (via composable) ─────────────────────────────────────────────
-const gridScrollRef = ref<HTMLElement | null>(null)
-const { visiblePhotoIds, setupObserver } = usePhotoLazyLoad('200px')
-
-watch(gridScrollRef, (el) => { if (el) nextTick(() => setupObserver(el)) })
 
 // ── Person face / photo items ─────────────────────────────────────────────────
 const personFaceItems = computed(() => {
@@ -67,7 +60,6 @@ watch(uniquePhotoFaceItems, (items) => {
     if (selectedIndex.value < 0) selectedIndex.value = 0
     else if (selectedIndex.value >= items.length) selectedIndex.value = items.length - 1
   }
-  void nextTick(() => { if (gridScrollRef.value) setupObserver(gridScrollRef.value) })
 })
 
 const allUniquePhotoFaceItems = computed(() => {
@@ -133,30 +125,11 @@ useGalleryKeyboard({
   },
 })
 
-// ── Face bbox helpers ─────────────────────────────────────────────────────────
+// ── Face bbox helpers (used in fullscreen overlay) ────────────────────────────
 function validBbox(bbox: FaceBBox | undefined | null): FaceBBox | null {
   if (!bbox) return null
   if (bbox.x > 1.1 || bbox.y > 1.1) return null
   return bbox
-}
-
-function thumbnailZoom(bbox: FaceBBox | undefined | null): number {
-  const b = validBbox(bbox)
-  if (!b) return 1
-  return Math.min(4, Math.max(1.5, 0.4 / Math.max(b.width, b.height)))
-}
-
-function thumbnailImageStyle(bbox: FaceBBox | undefined | null): Record<string, string> {
-  const b = validBbox(bbox)
-  if (!b) return {}
-  const cx = b.x + b.width / 2
-  const cy = b.y + b.height / 2
-  const zoom = thumbnailZoom(bbox)
-  return {
-    objectPosition: `${(cx * 100).toFixed(1)}% ${(cy * 100).toFixed(1)}%`,
-    transform: `scale(${zoom.toFixed(2)}) translate(${((0.5 - cx) * 100).toFixed(1)}%, ${((0.5 - cy) * 100).toFixed(1)}%)`,
-    transformOrigin: '50% 50%',
-  }
 }
 
 function faceBoxStyle(bbox: FaceBBox | undefined | null): Record<string, string> {
@@ -168,12 +141,6 @@ function faceBoxStyle(bbox: FaceBBox | undefined | null): Record<string, string>
     width: `${(b.width * 100).toFixed(2)}%`,
     height: `${(b.height * 100).toFixed(2)}%`,
   }
-}
-
-function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): string {
-  const zoom = thumbnailZoom(bbox)
-  const width = zoom >= 2 ? 800 : zoom >= 1.5 ? 600 : 400
-  return getPhotoUrl(filename, width)
 }
 
 // ── Curation ──────────────────────────────────────────────────────────────────
@@ -413,49 +380,18 @@ onUnmounted(() => serviceHealth.stopPolling())
         @ignore="handleIgnorePerson"
       />
 
-      <!-- CENTER: Face photo grid (face-specific rendering, stays here) -->
-      <div class="photo-grid-scroll" ref="gridScrollRef">
-        <div v-if="loadingDetails" class="info-text"><i class="pi pi-spin pi-spinner" /> Lade…</div>
-        <div v-else-if="uniquePhotoFaceItems.length === 0" class="info-text">Keine Fotos.</div>
-        <div v-else class="photo-grid">
-          <div
-            v-for="(item, idx) in uniquePhotoFaceItems"
-            :key="item.photo.id"
-            :data-photo-id="item.photo.id"
-            class="photo-item"
-            tabindex="0"
-            :class="{
-              selected: idx === selectedIndex,
-              'is-hidden': item.photo.curation_status === 'hidden',
-              'is-favorite': item.photo.curation_status === 'favorite',
-            }"
-            @click="selectedIndex = idx"
-            @dblclick="isFullscreen = true"
-          >
-            <div class="photo-thumb">
-              <HeicImage
-                v-if="visiblePhotoIds.has(item.photo.id)"
-                :src="thumbnailSrc(item.photo.filename, item.face.bbox)"
-                :alt="item.photo.original_name"
-                objectFit="cover"
-                :imageStyle="thumbnailImageStyle(item.face.bbox)"
-              >
-                <div class="face-box" :style="faceBoxStyle(item.face.bbox)" />
-              </HeicImage>
-            </div>
-            <i v-if="item.photo.curation_status === 'favorite'" class="pi pi-heart-fill favorite-badge" />
-            <i v-if="item.photo.curation_status === 'hidden'" class="pi pi-eye-slash hidden-badge" />
-            <div class="photo-info">
-              <span class="name">{{ item.photo.original_name }}</span>
-              <div class="photo-actions">
-                <Button v-if="canDelete && item.photo.curation_status === 'hidden'" size="small" icon="pi pi-eye" severity="info" text rounded @click.stop="handleRestorePhoto(item.photo.id)" />
-                <Button v-if="canDelete && item.photo.curation_status !== 'hidden'" size="small" :icon="item.photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'" :severity="item.photo.curation_status === 'favorite' ? 'warn' : 'secondary'" text rounded @click.stop="handleToggleFavorite(item.photo.id, item.photo.curation_status)" />
-                <Button v-if="canDelete && item.photo.curation_status !== 'hidden'" size="small" icon="pi pi-eye-slash" severity="danger" text rounded @click.stop="handleHidePhoto(item.photo.id)" />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <!-- CENTER: Face photo grid -->
+      <FacePhotoGrid
+        :items="uniquePhotoFaceItems"
+        :selectedIndex="selectedIndex"
+        :loadingDetails="loadingDetails"
+        :canDelete="canDelete"
+        @update:selectedIndex="selectedIndex = $event"
+        @open-fullscreen="isFullscreen = true"
+        @toggle-favorite="handleToggleFavorite"
+        @hide="handleHidePhoto"
+        @restore="handleRestorePhoto"
+      />
 
       <!-- RIGHT: Details sidebar -->
       <PhotoDetailSidebar
@@ -583,109 +519,14 @@ onUnmounted(() => serviceHealth.stopPolling())
   overflow: hidden;
 }
 
-/* ── Center: face photo grid ─────────────────────────────────────────────── */
-.photo-grid-scroll {
-  flex: 1;
-  min-width: 0;
-  overflow-y: auto;
-  padding: 1rem;
-}
-
-.photo-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 1rem;
-}
-
-.photo-item {
-  position: relative;
-  border-radius: 8px;
-  overflow: hidden;
-  background: var(--surface-card);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-  cursor: pointer;
-  transition: transform 0.2s;
-  border: 4px solid transparent;
-  outline: none;
-}
-
-.photo-item:hover { transform: scale(1.02); }
-
-.photo-item:focus-visible {
-  outline: 2px solid var(--p-primary-300);
-  outline-offset: -2px;
-}
-
-.photo-item.selected {
-  border-color: var(--p-primary-color);
-  transform: scale(1.05);
-  box-shadow: 0 0 15px var(--p-primary-color);
-  z-index: 10;
-}
-
-.photo-thumb {
-  width: 100%;
-  height: 200px;
-  background: var(--surface-ground);
-  overflow: hidden;
-}
-
-.photo-thumb :deep(.heic-image-container) { width: 100%; height: 100%; }
-
-.photo-info {
-  padding: 0.25rem 0.5rem;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: rgba(0,0,0,0.65);
-  backdrop-filter: blur(4px);
+/* ── Face bbox overlay (fullscreen only) ─────────────────────────────────── */
+.face-box-fullscreen {
   position: absolute;
-  bottom: 0; left: 0; right: 0;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-
-.photo-item:hover .photo-info,
-.photo-item.selected .photo-info,
-.photo-item:focus-within .photo-info { opacity: 1; }
-
-.photo-info .name {
-  font-size: 0.8rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex: 1;
-  color: white;
-}
-
-.photo-actions { display: flex; gap: 0; }
-
-.photo-item.is-hidden { opacity: 0.35; }
-.photo-item.is-hidden:hover { opacity: 0.7; }
-.photo-item.is-favorite { border-color: var(--p-yellow-500); }
-
-.favorite-badge, .hidden-badge {
-  position: absolute;
-  top: 8px; right: 8px;
-  font-size: 1.2rem;
-  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
-  z-index: 5;
-}
-.favorite-badge { color: var(--p-yellow-500); }
-.hidden-badge { color: white; }
-
-/* ── Face bbox overlay ───────────────────────────────────────────────────── */
-.face-box {
-  position: absolute;
-  border: 2px solid #eab308;
+  border: 3px solid #eab308;
   box-sizing: border-box;
   pointer-events: none;
   z-index: 2;
   border-radius: 2px;
-}
-
-.face-box-fullscreen {
-  border-width: 3px;
   box-shadow: 0 0 0 1px rgba(0,0,0,0.4);
 }
 
