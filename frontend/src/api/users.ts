@@ -81,3 +81,17 @@ export function deleteUser(id: number) {
   })
 }
 
+export function requestPasswordReset(email: string) {
+  return apiFetch<{ success: boolean; message: string }>('/auth/request-password-reset', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  })
+}
+
+export function resetPassword(token: string, newPassword: string) {
+  return apiFetch<{ success: boolean; message: string }>('/auth/reset-password', {
+    method: 'POST',
+    body: JSON.stringify({ token, new_password: newPassword }),
+  })
+}
+

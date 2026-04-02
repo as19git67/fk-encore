@@ -227,6 +227,23 @@ function handlePhotoClick(item: PhotoItem) {
 function handleScrollTo(sectionId: string) {
   photoGridRef.value?.scrollToSection(sectionId)
   activeSection.value = sectionId
+
+  // Select first photo in the target section
+  for (const yearGroup of groupedPhotos.value) {
+    if (yearGroup.sectionId === sectionId) {
+      const firstMonth = yearGroup.months[0]
+      if (firstMonth?.photos.length) {
+        selectedIndex.value = firstMonth.photos[0]!.index
+      }
+      return
+    }
+    for (const monthGroup of yearGroup.months) {
+      if (monthGroup.sectionId === sectionId && monthGroup.photos.length) {
+        selectedIndex.value = monthGroup.photos[0]!.index
+        return
+      }
+    }
+  }
 }
 
 // ── Album cover ───────────────────────────────────────────────────────────────

@@ -230,6 +230,7 @@ export interface Album {
   newest_photo_at?: string
   oldest_photo_at?: string
   photo_count: number
+  is_shared: boolean
   created_at: string
   updated_at: string
 }

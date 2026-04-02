@@ -64,6 +64,25 @@ export interface ChangePasswordRequest {
 }
 
 
+export interface RequestPasswordResetRequest {
+  email: string;
+}
+
+export interface RequestPasswordResetResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface ResetPasswordRequest {
+  token: string;
+  new_password: string;
+}
+
+export interface ResetPasswordResponse {
+  success: boolean;
+  message: string;
+}
+
 export interface LoginRequest {
   email: string;
   password: string;
@@ -253,6 +272,7 @@ export interface Album {
   newest_photo_at?: string;
   oldest_photo_at?: string;
   photo_count: number;
+  is_shared: boolean;
   created_at: string;
   updated_at: string;
 }

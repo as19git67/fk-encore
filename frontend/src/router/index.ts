@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import LoginView from '../views/LoginView.vue'
 import RegisterView from '../views/RegisterView.vue'
+import ForgotPasswordView from '../views/ForgotPasswordView.vue'
 import UserListView from '../views/UserListView.vue'
 import UserDetailView from '../views/UserDetailView.vue'
 import RolesView from '../views/RolesView.vue'
@@ -18,6 +19,7 @@ const router = createRouter({
     { path: '/', redirect: '/photos' },
     { path: '/login', name: 'login', component: LoginView },
     { path: '/register', name: 'register', component: RegisterView },
+    { path: '/forgot-password', name: 'forgot-password', component: ForgotPasswordView },
     { path: '/users', name: 'users', component: UserListView, meta: { permission: 'users.list' } },
     { path: '/users/:id', name: 'user-detail', component: UserDetailView, meta: { permission: 'users.read' } },
     { path: '/roles', name: 'roles', component: RolesView, meta: { permission: 'roles.list' } },
@@ -34,7 +36,7 @@ router.beforeEach((to) => {
   const auth = useAuthStore()
   auth.loadFromStorage()
 
-  const publicRoutes = ['login', 'register']
+  const publicRoutes = ['login', 'register', 'forgot-password']
   if (!auth.isAuthenticated && !publicRoutes.includes(to.name as string)) {
     return { name: 'login' }
   }

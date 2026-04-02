@@ -46,6 +46,17 @@ export const sessions = pgTable("sessions", {
   expires_at: timestamp("expires_at", { mode: "string" }).notNull(),
 });
 
+// ========== Password Reset Tokens ==========
+
+export const passwordResetTokens = pgTable("password_reset_tokens", {
+  token: text("token").primaryKey(),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  created_at: timestamp("created_at").defaultNow(),
+  expires_at: timestamp("expires_at", { mode: "string" }).notNull(),
+});
+
 // ========== Passkeys ==========
 
 export const passkeys = pgTable("passkeys", {

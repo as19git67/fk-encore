@@ -25,6 +25,7 @@ const emit = defineEmits<{
   'photo-click': [item: PhotoItem, event: MouseEvent]
   'photo-dblclick': [item: PhotoItem]
   'stack-click': [group: PhotoGroup]
+  'group-multi-select': [group: PhotoGroup, event: MouseEvent]
   'toggle-favorite': [id: number, status: CurationStatus]
   'hide': [id: number]
   'restore': [id: number]
@@ -145,7 +146,7 @@ defineExpose({
               'is-favorite': item.photo.curation_status === 'favorite',
               'is-stack': !!item.group,
             }"
-            @click="item.group ? emit('stack-click', item.group) : emit('photo-click', item, $event)"
+            @click="item.group ? (($event.ctrlKey || $event.metaKey || $event.shiftKey) ? emit('group-multi-select', item.group, $event) : emit('stack-click', item.group)) : emit('photo-click', item, $event)"
             @dblclick="!item.group && emit('photo-dblclick', item)"
           >
             <div class="photo-thumb">
