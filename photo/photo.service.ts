@@ -807,7 +807,7 @@ export async function convertHeicToJpeg(filePath: string): Promise<Buffer> {
   // sharp's bundled libvips may lack HEIC support; use system heif-convert instead.
   const tempFile = path.join(os.tmpdir(), `heic_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.jpg`);
   try {
-    await execFileAsync('heif-convert', ['-q', '90', filePath, tempFile]);
+    await execFileAsync('/usr/bin/heif-convert', ['-q', '90', filePath, tempFile]);
     return await fs.promises.readFile(tempFile);
   } finally {
     fs.promises.unlink(tempFile).catch(() => {});
