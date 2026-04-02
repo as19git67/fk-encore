@@ -543,7 +543,7 @@ onUnmounted(() => serviceHealth.stopPolling())
 .role-badge--owner { background: #fee2e2; color: #991b1b; }
 .role-badge--contributor { background: #dcfce7; color: #166534; }
 
-.controls { display: flex; gap: 2rem; align-items: center; flex-wrap: wrap; }
+.controls { display: flex; gap: 1em; align-items: center; flex-wrap: wrap; }
 
 .control-group { display: flex; align-items: center; gap: 0.5rem; }
 .control-group label { font-size: 0.85rem; color: var(--text-color-secondary); }
