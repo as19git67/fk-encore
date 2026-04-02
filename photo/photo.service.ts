@@ -1144,7 +1144,7 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     FROM photos p
     INNER JOIN album_photos ap ON ap.photo_id = p.id AND ap.album_id = ${albumId}
     LEFT JOIN photo_curation my_pc ON my_pc.photo_id = p.id AND my_pc.user_id = ${userId}
-    LEFT JOIN photo_curation all_pc ON all_pc.photo_id = p.id AND all_pc.user_id = ANY(${participantIds}::int[])
+    LEFT JOIN photo_curation all_pc ON all_pc.photo_id = p.id AND all_pc.user_id = ANY(ARRAY[${sql.join(participantIds.map(id => sql`${id}`), sql`, `)}]::int[])
     GROUP BY p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash,
              p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop, ap.added_by_user_id, ap.added_at, my_pc.status
   `)).rows;
