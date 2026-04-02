@@ -130,6 +130,7 @@ export const photos = pgTable("photos", {
   location_country: text("location_country"),
   ai_quality_score: real("ai_quality_score"),
   ai_quality_details: jsonb("ai_quality_details").$type<Record<string, number>>(),
+  auto_crop: jsonb("auto_crop").$type<{ x: number; y: number }>(),
 });
 
 // ========== Persons ==========

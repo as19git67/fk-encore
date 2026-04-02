@@ -64,6 +64,20 @@
       "when": 1775100000000,
       "tag": "0008_add_performance_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1775200000000,
+      "tag": "0009_password_reset_tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1775300000000,
+      "tag": "0010_auto_crop",
+      "breakpoints": true
     }
   ]
 }
