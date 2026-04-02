@@ -20,6 +20,7 @@ export interface Photo {
   location_country?: string
   ai_quality_score?: number
   ai_quality_details?: Record<string, number>
+  auto_crop?: { x: number; y: number }
 }
 
 export interface ListPhotosResponse {
@@ -177,6 +178,12 @@ export function rescanPhotos(force: boolean) {
 
 export function retryFailedScans() {
   return apiFetch<{ retried: number }>('/photos/scan-queue/retry-failed', {
+    method: 'POST'
+  })
+}
+
+export function recomputeAutoCrops() {
+  return apiFetch<{ updated: number }>('/photos/recompute-auto-crops', {
     method: 'POST'
   })
 }

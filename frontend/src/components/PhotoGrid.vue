@@ -155,6 +155,7 @@ defineExpose({
                 :src="getPhotoUrl(item.photo.filename, 400)"
                 :alt="item.photo.original_name"
                 objectFit="cover"
+                :imageStyle="item.photo.auto_crop ? { objectPosition: `${item.photo.auto_crop.x * 100}% ${item.photo.auto_crop.y * 100}%` } : undefined"
               />
             </div>
 

@@ -180,6 +180,70 @@ export async function indexPhotoEmbeddings(userId: number, photoId: number, forc
   }, force);
 }
 
+/**
+ * Compute the auto-crop focus point for a photo based on detected faces and landmarks.
+ * Faces take priority; if none exist, the largest/most confident landmark is used.
+ * The result is a normalized {x, y} center (0..1) stored on the photo row.
+ */
+export async function computeAndStoreAutoCrop(userId: number, photoId: number): Promise<void> {
+  // Collect non-ignored face bboxes
+  const faceRows = await dbAll<{ bbox: string }>(
+    db.select({ bbox: faces.bbox }).from(faces)
+      .where(and(eq(faces.photo_id, photoId), eq(faces.user_id, userId), eq(faces.ignored, false)))
+  );
+
+  const faceBboxes = faceRows.map(r => JSON.parse(r.bbox) as { x: number; y: number; width: number; height: number });
+
+  if (faceBboxes.length > 0) {
+    // Compute weighted center across all faces (weighted by area)
+    let totalWeight = 0;
+    let cx = 0;
+    let cy = 0;
+    for (const b of faceBboxes) {
+      const area = b.width * b.height;
+      const weight = Math.max(area, 0.001);
+      cx += (b.x + b.width / 2) * weight;
+      cy += (b.y + b.height / 2) * weight;
+      totalWeight += weight;
+    }
+    cx /= totalWeight;
+    cy /= totalWeight;
+
+    await dbExec(
+      db.update(photos).set({ auto_crop: { x: Math.round(cx * 1000) / 1000, y: Math.round(cy * 1000) / 1000 } })
+        .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+    );
+    return;
+  }
+
+  // Fallback: use landmark with highest confidence
+  const landmarkRows = await dbAll<{ bbox: string; confidence: number }>(
+    db.select({ bbox: photoLandmarks.bbox, confidence: photoLandmarks.confidence })
+      .from(photoLandmarks)
+      .where(and(eq(photoLandmarks.photo_id, photoId), eq(photoLandmarks.user_id, userId)))
+  );
+
+  if (landmarkRows.length > 0) {
+    // Pick the landmark with the highest confidence
+    const best = landmarkRows.reduce((a, b) => (b.confidence > a.confidence ? b : a));
+    const bbox = JSON.parse(best.bbox) as { x: number; y: number; width: number; height: number };
+    const cx = bbox.x + bbox.width / 2;
+    const cy = bbox.y + bbox.height / 2;
+
+    await dbExec(
+      db.update(photos).set({ auto_crop: { x: Math.round(cx * 1000) / 1000, y: Math.round(cy * 1000) / 1000 } })
+        .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+    );
+    return;
+  }
+
+  // No faces or landmarks – clear auto_crop so default centering is used
+  await dbExec(
+    db.update(photos).set({ auto_crop: null })
+      .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+  );
+}
+
 export async function indexPhotoFaces(userId: number, photoId: number, resetIgnored: boolean = false): Promise<void> {
   if (!ENABLE_LOCAL_FACES) {
     console.log("Local face indexing is disabled via ENABLE_LOCAL_FACES=false");
@@ -310,6 +374,13 @@ export async function indexPhotoFaces(userId: number, photoId: number, resetIgno
         // Ignore
       }
     }
+  }
+
+  // Recompute auto-crop focus point after face changes
+  try {
+    await computeAndStoreAutoCrop(userId, photoId);
+  } catch (err) {
+    console.error(`Error computing auto-crop for photo ${photoId}:`, err);
   }
 }
 
@@ -543,6 +614,7 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
     location_name: string | null; location_city: string | null; location_country: string | null;
     ai_quality_score: number | null;
     ai_quality_details: Record<string, number> | null;
+    auto_crop: { x: number; y: number } | null;
   }>(
     db
       .select({
@@ -563,6 +635,7 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
         location_country: photos.location_country,
         ai_quality_score: photos.ai_quality_score,
         ai_quality_details: photos.ai_quality_details,
+        auto_crop: photos.auto_crop,
       })
       .from(photos)
       .leftJoin(
@@ -594,6 +667,7 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
       location_country: r.location_country ?? undefined,
       ai_quality_score: r.ai_quality_score ?? undefined,
       ai_quality_details: r.ai_quality_details ?? undefined,
+      auto_crop: r.auto_crop ?? undefined,
     })),
   };
 }
@@ -1047,6 +1121,7 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
       curation_status: photoCuration.status,
       added_by_user_id: albumPhotos.added_by_user_id,
       added_at: albumPhotos.added_at,
+      auto_crop: photos.auto_crop,
     })
     .from(photos)
     .innerJoin(albumPhotos, eq(albumPhotos.photo_id, photos.id))
@@ -1102,6 +1177,7 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
       curation_status: (r.curation_status as CurationStatus) ?? "visible",
       added_by_user_id: r.added_by_user_id ?? undefined,
       added_at: r.added_at ?? "",
+      auto_crop: r.auto_crop ?? undefined,
     })),
   };
 }
@@ -1910,6 +1986,27 @@ export async function retryFailedScansLogic(userId: number): Promise<{ retried: 
   return { retried };
 }
 
+/**
+ * Recompute auto_crop for all photos of a user based on existing face/landmark data.
+ */
+export async function recomputeAllAutoCropsLogic(userId: number): Promise<{ updated: number }> {
+  const allPhotos = await dbAll<{ id: number }>(
+    db.select({ id: photos.id }).from(photos).where(eq(photos.user_id, userId))
+  );
+
+  let updated = 0;
+  for (const p of allPhotos) {
+    try {
+      await computeAndStoreAutoCrop(userId, p.id);
+      updated++;
+    } catch (err) {
+      console.error(`Error computing auto-crop for photo ${p.id}:`, err);
+    }
+  }
+
+  return { updated };
+}
+
 // ── Orphaned person cleanup ──────────────────────────────────────────────────
 
 /**
@@ -2364,6 +2461,7 @@ export async function searchByDateRangeLogic(
     created_at: string | null; curation_status: string | null;
     latitude: number | null; longitude: number | null;
     location_city: string | null; location_country: string | null; location_name: string | null;
+    auto_crop: { x: number; y: number } | null;
   }>(
     db.select({
       id: photos.id, user_id: photos.user_id, filename: photos.filename,
@@ -2372,7 +2470,7 @@ export async function searchByDateRangeLogic(
       created_at: photos.created_at, curation_status: photoCuration.status,
       latitude: photos.latitude, longitude: photos.longitude,
       location_city: photos.location_city, location_country: photos.location_country,
-      location_name: photos.location_name,
+      location_name: photos.location_name, auto_crop: photos.auto_crop,
     })
     .from(photos)
     .leftJoin(photoCuration, and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)))
@@ -2389,7 +2487,7 @@ export async function searchByDateRangeLogic(
       curation_status: (r.curation_status as CurationStatus) ?? "visible",
       latitude: r.latitude ?? undefined, longitude: r.longitude ?? undefined,
       location_city: r.location_city ?? undefined, location_country: r.location_country ?? undefined,
-      location_name: r.location_name ?? undefined,
+      location_name: r.location_name ?? undefined, auto_crop: r.auto_crop ?? undefined,
     })),
   };
 }
@@ -2427,6 +2525,7 @@ export async function searchByLocationLogic(
     created_at: string | null; curation_status: string | null;
     latitude: number | null; longitude: number | null;
     location_city: string | null; location_country: string | null; location_name: string | null;
+    auto_crop: { x: number; y: number } | null;
   }>(
     db.select({
       id: photos.id, user_id: photos.user_id, filename: photos.filename,
@@ -2435,7 +2534,7 @@ export async function searchByLocationLogic(
       created_at: photos.created_at, curation_status: photoCuration.status,
       latitude: photos.latitude, longitude: photos.longitude,
       location_city: photos.location_city, location_country: photos.location_country,
-      location_name: photos.location_name,
+      location_name: photos.location_name, auto_crop: photos.auto_crop,
     })
     .from(photos)
     .leftJoin(photoCuration, and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)))
@@ -2452,7 +2551,7 @@ export async function searchByLocationLogic(
       curation_status: (r.curation_status as CurationStatus) ?? "visible",
       latitude: r.latitude ?? undefined, longitude: r.longitude ?? undefined,
       location_city: r.location_city ?? undefined, location_country: r.location_country ?? undefined,
-      location_name: r.location_name ?? undefined,
+      location_name: r.location_name ?? undefined, auto_crop: r.auto_crop ?? undefined,
     })),
   };
 }
@@ -2540,6 +2639,13 @@ export async function indexPhotoLandmarks(userId: number, photoId: number): Prom
     if (tempPath && fs.existsSync(tempPath)) {
       fs.unlinkSync(tempPath);
     }
+  }
+
+  // Recompute auto-crop focus point (landmarks as fallback if no faces)
+  try {
+    await computeAndStoreAutoCrop(userId, photoId);
+  } catch (err) {
+    console.error(`Error computing auto-crop for photo ${photoId}:`, err);
   }
 }
 

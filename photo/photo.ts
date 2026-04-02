@@ -664,6 +664,20 @@ export const retryFailedScans = api(
   }
 );
 
+/**
+ * Recompute auto-crop focus points for all photos based on existing face/landmark data.
+ */
+export const recomputeAutoCrops = api(
+  { expose: true, method: "POST", path: "/photos/recompute-auto-crops", auth: true },
+  async (): Promise<{ updated: number }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "data.manage");
+    return await service.recomputeAllAutoCropsLogic(userId);
+  }
+);
+
 // ========== Photo Groups ==========
 
 import type {
