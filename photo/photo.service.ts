@@ -2665,8 +2665,10 @@ export async function indexPhotoLandmarks(userId: number, photoId: number): Prom
   const ext = path.extname(photo.filename).toLowerCase();
   if (ext === ".heic" || ext === ".heif") {
     try {
+      const inputBuffer = await fs.promises.readFile(filePath);
+      const outputBuffer = await heicConvert({ buffer: inputBuffer, format: "JPEG", quality: 1 });
       tempPath = path.join(UPLOAD_DIR, `temp_lm_${photoId}_${Date.now()}.jpg`);
-      await sharp(filePath).jpeg({ quality: 100 }).toFile(tempPath);
+      await fs.promises.writeFile(tempPath, outputBuffer as Buffer);
       processingPath = tempPath;
     } catch (err) {
       console.error(`HEIC conversion for landmark detection failed (photo ${photoId}):`, err);
