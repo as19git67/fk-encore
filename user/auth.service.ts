@@ -16,6 +16,7 @@ import type {
 } from "../db/types";
 import { toUser, getRolesForUser, getPermissionsForUser } from "./user.service";
 import { checkRateLimit, resetRateLimit, getClientIp } from "./rateLimiter";
+import { sendPasswordResetEmail } from "./mail";
 
 const nowSql = sql`NOW()`
 
@@ -132,9 +133,8 @@ export async function requestPasswordResetLogic(req: RequestPasswordResetRequest
     })
   );
 
-  // In a production app, send an email with the reset link here.
-  // For now, we log the token to the console for development.
-  console.log(`[Password Reset] Token for ${user.email}: ${token}`);
+  // Send the reset email (falls back to console.warn if SMTP not configured)
+  await sendPasswordResetEmail(user.email, token);
 
   return { success: true, message: "Falls ein Konto mit dieser E-Mail existiert, wurde ein Zurücksetzungslink erstellt." };
 }
