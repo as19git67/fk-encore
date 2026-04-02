@@ -81,6 +81,9 @@ async function handlePasskeyLogin() {
           <Button type="submit" label="Anmelden" icon="pi pi-sign-in" :loading="loading" fluid />
         </form>
         <p class="link">
+          <router-link to="/forgot-password">Passwort vergessen?</router-link>
+        </p>
+        <p class="link">
           Noch kein Konto? <router-link to="/register">Registrieren</router-link>
         </p>
       </template>

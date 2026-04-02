@@ -1,17 +1,22 @@
 import crypto from "crypto";
-import { compareSync } from "bcryptjs";
+import { compareSync, hashSync } from "bcryptjs";
 import { eq, and, lt, gt, sql } from "drizzle-orm";
 import db from "../db/database";
-import { users, sessions } from "../db/schema";
+import { users, sessions, passwordResetTokens } from "../db/schema";
 import { dbFirst, dbAll, dbExec, dbInsertReturning } from '../db/adapter';
 import type {
   UserWithRolesAndPermissions,
   LoginRequest,
   LoginResponse,
   LogoutResponse,
+  RequestPasswordResetRequest,
+  RequestPasswordResetResponse,
+  ResetPasswordRequest,
+  ResetPasswordResponse,
 } from "../db/types";
 import { toUser, getRolesForUser, getPermissionsForUser } from "./user.service";
 import { checkRateLimit, resetRateLimit, getClientIp } from "./rateLimiter";
+import { sendPasswordResetEmail } from "./mail";
 
 const nowSql = sql`NOW()`
 
@@ -95,4 +100,81 @@ export async function validateToken(token: string): Promise<{ userID: string; pe
 
   const perms = await getPermissionsForUser(session.user_id);
   return { userID: String(session.user_id), permissions: perms };
+}
+
+// ---------- Password Reset ----------
+
+export async function requestPasswordResetLogic(req: RequestPasswordResetRequest): Promise<RequestPasswordResetResponse> {
+  if (!req.email) {
+    throw new Error("email is required");
+  }
+
+  const user = await dbFirst<typeof users.$inferSelect>(
+    db.select().from(users).where(eq(users.email, req.email))
+  );
+
+  // Always return success to prevent email enumeration
+  if (!user) {
+    return { success: true, message: "Falls ein Konto mit dieser E-Mail existiert, wurde ein Zurücksetzungslink erstellt." };
+  }
+
+  // Clean up expired reset tokens
+  await dbExec(
+    db.delete(passwordResetTokens).where(lt(passwordResetTokens.expires_at, nowSql))
+  );
+
+  // Generate token (1 hour expiry)
+  const token = crypto.randomBytes(32).toString("base64url");
+  await dbExec(
+    db.insert(passwordResetTokens).values({
+      token,
+      user_id: user.id,
+      expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    })
+  );
+
+  // Send the reset email (falls back to console.warn if SMTP not configured)
+  await sendPasswordResetEmail(user.email, token);
+
+  return { success: true, message: "Falls ein Konto mit dieser E-Mail existiert, wurde ein Zurücksetzungslink erstellt." };
+}
+
+export async function resetPasswordLogic(req: ResetPasswordRequest): Promise<ResetPasswordResponse> {
+  if (!req.token || !req.new_password) {
+    throw new Error("token and new_password are required");
+  }
+
+  if (req.new_password.length < 6) {
+    throw new Error("password must be at least 6 characters");
+  }
+
+  const resetToken = await dbFirst<{ token: string; user_id: number; expires_at: string }>(
+    db.select()
+      .from(passwordResetTokens)
+      .where(
+        and(
+          eq(passwordResetTokens.token, req.token),
+          gt(passwordResetTokens.expires_at, nowSql)
+        )
+      )
+  );
+
+  if (!resetToken) {
+    throw new Error("invalid or expired reset token");
+  }
+
+  // Update password
+  const newHash = hashSync(req.new_password, 10);
+  await dbExec(
+    db.update(users)
+      .set({ password_hash: newHash, updated_at: new Date().toISOString() })
+      .where(eq(users.id, resetToken.user_id))
+  );
+
+  // Delete the used token and any other tokens for this user
+  await dbExec(
+    db.delete(passwordResetTokens).where(eq(passwordResetTokens.user_id, resetToken.user_id))
+  );
+
+  return { success: true, message: "Passwort wurde erfolgreich zurückgesetzt." };
 }
