@@ -350,7 +350,7 @@ async function handleReindexPhoto() {
 }
 
 // ── Group multi-select (Ctrl/Shift click on a stack) ─────────────────────
-function handleGroupMultiSelect(group: PhotoGroup, event: MouseEvent) {
+function handleGroupMultiSelect(group: PhotoGroup) {
   const newSet = new Set(selectedPhotoIds.value)
   for (const pid of group.photo_ids) {
     newSet.add(pid)
