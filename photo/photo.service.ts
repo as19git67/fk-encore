@@ -620,6 +620,22 @@ export async function deletePhotoLogic(userId: number, photoId: number): Promise
   return { success: true, message: "Photo hidden" };
 }
 
+/** Delete all cached thumbnail variants for a given photo filename. */
+async function deleteCachedThumbnails(filename: string): Promise<void> {
+  const baseName = path.basename(filename, path.extname(filename));
+  const prefix = `${baseName}_`;
+  try {
+    const entries = await fs.promises.readdir(THUMBNAIL_DIR);
+    await Promise.all(
+      entries
+        .filter(f => f.startsWith(prefix) && f.endsWith('.jpg'))
+        .map(f => fs.promises.unlink(path.join(THUMBNAIL_DIR, f)).catch(() => {}))
+    );
+  } catch {
+    // THUMBNAIL_DIR missing or unreadable — nothing to clean up
+  }
+}
+
 export async function hardDeletePhotoLogic(userId: number, photoId: number): Promise<DeleteResponse> {
   const photo = await dbFirst<typeof photos.$inferSelect>(
     db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
@@ -629,11 +645,12 @@ export async function hardDeletePhotoLogic(userId: number, photoId: number): Pro
     throw new Error("Photo not found or unauthorized");
   }
 
-  // Delete file from disk
+  // Delete original file and all cached thumbnails from disk
   const filePath = path.join(UPLOAD_DIR, photo.filename);
   if (fs.existsSync(filePath)) {
     fs.unlinkSync(filePath);
   }
+  await deleteCachedThumbnails(photo.filename);
 
   // Hard delete from DB (cascades to curation, faces, album_photos, group_members)
   await dbExec(db.delete(photos).where(eq(photos.id, photoId)));
