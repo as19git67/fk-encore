@@ -166,6 +166,16 @@ defineExpose({
             <i v-if="item.photo.curation_status === 'favorite'" class="pi pi-heart-fill favorite-badge" />
             <i v-if="item.photo.curation_status === 'hidden'" class="pi pi-eye-slash hidden-badge" />
 
+            <!-- Anonymized curation stats (shared albums only) -->
+            <div v-if="(item.photo as any).curation_stats" class="curation-stats-badge">
+              <span v-if="(item.photo as any).curation_stats.fav_count > 0" class="stat-fav" :title="`${(item.photo as any).curation_stats.fav_count} von ${(item.photo as any).curation_stats.member_count} finden dieses Foto gut`">
+                <i class="pi pi-heart-fill" /> {{ (item.photo as any).curation_stats.fav_count }}/{{ (item.photo as any).curation_stats.member_count }}
+              </span>
+              <span v-if="(item.photo as any).curation_stats.hide_count > 0" class="stat-hide" :title="`${(item.photo as any).curation_stats.hide_count} von ${(item.photo as any).curation_stats.member_count} haben dieses Foto ausgeblendet`">
+                <i class="pi pi-eye-slash" /> {{ (item.photo as any).curation_stats.hide_count }}/{{ (item.photo as any).curation_stats.member_count }}
+              </span>
+            </div>
+
             <div class="photo-info">
               <span class="name">
                 {{ item.group ? `${item.group.member_count} ähnliche Fotos` : item.photo.original_name }}
@@ -309,6 +319,31 @@ defineExpose({
   font-size: 0.9rem;
   text-shadow: 0 0 4px rgba(0,0,0,0.5);
 }
+
+/* ── Curation stats (shared albums) ─────────────────────────────────────── */
+.curation-stats-badge {
+  position: absolute;
+  bottom: 32px;
+  left: 6px;
+  display: flex;
+  gap: 6px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.curation-stats-badge .stat-fav,
+.curation-stats-badge .stat-hide {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  padding: 1px 5px;
+  border-radius: 8px;
+}
+
+.curation-stats-badge .stat-fav i { color: var(--p-orange-400); font-size: 0.65rem; }
+.curation-stats-badge .stat-hide i { color: var(--p-red-300); font-size: 0.65rem; }
 
 /* ── Hover info bar ──────────────────────────────────────────────────────── */
 .photo-info {

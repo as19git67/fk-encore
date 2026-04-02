@@ -299,6 +299,37 @@ function getPersonName(personId?: number) {
         </template>
       </div>
 
+      <!-- Curation opinions (shared albums only) -->
+      <template v-if="(photo as any).curation_stats && (photo as any).curation_stats.member_count > 1">
+        <div class="sidebar-divider" />
+        <div class="sidebar-section">
+          <div class="section-label"><i class="pi pi-users" /> Meinungen ({{ (photo as any).curation_stats.member_count }} Teilnehmer)</div>
+          <div class="curation-opinion-bars">
+            <div class="opinion-row">
+              <span class="opinion-label"><i class="pi pi-heart-fill opinion-icon opinion-icon--fav" /> Favorit</span>
+              <div class="opinion-bar-track">
+                <div class="opinion-bar-fill opinion-bar-fill--fav" :style="{ width: `${((photo as any).curation_stats.fav_count / (photo as any).curation_stats.member_count) * 100}%` }" />
+              </div>
+              <span class="opinion-count">{{ (photo as any).curation_stats.fav_count }} von {{ (photo as any).curation_stats.member_count }}</span>
+            </div>
+            <div v-if="(photo as any).curation_stats.hide_count > 0" class="opinion-row">
+              <span class="opinion-label"><i class="pi pi-eye-slash opinion-icon opinion-icon--hide" /> Ausgeblendet</span>
+              <div class="opinion-bar-track">
+                <div class="opinion-bar-fill opinion-bar-fill--hide" :style="{ width: `${((photo as any).curation_stats.hide_count / (photo as any).curation_stats.member_count) * 100}%` }" />
+              </div>
+              <span class="opinion-count">{{ (photo as any).curation_stats.hide_count }} von {{ (photo as any).curation_stats.member_count }}</span>
+            </div>
+            <div v-if="photo.ai_quality_score != null" class="opinion-row">
+              <span class="opinion-label"><i class="pi pi-star-fill opinion-icon opinion-icon--ai" /> KI-Bewertung</span>
+              <div class="opinion-bar-track">
+                <div class="opinion-bar-fill opinion-bar-fill--ai" :style="{ width: `${photo.ai_quality_score * 100}%` }" />
+              </div>
+              <span class="opinion-count">{{ (photo.ai_quality_score * 100).toFixed(0) }}%</span>
+            </div>
+          </div>
+        </div>
+      </template>
+
       <div class="sidebar-divider" />
 
       <div class="meta-list">
@@ -666,5 +697,60 @@ function getPersonName(personId?: number) {
   min-width: 0;
   padding: 0.35rem 0.5rem;
   font-size: 0.85rem;
+}
+
+/* ── Curation opinions ─────────────────────────────────────────────────── */
+.curation-opinion-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.opinion-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.opinion-label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 7rem;
+  color: var(--text-color-secondary);
+  font-size: 0.78rem;
+}
+
+.opinion-icon { font-size: 0.75rem; }
+.opinion-icon--fav { color: var(--p-orange-400); }
+.opinion-icon--hide { color: var(--p-red-400); }
+.opinion-icon--ai { color: var(--p-yellow-500); }
+
+.opinion-bar-track {
+  flex: 1;
+  height: 6px;
+  background: var(--surface-200);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.opinion-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.opinion-bar-fill--fav { background: var(--p-orange-400); }
+.opinion-bar-fill--hide { background: var(--p-red-400); }
+.opinion-bar-fill--ai { background: var(--p-yellow-500); }
+
+.opinion-count {
+  font-size: 0.75rem;
+  color: var(--text-color-secondary);
+  min-width: 3.5rem;
+  text-align: right;
+  white-space: nowrap;
 }
 </style>
