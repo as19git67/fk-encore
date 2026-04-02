@@ -620,19 +620,26 @@ export async function deletePhotoLogic(userId: number, photoId: number): Promise
   return { success: true, message: "Photo hidden" };
 }
 
+/** Returns the 2-char hex shard subdirectory for a thumbnail baseName (MD5-based, 256 buckets). */
+export function thumbnailShardPath(baseName: string): string {
+  const shard = crypto.createHash('md5').update(baseName).digest('hex').slice(0, 2);
+  return path.join(THUMBNAIL_DIR, shard);
+}
+
 /** Delete all cached thumbnail variants for a given photo filename. */
 async function deleteCachedThumbnails(filename: string): Promise<void> {
   const baseName = path.basename(filename, path.extname(filename));
   const prefix = `${baseName}_`;
+  const shardPath = thumbnailShardPath(baseName);
   try {
-    const entries = await fs.promises.readdir(THUMBNAIL_DIR);
+    const entries = await fs.promises.readdir(shardPath);
     await Promise.all(
       entries
         .filter(f => f.startsWith(prefix) && f.endsWith('.jpg'))
-        .map(f => fs.promises.unlink(path.join(THUMBNAIL_DIR, f)).catch(() => {}))
+        .map(f => fs.promises.unlink(path.join(shardPath, f)).catch(() => {}))
     );
   } catch {
-    // THUMBNAIL_DIR missing or unreadable — nothing to clean up
+    // shard dir missing or unreadable — nothing to clean up
   }
 }
 
