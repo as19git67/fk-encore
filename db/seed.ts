@@ -125,4 +125,18 @@ export async function seed(db: any): Promise<void> {
 
     console.log(`[seed] Created admin user: ${adminEmail}`);
   }
+
+  // --- Seed AI system user (virtual participant for quality-based curation) ---
+  const AI_USER_EMAIL = "ai@system.local";
+  const existingAiUser = (await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.email, AI_USER_EMAIL)))[0];
+
+  if (!existingAiUser) {
+    // Password hash is a dummy — this user cannot log in (no valid bcrypt hash for any password)
+    await db.insert(schema.users).values({
+      email: AI_USER_EMAIL,
+      name: "KI-Bewertung",
+      password_hash: "$2a$10$NOLOGIN.SYSTEM.USER.AI.QUALITY.000000000000000000000",
+    });
+    console.log(`[seed] Created AI system user: ${AI_USER_EMAIL}`);
+  }
 }
