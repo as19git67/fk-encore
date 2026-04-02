@@ -45,6 +45,7 @@ services:
       APP_URL: ${APP_URL:-http://localhost:8080}
     volumes:
       - photos:/mnt/data/photos
+      - thumbnails:/mnt/data/thumbnails
 
   # ── InsightFace Service (Face Detection) ───────────────────────────────────
   insightface:
@@ -120,6 +121,12 @@ volumes:
     driver: local
     driver_opts:
       device: /Users/anton/vivanty_data/photos
+      o: bind
+      type: none
+  thumbnails:
+    driver: local
+    driver_opts:
+      device: /Users/anton/vivanty_data/thumbnails
       o: bind
       type: none
   pgdata:
