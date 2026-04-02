@@ -104,6 +104,21 @@ const LANDMARK_SERVICE_URL = process.env.LANDMARK_SERVICE_URL || "http://localho
 export const ENABLE_LANDMARKS = process.env.ENABLE_LANDMARKS === "true";
 export const ENABLE_QUALITY = process.env.ENABLE_QUALITY !== "false"; // enabled by default
 
+// ── AI system user for virtual curation votes ────────────────────────────────
+const AI_USER_EMAIL = "ai@system.local";
+const AI_FAV_THRESHOLD = parseFloat(process.env.AI_FAV_THRESHOLD || "0.7");
+const AI_HIDE_THRESHOLD = parseFloat(process.env.AI_HIDE_THRESHOLD || "0.3");
+let _aiUserId: number | null | undefined; // undefined = not yet queried
+
+async function getAiUserId(): Promise<number | null> {
+  if (_aiUserId !== undefined) return _aiUserId;
+  const row = await dbFirst<{ id: number }>(
+    db.select({ id: users.id }).from(users).where(eq(users.email, AI_USER_EMAIL))
+  );
+  _aiUserId = row?.id ?? null;
+  return _aiUserId;
+}
+
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
@@ -1034,11 +1049,13 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
 
   const viewConfig = resolveViewConfig(settings.active_view, settings.view_config as ViewConfig | null, settings.hide_mode);
 
-  // Determine album participant IDs (owner + shared users)
+  // Determine album participant IDs (owner + shared users + AI user)
   const shareRows = await dbAll<{ user_id: number }>(
     db.select({ user_id: albumShares.user_id }).from(albumShares).where(eq(albumShares.album_id, albumId))
   );
-  const participantIds = [album.user_id, ...shareRows.map(s => s.user_id)];
+  const humanParticipantIds = [album.user_id, ...shareRows.map(s => s.user_id)];
+  const aiUserId = await getAiUserId();
+  const participantIds = aiUserId ? [...humanParticipantIds, aiUserId] : humanParticipantIds;
   const memberCount = participantIds.length;
 
   // Use raw SQL for the aggregated query with curation stats
@@ -2764,6 +2781,23 @@ export async function indexPhotoQuality(userId: number, photoId: number): Promis
       .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)));
 
     console.log(`[quality] photo ${photoId} final score ${compositeScore.toFixed(3)}`);
+
+    // ── Virtual AI curation vote ──────────────────────────────────────────
+    const aiUserId = await getAiUserId();
+    if (aiUserId) {
+      let aiStatus: CurationStatus = "visible";
+      if (compositeScore >= AI_FAV_THRESHOLD) aiStatus = "favorite";
+      else if (compositeScore <= AI_HIDE_THRESHOLD) aiStatus = "hidden";
+
+      await db
+        .insert(photoCuration)
+        .values({ user_id: aiUserId, photo_id: photoId, status: aiStatus })
+        .onConflictDoUpdate({
+          target: [photoCuration.user_id, photoCuration.photo_id],
+          set: { status: aiStatus, updated_at: nowSql },
+        });
+      console.log(`[quality] photo ${photoId} AI curation → ${aiStatus} (score=${compositeScore.toFixed(3)}, thresholds: fav>=${AI_FAV_THRESHOLD}, hide<=${AI_HIDE_THRESHOLD})`);
+    }
   } catch (err) {
     console.error(`Quality scoring failed for photo ${photoId}:`, err);
   } finally {

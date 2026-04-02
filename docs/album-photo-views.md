@@ -101,13 +101,42 @@ Bei Auswahl eines Fotos im geteilten Album zeigt die Sidebar einen "Meinungen"-B
 - Fortschrittsbalken fuer Ausblend-Anteil (nur wenn > 0)
 - KI-Bewertung als dritte Reihe (wenn vorhanden)
 
+## Virtueller KI-Teilnehmer
+
+Die KI agiert als virtueller Album-Teilnehmer, der basierend auf dem Quality-Score automatisch abstimmt.
+
+### Funktionsweise
+
+1. **System-User**: Ein spezieller User `KI-Bewertung` (Email: `ai@system.local`) wird beim Seeding angelegt. Dieser User kann sich nicht einloggen (ungültiger Passwort-Hash).
+
+2. **Automatische Abstimmung**: Nach jedem Quality-Scoring schreibt die KI einen `photo_curation`-Eintrag:
+   - Score >= 0.7 (konfigurierbar via `AI_FAV_THRESHOLD`) -> `favorite`
+   - Score <= 0.3 (konfigurierbar via `AI_HIDE_THRESHOLD`) -> `hidden`
+   - Dazwischen -> `visible`
+
+3. **Teilnehmer-Zaehlung**: Der KI-User wird in jedem Album als zusaetzlicher Teilnehmer gezaehlt. Seine Stimme fliesst in `fav_count` und `hide_count` ein.
+
+### Konfiguration (Umgebungsvariablen)
+
+| Variable | Default | Beschreibung |
+|---|---|---|
+| `AI_FAV_THRESHOLD` | `0.7` | Score ab dem die KI "Favorit" stimmt |
+| `AI_HIDE_THRESHOLD` | `0.3` | Score unter dem die KI "Ausblenden" stimmt |
+
+### Auswirkung auf Views
+
+- **Alle Fotos**: KI-Stimme ist im Zaehler sichtbar (z.B. "2/4" statt "1/3")
+- **Gruppen-Highlights**: KI-Favorit zaehlt als eine Stimme fuer den Konsens
+- Die KI-Stimme ist **anonymisiert** wie alle anderen - im Frontend nicht als "KI" erkennbar, sondern einfach ein weiterer Teilnehmer
+
 ## Betroffene Dateien
 
 ### Backend
 - `db/types.ts` - Neue Typen (ViewConfig, ActiveView, PhotoCurationStats)
+- `db/seed.ts` - System-User "KI-Bewertung" anlegen
 - `db/schema.ts` - Unveraendert (JSONB view_config traegt die neuen Typen)
 - `db/migrations/postgres/0010_album_curation_views.sql` - Performance-Index
-- `photo/photo.service.ts` - Aggregierte Query, Preset-Mapping, Filter-Logik
+- `photo/photo.service.ts` - Aggregierte Query, Preset-Mapping, Filter-Logik, KI-Curation
 
 ### Frontend
 - `frontend/src/api/photos.ts` - Neue Typen (AlbumPhoto, ViewConfig, PhotoCurationStats)
