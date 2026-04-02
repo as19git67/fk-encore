@@ -36,8 +36,16 @@ services:
       EMBEDDING_SERVICE_URL: http://embedding_service:8000
       LANDMARK_SERVICE_URL: http://landmark:8000
       ENABLE_LANDMARKS: "true"
+      # SMTP for password reset emails (leave empty to log tokens to console)
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-noreply@example.com}
+      APP_URL: ${APP_URL:-http://localhost:8080}
     volumes:
       - photos:/mnt/data/photos
+      - thumbnails:/mnt/data/thumbnails
 
   # ── InsightFace Service (Face Detection) ───────────────────────────────────
   insightface:
@@ -113,6 +121,12 @@ volumes:
     driver: local
     driver_opts:
       device: /Users/anton/vivanty_data/photos
+      o: bind
+      type: none
+  thumbnails:
+    driver: local
+    driver_opts:
+      device: /Users/anton/vivanty_data/thumbnails
       o: bind
       type: none
   pgdata:

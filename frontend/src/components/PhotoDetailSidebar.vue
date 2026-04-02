@@ -3,7 +3,7 @@ import Button from 'primevue/button'
 import DatePicker from 'primevue/datepicker'
 import Checkbox from 'primevue/checkbox'
 import HeicImage from './HeicImage.vue'
-import { getPhotoUrl, listAlbums, getPhotosAlbums, batchUpdateAlbumPhotos, updateAlbum, type Album } from '../api/photos'
+import { getPhotoUrl, listAlbums, getPhotosAlbums, batchUpdateAlbumPhotos, updateAlbum, createAlbum, type Album } from '../api/photos'
 import { getAlbumCheckState as calculateAlbumCheckState, getNewPendingAction } from '../utils/albumSelection'
 import type { Photo, Face, LandmarkItem, Person, CurationStatus } from '../api/photos'
 import { ref, onMounted, watch } from 'vue'
@@ -134,6 +134,31 @@ async function saveAlbumChanges() {
   }
 }
 
+const showNewAlbumInput = ref(false)
+const newAlbumName = ref('')
+const creatingAlbum = ref(false)
+
+async function handleCreateAlbumAndAdd() {
+  const name = newAlbumName.value.trim()
+  if (!name) return
+  creatingAlbum.value = true
+  try {
+    const album = await createAlbum(name)
+    const photoIds = props.selectedPhotos && props.selectedPhotos.length > 0
+      ? props.selectedPhotos.map(p => p.id)
+      : [props.photo.id]
+    await batchUpdateAlbumPhotos([album.id], photoIds, 'add')
+    newAlbumName.value = ''
+    showNewAlbumInput.value = false
+    await loadAlbums()
+    await loadPhotosAlbums()
+  } catch (err) {
+    console.error('Failed to create album:', err)
+  } finally {
+    creatingAlbum.value = false
+  }
+}
+
 const togglingCover = ref(false)
 async function toggleCover() {
   if (!props.albumId || togglingCover.value) return
@@ -225,16 +250,25 @@ function getPersonName(personId?: number) {
           </div>
         </div>
 
+        <div class="new-album-inline" style="margin-top: 0.5rem">
+          <div v-if="showNewAlbumInput" class="new-album-form">
+            <input v-model="newAlbumName" type="text" class="p-inputtext new-album-input" placeholder="Albumname…" @keydown.enter="handleCreateAlbumAndAdd" @keydown.escape="showNewAlbumInput = false" />
+            <Button icon="pi pi-check" size="small" :loading="creatingAlbum" :disabled="!newAlbumName.trim()" @click="handleCreateAlbumAndAdd" />
+            <Button icon="pi pi-times" size="small" text @click="showNewAlbumInput = false; newAlbumName = ''" />
+          </div>
+          <Button v-else label="Neues Album" icon="pi pi-plus" size="small" text @click="showNewAlbumInput = true" class="p-0" />
+        </div>
+
         <div class="sidebar-divider" style="margin: 1.5rem 0" />
-        
+
         <div class="multi-actions">
-          <Button 
-            label="Speichern" 
-            icon="pi pi-save" 
-            class="w-full" 
+          <Button
+            label="Speichern"
+            icon="pi pi-save"
+            class="w-full"
             :disabled="Object.keys(pendingAlbumChanges).length === 0"
             :loading="savingAlbums"
-            @click="saveAlbumChanges" 
+            @click="saveAlbumChanges"
           />
         </div>
       </div>
@@ -346,6 +380,14 @@ function getPersonName(personId?: number) {
                 class="p-0"
             />
           </div>
+        </div>
+        <div class="new-album-inline" style="margin-top: 0.5rem">
+          <div v-if="showNewAlbumInput" class="new-album-form">
+            <input v-model="newAlbumName" type="text" class="p-inputtext new-album-input" placeholder="Albumname…" @keydown.enter="handleCreateAlbumAndAdd" @keydown.escape="showNewAlbumInput = false; newAlbumName = ''" />
+            <Button icon="pi pi-check" size="small" :loading="creatingAlbum" :disabled="!newAlbumName.trim()" @click="handleCreateAlbumAndAdd" />
+            <Button icon="pi pi-times" size="small" text @click="showNewAlbumInput = false; newAlbumName = ''" />
+          </div>
+          <Button v-else label="Neues Album" icon="pi pi-plus" size="small" text @click="showNewAlbumInput = true" class="p-0" />
         </div>
         <div class="multi-actions" style="margin-top: 0.75rem">
           <Button v-if="Object.keys(pendingAlbumChanges).length > 0"
@@ -607,5 +649,22 @@ function getPersonName(personId?: number) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.new-album-inline {
+  padding-inline: 0.25rem;
+}
+
+.new-album-form {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.new-album-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.85rem;
 }
 </style>

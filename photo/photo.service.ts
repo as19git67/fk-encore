@@ -919,6 +919,10 @@ export async function listAlbumsLogic(userId: number): Promise<ListAlbumsRespons
         cover_photo_id: albums.cover_photo_id,
         created_at: albums.created_at,
         updated_at: albums.updated_at,
+        is_shared: sql<boolean>`EXISTS (
+          SELECT 1 FROM ${albumShares}
+          WHERE ${albumShares.album_id} = ${albums.id}
+        )`,
         cover_filename: sql<string>`COALESCE(
           ${photos.filename},
           (
@@ -964,6 +968,7 @@ export async function listAlbumsLogic(userId: number): Promise<ListAlbumsRespons
       newest_photo_at: r.newest_photo_at ?? undefined,
       oldest_photo_at: r.oldest_photo_at ?? undefined,
       photo_count: Number(r.photo_count || 0),
+      is_shared: !!r.is_shared,
       created_at: r.created_at ?? "",
       updated_at: r.updated_at ?? "",
     })),
