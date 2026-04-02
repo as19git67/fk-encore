@@ -177,6 +177,7 @@ onMounted(loadData)
           />
           <div v-else class="album-icon"><i class="pi pi-images"/></div>
         </div>
+        <i v-if="album.is_shared" class="pi pi-share-alt shared-badge" v-tooltip="'Freigegeben'" />
         <div class="album-info">
           <span class="album-name">{{ album.name }}</span>
           <span v-if="album.description" class="album-desc">{{ album.description }}</span>
@@ -285,6 +286,19 @@ onMounted(loadData)
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.shared-badge {
+  position: absolute;
+  bottom: 0.5rem;
+  right: 0.5rem;
+  z-index: 1;
+  font-size: 0.9rem;
+  color: white;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 50%;
+  padding: 0.35rem;
+  backdrop-filter: blur(4px);
 }
 
 .album-actions {

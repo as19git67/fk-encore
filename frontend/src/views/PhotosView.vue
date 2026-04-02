@@ -113,6 +113,19 @@ const { groupedPhotos } = usePhotoGrouping(photos, {
 const { selectedIndex, selectedPhotoIds, selectedPhoto, selectedPhotos, selectPhoto } =
   usePhotoSelection(photos)
 
+// Expand selection: if any selected photo is in a group, include all group members
+const expandedSelectedPhotos = computed<Photo[]>(() => {
+  const expanded = new Set<number>()
+  for (const photo of selectedPhotos.value) {
+    expanded.add(photo.id)
+    const group = photoToGroup.value.get(photo.id)
+    if (group) {
+      for (const pid of group.photo_ids) expanded.add(pid)
+    }
+  }
+  return photos.value.filter(p => expanded.has(p.id))
+})
+
 const prevPhoto = computed(() =>
   selectedIndex.value > 0 ? photos.value[selectedIndex.value - 1] ?? null : null
 )
@@ -336,6 +349,18 @@ async function handleReindexPhoto() {
   finally { reindexingPhoto.value = false }
 }
 
+// ── Group multi-select (Ctrl/Shift click on a stack) ─────────────────────
+function handleGroupMultiSelect(group: PhotoGroup, event: MouseEvent) {
+  const newSet = new Set(selectedPhotoIds.value)
+  for (const pid of group.photo_ids) {
+    newSet.add(pid)
+  }
+  selectedPhotoIds.value = newSet
+  // Set selectedIndex to the cover photo or first group member
+  const coverIdx = photos.value.findIndex(p => p.id === (group.cover_photo_id ?? group.photo_ids[0]))
+  if (coverIdx >= 0) selectedIndex.value = coverIdx
+}
+
 // ── Stack group handling ──────────────────────────────────────────────────────
 function selectAfterGroup(group: PhotoGroup | null) {
   if (!group || photos.value.length === 0) {
@@ -381,9 +406,29 @@ function handleStartGroupReview() {
 function handleScrollTo(sectionId: string) {
   photoGridRef.value?.scrollToSection(sectionId)
   activeSection.value = sectionId
+
+  // Select first photo in the target section
+  for (const yearGroup of groupedPhotos.value) {
+    if (yearGroup.sectionId === sectionId) {
+      const firstMonth = yearGroup.months[0]
+      if (firstMonth?.photos.length) {
+        selectPhoto(firstMonth.photos[0]!.index)
+      }
+      return
+    }
+    for (const monthGroup of yearGroup.months) {
+      if (monthGroup.sectionId === sectionId && monthGroup.photos.length) {
+        selectPhoto(monthGroup.photos[0]!.index)
+        return
+      }
+    }
+  }
 }
 
 // ── Upload / Drag & Drop ──────────────────────────────────────────────────────
+const uploadErrors = ref<string[]>([])
+const showErrorFlyout = ref(false)
+
 const isDragging = ref(false)
 const dragCounter = ref(0)
 
@@ -417,12 +462,19 @@ async function handleUpload(event: any) {
     if (abortController.signal.aborted) {
       error.value = 'Hochladen wurde abgebrochen.'
     } else if (duplicates.length || unsupported.length || errors.length) {
-      const msg = [
-        duplicates.length ? `Bereits vorhanden: ${duplicates.join(', ')}.` : '',
-        unsupported.length ? `Nicht unterstützt: ${unsupported.join(', ')}.` : '',
-        errors.length ? `Fehler: ${errors.join('; ')}.` : '',
-      ].filter(Boolean).join(' ')
-      error.value = msg
+      const allErrors: string[] = [
+        ...duplicates.map(f => `Bereits vorhanden: ${f}`),
+        ...unsupported.map(f => `Nicht unterstützt: ${f}`),
+        ...errors.map(e => `Fehler: ${e}`),
+      ]
+      const totalErrors = allErrors.length
+      if (totalErrors > 3) {
+        uploadErrors.value = allErrors
+        error.value = `${totalErrors} Dateien konnten nicht hochgeladen werden.`
+      } else {
+        uploadErrors.value = []
+        error.value = allErrors.join(' ')
+      }
     }
   } catch (err: any) {
     if (!abortController.signal.aborted) error.value = err.message || 'Fehler beim Hochladen'
@@ -530,7 +582,25 @@ onUnmounted(() => serviceHealth.stopPolling())
     </div>
 
     <Message v-if="searchError" severity="error" @close="searchError = ''">{{ searchError }}</Message>
-    <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
+    <Message v-if="error" severity="error" @close="error = ''; uploadErrors = []">
+      {{ error }}
+      <button v-if="uploadErrors.length > 3" class="error-flyout-btn" @click="showErrorFlyout = !showErrorFlyout">
+        <i class="pi pi-list" /> Details anzeigen
+      </button>
+    </Message>
+
+    <!-- Error flyout overlay -->
+    <div v-if="showErrorFlyout && uploadErrors.length > 0" class="error-flyout-overlay" @click.self="showErrorFlyout = false">
+      <div class="error-flyout">
+        <div class="error-flyout-header">
+          <span>{{ uploadErrors.length }} Fehler beim Hochladen</span>
+          <button class="error-flyout-close" @click="showErrorFlyout = false"><i class="pi pi-times" /></button>
+        </div>
+        <ul class="error-flyout-list">
+          <li v-for="(err, i) in uploadErrors" :key="i">{{ err }}</li>
+        </ul>
+      </div>
+    </div>
 
     <div v-if="uploading" class="info-text">Fotos werden hochgeladen…</div>
     <div v-else-if="loading" class="info-text">Lade Fotos…</div>
@@ -560,6 +630,7 @@ onUnmounted(() => serviceHealth.stopPolling())
         @photo-click="(item, event) => selectPhoto(item.index, event)"
         @photo-dblclick="isFullscreen = true"
         @stack-click="activeGroup = $event"
+        @group-multi-select="handleGroupMultiSelect"
         @toggle-favorite="handleToggleFavorite"
         @hide="handleDelete"
         @restore="handleRestore"
@@ -569,7 +640,7 @@ onUnmounted(() => serviceHealth.stopPolling())
       <PhotoDetailSidebar
         v-if="selectedPhotos.length > 0"
         :photo="(selectedPhoto || selectedPhotos[0])!"
-        :selectedPhotos="selectedPhotos"
+        :selectedPhotos="expandedSelectedPhotos"
         :faces="detectedFaces"
         :loading-faces="loadingFaces"
         :landmarks="detectedLandmarks"
@@ -775,4 +846,82 @@ onUnmounted(() => serviceHealth.stopPolling())
 }
 
 .drag-message .pi { font-size: 3rem; }
+
+/* ── Error flyout ───────────────────────────────────────────────────────── */
+.error-flyout-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: 0.75rem;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.error-flyout-btn:hover { background: rgba(255, 255, 255, 0.3); }
+
+.error-flyout-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 8rem;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.error-flyout {
+  background: var(--surface-card);
+  border: 1px solid var(--surface-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  width: 90%;
+  max-width: 500px;
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.error-flyout-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  border-bottom: 1px solid var(--surface-border);
+  flex-shrink: 0;
+}
+
+.error-flyout-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-color-secondary);
+  padding: 0.25rem;
+  border-radius: 4px;
+}
+.error-flyout-close:hover { color: var(--text-color); background: var(--surface-100); }
+
+.error-flyout-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.error-flyout-list li {
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  border-bottom: 1px solid var(--surface-50);
+}
+
+.error-flyout-list li:last-child { border-bottom: none; }
 </style>
