@@ -35,6 +35,9 @@ import type {
   AlbumPhotoWithMeta,
   AlbumUserSettings,
   UpdateAlbumUserSettingsRequest,
+  ViewConfig,
+  ActiveView,
+  PhotoCurationStats,
   CreateAlbumRequest,
   UpdateAlbumRequest,
   AddPhotoToAlbumRequest,
@@ -100,6 +103,21 @@ export const ENABLE_LOCAL_FACES = process.env.ENABLE_LOCAL_FACES === "true";
 const LANDMARK_SERVICE_URL = process.env.LANDMARK_SERVICE_URL || "http://localhost:8002";
 export const ENABLE_LANDMARKS = process.env.ENABLE_LANDMARKS === "true";
 export const ENABLE_QUALITY = process.env.ENABLE_QUALITY !== "false"; // enabled by default
+
+// ── AI system user for virtual curation votes ────────────────────────────────
+const AI_USER_EMAIL = "ai@system.local";
+const AI_FAV_THRESHOLD = parseFloat(process.env.AI_FAV_THRESHOLD || "0.7");
+const AI_HIDE_THRESHOLD = parseFloat(process.env.AI_HIDE_THRESHOLD || "0.3");
+let _aiUserId: number | null | undefined; // undefined = not yet queried
+
+async function getAiUserId(): Promise<number | null> {
+  if (_aiUserId !== undefined) return _aiUserId;
+  const row = await dbFirst<{ id: number }>(
+    db.select({ id: users.id }).from(users).where(eq(users.email, AI_USER_EMAIL))
+  );
+  _aiUserId = row?.id ?? null;
+  return _aiUserId;
+}
 
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -1049,6 +1067,28 @@ export async function listAlbumsLogic(userId: number): Promise<ListAlbumsRespons
   };
 }
 
+// ── View Presets ─────────────────────────────────────────────────────────────
+
+const VIEW_PRESETS: Record<string, ViewConfig> = {
+  all:       { hideFilter: "mine",      favFilter: "all" },
+  favorites: { hideFilter: "mine",      favFilter: "mine" },
+  consensus: { hideFilter: "consensus", favFilter: "consensus", hideConsensusMin: 1, favConsensusMin: 2 },
+};
+
+/** Resolve effective ViewConfig from active_view preset or custom view_config */
+function resolveViewConfig(activeView: string, viewConfig: ViewConfig | null | undefined, hideMode: string): ViewConfig {
+  // Known preset → use it directly
+  if (activeView in VIEW_PRESETS) {
+    return VIEW_PRESETS[activeView]!;
+  }
+  // Custom view with config → use as-is
+  if (activeView === "custom" && viewConfig) {
+    return viewConfig;
+  }
+  // Legacy fallback: map old hide_mode to hideFilter
+  return { hideFilter: hideMode === "all" ? "consensus" : "mine", favFilter: "all", hideConsensusMin: 1 };
+}
+
 export async function getAlbumLogic(userId: number, albumId: number): Promise<AlbumWithPhotos> {
   const album = await dbFirst<typeof albums.$inferSelect>(
     db.select().from(albums).where(eq(albums.id, albumId))
@@ -1081,54 +1121,59 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     settings = { album_id: albumId, user_id: userId, hide_mode: "mine", active_view: "all", view_config: null, cover_photo_id: undefined };
   }
 
-  // Build photo query based on settings
-  const conditions = [eq(albumPhotos.album_id, albumId)];
+  const viewConfig = resolveViewConfig(settings.active_view, settings.view_config as ViewConfig | null, settings.hide_mode);
 
-  // Apply curation filter (hide mode)
-  if (settings.hide_mode === "mine") {
-    // Hide if current user hid it
-    conditions.push(or(isNull(photoCuration.status), sql`${photoCuration.status} != 'hidden'`) as any);
-  } else if (settings.hide_mode === "all") {
-    // Hide if ANYONE who is part of the album hid it
-    // For simplicity, we hide if it's hidden in the global curation table for this photo at all
-    // A more precise version would check only album participants
-    const hiddenSubquery = db
-      .select({ photo_id: photoCuration.photo_id })
-      .from(photoCuration)
-      .where(eq(photoCuration.status, "hidden"));
-    
-    conditions.push(sql`${photos.id} NOT IN (${hiddenSubquery})`);
-  }
+  // Determine album participant IDs (owner + shared users + AI user)
+  const shareRows = await dbAll<{ user_id: number }>(
+    db.select({ user_id: albumShares.user_id }).from(albumShares).where(eq(albumShares.album_id, albumId))
+  );
+  const humanParticipantIds = [album.user_id, ...shareRows.map(s => s.user_id)];
+  const aiUserId = await getAiUserId();
+  const participantIds = aiUserId ? [...humanParticipantIds, aiUserId] : humanParticipantIds;
+  const memberCount = participantIds.length;
 
-  // Apply active view
-  if (settings.active_view === "favorites") {
-    conditions.push(eq(photoCuration.status, "favorite"));
-  } else if (settings.active_view === "by_user" && settings.view_config && (settings.view_config as any).userId) {
-    conditions.push(eq(albumPhotos.added_by_user_id, (settings.view_config as any).userId));
-  }
+  // Use raw SQL for the aggregated query with curation stats
+  const photoRows = (await db.execute(sql`
+    SELECT
+      p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash,
+      p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop,
+      ap.added_by_user_id, ap.added_at,
+      my_pc.status AS curation_status,
+      COALESCE(SUM(CASE WHEN all_pc.status = 'favorite' THEN 1 ELSE 0 END), 0)::int AS fav_count,
+      COALESCE(SUM(CASE WHEN all_pc.status = 'hidden' THEN 1 ELSE 0 END), 0)::int AS hide_count
+    FROM photos p
+    INNER JOIN album_photos ap ON ap.photo_id = p.id AND ap.album_id = ${albumId}
+    LEFT JOIN photo_curation my_pc ON my_pc.photo_id = p.id AND my_pc.user_id = ${userId}
+    LEFT JOIN photo_curation all_pc ON all_pc.photo_id = p.id AND all_pc.user_id = ANY(${participantIds}::int[])
+    GROUP BY p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash,
+             p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop, ap.added_by_user_id, ap.added_at, my_pc.status
+  `)).rows;
 
-  const query = db
-    .select({
-      id: photos.id,
-      user_id: photos.user_id,
-      filename: photos.filename,
-      original_name: photos.original_name,
-      mime_type: photos.mime_type,
-      size: photos.size,
-      hash: photos.hash,
-      taken_at: photos.taken_at,
-      created_at: photos.created_at,
-      curation_status: photoCuration.status,
-      added_by_user_id: albumPhotos.added_by_user_id,
-      added_at: albumPhotos.added_at,
-      auto_crop: photos.auto_crop,
-    })
-    .from(photos)
-    .innerJoin(albumPhotos, eq(albumPhotos.photo_id, photos.id))
-    .leftJoin(photoCuration, and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)))
-    .where(and(...conditions));
+  // Apply view filters in JS (cleaner than building dynamic HAVING clauses)
+  const filteredPhotos = photoRows.filter((r: any) => {
+    // ── Hide filter ──
+    if (viewConfig.hideFilter === "mine") {
+      if (r.curation_status === "hidden") return false;
+    } else if (viewConfig.hideFilter === "consensus") {
+      const min = viewConfig.hideConsensusMin ?? 1;
+      if (r.hide_count >= min) return false;
+    }
+    // hideFilter === "none" → no filtering
 
-  const photoRows = await dbAll<any>(query);
+    // ── Favorites filter ──
+    if (viewConfig.favFilter === "mine") {
+      if (r.curation_status !== "favorite") return false;
+    } else if (viewConfig.favFilter === "any") {
+      if (r.fav_count < 1) return false;
+    } else if (viewConfig.favFilter === "consensus") {
+      const min = viewConfig.favConsensusMin ?? 2;
+      if (r.fav_count < min) return false;
+    }
+    // favFilter === "all" → no filtering
+
+    return true;
+  });
+
   const stats = await getAlbumStats(albumId);
   // Determine cover photo: prefer user-specific cover, then album's cover, then newest in album
   let coverFilename: string | undefined = undefined;
@@ -1142,6 +1187,9 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
   } else {
     coverFilename = stats.newest_photo_filename;
   }
+
+  // Check if album is shared (has other participants)
+  const isShared = memberCount > 1;
 
   return {
     id: album.id,
@@ -1160,11 +1208,11 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
       album_id: settings.album_id,
       user_id: settings.user_id,
       hide_mode: settings.hide_mode as "mine" | "all",
-      active_view: settings.active_view as "all" | "favorites" | "by_user",
-      view_config: settings.view_config,
+      active_view: settings.active_view as ActiveView,
+      view_config: settings.view_config as ViewConfig | null,
       cover_photo_id: settings.cover_photo_id ?? undefined,
     },
-    photos: photoRows.map((r: any) => ({
+    photos: filteredPhotos.map((r: any) => ({
       id: r.id,
       user_id: r.user_id,
       filename: r.filename,
@@ -1178,6 +1226,11 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
       added_by_user_id: r.added_by_user_id ?? undefined,
       added_at: r.added_at ?? "",
       auto_crop: r.auto_crop ?? undefined,
+      curation_stats: isShared ? {
+        fav_count: Number(r.fav_count),
+        hide_count: Number(r.hide_count),
+        member_count: memberCount,
+      } : undefined,
     })),
   };
 }
@@ -1188,6 +1241,11 @@ export async function updateAlbumUserSettingsLogic(userId: number, req: UpdateAl
   if (req.activeView) values.active_view = req.activeView;
   if (req.viewConfig !== undefined) values.view_config = req.viewConfig;
   if ((req as any).coverPhotoId !== undefined) values.cover_photo_id = (req as any).coverPhotoId;
+
+  // When switching to a preset, store corresponding view_config for consistency
+  if (req.activeView && req.activeView in VIEW_PRESETS && req.viewConfig === undefined) {
+    values.view_config = VIEW_PRESETS[req.activeView];
+  }
 
   await dbExec(
     db.update(albumUserSettings)
@@ -1205,8 +1263,8 @@ export async function updateAlbumUserSettingsLogic(userId: number, req: UpdateAl
     album_id: updated.album_id,
     user_id: updated.user_id,
     hide_mode: updated.hide_mode as "mine" | "all",
-    active_view: updated.active_view as "all" | "favorites" | "by_user",
-    view_config: updated.view_config,
+    active_view: updated.active_view as ActiveView,
+    view_config: updated.view_config as ViewConfig | null,
     cover_photo_id: updated.cover_photo_id ?? undefined,
   };
 }
@@ -2828,6 +2886,23 @@ export async function indexPhotoQuality(userId: number, photoId: number): Promis
       .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)));
 
     console.log(`[quality] photo ${photoId} final score ${compositeScore.toFixed(3)}`);
+
+    // ── Virtual AI curation vote ──────────────────────────────────────────
+    const aiUserId = await getAiUserId();
+    if (aiUserId) {
+      let aiStatus: CurationStatus = "visible";
+      if (compositeScore >= AI_FAV_THRESHOLD) aiStatus = "favorite";
+      else if (compositeScore <= AI_HIDE_THRESHOLD) aiStatus = "hidden";
+
+      await db
+        .insert(photoCuration)
+        .values({ user_id: aiUserId, photo_id: photoId, status: aiStatus })
+        .onConflictDoUpdate({
+          target: [photoCuration.user_id, photoCuration.photo_id],
+          set: { status: aiStatus, updated_at: nowSql },
+        });
+      console.log(`[quality] photo ${photoId} AI curation → ${aiStatus} (score=${compositeScore.toFixed(3)}, thresholds: fav>=${AI_FAV_THRESHOLD}, hide<=${AI_HIDE_THRESHOLD})`);
+    }
   } catch (err) {
     console.error(`Quality scoring failed for photo ${photoId}:`, err);
   } finally {
