@@ -14,6 +14,7 @@ import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import {
   type AlbumWithPhotos,
   type AlbumShareWithUser,
+  type AlbumPhoto,
   getPhotoFaces,
   getAlbum,
   getAlbumShares,
@@ -287,8 +288,19 @@ const shareAccessLevel = ref<'read' | 'write'>('read')
 const sharing = ref(false)
 const loadingShares = ref(false)
 
-const viewOptions = [{ label: 'Alle', value: 'all' }, { label: 'Favoriten', value: 'favorites' }]
-const hideModeOptions = [{ label: 'Meine ausgeblendeten', value: 'mine' }, { label: 'Alle ausgeblendeten', value: 'all' }]
+const viewOptions = [
+  { label: 'Alle Fotos', value: 'all' },
+  { label: 'Meine Favoriten', value: 'favorites' },
+  { label: 'Gruppen-Highlights', value: 'consensus' },
+]
+
+// Show consensus option only for shared albums
+const availableViewOptions = computed(() => {
+  const isShared = album.value && album.value.role !== 'owner'
+    || (album.value?.photos?.some((p: AlbumPhoto) => p.curation_stats && p.curation_stats.member_count > 1))
+  if (isShared) return viewOptions
+  return viewOptions.filter(o => o.value !== 'consensus')
+})
 const accessLevelOptions = [{ label: 'Nur lesen', value: 'read' }, { label: 'Bearbeiten', value: 'write' }]
 
 const usersNotShared = computed(() => {
@@ -355,11 +367,7 @@ onUnmounted(() => serviceHealth.stopPolling())
           <Button v-if="isOwner" icon="pi pi-share-alt" label="Freigeben" size="small" text @click="openShareDialog" />
           <div v-if="album.settings" class="control-group">
             <label>Ansicht:</label>
-            <SelectButton v-model="album.settings.active_view" :options="viewOptions" optionLabel="label" optionValue="value" @change="handleSettingsChange" />
-          </div>
-          <div v-if="album.settings" class="control-group">
-            <label>Ausblenden:</label>
-            <SelectButton v-model="album.settings.hide_mode" :options="hideModeOptions" optionLabel="label" optionValue="value" @change="handleSettingsChange" />
+            <SelectButton v-model="album.settings.active_view" :options="availableViewOptions" optionLabel="label" optionValue="value" @change="handleSettingsChange" />
           </div>
         </div>
       </div>
