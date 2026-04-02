@@ -1,6 +1,11 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
+import os from "os";
+import { execFile } from "child_process";
+import { promisify } from "util";
+
+const execFileAsync = promisify(execFile);
 import exifr from "exifr";
 import { exiftool } from "exiftool-vendored";
 import { eq, and, or, sql, inArray, ilike, isNull, isNotNull, desc } from "drizzle-orm";
@@ -191,12 +196,13 @@ export async function indexPhotoFaces(userId: number, photoId: number, resetIgno
   let processingPath = filePath;
   let tempPath: string | null = null;
 
-  // Check if it's a HEIC file
+  // Check if it's a HEIC file – use heif-convert (libheif) since sharp may lack HEIC support
   const ext = path.extname(photo.filename).toLowerCase();
   if (ext === ".heic" || ext === ".heif") {
     try {
       tempPath = path.join(UPLOAD_DIR, `temp_${photoId}_${Date.now()}.jpg`);
-      await sharp(filePath).jpeg({ quality: 100 }).toFile(tempPath);
+      const jpegBuffer = await convertHeicToJpeg(filePath);
+      await fs.promises.writeFile(tempPath, jpegBuffer);
       processingPath = tempPath;
     } catch (err) {
       console.error(`Error converting HEIC photo ${photoId}:`, err);
@@ -798,8 +804,14 @@ export function getPhotoFileLogic(filename: string): { data: string; mimeType: s
 }
 
 export async function convertHeicToJpeg(filePath: string): Promise<Buffer> {
-  // .rotate() with no arguments auto-orients based on EXIF orientation tag
-  return sharp(filePath).rotate().jpeg({ quality: 90 }).toBuffer();
+  // sharp's bundled libvips may lack HEIC support; use system heif-convert instead.
+  const tempFile = path.join(os.tmpdir(), `heic_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.jpg`);
+  try {
+    await execFileAsync('heif-convert', ['-q', '90', filePath, tempFile]);
+    return await fs.promises.readFile(tempFile);
+  } finally {
+    fs.promises.unlink(tempFile).catch(() => {});
+  }
 }
 
 /**
