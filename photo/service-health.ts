@@ -25,11 +25,11 @@ export interface ServiceHealthStatus {
 // ─── configuration ────────────────────────────────────────────────────────────
 
 const HEALTH_CHECK_INTERVAL_MS = parseInt(
-  process.env.HEALTH_CHECK_INTERVAL_MS ?? "30000",
+  process.env.HEALTH_CHECK_INTERVAL_MS ?? "60000",
   10,
 );
 const HEALTH_CHECK_TIMEOUT_MS = parseInt(
-  process.env.HEALTH_CHECK_TIMEOUT_MS ?? "5000",
+  process.env.HEALTH_CHECK_TIMEOUT_MS ?? "15000",
   10,
 );
 
