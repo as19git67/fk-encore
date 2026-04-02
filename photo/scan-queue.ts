@@ -236,24 +236,34 @@ export async function requeueForRescan(userId: number, force: boolean): Promise<
 
 async function getMissingPhotoIds(userId: number, service: ScanService): Promise<number[]> {
   if (service === "face_detection") {
-    // Photos with no face rows
+    // Photos without a 'done' queue entry for face_detection.
+    // Previously this checked for missing face rows, but photos that were
+    // scanned and had zero faces would be re-queued every time.
     const rows = await db.execute<{ id: number }>(sql`
       SELECT p.id FROM photos p
       WHERE p.user_id = ${userId}
         AND NOT EXISTS (
-          SELECT 1 FROM faces f WHERE f.photo_id = p.id
+          SELECT 1 FROM photo_scan_queue q
+          WHERE q.photo_id = p.id
+            AND q.service = 'face_detection'
+            AND q.status = 'done'
         )
     `);
     return rows.rows.map((r) => r.id);
   }
 
   if (service === "landmark") {
-    // Photos with no landmark rows
+    // Photos without a 'done' queue entry for landmark.
+    // Previously this checked for missing landmark rows, but photos that were
+    // scanned and had zero landmarks would be re-queued every time.
     const rows = await db.execute<{ id: number }>(sql`
       SELECT p.id FROM photos p
       WHERE p.user_id = ${userId}
         AND NOT EXISTS (
-          SELECT 1 FROM photo_landmarks l WHERE l.photo_id = p.id
+          SELECT 1 FROM photo_scan_queue q
+          WHERE q.photo_id = p.id
+            AND q.service = 'landmark'
+            AND q.status = 'done'
         )
     `);
     return rows.rows.map((r) => r.id);

@@ -139,7 +139,7 @@ class ScanWorker {
         await indexPhotoEmbeddings(job.user_id, job.photo_id, job.force);
         break;
       case "face_detection":
-        await indexPhotoFaces(job.user_id, job.photo_id, false);
+        await indexPhotoFaces(job.user_id, job.photo_id, job.force);
         break;
       case "landmark":
         await indexPhotoLandmarks(job.user_id, job.photo_id);
