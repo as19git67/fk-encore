@@ -49,8 +49,9 @@ const checkAndConvert = async () => {
   if (!props.src) return;
   naturalAspectRatio.value = null;
 
-  const lowerSrc = props.src.toLowerCase();
-  isHeic.value = lowerSrc.endsWith('.heic') || lowerSrc.endsWith('.heif');
+  // Strip query params before checking extension so "file.heic?w=400" is detected correctly
+  const pathPart = (props.src.split('?')[0] ?? props.src).toLowerCase();
+  isHeic.value = pathPart.endsWith('.heic') || pathPart.endsWith('.heif');
 
   if (!isHeic.value) {
     displaySrc.value = props.src;
