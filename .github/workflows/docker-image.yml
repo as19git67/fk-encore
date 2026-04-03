@@ -106,7 +106,7 @@ jobs:
           username: ${{ secrets.TRUENAS_USER }}
           key: ${{ secrets.TRUENAS_SSH_KEY }}
           script: |
-            cd ${{ secrets.TRUENAS_COMPOSE_DIR }}
+            cd ${{ secrets.TRUENAS_COMPOSE_DIR_TEST }}
             docker compose pull
             docker compose up -d
 
@@ -118,6 +118,6 @@ jobs:
           username: ${{ secrets.TRUENAS_USER }}
           key: ${{ secrets.TRUENAS_SSH_KEY }}
           script: |
-            cd ${{ secrets.TRUENAS_COMPOSE_DIR }}
+            cd ${{ secrets.TRUENAS_COMPOSE_DIR_LATEST }}
             docker compose pull
             docker compose up -d
