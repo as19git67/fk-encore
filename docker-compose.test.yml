@@ -1,8 +1,11 @@
+# Test-Umgebung: verwendet den 'test'-Tag (gebaut aus PRs)
+# Auf TrueNAS in einem separaten Verzeichnis ablegen, z. B. /mnt/data/fk-encore-test/
+# Eigene .env-Datei mit TEST-spezifischen Werten anlegen.
+
 services:
-  # ── Main Encore.ts Application ─────────────────────────────────────────────
   app:
-    image: ghcr.io/as19git67/fk-encore:latest
-    container_name: fk-encore-app
+    image: ghcr.io/as19git67/fk-encore:test
+    container_name: fk-encore-app-test
     restart: unless-stopped
     depends_on:
       postgres:
@@ -14,7 +17,7 @@ services:
       landmark:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "8081:8080"       # anderer Host-Port als Produktion
     environment:
       PORT: "8080"
       DB_TYPE: postgres
@@ -22,35 +25,33 @@ services:
       POSTGRES_PORT: 5432
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DATABASE: encore
+      POSTGRES_DATABASE: encore_test
       PHOTO_UPLOAD_DIR: /mnt/data/photos
       ADMIN_EMAIL: admin@example.com
       ADMIN_NAME: Admin
-      ADMIN_PASSWORD: changeme   # <-- hier anpassen!
+      ADMIN_PASSWORD: changeme
       RP_ID: localhost
-      RP_NAME: Vivanty App
-      RP_ORIGIN: http://localhost:8080
+      RP_NAME: Vivanty App (Test)
+      RP_ORIGIN: http://localhost:8081
       ENABLE_LOCAL_FACES: "true"
       FACE_DISTANCE_THRESHOLD: "0.42"
       INSIGHTFACE_SERVICE_URL: http://insightface:8000
       EMBEDDING_SERVICE_URL: http://embedding_service:8000
       LANDMARK_SERVICE_URL: http://landmark:8000
       ENABLE_LANDMARKS: "true"
-      # SMTP for password reset emails (leave empty to log tokens to console)
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-noreply@example.com}
-      APP_URL: ${APP_URL:-http://localhost:8080}
+      APP_URL: ${APP_URL:-http://localhost:8081}
     volumes:
       - photos:/mnt/data/photos
       - thumbnails:/mnt/data/thumbnails
 
-  # ── InsightFace Service (Face Detection) ───────────────────────────────────
   insightface:
     image: ghcr.io/as19git67/fk-encore-insightface:latest
-    container_name: fk-encore-insightface
+    container_name: fk-encore-insightface-test
     restart: unless-stopped
     environment:
       ORT_LOGGING_LEVEL: "3"
@@ -61,16 +62,15 @@ services:
       retries: 5
       start_period: 20s
 
-  # ── Embedding Service (CLIP + DINOv2) ──────────────────────────────────────
   embedding_service:
     image: ghcr.io/as19git67/fk-encore-embedding:latest
-    container_name: fk-encore-embedding
+    container_name: fk-encore-embedding-test
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/embeddings
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/embeddings_test
       CLIP_MODEL_NAME: xlm-roberta-large-ViT-H-14
       CLIP_PRETRAINED: frozen_laion5b_s13b_b90k
       DINO_MODEL_NAME: facebook/dinov2-base
@@ -82,10 +82,9 @@ services:
       retries: 5
       start_period: 20s
 
-  # ── Landmark Detection Service (Grounding DINO) ────────────────────────────
   landmark:
     image: ghcr.io/as19git67/fk-encore-landmark:latest
-    container_name: fk-encore-landmark
+    container_name: fk-encore-landmark-test
     restart: unless-stopped
     environment:
       LANDMARK_THRESHOLD: "0.35"
@@ -97,49 +96,28 @@ services:
       retries: 3
       start_period: 120s
 
-  # ── PostgreSQL (shared instance for both app and embedding service) ─────────
   postgres:
     image: pgvector/pgvector:pg18
-    container_name: fk-encore-db
+    container_name: fk-encore-db-test
     restart: unless-stopped
     ports:
-      - "5432:5432"
+      - "5433:5432"       # anderer Host-Port als Produktion
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: encore          # primary database for the app
+      POSTGRES_DB: encore_test
     volumes:
       - pgdata:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d encore"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d encore_test"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-volumes:
-  photos:
-    driver: local
-    driver_opts:
-      device: /Users/anton/vivanty_data/photos
-      o: bind
-      type: none
-  thumbnails:
-    driver: local
-    driver_opts:
-      device: /Users/anton/vivanty_data/thumbnails
-      o: bind
-      type: none
-  pgdata:
-    driver: local
-    driver_opts:
-      device: /Users/anton/vivanty_data/pgdata
-      o: bind
-      type: none
-
-  # ── Watchtower (empfängt Deploy-Trigger via HTTP, zieht neue Images) ─────────
+  # ── Watchtower (Port 9001 — separater Endpunkt vom Produktions-Watchtower) ───
   watchtower:
     image: containrrr/watchtower
-    container_name: fk-encore-watchtower
+    container_name: fk-encore-watchtower-test
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -148,12 +126,31 @@ volumes:
       WATCHTOWER_HTTP_API_TOKEN: ${WATCHTOWER_TOKEN}
       WATCHTOWER_CLEANUP: "true"
       WATCHTOWER_NO_STARTUP_MESSAGE: "true"
-    # Nur diese vier Container beobachten (nicht alle Container auf dem Host)
     command: >
       --http-api-periodic-polls
-      fk-encore-app
-      fk-encore-insightface
-      fk-encore-embedding
-      fk-encore-landmark
+      fk-encore-app-test
+      fk-encore-insightface-test
+      fk-encore-embedding-test
+      fk-encore-landmark-test
     ports:
-      - "9000:8080"
+      - "9001:8080"
+
+volumes:
+  photos:
+    driver: local
+    driver_opts:
+      device: /mnt/data/fk-encore-test/photos
+      o: bind
+      type: none
+  thumbnails:
+    driver: local
+    driver_opts:
+      device: /mnt/data/fk-encore-test/thumbnails
+      o: bind
+      type: none
+  pgdata:
+    driver: local
+    driver_opts:
+      device: /mnt/data/fk-encore-test/pgdata
+      o: bind
+      type: none

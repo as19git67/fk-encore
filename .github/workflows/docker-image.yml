@@ -87,12 +87,29 @@ jobs:
           tags: |
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
             type=semver,pattern={{version}}
+            type=raw,value=test,enable=${{ github.event_name == 'pull_request' }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: ${{ github.event_name != 'pull_request' }}
+          push: true
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_NUMBER=${{ github.run_number }}-${{ github.sha }}
+
+      - name: Deploy to TrueNAS (test)
+        if: github.event_name == 'pull_request'
+        run: |
+          curl -f -X POST \
+            -H "Authorization: Bearer ${{ secrets.WATCHTOWER_TOKEN }}" \
+            ${{ secrets.WATCHTOWER_URL_TEST }}/v1/update
+
+      - name: Deploy to TrueNAS (latest)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          curl -f -X POST \
+            -H "Authorization: Bearer ${{ secrets.WATCHTOWER_TOKEN }}" \
+            ${{ secrets.WATCHTOWER_URL_PROD }}/v1/update
