@@ -104,6 +104,9 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           curl -f -X POST \
+            --retry 5 \
+            --retry-delay 10 \
+            --retry-all-errors \
             -H "Authorization: Bearer ${{ secrets.WATCHTOWER_TOKEN }}" \
             ${{ secrets.WATCHTOWER_URL_TEST }}/v1/update
 
@@ -111,5 +114,8 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: |
           curl -f -X POST \
+            --retry 5 \
+            --retry-delay 10 \
+            --retry-all-errors \
             -H "Authorization: Bearer ${{ secrets.WATCHTOWER_TOKEN }}" \
             ${{ secrets.WATCHTOWER_URL_PROD }}/v1/update
