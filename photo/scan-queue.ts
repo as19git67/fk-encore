@@ -8,7 +8,7 @@ import db from "../db/database";
 import { photoScanQueue, photos, faces, photoLandmarks } from "../db/schema";
 import { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY } from "./photo.service";
 
-export type ScanService = "embedding" | "face_detection" | "landmark" | "quality";
+export type ScanService = "embedding" | "face_detection" | "landmark" | "quality" | "geocoding";
 export type ScanStatus = "pending" | "processing" | "failed" | "done";
 
 /**
@@ -36,7 +36,7 @@ export interface QueueStatus {
 
 /** Services that are enabled in this installation */
 function enabledServices(): ScanService[] {
-  const services: ScanService[] = ["embedding"];
+  const services: ScanService[] = ["embedding", "geocoding"];
   if (ENABLE_LOCAL_FACES) services.push("face_detection");
   if (ENABLE_LANDMARKS) services.push("landmark");
   if (ENABLE_QUALITY) services.push("quality");
@@ -145,7 +145,7 @@ export async function getQueueStatus(userId: number): Promise<QueueStatus> {
   `);
 
   const map = new Map<ScanService, QueueServiceStatus>();
-  for (const svc of (["embedding", "face_detection", "landmark", "quality"] as ScanService[])) {
+  for (const svc of (["embedding", "face_detection", "landmark", "quality", "geocoding"] as ScanService[])) {
     map.set(svc, { service: svc, pending: 0, processing: 0, failed: 0, done: 0 });
   }
 
@@ -275,6 +275,23 @@ async function getMissingPhotoIds(userId: number, service: ScanService): Promise
       SELECT p.id FROM photos p
       WHERE p.user_id = ${userId}
         AND p.ai_quality_score IS NULL
+    `);
+    return rows.rows.map((r) => r.id);
+  }
+
+  if (service === "geocoding") {
+    // Photos without a 'done' geocoding queue entry.
+    // This covers both photos that were never geocoded and photos where
+    // geocoding failed (failed entries don't block a new pending insert).
+    const rows = await db.execute<{ id: number }>(sql`
+      SELECT p.id FROM photos p
+      WHERE p.user_id = ${userId}
+        AND NOT EXISTS (
+          SELECT 1 FROM photo_scan_queue q
+          WHERE q.photo_id = p.id
+            AND q.service = 'geocoding'
+            AND q.status = 'done'
+        )
     `);
     return rows.rows.map((r) => r.id);
   }
