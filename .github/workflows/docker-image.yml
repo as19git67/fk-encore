@@ -100,24 +100,14 @@ jobs:
 
       - name: Deploy to TrueNAS (test)
         if: github.event_name == 'pull_request'
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.TRUENAS_HOST }}
-          username: ${{ secrets.TRUENAS_USER }}
-          key: ${{ secrets.TRUENAS_SSH_KEY }}
-          script: |
-            cd ${{ secrets.TRUENAS_COMPOSE_DIR_TEST }}
-            docker compose pull
-            docker compose up -d
+        run: |
+          curl -f -X POST \
+            -H "Authorization: Bearer ${{ secrets.WATCHTOWER_TOKEN }}" \
+            ${{ secrets.WATCHTOWER_URL_TEST }}/v1/update
 
       - name: Deploy to TrueNAS (latest)
         if: github.ref == 'refs/heads/main'
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.TRUENAS_HOST }}
-          username: ${{ secrets.TRUENAS_USER }}
-          key: ${{ secrets.TRUENAS_SSH_KEY }}
-          script: |
-            cd ${{ secrets.TRUENAS_COMPOSE_DIR_LATEST }}
-            docker compose pull
-            docker compose up -d
+        run: |
+          curl -f -X POST \
+            -H "Authorization: Bearer ${{ secrets.WATCHTOWER_TOKEN }}" \
+            ${{ secrets.WATCHTOWER_URL_PROD }}/v1/update
