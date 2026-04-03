@@ -98,6 +98,13 @@ export const appRedirect = api.raw(
   }
 );
 
+export const buildInfo = api(
+  { expose: true, method: "GET", path: "/api/build-info" },
+  async (): Promise<{ build: string }> => {
+    return { build: process.env.APP_BUILD_NUMBER ?? "dev" };
+  }
+);
+
 export const healthz = api.raw(
   { expose: true, method: "GET", path: "/healthz" },
   async (_req, res) => {

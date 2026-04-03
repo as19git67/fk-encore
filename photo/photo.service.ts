@@ -476,7 +476,7 @@ async function geocodePhotoLocation(userId: number, photoId: number, lat: number
  * 2. If GPS is available, calls Nominatim for reverse-geocoding.
  * 3. Succeeds silently when no GPS data exists (nothing to geocode).
  */
-export async function indexPhotoGeocoding(userId: number, photoId: number): Promise<void> {
+export async function indexPhotoGeocoding(userId: number, photoId: number, force = false): Promise<void> {
   const photo = await dbFirst<typeof photos.$inferSelect>(
     db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
   );
@@ -502,8 +502,8 @@ export async function indexPhotoGeocoding(userId: number, photoId: number): Prom
   // No GPS available at all — mark as done (nothing to geocode)
   if (lat === null || lon === null) return;
 
-  // Already has a location name and this is not a forced rescan — skip
-  if (photo.location_name) return;
+  // Already has a location name — skip unless this is a forced rescan
+  if (photo.location_name && !force) return;
 
   await geocodePhotoLocation(userId, photoId, lat, lon);
 }
