@@ -78,6 +78,20 @@
       "when": 1775300000000,
       "tag": "0010_auto_crop",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1775400000000,
+      "tag": "0010_album_curation_views",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1775500000000,
+      "tag": "0011_geocoding_scan_service",
+      "breakpoints": true
     }
   ]
 }
