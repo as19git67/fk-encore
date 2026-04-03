@@ -97,3 +97,27 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Deploy to TrueNAS (test)
+        if: github.event_name == 'pull_request'
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.TRUENAS_HOST }}
+          username: ${{ secrets.TRUENAS_USER }}
+          key: ${{ secrets.TRUENAS_SSH_KEY }}
+          script: |
+            cd ${{ secrets.TRUENAS_COMPOSE_DIR }}
+            docker compose pull
+            docker compose up -d
+
+      - name: Deploy to TrueNAS (latest)
+        if: github.ref == 'refs/heads/main'
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.TRUENAS_HOST }}
+          username: ${{ secrets.TRUENAS_USER }}
+          key: ${{ secrets.TRUENAS_SSH_KEY }}
+          script: |
+            cd ${{ secrets.TRUENAS_COMPOSE_DIR }}
+            docker compose pull
+            docker compose up -d
