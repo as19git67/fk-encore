@@ -296,7 +296,7 @@ export const photoLandmarks = pgTable("photo_landmarks", {
 
 // ========== Scan Queue ==========
 
-export const scanServiceEnum = pgEnum("scan_service", ["embedding", "face_detection", "landmark", "quality"]);
+export const scanServiceEnum = pgEnum("scan_service", ["embedding", "face_detection", "landmark", "quality", "geocoding"]);
 export const scanStatusEnum = pgEnum("scan_status", ["pending", "processing", "failed", "done"]);
 
 export const photoScanQueue = pgTable("photo_scan_queue", {

@@ -24,6 +24,7 @@ const serviceLabels: Record<string, string> = {
   face_detection: 'Gesichtserkennung',
   landmark: 'Sehenswürdigkeiten',
   quality: 'Qualität',
+  geocoding: 'Geocoding',
 }
 
 const totalPending = computed(() =>
