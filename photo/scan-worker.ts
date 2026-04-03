@@ -1,5 +1,5 @@
 /**
- * Background scan workers — one per service (embedding, face_detection, landmark, quality).
+ * Background scan workers — one per service (embedding, face_detection, landmark, quality, geocoding).
  * Workers are started as a side-effect of importing this module (via encore.service.ts).
  *
  * Concurrency per worker is configurable via environment variables:
@@ -7,6 +7,9 @@
  *   SCAN_FACE_CONCURRENCY        (default: 1)
  *   SCAN_LANDMARK_CONCURRENCY    (default: 1)
  *   SCAN_QUALITY_CONCURRENCY     (default: 1)
+ *
+ * The geocoding worker always runs at concurrency 1 with a 1.1s delay
+ * between jobs to respect the Nominatim rate limit (1 req/s).
  */
 
 import {
@@ -23,6 +26,7 @@ import {
   indexPhotoFaces,
   indexPhotoLandmarks,
   indexPhotoQuality,
+  indexPhotoGeocoding,
   findPhotoGroupsLogic,
   cleanupOrphanedPersons,
 } from "./photo.service";
@@ -139,13 +143,18 @@ class ScanWorker {
         await indexPhotoEmbeddings(job.user_id, job.photo_id, job.force);
         break;
       case "face_detection":
-        await indexPhotoFaces(job.user_id, job.photo_id, false);
+        await indexPhotoFaces(job.user_id, job.photo_id, job.force);
         break;
       case "landmark":
         await indexPhotoLandmarks(job.user_id, job.photo_id);
         break;
       case "quality":
         await indexPhotoQuality(job.user_id, job.photo_id);
+        break;
+      case "geocoding":
+        await indexPhotoGeocoding(job.user_id, job.photo_id);
+        // Respect Nominatim rate limit (1 req/s)
+        await new Promise((r) => setTimeout(r, 1100));
         break;
     }
   }
@@ -174,6 +183,7 @@ const embeddingWorker = new ScanWorker("embedding", embeddingConcurrency);
 const faceWorker = new ScanWorker("face_detection", faceConcurrency);
 const landmarkWorker = new ScanWorker("landmark", landmarkConcurrency);
 const qualityWorker = new ScanWorker("quality", qualityConcurrency);
+const geocodingWorker = new ScanWorker("geocoding", 1); // always 1 — Nominatim rate limit
 
 /** Wake all workers to check for new work. Non-blocking. */
 export function triggerWorkers(): void {
@@ -181,6 +191,7 @@ export function triggerWorkers(): void {
   faceWorker.tick();
   landmarkWorker.tick();
   qualityWorker.tick();
+  geocodingWorker.tick();
 }
 
 export async function startWorkers(): Promise<void> {
@@ -208,8 +219,9 @@ export async function startWorkers(): Promise<void> {
   faceWorker.start();
   landmarkWorker.start();
   qualityWorker.start();
+  geocodingWorker.start();
   console.log(
-    `[scan-worker] embedding(c=${embeddingConcurrency}), face_detection(c=${faceConcurrency}), landmark(c=${landmarkConcurrency}), quality(c=${qualityConcurrency})`,
+    `[scan-worker] embedding(c=${embeddingConcurrency}), face_detection(c=${faceConcurrency}), landmark(c=${landmarkConcurrency}), quality(c=${qualityConcurrency}), geocoding(c=1)`,
   );
 }
 
