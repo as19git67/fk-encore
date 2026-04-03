@@ -152,7 +152,7 @@ class ScanWorker {
         await indexPhotoQuality(job.user_id, job.photo_id);
         break;
       case "geocoding":
-        await indexPhotoGeocoding(job.user_id, job.photo_id);
+        await indexPhotoGeocoding(job.user_id, job.photo_id, job.force);
         // Respect Nominatim rate limit (1 req/s)
         await new Promise((r) => setTimeout(r, 1100));
         break;

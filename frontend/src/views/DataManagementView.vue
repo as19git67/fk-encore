@@ -10,6 +10,7 @@ import {
   recomputeAutoCrops,
   type ScanQueueStatus,
 } from '../api/photos'
+import { getBuildInfo } from '../api/system'
 
 // ── Scan Queue ────────────────────────────────────────────────────────────────
 
@@ -202,11 +203,16 @@ async function handleRecomputeAutoCrops() {
   }
 }
 
+// ── Build-Info ────────────────────────────────────────────────────────────────
+
+const buildNumber = ref('…')
+
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 onMounted(async () => {
   await fetchQueueStatus()
   if (isActive.value) startPolling()
+  getBuildInfo().then(info => { buildNumber.value = info.build })
 })
 
 onUnmounted(() => stopPolling())
@@ -407,6 +413,12 @@ onUnmounted(() => stopPolling())
         @click="handleRefreshMetadata"
       />
     </div>
+
+    <!-- Build-Info -->
+    <div class="data-management-group">
+      <h3>Version</h3>
+      <span class="build-number">Build {{ buildNumber }}</span>
+    </div>
   </div>
 </template>
 
@@ -434,6 +446,12 @@ onUnmounted(() => stopPolling())
   flex-direction: column;
   align-items: flex-start;
   gap: 0.5em;
+}
+
+.build-number {
+  font-size: 0.85rem;
+  color: var(--p-text-muted-color, #888);
+  font-family: monospace;
 }
 
 .data-management-group h3, .data-management-group p {
