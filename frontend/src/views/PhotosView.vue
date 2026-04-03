@@ -135,6 +135,16 @@ const nextPhoto = computed(() =>
     : null
 )
 
+// ── Mobile drawer state ───────────────────────────────────────────────────────
+const mobileTimelineOpen = ref(false)
+const mobileSidebarOpen = ref(false)
+
+watch(selectedPhoto, (photo) => {
+  if (photo && window.innerWidth <= 768) {
+    mobileSidebarOpen.value = true
+  }
+})
+
 // ── Sidebar state ─────────────────────────────────────────────────────────────
 const detectedFaces = ref<Face[]>([])
 const loadingFaces = ref(false)
@@ -607,7 +617,11 @@ onUnmounted(() => serviceHealth.stopPolling())
     <div v-else-if="photos.length === 0" class="info-text">Keine Fotos hochgeladen.</div>
 
     <!-- Three-column layout -->
-    <div v-else class="gallery-layout">
+    <div
+      v-else
+      class="gallery-layout"
+      :class="{ 'mobile-timeline-open': mobileTimelineOpen, 'mobile-sidebar-open': mobileSidebarOpen }"
+    >
       <!-- LEFT: Timeline nav -->
       <TimelineNav
         ref="timelineNavRef"
@@ -690,6 +704,34 @@ onUnmounted(() => serviceHealth.stopPolling())
       @close="handleGroupClose"
       @next="handleGroupNext"
     />
+
+    <!-- Mobile: Backdrop zum Schließen von Drawern -->
+    <div
+      v-if="mobileTimelineOpen || mobileSidebarOpen"
+      class="mobile-backdrop"
+      @click="mobileTimelineOpen = false; mobileSidebarOpen = false"
+    />
+
+    <!-- Mobile: Floating-Button zum Öffnen der Zeitleiste -->
+    <button
+      v-if="!loading && !uploading && photos.length > 0"
+      class="mobile-fab mobile-fab--timeline"
+      :class="{ active: mobileTimelineOpen }"
+      @click="mobileTimelineOpen = !mobileTimelineOpen; mobileSidebarOpen = false"
+      aria-label="Zeitleiste"
+    >
+      <i class="pi pi-calendar" />
+    </button>
+
+    <!-- Mobile: Floating-Button zum Öffnen der Details (wenn Foto gewählt) -->
+    <button
+      v-if="selectedPhoto && !mobileSidebarOpen && !loading && !uploading"
+      class="mobile-fab mobile-fab--details"
+      @click="mobileSidebarOpen = true; mobileTimelineOpen = false"
+      aria-label="Details"
+    >
+      <i class="pi pi-info-circle" />
+    </button>
   </div>
 </template>
 
@@ -924,4 +966,125 @@ onUnmounted(() => serviceHealth.stopPolling())
 }
 
 .error-flyout-list li:last-child { border-bottom: none; }
+
+/* ── Mobile Backdrop ─────────────────────────────────────────────────────── */
+.mobile-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 490;
+}
+
+/* ── Mobile FABs ─────────────────────────────────────────────────────────── */
+.mobile-fab {
+  display: none;
+  position: fixed;
+  bottom: 1.5rem;
+  z-index: 495;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  transition: background 0.2s, transform 0.2s;
+}
+
+.mobile-fab--timeline {
+  left: 1rem;
+  background: var(--surface-card);
+  color: var(--p-primary-color);
+  border: 1px solid var(--surface-border);
+}
+.mobile-fab--timeline.active {
+  background: var(--p-primary-color);
+  color: white;
+}
+
+.mobile-fab--details {
+  right: 1rem;
+  background: var(--p-primary-color);
+  color: white;
+}
+
+/* ── Mobile Breakpoint ───────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .mobile-backdrop { display: block; }
+  .mobile-fab { display: flex; }
+
+  /* Timeline Nav → linker Slide-in-Drawer */
+  .gallery-layout :deep(.timeline-nav) {
+    position: fixed;
+    left: 0;
+    top: var(--menubar-height, 3.5rem);
+    bottom: 0;
+    width: 80px;
+    z-index: 500;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    box-shadow: 3px 0 12px rgba(0, 0, 0, 0.2);
+  }
+  .gallery-layout.mobile-timeline-open :deep(.timeline-nav) {
+    transform: translateX(0);
+  }
+
+  /* Details Sidebar → Bottom Sheet */
+  .gallery-layout :deep(.details-sidebar) {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100% !important;
+    max-height: 65vh;
+    z-index: 500;
+    border-radius: 16px 16px 0 0;
+    border-left: none;
+    border-top: 1px solid var(--surface-border);
+    transform: translateY(100%);
+    transition: transform 0.3s ease;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.2);
+  }
+  .gallery-layout.mobile-sidebar-open :deep(.details-sidebar) {
+    transform: translateY(0);
+  }
+
+  /* Drag-Handle Indikator oben am Bottom Sheet */
+  .gallery-layout :deep(.sidebar-header)::before {
+    content: '';
+    display: block;
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--surface-300);
+    margin: 0 auto 0.5rem;
+  }
+  .gallery-layout :deep(.sidebar-header) {
+    flex-direction: column;
+    padding-top: 0.5rem;
+  }
+
+  /* Subheader kompakter */
+  .subheader {
+    padding: 0.375rem 0.75rem;
+  }
+  .photos-view .title {
+    font-size: 1.2rem;
+  }
+
+  /* Actions: Labels ausblenden, nur Icons */
+  .subheader .actions :deep(.p-button-label) {
+    display: none;
+  }
+  .subheader .actions :deep(.p-button) {
+    padding: 0.5rem;
+    min-width: 2.25rem;
+  }
+  .toggle-hidden label {
+    display: none;
+  }
+}
 </style>

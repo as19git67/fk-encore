@@ -88,4 +88,11 @@ body {
 .user-name {
   font-weight: 600;
 }
+
+@media (max-width: 640px) {
+  .user-name { display: none; }
+  /* Nur Icons in der Menü-Leiste */
+  .menu-end :deep(.p-button-label) { display: none; }
+  .menu-end :deep(.p-button) { padding: 0.5rem; }
+}
 </style>

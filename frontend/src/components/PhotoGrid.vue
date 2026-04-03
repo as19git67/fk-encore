@@ -241,6 +241,18 @@ defineExpose({
   margin-bottom: 0.5rem;
 }
 
+@media (max-width: 768px) {
+  .photo-grid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 0.5rem;
+  }
+  .photo-grid-scroll {
+    padding: 0 0.5rem 5rem; /* Abstand unten für FABs */
+  }
+  .year-title { font-size: 1.1rem; margin: 1rem 0 0.25rem; }
+  .month-title { font-size: 0.875rem; margin: 0.75rem 0 0.25rem; }
+}
+
 /* ── Photo item ──────────────────────────────────────────────────────────── */
 .photo-item {
   position: relative;
