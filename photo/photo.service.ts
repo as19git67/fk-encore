@@ -470,6 +470,44 @@ async function geocodePhotoLocation(userId: number, photoId: number, lat: number
   );
 }
 
+/**
+ * Scan-queue job handler for geocoding.
+ * 1. If the photo has no GPS coordinates, tries EXIF extraction.
+ * 2. If GPS is available, calls Nominatim for reverse-geocoding.
+ * 3. Succeeds silently when no GPS data exists (nothing to geocode).
+ */
+export async function indexPhotoGeocoding(userId: number, photoId: number): Promise<void> {
+  const photo = await dbFirst<typeof photos.$inferSelect>(
+    db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+  );
+  if (!photo) return;
+
+  let lat = photo.latitude;
+  let lon = photo.longitude;
+
+  // Try EXIF extraction if no GPS stored yet
+  if (lat === null || lon === null) {
+    const filePath = path.join(UPLOAD_DIR, photo.filename);
+    if (!fs.existsSync(filePath)) return; // file gone — nothing we can do
+    const exifMeta = await getExifMetadata(filePath);
+    if (exifMeta.latitude !== null && exifMeta.longitude !== null) {
+      lat = exifMeta.latitude;
+      lon = exifMeta.longitude;
+      await dbExec(
+        db.update(photos).set({ latitude: lat, longitude: lon }).where(eq(photos.id, photoId))
+      );
+    }
+  }
+
+  // No GPS available at all — mark as done (nothing to geocode)
+  if (lat === null || lon === null) return;
+
+  // Already has a location name and this is not a forced rescan — skip
+  if (photo.location_name) return;
+
+  await geocodePhotoLocation(userId, photoId, lat, lon);
+}
+
 // ---------- Photos ----------
 
 export async function uploadPhotoStream(
