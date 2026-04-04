@@ -58,8 +58,8 @@ async function handleLogout() {
 body {
   margin: 0;
   font-family: var(--font-family);
-  background: var(--surface-ground);
-  color: var(--text-color);
+  background: var(--p-surface-50);
+  color: var(--p-text-color);
 }
 
 .app-container {
@@ -87,5 +87,12 @@ body {
 
 .user-name {
   font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .user-name { display: none; }
+  /* Nur Icons in der Menü-Leiste */
+  .menu-end :deep(.p-button-label) { display: none; }
+  .menu-end :deep(.p-button) { padding: 0.5rem; }
 }
 </style>

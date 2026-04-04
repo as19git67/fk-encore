@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, shallowRef, computed, watch, nextTick } from 'vue'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import ToggleSwitch from 'primevue/toggleswitch'
@@ -21,6 +21,7 @@ import { listPersons, type Person } from '../api/photos'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
 import { usePhotoGrouping } from '../composables/usePhotoGrouping'
+import type { PhotoItem } from '../composables/usePhotoGrouping'
 import { usePhotoSelection } from '../composables/usePhotoSelection'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 
@@ -135,6 +136,46 @@ const nextPhoto = computed(() =>
     : null
 )
 
+// ── Mobile drawer state ───────────────────────────────────────────────────────
+const mobileTimelineOpen = ref(false)
+const mobileSidebarOpen = ref(false)
+const mobileSelectMode = ref(false)
+
+// Mobile-Selektion vollständig getrennt von usePhotoSelection (kein Watch-Interferenz)
+const mobileSelectedIds = shallowRef<Set<number>>(new Set())
+const mobileSelectedPhotos = computed<Photo[]>(() =>
+  photos.value.filter(p => mobileSelectedIds.value.has(p.id))
+)
+
+// Welche IDs an PhotoGrid übergeben werden – im Auswahlmodus die mobilen IDs
+const activeSelectedPhotoIds = computed<Set<number>>(() =>
+  mobileSelectMode.value ? mobileSelectedIds.value : selectedPhotoIds.value
+)
+
+function enterSelectMode() {
+  mobileSelectedIds.value = new Set()
+  mobileSelectMode.value = true
+}
+
+function exitSelectMode() {
+  mobileSelectMode.value = false
+  mobileSelectedIds.value = new Set()
+  mobileSidebarOpen.value = false
+}
+
+function handlePhotoClick(item: PhotoItem, event: MouseEvent) {
+  if (mobileSelectMode.value) {
+    // Mobile Auswahlmodus: lokalen State direkt togglen, usePhotoSelection komplett umgehen
+    const photoId = item.photo.id
+    const next = new Set(mobileSelectedIds.value)
+    if (next.has(photoId)) next.delete(photoId)
+    else next.add(photoId)
+    mobileSelectedIds.value = next
+  } else {
+    selectPhoto(item.index, event)
+  }
+}
+
 // ── Sidebar state ─────────────────────────────────────────────────────────────
 const detectedFaces = ref<Face[]>([])
 const loadingFaces = ref(false)
@@ -246,8 +287,13 @@ async function loadPhotos() {
     photoGroupsList.value = groupsRes.groups
     loading.value = false
     await nextTick()
-    const firstVisible = photos.value.findIndex(p => !hiddenByStack.value.has(p.id))
-    selectedIndex.value = firstVisible >= 0 ? firstVisible : (photos.value.length > 0 ? 0 : -1)
+    // Auf Mobile keine initiale Auswahl – Nutzer soll explizit tippen
+    if (window.innerWidth <= 768) {
+      selectedIndex.value = -1
+    } else {
+      const firstVisible = photos.value.findIndex(p => !hiddenByStack.value.has(p.id))
+      selectedIndex.value = firstVisible >= 0 ? firstVisible : (photos.value.length > 0 ? 0 : -1)
+    }
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Fotos'
     loading.value = false
@@ -351,14 +397,19 @@ async function handleReindexPhoto() {
 
 // ── Group multi-select (Ctrl/Shift click on a stack) ─────────────────────
 function handleGroupMultiSelect(group: PhotoGroup) {
-  const newSet = new Set(selectedPhotoIds.value)
-  for (const pid of group.photo_ids) {
-    newSet.add(pid)
+  if (mobileSelectMode.value) {
+    // Mobile: alle Gruppenfotos in den isolierten mobilen State einfügen
+    const next = new Set(mobileSelectedIds.value)
+    for (const pid of group.photo_ids) next.add(pid)
+    mobileSelectedIds.value = next
+  } else {
+    // Desktop: usePhotoSelection + Cursor auf Cover-Foto setzen
+    const newSet = new Set(selectedPhotoIds.value)
+    for (const pid of group.photo_ids) newSet.add(pid)
+    selectedPhotoIds.value = newSet
+    const coverIdx = photos.value.findIndex(p => p.id === (group.cover_photo_id ?? group.photo_ids[0]))
+    if (coverIdx >= 0) selectedIndex.value = coverIdx
   }
-  selectedPhotoIds.value = newSet
-  // Set selectedIndex to the cover photo or first group member
-  const coverIdx = photos.value.findIndex(p => p.id === (group.cover_photo_id ?? group.photo_ids[0]))
-  if (coverIdx >= 0) selectedIndex.value = coverIdx
 }
 
 // ── Stack group handling ──────────────────────────────────────────────────────
@@ -607,14 +658,19 @@ onUnmounted(() => serviceHealth.stopPolling())
     <div v-else-if="photos.length === 0" class="info-text">Keine Fotos hochgeladen.</div>
 
     <!-- Three-column layout -->
-    <div v-else class="gallery-layout">
-      <!-- LEFT: Timeline nav -->
-      <TimelineNav
-        ref="timelineNavRef"
-        :groupedPhotos="groupedPhotos"
-        :activeSection="activeSection"
-        @scroll-to="handleScrollTo"
-      />
+    <div
+      v-else
+      class="gallery-layout"
+    >
+      <!-- LEFT: Timeline nav – auf Mobile als Slide-in-Drawer -->
+      <div class="timeline-drawer" :class="{ 'is-open': mobileTimelineOpen }">
+        <TimelineNav
+          ref="timelineNavRef"
+          :groupedPhotos="groupedPhotos"
+          :activeSection="activeSection"
+          @scroll-to="handleScrollTo"
+        />
+      </div>
 
       <!-- CENTER: Photo grid -->
       <PhotoGrid
@@ -622,12 +678,13 @@ onUnmounted(() => serviceHealth.stopPolling())
         :groupedPhotos="groupedPhotos"
         :photos="photos"
         :selectedIndex="selectedIndex"
-        :selectedPhotoIds="selectedPhotoIds"
+        :selectedPhotoIds="activeSelectedPhotoIds"
         :canDelete="canDelete"
         :hasStacks="true"
+        :selectMode="mobileSelectMode"
         @update:columnCount="columnCount = $event"
         @section-change="activeSection = $event"
-        @photo-click="(item, event) => selectPhoto(item.index, event)"
+        @photo-click="handlePhotoClick"
         @photo-dblclick="isFullscreen = true"
         @stack-click="activeGroup = $event"
         @group-multi-select="handleGroupMultiSelect"
@@ -636,35 +693,42 @@ onUnmounted(() => serviceHealth.stopPolling())
         @restore="handleRestore"
       />
 
-      <!-- RIGHT: Details sidebar -->
-      <PhotoDetailSidebar
-        v-if="selectedPhotos.length > 0"
-        :photo="(selectedPhoto || selectedPhotos[0])!"
-        :selectedPhotos="expandedSelectedPhotos"
-        :faces="detectedFaces"
-        :loading-faces="loadingFaces"
-        :landmarks="detectedLandmarks"
-        :loading-landmarks="loadingLandmarks"
-        :limitAlbumsShown="true"
-        :persons="persons"
-        :can-delete="canDelete"
-        :can-upload="canUpload"
-        :reindexing-photo="reindexingPhoto"
-        :is-editing-date="isEditingDate"
-        v-model:editDate="editDate"
-        :updating-date="updatingDate"
-        :show-persons="auth.hasPermission('people.view')"
-        :face-service-available="serviceHealth.faceServiceAvailable"
-        @fullscreen="isFullscreen = true"
-        @toggle-favorite="handleToggleFavorite"
-        @hide="handleDelete"
-        @restore="handleRestore"
-        @start-edit-date="startEditingDate"
-        @update-date="handleUpdateDate"
-        @cancel-edit-date="isEditingDate = false"
-        @ignore-face="handleIgnoreFace"
-        @reindex="handleReindexPhoto"
-      />
+      <!-- RIGHT: Details sidebar – auf Mobile als Bottom-Sheet -->
+      <div class="sidebar-sheet" :class="{ 'is-open': mobileSidebarOpen }">
+        <div class="sidebar-sheet-header">
+          <button class="sidebar-sheet-close" @click="mobileSidebarOpen = false" aria-label="Schließen">
+            <i class="pi pi-times" />
+          </button>
+        </div>
+        <PhotoDetailSidebar
+          v-if="mobileSelectMode ? mobileSelectedPhotos.length > 0 : selectedPhotos.length > 0"
+          :photo="mobileSelectMode ? mobileSelectedPhotos[0]! : (selectedPhoto || selectedPhotos[0])!"
+          :selectedPhotos="mobileSelectMode ? mobileSelectedPhotos : expandedSelectedPhotos"
+          :faces="detectedFaces"
+          :loading-faces="loadingFaces"
+          :landmarks="detectedLandmarks"
+          :loading-landmarks="loadingLandmarks"
+          :limitAlbumsShown="true"
+          :persons="persons"
+          :can-delete="canDelete"
+          :can-upload="canUpload"
+          :reindexing-photo="reindexingPhoto"
+          :is-editing-date="isEditingDate"
+          v-model:editDate="editDate"
+          :updating-date="updatingDate"
+          :show-persons="auth.hasPermission('people.view')"
+          :face-service-available="serviceHealth.faceServiceAvailable"
+          @fullscreen="isFullscreen = true"
+          @toggle-favorite="handleToggleFavorite"
+          @hide="handleDelete"
+          @restore="handleRestore"
+          @start-edit-date="startEditingDate"
+          @update-date="handleUpdateDate"
+          @cancel-edit-date="isEditingDate = false"
+          @ignore-face="handleIgnoreFace"
+          @reindex="handleReindexPhoto"
+        />
+      </div>
     </div>
 
     <!-- Fullscreen overlay -->
@@ -690,6 +754,69 @@ onUnmounted(() => serviceHealth.stopPolling())
       @close="handleGroupClose"
       @next="handleGroupNext"
     />
+
+    <!-- Mobile: Backdrop zum Schließen von Drawern -->
+    <div
+      v-if="mobileTimelineOpen || mobileSidebarOpen"
+      class="mobile-backdrop"
+      @click="mobileTimelineOpen = false; mobileSidebarOpen = false"
+    />
+
+    <!-- Mobile: Floating-Button zum Öffnen der Zeitleiste -->
+    <button
+      v-if="!loading && !uploading && photos.length > 0 && !mobileSelectMode"
+      class="mobile-fab mobile-fab--timeline"
+      :class="{ active: mobileTimelineOpen }"
+      @click="mobileTimelineOpen = !mobileTimelineOpen; mobileSidebarOpen = false"
+      aria-label="Zeitleiste"
+    >
+      <i class="pi pi-calendar" />
+    </button>
+
+    <!-- Mobile: Floating-Button Auswahlmodus starten (nur wenn nicht im Auswahlmodus) -->
+    <button
+      v-if="!loading && !uploading && photos.length > 0 && !mobileSelectMode"
+      class="mobile-fab mobile-fab--select"
+      @click="enterSelectMode"
+      aria-label="Fotos auswählen"
+    >
+      <i class="pi pi-check-square" />
+    </button>
+
+    <!-- Mobile: Floating-Button zum Öffnen der Details (wenn Foto gewählt, nicht im Auswahlmodus) -->
+    <button
+      v-if="selectedPhoto && !mobileSidebarOpen && !loading && !uploading && !mobileSelectMode"
+      class="mobile-fab mobile-fab--details"
+      @click="mobileSidebarOpen = true; mobileTimelineOpen = false"
+      aria-label="Details"
+    >
+      <i class="pi pi-info-circle" />
+    </button>
+
+    <!-- Mobile: Action-Bar im Auswahlmodus -->
+    <div v-if="mobileSelectMode" class="mobile-select-bar">
+      <span class="mobile-select-count">
+        <i class="pi pi-check-square" />
+        {{ mobileSelectedPhotos.length > 0 ? `${mobileSelectedPhotos.length} ausgewählt` : 'Fotos antippen zum Auswählen' }}
+      </span>
+      <div class="mobile-select-actions">
+        <Button
+          v-if="mobileSelectedPhotos.length > 0"
+          label="Details / Album"
+          icon="pi pi-book"
+          size="small"
+          @click="mobileSidebarOpen = true; mobileTimelineOpen = false"
+        />
+        <Button
+          label="Abbrechen"
+          icon="pi pi-times"
+          size="small"
+          severity="secondary"
+          outlined
+          @click="exitSelectMode"
+        />
+      </div>
+    </div>
   </div>
 </template>
 
@@ -709,7 +836,7 @@ onUnmounted(() => serviceHealth.stopPolling())
 
 .subheader {
   flex-shrink: 0;
-  background: var(--surface-card);
+  background: var(--p-surface-0);
   box-shadow: 0 2px 6px rgba(0,0,0,0.08);
   padding: 0.5rem 1rem;
 }
@@ -737,7 +864,7 @@ onUnmounted(() => serviceHealth.stopPolling())
 .info-text {
   text-align: center;
   padding: 3rem 1rem;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
 }
 
 .gallery-layout {
@@ -768,7 +895,7 @@ onUnmounted(() => serviceHealth.stopPolling())
   left: 0.75rem;
   top: 50%;
   transform: translateY(-50%);
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
   pointer-events: none;
   font-size: 0.9rem;
 }
@@ -776,17 +903,17 @@ onUnmounted(() => serviceHealth.stopPolling())
 .search-input {
   width: 100%;
   padding: 0.5rem 2.25rem;
-  border: 1px solid var(--surface-300);
+  border: 1px solid var(--p-surface-300);
   border-radius: 6px;
-  background: var(--surface-0);
-  color: var(--text-color);
+  background: var(--p-surface-0);
+  color: var(--p-text-color);
   font-size: 0.95rem;
   outline: none;
   box-sizing: border-box;
 }
 
 .search-input:focus {
-  border-color: var(--primary-color);
+  border-color: var(--p-primary-color);
   box-shadow: 0 0 0 2px var(--primary-200, rgba(99, 102, 241, 0.2));
 }
 
@@ -798,16 +925,16 @@ onUnmounted(() => serviceHealth.stopPolling())
   background: none;
   border: none;
   cursor: pointer;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
   padding: 0.2rem;
   display: flex;
   border-radius: 4px;
 }
-.search-clear:hover { color: var(--text-color); background: var(--surface-100); }
+.search-clear:hover { color: var(--p-text-color); background: var(--p-surface-100); }
 
 .search-result-count {
   font-size: 0.875rem;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
   white-space: nowrap;
 }
 
@@ -877,8 +1004,8 @@ onUnmounted(() => serviceHealth.stopPolling())
 }
 
 .error-flyout {
-  background: var(--surface-card);
-  border: 1px solid var(--surface-border);
+  background: var(--p-surface-0);
+  border: 1px solid var(--p-surface-200);
   border-radius: 8px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
   width: 90%;
@@ -895,7 +1022,7 @@ onUnmounted(() => serviceHealth.stopPolling())
   padding: 0.75rem 1rem;
   font-weight: 600;
   font-size: 0.95rem;
-  border-bottom: 1px solid var(--surface-border);
+  border-bottom: 1px solid var(--p-surface-200);
   flex-shrink: 0;
 }
 
@@ -903,11 +1030,11 @@ onUnmounted(() => serviceHealth.stopPolling())
   background: none;
   border: none;
   cursor: pointer;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
   padding: 0.25rem;
   border-radius: 4px;
 }
-.error-flyout-close:hover { color: var(--text-color); background: var(--surface-100); }
+.error-flyout-close:hover { color: var(--p-text-color); background: var(--p-surface-100); }
 
 .error-flyout-list {
   list-style: none;
@@ -920,8 +1047,206 @@ onUnmounted(() => serviceHealth.stopPolling())
 .error-flyout-list li {
   padding: 0.5rem 1rem;
   font-size: 0.85rem;
-  border-bottom: 1px solid var(--surface-50);
+  border-bottom: 1px solid var(--p-surface-50);
 }
 
 .error-flyout-list li:last-child { border-bottom: none; }
+
+/* ── Mobile Backdrop ─────────────────────────────────────────────────────── */
+.mobile-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 490;
+}
+
+/* ── Mobile FABs ─────────────────────────────────────────────────────────── */
+.mobile-fab {
+  display: none;
+  position: fixed;
+  bottom: 1.5rem;
+  z-index: 495;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  transition: background 0.2s, transform 0.2s;
+}
+
+.mobile-fab--timeline {
+  left: 1rem;
+  background: var(--p-surface-0);
+  color: var(--p-primary-color);
+  border: 1px solid var(--p-surface-200);
+}
+.mobile-fab--timeline.active {
+  background: var(--p-primary-color);
+  color: white;
+}
+
+.mobile-fab--select {
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--p-surface-0);
+  color: var(--p-text-muted-color);
+  border: 1px solid var(--p-surface-200);
+}
+
+.mobile-fab--details {
+  right: 1rem;
+  background: var(--p-primary-color);
+  color: white;
+}
+
+/* ── Mobile Select Action-Bar ────────────────────────────────────────────── */
+.mobile-select-bar {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 495;
+  background: var(--p-surface-0);
+  border-top: 1px solid var(--p-surface-200);
+  padding: 0.75rem 1rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.12);
+}
+
+.mobile-select-count {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--p-text-color);
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.mobile-select-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+/* ── Timeline Drawer Wrapper ─────────────────────────────────────────────── */
+.timeline-drawer {
+  /* Desktop: normaler Flex-Child, Wrapper unsichtbar */
+  display: contents;
+}
+
+/* ── Sidebar Sheet Wrapper ───────────────────────────────────────────────── */
+.sidebar-sheet {
+  /* Desktop: normaler Flex-Child, Wrapper unsichtbar */
+  display: contents;
+}
+
+/* Schließen-Button + Header nur auf Mobile sichtbar */
+.sidebar-sheet-header { display: none; }
+.sidebar-sheet-close { display: none; }
+
+/* ── Mobile Breakpoint ───────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .mobile-backdrop { display: block; }
+  .mobile-fab { display: flex; }
+  .mobile-select-bar { display: flex; }
+
+  /* Timeline Drawer → linker Slide-in-Drawer */
+  .timeline-drawer {
+    display: block;
+    position: fixed;
+    left: 0;
+    top: var(--menubar-height, 3.5rem);
+    bottom: 0;
+    width: 80px;
+    z-index: 500;
+    background: var(--p-surface-0);
+    border-right: 1px solid var(--p-surface-200);
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    box-shadow: 3px 0 12px rgba(0, 0, 0, 0.2);
+    overflow-y: auto;
+  }
+  .timeline-drawer.is-open {
+    transform: translateX(0);
+  }
+
+  /* Sidebar Sheet → Bottom Sheet */
+  .sidebar-sheet {
+    display: block;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    max-height: 65vh;
+    z-index: 500;
+    background: var(--p-surface-0);
+    border-radius: 16px 16px 0 0;
+    border-top: 1px solid var(--p-surface-200);
+    transform: translateY(100%);
+    transition: transform 0.3s ease;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.2);
+    overflow-y: auto;
+  }
+  .sidebar-sheet.is-open {
+    transform: translateY(0);
+  }
+
+  /* Sticky Header mit Schließen-Button */
+  .sidebar-sheet-header {
+    display: flex;
+    justify-content: flex-end;
+    position: sticky;
+    top: 0;
+    background: var(--p-surface-0);
+    border-bottom: 1px solid var(--p-surface-100);
+    padding: 0.3rem 0.5rem;
+    z-index: 1;
+  }
+  .sidebar-sheet-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--p-text-muted-color);
+    padding: 0.4rem;
+    border-radius: 50%;
+    font-size: 1rem;
+  }
+  .sidebar-sheet-close:hover {
+    color: var(--p-text-color);
+    background: var(--p-surface-100);
+  }
+
+  /* Subheader kompakter */
+  .subheader {
+    padding: 0.375rem 0.75rem;
+  }
+  .photos-view .title {
+    font-size: 1.2rem;
+  }
+
+  /* Actions: Labels ausblenden, nur Icons */
+  .subheader .actions :deep(.p-button-label) {
+    display: none;
+  }
+  .subheader .actions :deep(.p-button) {
+    padding: 0.5rem;
+    min-width: 2.25rem;
+  }
+  .toggle-hidden label {
+    display: none;
+  }
+}
 </style>

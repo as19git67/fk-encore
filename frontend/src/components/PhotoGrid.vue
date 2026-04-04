@@ -1,5 +1,41 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
+
+// ── iOS tap fix ──────────────────────────────────────────────────────────────
+// iOS Safari fires click on <div> only on the 2nd tap (first tap = hover).
+// We detect real taps via touchstart/touchend and emit directly.
+let touchStartX = 0
+let touchStartY = 0
+
+function onItemTouchStart(e: TouchEvent) {
+  const t = e.touches[0]
+  if (!t) return
+  touchStartX = t.clientX
+  touchStartY = t.clientY
+}
+
+function onItemTouchEnd(e: TouchEvent, item: PhotoItem) {
+  const t = e.changedTouches[0]
+  if (!t) return
+  const dx = Math.abs(t.clientX - touchStartX)
+  const dy = Math.abs(t.clientY - touchStartY)
+  if (dx > 10 || dy > 10) return // was a scroll, not a tap
+  e.preventDefault() // prevent the delayed click from also firing
+  handleItemTap(item, e as unknown as MouseEvent)
+}
+
+function handleItemTap(item: PhotoItem, event: MouseEvent | TouchEvent) {
+  const me = event as MouseEvent
+  if (item.group) {
+    if (props.selectMode || me.ctrlKey || me.metaKey || me.shiftKey) {
+      emit('group-multi-select', item.group, me)
+    } else {
+      emit('stack-click', item.group)
+    }
+  } else {
+    emit('photo-click', item, me)
+  }
+}
 import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
 import { usePhotoLazyLoad } from '../composables/usePhotoLazyLoad'
@@ -16,6 +52,8 @@ const props = defineProps<{
   canDelete?: boolean
   /** When true, photo items in stacks open the compare view instead of selecting */
   hasStacks?: boolean
+  /** When true, tapping a stack selects all its photos instead of opening compare view */
+  selectMode?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -146,7 +184,9 @@ defineExpose({
               'is-favorite': item.photo.curation_status === 'favorite',
               'is-stack': !!item.group,
             }"
-            @click="item.group ? (($event.ctrlKey || $event.metaKey || $event.shiftKey) ? emit('group-multi-select', item.group, $event) : emit('stack-click', item.group)) : emit('photo-click', item, $event)"
+            @touchstart.passive="onItemTouchStart"
+            @touchend="onItemTouchEnd($event, item)"
+            @click="handleItemTap(item, $event)"
             @dblclick="!item.group && emit('photo-dblclick', item)"
           >
             <div class="photo-thumb">
@@ -224,14 +264,14 @@ defineExpose({
   font-size: 1.4rem;
   font-weight: 700;
   margin: 1.5rem 0 0.5rem;
-  color: var(--text-color);
+  color: var(--p-text-color);
 }
 
 .month-title {
   font-size: 1rem;
   font-weight: 600;
   margin: 1rem 0 0.4rem;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
 }
 
 .photo-grid {
@@ -241,20 +281,37 @@ defineExpose({
   margin-bottom: 0.5rem;
 }
 
+@media (max-width: 768px) {
+  .photo-grid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 0.5rem;
+  }
+  .photo-grid-scroll {
+    padding: 0 0.5rem 7rem; /* Abstand unten für FABs + Action-Bar */
+  }
+  .year-title { font-size: 1.1rem; margin: 1rem 0 0.25rem; }
+  .month-title { font-size: 0.875rem; margin: 0.75rem 0 0.25rem; }
+}
+
 /* ── Photo item ──────────────────────────────────────────────────────────── */
 .photo-item {
   position: relative;
   border-radius: 8px;
   overflow: hidden;
   cursor: pointer;
-  background: var(--surface-ground);
+  background: var(--p-surface-50);
   border: 2px solid transparent;
   transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
 }
 
-.photo-item:hover {
-  border-color: var(--p-primary-color);
-  box-shadow: 0 0 0 2px var(--p-primary-200);
+@media (hover: hover) {
+  .photo-item:hover {
+    border-color: var(--p-primary-color);
+    box-shadow: 0 0 0 2px var(--p-primary-200);
+  }
 }
 
 .photo-item.selected {
@@ -269,13 +326,13 @@ defineExpose({
 
 .photo-item.is-stack {
   border-style: dashed;
-  border-color: var(--surface-border);
+  border-color: var(--p-surface-200);
 }
 
 .photo-thumb {
   width: 100%;
   aspect-ratio: 1;
-  background: var(--surface-ground);
+  background: var(--p-surface-50);
   overflow: hidden;
 }
 
