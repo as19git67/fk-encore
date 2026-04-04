@@ -6,7 +6,7 @@ import HeicImage from './HeicImage.vue'
 import { getPhotoUrl, listAlbums, getPhotosAlbums, batchUpdateAlbumPhotos, updateAlbum, createAlbum, type Album } from '../api/photos'
 import { getAlbumCheckState as calculateAlbumCheckState, getNewPendingAction } from '../utils/albumSelection'
 import type { Photo, Face, LandmarkItem, Person, CurationStatus } from '../api/photos'
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 
 const props = defineProps<{
   photo: Photo
@@ -206,6 +206,14 @@ function getPersonName(personId?: number) {
   const person = props.persons.find(p => p.id === personId)
   return person ? person.name : 'Unbekannt'
 }
+
+const namedFaces = computed(() =>
+  props.faces.filter(f =>
+    !f.ignored &&
+    f.person_id &&
+    props.persons.find(p => p.id === f.person_id)?.name?.trim()
+  )
+)
 </script>
 
 <template>
@@ -375,9 +383,9 @@ function getPersonName(personId?: number) {
         <div class="sidebar-section">
           <div class="section-label"><i class="pi pi-users" /> Personen</div>
           <div v-if="loadingFaces" class="loading-row"><i class="pi pi-spin pi-spinner" /> Lade…</div>
-          <div v-else-if="faces.filter(f => !f.ignored).length === 0" class="empty-hint">Keine Personen erkannt</div>
+          <div v-else-if="namedFaces.length === 0" class="empty-hint">Keine Personen erkannt</div>
           <div v-else class="person-list">
-            <div v-for="face in faces.filter(f => !f.ignored)" :key="face.id" class="person-row">
+            <div v-for="face in namedFaces" :key="face.id" class="person-row">
               <i class="pi pi-user person-icon" />
               <span class="person-name">{{ getPersonName(face.person_id) }}</span>
               <Button icon="pi pi-times" severity="secondary" text rounded size="small" @click="emit('ignore-face', face.id)" v-tooltip="'Entfernen'" />
@@ -467,6 +475,10 @@ function getPersonName(personId?: number) {
     background: var(--p-surface-0);
     overflow-y: auto;
     border-left: none;
+  }
+  /* Kein separater Header im Sheet – Close-Button kommt vom Parent */
+  .sidebar-header {
+    display: none;
   }
 }
 
