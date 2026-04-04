@@ -1024,6 +1024,7 @@ onUnmounted(() => serviceHealth.stopPolling())
     bottom: 0;
     width: 80px;
     z-index: 500;
+    background: var(--surface-card) !important;
     transform: translateX(-100%);
     transition: transform 0.25s ease;
     box-shadow: 3px 0 12px rgba(0, 0, 0, 0.2);
@@ -1041,6 +1042,7 @@ onUnmounted(() => serviceHealth.stopPolling())
     width: 100% !important;
     max-height: 65vh;
     z-index: 500;
+    background: var(--surface-card) !important;
     border-radius: 16px 16px 0 0;
     border-left: none;
     border-top: 1px solid var(--surface-border);
