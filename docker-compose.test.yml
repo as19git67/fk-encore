@@ -7,6 +7,8 @@ services:
     image: ghcr.io/as19git67/fk-encore:test
     container_name: fk-encore-app-test
     restart: unless-stopped
+    labels:
+      com.centurylinklabs.watchtower.scope: fktest
     depends_on:
       postgres:
         condition: service_healthy
@@ -53,6 +55,8 @@ services:
     image: ghcr.io/as19git67/fk-encore-insightface:latest
     container_name: fk-encore-insightface-test
     restart: unless-stopped
+    labels:
+      com.centurylinklabs.watchtower.scope: fktest
     environment:
       ORT_LOGGING_LEVEL: "3"
     healthcheck:
@@ -66,6 +70,8 @@ services:
     image: ghcr.io/as19git67/fk-encore-embedding:latest
     container_name: fk-encore-embedding-test
     restart: unless-stopped
+    labels:
+      com.centurylinklabs.watchtower.scope: fktest
     depends_on:
       postgres:
         condition: service_healthy
@@ -86,6 +92,8 @@ services:
     image: ghcr.io/as19git67/fk-encore-landmark:latest
     container_name: fk-encore-landmark-test
     restart: unless-stopped
+    labels:
+      com.centurylinklabs.watchtower.scope: fktest
     environment:
       LANDMARK_THRESHOLD: "0.35"
       LOG_LEVEL: INFO
@@ -125,13 +133,9 @@ services:
       WATCHTOWER_HTTP_API_UPDATE: "true"
       WATCHTOWER_HTTP_API_TOKEN: ${WATCHTOWER_TOKEN}
       WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_SCOPE: fktest
       WATCHTOWER_NO_STARTUP_MESSAGE: "true"
-    command: >
-      --http-api-periodic-polls
-      fk-encore-app-test
-      fk-encore-insightface-test
-      fk-encore-embedding-test
-      fk-encore-landmark-test
+    command: --http-api-periodic-polls
     ports:
       - "9001:8080"
 

@@ -345,6 +345,10 @@ async function handleRemoveShare(userId: number) {
   } catch (err: any) { error.value = err.message || 'Fehler' }
 }
 
+// ── Mobile drawer state ───────────────────────────────────────────────────────
+const mobileTimelineOpen = ref(false)
+const mobileSidebarOpen = ref(false)
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 void loadData()
 if (showPersons.value) void loadPersons()
@@ -407,13 +411,15 @@ onUnmounted(() => serviceHealth.stopPolling())
 
     <!-- Three-column layout: TimelineNav | PhotoGrid | Sidebar -->
     <div v-if="album && groupedPhotos.length > 0" class="gallery-layout">
-      <!-- LEFT: Timeline nav -->
-      <TimelineNav
-        ref="timelineNavRef"
-        :groupedPhotos="groupedPhotos"
-        :activeSection="activeSection"
-        @scroll-to="handleScrollTo"
-      />
+      <!-- LEFT: Timeline nav – auf Mobile als Slide-in-Drawer -->
+      <div class="timeline-drawer" :class="{ 'is-open': mobileTimelineOpen }">
+        <TimelineNav
+          ref="timelineNavRef"
+          :groupedPhotos="groupedPhotos"
+          :activeSection="activeSection"
+          @scroll-to="handleScrollTo"
+        />
+      </div>
 
       <!-- CENTER: Photo grid -->
       <PhotoGrid
@@ -432,36 +438,71 @@ onUnmounted(() => serviceHealth.stopPolling())
         @restore="handleRestorePhoto"
       />
 
-      <!-- RIGHT: Details sidebar -->
-      <PhotoDetailSidebar
-        v-if="selectedPhoto"
-        :photo="selectedPhoto"
-        :can-delete="canDeletePhotos || canWrite"
-        :can-upload="canUploadPhotos"
-        :faces="detectedFaces"
-        :is-editing-date="false"
-        :landmarks="detectedLandmarks"
-        :loading-faces="loadingFaces"
-        :loading-landmarks="loadingLandmarks"
-        :persons="persons"
-        :reindexing-photo="reindexingPhoto"
-        :updating-date="false"
-        :album-id="albumId"
-        :cover-photo-id="album.cover_photo_id"
-        :show-persons="showPersons"
-        :limit-albums-shown="true"
-        :face-service-available="serviceHealth.faceServiceAvailable"
-        @update:cover-photo-id="handleCoverPhotoIdUpdate"
-        @fullscreen="isFullscreen = true"
-        @toggle-favorite="handleToggleFavorite"
-        @hide="handleHidePhoto"
-        @restore="handleRestorePhoto"
-        @ignore-face="handleIgnoreFaceInSidebar"
-        @reindex="handleReindexPhoto"
-      />
+      <!-- RIGHT: Details sidebar – auf Mobile als Bottom-Sheet -->
+      <div class="sidebar-sheet" :class="{ 'is-open': mobileSidebarOpen }">
+        <div class="sidebar-sheet-header">
+          <button class="sidebar-sheet-close" @click="mobileSidebarOpen = false" aria-label="Schließen">
+            <i class="pi pi-times" />
+          </button>
+        </div>
+        <PhotoDetailSidebar
+          v-if="selectedPhoto"
+          :photo="selectedPhoto"
+          :can-delete="canDeletePhotos || canWrite"
+          :can-upload="canUploadPhotos"
+          :faces="detectedFaces"
+          :is-editing-date="false"
+          :landmarks="detectedLandmarks"
+          :loading-faces="loadingFaces"
+          :loading-landmarks="loadingLandmarks"
+          :persons="persons"
+          :reindexing-photo="reindexingPhoto"
+          :updating-date="false"
+          :album-id="albumId"
+          :cover-photo-id="album.cover_photo_id"
+          :show-persons="showPersons"
+          :limit-albums-shown="true"
+          :face-service-available="serviceHealth.faceServiceAvailable"
+          @update:cover-photo-id="handleCoverPhotoIdUpdate"
+          @fullscreen="isFullscreen = true"
+          @toggle-favorite="handleToggleFavorite"
+          @hide="handleHidePhoto"
+          @restore="handleRestorePhoto"
+          @ignore-face="handleIgnoreFaceInSidebar"
+          @reindex="handleReindexPhoto"
+        />
+      </div>
     </div>
 
     <div v-else-if="album" class="info-text">Keine Fotos in dieser Ansicht.</div>
+
+    <!-- Mobile: Backdrop zum Schließen von Drawern -->
+    <div
+      v-if="mobileTimelineOpen || mobileSidebarOpen"
+      class="mobile-backdrop"
+      @click="mobileTimelineOpen = false; mobileSidebarOpen = false"
+    />
+
+    <!-- Mobile: Floating-Button Zeitleiste -->
+    <button
+      v-if="album && groupedPhotos.length > 0"
+      class="mobile-fab mobile-fab--timeline"
+      :class="{ active: mobileTimelineOpen }"
+      @click="mobileTimelineOpen = !mobileTimelineOpen; mobileSidebarOpen = false"
+      aria-label="Zeitleiste"
+    >
+      <i class="pi pi-calendar" />
+    </button>
+
+    <!-- Mobile: Floating-Button Details -->
+    <button
+      v-if="selectedPhoto && !mobileSidebarOpen && album"
+      class="mobile-fab mobile-fab--details"
+      @click="mobileSidebarOpen = true; mobileTimelineOpen = false"
+      aria-label="Details"
+    >
+      <i class="pi pi-info-circle" />
+    </button>
 
     <!-- Fullscreen overlay -->
     <FullscreenOverlay
@@ -526,7 +567,7 @@ onUnmounted(() => serviceHealth.stopPolling())
 
 .subheader {
   flex-shrink: 0;
-  background: var(--surface-card);
+  background: var(--p-surface-0);
   box-shadow: 0 2px 6px rgba(0,0,0,0.08);
 }
 
@@ -536,7 +577,7 @@ onUnmounted(() => serviceHealth.stopPolling())
   align-items: center;
   padding: 1rem;
   gap: 0.5em;
-  border-bottom: 1px solid var(--surface-border);
+  border-bottom: 1px solid var(--p-surface-200);
 }
 
 .header-left { display: flex; align-items: center; gap: 1rem; }
@@ -545,7 +586,7 @@ onUnmounted(() => serviceHealth.stopPolling())
   font-size: 0.75rem;
   padding: 0.2rem 0.5rem;
   border-radius: 4px;
-  background: var(--surface-200);
+  background: var(--p-surface-200);
   text-transform: uppercase;
 }
 .role-badge--owner { background: #fee2e2; color: #991b1b; }
@@ -554,7 +595,7 @@ onUnmounted(() => serviceHealth.stopPolling())
 .controls { display: flex; gap: 1em; align-items: center; flex-wrap: wrap; }
 
 .control-group { display: flex; align-items: center; gap: 0.5rem; }
-.control-group label { font-size: 0.85rem; color: var(--text-color-secondary); }
+.control-group label { font-size: 0.85rem; color: var(--p-text-muted-color); }
 
 /* ── Album info block ────────────────────────────────────────────────────── */
 .album-info-block {
@@ -564,7 +605,7 @@ onUnmounted(() => serviceHealth.stopPolling())
   align-items: center;
   gap: 1rem;
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--surface-border);
+  border-bottom: 1px solid var(--p-surface-200);
 }
 
 .album-info-block__description {
@@ -576,12 +617,12 @@ onUnmounted(() => serviceHealth.stopPolling())
 
 .album-info-block__description-content { display: flex; align-items: center; gap: 0.5rem; width: 100%; }
 .album-info-block__description-text { font-size: 0.9rem; }
-.album-info-block__description-text--empty { color: var(--text-color-secondary); font-style: italic; }
+.album-info-block__description-text--empty { color: var(--p-text-muted-color); font-style: italic; }
 .album-info-block__edit { display: flex; align-items: center; gap: 0.5rem; width: 100%; }
 .album-info-block__edit textarea { flex: 1; min-height: 2.5rem; }
 .album-info-block__edit-actions { display: flex; gap: 0.25rem; }
 .album-info-block__meta { display: flex; align-items: center; flex: 0 0 auto; }
-.album-info-block__meta-text { font-size: 0.85rem; color: var(--text-color-secondary); white-space: nowrap; }
+.album-info-block__meta-text { font-size: 0.85rem; color: var(--p-text-muted-color); white-space: nowrap; }
 
 /* ── Three-column layout ─────────────────────────────────────────────────── */
 .gallery-layout {
@@ -594,22 +635,146 @@ onUnmounted(() => serviceHealth.stopPolling())
 .info-text {
   text-align: center;
   padding: 3rem 1rem;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
 }
 
 /* ── Share dialog ────────────────────────────────────────────────────────── */
 .share-loading { padding: 1rem; text-align: center; }
 .share-section { margin-bottom: 1.5rem; }
 .share-section-title { font-size: 0.9rem; font-weight: 600; margin-bottom: 0.75rem; }
-.share-empty { font-size: 0.85rem; color: var(--text-color-secondary); }
-.share-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.4rem 0; border-bottom: 1px solid var(--surface-border); }
+.share-empty { font-size: 0.85rem; color: var(--p-text-muted-color); }
+.share-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.4rem 0; border-bottom: 1px solid var(--p-surface-200); }
 .share-user-info { flex: 1; min-width: 0; }
 .share-user-name { display: block; font-size: 0.875rem; font-weight: 500; }
-.share-user-email { display: block; font-size: 0.75rem; color: var(--text-color-secondary); }
+.share-user-email { display: block; font-size: 0.75rem; color: var(--p-text-muted-color); }
 .share-badge { font-size: 0.7rem; padding: 0.15rem 0.4rem; border-radius: 3px; white-space: nowrap; }
-.share-badge--read { background: var(--surface-200); color: var(--text-color-secondary); }
+.share-badge--read { background: var(--p-surface-200); color: var(--p-text-muted-color); }
 .share-badge--write { background: #dcfce7; color: #166534; }
 .share-add-form { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
 .share-user-select { flex: 1; min-width: 180px; }
 .share-userid-input { width: 120px; }
+
+/* ── Timeline Drawer Wrapper ─────────────────────────────────────────────── */
+.timeline-drawer { display: contents; }
+
+/* ── Sidebar Sheet Wrapper ───────────────────────────────────────────────── */
+.sidebar-sheet { display: contents; }
+.sidebar-sheet-header { display: none; }
+.sidebar-sheet-close { display: none; }
+
+/* ── Mobile Backdrop ─────────────────────────────────────────────────────── */
+.mobile-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 490;
+}
+
+/* ── Mobile FABs ─────────────────────────────────────────────────────────── */
+.mobile-fab {
+  display: none;
+  position: fixed;
+  bottom: 1.5rem;
+  z-index: 495;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  transition: background 0.2s;
+}
+.mobile-fab--timeline {
+  left: 1rem;
+  background: var(--p-surface-0);
+  color: var(--p-primary-color);
+  border: 1px solid var(--p-surface-200);
+}
+.mobile-fab--timeline.active {
+  background: var(--p-primary-color);
+  color: white;
+}
+.mobile-fab--details {
+  right: 1rem;
+  background: var(--p-primary-color);
+  color: white;
+}
+
+/* ── Mobile Breakpoint ───────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .mobile-backdrop { display: block; }
+  .mobile-fab { display: flex; }
+
+  .album-detail-view { margin-inline: 0; }
+
+  .timeline-drawer {
+    display: block;
+    position: fixed;
+    left: 0;
+    top: var(--menubar-height, 3.5rem);
+    bottom: 0;
+    width: 80px;
+    z-index: 500;
+    background: var(--p-surface-0);
+    border-right: 1px solid var(--p-surface-200);
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    box-shadow: 3px 0 12px rgba(0, 0, 0, 0.2);
+    overflow-y: auto;
+  }
+  .timeline-drawer.is-open { transform: translateX(0); }
+
+  .sidebar-sheet {
+    display: block;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    max-height: 65vh;
+    z-index: 500;
+    background: var(--p-surface-0);
+    border-radius: 16px 16px 0 0;
+    border-top: 1px solid var(--p-surface-200);
+    transform: translateY(100%);
+    transition: transform 0.3s ease;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.2);
+    overflow-y: auto;
+  }
+  .sidebar-sheet.is-open { transform: translateY(0); }
+
+  /* Sticky Header mit Schließen-Button */
+  .sidebar-sheet-header {
+    display: flex;
+    justify-content: flex-end;
+    position: sticky;
+    top: 0;
+    background: var(--p-surface-0);
+    border-bottom: 1px solid var(--p-surface-100);
+    padding: 0.3rem 0.5rem;
+    z-index: 1;
+  }
+  .sidebar-sheet-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--p-text-muted-color);
+    padding: 0.4rem;
+    border-radius: 50%;
+    font-size: 1rem;
+  }
+  .sidebar-sheet-close:hover {
+    color: var(--p-text-color);
+    background: var(--p-surface-100);
+  }
+
+  .subheader .controls :deep(.p-button-label) { display: none; }
+  .subheader .controls :deep(.p-button) { padding: 0.5rem; min-width: 2.25rem; }
+}
 </style>

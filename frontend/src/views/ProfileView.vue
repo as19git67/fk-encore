@@ -250,11 +250,11 @@ onMounted(loadPasskeys)
 
 .detail-label {
   font-weight: 600;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
 }
 
 .description {
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
   margin-bottom: 1rem;
 }
 
@@ -281,7 +281,7 @@ onMounted(loadPasskeys)
 }
 
 .no-roles {
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
   font-style: italic;
 }
 

@@ -268,7 +268,7 @@ onMounted(loadData)
 }
 
 .no-perms {
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
   font-style: italic;
   font-size: 0.85rem;
 }
@@ -294,9 +294,9 @@ onMounted(loadData)
   margin: 0;
   font-size: 0.85rem;
   text-transform: uppercase;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
   letter-spacing: 0.05em;
-  border-bottom: 1px solid var(--surface-border);
+  border-bottom: 1px solid var(--p-surface-200);
   padding-bottom: 0.25rem;
 }
 
@@ -321,6 +321,6 @@ onMounted(loadData)
 
 .perm-desc {
   font-size: 0.8rem;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
 }
 </style>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
 import { getPhotoUrl, type Photo, type CurationStatus } from '../api/photos'
@@ -20,6 +21,25 @@ const emit = defineEmits<{
   'restore': [id: number]
 }>()
 
+// ── Touch-Swipe für mobile Navigation ────────────────────────────────────────
+const touchStartX = ref(0)
+const touchStartY = ref(0)
+
+function handleTouchStart(e: TouchEvent) {
+  touchStartX.value = e.touches[0]!.clientX
+  touchStartY.value = e.touches[0]!.clientY
+}
+
+function handleTouchEnd(e: TouchEvent) {
+  const dx = e.changedTouches[0]!.clientX - touchStartX.value
+  const dy = e.changedTouches[0]!.clientY - touchStartY.value
+  // Nur horizontal wischen auswerten, wenn x-Bewegung dominiert
+  if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40) {
+    if (dx > 0 && props.prevPhoto) emit('prev')
+    else if (dx < 0 && props.nextPhoto) emit('next')
+  }
+}
+
 function formatDate(photo: Photo) {
   const dateStr = photo.taken_at || photo.created_at
   if (!dateStr) return ''
@@ -38,7 +58,7 @@ function formatDate(photo: Photo) {
       <HeicImage v-if="nextPhoto" :src="getPhotoUrl(nextPhoto.filename)" />
     </div>
 
-    <div class="fullscreen-content" @click.stop>
+    <div class="fullscreen-content" @click.stop @touchstart="handleTouchStart" @touchend="handleTouchEnd">
       <HeicImage :src="getPhotoUrl(photo.filename)" :alt="photo.original_name" objectFit="contain">
         <!-- Allow caller to inject overlays (e.g. face box) -->
         <slot />
@@ -161,4 +181,21 @@ function formatDate(photo: Photo) {
 
 .fs-nav-left { left: 1rem; }
 .fs-nav-right { right: 1rem; }
+
+@media (max-width: 768px) {
+  .fs-nav {
+    /* Auf Mobile immer sichtbar, größere Tappfläche */
+    opacity: 1;
+    top: auto;
+    bottom: 4rem;
+    transform: none;
+    background: rgba(0, 0, 0, 0.5) !important;
+    padding: 0.75rem !important;
+  }
+  .fs-nav-left { left: 0.5rem; }
+  .fs-nav-right { right: 0.5rem; }
+
+  /* Datum in TopBar kürzer */
+  .fs-date-bar { font-size: 0.8em; }
+}
 </style>

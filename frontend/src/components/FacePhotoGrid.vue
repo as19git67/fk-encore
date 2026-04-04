@@ -173,7 +173,7 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
   justify-content: center;
   gap: 0.5em;
   padding: 3rem 1rem;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
 }
 
 .photo-grid {
@@ -186,7 +186,7 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
   position: relative;
   border-radius: 8px;
   overflow: hidden;
-  background: var(--surface-card);
+  background: var(--p-surface-0);
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
   cursor: pointer;
   transition: transform 0.2s;
@@ -211,7 +211,7 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
 .photo-thumb {
   width: 100%;
   height: 200px;
-  background: var(--surface-ground);
+  background: var(--p-surface-50);
   overflow: hidden;
 }
 

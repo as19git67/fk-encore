@@ -213,7 +213,7 @@ onMounted(loadData)
 
 .detail-label {
   font-weight: 600;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
 }
 
 .roles-list {
@@ -230,7 +230,7 @@ onMounted(loadData)
 }
 
 .no-roles {
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
   margin-bottom: 1rem;
 }
 
@@ -252,7 +252,7 @@ onMounted(loadData)
 .loading {
   text-align: center;
   padding: 2rem;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
 }
 
 .confirm-content {
