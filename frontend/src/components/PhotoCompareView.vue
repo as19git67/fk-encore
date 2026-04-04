@@ -806,7 +806,7 @@ function getPhotoById(id: number): Photo | undefined {
   align-items: center;
   gap: 0.25rem;
   font-size: 0.75rem;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
   cursor: default;
   margin-left: 0.5rem;
 }

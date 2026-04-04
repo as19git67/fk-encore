@@ -148,7 +148,7 @@ async function handleResetPassword() {
 
 .hint {
   font-size: 0.875rem;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
   margin: 0 0 0.5rem;
 }
 

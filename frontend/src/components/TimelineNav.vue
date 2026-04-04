@@ -74,11 +74,18 @@ defineExpose({ navigateUp, navigateDown })
   flex-shrink: 0;
   overflow-y: auto;
   padding: 1rem 0.5rem;
-  background: var(--surface-card);
-  border-right: 1px solid var(--surface-border);
+  background: var(--p-surface-0);
+  border-right: 1px solid var(--p-surface-200);
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+}
+
+@media (max-width: 768px) {
+  /* Als Drawer: sicherstellen dass der Hintergrund undurchsichtig bleibt */
+  .timeline-nav {
+    background: var(--p-surface-0);
+  }
 }
 
 .nav-year-group {
@@ -111,7 +118,7 @@ defineExpose({ navigateUp, navigateDown })
 
 .nav-month {
   font-size: 0.75rem;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
   cursor: pointer;
   text-decoration: none;
   padding: 0.1rem 0.3rem;
