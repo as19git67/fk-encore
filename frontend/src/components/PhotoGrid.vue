@@ -8,13 +8,17 @@ let touchStartX = 0
 let touchStartY = 0
 
 function onItemTouchStart(e: TouchEvent) {
-  touchStartX = e.touches[0].clientX
-  touchStartY = e.touches[0].clientY
+  const t = e.touches[0]
+  if (!t) return
+  touchStartX = t.clientX
+  touchStartY = t.clientY
 }
 
 function onItemTouchEnd(e: TouchEvent, item: PhotoItem) {
-  const dx = Math.abs(e.changedTouches[0].clientX - touchStartX)
-  const dy = Math.abs(e.changedTouches[0].clientY - touchStartY)
+  const t = e.changedTouches[0]
+  if (!t) return
+  const dx = Math.abs(t.clientX - touchStartX)
+  const dy = Math.abs(t.clientY - touchStartY)
   if (dx > 10 || dy > 10) return // was a scroll, not a tap
   e.preventDefault() // prevent the delayed click from also firing
   handleItemTap(item, e as unknown as MouseEvent)
