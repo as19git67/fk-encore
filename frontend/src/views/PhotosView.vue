@@ -630,15 +630,16 @@ onUnmounted(() => serviceHealth.stopPolling())
     <div
       v-else
       class="gallery-layout"
-      :class="{ 'mobile-timeline-open': mobileTimelineOpen, 'mobile-sidebar-open': mobileSidebarOpen }"
     >
-      <!-- LEFT: Timeline nav -->
-      <TimelineNav
-        ref="timelineNavRef"
-        :groupedPhotos="groupedPhotos"
-        :activeSection="activeSection"
-        @scroll-to="handleScrollTo"
-      />
+      <!-- LEFT: Timeline nav – auf Mobile als Slide-in-Drawer -->
+      <div class="timeline-drawer" :class="{ 'is-open': mobileTimelineOpen }">
+        <TimelineNav
+          ref="timelineNavRef"
+          :groupedPhotos="groupedPhotos"
+          :activeSection="activeSection"
+          @scroll-to="handleScrollTo"
+        />
+      </div>
 
       <!-- CENTER: Photo grid -->
       <PhotoGrid
@@ -660,35 +661,37 @@ onUnmounted(() => serviceHealth.stopPolling())
         @restore="handleRestore"
       />
 
-      <!-- RIGHT: Details sidebar -->
-      <PhotoDetailSidebar
-        v-if="selectedPhotos.length > 0"
-        :photo="(selectedPhoto || selectedPhotos[0])!"
-        :selectedPhotos="expandedSelectedPhotos"
-        :faces="detectedFaces"
-        :loading-faces="loadingFaces"
-        :landmarks="detectedLandmarks"
-        :loading-landmarks="loadingLandmarks"
-        :limitAlbumsShown="true"
-        :persons="persons"
-        :can-delete="canDelete"
-        :can-upload="canUpload"
-        :reindexing-photo="reindexingPhoto"
-        :is-editing-date="isEditingDate"
-        v-model:editDate="editDate"
-        :updating-date="updatingDate"
-        :show-persons="auth.hasPermission('people.view')"
-        :face-service-available="serviceHealth.faceServiceAvailable"
-        @fullscreen="isFullscreen = true"
-        @toggle-favorite="handleToggleFavorite"
-        @hide="handleDelete"
-        @restore="handleRestore"
-        @start-edit-date="startEditingDate"
-        @update-date="handleUpdateDate"
-        @cancel-edit-date="isEditingDate = false"
-        @ignore-face="handleIgnoreFace"
-        @reindex="handleReindexPhoto"
-      />
+      <!-- RIGHT: Details sidebar – auf Mobile als Bottom-Sheet -->
+      <div class="sidebar-sheet" :class="{ 'is-open': mobileSidebarOpen }">
+        <PhotoDetailSidebar
+          v-if="selectedPhotos.length > 0"
+          :photo="(selectedPhoto || selectedPhotos[0])!"
+          :selectedPhotos="expandedSelectedPhotos"
+          :faces="detectedFaces"
+          :loading-faces="loadingFaces"
+          :landmarks="detectedLandmarks"
+          :loading-landmarks="loadingLandmarks"
+          :limitAlbumsShown="true"
+          :persons="persons"
+          :can-delete="canDelete"
+          :can-upload="canUpload"
+          :reindexing-photo="reindexingPhoto"
+          :is-editing-date="isEditingDate"
+          v-model:editDate="editDate"
+          :updating-date="updatingDate"
+          :show-persons="auth.hasPermission('people.view')"
+          :face-service-available="serviceHealth.faceServiceAvailable"
+          @fullscreen="isFullscreen = true"
+          @toggle-favorite="handleToggleFavorite"
+          @hide="handleDelete"
+          @restore="handleRestore"
+          @start-edit-date="startEditingDate"
+          @update-date="handleUpdateDate"
+          @cancel-edit-date="isEditingDate = false"
+          @ignore-face="handleIgnoreFace"
+          @reindex="handleReindexPhoto"
+        />
+      </div>
     </div>
 
     <!-- Fullscreen overlay -->
@@ -1104,63 +1107,74 @@ onUnmounted(() => serviceHealth.stopPolling())
   flex-shrink: 0;
 }
 
+/* ── Timeline Drawer Wrapper ─────────────────────────────────────────────── */
+.timeline-drawer {
+  /* Desktop: normaler Flex-Child, Wrapper unsichtbar */
+  display: contents;
+}
+
+/* ── Sidebar Sheet Wrapper ───────────────────────────────────────────────── */
+.sidebar-sheet {
+  /* Desktop: normaler Flex-Child, Wrapper unsichtbar */
+  display: contents;
+}
+
 /* ── Mobile Breakpoint ───────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .mobile-backdrop { display: block; }
   .mobile-fab { display: flex; }
   .mobile-select-bar { display: flex; }
 
-  /* Timeline Nav → linker Slide-in-Drawer */
-  .gallery-layout :deep(.timeline-nav) {
+  /* Timeline Drawer → linker Slide-in-Drawer */
+  .timeline-drawer {
+    display: block;
     position: fixed;
     left: 0;
     top: var(--menubar-height, 3.5rem);
     bottom: 0;
     width: 80px;
     z-index: 500;
-    background: var(--surface-card) !important;
+    background: var(--surface-card);
+    border-right: 1px solid var(--surface-border);
     transform: translateX(-100%);
     transition: transform 0.25s ease;
     box-shadow: 3px 0 12px rgba(0, 0, 0, 0.2);
+    overflow-y: auto;
   }
-  .gallery-layout.mobile-timeline-open :deep(.timeline-nav) {
+  .timeline-drawer.is-open {
     transform: translateX(0);
   }
 
-  /* Details Sidebar → Bottom Sheet */
-  .gallery-layout :deep(.details-sidebar) {
+  /* Sidebar Sheet → Bottom Sheet */
+  .sidebar-sheet {
+    display: block;
     position: fixed;
     bottom: 0;
     left: 0;
     right: 0;
-    width: 100% !important;
     max-height: 65vh;
     z-index: 500;
-    background: var(--surface-card) !important;
+    background: var(--surface-card);
     border-radius: 16px 16px 0 0;
-    border-left: none;
     border-top: 1px solid var(--surface-border);
     transform: translateY(100%);
     transition: transform 0.3s ease;
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.2);
+    overflow-y: auto;
   }
-  .gallery-layout.mobile-sidebar-open :deep(.details-sidebar) {
+  .sidebar-sheet.is-open {
     transform: translateY(0);
   }
 
   /* Drag-Handle Indikator oben am Bottom Sheet */
-  .gallery-layout :deep(.sidebar-header)::before {
+  .sidebar-sheet::before {
     content: '';
     display: block;
     width: 36px;
     height: 4px;
     border-radius: 2px;
     background: var(--surface-300);
-    margin: 0 auto 0.5rem;
-  }
-  .gallery-layout :deep(.sidebar-header) {
-    flex-direction: column;
-    padding-top: 0.5rem;
+    margin: 0.5rem auto 0;
   }
 
   /* Subheader kompakter */
