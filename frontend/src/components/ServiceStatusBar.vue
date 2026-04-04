@@ -33,14 +33,14 @@ const serviceLabels: Record<string, string> = {
   flex-wrap: wrap;
   gap: 0.4rem;
   padding: 0.4rem 1rem;
-  background: var(--yellow-100, #fef9c3);
-  border-bottom: 1px solid var(--yellow-300, #fde047);
+  background: var(--p-yellow-100);
+  border-bottom: 1px solid var(--p-yellow-300);
   font-size: 0.82rem;
-  color: var(--yellow-900, #713f12);
+  color: var(--p-yellow-900);
 }
 
 .service-status-bar__icon {
-  color: var(--yellow-600, #ca8a04);
+  color: var(--p-yellow-600);
   flex-shrink: 0;
 }
 
@@ -50,8 +50,8 @@ const serviceLabels: Record<string, string> = {
 }
 
 .service-status-bar__badge {
-  background: var(--yellow-200, #fef08a);
-  border: 1px solid var(--yellow-400, #facc15);
+  background: var(--p-yellow-200);
+  border: 1px solid var(--p-yellow-400);
   border-radius: 0.75rem;
   padding: 0.1rem 0.6rem;
   font-weight: 500;
@@ -59,8 +59,29 @@ const serviceLabels: Record<string, string> = {
 }
 
 .service-status-bar__hint {
-  color: var(--yellow-700, #a16207);
+  color: var(--p-yellow-700);
   font-style: italic;
+}
+
+@media (prefers-color-scheme: dark) {
+  .service-status-bar {
+    background: var(--p-yellow-900);
+    border-bottom-color: var(--p-yellow-700);
+    color: var(--p-yellow-100);
+  }
+
+  .service-status-bar__icon {
+    color: var(--p-yellow-300);
+  }
+
+  .service-status-bar__badge {
+    background: var(--p-yellow-800);
+    border-color: var(--p-yellow-600);
+  }
+
+  .service-status-bar__hint {
+    color: var(--p-yellow-200);
+  }
 }
 </style>
 
