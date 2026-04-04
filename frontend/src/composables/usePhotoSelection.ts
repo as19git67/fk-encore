@@ -1,4 +1,4 @@
-import { ref, computed, watch } from 'vue'
+import { ref, shallowRef, computed, watch } from 'vue'
 import type { Ref } from 'vue'
 import type { Photo } from '../api/photos'
 
@@ -6,10 +6,14 @@ import type { Photo } from '../api/photos'
  * Manages single + multi photo selection state.
  * selectedIndex is the "primary" selected photo (used for keyboard nav & sidebar).
  * selectedPhotoIds is the full set (used for multi-select batch operations).
+ *
+ * shallowRef is used for selectedPhotoIds because we always replace the Set
+ * rather than mutating it. This avoids Vue deep-reactivity proxy issues with
+ * Set.has/size tracking and ensures computed properties update on assignment.
  */
 export function usePhotoSelection(photos: Ref<Photo[]>) {
   const selectedIndex = ref(-1)
-  const selectedPhotoIds = ref<Set<number>>(new Set())
+  const selectedPhotoIds = shallowRef<Set<number>>(new Set())
 
   const selectedPhoto = computed<Photo | null>(() => {
     if (selectedIndex.value < 0) return null
