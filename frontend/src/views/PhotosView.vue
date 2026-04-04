@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, shallowRef, computed, watch, nextTick } from 'vue'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import ToggleSwitch from 'primevue/toggleswitch'
@@ -141,22 +141,36 @@ const mobileTimelineOpen = ref(false)
 const mobileSidebarOpen = ref(false)
 const mobileSelectMode = ref(false)
 
+// Mobile-Selektion vollständig getrennt von usePhotoSelection (kein Watch-Interferenz)
+const mobileSelectedIds = shallowRef<Set<number>>(new Set())
+const mobileSelectedPhotos = computed<Photo[]>(() =>
+  photos.value.filter(p => mobileSelectedIds.value.has(p.id))
+)
+
+// Welche IDs an PhotoGrid übergeben werden – im Auswahlmodus die mobilen IDs
+const activeSelectedPhotoIds = computed<Set<number>>(() =>
+  mobileSelectMode.value ? mobileSelectedIds.value : selectedPhotoIds.value
+)
+
+function enterSelectMode() {
+  mobileSelectedIds.value = new Set()
+  mobileSelectMode.value = true
+}
+
 function exitSelectMode() {
   mobileSelectMode.value = false
-  clearSelection()
+  mobileSelectedIds.value = new Set()
   mobileSidebarOpen.value = false
 }
 
 function handlePhotoClick(item: PhotoItem, event: MouseEvent) {
   if (mobileSelectMode.value) {
-    // Im Auswahlmodus: item.photo direkt verwenden statt über photos.value[index] zu gehen,
-    // damit kein staler Index-Lookup die Auswahl bricht.
-    // selectedIndex NICHT ändern – der watch in usePhotoSelection würde selectedPhotoIds zurücksetzen.
+    // Mobile Auswahlmodus: lokalen State direkt togglen, usePhotoSelection komplett umgehen
     const photoId = item.photo.id
-    const newSet = new Set(selectedPhotoIds.value)
-    if (newSet.has(photoId)) newSet.delete(photoId)
-    else newSet.add(photoId)
-    selectedPhotoIds.value = newSet
+    const next = new Set(mobileSelectedIds.value)
+    if (next.has(photoId)) next.delete(photoId)
+    else next.add(photoId)
+    mobileSelectedIds.value = next
   } else {
     selectPhoto(item.index, event)
   }
@@ -383,14 +397,16 @@ async function handleReindexPhoto() {
 
 // ── Group multi-select (Ctrl/Shift click on a stack) ─────────────────────
 function handleGroupMultiSelect(group: PhotoGroup) {
-  const newSet = new Set(selectedPhotoIds.value)
-  for (const pid of group.photo_ids) {
-    newSet.add(pid)
-  }
-  selectedPhotoIds.value = newSet
-  // Im mobilen Auswahlmodus selectedIndex NICHT setzen – der watch in usePhotoSelection
-  // würde sonst selectedPhotoIds auf {coverPhotoId} zurücksetzen und die Gruppenauswahl verwerfen
-  if (!mobileSelectMode.value) {
+  if (mobileSelectMode.value) {
+    // Mobile: alle Gruppenfotos in den isolierten mobilen State einfügen
+    const next = new Set(mobileSelectedIds.value)
+    for (const pid of group.photo_ids) next.add(pid)
+    mobileSelectedIds.value = next
+  } else {
+    // Desktop: usePhotoSelection + Cursor auf Cover-Foto setzen
+    const newSet = new Set(selectedPhotoIds.value)
+    for (const pid of group.photo_ids) newSet.add(pid)
+    selectedPhotoIds.value = newSet
     const coverIdx = photos.value.findIndex(p => p.id === (group.cover_photo_id ?? group.photo_ids[0]))
     if (coverIdx >= 0) selectedIndex.value = coverIdx
   }
@@ -662,7 +678,7 @@ onUnmounted(() => serviceHealth.stopPolling())
         :groupedPhotos="groupedPhotos"
         :photos="photos"
         :selectedIndex="selectedIndex"
-        :selectedPhotoIds="selectedPhotoIds"
+        :selectedPhotoIds="activeSelectedPhotoIds"
         :canDelete="canDelete"
         :hasStacks="true"
         :selectMode="mobileSelectMode"
@@ -685,9 +701,9 @@ onUnmounted(() => serviceHealth.stopPolling())
           </button>
         </div>
         <PhotoDetailSidebar
-          v-if="selectedPhotos.length > 0"
-          :photo="(selectedPhoto || selectedPhotos[0])!"
-          :selectedPhotos="expandedSelectedPhotos"
+          v-if="mobileSelectMode ? mobileSelectedPhotos.length > 0 : selectedPhotos.length > 0"
+          :photo="mobileSelectMode ? mobileSelectedPhotos[0]! : (selectedPhoto || selectedPhotos[0])!"
+          :selectedPhotos="mobileSelectMode ? mobileSelectedPhotos : expandedSelectedPhotos"
           :faces="detectedFaces"
           :loading-faces="loadingFaces"
           :landmarks="detectedLandmarks"
@@ -761,7 +777,7 @@ onUnmounted(() => serviceHealth.stopPolling())
     <button
       v-if="!loading && !uploading && photos.length > 0 && !mobileSelectMode"
       class="mobile-fab mobile-fab--select"
-      @click="clearSelection(); mobileSelectMode = true"
+      @click="enterSelectMode"
       aria-label="Fotos auswählen"
     >
       <i class="pi pi-check-square" />
@@ -781,11 +797,11 @@ onUnmounted(() => serviceHealth.stopPolling())
     <div v-if="mobileSelectMode" class="mobile-select-bar">
       <span class="mobile-select-count">
         <i class="pi pi-check-square" />
-        {{ selectedPhotos.length > 0 ? `${selectedPhotos.length} ausgewählt` : 'Fotos antippen zum Auswählen' }}
+        {{ mobileSelectedPhotos.length > 0 ? `${mobileSelectedPhotos.length} ausgewählt` : 'Fotos antippen zum Auswählen' }}
       </span>
       <div class="mobile-select-actions">
         <Button
-          v-if="selectedPhotos.length > 0"
+          v-if="mobileSelectedPhotos.length > 0"
           label="Details / Album"
           icon="pi pi-book"
           size="small"
