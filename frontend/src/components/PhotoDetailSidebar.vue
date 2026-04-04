@@ -794,4 +794,45 @@ const namedFaces = computed(() =>
   text-align: right;
   white-space: nowrap;
 }
+
+@media (prefers-color-scheme: dark) {
+  .details-sidebar {
+    background: var(--p-surface-900);
+    border-left-color: var(--p-surface-700);
+  }
+  .sidebar-header {
+    border-bottom-color: var(--p-surface-700);
+  }
+  .preview-container {
+    background: var(--p-surface-800);
+  }
+  .sidebar-divider {
+    background: var(--p-surface-700);
+  }
+  .date-editor {
+    background: var(--p-surface-800);
+  }
+  .location-pill {
+    background: var(--p-surface-800);
+    border-color: var(--p-surface-600);
+  }
+  .landmark-tag {
+    background: var(--p-surface-800);
+    border-color: var(--p-surface-600);
+  }
+  .person-row {
+    background: var(--p-surface-800);
+    border-color: var(--p-surface-700);
+  }
+  .album-checkbox-list {
+    background: var(--p-surface-800);
+    border-color: var(--p-surface-700);
+  }
+  .album-checkbox-item:hover {
+    background: var(--p-surface-700);
+  }
+  .opinion-bar-track {
+    background: var(--p-surface-700);
+  }
+}
 </style>

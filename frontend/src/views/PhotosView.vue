@@ -1255,4 +1255,28 @@ onUnmounted(() => serviceHealth.stopPolling())
     display: none;
   }
 }
+
+@media (prefers-color-scheme: dark) {
+  .subheader {
+    background: var(--p-surface-900);
+  }
+  .sidebar-sheet-close {
+    background: var(--p-surface-800);
+    border-color: var(--p-surface-700);
+  }
+  .sidebar-sheet-close:hover {
+    background: var(--p-surface-700);
+  }
+}
+
+@media (prefers-color-scheme: dark) and (max-width: 768px) {
+  .timeline-drawer {
+    background: var(--p-surface-900);
+    border-right-color: var(--p-surface-700);
+  }
+  .sidebar-sheet {
+    background: var(--p-surface-900);
+    border-top-color: var(--p-surface-700);
+  }
+}
 </style>

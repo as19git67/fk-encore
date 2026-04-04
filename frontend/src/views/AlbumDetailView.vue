@@ -834,4 +834,28 @@ onUnmounted(() => serviceHealth.stopPolling())
   .album-info-block__description { flex: 0 0 auto; min-width: unset; }
   .album-info-block__description-text--empty { display: none; }
 }
+
+@media (prefers-color-scheme: dark) {
+  .subheader {
+    background: var(--p-surface-900);
+  }
+  .sidebar-sheet-close {
+    background: var(--p-surface-800);
+    border-color: var(--p-surface-700);
+  }
+  .sidebar-sheet-close:hover {
+    background: var(--p-surface-700);
+  }
+  .mobile-fab--timeline {
+    background: var(--p-surface-800);
+    border-color: var(--p-surface-700);
+  }
+}
+
+@media (prefers-color-scheme: dark) and (max-width: 768px) {
+  .sidebar-sheet {
+    background: var(--p-surface-900);
+    border-top-color: var(--p-surface-700);
+  }
+}
 </style>
