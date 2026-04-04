@@ -589,8 +589,13 @@ onUnmounted(() => serviceHealth.stopPolling())
   background: var(--p-surface-200);
   text-transform: uppercase;
 }
-.role-badge--owner { background: #fee2e2; color: #991b1b; }
-.role-badge--contributor { background: #dcfce7; color: #166534; }
+.role-badge--owner { background: var(--p-red-100); color: var(--p-red-700); }
+.role-badge--contributor { background: var(--p-green-100); color: var(--p-green-700); }
+
+@media (prefers-color-scheme: dark) {
+  .role-badge--owner { background: var(--p-red-900); color: var(--p-red-200); }
+  .role-badge--contributor { background: var(--p-green-900); color: var(--p-green-200); }
+}
 
 .controls { display: flex; gap: 1em; align-items: center; flex-wrap: wrap; }
 
@@ -649,7 +654,11 @@ onUnmounted(() => serviceHealth.stopPolling())
 .share-user-email { display: block; font-size: 0.75rem; color: var(--p-text-muted-color); }
 .share-badge { font-size: 0.7rem; padding: 0.15rem 0.4rem; border-radius: 3px; white-space: nowrap; }
 .share-badge--read { background: var(--p-surface-200); color: var(--p-text-muted-color); }
-.share-badge--write { background: #dcfce7; color: #166534; }
+.share-badge--write { background: var(--p-green-100); color: var(--p-green-700); }
+
+@media (prefers-color-scheme: dark) {
+  .share-badge--write { background: var(--p-green-900); color: var(--p-green-200); }
+}
 .share-add-form { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
 .share-user-select { flex: 1; min-width: 180px; }
 .share-userid-input { width: 120px; }
@@ -734,7 +743,7 @@ onUnmounted(() => serviceHealth.stopPolling())
     bottom: 0;
     left: 0;
     right: 0;
-    max-height: 65vh;
+    max-height: calc(100dvh - var(--menubar-height, 3.5rem));
     z-index: 500;
     background: var(--p-surface-0);
     border-radius: 16px 16px 0 0;
@@ -746,31 +755,37 @@ onUnmounted(() => serviceHealth.stopPolling())
   }
   .sidebar-sheet.is-open { transform: translateY(0); }
 
-  /* Sticky Header mit Schließen-Button */
+  /* Close-Button schwebt sticky über dem Content, kein separater Header */
   .sidebar-sheet-header {
-    display: flex;
-    justify-content: flex-end;
     position: sticky;
     top: 0;
-    background: var(--p-surface-0);
-    border-bottom: 1px solid var(--p-surface-100);
-    padding: 0.3rem 0.5rem;
-    z-index: 1;
+    height: 0;
+    overflow: visible;
+    z-index: 2;
+    display: flex;
+    justify-content: flex-end;
+    pointer-events: none;
   }
   .sidebar-sheet-close {
+    pointer-events: all;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: none;
-    border: none;
+    background: var(--p-surface-0);
+    border: 1px solid var(--p-surface-200);
     cursor: pointer;
-    color: var(--p-text-muted-color);
-    padding: 0.4rem;
+    color: var(--p-text-color);
+    padding: 0;
     border-radius: 50%;
-    font-size: 1rem;
+    font-size: 0.85rem;
+    width: 1.75rem;
+    height: 1.75rem;
+    margin-top: 0.5rem;
+    margin-right: 0.5rem;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+    flex-shrink: 0;
   }
   .sidebar-sheet-close:hover {
-    color: var(--p-text-color);
     background: var(--p-surface-100);
   }
 

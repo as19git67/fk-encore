@@ -6,7 +6,7 @@ import HeicImage from './HeicImage.vue'
 import { getPhotoUrl, listAlbums, getPhotosAlbums, batchUpdateAlbumPhotos, updateAlbum, createAlbum, type Album } from '../api/photos'
 import { getAlbumCheckState as calculateAlbumCheckState, getNewPendingAction } from '../utils/albumSelection'
 import type { Photo, Face, LandmarkItem, Person, CurationStatus } from '../api/photos'
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 
 const props = defineProps<{
   photo: Photo
@@ -206,6 +206,14 @@ function getPersonName(personId?: number) {
   const person = props.persons.find(p => p.id === personId)
   return person ? person.name : 'Unbekannt'
 }
+
+const namedFaces = computed(() =>
+  props.faces.filter(f =>
+    !f.ignored &&
+    f.person_id &&
+    props.persons.find(p => p.id === f.person_id)?.name?.trim()
+  )
+)
 </script>
 
 <template>
@@ -275,7 +283,7 @@ function getPersonName(personId?: number) {
     </div>
     <div v-else class="sidebar-scroll">
       <div class="preview-container" @click="emit('fullscreen')" title="Vollbild">
-        <HeicImage :src="getPhotoUrl(photo.filename)" :alt="photo.original_name" />
+        <HeicImage :src="getPhotoUrl(photo.filename)" :alt="photo.original_name" objectFit="contain" />
         <div class="preview-overlay"><i class="pi pi-expand"></i></div>
       </div>
 
@@ -375,9 +383,9 @@ function getPersonName(personId?: number) {
         <div class="sidebar-section">
           <div class="section-label"><i class="pi pi-users" /> Personen</div>
           <div v-if="loadingFaces" class="loading-row"><i class="pi pi-spin pi-spinner" /> Lade…</div>
-          <div v-else-if="faces.filter(f => !f.ignored).length === 0" class="empty-hint">Keine Personen erkannt</div>
+          <div v-else-if="namedFaces.length === 0" class="empty-hint">Keine Personen erkannt</div>
           <div v-else class="person-list">
-            <div v-for="face in faces.filter(f => !f.ignored)" :key="face.id" class="person-row">
+            <div v-for="face in namedFaces" :key="face.id" class="person-row">
               <i class="pi pi-user person-icon" />
               <span class="person-name">{{ getPersonName(face.person_id) }}</span>
               <Button icon="pi pi-times" severity="secondary" text rounded size="small" @click="emit('ignore-face', face.id)" v-tooltip="'Entfernen'" />
@@ -468,6 +476,10 @@ function getPersonName(personId?: number) {
     overflow-y: auto;
     border-left: none;
   }
+  /* Kein separater Header im Sheet – Close-Button kommt vom Parent */
+  .sidebar-header {
+    display: none;
+  }
 }
 
 .sidebar-header {
@@ -496,11 +508,30 @@ function getPersonName(personId?: number) {
   position: relative;
   cursor: pointer;
   background: var(--p-surface-50);
+  width: 100%;
 }
 
+/* Höhe richtet sich nach dem natürlichen Seitenverhältnis des Bildes,
+   maximal so hoch wie die Sidebar breit ist (= quadratisch).
+   HeicImage setzt im contain-Modus aspect-ratio + height:auto am
+   image-content-wrapper; wir überschreiben die height:100%-Ketten. */
 .preview-container :deep(.heic-image-container) {
-  height: 200px;
+  height: auto !important;
   width: 100%;
+  min-height: 60px; /* Platzhalter während des Ladens */
+}
+.preview-container :deep(.image-wrapper) {
+  height: auto !important;
+}
+.preview-container :deep(.image-content-wrapper) {
+  /* Inline-Style maxHeight:'100%' überschreiben → feste Pixel-Schranke */
+  max-height: 280px !important; /* = Sidebar-Breite auf Desktop */
+}
+
+@media (max-width: 768px) {
+  .preview-container :deep(.image-content-wrapper) {
+    max-height: 100vw !important; /* = volle Sheet-Breite auf Mobile */
+  }
 }
 
 .preview-overlay {
