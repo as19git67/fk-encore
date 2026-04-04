@@ -21,6 +21,7 @@ import { listPersons, type Person } from '../api/photos'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
 import { usePhotoGrouping } from '../composables/usePhotoGrouping'
+import type { PhotoItem } from '../composables/usePhotoGrouping'
 import { usePhotoSelection } from '../composables/usePhotoSelection'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 
@@ -146,15 +147,15 @@ function exitSelectMode() {
   mobileSidebarOpen.value = false
 }
 
-function handlePhotoClick(item: { index: number }, event: MouseEvent) {
+function handlePhotoClick(item: PhotoItem, event: MouseEvent) {
   if (mobileSelectMode.value) {
-    // Im Auswahlmodus: direkt selectedPhotoIds togglen (ohne selectedIndex zu ändern,
-    // damit der watch in usePhotoSelection nicht die Auswahl zurücksetzt)
-    const photo = photos.value[item.index]
-    if (!photo) return
+    // Im Auswahlmodus: item.photo direkt verwenden statt über photos.value[index] zu gehen,
+    // damit kein staler Index-Lookup die Auswahl bricht.
+    // selectedIndex NICHT ändern – der watch in usePhotoSelection würde selectedPhotoIds zurücksetzen.
+    const photoId = item.photo.id
     const newSet = new Set(selectedPhotoIds.value)
-    if (newSet.has(photo.id)) newSet.delete(photo.id)
-    else newSet.add(photo.id)
+    if (newSet.has(photoId)) newSet.delete(photoId)
+    else newSet.add(photoId)
     selectedPhotoIds.value = newSet
   } else {
     selectPhoto(item.index, event)
