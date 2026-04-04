@@ -777,22 +777,46 @@ onUnmounted(() => serviceHealth.stopPolling())
   .subheader .controls :deep(.p-button-label) { display: none; }
   .subheader .controls :deep(.p-button) { padding: 0.5rem; min-width: 2.25rem; }
 
-  .header { flex-wrap: wrap; }
-  .header-left { flex: 1 1 100%; }
-  .controls {
+  /* Compact sticky header on mobile */
+  .header {
+    flex-wrap: wrap;
+    padding: 0.35rem 0.65rem;
+    gap: 0.2rem;
+  }
+  .header-left { flex: 1; min-width: 0; }
+  .album-detail-view .title { font-size: 1.1em; }
+
+  /* Flatten .controls into the header flex container so icon-buttons stay
+     on the title row and only the SelectButton wraps to a new full row. */
+  .controls { display: contents; }
+  .subheader .controls > :deep(.p-button) {
+    flex: 0 0 auto;
+    padding: 0.35rem;
+    min-width: 2rem;
+  }
+  .control-group {
+    display: flex;
     flex: 1 1 100%;
-    justify-content: flex-start;
-    overflow-x: auto;
-    padding-bottom: 0.1rem;
+    order: 10;
   }
   .control-group label { display: none; }
+  .subheader .control-group :deep(.p-selectbutton) { width: 100%; }
   .subheader .control-group :deep(.p-selectbutton .p-button) {
-    padding: 0.4rem 0.6rem;
+    flex: 1;
+    padding: 0.35rem 0.4rem;
     font-size: 0.78rem;
     min-width: unset;
   }
   .subheader .control-group :deep(.p-selectbutton .p-button-label) {
     display: inline;
   }
+
+  /* Compact album-info-block */
+  .album-info-block {
+    padding: 0.3rem 0.65rem;
+    gap: 0.4rem;
+  }
+  .album-info-block__description { flex: 0 0 auto; min-width: unset; }
+  .album-info-block__description-text--empty { display: none; }
 }
 </style>
