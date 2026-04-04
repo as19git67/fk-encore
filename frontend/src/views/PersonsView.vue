@@ -323,6 +323,7 @@ async function handleIgnorePerson(person: Person) {
     accept: async () => {
       try {
         if (fallback) selectedPerson.value = fallback
+        selectedPersonDetail.value = null  // force reload so selectPersonItem doesn't early-return
         await ignorePersonFaces(person.id)
         await loadData()
       } catch (err: any) { error.value = err.message || 'Fehler beim Ignorieren' }

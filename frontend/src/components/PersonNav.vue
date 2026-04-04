@@ -87,6 +87,21 @@ function thumbnailImageStyle(bbox: FaceBBox | undefined | null): Record<string, 
   }
 }
 
+// ── Touch handling (prevent iOS two-tap focus-then-click issue) ──────────────
+let touchStartY = 0
+
+function onEntryTouchStart(e: TouchEvent) {
+  touchStartY = e.touches[0]?.clientY ?? 0
+}
+
+function onEntryTouchEnd(e: TouchEvent, person: Person) {
+  const dy = Math.abs((e.changedTouches[0]?.clientY ?? 0) - touchStartY)
+  if (dy < 10) {
+    e.preventDefault()
+    emit('update:selectedPerson', person)
+  }
+}
+
 // ── Keyboard nav (↑/↓ within the list) ──────────────────────────────────────
 function getEntries(): HTMLElement[] {
   return Array.from(document.querySelectorAll<HTMLElement>('.person-entry[tabindex]'))
@@ -120,6 +135,8 @@ defineExpose({ navigateUp, navigateDown })
       tabindex="0"
       :class="{ active: selectedPerson?.id === person.id }"
       @click="emit('update:selectedPerson', person)"
+      @touchstart.passive="onEntryTouchStart"
+      @touchend="onEntryTouchEnd($event, person)"
     >
       <div class="person-avatar">
         <HeicImage
@@ -130,7 +147,7 @@ defineExpose({ navigateUp, navigateDown })
         />
       </div>
       <div class="person-entry-info">
-        <div v-if="inlineRenamePersonId === person.id" class="rename-inline" @click.stop>
+        <div v-if="inlineRenamePersonId === person.id" class="rename-inline" @click.stop @touchend.stop>
           <input
             :ref="setInlineRenameInputRef"
             v-model="inlineRenameValue"
@@ -160,6 +177,7 @@ defineExpose({ navigateUp, navigateDown })
         text rounded size="small"
         tabindex="-1"
         @click.stop="startInlineRename(person)"
+        @touchend.stop
       />
     </div>
   </nav>
