@@ -16,6 +16,8 @@ const props = defineProps<{
   canDelete?: boolean
   /** When true, photo items in stacks open the compare view instead of selecting */
   hasStacks?: boolean
+  /** When true, tapping a stack selects all its photos instead of opening compare view */
+  selectMode?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -146,7 +148,7 @@ defineExpose({
               'is-favorite': item.photo.curation_status === 'favorite',
               'is-stack': !!item.group,
             }"
-            @click="item.group ? (($event.ctrlKey || $event.metaKey || $event.shiftKey) ? emit('group-multi-select', item.group, $event) : emit('stack-click', item.group)) : emit('photo-click', item, $event)"
+            @click="item.group ? ((props.selectMode || $event.ctrlKey || $event.metaKey || $event.shiftKey) ? emit('group-multi-select', item.group, $event) : emit('stack-click', item.group)) : emit('photo-click', item, $event)"
             @dblclick="!item.group && emit('photo-dblclick', item)"
           >
             <div class="photo-thumb">

@@ -656,6 +656,7 @@ onUnmounted(() => serviceHealth.stopPolling())
         :selectedPhotoIds="selectedPhotoIds"
         :canDelete="canDelete"
         :hasStacks="true"
+        :selectMode="mobileSelectMode"
         @update:columnCount="columnCount = $event"
         @section-change="activeSection = $event"
         @photo-click="handlePhotoClick"
@@ -749,7 +750,7 @@ onUnmounted(() => serviceHealth.stopPolling())
     <button
       v-if="!loading && !uploading && photos.length > 0 && !mobileSelectMode"
       class="mobile-fab mobile-fab--select"
-      @click="mobileSelectMode = true"
+      @click="clearSelection(); mobileSelectMode = true"
       aria-label="Fotos auswählen"
     >
       <i class="pi pi-check-square" />

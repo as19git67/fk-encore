@@ -461,10 +461,12 @@ function getPersonName(personId?: number) {
 }
 
 @media (max-width: 768px) {
-  /* Als Bottom-Sheet: sicherstellen dass der Hintergrund undurchsichtig bleibt */
+  /* Als Bottom-Sheet: volle Breite und undurchsichtiger Hintergrund */
   .details-sidebar {
+    width: 100%;
     background: var(--p-surface-0);
     overflow-y: auto;
+    border-left: none;
   }
 }
 

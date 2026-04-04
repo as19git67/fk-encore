@@ -330,6 +330,10 @@ async function handleIgnorePerson(person: Person) {
   })
 }
 
+// ── Mobile drawer state ───────────────────────────────────────────────────────
+const mobilePersonNavOpen = ref(false)
+const mobileSidebarOpen = ref(false)
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadData()
 serviceHealth.startPolling()
@@ -370,15 +374,17 @@ onUnmounted(() => serviceHealth.stopPolling())
     <div v-else-if="!loading && persons.length === 0" class="info-text">Keine Personen erkannt.</div>
 
     <div v-else class="gallery-layout">
-      <!-- LEFT: Person nav -->
-      <PersonNav
-        ref="personNavRef"
-        :persons="persons"
-        :selectedPerson="selectedPerson"
-        @update:selectedPerson="handlePersonSelected"
-        @rename="handleRenameFromNav"
-        @ignore="handleIgnorePerson"
-      />
+      <!-- LEFT: Person nav – auf Mobile als Slide-in-Drawer -->
+      <div class="person-nav-drawer" :class="{ 'is-open': mobilePersonNavOpen }">
+        <PersonNav
+          ref="personNavRef"
+          :persons="persons"
+          :selectedPerson="selectedPerson"
+          @update:selectedPerson="handlePersonSelected($event); mobilePersonNavOpen = false"
+          @rename="handleRenameFromNav"
+          @ignore="handleIgnorePerson"
+        />
+      </div>
 
       <!-- CENTER: Face photo grid -->
       <FacePhotoGrid
@@ -393,31 +399,64 @@ onUnmounted(() => serviceHealth.stopPolling())
         @restore="handleRestorePhoto"
       />
 
-      <!-- RIGHT: Details sidebar -->
-      <PhotoDetailSidebar
-        v-if="selectedPhoto"
-        :photo="selectedPhoto"
-        :faces="detectedFaces"
-        :loading-faces="loadingFaces"
-        :landmarks="detectedLandmarks"
-        :loading-landmarks="loadingLandmarks"
-        :persons="persons"
-        :can-delete="canDelete"
-        :can-upload="false"
-        :reindexing-photo="reindexingPhoto"
-        :is-editing-date="false"
-        :updating-date="false"
-        :show-persons="auth.hasPermission('people.view')"
-        :limit-albums-shown="true"
-        :face-service-available="serviceHealth.faceServiceAvailable"
-        @fullscreen="isFullscreen = true"
-        @toggle-favorite="handleToggleFavorite"
-        @hide="handleHidePhoto"
-        @restore="handleRestorePhoto"
-        @ignore-face="handleIgnoreFaceInSidebar"
-        @reindex="handleReindexPhoto"
-      />
+      <!-- RIGHT: Details sidebar – auf Mobile als Bottom-Sheet -->
+      <div class="person-sidebar-sheet" :class="{ 'is-open': mobileSidebarOpen }">
+        <button class="sidebar-sheet-close" @click="mobileSidebarOpen = false" aria-label="Schließen">
+          <i class="pi pi-times" />
+        </button>
+        <PhotoDetailSidebar
+          v-if="selectedPhoto"
+          :photo="selectedPhoto"
+          :faces="detectedFaces"
+          :loading-faces="loadingFaces"
+          :landmarks="detectedLandmarks"
+          :loading-landmarks="loadingLandmarks"
+          :persons="persons"
+          :can-delete="canDelete"
+          :can-upload="false"
+          :reindexing-photo="reindexingPhoto"
+          :is-editing-date="false"
+          :updating-date="false"
+          :show-persons="auth.hasPermission('people.view')"
+          :limit-albums-shown="true"
+          :face-service-available="serviceHealth.faceServiceAvailable"
+          @fullscreen="isFullscreen = true"
+          @toggle-favorite="handleToggleFavorite"
+          @hide="handleHidePhoto"
+          @restore="handleRestorePhoto"
+          @ignore-face="handleIgnoreFaceInSidebar"
+          @reindex="handleReindexPhoto"
+        />
+      </div>
     </div>
+
+    <!-- Mobile: Backdrop zum Schließen von Drawern -->
+    <div
+      v-if="mobilePersonNavOpen || mobileSidebarOpen"
+      class="mobile-backdrop"
+      @click="mobilePersonNavOpen = false; mobileSidebarOpen = false"
+    />
+
+    <!-- Mobile: Floating-Button zum Öffnen der Personenliste -->
+    <button
+      v-if="!loading && persons.length > 0"
+      class="mobile-fab mobile-fab--persons"
+      :class="{ active: mobilePersonNavOpen }"
+      @click="mobilePersonNavOpen = !mobilePersonNavOpen; mobileSidebarOpen = false"
+      aria-label="Personenliste"
+    >
+      <i class="pi pi-users" />
+    </button>
+
+    <!-- Mobile: Floating-Button zum Öffnen der Details -->
+    <button
+      v-if="selectedPhoto && !mobileSidebarOpen && !loading"
+      class="mobile-fab mobile-fab--details"
+      @click="mobileSidebarOpen = true; mobilePersonNavOpen = false"
+      aria-label="Details"
+    >
+      <i class="pi pi-info-circle" />
+    </button>
 
     <!-- Fullscreen overlay -->
     <FullscreenOverlay
@@ -517,6 +556,153 @@ onUnmounted(() => serviceHealth.stopPolling())
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+
+/* ── Person Nav Drawer Wrapper ───────────────────────────────────────────── */
+.person-nav-drawer {
+  display: contents;
+}
+
+/* ── Person Sidebar Sheet Wrapper ────────────────────────────────────────── */
+.person-sidebar-sheet {
+  display: contents;
+}
+
+.sidebar-sheet-close {
+  display: none;
+}
+
+/* ── Mobile Backdrop ─────────────────────────────────────────────────────── */
+.mobile-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 490;
+}
+
+/* ── Mobile FABs ─────────────────────────────────────────────────────────── */
+.mobile-fab {
+  display: none;
+  position: fixed;
+  bottom: 1.5rem;
+  z-index: 495;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  transition: background 0.2s, transform 0.2s;
+}
+
+.mobile-fab--persons {
+  left: 1rem;
+  background: var(--p-surface-0);
+  color: var(--p-primary-color);
+  border: 1px solid var(--p-surface-200);
+}
+.mobile-fab--persons.active {
+  background: var(--p-primary-color);
+  color: white;
+}
+
+.mobile-fab--details {
+  right: 1rem;
+  background: var(--p-primary-color);
+  color: white;
+}
+
+/* ── Mobile Breakpoint ───────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .mobile-backdrop { display: block; }
+  .mobile-fab { display: flex; }
+
+  /* Person Nav Drawer → linker Slide-in-Drawer */
+  .person-nav-drawer {
+    display: block;
+    position: fixed;
+    left: 0;
+    top: var(--menubar-height, 3.5rem);
+    bottom: 0;
+    width: 200px;
+    z-index: 500;
+    background: var(--p-surface-0);
+    border-right: 1px solid var(--p-surface-200);
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    box-shadow: 3px 0 12px rgba(0, 0, 0, 0.2);
+    overflow-y: auto;
+  }
+  .person-nav-drawer.is-open {
+    transform: translateX(0);
+  }
+
+  /* Person Sidebar Sheet → Bottom Sheet */
+  .person-sidebar-sheet {
+    display: block;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    max-height: 65vh;
+    z-index: 500;
+    background: var(--p-surface-0);
+    border-radius: 16px 16px 0 0;
+    border-top: 1px solid var(--p-surface-200);
+    transform: translateY(100%);
+    transition: transform 0.3s ease;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.2);
+    overflow-y: auto;
+    padding-top: 2.25rem;
+  }
+  .person-sidebar-sheet.is-open {
+    transform: translateY(0);
+  }
+
+  /* Schließen-Button am Bottom Sheet */
+  .sidebar-sheet-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    top: 0.5rem;
+    right: 0.75rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--p-text-muted-color);
+    padding: 0.4rem;
+    border-radius: 50%;
+    font-size: 1rem;
+    z-index: 1;
+  }
+  .sidebar-sheet-close:hover {
+    color: var(--p-text-color);
+    background: var(--p-surface-100);
+  }
+
+  .subheader {
+    padding: 0.375rem 0.75rem;
+  }
+  .persons-view .title {
+    font-size: 1.2rem;
+  }
+
+  /* Actions: Labels ausblenden, nur Icons */
+  .subheader .actions :deep(.p-button-label) {
+    display: none;
+  }
+  .subheader .actions :deep(.p-button) {
+    padding: 0.5rem;
+    min-width: 2.25rem;
+  }
+  .toggle-hidden label {
+    display: none;
+  }
 }
 
 /* ── Face bbox overlay (fullscreen only) ─────────────────────────────────── */
