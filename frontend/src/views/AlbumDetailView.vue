@@ -440,9 +440,11 @@ onUnmounted(() => serviceHealth.stopPolling())
 
       <!-- RIGHT: Details sidebar – auf Mobile als Bottom-Sheet -->
       <div class="sidebar-sheet" :class="{ 'is-open': mobileSidebarOpen }">
-        <button class="sidebar-sheet-close" @click="mobileSidebarOpen = false" aria-label="Schließen">
-          <i class="pi pi-times" />
-        </button>
+        <div class="sidebar-sheet-header">
+          <button class="sidebar-sheet-close" @click="mobileSidebarOpen = false" aria-label="Schließen">
+            <i class="pi pi-times" />
+          </button>
+        </div>
         <PhotoDetailSidebar
           v-if="selectedPhoto"
           :photo="selectedPhoto"
@@ -657,6 +659,7 @@ onUnmounted(() => serviceHealth.stopPolling())
 
 /* ── Sidebar Sheet Wrapper ───────────────────────────────────────────────── */
 .sidebar-sheet { display: contents; }
+.sidebar-sheet-header { display: none; }
 .sidebar-sheet-close { display: none; }
 
 /* ── Mobile Backdrop ─────────────────────────────────────────────────────── */
@@ -740,17 +743,24 @@ onUnmounted(() => serviceHealth.stopPolling())
     transition: transform 0.3s ease;
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.2);
     overflow-y: auto;
-    padding-top: 2.25rem;
   }
   .sidebar-sheet.is-open { transform: translateY(0); }
 
+  /* Sticky Header mit Schließen-Button */
+  .sidebar-sheet-header {
+    display: flex;
+    justify-content: flex-end;
+    position: sticky;
+    top: 0;
+    background: var(--p-surface-0);
+    border-bottom: 1px solid var(--p-surface-100);
+    padding: 0.3rem 0.5rem;
+    z-index: 1;
+  }
   .sidebar-sheet-close {
     display: flex;
     align-items: center;
     justify-content: center;
-    position: absolute;
-    top: 0.5rem;
-    right: 0.75rem;
     background: none;
     border: none;
     cursor: pointer;
@@ -758,7 +768,6 @@ onUnmounted(() => serviceHealth.stopPolling())
     padding: 0.4rem;
     border-radius: 50%;
     font-size: 1rem;
-    z-index: 1;
   }
   .sidebar-sheet-close:hover {
     color: var(--p-text-color);
