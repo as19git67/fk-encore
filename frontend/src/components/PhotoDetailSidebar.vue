@@ -460,6 +460,14 @@ function getPersonName(personId?: number) {
   overflow: hidden;
 }
 
+@media (max-width: 768px) {
+  /* Als Bottom-Sheet: sicherstellen dass der Hintergrund undurchsichtig bleibt */
+  .details-sidebar {
+    background: var(--surface-card);
+    overflow-y: auto;
+  }
+}
+
 .sidebar-header {
   display: flex;
   justify-content: space-between;

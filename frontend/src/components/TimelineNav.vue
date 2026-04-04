@@ -81,6 +81,13 @@ defineExpose({ navigateUp, navigateDown })
   gap: 1.5rem;
 }
 
+@media (max-width: 768px) {
+  /* Als Drawer: sicherstellen dass der Hintergrund undurchsichtig bleibt */
+  .timeline-nav {
+    background: var(--surface-card);
+  }
+}
+
 .nav-year-group {
   display: flex;
   flex-direction: column;

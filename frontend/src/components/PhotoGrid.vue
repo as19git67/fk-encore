@@ -247,7 +247,7 @@ defineExpose({
     gap: 0.5rem;
   }
   .photo-grid-scroll {
-    padding: 0 0.5rem 5rem; /* Abstand unten für FABs */
+    padding: 0 0.5rem 7rem; /* Abstand unten für FABs + Action-Bar */
   }
   .year-title { font-size: 1.1rem; margin: 1rem 0 0.25rem; }
   .month-title { font-size: 0.875rem; margin: 0.75rem 0 0.25rem; }

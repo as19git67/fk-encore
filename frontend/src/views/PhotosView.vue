@@ -110,7 +110,7 @@ const { groupedPhotos } = usePhotoGrouping(photos, {
 })
 
 // ── Selection (via composable) ────────────────────────────────────────────────
-const { selectedIndex, selectedPhotoIds, selectedPhoto, selectedPhotos, selectPhoto } =
+const { selectedIndex, selectedPhotoIds, selectedPhoto, selectedPhotos, selectPhoto, clearSelection } =
   usePhotoSelection(photos)
 
 // Expand selection: if any selected photo is in a group, include all group members
@@ -138,12 +138,22 @@ const nextPhoto = computed(() =>
 // ── Mobile drawer state ───────────────────────────────────────────────────────
 const mobileTimelineOpen = ref(false)
 const mobileSidebarOpen = ref(false)
+const mobileSelectMode = ref(false)
 
-watch(selectedPhoto, (photo) => {
-  if (photo && window.innerWidth <= 768) {
-    mobileSidebarOpen.value = true
+function exitSelectMode() {
+  mobileSelectMode.value = false
+  clearSelection()
+  mobileSidebarOpen.value = false
+}
+
+function handlePhotoClick(item: { index: number }, event: MouseEvent) {
+  if (mobileSelectMode.value) {
+    // Im Auswahlmodus: Tippen = Ctrl+Click (Toggle)
+    selectPhoto(item.index, { ctrlKey: true, metaKey: false, shiftKey: false } as MouseEvent)
+  } else {
+    selectPhoto(item.index, event)
   }
-})
+}
 
 // ── Sidebar state ─────────────────────────────────────────────────────────────
 const detectedFaces = ref<Face[]>([])
@@ -641,7 +651,7 @@ onUnmounted(() => serviceHealth.stopPolling())
         :hasStacks="true"
         @update:columnCount="columnCount = $event"
         @section-change="activeSection = $event"
-        @photo-click="(item, event) => selectPhoto(item.index, event)"
+        @photo-click="handlePhotoClick"
         @photo-dblclick="isFullscreen = true"
         @stack-click="activeGroup = $event"
         @group-multi-select="handleGroupMultiSelect"
@@ -714,7 +724,7 @@ onUnmounted(() => serviceHealth.stopPolling())
 
     <!-- Mobile: Floating-Button zum Öffnen der Zeitleiste -->
     <button
-      v-if="!loading && !uploading && photos.length > 0"
+      v-if="!loading && !uploading && photos.length > 0 && !mobileSelectMode"
       class="mobile-fab mobile-fab--timeline"
       :class="{ active: mobileTimelineOpen }"
       @click="mobileTimelineOpen = !mobileTimelineOpen; mobileSidebarOpen = false"
@@ -723,15 +733,51 @@ onUnmounted(() => serviceHealth.stopPolling())
       <i class="pi pi-calendar" />
     </button>
 
-    <!-- Mobile: Floating-Button zum Öffnen der Details (wenn Foto gewählt) -->
+    <!-- Mobile: Floating-Button Auswahlmodus togglen -->
     <button
-      v-if="selectedPhoto && !mobileSidebarOpen && !loading && !uploading"
+      v-if="!loading && !uploading && photos.length > 0"
+      class="mobile-fab mobile-fab--select"
+      :class="{ active: mobileSelectMode }"
+      @click="mobileSelectMode ? exitSelectMode() : (mobileSelectMode = true)"
+      :aria-label="mobileSelectMode ? 'Auswahl beenden' : 'Fotos auswählen'"
+    >
+      <i :class="mobileSelectMode ? 'pi pi-times' : 'pi pi-check-square'" />
+    </button>
+
+    <!-- Mobile: Floating-Button zum Öffnen der Details (wenn Foto gewählt, nicht im Auswahlmodus) -->
+    <button
+      v-if="selectedPhoto && !mobileSidebarOpen && !loading && !uploading && !mobileSelectMode"
       class="mobile-fab mobile-fab--details"
       @click="mobileSidebarOpen = true; mobileTimelineOpen = false"
       aria-label="Details"
     >
       <i class="pi pi-info-circle" />
     </button>
+
+    <!-- Mobile: Action-Bar im Auswahlmodus -->
+    <div v-if="mobileSelectMode" class="mobile-select-bar">
+      <span class="mobile-select-count">
+        <i class="pi pi-check-square" />
+        {{ selectedPhotos.length > 0 ? `${selectedPhotos.length} ausgewählt` : 'Fotos antippen zum Auswählen' }}
+      </span>
+      <div class="mobile-select-actions">
+        <Button
+          v-if="selectedPhotos.length > 0"
+          label="Details / Album"
+          icon="pi pi-book"
+          size="small"
+          @click="mobileSidebarOpen = true; mobileTimelineOpen = false"
+        />
+        <Button
+          label="Abbrechen"
+          icon="pi pi-times"
+          size="small"
+          severity="secondary"
+          outlined
+          @click="exitSelectMode"
+        />
+      </div>
+    </div>
   </div>
 </template>
 
@@ -1005,16 +1051,64 @@ onUnmounted(() => serviceHealth.stopPolling())
   color: white;
 }
 
+.mobile-fab--select {
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface-card);
+  color: var(--text-color-secondary);
+  border: 1px solid var(--surface-border);
+}
+.mobile-fab--select.active {
+  background: var(--p-red-500, #ef4444);
+  color: white;
+  border-color: transparent;
+}
+
 .mobile-fab--details {
   right: 1rem;
   background: var(--p-primary-color);
   color: white;
 }
 
+/* ── Mobile Select Action-Bar ────────────────────────────────────────────── */
+.mobile-select-bar {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 495;
+  background: var(--surface-card);
+  border-top: 1px solid var(--surface-border);
+  padding: 0.75rem 1rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.12);
+}
+
+.mobile-select-count {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-color);
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.mobile-select-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
 /* ── Mobile Breakpoint ───────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .mobile-backdrop { display: block; }
   .mobile-fab { display: flex; }
+  .mobile-select-bar { display: flex; }
 
   /* Timeline Nav → linker Slide-in-Drawer */
   .gallery-layout :deep(.timeline-nav) {
