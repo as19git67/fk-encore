@@ -850,6 +850,49 @@ export async function updatePhotoCurationLogic(
     );
   }
 
+  // After hiding a photo, check if it belongs to an unreviewed group where all
+  // remaining members are now hidden. If so, mark the group as reviewed.
+  if (status === "hidden") {
+    const memberOfGroups = await dbAll<{ group_id: number }>(
+      db.select({ group_id: photoGroupMembers.group_id })
+        .from(photoGroupMembers)
+        .innerJoin(photoGroups, eq(photoGroups.id, photoGroupMembers.group_id))
+        .where(and(
+          eq(photoGroupMembers.photo_id, photoId),
+          eq(photoGroups.user_id, userId),
+          isNull(photoGroups.reviewed_at)
+        ))
+    );
+
+    for (const { group_id } of memberOfGroups) {
+      // Count members that are NOT hidden for this user
+      const visibleMembers = await dbAll<{ photo_id: number }>(
+        db.select({ photo_id: photoGroupMembers.photo_id })
+          .from(photoGroupMembers)
+          .leftJoin(
+            photoCuration,
+            and(
+              eq(photoCuration.photo_id, photoGroupMembers.photo_id),
+              eq(photoCuration.user_id, userId)
+            )
+          )
+          .where(and(
+            eq(photoGroupMembers.group_id, group_id),
+            or(isNull(photoCuration.status), sql`${photoCuration.status} != 'hidden'`)
+          ))
+      );
+
+      if (visibleMembers.length === 0) {
+        // All members are hidden – mark group as reviewed
+        await dbExec(
+          db.update(photoGroups)
+            .set({ reviewed_at: new Date().toISOString() })
+            .where(eq(photoGroups.id, group_id))
+        );
+      }
+    }
+  }
+
   return { success: true };
 }
 
