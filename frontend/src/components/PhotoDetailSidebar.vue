@@ -283,7 +283,7 @@ const namedFaces = computed(() =>
     </div>
     <div v-else class="sidebar-scroll">
       <div class="preview-container" @click="emit('fullscreen')" title="Vollbild">
-        <HeicImage :src="getPhotoUrl(photo.filename)" :alt="photo.original_name" />
+        <HeicImage :src="getPhotoUrl(photo.filename)" :alt="photo.original_name" objectFit="contain" />
         <div class="preview-overlay"><i class="pi pi-expand"></i></div>
       </div>
 
@@ -508,11 +508,30 @@ const namedFaces = computed(() =>
   position: relative;
   cursor: pointer;
   background: var(--p-surface-50);
+  width: 100%;
 }
 
+/* Höhe richtet sich nach dem natürlichen Seitenverhältnis des Bildes,
+   maximal so hoch wie die Sidebar breit ist (= quadratisch).
+   HeicImage setzt im contain-Modus aspect-ratio + height:auto am
+   image-content-wrapper; wir überschreiben die height:100%-Ketten. */
 .preview-container :deep(.heic-image-container) {
-  height: 200px;
+  height: auto !important;
   width: 100%;
+  min-height: 60px; /* Platzhalter während des Ladens */
+}
+.preview-container :deep(.image-wrapper) {
+  height: auto !important;
+}
+.preview-container :deep(.image-content-wrapper) {
+  /* Inline-Style maxHeight:'100%' überschreiben → feste Pixel-Schranke */
+  max-height: 280px !important; /* = Sidebar-Breite auf Desktop */
+}
+
+@media (max-width: 768px) {
+  .preview-container :deep(.image-content-wrapper) {
+    max-height: 100vw !important; /* = volle Sheet-Breite auf Mobile */
+  }
 }
 
 .preview-overlay {
