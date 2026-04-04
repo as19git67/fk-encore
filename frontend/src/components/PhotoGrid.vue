@@ -221,7 +221,7 @@ defineExpose({
               <span class="name">
                 {{ item.group ? `${item.group.member_count} ähnliche Fotos` : item.photo.original_name }}
               </span>
-              <div v-if="!item.group" class="photo-actions">
+              <div v-if="!item.group && !selectMode" class="photo-actions">
                 <Button
                   v-if="canDelete && item.photo.curation_status === 'hidden'"
                   size="small" icon="pi pi-eye" severity="info" text rounded
