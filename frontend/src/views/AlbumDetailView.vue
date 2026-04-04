@@ -345,6 +345,10 @@ async function handleRemoveShare(userId: number) {
   } catch (err: any) { error.value = err.message || 'Fehler' }
 }
 
+// ── Mobile drawer state ───────────────────────────────────────────────────────
+const mobileTimelineOpen = ref(false)
+const mobileSidebarOpen = ref(false)
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 void loadData()
 if (showPersons.value) void loadPersons()
@@ -407,13 +411,15 @@ onUnmounted(() => serviceHealth.stopPolling())
 
     <!-- Three-column layout: TimelineNav | PhotoGrid | Sidebar -->
     <div v-if="album && groupedPhotos.length > 0" class="gallery-layout">
-      <!-- LEFT: Timeline nav -->
-      <TimelineNav
-        ref="timelineNavRef"
-        :groupedPhotos="groupedPhotos"
-        :activeSection="activeSection"
-        @scroll-to="handleScrollTo"
-      />
+      <!-- LEFT: Timeline nav – auf Mobile als Slide-in-Drawer -->
+      <div class="timeline-drawer" :class="{ 'is-open': mobileTimelineOpen }">
+        <TimelineNav
+          ref="timelineNavRef"
+          :groupedPhotos="groupedPhotos"
+          :activeSection="activeSection"
+          @scroll-to="handleScrollTo"
+        />
+      </div>
 
       <!-- CENTER: Photo grid -->
       <PhotoGrid
@@ -432,36 +438,69 @@ onUnmounted(() => serviceHealth.stopPolling())
         @restore="handleRestorePhoto"
       />
 
-      <!-- RIGHT: Details sidebar -->
-      <PhotoDetailSidebar
-        v-if="selectedPhoto"
-        :photo="selectedPhoto"
-        :can-delete="canDeletePhotos || canWrite"
-        :can-upload="canUploadPhotos"
-        :faces="detectedFaces"
-        :is-editing-date="false"
-        :landmarks="detectedLandmarks"
-        :loading-faces="loadingFaces"
-        :loading-landmarks="loadingLandmarks"
-        :persons="persons"
-        :reindexing-photo="reindexingPhoto"
-        :updating-date="false"
-        :album-id="albumId"
-        :cover-photo-id="album.cover_photo_id"
-        :show-persons="showPersons"
-        :limit-albums-shown="true"
-        :face-service-available="serviceHealth.faceServiceAvailable"
-        @update:cover-photo-id="handleCoverPhotoIdUpdate"
-        @fullscreen="isFullscreen = true"
-        @toggle-favorite="handleToggleFavorite"
-        @hide="handleHidePhoto"
-        @restore="handleRestorePhoto"
-        @ignore-face="handleIgnoreFaceInSidebar"
-        @reindex="handleReindexPhoto"
-      />
+      <!-- RIGHT: Details sidebar – auf Mobile als Bottom-Sheet -->
+      <div class="sidebar-sheet" :class="{ 'is-open': mobileSidebarOpen }">
+        <button class="sidebar-sheet-close" @click="mobileSidebarOpen = false" aria-label="Schließen">
+          <i class="pi pi-times" />
+        </button>
+        <PhotoDetailSidebar
+          v-if="selectedPhoto"
+          :photo="selectedPhoto"
+          :can-delete="canDeletePhotos || canWrite"
+          :can-upload="canUploadPhotos"
+          :faces="detectedFaces"
+          :is-editing-date="false"
+          :landmarks="detectedLandmarks"
+          :loading-faces="loadingFaces"
+          :loading-landmarks="loadingLandmarks"
+          :persons="persons"
+          :reindexing-photo="reindexingPhoto"
+          :updating-date="false"
+          :album-id="albumId"
+          :cover-photo-id="album.cover_photo_id"
+          :show-persons="showPersons"
+          :limit-albums-shown="true"
+          :face-service-available="serviceHealth.faceServiceAvailable"
+          @update:cover-photo-id="handleCoverPhotoIdUpdate"
+          @fullscreen="isFullscreen = true"
+          @toggle-favorite="handleToggleFavorite"
+          @hide="handleHidePhoto"
+          @restore="handleRestorePhoto"
+          @ignore-face="handleIgnoreFaceInSidebar"
+          @reindex="handleReindexPhoto"
+        />
+      </div>
     </div>
 
     <div v-else-if="album" class="info-text">Keine Fotos in dieser Ansicht.</div>
+
+    <!-- Mobile: Backdrop zum Schließen von Drawern -->
+    <div
+      v-if="mobileTimelineOpen || mobileSidebarOpen"
+      class="mobile-backdrop"
+      @click="mobileTimelineOpen = false; mobileSidebarOpen = false"
+    />
+
+    <!-- Mobile: Floating-Button Zeitleiste -->
+    <button
+      v-if="album && groupedPhotos.length > 0"
+      class="mobile-fab mobile-fab--timeline"
+      :class="{ active: mobileTimelineOpen }"
+      @click="mobileTimelineOpen = !mobileTimelineOpen; mobileSidebarOpen = false"
+      aria-label="Zeitleiste"
+    >
+      <i class="pi pi-calendar" />
+    </button>
+
+    <!-- Mobile: Floating-Button Details -->
+    <button
+      v-if="selectedPhoto && !mobileSidebarOpen && album"
+      class="mobile-fab mobile-fab--details"
+      @click="mobileSidebarOpen = true; mobileTimelineOpen = false"
+      aria-label="Details"
+    >
+      <i class="pi pi-info-circle" />
+    </button>
 
     <!-- Fullscreen overlay -->
     <FullscreenOverlay
@@ -612,4 +651,121 @@ onUnmounted(() => serviceHealth.stopPolling())
 .share-add-form { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
 .share-user-select { flex: 1; min-width: 180px; }
 .share-userid-input { width: 120px; }
+
+/* ── Timeline Drawer Wrapper ─────────────────────────────────────────────── */
+.timeline-drawer { display: contents; }
+
+/* ── Sidebar Sheet Wrapper ───────────────────────────────────────────────── */
+.sidebar-sheet { display: contents; }
+.sidebar-sheet-close { display: none; }
+
+/* ── Mobile Backdrop ─────────────────────────────────────────────────────── */
+.mobile-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 490;
+}
+
+/* ── Mobile FABs ─────────────────────────────────────────────────────────── */
+.mobile-fab {
+  display: none;
+  position: fixed;
+  bottom: 1.5rem;
+  z-index: 495;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  transition: background 0.2s;
+}
+.mobile-fab--timeline {
+  left: 1rem;
+  background: var(--p-surface-0);
+  color: var(--p-primary-color);
+  border: 1px solid var(--p-surface-200);
+}
+.mobile-fab--timeline.active {
+  background: var(--p-primary-color);
+  color: white;
+}
+.mobile-fab--details {
+  right: 1rem;
+  background: var(--p-primary-color);
+  color: white;
+}
+
+/* ── Mobile Breakpoint ───────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .mobile-backdrop { display: block; }
+  .mobile-fab { display: flex; }
+
+  .album-detail-view { margin-inline: 0; }
+
+  .timeline-drawer {
+    display: block;
+    position: fixed;
+    left: 0;
+    top: var(--menubar-height, 3.5rem);
+    bottom: 0;
+    width: 80px;
+    z-index: 500;
+    background: var(--p-surface-0);
+    border-right: 1px solid var(--p-surface-200);
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    box-shadow: 3px 0 12px rgba(0, 0, 0, 0.2);
+    overflow-y: auto;
+  }
+  .timeline-drawer.is-open { transform: translateX(0); }
+
+  .sidebar-sheet {
+    display: block;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    max-height: 65vh;
+    z-index: 500;
+    background: var(--p-surface-0);
+    border-radius: 16px 16px 0 0;
+    border-top: 1px solid var(--p-surface-200);
+    transform: translateY(100%);
+    transition: transform 0.3s ease;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.2);
+    overflow-y: auto;
+    padding-top: 2.25rem;
+  }
+  .sidebar-sheet.is-open { transform: translateY(0); }
+
+  .sidebar-sheet-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    top: 0.5rem;
+    right: 0.75rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--p-text-muted-color);
+    padding: 0.4rem;
+    border-radius: 50%;
+    font-size: 1rem;
+    z-index: 1;
+  }
+  .sidebar-sheet-close:hover {
+    color: var(--p-text-color);
+    background: var(--p-surface-100);
+  }
+
+  .subheader .controls :deep(.p-button-label) { display: none; }
+  .subheader .controls :deep(.p-button) { padding: 0.5rem; min-width: 2.25rem; }
+}
 </style>
