@@ -111,7 +111,7 @@ const { groupedPhotos } = usePhotoGrouping(photos, {
 })
 
 // ── Selection (via composable) ────────────────────────────────────────────────
-const { selectedIndex, selectedPhotoIds, selectedPhoto, selectedPhotos, selectPhoto, clearSelection } =
+const { selectedIndex, selectedPhotoIds, selectedPhoto, selectedPhotos, selectPhoto } =
   usePhotoSelection(photos)
 
 // Expand selection: if any selected photo is in a group, include all group members
