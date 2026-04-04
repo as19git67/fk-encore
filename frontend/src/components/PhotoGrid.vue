@@ -1,5 +1,37 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
+
+// ── iOS tap fix ──────────────────────────────────────────────────────────────
+// iOS Safari fires click on <div> only on the 2nd tap (first tap = hover).
+// We detect real taps via touchstart/touchend and emit directly.
+let touchStartX = 0
+let touchStartY = 0
+
+function onItemTouchStart(e: TouchEvent) {
+  touchStartX = e.touches[0].clientX
+  touchStartY = e.touches[0].clientY
+}
+
+function onItemTouchEnd(e: TouchEvent, item: PhotoItem) {
+  const dx = Math.abs(e.changedTouches[0].clientX - touchStartX)
+  const dy = Math.abs(e.changedTouches[0].clientY - touchStartY)
+  if (dx > 10 || dy > 10) return // was a scroll, not a tap
+  e.preventDefault() // prevent the delayed click from also firing
+  handleItemTap(item, e as unknown as MouseEvent)
+}
+
+function handleItemTap(item: PhotoItem, event: MouseEvent | TouchEvent) {
+  const me = event as MouseEvent
+  if (item.group) {
+    if (props.selectMode || me.ctrlKey || me.metaKey || me.shiftKey) {
+      emit('group-multi-select', item.group, me)
+    } else {
+      emit('stack-click', item.group)
+    }
+  } else {
+    emit('photo-click', item, me)
+  }
+}
 import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
 import { usePhotoLazyLoad } from '../composables/usePhotoLazyLoad'
@@ -148,7 +180,9 @@ defineExpose({
               'is-favorite': item.photo.curation_status === 'favorite',
               'is-stack': !!item.group,
             }"
-            @click="item.group ? ((props.selectMode || $event.ctrlKey || $event.metaKey || $event.shiftKey) ? emit('group-multi-select', item.group, $event) : emit('stack-click', item.group)) : emit('photo-click', item, $event)"
+            @touchstart.passive="onItemTouchStart"
+            @touchend="onItemTouchEnd($event, item)"
+            @click="handleItemTap(item, $event)"
             @dblclick="!item.group && emit('photo-dblclick', item)"
           >
             <div class="photo-thumb">
@@ -264,11 +298,16 @@ defineExpose({
   background: var(--p-surface-50);
   border: 2px solid transparent;
   transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
 }
 
-.photo-item:hover {
-  border-color: var(--p-primary-color);
-  box-shadow: 0 0 0 2px var(--p-primary-200);
+@media (hover: hover) {
+  .photo-item:hover {
+    border-color: var(--p-primary-color);
+    box-shadow: 0 0 0 2px var(--p-primary-200);
+  }
 }
 
 .photo-item.selected {
