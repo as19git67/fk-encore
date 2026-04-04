@@ -272,8 +272,13 @@ async function loadPhotos() {
     photoGroupsList.value = groupsRes.groups
     loading.value = false
     await nextTick()
-    const firstVisible = photos.value.findIndex(p => !hiddenByStack.value.has(p.id))
-    selectedIndex.value = firstVisible >= 0 ? firstVisible : (photos.value.length > 0 ? 0 : -1)
+    // Auf Mobile keine initiale Auswahl – Nutzer soll explizit tippen
+    if (window.innerWidth <= 768) {
+      selectedIndex.value = -1
+    } else {
+      const firstVisible = photos.value.findIndex(p => !hiddenByStack.value.has(p.id))
+      selectedIndex.value = firstVisible >= 0 ? firstVisible : (photos.value.length > 0 ? 0 : -1)
+    }
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Fotos'
     loading.value = false
@@ -382,9 +387,12 @@ function handleGroupMultiSelect(group: PhotoGroup) {
     newSet.add(pid)
   }
   selectedPhotoIds.value = newSet
-  // Set selectedIndex to the cover photo or first group member
-  const coverIdx = photos.value.findIndex(p => p.id === (group.cover_photo_id ?? group.photo_ids[0]))
-  if (coverIdx >= 0) selectedIndex.value = coverIdx
+  // Im mobilen Auswahlmodus selectedIndex NICHT setzen – der watch in usePhotoSelection
+  // würde sonst selectedPhotoIds auf {coverPhotoId} zurücksetzen und die Gruppenauswahl verwerfen
+  if (!mobileSelectMode.value) {
+    const coverIdx = photos.value.findIndex(p => p.id === (group.cover_photo_id ?? group.photo_ids[0]))
+    if (coverIdx >= 0) selectedIndex.value = coverIdx
+  }
 }
 
 // ── Stack group handling ──────────────────────────────────────────────────────
