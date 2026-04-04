@@ -148,8 +148,14 @@ function exitSelectMode() {
 
 function handlePhotoClick(item: { index: number }, event: MouseEvent) {
   if (mobileSelectMode.value) {
-    // Im Auswahlmodus: Tippen = Ctrl+Click (Toggle)
-    selectPhoto(item.index, { ctrlKey: true, metaKey: false, shiftKey: false } as MouseEvent)
+    // Im Auswahlmodus: direkt selectedPhotoIds togglen (ohne selectedIndex zu ändern,
+    // damit der watch in usePhotoSelection nicht die Auswahl zurücksetzt)
+    const photo = photos.value[item.index]
+    if (!photo) return
+    const newSet = new Set(selectedPhotoIds.value)
+    if (newSet.has(photo.id)) newSet.delete(photo.id)
+    else newSet.add(photo.id)
+    selectedPhotoIds.value = newSet
   } else {
     selectPhoto(item.index, event)
   }
@@ -663,6 +669,9 @@ onUnmounted(() => serviceHealth.stopPolling())
 
       <!-- RIGHT: Details sidebar – auf Mobile als Bottom-Sheet -->
       <div class="sidebar-sheet" :class="{ 'is-open': mobileSidebarOpen }">
+        <button class="sidebar-sheet-close" @click="mobileSidebarOpen = false" aria-label="Schließen">
+          <i class="pi pi-times" />
+        </button>
         <PhotoDetailSidebar
           v-if="selectedPhotos.length > 0"
           :photo="(selectedPhoto || selectedPhotos[0])!"
@@ -736,15 +745,14 @@ onUnmounted(() => serviceHealth.stopPolling())
       <i class="pi pi-calendar" />
     </button>
 
-    <!-- Mobile: Floating-Button Auswahlmodus togglen -->
+    <!-- Mobile: Floating-Button Auswahlmodus starten (nur wenn nicht im Auswahlmodus) -->
     <button
-      v-if="!loading && !uploading && photos.length > 0"
+      v-if="!loading && !uploading && photos.length > 0 && !mobileSelectMode"
       class="mobile-fab mobile-fab--select"
-      :class="{ active: mobileSelectMode }"
-      @click="mobileSelectMode ? exitSelectMode() : (mobileSelectMode = true)"
-      :aria-label="mobileSelectMode ? 'Auswahl beenden' : 'Fotos auswählen'"
+      @click="mobileSelectMode = true"
+      aria-label="Fotos auswählen"
     >
-      <i :class="mobileSelectMode ? 'pi pi-times' : 'pi pi-check-square'" />
+      <i class="pi pi-check-square" />
     </button>
 
     <!-- Mobile: Floating-Button zum Öffnen der Details (wenn Foto gewählt, nicht im Auswahlmodus) -->
@@ -1061,11 +1069,6 @@ onUnmounted(() => serviceHealth.stopPolling())
   color: var(--p-text-muted-color);
   border: 1px solid var(--p-surface-200);
 }
-.mobile-fab--select.active {
-  background: var(--p-red-500, #ef4444);
-  color: white;
-  border-color: transparent;
-}
 
 .mobile-fab--details {
   right: 1rem;
@@ -1119,6 +1122,11 @@ onUnmounted(() => serviceHealth.stopPolling())
   display: contents;
 }
 
+/* Schließen-Button nur auf Mobile sichtbar */
+.sidebar-sheet-close {
+  display: none;
+}
+
 /* ── Mobile Breakpoint ───────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .mobile-backdrop { display: block; }
@@ -1161,20 +1169,32 @@ onUnmounted(() => serviceHealth.stopPolling())
     transition: transform 0.3s ease;
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.2);
     overflow-y: auto;
+    padding-top: 2.25rem; /* Platz für den Schließen-Button */
   }
   .sidebar-sheet.is-open {
     transform: translateY(0);
   }
 
-  /* Drag-Handle Indikator oben am Bottom Sheet */
-  .sidebar-sheet::before {
-    content: '';
-    display: block;
-    width: 36px;
-    height: 4px;
-    border-radius: 2px;
-    background: var(--p-surface-300);
-    margin: 0.5rem auto 0;
+  /* Schließen-Button am Bottom Sheet */
+  .sidebar-sheet-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    top: 0.5rem;
+    right: 0.75rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--p-text-muted-color);
+    padding: 0.4rem;
+    border-radius: 50%;
+    font-size: 1rem;
+    z-index: 1;
+  }
+  .sidebar-sheet-close:hover {
+    color: var(--p-text-color);
+    background: var(--p-surface-100);
   }
 
   /* Subheader kompakter */
