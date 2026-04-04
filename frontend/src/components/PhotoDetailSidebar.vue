@@ -455,15 +455,15 @@ function getPersonName(personId?: number) {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background: var(--surface-card);
-  border-left: 1px solid var(--surface-border);
+  background: var(--p-surface-0);
+  border-left: 1px solid var(--p-surface-200);
   overflow: hidden;
 }
 
 @media (max-width: 768px) {
   /* Als Bottom-Sheet: sicherstellen dass der Hintergrund undurchsichtig bleibt */
   .details-sidebar {
-    background: var(--surface-card);
+    background: var(--p-surface-0);
     overflow-y: auto;
   }
 }
@@ -473,7 +473,7 @@ function getPersonName(personId?: number) {
   justify-content: space-between;
   align-items: center;
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--surface-border);
+  border-bottom: 1px solid var(--p-surface-200);
   flex-shrink: 0;
 }
 
@@ -482,7 +482,7 @@ function getPersonName(personId?: number) {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.8px;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
 }
 
 .sidebar-scroll {
@@ -493,7 +493,7 @@ function getPersonName(personId?: number) {
 .preview-container {
   position: relative;
   cursor: pointer;
-  background: var(--surface-ground);
+  background: var(--p-surface-50);
 }
 
 .preview-container :deep(.heic-image-container) {
@@ -522,7 +522,7 @@ function getPersonName(personId?: number) {
   padding: 0.5rem 1rem;
 }
 
-.sidebar-divider { height: 1px; background: var(--surface-border); }
+.sidebar-divider { height: 1px; background: var(--p-surface-200); }
 
 .sidebar-section { padding: 0.75rem 1rem; }
 
@@ -531,7 +531,7 @@ function getPersonName(personId?: number) {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.6px;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
   margin-bottom: 0.5rem;
   display: flex;
   align-items: center;
@@ -555,7 +555,7 @@ function getPersonName(personId?: number) {
 
 .meta-icon {
   font-size: 0.8rem;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
   margin-top: 0.15rem;
   flex-shrink: 0;
 }
@@ -588,7 +588,7 @@ function getPersonName(personId?: number) {
   gap: 0.75rem;
   margin: 0.5rem 0;
   padding: 0.75rem;
-  background: var(--surface-ground);
+  background: var(--p-surface-50);
   border-radius: 6px;
 }
 
@@ -598,8 +598,8 @@ function getPersonName(personId?: number) {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  background: var(--surface-100);
-  border: 1px solid var(--surface-300);
+  background: var(--p-surface-100);
+  border: 1px solid var(--p-surface-300);
   border-radius: 1rem;
   padding: 0.25rem 0.75rem;
   font-size: 0.82rem;
@@ -612,27 +612,27 @@ function getPersonName(personId?: number) {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  background: var(--surface-100);
-  border: 1px solid var(--surface-300);
+  background: var(--p-surface-100);
+  border: 1px solid var(--p-surface-300);
   border-radius: 1rem;
   padding: 0.2rem 0.6rem;
   font-size: 0.8rem;
   cursor: default;
 }
-.landmark-tag .pi-building { font-size: 0.7rem; color: var(--text-color-secondary); }
-.landmark-confidence { font-size: 0.7rem; color: var(--text-color-secondary); }
+.landmark-tag .pi-building { font-size: 0.7rem; color: var(--p-text-muted-color); }
+.landmark-confidence { font-size: 0.7rem; color: var(--p-text-muted-color); }
 
 .loading-row {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   font-size: 0.82rem;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
 }
 
 .empty-hint {
   font-size: 0.82rem;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
   font-style: italic;
 }
 
@@ -642,11 +642,11 @@ function getPersonName(personId?: number) {
   align-items: center;
   gap: 0.6rem;
   padding-inline: 0.4rem;
-  background: var(--surface-ground);
+  background: var(--p-surface-50);
   border-radius: 6px;
-  border: 1px solid var(--surface-border);
+  border: 1px solid var(--p-surface-200);
 }
-.person-icon { font-size: 0.8rem; color: var(--text-color-secondary); }
+.person-icon { font-size: 0.8rem; color: var(--p-text-muted-color); }
 .person-name { flex: 1; font-size: 0.875rem; }
 
 .reindex-btn { width: 100%; margin-top: 0.5rem; }
@@ -659,9 +659,9 @@ function getPersonName(personId?: number) {
 
 .album-checkbox-list {
   padding: 0.25rem;
-  border: 1px solid var(--surface-border);
+  border: 1px solid var(--p-surface-200);
   border-radius: 6px;
-  background: var(--surface-ground);
+  background: var(--p-surface-50);
 }
 
 .album-checkbox-item {
@@ -674,7 +674,7 @@ function getPersonName(personId?: number) {
 }
 
 .album-checkbox-item:hover {
-  background: var(--surface-hover);
+  background: var(--p-surface-100);
 }
 
 .expand-toggle {
@@ -727,7 +727,7 @@ function getPersonName(personId?: number) {
   align-items: center;
   gap: 0.3rem;
   min-width: 7rem;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
   font-size: 0.78rem;
 }
 
@@ -739,7 +739,7 @@ function getPersonName(personId?: number) {
 .opinion-bar-track {
   flex: 1;
   height: 6px;
-  background: var(--surface-200);
+  background: var(--p-surface-200);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -756,7 +756,7 @@ function getPersonName(personId?: number) {
 
 .opinion-count {
   font-size: 0.75rem;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
   min-width: 3.5rem;
   text-align: right;
   white-space: nowrap;

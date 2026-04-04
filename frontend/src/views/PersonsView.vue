@@ -485,7 +485,7 @@ onUnmounted(() => serviceHealth.stopPolling())
 
 .subheader {
   flex-shrink: 0;
-  background: var(--surface-card);
+  background: var(--p-surface-0);
   box-shadow: 0 2px 6px rgba(0,0,0,0.08);
   padding: 0.5rem 1rem;
 }
@@ -509,7 +509,7 @@ onUnmounted(() => serviceHealth.stopPolling())
   justify-content: center;
   gap: 0.5em;
   padding: 3rem 1rem;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
 }
 
 .gallery-layout {
@@ -533,7 +533,7 @@ onUnmounted(() => serviceHealth.stopPolling())
 .fs-person-name {
   font-size: 1rem;
   font-weight: 600;
-  color: var(--text-color);
+  color: var(--p-text-color);
 }
 
 /* ── Rename dialog ───────────────────────────────────────────────────────── */

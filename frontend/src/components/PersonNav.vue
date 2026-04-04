@@ -170,8 +170,8 @@ defineExpose({ navigateUp, navigateDown })
   width: 200px;
   flex-shrink: 0;
   overflow-y: auto;
-  background: var(--surface-card);
-  border-right: 1px solid var(--surface-border);
+  background: var(--p-surface-0);
+  border-right: 1px solid var(--p-surface-200);
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -189,7 +189,7 @@ defineExpose({ navigateUp, navigateDown })
   position: relative;
 }
 
-.person-entry:hover { background: var(--surface-hover); }
+.person-entry:hover { background: var(--p-surface-100); }
 .person-entry:hover .pencil-btn { opacity: 1; }
 .person-entry.active {
   background: var(--p-primary-50);
@@ -222,7 +222,7 @@ defineExpose({ navigateUp, navigateDown })
 
 .person-entry-count {
   font-size: 0.7rem;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
 }
 
 .pencil-btn {
@@ -243,9 +243,9 @@ defineExpose({ navigateUp, navigateDown })
   min-width: 0;
   font-size: 0.8rem;
   padding: 0.2rem 0.4rem;
-  border: 1px solid var(--surface-border);
+  border: 1px solid var(--p-surface-200);
   border-radius: 4px;
-  background: var(--surface-card);
-  color: var(--text-color);
+  background: var(--p-surface-0);
+  color: var(--p-text-color);
 }
 </style>

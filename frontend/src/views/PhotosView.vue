@@ -800,7 +800,7 @@ onUnmounted(() => serviceHealth.stopPolling())
 
 .subheader {
   flex-shrink: 0;
-  background: var(--surface-card);
+  background: var(--p-surface-0);
   box-shadow: 0 2px 6px rgba(0,0,0,0.08);
   padding: 0.5rem 1rem;
 }
@@ -828,7 +828,7 @@ onUnmounted(() => serviceHealth.stopPolling())
 .info-text {
   text-align: center;
   padding: 3rem 1rem;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
 }
 
 .gallery-layout {
@@ -859,7 +859,7 @@ onUnmounted(() => serviceHealth.stopPolling())
   left: 0.75rem;
   top: 50%;
   transform: translateY(-50%);
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
   pointer-events: none;
   font-size: 0.9rem;
 }
@@ -867,17 +867,17 @@ onUnmounted(() => serviceHealth.stopPolling())
 .search-input {
   width: 100%;
   padding: 0.5rem 2.25rem;
-  border: 1px solid var(--surface-300);
+  border: 1px solid var(--p-surface-300);
   border-radius: 6px;
-  background: var(--surface-0);
-  color: var(--text-color);
+  background: var(--p-surface-0);
+  color: var(--p-text-color);
   font-size: 0.95rem;
   outline: none;
   box-sizing: border-box;
 }
 
 .search-input:focus {
-  border-color: var(--primary-color);
+  border-color: var(--p-primary-color);
   box-shadow: 0 0 0 2px var(--primary-200, rgba(99, 102, 241, 0.2));
 }
 
@@ -889,16 +889,16 @@ onUnmounted(() => serviceHealth.stopPolling())
   background: none;
   border: none;
   cursor: pointer;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
   padding: 0.2rem;
   display: flex;
   border-radius: 4px;
 }
-.search-clear:hover { color: var(--text-color); background: var(--surface-100); }
+.search-clear:hover { color: var(--p-text-color); background: var(--p-surface-100); }
 
 .search-result-count {
   font-size: 0.875rem;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
   white-space: nowrap;
 }
 
@@ -968,8 +968,8 @@ onUnmounted(() => serviceHealth.stopPolling())
 }
 
 .error-flyout {
-  background: var(--surface-card);
-  border: 1px solid var(--surface-border);
+  background: var(--p-surface-0);
+  border: 1px solid var(--p-surface-200);
   border-radius: 8px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
   width: 90%;
@@ -986,7 +986,7 @@ onUnmounted(() => serviceHealth.stopPolling())
   padding: 0.75rem 1rem;
   font-weight: 600;
   font-size: 0.95rem;
-  border-bottom: 1px solid var(--surface-border);
+  border-bottom: 1px solid var(--p-surface-200);
   flex-shrink: 0;
 }
 
@@ -994,11 +994,11 @@ onUnmounted(() => serviceHealth.stopPolling())
   background: none;
   border: none;
   cursor: pointer;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
   padding: 0.25rem;
   border-radius: 4px;
 }
-.error-flyout-close:hover { color: var(--text-color); background: var(--surface-100); }
+.error-flyout-close:hover { color: var(--p-text-color); background: var(--p-surface-100); }
 
 .error-flyout-list {
   list-style: none;
@@ -1011,7 +1011,7 @@ onUnmounted(() => serviceHealth.stopPolling())
 .error-flyout-list li {
   padding: 0.5rem 1rem;
   font-size: 0.85rem;
-  border-bottom: 1px solid var(--surface-50);
+  border-bottom: 1px solid var(--p-surface-50);
 }
 
 .error-flyout-list li:last-child { border-bottom: none; }
@@ -1045,9 +1045,9 @@ onUnmounted(() => serviceHealth.stopPolling())
 
 .mobile-fab--timeline {
   left: 1rem;
-  background: var(--surface-card);
+  background: var(--p-surface-0);
   color: var(--p-primary-color);
-  border: 1px solid var(--surface-border);
+  border: 1px solid var(--p-surface-200);
 }
 .mobile-fab--timeline.active {
   background: var(--p-primary-color);
@@ -1057,9 +1057,9 @@ onUnmounted(() => serviceHealth.stopPolling())
 .mobile-fab--select {
   left: 50%;
   transform: translateX(-50%);
-  background: var(--surface-card);
-  color: var(--text-color-secondary);
-  border: 1px solid var(--surface-border);
+  background: var(--p-surface-0);
+  color: var(--p-text-muted-color);
+  border: 1px solid var(--p-surface-200);
 }
 .mobile-fab--select.active {
   background: var(--p-red-500, #ef4444);
@@ -1081,8 +1081,8 @@ onUnmounted(() => serviceHealth.stopPolling())
   left: 0;
   right: 0;
   z-index: 495;
-  background: var(--surface-card);
-  border-top: 1px solid var(--surface-border);
+  background: var(--p-surface-0);
+  border-top: 1px solid var(--p-surface-200);
   padding: 0.75rem 1rem;
   align-items: center;
   justify-content: space-between;
@@ -1096,7 +1096,7 @@ onUnmounted(() => serviceHealth.stopPolling())
   gap: 0.5rem;
   font-size: 0.9rem;
   font-weight: 500;
-  color: var(--text-color);
+  color: var(--p-text-color);
   flex-shrink: 1;
   min-width: 0;
 }
@@ -1134,8 +1134,8 @@ onUnmounted(() => serviceHealth.stopPolling())
     bottom: 0;
     width: 80px;
     z-index: 500;
-    background: var(--surface-card);
-    border-right: 1px solid var(--surface-border);
+    background: var(--p-surface-0);
+    border-right: 1px solid var(--p-surface-200);
     transform: translateX(-100%);
     transition: transform 0.25s ease;
     box-shadow: 3px 0 12px rgba(0, 0, 0, 0.2);
@@ -1154,9 +1154,9 @@ onUnmounted(() => serviceHealth.stopPolling())
     right: 0;
     max-height: 65vh;
     z-index: 500;
-    background: var(--surface-card);
+    background: var(--p-surface-0);
     border-radius: 16px 16px 0 0;
-    border-top: 1px solid var(--surface-border);
+    border-top: 1px solid var(--p-surface-200);
     transform: translateY(100%);
     transition: transform 0.3s ease;
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.2);
@@ -1173,7 +1173,7 @@ onUnmounted(() => serviceHealth.stopPolling())
     width: 36px;
     height: 4px;
     border-radius: 2px;
-    background: var(--surface-300);
+    background: var(--p-surface-300);
     margin: 0.5rem auto 0;
   }
 

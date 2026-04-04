@@ -58,8 +58,8 @@ async function handleLogout() {
 body {
   margin: 0;
   font-family: var(--font-family);
-  background: var(--surface-ground);
-  color: var(--text-color);
+  background: var(--p-surface-50);
+  color: var(--p-text-color);
 }
 
 .app-container {

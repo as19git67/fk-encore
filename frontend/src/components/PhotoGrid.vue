@@ -224,14 +224,14 @@ defineExpose({
   font-size: 1.4rem;
   font-weight: 700;
   margin: 1.5rem 0 0.5rem;
-  color: var(--text-color);
+  color: var(--p-text-color);
 }
 
 .month-title {
   font-size: 1rem;
   font-weight: 600;
   margin: 1rem 0 0.4rem;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
 }
 
 .photo-grid {
@@ -259,7 +259,7 @@ defineExpose({
   border-radius: 8px;
   overflow: hidden;
   cursor: pointer;
-  background: var(--surface-ground);
+  background: var(--p-surface-50);
   border: 2px solid transparent;
   transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
 }
@@ -281,13 +281,13 @@ defineExpose({
 
 .photo-item.is-stack {
   border-style: dashed;
-  border-color: var(--surface-border);
+  border-color: var(--p-surface-200);
 }
 
 .photo-thumb {
   width: 100%;
   aspect-ratio: 1;
-  background: var(--surface-ground);
+  background: var(--p-surface-50);
   overflow: hidden;
 }
 

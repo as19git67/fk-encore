@@ -526,7 +526,7 @@ onUnmounted(() => serviceHealth.stopPolling())
 
 .subheader {
   flex-shrink: 0;
-  background: var(--surface-card);
+  background: var(--p-surface-0);
   box-shadow: 0 2px 6px rgba(0,0,0,0.08);
 }
 
@@ -536,7 +536,7 @@ onUnmounted(() => serviceHealth.stopPolling())
   align-items: center;
   padding: 1rem;
   gap: 0.5em;
-  border-bottom: 1px solid var(--surface-border);
+  border-bottom: 1px solid var(--p-surface-200);
 }
 
 .header-left { display: flex; align-items: center; gap: 1rem; }
@@ -545,7 +545,7 @@ onUnmounted(() => serviceHealth.stopPolling())
   font-size: 0.75rem;
   padding: 0.2rem 0.5rem;
   border-radius: 4px;
-  background: var(--surface-200);
+  background: var(--p-surface-200);
   text-transform: uppercase;
 }
 .role-badge--owner { background: #fee2e2; color: #991b1b; }
@@ -554,7 +554,7 @@ onUnmounted(() => serviceHealth.stopPolling())
 .controls { display: flex; gap: 1em; align-items: center; flex-wrap: wrap; }
 
 .control-group { display: flex; align-items: center; gap: 0.5rem; }
-.control-group label { font-size: 0.85rem; color: var(--text-color-secondary); }
+.control-group label { font-size: 0.85rem; color: var(--p-text-muted-color); }
 
 /* ── Album info block ────────────────────────────────────────────────────── */
 .album-info-block {
@@ -564,7 +564,7 @@ onUnmounted(() => serviceHealth.stopPolling())
   align-items: center;
   gap: 1rem;
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--surface-border);
+  border-bottom: 1px solid var(--p-surface-200);
 }
 
 .album-info-block__description {
@@ -576,12 +576,12 @@ onUnmounted(() => serviceHealth.stopPolling())
 
 .album-info-block__description-content { display: flex; align-items: center; gap: 0.5rem; width: 100%; }
 .album-info-block__description-text { font-size: 0.9rem; }
-.album-info-block__description-text--empty { color: var(--text-color-secondary); font-style: italic; }
+.album-info-block__description-text--empty { color: var(--p-text-muted-color); font-style: italic; }
 .album-info-block__edit { display: flex; align-items: center; gap: 0.5rem; width: 100%; }
 .album-info-block__edit textarea { flex: 1; min-height: 2.5rem; }
 .album-info-block__edit-actions { display: flex; gap: 0.25rem; }
 .album-info-block__meta { display: flex; align-items: center; flex: 0 0 auto; }
-.album-info-block__meta-text { font-size: 0.85rem; color: var(--text-color-secondary); white-space: nowrap; }
+.album-info-block__meta-text { font-size: 0.85rem; color: var(--p-text-muted-color); white-space: nowrap; }
 
 /* ── Three-column layout ─────────────────────────────────────────────────── */
 .gallery-layout {
@@ -594,20 +594,20 @@ onUnmounted(() => serviceHealth.stopPolling())
 .info-text {
   text-align: center;
   padding: 3rem 1rem;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
 }
 
 /* ── Share dialog ────────────────────────────────────────────────────────── */
 .share-loading { padding: 1rem; text-align: center; }
 .share-section { margin-bottom: 1.5rem; }
 .share-section-title { font-size: 0.9rem; font-weight: 600; margin-bottom: 0.75rem; }
-.share-empty { font-size: 0.85rem; color: var(--text-color-secondary); }
-.share-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.4rem 0; border-bottom: 1px solid var(--surface-border); }
+.share-empty { font-size: 0.85rem; color: var(--p-text-muted-color); }
+.share-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.4rem 0; border-bottom: 1px solid var(--p-surface-200); }
 .share-user-info { flex: 1; min-width: 0; }
 .share-user-name { display: block; font-size: 0.875rem; font-weight: 500; }
-.share-user-email { display: block; font-size: 0.75rem; color: var(--text-color-secondary); }
+.share-user-email { display: block; font-size: 0.75rem; color: var(--p-text-muted-color); }
 .share-badge { font-size: 0.7rem; padding: 0.15rem 0.4rem; border-radius: 3px; white-space: nowrap; }
-.share-badge--read { background: var(--surface-200); color: var(--text-color-secondary); }
+.share-badge--read { background: var(--p-surface-200); color: var(--p-text-muted-color); }
 .share-badge--write { background: #dcfce7; color: #166534; }
 .share-add-form { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
 .share-user-select { flex: 1; min-width: 180px; }
