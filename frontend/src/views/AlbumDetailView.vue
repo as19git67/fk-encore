@@ -776,5 +776,23 @@ onUnmounted(() => serviceHealth.stopPolling())
 
   .subheader .controls :deep(.p-button-label) { display: none; }
   .subheader .controls :deep(.p-button) { padding: 0.5rem; min-width: 2.25rem; }
+
+  .header { flex-wrap: wrap; }
+  .header-left { flex: 1 1 100%; }
+  .controls {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding-bottom: 0.1rem;
+  }
+  .control-group label { display: none; }
+  .subheader .control-group :deep(.p-selectbutton .p-button) {
+    padding: 0.4rem 0.6rem;
+    font-size: 0.78rem;
+    min-width: unset;
+  }
+  .subheader .control-group :deep(.p-selectbutton .p-button-label) {
+    display: inline;
+  }
 }
 </style>
