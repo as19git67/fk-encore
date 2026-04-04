@@ -589,8 +589,13 @@ onUnmounted(() => serviceHealth.stopPolling())
   background: var(--p-surface-200);
   text-transform: uppercase;
 }
-.role-badge--owner { background: #fee2e2; color: #991b1b; }
-.role-badge--contributor { background: #dcfce7; color: #166534; }
+.role-badge--owner { background: var(--p-red-100); color: var(--p-red-700); }
+.role-badge--contributor { background: var(--p-green-100); color: var(--p-green-700); }
+
+@media (prefers-color-scheme: dark) {
+  .role-badge--owner { background: var(--p-red-900); color: var(--p-red-200); }
+  .role-badge--contributor { background: var(--p-green-900); color: var(--p-green-200); }
+}
 
 .controls { display: flex; gap: 1em; align-items: center; flex-wrap: wrap; }
 
@@ -649,7 +654,11 @@ onUnmounted(() => serviceHealth.stopPolling())
 .share-user-email { display: block; font-size: 0.75rem; color: var(--p-text-muted-color); }
 .share-badge { font-size: 0.7rem; padding: 0.15rem 0.4rem; border-radius: 3px; white-space: nowrap; }
 .share-badge--read { background: var(--p-surface-200); color: var(--p-text-muted-color); }
-.share-badge--write { background: #dcfce7; color: #166534; }
+.share-badge--write { background: var(--p-green-100); color: var(--p-green-700); }
+
+@media (prefers-color-scheme: dark) {
+  .share-badge--write { background: var(--p-green-900); color: var(--p-green-200); }
+}
 .share-add-form { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
 .share-user-select { flex: 1; min-width: 180px; }
 .share-userid-input { width: 120px; }
