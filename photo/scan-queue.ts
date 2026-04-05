@@ -311,6 +311,18 @@ async function getMissingPhotoIds(userId: number, service: ScanService): Promise
 }
 
 /**
+ * Cancel all pending scan jobs for a user.
+ * Processing jobs are left alone (they will finish their current work).
+ * Returns the number of cancelled jobs.
+ */
+export async function cancelPendingScans(userId: number): Promise<number> {
+  const result = await db
+    .delete(photoScanQueue)
+    .where(and(eq(photoScanQueue.user_id, userId), eq(photoScanQueue.status, "pending")));
+  return (result as any).rowCount ?? 0;
+}
+
+/**
  * Reset stuck 'processing' jobs back to 'pending' on service restart.
  * Called once at worker boot time.
  */
