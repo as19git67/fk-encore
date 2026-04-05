@@ -282,8 +282,8 @@ async function loadPhotos() {
       listPhotoGroups().catch(() => ({ groups: [] })),
     ])
     photos.value = photosRes.photos.sort((a, b) =>
-      new Date(b.taken_at || b.created_at).getTime() -
-      new Date(a.taken_at || a.created_at).getTime()
+      new Date(a.taken_at || a.created_at).getTime() -
+      new Date(b.taken_at || b.created_at).getTime()
     )
     photoGroupsList.value = groupsRes.groups
     loading.value = false
@@ -292,8 +292,9 @@ async function loadPhotos() {
     if (window.innerWidth <= 768) {
       selectedIndex.value = -1
     } else {
-      const firstVisible = photos.value.findIndex(p => !hiddenByStack.value.has(p.id))
-      selectedIndex.value = firstVisible >= 0 ? firstVisible : (photos.value.length > 0 ? 0 : -1)
+      // Neuestes Foto (letztes in der Liste) initial fokussieren
+      const lastVisible = [...photos.value].reverse().findIndex(p => !hiddenByStack.value.has(p.id))
+      selectedIndex.value = lastVisible >= 0 ? photos.value.length - 1 - lastVisible : (photos.value.length > 0 ? photos.value.length - 1 : -1)
     }
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Fotos'
@@ -308,8 +309,8 @@ async function reloadPhotosInPlace() {
       listPhotoGroups().catch(() => ({ groups: [] })),
     ])
     photos.value = photosRes.photos.sort((a, b) =>
-      new Date(b.taken_at || b.created_at).getTime() -
-      new Date(a.taken_at || a.created_at).getTime()
+      new Date(a.taken_at || a.created_at).getTime() -
+      new Date(b.taken_at || b.created_at).getTime()
     )
     photoGroupsList.value = groupsRes.groups
   } catch { /* silently fail */ }

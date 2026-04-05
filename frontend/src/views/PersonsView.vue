@@ -451,15 +451,6 @@ onUnmounted(() => serviceHealth.stopPolling())
       <i class="pi pi-users" />
     </button>
 
-    <!-- Mobile: Floating-Button zum Öffnen der Details -->
-    <button
-      v-if="selectedPhoto && !mobileSidebarOpen && !loading"
-      class="mobile-fab mobile-fab--details"
-      @click="mobileSidebarOpen = true; mobilePersonNavOpen = false"
-      aria-label="Details"
-    >
-      <i class="pi pi-info-circle" />
-    </button>
 
     <!-- Fullscreen overlay -->
     <FullscreenOverlay
@@ -474,6 +465,7 @@ onUnmounted(() => serviceHealth.stopPolling())
       @toggle-favorite="handleToggleFavorite"
       @hide="handleHidePhoto"
       @restore="handleRestorePhoto"
+      @show-details="isFullscreen = false; mobileSidebarOpen = true; mobilePersonNavOpen = false"
     >
       <!-- Face box overlay in fullscreen -->
       <div class="face-box face-box-fullscreen" :style="faceBoxStyle(selectedPersonFace?.bbox)" />
@@ -482,6 +474,7 @@ onUnmounted(() => serviceHealth.stopPolling())
         <Button v-if="selectedPerson" icon="pi pi-pencil" rounded text size="small" @click.stop="openRename(selectedPerson)" />
       </template>
       <template #topbar-actions>
+        <Button icon="pi pi-info-circle" rounded text severity="secondary" v-tooltip.bottom="'Details'" @click.stop="isFullscreen = false; mobileSidebarOpen = true; mobilePersonNavOpen = false" />
         <Button v-if="canDelete && selectedPhoto.curation_status === 'hidden'" icon="pi pi-eye" rounded text severity="info" @click.stop="handleRestorePhoto(selectedPhoto.id)" />
         <Button v-else-if="canDelete" icon="pi pi-eye-slash" rounded text severity="warn" @click.stop="handleHidePhoto(selectedPhoto.id)" />
         <Button v-if="canDelete" :icon="selectedPhoto.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'" rounded text :severity="selectedPhoto.curation_status === 'favorite' ? 'warn' : 'secondary'" @click.stop="handleToggleFavorite(selectedPhoto.id, selectedPhoto.curation_status)" />
@@ -612,11 +605,7 @@ onUnmounted(() => serviceHealth.stopPolling())
   color: white;
 }
 
-.mobile-fab--details {
-  right: 1rem;
-  background: var(--p-primary-color);
-  color: white;
-}
+
 
 /* ── Mobile Breakpoint ───────────────────────────────────────────────────── */
 @media (max-width: 768px) {
