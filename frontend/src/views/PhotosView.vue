@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, shallowRef, computed, watch, nextTick } from 'vue'
+import { ref, shallowRef, computed, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import ToggleSwitch from 'primevue/toggleswitch'
@@ -11,7 +12,7 @@ import TimelineNav from '../components/TimelineNav.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import {
-  listPhotos, uploadPhoto, updatePhotoDate, reindexPhoto, ignoreFace,
+  listPhotos, uploadPhotoWithProgress, updatePhotoDate, reindexPhoto, ignoreFace,
   getPhotoFaces, getPhotoLandmarks, updatePhotoCuration,
   listPhotoGroups, searchPhotos,
   type Photo, type Face, type CurationStatus, type PhotoGroup,
@@ -28,6 +29,8 @@ import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 const auth = useAuthStore()
 const serviceHealth = useServiceHealthStore()
 const confirm = useConfirm()
+const route = useRoute()
+const router = useRouter()
 
 // ── Data ─────────────────────────────────────────────────────────────────────
 const photos = ref<Photo[]>([])
@@ -188,9 +191,13 @@ const isEditingDate = ref(false)
 const editDate = ref<Date | null>(null)
 const updatingDate = ref(false)
 
+const LAST_PHOTO_KEY = 'photos_last_selected_id'
+
 watch(selectedPhoto, (photo) => {
   isEditingDate.value = false
   if (photo) {
+    console.log('[PhotosView] Saving selected photo to localStorage:', photo.id)
+    localStorage.setItem(LAST_PHOTO_KEY, String(photo.id))
     loadDetectedFaces(photo.id)
     loadLandmarks(photo.id)
     loadPersons()
@@ -286,16 +293,46 @@ async function loadPhotos() {
       new Date(b.taken_at || b.created_at).getTime()
     )
     photoGroupsList.value = groupsRes.groups
-    loading.value = false
-    await nextTick()
-    // Auf Mobile keine initiale Auswahl – Nutzer soll explizit tippen
-    if (window.innerWidth <= 768) {
+
+    // Determine which photo to focus: query param > localStorage > newest
+    let targetIdx = -1
+
+    const queryPhotoId = Number(route.query.photoId)
+    const storedPhotoId = Number(localStorage.getItem(LAST_PHOTO_KEY))
+
+    console.log('[PhotosView] loadPhotos: queryPhotoId=', queryPhotoId, 'storedPhotoId=', storedPhotoId, 'photosCount=', photos.value.length)
+
+    if (queryPhotoId) {
+      targetIdx = photos.value.findIndex(p => p.id === queryPhotoId && !hiddenByStack.value.has(p.id))
+      console.log('[PhotosView] queryPhotoId targetIdx=', targetIdx)
+      router.replace({ query: { ...route.query, photoId: undefined } })
+    }
+
+    if (targetIdx < 0 && storedPhotoId) {
+      targetIdx = photos.value.findIndex(p => p.id === storedPhotoId && !hiddenByStack.value.has(p.id))
+      console.log('[PhotosView] storedPhotoId targetIdx=', targetIdx)
+    }
+
+    if (targetIdx < 0 && photos.value.length > 0) {
+      // Fallback: neuestes sichtbares Foto
+      const lastVisible = [...photos.value].reverse().findIndex(p => !hiddenByStack.value.has(p.id))
+      targetIdx = lastVisible >= 0 ? photos.value.length - 1 - lastVisible : photos.value.length - 1
+      console.log('[PhotosView] fallback targetIdx=', targetIdx)
+    }
+
+    const isMobile = window.innerWidth <= 768
+    console.log('[PhotosView] isMobile=', isMobile, 'final targetIdx=', targetIdx)
+
+    // On mobile: only skip pre-selection if there's no explicit target (query param or stored)
+    if (isMobile && !queryPhotoId && !storedPhotoId) {
       selectedIndex.value = -1
     } else {
-      // Neuestes Foto (letztes in der Liste) initial fokussieren
-      const lastVisible = [...photos.value].reverse().findIndex(p => !hiddenByStack.value.has(p.id))
-      selectedIndex.value = lastVisible >= 0 ? photos.value.length - 1 - lastVisible : (photos.value.length > 0 ? photos.value.length - 1 : -1)
+      selectedIndex.value = targetIdx
     }
+    console.log('[PhotosView] selectedIndex set to', selectedIndex.value)
+
+    // Now reveal the grid (PhotoGrid will mount with correct selectedIndex)
+    loading.value = false
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Fotos'
     loading.value = false
@@ -485,6 +522,14 @@ const showErrorFlyout = ref(false)
 const isDragging = ref(false)
 const dragCounter = ref(0)
 
+// Upload progress tracking
+const uploadCurrent = ref(0)
+const uploadTotal = ref(0)
+const uploadProgress = ref(0) // 0-100 overall progress
+const uploadSuccessCount = ref(0)
+const uploadResultMessage = ref('')
+let uploadResultTimeout: ReturnType<typeof setTimeout> | undefined
+
 async function handleUpload(event: any) {
   let files: File[] = []
   if (event.files) files = event.files
@@ -496,14 +541,32 @@ async function handleUpload(event: any) {
   uploadAbortController.value = abortController
   uploading.value = true
   error.value = ''
+  uploadCurrent.value = 0
+  uploadTotal.value = files.length
+  uploadProgress.value = 0
+  uploadSuccessCount.value = 0
+  uploadResultMessage.value = ''
+  if (uploadResultTimeout) { clearTimeout(uploadResultTimeout); uploadResultTimeout = undefined }
   const duplicates: string[] = []
   const unsupported: string[] = []
   const errors: string[] = []
 
   try {
-    for (const file of files) {
+    for (let i = 0; i < files.length; i++) {
       if (abortController.signal.aborted) break
-      try { await uploadPhoto(file, abortController.signal) }
+      const file = files[i]!
+      uploadCurrent.value = i + 1
+      try {
+        await uploadPhotoWithProgress(
+          file,
+          abortController.signal,
+          (loaded, total) => {
+            const filePct = loaded / total
+            uploadProgress.value = Math.round(((i + filePct) / files.length) * 100)
+          }
+        )
+        uploadSuccessCount.value++
+      }
       catch (err: any) {
         if (abortController.signal.aborted) break
         if (err.message?.includes('bereits hochgeladen')) duplicates.push(file.name)
@@ -528,6 +591,14 @@ async function handleUpload(event: any) {
         uploadErrors.value = []
         error.value = allErrors.join(' ')
       }
+    }
+    // Show success count in status bar
+    const count = uploadSuccessCount.value
+    if (count > 0 && !abortController.signal.aborted) {
+      uploadResultMessage.value = count === 1
+        ? '1 neues Foto hochgeladen'
+        : `${count} neue Fotos hochgeladen`
+      uploadResultTimeout = setTimeout(() => { uploadResultMessage.value = '' }, 8000)
     }
   } catch (err: any) {
     if (!abortController.signal.aborted) error.value = err.message || 'Fehler beim Hochladen'
@@ -565,7 +636,10 @@ loadPhotos()
 serviceHealth.startPolling()
 
 import { onUnmounted } from 'vue'
-onUnmounted(() => serviceHealth.stopPolling())
+onUnmounted(() => {
+  serviceHealth.stopPolling()
+  if (uploadResultTimeout) clearTimeout(uploadResultTimeout)
+})
 </script>
 
 <template>
@@ -655,8 +729,25 @@ onUnmounted(() => serviceHealth.stopPolling())
       </div>
     </div>
 
-    <div v-if="uploading" class="info-text">Fotos werden hochgeladen…</div>
-    <div v-else-if="loading" class="info-text">Lade Fotos…</div>
+    <!-- Upload progress bar -->
+    <div v-if="uploading" class="upload-progress-bar">
+      <div class="upload-progress-bar__info">
+        <i class="pi pi-upload" />
+        <span>Foto {{ uploadCurrent }} von {{ uploadTotal }} wird hochgeladen…</span>
+        <span class="upload-progress-bar__pct">{{ uploadProgress }}%</span>
+      </div>
+      <div class="upload-progress-bar__track">
+        <div class="upload-progress-bar__fill" :style="{ width: uploadProgress + '%' }" />
+      </div>
+    </div>
+
+    <!-- Upload result message -->
+    <div v-if="uploadResultMessage && !uploading" class="upload-result-bar">
+      <i class="pi pi-check-circle" />
+      <span>{{ uploadResultMessage }}</span>
+    </div>
+
+    <div v-if="!uploading && loading" class="info-text">Lade Fotos…</div>
     <div v-else-if="photos.length === 0" class="info-text">Keine Fotos hochgeladen.</div>
 
     <!-- Three-column layout -->
@@ -816,6 +907,73 @@ onUnmounted(() => serviceHealth.stopPolling())
 </template>
 
 <style scoped>
+/* ── Upload progress bar ──────────────────────────────────────────────────── */
+.upload-progress-bar {
+  padding: 0.5rem 1rem;
+  background: var(--p-blue-50);
+  border-bottom: 1px solid var(--p-blue-200);
+}
+.upload-progress-bar__info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--p-blue-700);
+  margin-bottom: 0.35rem;
+}
+.upload-progress-bar__pct {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.upload-progress-bar__track {
+  height: 4px;
+  background: var(--p-blue-100);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.upload-progress-bar__fill {
+  height: 100%;
+  background: var(--p-blue-500);
+  border-radius: 2px;
+  transition: width 0.15s ease;
+}
+
+.upload-result-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: var(--p-green-50);
+  border-bottom: 1px solid var(--p-green-200);
+  color: var(--p-green-700);
+  font-size: 0.875rem;
+  animation: upload-result-fade-in 0.3s ease;
+}
+.upload-result-bar .pi-check-circle {
+  color: var(--p-green-500);
+}
+
+@keyframes upload-result-fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Dark mode */
+.p-dark .upload-progress-bar {
+  background: var(--p-blue-900);
+  border-color: var(--p-blue-700);
+}
+.p-dark .upload-progress-bar__info { color: var(--p-blue-200); }
+.p-dark .upload-progress-bar__track { background: var(--p-blue-800); }
+.p-dark .upload-progress-bar__fill  { background: var(--p-blue-400); }
+
+.p-dark .upload-result-bar {
+  background: var(--p-green-900);
+  border-color: var(--p-green-700);
+  color: var(--p-green-200);
+}
+.p-dark .upload-result-bar .pi-check-circle { color: var(--p-green-400); }
+
 .photos-view {
   display: flex;
   flex-direction: column;
