@@ -240,11 +240,7 @@ const photoGridRef = ref<InstanceType<typeof PhotoGrid> | null>(null)
 const timelineNavRef = ref<InstanceType<typeof TimelineNav> | null>(null)
 
 function scrollToSelectedPhoto(behavior: ScrollBehavior = 'smooth') {
-  if (selectedIndex.value < 0) return
-  const photo = photos.value[selectedIndex.value]
-  if (!photo) return
-  const el = photoGridRef.value?.scrollRef?.querySelector(`[data-photo-id="${photo.id}"]`)
-  if (el) el.scrollIntoView({ behavior, block: 'nearest' })
+  photoGridRef.value?.scrollToPhoto(selectedIndex.value, behavior)
 }
 
 // ── Keyboard navigation (via composable) ─────────────────────────────────────

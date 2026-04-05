@@ -133,12 +133,36 @@ watch(scrollRef, async (el) => {
 })
 
 // ── Scroll selected photo into view ─────────────────────────────────────────
-watch(() => props.selectedIndex, (idx) => {
+function scrollToPhoto(idx: number, behavior: ScrollBehavior = 'smooth') {
   if (idx < 0) return
   const photo = props.photos[idx]
   if (!photo) return
   const el = scrollRef.value?.querySelector(`[data-photo-id="${photo.id}"]`)
-  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  if (el) el.scrollIntoView({ behavior, block: 'nearest' })
+}
+
+watch(() => props.selectedIndex, (idx) => {
+  scrollToPhoto(idx)
+})
+
+// Scroll to initially selected photo once DOM is ready
+onMounted(async () => {
+  if (props.selectedIndex >= 0) {
+    await nextTick()
+    // DOM elements may not be ready on first tick, retry briefly
+    let attempts = 0
+    const tryScroll = () => {
+      const photo = props.photos[props.selectedIndex]
+      if (!photo) return
+      const el = scrollRef.value?.querySelector(`[data-photo-id="${photo.id}"]`)
+      if (el) {
+        el.scrollIntoView({ behavior: 'instant', block: 'nearest' })
+      } else if (attempts++ < 5) {
+        requestAnimationFrame(tryScroll)
+      }
+    }
+    tryScroll()
+  }
 })
 
 // ── Public: scroll to a section header ──────────────────────────────────────
@@ -147,6 +171,7 @@ defineExpose({
     const el = scrollRef.value?.querySelector(`[data-section-id="${sectionId}"]`)
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
   },
+  scrollToPhoto,
   scrollRef,
 })
 </script>
