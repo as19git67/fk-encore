@@ -19,6 +19,7 @@ const emit = defineEmits<{
   'toggle-favorite': [id: number, status: CurationStatus]
   'hide': [id: number]
   'restore': [id: number]
+  'show-details': []
 }>()
 
 // ── Touch-Swipe für mobile Navigation ────────────────────────────────────────
@@ -77,6 +78,11 @@ function formatDate(photo: Photo) {
 
         <div class="fs-toolbar">
           <slot name="topbar-actions">
+            <Button
+              icon="pi pi-info-circle" rounded text severity="secondary"
+              @click="emit('show-details')"
+              v-tooltip.bottom="'Details'"
+            />
             <Button
               v-if="canDelete && photo.curation_status === 'hidden'"
               icon="pi pi-eye" rounded text severity="warn"
