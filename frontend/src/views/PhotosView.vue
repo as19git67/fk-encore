@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, shallowRef, computed, watch, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import ToggleSwitch from 'primevue/toggleswitch'
@@ -28,6 +29,8 @@ import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 const auth = useAuthStore()
 const serviceHealth = useServiceHealthStore()
 const confirm = useConfirm()
+const route = useRoute()
+const router = useRouter()
 
 // ── Data ─────────────────────────────────────────────────────────────────────
 const photos = ref<Photo[]>([])
@@ -288,8 +291,20 @@ async function loadPhotos() {
     photoGroupsList.value = groupsRes.groups
     loading.value = false
     await nextTick()
-    // Auf Mobile keine initiale Auswahl – Nutzer soll explizit tippen
-    if (window.innerWidth <= 768) {
+
+    // Navigate to specific photo if query param is present
+    const targetPhotoId = Number(route.query.photoId)
+    if (targetPhotoId) {
+      const idx = photos.value.findIndex(p => p.id === targetPhotoId)
+      if (idx >= 0) {
+        selectedIndex.value = idx
+        // Clear query param so reload doesn't jump again
+        router.replace({ query: { ...route.query, photoId: undefined } })
+      } else {
+        selectedIndex.value = photos.value.length > 0 ? photos.value.length - 1 : -1
+      }
+    } else if (window.innerWidth <= 768) {
+      // Auf Mobile keine initiale Auswahl – Nutzer soll explizit tippen
       selectedIndex.value = -1
     } else {
       // Neuestes Foto (letztes in der Liste) initial fokussieren
@@ -517,11 +532,12 @@ async function handleUpload(event: any) {
   try {
     for (let i = 0; i < files.length; i++) {
       if (abortController.signal.aborted) break
+      const file = files[i]!
       uploadCurrent.value = i + 1
       uploadFileProgress.value = 0
       try {
         await uploadPhotoWithProgress(
-          files[i],
+          file,
           abortController.signal,
           (loaded, total) => { uploadFileProgress.value = Math.round((loaded / total) * 100) }
         )
@@ -529,9 +545,9 @@ async function handleUpload(event: any) {
       }
       catch (err: any) {
         if (abortController.signal.aborted) break
-        if (err.message?.includes('bereits hochgeladen')) duplicates.push(files[i].name)
-        else if (err.message?.includes('nicht unterstützt')) unsupported.push(files[i].name)
-        else errors.push(`${files[i].name}: ${err.message}`)
+        if (err.message?.includes('bereits hochgeladen')) duplicates.push(file.name)
+        else if (err.message?.includes('nicht unterstützt')) unsupported.push(file.name)
+        else errors.push(`${file.name}: ${err.message}`)
       }
     }
     await loadPhotos()
