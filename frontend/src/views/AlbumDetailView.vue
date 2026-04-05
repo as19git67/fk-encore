@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import SelectButton from 'primevue/selectbutton'
 import Button from 'primevue/button'
@@ -11,6 +11,8 @@ import PhotoGrid from '../components/PhotoGrid.vue'
 import TimelineNav from '../components/TimelineNav.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
+
+const TripMap = defineAsyncComponent(() => import('../components/TripMap.vue'))
 import {
   type AlbumWithPhotos,
   type AlbumShareWithUser,
@@ -111,6 +113,47 @@ const isOwner = computed(() => album.value?.role === 'owner')
 const canDeletePhotos = computed(() => auth.hasPermission('photos.delete'))
 const canUploadPhotos = computed(() => auth.hasPermission('photos.upload'))
 const showPersons = computed(() => auth.hasPermission('people.view'))
+
+// ── Display mode (Album-Eigenschaft) ─────────────────────────────────────────
+const displayMode = ref<'grid' | 'map'>('grid')
+const displayModeOptions = [
+  { label: 'Raster', value: 'grid' },
+  { label: 'Karte', value: 'map' },
+]
+
+watch(album, (a) => {
+  if (a) displayMode.value = a.display_mode ?? 'grid'
+}, { immediate: true })
+
+async function handleDisplayModeChange() {
+  if (!album.value || !canWrite.value) return
+  try {
+    await updateAlbum(album.value.id, { displayMode: displayMode.value })
+    album.value.display_mode = displayMode.value
+  } catch { /* ignore – toggle is already optimistically set */ }
+}
+
+// ── Map fullscreen ───────────────────────────────────────────────────────────
+const mapFullscreenPhotos = ref<Photo[]>([])
+const mapFullscreenIndex = ref(0)
+const isMapFullscreen = ref(false)
+
+function handleMapFullscreen(stopPhotos: Photo[], startIndex: number) {
+  mapFullscreenPhotos.value = stopPhotos
+  mapFullscreenIndex.value = startIndex
+  isMapFullscreen.value = true
+}
+
+const mapSelectedPhoto = computed(() =>
+  mapFullscreenIndex.value >= 0 ? mapFullscreenPhotos.value[mapFullscreenIndex.value] ?? null : null
+)
+const mapPrevPhoto = computed(() =>
+  mapFullscreenIndex.value > 0 ? mapFullscreenPhotos.value[mapFullscreenIndex.value - 1] ?? null : null
+)
+const mapNextPhoto = computed(() =>
+  mapFullscreenIndex.value < mapFullscreenPhotos.value.length - 1
+    ? mapFullscreenPhotos.value[mapFullscreenIndex.value + 1] ?? null : null
+)
 
 // ── Sidebar state ─────────────────────────────────────────────────────────────
 const detectedFaces = ref<Face[]>([])
@@ -373,6 +416,10 @@ onUnmounted(() => serviceHealth.stopPolling())
             <label>Ansicht:</label>
             <SelectButton v-model="album.settings.active_view" :options="availableViewOptions" optionLabel="label" optionValue="value" @change="handleSettingsChange" />
           </div>
+          <div class="control-group">
+            <label>Darstellung:</label>
+            <SelectButton v-model="displayMode" :options="displayModeOptions" optionLabel="label" optionValue="value" @change="handleDisplayModeChange" />
+          </div>
         </div>
       </div>
     </div>
@@ -409,8 +456,15 @@ onUnmounted(() => serviceHealth.stopPolling())
       </div>
     </div>
 
+    <!-- Map mode -->
+    <TripMap
+      v-if="album && displayMode === 'map' && albumPhotos.length > 0"
+      :photos="albumPhotos"
+      @open-fullscreen="handleMapFullscreen"
+    />
+
     <!-- Three-column layout: TimelineNav | PhotoGrid | Sidebar -->
-    <div v-if="album && groupedPhotos.length > 0" class="gallery-layout">
+    <div v-else-if="album && groupedPhotos.length > 0" class="gallery-layout">
       <!-- LEFT: Timeline nav – auf Mobile als Slide-in-Drawer -->
       <div class="timeline-drawer" :class="{ 'is-open': mobileTimelineOpen }">
         <TimelineNav
@@ -485,7 +539,7 @@ onUnmounted(() => serviceHealth.stopPolling())
 
     <!-- Mobile: Floating-Button Zeitleiste -->
     <button
-      v-if="album && groupedPhotos.length > 0"
+      v-if="album && groupedPhotos.length > 0 && displayMode === 'grid'"
       class="mobile-fab mobile-fab--timeline"
       :class="{ active: mobileTimelineOpen }"
       @click="mobileTimelineOpen = !mobileTimelineOpen; mobileSidebarOpen = false"
@@ -495,7 +549,7 @@ onUnmounted(() => serviceHealth.stopPolling())
     </button>
 
 
-    <!-- Fullscreen overlay -->
+    <!-- Fullscreen overlay (Grid mode) -->
     <FullscreenOverlay
       v-if="isFullscreen && selectedPhoto"
       :photo="selectedPhoto"
@@ -509,6 +563,22 @@ onUnmounted(() => serviceHealth.stopPolling())
       @hide="handleHidePhoto"
       @restore="handleRestorePhoto"
       @show-details="isFullscreen = false; mobileSidebarOpen = true; mobileTimelineOpen = false"
+    />
+
+    <!-- Fullscreen overlay (Map mode – scoped to stop photos) -->
+    <FullscreenOverlay
+      v-if="isMapFullscreen && mapSelectedPhoto"
+      :photo="mapSelectedPhoto"
+      :prevPhoto="mapPrevPhoto"
+      :nextPhoto="mapNextPhoto"
+      :canDelete="canDeletePhotos || canWrite"
+      @close="isMapFullscreen = false"
+      @prev="mapFullscreenIndex--"
+      @next="mapFullscreenIndex++"
+      @toggle-favorite="handleToggleFavorite"
+      @hide="handleHidePhoto"
+      @restore="handleRestorePhoto"
+      @show-details="isMapFullscreen = false"
     />
 
     <!-- Share Dialog -->

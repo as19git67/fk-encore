@@ -270,6 +270,7 @@ export interface Album {
   description?: string;
   cover_photo_id?: number;
   cover_filename?: string;
+  display_mode: "grid" | "map";
   newest_photo_at?: string;
   oldest_photo_at?: string;
   photo_count: number;
@@ -348,6 +349,7 @@ export interface UpdateAlbumRequest {
   name?: string;
   description?: string;
   coverPhotoId?: number | null;
+  displayMode?: "grid" | "map";
 }
 
 export interface AddPhotoToAlbumRequest {

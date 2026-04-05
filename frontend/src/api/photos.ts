@@ -287,6 +287,7 @@ export interface Album {
   description?: string
   cover_photo_id?: number
   cover_filename?: string
+  display_mode: 'grid' | 'map'
   newest_photo_at?: string
   oldest_photo_at?: string
   photo_count: number
@@ -345,7 +346,7 @@ export function createAlbum(name: string, description?: string) {
   })
 }
 
-export function updateAlbum(id: number, patch: { name?: string; description?: string; coverPhotoId?: number | null }) {
+export function updateAlbum(id: number, patch: { name?: string; description?: string; coverPhotoId?: number | null; displayMode?: 'grid' | 'map' }) {
   return apiFetch<Album>('/albums', {
     method: 'PATCH',
     body: JSON.stringify({ id, ...patch })

@@ -221,6 +221,7 @@ export const albums = pgTable("albums", {
   description: text("description"),
   cover_photo_id: integer("cover_photo_id")
     .references(() => photos.id, { onDelete: "set null" }),
+  display_mode: text("display_mode").notNull().default("grid"), // 'grid' | 'map'
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
   updated_at: timestamp("updated_at", { mode: "string" }).defaultNow(),
 });
