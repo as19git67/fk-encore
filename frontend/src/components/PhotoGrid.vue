@@ -299,7 +299,7 @@ defineExpose({
   border-radius: 8px;
   overflow: hidden;
   cursor: pointer;
-  background: var(--p-surface-50);
+  background: var(--p-content-hover-background);
   border: 2px solid transparent;
   transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
   touch-action: manipulation;
@@ -326,13 +326,13 @@ defineExpose({
 
 .photo-item.is-stack {
   border-style: dashed;
-  border-color: var(--p-surface-200);
+  border-color: var(--p-content-border-color);
 }
 
 .photo-thumb {
   width: 100%;
   aspect-ratio: 1;
-  background: var(--p-surface-50);
+  background: var(--p-content-hover-background);
   overflow: hidden;
 }
 

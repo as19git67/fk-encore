@@ -494,7 +494,7 @@ onUnmounted(() => stopPolling())
 .queue-table td {
   padding: 0.4rem 0.75rem;
   text-align: left;
-  border-bottom: 1px solid var(--p-surface-200);
+  border-bottom: 1px solid var(--p-content-border-color);
 }
 .queue-table th {
   color: var(--p-text-muted-color);

@@ -58,7 +58,7 @@ async function handleLogout() {
 body {
   margin: 0;
   font-family: var(--font-family);
-  background: var(--p-surface-50);
+  background: var(--p-content-hover-background);
   color: var(--p-text-color);
 }
 

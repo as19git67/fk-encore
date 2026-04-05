@@ -567,7 +567,7 @@ onUnmounted(() => serviceHealth.stopPolling())
 
 .subheader {
   flex-shrink: 0;
-  background: var(--p-surface-0);
+  background: var(--p-content-background);
   box-shadow: 0 2px 6px rgba(0,0,0,0.08);
 }
 
@@ -577,7 +577,7 @@ onUnmounted(() => serviceHealth.stopPolling())
   align-items: center;
   padding: 1rem;
   gap: 0.5em;
-  border-bottom: 1px solid var(--p-surface-200);
+  border-bottom: 1px solid var(--p-content-border-color);
 }
 
 .header-left { display: flex; align-items: center; gap: 1rem; }
@@ -586,7 +586,7 @@ onUnmounted(() => serviceHealth.stopPolling())
   font-size: 0.75rem;
   padding: 0.2rem 0.5rem;
   border-radius: 4px;
-  background: var(--p-surface-200);
+  background: var(--p-content-border-color);
   text-transform: uppercase;
 }
 .role-badge--owner { background: var(--p-red-100); color: var(--p-red-700); }
@@ -610,7 +610,7 @@ onUnmounted(() => serviceHealth.stopPolling())
   align-items: center;
   gap: 1rem;
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--p-surface-200);
+  border-bottom: 1px solid var(--p-content-border-color);
 }
 
 .album-info-block__description {
@@ -648,12 +648,12 @@ onUnmounted(() => serviceHealth.stopPolling())
 .share-section { margin-bottom: 1.5rem; }
 .share-section-title { font-size: 0.9rem; font-weight: 600; margin-bottom: 0.75rem; }
 .share-empty { font-size: 0.85rem; color: var(--p-text-muted-color); }
-.share-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.4rem 0; border-bottom: 1px solid var(--p-surface-200); }
+.share-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.4rem 0; border-bottom: 1px solid var(--p-content-border-color); }
 .share-user-info { flex: 1; min-width: 0; }
 .share-user-name { display: block; font-size: 0.875rem; font-weight: 500; }
 .share-user-email { display: block; font-size: 0.75rem; color: var(--p-text-muted-color); }
 .share-badge { font-size: 0.7rem; padding: 0.15rem 0.4rem; border-radius: 3px; white-space: nowrap; }
-.share-badge--read { background: var(--p-surface-200); color: var(--p-text-muted-color); }
+.share-badge--read { background: var(--p-content-border-color); color: var(--p-text-muted-color); }
 .share-badge--write { background: var(--p-green-100); color: var(--p-green-700); }
 
 @media (prefers-color-scheme: dark) {
@@ -699,9 +699,9 @@ onUnmounted(() => serviceHealth.stopPolling())
 }
 .mobile-fab--timeline {
   left: 1rem;
-  background: var(--p-surface-0);
+  background: var(--p-content-background);
   color: var(--p-primary-color);
-  border: 1px solid var(--p-surface-200);
+  border: 1px solid var(--p-content-border-color);
 }
 .mobile-fab--timeline.active {
   background: var(--p-primary-color);
@@ -728,8 +728,8 @@ onUnmounted(() => serviceHealth.stopPolling())
     bottom: 0;
     width: 80px;
     z-index: 500;
-    background: var(--p-surface-0);
-    border-right: 1px solid var(--p-surface-200);
+    background: var(--p-content-background);
+    border-right: 1px solid var(--p-content-border-color);
     transform: translateX(-100%);
     transition: transform 0.25s ease;
     box-shadow: 3px 0 12px rgba(0, 0, 0, 0.2);
@@ -745,9 +745,9 @@ onUnmounted(() => serviceHealth.stopPolling())
     right: 0;
     max-height: calc(100dvh - var(--menubar-height, 3.5rem));
     z-index: 500;
-    background: var(--p-surface-0);
+    background: var(--p-content-background);
     border-radius: 16px 16px 0 0;
-    border-top: 1px solid var(--p-surface-200);
+    border-top: 1px solid var(--p-content-border-color);
     transform: translateY(100%);
     transition: transform 0.3s ease;
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.2);
@@ -771,8 +771,8 @@ onUnmounted(() => serviceHealth.stopPolling())
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--p-surface-0);
-    border: 1px solid var(--p-surface-200);
+    background: var(--p-content-background);
+    border: 1px solid var(--p-content-border-color);
     cursor: pointer;
     color: var(--p-text-color);
     padding: 0;
@@ -786,7 +786,7 @@ onUnmounted(() => serviceHealth.stopPolling())
     flex-shrink: 0;
   }
   .sidebar-sheet-close:hover {
-    background: var(--p-surface-100);
+    background: var(--p-content-hover-background);
   }
 
   .subheader .controls :deep(.p-button-label) { display: none; }
@@ -834,4 +834,5 @@ onUnmounted(() => serviceHealth.stopPolling())
   .album-info-block__description { flex: 0 0 auto; min-width: unset; }
   .album-info-block__description-text--empty { display: none; }
 }
+
 </style>
