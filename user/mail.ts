@@ -6,6 +6,7 @@ const SMTP_USER = process.env.SMTP_USER || "";
 const SMTP_PASS = process.env.SMTP_PASS || "";
 const SMTP_FROM = process.env.SMTP_FROM || "noreply@example.com";
 const APP_URL = process.env.APP_URL || process.env.RP_ORIGIN || "http://localhost:5173";
+const APP_NAME = process.env.RP_NAME || "App";
 
 function isSmtpConfigured(): boolean {
   return !!(SMTP_HOST && SMTP_USER && SMTP_PASS);
@@ -29,7 +30,7 @@ function getTransporter(): nodemailer.Transporter {
 }
 
 export async function sendPasswordResetEmail(email: string, token: string): Promise<void> {
-  const resetLink = `${APP_URL}/forgot-password?token=${encodeURIComponent(token)}`;
+  const resetLink = `${APP_URL}/app/forgot-password?token=${encodeURIComponent(token)}`;
 
   if (!isSmtpConfigured()) {
     console.warn(`[Mail] SMTP not configured. Reset link for ${email}: ${resetLink}`);
@@ -38,8 +39,8 @@ export async function sendPasswordResetEmail(email: string, token: string): Prom
 
   const html = `
     <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-      <h2>Passwort zurücksetzen</h2>
-      <p>Du hast eine Anfrage zum Zurücksetzen deines Passworts gestellt.</p>
+      <h2>${APP_NAME} – Passwort zurücksetzen</h2>
+      <p>Du hast eine Anfrage zum Zurücksetzen deines Passworts für <strong>${APP_NAME}</strong> gestellt.</p>
       <p>Klicke auf den folgenden Link, um ein neues Passwort zu setzen:</p>
       <p style="margin: 1.5em 0;">
         <a href="${resetLink}"
@@ -56,8 +57,8 @@ export async function sendPasswordResetEmail(email: string, token: string): Prom
   await getTransporter().sendMail({
     from: SMTP_FROM,
     to: email,
-    subject: "Passwort zurücksetzen",
+    subject: `${APP_NAME} – Passwort zurücksetzen`,
     html,
-    text: `Passwort zurücksetzen\n\nKlicke auf diesen Link: ${resetLink}\n\nDer Link ist eine Stunde gültig.`,
+    text: `${APP_NAME} – Passwort zurücksetzen\n\nKlicke auf diesen Link: ${resetLink}\n\nDer Link ist eine Stunde gültig.`,
   });
 }
