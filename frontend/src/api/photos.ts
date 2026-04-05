@@ -182,6 +182,12 @@ export function retryFailedScans() {
   })
 }
 
+export function cancelPendingScans() {
+  return apiFetch<{ cancelled: number }>('/photos/scan-queue/cancel', {
+    method: 'POST'
+  })
+}
+
 export function recomputeAutoCrops() {
   return apiFetch<{ updated: number }>('/photos/recompute-auto-crops', {
     method: 'POST'

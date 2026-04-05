@@ -664,6 +664,17 @@ export const retryFailedScans = api(
   }
 );
 
+export const cancelPendingScans = api(
+  { expose: true, method: "POST", path: "/photos/scan-queue/cancel", auth: true },
+  async (): Promise<{ cancelled: number }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "data.manage");
+    return await service.cancelPendingScansLogic(userId);
+  }
+);
+
 /**
  * Recompute auto-crop focus points for all photos based on existing face/landmark data.
  */
