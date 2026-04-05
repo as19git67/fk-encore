@@ -173,6 +173,7 @@ function handlePhotoClick(item: PhotoItem, event: MouseEvent) {
     mobileSelectedIds.value = next
   } else {
     selectPhoto(item.index, event)
+    isFullscreen.value = true
   }
 }
 
@@ -686,6 +687,7 @@ onUnmounted(() => serviceHealth.stopPolling())
         @section-change="activeSection = $event"
         @photo-click="handlePhotoClick"
         @photo-dblclick="isFullscreen = true"
+
         @stack-click="activeGroup = $event"
         @group-multi-select="handleGroupMultiSelect"
         @toggle-favorite="handleToggleFavorite"
@@ -744,6 +746,7 @@ onUnmounted(() => serviceHealth.stopPolling())
       @toggle-favorite="handleToggleFavorite"
       @hide="handleDelete"
       @restore="handleRestore"
+      @show-details="isFullscreen = false; mobileSidebarOpen = true; mobileTimelineOpen = false"
     />
 
     <PhotoCompareView
@@ -783,15 +786,6 @@ onUnmounted(() => serviceHealth.stopPolling())
       <i class="pi pi-check-square" />
     </button>
 
-    <!-- Mobile: Floating-Button zum Öffnen der Details (wenn Foto gewählt, nicht im Auswahlmodus) -->
-    <button
-      v-if="selectedPhoto && !mobileSidebarOpen && !loading && !uploading && !mobileSelectMode"
-      class="mobile-fab mobile-fab--details"
-      @click="mobileSidebarOpen = true; mobileTimelineOpen = false"
-      aria-label="Details"
-    >
-      <i class="pi pi-info-circle" />
-    </button>
 
     <!-- Mobile: Action-Bar im Auswahlmodus -->
     <div v-if="mobileSelectMode" class="mobile-select-bar">
@@ -1098,11 +1092,6 @@ onUnmounted(() => serviceHealth.stopPolling())
   border: 1px solid var(--p-content-border-color);
 }
 
-.mobile-fab--details {
-  right: 1rem;
-  background: var(--p-primary-color);
-  color: white;
-}
 
 /* ── Mobile Select Action-Bar ────────────────────────────────────────────── */
 .mobile-select-bar {
