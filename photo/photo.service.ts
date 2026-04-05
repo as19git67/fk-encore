@@ -2107,7 +2107,7 @@ export async function rescanPhotoGpsLogic(
 
 // ── Scan Queue API helpers ───────────────────────────────────────────────────
 
-import { getQueueStatus, requeueFailed, requeueForRescan } from "./scan-queue";
+import { getQueueStatus, requeueFailed, requeueForRescan, cancelPendingScans } from "./scan-queue";
 
 export async function getScanQueueStatusLogic(userId: number) {
   return getQueueStatus(userId);
@@ -2123,6 +2123,11 @@ export async function retryFailedScansLogic(userId: number): Promise<{ retried: 
   const retried = await requeueFailed(userId);
   triggerWorkers();
   return { retried };
+}
+
+export async function cancelPendingScansLogic(userId: number): Promise<{ cancelled: number }> {
+  const cancelled = await cancelPendingScans(userId);
+  return { cancelled };
 }
 
 /**

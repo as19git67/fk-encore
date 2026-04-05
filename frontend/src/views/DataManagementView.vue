@@ -4,7 +4,8 @@ import Button from 'primevue/button'
 import ProgressBar from 'primevue/progressbar'
 import Message from 'primevue/message'
 import {
-  getScanQueueStatus, rescanPhotos, retryFailedScans, findPhotoGroups,
+  getScanQueueStatus, rescanPhotos, retryFailedScans, cancelPendingScans,
+  findPhotoGroups,
   getPhotosToRefreshMetadata, refreshPhotoMetadata,
   getPhotosNeedingGpsRescan, rescanPhotoGps,
   recomputeAutoCrops,
@@ -18,6 +19,7 @@ const queueStatus = ref<ScanQueueStatus>({ services: [] })
 const queueError = ref('')
 const rescanLoading = ref(false)
 const retryLoading = ref(false)
+const cancelLoading = ref(false)
 let pollInterval: ReturnType<typeof setInterval> | null = null
 
 const serviceLabels: Record<string, string> = {
@@ -84,6 +86,19 @@ async function handleRetry() {
     queueError.value = err.message || 'Fehler beim Wiederholen'
   } finally {
     retryLoading.value = false
+  }
+}
+
+async function handleCancel() {
+  cancelLoading.value = true
+  try {
+    await cancelPendingScans()
+    await fetchQueueStatus()
+    if (!isActive.value) stopPolling()
+  } catch (err: any) {
+    queueError.value = err.message || 'Fehler beim Abbrechen'
+  } finally {
+    cancelLoading.value = false
   }
 }
 
@@ -232,42 +247,78 @@ onUnmounted(() => stopPolling())
 
       <Message v-if="queueError" severity="error" class="mb-3" @close="queueError = ''">{{ queueError }}</Message>
 
-      <!-- Status-Tabelle -->
-      <table class="queue-table mb-4">
-        <thead>
-          <tr>
-            <th>Service</th>
-            <th>Ausstehend</th>
-            <th>Läuft</th>
-            <th>Fehler</th>
-            <th>Erledigt</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="svc in queueStatus.services" :key="svc.service">
-            <td>{{ serviceLabels[svc.service] ?? svc.service }}</td>
-            <td>
+      <!-- Status-Tabelle (Desktop) -->
+      <div class="queue-table-wrapper">
+        <table class="queue-table mb-4">
+          <thead>
+            <tr>
+              <th>Service</th>
+              <th>Ausstehend</th>
+              <th>Läuft</th>
+              <th>Fehler</th>
+              <th>Erledigt</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="svc in queueStatus.services" :key="svc.service">
+              <td>{{ serviceLabels[svc.service] ?? svc.service }}</td>
+              <td>
+                <span v-if="svc.pending > 0" class="badge badge-pending">{{ svc.pending }}</span>
+                <span v-else class="text-secondary">—</span>
+              </td>
+              <td>
+                <span v-if="svc.processing > 0" class="badge badge-processing">
+                  <i class="pi pi-spin pi-spinner" style="font-size:0.7rem" />
+                  {{ svc.processing }}
+                </span>
+                <span v-else class="text-secondary">—</span>
+              </td>
+              <td>
+                <span v-if="svc.failed > 0" class="badge badge-failed">{{ svc.failed }}</span>
+                <span v-else class="text-secondary">—</span>
+              </td>
+              <td class="text-secondary">{{ svc.done }}</td>
+            </tr>
+            <tr v-if="queueStatus.services.length === 0">
+              <td colspan="5" class="text-secondary" style="text-align:center">Keine Daten</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Status-Karten (Mobil) -->
+      <div class="queue-cards mb-4">
+        <div v-for="svc in queueStatus.services" :key="svc.service" class="queue-card">
+          <div class="queue-card__header">{{ serviceLabels[svc.service] ?? svc.service }}</div>
+          <div class="queue-card__stats">
+            <div class="queue-card__stat">
+              <span class="queue-card__label">Ausstehend</span>
               <span v-if="svc.pending > 0" class="badge badge-pending">{{ svc.pending }}</span>
               <span v-else class="text-secondary">—</span>
-            </td>
-            <td>
+            </div>
+            <div class="queue-card__stat">
+              <span class="queue-card__label">Läuft</span>
               <span v-if="svc.processing > 0" class="badge badge-processing">
                 <i class="pi pi-spin pi-spinner" style="font-size:0.7rem" />
                 {{ svc.processing }}
               </span>
               <span v-else class="text-secondary">—</span>
-            </td>
-            <td>
+            </div>
+            <div class="queue-card__stat">
+              <span class="queue-card__label">Fehler</span>
               <span v-if="svc.failed > 0" class="badge badge-failed">{{ svc.failed }}</span>
               <span v-else class="text-secondary">—</span>
-            </td>
-            <td class="text-secondary">{{ svc.done }}</td>
-          </tr>
-          <tr v-if="queueStatus.services.length === 0">
-            <td colspan="5" class="text-secondary" style="text-align:center">Keine Daten</td>
-          </tr>
-        </tbody>
-      </table>
+            </div>
+            <div class="queue-card__stat">
+              <span class="queue-card__label">Erledigt</span>
+              <span class="text-secondary">{{ svc.done }}</span>
+            </div>
+          </div>
+        </div>
+        <div v-if="queueStatus.services.length === 0" class="text-secondary" style="text-align:center">
+          Keine Daten
+        </div>
+      </div>
 
       <div v-if="isActive" class="status-progress">
         <span class="text-secondary" style="font-size:0.85rem">
@@ -275,13 +326,24 @@ onUnmounted(() => stopPolling())
           {{ totalProcessing }} werden verarbeitet, {{ totalPending }} warten…
         </span>
         <ProgressBar class="status-progress__bar" mode="indeterminate" />
+        <Button
+          icon="pi pi-times"
+          label="Scan abbrechen"
+          severity="danger"
+          size="small"
+          outlined
+          :loading="cancelLoading"
+          :disabled="cancelLoading"
+          @click="handleCancel"
+          style="align-self: flex-start; margin-top: 0.25rem"
+        />
       </div>
 
       <div v-if="!isActive" class="button-row">
         <Button
           icon="pi pi-search-plus"
           label="Fehlende Scans starten"
-          severity="secondary"
+          outlined
           :loading="rescanLoading"
           :disabled="rescanLoading || retryLoading"
           @click="handleRescan(false)"
@@ -289,7 +351,7 @@ onUnmounted(() => stopPolling())
         <Button
           icon="pi pi-refresh"
           label="Alles neu scannen"
-          severity="secondary"
+          outlined
           :loading="rescanLoading"
           :disabled="rescanLoading || retryLoading"
           @click="handleRescan(true)"
@@ -326,7 +388,7 @@ onUnmounted(() => stopPolling())
         icon="pi pi-images"
         label="Gruppen neu berechnen"
         :loading="groupingLoading"
-        :disabled="groupingLoading || isActive"
+        :disabled="groupingLoading || isActive || rescanLoading || retryLoading"
         @click="handleFindGroups"
       />
     </div>
@@ -359,7 +421,7 @@ onUnmounted(() => stopPolling())
       <Button class="data-management-group__item"
         icon="pi pi-map-marker"
         label="GPS neu einlesen"
-        :disabled="gpsRescanLoading || isActive"
+        :disabled="gpsRescanLoading || isActive || rescanLoading || retryLoading"
         :loading="gpsRescanLoading"
         @click="handleGpsRescan"
       />
@@ -386,7 +448,7 @@ onUnmounted(() => stopPolling())
         icon="pi pi-arrows-alt"
         label="Auto-Crop neu berechnen"
         :loading="autoCropLoading"
-        :disabled="autoCropLoading"
+        :disabled="autoCropLoading || isActive || rescanLoading || retryLoading"
         @click="handleRecomputeAutoCrops"
       />
     </div>
@@ -408,7 +470,7 @@ onUnmounted(() => stopPolling())
       <Button class="data-management-group__item"
         icon="pi pi-refresh"
         label="Metadaten aktualisieren"
-        :disabled="refreshingMetadata || isActive"
+        :disabled="refreshingMetadata || isActive || rescanLoading || retryLoading"
         :loading="refreshingMetadata"
         @click="handleRefreshMetadata"
       />
@@ -427,6 +489,7 @@ onUnmounted(() => stopPolling())
   gap: 1rem;
   display: flex;
   flex-direction: column;
+  padding-inline: 0.25em;
 }
 
 @media (min-width: 800px) {
@@ -465,6 +528,7 @@ onUnmounted(() => stopPolling())
   display: flex;
   flex-direction: column;
   margin-block: 0.25em;
+  align-self: stretch;
 }
 
 .status-progress .text-secondary {
@@ -483,6 +547,30 @@ onUnmounted(() => stopPolling())
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
+  align-self: flex-start;
+}
+
+@media (max-width: 600px) {
+  .button-row {
+    flex-direction: column;
+    align-self: stretch;
+  }
+}
+
+@media (max-width: 600px) {
+  .button-row + .button-row,
+  .data-management-group :deep(.p-button:only-child) {
+    width: 100%;
+  }
+}
+
+/* Desktop: show table, hide cards */
+.queue-table-wrapper { display: block; align-self: stretch; }
+.queue-cards { display: none; }
+
+@media (max-width: 600px) {
+  .queue-table-wrapper { display: none; }
+  .queue-cards { display: flex; flex-direction: column; gap: 0.5rem; align-self: stretch; }
 }
 
 .queue-table {
@@ -501,6 +589,33 @@ onUnmounted(() => stopPolling())
   font-weight: 600;
   font-size: 0.8rem;
   text-transform: uppercase;
+}
+
+/* Mobile card layout */
+.queue-card {
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 0.5rem;
+  padding: 0.6rem 0.75rem;
+}
+.queue-card__header {
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: 0.4rem;
+}
+.queue-card__stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.3rem 1rem;
+}
+.queue-card__stat {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.85rem;
+}
+.queue-card__label {
+  color: var(--p-text-muted-color);
+  font-size: 0.8rem;
 }
 
 .badge {
