@@ -142,39 +142,47 @@ function scrollToPhoto(idx: number, behavior: ScrollBehavior = 'smooth') {
 
   let attempts = 0
   const tryScroll = () => {
-    const el = scrollRef.value?.querySelector(`[data-photo-id="${photo.id}"]`)
+    const container = scrollRef.value
+    if (!container) {
+      if (attempts++ < 30) requestAnimationFrame(tryScroll)
+      return
+    }
+    const el = container.querySelector(`[data-photo-id="${photo.id}"]`) as HTMLElement | null
     if (el) {
-      el.scrollIntoView({ behavior, block: 'nearest' })
-    } else if (attempts++ < 10) {
+      // Use explicit scrollTo on the correct container instead of scrollIntoView
+      const containerRect = container.getBoundingClientRect()
+      const elRect = el.getBoundingClientRect()
+      const targetTop = container.scrollTop + elRect.top - containerRect.top - containerRect.height / 2 + elRect.height / 2
+      container.scrollTo({ top: Math.max(0, targetTop), behavior })
+    } else if (attempts++ < 30) {
       requestAnimationFrame(tryScroll)
     }
   }
   tryScroll()
 }
 
-// User-driven selection changes → smooth scroll
-watch(() => props.selectedIndex, (idx) => {
-  // Skip if this is the initial render (handled separately below)
-  if (!initialScrollDone) return
-  scrollToPhoto(idx)
+// Initial scroll: use onMounted + setTimeout to ensure DOM is fully laid out
+onMounted(() => {
+  if (props.selectedIndex >= 0 && props.groupedPhotos.length > 0) {
+    initialScrollDone = true
+    // Small delay ensures the browser has completed layout after mount
+    setTimeout(() => scrollToPhoto(props.selectedIndex, 'instant'), 50)
+  }
 })
 
-// Initial scroll: wait for groupedPhotos to render, then jump instantly
-watch(() => props.groupedPhotos, () => {
-  if (initialScrollDone) return
-  if (props.selectedIndex >= 0) {
-    initialScrollDone = true
-    nextTick(() => scrollToPhoto(props.selectedIndex, 'instant'))
-  }
-}, { immediate: true })
-
-// Fallback: if selectedIndex is set after groupedPhotos already rendered
+// Fallback: if selectedIndex is set after mount (e.g. async data loaded later)
 watch(() => props.selectedIndex, (idx) => {
   if (initialScrollDone) return
   if (idx >= 0 && props.groupedPhotos.length > 0) {
     initialScrollDone = true
     nextTick(() => scrollToPhoto(idx, 'instant'))
   }
+})
+
+// User-driven selection changes → smooth scroll
+watch(() => props.selectedIndex, (idx) => {
+  if (!initialScrollDone) return
+  scrollToPhoto(idx)
 })
 
 // ── Public: scroll to a section header ──────────────────────────────────────

@@ -300,12 +300,12 @@ async function loadPhotos() {
     const storedPhotoId = Number(localStorage.getItem(LAST_PHOTO_KEY))
 
     if (queryPhotoId) {
-      targetIdx = photos.value.findIndex(p => p.id === queryPhotoId)
+      targetIdx = photos.value.findIndex(p => p.id === queryPhotoId && !hiddenByStack.value.has(p.id))
       router.replace({ query: { ...route.query, photoId: undefined } })
     }
 
     if (targetIdx < 0 && storedPhotoId) {
-      targetIdx = photos.value.findIndex(p => p.id === storedPhotoId)
+      targetIdx = photos.value.findIndex(p => p.id === storedPhotoId && !hiddenByStack.value.has(p.id))
     }
 
     if (targetIdx < 0 && photos.value.length > 0) {
