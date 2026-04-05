@@ -196,6 +196,7 @@ const LAST_PHOTO_KEY = 'photos_last_selected_id'
 watch(selectedPhoto, (photo) => {
   isEditingDate.value = false
   if (photo) {
+    console.log('[PhotosView] Saving selected photo to localStorage:', photo.id)
     localStorage.setItem(LAST_PHOTO_KEY, String(photo.id))
     loadDetectedFaces(photo.id)
     loadLandmarks(photo.id)
@@ -299,26 +300,35 @@ async function loadPhotos() {
     const queryPhotoId = Number(route.query.photoId)
     const storedPhotoId = Number(localStorage.getItem(LAST_PHOTO_KEY))
 
+    console.log('[PhotosView] loadPhotos: queryPhotoId=', queryPhotoId, 'storedPhotoId=', storedPhotoId, 'photosCount=', photos.value.length)
+
     if (queryPhotoId) {
       targetIdx = photos.value.findIndex(p => p.id === queryPhotoId && !hiddenByStack.value.has(p.id))
+      console.log('[PhotosView] queryPhotoId targetIdx=', targetIdx)
       router.replace({ query: { ...route.query, photoId: undefined } })
     }
 
     if (targetIdx < 0 && storedPhotoId) {
       targetIdx = photos.value.findIndex(p => p.id === storedPhotoId && !hiddenByStack.value.has(p.id))
+      console.log('[PhotosView] storedPhotoId targetIdx=', targetIdx)
     }
 
     if (targetIdx < 0 && photos.value.length > 0) {
       // Fallback: neuestes sichtbares Foto
       const lastVisible = [...photos.value].reverse().findIndex(p => !hiddenByStack.value.has(p.id))
       targetIdx = lastVisible >= 0 ? photos.value.length - 1 - lastVisible : photos.value.length - 1
+      console.log('[PhotosView] fallback targetIdx=', targetIdx)
     }
 
-    if (window.innerWidth <= 768 && !queryPhotoId) {
+    const isMobile = window.innerWidth <= 768
+    console.log('[PhotosView] isMobile=', isMobile, 'final targetIdx=', targetIdx)
+
+    if (isMobile && !queryPhotoId) {
       selectedIndex.value = -1
     } else {
       selectedIndex.value = targetIdx
     }
+    console.log('[PhotosView] selectedIndex set to', selectedIndex.value)
 
     // Now reveal the grid (PhotoGrid will mount with correct selectedIndex)
     loading.value = false

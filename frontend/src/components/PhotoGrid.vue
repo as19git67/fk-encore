@@ -136,26 +136,31 @@ watch(scrollRef, async (el) => {
 let initialScrollDone = false
 
 function scrollToPhoto(idx: number, behavior: ScrollBehavior = 'smooth') {
-  if (idx < 0) return
+  if (idx < 0) { console.log('[PhotoGrid] scrollToPhoto: idx < 0, skipping'); return }
   const photo = props.photos[idx]
-  if (!photo) return
+  if (!photo) { console.log('[PhotoGrid] scrollToPhoto: no photo at idx', idx); return }
+
+  console.log('[PhotoGrid] scrollToPhoto: idx=', idx, 'photoId=', photo.id, 'behavior=', behavior)
 
   let attempts = 0
   const tryScroll = () => {
     const container = scrollRef.value
     if (!container) {
       if (attempts++ < 30) requestAnimationFrame(tryScroll)
+      else console.log('[PhotoGrid] scrollToPhoto: gave up, no container after 30 attempts')
       return
     }
     const el = container.querySelector(`[data-photo-id="${photo.id}"]`) as HTMLElement | null
     if (el) {
-      // Use explicit scrollTo on the correct container instead of scrollIntoView
       const containerRect = container.getBoundingClientRect()
       const elRect = el.getBoundingClientRect()
       const targetTop = container.scrollTop + elRect.top - containerRect.top - containerRect.height / 2 + elRect.height / 2
+      console.log('[PhotoGrid] scrollToPhoto: SCROLLING to photoId=', photo.id, 'targetTop=', targetTop, 'containerScrollHeight=', container.scrollHeight)
       container.scrollTo({ top: Math.max(0, targetTop), behavior })
     } else if (attempts++ < 30) {
       requestAnimationFrame(tryScroll)
+    } else {
+      console.log('[PhotoGrid] scrollToPhoto: gave up, element not found for photoId=', photo.id)
     }
   }
   tryScroll()
@@ -163,9 +168,9 @@ function scrollToPhoto(idx: number, behavior: ScrollBehavior = 'smooth') {
 
 // Initial scroll: use onMounted + setTimeout to ensure DOM is fully laid out
 onMounted(() => {
+  console.log('[PhotoGrid] onMounted: selectedIndex=', props.selectedIndex, 'groupedPhotos.length=', props.groupedPhotos.length, 'scrollRef=', !!scrollRef.value)
   if (props.selectedIndex >= 0 && props.groupedPhotos.length > 0) {
     initialScrollDone = true
-    // Small delay ensures the browser has completed layout after mount
     setTimeout(() => scrollToPhoto(props.selectedIndex, 'instant'), 50)
   }
 })
