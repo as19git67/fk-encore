@@ -55,11 +55,11 @@ const selectedIndex = ref(-1)
 const isFullscreen = ref(false)
 const activeSection = ref('')
 
-// Flat Photo[] for composables, sorted newest-first
+// Flat Photo[] for composables, sorted oldest-first
 const albumPhotos = computed<Photo[]>(() =>
   [...((album.value?.photos ?? []) as Photo[])].sort((a, b) =>
-    new Date(b.taken_at || b.created_at).getTime() -
-    new Date(a.taken_at || a.created_at).getTime()
+    new Date(a.taken_at || a.created_at).getTime() -
+    new Date(b.taken_at || b.created_at).getTime()
   )
 )
 
@@ -143,7 +143,7 @@ async function loadData() {
   loading.value = true
   try {
     album.value = await getAlbum(albumId)
-    selectedIndex.value = album.value.photos.length > 0 ? 0 : -1
+    selectedIndex.value = album.value.photos.length > 0 ? albumPhotos.value.length - 1 : -1
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden des Albums'
   } finally {
@@ -494,15 +494,6 @@ onUnmounted(() => serviceHealth.stopPolling())
       <i class="pi pi-calendar" />
     </button>
 
-    <!-- Mobile: Floating-Button Details -->
-    <button
-      v-if="selectedPhoto && !mobileSidebarOpen && album"
-      class="mobile-fab mobile-fab--details"
-      @click="mobileSidebarOpen = true; mobileTimelineOpen = false"
-      aria-label="Details"
-    >
-      <i class="pi pi-info-circle" />
-    </button>
 
     <!-- Fullscreen overlay -->
     <FullscreenOverlay
@@ -517,6 +508,7 @@ onUnmounted(() => serviceHealth.stopPolling())
       @toggle-favorite="handleToggleFavorite"
       @hide="handleHidePhoto"
       @restore="handleRestorePhoto"
+      @show-details="isFullscreen = false; mobileSidebarOpen = true; mobileTimelineOpen = false"
     />
 
     <!-- Share Dialog -->
@@ -707,11 +699,7 @@ onUnmounted(() => serviceHealth.stopPolling())
   background: var(--p-primary-color);
   color: white;
 }
-.mobile-fab--details {
-  right: 1rem;
-  background: var(--p-primary-color);
-  color: white;
-}
+
 
 /* ── Mobile Breakpoint ───────────────────────────────────────────────────── */
 @media (max-width: 768px) {

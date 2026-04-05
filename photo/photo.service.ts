@@ -1218,6 +1218,7 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     SELECT
       p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash,
       p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop,
+      p.location_name, p.location_city, p.location_country,
       ap.added_by_user_id, ap.added_at,
       my_pc.status AS curation_status,
       COALESCE(SUM(CASE WHEN all_pc.status = 'favorite' THEN 1 ELSE 0 END), 0)::int AS fav_count,
@@ -1227,7 +1228,9 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     LEFT JOIN photo_curation my_pc ON my_pc.photo_id = p.id AND my_pc.user_id = ${userId}
     LEFT JOIN photo_curation all_pc ON all_pc.photo_id = p.id AND all_pc.user_id = ANY(ARRAY[${sql.join(participantIds.map(id => sql`${id}`), sql`, `)}]::int[])
     GROUP BY p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash,
-             p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop, ap.added_by_user_id, ap.added_at, my_pc.status
+             p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop,
+             p.location_name, p.location_city, p.location_country,
+             ap.added_by_user_id, ap.added_at, my_pc.status
   `)).rows;
 
   // Apply view filters in JS (cleaner than building dynamic HAVING clauses)
@@ -1307,6 +1310,9 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
       added_by_user_id: r.added_by_user_id ?? undefined,
       added_at: r.added_at ?? "",
       auto_crop: r.auto_crop ?? undefined,
+      location_name: r.location_name ?? undefined,
+      location_city: r.location_city ?? undefined,
+      location_country: r.location_country ?? undefined,
       curation_stats: isShared ? {
         fav_count: Number(r.fav_count),
         hide_count: Number(r.hide_count),

@@ -173,6 +173,7 @@ function handlePhotoClick(item: PhotoItem, event: MouseEvent) {
     mobileSelectedIds.value = next
   } else {
     selectPhoto(item.index, event)
+    isFullscreen.value = true
   }
 }
 
@@ -281,8 +282,8 @@ async function loadPhotos() {
       listPhotoGroups().catch(() => ({ groups: [] })),
     ])
     photos.value = photosRes.photos.sort((a, b) =>
-      new Date(b.taken_at || b.created_at).getTime() -
-      new Date(a.taken_at || a.created_at).getTime()
+      new Date(a.taken_at || a.created_at).getTime() -
+      new Date(b.taken_at || b.created_at).getTime()
     )
     photoGroupsList.value = groupsRes.groups
     loading.value = false
@@ -291,8 +292,9 @@ async function loadPhotos() {
     if (window.innerWidth <= 768) {
       selectedIndex.value = -1
     } else {
-      const firstVisible = photos.value.findIndex(p => !hiddenByStack.value.has(p.id))
-      selectedIndex.value = firstVisible >= 0 ? firstVisible : (photos.value.length > 0 ? 0 : -1)
+      // Neuestes Foto (letztes in der Liste) initial fokussieren
+      const lastVisible = [...photos.value].reverse().findIndex(p => !hiddenByStack.value.has(p.id))
+      selectedIndex.value = lastVisible >= 0 ? photos.value.length - 1 - lastVisible : (photos.value.length > 0 ? photos.value.length - 1 : -1)
     }
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Fotos'
@@ -307,8 +309,8 @@ async function reloadPhotosInPlace() {
       listPhotoGroups().catch(() => ({ groups: [] })),
     ])
     photos.value = photosRes.photos.sort((a, b) =>
-      new Date(b.taken_at || b.created_at).getTime() -
-      new Date(a.taken_at || a.created_at).getTime()
+      new Date(a.taken_at || a.created_at).getTime() -
+      new Date(b.taken_at || b.created_at).getTime()
     )
     photoGroupsList.value = groupsRes.groups
   } catch { /* silently fail */ }
@@ -686,6 +688,7 @@ onUnmounted(() => serviceHealth.stopPolling())
         @section-change="activeSection = $event"
         @photo-click="handlePhotoClick"
         @photo-dblclick="isFullscreen = true"
+
         @stack-click="activeGroup = $event"
         @group-multi-select="handleGroupMultiSelect"
         @toggle-favorite="handleToggleFavorite"
@@ -744,6 +747,7 @@ onUnmounted(() => serviceHealth.stopPolling())
       @toggle-favorite="handleToggleFavorite"
       @hide="handleDelete"
       @restore="handleRestore"
+      @show-details="isFullscreen = false; mobileSidebarOpen = true; mobileTimelineOpen = false"
     />
 
     <PhotoCompareView
@@ -783,15 +787,6 @@ onUnmounted(() => serviceHealth.stopPolling())
       <i class="pi pi-check-square" />
     </button>
 
-    <!-- Mobile: Floating-Button zum Öffnen der Details (wenn Foto gewählt, nicht im Auswahlmodus) -->
-    <button
-      v-if="selectedPhoto && !mobileSidebarOpen && !loading && !uploading && !mobileSelectMode"
-      class="mobile-fab mobile-fab--details"
-      @click="mobileSidebarOpen = true; mobileTimelineOpen = false"
-      aria-label="Details"
-    >
-      <i class="pi pi-info-circle" />
-    </button>
 
     <!-- Mobile: Action-Bar im Auswahlmodus -->
     <div v-if="mobileSelectMode" class="mobile-select-bar">
@@ -1098,11 +1093,6 @@ onUnmounted(() => serviceHealth.stopPolling())
   border: 1px solid var(--p-content-border-color);
 }
 
-.mobile-fab--details {
-  right: 1rem;
-  background: var(--p-primary-color);
-  color: white;
-}
 
 /* ── Mobile Select Action-Bar ────────────────────────────────────────────── */
 .mobile-select-bar {
