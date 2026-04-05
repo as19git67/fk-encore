@@ -142,38 +142,40 @@ const nextPhoto = computed(() =>
 // ── Mobile drawer state ───────────────────────────────────────────────────────
 const mobileTimelineOpen = ref(false)
 const mobileSidebarOpen = ref(false)
-const mobileSelectMode = ref(false)
 
-// Mobile-Selektion vollständig getrennt von usePhotoSelection (kein Watch-Interferenz)
-const mobileSelectedIds = shallowRef<Set<number>>(new Set())
-const mobileSelectedPhotos = computed<Photo[]>(() =>
-  photos.value.filter(p => mobileSelectedIds.value.has(p.id))
+// ── Select mode (mobile + desktop) ──────────────────────────────────────────
+const selectMode = ref(false)
+
+// Selektion im Auswahlmodus vollständig getrennt von usePhotoSelection (kein Watch-Interferenz)
+const selectModeIds = shallowRef<Set<number>>(new Set())
+const selectModePhotos = computed<Photo[]>(() =>
+  photos.value.filter(p => selectModeIds.value.has(p.id))
 )
 
-// Welche IDs an PhotoGrid übergeben werden – im Auswahlmodus die mobilen IDs
+// Welche IDs an PhotoGrid übergeben werden – im Auswahlmodus die separaten IDs
 const activeSelectedPhotoIds = computed<Set<number>>(() =>
-  mobileSelectMode.value ? mobileSelectedIds.value : selectedPhotoIds.value
+  selectMode.value ? selectModeIds.value : selectedPhotoIds.value
 )
 
 function enterSelectMode() {
-  mobileSelectedIds.value = new Set()
-  mobileSelectMode.value = true
+  selectModeIds.value = new Set()
+  selectMode.value = true
 }
 
 function exitSelectMode() {
-  mobileSelectMode.value = false
-  mobileSelectedIds.value = new Set()
+  selectMode.value = false
+  selectModeIds.value = new Set()
   mobileSidebarOpen.value = false
 }
 
 function handlePhotoClick(item: PhotoItem, event: MouseEvent) {
-  if (mobileSelectMode.value) {
-    // Mobile Auswahlmodus: lokalen State direkt togglen, usePhotoSelection komplett umgehen
+  if (selectMode.value) {
+    // Auswahlmodus: lokalen State direkt togglen, usePhotoSelection komplett umgehen
     const photoId = item.photo.id
-    const next = new Set(mobileSelectedIds.value)
+    const next = new Set(selectModeIds.value)
     if (next.has(photoId)) next.delete(photoId)
     else next.add(photoId)
-    mobileSelectedIds.value = next
+    selectModeIds.value = next
   } else {
     selectPhoto(item.index, event)
     isFullscreen.value = true
@@ -436,11 +438,11 @@ async function handleReindexPhoto() {
 
 // ── Group multi-select (Ctrl/Shift click on a stack) ─────────────────────
 function handleGroupMultiSelect(group: PhotoGroup) {
-  if (mobileSelectMode.value) {
+  if (selectMode.value) {
     // Mobile: alle Gruppenfotos in den isolierten mobilen State einfügen
-    const next = new Set(mobileSelectedIds.value)
+    const next = new Set(selectModeIds.value)
     for (const pid of group.photo_ids) next.add(pid)
-    mobileSelectedIds.value = next
+    selectModeIds.value = next
   } else {
     // Desktop: usePhotoSelection + Cursor auf Cover-Foto setzen
     const newSet = new Set(selectedPhotoIds.value)
@@ -665,6 +667,16 @@ onUnmounted(() => {
       <div class="header">
         <h1 class="title">Meine Fotos</h1>
         <div class="actions">
+          <Button
+            v-if="!loading && photos.length > 0"
+            class="desktop-select-toggle"
+            :icon="selectMode ? 'pi pi-times' : 'pi pi-check-square'"
+            :label="selectMode ? 'Auswahl beenden' : 'Auswählen'"
+            size="small"
+            :severity="selectMode ? 'danger' : 'secondary'"
+            :outlined="!selectMode"
+            @click="selectMode ? exitSelectMode() : enterSelectMode()"
+          />
           <div v-if="canDelete" class="toggle-hidden">
             <label for="showHidden" class="text-sm">Ausgeblendete</label>
             <ToggleSwitch v-model="showHidden" inputId="showHidden" @update:modelValue="loadPhotos" />
@@ -750,11 +762,33 @@ onUnmounted(() => {
     <div v-if="!uploading && loading" class="info-text">Lade Fotos…</div>
     <div v-else-if="photos.length === 0" class="info-text">Keine Fotos hochgeladen.</div>
 
-    <!-- Three-column layout -->
-    <div
-      v-else
-      class="gallery-layout"
-    >
+    <template v-else>
+      <!-- Desktop: Auswahl-Aktionsleiste -->
+      <div v-if="selectMode && selectModePhotos.length > 0" class="desktop-select-bar">
+        <span class="desktop-select-count">
+          <i class="pi pi-check-square" />
+          {{ selectModePhotos.length }} ausgewählt
+        </span>
+        <div class="desktop-select-actions">
+          <Button
+            label="Details / Album"
+            icon="pi pi-book"
+            size="small"
+            @click="mobileSidebarOpen = true; mobileTimelineOpen = false"
+          />
+          <Button
+            label="Auswahl aufheben"
+            icon="pi pi-replay"
+            size="small"
+            severity="secondary"
+            outlined
+            @click="selectModeIds = new Set()"
+          />
+        </div>
+      </div>
+
+      <!-- Three-column layout -->
+      <div class="gallery-layout">
       <!-- LEFT: Timeline nav – auf Mobile als Slide-in-Drawer -->
       <div class="timeline-drawer" :class="{ 'is-open': mobileTimelineOpen }">
         <TimelineNav
@@ -774,7 +808,7 @@ onUnmounted(() => {
         :selectedPhotoIds="activeSelectedPhotoIds"
         :canDelete="canDelete"
         :hasStacks="true"
-        :selectMode="mobileSelectMode"
+        :selectMode="selectMode"
         @update:columnCount="columnCount = $event"
         @section-change="activeSection = $event"
         @photo-click="handlePhotoClick"
@@ -795,9 +829,9 @@ onUnmounted(() => {
           </button>
         </div>
         <PhotoDetailSidebar
-          v-if="mobileSelectMode ? mobileSelectedPhotos.length > 0 : selectedPhotos.length > 0"
-          :photo="mobileSelectMode ? mobileSelectedPhotos[0]! : (selectedPhoto || selectedPhotos[0])!"
-          :selectedPhotos="mobileSelectMode ? mobileSelectedPhotos : expandedSelectedPhotos"
+          v-if="selectMode ? selectModePhotos.length > 0 : selectedPhotos.length > 0"
+          :photo="selectMode ? selectModePhotos[0]! : (selectedPhoto || selectedPhotos[0])!"
+          :selectedPhotos="selectMode ? selectModePhotos : expandedSelectedPhotos"
           :faces="detectedFaces"
           :loading-faces="loadingFaces"
           :landmarks="detectedLandmarks"
@@ -824,6 +858,7 @@ onUnmounted(() => {
         />
       </div>
     </div>
+    </template>
 
     <!-- Fullscreen overlay -->
     <FullscreenOverlay
@@ -859,7 +894,7 @@ onUnmounted(() => {
 
     <!-- Mobile: Floating-Button zum Öffnen der Zeitleiste -->
     <button
-      v-if="!loading && !uploading && photos.length > 0 && !mobileSelectMode"
+      v-if="!loading && !uploading && photos.length > 0 && !selectMode"
       class="mobile-fab mobile-fab--timeline"
       :class="{ active: mobileTimelineOpen }"
       @click="mobileTimelineOpen = !mobileTimelineOpen; mobileSidebarOpen = false"
@@ -870,7 +905,7 @@ onUnmounted(() => {
 
     <!-- Mobile: Floating-Button Auswahlmodus starten (nur wenn nicht im Auswahlmodus) -->
     <button
-      v-if="!loading && !uploading && photos.length > 0 && !mobileSelectMode"
+      v-if="!loading && !uploading && photos.length > 0 && !selectMode"
       class="mobile-fab mobile-fab--select"
       @click="enterSelectMode"
       aria-label="Fotos auswählen"
@@ -880,14 +915,14 @@ onUnmounted(() => {
 
 
     <!-- Mobile: Action-Bar im Auswahlmodus -->
-    <div v-if="mobileSelectMode" class="mobile-select-bar">
+    <div v-if="selectMode" class="mobile-select-bar">
       <span class="mobile-select-count">
         <i class="pi pi-check-square" />
-        {{ mobileSelectedPhotos.length > 0 ? `${mobileSelectedPhotos.length} ausgewählt` : 'Fotos antippen zum Auswählen' }}
+        {{ selectModePhotos.length > 0 ? `${selectModePhotos.length} ausgewählt` : 'Fotos antippen zum Auswählen' }}
       </span>
       <div class="mobile-select-actions">
         <Button
-          v-if="mobileSelectedPhotos.length > 0"
+          v-if="selectModePhotos.length > 0"
           label="Details / Album"
           icon="pi pi-book"
           size="small"
@@ -1205,6 +1240,36 @@ onUnmounted(() => {
 
 .error-flyout-list li:last-child { border-bottom: none; }
 
+/* ── Desktop Select Bar ──────────────────────────────────────────────────── */
+.desktop-select-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 1rem;
+  background: var(--p-primary-50, #eff6ff);
+  border-bottom: 1px solid var(--p-primary-200, #bfdbfe);
+  gap: 0.75rem;
+}
+
+.desktop-select-count {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--p-primary-700, #1d4ed8);
+}
+
+.desktop-select-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* ── Desktop Select Toggle (hidden on mobile – FAB is used instead) ──────── */
+.desktop-select-toggle {
+  display: inline-flex;
+}
+
 /* ── Mobile Backdrop ─────────────────────────────────────────────────────── */
 .mobile-backdrop {
   display: none;
@@ -1382,6 +1447,10 @@ onUnmounted(() => {
   .sidebar-sheet-close:hover {
     background: var(--p-content-hover-background);
   }
+
+  /* Desktop-Auswahl auf Mobile ausblenden (FABs + Mobile-Bar übernehmen) */
+  .desktop-select-toggle { display: none; }
+  .desktop-select-bar { display: none; }
 
   /* Subheader kompakter */
   .subheader {
