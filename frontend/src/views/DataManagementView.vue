@@ -507,7 +507,7 @@ onUnmounted(() => stopPolling())
 .data-management-group {
   display: flex;
   flex-direction: column;
-  align-items: stretch;
+  align-items: flex-start;
   gap: 0.5em;
 }
 
@@ -528,7 +528,7 @@ onUnmounted(() => stopPolling())
   display: flex;
   flex-direction: column;
   margin-block: 0.25em;
-  width: 100%;
+  align-self: stretch;
 }
 
 .status-progress .text-secondary {
@@ -555,28 +555,22 @@ onUnmounted(() => stopPolling())
     flex-direction: column;
     align-self: stretch;
   }
-  .button-row .p-button {
+}
+
+@media (max-width: 600px) {
+  .button-row + .button-row,
+  .data-management-group :deep(.p-button:only-child) {
     width: 100%;
   }
 }
 
-.data-management-group > .p-button {
-  align-self: flex-start;
-}
-
-@media (max-width: 600px) {
-  .data-management-group > .p-button {
-    align-self: stretch;
-  }
-}
-
 /* Desktop: show table, hide cards */
-.queue-table-wrapper { display: block; width: 100%; }
+.queue-table-wrapper { display: block; align-self: stretch; }
 .queue-cards { display: none; }
 
 @media (max-width: 600px) {
   .queue-table-wrapper { display: none; }
-  .queue-cards { display: flex; flex-direction: column; gap: 0.5rem; width: 100%; }
+  .queue-cards { display: flex; flex-direction: column; gap: 0.5rem; align-self: stretch; }
 }
 
 .queue-table {
