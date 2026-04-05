@@ -343,7 +343,7 @@ onUnmounted(() => stopPolling())
         <Button
           icon="pi pi-search-plus"
           label="Fehlende Scans starten"
-          severity="secondary"
+          outlined
           :loading="rescanLoading"
           :disabled="rescanLoading || retryLoading"
           @click="handleRescan(false)"
@@ -351,7 +351,7 @@ onUnmounted(() => stopPolling())
         <Button
           icon="pi pi-refresh"
           label="Alles neu scannen"
-          severity="secondary"
+          outlined
           :loading="rescanLoading"
           :disabled="rescanLoading || retryLoading"
           @click="handleRescan(true)"
@@ -489,6 +489,7 @@ onUnmounted(() => stopPolling())
   gap: 1rem;
   display: flex;
   flex-direction: column;
+  padding-inline: 0.25em;
 }
 
 @media (min-width: 800px) {
@@ -506,7 +507,7 @@ onUnmounted(() => stopPolling())
 .data-management-group {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 0.5em;
 }
 
@@ -527,6 +528,7 @@ onUnmounted(() => stopPolling())
   display: flex;
   flex-direction: column;
   margin-block: 0.25em;
+  width: 100%;
 }
 
 .status-progress .text-secondary {
@@ -545,14 +547,26 @@ onUnmounted(() => stopPolling())
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
+  align-self: flex-start;
 }
 
 @media (max-width: 600px) {
   .button-row {
     flex-direction: column;
+    align-self: stretch;
   }
   .button-row .p-button {
     width: 100%;
+  }
+}
+
+.data-management-group > .p-button {
+  align-self: flex-start;
+}
+
+@media (max-width: 600px) {
+  .data-management-group > .p-button {
+    align-self: stretch;
   }
 }
 
