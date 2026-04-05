@@ -191,9 +191,12 @@ const isEditingDate = ref(false)
 const editDate = ref<Date | null>(null)
 const updatingDate = ref(false)
 
+const LAST_PHOTO_KEY = 'photos_last_selected_id'
+
 watch(selectedPhoto, (photo) => {
   isEditingDate.value = false
   if (photo) {
+    localStorage.setItem(LAST_PHOTO_KEY, String(photo.id))
     loadDetectedFaces(photo.id)
     loadLandmarks(photo.id)
     loadPersons()
@@ -236,12 +239,12 @@ const activeSection = ref('')
 const photoGridRef = ref<InstanceType<typeof PhotoGrid> | null>(null)
 const timelineNavRef = ref<InstanceType<typeof TimelineNav> | null>(null)
 
-function scrollToSelectedPhoto() {
+function scrollToSelectedPhoto(behavior: ScrollBehavior = 'smooth') {
   if (selectedIndex.value < 0) return
   const photo = photos.value[selectedIndex.value]
   if (!photo) return
   const el = photoGridRef.value?.scrollRef?.querySelector(`[data-photo-id="${photo.id}"]`)
-  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  if (el) el.scrollIntoView({ behavior, block: 'nearest' })
 }
 
 // ── Keyboard navigation (via composable) ─────────────────────────────────────
@@ -300,29 +303,38 @@ async function loadPhotos() {
     loading.value = false
     await nextTick()
 
-    // Navigate to specific photo if query param is present
-    const targetPhotoId = Number(route.query.photoId)
-    if (targetPhotoId) {
-      const idx = photos.value.findIndex(p => p.id === targetPhotoId)
-      if (idx >= 0) {
-        selectedIndex.value = idx
-        // Clear query param so reload doesn't jump again
-        router.replace({ query: { ...route.query, photoId: undefined } })
-      } else {
-        selectedIndex.value = photos.value.length > 0 ? photos.value.length - 1 : -1
-      }
-    } else if (window.innerWidth <= 768) {
-      // Auf Mobile keine initiale Auswahl – Nutzer soll explizit tippen
-      selectedIndex.value = -1
-    } else {
-      // Neuestes Foto (letztes in der Liste) initial fokussieren
-      const lastVisible = [...photos.value].reverse().findIndex(p => !hiddenByStack.value.has(p.id))
-      selectedIndex.value = lastVisible >= 0 ? photos.value.length - 1 - lastVisible : (photos.value.length > 0 ? photos.value.length - 1 : -1)
+    // Determine which photo to focus: query param > localStorage > newest
+    let targetIdx = -1
+    let scrollBehavior: ScrollBehavior = 'instant'
+
+    const queryPhotoId = Number(route.query.photoId)
+    const storedPhotoId = Number(localStorage.getItem(LAST_PHOTO_KEY))
+
+    if (queryPhotoId) {
+      targetIdx = photos.value.findIndex(p => p.id === queryPhotoId)
+      scrollBehavior = 'smooth'
+      router.replace({ query: { ...route.query, photoId: undefined } })
     }
 
-    // Scroll to selected photo after DOM has fully rendered
+    if (targetIdx < 0 && storedPhotoId) {
+      targetIdx = photos.value.findIndex(p => p.id === storedPhotoId)
+    }
+
+    if (targetIdx < 0 && photos.value.length > 0) {
+      // Fallback: neuestes sichtbares Foto
+      const lastVisible = [...photos.value].reverse().findIndex(p => !hiddenByStack.value.has(p.id))
+      targetIdx = lastVisible >= 0 ? photos.value.length - 1 - lastVisible : photos.value.length - 1
+    }
+
+    if (window.innerWidth <= 768 && !queryPhotoId) {
+      selectedIndex.value = -1
+    } else {
+      selectedIndex.value = targetIdx
+    }
+
+    // Scroll after DOM has fully rendered
     await nextTick()
-    scrollToSelectedPhoto()
+    scrollToSelectedPhoto(scrollBehavior)
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Fotos'
     loading.value = false
