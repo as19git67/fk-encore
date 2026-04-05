@@ -27,6 +27,8 @@ const props = defineProps<{
   coverPhotoId?: number | null
   /** When false the "Neu erkennen" button is disabled (insightface not reachable). */
   faceServiceAvailable?: boolean
+  /** Show a "Go to photo" navigation button (e.g. from PersonsView). */
+  showNavigateToPhoto?: boolean
 }>()
 
 const editDate = defineModel<Date | null>('editDate', { default: null })
@@ -190,6 +192,7 @@ const emit = defineEmits<{
   'toggle-favorite': [id: number, status: CurationStatus]
   hide: [id: number]
   restore: [id: number]
+  'navigate-to-photo': [id: number]
 }>()
 
 function formatPhotoDate(photo: Photo) {
@@ -289,6 +292,7 @@ const namedFaces = computed(() =>
 
       <div class="quick-actions">
         <Button icon="pi pi-expand" v-tooltip.bottom="'Vollbild'" @click="emit('fullscreen')" severity="secondary" text rounded />
+        <Button v-if="showNavigateToPhoto" icon="pi pi-images" v-tooltip.bottom="'In Fotos anzeigen'" @click="emit('navigate-to-photo', photo.id)" severity="secondary" text rounded />
         <Button v-if="canDelete && photo.curation_status === 'hidden'" icon="pi pi-eye" v-tooltip.bottom="'Wiederherstellen'" @click="emit('restore', photo.id)" severity="info" text rounded />
         <template v-if="canDelete && photo.curation_status !== 'hidden'">
           <Button :icon="photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'" v-tooltip.bottom="photo.curation_status === 'favorite' ? 'Kein Favorit' : 'Favorit'" @click="emit('toggle-favorite', photo.id, photo.curation_status)" :severity="photo.curation_status === 'favorite' ? 'warn' : 'secondary'" text rounded />

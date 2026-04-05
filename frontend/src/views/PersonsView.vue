@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, type ComponentPublicInstance } from 'vue'
+import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import Dialog from 'primevue/dialog'
@@ -24,6 +25,7 @@ import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 
 const auth = useAuthStore()
 const serviceHealth = useServiceHealthStore()
+const router = useRouter()
 const canDelete = computed(() => auth.hasPermission('photos.delete'))
 const confirm = useConfirm()
 
@@ -205,6 +207,10 @@ async function handleReindexPhoto() {
   try { await reindexPhoto(selectedPhoto.value.id); await loadSidebarData(selectedPhoto.value.id) }
   catch (err: any) { error.value = err.message || 'Fehler beim Neu-Erkennen' }
   finally { reindexingPhoto.value = false }
+}
+
+function navigateToPhoto(photoId: number) {
+  router.push({ name: 'photos', query: { photoId: String(photoId) } })
 }
 
 // ── Data loading ──────────────────────────────────────────────────────────────
@@ -423,12 +429,14 @@ onUnmounted(() => serviceHealth.stopPolling())
           :show-persons="auth.hasPermission('people.view')"
           :limit-albums-shown="true"
           :face-service-available="serviceHealth.faceServiceAvailable"
+          :show-navigate-to-photo="true"
           @fullscreen="isFullscreen = true"
           @toggle-favorite="handleToggleFavorite"
           @hide="handleHidePhoto"
           @restore="handleRestorePhoto"
           @ignore-face="handleIgnoreFaceInSidebar"
           @reindex="handleReindexPhoto"
+          @navigate-to-photo="navigateToPhoto"
         />
       </div>
     </div>
@@ -474,6 +482,7 @@ onUnmounted(() => serviceHealth.stopPolling())
         <Button v-if="selectedPerson" icon="pi pi-pencil" rounded text size="small" @click.stop="openRename(selectedPerson)" />
       </template>
       <template #topbar-actions>
+        <Button icon="pi pi-images" rounded text severity="secondary" v-tooltip.bottom="'In Fotos anzeigen'" @click.stop="navigateToPhoto(selectedPhoto.id)" />
         <Button icon="pi pi-info-circle" rounded text severity="secondary" v-tooltip.bottom="'Details'" @click.stop="isFullscreen = false; mobileSidebarOpen = true; mobilePersonNavOpen = false" />
         <Button v-if="canDelete && selectedPhoto.curation_status === 'hidden'" icon="pi pi-eye" rounded text severity="info" @click.stop="handleRestorePhoto(selectedPhoto.id)" />
         <Button v-else-if="canDelete" icon="pi pi-eye-slash" rounded text severity="warn" @click.stop="handleHidePhoto(selectedPhoto.id)" />

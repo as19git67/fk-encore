@@ -242,7 +242,7 @@ onMounted(loadData)
   display: flex;
   flex-direction: column;
   height: calc(100vh - var(--menubar-height, 3.5rem));
-  overflow: hidden;
+  overflow-y: auto;
   margin-inline: -0.25em;
   padding-inline: 0.5em;
   width: 100%;

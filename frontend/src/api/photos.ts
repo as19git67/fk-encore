@@ -49,6 +49,53 @@ export async function uploadPhoto(file: File, signal?: AbortSignal) {
   })
 }
 
+export function uploadPhotoWithProgress(
+  file: File,
+  signal?: AbortSignal,
+  onProgress?: (loaded: number, total: number) => void
+): Promise<Photo> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    const token = localStorage.getItem('auth_token')
+
+    xhr.open('POST', `${API_BASE_URL}/photos`)
+    xhr.setRequestHeader('Content-Type', file.type)
+    xhr.setRequestHeader('X-File-Name', file.name)
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+
+    if (signal) {
+      signal.addEventListener('abort', () => xhr.abort())
+    }
+
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable && onProgress) {
+        onProgress(e.loaded, e.total)
+      }
+    })
+
+    xhr.addEventListener('load', () => {
+      if (xhr.status === 401) {
+        localStorage.removeItem('auth_token')
+        localStorage.removeItem('auth_user')
+        window.location.href = `${import.meta.env.BASE_URL}login`
+        reject(new Error('Unauthorized'))
+        return
+      }
+      const body = JSON.parse(xhr.responseText || '{}')
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(body as Photo)
+      } else {
+        reject(new Error(body.message || body.code || `Request failed: ${xhr.status}`))
+      }
+    })
+
+    xhr.addEventListener('error', () => reject(new Error('Netzwerkfehler beim Hochladen')))
+    xhr.addEventListener('abort', () => reject(new Error('Upload abgebrochen')))
+
+    xhr.send(file)
+  })
+}
+
 export function deletePhoto(id: number) {
   return apiFetch<DeleteResponse>(`/photos/${id}`, {
     method: 'DELETE'
