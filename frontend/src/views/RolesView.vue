@@ -296,7 +296,7 @@ onMounted(loadData)
   text-transform: uppercase;
   color: var(--p-text-muted-color);
   letter-spacing: 0.05em;
-  border-bottom: 1px solid var(--p-surface-200);
+  border-bottom: 1px solid var(--p-content-border-color);
   padding-bottom: 0.25rem;
 }
 

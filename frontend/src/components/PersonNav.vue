@@ -188,8 +188,8 @@ defineExpose({ navigateUp, navigateDown })
   width: 200px;
   flex-shrink: 0;
   overflow-y: auto;
-  background: var(--p-surface-0);
-  border-right: 1px solid var(--p-surface-200);
+  background: var(--p-content-background);
+  border-right: 1px solid var(--p-content-border-color);
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -207,7 +207,7 @@ defineExpose({ navigateUp, navigateDown })
   position: relative;
 }
 
-.person-entry:hover { background: var(--p-surface-100); }
+.person-entry:hover { background: var(--p-content-hover-background); }
 .person-entry:hover .pencil-btn { opacity: 1; }
 .person-entry.active {
   background: var(--p-primary-50);
@@ -261,9 +261,9 @@ defineExpose({ navigateUp, navigateDown })
   min-width: 0;
   font-size: 0.8rem;
   padding: 0.2rem 0.4rem;
-  border: 1px solid var(--p-surface-200);
+  border: 1px solid var(--p-content-border-color);
   border-radius: 4px;
-  background: var(--p-surface-0);
+  background: var(--p-content-background);
   color: var(--p-text-color);
 }
 </style>
