@@ -325,7 +325,7 @@ onMounted(loadData)
 .album-cover {
   width: 100%;
   height: 200px;
-  background: var(--p-surface-100);
+  background: var(--p-content-hover-background);
   overflow: hidden;
 }
 .album-cover :deep(.heic-image-container) {

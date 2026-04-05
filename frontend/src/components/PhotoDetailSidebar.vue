@@ -463,8 +463,8 @@ const namedFaces = computed(() =>
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background: var(--p-surface-0);
-  border-left: 1px solid var(--p-surface-200);
+  background: var(--p-content-background);
+  border-left: 1px solid var(--p-content-border-color);
   overflow: hidden;
 }
 
@@ -472,7 +472,7 @@ const namedFaces = computed(() =>
   /* Als Bottom-Sheet: volle Breite und undurchsichtiger Hintergrund */
   .details-sidebar {
     width: 100%;
-    background: var(--p-surface-0);
+    background: var(--p-content-background);
     overflow-y: auto;
     border-left: none;
   }
@@ -487,7 +487,7 @@ const namedFaces = computed(() =>
   justify-content: space-between;
   align-items: center;
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--p-surface-200);
+  border-bottom: 1px solid var(--p-content-border-color);
   flex-shrink: 0;
 }
 
@@ -507,7 +507,7 @@ const namedFaces = computed(() =>
 .preview-container {
   position: relative;
   cursor: pointer;
-  background: var(--p-surface-50);
+  background: var(--p-content-hover-background);
   width: 100%;
 }
 
@@ -555,7 +555,7 @@ const namedFaces = computed(() =>
   padding: 0.5rem 1rem;
 }
 
-.sidebar-divider { height: 1px; background: var(--p-surface-200); }
+.sidebar-divider { height: 1px; background: var(--p-content-border-color); }
 
 .sidebar-section { padding: 0.75rem 1rem; }
 
@@ -621,7 +621,7 @@ const namedFaces = computed(() =>
   gap: 0.75rem;
   margin: 0.5rem 0;
   padding: 0.75rem;
-  background: var(--p-surface-50);
+  background: var(--p-content-hover-background);
   border-radius: 6px;
 }
 
@@ -631,8 +631,8 @@ const namedFaces = computed(() =>
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  background: var(--p-surface-100);
-  border: 1px solid var(--p-surface-300);
+  background: var(--p-content-hover-background);
+  border: 1px solid var(--p-content-border-color);
   border-radius: 1rem;
   padding: 0.25rem 0.75rem;
   font-size: 0.82rem;
@@ -645,8 +645,8 @@ const namedFaces = computed(() =>
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  background: var(--p-surface-100);
-  border: 1px solid var(--p-surface-300);
+  background: var(--p-content-hover-background);
+  border: 1px solid var(--p-content-border-color);
   border-radius: 1rem;
   padding: 0.2rem 0.6rem;
   font-size: 0.8rem;
@@ -675,9 +675,9 @@ const namedFaces = computed(() =>
   align-items: center;
   gap: 0.6rem;
   padding-inline: 0.4rem;
-  background: var(--p-surface-50);
+  background: var(--p-content-hover-background);
   border-radius: 6px;
-  border: 1px solid var(--p-surface-200);
+  border: 1px solid var(--p-content-border-color);
 }
 .person-icon { font-size: 0.8rem; color: var(--p-text-muted-color); }
 .person-name { flex: 1; font-size: 0.875rem; }
@@ -692,9 +692,9 @@ const namedFaces = computed(() =>
 
 .album-checkbox-list {
   padding: 0.25rem;
-  border: 1px solid var(--p-surface-200);
+  border: 1px solid var(--p-content-border-color);
   border-radius: 6px;
-  background: var(--p-surface-50);
+  background: var(--p-content-hover-background);
 }
 
 .album-checkbox-item {
@@ -707,7 +707,7 @@ const namedFaces = computed(() =>
 }
 
 .album-checkbox-item:hover {
-  background: var(--p-surface-100);
+  background: var(--p-content-hover-background);
 }
 
 .expand-toggle {
@@ -772,7 +772,7 @@ const namedFaces = computed(() =>
 .opinion-bar-track {
   flex: 1;
   height: 6px;
-  background: var(--p-surface-200);
+  background: var(--p-content-border-color);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -794,4 +794,5 @@ const namedFaces = computed(() =>
   text-align: right;
   white-space: nowrap;
 }
+
 </style>

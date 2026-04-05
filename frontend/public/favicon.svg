@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#818cf8"/>
+      <stop offset="100%" stop-color="#4338ca"/>
+    </linearGradient>
+    <clipPath id="frame">
+      <rect x="5" y="7" width="22" height="18" rx="2.5"/>
+    </clipPath>
+  </defs>
+
+  <!-- App icon background -->
+  <rect width="32" height="32" rx="7" fill="url(#bg)"/>
+
+  <!-- Photo frame fill (sky) -->
+  <rect x="5" y="7" width="22" height="18" rx="2.5" fill="white" opacity="0.12"/>
+
+  <!-- Sun -->
+  <circle cx="22" cy="12.5" r="3" fill="#fde68a" clip-path="url(#frame)"/>
+
+  <!-- Mountain silhouette -->
+  <path d="M5 25 L11.5 15 L17 20.5 L21.5 13.5 L27 25 Z"
+        fill="white" opacity="0.92" clip-path="url(#frame)"/>
+
+  <!-- Photo frame border -->
+  <rect x="5" y="7" width="22" height="18" rx="2.5"
+        fill="none" stroke="white" stroke-width="1.2" opacity="0.35"/>
+</svg>

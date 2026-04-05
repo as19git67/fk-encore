@@ -186,7 +186,7 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
   position: relative;
   border-radius: 8px;
   overflow: hidden;
-  background: var(--p-surface-0);
+  background: var(--p-content-background);
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
   cursor: pointer;
   transition: transform 0.2s;
@@ -211,7 +211,7 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
 .photo-thumb {
   width: 100%;
   height: 200px;
-  background: var(--p-surface-50);
+  background: var(--p-content-hover-background);
   overflow: hidden;
 }
 
