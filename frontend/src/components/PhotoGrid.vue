@@ -133,35 +133,47 @@ watch(scrollRef, async (el) => {
 })
 
 // ── Scroll selected photo into view ─────────────────────────────────────────
+let initialScrollDone = false
+
 function scrollToPhoto(idx: number, behavior: ScrollBehavior = 'smooth') {
   if (idx < 0) return
   const photo = props.photos[idx]
   if (!photo) return
-  const el = scrollRef.value?.querySelector(`[data-photo-id="${photo.id}"]`)
-  if (el) el.scrollIntoView({ behavior, block: 'nearest' })
+
+  let attempts = 0
+  const tryScroll = () => {
+    const el = scrollRef.value?.querySelector(`[data-photo-id="${photo.id}"]`)
+    if (el) {
+      el.scrollIntoView({ behavior, block: 'nearest' })
+    } else if (attempts++ < 10) {
+      requestAnimationFrame(tryScroll)
+    }
+  }
+  tryScroll()
 }
 
+// User-driven selection changes → smooth scroll
 watch(() => props.selectedIndex, (idx) => {
+  // Skip if this is the initial render (handled separately below)
+  if (!initialScrollDone) return
   scrollToPhoto(idx)
 })
 
-// Scroll to initially selected photo once DOM is ready
-onMounted(async () => {
+// Initial scroll: wait for groupedPhotos to render, then jump instantly
+watch(() => props.groupedPhotos, () => {
+  if (initialScrollDone) return
   if (props.selectedIndex >= 0) {
-    await nextTick()
-    // DOM elements may not be ready on first tick, retry briefly
-    let attempts = 0
-    const tryScroll = () => {
-      const photo = props.photos[props.selectedIndex]
-      if (!photo) return
-      const el = scrollRef.value?.querySelector(`[data-photo-id="${photo.id}"]`)
-      if (el) {
-        el.scrollIntoView({ behavior: 'instant', block: 'nearest' })
-      } else if (attempts++ < 5) {
-        requestAnimationFrame(tryScroll)
-      }
-    }
-    tryScroll()
+    initialScrollDone = true
+    nextTick(() => scrollToPhoto(props.selectedIndex, 'instant'))
+  }
+}, { immediate: true })
+
+// Fallback: if selectedIndex is set after groupedPhotos already rendered
+watch(() => props.selectedIndex, (idx) => {
+  if (initialScrollDone) return
+  if (idx >= 0 && props.groupedPhotos.length > 0) {
+    initialScrollDone = true
+    nextTick(() => scrollToPhoto(idx, 'instant'))
   }
 })
 

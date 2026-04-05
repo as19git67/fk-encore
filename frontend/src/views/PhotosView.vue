@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, shallowRef, computed, watch, nextTick } from 'vue'
+import { ref, shallowRef, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
@@ -239,10 +239,6 @@ const activeSection = ref('')
 const photoGridRef = ref<InstanceType<typeof PhotoGrid> | null>(null)
 const timelineNavRef = ref<InstanceType<typeof TimelineNav> | null>(null)
 
-function scrollToSelectedPhoto(behavior: ScrollBehavior = 'smooth') {
-  photoGridRef.value?.scrollToPhoto(selectedIndex.value, behavior)
-}
-
 // ── Keyboard navigation (via composable) ─────────────────────────────────────
 useGalleryKeyboard({
   isBlocked: () => !!activeGroup.value || isEditingDate.value,
@@ -296,19 +292,15 @@ async function loadPhotos() {
       new Date(b.taken_at || b.created_at).getTime()
     )
     photoGroupsList.value = groupsRes.groups
-    loading.value = false
-    await nextTick()
 
     // Determine which photo to focus: query param > localStorage > newest
     let targetIdx = -1
-    let scrollBehavior: ScrollBehavior = 'instant'
 
     const queryPhotoId = Number(route.query.photoId)
     const storedPhotoId = Number(localStorage.getItem(LAST_PHOTO_KEY))
 
     if (queryPhotoId) {
       targetIdx = photos.value.findIndex(p => p.id === queryPhotoId)
-      scrollBehavior = 'smooth'
       router.replace({ query: { ...route.query, photoId: undefined } })
     }
 
@@ -328,9 +320,8 @@ async function loadPhotos() {
       selectedIndex.value = targetIdx
     }
 
-    // Scroll after DOM has fully rendered
-    await nextTick()
-    scrollToSelectedPhoto(scrollBehavior)
+    // Now reveal the grid (PhotoGrid will mount with correct selectedIndex)
+    loading.value = false
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Fotos'
     loading.value = false
