@@ -503,7 +503,7 @@ const dragCounter = ref(0)
 // Upload progress tracking
 const uploadCurrent = ref(0)
 const uploadTotal = ref(0)
-const uploadFileProgress = ref(0) // 0-100 per file
+const uploadProgress = ref(0) // 0-100 overall progress
 const uploadSuccessCount = ref(0)
 const uploadResultMessage = ref('')
 let uploadResultTimeout: ReturnType<typeof setTimeout> | undefined
@@ -521,7 +521,7 @@ async function handleUpload(event: any) {
   error.value = ''
   uploadCurrent.value = 0
   uploadTotal.value = files.length
-  uploadFileProgress.value = 0
+  uploadProgress.value = 0
   uploadSuccessCount.value = 0
   uploadResultMessage.value = ''
   if (uploadResultTimeout) { clearTimeout(uploadResultTimeout); uploadResultTimeout = undefined }
@@ -534,12 +534,14 @@ async function handleUpload(event: any) {
       if (abortController.signal.aborted) break
       const file = files[i]!
       uploadCurrent.value = i + 1
-      uploadFileProgress.value = 0
       try {
         await uploadPhotoWithProgress(
           file,
           abortController.signal,
-          (loaded, total) => { uploadFileProgress.value = Math.round((loaded / total) * 100) }
+          (loaded, total) => {
+            const filePct = loaded / total
+            uploadProgress.value = Math.round(((i + filePct) / files.length) * 100)
+          }
         )
         uploadSuccessCount.value++
       }
@@ -710,10 +712,10 @@ onUnmounted(() => {
       <div class="upload-progress-bar__info">
         <i class="pi pi-upload" />
         <span>Foto {{ uploadCurrent }} von {{ uploadTotal }} wird hochgeladen…</span>
-        <span class="upload-progress-bar__pct">{{ uploadFileProgress }}%</span>
+        <span class="upload-progress-bar__pct">{{ uploadProgress }}%</span>
       </div>
       <div class="upload-progress-bar__track">
-        <div class="upload-progress-bar__fill" :style="{ width: uploadFileProgress + '%' }" />
+        <div class="upload-progress-bar__fill" :style="{ width: uploadProgress + '%' }" />
       </div>
     </div>
 
