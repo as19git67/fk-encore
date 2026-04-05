@@ -236,6 +236,14 @@ const activeSection = ref('')
 const photoGridRef = ref<InstanceType<typeof PhotoGrid> | null>(null)
 const timelineNavRef = ref<InstanceType<typeof TimelineNav> | null>(null)
 
+function scrollToSelectedPhoto() {
+  if (selectedIndex.value < 0) return
+  const photo = photos.value[selectedIndex.value]
+  if (!photo) return
+  const el = photoGridRef.value?.scrollRef?.querySelector(`[data-photo-id="${photo.id}"]`)
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+}
+
 // ── Keyboard navigation (via composable) ─────────────────────────────────────
 useGalleryKeyboard({
   isBlocked: () => !!activeGroup.value || isEditingDate.value,
@@ -311,6 +319,10 @@ async function loadPhotos() {
       const lastVisible = [...photos.value].reverse().findIndex(p => !hiddenByStack.value.has(p.id))
       selectedIndex.value = lastVisible >= 0 ? photos.value.length - 1 - lastVisible : (photos.value.length > 0 ? photos.value.length - 1 : -1)
     }
+
+    // Scroll to selected photo after DOM has fully rendered
+    await nextTick()
+    scrollToSelectedPhoto()
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Fotos'
     loading.value = false
