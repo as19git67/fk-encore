@@ -323,7 +323,8 @@ async function loadPhotos() {
     const isMobile = window.innerWidth <= 768
     console.log('[PhotosView] isMobile=', isMobile, 'final targetIdx=', targetIdx)
 
-    if (isMobile && !queryPhotoId) {
+    // On mobile: only skip pre-selection if there's no explicit target (query param or stored)
+    if (isMobile && !queryPhotoId && !storedPhotoId) {
       selectedIndex.value = -1
     } else {
       selectedIndex.value = targetIdx
