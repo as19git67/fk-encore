@@ -270,6 +270,7 @@ export interface Album {
   description?: string;
   cover_photo_id?: number;
   cover_filename?: string;
+  display_mode: "grid" | "map";
   newest_photo_at?: string;
   oldest_photo_at?: string;
   photo_count: number;
@@ -341,6 +342,7 @@ export interface UpdateAlbumUserSettingsRequest {
 export interface CreateAlbumRequest {
   name: string;
   description?: string;
+  displayMode?: "grid" | "map";
 }
 
 export interface UpdateAlbumRequest {
@@ -348,6 +350,7 @@ export interface UpdateAlbumRequest {
   name?: string;
   description?: string;
   coverPhotoId?: number | null;
+  displayMode?: "grid" | "map";
 }
 
 export interface AddPhotoToAlbumRequest {
@@ -383,6 +386,50 @@ export interface AlbumShareWithUser extends AlbumShare {
 
 export interface GetAlbumSharesResponse {
   shares: AlbumShareWithUser[];
+  publicLink?: AlbumPublicLink;
+}
+
+export interface AlbumPublicLink {
+  id: number;
+  album_id: number;
+  token: string;
+  created_by_user_id: number;
+  created_at: string;
+  expires_at?: string;
+}
+
+export interface CreateAlbumPublicLinkRequest {
+  albumId: number;
+  expiresIn?: "7d" | "30d" | "90d";
+}
+
+export interface PublicAlbumResponse {
+  id: number;
+  name: string;
+  description?: string;
+  display_mode: "grid" | "map";
+  cover_filename?: string;
+  newest_photo_at?: string;
+  oldest_photo_at?: string;
+  photo_count: number;
+  photos: PublicAlbumPhoto[];
+}
+
+export interface PublicAlbumPhoto {
+  id: number;
+  filename: string;
+  original_name: string;
+  mime_type: string;
+  size: number;
+  taken_at?: string;
+  created_at: string;
+  latitude?: number;
+  longitude?: number;
+  location_name?: string;
+  location_city?: string;
+  location_country?: string;
+  ai_quality_score?: number;
+  auto_crop?: { x: number; y: number };
 }
 
 export interface RemoveAlbumShareRequest {

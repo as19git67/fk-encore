@@ -287,6 +287,7 @@ export interface Album {
   description?: string
   cover_photo_id?: number
   cover_filename?: string
+  display_mode: 'grid' | 'map'
   newest_photo_at?: string
   oldest_photo_at?: string
   photo_count: number
@@ -338,14 +339,14 @@ export function getAlbum(id: number) {
   return apiFetch<AlbumWithPhotos>(`/albums/${id}`)
 }
 
-export function createAlbum(name: string, description?: string) {
+export function createAlbum(name: string, description?: string, displayMode?: 'grid' | 'map') {
   return apiFetch<Album>('/albums', {
     method: 'POST',
-    body: JSON.stringify({ name, description })
+    body: JSON.stringify({ name, description, displayMode })
   })
 }
 
-export function updateAlbum(id: number, patch: { name?: string; description?: string; coverPhotoId?: number | null }) {
+export function updateAlbum(id: number, patch: { name?: string; description?: string; coverPhotoId?: number | null; displayMode?: 'grid' | 'map' }) {
   return apiFetch<Album>('/albums', {
     method: 'PATCH',
     body: JSON.stringify({ id, ...patch })
@@ -391,14 +392,71 @@ export interface AlbumShareWithUser {
   user_email: string
 }
 
+export interface AlbumPublicLink {
+  id: number
+  album_id: number
+  token: string
+  created_by_user_id: number
+  created_at: string
+  expires_at?: string
+}
+
+export type PublicLinkExpiry = '7d' | '30d' | '90d' | undefined
+
 export function getAlbumShares(albumId: number) {
-  return apiFetch<{ shares: AlbumShareWithUser[] }>(`/albums/${albumId}/shares`)
+  return apiFetch<{ shares: AlbumShareWithUser[]; publicLink?: AlbumPublicLink }>(`/albums/${albumId}/shares`)
 }
 
 export function removeAlbumShare(albumId: number, userId: number) {
   return apiFetch<{ success: boolean }>(`/albums/${albumId}/shares/${userId}`, {
     method: 'DELETE'
   })
+}
+
+export function createAlbumPublicLink(albumId: number, expiresIn?: PublicLinkExpiry) {
+  return apiFetch<AlbumPublicLink>(`/albums/${albumId}/public-link`, {
+    method: 'POST',
+    body: JSON.stringify(expiresIn ? { expiresIn } : {})
+  })
+}
+
+export function deleteAlbumPublicLink(albumId: number) {
+  return apiFetch<{ success: boolean }>(`/albums/${albumId}/public-link`, {
+    method: 'DELETE'
+  })
+}
+
+export interface PublicAlbumPhoto {
+  id: number
+  filename: string
+  original_name: string
+  mime_type: string
+  size: number
+  taken_at?: string
+  created_at: string
+  latitude?: number
+  longitude?: number
+  location_name?: string
+  location_city?: string
+  location_country?: string
+  ai_quality_score?: number
+  auto_crop?: { x: number; y: number }
+}
+
+export interface PublicAlbumResponse {
+  id: number
+  name: string
+  description?: string
+  display_mode: 'grid' | 'map'
+  cover_filename?: string
+  newest_photo_at?: string
+  oldest_photo_at?: string
+  photo_count: number
+  photos: PublicAlbumPhoto[]
+}
+
+export function getPublicAlbum(token: string) {
+  return apiFetch<PublicAlbumResponse>(`/albums/public/${token}`)
 }
 
 export function updateAlbumUserSettings(albumId: number, settings: Partial<AlbumUserSettings>) {
