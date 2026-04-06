@@ -90,7 +90,7 @@ async function handleCreateAlbum() {
     newAlbumDesc.value = ''
     newAlbumDisplayMode.value = 'grid'
     await loadData()
-    router.push(`/albums/${album.id}`)
+    router.push(`/fotos/alben/${album.id}`)
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Erstellen des Albums'
   } finally {
@@ -283,9 +283,9 @@ onMounted(loadData)
           :ref="el => { if (index === 0) firstAlbumRef = (el as HTMLElement) }"
           class="album-card"
           tabindex="0"
-          @click="router.push(`/albums/${album.id}`)"
-          @keydown.enter="router.push(`/albums/${album.id}`)"
-          @keydown.space.prevent="router.push(`/albums/${album.id}`)"
+          @click="router.push(`/fotos/alben/${album.id}`)"
+          @keydown.enter="router.push(`/fotos/alben/${album.id}`)"
+          @keydown.space.prevent="router.push(`/fotos/alben/${album.id}`)"
       >
         <div v-if="canManageAlbum(album)" class="album-actions" @click.stop>
           <Button icon="pi pi-share-alt" text rounded size="small" v-tooltip="'Freigeben'" @click="openShareDialog(album)" />

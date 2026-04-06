@@ -81,7 +81,7 @@ async function handleRemoveRole() {
 async function handleDelete() {
   try {
     await deleteUser(userId)
-    router.push('/users')
+    router.push('/admin')
   } catch (err: any) {
     showDeleteConfirm.value = false
     error.value = err.message || 'Benutzer konnte nicht gelöscht werden'
