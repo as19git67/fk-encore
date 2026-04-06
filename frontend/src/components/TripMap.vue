@@ -283,6 +283,7 @@ function handleNoGpsPhotoClick(photo: Photo) {
 <style scoped>
 .trip-map-wrapper {
   position: relative;
+  z-index: 0; /* isolate Leaflet z-indexes so menubar (z-index: 1100) stays on top */
   width: 100%;
   flex: 1;
   min-height: 0;
