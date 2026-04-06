@@ -330,7 +330,7 @@ onUnmounted(() => serviceHealth.stopPolling())
   <div class="album-detail-view">
     <ServiceStatusBar />
 
-    <div v-if="album && displayMode !== 'map'" class="subheader">
+    <div v-if="album" class="subheader">
       <div class="header">
         <div class="header-left">
           <h1 class="title">{{ album.name }}</h1>
@@ -352,7 +352,7 @@ onUnmounted(() => serviceHealth.stopPolling())
       <i class="pi pi-spin pi-spinner" /> Album wird geladen…
     </div>
 
-    <div v-if="album && displayMode !== 'map'" class="album-info-block">
+    <div v-if="album" class="album-info-block">
       <div class="album-info-block__description">
         <div v-if="!editingDescription" class="album-info-block__description-content">
           <span :class="{ 'album-info-block__description-text--empty': !album.description }" class="album-info-block__description-text">
