@@ -92,6 +92,13 @@
       "when": 1775500000000,
       "tag": "0011_geocoding_scan_service",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1775600000000,
+      "tag": "0012_album_display_mode",
+      "breakpoints": true
     }
   ]
 }
