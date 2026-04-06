@@ -240,6 +240,17 @@ function handleCoverPhotoIdUpdate(id: number | null) {
   album.value.cover_photo_id = id ?? undefined
 }
 
+async function handleSetMapCover(photoId: number) {
+  if (!album.value) return
+  const newCoverId = album.value.cover_photo_id === photoId ? null : photoId
+  try {
+    await updateAlbum(albumId, { coverPhotoId: newCoverId })
+    album.value.cover_photo_id = newCoverId ?? undefined
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Setzen des Covers'
+  }
+}
+
 // ── Grid interaction ──────────────────────────────────────────────────────────
 function handlePhotoClick(item: PhotoItem) {
   // Album view: single click selects + opens fullscreen
@@ -337,7 +348,7 @@ onUnmounted(() => serviceHealth.stopPolling())
           <span :class="['role-badge', `role-badge--${album.role}`]">{{ album.role }}</span>
         </div>
         <div class="controls">
-          <Button v-if="album.cover_photo_id" icon="pi pi-image" label="Cover fokussieren" size="small" text @click="scrollToCover" />
+          <Button v-if="album.cover_photo_id && displayMode !== 'map'" icon="pi pi-image" label="Cover fokussieren" size="small" text @click="scrollToCover" />
           <div v-if="album.settings" class="control-group">
             <label>Ansicht:</label>
             <SelectButton v-model="album.settings.active_view" :options="availableViewOptions" optionLabel="label" optionValue="value" @change="handleSettingsChange" />
@@ -503,7 +514,30 @@ onUnmounted(() => serviceHealth.stopPolling())
       @hide="handleHidePhoto"
       @restore="handleRestorePhoto"
       @show-details="isMapFullscreen = false"
-    />
+    >
+      <template #topbar-actions>
+        <Button
+          v-if="canWrite"
+          :icon="album?.cover_photo_id === mapSelectedPhoto.id ? 'pi pi-image-check' : 'pi pi-image'"
+          rounded text
+          :severity="album?.cover_photo_id === mapSelectedPhoto.id ? 'warn' : 'secondary'"
+          v-tooltip.bottom="album?.cover_photo_id === mapSelectedPhoto.id ? 'Vom Cover entfernen' : 'Als Cover setzen'"
+          @click="handleSetMapCover(mapSelectedPhoto.id)"
+        />
+        <Button
+          icon="pi pi-info-circle" rounded text severity="secondary"
+          @click="isMapFullscreen = false"
+          v-tooltip.bottom="'Schließen'"
+        />
+        <Button
+          v-if="canDeletePhotos || canWrite"
+          :icon="mapSelectedPhoto.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
+          rounded text
+          :severity="mapSelectedPhoto.curation_status === 'favorite' ? 'warn' : 'secondary'"
+          @click="handleToggleFavorite(mapSelectedPhoto.id, mapSelectedPhoto.curation_status)"
+        />
+      </template>
+    </FullscreenOverlay>
 
   </div>
 </template>
