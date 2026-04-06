@@ -99,6 +99,13 @@
       "when": 1775600000000,
       "tag": "0012_album_display_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1775700000000,
+      "tag": "0013_album_public_links",
+      "breakpoints": true
     }
   ]
 }

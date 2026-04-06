@@ -26,6 +26,9 @@ import {
   reindexPhoto,
   removeAlbumShare,
   shareAlbum,
+  createAlbumPublicLink,
+  deleteAlbumPublicLink,
+  type AlbumPublicLink,
   type CurationStatus,
   type Face,
   type LandmarkItem,
@@ -318,6 +321,8 @@ const shareUserId = ref<number | null>(null)
 const shareAccessLevel = ref<'read' | 'write'>('read')
 const sharing = ref(false)
 const loadingShares = ref(false)
+const publicLink = ref<AlbumPublicLink | null>(null)
+const linkCopied = ref(false)
 
 const viewOptions = [
   { label: 'Alle Fotos', value: 'all' },
@@ -349,6 +354,7 @@ async function openShareDialog() {
       auth.hasPermission('users.list') ? listUsers() : Promise.resolve({ users: [] }),
     ])
     albumShares.value = sharesRes.shares
+    publicLink.value = sharesRes.publicLink ?? null
     allUsers.value = usersRes.users
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Freigaben'
@@ -374,6 +380,34 @@ async function handleRemoveShare(userId: number) {
     await removeAlbumShare(albumId, userId)
     albumShares.value = albumShares.value.filter(s => s.user_id !== userId)
   } catch (err: any) { error.value = err.message || 'Fehler' }
+}
+
+function getPublicLinkUrl() {
+  if (!publicLink.value) return ''
+  return `${window.location.origin}${import.meta.env.BASE_URL}albums/shared/${publicLink.value.token}`
+}
+
+async function handleCreatePublicLink() {
+  try {
+    publicLink.value = await createAlbumPublicLink(albumId)
+    await copyPublicLink()
+  } catch (err: any) { error.value = err.message || 'Fehler beim Erstellen des Links' }
+}
+
+async function handleDeletePublicLink() {
+  try {
+    await deleteAlbumPublicLink(albumId)
+    publicLink.value = null
+    linkCopied.value = false
+  } catch (err: any) { error.value = err.message || 'Fehler beim Löschen des Links' }
+}
+
+async function copyPublicLink() {
+  try {
+    await navigator.clipboard.writeText(getPublicLinkUrl())
+    linkCopied.value = true
+    setTimeout(() => { linkCopied.value = false }, 2000)
+  } catch { /* clipboard not available */ }
 }
 
 // ── Mobile drawer state ───────────────────────────────────────────────────────
@@ -569,6 +603,20 @@ onUnmounted(() => serviceHealth.stopPolling())
     <Dialog v-model:visible="showShareDialog" header="Album freigeben" modal style="width: 480px">
       <div v-if="loadingShares" class="share-loading"><i class="pi pi-spin pi-spinner" /> Lädt…</div>
       <template v-else>
+        <!-- Public Link Section -->
+        <div class="share-section">
+          <h4 class="share-section-title"><i class="pi pi-link" /> Öffentlicher Link</h4>
+          <div v-if="publicLink" class="public-link-row">
+            <input :value="getPublicLinkUrl()" readonly class="p-inputtext public-link-input" @focus="($event.target as HTMLInputElement).select()" />
+            <Button :icon="linkCopied ? 'pi pi-check' : 'pi pi-copy'" :severity="linkCopied ? 'success' : 'secondary'" size="small" v-tooltip="'Kopieren'" @click="copyPublicLink" />
+            <Button icon="pi pi-trash" size="small" text severity="danger" v-tooltip="'Link löschen'" @click="handleDeletePublicLink" />
+          </div>
+          <div v-else>
+            <Button label="Link erstellen" icon="pi pi-link" size="small" outlined @click="handleCreatePublicLink" />
+            <span class="share-hint">Jeder mit dem Link kann das Album ansehen.</span>
+          </div>
+        </div>
+
         <div class="share-section">
           <h4 class="share-section-title">Aktuelle Freigaben</h4>
           <div v-if="albumShares.length === 0" class="share-empty">Noch keine Freigaben.</div>
@@ -708,6 +756,9 @@ onUnmounted(() => serviceHealth.stopPolling())
 .share-add-form { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
 .share-user-select { flex: 1; min-width: 180px; }
 .share-userid-input { width: 120px; }
+.share-hint { font-size: 0.8rem; color: var(--p-text-muted-color); margin-left: 0.5rem; }
+.public-link-row { display: flex; gap: 0.5rem; align-items: center; }
+.public-link-input { flex: 1; font-size: 0.8rem; }
 
 /* ── Timeline Drawer Wrapper ─────────────────────────────────────────────── */
 .timeline-drawer { display: contents; }
