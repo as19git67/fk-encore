@@ -123,7 +123,7 @@ const expandedSelectedPhotos = computed<Photo[]>(() => {
   for (const photo of selectedPhotos.value) {
     expanded.add(photo.id)
     const group = photoToGroup.value.get(photo.id)
-    if (group) {
+    if (group && !group.reviewed_at) {
       for (const pid of group.photo_ids) expanded.add(pid)
     }
   }
