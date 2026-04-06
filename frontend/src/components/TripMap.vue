@@ -276,14 +276,16 @@ function handleNoGpsPhotoClick(photo: Photo) {
 .trip-map-wrapper {
   position: relative;
   width: 100%;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
 .trip-map-container {
   width: 100%;
-  height: calc(100vh - var(--menubar-height, 56px) - 200px);
-  min-height: 300px;
+  flex: 1;
+  min-height: 250px;
   border-radius: 8px 8px 0 0;
   overflow: hidden;
 }
@@ -448,7 +450,6 @@ function handleNoGpsPhotoClick(photo: Photo) {
 
 @media (max-width: 768px) {
   .trip-map-container {
-    height: calc(100vh - var(--menubar-height, 56px) - 180px);
     border-radius: 0;
   }
 

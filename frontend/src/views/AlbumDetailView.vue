@@ -445,7 +445,7 @@ onUnmounted(() => serviceHealth.stopPolling())
   <div class="album-detail-view">
     <ServiceStatusBar />
 
-    <div v-if="album" class="subheader">
+    <div v-if="album" :class="['subheader', { 'subheader--compact': displayMode === 'map' }]">
       <div class="header">
         <div class="header-left">
           <h1 class="title">{{ album.name }}</h1>
@@ -468,7 +468,7 @@ onUnmounted(() => serviceHealth.stopPolling())
       <i class="pi pi-spin pi-spinner" /> Album wird geladen…
     </div>
 
-    <div v-if="album" class="album-info-block">
+    <div v-if="album && displayMode !== 'map'" class="album-info-block">
       <div class="album-info-block__description">
         <div v-if="!editingDescription" class="album-info-block__description-content">
           <span :class="{ 'album-info-block__description-text--empty': !album.description }" class="album-info-block__description-text">
@@ -706,6 +706,15 @@ onUnmounted(() => serviceHealth.stopPolling())
   padding: 1rem;
   gap: 0.5em;
   border-bottom: 1px solid var(--p-content-border-color);
+}
+
+.subheader--compact .header {
+  padding: 0.4rem 1rem;
+}
+
+.subheader--compact .title {
+  font-size: 1.1em;
+  margin-block: 0;
 }
 
 .header-left { display: flex; align-items: center; gap: 1rem; }
