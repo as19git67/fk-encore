@@ -30,6 +30,8 @@ import type {
   CurationStatus,
   UpdateCurationRequest,
   PhotoWithCuration,
+  AlbumPublicLink,
+  PublicAlbumResponse,
 } from "../db/types";
 import { Query } from "encore.dev/api";
 
@@ -449,6 +451,40 @@ export const removeAlbumShare = api(
     checkModule();
     const userId = getUserId();
     return await service.removeAlbumShareLogic(userId, { albumId, userId: sharedUserId });
+  }
+);
+
+/**
+ * Create a public share link for an album (owner only).
+ */
+export const createAlbumPublicLink = api(
+  { expose: true, method: "POST", path: "/albums/:id/public-link", auth: true },
+  async ({ id, expiresIn }: { id: number; expiresIn?: string }): Promise<AlbumPublicLink> => {
+    checkModule();
+    const userId = getUserId();
+    return await service.createAlbumPublicLinkLogic(userId, id, expiresIn);
+  }
+);
+
+/**
+ * Delete the public share link for an album (owner only).
+ */
+export const deleteAlbumPublicLink = api(
+  { expose: true, method: "DELETE", path: "/albums/:id/public-link", auth: true },
+  async ({ id }: { id: number }): Promise<{ success: boolean }> => {
+    checkModule();
+    const userId = getUserId();
+    return await service.deleteAlbumPublicLinkLogic(userId, id);
+  }
+);
+
+/**
+ * Get an album by public share token (no authentication required).
+ */
+export const getPublicAlbum = api(
+  { expose: true, method: "GET", path: "/albums/public/:token", auth: false },
+  async ({ token }: { token: string }): Promise<PublicAlbumResponse> => {
+    return await service.getPublicAlbumLogic(token);
   }
 );
 

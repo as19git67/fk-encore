@@ -5,6 +5,7 @@ import { createRequire } from "module";
 import exifr from "exifr";
 import { exiftool } from "exiftool-vendored";
 import { eq, and, or, sql, inArray, ilike, isNull, isNotNull, desc } from "drizzle-orm";
+import { APIError } from "encore.dev/api";
 import { enqueuePhotoScan, DeferJobError } from "./scan-queue";
 import { triggerWorkers } from "./scan-worker";
 import db from "../db/database";
@@ -16,6 +17,7 @@ import {
   albums,
   albumPhotos,
   albumShares,
+  albumPublicLinks,
   persons,
   faces,
   photoCuration,
@@ -46,6 +48,8 @@ import type {
   ShareAlbumRequest,
   GetAlbumSharesResponse,
   RemoveAlbumShareRequest,
+  AlbumPublicLink,
+  PublicAlbumResponse,
   ListAlbumsResponse,
   ListPhotosResponse,
   DeleteResponse,
@@ -1059,7 +1063,7 @@ async function getAlbumStats(albumId: number): Promise<{ newest_photo_at?: strin
 
 export async function createAlbumLogic(userId: number, req: CreateAlbumRequest): Promise<Album> {
   const row = await dbInsertReturning<typeof albums.$inferSelect>(
-    db.insert(albums).values({ user_id: userId, name: req.name, description: req.description ?? null }).returning()
+    db.insert(albums).values({ user_id: userId, name: req.name, description: req.description ?? null, display_mode: req.displayMode ?? "grid" }).returning()
   );
 
   return {
@@ -1069,6 +1073,7 @@ export async function createAlbumLogic(userId: number, req: CreateAlbumRequest):
     description: row!.description ?? undefined,
     cover_photo_id: row!.cover_photo_id ?? undefined,
     cover_filename: undefined,
+    display_mode: (row!.display_mode as "grid" | "map") ?? "grid",
     photo_count: 0,
     created_at: row!.created_at ?? "",
     updated_at: row!.updated_at ?? "",
@@ -1090,6 +1095,7 @@ export async function listAlbumsLogic(userId: number): Promise<ListAlbumsRespons
         name: albums.name,
         description: albums.description,
         cover_photo_id: albums.cover_photo_id,
+        display_mode: albums.display_mode,
         created_at: albums.created_at,
         updated_at: albums.updated_at,
         is_shared: sql<boolean>`EXISTS (
@@ -1138,6 +1144,7 @@ export async function listAlbumsLogic(userId: number): Promise<ListAlbumsRespons
       description: r.description ?? undefined,
       cover_photo_id: r.cover_photo_id ?? undefined,
       cover_filename: r.cover_filename ?? undefined,
+      display_mode: (r.display_mode as "grid" | "map") ?? "grid",
       newest_photo_at: r.newest_photo_at ?? undefined,
       oldest_photo_at: r.oldest_photo_at ?? undefined,
       photo_count: Number(r.photo_count || 0),
@@ -1218,6 +1225,7 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     SELECT
       p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash,
       p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop,
+      p.latitude, p.longitude,
       p.location_name, p.location_city, p.location_country,
       ap.added_by_user_id, ap.added_at,
       my_pc.status AS curation_status,
@@ -1229,6 +1237,7 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     LEFT JOIN photo_curation all_pc ON all_pc.photo_id = p.id AND all_pc.user_id = ANY(ARRAY[${sql.join(participantIds.map(id => sql`${id}`), sql`, `)}]::int[])
     GROUP BY p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash,
              p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop,
+             p.latitude, p.longitude,
              p.location_name, p.location_city, p.location_country,
              ap.added_by_user_id, ap.added_at, my_pc.status
   `)).rows;
@@ -1282,6 +1291,7 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     description: album.description ?? undefined,
     cover_photo_id: album.cover_photo_id ?? undefined,
     cover_filename: coverFilename,
+    display_mode: (album.display_mode as "grid" | "map") ?? "grid",
     newest_photo_at: stats.newest_photo_at,
     oldest_photo_at: stats.oldest_photo_at,
     photo_count: stats.photo_count,
@@ -1310,6 +1320,8 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
       added_by_user_id: r.added_by_user_id ?? undefined,
       added_at: r.added_at ?? "",
       auto_crop: r.auto_crop ?? undefined,
+      latitude: r.latitude != null ? Number(r.latitude) : undefined,
+      longitude: r.longitude != null ? Number(r.longitude) : undefined,
       location_name: r.location_name ?? undefined,
       location_city: r.location_city ?? undefined,
       location_country: r.location_country ?? undefined,
@@ -1375,6 +1387,7 @@ export async function updateAlbumLogic(userId: number, req: UpdateAlbumRequest):
   const values: any = { updated_at: new Date().toISOString() };
   if (req.name !== undefined) values.name = req.name;
   if (req.description !== undefined) values.description = req.description;
+  if (req.displayMode !== undefined) values.display_mode = req.displayMode;
   if (req.coverPhotoId !== undefined) {
     if (req.coverPhotoId === null) {
       values.cover_photo_id = null;
@@ -1411,6 +1424,7 @@ export async function updateAlbumLogic(userId: number, req: UpdateAlbumRequest):
     description: updated.description ?? undefined,
     cover_photo_id: updated.cover_photo_id ?? undefined,
     cover_filename: coverFilename,
+    display_mode: (updated.display_mode as "grid" | "map") ?? "grid",
     newest_photo_at: stats.newest_photo_at,
     oldest_photo_at: stats.oldest_photo_at,
     photo_count: stats.photo_count,
@@ -1596,6 +1610,11 @@ export async function getAlbumSharesLogic(userId: number, albumId: number): Prom
     .where(eq(albumShares.album_id, albumId))
   );
 
+  // Also fetch public link if it exists
+  const publicLink = await dbFirst<typeof albumPublicLinks.$inferSelect>(
+    db.select().from(albumPublicLinks).where(eq(albumPublicLinks.album_id, albumId))
+  );
+
   return {
     shares: rows.map(r => ({
       album_id: r.album_id,
@@ -1604,6 +1623,7 @@ export async function getAlbumSharesLogic(userId: number, albumId: number): Prom
       user_name: r.name,
       user_email: r.email,
     })),
+    publicLink: publicLink ? toPublicLinkResponse(publicLink) : undefined,
   };
 }
 
@@ -1618,6 +1638,137 @@ export async function removeAlbumShareLogic(userId: number, req: RemoveAlbumShar
     db.delete(albumShares).where(and(eq(albumShares.album_id, req.albumId), eq(albumShares.user_id, req.userId)))
   );
   return { success: true };
+}
+
+// ---------- Album Public Links ----------
+
+function toPublicLinkResponse(row: typeof albumPublicLinks.$inferSelect): AlbumPublicLink {
+  return {
+    id: row.id,
+    album_id: row.album_id,
+    token: row.token,
+    created_by_user_id: row.created_by_user_id,
+    created_at: row.created_at ?? "",
+    expires_at: row.expires_at ?? undefined,
+  };
+}
+
+const EXPIRES_IN_MS: Record<string, number> = {
+  "7d": 7 * 24 * 60 * 60 * 1000,
+  "30d": 30 * 24 * 60 * 60 * 1000,
+  "90d": 90 * 24 * 60 * 60 * 1000,
+};
+
+export async function createAlbumPublicLinkLogic(userId: number, albumId: number, expiresIn?: string): Promise<AlbumPublicLink> {
+  const album = await dbFirst<typeof albums.$inferSelect>(
+    db.select().from(albums).where(eq(albums.id, albumId))
+  );
+  if (!album) throw new Error("Album not found");
+  if (album.user_id !== userId) throw new Error("Only owner can create public link");
+
+  // Check if a link already exists
+  const existing = await dbFirst<typeof albumPublicLinks.$inferSelect>(
+    db.select().from(albumPublicLinks).where(eq(albumPublicLinks.album_id, albumId))
+  );
+  if (existing) {
+    return toPublicLinkResponse(existing);
+  }
+
+  const token = crypto.randomBytes(32).toString("base64url");
+  const expiresAt = expiresIn && EXPIRES_IN_MS[expiresIn]
+    ? new Date(Date.now() + EXPIRES_IN_MS[expiresIn]).toISOString()
+    : undefined;
+
+  const row = await dbInsertReturning<typeof albumPublicLinks.$inferSelect>(
+    db.insert(albumPublicLinks).values({
+      album_id: albumId,
+      token,
+      created_by_user_id: userId,
+      expires_at: expiresAt,
+    }).returning()
+  );
+
+  return toPublicLinkResponse(row);
+}
+
+export async function deleteAlbumPublicLinkLogic(userId: number, albumId: number): Promise<{ success: boolean }> {
+  const album = await dbFirst<typeof albums.$inferSelect>(
+    db.select().from(albums).where(eq(albums.id, albumId))
+  );
+  if (!album) throw new Error("Album not found");
+  if (album.user_id !== userId) throw new Error("Only owner can delete public link");
+
+  await dbExec(
+    db.delete(albumPublicLinks).where(eq(albumPublicLinks.album_id, albumId))
+  );
+  return { success: true };
+}
+
+export async function getPublicAlbumLogic(token: string): Promise<PublicAlbumResponse> {
+  const link = await dbFirst<typeof albumPublicLinks.$inferSelect>(
+    db.select().from(albumPublicLinks).where(eq(albumPublicLinks.token, token))
+  );
+  if (!link) throw APIError.notFound("Dieser Link ist ungültig oder existiert nicht mehr.");
+
+  // Check expiration
+  if (link.expires_at && new Date(link.expires_at) < new Date()) {
+    throw APIError.notFound("Dieser Link ist abgelaufen.");
+  }
+
+  const album = await dbFirst<typeof albums.$inferSelect>(
+    db.select().from(albums).where(eq(albums.id, link.album_id))
+  );
+  if (!album) throw new Error("Album not found");
+
+  const stats = await getAlbumStats(link.album_id);
+
+  // Get all photos in the album (no curation filtering for public view)
+  const photoRows = (await db.execute(sql`
+    SELECT
+      p.id, p.filename, p.original_name, p.mime_type, p.size,
+      p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop,
+      p.latitude, p.longitude,
+      p.location_name, p.location_city, p.location_country
+    FROM photos p
+    INNER JOIN album_photos ap ON ap.photo_id = p.id AND ap.album_id = ${link.album_id}
+    ORDER BY p.taken_at ASC NULLS LAST, p.created_at ASC
+  `)).rows;
+
+  // Determine cover
+  let coverFilename: string | undefined;
+  if (album.cover_photo_id) {
+    const cp = await dbFirst<any>(db.select({ filename: photos.filename }).from(photos).where(eq(photos.id, album.cover_photo_id)));
+    coverFilename = cp?.filename;
+  } else {
+    coverFilename = stats.newest_photo_filename;
+  }
+
+  return {
+    id: album.id,
+    name: album.name,
+    description: album.description ?? undefined,
+    display_mode: (album.display_mode as "grid" | "map") ?? "grid",
+    cover_filename: coverFilename,
+    newest_photo_at: stats.newest_photo_at,
+    oldest_photo_at: stats.oldest_photo_at,
+    photo_count: stats.photo_count,
+    photos: photoRows.map((r: any) => ({
+      id: r.id,
+      filename: r.filename,
+      original_name: r.original_name,
+      mime_type: r.mime_type,
+      size: r.size,
+      taken_at: r.taken_at ?? undefined,
+      created_at: r.created_at ?? "",
+      latitude: r.latitude != null ? Number(r.latitude) : undefined,
+      longitude: r.longitude != null ? Number(r.longitude) : undefined,
+      location_name: r.location_name ?? undefined,
+      location_city: r.location_city ?? undefined,
+      location_country: r.location_country ?? undefined,
+      ai_quality_score: r.ai_quality_score != null ? Number(r.ai_quality_score) : undefined,
+      auto_crop: r.auto_crop ?? undefined,
+    })),
+  };
 }
 
 async function findBestPersonMatch(

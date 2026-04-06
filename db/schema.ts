@@ -221,6 +221,7 @@ export const albums = pgTable("albums", {
   description: text("description"),
   cover_photo_id: integer("cover_photo_id")
     .references(() => photos.id, { onDelete: "set null" }),
+  display_mode: text("display_mode").notNull().default("grid"), // 'grid' | 'map'
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
   updated_at: timestamp("updated_at", { mode: "string" }).defaultNow(),
 });
@@ -241,6 +242,21 @@ export const albumPhotos = pgTable(
   },
   (table) => [primaryKey({ columns: [table.album_id, table.photo_id] })]
 );
+
+// ========== Album Public Links ==========
+
+export const albumPublicLinks = pgTable("album_public_links", {
+  id: serial("id").primaryKey(),
+  album_id: integer("album_id")
+    .notNull()
+    .references(() => albums.id, { onDelete: "cascade" }),
+  token: text("token").notNull().unique(),
+  created_by_user_id: integer("created_by_user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
+  expires_at: timestamp("expires_at", { mode: "string" }),
+});
 
 // ========== Album Shares ==========
 
