@@ -116,22 +116,10 @@ const showPersons = computed(() => auth.hasPermission('people.view'))
 
 // ── Display mode (Album-Eigenschaft) ─────────────────────────────────────────
 const displayMode = ref<'grid' | 'map'>('grid')
-const displayModeOptions = [
-  { label: 'Raster', value: 'grid' },
-  { label: 'Karte', value: 'map' },
-]
 
 watch(album, (a) => {
   if (a) displayMode.value = a.display_mode ?? 'grid'
 }, { immediate: true })
-
-async function handleDisplayModeChange() {
-  if (!album.value || !canWrite.value) return
-  try {
-    await updateAlbum(album.value.id, { displayMode: displayMode.value })
-    album.value.display_mode = displayMode.value
-  } catch { /* ignore – toggle is already optimistically set */ }
-}
 
 // ── Map fullscreen ───────────────────────────────────────────────────────────
 const mapFullscreenPhotos = ref<Photo[]>([])
@@ -415,10 +403,6 @@ onUnmounted(() => serviceHealth.stopPolling())
           <div v-if="album.settings" class="control-group">
             <label>Ansicht:</label>
             <SelectButton v-model="album.settings.active_view" :options="availableViewOptions" optionLabel="label" optionValue="value" @change="handleSettingsChange" />
-          </div>
-          <div class="control-group">
-            <label>Darstellung:</label>
-            <SelectButton v-model="displayMode" :options="displayModeOptions" optionLabel="label" optionValue="value" @change="handleDisplayModeChange" />
           </div>
         </div>
       </div>

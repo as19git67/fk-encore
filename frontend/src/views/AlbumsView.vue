@@ -212,7 +212,7 @@ onMounted(loadData)
       </div>
       <div class="dialog-content" style="margin-top: 0.5rem">
         <label>Darstellung</label>
-        <SelectButton v-model="newAlbumDisplayMode" :options="displayModeOptions" optionLabel="label" optionValue="value" />
+        <SelectButton v-model="newAlbumDisplayMode" :options="displayModeOptions" optionLabel="label" optionValue="value" :allowEmpty="false" />
       </div>
       <template #footer>
         <Button label="Abbrechen" text @click="showCreateDialog = false"/>
@@ -227,7 +227,7 @@ onMounted(loadData)
       </div>
       <div class="dialog-content" style="margin-top: 0.5rem">
         <label>Darstellung</label>
-        <SelectButton v-model="renameDisplayMode" :options="displayModeOptions" optionLabel="label" optionValue="value" />
+        <SelectButton v-model="renameDisplayMode" :options="displayModeOptions" optionLabel="label" optionValue="value" :allowEmpty="false" />
       </div>
       <template #footer>
         <Button label="Abbrechen" text @click="showRenameDialog = false" />
