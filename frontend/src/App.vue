@@ -74,6 +74,8 @@ body {
 }
 
 .content {
+  position: relative;
+  z-index: 0;
   max-width: none;
   margin: 0 auto;
   padding: 0;
@@ -87,6 +89,11 @@ body {
 
 .user-name {
   font-weight: 600;
+}
+
+/* Ensure PrimeVue mobile menubar dropdown appears above page content */
+.sticky-menubar .p-menubar-root-list {
+  z-index: 1100;
 }
 
 @media (max-width: 640px) {
