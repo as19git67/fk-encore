@@ -9,6 +9,8 @@ import TripMapNoGpsPanel from './TripMapNoGpsPanel.vue'
 
 const props = defineProps<{
   photos: Photo[]
+  albumName?: string
+  albumDescription?: string
 }>()
 
 const emit = defineEmits<{
@@ -87,7 +89,7 @@ function selectStop(stopId: number, panMap = true) {
   if (!stop || !map) return
 
   if (panMap) {
-    map.flyTo([stop.lat, stop.lng], Math.max(map.getZoom(), 13), { duration: 0.5 })
+    map.flyTo([stop.lat, stop.lng], 15, { duration: 0.5 })
   }
 
   // Scroll timeline to selected stop
@@ -238,7 +240,12 @@ function handleNoGpsPhotoClick(photo: Photo) {
     </div>
 
     <!-- Horizontal timeline strip -->
-    <div v-if="stops.length > 0" ref="timelineContainer" class="trip-timeline">
+    <div v-if="stops.length > 0" class="trip-timeline-wrapper">
+      <div v-if="albumName" class="trip-timeline-header">
+        <span class="trip-timeline-album-name">{{ albumName }}</span>
+        <span v-if="albumDescription" class="trip-timeline-album-desc">— {{ albumDescription }}</span>
+      </div>
+      <div ref="timelineContainer" class="trip-timeline">
       <div
         v-for="(stop, index) in stops"
         :key="stop.id"
@@ -260,6 +267,7 @@ function handleNoGpsPhotoClick(photo: Photo) {
           class="trip-timeline-connector"
           :style="{ background: dayColorMap.get(stop.day) }"
         />
+      </div>
       </div>
     </div>
 
@@ -344,15 +352,42 @@ function handleNoGpsPhotoClick(photo: Photo) {
 }
 
 /* ── Timeline strip ─────────────────────────────────────────────────────── */
+.trip-timeline-wrapper {
+  flex-shrink: 0;
+  background: var(--p-surface-card, #fff);
+  border-top: 1px solid var(--p-content-border-color, #dee2e6);
+}
+
+.trip-timeline-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.trip-timeline-album-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.trip-timeline-album-desc {
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color, #999);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .trip-timeline {
   display: flex;
   gap: 0;
   overflow-x: auto;
-  padding: 0.5rem;
-  background: var(--p-surface-card, #fff);
-  border-top: 1px solid var(--p-content-border-color, #dee2e6);
+  padding: 0.35rem 0.5rem 0.5rem;
   scrollbar-width: thin;
-  flex-shrink: 0;
   scroll-behavior: smooth;
 }
 
@@ -468,8 +503,8 @@ function handleNoGpsPhotoClick(photo: Photo) {
     top: calc(0.4rem + 22px);
   }
 
-  .trip-timeline {
-    padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+  .trip-timeline-wrapper {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 }
 </style>

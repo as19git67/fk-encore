@@ -168,6 +168,8 @@ onUnmounted(() => {
       <TripMap
         v-if="album.display_mode === 'map' && album.photos.length > 0"
         :photos="albumPhotosAsPhoto"
+        :albumName="album.name"
+        :albumDescription="album.description"
         @open-fullscreen="handleMapFullscreen"
       />
 

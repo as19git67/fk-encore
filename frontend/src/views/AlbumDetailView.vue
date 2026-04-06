@@ -498,6 +498,8 @@ onUnmounted(() => serviceHealth.stopPolling())
     <TripMap
       v-if="album && displayMode === 'map' && albumPhotos.length > 0"
       :photos="albumPhotos"
+      :albumName="album.name"
+      :albumDescription="album.description"
       @open-fullscreen="handleMapFullscreen"
     />
 
