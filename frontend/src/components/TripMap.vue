@@ -348,10 +348,11 @@ function handleNoGpsPhotoClick(photo: Photo) {
   display: flex;
   gap: 0;
   overflow-x: auto;
-  padding: 0.75rem 0.5rem;
+  padding: 0.5rem;
   background: var(--p-surface-card, #fff);
   border-top: 1px solid var(--p-content-border-color, #dee2e6);
   scrollbar-width: thin;
+  flex-shrink: 0;
   scroll-behavior: smooth;
 }
 
@@ -465,6 +466,10 @@ function handleNoGpsPhotoClick(photo: Photo) {
 
   .trip-timeline-connector {
     top: calc(0.4rem + 22px);
+  }
+
+  .trip-timeline {
+    padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
   }
 }
 </style>

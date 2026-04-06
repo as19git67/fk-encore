@@ -153,17 +153,15 @@ onUnmounted(() => {
     <Message v-if="error" severity="error">{{ error }}</Message>
 
     <template v-if="album">
-      <div :class="['shared-header', { 'shared-header--compact': album.display_mode === 'map' }]">
+      <div v-if="album.display_mode !== 'map'" class="shared-header">
         <h1 class="title">{{ album.name }}</h1>
-        <template v-if="album.display_mode !== 'map'">
-          <p v-if="album.description" class="description">{{ album.description }}</p>
-          <span class="meta">
-            {{ album.photo_count }} {{ album.photo_count === 1 ? 'Foto' : 'Fotos' }}
-            <template v-if="album.oldest_photo_at && album.newest_photo_at">
-              · {{ new Date(album.oldest_photo_at).toLocaleDateString() }} – {{ new Date(album.newest_photo_at).toLocaleDateString() }}
-            </template>
-          </span>
-        </template>
+        <p v-if="album.description" class="description">{{ album.description }}</p>
+        <span class="meta">
+          {{ album.photo_count }} {{ album.photo_count === 1 ? 'Foto' : 'Fotos' }}
+          <template v-if="album.oldest_photo_at && album.newest_photo_at">
+            · {{ new Date(album.oldest_photo_at).toLocaleDateString() }} – {{ new Date(album.newest_photo_at).toLocaleDateString() }}
+          </template>
+        </span>
       </div>
 
       <!-- Map mode -->
@@ -242,7 +240,7 @@ onUnmounted(() => {
 .shared-album-view {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   background: var(--p-surface-ground, #f8f9fa);
 }
@@ -255,19 +253,10 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-.shared-header--compact {
-  padding: 0.5rem 1rem;
-}
-
 .shared-header .title {
   font-size: 1.75rem;
   font-weight: 700;
   margin: 0 0 0.25rem;
-}
-
-.shared-header--compact .title {
-  font-size: 1.1rem;
-  margin: 0;
 }
 
 .shared-header .description {

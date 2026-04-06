@@ -445,7 +445,7 @@ onUnmounted(() => serviceHealth.stopPolling())
   <div class="album-detail-view">
     <ServiceStatusBar />
 
-    <div v-if="album" :class="['subheader', { 'subheader--compact': displayMode === 'map' }]">
+    <div v-if="album && displayMode !== 'map'" class="subheader">
       <div class="header">
         <div class="header-left">
           <h1 class="title">{{ album.name }}</h1>
@@ -683,7 +683,7 @@ onUnmounted(() => serviceHealth.stopPolling())
 .album-detail-view {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - var(--menubar-height, 3.5rem));
+  height: calc(100dvh - var(--menubar-height, 3.5rem));
   overflow: hidden;
 }
 
@@ -706,15 +706,6 @@ onUnmounted(() => serviceHealth.stopPolling())
   padding: 1rem;
   gap: 0.5em;
   border-bottom: 1px solid var(--p-content-border-color);
-}
-
-.subheader--compact .header {
-  padding: 0.4rem 1rem;
-}
-
-.subheader--compact .title {
-  font-size: 1.1em;
-  margin-block: 0;
 }
 
 .header-left { display: flex; align-items: center; gap: 1rem; }
