@@ -1,0 +1,112 @@
+import type { RouteRecordRaw } from 'vue-router'
+
+export interface ModuleMenuItem {
+  label: string
+  icon: string
+  routeName: string
+  permission?: string
+}
+
+export interface ModuleConfig {
+  id: string
+  label: string
+  icon: string
+  basePath: string
+  permission?: string
+  routes: RouteRecordRaw[]
+  menuItems: ModuleMenuItem[]
+}
+
+export const modules: ModuleConfig[] = [
+  {
+    id: 'fotos',
+    label: 'Fotos',
+    icon: 'pi pi-images',
+    basePath: '/fotos',
+    permission: 'photos.view',
+    routes: [
+      {
+        path: '',
+        name: 'fotos-gallery',
+        component: () => import('../views/PhotosView.vue'),
+        meta: { permission: 'photos.view' },
+      },
+      {
+        path: 'alben',
+        name: 'fotos-albums',
+        component: () => import('../views/AlbumsView.vue'),
+        meta: { permission: 'photos.view' },
+      },
+      {
+        path: 'alben/:id',
+        name: 'fotos-album-detail',
+        component: () => import('../views/AlbumDetailView.vue'),
+        meta: { permission: 'photos.view' },
+      },
+      {
+        path: 'personen',
+        name: 'fotos-people',
+        component: () => import('../views/PersonsView.vue'),
+        meta: { permission: 'people.view' },
+      },
+    ],
+    menuItems: [
+      { label: 'Galerie', icon: 'pi pi-images', routeName: 'fotos-gallery', permission: 'photos.view' },
+      { label: 'Alben', icon: 'pi pi-folder-open', routeName: 'fotos-albums', permission: 'photos.view' },
+      { label: 'Personen', icon: 'pi pi-users', routeName: 'fotos-people', permission: 'people.view' },
+    ],
+  },
+  {
+    id: 'admin',
+    label: 'Admin',
+    icon: 'pi pi-cog',
+    basePath: '/admin',
+    permission: 'users.list',
+    routes: [
+      {
+        path: '',
+        name: 'admin-users',
+        component: () => import('../views/UserListView.vue'),
+        meta: { permission: 'users.list' },
+      },
+      {
+        path: 'benutzer/:id',
+        name: 'admin-user-detail',
+        component: () => import('../views/UserDetailView.vue'),
+        meta: { permission: 'users.read' },
+      },
+      {
+        path: 'rollen',
+        name: 'admin-roles',
+        component: () => import('../views/RolesView.vue'),
+        meta: { permission: 'roles.list' },
+      },
+      {
+        path: 'daten',
+        name: 'admin-data',
+        component: () => import('../views/DataManagementView.vue'),
+        meta: { permission: 'data.manage' },
+      },
+    ],
+    menuItems: [
+      { label: 'Benutzer', icon: 'pi pi-users', routeName: 'admin-users', permission: 'users.list' },
+      { label: 'Rollen', icon: 'pi pi-shield', routeName: 'admin-roles', permission: 'roles.list' },
+      { label: 'Datenverwaltung', icon: 'pi pi-database', routeName: 'admin-data', permission: 'data.manage' },
+    ],
+  },
+]
+
+/**
+ * Detect active module from the current path.
+ * Returns the module ID if path starts with a known module basePath, otherwise null (= all modules).
+ */
+export function detectModule(path: string): ModuleConfig | null {
+  return modules.find((m) => path === m.basePath || path.startsWith(m.basePath + '/')) ?? null
+}
+
+/**
+ * Get the default route name for a module.
+ */
+export function getModuleDefaultRoute(mod: ModuleConfig): string {
+  return mod.routes[0]?.name as string
+}

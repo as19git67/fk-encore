@@ -20,7 +20,7 @@ onMounted(async () => {
 })
 
 function onRowClick(event: any) {
-  router.push(`/users/${event.data.id}`)
+  router.push(`/admin/benutzer/${event.data.id}`)
 }
 
 function formatDate(dateStr: string) {

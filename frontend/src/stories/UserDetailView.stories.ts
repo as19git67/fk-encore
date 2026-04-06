@@ -8,7 +8,7 @@ import { onBeforeMount } from 'vue'
 const withRoute = () => ({
   setup() {
     const router = useRouter()
-    onBeforeMount(() => router.push('/users/1'))
+    onBeforeMount(() => router.push('/admin/benutzer/1'))
     return {}
   },
   template: '<story />',
