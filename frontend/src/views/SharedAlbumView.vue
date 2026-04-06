@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, defineAsyncComponent } from 'vue'
+import { ref, computed, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import { useRoute } from 'vue-router'
 import Message from 'primevue/message'
 import HeicImage from '../components/HeicImage.vue'
@@ -18,8 +18,9 @@ const fullscreenIndex = ref(0)
 const fullscreenPhotos = ref<PublicAlbumPhoto[]>([])
 
 const currentPhoto = computed(() => fullscreenPhotos.value[fullscreenIndex.value] ?? null)
-const prevPhoto = computed(() => fullscreenIndex.value > 0 ? fullscreenPhotos.value[fullscreenIndex.value - 1] : null)
-const nextPhoto = computed(() => fullscreenIndex.value < fullscreenPhotos.value.length - 1 ? fullscreenPhotos.value[fullscreenIndex.value + 1] : null)
+const hasPrev = computed(() => fullscreenIndex.value > 0)
+const hasNext = computed(() => fullscreenIndex.value < fullscreenPhotos.value.length - 1)
+const photoCounter = computed(() => `${fullscreenIndex.value + 1} / ${fullscreenPhotos.value.length}`)
 
 /** Cast PublicAlbumPhoto[] to Photo[] for components that expect full Photo type */
 function asPhotos(photos: PublicAlbumPhoto[]): Photo[] {
@@ -42,7 +43,6 @@ function openFullscreen(photo: PublicAlbumPhoto, photos: PublicAlbumPhoto[]) {
 }
 
 function handleMapFullscreen(stopPhotos: Photo[], startIndex: number) {
-  // Map TripMap's Photo[] back to PublicAlbumPhoto[] via id lookup
   const idSet = new Set(stopPhotos.map(p => p.id))
   fullscreenPhotos.value = album.value?.photos.filter(p => idSet.has(p.id)) ?? []
   fullscreenIndex.value = startIndex
@@ -53,12 +53,74 @@ function closeFullscreen() {
   isFullscreen.value = false
 }
 
+function goPrev() {
+  if (hasPrev.value) fullscreenIndex.value--
+}
+
+function goNext() {
+  if (hasNext.value) fullscreenIndex.value++
+}
+
+// ── Keyboard navigation ─────────────────────────────────────────────────────
+
 function handleKeydown(e: KeyboardEvent) {
   if (!isFullscreen.value) return
   if (e.key === 'Escape') closeFullscreen()
-  if (e.key === 'ArrowLeft' && prevPhoto.value) fullscreenIndex.value--
-  if (e.key === 'ArrowRight' && nextPhoto.value) fullscreenIndex.value++
+  if (e.key === 'ArrowLeft') goPrev()
+  if (e.key === 'ArrowRight') goNext()
 }
+
+// ── Touch swipe ─────────────────────────────────────────────────────────────
+
+let touchStartX = 0
+let touchStartY = 0
+let touchStartTime = 0
+
+function handleTouchStart(e: TouchEvent) {
+  const touch = e.touches[0]
+  if (!touch) return
+  touchStartX = touch.clientX
+  touchStartY = touch.clientY
+  touchStartTime = Date.now()
+}
+
+function handleTouchEnd(e: TouchEvent) {
+  const touch = e.changedTouches[0]
+  if (!touch) return
+
+  const dx = touch.clientX - touchStartX
+  const dy = touch.clientY - touchStartY
+  const dt = Date.now() - touchStartTime
+
+  // Must be a horizontal swipe: fast enough, far enough, more horizontal than vertical
+  if (dt > 500 || Math.abs(dx) < 50 || Math.abs(dy) > Math.abs(dx)) return
+
+  if (dx < 0) goNext()
+  else goPrev()
+}
+
+// ── Info formatting ─────────────────────────────────────────────────────────
+
+function formatLocation(photo: PublicAlbumPhoto): string {
+  return [photo.location_name, photo.location_city, photo.location_country]
+    .filter(Boolean)
+    .join(', ')
+}
+
+function formatDate(photo: PublicAlbumPhoto): string {
+  const d = photo.taken_at ? new Date(photo.taken_at) : null
+  if (!d) return ''
+  return d.toLocaleDateString('de-DE', {
+    weekday: 'long',
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+// ── Lifecycle ───────────────────────────────────────────────────────────────
 
 onMounted(async () => {
   document.addEventListener('keydown', handleKeydown)
@@ -75,6 +137,10 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+})
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeydown)
 })
 </script>
 
@@ -122,26 +188,48 @@ onMounted(async () => {
       </div>
     </template>
 
-    <!-- Simple fullscreen overlay for public view -->
+    <!-- Fullscreen overlay -->
     <Teleport to="body">
-      <div v-if="isFullscreen && currentPhoto" class="shared-fullscreen" @click.self="closeFullscreen">
-        <button class="close-btn" @click="closeFullscreen"><i class="pi pi-times" /></button>
-        <button v-if="prevPhoto" class="nav-btn nav-prev" @click="fullscreenIndex--"><i class="pi pi-chevron-left" /></button>
-        <div class="fullscreen-image-container">
+      <div
+        v-if="isFullscreen && currentPhoto"
+        class="shared-fullscreen"
+        @touchstart.passive="handleTouchStart"
+        @touchend.passive="handleTouchEnd"
+      >
+        <!-- Close button -->
+        <button class="fs-close" @click="closeFullscreen"><i class="pi pi-times" /></button>
+
+        <!-- Image area -->
+        <div class="fs-image" @click.self="closeFullscreen">
           <HeicImage
+            :key="currentPhoto.id"
             :src="getPhotoUrl(currentPhoto.filename)"
             :alt="currentPhoto.original_name"
             objectFit="contain"
           />
         </div>
-        <button v-if="nextPhoto" class="nav-btn nav-next" @click="fullscreenIndex++"><i class="pi pi-chevron-right" /></button>
-        <div class="fullscreen-info">
-          <span v-if="currentPhoto.location_name || currentPhoto.location_city">
-            {{ [currentPhoto.location_name, currentPhoto.location_city].filter(Boolean).join(', ') }}
-          </span>
-          <span v-if="currentPhoto.taken_at">
-            {{ new Date(currentPhoto.taken_at).toLocaleDateString() }}
-          </span>
+
+        <!-- Navigation arrows (desktop) -->
+        <button v-if="hasPrev" class="fs-nav fs-nav--prev" @click="goPrev">
+          <i class="pi pi-chevron-left" />
+        </button>
+        <button v-if="hasNext" class="fs-nav fs-nav--next" @click="goNext">
+          <i class="pi pi-chevron-right" />
+        </button>
+
+        <!-- Bottom info bar -->
+        <div class="fs-info-bar">
+          <div class="fs-info-text">
+            <div v-if="formatLocation(currentPhoto)" class="fs-info-location">
+              <i class="pi pi-map-marker" /> {{ formatLocation(currentPhoto) }}
+            </div>
+            <div v-if="formatDate(currentPhoto)" class="fs-info-date">
+              {{ formatDate(currentPhoto) }}
+            </div>
+          </div>
+          <div v-if="fullscreenPhotos.length > 1" class="fs-info-counter">
+            {{ photoCounter }}
+          </div>
         </div>
       </div>
     </Teleport>
@@ -208,41 +296,46 @@ onMounted(async () => {
   color: var(--p-text-muted-color);
 }
 
-/* Fullscreen overlay */
+/* ── Fullscreen overlay ─────────────────────────────────────────────────── */
+
 .shared-fullscreen {
   position: fixed;
   inset: 0;
   z-index: 9999;
-  background: rgba(0, 0, 0, 0.95);
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.fs-image {
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
+  min-height: 0;
 }
 
-.fullscreen-image-container {
-  max-width: 90vw;
-  max-height: 90vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.fs-image :deep(.heic-image-container) {
+  width: 100%;
+  height: 100%;
 }
 
-.fullscreen-image-container :deep(.heic-image-container) {
-  max-width: 90vw;
-  max-height: 90vh;
-}
-
-.fullscreen-image-container :deep(img) {
-  max-width: 90vw;
-  max-height: 90vh;
+.fs-image :deep(img) {
+  width: 100%;
+  height: 100%;
   object-fit: contain;
 }
 
-.close-btn {
+/* Close button */
+.fs-close {
   position: absolute;
-  top: 1rem;
-  right: 1rem;
-  background: rgba(255, 255, 255, 0.15);
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 10;
+  background: rgba(255, 255, 255, 0.12);
   border: none;
   color: white;
   font-size: 1.25rem;
@@ -253,18 +346,20 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1;
+  backdrop-filter: blur(4px);
 }
 
-.close-btn:hover {
-  background: rgba(255, 255, 255, 0.3);
+.fs-close:hover {
+  background: rgba(255, 255, 255, 0.25);
 }
 
-.nav-btn {
+/* Navigation arrows */
+.fs-nav {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  background: rgba(255, 255, 255, 0.15);
+  z-index: 10;
+  background: rgba(255, 255, 255, 0.12);
   border: none;
   color: white;
   font-size: 1.5rem;
@@ -275,33 +370,76 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1;
-}
-
-.nav-btn:hover {
-  background: rgba(255, 255, 255, 0.3);
-}
-
-.nav-prev {
-  left: 1rem;
-}
-
-.nav-next {
-  right: 1rem;
-}
-
-.fullscreen-info {
-  position: absolute;
-  bottom: 1.5rem;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  gap: 1rem;
-  color: rgba(255, 255, 255, 0.8);
-  font-size: 0.9rem;
-  background: rgba(0, 0, 0, 0.5);
-  padding: 0.5rem 1rem;
-  border-radius: 999px;
   backdrop-filter: blur(4px);
+  transition: background 0.15s;
+}
+
+.fs-nav:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.fs-nav--prev { left: 0.75rem; }
+.fs-nav--next { right: 0.75rem; }
+
+/* Bottom info bar - full width, no radius */
+.fs-info-bar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  color: rgba(255, 255, 255, 0.9);
+  flex-shrink: 0;
+}
+
+.fs-info-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.fs-info-location {
+  font-size: 0.95rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.fs-info-location .pi {
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+.fs-info-date {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.fs-info-counter {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.5);
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding-left: 1rem;
+}
+
+/* Mobile: hide arrow buttons, swipe handles navigation */
+@media (max-width: 768px) {
+  .fs-nav {
+    display: none;
+  }
+
+  .fs-info-bar {
+    padding: 0.6rem 0.75rem;
+  }
+
+  .fs-info-location {
+    font-size: 0.85rem;
+  }
 }
 </style>
