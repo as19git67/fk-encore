@@ -1,0 +1,9 @@
+openapi: "3.0.0"
+info:
+  title: FK Encore API
+  version: "1.0.0"
+  description: |
+    Placeholder OpenAPI spec. Regenerate with:
+    encore gen client --lang=openapi --output=./openapi/spec.json
+    cp ./openapi/spec.json ./ios/openapi.yaml
+paths: {}
