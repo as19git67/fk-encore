@@ -23,6 +23,7 @@ export default defineConfig({
           if (id.includes('/vue/') || id.includes('/vue-router/') || id.includes('/pinia/')) return 'vendor-vue'
           if (id.includes('/primeicons/')) return 'vendor-primeicons'
           if (id.includes('/@simplewebauthn/browser/')) return 'vendor-webauthn'
+          if (id.includes('/leaflet/') || id.includes('/@vue-leaflet/')) return 'vendor-leaflet'
         },
       },
     },
