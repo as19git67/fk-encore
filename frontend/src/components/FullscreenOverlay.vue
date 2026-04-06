@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
 import { getPhotoUrl, type Photo, type CurationStatus } from '../api/photos'
@@ -21,6 +21,14 @@ const emit = defineEmits<{
   'restore': [id: number]
   'show-details': []
 }>()
+
+// ── Preload erst nach Laden des aktuellen Bildes ────────────────────────────
+const currentLoaded = ref(false)
+watch(() => props.photo.id, () => { currentLoaded.value = false })
+
+function onCurrentImageLoad() {
+  currentLoaded.value = true
+}
 
 // ── Touch-Swipe für mobile Navigation ────────────────────────────────────────
 const touchStartX = ref(0)
@@ -58,17 +66,19 @@ function formatDate(photo: Photo) {
 <template>
   <Teleport to="body">
   <div class="fullscreen-overlay" @click="emit('close')">
-    <!-- Preload neighbours -->
-    <div style="display: none">
+    <!-- Preload neighbours only after current image has loaded -->
+    <div v-if="currentLoaded" style="display: none">
       <HeicImage v-if="prevPhoto" :src="getPhotoUrl(prevPhoto.filename)" />
       <HeicImage v-if="nextPhoto" :src="getPhotoUrl(nextPhoto.filename)" />
     </div>
 
     <div class="fullscreen-content" @click.stop @touchstart="handleTouchStart" @touchend="handleTouchEnd">
-      <HeicImage :src="getPhotoUrl(photo.filename)" :alt="photo.original_name" objectFit="contain">
-        <!-- Allow caller to inject overlays (e.g. face box) -->
-        <slot />
-      </HeicImage>
+      <div @load.capture="onCurrentImageLoad" style="display: contents">
+        <HeicImage :src="getPhotoUrl(photo.filename)" :alt="photo.original_name" objectFit="contain">
+          <!-- Allow caller to inject overlays (e.g. face box) -->
+          <slot />
+        </HeicImage>
+      </div>
 
       <!-- Top bar -->
       <div class="fs-topbar">
