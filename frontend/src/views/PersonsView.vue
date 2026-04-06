@@ -210,7 +210,7 @@ async function handleReindexPhoto() {
 }
 
 function navigateToPhoto(photoId: number) {
-  router.push({ name: 'photos', query: { photoId: String(photoId) } })
+  router.push({ name: 'fotos-gallery', query: { photoId: String(photoId) } })
 }
 
 // ── Data loading ──────────────────────────────────────────────────────────────
