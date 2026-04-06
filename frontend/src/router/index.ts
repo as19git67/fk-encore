@@ -12,6 +12,7 @@ import PersonsView from '../views/PersonsView.vue'
 import DataManagementView from '../views/DataManagementView.vue'
 import AlbumsView from '../views/AlbumsView.vue'
 import AlbumDetailView from '../views/AlbumDetailView.vue'
+import SharedAlbumView from '../views/SharedAlbumView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -26,6 +27,7 @@ const router = createRouter({
     { path: '/profile', name: 'profile', component: ProfileView },
     { path: '/photos', name: 'photos', component: PhotosView, meta: { permission: 'photos.view' } },
     { path: '/albums', name: 'albums', component: AlbumsView, meta: { permission: 'photos.view' } },
+    { path: '/albums/shared/:token', name: 'shared-album', component: SharedAlbumView },
     { path: '/albums/:id', name: 'album-detail', component: AlbumDetailView, meta: { permission: 'photos.view' } },
     { path: '/people', name: 'people', component: PersonsView, meta: { permission: 'people.view' } },
     { path: '/data-management', name: 'data-management', component: DataManagementView, meta: { permission: 'data.manage' } },
@@ -36,7 +38,7 @@ router.beforeEach((to) => {
   const auth = useAuthStore()
   auth.loadFromStorage()
 
-  const publicRoutes = ['login', 'register', 'forgot-password']
+  const publicRoutes = ['login', 'register', 'forgot-password', 'shared-album']
   if (!auth.isAuthenticated && !publicRoutes.includes(to.name as string)) {
     return { name: 'login' }
   }

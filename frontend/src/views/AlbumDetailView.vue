@@ -1,29 +1,25 @@
 <script lang="ts" setup>
-import { computed, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import SelectButton from 'primevue/selectbutton'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
-import Dialog from 'primevue/dialog'
-import Select from 'primevue/select'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import PhotoGrid from '../components/PhotoGrid.vue'
 import TimelineNav from '../components/TimelineNav.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
+
+const TripMap = defineAsyncComponent(() => import('../components/TripMap.vue'))
 import {
   type AlbumWithPhotos,
-  type AlbumShareWithUser,
   type AlbumPhoto,
   getPhotoFaces,
   getAlbum,
-  getAlbumShares,
   getPhotoLandmarks,
   ignoreFace,
   listPersons,
   reindexPhoto,
-  removeAlbumShare,
-  shareAlbum,
   type CurationStatus,
   type Face,
   type LandmarkItem,
@@ -33,7 +29,6 @@ import {
   updateAlbum,
   updateAlbumUserSettings
 } from '../api/photos'
-import { listUsers, type UserWithRoles } from '../api/users'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
 import { usePhotoGrouping } from '../composables/usePhotoGrouping'
@@ -107,10 +102,38 @@ const nextPhoto = computed(() =>
 )
 
 const canWrite = computed(() => album.value?.role === 'owner' || album.value?.role === 'contributor')
-const isOwner = computed(() => album.value?.role === 'owner')
 const canDeletePhotos = computed(() => auth.hasPermission('photos.delete'))
 const canUploadPhotos = computed(() => auth.hasPermission('photos.upload'))
 const showPersons = computed(() => auth.hasPermission('people.view'))
+
+// ── Display mode (Album-Eigenschaft) ─────────────────────────────────────────
+const displayMode = ref<'grid' | 'map'>('grid')
+
+watch(album, (a) => {
+  if (a) displayMode.value = a.display_mode ?? 'grid'
+}, { immediate: true })
+
+// ── Map fullscreen ───────────────────────────────────────────────────────────
+const mapFullscreenPhotos = ref<Photo[]>([])
+const mapFullscreenIndex = ref(0)
+const isMapFullscreen = ref(false)
+
+function handleMapFullscreen(stopPhotos: Photo[], startIndex: number) {
+  mapFullscreenPhotos.value = stopPhotos
+  mapFullscreenIndex.value = startIndex
+  isMapFullscreen.value = true
+}
+
+const mapSelectedPhoto = computed(() =>
+  mapFullscreenIndex.value >= 0 ? mapFullscreenPhotos.value[mapFullscreenIndex.value] ?? null : null
+)
+const mapPrevPhoto = computed(() =>
+  mapFullscreenIndex.value > 0 ? mapFullscreenPhotos.value[mapFullscreenIndex.value - 1] ?? null : null
+)
+const mapNextPhoto = computed(() =>
+  mapFullscreenIndex.value < mapFullscreenPhotos.value.length - 1
+    ? mapFullscreenPhotos.value[mapFullscreenIndex.value + 1] ?? null : null
+)
 
 // ── Sidebar state ─────────────────────────────────────────────────────────────
 const detectedFaces = ref<Face[]>([])
@@ -217,6 +240,17 @@ function handleCoverPhotoIdUpdate(id: number | null) {
   album.value.cover_photo_id = id ?? undefined
 }
 
+async function handleSetMapCover(photoId: number) {
+  if (!album.value) return
+  const newCoverId = album.value.cover_photo_id === photoId ? null : photoId
+  try {
+    await updateAlbum(albumId, { coverPhotoId: newCoverId })
+    album.value.cover_photo_id = newCoverId ?? undefined
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Setzen des Covers'
+  }
+}
+
 // ── Grid interaction ──────────────────────────────────────────────────────────
 function handlePhotoClick(item: PhotoItem) {
   // Album view: single click selects + opens fullscreen
@@ -279,15 +313,6 @@ async function saveDescription() {
   }
 }
 
-// ── Album sharing ─────────────────────────────────────────────────────────────
-const showShareDialog = ref(false)
-const albumShares = ref<AlbumShareWithUser[]>([])
-const allUsers = ref<UserWithRoles[]>([])
-const shareUserId = ref<number | null>(null)
-const shareAccessLevel = ref<'read' | 'write'>('read')
-const sharing = ref(false)
-const loadingShares = ref(false)
-
 const viewOptions = [
   { label: 'Alle Fotos', value: 'all' },
   { label: 'Meine Favoriten', value: 'favorites' },
@@ -301,50 +326,6 @@ const availableViewOptions = computed(() => {
   if (isShared) return viewOptions
   return viewOptions.filter(o => o.value !== 'consensus')
 })
-const accessLevelOptions = [{ label: 'Nur lesen', value: 'read' }, { label: 'Bearbeiten', value: 'write' }]
-
-const usersNotShared = computed(() => {
-  const sharedIds = new Set(albumShares.value.map(s => s.user_id))
-  const currentUserId = auth.user?.id
-  return allUsers.value.filter(u => u.id !== currentUserId && !sharedIds.has(u.id))
-})
-
-async function openShareDialog() {
-  showShareDialog.value = true
-  loadingShares.value = true
-  try {
-    const [sharesRes, usersRes] = await Promise.all([
-      getAlbumShares(albumId),
-      auth.hasPermission('users.list') ? listUsers() : Promise.resolve({ users: [] }),
-    ])
-    albumShares.value = sharesRes.shares
-    allUsers.value = usersRes.users
-  } catch (err: any) {
-    error.value = err.message || 'Fehler beim Laden der Freigaben'
-  } finally {
-    loadingShares.value = false
-  }
-}
-
-async function handleShare() {
-  if (!shareUserId.value) return
-  sharing.value = true
-  try {
-    await shareAlbum(albumId, shareUserId.value, shareAccessLevel.value)
-    albumShares.value = (await getAlbumShares(albumId)).shares
-    shareUserId.value = null
-    shareAccessLevel.value = 'read'
-  } catch (err: any) { error.value = err.message || 'Fehler beim Freigeben' }
-  finally { sharing.value = false }
-}
-
-async function handleRemoveShare(userId: number) {
-  try {
-    await removeAlbumShare(albumId, userId)
-    albumShares.value = albumShares.value.filter(s => s.user_id !== userId)
-  } catch (err: any) { error.value = err.message || 'Fehler' }
-}
-
 // ── Mobile drawer state ───────────────────────────────────────────────────────
 const mobileTimelineOpen = ref(false)
 const mobileSidebarOpen = ref(false)
@@ -367,8 +348,7 @@ onUnmounted(() => serviceHealth.stopPolling())
           <span :class="['role-badge', `role-badge--${album.role}`]">{{ album.role }}</span>
         </div>
         <div class="controls">
-          <Button v-if="album.cover_photo_id" icon="pi pi-image" label="Cover fokussieren" size="small" text @click="scrollToCover" />
-          <Button v-if="isOwner" icon="pi pi-share-alt" label="Freigeben" size="small" text @click="openShareDialog" />
+          <Button v-if="album.cover_photo_id && displayMode !== 'map'" icon="pi pi-image" label="Cover fokussieren" size="small" text @click="scrollToCover" />
           <div v-if="album.settings" class="control-group">
             <label>Ansicht:</label>
             <SelectButton v-model="album.settings.active_view" :options="availableViewOptions" optionLabel="label" optionValue="value" @change="handleSettingsChange" />
@@ -409,8 +389,17 @@ onUnmounted(() => serviceHealth.stopPolling())
       </div>
     </div>
 
+    <!-- Map mode -->
+    <TripMap
+      v-if="album && displayMode === 'map' && albumPhotos.length > 0"
+      :photos="albumPhotos"
+      :albumName="album.name"
+      :albumDescription="album.description"
+      @open-fullscreen="handleMapFullscreen"
+    />
+
     <!-- Three-column layout: TimelineNav | PhotoGrid | Sidebar -->
-    <div v-if="album && groupedPhotos.length > 0" class="gallery-layout">
+    <div v-else-if="album && groupedPhotos.length > 0" class="gallery-layout">
       <!-- LEFT: Timeline nav – auf Mobile als Slide-in-Drawer -->
       <div class="timeline-drawer" :class="{ 'is-open': mobileTimelineOpen }">
         <TimelineNav
@@ -485,7 +474,7 @@ onUnmounted(() => serviceHealth.stopPolling())
 
     <!-- Mobile: Floating-Button Zeitleiste -->
     <button
-      v-if="album && groupedPhotos.length > 0"
+      v-if="album && groupedPhotos.length > 0 && displayMode === 'grid'"
       class="mobile-fab mobile-fab--timeline"
       :class="{ active: mobileTimelineOpen }"
       @click="mobileTimelineOpen = !mobileTimelineOpen; mobileSidebarOpen = false"
@@ -495,7 +484,7 @@ onUnmounted(() => serviceHealth.stopPolling())
     </button>
 
 
-    <!-- Fullscreen overlay -->
+    <!-- Fullscreen overlay (Grid mode) -->
     <FullscreenOverlay
       v-if="isFullscreen && selectedPhoto"
       :photo="selectedPhoto"
@@ -511,35 +500,45 @@ onUnmounted(() => serviceHealth.stopPolling())
       @show-details="isFullscreen = false; mobileSidebarOpen = true; mobileTimelineOpen = false"
     />
 
-    <!-- Share Dialog -->
-    <Dialog v-model:visible="showShareDialog" header="Album freigeben" modal style="width: 480px">
-      <div v-if="loadingShares" class="share-loading"><i class="pi pi-spin pi-spinner" /> Lädt…</div>
-      <template v-else>
-        <div class="share-section">
-          <h4 class="share-section-title">Aktuelle Freigaben</h4>
-          <div v-if="albumShares.length === 0" class="share-empty">Noch keine Freigaben.</div>
-          <div v-for="share in albumShares" :key="share.user_id" class="share-row">
-            <div class="share-user-info">
-              <span class="share-user-name">{{ share.user_name }}</span>
-              <span class="share-user-email">{{ share.user_email }}</span>
-            </div>
-            <span :class="['share-badge', share.access_level === 'write' ? 'share-badge--write' : 'share-badge--read']">
-              {{ share.access_level === 'write' ? 'Bearbeiten' : 'Nur lesen' }}
-            </span>
-            <Button icon="pi pi-times" size="small" text severity="danger" @click="handleRemoveShare(share.user_id)" />
-          </div>
-        </div>
-        <div class="share-section">
-          <h4 class="share-section-title">Benutzer hinzufügen</h4>
-          <div class="share-add-form">
-            <Select v-if="allUsers.length > 0" v-model="shareUserId" :options="usersNotShared" optionLabel="name" optionValue="id" placeholder="Benutzer auswählen…" class="share-user-select" />
-            <input v-else v-model.number="shareUserId" type="number" placeholder="Benutzer-ID" class="p-inputtext share-userid-input" />
-            <SelectButton v-model="shareAccessLevel" :options="accessLevelOptions" optionLabel="label" optionValue="value" />
-            <Button label="Freigeben" icon="pi pi-check" :loading="sharing" :disabled="!shareUserId" @click="handleShare" />
-          </div>
-        </div>
+    <!-- Fullscreen overlay (Map mode – scoped to stop photos) -->
+    <FullscreenOverlay
+      v-if="isMapFullscreen && mapSelectedPhoto"
+      :photo="mapSelectedPhoto"
+      :prevPhoto="mapPrevPhoto"
+      :nextPhoto="mapNextPhoto"
+      :canDelete="canDeletePhotos || canWrite"
+      @close="isMapFullscreen = false"
+      @prev="mapFullscreenIndex--"
+      @next="mapFullscreenIndex++"
+      @toggle-favorite="handleToggleFavorite"
+      @hide="handleHidePhoto"
+      @restore="handleRestorePhoto"
+      @show-details="isMapFullscreen = false"
+    >
+      <template #topbar-actions>
+        <Button
+          v-if="canWrite"
+          :icon="album?.cover_photo_id === mapSelectedPhoto.id ? 'pi pi-image-check' : 'pi pi-image'"
+          rounded text
+          :severity="album?.cover_photo_id === mapSelectedPhoto.id ? 'warn' : 'secondary'"
+          v-tooltip.bottom="album?.cover_photo_id === mapSelectedPhoto.id ? 'Vom Cover entfernen' : 'Als Cover setzen'"
+          @click="handleSetMapCover(mapSelectedPhoto.id)"
+        />
+        <Button
+          icon="pi pi-info-circle" rounded text severity="secondary"
+          @click="isMapFullscreen = false"
+          v-tooltip.bottom="'Schließen'"
+        />
+        <Button
+          v-if="canDeletePhotos || canWrite"
+          :icon="mapSelectedPhoto.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
+          rounded text
+          :severity="mapSelectedPhoto.curation_status === 'favorite' ? 'warn' : 'secondary'"
+          @click="handleToggleFavorite(mapSelectedPhoto.id, mapSelectedPhoto.curation_status)"
+        />
       </template>
-    </Dialog>
+    </FullscreenOverlay>
+
   </div>
 </template>
 
@@ -547,7 +546,7 @@ onUnmounted(() => serviceHealth.stopPolling())
 .album-detail-view {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - var(--menubar-height, 3.5rem));
+  height: calc(100dvh - var(--menubar-height, 3.5rem));
   overflow: hidden;
 }
 
@@ -634,26 +633,6 @@ onUnmounted(() => serviceHealth.stopPolling())
   padding: 3rem 1rem;
   color: var(--p-text-muted-color);
 }
-
-/* ── Share dialog ────────────────────────────────────────────────────────── */
-.share-loading { padding: 1rem; text-align: center; }
-.share-section { margin-bottom: 1.5rem; }
-.share-section-title { font-size: 0.9rem; font-weight: 600; margin-bottom: 0.75rem; }
-.share-empty { font-size: 0.85rem; color: var(--p-text-muted-color); }
-.share-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.4rem 0; border-bottom: 1px solid var(--p-content-border-color); }
-.share-user-info { flex: 1; min-width: 0; }
-.share-user-name { display: block; font-size: 0.875rem; font-weight: 500; }
-.share-user-email { display: block; font-size: 0.75rem; color: var(--p-text-muted-color); }
-.share-badge { font-size: 0.7rem; padding: 0.15rem 0.4rem; border-radius: 3px; white-space: nowrap; }
-.share-badge--read { background: var(--p-content-border-color); color: var(--p-text-muted-color); }
-.share-badge--write { background: var(--p-green-100); color: var(--p-green-700); }
-
-@media (prefers-color-scheme: dark) {
-  .share-badge--write { background: var(--p-green-900); color: var(--p-green-200); }
-}
-.share-add-form { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
-.share-user-select { flex: 1; min-width: 180px; }
-.share-userid-input { width: 120px; }
 
 /* ── Timeline Drawer Wrapper ─────────────────────────────────────────────── */
 .timeline-drawer { display: contents; }
