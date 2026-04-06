@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
 import { getPhotoUrl, type Photo, type CurationStatus } from '../api/photos'
@@ -40,6 +40,10 @@ function handleTouchEnd(e: TouchEvent) {
     else if (dx < 0 && props.nextPhoto) emit('next')
   }
 }
+
+// ── Body-Scroll sperren während Fullscreen ──────────────────────────────────
+onMounted(() => { document.body.style.overflow = 'hidden' })
+onUnmounted(() => { document.body.style.overflow = '' })
 
 function formatDate(photo: Photo) {
   const dateStr = photo.taken_at || photo.created_at
@@ -128,7 +132,7 @@ function formatDate(photo: Photo) {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.92);
-  z-index: 1000;
+  z-index: 1200;
   display: flex;
   align-items: center;
   justify-content: center;
