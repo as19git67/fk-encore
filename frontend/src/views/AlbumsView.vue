@@ -5,6 +5,7 @@ import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
+import SelectButton from 'primevue/selectbutton'
 import HeicImage from '../components/HeicImage.vue'
 import {type Album, createAlbum, listAlbums, getPhotoUrl, updateAlbum, deleteAlbum} from '../api/photos'
 import { useAuthStore } from '../stores/auth'
@@ -41,12 +42,19 @@ watch(loading, (newLoading) => {
 const showCreateDialog = ref(false)
 const newAlbumName = ref('')
 const newAlbumDesc = ref('')
+const newAlbumDisplayMode = ref<'grid' | 'map'>('grid')
 const creating = ref(false)
 const showRenameDialog = ref(false)
 const showDeleteDialog = ref(false)
 const renameValue = ref('')
+const renameDisplayMode = ref<'grid' | 'map'>('grid')
 const updatingAlbum = ref(false)
 const selectedAlbum = ref<Album | null>(null)
+
+const displayModeOptions = [
+  { label: 'Raster', value: 'grid' },
+  { label: 'Karte', value: 'map' },
+]
 
 const router = useRouter()
 
@@ -66,10 +74,11 @@ async function handleCreateAlbum() {
   if (!newAlbumName.value.trim()) return
   creating.value = true
   try {
-    const album = await createAlbum(newAlbumName.value.trim(), newAlbumDesc.value.trim() || undefined)
+    const album = await createAlbum(newAlbumName.value.trim(), newAlbumDesc.value.trim() || undefined, newAlbumDisplayMode.value)
     showCreateDialog.value = false
     newAlbumName.value = ''
     newAlbumDesc.value = ''
+    newAlbumDisplayMode.value = 'grid'
     await loadData()
     router.push(`/albums/${album.id}`)
   } catch (err: any) {
@@ -86,6 +95,7 @@ function canManageAlbum(album: Album) {
 function openRenameDialog(album: Album) {
   selectedAlbum.value = album
   renameValue.value = album.name
+  renameDisplayMode.value = album.display_mode ?? 'grid'
   showRenameDialog.value = true
 }
 
@@ -101,7 +111,7 @@ async function handleRenameAlbum() {
 
   updatingAlbum.value = true
   try {
-    await updateAlbum(selectedAlbum.value.id, { name: newName })
+    await updateAlbum(selectedAlbum.value.id, { name: newName, displayMode: renameDisplayMode.value })
     showRenameDialog.value = false
     selectedAlbum.value = null
     await loadData()
@@ -165,7 +175,7 @@ onMounted(loadData)
           @keydown.space.prevent="router.push(`/albums/${album.id}`)"
       >
         <div v-if="canManageAlbum(album)" class="album-actions" @click.stop>
-          <Button icon="pi pi-pencil" text rounded size="small" v-tooltip="'Umbenennen'" @click="openRenameDialog(album)" />
+          <Button icon="pi pi-pencil" text rounded size="small" v-tooltip="'Bearbeiten'" @click="openRenameDialog(album)" />
           <Button icon="pi pi-trash" text rounded size="small" severity="danger" v-tooltip="'Löschen'" @click="openDeleteDialog(album)" />
         </div>
         <div class="album-cover">
@@ -200,16 +210,24 @@ onMounted(loadData)
         <label for="albumDesc">Beschreibung</label>
         <textarea id="albumDesc" v-model="newAlbumDesc" rows="2" class="p-inputtextarea p-inputtext" style="width: 100%"></textarea>
       </div>
+      <div class="dialog-content" style="margin-top: 0.5rem">
+        <label>Darstellung</label>
+        <SelectButton v-model="newAlbumDisplayMode" :options="displayModeOptions" optionLabel="label" optionValue="value" />
+      </div>
       <template #footer>
         <Button label="Abbrechen" text @click="showCreateDialog = false"/>
         <Button label="Erstellen" :loading="creating" @click="handleCreateAlbum"/>
       </template>
     </Dialog>
 
-    <Dialog v-model:visible="showRenameDialog" header="Album umbenennen" :modal="true">
+    <Dialog v-model:visible="showRenameDialog" header="Album bearbeiten" :modal="true">
       <div class="dialog-content">
         <label for="renameAlbumName">Name des Albums</label>
         <InputText id="renameAlbumName" v-model="renameValue" autofocus @keydown.enter="handleRenameAlbum" />
+      </div>
+      <div class="dialog-content" style="margin-top: 0.5rem">
+        <label>Darstellung</label>
+        <SelectButton v-model="renameDisplayMode" :options="displayModeOptions" optionLabel="label" optionValue="value" />
       </div>
       <template #footer>
         <Button label="Abbrechen" text @click="showRenameDialog = false" />

@@ -1059,7 +1059,7 @@ async function getAlbumStats(albumId: number): Promise<{ newest_photo_at?: strin
 
 export async function createAlbumLogic(userId: number, req: CreateAlbumRequest): Promise<Album> {
   const row = await dbInsertReturning<typeof albums.$inferSelect>(
-    db.insert(albums).values({ user_id: userId, name: req.name, description: req.description ?? null }).returning()
+    db.insert(albums).values({ user_id: userId, name: req.name, description: req.description ?? null, display_mode: req.displayMode ?? "grid" }).returning()
   );
 
   return {
@@ -1221,6 +1221,7 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     SELECT
       p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash,
       p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop,
+      p.latitude, p.longitude,
       p.location_name, p.location_city, p.location_country,
       ap.added_by_user_id, ap.added_at,
       my_pc.status AS curation_status,
@@ -1232,6 +1233,7 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     LEFT JOIN photo_curation all_pc ON all_pc.photo_id = p.id AND all_pc.user_id = ANY(ARRAY[${sql.join(participantIds.map(id => sql`${id}`), sql`, `)}]::int[])
     GROUP BY p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash,
              p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop,
+             p.latitude, p.longitude,
              p.location_name, p.location_city, p.location_country,
              ap.added_by_user_id, ap.added_at, my_pc.status
   `)).rows;
@@ -1314,6 +1316,8 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
       added_by_user_id: r.added_by_user_id ?? undefined,
       added_at: r.added_at ?? "",
       auto_crop: r.auto_crop ?? undefined,
+      latitude: r.latitude != null ? Number(r.latitude) : undefined,
+      longitude: r.longitude != null ? Number(r.longitude) : undefined,
       location_name: r.location_name ?? undefined,
       location_city: r.location_city ?? undefined,
       location_country: r.location_country ?? undefined,

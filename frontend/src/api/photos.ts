@@ -339,10 +339,10 @@ export function getAlbum(id: number) {
   return apiFetch<AlbumWithPhotos>(`/albums/${id}`)
 }
 
-export function createAlbum(name: string, description?: string) {
+export function createAlbum(name: string, description?: string, displayMode?: 'grid' | 'map') {
   return apiFetch<Album>('/albums', {
     method: 'POST',
-    body: JSON.stringify({ name, description })
+    body: JSON.stringify({ name, description, displayMode })
   })
 }
 

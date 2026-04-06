@@ -342,6 +342,7 @@ export interface UpdateAlbumUserSettingsRequest {
 export interface CreateAlbumRequest {
   name: string;
   description?: string;
+  displayMode?: "grid" | "map";
 }
 
 export interface UpdateAlbumRequest {
