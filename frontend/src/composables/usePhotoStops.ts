@@ -34,7 +34,7 @@ interface GeoPhoto extends Photo {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const CLUSTER_DISTANCE_METERS = 100
+const CLUSTER_DISTANCE_METERS = 500
 
 const DAY_COLORS = [
   '#4285F4', '#EA4335', '#34A853', '#FBBC05', '#9C27B0',
