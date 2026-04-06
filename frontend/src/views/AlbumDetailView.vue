@@ -29,6 +29,7 @@ import {
   createAlbumPublicLink,
   deleteAlbumPublicLink,
   type AlbumPublicLink,
+  type PublicLinkExpiry,
   type CurationStatus,
   type Face,
   type LandmarkItem,
@@ -323,6 +324,13 @@ const sharing = ref(false)
 const loadingShares = ref(false)
 const publicLink = ref<AlbumPublicLink | null>(null)
 const linkCopied = ref(false)
+const linkExpiry = ref<PublicLinkExpiry>(undefined)
+const expiryOptions = [
+  { label: 'Unbegrenzt', value: undefined },
+  { label: '7 Tage', value: '7d' },
+  { label: '30 Tage', value: '30d' },
+  { label: '90 Tage', value: '90d' },
+]
 
 const viewOptions = [
   { label: 'Alle Fotos', value: 'all' },
@@ -389,10 +397,22 @@ function getPublicLinkUrl() {
 
 async function handleCreatePublicLink() {
   try {
-    publicLink.value = await createAlbumPublicLink(albumId)
+    publicLink.value = await createAlbumPublicLink(albumId, linkExpiry.value)
     await copyPublicLink()
   } catch (err: any) { error.value = err.message || 'Fehler beim Erstellen des Links' }
 }
+
+function formatExpiryDate(dateStr: string): string {
+  const date = new Date(dateStr)
+  const now = new Date()
+  if (date < now) return 'Abgelaufen'
+  return `Gültig bis ${date.toLocaleDateString('de-DE', { day: '2-digit', month: 'short', year: 'numeric' })}`
+}
+
+const isLinkExpired = computed(() => {
+  if (!publicLink.value?.expires_at) return false
+  return new Date(publicLink.value.expires_at) < new Date()
+})
 
 async function handleDeletePublicLink() {
   try {
@@ -606,13 +626,27 @@ onUnmounted(() => serviceHealth.stopPolling())
         <!-- Public Link Section -->
         <div class="share-section">
           <h4 class="share-section-title"><i class="pi pi-link" /> Öffentlicher Link</h4>
-          <div v-if="publicLink" class="public-link-row">
-            <input :value="getPublicLinkUrl()" readonly class="p-inputtext public-link-input" @focus="($event.target as HTMLInputElement).select()" />
-            <Button :icon="linkCopied ? 'pi pi-check' : 'pi pi-copy'" :severity="linkCopied ? 'success' : 'secondary'" size="small" v-tooltip="'Kopieren'" @click="copyPublicLink" />
-            <Button icon="pi pi-trash" size="small" text severity="danger" v-tooltip="'Link löschen'" @click="handleDeletePublicLink" />
+          <div v-if="publicLink" class="public-link-block">
+            <div class="public-link-row">
+              <input :value="getPublicLinkUrl()" readonly class="p-inputtext public-link-input" @focus="($event.target as HTMLInputElement).select()" />
+              <Button :icon="linkCopied ? 'pi pi-check' : 'pi pi-copy'" :severity="linkCopied ? 'success' : 'secondary'" size="small" v-tooltip="'Kopieren'" @click="copyPublicLink" />
+              <Button icon="pi pi-trash" size="small" text severity="danger" v-tooltip="'Link löschen'" @click="handleDeletePublicLink" />
+            </div>
+            <div class="public-link-meta">
+              <span v-if="publicLink.expires_at" :class="['public-link-expiry', { 'public-link-expiry--expired': isLinkExpired }]">
+                <i :class="isLinkExpired ? 'pi pi-exclamation-circle' : 'pi pi-clock'" />
+                {{ formatExpiryDate(publicLink.expires_at) }}
+              </span>
+              <span v-else class="public-link-expiry">
+                <i class="pi pi-clock" /> Unbegrenzt gültig
+              </span>
+            </div>
           </div>
-          <div v-else>
-            <Button label="Link erstellen" icon="pi pi-link" size="small" outlined @click="handleCreatePublicLink" />
+          <div v-else class="public-link-create">
+            <div class="public-link-create-row">
+              <Select v-model="linkExpiry" :options="expiryOptions" optionLabel="label" optionValue="value" placeholder="Gültigkeit" class="link-expiry-select" />
+              <Button label="Link erstellen" icon="pi pi-link" size="small" outlined @click="handleCreatePublicLink" />
+            </div>
             <span class="share-hint">Jeder mit dem Link kann das Album ansehen.</span>
           </div>
         </div>
@@ -756,9 +790,16 @@ onUnmounted(() => serviceHealth.stopPolling())
 .share-add-form { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
 .share-user-select { flex: 1; min-width: 180px; }
 .share-userid-input { width: 120px; }
-.share-hint { font-size: 0.8rem; color: var(--p-text-muted-color); margin-left: 0.5rem; }
+.share-hint { font-size: 0.8rem; color: var(--p-text-muted-color); margin-top: 0.4rem; display: block; }
+.public-link-block { display: flex; flex-direction: column; gap: 0.4rem; }
 .public-link-row { display: flex; gap: 0.5rem; align-items: center; }
 .public-link-input { flex: 1; font-size: 0.8rem; }
+.public-link-meta { display: flex; align-items: center; gap: 0.5rem; }
+.public-link-expiry { font-size: 0.8rem; color: var(--p-text-muted-color); display: flex; align-items: center; gap: 0.3rem; }
+.public-link-expiry--expired { color: var(--p-red-500, #ef4444); font-weight: 500; }
+.public-link-create { display: flex; flex-direction: column; gap: 0.4rem; }
+.public-link-create-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.link-expiry-select { min-width: 140px; }
 
 /* ── Timeline Drawer Wrapper ─────────────────────────────────────────────── */
 .timeline-drawer { display: contents; }

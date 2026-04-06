@@ -398,7 +398,10 @@ export interface AlbumPublicLink {
   token: string
   created_by_user_id: number
   created_at: string
+  expires_at?: string
 }
+
+export type PublicLinkExpiry = '7d' | '30d' | '90d' | undefined
 
 export function getAlbumShares(albumId: number) {
   return apiFetch<{ shares: AlbumShareWithUser[]; publicLink?: AlbumPublicLink }>(`/albums/${albumId}/shares`)
@@ -410,9 +413,10 @@ export function removeAlbumShare(albumId: number, userId: number) {
   })
 }
 
-export function createAlbumPublicLink(albumId: number) {
+export function createAlbumPublicLink(albumId: number, expiresIn?: PublicLinkExpiry) {
   return apiFetch<AlbumPublicLink>(`/albums/${albumId}/public-link`, {
-    method: 'POST'
+    method: 'POST',
+    body: JSON.stringify({ expiresIn })
   })
 }
 

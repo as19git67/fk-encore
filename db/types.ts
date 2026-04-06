@@ -395,10 +395,12 @@ export interface AlbumPublicLink {
   token: string;
   created_by_user_id: number;
   created_at: string;
+  expires_at?: string;
 }
 
 export interface CreateAlbumPublicLinkRequest {
   albumId: number;
+  expiresIn?: "7d" | "30d" | "90d";
 }
 
 export interface PublicAlbumResponse {

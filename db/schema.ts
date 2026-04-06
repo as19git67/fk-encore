@@ -255,6 +255,7 @@ export const albumPublicLinks = pgTable("album_public_links", {
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
+  expires_at: timestamp("expires_at", { mode: "string" }),
 });
 
 // ========== Album Shares ==========

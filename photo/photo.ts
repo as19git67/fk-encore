@@ -459,10 +459,10 @@ export const removeAlbumShare = api(
  */
 export const createAlbumPublicLink = api(
   { expose: true, method: "POST", path: "/albums/:id/public-link", auth: true },
-  async ({ id }: { id: number }): Promise<AlbumPublicLink> => {
+  async ({ id, expiresIn }: { id: number; expiresIn?: string }): Promise<AlbumPublicLink> => {
     checkModule();
     const userId = getUserId();
-    return await service.createAlbumPublicLinkLogic(userId, id);
+    return await service.createAlbumPublicLinkLogic(userId, id, expiresIn);
   }
 );
 

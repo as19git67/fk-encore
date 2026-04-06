@@ -1622,13 +1622,7 @@ export async function getAlbumSharesLogic(userId: number, albumId: number): Prom
       user_name: r.name,
       user_email: r.email,
     })),
-    publicLink: publicLink ? {
-      id: publicLink.id,
-      album_id: publicLink.album_id,
-      token: publicLink.token,
-      created_by_user_id: publicLink.created_by_user_id,
-      created_at: publicLink.created_at ?? "",
-    } : undefined,
+    publicLink: publicLink ? toPublicLinkResponse(publicLink) : undefined,
   };
 }
 
@@ -1647,7 +1641,24 @@ export async function removeAlbumShareLogic(userId: number, req: RemoveAlbumShar
 
 // ---------- Album Public Links ----------
 
-export async function createAlbumPublicLinkLogic(userId: number, albumId: number): Promise<AlbumPublicLink> {
+function toPublicLinkResponse(row: typeof albumPublicLinks.$inferSelect): AlbumPublicLink {
+  return {
+    id: row.id,
+    album_id: row.album_id,
+    token: row.token,
+    created_by_user_id: row.created_by_user_id,
+    created_at: row.created_at ?? "",
+    expires_at: row.expires_at ?? undefined,
+  };
+}
+
+const EXPIRES_IN_MS: Record<string, number> = {
+  "7d": 7 * 24 * 60 * 60 * 1000,
+  "30d": 30 * 24 * 60 * 60 * 1000,
+  "90d": 90 * 24 * 60 * 60 * 1000,
+};
+
+export async function createAlbumPublicLinkLogic(userId: number, albumId: number, expiresIn?: string): Promise<AlbumPublicLink> {
   const album = await dbFirst<typeof albums.$inferSelect>(
     db.select().from(albums).where(eq(albums.id, albumId))
   );
@@ -1659,31 +1670,24 @@ export async function createAlbumPublicLinkLogic(userId: number, albumId: number
     db.select().from(albumPublicLinks).where(eq(albumPublicLinks.album_id, albumId))
   );
   if (existing) {
-    return {
-      id: existing.id,
-      album_id: existing.album_id,
-      token: existing.token,
-      created_by_user_id: existing.created_by_user_id,
-      created_at: existing.created_at ?? "",
-    };
+    return toPublicLinkResponse(existing);
   }
 
   const token = crypto.randomBytes(32).toString("base64url");
+  const expiresAt = expiresIn && EXPIRES_IN_MS[expiresIn]
+    ? new Date(Date.now() + EXPIRES_IN_MS[expiresIn]).toISOString()
+    : undefined;
+
   const row = await dbInsertReturning<typeof albumPublicLinks.$inferSelect>(
     db.insert(albumPublicLinks).values({
       album_id: albumId,
       token,
       created_by_user_id: userId,
+      expires_at: expiresAt,
     }).returning()
   );
 
-  return {
-    id: row.id,
-    album_id: row.album_id,
-    token: row.token,
-    created_by_user_id: row.created_by_user_id,
-    created_at: row.created_at ?? "",
-  };
+  return toPublicLinkResponse(row);
 }
 
 export async function deleteAlbumPublicLinkLogic(userId: number, albumId: number): Promise<{ success: boolean }> {
@@ -1704,6 +1708,11 @@ export async function getPublicAlbumLogic(token: string): Promise<PublicAlbumRes
     db.select().from(albumPublicLinks).where(eq(albumPublicLinks.token, token))
   );
   if (!link) throw new Error("Invalid or expired share link");
+
+  // Check expiration
+  if (link.expires_at && new Date(link.expires_at) < new Date()) {
+    throw new Error("This share link has expired");
+  }
 
   const album = await dbFirst<typeof albums.$inferSelect>(
     db.select().from(albums).where(eq(albums.id, link.album_id))
