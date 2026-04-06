@@ -56,6 +56,7 @@ function formatDate(photo: Photo) {
 </script>
 
 <template>
+  <Teleport to="body">
   <div class="fullscreen-overlay" @click="emit('close')">
     <!-- Preload neighbours -->
     <div style="display: none">
@@ -125,6 +126,7 @@ function formatDate(photo: Photo) {
       />
     </div>
   </div>
+  </Teleport>
 </template>
 
 <style scoped>
