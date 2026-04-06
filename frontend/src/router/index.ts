@@ -1,36 +1,48 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import type { RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { modules } from '../config/modules'
 import LoginView from '../views/LoginView.vue'
 import RegisterView from '../views/RegisterView.vue'
 import ForgotPasswordView from '../views/ForgotPasswordView.vue'
-import UserListView from '../views/UserListView.vue'
-import UserDetailView from '../views/UserDetailView.vue'
-import RolesView from '../views/RolesView.vue'
 import ProfileView from '../views/ProfileView.vue'
-import PhotosView from '../views/PhotosView.vue'
-import PersonsView from '../views/PersonsView.vue'
-import DataManagementView from '../views/DataManagementView.vue'
-import AlbumsView from '../views/AlbumsView.vue'
-import AlbumDetailView from '../views/AlbumDetailView.vue'
 import SharedAlbumView from '../views/SharedAlbumView.vue'
+
+// Build module routes from config
+const moduleRoutes: RouteRecordRaw[] = modules.map((mod) => ({
+  path: mod.basePath,
+  children: mod.routes,
+}))
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
-    { path: '/', redirect: '/photos' },
+    // Default: redirect to first module
+    { path: '/', redirect: modules[0]?.basePath ?? '/fotos' },
+
+    // Public routes
     { path: '/login', name: 'login', component: LoginView },
     { path: '/register', name: 'register', component: RegisterView },
     { path: '/forgot-password', name: 'forgot-password', component: ForgotPasswordView },
-    { path: '/users', name: 'users', component: UserListView, meta: { permission: 'users.list' } },
-    { path: '/users/:id', name: 'user-detail', component: UserDetailView, meta: { permission: 'users.read' } },
-    { path: '/roles', name: 'roles', component: RolesView, meta: { permission: 'roles.list' } },
+
+    // Shared authenticated routes
     { path: '/profile', name: 'profile', component: ProfileView },
-    { path: '/photos', name: 'photos', component: PhotosView, meta: { permission: 'photos.view' } },
-    { path: '/albums', name: 'albums', component: AlbumsView, meta: { permission: 'photos.view' } },
+
+    // Public shared album (no auth required)
     { path: '/albums/shared/:token', name: 'shared-album', component: SharedAlbumView },
-    { path: '/albums/:id', name: 'album-detail', component: AlbumDetailView, meta: { permission: 'photos.view' } },
-    { path: '/people', name: 'people', component: PersonsView, meta: { permission: 'people.view' } },
-    { path: '/data-management', name: 'data-management', component: DataManagementView, meta: { permission: 'data.manage' } },
+
+    // Module routes
+    ...moduleRoutes,
+
+    // Legacy redirects (keep old URLs working)
+    { path: '/photos', redirect: '/fotos' },
+    { path: '/albums', redirect: '/fotos/alben' },
+    { path: '/albums/:id', redirect: (to) => `/fotos/alben/${to.params.id}` },
+    { path: '/people', redirect: '/fotos/personen' },
+    { path: '/users', redirect: '/admin' },
+    { path: '/users/:id', redirect: (to) => `/admin/benutzer/${to.params.id}` },
+    { path: '/roles', redirect: '/admin/rollen' },
+    { path: '/data-management', redirect: '/admin/daten' },
   ],
 })
 
