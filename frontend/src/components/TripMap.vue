@@ -19,16 +19,20 @@ const { stops, photosWithoutGps, dayPaths, dayTransitions, dayColorMap, uniqueDa
   usePhotoStops(toRef(props, 'photos'))
 
 const mapContainer = ref<HTMLElement | null>(null)
+const timelineContainer = ref<HTMLElement | null>(null)
 let map: L.Map | null = null
 const markers: L.Marker[] = []
 const polylines: L.Polyline[] = []
 
+const selectedStopId = ref<number | null>(null)
+
 // ── Map initialization ───────────────────────────────────────────────────────
 
-function createPinIcon(stop: Stop): L.DivIcon {
+function createPinIcon(stop: Stop, isSelected: boolean): L.DivIcon {
   const url = getPhotoUrl(stop.coverPhoto.filename, 96)
   const count = stop.photos.length
   const badge = count > 1 ? `<span class="trip-pin-badge">${count}</span>` : ''
+  const selectedClass = isSelected ? ' trip-pin-selected' : ''
 
   return L.divIcon({
     className: 'trip-pin-icon',
@@ -36,7 +40,7 @@ function createPinIcon(stop: Stop): L.DivIcon {
     iconAnchor: [24, 48],
     popupAnchor: [0, -50],
     html: `
-      <div class="trip-pin-container">
+      <div class="trip-pin-container${selectedClass}">
         <div class="trip-pin-thumbnail">
           <img src="${url}" alt="" />
         </div>
@@ -63,6 +67,42 @@ function createPopupContent(stop: Stop): string {
       </div>
     </div>
   `
+}
+
+function updateMarkerIcons() {
+  for (let i = 0; i < stops.value.length; i++) {
+    const stop = stops.value[i]!
+    const marker = markers[i]
+    if (marker) {
+      marker.setIcon(createPinIcon(stop, stop.id === selectedStopId.value))
+    }
+  }
+}
+
+function selectStop(stopId: number, panMap = true) {
+  selectedStopId.value = stopId
+  updateMarkerIcons()
+
+  const stop = stops.value.find(s => s.id === stopId)
+  if (!stop || !map) return
+
+  if (panMap) {
+    map.flyTo([stop.lat, stop.lng], Math.max(map.getZoom(), 13), { duration: 0.5 })
+  }
+
+  // Scroll timeline to selected stop
+  scrollTimelineToStop(stopId)
+}
+
+function scrollTimelineToStop(stopId: number) {
+  const container = timelineContainer.value
+  if (!container) return
+  const el = container.querySelector(`[data-stop-id="${stopId}"]`) as HTMLElement | null
+  if (!el) return
+  const containerRect = container.getBoundingClientRect()
+  const elRect = el.getBoundingClientRect()
+  const scrollLeft = el.offsetLeft - containerRect.width / 2 + elRect.width / 2
+  container.scrollTo({ left: scrollLeft, behavior: 'smooth' })
 }
 
 function initMap() {
@@ -117,7 +157,7 @@ function renderContent() {
   // Draw stop markers
   for (const stop of stops.value) {
     const marker = L.marker([stop.lat, stop.lng], {
-      icon: createPinIcon(stop),
+      icon: createPinIcon(stop, stop.id === selectedStopId.value),
     }).addTo(map)
 
     marker.bindPopup(createPopupContent(stop), {
@@ -126,6 +166,7 @@ function renderContent() {
     })
 
     marker.on('click', () => {
+      selectStop(stop.id, false)
       emit('open-fullscreen', stop.photos, 0)
     })
 
@@ -138,6 +179,18 @@ function renderContent() {
   } else {
     map.setView([51.1657, 10.4515], 5) // Default: Germany center
   }
+}
+
+// ── Timeline helpers ────────────────────────────────────────────────────────
+
+function getStopLabel(stop: Stop): string {
+  if (stop.locationLabel) return stop.locationLabel
+  return `Stopp ${stop.id + 1}`
+}
+
+function formatStopDate(stop: Stop): string {
+  const date = new Date(stop.coverPhoto.taken_at || stop.coverPhoto.created_at)
+  return date.toLocaleDateString('de-DE', { day: '2-digit', month: 'short' })
 }
 
 // ── Legend ────────────────────────────────────────────────────────────────────
@@ -180,8 +233,34 @@ function handleNoGpsPhotoClick(photo: Photo) {
     <!-- Stats overlay -->
     <div class="trip-stats">
       <span>{{ stops.length }} {{ stops.length === 1 ? 'Stopp' : 'Stopps' }}</span>
-      <span class="trip-stats-sep">•</span>
+      <span class="trip-stats-sep">&bull;</span>
       <span>{{ photos.filter(p => p.latitude != null).length }} Fotos</span>
+    </div>
+
+    <!-- Horizontal timeline strip -->
+    <div v-if="stops.length > 0" ref="timelineContainer" class="trip-timeline">
+      <div
+        v-for="(stop, index) in stops"
+        :key="stop.id"
+        :data-stop-id="stop.id"
+        :class="['trip-timeline-item', { 'trip-timeline-item--selected': stop.id === selectedStopId }]"
+        @click="selectStop(stop.id)"
+      >
+        <div class="trip-timeline-thumb">
+          <img :src="getPhotoUrl(stop.coverPhoto.filename, 96)" :alt="getStopLabel(stop)" />
+        </div>
+        <div class="trip-timeline-info">
+          <span class="trip-timeline-label">{{ getStopLabel(stop) }}</span>
+          <span class="trip-timeline-date">{{ formatStopDate(stop) }}</span>
+          <span class="trip-timeline-count">{{ stop.photos.length }} {{ stop.photos.length === 1 ? 'Foto' : 'Fotos' }}</span>
+        </div>
+        <!-- Connector line between items -->
+        <div
+          v-if="index < stops.length - 1"
+          class="trip-timeline-connector"
+          :style="{ background: dayColorMap.get(stop.day) }"
+        />
+      </div>
     </div>
 
     <!-- Photos without GPS -->
@@ -197,15 +276,16 @@ function handleNoGpsPhotoClick(photo: Photo) {
 .trip-map-wrapper {
   position: relative;
   width: 100%;
-  height: calc(100vh - var(--menubar-height, 56px) - 120px);
-  min-height: 400px;
-  border-radius: 8px;
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .trip-map-container {
   width: 100%;
-  height: 100%;
+  height: calc(100vh - var(--menubar-height, 56px) - 200px);
+  min-height: 300px;
+  border-radius: 8px 8px 0 0;
+  overflow: hidden;
 }
 
 /* Legend */
@@ -261,10 +341,129 @@ function handleNoGpsPhotoClick(photo: Photo) {
   opacity: 0.5;
 }
 
+/* ── Timeline strip ─────────────────────────────────────────────────────── */
+.trip-timeline {
+  display: flex;
+  gap: 0;
+  overflow-x: auto;
+  padding: 0.75rem 0.5rem;
+  background: var(--p-surface-card, #fff);
+  border-top: 1px solid var(--p-content-border-color, #dee2e6);
+  scrollbar-width: thin;
+  scroll-behavior: smooth;
+}
+
+.trip-timeline::-webkit-scrollbar {
+  height: 4px;
+}
+
+.trip-timeline::-webkit-scrollbar-thumb {
+  background: var(--p-content-border-color, #ccc);
+  border-radius: 2px;
+}
+
+.trip-timeline-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 90px;
+  max-width: 110px;
+  padding: 0.4rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s;
+  flex-shrink: 0;
+}
+
+.trip-timeline-item:hover {
+  background: var(--p-content-hover-background, rgba(0,0,0,0.04));
+}
+
+.trip-timeline-item--selected {
+  background: var(--p-primary-50, rgba(66,133,244,0.1));
+  outline: 2px solid var(--p-primary-color, #4285F4);
+  outline-offset: -2px;
+}
+
+.trip-timeline-thumb {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid var(--p-content-border-color, #dee2e6);
+  flex-shrink: 0;
+  margin-bottom: 0.3rem;
+}
+
+.trip-timeline-item--selected .trip-timeline-thumb {
+  border-color: var(--p-primary-color, #4285F4);
+}
+
+.trip-timeline-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.trip-timeline-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 1px;
+  min-width: 0;
+  width: 100%;
+}
+
+.trip-timeline-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.trip-timeline-date {
+  font-size: 0.65rem;
+  color: var(--p-text-muted-color, #999);
+}
+
+.trip-timeline-count {
+  font-size: 0.6rem;
+  color: var(--p-text-muted-color, #aaa);
+}
+
+.trip-timeline-connector {
+  position: absolute;
+  top: calc(0.4rem + 28px);
+  right: -12px;
+  width: 24px;
+  height: 3px;
+  border-radius: 2px;
+  opacity: 0.5;
+  z-index: 1;
+}
+
 @media (max-width: 768px) {
-  .trip-map-wrapper {
-    height: calc(100vh - var(--menubar-height, 56px) - 80px);
+  .trip-map-container {
+    height: calc(100vh - var(--menubar-height, 56px) - 180px);
     border-radius: 0;
+  }
+
+  .trip-timeline-item {
+    min-width: 76px;
+    max-width: 90px;
+  }
+
+  .trip-timeline-thumb {
+    width: 44px;
+    height: 44px;
+  }
+
+  .trip-timeline-connector {
+    top: calc(0.4rem + 22px);
   }
 }
 </style>
@@ -280,6 +479,17 @@ function handleNoGpsPhotoClick(photo: Photo) {
   position: relative;
   width: 48px;
   height: 56px;
+  transition: transform 0.2s;
+}
+
+.trip-pin-container.trip-pin-selected {
+  transform: scale(1.25);
+  z-index: 1000 !important;
+}
+
+.trip-pin-selected .trip-pin-thumbnail {
+  border-color: var(--p-primary-color, #4285F4);
+  box-shadow: 0 0 0 3px rgba(66, 133, 244, 0.3), 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 .trip-pin-thumbnail {
@@ -308,6 +518,10 @@ function handleNoGpsPhotoClick(photo: Photo) {
   border-left: 6px solid transparent;
   border-right: 6px solid transparent;
   border-top: 8px solid white;
+}
+
+.trip-pin-selected .trip-pin-pointer {
+  border-top-color: var(--p-primary-color, #4285F4);
 }
 
 .trip-pin-badge {
