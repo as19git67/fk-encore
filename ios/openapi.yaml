@@ -1,9 +1,5739 @@
-openapi: "3.0.0"
-info:
-  title: FK Encore API
-  version: "1.0.0"
-  description: |
-    Placeholder OpenAPI spec. Regenerate with:
-    encore gen client --lang=openapi --output=./openapi/spec.json
-    cp ./openapi/spec.json ./ios/openapi.yaml
-paths: {}
+{
+  "components": {
+    "responses": {
+      "APIError": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "externalDocs": {
+                "url": "https://pkg.go.dev/encore.dev/beta/errs#Error"
+              },
+              "properties": {
+                "code": {
+                  "description": "Error code",
+                  "example": "not_found",
+                  "externalDocs": {
+                    "url": "https://pkg.go.dev/encore.dev/beta/errs#ErrCode"
+                  },
+                  "type": "string"
+                },
+                "details": {
+                  "description": "Error details",
+                  "type": "object"
+                },
+                "message": {
+                  "description": "Error message",
+                  "type": "string"
+                }
+              },
+              "title": "APIError",
+              "type": "object"
+            }
+          }
+        },
+        "description": "Error response"
+      }
+    },
+    "schemas": {
+      "db.ActiveView": {
+        "enum": [
+          "all",
+          "favorites",
+          "consensus",
+          "custom"
+        ],
+        "type": "string"
+      },
+      "db.Album": {
+        "properties": {
+          "cover_filename": {
+            "type": "string"
+          },
+          "cover_photo_id": {
+            "type": "number"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "display_mode": {
+            "enum": [
+              "grid",
+              "map"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "type": "number"
+          },
+          "is_shared": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "newest_photo_at": {
+            "type": "string"
+          },
+          "oldest_photo_at": {
+            "type": "string"
+          },
+          "photo_count": {
+            "type": "number"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "name",
+          "display_mode",
+          "photo_count",
+          "is_shared",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "db.AlbumPhotoWithMeta": {
+        "properties": {
+          "added_at": {
+            "type": "string"
+          },
+          "added_by_user_id": {
+            "type": "number"
+          },
+          "ai_quality_details": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object"
+          },
+          "ai_quality_score": {
+            "type": "number"
+          },
+          "auto_crop": {
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y"
+            ],
+            "type": "object"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "curation_stats": {
+            "$ref": "#/components/schemas/db.PhotoCurationStats"
+          },
+          "curation_status": {
+            "$ref": "#/components/schemas/db.CurationStatus"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "hash": {
+            "type": "string"
+          },
+          "id": {
+            "type": "number"
+          },
+          "latitude": {
+            "type": "number"
+          },
+          "location_city": {
+            "type": "string"
+          },
+          "location_country": {
+            "type": "string"
+          },
+          "location_name": {
+            "type": "string"
+          },
+          "longitude": {
+            "type": "number"
+          },
+          "mime_type": {
+            "type": "string"
+          },
+          "original_name": {
+            "type": "string"
+          },
+          "size": {
+            "type": "number"
+          },
+          "taken_at": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "added_at",
+          "curation_status",
+          "id",
+          "user_id",
+          "filename",
+          "original_name",
+          "mime_type",
+          "size",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "db.AlbumPublicLink": {
+        "properties": {
+          "album_id": {
+            "type": "number"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "created_by_user_id": {
+            "type": "number"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "number"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "album_id",
+          "token",
+          "created_by_user_id",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "db.AlbumShareWithUser": {
+        "properties": {
+          "access_level": {
+            "enum": [
+              "read",
+              "write"
+            ],
+            "type": "string"
+          },
+          "album_id": {
+            "type": "number"
+          },
+          "user_email": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "number"
+          },
+          "user_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_name",
+          "user_email",
+          "album_id",
+          "user_id",
+          "access_level"
+        ],
+        "type": "object"
+      },
+      "db.AlbumUserSettings": {
+        "properties": {
+          "active_view": {
+            "$ref": "#/components/schemas/db.ActiveView"
+          },
+          "album_id": {
+            "type": "number"
+          },
+          "cover_photo_id": {
+            "type": "number"
+          },
+          "hide_mode": {
+            "enum": [
+              "mine",
+              "all"
+            ],
+            "type": "string"
+          },
+          "user_id": {
+            "type": "number"
+          },
+          "view_config": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/db.ViewConfig"
+              },
+              {
+                "nullable": true,
+                "type": "boolean"
+              }
+            ],
+            "nullable": true
+          }
+        },
+        "required": [
+          "album_id",
+          "user_id",
+          "hide_mode",
+          "active_view"
+        ],
+        "type": "object"
+      },
+      "db.CurationStatus": {
+        "enum": [
+          "visible",
+          "hidden",
+          "favorite"
+        ],
+        "type": "string"
+      },
+      "db.Face": {
+        "properties": {
+          "bbox": {
+            "$ref": "#/components/schemas/db.FaceBBox"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "embedding": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "number"
+          },
+          "ignored": {
+            "type": "boolean"
+          },
+          "person_id": {
+            "type": "number"
+          },
+          "photo": {
+            "properties": {
+              "created_at": {
+                "type": "string"
+              },
+              "filename": {
+                "type": "string"
+              },
+              "id": {
+                "type": "number"
+              },
+              "original_name": {
+                "type": "string"
+              },
+              "taken_at": {
+                "type": "string"
+              },
+              "user_id": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "user_id",
+              "filename",
+              "original_name",
+              "created_at"
+            ],
+            "type": "object"
+          },
+          "photo_id": {
+            "type": "number"
+          },
+          "quality": {
+            "type": "number"
+          },
+          "user_id": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "photo_id",
+          "bbox",
+          "embedding",
+          "ignored",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "db.FaceBBox": {
+        "properties": {
+          "height": {
+            "type": "number"
+          },
+          "width": {
+            "type": "number"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "width",
+          "height"
+        ],
+        "type": "object"
+      },
+      "db.LandmarkBBox": {
+        "properties": {
+          "height": {
+            "type": "number"
+          },
+          "width": {
+            "type": "number"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "width",
+          "height"
+        ],
+        "type": "object"
+      },
+      "db.PasskeyInfo": {
+        "properties": {
+          "backed_up": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "credential_id": {
+            "type": "string"
+          },
+          "device_type": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "credential_id",
+          "name",
+          "device_type",
+          "backed_up",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "db.Permission": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "number"
+          },
+          "key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "description"
+        ],
+        "type": "object"
+      },
+      "db.PhotoAlbumsResponse": {
+        "properties": {
+          "albumIds": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "photoId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "photoId",
+          "albumIds"
+        ],
+        "type": "object"
+      },
+      "db.PhotoCurationStats": {
+        "properties": {
+          "fav_count": {
+            "title": "Number of album participants who favorited this photo\n",
+            "type": "number"
+          },
+          "hide_count": {
+            "title": "Number of album participants who hid this photo\n",
+            "type": "number"
+          },
+          "member_count": {
+            "title": "Total number of album participants (owner + shared users)\n",
+            "type": "number"
+          }
+        },
+        "required": [
+          "fav_count",
+          "hide_count",
+          "member_count"
+        ],
+        "title": "Anonymized curation statistics for a photo within a shared album\n",
+        "type": "object"
+      },
+      "db.PhotoGroup": {
+        "properties": {
+          "cover_photo_id": {
+            "type": "number"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "number"
+          },
+          "member_count": {
+            "type": "number"
+          },
+          "photo_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "reviewed_at": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "created_at",
+          "member_count",
+          "photo_ids"
+        ],
+        "type": "object"
+      },
+      "db.PhotoWithCuration": {
+        "properties": {
+          "ai_quality_details": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object"
+          },
+          "ai_quality_score": {
+            "type": "number"
+          },
+          "auto_crop": {
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y"
+            ],
+            "type": "object"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "curation_status": {
+            "$ref": "#/components/schemas/db.CurationStatus"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "hash": {
+            "type": "string"
+          },
+          "id": {
+            "type": "number"
+          },
+          "latitude": {
+            "type": "number"
+          },
+          "location_city": {
+            "type": "string"
+          },
+          "location_country": {
+            "type": "string"
+          },
+          "location_name": {
+            "type": "string"
+          },
+          "longitude": {
+            "type": "number"
+          },
+          "mime_type": {
+            "type": "string"
+          },
+          "original_name": {
+            "type": "string"
+          },
+          "size": {
+            "type": "number"
+          },
+          "taken_at": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "curation_status",
+          "id",
+          "user_id",
+          "filename",
+          "original_name",
+          "mime_type",
+          "size",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "db.PublicAlbumPhoto": {
+        "properties": {
+          "ai_quality_score": {
+            "type": "number"
+          },
+          "auto_crop": {
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y"
+            ],
+            "type": "object"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "id": {
+            "type": "number"
+          },
+          "latitude": {
+            "type": "number"
+          },
+          "location_city": {
+            "type": "string"
+          },
+          "location_country": {
+            "type": "string"
+          },
+          "location_name": {
+            "type": "string"
+          },
+          "longitude": {
+            "type": "number"
+          },
+          "mime_type": {
+            "type": "string"
+          },
+          "original_name": {
+            "type": "string"
+          },
+          "size": {
+            "type": "number"
+          },
+          "taken_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "filename",
+          "original_name",
+          "mime_type",
+          "size",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "db.Role": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description"
+        ],
+        "type": "object"
+      },
+      "db.RoleWithPermissions": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          },
+          "permissions": {
+            "items": {
+              "$ref": "#/components/schemas/db.Permission"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "permissions",
+          "id",
+          "name",
+          "description"
+        ],
+        "type": "object"
+      },
+      "db.User": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "id": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "name",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "db.UserWithRoles": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "id": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          },
+          "roles": {
+            "items": {
+              "$ref": "#/components/schemas/db.Role"
+            },
+            "type": "array"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "roles",
+          "id",
+          "email",
+          "name",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "db.UserWithRolesAndPermissions": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "id": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "roles": {
+            "items": {
+              "$ref": "#/components/schemas/db.Role"
+            },
+            "type": "array"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "roles",
+          "permissions",
+          "id",
+          "email",
+          "name",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "db.ViewConfig": {
+        "properties": {
+          "favConsensusMin": {
+            "title": "Minimum number of users who favorited for consensus favorites\n",
+            "type": "number"
+          },
+          "favFilter": {
+            "enum": [
+              "all",
+              "mine",
+              "any",
+              "consensus"
+            ],
+            "title": "Which favorites filter to apply\n",
+            "type": "string"
+          },
+          "hideConsensusMin": {
+            "title": "Minimum number of users who hid a photo for consensus hide\n",
+            "type": "number"
+          },
+          "hideFilter": {
+            "enum": [
+              "none",
+              "mine",
+              "consensus"
+            ],
+            "title": "Which hidden photos to filter out\n",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hideFilter",
+          "favFilter"
+        ],
+        "type": "object"
+      },
+      "db.WebAuthnAuthenticationCredential": {
+        "properties": {
+          "authenticatorAttachment": {
+            "type": "string"
+          },
+          "clientExtensionResults": {
+            "$ref": "#/components/schemas/db.WebAuthnClientExtensionResults"
+          },
+          "id": {
+            "type": "string"
+          },
+          "rawId": {
+            "type": "string"
+          },
+          "response": {
+            "$ref": "#/components/schemas/db.WebAuthnAuthenticationCredentialResponse"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "rawId",
+          "response",
+          "clientExtensionResults",
+          "type"
+        ],
+        "type": "object"
+      },
+      "db.WebAuthnAuthenticationCredentialResponse": {
+        "properties": {
+          "authenticatorData": {
+            "type": "string"
+          },
+          "clientDataJSON": {
+            "type": "string"
+          },
+          "signature": {
+            "type": "string"
+          },
+          "userHandle": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "clientDataJSON",
+          "authenticatorData",
+          "signature"
+        ],
+        "type": "object"
+      },
+      "db.WebAuthnAuthenticationOptions": {
+        "properties": {
+          "allowCredentials": {
+            "items": {
+              "$ref": "#/components/schemas/db.WebAuthnCredentialDescriptor"
+            },
+            "type": "array"
+          },
+          "challenge": {
+            "type": "string"
+          },
+          "hints": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "rpId": {
+            "type": "string"
+          },
+          "timeout": {
+            "type": "number"
+          },
+          "userVerification": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "challenge"
+        ],
+        "type": "object"
+      },
+      "db.WebAuthnAuthenticatorSelection": {
+        "properties": {
+          "authenticatorAttachment": {
+            "type": "string"
+          },
+          "requireResidentKey": {
+            "type": "boolean"
+          },
+          "residentKey": {
+            "type": "string"
+          },
+          "userVerification": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "db.WebAuthnClientExtensionResults": {
+        "properties": {
+          "appid": {
+            "type": "boolean"
+          },
+          "credProps": {
+            "properties": {
+              "rk": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "db.WebAuthnCredentialDescriptor": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "transports": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type"
+        ],
+        "type": "object"
+      },
+      "db.WebAuthnPubKeyParam": {
+        "properties": {
+          "alg": {
+            "type": "number"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "alg"
+        ],
+        "type": "object"
+      },
+      "db.WebAuthnRegistrationCredential": {
+        "properties": {
+          "authenticatorAttachment": {
+            "type": "string"
+          },
+          "clientExtensionResults": {
+            "$ref": "#/components/schemas/db.WebAuthnClientExtensionResults"
+          },
+          "id": {
+            "type": "string"
+          },
+          "rawId": {
+            "type": "string"
+          },
+          "response": {
+            "$ref": "#/components/schemas/db.WebAuthnRegistrationCredentialResponse"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "rawId",
+          "response",
+          "clientExtensionResults",
+          "type"
+        ],
+        "type": "object"
+      },
+      "db.WebAuthnRegistrationCredentialResponse": {
+        "properties": {
+          "attestationObject": {
+            "type": "string"
+          },
+          "authenticatorData": {
+            "type": "string"
+          },
+          "clientDataJSON": {
+            "type": "string"
+          },
+          "publicKey": {
+            "type": "string"
+          },
+          "publicKeyAlgorithm": {
+            "type": "number"
+          },
+          "transports": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "clientDataJSON",
+          "attestationObject"
+        ],
+        "type": "object"
+      },
+      "db.WebAuthnRegistrationOptions": {
+        "properties": {
+          "attestation": {
+            "type": "string"
+          },
+          "attestationFormats": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "authenticatorSelection": {
+            "$ref": "#/components/schemas/db.WebAuthnAuthenticatorSelection"
+          },
+          "challenge": {
+            "type": "string"
+          },
+          "excludeCredentials": {
+            "items": {
+              "$ref": "#/components/schemas/db.WebAuthnCredentialDescriptor"
+            },
+            "type": "array"
+          },
+          "hints": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "pubKeyCredParams": {
+            "items": {
+              "$ref": "#/components/schemas/db.WebAuthnPubKeyParam"
+            },
+            "type": "array"
+          },
+          "rp": {
+            "$ref": "#/components/schemas/db.WebAuthnRp"
+          },
+          "timeout": {
+            "type": "number"
+          },
+          "user": {
+            "$ref": "#/components/schemas/db.WebAuthnUser"
+          }
+        },
+        "required": [
+          "rp",
+          "user",
+          "challenge",
+          "pubKeyCredParams"
+        ],
+        "type": "object"
+      },
+      "db.WebAuthnRp": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "db.WebAuthnUser": {
+        "properties": {
+          "displayName": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "displayName"
+        ],
+        "type": "object"
+      },
+      "photo.ExternalServiceName": {
+        "enum": [
+          "insightface",
+          "embedding",
+          "landmark"
+        ],
+        "type": "string"
+      },
+      "photo.LandmarkItem": {
+        "properties": {
+          "bbox": {
+            "$ref": "#/components/schemas/db.LandmarkBBox"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "id": {
+            "type": "number"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "confidence",
+          "bbox"
+        ],
+        "type": "object"
+      },
+      "photo.LandmarkSearchResult": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "landmarks": {
+            "items": {
+              "properties": {
+                "bbox": {
+                  "$ref": "#/components/schemas/db.LandmarkBBox"
+                },
+                "confidence": {
+                  "type": "number"
+                },
+                "label": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "label",
+                "confidence",
+                "bbox"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "photoId": {
+            "type": "number"
+          },
+          "taken_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "photoId",
+          "filename",
+          "created_at",
+          "landmarks"
+        ],
+        "type": "object"
+      },
+      "photo.NaturalSearchResult": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "location_city": {
+            "type": "string"
+          },
+          "location_country": {
+            "type": "string"
+          },
+          "photoId": {
+            "type": "number"
+          },
+          "score": {
+            "type": "number"
+          },
+          "taken_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "photoId",
+          "score",
+          "filename",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "photo.ParsedQuery": {
+        "properties": {
+          "fromDate": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          },
+          "semanticQuery": {
+            "type": "string"
+          },
+          "toDate": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "semanticQuery"
+        ],
+        "title": "Serializable form returned to API callers\n",
+        "type": "object"
+      },
+      "photo.PhotoSearchResult": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "photoId": {
+            "type": "number"
+          },
+          "score": {
+            "type": "number"
+          },
+          "taken_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "photoId",
+          "score",
+          "filename",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "photo.QueueServiceStatus": {
+        "properties": {
+          "done": {
+            "type": "number"
+          },
+          "failed": {
+            "type": "number"
+          },
+          "pending": {
+            "type": "number"
+          },
+          "processing": {
+            "type": "number"
+          },
+          "service": {
+            "$ref": "#/components/schemas/photo.ScanService"
+          }
+        },
+        "required": [
+          "service",
+          "pending",
+          "processing",
+          "failed",
+          "done"
+        ],
+        "type": "object"
+      },
+      "photo.ScanService": {
+        "enum": [
+          "embedding",
+          "face_detection",
+          "landmark",
+          "quality",
+          "geocoding"
+        ],
+        "type": "string"
+      },
+      "photo.ServiceHealthStatus": {
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "lastChecked": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "nullable": true,
+                "type": "boolean"
+              }
+            ],
+            "nullable": true
+          },
+          "lastError": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "nullable": true,
+                "type": "boolean"
+              }
+            ],
+            "nullable": true
+          },
+          "name": {
+            "$ref": "#/components/schemas/photo.ExternalServiceName"
+          }
+        },
+        "required": [
+          "name",
+          "available",
+          "lastChecked",
+          "lastError"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Generated by encore",
+    "title": "API for w2b9g",
+    "version": "1",
+    "x-logo": {
+      "altText": "Encore logo",
+      "backgroundColor": "#EEEEE1",
+      "url": "https://encore.dev/assets/branding/logo/logo-black.png"
+    }
+  },
+  "openapi": "3.0.0",
+  "paths": {
+    "/": {
+      "get": {
+        "operationId": "GET:web.rootRedirect",
+        "responses": {
+          "200": {
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/albums": {
+      "get": {
+        "operationId": "GET:photo.listAlbums",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "albums": {
+                      "items": {
+                        "$ref": "#/components/schemas/db.Album"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "albums"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "List all albums accessible to the user.\n"
+      },
+      "patch": {
+        "operationId": "PATCH:photo.updateAlbum",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "coverPhotoId": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "nullable": true,
+                        "type": "boolean"
+                      }
+                    ],
+                    "nullable": true
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "displayMode": {
+                    "enum": [
+                      "grid",
+                      "map"
+                    ],
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "number"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "cover_filename": {
+                      "type": "string"
+                    },
+                    "cover_photo_id": {
+                      "type": "number"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "display_mode": {
+                      "enum": [
+                        "grid",
+                        "map"
+                      ],
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "number"
+                    },
+                    "is_shared": {
+                      "type": "boolean"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "newest_photo_at": {
+                      "type": "string"
+                    },
+                    "oldest_photo_at": {
+                      "type": "string"
+                    },
+                    "photo_count": {
+                      "type": "number"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    },
+                    "user_id": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "user_id",
+                    "name",
+                    "display_mode",
+                    "photo_count",
+                    "is_shared",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Update an album (rename).\n"
+      },
+      "post": {
+        "operationId": "POST:photo.createAlbum",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "description": {
+                    "type": "string"
+                  },
+                  "displayMode": {
+                    "enum": [
+                      "grid",
+                      "map"
+                    ],
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "cover_filename": {
+                      "type": "string"
+                    },
+                    "cover_photo_id": {
+                      "type": "number"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "display_mode": {
+                      "enum": [
+                        "grid",
+                        "map"
+                      ],
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "number"
+                    },
+                    "is_shared": {
+                      "type": "boolean"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "newest_photo_at": {
+                      "type": "string"
+                    },
+                    "oldest_photo_at": {
+                      "type": "string"
+                    },
+                    "photo_count": {
+                      "type": "number"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    },
+                    "user_id": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "user_id",
+                    "name",
+                    "display_mode",
+                    "photo_count",
+                    "is_shared",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Create a new album.\n"
+      }
+    },
+    "/albums/photos": {
+      "post": {
+        "operationId": "POST:photo.addPhotoToAlbum",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "albumId": {
+                    "type": "number"
+                  },
+                  "photoId": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "albumId",
+                  "photoId"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Add a photo to an album.\n"
+      }
+    },
+    "/albums/photos/batch": {
+      "post": {
+        "operationId": "POST:photo.batchUpdateAlbumPhotos",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "action": {
+                    "enum": [
+                      "add",
+                      "remove"
+                    ],
+                    "type": "string"
+                  },
+                  "albumIds": {
+                    "items": {
+                      "type": "number"
+                    },
+                    "type": "array"
+                  },
+                  "photoIds": {
+                    "items": {
+                      "type": "number"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "albumIds",
+                  "photoIds",
+                  "action"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Batch add/remove photos to/from albums.\n"
+      }
+    },
+    "/albums/public/{token}": {
+      "get": {
+        "operationId": "GET:photo.getPublicAlbum",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "cover_filename": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "display_mode": {
+                      "enum": [
+                        "grid",
+                        "map"
+                      ],
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "number"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "newest_photo_at": {
+                      "type": "string"
+                    },
+                    "oldest_photo_at": {
+                      "type": "string"
+                    },
+                    "photo_count": {
+                      "type": "number"
+                    },
+                    "photos": {
+                      "items": {
+                        "$ref": "#/components/schemas/db.PublicAlbumPhoto"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "display_mode",
+                    "photo_count",
+                    "photos"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Get an album by public share token (no authentication required).\n"
+      }
+    },
+    "/albums/share": {
+      "post": {
+        "operationId": "POST:photo.shareAlbum",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "accessLevel": {
+                    "enum": [
+                      "read",
+                      "write"
+                    ],
+                    "type": "string"
+                  },
+                  "albumId": {
+                    "type": "number"
+                  },
+                  "userId": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "albumId",
+                  "userId",
+                  "accessLevel"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Share an album with another user.\n"
+      }
+    },
+    "/albums/{albumId}/shares/{userId}": {
+      "delete": {
+        "operationId": "DELETE:photo.removeAlbumShare",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "albumId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          },
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Remove a share from an album (owner only).\n"
+      }
+    },
+    "/albums/{id}": {
+      "delete": {
+        "operationId": "DELETE:photo.deleteAlbum",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "message"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Delete an album.\n"
+      },
+      "get": {
+        "operationId": "GET:photo.getAlbum",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "cover_filename": {
+                      "type": "string"
+                    },
+                    "cover_photo_id": {
+                      "type": "number"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "display_mode": {
+                      "enum": [
+                        "grid",
+                        "map"
+                      ],
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "number"
+                    },
+                    "is_shared": {
+                      "type": "boolean"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "newest_photo_at": {
+                      "type": "string"
+                    },
+                    "oldest_photo_at": {
+                      "type": "string"
+                    },
+                    "photo_count": {
+                      "type": "number"
+                    },
+                    "photos": {
+                      "items": {
+                        "$ref": "#/components/schemas/db.AlbumPhotoWithMeta"
+                      },
+                      "type": "array"
+                    },
+                    "role": {
+                      "enum": [
+                        "owner",
+                        "admin",
+                        "contributor",
+                        "viewer"
+                      ],
+                      "type": "string"
+                    },
+                    "settings": {
+                      "$ref": "#/components/schemas/db.AlbumUserSettings"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    },
+                    "user_id": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "photos",
+                    "role",
+                    "id",
+                    "user_id",
+                    "name",
+                    "display_mode",
+                    "photo_count",
+                    "is_shared",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Get an album with its photos.\n"
+      }
+    },
+    "/albums/{id}/public-link": {
+      "delete": {
+        "operationId": "DELETE:photo.deleteAlbumPublicLink",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Delete the public share link for an album (owner only).\n"
+      },
+      "post": {
+        "operationId": "POST:photo.createAlbumPublicLink",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "expiresIn": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "album_id": {
+                      "type": "number"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "created_by_user_id": {
+                      "type": "number"
+                    },
+                    "expires_at": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "number"
+                    },
+                    "token": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "album_id",
+                    "token",
+                    "created_by_user_id",
+                    "created_at"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Create a public share link for an album (owner only).\n"
+      }
+    },
+    "/albums/{id}/settings": {
+      "patch": {
+        "operationId": "PATCH:photo.updateAlbumUserSettings",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "activeView": {
+                    "$ref": "#/components/schemas/db.ActiveView"
+                  },
+                  "coverPhotoId": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "nullable": true,
+                        "type": "boolean"
+                      }
+                    ],
+                    "nullable": true
+                  },
+                  "hideMode": {
+                    "enum": [
+                      "mine",
+                      "all"
+                    ],
+                    "type": "string"
+                  },
+                  "viewConfig": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/db.ViewConfig"
+                      },
+                      {
+                        "nullable": true,
+                        "type": "boolean"
+                      }
+                    ],
+                    "nullable": true
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "active_view": {
+                      "$ref": "#/components/schemas/db.ActiveView"
+                    },
+                    "album_id": {
+                      "type": "number"
+                    },
+                    "cover_photo_id": {
+                      "type": "number"
+                    },
+                    "hide_mode": {
+                      "enum": [
+                        "mine",
+                        "all"
+                      ],
+                      "type": "string"
+                    },
+                    "user_id": {
+                      "type": "number"
+                    },
+                    "view_config": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/db.ViewConfig"
+                        },
+                        {
+                          "nullable": true,
+                          "type": "boolean"
+                        }
+                      ],
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "album_id",
+                    "user_id",
+                    "hide_mode",
+                    "active_view"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Update personal settings/preferences for an album.\n"
+      }
+    },
+    "/albums/{id}/shares": {
+      "get": {
+        "operationId": "GET:photo.getAlbumShares",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "publicLink": {
+                      "$ref": "#/components/schemas/db.AlbumPublicLink"
+                    },
+                    "shares": {
+                      "items": {
+                        "$ref": "#/components/schemas/db.AlbumShareWithUser"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "shares"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Get all shares for an album (owner only).\n"
+      }
+    },
+    "/api/build-info": {
+      "get": {
+        "operationId": "GET:web.buildInfo",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "build": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "build"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/app": {
+      "get": {
+        "operationId": "GET:web.appRedirect",
+        "responses": {
+          "200": {
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/app/{path}": {
+      "get": {
+        "operationId": "GET:web.frontend",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "operationId": "POST:user.login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "email",
+                  "password"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "token": {
+                      "type": "string"
+                    },
+                    "user": {
+                      "$ref": "#/components/schemas/db.UserWithRolesAndPermissions"
+                    }
+                  },
+                  "required": [
+                    "user",
+                    "token"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Login — no auth required\n"
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "operationId": "POST:user.logout",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "message"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Logout — auth required\n"
+      }
+    },
+    "/auth/passkey/login/options": {
+      "post": {
+        "operationId": "POST:user.passkeyAuthOptions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "challengeId": {
+                      "type": "string"
+                    },
+                    "options": {
+                      "$ref": "#/components/schemas/db.WebAuthnAuthenticationOptions"
+                    }
+                  },
+                  "required": [
+                    "challengeId",
+                    "options"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Get passkey authentication options — no auth\n"
+      }
+    },
+    "/auth/passkey/login/verify": {
+      "post": {
+        "operationId": "POST:user.passkeyAuthVerify",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "challengeId": {
+                    "type": "string"
+                  },
+                  "credential": {
+                    "$ref": "#/components/schemas/db.WebAuthnAuthenticationCredential"
+                  }
+                },
+                "required": [
+                  "challengeId",
+                  "credential"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "token": {
+                      "type": "string"
+                    },
+                    "user": {
+                      "$ref": "#/components/schemas/db.UserWithRolesAndPermissions"
+                    }
+                  },
+                  "required": [
+                    "user",
+                    "token"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Verify passkey authentication — no auth\n"
+      }
+    },
+    "/auth/passkey/register/options": {
+      "post": {
+        "operationId": "POST:user.passkeyRegisterOptions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "challengeId": {
+                      "type": "string"
+                    },
+                    "options": {
+                      "$ref": "#/components/schemas/db.WebAuthnRegistrationOptions"
+                    }
+                  },
+                  "required": [
+                    "challengeId",
+                    "options"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Get passkey registration options — auth required\n"
+      }
+    },
+    "/auth/passkey/register/verify": {
+      "post": {
+        "operationId": "POST:user.passkeyRegisterVerify",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "challengeId": {
+                    "type": "string"
+                  },
+                  "credential": {
+                    "$ref": "#/components/schemas/db.WebAuthnRegistrationCredential"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "challengeId",
+                  "credential"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "backed_up": {
+                      "type": "boolean"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "credential_id": {
+                      "type": "string"
+                    },
+                    "device_type": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "credential_id",
+                    "name",
+                    "device_type",
+                    "backed_up",
+                    "created_at"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Verify passkey registration — auth required\n"
+      }
+    },
+    "/auth/passkeys": {
+      "get": {
+        "operationId": "GET:user.listPasskeys",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "passkeys": {
+                      "items": {
+                        "$ref": "#/components/schemas/db.PasskeyInfo"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "passkeys"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "List passkeys for the current user — auth required\n"
+      }
+    },
+    "/auth/passkeys/{credentialId}": {
+      "delete": {
+        "operationId": "DELETE:user.deletePasskey",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "credentialId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "message"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Delete a passkey — auth required\n"
+      }
+    },
+    "/auth/password": {
+      "post": {
+        "operationId": "POST:user.changePassword",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "current_password": {
+                    "type": "string"
+                  },
+                  "new_password": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "current_password",
+                  "new_password"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Change own password — only requires authentication\n"
+      }
+    },
+    "/auth/request-password-reset": {
+      "post": {
+        "operationId": "POST:user.requestPasswordReset",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "email"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "message"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Request password reset — no auth required\n"
+      }
+    },
+    "/auth/reset-password": {
+      "post": {
+        "operationId": "POST:user.resetPassword",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "new_password": {
+                    "type": "string"
+                  },
+                  "token": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "token",
+                  "new_password"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "message"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Reset password with token — no auth required\n"
+      }
+    },
+    "/faces/{faceId}/assign": {
+      "post": {
+        "operationId": "POST:photo.assignFaceToPerson",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "faceId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "personId": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "personId"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Assign a face to a person.\n"
+      }
+    },
+    "/faces/{faceId}/ignore": {
+      "post": {
+        "operationId": "POST:photo.ignoreFace",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "faceId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Ignore a face (manual removal).\n"
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "GET:web.health",
+        "responses": {
+          "200": {
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/healthz": {
+      "get": {
+        "operationId": "GET:web.healthz",
+        "responses": {
+          "200": {
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/permissions": {
+      "get": {
+        "operationId": "GET:role.listPermissions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "permissions": {
+                      "items": {
+                        "$ref": "#/components/schemas/db.Permission"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "permissions"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "List all permissions — requires roles.read\n"
+      }
+    },
+    "/persons": {
+      "get": {
+        "operationId": "GET:photo.listPersons",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "enableLocalFaces": {
+                      "type": "boolean"
+                    },
+                    "persons": {
+                      "items": {
+                        "properties": {
+                          "cover_bbox": {
+                            "$ref": "#/components/schemas/db.FaceBBox"
+                          },
+                          "cover_face_id": {
+                            "type": "number"
+                          },
+                          "cover_filename": {
+                            "type": "string"
+                          },
+                          "created_at": {
+                            "type": "string"
+                          },
+                          "faceCount": {
+                            "type": "number"
+                          },
+                          "id": {
+                            "type": "number"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "updated_at": {
+                            "type": "string"
+                          },
+                          "user_id": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "user_id",
+                          "name",
+                          "created_at",
+                          "updated_at",
+                          "faceCount"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "persons",
+                    "enableLocalFaces"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "List all persons owned by the user.\n"
+      }
+    },
+    "/persons/merge": {
+      "post": {
+        "operationId": "POST:photo.mergePersons",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "sourceIds": {
+                    "items": {
+                      "type": "number"
+                    },
+                    "type": "array"
+                  },
+                  "targetId": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "sourceIds",
+                  "targetId"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Merge multiple persons into one.\n"
+      }
+    },
+    "/persons/{id}": {
+      "get": {
+        "operationId": "GET:photo.getPersonDetails",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "cover_bbox": {
+                      "$ref": "#/components/schemas/db.FaceBBox"
+                    },
+                    "cover_face_id": {
+                      "type": "number"
+                    },
+                    "cover_filename": {
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "faces": {
+                      "items": {
+                        "$ref": "#/components/schemas/db.Face"
+                      },
+                      "type": "array"
+                    },
+                    "id": {
+                      "type": "number"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    },
+                    "user_id": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "faces",
+                    "id",
+                    "user_id",
+                    "name",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Get person details with their faces.\n"
+      },
+      "patch": {
+        "operationId": "PATCH:photo.updatePerson",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "cover_bbox": {
+                      "$ref": "#/components/schemas/db.FaceBBox"
+                    },
+                    "cover_face_id": {
+                      "type": "number"
+                    },
+                    "cover_filename": {
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "faceCount": {
+                      "type": "number"
+                    },
+                    "id": {
+                      "type": "number"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    },
+                    "user_id": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "user_id",
+                    "name",
+                    "created_at",
+                    "updated_at",
+                    "faceCount"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Update person (rename).\n"
+      }
+    },
+    "/persons/{id}/ignore": {
+      "post": {
+        "operationId": "POST:photo.ignorePersonFaces",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Ignore all faces of a person (manual removal).\n"
+      }
+    },
+    "/photos": {
+      "get": {
+        "operationId": "GET:photo.listPhotos",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": true,
+            "in": "query",
+            "name": "showHidden",
+            "schema": {
+              "type": "boolean"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "photos": {
+                      "items": {
+                        "$ref": "#/components/schemas/db.PhotoWithCuration"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "photos"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "List all photos owned by the user.\n"
+      },
+      "post": {
+        "description": "Expects the raw image data in the request body. Filename should be provided in X-File-Name header.\n",
+        "operationId": "POST:photo.uploadPhoto",
+        "responses": {
+          "200": {
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Upload a photo.\n"
+      }
+    },
+    "/photos/albums": {
+      "get": {
+        "operationId": "GET:photo.getPhotosAlbums",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": true,
+            "in": "query",
+            "name": "ids",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "results": {
+                      "items": {
+                        "$ref": "#/components/schemas/db.PhotoAlbumsResponse"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "results"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Get album IDs for a list of photos.\n"
+      }
+    },
+    "/photos/file/{filename}": {
+      "get": {
+        "operationId": "GET:photo.getPhotoFile",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Serve a photo file.\n"
+      }
+    },
+    "/photos/find-groups": {
+      "post": {
+        "operationId": "POST:photo.findPhotoGroups",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "groups_created": {
+                      "type": "number"
+                    },
+                    "total_photos_grouped": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "groups_created",
+                    "total_photos_grouped"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Find similar photo groups using DINOv2 embeddings.\n"
+      }
+    },
+    "/photos/groups": {
+      "get": {
+        "operationId": "GET:photo.listPhotoGroups",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "groups": {
+                      "items": {
+                        "$ref": "#/components/schemas/db.PhotoGroup"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "groups"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "List all photo groups for the current user.\n"
+      }
+    },
+    "/photos/groups/next-unreviewed": {
+      "get": {
+        "operationId": "GET:photo.getNextUnreviewedGroup",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "group": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/db.PhotoGroup"
+                        },
+                        {
+                          "nullable": true,
+                          "type": "boolean"
+                        }
+                      ],
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "group"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Get the next unreviewed photo group.\n"
+      }
+    },
+    "/photos/groups/{id}/review": {
+      "post": {
+        "operationId": "POST:photo.reviewPhotoGroup",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Mark a photo group as reviewed.\n"
+      }
+    },
+    "/photos/needs-gps-rescan": {
+      "get": {
+        "operationId": "GET:photo.getPhotosNeedingGpsRescan",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "ids": {
+                      "items": {
+                        "type": "number"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "ids"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/photos/recompute-auto-crops": {
+      "post": {
+        "operationId": "POST:photo.recomputeAutoCrops",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "updated": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "updated"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Recompute auto-crop focus points for all photos based on existing face/landmark\ndata.\n"
+      }
+    },
+    "/photos/refresh-metadata": {
+      "get": {
+        "operationId": "GET:photo.getPhotosToRefreshMetadata",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "ids": {
+                      "items": {
+                        "type": "number"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "ids"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Get all photo IDs for metadata refresh.\n"
+      }
+    },
+    "/photos/rescan": {
+      "post": {
+        "operationId": "POST:photo.rescanPhotos",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "force": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "force"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "queued": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "queued"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/photos/scan-queue/cancel": {
+      "post": {
+        "operationId": "POST:photo.cancelPendingScans",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "cancelled": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "cancelled"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/photos/scan-queue/retry-failed": {
+      "post": {
+        "operationId": "POST:photo.retryFailedScans",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "retried": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "retried"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/photos/scan-queue/status": {
+      "get": {
+        "operationId": "GET:photo.getScanQueueStatus",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "services": {
+                      "items": {
+                        "$ref": "#/components/schemas/photo.QueueServiceStatus"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "services"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/photos/search": {
+      "post": {
+        "operationId": "POST:photo.searchPhotos",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "limit": {
+                    "type": "number"
+                  },
+                  "query": {
+                    "type": "string"
+                  },
+                  "threshold": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "results": {
+                      "items": {
+                        "$ref": "#/components/schemas/photo.PhotoSearchResult"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "results"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Semantic photo search using natural language query via CLIP text embeddings.\n"
+      }
+    },
+    "/photos/search/date": {
+      "get": {
+        "description": "Parameters: from, to (ISO 8601 strings), year, month, limit\n",
+        "operationId": "GET:photo.searchPhotosByDate",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": true,
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "allowEmptyValue": true,
+            "explode": true,
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "allowEmptyValue": true,
+            "explode": true,
+            "in": "query",
+            "name": "year",
+            "schema": {
+              "type": "number"
+            },
+            "style": "form"
+          },
+          {
+            "allowEmptyValue": true,
+            "explode": true,
+            "in": "query",
+            "name": "month",
+            "schema": {
+              "type": "number"
+            },
+            "style": "form"
+          },
+          {
+            "allowEmptyValue": true,
+            "explode": true,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "number"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "photos": {
+                      "items": {
+                        "$ref": "#/components/schemas/db.PhotoWithCuration"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "photos"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Search photos by date range, year, or year+month.\n"
+      }
+    },
+    "/photos/search/landmarks": {
+      "post": {
+        "operationId": "POST:photo.searchPhotosByLandmark",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "limit": {
+                    "type": "number"
+                  },
+                  "query": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "results": {
+                      "items": {
+                        "$ref": "#/components/schemas/photo.LandmarkSearchResult"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "results"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Search photos by landmark label (e.g. \"kirche\", \"brücke\", \"eiffel\").\n"
+      }
+    },
+    "/photos/search/location": {
+      "get": {
+        "operationId": "GET:photo.searchPhotosByLocation",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": true,
+            "in": "query",
+            "name": "city",
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "allowEmptyValue": true,
+            "explode": true,
+            "in": "query",
+            "name": "country",
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "allowEmptyValue": true,
+            "explode": true,
+            "in": "query",
+            "name": "lat",
+            "schema": {
+              "type": "number"
+            },
+            "style": "form"
+          },
+          {
+            "allowEmptyValue": true,
+            "explode": true,
+            "in": "query",
+            "name": "lon",
+            "schema": {
+              "type": "number"
+            },
+            "style": "form"
+          },
+          {
+            "allowEmptyValue": true,
+            "explode": true,
+            "in": "query",
+            "name": "radius",
+            "schema": {
+              "type": "number"
+            },
+            "style": "form"
+          },
+          {
+            "allowEmptyValue": true,
+            "explode": true,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "number"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "photos": {
+                      "items": {
+                        "$ref": "#/components/schemas/db.PhotoWithCuration"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "photos"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Search photos by location: city/country name or GPS coordinates with radius\n(km).\n"
+      }
+    },
+    "/photos/search/natural": {
+      "post": {
+        "description": "Parses German queries like \"Kirchen in München von 2004 bis 2017\" into: - a semantic CLIP query (\"Kirchen\") - a location filter (\"München\") - a date range filter (2004-01-01 – 2017-12-31) Returns results and the parsed query components for transparency.\n",
+        "operationId": "POST:photo.searchPhotosNatural",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "limit": {
+                    "type": "number"
+                  },
+                  "query": {
+                    "type": "string"
+                  },
+                  "threshold": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "parsed": {
+                      "$ref": "#/components/schemas/photo.ParsedQuery"
+                    },
+                    "results": {
+                      "items": {
+                        "$ref": "#/components/schemas/photo.NaturalSearchResult"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "results",
+                    "parsed"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Combined natural language photo search.\n"
+      }
+    },
+    "/photos/service-health": {
+      "get": {
+        "operationId": "GET:photo.getExternalServiceHealth",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "services": {
+                      "items": {
+                        "$ref": "#/components/schemas/photo.ServiceHealthStatus"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "services"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/photos/{id}": {
+      "delete": {
+        "operationId": "DELETE:photo.deletePhoto",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "message"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Delete a photo.\n"
+      }
+    },
+    "/photos/{id}/curation": {
+      "patch": {
+        "operationId": "PATCH:photo.updatePhotoCuration",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "status": {
+                    "$ref": "#/components/schemas/db.CurationStatus"
+                  }
+                },
+                "required": [
+                  "status"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Update curation status for a photo (visible/hidden/favorite).\n"
+      }
+    },
+    "/photos/{id}/date": {
+      "patch": {
+        "operationId": "PATCH:photo.updatePhotoDate",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "taken_at": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "taken_at"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "taken_at": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "taken_at"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Update the \"taken at\" date of a photo.\n"
+      }
+    },
+    "/photos/{id}/faces": {
+      "get": {
+        "operationId": "GET:photo.getPhotoFaces",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "faces": {
+                      "items": {
+                        "$ref": "#/components/schemas/db.Face"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "faces"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Get faces for a specific photo.\n"
+      }
+    },
+    "/photos/{id}/hard": {
+      "delete": {
+        "operationId": "DELETE:photo.hardDeletePhoto",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "message"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Permanently delete a photo (file + DB record).\n"
+      }
+    },
+    "/photos/{id}/index-landmarks": {
+      "post": {
+        "operationId": "POST:photo.reindexPhotoLandmarks",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Trigger landmark re-detection for a specific photo.\n"
+      }
+    },
+    "/photos/{id}/landmarks": {
+      "get": {
+        "operationId": "GET:photo.getPhotoLandmarks",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "landmarks": {
+                      "items": {
+                        "$ref": "#/components/schemas/photo.LandmarkItem"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "landmarks"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Get all detected landmarks for a specific photo.\n"
+      }
+    },
+    "/photos/{id}/refresh-metadata": {
+      "post": {
+        "operationId": "POST:photo.refreshPhotoMetadata",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "taken_at": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Refresh metadata for a specific photo.\n"
+      }
+    },
+    "/photos/{id}/reindex": {
+      "post": {
+        "operationId": "POST:photo.reindexPhoto",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Reindex a single photo.\n"
+      }
+    },
+    "/photos/{id}/rescan-gps": {
+      "post": {
+        "operationId": "POST:photo.rescanPhotoGps",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "geocoded": {
+                      "type": "boolean"
+                    },
+                    "gpsFound": {
+                      "type": "boolean"
+                    },
+                    "scansQueued": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "gpsFound",
+                    "geocoded",
+                    "scansQueued"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/roles": {
+      "get": {
+        "operationId": "GET:role.listRoles",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "roles": {
+                      "items": {
+                        "$ref": "#/components/schemas/db.RoleWithPermissions"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "roles"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "List all roles — requires roles.list\n"
+      },
+      "post": {
+        "operationId": "POST:role.createRole",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "description": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "description": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "number"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Create a new role — requires roles.create\n"
+      }
+    },
+    "/roles/{id}": {
+      "delete": {
+        "operationId": "DELETE:role.deleteRole",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "message"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Delete a role — requires roles.delete\n"
+      },
+      "get": {
+        "operationId": "GET:role.getRole",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "description": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "number"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "users": {
+                      "items": {
+                        "$ref": "#/components/schemas/db.User"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "users",
+                    "id",
+                    "name",
+                    "description"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Get a single role by ID — requires roles.read\n"
+      },
+      "put": {
+        "operationId": "PUT:role.updateRole",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "description": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "description": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "number"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Update an existing role — requires roles.update\n"
+      }
+    },
+    "/roles/{roleId}/permissions": {
+      "post": {
+        "operationId": "POST:role.assignPermission",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "roleId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "permissionId": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "permissionId"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "permissions": {
+                      "items": {
+                        "$ref": "#/components/schemas/db.Permission"
+                      },
+                      "type": "array"
+                    },
+                    "roleId": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "roleId",
+                    "permissions"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Assign a permission to a role — requires roles.update\n"
+      }
+    },
+    "/roles/{roleId}/permissions/{permissionId}": {
+      "delete": {
+        "operationId": "DELETE:role.revokePermission",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "roleId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          },
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "permissionId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "message"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Revoke a permission from a role — requires roles.update\n"
+      }
+    },
+    "/users": {
+      "get": {
+        "operationId": "GET:user.listUsers",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "users": {
+                      "items": {
+                        "$ref": "#/components/schemas/db.UserWithRoles"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "users"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "List all users — requires users.list\n"
+      },
+      "post": {
+        "operationId": "POST:user.createUser",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "email",
+                  "name",
+                  "password"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "email": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "number"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "roles": {
+                      "items": {
+                        "$ref": "#/components/schemas/db.Role"
+                      },
+                      "type": "array"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "roles",
+                    "id",
+                    "email",
+                    "name",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Create a new user (Register) — no auth required\n"
+      }
+    },
+    "/users/{id}": {
+      "delete": {
+        "operationId": "DELETE:user.deleteUser",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "message"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Delete a user — requires users.delete\n"
+      },
+      "get": {
+        "operationId": "GET:user.getUser",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "email": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "number"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "roles": {
+                      "items": {
+                        "$ref": "#/components/schemas/db.Role"
+                      },
+                      "type": "array"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "roles",
+                    "id",
+                    "email",
+                    "name",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Get a single user by ID (with roles) — requires users.read\n"
+      },
+      "put": {
+        "operationId": "PUT:user.updateUser",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "email": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "number"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "roles": {
+                      "items": {
+                        "$ref": "#/components/schemas/db.Role"
+                      },
+                      "type": "array"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "roles",
+                    "id",
+                    "email",
+                    "name",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Update an existing user — requires users.update\n"
+      }
+    },
+    "/users/{userId}/roles": {
+      "get": {
+        "operationId": "GET:user.getUserRoles",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "roles": {
+                      "items": {
+                        "$ref": "#/components/schemas/db.Role"
+                      },
+                      "type": "array"
+                    },
+                    "userId": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "userId",
+                    "roles"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Get all roles for a user — requires users.read\n"
+      },
+      "post": {
+        "operationId": "POST:user.assignRole",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "roleId": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "roleId"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "roles": {
+                      "items": {
+                        "$ref": "#/components/schemas/db.Role"
+                      },
+                      "type": "array"
+                    },
+                    "userId": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "userId",
+                    "roles"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Assign a role to a user — requires roles.assign\n"
+      }
+    },
+    "/users/{userId}/roles/{roleId}": {
+      "delete": {
+        "operationId": "DELETE:user.removeRole",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          },
+          {
+            "allowEmptyValue": true,
+            "explode": false,
+            "in": "path",
+            "name": "roleId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "message"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success response"
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Remove a role from a user — requires roles.revoke\n"
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "Encore local dev environment",
+      "url": "http://localhost:4000"
+    }
+  ]
+}

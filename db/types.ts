@@ -120,25 +120,117 @@ export interface PasskeyInfo {
   created_at: string;
 }
 
+// WebAuthn protocol types (used in passkey registration/authentication flows)
+
+export interface WebAuthnRp {
+  name: string;
+  id?: string;
+}
+
+export interface WebAuthnUser {
+  id: string;
+  name: string;
+  displayName: string;
+}
+
+export interface WebAuthnPubKeyParam {
+  type: string;
+  alg: number;
+}
+
+export interface WebAuthnCredentialDescriptor {
+  id: string;
+  type: string;
+  transports?: string[];
+}
+
+export interface WebAuthnAuthenticatorSelection {
+  authenticatorAttachment?: string;
+  requireResidentKey?: boolean;
+  residentKey?: string;
+  userVerification?: string;
+}
+
+export interface WebAuthnRegistrationOptions {
+  rp: WebAuthnRp;
+  user: WebAuthnUser;
+  challenge: string;
+  pubKeyCredParams: WebAuthnPubKeyParam[];
+  timeout?: number;
+  excludeCredentials?: WebAuthnCredentialDescriptor[];
+  authenticatorSelection?: WebAuthnAuthenticatorSelection;
+  attestation?: string;
+  hints?: string[];
+  attestationFormats?: string[];
+}
+
+export interface WebAuthnAuthenticationOptions {
+  challenge: string;
+  timeout?: number;
+  rpId?: string;
+  allowCredentials?: WebAuthnCredentialDescriptor[];
+  userVerification?: string;
+  hints?: string[];
+}
+
+export interface WebAuthnRegistrationCredentialResponse {
+  clientDataJSON: string;
+  attestationObject: string;
+  authenticatorData?: string;
+  transports?: string[];
+  publicKeyAlgorithm?: number;
+  publicKey?: string;
+}
+
+export interface WebAuthnClientExtensionResults {
+  appid?: boolean;
+  credProps?: { rk?: boolean };
+}
+
+export interface WebAuthnRegistrationCredential {
+  id: string;
+  rawId: string;
+  response: WebAuthnRegistrationCredentialResponse;
+  authenticatorAttachment?: string;
+  clientExtensionResults: WebAuthnClientExtensionResults;
+  type: string;
+}
+
+export interface WebAuthnAuthenticationCredentialResponse {
+  clientDataJSON: string;
+  authenticatorData: string;
+  signature: string;
+  userHandle?: string;
+}
+
+export interface WebAuthnAuthenticationCredential {
+  id: string;
+  rawId: string;
+  response: WebAuthnAuthenticationCredentialResponse;
+  authenticatorAttachment?: string;
+  clientExtensionResults: WebAuthnClientExtensionResults;
+  type: string;
+}
+
 export interface PasskeyRegistrationOptionsResponse {
   challengeId: string;
-  options: any;
+  options: WebAuthnRegistrationOptions;
 }
 
 export interface PasskeyRegistrationVerifyRequest {
   challengeId: string;
-  credential: any;
+  credential: WebAuthnRegistrationCredential;
   name?: string;
 }
 
 export interface PasskeyAuthOptionsResponse {
   challengeId: string;
-  options: any;
+  options: WebAuthnAuthenticationOptions;
 }
 
 export interface PasskeyAuthVerifyRequest {
   challengeId: string;
-  credential: any;
+  credential: WebAuthnAuthenticationCredential;
 }
 
 export interface ListPasskeysResponse {

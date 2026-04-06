@@ -142,7 +142,7 @@ describe("Passkey Auth Options", () => {
     expect(result.options).toBeDefined();
     // Use console.log to debug the options structure if it fails again
     // console.log('Auth Options:', JSON.stringify(result.options, null, 2));
-    expect(result.options.rpId || result.options.rpID || (result.options.rp && result.options.rp.id)).toBe("localhost");
+    expect(result.options.rpId).toBe("localhost");
   });
 
   it("stores anonymous challenge (no user_id)", async () => {
