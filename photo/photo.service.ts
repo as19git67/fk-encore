@@ -5,6 +5,7 @@ import { createRequire } from "module";
 import exifr from "exifr";
 import { exiftool } from "exiftool-vendored";
 import { eq, and, or, sql, inArray, ilike, isNull, isNotNull, desc } from "drizzle-orm";
+import { APIError } from "encore.dev/api";
 import { enqueuePhotoScan, DeferJobError } from "./scan-queue";
 import { triggerWorkers } from "./scan-worker";
 import db from "../db/database";
@@ -1707,11 +1708,11 @@ export async function getPublicAlbumLogic(token: string): Promise<PublicAlbumRes
   const link = await dbFirst<typeof albumPublicLinks.$inferSelect>(
     db.select().from(albumPublicLinks).where(eq(albumPublicLinks.token, token))
   );
-  if (!link) throw new Error("Invalid or expired share link");
+  if (!link) throw APIError.notFound("Dieser Link ist ungültig oder existiert nicht mehr.");
 
   // Check expiration
   if (link.expires_at && new Date(link.expires_at) < new Date()) {
-    throw new Error("This share link has expired");
+    throw APIError.notFound("Dieser Link ist abgelaufen.");
   }
 
   const album = await dbFirst<typeof albums.$inferSelect>(
