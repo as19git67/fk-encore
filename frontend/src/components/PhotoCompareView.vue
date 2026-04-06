@@ -749,7 +749,7 @@ function getPhotoById(id: number): Photo | undefined {
   position: fixed;
   inset: 0;
   background: #0a0a0a;
-  z-index: 1000;
+  z-index: 1200;
   display: flex;
   flex-direction: column;
   overflow: hidden;
