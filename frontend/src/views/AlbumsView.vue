@@ -57,6 +57,7 @@ const creating = ref(false)
 const showRenameDialog = ref(false)
 const showDeleteDialog = ref(false)
 const renameValue = ref('')
+const renameDesc = ref('')
 const renameDisplayMode = ref<'grid' | 'map'>('grid')
 const updatingAlbum = ref(false)
 const selectedAlbum = ref<Album | null>(null)
@@ -105,6 +106,7 @@ function canManageAlbum(album: Album) {
 function openRenameDialog(album: Album) {
   selectedAlbum.value = album
   renameValue.value = album.name
+  renameDesc.value = album.description || ''
   renameDisplayMode.value = album.display_mode ?? 'grid'
   showRenameDialog.value = true
 }
@@ -121,7 +123,7 @@ async function handleRenameAlbum() {
 
   updatingAlbum.value = true
   try {
-    await updateAlbum(selectedAlbum.value.id, { name: newName, displayMode: renameDisplayMode.value })
+    await updateAlbum(selectedAlbum.value.id, { name: newName, description: renameDesc.value.trim(), displayMode: renameDisplayMode.value })
     showRenameDialog.value = false
     selectedAlbum.value = null
     await loadData()
@@ -338,6 +340,10 @@ onMounted(loadData)
       <div class="dialog-content">
         <label for="renameAlbumName">Name des Albums</label>
         <InputText id="renameAlbumName" v-model="renameValue" autofocus @keydown.enter="handleRenameAlbum" />
+      </div>
+      <div class="dialog-content" style="margin-top: 0.5rem">
+        <label for="renameAlbumDesc">Beschreibung</label>
+        <textarea id="renameAlbumDesc" v-model="renameDesc" rows="2" class="p-inputtextarea p-inputtext" style="width: 100%"></textarea>
       </div>
       <div class="dialog-content" style="margin-top: 0.5rem">
         <label>Darstellung</label>

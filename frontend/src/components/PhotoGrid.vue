@@ -50,6 +50,8 @@ const props = defineProps<{
   selectedIndex: number
   selectedPhotoIds: Set<number>
   canDelete?: boolean
+  /** When true, suppress automatic scroll-to-photo on selection changes */
+  suppressScroll?: boolean
   /** When true, photo items in stacks open the compare view instead of selecting */
   hasStacks?: boolean
   /** When true, tapping a stack selects all its photos instead of opening compare view */
@@ -184,9 +186,9 @@ watch(() => props.selectedIndex, (idx) => {
   }
 })
 
-// User-driven selection changes → smooth scroll
+// User-driven selection changes → smooth scroll (skip when fullscreen suppresses it)
 watch(() => props.selectedIndex, (idx) => {
-  if (!initialScrollDone) return
+  if (!initialScrollDone || props.suppressScroll) return
   scrollToPhoto(idx)
 })
 

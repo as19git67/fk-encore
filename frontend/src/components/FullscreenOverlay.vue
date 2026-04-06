@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
 import { getPhotoUrl, type Photo, type CurationStatus } from '../api/photos'
@@ -22,6 +22,14 @@ const emit = defineEmits<{
   'show-details': []
 }>()
 
+// ── Preload erst nach Laden des aktuellen Bildes ────────────────────────────
+const currentLoaded = ref(false)
+watch(() => props.photo.id, () => { currentLoaded.value = false })
+
+function onCurrentImageLoad() {
+  currentLoaded.value = true
+}
+
 // ── Touch-Swipe für mobile Navigation ────────────────────────────────────────
 const touchStartX = ref(0)
 const touchStartY = ref(0)
@@ -41,6 +49,10 @@ function handleTouchEnd(e: TouchEvent) {
   }
 }
 
+// ── Body-Scroll sperren während Fullscreen ──────────────────────────────────
+onMounted(() => { document.body.style.overflow = 'hidden' })
+onUnmounted(() => { document.body.style.overflow = '' })
+
 function formatDate(photo: Photo) {
   const dateStr = photo.taken_at || photo.created_at
   if (!dateStr) return ''
@@ -52,18 +64,21 @@ function formatDate(photo: Photo) {
 </script>
 
 <template>
+  <Teleport to="body">
   <div class="fullscreen-overlay" @click="emit('close')">
-    <!-- Preload neighbours -->
-    <div style="display: none">
+    <!-- Preload neighbours only after current image has loaded -->
+    <div v-if="currentLoaded" style="display: none">
       <HeicImage v-if="prevPhoto" :src="getPhotoUrl(prevPhoto.filename)" />
       <HeicImage v-if="nextPhoto" :src="getPhotoUrl(nextPhoto.filename)" />
     </div>
 
     <div class="fullscreen-content" @click.stop @touchstart="handleTouchStart" @touchend="handleTouchEnd">
-      <HeicImage :src="getPhotoUrl(photo.filename)" :alt="photo.original_name" objectFit="contain">
-        <!-- Allow caller to inject overlays (e.g. face box) -->
-        <slot />
-      </HeicImage>
+      <div @load.capture="onCurrentImageLoad" style="display: contents">
+        <HeicImage :src="getPhotoUrl(photo.filename)" :alt="photo.original_name" objectFit="contain">
+          <!-- Allow caller to inject overlays (e.g. face box) -->
+          <slot />
+        </HeicImage>
+      </div>
 
       <!-- Top bar -->
       <div class="fs-topbar">
@@ -121,6 +136,7 @@ function formatDate(photo: Photo) {
       />
     </div>
   </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -128,7 +144,7 @@ function formatDate(photo: Photo) {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.92);
-  z-index: 1000;
+  z-index: 1200;
   display: flex;
   align-items: center;
   justify-content: center;
