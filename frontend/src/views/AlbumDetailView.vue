@@ -453,7 +453,6 @@ onUnmounted(() => serviceHealth.stopPolling())
         </div>
         <div class="controls">
           <Button v-if="album.cover_photo_id" icon="pi pi-image" label="Cover fokussieren" size="small" text @click="scrollToCover" />
-          <Button v-if="isOwner" icon="pi pi-share-alt" label="Freigeben" size="small" text @click="openShareDialog" />
           <div v-if="album.settings" class="control-group">
             <label>Ansicht:</label>
             <SelectButton v-model="album.settings.active_view" :options="availableViewOptions" optionLabel="label" optionValue="value" @change="handleSettingsChange" />
