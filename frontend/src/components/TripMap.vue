@@ -17,7 +17,7 @@ const emit = defineEmits<{
   'open-fullscreen': [stopPhotos: Photo[], startIndex: number]
 }>()
 
-const { stops, photosWithoutGps, dayPaths, dayTransitions, dayColorMap, uniqueDays, bounds } =
+const { stops, photosWithoutGps, dayPaths, dayTransitions, dayColorMap, bounds } =
   usePhotoStops(toRef(props, 'photos'))
 
 const mapContainer = ref<HTMLElement | null>(null)
@@ -195,14 +195,6 @@ function formatStopDate(stop: Stop): string {
   return date.toLocaleDateString('de-DE', { day: '2-digit', month: 'short' })
 }
 
-// ── Legend ────────────────────────────────────────────────────────────────────
-
-function formatDay(day: string): string {
-  return new Date(day + 'T00:00:00').toLocaleDateString('de-DE', {
-    day: '2-digit',
-    month: 'short',
-  })
-}
 
 // ── Lifecycle ────────────────────────────────────────────────────────────────
 
@@ -223,14 +215,6 @@ function handleNoGpsPhotoClick(photo: Photo) {
 <template>
   <div class="trip-map-wrapper">
     <div ref="mapContainer" class="trip-map-container" />
-
-    <!-- Day legend -->
-    <div v-if="uniqueDays.length > 1" class="trip-legend">
-      <div v-for="day in uniqueDays" :key="day" class="trip-legend-item">
-        <span class="trip-legend-dot" :style="{ background: dayColorMap.get(day) }" />
-        <span class="trip-legend-label">{{ formatDay(day) }}</span>
-      </div>
-    </div>
 
     <!-- Stats overlay -->
     <div class="trip-stats">
@@ -299,45 +283,11 @@ function handleNoGpsPhotoClick(photo: Photo) {
   overflow: hidden;
 }
 
-/* Legend */
-.trip-legend {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  z-index: 1000;
-  background: rgba(0, 0, 0, 0.75);
-  backdrop-filter: blur(8px);
-  border-radius: 8px;
-  padding: 8px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.trip-legend-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.trip-legend-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.trip-legend-label {
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 0.8rem;
-  white-space: nowrap;
-}
-
 /* Stats */
 .trip-stats {
   position: absolute;
   top: 12px;
-  left: 12px;
+  right: 12px;
   z-index: 1000;
   background: rgba(0, 0, 0, 0.75);
   backdrop-filter: blur(8px);

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, shallowRef, computed, watch } from 'vue'
+import { ref, shallowRef, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
@@ -123,7 +123,7 @@ const expandedSelectedPhotos = computed<Photo[]>(() => {
   for (const photo of selectedPhotos.value) {
     expanded.add(photo.id)
     const group = photoToGroup.value.get(photo.id)
-    if (group) {
+    if (group && !group.reviewed_at) {
       for (const pid of group.photo_ids) expanded.add(pid)
     }
   }
@@ -230,7 +230,13 @@ async function loadLandmarks(photoId: number) {
 // ── Fullscreen ────────────────────────────────────────────────────────────────
 const isFullscreen = ref(false)
 
-watch(isFullscreen, (val) => { if (!val) isEditingDate.value = false })
+watch(isFullscreen, (val) => {
+  if (!val) {
+    isEditingDate.value = false
+    // Nach Schließen des Fullscreen: Grid zum aktuellen Foto scrollen
+    nextTick(() => photoGridRef.value?.scrollToPhoto(selectedIndex.value, 'instant'))
+  }
+})
 
 // ── Column count (received from PhotoGrid) ────────────────────────────────────
 const columnCount = ref(4)
@@ -808,6 +814,7 @@ onUnmounted(() => {
         :selectedPhotoIds="activeSelectedPhotoIds"
         :canDelete="canDelete"
         :hasStacks="true"
+        :suppressScroll="isFullscreen"
         :selectMode="selectMode"
         @update:columnCount="columnCount = $event"
         @section-change="activeSection = $event"
