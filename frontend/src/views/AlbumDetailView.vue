@@ -367,7 +367,7 @@ onUnmounted(() => serviceHealth.stopPolling())
     </div>
 
     <div v-if="album" class="album-info-block">
-      <div class="album-info-block__description">
+      <div v-if="displayMode !== 'map'" class="album-info-block__description">
         <div v-if="!editingDescription" class="album-info-block__description-content">
           <span :class="{ 'album-info-block__description-text--empty': !album.description }" class="album-info-block__description-text">
             {{ album.description || 'Keine Beschreibung' }}
