@@ -160,7 +160,7 @@ export async function passkeyRegisterVerifyLogic(
   const { challenge } = await getAndDeleteChallenge(req.challengeId);
 
   const verification = await verifyRegistrationResponse({
-    response: req.credential,
+    response: req.credential as Parameters<typeof verifyRegistrationResponse>[0]['response'],
     expectedChallenge: challenge,
     expectedOrigin: getRpOrigin(),
     expectedRPID: getRpId(),
@@ -236,7 +236,7 @@ export async function passkeyAuthVerifyLogic(
   }
 
   const verification = await verifyAuthenticationResponse({
-    response: req.credential,
+    response: req.credential as Parameters<typeof verifyAuthenticationResponse>[0]['response'],
     expectedChallenge: challenge,
     expectedOrigin: getRpOrigin(),
     expectedRPID: getRpId(),
