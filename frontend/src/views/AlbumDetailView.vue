@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, defineAsyncComponent, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import SelectButton from 'primevue/selectbutton'
 import Button from 'primevue/button'
@@ -48,6 +48,9 @@ const error = ref('')
 
 const selectedIndex = ref(-1)
 const isFullscreen = ref(false)
+watch(isFullscreen, (val) => {
+  if (!val) nextTick(() => photoGridRef.value?.scrollToPhoto(selectedIndex.value, 'instant'))
+})
 const activeSection = ref('')
 
 // Flat Photo[] for composables, sorted oldest-first
@@ -418,6 +421,7 @@ onUnmounted(() => serviceHealth.stopPolling())
         :selectedIndex="selectedIndex"
         :selectedPhotoIds="new Set(selectedPhoto ? [selectedPhoto.id] : [])"
         :canDelete="false"
+        :suppressScroll="isFullscreen"
         @update:columnCount="() => {}"
         @section-change="activeSection = $event"
         @photo-click="handlePhotoClick"
