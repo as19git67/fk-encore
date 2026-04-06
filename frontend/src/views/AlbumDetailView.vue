@@ -324,9 +324,9 @@ const sharing = ref(false)
 const loadingShares = ref(false)
 const publicLink = ref<AlbumPublicLink | null>(null)
 const linkCopied = ref(false)
-const linkExpiry = ref<PublicLinkExpiry>(undefined)
+const linkExpiry = ref<string | null>(null)
 const expiryOptions = [
-  { label: 'Unbegrenzt', value: undefined },
+  { label: 'Unbegrenzt', value: null },
   { label: '7 Tage', value: '7d' },
   { label: '30 Tage', value: '30d' },
   { label: '90 Tage', value: '90d' },
@@ -397,7 +397,7 @@ function getPublicLinkUrl() {
 
 async function handleCreatePublicLink() {
   try {
-    publicLink.value = await createAlbumPublicLink(albumId, linkExpiry.value)
+    publicLink.value = await createAlbumPublicLink(albumId, (linkExpiry.value as PublicLinkExpiry) ?? undefined)
     await copyPublicLink()
   } catch (err: any) { error.value = err.message || 'Fehler beim Erstellen des Links' }
 }

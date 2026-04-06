@@ -416,7 +416,7 @@ export function removeAlbumShare(albumId: number, userId: number) {
 export function createAlbumPublicLink(albumId: number, expiresIn?: PublicLinkExpiry) {
   return apiFetch<AlbumPublicLink>(`/albums/${albumId}/public-link`, {
     method: 'POST',
-    body: JSON.stringify({ expiresIn })
+    body: JSON.stringify(expiresIn ? { expiresIn } : {})
   })
 }
 
