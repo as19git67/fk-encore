@@ -26,7 +26,7 @@ struct PersonDetailView: View {
                 LazyVGrid(columns: columns, spacing: 2) {
                     ForEach(photos) { photo in
                         NavigationLink(value: photo.id) {
-                            PhotoThumbnailView(photoId: photo.id)
+                            PhotoThumbnailView(filename: photo.filename)
                                 .aspectRatio(1, contentMode: .fill)
                                 .clipped()
                         }
@@ -36,7 +36,9 @@ struct PersonDetailView: View {
             }
         }
         .navigationTitle(person?.name ?? "Person")
+        #if os(iOS)
         .navigationBarTitleDisplayMode(.large)
+        #endif
         .navigationDestination(for: Int.self) { photoId in
             PhotoDetailView(photoId: photoId)
         }

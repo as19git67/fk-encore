@@ -26,9 +26,11 @@ struct RegisterView: View {
 
                 TextField("E-Mail", text: $viewModel.email)
                     .textContentType(.emailAddress)
+                    #if os(iOS)
                     .keyboardType(.emailAddress)
-                    .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
+                    #endif
+                    .autocorrectionDisabled()
                     .padding()
                     .background(.quaternary)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -73,6 +75,8 @@ struct RegisterView: View {
 
             Spacer()
         }
+        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        #endif
     }
 }

@@ -72,7 +72,9 @@ struct PhotoUploadView: View {
             }
             .padding(.top, 24)
             .navigationTitle("Fotos hochladen")
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") { dismiss() }

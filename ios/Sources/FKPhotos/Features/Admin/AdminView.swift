@@ -82,7 +82,7 @@ struct AdminView: View {
 }
 
 struct ServerSettingsView: View {
-    @State private var serverURL = "http://localhost:4000"
+    @AppStorage(APIClient.serverURLKey) private var serverURL: String = "http://localhost:4000"
     @State private var isSaved = false
 
     var body: some View {
