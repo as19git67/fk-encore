@@ -41,14 +41,14 @@ actor APIClient {
 
     func get<T: Decodable>(_ path: String, query: [String: String]? = nil) async throws -> T {
         let url = buildURL(path: path, query: query)
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: url, timeoutInterval: 30)
         request.httpMethod = "GET"
         applyAuth(&request)
         return try await perform(request)
     }
 
     func post<B: Encodable, T: Decodable>(_ path: String, body: B) async throws -> T {
-        var request = URLRequest(url: buildURL(path: path))
+        var request = URLRequest(url: buildURL(path: path), timeoutInterval: 30)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(body)
@@ -57,7 +57,7 @@ actor APIClient {
     }
 
     func put<B: Encodable, T: Decodable>(_ path: String, body: B) async throws -> T {
-        var request = URLRequest(url: buildURL(path: path))
+        var request = URLRequest(url: buildURL(path: path), timeoutInterval: 30)
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(body)
@@ -65,8 +65,17 @@ actor APIClient {
         return try await perform(request)
     }
 
+    func patch<B: Encodable, T: Decodable>(_ path: String, body: B) async throws -> T {
+        var request = URLRequest(url: buildURL(path: path), timeoutInterval: 30)
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(body)
+        applyAuth(&request)
+        return try await perform(request)
+    }
+
     func delete<T: Decodable>(_ path: String) async throws -> T {
-        var request = URLRequest(url: buildURL(path: path))
+        var request = URLRequest(url: buildURL(path: path), timeoutInterval: 30)
         request.httpMethod = "DELETE"
         applyAuth(&request)
         return try await perform(request)

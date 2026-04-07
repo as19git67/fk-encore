@@ -14,7 +14,7 @@ final class PhotosViewModel {
 
         do {
             let response: ListPhotosResponse = try await APIClient.shared.get("/photos")
-            photos = response.photos
+            photos = response.photos.reversed()
         } catch {
             errorMessage = error.localizedDescription
         }
