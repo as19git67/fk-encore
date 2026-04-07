@@ -3153,12 +3153,14 @@ export async function indexPhotoQuality(userId: number, photoId: number): Promis
   let processingPath = filePath;
   let tempPath: string | null = null;
 
-  // HEIC files must be converted before sending to the embedding service
+  // HEIC files must be converted before sending to the embedding service.
+  // sharp's bundled libvips lacks HEIC decode support; use heic-convert instead.
   const ext = path.extname(photo.filename).toLowerCase();
   if (ext === ".heic" || ext === ".heif") {
     try {
+      const jpegBuffer = await convertHeicToJpeg(filePath);
       tempPath = path.join(UPLOAD_DIR, `temp_q_${photoId}_${Date.now()}.jpg`);
-      await sharp(filePath).jpeg({ quality: 100 }).toFile(tempPath);
+      await fs.promises.writeFile(tempPath, jpegBuffer);
       processingPath = tempPath;
     } catch (err) {
       console.error(`HEIC conversion for quality scoring failed (photo ${photoId}):`, err);
