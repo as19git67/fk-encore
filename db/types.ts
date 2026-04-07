@@ -308,6 +308,7 @@ export interface Photo {
   location_name?: string;
   location_city?: string;
   location_country?: string;
+  location_short?: string;
   ai_quality_score?: number;
   ai_quality_details?: Record<string, number>;
   auto_crop?: { x: number; y: number };

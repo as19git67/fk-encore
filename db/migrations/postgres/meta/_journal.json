@@ -120,6 +120,13 @@
       "when": 1775900000000,
       "tag": "0015_photo_description",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1776000000000,
+      "tag": "0016_location_short",
+      "breakpoints": true
     }
   ]
 }

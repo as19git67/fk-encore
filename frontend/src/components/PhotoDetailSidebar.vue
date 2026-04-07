@@ -413,8 +413,7 @@ watch(() => props.photo.id, () => {
         <div class="sidebar-section">
           <div class="section-label"><i class="pi pi-map-marker" /> Ort</div>
           <div v-if="photo.location_name || photo.location_city" class="location-pill">
-            <template v-if="photo.location_name && photo.location_country">{{ photo.location_name }}, {{ photo.location_country }}</template>
-            <template v-else-if="photo.location_name">{{ photo.location_name }}</template>
+            <template v-if="photo.location_name">{{ photo.location_name }}</template>
             <template v-else-if="photo.location_city && photo.location_country">{{ photo.location_city }}, {{ photo.location_country }}</template>
             <template v-else>{{ photo.location_city }}</template>
           </div>
