@@ -2921,9 +2921,11 @@ export async function indexPhotoLandmarks(userId: number, photoId: number): Prom
 
   try {
     const result = await callLandmarkService(processingPath);
-    if (result.landmarks.length > 0) {
+    // Only keep landmarks with ≥60% confidence to avoid cluttering the DB
+    const confident = result.landmarks.filter(lm => lm.confidence >= 0.6);
+    if (confident.length > 0) {
       await dbExec(db.delete(photoLandmarks).where(eq(photoLandmarks.photo_id, photoId)));
-      for (const lm of result.landmarks) {
+      for (const lm of confident) {
         await dbExec(
           db.insert(photoLandmarks).values({
             photo_id: photoId,
@@ -2934,7 +2936,10 @@ export async function indexPhotoLandmarks(userId: number, photoId: number): Prom
           })
         );
       }
-      console.log(`Stored ${result.landmarks.length} landmarks for photo ${photoId}`);
+      console.log(`Stored ${confident.length} landmarks for photo ${photoId} (${result.landmarks.length - confident.length} below 60% filtered)`);
+    } else if (result.landmarks.length > 0) {
+      // All landmarks below threshold – clear any stale entries
+      await dbExec(db.delete(photoLandmarks).where(eq(photoLandmarks.photo_id, photoId)));
     }
   } catch (err) {
     console.error(`Landmark detection failed for photo ${photoId}:`, err);

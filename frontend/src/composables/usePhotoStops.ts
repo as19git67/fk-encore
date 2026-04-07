@@ -1,5 +1,6 @@
 import { computed, type Ref } from 'vue'
 import type { Photo } from '../api/photos'
+import { formatLocationLabel } from '../utils/dateFormat'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -78,11 +79,7 @@ function pickCover(photos: Photo[]): Photo {
 }
 
 function buildLocationLabel(photo: Photo): string {
-  const parts: string[] = []
-  if (photo.location_name) parts.push(photo.location_name)
-  if (photo.location_city) parts.push(photo.location_city)
-  if (photo.location_country && !parts.length) parts.push(photo.location_country)
-  return parts.join(', ') || ''
+  return formatLocationLabel(photo)
 }
 
 function isGeoPhoto(p: Photo): p is GeoPhoto {
