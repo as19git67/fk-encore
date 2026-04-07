@@ -444,7 +444,7 @@ interface GeocodeResult {
 
 async function reverseGeocode(lat: number, lon: number): Promise<GeocodeResult> {
   try {
-    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&accept-language=de`;
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&accept-language=de,en,local`;
     const res = await fetch(url, {
       headers: { "User-Agent": "fk-encore-photo-app/1.0" },
     });
