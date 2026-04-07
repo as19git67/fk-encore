@@ -26,7 +26,7 @@ struct AlbumDetailView: View {
                 LazyVGrid(columns: columns, spacing: 2) {
                     ForEach(photos) { photo in
                         NavigationLink(value: photo.id) {
-                            PhotoThumbnailView(photoId: photo.id)
+                            PhotoThumbnailView(filename: photo.filename)
                                 .aspectRatio(1, contentMode: .fill)
                                 .clipped()
                         }

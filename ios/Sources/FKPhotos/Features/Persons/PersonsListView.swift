@@ -48,12 +48,10 @@ struct PersonCardView: View {
     var body: some View {
         VStack(spacing: 8) {
             // Face thumbnail
-            if let coverPhotoFilename = person.cover_filename,
-               let coverFaceId = person.cover_face_id {
-                PhotoThumbnailView(photoId: coverFaceId)
+            if let coverPhotoFilename = person.cover_filename {
+                PhotoThumbnailView(filename: coverPhotoFilename)
                     .frame(width: 80, height: 80)
                     .clipShape(Circle())
-                let _ = coverPhotoFilename // suppress unused
             } else {
                 Circle()
                     .fill(.quaternary)

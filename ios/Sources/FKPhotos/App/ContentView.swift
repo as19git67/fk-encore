@@ -1,9 +1,11 @@
 import SwiftUI
 
-struct ContentView: View {
+public struct ContentView: View {
     @Environment(AuthManager.self) private var authManager
 
-    var body: some View {
+    public init() {}
+
+    public var body: some View {
         Group {
             if authManager.isAuthenticated {
                 MainTabView()
@@ -12,6 +14,10 @@ struct ContentView: View {
             }
         }
         .animation(.easeInOut, value: authManager.isAuthenticated)
+        .task {
+            // Inject the AuthManager into APIClient so requests can attach the token.
+            await APIClient.shared.setAuthManager(authManager)
+        }
     }
 }
 

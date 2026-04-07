@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 
 @Observable
-final class AuthManager: @unchecked Sendable {
+public final class AuthManager: @unchecked Sendable {
     private(set) var currentUser: UserWithRolesAndPermissions?
     private(set) var isAuthenticated = false
     private(set) var isLoading = false
@@ -14,7 +14,7 @@ final class AuthManager: @unchecked Sendable {
         KeychainHelper.loadString(forKey: tokenKey)
     }
 
-    init() {
+    public init() {
         restoreSession()
     }
 

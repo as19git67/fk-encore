@@ -4,6 +4,8 @@ struct LoginView: View {
     @Environment(AuthManager.self) private var authManager
     @State private var viewModel = AuthViewModel()
     @State private var showRegister = false
+    @State private var showServerConfig = false
+    @AppStorage(APIClient.serverURLKey) private var serverURL: String = "http://localhost:4000"
 
     var body: some View {
         NavigationStack {
@@ -80,9 +82,32 @@ struct LoginView: View {
                 .font(.footnote)
 
                 Spacer()
+
+                // Server selection
+                Button {
+                    showServerConfig = true
+                } label: {
+                    Label(serverURL, systemImage: "server.rack")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .padding(.bottom, 8)
             }
             .navigationDestination(isPresented: $showRegister) {
                 RegisterView()
+            }
+            .sheet(isPresented: $showServerConfig) {
+                NavigationStack {
+                    ServerSettingsView()
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Fertig") { showServerConfig = false }
+                            }
+                        }
+                }
+                .presentationDetents([.medium])
             }
         }
     }

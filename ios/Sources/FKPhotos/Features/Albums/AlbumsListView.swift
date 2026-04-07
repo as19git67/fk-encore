@@ -81,10 +81,9 @@ struct AlbumRowView: View {
         HStack(spacing: 12) {
             // Album cover thumbnail
             if let coverFilename = album.cover_filename {
-                PhotoThumbnailView(photoId: album.cover_photo_id ?? 0)
+                PhotoThumbnailView(filename: coverFilename)
                     .frame(width: 60, height: 60)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
-                let _ = coverFilename // suppress unused warning
             } else {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(.quaternary)

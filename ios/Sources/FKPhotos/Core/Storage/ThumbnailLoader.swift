@@ -6,22 +6,20 @@ import SwiftUI
 final class ThumbnailLoader: @unchecked Sendable {
     private(set) var image: UIImage?
     private(set) var isLoading = false
+    private(set) var hasError = false
 
-    private let photoId: Int
-    private let isThumbnail: Bool
+    private let filename: String
 
-    init(photoId: Int, isThumbnail: Bool = true) {
-        self.photoId = photoId
-        self.isThumbnail = isThumbnail
+    init(filename: String) {
+        self.filename = filename
     }
 
     @MainActor
     func load() async {
-        guard !isLoading else { return }
+        guard !isLoading, image == nil else { return }
 
-        let cacheKey = "photo-\(photoId)-\(isThumbnail ? "thumb" : "full")"
+        let cacheKey = "photo-\(filename)"
 
-        // Check cache first
         if let cached = await ImageCache.shared.image(forKey: cacheKey) {
             image = cached
             return
@@ -31,21 +29,15 @@ final class ThumbnailLoader: @unchecked Sendable {
         defer { isLoading = false }
 
         do {
-            var query: [String: String] = [:]
-            if isThumbnail {
-                query["thumbnail"] = "true"
+            let data = try await APIClient.shared.downloadData("/photos/file/\(filename)")
+            guard let loadedImage = UIImage(data: data) else {
+                hasError = true
+                return
             }
-
-            let data = try await APIClient.shared.downloadData(
-                "/photos/\(photoId)/file",
-                query: query.isEmpty ? nil : query
-            )
-
-            guard let loadedImage = UIImage(data: data) else { return }
             image = loadedImage
             await ImageCache.shared.store(loadedImage, forKey: cacheKey)
         } catch {
-            // Silently fail — UI shows placeholder
+            hasError = true
         }
     }
 }

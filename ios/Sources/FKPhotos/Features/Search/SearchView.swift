@@ -15,7 +15,9 @@ struct SearchView: View {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
                     TextField("Fotos suchen...", text: $viewModel.query)
+                        #if os(iOS)
                         .textInputAutocapitalization(.never)
+                        #endif
                         .autocorrectionDisabled()
                         .onSubmit {
                             Task { await viewModel.search() }
@@ -56,7 +58,7 @@ struct SearchView: View {
                     LazyVGrid(columns: columns, spacing: 2) {
                         ForEach(viewModel.results) { photo in
                             NavigationLink(value: photo.id) {
-                                PhotoThumbnailView(photoId: photo.id)
+                                PhotoThumbnailView(filename: photo.filename)
                                     .aspectRatio(1, contentMode: .fill)
                                     .clipped()
                             }
