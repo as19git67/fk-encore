@@ -1,7 +1,16 @@
 /**
- * Centralized date formatting utilities.
+ * Centralized date/location formatting utilities.
  * All photo-related dates use the browser locale; admin dates use 'de-DE'.
  */
+
+/** Compact location label: name + city, country only as fallback */
+export function formatLocationLabel(loc: { location_name?: string; location_city?: string; location_country?: string }): string {
+  const parts: string[] = []
+  if (loc.location_name) parts.push(loc.location_name)
+  if (loc.location_city) parts.push(loc.location_city)
+  if (loc.location_country && !parts.length) parts.push(loc.location_country)
+  return parts.join(', ')
+}
 
 /** Full photo date with time (for fullscreen overlay, sidebar, shared album) */
 export function formatPhotoDate(dateStr: string | null | undefined): string {

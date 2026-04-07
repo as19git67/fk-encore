@@ -5,7 +5,7 @@ import Message from 'primevue/message'
 import HeicImage from '../components/HeicImage.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import { getPublicAlbum, getPhotoUrl, type PublicAlbumResponse, type PublicAlbumPhoto, type Photo } from '../api/photos'
-import { formatPhotoDate } from '../utils/dateFormat'
+import { formatPhotoDate, formatLocationLabel } from '../utils/dateFormat'
 
 const TripMap = defineAsyncComponent(() => import('../components/TripMap.vue'))
 
@@ -88,9 +88,7 @@ function handleKeydown(e: KeyboardEvent) {
 // ── Info formatting ─────────────────────────────────────────────────────────
 
 function formatLocation(photo: PublicAlbumPhoto): string {
-  return [photo.location_name, photo.location_city, photo.location_country]
-    .filter(Boolean)
-    .join(', ')
+  return formatLocationLabel(photo)
 }
 
 function formatDate(photo: PublicAlbumPhoto): string {

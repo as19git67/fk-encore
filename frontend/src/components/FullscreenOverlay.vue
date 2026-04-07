@@ -3,7 +3,7 @@ import { ref, watch, onMounted, onUnmounted } from 'vue'
 import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
 import { getPhotoUrl, type Photo, type CurationStatus } from '../api/photos'
-import { formatPhotoDate } from '../utils/dateFormat'
+import { formatPhotoDate, formatLocationLabel } from '../utils/dateFormat'
 
 const props = defineProps<{
   photo: Photo
@@ -57,6 +57,10 @@ onUnmounted(() => { document.body.style.overflow = '' })
 function formatDate(photo: Photo) {
   return formatPhotoDate(photo.taken_at || photo.created_at)
 }
+
+function locationLabel(photo: Photo) {
+  return formatLocationLabel(photo)
+}
 </script>
 
 <template>
@@ -83,7 +87,13 @@ function formatDate(photo: Photo) {
         <div class="fs-center">
           <!-- Slot for custom center content (e.g. person name + rename btn) -->
           <slot name="topbar-center">
-            <div class="fs-date-bar">{{ formatDate(photo) }}</div>
+            <div class="fs-info-center">
+              <div class="fs-date-bar">{{ formatDate(photo) }}</div>
+              <div v-if="locationLabel(photo)" class="fs-location-bar">
+                <i class="pi pi-map-marker" />
+                {{ locationLabel(photo) }}
+              </div>
+            </div>
           </slot>
         </div>
 
@@ -180,9 +190,24 @@ function formatDate(photo: Photo) {
   justify-content: center;
 }
 
+.fs-info-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.3;
+}
+
 .fs-date-bar {
   color: rgba(255,255,255,0.85);
   font-size: 0.9em;
+}
+
+.fs-location-bar {
+  color: rgba(255,255,255,0.6);
+  font-size: 0.75em;
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
 }
 
 .fs-toolbar {
