@@ -4,7 +4,7 @@ import fs from "fs";
 import path from "path";
 import { eq, sql } from "drizzle-orm";
 import db from "../db/database";
-import { photos, faces, persons, albums, albumPhotos, albumShares, users, roles, permissions, rolePermissions, userRoles } from "../db/schema";
+import { photos, faces, userFaceAssignments, persons, albums, albumPhotos, albumShares, users, roles, permissions, rolePermissions, userRoles } from "../db/schema";
 import { dbInsertReturning, dbExec } from "../db/adapter";
 import { UPLOAD_DIR, computeFaceCompositionScore } from "./photo.service";
 import * as service from "./photo.service";
@@ -23,6 +23,7 @@ describe("Photo Module", () => {
     await db.delete(albumPhotos);
     await db.delete(albumShares);
     await db.delete(albums);
+    await db.delete(userFaceAssignments);
     await db.delete(faces);
     await db.delete(persons);
     await db.delete(photos);
@@ -251,14 +252,19 @@ describe("Photo Module", () => {
         mimeType: "image/jpeg",
       });
 
-      // Insert an ignored face
-      await db.insert(faces).values({
+      // Insert a face (global) and an ignored assignment for this user
+      const insertedFace = await dbInsertReturning<{ id: number }>(
+        db.insert(faces).values({
+          photo_id: photo.id,
+          bbox: JSON.stringify({ x: 0.1, y: 0.1, width: 0.2, height: 0.2 }),
+          embedding: JSON.stringify([0.1, 0.2]),
+          quality: 100
+        }).returning()
+      );
+      await db.insert(userFaceAssignments).values({
         user_id: user1.id,
-        photo_id: photo.id,
-        bbox: JSON.stringify({ x: 0.1, y: 0.1, width: 0.2, height: 0.2 }),
-        embedding: JSON.stringify([0.1, 0.2]),
+        face_id: insertedFace!.id,
         ignored: true,
-        quality: 100
       });
 
       // Verify it's there
@@ -323,25 +329,31 @@ describe("Photo Module", () => {
 
       const olderFace = await dbInsertReturning<{ id: number }>(
         db.insert(faces).values({
-          user_id: user1.id,
           photo_id: olderPhoto!.id,
-          person_id: person!.id,
           bbox: JSON.stringify(olderBbox),
           embedding: JSON.stringify([0.1, 0.2]),
-          ignored: false,
         }).returning()
       );
+      await db.insert(userFaceAssignments).values({
+        user_id: user1.id,
+        face_id: olderFace!.id,
+        person_id: person!.id,
+        ignored: false,
+      });
 
       const newerFace = await dbInsertReturning<{ id: number }>(
         db.insert(faces).values({
-          user_id: user1.id,
           photo_id: newerPhoto!.id,
-          person_id: person!.id,
           bbox: JSON.stringify(newerBbox),
           embedding: JSON.stringify([0.3, 0.4]),
-          ignored: false,
         }).returning()
       );
+      await db.insert(userFaceAssignments).values({
+        user_id: user1.id,
+        face_id: newerFace!.id,
+        person_id: person!.id,
+        ignored: false,
+      });
 
       // Intentionally point persisted cover to the older face.
       // listPersons/getPersonDetails should still resolve the newest face by taken_at.
@@ -380,17 +392,22 @@ describe("Photo Module", () => {
       );
       const photo = { id: photoRow!.id };
 
-      await db.insert(faces).values({
+      const insertedFace = await dbInsertReturning<{ id: number }>(
+        db.insert(faces).values({
+          photo_id: photo.id,
+          bbox: JSON.stringify({ x: 0, y: 0, width: 0.1, height: 0.1 }),
+          embedding: JSON.stringify([0.1, 0.1]),
+        }).returning()
+      );
+      await db.insert(userFaceAssignments).values({
         user_id: user1.id,
-        photo_id: photo.id,
+        face_id: insertedFace!.id,
         person_id: person!.id,
-        bbox: JSON.stringify({ x: 0, y: 0, width: 0.1, height: 0.1 }),
-        embedding: JSON.stringify([0.1, 0.1]),
         ignored: false,
       });
 
       // Verify setup
-      const facesBefore = await db.select().from(faces).where(eq(faces.person_id, person!.id));
+      const facesBefore = await db.select().from(userFaceAssignments).where(eq(userFaceAssignments.person_id, person!.id));
       expect(facesBefore).toHaveLength(1);
 
       // Ignore person
@@ -400,10 +417,10 @@ describe("Photo Module", () => {
       const personAfter = await db.select().from(persons).where(eq(persons.id, person!.id)).then(r => r[0]);
       expect(personAfter).toBeUndefined();
 
-      // Verify faces are marked ignored and person_id is null
-      const facesAfter = await db.select().from(faces).where(eq(faces.photo_id, photo.id));
-      expect(facesAfter[0].ignored).toBeTruthy();
-      expect(facesAfter[0].person_id).toBeNull();
+      // Verify assignments are marked ignored and person_id is null
+      const assignmentsAfter = await db.select().from(userFaceAssignments).where(eq(userFaceAssignments.face_id, insertedFace!.id));
+      expect(assignmentsAfter[0].ignored).toBeTruthy();
+      expect(assignmentsAfter[0].person_id).toBeNull();
     });
   });
 

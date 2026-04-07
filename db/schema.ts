@@ -148,13 +148,10 @@ export const persons = pgTable("persons", {
   updated_at: timestamp("updated_at", { mode: "string" }).defaultNow(),
 });
 
-// ========== Faces ==========
+// ========== Faces (global detection results — one row per detected face per photo) ==========
 
 export const faces = pgTable("faces", {
   id: serial("id").primaryKey(),
-  user_id: integer("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
   photo_id: integer("photo_id")
     .notNull()
     .references(() => photos.id, { onDelete: "cascade" }),
@@ -162,11 +159,27 @@ export const faces = pgTable("faces", {
   bbox: text("bbox").notNull(),
   // Embedding als JSON-kodierte Float32-Liste (z. B. 128/512 Dimensionen)
   embedding: text("embedding").notNull(),
-  person_id: integer("person_id").references(() => persons.id, { onDelete: "set null" }),
   quality: integer("quality").default(0),
-  ignored: boolean("ignored").notNull().default(false),
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
 });
+
+// ========== User Face Assignments (per-user person mapping & ignored state) ==========
+
+export const userFaceAssignments = pgTable(
+  "user_face_assignments",
+  {
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    face_id: integer("face_id")
+      .notNull()
+      .references(() => faces.id, { onDelete: "cascade" }),
+    person_id: integer("person_id").references(() => persons.id, { onDelete: "set null" }),
+    ignored: boolean("ignored").notNull().default(false),
+    created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.user_id, table.face_id] })]
+);
 
 // ========== Photo Curation (per-user visibility) ==========
 
@@ -314,7 +327,7 @@ export const photoLandmarks = pgTable("photo_landmarks", {
 
 // ========== Scan Queue ==========
 
-export const scanServiceEnum = pgEnum("scan_service", ["embedding", "face_detection", "landmark", "quality", "geocoding"]);
+export const scanServiceEnum = pgEnum("scan_service", ["embedding", "face_detection", "face_assignment", "landmark", "quality", "geocoding"]);
 export const scanStatusEnum = pgEnum("scan_status", ["pending", "processing", "failed", "done"]);
 
 export const photoScanQueue = pgTable("photo_scan_queue", {
