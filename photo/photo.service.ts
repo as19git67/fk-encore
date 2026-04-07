@@ -410,25 +410,36 @@ interface ExifMetadata {
   takenAt: string | null;
   latitude: number | null;
   longitude: number | null;
+  description: string | null;
 }
 
 async function getExifMetadata(filePath: string): Promise<ExifMetadata> {
   try {
-    const data = await exifr.parse(filePath, { gps: true });
+    const data = await exifr.parse(filePath, { gps: true, xmp: true, iptc: true });
     let takenAt: string | null = null;
     if (data?.DateTimeOriginal) {
       takenAt = new Date(data.DateTimeOriginal).toISOString();
     } else if (data?.CreateDate) {
       takenAt = new Date(data.CreateDate).toISOString();
     }
+    // Extract description from various EXIF/XMP/IPTC fields
+    const description: string | null =
+      data?.ImageDescription ??
+      data?.Description ??
+      data?.["dc:description"] ??
+      data?.UserComment ??
+      data?.Caption ??
+      data?.["Caption-Abstract"] ??
+      null;
     return {
       takenAt,
       latitude: data?.latitude ?? null,
       longitude: data?.longitude ?? null,
+      description: typeof description === "string" && description.trim() ? description.trim() : null,
     };
   } catch (err) {
     console.error("Error parsing EXIF data:", err);
-    return { takenAt: null, latitude: null, longitude: null };
+    return { takenAt: null, latitude: null, longitude: null, description: null };
   }
 }
 
@@ -567,6 +578,7 @@ export async function uploadPhotoStream(
       taken_at: exifMeta.takenAt,
       latitude: exifMeta.latitude,
       longitude: exifMeta.longitude,
+      description: exifMeta.description,
     }).returning()
   );
 
@@ -594,6 +606,7 @@ export async function uploadPhotoStream(
     created_at: row!.created_at ?? "",
     latitude: row!.latitude ?? undefined,
     longitude: row!.longitude ?? undefined,
+    description: row!.description ?? undefined,
   };
 }
 
@@ -635,6 +648,7 @@ export async function uploadPhotoLogic(
       taken_at: exifMeta2.takenAt,
       latitude: exifMeta2.latitude,
       longitude: exifMeta2.longitude,
+      description: exifMeta2.description,
     }).returning()
   );
 
@@ -662,6 +676,7 @@ export async function uploadPhotoLogic(
     created_at: row2!.created_at ?? "",
     latitude: row2!.latitude ?? undefined,
     longitude: row2!.longitude ?? undefined,
+    description: row2!.description ?? undefined,
   };
 }
 
@@ -675,6 +690,7 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
     ai_quality_score: number | null;
     ai_quality_details: Record<string, number> | null;
     auto_crop: { x: number; y: number } | null;
+    description: string | null;
   }>(
     db
       .select({
@@ -696,6 +712,7 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
         ai_quality_score: photos.ai_quality_score,
         ai_quality_details: photos.ai_quality_details,
         auto_crop: photos.auto_crop,
+        description: photos.description,
       })
       .from(photos)
       .leftJoin(
@@ -728,6 +745,7 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
       ai_quality_score: r.ai_quality_score ?? undefined,
       ai_quality_details: r.ai_quality_details ?? undefined,
       auto_crop: r.auto_crop ?? undefined,
+      description: r.description ?? undefined,
     })),
   };
 }
@@ -921,12 +939,15 @@ export async function refreshPhotoMetadataLogic(userId: number, photoId: number)
     throw new Error("File not found on disk");
   }
 
-  const takenAt = await getExifDate(filePath);
+  const exifMeta = await getExifMetadata(filePath);
 
   // Always update, even if takenAt is null (to sync with current logic if it was different before)
-  await dbExec(db.update(photos).set({ taken_at: takenAt }).where(eq(photos.id, photoId)));
+  await dbExec(db.update(photos).set({
+    taken_at: exifMeta.takenAt,
+    description: exifMeta.description ?? photo.description,
+  }).where(eq(photos.id, photoId)));
 
-  return { success: true, taken_at: takenAt ?? undefined };
+  return { success: true, taken_at: exifMeta.takenAt ?? undefined };
 }
 
 export async function updatePhotoDateLogic(
@@ -987,6 +1008,48 @@ export async function updatePhotoDateLogic(
   }
 
   return { success: true, taken_at: takenAt };
+}
+
+export async function updatePhotoDescriptionLogic(
+  userId: number,
+  photoId: number,
+  description: string | null
+): Promise<{ success: boolean; description: string | null }> {
+  const photo = await dbFirst<typeof photos.$inferSelect>(
+    db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+  );
+
+  if (!photo) {
+    throw new Error("Photo not found or unauthorized");
+  }
+
+  const trimmed = description?.trim() || null;
+
+  // 1. Update database
+  await dbExec(db.update(photos).set({ description: trimmed }).where(eq(photos.id, photoId)));
+
+  // 2. Write to EXIF data
+  try {
+    const filePath = path.join(UPLOAD_DIR, photo.filename);
+    if (fs.existsSync(filePath)) {
+      const ext = path.extname(filePath).toLowerCase();
+      if (EXIF_WRITABLE_EXTENSIONS.has(ext)) {
+        await Promise.race([
+          exiftool.write(filePath, {
+            ImageDescription: trimmed ?? "",
+            "Description": trimmed ?? "",
+          }, ["-overwrite_original"]),
+          new Promise((_, reject) => {
+            setTimeout(() => reject(new Error(`EXIF_WRITE_TIMEOUT after ${EXIF_WRITE_TIMEOUT_MS}ms`)), EXIF_WRITE_TIMEOUT_MS);
+          })
+        ]);
+      }
+    }
+  } catch (err) {
+    console.error("Error writing description to EXIF:", err);
+  }
+
+  return { success: true, description: trimmed };
 }
 
 export function getPhotoFileLogic(filename: string): { data: string; mimeType: string } {
@@ -1224,7 +1287,7 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
   const photoRows = (await db.execute(sql`
     SELECT
       p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash,
-      p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop,
+      p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop, p.description,
       p.latitude, p.longitude,
       p.location_name, p.location_city, p.location_country,
       ap.added_by_user_id, ap.added_at,
@@ -1236,7 +1299,7 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     LEFT JOIN photo_curation my_pc ON my_pc.photo_id = p.id AND my_pc.user_id = ${userId}
     LEFT JOIN photo_curation all_pc ON all_pc.photo_id = p.id AND all_pc.user_id = ANY(ARRAY[${sql.join(participantIds.map(id => sql`${id}`), sql`, `)}]::int[])
     GROUP BY p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash,
-             p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop,
+             p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop, p.description,
              p.latitude, p.longitude,
              p.location_name, p.location_city, p.location_country,
              ap.added_by_user_id, ap.added_at, my_pc.status
@@ -1325,6 +1388,7 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
       location_name: r.location_name ?? undefined,
       location_city: r.location_city ?? undefined,
       location_country: r.location_country ?? undefined,
+      description: r.description ?? undefined,
       curation_stats: isShared ? {
         fav_count: Number(r.fav_count),
         hide_count: Number(r.hide_count),
@@ -1726,7 +1790,7 @@ export async function getPublicAlbumLogic(token: string): Promise<PublicAlbumRes
   const photoRows = (await db.execute(sql`
     SELECT
       p.id, p.filename, p.original_name, p.mime_type, p.size,
-      p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop,
+      p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop, p.description,
       p.latitude, p.longitude,
       p.location_name, p.location_city, p.location_country
     FROM photos p
@@ -1767,6 +1831,7 @@ export async function getPublicAlbumLogic(token: string): Promise<PublicAlbumRes
       location_country: r.location_country ?? undefined,
       ai_quality_score: r.ai_quality_score != null ? Number(r.ai_quality_score) : undefined,
       auto_crop: r.auto_crop ?? undefined,
+      description: r.description ?? undefined,
     })),
   };
 }

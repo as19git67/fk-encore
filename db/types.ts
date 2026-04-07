@@ -311,6 +311,7 @@ export interface Photo {
   ai_quality_score?: number;
   ai_quality_details?: Record<string, number>;
   auto_crop?: { x: number; y: number };
+  description?: string;
 }
 
 export interface FaceBBox { x: number; y: number; width: number; height: number; }

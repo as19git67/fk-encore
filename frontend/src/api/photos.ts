@@ -21,6 +21,7 @@ export interface Photo {
   ai_quality_score?: number
   ai_quality_details?: Record<string, number>
   auto_crop?: { x: number; y: number }
+  description?: string
 }
 
 export interface ListPhotosResponse {
@@ -121,6 +122,13 @@ export function updatePhotoDate(id: number, taken_at: string) {
   return apiFetch<{ success: boolean; taken_at: string }>(`/photos/${id}/date`, {
     method: 'PATCH',
     body: JSON.stringify({ taken_at })
+  })
+}
+
+export function updatePhotoDescription(id: number, description: string | null) {
+  return apiFetch<{ success: boolean; description: string | null }>(`/photos/${id}/description`, {
+    method: 'PATCH',
+    body: JSON.stringify({ description })
   })
 }
 
