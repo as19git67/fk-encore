@@ -410,25 +410,36 @@ interface ExifMetadata {
   takenAt: string | null;
   latitude: number | null;
   longitude: number | null;
+  description: string | null;
 }
 
 async function getExifMetadata(filePath: string): Promise<ExifMetadata> {
   try {
-    const data = await exifr.parse(filePath, { gps: true });
+    const data = await exifr.parse(filePath, { gps: true, xmp: true, iptc: true });
     let takenAt: string | null = null;
     if (data?.DateTimeOriginal) {
       takenAt = new Date(data.DateTimeOriginal).toISOString();
     } else if (data?.CreateDate) {
       takenAt = new Date(data.CreateDate).toISOString();
     }
+    // Extract description from various EXIF/XMP/IPTC fields
+    const description: string | null =
+      data?.ImageDescription ??
+      data?.Description ??
+      data?.["dc:description"] ??
+      data?.UserComment ??
+      data?.Caption ??
+      data?.["Caption-Abstract"] ??
+      null;
     return {
       takenAt,
       latitude: data?.latitude ?? null,
       longitude: data?.longitude ?? null,
+      description: typeof description === "string" && description.trim() ? description.trim() : null,
     };
   } catch (err) {
     console.error("Error parsing EXIF data:", err);
-    return { takenAt: null, latitude: null, longitude: null };
+    return { takenAt: null, latitude: null, longitude: null, description: null };
   }
 }
 
@@ -437,9 +448,45 @@ async function getExifDate(filePath: string): Promise<string | null> {
 }
 
 interface GeocodeResult {
+  /** Concise location, e.g. "Schlossplatz 4, Stuttgart" */
   displayName: string;
+  /** Short label for title bars, e.g. "Schlossplatz" or "Stuttgart" */
+  shortName: string | null;
   city: string | null;
   country: string | null;
+}
+
+/**
+ * Build a concise location string from Nominatim address components.
+ * Format: "Straße Hausnr, Stadt" (German style: house number after street).
+ * Falls back gracefully when fields are missing.
+ */
+function buildLocationName(addr: Record<string, any>): { displayName: string; shortName: string | null } {
+  const road = addr.road ?? addr.pedestrian ?? addr.footway ?? addr.path ?? null;
+  const houseNumber = addr.house_number ?? null;
+  const city = addr.city ?? addr.town ?? addr.village ?? addr.municipality ?? null;
+  const tourism = addr.tourism ?? addr.amenity ?? addr.building ?? addr.leisure ?? null;
+
+  // Short name: most specific place identifier for title bars
+  const shortName = tourism ?? road ?? city ?? null;
+
+  // Build concise display name
+  const parts: string[] = [];
+
+  // Street + house number (German format: "Straße 4")
+  if (road) {
+    parts.push(houseNumber ? `${road} ${houseNumber}` : road);
+  } else if (tourism) {
+    parts.push(tourism);
+  }
+
+  // City (only if different from what we already have)
+  if (city && city !== road && city !== tourism) {
+    parts.push(city);
+  }
+
+  const displayName = parts.join(", ");
+  return { displayName, shortName };
 }
 
 async function reverseGeocode(lat: number, lon: number): Promise<GeocodeResult> {
@@ -448,16 +495,21 @@ async function reverseGeocode(lat: number, lon: number): Promise<GeocodeResult> 
     const res = await fetch(url, {
       headers: { "User-Agent": "fk-encore-photo-app/1.0" },
     });
-    if (!res.ok) return { displayName: "", city: null, country: null };
+    if (!res.ok) return { displayName: "", shortName: null, city: null, country: null };
     const data = await res.json() as Record<string, any>;
+    const addr = data.address ?? {};
+    const city = addr.city ?? addr.town ?? addr.village ?? addr.municipality ?? null;
+    const country = addr.country ?? null;
+    const { displayName, shortName } = buildLocationName(addr);
     return {
-      displayName: data.display_name ?? "",
-      city: data.address?.city ?? data.address?.town ?? data.address?.village ?? null,
-      country: data.address?.country ?? null,
+      displayName: displayName || city || data.display_name || "",
+      shortName,
+      city,
+      country,
     };
   } catch (err) {
     console.error("Nominatim reverse geocoding failed:", err);
-    return { displayName: "", city: null, country: null };
+    return { displayName: "", shortName: null, city: null, country: null };
   }
 }
 
@@ -467,6 +519,7 @@ async function geocodePhotoLocation(userId: number, photoId: number, lat: number
     db.update(photos)
       .set({
         location_name: geo.displayName || null,
+        location_short: geo.shortName || null,
         location_city: geo.city,
         location_country: geo.country,
       })
@@ -567,6 +620,7 @@ export async function uploadPhotoStream(
       taken_at: exifMeta.takenAt,
       latitude: exifMeta.latitude,
       longitude: exifMeta.longitude,
+      description: exifMeta.description,
     }).returning()
   );
 
@@ -594,6 +648,7 @@ export async function uploadPhotoStream(
     created_at: row!.created_at ?? "",
     latitude: row!.latitude ?? undefined,
     longitude: row!.longitude ?? undefined,
+    description: row!.description ?? undefined,
   };
 }
 
@@ -635,6 +690,7 @@ export async function uploadPhotoLogic(
       taken_at: exifMeta2.takenAt,
       latitude: exifMeta2.latitude,
       longitude: exifMeta2.longitude,
+      description: exifMeta2.description,
     }).returning()
   );
 
@@ -662,6 +718,7 @@ export async function uploadPhotoLogic(
     created_at: row2!.created_at ?? "",
     latitude: row2!.latitude ?? undefined,
     longitude: row2!.longitude ?? undefined,
+    description: row2!.description ?? undefined,
   };
 }
 
@@ -672,9 +729,11 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
     created_at: string | null; curation_status: string | null;
     latitude: number | null; longitude: number | null;
     location_name: string | null; location_city: string | null; location_country: string | null;
+    location_short: string | null;
     ai_quality_score: number | null;
     ai_quality_details: Record<string, number> | null;
     auto_crop: { x: number; y: number } | null;
+    description: string | null;
   }>(
     db
       .select({
@@ -693,9 +752,11 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
         location_name: photos.location_name,
         location_city: photos.location_city,
         location_country: photos.location_country,
+        location_short: photos.location_short,
         ai_quality_score: photos.ai_quality_score,
         ai_quality_details: photos.ai_quality_details,
         auto_crop: photos.auto_crop,
+        description: photos.description,
       })
       .from(photos)
       .leftJoin(
@@ -725,9 +786,11 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
       location_name: r.location_name ?? undefined,
       location_city: r.location_city ?? undefined,
       location_country: r.location_country ?? undefined,
+      location_short: r.location_short ?? undefined,
       ai_quality_score: r.ai_quality_score ?? undefined,
       ai_quality_details: r.ai_quality_details ?? undefined,
       auto_crop: r.auto_crop ?? undefined,
+      description: r.description ?? undefined,
     })),
   };
 }
@@ -921,12 +984,15 @@ export async function refreshPhotoMetadataLogic(userId: number, photoId: number)
     throw new Error("File not found on disk");
   }
 
-  const takenAt = await getExifDate(filePath);
+  const exifMeta = await getExifMetadata(filePath);
 
   // Always update, even if takenAt is null (to sync with current logic if it was different before)
-  await dbExec(db.update(photos).set({ taken_at: takenAt }).where(eq(photos.id, photoId)));
+  await dbExec(db.update(photos).set({
+    taken_at: exifMeta.takenAt,
+    description: exifMeta.description ?? photo.description,
+  }).where(eq(photos.id, photoId)));
 
-  return { success: true, taken_at: takenAt ?? undefined };
+  return { success: true, taken_at: exifMeta.takenAt ?? undefined };
 }
 
 export async function updatePhotoDateLogic(
@@ -987,6 +1053,48 @@ export async function updatePhotoDateLogic(
   }
 
   return { success: true, taken_at: takenAt };
+}
+
+export async function updatePhotoDescriptionLogic(
+  userId: number,
+  photoId: number,
+  description: string | null
+): Promise<{ success: boolean; description: string | null }> {
+  const photo = await dbFirst<typeof photos.$inferSelect>(
+    db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+  );
+
+  if (!photo) {
+    throw new Error("Photo not found or unauthorized");
+  }
+
+  const trimmed = description?.trim() || null;
+
+  // 1. Update database
+  await dbExec(db.update(photos).set({ description: trimmed }).where(eq(photos.id, photoId)));
+
+  // 2. Write to EXIF data
+  try {
+    const filePath = path.join(UPLOAD_DIR, photo.filename);
+    if (fs.existsSync(filePath)) {
+      const ext = path.extname(filePath).toLowerCase();
+      if (EXIF_WRITABLE_EXTENSIONS.has(ext)) {
+        await Promise.race([
+          exiftool.write(filePath, {
+            ImageDescription: trimmed ?? "",
+            "Description": trimmed ?? "",
+          }, ["-overwrite_original"]),
+          new Promise((_, reject) => {
+            setTimeout(() => reject(new Error(`EXIF_WRITE_TIMEOUT after ${EXIF_WRITE_TIMEOUT_MS}ms`)), EXIF_WRITE_TIMEOUT_MS);
+          })
+        ]);
+      }
+    }
+  } catch (err) {
+    console.error("Error writing description to EXIF:", err);
+  }
+
+  return { success: true, description: trimmed };
 }
 
 export function getPhotoFileLogic(filename: string): { data: string; mimeType: string } {
@@ -1224,9 +1332,9 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
   const photoRows = (await db.execute(sql`
     SELECT
       p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash,
-      p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop,
+      p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop, p.description,
       p.latitude, p.longitude,
-      p.location_name, p.location_city, p.location_country,
+      p.location_name, p.location_city, p.location_country, p.location_short,
       ap.added_by_user_id, ap.added_at,
       my_pc.status AS curation_status,
       COALESCE(SUM(CASE WHEN all_pc.status = 'favorite' THEN 1 ELSE 0 END), 0)::int AS fav_count,
@@ -1236,9 +1344,9 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     LEFT JOIN photo_curation my_pc ON my_pc.photo_id = p.id AND my_pc.user_id = ${userId}
     LEFT JOIN photo_curation all_pc ON all_pc.photo_id = p.id AND all_pc.user_id = ANY(ARRAY[${sql.join(participantIds.map(id => sql`${id}`), sql`, `)}]::int[])
     GROUP BY p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash,
-             p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop,
+             p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop, p.description,
              p.latitude, p.longitude,
-             p.location_name, p.location_city, p.location_country,
+             p.location_name, p.location_city, p.location_country, p.location_short,
              ap.added_by_user_id, ap.added_at, my_pc.status
   `)).rows;
 
@@ -1325,6 +1433,8 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
       location_name: r.location_name ?? undefined,
       location_city: r.location_city ?? undefined,
       location_country: r.location_country ?? undefined,
+      location_short: r.location_short ?? undefined,
+      description: r.description ?? undefined,
       curation_stats: isShared ? {
         fav_count: Number(r.fav_count),
         hide_count: Number(r.hide_count),
@@ -1726,9 +1836,9 @@ export async function getPublicAlbumLogic(token: string): Promise<PublicAlbumRes
   const photoRows = (await db.execute(sql`
     SELECT
       p.id, p.filename, p.original_name, p.mime_type, p.size,
-      p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop,
+      p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop, p.description,
       p.latitude, p.longitude,
-      p.location_name, p.location_city, p.location_country
+      p.location_name, p.location_city, p.location_country, p.location_short
     FROM photos p
     INNER JOIN album_photos ap ON ap.photo_id = p.id AND ap.album_id = ${link.album_id}
     ORDER BY p.taken_at ASC NULLS LAST, p.created_at ASC
@@ -1765,8 +1875,10 @@ export async function getPublicAlbumLogic(token: string): Promise<PublicAlbumRes
       location_name: r.location_name ?? undefined,
       location_city: r.location_city ?? undefined,
       location_country: r.location_country ?? undefined,
+      location_short: r.location_short ?? undefined,
       ai_quality_score: r.ai_quality_score != null ? Number(r.ai_quality_score) : undefined,
       auto_crop: r.auto_crop ?? undefined,
+      description: r.description ?? undefined,
     })),
   };
 }
@@ -2762,7 +2874,7 @@ export async function searchByDateRangeLogic(
     created_at: string | null; curation_status: string | null;
     latitude: number | null; longitude: number | null;
     location_city: string | null; location_country: string | null; location_name: string | null;
-    auto_crop: { x: number; y: number } | null;
+    location_short: string | null; auto_crop: { x: number; y: number } | null;
   }>(
     db.select({
       id: photos.id, user_id: photos.user_id, filename: photos.filename,
@@ -2771,7 +2883,7 @@ export async function searchByDateRangeLogic(
       created_at: photos.created_at, curation_status: photoCuration.status,
       latitude: photos.latitude, longitude: photos.longitude,
       location_city: photos.location_city, location_country: photos.location_country,
-      location_name: photos.location_name, auto_crop: photos.auto_crop,
+      location_name: photos.location_name, location_short: photos.location_short, auto_crop: photos.auto_crop,
     })
     .from(photos)
     .leftJoin(photoCuration, and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)))
@@ -2788,7 +2900,7 @@ export async function searchByDateRangeLogic(
       curation_status: (r.curation_status as CurationStatus) ?? "visible",
       latitude: r.latitude ?? undefined, longitude: r.longitude ?? undefined,
       location_city: r.location_city ?? undefined, location_country: r.location_country ?? undefined,
-      location_name: r.location_name ?? undefined, auto_crop: r.auto_crop ?? undefined,
+      location_name: r.location_name ?? undefined, location_short: r.location_short ?? undefined, auto_crop: r.auto_crop ?? undefined,
     })),
   };
 }
@@ -2826,7 +2938,7 @@ export async function searchByLocationLogic(
     created_at: string | null; curation_status: string | null;
     latitude: number | null; longitude: number | null;
     location_city: string | null; location_country: string | null; location_name: string | null;
-    auto_crop: { x: number; y: number } | null;
+    location_short: string | null; auto_crop: { x: number; y: number } | null;
   }>(
     db.select({
       id: photos.id, user_id: photos.user_id, filename: photos.filename,
@@ -2835,7 +2947,7 @@ export async function searchByLocationLogic(
       created_at: photos.created_at, curation_status: photoCuration.status,
       latitude: photos.latitude, longitude: photos.longitude,
       location_city: photos.location_city, location_country: photos.location_country,
-      location_name: photos.location_name, auto_crop: photos.auto_crop,
+      location_name: photos.location_name, location_short: photos.location_short, auto_crop: photos.auto_crop,
     })
     .from(photos)
     .leftJoin(photoCuration, and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)))
@@ -2852,7 +2964,7 @@ export async function searchByLocationLogic(
       curation_status: (r.curation_status as CurationStatus) ?? "visible",
       latitude: r.latitude ?? undefined, longitude: r.longitude ?? undefined,
       location_city: r.location_city ?? undefined, location_country: r.location_country ?? undefined,
-      location_name: r.location_name ?? undefined, auto_crop: r.auto_crop ?? undefined,
+      location_name: r.location_name ?? undefined, location_short: r.location_short ?? undefined, auto_crop: r.auto_crop ?? undefined,
     })),
   };
 }

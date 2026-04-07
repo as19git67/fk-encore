@@ -3,7 +3,7 @@ import Button from 'primevue/button'
 import DatePicker from 'primevue/datepicker'
 import Checkbox from 'primevue/checkbox'
 import HeicImage from './HeicImage.vue'
-import { getPhotoUrl, listAlbums, getPhotosAlbums, batchUpdateAlbumPhotos, updateAlbum, createAlbum, type Album } from '../api/photos'
+import { getPhotoUrl, listAlbums, getPhotosAlbums, batchUpdateAlbumPhotos, updateAlbum, createAlbum, updatePhotoDescription, type Album } from '../api/photos'
 import { getAlbumCheckState as calculateAlbumCheckState, getNewPendingAction } from '../utils/albumSelection'
 import type { Photo, Face, LandmarkItem, Person, CurationStatus } from '../api/photos'
 import { ref, computed, onMounted, watch } from 'vue'
@@ -207,12 +207,45 @@ function getPersonName(personId?: number) {
 }
 
 const namedFaces = computed(() =>
-  props.faces.filter(f =>
-    !f.ignored &&
-    f.person_id &&
-    props.persons.find(p => p.id === f.person_id)?.name?.trim()
-  )
+  props.faces.filter(f => {
+    if (f.ignored || !f.person_id) return false
+    const person = props.persons.find(p => p.id === f.person_id)
+    const name = person?.name?.trim()
+    return !!name && name.toLowerCase() !== 'unbenannt'
+  })
 )
+
+// ── Description editing ──────────────────────────────────────────────────────
+const isEditingDescription = ref(false)
+const descriptionText = ref('')
+const savingDescription = ref(false)
+
+function startEditDescription() {
+  descriptionText.value = props.photo.description ?? ''
+  isEditingDescription.value = true
+}
+
+function cancelEditDescription() {
+  isEditingDescription.value = false
+}
+
+async function saveDescription() {
+  savingDescription.value = true
+  try {
+    const value = descriptionText.value.trim() || null
+    const res = await updatePhotoDescription(props.photo.id, value)
+    props.photo.description = res.description ?? undefined
+    isEditingDescription.value = false
+  } catch (err) {
+    console.error('Failed to save description:', err)
+  } finally {
+    savingDescription.value = false
+  }
+}
+
+watch(() => props.photo.id, () => {
+  isEditingDescription.value = false
+})
 </script>
 
 <template>
@@ -358,13 +391,29 @@ const namedFaces = computed(() =>
 
       <div class="sidebar-divider" />
 
+      <div class="sidebar-section">
+        <div class="section-label">
+          <i class="pi pi-align-left" />
+          <span>Beschreibung</span>
+          <Button v-if="canUpload && !isEditingDescription" icon="pi pi-pencil" text rounded size="small" @click="startEditDescription" class="edit-btn" />
+        </div>
+        <div v-if="isEditingDescription" class="description-editor">
+          <textarea v-model="descriptionText" class="p-inputtext description-textarea" rows="3" placeholder="Beschreibung eingeben…" @keydown.escape="cancelEditDescription" />
+          <div class="edit-actions">
+            <Button icon="pi pi-check" severity="success" text rounded @click="saveDescription" :loading="savingDescription" />
+            <Button icon="pi pi-times" severity="danger" text rounded @click="cancelEditDescription" :disabled="savingDescription" />
+          </div>
+        </div>
+        <div v-else-if="photo.description" class="description-text">{{ photo.description }}</div>
+        <div v-else class="empty-hint">Keine Beschreibung</div>
+      </div>
+
       <template v-if="photo.location_city || photo.location_name || loadingLandmarks || landmarks.length > 0">
         <div class="sidebar-divider" />
         <div class="sidebar-section">
           <div class="section-label"><i class="pi pi-map-marker" /> Ort</div>
           <div v-if="photo.location_name || photo.location_city" class="location-pill">
-            <template v-if="photo.location_name && photo.location_country">{{ photo.location_name }}, {{ photo.location_country }}</template>
-            <template v-else-if="photo.location_name">{{ photo.location_name }}</template>
+            <template v-if="photo.location_name">{{ photo.location_name }}</template>
             <template v-else-if="photo.location_city && photo.location_country">{{ photo.location_city }}, {{ photo.location_country }}</template>
             <template v-else>{{ photo.location_city }}</template>
           </div>
@@ -682,6 +731,29 @@ const namedFaces = computed(() =>
 }
 .person-icon { font-size: 0.8rem; color: var(--p-text-muted-color); }
 .person-name { flex: 1; font-size: 0.875rem; }
+
+.description-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.description-textarea {
+  width: 100%;
+  resize: vertical;
+  font-size: 0.85rem;
+  padding: 0.5rem;
+  border-radius: 6px;
+  font-family: inherit;
+}
+
+.description-text {
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--p-text-color);
+}
 
 .reindex-btn { width: 100%; margin-top: 0.5rem; }
 
