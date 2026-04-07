@@ -2,21 +2,16 @@ import SwiftUI
 
 struct PhotoDetailView: View {
     let photoId: Int
-    @State private var loader: ThumbnailLoader
+    @State private var loader: ThumbnailLoader?
     @State private var photo: PhotoWithCuration?
     @State private var errorMessage: String?
-
-    init(photoId: Int) {
-        self.photoId = photoId
-        _loader = State(initialValue: ThumbnailLoader(photoId: photoId, isThumbnail: false))
-    }
 
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
                 // Full-size image
                 Group {
-                    if let image = loader.image {
+                    if let image = loader?.image {
                         Image(uiImage: image)
                             .resizable()
                             .scaledToFit()
@@ -25,8 +20,12 @@ struct PhotoDetailView: View {
                             .fill(.quaternary)
                             .aspectRatio(4/3, contentMode: .fit)
                             .overlay {
-                                if loader.isLoading {
+                                if loader?.isLoading == true || (loader == nil && photo == nil) {
                                     ProgressView()
+                                } else if loader?.hasError == true {
+                                    Image(systemName: "exclamationmark.triangle")
+                                        .font(.largeTitle)
+                                        .foregroundStyle(.secondary)
                                 } else {
                                     Image(systemName: "photo")
                                         .font(.largeTitle)
@@ -86,10 +85,16 @@ struct PhotoDetailView: View {
                 }
             }
         }
+        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        #endif
         .task {
-            await loader.load()
             await loadPhotoDetails()
+            if let filename = photo?.filename {
+                let l = ThumbnailLoader(filename: filename)
+                loader = l
+                await l.load()
+            }
         }
     }
 

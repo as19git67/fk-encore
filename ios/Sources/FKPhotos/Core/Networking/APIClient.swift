@@ -2,8 +2,9 @@ import Foundation
 
 actor APIClient {
     static let shared = APIClient()
+    static let serverURLKey = "apiServerURL"
 
-    // Default to localhost for development. Override via Settings or environment.
+    // Default to localhost for development. Override via Admin → Server settings.
     var baseURL: URL
 
     private let decoder: JSONDecoder = {
@@ -18,8 +19,13 @@ actor APIClient {
 
     private var authManager: AuthManager?
 
-    init(baseURL: URL = URL(string: "http://localhost:4000")!) {
-        self.baseURL = baseURL
+    init() {
+        if let stored = UserDefaults.standard.string(forKey: APIClient.serverURLKey),
+           let url = URL(string: stored) {
+            self.baseURL = url
+        } else {
+            self.baseURL = URL(string: "http://localhost:4000")!
+        }
     }
 
     func setAuthManager(_ manager: AuthManager) {
@@ -28,6 +34,7 @@ actor APIClient {
 
     func setBaseURL(_ url: URL) {
         self.baseURL = url
+        UserDefaults.standard.set(url.absoluteString, forKey: APIClient.serverURLKey)
     }
 
     // MARK: - Generic Requests
@@ -109,7 +116,10 @@ actor APIClient {
     }
 
     private func applyAuth(_ request: inout URLRequest) {
-        if let token = authManager?.token {
+        // Fall back to reading the token directly from the Keychain if the authManager
+        // hasn't been injected yet (avoids a race with the .task that sets it on app start).
+        let token = authManager?.token ?? KeychainHelper.loadString(forKey: "auth_token")
+        if let token {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
     }

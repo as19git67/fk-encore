@@ -32,7 +32,7 @@ struct PhotoGridView: View {
                 LazyVGrid(columns: columns, spacing: 2) {
                     ForEach(viewModel.photos) { photo in
                         NavigationLink(value: photo.id) {
-                            PhotoThumbnailView(photoId: photo.id)
+                            PhotoThumbnailView(filename: photo.filename)
                                 .aspectRatio(1, contentMode: .fill)
                                 .clipped()
                         }
@@ -55,12 +55,10 @@ struct PhotoGridView: View {
 }
 
 struct PhotoThumbnailView: View {
-    let photoId: Int
     @State private var loader: ThumbnailLoader
 
-    init(photoId: Int) {
-        self.photoId = photoId
-        _loader = State(initialValue: ThumbnailLoader(photoId: photoId))
+    init(filename: String) {
+        _loader = State(initialValue: ThumbnailLoader(filename: filename))
     }
 
     var body: some View {
@@ -75,6 +73,9 @@ struct PhotoThumbnailView: View {
                     .overlay {
                         if loader.isLoading {
                             ProgressView()
+                        } else if loader.hasError {
+                            Image(systemName: "exclamationmark.triangle")
+                                .foregroundStyle(.red.opacity(0.6))
                         } else {
                             Image(systemName: "photo")
                                 .foregroundStyle(.secondary)
