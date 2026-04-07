@@ -56,12 +56,17 @@ onUnmounted(() => { document.body.style.overflow = '' })
 
 // ── Keyboard navigation ─────────────────────────────────────────────────────
 function handleKeydown(e: KeyboardEvent) {
-  if (e.key === 'ArrowLeft') { if (props.prevPhoto) emit('prev'); e.preventDefault() }
-  else if (e.key === 'ArrowRight') { if (props.nextPhoto) emit('next'); e.preventDefault() }
-  else if (e.key === 'Escape') { emit('close'); e.preventDefault() }
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Escape') {
+    // Stop parent useGalleryKeyboard from also handling the event
+    e.stopImmediatePropagation()
+    e.preventDefault()
+    if (e.key === 'ArrowLeft' && props.prevPhoto) emit('prev')
+    else if (e.key === 'ArrowRight' && props.nextPhoto) emit('next')
+    else if (e.key === 'Escape') emit('close')
+  }
 }
-onMounted(() => window.addEventListener('keydown', handleKeydown))
-onUnmounted(() => window.removeEventListener('keydown', handleKeydown))
+onMounted(() => window.addEventListener('keydown', handleKeydown, true))
+onUnmounted(() => window.removeEventListener('keydown', handleKeydown, true))
 
 function formatDate(photo: Photo) {
   return formatPhotoDate(photo.taken_at || photo.created_at)
