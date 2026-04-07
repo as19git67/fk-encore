@@ -17,6 +17,7 @@ import {
   type PasskeyInfo,
 } from '../api/passkeys'
 import { changePassword } from '../api/users'
+import { formatDateShort } from '../utils/dateFormat'
 import {
   startRegistration,
   browserSupportsWebAuthn,
@@ -75,7 +76,7 @@ async function handleDeletePasskey(credentialId: string) {
 }
 
 function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleString('de-DE')
+  return formatDateShort(dateStr)
 }
 
 // ── Password change ──────────────────────────────────────────────────────────

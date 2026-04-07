@@ -1,6 +1,33 @@
 /* Minimal reset — PrimeVue handles the rest */
 :root {
   --font-family: 'Inter', system-ui, -apple-system, sans-serif;
+
+  /* ── Design Tokens: Spacing ─────────────────────────────────────────────── */
+  --spacing-xs: 0.25rem;   /* 4px */
+  --spacing-sm: 0.5rem;    /* 8px */
+  --spacing-md: 0.75rem;   /* 12px */
+  --spacing-lg: 1rem;      /* 16px */
+  --spacing-xl: 1.5rem;    /* 24px */
+  --spacing-2xl: 2rem;     /* 32px */
+  --spacing-3xl: 3rem;     /* 48px */
+
+  /* ── Design Tokens: Border Radius ───────────────────────────────────────── */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 1rem;
+  --radius-full: 50%;
+
+  /* ── Design Tokens: Z-Index Scale ───────────────────────────────────────── */
+  --z-sticky: 2;
+  --z-mobile-backdrop: 490;
+  --z-mobile-fab: 495;
+  --z-mobile-drawer: 500;
+  --z-fullscreen: 1200;
+
+  /* ── Design Tokens: Grid ────────────────────────────────────────────────── */
+  --grid-gap: 1rem;
+  --grid-gap-compact: 4px;
+  --grid-min-col: 200px;
 }
 *,
 *::before,
@@ -14,3 +41,9 @@ a {
 a:hover {
   text-decoration: underline;
 }
+
+/* ── Spacing utility classes ────────────────────────────────────────────── */
+.mt-sm { margin-top: var(--spacing-sm); }
+.mt-md { margin-top: var(--spacing-md); }
+.mt-lg { margin-top: var(--spacing-lg); }
+.my-xl { margin-top: var(--spacing-xl); margin-bottom: var(--spacing-xl); }

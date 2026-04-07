@@ -222,6 +222,16 @@ export async function requeueForRescan(userId: number, force: boolean): Promise<
             .onConflictDoNothing();
         }
       } else {
+        // Remove old done/failed rows so the counter stays accurate
+        await db
+          .delete(photoScanQueue)
+          .where(
+            and(
+              eq(photoScanQueue.photo_id, photoId),
+              eq(photoScanQueue.service, service),
+              not(inArray(photoScanQueue.status, ["pending", "processing"])),
+            ),
+          );
         await db
           .insert(photoScanQueue)
           .values({ photo_id: photoId, user_id: userId, service, force: false })

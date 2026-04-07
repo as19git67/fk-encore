@@ -3,7 +3,9 @@ import { ref, computed, onMounted, onUnmounted, defineAsyncComponent } from 'vue
 import { useRoute } from 'vue-router'
 import Message from 'primevue/message'
 import HeicImage from '../components/HeicImage.vue'
+import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import { getPublicAlbum, getPhotoUrl, type PublicAlbumResponse, type PublicAlbumPhoto, type Photo } from '../api/photos'
+import { formatPhotoDate, formatLocationLabel } from '../utils/dateFormat'
 
 const TripMap = defineAsyncComponent(() => import('../components/TripMap.vue'))
 
@@ -34,6 +36,19 @@ function asPhotos(photos: PublicAlbumPhoto[]): Photo[] {
 }
 
 const albumPhotosAsPhoto = computed(() => album.value ? asPhotos(album.value.photos) : [])
+
+function asPhoto(p: PublicAlbumPhoto): Photo {
+  return { ...p, user_id: 0, hash: undefined, curation_status: 'visible' as const, ai_quality_details: undefined }
+}
+const currentPhotoAsPhoto = computed(() => currentPhoto.value ? asPhoto(currentPhoto.value) : null)
+const prevPhotoAsPhoto = computed(() => {
+  const idx = fullscreenIndex.value - 1
+  return idx >= 0 ? asPhoto(fullscreenPhotos.value[idx]!) : null
+})
+const nextPhotoAsPhoto = computed(() => {
+  const idx = fullscreenIndex.value + 1
+  return idx < fullscreenPhotos.value.length ? asPhoto(fullscreenPhotos.value[idx]!) : null
+})
 
 function openFullscreen(photo: PublicAlbumPhoto, photos: PublicAlbumPhoto[]) {
   fullscreenPhotos.value = photos
@@ -70,54 +85,14 @@ function handleKeydown(e: KeyboardEvent) {
   if (e.key === 'ArrowRight') goNext()
 }
 
-// ── Touch swipe ─────────────────────────────────────────────────────────────
-
-let touchStartX = 0
-let touchStartY = 0
-let touchStartTime = 0
-
-function handleTouchStart(e: TouchEvent) {
-  const touch = e.touches[0]
-  if (!touch) return
-  touchStartX = touch.clientX
-  touchStartY = touch.clientY
-  touchStartTime = Date.now()
-}
-
-function handleTouchEnd(e: TouchEvent) {
-  const touch = e.changedTouches[0]
-  if (!touch) return
-
-  const dx = touch.clientX - touchStartX
-  const dy = touch.clientY - touchStartY
-  const dt = Date.now() - touchStartTime
-
-  // Must be a horizontal swipe: fast enough, far enough, more horizontal than vertical
-  if (dt > 500 || Math.abs(dx) < 50 || Math.abs(dy) > Math.abs(dx)) return
-
-  if (dx < 0) goNext()
-  else goPrev()
-}
-
 // ── Info formatting ─────────────────────────────────────────────────────────
 
 function formatLocation(photo: PublicAlbumPhoto): string {
-  return [photo.location_name, photo.location_city, photo.location_country]
-    .filter(Boolean)
-    .join(', ')
+  return formatLocationLabel(photo)
 }
 
 function formatDate(photo: PublicAlbumPhoto): string {
-  const d = photo.taken_at ? new Date(photo.taken_at) : null
-  if (!d) return ''
-  return d.toLocaleDateString('de-DE', {
-    weekday: 'long',
-    day: '2-digit',
-    month: 'long',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  return formatPhotoDate(photo.taken_at)
 }
 
 // ── Lifecycle ───────────────────────────────────────────────────────────────
@@ -190,42 +165,25 @@ onUnmounted(() => {
       </div>
     </template>
 
-    <!-- Fullscreen overlay -->
-    <Teleport to="body">
-      <div
-        v-if="isFullscreen && currentPhoto"
-        class="shared-fullscreen"
-        @touchstart.passive="handleTouchStart"
-        @touchend.passive="handleTouchEnd"
-      >
-        <!-- Close button -->
-        <button class="fs-close" @click="closeFullscreen"><i class="pi pi-times" /></button>
-
-        <!-- Image area -->
-        <div class="fs-image" @click.self="closeFullscreen">
-          <HeicImage
-            :key="currentPhoto.id"
-            :src="getPhotoUrl(currentPhoto.filename)"
-            :alt="currentPhoto.original_name"
-            objectFit="contain"
-          />
-        </div>
-
-        <!-- Navigation arrows (desktop) -->
-        <button v-if="hasPrev" class="fs-nav fs-nav--prev" @click="goPrev">
-          <i class="pi pi-chevron-left" />
-        </button>
-        <button v-if="hasNext" class="fs-nav fs-nav--next" @click="goNext">
-          <i class="pi pi-chevron-right" />
-        </button>
-
-        <!-- Bottom info bar -->
+    <!-- Fullscreen overlay (reuses shared FullscreenOverlay component) -->
+    <FullscreenOverlay
+      v-if="isFullscreen && currentPhotoAsPhoto"
+      :photo="currentPhotoAsPhoto"
+      :prevPhoto="prevPhotoAsPhoto"
+      :nextPhoto="nextPhotoAsPhoto"
+      :canDelete="false"
+      @close="closeFullscreen"
+      @prev="goPrev"
+      @next="goNext"
+    >
+      <template #topbar-actions><!-- no action buttons in shared view --></template>
+      <template #bottom-bar>
         <div class="fs-info-bar">
           <div class="fs-info-text">
-            <div v-if="formatLocation(currentPhoto)" class="fs-info-location">
+            <div v-if="currentPhoto && formatLocation(currentPhoto)" class="fs-info-location">
               <i class="pi pi-map-marker" /> {{ formatLocation(currentPhoto) }}
             </div>
-            <div v-if="formatDate(currentPhoto)" class="fs-info-date">
+            <div v-if="currentPhoto && formatDate(currentPhoto)" class="fs-info-date">
               {{ formatDate(currentPhoto) }}
             </div>
           </div>
@@ -233,8 +191,8 @@ onUnmounted(() => {
             {{ photoCounter }}
           </div>
         </div>
-      </div>
-    </Teleport>
+      </template>
+    </FullscreenOverlay>
   </div>
 </template>
 
@@ -273,16 +231,16 @@ onUnmounted(() => {
 
 .photo-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 4px;
-  padding: 4px;
+  grid-template-columns: repeat(auto-fill, minmax(var(--grid-min-col), 1fr));
+  gap: var(--grid-gap-compact);
+  padding: var(--grid-gap-compact);
 }
 
 .grid-item {
   aspect-ratio: 1;
   overflow: hidden;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .grid-item :deep(.heic-image-container) {
@@ -300,92 +258,8 @@ onUnmounted(() => {
   color: var(--p-text-muted-color);
 }
 
-/* ── Fullscreen overlay ─────────────────────────────────────────────────── */
+/* ── Fullscreen bottom info bar (rendered via FullscreenOverlay slot) ──── */
 
-.shared-fullscreen {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  background: #000;
-  display: flex;
-  flex-direction: column;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-.fs-image {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  min-height: 0;
-}
-
-.fs-image :deep(.heic-image-container) {
-  width: 100%;
-  height: 100%;
-}
-
-.fs-image :deep(img) {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-/* Close button */
-.fs-close {
-  position: absolute;
-  top: 0.75rem;
-  right: 0.75rem;
-  z-index: 10;
-  background: rgba(255, 255, 255, 0.12);
-  border: none;
-  color: white;
-  font-size: 1.25rem;
-  width: 2.5rem;
-  height: 2.5rem;
-  border-radius: 50%;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  backdrop-filter: blur(4px);
-}
-
-.fs-close:hover {
-  background: rgba(255, 255, 255, 0.25);
-}
-
-/* Navigation arrows */
-.fs-nav {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 10;
-  background: rgba(255, 255, 255, 0.12);
-  border: none;
-  color: white;
-  font-size: 1.5rem;
-  width: 3rem;
-  height: 3rem;
-  border-radius: 50%;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  backdrop-filter: blur(4px);
-  transition: background 0.15s;
-}
-
-.fs-nav:hover {
-  background: rgba(255, 255, 255, 0.25);
-}
-
-.fs-nav--prev { left: 0.75rem; }
-.fs-nav--next { right: 0.75rem; }
-
-/* Bottom info bar - full width, no radius */
 .fs-info-bar {
   display: flex;
   align-items: flex-start;
@@ -432,12 +306,7 @@ onUnmounted(() => {
   padding-left: 1rem;
 }
 
-/* Mobile: hide arrow buttons, swipe handles navigation */
 @media (max-width: 768px) {
-  .fs-nav {
-    display: none;
-  }
-
   .fs-info-bar {
     padding: 0.6rem 0.75rem;
   }

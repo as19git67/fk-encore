@@ -178,7 +178,8 @@ function handlePhotoClick(item: PhotoItem, event: MouseEvent) {
     selectModeIds.value = next
   } else {
     selectPhoto(item.index, event)
-    isFullscreen.value = true
+    // Mobile: Single-Tap öffnet Fullscreen (kein Sidebar sichtbar)
+    if (window.innerWidth <= 768) isFullscreen.value = true
   }
 }
 
@@ -1283,7 +1284,7 @@ onUnmounted(() => {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.45);
-  z-index: 490;
+  z-index: var(--z-mobile-backdrop);
 }
 
 /* ── Mobile FABs ─────────────────────────────────────────────────────────── */
@@ -1291,7 +1292,7 @@ onUnmounted(() => {
   display: none;
   position: fixed;
   bottom: 1.5rem;
-  z-index: 495;
+  z-index: var(--z-mobile-fab);
   width: 48px;
   height: 48px;
   border-radius: 50%;
@@ -1331,7 +1332,7 @@ onUnmounted(() => {
   bottom: 0;
   left: 0;
   right: 0;
-  z-index: 495;
+  z-index: var(--z-mobile-fab);
   background: var(--p-content-background);
   border-top: 1px solid var(--p-content-border-color);
   padding: 0.75rem 1rem;
@@ -1388,7 +1389,7 @@ onUnmounted(() => {
     top: var(--menubar-height, 3.5rem);
     bottom: 0;
     width: 80px;
-    z-index: 500;
+    z-index: var(--z-mobile-drawer);
     background: var(--p-content-background);
     border-right: 1px solid var(--p-content-border-color);
     transform: translateX(-100%);
@@ -1408,7 +1409,7 @@ onUnmounted(() => {
     left: 0;
     right: 0;
     max-height: calc(100dvh - var(--menubar-height, 3.5rem));
-    z-index: 500;
+    z-index: var(--z-mobile-drawer);
     background: var(--p-content-background);
     border-radius: 16px 16px 0 0;
     border-top: 1px solid var(--p-content-border-color);

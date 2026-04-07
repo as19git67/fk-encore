@@ -10,6 +10,7 @@ import Message from 'primevue/message'
 import { getUser, deleteUser, type UserWithRoles } from '../api/users'
 import { listRoles, assignRole, removeRole } from '../api/roles'
 import type { Role } from '../api/users'
+import { formatDateShort } from '../utils/dateFormat'
 import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
@@ -89,7 +90,7 @@ async function handleDelete() {
 }
 
 function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleString('de-DE')
+  return formatDateShort(dateStr)
 }
 
 onMounted(loadData)

@@ -4,6 +4,7 @@ import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
 import { usePhotoLazyLoad } from '../composables/usePhotoLazyLoad'
 import { getPhotoUrl, type CurationStatus, type FaceBBox } from '../api/photos'
+import { thumbnailImageStyle, faceBoxStyle, thumbnailSrcWidth } from '../utils/faceBbox'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export interface FaceItem {
@@ -52,47 +53,9 @@ onMounted(() => {
   if (scrollRef.value) setupObserver(scrollRef.value)
 })
 
-// ── Face bbox helpers ─────────────────────────────────────────────────────────
-function validBbox(bbox: FaceBBox | undefined | null): FaceBBox | null {
-  if (!bbox) return null
-  if (bbox.x > 1.1 || bbox.y > 1.1) return null
-  return bbox
-}
-
-function thumbnailZoom(bbox: FaceBBox | undefined | null): number {
-  const b = validBbox(bbox)
-  if (!b) return 1
-  return Math.min(4, Math.max(1.5, 0.4 / Math.max(b.width, b.height)))
-}
-
-function thumbnailImageStyle(bbox: FaceBBox | undefined | null): Record<string, string> {
-  const b = validBbox(bbox)
-  if (!b) return {}
-  const cx = b.x + b.width / 2
-  const cy = b.y + b.height / 2
-  const zoom = thumbnailZoom(bbox)
-  return {
-    objectPosition: `${(cx * 100).toFixed(1)}% ${(cy * 100).toFixed(1)}%`,
-    transform: `scale(${zoom.toFixed(2)}) translate(${((0.5 - cx) * 100).toFixed(1)}%, ${((0.5 - cy) * 100).toFixed(1)}%)`,
-    transformOrigin: '50% 50%',
-  }
-}
-
-function faceBoxStyle(bbox: FaceBBox | undefined | null): Record<string, string> {
-  const b = validBbox(bbox)
-  if (!b) return { display: 'none' }
-  return {
-    left: `${(b.x * 100).toFixed(2)}%`,
-    top: `${(b.y * 100).toFixed(2)}%`,
-    width: `${(b.width * 100).toFixed(2)}%`,
-    height: `${(b.height * 100).toFixed(2)}%`,
-  }
-}
-
+// ── Face bbox helpers (extracted to utils/faceBbox.ts) ────────────────────────
 function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): string {
-  const zoom = thumbnailZoom(bbox)
-  const width = zoom >= 2 ? 800 : zoom >= 1.5 ? 600 : 400
-  return getPhotoUrl(filename, width)
+  return getPhotoUrl(filename, thumbnailSrcWidth(bbox))
 }
 </script>
 
@@ -136,12 +99,7 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
           <span class="name">{{ item.photo.original_name }}</span>
           <div class="photo-actions">
             <Button
-              v-if="canDelete && item.photo.curation_status === 'hidden'"
-              size="small" icon="pi pi-eye" severity="info" text rounded
-              @click.stop="emit('restore', item.photo.id)"
-            />
-            <Button
-              v-if="canDelete && item.photo.curation_status !== 'hidden'"
+              v-if="canDelete"
               size="small"
               :icon="item.photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
               :severity="item.photo.curation_status === 'favorite' ? 'warn' : 'secondary'"
@@ -149,9 +107,12 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
               @click.stop="emit('toggle-favorite', item.photo.id, item.photo.curation_status)"
             />
             <Button
-              v-if="canDelete && item.photo.curation_status !== 'hidden'"
-              size="small" icon="pi pi-eye-slash" severity="danger" text rounded
-              @click.stop="emit('hide', item.photo.id)"
+              v-if="canDelete"
+              size="small"
+              :icon="item.photo.curation_status === 'hidden' ? 'pi pi-eye-slash' : 'pi pi-eye'"
+              :severity="item.photo.curation_status === 'hidden' ? 'danger' : 'secondary'"
+              text rounded
+              @click.stop="item.photo.curation_status === 'hidden' ? emit('restore', item.photo.id) : emit('hide', item.photo.id)"
             />
           </div>
         </div>
@@ -178,13 +139,13 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
 
 .photo-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(var(--grid-min-col), 1fr));
+  gap: var(--grid-gap);
 }
 
 .photo-item {
   position: relative;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   background: var(--p-content-background);
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
@@ -262,7 +223,7 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
 /* ── Face bbox overlay ───────────────────────────────────────────────────── */
 .face-box {
   position: absolute;
-  border: 2px solid #eab308;
+  border: 2px solid var(--p-yellow-500, #eab308);
   box-sizing: border-box;
   pointer-events: none;
   z-index: 2;

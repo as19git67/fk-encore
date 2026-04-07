@@ -5,6 +5,7 @@ import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Chip from 'primevue/chip'
 import { listUsers, type UserWithRoles } from '../api/users'
+import { formatDateShort } from '../utils/dateFormat'
 
 const router = useRouter()
 const users = ref<UserWithRoles[]>([])
@@ -24,7 +25,7 @@ function onRowClick(event: any) {
 }
 
 function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleString('de-DE')
+  return formatDateShort(dateStr)
 }
 </script>
 
