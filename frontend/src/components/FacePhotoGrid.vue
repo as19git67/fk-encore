@@ -99,12 +99,7 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
           <span class="name">{{ item.photo.original_name }}</span>
           <div class="photo-actions">
             <Button
-              v-if="canDelete && item.photo.curation_status === 'hidden'"
-              size="small" icon="pi pi-eye" severity="info" text rounded
-              @click.stop="emit('restore', item.photo.id)"
-            />
-            <Button
-              v-if="canDelete && item.photo.curation_status !== 'hidden'"
+              v-if="canDelete"
               size="small"
               :icon="item.photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
               :severity="item.photo.curation_status === 'favorite' ? 'warn' : 'secondary'"
@@ -112,9 +107,12 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
               @click.stop="emit('toggle-favorite', item.photo.id, item.photo.curation_status)"
             />
             <Button
-              v-if="canDelete && item.photo.curation_status !== 'hidden'"
-              size="small" icon="pi pi-eye-slash" severity="danger" text rounded
-              @click.stop="emit('hide', item.photo.id)"
+              v-if="canDelete"
+              size="small"
+              :icon="item.photo.curation_status === 'hidden' ? 'pi pi-eye-slash' : 'pi pi-eye'"
+              :severity="item.photo.curation_status === 'hidden' ? 'danger' : 'secondary'"
+              text rounded
+              @click.stop="item.photo.curation_status === 'hidden' ? emit('restore', item.photo.id) : emit('hide', item.photo.id)"
             />
           </div>
         </div>

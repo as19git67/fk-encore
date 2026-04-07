@@ -54,6 +54,15 @@ function handleTouchEnd(e: TouchEvent) {
 onMounted(() => { document.body.style.overflow = 'hidden' })
 onUnmounted(() => { document.body.style.overflow = '' })
 
+// ── Keyboard navigation ─────────────────────────────────────────────────────
+function handleKeydown(e: KeyboardEvent) {
+  if (e.key === 'ArrowLeft') { if (props.prevPhoto) emit('prev'); e.preventDefault() }
+  else if (e.key === 'ArrowRight') { if (props.nextPhoto) emit('next'); e.preventDefault() }
+  else if (e.key === 'Escape') { emit('close'); e.preventDefault() }
+}
+onMounted(() => window.addEventListener('keydown', handleKeydown))
+onUnmounted(() => window.removeEventListener('keydown', handleKeydown))
+
 function formatDate(photo: Photo) {
   return formatPhotoDate(photo.taken_at || photo.created_at)
 }
@@ -105,14 +114,11 @@ function locationLabel(photo: Photo) {
               v-tooltip.bottom="'Details'"
             />
             <Button
-              v-if="canDelete && photo.curation_status === 'hidden'"
-              icon="pi pi-eye" rounded text severity="warn"
-              @click="emit('restore', photo.id)"
-            />
-            <Button
-              v-else-if="canDelete"
-              icon="pi pi-eye-slash" rounded text severity="info"
-              @click="emit('hide', photo.id)"
+              v-if="canDelete"
+              :icon="photo.curation_status === 'hidden' ? 'pi pi-eye-slash' : 'pi pi-eye'"
+              rounded text
+              :severity="photo.curation_status === 'hidden' ? 'danger' : 'secondary'"
+              @click="photo.curation_status === 'hidden' ? emit('restore', photo.id) : emit('hide', photo.id)"
             />
             <Button
               v-if="canDelete"

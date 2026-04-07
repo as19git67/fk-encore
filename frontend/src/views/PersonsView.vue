@@ -469,8 +469,7 @@ onUnmounted(() => serviceHealth.stopPolling())
       <template #topbar-actions>
         <Button icon="pi pi-images" rounded text severity="secondary" v-tooltip.bottom="'In Fotos anzeigen'" @click.stop="navigateToPhoto(selectedPhoto.id)" />
         <Button icon="pi pi-info-circle" rounded text severity="secondary" v-tooltip.bottom="'Details'" @click.stop="isFullscreen = false; mobileSidebarOpen = true; mobilePersonNavOpen = false" />
-        <Button v-if="canDelete && selectedPhoto.curation_status === 'hidden'" icon="pi pi-eye" rounded text severity="info" @click.stop="handleRestorePhoto(selectedPhoto.id)" />
-        <Button v-else-if="canDelete" icon="pi pi-eye-slash" rounded text severity="warn" @click.stop="handleHidePhoto(selectedPhoto.id)" />
+        <Button v-if="canDelete" :icon="selectedPhoto.curation_status === 'hidden' ? 'pi pi-eye-slash' : 'pi pi-eye'" rounded text :severity="selectedPhoto.curation_status === 'hidden' ? 'danger' : 'secondary'" @click.stop="selectedPhoto.curation_status === 'hidden' ? handleRestorePhoto(selectedPhoto.id) : handleHidePhoto(selectedPhoto.id)" />
         <Button v-if="canDelete" :icon="selectedPhoto.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'" rounded text :severity="selectedPhoto.curation_status === 'favorite' ? 'warn' : 'secondary'" @click.stop="handleToggleFavorite(selectedPhoto.id, selectedPhoto.curation_status)" />
         <Button v-if="selectedPersonFace" icon="pi pi-trash" label="Gesicht ignorieren" rounded text severity="danger" @click.stop="handleIgnoreFace(selectedPersonFace.id)" />
       </template>
