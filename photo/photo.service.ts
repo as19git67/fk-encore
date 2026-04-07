@@ -245,11 +245,11 @@ export async function computeAndStoreAutoCrop(userId: number, photoId: number): 
     return;
   }
 
-  // Fallback: use landmark with highest confidence
+  // Fallback: use landmark with highest confidence (global — no user filter)
   const landmarkRows = await dbAll<{ bbox: string; confidence: number }>(
     db.select({ bbox: photoLandmarks.bbox, confidence: photoLandmarks.confidence })
       .from(photoLandmarks)
-      .where(and(eq(photoLandmarks.photo_id, photoId), eq(photoLandmarks.user_id, userId)))
+      .where(eq(photoLandmarks.photo_id, photoId))
   );
 
   if (landmarkRows.length > 0) {
@@ -3166,9 +3166,13 @@ async function callLandmarkService(
   return response.json() as Promise<{ landmarks: Array<{ label: string; confidence: number; bbox: { x: number; y: number; width: number; height: number } }> }>;
 }
 
+/**
+ * Detect landmarks in a photo (global, runs once per photo).
+ * userId is only used for auto-crop recomputation.
+ */
 export async function indexPhotoLandmarks(userId: number, photoId: number): Promise<void> {
   const photo = await dbFirst<typeof photos.$inferSelect>(
-    db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+    db.select().from(photos).where(eq(photos.id, photoId))
   );
   if (!photo) return;
 
@@ -3202,7 +3206,6 @@ export async function indexPhotoLandmarks(userId: number, photoId: number): Prom
         await dbExec(
           db.insert(photoLandmarks).values({
             photo_id: photoId,
-            user_id: userId,
             label: lm.label,
             confidence: lm.confidence,
             bbox: JSON.stringify(lm.bbox),
@@ -3481,6 +3484,7 @@ export async function searchByLandmarkLogic(
   query: string,
   limit: number = 50
 ): Promise<{ results: LandmarkSearchResult[] }> {
+  // Join with photos to filter by user ownership (landmarks are global, access is per-user)
   const lmRows = await dbAll<{ photo_id: number; label: string; confidence: number; bbox: string }>(
     db.select({
       photo_id: photoLandmarks.photo_id,
@@ -3489,7 +3493,8 @@ export async function searchByLandmarkLogic(
       bbox: photoLandmarks.bbox,
     })
     .from(photoLandmarks)
-    .where(and(eq(photoLandmarks.user_id, userId), ilike(photoLandmarks.label, `%${query}%`)))
+    .innerJoin(photos, eq(photos.id, photoLandmarks.photo_id))
+    .where(and(eq(photos.user_id, userId), ilike(photoLandmarks.label, `%${query}%`)))
     .orderBy(sql`${photoLandmarks.confidence} DESC`)
   );
 

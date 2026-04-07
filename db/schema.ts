@@ -310,14 +310,13 @@ export const albumUserSettings = pgTable(
 
 // ========== Photo Landmarks (Grounding DINO detection results) ==========
 
+// ========== Photo Landmarks (global detection results — one set per photo) ==========
+
 export const photoLandmarks = pgTable("photo_landmarks", {
   id: serial("id").primaryKey(),
   photo_id: integer("photo_id")
     .notNull()
     .references(() => photos.id, { onDelete: "cascade" }),
-  user_id: integer("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
   label: text("label").notNull(),
   confidence: real("confidence").notNull(),
   // Bounding box as JSON string: { x, y, width, height } normalized to image size (0..1)
