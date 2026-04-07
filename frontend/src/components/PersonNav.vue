@@ -2,8 +2,8 @@
 import { ref, nextTick, type ComponentPublicInstance } from 'vue'
 import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
-import { getPhotoUrl, type Person, type FaceBBox } from '../api/photos'
-import { validBbox, thumbnailZoom, thumbnailImageStyle } from '../utils/faceBbox'
+import { getPhotoUrl, type Person } from '../api/photos'
+import { thumbnailImageStyle } from '../utils/faceBbox'
 
 const props = defineProps<{
   persons: Person[]

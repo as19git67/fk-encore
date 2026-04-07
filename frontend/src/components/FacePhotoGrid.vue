@@ -4,7 +4,7 @@ import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
 import { usePhotoLazyLoad } from '../composables/usePhotoLazyLoad'
 import { getPhotoUrl, type CurationStatus, type FaceBBox } from '../api/photos'
-import { validBbox, thumbnailZoom, thumbnailImageStyle, faceBoxStyle, thumbnailSrcWidth } from '../utils/faceBbox'
+import { thumbnailImageStyle, faceBoxStyle, thumbnailSrcWidth } from '../utils/faceBbox'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export interface FaceItem {

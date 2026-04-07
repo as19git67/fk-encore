@@ -17,9 +17,9 @@ import {
   ignoreFace, ignorePersonFaces, updatePhotoCuration, reindexPhoto,
   getPhotoFaces, getPhotoLandmarks,
   type CurationStatus, type Person, type Photo, type PersonDetails,
-  type Face, type LandmarkItem, type FaceBBox,
+  type Face, type LandmarkItem,
 } from '../api/photos'
-import { validBbox, faceBoxStyle } from '../utils/faceBbox'
+import { faceBoxStyle } from '../utils/faceBbox'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
