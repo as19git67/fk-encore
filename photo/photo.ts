@@ -223,6 +223,21 @@ export const updatePhotoDate = api(
 );
 
 /**
+ * Update the description/text of a photo. Also writes to EXIF data.
+ */
+export const updatePhotoDescription = api(
+  { expose: true, method: "PATCH", path: "/photos/:id/description", auth: true },
+  async ({ id, description }: { id: number; description: string | null }): Promise<{ success: boolean; description: string | null }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.upload");
+
+    return await service.updatePhotoDescriptionLogic(userId, id, description);
+  }
+);
+
+/**
  * Serve a photo file.
  */
 export const getPhotoFile = api.raw(

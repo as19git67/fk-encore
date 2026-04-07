@@ -128,9 +128,11 @@ export const photos = pgTable("photos", {
   location_name: text("location_name"),
   location_city: text("location_city"),
   location_country: text("location_country"),
+  location_short: text("location_short"),
   ai_quality_score: real("ai_quality_score"),
   ai_quality_details: jsonb("ai_quality_details").$type<Record<string, number>>(),
   auto_crop: jsonb("auto_crop").$type<{ x: number; y: number }>(),
+  description: text("description"),
 });
 
 // ========== Persons ==========
