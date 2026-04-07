@@ -256,9 +256,9 @@ async function handleSetMapCover(photoId: number) {
 
 // ── Grid interaction ──────────────────────────────────────────────────────────
 function handlePhotoClick(item: PhotoItem) {
-  // Album view: single click selects + opens fullscreen
   selectedIndex.value = item.index
-  isFullscreen.value = true
+  // Mobile: Single-Tap öffnet Fullscreen (kein Sidebar sichtbar)
+  if (window.innerWidth <= 768) isFullscreen.value = true
 }
 
 // ── Timeline nav ──────────────────────────────────────────────────────────────
@@ -425,7 +425,7 @@ onUnmounted(() => serviceHealth.stopPolling())
         @update:columnCount="() => {}"
         @section-change="activeSection = $event"
         @photo-click="handlePhotoClick"
-        @photo-dblclick="handlePhotoClick"
+        @photo-dblclick="isFullscreen = true"
         @toggle-favorite="handleToggleFavorite"
         @hide="handleHidePhoto"
         @restore="handleRestorePhoto"
@@ -652,7 +652,7 @@ onUnmounted(() => serviceHealth.stopPolling())
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.45);
-  z-index: 490;
+  z-index: var(--z-mobile-backdrop);
 }
 
 /* ── Mobile FABs ─────────────────────────────────────────────────────────── */
@@ -660,7 +660,7 @@ onUnmounted(() => serviceHealth.stopPolling())
   display: none;
   position: fixed;
   bottom: 1.5rem;
-  z-index: 495;
+  z-index: var(--z-mobile-fab);
   width: 48px;
   height: 48px;
   border-radius: 50%;
@@ -698,7 +698,7 @@ onUnmounted(() => serviceHealth.stopPolling())
     top: var(--menubar-height, 3.5rem);
     bottom: 0;
     width: 80px;
-    z-index: 500;
+    z-index: var(--z-mobile-drawer);
     background: var(--p-content-background);
     border-right: 1px solid var(--p-content-border-color);
     transform: translateX(-100%);
@@ -715,7 +715,7 @@ onUnmounted(() => serviceHealth.stopPolling())
     left: 0;
     right: 0;
     max-height: calc(100dvh - var(--menubar-height, 3.5rem));
-    z-index: 500;
+    z-index: var(--z-mobile-drawer);
     background: var(--p-content-background);
     border-radius: 16px 16px 0 0;
     border-top: 1px solid var(--p-content-border-color);

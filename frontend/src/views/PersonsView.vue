@@ -19,6 +19,7 @@ import {
   type CurationStatus, type Person, type Photo, type PersonDetails,
   type Face, type LandmarkItem, type FaceBBox,
 } from '../api/photos'
+import { validBbox, faceBoxStyle } from '../utils/faceBbox'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
@@ -127,23 +128,7 @@ useGalleryKeyboard({
   },
 })
 
-// ── Face bbox helpers (used in fullscreen overlay) ────────────────────────────
-function validBbox(bbox: FaceBBox | undefined | null): FaceBBox | null {
-  if (!bbox) return null
-  if (bbox.x > 1.1 || bbox.y > 1.1) return null
-  return bbox
-}
-
-function faceBoxStyle(bbox: FaceBBox | undefined | null): Record<string, string> {
-  const b = validBbox(bbox)
-  if (!b) return { display: 'none' }
-  return {
-    left: `${(b.x * 100).toFixed(2)}%`,
-    top: `${(b.y * 100).toFixed(2)}%`,
-    width: `${(b.width * 100).toFixed(2)}%`,
-    height: `${(b.height * 100).toFixed(2)}%`,
-  }
-}
+// Face bbox helpers extracted to utils/faceBbox.ts
 
 // ── Curation ──────────────────────────────────────────────────────────────────
 function setPhotoStatus(id: number, status: CurationStatus) {

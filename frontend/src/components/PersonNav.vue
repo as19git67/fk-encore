@@ -3,6 +3,7 @@ import { ref, nextTick, type ComponentPublicInstance } from 'vue'
 import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
 import { getPhotoUrl, type Person, type FaceBBox } from '../api/photos'
+import { validBbox, thumbnailZoom, thumbnailImageStyle } from '../utils/faceBbox'
 
 const props = defineProps<{
   persons: Person[]
@@ -62,30 +63,7 @@ function getCoverUrl(person: Person) {
   return 'https://www.primefaces.org/wp-content/uploads/2020/05/placeholder.png'
 }
 
-function validBbox(bbox: FaceBBox | undefined | null): FaceBBox | null {
-  if (!bbox) return null
-  if (bbox.x > 1.1 || bbox.y > 1.1) return null
-  return bbox
-}
-
-function thumbnailZoom(bbox: FaceBBox | undefined | null): number {
-  const b = validBbox(bbox)
-  if (!b) return 1
-  return Math.min(4, Math.max(1.5, 0.4 / Math.max(b.width, b.height)))
-}
-
-function thumbnailImageStyle(bbox: FaceBBox | undefined | null): Record<string, string> {
-  const b = validBbox(bbox)
-  if (!b) return {}
-  const cx = b.x + b.width / 2
-  const cy = b.y + b.height / 2
-  const zoom = thumbnailZoom(bbox)
-  return {
-    objectPosition: `${(cx * 100).toFixed(1)}% ${(cy * 100).toFixed(1)}%`,
-    transform: `scale(${zoom.toFixed(2)}) translate(${((0.5 - cx) * 100).toFixed(1)}%, ${((0.5 - cy) * 100).toFixed(1)}%)`,
-    transformOrigin: '50% 50%',
-  }
-}
+// Face bbox helpers extracted to utils/faceBbox.ts
 
 // ── Touch handling (prevent iOS two-tap focus-then-click issue) ──────────────
 let touchStartY = 0

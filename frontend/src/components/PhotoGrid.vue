@@ -328,15 +328,15 @@ defineExpose({
 
 .photo-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 1rem;
-  margin-bottom: 0.5rem;
+  grid-template-columns: repeat(auto-fill, minmax(var(--grid-min-col), 1fr));
+  gap: var(--grid-gap);
+  margin-bottom: var(--spacing-sm);
 }
 
 @media (max-width: 768px) {
   .photo-grid {
     grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-    gap: 0.5rem;
+    gap: var(--spacing-sm);
   }
   .photo-grid-scroll {
     padding: 0 0.5rem 7rem; /* Abstand unten für FABs + Action-Bar */
@@ -348,7 +348,7 @@ defineExpose({
 /* ── Photo item ──────────────────────────────────────────────────────────── */
 .photo-item {
   position: relative;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   cursor: pointer;
   background: var(--p-content-hover-background);

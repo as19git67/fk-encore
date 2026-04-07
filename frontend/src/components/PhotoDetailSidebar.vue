@@ -7,6 +7,7 @@ import { getPhotoUrl, listAlbums, getPhotosAlbums, batchUpdateAlbumPhotos, updat
 import { getAlbumCheckState as calculateAlbumCheckState, getNewPendingAction } from '../utils/albumSelection'
 import type { Photo, Face, LandmarkItem, Person, CurationStatus } from '../api/photos'
 import { ref, computed, onMounted, watch } from 'vue'
+import { formatPhotoDate } from '../utils/dateFormat'
 
 const props = defineProps<{
   photo: Photo
@@ -195,13 +196,8 @@ const emit = defineEmits<{
   'navigate-to-photo': [id: number]
 }>()
 
-function formatPhotoDate(photo: Photo) {
-  const dateStr = photo.taken_at || photo.created_at
-  if (!dateStr) return ''
-  return new Intl.DateTimeFormat(navigator.language, {
-    year: 'numeric', month: 'long', day: 'numeric',
-    hour: '2-digit', minute: '2-digit'
-  }).format(new Date(dateStr))
+function formatPhotoDateDisplay(photo: Photo) {
+  return formatPhotoDate(photo.taken_at || photo.created_at)
 }
 
 function getPersonName(personId?: number) {
@@ -232,7 +228,7 @@ const namedFaces = computed(() =>
         </div>
         
         <div class="album-list-container">
-          <div class="section-label" style="margin-top: 1rem">
+          <div class="section-label" class="mt-lg">
             <i class="pi pi-book" />
             <span>Alben</span>
           </div>
@@ -261,7 +257,7 @@ const namedFaces = computed(() =>
           </div>
         </div>
 
-        <div class="new-album-inline" style="margin-top: 0.5rem">
+        <div class="new-album-inline" class="mt-sm">
           <div v-if="showNewAlbumInput" class="new-album-form">
             <input v-model="newAlbumName" type="text" class="p-inputtext new-album-input" placeholder="Albumname…" @keydown.enter="handleCreateAlbumAndAdd" @keydown.escape="showNewAlbumInput = false" />
             <Button icon="pi pi-check" size="small" :loading="creatingAlbum" :disabled="!newAlbumName.trim()" @click="handleCreateAlbumAndAdd" />
@@ -270,7 +266,7 @@ const namedFaces = computed(() =>
           <Button v-else label="Neues Album" icon="pi pi-plus" size="small" text @click="showNewAlbumInput = true" class="p-0" />
         </div>
 
-        <div class="sidebar-divider" style="margin: 1.5rem 0" />
+        <div class="sidebar-divider" class="my-xl" />
 
         <div class="multi-actions">
           <Button
@@ -348,7 +344,7 @@ const namedFaces = computed(() =>
         <div class="meta-row">
           <i class="pi pi-calendar meta-icon" />
           <span class="meta-value date-value">
-            {{ formatPhotoDate(photo) }}
+            {{ formatPhotoDateDisplay(photo) }}
             <Button v-if="canUpload && !isEditingDate" icon="pi pi-pencil" text rounded size="small" @click="emit('start-edit-date')" class="edit-btn" />
           </span>
         </div>
@@ -424,7 +420,7 @@ const namedFaces = computed(() =>
             />
           </div>
         </div>
-        <div class="new-album-inline" style="margin-top: 0.5rem">
+        <div class="new-album-inline" class="mt-sm">
           <div v-if="showNewAlbumInput" class="new-album-form">
             <input v-model="newAlbumName" type="text" class="p-inputtext new-album-input" placeholder="Albumname…" @keydown.enter="handleCreateAlbumAndAdd" @keydown.escape="showNewAlbumInput = false; newAlbumName = ''" />
             <Button icon="pi pi-check" size="small" :loading="creatingAlbum" :disabled="!newAlbumName.trim()" @click="handleCreateAlbumAndAdd" />
@@ -432,7 +428,7 @@ const namedFaces = computed(() =>
           </div>
           <Button v-else label="Neues Album" icon="pi pi-plus" size="small" text @click="showNewAlbumInput = true" class="p-0" />
         </div>
-        <div class="multi-actions" style="margin-top: 0.75rem">
+        <div class="multi-actions" class="mt-md">
           <Button v-if="Object.keys(pendingAlbumChanges).length > 0"
                   label="Speichern"
                   icon="pi pi-save"

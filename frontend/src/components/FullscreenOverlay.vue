@@ -3,6 +3,7 @@ import { ref, watch, onMounted, onUnmounted } from 'vue'
 import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
 import { getPhotoUrl, type Photo, type CurationStatus } from '../api/photos'
+import { formatPhotoDate } from '../utils/dateFormat'
 
 const props = defineProps<{
   photo: Photo
@@ -54,12 +55,7 @@ onMounted(() => { document.body.style.overflow = 'hidden' })
 onUnmounted(() => { document.body.style.overflow = '' })
 
 function formatDate(photo: Photo) {
-  const dateStr = photo.taken_at || photo.created_at
-  if (!dateStr) return ''
-  return new Intl.DateTimeFormat(navigator.language, {
-    year: 'numeric', month: 'long', day: 'numeric',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-  }).format(new Date(dateStr))
+  return formatPhotoDate(photo.taken_at || photo.created_at)
 }
 </script>
 
@@ -134,6 +130,9 @@ function formatDate(photo: Photo) {
         rounded text
         @click="emit('next')"
       />
+
+      <!-- Optional bottom bar slot (e.g. location info in shared albums) -->
+      <slot name="bottom-bar" />
     </div>
   </div>
   </Teleport>
@@ -144,7 +143,7 @@ function formatDate(photo: Photo) {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.92);
-  z-index: 1200;
+  z-index: var(--z-fullscreen);
   display: flex;
   align-items: center;
   justify-content: center;
