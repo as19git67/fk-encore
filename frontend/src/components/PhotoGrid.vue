@@ -275,13 +275,7 @@ defineExpose({
               </span>
               <div v-if="!item.group && !selectMode" class="photo-actions">
                 <Button
-                  v-if="canDelete && item.photo.curation_status === 'hidden'"
-                  size="small" icon="pi pi-eye" severity="info" text rounded
-                  v-tooltip="'Wiederherstellen'"
-                  @click.stop="emit('restore', item.photo.id)"
-                />
-                <Button
-                  v-if="canDelete && item.photo.curation_status !== 'hidden'"
+                  v-if="canDelete"
                   size="small"
                   :icon="item.photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
                   :severity="item.photo.curation_status === 'favorite' ? 'warn' : 'secondary'"
@@ -290,10 +284,13 @@ defineExpose({
                   @click.stop="emit('toggle-favorite', item.photo.id, item.photo.curation_status)"
                 />
                 <Button
-                  v-if="canDelete && item.photo.curation_status !== 'hidden'"
-                  size="small" icon="pi pi-eye-slash" severity="danger" text rounded
-                  v-tooltip="'Ausblenden'"
-                  @click.stop="emit('hide', item.photo.id)"
+                  v-if="canDelete"
+                  size="small"
+                  :icon="item.photo.curation_status === 'hidden' ? 'pi pi-eye-slash' : 'pi pi-eye'"
+                  :severity="item.photo.curation_status === 'hidden' ? 'danger' : 'secondary'"
+                  text rounded
+                  v-tooltip="item.photo.curation_status === 'hidden' ? 'Wiederherstellen' : 'Ausblenden'"
+                  @click.stop="item.photo.curation_status === 'hidden' ? emit('restore', item.photo.id) : emit('hide', item.photo.id)"
                 />
               </div>
             </div>
@@ -328,15 +325,15 @@ defineExpose({
 
 .photo-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 1rem;
-  margin-bottom: 0.5rem;
+  grid-template-columns: repeat(auto-fill, minmax(var(--grid-min-col), 1fr));
+  gap: var(--grid-gap);
+  margin-bottom: var(--spacing-sm);
 }
 
 @media (max-width: 768px) {
   .photo-grid {
     grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-    gap: 0.5rem;
+    gap: var(--spacing-sm);
   }
   .photo-grid-scroll {
     padding: 0 0.5rem 7rem; /* Abstand unten für FABs + Action-Bar */
@@ -348,7 +345,7 @@ defineExpose({
 /* ── Photo item ──────────────────────────────────────────────────────────── */
 .photo-item {
   position: relative;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   cursor: pointer;
   background: var(--p-content-hover-background);

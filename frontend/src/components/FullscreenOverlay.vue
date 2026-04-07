@@ -3,6 +3,7 @@ import { ref, watch, onMounted, onUnmounted } from 'vue'
 import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
 import { getPhotoUrl, type Photo, type CurationStatus } from '../api/photos'
+import { formatPhotoDate, formatLocationLabel } from '../utils/dateFormat'
 
 const props = defineProps<{
   photo: Photo
@@ -53,13 +54,29 @@ function handleTouchEnd(e: TouchEvent) {
 onMounted(() => { document.body.style.overflow = 'hidden' })
 onUnmounted(() => { document.body.style.overflow = '' })
 
+// ── Keyboard navigation ─────────────────────────────────────────────────────
+function handleKeydown(e: KeyboardEvent) {
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Escape') {
+    e.stopImmediatePropagation()
+    e.preventDefault()
+    if (e.key === 'ArrowLeft' && props.prevPhoto) emit('prev')
+    else if (e.key === 'ArrowRight' && props.nextPhoto) emit('next')
+    else if (e.key === 'Escape') emit('close')
+  } else if (e.key === 'f' || e.key === 'F') {
+    e.stopImmediatePropagation()
+    e.preventDefault()
+    emit('toggle-favorite', props.photo.id, props.photo.curation_status)
+  }
+}
+onMounted(() => window.addEventListener('keydown', handleKeydown, true))
+onUnmounted(() => window.removeEventListener('keydown', handleKeydown, true))
+
 function formatDate(photo: Photo) {
-  const dateStr = photo.taken_at || photo.created_at
-  if (!dateStr) return ''
-  return new Intl.DateTimeFormat(navigator.language, {
-    year: 'numeric', month: 'long', day: 'numeric',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-  }).format(new Date(dateStr))
+  return formatPhotoDate(photo.taken_at || photo.created_at)
+}
+
+function locationLabel(photo: Photo) {
+  return formatLocationLabel(photo)
 }
 </script>
 
@@ -87,7 +104,13 @@ function formatDate(photo: Photo) {
         <div class="fs-center">
           <!-- Slot for custom center content (e.g. person name + rename btn) -->
           <slot name="topbar-center">
-            <div class="fs-date-bar">{{ formatDate(photo) }}</div>
+            <div class="fs-info-center">
+              <div class="fs-date-bar">{{ formatDate(photo) }}</div>
+              <div v-if="locationLabel(photo)" class="fs-location-bar">
+                <i class="pi pi-map-marker" />
+                {{ locationLabel(photo) }}
+              </div>
+            </div>
           </slot>
         </div>
 
@@ -99,14 +122,11 @@ function formatDate(photo: Photo) {
               v-tooltip.bottom="'Details'"
             />
             <Button
-              v-if="canDelete && photo.curation_status === 'hidden'"
-              icon="pi pi-eye" rounded text severity="warn"
-              @click="emit('restore', photo.id)"
-            />
-            <Button
-              v-else-if="canDelete"
-              icon="pi pi-eye-slash" rounded text severity="info"
-              @click="emit('hide', photo.id)"
+              v-if="canDelete"
+              :icon="photo.curation_status === 'hidden' ? 'pi pi-eye-slash' : 'pi pi-eye'"
+              rounded text
+              :severity="photo.curation_status === 'hidden' ? 'danger' : 'secondary'"
+              @click="photo.curation_status === 'hidden' ? emit('restore', photo.id) : emit('hide', photo.id)"
             />
             <Button
               v-if="canDelete"
@@ -134,6 +154,9 @@ function formatDate(photo: Photo) {
         rounded text
         @click="emit('next')"
       />
+
+      <!-- Optional bottom bar slot (e.g. location info in shared albums) -->
+      <slot name="bottom-bar" />
     </div>
   </div>
   </Teleport>
@@ -144,7 +167,7 @@ function formatDate(photo: Photo) {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.92);
-  z-index: 1200;
+  z-index: var(--z-fullscreen);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -181,9 +204,24 @@ function formatDate(photo: Photo) {
   justify-content: center;
 }
 
+.fs-info-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.3;
+}
+
 .fs-date-bar {
   color: rgba(255,255,255,0.85);
   font-size: 0.9em;
+}
+
+.fs-location-bar {
+  color: rgba(255,255,255,0.6);
+  font-size: 0.75em;
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
 }
 
 .fs-toolbar {
