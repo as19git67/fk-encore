@@ -369,10 +369,12 @@ const namedFaces = computed(() =>
             <template v-else>{{ photo.location_city }}</template>
           </div>
           <div v-if="loadingLandmarks" class="loading-row"><i class="pi pi-spin pi-spinner" /> Gebäude werden erkannt…</div>
-          <div v-else-if="landmarks.length > 0" class="landmark-chips">
-            <span v-for="lm in landmarks" :key="lm.id" class="landmark-tag" :title="`${Math.round(lm.confidence * 100)}%`">
-              <i class="pi pi-building" /> {{ lm.label }} <span class="landmark-confidence">{{ Math.round(lm.confidence * 100) }}%</span>
-            </span>
+          <div v-else-if="landmarks.some(lm => lm.confidence >= 0.6)" class="landmark-chips">
+            <template v-for="lm in landmarks" :key="lm.id">
+              <span v-if="lm.confidence >= 0.6" class="landmark-tag" :title="`${Math.round(lm.confidence * 100)}%`">
+                <i class="pi pi-building" /> {{ lm.label }} <span class="landmark-confidence">{{ Math.round(lm.confidence * 100) }}%</span>
+              </span>
+            </template>
           </div>
         </div>
       </template>

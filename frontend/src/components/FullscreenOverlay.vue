@@ -57,12 +57,15 @@ onUnmounted(() => { document.body.style.overflow = '' })
 // ── Keyboard navigation ─────────────────────────────────────────────────────
 function handleKeydown(e: KeyboardEvent) {
   if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Escape') {
-    // Stop parent useGalleryKeyboard from also handling the event
     e.stopImmediatePropagation()
     e.preventDefault()
     if (e.key === 'ArrowLeft' && props.prevPhoto) emit('prev')
     else if (e.key === 'ArrowRight' && props.nextPhoto) emit('next')
     else if (e.key === 'Escape') emit('close')
+  } else if (e.key === 'f' || e.key === 'F') {
+    e.stopImmediatePropagation()
+    e.preventDefault()
+    emit('toggle-favorite', props.photo.id, props.photo.curation_status)
   }
 }
 onMounted(() => window.addEventListener('keydown', handleKeydown, true))

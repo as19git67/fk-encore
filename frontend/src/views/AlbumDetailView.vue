@@ -89,6 +89,8 @@ useGalleryKeyboard({
   },
   onExtra(e) {
     if (e.key === 'Escape' && isFullscreen.value) { isFullscreen.value = false; e.preventDefault() }
+    else if (e.key === 'Enter' && !isFullscreen.value && selectedIndex.value !== -1) { isFullscreen.value = true; e.preventDefault() }
+    else if ((e.key === 'f' || e.key === 'F') && selectedPhoto.value) { handleToggleFavorite(selectedPhoto.value.id, selectedPhoto.value.curation_status); e.preventDefault() }
   },
 })
 
