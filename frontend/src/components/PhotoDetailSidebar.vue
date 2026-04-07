@@ -228,7 +228,7 @@ const namedFaces = computed(() =>
         </div>
         
         <div class="album-list-container">
-          <div class="section-label" class="mt-lg">
+          <div class="section-label mt-lg">
             <i class="pi pi-book" />
             <span>Alben</span>
           </div>
@@ -257,7 +257,7 @@ const namedFaces = computed(() =>
           </div>
         </div>
 
-        <div class="new-album-inline" class="mt-sm">
+        <div class="new-album-inline mt-sm">
           <div v-if="showNewAlbumInput" class="new-album-form">
             <input v-model="newAlbumName" type="text" class="p-inputtext new-album-input" placeholder="Albumname…" @keydown.enter="handleCreateAlbumAndAdd" @keydown.escape="showNewAlbumInput = false" />
             <Button icon="pi pi-check" size="small" :loading="creatingAlbum" :disabled="!newAlbumName.trim()" @click="handleCreateAlbumAndAdd" />
@@ -266,7 +266,7 @@ const namedFaces = computed(() =>
           <Button v-else label="Neues Album" icon="pi pi-plus" size="small" text @click="showNewAlbumInput = true" class="p-0" />
         </div>
 
-        <div class="sidebar-divider" class="my-xl" />
+        <div class="sidebar-divider my-xl" />
 
         <div class="multi-actions">
           <Button
@@ -420,7 +420,7 @@ const namedFaces = computed(() =>
             />
           </div>
         </div>
-        <div class="new-album-inline" class="mt-sm">
+        <div class="new-album-inline mt-sm">
           <div v-if="showNewAlbumInput" class="new-album-form">
             <input v-model="newAlbumName" type="text" class="p-inputtext new-album-input" placeholder="Albumname…" @keydown.enter="handleCreateAlbumAndAdd" @keydown.escape="showNewAlbumInput = false; newAlbumName = ''" />
             <Button icon="pi pi-check" size="small" :loading="creatingAlbum" :disabled="!newAlbumName.trim()" @click="handleCreateAlbumAndAdd" />
@@ -428,7 +428,7 @@ const namedFaces = computed(() =>
           </div>
           <Button v-else label="Neues Album" icon="pi pi-plus" size="small" text @click="showNewAlbumInput = true" class="p-0" />
         </div>
-        <div class="multi-actions" class="mt-md">
+        <div class="multi-actions mt-md">
           <Button v-if="Object.keys(pendingAlbumChanges).length > 0"
                   label="Speichern"
                   icon="pi pi-save"
