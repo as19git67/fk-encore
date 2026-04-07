@@ -19,7 +19,7 @@ __pycache__/
 /.idea/*
 /uploads/
 ios/.build
-ios/.swiftpm/xcode/
+ios/.swiftpm/
 ios/**/*.xcuserstate
 ios/**/xcuserdata/
 ios/DerivedData/
