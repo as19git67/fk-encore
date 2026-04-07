@@ -56,8 +56,14 @@ struct AdminView: View {
                 }
             }
 
-            // Server settings
+            // Settings
             Section("Einstellungen") {
+                NavigationLink {
+                    SyncSettingsView()
+                } label: {
+                    Label("Automatisch hochladen", systemImage: "arrow.triangle.2.circlepath.icloud")
+                }
+
                 NavigationLink {
                     ServerSettingsView()
                 } label: {

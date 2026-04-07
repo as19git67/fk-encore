@@ -3,9 +3,12 @@ import SwiftUI
 struct AlbumDetailView: View {
     let albumId: Int
     @State private var album: Album?
+    @State private var userRole: String = ""
     @State private var photos: [PhotoWithCuration] = []
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var showShareSheet = false
+    @State private var selectedPhoto: PhotoWithCuration?
 
     private let columns = [
         GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 2)
@@ -25,11 +28,12 @@ struct AlbumDetailView: View {
             } else {
                 LazyVGrid(columns: columns, spacing: 2) {
                     ForEach(photos) { photo in
-                        NavigationLink(value: photo.id) {
-                            PhotoThumbnailView(filename: photo.filename)
-                                .aspectRatio(1, contentMode: .fill)
-                                .clipped()
+                        Button {
+                            selectedPhoto = photo
+                        } label: {
+                            PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop)
                         }
+                        .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal, 2)
@@ -37,8 +41,22 @@ struct AlbumDetailView: View {
         }
         .navigationTitle(album?.name ?? "Album")
         .navigationBarTitleDisplayMode(.large)
-        .navigationDestination(for: Int.self) { photoId in
-            PhotoDetailView(photoId: photoId)
+        .fullScreenCover(item: $selectedPhoto) { photo in
+            PhotoFullscreenView(photo: photo)
+        }
+        .toolbar {
+            if userRole == "owner" || userRole == "admin" {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showShareSheet = true
+                    } label: {
+                        Image(systemName: "person.crop.circle.badge.plus")
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showShareSheet) {
+            AlbumShareView(albumId: albumId)
         }
         .task {
             await loadAlbum()
@@ -53,8 +71,10 @@ struct AlbumDetailView: View {
                 let name: String
                 let description: String?
                 let photos: [PhotoWithCuration]
+                let role: String?
             }
             let response: AlbumResponse = try await APIClient.shared.get("/albums/\(albumId)")
+            userRole = response.role ?? ""
             album = Album(
                 id: response.id,
                 user_id: 0,

@@ -171,6 +171,37 @@ struct PersonWithFaceCount: Codable, Identifiable, Sendable {
     let faceCount: Int
 }
 
+/// Minimal photo info embedded in a Face when fetched via GET /persons/:id
+struct FacePhoto: Codable, Sendable {
+    let id: Int
+    let user_id: Int
+    let filename: String
+    let original_name: String
+    let taken_at: String?
+    let created_at: String
+}
+
+struct Face: Codable, Identifiable, Sendable {
+    let id: Int
+    let user_id: Int
+    let photo_id: Int
+    let bbox: FaceBBox
+    let person_id: Int?
+    let quality: Double?
+    let ignored: Bool
+    let created_at: String
+    /// Present when fetched via GET /persons/:id
+    let photo: FacePhoto?
+}
+
+struct PersonDetailsResponse: Codable, Identifiable, Sendable {
+    let id: Int
+    let user_id: Int
+    let name: String
+    let cover_face_id: Int?
+    let faces: [Face]
+}
+
 // MARK: - Landmark
 
 struct Landmark: Codable, Identifiable, Sendable {
@@ -181,6 +212,32 @@ struct Landmark: Codable, Identifiable, Sendable {
     let confidence: Double
     let bbox: FaceBBox
     let created_at: String?
+}
+
+// MARK: - Album Sharing
+
+struct AlbumShareWithUser: Codable, Identifiable, Sendable {
+    let album_id: Int
+    let user_id: Int
+    let access_level: String // "read" | "write"
+    let user_name: String
+    let user_email: String
+
+    var id: Int { user_id }
+}
+
+struct AlbumPublicLink: Codable, Identifiable, Sendable {
+    let id: Int
+    let album_id: Int
+    let token: String
+    let created_by_user_id: Int
+    let created_at: String
+    let expires_at: String?
+}
+
+struct GetAlbumSharesResponse: Codable, Sendable {
+    let shares: [AlbumShareWithUser]
+    let publicLink: AlbumPublicLink?
 }
 
 // MARK: - API Response Wrappers
@@ -196,6 +253,10 @@ struct ListAlbumsResponse: Codable, Sendable {
 struct ListPersonsResponse: Codable, Sendable {
     let persons: [PersonWithFaceCount]
     let enableLocalFaces: Bool
+}
+
+struct ListFacesResponse: Codable, Sendable {
+    let faces: [Face]
 }
 
 struct ListUsersResponse: Codable, Sendable {

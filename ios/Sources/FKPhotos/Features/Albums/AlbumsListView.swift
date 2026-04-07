@@ -3,6 +3,7 @@ import SwiftUI
 struct AlbumsListView: View {
     @State private var viewModel = AlbumsViewModel()
     @State private var showCreateSheet = false
+    @State private var showErrorAlert = false
     @State private var newAlbumName = ""
     @State private var newAlbumDescription = ""
 
@@ -17,6 +18,11 @@ struct AlbumsListView: View {
                     Label("Keine Alben", systemImage: "rectangle.stack")
                 } description: {
                     Text("Erstelle ein Album, um Fotos zu organisieren.")
+                } actions: {
+                    Button("Neues Album erstellen") {
+                        showCreateSheet = true
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
                 .listRowSeparator(.hidden)
             } else {
@@ -57,19 +63,31 @@ struct AlbumsListView: View {
             TextField("Name", text: $newAlbumName)
             TextField("Beschreibung (optional)", text: $newAlbumDescription)
             Button("Erstellen") {
+                let name = newAlbumName
+                let description = newAlbumDescription
+                newAlbumName = ""
+                newAlbumDescription = ""
                 Task {
                     _ = await viewModel.createAlbum(
-                        name: newAlbumName,
-                        description: newAlbumDescription.isEmpty ? nil : newAlbumDescription
+                        name: name,
+                        description: description.isEmpty ? nil : description
                     )
-                    newAlbumName = ""
-                    newAlbumDescription = ""
+                    if viewModel.errorMessage != nil {
+                        showErrorAlert = true
+                    }
                 }
             }
             Button("Abbrechen", role: .cancel) {
                 newAlbumName = ""
                 newAlbumDescription = ""
             }
+        }
+        .alert("Fehler", isPresented: $showErrorAlert) {
+            Button("OK", role: .cancel) {
+                viewModel.errorMessage = nil
+            }
+        } message: {
+            Text(viewModel.errorMessage ?? "")
         }
     }
 }

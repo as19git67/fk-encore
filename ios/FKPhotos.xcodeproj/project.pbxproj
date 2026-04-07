@@ -8,12 +8,14 @@
 
 /* Begin PBXBuildFile section */
 		1A0000000000000000000004 /* Main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000003 /* Main.swift */; };
+		3A2AC8112F8521B100CBFB58 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3A2AC8102F8521B100CBFB58 /* Assets.xcassets */; };
 		3A389D332F84440C00F7F4B5 /* FKPhotosLib in Frameworks */ = {isa = PBXBuildFile; productRef = 3A389D322F84440C00F7F4B5 /* FKPhotosLib */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		1A0000000000000000000003 /* Main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Main.swift; path = App/Main.swift; sourceTree = "<group>"; };
 		1A000000000000000000000A /* FKPhotos.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FKPhotos.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		3A2AC8102F8521B100CBFB58 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -48,6 +50,7 @@
 			isa = PBXGroup;
 			children = (
 				1A0000000000000000000003 /* Main.swift */,
+				3A2AC8102F8521B100CBFB58 /* Assets.xcassets */,
 			);
 			name = App;
 			sourceTree = "<group>";
@@ -116,6 +119,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3A2AC8112F8521B100CBFB58 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -182,7 +186,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3PQ498L3V8;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Sources/FKPhotos/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Vivanty Photos";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photography";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Zum Hochladen von Fotos in Vivanty Photos";
@@ -219,7 +224,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3PQ498L3V8;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Sources/FKPhotos/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Vivanty Photos";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photography";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Zum Hochladen von Fotos in Vivanty Photos";
