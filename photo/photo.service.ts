@@ -507,10 +507,38 @@ export async function assignFacesForUser(userId: number, photoId: number, resetI
 
     let personId = match?.personId;
     if (!personId) {
-      const newPerson = await dbInsertReturning<typeof persons.$inferSelect>(
-        db.insert(persons).values({ user_id: userId, name: "Unbenannt" }).returning()
+      // Try to inherit the person name from existing assignments by other users
+      // (e.g. the photo owner already named this person).
+      const sourceAssignment = await dbFirst<{ person_name: string }>(
+        db.select({ person_name: persons.name })
+          .from(userFaceAssignments)
+          .innerJoin(persons, eq(persons.id, userFaceAssignments.person_id))
+          .where(and(
+            eq(userFaceAssignments.face_id, face.id),
+            sql`${persons.name} != 'Unbenannt'`,
+            eq(userFaceAssignments.ignored, false),
+          ))
       );
-      personId = newPerson!.id;
+
+      const personName = sourceAssignment?.person_name ?? "Unbenannt";
+
+      // If the user already has a person with the same name, reuse it
+      // so that faces from the same source person stay grouped.
+      if (personName !== "Unbenannt") {
+        const existingPerson = await dbFirst<{ id: number }>(
+          db.select({ id: persons.id })
+            .from(persons)
+            .where(and(eq(persons.user_id, userId), eq(persons.name, personName)))
+        );
+        if (existingPerson) personId = existingPerson.id;
+      }
+
+      if (!personId) {
+        const newPerson = await dbInsertReturning<typeof persons.$inferSelect>(
+          db.insert(persons).values({ user_id: userId, name: personName }).returning()
+        );
+        personId = newPerson!.id;
+      }
     }
 
     // Insert user_face_assignment
@@ -1962,10 +1990,78 @@ export async function removeAlbumShareLogic(userId: number, req: RemoveAlbumShar
   if (!album) throw new Error("Album not found");
   if (album.user_id !== userId) throw new Error("Only owner can remove shares");
 
+  // Collect photo IDs in this album BEFORE deleting the share
+  const albumPhotoIds = (await dbAll<{ photo_id: number }>(
+    db.select({ photo_id: albumPhotos.photo_id }).from(albumPhotos).where(eq(albumPhotos.album_id, req.albumId))
+  )).map(r => r.photo_id);
+
   await dbExec(
     db.delete(albumShares).where(and(eq(albumShares.album_id, req.albumId), eq(albumShares.user_id, req.userId)))
   );
+
+  // Clean up face assignments, queue entries, and orphaned persons for the
+  // unshared user — but only for photos they no longer have access to.
+  if (albumPhotoIds.length > 0) {
+    cleanupAfterUnshare(req.userId, albumPhotoIds).catch(err => {
+      console.error(`Error cleaning up after unshare of album ${req.albumId}:`, err);
+    });
+  }
+
   return { success: true };
+}
+
+/**
+ * After an album share is removed, delete the user's face data for photos
+ * they no longer have access to (not owned and not in any other shared album).
+ */
+async function cleanupAfterUnshare(sharedUserId: number, albumPhotoIds: number[]): Promise<void> {
+  // Find which of these photos the user still has access to
+  // (owns the photo OR has access through another shared album).
+  const stillAccessibleResult = await db.execute<{ photo_id: number }>(sql`
+    SELECT DISTINCT photo_id FROM (
+      -- Photos owned by the user
+      SELECT id AS photo_id FROM photos WHERE user_id = ${sharedUserId} AND id IN (${sql.join(albumPhotoIds.map(id => sql`${id}`), sql`, `)})
+      UNION
+      -- Photos accessible through other shared albums
+      SELECT ap.photo_id
+      FROM album_photos ap
+      INNER JOIN album_shares ash ON ash.album_id = ap.album_id AND ash.user_id = ${sharedUserId}
+      WHERE ap.photo_id IN (${sql.join(albumPhotoIds.map(id => sql`${id}`), sql`, `)})
+    ) accessible
+  `);
+  const stillAccessibleSet = new Set(stillAccessibleResult.rows.map(r => r.photo_id));
+  const orphanedPhotoIds = albumPhotoIds.filter(id => !stillAccessibleSet.has(id));
+
+  if (orphanedPhotoIds.length === 0) return;
+
+  console.log(`[unshare] Cleaning up ${orphanedPhotoIds.length} orphaned photos for user ${sharedUserId}`);
+
+  // Get face IDs for the orphaned photos
+  const orphanedFaceIds = (await dbAll<{ id: number }>(
+    db.select({ id: faces.id }).from(faces).where(inArray(faces.photo_id, orphanedPhotoIds))
+  )).map(r => r.id);
+
+  if (orphanedFaceIds.length > 0) {
+    // Delete user_face_assignments for these faces
+    await dbExec(
+      db.delete(userFaceAssignments).where(and(
+        eq(userFaceAssignments.user_id, sharedUserId),
+        inArray(userFaceAssignments.face_id, orphanedFaceIds)
+      ))
+    );
+  }
+
+  // Remove all face_assignment queue entries for these photos
+  await dbExec(
+    db.delete(photoScanQueue).where(and(
+      eq(photoScanQueue.user_id, sharedUserId),
+      inArray(photoScanQueue.photo_id, orphanedPhotoIds),
+      eq(photoScanQueue.service, "face_assignment"),
+    ))
+  );
+
+  // Clean up orphaned persons (persons with no remaining face assignments)
+  await cleanupOrphanedPersons(sharedUserId);
 }
 
 // ---------- Album Public Links ----------
