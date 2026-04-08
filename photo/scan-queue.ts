@@ -1,15 +1,35 @@
 /**
  * Persistent scan queue helpers.
  * All DB operations for photo_scan_queue live here.
+ *
+ * Services are split into two categories:
+ *   Global:   face_detection, embedding, landmark, quality, geocoding
+ *             → run once per photo (user_id = NULL)
+ *   Per-user: face_assignment
+ *             → run once per user per photo (user_id set)
  */
 
-import { eq, and, inArray, sql, not } from "drizzle-orm";
+import { eq, and, inArray, sql, not, isNull } from "drizzle-orm";
 import db from "../db/database";
 import { photoScanQueue, photos, faces, photoLandmarks } from "../db/schema";
 import { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY } from "./photo.service";
 
 export type ScanService = "embedding" | "face_detection" | "face_assignment" | "landmark" | "quality" | "geocoding";
 export type ScanStatus = "pending" | "processing" | "failed" | "done";
+
+/** Services that run once per photo (no user_id in queue). */
+const GLOBAL_SERVICES: ReadonlySet<ScanService> = new Set([
+  "face_detection", "embedding", "landmark", "quality", "geocoding",
+]);
+
+/** Services that run once per user per photo. */
+const PER_USER_SERVICES: ReadonlySet<ScanService> = new Set([
+  "face_assignment",
+]);
+
+export function isGlobalService(service: ScanService): boolean {
+  return GLOBAL_SERVICES.has(service);
+}
 
 /**
  * Thrown by a job handler to signal "not ready yet — put me back in the queue".
@@ -48,6 +68,8 @@ function enabledServices(): ScanService[] {
 
 /**
  * Enqueue a photo for scanning across all enabled services.
+ * Global services use user_id = NULL (one job per photo).
+ * Per-user services use the provided userId.
  * Uses ON CONFLICT DO NOTHING so a photo already pending/processing is not duplicated.
  * If force=true the existing pending row is updated to set force=true.
  */
@@ -60,26 +82,43 @@ export async function enqueuePhotoScan(
   if (services.length === 0) return;
 
   for (const service of services) {
+    const queueUserId = isGlobalService(service) ? null : userId;
+
     // Try insert first (covers the common case: new photo, not yet in queue)
     const result = await db
       .insert(photoScanQueue)
-      .values({ photo_id: photoId, user_id: userId, service, force })
+      .values({ photo_id: photoId, user_id: queueUserId, service, force })
       .onConflictDoNothing()
       .returning({ id: photoScanQueue.id });
 
     // If nothing was inserted (duplicate pending/processing), and force was requested,
     // upgrade the existing pending row to force=true
     if (result.length === 0 && force) {
-      await db
-        .update(photoScanQueue)
-        .set({ force: true })
-        .where(
-          and(
-            eq(photoScanQueue.photo_id, photoId),
-            eq(photoScanQueue.service, service),
-            inArray(photoScanQueue.status, ["pending", "processing"]),
-          ),
-        );
+      if (isGlobalService(service)) {
+        await db
+          .update(photoScanQueue)
+          .set({ force: true })
+          .where(
+            and(
+              eq(photoScanQueue.photo_id, photoId),
+              eq(photoScanQueue.service, service),
+              isNull(photoScanQueue.user_id),
+              inArray(photoScanQueue.status, ["pending", "processing"]),
+            ),
+          );
+      } else {
+        await db
+          .update(photoScanQueue)
+          .set({ force: true })
+          .where(
+            and(
+              eq(photoScanQueue.photo_id, photoId),
+              eq(photoScanQueue.service, service),
+              eq(photoScanQueue.user_id, userId),
+              inArray(photoScanQueue.status, ["pending", "processing"]),
+            ),
+          );
+      }
     }
   }
 }
@@ -138,12 +177,18 @@ export async function markJobFailed(id: number, error: string): Promise<void> {
     .where(eq(photoScanQueue.id, id));
 }
 
-/** Aggregate queue counts per service for a specific user. */
+/**
+ * Aggregate queue counts for a user.
+ * Global services (user_id IS NULL) are shown to all users.
+ * Per-user services are filtered by userId.
+ */
 export async function getQueueStatus(userId: number): Promise<QueueStatus> {
+  // Global services: count all rows where user_id IS NULL
+  // Per-user services: count rows where user_id = userId
   const rows = await db.execute<{ service: ScanService; status: ScanStatus; count: string }>(sql`
     SELECT service, status, COUNT(*)::int as count
     FROM photo_scan_queue
-    WHERE user_id = ${userId}
+    WHERE user_id IS NULL OR user_id = ${userId}
     GROUP BY service, status
   `);
 
@@ -164,11 +209,22 @@ export async function getQueueStatus(userId: number): Promise<QueueStatus> {
 
 /** Reset all failed jobs for a user back to pending. */
 export async function requeueFailed(userId: number): Promise<number> {
-  const result = await db
+  // Reset per-user failed jobs
+  const perUserResult = await db
     .update(photoScanQueue)
     .set({ status: "pending", error_msg: null, started_at: null, finished_at: null })
     .where(and(eq(photoScanQueue.user_id, userId), eq(photoScanQueue.status, "failed")));
-  return (result as any).rowCount ?? 0;
+
+  // Reset global failed jobs for this user's photos
+  const globalResult = await db.execute(sql`
+    UPDATE photo_scan_queue
+    SET status = 'pending', error_msg = NULL, started_at = NULL, finished_at = NULL
+    WHERE status = 'failed'
+      AND user_id IS NULL
+      AND photo_id IN (SELECT id FROM photos WHERE user_id = ${userId})
+  `);
+
+  return ((perUserResult as any).rowCount ?? 0) + ((globalResult as any).rowCount ?? 0);
 }
 
 /**
@@ -195,50 +251,95 @@ export async function requeueForRescan(userId: number, force: boolean): Promise<
       photoIds = rows.map((r) => r.id);
     }
 
+    const isGlobal = isGlobalService(service);
+
     for (const photoId of photoIds) {
       if (force) {
         // Remove all done/failed rows first so at most one row (the active one)
         // remains. Without this, updating multiple rows to 'pending' would
-        // violate the partial unique index uq_active_scan.
-        await db
-          .delete(photoScanQueue)
-          .where(
-            and(
-              eq(photoScanQueue.photo_id, photoId),
-              eq(photoScanQueue.service, service),
-              not(inArray(photoScanQueue.status, ["pending", "processing"])),
-            ),
-          );
-
-        // Reset any surviving active row to pending with force=true
-        const updated = await db
-          .update(photoScanQueue)
-          .set({ status: "pending", force: true, error_msg: null, started_at: null, finished_at: null, attempts: 0 })
-          .where(
-            and(eq(photoScanQueue.photo_id, photoId), eq(photoScanQueue.service, service)),
-          );
-        // No existing row → insert fresh
-        if (((updated as any).rowCount ?? 0) === 0) {
+        // violate the partial unique index.
+        if (isGlobal) {
           await db
-            .insert(photoScanQueue)
-            .values({ photo_id: photoId, user_id: userId, service, force: true })
-            .onConflictDoNothing();
+            .delete(photoScanQueue)
+            .where(
+              and(
+                eq(photoScanQueue.photo_id, photoId),
+                eq(photoScanQueue.service, service),
+                isNull(photoScanQueue.user_id),
+                not(inArray(photoScanQueue.status, ["pending", "processing"])),
+              ),
+            );
+
+          const updated = await db
+            .update(photoScanQueue)
+            .set({ status: "pending", force: true, error_msg: null, started_at: null, finished_at: null, attempts: 0 })
+            .where(
+              and(eq(photoScanQueue.photo_id, photoId), eq(photoScanQueue.service, service), isNull(photoScanQueue.user_id)),
+            );
+          if (((updated as any).rowCount ?? 0) === 0) {
+            await db
+              .insert(photoScanQueue)
+              .values({ photo_id: photoId, user_id: null, service, force: true })
+              .onConflictDoNothing();
+          }
+        } else {
+          await db
+            .delete(photoScanQueue)
+            .where(
+              and(
+                eq(photoScanQueue.photo_id, photoId),
+                eq(photoScanQueue.service, service),
+                eq(photoScanQueue.user_id, userId),
+                not(inArray(photoScanQueue.status, ["pending", "processing"])),
+              ),
+            );
+
+          const updated = await db
+            .update(photoScanQueue)
+            .set({ status: "pending", force: true, error_msg: null, started_at: null, finished_at: null, attempts: 0 })
+            .where(
+              and(eq(photoScanQueue.photo_id, photoId), eq(photoScanQueue.service, service), eq(photoScanQueue.user_id, userId)),
+            );
+          if (((updated as any).rowCount ?? 0) === 0) {
+            await db
+              .insert(photoScanQueue)
+              .values({ photo_id: photoId, user_id: userId, service, force: true })
+              .onConflictDoNothing();
+          }
         }
       } else {
         // Remove old done/failed rows so the counter stays accurate
-        await db
-          .delete(photoScanQueue)
-          .where(
-            and(
-              eq(photoScanQueue.photo_id, photoId),
-              eq(photoScanQueue.service, service),
-              not(inArray(photoScanQueue.status, ["pending", "processing"])),
-            ),
-          );
-        await db
-          .insert(photoScanQueue)
-          .values({ photo_id: photoId, user_id: userId, service, force: false })
-          .onConflictDoNothing();
+        if (isGlobal) {
+          await db
+            .delete(photoScanQueue)
+            .where(
+              and(
+                eq(photoScanQueue.photo_id, photoId),
+                eq(photoScanQueue.service, service),
+                isNull(photoScanQueue.user_id),
+                not(inArray(photoScanQueue.status, ["pending", "processing"])),
+              ),
+            );
+          await db
+            .insert(photoScanQueue)
+            .values({ photo_id: photoId, user_id: null, service, force: false })
+            .onConflictDoNothing();
+        } else {
+          await db
+            .delete(photoScanQueue)
+            .where(
+              and(
+                eq(photoScanQueue.photo_id, photoId),
+                eq(photoScanQueue.service, service),
+                eq(photoScanQueue.user_id, userId),
+                not(inArray(photoScanQueue.status, ["pending", "processing"])),
+              ),
+            );
+          await db
+            .insert(photoScanQueue)
+            .values({ photo_id: photoId, user_id: userId, service, force: false })
+            .onConflictDoNothing();
+        }
       }
       queued++;
     }
@@ -248,15 +349,16 @@ export async function requeueForRescan(userId: number, force: boolean): Promise<
 }
 
 async function getMissingPhotoIds(userId: number, service: ScanService): Promise<number[]> {
-  if (service === "face_detection") {
-    // Photos without a 'done' queue entry for face_detection (global detection).
+  if (isGlobalService(service)) {
+    // Global services: photos owned by this user that don't have a 'done' global queue entry
     const rows = await db.execute<{ id: number }>(sql`
       SELECT p.id FROM photos p
       WHERE p.user_id = ${userId}
         AND NOT EXISTS (
           SELECT 1 FROM photo_scan_queue q
           WHERE q.photo_id = p.id
-            AND q.service = 'face_detection'
+            AND q.service = ${service}
+            AND q.user_id IS NULL
             AND q.status = 'done'
         )
     `);
@@ -264,8 +366,7 @@ async function getMissingPhotoIds(userId: number, service: ScanService): Promise
   }
 
   if (service === "face_assignment") {
-    // Photos that have been detected but not yet assigned for this user.
-    // A photo needs face_assignment if it has faces but no user_face_assignments for this user.
+    // Per-user: photos that have been detected but not yet assigned for this user.
     const rows = await db.execute<{ id: number }>(sql`
       SELECT p.id FROM photos p
       WHERE p.user_id = ${userId}
@@ -280,74 +381,31 @@ async function getMissingPhotoIds(userId: number, service: ScanService): Promise
     return rows.rows.map((r) => r.id);
   }
 
-  if (service === "landmark") {
-    // Photos without a 'done' queue entry for landmark.
-    // Previously this checked for missing landmark rows, but photos that were
-    // scanned and had zero landmarks would be re-queued every time.
-    const rows = await db.execute<{ id: number }>(sql`
-      SELECT p.id FROM photos p
-      WHERE p.user_id = ${userId}
-        AND NOT EXISTS (
-          SELECT 1 FROM photo_scan_queue q
-          WHERE q.photo_id = p.id
-            AND q.service = 'landmark'
-            AND q.status = 'done'
-        )
-    `);
-    return rows.rows.map((r) => r.id);
-  }
-
-  if (service === "quality") {
-    // Photos with no AI quality score yet
-    const rows = await db.execute<{ id: number }>(sql`
-      SELECT p.id FROM photos p
-      WHERE p.user_id = ${userId}
-        AND p.ai_quality_score IS NULL
-    `);
-    return rows.rows.map((r) => r.id);
-  }
-
-  if (service === "geocoding") {
-    // Photos without a 'done' geocoding queue entry.
-    // This covers both photos that were never geocoded and photos where
-    // geocoding failed (failed entries don't block a new pending insert).
-    const rows = await db.execute<{ id: number }>(sql`
-      SELECT p.id FROM photos p
-      WHERE p.user_id = ${userId}
-        AND NOT EXISTS (
-          SELECT 1 FROM photo_scan_queue q
-          WHERE q.photo_id = p.id
-            AND q.service = 'geocoding'
-            AND q.status = 'done'
-        )
-    `);
-    return rows.rows.map((r) => r.id);
-  }
-
-  // embedding: photos without a 'done' queue entry (no confirmed successful embedding)
-  const rows = await db.execute<{ id: number }>(sql`
-    SELECT p.id FROM photos p
-    WHERE p.user_id = ${userId}
-      AND NOT EXISTS (
-        SELECT 1 FROM photo_scan_queue q
-        WHERE q.photo_id = p.id
-          AND q.service = 'embedding'
-          AND q.status = 'done'
-      )
-  `);
-  return rows.rows.map((r) => r.id);
+  // Fallback (shouldn't reach here)
+  return [];
 }
 
 /**
  * Cancel all pending scan jobs for a user.
+ * Cancels per-user jobs and global jobs for the user's photos.
  * Processing jobs are left alone (they will finish their current work).
  * Returns the number of cancelled jobs.
  */
 export async function cancelPendingScans(userId: number): Promise<number> {
-  const result = await db
+  // Cancel per-user pending jobs
+  const perUserResult = await db
     .delete(photoScanQueue)
     .where(and(eq(photoScanQueue.user_id, userId), eq(photoScanQueue.status, "pending")));
-  return (result as any).rowCount ?? 0;
+
+  // Cancel global pending jobs for this user's photos
+  const globalResult = await db.execute(sql`
+    DELETE FROM photo_scan_queue
+    WHERE status = 'pending'
+      AND user_id IS NULL
+      AND photo_id IN (SELECT id FROM photos WHERE user_id = ${userId})
+  `);
+
+  return ((perUserResult as any).rowCount ?? 0) + ((globalResult as any).rowCount ?? 0);
 }
 
 /**
