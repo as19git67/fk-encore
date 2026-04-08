@@ -20,6 +20,7 @@ import {
   albumPublicLinks,
   persons,
   faces,
+  userFaceAssignments,
   photoCuration,
   photoGroups,
   photoGroupMembers,
@@ -192,7 +193,7 @@ export async function indexPhotoEmbeddings(userId: number, photoId: number, forc
   const filePath = path.join(UPLOAD_DIR, photo.filename);
   if (!fs.existsSync(filePath)) return;
 
-  // Get face IDs for this photo (optional, but good for completeness if we have them)
+  // Get face IDs for this photo (global — no user filter needed)
   const photoFaces = await dbAll<{ id: number }>(db.select({ id: faces.id }).from(faces).where(eq(faces.photo_id, photoId)));
   const faceIds = photoFaces.map(f => f.id.toString());
 
@@ -208,10 +209,16 @@ export async function indexPhotoEmbeddings(userId: number, photoId: number, forc
  * The result is a normalized {x, y} center (0..1) stored on the photo row.
  */
 export async function computeAndStoreAutoCrop(userId: number, photoId: number): Promise<void> {
-  // Collect non-ignored face bboxes
+  // Collect non-ignored face bboxes (join faces + user_face_assignments)
   const faceRows = await dbAll<{ bbox: string }>(
-    db.select({ bbox: faces.bbox }).from(faces)
-      .where(and(eq(faces.photo_id, photoId), eq(faces.user_id, userId), eq(faces.ignored, false)))
+    db.select({ bbox: faces.bbox })
+      .from(faces)
+      .innerJoin(userFaceAssignments, and(
+        eq(userFaceAssignments.face_id, faces.id),
+        eq(userFaceAssignments.user_id, userId),
+        eq(userFaceAssignments.ignored, false)
+      ))
+      .where(eq(faces.photo_id, photoId))
   );
 
   const faceBboxes = faceRows.map(r => JSON.parse(r.bbox) as { x: number; y: number; width: number; height: number });
@@ -238,11 +245,11 @@ export async function computeAndStoreAutoCrop(userId: number, photoId: number): 
     return;
   }
 
-  // Fallback: use landmark with highest confidence
+  // Fallback: use landmark with highest confidence (global — no user filter)
   const landmarkRows = await dbAll<{ bbox: string; confidence: number }>(
     db.select({ bbox: photoLandmarks.bbox, confidence: photoLandmarks.confidence })
       .from(photoLandmarks)
-      .where(and(eq(photoLandmarks.photo_id, photoId), eq(photoLandmarks.user_id, userId)))
+      .where(eq(photoLandmarks.photo_id, photoId))
   );
 
   if (landmarkRows.length > 0) {
@@ -266,14 +273,30 @@ export async function computeAndStoreAutoCrop(userId: number, photoId: number): 
   );
 }
 
-export async function indexPhotoFaces(userId: number, photoId: number, resetIgnored: boolean = false): Promise<void> {
+/**
+ * Detect faces in a photo using InsightFace (global, runs once per photo).
+ * Stores raw detection results (bbox + embedding) in the `faces` table.
+ * If faces already exist for this photo and force is false, detection is skipped.
+ */
+export async function detectPhotoFaces(photoId: number, force: boolean = false): Promise<void> {
   if (!ENABLE_LOCAL_FACES) {
     console.log("Local face indexing is disabled via ENABLE_LOCAL_FACES=false");
     return;
   }
 
+  // Check if faces already exist for this photo (skip detection if not forced)
+  if (!force) {
+    const existing = await dbFirst<{ id: number }>(
+      db.select({ id: faces.id }).from(faces).where(eq(faces.photo_id, photoId)).limit(1)
+    );
+    if (existing) {
+      console.log(`Faces already detected for photo ${photoId}, skipping detection`);
+      return;
+    }
+  }
+
   const photo = await dbFirst<typeof photos.$inferSelect>(
-    db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+    db.select().from(photos).where(eq(photos.id, photoId))
   );
   if (!photo) return;
 
@@ -283,7 +306,6 @@ export async function indexPhotoFaces(userId: number, photoId: number, resetIgno
   let processingPath = filePath;
   let tempPath: string | null = null;
 
-  // Check if it's a HEIC file – use heif-convert (libheif) since sharp may lack HEIC support
   const ext = path.extname(photo.filename).toLowerCase();
   if (ext === ".heic" || ext === ".heif") {
     try {
@@ -297,16 +319,9 @@ export async function indexPhotoFaces(userId: number, photoId: number, resetIgno
     }
   }
 
-  // Get existing ignored faces for this photo to preserve them (if not resetting)
-  const ignoredFaces = resetIgnored ? [] : await dbAll<typeof faces.$inferSelect>(db.select().from(faces).where(and(eq(faces.photo_id, photoId), eq(faces.ignored, true))));
-
-  // Remove faces for this photo
-  if (resetIgnored) {
-    // Remove ALL faces (including ignored ones)
+  // If forced, remove old face rows (cascade will clean up user_face_assignments)
+  if (force) {
     await dbExec(db.delete(faces).where(eq(faces.photo_id, photoId)));
-  } else {
-    // Only remove non-ignored faces
-    await dbExec(db.delete(faces).where(and(eq(faces.photo_id, photoId), eq(faces.ignored, false))));
   }
 
   try {
@@ -314,11 +329,10 @@ export async function indexPhotoFaces(userId: number, photoId: number, resetIgno
     const facesDetected = detectResult.faces;
     const imgWidth = detectResult.width;
     const imgHeight = detectResult.height;
-    
+
     console.log(`Detected ${facesDetected.length} faces in photo ${photoId} (size: ${imgWidth}x${imgHeight})`);
 
     for (const f of facesDetected) {
-      // Normalize bbox to 0..1 relative values
       const bbox = {
         x: f.bbox[0] / imgWidth,
         y: f.bbox[1] / imgHeight,
@@ -326,84 +340,172 @@ export async function indexPhotoFaces(userId: number, photoId: number, resetIgno
         height: (f.bbox[3] - f.bbox[1]) / imgHeight
       };
 
-      // Check if this face matches an ignored one (by bbox overlap)
-      const isIgnored = ignoredFaces.some(iface => {
-        const iBbox = JSON.parse(iface.bbox);
-        return calculateOverlap(bbox, iBbox) > 0.8; // 80% overlap threshold
-      });
-
-      if (isIgnored) continue;
-
-      const embedding = f.embedding;
-
-      // Find best matching person (using cosine similarity)
-      const match = await findBestPersonMatch(userId, embedding);
-
-      let personId = match?.personId;
-      if (!personId) {
-        // Create new person
-        const newPerson = await dbInsertReturning<typeof persons.$inferSelect>(
-          db.insert(persons).values({ user_id: userId, name: "Unbenannt" }).returning()
-        );
-        personId = newPerson!.id;
-      }
-
-      const faceResult = await dbInsertReturning<typeof faces.$inferSelect>(
+      await dbInsertReturning<typeof faces.$inferSelect>(
         db.insert(faces)
           .values({
-            user_id: userId,
             photo_id: photoId,
             bbox: JSON.stringify(bbox),
-            embedding: JSON.stringify(embedding),
-            person_id: personId,
+            embedding: JSON.stringify(f.embedding),
             quality: 100,
           })
           .returning()
       );
-
-      // Set cover_face_id if not set for person OR if it refers to a non-existent face
-      const currentPerson = await dbFirst<typeof persons.$inferSelect>(db.select().from(persons).where(eq(persons.id, personId)));
-      let needsCoverUpdate = false;
-      if (currentPerson) {
-          if (!currentPerson.cover_face_id) {
-              needsCoverUpdate = true;
-          } else {
-              const coverFaceExists = await dbFirst<{ id: number }>(db.select({ id: faces.id }).from(faces).where(eq(faces.id, currentPerson.cover_face_id)));
-              if (!coverFaceExists) {
-                  needsCoverUpdate = true;
-              }
-          }
-      }
-
-      if (needsCoverUpdate) {
-          await dbExec(db.update(persons).set({
-              cover_face_id: faceResult!.id,
-              updated_at: new Date().toISOString(),
-          }).where(eq(persons.id, personId)));
-      } else {
-          await dbExec(db.update(persons).set({
-              updated_at: new Date().toISOString(),
-          }).where(eq(persons.id, personId)));
-      }
     }
   } catch (err) {
-    console.error(`Error indexing faces for photo ${photoId}:`, err);
+    console.error(`Error detecting faces for photo ${photoId}:`, err);
   } finally {
     if (tempPath && fs.existsSync(tempPath)) {
-      try {
-        await fs.promises.unlink(tempPath);
-      } catch (e) {
-        // Ignore
-      }
+      try { await fs.promises.unlink(tempPath); } catch (_e) { /* ignore */ }
+    }
+  }
+}
+
+/**
+ * Assign detected faces to persons for a specific user (per-user, runs per user per photo).
+ * Creates user_face_assignments rows with auto-matched person_id based on cosine similarity.
+ * Respects previously ignored faces (by bbox overlap).
+ */
+export async function assignFacesForUser(userId: number, photoId: number, resetIgnored: boolean = false): Promise<void> {
+  if (!ENABLE_LOCAL_FACES) return;
+
+  // Check if face detection has completed for this photo
+  const detectionDone = await dbFirst<{ id: number }>(
+    db.select({ id: photoScanQueue.id }).from(photoScanQueue)
+      .where(and(
+        eq(photoScanQueue.photo_id, photoId),
+        sql`${photoScanQueue.service} = 'face_detection'`,
+        sql`${photoScanQueue.status} = 'done'`
+      ))
+  );
+  if (!detectionDone) {
+    // Detection hasn't finished yet — defer this job
+    throw new DeferJobError(`face_detection not yet done for photo ${photoId}`);
+  }
+
+  // Get all detected faces for this photo (global)
+  const detectedFaces = await dbAll<typeof faces.$inferSelect>(
+    db.select().from(faces).where(eq(faces.photo_id, photoId))
+  );
+  if (detectedFaces.length === 0) return;
+
+  // Get existing ignored assignments for this user+photo to preserve them
+  const ignoredAssignments = resetIgnored ? [] : await dbAll<{
+    face_id: number; bbox: string;
+  }>(
+    db.select({ face_id: userFaceAssignments.face_id, bbox: faces.bbox })
+      .from(userFaceAssignments)
+      .innerJoin(faces, eq(faces.id, userFaceAssignments.face_id))
+      .where(and(
+        eq(userFaceAssignments.user_id, userId),
+        eq(faces.photo_id, photoId),
+        eq(userFaceAssignments.ignored, true)
+      ))
+  );
+
+  // Remove existing non-ignored assignments for this user+photo
+  if (resetIgnored) {
+    // Remove ALL assignments for this user+photo
+    const photoFaceIds = detectedFaces.map(f => f.id);
+    if (photoFaceIds.length > 0) {
+      await dbExec(
+        db.delete(userFaceAssignments).where(and(
+          eq(userFaceAssignments.user_id, userId),
+          inArray(userFaceAssignments.face_id, photoFaceIds)
+        ))
+      );
+    }
+  } else {
+    // Remove only non-ignored assignments
+    const photoFaceIds = detectedFaces.map(f => f.id);
+    if (photoFaceIds.length > 0) {
+      await dbExec(
+        db.delete(userFaceAssignments).where(and(
+          eq(userFaceAssignments.user_id, userId),
+          inArray(userFaceAssignments.face_id, photoFaceIds),
+          eq(userFaceAssignments.ignored, false)
+        ))
+      );
     }
   }
 
-  // Recompute auto-crop focus point after face changes
+  for (const face of detectedFaces) {
+    const bbox = JSON.parse(face.bbox);
+
+    // Check if this face was ignored by this user (by bbox overlap)
+    const isIgnored = ignoredAssignments.some(ia => {
+      const iBbox = JSON.parse(ia.bbox);
+      return calculateOverlap(bbox, iBbox) > 0.8;
+    });
+    if (isIgnored) continue;
+
+    // Check if assignment already exists (from a previous run)
+    const existingAssignment = await dbFirst<{ face_id: number }>(
+      db.select({ face_id: userFaceAssignments.face_id })
+        .from(userFaceAssignments)
+        .where(and(eq(userFaceAssignments.user_id, userId), eq(userFaceAssignments.face_id, face.id)))
+    );
+    if (existingAssignment) continue;
+
+    const embedding = JSON.parse(face.embedding as string) as number[];
+    const match = await findBestPersonMatch(userId, embedding);
+
+    let personId = match?.personId;
+    if (!personId) {
+      const newPerson = await dbInsertReturning<typeof persons.$inferSelect>(
+        db.insert(persons).values({ user_id: userId, name: "Unbenannt" }).returning()
+      );
+      personId = newPerson!.id;
+    }
+
+    // Insert user_face_assignment
+    await dbExec(
+      db.insert(userFaceAssignments)
+        .values({ user_id: userId, face_id: face.id, person_id: personId })
+        .onConflictDoNothing()
+    );
+
+    // Update person cover face if needed
+    const currentPerson = await dbFirst<typeof persons.$inferSelect>(
+      db.select().from(persons).where(eq(persons.id, personId))
+    );
+    let needsCoverUpdate = false;
+    if (currentPerson) {
+      if (!currentPerson.cover_face_id) {
+        needsCoverUpdate = true;
+      } else {
+        const coverFaceExists = await dbFirst<{ id: number }>(
+          db.select({ id: faces.id }).from(faces).where(eq(faces.id, currentPerson.cover_face_id))
+        );
+        if (!coverFaceExists) needsCoverUpdate = true;
+      }
+    }
+
+    if (needsCoverUpdate) {
+      await dbExec(db.update(persons).set({
+        cover_face_id: face.id,
+        updated_at: new Date().toISOString(),
+      }).where(eq(persons.id, personId)));
+    } else {
+      await dbExec(db.update(persons).set({
+        updated_at: new Date().toISOString(),
+      }).where(eq(persons.id, personId)));
+    }
+  }
+
+  // Recompute auto-crop focus point after face assignment changes
   try {
     await computeAndStoreAutoCrop(userId, photoId);
   } catch (err) {
     console.error(`Error computing auto-crop for photo ${photoId}:`, err);
   }
+}
+
+/**
+ * Legacy wrapper: detect faces + assign for owner. Used by scan-worker for backward compat.
+ */
+export async function indexPhotoFaces(userId: number, photoId: number, force: boolean = false): Promise<void> {
+  await detectPhotoFaces(photoId, force);
+  await assignFacesForUser(userId, photoId, force);
 }
 
 interface ExifMetadata {
@@ -1697,7 +1799,32 @@ export async function shareAlbumLogic(userId: number, req: ShareAlbumRequest): P
       .values({ album_id: req.albumId, user_id: req.userId, access_level: req.accessLevel })
       .onConflictDoUpdate({ target: [albumShares.album_id, albumShares.user_id], set: { access_level: req.accessLevel } })
   );
+
+  // Enqueue face_assignment jobs for all photos in the shared album for the new user.
+  // This way, the new user immediately gets face data without re-running InsightFace.
+  enqueueAlbumFaceAssignments(req.albumId, req.userId).catch(err => {
+    console.error(`Error enqueueing face assignments for shared album ${req.albumId}:`, err);
+  });
+
   return { success: true };
+}
+
+/**
+ * Enqueue face_assignment jobs for all photos in an album for a specific user.
+ * Called when an album is shared — the new user gets face assignments without re-running detection.
+ */
+async function enqueueAlbumFaceAssignments(albumId: number, targetUserId: number): Promise<void> {
+  const albumPhotoRows = await dbAll<{ photo_id: number }>(
+    db.select({ photo_id: albumPhotos.photo_id }).from(albumPhotos).where(eq(albumPhotos.album_id, albumId))
+  );
+
+  for (const { photo_id } of albumPhotoRows) {
+    await enqueuePhotoScan(photo_id, targetUserId, ["face_assignment"]);
+  }
+
+  if (albumPhotoRows.length > 0) {
+    triggerWorkers();
+  }
 }
 
 export async function getAlbumSharesLogic(userId: number, albumId: number): Promise<GetAlbumSharesResponse> {
@@ -1889,9 +2016,14 @@ async function findBestPersonMatch(
 ): Promise<{ personId: number; distance: number } | null> {
   const allFaces = await dbAll<{ person_id: number | null; embedding: string }>(
     db
-      .select({ person_id: faces.person_id, embedding: faces.embedding })
-      .from(faces)
-      .where(and(eq(faces.user_id, userId), sql`${faces.person_id} IS NOT NULL`, eq(faces.ignored, false)))
+      .select({ person_id: userFaceAssignments.person_id, embedding: faces.embedding })
+      .from(userFaceAssignments)
+      .innerJoin(faces, eq(faces.id, userFaceAssignments.face_id))
+      .where(and(
+        eq(userFaceAssignments.user_id, userId),
+        sql`${userFaceAssignments.person_id} IS NOT NULL`,
+        eq(userFaceAssignments.ignored, false)
+      ))
   );
 
   // Group embeddings by person
@@ -1983,11 +2115,12 @@ export async function listPersonsLogic(userId: number): Promise<ListPersonsRespo
       cover_face_id: sql<number>`COALESCE(
         (
           SELECT f.id
-          FROM faces f
+          FROM user_face_assignments ufa
+          INNER JOIN faces f ON f.id = ufa.face_id
           INNER JOIN photos p ON p.id = f.photo_id
-          WHERE f.person_id = persons.id
-            AND f.user_id = persons.user_id
-            AND f.ignored = ${rawFalse}
+          WHERE ufa.person_id = persons.id
+            AND ufa.user_id = persons.user_id
+            AND ufa.ignored = ${rawFalse}
           ORDER BY ${rawCoalesceDate} DESC NULLS LAST, f.id DESC
           LIMIT 1
         ),
@@ -1995,15 +2128,16 @@ export async function listPersonsLogic(userId: number): Promise<ListPersonsRespo
       )`,
       created_at: persons.created_at,
       updated_at: persons.updated_at,
-      faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM faces f WHERE f.person_id = persons.id AND f.ignored = ${rawFalse}), 0) AS INTEGER)`,
+      faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM user_face_assignments ufa WHERE ufa.person_id = persons.id AND ufa.ignored = ${rawFalse}), 0) AS INTEGER)`,
       cover_filename: sql<string>`COALESCE(
         (
           SELECT p.filename
-          FROM faces f
+          FROM user_face_assignments ufa
+          INNER JOIN faces f ON f.id = ufa.face_id
           INNER JOIN photos p ON p.id = f.photo_id
-          WHERE f.person_id = persons.id
-            AND f.user_id = persons.user_id
-            AND f.ignored = ${rawFalse}
+          WHERE ufa.person_id = persons.id
+            AND ufa.user_id = persons.user_id
+            AND ufa.ignored = ${rawFalse}
           ORDER BY ${rawCoalesceDate} DESC NULLS LAST, f.id DESC
           LIMIT 1
         ),
@@ -2012,11 +2146,12 @@ export async function listPersonsLogic(userId: number): Promise<ListPersonsRespo
       cover_bbox: sql<string>`COALESCE(
         (
           SELECT f.bbox
-          FROM faces f
+          FROM user_face_assignments ufa
+          INNER JOIN faces f ON f.id = ufa.face_id
           INNER JOIN photos p ON p.id = f.photo_id
-          WHERE f.person_id = persons.id
-            AND f.user_id = persons.user_id
-            AND f.ignored = ${rawFalse}
+          WHERE ufa.person_id = persons.id
+            AND ufa.user_id = persons.user_id
+            AND ufa.ignored = ${rawFalse}
           ORDER BY ${rawCoalesceDate} DESC NULLS LAST, f.id DESC
           LIMIT 1
         ),
@@ -2058,21 +2193,22 @@ export async function getPersonDetailsLogic(userId: number, personId: number): P
     db
       .select({
         id: faces.id,
-        user_id: faces.user_id,
+        user_id: userFaceAssignments.user_id,
         photo_id: faces.photo_id,
         bbox: faces.bbox,
         embedding: faces.embedding,
-        person_id: faces.person_id,
+        person_id: userFaceAssignments.person_id,
         quality: faces.quality,
-        ignored: faces.ignored,
+        ignored: userFaceAssignments.ignored,
         created_at: faces.created_at,
         filename: photos.filename,
         original_name: photos.original_name,
         taken_at: photos.taken_at,
       })
-      .from(faces)
+      .from(userFaceAssignments)
+      .innerJoin(faces, eq(faces.id, userFaceAssignments.face_id))
       .innerJoin(photos, eq(faces.photo_id, photos.id))
-      .where(and(eq(faces.person_id, personId), eq(faces.user_id, userId)))
+      .where(and(eq(userFaceAssignments.person_id, personId), eq(userFaceAssignments.user_id, userId)))
       .orderBy(sql`${photoDateOrder} DESC NULLS LAST`, sql`${faces.id} DESC`)
   );
 
@@ -2099,7 +2235,7 @@ export async function getPersonDetailsLogic(userId: number, personId: number): P
         filename: r.filename,
         original_name: r.original_name,
         taken_at: r.taken_at ?? undefined,
-        created_at: "", // Not strictly needed here, but part of the type
+        created_at: "",
       },
     })),
   };
@@ -2129,7 +2265,7 @@ export async function updatePersonLogic(userId: number, personId: number, name: 
         cover_face_id: persons.cover_face_id,
         created_at: persons.created_at,
         updated_at: persons.updated_at,
-        faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM faces f WHERE f.person_id = persons.id AND f.ignored = ${rawFalse}), 0) AS INTEGER)`,
+        faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM user_face_assignments ufa WHERE ufa.person_id = persons.id AND ufa.ignored = ${rawFalse}), 0) AS INTEGER)`,
         cover_filename: sql<string>`COALESCE((SELECT p.filename FROM photos p INNER JOIN faces f ON f.photo_id = p.id WHERE f.id = persons.cover_face_id LIMIT 1), '')`,
         cover_bbox: sql<string>`COALESCE((SELECT f.bbox FROM faces f WHERE f.id = persons.cover_face_id LIMIT 1), '')`,
       })
@@ -2166,24 +2302,24 @@ export async function mergePersonsLogic(userId: number, req: MergePersonsRequest
     throw new Error("Kann nicht zu einer unbenannten Person zusammenführen");
   }
 
-  // Move all faces from source persons to target person
+  // Move all face assignments from source persons to target person
   await dbExec(
-    db.update(faces)
+    db.update(userFaceAssignments)
       .set({ person_id: targetId })
-      .where(and(inArray(faces.person_id, sourceIds), eq(faces.user_id, userId)))
+      .where(and(inArray(userFaceAssignments.person_id, sourceIds), eq(userFaceAssignments.user_id, userId)))
   );
 
   // Update target person's cover face if it doesn't have one
   if (!target.cover_face_id) {
-    const firstFace = await dbFirst<{ id: number }>(
-      db.select({ id: faces.id })
-        .from(faces)
-        .where(and(eq(faces.person_id, targetId), eq(faces.user_id, userId)))
+    const firstFace = await dbFirst<{ face_id: number }>(
+      db.select({ face_id: userFaceAssignments.face_id })
+        .from(userFaceAssignments)
+        .where(and(eq(userFaceAssignments.person_id, targetId), eq(userFaceAssignments.user_id, userId)))
         .limit(1)
     );
     if (firstFace) {
       await dbExec(
-        db.update(persons).set({ cover_face_id: firstFace.id }).where(eq(persons.id, targetId))
+        db.update(persons).set({ cover_face_id: firstFace.face_id }).where(eq(persons.id, targetId))
       );
     }
   }
@@ -2207,9 +2343,9 @@ export async function assignFaceToPersonLogic(
   personId: number
 ): Promise<{ success: boolean }> {
   await dbExec(
-    db.update(faces)
+    db.update(userFaceAssignments)
       .set({ person_id: personId, ignored: false })
-      .where(and(eq(faces.id, faceId), eq(faces.user_id, userId)))
+      .where(and(eq(userFaceAssignments.face_id, faceId), eq(userFaceAssignments.user_id, userId)))
   );
   return { success: true };
 }
@@ -2219,9 +2355,9 @@ export async function ignoreFaceLogic(
   faceId: number
 ): Promise<{ success: boolean }> {
   await dbExec(
-    db.update(faces)
+    db.update(userFaceAssignments)
       .set({ ignored: true, person_id: null })
-      .where(and(eq(faces.id, faceId), eq(faces.user_id, userId)))
+      .where(and(eq(userFaceAssignments.face_id, faceId), eq(userFaceAssignments.user_id, userId)))
   );
   return { success: true };
 }
@@ -2231,9 +2367,9 @@ export async function ignorePersonFacesLogic(
   personId: number
 ): Promise<{ success: boolean }> {
   await dbExec(
-    db.update(faces)
+    db.update(userFaceAssignments)
       .set({ ignored: true, person_id: null })
-      .where(and(eq(faces.person_id, personId), eq(faces.user_id, userId)))
+      .where(and(eq(userFaceAssignments.person_id, personId), eq(userFaceAssignments.user_id, userId)))
   );
 
   // Also cleanup the person since they no longer have any associated faces
@@ -2246,8 +2382,28 @@ export async function getPhotoFacesLogic(
   userId: number,
   photoId: number
 ): Promise<{ faces: Face[] }> {
-  const rows = await dbAll<typeof faces.$inferSelect>(
-    db.select().from(faces).where(and(eq(faces.photo_id, photoId), eq(faces.user_id, userId)))
+  const rows = await dbAll<{
+    id: number; user_id: number; photo_id: number; bbox: string; embedding: string;
+    person_id: number | null; quality: number | null; ignored: boolean;
+    created_at: string | null;
+  }>(
+    db.select({
+      id: faces.id,
+      user_id: userFaceAssignments.user_id,
+      photo_id: faces.photo_id,
+      bbox: faces.bbox,
+      embedding: faces.embedding,
+      person_id: userFaceAssignments.person_id,
+      quality: faces.quality,
+      ignored: userFaceAssignments.ignored,
+      created_at: faces.created_at,
+    })
+    .from(faces)
+    .innerJoin(userFaceAssignments, and(
+      eq(userFaceAssignments.face_id, faces.id),
+      eq(userFaceAssignments.user_id, userId)
+    ))
+    .where(eq(faces.photo_id, photoId))
   );
 
   return {
@@ -2431,7 +2587,7 @@ export async function cleanupOrphanedPersons(userId: number): Promise<void> {
       .where(
         and(
           eq(persons.user_id, userId),
-          sql`NOT EXISTS (SELECT 1 FROM faces WHERE faces.person_id = persons.id)`
+          sql`NOT EXISTS (SELECT 1 FROM user_face_assignments WHERE user_face_assignments.person_id = persons.id)`
         )
       )
   );
@@ -2759,8 +2915,13 @@ export async function searchPhotosLogic(
   if (matchedPerson) {
     const personFaces = await dbAll<{ photo_id: number }>(
       db.select({ photo_id: faces.photo_id })
-        .from(faces)
-        .where(and(eq(faces.person_id, matchedPerson.id), eq(faces.ignored, false)))
+        .from(userFaceAssignments)
+        .innerJoin(faces, eq(faces.id, userFaceAssignments.face_id))
+        .where(and(
+          eq(userFaceAssignments.user_id, userId),
+          eq(userFaceAssignments.person_id, matchedPerson.id),
+          eq(userFaceAssignments.ignored, false)
+        ))
     );
     const uniquePhotoIds = [...new Set(personFaces.map(f => f.photo_id))];
     if (uniquePhotoIds.length === 0) return { results: [] };
@@ -3005,9 +3166,13 @@ async function callLandmarkService(
   return response.json() as Promise<{ landmarks: Array<{ label: string; confidence: number; bbox: { x: number; y: number; width: number; height: number } }> }>;
 }
 
+/**
+ * Detect landmarks in a photo (global, runs once per photo).
+ * userId is only used for auto-crop recomputation.
+ */
 export async function indexPhotoLandmarks(userId: number, photoId: number): Promise<void> {
   const photo = await dbFirst<typeof photos.$inferSelect>(
-    db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+    db.select().from(photos).where(eq(photos.id, photoId))
   );
   if (!photo) return;
 
@@ -3041,7 +3206,6 @@ export async function indexPhotoLandmarks(userId: number, photoId: number): Prom
         await dbExec(
           db.insert(photoLandmarks).values({
             photo_id: photoId,
-            user_id: userId,
             label: lm.label,
             confidence: lm.confidence,
             bbox: JSON.stringify(lm.bbox),
@@ -3174,7 +3338,7 @@ export async function indexPhotoQuality(userId: number, photoId: number): Promis
     const faceRows = await dbAll<{ bbox: string }>(
       db.select({ bbox: faces.bbox })
         .from(faces)
-        .where(and(eq(faces.photo_id, photoId), eq(faces.ignored, false)))
+        .where(eq(faces.photo_id, photoId))
     );
     bboxes = faceRows.map(r => JSON.parse(r.bbox) as FaceBBoxNorm);
   } catch (faceErr) {
@@ -3322,6 +3486,7 @@ export async function searchByLandmarkLogic(
   query: string,
   limit: number = 50
 ): Promise<{ results: LandmarkSearchResult[] }> {
+  // Join with photos to filter by user ownership (landmarks are global, access is per-user)
   const lmRows = await dbAll<{ photo_id: number; label: string; confidence: number; bbox: string }>(
     db.select({
       photo_id: photoLandmarks.photo_id,
@@ -3330,7 +3495,8 @@ export async function searchByLandmarkLogic(
       bbox: photoLandmarks.bbox,
     })
     .from(photoLandmarks)
-    .where(and(eq(photoLandmarks.user_id, userId), ilike(photoLandmarks.label, `%${query}%`)))
+    .innerJoin(photos, eq(photos.id, photoLandmarks.photo_id))
+    .where(and(eq(photos.user_id, userId), ilike(photoLandmarks.label, `%${query}%`)))
     .orderBy(sql`${photoLandmarks.confidence} DESC`)
   );
 

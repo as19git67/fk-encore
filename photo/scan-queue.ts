@@ -8,7 +8,7 @@ import db from "../db/database";
 import { photoScanQueue, photos, faces, photoLandmarks } from "../db/schema";
 import { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY } from "./photo.service";
 
-export type ScanService = "embedding" | "face_detection" | "landmark" | "quality" | "geocoding";
+export type ScanService = "embedding" | "face_detection" | "face_assignment" | "landmark" | "quality" | "geocoding";
 export type ScanStatus = "pending" | "processing" | "failed" | "done";
 
 /**
@@ -37,7 +37,10 @@ export interface QueueStatus {
 /** Services that are enabled in this installation */
 function enabledServices(): ScanService[] {
   const services: ScanService[] = ["embedding", "geocoding"];
-  if (ENABLE_LOCAL_FACES) services.push("face_detection");
+  if (ENABLE_LOCAL_FACES) {
+    services.push("face_detection");
+    services.push("face_assignment");
+  }
   if (ENABLE_LANDMARKS) services.push("landmark");
   if (ENABLE_QUALITY) services.push("quality");
   return services;
@@ -145,7 +148,7 @@ export async function getQueueStatus(userId: number): Promise<QueueStatus> {
   `);
 
   const map = new Map<ScanService, QueueServiceStatus>();
-  for (const svc of (["embedding", "face_detection", "landmark", "quality", "geocoding"] as ScanService[])) {
+  for (const svc of (["embedding", "face_detection", "face_assignment", "landmark", "quality", "geocoding"] as ScanService[])) {
     map.set(svc, { service: svc, pending: 0, processing: 0, failed: 0, done: 0 });
   }
 
@@ -246,9 +249,7 @@ export async function requeueForRescan(userId: number, force: boolean): Promise<
 
 async function getMissingPhotoIds(userId: number, service: ScanService): Promise<number[]> {
   if (service === "face_detection") {
-    // Photos without a 'done' queue entry for face_detection.
-    // Previously this checked for missing face rows, but photos that were
-    // scanned and had zero faces would be re-queued every time.
+    // Photos without a 'done' queue entry for face_detection (global detection).
     const rows = await db.execute<{ id: number }>(sql`
       SELECT p.id FROM photos p
       WHERE p.user_id = ${userId}
@@ -256,6 +257,23 @@ async function getMissingPhotoIds(userId: number, service: ScanService): Promise
           SELECT 1 FROM photo_scan_queue q
           WHERE q.photo_id = p.id
             AND q.service = 'face_detection'
+            AND q.status = 'done'
+        )
+    `);
+    return rows.rows.map((r) => r.id);
+  }
+
+  if (service === "face_assignment") {
+    // Photos that have been detected but not yet assigned for this user.
+    // A photo needs face_assignment if it has faces but no user_face_assignments for this user.
+    const rows = await db.execute<{ id: number }>(sql`
+      SELECT p.id FROM photos p
+      WHERE p.user_id = ${userId}
+        AND NOT EXISTS (
+          SELECT 1 FROM photo_scan_queue q
+          WHERE q.photo_id = p.id
+            AND q.user_id = ${userId}
+            AND q.service = 'face_assignment'
             AND q.status = 'done'
         )
     `);

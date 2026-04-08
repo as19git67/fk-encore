@@ -127,6 +127,20 @@
       "when": 1776000000000,
       "tag": "0016_location_short",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1776100000000,
+      "tag": "0017_user_face_assignments",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1776200000000,
+      "tag": "0018_global_landmarks",
+      "breakpoints": true
     }
   ]
 }

@@ -23,7 +23,8 @@ import {
 } from "./scan-queue";
 import {
   indexPhotoEmbeddings,
-  indexPhotoFaces,
+  detectPhotoFaces,
+  assignFacesForUser,
   indexPhotoLandmarks,
   indexPhotoQuality,
   indexPhotoGeocoding,
@@ -45,6 +46,7 @@ const POLL_INTERVAL_MS = 30_000; // fallback poll when idle
 const SERVICE_DEPENDENCY: Partial<Record<ScanService, ExternalServiceName>> = {
   embedding: "embedding",
   face_detection: "insightface",
+  // face_assignment has no external dependency — it only reads from the local DB
   landmark: "landmark",
   quality: "embedding",
 };
@@ -109,10 +111,10 @@ class ScanWorker {
         );
       }
 
-      // After face detection completes, clean up orphaned persons.
-      if (this.service === "face_detection") {
+      // After face assignment completes, clean up orphaned persons.
+      if (this.service === "face_assignment") {
         cleanupOrphanedPersons(job.user_id).catch((err) =>
-          console.error(`[scan-worker] cleanup error after face job ${job.id}:`, err),
+          console.error(`[scan-worker] cleanup error after face_assignment job ${job.id}:`, err),
         );
       }
     } catch (err: any) {
@@ -143,7 +145,12 @@ class ScanWorker {
         await indexPhotoEmbeddings(job.user_id, job.photo_id, job.force);
         break;
       case "face_detection":
-        await indexPhotoFaces(job.user_id, job.photo_id, job.force);
+        // Global detection — runs once per photo regardless of user
+        await detectPhotoFaces(job.photo_id, job.force);
+        break;
+      case "face_assignment":
+        // Per-user assignment — matches detected faces to this user's persons
+        await assignFacesForUser(job.user_id, job.photo_id, job.force);
         break;
       case "landmark":
         await indexPhotoLandmarks(job.user_id, job.photo_id);
@@ -176,11 +183,13 @@ class ScanWorker {
 
 const embeddingConcurrency = parseInt(process.env.SCAN_EMBEDDING_CONCURRENCY ?? "1", 10);
 const faceConcurrency = parseInt(process.env.SCAN_FACE_CONCURRENCY ?? "1", 10);
+const faceAssignConcurrency = parseInt(process.env.SCAN_FACE_ASSIGN_CONCURRENCY ?? "1", 10);
 const landmarkConcurrency = parseInt(process.env.SCAN_LANDMARK_CONCURRENCY ?? "1", 10);
 const qualityConcurrency = parseInt(process.env.SCAN_QUALITY_CONCURRENCY ?? "1", 10);
 
 const embeddingWorker = new ScanWorker("embedding", embeddingConcurrency);
 const faceWorker = new ScanWorker("face_detection", faceConcurrency);
+const faceAssignWorker = new ScanWorker("face_assignment", faceAssignConcurrency);
 const landmarkWorker = new ScanWorker("landmark", landmarkConcurrency);
 const qualityWorker = new ScanWorker("quality", qualityConcurrency);
 const geocodingWorker = new ScanWorker("geocoding", 1); // always 1 — Nominatim rate limit
@@ -189,6 +198,7 @@ const geocodingWorker = new ScanWorker("geocoding", 1); // always 1 — Nominati
 export function triggerWorkers(): void {
   embeddingWorker.tick();
   faceWorker.tick();
+  faceAssignWorker.tick();
   landmarkWorker.tick();
   qualityWorker.tick();
   geocodingWorker.tick();
@@ -209,6 +219,8 @@ export async function startWorkers(): Promise<void> {
       qualityWorker.tick();
     } else if (name === "insightface") {
       faceWorker.tick();
+      // Also wake face_assignment — new detections may be available
+      faceAssignWorker.tick();
     } else if (name === "landmark") {
       landmarkWorker.tick();
     }
@@ -217,11 +229,12 @@ export async function startWorkers(): Promise<void> {
   console.log("[scan-worker] Workers starting...");
   embeddingWorker.start();
   faceWorker.start();
+  faceAssignWorker.start();
   landmarkWorker.start();
   qualityWorker.start();
   geocodingWorker.start();
   console.log(
-    `[scan-worker] embedding(c=${embeddingConcurrency}), face_detection(c=${faceConcurrency}), landmark(c=${landmarkConcurrency}), quality(c=${qualityConcurrency}), geocoding(c=1)`,
+    `[scan-worker] embedding(c=${embeddingConcurrency}), face_detection(c=${faceConcurrency}), face_assignment(c=${faceAssignConcurrency}), landmark(c=${landmarkConcurrency}), quality(c=${qualityConcurrency}), geocoding(c=1)`,
   );
 }
 
