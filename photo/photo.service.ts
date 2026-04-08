@@ -1629,6 +1629,20 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
 }
 
 export async function updateAlbumUserSettingsLogic(userId: number, req: UpdateAlbumUserSettingsRequest): Promise<AlbumUserSettings> {
+  // Verify the album exists and the user has access (owner or any share level)
+  const album = await dbFirst<typeof albums.$inferSelect>(
+    db.select().from(albums).where(eq(albums.id, req.albumId))
+  );
+  if (!album) throw new Error("Album not found");
+
+  const isOwner = album.user_id === userId;
+  if (!isOwner) {
+    const share = await dbFirst<typeof albumShares.$inferSelect>(
+      db.select().from(albumShares).where(and(eq(albumShares.album_id, req.albumId), eq(albumShares.user_id, userId)))
+    );
+    if (!share) throw new Error("Unauthorized access to album");
+  }
+
   const values: any = {};
   if (req.hideMode) values.hide_mode = req.hideMode;
   if (req.activeView) values.active_view = req.activeView;
@@ -1649,6 +1663,13 @@ export async function updateAlbumUserSettingsLogic(userId: number, req: UpdateAl
   if (req.activeView && req.activeView in VIEW_PRESETS && req.viewConfig === undefined) {
     values.view_config = VIEW_PRESETS[req.activeView];
   }
+
+  // Ensure settings row exists (may not if user never opened album detail view)
+  await dbExec(
+    db.insert(albumUserSettings)
+      .values({ album_id: req.albumId, user_id: userId, hide_mode: "mine", active_view: "all", cover_photo_id: null })
+      .onConflictDoNothing()
+  );
 
   await dbExec(
     db.update(albumUserSettings)
