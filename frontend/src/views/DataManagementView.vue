@@ -343,7 +343,6 @@ onUnmounted(() => stopPolling())
         <Button
           icon="pi pi-search-plus"
           label="Fehlende Scans starten"
-          outlined
           :loading="rescanLoading"
           :disabled="rescanLoading || retryLoading"
           @click="handleRescan(false)"
@@ -351,7 +350,6 @@ onUnmounted(() => stopPolling())
         <Button
           icon="pi pi-refresh"
           label="Alles neu scannen"
-          outlined
           :loading="rescanLoading"
           :disabled="rescanLoading || retryLoading"
           @click="handleRescan(true)"
@@ -386,6 +384,7 @@ onUnmounted(() => stopPolling())
 
       <Button class="data-management-group__item"
         icon="pi pi-images"
+        outlined
         label="Gruppen neu berechnen"
         :loading="groupingLoading"
         :disabled="groupingLoading || isActive || rescanLoading || retryLoading"
@@ -420,6 +419,7 @@ onUnmounted(() => stopPolling())
 
       <Button class="data-management-group__item"
         icon="pi pi-map-marker"
+        outlined
         label="GPS neu einlesen"
         :disabled="gpsRescanLoading || isActive || rescanLoading || retryLoading"
         :loading="gpsRescanLoading"
@@ -446,6 +446,7 @@ onUnmounted(() => stopPolling())
 
       <Button class="data-management-group__item"
         icon="pi pi-arrows-alt"
+        outlined
         label="Auto-Crop neu berechnen"
         :loading="autoCropLoading"
         :disabled="autoCropLoading || isActive || rescanLoading || retryLoading"
@@ -469,6 +470,7 @@ onUnmounted(() => stopPolling())
 
       <Button class="data-management-group__item"
         icon="pi pi-refresh"
+        outlined
         label="Metadaten aktualisieren"
         :disabled="refreshingMetadata || isActive || rescanLoading || retryLoading"
         :loading="refreshingMetadata"
