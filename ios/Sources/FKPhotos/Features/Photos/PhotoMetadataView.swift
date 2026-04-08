@@ -182,7 +182,15 @@ struct PhotoMetadataView: View {
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let d = iso.date(from: str) { return d }
         iso.formatOptions = [.withInternetDateTime]
-        return iso.date(from: str)
+        if let d = iso.date(from: str) { return d }
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.timeZone = TimeZone(identifier: "UTC")
+        for fmt in ["yyyy-MM-dd HH:mm:ss.SSS", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd"] {
+            df.dateFormat = fmt
+            if let d = df.date(from: str) { return d }
+        }
+        return nil
     }
 
     private var locationText: String {

@@ -8,7 +8,7 @@ final class PhotoMetadataViewModel {
     }
 
     let photo: PhotoWithCuration
-    private(set) var curationStatus: CurationStatus
+    var curationStatus: CurationStatus
     private(set) var takenAt: String?
 
     struct LandmarkEntry: Identifiable {
