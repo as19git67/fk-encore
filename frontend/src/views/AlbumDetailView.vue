@@ -242,15 +242,26 @@ async function handleReindexPhoto() {
 
 function handleCoverPhotoIdUpdate(id: number | null) {
   if (!album.value) return
-  album.value.cover_photo_id = id ?? undefined
+  if (canWrite.value) {
+    album.value.cover_photo_id = id ?? undefined
+  } else {
+    // Viewer: update user-specific settings
+    if (!album.value.settings) return
+    album.value.settings.cover_photo_id = id
+  }
 }
 
 async function handleSetMapCover(photoId: number) {
   if (!album.value) return
-  const newCoverId = album.value.cover_photo_id === photoId ? null : photoId
+  const newCoverId = effectiveCoverPhotoId.value === photoId ? null : photoId
   try {
-    await updateAlbum(albumId, { coverPhotoId: newCoverId })
-    album.value.cover_photo_id = newCoverId ?? undefined
+    if (canWrite.value) {
+      await updateAlbum(albumId, { coverPhotoId: newCoverId })
+      album.value.cover_photo_id = newCoverId ?? undefined
+    } else {
+      await updateAlbumUserSettings(albumId, { cover_photo_id: newCoverId })
+      if (album.value.settings) album.value.settings.cover_photo_id = newCoverId
+    }
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Setzen des Covers'
   }
@@ -287,9 +298,15 @@ function handleScrollTo(sectionId: string) {
 }
 
 // ── Album cover ───────────────────────────────────────────────────────────────
+// Effective cover: user-specific setting takes precedence over album-level cover
+const effectiveCoverPhotoId = computed(() => {
+  if (!album.value) return undefined
+  return album.value.settings?.cover_photo_id ?? album.value.cover_photo_id
+})
+
 async function scrollToCover() {
-  if (!album.value?.cover_photo_id) return
-  const idx = albumPhotos.value.findIndex(p => p.id === album.value!.cover_photo_id)
+  if (!effectiveCoverPhotoId.value) return
+  const idx = albumPhotos.value.findIndex(p => p.id === effectiveCoverPhotoId.value)
   if (idx >= 0) selectedIndex.value = idx
 }
 
@@ -353,7 +370,7 @@ onUnmounted(() => serviceHealth.stopPolling())
           <span :class="['role-badge', `role-badge--${album.role}`]">{{ album.role }}</span>
         </div>
         <div class="controls">
-          <Button v-if="album.cover_photo_id && displayMode !== 'map'" icon="pi pi-image" label="Cover fokussieren" size="small" text @click="scrollToCover" />
+          <Button v-if="effectiveCoverPhotoId && displayMode !== 'map'" icon="pi pi-image" label="Cover fokussieren" size="small" text @click="scrollToCover" />
           <div v-if="album.settings" class="control-group">
             <label>Ansicht:</label>
             <SelectButton v-model="album.settings.active_view" :options="availableViewOptions" optionLabel="label" optionValue="value" @change="handleSettingsChange" />
@@ -454,7 +471,8 @@ onUnmounted(() => serviceHealth.stopPolling())
           :reindexing-photo="reindexingPhoto"
           :updating-date="false"
           :album-id="albumId"
-          :cover-photo-id="album.cover_photo_id"
+          :cover-photo-id="effectiveCoverPhotoId"
+          :album-role="album.role"
           :show-persons="showPersons"
           :limit-albums-shown="true"
           :face-service-available="serviceHealth.faceServiceAvailable"
@@ -523,11 +541,10 @@ onUnmounted(() => serviceHealth.stopPolling())
     >
       <template #topbar-actions>
         <Button
-          v-if="canWrite"
-          :icon="album?.cover_photo_id === mapSelectedPhoto.id ? 'pi pi-image-check' : 'pi pi-image'"
+          :icon="effectiveCoverPhotoId === mapSelectedPhoto.id ? 'pi pi-image-check' : 'pi pi-image'"
           rounded text
-          :severity="album?.cover_photo_id === mapSelectedPhoto.id ? 'warn' : 'secondary'"
-          v-tooltip.bottom="album?.cover_photo_id === mapSelectedPhoto.id ? 'Vom Cover entfernen' : 'Als Cover setzen'"
+          :severity="effectiveCoverPhotoId === mapSelectedPhoto.id ? 'warn' : 'secondary'"
+          v-tooltip.bottom="effectiveCoverPhotoId === mapSelectedPhoto.id ? 'Vom Cover entfernen' : 'Als Cover setzen'"
           @click="handleSetMapCover(mapSelectedPhoto.id)"
         />
         <Button
