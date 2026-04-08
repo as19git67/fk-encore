@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { api } from "encore.dev/api";
+import { photo } from "~encore/clients";
 
 const CONTAINER_DIST_DIR = "/app/frontend/dist";
 const LOCAL_DIST_DIR = path.resolve(process.cwd(), "frontend/dist");
@@ -40,6 +41,50 @@ function sendHealthOk(res: { statusCode: number; setHeader: (name: string, value
   res.end(JSON.stringify({ status: "ok" }));
 }
 
+/**
+ * Extract share token from a path like "albums/shared/<token>".
+ */
+function extractShareToken(rawPath: string): string | null {
+  const match = rawPath.match(/^albums\/shared\/([A-Za-z0-9_-]+)$/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Escape a string for safe use inside HTML attribute values.
+ */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/**
+ * Build Open Graph HTML meta tags for a shared album.
+ */
+function buildOgTags(
+  albumName: string,
+  description: string,
+  photoCount: number,
+  imageUrl: string | null,
+  pageUrl: string,
+): string {
+  const tags = [
+    `<meta property="og:type" content="website" />`,
+    `<meta property="og:title" content="${escapeHtml(albumName)}" />`,
+    `<meta property="og:description" content="${escapeHtml(description)}" />`,
+    `<meta property="og:site_name" content="Vivanty" />`,
+    `<meta property="og:url" content="${escapeHtml(pageUrl)}" />`,
+  ];
+  if (imageUrl) {
+    tags.push(`<meta property="og:image" content="${escapeHtml(imageUrl)}" />`);
+    tags.push(`<meta property="og:image:width" content="1200" />`);
+    tags.push(`<meta property="og:image:height" content="630" />`);
+  }
+  return tags.join("\n    ");
+}
+
 export const frontend = api.raw(
   { expose: true, method: "GET", path: "/app/*path" },
   async (req, res) => {
@@ -65,9 +110,42 @@ export const frontend = api.raw(
       return;
     }
 
+    // For shared album URLs, inject Open Graph meta tags so iMessage/social
+    // previews show the album name and cover image instead of just "Vivanty".
+    const shareToken = extractShareToken(rawPath);
+    if (shareToken && filePath.endsWith("index.html")) {
+      try {
+        const album = await photo.getPublicAlbum({ token: shareToken });
+        const origin = `${req.headers["x-forwarded-proto"] ?? "https"}://${req.headers.host}`;
+        const pageUrl = `${origin}/app/albums/shared/${shareToken}`;
+
+        const photoLabel = album.photo_count === 1 ? "1 Foto" : `${album.photo_count} Fotos`;
+        const desc = album.description
+          ? `${album.description} — ${photoLabel}`
+          : `Geteiltes Album — ${photoLabel}`;
+
+        const imageUrl = album.cover_filename
+          ? `${origin}/photos/file/${album.cover_filename}?w=1200&convert=true`
+          : null;
+
+        const ogTags = buildOgTags(album.name, desc, album.photo_count, imageUrl, pageUrl);
+
+        let html = await fs.promises.readFile(filePath, "utf-8");
+        html = html.replace("<title>Vivanty</title>", `<title>${escapeHtml(album.name)} — Vivanty</title>\n    ${ogTags}`);
+
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.setHeader("Cache-Control", "public, max-age=3600");
+        res.end(html);
+        return;
+      } catch {
+        // Album not found or expired — fall through to serve plain SPA
+      }
+    }
+
     res.statusCode = 200;
     res.setHeader("Content-Type", contentTypeFor(filePath));
-    
+
     // Add caching headers for static assets
     // We use a shorter TTL for index.html than for hashed assets
     if (requested === "index.html" || !filePath.includes("assets")) {
