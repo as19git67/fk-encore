@@ -31,6 +31,7 @@ import {
   indexPhotoGeocoding,
   findPhotoGroupsLogic,
   cleanupOrphanedPersons,
+  hasFacesForPhoto,
 } from "./photo.service";
 import {
   assertServiceAvailable,
@@ -115,9 +116,14 @@ class ScanWorker {
       // After face detection completes, re-enqueue quality so it can
       // include face composition data (quality no longer defers on
       // pending face_detection to avoid blocking during "scan missing").
+      // Only re-enqueue when faces were actually found — otherwise the
+      // quality score would be identical and the re-run is wasted work.
       if (this.service === "face_detection") {
-        enqueuePhotoScan(job.photo_id, job.user_id, ["quality"]).then(() => {
-          qualityWorker.tick();
+        hasFacesForPhoto(job.photo_id).then((has) => {
+          if (!has) return;
+          return enqueuePhotoScan(job.photo_id, job.user_id, ["quality"]).then(() => {
+            qualityWorker.tick();
+          });
         }).catch((err) =>
           console.error(`[scan-worker] quality re-enqueue after face_detection job ${job.id}:`, err),
         );

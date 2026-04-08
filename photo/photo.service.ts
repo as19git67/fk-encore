@@ -278,6 +278,14 @@ export async function computeAndStoreAutoCrop(userId: number, photoId: number): 
  * Stores raw detection results (bbox + embedding) in the `faces` table.
  * If faces already exist for this photo and force is false, detection is skipped.
  */
+/** Check whether any faces have been detected for a photo. */
+export async function hasFacesForPhoto(photoId: number): Promise<boolean> {
+  const row = await dbFirst<{ id: number }>(
+    db.select({ id: faces.id }).from(faces).where(eq(faces.photo_id, photoId))
+  );
+  return row != null;
+}
+
 export async function detectPhotoFaces(photoId: number, force: boolean = false): Promise<void> {
   if (!ENABLE_LOCAL_FACES) {
     console.log("Local face indexing is disabled via ENABLE_LOCAL_FACES=false");
