@@ -3628,12 +3628,16 @@ export async function getLandmarksForPhotoLogic(
   userId: number,
   photoId: number
 ): Promise<{ landmarks: LandmarkItem[]; location?: PhotoLocation }> {
+  // Allow access for photo owner OR users with shared album access
   const photo = await dbFirst<{ id: number; location_name: string | null; location_city: string | null; location_country: string | null }>(
     db.select({ id: photos.id, location_name: photos.location_name, location_city: photos.location_city, location_country: photos.location_country })
       .from(photos)
-      .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+      .where(eq(photos.id, photoId))
   );
   if (!photo) throw new Error("Photo not found");
+
+  const accessibleUsers = await getUsersWithPhotoAccess(photoId);
+  if (!accessibleUsers.includes(userId)) throw new Error("Photo not found");
 
   const rows = await dbAll<{ id: number; label: string; confidence: number; bbox: string }>(
     db.select({ id: photoLandmarks.id, label: photoLandmarks.label, confidence: photoLandmarks.confidence, bbox: photoLandmarks.bbox })

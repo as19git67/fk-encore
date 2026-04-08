@@ -209,7 +209,9 @@ function getPersonName(personId?: number) {
 const namedFaces = computed(() =>
   props.faces.filter(f => {
     if (f.ignored || !f.person_id) return false
-    return true
+    const person = props.persons.find(p => p.id === f.person_id)
+    const name = person?.name?.trim()
+    return !!name && name.toLowerCase() !== 'unbenannt'
   })
 )
 
