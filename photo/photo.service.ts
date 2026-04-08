@@ -278,6 +278,14 @@ export async function computeAndStoreAutoCrop(userId: number, photoId: number): 
  * Stores raw detection results (bbox + embedding) in the `faces` table.
  * If faces already exist for this photo and force is false, detection is skipped.
  */
+/** Check whether any faces have been detected for a photo. */
+export async function hasFacesForPhoto(photoId: number): Promise<boolean> {
+  const row = await dbFirst<{ id: number }>(
+    db.select({ id: faces.id }).from(faces).where(eq(faces.photo_id, photoId))
+  );
+  return row != null;
+}
+
 export async function detectPhotoFaces(photoId: number, force: boolean = false): Promise<void> {
   if (!ENABLE_LOCAL_FACES) {
     console.log("Local face indexing is disabled via ENABLE_LOCAL_FACES=false");
@@ -3171,6 +3179,8 @@ async function callLandmarkService(
  * userId is only used for auto-crop recomputation.
  */
 export async function indexPhotoLandmarks(userId: number, photoId: number): Promise<void> {
+  if (!ENABLE_LANDMARKS) return;
+
   const photo = await dbFirst<typeof photos.$inferSelect>(
     db.select().from(photos).where(eq(photos.id, photoId))
   );
@@ -3286,25 +3296,10 @@ export function computeFaceCompositionScore(bboxes: FaceBBoxNorm[]): number | nu
 export async function indexPhotoQuality(userId: number, photoId: number): Promise<void> {
   if (!ENABLE_QUALITY) return;
 
-  // If face detection is enabled, wait until its job is no longer active before
-  // scoring.  Throwing DeferJobError puts this job back to pending so it is
-  // retried on the next worker poll cycle — no double CLIP call needed.
-  if (ENABLE_LOCAL_FACES) {
-    const faceJobRow = await dbFirst<{ status: string }>(
-      db.select({ status: photoScanQueue.status })
-        .from(photoScanQueue)
-        .where(and(
-          eq(photoScanQueue.photo_id, photoId),
-          eq(photoScanQueue.service, "face_detection"),
-        ))
-    );
-    // Defer only when a face job actively exists but hasn't finished yet.
-    // If no job exists, or it is done/failed, proceed so quality scoring is
-    // never blocked indefinitely.
-    if (faceJobRow && (faceJobRow.status === "pending" || faceJobRow.status === "processing")) {
-      throw new DeferJobError("waiting for face_detection to complete");
-    }
-  }
+  // Face bbox data is fetched from the DB later and used for composition
+  // scoring when available.  We no longer defer on pending face_detection jobs
+  // because that blocks quality scanning entirely during "scan missing" when
+  // both services are re-enqueued at the same time.
 
   const photo = await dbFirst<typeof photos.$inferSelect>(
     db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
@@ -3361,8 +3356,7 @@ export async function indexPhotoQuality(userId: number, photoId: number): Promis
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`Quality service returned ${response.status} for photo ${photoId}: ${errorText}`);
-      return;
+      throw new Error(`Quality service returned ${response.status} for photo ${photoId}: ${errorText}`);
     }
 
     const result = await response.json() as {
@@ -3433,6 +3427,7 @@ export async function indexPhotoQuality(userId: number, photoId: number): Promis
     }
   } catch (err) {
     console.error(`Quality scoring failed for photo ${photoId}:`, err);
+    throw err;
   } finally {
     if (tempPath && fs.existsSync(tempPath)) {
       fs.unlinkSync(tempPath);
