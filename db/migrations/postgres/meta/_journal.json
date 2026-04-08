@@ -141,6 +141,13 @@
       "when": 1776200000000,
       "tag": "0018_global_landmarks",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1776300000000,
+      "tag": "0019_global_scan_queue",
+      "breakpoints": true
     }
   ]
 }
