@@ -326,6 +326,7 @@ export interface AlbumUserSettings {
   hide_mode: 'mine' | 'all'
   active_view: ActiveView
   view_config?: ViewConfig | null
+  cover_photo_id?: number | null
 }
 
 export interface AlbumPhoto extends Photo {
@@ -474,6 +475,7 @@ export function updateAlbumUserSettings(albumId: number, settings: Partial<Album
   if (rest.hide_mode) req.hideMode = rest.hide_mode
   if (rest.active_view) req.activeView = rest.active_view
   if (rest.view_config !== undefined) req.viewConfig = rest.view_config
+  if (rest.cover_photo_id !== undefined) req.coverPhotoId = rest.cover_photo_id
 
   return apiFetch<AlbumUserSettings>(`/albums/${albumId}/settings`, {
     method: 'PATCH',

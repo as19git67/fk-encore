@@ -1065,11 +1065,10 @@ export async function updatePhotoCurationLogic(
   }
 
   // If the requester is not the owner, allow the action only when the photo
-  // is part of an album that has been shared with the requester.
+  // is part of an album that has been shared with the requester (any access level).
+  // Curation (favorites/hiding) is user-specific and does not affect other users,
+  // so both "read" and "write" shares are permitted.
   if (photo.user_id !== userId) {
-    // Only allow non-owners to change curation when they have WRITE access to
-    // an album that contains the photo. View-only (read) shares are not
-    // permitted to hide/curate photos.
     const shared = await dbFirst(
       db
         .select({ album_id: albumPhotos.album_id })
@@ -1077,8 +1076,7 @@ export async function updatePhotoCurationLogic(
         .innerJoin(albumShares, eq(albumShares.album_id, albumPhotos.album_id))
         .where(and(
           eq(albumPhotos.photo_id, photoId),
-          eq(albumShares.user_id, userId),
-          eq(albumShares.access_level, "write")
+          eq(albumShares.user_id, userId)
         ))
     );
     if (!shared) {
@@ -1631,16 +1629,47 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
 }
 
 export async function updateAlbumUserSettingsLogic(userId: number, req: UpdateAlbumUserSettingsRequest): Promise<AlbumUserSettings> {
+  // Verify the album exists and the user has access (owner or any share level)
+  const album = await dbFirst<typeof albums.$inferSelect>(
+    db.select().from(albums).where(eq(albums.id, req.albumId))
+  );
+  if (!album) throw new Error("Album not found");
+
+  const isOwner = album.user_id === userId;
+  if (!isOwner) {
+    const share = await dbFirst<typeof albumShares.$inferSelect>(
+      db.select().from(albumShares).where(and(eq(albumShares.album_id, req.albumId), eq(albumShares.user_id, userId)))
+    );
+    if (!share) throw new Error("Unauthorized access to album");
+  }
+
   const values: any = {};
   if (req.hideMode) values.hide_mode = req.hideMode;
   if (req.activeView) values.active_view = req.activeView;
   if (req.viewConfig !== undefined) values.view_config = req.viewConfig;
-  if ((req as any).coverPhotoId !== undefined) values.cover_photo_id = (req as any).coverPhotoId;
+  if (req.coverPhotoId !== undefined) {
+    if (req.coverPhotoId === null) {
+      values.cover_photo_id = null;
+    } else {
+      const ap = await dbFirst<typeof albumPhotos.$inferSelect>(
+        db.select().from(albumPhotos).where(and(eq(albumPhotos.album_id, req.albumId), eq(albumPhotos.photo_id, req.coverPhotoId)))
+      );
+      if (!ap) throw new Error("Cover photo must be part of the album");
+      values.cover_photo_id = req.coverPhotoId;
+    }
+  }
 
   // When switching to a preset, store corresponding view_config for consistency
   if (req.activeView && req.activeView in VIEW_PRESETS && req.viewConfig === undefined) {
     values.view_config = VIEW_PRESETS[req.activeView];
   }
+
+  // Ensure settings row exists (may not if user never opened album detail view)
+  await dbExec(
+    db.insert(albumUserSettings)
+      .values({ album_id: req.albumId, user_id: userId, hide_mode: "mine", active_view: "all", cover_photo_id: null })
+      .onConflictDoNothing()
+  );
 
   await dbExec(
     db.update(albumUserSettings)
