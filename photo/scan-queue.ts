@@ -179,16 +179,15 @@ export async function markJobFailed(id: number, error: string): Promise<void> {
 
 /**
  * Aggregate queue counts for a user.
- * Global services (user_id IS NULL) are shown to all users.
- * Per-user services are filtered by userId.
+ * Global services: only count rows where user_id IS NULL (avoids double-counting legacy rows).
+ * Per-user services: only count rows where user_id = userId.
  */
 export async function getQueueStatus(userId: number): Promise<QueueStatus> {
-  // Global services: count all rows where user_id IS NULL
-  // Per-user services: count rows where user_id = userId
   const rows = await db.execute<{ service: ScanService; status: ScanStatus; count: string }>(sql`
     SELECT service, status, COUNT(*)::int as count
     FROM photo_scan_queue
-    WHERE user_id IS NULL OR user_id = ${userId}
+    WHERE (user_id IS NULL AND service IN ('face_detection', 'embedding', 'landmark', 'quality', 'geocoding'))
+       OR (user_id = ${userId} AND service = 'face_assignment')
     GROUP BY service, status
   `);
 
@@ -259,16 +258,25 @@ export async function requeueForRescan(userId: number, force: boolean): Promise<
         // remains. Without this, updating multiple rows to 'pending' would
         // violate the partial unique index.
         if (isGlobal) {
+          // Delete ALL non-active rows for this photo+service, including legacy
+          // rows that still have user_id set from before the global migration.
           await db
             .delete(photoScanQueue)
             .where(
               and(
                 eq(photoScanQueue.photo_id, photoId),
                 eq(photoScanQueue.service, service),
-                isNull(photoScanQueue.user_id),
                 not(inArray(photoScanQueue.status, ["pending", "processing"])),
               ),
             );
+          // Also delete legacy rows with user_id that are active (shouldn't happen
+          // normally, but cleans up any stuck legacy entries).
+          await db.execute(sql`
+            DELETE FROM photo_scan_queue
+            WHERE photo_id = ${photoId}
+              AND service = ${service}
+              AND user_id IS NOT NULL
+          `);
 
           const updated = await db
             .update(photoScanQueue)
@@ -310,16 +318,23 @@ export async function requeueForRescan(userId: number, force: boolean): Promise<
       } else {
         // Remove old done/failed rows so the counter stays accurate
         if (isGlobal) {
+          // Delete ALL non-active rows including legacy per-user entries
           await db
             .delete(photoScanQueue)
             .where(
               and(
                 eq(photoScanQueue.photo_id, photoId),
                 eq(photoScanQueue.service, service),
-                isNull(photoScanQueue.user_id),
                 not(inArray(photoScanQueue.status, ["pending", "processing"])),
               ),
             );
+          // Also delete legacy rows with user_id
+          await db.execute(sql`
+            DELETE FROM photo_scan_queue
+            WHERE photo_id = ${photoId}
+              AND service = ${service}
+              AND user_id IS NOT NULL
+          `);
           await db
             .insert(photoScanQueue)
             .values({ photo_id: photoId, user_id: null, service, force: false })
@@ -350,7 +365,8 @@ export async function requeueForRescan(userId: number, force: boolean): Promise<
 
 async function getMissingPhotoIds(userId: number, service: ScanService): Promise<number[]> {
   if (isGlobalService(service)) {
-    // Global services: photos owned by this user that don't have a 'done' global queue entry
+    // Global services: photos owned by this user that don't have a 'done' queue entry.
+    // Accepts both new global rows (user_id IS NULL) and legacy per-user rows as "done".
     const rows = await db.execute<{ id: number }>(sql`
       SELECT p.id FROM photos p
       WHERE p.user_id = ${userId}
@@ -358,7 +374,6 @@ async function getMissingPhotoIds(userId: number, service: ScanService): Promise
           SELECT 1 FROM photo_scan_queue q
           WHERE q.photo_id = p.id
             AND q.service = ${service}
-            AND q.user_id IS NULL
             AND q.status = 'done'
         )
     `);
