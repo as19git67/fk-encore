@@ -8,13 +8,15 @@ struct PhotoFullscreenView: View {
     private let bboxes: [FaceBBox?]
     @Binding private var currentIndex: Int
     @Environment(\.dismiss) private var dismiss
-    @State private var showLocationInfo = false
+    @State private var showDetails = false
+    @State private var currentCurationStatus: CurationStatus
 
     /// Single-photo convenience init (e.g. PersonDetailView).
     init(photo: PhotoWithCuration, faceBBox: FaceBBox? = nil) {
         self.photos = [photo]
         self.bboxes = [faceBBox]
         _currentIndex = .constant(0)
+        _currentCurationStatus = State(initialValue: photo.curation_status)
     }
 
     /// Multi-photo init for paged navigation (e.g. PhotoGridView).
@@ -22,6 +24,8 @@ struct PhotoFullscreenView: View {
         self.photos = photos
         self.bboxes = Array(repeating: nil, count: photos.count)
         _currentIndex = currentIndex
+        let idx = currentIndex.wrappedValue
+        _currentCurationStatus = State(initialValue: photos.indices.contains(idx) ? photos[idx].curation_status : .visible)
     }
 
     private var currentPhoto: PhotoWithCuration? {
@@ -36,15 +40,25 @@ struct PhotoFullscreenView: View {
                 ForEach(photos.indices, id: \.self) { index in
                     PhotoPageView(
                         photo: photos[index],
-                        faceBBox: index < bboxes.count ? bboxes[index] : nil
+                        faceBBox: index < bboxes.count ? bboxes[index] : nil,
+                        showDetails: $showDetails,
+                        curationStatus: index == currentIndex
+                            ? $currentCurationStatus
+                            : .constant(photos[index].curation_status)
                     )
                     .tag(index)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
-            .background(Color.black)
+            .background(Color(.systemBackground))
             .ignoresSafeArea()
             .navigationBarTitleDisplayMode(.inline)
+            .onChange(of: currentIndex) { _, newIndex in
+                if photos.indices.contains(newIndex) {
+                    currentCurationStatus = photos[newIndex].curation_status
+                }
+                withAnimation(.spring(duration: 0.4)) { showDetails = false }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { dismiss() } label: {
@@ -52,19 +66,42 @@ struct PhotoFullscreenView: View {
                             .fontWeight(.semibold)
                     }
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        Task {
+                            guard let photo = currentPhoto else { return }
+                            let next: CurationStatus = currentCurationStatus == .hidden ? .visible : .hidden
+                            struct Body: Codable { let status: CurationStatus }
+                            struct Response: Codable { let success: Bool }
+                            _ = try? await APIClient.shared.patch(
+                                "/photos/\(photo.id)/curation",
+                                body: Body(status: next)
+                            ) as Response
+                            currentCurationStatus = next
+                        }
+                    } label: {
+                        Image(systemName: currentCurationStatus == .hidden ? "eye.slash" : "eye")
+                            .foregroundStyle(currentCurationStatus == .hidden ? Color.red : Color.accentColor)
+                    }
+                }
                 ToolbarItem(placement: .principal) {
                     if let photo = currentPhoto {
-                        Button { showLocationInfo = true } label: {
-                            VStack(spacing: 1) {
+                        Button {
+                            withAnimation(.spring(duration: 0.4)) { showDetails.toggle() }
+                        } label: {
+                            VStack(spacing: 0) {
                                 if let loc = photo.location_name ?? photo.location_city {
                                     Text(loc)
-                                        .font(.headline)
+                                        .font(.subheadline).fontWeight(.semibold)
                                         .lineLimit(1)
                                     if let date = chipDate(photo) {
-                                        Text(date).font(.subheadline)
+                                        Text(date)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
                                     }
                                 } else if let date = chipDate(photo) {
-                                    Text(date).font(.headline)
+                                    Text(date)
+                                        .font(.subheadline).fontWeight(.semibold)
                                 }
                             }
                         }
@@ -73,15 +110,12 @@ struct PhotoFullscreenView: View {
                 }
             }
         }
-        .sheet(isPresented: $showLocationInfo) {
-            locationInfoSheet
-        }
     }
 
     // MARK: - Helpers
 
     private func chipDate(_ photo: PhotoWithCuration) -> String? {
-        guard let d = parseISO(photo.created_at) else { return nil }
+        guard let d = parseISO(photo.taken_at ?? photo.created_at) else { return nil }
         let f = DateFormatter()
         f.dateStyle = .medium
         f.timeStyle = .none
@@ -93,28 +127,18 @@ struct PhotoFullscreenView: View {
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let d = iso.date(from: str) { return d }
         iso.formatOptions = [.withInternetDateTime]
-        return iso.date(from: str)
+        if let d = iso.date(from: str) { return d }
+        // PostgreSQL timestamp: "2024-03-15 14:30:00[.mmm]" (space, no timezone)
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.timeZone = TimeZone(identifier: "UTC")
+        for fmt in ["yyyy-MM-dd HH:mm:ss.SSS", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd"] {
+            df.dateFormat = fmt
+            if let d = df.date(from: str) { return d }
+        }
+        return nil
     }
 
-    @ViewBuilder
-    private var locationInfoSheet: some View {
-        let photo = currentPhoto
-        let locParts = [photo?.location_name ?? photo?.location_city, photo?.location_country]
-            .compactMap { $0 }
-        let locText = locParts.isEmpty ? nil : locParts.joined(separator: ", ")
-        VStack(alignment: .leading, spacing: 20) {
-            if let loc = locText {
-                Label(loc, systemImage: "location.fill").font(.subheadline)
-            }
-            if let date = photo.flatMap({ chipDate($0) }) {
-                Label(date, systemImage: "calendar").font(.subheadline)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(24)
-        .presentationDetents([.height(180)])
-        .presentationDragIndicator(.visible)
-    }
 }
 
 // MARK: - Single page
@@ -125,23 +149,27 @@ private struct PhotoPageView: View {
 
     @State private var loader: ThumbnailLoader
     @State private var viewModel: PhotoMetadataViewModel
-    @State private var showDetails = false
+    @Binding var showDetails: Bool
+    @Binding var curationStatus: CurationStatus
+    @State private var showAllAlbums = false
     @State private var showDatePicker = false
     @State private var editedDate = Date()
 
     private let toolbarHeight: CGFloat = 60
 
-    init(photo: PhotoWithCuration, faceBBox: FaceBBox? = nil) {
+    init(photo: PhotoWithCuration, faceBBox: FaceBBox? = nil, showDetails: Binding<Bool>, curationStatus: Binding<CurationStatus>) {
         self.photo = photo
         self.faceBBox = faceBBox
         _loader = State(initialValue: ThumbnailLoader(filename: photo.filename))
         _viewModel = State(initialValue: PhotoMetadataViewModel(photo: photo))
+        _showDetails = showDetails
+        _curationStatus = curationStatus
     }
 
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .bottom) {
-                Color.black.ignoresSafeArea()
+                Color(.systemBackground).ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     imageSection(geo: geo)
@@ -159,6 +187,15 @@ private struct PhotoPageView: View {
                         .background(showDetails ? Color(.systemBackground) : .clear)
                 }
             }
+        }
+        .onChange(of: viewModel.curationStatus) { _, s in
+            curationStatus = s
+        }
+        .onChange(of: curationStatus) { _, s in
+            if viewModel.curationStatus != s { viewModel.curationStatus = s }
+        }
+        .onChange(of: showDetails) { _, isShowing in
+            if !isShowing { showAllAlbums = false }
         }
         .task {
             async let img: Void = loader.load()
@@ -185,17 +222,17 @@ private struct PhotoPageView: View {
                     ZoomableImageView(image: image)
                         .frame(width: geo.size.width, height: height)
                 } else if loader.hasError {
-                    Color.black
+                    Color(.systemBackground)
                         .frame(width: geo.size.width, height: height)
                         .overlay {
                             Image(systemName: "exclamationmark.triangle")
                                 .font(.largeTitle)
-                                .foregroundStyle(.white.opacity(0.6))
+                                .foregroundStyle(.secondary)
                         }
                 } else {
-                    Color.black
+                    Color(.systemBackground)
                         .frame(width: geo.size.width, height: height)
-                        .overlay { ProgressView().tint(.white) }
+                        .overlay { ProgressView() }
                 }
             }
 
@@ -321,7 +358,10 @@ private struct PhotoPageView: View {
                 if viewModel.isLoadingAlbums {
                     detailRow { ProgressView().frame(maxWidth: .infinity) }
                 } else {
-                    ForEach(viewModel.sortedAlbums) { album in
+                    let visibleAlbums = showAllAlbums
+                        ? viewModel.sortedAlbums
+                        : Array(viewModel.sortedAlbums.prefix(3))
+                    ForEach(visibleAlbums) { album in
                         detailRow {
                             Button {
                                 viewModel.toggleAlbum(album.id)
@@ -336,6 +376,20 @@ private struct PhotoPageView: View {
                                     Spacer()
                                 }
                                 .font(.subheadline)
+                            }
+                        }
+                    }
+                    if viewModel.sortedAlbums.count > 3 {
+                        detailRow {
+                            Button {
+                                withAnimation { showAllAlbums.toggle() }
+                            } label: {
+                                Text(showAllAlbums
+                                     ? "Weniger anzeigen"
+                                     : "Mehr anzeigen (\(viewModel.sortedAlbums.count - 3) weitere)")
+                                    .font(.subheadline)
+                                    .foregroundStyle(Color.accentColor)
+                                    .frame(maxWidth: .infinity, alignment: .center)
                             }
                         }
                     }
@@ -375,62 +429,33 @@ private struct PhotoPageView: View {
     }
 
     // MARK: - Bottom Bar
-    //
-    // Two visually independent sections at the same height:
-    //   • Center: ♡ and ℹ grouped together (compact, only as wide as the icons need)
-    //   • Trailing: 👁 in its own section, separated by a Divider
 
     private var bottomBar: some View {
-        HStack(spacing: 0) {
-            // ── Center group: favorite + info ──────────────────────────────
-            HStack(spacing: 32) {
-                Button {
-                    Task {
-                        let next: CurationStatus = viewModel.curationStatus == .favorite ? .visible : .favorite
-                        await viewModel.setCuration(next)
-                    }
-                } label: {
-                    Image(systemName: viewModel.curationStatus == .favorite ? "heart.fill" : "heart")
-                        .font(.title2)
-                        .foregroundStyle(viewModel.curationStatus == .favorite ? Color.red : toolbarIconColor)
-                }
-
-                Button {
-                    withAnimation(.spring(duration: 0.4)) { showDetails.toggle() }
-                } label: {
-                    Image(systemName: showDetails ? "info.circle.fill" : "info.circle")
-                        .font(.title2)
-                        .foregroundStyle(showDetails ? Color.accentColor : toolbarIconColor)
-                }
-            }
-            .frame(maxWidth: .infinity)   // center within the bar
-
-            // ── Divider ────────────────────────────────────────────────────
-            Divider()
-                .frame(height: 24)
-                .padding(.horizontal, 4)
-
-            // ── Trailing: visibility toggle ────────────────────────────────
-            // eye       = currently visible  (tap to hide)
-            // eye.slash = currently hidden   (tap to show, shown in red)
+        HStack(spacing: 32) {
             Button {
                 Task {
-                    let next: CurationStatus = viewModel.curationStatus == .hidden ? .visible : .hidden
+                    let next: CurationStatus = viewModel.curationStatus == .favorite ? .visible : .favorite
                     await viewModel.setCuration(next)
                 }
             } label: {
-                Image(systemName: viewModel.curationStatus == .hidden ? "eye.slash" : "eye")
+                Image(systemName: viewModel.curationStatus == .favorite ? "heart.fill" : "heart")
                     .font(.title2)
-                    .foregroundStyle(viewModel.curationStatus == .hidden ? Color.red : toolbarIconColor)
+                    .foregroundStyle(viewModel.curationStatus == .favorite ? Color.red : toolbarIconColor)
             }
-            .frame(width: 60)
+
+            Button {
+                withAnimation(.spring(duration: 0.4)) { showDetails.toggle() }
+            } label: {
+                Image(systemName: showDetails ? "info.circle.fill" : "info.circle")
+                    .font(.title2)
+                    .foregroundStyle(showDetails ? Color.accentColor : toolbarIconColor)
+            }
         }
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, 8)
     }
 
-    private var toolbarIconColor: Color {
-        showDetails ? .primary : .white
-    }
+    private var toolbarIconColor: Color { .primary }
 
     // MARK: - Date Picker Sheet
 
@@ -508,7 +533,16 @@ private struct PhotoPageView: View {
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let d = iso.date(from: str) { return d }
         iso.formatOptions = [.withInternetDateTime]
-        return iso.date(from: str)
+        if let d = iso.date(from: str) { return d }
+        // PostgreSQL timestamp: "2024-03-15 14:30:00[.mmm]" (space, no timezone)
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.timeZone = TimeZone(identifier: "UTC")
+        for fmt in ["yyyy-MM-dd HH:mm:ss.SSS", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd"] {
+            df.dateFormat = fmt
+            if let d = df.date(from: str) { return d }
+        }
+        return nil
     }
 
     private var locationText: String? {

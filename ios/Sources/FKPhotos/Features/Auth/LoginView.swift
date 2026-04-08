@@ -17,7 +17,7 @@ struct LoginView: View {
                     Image(systemName: "photo.stack")
                         .font(.system(size: 64))
                         .foregroundStyle(.blue)
-                    Text("FK Photos")
+                    Text("Vivanty Photos")
                         .font(.largeTitle.bold())
                     Text("Melde dich an, um fortzufahren")
                         .font(.subheadline)
