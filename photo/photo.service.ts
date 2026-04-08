@@ -1065,11 +1065,10 @@ export async function updatePhotoCurationLogic(
   }
 
   // If the requester is not the owner, allow the action only when the photo
-  // is part of an album that has been shared with the requester.
+  // is part of an album that has been shared with the requester (any access level).
+  // Curation (favorites/hiding) is user-specific and does not affect other users,
+  // so both "read" and "write" shares are permitted.
   if (photo.user_id !== userId) {
-    // Only allow non-owners to change curation when they have WRITE access to
-    // an album that contains the photo. View-only (read) shares are not
-    // permitted to hide/curate photos.
     const shared = await dbFirst(
       db
         .select({ album_id: albumPhotos.album_id })
@@ -1077,8 +1076,7 @@ export async function updatePhotoCurationLogic(
         .innerJoin(albumShares, eq(albumShares.album_id, albumPhotos.album_id))
         .where(and(
           eq(albumPhotos.photo_id, photoId),
-          eq(albumShares.user_id, userId),
-          eq(albumShares.access_level, "write")
+          eq(albumShares.user_id, userId)
         ))
     );
     if (!shared) {
