@@ -3,7 +3,7 @@ import Button from 'primevue/button'
 import DatePicker from 'primevue/datepicker'
 import Checkbox from 'primevue/checkbox'
 import HeicImage from './HeicImage.vue'
-import { getPhotoUrl, listAlbums, getPhotosAlbums, batchUpdateAlbumPhotos, updateAlbum, createAlbum, updatePhotoDescription, type Album } from '../api/photos'
+import { getPhotoUrl, listAlbums, getPhotosAlbums, batchUpdateAlbumPhotos, updateAlbum, updateAlbumUserSettings, createAlbum, updatePhotoDescription, type Album } from '../api/photos'
 import { getAlbumCheckState as calculateAlbumCheckState, getNewPendingAction } from '../utils/albumSelection'
 import type { Photo, Face, LandmarkItem, Person, CurationStatus } from '../api/photos'
 import { ref, computed, onMounted, watch } from 'vue'
@@ -26,6 +26,7 @@ const props = defineProps<{
   limitAlbumsShown?: boolean
   albumId?: number
   coverPhotoId?: number | null
+  albumRole?: 'owner' | 'admin' | 'contributor' | 'viewer'
   /** When false the "Neu erkennen" button is disabled (insightface not reachable). */
   faceServiceAvailable?: boolean
   /** Show a "Go to photo" navigation button (e.g. from PersonsView). */
@@ -171,7 +172,12 @@ async function toggleCover() {
 
   togglingCover.value = true
   try {
-    await updateAlbum(props.albumId, { coverPhotoId: newCoverId })
+    const canWriteAlbum = props.albumRole === 'owner' || props.albumRole === 'contributor'
+    if (canWriteAlbum) {
+      await updateAlbum(props.albumId, { coverPhotoId: newCoverId })
+    } else {
+      await updateAlbumUserSettings(props.albumId, { cover_photo_id: newCoverId })
+    }
     emit('update:coverPhotoId', newCoverId)
   } catch (err) {
     console.error('Failed to update album cover:', err)
