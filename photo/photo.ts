@@ -919,7 +919,7 @@ export const reindexPhotoLandmarks = api(
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "photos.edit");
-    await service.indexPhotoLandmarks(userId, id);
+    await service.indexPhotoLandmarks(id);
     return { success: true };
   }
 );
