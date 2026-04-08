@@ -18,6 +18,7 @@ import {
   markJobDone,
   markJobFailed,
   resetStuckJobs,
+  enqueuePhotoScan,
   DeferJobError,
   type ScanService,
 } from "./scan-queue";
@@ -108,6 +109,17 @@ class ScanWorker {
       if (this.service === "embedding") {
         findPhotoGroupsLogic(job.user_id).catch((err) =>
           console.error(`[scan-worker] grouping error after embedding job ${job.id}:`, err),
+        );
+      }
+
+      // After face detection completes, re-enqueue quality so it can
+      // include face composition data (quality no longer defers on
+      // pending face_detection to avoid blocking during "scan missing").
+      if (this.service === "face_detection") {
+        enqueuePhotoScan(job.photo_id, job.user_id, ["quality"]).then(() => {
+          qualityWorker.tick();
+        }).catch((err) =>
+          console.error(`[scan-worker] quality re-enqueue after face_detection job ${job.id}:`, err),
         );
       }
 
