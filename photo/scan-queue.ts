@@ -158,6 +158,9 @@ export async function markJobDone(id: number): Promise<void> {
  * Reset a processing job back to pending without incrementing the attempt
  * counter.  Used when a job cannot run yet because a prerequisite scan has
  * not finished — the job will be retried on the next worker poll cycle.
+ *
+ * enqueued_at is bumped to NOW() so the deferred job moves to the back of
+ * the queue and doesn't block other ready jobs (prevents livelock).
  */
 export async function deferJob(id: number): Promise<void> {
   await db
@@ -165,6 +168,7 @@ export async function deferJob(id: number): Promise<void> {
     .set({
       status: "pending",
       started_at: null,
+      enqueued_at: sql`NOW()`,
       attempts: sql`GREATEST(0, attempts - 1)`,
     })
     .where(eq(photoScanQueue.id, id));

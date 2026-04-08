@@ -421,19 +421,22 @@ export async function enqueueFaceAssignmentForAllUsers(photoId: number): Promise
 export async function assignFacesForUser(userId: number, photoId: number, resetIgnored: boolean = false): Promise<void> {
   if (!ENABLE_LOCAL_FACES) return;
 
-  // Check if face detection has completed for this photo
-  const detectionDone = await dbFirst<{ id: number }>(
+  // Check if face detection is actively running for this photo.
+  // Only defer when detection is pending/processing — if it was never enqueued,
+  // already done, or failed, proceed gracefully instead of blocking the queue.
+  const detectionRunning = await dbFirst<{ id: number }>(
     db.select({ id: photoScanQueue.id }).from(photoScanQueue)
       .where(and(
         eq(photoScanQueue.photo_id, photoId),
         sql`${photoScanQueue.service} = 'face_detection'`,
-        sql`${photoScanQueue.status} = 'done'`
+        inArray(photoScanQueue.status, ["pending", "processing"]),
       ))
   );
-  if (!detectionDone) {
-    // Detection hasn't finished yet — defer this job
+  if (detectionRunning) {
     throw new DeferJobError(`face_detection not yet done for photo ${photoId}`);
   }
+  // No active detection → proceed. There may still be faces from a previous
+  // run, and we'll handle "no faces" gracefully below.
 
   // Get all detected faces for this photo (global)
   const detectedFaces = await dbAll<typeof faces.$inferSelect>(
@@ -1748,15 +1751,17 @@ export async function addPhotoToAlbumLogic(userId: number, req: AddPhotoToAlbumR
 
   // Enqueue face_assignment for all shared users of this album (not the owner — they
   // already have it from the upload).  Fire-and-forget so the API responds immediately.
-  const sharedUsers = await dbAll<{ user_id: number }>(
-    db.select({ user_id: albumShares.user_id }).from(albumShares).where(eq(albumShares.album_id, req.albumId))
-  );
-  if (sharedUsers.length > 0) {
-    Promise.all(
-      sharedUsers.map(({ user_id }) => enqueuePhotoScan(req.photoId, user_id, ["face_assignment"]))
-    ).then(() => triggerWorkers()).catch(err => {
-      console.error("Error enqueueing face assignments for shared album photo:", err);
-    });
+  if (ENABLE_LOCAL_FACES) {
+    const sharedUsers = await dbAll<{ user_id: number }>(
+      db.select({ user_id: albumShares.user_id }).from(albumShares).where(eq(albumShares.album_id, req.albumId))
+    );
+    if (sharedUsers.length > 0) {
+      Promise.all(
+        sharedUsers.map(({ user_id }) => enqueuePhotoScan(req.photoId, user_id, ["face_assignment"]))
+      ).then(() => triggerWorkers()).catch(err => {
+        console.error("Error enqueueing face assignments for shared album photo:", err);
+      });
+    }
   }
 
   return { success: true };
@@ -1839,17 +1844,19 @@ export async function batchUpdateAlbumPhotosLogic(userId: number, req: BatchAlbu
       }
 
       // Enqueue face_assignment for all shared users of this album
-      const sharedUsers = await dbAll<{ user_id: number }>(
-        db.select({ user_id: albumShares.user_id }).from(albumShares).where(eq(albumShares.album_id, albumId))
-      );
-      if (sharedUsers.length > 0) {
-        Promise.all(
-          sharedUsers.flatMap(({ user_id }) =>
-            photoIds.map(photoId => enqueuePhotoScan(photoId, user_id, ["face_assignment"]))
-          )
-        ).then(() => triggerWorkers()).catch(err => {
-          console.error("Error enqueueing face assignments for batch album add:", err);
-        });
+      if (ENABLE_LOCAL_FACES) {
+        const sharedUsers = await dbAll<{ user_id: number }>(
+          db.select({ user_id: albumShares.user_id }).from(albumShares).where(eq(albumShares.album_id, albumId))
+        );
+        if (sharedUsers.length > 0) {
+          Promise.all(
+            sharedUsers.flatMap(({ user_id }) =>
+              photoIds.map(photoId => enqueuePhotoScan(photoId, user_id, ["face_assignment"]))
+            )
+          ).then(() => triggerWorkers()).catch(err => {
+            console.error("Error enqueueing face assignments for batch album add:", err);
+          });
+        }
       }
     }
   } else if (action === "remove") {
@@ -1894,9 +1901,13 @@ export async function shareAlbumLogic(userId: number, req: ShareAlbumRequest): P
  * Called when an album is shared — the new user gets face assignments without re-running detection.
  */
 async function enqueueAlbumFaceAssignments(albumId: number, targetUserId: number): Promise<void> {
+  if (!ENABLE_LOCAL_FACES) return;
+
   const albumPhotoRows = await dbAll<{ photo_id: number }>(
     db.select({ photo_id: albumPhotos.photo_id }).from(albumPhotos).where(eq(albumPhotos.album_id, albumId))
   );
+
+  console.log(`[face-assign] Enqueueing face_assignment for ${albumPhotoRows.length} photos in album ${albumId} for user ${targetUserId}`);
 
   for (const { photo_id } of albumPhotoRows) {
     await enqueuePhotoScan(photo_id, targetUserId, ["face_assignment"]);
