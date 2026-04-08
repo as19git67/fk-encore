@@ -20,6 +20,7 @@ const queueError = ref('')
 const rescanLoading = ref(false)
 const retryLoading = ref(false)
 const cancelLoading = ref(false)
+const cancelledPending = ref(false)  // true after cancel until queue settles
 let pollInterval: ReturnType<typeof setInterval> | null = null
 
 const serviceLabels: Record<string, string> = {
@@ -44,6 +45,11 @@ const isActive = computed(() => totalPending.value > 0 || totalProcessing.value 
 async function fetchQueueStatus() {
   try {
     queueStatus.value = await getScanQueueStatus()
+    // Reset cancelled state once the queue has fully settled
+    if (cancelledPending.value && !isActive.value) {
+      cancelledPending.value = false
+      stopPolling()
+    }
   } catch {
     // ignore polling errors
   }
@@ -93,8 +99,12 @@ async function handleCancel() {
   cancelLoading.value = true
   try {
     await cancelPendingScans()
+    cancelledPending.value = true
     await fetchQueueStatus()
-    if (!isActive.value) stopPolling()
+    if (!isActive.value) {
+      stopPolling()
+      cancelledPending.value = false
+    }
   } catch (err: any) {
     queueError.value = err.message || 'Fehler beim Abbrechen'
   } finally {
@@ -321,7 +331,11 @@ onUnmounted(() => stopPolling())
       </div>
 
       <div v-if="isActive" class="status-progress">
-        <span class="text-secondary" style="font-size:0.85rem">
+        <span v-if="cancelledPending" class="text-secondary" style="font-size:0.85rem">
+          <i class="pi pi-spin pi-spinner mr-1" />
+          Wird abgebrochen… {{ totalProcessing }} laufende Jobs werden noch beendet.
+        </span>
+        <span v-else class="text-secondary" style="font-size:0.85rem">
           <i class="pi pi-spin pi-spinner mr-1" />
           {{ totalProcessing }} werden verarbeitet, {{ totalPending }} warten…
         </span>
@@ -333,7 +347,7 @@ onUnmounted(() => stopPolling())
           size="small"
           outlined
           :loading="cancelLoading"
-          :disabled="cancelLoading"
+          :disabled="cancelLoading || cancelledPending"
           @click="handleCancel"
           style="align-self: flex-start; margin-top: 0.25rem"
         />

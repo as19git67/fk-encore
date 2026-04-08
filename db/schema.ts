@@ -335,7 +335,6 @@ export const photoScanQueue = pgTable("photo_scan_queue", {
     .notNull()
     .references(() => photos.id, { onDelete: "cascade" }),
   user_id: integer("user_id")
-    .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
   service: scanServiceEnum("service").notNull(),
   status: scanStatusEnum("status").notNull().default("pending"),

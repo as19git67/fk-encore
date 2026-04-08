@@ -184,9 +184,9 @@ async function callEmbeddingServiceUpload(
   console.log(`Successfully uploaded photo ${photoId} to embedding service.`);
 }
 
-export async function indexPhotoEmbeddings(userId: number, photoId: number, force: boolean = false): Promise<void> {
+export async function indexPhotoEmbeddings(photoId: number, force: boolean = false): Promise<void> {
   const photo = await dbFirst<typeof photos.$inferSelect>(
-    db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+    db.select().from(photos).where(eq(photos.id, photoId))
   );
   if (!photo) return;
 
@@ -368,6 +368,51 @@ export async function detectPhotoFaces(photoId: number, force: boolean = false):
   }
 }
 
+/** Look up the owner of a photo. Returns undefined if the photo doesn't exist. */
+export async function getPhotoOwnerId(photoId: number): Promise<number | undefined> {
+  const row = await dbFirst<{ user_id: number }>(
+    db.select({ user_id: photos.user_id }).from(photos).where(eq(photos.id, photoId))
+  );
+  return row?.user_id;
+}
+
+/**
+ * Find all users who have access to a photo:
+ *   1. The photo owner
+ *   2. Users who have the photo in a shared album
+ * Returns unique user IDs.
+ */
+export async function getUsersWithPhotoAccess(photoId: number): Promise<number[]> {
+  const rows = await db.execute<{ user_id: number }>(sql`
+    SELECT DISTINCT u.user_id FROM (
+      -- Photo owner
+      SELECT user_id FROM photos WHERE id = ${photoId}
+      UNION
+      -- Users with album access (album shared with them and photo is in that album)
+      SELECT asr.user_id
+      FROM album_shares asr
+      INNER JOIN album_photos ap ON ap.album_id = asr.album_id
+      WHERE ap.photo_id = ${photoId}
+    ) u
+  `);
+  return rows.rows.map((r) => r.user_id);
+}
+
+/**
+ * Enqueue face_assignment for all users who have access to a photo.
+ * Called after face_detection completes to ensure every user gets face assignments.
+ */
+export async function enqueueFaceAssignmentForAllUsers(photoId: number): Promise<void> {
+  if (!ENABLE_LOCAL_FACES) return;
+  const userIds = await getUsersWithPhotoAccess(photoId);
+  for (const userId of userIds) {
+    await enqueuePhotoScan(photoId, userId, ["face_assignment"]);
+  }
+  if (userIds.length > 0) {
+    triggerWorkers();
+  }
+}
+
 /**
  * Assign detected faces to persons for a specific user (per-user, runs per user per photo).
  * Creates user_face_assignments rows with auto-matched person_id based on cosine similarity.
@@ -376,19 +421,22 @@ export async function detectPhotoFaces(photoId: number, force: boolean = false):
 export async function assignFacesForUser(userId: number, photoId: number, resetIgnored: boolean = false): Promise<void> {
   if (!ENABLE_LOCAL_FACES) return;
 
-  // Check if face detection has completed for this photo
-  const detectionDone = await dbFirst<{ id: number }>(
+  // Check if face detection is actively running for this photo.
+  // Only defer when detection is pending/processing — if it was never enqueued,
+  // already done, or failed, proceed gracefully instead of blocking the queue.
+  const detectionRunning = await dbFirst<{ id: number }>(
     db.select({ id: photoScanQueue.id }).from(photoScanQueue)
       .where(and(
         eq(photoScanQueue.photo_id, photoId),
         sql`${photoScanQueue.service} = 'face_detection'`,
-        sql`${photoScanQueue.status} = 'done'`
+        inArray(photoScanQueue.status, ["pending", "processing"]),
       ))
   );
-  if (!detectionDone) {
-    // Detection hasn't finished yet — defer this job
+  if (detectionRunning) {
     throw new DeferJobError(`face_detection not yet done for photo ${photoId}`);
   }
+  // No active detection → proceed. There may still be faces from a previous
+  // run, and we'll handle "no faces" gracefully below.
 
   // Get all detected faces for this photo (global)
   const detectedFaces = await dbAll<typeof faces.$inferSelect>(
@@ -459,10 +507,38 @@ export async function assignFacesForUser(userId: number, photoId: number, resetI
 
     let personId = match?.personId;
     if (!personId) {
-      const newPerson = await dbInsertReturning<typeof persons.$inferSelect>(
-        db.insert(persons).values({ user_id: userId, name: "Unbenannt" }).returning()
+      // Try to inherit the person name from existing assignments by other users
+      // (e.g. the photo owner already named this person).
+      const sourceAssignment = await dbFirst<{ person_name: string }>(
+        db.select({ person_name: persons.name })
+          .from(userFaceAssignments)
+          .innerJoin(persons, eq(persons.id, userFaceAssignments.person_id))
+          .where(and(
+            eq(userFaceAssignments.face_id, face.id),
+            sql`${persons.name} != 'Unbenannt'`,
+            eq(userFaceAssignments.ignored, false),
+          ))
       );
-      personId = newPerson!.id;
+
+      const personName = sourceAssignment?.person_name ?? "Unbenannt";
+
+      // If the user already has a person with the same name, reuse it
+      // so that faces from the same source person stay grouped.
+      if (personName !== "Unbenannt") {
+        const existingPerson = await dbFirst<{ id: number }>(
+          db.select({ id: persons.id })
+            .from(persons)
+            .where(and(eq(persons.user_id, userId), eq(persons.name, personName)))
+        );
+        if (existingPerson) personId = existingPerson.id;
+      }
+
+      if (!personId) {
+        const newPerson = await dbInsertReturning<typeof persons.$inferSelect>(
+          db.insert(persons).values({ user_id: userId, name: personName }).returning()
+        );
+        personId = newPerson!.id;
+      }
     }
 
     // Insert user_face_assignment
@@ -623,7 +699,7 @@ async function reverseGeocode(lat: number, lon: number): Promise<GeocodeResult> 
   }
 }
 
-async function geocodePhotoLocation(userId: number, photoId: number, lat: number, lon: number): Promise<void> {
+async function geocodePhotoLocation(photoId: number, lat: number, lon: number): Promise<void> {
   const geo = await reverseGeocode(lat, lon);
   await dbExec(
     db.update(photos)
@@ -633,7 +709,7 @@ async function geocodePhotoLocation(userId: number, photoId: number, lat: number
         location_city: geo.city,
         location_country: geo.country,
       })
-      .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+      .where(eq(photos.id, photoId))
   );
 }
 
@@ -643,9 +719,9 @@ async function geocodePhotoLocation(userId: number, photoId: number, lat: number
  * 2. If GPS is available, calls Nominatim for reverse-geocoding.
  * 3. Succeeds silently when no GPS data exists (nothing to geocode).
  */
-export async function indexPhotoGeocoding(userId: number, photoId: number, force = false): Promise<void> {
+export async function indexPhotoGeocoding(photoId: number, force = false): Promise<void> {
   const photo = await dbFirst<typeof photos.$inferSelect>(
-    db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+    db.select().from(photos).where(eq(photos.id, photoId))
   );
   if (!photo) return;
 
@@ -672,7 +748,7 @@ export async function indexPhotoGeocoding(userId: number, photoId: number, force
   // Already has a location name — skip unless this is a forced rescan
   if (photo.location_name && !force) return;
 
-  await geocodePhotoLocation(userId, photoId, lat, lon);
+  await geocodePhotoLocation(photoId, lat, lon);
 }
 
 // ---------- Photos ----------
@@ -741,7 +817,7 @@ export async function uploadPhotoStream(
 
   // Reverse-geocode GPS coordinates in background
   if (exifMeta.latitude !== null && exifMeta.longitude !== null) {
-    geocodePhotoLocation(userId, row!.id, exifMeta.latitude, exifMeta.longitude).catch(err => {
+    geocodePhotoLocation(row!.id, exifMeta.latitude, exifMeta.longitude).catch(err => {
       console.error("Geocoding error:", err);
     });
   }
@@ -811,7 +887,7 @@ export async function uploadPhotoLogic(
 
   // Reverse-geocode GPS coordinates in background
   if (exifMeta2.latitude !== null && exifMeta2.longitude !== null) {
-    geocodePhotoLocation(userId, row2!.id, exifMeta2.latitude, exifMeta2.longitude).catch(err => {
+    geocodePhotoLocation(row2!.id, exifMeta2.latitude, exifMeta2.longitude).catch(err => {
       console.error("Geocoding error:", err);
     });
   }
@@ -1693,13 +1769,28 @@ export async function addPhotoToAlbumLogic(userId: number, req: AddPhotoToAlbumR
   }
 
   await dbExec(
-    db.insert(albumPhotos).values({ 
-      album_id: req.albumId, 
+    db.insert(albumPhotos).values({
+      album_id: req.albumId,
       photo_id: req.photoId,
       added_by_user_id: userId,
       added_at: new Date().toISOString()
     })
   );
+
+  // Enqueue face_assignment for all shared users of this album (not the owner — they
+  // already have it from the upload).  Fire-and-forget so the API responds immediately.
+  if (ENABLE_LOCAL_FACES) {
+    const sharedUsers = await dbAll<{ user_id: number }>(
+      db.select({ user_id: albumShares.user_id }).from(albumShares).where(eq(albumShares.album_id, req.albumId))
+    );
+    if (sharedUsers.length > 0) {
+      Promise.all(
+        sharedUsers.map(({ user_id }) => enqueuePhotoScan(req.photoId, user_id, ["face_assignment"]))
+      ).then(() => triggerWorkers()).catch(err => {
+        console.error("Error enqueueing face assignments for shared album photo:", err);
+      });
+    }
+  }
 
   return { success: true };
 }
@@ -1779,6 +1870,22 @@ export async function batchUpdateAlbumPhotosLogic(userId: number, req: BatchAlbu
           );
         }
       }
+
+      // Enqueue face_assignment for all shared users of this album
+      if (ENABLE_LOCAL_FACES) {
+        const sharedUsers = await dbAll<{ user_id: number }>(
+          db.select({ user_id: albumShares.user_id }).from(albumShares).where(eq(albumShares.album_id, albumId))
+        );
+        if (sharedUsers.length > 0) {
+          Promise.all(
+            sharedUsers.flatMap(({ user_id }) =>
+              photoIds.map(photoId => enqueuePhotoScan(photoId, user_id, ["face_assignment"]))
+            )
+          ).then(() => triggerWorkers()).catch(err => {
+            console.error("Error enqueueing face assignments for batch album add:", err);
+          });
+        }
+      }
     }
   } else if (action === "remove") {
     await dbExec(
@@ -1822,9 +1929,13 @@ export async function shareAlbumLogic(userId: number, req: ShareAlbumRequest): P
  * Called when an album is shared — the new user gets face assignments without re-running detection.
  */
 async function enqueueAlbumFaceAssignments(albumId: number, targetUserId: number): Promise<void> {
+  if (!ENABLE_LOCAL_FACES) return;
+
   const albumPhotoRows = await dbAll<{ photo_id: number }>(
     db.select({ photo_id: albumPhotos.photo_id }).from(albumPhotos).where(eq(albumPhotos.album_id, albumId))
   );
+
+  console.log(`[face-assign] Enqueueing face_assignment for ${albumPhotoRows.length} photos in album ${albumId} for user ${targetUserId}`);
 
   for (const { photo_id } of albumPhotoRows) {
     await enqueuePhotoScan(photo_id, targetUserId, ["face_assignment"]);
@@ -1879,10 +1990,78 @@ export async function removeAlbumShareLogic(userId: number, req: RemoveAlbumShar
   if (!album) throw new Error("Album not found");
   if (album.user_id !== userId) throw new Error("Only owner can remove shares");
 
+  // Collect photo IDs in this album BEFORE deleting the share
+  const albumPhotoIds = (await dbAll<{ photo_id: number }>(
+    db.select({ photo_id: albumPhotos.photo_id }).from(albumPhotos).where(eq(albumPhotos.album_id, req.albumId))
+  )).map(r => r.photo_id);
+
   await dbExec(
     db.delete(albumShares).where(and(eq(albumShares.album_id, req.albumId), eq(albumShares.user_id, req.userId)))
   );
+
+  // Clean up face assignments, queue entries, and orphaned persons for the
+  // unshared user — but only for photos they no longer have access to.
+  if (albumPhotoIds.length > 0) {
+    cleanupAfterUnshare(req.userId, albumPhotoIds).catch(err => {
+      console.error(`Error cleaning up after unshare of album ${req.albumId}:`, err);
+    });
+  }
+
   return { success: true };
+}
+
+/**
+ * After an album share is removed, delete the user's face data for photos
+ * they no longer have access to (not owned and not in any other shared album).
+ */
+async function cleanupAfterUnshare(sharedUserId: number, albumPhotoIds: number[]): Promise<void> {
+  // Find which of these photos the user still has access to
+  // (owns the photo OR has access through another shared album).
+  const stillAccessibleResult = await db.execute<{ photo_id: number }>(sql`
+    SELECT DISTINCT photo_id FROM (
+      -- Photos owned by the user
+      SELECT id AS photo_id FROM photos WHERE user_id = ${sharedUserId} AND id IN (${sql.join(albumPhotoIds.map(id => sql`${id}`), sql`, `)})
+      UNION
+      -- Photos accessible through other shared albums
+      SELECT ap.photo_id
+      FROM album_photos ap
+      INNER JOIN album_shares ash ON ash.album_id = ap.album_id AND ash.user_id = ${sharedUserId}
+      WHERE ap.photo_id IN (${sql.join(albumPhotoIds.map(id => sql`${id}`), sql`, `)})
+    ) accessible
+  `);
+  const stillAccessibleSet = new Set(stillAccessibleResult.rows.map(r => r.photo_id));
+  const orphanedPhotoIds = albumPhotoIds.filter(id => !stillAccessibleSet.has(id));
+
+  if (orphanedPhotoIds.length === 0) return;
+
+  console.log(`[unshare] Cleaning up ${orphanedPhotoIds.length} orphaned photos for user ${sharedUserId}`);
+
+  // Get face IDs for the orphaned photos
+  const orphanedFaceIds = (await dbAll<{ id: number }>(
+    db.select({ id: faces.id }).from(faces).where(inArray(faces.photo_id, orphanedPhotoIds))
+  )).map(r => r.id);
+
+  if (orphanedFaceIds.length > 0) {
+    // Delete user_face_assignments for these faces
+    await dbExec(
+      db.delete(userFaceAssignments).where(and(
+        eq(userFaceAssignments.user_id, sharedUserId),
+        inArray(userFaceAssignments.face_id, orphanedFaceIds)
+      ))
+    );
+  }
+
+  // Remove all face_assignment queue entries for these photos
+  await dbExec(
+    db.delete(photoScanQueue).where(and(
+      eq(photoScanQueue.user_id, sharedUserId),
+      inArray(photoScanQueue.photo_id, orphanedPhotoIds),
+      eq(photoScanQueue.service, "face_assignment"),
+    ))
+  );
+
+  // Clean up orphaned persons (persons with no remaining face assignments)
+  await cleanupOrphanedPersons(sharedUserId);
 }
 
 // ---------- Album Public Links ----------
@@ -2439,9 +2618,9 @@ export async function reindexPhotoLogic(
   if (!photo) throw new Error("Photo not found");
 
   await indexPhotoFaces(userId, photoId, true);
-  await indexPhotoEmbeddings(userId, photoId, true);
+  await indexPhotoEmbeddings(photoId, true);
   if (ENABLE_LANDMARKS) {
-    await indexPhotoLandmarks(userId, photoId);
+    await indexPhotoLandmarks(photoId);
   }
   let lat = photo.latitude;
   let lon = photo.longitude;
@@ -2459,7 +2638,7 @@ export async function reindexPhotoLogic(
   }
 
   if (lat !== null && lon !== null && !photo.location_name) {
-    await geocodePhotoLocation(userId, photoId, lat, lon);
+    await geocodePhotoLocation(photoId, lat, lon);
   }
   return { success: true };
 }
@@ -2531,7 +2710,7 @@ export async function rescanPhotoGpsLogic(
   }
 
   if (lat !== null && lon !== null && !photo.location_name) {
-    await geocodePhotoLocation(userId, photoId, lat, lon);
+    await geocodePhotoLocation(photoId, lat, lon);
     geocoded = true;
   }
 
@@ -3178,7 +3357,7 @@ async function callLandmarkService(
  * Detect landmarks in a photo (global, runs once per photo).
  * userId is only used for auto-crop recomputation.
  */
-export async function indexPhotoLandmarks(userId: number, photoId: number): Promise<void> {
+export async function indexPhotoLandmarks(photoId: number): Promise<void> {
   if (!ENABLE_LANDMARKS) return;
 
   const photo = await dbFirst<typeof photos.$inferSelect>(
@@ -3235,9 +3414,13 @@ export async function indexPhotoLandmarks(userId: number, photoId: number): Prom
     }
   }
 
-  // Recompute auto-crop focus point (landmarks as fallback if no faces)
+  // Recompute auto-crop focus point (landmarks as fallback if no faces).
+  // This is a global operation — use photo owner for the per-user face filter.
   try {
-    await computeAndStoreAutoCrop(userId, photoId);
+    const ownerId = await getPhotoOwnerId(photoId);
+    if (ownerId) {
+      await computeAndStoreAutoCrop(ownerId, photoId);
+    }
   } catch (err) {
     console.error(`Error computing auto-crop for photo ${photoId}:`, err);
   }
@@ -3293,7 +3476,7 @@ export function computeFaceCompositionScore(bboxes: FaceBBoxNorm[]): number | nu
   return areaScore * 0.65 + positionScore * 0.35;
 }
 
-export async function indexPhotoQuality(userId: number, photoId: number): Promise<void> {
+export async function indexPhotoQuality(photoId: number): Promise<void> {
   if (!ENABLE_QUALITY) return;
 
   // Face bbox data is fetched from the DB later and used for composition
@@ -3302,7 +3485,7 @@ export async function indexPhotoQuality(userId: number, photoId: number): Promis
   // both services are re-enqueued at the same time.
 
   const photo = await dbFirst<typeof photos.$inferSelect>(
-    db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+    db.select().from(photos).where(eq(photos.id, photoId))
   );
   if (!photo) return;
 
@@ -3405,7 +3588,7 @@ export async function indexPhotoQuality(userId: number, photoId: number): Promis
         ai_quality_score: compositeScore,
         ai_quality_details: Object.keys(details).length > 0 ? details : null,
       })
-      .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)));
+      .where(eq(photos.id, photoId));
 
     console.log(`[quality] photo ${photoId} final score ${compositeScore.toFixed(3)}`);
 
@@ -3445,12 +3628,16 @@ export async function getLandmarksForPhotoLogic(
   userId: number,
   photoId: number
 ): Promise<{ landmarks: LandmarkItem[]; location?: PhotoLocation }> {
+  // Allow access for photo owner OR users with shared album access
   const photo = await dbFirst<{ id: number; location_name: string | null; location_city: string | null; location_country: string | null }>(
     db.select({ id: photos.id, location_name: photos.location_name, location_city: photos.location_city, location_country: photos.location_country })
       .from(photos)
-      .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
+      .where(eq(photos.id, photoId))
   );
   if (!photo) throw new Error("Photo not found");
+
+  const accessibleUsers = await getUsersWithPhotoAccess(photoId);
+  if (!accessibleUsers.includes(userId)) throw new Error("Photo not found");
 
   const rows = await dbAll<{ id: number; label: string; confidence: number; bbox: string }>(
     db.select({ id: photoLandmarks.id, label: photoLandmarks.label, confidence: photoLandmarks.confidence, bbox: photoLandmarks.bbox })

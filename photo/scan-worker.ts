@@ -32,6 +32,8 @@ import {
   findPhotoGroupsLogic,
   cleanupOrphanedPersons,
   hasFacesForPhoto,
+  enqueueFaceAssignmentForAllUsers,
+  getPhotoOwnerId,
 } from "./photo.service";
 import {
   assertServiceAvailable,
@@ -106,10 +108,25 @@ class ScanWorker {
       await this.runJob(job);
       await markJobDone(job.id);
 
-      // After embedding completes, try to re-group similar photos
+      // After face_detection completes, enqueue face_assignment for ALL users
+      // who have access to the photo (owner + shared album members).
+      if (this.service === "face_detection") {
+        enqueueFaceAssignmentForAllUsers(job.photo_id).catch((err) =>
+          console.error(`[scan-worker] face_assignment enqueue error after face_detection job ${job.id}:`, err),
+        );
+      }
+
+      // After embedding completes, try to re-group similar photos.
+      // Embedding is global (user_id NULL) — look up the photo owner.
       if (this.service === "embedding") {
-        findPhotoGroupsLogic(job.user_id).catch((err) =>
-          console.error(`[scan-worker] grouping error after embedding job ${job.id}:`, err),
+        getPhotoOwnerId(job.photo_id).then((ownerId) => {
+          if (ownerId) {
+            findPhotoGroupsLogic(ownerId).catch((err) =>
+              console.error(`[scan-worker] grouping error after embedding job ${job.id}:`, err),
+            );
+          }
+        }).catch((err) =>
+          console.error(`[scan-worker] grouping lookup error after embedding job ${job.id}:`, err),
         );
       }
 
@@ -121,7 +138,8 @@ class ScanWorker {
       if (this.service === "face_detection") {
         hasFacesForPhoto(job.photo_id).then((has) => {
           if (!has) return;
-          return enqueuePhotoScan(job.photo_id, job.user_id, ["quality"]).then(() => {
+          // quality is a global service — userId=0 is ignored for global enqueue
+          return enqueuePhotoScan(job.photo_id, 0, ["quality"]).then(() => {
             qualityWorker.tick();
           });
         }).catch((err) =>
@@ -130,7 +148,7 @@ class ScanWorker {
       }
 
       // After face assignment completes, clean up orphaned persons.
-      if (this.service === "face_assignment") {
+      if (this.service === "face_assignment" && job.user_id) {
         cleanupOrphanedPersons(job.user_id).catch((err) =>
           console.error(`[scan-worker] cleanup error after face_assignment job ${job.id}:`, err),
         );
@@ -152,7 +170,7 @@ class ScanWorker {
     return true; // a job was dequeued and completed (or permanently failed)
   }
 
-  private async runJob(job: { photo_id: number; user_id: number; force: boolean }): Promise<void> {
+  private async runJob(job: { photo_id: number; user_id: number | null; force: boolean }): Promise<void> {
     // Check that the required external service is reachable before doing any work.
     // If it is not, throws ServiceUnavailableError which is caught above as a defer.
     const dep = SERVICE_DEPENDENCY[this.service];
@@ -160,7 +178,7 @@ class ScanWorker {
 
     switch (this.service) {
       case "embedding":
-        await indexPhotoEmbeddings(job.user_id, job.photo_id, job.force);
+        await indexPhotoEmbeddings(job.photo_id, job.force);
         break;
       case "face_detection":
         // Global detection — runs once per photo regardless of user
@@ -168,16 +186,17 @@ class ScanWorker {
         break;
       case "face_assignment":
         // Per-user assignment — matches detected faces to this user's persons
+        if (!job.user_id) break; // should never happen, but guard
         await assignFacesForUser(job.user_id, job.photo_id, job.force);
         break;
       case "landmark":
-        await indexPhotoLandmarks(job.user_id, job.photo_id);
+        await indexPhotoLandmarks(job.photo_id);
         break;
       case "quality":
-        await indexPhotoQuality(job.user_id, job.photo_id);
+        await indexPhotoQuality(job.photo_id);
         break;
       case "geocoding":
-        await indexPhotoGeocoding(job.user_id, job.photo_id, job.force);
+        await indexPhotoGeocoding(job.photo_id, job.force);
         // Respect Nominatim rate limit (1 req/s)
         await new Promise((r) => setTimeout(r, 1100));
         break;
