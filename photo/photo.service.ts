@@ -1633,7 +1633,17 @@ export async function updateAlbumUserSettingsLogic(userId: number, req: UpdateAl
   if (req.hideMode) values.hide_mode = req.hideMode;
   if (req.activeView) values.active_view = req.activeView;
   if (req.viewConfig !== undefined) values.view_config = req.viewConfig;
-  if ((req as any).coverPhotoId !== undefined) values.cover_photo_id = (req as any).coverPhotoId;
+  if (req.coverPhotoId !== undefined) {
+    if (req.coverPhotoId === null) {
+      values.cover_photo_id = null;
+    } else {
+      const ap = await dbFirst<typeof albumPhotos.$inferSelect>(
+        db.select().from(albumPhotos).where(and(eq(albumPhotos.album_id, req.albumId), eq(albumPhotos.photo_id, req.coverPhotoId)))
+      );
+      if (!ap) throw new Error("Cover photo must be part of the album");
+      values.cover_photo_id = req.coverPhotoId;
+    }
+  }
 
   // When switching to a preset, store corresponding view_config for consistency
   if (req.activeView && req.activeView in VIEW_PRESETS && req.viewConfig === undefined) {
