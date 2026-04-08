@@ -3179,6 +3179,8 @@ async function callLandmarkService(
  * userId is only used for auto-crop recomputation.
  */
 export async function indexPhotoLandmarks(userId: number, photoId: number): Promise<void> {
+  if (!ENABLE_LANDMARKS) return;
+
   const photo = await dbFirst<typeof photos.$inferSelect>(
     db.select().from(photos).where(eq(photos.id, photoId))
   );
