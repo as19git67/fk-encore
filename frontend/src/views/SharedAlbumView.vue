@@ -14,16 +14,6 @@ const album = ref<PublicAlbumResponse | null>(null)
 const loading = ref(true)
 const error = ref('')
 
-// Fullscreen state
-const isFullscreen = ref(false)
-const fullscreenIndex = ref(0)
-const fullscreenPhotos = ref<PublicAlbumPhoto[]>([])
-
-const currentPhoto = computed(() => fullscreenPhotos.value[fullscreenIndex.value] ?? null)
-const hasPrev = computed(() => fullscreenIndex.value > 0)
-const hasNext = computed(() => fullscreenIndex.value < fullscreenPhotos.value.length - 1)
-const photoCounter = computed(() => `${fullscreenIndex.value + 1} / ${fullscreenPhotos.value.length}`)
-
 /** Cast PublicAlbumPhoto[] to Photo[] for components that expect full Photo type */
 function asPhotos(photos: PublicAlbumPhoto[]): Photo[] {
   return photos.map(p => ({
@@ -35,22 +25,28 @@ function asPhotos(photos: PublicAlbumPhoto[]): Photo[] {
   }))
 }
 
-const albumPhotosAsPhoto = computed(() => album.value ? asPhotos(album.value.photos) : [])
+const albumPhotosAsPhoto = computed<Photo[]>(() => album.value ? asPhotos(album.value.photos) : [])
 
-function asPhoto(p: PublicAlbumPhoto): Photo {
-  return { ...p, user_id: 0, hash: undefined, curation_status: 'visible' as const, ai_quality_details: undefined }
-}
-const currentPhotoAsPhoto = computed(() => currentPhoto.value ? asPhoto(currentPhoto.value) : null)
-const prevPhotoAsPhoto = computed(() => {
+// Fullscreen state — uses full Photo type so FullscreenOverlay works directly
+const isFullscreen = ref(false)
+const fullscreenIndex = ref(0)
+const fullscreenPhotos = ref<Photo[]>([])
+
+const currentPhoto = computed<Photo | null>(() => fullscreenPhotos.value[fullscreenIndex.value] ?? null)
+const prevPhoto = computed<Photo | null>(() => {
   const idx = fullscreenIndex.value - 1
-  return idx >= 0 ? asPhoto(fullscreenPhotos.value[idx]!) : null
+  return idx >= 0 ? (fullscreenPhotos.value[idx] ?? null) : null
 })
-const nextPhotoAsPhoto = computed(() => {
+const nextPhoto = computed<Photo | null>(() => {
   const idx = fullscreenIndex.value + 1
-  return idx < fullscreenPhotos.value.length ? asPhoto(fullscreenPhotos.value[idx]!) : null
+  return idx < fullscreenPhotos.value.length ? (fullscreenPhotos.value[idx] ?? null) : null
 })
+const hasPrev = computed(() => fullscreenIndex.value > 0)
+const hasNext = computed(() => fullscreenIndex.value < fullscreenPhotos.value.length - 1)
+const photoCounter = computed(() => `${fullscreenIndex.value + 1} / ${fullscreenPhotos.value.length}`)
 
-function openFullscreen(photo: PublicAlbumPhoto, photos: PublicAlbumPhoto[]) {
+function openFullscreen(photo: Photo) {
+  const photos = albumPhotosAsPhoto.value
   fullscreenPhotos.value = photos
   fullscreenIndex.value = photos.findIndex(p => p.id === photo.id)
   if (fullscreenIndex.value < 0) fullscreenIndex.value = 0
@@ -58,8 +54,9 @@ function openFullscreen(photo: PublicAlbumPhoto, photos: PublicAlbumPhoto[]) {
 }
 
 function handleMapFullscreen(stopPhotos: Photo[], startIndex: number) {
-  const idSet = new Set(stopPhotos.map(p => p.id))
-  fullscreenPhotos.value = album.value?.photos.filter(p => idSet.has(p.id)) ?? []
+  // stopPhotos come directly from TripMap and are already Photo[] — use as-is
+  // to preserve the stop's photo ordering (and keep startIndex valid).
+  fullscreenPhotos.value = stopPhotos
   fullscreenIndex.value = startIndex
   isFullscreen.value = true
 }
@@ -87,11 +84,11 @@ function handleKeydown(e: KeyboardEvent) {
 
 // ── Info formatting ─────────────────────────────────────────────────────────
 
-function formatLocation(photo: PublicAlbumPhoto): string {
+function formatLocation(photo: Photo): string {
   return formatLocationLabel(photo)
 }
 
-function formatDate(photo: PublicAlbumPhoto): string {
+function formatDate(photo: Photo): string {
   return formatPhotoDate(photo.taken_at)
 }
 
@@ -151,10 +148,10 @@ onUnmounted(() => {
       <!-- Grid mode -->
       <div v-else class="photo-grid">
         <div
-          v-for="photo in album.photos"
+          v-for="photo in albumPhotosAsPhoto"
           :key="photo.id"
           class="grid-item"
-          @click="openFullscreen(photo, album!.photos)"
+          @click="openFullscreen(photo)"
         >
           <HeicImage
             :src="getPhotoUrl(photo.filename, 400)"
@@ -167,10 +164,10 @@ onUnmounted(() => {
 
     <!-- Fullscreen overlay (reuses shared FullscreenOverlay component) -->
     <FullscreenOverlay
-      v-if="isFullscreen && currentPhotoAsPhoto"
-      :photo="currentPhotoAsPhoto"
-      :prevPhoto="prevPhotoAsPhoto"
-      :nextPhoto="nextPhotoAsPhoto"
+      v-if="isFullscreen && currentPhoto"
+      :photo="currentPhoto"
+      :prevPhoto="prevPhoto"
+      :nextPhoto="nextPhoto"
       :canDelete="false"
       @close="closeFullscreen"
       @prev="goPrev"
@@ -230,8 +227,13 @@ onUnmounted(() => {
 }
 
 .photo-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(var(--grid-min-col), 1fr));
+  grid-auto-rows: min-content;
+  align-content: start;
   gap: var(--grid-gap-compact);
   padding: var(--grid-gap-compact);
 }
