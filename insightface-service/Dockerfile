@@ -15,10 +15,11 @@ RUN groupadd -g 568 apps \
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# Pre-download InsightFace models. The library resolves '~/.insightface' via
-# $HOME, so point HOME at the apps user's home during the download and chown
-# the result to the apps user so it is readable at runtime.
-RUN HOME=/home/apps python -c "from insightface.app import FaceAnalysis; FaceAnalysis(name='buffalo_l').prepare(ctx_id=-1)" \
+# Pre-download InsightFace models into a fixed location that matches what
+# main.py uses at runtime (INSIGHTFACE_ROOT). Passing `root=` explicitly
+# avoids any dependence on $HOME expansion.
+RUN mkdir -p /home/apps/.insightface \
+    && python -c "from insightface.app import FaceAnalysis; FaceAnalysis(name='buffalo_l', root='/home/apps/.insightface').prepare(ctx_id=-1)" \
     && chown -R 568:568 /home/apps/.insightface
 
 COPY main.py /app/main.py
@@ -26,8 +27,9 @@ WORKDIR /app
 RUN chown -R 568:568 /app
 
 # Suppress onnxruntime warnings (Optional, but can help)
-ENV ORT_LOGGING_LEVEL=3 \
-    HOME=/home/apps
+ENV ORT_LOGGING_LEVEL=3
+ENV HOME=/home/apps
+ENV INSIGHTFACE_ROOT=/home/apps/.insightface
 
 EXPOSE 8000
 
