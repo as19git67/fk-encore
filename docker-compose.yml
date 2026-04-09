@@ -4,6 +4,9 @@ services:
     image: ghcr.io/as19git67/fk-encore:latest
     container_name: fk-encore-app
     restart: unless-stopped
+    # Run as the TrueNAS SCALE "apps" user (UID/GID 568). Ensure the bind-
+    # mounted host directories (photos, thumbnails) are owned by 568:568.
+    user: "568:568"
     depends_on:
       postgres:
         condition: service_healthy
@@ -24,6 +27,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DATABASE: encore
       PHOTO_UPLOAD_DIR: /mnt/data/photos
+      PHOTO_THUMBNAIL_DIR: /mnt/data/thumbnails
       ADMIN_EMAIL: admin@example.com
       ADMIN_NAME: Admin
       ADMIN_PASSWORD: changeme   # <-- hier anpassen!
@@ -52,6 +56,7 @@ services:
     image: ghcr.io/as19git67/fk-encore-insightface:latest
     container_name: fk-encore-insightface
     restart: unless-stopped
+    user: "568:568"
     environment:
       ORT_LOGGING_LEVEL: "3"
     healthcheck:
@@ -66,6 +71,7 @@ services:
     image: ghcr.io/as19git67/fk-encore-embedding:latest
     container_name: fk-encore-embedding
     restart: unless-stopped
+    user: "568:568"
     depends_on:
       postgres:
         condition: service_healthy
@@ -87,6 +93,7 @@ services:
     image: ghcr.io/as19git67/fk-encore-landmark:latest
     container_name: fk-encore-landmark
     restart: unless-stopped
+    user: "568:568"
     environment:
       LANDMARK_THRESHOLD: "0.35"
       LOG_LEVEL: INFO

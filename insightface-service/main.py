@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI, UploadFile, File, HTTPException
 import numpy as np
 import insightface
@@ -6,7 +7,15 @@ import cv2
 
 app = FastAPI()
 
-app_state = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
+# Explicit model root to avoid relying on $HOME expansion at runtime.
+# Defaults to the apps user's home; can be overridden via env var.
+INSIGHTFACE_ROOT = os.environ.get("INSIGHTFACE_ROOT", "/home/apps/.insightface")
+
+app_state = FaceAnalysis(
+    name="buffalo_l",
+    providers=["CPUExecutionProvider"],
+    root=INSIGHTFACE_ROOT,
+)
 app_state.prepare(ctx_id=0, det_size=(640, 640))
 
 
