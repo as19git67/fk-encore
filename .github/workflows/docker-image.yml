@@ -134,10 +134,24 @@ jobs:
       # Encore app, node_modules, and the Encore runtime entrypoint. We
       # tag it locally as fk-encore-raw:build; it never leaves the runner.
       #
-      # --skip-config  : we don't use Encore's SQLDatabase/PubSub/etc., so
-      #                  there is no infra-config.json to generate.
-      # --base         : keeps image layout consistent with the old Dockerfile.
-      # --os/--arch    : explicit to avoid surprises if runners change arch.
+      # We deliberately do NOT pass `--skip-config`: the Encore runtime
+      # requires either ENCORE_RUNTIME_CONFIG or ENCORE_INFRA_CONFIG_PATH
+      # at startup, and `--skip-config` suppresses both, causing the
+      # container to crash immediately with
+      #     Error: failed to initialize runtime: unable to parse runtime config
+      #     Caused by: environment variable not present
+      # Without `--skip-config` and without `--config <file>`, `encore
+      # build docker` auto-generates a minimal infra-config.json with all
+      # services/gateways marked as hosted and bakes it into the image at
+      # /encore/infra.config.json (plus the matching ENCORE_INFRA_CONFIG_PATH
+      # env var). That is exactly what we want: our app does not use any
+      # Encore-managed infrastructure resources (no SQLDatabase, no PubSub,
+      # no Bucket), so the auto-generated config stays empty of resources
+      # and the app reads its own runtime settings from plain `process.env`
+      # variables supplied by the TrueNAS container config.
+      #
+      # --base    : keeps image layout consistent with the old Dockerfile.
+      # --os/--arch : explicit to avoid surprises if runners change arch.
       #
       # To build a multi-arch image (amd64 + arm64) you need several changes:
       #   1. Switch setup-buildx-action back to the `docker-container` driver
@@ -159,7 +173,6 @@ jobs:
         run: |
           encore build docker \
             --base=node:24-bookworm-slim \
-            --skip-config \
             --os=linux \
             --arch=amd64 \
             fk-encore-raw:build
