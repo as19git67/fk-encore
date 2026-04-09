@@ -19,6 +19,14 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  # Pinned Encore CLI version. Keep this in step with the `encore.dev`
+  # runtime version in package.json (currently ^1.56.2).
+  # To always use the latest release, drop the version argument from the
+  # install call below, i.e. replace
+  #     curl -L https://encore.dev/install.sh | bash -s -- -v ${ENCORE_VERSION}
+  # with
+  #     curl -L https://encore.dev/install.sh | bash
+  ENCORE_VERSION: v1.56.5
 
 jobs:
 
@@ -48,16 +56,22 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      - name: setup node
+
+      - name: Setup Node
         uses: actions/setup-node@v6
         with:
           node-version: 24
 
-      - name: Install dependencies
+      # Intentionally `npm install` (not `npm ci`): lockfiles have repeatedly
+      # drifted between dev platforms in this repo, and `npm ci` would fail
+      # CI on every drift. `npm install` is more forgiving.
+      - name: Install backend dependencies
         run: npm install
 
       - name: Run tests
@@ -71,6 +85,20 @@ jobs:
           POSTGRES_PASSWORD: postgres
           POSTGRES_TEST_DB: encore_test
           POSTGRES_TEST_CONNECTION_STRING: postgres://postgres:postgres@localhost:5432/encore_test
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend install --legacy-peer-deps
+
+      - name: Build frontend (SPA bundle)
+        run: npm --prefix frontend run build
+
+      - name: Install Encore CLI (${{ env.ENCORE_VERSION }})
+        run: |
+          curl -L https://encore.dev/install.sh | bash -s -- -v "${ENCORE_VERSION}"
+          echo "${HOME}/.encore/bin" >> "${GITHUB_PATH}"
+
+      - name: Verify Encore CLI
+        run: encore version
 
       - name: Log in to the container registry
         uses: docker/login-action@v3
@@ -89,15 +117,47 @@ jobs:
             type=semver,pattern={{version}}
             type=raw,value=test,enable=${{ github.event_name == 'pull_request' }}
 
-      - name: Build and push Docker image
+      # Stage A — Encore's official production build. Produces a portable
+      # image built on node:24-bookworm-slim that contains the compiled
+      # Encore app, node_modules, and the Encore runtime entrypoint. We
+      # tag it locally as fk-encore-raw:build; it never leaves the runner.
+      #
+      # --skip-config  : we don't use Encore's SQLDatabase/PubSub/etc., so
+      #                  there is no infra-config.json to generate.
+      # --base         : keeps image layout consistent with the old Dockerfile.
+      # --os/--arch    : explicit to avoid surprises if runners change arch.
+      #
+      # To build a multi-arch image (amd64 + arm64) you need TWO encore build
+      # invocations and a manifest list, e.g.:
+      #   encore build docker --base=... --os=linux --arch=amd64 fk-encore-raw:amd64
+      #   encore build docker --base=... --os=linux --arch=arm64 fk-encore-raw:arm64
+      # then run Stage B twice (once per arch, matching --build-arg BASE_IMAGE)
+      # and finally assemble a manifest with `docker buildx imagetools create`.
+      # Stage B's docker/build-push-action would then use platforms: linux/amd64,linux/arm64
+      # and you'd pipe each per-arch Encore image through a matrix build.
+      - name: Build Encore application image (Stage A)
+        run: |
+          encore build docker \
+            --base=node:24-bookworm-slim \
+            --skip-config \
+            --os=linux \
+            --arch=amd64 \
+            fk-encore-raw:build
+
+      # Stage B — thin runtime wrapper that adds the TrueNAS SCALE apps user
+      # (568:568), bind-mount directories, the pre-built frontend SPA, and
+      # bakes APP_BUILD_NUMBER into the image. Pushes the final image to ghcr.
+      - name: Build and push runtime image (Stage B)
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: docker/Dockerfile.runtime
           push: true
-          platforms: linux/amd64  # linux/arm64
+          platforms: linux/amd64  # multi-arch: linux/amd64,linux/arm64 (also requires Stage A matrix above)
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
+            BASE_IMAGE=fk-encore-raw:build
             BUILD_NUMBER=${{ github.run_number }}-${{ github.sha }}
 
       - name: Deploy to TrueNAS (test)
