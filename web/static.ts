@@ -3,7 +3,12 @@ import path from "path";
 import { api } from "encore.dev/api";
 import { photo } from "~encore/clients";
 
-const CONTAINER_DIST_DIR = "/app/frontend/dist";
+// Where the pre-built SPA lives inside the container image. The runtime
+// wrapper (docker/Dockerfile.runtime) copies frontend/dist to this absolute
+// path, which is deliberately outside of whatever WORKDIR `encore build
+// docker` picks so the two cannot collide. Override via FRONTEND_DIST_DIR
+// for custom deployments.
+const CONTAINER_DIST_DIR = process.env.FRONTEND_DIST_DIR ?? "/srv/frontend/dist";
 const LOCAL_DIST_DIR = path.resolve(process.cwd(), "frontend/dist");
 
 function getDistDir(): string {

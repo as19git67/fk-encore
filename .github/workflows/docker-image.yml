@@ -48,16 +48,34 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-      - name: Set up Docker Buildx
+
+      # Buildx is configured with the `docker` driver (not the default
+      # `docker-container`) so that Stage B can `FROM fk-encore-raw:build`,
+      # an image produced by Stage A that lives only in the host daemon's
+      # local image store. The `docker-container` driver runs buildkit in
+      # an isolated container with no access to host-local images and would
+      # try to pull `fk-encore-raw:build` from docker.io, failing with
+      # "insufficient_scope: authorization failed".
+      #
+      # Trade-off: the `docker` driver only builds for the host platform
+      # (linux/amd64 on ubuntu-latest) and does not support advanced
+      # buildkit features like cache export or provenance attestations.
+      # That matches our current amd64-only requirement. For multi-arch,
+      # see the Stage A multi-arch comment block further down.
+      - name: Set up Docker Buildx (docker driver)
         uses: docker/setup-buildx-action@v3
-      - name: setup node
+        with:
+          driver: docker
+
+      - name: Setup Node
         uses: actions/setup-node@v6
         with:
           node-version: 24
 
-      - name: Install dependencies
+      # Intentionally `npm install` (not `npm ci`): lockfiles have repeatedly
+      # drifted between dev platforms in this repo, and `npm ci` would fail
+      # CI on every drift. `npm install` is more forgiving.
+      - name: Install backend dependencies
         run: npm install
 
       - name: Run tests
@@ -71,6 +89,28 @@ jobs:
           POSTGRES_PASSWORD: postgres
           POSTGRES_TEST_DB: encore_test
           POSTGRES_TEST_CONNECTION_STRING: postgres://postgres:postgres@localhost:5432/encore_test
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend install --legacy-peer-deps
+
+      - name: Build frontend (SPA bundle)
+        run: npm --prefix frontend run build
+
+      # Installs the Encore CLI by running the upstream `install.sh` as
+      # documented at https://encore.dev/docs/ts/self-host/ci-cd. We do NOT
+      # pass a `-v <version>` argument: the official docs install the latest
+      # GA release, and an earlier attempt to pin via `-v ${ENCORE_VERSION}`
+      # caused install.sh to 403 on the CDN. The actual CLI version used is
+      # logged in the next step for traceability.
+      - name: Install Encore CLI (latest GA)
+        run: |
+          curl -fsSL --retry 3 --retry-delay 5 -o install.sh https://encore.dev/install.sh
+          bash install.sh
+          rm -f install.sh
+          echo "${HOME}/.encore/bin" >> "${GITHUB_PATH}"
+
+      - name: Verify Encore CLI
+        run: encore version
 
       - name: Log in to the container registry
         uses: docker/login-action@v3
@@ -89,15 +129,71 @@ jobs:
             type=semver,pattern={{version}}
             type=raw,value=test,enable=${{ github.event_name == 'pull_request' }}
 
-      - name: Build and push Docker image
+      # Stage A — Encore's official production build. Produces a portable
+      # image built on node:24-bookworm-slim that contains the compiled
+      # Encore app, node_modules, and the Encore runtime entrypoint. We
+      # tag it locally as fk-encore-raw:build; it never leaves the runner.
+      #
+      # We deliberately do NOT pass `--skip-config`: the Encore runtime
+      # requires either ENCORE_RUNTIME_CONFIG or ENCORE_INFRA_CONFIG_PATH
+      # at startup, and `--skip-config` suppresses both, causing the
+      # container to crash immediately with
+      #     Error: failed to initialize runtime: unable to parse runtime config
+      #     Caused by: environment variable not present
+      # Without `--skip-config` and without `--config <file>`, `encore
+      # build docker` auto-generates a minimal infra-config.json with all
+      # services/gateways marked as hosted and bakes it into the image at
+      # /encore/infra.config.json (plus the matching ENCORE_INFRA_CONFIG_PATH
+      # env var). That is exactly what we want: our app does not use any
+      # Encore-managed infrastructure resources (no SQLDatabase, no PubSub,
+      # no Bucket), so the auto-generated config stays empty of resources
+      # and the app reads its own runtime settings from plain `process.env`
+      # variables supplied by the TrueNAS container config.
+      #
+      # --base    : keeps image layout consistent with the old Dockerfile.
+      # --os/--arch : explicit to avoid surprises if runners change arch.
+      #
+      # To build a multi-arch image (amd64 + arm64) you need several changes:
+      #   1. Switch setup-buildx-action back to the `docker-container` driver
+      #      and re-add `docker/setup-qemu-action@v3` above.
+      #   2. Because buildkit in that driver cannot see host-local images,
+      #      run a local registry on the runner (e.g. `docker run -d -p 5000:5000 registry:2`)
+      #      and add `--push` + `docker.io/...` tags to the Stage A command
+      #      so Stage A pushes to `localhost:5000/fk-encore-raw:<arch>`.
+      #   3. Run Stage A twice in a matrix (amd64, arm64), each producing
+      #      `localhost:5000/fk-encore-raw:<arch>`.
+      #   4. Update Stage B's BASE_IMAGE build-arg to reference the local
+      #      registry tag, and set `platforms: linux/amd64,linux/arm64`.
+      #   5. Assemble a final manifest list with `docker buildx imagetools
+      #      create` pointing at the per-arch Stage B outputs.
+      # We intentionally chose the simpler amd64-only `docker` driver path
+      # above because that is the only target platform we currently deploy
+      # to on TrueNAS SCALE.
+      - name: Build Encore application image (Stage A)
+        run: |
+          encore build docker \
+            --base=node:24-bookworm-slim \
+            --os=linux \
+            --arch=amd64 \
+            fk-encore-raw:build
+
+      # Stage B — thin runtime wrapper that adds the TrueNAS SCALE apps user
+      # (568:568), bind-mount directories, the pre-built frontend SPA, and
+      # bakes APP_BUILD_NUMBER into the image. Pushes the final image to ghcr.
+      #
+      # No `platforms:` key: the `docker` buildx driver (configured above)
+      # only builds for the host platform, so declaring `linux/amd64` here
+      # would be redundant and declaring anything else would error out.
+      - name: Build and push runtime image (Stage B)
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: docker/Dockerfile.runtime
           push: true
-          platforms: linux/amd64  # linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
+            BASE_IMAGE=fk-encore-raw:build
             BUILD_NUMBER=${{ github.run_number }}-${{ github.sha }}
 
       - name: Deploy to TrueNAS (test)
