@@ -263,15 +263,19 @@ onUnmounted(() => {
 /* ── Fullscreen bottom info bar (rendered via FullscreenOverlay slot) ──── */
 
 .fs-info-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  width: 100%;
   padding: 0.75rem 1rem;
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
   background: rgba(0, 0, 0, 0.7);
   backdrop-filter: blur(8px);
   color: rgba(255, 255, 255, 0.9);
-  flex-shrink: 0;
+  z-index: 10;
 }
 
 .fs-info-text {
