@@ -84,12 +84,27 @@ function handleKeydown(e: KeyboardEvent) {
 
 // ── Info formatting ─────────────────────────────────────────────────────────
 
-function formatLocation(photo: Photo): string {
-  return formatLocationLabel(photo)
+/**
+ * Build a location label, removing duplicate segments.
+ * Nominatim often returns `location_name` already containing the city
+ * (e.g. "Josef-Haubrich-Hof 5, Köln"), which would otherwise produce
+ * "Josef-Haubrich-Hof 5, Köln, Köln" when concatenated with location_city.
+ */
+function formatSharedLocation(photo: Photo): string {
+  const parts = formatLocationLabel(photo).split(', ')
+  const seen = new Set<string>()
+  const deduped: string[] = []
+  for (const p of parts) {
+    const key = p.trim().toLowerCase()
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    deduped.push(p.trim())
+  }
+  return deduped.join(', ')
 }
 
 function formatDate(photo: Photo): string {
-  return formatPhotoDate(photo.taken_at)
+  return formatPhotoDate(photo.taken_at || photo.created_at)
 }
 
 // ── Lifecycle ───────────────────────────────────────────────────────────────
@@ -173,20 +188,19 @@ onUnmounted(() => {
       @prev="goPrev"
       @next="goNext"
     >
+      <template #topbar-center>
+        <div v-if="currentPhoto" class="shared-fs-info-center">
+          <div class="shared-fs-date">{{ formatDate(currentPhoto) }}</div>
+          <div v-if="formatSharedLocation(currentPhoto)" class="shared-fs-location">
+            <i class="pi pi-map-marker" />
+            {{ formatSharedLocation(currentPhoto) }}
+          </div>
+        </div>
+      </template>
       <template #topbar-actions><!-- no action buttons in shared view --></template>
       <template #bottom-bar>
-        <div class="fs-info-bar">
-          <div class="fs-info-text">
-            <div v-if="currentPhoto && formatLocation(currentPhoto)" class="fs-info-location">
-              <i class="pi pi-map-marker" /> {{ formatLocation(currentPhoto) }}
-            </div>
-            <div v-if="currentPhoto && formatDate(currentPhoto)" class="fs-info-date">
-              {{ formatDate(currentPhoto) }}
-            </div>
-          </div>
-          <div v-if="fullscreenPhotos.length > 1" class="fs-info-counter">
-            {{ photoCounter }}
-          </div>
+        <div v-if="fullscreenPhotos.length > 1" class="fs-counter-pill">
+          {{ photoCounter }}
         </div>
       </template>
     </FullscreenOverlay>
@@ -260,65 +274,54 @@ onUnmounted(() => {
   color: var(--p-text-muted-color);
 }
 
-/* ── Fullscreen bottom info bar (rendered via FullscreenOverlay slot) ──── */
+/* ── Fullscreen topbar-center override (dedup city) ─────────────────────── */
 
-.fs-info-bar {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 0.75rem 1rem;
-  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(8px);
-  color: rgba(255, 255, 255, 0.9);
-  z-index: 10;
-}
-
-.fs-info-text {
+.shared-fs-info-center {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-  min-width: 0;
-  flex: 1;
+  align-items: center;
+  line-height: 1.3;
 }
 
-.fs-info-location {
-  font-size: 0.95rem;
-  font-weight: 500;
+.shared-fs-date {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.9em;
+}
+
+.shared-fs-location {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.75em;
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.3em;
 }
 
-.fs-info-location .pi {
+/* ── Counter pill, styled like the nav buttons but horizontally centered ─ */
+
+.fs-counter-pill {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: white;
+  background: rgba(0, 0, 0, 0.4);
+  padding: 0.5rem 0.9rem;
+  border-radius: 999px;
   font-size: 0.85rem;
-  opacity: 0.7;
-}
-
-.fs-info-date {
-  font-size: 0.8rem;
-  color: rgba(255, 255, 255, 0.6);
-}
-
-.fs-info-counter {
-  font-size: 0.85rem;
-  color: rgba(255, 255, 255, 0.5);
+  font-weight: 500;
+  z-index: 10;
+  backdrop-filter: blur(6px);
+  pointer-events: none;
   white-space: nowrap;
-  flex-shrink: 0;
-  padding-left: 1rem;
 }
 
 @media (max-width: 768px) {
-  .fs-info-bar {
-    padding: 0.6rem 0.75rem;
-  }
-
-  .fs-info-location {
-    font-size: 0.85rem;
+  .fs-counter-pill {
+    top: auto;
+    bottom: 4rem;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.5);
+    padding: 0.75rem 1rem;
   }
 }
 </style>
