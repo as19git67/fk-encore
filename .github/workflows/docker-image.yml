@@ -19,14 +19,6 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  # Pinned Encore CLI version. Keep this in step with the `encore.dev`
-  # runtime version in package.json (currently ^1.56.2).
-  # To always use the latest release, drop the version argument from the
-  # install call below, i.e. replace
-  #     curl -L https://encore.dev/install.sh | bash -s -- -v ${ENCORE_VERSION}
-  # with
-  #     curl -L https://encore.dev/install.sh | bash
-  ENCORE_VERSION: v1.56.5
 
 jobs:
 
@@ -92,9 +84,17 @@ jobs:
       - name: Build frontend (SPA bundle)
         run: npm --prefix frontend run build
 
-      - name: Install Encore CLI (${{ env.ENCORE_VERSION }})
+      # Installs the Encore CLI by running the upstream `install.sh` as
+      # documented at https://encore.dev/docs/ts/self-host/ci-cd. We do NOT
+      # pass a `-v <version>` argument: the official docs install the latest
+      # GA release, and an earlier attempt to pin via `-v ${ENCORE_VERSION}`
+      # caused install.sh to 403 on the CDN. The actual CLI version used is
+      # logged in the next step for traceability.
+      - name: Install Encore CLI (latest GA)
         run: |
-          curl -L https://encore.dev/install.sh | bash -s -- -v "${ENCORE_VERSION}"
+          curl -fsSL --retry 3 --retry-delay 5 -o install.sh https://encore.dev/install.sh
+          bash install.sh
+          rm -f install.sh
           echo "${HOME}/.encore/bin" >> "${GITHUB_PATH}"
 
       - name: Verify Encore CLI
