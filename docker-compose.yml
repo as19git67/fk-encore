@@ -4,6 +4,9 @@ services:
     image: ghcr.io/as19git67/fk-encore:latest
     container_name: fk-encore-app
     restart: unless-stopped
+    # Run as the TrueNAS SCALE "apps" user (UID/GID 568). Ensure the bind-
+    # mounted host directories (photos, thumbnails) are owned by 568:568.
+    user: "568:568"
     depends_on:
       postgres:
         condition: service_healthy
