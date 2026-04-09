@@ -9,8 +9,12 @@ RUN apt-get update && apt-get install -y \
 
 # Create a non-root "apps" user matching TrueNAS SCALE's built-in apps user
 # (UID/GID 568) so bind-mounted ZFS datasets can be owned accordingly.
-RUN groupadd -g 568 apps \
-    && useradd -u 568 -g 568 -m -s /bin/bash apps
+# getent asserts the user really made it into /etc/passwd — otherwise the
+# build fails loudly instead of producing an image that crashes at runtime.
+RUN groupadd --gid 568 apps \
+    && useradd --uid 568 --gid 568 --create-home --shell /bin/bash apps \
+    && getent passwd 568 \
+    && getent group 568
 
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
@@ -29,6 +33,8 @@ RUN chown -R 568:568 /app
 # Suppress onnxruntime warnings (Optional, but can help)
 ENV ORT_LOGGING_LEVEL=3
 ENV HOME=/home/apps
+ENV USER=apps
+ENV LOGNAME=apps
 ENV INSIGHTFACE_ROOT=/home/apps/.insightface
 
 EXPOSE 8000

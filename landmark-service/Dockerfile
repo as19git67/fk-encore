@@ -2,8 +2,12 @@ FROM python:3.12-slim-bookworm
 
 # Create a non-root "apps" user matching TrueNAS SCALE's built-in apps user
 # (UID/GID 568) so bind-mounted ZFS datasets can be owned accordingly.
-RUN groupadd -g 568 apps \
-    && useradd -u 568 -g 568 -m -s /bin/bash apps
+# getent asserts the user really made it into /etc/passwd — otherwise the
+# build fails loudly instead of producing an image that crashes at runtime.
+RUN groupadd --gid 568 apps \
+    && useradd --uid 568 --gid 568 --create-home --shell /bin/bash apps \
+    && getent passwd 568 \
+    && getent group 568
 
 WORKDIR /app
 
@@ -18,17 +22,27 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY main.py .
 
-# Pre-download model weights at build time to avoid cold-start delays.
-# transformers caches under ~/.cache/huggingface (via $HOME), so we point
-# HOME at the apps user's home during the download and chown the result.
-RUN HOME=/home/apps python -c "\
+# Cache-related env vars as absolute paths. Set each on its own ENV line so
+# they definitely propagate to both build-time RUN steps and the runtime CMD.
+ENV HOME=/home/apps
+ENV USER=apps
+ENV LOGNAME=apps
+ENV XDG_CACHE_HOME=/home/apps/.cache
+ENV HF_HOME=/home/apps/.cache/huggingface
+ENV HUGGINGFACE_HUB_CACHE=/home/apps/.cache/huggingface/hub
+ENV TRANSFORMERS_CACHE=/home/apps/.cache/huggingface/transformers
+ENV TORCH_HOME=/home/apps/.cache/torch
+
+# Pre-download model weights into the explicit cache dir so the non-root
+# apps user can load them at runtime. cache_dir= is passed explicitly so the
+# download never depends on $HOME expansion.
+RUN mkdir -p /home/apps/.cache/huggingface /home/apps/.cache/torch \
+    && python -c "\
 from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection; \
-AutoProcessor.from_pretrained('IDEA-Research/grounding-dino-base'); \
-AutoModelForZeroShotObjectDetection.from_pretrained('IDEA-Research/grounding-dino-base'); \
+AutoProcessor.from_pretrained('IDEA-Research/grounding-dino-base', cache_dir='/home/apps/.cache/huggingface'); \
+AutoModelForZeroShotObjectDetection.from_pretrained('IDEA-Research/grounding-dino-base', cache_dir='/home/apps/.cache/huggingface'); \
 print('Model pre-downloaded.')" \
     && chown -R 568:568 /home/apps /app
-
-ENV HOME=/home/apps
 
 EXPOSE 8000
 

@@ -21,26 +21,46 @@ FROM python:3.12-slim-bookworm
 
 # Create a non-root "apps" user matching TrueNAS SCALE's built-in apps user
 # (UID/GID 568) so bind-mounted ZFS datasets can be owned accordingly.
-RUN groupadd -g 568 apps \
-    && useradd -u 568 -g 568 -m -s /bin/bash apps
+# getent asserts the user really made it into /etc/passwd — otherwise the
+# build fails loudly instead of producing an image that crashes at runtime
+# with "getpwuid(): uid not found: 568".
+RUN groupadd --gid 568 apps \
+    && useradd --uid 568 --gid 568 --create-home --shell /bin/bash apps \
+    && getent passwd 568 \
+    && getent group 568
 
 WORKDIR /app
 
 # Copy installed packages from builder
 COPY --from=builder /install /usr/local
 
-# Pre-download model weights at build time to avoid cold-start delays.
-# open_clip and transformers cache under ~/.cache (via $HOME), so we point
-# HOME at the apps user's home during the download.
-RUN HOME=/home/apps python -c "\
+# Cache-related env vars as absolute paths. Set each on its own ENV line so
+# they definitely propagate to both build-time RUN steps and the runtime CMD.
+ENV HOME=/home/apps
+ENV USER=apps
+ENV LOGNAME=apps
+ENV XDG_CACHE_HOME=/home/apps/.cache
+ENV HF_HOME=/home/apps/.cache/huggingface
+ENV HUGGINGFACE_HUB_CACHE=/home/apps/.cache/huggingface/hub
+ENV TRANSFORMERS_CACHE=/home/apps/.cache/huggingface/transformers
+ENV TORCH_HOME=/home/apps/.cache/torch
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV LOG_LEVEL=INFO
+
+# Pre-download model weights into the explicit cache dirs so the non-root
+# apps user can load them at runtime. cache_dir= is passed explicitly so the
+# download never depends on $HOME expansion.
+RUN mkdir -p /home/apps/.cache/huggingface /home/apps/.cache/torch \
+    && python -c "\
 import open_clip; \
-open_clip.create_model_and_transforms('xlm-roberta-large-ViT-H-14', pretrained='frozen_laion5b_s13b_b90k'); \
+open_clip.create_model_and_transforms('xlm-roberta-large-ViT-H-14', pretrained='frozen_laion5b_s13b_b90k', cache_dir='/home/apps/.cache/huggingface'); \
 print('OpenCLIP model pre-downloaded.') \
 "
-RUN HOME=/home/apps python -c "\
+RUN python -c "\
 from transformers import AutoImageProcessor, AutoModel; \
-AutoImageProcessor.from_pretrained('facebook/dinov2-base'); \
-AutoModel.from_pretrained('facebook/dinov2-base'); \
+AutoImageProcessor.from_pretrained('facebook/dinov2-base', cache_dir='/home/apps/.cache/huggingface'); \
+AutoModel.from_pretrained('facebook/dinov2-base', cache_dir='/home/apps/.cache/huggingface'); \
 print('DINOv2 model pre-downloaded.') \
 "
 RUN chown -R 568:568 /home/apps
@@ -54,11 +74,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/* \
     && chown -R 568:568 /app
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    LOG_LEVEL=INFO \
-    HOME=/home/apps
 
 EXPOSE 8000
 
