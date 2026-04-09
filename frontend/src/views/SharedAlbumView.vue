@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import { useRoute } from 'vue-router'
 import Message from 'primevue/message'
 import HeicImage from '../components/HeicImage.vue'
@@ -22,6 +22,7 @@ function asPhotos(photos: PublicAlbumPhoto[]): Photo[] {
     hash: undefined,
     curation_status: 'visible' as const,
     ai_quality_details: undefined,
+    description: p.description,
   }))
 }
 
@@ -63,7 +64,27 @@ function handleMapFullscreen(stopPhotos: Photo[], startIndex: number) {
 
 function closeFullscreen() {
   isFullscreen.value = false
+  showInfo.value = false
 }
+
+// ── Info panel (slides up from bottom, photo shrinks to 60%) ────────────────
+
+const showInfo = ref(false)
+function toggleInfo() {
+  showInfo.value = !showInfo.value
+}
+
+/** Per-photo description if the backend returned one, else the album description. */
+const currentDescription = computed<string>(() => {
+  const photoDesc = currentPhoto.value?.description?.trim()
+  if (photoDesc) return photoDesc
+  return album.value?.description?.trim() ?? ''
+})
+
+// Reset panel when leaving fullscreen by other means (e.g., swipe to close)
+watch(isFullscreen, (open) => {
+  if (!open) showInfo.value = false
+})
 
 function goPrev() {
   if (hasPrev.value) fullscreenIndex.value--
@@ -187,6 +208,7 @@ onUnmounted(() => {
       @close="closeFullscreen"
       @prev="goPrev"
       @next="goNext"
+      @show-details="toggleInfo"
     >
       <template #topbar-center>
         <div v-if="currentPhoto" class="shared-fs-info-center">
@@ -197,10 +219,32 @@ onUnmounted(() => {
           </div>
         </div>
       </template>
-      <template #topbar-actions><!-- no action buttons in shared view --></template>
       <template #bottom-bar>
-        <div v-if="fullscreenPhotos.length > 1" class="fs-counter-pill">
+        <div v-if="fullscreenPhotos.length > 1 && !showInfo" class="fs-counter-pill">
           {{ photoCounter }}
+        </div>
+        <div
+          class="shared-album-info-panel"
+          :class="{ 'is-open': showInfo }"
+          @click.stop
+          @touchstart.stop
+          @touchend.stop
+          @touchmove.stop
+        >
+          <div v-if="currentPhoto" class="info-panel-content">
+            <div class="info-row info-date">
+              <i class="pi pi-calendar" />
+              <span>{{ formatDate(currentPhoto) }}</span>
+            </div>
+            <div v-if="formatSharedLocation(currentPhoto)" class="info-row info-location">
+              <i class="pi pi-map-marker" />
+              <span>{{ formatSharedLocation(currentPhoto) }}</span>
+            </div>
+            <div v-if="currentDescription" class="info-row info-description">
+              <i class="pi pi-align-left" />
+              <p>{{ currentDescription }}</p>
+            </div>
+          </div>
         </div>
       </template>
     </FullscreenOverlay>
@@ -323,5 +367,109 @@ onUnmounted(() => {
     background: rgba(0, 0, 0, 0.5);
     padding: 0.75rem 1rem;
   }
+}
+
+/* ── Info panel (slides up from bottom, 40% height) ─────────────────────── */
+
+.shared-album-info-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 40dvh;
+  background: rgba(18, 18, 18, 0.96);
+  backdrop-filter: blur(12px);
+  color: rgba(255, 255, 255, 0.92);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  transform: translateY(100%);
+  transition: transform 0.3s ease;
+  z-index: 11;
+  overflow-y: auto;
+  padding: 1.25rem 1.5rem;
+  padding-bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px));
+  box-sizing: border-box;
+}
+
+.shared-album-info-panel.is-open {
+  transform: translateY(0);
+}
+
+.info-panel-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 48rem;
+  margin: 0 auto;
+}
+
+.info-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
+.info-row .pi {
+  margin-top: 0.15rem;
+  opacity: 0.6;
+  flex-shrink: 0;
+  font-size: 0.95rem;
+}
+
+.info-row > span,
+.info-row > p {
+  margin: 0;
+  min-width: 0;
+  word-wrap: break-word;
+}
+
+.info-date {
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 500;
+}
+
+.info-location {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.info-description {
+  color: rgba(255, 255, 255, 0.75);
+  white-space: pre-wrap;
+}
+
+@media (max-width: 768px) {
+  .shared-album-info-panel {
+    padding: 1rem 1rem;
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .info-panel-content {
+    gap: 0.75rem;
+  }
+
+  .info-row {
+    font-size: 0.9rem;
+  }
+}
+</style>
+
+<!--
+  Global style: reach into FullscreenOverlay's .fullscreen-content to shrink
+  the photo to 60% height while the info panel is open. Scoped via :has() on
+  the info panel class, so it only activates when SharedAlbumView has injected
+  the panel — no effect on logged-in user views.
+-->
+<style>
+.fullscreen-content:has(> .shared-album-info-panel.is-open) {
+  padding-bottom: 40dvh;
+  transition: padding-bottom 0.3s ease;
+}
+
+/* Hide nav buttons while info panel is open to avoid overlap */
+.fullscreen-overlay:has(.shared-album-info-panel.is-open) .fs-nav {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
 }
 </style>
