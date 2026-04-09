@@ -24,6 +24,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DATABASE: encore
       PHOTO_UPLOAD_DIR: /mnt/data/photos
+      PHOTO_THUMBNAIL_DIR: /mnt/data/thumbnails
       ADMIN_EMAIL: admin@example.com
       ADMIN_NAME: Admin
       ADMIN_PASSWORD: changeme   # <-- hier anpassen!
