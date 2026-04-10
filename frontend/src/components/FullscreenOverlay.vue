@@ -230,6 +230,11 @@ function locationLabel(photo: Photo) {
   gap: 0.3em;
 }
 
+.fs-topbar :deep(.p-button-rounded) {
+  width: 2.25rem;
+  height: 2.25rem;
+}
+
 .fs-toolbar {
   display: flex;
   gap: 0.25em;
