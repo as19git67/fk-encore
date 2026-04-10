@@ -24,23 +24,24 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  function setSession(responseToken: string, responseUser: UserWithRoles) {
+  function setSession(responseToken: string, responseRefreshToken: string, responseUser: UserWithRoles) {
     token.value = responseToken
     user.value = responseUser
     localStorage.setItem('auth_token', responseToken)
+    localStorage.setItem('refresh_token', responseRefreshToken)
     localStorage.setItem('auth_user', JSON.stringify(responseUser))
   }
 
   async function login(email: string, password: string) {
     const response = await usersApi.login(email, password)
-    setSession(response.token, response.user)
+    setSession(response.token, response.refreshToken, response.user)
   }
 
   async function loginWithPasskey() {
     const { challengeId, options } = await passkeyAuthOptions()
     const credential = await startAuthentication({ optionsJSON: options })
     const response = await passkeyAuthVerify(challengeId, credential)
-    setSession(response.token, response.user)
+    setSession(response.token, response.refreshToken, response.user)
   }
 
   async function register(email: string, name: string, password: string) {
@@ -51,13 +52,15 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function logout() {
     try {
-      await usersApi.logout()
+      const refreshToken = localStorage.getItem('refresh_token')
+      await usersApi.logout(refreshToken ?? undefined)
     } catch {
       // Ignore errors on logout
     }
     token.value = null
     user.value = null
     localStorage.removeItem('auth_token')
+    localStorage.removeItem('refresh_token')
     localStorage.removeItem('auth_user')
   }
 

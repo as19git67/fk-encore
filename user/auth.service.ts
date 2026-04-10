@@ -2,13 +2,15 @@ import crypto from "crypto";
 import { compareSync, hashSync } from "bcryptjs";
 import { eq, and, lt, gt, sql } from "drizzle-orm";
 import db from "../db/database";
-import { users, sessions, passwordResetTokens } from "../db/schema";
+import { users, sessions, refreshTokens, passwordResetTokens } from "../db/schema";
 import { dbFirst, dbAll, dbExec, dbInsertReturning } from '../db/adapter';
 import type {
   UserWithRolesAndPermissions,
   LoginRequest,
   LoginResponse,
   LogoutResponse,
+  RefreshRequest,
+  RefreshResponse,
   RequestPasswordResetRequest,
   RequestPasswordResetResponse,
   ResetPasswordRequest,
@@ -20,12 +22,47 @@ import { sendPasswordResetEmail } from "./mail";
 
 const nowSql = sql`NOW()`
 
+// ---------- Token Lifetimes ----------
+
+const ACCESS_TOKEN_TTL = 15 * 60 * 1000;          // 15 minutes
+const REFRESH_TOKEN_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
+
 // ---------- Helpers ----------
 
 async function cleanupExpiredSessions(): Promise<void> {
   await dbExec(
     db.delete(sessions).where(lt(sessions.expires_at, nowSql))
   );
+}
+
+async function cleanupExpiredRefreshTokens(): Promise<void> {
+  await dbExec(
+    db.delete(refreshTokens).where(lt(refreshTokens.expires_at, nowSql))
+  );
+}
+
+/** Creates a short-lived access token + a long-lived refresh token for a user. */
+export async function createSessionTokens(userId: number): Promise<{ token: string; refreshToken: string }> {
+  const token = crypto.randomBytes(32).toString("base64url");
+  const refresh = crypto.randomBytes(32).toString("base64url");
+
+  await dbExec(
+    db.insert(sessions).values({
+      token,
+      user_id: userId,
+      expires_at: new Date(Date.now() + ACCESS_TOKEN_TTL).toISOString(),
+    })
+  );
+
+  await dbExec(
+    db.insert(refreshTokens).values({
+      token: refresh,
+      user_id: userId,
+      expires_at: new Date(Date.now() + REFRESH_TOKEN_TTL).toISOString(),
+    })
+  );
+
+  return { token, refreshToken: refresh };
 }
 
 // ---------- Business Logic ----------
@@ -53,19 +90,11 @@ export async function loginLogic(req: LoginRequest): Promise<LoginResponse> {
 
   resetRateLimit(ip);
 
-  // Cleanup expired sessions
+  // Cleanup expired tokens
   await cleanupExpiredSessions();
+  await cleanupExpiredRefreshTokens();
 
-  // Generate opaque token
-  const token = crypto.randomBytes(32).toString("base64url");
-
-  await dbExec(
-    db.insert(sessions).values({
-      token,
-      user_id: row.id,
-      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-    })
-  );
+  const { token, refreshToken } = await createSessionTokens(row.id);
 
   const user: UserWithRolesAndPermissions = {
     ...toUser(row),
@@ -73,12 +102,55 @@ export async function loginLogic(req: LoginRequest): Promise<LoginResponse> {
     permissions: await getPermissionsForUser(row.id),
   };
 
-  return { user, token };
+  return { user, token, refreshToken };
 }
 
-export async function logoutLogic(token: string): Promise<LogoutResponse> {
+export async function logoutLogic(token: string, refreshToken?: string): Promise<LogoutResponse> {
   await dbExec(db.delete(sessions).where(eq(sessions.token, token)));
+  if (refreshToken) {
+    await dbExec(db.delete(refreshTokens).where(eq(refreshTokens.token, refreshToken)));
+  }
   return { success: true, message: "Logged out successfully" };
+}
+
+export async function refreshTokenLogic(req: RefreshRequest): Promise<RefreshResponse> {
+  const row = await dbFirst<{ token: string; user_id: number }>(
+    db
+      .select({ token: refreshTokens.token, user_id: refreshTokens.user_id })
+      .from(refreshTokens)
+      .where(
+        and(
+          eq(refreshTokens.token, req.refreshToken),
+          gt(refreshTokens.expires_at, nowSql)
+        )
+      )
+  );
+
+  if (!row) {
+    throw new Error("invalid or expired refresh token");
+  }
+
+  // Rotate: delete old refresh token
+  await dbExec(db.delete(refreshTokens).where(eq(refreshTokens.token, req.refreshToken)));
+
+  // Create new token pair
+  const { token, refreshToken } = await createSessionTokens(row.user_id);
+
+  const userRow = await dbFirst<typeof users.$inferSelect>(
+    db.select().from(users).where(eq(users.id, row.user_id))
+  );
+
+  if (!userRow) {
+    throw new Error("user not found");
+  }
+
+  const user: UserWithRolesAndPermissions = {
+    ...toUser(userRow),
+    roles: await getRolesForUser(userRow.id),
+    permissions: await getPermissionsForUser(userRow.id),
+  };
+
+  return { token, refreshToken, user };
 }
 
 export async function validateToken(token: string): Promise<{ userID: string; permissions: string[] }> {

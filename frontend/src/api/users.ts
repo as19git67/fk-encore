@@ -22,6 +22,7 @@ export interface UserWithRoles extends User {
 export interface LoginResponse {
   user: UserWithRoles
   token: string
+  refreshToken: string
 }
 
 export interface ListUsersResponse {
@@ -47,9 +48,10 @@ export function login(email: string, password: string) {
   })
 }
 
-export function logout() {
+export function logout(refreshToken?: string) {
   return apiFetch<{ success: boolean; message: string }>('/auth/logout', {
     method: 'POST',
+    body: JSON.stringify({ refreshToken }),
   })
 }
 
