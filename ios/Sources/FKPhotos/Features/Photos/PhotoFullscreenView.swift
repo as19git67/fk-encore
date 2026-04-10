@@ -108,7 +108,37 @@ struct PhotoFullscreenView: View {
                         .buttonStyle(.plain)
                     }
                 }
+                ToolbarItem(placement: .bottomBar) {
+                    HStack {
+                        Button {
+                            Task {
+                                guard let photo = currentPhoto else { return }
+                                let next: CurationStatus = currentCurationStatus == .favorite ? .visible : .favorite
+                                struct Body: Codable { let status: CurationStatus }
+                                struct Response: Codable { let success: Bool }
+                                _ = try? await APIClient.shared.patch(
+                                    "/photos/\(photo.id)/curation",
+                                    body: Body(status: next)
+                                ) as Response
+                                currentCurationStatus = next
+                            }
+                        } label: {
+                            Image(systemName: currentCurationStatus == .favorite ? "heart.fill" : "heart")
+                                .font(.title2)
+                                .foregroundStyle(currentCurationStatus == .favorite ? Color.red : .primary)
+                        }
+
+                        Button {
+                            withAnimation(.spring(duration: 0.4)) { showDetails.toggle() }
+                        } label: {
+                            Image(systemName: showDetails ? "info.circle.fill" : "info.circle")
+                                .font(.title2)
+                                .foregroundStyle(showDetails ? Color.accentColor : .primary)
+                        }
+                    }
+                }
             }
+            .toolbarBackground(showDetails ? .visible : .hidden, for: .bottomBar)
         }
     }
 
@@ -155,8 +185,6 @@ private struct PhotoPageView: View {
     @State private var showDatePicker = false
     @State private var editedDate = Date()
 
-    private let toolbarHeight: CGFloat = 60
-
     init(photo: PhotoWithCuration, faceBBox: FaceBBox? = nil, showDetails: Binding<Bool>, curationStatus: Binding<CurationStatus>) {
         self.photo = photo
         self.faceBBox = faceBBox
@@ -178,13 +206,6 @@ private struct PhotoPageView: View {
                         detailsPanel(geo: geo)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
-
-                    Spacer(minLength: 0)
-
-                    bottomBar
-                        .frame(height: toolbarHeight)
-                        .frame(maxWidth: .infinity)
-                        .background(showDetails ? Color(.systemBackground) : .clear)
                 }
             }
         }
@@ -213,7 +234,7 @@ private struct PhotoPageView: View {
     private func imageSection(geo: GeometryProxy) -> some View {
         let height: CGFloat = max(0, showDetails
             ? geo.size.height * 0.40
-            : geo.size.height - toolbarHeight)
+            : geo.size.height)
 
         ZStack {
             // Photo
@@ -263,7 +284,7 @@ private struct PhotoPageView: View {
 
     @ViewBuilder
     private func detailsPanel(geo: GeometryProxy) -> some View {
-        let height = geo.size.height * 0.60 - toolbarHeight
+        let height = geo.size.height * 0.60
 
         ScrollView {
             LazyVStack(spacing: 0) {
@@ -428,34 +449,6 @@ private struct PhotoPageView: View {
         .frame(height: max(height, 0))
     }
 
-    // MARK: - Bottom Bar
-
-    private var bottomBar: some View {
-        HStack(spacing: 32) {
-            Button {
-                Task {
-                    let next: CurationStatus = viewModel.curationStatus == .favorite ? .visible : .favorite
-                    await viewModel.setCuration(next)
-                }
-            } label: {
-                Image(systemName: viewModel.curationStatus == .favorite ? "heart.fill" : "heart")
-                    .font(.title2)
-                    .foregroundStyle(viewModel.curationStatus == .favorite ? Color.red : toolbarIconColor)
-            }
-
-            Button {
-                withAnimation(.spring(duration: 0.4)) { showDetails.toggle() }
-            } label: {
-                Image(systemName: showDetails ? "info.circle.fill" : "info.circle")
-                    .font(.title2)
-                    .foregroundStyle(showDetails ? Color.accentColor : toolbarIconColor)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 8)
-    }
-
-    private var toolbarIconColor: Color { .primary }
 
     // MARK: - Date Picker Sheet
 
