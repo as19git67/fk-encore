@@ -79,10 +79,15 @@ const currentDescription = computed<string>(() => {
   return currentPhoto.value?.description?.trim() ?? ''
 })
 
-/** Google Maps URL for the current photo's coordinates — works cross-platform. */
+/** Maps URL — Apple Maps on Apple devices, Google Maps elsewhere. */
+const isApple = /iPhone|iPad|iPod|Mac/.test(navigator.userAgent)
 const currentMapUrl = computed<string | null>(() => {
   const p = currentPhoto.value
   if (!p || p.latitude == null || p.longitude == null) return null
+  if (isApple) {
+    const q = formatSharedLocation(p)
+    return `https://maps.apple.com/?ll=${p.latitude},${p.longitude}&q=${encodeURIComponent(q || `${p.latitude},${p.longitude}`)}`
+  }
   return `https://www.google.com/maps/search/?api=1&query=${p.latitude},${p.longitude}`
 })
 
