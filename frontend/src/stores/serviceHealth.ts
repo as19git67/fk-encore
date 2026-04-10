@@ -1,11 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { getExternalServiceHealth, type ExternalServiceHealth, type ExternalServiceName } from '../api/photos'
+import { getExternalServiceHealth, type ExternalServiceHealth, type ExternalServiceName, type ServerPressureStatus } from '../api/photos'
 
 const POLL_INTERVAL_MS = 30_000
 
 export const useServiceHealthStore = defineStore('serviceHealth', () => {
   const services = ref<ExternalServiceHealth[]>([])
+  const serverPressure = ref<ServerPressureStatus>({ underPressure: false, eventLoopLagMs: 0 })
   const loading = ref(false)
   let pollTimer: ReturnType<typeof setInterval> | null = null
 
@@ -14,6 +15,9 @@ export const useServiceHealthStore = defineStore('serviceHealth', () => {
       loading.value = true
       const res = await getExternalServiceHealth()
       services.value = res.services
+      if (res.serverPressure) {
+        serverPressure.value = res.serverPressure
+      }
     } catch {
       // Silently ignore – the UI can show defaults (all unavailable)
     } finally {
@@ -53,6 +57,7 @@ export const useServiceHealthStore = defineStore('serviceHealth', () => {
 
   return {
     services,
+    serverPressure,
     loading,
     refresh,
     startPolling,

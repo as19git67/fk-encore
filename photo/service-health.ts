@@ -13,6 +13,8 @@
  * automatically.
  */
 
+import { isUnderPressure, getEventLoopLagMs } from "./event-loop-pressure";
+
 export type ExternalServiceName = "insightface" | "embedding" | "landmark";
 
 export interface ServiceHealthStatus {
@@ -20,6 +22,11 @@ export interface ServiceHealthStatus {
   available: boolean;
   lastChecked: string | null; // ISO timestamp
   lastError: string | null;
+}
+
+export interface ServerPressureStatus {
+  underPressure: boolean;
+  eventLoopLagMs: number;
 }
 
 // ─── configuration ────────────────────────────────────────────────────────────
@@ -99,6 +106,14 @@ export function getAllServiceHealthStatuses(): ServiceHealthStatus[] {
     lastChecked: s.lastChecked?.toISOString() ?? null,
     lastError: s.lastError,
   }));
+}
+
+/** Current server pressure status for the API response. */
+export function getServerPressureStatus(): ServerPressureStatus {
+  return {
+    underPressure: isUnderPressure(),
+    eventLoopLagMs: getEventLoopLagMs(),
+  };
 }
 
 // ─── health-check logic ───────────────────────────────────────────────────────
