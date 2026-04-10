@@ -1401,7 +1401,7 @@ export async function listAlbumsLogic(userId: number): Promise<ListAlbumsRespons
         cover_filename: sql<string>`COALESCE(
           ${photos.filename},
           (
-            SELECT ${photos.filename}
+            SELECT p_cover.filename
             FROM ${albumPhotos} ap_cover
             JOIN ${photos} p_cover ON ap_cover.photo_id = p_cover.id
             WHERE ap_cover.album_id = ${albums.id}
