@@ -379,7 +379,6 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   line-height: 1.3;
-  color: rgba(255, 255, 255, 0.85);
 }
 
 .fullscreen-overlay .shared-fs-date {
@@ -387,7 +386,7 @@ onUnmounted(() => {
 }
 
 .fullscreen-overlay .shared-fs-location {
-  color: rgba(255, 255, 255, 0.6);
+  opacity: 0.7;
   font-size: 0.75em;
   display: flex;
   align-items: center;
