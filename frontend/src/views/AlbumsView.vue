@@ -195,12 +195,20 @@ async function openShareDialog(album: Album) {
   }
 }
 
+function syncAlbumIsShared() {
+  const album = albums.value.find(a => a.id === shareAlbumId.value)
+  if (album) {
+    album.is_shared = albumSharesList.value.length > 0
+  }
+}
+
 async function handleShare() {
   if (!shareUserId.value) return
   sharing.value = true
   try {
     await shareAlbum(shareAlbumId.value, shareUserId.value, shareAccessLevel.value)
     albumSharesList.value = (await getAlbumShares(shareAlbumId.value)).shares
+    syncAlbumIsShared()
     shareUserId.value = null
     shareAccessLevel.value = 'read'
   } catch (err: any) { error.value = err.message || 'Fehler beim Freigeben' }
@@ -211,6 +219,7 @@ async function handleRemoveShare(userId: number) {
   try {
     await removeAlbumShare(shareAlbumId.value, userId)
     albumSharesList.value = albumSharesList.value.filter(s => s.user_id !== userId)
+    syncAlbumIsShared()
   } catch (err: any) { error.value = err.message || 'Fehler' }
 }
 
