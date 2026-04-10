@@ -363,8 +363,16 @@ onUnmounted(() => {
   margin-top: 4rem;
   color: var(--p-text-muted-color);
 }
+</style>
 
-/* ── Fullscreen topbar-center override (dedup city) ─────────────────────── */
+<!--
+  Global (unscoped) styles for elements rendered inside FullscreenOverlay's
+  <Teleport to="body">. Scoped CSS can fail to reach teleported content.
+  All selectors use unique class names that only SharedAlbumView creates,
+  so they cannot leak into other views.
+-->
+<style>
+/* ── Topbar-center slot content ──────────────────────────────────────────── */
 
 .shared-fs-info-center {
   display: flex;
@@ -386,7 +394,7 @@ onUnmounted(() => {
   gap: 0.3em;
 }
 
-/* ── Counter pill, styled like the nav buttons but horizontally centered ─ */
+/* ── Counter pill ────────────────────────────────────────────────────────── */
 
 .fs-counter-pill {
   position: absolute;
@@ -415,7 +423,7 @@ onUnmounted(() => {
   }
 }
 
-/* ── Info panel (slides up from bottom, 40% height) ─────────────────────── */
+/* ── Info panel (slides up from bottom, 40% height) ──────────────────────── */
 
 .shared-album-info-panel {
   position: absolute;
@@ -507,18 +515,13 @@ onUnmounted(() => {
     font-size: 0.9rem;
   }
 }
-</style>
 
-<!--
-  Global style: reach into FullscreenOverlay's .fullscreen-content to shrink
-  the photo to 60% height while the info panel is open. Scoped via :has() on
-  the info panel class, so it only activates when SharedAlbumView has injected
-  the panel — no effect on logged-in user views.
--->
-<style>
+/* ── Photo shrink + nav hide when info panel is open ─────────────────────── */
+
 .fullscreen-content:has(> .shared-album-info-panel.is-open) {
+  padding-top: 3.5rem;
   padding-bottom: 40dvh;
-  transition: padding-bottom 0.3s ease;
+  transition: padding 0.3s ease;
 }
 
 /* Hide nav buttons while info panel is open to avoid overlap */
