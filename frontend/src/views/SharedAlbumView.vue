@@ -374,19 +374,19 @@ onUnmounted(() => {
 <style>
 /* ── Topbar-center slot content ──────────────────────────────────────────── */
 
-.shared-fs-info-center {
+.fullscreen-overlay .shared-fs-info-center {
   display: flex;
   flex-direction: column;
   align-items: center;
   line-height: 1.3;
+  color: rgba(255, 255, 255, 0.85);
 }
 
-.shared-fs-date {
-  color: rgba(255, 255, 255, 0.85);
+.fullscreen-overlay .shared-fs-date {
   font-size: 0.9em;
 }
 
-.shared-fs-location {
+.fullscreen-overlay .shared-fs-location {
   color: rgba(255, 255, 255, 0.6);
   font-size: 0.75em;
   display: flex;
