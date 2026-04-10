@@ -10,6 +10,10 @@ const props = defineProps<{
   prevPhoto: Photo | null
   nextPhoto: Photo | null
   canDelete?: boolean
+  /** Control visibility of the details (ⓘ) button. Default: true. */
+  showDetailsButton?: boolean
+  /** When true the details icon switches to a close icon (✕). Default: false. */
+  detailsActive?: boolean
   /** Optional slot content rendered inside the fullscreen image (e.g. face box) */
 }>()
 
@@ -117,9 +121,11 @@ function locationLabel(photo: Photo) {
         <div class="fs-toolbar">
           <slot name="topbar-actions">
             <Button
-              icon="pi pi-info-circle" rounded text severity="secondary"
+              v-if="props.showDetailsButton !== false"
+              :icon="props.detailsActive ? 'pi pi-times' : 'pi pi-info-circle'"
+              rounded text severity="secondary"
               @click="emit('show-details')"
-              v-tooltip.bottom="'Details'"
+              v-tooltip.bottom="props.detailsActive ? 'Schließen' : 'Details'"
             />
             <Button
               v-if="canDelete"
@@ -188,6 +194,7 @@ function locationLabel(photo: Photo) {
   top: 0;
   left: 0;
   right: 0;
+  height: 2.75em;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -201,6 +208,7 @@ function locationLabel(photo: Photo) {
   align-items: center;
   gap: 0.5em;
   flex: 1;
+  min-width: 0;
   justify-content: center;
 }
 
@@ -209,19 +217,33 @@ function locationLabel(photo: Photo) {
   flex-direction: column;
   align-items: center;
   line-height: 1.3;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .fs-date-bar {
-  color: rgba(255,255,255,0.85);
   font-size: 0.9em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .fs-location-bar {
-  color: rgba(255,255,255,0.6);
+  opacity: 0.7;
   font-size: 0.75em;
   display: flex;
   align-items: center;
   gap: 0.3em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.fs-topbar :deep(.p-button-rounded) {
+  width: 2em;
+  height: 2em;
 }
 
 .fs-toolbar {

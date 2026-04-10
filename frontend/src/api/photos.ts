@@ -451,6 +451,7 @@ export interface PublicAlbumPhoto {
   location_country?: string
   ai_quality_score?: number
   auto_crop?: { x: number; y: number }
+  description?: string
 }
 
 export interface PublicAlbumResponse {
