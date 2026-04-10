@@ -1320,7 +1320,11 @@ export async function resizeImage(imageBuffer: Buffer, targetWidth: number): Pro
 
 // ---------- Albums ----------
 
-async function getAlbumStats(albumId: number): Promise<{ newest_photo_at?: string, oldest_photo_at?: string, photo_count: number, newest_photo_filename?: string }> {
+async function getAlbumStats(albumId: number, userId?: number): Promise<{ newest_photo_at?: string, oldest_photo_at?: string, photo_count: number, newest_photo_filename?: string }> {
+  const hiddenFilter = userId
+    ? sql`AND NOT EXISTS (SELECT 1 FROM ${photoCuration} WHERE ${photoCuration.photo_id} = ${albumPhotos.photo_id} AND ${photoCuration.user_id} = ${userId} AND ${photoCuration.status} = 'hidden')`
+    : sql``;
+
   const stats = await dbFirst<any>(
     db.select({
       newest_photo_at: sql<string>`MAX(COALESCE(${photos.taken_at}, ${photos.created_at}))`,
@@ -1329,7 +1333,7 @@ async function getAlbumStats(albumId: number): Promise<{ newest_photo_at?: strin
     })
     .from(albumPhotos)
     .innerJoin(photos, eq(albumPhotos.photo_id, photos.id))
-    .where(eq(albumPhotos.album_id, albumId))
+    .where(sql`${albumPhotos.album_id} = ${albumId} ${hiddenFilter}`)
   );
 
   let newestFilename: string | undefined = undefined;
@@ -1338,7 +1342,7 @@ async function getAlbumStats(albumId: number): Promise<{ newest_photo_at?: strin
       db.select({ filename: photos.filename })
       .from(albumPhotos)
       .innerJoin(photos, eq(albumPhotos.photo_id, photos.id))
-      .where(eq(albumPhotos.album_id, albumId))
+      .where(sql`${albumPhotos.album_id} = ${albumId} ${hiddenFilter}`)
       .orderBy(desc(sql`COALESCE(${photos.taken_at}, ${photos.created_at})`))
       .limit(1)
     );
@@ -1398,29 +1402,33 @@ export async function listAlbumsLogic(userId: number): Promise<ListAlbumsRespons
           ${photos.filename},
           (
             SELECT ${photos.filename}
-            FROM ${albumPhotos}
-            JOIN ${photos} ON ${albumPhotos.photo_id} = ${photos.id}
-            WHERE ${albumPhotos.album_id} = ${albums.id}
-            ORDER BY COALESCE(${photos.taken_at}, ${photos.created_at}) DESC
+            FROM ${albumPhotos} ap_cover
+            JOIN ${photos} p_cover ON ap_cover.photo_id = p_cover.id
+            WHERE ap_cover.album_id = ${albums.id}
+              AND NOT EXISTS (SELECT 1 FROM ${photoCuration} pc WHERE pc.photo_id = ap_cover.photo_id AND pc.user_id = ${userId} AND pc.status = 'hidden')
+            ORDER BY COALESCE(p_cover.taken_at, p_cover.created_at) DESC
             LIMIT 1
           )
         )`,
         newest_photo_at: sql<string>`(
-          SELECT MAX(COALESCE(${photos.taken_at}, ${photos.created_at}))
-          FROM ${albumPhotos}
-          JOIN ${photos} ON ${albumPhotos.photo_id} = ${photos.id}
-          WHERE ${albumPhotos.album_id} = ${albums.id}
+          SELECT MAX(COALESCE(p_new.taken_at, p_new.created_at))
+          FROM ${albumPhotos} ap_new
+          JOIN ${photos} p_new ON ap_new.photo_id = p_new.id
+          WHERE ap_new.album_id = ${albums.id}
+            AND NOT EXISTS (SELECT 1 FROM ${photoCuration} pc WHERE pc.photo_id = ap_new.photo_id AND pc.user_id = ${userId} AND pc.status = 'hidden')
         )`,
         oldest_photo_at: sql<string>`(
-          SELECT MIN(COALESCE(${photos.taken_at}, ${photos.created_at}))
-          FROM ${albumPhotos}
-          JOIN ${photos} ON ${albumPhotos.photo_id} = ${photos.id}
-          WHERE ${albumPhotos.album_id} = ${albums.id}
+          SELECT MIN(COALESCE(p_old.taken_at, p_old.created_at))
+          FROM ${albumPhotos} ap_old
+          JOIN ${photos} p_old ON ap_old.photo_id = p_old.id
+          WHERE ap_old.album_id = ${albums.id}
+            AND NOT EXISTS (SELECT 1 FROM ${photoCuration} pc WHERE pc.photo_id = ap_old.photo_id AND pc.user_id = ${userId} AND pc.status = 'hidden')
         )`,
         photo_count: sql<number>`(
           SELECT COUNT(*)
-          FROM ${albumPhotos}
-          WHERE ${albumPhotos.album_id} = ${albums.id}
+          FROM ${albumPhotos} ap_cnt
+          WHERE ap_cnt.album_id = ${albums.id}
+            AND NOT EXISTS (SELECT 1 FROM ${photoCuration} pc WHERE pc.photo_id = ap_cnt.photo_id AND pc.user_id = ${userId} AND pc.status = 'hidden')
         )`,
       })
       .from(albums)
@@ -1559,8 +1567,20 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     return true;
   });
 
-  const stats = await getAlbumStats(albumId);
-  // Determine cover photo: prefer user-specific cover, then album's cover, then newest in album
+  // Compute stats from filtered photos so count/timespan match what the user sees
+  const filteredCount = filteredPhotos.length;
+  let filteredNewest: string | undefined;
+  let filteredOldest: string | undefined;
+  let newestFilteredFilename: string | undefined;
+  for (const p of filteredPhotos) {
+    const d = p.taken_at || p.created_at;
+    if (d) {
+      if (!filteredNewest || d > filteredNewest) { filteredNewest = d; newestFilteredFilename = p.filename; }
+      if (!filteredOldest || d < filteredOldest) { filteredOldest = d; }
+    }
+  }
+
+  // Determine cover photo: prefer user-specific cover, then album's cover, then newest visible in album
   let coverFilename: string | undefined = undefined;
   let coverPhotoIdToUse: number | null | undefined = (settings as any).cover_photo_id;
   if (!coverPhotoIdToUse) {
@@ -1570,7 +1590,7 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     const cp = await dbFirst<any>(db.select({ filename: photos.filename }).from(photos).where(eq(photos.id, coverPhotoIdToUse)));
     coverFilename = cp?.filename;
   } else {
-    coverFilename = stats.newest_photo_filename;
+    coverFilename = newestFilteredFilename;
   }
 
   // Check if album is shared (has other participants)
@@ -1584,9 +1604,9 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     cover_photo_id: album.cover_photo_id ?? undefined,
     cover_filename: coverFilename,
     display_mode: (album.display_mode as "grid" | "map") ?? "grid",
-    newest_photo_at: stats.newest_photo_at,
-    oldest_photo_at: stats.oldest_photo_at,
-    photo_count: stats.photo_count,
+    newest_photo_at: filteredNewest,
+    oldest_photo_at: filteredOldest,
+    photo_count: filteredCount,
     created_at: album.created_at ?? "",
     updated_at: album.updated_at ?? "",
     role,
@@ -1733,7 +1753,7 @@ export async function updateAlbumLogic(userId: number, req: UpdateAlbumRequest):
   const updated = (await dbFirst<typeof albums.$inferSelect>(
     db.select().from(albums).where(eq(albums.id, req.id))
   ))!;
-  const stats = await getAlbumStats(req.id);
+  const stats = await getAlbumStats(req.id, userId);
   let coverFilename: string | undefined = undefined;
   if (updated.cover_photo_id) {
     const cp = await dbFirst<any>(db.select({ filename: photos.filename }).from(photos).where(eq(photos.id, updated.cover_photo_id)));
