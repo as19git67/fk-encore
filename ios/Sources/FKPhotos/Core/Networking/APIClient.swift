@@ -18,6 +18,7 @@ actor APIClient {
     }()
 
     private var authManager: AuthManager?
+    private var isRefreshing = false
 
     init() {
         if let stored = UserDefaults.standard.string(forKey: APIClient.serverURLKey),
@@ -44,10 +45,20 @@ actor APIClient {
         var request = URLRequest(url: url, timeoutInterval: 30)
         request.httpMethod = "GET"
         applyAuth(&request)
-        return try await perform(request)
+        return try await performWithRefresh(request)
     }
 
     func post<B: Encodable, T: Decodable>(_ path: String, body: B) async throws -> T {
+        var request = URLRequest(url: buildURL(path: path), timeoutInterval: 30)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(body)
+        applyAuth(&request)
+        return try await performWithRefresh(request)
+    }
+
+    /// POST without automatic 401 retry — used by the refresh endpoint itself to avoid loops.
+    func postWithoutRetry<B: Encodable, T: Decodable>(_ path: String, body: B) async throws -> T {
         var request = URLRequest(url: buildURL(path: path), timeoutInterval: 30)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -62,7 +73,7 @@ actor APIClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(body)
         applyAuth(&request)
-        return try await perform(request)
+        return try await performWithRefresh(request)
     }
 
     func patch<B: Encodable, T: Decodable>(_ path: String, body: B) async throws -> T {
@@ -71,14 +82,14 @@ actor APIClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(body)
         applyAuth(&request)
-        return try await perform(request)
+        return try await performWithRefresh(request)
     }
 
     func delete<T: Decodable>(_ path: String) async throws -> T {
         var request = URLRequest(url: buildURL(path: path), timeoutInterval: 30)
         request.httpMethod = "DELETE"
         applyAuth(&request)
-        return try await perform(request)
+        return try await performWithRefresh(request)
     }
 
     // MARK: - Raw Upload (matching web frontend pattern: raw body + X-File-Name header)
@@ -90,7 +101,7 @@ actor APIClient {
         request.setValue(filename, forHTTPHeaderField: "X-File-Name")
         request.httpBody = data
         applyAuth(&request)
-        return try await perform(request)
+        return try await performWithRefresh(request)
     }
 
     // MARK: - Download (for photos/thumbnails)
@@ -105,10 +116,26 @@ actor APIClient {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
         }
-        guard (200...299).contains(httpResponse.statusCode) else {
-            if httpResponse.statusCode == 401 {
-                authManager?.handleUnauthorized()
+
+        if httpResponse.statusCode == 401 {
+            // Try refresh
+            if let manager = authManager, await manager.tryRefresh() {
+                applyAuth(&request)
+                let (retryData, retryResponse) = try await URLSession.shared.data(for: request)
+                guard let retryHttp = retryResponse as? HTTPURLResponse else {
+                    throw APIError.invalidResponse
+                }
+                guard (200...299).contains(retryHttp.statusCode) else {
+                    authManager?.handleUnauthorized()
+                    throw APIError.httpError(retryHttp.statusCode, parseErrorMessage(retryData))
+                }
+                return retryData
             }
+            authManager?.handleUnauthorized()
+            throw APIError.httpError(401, parseErrorMessage(data))
+        }
+
+        guard (200...299).contains(httpResponse.statusCode) else {
             throw APIError.httpError(httpResponse.statusCode, parseErrorMessage(data))
         }
         return data
@@ -144,6 +171,32 @@ actor APIClient {
             if httpResponse.statusCode == 401 {
                 authManager?.handleUnauthorized()
             }
+            throw APIError.httpError(httpResponse.statusCode, parseErrorMessage(data))
+        }
+
+        return try decoder.decode(T.self, from: data)
+    }
+
+    /// Performs request; on 401, attempts a token refresh and retries once.
+    private func performWithRefresh<T: Decodable>(_ request: URLRequest) async throws -> T {
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+
+        if httpResponse.statusCode == 401, let manager = authManager {
+            let refreshed = await manager.tryRefresh()
+            if refreshed {
+                var retryRequest = request
+                applyAuth(&retryRequest)
+                return try await perform(retryRequest)
+            }
+            manager.handleUnauthorized()
+            throw APIError.httpError(401, parseErrorMessage(data))
+        }
+
+        guard (200...299).contains(httpResponse.statusCode) else {
             throw APIError.httpError(httpResponse.statusCode, parseErrorMessage(data))
         }
 

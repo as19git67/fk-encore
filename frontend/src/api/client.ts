@@ -1,5 +1,39 @@
 export const API_BASE_URL = import.meta.env.PROD ? '' : '/api'
 
+let refreshPromise: Promise<boolean> | null = null
+
+async function tryRefresh(): Promise<boolean> {
+  const refreshToken = localStorage.getItem('refresh_token')
+  if (!refreshToken) return false
+
+  // Deduplicate: if a refresh is already in-flight, wait for it
+  if (refreshPromise) return refreshPromise
+
+  refreshPromise = (async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      })
+
+      if (!response.ok) return false
+
+      const data = await response.json()
+      localStorage.setItem('auth_token', data.token)
+      localStorage.setItem('refresh_token', data.refreshToken)
+      localStorage.setItem('auth_user', JSON.stringify(data.user))
+      return true
+    } catch {
+      return false
+    } finally {
+      refreshPromise = null
+    }
+  })()
+
+  return refreshPromise
+}
+
 export async function apiFetch<T>(
   path: string,
   options: RequestInit = {}
@@ -19,13 +53,27 @@ export async function apiFetch<T>(
     headers['Authorization'] = `Bearer ${token}`
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  let response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers,
   })
 
+  // On 401, try refreshing the access token and retry once
+  if (response.status === 401 && path !== '/auth/refresh') {
+    const refreshed = await tryRefresh()
+    if (refreshed) {
+      const newToken = localStorage.getItem('auth_token')
+      headers['Authorization'] = `Bearer ${newToken}`
+      response = await fetch(`${API_BASE_URL}${path}`, {
+        ...options,
+        headers,
+      })
+    }
+  }
+
   if (response.status === 401) {
     localStorage.removeItem('auth_token')
+    localStorage.removeItem('refresh_token')
     localStorage.removeItem('auth_user')
     window.location.href = `${import.meta.env.BASE_URL}login`
     throw new Error('Unauthorized')
@@ -38,4 +86,3 @@ export async function apiFetch<T>(
 
   return response.json()
 }
-
