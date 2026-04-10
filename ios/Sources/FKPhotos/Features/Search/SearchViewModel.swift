@@ -18,9 +18,10 @@ final class SearchViewModel {
         hasSearched = true
 
         do {
-            let response: ListPhotosResponse = try await APIClient.shared.get(
+            struct SearchBody: Encodable { let query: String }
+            let response: ListPhotosResponse = try await APIClient.shared.post(
                 "/photos/search",
-                query: ["q": trimmed]
+                body: SearchBody(query: trimmed)
             )
             results = response.photos
         } catch {

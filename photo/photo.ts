@@ -820,7 +820,7 @@ export const searchPhotos = api(
     query: string;
     limit?: number;
     threshold?: number;
-  }): Promise<{ results: service.PhotoSearchResult[] }> => {
+  }): Promise<{ photos: PhotoWithCuration[] }> => {
     checkModule();
     const userId = getUserId();
     const authData = getAuthData()!;
