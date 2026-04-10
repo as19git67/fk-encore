@@ -16,13 +16,13 @@ struct ZoomableImageView: UIViewRepresentable {
         sv.maximumZoomScale = 5
         sv.showsHorizontalScrollIndicator = false
         sv.showsVerticalScrollIndicator = false
-        sv.backgroundColor = .black
+        sv.backgroundColor = .systemBackground
         sv.contentInsetAdjustmentBehavior = .never
         sv.bouncesZoom = true
 
         let iv = UIImageView(image: image)
         iv.contentMode = .scaleAspectFit
-        iv.backgroundColor = .black
+        iv.backgroundColor = .systemBackground
         sv.addSubview(iv)
         context.coordinator.imageView = iv
 
