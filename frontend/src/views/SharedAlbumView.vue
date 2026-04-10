@@ -55,10 +55,12 @@ function openFullscreen(photo: Photo) {
 }
 
 function handleMapFullscreen(stopPhotos: Photo[], startIndex: number) {
-  // stopPhotos come directly from TripMap and are already Photo[] — use as-is
-  // to preserve the stop's photo ordering (and keep startIndex valid).
-  fullscreenPhotos.value = stopPhotos
-  fullscreenIndex.value = startIndex
+  // Use all album photos so left/right navigation works across stops
+  const allPhotos = albumPhotosAsPhoto.value
+  const targetPhoto = stopPhotos[startIndex]
+  const globalIndex = targetPhoto ? allPhotos.findIndex(p => p.id === targetPhoto.id) : -1
+  fullscreenPhotos.value = allPhotos
+  fullscreenIndex.value = globalIndex >= 0 ? globalIndex : 0
   isFullscreen.value = true
 }
 

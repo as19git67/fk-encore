@@ -128,8 +128,12 @@ const mapFullscreenIndex = ref(0)
 const isMapFullscreen = ref(false)
 
 function handleMapFullscreen(stopPhotos: Photo[], startIndex: number) {
-  mapFullscreenPhotos.value = stopPhotos
-  mapFullscreenIndex.value = startIndex
+  // Use all album photos so left/right navigation works across stops
+  const allPhotos = albumPhotos.value
+  const targetPhoto = stopPhotos[startIndex]
+  const globalIndex = targetPhoto ? allPhotos.findIndex(p => p.id === targetPhoto.id) : -1
+  mapFullscreenPhotos.value = allPhotos
+  mapFullscreenIndex.value = globalIndex >= 0 ? globalIndex : 0
   isMapFullscreen.value = true
 }
 
