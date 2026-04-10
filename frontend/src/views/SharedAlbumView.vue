@@ -80,10 +80,17 @@ const currentDescription = computed<string>(() => {
   return currentPhoto.value?.description?.trim() ?? ''
 })
 
-/** True when the current photo has details beyond date/time (location or description). */
+/**
+ * True when the info panel would show something beyond what the topbar
+ * already displays (date + location text). That is:
+ * – photo has GPS coordinates (the panel turns location into a map link), OR
+ * – photo has a description.
+ */
 const hasExtraDetails = computed<boolean>(() => {
-  if (!currentPhoto.value) return false
-  return !!(formatSharedLocation(currentPhoto.value) || currentDescription.value)
+  const p = currentPhoto.value
+  if (!p) return false
+  const hasCoords = p.latitude != null && p.longitude != null
+  return !!(hasCoords || currentDescription.value)
 })
 
 /** Show the info button when there are extra details OR the panel is already open. */
