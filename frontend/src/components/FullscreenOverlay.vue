@@ -208,6 +208,7 @@ function locationLabel(photo: Photo) {
   align-items: center;
   gap: 0.5em;
   flex: 1;
+  min-width: 0;
   justify-content: center;
 }
 
@@ -216,11 +217,17 @@ function locationLabel(photo: Photo) {
   flex-direction: column;
   align-items: center;
   line-height: 1.3;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .fs-date-bar {
   color: rgba(255,255,255,0.85);
   font-size: 0.9em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .fs-location-bar {
@@ -229,6 +236,10 @@ function locationLabel(photo: Photo) {
   display: flex;
   align-items: center;
   gap: 0.3em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .fs-topbar :deep(.p-button-rounded) {

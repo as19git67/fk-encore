@@ -379,10 +379,16 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   line-height: 1.3;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .fullscreen-overlay .shared-fs-date {
   font-size: 0.9em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .fullscreen-overlay .shared-fs-location {
@@ -391,6 +397,10 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 0.3em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 /* ── Counter pill ────────────────────────────────────────────────────────── */
