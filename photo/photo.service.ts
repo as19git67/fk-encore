@@ -3139,7 +3139,7 @@ export async function searchPhotosLogic(
   query: string,
   limit: number = 20,
   threshold: number = 0.20
-): Promise<{ results: PhotoSearchResult[] }> {
+): Promise<{ photos: PhotoWithCuration[] }> {
   // 0. Check if query matches a known person name
   const matchedPerson = await dbFirst<{ id: number }>(
     db.select({ id: persons.id })
@@ -3160,20 +3160,39 @@ export async function searchPhotosLogic(
         ))
     );
     const uniquePhotoIds = [...new Set(personFaces.map(f => f.photo_id))];
-    if (uniquePhotoIds.length === 0) return { results: [] };
+    if (uniquePhotoIds.length === 0) return { photos: [] };
 
-    const userPhotos = await dbAll<{ id: number; filename: string; taken_at: string | null; created_at: string }>(
-      db.select({ id: photos.id, filename: photos.filename, taken_at: photos.taken_at, created_at: photos.created_at })
-        .from(photos)
-        .where(and(eq(photos.user_id, userId), inArray(photos.id, uniquePhotoIds)))
+    const rows = await dbAll<{
+      id: number; user_id: number; filename: string; original_name: string;
+      mime_type: string; size: number; hash: string | null; taken_at: string | null;
+      created_at: string | null; curation_status: string | null;
+      latitude: number | null; longitude: number | null;
+      location_city: string | null; location_country: string | null; location_name: string | null;
+      location_short: string | null; auto_crop: { x: number; y: number } | null;
+    }>(
+      db.select({
+        id: photos.id, user_id: photos.user_id, filename: photos.filename,
+        original_name: photos.original_name, mime_type: photos.mime_type,
+        size: photos.size, hash: photos.hash, taken_at: photos.taken_at,
+        created_at: photos.created_at, curation_status: photoCuration.status,
+        latitude: photos.latitude, longitude: photos.longitude,
+        location_city: photos.location_city, location_country: photos.location_country,
+        location_name: photos.location_name, location_short: photos.location_short, auto_crop: photos.auto_crop,
+      })
+      .from(photos)
+      .leftJoin(photoCuration, and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)))
+      .where(and(eq(photos.user_id, userId), inArray(photos.id, uniquePhotoIds)))
     );
     return {
-      results: userPhotos.map(p => ({
-        photoId: p.id,
-        score: 1.0,
-        filename: p.filename,
-        taken_at: p.taken_at ?? undefined,
-        created_at: p.created_at,
+      photos: rows.map(r => ({
+        id: r.id, user_id: r.user_id, filename: r.filename, original_name: r.original_name,
+        mime_type: r.mime_type, size: r.size, hash: r.hash ?? undefined,
+        taken_at: r.taken_at ?? undefined, created_at: r.created_at ?? "",
+        curation_status: (r.curation_status as CurationStatus) ?? "visible",
+        latitude: r.latitude ?? undefined, longitude: r.longitude ?? undefined,
+        location_city: r.location_city ?? undefined, location_country: r.location_country ?? undefined,
+        location_name: r.location_name ?? undefined, location_short: r.location_short ?? undefined,
+        auto_crop: r.auto_crop ?? undefined,
       })),
     };
   }
@@ -3198,7 +3217,7 @@ export async function searchPhotosLogic(
   }
 
   if (embeddingResults.length === 0) {
-    return { results: [] };
+    return { photos: [] };
   }
 
   // 2. Map numeric photo IDs and verify ownership
@@ -3206,30 +3225,49 @@ export async function searchPhotosLogic(
     .map(r => parseInt(r.photo_id, 10))
     .filter(id => !isNaN(id));
 
-  const userPhotos = await dbAll<{ id: number; filename: string; taken_at: string | null; created_at: string }>(
-    db.select({ id: photos.id, filename: photos.filename, taken_at: photos.taken_at, created_at: photos.created_at })
-      .from(photos)
-      .where(and(eq(photos.user_id, userId), inArray(photos.id, photoIdNumbers)))
+  const rows = await dbAll<{
+    id: number; user_id: number; filename: string; original_name: string;
+    mime_type: string; size: number; hash: string | null; taken_at: string | null;
+    created_at: string | null; curation_status: string | null;
+    latitude: number | null; longitude: number | null;
+    location_city: string | null; location_country: string | null; location_name: string | null;
+    location_short: string | null; auto_crop: { x: number; y: number } | null;
+  }>(
+    db.select({
+      id: photos.id, user_id: photos.user_id, filename: photos.filename,
+      original_name: photos.original_name, mime_type: photos.mime_type,
+      size: photos.size, hash: photos.hash, taken_at: photos.taken_at,
+      created_at: photos.created_at, curation_status: photoCuration.status,
+      latitude: photos.latitude, longitude: photos.longitude,
+      location_city: photos.location_city, location_country: photos.location_country,
+      location_name: photos.location_name, location_short: photos.location_short, auto_crop: photos.auto_crop,
+    })
+    .from(photos)
+    .leftJoin(photoCuration, and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)))
+    .where(and(eq(photos.user_id, userId), inArray(photos.id, photoIdNumbers)))
   );
 
-  const photoMap = new Map(userPhotos.map(p => [p.id, p]));
+  const photoMap = new Map(rows.map(r => [r.id, r]));
 
   // 3. Build results preserving embedding score order
-  const results: PhotoSearchResult[] = [];
+  const resultPhotos: PhotoWithCuration[] = [];
   for (const r of embeddingResults) {
     const id = parseInt(r.photo_id, 10);
-    const photo = photoMap.get(id);
-    if (!photo) continue; // skip photos not belonging to user
-    results.push({
-      photoId: photo.id,
-      score: r.score,
-      filename: photo.filename,
-      taken_at: photo.taken_at ?? undefined,
-      created_at: photo.created_at,
+    const row = photoMap.get(id);
+    if (!row) continue; // skip photos not belonging to user
+    resultPhotos.push({
+      id: row.id, user_id: row.user_id, filename: row.filename, original_name: row.original_name,
+      mime_type: row.mime_type, size: row.size, hash: row.hash ?? undefined,
+      taken_at: row.taken_at ?? undefined, created_at: row.created_at ?? "",
+      curation_status: (row.curation_status as CurationStatus) ?? "visible",
+      latitude: row.latitude ?? undefined, longitude: row.longitude ?? undefined,
+      location_city: row.location_city ?? undefined, location_country: row.location_country ?? undefined,
+      location_name: row.location_name ?? undefined, location_short: row.location_short ?? undefined,
+      auto_crop: row.auto_crop ?? undefined,
     });
   }
 
-  return { results };
+  return { photos: resultPhotos };
 }
 
 // ---------- Date Range Search ----------
