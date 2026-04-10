@@ -138,6 +138,18 @@ async function saveAlbumChanges() {
   }
 }
 
+const sortedAlbums = computed(() => {
+  return [...albums.value].sort((a, b) => {
+    const stateA = getEffectiveAlbumCheckState(a.id)
+    const stateB = getEffectiveAlbumCheckState(b.id)
+    // selected (true) or indeterminate (null) come before unselected (false)
+    const selA = stateA === true || stateA === null ? 1 : 0
+    const selB = stateB === true || stateB === null ? 1 : 0
+    if (selA !== selB) return selB - selA
+    return a.name.localeCompare(b.name)
+  })
+})
+
 const showNewAlbumInput = ref(false)
 const newAlbumName = ref('')
 const creatingAlbum = ref(false)
@@ -273,9 +285,9 @@ watch(() => props.photo.id, () => {
           </div>
           <div v-if="loadingAlbums" class="loading-row"><i class="pi pi-spin pi-spinner" /> Lade Alben…</div>
           <div v-else class="album-checkbox-list">
-            <div v-for="album in (limitAlbumsShown && !isAlbumsExpanded ? albums.slice(0, 3) : albums)" :key="album.id" class="album-checkbox-item">
-              <Checkbox 
-                :modelValue="getEffectiveAlbumCheckState(album.id) === true" 
+            <div v-for="album in (limitAlbumsShown && !isAlbumsExpanded ? sortedAlbums.slice(0, 3) : sortedAlbums)" :key="album.id" class="album-checkbox-item">
+              <Checkbox
+                :modelValue="getEffectiveAlbumCheckState(album.id) === true"
                 :indeterminate="getEffectiveAlbumCheckState(album.id) === null"
                 @update:modelValue="(val) => handleAlbumChange(album.id, val)"
                 :binary="true"
@@ -283,7 +295,7 @@ watch(() => props.photo.id, () => {
               />
               <label :for="'album-multi-' + album.id">{{ album.name }}</label>
             </div>
-            <div v-if="limitAlbumsShown && albums.length > 3" class="expand-toggle">
+            <div v-if="limitAlbumsShown && sortedAlbums.length > 3" class="expand-toggle">
               <Button 
                 :label="isAlbumsExpanded ? 'Weniger anzeigen' : 'Mehr anzeigen'" 
                 :icon="isAlbumsExpanded ? 'pi pi-chevron-up' : 'pi pi-chevron-down'" 
@@ -455,7 +467,7 @@ watch(() => props.photo.id, () => {
         <div class="section-label"><i class="pi pi-book" /> Alben</div>
         <div v-if="loadingAlbums" class="loading-row"><i class="pi pi-spin pi-spinner" /> Lade Alben…</div>
         <div v-if="!loadingAlbums && albums.length > 0" class="album-checkbox-list">
-          <div v-for="album in (limitAlbumsShown && !isAlbumsExpanded ? albums.slice(0, 3) : albums)" :key="album.id" class="album-checkbox-item">
+          <div v-for="album in (limitAlbumsShown && !isAlbumsExpanded ? sortedAlbums.slice(0, 3) : sortedAlbums)" :key="album.id" class="album-checkbox-item">
             <Checkbox
                 :modelValue="getEffectiveAlbumCheckState(album.id) === true"
                 :indeterminate="getEffectiveAlbumCheckState(album.id) === null"
@@ -465,7 +477,7 @@ watch(() => props.photo.id, () => {
             />
             <label :for="'album-single-' + album.id">{{ album.name }}</label>
           </div>
-          <div v-if="limitAlbumsShown && albums.length > 3" class="expand-toggle">
+          <div v-if="limitAlbumsShown && sortedAlbums.length > 3" class="expand-toggle">
             <Button
                 :label="isAlbumsExpanded ? 'Weniger anzeigen' : 'Mehr anzeigen'"
                 :icon="isAlbumsExpanded ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"
