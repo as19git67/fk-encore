@@ -9,6 +9,7 @@ public final class AuthManager: @unchecked Sendable {
 
     private let tokenKey = "auth_token"
     private let userKey = "auth_user"
+    static let savedEmailKey = "saved_login_email"
 
     var token: String? {
         KeychainHelper.loadString(forKey: tokenKey)
@@ -45,6 +46,7 @@ public final class AuthManager: @unchecked Sendable {
         let userData = try JSONEncoder().encode(response.user)
         try KeychainHelper.save(userData, forKey: userKey)
 
+        UserDefaults.standard.set(email, forKey: AuthManager.savedEmailKey)
         currentUser = response.user
         isAuthenticated = true
     }
@@ -56,6 +58,7 @@ public final class AuthManager: @unchecked Sendable {
 
         KeychainHelper.delete(forKey: tokenKey)
         KeychainHelper.delete(forKey: userKey)
+        UserDefaults.standard.removeObject(forKey: AuthManager.savedEmailKey)
         currentUser = nil
         isAuthenticated = false
     }

@@ -4,8 +4,14 @@ struct PersonsListView: View {
     @State private var viewModel = PersonsViewModel()
 
     private let columns = [
-        GridItem(.adaptive(minimum: 100, maximum: 140), spacing: 12)
+        GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 2)
     ]
+
+    private var sortedPersons: [PersonWithFaceCount] {
+        viewModel.persons.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
 
     var body: some View {
         ScrollView {
@@ -19,14 +25,14 @@ struct PersonsListView: View {
                     Text("Personen werden automatisch erkannt.")
                 }
             } else {
-                LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(viewModel.persons) { person in
+                LazyVGrid(columns: columns, spacing: 8) {
+                    ForEach(sortedPersons) { person in
                         NavigationLink(value: person.id) {
                             PersonCardView(person: person)
                         }
+                        .buttonStyle(.plain)
                     }
                 }
-                .padding()
             }
         }
         .navigationTitle("Personen")
@@ -46,31 +52,25 @@ struct PersonCardView: View {
     let person: PersonWithFaceCount
 
     var body: some View {
-        VStack(spacing: 8) {
-            // Face thumbnail
-            if let coverPhotoFilename = person.cover_filename {
-                PhotoThumbnailView(filename: coverPhotoFilename)
-                    .frame(width: 80, height: 80)
-                    .clipShape(Circle())
+        VStack(spacing: 4) {
+            if let filename = person.cover_filename {
+                PhotoThumbnailView(filename: filename)
             } else {
-                Circle()
-                    .fill(.quaternary)
-                    .frame(width: 80, height: 80)
+                Color(.quaternarySystemFill)
+                    .aspectRatio(1, contentMode: .fill)
                     .overlay {
                         Image(systemName: "person.fill")
                             .font(.title)
                             .foregroundStyle(.secondary)
                     }
+                    .clipped()
             }
 
             Text(person.name.isEmpty ? "Unbekannt" : person.name)
-                .font(.caption.bold())
+                .font(.caption)
                 .lineLimit(1)
                 .foregroundStyle(.primary)
-
-            Text("\(person.faceCount) Fotos")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+                .padding(.horizontal, 2)
         }
     }
 }
