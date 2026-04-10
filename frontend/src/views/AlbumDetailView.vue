@@ -1,8 +1,9 @@
 <script lang="ts" setup>
 import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import SelectButton from 'primevue/selectbutton'
 import Button from 'primevue/button'
+import Dialog from 'primevue/dialog'
 import Message from 'primevue/message'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import PhotoGrid from '../components/PhotoGrid.vue'
@@ -14,6 +15,7 @@ const TripMap = defineAsyncComponent(() => import('../components/TripMap.vue'))
 import {
   type AlbumWithPhotos,
   type AlbumPhoto,
+  deleteAlbum,
   getPhotoFaces,
   getAlbum,
   getPhotoLandmarks,
@@ -37,6 +39,7 @@ import type { PhotoItem } from '../composables/usePhotoGrouping'
 import { onUnmounted } from 'vue'
 
 const route = useRoute()
+const router = useRouter()
 const albumId = Number(route.params.id)
 const auth = useAuthStore()
 const serviceHealth = useServiceHealthStore()
@@ -107,6 +110,7 @@ const nextPhoto = computed(() =>
 )
 
 const canWrite = computed(() => album.value?.role === 'owner' || album.value?.role === 'contributor')
+const isOwner = computed(() => album.value?.role === 'owner')
 const canDeletePhotos = computed(() => auth.hasPermission('photos.delete'))
 const canUploadPhotos = computed(() => auth.hasPermission('photos.upload'))
 const showPersons = computed(() => auth.hasPermission('people.view'))
@@ -267,6 +271,24 @@ async function handleSetMapCover(photoId: number) {
   }
 }
 
+// ── Delete album ─────────────────────────────────────────────────────────────
+const showDeleteDialog = ref(false)
+const deletingAlbum = ref(false)
+
+async function handleDeleteAlbum() {
+  if (!album.value) return
+  deletingAlbum.value = true
+  try {
+    await deleteAlbum(album.value.id)
+    showDeleteDialog.value = false
+    router.push({ name: 'fotos-albums' })
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Löschen des Albums'
+  } finally {
+    deletingAlbum.value = false
+  }
+}
+
 // ── Grid interaction ──────────────────────────────────────────────────────────
 function handlePhotoClick(item: PhotoItem) {
   selectedIndex.value = item.index
@@ -370,6 +392,7 @@ onUnmounted(() => serviceHealth.stopPolling())
           <span :class="['role-badge', `role-badge--${album.role}`]">{{ album.role }}</span>
         </div>
         <div class="controls">
+          <Button v-if="isOwner" icon="pi pi-trash" size="small" text severity="danger" v-tooltip="'Album löschen'" @click="showDeleteDialog = true" />
           <Button v-if="effectiveCoverPhotoId && displayMode !== 'map'" icon="pi pi-image" label="Cover fokussieren" size="small" text @click="scrollToCover" />
           <div v-if="album.settings" class="control-group">
             <label>Ansicht:</label>
@@ -565,6 +588,18 @@ onUnmounted(() => serviceHealth.stopPolling())
         />
       </template>
     </FullscreenOverlay>
+
+    <!-- Delete album confirmation dialog -->
+    <Dialog v-model:visible="showDeleteDialog" header="Album löschen" :modal="true" style="width: min(100%, 28rem)">
+      <div class="dialog-body">
+        <p>Willst du dieses Album wirklich löschen?</p>
+        <p class="muted">Es werden keine Fotos gelöscht. Sie bleiben unter <b>Alle Fotos</b> erhalten.</p>
+      </div>
+      <template #footer>
+        <Button label="Abbrechen" text @click="showDeleteDialog = false" />
+        <Button label="Löschen" severity="danger" :loading="deletingAlbum" @click="handleDeleteAlbum" />
+      </template>
+    </Dialog>
 
   </div>
 </template>
@@ -828,5 +863,9 @@ onUnmounted(() => serviceHealth.stopPolling())
   .album-info-block__description { flex: 0 0 auto; min-width: unset; }
   .album-info-block__description-text--empty { display: none; }
 }
+
+/* ── Delete dialog ──────────────────────────────────────────────────────── */
+.dialog-body { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.5rem 0; }
+.dialog-body .muted { color: var(--p-text-muted-color); font-size: 0.9rem; }
 
 </style>
