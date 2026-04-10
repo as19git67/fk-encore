@@ -1,10 +1,11 @@
 import { api, APIError } from "encore.dev/api";
 import type {
   LoginRequest, LoginResponse, LogoutResponse,
+  RefreshRequest, RefreshResponse,
   RequestPasswordResetRequest, RequestPasswordResetResponse,
   ResetPasswordRequest, ResetPasswordResponse,
 } from "../db/types";
-import { loginLogic, logoutLogic, requestPasswordResetLogic, resetPasswordLogic } from "./auth.service";
+import { loginLogic, logoutLogic, refreshTokenLogic, requestPasswordResetLogic, resetPasswordLogic } from "./auth.service";
 import { getAuthToken } from "./auth-handler";
 
 /** Login — no auth required */
@@ -28,12 +29,27 @@ export const login = api(
 /** Logout — auth required */
 export const logout = api(
   { expose: true, auth: true, method: "POST", path: "/auth/logout" },
-  async (): Promise<LogoutResponse> => {
+  async (req: { refreshToken?: string }): Promise<LogoutResponse> => {
     const token = getAuthToken();
     if (!token) {
       throw APIError.unauthenticated("no token provided");
     }
-    return await logoutLogic(token);
+    return await logoutLogic(token, req.refreshToken);
+  }
+);
+
+/** Refresh — exchange a valid refresh token for a new token pair (no auth required) */
+export const refresh = api(
+  { expose: true, method: "POST", path: "/auth/refresh" },
+  async (req: RefreshRequest): Promise<RefreshResponse> => {
+    try {
+      return await refreshTokenLogic(req);
+    } catch (err: any) {
+      if (err.message?.includes("invalid or expired")) {
+        throw APIError.unauthenticated(err.message);
+      }
+      throw err;
+    }
   }
 );
 

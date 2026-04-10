@@ -91,6 +91,17 @@ export interface LoginRequest {
 export interface LoginResponse {
   user: UserWithRolesAndPermissions;
   token: string;
+  refreshToken: string;
+}
+
+export interface RefreshRequest {
+  refreshToken: string;
+}
+
+export interface RefreshResponse {
+  token: string;
+  refreshToken: string;
+  user: UserWithRolesAndPermissions;
 }
 
 export interface LogoutResponse {

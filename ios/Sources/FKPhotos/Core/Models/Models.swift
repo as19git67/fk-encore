@@ -39,6 +39,7 @@ struct LoginRequest: Codable, Sendable {
 struct LoginResponse: Codable, Sendable {
     let user: UserWithRolesAndPermissions
     let token: String
+    let refreshToken: String
 }
 
 struct RegisterRequest: Codable, Sendable {

@@ -27,6 +27,7 @@ import type {
   DeleteResponse,
 } from "../db/types";
 import { toUser, getRolesForUser, getPermissionsForUser } from "./user.service";
+import { createSessionTokens } from "./auth.service";
 
 const nowSql = sql`NOW()`
 
@@ -105,16 +106,8 @@ function toPasskeyInfo(row: typeof passkeys.$inferSelect): PasskeyInfo {
   };
 }
 
-async function createSession(userId: number): Promise<string> {
-  const token = crypto.randomBytes(32).toString("base64url");
-  await dbExec(
-    db.insert(sessions).values({
-      token,
-      user_id: userId,
-      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-    })
-  );
-  return token;
+async function createSession(userId: number): Promise<{ token: string; refreshToken: string }> {
+  return createSessionTokens(userId);
 }
 
 // ---------- Registration ----------
@@ -276,7 +269,7 @@ export async function passkeyAuthVerifyLogic(
     db.select().from(users).where(eq(users.id, passkey.user_id))
   ))!;
 
-  const token = await createSession(userRow.id);
+  const { token, refreshToken } = await createSession(userRow.id);
 
   return {
     user: {
@@ -285,6 +278,7 @@ export async function passkeyAuthVerifyLogic(
       permissions: await getPermissionsForUser(userRow.id),
     },
     token,
+    refreshToken,
   };
 }
 
