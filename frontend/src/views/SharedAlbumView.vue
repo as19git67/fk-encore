@@ -187,18 +187,20 @@ onUnmounted(() => {
       />
 
       <!-- Grid mode -->
-      <div v-else class="photo-grid">
-        <div
-          v-for="photo in albumPhotosAsPhoto"
-          :key="photo.id"
-          class="grid-item"
-          @click="openFullscreen(photo)"
-        >
-          <HeicImage
-            :src="getPhotoUrl(photo.filename, 400)"
-            :alt="photo.original_name"
-            objectFit="cover"
-          />
+      <div v-else class="photo-grid-scroll">
+        <div class="photo-grid">
+          <div
+            v-for="photo in albumPhotosAsPhoto"
+            :key="photo.id"
+            class="grid-item"
+            @click="openFullscreen(photo)"
+          >
+            <HeicImage
+              :src="getPhotoUrl(photo.filename, 400)"
+              :alt="photo.original_name"
+              objectFit="cover"
+            />
+          </div>
         </div>
       </div>
     </template>
@@ -292,23 +294,37 @@ onUnmounted(() => {
   color: var(--p-text-muted-color);
 }
 
-.photo-grid {
+.photo-grid-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--grid-min-col), 1fr));
-  grid-auto-rows: min-content;
-  align-content: start;
-  gap: var(--grid-gap-compact);
   padding: var(--grid-gap-compact);
 }
 
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--grid-min-col), 1fr));
+  gap: var(--grid-gap-compact);
+}
+
+@media (max-width: 768px) {
+  .photo-grid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: var(--spacing-sm, 4px);
+  }
+
+  .photo-grid-scroll {
+    padding: var(--spacing-sm, 4px);
+  }
+}
+
 .grid-item {
+  position: relative;
   aspect-ratio: 1;
   overflow: hidden;
   cursor: pointer;
   border-radius: var(--radius-sm);
+  background: var(--p-content-hover-background, #eee);
 }
 
 .grid-item :deep(.heic-image-container) {
@@ -316,8 +332,10 @@ onUnmounted(() => {
   height: 100%;
 }
 
-.grid-item:hover {
-  opacity: 0.85;
+@media (hover: hover) {
+  .grid-item:hover {
+    opacity: 0.85;
+  }
 }
 
 .info-text {
