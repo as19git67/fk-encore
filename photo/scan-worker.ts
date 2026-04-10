@@ -43,6 +43,11 @@ import {
   startHealthChecks,
   type ExternalServiceName,
 } from "./service-health";
+import {
+  isUnderPressure,
+  startPressureMonitor,
+  WORKER_PRESSURE_DELAY_MS,
+} from "./event-loop-pressure";
 
 const POLL_INTERVAL_MS = 30_000; // fallback poll when idle
 
@@ -66,19 +71,24 @@ class ScanWorker {
 
   /**
    * Called after enqueueing new work or on a timer. Fills concurrency slots.
-   * Only reschedules immediately if a job was actually processed; otherwise
-   * the worker goes idle and waits for the next timer tick or triggerWorkers().
-   * This prevents a busy-loop of DB queries when the queue is empty.
+   * Only reschedules if a job was actually processed; otherwise the worker
+   * goes idle and waits for the next timer tick or triggerWorkers().
+   *
+   * Between jobs the worker always yields to the event loop so that
+   * latency-sensitive requests (health checks, UI queries) are not starved.
+   * When the event loop is under pressure the worker adds an extra delay
+   * to let the system recover before processing the next job.
    */
   tick(): void {
     while (this.running < this.concurrency) {
       this.running++;
       this.processNext().then((hadWork) => {
         this.running--;
-        // Only chase more work immediately when there was something to process.
-        // If the queue was empty, stop here — the periodic timer will wake us.
         if (hadWork && this.running < this.concurrency) {
-          this.tick();
+          // Yield to the event loop before processing the next job.
+          // Under pressure, add a longer delay so health checks get through.
+          const delay = isUnderPressure() ? WORKER_PRESSURE_DELAY_MS : 0;
+          setTimeout(() => this.tick(), delay);
         }
       }).catch(() => {
         this.running--;
@@ -94,6 +104,13 @@ class ScanWorker {
    * work and waits for the service-recovery callback or the next timer tick.
    */
   private async processNext(): Promise<boolean> {
+    // Pre-check: if the event loop is under pressure, skip this cycle
+    // so that health checks and other latency-sensitive requests can be
+    // served in time.  The periodic timer will wake us once pressure drops.
+    if (isUnderPressure()) {
+      return false;
+    }
+
     // Pre-check: if the required service is down, don't even dequeue.
     // This avoids the dequeue→defer→re-dequeue busy-loop entirely.
     const dep = SERVICE_DEPENDENCY[this.service];
@@ -244,6 +261,10 @@ export function triggerWorkers(): void {
 export async function startWorkers(): Promise<void> {
   // Reset jobs that were stuck in 'processing' state when the server last stopped
   await resetStuckJobs();
+
+  // Start event-loop pressure monitor so workers can back off when
+  // the server is exhausted, giving health checks priority.
+  startPressureMonitor();
 
   // Start external-service health-checks first.
   // Workers will defer (not fail) jobs when a required service is down.
