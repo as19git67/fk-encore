@@ -10,6 +10,10 @@ const props = defineProps<{
   prevPhoto: Photo | null
   nextPhoto: Photo | null
   canDelete?: boolean
+  /** Control visibility of the details (ⓘ) button. Default: true. */
+  showDetailsButton?: boolean
+  /** When true the details icon switches to a close icon (✕). Default: false. */
+  detailsActive?: boolean
   /** Optional slot content rendered inside the fullscreen image (e.g. face box) */
 }>()
 
@@ -117,9 +121,11 @@ function locationLabel(photo: Photo) {
         <div class="fs-toolbar">
           <slot name="topbar-actions">
             <Button
-              icon="pi pi-info-circle" rounded text severity="secondary"
+              v-if="props.showDetailsButton !== false"
+              :icon="props.detailsActive ? 'pi pi-times' : 'pi pi-info-circle'"
+              rounded text severity="secondary"
               @click="emit('show-details')"
-              v-tooltip.bottom="'Details'"
+              v-tooltip.bottom="props.detailsActive ? 'Schließen' : 'Details'"
             />
             <Button
               v-if="canDelete"

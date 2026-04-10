@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import { useRoute } from 'vue-router'
-import Button from 'primevue/button'
 import Message from 'primevue/message'
 import HeicImage from '../components/HeicImage.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
@@ -231,6 +230,8 @@ onUnmounted(() => {
       :prevPhoto="prevPhoto"
       :nextPhoto="nextPhoto"
       :canDelete="false"
+      :showDetailsButton="showInfoButton"
+      :detailsActive="showInfo"
       @close="closeFullscreen"
       @prev="goPrev"
       @next="goNext"
@@ -244,16 +245,6 @@ onUnmounted(() => {
             {{ formatSharedLocation(currentPhoto) }}
           </div>
         </div>
-      </template>
-      <template #topbar-actions>
-        <Button
-          v-if="showInfoButton"
-          :icon="showInfo ? 'pi pi-times' : 'pi pi-info-circle'"
-          rounded
-          text
-          severity="secondary"
-          @click="toggleInfo"
-        />
       </template>
       <template #bottom-bar>
         <div v-if="fullscreenPhotos.length > 1 && !showInfo" class="fs-counter-pill">
