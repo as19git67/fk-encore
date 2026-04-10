@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import db from "../db/database";
-import { sessions, rolePermissions, userRoles, users, permissions, roles } from "../db/schema";
+import { sessions, refreshTokens, rolePermissions, userRoles, users, permissions, roles } from "../db/schema";
 import { loginLogic, logoutLogic, validateToken } from "./auth.service";
 import { createUserLogic, getPermissionsForUser } from "./user.service";
 import { createRoleLogic } from "../role/role.service";
@@ -18,6 +18,7 @@ async function seedPermissions() {
 }
 
 beforeEach(async () => {
+  await db.delete(refreshTokens);
   await db.delete(sessions);
   await db.delete(rolePermissions);
   await db.delete(userRoles);
