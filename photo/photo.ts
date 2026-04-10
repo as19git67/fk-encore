@@ -646,13 +646,16 @@ export const getPhotoFaces = api(
 
 // ========== Service Health ==========
 
-import { getAllServiceHealthStatuses, type ServiceHealthStatus } from "./service-health";
+import { getAllServiceHealthStatuses, getServerPressureStatus, type ServiceHealthStatus, type ServerPressureStatus } from "./service-health";
 
 export const getExternalServiceHealth = api(
   { expose: true, method: "GET", path: "/photos/service-health", auth: true },
-  async (): Promise<{ services: ServiceHealthStatus[] }> => {
+  async (): Promise<{ services: ServiceHealthStatus[]; serverPressure: ServerPressureStatus }> => {
     checkModule();
-    return { services: getAllServiceHealthStatuses() };
+    return {
+      services: getAllServiceHealthStatuses(),
+      serverPressure: getServerPressureStatus(),
+    };
   }
 );
 

@@ -565,7 +565,12 @@ export interface ExternalServiceHealth {
   lastError: string | null
 }
 
+export interface ServerPressureStatus {
+  underPressure: boolean
+  eventLoopLagMs: number
+}
+
 export function getExternalServiceHealth() {
-  return apiFetch<{ services: ExternalServiceHealth[] }>('/photos/service-health')
+  return apiFetch<{ services: ExternalServiceHealth[]; serverPressure: ServerPressureStatus }>('/photos/service-health')
 }
 
