@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import { useRoute } from 'vue-router'
+import Button from 'primevue/button'
 import Message from 'primevue/message'
 import HeicImage from '../components/HeicImage.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
@@ -78,6 +79,15 @@ function toggleInfo() {
 const currentDescription = computed<string>(() => {
   return currentPhoto.value?.description?.trim() ?? ''
 })
+
+/** True when the current photo has details beyond date/time (location or description). */
+const hasExtraDetails = computed<boolean>(() => {
+  if (!currentPhoto.value) return false
+  return !!(formatSharedLocation(currentPhoto.value) || currentDescription.value)
+})
+
+/** Show the info button when there are extra details OR the panel is already open. */
+const showInfoButton = computed(() => hasExtraDetails.value || showInfo.value)
 
 /** Maps URL — Apple Maps on Apple devices, Google Maps elsewhere. */
 const isApple = /iPhone|iPad|iPod|Mac/.test(navigator.userAgent)
@@ -230,6 +240,16 @@ onUnmounted(() => {
             {{ formatSharedLocation(currentPhoto) }}
           </div>
         </div>
+      </template>
+      <template #topbar-actions>
+        <Button
+          v-if="showInfoButton"
+          :icon="showInfo ? 'pi pi-times' : 'pi pi-info-circle'"
+          rounded
+          text
+          severity="secondary"
+          @click="toggleInfo"
+        />
       </template>
       <template #bottom-bar>
         <div v-if="fullscreenPhotos.length > 1 && !showInfo" class="fs-counter-pill">
