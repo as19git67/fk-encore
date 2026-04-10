@@ -453,6 +453,8 @@ onUnmounted(() => serviceHealth.stopPolling())
       :prevPhoto="prevPersonPhoto"
       :nextPhoto="nextPersonPhoto"
       :canDelete="canDelete"
+      :showDetailsButton="true"
+      :detailsActive="false"
       @close="isFullscreen = false"
       @prev="selectedIndex--"
       @next="selectedIndex++"
