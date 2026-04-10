@@ -222,7 +222,6 @@ function locationLabel(photo: Photo) {
 }
 
 .fs-date-bar {
-  color: rgba(255,255,255,0.85);
   font-size: 0.9em;
   white-space: nowrap;
   overflow: hidden;
@@ -231,7 +230,7 @@ function locationLabel(photo: Photo) {
 }
 
 .fs-location-bar {
-  color: rgba(255,255,255,0.6);
+  opacity: 0.7;
   font-size: 0.75em;
   display: flex;
   align-items: center;
