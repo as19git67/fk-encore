@@ -81,16 +81,13 @@ const currentDescription = computed<string>(() => {
 })
 
 /**
- * True when the info panel would show something beyond what the topbar
- * already displays (date + location text). That is:
- * – photo has GPS coordinates (the panel turns location into a map link), OR
- * – photo has a description.
+ * True when the info panel provides value beyond what the topbar already
+ * shows (date + location text). Currently that means: the photo has a
+ * description. Date, location and map link are shown *inside* the panel
+ * when it opens, but they alone don't justify showing the button.
  */
 const hasExtraDetails = computed<boolean>(() => {
-  const p = currentPhoto.value
-  if (!p) return false
-  const hasCoords = p.latitude != null && p.longitude != null
-  return !!(hasCoords || currentDescription.value)
+  return !!currentDescription.value
 })
 
 /** Show the info button when there are extra details OR the panel is already open. */
