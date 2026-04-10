@@ -79,13 +79,11 @@ const currentDescription = computed<string>(() => {
   return currentPhoto.value?.description?.trim() ?? ''
 })
 
-/** geo: URI for the current photo so tapping opens the device's maps app. */
-const currentGeoUri = computed<string | null>(() => {
+/** Google Maps URL for the current photo's coordinates — works cross-platform. */
+const currentMapUrl = computed<string | null>(() => {
   const p = currentPhoto.value
   if (!p || p.latitude == null || p.longitude == null) return null
-  const label = formatSharedLocation(p)
-  const q = label ? `?q=${encodeURIComponent(label)}` : ''
-  return `geo:${p.latitude},${p.longitude}${q}`
+  return `https://www.google.com/maps/search/?api=1&query=${p.latitude},${p.longitude}`
 })
 
 // Reset panel when leaving fullscreen by other means (e.g., swipe to close)
@@ -245,7 +243,7 @@ onUnmounted(() => {
             </div>
             <div v-if="formatSharedLocation(currentPhoto)" class="info-row info-location">
               <i class="pi pi-map-marker" />
-              <a v-if="currentGeoUri" :href="currentGeoUri" class="info-location-link">
+              <a v-if="currentMapUrl" :href="currentMapUrl" target="_blank" rel="noopener" class="info-location-link">
                 {{ formatSharedLocation(currentPhoto) }}
               </a>
               <span v-else>{{ formatSharedLocation(currentPhoto) }}</span>
