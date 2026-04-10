@@ -24,10 +24,13 @@ export const defaultHandlers = [
 
   // ── Auth ───────────────────────────────────────────────────────────────────
   http.post('/api/auth/login', () =>
-    HttpResponse.json({ user: MOCK_USER, token: 'mock-token' }),
+    HttpResponse.json({ user: MOCK_USER, token: 'mock-token', refreshToken: 'mock-refresh-token' }),
   ),
   http.post('/api/auth/logout', () =>
     HttpResponse.json({ success: true, message: 'Abgemeldet' }),
+  ),
+  http.post('/api/auth/refresh', () =>
+    HttpResponse.json({ user: MOCK_USER, token: 'mock-token-refreshed', refreshToken: 'mock-refresh-token-refreshed' }),
   ),
   http.post('/api/auth/password', () => HttpResponse.json({ success: true })),
 

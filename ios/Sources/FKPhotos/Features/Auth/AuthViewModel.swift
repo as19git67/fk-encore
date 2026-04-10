@@ -3,7 +3,7 @@ import SwiftUI
 
 @Observable
 final class AuthViewModel {
-    var email = ""
+    var email = UserDefaults.standard.string(forKey: AuthManager.savedEmailKey) ?? ""
     var password = ""
     var name = ""
     var errorMessage: String?
