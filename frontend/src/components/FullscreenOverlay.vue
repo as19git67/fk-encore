@@ -194,6 +194,7 @@ function locationLabel(photo: Photo) {
   top: 0;
   left: 0;
   right: 0;
+  height: 2.75em;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -231,8 +232,8 @@ function locationLabel(photo: Photo) {
 }
 
 .fs-topbar :deep(.p-button-rounded) {
-  width: 2.25rem;
-  height: 2.25rem;
+  width: 2em;
+  height: 2em;
 }
 
 .fs-toolbar {
