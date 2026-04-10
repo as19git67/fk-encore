@@ -74,11 +74,18 @@ function toggleInfo() {
   showInfo.value = !showInfo.value
 }
 
-/** Per-photo description if the backend returned one, else the album description. */
+/** Per-photo description (only — no album fallback). */
 const currentDescription = computed<string>(() => {
-  const photoDesc = currentPhoto.value?.description?.trim()
-  if (photoDesc) return photoDesc
-  return album.value?.description?.trim() ?? ''
+  return currentPhoto.value?.description?.trim() ?? ''
+})
+
+/** geo: URI for the current photo so tapping opens the device's maps app. */
+const currentGeoUri = computed<string | null>(() => {
+  const p = currentPhoto.value
+  if (!p || p.latitude == null || p.longitude == null) return null
+  const label = formatSharedLocation(p)
+  const q = label ? `?q=${encodeURIComponent(label)}` : ''
+  return `geo:${p.latitude},${p.longitude}${q}`
 })
 
 // Reset panel when leaving fullscreen by other means (e.g., swipe to close)
@@ -238,7 +245,10 @@ onUnmounted(() => {
             </div>
             <div v-if="formatSharedLocation(currentPhoto)" class="info-row info-location">
               <i class="pi pi-map-marker" />
-              <span>{{ formatSharedLocation(currentPhoto) }}</span>
+              <a v-if="currentGeoUri" :href="currentGeoUri" class="info-location-link">
+                {{ formatSharedLocation(currentPhoto) }}
+              </a>
+              <span v-else>{{ formatSharedLocation(currentPhoto) }}</span>
             </div>
             <div v-if="currentDescription" class="info-row info-description">
               <i class="pi pi-align-left" />
@@ -431,6 +441,15 @@ onUnmounted(() => {
 
 .info-location {
   color: rgba(255, 255, 255, 0.8);
+}
+
+.info-location-link {
+  color: rgba(120, 180, 255, 0.95);
+  text-decoration: none;
+}
+
+.info-location-link:active {
+  opacity: 0.7;
 }
 
 .info-description {
