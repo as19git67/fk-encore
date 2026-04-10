@@ -171,7 +171,7 @@ async function loadData() {
   loading.value = true
   try {
     album.value = await getAlbum(albumId)
-    selectedIndex.value = album.value.photos.length > 0 ? albumPhotos.value.length - 1 : -1
+    selectedIndex.value = album.value.photos.length > 0 ? 0 : -1
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden des Albums'
   } finally {
