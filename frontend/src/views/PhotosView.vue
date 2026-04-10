@@ -875,6 +875,8 @@ onUnmounted(() => {
       :prevPhoto="prevPhoto"
       :nextPhoto="nextPhoto"
       :canDelete="canDelete"
+      :showDetailsButton="true"
+      :detailsActive="false"
       @close="isFullscreen = false"
       @prev="selectedIndex--"
       @next="selectedIndex++"
