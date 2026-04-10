@@ -322,8 +322,13 @@ onUnmounted(() => {
 }
 
 .photo-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(var(--grid-min-col), 1fr));
+  grid-auto-rows: min-content;
+  align-content: start;
   gap: var(--grid-gap-compact);
 }
 
