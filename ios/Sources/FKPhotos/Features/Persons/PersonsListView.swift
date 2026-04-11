@@ -8,9 +8,9 @@ struct PersonsListView: View {
     ]
 
     private var sortedPersons: [PersonWithFaceCount] {
-        viewModel.persons.sorted {
-            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-        }
+        viewModel.persons
+            .filter { $0.faceCount > 1 }
+            .sorted { $0.faceCount > $1.faceCount }
     }
 
     var body: some View {
@@ -70,6 +70,11 @@ struct PersonCardView: View {
                 .font(.caption)
                 .lineLimit(1)
                 .foregroundStyle(.primary)
+                .padding(.horizontal, 2)
+
+            Text("\(person.faceCount) Fotos")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
                 .padding(.horizontal, 2)
         }
     }

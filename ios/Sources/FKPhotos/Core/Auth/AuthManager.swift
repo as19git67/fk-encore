@@ -103,7 +103,6 @@ public final class AuthManager: @unchecked Sendable {
         KeychainHelper.delete(forKey: tokenKey)
         KeychainHelper.delete(forKey: refreshTokenKey)
         KeychainHelper.delete(forKey: userKey)
-        UserDefaults.standard.removeObject(forKey: AuthManager.savedEmailKey)
         Task { @MainActor in
             currentUser = nil
             isAuthenticated = false
