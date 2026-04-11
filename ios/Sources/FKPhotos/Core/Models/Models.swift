@@ -241,6 +241,27 @@ struct GetAlbumSharesResponse: Codable, Sendable {
     let publicLink: AlbumPublicLink?
 }
 
+// MARK: - Timeline
+
+struct TimelineMonth: Codable, Identifiable, Hashable, Sendable {
+    let month: Int
+    let count: Int
+    let cover_filename: String?
+    var id: Int { month }
+}
+
+struct TimelineYear: Codable, Identifiable, Hashable, Sendable {
+    let year: Int
+    let count: Int
+    let cover_filename: String?
+    let months: [TimelineMonth]
+    var id: Int { year }
+}
+
+struct PhotoTimelineResponse: Codable, Sendable {
+    let years: [TimelineYear]
+}
+
 // MARK: - API Response Wrappers
 
 struct ListPhotosResponse: Codable, Sendable {
