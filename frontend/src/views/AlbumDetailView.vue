@@ -29,7 +29,8 @@ import {
   type Photo,
   updatePhotoCuration,
   updateAlbum,
-  updateAlbumUserSettings
+  updateAlbumUserSettings,
+  batchFavoritePhotos
 } from '../api/photos'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
@@ -128,8 +129,12 @@ const mapFullscreenIndex = ref(0)
 const isMapFullscreen = ref(false)
 
 function handleMapFullscreen(stopPhotos: Photo[], startIndex: number) {
-  mapFullscreenPhotos.value = stopPhotos
-  mapFullscreenIndex.value = startIndex
+  // Use all album photos so left/right navigation works across stops
+  const allPhotos = albumPhotos.value
+  const targetPhoto = stopPhotos[startIndex]
+  const globalIndex = targetPhoto ? allPhotos.findIndex(p => p.id === targetPhoto.id) : -1
+  mapFullscreenPhotos.value = allPhotos
+  mapFullscreenIndex.value = globalIndex >= 0 ? globalIndex : 0
   isMapFullscreen.value = true
 }
 
@@ -358,18 +363,37 @@ async function saveDescription() {
 }
 
 const viewOptions = [
-  { label: 'Alle Fotos', value: 'all' },
-  { label: 'Meine Favoriten', value: 'favorites' },
-  { label: 'Gruppen-Highlights', value: 'consensus' },
+  { label: 'Alle Fotos', value: 'all', icon: 'pi pi-images' },
+  { label: 'Meine Favoriten', value: 'favorites', icon: 'pi pi-heart' },
+  { label: 'Gruppen-Highlights', value: 'consensus', icon: 'pi pi-star' },
+  { label: 'Favoriten anderer', value: 'others-favorites', icon: 'pi pi-users' },
 ]
 
-// Show consensus option only for shared albums
+// Show shared-only options only for shared albums
 const availableViewOptions = computed(() => {
   const isShared = album.value && album.value.role !== 'owner'
     || (album.value?.photos?.some((p: AlbumPhoto) => p.curation_stats && p.curation_stats.member_count > 1))
   if (isShared) return viewOptions
-  return viewOptions.filter(o => o.value !== 'consensus')
+  return viewOptions.filter(o => o.value !== 'consensus' && o.value !== 'others-favorites')
 })
+
+// Batch favorite all visible photos (for "others-favorites" view)
+const batchFavoriting = ref(false)
+
+async function handleBatchFavoriteAll() {
+  if (!album.value) return
+  const photoIds = albumPhotos.value.map(p => p.id)
+  if (photoIds.length === 0) return
+  batchFavoriting.value = true
+  try {
+    await batchFavoritePhotos(albumId, photoIds)
+    await loadData()
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Favorisieren'
+  } finally {
+    batchFavoriting.value = false
+  }
+}
 // ── Mobile drawer state ───────────────────────────────────────────────────────
 const mobileTimelineOpen = ref(false)
 const mobileSidebarOpen = ref(false)
@@ -388,15 +412,56 @@ onUnmounted(() => serviceHealth.stopPolling())
     <div v-if="album" class="subheader">
       <div class="header">
         <div class="header-left">
-          <h1 class="title">{{ album.name }}</h1>
-          <span :class="['role-badge', `role-badge--${album.role}`]">{{ album.role }}</span>
+          <div class="header-left__title-row">
+            <h1 class="title">{{ album.name }}</h1>
+            <span :class="['role-badge', `role-badge--${album.role}`]">{{ album.role }}</span>
+            <div class="album-info-block">
+              <div v-if="displayMode !== 'map'" class="album-info-block__description">
+                <div v-if="!editingDescription" class="album-info-block__description-content">
+                  <span :class="{ 'album-info-block__description-text--empty': !album.description }" class="album-info-block__description-text">
+                    {{ album.description || 'Keine Beschreibung' }}
+                  </span>
+                  <Button v-if="canWrite" icon="pi pi-pencil" size="small" text @click="startEditDesc" class="album-info-block__edit-btn" />
+                </div>
+                <div v-else class="album-info-block__edit">
+                  <textarea v-model="descDraft" class="p-inputtextarea p-inputtext" rows="2" />
+                  <div class="album-info-block__edit-actions">
+                    <Button :loading="updatingAlbum" icon="pi pi-check" size="small" @click="saveDescription" />
+                    <Button :disabled="updatingAlbum" icon="pi pi-times" size="small" text @click="editingDescription = false" />
+                  </div>
+                </div>
+              </div>
+              <div class="album-info-block__meta">
+                <span class="album-info-block__meta-text">
+                  {{ album.photo_count }} {{ album.photo_count === 1 ? 'Foto' : 'Fotos' }}
+                  <template v-if="album.oldest_photo_at && album.newest_photo_at">
+                    • {{ new Date(album.oldest_photo_at).toLocaleDateString() }} – {{ new Date(album.newest_photo_at).toLocaleDateString() }}
+                  </template>
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="controls">
           <Button v-if="isOwner" icon="pi pi-trash" size="small" text severity="danger" v-tooltip="'Album löschen'" @click="showDeleteDialog = true" />
           <Button v-if="effectiveCoverPhotoId && displayMode !== 'map'" icon="pi pi-image" label="Cover fokussieren" size="small" text @click="scrollToCover" />
           <div v-if="album.settings" class="control-group">
             <label>Ansicht:</label>
-            <SelectButton v-model="album.settings.active_view" :options="availableViewOptions" optionLabel="label" optionValue="value" @change="handleSettingsChange" />
+            <SelectButton v-model="album.settings.active_view" :options="availableViewOptions" optionValue="value" @change="handleSettingsChange">
+              <template #option="{ option }">
+                <i :class="option.icon" class="view-icon" />
+                <span class="view-label">{{ option.label }}</span>
+              </template>
+            </SelectButton>
+            <Button
+              v-if="album.settings?.active_view === 'others-favorites' && albumPhotos.length > 0"
+              icon="pi pi-heart-fill"
+              :label="`Alle favorisieren (${albumPhotos.length})`"
+              size="small"
+              severity="warn"
+              :loading="batchFavoriting"
+              @click="handleBatchFavoriteAll"
+            />
           </div>
         </div>
       </div>
@@ -406,32 +471,6 @@ onUnmounted(() => serviceHealth.stopPolling())
 
     <div v-if="loading && !album" class="info-text">
       <i class="pi pi-spin pi-spinner" /> Album wird geladen…
-    </div>
-
-    <div v-if="album" class="album-info-block">
-      <div v-if="displayMode !== 'map'" class="album-info-block__description">
-        <div v-if="!editingDescription" class="album-info-block__description-content">
-          <span :class="{ 'album-info-block__description-text--empty': !album.description }" class="album-info-block__description-text">
-            {{ album.description || 'Keine Beschreibung' }}
-          </span>
-          <Button v-if="canWrite" icon="pi pi-pencil" size="small" text @click="startEditDesc" class="album-info-block__edit-btn" />
-        </div>
-        <div v-else class="album-info-block__edit">
-          <textarea v-model="descDraft" class="p-inputtextarea p-inputtext" rows="2" />
-          <div class="album-info-block__edit-actions">
-            <Button :loading="updatingAlbum" icon="pi pi-check" size="small" @click="saveDescription" />
-            <Button :disabled="updatingAlbum" icon="pi pi-times" size="small" text @click="editingDescription = false" />
-          </div>
-        </div>
-      </div>
-      <div class="album-info-block__meta">
-        <span class="album-info-block__meta-text">
-          {{ album.photo_count }} {{ album.photo_count === 1 ? 'Foto' : 'Fotos' }}
-          <template v-if="album.oldest_photo_at && album.newest_photo_at">
-            • {{ new Date(album.oldest_photo_at).toLocaleDateString() }} – {{ new Date(album.newest_photo_at).toLocaleDateString() }}
-          </template>
-        </span>
-      </div>
     </div>
 
     <!-- Map mode -->
@@ -626,6 +665,7 @@ onUnmounted(() => serviceHealth.stopPolling())
 
 .header {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   padding: 1rem;
@@ -633,7 +673,8 @@ onUnmounted(() => serviceHealth.stopPolling())
   border-bottom: 1px solid var(--p-content-border-color);
 }
 
-.header-left { display: flex; align-items: center; gap: 1rem; }
+.header-left { display: flex; min-width: 0; }
+.header-left__title-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 
 .role-badge {
   font-size: 0.75rem;
@@ -655,16 +696,16 @@ onUnmounted(() => serviceHealth.stopPolling())
 .control-group { display: flex; align-items: center; gap: 0.5rem; }
 .control-group label { font-size: 0.85rem; color: var(--p-text-muted-color); }
 
-/* ── Album info block ────────────────────────────────────────────────────── */
+/* ── Album info block (inside header-left) ─────────────────────────────── */
 .album-info-block {
-  flex-shrink: 0;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 1rem;
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--p-content-border-color);
+  gap: 0.5rem 1rem;
 }
+
+/* ── View icon in SelectButton ─────────────────────────────────────────── */
+.view-icon { margin-right: 0.4rem; font-size: 0.9rem; }
 
 .album-info-block__description {
   flex: 1 1 24rem;
@@ -820,6 +861,9 @@ onUnmounted(() => serviceHealth.stopPolling())
 
   .subheader .controls :deep(.p-button-label) { display: none; }
   .subheader .controls :deep(.p-button) { padding: 0.5rem; min-width: 2.25rem; }
+  /* Icon-only for all standalone buttons inside control-group on mobile */
+  .control-group > :deep(.p-button .p-button-label) { display: none; }
+  .control-group > :deep(.p-button) { padding: 0.35rem; min-width: 2rem; }
 
   /* Compact sticky header on mobile */
   .header {
@@ -827,7 +871,7 @@ onUnmounted(() => serviceHealth.stopPolling())
     padding: 0.35rem 0.65rem;
     gap: 0.2rem;
   }
-  .header-left { flex: 1; min-width: 0; }
+  .header-left { flex: 1; min-width: 0; gap: 0.1rem; }
   .album-detail-view .title { font-size: 1.1em; }
 
   /* Flatten .controls into the header flex container so icon-buttons stay
@@ -846,19 +890,26 @@ onUnmounted(() => serviceHealth.stopPolling())
   .control-group label { display: none; }
   .subheader .control-group :deep(.p-selectbutton) { width: 100%; }
   .subheader .control-group :deep(.p-selectbutton .p-button) {
-    flex: 1;
-    padding: 0.35rem 0.4rem;
+    flex: 0 1 auto;
+    padding: 0.35rem 0.5rem;
     font-size: 0.78rem;
     min-width: unset;
   }
-  .subheader .control-group :deep(.p-selectbutton .p-button-label) {
-    display: inline;
+  /* Active button gets more space to show icon + label */
+  .subheader .control-group :deep(.p-selectbutton .p-button.p-highlight) {
+    flex: 1 1 auto;
+  }
+  /* Hide labels on non-active view buttons, show only icon */
+  .subheader .control-group :deep(.p-selectbutton .p-button:not(.p-highlight)) .view-label {
+    display: none;
+  }
+  .subheader .control-group :deep(.p-selectbutton .p-button:not(.p-highlight)) .view-icon {
+    margin-right: 0;
   }
 
-  /* Compact album-info-block */
+  /* Compact album-info-block inside header-left */
   .album-info-block {
-    padding: 0.3rem 0.65rem;
-    gap: 0.4rem;
+    gap: 0.3rem;
   }
   .album-info-block__description { flex: 0 0 auto; min-width: unset; }
   .album-info-block__description-text--empty { display: none; }

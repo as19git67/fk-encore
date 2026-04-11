@@ -1147,6 +1147,56 @@ export async function updatePhotoCurationLogic(
   return { success: true };
 }
 
+/**
+ * Batch-favorite multiple photos within an album context.
+ * Verifies album access and that all photos belong to the album.
+ */
+export async function batchFavoritePhotosLogic(
+  userId: number,
+  albumId: number,
+  photoIds: number[]
+): Promise<{ success: boolean; favorited: number }> {
+  if (photoIds.length === 0) return { success: true, favorited: 0 };
+
+  // Verify album access
+  const album = await dbFirst<typeof albums.$inferSelect>(
+    db.select().from(albums).where(eq(albums.id, albumId))
+  );
+  if (!album) throw new Error("Album not found");
+
+  const isOwner = album.user_id === userId;
+  if (!isOwner) {
+    const share = await dbFirst<typeof albumShares.$inferSelect>(
+      db.select().from(albumShares).where(and(eq(albumShares.album_id, albumId), eq(albumShares.user_id, userId)))
+    );
+    if (!share) throw new Error("Unauthorized access to album");
+  }
+
+  // Verify all photos belong to the album
+  const albumPhotoRows = await dbAll<{ photo_id: number }>(
+    db.select({ photo_id: albumPhotos.photo_id })
+      .from(albumPhotos)
+      .where(and(eq(albumPhotos.album_id, albumId), inArray(albumPhotos.photo_id, photoIds)))
+  );
+  const validPhotoIds = albumPhotoRows.map(r => r.photo_id);
+
+  if (validPhotoIds.length === 0) return { success: true, favorited: 0 };
+
+  // Batch upsert curation rows to 'favorite'
+  for (const photoId of validPhotoIds) {
+    await dbExec(
+      db.insert(photoCuration)
+        .values({ user_id: userId, photo_id: photoId, status: "favorite" })
+        .onConflictDoUpdate({
+          target: [photoCuration.user_id, photoCuration.photo_id],
+          set: { status: "favorite", updated_at: sql`NOW()` },
+        })
+    );
+  }
+
+  return { success: true, favorited: validPhotoIds.length };
+}
+
 export async function getPhotosToRefreshMetadataLogic(userId: number): Promise<{ ids: number[] }> {
   const rows = await dbAll<{ id: number }>(
     db.select({ id: photos.id }).from(photos).where(eq(photos.user_id, userId))
@@ -1458,9 +1508,10 @@ export async function listAlbumsLogic(userId: number): Promise<ListAlbumsRespons
 // ── View Presets ─────────────────────────────────────────────────────────────
 
 const VIEW_PRESETS: Record<string, ViewConfig> = {
-  all:       { hideFilter: "mine",      favFilter: "all" },
-  favorites: { hideFilter: "mine",      favFilter: "mine" },
-  consensus: { hideFilter: "consensus", favFilter: "consensus", hideConsensusMin: 1, favConsensusMin: 2 },
+  all:                { hideFilter: "mine",      favFilter: "all" },
+  favorites:          { hideFilter: "mine",      favFilter: "mine" },
+  consensus:          { hideFilter: "consensus", favFilter: "consensus", hideConsensusMin: 1, favConsensusMin: 2 },
+  "others-favorites": { hideFilter: "mine",      favFilter: "others-not-mine" },
 };
 
 /** Resolve effective ViewConfig from active_view preset or custom view_config */
@@ -1561,6 +1612,9 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     } else if (viewConfig.favFilter === "consensus") {
       const min = viewConfig.favConsensusMin ?? 2;
       if (r.fav_count < min) return false;
+    } else if (viewConfig.favFilter === "others-not-mine") {
+      // Show photos favorited by at least one other participant but not by the current user
+      if (r.fav_count < 1 || r.curation_status === "favorite") return false;
     }
     // favFilter === "all" → no filtering
 
