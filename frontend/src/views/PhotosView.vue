@@ -16,7 +16,7 @@ import {
   getPhotoFaces, getPhotoLandmarks, updatePhotoCuration,
   listPhotoGroups, searchPhotos,
   type Photo, type Face, type CurationStatus, type PhotoGroup,
-  type PhotoSearchResult, type LandmarkItem,
+  type LandmarkItem,
 } from '../api/photos'
 import { listPersons, type Person } from '../api/photos'
 import { useAuthStore } from '../stores/auth'
@@ -74,12 +74,12 @@ const hiddenByStack = computed(() => {
 
 // ── Search ────────────────────────────────────────────────────────────────────
 const searchQuery = ref('')
-const searchResults = ref<PhotoSearchResult[] | null>(null)
+const searchResults = ref<Photo[] | null>(null)
 const searchLoading = ref(false)
 const searchError = ref('')
 
 const searchResultIds = computed<number[] | null>(() =>
-  searchResults.value ? searchResults.value.map(r => r.photoId) : null
+  searchResults.value ? searchResults.value.map(r => r.id) : null
 )
 
 async function executeSearch() {
@@ -88,7 +88,7 @@ async function executeSearch() {
   searchLoading.value = true
   searchError.value = ''
   try {
-    searchResults.value = (await searchPhotos(q)).results
+    searchResults.value = (await searchPhotos(q)).photos
   } catch {
     searchError.value = 'Suche fehlgeschlagen. Ist der Embedding-Service erreichbar?'
   } finally {

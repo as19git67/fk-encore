@@ -3324,7 +3324,7 @@ export async function searchByDateRangeLogic(
     .leftJoin(photoCuration, and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)))
     .where(and(...conditions))
     .orderBy(photoDateOrder)
-    .limit(params.limit ?? 200)
+    .limit(params.limit ?? 500)
   );
 
   return {
@@ -3388,7 +3388,7 @@ export async function searchByLocationLogic(
     .leftJoin(photoCuration, and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)))
     .where(and(...conditions))
     .orderBy(photoDateOrder)
-    .limit(params.limit ?? 200)
+    .limit(params.limit ?? 500)
   );
 
   return {
