@@ -305,12 +305,12 @@ export interface Album {
   updated_at: string
 }
 
-export type ActiveView = 'all' | 'favorites' | 'consensus' | 'custom'
+export type ActiveView = 'all' | 'favorites' | 'consensus' | 'others-favorites' | 'custom'
 
 export interface ViewConfig {
   hideFilter: 'none' | 'mine' | 'consensus'
   hideConsensusMin?: number
-  favFilter: 'all' | 'mine' | 'any' | 'consensus'
+  favFilter: 'all' | 'mine' | 'any' | 'consensus' | 'others-not-mine'
   favConsensusMin?: number
 }
 
@@ -468,6 +468,13 @@ export interface PublicAlbumResponse {
 
 export function getPublicAlbum(token: string) {
   return apiFetch<PublicAlbumResponse>(`/albums/public/${token}`)
+}
+
+export function batchFavoritePhotos(albumId: number, photoIds: number[]) {
+  return apiFetch<{ success: boolean; favorited: number }>(`/albums/${albumId}/batch-favorite`, {
+    method: 'POST',
+    body: JSON.stringify({ photoIds })
+  })
 }
 
 export function updateAlbumUserSettings(albumId: number, settings: Partial<AlbumUserSettings>) {
