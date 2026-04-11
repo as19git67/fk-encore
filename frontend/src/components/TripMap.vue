@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { ref, toRef, onMounted, watch, nextTick } from 'vue'
+import { ref, toRef, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import type { Photo } from '../api/photos'
@@ -196,11 +196,36 @@ function formatStopDate(stop: Stop): string {
 }
 
 
+// ── Keyboard navigation between stops ───────────────────────────────────────
+
+function navigateToPrevStop() {
+  if (selectedStopId.value == null || stops.value.length === 0) return
+  const idx = stops.value.findIndex(s => s.id === selectedStopId.value)
+  if (idx > 0) selectStop(stops.value[idx - 1]!.id)
+}
+
+function navigateToNextStop() {
+  if (selectedStopId.value == null || stops.value.length === 0) return
+  const idx = stops.value.findIndex(s => s.id === selectedStopId.value)
+  if (idx >= 0 && idx < stops.value.length - 1) selectStop(stops.value[idx + 1]!.id)
+}
+
+function handleKeydown(e: KeyboardEvent) {
+  if (selectedStopId.value == null) return
+  if (e.key === 'ArrowLeft') { e.preventDefault(); navigateToPrevStop() }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); navigateToNextStop() }
+}
+
 // ── Lifecycle ────────────────────────────────────────────────────────────────
 
 onMounted(async () => {
   await nextTick()
   initMap()
+  window.addEventListener('keydown', handleKeydown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeydown)
 })
 
 watch(() => props.photos, () => {
