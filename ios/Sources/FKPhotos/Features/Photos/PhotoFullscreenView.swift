@@ -11,12 +11,26 @@ struct PhotoFullscreenView: View {
     @State private var showDetails = false
     @State private var currentCurationStatus: CurationStatus
 
+    // Person context (when navigated from PersonDetailView)
+    private let personId: Int?
+    private let onPersonRenamed: ((String) -> Void)?
+    private let onPersonMerged: (() -> Void)?
+    @State private var personName: String = ""
+    @State private var isRenaming = false
+    @State private var newName = ""
+    @State private var conflictPerson: PersonWithFaceCount? = nil
+    @State private var isMerging = false
+
     /// Single-photo convenience init (e.g. PersonDetailView).
-    init(photo: PhotoWithCuration, faceBBox: FaceBBox? = nil) {
+    init(photo: PhotoWithCuration, faceBBox: FaceBBox? = nil, personId: Int? = nil, initialPersonName: String = "", onPersonRenamed: ((String) -> Void)? = nil, onPersonMerged: (() -> Void)? = nil) {
         self.photos = [photo]
         self.bboxes = [faceBBox]
         _currentIndex = .constant(0)
         _currentCurationStatus = State(initialValue: photo.curation_status)
+        self.personId = personId
+        _personName = State(initialValue: initialPersonName)
+        self.onPersonRenamed = onPersonRenamed
+        self.onPersonMerged = onPersonMerged
     }
 
     /// Multi-photo init for paged navigation (e.g. PhotoGridView).
@@ -26,6 +40,9 @@ struct PhotoFullscreenView: View {
         _currentIndex = currentIndex
         let idx = currentIndex.wrappedValue
         _currentCurationStatus = State(initialValue: photos.indices.contains(idx) ? photos[idx].curation_status : .visible)
+        self.personId = nil
+        self.onPersonRenamed = nil
+        self.onPersonMerged = nil
     }
 
     private var currentPhoto: PhotoWithCuration? {
@@ -66,6 +83,20 @@ struct PhotoFullscreenView: View {
                             .fontWeight(.semibold)
                     }
                 }
+                if personId != nil {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        if isMerging {
+                            ProgressView()
+                        } else {
+                            Button {
+                                newName = personName
+                                isRenaming = true
+                            } label: {
+                                Image(systemName: "square.and.pencil")
+                            }
+                        }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Task {
@@ -90,7 +121,16 @@ struct PhotoFullscreenView: View {
                             withAnimation(.spring(duration: 0.4)) { showDetails.toggle() }
                         } label: {
                             VStack(spacing: 0) {
-                                if let loc = photo.location_name ?? photo.location_city {
+                                if personId != nil {
+                                    Text(personName.isEmpty ? "Unbekannt" : personName)
+                                        .font(.subheadline).fontWeight(.semibold)
+                                        .lineLimit(1)
+                                    if let date = chipDate(photo) {
+                                        Text(date)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                } else if let loc = photo.location_name ?? photo.location_city {
                                     Text(loc)
                                         .font(.subheadline).fontWeight(.semibold)
                                         .lineLimit(1)
@@ -139,7 +179,83 @@ struct PhotoFullscreenView: View {
                 }
             }
             .toolbarBackground(showDetails ? .visible : .hidden, for: .bottomBar)
+            .alert("Umbenennen", isPresented: $isRenaming) {
+                TextField("Name eingeben", text: $newName)
+                    .autocorrectionDisabled()
+                Button("Speichern") {
+                    Task { await submitRename() }
+                }
+                Button("Abbrechen", role: .cancel) {}
+            } message: {
+                Text("Gib einen Namen für diese Person ein.")
+            }
+            .confirmationDialog(
+                conflictPerson.map { "Mit \"\($0.name)\" zusammenführen?" } ?? "",
+                isPresented: Binding(
+                    get: { conflictPerson != nil },
+                    set: { if !$0 { conflictPerson = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                if let conflict = conflictPerson {
+                    Button("Zusammenführen mit \"\(conflict.name)\"") {
+                        Task { await mergeInto(conflict) }
+                    }
+                }
+                Button("Abbrechen", role: .cancel) { conflictPerson = nil }
+            } message: {
+                if let conflict = conflictPerson {
+                    Text("\"\(conflict.name)\" existiert bereits. Die Fotos dieser Person werden zu \"\(conflict.name)\" verschoben.")
+                }
+            }
         }
+    }
+
+    // MARK: - Person rename/merge
+
+    private struct ListPersonsResponse: Codable { let persons: [PersonWithFaceCount] }
+    private struct RenameBody: Codable { let name: String }
+    private struct MergeBody: Codable { let sourceIds: [Int]; let targetId: Int }
+    private struct MergeResponse: Codable { let success: Bool }
+
+    private func submitRename() async {
+        guard let pid = personId else { return }
+        let name = newName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty, name.lowercased() != "unbenannt" else { return }
+
+        if let response = try? await APIClient.shared.get("/persons") as ListPersonsResponse,
+           let existing = response.persons.first(where: {
+               $0.name.lowercased() == name.lowercased() && $0.id != pid
+           }) {
+            conflictPerson = existing
+            return
+        }
+
+        await renamePerson(pid: pid, to: name)
+    }
+
+    private func renamePerson(pid: Int, to name: String) async {
+        struct PersonResponse: Codable { let id: Int; let name: String }
+        do {
+            let _: PersonResponse = try await APIClient.shared.patch("/persons/\(pid)", body: RenameBody(name: name))
+            personName = name
+            onPersonRenamed?(name)
+        } catch {}
+    }
+
+    private func mergeInto(_ target: PersonWithFaceCount) async {
+        guard let pid = personId else { return }
+        isMerging = true
+        conflictPerson = nil
+        do {
+            let _: MergeResponse = try await APIClient.shared.post(
+                "/persons/merge",
+                body: MergeBody(sourceIds: [pid], targetId: target.id)
+            )
+            onPersonMerged?()
+            dismiss()
+        } catch {}
+        isMerging = false
     }
 
     // MARK: - Helpers

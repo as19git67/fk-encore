@@ -19,6 +19,7 @@ actor APIClient {
 
     private var authManager: AuthManager?
     private var isRefreshing = false
+    private var pendingRefreshContinuations: [CheckedContinuation<Bool, Never>] = []
 
     init() {
         if let stored = UserDefaults.standard.string(forKey: APIClient.serverURLKey),
@@ -118,8 +119,7 @@ actor APIClient {
         }
 
         if httpResponse.statusCode == 401 {
-            // Try refresh
-            if let manager = authManager, await manager.tryRefresh() {
+            if let manager = authManager, await refreshOnce(manager: manager) {
                 applyAuth(&request)
                 let (retryData, retryResponse) = try await URLSession.shared.data(for: request)
                 guard let retryHttp = retryResponse as? HTTPURLResponse else {
@@ -178,6 +178,7 @@ actor APIClient {
     }
 
     /// Performs request; on 401, attempts a token refresh and retries once.
+    /// Concurrent 401s all wait for a single refresh to avoid token rotation conflicts.
     private func performWithRefresh<T: Decodable>(_ request: URLRequest) async throws -> T {
         let (data, response) = try await URLSession.shared.data(for: request)
 
@@ -186,7 +187,7 @@ actor APIClient {
         }
 
         if httpResponse.statusCode == 401, let manager = authManager {
-            let refreshed = await manager.tryRefresh()
+            let refreshed = await refreshOnce(manager: manager)
             if refreshed {
                 var retryRequest = request
                 applyAuth(&retryRequest)
@@ -201,6 +202,27 @@ actor APIClient {
         }
 
         return try decoder.decode(T.self, from: data)
+    }
+
+    /// Ensures only one refresh runs at a time. Subsequent callers wait for the first to finish.
+    private func refreshOnce(manager: AuthManager) async -> Bool {
+        if isRefreshing {
+            return await withCheckedContinuation { continuation in
+                pendingRefreshContinuations.append(continuation)
+            }
+        }
+
+        isRefreshing = true
+        let result = await manager.tryRefresh()
+        isRefreshing = false
+
+        let waiting = pendingRefreshContinuations
+        pendingRefreshContinuations.removeAll()
+        for continuation in waiting {
+            continuation.resume(returning: result)
+        }
+
+        return result
     }
 
     private func parseErrorMessage(_ data: Data) -> String {
