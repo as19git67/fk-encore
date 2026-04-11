@@ -7,7 +7,8 @@ struct PhotoUploadView: View {
     @State private var isUploading = false
     @State private var uploadProgress = 0
     @State private var uploadTotal = 0
-    @State private var errorMessage: String?
+    @State private var failedCount = 0
+    var albumId: Int? = nil
     var onUploadComplete: (() -> Void)?
 
     var body: some View {
@@ -15,7 +16,7 @@ struct PhotoUploadView: View {
             VStack(spacing: 24) {
                 if isUploading {
                     VStack(spacing: 16) {
-                        ProgressView(value: Double(uploadProgress), total: Double(uploadTotal))
+                        ProgressView(value: Double(uploadProgress), total: Double(max(uploadTotal, 1)))
                             .padding(.horizontal)
                         Text("Hochladen: \(uploadProgress)/\(uploadTotal)")
                             .foregroundStyle(.secondary)
@@ -61,10 +62,11 @@ struct PhotoUploadView: View {
                     }
                 }
 
-                if let error = errorMessage {
-                    Text(error)
-                        .foregroundStyle(.red)
+                if failedCount > 0 {
+                    Text("\(failedCount) Foto(s) konnten nicht hochgeladen werden (bereits vorhanden oder Fehler).")
+                        .foregroundStyle(.orange)
                         .font(.caption)
+                        .multilineTextAlignment(.center)
                         .padding(.horizontal)
                 }
 
@@ -87,37 +89,41 @@ struct PhotoUploadView: View {
         isUploading = true
         uploadTotal = selectedItems.count
         uploadProgress = 0
-        errorMessage = nil
+        failedCount = 0
 
         for item in selectedItems {
             do {
                 guard let data = try await item.loadTransferable(type: Data.self) else {
+                    await MainActor.run { failedCount += 1 }
                     continue
                 }
 
                 let filename = "photo_\(Date().timeIntervalSince1970).jpg"
                 let mimeType = "image/jpeg"
 
-                _ = try await APIClient.shared.uploadPhoto(
+                let uploaded = try await APIClient.shared.uploadPhoto(
                     data: data,
                     filename: filename,
                     mimeType: mimeType
                 )
 
-                await MainActor.run {
-                    uploadProgress += 1
+                if let aid = albumId {
+                    struct AlbumPhotoBody: Codable { let albumId: Int; let photoId: Int }
+                    struct AlbumPhotoResponse: Codable { let success: Bool }
+                    _ = try? await APIClient.shared.post(
+                        "/albums/photos",
+                        body: AlbumPhotoBody(albumId: aid, photoId: uploaded.id)
+                    ) as AlbumPhotoResponse
                 }
+
+                await MainActor.run { uploadProgress += 1 }
             } catch {
-                await MainActor.run {
-                    errorMessage = "Fehler beim Hochladen: \(error.localizedDescription)"
-                }
+                await MainActor.run { failedCount += 1 }
             }
         }
 
         isUploading = false
-        if errorMessage == nil {
-            onUploadComplete?()
-            dismiss()
-        }
+        onUploadComplete?()
+        dismiss()
     }
 }

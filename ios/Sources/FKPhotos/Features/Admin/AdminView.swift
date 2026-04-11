@@ -2,7 +2,6 @@ import SwiftUI
 
 struct AdminView: View {
     @Environment(AuthManager.self) private var authManager
-    @State private var showUpload = false
 
     var body: some View {
         List {
@@ -29,15 +28,6 @@ struct AdminView: View {
                         }
                     }
                     .padding(.vertical, 4)
-                }
-            }
-
-            // Actions
-            Section("Aktionen") {
-                Button {
-                    showUpload = true
-                } label: {
-                    Label("Fotos hochladen", systemImage: "photo.badge.plus")
                 }
             }
 
@@ -81,9 +71,6 @@ struct AdminView: View {
             }
         }
         .navigationTitle("Profil")
-        .sheet(isPresented: $showUpload) {
-            PhotoUploadView()
-        }
     }
 }
 
