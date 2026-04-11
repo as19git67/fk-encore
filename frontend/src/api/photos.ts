@@ -527,7 +527,7 @@ export interface PhotoSearchResult {
 }
 
 export function searchPhotos(query: string, limit: number = 1000, threshold: number = 0.20) {
-  return apiFetch<{ results: PhotoSearchResult[] }>('/photos/search', {
+  return apiFetch<{ photos: Photo[] }>('/photos/search', {
     method: 'POST',
     body: JSON.stringify({ query, limit, threshold })
   })
