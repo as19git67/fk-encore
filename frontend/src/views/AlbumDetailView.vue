@@ -861,6 +861,9 @@ onUnmounted(() => serviceHealth.stopPolling())
 
   .subheader .controls :deep(.p-button-label) { display: none; }
   .subheader .controls :deep(.p-button) { padding: 0.5rem; min-width: 2.25rem; }
+  /* Icon-only for all standalone buttons inside control-group on mobile */
+  .control-group > :deep(.p-button .p-button-label) { display: none; }
+  .control-group > :deep(.p-button) { padding: 0.35rem; min-width: 2rem; }
 
   /* Compact sticky header on mobile */
   .header {
