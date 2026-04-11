@@ -1896,6 +1896,17 @@ export async function addPhotoToAlbumLogic(userId: number, req: AddPhotoToAlbumR
     }
   }
 
+  // Re-run similar-photo grouping for shared users so the new photo is considered.
+  // Fire-and-forget so the API responds immediately.
+  const sharedUsersForGrouping = await dbAll<{ user_id: number }>(
+    db.select({ user_id: albumShares.user_id }).from(albumShares).where(eq(albumShares.album_id, req.albumId))
+  );
+  for (const { user_id } of sharedUsersForGrouping) {
+    findPhotoGroupsLogic(user_id).catch(err => {
+      console.error(`Error re-grouping photos for shared user ${user_id}:`, err);
+    });
+  }
+
   return { success: true };
 }
 
@@ -2025,6 +2036,11 @@ export async function shareAlbumLogic(userId: number, req: ShareAlbumRequest): P
     console.error(`Error enqueueing face assignments for shared album ${req.albumId}:`, err);
   });
 
+  // Re-run similar-photo grouping for the new shared user so shared photos are considered.
+  findPhotoGroupsLogic(req.userId).catch(err => {
+    console.error(`Error re-grouping photos for newly shared user ${req.userId}:`, err);
+  });
+
   return { success: true };
 }
 
@@ -2110,6 +2126,11 @@ export async function removeAlbumShareLogic(userId: number, req: RemoveAlbumShar
       console.error(`Error cleaning up after unshare of album ${req.albumId}:`, err);
     });
   }
+
+  // Re-run grouping so removed shared photos are no longer in groups.
+  findPhotoGroupsLogic(req.userId).catch(err => {
+    console.error(`Error re-grouping photos after unshare for user ${req.userId}:`, err);
+  });
 
   return { success: true };
 }
@@ -2911,12 +2932,31 @@ const SIMILARITY_THRESHOLD = 0.90;
 const TIME_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
 
 export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsResponse> {
-  // 1. Get all user photos with timestamps
-  const allPhotos = await dbAll<{ id: number; taken_at: string | null; created_at: string | null }>(
+  // 1. Get all user photos with timestamps (own + shared album photos)
+  const ownPhotos = await dbAll<{ id: number; taken_at: string | null; created_at: string | null }>(
     db.select({ id: photos.id, taken_at: photos.taken_at, created_at: photos.created_at })
       .from(photos)
       .where(eq(photos.user_id, userId))
   );
+
+  // Also get photos visible through shared albums
+  const sharedPhotos = await dbAll<{ id: number; taken_at: string | null; created_at: string | null }>(
+    db.selectDistinct({ id: photos.id, taken_at: photos.taken_at, created_at: photos.created_at })
+      .from(photos)
+      .innerJoin(albumPhotos, eq(albumPhotos.photo_id, photos.id))
+      .innerJoin(albumShares, and(
+        eq(albumShares.album_id, albumPhotos.album_id),
+        eq(albumShares.user_id, userId)
+      ))
+  );
+
+  // Merge and deduplicate by photo ID
+  const photoMap = new Map<number, { id: number; taken_at: string | null; created_at: string | null }>();
+  for (const p of ownPhotos) photoMap.set(p.id, p);
+  for (const p of sharedPhotos) {
+    if (!photoMap.has(p.id)) photoMap.set(p.id, p);
+  }
+  const allPhotos = Array.from(photoMap.values());
 
   if (allPhotos.length < 2) {
     return { groups_created: 0, total_photos_grouped: 0 };

@@ -34,6 +34,7 @@ import {
   hasFacesForPhoto,
   enqueueFaceAssignmentForAllUsers,
   getPhotoOwnerId,
+  getUsersWithPhotoAccess,
 } from "./photo.service";
 import {
   assertServiceAvailable,
@@ -133,13 +134,13 @@ class ScanWorker {
         );
       }
 
-      // After embedding completes, try to re-group similar photos.
-      // Embedding is global (user_id NULL) — look up the photo owner.
+      // After embedding completes, re-group similar photos for all users
+      // who can see this photo (owner + shared album members).
       if (this.service === "embedding") {
-        getPhotoOwnerId(job.photo_id).then((ownerId) => {
-          if (ownerId) {
-            findPhotoGroupsLogic(ownerId).catch((err) =>
-              console.error(`[scan-worker] grouping error after embedding job ${job.id}:`, err),
+        getUsersWithPhotoAccess(job.photo_id).then((userIds) => {
+          for (const uid of userIds) {
+            findPhotoGroupsLogic(uid).catch((err) =>
+              console.error(`[scan-worker] grouping error for user ${uid} after embedding job ${job.id}:`, err),
             );
           }
         }).catch((err) =>
