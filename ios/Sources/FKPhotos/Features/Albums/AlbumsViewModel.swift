@@ -22,19 +22,23 @@ final class AlbumsViewModel {
     }
 
     @MainActor
-    func createAlbum(name: String, description: String?) async -> Album? {
+    func createAlbum(name: String, description: String?) async -> Bool {
         struct Body: Codable {
             let name: String
             let description: String?
         }
+        struct CreateResponse: Codable {
+            let id: Int
+            let name: String
+        }
 
         do {
-            let album: Album = try await APIClient.shared.post("/albums", body: Body(name: name, description: description))
+            let _: CreateResponse = try await APIClient.shared.post("/albums", body: Body(name: name, description: description))
             await loadAlbums()
-            return album
+            return true
         } catch {
             errorMessage = error.localizedDescription
-            return nil
+            return false
         }
     }
 
