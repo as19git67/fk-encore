@@ -825,7 +825,7 @@ export const searchPhotos = api(
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "photos.view");
-    return await service.searchPhotosLogic(userId, query, limit ?? 20, threshold ?? 0.20);
+    return await service.searchPhotosLogic(userId, query, limit ?? 500, threshold ?? 0.20);
   }
 );
 
@@ -894,7 +894,7 @@ export const searchPhotosByLandmark = api(
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "photos.view");
-    return await service.searchByLandmarkLogic(userId, query, limit ?? 50);
+    return await service.searchByLandmarkLogic(userId, query, limit ?? 500);
   }
 );
 
@@ -950,6 +950,6 @@ export const searchPhotosNatural = api(
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "photos.view");
-    return await service.searchPhotosNaturalLogic(userId, query, limit ?? 30, threshold ?? 0.18);
+    return await service.searchPhotosNaturalLogic(userId, query, limit ?? 500, threshold ?? 0.18);
   }
 );
