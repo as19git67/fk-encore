@@ -415,30 +415,30 @@ onUnmounted(() => serviceHealth.stopPolling())
           <div class="header-left__title-row">
             <h1 class="title">{{ album.name }}</h1>
             <span :class="['role-badge', `role-badge--${album.role}`]">{{ album.role }}</span>
-          </div>
-          <div class="album-info-block">
-            <div v-if="displayMode !== 'map'" class="album-info-block__description">
-              <div v-if="!editingDescription" class="album-info-block__description-content">
-                <span :class="{ 'album-info-block__description-text--empty': !album.description }" class="album-info-block__description-text">
-                  {{ album.description || 'Keine Beschreibung' }}
-                </span>
-                <Button v-if="canWrite" icon="pi pi-pencil" size="small" text @click="startEditDesc" class="album-info-block__edit-btn" />
-              </div>
-              <div v-else class="album-info-block__edit">
-                <textarea v-model="descDraft" class="p-inputtextarea p-inputtext" rows="2" />
-                <div class="album-info-block__edit-actions">
-                  <Button :loading="updatingAlbum" icon="pi pi-check" size="small" @click="saveDescription" />
-                  <Button :disabled="updatingAlbum" icon="pi pi-times" size="small" text @click="editingDescription = false" />
+            <div class="album-info-block">
+              <div v-if="displayMode !== 'map'" class="album-info-block__description">
+                <div v-if="!editingDescription" class="album-info-block__description-content">
+                  <span :class="{ 'album-info-block__description-text--empty': !album.description }" class="album-info-block__description-text">
+                    {{ album.description || 'Keine Beschreibung' }}
+                  </span>
+                  <Button v-if="canWrite" icon="pi pi-pencil" size="small" text @click="startEditDesc" class="album-info-block__edit-btn" />
+                </div>
+                <div v-else class="album-info-block__edit">
+                  <textarea v-model="descDraft" class="p-inputtextarea p-inputtext" rows="2" />
+                  <div class="album-info-block__edit-actions">
+                    <Button :loading="updatingAlbum" icon="pi pi-check" size="small" @click="saveDescription" />
+                    <Button :disabled="updatingAlbum" icon="pi pi-times" size="small" text @click="editingDescription = false" />
+                  </div>
                 </div>
               </div>
-            </div>
-            <div class="album-info-block__meta">
-              <span class="album-info-block__meta-text">
-                {{ album.photo_count }} {{ album.photo_count === 1 ? 'Foto' : 'Fotos' }}
-                <template v-if="album.oldest_photo_at && album.newest_photo_at">
-                  • {{ new Date(album.oldest_photo_at).toLocaleDateString() }} – {{ new Date(album.newest_photo_at).toLocaleDateString() }}
-                </template>
-              </span>
+              <div class="album-info-block__meta">
+                <span class="album-info-block__meta-text">
+                  {{ album.photo_count }} {{ album.photo_count === 1 ? 'Foto' : 'Fotos' }}
+                  <template v-if="album.oldest_photo_at && album.newest_photo_at">
+                    • {{ new Date(album.oldest_photo_at).toLocaleDateString() }} – {{ new Date(album.newest_photo_at).toLocaleDateString() }}
+                  </template>
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -453,16 +453,16 @@ onUnmounted(() => serviceHealth.stopPolling())
                 <span class="view-label">{{ option.label }}</span>
               </template>
             </SelectButton>
+            <Button
+              v-if="album.settings?.active_view === 'others-favorites' && albumPhotos.length > 0"
+              icon="pi pi-heart-fill"
+              :label="`Alle favorisieren (${albumPhotos.length})`"
+              size="small"
+              severity="warn"
+              :loading="batchFavoriting"
+              @click="handleBatchFavoriteAll"
+            />
           </div>
-          <Button
-            v-if="album.settings?.active_view === 'others-favorites' && albumPhotos.length > 0"
-            icon="pi pi-heart-fill"
-            :label="`Alle favorisieren (${albumPhotos.length})`"
-            size="small"
-            severity="warn"
-            :loading="batchFavoriting"
-            @click="handleBatchFavoriteAll"
-          />
         </div>
       </div>
     </div>
@@ -665,6 +665,7 @@ onUnmounted(() => serviceHealth.stopPolling())
 
 .header {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   padding: 1rem;
@@ -672,8 +673,8 @@ onUnmounted(() => serviceHealth.stopPolling())
   border-bottom: 1px solid var(--p-content-border-color);
 }
 
-.header-left { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
-.header-left__title-row { display: flex; align-items: center; gap: 1rem; }
+.header-left { display: flex; min-width: 0; }
+.header-left__title-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 
 .role-badge {
   font-size: 0.75rem;
