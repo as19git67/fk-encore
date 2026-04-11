@@ -3346,52 +3346,49 @@ export interface PhotoTimelineResponse {
 
 export async function getPhotoTimelineLogic(userId: number): Promise<PhotoTimelineResponse> {
   // Get month-level counts + cover filename (newest photo per month) in one query
-  const rows = await dbAll<{
-    year: number;
-    month: number;
-    count: number;
-    cover_filename: string | null;
-  }>(db.execute(sql`
-    SELECT
-      EXTRACT(YEAR FROM COALESCE(p.taken_at, p.created_at))::int AS year,
-      EXTRACT(MONTH FROM COALESCE(p.taken_at, p.created_at))::int AS month,
-      COUNT(*)::int AS count,
-      (
-        SELECT p2.filename FROM photos p2
-        LEFT JOIN photo_curation pc2
-          ON pc2.photo_id = p2.id AND pc2.user_id = ${userId}
-        WHERE p2.user_id = ${userId}
-          AND EXTRACT(YEAR FROM COALESCE(p2.taken_at, p2.created_at)) =
-              EXTRACT(YEAR FROM COALESCE(p.taken_at, p.created_at))
-          AND EXTRACT(MONTH FROM COALESCE(p2.taken_at, p2.created_at)) =
-              EXTRACT(MONTH FROM COALESCE(p.taken_at, p.created_at))
-          AND (pc2.status IS NULL OR pc2.status != 'hidden')
-        ORDER BY COALESCE(p2.taken_at, p2.created_at) DESC
-        LIMIT 1
-      ) AS cover_filename
-    FROM photos p
-    LEFT JOIN photo_curation pc
-      ON pc.photo_id = p.id AND pc.user_id = ${userId}
-    WHERE p.user_id = ${userId}
-      AND (pc.status IS NULL OR pc.status != 'hidden')
-    GROUP BY year, month
-    ORDER BY year DESC, month DESC
-  `));
+  const rows = (await db.execute(sql`
+    WITH visible AS (
+      SELECT
+        p.filename,
+        EXTRACT(YEAR  FROM COALESCE(p.taken_at, p.created_at))::int AS year,
+        EXTRACT(MONTH FROM COALESCE(p.taken_at, p.created_at))::int AS month,
+        COALESCE(p.taken_at, p.created_at) AS photo_date
+      FROM photos p
+      LEFT JOIN photo_curation pc ON pc.photo_id = p.id AND pc.user_id = ${userId}
+      WHERE p.user_id = ${userId}
+        AND (pc.status IS NULL OR pc.status != 'hidden')
+    ),
+    covers AS (
+      SELECT DISTINCT ON (year, month) year, month, filename AS cover_filename
+      FROM visible
+      ORDER BY year, month, photo_date DESC
+    ),
+    counts AS (
+      SELECT year, month, COUNT(*)::int AS count
+      FROM visible
+      GROUP BY year, month
+    )
+    SELECT c.year, c.month, c.count, cv.cover_filename
+    FROM counts c
+    JOIN covers cv ON cv.year = c.year AND cv.month = c.month
+    ORDER BY c.year DESC, c.month DESC
+  `)).rows as Array<{ year: number; month: number; count: number; cover_filename: string | null }>;
 
   // Group months under years
   const yearMap = new Map<number, TimelineYear>();
   for (const row of rows) {
     if (!yearMap.has(row.year)) {
       yearMap.set(row.year, {
-        year: row.year,
+        year: Number(row.year),
         count: 0,
         cover_filename: row.cover_filename,
         months: [],
       });
     }
     const yr = yearMap.get(row.year)!;
-    yr.count += row.count;
-    yr.months.push({ month: row.month, count: row.count, cover_filename: row.cover_filename });
+    const count = Number(row.count);
+    yr.count += count;
+    yr.months.push({ month: Number(row.month), count, cover_filename: row.cover_filename });
   }
 
   return { years: Array.from(yearMap.values()) };
