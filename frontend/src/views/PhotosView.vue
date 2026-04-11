@@ -4,7 +4,6 @@ import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import ToggleSwitch from 'primevue/toggleswitch'
-import { useConfirm } from 'primevue/useconfirm'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import PhotoGrid from '../components/PhotoGrid.vue'
@@ -28,7 +27,6 @@ import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 
 const auth = useAuthStore()
 const serviceHealth = useServiceHealthStore()
-const confirm = useConfirm()
 const route = useRoute()
 const router = useRouter()
 
@@ -364,20 +362,11 @@ async function reloadPhotosInPlace() {
 
 // ── Curation ──────────────────────────────────────────────────────────────────
 async function handleDelete(id: number) {
-  confirm.require({
-    message: 'Foto ausblenden? Es kann jederzeit wiederhergestellt werden.',
-    header: 'Foto ausblenden',
-    icon: 'pi pi-eye-slash',
-    rejectProps: { label: 'Abbrechen', severity: 'secondary', outlined: true },
-    acceptProps: { label: 'Ausblenden', severity: 'warn' },
-    accept: async () => {
-      try {
-        await updatePhotoCuration(id, 'hidden')
-        await reloadPhotosInPlace()
-        if (selectedIndex.value >= photos.value.length) selectedIndex.value = photos.value.length - 1
-      } catch (err: any) { error.value = err.message || 'Fehler' }
-    },
-  })
+  try {
+    await updatePhotoCuration(id, 'hidden')
+    await reloadPhotosInPlace()
+    if (selectedIndex.value >= photos.value.length) selectedIndex.value = photos.value.length - 1
+  } catch (err: any) { error.value = err.message || 'Fehler' }
 }
 
 async function handleRestore(id: number) {

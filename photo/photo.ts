@@ -173,6 +173,21 @@ export const updatePhotoCuration = api(
 );
 
 /**
+ * Batch-favorite multiple photos within an album.
+ * Used by the "others' favorites" view to favorite all visible photos at once.
+ */
+export const batchFavoritePhotos = api(
+  { expose: true, method: "POST", path: "/albums/:albumId/batch-favorite", auth: true },
+  async ({ albumId, photoIds }: { albumId: number; photoIds: number[] }): Promise<{ success: boolean; favorited: number }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    return await service.batchFavoritePhotosLogic(userId, albumId, photoIds);
+  }
+);
+
+/**
  * Get all photo IDs for metadata refresh.
  */
 export const getPhotosToRefreshMetadata = api(
