@@ -1661,6 +1661,7 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     newest_photo_at: filteredNewest,
     oldest_photo_at: filteredOldest,
     photo_count: filteredCount,
+    is_shared: isShared,
     created_at: album.created_at ?? "",
     updated_at: album.updated_at ?? "",
     role,
