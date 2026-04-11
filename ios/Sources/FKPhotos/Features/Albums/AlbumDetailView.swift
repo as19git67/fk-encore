@@ -8,7 +8,11 @@ struct AlbumDetailView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var showShareSheet = false
+    @State private var showUpload = false
+    @State private var showDeleteConfirm = false
+    @State private var isDeleting = false
     @State private var selectedPhoto: PhotoWithCuration?
+    @Environment(\.dismiss) private var dismiss
 
     private let columns = [
         GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 2)
@@ -45,6 +49,13 @@ struct AlbumDetailView: View {
             PhotoFullscreenView(photo: photo)
         }
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showUpload = true
+                } label: {
+                    Image(systemName: "photo.badge.plus")
+                }
+            }
             if userRole == "owner" || userRole == "admin" {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
@@ -53,6 +64,26 @@ struct AlbumDetailView: View {
                         Image(systemName: "person.crop.circle.badge.plus")
                     }
                 }
+                ToolbarItem(placement: .primaryAction) {
+                    Button(role: .destructive) {
+                        showDeleteConfirm = true
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                }
+            }
+        }
+        .confirmationDialog("Album löschen?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+            Button("Löschen", role: .destructive) {
+                Task { await deleteAlbum() }
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: {
+            Text("Das Album wird unwiderruflich gelöscht. Die Fotos bleiben erhalten.")
+        }
+        .sheet(isPresented: $showUpload) {
+            PhotoUploadView(albumId: albumId) {
+                Task { await loadAlbum() }
             }
         }
         .sheet(isPresented: $showShareSheet) {
@@ -61,6 +92,17 @@ struct AlbumDetailView: View {
         .task {
             await loadAlbum()
         }
+    }
+
+    private func deleteAlbum() async {
+        isDeleting = true
+        do {
+            let _: DeleteResponse = try await APIClient.shared.delete("/albums/\(albumId)")
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isDeleting = false
     }
 
     private func loadAlbum() async {

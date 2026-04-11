@@ -68,11 +68,11 @@ struct AlbumsListView: View {
                 newAlbumName = ""
                 newAlbumDescription = ""
                 Task {
-                    _ = await viewModel.createAlbum(
+                    let ok = await viewModel.createAlbum(
                         name: name,
                         description: description.isEmpty ? nil : description
                     )
-                    if viewModel.errorMessage != nil {
+                    if !ok {
                         showErrorAlert = true
                     }
                 }

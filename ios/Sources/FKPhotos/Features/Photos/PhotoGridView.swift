@@ -5,6 +5,7 @@ struct PhotoGridView: View {
     @State private var isFullscreenPresented = false
     @State private var selectedIndex = 0
     @State private var scrollTarget: Int?
+    @State private var showUpload = false
 
     private let columns = [
         GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 2)
@@ -57,6 +58,20 @@ struct PhotoGridView: View {
             }
         }
         .navigationTitle("Fotos")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showUpload = true
+                } label: {
+                    Image(systemName: "photo.badge.plus")
+                }
+            }
+        }
+        .sheet(isPresented: $showUpload) {
+            PhotoUploadView {
+                Task { await viewModel.loadPhotos() }
+            }
+        }
         .fullScreenCover(isPresented: $isFullscreenPresented) {
             PhotoFullscreenView(photos: viewModel.photos, currentIndex: $selectedIndex)
         }
