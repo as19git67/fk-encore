@@ -29,7 +29,8 @@ import {
   type Photo,
   updatePhotoCuration,
   updateAlbum,
-  updateAlbumUserSettings
+  updateAlbumUserSettings,
+  batchFavoritePhotos
 } from '../api/photos'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
@@ -365,15 +366,34 @@ const viewOptions = [
   { label: 'Alle Fotos', value: 'all' },
   { label: 'Meine Favoriten', value: 'favorites' },
   { label: 'Gruppen-Highlights', value: 'consensus' },
+  { label: 'Favoriten anderer', value: 'others-favorites' },
 ]
 
-// Show consensus option only for shared albums
+// Show shared-only options only for shared albums
 const availableViewOptions = computed(() => {
   const isShared = album.value && album.value.role !== 'owner'
     || (album.value?.photos?.some((p: AlbumPhoto) => p.curation_stats && p.curation_stats.member_count > 1))
   if (isShared) return viewOptions
-  return viewOptions.filter(o => o.value !== 'consensus')
+  return viewOptions.filter(o => o.value !== 'consensus' && o.value !== 'others-favorites')
 })
+
+// Batch favorite all visible photos (for "others-favorites" view)
+const batchFavoriting = ref(false)
+
+async function handleBatchFavoriteAll() {
+  if (!album.value) return
+  const photoIds = albumPhotos.value.map(p => p.id)
+  if (photoIds.length === 0) return
+  batchFavoriting.value = true
+  try {
+    await batchFavoritePhotos(albumId, photoIds)
+    await loadData()
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Favorisieren'
+  } finally {
+    batchFavoriting.value = false
+  }
+}
 // ── Mobile drawer state ───────────────────────────────────────────────────────
 const mobileTimelineOpen = ref(false)
 const mobileSidebarOpen = ref(false)
@@ -402,6 +422,15 @@ onUnmounted(() => serviceHealth.stopPolling())
             <label>Ansicht:</label>
             <SelectButton v-model="album.settings.active_view" :options="availableViewOptions" optionLabel="label" optionValue="value" @change="handleSettingsChange" />
           </div>
+          <Button
+            v-if="album.settings?.active_view === 'others-favorites' && albumPhotos.length > 0"
+            icon="pi pi-heart-fill"
+            :label="`Alle favorisieren (${albumPhotos.length})`"
+            size="small"
+            severity="warn"
+            :loading="batchFavoriting"
+            @click="handleBatchFavoriteAll"
+          />
         </div>
       </div>
     </div>

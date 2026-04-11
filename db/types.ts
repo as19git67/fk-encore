@@ -404,7 +404,7 @@ export interface AlbumShare {
 
 // ── View Config for Album Views ──────────────────────────────────────────────
 
-export type ActiveView = "all" | "favorites" | "consensus" | "custom";
+export type ActiveView = "all" | "favorites" | "consensus" | "others-favorites" | "custom";
 
 export interface ViewConfig {
   /** Which hidden photos to filter out */
@@ -412,7 +412,7 @@ export interface ViewConfig {
   /** Minimum number of users who hid a photo for consensus hide */
   hideConsensusMin?: number;
   /** Which favorites filter to apply */
-  favFilter: "all" | "mine" | "any" | "consensus";
+  favFilter: "all" | "mine" | "any" | "consensus" | "others-not-mine";
   /** Minimum number of users who favorited for consensus favorites */
   favConsensusMin?: number;
 }
