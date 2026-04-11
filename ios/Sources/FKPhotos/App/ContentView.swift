@@ -26,7 +26,7 @@ struct MainTabView: View {
         TabView {
             Tab("Fotos", systemImage: "photo.on.rectangle") {
                 NavigationStack {
-                    PhotoGridView()
+                    PhotoTimelineView()
                 }
             }
 

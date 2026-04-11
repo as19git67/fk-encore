@@ -3325,6 +3325,75 @@ export async function searchPhotosLogic(
   return { photos: resultPhotos };
 }
 
+// ---------- Photo Timeline ----------
+
+export interface TimelineMonth {
+  month: number;
+  count: number;
+  cover_filename: string | null;
+}
+
+export interface TimelineYear {
+  year: number;
+  count: number;
+  cover_filename: string | null;
+  months: TimelineMonth[];
+}
+
+export interface PhotoTimelineResponse {
+  years: TimelineYear[];
+}
+
+export async function getPhotoTimelineLogic(userId: number): Promise<PhotoTimelineResponse> {
+  // Get month-level counts + cover filename (newest photo per month) in one query
+  const rows = (await db.execute(sql`
+    WITH visible AS (
+      SELECT
+        p.filename,
+        EXTRACT(YEAR  FROM COALESCE(p.taken_at, p.created_at))::int AS year,
+        EXTRACT(MONTH FROM COALESCE(p.taken_at, p.created_at))::int AS month,
+        COALESCE(p.taken_at, p.created_at) AS photo_date
+      FROM photos p
+      LEFT JOIN photo_curation pc ON pc.photo_id = p.id AND pc.user_id = ${userId}
+      WHERE p.user_id = ${userId}
+        AND (pc.status IS NULL OR pc.status != 'hidden')
+    ),
+    covers AS (
+      SELECT DISTINCT ON (year, month) year, month, filename AS cover_filename
+      FROM visible
+      ORDER BY year, month, photo_date DESC
+    ),
+    counts AS (
+      SELECT year, month, COUNT(*)::int AS count
+      FROM visible
+      GROUP BY year, month
+    )
+    SELECT c.year, c.month, c.count, cv.cover_filename
+    FROM counts c
+    JOIN covers cv ON cv.year = c.year AND cv.month = c.month
+    ORDER BY c.year DESC, c.month DESC
+  `)).rows as Array<{ year: number; month: number; count: number; cover_filename: string | null }>;
+
+  // Group months under years
+  const yearMap = new Map<number, TimelineYear>();
+  for (const row of rows) {
+    if (!yearMap.has(row.year)) {
+      yearMap.set(row.year, {
+        year: Number(row.year),
+        count: 0,
+        cover_filename: row.cover_filename,
+        months: [],
+      });
+    }
+    const yr = yearMap.get(row.year)!;
+    const count = Number(row.count);
+    yr.count += count;
+    yr.months.push({ month: Number(row.month), count, cover_filename: row.cover_filename });
+  }
+
+  return { years: Array.from(yearMap.values()) };
+}
+
 // ---------- Date Range Search ----------
 
 export async function searchByDateRangeLogic(

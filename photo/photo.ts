@@ -845,6 +845,21 @@ export const searchPhotos = api(
 );
 
 /**
+ * Get a year/month timeline summary with counts and cover photos.
+ * Used by the iOS app for hierarchical year → month → photos navigation.
+ */
+export const getPhotoTimeline = api(
+  { expose: true, method: "GET", path: "/photos/timeline", auth: true },
+  async (): Promise<service.PhotoTimelineResponse> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    return await service.getPhotoTimelineLogic(userId);
+  }
+);
+
+/**
  * Search photos by date range, year, or year+month.
  * Parameters: from, to (ISO 8601 strings), year, month, limit
  */
