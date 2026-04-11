@@ -13,8 +13,8 @@ import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 
 const TripMap = defineAsyncComponent(() => import('../components/TripMap.vue'))
 import {
+  type ActiveView,
   type AlbumWithPhotos,
-  type AlbumPhoto,
   deleteAlbum,
   getPhotoFaces,
   getAlbum,
@@ -371,9 +371,7 @@ const viewOptions = [
 
 // Show shared-only options only for shared albums
 const availableViewOptions = computed(() => {
-  const isShared = album.value && album.value.role !== 'owner'
-    || (album.value?.photos?.some((p: AlbumPhoto) => p.curation_stats && p.curation_stats.member_count > 1))
-  if (isShared) return viewOptions
+  if (album.value?.is_shared || (album.value && album.value.role !== 'owner')) return viewOptions
   return viewOptions.filter(o => o.value !== 'consensus' && o.value !== 'others-favorites')
 })
 
@@ -411,58 +409,79 @@ onUnmounted(() => serviceHealth.stopPolling())
 
     <div v-if="album" class="subheader">
       <div class="header">
-        <div class="header-left">
-          <div class="header-left__title-row">
-            <h1 class="title">{{ album.name }}</h1>
-            <span :class="['role-badge', `role-badge--${album.role}`]">{{ album.role }}</span>
-            <div class="album-info-block">
-              <div v-if="displayMode !== 'map'" class="album-info-block__description">
-                <div v-if="!editingDescription" class="album-info-block__description-content">
-                  <span :class="{ 'album-info-block__description-text--empty': !album.description }" class="album-info-block__description-text">
-                    {{ album.description || 'Keine Beschreibung' }}
-                  </span>
-                  <Button v-if="canWrite" icon="pi pi-pencil" size="small" text @click="startEditDesc" class="album-info-block__edit-btn" />
-                </div>
-                <div v-else class="album-info-block__edit">
-                  <textarea v-model="descDraft" class="p-inputtextarea p-inputtext" rows="2" />
-                  <div class="album-info-block__edit-actions">
-                    <Button :loading="updatingAlbum" icon="pi pi-check" size="small" @click="saveDescription" />
-                    <Button :disabled="updatingAlbum" icon="pi pi-times" size="small" text @click="editingDescription = false" />
-                  </div>
-                </div>
-              </div>
-              <div class="album-info-block__meta">
-                <span class="album-info-block__meta-text">
-                  {{ album.photo_count }} {{ album.photo_count === 1 ? 'Foto' : 'Fotos' }}
-                  <template v-if="album.oldest_photo_at && album.newest_photo_at">
-                    • {{ new Date(album.oldest_photo_at).toLocaleDateString() }} – {{ new Date(album.newest_photo_at).toLocaleDateString() }}
-                  </template>
-                </span>
-              </div>
+        <!-- 1. Album name -->
+        <h1 class="header__title">{{ album.name }}</h1>
+
+        <!-- 2. Role badge -->
+        <span :class="['header__badge', `header__badge--${album.role}`]">{{ album.role }}</span>
+
+        <!-- 3. Description with edit -->
+        <div v-if="displayMode !== 'map'" class="header__description">
+          <div v-if="!editingDescription" class="header__description-view">
+            <span :class="{ 'header__description-text--empty': !album.description }" class="header__description-text">
+              {{ album.description || 'Keine Beschreibung' }}
+            </span>
+            <Button v-if="canWrite" icon="pi pi-pencil" size="small" text @click="startEditDesc" />
+          </div>
+          <div v-else class="header__description-edit">
+            <textarea v-model="descDraft" class="p-inputtextarea p-inputtext" rows="2" />
+            <div class="header__description-edit-actions">
+              <Button :loading="updatingAlbum" icon="pi pi-check" size="small" @click="saveDescription" />
+              <Button :disabled="updatingAlbum" icon="pi pi-times" size="small" text @click="editingDescription = false" />
             </div>
           </div>
         </div>
-        <div class="controls">
-          <Button v-if="isOwner" icon="pi pi-trash" size="small" text severity="danger" v-tooltip="'Album löschen'" @click="showDeleteDialog = true" />
-          <Button v-if="effectiveCoverPhotoId && displayMode !== 'map'" icon="pi pi-image" label="Cover fokussieren" size="small" text @click="scrollToCover" />
-          <div v-if="album.settings" class="control-group">
-            <label>Ansicht:</label>
-            <SelectButton v-model="album.settings.active_view" :options="availableViewOptions" optionValue="value" @change="handleSettingsChange">
-              <template #option="{ option }">
-                <i :class="option.icon" class="view-icon" />
-                <span class="view-label">{{ option.label }}</span>
-              </template>
-            </SelectButton>
-            <Button
-              v-if="album.settings?.active_view === 'others-favorites' && albumPhotos.length > 0"
-              icon="pi pi-heart-fill"
-              :label="`Alle favorisieren (${albumPhotos.length})`"
-              size="small"
-              severity="warn"
-              :loading="batchFavoriting"
-              @click="handleBatchFavoriteAll"
-            />
+
+        <!-- 4. Metadata -->
+        <div class="header__meta">
+          {{ album.photo_count }} {{ album.photo_count === 1 ? 'Foto' : 'Fotos' }}
+          <template v-if="album.oldest_photo_at && album.newest_photo_at">
+            &bull; {{ new Date(album.oldest_photo_at).toLocaleDateString() }} – {{ new Date(album.newest_photo_at).toLocaleDateString() }}
+          </template>
+        </div>
+
+        <!-- 5a. View switcher – DESKTOP (text labels) -->
+        <div v-if="album.settings" class="header__views-desktop">
+          <SelectButton v-model="album.settings.active_view" :options="availableViewOptions" optionLabel="label" optionValue="value" @change="handleSettingsChange" />
+          <Button
+            v-if="album.settings.active_view === 'others-favorites' && albumPhotos.length > 0"
+            icon="pi pi-heart-fill"
+            :label="`Alle favorisieren (${albumPhotos.length})`"
+            size="small"
+            severity="warn"
+            :loading="batchFavoriting"
+            @click="handleBatchFavoriteAll"
+          />
+        </div>
+
+        <!-- 5b. View switcher – MOBILE (icon-only) -->
+        <div v-if="album.settings" class="header__views-mobile">
+          <div class="mobile-view-switcher">
+            <button
+              v-for="opt in availableViewOptions"
+              :key="opt.value"
+              :class="['mobile-view-btn', { 'mobile-view-btn--active': album.settings!.active_view === opt.value }]"
+              @click="album.settings!.active_view = opt.value as ActiveView; handleSettingsChange()"
+            >
+              <i :class="opt.icon" />
+              <span v-if="album.settings!.active_view === opt.value" class="mobile-view-btn__label">{{ opt.label }}</span>
+            </button>
           </div>
+          <Button
+            v-if="album.settings.active_view === 'others-favorites' && albumPhotos.length > 0"
+            icon="pi pi-heart-fill"
+            size="small"
+            severity="warn"
+            :loading="batchFavoriting"
+            v-tooltip="'Alle favorisieren'"
+            @click="handleBatchFavoriteAll"
+          />
+        </div>
+
+        <!-- 6. Action buttons -->
+        <div class="header__actions">
+          <Button v-if="effectiveCoverPhotoId && displayMode !== 'map'" icon="pi pi-image" label="Cover fokussieren" size="small" text @click="scrollToCover" />
+          <Button v-if="isOwner" icon="pi pi-trash" size="small" text severity="danger" v-tooltip="'Album löschen'" @click="showDeleteDialog = true" />
         </div>
       </div>
     </div>
@@ -647,7 +666,7 @@ onUnmounted(() => serviceHealth.stopPolling())
 .album-detail-view {
   display: flex;
   flex-direction: column;
-  height: calc(100dvh - var(--menubar-height, 3.5rem));
+  height: calc(100dvh - var(--menubar-height, 3.5em));
   overflow: hidden;
 }
 
@@ -655,73 +674,67 @@ onUnmounted(() => serviceHealth.stopPolling())
   .album-detail-view { margin-inline: 0.5em; }
 }
 
-.album-detail-view .title { font-size: 1.5em; font-weight: 600; margin-block: 0.25em; }
-
 .subheader {
   flex-shrink: 0;
   background: var(--p-content-background);
   box-shadow: 0 2px 6px rgba(0,0,0,0.08);
 }
 
+/* ── Flat header flex container ────────────────────────────────────────── */
 .header {
   display: flex;
   flex-wrap: wrap;
-  justify-content: space-between;
   align-items: center;
-  padding: 1rem;
-  gap: 0.5em;
-  border-bottom: 1px solid var(--p-content-border-color);
+  justify-content: space-between;
+  padding: 0.75em 1em;
+  gap: 0.5em 0.75em;
 }
 
-.header-left { display: flex; min-width: 0; }
-.header-left__title-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.header__actions { display: flex; align-items: center; gap: 0.25em; }
 
-.role-badge {
-  font-size: 0.75rem;
-  padding: 0.2rem 0.5rem;
+.header__title {
+  font-size: 1.5em;
+  font-weight: 600;
+  margin: 0;
+}
+
+.header__badge {
+  font-size: 0.75em;
+  padding: 0.2em 0.5em;
   border-radius: 4px;
   background: var(--p-content-border-color);
   text-transform: uppercase;
 }
-.role-badge--owner { background: var(--p-red-100); color: var(--p-red-700); }
-.role-badge--contributor { background: var(--p-green-100); color: var(--p-green-700); }
+.header__badge--owner { background: var(--p-red-100); color: var(--p-red-700); }
+.header__badge--contributor { background: var(--p-green-100); color: var(--p-green-700); }
 
 @media (prefers-color-scheme: dark) {
-  .role-badge--owner { background: var(--p-red-900); color: var(--p-red-200); }
-  .role-badge--contributor { background: var(--p-green-900); color: var(--p-green-200); }
+  .header__badge--owner { background: var(--p-red-900); color: var(--p-red-200); }
+  .header__badge--contributor { background: var(--p-green-900); color: var(--p-green-200); }
 }
 
-.controls { display: flex; gap: 1em; align-items: center; flex-wrap: wrap; }
+.header__description {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.header__description-view { display: flex; align-items: center; gap: 0.5em; }
+.header__description-text { font-size: 0.9em; }
+.header__description-text--empty { color: var(--p-text-muted-color); font-style: italic; }
+.header__description-edit { display: flex; align-items: center; gap: 0.5em; width: 100%; }
+.header__description-edit textarea { flex: 1; min-height: 2.5em; }
+.header__description-edit-actions { display: flex; gap: 0.25em; }
 
-.control-group { display: flex; align-items: center; gap: 0.5rem; }
-.control-group label { font-size: 0.85rem; color: var(--p-text-muted-color); }
-
-/* ── Album info block (inside header-left) ─────────────────────────────── */
-.album-info-block {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem 1rem;
+.header__meta {
+  font-size: 0.85em;
+  color: var(--p-text-muted-color);
+  white-space: nowrap;
 }
 
-/* ── View icon in SelectButton ─────────────────────────────────────────── */
-.view-icon { margin-right: 0.4rem; font-size: 0.9rem; }
+/* Desktop view switcher: visible by default */
+.header__views-desktop { display: flex; align-items: center; gap: 0.5em; }
 
-.album-info-block__description {
-  flex: 1 1 24rem;
-  min-width: 16rem;
-  display: flex;
-  align-items: center;
-}
-
-.album-info-block__description-content { display: flex; align-items: center; gap: 0.5rem; width: 100%; }
-.album-info-block__description-text { font-size: 0.9rem; }
-.album-info-block__description-text--empty { color: var(--p-text-muted-color); font-style: italic; }
-.album-info-block__edit { display: flex; align-items: center; gap: 0.5rem; width: 100%; }
-.album-info-block__edit textarea { flex: 1; min-height: 2.5rem; }
-.album-info-block__edit-actions { display: flex; gap: 0.25rem; }
-.album-info-block__meta { display: flex; align-items: center; flex: 0 0 auto; }
-.album-info-block__meta-text { font-size: 0.85rem; color: var(--p-text-muted-color); white-space: nowrap; }
+/* Mobile view switcher: hidden by default */
+.header__views-mobile { display: none; }
 
 /* ── Three-column layout ─────────────────────────────────────────────────── */
 .gallery-layout {
@@ -733,7 +746,7 @@ onUnmounted(() => serviceHealth.stopPolling())
 
 .info-text {
   text-align: center;
-  padding: 3rem 1rem;
+  padding: 3em 1em;
   color: var(--p-text-muted-color);
 }
 
@@ -758,7 +771,7 @@ onUnmounted(() => serviceHealth.stopPolling())
 .mobile-fab {
   display: none;
   position: fixed;
-  bottom: 1.5rem;
+  bottom: 1.5em;
   z-index: var(--z-mobile-fab);
   width: 48px;
   height: 48px;
@@ -767,12 +780,12 @@ onUnmounted(() => serviceHealth.stopPolling())
   cursor: pointer;
   align-items: center;
   justify-content: center;
-  font-size: 1.1rem;
+  font-size: 1.1em;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
   transition: background 0.2s;
 }
 .mobile-fab--timeline {
-  left: 1rem;
+  left: 1em;
   background: var(--p-content-background);
   color: var(--p-primary-color);
   border: 1px solid var(--p-content-border-color);
@@ -794,7 +807,7 @@ onUnmounted(() => serviceHealth.stopPolling())
     display: block;
     position: fixed;
     left: 0;
-    top: var(--menubar-height, 3.5rem);
+    top: var(--menubar-height, 3.5em);
     bottom: 0;
     width: 80px;
     z-index: var(--z-mobile-drawer);
@@ -813,7 +826,7 @@ onUnmounted(() => serviceHealth.stopPolling())
     bottom: 0;
     left: 0;
     right: 0;
-    max-height: calc(100dvh - var(--menubar-height, 3.5rem));
+    max-height: calc(100dvh - var(--menubar-height, 3.5em));
     z-index: var(--z-mobile-drawer);
     background: var(--p-content-background);
     border-radius: 16px 16px 0 0;
@@ -825,7 +838,6 @@ onUnmounted(() => serviceHealth.stopPolling())
   }
   .sidebar-sheet.is-open { transform: translateY(0); }
 
-  /* Close-Button schwebt sticky über dem Content, kein separater Header */
   .sidebar-sheet-header {
     position: sticky;
     top: 0;
@@ -847,11 +859,11 @@ onUnmounted(() => serviceHealth.stopPolling())
     color: var(--p-text-color);
     padding: 0;
     border-radius: 50%;
-    font-size: 0.85rem;
-    width: 1.75rem;
-    height: 1.75rem;
-    margin-top: 0.5rem;
-    margin-right: 0.5rem;
+    font-size: 0.85em;
+    width: 1.75em;
+    height: 1.75em;
+    margin-top: 0.5em;
+    margin-right: 0.5em;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
     flex-shrink: 0;
   }
@@ -859,64 +871,52 @@ onUnmounted(() => serviceHealth.stopPolling())
     background: var(--p-content-hover-background);
   }
 
-  .subheader .controls :deep(.p-button-label) { display: none; }
-  .subheader .controls :deep(.p-button) { padding: 0.5rem; min-width: 2.25rem; }
-  /* Icon-only for all standalone buttons inside control-group on mobile */
-  .control-group > :deep(.p-button .p-button-label) { display: none; }
-  .control-group > :deep(.p-button) { padding: 0.35rem; min-width: 2rem; }
+  /* Swap view switcher variants */
+  .header__views-desktop { display: none; }
+  .header__views-mobile { display: flex; flex-wrap: wrap; gap: 0.35em; align-items: center; flex: 1 1 100%; order: 10; }
 
-  /* Compact sticky header on mobile */
-  .header {
-    flex-wrap: wrap;
-    padding: 0.35rem 0.65rem;
-    gap: 0.2rem;
-  }
-  .header-left { flex: 1; min-width: 0; gap: 0.1rem; }
-  .album-detail-view .title { font-size: 1.1em; }
+  /* Compact header on mobile */
+  .header { padding: 0.35em 0.65em; gap: 0.25em 0.5em; }
+  .header__title { font-size: 1.1em; }
+  .header__description { flex: 1 1 100%; }
+  .header__description-text--empty { display: none; }
 
-  /* Flatten .controls into the header flex container so icon-buttons stay
-     on the title row and only the SelectButton wraps to a new full row. */
-  .controls { display: contents; }
-  .subheader .controls > :deep(.p-button) {
-    flex: 0 0 auto;
-    padding: 0.35rem;
-    min-width: 2rem;
-  }
-  .control-group {
+  /* ── Mobile view switcher (custom segmented control) ──────────────────── */
+  .mobile-view-switcher {
     display: flex;
-    flex: 1 1 100%;
-    order: 10;
+    border: 1px solid var(--p-content-border-color);
+    border-radius: var(--p-border-radius, 6px);
+    overflow: hidden;
   }
-  .control-group label { display: none; }
-  .subheader .control-group :deep(.p-selectbutton) { width: 100%; }
-  .subheader .control-group :deep(.p-selectbutton .p-button) {
-    flex: 0 1 auto;
-    padding: 0.35rem 0.5rem;
-    font-size: 0.78rem;
-    min-width: unset;
+  .mobile-view-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3em;
+    padding: 0.4em 0.5em;
+    border: none;
+    background: var(--p-content-background);
+    color: var(--p-text-color);
+    font-size: 0.8em;
+    cursor: pointer;
+    transition: background 0.15s;
   }
-  /* Active button gets more space to show icon + label */
-  .subheader .control-group :deep(.p-selectbutton .p-button.p-highlight) {
-    flex: 1 1 auto;
+  .mobile-view-btn + .mobile-view-btn {
+    border-left: 1px solid var(--p-content-border-color);
   }
-  /* Hide labels on non-active view buttons, show only icon */
-  .subheader .control-group :deep(.p-selectbutton .p-button:not(.p-highlight)) .view-label {
-    display: none;
+  .mobile-view-btn--active {
+    flex: 1;
+    background: var(--p-primary-color);
+    color: var(--p-primary-contrast-color, #fff);
+    font-weight: 600;
   }
-  .subheader .control-group :deep(.p-selectbutton .p-button:not(.p-highlight)) .view-icon {
-    margin-right: 0;
+  .mobile-view-btn__label {
+    white-space: nowrap;
   }
-
-  /* Compact album-info-block inside header-left */
-  .album-info-block {
-    gap: 0.3rem;
-  }
-  .album-info-block__description { flex: 0 0 auto; min-width: unset; }
-  .album-info-block__description-text--empty { display: none; }
 }
 
 /* ── Delete dialog ──────────────────────────────────────────────────────── */
-.dialog-body { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.5rem 0; }
-.dialog-body .muted { color: var(--p-text-muted-color); font-size: 0.9rem; }
+.dialog-body { display: flex; flex-direction: column; gap: 0.5em; padding: 0.5em 0; }
+.dialog-body .muted { color: var(--p-text-muted-color); font-size: 0.9em; }
 
 </style>
