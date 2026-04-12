@@ -3060,13 +3060,28 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
       const memberSet = new Set(memberPhotoIds);
 
       let alreadyReviewed = false;
-      for (const [, reviewedSet] of reviewedMemberSets) {
+      const obsoleteReviewedIds: number[] = [];
+      for (const [gid, reviewedSet] of reviewedMemberSets) {
         if (memberSet.size === reviewedSet.size && [...memberSet].every((id) => reviewedSet.has(id))) {
           alreadyReviewed = true;
           break;
         }
+        // New group is a strict superset of a reviewed one — the reviewed
+        // snapshot is obsolete (e.g. a photo was added to a shared album and
+        // the group grew). Mark the old reviewed row for deletion so the user
+        // can re-review the expanded group once.
+        if (reviewedSet.size < memberSet.size && [...reviewedSet].every((id) => memberSet.has(id))) {
+          obsoleteReviewedIds.push(gid);
+        }
       }
       if (alreadyReviewed) continue;
+
+      if (obsoleteReviewedIds.length > 0) {
+        await dbExec(
+          tx.delete(photoGroups).where(inArray(photoGroups.id, obsoleteReviewedIds))
+        );
+        for (const gid of obsoleteReviewedIds) reviewedMemberSets.delete(gid);
+      }
 
       let bestCenter = memberIndices[0];
       let bestAvgSim = -1;

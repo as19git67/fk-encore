@@ -98,7 +98,15 @@ const albumPhotoGroups = computed<PhotoGroup[]>(() => {
 
 const photoToGroup = computed(() => {
   const map = new Map<number, PhotoGroup>()
+  // Reviewed first, unreviewed last — so unreviewed groups win for photos
+  // that belong to both (happens transiently when members were added and a
+  // new superset group was created alongside the old reviewed one).
   for (const group of albumPhotoGroups.value) {
+    if (!group.reviewed_at) continue
+    for (const pid of group.photo_ids) map.set(pid, group)
+  }
+  for (const group of albumPhotoGroups.value) {
+    if (group.reviewed_at) continue
     for (const pid of group.photo_ids) map.set(pid, group)
   }
   return map
