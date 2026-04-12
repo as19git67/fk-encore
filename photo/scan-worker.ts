@@ -29,7 +29,7 @@ import {
   indexPhotoLandmarks,
   indexPhotoQuality,
   indexPhotoGeocoding,
-  findPhotoGroupsLogic,
+  scheduleRegroup,
   cleanupOrphanedPersons,
   hasFacesForPhoto,
   enqueueFaceAssignmentForAllUsers,
@@ -135,13 +135,13 @@ class ScanWorker {
       }
 
       // After embedding completes, re-group similar photos for all users
-      // who can see this photo (owner + shared album members).
+      // who can see this photo (owner + shared album members). Runs are
+      // serialized per user via scheduleRegroup to avoid concurrent passes
+      // clobbering each other's results.
       if (this.service === "embedding") {
         getUsersWithPhotoAccess(job.photo_id).then((userIds) => {
           for (const uid of userIds) {
-            findPhotoGroupsLogic(uid).catch((err) =>
-              console.error(`[scan-worker] grouping error for user ${uid} after embedding job ${job.id}:`, err),
-            );
+            scheduleRegroup(uid);
           }
         }).catch((err) =>
           console.error(`[scan-worker] grouping lookup error after embedding job ${job.id}:`, err),

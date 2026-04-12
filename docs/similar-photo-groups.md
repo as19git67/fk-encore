@@ -91,6 +91,29 @@ Das hat zwei Konsequenzen:
 Die Aufrufe sind Fire-and-Forget mit Error-Logging, damit das API-Response
 nicht blockiert wird.
 
+### Serialisierung pro User
+
+Alle Trigger laufen durch `scheduleRegroup(userId)` (`photo.service.ts`). Diese
+Funktion garantiert:
+
+- **Mutex**: Pro User läuft höchstens eine `findPhotoGroupsLogic`-Instanz
+  gleichzeitig.
+- **Coalescing**: Kommen während einer laufenden Berechnung mehrere weitere
+  Trigger an, werden sie zu genau einem Folge-Durchlauf zusammengefasst, der
+  anschließend den neuesten DB-Stand sieht.
+
+Das ist wichtig, weil `findPhotoGroupsLogic` zu Beginn seiner Transaktion alle
+unreviewten Gruppen des Users löscht und anschließend die frisch berechneten
+Cluster einfügt. Ohne Serialisierung könnten zwei parallele Trigger (z. B. ein
+schneller "Foto 1 und Foto 2 ins Album"-Doppelklick) folgendermaßen
+interagieren: der ältere Trigger hat einen kleineren Foto-Snapshot gelesen
+(`[1]`), berechnet deshalb kein Cluster; commitet danach sein `DELETE` – und
+räumt die Gruppe `{1,2}` weg, die der neuere Trigger gerade eingefügt hatte.
+
+Der manuelle Endpoint `POST /photos/find-groups` wartet ebenfalls auf den
+Scheduler (inkl. eines evtl. bereits vorgemerkten Folge-Durchlaufs) bevor er
+die aktuellen Gruppenstatistiken zurückgibt.
+
 ## Darstellung im Frontend
 
 ### Generelle Mechanik

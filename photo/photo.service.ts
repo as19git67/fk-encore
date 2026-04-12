@@ -1897,14 +1897,12 @@ export async function addPhotoToAlbumLogic(userId: number, req: AddPhotoToAlbumR
   }
 
   // Re-run similar-photo grouping for shared users so the new photo is considered.
-  // Fire-and-forget so the API responds immediately.
+  // Scheduled per-user so rapid consecutive adds don't race each other.
   const sharedUsersForGrouping = await dbAll<{ user_id: number }>(
     db.select({ user_id: albumShares.user_id }).from(albumShares).where(eq(albumShares.album_id, req.albumId))
   );
   for (const { user_id } of sharedUsersForGrouping) {
-    findPhotoGroupsLogic(user_id).catch(err => {
-      console.error(`Error re-grouping photos for shared user ${user_id}:`, err);
-    });
+    scheduleRegroup(user_id);
   }
 
   return { success: true };
@@ -2037,9 +2035,7 @@ export async function shareAlbumLogic(userId: number, req: ShareAlbumRequest): P
   });
 
   // Re-run similar-photo grouping for the new shared user so shared photos are considered.
-  findPhotoGroupsLogic(req.userId).catch(err => {
-    console.error(`Error re-grouping photos for newly shared user ${req.userId}:`, err);
-  });
+  scheduleRegroup(req.userId);
 
   return { success: true };
 }
@@ -2128,9 +2124,7 @@ export async function removeAlbumShareLogic(userId: number, req: RemoveAlbumShar
   }
 
   // Re-run grouping so removed shared photos are no longer in groups.
-  findPhotoGroupsLogic(req.userId).catch(err => {
-    console.error(`Error re-grouping photos after unshare for user ${req.userId}:`, err);
-  });
+  scheduleRegroup(req.userId);
 
   return { success: true };
 }
@@ -2931,6 +2925,49 @@ class UnionFind {
 const SIMILARITY_THRESHOLD = 0.90;
 const TIME_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
 
+// Serialize similar-photo regrouping per user.
+// `findPhotoGroupsLogic` reads the user's accessible photos, deletes all
+// un-reviewed groups and re-inserts them. Concurrent runs for the same user
+// (e.g. triggered by rapid album-photo adds) race on the delete/insert and
+// can wipe out groups a parallel run just created. This scheduler guarantees:
+//   - At most one run per user is in flight.
+//   - Triggers arriving during a run are collapsed into exactly one follow-up
+//     run that sees the latest state.
+const groupingRunning = new Map<number, Promise<void>>();
+const groupingPending = new Set<number>();
+
+/**
+ * Runs `findPhotoGroupsLogic(userId)` with a per-user mutex + coalescing:
+ *   - If no run is active, starts one immediately.
+ *   - If one is active, marks a follow-up and returns the in-flight promise,
+ *     which only resolves after the follow-up pass completes.
+ * The returned promise lets awaiters (e.g. the manual POST endpoint) block
+ * until the regroup they asked for has actually happened.
+ */
+export function scheduleRegroup(userId: number): Promise<void> {
+  const existing = groupingRunning.get(userId);
+  if (existing) {
+    groupingPending.add(userId);
+    return existing;
+  }
+  const run = (async () => {
+    try {
+      do {
+        groupingPending.delete(userId);
+        try {
+          await findPhotoGroupsLogic(userId);
+        } catch (err) {
+          console.error(`[regroup] error for user ${userId}:`, err);
+        }
+      } while (groupingPending.has(userId));
+    } finally {
+      groupingRunning.delete(userId);
+    }
+  })();
+  groupingRunning.set(userId, run);
+  return run;
+}
+
 export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsResponse> {
   // 1. Get all user photos with timestamps (own + shared album photos)
   const ownPhotos = await dbAll<{ id: number; taken_at: string | null; created_at: string | null }>(
@@ -3136,6 +3173,28 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
 
   console.log(`Photo grouping for user ${userId}: ${groupsCreated} groups created, ${totalPhotosGrouped} photos grouped`);
   return { groups_created: groupsCreated, total_photos_grouped: totalPhotosGrouped };
+}
+
+/**
+ * Summary of the current grouping state for a user. Used by the manual
+ * POST /photos/find-groups endpoint after scheduleRegroup() resolves, since
+ * the scheduler doesn't surface the last run's counts directly.
+ */
+export async function countUserGroupStats(userId: number): Promise<FindGroupsResponse> {
+  const rows = await dbAll<{ group_count: number; member_count: number }>(
+    db.select({
+      group_count: sql<number>`COUNT(DISTINCT ${photoGroups.id})`.as('group_count'),
+      member_count: sql<number>`COUNT(${photoGroupMembers.photo_id})`.as('member_count'),
+    })
+      .from(photoGroups)
+      .leftJoin(photoGroupMembers, eq(photoGroupMembers.group_id, photoGroups.id))
+      .where(eq(photoGroups.user_id, userId))
+  );
+  const stats = rows[0] ?? { group_count: 0, member_count: 0 };
+  return {
+    groups_created: Number(stats.group_count) || 0,
+    total_photos_grouped: Number(stats.member_count) || 0,
+  };
 }
 
 export async function listPhotoGroupsLogic(userId: number): Promise<ListGroupsResponse> {
