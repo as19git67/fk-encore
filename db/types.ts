@@ -556,6 +556,33 @@ export interface ListPhotosResponse {
   photos: PhotoWithCuration[];
 }
 
+/**
+ * Lightweight photo entry for the gallery grid index.
+ * Contains only the fields needed to render thumbnails and group by date —
+ * heavy fields (location_*, ai_quality_details, description, hash, GPS) are
+ * loaded on demand via the /photos/details endpoint.
+ */
+export interface PhotoIndexEntry {
+  id: number;
+  user_id: number;
+  filename: string;
+  original_name: string;
+  mime_type: string;
+  size: number;
+  taken_at?: string;
+  created_at: string;
+  curation_status: CurationStatus;
+  auto_crop?: { x: number; y: number };
+}
+
+export interface ListPhotoIndexResponse {
+  photos: PhotoIndexEntry[];
+}
+
+export interface PhotoDetailsBatchResponse {
+  photos: PhotoWithCuration[];
+}
+
 export interface PhotoGroup {
   id: number;
   user_id: number;

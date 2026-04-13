@@ -53,6 +53,9 @@ import type {
   PublicAlbumResponse,
   ListAlbumsResponse,
   ListPhotosResponse,
+  ListPhotoIndexResponse,
+  PhotoIndexEntry,
+  PhotoDetailsBatchResponse,
   DeleteResponse,
   Person,
   ListPersonsResponse,
@@ -957,6 +960,150 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
 
   return {
     photos: filtered.map((r) => ({
+      id: r.id,
+      user_id: r.user_id,
+      filename: r.filename,
+      original_name: r.original_name,
+      mime_type: r.mime_type,
+      size: r.size,
+      hash: r.hash ?? undefined,
+      taken_at: r.taken_at ?? undefined,
+      created_at: r.created_at ?? "",
+      curation_status: (r.curation_status as CurationStatus) ?? "visible",
+      latitude: r.latitude ?? undefined,
+      longitude: r.longitude ?? undefined,
+      location_name: r.location_name ?? undefined,
+      location_city: r.location_city ?? undefined,
+      location_country: r.location_country ?? undefined,
+      location_short: r.location_short ?? undefined,
+      ai_quality_score: r.ai_quality_score ?? undefined,
+      ai_quality_details: r.ai_quality_details ?? undefined,
+      auto_crop: r.auto_crop ?? undefined,
+      description: r.description ?? undefined,
+    })),
+  };
+}
+
+/**
+ * Lightweight gallery index: returns only the columns required to render the
+ * grid (id, filename, dates, curation_status, auto_crop) and group photos by
+ * year/month. Heavy fields (location_*, ai_quality_*, description, hash, GPS)
+ * are loaded on demand via getPhotoDetailsBatchLogic.
+ *
+ * Designed to make the initial photo list load fast even with many thousands
+ * of photos.
+ */
+export async function listPhotoIndexLogic(
+  userId: number,
+  showHidden: boolean = false
+): Promise<ListPhotoIndexResponse> {
+  const rows = await dbAll<{
+    id: number; user_id: number; filename: string; original_name: string;
+    mime_type: string; size: number;
+    taken_at: string | null; created_at: string | null;
+    curation_status: string | null;
+    auto_crop: { x: number; y: number } | null;
+  }>(
+    db
+      .select({
+        id: photos.id,
+        user_id: photos.user_id,
+        filename: photos.filename,
+        original_name: photos.original_name,
+        mime_type: photos.mime_type,
+        size: photos.size,
+        taken_at: photos.taken_at,
+        created_at: photos.created_at,
+        curation_status: photoCuration.status,
+        auto_crop: photos.auto_crop,
+      })
+      .from(photos)
+      .leftJoin(
+        photoCuration,
+        and(eq(photos.id, photoCuration.photo_id), eq(photoCuration.user_id, userId))
+      )
+      .where(eq(photos.user_id, userId))
+      .orderBy(sql`${photoDateOrder} DESC`)
+  );
+
+  const filtered = showHidden
+    ? rows
+    : rows.filter((r) => (r.curation_status ?? "visible") !== "hidden");
+
+  const result: PhotoIndexEntry[] = filtered.map((r) => ({
+    id: r.id,
+    user_id: r.user_id,
+    filename: r.filename,
+    original_name: r.original_name,
+    mime_type: r.mime_type,
+    size: r.size,
+    taken_at: r.taken_at ?? undefined,
+    created_at: r.created_at ?? "",
+    curation_status: (r.curation_status as CurationStatus) ?? "visible",
+    auto_crop: r.auto_crop ?? undefined,
+  }));
+
+  return { photos: result };
+}
+
+/**
+ * Returns full PhotoWithCuration records for a list of photo IDs that belong
+ * to the given user. Used by the frontend to progressively hydrate the photo
+ * index with the heavy fields needed for the detail sidebar/fullscreen view.
+ *
+ * IDs not owned by the user are silently skipped (no leak of existence).
+ */
+export async function getPhotoDetailsBatchLogic(
+  userId: number,
+  ids: number[]
+): Promise<PhotoDetailsBatchResponse> {
+  if (ids.length === 0) return { photos: [] };
+
+  const rows = await dbAll<{
+    id: number; user_id: number; filename: string; original_name: string;
+    mime_type: string; size: number; hash: string | null; taken_at: string | null;
+    created_at: string | null; curation_status: string | null;
+    latitude: number | null; longitude: number | null;
+    location_name: string | null; location_city: string | null; location_country: string | null;
+    location_short: string | null;
+    ai_quality_score: number | null;
+    ai_quality_details: Record<string, number> | null;
+    auto_crop: { x: number; y: number } | null;
+    description: string | null;
+  }>(
+    db
+      .select({
+        id: photos.id,
+        user_id: photos.user_id,
+        filename: photos.filename,
+        original_name: photos.original_name,
+        mime_type: photos.mime_type,
+        size: photos.size,
+        hash: photos.hash,
+        taken_at: photos.taken_at,
+        created_at: photos.created_at,
+        curation_status: photoCuration.status,
+        latitude: photos.latitude,
+        longitude: photos.longitude,
+        location_name: photos.location_name,
+        location_city: photos.location_city,
+        location_country: photos.location_country,
+        location_short: photos.location_short,
+        ai_quality_score: photos.ai_quality_score,
+        ai_quality_details: photos.ai_quality_details,
+        auto_crop: photos.auto_crop,
+        description: photos.description,
+      })
+      .from(photos)
+      .leftJoin(
+        photoCuration,
+        and(eq(photos.id, photoCuration.photo_id), eq(photoCuration.user_id, userId))
+      )
+      .where(and(eq(photos.user_id, userId), inArray(photos.id, ids)))
+  );
+
+  return {
+    photos: rows.map((r) => ({
       id: r.id,
       user_id: r.user_id,
       filename: r.filename,

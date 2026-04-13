@@ -40,9 +40,22 @@ export function usePhotoGrouping(
     const groupMap = options?.photoToGroup?.value ?? new Map<number, PhotoGroup>()
     const sort = options?.sortBy?.value ?? 'date'
 
-    const basePhotos = ids !== null
-      ? ids.map(id => allPhotos.find(p => p.id === id)).filter((p): p is Photo => p !== undefined)
-      : allPhotos
+    // Pre-build id → index map once. Avoids O(n²) `allPhotos.indexOf(photo)`
+    // inside the per-photo loops below.
+    const indexById = new Map<number, number>()
+    for (let i = 0; i < allPhotos.length; i++) indexById.set(allPhotos[i]!.id, i)
+    const idxOf = (p: Photo) => indexById.get(p.id) ?? -1
+
+    let basePhotos: Photo[]
+    if (ids !== null) {
+      const byId = new Map<number, Photo>()
+      for (const p of allPhotos) byId.set(p.id, p)
+      basePhotos = ids
+        .map(id => byId.get(id))
+        .filter((p): p is Photo => p !== undefined)
+    } else {
+      basePhotos = allPhotos
+    }
 
     if (sort === 'quality') {
       const tiers = [
@@ -73,7 +86,7 @@ export function usePhotoGrouping(
           months: [{
             month: '',
             sectionId,
-            photos: tierPhotos.map(photo => ({ photo, index: allPhotos.indexOf(photo) })),
+            photos: tierPhotos.map(photo => ({ photo, index: idxOf(photo) })),
           }],
         })
       })
@@ -84,7 +97,7 @@ export function usePhotoGrouping(
           months: [{
             month: '',
             sectionId: 'quality-unscored',
-            photos: unscored.map(photo => ({ photo, index: allPhotos.indexOf(photo) })),
+            photos: unscored.map(photo => ({ photo, index: idxOf(photo) })),
           }],
         })
       }
@@ -116,7 +129,7 @@ export function usePhotoGrouping(
 
       const stackGroup = ids === null ? groupMap.get(photo.id) : undefined
       const group = stackGroup && !stackGroup.reviewed_at ? stackGroup : undefined
-      monthGroup.photos.push({ photo, index: allPhotos.indexOf(photo), group })
+      monthGroup.photos.push({ photo, index: idxOf(photo), group })
     })
     return groups
   })
