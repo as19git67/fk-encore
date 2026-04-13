@@ -102,6 +102,29 @@ function onHideClick() {
 function onFavoriteClick() {
   emit('toggle-favorite', props.photo.id, props.photo.curation_status)
 }
+
+// Explicit keyboard activation for Hide / Favorite. Without this, pressing
+// Space or Enter on a Tab-focused Hide / Fav button sometimes does not fire
+// the native click — the button re-renders synchronously when
+// `photo.curation_status` changes (icon + severity + tooltip all depend on
+// it), and the native Space/Enter → click synthesis can race with that
+// update cycle. The Details and Cover buttons do not have that problem
+// because their rendered props are driven by stable flags.
+function onHideKeydown(e: KeyboardEvent) {
+  if (e.key === ' ' || e.key === 'Enter') {
+    e.preventDefault()
+    e.stopPropagation()
+    onHideClick()
+  }
+}
+
+function onFavoriteKeydown(e: KeyboardEvent) {
+  if (e.key === ' ' || e.key === 'Enter') {
+    e.preventDefault()
+    e.stopPropagation()
+    onFavoriteClick()
+  }
+}
 </script>
 
 <template>
@@ -158,6 +181,7 @@ function onFavoriteClick() {
               rounded text
               :severity="photo.curation_status === 'hidden' ? 'danger' : 'secondary'"
               @click="onHideClick"
+              @keydown="onHideKeydown"
               v-tooltip.bottom="photo.curation_status === 'hidden' ? 'Wiederherstellen' : 'Ausblenden'"
             />
             <Button
@@ -166,6 +190,7 @@ function onFavoriteClick() {
               rounded text
               :severity="photo.curation_status === 'favorite' ? 'warn' : 'secondary'"
               @click="onFavoriteClick"
+              @keydown="onFavoriteKeydown"
               v-tooltip.bottom="photo.curation_status === 'favorite' ? 'Favorit entfernen' : 'Als Favorit markieren'"
             />
           </slot>
