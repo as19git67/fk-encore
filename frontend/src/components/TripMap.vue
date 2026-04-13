@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { ref, toRef, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, toRef, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import type { Photo } from '../api/photos'
@@ -17,7 +17,7 @@ const emit = defineEmits<{
   'open-fullscreen': [stopPhotos: Photo[], startIndex: number]
 }>()
 
-const { stops, photosWithoutGps, dayPaths, dayTransitions, dayColorMap, bounds } =
+const { stops, photosWithoutGps, dayPaths, dayTransitions, dayColorMap, uniqueDays, bounds } =
   usePhotoStops(toRef(props, 'photos'))
 
 const mapContainer = ref<HTMLElement | null>(null)
@@ -27,6 +27,62 @@ const markers: L.Marker[] = []
 const polylines: L.Polyline[] = []
 
 const selectedStopId = ref<number | null>(null)
+
+// Track which days are currently expanded in the timeline
+const expandedDays = ref<Set<string>>(new Set())
+
+// Group stops by day while preserving chronological order
+const stopsByDay = computed<Map<string, Stop[]>>(() => {
+  const map = new Map<string, Stop[]>()
+  for (const stop of stops.value) {
+    if (!map.has(stop.day)) map.set(stop.day, [])
+    map.get(stop.day)!.push(stop)
+  }
+  return map
+})
+
+// Flat list of stop IDs currently visible in the timeline, taking the
+// expanded/collapsed state of each day into account. For a collapsed
+// day only the first (cover) stop is visible.
+const visibleStopIds = computed<number[]>(() => {
+  const ids: number[] = []
+  for (const day of uniqueDays.value) {
+    const dayStops = stopsByDay.value.get(day) ?? []
+    if (dayStops.length === 0) continue
+    if (expandedDays.value.has(day)) {
+      for (const s of dayStops) ids.push(s.id)
+    } else {
+      ids.push(dayStops[0]!.id)
+    }
+  }
+  return ids
+})
+
+function formatDayLabel(day: string): string {
+  // day = YYYY-MM-DD → DD. Mon
+  const d = new Date(day + 'T00:00:00')
+  return d.toLocaleDateString('de-DE', { day: '2-digit', month: 'short' })
+}
+
+function toggleDay(day: string) {
+  if (expandedDays.value.has(day)) {
+    expandedDays.value.delete(day)
+  } else {
+    expandedDays.value.add(day)
+  }
+  // Trigger reactivity on a Set in a ref
+  expandedDays.value = new Set(expandedDays.value)
+}
+
+function handleDayCardClick(day: string) {
+  const dayStops = stopsByDay.value.get(day) ?? []
+  const first = dayStops[0]
+  if (!first) return
+  if (dayStops.length > 1) {
+    toggleDay(day)
+  }
+  selectStop(first.id)
+}
 
 // ── Map initialization ───────────────────────────────────────────────────────
 
@@ -88,18 +144,30 @@ function selectStop(stopId: number, panMap = true) {
   const stop = stops.value.find(s => s.id === stopId)
   if (!stop || !map) return
 
+  // Auto-expand the day of the selected stop if it's not the cover/first stop
+  // (e.g. when the stop is selected via a map marker and its day is collapsed)
+  const dayStops = stopsByDay.value.get(stop.day) ?? []
+  if (dayStops.length > 1 && dayStops[0]!.id !== stopId && !expandedDays.value.has(stop.day)) {
+    expandedDays.value = new Set(expandedDays.value).add(stop.day)
+  }
+
   if (panMap) {
     map.flyTo([stop.lat, stop.lng], 15, { duration: 0.5 })
   }
 
-  // Scroll timeline to selected stop
-  scrollTimelineToStop(stopId)
+  // Scroll timeline to selected stop (wait for DOM to update if day just expanded)
+  nextTick(() => scrollTimelineToStop(stopId))
 }
 
 function scrollTimelineToStop(stopId: number) {
   const container = timelineContainer.value
   if (!container) return
-  const el = container.querySelector(`[data-stop-id="${stopId}"]`) as HTMLElement | null
+  let el = container.querySelector(`[data-stop-id="${stopId}"]`) as HTMLElement | null
+  // If the stop isn't directly rendered (collapsed day), scroll to the day group
+  if (!el) {
+    const stop = stops.value.find(s => s.id === stopId)
+    if (stop) el = container.querySelector(`[data-day="${stop.day}"]`) as HTMLElement | null
+  }
   if (!el) return
   const containerRect = container.getBoundingClientRect()
   const elRect = el.getBoundingClientRect()
@@ -200,14 +268,33 @@ function formatStopDate(stop: Stop): string {
 
 function navigateToPrevStop() {
   if (selectedStopId.value == null || stops.value.length === 0) return
-  const idx = stops.value.findIndex(s => s.id === selectedStopId.value)
-  if (idx > 0) selectStop(stops.value[idx - 1]!.id)
+  const visible = visibleStopIds.value
+  const idx = visible.indexOf(selectedStopId.value)
+  if (idx > 0) selectStop(visible[idx - 1]!)
 }
 
 function navigateToNextStop() {
   if (selectedStopId.value == null || stops.value.length === 0) return
-  const idx = stops.value.findIndex(s => s.id === selectedStopId.value)
-  if (idx >= 0 && idx < stops.value.length - 1) selectStop(stops.value[idx + 1]!.id)
+  const curr = stops.value.find(s => s.id === selectedStopId.value)
+  if (!curr) return
+
+  const dayStops = stopsByDay.value.get(curr.day) ?? []
+  const isCollapsed = !expandedDays.value.has(curr.day)
+  const isFirstOfDay = dayStops[0]?.id === curr.id
+
+  // If on a collapsed multi-stop day, expand it and advance to the next
+  // sibling within the day (as per issue #71: "expands automatically when
+  // on the day and going right").
+  if (isCollapsed && isFirstOfDay && dayStops.length > 1) {
+    expandedDays.value = new Set(expandedDays.value).add(curr.day)
+    nextTick(() => selectStop(dayStops[1]!.id))
+    return
+  }
+
+  // Otherwise: move forward through the currently visible items
+  const visible = visibleStopIds.value
+  const idx = visible.indexOf(curr.id)
+  if (idx >= 0 && idx < visible.length - 1) selectStop(visible[idx + 1]!)
 }
 
 function handleKeydown(e: KeyboardEvent) {
@@ -229,6 +316,9 @@ onUnmounted(() => {
 })
 
 watch(() => props.photos, () => {
+  // Reset collapse state when the underlying photo set changes
+  expandedDays.value = new Set()
+  selectedStopId.value = null
   renderContent()
 }, { deep: true })
 
@@ -255,28 +345,100 @@ function handleNoGpsPhotoClick(photo: Photo) {
         <span v-if="albumDescription" class="trip-timeline-album-desc">— {{ albumDescription }}</span>
       </div>
       <div ref="timelineContainer" class="trip-timeline">
-      <div
-        v-for="(stop, index) in stops"
-        :key="stop.id"
-        :data-stop-id="stop.id"
-        :class="['trip-timeline-item', { 'trip-timeline-item--selected': stop.id === selectedStopId }]"
-        @click="selectStop(stop.id)"
-      >
-        <div class="trip-timeline-thumb">
-          <img :src="getPhotoUrl(stop.coverPhoto.filename, 96)" :alt="getStopLabel(stop)" />
-        </div>
-        <div class="trip-timeline-info">
-          <span class="trip-timeline-label">{{ getStopLabel(stop) }}</span>
-          <span class="trip-timeline-date">{{ formatStopDate(stop) }}</span>
-          <span class="trip-timeline-count">{{ stop.photos.length }} {{ stop.photos.length === 1 ? 'Foto' : 'Fotos' }}</span>
-        </div>
-        <!-- Connector line between items -->
-        <div
-          v-if="index < stops.length - 1"
-          class="trip-timeline-connector"
-          :style="{ background: dayColorMap.get(stop.day) }"
-        />
-      </div>
+        <template v-for="day in uniqueDays" :key="day">
+          <div
+            class="trip-timeline-day-group"
+            :class="{ 'trip-timeline-day-group--expanded': expandedDays.has(day) }"
+            :data-day="day"
+          >
+            <!-- Day "cover" card (representative of the whole day). In
+                 collapsed mode this is the only visible item for the day;
+                 clicking it toggles expansion when the day has >1 stop. -->
+            <div
+              v-if="stopsByDay.get(day) && stopsByDay.get(day)!.length > 0"
+              :data-stop-id="stopsByDay.get(day)![0]!.id"
+              :class="[
+                'trip-timeline-item',
+                'trip-timeline-item--day',
+                {
+                  'trip-timeline-item--selected': stopsByDay.get(day)![0]!.id === selectedStopId,
+                  'trip-timeline-item--expandable': stopsByDay.get(day)!.length > 1,
+                  'trip-timeline-item--expanded': expandedDays.has(day) && stopsByDay.get(day)!.length > 1,
+                },
+              ]"
+              :title="stopsByDay.get(day)!.length > 1
+                ? (expandedDays.has(day) ? 'Tag einklappen' : 'Tag ausklappen')
+                : getStopLabel(stopsByDay.get(day)![0]!)"
+              @click="handleDayCardClick(day)"
+            >
+              <div class="trip-timeline-thumb-wrap">
+                <!-- Stacked effect hint that the day holds multiple stops -->
+                <div
+                  v-if="stopsByDay.get(day)!.length > 1 && !expandedDays.has(day)"
+                  class="trip-timeline-stack-hint"
+                  :style="{ borderColor: dayColorMap.get(day) }"
+                />
+                <div class="trip-timeline-thumb">
+                  <img
+                    :src="getPhotoUrl(stopsByDay.get(day)![0]!.coverPhoto.filename, 96)"
+                    :alt="getStopLabel(stopsByDay.get(day)![0]!)"
+                  />
+                </div>
+                <!-- Count badge showing number of stops for the day -->
+                <span
+                  v-if="stopsByDay.get(day)!.length > 1"
+                  class="trip-timeline-day-badge"
+                  :style="{ background: dayColorMap.get(day) }"
+                >{{ stopsByDay.get(day)!.length }}</span>
+              </div>
+              <div class="trip-timeline-info">
+                <span class="trip-timeline-label">{{ formatDayLabel(day) }}</span>
+                <span class="trip-timeline-date">
+                  {{ stopsByDay.get(day)!.length }}
+                  {{ stopsByDay.get(day)!.length === 1 ? 'Stopp' : 'Stopps' }}
+                </span>
+                <span
+                  v-if="stopsByDay.get(day)!.length > 1"
+                  class="trip-timeline-chevron"
+                  :class="{ 'trip-timeline-chevron--open': expandedDays.has(day) }"
+                  aria-hidden="true"
+                >›</span>
+              </div>
+            </div>
+
+            <!-- Expanded siblings of the day (stops 2..N) -->
+            <template v-if="expandedDays.has(day) && (stopsByDay.get(day)?.length ?? 0) > 1">
+              <div
+                v-for="(stop, sIdx) in stopsByDay.get(day)!.slice(1)"
+                :key="stop.id"
+                :data-stop-id="stop.id"
+                :class="[
+                  'trip-timeline-item',
+                  'trip-timeline-item--sibling',
+                  { 'trip-timeline-item--selected': stop.id === selectedStopId },
+                ]"
+                @click="selectStop(stop.id)"
+              >
+                <!-- Connector back to the previous stop of the same day -->
+                <div
+                  class="trip-timeline-connector trip-timeline-connector--sibling"
+                  :style="{ background: dayColorMap.get(day) }"
+                />
+                <div class="trip-timeline-thumb">
+                  <img :src="getPhotoUrl(stop.coverPhoto.filename, 96)" :alt="getStopLabel(stop)" />
+                </div>
+                <div class="trip-timeline-info">
+                  <span class="trip-timeline-label">{{ getStopLabel(stop) }}</span>
+                  <span class="trip-timeline-date">{{ formatStopDate(stop) }}</span>
+                  <span class="trip-timeline-count">
+                    {{ stop.photos.length }} {{ stop.photos.length === 1 ? 'Foto' : 'Fotos' }}
+                  </span>
+                </div>
+                <span class="sr-only">Stopp {{ sIdx + 2 }}</span>
+              </div>
+            </template>
+          </div>
+        </template>
       </div>
     </div>
 
@@ -360,11 +522,24 @@ function handleNoGpsPhotoClick(photo: Photo) {
 
 .trip-timeline {
   display: flex;
-  gap: 0;
+  gap: 0.35rem;
   overflow-x: auto;
   padding: 0.35rem 0.5rem 0.5rem;
   scrollbar-width: thin;
   scroll-behavior: smooth;
+}
+
+.trip-timeline-day-group {
+  display: flex;
+  align-items: stretch;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.trip-timeline-day-group--expanded {
+  padding: 0 0.25rem;
+  border-radius: 10px;
+  background: var(--p-content-hover-background, rgba(0, 0, 0, 0.03));
 }
 
 .trip-timeline::-webkit-scrollbar {
@@ -460,6 +635,103 @@ function handleNoGpsPhotoClick(photo: Photo) {
   z-index: 1;
 }
 
+.trip-timeline-connector--sibling {
+  position: absolute;
+  top: calc(0.4rem + 28px);
+  left: -10px;
+  right: auto;
+  width: 14px;
+  height: 3px;
+  opacity: 0.7;
+}
+
+/* Expandable day card marker */
+.trip-timeline-item--expandable {
+  cursor: pointer;
+}
+
+.trip-timeline-item--expandable .trip-timeline-thumb {
+  border-color: var(--p-primary-color, #4285F4);
+}
+
+.trip-timeline-item--expanded .trip-timeline-thumb {
+  border-style: solid;
+}
+
+/* Wrapper around the thumb so that the stack-hint and day-badge can
+   escape the overflow:hidden of the round thumb. */
+.trip-timeline-thumb-wrap {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 0.3rem;
+  flex-shrink: 0;
+}
+
+.trip-timeline-thumb-wrap .trip-timeline-thumb {
+  margin-bottom: 0;
+  position: relative;
+  z-index: 1;
+}
+
+/* Stacked-cards hint behind the thumb when collapsed */
+.trip-timeline-stack-hint {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 2px solid var(--p-primary-color, #4285F4);
+  opacity: 0.55;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* Badge showing number of stops per day on the day-cover thumb */
+.trip-timeline-day-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  z-index: 2;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--p-primary-color, #4285F4);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.trip-timeline-chevron {
+  font-size: 0.85rem;
+  line-height: 0.85rem;
+  color: var(--p-primary-color, #4285F4);
+  font-weight: 700;
+  transition: transform 0.15s ease;
+  margin-top: 1px;
+}
+
+.trip-timeline-chevron--open {
+  transform: rotate(90deg);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 @media (max-width: 768px) {
   .trip-map-container {
     border-radius: 0;
@@ -471,6 +743,16 @@ function handleNoGpsPhotoClick(photo: Photo) {
   }
 
   .trip-timeline-thumb {
+    width: 44px;
+    height: 44px;
+  }
+
+  .trip-timeline-thumb-wrap {
+    width: 44px;
+    height: 44px;
+  }
+
+  .trip-timeline-stack-hint {
     width: 44px;
     height: 44px;
   }
