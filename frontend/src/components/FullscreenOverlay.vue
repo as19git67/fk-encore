@@ -133,6 +133,7 @@ function locationLabel(photo: Photo) {
               rounded text
               :severity="photo.curation_status === 'hidden' ? 'danger' : 'secondary'"
               @click="photo.curation_status === 'hidden' ? emit('restore', photo.id) : emit('hide', photo.id)"
+              v-tooltip.bottom="photo.curation_status === 'hidden' ? 'Wiederherstellen' : 'Ausblenden'"
             />
             <Button
               v-if="canDelete"
@@ -140,6 +141,7 @@ function locationLabel(photo: Photo) {
               rounded text
               :severity="photo.curation_status === 'favorite' ? 'warn' : 'secondary'"
               @click="emit('toggle-favorite', photo.id, photo.curation_status)"
+              v-tooltip.bottom="photo.curation_status === 'favorite' ? 'Favorit entfernen' : 'Als Favorit markieren'"
             />
           </slot>
         </div>
