@@ -4344,6 +4344,38 @@ export function parseNaturalQuery(raw: string): ParsedQuery {
   };
 }
 
+/**
+ * Parse a query via the embedding service's spaCy + dateparser endpoint.
+ * Returns null on any failure so the caller can fall back to the regex parser.
+ */
+async function parseNaturalQueryRemote(raw: string): Promise<ParsedQueryInternal | null> {
+  try {
+    const response = await fetch(`${EMBEDDING_SERVICE_URL}/parse/query`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: raw }),
+      // The parser is fast (5-20 ms) but the model load on first call may
+      // take a few seconds. 5 s is a safe upper bound; we fall back on timeout.
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) return null;
+    const data = await response.json() as {
+      semantic_query: string;
+      location: string | null;
+      from_date: string | null;
+      to_date: string | null;
+    };
+    return {
+      semanticQuery: data.semantic_query ?? "",
+      location: data.location ?? undefined,
+      fromDate: data.from_date ? new Date(data.from_date) : undefined,
+      toDate: data.to_date ? new Date(data.to_date) : undefined,
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
 // ---------- Combined Natural Language Search ----------
 
 export interface NaturalSearchResult extends PhotoSearchResult {
@@ -4357,7 +4389,12 @@ export async function searchPhotosNaturalLogic(
   limit: number = 30,
   threshold: number = 0.18
 ): Promise<{ results: NaturalSearchResult[]; parsed: ParsedQuery }> {
-  const parsed = parseNaturalQueryInternal(query);
+  // Prefer the spaCy-based parser running in the embedding service – it
+  // understands relative dates ("letzten Sommer", "vor 2 Jahren"), case-
+  // insensitive locations, and produces fewer false positives. Falls back to
+  // the in-process regex parser whenever the service is unreachable, so the
+  // search still works in degraded mode.
+  const parsed = (await parseNaturalQueryRemote(query)) ?? parseNaturalQueryInternal(query);
   const parsedPublic: ParsedQuery = {
     semanticQuery: parsed.semanticQuery,
     fromDate: parsed.fromDate?.toISOString(),
