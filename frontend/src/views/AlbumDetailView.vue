@@ -10,6 +10,7 @@ import PhotoGrid from '../components/PhotoGrid.vue'
 import TimelineNav from '../components/TimelineNav.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
+import PhotoCompareView from '../components/PhotoCompareView.vue'
 
 const TripMap = defineAsyncComponent(() => import('../components/TripMap.vue'))
 import {
@@ -21,12 +22,14 @@ import {
   getPhotoLandmarks,
   ignoreFace,
   listPersons,
+  listPhotoGroups,
   reindexPhoto,
   type CurationStatus,
   type Face,
   type LandmarkItem,
   type Person,
   type Photo,
+  type PhotoGroup,
   updatePhotoCuration,
   updateAlbum,
   updateAlbumUserSettings,
@@ -65,8 +68,70 @@ const albumPhotos = computed<Photo[]>(() =>
   )
 )
 
+// ── Similar-photo groups (stacks) ─────────────────────────────────────────────
+// Load all user's groups; filter to those with 2+ members in this album.
+const photoGroupsList = ref<PhotoGroup[]>([])
+const activeGroup = ref<PhotoGroup | null>(null)
+
+const albumPhotoIds = computed(() => new Set(albumPhotos.value.map(p => p.id)))
+
+// Groups scoped to this album: only include groups where at least 2 photos
+// are in the album. Trim each group's member list to the album members and
+// choose an album-internal cover photo.
+const albumPhotoGroups = computed<PhotoGroup[]>(() => {
+  const result: PhotoGroup[] = []
+  for (const g of photoGroupsList.value) {
+    const membersInAlbum = g.photo_ids.filter(id => albumPhotoIds.value.has(id))
+    if (membersInAlbum.length < 2) continue
+    const coverInAlbum = g.cover_photo_id && albumPhotoIds.value.has(g.cover_photo_id)
+      ? g.cover_photo_id
+      : membersInAlbum[0]
+    result.push({
+      ...g,
+      photo_ids: membersInAlbum,
+      cover_photo_id: coverInAlbum,
+      member_count: membersInAlbum.length,
+    })
+  }
+  return result
+})
+
+const photoToGroup = computed(() => {
+  const map = new Map<number, PhotoGroup>()
+  // Reviewed first, unreviewed last — so unreviewed groups win for photos
+  // that belong to both (happens transiently when members were added and a
+  // new superset group was created alongside the old reviewed one).
+  for (const group of albumPhotoGroups.value) {
+    if (!group.reviewed_at) continue
+    for (const pid of group.photo_ids) map.set(pid, group)
+  }
+  for (const group of albumPhotoGroups.value) {
+    if (group.reviewed_at) continue
+    for (const pid of group.photo_ids) map.set(pid, group)
+  }
+  return map
+})
+
+const unreviewedGroupCount = computed(() =>
+  albumPhotoGroups.value.filter(g => !g.reviewed_at).length
+)
+
+const hiddenByStack = computed(() => {
+  const set = new Set<number>()
+  for (const group of albumPhotoGroups.value) {
+    if (group.reviewed_at) continue
+    for (const pid of group.photo_ids) {
+      if (pid !== group.cover_photo_id) set.add(pid)
+    }
+  }
+  return set
+})
+
 // ── Grouping (via composable) ─────────────────────────────────────────────────
-const { groupedPhotos } = usePhotoGrouping(albumPhotos)
+const { groupedPhotos } = usePhotoGrouping(albumPhotos, {
+  hiddenByStack,
+  photoToGroup,
+})
 
 // ── Navigation refs ───────────────────────────────────────────────────────────
 const photoGridRef = ref<InstanceType<typeof PhotoGrid> | null>(null)
@@ -74,6 +139,7 @@ const timelineNavRef = ref<InstanceType<typeof TimelineNav> | null>(null)
 
 // ── Keyboard navigation (via composable) ─────────────────────────────────────
 useGalleryKeyboard({
+  isBlocked: () => !!activeGroup.value,
   onLeft() {
     if (isFullscreen.value) { if (selectedIndex.value > 0) selectedIndex.value--; return }
     if (selectedIndex.value > 0) selectedIndex.value--
@@ -114,6 +180,7 @@ const canWrite = computed(() => album.value?.role === 'owner' || album.value?.ro
 const isOwner = computed(() => album.value?.role === 'owner')
 const canDeletePhotos = computed(() => auth.hasPermission('photos.delete'))
 const canUploadPhotos = computed(() => auth.hasPermission('photos.upload'))
+const canManageData = computed(() => auth.hasPermission('data.manage'))
 const showPersons = computed(() => auth.hasPermission('people.view'))
 
 // ── Display mode (Album-Eigenschaft) ─────────────────────────────────────────
@@ -179,7 +246,12 @@ watch(selectedIndex, () => {
 async function loadData() {
   loading.value = true
   try {
-    album.value = await getAlbum(albumId)
+    const [albumRes, groupsRes] = await Promise.all([
+      getAlbum(albumId),
+      listPhotoGroups().catch(() => ({ groups: [] })),
+    ])
+    album.value = albumRes
+    photoGroupsList.value = groupsRes.groups
     selectedIndex.value = album.value.photos.length > 0 ? 0 : -1
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden des Albums'
@@ -299,6 +371,53 @@ function handlePhotoClick(item: PhotoItem) {
   selectedIndex.value = item.index
   // Mobile: Single-Tap öffnet Fullscreen (kein Sidebar sichtbar)
   if (window.innerWidth <= 768) isFullscreen.value = true
+}
+
+// ── Stack / similar-photo group handling ─────────────────────────────────────
+function handleStackClick(group: PhotoGroup) {
+  activeGroup.value = group
+}
+
+function selectAfterGroup(group: PhotoGroup | null) {
+  if (!group || albumPhotos.value.length === 0) {
+    selectedIndex.value = albumPhotos.value.length > 0 ? 0 : -1
+    return
+  }
+  const groupPhotoIds = new Set(group.photo_ids)
+  const visible = albumPhotos.value
+    .map((p, i) => ({ photo: p, index: i }))
+    .filter(({ photo }) => groupPhotoIds.has(photo.id) && !hiddenByStack.value.has(photo.id))
+  if (visible.length > 0) {
+    selectedIndex.value = visible[0]!.index
+    return
+  }
+  selectedIndex.value = albumPhotos.value.findIndex(p => !hiddenByStack.value.has(p.id))
+}
+
+async function handleGroupClose() {
+  const group = activeGroup.value
+  activeGroup.value = null
+  await loadData() // reloads album photos and groups
+  selectAfterGroup(group)
+}
+
+async function handleGroupNext(reviewedGroupId: number) {
+  const candidateId = albumPhotoGroups.value.find(g => !g.reviewed_at && g.id !== reviewedGroupId)?.id
+  await loadData()
+  if (candidateId !== undefined) {
+    // Re-resolve against the freshly loaded list so photo_ids reflect the latest album state.
+    const refreshed = albumPhotoGroups.value.find(g => g.id === candidateId && !g.reviewed_at)
+    activeGroup.value = refreshed ?? null
+  } else {
+    const group = activeGroup.value
+    activeGroup.value = null
+    selectAfterGroup(group)
+  }
+}
+
+function handleStartGroupReview() {
+  const first = albumPhotoGroups.value.find(g => !g.reviewed_at)
+  if (first) activeGroup.value = first
 }
 
 // ── Timeline nav ──────────────────────────────────────────────────────────────
@@ -480,6 +599,12 @@ onUnmounted(() => serviceHealth.stopPolling())
 
         <!-- 6. Action buttons -->
         <div class="header__actions">
+          <Button
+            v-if="canManageData && unreviewedGroupCount > 0 && displayMode !== 'map'"
+            :label="`Gruppen bearbeiten (${unreviewedGroupCount} offen)`"
+            icon="pi pi-images" severity="success" size="small"
+            @click="handleStartGroupReview"
+          />
           <Button v-if="effectiveCoverPhotoId && displayMode !== 'map'" icon="pi pi-image" label="Cover fokussieren" size="small" text @click="scrollToCover" />
           <Button v-if="isOwner" icon="pi pi-trash" size="small" text severity="danger" v-tooltip="'Album löschen'" @click="showDeleteDialog = true" />
         </div>
@@ -521,11 +646,13 @@ onUnmounted(() => serviceHealth.stopPolling())
         :selectedIndex="selectedIndex"
         :selectedPhotoIds="new Set(selectedPhoto ? [selectedPhoto.id] : [])"
         :canDelete="false"
+        :hasStacks="true"
         :suppressScroll="isFullscreen"
         @update:columnCount="() => {}"
         @section-change="activeSection = $event"
         @photo-click="handlePhotoClick"
         @photo-dblclick="isFullscreen = true"
+        @stack-click="handleStackClick"
         @toggle-favorite="handleToggleFavorite"
         @hide="handleHidePhoto"
         @restore="handleRestorePhoto"
@@ -646,6 +773,16 @@ onUnmounted(() => serviceHealth.stopPolling())
         />
       </template>
     </FullscreenOverlay>
+
+    <!-- Similar-photo group review overlay -->
+    <PhotoCompareView
+      v-if="activeGroup"
+      :group="activeGroup"
+      :allPhotos="albumPhotos"
+      :totalUnreviewed="unreviewedGroupCount"
+      @close="handleGroupClose"
+      @next="handleGroupNext"
+    />
 
     <!-- Delete album confirmation dialog -->
     <Dialog v-model:visible="showDeleteDialog" header="Album löschen" :modal="true" style="width: min(100%, 28rem)">

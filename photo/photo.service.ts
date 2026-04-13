@@ -1896,6 +1896,15 @@ export async function addPhotoToAlbumLogic(userId: number, req: AddPhotoToAlbumR
     }
   }
 
+  // Re-run similar-photo grouping for shared users so the new photo is considered.
+  // Scheduled per-user so rapid consecutive adds don't race each other.
+  const sharedUsersForGrouping = await dbAll<{ user_id: number }>(
+    db.select({ user_id: albumShares.user_id }).from(albumShares).where(eq(albumShares.album_id, req.albumId))
+  );
+  for (const { user_id } of sharedUsersForGrouping) {
+    scheduleRegroup(user_id);
+  }
+
   return { success: true };
 }
 
@@ -2025,6 +2034,9 @@ export async function shareAlbumLogic(userId: number, req: ShareAlbumRequest): P
     console.error(`Error enqueueing face assignments for shared album ${req.albumId}:`, err);
   });
 
+  // Re-run similar-photo grouping for the new shared user so shared photos are considered.
+  scheduleRegroup(req.userId);
+
   return { success: true };
 }
 
@@ -2110,6 +2122,9 @@ export async function removeAlbumShareLogic(userId: number, req: RemoveAlbumShar
       console.error(`Error cleaning up after unshare of album ${req.albumId}:`, err);
     });
   }
+
+  // Re-run grouping so removed shared photos are no longer in groups.
+  scheduleRegroup(req.userId);
 
   return { success: true };
 }
@@ -2910,13 +2925,75 @@ class UnionFind {
 const SIMILARITY_THRESHOLD = 0.90;
 const TIME_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
 
+// Serialize similar-photo regrouping per user.
+// `findPhotoGroupsLogic` reads the user's accessible photos, deletes all
+// un-reviewed groups and re-inserts them. Concurrent runs for the same user
+// (e.g. triggered by rapid album-photo adds) race on the delete/insert and
+// can wipe out groups a parallel run just created. This scheduler guarantees:
+//   - At most one run per user is in flight.
+//   - Triggers arriving during a run are collapsed into exactly one follow-up
+//     run that sees the latest state.
+const groupingRunning = new Map<number, Promise<void>>();
+const groupingPending = new Set<number>();
+
+/**
+ * Runs `findPhotoGroupsLogic(userId)` with a per-user mutex + coalescing:
+ *   - If no run is active, starts one immediately.
+ *   - If one is active, marks a follow-up and returns the in-flight promise,
+ *     which only resolves after the follow-up pass completes.
+ * The returned promise lets awaiters (e.g. the manual POST endpoint) block
+ * until the regroup they asked for has actually happened.
+ */
+export function scheduleRegroup(userId: number): Promise<void> {
+  const existing = groupingRunning.get(userId);
+  if (existing) {
+    groupingPending.add(userId);
+    return existing;
+  }
+  const run = (async () => {
+    try {
+      do {
+        groupingPending.delete(userId);
+        try {
+          await findPhotoGroupsLogic(userId);
+        } catch (err) {
+          console.error(`[regroup] error for user ${userId}:`, err);
+        }
+      } while (groupingPending.has(userId));
+    } finally {
+      groupingRunning.delete(userId);
+    }
+  })();
+  groupingRunning.set(userId, run);
+  return run;
+}
+
 export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsResponse> {
-  // 1. Get all user photos with timestamps
-  const allPhotos = await dbAll<{ id: number; taken_at: string | null; created_at: string | null }>(
+  // 1. Get all user photos with timestamps (own + shared album photos)
+  const ownPhotos = await dbAll<{ id: number; taken_at: string | null; created_at: string | null }>(
     db.select({ id: photos.id, taken_at: photos.taken_at, created_at: photos.created_at })
       .from(photos)
       .where(eq(photos.user_id, userId))
   );
+
+  // Also get photos visible through shared albums
+  const sharedPhotos = await dbAll<{ id: number; taken_at: string | null; created_at: string | null }>(
+    db.selectDistinct({ id: photos.id, taken_at: photos.taken_at, created_at: photos.created_at })
+      .from(photos)
+      .innerJoin(albumPhotos, eq(albumPhotos.photo_id, photos.id))
+      .innerJoin(albumShares, and(
+        eq(albumShares.album_id, albumPhotos.album_id),
+        eq(albumShares.user_id, userId)
+      ))
+  );
+
+  // Merge and deduplicate by photo ID
+  const photoMap = new Map<number, { id: number; taken_at: string | null; created_at: string | null }>();
+  for (const p of ownPhotos) photoMap.set(p.id, p);
+  for (const p of sharedPhotos) {
+    if (!photoMap.has(p.id)) photoMap.set(p.id, p);
+  }
+  const allPhotos = Array.from(photoMap.values());
 
   if (allPhotos.length < 2) {
     return { groups_created: 0, total_photos_grouped: 0 };
@@ -3020,13 +3097,28 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
       const memberSet = new Set(memberPhotoIds);
 
       let alreadyReviewed = false;
-      for (const [, reviewedSet] of reviewedMemberSets) {
+      const obsoleteReviewedIds: number[] = [];
+      for (const [gid, reviewedSet] of reviewedMemberSets) {
         if (memberSet.size === reviewedSet.size && [...memberSet].every((id) => reviewedSet.has(id))) {
           alreadyReviewed = true;
           break;
         }
+        // New group is a strict superset of a reviewed one — the reviewed
+        // snapshot is obsolete (e.g. a photo was added to a shared album and
+        // the group grew). Mark the old reviewed row for deletion so the user
+        // can re-review the expanded group once.
+        if (reviewedSet.size < memberSet.size && [...reviewedSet].every((id) => memberSet.has(id))) {
+          obsoleteReviewedIds.push(gid);
+        }
       }
       if (alreadyReviewed) continue;
+
+      if (obsoleteReviewedIds.length > 0) {
+        await dbExec(
+          tx.delete(photoGroups).where(inArray(photoGroups.id, obsoleteReviewedIds))
+        );
+        for (const gid of obsoleteReviewedIds) reviewedMemberSets.delete(gid);
+      }
 
       let bestCenter = memberIndices[0];
       let bestAvgSim = -1;
@@ -3081,6 +3173,28 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
 
   console.log(`Photo grouping for user ${userId}: ${groupsCreated} groups created, ${totalPhotosGrouped} photos grouped`);
   return { groups_created: groupsCreated, total_photos_grouped: totalPhotosGrouped };
+}
+
+/**
+ * Summary of the current grouping state for a user. Used by the manual
+ * POST /photos/find-groups endpoint after scheduleRegroup() resolves, since
+ * the scheduler doesn't surface the last run's counts directly.
+ */
+export async function countUserGroupStats(userId: number): Promise<FindGroupsResponse> {
+  const rows = await dbAll<{ group_count: number; member_count: number }>(
+    db.select({
+      group_count: sql<number>`COUNT(DISTINCT ${photoGroups.id})`.as('group_count'),
+      member_count: sql<number>`COUNT(${photoGroupMembers.photo_id})`.as('member_count'),
+    })
+      .from(photoGroups)
+      .leftJoin(photoGroupMembers, eq(photoGroupMembers.group_id, photoGroups.id))
+      .where(eq(photoGroups.user_id, userId))
+  );
+  const stats = rows[0] ?? { group_count: 0, member_count: 0 };
+  return {
+    groups_created: Number(stats.group_count) || 0,
+    total_photos_grouped: Number(stats.member_count) || 0,
+  };
 }
 
 export async function listPhotoGroupsLogic(userId: number): Promise<ListGroupsResponse> {
