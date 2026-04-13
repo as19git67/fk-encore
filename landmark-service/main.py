@@ -7,8 +7,13 @@ import logging
 import os
 import torch
 from fastapi import FastAPI, File, Form, UploadFile
-from PIL import Image
+from PIL import Image, ImageFile
 from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
+
+# Allow Pillow to decode images with missing/truncated trailing bytes so that
+# slightly corrupted photos still reach the detector instead of failing the
+# whole scan. See embedding_service for the same rationale.
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
