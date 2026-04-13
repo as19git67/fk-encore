@@ -108,6 +108,28 @@ export const uploadPhoto = api.raw(
 );
 
 /**
+ * Check whether a photo with the given SHA-256 hash already exists for the
+ * current user. Used by the client to avoid uploading duplicates and save
+ * bandwidth (especially on mobile data connections).
+ */
+export const checkPhotoHash = api(
+  { expose: true, method: "GET", path: "/photos/check-hash/:hash", auth: true },
+  async ({ hash }: { hash: string }): Promise<{ exists: boolean }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.upload");
+
+    const normalized = (hash ?? "").trim().toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(normalized)) {
+      throw APIError.invalidArgument("hash must be a SHA-256 hex string (64 chars)");
+    }
+
+    return await service.checkPhotoHashLogic(userId, normalized);
+  }
+);
+
+/**
  * List all photos owned by the user.
  */
 export const listPhotos = api(

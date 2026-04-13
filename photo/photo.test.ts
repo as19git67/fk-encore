@@ -157,6 +157,28 @@ describe("Photo Module", () => {
       expect(filesAfter).toBe(filesBefore);
     });
 
+    it("checkPhotoHashLogic returns existence based on user + hash", async () => {
+      const fileData = Buffer.from("hash-check-data");
+      const uploaded = await service.uploadPhotoLogic(user1.id, {
+        data: fileData,
+        name: "h.jpg",
+        mimeType: "image/jpeg",
+      });
+
+      const digest = uploaded.hash!;
+      expect(digest).toMatch(/^[a-f0-9]{64}$/);
+
+      const sameUser = await service.checkPhotoHashLogic(user1.id, digest);
+      expect(sameUser).toEqual({ exists: true });
+
+      const otherUser = await service.checkPhotoHashLogic(user2.id, digest);
+      expect(otherUser).toEqual({ exists: false });
+
+      const unknownHash = "0".repeat(64);
+      const missing = await service.checkPhotoHashLogic(user1.id, unknownHash);
+      expect(missing).toEqual({ exists: false });
+    });
+
     it("should not allow duplicate uploads for the same user", async () => {
       const fileData = Buffer.from("identical-data");
       await service.uploadPhotoLogic(user1.id, {

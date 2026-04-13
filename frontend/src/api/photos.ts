@@ -91,6 +91,36 @@ export function getPhotoDetailsBatch(ids: number[]) {
   return apiFetch<PhotoDetailsBatchResponse>(`/photos/details?ids=${ids.join(',')}`)
 }
 
+/**
+ * Compute the SHA-256 hash of a file using the Web Crypto API.
+ * Returns a lowercase hex string. Requires a secure context (HTTPS or
+ * localhost); returns `null` if Web Crypto is unavailable.
+ */
+export async function computeFileHash(file: File | Blob): Promise<string | null> {
+  if (typeof crypto === 'undefined' || !crypto.subtle) return null
+  try {
+    const buffer = await file.arrayBuffer()
+    const digest = await crypto.subtle.digest('SHA-256', buffer)
+    const bytes = new Uint8Array(digest)
+    let hex = ''
+    for (let i = 0; i < bytes.length; i++) {
+      hex += bytes[i]!.toString(16).padStart(2, '0')
+    }
+    return hex
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Check whether a photo with the given SHA-256 hash already exists for the
+ * current user. Used to skip uploads of duplicate photos, which avoids
+ * transferring the file over the network (saves time + mobile data).
+ */
+export function checkPhotoHash(hash: string) {
+  return apiFetch<{ exists: boolean }>(`/photos/check-hash/${hash}`)
+}
+
 export async function uploadPhoto(file: File, signal?: AbortSignal) {
   return apiFetch<Photo>('/photos', {
     method: 'POST',
