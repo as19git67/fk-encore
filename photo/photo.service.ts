@@ -756,6 +756,23 @@ export async function indexPhotoGeocoding(photoId: number, force = false): Promi
 
 // ---------- Photos ----------
 
+/**
+ * Check whether a photo with the given SHA-256 hash already exists for the
+ * user. Used by the upload UI to detect duplicates client-side before
+ * transferring the file.
+ */
+export async function checkPhotoHashLogic(
+  userId: number,
+  hash: string
+): Promise<{ exists: boolean }> {
+  const existing = await dbFirst<{ id: number }>(
+    db.select({ id: photos.id })
+      .from(photos)
+      .where(and(eq(photos.user_id, userId), eq(photos.hash, hash)))
+  );
+  return { exists: !!existing };
+}
+
 export async function uploadPhotoStream(
   userId: number,
   stream: IncomingMessage,

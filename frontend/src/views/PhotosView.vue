@@ -13,7 +13,7 @@ import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import {
   listPhotoIndex, uploadPhotoWithProgress, updatePhotoDate, reindexPhoto, ignoreFace,
   getPhotoFaces, getPhotoLandmarks, updatePhotoCuration,
-  listPhotoGroups, searchPhotos,
+  listPhotoGroups, searchPhotos, computeFileHash, checkPhotoHash,
   type Photo, type Face, type CurationStatus, type PhotoGroup,
   type LandmarkItem,
 } from '../api/photos'
@@ -609,6 +609,25 @@ async function handleUpload(event: any) {
       const file = files[i]!
       uploadCurrent.value = i + 1
       try {
+        // Client-side duplicate check: compute SHA-256 locally and ask the
+        // server if that hash already exists for this user. Skipping the
+        // upload of a duplicate avoids transferring the file over the
+        // network (saves bandwidth and mobile data).
+        const fileHash = await computeFileHash(file)
+        if (fileHash && !abortController.signal.aborted) {
+          try {
+            const { exists } = await checkPhotoHash(fileHash)
+            if (exists) {
+              duplicates.push(file.name)
+              uploadProgress.value = Math.round(((i + 1) / files.length) * 100)
+              continue
+            }
+          } catch {
+            // If the pre-check fails (e.g. network error), fall through to
+            // the actual upload — the server will reject duplicates anyway.
+          }
+        }
+
         await uploadPhotoWithProgress(
           file,
           abortController.signal,
