@@ -11,7 +11,7 @@ import TimelineNav from '../components/TimelineNav.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import {
-  listPhotos, uploadPhotoWithProgress, updatePhotoDate, reindexPhoto, ignoreFace,
+  listPhotoIndex, uploadPhotoWithProgress, updatePhotoDate, reindexPhoto, ignoreFace,
   getPhotoFaces, getPhotoLandmarks, updatePhotoCuration,
   listPhotoGroups, searchPhotos,
   type Photo, type Face, type CurationStatus, type PhotoGroup,
@@ -23,6 +23,7 @@ import { useServiceHealthStore } from '../stores/serviceHealth'
 import { usePhotoGrouping } from '../composables/usePhotoGrouping'
 import type { PhotoItem } from '../composables/usePhotoGrouping'
 import { usePhotoSelection } from '../composables/usePhotoSelection'
+import { usePhotoHydration } from '../composables/usePhotoHydration'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 
 const auth = useAuthStore()
@@ -95,6 +96,12 @@ async function executeSearch() {
   searchError.value = ''
   try {
     searchResults.value = (await searchPhotos(q)).photos
+    // Search results are shown via searchResultIds → photos.value mapping.
+    // Prioritize hydrating the matching photos so the sidebar/details show
+    // full data immediately when a search hit is clicked.
+    if (searchResults.value && searchResults.value.length > 0) {
+      hydration.ensureLoaded(searchResults.value.map(p => p.id))
+    }
   } catch {
     searchError.value = 'Suche fehlgeschlagen. Ist der Embedding-Service erreichbar?'
   } finally {
@@ -122,6 +129,13 @@ const { groupedPhotos } = usePhotoGrouping(photos, {
 // ── Selection (via composable) ────────────────────────────────────────────────
 const { selectedIndex, selectedPhotoIds, selectedPhoto, selectedPhotos, selectPhoto } =
   usePhotoSelection(photos)
+
+// ── Two-stage loading: lightweight index first, full details on demand ───────
+// The /photos/index endpoint returns just the columns needed to render the
+// grid (id, filename, dates, curation_status, auto_crop). Heavy fields
+// (location, GPS, ai_quality_*, description) are hydrated lazily via the
+// /photos/details batch endpoint as photos become visible / selected.
+const hydration = usePhotoHydration(photos, { batchSize: 100, backgroundPauseMs: 50 })
 
 // Expand selection: if any selected photo is in a group, include all group members
 const expandedSelectedPhotos = computed<Photo[]>(() => {
@@ -207,6 +221,10 @@ watch(selectedPhoto, (photo) => {
   if (photo) {
     console.log('[PhotosView] Saving selected photo to localStorage:', photo.id)
     localStorage.setItem(LAST_PHOTO_KEY, String(photo.id))
+    // Make sure heavy fields (location, GPS, ai_quality_*, description) are
+    // available for the sidebar/fullscreen view even if background hydration
+    // hasn't reached this photo yet.
+    hydration.ensureLoaded([photo.id])
     loadDetectedFaces(photo.id)
     loadLandmarks(photo.id)
     loadPersons()
@@ -298,12 +316,14 @@ useGalleryKeyboard({
 async function loadPhotos() {
   loading.value = true
   error.value = ''
+  hydration.reset()
   try {
-    const [photosRes, groupsRes] = await Promise.all([
-      listPhotos(showHidden.value),
+    // Stage 1: lightweight index (small payload, fast even with thousands of photos)
+    const [indexRes, groupsRes] = await Promise.all([
+      listPhotoIndex(showHidden.value),
       listPhotoGroups().catch(() => ({ groups: [] })),
     ])
-    photos.value = photosRes.photos.sort((a, b) =>
+    photos.value = (indexRes.photos as Photo[]).sort((a, b) =>
       new Date(a.taken_at || a.created_at).getTime() -
       new Date(b.taken_at || b.created_at).getTime()
     )
@@ -348,6 +368,19 @@ async function loadPhotos() {
 
     // Now reveal the grid (PhotoGrid will mount with correct selectedIndex)
     loading.value = false
+
+    // Stage 2: hydrate the focused photo first (its sidebar opens immediately),
+    // then walk the rest of the index in the background so all heavy fields
+    // become available without blocking the initial render.
+    if (selectedIndex.value >= 0) {
+      const focused = photos.value[selectedIndex.value]
+      if (focused) {
+        // Fire-and-forget: sidebar fields will appear as soon as the request
+        // resolves, no spinner needed since the grid is already interactive.
+        hydration.ensureLoaded([focused.id])
+      }
+    }
+    hydration.hydrateAllInBackground()
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Fotos'
     loading.value = false
@@ -356,15 +389,21 @@ async function loadPhotos() {
 
 async function reloadPhotosInPlace() {
   try {
-    const [photosRes, groupsRes] = await Promise.all([
-      listPhotos(showHidden.value),
+    const [indexRes, groupsRes] = await Promise.all([
+      listPhotoIndex(showHidden.value),
       listPhotoGroups().catch(() => ({ groups: [] })),
     ])
-    photos.value = photosRes.photos.sort((a, b) =>
+    hydration.reset()
+    photos.value = (indexRes.photos as Photo[]).sort((a, b) =>
       new Date(a.taken_at || a.created_at).getTime() -
       new Date(b.taken_at || b.created_at).getTime()
     )
     photoGroupsList.value = groupsRes.groups
+    if (selectedIndex.value >= 0) {
+      const focused = photos.value[selectedIndex.value]
+      if (focused) hydration.ensureLoaded([focused.id])
+    }
+    hydration.hydrateAllInBackground()
   } catch { /* silently fail */ }
 }
 
@@ -497,6 +536,13 @@ function handleStartGroupReview() {
   const first = photoGroupsList.value.find(g => !g.reviewed_at)
   if (first) activeGroup.value = first
 }
+
+// When a stack/compare view opens, hydrate all of its photos up front so the
+// comparison UI has full metadata (quality scores, descriptions, …) without
+// waiting for the background loop.
+watch(activeGroup, (group) => {
+  if (group?.photo_ids?.length) hydration.ensureLoaded(group.photo_ids)
+})
 
 // ── Timeline nav scroll ───────────────────────────────────────────────────────
 function handleScrollTo(sectionId: string) {
@@ -645,6 +691,7 @@ import { onUnmounted } from 'vue'
 onUnmounted(() => {
   serviceHealth.stopPolling()
   if (uploadResultTimeout) clearTimeout(uploadResultTimeout)
+  hydration.cancel()
 })
 </script>
 

@@ -20,6 +20,8 @@ import type {
   RemoveAlbumShareRequest,
   ListAlbumsResponse,
   ListPhotosResponse,
+  ListPhotoIndexResponse,
+  PhotoDetailsBatchResponse,
   DeleteResponse,
   Person,
   Face,
@@ -117,6 +119,50 @@ export const listPhotos = api(
     requirePermission(authData, "photos.view");
 
     return await service.listPhotosLogic(userId, showHidden ?? false);
+  }
+);
+
+/**
+ * Lightweight gallery index. Returns only the columns needed to render the
+ * photo grid (id, filename, dates, curation_status, auto_crop). The frontend
+ * then progressively loads the full details via /photos/details.
+ *
+ * Substantially faster than /photos for large libraries because the JSON
+ * payload per row is reduced from ~20 columns to ~10 small columns and
+ * the SQL query no longer materializes the heavy JSONB columns
+ * (ai_quality_details, location_*, description, hash, GPS).
+ */
+export const listPhotoIndex = api(
+  { expose: true, method: "GET", path: "/photos/index", auth: true },
+  async ({ showHidden }: { showHidden?: Query<boolean> }): Promise<ListPhotoIndexResponse> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+
+    return await service.listPhotoIndexLogic(userId, showHidden ?? false);
+  }
+);
+
+/**
+ * Batch fetch full photo details for a set of IDs (comma-separated query
+ * parameter). Used to progressively hydrate the lightweight /photos/index
+ * response with the heavy fields (location, GPS, ai_quality_*, description).
+ */
+export const getPhotoDetailsBatch = api(
+  { expose: true, method: "GET", path: "/photos/details", auth: true },
+  async ({ ids }: { ids: Query<string> }): Promise<PhotoDetailsBatchResponse> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+
+    const parsedIds = (ids ?? "")
+      .split(",")
+      .map((s) => parseInt(s.trim(), 10))
+      .filter((n) => Number.isFinite(n) && n > 0);
+
+    return await service.getPhotoDetailsBatchLogic(userId, parsedIds);
   }
 );
 
