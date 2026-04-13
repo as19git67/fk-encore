@@ -343,8 +343,8 @@ watch(() => props.photo.id, () => {
         <div class="preview-overlay"><i class="pi pi-expand"></i></div>
       </div>
 
-      <div class="quick-actions">
-        <Button v-if="!inFlyout" icon="pi pi-expand" v-tooltip.bottom="'Vollbild'" @click="emit('fullscreen')" severity="secondary" text rounded />
+      <div v-if="!inFlyout" class="quick-actions">
+        <Button icon="pi pi-expand" v-tooltip.bottom="'Vollbild'" @click="emit('fullscreen')" severity="secondary" text rounded />
         <Button v-if="showNavigateToPhoto" icon="pi pi-images" v-tooltip.bottom="'In Fotos anzeigen'" @click="emit('navigate-to-photo', photo.id)" severity="secondary" text rounded />
         <template v-if="canDelete">
           <Button :icon="photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'" v-tooltip.bottom="photo.curation_status === 'favorite' ? 'Kein Favorit' : 'Favorit'" @click="emit('toggle-favorite', photo.id, photo.curation_status)" :severity="photo.curation_status === 'favorite' ? 'warn' : 'secondary'" text rounded />
@@ -557,7 +557,7 @@ watch(() => props.photo.id, () => {
 .details-sidebar--flyout {
   width: 100%;
   border-left: none;
-  background: transparent;
+  background: var(--p-content-background);
   overflow: visible;
 }
 

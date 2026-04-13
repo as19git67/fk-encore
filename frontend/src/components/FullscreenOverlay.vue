@@ -294,9 +294,9 @@ function locationLabel(photo: Photo) {
   right: calc(1rem + 2.5em + 0.5rem);
   bottom: 1rem;
   width: min(380px, calc(100vw - 1rem - 2.5em - 1rem));
-  background: var(--p-surface-card, #1e1e1e);
-  color: var(--p-text-color, #eee);
-  border: 1px solid var(--p-content-border-color, rgba(255, 255, 255, 0.1));
+  background: var(--p-content-background, #fff);
+  color: var(--p-text-color, #222);
+  border: 1px solid var(--p-content-border-color, rgba(0, 0, 0, 0.1));
   border-radius: 10px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   overflow-y: auto;
