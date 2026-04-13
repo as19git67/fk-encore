@@ -64,14 +64,25 @@ function formatDayLabel(day: string): string {
   return d.toLocaleDateString('de-DE', { day: '2-digit', month: 'short' })
 }
 
+function dayPhotoCount(day: string): number {
+  const dayStops = stopsByDay.value.get(day) ?? []
+  return dayStops.reduce((sum, s) => sum + s.photos.length, 0)
+}
+
 function toggleDay(day: string) {
   if (expandedDays.value.has(day)) {
-    expandedDays.value.delete(day)
+    // Collapse the day
+    expandedDays.value = new Set()
   } else {
-    expandedDays.value.add(day)
+    // Expand exclusively — only one day can be expanded at a time. Any
+    // previously expanded day gets collapsed automatically.
+    expandedDays.value = new Set([day])
   }
-  // Trigger reactivity on a Set in a ref
-  expandedDays.value = new Set(expandedDays.value)
+}
+
+function expandDayExclusive(day: string) {
+  if (expandedDays.value.has(day) && expandedDays.value.size === 1) return
+  expandedDays.value = new Set([day])
 }
 
 function handleDayCardClick(day: string) {
@@ -145,10 +156,12 @@ function selectStop(stopId: number, panMap = true) {
   if (!stop || !map) return
 
   // Auto-expand the day of the selected stop if it's not the cover/first stop
-  // (e.g. when the stop is selected via a map marker and its day is collapsed)
+  // (e.g. when the stop is selected via a map marker and its day is collapsed).
+  // Only one day can be expanded at a time — any previously expanded day is
+  // collapsed automatically.
   const dayStops = stopsByDay.value.get(stop.day) ?? []
-  if (dayStops.length > 1 && dayStops[0]!.id !== stopId && !expandedDays.value.has(stop.day)) {
-    expandedDays.value = new Set(expandedDays.value).add(stop.day)
+  if (dayStops.length > 1 && dayStops[0]!.id !== stopId) {
+    expandDayExclusive(stop.day)
   }
 
   if (panMap) {
@@ -286,7 +299,7 @@ function navigateToNextStop() {
   // sibling within the day (as per issue #71: "expands automatically when
   // on the day and going right").
   if (isCollapsed && isFirstOfDay && dayStops.length > 1) {
-    expandedDays.value = new Set(expandedDays.value).add(curr.day)
+    expandDayExclusive(curr.day)
     nextTick(() => selectStop(dayStops[1]!.id))
     return
   }
@@ -410,8 +423,14 @@ defineExpose({ selectStopByPhotoId })
               <div class="trip-timeline-info">
                 <span class="trip-timeline-label">{{ formatDayLabel(day) }}</span>
                 <span class="trip-timeline-date">
-                  {{ stopsByDay.get(day)!.length }}
-                  {{ stopsByDay.get(day)!.length === 1 ? 'Stopp' : 'Stopps' }}
+                  <template v-if="expandedDays.has(day) && stopsByDay.get(day)!.length > 1">
+                    {{ dayPhotoCount(day) }}
+                    {{ dayPhotoCount(day) === 1 ? 'Foto' : 'Fotos' }}
+                  </template>
+                  <template v-else>
+                    {{ stopsByDay.get(day)!.length }}
+                    {{ stopsByDay.get(day)!.length === 1 ? 'Stopp' : 'Stopps' }}
+                  </template>
                 </span>
                 <span
                   v-if="stopsByDay.get(day)!.length > 1"
