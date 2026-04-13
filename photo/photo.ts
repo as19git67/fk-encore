@@ -776,7 +776,12 @@ export const findPhotoGroups = api(
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "data.manage");
-    return await service.findPhotoGroupsLogic(userId);
+    // Serialize with any in-flight background regroup (e.g. triggered by a
+    // recently added shared-album photo) so the manual call doesn't race
+    // against it. The scheduler awaits the full pass (including any queued
+    // follow-up) before resolving.
+    await service.scheduleRegroup(userId);
+    return await service.countUserGroupStats(userId);
   }
 );
 
