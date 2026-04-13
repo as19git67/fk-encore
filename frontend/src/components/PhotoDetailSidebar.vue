@@ -416,7 +416,14 @@ watch(() => props.photo.id, () => {
       <div class="sidebar-divider" />
 
       <div class="sidebar-section">
-        <div class="section-label">
+        <!-- When editing or when there is no description, show the heading
+             with icon and edit button. If a description exists and we're
+             not editing, drop the heading and show the text directly
+             (with an inline edit pencil). -->
+        <div
+          v-if="isEditingDescription || !photo.description"
+          class="section-label"
+        >
           <i class="pi pi-align-left" />
           <span>Beschreibung</span>
           <Button v-if="canUpload && !isEditingDescription" icon="pi pi-pencil" text rounded size="small" @click="startEditDescription" class="edit-btn" />
@@ -428,15 +435,19 @@ watch(() => props.photo.id, () => {
             <Button icon="pi pi-times" severity="danger" text rounded @click="cancelEditDescription" :disabled="savingDescription" />
           </div>
         </div>
-        <div v-else-if="photo.description" class="description-text">{{ photo.description }}</div>
+        <div v-else-if="photo.description" class="description-text">
+          <i class="pi pi-align-left meta-icon description-icon" />
+          <span class="description-body">{{ photo.description }}</span>
+          <Button v-if="canUpload" icon="pi pi-pencil" text rounded size="small" @click="startEditDescription" class="edit-btn" />
+        </div>
         <div v-else class="empty-hint">Keine Beschreibung</div>
       </div>
 
       <template v-if="photo.location_city || photo.location_name || loadingLandmarks || landmarks.length > 0 || (inFlyout && photo.latitude != null && photo.longitude != null)">
         <div class="sidebar-divider" />
         <div class="sidebar-section">
-          <div class="section-label"><i class="pi pi-map-marker" /> Ort</div>
           <div v-if="photo.location_name || photo.location_city" class="location-pill">
+            <i class="pi pi-map-marker" />
             <template v-if="photo.location_name">{{ photo.location_name }}</template>
             <template v-else-if="photo.location_city && photo.location_country">{{ photo.location_city }}, {{ photo.location_country }}</template>
             <template v-else>{{ photo.location_city }}</template>
@@ -696,7 +707,6 @@ watch(() => props.photo.id, () => {
 .meta-icon {
   font-size: 0.8rem;
   color: var(--p-text-muted-color);
-  margin-top: 0.15rem;
   flex-shrink: 0;
 }
 
@@ -744,6 +754,11 @@ watch(() => props.photo.id, () => {
   padding: 0.25rem 0.75rem;
   font-size: 0.82rem;
   margin-bottom: 0.5rem;
+}
+
+.location-pill .pi-map-marker {
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
 }
 
 .landmark-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
@@ -810,6 +825,18 @@ watch(() => props.photo.id, () => {
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--p-text-color);
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.description-icon {
+  margin-top: 0.2rem;
+}
+
+.description-body {
+  flex: 1;
+  min-width: 0;
 }
 
 .reindex-btn { width: 100%; margin-top: 0.5rem; }
