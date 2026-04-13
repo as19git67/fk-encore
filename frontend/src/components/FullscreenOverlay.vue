@@ -72,9 +72,20 @@ function handleKeydown(e: KeyboardEvent) {
       else emit('close')
     }
   } else if (e.key === 'f' || e.key === 'F') {
+    // Skip the hotkey while typing in an input (e.g. description textarea).
+    const tag = (document.activeElement as HTMLElement | null)?.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return
     e.stopImmediatePropagation()
     e.preventDefault()
     emit('toggle-favorite', props.photo.id, props.photo.curation_status)
+  } else if (e.key === 'h' || e.key === 'H') {
+    if (!props.canDelete) return
+    const tag = (document.activeElement as HTMLElement | null)?.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return
+    e.stopImmediatePropagation()
+    e.preventDefault()
+    if (props.photo.curation_status === 'hidden') emit('restore', props.photo.id)
+    else emit('hide', props.photo.id)
   }
 }
 onMounted(() => window.addEventListener('keydown', handleKeydown, true))
@@ -88,43 +99,12 @@ function locationLabel(photo: Photo) {
   return formatLocationLabel(photo)
 }
 
-// ── Toolbar button handlers ─────────────────────────────────────────────────
-// Use stable methods (not inline ternaries on @click) so the click handler
-// identity is stable across renders. Otherwise the handler function changes
-// on every reactive update of `photo.curation_status`, which on the first
-// render after mount could race with the button's click dispatch and
-// swallow the event.
-function onHideClick() {
-  if (props.photo.curation_status === 'hidden') emit('restore', props.photo.id)
-  else emit('hide', props.photo.id)
-}
-
-function onFavoriteClick() {
-  emit('toggle-favorite', props.photo.id, props.photo.curation_status)
-}
-
-// Explicit keyboard activation for Hide / Favorite. Without this, pressing
-// Space or Enter on a Tab-focused Hide / Fav button sometimes does not fire
-// the native click — the button re-renders synchronously when
-// `photo.curation_status` changes (icon + severity + tooltip all depend on
-// it), and the native Space/Enter → click synthesis can race with that
-// update cycle. The Details and Cover buttons do not have that problem
-// because their rendered props are driven by stable flags.
-function onHideKeydown(e: KeyboardEvent) {
-  if (e.key === ' ' || e.key === 'Enter') {
-    e.preventDefault()
-    e.stopPropagation()
-    onHideClick()
-  }
-}
-
-function onFavoriteKeydown(e: KeyboardEvent) {
-  if (e.key === ' ' || e.key === 'Enter') {
-    e.preventDefault()
-    e.stopPropagation()
-    onFavoriteClick()
-  }
-}
+// ── Keyboard shortcuts ─────────────────────────────────────────────────────
+// `F` = toggle favorite, `H` = hide / restore. Both are implemented in the
+// window-level capture-phase `handleKeydown` above so they work regardless
+// of which element currently has focus — users don't have to Tab to the
+// toolbar to trigger the action. The native Space/Enter activation of the
+// focused toolbar buttons (@click handlers) also continues to work.
 </script>
 
 <template>
@@ -180,18 +160,16 @@ function onFavoriteKeydown(e: KeyboardEvent) {
               :icon="photo.curation_status === 'hidden' ? 'pi pi-eye-slash' : 'pi pi-eye'"
               rounded text
               :severity="photo.curation_status === 'hidden' ? 'danger' : 'secondary'"
-              @click="onHideClick"
-              @keydown="onHideKeydown"
-              v-tooltip.bottom="photo.curation_status === 'hidden' ? 'Wiederherstellen' : 'Ausblenden'"
+              @click="photo.curation_status === 'hidden' ? emit('restore', photo.id) : emit('hide', photo.id)"
+              v-tooltip.bottom="(photo.curation_status === 'hidden' ? 'Wiederherstellen' : 'Ausblenden') + ' (H)'"
             />
             <Button
               v-if="canDelete"
               :icon="photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
               rounded text
               :severity="photo.curation_status === 'favorite' ? 'warn' : 'secondary'"
-              @click="onFavoriteClick"
-              @keydown="onFavoriteKeydown"
-              v-tooltip.bottom="photo.curation_status === 'favorite' ? 'Favorit entfernen' : 'Als Favorit markieren'"
+              @click="emit('toggle-favorite', photo.id, photo.curation_status)"
+              v-tooltip.bottom="(photo.curation_status === 'favorite' ? 'Favorit entfernen' : 'Als Favorit markieren') + ' (F)'"
             />
           </slot>
         </div>
