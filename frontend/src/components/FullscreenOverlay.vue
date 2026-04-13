@@ -65,7 +65,12 @@ function handleKeydown(e: KeyboardEvent) {
     e.preventDefault()
     if (e.key === 'ArrowLeft' && props.prevPhoto) emit('prev')
     else if (e.key === 'ArrowRight' && props.nextPhoto) emit('next')
-    else if (e.key === 'Escape') emit('close')
+    else if (e.key === 'Escape') {
+      // Close the details flyout first if it is open; otherwise close the
+      // whole fullscreen overlay.
+      if (props.detailsActive) emit('show-details')
+      else emit('close')
+    }
   } else if (e.key === 'f' || e.key === 'F') {
     e.stopImmediatePropagation()
     e.preventDefault()
@@ -119,13 +124,18 @@ function locationLabel(photo: Photo) {
         </div>
 
         <div class="fs-toolbar">
+          <!-- Slot for extra action buttons placed before the default ones
+               (e.g. "set as cover" in the map-mode fullscreen). -->
+          <slot name="topbar-actions-before" />
           <slot name="topbar-actions">
             <Button
               v-if="props.showDetailsButton !== false"
-              :icon="props.detailsActive ? 'pi pi-times' : 'pi pi-info-circle'"
-              rounded text severity="secondary"
+              icon="pi pi-info-circle"
+              rounded text
+              :severity="props.detailsActive ? 'primary' : 'secondary'"
+              :class="{ 'fs-toolbar-btn--active': props.detailsActive }"
               @click="emit('show-details')"
-              v-tooltip.bottom="props.detailsActive ? 'Schließen' : 'Details'"
+              v-tooltip.bottom="props.detailsActive ? 'Details schließen' : 'Details'"
             />
             <Button
               v-if="canDelete"
@@ -145,6 +155,23 @@ function locationLabel(photo: Photo) {
             />
           </slot>
         </div>
+      </div>
+
+      <!-- Details flyout (right side). Stays mounted across photo changes so
+           the embedded content's state (scroll position etc.) is preserved;
+           only the data reactively updates. Leaves room for the right nav
+           arrow so it remains clickable while the flyout is open. -->
+      <div
+        v-if="$slots['details-flyout']"
+        class="fs-details-flyout"
+        :class="{ 'fs-details-flyout--open': props.detailsActive }"
+        @click.stop
+        @touchstart.stop
+        @touchend.stop
+        @touchmove.stop
+        @wheel.stop
+      >
+        <slot name="details-flyout" />
       </div>
 
       <!-- Prev / Next buttons -->
@@ -251,6 +278,57 @@ function locationLabel(photo: Photo) {
 .fs-toolbar {
   display: flex;
   gap: 0.25em;
+}
+
+/* Highlighted state for toolbar toggle buttons (e.g. Details when open). */
+.fs-toolbar :deep(.fs-toolbar-btn--active) {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* ── Details flyout ─────────────────────────────────────────────────────── */
+.fs-details-flyout {
+  position: absolute;
+  top: calc(2.75em + 0.5rem);
+  /* Leave room for the right navigation button which sits at right:1rem
+     and is ~2em wide, so the flyout stops before it. */
+  right: calc(1rem + 2.5em + 0.5rem);
+  bottom: 1rem;
+  width: min(380px, calc(100vw - 1rem - 2.5em - 1rem));
+  background: var(--p-surface-card, #1e1e1e);
+  color: var(--p-text-color, #eee);
+  border: 1px solid var(--p-content-border-color, rgba(255, 255, 255, 0.1));
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  overflow-y: auto;
+  overflow-x: hidden;
+  z-index: 9;
+  transform: translateX(12px);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+
+.fs-details-flyout--open {
+  transform: translateX(0);
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+@media (max-width: 768px) {
+  .fs-details-flyout {
+    /* Mobile: right-nav button lives at the bottom, so the flyout can
+       stretch closer to the right edge. */
+    top: calc(2.75em + 0.25rem);
+    right: 0.5rem;
+    left: 0.5rem;
+    /* Keep clear of the bottom nav buttons (~4rem + safe-area + padding) */
+    bottom: calc(4rem + env(safe-area-inset-bottom, 0px) + 0.75rem);
+    width: auto;
+    max-width: 480px;
+    margin-left: auto;
+  }
 }
 
 /* ── Prev/Next nav buttons ──────────────────────────────────────────────── */

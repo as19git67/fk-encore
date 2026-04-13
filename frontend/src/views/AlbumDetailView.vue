@@ -526,6 +526,11 @@ async function handleBatchFavoriteAll() {
 // ── Mobile drawer state ───────────────────────────────────────────────────────
 const mobileTimelineOpen = ref(false)
 const mobileSidebarOpen = ref(false)
+/** Whether the details flyout inside the fullscreen overlay is open.
+ *  Shared between the grid- and map-mode fullscreens (only one is ever
+ *  visible at a time). Kept as a persistent ref so that navigating
+ *  between photos does not close the flyout. */
+const fullscreenDetailsOpen = ref(false)
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 void loadData()
@@ -737,15 +742,43 @@ onUnmounted(() => serviceHealth.stopPolling())
       :nextPhoto="nextPhoto"
       :canDelete="canDeletePhotos || canWrite"
       :showDetailsButton="true"
-      :detailsActive="false"
-      @close="isFullscreen = false"
+      :detailsActive="fullscreenDetailsOpen"
+      @close="isFullscreen = false; fullscreenDetailsOpen = false"
       @prev="selectedIndex--"
       @next="selectedIndex++"
       @toggle-favorite="handleToggleFavorite"
       @hide="handleHidePhoto"
       @restore="handleRestorePhoto"
-      @show-details="isFullscreen = false; mobileSidebarOpen = true; mobileTimelineOpen = false"
-    />
+      @show-details="fullscreenDetailsOpen = !fullscreenDetailsOpen"
+    >
+      <template #details-flyout>
+        <PhotoDetailSidebar
+          :photo="selectedPhoto"
+          :can-delete="canDeletePhotos || canWrite"
+          :can-upload="canUploadPhotos"
+          :faces="detectedFaces"
+          :is-editing-date="false"
+          :landmarks="detectedLandmarks"
+          :loading-faces="loadingFaces"
+          :loading-landmarks="loadingLandmarks"
+          :persons="persons"
+          :reindexing-photo="reindexingPhoto"
+          :updating-date="false"
+          :album-id="albumId"
+          :cover-photo-id="effectiveCoverPhotoId"
+          :album-role="album?.role"
+          :show-persons="showPersons"
+          :limit-albums-shown="true"
+          :face-service-available="serviceHealth.faceServiceAvailable"
+          @update:cover-photo-id="handleCoverPhotoIdUpdate"
+          @toggle-favorite="handleToggleFavorite"
+          @hide="handleHidePhoto"
+          @restore="handleRestorePhoto"
+          @ignore-face="handleIgnoreFaceInSidebar"
+          @reindex="handleReindexPhoto"
+        />
+      </template>
+    </FullscreenOverlay>
 
     <!-- Fullscreen overlay (Map mode – scoped to stop photos) -->
     <FullscreenOverlay
@@ -755,16 +788,16 @@ onUnmounted(() => serviceHealth.stopPolling())
       :nextPhoto="mapNextPhoto"
       :canDelete="canDeletePhotos || canWrite"
       :showDetailsButton="true"
-      :detailsActive="false"
-      @close="closeMapFullscreen"
+      :detailsActive="fullscreenDetailsOpen"
+      @close="closeMapFullscreen(); fullscreenDetailsOpen = false"
       @prev="mapFullscreenIndex--"
       @next="mapFullscreenIndex++"
       @toggle-favorite="handleToggleFavorite"
       @hide="handleHidePhoto"
       @restore="handleRestorePhoto"
-      @show-details="closeMapFullscreen"
+      @show-details="fullscreenDetailsOpen = !fullscreenDetailsOpen"
     >
-      <template #topbar-actions>
+      <template #topbar-actions-before>
         <Button
           :icon="effectiveCoverPhotoId === mapSelectedPhoto.id ? 'pi pi-image-check' : 'pi pi-image'"
           rounded text
@@ -772,18 +805,32 @@ onUnmounted(() => serviceHealth.stopPolling())
           v-tooltip.bottom="effectiveCoverPhotoId === mapSelectedPhoto.id ? 'Vom Cover entfernen' : 'Als Cover setzen'"
           @click="handleSetMapCover(mapSelectedPhoto.id)"
         />
-        <Button
-          icon="pi pi-info-circle" rounded text severity="secondary"
-          @click="closeMapFullscreen"
-          v-tooltip.bottom="'Schließen'"
-        />
-        <Button
-          v-if="canDeletePhotos || canWrite"
-          :icon="mapSelectedPhoto.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
-          rounded text
-          :severity="mapSelectedPhoto.curation_status === 'favorite' ? 'warn' : 'secondary'"
-          @click="handleToggleFavorite(mapSelectedPhoto.id, mapSelectedPhoto.curation_status)"
-          v-tooltip.bottom="mapSelectedPhoto.curation_status === 'favorite' ? 'Favorit entfernen' : 'Als Favorit markieren'"
+      </template>
+      <template #details-flyout>
+        <PhotoDetailSidebar
+          :photo="mapSelectedPhoto"
+          :can-delete="canDeletePhotos || canWrite"
+          :can-upload="canUploadPhotos"
+          :faces="detectedFaces"
+          :is-editing-date="false"
+          :landmarks="detectedLandmarks"
+          :loading-faces="loadingFaces"
+          :loading-landmarks="loadingLandmarks"
+          :persons="persons"
+          :reindexing-photo="reindexingPhoto"
+          :updating-date="false"
+          :album-id="albumId"
+          :cover-photo-id="effectiveCoverPhotoId"
+          :album-role="album?.role"
+          :show-persons="showPersons"
+          :limit-albums-shown="true"
+          :face-service-available="serviceHealth.faceServiceAvailable"
+          @update:cover-photo-id="handleCoverPhotoIdUpdate"
+          @toggle-favorite="handleToggleFavorite"
+          @hide="handleHidePhoto"
+          @restore="handleRestorePhoto"
+          @ignore-face="handleIgnoreFaceInSidebar"
+          @reindex="handleReindexPhoto"
         />
       </template>
     </FullscreenOverlay>
