@@ -31,6 +31,7 @@ import {
   type Photo,
   type PhotoGroup,
   updatePhotoCuration,
+  updatePhotoDate,
   updateAlbum,
   updateAlbumUserSettings,
   batchFavoritePhotos
@@ -323,6 +324,39 @@ async function handleToggleFavorite(id: number, currentStatus: CurationStatus) {
 async function handleIgnoreFaceInSidebar(faceId: number) {
   try { await ignoreFace(faceId); detectedFaces.value = detectedFaces.value.filter(f => f.id !== faceId) }
   catch (err: any) { error.value = err.message || 'Fehler' }
+}
+
+// ── Photo date editing (sidebar pencil) ───────────────────────────────────────
+const isEditingDate = ref(false)
+const editDate = ref<Date | null>(null)
+const updatingDate = ref(false)
+const dateEditingPhoto = ref<Photo | null>(null)
+
+function startEditingDate() {
+  // Pick the currently active photo: map mode uses `mapSelectedPhoto`,
+  // otherwise the grid/fullscreen selection.
+  const photo = mapSelectedPhoto.value || selectedPhoto.value
+  if (!photo) return
+  dateEditingPhoto.value = photo
+  editDate.value = new Date(photo.taken_at || photo.created_at)
+  isEditingDate.value = true
+}
+
+async function handleUpdateDate() {
+  const photo = dateEditingPhoto.value
+  if (!editDate.value || !photo || !album.value) return
+  updatingDate.value = true
+  try {
+    const takenAt = editDate.value.toISOString()
+    await updatePhotoDate(photo.id, takenAt)
+    album.value.photos = album.value.photos.map(p => p.id === photo.id ? { ...p, taken_at: takenAt } : p)
+    isEditingDate.value = false
+    dateEditingPhoto.value = null
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Aktualisieren des Datums'
+  } finally {
+    updatingDate.value = false
+  }
 }
 
 async function handleReindexPhoto() {
@@ -708,13 +742,14 @@ onUnmounted(() => serviceHealth.stopPolling())
           :can-delete="canDeletePhotos || canWrite"
           :can-upload="canUploadPhotos"
           :faces="detectedFaces"
-          :is-editing-date="false"
+          :is-editing-date="isEditingDate"
+          v-model:editDate="editDate"
           :landmarks="detectedLandmarks"
           :loading-faces="loadingFaces"
           :loading-landmarks="loadingLandmarks"
           :persons="persons"
           :reindexing-photo="reindexingPhoto"
-          :updating-date="false"
+          :updating-date="updatingDate"
           :album-id="albumId"
           :cover-photo-id="effectiveCoverPhotoId"
           :album-role="album.role"
@@ -726,6 +761,9 @@ onUnmounted(() => serviceHealth.stopPolling())
           @toggle-favorite="handleToggleFavorite"
           @hide="handleHidePhoto"
           @restore="handleRestorePhoto"
+          @start-edit-date="startEditingDate"
+          @update-date="handleUpdateDate"
+          @cancel-edit-date="isEditingDate = false"
           @ignore-face="handleIgnoreFaceInSidebar"
           @reindex="handleReindexPhoto"
         />
@@ -777,13 +815,14 @@ onUnmounted(() => serviceHealth.stopPolling())
           :can-delete="canDeletePhotos || canWrite"
           :can-upload="canUploadPhotos"
           :faces="detectedFaces"
-          :is-editing-date="false"
+          :is-editing-date="isEditingDate"
+          v-model:editDate="editDate"
           :landmarks="detectedLandmarks"
           :loading-faces="loadingFaces"
           :loading-landmarks="loadingLandmarks"
           :persons="persons"
           :reindexing-photo="reindexingPhoto"
-          :updating-date="false"
+          :updating-date="updatingDate"
           :album-id="albumId"
           :cover-photo-id="effectiveCoverPhotoId"
           :album-role="album?.role"
@@ -794,6 +833,9 @@ onUnmounted(() => serviceHealth.stopPolling())
           @toggle-favorite="handleToggleFavorite"
           @hide="handleHidePhoto"
           @restore="handleRestorePhoto"
+          @start-edit-date="startEditingDate"
+          @update-date="handleUpdateDate"
+          @cancel-edit-date="isEditingDate = false"
           @ignore-face="handleIgnoreFaceInSidebar"
           @reindex="handleReindexPhoto"
         />
@@ -834,13 +876,14 @@ onUnmounted(() => serviceHealth.stopPolling())
           :can-delete="canDeletePhotos || canWrite"
           :can-upload="canUploadPhotos"
           :faces="detectedFaces"
-          :is-editing-date="false"
+          :is-editing-date="isEditingDate"
+          v-model:editDate="editDate"
           :landmarks="detectedLandmarks"
           :loading-faces="loadingFaces"
           :loading-landmarks="loadingLandmarks"
           :persons="persons"
           :reindexing-photo="reindexingPhoto"
-          :updating-date="false"
+          :updating-date="updatingDate"
           :album-id="albumId"
           :cover-photo-id="effectiveCoverPhotoId"
           :album-role="album?.role"
@@ -851,6 +894,9 @@ onUnmounted(() => serviceHealth.stopPolling())
           @toggle-favorite="handleToggleFavorite"
           @hide="handleHidePhoto"
           @restore="handleRestorePhoto"
+          @start-edit-date="startEditingDate"
+          @update-date="handleUpdateDate"
+          @cancel-edit-date="isEditingDate = false"
           @ignore-face="handleIgnoreFaceInSidebar"
           @reindex="handleReindexPhoto"
         />

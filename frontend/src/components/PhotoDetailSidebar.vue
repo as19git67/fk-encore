@@ -417,18 +417,9 @@ watch(() => props.photo.id, () => {
       <div class="sidebar-divider" />
 
       <div class="sidebar-section">
-        <!-- When editing or when there is no description, show the heading
-             with icon and edit button. If a description exists and we're
-             not editing, drop the heading and show the text directly
-             (with an inline edit pencil). -->
-        <div
-          v-if="isEditingDescription || !photo.description"
-          class="section-label"
-        >
-          <i class="pi pi-align-left" />
-          <span>Beschreibung</span>
-          <Button v-if="canUpload && !isEditingDescription" icon="pi pi-pencil" text rounded size="small" @click="startEditDescription" class="edit-btn" />
-        </div>
+        <!-- Editor when editing, the text itself when set, otherwise a
+             muted italic "Keine Beschreibung" placeholder. The edit pencil
+             is always inline with the content (center-aligned). -->
         <div v-if="isEditingDescription" class="description-editor">
           <textarea v-model="descriptionText" class="p-inputtext description-textarea" rows="3" placeholder="Beschreibung eingeben…" @keydown.escape="cancelEditDescription" />
           <div class="edit-actions">
@@ -441,17 +432,22 @@ watch(() => props.photo.id, () => {
           <span class="description-body">{{ photo.description }}</span>
           <Button v-if="canUpload" icon="pi pi-pencil" text rounded size="small" @click="startEditDescription" class="edit-btn" />
         </div>
-        <div v-else class="empty-hint">Keine Beschreibung</div>
+        <div v-else class="empty-description">
+          <span class="empty-description-text">Keine Beschreibung</span>
+          <Button v-if="canUpload" icon="pi pi-pencil" text rounded size="small" @click="startEditDescription" class="edit-btn" />
+        </div>
       </div>
 
       <template v-if="photo.location_city || photo.location_name || loadingLandmarks || landmarks.length > 0 || (inFlyout && photo.latitude != null && photo.longitude != null)">
         <div class="sidebar-divider" />
         <div class="sidebar-section">
-          <div v-if="photo.location_name || photo.location_city" class="location-pill">
-            <i class="pi pi-map-marker" />
-            <template v-if="photo.location_name">{{ photo.location_name }}</template>
-            <template v-else-if="photo.location_city && photo.location_country">{{ photo.location_city }}, {{ photo.location_country }}</template>
-            <template v-else>{{ photo.location_city }}</template>
+          <div v-if="photo.location_name || photo.location_city" class="meta-row location-row">
+            <i class="pi pi-map-marker meta-icon" />
+            <span class="meta-value">
+              <template v-if="photo.location_name">{{ photo.location_name }}</template>
+              <template v-else-if="photo.location_city && photo.location_country">{{ photo.location_city }}, {{ photo.location_country }}</template>
+              <template v-else>{{ photo.location_city }}</template>
+            </span>
           </div>
           <PhotoMiniMap
             v-if="inFlyout && photo.latitude != null && photo.longitude != null"
@@ -752,21 +748,8 @@ watch(() => props.photo.id, () => {
 
 .edit-actions { display: flex; gap: 0.5rem; }
 
-.location-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  background: var(--p-content-hover-background);
-  border: 1px solid var(--p-content-border-color);
-  border-radius: 1rem;
-  padding: 0.25rem 0.75rem;
-  font-size: 0.82rem;
+.location-row {
   margin-bottom: 0.5rem;
-}
-
-.location-pill .pi-map-marker {
-  font-size: 0.8rem;
-  color: var(--p-text-muted-color);
 }
 
 .landmark-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
@@ -834,15 +817,25 @@ watch(() => props.photo.id, () => {
   word-break: break-word;
   color: var(--p-text-color);
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 0.5rem;
 }
 
-.description-icon {
-  margin-top: 0.2rem;
+.description-body {
+  flex: 1;
+  min-width: 0;
 }
 
-.description-body {
+.empty-description {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--p-text-muted-color);
+  font-style: italic;
+}
+
+.empty-description-text {
   flex: 1;
   min-width: 0;
 }
