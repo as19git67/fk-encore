@@ -819,9 +819,10 @@ onUnmounted(() => serviceHealth.stopPolling())
     >
       <template #topbar-actions-before>
         <Button
-          :icon="effectiveCoverPhotoId === mapSelectedPhoto.id ? 'pi pi-image-check' : 'pi pi-image'"
+          icon="pi pi-image"
           rounded text
           :severity="effectiveCoverPhotoId === mapSelectedPhoto.id ? 'warn' : 'secondary'"
+          :class="{ 'fs-toolbar-btn--active': effectiveCoverPhotoId === mapSelectedPhoto.id }"
           v-tooltip.bottom="effectiveCoverPhotoId === mapSelectedPhoto.id ? 'Vom Cover entfernen' : 'Als Cover setzen'"
           @click="handleSetMapCover(mapSelectedPhoto.id)"
         />

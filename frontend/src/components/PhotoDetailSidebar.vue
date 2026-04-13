@@ -352,9 +352,10 @@ watch(() => props.photo.id, () => {
         </template>
         <template v-if="albumId" class="meta-row cover-action">
           <Button
-              :icon="coverPhotoId === photo.id ? 'pi pi-image-check' : 'pi pi-image'"
+              icon="pi pi-image"
               v-tooltip.bottom="coverPhotoId === photo.id ? 'Vom Cover entfernen' : 'Als Cover setzen'"
               :severity="coverPhotoId === photo.id ? 'warn' : 'secondary'"
+              :class="{ 'cover-btn--active': coverPhotoId === photo.id }"
               text
               rounded
               :loading="togglingCover"
@@ -671,6 +672,13 @@ watch(() => props.photo.id, () => {
   justify-content: center;
   gap: 0.25rem;
   padding: 0.5rem 1rem;
+}
+
+/* Active-state highlight for the Cover toggle (PrimeVue "warn" on a text
+   button can be subtle on light backgrounds – give it a filled chip feel
+   so the "set" state stays clearly visible). */
+.quick-actions :deep(.cover-btn--active) {
+  background: var(--p-content-hover-background);
 }
 
 .sidebar-divider { height: 1px; background: var(--p-content-border-color); }
