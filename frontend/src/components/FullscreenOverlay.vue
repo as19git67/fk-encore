@@ -78,7 +78,7 @@ function handleKeydown(e: KeyboardEvent) {
     e.stopImmediatePropagation()
     e.preventDefault()
     emit('toggle-favorite', props.photo.id, props.photo.curation_status)
-  } else if (e.key === 'h' || e.key === 'H') {
+  } else if (e.key === 'x' || e.key === 'X') {
     if (!props.canDelete) return
     const tag = (document.activeElement as HTMLElement | null)?.tagName
     if (tag === 'INPUT' || tag === 'TEXTAREA') return
@@ -100,7 +100,7 @@ function locationLabel(photo: Photo) {
 }
 
 // ── Keyboard shortcuts ─────────────────────────────────────────────────────
-// `F` = toggle favorite, `H` = hide / restore. Both are implemented in the
+// `F` = toggle favorite, `X` = hide / restore. Both are implemented in the
 // window-level capture-phase `handleKeydown` above so they work regardless
 // of which element currently has focus — users don't have to Tab to the
 // toolbar to trigger the action. The native Space/Enter activation of the
@@ -161,7 +161,7 @@ function locationLabel(photo: Photo) {
               rounded text
               :severity="photo.curation_status === 'hidden' ? 'danger' : 'secondary'"
               @click="photo.curation_status === 'hidden' ? emit('restore', photo.id) : emit('hide', photo.id)"
-              v-tooltip.bottom="(photo.curation_status === 'hidden' ? 'Wiederherstellen' : 'Ausblenden') + ' (H)'"
+              v-tooltip.bottom="(photo.curation_status === 'hidden' ? 'Wiederherstellen' : 'Ausblenden') + ' (X)'"
             />
             <Button
               v-if="canDelete"

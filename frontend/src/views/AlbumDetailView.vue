@@ -299,19 +299,33 @@ async function loadSidebarData(photoId: number) {
 }
 
 // ── Curation ──────────────────────────────────────────────────────────────────
+// Mutate the photo object directly so that Vue's reactive proxy picks up the
+// change and re-renders every template that reads `curation_status`
+// (PhotoGrid tile, PhotoDetailSidebar, FullscreenOverlay toolbar). Replacing
+// the whole `photos` array works for computeds that depend on the array
+// reference, but the `selectedPhoto` reference passed to FullscreenOverlay
+// stays tied to a stale object because `albumPhotos` is a sorted copy — so a
+// targeted mutation is the more reliable approach here.
 function updatePhotoStatus(id: number, status: CurationStatus) {
   if (!album.value) return
-  album.value.photos = album.value.photos.map(p => p.id === id ? { ...p, curation_status: status } : p)
+  const photo = album.value.photos.find(p => p.id === id)
+  if (photo) photo.curation_status = status
 }
 
 async function handleHidePhoto(id: number) {
-  try { await updatePhotoCuration(id, 'hidden'); updatePhotoStatus(id, 'hidden') }
-  catch (err: any) { error.value = err.message || 'Fehler' }
+  const photo = album.value?.photos.find(p => p.id === id)
+  const prev = photo?.curation_status
+  updatePhotoStatus(id, 'hidden')
+  try { await updatePhotoCuration(id, 'hidden') }
+  catch (err: any) { if (prev) updatePhotoStatus(id, prev); error.value = err.message || 'Fehler' }
 }
 
 async function handleRestorePhoto(id: number) {
-  try { await updatePhotoCuration(id, 'visible'); updatePhotoStatus(id, 'visible') }
-  catch (err: any) { error.value = err.message || 'Fehler' }
+  const photo = album.value?.photos.find(p => p.id === id)
+  const prev = photo?.curation_status
+  updatePhotoStatus(id, 'visible')
+  try { await updatePhotoCuration(id, 'visible') }
+  catch (err: any) { if (prev) updatePhotoStatus(id, prev); error.value = err.message || 'Fehler' }
 }
 
 async function handleToggleFavorite(id: number, currentStatus: CurationStatus) {
