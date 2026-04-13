@@ -783,6 +783,7 @@ onUnmounted(() => serviceHealth.stopPolling())
           rounded text
           :severity="mapSelectedPhoto.curation_status === 'favorite' ? 'warn' : 'secondary'"
           @click="handleToggleFavorite(mapSelectedPhoto.id, mapSelectedPhoto.curation_status)"
+          v-tooltip.bottom="mapSelectedPhoto.curation_status === 'favorite' ? 'Favorit entfernen' : 'Als Favorit markieren'"
         />
       </template>
     </FullscreenOverlay>

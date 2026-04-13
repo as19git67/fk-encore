@@ -39,6 +39,14 @@ app.use(PrimeVue, {
       darkModeSelector: 'system',
     },
   },
+  zIndex: {
+    // Must sit above --z-fullscreen (1200) so tooltips on buttons inside
+    // FullscreenOverlay are not hidden behind the overlay.
+    modal: 1100,
+    overlay: 1000,
+    menu: 1000,
+    tooltip: 1300,
+  },
 })
 app.use(ConfirmationService)
 app.directive('tooltip', Tooltip)
