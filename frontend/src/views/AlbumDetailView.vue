@@ -191,6 +191,7 @@ watch(album, (a) => {
 }, { immediate: true })
 
 // ── Map fullscreen ───────────────────────────────────────────────────────────
+const tripMapRef = ref<{ selectStopByPhotoId: (id: number) => boolean } | null>(null)
 const mapFullscreenPhotos = ref<Photo[]>([])
 const mapFullscreenIndex = ref(0)
 const isMapFullscreen = ref(false)
@@ -203,6 +204,17 @@ function handleMapFullscreen(stopPhotos: Photo[], startIndex: number) {
   mapFullscreenPhotos.value = allPhotos
   mapFullscreenIndex.value = globalIndex >= 0 ? globalIndex : 0
   isMapFullscreen.value = true
+}
+
+function closeMapFullscreen() {
+  // Sync the map's selected stop with the photo the user ended on, so that
+  // navigating beyond the original stop inside fullscreen is reflected on
+  // the map once the overlay is closed.
+  const ended = mapSelectedPhoto.value
+  if (ended && tripMapRef.value) {
+    tripMapRef.value.selectStopByPhotoId(ended.id)
+  }
+  isMapFullscreen.value = false
 }
 
 const mapSelectedPhoto = computed(() =>
@@ -620,6 +632,7 @@ onUnmounted(() => serviceHealth.stopPolling())
     <!-- Map mode -->
     <TripMap
       v-if="album && displayMode === 'map' && albumPhotos.length > 0"
+      ref="tripMapRef"
       :photos="albumPhotos"
       :albumName="album.name"
       :albumDescription="album.description"
@@ -743,13 +756,13 @@ onUnmounted(() => serviceHealth.stopPolling())
       :canDelete="canDeletePhotos || canWrite"
       :showDetailsButton="true"
       :detailsActive="false"
-      @close="isMapFullscreen = false"
+      @close="closeMapFullscreen"
       @prev="mapFullscreenIndex--"
       @next="mapFullscreenIndex++"
       @toggle-favorite="handleToggleFavorite"
       @hide="handleHidePhoto"
       @restore="handleRestorePhoto"
-      @show-details="isMapFullscreen = false"
+      @show-details="closeMapFullscreen"
     >
       <template #topbar-actions>
         <Button
@@ -761,7 +774,7 @@ onUnmounted(() => serviceHealth.stopPolling())
         />
         <Button
           icon="pi pi-info-circle" rounded text severity="secondary"
-          @click="isMapFullscreen = false"
+          @click="closeMapFullscreen"
           v-tooltip.bottom="'Schließen'"
         />
         <Button

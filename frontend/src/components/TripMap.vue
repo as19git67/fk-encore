@@ -325,6 +325,22 @@ watch(() => props.photos, () => {
 function handleNoGpsPhotoClick(photo: Photo) {
   emit('open-fullscreen', [photo], 0)
 }
+
+// ── External API ─────────────────────────────────────────────────────────────
+
+/** Select the stop that contains the given photo, if any. Used by the parent
+ *  view to sync the map selection with the photo the user ended on in the
+ *  fullscreen overlay (issue: "Wenn man in der Vollbildansicht über den Stop
+ *  hinaus navigiert, sollte sich das in der Kartenansicht wiederspiegeln,
+ *  sobald man die Vollbildansicht verläßt"). */
+function selectStopByPhotoId(photoId: number): boolean {
+  const stop = stops.value.find((s) => s.photos.some((p) => p.id === photoId))
+  if (!stop) return false
+  if (stop.id !== selectedStopId.value) selectStop(stop.id)
+  return true
+}
+
+defineExpose({ selectStopByPhotoId })
 </script>
 
 <template>
