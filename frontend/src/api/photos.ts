@@ -29,6 +29,37 @@ export interface ListPhotosResponse {
   photos: Photo[]
 }
 
+/**
+ * Lightweight photo entry for the gallery index. Heavy fields
+ * (location_*, ai_quality_*, description, hash, GPS) are omitted and must be
+ * fetched on demand via getPhotoDetailsBatch.
+ *
+ * The shape is structurally compatible with `Photo` (just with several
+ * optional fields undefined), so an index entry can be widened to `Photo`
+ * without conversion — frontend code that reads e.g. `photo.location_name`
+ * will simply see `undefined` until the details are hydrated.
+ */
+export interface PhotoIndexEntry {
+  id: number
+  user_id: number
+  filename: string
+  original_name: string
+  mime_type: string
+  size: number
+  taken_at?: string
+  created_at: string
+  curation_status: CurationStatus
+  auto_crop?: { x: number; y: number }
+}
+
+export interface ListPhotoIndexResponse {
+  photos: PhotoIndexEntry[]
+}
+
+export interface PhotoDetailsBatchResponse {
+  photos: Photo[]
+}
+
 export interface DeleteResponse {
   success: boolean
   message: string
@@ -37,6 +68,27 @@ export interface DeleteResponse {
 export function listPhotos(showHidden: boolean = false) {
   const query = showHidden ? '?showHidden=true' : ''
   return apiFetch<ListPhotosResponse>(`/photos${query}`)
+}
+
+/**
+ * Lightweight gallery index – returns just enough per photo to render the
+ * grid (id, filename, dates, curation_status, auto_crop). Use this for the
+ * initial gallery load, then call `getPhotoDetailsBatch` to hydrate the
+ * heavy fields (location, GPS, AI quality, description) on demand.
+ */
+export function listPhotoIndex(showHidden: boolean = false) {
+  const query = showHidden ? '?showHidden=true' : ''
+  return apiFetch<ListPhotoIndexResponse>(`/photos/index${query}`)
+}
+
+/**
+ * Batch fetch full details (heavy fields) for a list of photo IDs.
+ */
+export function getPhotoDetailsBatch(ids: number[]) {
+  if (ids.length === 0) {
+    return Promise.resolve<PhotoDetailsBatchResponse>({ photos: [] })
+  }
+  return apiFetch<PhotoDetailsBatchResponse>(`/photos/details?ids=${ids.join(',')}`)
 }
 
 export async function uploadPhoto(file: File, signal?: AbortSignal) {
