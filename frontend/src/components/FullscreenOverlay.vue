@@ -87,6 +87,21 @@ function formatDate(photo: Photo) {
 function locationLabel(photo: Photo) {
   return formatLocationLabel(photo)
 }
+
+// ── Toolbar button handlers ─────────────────────────────────────────────────
+// Use stable methods (not inline ternaries on @click) so the click handler
+// identity is stable across renders. Otherwise the handler function changes
+// on every reactive update of `photo.curation_status`, which on the first
+// render after mount could race with the button's click dispatch and
+// swallow the event.
+function onHideClick() {
+  if (props.photo.curation_status === 'hidden') emit('restore', props.photo.id)
+  else emit('hide', props.photo.id)
+}
+
+function onFavoriteClick() {
+  emit('toggle-favorite', props.photo.id, props.photo.curation_status)
+}
 </script>
 
 <template>
@@ -142,7 +157,7 @@ function locationLabel(photo: Photo) {
               :icon="photo.curation_status === 'hidden' ? 'pi pi-eye-slash' : 'pi pi-eye'"
               rounded text
               :severity="photo.curation_status === 'hidden' ? 'danger' : 'secondary'"
-              @click="photo.curation_status === 'hidden' ? emit('restore', photo.id) : emit('hide', photo.id)"
+              @click="onHideClick"
               v-tooltip.bottom="photo.curation_status === 'hidden' ? 'Wiederherstellen' : 'Ausblenden'"
             />
             <Button
@@ -150,7 +165,7 @@ function locationLabel(photo: Photo) {
               :icon="photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
               rounded text
               :severity="photo.curation_status === 'favorite' ? 'warn' : 'secondary'"
-              @click="emit('toggle-favorite', photo.id, photo.curation_status)"
+              @click="onFavoriteClick"
               v-tooltip.bottom="photo.curation_status === 'favorite' ? 'Favorit entfernen' : 'Als Favorit markieren'"
             />
           </slot>
