@@ -3,6 +3,7 @@ import Button from 'primevue/button'
 import DatePicker from 'primevue/datepicker'
 import Checkbox from 'primevue/checkbox'
 import HeicImage from './HeicImage.vue'
+import PhotoMiniMap from './PhotoMiniMap.vue'
 import { getPhotoUrl, listAlbums, getPhotosAlbums, batchUpdateAlbumPhotos, updateAlbum, updateAlbumUserSettings, createAlbum, updatePhotoDescription, type Album } from '../api/photos'
 import { getAlbumCheckState as calculateAlbumCheckState, getNewPendingAction } from '../utils/albumSelection'
 import type { Photo, Face, LandmarkItem, Person, CurationStatus } from '../api/photos'
@@ -31,6 +32,11 @@ const props = defineProps<{
   faceServiceAvailable?: boolean
   /** Show a "Go to photo" navigation button (e.g. from PersonsView). */
   showNavigateToPhoto?: boolean
+  /** When true, the sidebar is rendered inside the fullscreen details
+   *  flyout: it fills the available width, the photo preview is hidden
+   *  (the user already sees the photo in the fullscreen view), and a
+   *  small map with a pin is shown under the location section. */
+  inFlyout?: boolean
 }>()
 
 const editDate = defineModel<Date | null>('editDate', { default: null })
@@ -267,7 +273,7 @@ watch(() => props.photo.id, () => {
 </script>
 
 <template>
-  <aside class="details-sidebar">
+  <aside class="details-sidebar" :class="{ 'details-sidebar--flyout': inFlyout }">
     <div class="sidebar-header">
       <span class="sidebar-title">Details</span>
     </div>
@@ -332,13 +338,13 @@ watch(() => props.photo.id, () => {
       </div>
     </div>
     <div v-else class="sidebar-scroll">
-      <div class="preview-container" @click="emit('fullscreen')" title="Vollbild">
+      <div v-if="!inFlyout" class="preview-container" @click="emit('fullscreen')" title="Vollbild">
         <HeicImage :src="getPhotoUrl(photo.filename)" :alt="photo.original_name" objectFit="contain" />
         <div class="preview-overlay"><i class="pi pi-expand"></i></div>
       </div>
 
       <div class="quick-actions">
-        <Button icon="pi pi-expand" v-tooltip.bottom="'Vollbild'" @click="emit('fullscreen')" severity="secondary" text rounded />
+        <Button v-if="!inFlyout" icon="pi pi-expand" v-tooltip.bottom="'Vollbild'" @click="emit('fullscreen')" severity="secondary" text rounded />
         <Button v-if="showNavigateToPhoto" icon="pi pi-images" v-tooltip.bottom="'In Fotos anzeigen'" @click="emit('navigate-to-photo', photo.id)" severity="secondary" text rounded />
         <template v-if="canDelete">
           <Button :icon="photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'" v-tooltip.bottom="photo.curation_status === 'favorite' ? 'Kein Favorit' : 'Favorit'" @click="emit('toggle-favorite', photo.id, photo.curation_status)" :severity="photo.curation_status === 'favorite' ? 'warn' : 'secondary'" text rounded />
@@ -426,7 +432,7 @@ watch(() => props.photo.id, () => {
         <div v-else class="empty-hint">Keine Beschreibung</div>
       </div>
 
-      <template v-if="photo.location_city || photo.location_name || loadingLandmarks || landmarks.length > 0">
+      <template v-if="photo.location_city || photo.location_name || loadingLandmarks || landmarks.length > 0 || (inFlyout && photo.latitude != null && photo.longitude != null)">
         <div class="sidebar-divider" />
         <div class="sidebar-section">
           <div class="section-label"><i class="pi pi-map-marker" /> Ort</div>
@@ -435,6 +441,14 @@ watch(() => props.photo.id, () => {
             <template v-else-if="photo.location_city && photo.location_country">{{ photo.location_city }}, {{ photo.location_country }}</template>
             <template v-else>{{ photo.location_city }}</template>
           </div>
+          <PhotoMiniMap
+            v-if="inFlyout && photo.latitude != null && photo.longitude != null"
+            :key="photo.id"
+            :latitude="photo.latitude"
+            :longitude="photo.longitude"
+            :label="photo.location_name || photo.location_city"
+            class="mini-map"
+          />
           <div v-if="loadingLandmarks" class="loading-row"><i class="pi pi-spin pi-spinner" /> Gebäude werden erkannt…</div>
           <div v-else-if="landmarks.some(lm => lm.confidence >= 0.6)" class="landmark-chips">
             <template v-for="lm in landmarks" :key="lm.id">
@@ -534,6 +548,31 @@ watch(() => props.photo.id, () => {
   background: var(--p-content-background);
   border-left: 1px solid var(--p-content-border-color);
   overflow: hidden;
+}
+
+/* Flyout variant: fill the entire width of the surrounding flyout and
+   drop the vertical border (the flyout already has its own border).
+   Also defer scrolling to the surrounding flyout to avoid a double
+   scroll container. */
+.details-sidebar--flyout {
+  width: 100%;
+  border-left: none;
+  background: transparent;
+  overflow: visible;
+}
+
+.details-sidebar--flyout .sidebar-scroll {
+  overflow: visible;
+}
+
+/* Header would be redundant — the flyout already implies "Details". */
+.details-sidebar--flyout .sidebar-header {
+  display: none;
+}
+
+.mini-map {
+  margin-top: 0.1rem;
+  margin-bottom: 0.5rem;
 }
 
 @media (max-width: 768px) {

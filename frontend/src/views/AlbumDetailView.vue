@@ -753,6 +753,7 @@ onUnmounted(() => serviceHealth.stopPolling())
     >
       <template #details-flyout>
         <PhotoDetailSidebar
+          :in-flyout="true"
           :photo="selectedPhoto"
           :can-delete="canDeletePhotos || canWrite"
           :can-upload="canUploadPhotos"
@@ -808,6 +809,7 @@ onUnmounted(() => serviceHealth.stopPolling())
       </template>
       <template #details-flyout>
         <PhotoDetailSidebar
+          :in-flyout="true"
           :photo="mapSelectedPhoto"
           :can-delete="canDeletePhotos || canWrite"
           :can-upload="canUploadPhotos"
