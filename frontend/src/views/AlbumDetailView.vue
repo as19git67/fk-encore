@@ -309,7 +309,21 @@ async function loadSidebarData(photoId: number) {
 function updatePhotoStatus(id: number, status: CurationStatus) {
   if (!album.value) return
   const photo = album.value.photos.find(p => p.id === id)
-  if (photo) photo.curation_status = status
+  if (!photo) return
+  const prev = photo.curation_status
+  if (prev === status) return
+  photo.curation_status = status
+  // Keep the per-photo aggregate counters shown under "Meinungen" in sync
+  // with the current user's own toggle. The server re-aggregates across all
+  // members, but until the next reload we adjust locally so the opinion
+  // bars reflect the new state immediately.
+  const stats = photo.curation_stats
+  if (stats) {
+    if (prev === 'favorite' && status !== 'favorite') stats.fav_count = Math.max(0, stats.fav_count - 1)
+    if (prev !== 'favorite' && status === 'favorite') stats.fav_count += 1
+    if (prev === 'hidden' && status !== 'hidden') stats.hide_count = Math.max(0, stats.hide_count - 1)
+    if (prev !== 'hidden' && status === 'hidden') stats.hide_count += 1
+  }
 }
 
 async function handleHidePhoto(id: number) {
@@ -821,6 +835,7 @@ onUnmounted(() => serviceHealth.stopPolling())
       @hide="handleHidePhoto"
       @restore="handleRestorePhoto"
       @show-details="fullscreenDetailsOpen = !fullscreenDetailsOpen"
+      @toggle-cover="handleSetMapCover"
     >
       <template #details-flyout>
         <PhotoDetailSidebar
@@ -872,6 +887,7 @@ onUnmounted(() => serviceHealth.stopPolling())
       @hide="handleHidePhoto"
       @restore="handleRestorePhoto"
       @show-details="fullscreenDetailsOpen = !fullscreenDetailsOpen"
+      @toggle-cover="handleSetMapCover"
     >
       <template #topbar-actions-before>
         <Button
@@ -879,7 +895,7 @@ onUnmounted(() => serviceHealth.stopPolling())
           rounded text
           :severity="effectiveCoverPhotoId === mapSelectedPhoto.id ? 'warn' : 'secondary'"
           :class="{ 'fs-toolbar-btn--active': effectiveCoverPhotoId === mapSelectedPhoto.id }"
-          v-tooltip.bottom="effectiveCoverPhotoId === mapSelectedPhoto.id ? 'Vom Cover entfernen' : 'Als Cover setzen'"
+          v-tooltip.bottom="(effectiveCoverPhotoId === mapSelectedPhoto.id ? 'Vom Cover entfernen' : 'Als Cover setzen') + ' (C)'"
           @click="handleSetMapCover(mapSelectedPhoto.id)"
         />
       </template>

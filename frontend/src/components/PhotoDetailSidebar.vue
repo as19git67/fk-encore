@@ -433,6 +433,7 @@ watch(() => props.photo.id, () => {
           <Button v-if="canUpload" icon="pi pi-pencil" text rounded size="small" @click="startEditDescription" class="edit-btn" />
         </div>
         <div v-else class="empty-description">
+          <i class="pi pi-align-left meta-icon description-icon" />
           <span class="empty-description-text">Keine Beschreibung</span>
           <Button v-if="canUpload" icon="pi pi-pencil" text rounded size="small" @click="startEditDescription" class="edit-btn" />
         </div>
@@ -541,6 +542,12 @@ watch(() => props.photo.id, () => {
         <div v-if="photo.size" class="meta-row">
           <i class="pi pi-database meta-icon" />
           <span class="meta-value">{{ (photo.size / 1024 / 1024).toFixed(2) }} MB</span>
+        </div>
+        <!-- Stored filename on disk (UUID-ish) – useful when tracking a photo
+             down inside the Docker volume. -->
+        <div v-if="photo.filename" class="meta-row">
+          <i class="pi pi-hashtag meta-icon" />
+          <span class="meta-value meta-value--mono" :title="photo.filename">{{ photo.filename }}</span>
         </div>
       </div>
     </div>
@@ -719,6 +726,13 @@ watch(() => props.photo.id, () => {
   min-width: 0;
   word-break: break-word;
   line-height: 1.4;
+}
+
+.meta-value--mono {
+  font-family: var(--font-family-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color);
+  word-break: break-all;
 }
 
 .cover-action {

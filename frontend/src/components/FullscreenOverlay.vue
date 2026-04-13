@@ -25,6 +25,7 @@ const emit = defineEmits<{
   'hide': [id: number]
   'restore': [id: number]
   'show-details': []
+  'toggle-cover': [id: number]
 }>()
 
 // ── Preload erst nach Laden des aktuellen Bildes ────────────────────────────
@@ -86,6 +87,19 @@ function handleKeydown(e: KeyboardEvent) {
     e.preventDefault()
     if (props.photo.curation_status === 'hidden') emit('restore', props.photo.id)
     else emit('hide', props.photo.id)
+  } else if (e.key === 'i' || e.key === 'I') {
+    if (props.showDetailsButton === false) return
+    const tag = (document.activeElement as HTMLElement | null)?.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return
+    e.stopImmediatePropagation()
+    e.preventDefault()
+    emit('show-details')
+  } else if (e.key === 'c' || e.key === 'C') {
+    const tag = (document.activeElement as HTMLElement | null)?.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return
+    e.stopImmediatePropagation()
+    e.preventDefault()
+    emit('toggle-cover', props.photo.id)
   }
 }
 onMounted(() => window.addEventListener('keydown', handleKeydown, true))
@@ -100,11 +114,12 @@ function locationLabel(photo: Photo) {
 }
 
 // ── Keyboard shortcuts ─────────────────────────────────────────────────────
-// `F` = toggle favorite, `X` = hide / restore. Both are implemented in the
-// window-level capture-phase `handleKeydown` above so they work regardless
-// of which element currently has focus — users don't have to Tab to the
-// toolbar to trigger the action. The native Space/Enter activation of the
-// focused toolbar buttons (@click handlers) also continues to work.
+// `F` = toggle favorite, `X` = hide / restore, `I` = toggle details flyout,
+// `C` = toggle album cover. All implemented in the window-level
+// capture-phase `handleKeydown` above so they work regardless of which
+// element currently has focus — users don't have to Tab to the toolbar to
+// trigger the action. The native Space/Enter activation of the focused
+// toolbar buttons (@click handlers) also continues to work.
 </script>
 
 <template>
@@ -153,7 +168,7 @@ function locationLabel(photo: Photo) {
               :severity="props.detailsActive ? 'primary' : 'secondary'"
               :class="{ 'fs-toolbar-btn--active': props.detailsActive }"
               @click="emit('show-details')"
-              v-tooltip.bottom="props.detailsActive ? 'Details schließen' : 'Details'"
+              v-tooltip.bottom="(props.detailsActive ? 'Details schließen' : 'Details') + ' (I)'"
             />
             <Button
               v-if="canDelete"
