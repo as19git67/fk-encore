@@ -352,7 +352,7 @@ watch(() => props.photo.id, () => {
         </template>
         <template v-if="albumId" class="meta-row cover-action">
           <Button
-              :icon="coverPhotoId === photo.id ? 'pi pi-image' : 'pi pi-image'"
+              :icon="coverPhotoId === photo.id ? 'pi pi-image-check' : 'pi pi-image'"
               v-tooltip.bottom="coverPhotoId === photo.id ? 'Vom Cover entfernen' : 'Als Cover setzen'"
               :severity="coverPhotoId === photo.id ? 'warn' : 'secondary'"
               text

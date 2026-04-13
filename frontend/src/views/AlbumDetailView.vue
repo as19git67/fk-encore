@@ -333,14 +333,29 @@ async function handleReindexPhoto() {
   finally { reindexingPhoto.value = false }
 }
 
+function applyViewerCoverOverride(id: number | null) {
+  if (!album.value) return
+  if (album.value.settings) {
+    album.value.settings.cover_photo_id = id
+  } else {
+    // Viewer has never persisted any setting yet – synthesise a minimal
+    // local settings object so the UI reflects the toggled cover instantly.
+    album.value.settings = {
+      album_id: album.value.id,
+      user_id: 0,
+      hide_mode: 'mine',
+      active_view: 'all',
+      cover_photo_id: id,
+    }
+  }
+}
+
 function handleCoverPhotoIdUpdate(id: number | null) {
   if (!album.value) return
   if (canWrite.value) {
     album.value.cover_photo_id = id ?? undefined
   } else {
-    // Viewer: update user-specific settings
-    if (!album.value.settings) return
-    album.value.settings.cover_photo_id = id
+    applyViewerCoverOverride(id)
   }
 }
 
@@ -353,7 +368,7 @@ async function handleSetMapCover(photoId: number) {
       album.value.cover_photo_id = newCoverId ?? undefined
     } else {
       await updateAlbumUserSettings(albumId, { cover_photo_id: newCoverId })
-      if (album.value.settings) album.value.settings.cover_photo_id = newCoverId
+      applyViewerCoverOverride(newCoverId)
     }
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Setzen des Covers'
@@ -456,10 +471,14 @@ function handleScrollTo(sectionId: string) {
 }
 
 // ── Album cover ───────────────────────────────────────────────────────────────
-// Effective cover: user-specific setting takes precedence over album-level cover
-const effectiveCoverPhotoId = computed(() => {
+// Effective cover: user-specific setting takes precedence over album-level
+// cover. An explicit `null` in the user settings means "the user hid the
+// cover for themselves" and must NOT fall back to the album-level cover.
+const effectiveCoverPhotoId = computed<number | null | undefined>(() => {
   if (!album.value) return undefined
-  return album.value.settings?.cover_photo_id ?? album.value.cover_photo_id
+  const userCover = album.value.settings?.cover_photo_id
+  if (userCover !== undefined) return userCover // number | null
+  return album.value.cover_photo_id
 })
 
 async function scrollToCover() {
