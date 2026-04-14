@@ -51,24 +51,6 @@ services:
       BACKUP_DIR: /mnt/backup
       # 30 minutes; overrides the auto-stop safety timer in /internal/backup/start
       BACKUP_AUTO_STOP_MS: ${BACKUP_AUTO_STOP_MS:-1800000}
-      # Shared secret for /internal/backup/* — must match
-      # /etc/fk-encore/backup-token on the host. Generate with
-      # scripts/host/install-backup-hook.sh. Leaving this empty disables
-      # the backup endpoints (they respond with 401).
-      BACKUP_TOKEN: ${BACKUP_TOKEN:-}
-      # Defence-in-depth: comma-separated CIDR allow-list for
-      # /internal/backup/*. Requests from outside the list are rejected
-      # before the token is even checked — so a leaked token cannot be
-      # abused from the public internet. Leave unset to use the built-in
-      # defaults (loopback + RFC1918 + IPv6 ULA, which covers the Docker
-      # bridge). Override only if the app is fronted by a reverse proxy
-      # that SNATs requests from somewhere unusual.
-      BACKUP_ALLOW_CIDRS: ${BACKUP_ALLOW_CIDRS:-}
-      # Encore.ts proxies requests through its Rust HTTP layer, so the
-      # real peer IP arrives in X-Forwarded-For (the Node socket is
-      # internal). We therefore trust XFF by default — only set to
-      # "false" in test rigs that bypass Encore.
-      BACKUP_TRUST_XFF: ${BACKUP_TRUST_XFF:-true}
     volumes:
       - photos:/mnt/data/photos
       - thumbnails:/mnt/data/thumbnails

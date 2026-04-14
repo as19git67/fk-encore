@@ -25,9 +25,7 @@
 #
 # Configuration (env vars override defaults):
 #   FK_ENCORE_URL        base URL of the app, default http://localhost:8080
-#   FK_BACKUP_TOKEN_FILE path to token file,  default: ./backup-token next to
-#                        this script (that is where install-backup-hook.sh
-#                        places it — on a ZFS dataset, upgrade-safe)
+#   FK_BACKUP_TOKEN_FILE path to token file,  default /etc/fk-encore/backup-token
 #   ZFS_DATASET          dataset for snapshot, default tank/vivanty
 #   LABEL                snapshot + dump label, default daily-<UTC timestamp>
 #   CURL_TIMEOUT         seconds, default 30
@@ -37,10 +35,8 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 FK_ENCORE_URL="${FK_ENCORE_URL:-http://localhost:8080}"
-FK_BACKUP_TOKEN_FILE="${FK_BACKUP_TOKEN_FILE:-$SCRIPT_DIR/backup-token}"
+FK_BACKUP_TOKEN_FILE="${FK_BACKUP_TOKEN_FILE:-/etc/fk-encore/backup-token}"
 ZFS_DATASET="${ZFS_DATASET:-tank/vivanty}"
 LABEL="${LABEL:-daily-$(date -u +%Y%m%d-%H%M%S)}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-30}"
@@ -69,36 +65,14 @@ if ! command -v curl >/dev/null 2>&1; then
 fi
 
 call_api() {
-  # Usage: call_api METHOD PATH [extra curl args...]
-  # Prints the response body on stdout when the HTTP status is 2xx.
-  # On non-2xx, logs "HTTP <status>: <body>" to stderr and returns 1. Without
-  # this, curl --fail hides the body, making 401 / 400 responses opaque on
-  # the host.
   local method="$1" path="$2"
-  local tmp_body http_status
-  tmp_body="$(mktemp)"
-  # shellcheck disable=SC2064
-  trap "rm -f '$tmp_body'" RETURN
-
-  http_status="$(
-    curl --silent --show-error \
-         --max-time "$CURL_TIMEOUT" \
-         --request "$method" \
-         --header "Authorization: Bearer $TOKEN" \
-         --header "Content-Type: application/json" \
-         --output "$tmp_body" \
-         --write-out '%{http_code}' \
-         "${@:3}" \
-         "$FK_ENCORE_URL$path" || true
-  )"
-
-  if [[ "$http_status" =~ ^2[0-9][0-9]$ ]]; then
-    cat "$tmp_body"
-    return 0
-  fi
-
-  log "HTTP $http_status from $method $path: $(tr -d '\n' < "$tmp_body")"
-  return 1
+  curl --fail --silent --show-error \
+       --max-time "$CURL_TIMEOUT" \
+       --request "$method" \
+       --header "Authorization: Bearer $TOKEN" \
+       --header "Content-Type: application/json" \
+       "${@:3}" \
+       "$FK_ENCORE_URL$path"
 }
 
 stop_backup() {

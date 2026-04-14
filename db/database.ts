@@ -20,6 +20,7 @@ if (fs.existsSync(envPath)) {
 
 import * as schema from "./schema";
 import { seed } from "./seed";
+import { runStartupHousekeeping } from "../backup/startup";
 
 type DbInstance = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -95,11 +96,9 @@ export async function initializeDb(): Promise<DbInstance> {
       //   - defensive pg_backup_stop() in case the previous process crashed
       //     while the cluster was in backup mode,
       //   - apply any pending `restore-*.dump` file from $BACKUP_DIR.
-      // Loaded lazily so tests (which mock encore.dev/api but not /log)
-      // never pull in the backup module's encore.dev/log dependency.
+      // Tests and fresh installs without a backup dir are no-ops.
       if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
         try {
-          const { runStartupHousekeeping } = await import("../backup/startup");
           await runStartupHousekeeping();
         } catch (err: any) {
           console.error(`[db] backup housekeeping failed: ${err?.message ?? err}`);
