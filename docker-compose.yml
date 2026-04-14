@@ -51,6 +51,11 @@ services:
       BACKUP_DIR: /mnt/backup
       # 30 minutes; overrides the auto-stop safety timer in /internal/backup/start
       BACKUP_AUTO_STOP_MS: ${BACKUP_AUTO_STOP_MS:-1800000}
+      # Shared secret for /internal/backup/* — must match
+      # /etc/fk-encore/backup-token on the host. Generate with
+      # scripts/host/install-backup-hook.sh. Leaving this empty disables
+      # the backup endpoints (they respond with 401).
+      BACKUP_TOKEN: ${BACKUP_TOKEN:-}
     volumes:
       - photos:/mnt/data/photos
       - thumbnails:/mnt/data/thumbnails
