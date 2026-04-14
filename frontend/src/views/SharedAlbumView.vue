@@ -32,6 +32,10 @@ const albumPhotosAsPhoto = computed<Photo[]>(() => album.value ? asPhotos(album.
 const isFullscreen = ref(false)
 const fullscreenIndex = ref(0)
 const fullscreenPhotos = ref<Photo[]>([])
+/** True when fullscreen was opened from a map stop. Controls whether we
+ *  sync the map's selected stop back on close. */
+const fullscreenFromMap = ref(false)
+const tripMapRef = ref<{ selectStopByPhotoId: (id: number) => boolean } | null>(null)
 
 const currentPhoto = computed<Photo | null>(() => fullscreenPhotos.value[fullscreenIndex.value] ?? null)
 const prevPhoto = computed<Photo | null>(() => {
@@ -51,6 +55,7 @@ function openFullscreen(photo: Photo) {
   fullscreenPhotos.value = photos
   fullscreenIndex.value = photos.findIndex(p => p.id === photo.id)
   if (fullscreenIndex.value < 0) fullscreenIndex.value = 0
+  fullscreenFromMap.value = false
   isFullscreen.value = true
 }
 
@@ -61,12 +66,20 @@ function handleMapFullscreen(stopPhotos: Photo[], startIndex: number) {
   const globalIndex = targetPhoto ? allPhotos.findIndex(p => p.id === targetPhoto.id) : -1
   fullscreenPhotos.value = allPhotos
   fullscreenIndex.value = globalIndex >= 0 ? globalIndex : 0
+  fullscreenFromMap.value = true
   isFullscreen.value = true
 }
 
 function closeFullscreen() {
+  // Sync the map's selected stop with the photo the user ended on when
+  // fullscreen was opened from a map stop, so that navigating beyond the
+  // initial stop is reflected on the map once the overlay is closed.
+  if (fullscreenFromMap.value && currentPhoto.value && tripMapRef.value) {
+    tripMapRef.value.selectStopByPhotoId(currentPhoto.value.id)
+  }
   isFullscreen.value = false
   showInfo.value = false
+  fullscreenFromMap.value = false
 }
 
 // ── Info panel (slides up from bottom, photo shrinks to 60%) ────────────────
@@ -200,6 +213,7 @@ onUnmounted(() => {
       <!-- Map mode -->
       <TripMap
         v-if="album.display_mode === 'map' && album.photos.length > 0"
+        ref="tripMapRef"
         :photos="albumPhotosAsPhoto"
         :albumName="album.name"
         :albumDescription="album.description"

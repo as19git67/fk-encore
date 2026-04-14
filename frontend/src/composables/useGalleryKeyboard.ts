@@ -31,8 +31,20 @@ export interface GalleryKeyboardOptions {
 export function useGalleryKeyboard(options: GalleryKeyboardOptions) {
   function handleKeydown(e: KeyboardEvent) {
     // Skip when typing in an input/textarea
-    const tag = document.activeElement?.tagName
+    const active = document.activeElement as HTMLElement | null
+    const tag = active?.tagName
     if (tag === 'INPUT' || tag === 'TEXTAREA') return
+
+    // When a button is focused, let Space / Enter trigger the button's
+    // native click behavior. Intercepting them here would either steal
+    // the click (e.g. toggling fullscreen instead) or race with the
+    // button's own handler and make it look like the click was lost.
+    if (
+      (e.key === ' ' || e.key === 'Enter') &&
+      (tag === 'BUTTON' || active?.getAttribute('role') === 'button')
+    ) {
+      return
+    }
 
     // Allow caller to block (e.g. during date editing, compare view)
     if (options.isBlocked?.()) return

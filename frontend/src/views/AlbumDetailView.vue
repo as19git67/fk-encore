@@ -31,6 +31,7 @@ import {
   type Photo,
   type PhotoGroup,
   updatePhotoCuration,
+  updatePhotoDate,
   updateAlbum,
   updateAlbumUserSettings,
   batchFavoritePhotos
@@ -191,6 +192,7 @@ watch(album, (a) => {
 }, { immediate: true })
 
 // ── Map fullscreen ───────────────────────────────────────────────────────────
+const tripMapRef = ref<{ selectStopByPhotoId: (id: number) => boolean } | null>(null)
 const mapFullscreenPhotos = ref<Photo[]>([])
 const mapFullscreenIndex = ref(0)
 const isMapFullscreen = ref(false)
@@ -203,6 +205,17 @@ function handleMapFullscreen(stopPhotos: Photo[], startIndex: number) {
   mapFullscreenPhotos.value = allPhotos
   mapFullscreenIndex.value = globalIndex >= 0 ? globalIndex : 0
   isMapFullscreen.value = true
+}
+
+function closeMapFullscreen() {
+  // Sync the map's selected stop with the photo the user ended on, so that
+  // navigating beyond the original stop inside fullscreen is reflected on
+  // the map once the overlay is closed.
+  const ended = mapSelectedPhoto.value
+  if (ended && tripMapRef.value) {
+    tripMapRef.value.selectStopByPhotoId(ended.id)
+  }
+  isMapFullscreen.value = false
 }
 
 const mapSelectedPhoto = computed(() =>
@@ -286,19 +299,47 @@ async function loadSidebarData(photoId: number) {
 }
 
 // ── Curation ──────────────────────────────────────────────────────────────────
+// Mutate the photo object directly so that Vue's reactive proxy picks up the
+// change and re-renders every template that reads `curation_status`
+// (PhotoGrid tile, PhotoDetailSidebar, FullscreenOverlay toolbar). Replacing
+// the whole `photos` array works for computeds that depend on the array
+// reference, but the `selectedPhoto` reference passed to FullscreenOverlay
+// stays tied to a stale object because `albumPhotos` is a sorted copy — so a
+// targeted mutation is the more reliable approach here.
 function updatePhotoStatus(id: number, status: CurationStatus) {
   if (!album.value) return
-  album.value.photos = album.value.photos.map(p => p.id === id ? { ...p, curation_status: status } : p)
+  const photo = album.value.photos.find(p => p.id === id)
+  if (!photo) return
+  const prev = photo.curation_status
+  if (prev === status) return
+  photo.curation_status = status
+  // Keep the per-photo aggregate counters shown under "Meinungen" in sync
+  // with the current user's own toggle. The server re-aggregates across all
+  // members, but until the next reload we adjust locally so the opinion
+  // bars reflect the new state immediately.
+  const stats = photo.curation_stats
+  if (stats) {
+    if (prev === 'favorite' && status !== 'favorite') stats.fav_count = Math.max(0, stats.fav_count - 1)
+    if (prev !== 'favorite' && status === 'favorite') stats.fav_count += 1
+    if (prev === 'hidden' && status !== 'hidden') stats.hide_count = Math.max(0, stats.hide_count - 1)
+    if (prev !== 'hidden' && status === 'hidden') stats.hide_count += 1
+  }
 }
 
 async function handleHidePhoto(id: number) {
-  try { await updatePhotoCuration(id, 'hidden'); updatePhotoStatus(id, 'hidden') }
-  catch (err: any) { error.value = err.message || 'Fehler' }
+  const photo = album.value?.photos.find(p => p.id === id)
+  const prev = photo?.curation_status
+  updatePhotoStatus(id, 'hidden')
+  try { await updatePhotoCuration(id, 'hidden') }
+  catch (err: any) { if (prev) updatePhotoStatus(id, prev); error.value = err.message || 'Fehler' }
 }
 
 async function handleRestorePhoto(id: number) {
-  try { await updatePhotoCuration(id, 'visible'); updatePhotoStatus(id, 'visible') }
-  catch (err: any) { error.value = err.message || 'Fehler' }
+  const photo = album.value?.photos.find(p => p.id === id)
+  const prev = photo?.curation_status
+  updatePhotoStatus(id, 'visible')
+  try { await updatePhotoCuration(id, 'visible') }
+  catch (err: any) { if (prev) updatePhotoStatus(id, prev); error.value = err.message || 'Fehler' }
 }
 
 async function handleToggleFavorite(id: number, currentStatus: CurationStatus) {
@@ -313,6 +354,39 @@ async function handleIgnoreFaceInSidebar(faceId: number) {
   catch (err: any) { error.value = err.message || 'Fehler' }
 }
 
+// ── Photo date editing (sidebar pencil) ───────────────────────────────────────
+const isEditingDate = ref(false)
+const editDate = ref<Date | null>(null)
+const updatingDate = ref(false)
+const dateEditingPhoto = ref<Photo | null>(null)
+
+function startEditingDate() {
+  // Pick the currently active photo: map mode uses `mapSelectedPhoto`,
+  // otherwise the grid/fullscreen selection.
+  const photo = mapSelectedPhoto.value || selectedPhoto.value
+  if (!photo) return
+  dateEditingPhoto.value = photo
+  editDate.value = new Date(photo.taken_at || photo.created_at)
+  isEditingDate.value = true
+}
+
+async function handleUpdateDate() {
+  const photo = dateEditingPhoto.value
+  if (!editDate.value || !photo || !album.value) return
+  updatingDate.value = true
+  try {
+    const takenAt = editDate.value.toISOString()
+    await updatePhotoDate(photo.id, takenAt)
+    album.value.photos = album.value.photos.map(p => p.id === photo.id ? { ...p, taken_at: takenAt } : p)
+    isEditingDate.value = false
+    dateEditingPhoto.value = null
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Aktualisieren des Datums'
+  } finally {
+    updatingDate.value = false
+  }
+}
+
 async function handleReindexPhoto() {
   if (!selectedPhoto.value) return
   reindexingPhoto.value = true
@@ -321,14 +395,29 @@ async function handleReindexPhoto() {
   finally { reindexingPhoto.value = false }
 }
 
+function applyViewerCoverOverride(id: number | null) {
+  if (!album.value) return
+  if (album.value.settings) {
+    album.value.settings.cover_photo_id = id
+  } else {
+    // Viewer has never persisted any setting yet – synthesise a minimal
+    // local settings object so the UI reflects the toggled cover instantly.
+    album.value.settings = {
+      album_id: album.value.id,
+      user_id: 0,
+      hide_mode: 'mine',
+      active_view: 'all',
+      cover_photo_id: id,
+    }
+  }
+}
+
 function handleCoverPhotoIdUpdate(id: number | null) {
   if (!album.value) return
   if (canWrite.value) {
     album.value.cover_photo_id = id ?? undefined
   } else {
-    // Viewer: update user-specific settings
-    if (!album.value.settings) return
-    album.value.settings.cover_photo_id = id
+    applyViewerCoverOverride(id)
   }
 }
 
@@ -341,7 +430,7 @@ async function handleSetMapCover(photoId: number) {
       album.value.cover_photo_id = newCoverId ?? undefined
     } else {
       await updateAlbumUserSettings(albumId, { cover_photo_id: newCoverId })
-      if (album.value.settings) album.value.settings.cover_photo_id = newCoverId
+      applyViewerCoverOverride(newCoverId)
     }
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Setzen des Covers'
@@ -444,10 +533,14 @@ function handleScrollTo(sectionId: string) {
 }
 
 // ── Album cover ───────────────────────────────────────────────────────────────
-// Effective cover: user-specific setting takes precedence over album-level cover
-const effectiveCoverPhotoId = computed(() => {
+// Effective cover: user-specific setting takes precedence over album-level
+// cover. An explicit `null` in the user settings means "the user hid the
+// cover for themselves" and must NOT fall back to the album-level cover.
+const effectiveCoverPhotoId = computed<number | null | undefined>(() => {
   if (!album.value) return undefined
-  return album.value.settings?.cover_photo_id ?? album.value.cover_photo_id
+  const userCover = album.value.settings?.cover_photo_id
+  if (userCover !== undefined) return userCover // number | null
+  return album.value.cover_photo_id
 })
 
 async function scrollToCover() {
@@ -514,6 +607,11 @@ async function handleBatchFavoriteAll() {
 // ── Mobile drawer state ───────────────────────────────────────────────────────
 const mobileTimelineOpen = ref(false)
 const mobileSidebarOpen = ref(false)
+/** Whether the details flyout inside the fullscreen overlay is open.
+ *  Shared between the grid- and map-mode fullscreens (only one is ever
+ *  visible at a time). Kept as a persistent ref so that navigating
+ *  between photos does not close the flyout. */
+const fullscreenDetailsOpen = ref(false)
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 void loadData()
@@ -620,6 +718,7 @@ onUnmounted(() => serviceHealth.stopPolling())
     <!-- Map mode -->
     <TripMap
       v-if="album && displayMode === 'map' && albumPhotos.length > 0"
+      ref="tripMapRef"
       :photos="albumPhotos"
       :albumName="album.name"
       :albumDescription="album.description"
@@ -671,13 +770,14 @@ onUnmounted(() => serviceHealth.stopPolling())
           :can-delete="canDeletePhotos || canWrite"
           :can-upload="canUploadPhotos"
           :faces="detectedFaces"
-          :is-editing-date="false"
+          :is-editing-date="isEditingDate"
+          v-model:editDate="editDate"
           :landmarks="detectedLandmarks"
           :loading-faces="loadingFaces"
           :loading-landmarks="loadingLandmarks"
           :persons="persons"
           :reindexing-photo="reindexingPhoto"
-          :updating-date="false"
+          :updating-date="updatingDate"
           :album-id="albumId"
           :cover-photo-id="effectiveCoverPhotoId"
           :album-role="album.role"
@@ -689,6 +789,9 @@ onUnmounted(() => serviceHealth.stopPolling())
           @toggle-favorite="handleToggleFavorite"
           @hide="handleHidePhoto"
           @restore="handleRestorePhoto"
+          @start-edit-date="startEditingDate"
+          @update-date="handleUpdateDate"
+          @cancel-edit-date="isEditingDate = false"
           @ignore-face="handleIgnoreFaceInSidebar"
           @reindex="handleReindexPhoto"
         />
@@ -724,15 +827,49 @@ onUnmounted(() => serviceHealth.stopPolling())
       :nextPhoto="nextPhoto"
       :canDelete="canDeletePhotos || canWrite"
       :showDetailsButton="true"
-      :detailsActive="false"
-      @close="isFullscreen = false"
+      :detailsActive="fullscreenDetailsOpen"
+      @close="isFullscreen = false; fullscreenDetailsOpen = false"
       @prev="selectedIndex--"
       @next="selectedIndex++"
       @toggle-favorite="handleToggleFavorite"
       @hide="handleHidePhoto"
       @restore="handleRestorePhoto"
-      @show-details="isFullscreen = false; mobileSidebarOpen = true; mobileTimelineOpen = false"
-    />
+      @show-details="fullscreenDetailsOpen = !fullscreenDetailsOpen"
+      @toggle-cover="handleSetMapCover"
+    >
+      <template #details-flyout>
+        <PhotoDetailSidebar
+          :in-flyout="true"
+          :photo="selectedPhoto"
+          :can-delete="canDeletePhotos || canWrite"
+          :can-upload="canUploadPhotos"
+          :faces="detectedFaces"
+          :is-editing-date="isEditingDate"
+          v-model:editDate="editDate"
+          :landmarks="detectedLandmarks"
+          :loading-faces="loadingFaces"
+          :loading-landmarks="loadingLandmarks"
+          :persons="persons"
+          :reindexing-photo="reindexingPhoto"
+          :updating-date="updatingDate"
+          :album-id="albumId"
+          :cover-photo-id="effectiveCoverPhotoId"
+          :album-role="album?.role"
+          :show-persons="showPersons"
+          :limit-albums-shown="true"
+          :face-service-available="serviceHealth.faceServiceAvailable"
+          @update:cover-photo-id="handleCoverPhotoIdUpdate"
+          @toggle-favorite="handleToggleFavorite"
+          @hide="handleHidePhoto"
+          @restore="handleRestorePhoto"
+          @start-edit-date="startEditingDate"
+          @update-date="handleUpdateDate"
+          @cancel-edit-date="isEditingDate = false"
+          @ignore-face="handleIgnoreFaceInSidebar"
+          @reindex="handleReindexPhoto"
+        />
+      </template>
+    </FullscreenOverlay>
 
     <!-- Fullscreen overlay (Map mode – scoped to stop photos) -->
     <FullscreenOverlay
@@ -742,34 +879,56 @@ onUnmounted(() => serviceHealth.stopPolling())
       :nextPhoto="mapNextPhoto"
       :canDelete="canDeletePhotos || canWrite"
       :showDetailsButton="true"
-      :detailsActive="false"
-      @close="isMapFullscreen = false"
+      :detailsActive="fullscreenDetailsOpen"
+      @close="closeMapFullscreen(); fullscreenDetailsOpen = false"
       @prev="mapFullscreenIndex--"
       @next="mapFullscreenIndex++"
       @toggle-favorite="handleToggleFavorite"
       @hide="handleHidePhoto"
       @restore="handleRestorePhoto"
-      @show-details="isMapFullscreen = false"
+      @show-details="fullscreenDetailsOpen = !fullscreenDetailsOpen"
+      @toggle-cover="handleSetMapCover"
     >
-      <template #topbar-actions>
+      <template #topbar-actions-before>
         <Button
-          :icon="effectiveCoverPhotoId === mapSelectedPhoto.id ? 'pi pi-image-check' : 'pi pi-image'"
+          icon="pi pi-image"
           rounded text
           :severity="effectiveCoverPhotoId === mapSelectedPhoto.id ? 'warn' : 'secondary'"
-          v-tooltip.bottom="effectiveCoverPhotoId === mapSelectedPhoto.id ? 'Vom Cover entfernen' : 'Als Cover setzen'"
+          :class="{ 'fs-toolbar-btn--active': effectiveCoverPhotoId === mapSelectedPhoto.id }"
+          v-tooltip.bottom="(effectiveCoverPhotoId === mapSelectedPhoto.id ? 'Vom Cover entfernen' : 'Als Cover setzen') + ' (C)'"
           @click="handleSetMapCover(mapSelectedPhoto.id)"
         />
-        <Button
-          icon="pi pi-info-circle" rounded text severity="secondary"
-          @click="isMapFullscreen = false"
-          v-tooltip.bottom="'Schließen'"
-        />
-        <Button
-          v-if="canDeletePhotos || canWrite"
-          :icon="mapSelectedPhoto.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
-          rounded text
-          :severity="mapSelectedPhoto.curation_status === 'favorite' ? 'warn' : 'secondary'"
-          @click="handleToggleFavorite(mapSelectedPhoto.id, mapSelectedPhoto.curation_status)"
+      </template>
+      <template #details-flyout>
+        <PhotoDetailSidebar
+          :in-flyout="true"
+          :photo="mapSelectedPhoto"
+          :can-delete="canDeletePhotos || canWrite"
+          :can-upload="canUploadPhotos"
+          :faces="detectedFaces"
+          :is-editing-date="isEditingDate"
+          v-model:editDate="editDate"
+          :landmarks="detectedLandmarks"
+          :loading-faces="loadingFaces"
+          :loading-landmarks="loadingLandmarks"
+          :persons="persons"
+          :reindexing-photo="reindexingPhoto"
+          :updating-date="updatingDate"
+          :album-id="albumId"
+          :cover-photo-id="effectiveCoverPhotoId"
+          :album-role="album?.role"
+          :show-persons="showPersons"
+          :limit-albums-shown="true"
+          :face-service-available="serviceHealth.faceServiceAvailable"
+          @update:cover-photo-id="handleCoverPhotoIdUpdate"
+          @toggle-favorite="handleToggleFavorite"
+          @hide="handleHidePhoto"
+          @restore="handleRestorePhoto"
+          @start-edit-date="startEditingDate"
+          @update-date="handleUpdateDate"
+          @cancel-edit-date="isEditingDate = false"
+          @ignore-face="handleIgnoreFaceInSidebar"
+          @reindex="handleReindexPhoto"
         />
       </template>
     </FullscreenOverlay>

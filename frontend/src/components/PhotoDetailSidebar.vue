@@ -3,6 +3,7 @@ import Button from 'primevue/button'
 import DatePicker from 'primevue/datepicker'
 import Checkbox from 'primevue/checkbox'
 import HeicImage from './HeicImage.vue'
+import PhotoMiniMap from './PhotoMiniMap.vue'
 import { getPhotoUrl, listAlbums, getPhotosAlbums, batchUpdateAlbumPhotos, updateAlbum, updateAlbumUserSettings, createAlbum, updatePhotoDescription, type Album } from '../api/photos'
 import { getAlbumCheckState as calculateAlbumCheckState, getNewPendingAction } from '../utils/albumSelection'
 import type { Photo, Face, LandmarkItem, Person, CurationStatus } from '../api/photos'
@@ -31,6 +32,11 @@ const props = defineProps<{
   faceServiceAvailable?: boolean
   /** Show a "Go to photo" navigation button (e.g. from PersonsView). */
   showNavigateToPhoto?: boolean
+  /** When true, the sidebar is rendered inside the fullscreen details
+   *  flyout: it fills the available width, the photo preview is hidden
+   *  (the user already sees the photo in the fullscreen view), and a
+   *  small map with a pin is shown under the location section. */
+  inFlyout?: boolean
 }>()
 
 const editDate = defineModel<Date | null>('editDate', { default: null })
@@ -267,7 +273,7 @@ watch(() => props.photo.id, () => {
 </script>
 
 <template>
-  <aside class="details-sidebar">
+  <aside class="details-sidebar" :class="{ 'details-sidebar--flyout': inFlyout }">
     <div class="sidebar-header">
       <span class="sidebar-title">Details</span>
     </div>
@@ -332,12 +338,12 @@ watch(() => props.photo.id, () => {
       </div>
     </div>
     <div v-else class="sidebar-scroll">
-      <div class="preview-container" @click="emit('fullscreen')" title="Vollbild">
+      <div v-if="!inFlyout" class="preview-container" @click="emit('fullscreen')" title="Vollbild">
         <HeicImage :src="getPhotoUrl(photo.filename)" :alt="photo.original_name" objectFit="contain" />
         <div class="preview-overlay"><i class="pi pi-expand"></i></div>
       </div>
 
-      <div class="quick-actions">
+      <div v-if="!inFlyout" class="quick-actions">
         <Button icon="pi pi-expand" v-tooltip.bottom="'Vollbild'" @click="emit('fullscreen')" severity="secondary" text rounded />
         <Button v-if="showNavigateToPhoto" icon="pi pi-images" v-tooltip.bottom="'In Fotos anzeigen'" @click="emit('navigate-to-photo', photo.id)" severity="secondary" text rounded />
         <template v-if="canDelete">
@@ -346,9 +352,10 @@ watch(() => props.photo.id, () => {
         </template>
         <template v-if="albumId" class="meta-row cover-action">
           <Button
-              :icon="coverPhotoId === photo.id ? 'pi pi-image' : 'pi pi-image'"
+              icon="pi pi-image"
               v-tooltip.bottom="coverPhotoId === photo.id ? 'Vom Cover entfernen' : 'Als Cover setzen'"
               :severity="coverPhotoId === photo.id ? 'warn' : 'secondary'"
+              :class="{ 'cover-btn--active': coverPhotoId === photo.id }"
               text
               rounded
               :loading="togglingCover"
@@ -410,11 +417,9 @@ watch(() => props.photo.id, () => {
       <div class="sidebar-divider" />
 
       <div class="sidebar-section">
-        <div class="section-label">
-          <i class="pi pi-align-left" />
-          <span>Beschreibung</span>
-          <Button v-if="canUpload && !isEditingDescription" icon="pi pi-pencil" text rounded size="small" @click="startEditDescription" class="edit-btn" />
-        </div>
+        <!-- Editor when editing, the text itself when set, otherwise a
+             muted italic "Keine Beschreibung" placeholder. The edit pencil
+             is always inline with the content (center-aligned). -->
         <div v-if="isEditingDescription" class="description-editor">
           <textarea v-model="descriptionText" class="p-inputtext description-textarea" rows="3" placeholder="Beschreibung eingeben…" @keydown.escape="cancelEditDescription" />
           <div class="edit-actions">
@@ -422,19 +427,37 @@ watch(() => props.photo.id, () => {
             <Button icon="pi pi-times" severity="danger" text rounded @click="cancelEditDescription" :disabled="savingDescription" />
           </div>
         </div>
-        <div v-else-if="photo.description" class="description-text">{{ photo.description }}</div>
-        <div v-else class="empty-hint">Keine Beschreibung</div>
+        <div v-else-if="photo.description" class="description-text">
+          <i class="pi pi-align-left meta-icon description-icon" />
+          <span class="description-body">{{ photo.description }}</span>
+          <Button v-if="canUpload" icon="pi pi-pencil" text rounded size="small" @click="startEditDescription" class="edit-btn" />
+        </div>
+        <div v-else class="empty-description">
+          <i class="pi pi-align-left meta-icon description-icon" />
+          <span class="empty-description-text">Keine Beschreibung</span>
+          <Button v-if="canUpload" icon="pi pi-pencil" text rounded size="small" @click="startEditDescription" class="edit-btn" />
+        </div>
       </div>
 
-      <template v-if="photo.location_city || photo.location_name || loadingLandmarks || landmarks.length > 0">
+      <template v-if="photo.location_city || photo.location_name || loadingLandmarks || landmarks.length > 0 || (inFlyout && photo.latitude != null && photo.longitude != null)">
         <div class="sidebar-divider" />
         <div class="sidebar-section">
-          <div class="section-label"><i class="pi pi-map-marker" /> Ort</div>
-          <div v-if="photo.location_name || photo.location_city" class="location-pill">
-            <template v-if="photo.location_name">{{ photo.location_name }}</template>
-            <template v-else-if="photo.location_city && photo.location_country">{{ photo.location_city }}, {{ photo.location_country }}</template>
-            <template v-else>{{ photo.location_city }}</template>
+          <div v-if="photo.location_name || photo.location_city" class="meta-row location-row">
+            <i class="pi pi-map-marker meta-icon" />
+            <span class="meta-value">
+              <template v-if="photo.location_name">{{ photo.location_name }}</template>
+              <template v-else-if="photo.location_city && photo.location_country">{{ photo.location_city }}, {{ photo.location_country }}</template>
+              <template v-else>{{ photo.location_city }}</template>
+            </span>
           </div>
+          <PhotoMiniMap
+            v-if="inFlyout && photo.latitude != null && photo.longitude != null"
+            :key="photo.id"
+            :latitude="photo.latitude"
+            :longitude="photo.longitude"
+            :label="photo.location_name || photo.location_city"
+            class="mini-map"
+          />
           <div v-if="loadingLandmarks" class="loading-row"><i class="pi pi-spin pi-spinner" /> Gebäude werden erkannt…</div>
           <div v-else-if="landmarks.some(lm => lm.confidence >= 0.6)" class="landmark-chips">
             <template v-for="lm in landmarks" :key="lm.id">
@@ -520,6 +543,12 @@ watch(() => props.photo.id, () => {
           <i class="pi pi-database meta-icon" />
           <span class="meta-value">{{ (photo.size / 1024 / 1024).toFixed(2) }} MB</span>
         </div>
+        <!-- Stored filename on disk (UUID-ish) – useful when tracking a photo
+             down inside the Docker volume. -->
+        <div v-if="photo.filename" class="meta-row">
+          <i class="pi pi-hashtag meta-icon" />
+          <span class="meta-value meta-value--mono" :title="photo.filename">{{ photo.filename }}</span>
+        </div>
       </div>
     </div>
   </aside>
@@ -534,6 +563,31 @@ watch(() => props.photo.id, () => {
   background: var(--p-content-background);
   border-left: 1px solid var(--p-content-border-color);
   overflow: hidden;
+}
+
+/* Flyout variant: fill the entire width of the surrounding flyout and
+   drop the vertical border (the flyout already has its own border).
+   Also defer scrolling to the surrounding flyout to avoid a double
+   scroll container. */
+.details-sidebar--flyout {
+  width: 100%;
+  border-left: none;
+  background: var(--p-content-background);
+  overflow: visible;
+}
+
+.details-sidebar--flyout .sidebar-scroll {
+  overflow: visible;
+}
+
+/* Header would be redundant — the flyout already implies "Details". */
+.details-sidebar--flyout .sidebar-header {
+  display: none;
+}
+
+.mini-map {
+  margin-top: 0.1rem;
+  margin-bottom: 0.5rem;
 }
 
 @media (max-width: 768px) {
@@ -623,6 +677,13 @@ watch(() => props.photo.id, () => {
   padding: 0.5rem 1rem;
 }
 
+/* Active-state highlight for the Cover toggle (PrimeVue "warn" on a text
+   button can be subtle on light backgrounds – give it a filled chip feel
+   so the "set" state stays clearly visible). */
+.quick-actions :deep(.cover-btn--active) {
+  background: var(--p-content-hover-background);
+}
+
 .sidebar-divider { height: 1px; background: var(--p-content-border-color); }
 
 .sidebar-section { padding: 0.75rem 1rem; }
@@ -657,7 +718,6 @@ watch(() => props.photo.id, () => {
 .meta-icon {
   font-size: 0.8rem;
   color: var(--p-text-muted-color);
-  margin-top: 0.15rem;
   flex-shrink: 0;
 }
 
@@ -666,6 +726,13 @@ watch(() => props.photo.id, () => {
   min-width: 0;
   word-break: break-word;
   line-height: 1.4;
+}
+
+.meta-value--mono {
+  font-family: var(--font-family-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color);
+  word-break: break-all;
 }
 
 .cover-action {
@@ -695,15 +762,7 @@ watch(() => props.photo.id, () => {
 
 .edit-actions { display: flex; gap: 0.5rem; }
 
-.location-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  background: var(--p-content-hover-background);
-  border: 1px solid var(--p-content-border-color);
-  border-radius: 1rem;
-  padding: 0.25rem 0.75rem;
-  font-size: 0.82rem;
+.location-row {
   margin-bottom: 0.5rem;
 }
 
@@ -771,6 +830,28 @@ watch(() => props.photo.id, () => {
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--p-text-color);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.description-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.empty-description {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--p-text-muted-color);
+  font-style: italic;
+}
+
+.empty-description-text {
+  flex: 1;
+  min-width: 0;
 }
 
 .reindex-btn { width: 100%; margin-top: 0.5rem; }
