@@ -9,8 +9,17 @@ from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Form
 from PIL import UnidentifiedImageError
-from PIL import Image
+from PIL import Image, ImageFile
 from sqlalchemy.ext.asyncio import AsyncSession
+
+# Allow Pillow to decode images with missing/truncated trailing bytes.
+# Some cameras / transfer pipelines produce JPEGs where the declared data
+# segment isn't fully present, causing Pillow to raise
+# "image file is truncated (N bytes not processed)". Enabling this flag lets
+# Pillow pad the missing bytes and continue decoding, which is acceptable for
+# quality scoring, embeddings, and face analysis where pixel-perfect fidelity
+# at the very edge of the image is not required.
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 from app.config import settings
 from app.db.database import check_db_connection, get_db
