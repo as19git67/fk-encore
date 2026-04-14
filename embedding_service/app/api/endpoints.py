@@ -30,6 +30,8 @@ from app.models.schemas import (
     GetRequest,
     GetResponse,
     HealthResponse,
+    ParseQueryRequest,
+    ParseQueryResponse,
     PhotoRecord,
     SearchRequest,
     SearchResponse,
@@ -252,6 +254,32 @@ async def search_by_text(request: TextSearchRequest, db: DbDep) -> SearchRespons
         if score >= request.threshold
     ]
     return SearchResponse(results=results)
+
+
+# ---------------------------------------------------------------------------
+# /parse/query
+# ---------------------------------------------------------------------------
+
+@router.post("/parse/query", response_model=ParseQueryResponse, tags=["search"])
+async def parse_query_endpoint(request: ParseQueryRequest) -> ParseQueryResponse:
+    """Parse a German natural-language photo search query into structured filters.
+
+    Uses spaCy NER for locations and dateparser for absolute/relative dates.
+    Returns a `semantic_query` (cleaned text for CLIP) plus optional
+    `location`, `from_date`, `to_date` filters.
+    """
+    try:
+        from app.services.query_parser import parse_query
+
+        parsed = parse_query(request.query)
+    except Exception as exc:
+        logger.exception("Query parsing failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Query parsing error",
+        ) from exc
+
+    return ParseQueryResponse(**parsed)
 
 
 # ---------------------------------------------------------------------------

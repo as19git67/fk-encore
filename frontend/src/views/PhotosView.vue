@@ -10,10 +10,11 @@ import PhotoGrid from '../components/PhotoGrid.vue'
 import TimelineNav from '../components/TimelineNav.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
+import NaturalSearchBar from '../components/NaturalSearchBar.vue'
 import {
   listPhotoIndex, uploadPhotoWithProgress, updatePhotoDate, reindexPhoto, ignoreFace,
   getPhotoFaces, getPhotoLandmarks, updatePhotoCuration,
-  listPhotoGroups, searchPhotos, computeFileHash, checkPhotoHash,
+  listPhotoGroups, computeFileHash, checkPhotoHash,
   type Photo, type Face, type CurationStatus, type PhotoGroup,
   type LandmarkItem,
 } from '../api/photos'
@@ -25,6 +26,7 @@ import type { PhotoItem } from '../composables/usePhotoGrouping'
 import { usePhotoSelection } from '../composables/usePhotoSelection'
 import { usePhotoHydration } from '../composables/usePhotoHydration'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
+import { useNaturalSearch } from '../composables/useNaturalSearch'
 
 const auth = useAuthStore()
 const serviceHealth = useServiceHealthStore()
@@ -80,40 +82,30 @@ const hiddenByStack = computed(() => {
 
 
 // ── Search ────────────────────────────────────────────────────────────────────
-const searchQuery = ref('')
-const searchResults = ref<Photo[] | null>(null)
-const searchLoading = ref(false)
-const searchError = ref('')
-
-const searchResultIds = computed<number[] | null>(() =>
-  searchResults.value ? searchResults.value.map(r => r.id) : null
-)
+const {
+  searchQuery,
+  searchResultIds,
+  loading: searchLoading,
+  error: searchError,
+  executeSearch: runSearch,
+  clearSearch,
+  locationChip,
+  dateChip,
+  semanticChip,
+  hasParsedChips,
+} = useNaturalSearch()
 
 async function executeSearch() {
-  const q = searchQuery.value.trim()
-  if (!q) { clearSearch(); return }
-  searchLoading.value = true
-  searchError.value = ''
-  try {
-    searchResults.value = (await searchPhotos(q)).photos
-    // Search results are shown via searchResultIds → photos.value mapping.
-    // Prioritize hydrating the matching photos so the sidebar/details show
-    // full data immediately when a search hit is clicked.
-    if (searchResults.value && searchResults.value.length > 0) {
-      hydration.ensureLoaded(searchResults.value.map(p => p.id))
-    }
-  } catch {
-    searchError.value = 'Suche fehlgeschlagen. Ist der Embedding-Service erreichbar?'
-  } finally {
-    searchLoading.value = false
+  await runSearch()
+  // Search hits are shown via searchResultIds → photos.value mapping.
+  // Prioritize hydrating the matching photos so the sidebar/details show
+  // full data immediately when a hit is clicked.
+  if (searchResultIds.value && searchResultIds.value.length > 0) {
+    hydration.ensureLoaded(searchResultIds.value)
   }
 }
 
-function clearSearch() {
-  searchQuery.value = ''
-  searchResults.value = null
-  searchError.value = ''
-}
+const searchResultCount = computed(() => searchResultIds.value?.length ?? 0)
 
 // ── Sort ──────────────────────────────────────────────────────────────────────
 const sortBy = ref<'date' | 'quality'>('date')
@@ -766,28 +758,24 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div class="search-bar">
-        <div class="search-input-wrapper">
-          <i class="pi pi-search search-icon" />
-          <input v-model="searchQuery" type="text" class="search-input"
-            placeholder="Fotos suchen…"
-            @keyup.enter="executeSearch"
-            @keyup.escape="clearSearch" />
-          <button v-if="searchQuery" class="search-clear" @click="clearSearch"><i class="pi pi-times" /></button>
-        </div>
-        <Button icon="pi pi-search" label="Suchen" :loading="searchLoading" :disabled="!searchQuery.trim()" @click="executeSearch" />
-        <span v-if="searchResults !== null && !searchLoading" class="search-result-count">
-          {{ searchResults.length }} Treffer
-        </span>
-        <div class="sort-toggle">
-          <Button
-            :icon="sortBy === 'date' ? 'pi pi-calendar' : 'pi pi-star'"
-            :label="sortBy === 'date' ? 'Datum' : 'Qualität'"
-            size="small" severity="secondary" outlined
-            @click="sortBy = sortBy === 'date' ? 'quality' : 'date'"
-          />
-        </div>
-      </div>
+      <NaturalSearchBar
+        v-model="searchQuery"
+        :loading="searchLoading"
+        :result-count="searchResultIds !== null ? searchResultCount : null"
+        :has-parsed-chips="hasParsedChips"
+        :location-chip="locationChip"
+        :date-chip="dateChip"
+        :semantic-chip="semanticChip"
+        @search="executeSearch"
+        @clear="clearSearch"
+      >
+        <Button
+          :icon="sortBy === 'date' ? 'pi pi-calendar' : 'pi pi-star'"
+          :label="sortBy === 'date' ? 'Datum' : 'Qualität'"
+          size="small" severity="secondary" outlined
+          @click="sortBy = sortBy === 'date' ? 'quality' : 'date'"
+        />
+      </NaturalSearchBar>
     </div>
 
     <Message v-if="searchError" severity="error" @close="searchError = ''">{{ searchError }}</Message>
@@ -1134,72 +1122,6 @@ onUnmounted(() => {
   min-height: 0;
   overflow: hidden;
 }
-
-/* ── Search Bar ──────────────────────────────────────────────────────────── */
-.search-bar {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.25rem 0 0;
-  flex-wrap: wrap;
-}
-
-.search-input-wrapper {
-  position: relative;
-  flex: 1;
-  min-width: 200px;
-  max-width: 600px;
-}
-
-.search-icon {
-  position: absolute;
-  left: 0.75rem;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--p-text-muted-color);
-  pointer-events: none;
-  font-size: 0.9rem;
-}
-
-.search-input {
-  width: 100%;
-  padding: 0.5rem 2.25rem;
-  border: 1px solid var(--p-content-border-color);
-  border-radius: 6px;
-  background: var(--p-content-background);
-  color: var(--p-text-color);
-  font-size: 0.95rem;
-  outline: none;
-  box-sizing: border-box;
-}
-
-.search-input:focus {
-  border-color: var(--p-primary-color);
-  box-shadow: 0 0 0 2px var(--primary-200, rgba(99, 102, 241, 0.2));
-}
-
-.search-clear {
-  position: absolute;
-  right: 0.5rem;
-  top: 50%;
-  transform: translateY(-50%);
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--p-text-muted-color);
-  padding: 0.2rem;
-  display: flex;
-  border-radius: 4px;
-}
-.search-clear:hover { color: var(--p-text-color); background: var(--p-content-hover-background); }
-
-.search-result-count {
-  font-size: 0.875rem;
-  color: var(--p-text-muted-color);
-  white-space: nowrap;
-}
-
-.sort-toggle { margin-left: auto; }
 
 /* ── Upload ──────────────────────────────────────────────────────────────── */
 .upload-button-label { display: inline-flex; cursor: pointer; }
