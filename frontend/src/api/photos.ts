@@ -462,6 +462,20 @@ export function getPhotosAlbums(ids: number[]) {
   return apiFetch<{ results: { photoId: number; albumIds: number[] }[] }>(`/photos/albums?ids=${ids.join(',')}`)
 }
 
+export interface PhotoLocationAlbum { id: number; name: string }
+export interface PhotoLocationPerson { id: number; name: string }
+export interface PhotoLocationsResponse {
+  photoId: number
+  albums: PhotoLocationAlbum[]
+  persons: PhotoLocationPerson[]
+  hasGps: boolean
+}
+
+/** Jump destinations for a single photo (albums / persons / map). */
+export function getPhotoLocations(id: number) {
+  return apiFetch<PhotoLocationsResponse>(`/photos/${id}/locations`)
+}
+
 export function batchUpdateAlbumPhotos(albumIds: number[], photoIds: number[], action: 'add' | 'remove') {
   return apiFetch<{ success: boolean }>('/albums/photos/batch', {
     method: 'POST',

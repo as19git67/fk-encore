@@ -9,6 +9,7 @@ import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import PhotoGrid from '../components/PhotoGrid.vue'
 import TimelineNav from '../components/TimelineNav.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
+import PhotoLocationMenu from '../components/PhotoLocationMenu.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import NaturalSearchBar from '../components/NaturalSearchBar.vue'
 import {
@@ -905,6 +906,7 @@ onUnmounted(() => {
           :updating-date="updatingDate"
           :show-persons="auth.hasPermission('people.view')"
           :face-service-available="serviceHealth.faceServiceAvailable"
+          :location-menu-exclude-all-photos="true"
           @fullscreen="isFullscreen = true"
           @toggle-favorite="handleToggleFavorite"
           @hide="handleDelete"
@@ -935,7 +937,11 @@ onUnmounted(() => {
       @hide="handleDelete"
       @restore="handleRestore"
       @show-details="isFullscreen = false; mobileSidebarOpen = true; mobileTimelineOpen = false"
-    />
+    >
+      <template #topbar-actions-before>
+        <PhotoLocationMenu :photo-id="selectedPhoto.id" :exclude-all-photos="true" />
+      </template>
+    </FullscreenOverlay>
 
     <PhotoCompareView
       v-if="activeGroup"

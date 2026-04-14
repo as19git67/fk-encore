@@ -4,6 +4,7 @@ import DatePicker from 'primevue/datepicker'
 import Checkbox from 'primevue/checkbox'
 import HeicImage from './HeicImage.vue'
 import PhotoMiniMap from './PhotoMiniMap.vue'
+import PhotoLocationMenu from './PhotoLocationMenu.vue'
 import { getPhotoUrl, listAlbums, getPhotosAlbums, batchUpdateAlbumPhotos, updateAlbum, updateAlbumUserSettings, createAlbum, updatePhotoDescription, type Album } from '../api/photos'
 import { getAlbumCheckState as calculateAlbumCheckState, getNewPendingAction } from '../utils/albumSelection'
 import type { Photo, Face, LandmarkItem, Person, CurationStatus } from '../api/photos'
@@ -32,6 +33,10 @@ const props = defineProps<{
   faceServiceAvailable?: boolean
   /** Show a "Go to photo" navigation button (e.g. from PersonsView). */
   showNavigateToPhoto?: boolean
+  /** Hide the "Alle Fotos" entry in the location menu (we're already there). */
+  locationMenuExcludeAllPhotos?: boolean
+  /** Hide this person from the location menu (we're already viewing it). */
+  locationMenuExcludePersonId?: number
   /** When true, the sidebar is rendered inside the fullscreen details
    *  flyout: it fills the available width, the photo preview is hidden
    *  (the user already sees the photo in the fullscreen view), and a
@@ -346,6 +351,12 @@ watch(() => props.photo.id, () => {
       <div v-if="!inFlyout" class="quick-actions">
         <Button icon="pi pi-expand" v-tooltip.bottom="'Vollbild'" @click="emit('fullscreen')" severity="secondary" text rounded />
         <Button v-if="showNavigateToPhoto" icon="pi pi-images" v-tooltip.bottom="'In Fotos anzeigen'" @click="emit('navigate-to-photo', photo.id)" severity="secondary" text rounded />
+        <PhotoLocationMenu
+          :photo-id="photo.id"
+          :exclude-all-photos="locationMenuExcludeAllPhotos"
+          :exclude-album-id="albumId"
+          :exclude-person-id="locationMenuExcludePersonId"
+        />
         <template v-if="canDelete">
           <Button :icon="photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'" v-tooltip.bottom="photo.curation_status === 'favorite' ? 'Kein Favorit' : 'Favorit'" @click="emit('toggle-favorite', photo.id, photo.curation_status)" :severity="photo.curation_status === 'favorite' ? 'warn' : 'secondary'" text rounded />
           <Button :icon="photo.curation_status === 'hidden' ? 'pi pi-eye-slash' : 'pi pi-eye'" v-tooltip.bottom="photo.curation_status === 'hidden' ? 'Wiederherstellen' : 'Ausblenden'" @click="photo.curation_status === 'hidden' ? emit('restore', photo.id) : emit('hide', photo.id)" :severity="photo.curation_status === 'hidden' ? 'danger' : 'secondary'" text rounded />

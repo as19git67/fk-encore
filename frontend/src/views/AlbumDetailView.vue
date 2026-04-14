@@ -9,6 +9,7 @@ import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import PhotoGrid from '../components/PhotoGrid.vue'
 import TimelineNav from '../components/TimelineNav.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
+import PhotoLocationMenu from '../components/PhotoLocationMenu.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
 import NaturalSearchBar from '../components/NaturalSearchBar.vue'
@@ -305,7 +306,22 @@ async function loadData() {
     ])
     album.value = albumRes
     photoGroupsList.value = groupsRes.groups
-    selectedIndex.value = album.value.photos.length > 0 ? 0 : -1
+
+    // Honor ?photoId=… query: pre-select and scroll to that photo.
+    const queryPhotoId = Number(route.query.photoId)
+    let targetIdx = -1
+    if (queryPhotoId) {
+      targetIdx = albumPhotos.value.findIndex(p => p.id === queryPhotoId)
+      if (targetIdx >= 0) {
+        router.replace({ query: { ...route.query, photoId: undefined } })
+        nextTick(() => photoGridRef.value?.scrollToPhoto(targetIdx, 'smooth'))
+      }
+    }
+    if (targetIdx < 0) {
+      selectedIndex.value = album.value.photos.length > 0 ? 0 : -1
+    } else {
+      selectedIndex.value = targetIdx
+    }
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden des Albums'
   } finally {
@@ -894,6 +910,9 @@ onUnmounted(() => serviceHealth.stopPolling())
       @show-details="fullscreenDetailsOpen = !fullscreenDetailsOpen"
       @toggle-cover="handleSetMapCover"
     >
+      <template #topbar-actions-before>
+        <PhotoLocationMenu :photo-id="selectedPhoto.id" :exclude-album-id="albumId" />
+      </template>
       <template #details-flyout>
         <PhotoDetailSidebar
           :in-flyout="true"
@@ -947,6 +966,7 @@ onUnmounted(() => serviceHealth.stopPolling())
       @toggle-cover="handleSetMapCover"
     >
       <template #topbar-actions-before>
+        <PhotoLocationMenu :photo-id="mapSelectedPhoto.id" :exclude-album-id="albumId" />
         <Button
           icon="pi pi-image"
           rounded text
