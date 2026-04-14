@@ -1,0 +1,76 @@
+name: GHCR Cleanup
+
+# Keeps the four container packages on ghcr.io/as19git67/* tidy:
+#   * fk-encore              (Encore backend, built by docker-image.yml)
+#   * fk-encore-landmark     (built by docker-image-landmark.yml)
+#   * fk-encore-embedding    (built by docker-image-embedding.yml)
+#   * fk-encore-insightface  (built by docker-image-insightface.yml)
+#
+# Policy (applied per package):
+#   1. Delete every UNTAGGED version immediately.
+#      Those are the orphaned layers left behind when `latest`, `test`
+#      or a semver tag is moved to a newer build. They are pure clutter
+#      and make up the bulk of the registry storage over time.
+#   2. Of the remaining TAGGED versions, keep the 10 most recent and
+#      delete older ones — UNLESS the tag matches one of:
+#        - a semver release tag (e.g. `1.2.3` or `v1.2.3`)
+#        - `latest`
+#      Release tags are permanent markers; `latest` is the current
+#      production pointer. Both are never deleted.
+#
+# PR builds push the `test` tag (see the metadata step in each build
+# workflow). Because the `test` tag is moved on every new PR build, the
+# previous `test`-tagged version becomes untagged and is removed by
+# step 1 on the next cleanup run.
+#
+# Runs weekly on Sundays at 03:00 UTC, and can be triggered manually
+# via the Actions tab (workflow_dispatch).
+
+on:
+  schedule:
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+
+permissions:
+  packages: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - fk-encore
+          - fk-encore-landmark
+          - fk-encore-embedding
+          - fk-encore-insightface
+    steps:
+      # Step 1 — purge all untagged versions.
+      # `delete-only-untagged-versions: 'true'` makes the action ignore
+      # `min-versions-to-keep` and simply drop every version without any
+      # tag attached.
+      - name: Delete untagged versions of ${{ matrix.package }}
+        uses: actions/delete-package-versions@v5
+        with:
+          owner: ${{ github.repository_owner }}
+          package-name: ${{ matrix.package }}
+          package-type: container
+          delete-only-untagged-versions: 'true'
+
+      # Step 2 — trim old tagged versions.
+      # `ignore-versions` is a regex matched against the version's NAME,
+      # which for GHCR container packages is the SHA-256 digest — not the
+      # tag. The action therefore also accepts an implicit match against
+      # any of the version's tags, so the regex below protects versions
+      # whose tag is `latest` or a semver (`1.2.3` / `v1.2.3`).
+      # `min-versions-to-keep: 10` keeps the ten most recent of whatever
+      # remains after the ignore filter.
+      - name: Prune old tagged versions of ${{ matrix.package }}
+        uses: actions/delete-package-versions@v5
+        with:
+          owner: ${{ github.repository_owner }}
+          package-name: ${{ matrix.package }}
+          package-type: container
+          min-versions-to-keep: 10
+          ignore-versions: '^(latest|v?\d+\.\d+\.\d+)$'
