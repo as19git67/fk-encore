@@ -8,26 +8,15 @@
  * RFC1918 / loopback and will be rejected before the token is even
  * inspected.
  *
- * Source-IP resolution:
- *   - Encore.ts' Rust HTTP layer proxies requests into Node, so inside an
- *     `api.raw` handler `req.socket.remoteAddress` is either unset or the
- *     internal proxy socket, never the real TCP peer. The verified peer
- *     IP is relayed via `X-Forwarded-For` (same mechanism the existing
- *     `user/rateLimiter.ts` relies on).
- *   - We therefore read the left-most `X-Forwarded-For` entry by default,
- *     and fall back to the socket address only when no XFF is present.
- *     Set `BACKUP_TRUST_XFF=false` to disable XFF use entirely (useful in
- *     test rigs that bypass Encore).
- *
- * Typical peer addresses inside Docker:
- *   - Host→container via the published port: the bridge gateway, e.g.
- *     172.17.0.1 (default bridge) or 172.18.0.1 / 172.19.0.1 for
- *     Compose-created networks. Covered by the default `172.16.0.0/12`.
- *   - Container→container on the same network: a RFC1918 address in the
- *     same subnet as the bridge. Also covered by the defaults.
- *   - External client via a reverse proxy: the proxy's public address,
- *     which will usually be outside the defaults and must be added to
- *     `BACKUP_ALLOW_CIDRS` explicitly.
+ * Source-IP behaviour inside Docker:
+ *   - Requests from the host via the published port are SNAT-ed to the
+ *     bridge gateway (e.g. 172.17.0.1), which is why the default list
+ *     includes the private RFC1918 ranges, not just 127.0.0.1.
+ *   - Requests from other containers on the same Docker network also
+ *     arrive from a private range and are allowed.
+ *   - External requests forwarded by a reverse proxy should include
+ *     X-Forwarded-For; if `BACKUP_TRUST_XFF` is truthy the left-most
+ *     entry is checked instead of the socket address.
  *
  * Override the default list via `BACKUP_ALLOW_CIDRS` (comma-separated).
  */
@@ -159,48 +148,15 @@ export function isRemoteAllowed(remoteAddr: string | undefined | null): boolean 
 }
 
 /**
- * Placeholder socket addresses that Encore.ts fills in when no real peer is
- * available to the Node handler. Treating them as "no peer IP" is what
- * lets `isPeerAddressUsable` tell the auth layer to skip the CIDR check.
- */
-const UNUSABLE_SOCKET_ADDRS = new Set(["0.0.0.0", "::", "::0"]);
-
-/**
- * Returns true when the CIDR check has a real IP to match against.
- * Returns false when the runtime only gave us a placeholder / loopback-ish
- * value that carries no network-origin signal (Encore.ts' `api.raw`
- * handler is the motivating case — its socket is reported as `0.0.0.0`
- * and there are no forwarding headers). In that situation we cannot
- * enforce BACKUP_ALLOW_CIDRS and must fall back to the bearer token.
- */
-export function isPeerAddressUsable(addr: string | undefined | null): boolean {
-  const ip = normaliseIp(addr);
-  if (!ip) return false;
-  if (UNUSABLE_SOCKET_ADDRS.has(ip)) return false;
-  return net.isIP(ip) !== 0;
-}
-
-/**
- * Pick the effective remote address for authorisation.
- *
- * Encore.ts runs the Node handler behind its Rust HTTP layer, which means
- * `req.socket.remoteAddress` inside an `api.raw` handler is a placeholder
- * (observed: `"0.0.0.0"`) — never the real TCP peer. Encore also does
- * not relay the peer IP via `X-Forwarded-For` / `X-Real-IP` for raw
- * endpoints. When that happens `isPeerAddressUsable(returned)` will be
- * false and the caller should skip the CIDR check.
- *
- * If an upstream reverse proxy (nginx, Caddy, Traefik, ...) *does*
- * populate `X-Forwarded-For` and Encore preserves it, we read the
- * left-most entry — matching `user/rateLimiter.ts`. Set
- * `BACKUP_TRUST_XFF=false` to disable that behaviour in test rigs.
+ * Pick the effective remote address for authorisation. Prefers
+ * X-Forwarded-For (left-most entry) when BACKUP_TRUST_XFF is truthy,
+ * otherwise returns the socket address as-is.
  */
 export function effectiveRemoteAddress(
   socketAddr: string | undefined | null,
   xForwardedFor: string | string[] | undefined,
 ): string | null {
-  const trustXff = process.env.BACKUP_TRUST_XFF !== "false";
-  if (trustXff && xForwardedFor) {
+  if (process.env.BACKUP_TRUST_XFF === "true" && xForwardedFor) {
     const raw = Array.isArray(xForwardedFor) ? xForwardedFor[0] : xForwardedFor;
     const first = raw.split(",")[0]?.trim();
     if (first) return first;

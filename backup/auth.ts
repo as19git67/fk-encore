@@ -1,32 +1,59 @@
 /**
- * Shared-secret authentication for the /internal/backup/* endpoints.
+ * Defence-in-depth authentication for the /internal/backup/* endpoints.
  *
- * The token is read from the `BACKUP_TOKEN` environment variable, matching
- * the rest of the project's configuration style (docker-compose.yml + .env).
- * scripts/host/install-backup-hook.sh generates a random token once and
- * prints the value that should be added to .env as BACKUP_TOKEN plus written
- * to /etc/fk-encore/backup-token for the host-side cron driver.
+ * Two checks run in sequence before the handler executes:
+ *
+ *   1. Network origin (backup/ip-allow.ts) — the remote address must fall
+ *      inside an allow-listed CIDR (loopback + RFC1918 by default). This
+ *      blocks the "port 8080 is exposed to the internet" class of
+ *      mistakes even if the token ever leaks.
+ *
+ *   2. Bearer token (BACKUP_TOKEN env var) — compared in constant time
+ *      against the shared secret that scripts/host/install-backup-hook.sh
+ *      generates and also writes to /etc/fk-encore/backup-token.
+ *
+ * Both failures surface as APIError.unauthenticated so the endpoint does
+ * not leak which layer rejected the request.
  */
 
 import { APIError } from "encore.dev/api";
+import type { IncomingMessage } from "http";
+import { effectiveRemoteAddress, isRemoteAllowed } from "./ip-allow";
+
+/** Extracted for tests — call from api.raw handlers with the IncomingMessage. */
+export function assertBackupRequest(req: IncomingMessage): void {
+  assertRemoteAllowed(req);
+  assertBackupToken(req.headers["authorization"]);
+}
+
+function assertRemoteAllowed(req: IncomingMessage): void {
+  const socketAddr = req.socket?.remoteAddress;
+  const addr = effectiveRemoteAddress(socketAddr, req.headers["x-forwarded-for"]);
+  if (!isRemoteAllowed(addr)) {
+    throw APIError.unauthenticated(
+      `remote address ${addr ?? "<unknown>"} is not in BACKUP_ALLOW_CIDRS`,
+    );
+  }
+}
 
 /**
  * Throws APIError.unauthenticated if the Authorization header does not carry
  * the expected bearer token. A constant-time comparison is used to avoid
  * timing oracles.
  */
-export function assertBackupToken(authorization: string | undefined): void {
+export function assertBackupToken(authorization: string | string[] | undefined): void {
   const expected = process.env.BACKUP_TOKEN;
   if (!expected) {
     // Failing closed: if no token is provisioned, the endpoints are unusable.
     throw APIError.unauthenticated("BACKUP_TOKEN is not set — backup endpoints are disabled");
   }
 
-  if (!authorization) {
+  const header = Array.isArray(authorization) ? authorization[0] : authorization;
+  if (!header) {
     throw APIError.unauthenticated("missing Authorization header");
   }
 
-  const parts = authorization.split(" ");
+  const parts = header.split(" ");
   if (parts.length !== 2 || parts[0] !== "Bearer") {
     throw APIError.unauthenticated("invalid Authorization header format, expected: Bearer <token>");
   }
