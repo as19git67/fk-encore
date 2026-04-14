@@ -113,6 +113,14 @@ BACKUP_TOKEN=<vom Installer generierter Wert>
 docker compose up -d --no-deps app
 ```
 
+Die `/internal/backup/*` Endpunkte sind zusätzlich per CIDR-Allow-List
+abgesichert (Standard: Loopback + RFC1918 + IPv6 ULA). Damit werden
+Requests aus dem öffentlichen Internet selbst dann abgelehnt, wenn der
+Token einmal leakt — die Standard-Liste deckt Host-→Container-Traffic
+über die Docker-Bridge (SNAT auf `172.17.0.1` o. ä.) bereits ab, es ist
+normalerweise keine Anpassung nötig. Falls doch: via `BACKUP_ALLOW_CIDRS`
+in der `.env` überschreiben.
+
 Details und Konfiguration siehe `scripts/host/README.md`.
 
 ### Wiederherstellen

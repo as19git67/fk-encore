@@ -135,6 +135,8 @@ The app reads these from the container environment (see `docker-compose.yml`):
 |---------|---------|--------|
 | `BACKUP_DIR`          | `/mnt/backup`           | Where dumps and the `restore-*.dump` trigger live. |
 | `BACKUP_AUTO_STOP_MS` | `1800000` (30 min)      | Safety timer — force-stops a stuck backup if `/stop` never arrives. |
+| `BACKUP_ALLOW_CIDRS`  | *(see below)*           | Comma-separated CIDR allow-list for the peer address. |
+| `BACKUP_TRUST_XFF`    | `false`                 | If `true`, use the left-most `X-Forwarded-For` entry as the peer address. |
 
 `BACKUP_TOKEN` must be provisioned in the app container's environment (via
 the project's `.env` / `docker-compose.yml`). It is the shared value
@@ -145,9 +147,25 @@ of `/etc/fk-encore/backup-token`.
 
 - The token file is `0600 root:root`. The cron job runs as root, reads the
   token, and calls the app over loopback HTTP.
-- The `/internal/backup/*` endpoints perform a constant-time comparison
-  against the `BackupToken` secret. If the secret is not configured, every
-  call fails closed with `401 Unauthenticated`.
+- The `/internal/backup/*` endpoints are guarded by **two** checks that
+  run in order:
+  1. **CIDR allow-list.** The peer address must fall inside
+     `BACKUP_ALLOW_CIDRS`. Defaults: `127.0.0.0/8`, `::1/128`,
+     `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`
+     (loopback + RFC1918 + IPv6 ULA). That covers host-to-container
+     traffic through the Docker bridge (SNAT-ed to `172.17.0.1` or
+     similar) and container-to-container traffic, while rejecting
+     requests from the public internet even if port 8080 is exposed.
+     Override with `BACKUP_ALLOW_CIDRS=<cidr>,<cidr>,...` in the
+     container environment. Malformed entries are logged and skipped;
+     an empty or unparseable peer address fails closed.
+  2. **Bearer token.** Constant-time compare against `BACKUP_TOKEN`.
+     If the token is not configured, every call fails closed with
+     `401 Unauthenticated`.
+- Only set `BACKUP_TRUST_XFF=true` when the app is behind a reverse
+  proxy that you control. Trusting `X-Forwarded-For` unconditionally
+  would let a remote client spoof the peer address and bypass the
+  allow-list.
 - `pg_backup_start()` does not block reads; browser sessions continue to see
   a `503 Service Unavailable` via the maintenance middleware. `/health` and
   `/healthz` stay up so external monitoring is not poisoned.
