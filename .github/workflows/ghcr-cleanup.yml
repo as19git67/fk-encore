@@ -47,30 +47,86 @@ jobs:
           - fk-encore-insightface
     steps:
       # Step 1 — purge all untagged versions.
-      # `delete-only-untagged-versions: 'true'` makes the action ignore
-      # `min-versions-to-keep` and simply drop every version without any
-      # tag attached.
+      # Uses the GitHub REST API directly (gh cli) to avoid dependency on
+      # actions/delete-package-versions which currently runs on Node.js 20.
       - name: Delete untagged versions of ${{ matrix.package }}
-        uses: actions/delete-package-versions@v5
-        with:
-          owner: ${{ github.repository_owner }}
-          package-name: ${{ matrix.package }}
-          package-type: container
-          delete-only-untagged-versions: 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          OWNER="${{ github.repository_owner }}"
+          PACKAGE="${{ matrix.package }}"
+
+          # Detect user vs org so we hit the correct API namespace.
+          TYPE=$(gh api "/users/${OWNER}" --jq '.type' 2>/dev/null || echo "Organization")
+          if [ "$TYPE" = "User" ]; then
+            API_BASE="/users/${OWNER}/packages/container/${PACKAGE}/versions"
+          else
+            API_BASE="/orgs/${OWNER}/packages/container/${PACKAGE}/versions"
+          fi
+
+          # Merge all paginated results into one JSON array.
+          VERSIONS=$(gh api --paginate "${API_BASE}" --jq '.' 2>/dev/null \
+            | jq -s 'add // []' || echo '[]')
+
+          DELETED=0
+          while IFS= read -r id; do
+            [ -z "$id" ] && continue
+            if gh api --method DELETE "${API_BASE}/${id}"; then
+              echo "Deleted untagged version ${id}"
+              DELETED=$((DELETED + 1))
+            else
+              echo "Failed to delete version ${id}" >&2
+            fi
+          done < <(echo "${VERSIONS}" \
+            | jq -r '.[] | select(.metadata.container.tags | length == 0) | .id')
+
+          echo "Deleted ${DELETED} untagged version(s)."
 
       # Step 2 — trim old tagged versions.
-      # `ignore-versions` is a regex matched against the version's NAME,
-      # which for GHCR container packages is the SHA-256 digest — not the
-      # tag. The action therefore also accepts an implicit match against
-      # any of the version's tags, so the regex below protects versions
-      # whose tag is `latest` or a semver (`1.2.3` / `v1.2.3`).
-      # `min-versions-to-keep: 10` keeps the ten most recent of whatever
-      # remains after the ignore filter.
+      # Protected tags: `latest` and semver patterns (`1.2.3` / `v1.2.3`).
+      # Any version whose tags include at least one protected pattern is kept.
+      # Of the remaining tagged versions, the 10 most recent are kept and
+      # older ones are deleted.
       - name: Prune old tagged versions of ${{ matrix.package }}
-        uses: actions/delete-package-versions@v5
-        with:
-          owner: ${{ github.repository_owner }}
-          package-name: ${{ matrix.package }}
-          package-type: container
-          min-versions-to-keep: 10
-          ignore-versions: '^(latest|v?\d+\.\d+\.\d+)$'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          OWNER="${{ github.repository_owner }}"
+          PACKAGE="${{ matrix.package }}"
+
+          TYPE=$(gh api "/users/${OWNER}" --jq '.type' 2>/dev/null || echo "Organization")
+          if [ "$TYPE" = "User" ]; then
+            API_BASE="/users/${OWNER}/packages/container/${PACKAGE}/versions"
+          else
+            API_BASE="/orgs/${OWNER}/packages/container/${PACKAGE}/versions"
+          fi
+
+          VERSIONS=$(gh api --paginate "${API_BASE}" --jq '.' 2>/dev/null \
+            | jq -s 'add // []' || echo '[]')
+
+          DELETED=0
+          while IFS= read -r id; do
+            [ -z "$id" ] && continue
+            if gh api --method DELETE "${API_BASE}/${id}"; then
+              echo "Deleted old tagged version ${id}"
+              DELETED=$((DELETED + 1))
+            else
+              echo "Failed to delete version ${id}" >&2
+            fi
+          done < <(echo "${VERSIONS}" | jq -r '
+            [
+              .[] |
+              select(.metadata.container.tags | length > 0) |
+              select(
+                .metadata.container.tags |
+                map(test("^(latest|v?[0-9]+\\.[0-9]+\\.[0-9]+)$")) |
+                any | not
+              )
+            ] |
+            sort_by(.created_at) |
+            reverse |
+            .[10:] |
+            .[].id
+          ')
+
+          echo "Deleted ${DELETED} old tagged version(s)."
