@@ -20,6 +20,7 @@ if (fs.existsSync(envPath)) {
 
 import * as schema from "./schema";
 import { seed } from "./seed";
+import { runStartupHousekeeping } from "../backup/startup";
 
 type DbInstance = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -91,6 +92,18 @@ export async function initializeDb(): Promise<DbInstance> {
     try {
       const db = await createDb();
       await seed(db);
+      // Run backup-related startup housekeeping exactly once:
+      //   - defensive pg_backup_stop() in case the previous process crashed
+      //     while the cluster was in backup mode,
+      //   - apply any pending `restore-*.dump` file from $BACKUP_DIR.
+      // Tests and fresh installs without a backup dir are no-ops.
+      if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
+        try {
+          await runStartupHousekeeping();
+        } catch (err: any) {
+          console.error(`[db] backup housekeeping failed: ${err?.message ?? err}`);
+        }
+      }
       dbInstance = db;
       if (attempt > 1) {
         console.log(`[db] Connected successfully after ${attempt} attempt(s).`);

@@ -79,24 +79,67 @@ EMBEDDING_DB_PASSWORD=ein-anderes-passwort
 | `app-data` | SQLite-Datenbank + hochgeladene Fotos |
 | `embedding-pgdata` | PostgreSQL-Daten für Foto-Embeddings |
 
-### Backup
+### Automatisches tägliches Backup (empfohlen)
+
+Das Repo enthält einen Host-Hook, der täglich einen **anwendungs-konsistenten
+ZFS-Snapshot** inklusive `pg_dump` der Haupt-DB erzeugt. Der Ablauf:
+
+1. Host-Cron ruft `POST /internal/backup/start` — fk-encore pausiert die
+   Scan-Worker, setzt das Cluster per `pg_backup_start()` in den Backup-Modus
+   und schreibt einen `pg_dump` nach `/mnt/backup/encore-<label>.dump`.
+2. Der Host macht `zfs snapshot -r tank/vivanty@<label>` — pgdata + Fotos +
+   der gerade erstellte Dump sind damit konsistent im Snapshot.
+3. Host-Cron ruft `POST /internal/backup/stop` — `pg_backup_stop()`, Worker
+   laufen wieder.
+
+Eine Sicherheits-Zeitschaltuhr (default 30 Minuten) beendet den Backup-Modus
+automatisch, falls `/stop` nie ankommt — damit kann das WAL nicht endlos
+wachsen.
+
+**Installation auf dem Host (einmalig, als root):**
 
 ```bash
-# App-Daten (SQLite DB + Fotos)
-docker compose cp app:/mnt/data ./backup-data
-
-# Embedding-Datenbank
-docker compose exec embedding_postgres pg_dump -U postgres embeddings > backup-embeddings.sql
+sudo ./scripts/host/install-backup-hook.sh --dataset tank/vivanty
+# danach — Token in die App einsetzen:
+docker exec -i fk-encore-app encore secret set --type production BackupToken
+docker compose restart app
 ```
+
+Details und Konfiguration siehe `scripts/host/README.md`.
 
 ### Wiederherstellen
 
-```bash
-# App-Daten
-docker compose cp ./backup-data/. app:/mnt/data
+Zwei Pfade werden unterstützt:
 
-# Embedding-Datenbank
-cat backup-embeddings.sql | docker compose exec -T embedding_postgres psql -U postgres embeddings
+**A) Vollständiger Rollback (Fotos + DB, schnell):**
+
+```bash
+docker compose down
+sudo zfs rollback -r tank/vivanty@daily-20260413-030000
+docker compose up -d
+```
+
+**B) Nur DB aus `pg_dump` wiederherstellen (Opt-in beim Start):**
+
+```bash
+# 1. Dump-Datei als "restore-*" im Backup-Verzeichnis ablegen
+cp /mnt/backup/encore-daily-20260413-030000.dump \
+   /mnt/backup/restore-20260414-rollback.dump
+
+# 2. Container neustarten
+docker compose restart app
+```
+
+Beim Start erkennt fk-encore die Datei, legt zunächst zur Sicherheit einen
+`pre-restore-<ISO>.dump` des aktuellen DB-Stands an, führt `pg_restore
+--clean --if-exists` aus und benennt die Trigger-Datei in
+`restored-…` um, damit der Restore beim nächsten Start nicht erneut läuft.
+
+**Notfall-Backup ohne ZFS-Snapshot (z. B. auf Nicht-TrueNAS-Systemen):**
+
+```bash
+# Nur die Haupt-DB — Fotos separat per rsync/etc. sichern
+docker exec fk-encore-app sh -c 'pg_dump -Fc --no-owner "$POSTGRES_DATABASE" > /mnt/backup/encore-manual.dump'
 ```
 
 ## Häufige Aufgaben

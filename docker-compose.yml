@@ -47,9 +47,14 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-noreply@example.com}
       APP_URL: ${APP_URL:-http://localhost:8080}
+      # Backup subsystem — see scripts/host/README.md
+      BACKUP_DIR: /mnt/backup
+      # 30 minutes; overrides the auto-stop safety timer in /internal/backup/start
+      BACKUP_AUTO_STOP_MS: ${BACKUP_AUTO_STOP_MS:-1800000}
     volumes:
       - photos:/mnt/data/photos
       - thumbnails:/mnt/data/thumbnails
+      - backup:/mnt/backup
 
   # ── InsightFace Service (Face Detection) ───────────────────────────────────
   insightface:
@@ -140,6 +145,16 @@ volumes:
     driver: local
     driver_opts:
       device: /Users/anton/vivanty_data/pgdata
+      o: bind
+      type: none
+  # Backup volume — consumed by the /internal/backup/* endpoints and by
+  # the restore-on-startup hook. The host-side backup script (see
+  # scripts/host/fk-encore-backup.sh) is expected to be able to read and
+  # write files in the same directory.
+  backup:
+    driver: local
+    driver_opts:
+      device: /Users/anton/vivanty_data/backup
       o: bind
       type: none
 

@@ -19,14 +19,21 @@ FROM ${BASE_IMAGE}
 
 USER root
 
+# postgresql-client provides pg_dump and pg_restore, used by the backup
+# service (backup/pg-dump.ts) for the fast-path DB dump during a backup
+# run and for the restore-on-startup hook.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
 # Create the TrueNAS SCALE "apps" group/user (UID/GID 568) if they are not
 # already present in the Encore base. Also create the bind-mount targets and
 # hand them to the apps user, matching the permissions the host expects.
 RUN set -eux; \
     if ! getent group  568 >/dev/null; then groupadd -g 568 apps;  fi; \
     if ! getent passwd 568 >/dev/null; then useradd  -u 568 -g 568 -m -s /bin/bash apps; fi; \
-    mkdir -p /mnt/data/photos /mnt/data/thumbnails /app/data /srv/frontend/dist; \
-    chown -R 568:568 /mnt/data /app/data /srv/frontend
+    mkdir -p /mnt/data/photos /mnt/data/thumbnails /mnt/backup /app/data /srv/frontend/dist; \
+    chown -R 568:568 /mnt/data /mnt/backup /app/data /srv/frontend
 
 # Pre-built SPA assets. The host-side CI/CD runs `npm run build` in frontend/
 # before calling `docker build`, so frontend/dist is populated.
