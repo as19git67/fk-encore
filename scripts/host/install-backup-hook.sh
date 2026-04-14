@@ -87,20 +87,23 @@ chown root:root "$CRON_FILE"
 echo "[ok] installed $CRON_FILE (schedule: $CRON_SCHEDULE)"
 
 # --- reminder --------------------------------------------------------------
+TOKEN_VALUE="$(tr -d '[:space:]' < "$TOKEN_FILE")"
 cat <<EOF
 
 -----------------------------------------------------------------------------
-Finish the install by giving the same token to the fk-encore app:
+Finish the install by giving the same token to the fk-encore app via .env:
 
-  docker exec -i fk-encore-app encore secret set --type production BackupToken
+  1. Add this line to the .env next to docker-compose.yml:
 
-Paste the value of $TOKEN_FILE when prompted, then restart the container:
+       BACKUP_TOKEN=$TOKEN_VALUE
 
-  docker compose restart app
+  2. Restart the container so the new env var is picked up:
 
-Verify end-to-end:
+       docker compose up -d --no-deps app
 
-  $SCRIPT_DST
-  zfs list -t snapshot | grep fk-encore || zfs list -t snapshot | tail
+  3. Verify end-to-end:
+
+       $SCRIPT_DST
+       zfs list -t snapshot | grep fk-encore || zfs list -t snapshot | tail
 -----------------------------------------------------------------------------
 EOF

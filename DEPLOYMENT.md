@@ -102,9 +102,17 @@ wachsen.
 
 ```bash
 sudo ./scripts/host/install-backup-hook.sh --dataset tank/vivanty
-# danach — Token in die App einsetzen:
-docker exec -i fk-encore-app encore secret set --type production BackupToken
-docker compose restart app
+```
+
+Der Installer druckt am Ende einen generierten Token. Diesen in die
+`.env` neben der `docker-compose.yml` eintragen und den Container neu starten:
+
+```env
+BACKUP_TOKEN=<vom Installer generierter Wert>
+```
+
+```bash
+docker compose up -d --no-deps app
 ```
 
 Details und Konfiguration siehe `scripts/host/README.md`.

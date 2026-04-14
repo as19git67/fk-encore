@@ -43,15 +43,20 @@ That will:
 3. Create `/etc/cron.d/fk-encore-backup` with a daily 03:00 UTC entry. Use
    `--cron '<schedule>'` to override (5-field cron syntax).
 
-The installer prints a reminder to set the same token inside the container:
+The installer prints the generated token and a reminder to add it to the
+project's `.env` so the container picks it up via the `BACKUP_TOKEN`
+environment variable:
 
 ```bash
-docker exec -i fk-encore-app encore secret set --type production BackupToken
-# paste the contents of /etc/fk-encore/backup-token when prompted
-docker compose restart app
+# .env (next to docker-compose.yml)
+BACKUP_TOKEN=<value-printed-by-installer>
 ```
 
-Until the Encore secret is set, `/internal/backup/start` responds with
+```bash
+docker compose up -d --no-deps app   # pick up the new env var
+```
+
+Until `BACKUP_TOKEN` is set, `/internal/backup/*` responds with
 `401 Unauthenticated`.
 
 ## Test the flow end-to-end
@@ -131,9 +136,10 @@ The app reads these from the container environment (see `docker-compose.yml`):
 | `BACKUP_DIR`          | `/mnt/backup`           | Where dumps and the `restore-*.dump` trigger live. |
 | `BACKUP_AUTO_STOP_MS` | `1800000` (30 min)      | Safety timer — force-stops a stuck backup if `/stop` never arrives. |
 
-The `BackupToken` Encore secret must be provisioned via
-`encore secret set --type production BackupToken`; it is the shared value
-between this directory's installer and the app.
+`BACKUP_TOKEN` must be provisioned in the app container's environment (via
+the project's `.env` / `docker-compose.yml`). It is the shared value
+between this directory's installer and the app, and must match the contents
+of `/etc/fk-encore/backup-token`.
 
 ## Security
 

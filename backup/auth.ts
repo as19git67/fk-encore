@@ -1,15 +1,14 @@
 /**
  * Shared-secret authentication for the /internal/backup/* endpoints.
  *
- * The token is provisioned by scripts/host/install-backup-hook.sh which writes
- * the same value to /etc/fk-encore/backup-token on the host (consumed by the
- * backup cron) and to the Encore secret "BackupToken" (consumed here).
+ * The token is read from the `BACKUP_TOKEN` environment variable, matching
+ * the rest of the project's configuration style (docker-compose.yml + .env).
+ * scripts/host/install-backup-hook.sh generates a random token once and
+ * prints the value that should be added to .env as BACKUP_TOKEN plus written
+ * to /etc/fk-encore/backup-token for the host-side cron driver.
  */
 
 import { APIError } from "encore.dev/api";
-import { secret } from "encore.dev/config";
-
-const backupToken = secret("BackupToken");
 
 /**
  * Throws APIError.unauthenticated if the Authorization header does not carry
@@ -17,10 +16,10 @@ const backupToken = secret("BackupToken");
  * timing oracles.
  */
 export function assertBackupToken(authorization: string | undefined): void {
-  const expected = backupToken();
+  const expected = process.env.BACKUP_TOKEN;
   if (!expected) {
     // Failing closed: if no token is provisioned, the endpoints are unusable.
-    throw APIError.unauthenticated("backup token is not configured on this deployment");
+    throw APIError.unauthenticated("BACKUP_TOKEN is not set — backup endpoints are disabled");
   }
 
   if (!authorization) {
