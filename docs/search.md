@@ -76,13 +76,28 @@ extracted (`photo/photo.service.ts`):
    `photos` with a `WHERE` over `taken_at` / `location_*`, ordered by date.
    No CLIP call is needed.
 2. **Semantic only** — the query reduces to free-form text with no dates or
-   locations. Forwarded directly to the embedding service's
-   `POST /search/text`, which returns pgvector similarity scores.
+   locations. Runs CLIP `POST /search/text` *and* a description token search
+   in parallel, then merges both result sets (description matches get
+   `score = 1.0`, CLIP hits keep their cosine score; results sorted
+   desc-by-score).
 3. **Combined** — both structural and semantic. The backend first fetches
    candidate photo IDs that satisfy the structural filter (enlarging `k` to
-   compensate for intersection loss), calls `/search/text` for a CLIP
-   similarity ranking, and finally intersects the two sets. The CLIP score is
-   used for ordering; the structural filter is the hard gate.
+   compensate for intersection loss), runs CLIP `/search/text` and the
+   description search in parallel, intersects CLIP with the structural set,
+   then unions in description matches (which already had the structural
+   filter applied at query time).
+
+### Description token search
+
+In addition to CLIP image embeddings, the search inspects the
+`photos.description` column. The parser's `semanticQuery` is split on
+whitespace; tokens of length ≥ 2 are AND-joined as `ILIKE %token%`
+predicates. So a query like `Mariens Geburtstag` matches a photo whose
+description is `"Mariens 30. Geburtstag im Garten"` even though CLIP would
+not reliably find it from the image alone.
+
+Description matches always count as a perfect hit (`score = 1.0`) and
+therefore appear at the top of the result list, ahead of CLIP-only matches.
 
 The hidden-photo filter (`photo_curation.status != 'hidden'`) is always
 applied so deleted / archived photos stay out of results.
