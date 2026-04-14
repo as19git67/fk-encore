@@ -72,3 +72,14 @@ class HealthResponse(BaseModel):
     status: str
     db: str
     models: dict
+
+
+class ParseQueryRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=500, description="Natural language query in German")
+
+
+class ParseQueryResponse(BaseModel):
+    semantic_query: str = Field(..., description="Cleaned text suitable for CLIP text encoding")
+    location: Optional[str] = Field(None, description="Detected location (city, country, region)")
+    from_date: Optional[str] = Field(None, description="ISO 8601 start date, inclusive")
+    to_date: Optional[str] = Field(None, description="ISO 8601 end date, inclusive")

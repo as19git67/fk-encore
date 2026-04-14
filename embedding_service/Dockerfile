@@ -67,6 +67,15 @@ RUN for attempt in 1 2 3 4 5; do \
          echo "Attempt $attempt failed, retrying in ${sleep_time}s..."; \
          sleep "$sleep_time"; \
        done
+# spaCy German NER model for natural-language query parsing.
+# de_core_news_md (~40 MB) – good NER for LOC/GPE/DATE without the 560 MB lg footprint.
+RUN for attempt in 1 2 3 4 5; do \
+         python -m spacy download de_core_news_md && break; \
+         if [ "$attempt" = "5" ]; then echo "spaCy model download failed after 5 attempts"; exit 1; fi; \
+         sleep_time=$((attempt * 30)); \
+         echo "Attempt $attempt failed, retrying in ${sleep_time}s..."; \
+         sleep "$sleep_time"; \
+       done
 RUN chown -R 568:568 /home/apps
 
 # Copy application source
