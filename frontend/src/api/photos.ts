@@ -622,6 +622,32 @@ export function searchPhotos(query: string, limit: number = 1000, threshold: num
   })
 }
 
+/** Structured breakdown of a natural-language query returned by the backend. */
+export interface ParsedQuery {
+  semanticQuery: string
+  fromDate?: string
+  toDate?: string
+  location?: string
+}
+
+export interface NaturalSearchResult extends PhotoSearchResult {
+  location_city?: string
+  location_country?: string
+}
+
+/**
+ * Semantic + structural photo search.
+ * Understands queries like "Kirchen in München von 2004 bis 2017":
+ * the backend parses location and date filters out and combines them with
+ * the CLIP semantic similarity search.
+ */
+export function searchPhotosNatural(query: string, limit: number = 500, threshold: number = 0.18) {
+  return apiFetch<{ results: NaturalSearchResult[]; parsed: ParsedQuery }>('/photos/search/natural', {
+    method: 'POST',
+    body: JSON.stringify({ query, limit, threshold })
+  })
+}
+
 // ---------- Landmarks ----------
 
 export interface LandmarkBBox { x: number; y: number; width: number; height: number }

@@ -4344,6 +4344,38 @@ export function parseNaturalQuery(raw: string): ParsedQuery {
   };
 }
 
+/**
+ * Parse a query via the embedding service's spaCy + dateparser endpoint.
+ * Returns null on any failure so the caller can fall back to the regex parser.
+ */
+async function parseNaturalQueryRemote(raw: string): Promise<ParsedQueryInternal | null> {
+  try {
+    const response = await fetch(`${EMBEDDING_SERVICE_URL}/parse/query`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: raw }),
+      // The parser is fast (5-20 ms) but the model load on first call may
+      // take a few seconds. 5 s is a safe upper bound; we fall back on timeout.
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) return null;
+    const data = await response.json() as {
+      semantic_query: string;
+      location: string | null;
+      from_date: string | null;
+      to_date: string | null;
+    };
+    return {
+      semanticQuery: data.semantic_query ?? "",
+      location: data.location ?? undefined,
+      fromDate: data.from_date ? new Date(data.from_date) : undefined,
+      toDate: data.to_date ? new Date(data.to_date) : undefined,
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
 // ---------- Combined Natural Language Search ----------
 
 export interface NaturalSearchResult extends PhotoSearchResult {
@@ -4357,7 +4389,12 @@ export async function searchPhotosNaturalLogic(
   limit: number = 30,
   threshold: number = 0.18
 ): Promise<{ results: NaturalSearchResult[]; parsed: ParsedQuery }> {
-  const parsed = parseNaturalQueryInternal(query);
+  // Prefer the spaCy-based parser running in the embedding service – it
+  // understands relative dates ("letzten Sommer", "vor 2 Jahren"), case-
+  // insensitive locations, and produces fewer false positives. Falls back to
+  // the in-process regex parser whenever the service is unreachable, so the
+  // search still works in degraded mode.
+  const parsed = (await parseNaturalQueryRemote(query)) ?? parseNaturalQueryInternal(query);
   const parsedPublic: ParsedQuery = {
     semanticQuery: parsed.semanticQuery,
     fromDate: parsed.fromDate?.toISOString(),
@@ -4389,6 +4426,54 @@ export async function searchPhotosNaturalLogic(
   const hasStructuredFilter = !!(parsed.fromDate || parsed.location);
   const hasSemanticQuery = parsed.semanticQuery.length > 0;
 
+  // Description token search: every whitespace-separated token of the
+  // semantic query must appear (case-insensitive substring) in the photo
+  // description. This is what makes "Mariens Geburtstag" find a photo
+  // whose description is "Mariens 30. Geburtstag im Garten" – CLIP alone
+  // wouldn't reliably get there.
+  const descriptionTokens = parsed.semanticQuery
+    .split(/\s+/)
+    .map(t => t.trim())
+    .filter(t => t.length >= 2);
+  const buildDescriptionConditions = () => {
+    const base = [
+      eq(photos.user_id, userId),
+      sql`${photos.description} IS NOT NULL`,
+      sql`${photos.description} <> ''`,
+      or(sql`${photoCuration.status} IS NULL`, sql`${photoCuration.status} != 'hidden'`),
+    ];
+    for (const tok of descriptionTokens) {
+      base.push(ilike(photos.description, `%${tok}%`));
+    }
+    if (parsed.fromDate) {
+      base.push(sql`COALESCE(${photos.taken_at}, ${photos.created_at}) >= ${parsed.fromDate.toISOString()}`);
+    }
+    if (parsed.toDate) {
+      base.push(sql`COALESCE(${photos.taken_at}, ${photos.created_at}) <= ${parsed.toDate.toISOString()}`);
+    }
+    if (parsed.location) {
+      base.push(
+        or(
+          ilike(photos.location_city, `%${parsed.location}%`),
+          ilike(photos.location_country, `%${parsed.location}%`),
+          ilike(photos.location_name, `%${parsed.location}%`),
+        )
+      );
+    }
+    return base;
+  };
+  const fetchDescriptionMatchIds = async (): Promise<number[]> => {
+    if (descriptionTokens.length === 0) return [];
+    const rows = await dbAll<{ id: number }>(
+      db.select({ id: photos.id })
+        .from(photos)
+        .leftJoin(photoCuration, and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)))
+        .where(and(...buildDescriptionConditions()))
+        .limit(limit)
+    );
+    return rows.map(r => r.id);
+  };
+
   const selectFields = {
     id: photos.id, filename: photos.filename, taken_at: photos.taken_at,
     created_at: photos.created_at, location_city: photos.location_city,
@@ -4419,32 +4504,43 @@ export async function searchPhotosNaturalLogic(
     return { parsed: parsedPublic, results: rows.map(r => toResult(r, 1.0)) };
   }
 
-  // Case B: semantic only, no structural filters → pure CLIP
+  // Case B: semantic only, no structural filters → CLIP ∪ description matches
   if (!hasStructuredFilter) {
-    const response = await fetch(`${EMBEDDING_SERVICE_URL}/search/text`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: parsed.semanticQuery, k: limit, threshold }),
-    });
-    if (!response.ok) throw new Error(`Embedding service error: ${response.status}`);
-    const clipData = await response.json() as { results: Array<{ photo_id: string; score: number }> };
-    const ids = clipData.results.map(r => parseInt(r.photo_id, 10)).filter(id => !isNaN(id));
-    if (ids.length === 0) return { results: [], parsed: parsedPublic };
+    const [clipResp, descIds] = await Promise.all([
+      fetch(`${EMBEDDING_SERVICE_URL}/search/text`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: parsed.semanticQuery, k: limit, threshold }),
+      }),
+      fetchDescriptionMatchIds(),
+    ]);
+    if (!clipResp.ok) throw new Error(`Embedding service error: ${clipResp.status}`);
+    const clipData = await clipResp.json() as { results: Array<{ photo_id: string; score: number }> };
+    const clipScores = new Map<number, number>();
+    for (const r of clipData.results) {
+      const id = parseInt(r.photo_id, 10);
+      if (!isNaN(id)) clipScores.set(id, r.score);
+    }
+    // Description matches get a score of 1.0 (explicit text match wins over
+    // CLIP similarity); CLIP-only hits keep their cosine score.
+    const merged = new Map<number, number>(clipScores);
+    for (const id of descIds) merged.set(id, 1.0);
+    if (merged.size === 0) return { results: [], parsed: parsedPublic };
+
+    const ids = [...merged.keys()];
     const rows = await dbAll<PhotoRow>(
       db.select(selectFields).from(photos)
         .leftJoin(photoCuration, and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)))
         .where(and(eq(photos.user_id, userId), inArray(photos.id, ids)))
     );
-    const photoMap = new Map(rows.map(p => [p.id, p]));
-    return {
-      parsed: parsedPublic,
-      results: clipData.results
-        .map(r => { const p = photoMap.get(parseInt(r.photo_id, 10)); return p ? toResult(p, r.score) : null; })
-        .filter((r): r is NaturalSearchResult => r !== null),
-    };
+    const ordered = rows
+      .map(r => toResult(r, merged.get(r.id) ?? 0))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
+    return { parsed: parsedPublic, results: ordered };
   }
 
-  // Case C: semantic + structural filters → CLIP results intersected with DB filter
+  // Case C: semantic + structural → (CLIP ∩ structural) ∪ description matches
   // Pre-fetch candidate IDs matching date + location constraints
   const candidateRows = await dbAll<{ id: number }>(
     db.select({ id: photos.id })
@@ -4457,31 +4553,36 @@ export async function searchPhotosNaturalLogic(
 
   // Request enlarged k so intersection still yields enough results
   const clipK = Math.min(candidateSet.size, limit * 5);
-  const response = await fetch(`${EMBEDDING_SERVICE_URL}/search/text`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query: parsed.semanticQuery, k: clipK, threshold }),
-  });
-  if (!response.ok) throw new Error(`Embedding service error: ${response.status}`);
-  const clipData = await response.json() as { results: Array<{ photo_id: string; score: number }> };
+  const [clipResp, descIds] = await Promise.all([
+    fetch(`${EMBEDDING_SERVICE_URL}/search/text`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: parsed.semanticQuery, k: clipK, threshold }),
+    }),
+    // fetchDescriptionMatchIds already applies the same structural filter,
+    // so we don't need to intersect manually.
+    fetchDescriptionMatchIds(),
+  ]);
+  if (!clipResp.ok) throw new Error(`Embedding service error: ${clipResp.status}`);
+  const clipData = await clipResp.json() as { results: Array<{ photo_id: string; score: number }> };
 
-  // Keep only CLIP results that also match the structural filter
-  const intersected = clipData.results
-    .filter(r => candidateSet.has(parseInt(r.photo_id, 10)))
-    .slice(0, limit);
-  if (intersected.length === 0) return { results: [], parsed: parsedPublic };
+  // Score map: CLIP hits inside the structural candidate set + description matches.
+  const merged = new Map<number, number>();
+  for (const r of clipData.results) {
+    const id = parseInt(r.photo_id, 10);
+    if (!isNaN(id) && candidateSet.has(id)) merged.set(id, r.score);
+  }
+  for (const id of descIds) merged.set(id, 1.0);
+  if (merged.size === 0) return { results: [], parsed: parsedPublic };
 
-  const ids = intersected.map(r => parseInt(r.photo_id, 10));
+  const ids = [...merged.keys()];
   const rows = await dbAll<PhotoRow>(
     db.select(selectFields).from(photos)
       .where(and(eq(photos.user_id, userId), inArray(photos.id, ids)))
   );
-  const photoMap = new Map(rows.map(p => [p.id, p]));
-
-  return {
-    parsed: parsedPublic,
-    results: intersected
-      .map(r => { const p = photoMap.get(parseInt(r.photo_id, 10)); return p ? toResult(p, r.score) : null; })
-      .filter((r): r is NaturalSearchResult => r !== null),
-  };
+  const ordered = rows
+    .map(r => toResult(r, merged.get(r.id) ?? 0))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+  return { parsed: parsedPublic, results: ordered };
 }
