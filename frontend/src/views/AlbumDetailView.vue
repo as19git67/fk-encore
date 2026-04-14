@@ -157,6 +157,16 @@ const searchResultCountInAlbum = computed<number | null>(() => {
   return ids.filter(id => albumPhotoIds.value.has(id)).length
 })
 
+// Album photos narrowed to the active search hits. When no search is
+// running, returns the full album. Used by the map view, which doesn't go
+// through usePhotoGrouping.
+const albumPhotosFiltered = computed<Photo[]>(() => {
+  const ids = searchResultIds.value
+  if (ids === null) return albumPhotos.value
+  const hitSet = new Set(ids)
+  return albumPhotos.value.filter(p => hitSet.has(p.id))
+})
+
 // ── Grouping (via composable) ─────────────────────────────────────────────────
 const { groupedPhotos } = usePhotoGrouping(albumPhotos, {
   hiddenByStack,
@@ -742,7 +752,7 @@ onUnmounted(() => serviceHealth.stopPolling())
     <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
 
     <!-- Natural-language search: global search, results filtered to this album -->
-    <div v-if="album && displayMode !== 'map' && albumPhotos.length > 0" class="album-search">
+    <div v-if="album && albumPhotos.length > 0" class="album-search">
       <NaturalSearchBar
         v-model="searchQuery"
         :loading="searchLoading"
@@ -766,7 +776,7 @@ onUnmounted(() => serviceHealth.stopPolling())
     <TripMap
       v-if="album && displayMode === 'map' && albumPhotos.length > 0"
       ref="tripMapRef"
-      :photos="albumPhotos"
+      :photos="albumPhotosFiltered"
       :albumName="album.name"
       :albumDescription="album.description"
       @open-fullscreen="handleMapFullscreen"
