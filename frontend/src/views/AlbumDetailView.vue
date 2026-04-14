@@ -11,6 +11,7 @@ import TimelineNav from '../components/TimelineNav.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
+import NaturalSearchBar from '../components/NaturalSearchBar.vue'
 
 const TripMap = defineAsyncComponent(() => import('../components/TripMap.vue'))
 import {
@@ -40,6 +41,7 @@ import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
 import { usePhotoGrouping } from '../composables/usePhotoGrouping'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
+import { useNaturalSearch } from '../composables/useNaturalSearch'
 import type { PhotoItem } from '../composables/usePhotoGrouping'
 import { onUnmounted } from 'vue'
 
@@ -128,10 +130,38 @@ const hiddenByStack = computed(() => {
   return set
 })
 
+// ── Search ────────────────────────────────────────────────────────────────────
+// Uses the natural-language search endpoint (spaCy-parsed location + date
+// filters combined with CLIP semantic search). Results are global across
+// the user's library; usePhotoGrouping's id-filter discards hits that
+// aren't in this album.
+const {
+  searchQuery,
+  searchResultIds,
+  loading: searchLoading,
+  error: searchError,
+  executeSearch,
+  clearSearch,
+  locationChip,
+  dateChip,
+  semanticChip,
+  hasParsedChips,
+} = useNaturalSearch()
+
+// Count of hits that actually land in this album (global search minus
+// photos from other albums) so the displayed number matches what the user
+// sees in the grid.
+const searchResultCountInAlbum = computed<number | null>(() => {
+  const ids = searchResultIds.value
+  if (ids === null) return null
+  return ids.filter(id => albumPhotoIds.value.has(id)).length
+})
+
 // ── Grouping (via composable) ─────────────────────────────────────────────────
 const { groupedPhotos } = usePhotoGrouping(albumPhotos, {
   hiddenByStack,
   photoToGroup,
+  searchResultIds,
 })
 
 // ── Navigation refs ───────────────────────────────────────────────────────────
@@ -711,6 +741,23 @@ onUnmounted(() => serviceHealth.stopPolling())
 
     <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
 
+    <!-- Natural-language search: global search, results filtered to this album -->
+    <div v-if="album && displayMode !== 'map' && albumPhotos.length > 0" class="album-search">
+      <NaturalSearchBar
+        v-model="searchQuery"
+        :loading="searchLoading"
+        :result-count="searchResultCountInAlbum"
+        :has-parsed-chips="hasParsedChips"
+        :location-chip="locationChip"
+        :date-chip="dateChip"
+        :semantic-chip="semanticChip"
+        placeholder="Fotos in diesem Album suchen…"
+        @search="executeSearch"
+        @clear="clearSearch"
+      />
+      <Message v-if="searchError" severity="error" :closable="false">{{ searchError }}</Message>
+    </div>
+
     <div v-if="loading && !album" class="info-text">
       <i class="pi pi-spin pi-spinner" /> Album wird geladen…
     </div>
@@ -1031,6 +1078,14 @@ onUnmounted(() => serviceHealth.stopPolling())
 
 /* Mobile view switcher: hidden by default */
 .header__views-mobile { display: none; }
+
+/* ── Album-scoped natural search bar ─────────────────────────────────────── */
+.album-search {
+  padding: 0 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
 
 /* ── Three-column layout ─────────────────────────────────────────────────── */
 .gallery-layout {
