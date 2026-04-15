@@ -1283,7 +1283,10 @@ watch(albumId, () => {
 
   /* Swap view switcher variants */
   .header__views-desktop { display: none; }
-  .header__views-mobile { display: flex; flex-wrap: wrap; gap: 0.35em; align-items: center; flex: 1 1 100%; order: 10; }
+  .header__views-mobile { display: flex; flex-wrap: wrap; gap: 0.35em; align-items: center; flex: 1 1 auto; order: 10; }
+
+  /* Put action icons on the same row as the mobile view switcher */
+  .header__actions { order: 11; }
 
   /* Compact header on mobile */
   .header { padding: 0.35em 0.65em; gap: 0.25em 0.5em; }
