@@ -69,14 +69,36 @@ if ! command -v curl >/dev/null 2>&1; then
 fi
 
 call_api() {
+  # Usage: call_api METHOD PATH [extra curl args...]
+  # Prints the response body on stdout when the HTTP status is 2xx.
+  # On non-2xx, logs "HTTP <status>: <body>" to stderr and returns 1. Without
+  # this, curl --fail hides the body, making 401 / 400 responses opaque on
+  # the host.
   local method="$1" path="$2"
-  curl --fail --silent --show-error \
-       --max-time "$CURL_TIMEOUT" \
-       --request "$method" \
-       --header "Authorization: Bearer $TOKEN" \
-       --header "Content-Type: application/json" \
-       "${@:3}" \
-       "$FK_ENCORE_URL$path"
+  local tmp_body http_status
+  tmp_body="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f '$tmp_body'" RETURN
+
+  http_status="$(
+    curl --silent --show-error \
+         --max-time "$CURL_TIMEOUT" \
+         --request "$method" \
+         --header "Authorization: Bearer $TOKEN" \
+         --header "Content-Type: application/json" \
+         --output "$tmp_body" \
+         --write-out '%{http_code}' \
+         "${@:3}" \
+         "$FK_ENCORE_URL$path" || true
+  )"
+
+  if [[ "$http_status" =~ ^2[0-9][0-9]$ ]]; then
+    cat "$tmp_body"
+    return 0
+  fi
+
+  log "HTTP $http_status from $method $path: $(tr -d '\n' < "$tmp_body")"
+  return 1
 }
 
 stop_backup() {
