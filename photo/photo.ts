@@ -35,6 +35,7 @@ import type {
   PhotoWithCuration,
   AlbumPublicLink,
   PublicAlbumResponse,
+  PhotoLocationsResponse,
 } from "../db/types";
 import { Query } from "encore.dev/api";
 
@@ -504,6 +505,20 @@ export const getPhotosAlbums = api(
     const userId = getUserId();
     const photoIds = ids.split(",").map(id => parseInt(id)).filter(id => !isNaN(id));
     return await service.getPhotoAlbumsLogic(userId, photoIds);
+  }
+);
+
+/**
+ * Get jump destinations for a photo: list of albums containing the photo,
+ * list of named persons tagged in it and whether it has GPS coordinates.
+ * Used by the "Show photo in…" menu in the web UI.
+ */
+export const getPhotoLocations = api(
+  { expose: true, method: "GET", path: "/photos/:id/locations", auth: true },
+  async ({ id }: { id: number }): Promise<PhotoLocationsResponse> => {
+    checkModule();
+    const userId = getUserId();
+    return await service.getPhotoLocationsLogic(userId, id);
   }
 );
 

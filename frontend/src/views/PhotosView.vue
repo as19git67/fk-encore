@@ -905,6 +905,7 @@ onUnmounted(() => {
           :updating-date="updatingDate"
           :show-persons="auth.hasPermission('people.view')"
           :face-service-available="serviceHealth.faceServiceAvailable"
+          :location-menu-exclude-all-photos="true"
           @fullscreen="isFullscreen = true"
           @toggle-favorite="handleToggleFavorite"
           @hide="handleDelete"
@@ -936,6 +937,7 @@ onUnmounted(() => {
       @restore="handleRestore"
       @show-details="isFullscreen = false; mobileSidebarOpen = true; mobileTimelineOpen = false"
     />
+    <!-- end fullscreen overlay -->
 
     <PhotoCompareView
       v-if="activeGroup"

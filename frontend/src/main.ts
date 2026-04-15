@@ -40,11 +40,12 @@ app.use(PrimeVue, {
     },
   },
   zIndex: {
-    // Must sit above --z-fullscreen (1200) so tooltips on buttons inside
-    // FullscreenOverlay are not hidden behind the overlay.
-    modal: 1100,
-    overlay: 1000,
-    menu: 1000,
+    // Must sit above --z-fullscreen (1200) so popups, dialogs and tooltips
+    // triggered from buttons inside FullscreenOverlay are not hidden behind
+    // the overlay.
+    modal: 1250,
+    overlay: 1250,
+    menu: 1250,
     tooltip: 1300,
   },
 })

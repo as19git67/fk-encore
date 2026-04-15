@@ -2099,6 +2099,90 @@ export async function getPhotoAlbumsLogic(userId: number, photoIds: number[]): P
   };
 }
 
+/**
+ * Jump destinations for a single photo. Lists all albums (owned or shared with
+ * the user) the photo belongs to, all named persons the user has tagged in
+ * faces on the photo, and whether the photo has GPS coordinates.
+ */
+export async function getPhotoLocationsLogic(
+  userId: number,
+  photoId: number
+): Promise<import("../db/types").PhotoLocationsResponse> {
+  // Verify the photo exists and belongs to the user.
+  const photo = await dbFirst<{ id: number; user_id: number; latitude: number | null; longitude: number | null }>(
+    db.select({
+      id: photos.id,
+      user_id: photos.user_id,
+      latitude: photos.latitude,
+      longitude: photos.longitude,
+    }).from(photos).where(eq(photos.id, photoId))
+  );
+  if (!photo) throw APIError.notFound("photo not found");
+  if (photo.user_id !== userId) {
+    // The photo is visible to the user only if it appears in an album they
+    // own or that has been shared with them.
+    const sharedHit = await dbFirst<{ exists: number }>(
+      db.select({ exists: sql<number>`1` }).from(albumPhotos)
+        .innerJoin(albums, eq(albums.id, albumPhotos.album_id))
+        .where(and(
+          eq(albumPhotos.photo_id, photoId),
+          or(
+            eq(albums.user_id, userId),
+            sql`EXISTS (SELECT 1 FROM ${albumShares} WHERE ${albumShares.album_id} = ${albums.id} AND ${albumShares.user_id} = ${userId})`
+          )
+        )).limit(1)
+    );
+    if (!sharedHit) throw APIError.permissionDenied("not allowed");
+  }
+
+  const albumRows = await dbAll<{ id: number; name: string }>(
+    db.select({ id: albums.id, name: albums.name })
+      .from(albumPhotos)
+      .innerJoin(albums, eq(albums.id, albumPhotos.album_id))
+      .where(and(
+        eq(albumPhotos.photo_id, photoId),
+        or(
+          eq(albums.user_id, userId),
+          sql`EXISTS (SELECT 1 FROM ${albumShares} WHERE ${albumShares.album_id} = ${albums.id} AND ${albumShares.user_id} = ${userId})`
+        )
+      ))
+  );
+
+  const personRows = await dbAll<{ id: number; name: string }>(
+    db.selectDistinct({ id: persons.id, name: persons.name })
+      .from(userFaceAssignments)
+      .innerJoin(faces, eq(faces.id, userFaceAssignments.face_id))
+      .innerJoin(persons, eq(persons.id, userFaceAssignments.person_id))
+      .where(and(
+        eq(userFaceAssignments.user_id, userId),
+        eq(userFaceAssignments.ignored, false),
+        eq(faces.photo_id, photoId),
+        isNotNull(userFaceAssignments.person_id),
+        eq(persons.user_id, userId)
+      ))
+  );
+
+  // Filter out unnamed persons (default "Unbenannt").
+  const namedPersons = personRows.filter(
+    p => !!p.name && p.name.trim().toLowerCase() !== "unbenannt"
+  );
+
+  const hasGps =
+    photo.latitude !== null && photo.latitude !== undefined &&
+    photo.longitude !== null && photo.longitude !== undefined;
+
+  // Stable order: alphabetical by name.
+  albumRows.sort((a, b) => a.name.localeCompare(b.name));
+  namedPersons.sort((a, b) => a.name.localeCompare(b.name));
+
+  return {
+    photoId,
+    albums: albumRows,
+    persons: namedPersons,
+    hasGps,
+  };
+}
+
 export async function batchUpdateAlbumPhotosLogic(userId: number, req: BatchAlbumPhotosRequest): Promise<{ success: boolean }> {
   const { albumIds, photoIds, action } = req;
   if (albumIds.length === 0 || photoIds.length === 0) return { success: true };
