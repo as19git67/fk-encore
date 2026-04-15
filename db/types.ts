@@ -478,6 +478,27 @@ export interface ListPhotoAlbumsResponse {
   results: PhotoAlbumsResponse[];
 }
 
+export interface PhotoLocationAlbum {
+  id: number;
+  name: string;
+}
+
+export interface PhotoLocationPerson {
+  id: number;
+  name: string;
+}
+
+/**
+ * Jump-destinations for a single photo: used by the "Show photo in…" menu.
+ * Returned by GET /photos/:id/locations.
+ */
+export interface PhotoLocationsResponse {
+  photoId: number;
+  albums: PhotoLocationAlbum[];
+  persons: PhotoLocationPerson[];
+  hasGps: boolean;
+}
+
 export interface ShareAlbumRequest {
   albumId: number;
   userId: number;

@@ -4,11 +4,12 @@ import DatePicker from 'primevue/datepicker'
 import Checkbox from 'primevue/checkbox'
 import HeicImage from './HeicImage.vue'
 import PhotoMiniMap from './PhotoMiniMap.vue'
+import PhotoLocationMenu from './PhotoLocationMenu.vue'
 import { getPhotoUrl, listAlbums, getPhotosAlbums, batchUpdateAlbumPhotos, updateAlbum, updateAlbumUserSettings, createAlbum, updatePhotoDescription, type Album } from '../api/photos'
 import { getAlbumCheckState as calculateAlbumCheckState, getNewPendingAction } from '../utils/albumSelection'
 import type { Photo, Face, LandmarkItem, Person, CurationStatus } from '../api/photos'
 import { ref, computed, onMounted, watch } from 'vue'
-import { formatPhotoDate } from '../utils/dateFormat'
+import { formatPhotoDateCompact } from '../utils/dateFormat'
 
 const props = defineProps<{
   photo: Photo
@@ -32,6 +33,8 @@ const props = defineProps<{
   faceServiceAvailable?: boolean
   /** Show a "Go to photo" navigation button (e.g. from PersonsView). */
   showNavigateToPhoto?: boolean
+  /** Hide the "Alle Fotos" entry in the location menu (we're already there). */
+  locationMenuExcludeAllPhotos?: boolean
   /** When true, the sidebar is rendered inside the fullscreen details
    *  flyout: it fills the available width, the photo preview is hidden
    *  (the user already sees the photo in the fullscreen view), and a
@@ -221,7 +224,7 @@ const emit = defineEmits<{
 }>()
 
 function formatPhotoDateDisplay(photo: Photo) {
-  return formatPhotoDate(photo.taken_at || photo.created_at)
+  return formatPhotoDateCompact(photo.taken_at || photo.created_at)
 }
 
 function getPersonName(personId?: number) {
@@ -362,6 +365,11 @@ watch(() => props.photo.id, () => {
               @click="toggleCover"
           />
         </template>
+        <PhotoLocationMenu
+          :photo-id="photo.id"
+          :exclude-all-photos="locationMenuExcludeAllPhotos"
+          :exclude-album-id="albumId"
+        />
       </div>
 
       <!-- Curation opinions (shared albums only) -->
@@ -400,10 +408,8 @@ watch(() => props.photo.id, () => {
       <div class="meta-list">
         <div class="meta-row">
           <i class="pi pi-calendar meta-icon" />
-          <span class="meta-value date-value">
-            {{ formatPhotoDateDisplay(photo) }}
-            <Button v-if="canUpload && !isEditingDate" icon="pi pi-pencil" text rounded size="small" @click="emit('start-edit-date')" class="edit-btn" />
-          </span>
+          <span class="meta-value date-value">{{ formatPhotoDateDisplay(photo) }}</span>
+          <Button v-if="canUpload && !isEditingDate" icon="pi pi-pencil" text rounded size="small" @click="emit('start-edit-date')" class="edit-btn" />
         </div>
         <div v-if="isEditingDate" class="date-editor">
           <DatePicker v-model="editDate" showTime hourFormat="24" fluid />

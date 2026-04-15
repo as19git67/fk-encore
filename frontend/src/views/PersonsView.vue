@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, type ComponentPublicInstance } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import Dialog from 'primevue/dialog'
@@ -27,6 +27,7 @@ import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 const auth = useAuthStore()
 const serviceHealth = useServiceHealthStore()
 const router = useRouter()
+const route = useRoute()
 const canDelete = computed(() => auth.hasPermission('photos.delete'))
 const confirm = useConfirm()
 
@@ -58,24 +59,43 @@ const uniquePhotoFaceItems = computed(() => {
   })
 })
 
+// While the fullscreen overlay is open we pin a snapshot of the list so
+// that hiding/unhiding the current photo (via the eye button) doesn't
+// yank it out of the carousel. The pin is released when the overlay
+// closes, at which point we re-map selectedIndex onto the live list.
+type PersonFaceItem = { face: Face; photo: Photo }
+const pinnedFullscreenItems = ref<PersonFaceItem[] | null>(null)
+
+const effectivePhotoFaceItems = computed<PersonFaceItem[]>(() =>
+  pinnedFullscreenItems.value ?? uniquePhotoFaceItems.value
+)
+
+watch(isFullscreen, (val) => {
+  if (val) {
+    pinnedFullscreenItems.value = uniquePhotoFaceItems.value.slice()
+  } else {
+    const currentPhoto = pinnedFullscreenItems.value?.[selectedIndex.value]?.photo ?? null
+    pinnedFullscreenItems.value = null
+    if (currentPhoto) {
+      const newIdx = uniquePhotoFaceItems.value.findIndex(i => i.photo.id === currentPhoto.id)
+      selectedIndex.value = newIdx >= 0 ? newIdx : (uniquePhotoFaceItems.value.length > 0 ? 0 : -1)
+    }
+  }
+})
+
 watch(uniquePhotoFaceItems, (items) => {
+  // While pinned (fullscreen), keep selectedIndex as-is so the viewed
+  // photo doesn't change underneath the user when curation status flips.
+  if (pinnedFullscreenItems.value) return
   if (items.length > 0) {
     if (selectedIndex.value < 0) selectedIndex.value = 0
     else if (selectedIndex.value >= items.length) selectedIndex.value = items.length - 1
   }
 })
 
-const allUniquePhotoFaceItems = computed(() => {
-  const seen = new Set<number>()
-  return (selectedPersonDetail.value?.faces ?? [])
-    .filter(f => !!f.photo)
-    .map(f => ({ face: f, photo: f.photo as Photo }))
-    .filter(item => { if (seen.has(item.photo.id)) return false; seen.add(item.photo.id); return true })
-})
-
-const personPhotos = computed(() => allUniquePhotoFaceItems.value.map(i => i.photo))
-const selectedPhoto = computed(() => uniquePhotoFaceItems.value[selectedIndex.value]?.photo ?? null)
-const selectedPersonFace = computed(() => allUniquePhotoFaceItems.value[selectedIndex.value]?.face ?? null)
+const personPhotos = computed(() => effectivePhotoFaceItems.value.map(i => i.photo))
+const selectedPhoto = computed(() => effectivePhotoFaceItems.value[selectedIndex.value]?.photo ?? null)
+const selectedPersonFace = computed(() => effectivePhotoFaceItems.value[selectedIndex.value]?.face ?? null)
 const prevPersonPhoto = computed(() => selectedIndex.value > 0 ? personPhotos.value[selectedIndex.value - 1] ?? null : null)
 const nextPersonPhoto = computed(() => selectedIndex.value < personPhotos.value.length - 1 ? personPhotos.value[selectedIndex.value + 1] ?? null : null)
 
@@ -212,7 +232,17 @@ async function loadData() {
         if (a.name !== 'Unbenannt' && b.name === 'Unbenannt') return -1
         return Number(b.faceCount || 0) - Number(a.faceCount || 0)
       })
-    if (selectedPerson.value) {
+    // Honor ?personId=… (and optional ?photoId=… to jump to a specific photo).
+    const queryPersonId = Number(route.query.personId)
+    const queryPhotoId = Number(route.query.photoId)
+    const queryPerson = queryPersonId
+      ? persons.value.find(p => p.id === queryPersonId)
+      : undefined
+
+    if (queryPerson) {
+      await selectPersonItem(queryPerson, queryPhotoId || undefined)
+      router.replace({ query: { ...route.query, personId: undefined, photoId: undefined } })
+    } else if (selectedPerson.value) {
       const still = persons.value.find(p => p.id === selectedPerson.value!.id)
       if (still) await selectPersonItem(still)
       else if (persons.value.length > 0) await selectPersonItem(persons.value[0]!)
@@ -227,21 +257,29 @@ async function loadData() {
   }
 }
 
-async function selectPersonItem(person: Person) {
-  if (selectedPerson.value?.id === person.id && selectedPersonDetail.value) return
-  selectedPerson.value = person
-  selectedIndex.value = -1
-  detectedFaces.value = []
-  detectedLandmarks.value = []
-  loadingDetails.value = true
-  try {
-    selectedPersonDetail.value = await getPersonDetails(person.id)
-    if (uniquePhotoFaceItems.value.length > 0) selectedIndex.value = 0
-  } catch (err: any) {
-    error.value = err.message || 'Fehler beim Laden'
-    selectedPersonDetail.value = null
-  } finally {
-    loadingDetails.value = false
+async function selectPersonItem(person: Person, focusPhotoId?: number) {
+  const alreadyLoaded = selectedPerson.value?.id === person.id && !!selectedPersonDetail.value
+  if (!alreadyLoaded) {
+    selectedPerson.value = person
+    selectedIndex.value = -1
+    detectedFaces.value = []
+    detectedLandmarks.value = []
+    loadingDetails.value = true
+    try {
+      selectedPersonDetail.value = await getPersonDetails(person.id)
+    } catch (err: any) {
+      error.value = err.message || 'Fehler beim Laden'
+      selectedPersonDetail.value = null
+    } finally {
+      loadingDetails.value = false
+    }
+  }
+  // Jump to a specific photo if requested, otherwise fall back to the first.
+  if (focusPhotoId) {
+    const idx = uniquePhotoFaceItems.value.findIndex(i => i.photo.id === focusPhotoId)
+    selectedIndex.value = idx >= 0 ? idx : (uniquePhotoFaceItems.value.length > 0 ? 0 : -1)
+  } else if (!alreadyLoaded && uniquePhotoFaceItems.value.length > 0) {
+    selectedIndex.value = 0
   }
 }
 
@@ -474,7 +512,7 @@ onUnmounted(() => serviceHealth.stopPolling())
         <Button icon="pi pi-info-circle" rounded text severity="secondary" v-tooltip.bottom="'Details'" @click.stop="isFullscreen = false; mobileSidebarOpen = true; mobilePersonNavOpen = false" />
         <Button v-if="canDelete" :icon="selectedPhoto.curation_status === 'hidden' ? 'pi pi-eye-slash' : 'pi pi-eye'" rounded text :severity="selectedPhoto.curation_status === 'hidden' ? 'danger' : 'secondary'" @click.stop="selectedPhoto.curation_status === 'hidden' ? handleRestorePhoto(selectedPhoto.id) : handleHidePhoto(selectedPhoto.id)" />
         <Button v-if="canDelete" :icon="selectedPhoto.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'" rounded text :severity="selectedPhoto.curation_status === 'favorite' ? 'warn' : 'secondary'" @click.stop="handleToggleFavorite(selectedPhoto.id, selectedPhoto.curation_status)" />
-        <Button v-if="selectedPersonFace" icon="pi pi-trash" label="Gesicht ignorieren" rounded text severity="danger" @click.stop="handleIgnoreFace(selectedPersonFace.id)" />
+        <Button v-if="selectedPersonFace" icon="pi pi-trash" rounded text severity="danger" v-tooltip.bottom="'Gesicht ignorieren'" @click.stop="handleIgnoreFace(selectedPersonFace.id)" />
       </template>
     </FullscreenOverlay>
 
