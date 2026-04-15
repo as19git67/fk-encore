@@ -11,5 +11,10 @@ import { Service } from "encore.dev/service";
 // all services.
 process.umask(0o007);
 
+// NOTE: The `web` service deliberately does NOT install the maintenance
+// middleware because it owns /health and /healthz — monitoring must keep
+// working during backups. The raw SPA handler (/app/*) and the typed
+// /api/build-info endpoint opt into maintenance mode individually; see
+// web/static.ts.
 export default new Service("web");
 

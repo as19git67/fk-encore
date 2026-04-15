@@ -26,6 +26,14 @@ drizzle.config.ts
 
 # Configuration and scripts
 scripts
+# Exception: the host-side backup hook files are COPYed into the runtime
+# image by docker/Dockerfile.runtime and seeded onto the backup volume at
+# container start (see backup/startup.ts). They must be part of the build
+# context.
+!scripts/host
+!scripts/host/install-backup-hook.sh
+!scripts/host/fk-encore-backup.sh
+!scripts/host/README.md
 test_output.txt
 tsconfig.tsbuildinfo
 data

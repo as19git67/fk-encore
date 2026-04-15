@@ -3,6 +3,7 @@ import path from "path";
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
+import { writeMaintenanceResponseIfActive } from "../backup/maintenance";
 import * as service from "./photo.service";
 import { UPLOAD_DIR, THUMBNAIL_DIR, thumbnailShardPath } from "./photo.service";
 import type {
@@ -59,6 +60,7 @@ function checkModule() {
 export const uploadPhoto = api.raw(
   { expose: true, method: "POST", path: "/photos", auth: true, bodyLimit: null },
   async (req, res) => {
+    if (writeMaintenanceResponseIfActive(res)) return;
     try {
       checkModule();
     } catch (err: any) {
@@ -326,6 +328,7 @@ export const updatePhotoDescription = api(
 export const getPhotoFile = api.raw(
   { expose: true, method: "GET", path: "/photos/file/:filename", auth: false },
   async (req, res) => {
+    if (writeMaintenanceResponseIfActive(res)) return;
     try {
       const url = new URL(req.url || "", `http://${req.headers.host}`);
       const filename = path.basename(url.pathname);
