@@ -277,7 +277,15 @@ const loadingLandmarks = ref(false)
 const reindexingPhoto = ref(false)
 const persons = ref<Person[]>([])
 
-watch(selectedPhoto, (photo) => {
+// The sidebar (including the fullscreen details flyout) follows either
+// the grid selection or, when the map fullscreen is open, the photo
+// currently shown in the map overlay. Watch the effective photo so
+// faces/landmarks reflect what the user actually sees.
+const activeDetailPhoto = computed(() =>
+  isMapFullscreen.value ? mapSelectedPhoto.value : selectedPhoto.value
+)
+
+watch(activeDetailPhoto, (photo) => {
   if (photo) {
     loadSidebarData(photo.id)
     if (showPersons.value) void loadPersons()
@@ -305,7 +313,28 @@ async function loadData() {
     ])
     album.value = albumRes
     photoGroupsList.value = groupsRes.groups
-    selectedIndex.value = album.value.photos.length > 0 ? 0 : -1
+
+    // Honor ?photoId=… query: pre-select and scroll to that photo.
+    // If the target photo is hidden as a stack member, fall back to the
+    // stack's cover photo (which is what's actually rendered in the grid).
+    const queryPhotoId = Number(route.query.photoId)
+    let targetIdx = -1
+    if (queryPhotoId) {
+      let effectiveId = queryPhotoId
+      if (hiddenByStack.value.has(queryPhotoId)) {
+        const group = photoToGroup.value.get(queryPhotoId)
+        if (group?.cover_photo_id) effectiveId = group.cover_photo_id
+      }
+      targetIdx = albumPhotos.value.findIndex(p => p.id === effectiveId)
+      if (targetIdx >= 0) {
+        router.replace({ query: { ...route.query, photoId: undefined } })
+      }
+    }
+    if (targetIdx < 0) {
+      selectedIndex.value = album.value.photos.length > 0 ? 0 : -1
+    } else {
+      selectedIndex.value = targetIdx
+    }
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden des Albums'
   } finally {
