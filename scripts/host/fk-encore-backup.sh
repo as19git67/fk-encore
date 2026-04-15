@@ -25,7 +25,9 @@
 #
 # Configuration (env vars override defaults):
 #   FK_ENCORE_URL        base URL of the app, default http://localhost:8080
-#   FK_BACKUP_TOKEN_FILE path to token file,  default /etc/fk-encore/backup-token
+#   FK_BACKUP_TOKEN_FILE path to token file,  default: ./backup-token next to
+#                        this script (that is where install-backup-hook.sh
+#                        places it — on a ZFS dataset, upgrade-safe)
 #   ZFS_DATASET          dataset for snapshot, default tank/vivanty
 #   LABEL                snapshot + dump label, default daily-<UTC timestamp>
 #   CURL_TIMEOUT         seconds, default 30
@@ -35,8 +37,10 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 FK_ENCORE_URL="${FK_ENCORE_URL:-http://localhost:8080}"
-FK_BACKUP_TOKEN_FILE="${FK_BACKUP_TOKEN_FILE:-/etc/fk-encore/backup-token}"
+FK_BACKUP_TOKEN_FILE="${FK_BACKUP_TOKEN_FILE:-$SCRIPT_DIR/backup-token}"
 ZFS_DATASET="${ZFS_DATASET:-tank/vivanty}"
 LABEL="${LABEL:-daily-$(date -u +%Y%m%d-%H%M%S)}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-30}"
