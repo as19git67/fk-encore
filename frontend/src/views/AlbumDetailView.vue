@@ -307,13 +307,19 @@ async function loadData() {
     photoGroupsList.value = groupsRes.groups
 
     // Honor ?photoId=… query: pre-select and scroll to that photo.
+    // If the target photo is hidden as a stack member, fall back to the
+    // stack's cover photo (which is what's actually rendered in the grid).
     const queryPhotoId = Number(route.query.photoId)
     let targetIdx = -1
     if (queryPhotoId) {
-      targetIdx = albumPhotos.value.findIndex(p => p.id === queryPhotoId)
+      let effectiveId = queryPhotoId
+      if (hiddenByStack.value.has(queryPhotoId)) {
+        const group = photoToGroup.value.get(queryPhotoId)
+        if (group?.cover_photo_id) effectiveId = group.cover_photo_id
+      }
+      targetIdx = albumPhotos.value.findIndex(p => p.id === effectiveId)
       if (targetIdx >= 0) {
         router.replace({ query: { ...route.query, photoId: undefined } })
-        nextTick(() => photoGridRef.value?.scrollToPhoto(targetIdx, 'smooth'))
       }
     }
     if (targetIdx < 0) {
