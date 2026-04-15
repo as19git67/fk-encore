@@ -1,161 +1,177 @@
-# REST API Starter
+# FK-Encore
 
-This is a RESTful API Starter with a single Hello World API endpoint.
+**FK-Encore** is a self-hosted photo management platform with AI-powered
+organization, collaborative album curation, and natural-language search. It is
+built on [Encore.ts](https://encore.dev) for the backend and a Vue 3 single-page
+application for the frontend, orchestrated together with specialized Python
+microservices for machine learning workloads.
 
-## Prerequisites 
+## Overview
 
-**Install Encore:**
-- **macOS:** `brew install encoredev/tap/encore`
-- **Linux:** `curl -L https://encore.dev/install.sh | bash`
-- **Windows:** `iwr https://encore.dev/install.ps1 | iex`
+FK-Encore turns a private photo library into a searchable, collaborative
+archive. Uploaded images are automatically analyzed for faces, landmarks,
+semantic content, visual similarity, and quality. Albums become collaborative
+spaces where multiple users (and the AI itself) can vote on favorites, with
+multiple view modes such as *All*, *Favorites*, *Consensus*, and custom
+selections.
 
-## Create app
+The project is philosophically closer to a curation tool than a Google Photos
+clone: it is photo-only (no video), optimized for shared events and family
+libraries, and tuned for German-language search with intelligent query
+decomposition.
 
-Create a local app from this template:
+## Key features
+
+### Photo management
+- Web upload with JPEG, PNG, GIF, WebP, and automatic HEIC → JPEG conversion
+- Hash-based and ML-based duplicate detection (DINOv2) with a review workflow
+- On-the-fly resizing via query parameter
+- Intelligent thumbnail focus point derived from detected faces and landmarks
+- AI-based quality score for every photo
+
+### AI / machine learning
+- **Face recognition & clustering** – InsightFace (`buffalo_l`) with distance-based
+  clustering, named people, merging, and per-face ignore
+- **Landmark detection** – Grounding DINO for churches, bridges, towers, and
+  other points of interest
+- **Semantic search** – OpenCLIP embeddings
+- **Visual similarity** – DINOv2 embeddings, plus a hybrid CLIP + DINOv2 mode
+- **Photo quality scoring** – AI score with detail metrics, used for
+  AI-driven album voting
+
+### Search
+- Natural-language search in German with query parsing and decomposition
+  (location + date + semantic content combined automatically)
+- GPS radius search in kilometers
+- Landmark search, city/country search, and date-range search
+
+### Collaborative albums
+- Shared albums with read/write access per user
+- Anonymous voting ("3 / 5 favorites")
+- AI as album participant – quality-based voting
+- Multiple view modes per album: All / Favorites / Consensus / Custom
+- Hide photos, favorite photos per user and per album
+
+### Authentication & access control
+- Password login (bcrypt) and **WebAuthn / FIDO2 passkeys** with multi-passkey
+  support
+- Token-based password reset via email
+- Granular RBAC with 18+ permissions and custom roles
+- Rate limiting on auth endpoints
+
+### Storage & infrastructure
+- Encore `SQLDatabase` (PostgreSQL) with Drizzle ORM
+- Encore object storage buckets for photos
+- Dedicated PostgreSQL with `pgvector` for embeddings
+- OpenAPI specification generated from Encore.ts
+- Modular microservice architecture: 3 specialized ML services
+
+## Architecture
+
+| Component            | Role                                             |
+|----------------------|--------------------------------------------------|
+| `app` (Encore.ts)    | Main application – REST API + static frontend    |
+| `frontend`           | Vue 3 + PrimeVue + Pinia SPA (served under `/app/`) |
+| `insightface-service` | Python – face detection & embeddings            |
+| `embedding_service`  | Python – CLIP and DINOv2 embeddings              |
+| `landmark-service`   | Python – Grounding DINO landmark detection       |
+| `embedding_postgres` | PostgreSQL + pgvector for vector search          |
+
+See [`FEATURE_COMPARISON.md`](./FEATURE_COMPARISON.md) for a detailed
+feature-by-feature comparison against Immich, and
+[`DEPLOYMENT.md`](./DEPLOYMENT.md) for the full deployment guide.
+
+## Prerequisites
+
+- [Encore CLI](https://encore.dev)
+  - macOS: `brew install encoredev/tap/encore`
+  - Linux: `curl -L https://encore.dev/install.sh | bash`
+  - Windows: `iwr https://encore.dev/install.ps1 | iex`
+- [Docker](https://www.docker.com/) (with Compose v2) – required for local
+  PostgreSQL and the ML services
+- Node.js 20+
+- At least **8 GB of RAM** for the ML models
+
+## Running locally
+
+Run the full stack (backend + frontend + ML services) via Docker Compose:
 
 ```bash
-encore app create my-app-name --example=ts/hello-world
+cp docker-compose.env.example .env
+# edit .env – at minimum set ADMIN_PASSWORD
+docker compose up -d
 ```
 
-## Run app locally
+The application is then reachable at <http://localhost:8080>.
 
-Run this command from your application's root folder:
+For active backend development, use the Encore CLI directly from the project
+root:
 
 ```bash
 encore run
 ```
-### Using the API
 
-To see that your app is running, you can ping the API.
+While `encore run` is active, open <http://localhost:9400/> to access the
+Encore [local developer dashboard](https://encore.dev/docs/observability/dev-dash)
+with traces, architecture diagrams, and the service catalog.
+
+Start the frontend dev server separately:
 
 ```bash
-curl http://localhost:4000/hello/World
+npm run dev:frontend
 ```
-
-### Local Development Dashboard
-
-While `encore run` is running, open [http://localhost:9400/](http://localhost:9400/) to access Encore's [local developer dashboard](https://encore.dev/docs/observability/dev-dash).
-
-Here you can see traces for all requests that you made, see your architecture diagram (just a single service for this simple example), and view API documentation in the Service Catalog.
-
-## Development
-
-### Add a new service
-
-To create a new microservice, add a file named encore.service.ts in a new directory.
-The file should export a service definition by calling `new Service`, imported from `encore.dev/service`.
-
-```ts
-import { Service } from "encore.dev/service";
-
-export default new Service("my-service");
-```
-
-Encore will now consider this directory and all its subdirectories as part of the service.
-
-Learn more in the docs: https://encore.dev/docs/ts/primitives/services
-
-### Add a new endpoint
-
-Create a new `.ts` file in your new service directory and write a regular async function within it. Then to turn it into an API endpoint, use the `api` function from the `encore.dev/api` module. This function designates it as an API endpoint.
-
-Learn more in the docs: https://encore.dev/docs/ts/primitives/defining-apis
-
-### Service-to-service API calls
-
-Calling API endpoints between services looks like regular function calls with Encore.ts.
-The only thing you need to do is import the service you want to call from `~encore/clients` and then call its API endpoints like functions.
-
-In the example below, we import the service `hello` and call the `ping` endpoint using a function call to `hello.ping`:
-
-```ts
-import { hello } from "~encore/clients"; // import 'hello' service
-
-export const myOtherAPI = api({}, async (): Promise<void> => {
-  const resp = await hello.ping({ name: "World" });
-  console.log(resp.message); // "Hello World!"
-});
-```
-
-Learn more in the docs: https://encore.dev/docs/ts/primitives/api-calls
-
-### Add a database
-
-To create a database, import `encore.dev/storage/sqldb` and call `new SQLDatabase`, assigning the result to a top-level variable. For example:
-
-```ts
-import { SQLDatabase } from "encore.dev/storage/sqldb";
-
-// Create the todo database and assign it to the "db" variable
-const db = new SQLDatabase("todo", {
-  migrations: "./migrations",
-});
-```
-
-Then create a directory `migrations` inside the service directory and add a migration file `0001_create_table.up.sql` to define the database schema. For example:
-
-```sql
-CREATE TABLE todo_item (
-  id BIGSERIAL PRIMARY KEY,
-  title TEXT NOT NULL,
-  done BOOLEAN NOT NULL DEFAULT false
-  -- etc...
-);
-```
-
-Once you've added a migration, restart your app with `encore run` to start up the database and apply the migration. Keep in mind that you need to have [Docker](https://docker.com) installed and running to start the database.
-
-Learn more in the docs: https://encore.dev/docs/ts/primitives/databases
-
-### Learn more
-
-There are many more features to explore in Encore.ts, for example:
-
-- [Request Validation](https://encore.dev/docs/ts/primitives/validation)
-- [Streaming APIs](https://encore.dev/docs/ts/primitives/streaming-apis)
-- [Cron jobs](https://encore.dev/docs/ts/primitives/cron-jobs)
-- [Pub/Sub](https://encore.dev/docs/ts/primitives/pubsub)
-- [Object Storage](https://encore.dev/docs/ts/primitives/object-storage)
-- [Secrets](https://encore.dev/docs/ts/primitives/secrets)
-- [Authentication handlers](https://encore.dev/docs/ts/develop/auth)
-- [Middleware](https://encore.dev/docs/ts/develop/middleware)
 
 ## Deployment
 
-### Docker Runtime
+### Docker runtime
 
-The container runs a single `encore run` process. Encore serves both:
+The container runs a single `encore run` process that serves both the frontend
+SPA under `/app/` and all API endpoints on the same origin (no reverse proxy
+rewrite required). Requests to `/` are redirected to `/app/`.
 
-- the frontend SPA under `/app/`
-- all API endpoints on the same origin (no reverse proxy rewrite required)
+Health endpoints:
+- `GET /healthz` → `{ "status": "ok" }`
+- `GET /health` → same payload (alias)
 
-If the browser opens the container root `/`, it is redirected to `/app/`.
-
-The container also exposes a lightweight health endpoint:
-
-- `GET /healthz` returns `{ "status": "ok" }`
-- `GET /health` returns the same payload (alias for compatibility)
-
-Run a local container smoke-test (health + redirect + SPA index):
+Run a local container smoke test (health + redirect + SPA index):
 
 ```bash
 bash scripts/container-smoke-test.sh fk-encore:smoke
 ```
 
-### Self-hosting
+### Self-hosting (single container)
 
+```bash
+docker run -d --name my-encore-app -p 8080:8080 \
+  -e ADMIN_EMAIL=abc@example.com \
+  -e ADMIN_NAME=abc \
+  -e ADMIN_PASSWORD=secret7! \
+  -e RP_NAME="My Encore App" \
+  -e RP_ORIGIN=http://localhost:8080 \
+  -e ENABLE_LOCAL_FACES=true \
+  -e INSIGHTFACE_SERVICE_URL=http://localhost:8000 \
+  -e FACE_DISTANCE_THRESHOLD=0.45 \
+  -v /path/to/photos:/mnt/data/photos \
+  -v /path/to/db:/mnt/data/db \
+  fk-encore
 ```
-docker run -d --name my-encore-app -p 8080:8080 -e ADMIN_EMAIL=abc@example.com -e ADMIN_NAME=abc -e ADMIN_PASSWORD=secret7! -e RP_NAME="My Encore App" -e RP_ORIGIN=http://localhost:8080 -e ENABLE_LOCAL_FACES=true -e INSIGHTFACE_SERVICE_URL=http://localhost:8000 -e FACE_DISTANCE_THRESHOLD=0.45 -v /Users/example/fk-encore_data/photos:/mnt/data/photos -v /Users/example/fk-encore_data/db:/mnt/data/db fk-encore
-```
 
-## Link to GitHub
-
-github
+See [`DEPLOYMENT.md`](./DEPLOYMENT.md) for the recommended Docker Compose
+deployment and the full list of environment variables.
 
 ## Testing
 
-To run tests, configure the `test` command in your `package.json` to the test runner of your choice, and then use the command `encore test` from the CLI. The `encore test` command sets up all the necessary infrastructure in test mode before handing over to the test runner. [Learn more](https://encore.dev/docs/ts/develop/testing)
+Run the backend test suite with infrastructure set up automatically by Encore:
 
 ```bash
 encore test
 ```
+
+This uses [Vitest](https://vitest.dev/) under the hood. Infrastructure (test
+databases, Pub/Sub, etc.) is provisioned in test mode before the runner starts.
+See the [Encore testing docs](https://encore.dev/docs/ts/develop/testing) for
+details.
+
+## License
+
+MPL-2.0
