@@ -405,6 +405,7 @@ onUnmounted(() => serviceHealth.stopPolling())
         :selectedIndex="selectedIndex"
         :loadingDetails="loadingDetails"
         :canDelete="canDelete"
+        :currentPersonId="selectedPerson?.id"
         @update:selectedIndex="selectedIndex = $event"
         @open-fullscreen="isFullscreen = true"
         @toggle-favorite="handleToggleFavorite"

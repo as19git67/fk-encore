@@ -42,6 +42,9 @@ function goToPerson(personId: number) {
 }
 
 async function handleClick(event: MouseEvent) {
+  // Prevent the click from bubbling to ancestors that may close overlays
+  // (e.g. the fullscreen overlay's backdrop @click="close" handler).
+  event.stopPropagation()
   if (loading.value) return
   loading.value = true
   try {
@@ -140,18 +143,36 @@ async function handleClick(event: MouseEvent) {
       aria-label="Foto anzeigen in…"
       @click="handleClick"
     />
-    <Menu ref="menu" :model="items" :popup="true" />
+    <Menu
+      ref="menu"
+      :model="items"
+      :popup="true"
+      append-to="body"
+      class="photo-location-menu-popup"
+    />
   </span>
 </template>
 
 <style scoped>
 .photo-location-menu { display: inline-flex; }
-:global(.p-menu .loc-menu-header) {
+</style>
+
+<style>
+/* Belt-and-suspenders: ensure the popup always renders above the
+   fullscreen overlay (z-index var(--z-fullscreen) = 1200). PrimeVue's
+   global menu z-index is configured in main.ts but we override here too
+   so the menu reliably appears on top from any context. */
+.p-menu.photo-location-menu-popup {
+  z-index: 1250 !important;
+}
+.p-menu.photo-location-menu-popup .loc-menu-header {
   font-size: 0.75em;
   opacity: 0.6;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   padding-top: 0.25em;
 }
-:global(.p-menu .loc-menu-header .p-menuitem-link) { cursor: default; }
+.p-menu.photo-location-menu-popup .loc-menu-header .p-menuitem-link {
+  cursor: default;
+}
 </style>
