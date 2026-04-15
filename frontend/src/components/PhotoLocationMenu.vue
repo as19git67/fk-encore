@@ -8,7 +8,6 @@ import { getPhotoLocations } from '../api/photos'
 type Destination =
   | { kind: 'all-photos' }
   | { kind: 'album'; id: number; name: string }
-  | { kind: 'person'; id: number; name: string }
 
 const props = defineProps<{
   /** ID of the photo whose jump destinations should be shown. */
@@ -17,8 +16,6 @@ const props = defineProps<{
   excludeAllPhotos?: boolean
   /** Hide the entry for this album (we're already viewing it). */
   excludeAlbumId?: number
-  /** Hide the entry for this person (we're already viewing it). */
-  excludePersonId?: number
 }>()
 
 const router = useRouter()
@@ -32,15 +29,11 @@ function goToAllPhotos() {
 function goToAlbum(albumId: number) {
   router.push({ name: 'fotos-album-detail', params: { id: String(albumId) }, query: { photoId: String(props.photoId) } })
 }
-function goToPerson(personId: number) {
-  router.push({ name: 'fotos-people', query: { personId: String(personId), photoId: String(props.photoId) } })
-}
 
 function goTo(dest: Destination) {
   dialogVisible.value = false
   if (dest.kind === 'all-photos') goToAllPhotos()
-  else if (dest.kind === 'album') goToAlbum(dest.id)
-  else goToPerson(dest.id)
+  else goToAlbum(dest.id)
 }
 
 async function handleClick(event: MouseEvent) {
@@ -58,10 +51,6 @@ async function handleClick(event: MouseEvent) {
     for (const a of locations.albums) {
       if (props.excludeAlbumId === a.id) continue
       list.push({ kind: 'album', id: a.id, name: a.name })
-    }
-    for (const p of locations.persons) {
-      if (props.excludePersonId === p.id) continue
-      list.push({ kind: 'person', id: p.id, name: p.name })
     }
 
     if (list.length === 1) {
@@ -81,8 +70,7 @@ async function handleClick(event: MouseEvent) {
 
 function iconFor(dest: Destination): string {
   if (dest.kind === 'all-photos') return 'pi pi-images'
-  if (dest.kind === 'album') return 'pi pi-book'
-  return 'pi pi-user'
+  return 'pi pi-book'
 }
 
 function labelFor(dest: Destination): string {
@@ -91,7 +79,6 @@ function labelFor(dest: Destination): string {
 }
 
 const albumDests = () => destinations.value.filter((d): d is Extract<Destination, { kind: 'album' }> => d.kind === 'album')
-const personDests = () => destinations.value.filter((d): d is Extract<Destination, { kind: 'person' }> => d.kind === 'person')
 const allPhotosDest = () => destinations.value.find((d): d is Extract<Destination, { kind: 'all-photos' }> => d.kind === 'all-photos')
 </script>
 
@@ -139,20 +126,6 @@ const allPhotosDest = () => destinations.value.find((d): d is Extract<Destinatio
         >
           <i :class="iconFor(a)" />
           <span class="plm-label">{{ labelFor(a) }}</span>
-        </button>
-      </template>
-
-      <template v-if="personDests().length > 0">
-        <div class="plm-section-header">Personen</div>
-        <button
-          v-for="p in personDests()"
-          :key="'p-' + p.id"
-          type="button"
-          class="plm-item"
-          @click="goTo(p)"
-        >
-          <i :class="iconFor(p)" />
-          <span class="plm-label">{{ labelFor(p) }}</span>
         </button>
       </template>
     </div>

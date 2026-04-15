@@ -35,8 +35,6 @@ const props = defineProps<{
   showNavigateToPhoto?: boolean
   /** Hide the "Alle Fotos" entry in the location menu (we're already there). */
   locationMenuExcludeAllPhotos?: boolean
-  /** Hide this person from the location menu (we're already viewing it). */
-  locationMenuExcludePersonId?: number
   /** When true, the sidebar is rendered inside the fullscreen details
    *  flyout: it fills the available width, the photo preview is hidden
    *  (the user already sees the photo in the fullscreen view), and a
@@ -371,7 +369,6 @@ watch(() => props.photo.id, () => {
           :photo-id="photo.id"
           :exclude-all-photos="locationMenuExcludeAllPhotos"
           :exclude-album-id="albumId"
-          :exclude-person-id="locationMenuExcludePersonId"
         />
       </div>
 

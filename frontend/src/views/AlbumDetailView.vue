@@ -277,7 +277,15 @@ const loadingLandmarks = ref(false)
 const reindexingPhoto = ref(false)
 const persons = ref<Person[]>([])
 
-watch(selectedPhoto, (photo) => {
+// The sidebar (including the fullscreen details flyout) follows either
+// the grid selection or, when the map fullscreen is open, the photo
+// currently shown in the map overlay. Watch the effective photo so
+// faces/landmarks reflect what the user actually sees.
+const activeDetailPhoto = computed(() =>
+  isMapFullscreen.value ? mapSelectedPhoto.value : selectedPhoto.value
+)
+
+watch(activeDetailPhoto, (photo) => {
   if (photo) {
     loadSidebarData(photo.id)
     if (showPersons.value) void loadPersons()

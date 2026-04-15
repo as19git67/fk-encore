@@ -435,7 +435,6 @@ onUnmounted(() => serviceHealth.stopPolling())
           :limit-albums-shown="true"
           :face-service-available="serviceHealth.faceServiceAvailable"
           :show-navigate-to-photo="true"
-          :location-menu-exclude-person-id="selectedPerson?.id"
           @fullscreen="isFullscreen = true"
           @toggle-favorite="handleToggleFavorite"
           @hide="handleHidePhoto"
