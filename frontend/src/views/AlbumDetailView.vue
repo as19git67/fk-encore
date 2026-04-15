@@ -709,11 +709,11 @@ watch(albumId, () => {
 
     <div v-if="album" class="subheader">
       <div class="header">
-        <!-- 1. Album name -->
-        <h1 class="header__title">{{ album.name }}</h1>
-
-        <!-- 2. Role badge -->
-        <span :class="['header__badge', `header__badge--${album.role}`]">{{ album.role }}</span>
+        <!-- 1. Album name + role badge -->
+        <div class="header__title-group">
+          <h1 class="header__title">{{ album.name }}</h1>
+          <span :class="['header__badge', `header__badge--${album.role}`]">{{ album.role }}</span>
+        </div>
 
         <!-- 3. Description with edit -->
         <div v-if="displayMode !== 'map'" class="header__description">
@@ -1087,6 +1087,12 @@ watch(albumId, () => {
 }
 
 .header__actions { display: flex; align-items: center; gap: 0.25em; }
+
+.header__title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
 
 .header__title {
   font-size: 1.5em;
