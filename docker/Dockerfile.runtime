@@ -39,6 +39,17 @@ RUN set -eux; \
 # before calling `docker build`, so frontend/dist is populated.
 COPY --chown=568:568 frontend/dist/ /srv/frontend/dist/
 
+# Host-side backup hook: the three files the TrueNAS host needs (installer,
+# daily driver script, README) are shipped inside the image and copied onto
+# the backup volume on every container start by backup/startup.ts. That way
+# the host always has the version that matches the running image, without
+# the admin having to clone the fk-encore repo on the host.
+COPY --chown=568:568 scripts/host/install-backup-hook.sh \
+                     scripts/host/fk-encore-backup.sh \
+                     scripts/host/README.md \
+                     /opt/fk-encore/host-scripts/
+RUN chmod 0755 /opt/fk-encore/host-scripts/*.sh
+
 ARG BUILD_NUMBER=dev
 ENV APP_BUILD_NUMBER=${BUILD_NUMBER} \
     FRONTEND_DIST_DIR=/srv/frontend/dist \

@@ -1,164 +1,187 @@
-# FK Encore – Deployment mit Docker Compose
+# FK Encore – Deployment with Docker Compose
 
-## Voraussetzungen
+## Requirements
 
-- Docker (mit Compose v2)
-- Mindestens **8 GB RAM** (die ML-Modelle für Gesichtserkennung und Embeddings brauchen Speicher)
+- Docker (with Compose v2)
+- At least **8 GB of RAM** (the ML models for face recognition and embeddings
+  need memory)
 
-## Schnellstart
+## Quick start
 
 ```bash
-# 1. Konfiguration erstellen
+# 1. Create the configuration
 cp docker-compose.env.example .env
 
-# 2. .env anpassen (mindestens ADMIN_PASSWORD ändern!)
+# 2. Adjust .env (at minimum change ADMIN_PASSWORD!)
 nano .env
 
-# 3. Starten
+# 3. Start
 docker compose up -d
 
-# 4. Logs prüfen
+# 4. Check the logs
 docker compose logs -f
 ```
 
-Die App ist dann unter **http://localhost:8080** erreichbar.
+The app is then reachable at **http://localhost:8080**.
 
 ## Services
 
-| Service | Beschreibung | Interner Port | Standard-Host-Port |
-|---------|-------------|---------------|---------------------|
-| `app` | Encore.ts Hauptanwendung (Frontend + API) | 8080 | 8080 |
-| `insightface` | Gesichtserkennung (InsightFace/buffalo_l) | 8000 | – (nur intern) |
-| `embedding_service` | Foto-Embeddings (CLIP + DINOv2) | 8000 | – (nur intern) |
-| `embedding_postgres` | PostgreSQL mit pgvector für Embeddings | 5432 | – (nur intern) |
+| Service              | Description                                | Internal port | Default host port  |
+|----------------------|--------------------------------------------|---------------|--------------------|
+| `app`                | Encore.ts main application (frontend + API) | 8080          | 8080               |
+| `insightface`        | Face recognition (InsightFace/buffalo_l)   | 8000          | – (internal only)  |
+| `embedding_service`  | Photo embeddings (CLIP + DINOv2)           | 8000          | – (internal only)  |
+| `embedding_postgres` | PostgreSQL with pgvector for embeddings    | 5432          | – (internal only)  |
 
-Die ML-Services (insightface, embedding_service) sind nur intern erreichbar und nicht von außen zugänglich.
+The ML services (insightface, embedding_service) are only reachable
+internally and not exposed to the outside.
 
-## Konfiguration
+## Configuration
 
-### Pflicht-Variablen
+### Required variables
 
-| Variable | Beschreibung |
-|----------|-------------|
-| `ADMIN_PASSWORD` | Passwort für den initialen Admin-Account |
+| Variable          | Description |
+|-------------------|-------------|
+| `ADMIN_PASSWORD`  | Password for the initial admin account |
 
-### Optionale Variablen
+### Optional variables
 
-| Variable | Default | Beschreibung |
-|----------|---------|-------------|
-| `APP_PORT` | `8080` | Host-Port für die App |
-| `ADMIN_EMAIL` | `admin@example.com` | E-Mail des Admin-Accounts |
-| `ADMIN_NAME` | `Admin` | Name des Admin-Accounts |
-| `RP_ID` | `localhost` | WebAuthn Domain (ohne Protokoll/Port) |
-| `RP_ORIGIN` | `http://localhost:8080` | WebAuthn Origin (volle URL) |
-| `DB_TYPE` | `sqlite` | Datenbank-Typ (`sqlite` oder `postgres`) |
-| `ENABLE_LOCAL_FACES` | `true` | Gesichtserkennung aktivieren |
-| `FACE_DISTANCE_THRESHOLD` | `0.42` | Schwellwert für Gesichts-Matching (niedriger = strenger) |
-| `CLIP_MODEL_NAME` | `ViT-B-32` | OpenCLIP Modell |
-| `CLIP_PRETRAINED` | `openai` | Pretrained Weights |
-| `DINO_MODEL_NAME` | `facebook/dinov2-base` | DINOv2 Modell |
-| `EMBEDDING_DB_PASSWORD` | `postgres` | Passwort für die Embedding-Datenbank |
+| Variable                  | Default                  | Description |
+|---------------------------|--------------------------|-------------|
+| `APP_PORT`                | `8080`                   | Host port for the app |
+| `ADMIN_EMAIL`             | `admin@example.com`      | Email of the admin account |
+| `ADMIN_NAME`              | `Admin`                  | Name of the admin account |
+| `RP_ID`                   | `localhost`              | WebAuthn domain (without protocol/port) |
+| `RP_ORIGIN`               | `http://localhost:8080`  | WebAuthn origin (full URL) |
+| `DB_TYPE`                 | `sqlite`                 | Database type (`sqlite` or `postgres`) |
+| `ENABLE_LOCAL_FACES`      | `true`                   | Enable face recognition |
+| `FACE_DISTANCE_THRESHOLD` | `0.42`                   | Threshold for face matching (lower = stricter) |
+| `CLIP_MODEL_NAME`         | `ViT-B-32`               | OpenCLIP model |
+| `CLIP_PRETRAINED`         | `openai`                 | Pretrained weights |
+| `DINO_MODEL_NAME`         | `facebook/dinov2-base`   | DINOv2 model |
+| `EMBEDDING_DB_PASSWORD`   | `postgres`               | Password for the embedding database |
 
-### Beispiel: Produktions-Setup hinter Reverse Proxy
+### Example: production setup behind a reverse proxy
 
 ```env
 APP_PORT=8080
-ADMIN_EMAIL=admin@meinedomain.de
+ADMIN_EMAIL=admin@my-domain.com
 ADMIN_NAME=Administrator
-ADMIN_PASSWORD=ein-sicheres-passwort-hier
-RP_ID=fotos.meinedomain.de
-RP_NAME=Familienfotos
-RP_ORIGIN=https://fotos.meinedomain.de
-EMBEDDING_DB_PASSWORD=ein-anderes-passwort
+ADMIN_PASSWORD=a-strong-password-here
+RP_ID=photos.my-domain.com
+RP_NAME=Family Photos
+RP_ORIGIN=https://photos.my-domain.com
+EMBEDDING_DB_PASSWORD=another-password
 ```
 
-## Daten & Volumes
+## Data & volumes
 
-| Volume | Inhalt |
-|--------|--------|
-| `app-data` | SQLite-Datenbank + hochgeladene Fotos |
-| `embedding-pgdata` | PostgreSQL-Daten für Foto-Embeddings |
+| Volume             | Contents                                   |
+|--------------------|--------------------------------------------|
+| `app-data`         | SQLite database + uploaded photos          |
+| `embedding-pgdata` | PostgreSQL data for photo embeddings       |
 
-### Automatisches tägliches Backup (empfohlen)
+### Automatic daily backup (recommended)
 
-Das Repo enthält einen Host-Hook, der täglich einen **anwendungs-konsistenten
-ZFS-Snapshot** inklusive `pg_dump` der Haupt-DB erzeugt. Der Ablauf:
+The repo ships with a host-side hook that takes a daily
+**application-consistent ZFS snapshot** including a `pg_dump` of the main DB.
+Flow:
 
-1. Host-Cron ruft `POST /internal/backup/start` — fk-encore pausiert die
-   Scan-Worker, setzt das Cluster per `pg_backup_start()` in den Backup-Modus
-   und schreibt einen `pg_dump` nach `/mnt/backup/encore-<label>.dump`.
-2. Der Host macht `zfs snapshot -r tank/vivanty@<label>` — pgdata + Fotos +
-   der gerade erstellte Dump sind damit konsistent im Snapshot.
-3. Host-Cron ruft `POST /internal/backup/stop` — `pg_backup_stop()`, Worker
-   laufen wieder.
+1. The host cron calls `POST /internal/backup/start` — fk-encore pauses the
+   scan workers, puts the cluster into backup mode via `pg_backup_start()`,
+   and writes a `pg_dump` to `/mnt/backup/encore-<label>.dump`.
+2. The host runs `zfs snapshot -r tank/vivanty@<label>` — pgdata + photos
+   + the dump that was just written are all consistently captured in the
+   snapshot.
+3. The host cron calls `POST /internal/backup/stop` — `pg_backup_stop()`,
+   workers resume.
 
-Eine Sicherheits-Zeitschaltuhr (default 30 Minuten) beendet den Backup-Modus
-automatisch, falls `/stop` nie ankommt — damit kann das WAL nicht endlos
-wachsen.
+A safety timer (default 30 minutes) automatically ends backup mode if
+`/stop` never arrives, so the WAL cannot grow without bound.
 
-**Installation auf dem Host (einmalig, als root):**
+**Installation on the host (one time, as root):**
+
+The fk-encore container ships the host-side hook scripts inside the image
+and copies them onto the backup volume on every start. You do **not**
+need to clone the fk-encore repo on the host. The path on the host is:
+
+```
+/mnt/<dataset>/<backup-dir>/host-scripts/
+    ├── install-backup-hook.sh
+    ├── fk-encore-backup.sh
+    └── README.md
+```
+
+Run the installer from there:
 
 ```bash
-sudo ./scripts/host/install-backup-hook.sh
-# oder nicht-interaktiv:
-sudo ./scripts/host/install-backup-hook.sh --dataset tank/vivanty
+sudo /mnt/<dataset>/<backup-dir>/host-scripts/install-backup-hook.sh
+# or non-interactive:
+sudo /mnt/<dataset>/<backup-dir>/host-scripts/install-backup-hook.sh \
+    --dataset tank/vivanty
 ```
 
-Wichtig: Alle persistenten Artefakte landen unter
-`/mnt/<dataset>/fk-encore-hook/` — also auf dem ZFS-Dataset selbst und
-**nicht** unter `/etc` oder `/usr/local/sbin`. Grund: TrueNAS SCALE tauscht
-bei jedem Upgrade das Root-Dateisystem komplett aus (neues Boot-
-Environment), Dateien unter `/etc/…` würden dabei verloren gehen. Datasets
-bleiben erhalten.
+Why this layout? TrueNAS SCALE replaces the entire root filesystem on
+every upgrade (new boot environment), so files under `/etc`,
+`/usr/local/sbin` or `/etc/cron.d` would vanish. ZFS datasets survive
+upgrades, so all persistent artefacts (the scripts and the token file
+that the installer generates) live there.
 
-Der Installer:
+The container only ever overwrites the three files it ships
+(`install-backup-hook.sh`, `fk-encore-backup.sh`, `README.md`). The
+`backup-token` file the installer writes is preserved across image
+upgrades, and so is anything else you might have placed in that
+directory.
 
-1. Fragt interaktiv nach dem Dataset (falls nicht per `--dataset` gesetzt)
-2. Legt `/mnt/<dataset>/fk-encore-hook/` mit Token (0600) und Script (0755) an
-3. Druckt am Ende den generierten Token **und** die genauen Felder, die
-   für den täglichen Cron-Job in der TrueNAS-UI auszufüllen sind
+The installer:
 
-Den Token in die `.env` neben der `docker-compose.yml` eintragen und den
-Container neu starten:
+1. Asks for the dataset interactively (or takes `--dataset`).
+2. Generates a random token at `<host-scripts>/backup-token`
+   (`0600 root:root`). Re-runs preserve any existing non-empty token.
+3. Prints both the `BACKUP_TOKEN=…` line for `.env` and the exact fields
+   to fill in the TrueNAS UI cron-jobs form.
+
+Add the printed token to `.env` next to `docker-compose.yml` and restart
+the container:
 
 ```env
-BACKUP_TOKEN=<vom Installer generierter Wert>
+BACKUP_TOKEN=<value-printed-by-the-installer>
 ```
 
 ```bash
 docker compose up -d --no-deps app
 ```
 
-**Cron-Job über die TrueNAS-UI einrichten** (nicht über `/etc/cron.d/`, das
-überlebt den nächsten TrueNAS-Upgrade nicht):
+**Register the cron job via the TrueNAS UI** (do not write to
+`/etc/cron.d/` — that does not survive a TrueNAS upgrade):
 
 System Settings → Advanced → Cron Jobs → Add
 
-| Feld          | Wert |
-|---------------|------|
-| Description   | `fk-encore daily backup` |
-| Command       | `ZFS_DATASET=<dataset> /mnt/<dataset>/fk-encore-hook/fk-encore-backup.sh` |
-| Run As User   | `root` |
-| Schedule      | Custom → `0 3 * * *` (03:00 UTC) |
-| Enabled       | yes |
+| Field          | Value |
+|----------------|-------|
+| Description    | `fk-encore daily backup` |
+| Command        | `ZFS_DATASET=<dataset> /mnt/<dataset>/<backup-dir>/host-scripts/fk-encore-backup.sh` |
+| Run As User    | `root` |
+| Schedule       | Custom → `0 3 * * *` (03:00 UTC) |
+| Enabled        | yes |
 
-Der Installer druckt die genaue Command-Zeile zum Kopieren aus.
+The installer prints the exact command line to copy.
 
-Die `/internal/backup/*` Endpunkte sind zusätzlich per CIDR-Allow-List
-abgesichert (Standard: Loopback + RFC1918 + IPv6 ULA). Damit werden
-Requests aus dem öffentlichen Internet selbst dann abgelehnt, wenn der
-Token einmal leakt — die Standard-Liste deckt Host-→Container-Traffic
-über die Docker-Bridge (SNAT auf `172.17.0.1` o. ä.) bereits ab, es ist
-normalerweise keine Anpassung nötig. Falls doch: via `BACKUP_ALLOW_CIDRS`
-in der `.env` überschreiben.
+The `/internal/backup/*` endpoints are additionally guarded by a CIDR
+allow-list (default: loopback + RFC1918 + IPv6 ULA). That rejects
+requests from the public internet even if the token leaks. The defaults
+already cover host-to-container traffic over the Docker bridge (SNAT-ed
+to `172.17.0.1` or similar), so no adjustment is normally needed.
+Override via `BACKUP_ALLOW_CIDRS` in `.env` if you have a non-standard
+setup.
 
-Details und Konfiguration siehe `scripts/host/README.md`.
+See `scripts/host/README.md` for full details and configuration.
 
-### Wiederherstellen
+### Restore
 
-Zwei Pfade werden unterstützt:
+Two paths are supported:
 
-**A) Vollständiger Rollback (Fotos + DB, schnell):**
+**A) Full rollback (photos + DB, fast):**
 
 ```bash
 docker compose down
@@ -166,39 +189,41 @@ sudo zfs rollback -r tank/vivanty@daily-20260413-030000
 docker compose up -d
 ```
 
-**B) Nur DB aus `pg_dump` wiederherstellen (Opt-in beim Start):**
+**B) Restore only the DB from a `pg_dump` (opt-in on startup):**
 
 ```bash
-# 1. Dump-Datei als "restore-*" im Backup-Verzeichnis ablegen
+# 1. Place the dump file in the backup directory, renamed with the
+#    "restore-" prefix
 cp /mnt/backup/encore-daily-20260413-030000.dump \
    /mnt/backup/restore-20260414-rollback.dump
 
-# 2. Container neustarten
+# 2. Restart the container
 docker compose restart app
 ```
 
-Beim Start erkennt fk-encore die Datei, legt zunächst zur Sicherheit einen
-`pre-restore-<ISO>.dump` des aktuellen DB-Stands an, führt `pg_restore
---clean --if-exists` aus und benennt die Trigger-Datei in
-`restored-…` um, damit der Restore beim nächsten Start nicht erneut läuft.
+On boot, fk-encore detects the file, first writes a safety
+`pre-restore-<ISO>.dump` of the current DB state, runs
+`pg_restore --clean --if-exists`, and renames the trigger file to
+`restored-…` so the restore is not re-applied on the next start.
 
-**Notfall-Backup ohne ZFS-Snapshot (z. B. auf Nicht-TrueNAS-Systemen):**
+**Emergency backup without ZFS snapshot (e.g. on non-TrueNAS systems):**
 
 ```bash
-# Nur die Haupt-DB — Fotos separat per rsync/etc. sichern
-docker exec fk-encore-app sh -c 'pg_dump -Fc --no-owner "$POSTGRES_DATABASE" > /mnt/backup/encore-manual.dump'
+# Main DB only — back up photos separately via rsync/etc.
+docker exec fk-encore-app sh -c \
+    'pg_dump -Fc --no-owner "$POSTGRES_DATABASE" > /mnt/backup/encore-manual.dump'
 ```
 
-## Häufige Aufgaben
+## Common tasks
 
-### Alle Services neu bauen
+### Rebuild all services
 
 ```bash
 docker compose build --no-cache
 docker compose up -d
 ```
 
-### Logs eines einzelnen Services
+### Logs of a single service
 
 ```bash
 docker compose logs -f app
@@ -206,33 +231,41 @@ docker compose logs -f embedding_service
 docker compose logs -f insightface
 ```
 
-### Service neustarten
+### Restart a service
 
 ```bash
 docker compose restart app
 ```
 
-### Alles stoppen und aufräumen
+### Stop everything and clean up
 
 ```bash
-docker compose down          # Services stoppen
-docker compose down -v       # Services stoppen + Volumes löschen (ACHTUNG: Datenverlust!)
+docker compose down          # Stop services
+docker compose down -v       # Stop services + delete volumes (CAUTION: data loss!)
 ```
 
-## Fehlerbehebung
+## Troubleshooting
 
 ### "Embedding service unavailable"
-Der Embedding-Service braucht beim ersten Start Zeit um die ML-Modelle zu laden (~1-2 Minuten). Prüfe den Status:
+
+The embedding service needs time on first start to load the ML models
+(~1–2 minutes). Check the status:
+
 ```bash
 docker compose logs embedding_service
-curl http://localhost:8001/health  # wenn Port exponiert
+curl http://localhost:8001/health  # if the port is exposed
 ```
 
 ### "FACE_MODELS_NOT_LOADED"
-InsightFace lädt beim ersten Start das buffalo_l-Modell. Das kann 1-2 Minuten dauern:
+
+InsightFace loads the buffalo_l model on first start. That can take 1–2
+minutes:
+
 ```bash
 docker compose logs insightface
 ```
 
-### Out of Memory
-Die ML-Services brauchen zusammen ca. 4-6 GB RAM. Erhöhe das Docker-Speicherlimit falls nötig (Docker Desktop → Settings → Resources).
+### Out of memory
+
+The ML services together need about 4–6 GB of RAM. Increase the Docker
+memory limit if necessary (Docker Desktop → Settings → Resources).
