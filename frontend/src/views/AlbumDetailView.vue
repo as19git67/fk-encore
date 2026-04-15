@@ -709,11 +709,19 @@ watch(albumId, () => {
 
     <div v-if="album" class="subheader">
       <div class="header">
-        <!-- 1. Album name -->
-        <h1 class="header__title">{{ album.name }}</h1>
+        <!-- 1. Album name + role badge -->
+        <div class="header__title-group">
+          <h1 class="header__title">{{ album.name }}</h1>
+          <span :class="['header__badge', `header__badge--${album.role}`]">{{ album.role }}</span>
+        </div>
 
-        <!-- 2. Role badge -->
-        <span :class="['header__badge', `header__badge--${album.role}`]">{{ album.role }}</span>
+        <!-- 2. Metadata -->
+        <div class="header__meta">
+          {{ album.photo_count }} {{ album.photo_count === 1 ? 'Foto' : 'Fotos' }}
+          <template v-if="album.oldest_photo_at && album.newest_photo_at">
+            &bull; {{ new Date(album.oldest_photo_at).toLocaleDateString() }} – {{ new Date(album.newest_photo_at).toLocaleDateString() }}
+          </template>
+        </div>
 
         <!-- 3. Description with edit -->
         <div v-if="displayMode !== 'map'" class="header__description">
@@ -730,14 +738,6 @@ watch(albumId, () => {
               <Button :disabled="updatingAlbum" icon="pi pi-times" size="small" text @click="editingDescription = false" />
             </div>
           </div>
-        </div>
-
-        <!-- 4. Metadata -->
-        <div class="header__meta">
-          {{ album.photo_count }} {{ album.photo_count === 1 ? 'Foto' : 'Fotos' }}
-          <template v-if="album.oldest_photo_at && album.newest_photo_at">
-            &bull; {{ new Date(album.oldest_photo_at).toLocaleDateString() }} – {{ new Date(album.newest_photo_at).toLocaleDateString() }}
-          </template>
         </div>
 
         <!-- 5a. View switcher – DESKTOP (text labels) -->
@@ -786,7 +786,7 @@ watch(albumId, () => {
             icon="pi pi-images" severity="success" size="small"
             @click="handleStartGroupReview"
           />
-          <Button v-if="effectiveCoverPhotoId && displayMode !== 'map'" icon="pi pi-image" label="Cover fokussieren" size="small" text @click="scrollToCover" />
+          <Button v-if="effectiveCoverPhotoId && displayMode !== 'map'" icon="pi pi-image" size="small" text v-tooltip="'Cover fokussieren'" @click="scrollToCover" />
           <Button v-if="isOwner" icon="pi pi-trash" size="small" text severity="danger" v-tooltip="'Album löschen'" @click="showDeleteDialog = true" />
         </div>
       </div>
@@ -1088,6 +1088,12 @@ watch(albumId, () => {
 
 .header__actions { display: flex; align-items: center; gap: 0.25em; }
 
+.header__title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
+
 .header__title {
   font-size: 1.5em;
   font-weight: 600;
@@ -1277,7 +1283,10 @@ watch(albumId, () => {
 
   /* Swap view switcher variants */
   .header__views-desktop { display: none; }
-  .header__views-mobile { display: flex; flex-wrap: wrap; gap: 0.35em; align-items: center; flex: 1 1 100%; order: 10; }
+  .header__views-mobile { display: flex; flex-wrap: wrap; gap: 0.35em; align-items: center; flex: 1 1 auto; order: 10; }
+
+  /* Put action icons on the same row as the mobile view switcher */
+  .header__actions { order: 11; }
 
   /* Compact header on mobile */
   .header { padding: 0.35em 0.65em; gap: 0.25em 0.5em; }
