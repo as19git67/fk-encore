@@ -9,6 +9,7 @@ import { getPhotoUrl, listAlbums, getPhotosAlbums, batchUpdateAlbumPhotos, updat
 import { getAlbumCheckState as calculateAlbumCheckState, getNewPendingAction } from '../utils/albumSelection'
 import type { Photo, Face, LandmarkItem, Person, CurationStatus } from '../api/photos'
 import { ref, computed, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { formatPhotoDateCompact } from '../utils/dateFormat'
 
 const props = defineProps<{
@@ -182,6 +183,20 @@ async function handleCreateAlbumAndAdd() {
   } finally {
     creatingAlbum.value = false
   }
+}
+
+const router = useRouter()
+
+/** Jump directly to the given album, pre-selecting the current photo.
+ *  Used by the inline "jump" button next to each album the photo is in —
+ *  a shortcut for the PhotoLocationMenu dialog. */
+function goToAlbum(targetAlbumId: number) {
+  if (targetAlbumId === props.albumId) return
+  router.push({
+    name: 'fotos-album-detail',
+    params: { id: String(targetAlbumId) },
+    query: { photoId: String(props.photo.id) },
+  })
 }
 
 const togglingCover = ref(false)
@@ -505,6 +520,18 @@ watch(() => props.photo.id, () => {
                 :id="'album-single-' + album.id"
             />
             <label :for="'album-single-' + album.id">{{ album.name }}</label>
+            <Button
+                v-if="getEffectiveAlbumCheckState(album.id) === true && album.id !== albumId"
+                icon="pi pi-external-link"
+                severity="secondary"
+                text
+                rounded
+                size="small"
+                class="album-jump-btn"
+                v-tooltip.left="'Zu diesem Album springen'"
+                :aria-label="`Zu Album ${album.name} springen`"
+                @click.stop="goToAlbum(album.id)"
+            />
           </div>
           <div v-if="limitAlbumsShown && sortedAlbums.length > 3" class="expand-toggle">
             <Button
@@ -899,6 +926,16 @@ watch(() => props.photo.id, () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.album-jump-btn {
+  flex-shrink: 0;
+  width: 1.75rem !important;
+  height: 1.75rem !important;
+}
+
+.album-jump-btn :deep(.p-button-icon) {
+  font-size: 0.85rem;
 }
 
 .new-album-inline {

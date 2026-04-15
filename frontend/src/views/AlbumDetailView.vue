@@ -47,7 +47,7 @@ import { onUnmounted } from 'vue'
 
 const route = useRoute()
 const router = useRouter()
-const albumId = Number(route.params.id)
+const albumId = computed(() => Number(route.params.id))
 const auth = useAuthStore()
 const serviceHealth = useServiceHealthStore()
 
@@ -308,7 +308,7 @@ async function loadData() {
   loading.value = true
   try {
     const [albumRes, groupsRes] = await Promise.all([
-      getAlbum(albumId),
+      getAlbum(albumId.value),
       listPhotoGroups().catch(() => ({ groups: [] })),
     ])
     album.value = albumRes
@@ -345,7 +345,7 @@ async function loadData() {
 async function handleSettingsChange() {
   if (!album.value?.settings) return
   try {
-    await updateAlbumUserSettings(albumId, album.value.settings)
+    await updateAlbumUserSettings(albumId.value, album.value.settings)
     await loadData()
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Speichern der Einstellungen'
@@ -495,10 +495,10 @@ async function handleSetMapCover(photoId: number) {
   const newCoverId = effectiveCoverPhotoId.value === photoId ? null : photoId
   try {
     if (canWrite.value) {
-      await updateAlbum(albumId, { coverPhotoId: newCoverId })
+      await updateAlbum(albumId.value, { coverPhotoId: newCoverId })
       album.value.cover_photo_id = newCoverId ?? undefined
     } else {
-      await updateAlbumUserSettings(albumId, { cover_photo_id: newCoverId })
+      await updateAlbumUserSettings(albumId.value, { cover_photo_id: newCoverId })
       applyViewerCoverOverride(newCoverId)
     }
   } catch (err: any) {
@@ -633,7 +633,7 @@ async function saveDescription() {
   if (!album.value) return
   updatingAlbum.value = true
   try {
-    await updateAlbum(albumId, { description: descDraft.value })
+    await updateAlbum(albumId.value, { description: descDraft.value })
     album.value.description = descDraft.value
     editingDescription.value = false
   } catch (err: any) {
@@ -665,7 +665,7 @@ async function handleBatchFavoriteAll() {
   if (photoIds.length === 0) return
   batchFavoriting.value = true
   try {
-    await batchFavoritePhotos(albumId, photoIds)
+    await batchFavoritePhotos(albumId.value, photoIds)
     await loadData()
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Favorisieren'
@@ -687,6 +687,20 @@ void loadData()
 if (showPersons.value) void loadPersons()
 serviceHealth.startPolling()
 onUnmounted(() => serviceHealth.stopPolling())
+
+// Reload when navigating between album-detail routes (same component is
+// reused by Vue Router on param changes). Without this, jumping from one
+// album to another via the Jump Dialog updates the URL but keeps the old
+// album's data, so subsequent jumps appear to do nothing.
+watch(albumId, () => {
+  album.value = null
+  selectedIndex.value = -1
+  activeGroup.value = null
+  activeSection.value = ''
+  detectedFaces.value = []
+  detectedLandmarks.value = []
+  void loadData()
+})
 </script>
 
 <template>
