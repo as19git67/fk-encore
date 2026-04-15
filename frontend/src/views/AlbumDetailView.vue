@@ -786,7 +786,7 @@ watch(albumId, () => {
             icon="pi pi-images" severity="success" size="small"
             @click="handleStartGroupReview"
           />
-          <Button v-if="effectiveCoverPhotoId && displayMode !== 'map'" class="header__cover-button" icon="pi pi-image" label="Cover fokussieren" size="small" text v-tooltip="'Cover fokussieren'" @click="scrollToCover" />
+          <Button v-if="effectiveCoverPhotoId && displayMode !== 'map'" icon="pi pi-image" size="small" text v-tooltip="'Cover fokussieren'" @click="scrollToCover" />
           <Button v-if="isOwner" icon="pi pi-trash" size="small" text severity="danger" v-tooltip="'Album löschen'" @click="showDeleteDialog = true" />
         </div>
       </div>
@@ -1287,9 +1287,6 @@ watch(albumId, () => {
 
   /* Compact header on mobile */
   .header { padding: 0.35em 0.65em; gap: 0.25em 0.5em; }
-
-  /* Hide label on "Cover fokussieren" button, show icon only */
-  .header__cover-button :deep(.p-button-label) { display: none; }
   .header__title { font-size: 1.1em; }
   .header__description { flex: 1 1 100%; }
   .header__description-text--empty { display: none; }
