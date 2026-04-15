@@ -98,6 +98,59 @@ describe("Photo Module", () => {
       fs.unlinkSync(path.join(UPLOAD_DIR, result.filename));
     });
 
+    it("should store uploads in YYYY/YYYY-MM/YYYY-MM-DD_at_HH.MM.SS_NN.<ext> layout", async () => {
+      const fileData = Buffer.from("layout-test-data");
+      const result = await service.uploadPhotoLogic(user1.id, {
+        data: fileData,
+        name: "layout.jpg",
+        mimeType: "image/jpeg",
+      });
+
+      // Filename is a relative subpath of UPLOAD_DIR using forward slashes.
+      expect(result.filename).toMatch(
+        /^\d{4}\/\d{4}-\d{2}\/\d{4}-\d{2}-\d{2}_at_\d{2}\.\d{2}\.\d{2}_\d{2}\.jpg$/
+      );
+
+      // Year/month subdir matches the filename timestamp.
+      const parts = result.filename.split("/");
+      const [year, yearMonth, leaf] = parts;
+      expect(leaf.startsWith(`${yearMonth}-`)).toBe(true);
+      expect(yearMonth.startsWith(`${year}-`)).toBe(true);
+
+      const abs = path.join(UPLOAD_DIR, result.filename);
+      expect(fs.existsSync(abs)).toBe(true);
+      fs.unlinkSync(abs);
+    });
+
+    it("should increment the counter when two uploads collide on the same second", async () => {
+      const a = await service.uploadPhotoLogic(user1.id, {
+        data: Buffer.from("collision-a"),
+        name: "a.jpg",
+        mimeType: "image/jpeg",
+      });
+      const b = await service.uploadPhotoLogic(user1.id, {
+        data: Buffer.from("collision-b"),
+        name: "b.jpg",
+        mimeType: "image/jpeg",
+      });
+
+      expect(a.filename).not.toBe(b.filename);
+
+      // Both filenames share the same stem up to the counter suffix; the
+      // counters are sequential two-digit numbers.
+      const stem = (name: string) => name.replace(/_\d{2}\.[^./]+$/, "");
+      expect(stem(a.filename)).toBe(stem(b.filename));
+
+      const counter = (name: string) =>
+        parseInt(name.match(/_(\d{2})\.[^./]+$/)![1], 10);
+      const counters = [counter(a.filename), counter(b.filename)].sort();
+      expect(counters[0]).toBe(0);
+      expect(counters[1]).toBe(1);
+
+      fs.unlinkSync(path.join(UPLOAD_DIR, a.filename));
+      fs.unlinkSync(path.join(UPLOAD_DIR, b.filename));
+    });
+
     it("should list only own photos", async () => {
       const fileData = Buffer.from("data");
       await service.uploadPhotoLogic(user1.id, { data: fileData, name: "u1.jpg", mimeType: "image/jpeg" });
