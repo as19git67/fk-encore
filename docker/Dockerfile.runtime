@@ -19,18 +19,49 @@ FROM ${BASE_IMAGE}
 
 USER root
 
+# pg_dump / pg_restore must be >= the server version. Our embedding
+# postgres service ships Postgres 18 (see docker-compose.yml), while
+# Debian bookworm's default postgresql-client is 15.x — that mismatch
+# makes pg_dump abort with "server version mismatch". Pull the PGDG
+# 18 client explicitly. Used by backup/pg-dump.ts for the fast-path
+# DB dump during a backup run and for the restore-on-startup hook.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl gnupg; \
+    install -d /usr/share/keyrings; \
+    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+        | gpg --dearmor -o /usr/share/keyrings/pgdg.gpg; \
+    . /etc/os-release; \
+    echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+        > /etc/apt/sources.list.d/pgdg.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends postgresql-client-18; \
+    apt-get purge -y --auto-remove curl gnupg; \
+    rm -rf /var/lib/apt/lists/*
+
 # Create the TrueNAS SCALE "apps" group/user (UID/GID 568) if they are not
 # already present in the Encore base. Also create the bind-mount targets and
 # hand them to the apps user, matching the permissions the host expects.
 RUN set -eux; \
     if ! getent group  568 >/dev/null; then groupadd -g 568 apps;  fi; \
     if ! getent passwd 568 >/dev/null; then useradd  -u 568 -g 568 -m -s /bin/bash apps; fi; \
-    mkdir -p /mnt/data/photos /mnt/data/thumbnails /app/data /srv/frontend/dist; \
-    chown -R 568:568 /mnt/data /app/data /srv/frontend
+    mkdir -p /mnt/data/photos /mnt/data/thumbnails /mnt/backup /app/data /srv/frontend/dist; \
+    chown -R 568:568 /mnt/data /mnt/backup /app/data /srv/frontend
 
 # Pre-built SPA assets. The host-side CI/CD runs `npm run build` in frontend/
 # before calling `docker build`, so frontend/dist is populated.
 COPY --chown=568:568 frontend/dist/ /srv/frontend/dist/
+
+# Host-side backup hook: the three files the TrueNAS host needs (installer,
+# daily driver script, README) are shipped inside the image and copied onto
+# the backup volume on every container start by backup/startup.ts. That way
+# the host always has the version that matches the running image, without
+# the admin having to clone the fk-encore repo on the host.
+COPY --chown=568:568 scripts/host/install-backup-hook.sh \
+                     scripts/host/fk-encore-backup.sh \
+                     scripts/host/README.md \
+                     /opt/fk-encore/host-scripts/
+RUN chmod 0755 /opt/fk-encore/host-scripts/*.sh
 
 ARG BUILD_NUMBER=dev
 ENV APP_BUILD_NUMBER=${BUILD_NUMBER} \

@@ -61,6 +61,21 @@ const SERVICE_DEPENDENCY: Partial<Record<ScanService, ExternalServiceName>> = {
   quality: "embedding",
 };
 
+/**
+ * Global pause flag — flipped by the backup service while a DB backup /
+ * ZFS snapshot is in flight. While paused:
+ *   - no new jobs are dequeued (processNext returns early)
+ *   - triggerWorkers() becomes a no-op
+ *   - the periodic poll timer keeps running but has no effect
+ * In-flight jobs are allowed to finish so pg_backup_start() is called only
+ * once the queue has drained.
+ */
+let workersPaused = false;
+
+export function areWorkersPaused(): boolean {
+  return workersPaused;
+}
+
 class ScanWorker {
   private running = 0;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -105,6 +120,13 @@ class ScanWorker {
    * work and waits for the service-recovery callback or the next timer tick.
    */
   private async processNext(): Promise<boolean> {
+    // Pre-check: if a backup is running, do not dequeue. In-flight work
+    // that was already picked up continues to run — pauseWorkers() waits
+    // for that via waitForWorkersIdle() before pg_backup_start is called.
+    if (workersPaused) {
+      return false;
+    }
+
     // Pre-check: if the event loop is under pressure, skip this cycle
     // so that health checks and other latency-sensitive requests can be
     // served in time.  The periodic timer will wake us once pressure drops.
@@ -234,6 +256,11 @@ class ScanWorker {
       this.pollTimer = null;
     }
   }
+
+  /** Number of jobs currently being processed by this worker. */
+  inFlight(): number {
+    return this.running;
+  }
 }
 
 const embeddingConcurrency = parseInt(process.env.SCAN_EMBEDDING_CONCURRENCY ?? "1", 10);
@@ -251,12 +278,49 @@ const geocodingWorker = new ScanWorker("geocoding", 1); // always 1 — Nominati
 
 /** Wake all workers to check for new work. Non-blocking. */
 export function triggerWorkers(): void {
+  if (workersPaused) return;
   embeddingWorker.tick();
   faceWorker.tick();
   faceAssignWorker.tick();
   landmarkWorker.tick();
   qualityWorker.tick();
   geocodingWorker.tick();
+}
+
+const ALL_WORKERS: ScanWorker[] = [
+  embeddingWorker,
+  faceWorker,
+  faceAssignWorker,
+  landmarkWorker,
+  qualityWorker,
+  geocodingWorker,
+];
+
+/**
+ * Pause all scan workers. Sets the global flag, stops the poll timers, and
+ * waits up to `drainTimeoutMs` for any in-flight jobs to finish so the
+ * caller can enter pg_backup_start() with a quiet queue.
+ *
+ * If in-flight work does not drain within the timeout the function returns
+ * anyway — the caller should treat that as a warning, not an error.
+ */
+export async function pauseWorkers(drainTimeoutMs = 60_000): Promise<void> {
+  workersPaused = true;
+  for (const w of ALL_WORKERS) w.stop();
+
+  const start = Date.now();
+  while (Date.now() - start < drainTimeoutMs) {
+    const busy = ALL_WORKERS.some((w) => w.inFlight() > 0);
+    if (!busy) return;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
+/** Resume all scan workers after a pauseWorkers() call. Safe to call while running. */
+export function resumeWorkers(): void {
+  if (!workersPaused) return;
+  workersPaused = false;
+  for (const w of ALL_WORKERS) w.start();
 }
 
 export async function startWorkers(): Promise<void> {

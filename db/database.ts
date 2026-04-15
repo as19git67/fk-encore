@@ -91,6 +91,20 @@ export async function initializeDb(): Promise<DbInstance> {
     try {
       const db = await createDb();
       await seed(db);
+      // Run backup-related startup housekeeping exactly once:
+      //   - defensive pg_backup_stop() in case the previous process crashed
+      //     while the cluster was in backup mode,
+      //   - apply any pending `restore-*.dump` file from $BACKUP_DIR.
+      // Loaded lazily so tests (which mock encore.dev/api but not /log)
+      // never pull in the backup module's encore.dev/log dependency.
+      if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
+        try {
+          const { runStartupHousekeeping } = await import("../backup/startup");
+          await runStartupHousekeeping();
+        } catch (err: any) {
+          console.error(`[db] backup housekeeping failed: ${err?.message ?? err}`);
+        }
+      }
       dbInstance = db;
       if (attempt > 1) {
         console.log(`[db] Connected successfully after ${attempt} attempt(s).`);

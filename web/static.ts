@@ -1,7 +1,9 @@
 import fs from "fs";
 import path from "path";
-import { api } from "encore.dev/api";
+import { api, APIError } from "encore.dev/api";
 import { photo } from "~encore/clients";
+import { isInBackupMode } from "../backup/state";
+import { writeMaintenanceResponseIfActive } from "../backup/maintenance";
 
 // Where the pre-built SPA lives inside the container image. The runtime
 // wrapper (docker/Dockerfile.runtime) copies frontend/dist to this absolute
@@ -93,6 +95,7 @@ function buildOgTags(
 export const frontend = api.raw(
   { expose: true, method: "GET", path: "/app/*path" },
   async (req, res) => {
+    if (writeMaintenanceResponseIfActive(res)) return;
     const distDir = getDistDir();
     const url = new URL(req.url ?? "/app/", `http://${req.headers.host ?? "localhost"}`);
     const rawPath = decodeURIComponent(url.pathname.replace(/^\/app\/?/, ""));
@@ -184,6 +187,9 @@ export const appRedirect = api.raw(
 export const buildInfo = api(
   { expose: true, method: "GET", path: "/api/build-info" },
   async (): Promise<{ build: string }> => {
+    if (isInBackupMode()) {
+      throw APIError.unavailable("Backup in progress — please retry in a few minutes.");
+    }
     return { build: process.env.APP_BUILD_NUMBER ?? "dev" };
   }
 );
