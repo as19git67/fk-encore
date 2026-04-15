@@ -214,27 +214,31 @@ value between the installer and the app, and must match the contents of
 - The token file is `0600 root:root` on a ZFS dataset that is only
   reachable via the host filesystem. The cron job runs as root, reads
   the token, and calls the app over loopback HTTP.
-- The `/internal/backup/*` endpoints are guarded by **two** checks that
-  run in order:
-  1. **CIDR allow-list.** The peer address must fall inside
-     `BACKUP_ALLOW_CIDRS`. Defaults: `127.0.0.0/8`, `::1/128`,
-     `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`
-     (loopback + RFC1918 + IPv6 ULA). That covers host-to-container
-     traffic through the Docker bridge (SNAT-ed to `172.17.0.1` or
-     similar) and container-to-container traffic, while rejecting
-     requests from the public internet even if port 8080 is exposed.
-     Override with `BACKUP_ALLOW_CIDRS=<cidr>,<cidr>,...` in the
-     container environment. Malformed entries are logged and skipped;
-     an empty or unparseable peer address fails closed.
-  2. **Bearer token.** Constant-time compare against `BACKUP_TOKEN`. If
-     the token is not configured, every call fails closed with
-     `401 Unauthenticated`.
-- `BACKUP_TRUST_XFF` defaults to `true` because Encore.ts' Rust HTTP
-  layer proxies requests into Node and sets `X-Forwarded-For` from the
-  verified TCP peer — the socket address inside the handler is the
-  internal proxy, not the real client. If you deploy the app standalone
-  (i.e. without Encore in front), set `BACKUP_TRUST_XFF=false` so a
-  remote client cannot spoof the peer IP by supplying its own XFF.
+- The `/internal/backup/*` endpoints are guarded by:
+  1. **CIDR allow-list (best-effort).** When a real peer IP is available
+     it must fall inside `BACKUP_ALLOW_CIDRS`. Defaults: `127.0.0.0/8`,
+     `::1/128`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
+     `fc00::/7` (loopback + RFC1918 + IPv6 ULA) — covers host-to-container
+     traffic via the Docker bridge and container-to-container traffic.
+     Override with `BACKUP_ALLOW_CIDRS=<cidr>,<cidr>,...` if your setup
+     uses a non-standard range. Malformed entries are logged and skipped.
+
+     Note: under Encore.ts' `api.raw` runtime, the real TCP peer IP is
+     not exposed to the Node handler (the socket is reported as
+     `0.0.0.0` and no `X-Forwarded-For` is relayed for raw endpoints).
+     When that happens the CIDR check is skipped — the first such
+     request logs `backup.auth.peer-address-unusable` once — and only
+     the bearer token is enforced. This is safe because:
+     - `/internal/backup/*` is not a high-volume endpoint and runs once
+       per day under cron.
+     - The token is 256-bit random, compared in constant time, and
+       disabled entirely if `BACKUP_TOKEN` is unset.
+     If you place a reverse proxy (nginx, Caddy, …) in front of the app
+     that populates `X-Forwarded-For`, the CIDR check re-activates
+     against that header. `BACKUP_TRUST_XFF=false` disables XFF use.
+  2. **Bearer token (always enforced).** Constant-time compare against
+     `BACKUP_TOKEN`. If the token is not configured, every call fails
+     closed with `401 Unauthenticated`.
 - `pg_backup_start()` does not block reads; browser sessions continue to
   see a `503 Service Unavailable` via the maintenance middleware.
   `/health` and `/healthz` stay up so external monitoring is not

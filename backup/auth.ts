@@ -3,14 +3,22 @@
  *
  * Two checks run in sequence before the handler executes:
  *
- *   1. Network origin (backup/ip-allow.ts) — the remote address must fall
- *      inside an allow-listed CIDR (loopback + RFC1918 by default). This
- *      blocks the "port 8080 is exposed to the internet" class of
- *      mistakes even if the token ever leaks.
+ *   1. Network origin (backup/ip-allow.ts) — if a real peer IP is
+ *      available, it must fall inside an allow-listed CIDR (loopback +
+ *      RFC1918 by default). Blocks the "port 8080 is exposed to the
+ *      internet" class of mistakes even if the token ever leaks.
+ *
+ *      NOTE: Encore.ts' `api.raw` handler does NOT expose the real TCP
+ *      peer — the socket is reported as `0.0.0.0` and no X-Forwarded-For
+ *      header is relayed for raw endpoints. When that happens this check
+ *      becomes a no-op (logged once as `backup.auth.peer-address-unusable`)
+ *      and only the bearer token is enforced. A 256-bit random token
+ *      compared in constant time is still a strong primary defence.
  *
  *   2. Bearer token (BACKUP_TOKEN env var) — compared in constant time
  *      against the shared secret that scripts/host/install-backup-hook.sh
- *      generates and also writes to /etc/fk-encore/backup-token.
+ *      generates next to the driver script (upgrade-safe on a ZFS
+ *      dataset). Always enforced — the only unconditional check.
  *
  * Both failures surface as APIError.unauthenticated so the endpoint does
  * not leak which layer rejected the request.
@@ -19,7 +27,7 @@
 import { APIError } from "encore.dev/api";
 import log from "encore.dev/log";
 import type { IncomingMessage } from "http";
-import { effectiveRemoteAddress, isRemoteAllowed } from "./ip-allow";
+import { effectiveRemoteAddress, isPeerAddressUsable, isRemoteAllowed } from "./ip-allow";
 
 /** Extracted for tests — call from api.raw handlers with the IncomingMessage. */
 export function assertBackupRequest(req: IncomingMessage): void {
@@ -27,26 +35,50 @@ export function assertBackupRequest(req: IncomingMessage): void {
   assertBackupToken(req.headers["authorization"]);
 }
 
+/** True once we have warned about the missing peer IP — avoids log spam. */
+let peerAddressUnusableWarned = false;
+
 function assertRemoteAllowed(req: IncomingMessage): void {
   const socketAddr = req.socket?.remoteAddress;
   const xff = req.headers["x-forwarded-for"];
   const addr = effectiveRemoteAddress(socketAddr, xff);
+
+  // Encore.ts' `api.raw` handler does not surface the real TCP peer IP:
+  // the socket is filled with a placeholder (observed: "0.0.0.0") and no
+  // X-Forwarded-For / X-Real-IP header is relayed. In that case the
+  // CIDR check cannot be enforced meaningfully — fall back to the
+  // bearer token alone. Warn once so operators are aware.
+  if (!isPeerAddressUsable(addr)) {
+    if (!peerAddressUnusableWarned) {
+      peerAddressUnusableWarned = true;
+      log.warn("backup.auth.peer-address-unusable", {
+        detail: "no usable peer IP — BACKUP_ALLOW_CIDRS cannot be enforced, relying on BACKUP_TOKEN only",
+        effective: addr ?? null,
+        socket: socketAddr ?? null,
+        xForwardedFor: xff ?? null,
+        xRealIp: req.headers["x-real-ip"] ?? null,
+      });
+    }
+    return;
+  }
+
   if (!isRemoteAllowed(addr)) {
-    // One-off diagnostic dump: what sources of peer IP did we actually
-    // see? Helps operators figure out whether the request reaches us
-    // with an unset socket (typical inside Encore.ts) or with an XFF
-    // value that falls outside BACKUP_ALLOW_CIDRS.
     log.warn("backup.auth.cidr-rejected", {
-      effective: addr ?? null,
+      effective: addr,
       socket: socketAddr ?? null,
       xForwardedFor: xff ?? null,
       xRealIp: req.headers["x-real-ip"] ?? null,
       headerNames: Object.keys(req.headers),
     });
     throw APIError.unauthenticated(
-      `remote address ${addr ?? "<unknown>"} is not in BACKUP_ALLOW_CIDRS`,
+      `remote address ${addr} is not in BACKUP_ALLOW_CIDRS`,
     );
   }
+}
+
+/** Reset the warn-once flag — intended for tests. */
+export function resetPeerAddressWarning(): void {
+  peerAddressUnusableWarned = false;
 }
 
 /**
