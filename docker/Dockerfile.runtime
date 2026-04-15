@@ -22,9 +22,25 @@ USER root
 # postgresql-client provides pg_dump and pg_restore, used by the backup
 # service (backup/pg-dump.ts) for the fast-path DB dump during a backup
 # run and for the restore-on-startup hook.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends postgresql-client \
-    && rm -rf /var/lib/apt/lists/*
+#
+# We pull postgresql-client-18 from the PostgreSQL Global Development Group
+# (PGDG) apt repository rather than Debian's default, because Bookworm only
+# ships postgresql-client 15 and pg_dump refuses to dump from a server whose
+# major version is newer than the client (the production database runs
+# PostgreSQL 18).
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl gnupg; \
+    install -d /usr/share/postgresql-common/pgdg; \
+    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+        -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc; \
+    . /etc/os-release; \
+    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+        > /etc/apt/sources.list.d/pgdg.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends postgresql-client-18; \
+    apt-get purge -y --auto-remove curl gnupg; \
+    rm -rf /var/lib/apt/lists/*
 
 # Create the TrueNAS SCALE "apps" group/user (UID/GID 568) if they are not
 # already present in the Encore base. Also create the bind-mount targets and
