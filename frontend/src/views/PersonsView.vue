@@ -59,24 +59,43 @@ const uniquePhotoFaceItems = computed(() => {
   })
 })
 
+// While the fullscreen overlay is open we pin a snapshot of the list so
+// that hiding/unhiding the current photo (via the eye button) doesn't
+// yank it out of the carousel. The pin is released when the overlay
+// closes, at which point we re-map selectedIndex onto the live list.
+type PersonFaceItem = { face: Face; photo: Photo }
+const pinnedFullscreenItems = ref<PersonFaceItem[] | null>(null)
+
+const effectivePhotoFaceItems = computed<PersonFaceItem[]>(() =>
+  pinnedFullscreenItems.value ?? uniquePhotoFaceItems.value
+)
+
+watch(isFullscreen, (val) => {
+  if (val) {
+    pinnedFullscreenItems.value = uniquePhotoFaceItems.value.slice()
+  } else {
+    const currentPhoto = pinnedFullscreenItems.value?.[selectedIndex.value]?.photo ?? null
+    pinnedFullscreenItems.value = null
+    if (currentPhoto) {
+      const newIdx = uniquePhotoFaceItems.value.findIndex(i => i.photo.id === currentPhoto.id)
+      selectedIndex.value = newIdx >= 0 ? newIdx : (uniquePhotoFaceItems.value.length > 0 ? 0 : -1)
+    }
+  }
+})
+
 watch(uniquePhotoFaceItems, (items) => {
+  // While pinned (fullscreen), keep selectedIndex as-is so the viewed
+  // photo doesn't change underneath the user when curation status flips.
+  if (pinnedFullscreenItems.value) return
   if (items.length > 0) {
     if (selectedIndex.value < 0) selectedIndex.value = 0
     else if (selectedIndex.value >= items.length) selectedIndex.value = items.length - 1
   }
 })
 
-const allUniquePhotoFaceItems = computed(() => {
-  const seen = new Set<number>()
-  return (selectedPersonDetail.value?.faces ?? [])
-    .filter(f => !!f.photo)
-    .map(f => ({ face: f, photo: f.photo as Photo }))
-    .filter(item => { if (seen.has(item.photo.id)) return false; seen.add(item.photo.id); return true })
-})
-
-const personPhotos = computed(() => allUniquePhotoFaceItems.value.map(i => i.photo))
-const selectedPhoto = computed(() => uniquePhotoFaceItems.value[selectedIndex.value]?.photo ?? null)
-const selectedPersonFace = computed(() => allUniquePhotoFaceItems.value[selectedIndex.value]?.face ?? null)
+const personPhotos = computed(() => effectivePhotoFaceItems.value.map(i => i.photo))
+const selectedPhoto = computed(() => effectivePhotoFaceItems.value[selectedIndex.value]?.photo ?? null)
+const selectedPersonFace = computed(() => effectivePhotoFaceItems.value[selectedIndex.value]?.face ?? null)
 const prevPersonPhoto = computed(() => selectedIndex.value > 0 ? personPhotos.value[selectedIndex.value - 1] ?? null : null)
 const nextPersonPhoto = computed(() => selectedIndex.value < personPhotos.value.length - 1 ? personPhotos.value[selectedIndex.value + 1] ?? null : null)
 
