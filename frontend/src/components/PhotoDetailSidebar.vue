@@ -9,7 +9,7 @@ import { getPhotoUrl, listAlbums, getPhotosAlbums, batchUpdateAlbumPhotos, updat
 import { getAlbumCheckState as calculateAlbumCheckState, getNewPendingAction } from '../utils/albumSelection'
 import type { Photo, Face, LandmarkItem, Person, CurationStatus } from '../api/photos'
 import { ref, computed, onMounted, watch } from 'vue'
-import { formatPhotoDate } from '../utils/dateFormat'
+import { formatPhotoDateCompact } from '../utils/dateFormat'
 
 const props = defineProps<{
   photo: Photo
@@ -226,7 +226,7 @@ const emit = defineEmits<{
 }>()
 
 function formatPhotoDateDisplay(photo: Photo) {
-  return formatPhotoDate(photo.taken_at || photo.created_at)
+  return formatPhotoDateCompact(photo.taken_at || photo.created_at)
 }
 
 function getPersonName(personId?: number) {
@@ -351,12 +351,6 @@ watch(() => props.photo.id, () => {
       <div v-if="!inFlyout" class="quick-actions">
         <Button icon="pi pi-expand" v-tooltip.bottom="'Vollbild'" @click="emit('fullscreen')" severity="secondary" text rounded />
         <Button v-if="showNavigateToPhoto" icon="pi pi-images" v-tooltip.bottom="'In Fotos anzeigen'" @click="emit('navigate-to-photo', photo.id)" severity="secondary" text rounded />
-        <PhotoLocationMenu
-          :photo-id="photo.id"
-          :exclude-all-photos="locationMenuExcludeAllPhotos"
-          :exclude-album-id="albumId"
-          :exclude-person-id="locationMenuExcludePersonId"
-        />
         <template v-if="canDelete">
           <Button :icon="photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'" v-tooltip.bottom="photo.curation_status === 'favorite' ? 'Kein Favorit' : 'Favorit'" @click="emit('toggle-favorite', photo.id, photo.curation_status)" :severity="photo.curation_status === 'favorite' ? 'warn' : 'secondary'" text rounded />
           <Button :icon="photo.curation_status === 'hidden' ? 'pi pi-eye-slash' : 'pi pi-eye'" v-tooltip.bottom="photo.curation_status === 'hidden' ? 'Wiederherstellen' : 'Ausblenden'" @click="photo.curation_status === 'hidden' ? emit('restore', photo.id) : emit('hide', photo.id)" :severity="photo.curation_status === 'hidden' ? 'danger' : 'secondary'" text rounded />
@@ -373,6 +367,12 @@ watch(() => props.photo.id, () => {
               @click="toggleCover"
           />
         </template>
+        <PhotoLocationMenu
+          :photo-id="photo.id"
+          :exclude-all-photos="locationMenuExcludeAllPhotos"
+          :exclude-album-id="albumId"
+          :exclude-person-id="locationMenuExcludePersonId"
+        />
       </div>
 
       <!-- Curation opinions (shared albums only) -->
@@ -411,10 +411,8 @@ watch(() => props.photo.id, () => {
       <div class="meta-list">
         <div class="meta-row">
           <i class="pi pi-calendar meta-icon" />
-          <span class="meta-value date-value">
-            {{ formatPhotoDateDisplay(photo) }}
-            <Button v-if="canUpload && !isEditingDate" icon="pi pi-pencil" text rounded size="small" @click="emit('start-edit-date')" class="edit-btn" />
-          </span>
+          <span class="meta-value date-value">{{ formatPhotoDateDisplay(photo) }}</span>
+          <Button v-if="canUpload && !isEditingDate" icon="pi pi-pencil" text rounded size="small" @click="emit('start-edit-date')" class="edit-btn" />
         </div>
         <div v-if="isEditingDate" class="date-editor">
           <DatePicker v-model="editDate" showTime hourFormat="24" fluid />

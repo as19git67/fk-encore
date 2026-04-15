@@ -9,7 +9,6 @@ import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import PhotoGrid from '../components/PhotoGrid.vue'
 import TimelineNav from '../components/TimelineNav.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
-import PhotoLocationMenu from '../components/PhotoLocationMenu.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
 import NaturalSearchBar from '../components/NaturalSearchBar.vue'
@@ -910,9 +909,6 @@ onUnmounted(() => serviceHealth.stopPolling())
       @show-details="fullscreenDetailsOpen = !fullscreenDetailsOpen"
       @toggle-cover="handleSetMapCover"
     >
-      <template #topbar-actions-before>
-        <PhotoLocationMenu :photo-id="selectedPhoto.id" :exclude-album-id="albumId" />
-      </template>
       <template #details-flyout>
         <PhotoDetailSidebar
           :in-flyout="true"
@@ -966,7 +962,6 @@ onUnmounted(() => serviceHealth.stopPolling())
       @toggle-cover="handleSetMapCover"
     >
       <template #topbar-actions-before>
-        <PhotoLocationMenu :photo-id="mapSelectedPhoto.id" :exclude-album-id="albumId" />
         <Button
           icon="pi pi-image"
           rounded text

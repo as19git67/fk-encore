@@ -9,7 +9,6 @@ import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import PhotoGrid from '../components/PhotoGrid.vue'
 import TimelineNav from '../components/TimelineNav.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
-import PhotoLocationMenu from '../components/PhotoLocationMenu.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import NaturalSearchBar from '../components/NaturalSearchBar.vue'
 import {
@@ -937,11 +936,8 @@ onUnmounted(() => {
       @hide="handleDelete"
       @restore="handleRestore"
       @show-details="isFullscreen = false; mobileSidebarOpen = true; mobileTimelineOpen = false"
-    >
-      <template #topbar-actions-before>
-        <PhotoLocationMenu :photo-id="selectedPhoto.id" :exclude-all-photos="true" />
-      </template>
-    </FullscreenOverlay>
+    />
+    <!-- end fullscreen overlay -->
 
     <PhotoCompareView
       v-if="activeGroup"

@@ -11,7 +11,6 @@ import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import PersonNav from '../components/PersonNav.vue'
 import FacePhotoGrid from '../components/FacePhotoGrid.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
-import PhotoLocationMenu from '../components/PhotoLocationMenu.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import {
   listPersons, updatePerson, mergePersons, getPersonDetails,
@@ -405,7 +404,6 @@ onUnmounted(() => serviceHealth.stopPolling())
         :selectedIndex="selectedIndex"
         :loadingDetails="loadingDetails"
         :canDelete="canDelete"
-        :currentPersonId="selectedPerson?.id"
         @update:selectedIndex="selectedIndex = $event"
         @open-fullscreen="isFullscreen = true"
         @toggle-favorite="handleToggleFavorite"
@@ -492,7 +490,6 @@ onUnmounted(() => serviceHealth.stopPolling())
         <Button v-if="selectedPerson" icon="pi pi-pencil" rounded text size="small" @click.stop="openRename(selectedPerson)" />
       </template>
       <template #topbar-actions>
-        <PhotoLocationMenu :photo-id="selectedPhoto.id" :exclude-person-id="selectedPerson?.id" />
         <Button icon="pi pi-images" rounded text severity="secondary" v-tooltip.bottom="'In Fotos anzeigen'" @click.stop="navigateToPhoto(selectedPhoto.id)" />
         <Button icon="pi pi-info-circle" rounded text severity="secondary" v-tooltip.bottom="'Details'" @click.stop="isFullscreen = false; mobileSidebarOpen = true; mobilePersonNavOpen = false" />
         <Button v-if="canDelete" :icon="selectedPhoto.curation_status === 'hidden' ? 'pi pi-eye-slash' : 'pi pi-eye'" rounded text :severity="selectedPhoto.curation_status === 'hidden' ? 'danger' : 'secondary'" @click.stop="selectedPhoto.curation_status === 'hidden' ? handleRestorePhoto(selectedPhoto.id) : handleHidePhoto(selectedPhoto.id)" />

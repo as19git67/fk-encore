@@ -2,7 +2,6 @@
 import { ref, watch, nextTick, onMounted } from 'vue'
 import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
-import PhotoLocationMenu from './PhotoLocationMenu.vue'
 import { usePhotoLazyLoad } from '../composables/usePhotoLazyLoad'
 import { getPhotoUrl, type CurationStatus, type FaceBBox } from '../api/photos'
 import { thumbnailImageStyle, faceBoxStyle, thumbnailSrcWidth } from '../utils/faceBbox'
@@ -29,9 +28,6 @@ const props = defineProps<{
   selectedIndex: number
   loadingDetails?: boolean
   canDelete?: boolean
-  /** Person whose face grid is currently shown — used to exclude that
-   * person from the per-photo "show in other locations" menu. */
-  currentPersonId?: number
 }>()
 
 const emit = defineEmits<{
@@ -101,11 +97,7 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
 
         <div class="photo-info">
           <span class="name">{{ item.photo.original_name }}</span>
-          <div class="photo-actions" @click.stop>
-            <PhotoLocationMenu
-              :photo-id="item.photo.id"
-              :exclude-person-id="currentPersonId"
-            />
+          <div class="photo-actions">
             <Button
               v-if="canDelete"
               size="small"
@@ -202,13 +194,6 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
 .photo-item:hover .photo-info,
 .photo-item.selected .photo-info,
 .photo-item:focus-within .photo-info { opacity: 1; }
-
-/* On touch devices `:hover` is unreliable: keep the action overlay
-   permanently visible so users can reach the per-photo actions
-   (favorite, hide, "show in other locations") without first selecting. */
-@media (hover: none) {
-  .photo-item .photo-info { opacity: 1; }
-}
 
 .photo-info .name {
   font-size: 0.8rem;
