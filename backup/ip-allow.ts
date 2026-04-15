@@ -159,19 +159,41 @@ export function isRemoteAllowed(remoteAddr: string | undefined | null): boolean 
 }
 
 /**
+ * Placeholder socket addresses that Encore.ts fills in when no real peer is
+ * available to the Node handler. Treating them as "no peer IP" is what
+ * lets `isPeerAddressUsable` tell the auth layer to skip the CIDR check.
+ */
+const UNUSABLE_SOCKET_ADDRS = new Set(["0.0.0.0", "::", "::0"]);
+
+/**
+ * Returns true when the CIDR check has a real IP to match against.
+ * Returns false when the runtime only gave us a placeholder / loopback-ish
+ * value that carries no network-origin signal (Encore.ts' `api.raw`
+ * handler is the motivating case — its socket is reported as `0.0.0.0`
+ * and there are no forwarding headers). In that situation we cannot
+ * enforce BACKUP_ALLOW_CIDRS and must fall back to the bearer token.
+ */
+export function isPeerAddressUsable(addr: string | undefined | null): boolean {
+  const ip = normaliseIp(addr);
+  if (!ip) return false;
+  if (UNUSABLE_SOCKET_ADDRS.has(ip)) return false;
+  return net.isIP(ip) !== 0;
+}
+
+/**
  * Pick the effective remote address for authorisation.
  *
  * Encore.ts runs the Node handler behind its Rust HTTP layer, which means
- * `req.socket.remoteAddress` inside an `api.raw` handler points at the
- * internal proxy (or is missing entirely) — never at the real TCP peer.
- * The verified peer IP is relayed via `X-Forwarded-For`, which is why the
- * rest of the app (see `user/rateLimiter.ts`) also reads it from headers.
+ * `req.socket.remoteAddress` inside an `api.raw` handler is a placeholder
+ * (observed: `"0.0.0.0"`) — never the real TCP peer. Encore also does
+ * not relay the peer IP via `X-Forwarded-For` / `X-Real-IP` for raw
+ * endpoints. When that happens `isPeerAddressUsable(returned)` will be
+ * false and the caller should skip the CIDR check.
  *
- * We therefore use the left-most X-Forwarded-For entry as the peer address
- * whenever it is present. The `BACKUP_TRUST_XFF` env var is kept as an
- * explicit opt-out for operators who want to fall back to the socket
- * address (e.g. when Encore is replaced by a plain Node HTTP server in a
- * testing rig): setting `BACKUP_TRUST_XFF=false` disables XFF use.
+ * If an upstream reverse proxy (nginx, Caddy, Traefik, ...) *does*
+ * populate `X-Forwarded-For` and Encore preserves it, we read the
+ * left-most entry — matching `user/rateLimiter.ts`. Set
+ * `BACKUP_TRUST_XFF=false` to disable that behaviour in test rigs.
  */
 export function effectiveRemoteAddress(
   socketAddr: string | undefined | null,
