@@ -715,6 +715,14 @@ watch(albumId, () => {
           <span :class="['header__badge', `header__badge--${album.role}`]">{{ album.role }}</span>
         </div>
 
+        <!-- 2. Metadata -->
+        <div class="header__meta">
+          {{ album.photo_count }} {{ album.photo_count === 1 ? 'Foto' : 'Fotos' }}
+          <template v-if="album.oldest_photo_at && album.newest_photo_at">
+            &bull; {{ new Date(album.oldest_photo_at).toLocaleDateString() }} – {{ new Date(album.newest_photo_at).toLocaleDateString() }}
+          </template>
+        </div>
+
         <!-- 3. Description with edit -->
         <div v-if="displayMode !== 'map'" class="header__description">
           <div v-if="!editingDescription" class="header__description-view">
@@ -730,14 +738,6 @@ watch(albumId, () => {
               <Button :disabled="updatingAlbum" icon="pi pi-times" size="small" text @click="editingDescription = false" />
             </div>
           </div>
-        </div>
-
-        <!-- 4. Metadata -->
-        <div class="header__meta">
-          {{ album.photo_count }} {{ album.photo_count === 1 ? 'Foto' : 'Fotos' }}
-          <template v-if="album.oldest_photo_at && album.newest_photo_at">
-            &bull; {{ new Date(album.oldest_photo_at).toLocaleDateString() }} – {{ new Date(album.newest_photo_at).toLocaleDateString() }}
-          </template>
         </div>
 
         <!-- 5a. View switcher – DESKTOP (text labels) -->
