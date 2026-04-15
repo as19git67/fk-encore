@@ -17,6 +17,7 @@
  */
 
 import { APIError } from "encore.dev/api";
+import log from "encore.dev/log";
 import type { IncomingMessage } from "http";
 import { effectiveRemoteAddress, isRemoteAllowed } from "./ip-allow";
 
@@ -28,8 +29,20 @@ export function assertBackupRequest(req: IncomingMessage): void {
 
 function assertRemoteAllowed(req: IncomingMessage): void {
   const socketAddr = req.socket?.remoteAddress;
-  const addr = effectiveRemoteAddress(socketAddr, req.headers["x-forwarded-for"]);
+  const xff = req.headers["x-forwarded-for"];
+  const addr = effectiveRemoteAddress(socketAddr, xff);
   if (!isRemoteAllowed(addr)) {
+    // One-off diagnostic dump: what sources of peer IP did we actually
+    // see? Helps operators figure out whether the request reaches us
+    // with an unset socket (typical inside Encore.ts) or with an XFF
+    // value that falls outside BACKUP_ALLOW_CIDRS.
+    log.warn("backup.auth.cidr-rejected", {
+      effective: addr ?? null,
+      socket: socketAddr ?? null,
+      xForwardedFor: xff ?? null,
+      xRealIp: req.headers["x-real-ip"] ?? null,
+      headerNames: Object.keys(req.headers),
+    });
     throw APIError.unauthenticated(
       `remote address ${addr ?? "<unknown>"} is not in BACKUP_ALLOW_CIDRS`,
     );
