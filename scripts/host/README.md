@@ -1,13 +1,12 @@
 # Host-side backup hook for fk-encore
 
-The files in this directory are installed on the **host** (TrueNAS SCALE or
-any Linux machine with ZFS) and coordinate an application-consistent
-backup:
+The files in this directory coordinate an application-consistent backup
+between a host-side cron job and the fk-encore container:
 
 ```
-┌──── host (root, cron) ─────────────────────────────────────────────────┐
+┌──── host (root, TrueNAS UI cron) ──────────────────────────────────────┐
 │                                                                        │
-│   /mnt/<dataset>/fk-encore-hook/fk-encore-backup.sh                    │
+│   /mnt/<dataset>/<backup-dir>/host-scripts/fk-encore-backup.sh         │
 │       │                                                                │
 │       ├─ POST /internal/backup/start  ── app pauses workers,           │
 │       │                                    pg_backup_start(),          │
@@ -19,88 +18,110 @@ backup:
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Upgrade safety on TrueNAS SCALE
+## How the scripts get onto the host
 
-TrueNAS SCALE replaces the root filesystem on every upgrade (new boot
-environment). Anything under `/etc`, `/usr/local/sbin` or `/etc/cron.d`
-would vanish at the next upgrade. This installer therefore places **all**
-persistent artefacts on a ZFS dataset under
-`/mnt/<dataset>/fk-encore-hook/`, and the cron job itself is registered
-via the TrueNAS UI (System Settings → Advanced → Cron Jobs), which is
-stored in the config DB — both survive upgrades.
+You do **not** need to clone the fk-encore repo on the host. Every time
+the fk-encore container starts, it copies the three files in this
+directory onto the backup volume at:
+
+```
+/mnt/<dataset>/<backup-dir>/host-scripts/
+    ├── install-backup-hook.sh
+    ├── fk-encore-backup.sh
+    └── README.md
+```
+
+(The container only ever overwrites those three files. Anything else in
+that directory — most importantly the `backup-token` written by the
+installer — is preserved across image upgrades.)
+
+The path is a sibling of the pg_dump output dir. Both live on a ZFS
+dataset, which means they survive a TrueNAS SCALE upgrade. Files placed
+under `/etc`, `/usr/local/sbin` or `/etc/cron.d` would not — TrueNAS
+replaces the boot environment on every upgrade. The cron job itself is
+registered via the TrueNAS UI so it lives in the config DB and is
+upgrade-safe too.
 
 ## Files
 
 | File                     | Role |
 |--------------------------|------|
-| `fk-encore-backup.sh`    | The daily driver. Installed onto the dataset, called by the TrueNAS cron job. |
-| `install-backup-hook.sh` | One-time installer. Prompts for the dataset, generates the token, deploys the driver. |
+| `fk-encore-backup.sh`    | The daily driver. Stateless; reads everything from env vars / the sibling token file. The cron job calls this. |
+| `install-backup-hook.sh` | One-time setup helper. Generates the token file (if absent) and prints the cron-job fields to fill in the TrueNAS UI. |
 
 ## Install
 
-Clone the fk-encore repo on the host (or copy `scripts/host/` via rsync)
-and run the installer as root. The installer prompts for the ZFS dataset
-interactively; pass `--dataset` to skip the prompt:
+1. Bring the fk-encore stack up at least once so the container seeds the
+   scripts onto the backup volume:
 
-```bash
-sudo ./scripts/host/install-backup-hook.sh
-# or non-interactive:
-sudo ./scripts/host/install-backup-hook.sh --dataset tank/vivanty
-```
+   ```bash
+   docker compose up -d
+   ```
 
-The installer will:
+2. SSH to the host as root and run the installer from where the container
+   put it:
 
-1. Create `/mnt/<dataset>/fk-encore-hook/` (mode `0700`, owner `root:root`).
-2. Generate a 32-byte random token and write it to
-   `/mnt/<dataset>/fk-encore-hook/backup-token` (mode `0600`,
-   owner `root:root`). If a non-empty file exists it is kept as-is, so
-   re-running the installer is safe and idempotent.
-3. Copy `fk-encore-backup.sh` to
-   `/mnt/<dataset>/fk-encore-hook/fk-encore-backup.sh` (mode `0755`,
-   owner `root:root`). The driver reads the token from its sibling
-   `backup-token` by default — no env-var plumbing needed.
-4. Print the `BACKUP_TOKEN=…` line for the app's `.env` plus the exact
-   fields to fill in the TrueNAS cron-jobs form.
+   ```bash
+   sudo /mnt/<dataset>/<backup-dir>/host-scripts/install-backup-hook.sh
+   # or non-interactive:
+   sudo /mnt/<dataset>/<backup-dir>/host-scripts/install-backup-hook.sh --dataset tank/vivanty
+   ```
 
-The installer refuses to install on `boot-pool/*` — that dataset is wiped
-on upgrade.
+   The installer will:
 
-Until `BACKUP_TOKEN` is set in the app's environment, `/internal/backup/*`
-responds with `401 Unauthenticated`.
+   - Prompt for the ZFS dataset (used both for the cron-job command-line
+     template and for the `zfs snapshot -r` target). A sensible default is
+     suggested if `zfs list` reports a single non-boot dataset.
+   - Generate a 32-byte random token at
+     `<host-scripts>/backup-token` (mode `0600`, owner `root:root`).
+     Re-runs are idempotent — an existing non-empty token is preserved.
+   - Print the `BACKUP_TOKEN=…` line for the project's `.env` and the
+     exact fields to fill in the TrueNAS UI cron-jobs form.
 
-### Cron-job via the TrueNAS UI
+3. Add the printed `BACKUP_TOKEN=…` line to `.env` next to
+   `docker-compose.yml` and restart the app:
 
-Do **not** write into `/etc/cron.d/` on TrueNAS SCALE — it is not
-preserved across upgrades. Use the UI instead:
+   ```bash
+   docker compose up -d --no-deps app
+   ```
 
-1. System Settings → Advanced → Cron Jobs → **Add**.
-2. Fill the form:
+   Until `BACKUP_TOKEN` is set, `/internal/backup/*` responds with
+   `401 Unauthenticated`.
 
-   | Field          | Value |
-   |----------------|-------|
-   | Description    | `fk-encore daily backup` |
-   | Command        | `ZFS_DATASET=<your-dataset> /mnt/<dataset>/fk-encore-hook/fk-encore-backup.sh` |
-   | Run As User    | `root` |
-   | Schedule       | Custom → `0 3 * * *` (03:00 UTC daily) |
-   | Hide Stdout    | no (so any warning triggers a cron mail) |
-   | Hide Stderr    | no |
-   | Enabled        | yes |
+4. Register the daily cron job via the TrueNAS UI (System Settings →
+   Advanced → Cron Jobs → Add). The installer's last lines contain the
+   exact command line to paste into the **Command** field, including the
+   `ZFS_DATASET=…` prefix.
 
-The installer's final output contains the exact command line for copy/paste.
+## Why is the daily script overwritten on every container start?
+
+Because that's exactly what makes upgrades painless: the script that runs
+on the host always matches the version that was shipped with the
+currently-running container image. Both `install-backup-hook.sh` and
+`fk-encore-backup.sh` are entirely stateless — every input comes from an
+env var, a CLI argument, or an interactive prompt. They never store
+anything in their own source directory other than the token file
+(written by the installer). The container's seed step explicitly leaves
+the token file alone, so credentials are stable across upgrades.
+
+If you ever need to pin a specific version on the host, copy the scripts
+out of `host-scripts/` and adjust the cron-job command to point at the
+copy.
 
 ## Test the flow end-to-end
 
 Run the driver manually as root:
 
 ```bash
-sudo ZFS_DATASET=tank/vivanty /mnt/tank/vivanty/fk-encore-hook/fk-encore-backup.sh
+sudo ZFS_DATASET=tank/vivanty \
+     /mnt/tank/vivanty/backup/host-scripts/fk-encore-backup.sh
 zfs list -t snapshot | grep "tank/vivanty@" | tail
 ls -la /mnt/tank/vivanty/backup/   # should contain encore-<label>.dump
 ```
 
-When the script is run manually, logs go to stderr. When invoked by the
-TrueNAS cron job, stdout/stderr flow into the cron mail (unless you hid
-them in the form).
+When run manually, logs go to stderr. When invoked by the TrueNAS cron
+job, stdout/stderr flow into the cron mail (unless you hid them in the
+form).
 
 ## Restore
 
@@ -119,11 +140,10 @@ docker compose up -d
 The fk-encore app does not need to do anything. This is the fastest way
 to recover from a bad deploy or a ransomware-style incident.
 
-Note: a full rollback also reverts
-`/mnt/<dataset>/fk-encore-hook/backup-token` to the token that was
-current at the time of the snapshot. If you had rotated the token
-afterwards, put the newer token back into the `.env` (or simply re-run
-the installer, which keeps the token file untouched if it already exists).
+Note: a full rollback also reverts the `backup-token` file to whatever
+was current at the time of the snapshot. If you had rotated the token
+afterwards, copy the newer token back into `.env` (or just re-run the
+installer, which preserves the existing token file).
 
 ### Path B — restore only the DB from a pg_dump
 
@@ -155,41 +175,45 @@ another mechanism) but the database needs to roll back.
 
 ## Configuration (host side)
 
-| Env var | Default | Effect |
-|---------|---------|--------|
-| `FK_ENCORE_URL`        | `http://localhost:8080`             | Where to reach the app. |
-| `FK_BACKUP_TOKEN_FILE` | `<script-dir>/backup-token`         | Path to the shared secret. Defaults to a sibling of the script on the dataset. |
-| `ZFS_DATASET`          | `tank/vivanty`                      | Dataset for `zfs snapshot -r`. Override via the cron-job command line. |
-| `LABEL`                | `daily-<UTC timestamp>`             | Snapshot and dump label. |
-| `CURL_TIMEOUT`         | `30`                                | Per-HTTP-call timeout (seconds). |
+`fk-encore-backup.sh` accepts overrides via env vars:
 
-Override by editing the TrueNAS cron-job **Command** field, e.g.:
+| Env var                | Default                        | Effect |
+|------------------------|--------------------------------|--------|
+| `FK_ENCORE_URL`        | `http://localhost:8080`        | Where to reach the app. |
+| `FK_BACKUP_TOKEN_FILE` | `<script-dir>/backup-token`    | Path to the shared secret. The default is the file the installer writes next to the script. |
+| `ZFS_DATASET`          | `tank/vivanty`                 | Dataset for `zfs snapshot -r`. Override via the cron-job command line. |
+| `LABEL`                | `daily-<UTC timestamp>`        | Snapshot and dump label. |
+| `CURL_TIMEOUT`         | `30`                           | Per-HTTP-call timeout in seconds. |
+
+Override by editing the cron-job **Command** field in the TrueNAS UI:
 
 ```
-ZFS_DATASET=tank/vivanty FK_ENCORE_URL=http://localhost:8080 /mnt/tank/vivanty/fk-encore-hook/fk-encore-backup.sh
+ZFS_DATASET=tank/vivanty FK_ENCORE_URL=http://localhost:8080 \
+    /mnt/tank/vivanty/backup/host-scripts/fk-encore-backup.sh
 ```
 
 ## Configuration (app side)
 
-The app reads these from the container environment (see `docker-compose.yml`):
+The app reads these from the container environment (see
+`docker-compose.yml`):
 
-| Env var | Default | Effect |
-|---------|---------|--------|
-| `BACKUP_DIR`          | `/mnt/backup`           | Where dumps and the `restore-*.dump` trigger live (inside the container). |
-| `BACKUP_AUTO_STOP_MS` | `1800000` (30 min)      | Safety timer — force-stops a stuck backup if `/stop` never arrives. |
-| `BACKUP_ALLOW_CIDRS`  | *(see below)*           | Comma-separated CIDR allow-list for the peer address. |
-| `BACKUP_TRUST_XFF`    | `false`                 | If `true`, use the left-most `X-Forwarded-For` entry as the peer address. |
+| Env var               | Default            | Effect |
+|-----------------------|--------------------|--------|
+| `BACKUP_DIR`          | `/mnt/backup`      | Where dumps and the `restore-*.dump` trigger live (inside the container). The seed step writes `host-scripts/` here too. |
+| `BACKUP_AUTO_STOP_MS` | `1800000` (30 min) | Safety timer — force-stops a stuck backup if `/stop` never arrives. |
+| `BACKUP_ALLOW_CIDRS`  | *(see below)*      | Comma-separated CIDR allow-list for the peer address. |
+| `BACKUP_TRUST_XFF`    | `false`            | If `true`, use the left-most `X-Forwarded-For` entry as the peer address. |
 
 `BACKUP_TOKEN` must be provisioned in the app container's environment
-(via the project's `.env` / `docker-compose.yml`). It is the shared value
-between this directory's installer and the app, and must match the
-contents of `/mnt/<dataset>/fk-encore-hook/backup-token`.
+(via the project's `.env` / `docker-compose.yml`). It is the shared
+value between the installer and the app, and must match the contents of
+`<host-scripts>/backup-token`.
 
 ## Security
 
-- The token file is `0600 root:root` on a dataset that is not exposed to
-  containers. The cron job runs as root, reads the token, and calls the
-  app over loopback HTTP.
+- The token file is `0600 root:root` on a ZFS dataset that is only
+  reachable via the host filesystem. The cron job runs as root, reads
+  the token, and calls the app over loopback HTTP.
 - The `/internal/backup/*` endpoints are guarded by **two** checks that
   run in order:
   1. **CIDR allow-list.** The peer address must fall inside

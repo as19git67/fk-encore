@@ -81,114 +81,75 @@ EMBEDDING_DB_PASSWORD=another-password
 | `app-data`         | SQLite database + uploaded photos          |
 | `embedding-pgdata` | PostgreSQL data for photo embeddings       |
 
-### Automatisches tägliches Backup (empfohlen)
+### Automatic daily backup (recommended)
 
-Das Repo enthält einen Host-Hook, der täglich einen **anwendungs-konsistenten
-ZFS-Snapshot** inklusive `pg_dump` der Haupt-DB erzeugt. Der Ablauf:
+The repo ships with a host-side hook that takes a daily
+**application-consistent ZFS snapshot** including a `pg_dump` of the main DB.
+Flow:
 
-1. Host-Cron ruft `POST /internal/backup/start` — fk-encore pausiert die
-   Scan-Worker, setzt das Cluster per `pg_backup_start()` in den Backup-Modus
-   und schreibt einen `pg_dump` nach `/mnt/backup/encore-<label>.dump`.
-2. Der Host macht `zfs snapshot -r tank/vivanty@<label>` — pgdata + Fotos +
-   der gerade erstellte Dump sind damit konsistent im Snapshot.
-3. Host-Cron ruft `POST /internal/backup/stop` — `pg_backup_stop()`, Worker
-   laufen wieder.
+1. The host cron calls `POST /internal/backup/start` — fk-encore pauses the
+   scan workers, puts the cluster into backup mode via `pg_backup_start()`,
+   and writes a `pg_dump` to `/mnt/backup/encore-<label>.dump`.
+2. The host runs `zfs snapshot -r tank/vivanty@<label>` — pgdata + photos
+   + the dump that was just written are all consistently captured in the
+   snapshot.
+3. The host cron calls `POST /internal/backup/stop` — `pg_backup_stop()`,
+   workers resume.
 
-Eine Sicherheits-Zeitschaltuhr (default 30 Minuten) beendet den Backup-Modus
-automatisch, falls `/stop` nie ankommt — damit kann das WAL nicht endlos
-wachsen.
+A safety timer (default 30 minutes) automatically ends backup mode if
+`/stop` never arrives, so the WAL cannot grow without bound.
 
-**Installation auf dem Host (einmalig, als root):**
+**Installation on the host (one time, as root):**
 
-```bash
-sudo ./scripts/host/install-backup-hook.sh
-# oder nicht-interaktiv:
-sudo ./scripts/host/install-backup-hook.sh --dataset tank/vivanty
+The fk-encore container ships the host-side hook scripts inside the image
+and copies them onto the backup volume on every start. You do **not**
+need to clone the fk-encore repo on the host. The path on the host is:
+
+```
+/mnt/<dataset>/<backup-dir>/host-scripts/
+    ├── install-backup-hook.sh
+    ├── fk-encore-backup.sh
+    └── README.md
 ```
 
-Wichtig: Alle persistenten Artefakte landen unter
-`/mnt/<dataset>/fk-encore-hook/` — also auf dem ZFS-Dataset selbst und
-**nicht** unter `/etc` oder `/usr/local/sbin`. Grund: TrueNAS SCALE tauscht
-bei jedem Upgrade das Root-Dateisystem komplett aus (neues Boot-
-Environment), Dateien unter `/etc/…` würden dabei verloren gehen. Datasets
-bleiben erhalten.
+Run the installer from there:
 
-Der Installer:
+```bash
+sudo /mnt/<dataset>/<backup-dir>/host-scripts/install-backup-hook.sh
+# or non-interactive:
+sudo /mnt/<dataset>/<backup-dir>/host-scripts/install-backup-hook.sh \
+    --dataset tank/vivanty
+```
 
-1. Fragt interaktiv nach dem Dataset (falls nicht per `--dataset` gesetzt)
-2. Legt `/mnt/<dataset>/fk-encore-hook/` mit Token (0600) und Script (0755) an
-3. Druckt am Ende den generierten Token **und** die genauen Felder, die
-   für den täglichen Cron-Job in der TrueNAS-UI auszufüllen sind
+Why this layout? TrueNAS SCALE replaces the entire root filesystem on
+every upgrade (new boot environment), so files under `/etc`,
+`/usr/local/sbin` or `/etc/cron.d` would vanish. ZFS datasets survive
+upgrades, so all persistent artefacts (the scripts and the token file
+that the installer generates) live there.
 
-Den Token in die `.env` neben der `docker-compose.yml` eintragen und den
-Container neu starten:
+The container only ever overwrites the three files it ships
+(`install-backup-hook.sh`, `fk-encore-backup.sh`, `README.md`). The
+`backup-token` file the installer writes is preserved across image
+upgrades, and so is anything else you might have placed in that
+directory.
+
+The installer:
+
+1. Asks for the dataset interactively (or takes `--dataset`).
+2. Generates a random token at `<host-scripts>/backup-token`
+   (`0600 root:root`). Re-runs preserve any existing non-empty token.
+3. Prints both the `BACKUP_TOKEN=…` line for `.env` and the exact fields
+   to fill in the TrueNAS UI cron-jobs form.
+
+Add the printed token to `.env` next to `docker-compose.yml` and restart
+the container:
 
 ```env
-BACKUP_TOKEN=<vom Installer generierter Wert>
+BACKUP_TOKEN=<value-printed-by-the-installer>
 ```
 
 ```bash
 docker compose up -d --no-deps app
-```
-
-**Cron-Job über die TrueNAS-UI einrichten** (nicht über `/etc/cron.d/`, das
-überlebt den nächsten TrueNAS-Upgrade nicht):
-
-System Settings → Advanced → Cron Jobs → Add
-
-| Feld          | Wert |
-|---------------|------|
-| Description   | `fk-encore daily backup` |
-| Command       | `ZFS_DATASET=<dataset> /mnt/<dataset>/fk-encore-hook/fk-encore-backup.sh` |
-| Run As User   | `root` |
-| Schedule      | Custom → `0 3 * * *` (03:00 UTC) |
-| Enabled       | yes |
-
-Der Installer druckt die genaue Command-Zeile zum Kopieren aus.
-
-Die `/internal/backup/*` Endpunkte sind zusätzlich per CIDR-Allow-List
-abgesichert (Standard: Loopback + RFC1918 + IPv6 ULA). Damit werden
-Requests aus dem öffentlichen Internet selbst dann abgelehnt, wenn der
-Token einmal leakt — die Standard-Liste deckt Host-→Container-Traffic
-über die Docker-Bridge (SNAT auf `172.17.0.1` o. ä.) bereits ab, es ist
-normalerweise keine Anpassung nötig. Falls doch: via `BACKUP_ALLOW_CIDRS`
-in der `.env` überschreiben.
-
-Details und Konfiguration siehe `scripts/host/README.md`.
-
-### Wiederherstellen
-
-Zwei Pfade werden unterstützt:
-
-**A) Vollständiger Rollback (Fotos + DB, schnell):**
-
-```bash
-docker compose down
-sudo zfs rollback -r tank/vivanty@daily-20260413-030000
-docker compose up -d
-```
-
-**B) Nur DB aus `pg_dump` wiederherstellen (Opt-in beim Start):**
-
-```bash
-# 1. Dump-Datei als "restore-*" im Backup-Verzeichnis ablegen
-cp /mnt/backup/encore-daily-20260413-030000.dump \
-   /mnt/backup/restore-20260414-rollback.dump
-
-# 2. Container neustarten
-docker compose restart app
-```
-
-Beim Start erkennt fk-encore die Datei, legt zunächst zur Sicherheit einen
-`pre-restore-<ISO>.dump` des aktuellen DB-Stands an, führt `pg_restore
---clean --if-exists` aus und benennt die Trigger-Datei in
-`restored-…` um, damit der Restore beim nächsten Start nicht erneut läuft.
-
-**Notfall-Backup ohne ZFS-Snapshot (z. B. auf Nicht-TrueNAS-Systemen):**
-
-```bash
-# Nur die Haupt-DB — Fotos separat per rsync/etc. sichern
-docker exec fk-encore-app sh -c 'pg_dump -Fc --no-owner "$POSTGRES_DATABASE" > /mnt/backup/encore-manual.dump'
 ```
 
 **Register the cron job via the TrueNAS UI** (do not write to

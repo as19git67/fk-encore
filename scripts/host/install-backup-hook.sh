@@ -1,36 +1,36 @@
 #!/usr/bin/env bash
 #
-# One-time installer for the fk-encore backup hook on a TrueNAS SCALE host.
+# One-time setup helper for the fk-encore backup hook.
 #
-# TrueNAS SCALE wipes the root filesystem on every upgrade (new boot
-# environment), so anything under /etc, /usr/local/sbin or /etc/cron.d
-# would vanish after the next upgrade. This installer instead places all
-# persistent artefacts on a ZFS dataset under /mnt/<dataset>/fk-encore-hook/
-# — datasets survive upgrades. The cron entry itself is NOT written into
-# /etc/cron.d/; instead the script prints copy-paste instructions for the
-# TrueNAS UI (System Settings → Advanced → Cron Jobs), which stores cron
-# definitions in the config DB and therefore also survives upgrades.
+# Workflow on TrueNAS SCALE:
 #
-# What it does:
-#   1. Asks for the ZFS dataset (e.g. tank/vivanty) unless --dataset is given.
-#      Verifies /mnt/<dataset> is present and is not the boot pool.
-#   2. Creates /mnt/<dataset>/fk-encore-hook/ (mode 0700, owner root:root).
-#   3. Generates a 32-byte random token and writes it to
-#      <install-dir>/backup-token (mode 0600, owner root:root). Re-run safe:
-#      an existing non-empty token file is kept.
-#   4. Copies fk-encore-backup.sh to <install-dir>/fk-encore-backup.sh.
-#   5. Prints the BACKUP_TOKEN value for the project's .env and the exact
-#      TrueNAS UI fields to fill in for the daily cron job.
+#   1. Bring the fk-encore stack up at least once. The container then copies
+#      this script and `fk-encore-backup.sh` onto the backup volume at
+#      /mnt/<dataset>/<backup-dir>/host-scripts/ (see backup/startup.ts).
+#   2. SSH to the host as root and run THIS script from that directory:
+#        sudo /mnt/<dataset>/<backup-dir>/host-scripts/install-backup-hook.sh
+#   3. Follow the on-screen instructions to register the daily cron job
+#      via the TrueNAS UI (System Settings → Advanced → Cron Jobs).
+#
+# This script is fully stateless except for the token file it writes next to
+# itself (`backup-token`). All runtime input is taken from $1/--dataset or
+# from an interactive prompt, so re-running the script (or having the
+# container overwrite it on the next start) is harmless: the token is
+# preserved (it lives outside the set of files the container manages),
+# and the rest is just printed reminders.
 #
 # Usage (as root):
-#   ./install-backup-hook.sh [--dataset tank/vivanty]
+#   ./install-backup-hook.sh                       # interactive prompt
+#   ./install-backup-hook.sh --dataset tank/foo    # non-interactive
 #
-# Re-run-safe: every step is idempotent.
+# Idempotent: re-running keeps the existing token unchanged.
 
 set -euo pipefail
 
 DATASET=""
-SCRIPT_SRC="$(cd "$(dirname "$0")" && pwd)/fk-encore-backup.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DRIVER_SCRIPT="$SCRIPT_DIR/fk-encore-backup.sh"
+TOKEN_FILE="$SCRIPT_DIR/backup-token"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -48,15 +48,19 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 
-if [[ ! -r "$SCRIPT_SRC" ]]; then
-  echo "cannot read $SCRIPT_SRC — run this script from the repository's scripts/host/ directory" >&2
+if [[ ! -x "$DRIVER_SCRIPT" ]]; then
+  echo "FATAL: $DRIVER_SCRIPT not found or not executable." >&2
+  echo "       This script is meant to run from the host-scripts/ directory" >&2
+  echo "       seeded by the fk-encore container onto the backup volume." >&2
+  echo "       Has the container been started at least once?" >&2
   exit 1
 fi
 
 # --- dataset prompt --------------------------------------------------------
+# We only need the dataset to template the cron-job command line and to
+# prove the install location is on a real ZFS dataset (i.e. survives a
+# TrueNAS upgrade).
 if [[ -z "$DATASET" ]]; then
-  # Try to offer a sensible default by listing top-level datasets on
-  # non-boot pools. If exactly one candidate exists, use it as the default.
   DEFAULT_DATASET=""
   if command -v zfs >/dev/null 2>&1; then
     mapfile -t CANDIDATES < <(zfs list -H -o name -d 1 2>/dev/null \
@@ -67,9 +71,9 @@ if [[ -z "$DATASET" ]]; then
     fi
   fi
 
-  echo "On which ZFS dataset should the backup hook be installed?"
-  echo "  (this is the dataset that will also be targeted by 'zfs snapshot -r';"
-  echo "   typically the one containing pgdata, photos and the backup dump dir)"
+  echo "Which ZFS dataset should be snapshotted by the daily backup?"
+  echo "  (typically the dataset that holds pgdata, photos and the backup dump dir;"
+  echo "   it will be the target of 'zfs snapshot -r')"
   if [[ -n "$DEFAULT_DATASET" ]]; then
     read -r -p "Dataset [$DEFAULT_DATASET]: " DATASET
     DATASET="${DATASET:-$DEFAULT_DATASET}"
@@ -89,33 +93,24 @@ if [[ "$DATASET" =~ ^/ ]] || [[ "$DATASET" =~ [[:space:]] ]]; then
   exit 1
 fi
 
-# Refuse the boot pool — defeats the whole purpose.
 POOL="${DATASET%%/*}"
 if [[ "$POOL" == "boot-pool" ]]; then
-  echo "FATAL: refusing to install on the boot-pool — it is wiped on every TrueNAS upgrade" >&2
+  echo "FATAL: refusing to use boot-pool — it is wiped on every TrueNAS upgrade" >&2
   exit 1
 fi
 
-MOUNTPOINT="/mnt/$DATASET"
-if [[ ! -d "$MOUNTPOINT" ]]; then
-  echo "FATAL: $MOUNTPOINT does not exist — is the dataset mounted?" >&2
+if [[ ! -d "/mnt/$DATASET" ]]; then
+  echo "FATAL: /mnt/$DATASET does not exist — is the dataset mounted?" >&2
   exit 1
 fi
-
-INSTALL_DIR="$MOUNTPOINT/fk-encore-hook"
-TOKEN_FILE="$INSTALL_DIR/backup-token"
-SCRIPT_DST="$INSTALL_DIR/fk-encore-backup.sh"
-
-# --- install-dir -----------------------------------------------------------
-mkdir -p "$INSTALL_DIR"
-chmod 0700 "$INSTALL_DIR"
-chown root:root "$INSTALL_DIR"
 
 # --- token -----------------------------------------------------------------
+# The token file lives next to this script. The container's seedHostScripts()
+# only overwrites the .sh / .md files it ships, never the token, so it
+# survives image upgrades.
 if [[ -s "$TOKEN_FILE" ]]; then
   echo "[ok] token file already exists at $TOKEN_FILE — leaving it unchanged"
 else
-  # 32 bytes of randomness, base64 URL-safe, no padding.
   TOKEN="$(head -c 32 /dev/urandom | base64 | tr -d '\n=' | tr '+/' '-_')"
   printf '%s\n' "$TOKEN" > "$TOKEN_FILE"
   chmod 0600 "$TOKEN_FILE"
@@ -123,9 +118,9 @@ else
   echo "[ok] wrote new token to $TOKEN_FILE"
 fi
 
-# --- driver script ---------------------------------------------------------
-install -m 0755 -o root -g root "$SCRIPT_SRC" "$SCRIPT_DST"
-echo "[ok] installed $SCRIPT_DST"
+# Be defensive about the driver script's mode in case the container ran as
+# a different uid and chmod didn't stick.
+chmod 0755 "$DRIVER_SCRIPT"
 
 # --- reminder --------------------------------------------------------------
 TOKEN_VALUE="$(tr -d '[:space:]' < "$TOKEN_FILE")"
@@ -144,13 +139,13 @@ Next steps — finish the install by:
 
   2. Register the daily cron job via the TrueNAS SCALE UI
      (System Settings → Advanced → Cron Jobs → Add).
-     This lives in the TrueNAS config DB and therefore survives upgrades —
-     a file under /etc/cron.d/ would not.
+     This entry lives in the TrueNAS config DB and survives upgrades — a
+     file under /etc/cron.d/ would not.
 
      Fill the form with:
 
        Description:   fk-encore daily backup
-       Command:       ZFS_DATASET=$DATASET $SCRIPT_DST
+       Command:       ZFS_DATASET=$DATASET $DRIVER_SCRIPT
        Run As User:   root
        Schedule:      Custom → 0 3 * * *   (03:00 UTC daily)
        Hide Stdout:   no    (so any warning triggers a cron mail)
@@ -159,11 +154,10 @@ Next steps — finish the install by:
 
   3. Verify end-to-end (run as root on the host):
 
-       ZFS_DATASET=$DATASET $SCRIPT_DST
+       ZFS_DATASET=$DATASET $DRIVER_SCRIPT
        zfs list -t snapshot | grep "$DATASET@" | tail
 
-     The pg_dump file will appear in the app's BACKUP_DIR, which is bind-
-     mounted into the container and is typically a sibling directory to the
-     install dir (see docker-compose.yml).
+     The pg_dump file appears in the backup volume, sibling to the
+     host-scripts/ directory you are in right now.
 -----------------------------------------------------------------------------
 EOF
