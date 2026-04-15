@@ -101,11 +101,27 @@ wachsen.
 **Installation auf dem Host (einmalig, als root):**
 
 ```bash
+sudo ./scripts/host/install-backup-hook.sh
+# oder nicht-interaktiv:
 sudo ./scripts/host/install-backup-hook.sh --dataset tank/vivanty
 ```
 
-Der Installer druckt am Ende einen generierten Token. Diesen in die
-`.env` neben der `docker-compose.yml` eintragen und den Container neu starten:
+Wichtig: Alle persistenten Artefakte landen unter
+`/mnt/<dataset>/fk-encore-hook/` — also auf dem ZFS-Dataset selbst und
+**nicht** unter `/etc` oder `/usr/local/sbin`. Grund: TrueNAS SCALE tauscht
+bei jedem Upgrade das Root-Dateisystem komplett aus (neues Boot-
+Environment), Dateien unter `/etc/…` würden dabei verloren gehen. Datasets
+bleiben erhalten.
+
+Der Installer:
+
+1. Fragt interaktiv nach dem Dataset (falls nicht per `--dataset` gesetzt)
+2. Legt `/mnt/<dataset>/fk-encore-hook/` mit Token (0600) und Script (0755) an
+3. Druckt am Ende den generierten Token **und** die genauen Felder, die
+   für den täglichen Cron-Job in der TrueNAS-UI auszufüllen sind
+
+Den Token in die `.env` neben der `docker-compose.yml` eintragen und den
+Container neu starten:
 
 ```env
 BACKUP_TOKEN=<vom Installer generierter Wert>
@@ -114,6 +130,21 @@ BACKUP_TOKEN=<vom Installer generierter Wert>
 ```bash
 docker compose up -d --no-deps app
 ```
+
+**Cron-Job über die TrueNAS-UI einrichten** (nicht über `/etc/cron.d/`, das
+überlebt den nächsten TrueNAS-Upgrade nicht):
+
+System Settings → Advanced → Cron Jobs → Add
+
+| Feld          | Wert |
+|---------------|------|
+| Description   | `fk-encore daily backup` |
+| Command       | `ZFS_DATASET=<dataset> /mnt/<dataset>/fk-encore-hook/fk-encore-backup.sh` |
+| Run As User   | `root` |
+| Schedule      | Custom → `0 3 * * *` (03:00 UTC) |
+| Enabled       | yes |
+
+Der Installer druckt die genaue Command-Zeile zum Kopieren aus.
 
 Die `/internal/backup/*` Endpunkte sind zusätzlich per CIDR-Allow-List
 abgesichert (Standard: Loopback + RFC1918 + IPv6 ULA). Damit werden
