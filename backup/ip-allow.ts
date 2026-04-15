@@ -8,15 +8,26 @@
  * RFC1918 / loopback and will be rejected before the token is even
  * inspected.
  *
- * Source-IP behaviour inside Docker:
- *   - Requests from the host via the published port are SNAT-ed to the
- *     bridge gateway (e.g. 172.17.0.1), which is why the default list
- *     includes the private RFC1918 ranges, not just 127.0.0.1.
- *   - Requests from other containers on the same Docker network also
- *     arrive from a private range and are allowed.
- *   - External requests forwarded by a reverse proxy should include
- *     X-Forwarded-For; if `BACKUP_TRUST_XFF` is truthy the left-most
- *     entry is checked instead of the socket address.
+ * Source-IP resolution:
+ *   - Encore.ts' Rust HTTP layer proxies requests into Node, so inside an
+ *     `api.raw` handler `req.socket.remoteAddress` is either unset or the
+ *     internal proxy socket, never the real TCP peer. The verified peer
+ *     IP is relayed via `X-Forwarded-For` (same mechanism the existing
+ *     `user/rateLimiter.ts` relies on).
+ *   - We therefore read the left-most `X-Forwarded-For` entry by default,
+ *     and fall back to the socket address only when no XFF is present.
+ *     Set `BACKUP_TRUST_XFF=false` to disable XFF use entirely (useful in
+ *     test rigs that bypass Encore).
+ *
+ * Typical peer addresses inside Docker:
+ *   - Host→container via the published port: the bridge gateway, e.g.
+ *     172.17.0.1 (default bridge) or 172.18.0.1 / 172.19.0.1 for
+ *     Compose-created networks. Covered by the default `172.16.0.0/12`.
+ *   - Container→container on the same network: a RFC1918 address in the
+ *     same subnet as the bridge. Also covered by the defaults.
+ *   - External client via a reverse proxy: the proxy's public address,
+ *     which will usually be outside the defaults and must be added to
+ *     `BACKUP_ALLOW_CIDRS` explicitly.
  *
  * Override the default list via `BACKUP_ALLOW_CIDRS` (comma-separated).
  */
@@ -148,15 +159,26 @@ export function isRemoteAllowed(remoteAddr: string | undefined | null): boolean 
 }
 
 /**
- * Pick the effective remote address for authorisation. Prefers
- * X-Forwarded-For (left-most entry) when BACKUP_TRUST_XFF is truthy,
- * otherwise returns the socket address as-is.
+ * Pick the effective remote address for authorisation.
+ *
+ * Encore.ts runs the Node handler behind its Rust HTTP layer, which means
+ * `req.socket.remoteAddress` inside an `api.raw` handler points at the
+ * internal proxy (or is missing entirely) — never at the real TCP peer.
+ * The verified peer IP is relayed via `X-Forwarded-For`, which is why the
+ * rest of the app (see `user/rateLimiter.ts`) also reads it from headers.
+ *
+ * We therefore use the left-most X-Forwarded-For entry as the peer address
+ * whenever it is present. The `BACKUP_TRUST_XFF` env var is kept as an
+ * explicit opt-out for operators who want to fall back to the socket
+ * address (e.g. when Encore is replaced by a plain Node HTTP server in a
+ * testing rig): setting `BACKUP_TRUST_XFF=false` disables XFF use.
  */
 export function effectiveRemoteAddress(
   socketAddr: string | undefined | null,
   xForwardedFor: string | string[] | undefined,
 ): string | null {
-  if (process.env.BACKUP_TRUST_XFF === "true" && xForwardedFor) {
+  const trustXff = process.env.BACKUP_TRUST_XFF !== "false";
+  if (trustXff && xForwardedFor) {
     const raw = Array.isArray(xForwardedFor) ? xForwardedFor[0] : xForwardedFor;
     const first = raw.split(",")[0]?.trim();
     if (first) return first;

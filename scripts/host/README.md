@@ -202,7 +202,7 @@ The app reads these from the container environment (see
 | `BACKUP_DIR`          | `/mnt/backup`      | Where dumps and the `restore-*.dump` trigger live (inside the container). The seed step writes `host-scripts/` here too. |
 | `BACKUP_AUTO_STOP_MS` | `1800000` (30 min) | Safety timer — force-stops a stuck backup if `/stop` never arrives. |
 | `BACKUP_ALLOW_CIDRS`  | *(see below)*      | Comma-separated CIDR allow-list for the peer address. |
-| `BACKUP_TRUST_XFF`    | `false`            | If `true`, use the left-most `X-Forwarded-For` entry as the peer address. |
+| `BACKUP_TRUST_XFF`    | `true`             | Read the peer IP from the left-most `X-Forwarded-For` entry. Required under Encore.ts (the real TCP peer is relayed via XFF, not the Node socket). Set to `false` only in test rigs that bypass Encore. |
 
 `BACKUP_TOKEN` must be provisioned in the app container's environment
 (via the project's `.env` / `docker-compose.yml`). It is the shared
@@ -229,10 +229,12 @@ value between the installer and the app, and must match the contents of
   2. **Bearer token.** Constant-time compare against `BACKUP_TOKEN`. If
      the token is not configured, every call fails closed with
      `401 Unauthenticated`.
-- Only set `BACKUP_TRUST_XFF=true` when the app is behind a reverse
-  proxy that you control. Trusting `X-Forwarded-For` unconditionally
-  would let a remote client spoof the peer address and bypass the
-  allow-list.
+- `BACKUP_TRUST_XFF` defaults to `true` because Encore.ts' Rust HTTP
+  layer proxies requests into Node and sets `X-Forwarded-For` from the
+  verified TCP peer — the socket address inside the handler is the
+  internal proxy, not the real client. If you deploy the app standalone
+  (i.e. without Encore in front), set `BACKUP_TRUST_XFF=false` so a
+  remote client cannot spoof the peer IP by supplying its own XFF.
 - `pg_backup_start()` does not block reads; browser sessions continue to
   see a `503 Service Unavailable` via the maintenance middleware.
   `/health` and `/healthz` stay up so external monitoring is not

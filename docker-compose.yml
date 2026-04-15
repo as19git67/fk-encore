@@ -64,10 +64,11 @@ services:
       # bridge). Override only if the app is fronted by a reverse proxy
       # that SNATs requests from somewhere unusual.
       BACKUP_ALLOW_CIDRS: ${BACKUP_ALLOW_CIDRS:-}
-      # Set to "true" only if the app sits behind a reverse proxy that
-      # sets X-Forwarded-For. The left-most entry is then used as the
-      # peer address for the CIDR check.
-      BACKUP_TRUST_XFF: ${BACKUP_TRUST_XFF:-false}
+      # Encore.ts proxies requests through its Rust HTTP layer, so the
+      # real peer IP arrives in X-Forwarded-For (the Node socket is
+      # internal). We therefore trust XFF by default — only set to
+      # "false" in test rigs that bypass Encore.
+      BACKUP_TRUST_XFF: ${BACKUP_TRUST_XFF:-true}
     volumes:
       - photos:/mnt/data/photos
       - thumbnails:/mnt/data/thumbnails
