@@ -14,7 +14,7 @@ import type {
   CreateLibraryRequest,
   UpdateLibraryRequest,
   ScanReport,
-  AvailableDirectory,
+  LibraryRootInfo,
 } from "./libraries.service";
 import { startWatcher, stopWatcher } from "./library-watcher";
 
@@ -60,12 +60,9 @@ export const listLibraries = api(
 
 export const listAvailablePaths = api(
   { expose: true, method: "GET", path: "/libraries/available-paths", auth: true },
-  async (): Promise<{ root: string; directories: AvailableDirectory[] }> => {
+  async (): Promise<LibraryRootInfo> => {
     checkPermission();
-    return {
-      root: libs.PHOTO_LIBRARIES_ROOT,
-      directories: await libs.listAvailableDirectories(),
-    };
+    return await libs.listLibraryRootInfo();
   }
 );
 

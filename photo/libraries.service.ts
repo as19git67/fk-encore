@@ -119,19 +119,58 @@ export interface AvailableDirectory {
   rel_path: string;
   abs_path: string;
   already_registered: boolean;
+  mounted: boolean;
+}
+
+/**
+ * Read /proc/self/mountinfo and return the set of current mount-point paths.
+ * Returns an empty set on non-Linux platforms (e.g. local development on
+ * macOS) — callers should treat that as "unknown, not detected".
+ */
+function readMountPoints(): Set<string> {
+  try {
+    const content = fs.readFileSync("/proc/self/mountinfo", "utf8");
+    const points = new Set<string>();
+    for (const line of content.split("\n")) {
+      // Format: mount-id parent-id major:minor root mount-point options...
+      const fields = line.split(" ");
+      if (fields.length >= 5 && fields[4]) points.add(fields[4]);
+    }
+    return points;
+  } catch {
+    return new Set();
+  }
+}
+
+export interface LibraryRootInfo {
+  root: string;
+  root_mounted: boolean;
+  directories: AvailableDirectory[];
 }
 
 /**
  * List direct sub-directories of PHOTO_LIBRARIES_ROOT for the admin UI picker.
  * Hidden entries (names starting with ".") are skipped. Already-registered
- * directories are returned too, but flagged so the UI can disable them.
+ * directories are returned too, but flagged so the UI can disable them. Each
+ * entry also carries a `mounted` flag derived from /proc/self/mountinfo so the
+ * admin can tell at a glance which sub-directories are real volume mounts.
  */
 export async function listAvailableDirectories(): Promise<AvailableDirectory[]> {
+  const info = await listLibraryRootInfo();
+  return info.directories;
+}
+
+export async function listLibraryRootInfo(): Promise<LibraryRootInfo> {
+  const mountPoints = readMountPoints();
+  const rootMounted = mountPoints.has(PHOTO_LIBRARIES_ROOT);
+
   let entries: fs.Dirent[];
   try {
     entries = await fs.promises.readdir(PHOTO_LIBRARIES_ROOT, { withFileTypes: true });
   } catch (err: any) {
-    if (err?.code === "ENOENT") return [];
+    if (err?.code === "ENOENT") {
+      return { root: PHOTO_LIBRARIES_ROOT, root_mounted: rootMounted, directories: [] };
+    }
     throw new Error(`PHOTO_LIBRARIES_ROOT unreadable: ${err?.message ?? err}`);
   }
 
@@ -150,10 +189,11 @@ export async function listAvailableDirectories(): Promise<AvailableDirectory[]> 
       rel_path: entry.name,
       abs_path: abs,
       already_registered: taken.has(abs),
+      mounted: mountPoints.has(abs),
     });
   }
   dirs.sort((a, b) => a.name.localeCompare(b.name));
-  return dirs;
+  return { root: PHOTO_LIBRARIES_ROOT, root_mounted: rootMounted, directories: dirs };
 }
 
 // ---------- CRUD ----------

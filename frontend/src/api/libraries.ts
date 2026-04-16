@@ -43,10 +43,12 @@ export interface AvailableDirectory {
   rel_path: string
   abs_path: string
   already_registered: boolean
+  mounted: boolean
 }
 
 export interface AvailablePathsResponse {
   root: string
+  root_mounted: boolean
   directories: AvailableDirectory[]
 }
 

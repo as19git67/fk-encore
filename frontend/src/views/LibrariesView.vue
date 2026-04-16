@@ -55,6 +55,7 @@ const saving = ref(false)
 // Path picker state (create mode)
 const availablePaths = ref<AvailableDirectory[]>([])
 const availableRoot = ref('')
+const rootMounted = ref(false)
 const loadingPaths = ref(false)
 
 // Delete confirmation
@@ -85,6 +86,7 @@ async function openCreateDialog() {
   try {
     const res = await listAvailablePaths()
     availableRoot.value = res.root
+    rootMounted.value = res.root_mounted
     availablePaths.value = res.directories
   } catch (err: any) {
     error.value = err.message || 'Verzeichnisse konnten nicht geladen werden'
@@ -334,7 +336,13 @@ onMounted(loadData)
           >
             <template #option="{ option }">
               <div class="path-option">
-                <span>{{ option.name }}</span>
+                <span class="path-option-name">
+                  <i
+                    :class="option.mounted ? 'pi pi-server mount-ok' : 'pi pi-folder mount-unknown'"
+                    v-tooltip="option.mounted ? 'Volume-Mount erkannt' : 'kein Volume-Mount erkannt'"
+                  />
+                  {{ option.name }}
+                </span>
                 <span v-if="option.already_registered" class="muted small">
                   (bereits registriert)
                 </span>
@@ -351,6 +359,13 @@ onMounted(loadData)
           <small v-if="editingId === null" class="hint-small">
             Auswahl direkter Unterverzeichnisse unter
             <code>{{ availableRoot || 'PHOTO_LIBRARIES_ROOT' }}</code>.
+            <span v-if="!loadingPaths">
+              <span v-if="rootMounted" class="mount-ok">Volume-Mount auf Root erkannt.</span>
+              <span v-else class="mount-warn">
+                Kein Volume-Mount auf Root erkannt — ggf. in der Docker-Compose
+                nicht konfiguriert.
+              </span>
+            </span>
           </small>
           <small v-else class="hint-small">Pfad kann nach Anlage nicht geändert werden.</small>
         </div>
@@ -507,5 +522,23 @@ onMounted(loadData)
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
+}
+
+.path-option-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.mount-ok {
+  color: var(--p-green-500, #22c55e);
+}
+
+.mount-unknown {
+  color: var(--p-text-muted-color);
+}
+
+.mount-warn {
+  color: var(--p-orange-500, #f59e0b);
 }
 </style>
