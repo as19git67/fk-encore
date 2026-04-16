@@ -177,13 +177,14 @@ another mechanism) but the database needs to roll back.
 
 `fk-encore-backup.sh` accepts overrides via env vars:
 
-| Env var                | Default                        | Effect |
-|------------------------|--------------------------------|--------|
-| `FK_ENCORE_URL`        | `http://localhost:8080`        | Where to reach the app. |
-| `FK_BACKUP_TOKEN_FILE` | `<script-dir>/backup-token`    | Path to the shared secret. The default is the file the installer writes next to the script. |
-| `ZFS_DATASET`          | `tank/vivanty`                 | Dataset for `zfs snapshot -r`. Override via the cron-job command line. |
-| `LABEL`                | `daily-<UTC timestamp>`        | Snapshot and dump label. |
-| `CURL_TIMEOUT`         | `30`                           | Per-HTTP-call timeout in seconds. |
+| Env var                   | Default                        | Effect |
+|---------------------------|--------------------------------|--------|
+| `FK_ENCORE_URL`           | `http://localhost:8080`        | Where to reach the app. |
+| `FK_BACKUP_TOKEN_FILE`    | `<script-dir>/backup-token`    | Path to the shared secret. The default is the file the installer writes next to the script. |
+| `ZFS_DATASET`             | `tank/vivanty`                 | Dataset for `zfs snapshot -r`. Override via the cron-job command line. |
+| `LABEL`                   | `daily-<UTC timestamp>`        | Snapshot and dump label. |
+| `CURL_TIMEOUT`            | `30`                           | Per-HTTP-call timeout in seconds. |
+| `SNAPSHOT_RETENTION_DAYS` | `30`                           | After a successful backup, destroy `daily-*` snapshots of `$ZFS_DATASET` whose `creation` timestamp is older than N days. Set `0` to disable. Only labels starting with `daily-` are touched — manual snapshots are preserved. The current run's snapshot is always kept. Prune errors are logged as `WARN` and do not fail the backup. |
 
 Override by editing the cron-job **Command** field in the TrueNAS UI:
 
