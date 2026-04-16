@@ -189,6 +189,26 @@ FastAPI app under `embedding_service/app/api/endpoints.py`.
 3. Results are filtered by a cosine-similarity threshold (default `0.18` from
    the backend). Returned as `[{photo_id, score}]`.
 
+#### Request validation
+
+The `TextSearchRequest` schema in
+[`embedding_service/app/models/schemas.py`](../embedding_service/app/models/schemas.py)
+enforces:
+
+| Field | Bounds |
+|---|---|
+| `query`     | 1 – 500 characters |
+| `k`         | 1 – 1000           |
+| `threshold` | 0.0 – 1.0          |
+
+Requests outside these bounds are rejected with `422 Unprocessable Entity`.
+The backend therefore caps every outgoing `/search/text` call via the
+`EMBEDDING_TEXT_SEARCH_MAX_K` / `EMBEDDING_TEXT_SEARCH_MAX_QUERY_LEN`
+constants in `photo/photo.service.ts`. This matters most in the combined
+(Case C) path, where `clipK = min(candidateSet.size, limit * 5, 1000)` —
+without the final cap, large structural candidate sets (e.g. a full-year
+date filter over a big library) would exceed `k = 1000` and produce a 422.
+
 ### Cold start and timeouts
 
 The spaCy model and the CLIP encoders are lazy-loaded on first use. The
@@ -278,6 +298,7 @@ Props mirror the composable output; the component emits `update:modelValue`,
 |---|---|
 | `/parse/query` timeout / 5xx / network | Backend falls back to regex parser. No user-facing error. |
 | `/search/text` error | Backend throws → frontend shows `"Suche fehlgeschlagen."` |
+| `k > 1000` or `query > 500` chars sent to `/search/text` | Service returns `422 Unprocessable Entity`. Prevented by the caps in `photo.service.ts`; if you see a 422 in the embedding logs, check whether a new caller bypassed those constants. |
 | Empty parser result | Query treated as pure semantic; returns CLIP-only results. |
 | No embeddings in DB for the user | `/search/text` returns empty list; UI shows "0 Treffer". |
 
