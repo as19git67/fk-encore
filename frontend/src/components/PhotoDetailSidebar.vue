@@ -79,18 +79,22 @@ async function loadPhotosAlbums() {
   }
 }
 
-// Reset selected album when photo changes
-watch(() => props.photo.id, () => {
+// Watch a stable key derived from the IDs currently shown in the sidebar.
+// The parent's `selectedPhotos` array is re-created on every photo-hydration
+// batch (photos.value is replaced in place), so watching the array reference
+// directly would re-fire /photos/albums on every hydration batch even though
+// the selection is unchanged. Watching the joined ID list avoids that.
+const selectedPhotoIdsKey = computed(() => {
+  const ids = props.selectedPhotos && props.selectedPhotos.length > 0
+    ? props.selectedPhotos.map(p => p.id)
+    : [props.photo.id]
+  return ids.join(',')
+})
+
+watch(selectedPhotoIdsKey, () => {
   pendingAlbumChanges.value = {}
   loadPhotosAlbums()
 }, { immediate: true })
-
-watch(() => props.selectedPhotos, () => {
-  pendingAlbumChanges.value = {}
-  if (props.selectedPhotos && props.selectedPhotos.length > 0) {
-    loadPhotosAlbums()
-  }
-})
 
 
 function getAlbumCheckState(albumId: number) {
