@@ -111,6 +111,20 @@ describe("getExifMetadata — IPTC fallbacks", () => {
     expect(meta.country).toBe("Deutschland");
   });
 
+  it("falls back to XMP dc:title when IPTC Headline is absent", async () => {
+    const file = await makeTempJpeg();
+    await exiftool.write(
+      file,
+      {
+        Headline: null,
+        Title: "Bergpanorama",
+      },
+      ["-overwrite_original"]
+    );
+    const meta = await getExifMetadata(file);
+    expect(meta.headline).toBe("Bergpanorama");
+  });
+
   it("treats Caption-Abstract and Headline as independent fields", async () => {
     // The upload/refresh paths use `description ?? headline` as the description
     // fallback — but getExifMetadata itself must not silently conflate the two.

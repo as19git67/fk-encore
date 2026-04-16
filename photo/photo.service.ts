@@ -870,7 +870,11 @@ export async function getExifMetadata(filePath: string): Promise<ExifMetadata> {
       asString(data?.Creator) ??
       asString(data?.["dc:creator"]) ??
       null;
-    const headline = asString(data?.Headline);
+    const headline =
+      asString(data?.Headline) ??
+      asString(data?.["dc:title"]) ??
+      asString(data?.title) ??
+      null;
     const copyright =
       asString(data?.CopyrightNotice) ??
       asString(data?.Copyright) ??
