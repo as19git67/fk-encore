@@ -327,15 +327,35 @@ export const updatePhotoDescription = api(
  * Serve a photo file.
  */
 export const getPhotoFile = api.raw(
-  { expose: true, method: "GET", path: "/photos/file/:filename", auth: false },
+  { expose: true, method: "GET", path: "/photos/file/*filename", auth: false },
   async (req, res) => {
     if (writeMaintenanceResponseIfActive(res)) return;
     try {
       const url = new URL(req.url || "", `http://${req.headers.host}`);
-      const filename = path.basename(url.pathname);
+      // Strip the fixed route prefix to retrieve the (possibly multi-segment)
+      // filename, which is now of the form `YYYY/YYYY-MM/<name>.<ext>`.
+      const rawPath = decodeURIComponent(url.pathname.replace(/^\/photos\/file\//, ""));
+      const filename = rawPath.replace(/^\/+/, "");
       console.log("Serving photo file:", filename);
-      
+
       const filePath = path.resolve(UPLOAD_DIR, filename);
+
+      // Path-traversal guard: the resolved path must stay inside UPLOAD_DIR,
+      // and must not point at the internal staging dir.
+      const uploadDirWithSep = UPLOAD_DIR.endsWith(path.sep) ? UPLOAD_DIR : UPLOAD_DIR + path.sep;
+      if (filePath !== UPLOAD_DIR && !filePath.startsWith(uploadDirWithSep)) {
+        console.error("Rejected path outside UPLOAD_DIR:", filePath);
+        res.statusCode = 400;
+        res.end("Invalid path");
+        return;
+      }
+      const topSegment = filename.split("/")[0];
+      if (topSegment === "_tmp" || topSegment.startsWith(".")) {
+        console.error("Rejected path into internal dir:", filePath);
+        res.statusCode = 404;
+        res.end("File not found");
+        return;
+      }
 
       if (!fs.existsSync(filePath)) {
         console.error("File not found:", filePath);
