@@ -130,8 +130,145 @@ async function getAiUserId(): Promise<number | null> {
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
+/** Temp staging dir for uploads before they are renamed into their final YYYY/YYYY-MM/... slot. */
+const UPLOAD_TMP_DIR = path.join(UPLOAD_DIR, "_tmp");
+if (!fs.existsSync(UPLOAD_TMP_DIR)) {
+  fs.mkdirSync(UPLOAD_TMP_DIR, { recursive: true });
+}
 if (!fs.existsSync(THUMBNAIL_DIR)) {
   fs.mkdirSync(THUMBNAIL_DIR, { recursive: true });
+}
+
+// ---------- Photo storage layout (YYYY/YYYY-MM/YYYY-MM-DD_at_HH.MM.SS_NN.ext) ----------
+
+const pad2 = (n: number) => n.toString().padStart(2, "0");
+
+/**
+ * Break a Date into its local Y/M/D/h/m/s components honoring the server's
+ * configured timezone (process.env.TZ). Using the default `toLocaleString`
+ * locale 'en-CA' gives a stable `YYYY-MM-DD HH:MM:SS` format we can parse.
+ */
+function localDateParts(d: Date): {
+  year: string;
+  month: string;
+  day: string;
+  hour: string;
+  minute: string;
+  second: string;
+} {
+  const tz = process.env.TZ || undefined;
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  const parts = fmt.formatToParts(d).reduce<Record<string, string>>((acc, p) => {
+    if (p.type !== "literal") acc[p.type] = p.value;
+    return acc;
+  }, {});
+  // Some runtimes return "24" for midnight hour — normalize to "00".
+  const hour = parts.hour === "24" ? "00" : parts.hour;
+  return {
+    year: parts.year,
+    month: parts.month,
+    day: parts.day,
+    hour,
+    minute: parts.minute,
+    second: parts.second,
+  };
+}
+
+/**
+ * Normalize an image extension. Falls back to `.jpg` when the source filename
+ * has no recognizable extension. Returned value is lowercase and includes the
+ * leading dot.
+ */
+export function normalizeImageExt(originalName: string, mimeType?: string): string {
+  const ext = path.extname(originalName).toLowerCase();
+  if (ext) return ext;
+  const mt = (mimeType || "").toLowerCase().split(";")[0].trim();
+  switch (mt) {
+    case "image/jpeg":
+    case "image/jpg":
+      return ".jpg";
+    case "image/png":
+      return ".png";
+    case "image/gif":
+      return ".gif";
+    case "image/webp":
+      return ".webp";
+    case "image/heic":
+      return ".heic";
+    case "image/heif":
+      return ".heif";
+    case "image/tiff":
+      return ".tiff";
+    case "image/bmp":
+      return ".bmp";
+    case "image/svg+xml":
+      return ".svg";
+    default:
+      return ".jpg";
+  }
+}
+
+/**
+ * Pick the timestamp used for the storage path. Prefers EXIF `takenAt`, falls
+ * back to upload time.
+ */
+export function pickStorageTimestamp(takenAtIso: string | null | undefined): Date {
+  if (takenAtIso) {
+    const d = new Date(takenAtIso);
+    if (!isNaN(d.getTime())) return d;
+  }
+  return new Date();
+}
+
+/**
+ * Reserve an output path under `UPLOAD_DIR` following the
+ * `YYYY/YYYY-MM/YYYY-MM-DD_at_HH.MM.SS_NN.<ext>` convention. The method
+ * atomically creates an empty placeholder file for the returned path using
+ * `O_EXCL`, so two concurrent callers cannot reserve the same slot. The caller
+ * is responsible for writing the actual contents into `absPath` (or moving a
+ * prepared temp file over it with `fs.rename`, which will replace the empty
+ * placeholder on the same filesystem).
+ *
+ * Returns both the filesystem path and the `filename` value to persist in the
+ * DB (relative to `UPLOAD_DIR`, forward-slash separated).
+ */
+export async function reserveStoragePath(
+  timestamp: Date,
+  ext: string
+): Promise<{ absPath: string; relPath: string }> {
+  const p = localDateParts(timestamp);
+  const subdir = path.join(`${p.year}`, `${p.year}-${p.month}`);
+  const absDir = path.join(UPLOAD_DIR, subdir);
+  await fs.promises.mkdir(absDir, { recursive: true });
+
+  const baseStem = `${p.year}-${p.month}-${p.day}_at_${p.hour}.${p.minute}.${p.second}`;
+  const normalizedExt = ext.startsWith(".") ? ext.toLowerCase() : `.${ext.toLowerCase()}`;
+
+  // Try counters 00..99 first; fall back to a wider range just in case.
+  for (let i = 0; i < 10000; i++) {
+    const name = `${baseStem}_${pad2(i)}${normalizedExt}`;
+    const absPath = path.join(absDir, name);
+    try {
+      // wx: fail if the file already exists → atomic slot reservation.
+      const handle = await fs.promises.open(absPath, "wx");
+      await handle.close();
+      const relPath = path.posix.join(`${p.year}`, `${p.year}-${p.month}`, name);
+      return { absPath, relPath };
+    } catch (err: any) {
+      if (err?.code === "EEXIST") continue;
+      throw err;
+    }
+  }
+  throw new Error("Could not reserve a unique photo filename slot");
 }
 
 // ---------- People & Faces ----------
@@ -783,10 +920,11 @@ export async function uploadPhotoStream(
     throw new Error("UNSUPPORTED_FILE_TYPE");
   }
 
-  const filename = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}${path.extname(originalName)}`;
-  const filePath = path.join(UPLOAD_DIR, filename);
+  const ext = normalizeImageExt(originalName, mimeType);
+  const tempName = `upload_${Date.now()}_${crypto.randomBytes(6).toString("hex")}${ext}`;
+  const tempPath = path.join(UPLOAD_TMP_DIR, tempName);
 
-  const fileStream = fs.createWriteStream(filePath);
+  const fileStream = fs.createWriteStream(tempPath);
   let size = 0;
   const hash = crypto.createHash('sha256');
 
@@ -800,7 +938,7 @@ export async function uploadPhotoStream(
   const digest = hash.digest('hex');
 
   // Extraction of EXIF data (date + GPS) after the file is saved
-  const exifMeta = await getExifMetadata(filePath);
+  const exifMeta = await getExifMetadata(tempPath);
 
   // Check for duplicate for this user
   const existing = await dbFirst<typeof photos.$inferSelect>(
@@ -809,11 +947,16 @@ export async function uploadPhotoStream(
 
   if (existing) {
     // Delete the temporary file
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
+    if (fs.existsSync(tempPath)) {
+      fs.unlinkSync(tempPath);
     }
     throw new Error("PHOTO_ALREADY_EXISTS");
   }
+
+  // Move the file into its final YYYY/YYYY-MM/YYYY-MM-DD_at_HH.MM.SS_NN.ext slot.
+  const storageTs = pickStorageTimestamp(exifMeta.takenAt);
+  const { absPath: filePath, relPath: filename } = await reserveStoragePath(storageTs, ext);
+  await fs.promises.rename(tempPath, filePath);
 
   const row = await dbInsertReturning<typeof photos.$inferSelect>(
     db.insert(photos).values({
@@ -877,13 +1020,19 @@ export async function uploadPhotoLogic(
     throw new Error("PHOTO_ALREADY_EXISTS");
   }
 
-  const filename = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}${path.extname(file.name)}`;
-  const filePath = path.join(UPLOAD_DIR, filename);
+  const ext = normalizeImageExt(file.name, file.mimeType);
+  const tempName = `upload_${Date.now()}_${crypto.randomBytes(6).toString("hex")}${ext}`;
+  const tempPath = path.join(UPLOAD_TMP_DIR, tempName);
 
-  fs.writeFileSync(filePath, file.data);
+  fs.writeFileSync(tempPath, file.data);
 
   // Extraction of EXIF data (date + GPS)
-  const exifMeta2 = await getExifMetadata(filePath);
+  const exifMeta2 = await getExifMetadata(tempPath);
+
+  // Move the file into its final YYYY/YYYY-MM/YYYY-MM-DD_at_HH.MM.SS_NN.ext slot.
+  const storageTs2 = pickStorageTimestamp(exifMeta2.takenAt);
+  const { absPath: filePath, relPath: filename } = await reserveStoragePath(storageTs2, ext);
+  await fs.promises.rename(tempPath, filePath);
 
   const row2 = await dbInsertReturning<typeof photos.$inferSelect>(
     db.insert(photos).values({
