@@ -91,6 +91,11 @@ const SUPPORTED_MIME_TYPES = new Set([
   "image/heic", "image/heif", "image/tiff", "image/bmp", "image/svg+xml",
 ]);
 const EMBEDDING_SERVICE_URL = process.env.EMBEDDING_SERVICE_URL || "http://localhost:8001";
+// Must match the validator bounds on TextSearchRequest in
+// embedding_service/app/models/schemas.py. Sending k/query outside these
+// bounds causes the embedding service to reject the request with 422.
+const EMBEDDING_TEXT_SEARCH_MAX_K = 1000;
+const EMBEDDING_TEXT_SEARCH_MAX_QUERY_LEN = 500;
 const EXIF_WRITE_TIMEOUT_MS = parseInt(process.env.EXIF_WRITE_TIMEOUT_MS || "8000", 10);
 const EXIF_WRITABLE_EXTENSIONS = new Set([".jpg", ".jpeg", ".tif", ".tiff", ".png"]);
 
@@ -3769,7 +3774,11 @@ export async function searchPhotosLogic(
     const response = await fetch(`${EMBEDDING_SERVICE_URL}/search/text`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query, k: limit, threshold }),
+      body: JSON.stringify({
+        query: query.slice(0, EMBEDDING_TEXT_SEARCH_MAX_QUERY_LEN),
+        k: Math.min(limit, EMBEDDING_TEXT_SEARCH_MAX_K),
+        threshold,
+      }),
     });
     if (!response.ok) {
       const errText = await response.text();
@@ -4743,7 +4752,11 @@ export async function searchPhotosNaturalLogic(
       fetch(`${EMBEDDING_SERVICE_URL}/search/text`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: parsed.semanticQuery, k: limit, threshold }),
+        body: JSON.stringify({
+          query: parsed.semanticQuery.slice(0, EMBEDDING_TEXT_SEARCH_MAX_QUERY_LEN),
+          k: Math.min(limit, EMBEDDING_TEXT_SEARCH_MAX_K),
+          threshold,
+        }),
       }),
       fetchDescriptionMatchIds(),
     ]);
@@ -4784,13 +4797,19 @@ export async function searchPhotosNaturalLogic(
   const candidateSet = new Set(candidateRows.map(r => r.id));
   if (candidateSet.size === 0) return { results: [], parsed: parsedPublic };
 
-  // Request enlarged k so intersection still yields enough results
-  const clipK = Math.min(candidateSet.size, limit * 5);
+  // Request enlarged k so intersection still yields enough results.
+  // Must stay within the embedding service's TextSearchRequest.k upper bound
+  // (1000) — exceeding it would produce a 422 Unprocessable Entity.
+  const clipK = Math.min(candidateSet.size, limit * 5, EMBEDDING_TEXT_SEARCH_MAX_K);
   const [clipResp, descIds] = await Promise.all([
     fetch(`${EMBEDDING_SERVICE_URL}/search/text`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: parsed.semanticQuery, k: clipK, threshold }),
+      body: JSON.stringify({
+        query: parsed.semanticQuery.slice(0, EMBEDDING_TEXT_SEARCH_MAX_QUERY_LEN),
+        k: clipK,
+        threshold,
+      }),
     }),
     // fetchDescriptionMatchIds already applies the same structural filter,
     // so we don't need to intersect manually.
