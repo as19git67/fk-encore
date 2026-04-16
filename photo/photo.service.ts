@@ -797,6 +797,19 @@ export function parseIptcDate(date: unknown, time: unknown): string | null {
 }
 
 function asString(v: unknown): string | null {
+  // Unwrap XMP Language Alternatives — exifr returns dc:title / dc:description
+  // as `{ lang: "x-default", value: "..." }` (single) or an array of such
+  // objects (multiple locales). Pick x-default, falling back to the first.
+  if (Array.isArray(v)) {
+    const xDefault = v.find((x) => x && typeof x === "object" && (x as any).lang === "x-default");
+    const pick = xDefault ?? v[0];
+    return pick && typeof pick === "object" && "value" in pick
+      ? asString((pick as { value: unknown }).value)
+      : null;
+  }
+  if (v && typeof v === "object" && "value" in v) {
+    return asString((v as { value: unknown }).value);
+  }
   if (typeof v !== "string") return null;
   const t = v.trim();
   return t.length > 0 ? t : null;
@@ -851,34 +864,36 @@ export async function getExifMetadata(filePath: string): Promise<ExifMetadata> {
       takenAt = parseIptcDate(data?.DateCreated, data?.TimeCreated);
     }
     // Description — prefer EXIF/XMP fields, fall back to IPTC Caption-Abstract.
+    // exifr normalizes XMP dc:description to lowercase `description`.
     const description: string | null =
       asString(data?.ImageDescription) ??
       asString(data?.Description) ??
-      asString(data?.["dc:description"]) ??
+      asString(data?.description) ??
       asString(data?.UserComment) ??
       asString(data?.Caption) ??
       asString(data?.["Caption-Abstract"]) ??
       null;
-    // Keywords — IPTC Keywords or XMP dc:subject.
+    // Keywords — IPTC Keywords or XMP dc:subject (exifr emits `subject`).
     const keywords = asStringArray(
-      data?.Keywords ?? data?.["dc:subject"] ?? data?.subject
+      data?.Keywords ?? data?.subject
     );
     const author =
       asString(data?.Byline) ??
       asString(data?.["By-line"]) ??
       asString(data?.Artist) ??
       asString(data?.Creator) ??
-      asString(data?.["dc:creator"]) ??
+      asString(data?.creator) ??
       null;
+    // XMP dc:title is the closest equivalent to IPTC Headline.
     const headline =
       asString(data?.Headline) ??
-      asString(data?.["dc:title"]) ??
       asString(data?.title) ??
       null;
     const copyright =
       asString(data?.CopyrightNotice) ??
       asString(data?.Copyright) ??
       asString(data?.Rights) ??
+      asString(data?.rights) ??
       null;
     const credit = asString(data?.Credit);
     const city = asString(data?.City);
