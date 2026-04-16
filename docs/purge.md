@@ -1,56 +1,57 @@
-# Photo Purge: Alle Fotodaten löschen
+# Photo Purge: Delete All Photo Data
 
-## Zusammenfassung
+## Summary
 
-Der Purge-Vorgang entfernt **unwiderruflich** sämtliche fotobezogenen Daten
-einer Installation – Fotos, Alben, Gesichter, Personen, Embeddings,
-Scan-Queue-Einträge und (optional) auch die Originaldateien sowie den
-Thumbnail-Cache. Benutzerkonten, Rollen und Berechtigungen bleiben erhalten.
+The purge flow **irreversibly** removes every photo-related piece of data
+from an installation – photos, albums, faces, persons, embeddings, scan
+queue entries, and (optionally) the original files and the thumbnail cache
+as well. User accounts, roles, and permissions are preserved.
 
-Das Feature ist als **Danger Zone** in der Datenverwaltung umgesetzt und durch
-eine eigene Berechtigung (`photos.purge`) sowie eine Tipp-Bestätigung
-(`LÖSCHEN`) gegen versehentliche Auslösung abgesichert.
+The feature is implemented as a **Danger Zone** in the data management
+view and is protected against accidental invocation by a dedicated
+permission (`photos.purge`) and a typed confirmation (`LÖSCHEN`, the
+German word for "delete", used verbatim in the German UI).
 
-## Wann sollte man purgen?
+## When should you purge?
 
-Typische Anwendungsfälle:
+Typical use cases:
 
-- **Frische Test-/Demo-Umgebung** ohne den Container neu aufzubauen.
-- **Vollständiger Reset** vor einem Re-Import einer kuratierten Bibliothek.
-- **Bereinigung von verwaisten Embeddings** nach einem fehlgeschlagenen
-  Migrations- oder Backup-Vorgang.
+- **Fresh test / demo environment** without rebuilding the container.
+- **Full reset** before re-importing a curated library.
+- **Cleaning up orphaned embeddings** after a failed migration or backup
+  operation.
 
-> Für das selektive Entfernen einzelner Fotos gibt es weiterhin den normalen
-> `DELETE /photos/:id`-Endpunkt mit `photos.delete`. Purge ist explizit der
-> "alles auf Anfang"-Knopf.
+> For selectively removing individual photos, the regular
+> `DELETE /photos/:id` endpoint with `photos.delete` is still available.
+> Purge is explicitly the "start over from scratch" button.
 
-## Berechtigungsmodell
+## Permission model
 
 ```
 permissions
 └── photos.purge   -- "Purge all photo-related data (destructive)"
 ```
 
-| Rolle             | `photos.purge`           |
-|-------------------|--------------------------|
-| Admin             | **NICHT** automatisch    |
-| User              | nicht zugewiesen         |
-| (eigene Rolle)    | manuell zuweisbar        |
+| Role            | `photos.purge`            |
+|-----------------|---------------------------|
+| Admin           | **NOT** assigned by default |
+| User            | not assigned               |
+| (custom role)   | can be granted manually    |
 
-`photos.purge` ist in [`db/seed.ts`](../db/seed.ts) explizit aus der
-Default-Zuweisung der Admin-Rolle ausgenommen (`adminExcludedPermissions`).
-Das ist eine bewusste Sicherheitsmassnahme: Selbst ein Admin kann erst
-purgen, nachdem ein zweiter Admin (oder dieselbe Person als bewusster Akt)
-die Berechtigung an eine Rolle vergeben hat. Der Seed-Job führt zusätzlich
-einen defensiven Cleanup durch und entzieht die Berechtigung der
-Admin-Rolle, falls sie aus früheren Versionen noch zugewiesen war.
+`photos.purge` is explicitly excluded from the default assignment of the
+Admin role in [`db/seed.ts`](../db/seed.ts) (`adminExcludedPermissions`).
+This is a deliberate safety measure: even an Admin can only purge after a
+second Admin (or the same person, as a deliberate act) has granted the
+permission to a role. The seed job additionally performs a defensive
+cleanup and revokes the permission from the Admin role if it had been
+granted in earlier versions.
 
-Die Frontend-UI prüft `auth.hasPermission('photos.purge')` und blendet den
-"Danger Zone"-Block ohne diese Berechtigung komplett aus.
+The frontend UI checks `auth.hasPermission('photos.purge')` and hides the
+entire "Danger Zone" block for users without this permission.
 
 ## API
 
-### Endpunkt
+### Endpoint
 
 ```
 POST /photos/purge        (auth required, permission: photos.purge)
@@ -59,11 +60,11 @@ Content-Type: application/json
 { "deleteFiles": false }
 ```
 
-| Feld          | Typ      | Bedeutung                                                  |
-|---------------|----------|------------------------------------------------------------|
-| `deleteFiles` | `boolean`| `true` = zusätzlich Originaldateien und Thumbnail-Cache löschen. `false` = nur Datenbank leeren, Dateien bleiben (verwaist) auf der Festplatte. |
+| Field         | Type      | Meaning                                                   |
+|---------------|-----------|-----------------------------------------------------------|
+| `deleteFiles` | `boolean` | `true` = also delete original files and thumbnail cache. `false` = empty the database only; files remain on disk (orphaned). |
 
-### Antwort
+### Response
 
 ```jsonc
 {
@@ -85,7 +86,7 @@ Content-Type: application/json
     "photos": 412
   },
   "files": {
-    "deleted": true,           // == übergebenes deleteFiles
+    "deleted": true,           // == the submitted deleteFiles value
     "uploadsRemoved": 412,
     "thumbnailsRemoved": 412,
     "failures": 0
@@ -99,31 +100,30 @@ Content-Type: application/json
 }
 ```
 
-`dbCounts` listet die Anzahl gelöschter Zeilen pro Tabelle in der
-**Reihenfolge der tatsächlichen Ausführung**, was die spätere Diagnose
-(z.B. eines unerwartet leeren Tables) erleichtert.
+`dbCounts` lists the number of deleted rows per table in the
+**order of actual execution**, which makes later diagnostics easier
+(e.g. for an unexpectedly empty table).
 
-`embeddingService` wird **immer** aufgerufen – auch wenn `deleteFiles=false`
-ist. Sobald die `photos`-Tabelle leer ist, sind die Embeddings im
-Vektor-Store ohnehin verwaist. Schlägt der Aufruf fehl (Service nicht
-erreichbar etc.), wird der Fehler im Response-Feld gemeldet, der
-DB-Teil des Purges gilt aber als erfolgreich.
+`embeddingService` is **always** called – even when `deleteFiles=false`.
+Once the `photos` table is empty, the embeddings in the vector store are
+orphaned anyway. If the call fails (service unreachable, etc.), the
+error is reported in the response field, but the DB part of the purge
+is still considered successful.
 
-## Implementierung
+## Implementation
 
-### Backend-Schichten
+### Backend layers
 
-| Datei                                                           | Rolle                                                                 |
-|-----------------------------------------------------------------|-----------------------------------------------------------------------|
-| [`photo/photo.ts`](../photo/photo.ts) `purgePhotos`             | Encore.ts-Endpoint, prüft Auth + Permission, delegiert an die Logik.  |
-| [`photo/photo.service.ts`](../photo/photo.service.ts) `purgeAllPhotosLogic` | Eigentliche Lösch-Sequenz, FK-sichere Reihenfolge, Datei- und Embedding-Cleanup. |
-| [`embedding_service/app/api/endpoints.py`](../embedding_service/app/api/endpoints.py) `delete_all_photos` | Python-Endpoint `DELETE /photos`, leert den pgvector-Store.           |
+| File                                                                                                     | Role                                                                  |
+|----------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------|
+| [`photo/photo.ts`](../photo/photo.ts) `purgePhotos`                                                      | Encore.ts endpoint; checks auth + permission and delegates to the logic. |
+| [`photo/photo.service.ts`](../photo/photo.service.ts) `purgeAllPhotosLogic`                              | Actual delete sequence, FK-safe order, file and embedding cleanup.    |
+| [`embedding_service/app/api/endpoints.py`](../embedding_service/app/api/endpoints.py) `delete_all_photos` | Python endpoint `DELETE /photos`; clears the pgvector store.          |
 
-### Lösch-Reihenfolge (FK-sicher)
+### Delete order (FK-safe)
 
-Innerhalb von `purgeAllPhotosLogic` werden die Tabellen in einer
-Reihenfolge geleert, die alle Foreign-Key-Abhängigkeiten respektiert
-(Kinder vor Eltern):
+Inside `purgeAllPhotosLogic`, tables are emptied in an order that respects
+all foreign-key dependencies (children before parents):
 
 ```
 photo_scan_queue
@@ -142,67 +142,68 @@ photo_curation
 photos
 ```
 
-Anschliessend:
+Afterwards:
 
-1. `DELETE` an den Embedding-Service (`/photos`).
-2. Internen `_aiUserId`-Cache zurücksetzen, damit der nächste Lookup einen
-   frischen Stand erhält.
-3. Wenn `deleteFiles=true`: `UPLOAD_DIR` und `THUMBNAIL_DIR` rekursiv
-   leeren (Verzeichnisse selbst bleiben bestehen, das `tmp`-Subverzeichnis
-   wird neu angelegt, damit Folge-Uploads sofort wieder funktionieren).
+1. `DELETE` call against the embedding service (`/photos`).
+2. Reset the internal `_aiUserId` cache so the next lookup gets a fresh
+   value.
+3. If `deleteFiles=true`: recursively empty `UPLOAD_DIR` and
+   `THUMBNAIL_DIR` (the directories themselves remain; the `tmp`
+   subdirectory is recreated so follow-up uploads keep working).
 
-Pro Eintrag aufgetretene Datei-Fehler werden gezählt (`files.failures`),
-brechen den Purge aber nicht ab — ein einzelner blockierter Handle soll
-nicht den restlichen Cleanup verhindern.
+Per-entry file errors are counted (`files.failures`) but do not abort the
+purge – a single blocked handle should not prevent the rest of the
+cleanup.
 
-### Was bleibt erhalten
+### What is preserved
 
 - `users`, `roles`, `permissions`, `role_permissions`, `user_roles`
-- WebAuthn-Credentials, Passwort-Reset-Tokens, Sessions
-- App-Konfiguration und Secrets
-- Backup-Snapshots auf dem ZFS-Dataset
-- Verzeichnisse `UPLOAD_DIR` und `THUMBNAIL_DIR` (nur Inhalt wird geleert)
+- WebAuthn credentials, password-reset tokens, sessions
+- App configuration and secrets
+- Backup snapshots on the ZFS dataset
+- The `UPLOAD_DIR` and `THUMBNAIL_DIR` directories themselves (only their
+  contents are cleared)
 
-## Frontend-UI
+## Frontend UI
 
-In [`frontend/src/views/DataManagementView.vue`](../frontend/src/views/DataManagementView.vue)
-ist der Purge als eigener Bereich **Danger Zone** umgesetzt:
+The purge is implemented as a dedicated **Danger Zone** section in
+[`frontend/src/views/DataManagementView.vue`](../frontend/src/views/DataManagementView.vue):
 
-1. Der Bereich wird nur gerendert, wenn der eingeloggte User die
-   Berechtigung `photos.purge` besitzt.
-2. Klick auf "Alle Fotodaten löschen…" öffnet einen modalen Dialog.
-3. Der Dialog erzwingt **zwei** Bestätigungen:
-   - Auswahl des Modus (`Nur Datenbank` vs. `Datenbank + Dateien`)
-   - Tippen des Schlüsselwortes `LÖSCHEN` (case-insensitive, getrimmt)
-4. Erst dann wird der Bestätigungs-Button aktiv.
-5. Nach dem Aufruf bleibt der Dialog offen und zeigt eine Tabelle mit den
-   gelöschten Zeilen pro Tabelle, dem Datei-Cleanup-Status und dem
-   Ergebnis des Embedding-Service-Aufrufs.
+1. The section is rendered only if the logged-in user has the
+   `photos.purge` permission.
+2. Clicking "Delete all photo data…" opens a modal dialog.
+3. The dialog requires **two** confirmations:
+   - Selection of the mode (`Database only` vs. `Database + files`).
+   - Typing the keyword `LÖSCHEN` (case-insensitive, trimmed).
+4. Only then does the confirmation button become active.
+5. After the call, the dialog stays open and shows a table with the number
+   of deleted rows per table, the file cleanup status, and the result of
+   the embedding-service call.
 
-## Sicherheitsüberlegungen
+## Security considerations
 
-- **Doppelt sicher**: Permission ist nicht Admin-default und Bestätigungs-
-  text ist erforderlich. Beides muss wegfallen, damit ein Purge
-  versehentlich ausgelöst werden kann.
-- **Audit**: Der Endpunkt läuft als normale Encore.ts-API und ist damit in
-  den Standard-Traces sichtbar (`encore run` Dev-Dashboard auf
-  <http://localhost:9400/>).
-- **Backups**: Vor einem Purge in produktiven Umgebungen sollte das in
+- **Double safety**: the permission is not in the Admin default, and a
+  confirmation phrase is required. Both must be bypassed for a purge to
+  happen accidentally.
+- **Audit**: the endpoint runs as a regular Encore.ts API and is
+  therefore visible in the standard traces (`encore run` dev dashboard
+  at <http://localhost:9400/>).
+- **Backups**: before a purge in production environments, the ZFS
+  snapshot system described in
   [`DEPLOYMENT.md`](../DEPLOYMENT.md#automatic-daily-backup-recommended)
-  beschriebene ZFS-Snapshot-System sicherstellen, dass ein
-  Anwendungs-konsistenter Snapshot existiert. Im Notfall lässt sich der
-  Stand per `zfs rollback` (Variante A im DEPLOYMENT) komplett
-  wiederherstellen.
-- **Embedding-Service-Ausfall**: Schlägt der `DELETE /photos`-Aufruf an
-  den Python-Service fehl, wird die Antwort entsprechend markiert. Der
-  DB-State ist trotzdem konsistent (leer); die verwaisten Embeddings
-  können später durch erneutes Aufrufen oder durch Neustart des
-  Embedding-Containers entfernt werden.
+  should ensure that an application-consistent snapshot exists. In an
+  emergency, the state can be fully restored via `zfs rollback`
+  (variant A in DEPLOYMENT).
+- **Embedding service outage**: if the `DELETE /photos` call to the
+  Python service fails, the response is marked accordingly. The DB
+  state is still consistent (empty); the orphaned embeddings can be
+  removed later by calling again or by restarting the embedding
+  container.
 
-## Verwandte Endpunkte
+## Related endpoints
 
-| Endpoint                       | Permission             | Scope                       |
-|--------------------------------|------------------------|-----------------------------|
-| `DELETE /photos/:id`           | `photos.delete`        | Einzelnes Foto              |
-| `DELETE /photos/:id/hard`      | `photos.delete`        | Einzelnes Foto + Datei      |
-| `POST   /photos/purge`         | `photos.purge`         | **Alle Fotos der Installation** |
+| Endpoint                       | Permission          | Scope                               |
+|--------------------------------|---------------------|-------------------------------------|
+| `DELETE /photos/:id`           | `photos.delete`     | Single photo                        |
+| `DELETE /photos/:id/hard`      | `photos.delete`     | Single photo + file                 |
+| `POST   /photos/purge`         | `photos.purge`      | **All photos of the installation**  |
