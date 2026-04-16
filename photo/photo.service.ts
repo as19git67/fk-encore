@@ -4838,3 +4838,152 @@ export async function searchPhotosNaturalLogic(
     .slice(0, limit);
   return { parsed: parsedPublic, results: ordered };
 }
+
+// ========================================================================
+// Photo Purge (destructive — requires photos.purge permission)
+// ========================================================================
+
+export interface PurgeFilesResult {
+  deleted: boolean;
+  uploadsRemoved: number;
+  thumbnailsRemoved: number;
+  failures: number;
+}
+
+export interface PurgeEmbeddingServiceResult {
+  called: boolean;
+  ok: boolean;
+  deleted: number;
+  error: string;
+}
+
+export interface PurgeResult {
+  success: boolean;
+  /** Rows removed from each affected table. Order reflects FK dependencies. */
+  dbCounts: Record<string, number>;
+  /** When `deleteFiles` is true: number of removed files / failed removals. */
+  files: PurgeFilesResult;
+  /** Result of the embedding-service `/photos` DELETE. */
+  embeddingService: PurgeEmbeddingServiceResult;
+}
+
+/**
+ * Recursively remove every entry inside `dir` but keep `dir` itself.
+ * Returns a tuple of (removedCount, failedCount). Swallows per-entry errors
+ * so a single failure doesn't abort the purge.
+ */
+async function emptyDirectory(dir: string): Promise<{ removed: number; failed: number }> {
+  let removed = 0;
+  let failed = 0;
+  let entries: string[] = [];
+  try {
+    entries = await fs.promises.readdir(dir);
+  } catch {
+    return { removed: 0, failed: 0 };
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry);
+    try {
+      const stat = await fs.promises.lstat(full);
+      if (stat.isDirectory()) {
+        await fs.promises.rm(full, { recursive: true, force: true });
+      } else {
+        await fs.promises.unlink(full);
+      }
+      removed++;
+    } catch (err) {
+      console.error(`[purge] Failed to remove ${full}:`, err);
+      failed++;
+    }
+  }
+  return { removed, failed };
+}
+
+/**
+ * Purge ALL photo-related data for the whole installation.
+ *
+ * Tables cleared (in FK-safe order):
+ *   photo_scan_queue → photo_landmarks → user_face_assignments → faces
+ *   → photo_group_members → photo_groups
+ *   → album_photos → album_shares → album_public_links → album_user_settings
+ *   → albums → persons → photo_curation → photos
+ *
+ * User accounts, roles, permissions and other non-photo data are preserved.
+ *
+ * When `deleteFiles` is true, every file inside UPLOAD_DIR and THUMBNAIL_DIR
+ * is removed as well (the directories themselves stay so subsequent uploads
+ * keep working). The embedding service's vector store is cleared in both
+ * modes — it's worthless once the photos table is empty.
+ */
+export async function purgeAllPhotosLogic(deleteFiles: boolean): Promise<PurgeResult> {
+  const dbCounts: Record<string, number> = {};
+  const runDelete = async (label: string, q: Promise<{ changes: number }>): Promise<void> => {
+    const res = await q;
+    dbCounts[label] = res?.changes ?? 0;
+  };
+
+  // FK-safe deletion order. Child tables first, then parents.
+  await runDelete("photo_scan_queue", dbExec(db.delete(photoScanQueue)));
+  await runDelete("photo_landmarks", dbExec(db.delete(photoLandmarks)));
+  await runDelete("user_face_assignments", dbExec(db.delete(userFaceAssignments)));
+  await runDelete("faces", dbExec(db.delete(faces)));
+
+  await runDelete("photo_group_members", dbExec(db.delete(photoGroupMembers)));
+  await runDelete("photo_groups", dbExec(db.delete(photoGroups)));
+
+  await runDelete("album_photos", dbExec(db.delete(albumPhotos)));
+  await runDelete("album_shares", dbExec(db.delete(albumShares)));
+  await runDelete("album_public_links", dbExec(db.delete(albumPublicLinks)));
+  await runDelete("album_user_settings", dbExec(db.delete(albumUserSettings)));
+  await runDelete("albums", dbExec(db.delete(albums)));
+
+  await runDelete("persons", dbExec(db.delete(persons)));
+  await runDelete("photo_curation", dbExec(db.delete(photoCuration)));
+  await runDelete("photos", dbExec(db.delete(photos)));
+
+  // Clear the embedding-service vector store so stale embeddings don't
+  // outlive the photos they describe.
+  const embeddingService: PurgeEmbeddingServiceResult = {
+    called: true,
+    ok: false,
+    deleted: 0,
+    error: "",
+  };
+  try {
+    const resp = await fetch(`${EMBEDDING_SERVICE_URL}/photos`, { method: "DELETE" });
+    if (resp.ok) {
+      const body = (await resp.json().catch(() => ({}))) as { deleted?: number };
+      embeddingService.ok = true;
+      embeddingService.deleted = body?.deleted ?? 0;
+    } else {
+      embeddingService.error = `HTTP ${resp.status}`;
+    }
+  } catch (err: any) {
+    embeddingService.error = err?.message || String(err);
+  }
+
+  // Reset internal AI-user cache so the next lookup refreshes its state.
+  _aiUserId = undefined;
+
+  // Optionally wipe files.
+  const files: PurgeResult["files"] = {
+    deleted: deleteFiles,
+    uploadsRemoved: 0,
+    thumbnailsRemoved: 0,
+    failures: 0,
+  };
+  if (deleteFiles) {
+    const uploads = await emptyDirectory(UPLOAD_DIR);
+    const thumbs = await emptyDirectory(THUMBNAIL_DIR);
+    files.uploadsRemoved = uploads.removed;
+    files.thumbnailsRemoved = thumbs.removed;
+    files.failures = uploads.failed + thumbs.failed;
+
+    // Recreate the temp-staging subdir that uploads rely on.
+    if (!fs.existsSync(UPLOAD_TMP_DIR)) {
+      fs.mkdirSync(UPLOAD_TMP_DIR, { recursive: true });
+    }
+  }
+
+  return { success: true, dbCounts, files, embeddingService };
+}

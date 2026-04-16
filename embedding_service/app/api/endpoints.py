@@ -556,3 +556,19 @@ async def get_photos(request: GetRequest, db: DbDep) -> GetResponse:
         )
 
     return GetResponse(photos=records)
+
+
+# ---------------------------------------------------------------------------
+# /photos (DELETE) — destructive: drop every embedding
+# ---------------------------------------------------------------------------
+
+@router.delete("/photos", tags=["embeddings"])
+async def delete_all_photos(db: DbDep) -> dict:
+    """Delete every stored photo embedding.
+
+    Used by the main app's photo-purge flow to clear the vector store in
+    lockstep with the authoritative photos table.
+    """
+    deleted = await repository.delete_all_photos(db)
+    logger.warning("Deleted all %d photo embeddings via /photos DELETE", deleted)
+    return {"status": "ok", "deleted": deleted}
