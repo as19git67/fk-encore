@@ -114,6 +114,48 @@ function ensureReadableDirectory(absPath: string): void {
   }
 }
 
+export interface AvailableDirectory {
+  name: string;
+  rel_path: string;
+  abs_path: string;
+  already_registered: boolean;
+}
+
+/**
+ * List direct sub-directories of PHOTO_LIBRARIES_ROOT for the admin UI picker.
+ * Hidden entries (names starting with ".") are skipped. Already-registered
+ * directories are returned too, but flagged so the UI can disable them.
+ */
+export async function listAvailableDirectories(): Promise<AvailableDirectory[]> {
+  let entries: fs.Dirent[];
+  try {
+    entries = await fs.promises.readdir(PHOTO_LIBRARIES_ROOT, { withFileTypes: true });
+  } catch (err: any) {
+    if (err?.code === "ENOENT") return [];
+    throw new Error(`PHOTO_LIBRARIES_ROOT unreadable: ${err?.message ?? err}`);
+  }
+
+  const taken = new Set(
+    (await dbAll<{ path: string }>(
+      db.select({ path: photoLibraries.path }).from(photoLibraries)
+    )).map((r) => r.path)
+  );
+
+  const dirs: AvailableDirectory[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+    const abs = path.join(PHOTO_LIBRARIES_ROOT, entry.name);
+    dirs.push({
+      name: entry.name,
+      rel_path: entry.name,
+      abs_path: abs,
+      already_registered: taken.has(abs),
+    });
+  }
+  dirs.sort((a, b) => a.name.localeCompare(b.name));
+  return dirs;
+}
+
 // ---------- CRUD ----------
 
 function rowToLibrary(row: typeof photoLibraries.$inferSelect): PhotoLibrary {

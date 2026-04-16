@@ -38,8 +38,24 @@ export interface ListLibrariesResponse {
   libraries: PhotoLibrary[]
 }
 
+export interface AvailableDirectory {
+  name: string
+  rel_path: string
+  abs_path: string
+  already_registered: boolean
+}
+
+export interface AvailablePathsResponse {
+  root: string
+  directories: AvailableDirectory[]
+}
+
 export function listLibraries() {
   return apiFetch<ListLibrariesResponse>('/libraries')
+}
+
+export function listAvailablePaths() {
+  return apiFetch<AvailablePathsResponse>('/libraries/available-paths')
 }
 
 export function getLibrary(id: number) {

@@ -14,6 +14,7 @@ import type {
   CreateLibraryRequest,
   UpdateLibraryRequest,
   ScanReport,
+  AvailableDirectory,
 } from "./libraries.service";
 import { startWatcher, stopWatcher } from "./library-watcher";
 
@@ -54,6 +55,17 @@ export const listLibraries = api(
   async (): Promise<{ libraries: PhotoLibrary[] }> => {
     checkPermission();
     return { libraries: await libs.listLibraries() };
+  }
+);
+
+export const listAvailablePaths = api(
+  { expose: true, method: "GET", path: "/libraries/available-paths", auth: true },
+  async (): Promise<{ root: string; directories: AvailableDirectory[] }> => {
+    checkPermission();
+    return {
+      root: libs.PHOTO_LIBRARIES_ROOT,
+      directories: await libs.listAvailableDirectories(),
+    };
   }
 );
 

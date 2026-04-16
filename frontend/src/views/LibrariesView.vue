@@ -11,6 +11,7 @@ import Tag from 'primevue/tag'
 import Message from 'primevue/message'
 import {
   listLibraries,
+  listAvailablePaths,
   createLibrary,
   updateLibrary,
   deleteLibrary,
@@ -19,6 +20,7 @@ import {
   type PhotoLibrary,
   type LibraryImportMode,
   type ScanReport,
+  type AvailableDirectory,
 } from '../api/libraries'
 import { useAuthStore } from '../stores/auth'
 import { formatDateShort } from '../utils/dateFormat'
@@ -50,6 +52,11 @@ const form = ref<{
 })
 const saving = ref(false)
 
+// Path picker state (create mode)
+const availablePaths = ref<AvailableDirectory[]>([])
+const availableRoot = ref('')
+const loadingPaths = ref(false)
+
 // Delete confirmation
 const showDeleteConfirm = ref(false)
 const libraryToDelete = ref<PhotoLibrary | null>(null)
@@ -70,10 +77,21 @@ async function loadData() {
   }
 }
 
-function openCreateDialog() {
+async function openCreateDialog() {
   editingId.value = null
   form.value = { name: '', path: '', import_mode: 'link', auto_import: false }
   showEditDialog.value = true
+  loadingPaths.value = true
+  try {
+    const res = await listAvailablePaths()
+    availableRoot.value = res.root
+    availablePaths.value = res.directories
+  } catch (err: any) {
+    error.value = err.message || 'Verzeichnisse konnten nicht geladen werden'
+    availablePaths.value = []
+  } finally {
+    loadingPaths.value = false
+  }
 }
 
 function openEditDialog(lib: PhotoLibrary) {
@@ -302,15 +320,37 @@ onMounted(loadData)
 
         <div class="field">
           <label for="lib-path">Pfad</label>
+          <Select
+            v-if="editingId === null"
+            id="lib-path"
+            v-model="form.path"
+            :options="availablePaths"
+            option-label="name"
+            option-value="rel_path"
+            :option-disabled="(opt: AvailableDirectory) => opt.already_registered"
+            :loading="loadingPaths"
+            :placeholder="loadingPaths ? 'Lade Verzeichnisse…' : 'Unterverzeichnis wählen'"
+            :empty-message="'Keine Verzeichnisse unter ' + availableRoot"
+          >
+            <template #option="{ option }">
+              <div class="path-option">
+                <span>{{ option.name }}</span>
+                <span v-if="option.already_registered" class="muted small">
+                  (bereits registriert)
+                </span>
+              </div>
+            </template>
+          </Select>
           <InputText
+            v-else
             id="lib-path"
             v-model="form.path"
             autocomplete="off"
-            :disabled="editingId !== null"
-            placeholder="z. B. archive oder /mnt/libraries/archive"
+            disabled
           />
           <small v-if="editingId === null" class="hint-small">
-            Relativ zu <code>PHOTO_LIBRARIES_ROOT</code> oder absoluter Pfad innerhalb davon.
+            Auswahl direkter Unterverzeichnisse unter
+            <code>{{ availableRoot || 'PHOTO_LIBRARIES_ROOT' }}</code>.
           </small>
           <small v-else class="hint-small">Pfad kann nach Anlage nicht geändert werden.</small>
         </div>
@@ -461,5 +501,11 @@ onMounted(loadData)
 
 .hint-small code {
   font-family: monospace;
+}
+
+.path-option {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
 }
 </style>
