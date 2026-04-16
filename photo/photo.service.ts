@@ -737,14 +737,108 @@ export async function indexPhotoFaces(userId: number, photoId: number, force: bo
   await assignFacesForUser(userId, photoId, force);
 }
 
-interface ExifMetadata {
+export interface ExifMetadata {
   takenAt: string | null;
   latitude: number | null;
   longitude: number | null;
   description: string | null;
+  /** IPTC Keywords / XMP dc:subject — candidate tags. */
+  keywords: string[];
+  /** IPTC By-line / XMP dc:creator — creator/photographer name. */
+  author: string | null;
+  /** IPTC Headline. */
+  headline: string | null;
+  /** IPTC Copyright / EXIF Copyright. */
+  copyright: string | null;
+  /** IPTC Credit. */
+  credit: string | null;
+  /** IPTC City. */
+  city: string | null;
+  /** IPTC Province-State. */
+  state: string | null;
+  /** IPTC Country-PrimaryLocationName. */
+  country: string | null;
 }
 
-async function getExifMetadata(filePath: string): Promise<ExifMetadata> {
+/**
+ * Parse an IPTC DateCreated (YYYYMMDD or YYYY-MM-DD) + optional TimeCreated
+ * (HHMMSS[±HHMM] or HH:MM:SS) into an ISO-8601 string. Returns null when the
+ * fields are missing or unparseable.
+ *
+ * Exported for unit tests.
+ */
+export function parseIptcDate(date: unknown, time: unknown): string | null {
+  if (!date) return null;
+  const dateStr = typeof date === "string" ? date : String(date);
+  // Accept "YYYYMMDD" or "YYYY-MM-DD" or "YYYY:MM:DD".
+  const dateMatch = dateStr.match(/^(\d{4})[:-]?(\d{2})[:-]?(\d{2})/);
+  if (!dateMatch) return null;
+  const [, yyyy, mm, dd] = dateMatch;
+  let hh = "00";
+  let mi = "00";
+  let ss = "00";
+  let tz = "Z";
+  if (time) {
+    const timeStr = typeof time === "string" ? time : String(time);
+    const timeMatch = timeStr.match(/^(\d{2}):?(\d{2}):?(\d{2})([+-]\d{2}:?\d{2})?/);
+    if (timeMatch) {
+      hh = timeMatch[1];
+      mi = timeMatch[2];
+      ss = timeMatch[3];
+      if (timeMatch[4]) {
+        tz = timeMatch[4].includes(":") ? timeMatch[4] : `${timeMatch[4].slice(0, 3)}:${timeMatch[4].slice(3)}`;
+      }
+    }
+  }
+  const iso = `${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}${tz}`;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
+function asString(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const t = v.trim();
+  return t.length > 0 ? t : null;
+}
+
+function asStringArray(v: unknown): string[] {
+  if (Array.isArray(v)) {
+    return v
+      .map((x) => (typeof x === "string" ? x.trim() : ""))
+      .filter((x) => x.length > 0);
+  }
+  const s = asString(v);
+  if (!s) return [];
+  // Some encoders store keywords as a single semicolon- or comma-separated string.
+  return s
+    .split(/[;,]/)
+    .map((x) => x.trim())
+    .filter((x) => x.length > 0);
+}
+
+/**
+ * Extract EXIF, IPTC and XMP metadata from an image file. Exported for tests.
+ *
+ * Always returns a defined object — on parse errors every field falls back to
+ * its "not present" value (null / empty array) so callers don't need to handle
+ * exceptions.
+ */
+export async function getExifMetadata(filePath: string): Promise<ExifMetadata> {
+  const empty: ExifMetadata = {
+    takenAt: null,
+    latitude: null,
+    longitude: null,
+    description: null,
+    keywords: [],
+    author: null,
+    headline: null,
+    copyright: null,
+    credit: null,
+    city: null,
+    state: null,
+    country: null,
+  };
   try {
     const data = await exifr.parse(filePath, { gps: true, xmp: true, iptc: true });
     let takenAt: string | null = null;
@@ -752,25 +846,60 @@ async function getExifMetadata(filePath: string): Promise<ExifMetadata> {
       takenAt = new Date(data.DateTimeOriginal).toISOString();
     } else if (data?.CreateDate) {
       takenAt = new Date(data.CreateDate).toISOString();
+    } else {
+      // Fall back to IPTC DateCreated/TimeCreated when EXIF timestamps are missing.
+      takenAt = parseIptcDate(data?.DateCreated, data?.TimeCreated);
     }
-    // Extract description from various EXIF/XMP/IPTC fields
+    // Description — prefer EXIF/XMP fields, fall back to IPTC Caption-Abstract.
     const description: string | null =
-      data?.ImageDescription ??
-      data?.Description ??
-      data?.["dc:description"] ??
-      data?.UserComment ??
-      data?.Caption ??
-      data?.["Caption-Abstract"] ??
+      asString(data?.ImageDescription) ??
+      asString(data?.Description) ??
+      asString(data?.["dc:description"]) ??
+      asString(data?.UserComment) ??
+      asString(data?.Caption) ??
+      asString(data?.["Caption-Abstract"]) ??
+      null;
+    // Keywords — IPTC Keywords or XMP dc:subject.
+    const keywords = asStringArray(
+      data?.Keywords ?? data?.["dc:subject"] ?? data?.subject
+    );
+    const author =
+      asString(data?.Byline) ??
+      asString(data?.["By-line"]) ??
+      asString(data?.Artist) ??
+      asString(data?.Creator) ??
+      asString(data?.["dc:creator"]) ??
+      null;
+    const headline = asString(data?.Headline);
+    const copyright =
+      asString(data?.CopyrightNotice) ??
+      asString(data?.Copyright) ??
+      asString(data?.Rights) ??
+      null;
+    const credit = asString(data?.Credit);
+    const city = asString(data?.City);
+    const state = asString(data?.["Province-State"]) ?? asString(data?.State);
+    const country =
+      asString(data?.["Country-PrimaryLocationName"]) ??
+      asString(data?.Country) ??
       null;
     return {
       takenAt,
       latitude: data?.latitude ?? null,
       longitude: data?.longitude ?? null,
-      description: typeof description === "string" && description.trim() ? description.trim() : null,
+      description,
+      keywords,
+      author,
+      headline,
+      copyright,
+      credit,
+      city,
+      state,
+      country,
     };
   } catch (err) {
     console.error("Error parsing EXIF data:", err);
-    return { takenAt: null, latitude: null, longitude: null, description: null };
+    return empty;
   }
 }
 
@@ -1587,13 +1716,21 @@ export async function updatePhotoDateLogic(
     const minutes = String(parsedDate.getMinutes()).padStart(2, '0');
     const seconds = String(parsedDate.getSeconds()).padStart(2, '0');
     const formattedDate = `${year}:${month}:${day} ${hours}:${minutes}:${seconds}`;
+    const iptcDate = `${year}:${month}:${day}`;
+    const iptcTime = `${hours}:${minutes}:${seconds}`;
 
-    // Write to multiple tags to ensure compatibility
+    // Write to multiple tags to ensure compatibility across EXIF, IPTC and XMP.
     await Promise.race([
       exiftool.write(filePath, {
+        // EXIF
         DateTimeOriginal: formattedDate,
         CreateDate: formattedDate,
         ModifyDate: formattedDate,
+        // IPTC IIM
+        DateCreated: iptcDate,
+        TimeCreated: iptcTime,
+        DigitalCreationDate: iptcDate,
+        DigitalCreationTime: iptcTime,
       }, ["-overwrite_original"]),
       new Promise((_, reject) => {
         setTimeout(() => reject(new Error(`EXIF_WRITE_TIMEOUT after ${EXIF_WRITE_TIMEOUT_MS}ms`)), EXIF_WRITE_TIMEOUT_MS);
@@ -1625,16 +1762,25 @@ export async function updatePhotoDescriptionLogic(
   // 1. Update database
   await dbExec(db.update(photos).set({ description: trimmed }).where(eq(photos.id, photoId)));
 
-  // 2. Write to EXIF data
+  // 2. Write description into EXIF, IPTC and XMP. Keeping the three kept in
+  //    sync makes the description survive third-party tooling that only reads
+  //    one of the three (e.g. Windows Explorer reads XMP, Lightroom reads IPTC,
+  //    legacy viewers read EXIF ImageDescription).
   try {
     const filePath = path.join(UPLOAD_DIR, photo.filename);
     if (fs.existsSync(filePath)) {
       const ext = path.extname(filePath).toLowerCase();
       if (EXIF_WRITABLE_EXTENSIONS.has(ext)) {
+        const value = trimmed ?? "";
         await Promise.race([
           exiftool.write(filePath, {
-            ImageDescription: trimmed ?? "",
-            "Description": trimmed ?? "",
+            // EXIF
+            ImageDescription: value,
+            // XMP (dc:description). exiftool-vendored's `Description` write
+            // shortcut targets XMP:Description.
+            "Description": value,
+            // IPTC Caption-Abstract
+            "Caption-Abstract": value,
           }, ["-overwrite_original"]),
           new Promise((_, reject) => {
             setTimeout(() => reject(new Error(`EXIF_WRITE_TIMEOUT after ${EXIF_WRITE_TIMEOUT_MS}ms`)), EXIF_WRITE_TIMEOUT_MS);
