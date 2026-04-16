@@ -152,6 +152,13 @@ Next steps — finish the install by:
        Hide Stderr:   no
        Enabled:       yes
 
+     Optional: add SNAPSHOT_RETENTION_DAYS=<n> before the script path to
+     override the default (30 days). Example — keep 14 days of daily-*
+     snapshots and disable retention with 0:
+
+       SNAPSHOT_RETENTION_DAYS=14 ZFS_DATASET=$DATASET $DRIVER_SCRIPT
+       SNAPSHOT_RETENTION_DAYS=0  ZFS_DATASET=$DATASET $DRIVER_SCRIPT
+
   3. Verify end-to-end (run as root on the host):
 
        ZFS_DATASET=$DATASET $DRIVER_SCRIPT

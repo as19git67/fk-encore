@@ -24,13 +24,21 @@
 #   4  /stop failed
 #
 # Configuration (env vars override defaults):
-#   FK_ENCORE_URL        base URL of the app, default http://localhost:8080
-#   FK_BACKUP_TOKEN_FILE path to token file,  default: ./backup-token next to
-#                        this script (that is where install-backup-hook.sh
-#                        places it — on a ZFS dataset, upgrade-safe)
-#   ZFS_DATASET          dataset for snapshot, default tank/vivanty
-#   LABEL                snapshot + dump label, default daily-<UTC timestamp>
-#   CURL_TIMEOUT         seconds, default 30
+#   FK_ENCORE_URL           base URL of the app, default http://localhost:8080
+#   FK_BACKUP_TOKEN_FILE    path to token file,  default: ./backup-token next to
+#                           this script (that is where install-backup-hook.sh
+#                           places it — on a ZFS dataset, upgrade-safe)
+#   ZFS_DATASET             dataset for snapshot, default tank/vivanty
+#   LABEL                   snapshot + dump label, default daily-<UTC timestamp>
+#   CURL_TIMEOUT            seconds, default 30
+#   SNAPSHOT_RETENTION_DAYS age in days above which `daily-*` snapshots of
+#                           $ZFS_DATASET are pruned after a successful run.
+#                           Default 30. Set to 0 to disable pruning. Only
+#                           snapshots whose label starts with `daily-` are
+#                           ever considered — manual / ad-hoc snapshots are
+#                           left alone. A prune failure is logged as WARN
+#                           but does not fail the backup (the snapshot
+#                           itself was taken successfully).
 #
 # Designed for bash 4+. Use `set -euo pipefail` so the trap-based /stop
 # always runs on failure.
@@ -44,6 +52,13 @@ FK_BACKUP_TOKEN_FILE="${FK_BACKUP_TOKEN_FILE:-$SCRIPT_DIR/backup-token}"
 ZFS_DATASET="${ZFS_DATASET:-tank/vivanty}"
 LABEL="${LABEL:-daily-$(date -u +%Y%m%d-%H%M%S)}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-30}"
+SNAPSHOT_RETENTION_DAYS="${SNAPSHOT_RETENTION_DAYS:-30}"
+
+if ! [[ "$SNAPSHOT_RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
+  printf '[fk-encore-backup] FATAL: SNAPSHOT_RETENTION_DAYS must be a non-negative integer, got %q\n' \
+    "$SNAPSHOT_RETENTION_DAYS" >&2
+  exit 1
+fi
 
 log() { printf '[fk-encore-backup %s] %s\n' "$(date -u +%FT%TZ)" "$*" >&2; }
 
@@ -110,6 +125,56 @@ stop_backup() {
   return 0
 }
 
+prune_old_snapshots() {
+  # Delete `daily-*` snapshots of $ZFS_DATASET older than N days. Manual /
+  # unrelated snapshots are left untouched (we only match the label prefix
+  # this script itself generates). `zfs snapshot -r` on the root dataset
+  # creates a snapshot with the same name on every child, so destroying
+  # `<root>@<label>` with `-r` cascades across the whole tree.
+  #
+  # We enumerate snapshots on the root dataset only (no `-r`) to get one
+  # row per label, regardless of how many child datasets carry a copy.
+  local retention_days="$1"
+  if (( retention_days == 0 )); then
+    log "snapshot retention disabled (SNAPSHOT_RETENTION_DAYS=0)"
+    return 0
+  fi
+
+  local now_epoch cutoff_epoch
+  now_epoch="$(date -u +%s)"
+  cutoff_epoch=$(( now_epoch - retention_days * 86400 ))
+  log "pruning daily-* snapshots of $ZFS_DATASET older than ${retention_days}d (created before $(date -u -d "@$cutoff_epoch" +%FT%TZ))"
+
+  local listing
+  if ! listing="$(zfs list -H -p -o name,creation -t snapshot "$ZFS_DATASET" 2>&1)"; then
+    log "WARN: zfs list failed, skipping prune: $listing"
+    return 1
+  fi
+
+  local name creation label pruned=0 failed=0
+  while IFS=$'\t' read -r name creation; do
+    [[ -z "$name" ]] && continue
+    label="${name#*@}"
+    # Only prune labels this script owns. Never touch the snapshot we just
+    # took (even if retention_days=0 would otherwise match in some future
+    # caller — defensive).
+    [[ "$label" == daily-* ]] || continue
+    [[ "$label" == "$LABEL" ]] && continue
+    if (( creation < cutoff_epoch )); then
+      log "destroying $name (created $(date -u -d "@$creation" +%FT%TZ))"
+      if zfs destroy -r "$name"; then
+        pruned=$(( pruned + 1 ))
+      else
+        log "WARN: zfs destroy -r $name failed"
+        failed=$(( failed + 1 ))
+      fi
+    fi
+  done <<< "$listing"
+
+  log "prune summary: destroyed=$pruned failed=$failed"
+  (( failed == 0 ))
+}
+
 # Trap: on ANY exit (success or failure after /start), try to /stop.
 # The app's safety timer is a last-resort backstop if this also fails.
 trap 'rc=$?; if [[ "${STARTED:-0}" == "1" ]]; then stop_backup || true; fi; exit $rc' EXIT
@@ -140,3 +205,8 @@ if ! stop_backup; then
 fi
 STARTED=0
 log "backup complete label=$LABEL"
+
+# -- 4. retention -------------------------------------------------------
+# Prune best-effort: the backup itself already succeeded, a prune failure
+# must not flip the overall exit code.
+prune_old_snapshots "$SNAPSHOT_RETENTION_DAYS" || true
