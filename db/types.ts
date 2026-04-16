@@ -324,6 +324,8 @@ export interface Photo {
   ai_quality_details?: Record<string, number>;
   auto_crop?: { x: number; y: number };
   description?: string;
+  /** IPTC Keywords / XMP dc:subject — user-facing tags imported from the file. */
+  keywords?: string[];
 }
 
 export interface FaceBBox { x: number; y: number; width: number; height: number; }

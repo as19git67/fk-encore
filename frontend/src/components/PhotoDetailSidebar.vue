@@ -494,6 +494,16 @@ watch(() => props.photo.id, () => {
         </div>
       </template>
 
+      <template v-if="photo.keywords && photo.keywords.length > 0">
+        <div class="sidebar-divider" />
+        <div class="sidebar-section">
+          <div class="section-label"><i class="pi pi-tag" /> Tags</div>
+          <div class="keyword-chips">
+            <span v-for="kw in photo.keywords" :key="kw" class="keyword-tag">{{ kw }}</span>
+          </div>
+        </div>
+      </template>
+
       <template v-if="showPersons !== false">
         <div class="sidebar-divider" />
         <div class="sidebar-section">
@@ -818,6 +828,19 @@ watch(() => props.photo.id, () => {
 }
 .landmark-tag .pi-building { font-size: 0.7rem; color: var(--p-text-muted-color); }
 .landmark-confidence { font-size: 0.7rem; color: var(--p-text-muted-color); }
+
+.keyword-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.keyword-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: var(--p-content-hover-background);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 1rem;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8rem;
+  cursor: default;
+}
 
 .loading-row {
   display: flex;

@@ -23,6 +23,8 @@ export interface Photo {
   ai_quality_details?: Record<string, number>
   auto_crop?: { x: number; y: number }
   description?: string
+  /** IPTC Keywords / XMP dc:subject — tags imported from the file. Read-only in the UI. */
+  keywords?: string[]
 }
 
 export interface ListPhotosResponse {

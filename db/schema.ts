@@ -144,6 +144,8 @@ export const photos = pgTable("photos", {
   ai_quality_details: jsonb("ai_quality_details").$type<Record<string, number>>(),
   auto_crop: jsonb("auto_crop").$type<{ x: number; y: number }>(),
   description: text("description"),
+  // IPTC Keywords / XMP dc:subject — user-facing tags imported from the file.
+  keywords: text("keywords").array().notNull().default(sql`'{}'::text[]`),
 });
 
 // ========== Persons ==========
