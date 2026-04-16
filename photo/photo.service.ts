@@ -86,10 +86,35 @@ export const UPLOAD_DIR = path.resolve(process.env.PHOTO_UPLOAD_DIR || "uploads/
 export const THUMBNAIL_DIR = path.resolve(process.env.PHOTO_THUMBNAIL_DIR || "uploads/thumbnails");
 const INSIGHTFACE_SERVICE_URL = process.env.INSIGHTFACE_SERVICE_URL || "http://localhost:8000";
 
-const SUPPORTED_MIME_TYPES = new Set([
+export const SUPPORTED_MIME_TYPES = new Set([
   "image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp",
   "image/heic", "image/heif", "image/tiff", "image/bmp", "image/svg+xml",
 ]);
+
+/** File extensions that map to a supported MIME type. Used by the library
+ *  scanner to filter directory listings before touching files. */
+export const SUPPORTED_EXTENSIONS = new Set([
+  ".jpg", ".jpeg", ".png", ".gif", ".webp",
+  ".heic", ".heif", ".tif", ".tiff", ".bmp", ".svg",
+]);
+
+export function guessMimeFromExt(ext: string): string | null {
+  const e = ext.toLowerCase();
+  switch (e) {
+    case ".jpg":
+    case ".jpeg": return "image/jpeg";
+    case ".png": return "image/png";
+    case ".gif": return "image/gif";
+    case ".webp": return "image/webp";
+    case ".heic": return "image/heic";
+    case ".heif": return "image/heif";
+    case ".tif":
+    case ".tiff": return "image/tiff";
+    case ".bmp": return "image/bmp";
+    case ".svg": return "image/svg+xml";
+    default: return null;
+  }
+}
 const EMBEDDING_SERVICE_URL = process.env.EMBEDDING_SERVICE_URL || "http://localhost:8001";
 // Must match the validator bounds on TextSearchRequest in
 // embedding_service/app/models/schemas.py. Sending k/query outside these
@@ -1543,8 +1568,13 @@ export function thumbnailShardPath(baseName: string): string {
 /** Delete all cached thumbnail variants for a given photo filename. */
 async function deleteCachedThumbnails(filename: string): Promise<void> {
   const baseName = path.basename(filename, path.extname(filename));
-  const prefix = `${baseName}_`;
-  const shardPath = thumbnailShardPath(baseName);
+  // Library photos use a hashed cache key to avoid basename collisions across
+  // libraries — see getPhotoFile for the matching cache-write logic.
+  const cacheBase = filename.startsWith("__library/")
+    ? `${baseName}_${crypto.createHash("md5").update(filename).digest("hex").slice(0, 8)}`
+    : baseName;
+  const prefix = `${cacheBase}_`;
+  const shardPath = thumbnailShardPath(cacheBase);
   try {
     const entries = await fs.promises.readdir(shardPath);
     await Promise.all(
@@ -1566,10 +1596,14 @@ export async function hardDeletePhotoLogic(userId: number, photoId: number): Pro
     throw new Error("Photo not found or unauthorized");
   }
 
-  // Delete original file and all cached thumbnails from disk
-  const filePath = path.join(UPLOAD_DIR, photo.filename);
-  if (fs.existsSync(filePath)) {
-    fs.unlinkSync(filePath);
+  // For `link`-imported photos the file lives outside our storage and the
+  // library is the source of truth — only drop the DB row + thumbnails. The
+  // unlink watcher does the same when the source file disappears externally.
+  if (!photo.external_path) {
+    const filePath = path.join(UPLOAD_DIR, photo.filename);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
   }
   await deleteCachedThumbnails(photo.filename);
 

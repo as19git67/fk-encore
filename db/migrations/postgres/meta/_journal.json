@@ -162,6 +162,13 @@
       "when": 1776500000000,
       "tag": "0021_photo_keywords",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1776600000000,
+      "tag": "0022_photo_libraries",
+      "breakpoints": true
     }
   ]
 }
