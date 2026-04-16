@@ -1,212 +1,210 @@
-# Ähnliche Fotos – Gruppierung und Review
+# Similar Photos – Grouping and Review
 
-## Überblick
+## Overview
 
-Das Feature erkennt visuell ähnliche Fotos (Serienaufnahmen, Mehrfachbelichtungen,
-nahezu identische Duplikate) und präsentiert sie als Stapel. Der User kann jede
-Gruppe im `PhotoCompareView` durchgehen, einzelne Fotos verstecken oder
-favorisieren und die Gruppe am Ende als "erledigt" (reviewed) markieren.
+The feature detects visually similar photos (bursts, multi-exposure shots,
+near-identical duplicates) and presents them as a stack. Users can step
+through each group in `PhotoCompareView`, hide or favorite individual photos,
+and finally mark the group as "done" (reviewed).
 
-Dieses Dokument beschreibt, wie die Gruppierung zustande kommt, wie sie sich
-gegenüber geteilten Alben verhält und was passiert, wenn sich Gruppenmitglieder
-nachträglich ändern.
+This document describes how the grouping is computed, how it behaves with
+respect to shared albums, and what happens when group members change later.
 
-## Datenmodell
+## Data model
 
-| Tabelle | Zweck |
-|---------|-------|
-| `photo_groups` | Eine Zeile pro User pro Ähnlichkeits-Cluster. Enthält `user_id`, `cover_photo_id`, `reviewed_at`, `created_at`. |
-| `photo_group_members` | M:N-Verknüpfung der Gruppe zu ihren Foto-Mitgliedern inkl. `similarity_rank`. |
+| Table | Purpose |
+|-------|---------|
+| `photo_groups` | One row per user per similarity cluster. Contains `user_id`, `cover_photo_id`, `reviewed_at`, `created_at`. |
+| `photo_group_members` | M:N link from the group to its photo members, including `similarity_rank`. |
 
-Wichtig: `photo_groups` hat **keine** Album-Referenz. Gruppen sind **user-spezifisch**,
-nicht album-spezifisch. Das heißt:
+Important: `photo_groups` has **no** album reference. Groups are
+**user-specific**, not album-specific. This means:
 
-- Jeder User hat seine eigene Sicht auf Ähnlichkeits-Cluster.
-- `reviewed_at` gilt nur für den einen User.
-- Zwei User (z. B. Eigentümer und Teilnehmer eines geteilten Albums) haben
-  separate Gruppen-Zeilen mit unabhängigem Review-Status.
+- Every user has their own view of similarity clusters.
+- `reviewed_at` applies to that one user only.
+- Two users (e.g. the owner and a participant of a shared album) have
+  separate group rows with independent review status.
 
-## Erkennungs-Pipeline
+## Detection pipeline
 
-Die Erkennung läuft in `findPhotoGroupsLogic(userId)` in `photo/photo.service.ts`:
+Detection runs in `findPhotoGroupsLogic(userId)` in `photo/photo.service.ts`:
 
-1. **Foto-Sammlung** – Lädt alle Fotos, auf die der User Zugriff hat:
-   - Eigene Fotos (`photos.user_id = userId`)
-   - Fotos aus geteilten Alben (`album_shares` ⋈ `album_photos` ⋈ `photos`)
-   - Beide Mengen werden per Map dedupliziert.
+1. **Photo collection** – loads all photos the user has access to:
+   - Own photos (`photos.user_id = userId`)
+   - Photos from shared albums (`album_shares` ⋈ `album_photos` ⋈ `photos`)
+   - Both sets are deduplicated via a map.
 
-2. **Embedding-Abruf** – Holt DINOv2-Embeddings für alle gesammelten Foto-IDs
-   vom Embedding-Service (`EMBEDDING_SERVICE_URL`).
+2. **Embedding fetch** – retrieves DINOv2 embeddings for all collected
+   photo IDs from the embedding service (`EMBEDDING_SERVICE_URL`).
 
-3. **Fensterbasierter Paarvergleich** – Sortiert nach Zeitstempel und
-   vergleicht jedes Foto nur mit Fotos innerhalb von 10 Minuten
-   (`TIME_WINDOW_MS`). Paare mit Kosinus-Ähnlichkeit ≥ 0.90
-   (`SIMILARITY_THRESHOLD`) werden per Union-Find verbunden.
+3. **Windowed pair comparison** – sorts by timestamp and compares each photo
+   only with photos within a 10-minute window (`TIME_WINDOW_MS`). Pairs
+   with cosine similarity ≥ 0.90 (`SIMILARITY_THRESHOLD`) are connected
+   via union-find.
 
-4. **Cluster-Bildung** – Zusammenhangskomponenten mit mindestens 2 Mitgliedern
-   werden zu Gruppen. Das Zentrum (höchste durchschnittliche Ähnlichkeit) wird
-   zum `cover_photo_id`.
+4. **Cluster formation** – connected components with at least 2 members
+   become groups. The center (highest average similarity) becomes the
+   `cover_photo_id`.
 
-5. **Persistenz** – Schreibt neue Gruppen in einer Transaktion:
-   - Löscht alle bestehenden **unreviewten** Gruppen des Users.
-   - Preservt reviewte Gruppen über Member-Set-Vergleich (siehe unten).
+5. **Persistence** – writes new groups in a transaction:
+   - Deletes all existing **unreviewed** groups of the user.
+   - Preserves reviewed groups via member-set comparison (see below).
 
-## Review-Preservation und Snapshot-Logik
+## Review preservation and snapshot logic
 
-Der Review-Status ist an einen konkreten Member-Snapshot gebunden.
+The review status is tied to a concrete member snapshot.
 
-Beim Neuaufbau der Gruppen prüft `findPhotoGroupsLogic` für jedes frisch
-berechnete Cluster:
+When rebuilding the groups, `findPhotoGroupsLogic` checks for each freshly
+computed cluster:
 
 ```
-für jede reviewte Gruppe:
-  wenn Member-Set identisch  → neue Gruppe nicht erstellen (Gruppe bleibt reviewed)
-  wenn Member-Set echte Teilmenge → alte reviewte Gruppe löschen (obsolet)
-  sonst                           → unabhängig, alte reviewte bleibt bestehen
+for every reviewed group:
+  if member set is identical   → do not create new group (group stays reviewed)
+  if member set is strict subset → delete old reviewed group (obsolete)
+  else                           → independent; old reviewed group remains
 ```
 
-Das hat zwei Konsequenzen:
+This has two consequences:
 
-- **Unveränderte Cluster bleiben reviewed**: Solange die Mitglieder gleich
-  sind, sieht der User die Gruppe nicht erneut.
-- **Erweiterte Cluster werden erneut vorgelegt**: Kommt ein Foto dazu
-  (z. B. Upload eines ähnlichen neuen Fotos, oder Hinzufügen eines Fotos in
-  ein geteiltes Album), entsteht ein neues Cluster mit größerer Membermenge.
-  Der Snapshot stimmt nicht mehr überein – es wird eine neue **unreviewte**
-  Gruppe erstellt, und die alte reviewte (nun obsolet gewordene) Teilmenge
-  wird gelöscht. Der User muss die erweiterte Gruppe einmal erneut bestätigen.
+- **Unchanged clusters stay reviewed**: as long as the members are the same,
+  the user does not see the group again.
+- **Extended clusters are shown again**: if a new photo joins (e.g. upload
+  of a similar new photo, or a photo added to a shared album), a new cluster
+  with a larger member set appears. The snapshot no longer matches – a new
+  **unreviewed** group is created, and the old reviewed (now obsolete)
+  subset is deleted. The user has to confirm the extended group once again.
 
-## Trigger für Neu-Gruppierung
+## Triggers for re-grouping
 
-`findPhotoGroupsLogic(userId)` wird an mehreren Stellen angestoßen:
+`findPhotoGroupsLogic(userId)` is triggered from several places:
 
-| Ereignis | Getriggert durch | Für welche User |
-|----------|------------------|-----------------|
-| Embedding-Job fertig | `scan-worker.ts` | Alle User mit Zugriff auf das Foto (Eigentümer + alle Shared-Album-Teilnehmer), ermittelt via `getUsersWithPhotoAccess` |
-| Album wird mit einem User geteilt | `shareAlbumLogic` | Der neu hinzugekommene Teilnehmer |
-| Foto wird einem Album hinzugefügt | `addPhotoToAlbumLogic` | Alle Shared-User des Albums |
-| Album-Freigabe wird entzogen | `removeAlbumShareLogic` | Der entfernte Teilnehmer (damit verlorene Fotos aus seinen Gruppen verschwinden) |
-| Manueller Trigger | `POST /photos/find-groups` | Der aufrufende User |
+| Event | Triggered by | For which users |
+|-------|--------------|-----------------|
+| Embedding job finished | `scan-worker.ts` | All users with access to the photo (owner + all shared-album participants), determined via `getUsersWithPhotoAccess` |
+| Album is shared with a user | `shareAlbumLogic` | The newly added participant |
+| Photo is added to an album | `addPhotoToAlbumLogic` | All shared users of the album |
+| Album share is revoked | `removeAlbumShareLogic` | The removed participant (so that lost photos disappear from their groups) |
+| Manual trigger | `POST /photos/find-groups` | The calling user |
 
-Die Aufrufe sind Fire-and-Forget mit Error-Logging, damit das API-Response
-nicht blockiert wird.
+The calls are fire-and-forget with error logging so that the API response
+is not blocked.
 
-### Serialisierung pro User
+### Per-user serialization
 
-Alle Trigger laufen durch `scheduleRegroup(userId)` (`photo.service.ts`). Diese
-Funktion garantiert:
+All triggers go through `scheduleRegroup(userId)` (`photo.service.ts`). This
+function guarantees:
 
-- **Mutex**: Pro User läuft höchstens eine `findPhotoGroupsLogic`-Instanz
-  gleichzeitig.
-- **Coalescing**: Kommen während einer laufenden Berechnung mehrere weitere
-  Trigger an, werden sie zu genau einem Folge-Durchlauf zusammengefasst, der
-  anschließend den neuesten DB-Stand sieht.
+- **Mutex**: at most one `findPhotoGroupsLogic` instance per user runs at
+  any time.
+- **Coalescing**: if multiple further triggers arrive while a computation
+  is running, they are merged into exactly one follow-up run that then sees
+  the latest DB state.
 
-Das ist wichtig, weil `findPhotoGroupsLogic` zu Beginn seiner Transaktion alle
-unreviewten Gruppen des Users löscht und anschließend die frisch berechneten
-Cluster einfügt. Ohne Serialisierung könnten zwei parallele Trigger (z. B. ein
-schneller "Foto 1 und Foto 2 ins Album"-Doppelklick) folgendermaßen
-interagieren: der ältere Trigger hat einen kleineren Foto-Snapshot gelesen
-(`[1]`), berechnet deshalb kein Cluster; commitet danach sein `DELETE` – und
-räumt die Gruppe `{1,2}` weg, die der neuere Trigger gerade eingefügt hatte.
+This matters because `findPhotoGroupsLogic` starts its transaction by
+deleting all of the user's unreviewed groups and then inserts the freshly
+computed clusters. Without serialization, two parallel triggers (e.g. a
+quick "photo 1 and photo 2 into the album" double click) could interact
+as follows: the older trigger read a smaller photo snapshot (`[1]`),
+therefore computes no cluster; it then commits its `DELETE` and wipes
+out the group `{1,2}` that the newer trigger had just inserted.
 
-Der manuelle Endpoint `POST /photos/find-groups` wartet ebenfalls auf den
-Scheduler (inkl. eines evtl. bereits vorgemerkten Folge-Durchlaufs) bevor er
-die aktuellen Gruppenstatistiken zurückgibt.
+The manual endpoint `POST /photos/find-groups` also waits for the
+scheduler (including any already queued follow-up run) before returning
+the current group statistics.
 
-## Darstellung im Frontend
+## Frontend rendering
 
-### Generelle Mechanik
+### General mechanics
 
-Die zwei Ansichten `PhotosView` ("Alle Fotos") und `AlbumDetailView` teilen die
-gleiche UI-Logik:
+The two views `PhotosView` ("All photos") and `AlbumDetailView` share the
+same UI logic:
 
-- `listPhotoGroups()` wird beim Laden aufgerufen.
-- Das Composable `usePhotoGrouping` bekommt `hiddenByStack` und `photoToGroup`
-  übergeben.
-- Für jede **unreviewte** Gruppe wird nur das Cover-Foto im Grid angezeigt;
-  die restlichen Mitglieder werden via `hiddenByStack` ausgeblendet.
-- Ein Klick auf den Stapel (`@stack-click`) öffnet `PhotoCompareView`.
-- Der Button **"Gruppen bearbeiten (N offen)"** springt per
-  `handleStartGroupReview` zur ersten unreviewten Gruppe.
+- `listPhotoGroups()` is called on load.
+- The `usePhotoGrouping` composable is given `hiddenByStack` and
+  `photoToGroup`.
+- For every **unreviewed** group, only the cover photo is shown in the
+  grid; the remaining members are hidden via `hiddenByStack`.
+- Clicking the stack (`@stack-click`) opens `PhotoCompareView`.
+- The button **"Edit groups (N open)"** jumps to the first unreviewed group
+  via `handleStartGroupReview`.
 
-### Album-spezifische Einschränkung
+### Album-specific restriction
 
-In der Album-Ansicht werden Gruppen zusätzlich auf die Album-Mitglieder
-eingeschränkt (`albumPhotoGroups` in `AlbumDetailView.vue`):
+In the album view, groups are additionally constrained to album members
+(`albumPhotoGroups` in `AlbumDetailView.vue`):
 
 ```ts
-// Vereinfachte Skizze
+// Simplified sketch
 for (const g of photoGroupsList.value) {
   const membersInAlbum = g.photo_ids.filter(id => albumPhotoIds.has(id))
-  if (membersInAlbum.length < 2) continue           // nicht relevant
+  if (membersInAlbum.length < 2) continue           // not relevant
   const coverInAlbum = albumPhotoIds.has(g.cover_photo_id)
     ? g.cover_photo_id
-    : membersInAlbum[0]                              // ersatzweise
+    : membersInAlbum[0]                              // fallback
   result.push({ ...g, photo_ids: membersInAlbum, cover_photo_id: coverInAlbum })
 }
 ```
 
-Das heißt:
+This means:
 
-- Nur Gruppen mit **≥ 2 Mitgliedern im aktuellen Album** erscheinen.
-- Mitglieder außerhalb des Albums werden aus der Gruppenansicht herausgefiltert.
-- Ist das ursprüngliche Cover nicht im Album, wird ein album-internes Mitglied
-  als Cover verwendet.
+- Only groups with **≥ 2 members in the current album** appear.
+- Members outside the album are filtered out of the group view.
+- If the original cover is not in the album, an in-album member is used as
+  the cover.
 
-### Robustheit bei transienten Doppel-Gruppen
+### Robustness against transient double groups
 
-`photoToGroup` kann kurzfristig sowohl eine reviewte als auch eine unreviewte
-Gruppe für dasselbe Foto enthalten (z. B. direkt nach dem Hinzufügen eines
-Fotos in ein geteiltes Album, bevor die Aufräumlogik lief). Die Map-Aufbau-Logik
-iteriert daher **erst reviewte, dann unreviewte** Gruppen – die unreviewte
-gewinnt damit und steuert Stack-Icon und Klick-Verhalten.
+`photoToGroup` can transiently contain both a reviewed and an unreviewed
+group for the same photo (e.g. right after adding a photo to a shared
+album, before the cleanup logic has run). The map-building logic therefore
+iterates **reviewed first, then unreviewed** – the unreviewed one wins
+and drives the stack icon and click behavior.
 
-## Szenario: Review im Teilalbum
+## Scenario: review in a partial album
 
-Ausgangssituation:
-- Gruppe G = {A, B, C} (alle drei sind visuell ähnlich).
-- Geteiltes Album enthält nur A und B.
-- Teilnehmer reviewt im Album.
+Starting situation:
+- Group G = {A, B, C} (all three are visually similar).
+- Shared album contains only A and B.
+- Participant reviews within the album.
 
-Ablauf:
+Flow:
 
-1. Teilnehmer öffnet Album → sieht Stapel [A, B] (C ist nicht im Album).
-2. Teilnehmer kuratiert A und B (versteckt / favorisiert) und klickt **Fertig**.
-3. `reviewPhotoGroup(id)` setzt `reviewed_at` auf seiner User-Gruppe [A, B].
-4. Foto C wird nicht gesehen und nicht kuratiert.
-5. Eigentümer fügt später C zum Album hinzu.
-6. `addPhotoToAlbumLogic` triggert `findPhotoGroupsLogic(teilnehmer)`.
-7. Neue Cluster-Berechnung: Teilnehmer sieht jetzt auch C → Cluster {A, B, C}.
-8. Snapshot-Vergleich: {A,B,C} ⊃ {A,B} → alte reviewte [A, B] wird gelöscht,
-   neue unreviewte [A, B, C] wird erstellt.
-9. Teilnehmer öffnet Album → Button "Gruppen bearbeiten (1 offen)" erscheint,
-   Stapel [A, B, C] ist sichtbar und kann erneut reviewed werden.
+1. Participant opens the album → sees the stack [A, B] (C is not in the album).
+2. Participant curates A and B (hide / favorite) and clicks **Done**.
+3. `reviewPhotoGroup(id)` sets `reviewed_at` on their user-group [A, B].
+4. Photo C is not seen and not curated.
+5. Later, the owner adds C to the album.
+6. `addPhotoToAlbumLogic` triggers `findPhotoGroupsLogic(participant)`.
+7. New cluster computation: the participant now sees C too → cluster {A, B, C}.
+8. Snapshot comparison: {A,B,C} ⊃ {A,B} → old reviewed [A, B] is deleted,
+   new unreviewed [A, B, C] is created.
+9. Participant opens the album → button "Edit groups (1 open)" appears,
+   stack [A, B, C] is visible and can be reviewed again.
 
-## Relevante Dateien
+## Relevant files
 
 - `photo/photo.service.ts`
-  - `findPhotoGroupsLogic` (Gruppierung + Preservation + Cleanup)
-  - `getUsersWithPhotoAccess` (Eigentümer + alle Shared-User eines Fotos)
-  - `reviewPhotoGroupLogic` (setzt `reviewed_at`)
+  - `findPhotoGroupsLogic` (grouping + preservation + cleanup)
+  - `getUsersWithPhotoAccess` (owner + all shared users of a photo)
+  - `reviewPhotoGroupLogic` (sets `reviewed_at`)
   - `addPhotoToAlbumLogic`, `shareAlbumLogic`, `removeAlbumShareLogic`
-    (triggern Re-Grouping für betroffene User)
-- `photo/scan-worker.ts` – triggert Re-Grouping für alle User mit Zugriff,
-  wenn ein Embedding-Job fertig wird.
+    (trigger re-grouping for the affected users)
+- `photo/scan-worker.ts` – triggers re-grouping for all users with access
+  when an embedding job finishes.
 - `db/schema.ts` – `photoGroups`, `photoGroupMembers`.
-- `frontend/src/views/PhotosView.vue` – globale Ansicht.
-- `frontend/src/views/AlbumDetailView.vue` – album-eingeschränkte Ansicht.
-- `frontend/src/components/PhotoCompareView.vue` – Review-/Vergleichs-Overlay.
-- `frontend/src/composables/usePhotoGrouping.ts` – Grid-Gruppierung inkl.
-  Stack-Collapsing.
+- `frontend/src/views/PhotosView.vue` – global view.
+- `frontend/src/views/AlbumDetailView.vue` – album-scoped view.
+- `frontend/src/components/PhotoCompareView.vue` – review / compare overlay.
+- `frontend/src/composables/usePhotoGrouping.ts` – grid grouping including
+  stack collapsing.
 
-## Tuning-Konstanten
+## Tuning constants
 
-| Konstante | Wert | Ort |
-|-----------|------|-----|
+| Constant | Value | Location |
+|----------|-------|----------|
 | `SIMILARITY_THRESHOLD` | 0.90 | `photo.service.ts` |
-| `TIME_WINDOW_MS` | 10 Minuten | `photo.service.ts` |
+| `TIME_WINDOW_MS` | 10 minutes | `photo.service.ts` |
 
-Der hohe Schwellwert ist bewusst gewählt – Ziel sind Near-Duplicates /
-Serien, keine thematisch ähnlichen Aufnahmen. Das Zeitfenster verhindert
-False Matches zwischen getrennten Ereignissen.
+The high threshold is intentional – the target is near-duplicates / bursts,
+not thematically similar shots. The time window prevents false matches
+between unrelated events.
