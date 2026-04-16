@@ -1,62 +1,62 @@
-# Auto-Crop: Intelligente Thumbnail-Positionierung
+# Auto-Crop: Intelligent Thumbnail Positioning
 
-## Zusammenfassung
+## Summary
 
-Hochkant-Bilder (Portrait) werden im Grid als quadratische Thumbnails angezeigt.
-Standardmässig schneidet der Browser dabei oben und unten gleichmässig ab (zentriert).
-Mit Auto-Crop wird der sichtbare Ausschnitt so verschoben, dass erkannte Gesichter
-oder Sehenswürdigkeiten im Fokus stehen.
+Portrait-oriented images are displayed as square thumbnails in the grid.
+By default, the browser crops the top and bottom evenly (centered).
+With auto-crop, the visible section is shifted so that detected faces
+or points of interest are in focus.
 
-## Funktionsweise
+## How it works
 
-### Kein serverseitiges Zuschneiden
+### No server-side cropping
 
-Das Originalbild und das generierte Thumbnail werden **nicht** verändert.
-Das Thumbnail bleibt ein normales, proportional skaliertes JPEG (z.B. 400px breit).
+The original image and the generated thumbnail are **not** modified.
+The thumbnail remains a normal, proportionally scaled JPEG (e.g. 400px wide).
 
-Der Trick passiert rein im **CSS**: Das Thumbnail wird im Grid in einem 1:1-Quadrat
-mit `object-fit: cover` dargestellt. Dabei bestimmt `object-position`, welcher
-Ausschnitt des Bildes sichtbar ist.
+The trick happens purely in **CSS**: the thumbnail is rendered in a 1:1 square
+in the grid with `object-fit: cover`. `object-position` then determines
+which section of the image is visible.
 
 ```
-Ohne Auto-Crop (Standard):         Mit Auto-Crop (Gesicht oben):
+Without auto-crop (default):       With auto-crop (face on top):
 object-position: 50% 50%           object-position: 50% 30%
 
 ┌─────────┐                        ┌─────────┐
-│ xxxxxxx │ ← abgeschnitten        │  ( ^ ^) │ ← Gesicht sichtbar
+│ xxxxxxx │ ← cropped              │  ( ^ ^) │ ← face visible
 │         │                        │   \_/   │
-│  ( ^ ^) │ ← Gesicht              │ xxxxxxx │
+│  ( ^ ^) │ ← face                 │ xxxxxxx │
 │   \_/   │                        │ xxxxxxx │
-│ xxxxxxx │ ← abgeschnitten        │ xxxxxxx │ ← abgeschnitten
+│ xxxxxxx │ ← cropped              │ xxxxxxx │ ← cropped
 └─────────┘                        └─────────┘
 ```
 
-### Fokuspunkt-Berechnung
+### Focus point calculation
 
-Der Fokuspunkt wird als normalisierte Koordinaten `{ x: 0..1, y: 0..1 }` gespeichert
-und nach folgender Priorität berechnet:
+The focus point is stored as normalized coordinates `{ x: 0..1, y: 0..1 }`
+and computed according to the following priority:
 
-1. **Gesichter** (Priorität): Gewichteter Schwerpunkt aller erkannten Gesichter.
-   Grössere Gesichter haben mehr Gewicht, damit das Hauptgesicht den Ausschnitt bestimmt.
-2. **Landmarks** (Fallback): Wenn keine Gesichter vorhanden sind, wird das Landmark
-   mit der höchsten Confidence verwendet (z.B. ein Gebäude, eine Brücke).
-3. **Kein Crop**: Wenn weder Gesichter noch Landmarks erkannt wurden, bleibt
-   `auto_crop` leer und der Browser verwendet die Standard-Zentrierung (50%/50%).
+1. **Faces** (priority): weighted centroid of all detected faces.
+   Larger faces carry more weight so that the main face determines the crop.
+2. **Landmarks** (fallback): if no faces are present, the landmark with the
+   highest confidence is used (e.g. a building or a bridge).
+3. **No crop**: if neither faces nor landmarks were detected, `auto_crop`
+   stays empty and the browser uses the default centering (50% / 50%).
 
-### Beispiel
+### Example
 
-Ein Hochkant-Foto mit einem Gesicht im oberen Drittel:
+A portrait photo with a face in the upper third:
 
-- Gesichts-BBox: `{ x: 0.3, y: 0.15, width: 0.4, height: 0.2 }`
-- Berechneter Fokus: `{ x: 0.5, y: 0.25 }` (Mitte der BBox)
+- Face bbox: `{ x: 0.3, y: 0.15, width: 0.4, height: 0.2 }`
+- Computed focus: `{ x: 0.5, y: 0.25 }` (center of the bbox)
 - CSS: `object-position: 50% 25%`
-- Ergebnis: Der sichtbare Ausschnitt verschiebt sich nach oben zum Gesicht.
+- Result: the visible section shifts upward to the face.
 
-## Technische Details
+## Technical details
 
-### Datenbank
+### Database
 
-Spalte `auto_crop` (JSONB, nullable) auf der `photos`-Tabelle:
+Column `auto_crop` (JSONB, nullable) on the `photos` table:
 
 ```json
 { "x": 0.5, "y": 0.25 }
@@ -67,25 +67,26 @@ Migration: `db/migrations/postgres/0010_auto_crop.sql`
 ### Backend
 
 - **`computeAndStoreAutoCrop(userId, photoId)`** in `photo/photo.service.ts`
-  - Liest alle nicht-ignorierten Gesichter und Landmarks aus der DB
-  - Berechnet den gewichteten Fokuspunkt
-  - Speichert das Ergebnis in `photos.auto_crop`
-- Wird automatisch am Ende von `indexPhotoFaces()` und `indexPhotoLandmarks()` aufgerufen
-- **Bulk-Endpoint**: `POST /photos/recompute-auto-crops` berechnet den Fokuspunkt
-  für alle bestehenden Fotos anhand vorhandener Erkennungsdaten neu
+  - Reads all non-ignored faces and landmarks from the DB
+  - Computes the weighted focus point
+  - Stores the result in `photos.auto_crop`
+- Called automatically at the end of `indexPhotoFaces()` and `indexPhotoLandmarks()`
+- **Bulk endpoint**: `POST /photos/recompute-auto-crops` recomputes the focus
+  point for all existing photos based on existing detection data
 
 ### Frontend
 
-- `PhotoGrid.vue` liest `photo.auto_crop` und setzt es als `imageStyle`:
+- `PhotoGrid.vue` reads `photo.auto_crop` and applies it as `imageStyle`:
   ```ts
   { objectPosition: `${auto_crop.x * 100}% ${auto_crop.y * 100}%` }
   ```
-- `HeicImage.vue` wendet den Style auf das `<img>`-Element an (via `:style="imageStyle"`)
-- Funktioniert in allen Grid-Ansichten: Fotos, Alben, Suchergebnisse
+- `HeicImage.vue` applies the style to the `<img>` element (via `:style="imageStyle"`)
+- Works in all grid views: photos, albums, search results
 
-### Datenverwaltung
+### Data management
 
-In der Datenverwaltung (DataManagementView) gibt es den Button
-**"Auto-Crop neu berechnen"**, der den Fokuspunkt für alle Fotos
-anhand der bereits vorhandenen Gesichts-/Landmark-Daten neu berechnet.
-Dies ist einmalig nötig für Fotos, die vor Einführung des Features hochgeladen wurden.
+In the data management view (DataManagementView) there is a button
+**"Recompute auto-crop"** that recomputes the focus point for all photos
+based on the existing face / landmark data.
+This is needed once for photos that were uploaded before the feature was
+introduced.

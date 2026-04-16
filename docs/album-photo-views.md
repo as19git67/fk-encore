@@ -1,38 +1,51 @@
-# Album Photo Views - Feature-Dokumentation
+# Album Photo Views – Feature Documentation
 
-## Hintergrund und Motivation
+## Background and motivation
 
-In geteilten Fotoalben gibt es ein wiederkehrendes Problem: Mehrere Personen steuern Fotos bei, aber beim Aussortieren gibt es unterschiedliche Meinungen. Ein Teilnehmer wuerde ein Foto loeschen, der andere nicht. Selbst nach dem Aussortieren bleiben oft noch zu viele Bilder uebrig, um schnell die Highlights eines Ereignisses zeigen zu koennen.
+Shared photo albums have a recurring problem: multiple people contribute
+photos, but opinions diverge when it comes to culling. One participant would
+delete a photo, another wouldn't. Even after culling, there are often still
+too many photos to quickly show the highlights of an event.
 
-### Kernprobleme
+### Core problems
 
-1. **Meinungsverschiedenheiten beim Aussortieren** - Es gibt keinen objektiven "richtigen" Schnitt fuer ein Album
-2. **Zu viele Fotos nach dem Aussortieren** - 200+ Fotos sind fuer eine schnelle Praesentation immer noch zu viel
-3. **Keine Sichtbarkeit der Meinungen anderer** - Man weiss nicht, was andere Teilnehmer fuer gut oder schlecht halten
+1. **Disagreement when culling** – there is no objective "right" cut for an album.
+2. **Too many photos after culling** – 200+ photos are still too many for a
+   quick presentation.
+3. **No visibility into other participants' opinions** – you don't know what
+   the others consider good or bad.
 
-## Loesung: Views mit anonymisierten Meinungen
+## Solution: views with anonymized opinions
 
-Statt sich auf *einen* Schnitt einigen zu muessen, sieht jeder Teilnehmer *seine* Version des Albums. Die Meinungen der anderen sind als anonymisierte Zaehler sichtbar ("3 von 5 finden's gut"), ohne zu verraten, wer genau was entschieden hat.
+Instead of having to agree on *one* cut, every participant sees *their* version
+of the album. The opinions of the others are visible as anonymized counters
+("3 out of 5 like it") without revealing who decided what.
 
-### Design-Entscheidungen
+### Design decisions
 
-- **Anonymisiert statt namentlich**: Soziale Dynamik wird vermieden. Man sieht "2 von 4 haben ausgeblendet", nicht "Max hat dein Foto ausgeblendet"
-- **Preset-basiert statt komplex**: 3 vordefinierte Views decken 90% der Use Cases ab
-- **Progressive Komplexitaet**: Basis-Mechanik (Ausblenden/Favorisieren) existierte bereits. Views sind eine neue Linse auf bestehende Daten
-- **KI als dritte Stimme**: Der AI-Quality-Score gibt eine neutrale, technische Bewertung neben den menschlichen Meinungen
+- **Anonymized instead of named**: social dynamics are avoided. You see
+  "2 out of 4 have hidden it", not "Max hid your photo".
+- **Preset-based instead of complex**: 3 predefined views cover 90% of the
+  use cases.
+- **Progressive complexity**: the base mechanics (hide/favorite) already
+  existed. Views are a new lens over existing data.
+- **AI as a third voice**: the AI quality score provides a neutral, technical
+  assessment alongside the human opinions.
 
-## Architektur
+## Architecture
 
-### Datenmodell
+### Data model
 
-Das Feature baut vollstaendig auf bestehenden Tabellen auf:
+The feature is built entirely on top of existing tables:
 
-- **`photo_curation`** (bestehend): Speichert pro User+Photo den Status (`visible` | `hidden` | `favorite`)
-- **`album_user_settings`** (erweitert): `active_view` um neue Werte erweitert, `view_config` JSONB jetzt typisiert
+- **`photo_curation`** (existing): stores the per-user+photo status
+  (`visible` | `hidden` | `favorite`).
+- **`album_user_settings`** (extended): `active_view` extended with new
+  values, `view_config` JSONB now typed.
 
-Keine neuen Tabellen noetig.
+No new tables required.
 
-### Neue Typen
+### New types
 
 ```typescript
 type ActiveView = "all" | "favorites" | "consensus" | "custom";
@@ -45,23 +58,23 @@ interface ViewConfig {
 }
 
 interface PhotoCurationStats {
-  fav_count: number;    // Wie viele Album-Teilnehmer favorisiert haben
-  hide_count: number;   // Wie viele ausgeblendet haben
-  member_count: number; // Gesamtzahl Teilnehmer
+  fav_count: number;    // how many album participants favorited
+  hide_count: number;   // how many have hidden
+  member_count: number; // total number of participants
 }
 ```
 
-### View-Presets
+### View presets
 
-| Preset | hideFilter | favFilter | Beschreibung |
+| Preset | hideFilter | favFilter | Description |
 |---|---|---|---|
-| **Alle Fotos** | `mine` | `all` | Standard - alles ausser meine ausgeblendeten |
-| **Meine Favoriten** | `mine` | `mine` | Nur was ich favorisiert habe |
-| **Gruppen-Highlights** | `consensus` (min 1) | `consensus` (min 2) | Was mindestens 2 Leute gut finden und keiner ausgeblendet hat |
+| **All photos** | `mine` | `all` | Default – everything except the ones I hid |
+| **My favorites** | `mine` | `mine` | Only what I favorited |
+| **Group highlights** | `consensus` (min 1) | `consensus` (min 2) | What at least 2 people like and nobody hid |
 
-### Query-Logik
+### Query logic
 
-Die Album-Foto-Abfrage aggregiert Curation-Daten ueber alle Teilnehmer:
+The album photo query aggregates curation data across all participants:
 
 ```sql
 SELECT p.*, my_pc.status AS curation_status,
@@ -75,79 +88,98 @@ LEFT JOIN photo_curation all_pc ON all_pc.photo_id = p.id
 GROUP BY p.id, my_pc.status
 ```
 
-Filter werden in JavaScript angewendet (statt dynamische HAVING-Klauseln), da die Foto-Anzahl pro Album typischerweise handhabbar ist und der Code deutlich lesbarer bleibt.
+Filters are applied in JavaScript (instead of dynamic HAVING clauses), since
+the number of photos per album is typically manageable and the code stays
+significantly more readable.
 
 ### Performance
 
-- Neuer Index: `idx_photo_curation_photo_status` auf `photo_curation(photo_id, status)` fuer schnelle Aggregation
-- Teilnehmer-IDs werden einmal abgefragt und im Array uebergeben statt Subquery pro Foto
+- New index: `idx_photo_curation_photo_status` on
+  `photo_curation(photo_id, status)` for fast aggregation.
+- Participant IDs are fetched once and passed in an array instead of a
+  subquery per photo.
 
-## Frontend-Integration
+## Frontend integration
 
-### View-Auswahl
+### View selection
 
-Die bisherigen zwei getrennten SelectButtons (Ansicht + Ausblenden) wurden durch eine einzige View-Auswahl mit Presets ersetzt. Der "Gruppen-Highlights" Button erscheint nur bei geteilten Alben.
+The previous two separate SelectButtons (view + hide) have been replaced by a
+single view selector with presets. The "Group highlights" button only appears
+for shared albums.
 
-### Anonymisierte Badges im Foto-Grid
+### Anonymized badges in the photo grid
 
-Jedes Foto in geteilten Alben zeigt kleine Badges:
-- Herz-Icon mit Zaehler (z.B. "3/5") - Favoriten-Zaehler
-- Augen-Icon mit Zaehler (z.B. "1/5") - Ausblend-Zaehler (nur wenn > 0)
+Every photo in shared albums shows small badges:
+- Heart icon with counter (e.g. "3/5") – favorites counter.
+- Eye icon with counter (e.g. "1/5") – hide counter (only if > 0).
 
-### Meinungen-Block in der Detail-Sidebar
+### Opinions block in the detail sidebar
 
-Bei Auswahl eines Fotos im geteilten Album zeigt die Sidebar einen "Meinungen"-Block mit:
-- Fortschrittsbalken fuer Favoriten-Anteil
-- Fortschrittsbalken fuer Ausblend-Anteil (nur wenn > 0)
-- KI-Bewertung als dritte Reihe (wenn vorhanden)
+When a photo in a shared album is selected, the sidebar shows an "Opinions"
+block with:
+- Progress bar for favorites share.
+- Progress bar for hide share (only if > 0).
+- AI rating as a third row (when available).
 
-## Virtueller KI-Teilnehmer
+## Virtual AI participant
 
-Die KI agiert als virtueller Album-Teilnehmer, der basierend auf dem Quality-Score automatisch abstimmt.
+The AI acts as a virtual album participant that automatically votes based on
+the quality score.
 
-### Funktionsweise
+### How it works
 
-1. **System-User**: Ein spezieller User `KI-Bewertung` (Email: `ai@system.local`) wird beim Seeding angelegt. Dieser User kann sich nicht einloggen (ungültiger Passwort-Hash).
+1. **System user**: a special user `AI-Rating` (email: `ai@system.local`) is
+   created during seeding. This user cannot log in (invalid password hash).
 
-2. **Automatische Abstimmung**: Nach jedem Quality-Scoring schreibt die KI einen `photo_curation`-Eintrag:
-   - Score >= 0.7 (konfigurierbar via `AI_FAV_THRESHOLD`) -> `favorite`
-   - Score <= 0.3 (konfigurierbar via `AI_HIDE_THRESHOLD`) -> `hidden`
-   - Dazwischen -> `visible`
+2. **Automatic voting**: after every quality scoring, the AI writes a
+   `photo_curation` entry:
+   - score >= 0.7 (configurable via `AI_FAV_THRESHOLD`) -> `favorite`
+   - score <= 0.3 (configurable via `AI_HIDE_THRESHOLD`) -> `hidden`
+   - in between -> `visible`
 
-3. **Teilnehmer-Zaehlung**: Der KI-User wird in jedem Album als zusaetzlicher Teilnehmer gezaehlt. Seine Stimme fliesst in `fav_count` und `hide_count` ein.
+3. **Participant counting**: the AI user is counted as an additional
+   participant in every album. Its vote flows into `fav_count` and
+   `hide_count`.
 
-### Konfiguration (Umgebungsvariablen)
+### Configuration (environment variables)
 
-| Variable | Default | Beschreibung |
+| Variable | Default | Description |
 |---|---|---|
-| `AI_FAV_THRESHOLD` | `0.7` | Score ab dem die KI "Favorit" stimmt |
-| `AI_HIDE_THRESHOLD` | `0.3` | Score unter dem die KI "Ausblenden" stimmt |
+| `AI_FAV_THRESHOLD` | `0.7` | Score at which the AI votes "favorite" |
+| `AI_HIDE_THRESHOLD` | `0.3` | Score below which the AI votes "hide" |
 
-### Auswirkung auf Views
+### Impact on views
 
-- **Alle Fotos**: KI-Stimme ist im Zaehler sichtbar (z.B. "2/4" statt "1/3")
-- **Gruppen-Highlights**: KI-Favorit zaehlt als eine Stimme fuer den Konsens
-- Die KI-Stimme ist **anonymisiert** wie alle anderen - im Frontend nicht als "KI" erkennbar, sondern einfach ein weiterer Teilnehmer
+- **All photos**: the AI vote is visible in the counter (e.g. "2/4" instead
+  of "1/3").
+- **Group highlights**: an AI favorite counts as a vote for consensus.
+- The AI vote is **anonymized** like all others – not recognizable as "AI"
+  in the frontend, simply another participant.
 
-## Betroffene Dateien
+## Affected files
 
 ### Backend
-- `db/types.ts` - Neue Typen (ViewConfig, ActiveView, PhotoCurationStats)
-- `db/seed.ts` - System-User "KI-Bewertung" anlegen
-- `db/schema.ts` - Unveraendert (JSONB view_config traegt die neuen Typen)
-- `db/migrations/postgres/0010_album_curation_views.sql` - Performance-Index
-- `photo/photo.service.ts` - Aggregierte Query, Preset-Mapping, Filter-Logik, KI-Curation
+- `db/types.ts` – new types (ViewConfig, ActiveView, PhotoCurationStats)
+- `db/seed.ts` – create the "AI-Rating" system user
+- `db/schema.ts` – unchanged (JSONB `view_config` carries the new types)
+- `db/migrations/postgres/0010_album_curation_views.sql` – performance index
+- `photo/photo.service.ts` – aggregated query, preset mapping, filter logic,
+  AI curation
 
 ### Frontend
-- `frontend/src/api/photos.ts` - Neue Typen (AlbumPhoto, ViewConfig, PhotoCurationStats)
-- `frontend/src/views/AlbumDetailView.vue` - Vereinheitlichte View-Auswahl
-- `frontend/src/components/PhotoGrid.vue` - Curation-Stats-Badges
-- `frontend/src/components/PhotoDetailSidebar.vue` - Meinungen-Block mit Fortschrittsbalken
+- `frontend/src/api/photos.ts` – new types (AlbumPhoto, ViewConfig,
+  PhotoCurationStats)
+- `frontend/src/views/AlbumDetailView.vue` – unified view selector
+- `frontend/src/components/PhotoGrid.vue` – curation stats badges
+- `frontend/src/components/PhotoDetailSidebar.vue` – opinions block with
+  progress bars
 
-## Moegliche Erweiterungen (Zukunft)
+## Possible extensions (future)
 
-1. **Custom-View-Dialog**: Wenn "Benutzerdefiniert" gewaehlt, ein Panel mit Slidern fuer consensus-Schwellwerte
-2. **Gespeicherte/benannte Views**: Pro User pro Album mehrere Views speichern ("Fotobuch-Auswahl", "Fuer Oma")
-3. **Geteilte Views**: Ein User erstellt eine View und teilt sie mit anderen
-4. **View als Export-Basis**: "Exportiere diese View als ZIP"
-5. **Automatische AI-Views**: "Top 20% nach KI-Qualitaet"
+1. **Custom view dialog**: when "Custom" is selected, a panel with sliders
+   for the consensus thresholds.
+2. **Saved / named views**: multiple views per user per album
+   ("Photobook selection", "For grandma").
+3. **Shared views**: a user creates a view and shares it with others.
+4. **View as export basis**: "Export this view as ZIP".
+5. **Automatic AI views**: "Top 20% by AI quality".
