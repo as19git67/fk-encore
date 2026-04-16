@@ -141,7 +141,7 @@ Stand: April 2026
 | Passwort-Reset per E-Mail | 🔶 Nur via Admin-CLI | ✅ Token-basiert per E-Mail |
 | Session-Verwaltung | ✅ Geräte-Übersicht | ✅ Token-basiert |
 | Rollen-System | 🔶 Admin/User | ⚡ Granulares RBAC mit Custom-Roles |
-| Feingranulare Berechtigungen | ❌ | ⚡ 18+ Permissions pro Rolle |
+| Feingranulare Berechtigungen | ❌ | ⚡ 19+ Permissions pro Rolle, inkl. opt-in `photos.purge` |
 | Speicher-Quotas pro Nutzer | ✅ | ❌ |
 | Auto-Registrierung via OAuth | ✅ | ❌ |
 | Rate Limiting (Login) | ❌ | ✅ |
@@ -184,6 +184,7 @@ Stand: April 2026
 | Maintenance-Mode | ✅ | ❌ |
 | Admin-CLI | ✅ immich-admin | ❌ |
 | Fehlgeschlagene Scans wiederholen | 🔶 | ✅ Mit Fehler-Logging |
+| Komplettes Zurücksetzen aller Fotodaten | 🔶 Admin-CLI / DB-Reset | ✅ UI-Aktion mit eigener Permission, Tipp-Bestätigung & FK-sicherer Lösch-Reihenfolge |
 
 ## 13. Archiv / Favoriten / Papierkorb
 
@@ -239,7 +240,7 @@ Stand: April 2026
 - **Deutsche Sprachsuche** – mit intelligentem Query-Parsing und Dekomposition
 - **GPS-Radius-Suche** – Umkreissuche in Kilometern
 - **Passkey-Authentifizierung** – WebAuthn/FIDO2
-- **Granulares RBAC** – 18+ Permissions, Custom Roles
+- **Granulares RBAC** – 19+ Permissions, Custom Roles, abgesicherter Purge-Aktion mit eigener Rolle
 - **Modulare ML-Architektur** – 3 spezialisierte Microservices
 - **Rate Limiting** auf Auth-Endpunkte
 - **Passwort-Reset per E-Mail** (Self-Service)
