@@ -46,7 +46,12 @@ export async function seed(db: any): Promise<void> {
     { key: "people.view", description: "View people and faces" },
     { key: "people.edit", description: "Edit people names and merge" },
     { key: "data.manage", description: "Access data management (reindex, maintenance)" },
+    { key: "photos.purge", description: "Purge all photo-related data (destructive)" },
   ];
+
+  // Permissions that are NEVER auto-assigned to the Admin role.
+  // These must be granted manually to a dedicated role for safety.
+  const adminExcludedPermissions = new Set<string>(["photos.purge"]);
 
   for (const perm of allPermissions) {
     const existing = (await db.select({ id: schema.permissions.id }).from(schema.permissions).where(eq(schema.permissions.key, perm.key)))[0];
@@ -60,9 +65,10 @@ export async function seed(db: any): Promise<void> {
   const adminRole = (await db.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.name, "Admin")))[0] as { id: number } | undefined;
 
   if (adminRole) {
-    const perms = await db.select({ id: schema.permissions.id }).from(schema.permissions) as { id: number }[];
+    const perms = await db.select({ id: schema.permissions.id, key: schema.permissions.key }).from(schema.permissions) as { id: number; key: string }[];
 
     for (const perm of perms) {
+      if (adminExcludedPermissions.has(perm.key)) continue;
       const existing = (await db.select({ role_id: schema.rolePermissions.role_id })
         .from(schema.rolePermissions)
         .where(and(
@@ -73,7 +79,18 @@ export async function seed(db: any): Promise<void> {
         await db.insert(schema.rolePermissions).values({ role_id: adminRole.id, permission_id: perm.id });
       }
     }
-    console.log(`[seed] Assigned all permissions to Admin role`);
+
+    // Defensive cleanup: if an excluded permission was previously granted to
+    // Admin (e.g. before this restriction existed), revoke it now.
+    for (const perm of perms) {
+      if (!adminExcludedPermissions.has(perm.key)) continue;
+      await db.delete(schema.rolePermissions)
+        .where(and(
+          eq(schema.rolePermissions.role_id, adminRole.id),
+          eq(schema.rolePermissions.permission_id, perm.id)
+        ));
+    }
+    console.log(`[seed] Assigned all permissions to Admin role (excluded: ${[...adminExcludedPermissions].join(", ")})`);
   }
 
   // --- Assign basic permissions to User role ---

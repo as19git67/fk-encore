@@ -1068,6 +1068,28 @@ export const reindexPhotoLandmarks = api(
   }
 );
 
+// ========== Destructive: Purge All Photos ==========
+
+/**
+ * Purge ALL photo-related data across the installation. Intentionally
+ * separate from `photos.delete` — requires the standalone `photos.purge`
+ * permission that Admins do NOT receive by default.
+ *
+ * When `deleteFiles` is true, the original uploads and all cached thumbnails
+ * are removed from disk as well. When false, only the database rows (including
+ * embeddings, albums, faces, persons, scan queue, …) are cleared so the files
+ * are kept but become orphaned.
+ */
+export const purgePhotos = api(
+  { expose: true, method: "POST", path: "/photos/purge", auth: true },
+  async ({ deleteFiles }: { deleteFiles: boolean }): Promise<service.PurgeResult> => {
+    const authData = getAuthData();
+    if (!authData) throw APIError.unauthenticated("Unauthorized");
+    requirePermission(authData, "photos.purge");
+    return await service.purgeAllPhotosLogic(!!deleteFiles);
+  }
+);
+
 /**
  * Combined natural language photo search.
  * Parses German queries like "Kirchen in München von 2004 bis 2017" into:

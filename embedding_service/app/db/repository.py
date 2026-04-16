@@ -55,6 +55,13 @@ async def get_photos_by_ids(session: AsyncSession, photo_ids: List[str]) -> List
     return list(result.scalars().all())
 
 
+async def delete_all_photos(session: AsyncSession) -> int:
+    """Delete all photo embeddings. Returns the number of rows removed."""
+    result = await session.execute(text("DELETE FROM photos"))
+    await session.flush()
+    return result.rowcount or 0
+
+
 async def search_by_clip(
     session: AsyncSession, query_vector: List[float], k: int
 ) -> List[Tuple[str, float]]:

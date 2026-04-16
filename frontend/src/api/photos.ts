@@ -369,6 +369,42 @@ export function hardDeletePhoto(id: number) {
   })
 }
 
+// ---------- Destructive: Purge ----------
+
+export interface PurgeFilesResult {
+  deleted: boolean
+  uploadsRemoved: number
+  thumbnailsRemoved: number
+  failures: number
+}
+
+export interface PurgeEmbeddingServiceResult {
+  called: boolean
+  ok: boolean
+  deleted: number
+  error: string
+}
+
+export interface PurgeResult {
+  success: boolean
+  dbCounts: Record<string, number>
+  files: PurgeFilesResult
+  embeddingService: PurgeEmbeddingServiceResult
+}
+
+/**
+ * Purge every photo-related row in the database (photos, albums, faces,
+ * persons, scan queue, …). When `deleteFiles` is true, the stored originals
+ * and all cached thumbnails are removed from disk as well. Requires the
+ * `photos.purge` permission.
+ */
+export function purgePhotos(deleteFiles: boolean) {
+  return apiFetch<PurgeResult>('/photos/purge', {
+    method: 'POST',
+    body: JSON.stringify({ deleteFiles })
+  })
+}
+
 // ---------- Albums ----------
 
 export interface Album {
