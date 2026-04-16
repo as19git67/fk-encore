@@ -208,17 +208,22 @@ const updatingDate = ref(false)
 
 const LAST_PHOTO_KEY = 'photos_last_selected_id'
 
-watch(selectedPhoto, (photo) => {
+// Watch the selected photo's ID (primitive) rather than the computed
+// `selectedPhoto` ref. The underlying Photo object is replaced on every
+// hydration batch (photos.value gets a new array with new objects at the
+// hydrated indices), so watching the ref directly would re-fire all of the
+// below requests on every background hydration batch.
+watch(() => selectedPhoto.value?.id ?? null, (photoId) => {
   isEditingDate.value = false
-  if (photo) {
-    console.log('[PhotosView] Saving selected photo to localStorage:', photo.id)
-    localStorage.setItem(LAST_PHOTO_KEY, String(photo.id))
+  if (photoId !== null) {
+    console.log('[PhotosView] Saving selected photo to localStorage:', photoId)
+    localStorage.setItem(LAST_PHOTO_KEY, String(photoId))
     // Make sure heavy fields (location, GPS, ai_quality_*, description) are
     // available for the sidebar/fullscreen view even if background hydration
     // hasn't reached this photo yet.
-    hydration.ensureLoaded([photo.id])
-    loadDetectedFaces(photo.id)
-    loadLandmarks(photo.id)
+    hydration.ensureLoaded([photoId])
+    loadDetectedFaces(photoId)
+    loadLandmarks(photoId)
     loadPersons()
   } else {
     detectedFaces.value = []
