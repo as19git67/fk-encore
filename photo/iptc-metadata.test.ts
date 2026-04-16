@@ -5,7 +5,7 @@ import crypto from "crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import sharp from "sharp";
 import { exiftool } from "exiftool-vendored";
-import { getExifMetadata, parseIptcDate } from "./photo.service";
+import { getExifMetadata, iptcLocationUpdate, parseIptcDate, type ExifMetadata } from "./photo.service";
 
 /**
  * Unit/integration tests for IPTC metadata handling (issue #129).
@@ -111,6 +111,25 @@ describe("getExifMetadata — IPTC fallbacks", () => {
     expect(meta.country).toBe("Deutschland");
   });
 
+  it("treats Caption-Abstract and Headline as independent fields", async () => {
+    // The upload/refresh paths use `description ?? headline` as the description
+    // fallback — but getExifMetadata itself must not silently conflate the two.
+    const file = await makeTempJpeg();
+    await exiftool.write(
+      file,
+      {
+        ImageDescription: null,
+        "Caption-Abstract": null,
+        Description: null,
+        Headline: "Bergpanorama",
+      },
+      ["-overwrite_original"]
+    );
+    const meta = await getExifMetadata(file);
+    expect(meta.description).toBeNull();
+    expect(meta.headline).toBe("Bergpanorama");
+  });
+
   it("falls back to IPTC DateCreated/TimeCreated when EXIF date tags are absent", async () => {
     const file = await makeTempJpeg();
     // Wipe any date tags sharp may have added, then set IPTC-only dates.
@@ -132,6 +151,51 @@ describe("getExifMetadata — IPTC fallbacks", () => {
     expect(parsed.getUTCFullYear()).toBe(2023);
     expect(parsed.getUTCMonth()).toBe(6); // July
     expect(parsed.getUTCDate()).toBe(20);
+  });
+});
+
+describe("iptcLocationUpdate", () => {
+  const baseMeta: ExifMetadata = {
+    takenAt: null,
+    latitude: null,
+    longitude: null,
+    description: null,
+    keywords: [],
+    author: null,
+    headline: null,
+    copyright: null,
+    credit: null,
+    city: null,
+    state: null,
+    country: null,
+  };
+
+  it("returns null when no IPTC location fields are present", () => {
+    expect(iptcLocationUpdate(baseMeta)).toBeNull();
+  });
+
+  it("builds a 'City, Country' display name when both are present", () => {
+    const upd = iptcLocationUpdate({ ...baseMeta, city: "München", country: "Deutschland" });
+    expect(upd).not.toBeNull();
+    expect(upd!.location_name).toBe("München, Deutschland");
+    expect(upd!.location_short).toBe("München");
+    expect(upd!.location_city).toBe("München");
+    expect(upd!.location_country).toBe("Deutschland");
+  });
+
+  it("falls back to state when city is missing", () => {
+    const upd = iptcLocationUpdate({ ...baseMeta, state: "Bayern", country: "Deutschland" });
+    expect(upd).not.toBeNull();
+    expect(upd!.location_name).toBe("Bayern, Deutschland");
+    expect(upd!.location_short).toBe("Bayern");
+    expect(upd!.location_city).toBeNull();
+  });
+
+  it("handles a country-only location gracefully", () => {
+    const upd = iptcLocationUpdate({ ...baseMeta, country: "Deutschland" });
+    expect(upd).not.toBeNull();
+    expect(upd!.location_name).toBe("Deutschland");
+    expect(upd!.location_short).toBeNull();
   });
 });
 

@@ -988,6 +988,36 @@ async function geocodePhotoLocation(photoId: number, lat: number, lon: number): 
 }
 
 /**
+ * Build location fields directly from the IPTC location block written into the
+ * file (e.g. by Lightroom's Map module or camera apps like Halide). Returns a
+ * partial update payload or null if no IPTC location data is present.
+ *
+ * Using these values lets us skip the Nominatim round-trip on upload.
+ *
+ * Exported for unit tests.
+ */
+export function iptcLocationUpdate(meta: ExifMetadata): {
+  location_name: string;
+  location_short: string | null;
+  location_city: string | null;
+  location_country: string | null;
+} | null {
+  const city = meta.city;
+  const state = meta.state;
+  const country = meta.country;
+  if (!city && !state && !country) return null;
+  // Display name follows the same shape reverseGeocode produces: "City, Country".
+  const displayParts = [city ?? state, country].filter((p): p is string => !!p);
+  const displayName = displayParts.join(", ");
+  return {
+    location_name: displayName,
+    location_short: city ?? state ?? null,
+    location_city: city,
+    location_country: country,
+  };
+}
+
+/**
  * Scan-queue job handler for geocoding.
  * 1. If the photo has no GPS coordinates, tries EXIF extraction.
  * 2. If GPS is available, calls Nominatim for reverse-geocoding.
@@ -1001,26 +1031,36 @@ export async function indexPhotoGeocoding(photoId: number, force = false): Promi
 
   let lat = photo.latitude;
   let lon = photo.longitude;
+  let iptcLoc: ReturnType<typeof iptcLocationUpdate> = null;
 
-  // Try EXIF extraction if no GPS stored yet
-  if (lat === null || lon === null) {
-    const filePath = path.join(UPLOAD_DIR, photo.filename);
-    if (!fs.existsSync(filePath)) return; // file gone — nothing we can do
+  // Try EXIF extraction if no GPS stored yet — or to discover IPTC location.
+  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  if (fs.existsSync(filePath)) {
     const exifMeta = await getExifMetadata(filePath);
-    if (exifMeta.latitude !== null && exifMeta.longitude !== null) {
+    if ((lat === null || lon === null) && exifMeta.latitude !== null && exifMeta.longitude !== null) {
       lat = exifMeta.latitude;
       lon = exifMeta.longitude;
       await dbExec(
         db.update(photos).set({ latitude: lat, longitude: lon }).where(eq(photos.id, photoId))
       );
     }
+    iptcLoc = iptcLocationUpdate(exifMeta);
   }
-
-  // No GPS available at all — mark as done (nothing to geocode)
-  if (lat === null || lon === null) return;
 
   // Already has a location name — skip unless this is a forced rescan
   if (photo.location_name && !force) return;
+
+  // Prefer IPTC location block written by the camera / Lightroom — it's free
+  // and avoids a Nominatim round-trip.
+  if (iptcLoc) {
+    await dbExec(
+      db.update(photos).set(iptcLoc).where(eq(photos.id, photoId))
+    );
+    return;
+  }
+
+  // No GPS available at all — nothing to geocode.
+  if (lat === null || lon === null) return;
 
   await geocodePhotoLocation(photoId, lat, lon);
 }
@@ -1092,6 +1132,11 @@ export async function uploadPhotoStream(
   const { absPath: filePath, relPath: filename } = await reserveStoragePath(storageTs, ext);
   await fs.promises.rename(tempPath, filePath);
 
+  // Description fallback: EXIF/XMP/IPTC caption first, then IPTC Headline.
+  const descriptionValue = exifMeta.description ?? exifMeta.headline ?? null;
+  // Pre-fill location from IPTC when present, sparing us a Nominatim call.
+  const iptcLoc = iptcLocationUpdate(exifMeta);
+
   const row = await dbInsertReturning<typeof photos.$inferSelect>(
     db.insert(photos).values({
       user_id: userId,
@@ -1103,7 +1148,9 @@ export async function uploadPhotoStream(
       taken_at: exifMeta.takenAt,
       latitude: exifMeta.latitude,
       longitude: exifMeta.longitude,
-      description: exifMeta.description,
+      description: descriptionValue,
+      keywords: exifMeta.keywords,
+      ...(iptcLoc ?? {}),
     }).returning()
   );
 
@@ -1112,8 +1159,10 @@ export async function uploadPhotoStream(
     console.error("Enqueue error:", err);
   });
 
-  // Reverse-geocode GPS coordinates in background
-  if (exifMeta.latitude !== null && exifMeta.longitude !== null) {
+  // Reverse-geocode GPS coordinates in background. Skipped when IPTC already
+  // carries location info — Lightroom / camera apps often write that block on
+  // export, and trusting it avoids a Nominatim round-trip per import.
+  if (!iptcLoc && exifMeta.latitude !== null && exifMeta.longitude !== null) {
     geocodePhotoLocation(row!.id, exifMeta.latitude, exifMeta.longitude).catch(err => {
       console.error("Geocoding error:", err);
     });
@@ -1132,6 +1181,7 @@ export async function uploadPhotoStream(
     latitude: row!.latitude ?? undefined,
     longitude: row!.longitude ?? undefined,
     description: row!.description ?? undefined,
+    keywords: row!.keywords ?? [],
   };
 }
 
@@ -1168,6 +1218,11 @@ export async function uploadPhotoLogic(
   const { absPath: filePath, relPath: filename } = await reserveStoragePath(storageTs2, ext);
   await fs.promises.rename(tempPath, filePath);
 
+  // Description fallback: EXIF/XMP/IPTC caption first, then IPTC Headline.
+  const descriptionValue2 = exifMeta2.description ?? exifMeta2.headline ?? null;
+  // Pre-fill location from IPTC when present, sparing us a Nominatim call.
+  const iptcLoc2 = iptcLocationUpdate(exifMeta2);
+
   const row2 = await dbInsertReturning<typeof photos.$inferSelect>(
     db.insert(photos).values({
       user_id: userId,
@@ -1179,7 +1234,9 @@ export async function uploadPhotoLogic(
       taken_at: exifMeta2.takenAt,
       latitude: exifMeta2.latitude,
       longitude: exifMeta2.longitude,
-      description: exifMeta2.description,
+      description: descriptionValue2,
+      keywords: exifMeta2.keywords,
+      ...(iptcLoc2 ?? {}),
     }).returning()
   );
 
@@ -1188,8 +1245,9 @@ export async function uploadPhotoLogic(
     console.error("Enqueue error:", err);
   });
 
-  // Reverse-geocode GPS coordinates in background
-  if (exifMeta2.latitude !== null && exifMeta2.longitude !== null) {
+  // Reverse-geocode GPS coordinates in background. Skipped when IPTC already
+  // carries location info — see uploadPhotoStream for rationale.
+  if (!iptcLoc2 && exifMeta2.latitude !== null && exifMeta2.longitude !== null) {
     geocodePhotoLocation(row2!.id, exifMeta2.latitude, exifMeta2.longitude).catch(err => {
       console.error("Geocoding error:", err);
     });
@@ -1208,6 +1266,7 @@ export async function uploadPhotoLogic(
     latitude: row2!.latitude ?? undefined,
     longitude: row2!.longitude ?? undefined,
     description: row2!.description ?? undefined,
+    keywords: row2!.keywords ?? [],
   };
 }
 
@@ -1223,6 +1282,7 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
     ai_quality_details: Record<string, number> | null;
     auto_crop: { x: number; y: number } | null;
     description: string | null;
+    keywords: string[] | null;
   }>(
     db
       .select({
@@ -1246,6 +1306,7 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
         ai_quality_details: photos.ai_quality_details,
         auto_crop: photos.auto_crop,
         description: photos.description,
+        keywords: photos.keywords,
       })
       .from(photos)
       .leftJoin(
@@ -1280,6 +1341,7 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
       ai_quality_details: r.ai_quality_details ?? undefined,
       auto_crop: r.auto_crop ?? undefined,
       description: r.description ?? undefined,
+      keywords: r.keywords ?? [],
     })),
   };
 }
@@ -1370,6 +1432,7 @@ export async function getPhotoDetailsBatchLogic(
     ai_quality_details: Record<string, number> | null;
     auto_crop: { x: number; y: number } | null;
     description: string | null;
+    keywords: string[] | null;
   }>(
     db
       .select({
@@ -1393,6 +1456,7 @@ export async function getPhotoDetailsBatchLogic(
         ai_quality_details: photos.ai_quality_details,
         auto_crop: photos.auto_crop,
         description: photos.description,
+        keywords: photos.keywords,
       })
       .from(photos)
       .leftJoin(
@@ -1424,6 +1488,7 @@ export async function getPhotoDetailsBatchLogic(
       ai_quality_details: r.ai_quality_details ?? undefined,
       auto_crop: r.auto_crop ?? undefined,
       description: r.description ?? undefined,
+      keywords: r.keywords ?? [],
     })),
   };
 }
@@ -1667,10 +1732,15 @@ export async function refreshPhotoMetadataLogic(userId: number, photoId: number)
 
   const exifMeta = await getExifMetadata(filePath);
 
-  // Always update, even if takenAt is null (to sync with current logic if it was different before)
+  // Always update, even if takenAt is null (to sync with current logic if it was different before).
+  // Description falls back to the IPTC Headline when no caption was written.
+  // Keywords sync is one-way: we trust what's on disk.
+  const iptcLoc = iptcLocationUpdate(exifMeta);
   await dbExec(db.update(photos).set({
     taken_at: exifMeta.takenAt,
-    description: exifMeta.description ?? photo.description,
+    description: exifMeta.description ?? exifMeta.headline ?? photo.description,
+    keywords: exifMeta.keywords,
+    ...(iptcLoc ?? {}),
   }).where(eq(photos.id, photoId)));
 
   return { success: true, taken_at: exifMeta.takenAt ?? undefined };
@@ -3355,14 +3425,12 @@ export async function rescanPhotoGpsLogic(
   let gpsFound = false;
   let geocoded = false;
   let scansQueued = false;
+  let iptcLoc: ReturnType<typeof iptcLocationUpdate> = null;
 
-  if (lat === null || lon === null) {
-    const filePath = path.join(UPLOAD_DIR, photo.filename);
-    if (!fs.existsSync(filePath)) {
-      return { gpsFound: false, geocoded: false, scansQueued: false };
-    }
+  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  if (fs.existsSync(filePath)) {
     const exifMeta = await getExifMetadata(filePath);
-    if (exifMeta.latitude !== null && exifMeta.longitude !== null) {
+    if ((lat === null || lon === null) && exifMeta.latitude !== null && exifMeta.longitude !== null) {
       lat = exifMeta.latitude;
       lon = exifMeta.longitude;
       await dbExec(
@@ -3374,11 +3442,22 @@ export async function rescanPhotoGpsLogic(
       triggerWorkers();
       scansQueued = true;
     }
+    iptcLoc = iptcLocationUpdate(exifMeta);
+  } else if (lat === null || lon === null) {
+    return { gpsFound: false, geocoded: false, scansQueued: false };
   }
 
-  if (lat !== null && lon !== null && !photo.location_name) {
-    await geocodePhotoLocation(photoId, lat, lon);
-    geocoded = true;
+  if (!photo.location_name) {
+    if (iptcLoc) {
+      // IPTC location block on the file – trust it and skip Nominatim.
+      await dbExec(
+        db.update(photos).set(iptcLoc).where(eq(photos.id, photoId))
+      );
+      geocoded = true;
+    } else if (lat !== null && lon !== null) {
+      await geocodePhotoLocation(photoId, lat, lon);
+      geocoded = true;
+    }
   }
 
   return { gpsFound, geocoded, scansQueued };
@@ -4814,24 +4893,30 @@ export async function searchPhotosNaturalLogic(
   const hasStructuredFilter = !!(parsed.fromDate || parsed.location);
   const hasSemanticQuery = parsed.semanticQuery.length > 0;
 
-  // Description token search: every whitespace-separated token of the
-  // semantic query must appear (case-insensitive substring) in the photo
-  // description. This is what makes "Mariens Geburtstag" find a photo
-  // whose description is "Mariens 30. Geburtstag im Garten" – CLIP alone
-  // wouldn't reliably get there.
+  // Text token search: every whitespace-separated token of the semantic query
+  // must appear (case-insensitive substring) in EITHER the photo description
+  // OR the imported IPTC keywords. This is what makes "Mariens Geburtstag"
+  // find a photo whose description is "Mariens 30. Geburtstag im Garten" or
+  // whose keywords contain "Geburtstag" – CLIP alone wouldn't reliably get
+  // there.
   const descriptionTokens = parsed.semanticQuery
     .split(/\s+/)
     .map(t => t.trim())
     .filter(t => t.length >= 2);
-  const buildDescriptionConditions = () => {
-    const base = [
+  const buildTextMatchConditions = () => {
+    const base: any[] = [
       eq(photos.user_id, userId),
-      sql`${photos.description} IS NOT NULL`,
-      sql`${photos.description} <> ''`,
       or(sql`${photoCuration.status} IS NULL`, sql`${photoCuration.status} != 'hidden'`),
     ];
     for (const tok of descriptionTokens) {
-      base.push(ilike(photos.description, `%${tok}%`));
+      const pattern = `%${tok}%`;
+      base.push(
+        or(
+          ilike(photos.description, pattern),
+          // Any single keyword contains the token (case-insensitive substring).
+          sql`EXISTS (SELECT 1 FROM unnest(${photos.keywords}) AS k WHERE k ILIKE ${pattern})`,
+        )
+      );
     }
     if (parsed.fromDate) {
       base.push(sql`COALESCE(${photos.taken_at}, ${photos.created_at}) >= ${parsed.fromDate.toISOString()}`);
@@ -4856,7 +4941,7 @@ export async function searchPhotosNaturalLogic(
       db.select({ id: photos.id })
         .from(photos)
         .leftJoin(photoCuration, and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)))
-        .where(and(...buildDescriptionConditions()))
+        .where(and(...buildTextMatchConditions()))
         .limit(limit)
     );
     return rows.map(r => r.id);
