@@ -1,258 +1,265 @@
-# Feature-Vergleich: Immich vs. FK-Encore
+# Feature Comparison: Immich vs. FK-Encore
 
-Stand: April 2026
+Status: April 2026
 
-## Legende
+## Legend
 
-- ✅ Vorhanden
-- ⚡ Vorhanden und überlegen
-- 🔶 Teilweise / anders umgesetzt
-- ❌ Nicht vorhanden
+- ✅ Available
+- ⚡ Available and superior
+- 🔶 Partial / implemented differently
+- ❌ Not available
 
 ---
 
-## 1. Foto-Verwaltung
+## 1. Photo Management
 
 | Feature | Immich | FK-Encore |
 |---|---|---|
 | Upload (Web) | ✅ | ✅ |
 | Upload (Mobile App) | ✅ | ❌ |
-| Upload (CLI) | ✅ Bulk-Upload, Glob-Filter, Watch-Mode | ❌ |
-| Formate: JPEG, PNG, GIF, WebP | ✅ | ✅ |
-| HEIC/HEIF-Support | ✅ Nativ | ✅ Mit Auto-Konvertierung zu JPEG |
-| RAW-Formate (RW2, PSD, TIFF, etc.) | ✅ 15+ Formate | ❌ |
+| Upload (CLI) | ✅ Bulk upload, glob filter, watch mode | ❌ |
+| Formats: JPEG, PNG, GIF, WebP | ✅ | ✅ |
+| HEIC/HEIF support | ✅ Native | ✅ With auto-conversion to JPEG |
+| RAW formats (RW2, PSD, TIFF, etc.) | ✅ 15+ formats | ❌ |
 | AVIF, JPEG XL, JPEG 2000, SVG | ✅ | ❌ |
-| Duplikaterkennung (Hash-basiert) | ✅ | ✅ |
-| Duplikaterkennung (ML-visuell) | ✅ Mit Review-Interface | ✅ DINOv2-basiert mit Review-Workflow |
-| Nicht-destruktive Bildbearbeitung | ✅ Crop, Rotate, Mirror | ❌ |
-| Foto-Stacks (Burst, Bracketing) | ✅ | ❌ |
-| 360°-Bilder | ✅ (Web) | ❌ |
+| Duplicate detection (hash-based) | ✅ | ✅ |
+| Duplicate detection (ML-visual) | ✅ With review interface | ✅ DINOv2-based with review workflow |
+| Non-destructive image editing | ✅ Crop, rotate, mirror | ❌ |
+| Photo stacks (burst, bracketing) | ✅ | ❌ |
+| 360° images | ✅ (Web) | ❌ |
 | LivePhotos / MotionPhotos | ✅ | ❌ |
-| Thumbnail-Generierung | ✅ Standard | ⚡ Intelligenter Fokuspunkt (Gesicht/Landmark) |
-| Bild-Resizing on-the-fly | 🔶 Vordefinierte Größen | ✅ Per Query-Parameter frei wählbar |
-| Foto-Qualitätsbewertung (AI) | ❌ | ⚡ AI-Score (0-1) mit Detailmetriken |
+| Thumbnail generation | ✅ Standard | ⚡ Intelligent focus point (face / landmark) |
+| On-the-fly image resizing | 🔶 Predefined sizes | ✅ Freely selectable via query parameter |
+| Photo quality scoring (AI) | ❌ | ⚡ AI score (0-1) with detailed metrics |
 
-## 2. Video-Verwaltung
-
-| Feature | Immich | FK-Encore |
-|---|---|---|
-| Video-Upload & Wiedergabe | ✅ 12+ Formate | ❌ |
-| Hardware-Transkodierung | ✅ NVENC, Quick Sync, VAAPI, RKMPP | ❌ |
-| Video-Streaming | ✅ | ❌ |
-
-> **FK-Encore ist rein foto-basiert – Video-Support fehlt komplett.**
-
-## 3. Alben & Teilen
+## 2. Video Management
 
 | Feature | Immich | FK-Encore |
 |---|---|---|
-| Alben erstellen & verwalten | ✅ | ✅ |
-| Alben mit Nutzern teilen | ✅ Editor/Viewer-Rollen | ✅ Read/Write-Zugriff |
-| Öffentliche Links (ohne Account) | ✅ Mit Ablaufdatum, Passwort | ❌ |
-| Upload durch Empfänger | ✅ Konfigurierbar | ❌ |
-| Album-Sync vom Handy | ✅ Auto-Sync von Geräte-Alben | ❌ |
-| Album-Cover-Foto | ✅ | ✅ |
-| Kollaborative Kuratierung | ❌ | ⚡ Favoriten, Verstecken, Konsens-Ansicht |
-| Anonyme Abstimmung in Alben | ❌ | ⚡ "3/5 Favoriten"-Anzeige |
-| AI als Album-Teilnehmer | ❌ | ⚡ Qualitäts-basiertes AI-Voting |
-| Mehrere Ansichtsmodi pro Album | ❌ | ⚡ Alle / Favoriten / Konsens / Custom |
-| Partner-Sharing (ganze Bibliothek) | ✅ | ❌ |
+| Video upload & playback | ✅ 12+ formats | ❌ |
+| Hardware transcoding | ✅ NVENC, Quick Sync, VAAPI, RKMPP | ❌ |
+| Video streaming | ✅ | ❌ |
 
-## 4. Suche
+> **FK-Encore is purely photo-based – video support is missing entirely.**
+
+## 3. Albums & Sharing
 
 | Feature | Immich | FK-Encore |
 |---|---|---|
-| Semantische Suche (CLIP) | ✅ OpenCLIP | ✅ OpenCLIP |
-| Visuelle Ähnlichkeitssuche | 🔶 Für Duplikate | ⚡ DINOv2 + Hybrid-Modus (CLIP+DINOv2) |
-| Natürliche Sprachsuche | ✅ Englisch-fokussiert | ⚡ Deutsch mit intelligentem Query-Parsing |
-| Query-Dekomposition (Ort+Datum+Semantic) | ❌ | ⚡ Automatische Zerlegung komplexer Queries |
-| OCR-Suche (Text in Bildern) | ✅ | ❌ |
-| Dateiname-Suche | ✅ | ❌ |
-| Kamera-Suche (Make/Model/Lens) | ✅ | ❌ |
-| Orts-Suche (Stadt/Land) | ✅ | ✅ |
-| GPS-Radius-Suche | ❌ | ⚡ Suche im km-Radius |
-| Datum-/Zeitraum-Suche | ✅ | ✅ |
-| Landmark-Suche | ❌ | ⚡ Suche nach erkannten Sehenswürdigkeiten |
-| Tag-Suche | ✅ | ❌ |
-| Beschreibungs-Suche | ✅ | ❌ |
-| Kombinierte Filter | ✅ | ✅ (über Query-Parsing) |
+| Create & manage albums | ✅ | ✅ |
+| Share albums with users | ✅ Editor/Viewer roles | ✅ Read/Write access |
+| Public links (no account) | ✅ With expiry date, password | ❌ |
+| Upload by recipients | ✅ Configurable | ❌ |
+| Album sync from phone | ✅ Auto-sync of device albums | ❌ |
+| Album cover photo | ✅ | ✅ |
+| Collaborative curation | ❌ | ⚡ Favorites, hide, consensus view |
+| Anonymous voting in albums | ❌ | ⚡ "3/5 favorites" display |
+| AI as album participant | ❌ | ⚡ Quality-based AI voting |
+| Multiple view modes per album | ❌ | ⚡ All / Favorites / Consensus / Custom |
+| Partner sharing (entire library) | ✅ | ❌ |
 
-## 5. KI / Machine Learning
+## 4. Search
 
 | Feature | Immich | FK-Encore |
 |---|---|---|
-| Gesichtserkennung | ✅ DBSCAN-Clustering | ✅ InsightFace + Embeddings |
-| Gesichts-Clustering | ✅ Inkrementell + Nightly-Jobs | ✅ Distanz-basiert |
-| Personen benennen & verwalten | ✅ | ✅ |
-| Personen mergen | ✅ | ✅ |
-| Geburtstag & Alter bei Foto | ✅ | ❌ |
-| Personen verstecken | ✅ | ✅ (Gesichter ignorieren) |
-| Objekt-/Szenen-Erkennung | ✅ Auto-Tagging | ❌ |
-| Landmark-Erkennung | ❌ | ⚡ Grounding DINO (Kirchen, Brücken, etc.) |
-| Foto-Qualitätsbewertung | ❌ | ⚡ AI-Score für jedes Foto |
-| Intelligenter Fokuspunkt | ❌ | ⚡ Gesichts-/Landmark-basiert |
-| GPU-Beschleunigung | ✅ CUDA, OpenVINO, VAAPI, ARM-NN, ROCm | ❌ |
-| Multi-GPU-Support | ✅ | ❌ |
-| FP16-Precision | ✅ | ❌ |
-| Konfigurierbare ML-Modelle | ✅ | ✅ |
+| Semantic search (CLIP) | ✅ OpenCLIP | ✅ OpenCLIP |
+| Visual similarity search | 🔶 For duplicates | ⚡ DINOv2 + hybrid mode (CLIP+DINOv2) |
+| Natural language search | ✅ English-focused | ⚡ German with intelligent query parsing |
+| Query decomposition (location+date+semantic) | ❌ | ⚡ Automatic decomposition of complex queries |
+| OCR search (text in images) | ✅ | ❌ |
+| Filename search | ✅ | ❌ |
+| Camera search (make/model/lens) | ✅ | ❌ |
+| Location search (city/country) | ✅ | ✅ |
+| GPS radius search | ❌ | ⚡ Search within km radius |
+| Date / time range search | ✅ | ✅ |
+| Landmark search | ❌ | ⚡ Search by detected points of interest |
+| Tag search | ✅ | ❌ |
+| Description search | ✅ | ❌ |
+| Combined filters | ✅ | ✅ (via query parsing) |
 
-## 6. Karte & Geolocation
-
-| Feature | Immich | FK-Encore |
-|---|---|---|
-| Interaktive Weltkarte | ✅ Web & Mobile | ❌ |
-| Reverse Geocoding | ✅ Lokal (GeoNames) | ✅ Stadt/Land-Extraktion |
-| GPS-Koordinaten aus EXIF | ✅ | ✅ |
-| GPS-Rescan / Bulk-Rescan | 🔶 Über Jobs | ✅ Einzeln oder Bulk |
-
-## 7. Zeitleiste & Erinnerungen
+## 5. AI / Machine Learning
 
 | Feature | Immich | FK-Encore |
 |---|---|---|
-| Chronologische Timeline | ✅ Mit Virtual Scroll | ✅ Foto-Grid mit Navigation |
-| Ordner-Ansicht | ✅ | ❌ |
-| Memories ("An diesem Tag") | ✅ Web & Mobile | ❌ |
-| Scrubbable Scrollbar | ✅ | ❌ |
+| Face recognition | ✅ DBSCAN clustering | ✅ InsightFace + embeddings |
+| Face clustering | ✅ Incremental + nightly jobs | ✅ Distance-based |
+| Name & manage people | ✅ | ✅ |
+| Merge people | ✅ | ✅ |
+| Birthday & age at time of photo | ✅ | ❌ |
+| Hide people | ✅ | ✅ (ignore faces) |
+| Object / scene detection | ✅ Auto-tagging | ❌ |
+| Landmark detection | ❌ | ⚡ Grounding DINO (churches, bridges, etc.) |
+| Photo quality scoring | ❌ | ⚡ AI score for every photo |
+| Intelligent focus point | ❌ | ⚡ Face / landmark-based |
+| GPU acceleration | ✅ CUDA, OpenVINO, VAAPI, ARM-NN, ROCm | ❌ |
+| Multi-GPU support | ✅ | ❌ |
+| FP16 precision | ✅ | ❌ |
+| Configurable ML models | ✅ | ✅ |
+
+## 6. Map & Geolocation
+
+| Feature | Immich | FK-Encore |
+|---|---|---|
+| Interactive world map | ✅ Web & mobile | ❌ |
+| Reverse geocoding | ✅ Local (GeoNames) | ✅ City/country extraction |
+| GPS coordinates from EXIF | ✅ | ✅ |
+| GPS rescan / bulk rescan | 🔶 Via jobs | ✅ Individual or bulk |
+
+## 7. Timeline & Memories
+
+| Feature | Immich | FK-Encore |
+|---|---|---|
+| Chronological timeline | ✅ With virtual scroll | ✅ Photo grid with navigation |
+| Folder view | ✅ | ❌ |
+| Memories ("On this day") | ✅ Web & mobile | ❌ |
+| Scrubbable scrollbar | ✅ | ❌ |
 
 ## 8. Mobile Apps
 
 | Feature | Immich | FK-Encore |
 |---|---|---|
-| iOS App | ✅ Nativ | ❌ |
-| Android App | ✅ Nativ | ❌ |
-| Auto-Backup bei App-Start | ✅ | ❌ |
-| Hintergrund-Backup | ✅ iOS & Android | ❌ |
-| Selektiver Album-Backup | ✅ | ❌ |
-| Nur-WLAN-Upload | ✅ | ❌ |
-| "Free Up Space" | ✅ | ❌ |
-| Offline-Modus | ✅ | ❌ |
-| Read-Only-Modus | ✅ | ❌ |
+| iOS app | ✅ Native | ❌ |
+| Android app | ✅ Native | ❌ |
+| Auto-backup on app start | ✅ | ❌ |
+| Background backup | ✅ iOS & Android | ❌ |
+| Selective album backup | ✅ | ❌ |
+| Wi-Fi-only upload | ✅ | ❌ |
+| "Free up space" | ✅ | ❌ |
+| Offline mode | ✅ | ❌ |
+| Read-only mode | ✅ | ❌ |
 
-> **FK-Encore hat keine nativen Mobile-Apps – nur eine Web-App.**
+> **FK-Encore has no native mobile apps – only a web app.**
 
-## 9. Authentifizierung & Nutzerverwaltung
+## 9. Authentication & User Management
 
 | Feature | Immich | FK-Encore |
 |---|---|---|
-| Passwort-Login | ✅ | ✅ (bcrypt) |
+| Password login | ✅ | ✅ (bcrypt) |
 | OAuth / OIDC | ✅ Authentik, Keycloak, Google, etc. | ❌ |
-| Passkeys (WebAuthn/FIDO2) | ❌ | ⚡ Registrierung, Login, Multi-Passkey |
-| API-Keys | ✅ | ❌ |
-| Passwort-Reset per E-Mail | 🔶 Nur via Admin-CLI | ✅ Token-basiert per E-Mail |
-| Session-Verwaltung | ✅ Geräte-Übersicht | ✅ Token-basiert |
-| Rollen-System | 🔶 Admin/User | ⚡ Granulares RBAC mit Custom-Roles |
-| Feingranulare Berechtigungen | ❌ | ⚡ 18+ Permissions pro Rolle |
-| Speicher-Quotas pro Nutzer | ✅ | ❌ |
-| Auto-Registrierung via OAuth | ✅ | ❌ |
-| Rate Limiting (Login) | ❌ | ✅ |
+| Passkeys (WebAuthn/FIDO2) | ❌ | ⚡ Registration, login, multi-passkey |
+| API keys | ✅ | ❌ |
+| Password reset via email | 🔶 Only via admin CLI | ✅ Token-based via email |
+| Session management | ✅ Device overview | ✅ Token-based |
+| Role system | 🔶 Admin/User | ⚡ Granular RBAC with custom roles |
+| Fine-grained permissions | ❌ | ⚡ 19+ permissions per role, incl. opt-in `photos.purge` |
+| Storage quotas per user | ✅ | ❌ |
+| Auto-registration via OAuth | ✅ | ❌ |
+| Rate limiting (login) | ❌ | ✅ |
 
-## 10. Externe Bibliotheken & Storage
-
-| Feature | Immich | FK-Encore |
-|---|---|---|
-| Externe Ordner einbinden | ✅ Read-Only | ❌ |
-| Filesystem-Watching | ✅ (experimentell) | ❌ |
-| Geplante Scans | ✅ | ❌ |
-| Konfigurierbares Speicher-Layout | ✅ Templates | ❌ |
-| S3-kompatible Backends | ✅ | ❌ |
-| Object Storage | ❌ | ✅ Encore Buckets |
-| XMP-Sidecar-Support | ✅ Lesen & Schreiben | ❌ |
-
-## 11. Metadaten
+## 10. External Libraries & Storage
 
 | Feature | Immich | FK-Encore |
 |---|---|---|
-| EXIF-Anzeige | ✅ Umfangreich | ✅ |
-| EXIF-Extraktion | ✅ 9 priorisierte DateTime-Felder | ✅ |
-| Datum manuell bearbeiten | ✅ | ✅ |
-| XMP-Sidecar Lesen/Schreiben | ✅ | ❌ |
-| Tag-Import (XMP/IPTC) | ✅ | ❌ |
-| Bewertungen (Ratings) | ✅ | ❌ |
-| Beschreibungen | ✅ | ❌ |
-| Metadata-Refresh / Reindex | ✅ Über Jobs | ✅ Einzeln und Bulk |
+| Mount external folders | ✅ Read-only | ❌ |
+| Filesystem watching | ✅ (experimental) | ❌ |
+| Scheduled scans | ✅ | ❌ |
+| Configurable storage layout | ✅ Templates | ❌ |
+| S3-compatible backends | ✅ | ❌ |
+| Object storage | ❌ | ✅ Encore Buckets |
+| XMP sidecar support | ✅ Read & write | ❌ |
+
+## 11. Metadata
+
+| Feature | Immich | FK-Encore |
+|---|---|---|
+| EXIF display | ✅ Extensive | ✅ |
+| EXIF extraction | ✅ 9 prioritized DateTime fields | ✅ |
+| Edit date manually | ✅ | ✅ |
+| XMP sidecar read/write | ✅ | ❌ |
+| Tag import (XMP/IPTC) | ✅ | ❌ |
+| Ratings | ✅ | ❌ |
+| Descriptions | ✅ | ❌ |
+| Metadata refresh / reindex | ✅ Via jobs | ✅ Individual and bulk |
 
 ## 12. Admin & Monitoring
 
 | Feature | Immich | FK-Encore |
 |---|---|---|
-| Admin-Dashboard | ✅ | ✅ (Data Management View) |
-| Job-Verwaltung | ✅ Trigger & Monitor | ✅ Scan-Queue mit Status-Tracking |
-| Service-Health-Monitoring | 🔶 | ✅ Für alle ML-Services |
-| Prometheus-Metriken | ✅ | ❌ |
-| Grafana-Integration | ✅ | ❌ |
-| Strukturiertes JSON-Logging | ✅ | ❌ |
-| Maintenance-Mode | ✅ | ❌ |
-| Admin-CLI | ✅ immich-admin | ❌ |
-| Fehlgeschlagene Scans wiederholen | 🔶 | ✅ Mit Fehler-Logging |
+| Admin dashboard | ✅ | ✅ (Data Management View) |
+| Job management | ✅ Trigger & monitor | ✅ Scan queue with status tracking |
+| Service health monitoring | 🔶 | ✅ For all ML services |
+| Prometheus metrics | ✅ | ❌ |
+| Grafana integration | ✅ | ❌ |
+| Structured JSON logging | ✅ | ❌ |
+| Maintenance mode | ✅ | ❌ |
+| Admin CLI | ✅ immich-admin | ❌ |
+| Retry failed scans | 🔶 | ✅ With error logging |
+| Full reset of all photo data | 🔶 Admin CLI / DB reset | ✅ UI action with dedicated permission, typed confirmation & FK-safe delete order |
 
-## 13. Archiv / Favoriten / Papierkorb
-
-| Feature | Immich | FK-Encore |
-|---|---|---|
-| Archiv (aus Timeline verstecken) | ✅ | 🔶 Sichtbar/Versteckt-System |
-| Favoriten | ✅ Global | 🔶 Pro Album und Nutzer |
-| Papierkorb (Soft-Delete, 30 Tage) | ✅ | ❌ |
-| Bewertungen (1-5 Sterne) | ✅ | ❌ |
-| Hierarchische Tags | ✅ | ❌ |
-
-## 14. Sonstiges
+## 13. Archive / Favorites / Trash
 
 | Feature | Immich | FK-Encore |
 |---|---|---|
-| Google Cast / Chromecast | ✅ (experimentell) | ❌ |
-| Internationalisierung (18+ Sprachen) | ✅ | ❌ |
-| OpenAPI-Spezifikation | ✅ | ✅ (Encore.ts generiert) |
-| Microservice-Architektur | 🔶 ML als separater Container | ⚡ 3 spezialisierte ML-Services |
-| Tech-Stack Backend | Go + TypeScript + Python | Encore.ts (TypeScript) + Python |
+| Archive (hide from timeline) | ✅ | 🔶 Visible/hidden system |
+| Favorites | ✅ Global | 🔶 Per album and user |
+| Trash (soft delete, 30 days) | ✅ | ❌ |
+| Ratings (1-5 stars) | ✅ | ❌ |
+| Hierarchical tags | ✅ | ❌ |
+
+## 14. Miscellaneous
+
+| Feature | Immich | FK-Encore |
+|---|---|---|
+| Google Cast / Chromecast | ✅ (experimental) | ❌ |
+| Internationalization (18+ languages) | ✅ | ❌ |
+| OpenAPI specification | ✅ | ✅ (generated by Encore.ts) |
+| Microservice architecture | 🔶 ML as separate container | ⚡ 3 specialized ML services |
+| Backend tech stack | Go + TypeScript + Python | Encore.ts (TypeScript) + Python |
 
 ---
 
-## Zusammenfassung
+## Summary
 
-### Immich ist überlegen bei:
+### Immich is superior at:
 
-- **Video-Unterstützung** – komplett fehlend in FK-Encore
-- **Mobile Apps** mit Auto-Backup (iOS & Android)
-- **Interaktive Weltkarte**
-- **Memories / Erinnerungen** ("An diesem Tag")
-- **Externe Bibliotheken** – bestehende Foto-Ordner einbinden
-- **Partner-Sharing** – ganze Bibliothek teilen
-- **Öffentliche Links** – Teilen ohne Account
-- **OAuth/OIDC** – Enterprise-SSO-Integration
-- **GPU-Beschleunigung** – CUDA, OpenVINO, etc.
-- **Video-Transkodierung** mit Hardware-Beschleunigung
-- **XMP-Sidecar** – Metadaten-Interoperabilität
-- **Objekt-/Szenen-Erkennung** und Auto-Tagging
-- **OCR** – Texterkennung in Bildern
+- **Video support** – entirely missing in FK-Encore
+- **Mobile apps** with auto-backup (iOS & Android)
+- **Interactive world map**
+- **Memories** ("On this day")
+- **External libraries** – mount existing photo folders
+- **Partner sharing** – share an entire library
+- **Public links** – sharing without an account
+- **OAuth/OIDC** – enterprise SSO integration
+- **GPU acceleration** – CUDA, OpenVINO, etc.
+- **Video transcoding** with hardware acceleration
+- **XMP sidecars** – metadata interoperability
+- **Object / scene detection** and auto-tagging
+- **OCR** – text recognition in images
 - **Monitoring** – Prometheus, Grafana
-- **Breitere Format-Unterstützung** (RAW, AVIF, JPEG XL, etc.)
-- **Community-Größe** und Reife des Projekts
+- **Broader format support** (RAW, AVIF, JPEG XL, etc.)
+- **Community size** and project maturity
 
-### FK-Encore ist überlegen bei:
+### FK-Encore is superior at:
 
-- **Kollaborative Album-Kuratierung** – Konsens-Ansicht, anonyme Abstimmung, Multiple Ansichtsmodi
-- **AI als Album-Teilnehmer** – Qualitäts-basiertes Voting
-- **Landmark-Erkennung** – Grounding DINO für Sehenswürdigkeiten
-- **AI-Qualitätsbewertung** – Score für jedes Foto
-- **Intelligenter Auto-Crop** – Fokuspunkt basierend auf Gesichtern/Landmarks
-- **Hybride Suche** – CLIP + DINOv2 Fusion
-- **Deutsche Sprachsuche** – mit intelligentem Query-Parsing und Dekomposition
-- **GPS-Radius-Suche** – Umkreissuche in Kilometern
-- **Passkey-Authentifizierung** – WebAuthn/FIDO2
-- **Granulares RBAC** – 18+ Permissions, Custom Roles
-- **Modulare ML-Architektur** – 3 spezialisierte Microservices
-- **Rate Limiting** auf Auth-Endpunkte
-- **Passwort-Reset per E-Mail** (Self-Service)
+- **Collaborative album curation** – consensus view, anonymous voting, multiple view modes
+- **AI as album participant** – quality-based voting
+- **Landmark detection** – Grounding DINO for points of interest
+- **AI quality scoring** – score for every photo
+- **Intelligent auto-crop** – focus point based on faces / landmarks
+- **Hybrid search** – CLIP + DINOv2 fusion
+- **German language search** – with intelligent query parsing and decomposition
+- **GPS radius search** – search within a kilometer radius
+- **Passkey authentication** – WebAuthn/FIDO2
+- **Granular RBAC** – 19+ permissions, custom roles, secured purge action with a dedicated role
+- **Modular ML architecture** – 3 specialized microservices
+- **Rate limiting** on auth endpoints
+- **Password reset via email** (self-service)
 
-### Fazit
+### Conclusion
 
-**Immich** ist die umfassendere, ausgereiftere Lösung – insbesondere als vollständiger Google-Photos-Ersatz mit Video-Support, Mobile-Apps und breiter Community. Es deckt den gesamten Lifecycle einer Foto-/Video-Verwaltung ab.
+**Immich** is the more comprehensive, more mature solution – especially as a
+full Google Photos replacement with video support, mobile apps, and a broad
+community. It covers the entire lifecycle of photo/video management.
 
-**FK-Encore** punktet mit innovativen AI-Features und einem einzigartigen kollaborativen Kuratierungskonzept. Die Album-Kuratierung (Konsens-Ansicht, AI-Voting, anonyme Abstimmung) geht deutlich über Immich hinaus. Ebenso sind Landmark-Erkennung, Foto-Qualitätsbewertung und die hybride Suche Alleinstellungsmerkmale.
+**FK-Encore** stands out with innovative AI features and a unique collaborative
+curation concept. Album curation (consensus view, AI voting, anonymous voting)
+goes significantly beyond Immich. Landmark detection, photo quality scoring,
+and hybrid search are additional unique selling points.
 
-Für eine Weiterentwicklung von FK-Encore wären folgende Immich-Features am wirkungsvollsten:
-1. **Video-Support** – größte Funktionslücke
-2. **Mobile App / PWA** mit Auto-Backup
-3. **Öffentliche Sharing-Links**
-4. **OAuth/OIDC** für Enterprise-Einsatz
-5. **Interaktive Kartenansicht**
+For the further development of FK-Encore, the following Immich features would
+be the most impactful:
+1. **Video support** – biggest functional gap
+2. **Mobile app / PWA** with auto-backup
+3. **Public sharing links**
+4. **OAuth/OIDC** for enterprise use
+5. **Interactive map view**

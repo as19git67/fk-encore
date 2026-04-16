@@ -56,8 +56,11 @@ decomposition.
 - Password login (bcrypt) and **WebAuthn / FIDO2 passkeys** with multi-passkey
   support
 - Token-based password reset via email
-- Granular RBAC with 18+ permissions and custom roles
+- Granular RBAC with 19+ permissions and custom roles
 - Rate limiting on auth endpoints
+- Dedicated, opt-in `photos.purge` permission for the destructive
+  "delete all photo data" action (not granted to Admin by default —
+  see [`docs/purge.md`](./docs/purge.md))
 
 ### Storage & infrastructure
 - Encore `SQLDatabase` (PostgreSQL) with Drizzle ORM
