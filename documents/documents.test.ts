@@ -9,6 +9,8 @@ import {
 } from "./documents.service";
 import { flattenTaxonomy, categoryTaxonomy } from "./taxonomy";
 import { DOCUMENT_SERVICES } from "./scan-queue";
+import { DuplicateDocumentError } from "./import";
+import { SUPPORTED_EXTENSIONS } from "./documents.service";
 
 describe("documents.service", () => {
   it("guessExtension prefers the filename extension for supported types", () => {
@@ -68,5 +70,23 @@ describe("documents.taxonomy", () => {
 describe("documents.scan-queue constants", () => {
   it("pipeline stages are declared in dependency order", () => {
     expect(DOCUMENT_SERVICES).toEqual(["text_extract", "classify", "embed"]);
+  });
+});
+
+describe("documents.import", () => {
+  it("DuplicateDocumentError exposes the existing document id", () => {
+    const err = new DuplicateDocumentError(42);
+    expect(err.existingId).toBe(42);
+    expect(err.name).toBe("DuplicateDocumentError");
+    expect(err.message).toBe("DOCUMENT_ALREADY_EXISTS");
+    expect(err).toBeInstanceOf(Error);
+  });
+});
+
+describe("documents.inbox supported extensions", () => {
+  it("only PDFs are eligible for inbox import", () => {
+    expect(SUPPORTED_EXTENSIONS.has(".pdf")).toBe(true);
+    expect(SUPPORTED_EXTENSIONS.has(".jpg")).toBe(false);
+    expect(SUPPORTED_EXTENSIONS.has(".docx")).toBe(false);
   });
 });
