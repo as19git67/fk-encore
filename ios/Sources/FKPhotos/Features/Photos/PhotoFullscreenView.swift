@@ -50,33 +50,32 @@ struct PhotoFullscreenView: View {
     }
 
     var body: some View {
-        // NavigationStack provides a system toolbar that gets Liquid Glass on iOS 26
-        // automatically and places itself correctly below the Dynamic Island.
-        NavigationStack {
-            TabView(selection: $currentIndex) {
-                ForEach(photos.indices, id: \.self) { index in
-                    PhotoPageView(
-                        photo: photos[index],
-                        faceBBox: index < bboxes.count ? bboxes[index] : nil,
-                        showDetails: $showDetails,
-                        curationStatus: index == currentIndex
-                            ? $currentCurationStatus
-                            : .constant(photos[index].curation_status)
-                    )
-                    .tag(index)
-                }
+        TabView(selection: $currentIndex) {
+            ForEach(photos.indices, id: \.self) { index in
+                PhotoPageView(
+                    photo: photos[index],
+                    faceBBox: index < bboxes.count ? bboxes[index] : nil,
+                    showDetails: $showDetails,
+                    curationStatus: index == currentIndex
+                        ? $currentCurationStatus
+                        : .constant(photos[index].curation_status)
+                )
+                .tag(index)
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .background(Color(.systemBackground))
-            .ignoresSafeArea()
-            .navigationBarTitleDisplayMode(.inline)
-            .onChange(of: currentIndex) { _, newIndex in
-                if photos.indices.contains(newIndex) {
-                    currentCurationStatus = photos[newIndex].curation_status
-                }
-                withAnimation(.spring(duration: 0.4)) { showDetails = false }
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .background(Color(.systemBackground))
+        .ignoresSafeArea()
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .tabBar)
+        .onChange(of: currentIndex) { _, newIndex in
+            if photos.indices.contains(newIndex) {
+                currentCurationStatus = photos[newIndex].curation_status
             }
-            .toolbar {
+            withAnimation(.spring(duration: 0.4)) { showDetails = false }
+        }
+        .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { dismiss() } label: {
                         Image(systemName: "chevron.left")
@@ -178,8 +177,8 @@ struct PhotoFullscreenView: View {
                     }
                 }
             }
-            .toolbarBackground(showDetails ? .visible : .hidden, for: .bottomBar)
-            .alert("Umbenennen", isPresented: $isRenaming) {
+        .toolbarBackground(showDetails ? .visible : .hidden, for: .bottomBar)
+        .alert("Umbenennen", isPresented: $isRenaming) {
                 TextField("Name eingeben", text: $newName)
                     .autocorrectionDisabled()
                 Button("Speichern") {
@@ -208,7 +207,6 @@ struct PhotoFullscreenView: View {
                     Text("\"\(conflict.name)\" existiert bereits. Die Fotos dieser Person werden zu \"\(conflict.name)\" verschoben.")
                 }
             }
-        }
     }
 
     // MARK: - Person rename/merge
