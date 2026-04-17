@@ -64,7 +64,8 @@ Register a new library.
   "path": "archive",             // relative to PHOTO_LIBRARIES_ROOT, or absolute under it
   "import_mode": "link",         // "link" (default) or "move"
   "auto_import": true,           // optional; starts a chokidar watcher
-  "auto_albums": false            // optional; see "Auto-albums" below
+  "auto_albums": false,          // optional; see "Auto-albums" below
+  "favorite_rating_threshold": 0 // optional; 0 disables, 1..5 auto-favourites by XMP rating
 }
 ```
 
@@ -87,10 +88,11 @@ Fetch one library.
 
 ### `PATCH /libraries/:id`
 
-Update name, import mode, `auto_import` or `auto_albums`. The watcher is
-re-synced to match the new configuration. Toggling `auto_albums` only affects
-future imports; already-imported photos are not retroactively sorted into
-albums.
+Update name, import mode, `auto_import`, `auto_albums` or
+`favorite_rating_threshold`. The watcher is re-synced to match the new
+configuration. Toggling `auto_albums` or raising
+`favorite_rating_threshold` only affects future imports; already-imported
+photos are not retroactively sorted into albums or flipped to favourite.
 
 ### `DELETE /libraries/:id`
 
@@ -102,6 +104,13 @@ via the regular hard-delete API if desired.
 ### `POST /libraries/:id/scan`
 
 Walk the library once and import every supported file not already in the DB.
+Scans are serialised per library: while a scan is running for library `id`,
+a second request for the same `id` fails fast with
+`412 FailedPrecondition` / `failed_precondition` and message
+`scan already running for library <id>`. Scans of different libraries run
+concurrently. The lock is held in-process; multi-replica deployments need a
+DB-level lock if they want cross-replica guarantees.
+
 Returns a scan report:
 
 ```json
@@ -138,18 +147,30 @@ Only meaningful for `link`-mode libraries. Returns `{ "removed": <n> }`.
 - **Auto-albums** — when `auto_albums = true`, every imported photo that sits
   in a sub-directory of the library root is added to an album named after the
   **full relative sub-path** (forward-slash separated). Photos located
-  directly in the library root are not auto-albumed. The album is owned by
-  the library owner and created on first use; subsequent imports into the
-  same sub-tree reuse it. Adding a photo to an album is idempotent, so
-  re-scans and watcher events don't produce duplicates. Example: with library
-  root `/mnt/libraries/archive`, the file `2020/2020-06 Wedding/IMG_0001.jpg`
-  lands in album `2020/2020-06 Wedding`, distinct from `2020/2020-07`.
+  directly in the library root fall back to an album named after the library
+  itself, so libraries without any sub-directory structure still get a single
+  catch-all album. The album is owned by the library owner and created on
+  first use; subsequent imports into the same sub-tree (or root) reuse it.
+  Adding a photo to an album is idempotent, so re-scans and watcher events
+  don't produce duplicates. Example: with library root
+  `/mnt/libraries/archive` (library name `Family archive`), the file
+  `2020/2020-06 Wedding/IMG_0001.jpg` lands in album `2020/2020-06 Wedding`;
+  the file `IMG_9999.jpg` directly in `archive/` lands in album
+  `Family archive`.
 - **Event label** — when the last path segment of a new auto-album contains
   text beyond a date fragment (`YYYY`, `YYYY-MM`, `YYYY-MM-DD`), the remainder
   is stored in `albums.event_name`. Example: `2020/2020-06 Wedding` yields
   `event_name = "Wedding"`; pure date folders like `2020/2020-06` leave it
   null. The field is only set at album creation time — manual edits made
   later are preserved.
+- **Auto-favourites from XMP rating** — when `favorite_rating_threshold` is
+  set to a value between 1 and 5, every imported photo whose `xmp:Rating`
+  meets or exceeds the threshold has its per-user curation status flipped to
+  `favorite` for the library owner. Value `0` (default) disables the
+  behaviour. The full star value is additionally appended as a keyword
+  (`Rating 1` … `Rating 5`) so the rating is searchable as a regular tag;
+  this keyword injection happens on every import regardless of the
+  threshold. See also [metadata mapping](./metadata-mapping.md).
 
 ## Data model
 
@@ -187,6 +208,14 @@ populated by the auto-album derivation (see above):
 ```sql
 ALTER TABLE albums
   ADD COLUMN event_name TEXT;
+```
+
+Migration `0025_library_favorite_rating_threshold.sql` adds the per-library
+threshold that flips photos to favourite based on their XMP rating:
+
+```sql
+ALTER TABLE photo_libraries
+  ADD COLUMN favorite_rating_threshold INTEGER NOT NULL DEFAULT 0;
 ```
 
 `photos.filename` for link-imported rows follows the synthetic form

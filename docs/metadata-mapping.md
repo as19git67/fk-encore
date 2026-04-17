@@ -26,6 +26,7 @@ then project a subset of it into the DB row.
 | `city`        | IPTC `City`                                                                         |
 | `state`       | IPTC `Province-State` → IPTC `State`                                                |
 | `country`     | IPTC `Country-PrimaryLocationName` → IPTC `Country`                                 |
+| `rating`      | XMP `xmp:Rating` (integer 1..5; `0` unrated and `-1` rejected collapse to `null`)   |
 
 XMP language-alternative unwrapping (e.g. `dc:description`, `dc:title`) is
 handled by the `asString()` helper: it prefers `x-default`, falling back to
@@ -48,7 +49,7 @@ derivation) but nothing stores them permanently.
 | `latitude`         | `ExifMetadata.latitude`                                                                                 |
 | `longitude`        | `ExifMetadata.longitude`                                                                                |
 | `description`      | `combineDescription(meta)` — see below                                                                  |
-| `keywords[]`       | `ExifMetadata.keywords`                                                                                 |
+| `keywords[]`       | `ExifMetadata.keywords` — plus `"Rating N"` (1..5) appended when `ExifMetadata.rating` is set (case-insensitive de-dup) |
 | `location_city`    | `ExifMetadata.city` (only if any of `city`/`state`/`country` is set)                                    |
 | `location_country` | `ExifMetadata.country`                                                                                  |
 | `location_name`    | derived: `"<city \| state>, <country>"` (whichever components are present)                              |
@@ -83,6 +84,13 @@ no column in `photos`. They are effectively discarded after parsing:
 - `credit` — IPTC Credit
 - `state` — IPTC Province-State (used as a fallback when building
   `location_name` / `location_short`, but not stored as its own column)
+- `rating` — XMP `xmp:Rating`; surfaced indirectly in two ways instead of
+  a dedicated column: (1) injected into `photos.keywords` as
+  `"Rating 1"`…`"Rating 5"` so it is searchable as a normal tag, and
+  (2) used by library imports to auto-favourite photos whose rating meets
+  or exceeds a per-library threshold
+  (`photo_libraries.favorite_rating_threshold`, see
+  [external libraries](./external-libraries.md)).
 
 Adding dedicated columns for these is a straightforward migration if they
 are needed by a future feature; today's import simply drops them.
