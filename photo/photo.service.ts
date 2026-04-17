@@ -4035,14 +4035,56 @@ export async function getNextUnreviewedGroupLogic(userId: number): Promise<Photo
   };
 }
 
-export async function reviewPhotoGroupLogic(userId: number, groupId: number): Promise<{ success: boolean }> {
+export async function reviewPhotoGroupLogic(
+  userId: number,
+  groupId: number,
+  photoIds?: number[]
+): Promise<{ success: boolean }> {
   const group = await dbFirst<{ id: number }>(
     db.select({ id: photoGroups.id })
       .from(photoGroups)
       .where(and(eq(photoGroups.id, groupId), eq(photoGroups.user_id, userId)))
   );
 
-  if (!group) throw new Error("Group not found");
+  // Stale ID: background regrouping (scheduleRegroup) deletes all unreviewed
+  // groups and recreates them with fresh IDs. If the frontend sent photo_ids,
+  // try to find the current unreviewed group that has exactly the same members
+  // and mark that one as reviewed instead.
+  if (!group && photoIds && photoIds.length > 0) {
+    const candidates = await dbAll<{ id: number }>(
+      db.select({ id: photoGroups.id })
+        .from(photoGroups)
+        .where(and(
+          eq(photoGroups.user_id, userId),
+          isNull(photoGroups.reviewed_at)
+        ))
+    );
+
+    for (const candidate of candidates) {
+      const members = await dbAll<{ photo_id: number }>(
+        db.select({ photo_id: photoGroupMembers.photo_id })
+          .from(photoGroupMembers)
+          .where(eq(photoGroupMembers.group_id, candidate.id))
+      );
+      const memberIds = new Set(members.map((m) => m.photo_id));
+      if (
+        memberIds.size === photoIds.length &&
+        photoIds.every((id) => memberIds.has(id))
+      ) {
+        await dbExec(
+          db.update(photoGroups)
+            .set({ reviewed_at: new Date().toISOString() })
+            .where(eq(photoGroups.id, candidate.id))
+        );
+        return { success: true };
+      }
+    }
+  }
+
+  // If nothing matches, treat the request as idempotent: the group is either
+  // already reviewed or was removed by regrouping. Returning success avoids
+  // an internal error in the UI when the client holds a stale group ID.
+  if (!group) return { success: true };
 
   await dbExec(
     db.update(photoGroups)
