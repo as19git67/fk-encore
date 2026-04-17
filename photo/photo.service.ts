@@ -84,12 +84,47 @@ const rawFalse = sql.raw('false')
 
 export const UPLOAD_DIR = path.resolve(process.env.PHOTO_UPLOAD_DIR || "uploads/photos");
 export const THUMBNAIL_DIR = path.resolve(process.env.PHOTO_THUMBNAIL_DIR || "uploads/thumbnails");
+
+/**
+ * Resolve the on-disk path for a photo row. Library-linked photos
+ * (link-import mode) have `external_path` set and their `filename` is a
+ * synthetic key that does not exist under UPLOAD_DIR, so any caller that
+ * needs the actual image bytes must go through this helper.
+ */
+export function getPhotoDiskPath(photo: { filename: string; external_path?: string | null }): string {
+  return photo.external_path ? photo.external_path : path.join(UPLOAD_DIR, photo.filename);
+}
 const INSIGHTFACE_SERVICE_URL = process.env.INSIGHTFACE_SERVICE_URL || "http://localhost:8000";
 
-const SUPPORTED_MIME_TYPES = new Set([
+export const SUPPORTED_MIME_TYPES = new Set([
   "image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp",
   "image/heic", "image/heif", "image/tiff", "image/bmp", "image/svg+xml",
 ]);
+
+/** File extensions that map to a supported MIME type. Used by the library
+ *  scanner to filter directory listings before touching files. */
+export const SUPPORTED_EXTENSIONS = new Set([
+  ".jpg", ".jpeg", ".png", ".gif", ".webp",
+  ".heic", ".heif", ".tif", ".tiff", ".bmp", ".svg",
+]);
+
+export function guessMimeFromExt(ext: string): string | null {
+  const e = ext.toLowerCase();
+  switch (e) {
+    case ".jpg":
+    case ".jpeg": return "image/jpeg";
+    case ".png": return "image/png";
+    case ".gif": return "image/gif";
+    case ".webp": return "image/webp";
+    case ".heic": return "image/heic";
+    case ".heif": return "image/heif";
+    case ".tif":
+    case ".tiff": return "image/tiff";
+    case ".bmp": return "image/bmp";
+    case ".svg": return "image/svg+xml";
+    default: return null;
+  }
+}
 const EMBEDDING_SERVICE_URL = process.env.EMBEDDING_SERVICE_URL || "http://localhost:8001";
 // Must match the validator bounds on TextSearchRequest in
 // embedding_service/app/models/schemas.py. Sending k/query outside these
@@ -335,7 +370,7 @@ export async function indexPhotoEmbeddings(photoId: number, force: boolean = fal
   );
   if (!photo) return;
 
-  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  const filePath = getPhotoDiskPath(photo);
   if (!fs.existsSync(filePath)) return;
 
   // Get face IDs for this photo (global — no user filter needed)
@@ -453,7 +488,7 @@ export async function detectPhotoFaces(photoId: number, force: boolean = false):
   );
   if (!photo) return;
 
-  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  const filePath = getPhotoDiskPath(photo);
   if (!fs.existsSync(filePath)) return;
 
   let processingPath = filePath;
@@ -748,6 +783,8 @@ export interface ExifMetadata {
   author: string | null;
   /** IPTC Headline. */
   headline: string | null;
+  /** XMP dc:title (language-alternative resolved to x-default). */
+  title: string | null;
   /** IPTC Copyright / EXIF Copyright. */
   copyright: string | null;
   /** IPTC Credit. */
@@ -846,6 +883,7 @@ export async function getExifMetadata(filePath: string): Promise<ExifMetadata> {
     keywords: [],
     author: null,
     headline: null,
+    title: null,
     copyright: null,
     credit: null,
     city: null,
@@ -884,11 +922,9 @@ export async function getExifMetadata(filePath: string): Promise<ExifMetadata> {
       asString(data?.Creator) ??
       asString(data?.creator) ??
       null;
-    // XMP dc:title is the closest equivalent to IPTC Headline.
-    const headline =
-      asString(data?.Headline) ??
-      asString(data?.title) ??
-      null;
+    const headline = asString(data?.Headline);
+    // XMP dc:title — exifr normalises to lowercase `title`.
+    const title = asString(data?.title);
     const copyright =
       asString(data?.CopyrightNotice) ??
       asString(data?.Copyright) ??
@@ -910,6 +946,7 @@ export async function getExifMetadata(filePath: string): Promise<ExifMetadata> {
       keywords,
       author,
       headline,
+      title,
       copyright,
       credit,
       city,
@@ -1015,6 +1052,22 @@ async function geocodePhotoLocation(photoId: number, lat: number, lon: number): 
  *
  * Exported for unit tests.
  */
+/**
+ * Build the description string written to `photos.description`.
+ *
+ * Base text comes from EXIF/XMP description (with IPTC Caption-Abstract /
+ * IPTC Headline as fallbacks). If XMP dc:title is also present and not
+ * already contained in the base, it is appended, separated by a blank line.
+ */
+export function combineDescription(meta: ExifMetadata): string | null {
+  const base = meta.description ?? meta.headline ?? null;
+  const title = meta.title;
+  if (!base && !title) return null;
+  if (!base) return title;
+  if (!title || base.includes(title)) return base;
+  return `${base}\n\n${title}`;
+}
+
 export function iptcLocationUpdate(meta: ExifMetadata): {
   location_name: string;
   location_short: string | null;
@@ -1053,7 +1106,7 @@ export async function indexPhotoGeocoding(photoId: number, force = false): Promi
   let iptcLoc: ReturnType<typeof iptcLocationUpdate> = null;
 
   // Try EXIF extraction if no GPS stored yet — or to discover IPTC location.
-  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  const filePath = getPhotoDiskPath(photo);
   if (fs.existsSync(filePath)) {
     const exifMeta = await getExifMetadata(filePath);
     if ((lat === null || lon === null) && exifMeta.latitude !== null && exifMeta.longitude !== null) {
@@ -1151,8 +1204,7 @@ export async function uploadPhotoStream(
   const { absPath: filePath, relPath: filename } = await reserveStoragePath(storageTs, ext);
   await fs.promises.rename(tempPath, filePath);
 
-  // Description fallback: EXIF/XMP/IPTC caption first, then IPTC Headline.
-  const descriptionValue = exifMeta.description ?? exifMeta.headline ?? null;
+  const descriptionValue = combineDescription(exifMeta);
   // Pre-fill location from IPTC when present, sparing us a Nominatim call.
   const iptcLoc = iptcLocationUpdate(exifMeta);
 
@@ -1237,8 +1289,7 @@ export async function uploadPhotoLogic(
   const { absPath: filePath, relPath: filename } = await reserveStoragePath(storageTs2, ext);
   await fs.promises.rename(tempPath, filePath);
 
-  // Description fallback: EXIF/XMP/IPTC caption first, then IPTC Headline.
-  const descriptionValue2 = exifMeta2.description ?? exifMeta2.headline ?? null;
+  const descriptionValue2 = combineDescription(exifMeta2);
   // Pre-fill location from IPTC when present, sparing us a Nominatim call.
   const iptcLoc2 = iptcLocationUpdate(exifMeta2);
 
@@ -1543,8 +1594,13 @@ export function thumbnailShardPath(baseName: string): string {
 /** Delete all cached thumbnail variants for a given photo filename. */
 async function deleteCachedThumbnails(filename: string): Promise<void> {
   const baseName = path.basename(filename, path.extname(filename));
-  const prefix = `${baseName}_`;
-  const shardPath = thumbnailShardPath(baseName);
+  // Library photos use a hashed cache key to avoid basename collisions across
+  // libraries — see getPhotoFile for the matching cache-write logic.
+  const cacheBase = filename.startsWith("__library/")
+    ? `${baseName}_${crypto.createHash("md5").update(filename).digest("hex").slice(0, 8)}`
+    : baseName;
+  const prefix = `${cacheBase}_`;
+  const shardPath = thumbnailShardPath(cacheBase);
   try {
     const entries = await fs.promises.readdir(shardPath);
     await Promise.all(
@@ -1566,10 +1622,14 @@ export async function hardDeletePhotoLogic(userId: number, photoId: number): Pro
     throw new Error("Photo not found or unauthorized");
   }
 
-  // Delete original file and all cached thumbnails from disk
-  const filePath = path.join(UPLOAD_DIR, photo.filename);
-  if (fs.existsSync(filePath)) {
-    fs.unlinkSync(filePath);
+  // For `link`-imported photos the file lives outside our storage and the
+  // library is the source of truth — only drop the DB row + thumbnails. The
+  // unlink watcher does the same when the source file disappears externally.
+  if (!photo.external_path) {
+    const filePath = path.join(UPLOAD_DIR, photo.filename);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
   }
   await deleteCachedThumbnails(photo.filename);
 
@@ -1744,7 +1804,7 @@ export async function refreshPhotoMetadataLogic(userId: number, photoId: number)
     throw new Error("Photo not found or unauthorized");
   }
 
-  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  const filePath = getPhotoDiskPath(photo);
   if (!fs.existsSync(filePath)) {
     throw new Error("File not found on disk");
   }
@@ -1757,7 +1817,7 @@ export async function refreshPhotoMetadataLogic(userId: number, photoId: number)
   const iptcLoc = iptcLocationUpdate(exifMeta);
   await dbExec(db.update(photos).set({
     taken_at: exifMeta.takenAt,
-    description: exifMeta.description ?? exifMeta.headline ?? photo.description,
+    description: combineDescription(exifMeta) ?? photo.description,
     keywords: exifMeta.keywords,
     ...(iptcLoc ?? {}),
   }).where(eq(photos.id, photoId)));
@@ -1778,7 +1838,7 @@ export async function updatePhotoDateLogic(
     throw new Error("Photo not found or unauthorized");
   }
 
-  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  const filePath = getPhotoDiskPath(photo);
   if (!fs.existsSync(filePath)) {
     throw new Error("File not found on disk");
   }
@@ -1856,7 +1916,7 @@ export async function updatePhotoDescriptionLogic(
   //    one of the three (e.g. Windows Explorer reads XMP, Lightroom reads IPTC,
   //    legacy viewers read EXIF ImageDescription).
   try {
-    const filePath = path.join(UPLOAD_DIR, photo.filename);
+    const filePath = getPhotoDiskPath(photo);
     if (fs.existsSync(filePath)) {
       const ext = path.extname(filePath).toLowerCase();
       if (EXIF_WRITABLE_EXTENSIONS.has(ext)) {
@@ -1993,6 +2053,7 @@ export async function listAlbumsLogic(userId: number): Promise<ListAlbumsRespons
         user_id: albums.user_id,
         name: albums.name,
         description: albums.description,
+        event_name: albums.event_name,
         cover_photo_id: albums.cover_photo_id,
         display_mode: albums.display_mode,
         created_at: albums.created_at,
@@ -3382,7 +3443,7 @@ export async function reindexPhotoLogic(
   let lon = photo.longitude;
 
   if (lat === null || lon === null) {
-    const filePath = path.join(UPLOAD_DIR, photo.filename);
+    const filePath = getPhotoDiskPath(photo);
     const exifMeta = await getExifMetadata(filePath);
     if (exifMeta.latitude !== null && exifMeta.longitude !== null) {
       lat = exifMeta.latitude;
@@ -3446,7 +3507,7 @@ export async function rescanPhotoGpsLogic(
   let scansQueued = false;
   let iptcLoc: ReturnType<typeof iptcLocationUpdate> = null;
 
-  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  const filePath = getPhotoDiskPath(photo);
   if (fs.existsSync(filePath)) {
     const exifMeta = await getExifMetadata(filePath);
     if ((lat === null || lon === null) && exifMeta.latitude !== null && exifMeta.longitude !== null) {
@@ -4340,7 +4401,7 @@ export async function indexPhotoLandmarks(photoId: number): Promise<void> {
   );
   if (!photo) return;
 
-  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  const filePath = getPhotoDiskPath(photo);
   if (!fs.existsSync(filePath)) return;
 
   let processingPath = filePath;
@@ -4464,7 +4525,7 @@ export async function indexPhotoQuality(photoId: number): Promise<void> {
   );
   if (!photo) return;
 
-  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  const filePath = getPhotoDiskPath(photo);
   if (!fs.existsSync(filePath)) return;
 
   let processingPath = filePath;

@@ -28,6 +28,11 @@ services:
       POSTGRES_DATABASE: encore
       PHOTO_UPLOAD_DIR: /mnt/data/photos
       PHOTO_THUMBNAIL_DIR: /mnt/data/thumbnails
+      # Root directory for external photo libraries (issue #75). Every path
+      # registered through /libraries must live under this root. Mount one or
+      # more host directories into subpaths of /mnt/libraries (see the
+      # `volumes:` section below for an example).
+      PHOTO_LIBRARIES_ROOT: /mnt/libraries
       ADMIN_EMAIL: admin@example.com
       ADMIN_NAME: Admin
       ADMIN_PASSWORD: changeme   # <-- hier anpassen!
@@ -73,6 +78,11 @@ services:
       - photos:/mnt/data/photos
       - thumbnails:/mnt/data/thumbnails
       - backup:/mnt/backup
+      # External photo libraries — mount any host directories you want to
+      # import from under /mnt/libraries. Use `:ro` for link-mode libraries
+      # so the container can never modify the originals. Example:
+      #   - /Users/anton/Pictures/Archive:/mnt/libraries/archive:ro
+      #   - /Users/anton/Pictures/Inbox:/mnt/libraries/inbox
 
   # ── InsightFace Service (Face Detection) ───────────────────────────────────
   insightface:

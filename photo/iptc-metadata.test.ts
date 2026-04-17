@@ -5,7 +5,7 @@ import crypto from "crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import sharp from "sharp";
 import { exiftool } from "exiftool-vendored";
-import { getExifMetadata, iptcLocationUpdate, parseIptcDate, type ExifMetadata } from "./photo.service";
+import { combineDescription, getExifMetadata, iptcLocationUpdate, parseIptcDate, type ExifMetadata } from "./photo.service";
 
 /**
  * Unit/integration tests for IPTC metadata handling (issue #129).
@@ -111,7 +111,7 @@ describe("getExifMetadata — IPTC fallbacks", () => {
     expect(meta.country).toBe("Deutschland");
   });
 
-  it("falls back to XMP dc:title when IPTC Headline is absent", async () => {
+  it("extracts XMP dc:title into its own `title` field", async () => {
     const file = await makeTempJpeg();
     await exiftool.write(
       file,
@@ -122,11 +122,12 @@ describe("getExifMetadata — IPTC fallbacks", () => {
       ["-overwrite_original"]
     );
     const meta = await getExifMetadata(file);
-    expect(meta.headline).toBe("Bergpanorama");
+    expect(meta.title).toBe("Bergpanorama");
+    expect(meta.headline).toBeNull();
   });
 
   it("treats Caption-Abstract and Headline as independent fields", async () => {
-    // The upload/refresh paths use `description ?? headline` as the description
+    // combineDescription() uses `description ?? headline` as the description
     // fallback — but getExifMetadata itself must not silently conflate the two.
     const file = await makeTempJpeg();
     await exiftool.write(
@@ -177,6 +178,7 @@ describe("iptcLocationUpdate", () => {
     keywords: [],
     author: null,
     headline: null,
+    title: null,
     copyright: null,
     credit: null,
     city: null,
@@ -210,6 +212,53 @@ describe("iptcLocationUpdate", () => {
     expect(upd).not.toBeNull();
     expect(upd!.location_name).toBe("Deutschland");
     expect(upd!.location_short).toBeNull();
+  });
+});
+
+describe("combineDescription", () => {
+  const baseMeta: ExifMetadata = {
+    takenAt: null,
+    latitude: null,
+    longitude: null,
+    description: null,
+    keywords: [],
+    author: null,
+    headline: null,
+    title: null,
+    copyright: null,
+    credit: null,
+    city: null,
+    state: null,
+    country: null,
+  };
+
+  it("returns null when nothing is set", () => {
+    expect(combineDescription(baseMeta)).toBeNull();
+  });
+
+  it("returns the description alone when no title is present", () => {
+    expect(combineDescription({ ...baseMeta, description: "Foto aus München" }))
+      .toBe("Foto aus München");
+  });
+
+  it("falls back to headline when description is absent", () => {
+    expect(combineDescription({ ...baseMeta, headline: "Bergpanorama" }))
+      .toBe("Bergpanorama");
+  });
+
+  it("returns the title alone when only title is present", () => {
+    expect(combineDescription({ ...baseMeta, title: "Bergpanorama" }))
+      .toBe("Bergpanorama");
+  });
+
+  it("appends title to description with a blank line in between", () => {
+    expect(combineDescription({ ...baseMeta, description: "Foto aus München", title: "Bergpanorama" }))
+      .toBe("Foto aus München\n\nBergpanorama");
+  });
+
+  it("skips the title when it is already contained in the description", () => {
+    expect(combineDescription({ ...baseMeta, description: "Bergpanorama — Foto aus München", title: "Bergpanorama" }))
+      .toBe("Bergpanorama — Foto aus München");
   });
 });
 
