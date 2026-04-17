@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import InputText from 'primevue/inputtext'
@@ -44,19 +44,40 @@ const form = ref<{
   path: string
   import_mode: LibraryImportMode
   auto_import: boolean
+  auto_albums: boolean
 }>({
   name: '',
   path: '',
   import_mode: 'link',
   auto_import: false,
+  auto_albums: false,
 })
 const saving = ref(false)
 
-// Path picker state (create mode)
+// Path picker state (create mode) — supports deep navigation via `sub`.
 const availablePaths = ref<AvailableDirectory[]>([])
 const availableRoot = ref('')
 const rootMounted = ref(false)
+const currentSub = ref('')
+const currentAbs = ref('')
+const currentRegistered = ref(false)
+const currentMounted = ref(false)
 const loadingPaths = ref(false)
+
+// Breadcrumb segments derived from currentSub. First entry is always the root.
+const pathSegments = computed<{ label: string; sub: string }[]>(() => {
+  const segs: { label: string; sub: string }[] = [
+    { label: availableRoot.value || '/', sub: '' },
+  ]
+  if (!currentSub.value) return segs
+  const parts = currentSub.value.split('/')
+  let acc = ''
+  for (const p of parts) {
+    acc = acc ? `${acc}/${p}` : p
+    segs.push({ label: p, sub: acc })
+  }
+  return segs
+})
 
 // Delete confirmation
 const showDeleteConfirm = ref(false)
@@ -78,15 +99,16 @@ async function loadData() {
   }
 }
 
-async function openCreateDialog() {
-  editingId.value = null
-  form.value = { name: '', path: '', import_mode: 'link', auto_import: false }
-  showEditDialog.value = true
+async function loadPickerAt(sub: string) {
   loadingPaths.value = true
   try {
-    const res = await listAvailablePaths()
+    const res = await listAvailablePaths(sub)
     availableRoot.value = res.root
     rootMounted.value = res.root_mounted
+    currentSub.value = res.sub
+    currentAbs.value = res.abs_path
+    currentRegistered.value = res.current_registered
+    currentMounted.value = res.current_mounted
     availablePaths.value = res.directories
   } catch (err: any) {
     error.value = err.message || 'Verzeichnisse konnten nicht geladen werden'
@@ -96,6 +118,19 @@ async function openCreateDialog() {
   }
 }
 
+async function openCreateDialog() {
+  editingId.value = null
+  form.value = {
+    name: '',
+    path: '',
+    import_mode: 'link',
+    auto_import: false,
+    auto_albums: false,
+  }
+  showEditDialog.value = true
+  await loadPickerAt('')
+}
+
 function openEditDialog(lib: PhotoLibrary) {
   editingId.value = lib.id
   form.value = {
@@ -103,8 +138,27 @@ function openEditDialog(lib: PhotoLibrary) {
     path: lib.path,
     import_mode: lib.import_mode,
     auto_import: lib.auto_import,
+    auto_albums: lib.auto_albums,
   }
   showEditDialog.value = true
+}
+
+function navigateInto(dir: AvailableDirectory) {
+  loadPickerAt(dir.rel_path)
+}
+
+function navigateTo(sub: string) {
+  loadPickerAt(sub)
+}
+
+function selectDirectory(dir: AvailableDirectory) {
+  if (dir.already_registered) return
+  form.value.path = dir.rel_path
+}
+
+function selectCurrent() {
+  if (!currentSub.value || currentRegistered.value) return
+  form.value.path = currentSub.value
 }
 
 async function handleSave() {
@@ -119,6 +173,7 @@ async function handleSave() {
         path: form.value.path.trim(),
         import_mode: form.value.import_mode,
         auto_import: form.value.auto_import,
+        auto_albums: form.value.auto_albums,
       })
       info.value = 'Bibliothek angelegt.'
     } else {
@@ -126,6 +181,7 @@ async function handleSave() {
         name: form.value.name.trim(),
         import_mode: form.value.import_mode,
         auto_import: form.value.auto_import,
+        auto_albums: form.value.auto_albums,
       })
       info.value = 'Bibliothek aktualisiert.'
     }
@@ -252,6 +308,14 @@ onMounted(loadData)
           />
         </template>
       </Column>
+      <Column header="Auto-Alben" style="width: 8rem">
+        <template #body="{ data }">
+          <Tag
+            :value="data.auto_albums ? 'an' : 'aus'"
+            :severity="data.auto_albums ? 'success' : 'secondary'"
+          />
+        </template>
+      </Column>
       <Column header="Letzter Scan" style="width: 10rem">
         <template #body="{ data }">
           <span v-if="data.last_scan_at">{{ formatDateShort(data.last_scan_at) }}</span>
@@ -321,34 +385,68 @@ onMounted(loadData)
         </div>
 
         <div class="field">
-          <label for="lib-path">Pfad</label>
-          <Select
-            v-if="editingId === null"
-            id="lib-path"
-            v-model="form.path"
-            :options="availablePaths"
-            option-label="name"
-            option-value="rel_path"
-            :option-disabled="(opt: AvailableDirectory) => opt.already_registered"
-            :loading="loadingPaths"
-            :placeholder="loadingPaths ? 'Lade Verzeichnisse…' : 'Unterverzeichnis wählen'"
-            :empty-message="'Keine Verzeichnisse unter ' + availableRoot"
-          >
-            <template #option="{ option }">
-              <div class="path-option">
-                <span class="path-option-name">
+          <label>Pfad</label>
+          <div v-if="editingId === null" class="picker">
+            <div class="breadcrumb">
+              <template v-for="(seg, i) in pathSegments" :key="seg.sub">
+                <Button
+                  :label="seg.label"
+                  :disabled="i === pathSegments.length - 1"
+                  size="small"
+                  severity="secondary"
+                  text
+                  @click="navigateTo(seg.sub)"
+                />
+                <span v-if="i < pathSegments.length - 1" class="sep">/</span>
+              </template>
+            </div>
+            <div class="selected-row">
+              <span class="muted small">Ausgewählt:</span>
+              <code v-if="form.path" class="path">{{ form.path }}</code>
+              <span v-else class="muted small"><em>nichts gewählt</em></span>
+              <Button
+                v-if="currentSub"
+                :label="currentRegistered ? 'Aktueller Ordner bereits registriert' : 'Aktuellen Ordner wählen'"
+                size="small"
+                :disabled="currentRegistered"
+                @click="selectCurrent"
+              />
+            </div>
+            <ul class="dir-list">
+              <li v-if="loadingPaths" class="muted small">Lade Verzeichnisse…</li>
+              <li v-else-if="availablePaths.length === 0" class="muted small">
+                Keine Unterverzeichnisse in <code>{{ currentAbs }}</code>.
+              </li>
+              <li
+                v-for="dir in availablePaths"
+                :key="dir.abs_path"
+                class="dir-item"
+                :class="{ selected: form.path === dir.rel_path }"
+              >
+                <button
+                  type="button"
+                  class="dir-name"
+                  v-tooltip="'Reingehen'"
+                  @click="navigateInto(dir)"
+                >
                   <i
-                    :class="option.mounted ? 'pi pi-server mount-ok' : 'pi pi-folder mount-unknown'"
-                    v-tooltip="option.mounted ? 'Volume-Mount erkannt' : 'kein Volume-Mount erkannt'"
+                    :class="dir.mounted ? 'pi pi-server mount-ok' : 'pi pi-folder mount-unknown'"
                   />
-                  {{ option.name }}
-                </span>
-                <span v-if="option.already_registered" class="muted small">
+                  {{ dir.name }}
+                </button>
+                <span v-if="dir.already_registered" class="muted small">
                   (bereits registriert)
                 </span>
-              </div>
-            </template>
-          </Select>
+                <Button
+                  :label="form.path === dir.rel_path ? 'Gewählt' : 'Wählen'"
+                  size="small"
+                  :severity="form.path === dir.rel_path ? 'success' : undefined"
+                  :disabled="dir.already_registered"
+                  @click="selectDirectory(dir)"
+                />
+              </li>
+            </ul>
+          </div>
           <InputText
             v-else
             id="lib-path"
@@ -357,7 +455,7 @@ onMounted(loadData)
             disabled
           />
           <small v-if="editingId === null" class="hint-small">
-            Auswahl direkter Unterverzeichnisse unter
+            Beliebig tief unterhalb von
             <code>{{ availableRoot || 'PHOTO_LIBRARIES_ROOT' }}</code>.
             <span v-if="!loadingPaths">
               <span v-if="rootMounted" class="mount-ok">Volume-Mount auf Root erkannt.</span>
@@ -384,6 +482,13 @@ onMounted(loadData)
         <div class="field row">
           <ToggleSwitch v-model="form.auto_import" input-id="lib-auto" />
           <label for="lib-auto">Automatischer Import (Watcher aktivieren)</label>
+        </div>
+
+        <div class="field row">
+          <ToggleSwitch v-model="form.auto_albums" input-id="lib-auto-albums" />
+          <label for="lib-auto-albums">
+            Auto-Alben aus Unterverzeichnissen (erstes Segment = Albumname)
+          </label>
         </div>
       </div>
 
@@ -518,18 +623,6 @@ onMounted(loadData)
   font-family: monospace;
 }
 
-.path-option {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-}
-
-.path-option-name {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
 .mount-ok {
   color: var(--p-green-500, #22c55e);
 }
@@ -540,5 +633,75 @@ onMounted(loadData)
 
 .mount-warn {
   color: var(--p-orange-500, #f59e0b);
+}
+
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 6px;
+  padding: 0.5rem;
+  background: var(--p-content-background);
+}
+
+.breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  font-family: monospace;
+  font-size: 0.85rem;
+}
+
+.breadcrumb .sep {
+  color: var(--p-text-muted-color);
+}
+
+.selected-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.dir-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  border-top: 1px solid var(--p-content-border-color);
+  padding-top: 0.25rem;
+}
+
+.dir-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.25rem;
+  border-radius: 4px;
+}
+
+.dir-item.selected {
+  background: var(--p-highlight-background, rgba(59, 130, 246, 0.1));
+}
+
+.dir-name {
+  background: none;
+  border: 0;
+  padding: 0.1rem 0.3rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: inherit;
+  font-size: 0.9rem;
+  flex: 1;
+  text-align: left;
+}
+
+.dir-name:hover {
+  text-decoration: underline;
 }
 </style>

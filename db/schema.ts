@@ -136,6 +136,9 @@ export const photoLibraries = pgTable("photo_libraries", {
   import_mode: libraryImportModeEnum("import_mode").notNull().default("link"),
   // When true a filesystem watcher imports newly arriving files automatically.
   auto_import: boolean("auto_import").notNull().default(false),
+  // When true an album per first-level sub-directory is auto-created and each
+  // imported photo is added to it.
+  auto_albums: boolean("auto_albums").notNull().default(false),
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
   last_scan_at: timestamp("last_scan_at", { mode: "string" }),
 });

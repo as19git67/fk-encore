@@ -9,6 +9,7 @@ export interface PhotoLibrary {
   path: string
   import_mode: LibraryImportMode
   auto_import: boolean
+  auto_albums: boolean
   created_at: string | null
   last_scan_at: string | null
 }
@@ -18,12 +19,14 @@ export interface CreateLibraryRequest {
   path: string
   import_mode?: LibraryImportMode
   auto_import?: boolean
+  auto_albums?: boolean
 }
 
 export interface UpdateLibraryRequest {
   name?: string
   import_mode?: LibraryImportMode
   auto_import?: boolean
+  auto_albums?: boolean
 }
 
 export interface ScanReport {
@@ -49,6 +52,10 @@ export interface AvailableDirectory {
 export interface AvailablePathsResponse {
   root: string
   root_mounted: boolean
+  sub: string
+  abs_path: string
+  current_registered: boolean
+  current_mounted: boolean
   directories: AvailableDirectory[]
 }
 
@@ -56,8 +63,9 @@ export function listLibraries() {
   return apiFetch<ListLibrariesResponse>('/libraries')
 }
 
-export function listAvailablePaths() {
-  return apiFetch<AvailablePathsResponse>('/libraries/available-paths')
+export function listAvailablePaths(sub: string = '') {
+  const qs = sub ? `?sub=${encodeURIComponent(sub)}` : ''
+  return apiFetch<AvailablePathsResponse>(`/libraries/available-paths${qs}`)
 }
 
 export function getLibrary(id: number) {

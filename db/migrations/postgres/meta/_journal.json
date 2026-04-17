@@ -169,6 +169,13 @@
       "when": 1776600000000,
       "tag": "0022_photo_libraries",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1776700000000,
+      "tag": "0023_library_auto_albums",
+      "breakpoints": true
     }
   ]
 }

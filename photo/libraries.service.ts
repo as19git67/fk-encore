@@ -18,7 +18,7 @@ import crypto from "crypto";
 import { eq, and, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbFirst, dbAll, dbExec, dbInsertReturning } from "../db/adapter";
-import { photoLibraries, photos } from "../db/schema";
+import { photoLibraries, photos, albums, albumPhotos } from "../db/schema";
 import {
   UPLOAD_DIR,
   SUPPORTED_EXTENSIONS,
@@ -45,6 +45,7 @@ export interface PhotoLibrary {
   path: string;
   import_mode: LibraryImportMode;
   auto_import: boolean;
+  auto_albums: boolean;
   created_at: string | null;
   last_scan_at: string | null;
 }
@@ -54,6 +55,7 @@ export interface CreateLibraryRequest {
   path: string;
   import_mode?: LibraryImportMode;
   auto_import?: boolean;
+  auto_albums?: boolean;
 }
 
 export interface UpdateLibraryRequest {
@@ -61,6 +63,7 @@ export interface UpdateLibraryRequest {
   name?: string;
   import_mode?: LibraryImportMode;
   auto_import?: boolean;
+  auto_albums?: boolean;
 }
 
 export interface ScanReport {
@@ -145,6 +148,14 @@ function readMountPoints(): Set<string> {
 export interface LibraryRootInfo {
   root: string;
   root_mounted: boolean;
+  /** Currently-browsed location relative to `root`. Empty string = at root. */
+  sub: string;
+  /** Absolute path of the currently-browsed location. */
+  abs_path: string;
+  /** True when the current location itself is already registered as a library. */
+  current_registered: boolean;
+  /** True when the current location is a real mount point (per /proc/mountinfo). */
+  current_mounted: boolean;
   directories: AvailableDirectory[];
 }
 
@@ -154,24 +165,36 @@ export interface LibraryRootInfo {
  * directories are returned too, but flagged so the UI can disable them. Each
  * entry also carries a `mounted` flag derived from /proc/self/mountinfo so the
  * admin can tell at a glance which sub-directories are real volume mounts.
+ *
+ * Pass `sub` (a path relative to PHOTO_LIBRARIES_ROOT) to list sub-directories
+ * of a deeper location. Sub paths are validated with `resolveLibraryPath` and
+ * must stay inside the root.
  */
-export async function listAvailableDirectories(): Promise<AvailableDirectory[]> {
-  const info = await listLibraryRootInfo();
-  return info.directories;
-}
-
-export async function listLibraryRootInfo(): Promise<LibraryRootInfo> {
+export async function listLibraryRootInfo(sub: string = ""): Promise<LibraryRootInfo> {
   const mountPoints = readMountPoints();
   const rootMounted = mountPoints.has(PHOTO_LIBRARIES_ROOT);
 
+  const normalizedSub = sub ? sub.replace(/^\/+|\/+$/g, "") : "";
+  const currentAbs = normalizedSub
+    ? resolveLibraryPath(normalizedSub)
+    : PHOTO_LIBRARIES_ROOT;
+
   let entries: fs.Dirent[];
   try {
-    entries = await fs.promises.readdir(PHOTO_LIBRARIES_ROOT, { withFileTypes: true });
+    entries = await fs.promises.readdir(currentAbs, { withFileTypes: true });
   } catch (err: any) {
     if (err?.code === "ENOENT") {
-      return { root: PHOTO_LIBRARIES_ROOT, root_mounted: rootMounted, directories: [] };
+      return {
+        root: PHOTO_LIBRARIES_ROOT,
+        root_mounted: rootMounted,
+        sub: normalizedSub,
+        abs_path: currentAbs,
+        current_registered: false,
+        current_mounted: mountPoints.has(currentAbs),
+        directories: [],
+      };
     }
-    throw new Error(`PHOTO_LIBRARIES_ROOT unreadable: ${err?.message ?? err}`);
+    throw new Error(`directory unreadable: ${err?.message ?? err}`);
   }
 
   const taken = new Set(
@@ -183,17 +206,26 @@ export async function listLibraryRootInfo(): Promise<LibraryRootInfo> {
   const dirs: AvailableDirectory[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
-    const abs = path.join(PHOTO_LIBRARIES_ROOT, entry.name);
+    const abs = path.join(currentAbs, entry.name);
+    const rel = normalizedSub ? `${normalizedSub}/${entry.name}` : entry.name;
     dirs.push({
       name: entry.name,
-      rel_path: entry.name,
+      rel_path: rel,
       abs_path: abs,
       already_registered: taken.has(abs),
       mounted: mountPoints.has(abs),
     });
   }
   dirs.sort((a, b) => a.name.localeCompare(b.name));
-  return { root: PHOTO_LIBRARIES_ROOT, root_mounted: rootMounted, directories: dirs };
+  return {
+    root: PHOTO_LIBRARIES_ROOT,
+    root_mounted: rootMounted,
+    sub: normalizedSub,
+    abs_path: currentAbs,
+    current_registered: taken.has(currentAbs),
+    current_mounted: mountPoints.has(currentAbs),
+    directories: dirs,
+  };
 }
 
 // ---------- CRUD ----------
@@ -206,6 +238,7 @@ function rowToLibrary(row: typeof photoLibraries.$inferSelect): PhotoLibrary {
     path: row.path,
     import_mode: row.import_mode as LibraryImportMode,
     auto_import: row.auto_import,
+    auto_albums: row.auto_albums,
     created_at: row.created_at ?? null,
     last_scan_at: row.last_scan_at ?? null,
   };
@@ -233,6 +266,7 @@ export async function createLibrary(
         path: abs,
         import_mode: req.import_mode ?? "link",
         auto_import: req.auto_import ?? false,
+        auto_albums: req.auto_albums ?? false,
       })
       .returning()
   );
@@ -261,6 +295,7 @@ export async function updateLibrary(req: UpdateLibraryRequest): Promise<PhotoLib
   if (req.name !== undefined) updates.name = req.name.trim();
   if (req.import_mode !== undefined) updates.import_mode = req.import_mode;
   if (req.auto_import !== undefined) updates.auto_import = req.auto_import;
+  if (req.auto_albums !== undefined) updates.auto_albums = req.auto_albums;
 
   if (Object.keys(updates).length > 0) {
     await dbExec(db.update(photoLibraries).set(updates).where(eq(photoLibraries.id, req.id)));
@@ -296,6 +331,51 @@ export type ImportOutcome =
   | { kind: "imported"; photoId: number }
   | { kind: "skipped_duplicate" }
   | { kind: "skipped_unsupported" };
+
+/**
+ * Derive the album name from the file's location relative to the library root.
+ * Returns the first path segment, or null if the file sits directly in the
+ * library root (in which case no auto-album should be created).
+ */
+function deriveAutoAlbumName(libraryPath: string, absFilePath: string): string | null {
+  const rel = path.relative(libraryPath, path.dirname(absFilePath));
+  if (!rel || rel === "." || rel.startsWith("..")) return null;
+  const first = rel.split(path.sep)[0];
+  return first?.trim() ? first : null;
+}
+
+/**
+ * Find or create an album with the given name for a specific user, then add
+ * the photo to it. Idempotent: calling twice for the same (album, photo) is a
+ * no-op thanks to the album_photos primary key.
+ */
+async function attachToAutoAlbum(
+  ownerId: number,
+  albumName: string,
+  photoId: number
+): Promise<void> {
+  let album = await dbFirst<{ id: number }>(
+    db
+      .select({ id: albums.id })
+      .from(albums)
+      .where(and(eq(albums.user_id, ownerId), eq(albums.name, albumName)))
+  );
+  if (!album) {
+    album = await dbInsertReturning<{ id: number }>(
+      db
+        .insert(albums)
+        .values({ user_id: ownerId, name: albumName })
+        .returning({ id: albums.id })
+    );
+  }
+  // ON CONFLICT DO NOTHING keeps the call idempotent across re-scans.
+  await dbExec(
+    db
+      .insert(albumPhotos)
+      .values({ album_id: album!.id, photo_id: photoId, added_by_user_id: ownerId })
+      .onConflictDoNothing()
+  );
+}
 
 /**
  * Import a single file from a library. Idempotent: a second call for the same
@@ -382,6 +462,17 @@ export async function importFile(
       })
       .returning()
   );
+
+  if (library.auto_albums) {
+    const albumName = deriveAutoAlbumName(library.path, absFilePath);
+    if (albumName) {
+      try {
+        await attachToAutoAlbum(ownerId, albumName, row!.id);
+      } catch (err) {
+        console.error("[libraries] auto-album attach failed:", err);
+      }
+    }
+  }
 
   enqueuePhotoScan(row!.id, ownerId)
     .then(() => triggerWorkers())

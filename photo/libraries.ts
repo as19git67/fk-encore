@@ -6,6 +6,7 @@
  */
 
 import { api, APIError } from "encore.dev/api";
+import type { Query } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import * as libs from "./libraries.service";
@@ -60,9 +61,13 @@ export const listLibraries = api(
 
 export const listAvailablePaths = api(
   { expose: true, method: "GET", path: "/libraries/available-paths", auth: true },
-  async (): Promise<LibraryRootInfo> => {
+  async ({ sub }: { sub?: Query<string> }): Promise<LibraryRootInfo> => {
     checkPermission();
-    return await libs.listLibraryRootInfo();
+    try {
+      return await libs.listLibraryRootInfo(sub ?? "");
+    } catch (err) {
+      toApiError(err);
+    }
   }
 );
 

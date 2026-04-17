@@ -63,9 +63,16 @@ Register a new library.
   "name": "Family archive",
   "path": "archive",             // relative to PHOTO_LIBRARIES_ROOT, or absolute under it
   "import_mode": "link",         // "link" (default) or "move"
-  "auto_import": true             // optional; starts a chokidar watcher
+  "auto_import": true,           // optional; starts a chokidar watcher
+  "auto_albums": false            // optional; see "Auto-albums" below
 }
 ```
+
+The `path` may point to any directory below `PHOTO_LIBRARIES_ROOT`, not only
+a top-level mount. Use `GET /libraries/available-paths?sub=<rel-path>` to walk
+the tree step by step: the response lists the sub-directories of the current
+level, each annotated with whether it is already registered and whether it is
+backed by its own mount.
 
 Returns the created row. A watcher is booted immediately when
 `auto_import = true`.
@@ -80,8 +87,10 @@ Fetch one library.
 
 ### `PATCH /libraries/:id`
 
-Update name, import mode or auto-import flag. The watcher is re-synced to
-match the new configuration.
+Update name, import mode, `auto_import` or `auto_albums`. The watcher is
+re-synced to match the new configuration. Toggling `auto_albums` only affects
+future imports; already-imported photos are not retroactively sorted into
+albums.
 
 ### `DELETE /libraries/:id`
 
@@ -121,6 +130,15 @@ Only meaningful for `link`-mode libraries. Returns `{ "removed": <n> }`.
   every library, drops orphaned `link` rows, and runs a fresh scan to pick
   up anything the watcher missed (service restarts, network shares without
   inotify, etc.). Implemented with Encore's declarative `CronJob`.
+- **Auto-albums** — when `auto_albums = true`, every imported photo that sits
+  in a sub-directory of the library root is added to an album named after the
+  **first path segment** relative to the library root. Photos located directly
+  in the library root are not auto-albumed. The album is owned by the library
+  owner and created on first use; subsequent imports into the same sub-tree
+  reuse it. Adding a photo to an album is idempotent, so re-scans and watcher
+  events don't produce duplicates. Example: with library root
+  `/mnt/libraries/archive`, the file `archive/2024/holidays/IMG_0001.jpg`
+  lands in album `2024`.
 
 ## Data model
 
@@ -142,6 +160,14 @@ CREATE TABLE photo_libraries (
 ALTER TABLE photos
   ADD COLUMN library_id    INTEGER REFERENCES photo_libraries(id) ON DELETE SET NULL,
   ADD COLUMN external_path TEXT;
+```
+
+Migration `0023_library_auto_albums.sql` adds the opt-in flag for the
+auto-album feature:
+
+```sql
+ALTER TABLE photo_libraries
+  ADD COLUMN auto_albums BOOLEAN NOT NULL DEFAULT false;
 ```
 
 `photos.filename` for link-imported rows follows the synthetic form
