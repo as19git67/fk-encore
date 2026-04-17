@@ -981,3 +981,8 @@ VPN:
 Build:
 - encore build docker: Build portable Docker image (--base string: Define base image, --push: Push to remote repository)
 </encore_cli_reference>
+
+## Aktive Feature-Pläne
+
+- **Dokumentenverwaltung** (neues Modul neben Fotos, lokale KI-Klassifikation via llm-service): `/root/.claude/plans/ein-weiteres-modul-in-peaceful-robin.md`. Wird iterativ in Etappen umgesetzt (DB/Seed → llm-service → documents-Service → Watcher → Suche → Frontend → Infra).
+
