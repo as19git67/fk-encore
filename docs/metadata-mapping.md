@@ -49,7 +49,7 @@ derivation) but nothing stores them permanently.
 | `latitude`         | `ExifMetadata.latitude`                                                                                 |
 | `longitude`        | `ExifMetadata.longitude`                                                                                |
 | `description`      | `combineDescription(meta)` — see below                                                                  |
-| `keywords[]`       | `ExifMetadata.keywords` — plus `"Rating N"` (1..5) appended when `ExifMetadata.rating` is set (case-insensitive de-dup) |
+| `keywords[]`       | `ExifMetadata.keywords` — plus `"Rating-N"` (1..5) appended when `ExifMetadata.rating` is set (case-insensitive de-dup). The hyphen keeps the label a single token so the natural search tokeniser doesn't split it. |
 | `location_city`    | `ExifMetadata.city` (only if any of `city`/`state`/`country` is set)                                    |
 | `location_country` | `ExifMetadata.country`                                                                                  |
 | `location_name`    | derived: `"<city \| state>, <country>"` (whichever components are present)                              |
@@ -86,7 +86,7 @@ no column in `photos`. They are effectively discarded after parsing:
   `location_name` / `location_short`, but not stored as its own column)
 - `rating` — XMP `xmp:Rating`; surfaced indirectly in two ways instead of
   a dedicated column: (1) injected into `photos.keywords` as
-  `"Rating 1"`…`"Rating 5"` so it is searchable as a normal tag, and
+  `"Rating-1"`…`"Rating-5"` so it is searchable as a normal tag, and
   (2) used by library imports to auto-favourite photos whose rating meets
   or exceeds a per-library threshold
   (`photo_libraries.favorite_rating_threshold`, see

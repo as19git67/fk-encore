@@ -166,8 +166,8 @@ Status: April 2026 (updated)
 | EXIF extraction | ✅ 9 prioritized DateTime fields | ✅ |
 | Edit date manually | ✅ | ✅ |
 | XMP sidecar read/write | ✅ | ❌ |
-| Tag import (XMP/IPTC) | ✅ | 🔶 IPTC extraction at upload (keywords, description, dates, location, copyright) + XMP rating → `Rating N` keyword |
-| Ratings | ✅ | 🔶 XMP rating imported as `Rating 1`…`Rating 5` tag; per-library threshold auto-favourites rated photos |
+| Tag import (XMP/IPTC) | ✅ | 🔶 IPTC extraction at upload (keywords, description, dates, location, copyright) + XMP rating → `Rating-N` keyword |
+| Ratings | ✅ | 🔶 XMP rating imported as `Rating-1`…`Rating-5` tag; per-library threshold auto-favourites rated photos |
 | Descriptions | ✅ | ✅ |
 | Metadata refresh / reindex | ✅ Via jobs | ✅ Individual and bulk |
 
@@ -194,7 +194,7 @@ Status: April 2026 (updated)
 | Archive (hide from timeline) | ✅ | 🔶 Visible/hidden system |
 | Favorites | ✅ Global | 🔶 Per album and user |
 | Trash (soft delete, 30 days) | ✅ | ❌ |
-| Ratings (1-5 stars) | ✅ | 🔶 Imported from XMP as `Rating N` tag; auto-favourite via per-library threshold |
+| Ratings (1-5 stars) | ✅ | 🔶 Imported from XMP as `Rating-N` tag; auto-favourite via per-library threshold |
 | Hierarchical tags | ✅ | ❌ |
 
 ## 14. Miscellaneous

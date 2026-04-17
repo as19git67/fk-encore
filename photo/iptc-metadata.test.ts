@@ -303,15 +303,15 @@ describe("parseXmpRating", () => {
 });
 
 describe("ratingKeyword / mergeRatingKeyword", () => {
-  it("builds the 'Rating N' label for valid star counts only", () => {
-    expect(ratingKeyword(3)).toBe("Rating 3");
+  it("builds the 'Rating-N' label for valid star counts only", () => {
+    expect(ratingKeyword(3)).toBe("Rating-3");
     expect(ratingKeyword(null)).toBeNull();
     expect(ratingKeyword(0)).toBeNull();
     expect(ratingKeyword(6)).toBeNull();
   });
 
   it("appends the derived tag to the existing keyword list", () => {
-    expect(mergeRatingKeyword(["urlaub"], 4)).toEqual(["urlaub", "Rating 4"]);
+    expect(mergeRatingKeyword(["urlaub"], 4)).toEqual(["urlaub", "Rating-4"]);
   });
 
   it("leaves the list untouched when no rating is present", () => {
@@ -320,7 +320,7 @@ describe("ratingKeyword / mergeRatingKeyword", () => {
   });
 
   it("de-duplicates case-insensitively so re-imports stay stable", () => {
-    expect(mergeRatingKeyword(["urlaub", "rating 4"], 4)).toEqual(["urlaub", "rating 4"]);
+    expect(mergeRatingKeyword(["urlaub", "rating-4"], 4)).toEqual(["urlaub", "rating-4"]);
   });
 });
 

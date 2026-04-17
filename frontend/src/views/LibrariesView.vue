@@ -551,7 +551,7 @@ onMounted(loadData)
           />
           <small class="hint-small">
             0 deaktiviert die automatische Favoriten-Markierung. Beim Import wird
-            zusätzlich ein Tag <code>Rating 1</code>…<code>Rating 5</code> aus
+            zusätzlich ein Tag <code>Rating-1</code>…<code>Rating-5</code> aus
             dem XMP-Rating übernommen.
           </small>
         </div>

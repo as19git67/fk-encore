@@ -874,17 +874,19 @@ export function parseXmpRating(v: unknown): number | null {
 }
 
 /**
- * Build the "Rating N" keyword used to expose a photo's star rating as a tag.
- * Returns null when `rating` is falsy so callers can just spread it into the
- * keyword array.
+ * Build the "Rating-N" keyword used to expose a photo's star rating as a tag.
+ * The hyphen keeps the label a single whitespace-free token so searches
+ * entered as "Rating-3" aren't tokenised into ["Rating", "3"] by the natural
+ * query parser. Returns null when `rating` is falsy so callers can just
+ * spread it into the keyword array.
  */
 export function ratingKeyword(rating: number | null | undefined): string | null {
   if (!rating || rating < 1 || rating > 5) return null;
-  return `Rating ${rating}`;
+  return `Rating-${rating}`;
 }
 
 /**
- * Append the "Rating N" keyword derived from `rating` to an existing keyword
+ * Append the "Rating-N" keyword derived from `rating` to an existing keyword
  * list. Case-insensitive de-dup keeps re-imports stable and respects any
  * tooling that already wrote an identical tag into the file itself.
  */
@@ -5028,14 +5030,10 @@ export async function searchPhotosNaturalLogic(
   // find a photo whose description is "Mariens 30. Geburtstag im Garten" or
   // whose keywords contain "Geburtstag" – CLIP alone wouldn't reliably get
   // there.
-  // Keep tokens of length >= 2 to suppress noise like "a"/"e", but always keep
-  // pure-digit tokens so queries such as "Rating 3" (→ ["Rating", "3"]) still
-  // narrow down to the specific rating keyword instead of degenerating to all
-  // rated photos.
   const descriptionTokens = parsed.semanticQuery
     .split(/\s+/)
     .map(t => t.trim())
-    .filter(t => t.length >= 2 || /^\d+$/.test(t));
+    .filter(t => t.length >= 2);
   const buildTextMatchConditions = () => {
     const base: any[] = [
       eq(photos.user_id, userId),

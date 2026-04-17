@@ -168,7 +168,8 @@ Only meaningful for `link`-mode libraries. Returns `{ "removed": <n> }`.
   meets or exceeds the threshold has its per-user curation status flipped to
   `favorite` for the library owner. Value `0` (default) disables the
   behaviour. The full star value is additionally appended as a keyword
-  (`Rating 1` … `Rating 5`) so the rating is searchable as a regular tag;
+  (`Rating-1` … `Rating-5`, hyphenated so the natural search treats it as a
+  single token) so the rating is searchable as a regular tag;
   this keyword injection happens on every import regardless of the
   threshold. See also [metadata mapping](./metadata-mapping.md).
 
