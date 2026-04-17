@@ -174,7 +174,14 @@ export interface LibraryRootInfo {
  */
 export async function listLibraryRootInfo(sub: string = ""): Promise<LibraryRootInfo> {
   const mountPoints = readMountPoints();
-  const rootMounted = mountPoints.has(PHOTO_LIBRARIES_ROOT);
+  const rootPrefix = PHOTO_LIBRARIES_ROOT.endsWith(path.sep)
+    ? PHOTO_LIBRARIES_ROOT
+    : PHOTO_LIBRARIES_ROOT + path.sep;
+  // Either the root itself is a mount point, or at least one volume is
+  // mounted somewhere below it — the recommended per-library layout.
+  const rootMounted =
+    mountPoints.has(PHOTO_LIBRARIES_ROOT) ||
+    [...mountPoints].some((mp) => mp.startsWith(rootPrefix));
 
   const normalizedSub = sub ? sub.replace(/^\/+|\/+$/g, "") : "";
   const currentAbs = normalizedSub

@@ -465,9 +465,9 @@ onMounted(loadData)
             Beliebig tief unterhalb von
             <code>{{ availableRoot || 'PHOTO_LIBRARIES_ROOT' }}</code>.
             <span v-if="!loadingPaths">
-              <span v-if="rootMounted" class="mount-ok">Volume-Mount auf Root erkannt.</span>
+              <span v-if="rootMounted" class="mount-ok">Volume-Mount unterhalb Root erkannt.</span>
               <span v-else class="mount-warn">
-                Kein Volume-Mount auf Root erkannt — ggf. in der Docker-Compose
+                Kein Volume-Mount unterhalb Root erkannt — ggf. in der Docker-Compose
                 nicht konfiguriert.
               </span>
             </span>
