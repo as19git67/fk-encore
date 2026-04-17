@@ -95,11 +95,14 @@ actor APIClient {
 
     // MARK: - Raw Upload (matching web frontend pattern: raw body + X-File-Name header)
 
-    func uploadPhoto(data: Data, filename: String, mimeType: String) async throws -> Photo {
+    func uploadPhoto(data: Data, filename: String, mimeType: String, isFavorite: Bool = false) async throws -> Photo {
         var request = URLRequest(url: buildURL(path: "/photos"))
         request.httpMethod = "POST"
         request.setValue(mimeType, forHTTPHeaderField: "Content-Type")
         request.setValue(filename, forHTTPHeaderField: "X-File-Name")
+        if isFavorite {
+            request.setValue("true", forHTTPHeaderField: "X-Is-Favorite")
+        }
         request.httpBody = data
         applyAuth(&request)
         return try await performWithRefresh(request)

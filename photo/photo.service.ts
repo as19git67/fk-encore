@@ -1213,7 +1213,8 @@ export async function uploadPhotoStream(
   userId: number,
   stream: IncomingMessage,
   originalName: string,
-  mimeType: string
+  mimeType: string,
+  isFavorite: boolean = false
 ): Promise<Photo> {
   if (!SUPPORTED_MIME_TYPES.has(mimeType.toLowerCase().split(";")[0].trim())) {
     throw new Error("UNSUPPORTED_FILE_TYPE");
@@ -1279,8 +1280,8 @@ export async function uploadPhotoStream(
     }).returning()
   );
 
-  // Mark as favourite if XMP Rating >= 4
-  if (exifMeta.rating !== null && exifMeta.rating >= 4) {
+  // Mark as favourite if the client flagged it (X-Is-Favorite header) or if XMP Rating >= 4
+  if (isFavorite || (exifMeta.rating !== null && exifMeta.rating >= 4)) {
     await dbExec(
       db.insert(photoCuration)
         .values({ user_id: userId, photo_id: row!.id, status: "favorite" })
