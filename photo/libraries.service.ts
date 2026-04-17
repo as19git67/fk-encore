@@ -71,6 +71,7 @@ export interface ScanReport {
   imported: number;
   skipped_duplicate: number;
   skipped_unsupported: number;
+  skipped_empty: number;
   errors: number;
 }
 
@@ -330,7 +331,8 @@ async function sha256OfFile(filePath: string): Promise<{ digest: string; size: n
 export type ImportOutcome =
   | { kind: "imported"; photoId: number }
   | { kind: "skipped_duplicate" }
-  | { kind: "skipped_unsupported" };
+  | { kind: "skipped_unsupported" }
+  | { kind: "skipped_empty" };
 
 /**
  * Derive the album name from the file's location relative to the library root.
@@ -428,6 +430,11 @@ export async function importFile(
   const ownerId = library.user_id;
 
   const { digest, size } = await sha256OfFile(absFilePath);
+
+  // Skip 0-byte files. They show up when the watcher fires before a network
+  // copy is finished. The hourly reconcile cron will pick the file up later
+  // once it actually has content.
+  if (size === 0) return { kind: "skipped_empty" };
 
   // Same hash for the same owner → already imported.
   const dup = await dbFirst<{ id: number }>(
@@ -545,6 +552,7 @@ export async function scanLibrary(libraryId: number): Promise<ScanReport> {
     imported: 0,
     skipped_duplicate: 0,
     skipped_unsupported: 0,
+    skipped_empty: 0,
     errors: 0,
   };
 
@@ -554,6 +562,7 @@ export async function scanLibrary(libraryId: number): Promise<ScanReport> {
       const outcome = await importFile(library, file);
       if (outcome.kind === "imported") report.imported++;
       else if (outcome.kind === "skipped_duplicate") report.skipped_duplicate++;
+      else if (outcome.kind === "skipped_empty") report.skipped_empty++;
       else report.skipped_unsupported++;
     } catch (err: any) {
       report.errors++;

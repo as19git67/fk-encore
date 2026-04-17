@@ -43,7 +43,7 @@ export async function startWatcher(library: PhotoLibrary): Promise<void> {
     },
     ignoreInitial: true,
     persistent: true,
-    awaitWriteFinish: { stabilityThreshold: 2000, pollInterval: 200 },
+    awaitWriteFinish: { stabilityThreshold: 10000, pollInterval: 200 },
   });
 
   watcher.on("add", async (file) => {

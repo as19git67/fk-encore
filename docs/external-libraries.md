@@ -110,9 +110,14 @@ Returns a scan report:
   "imported": 17,
   "skipped_duplicate": 1217,
   "skipped_unsupported": 0,
+  "skipped_empty": 0,
   "errors": 0
 }
 ```
+
+`skipped_empty` counts files that were 0 bytes at scan time — typically a
+network copy still in flight. The hourly reconcile cron picks them up on the
+next pass.
 
 ### `POST /libraries/:id/reconcile`
 

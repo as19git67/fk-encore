@@ -34,6 +34,7 @@ export interface ScanReport {
   imported: number
   skipped_duplicate: number
   skipped_unsupported: number
+  skipped_empty: number
   errors: number
 }
 

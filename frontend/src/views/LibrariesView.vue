@@ -222,6 +222,7 @@ async function runScan(lib: PhotoLibrary) {
     info.value = `Scan "${lib.name}": ${report.imported} importiert, `
       + `${report.skipped_duplicate} Duplikate, `
       + `${report.skipped_unsupported} nicht unterstützt, `
+      + `${report.skipped_empty} leer, `
       + `${report.errors} Fehler (${report.scanned} insgesamt).`
     await loadData()
   } catch (err: any) {
