@@ -5028,10 +5028,14 @@ export async function searchPhotosNaturalLogic(
   // find a photo whose description is "Mariens 30. Geburtstag im Garten" or
   // whose keywords contain "Geburtstag" – CLIP alone wouldn't reliably get
   // there.
+  // Keep tokens of length >= 2 to suppress noise like "a"/"e", but always keep
+  // pure-digit tokens so queries such as "Rating 3" (→ ["Rating", "3"]) still
+  // narrow down to the specific rating keyword instead of degenerating to all
+  // rated photos.
   const descriptionTokens = parsed.semanticQuery
     .split(/\s+/)
     .map(t => t.trim())
-    .filter(t => t.length >= 2);
+    .filter(t => t.length >= 2 || /^\d+$/.test(t));
   const buildTextMatchConditions = () => {
     const base: any[] = [
       eq(photos.user_id, userId),
