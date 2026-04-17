@@ -532,7 +532,9 @@ onMounted(loadData)
         <div class="field row">
           <ToggleSwitch v-model="form.auto_albums" input-id="lib-auto-albums" />
           <label for="lib-auto-albums">
-            Auto-Alben aus Unterverzeichnissen (voller Unterpfad = Albumname)
+            Auto-Alben aus Unterverzeichnissen (voller Unterpfad = Albumname;
+            Dateien direkt im Library-Wurzelverzeichnis kommen in ein Album
+            mit dem Library-Namen)
           </label>
         </div>
 

@@ -371,12 +371,23 @@ export type ImportOutcome =
 /**
  * Derive the album name from the file's location relative to the library root.
  * Returns the full relative sub-path (using forward slashes), so a file at
- * `2020/2020-01/img.jpg` ends up in album "2020/2020-01". Files directly in the
- * library root return null — no auto-album is created for those.
+ * `2020/2020-01/img.jpg` ends up in album "2020/2020-01". Files directly in
+ * the library root fall back to `fallbackName` (typically the library's own
+ * name) so libraries without any sub-directory structure still get a single
+ * catch-all album. Returns null when the file escapes the library root or no
+ * fallback was provided.
  */
-function deriveAutoAlbumName(libraryPath: string, absFilePath: string): string | null {
+function deriveAutoAlbumName(
+  libraryPath: string,
+  absFilePath: string,
+  fallbackName: string
+): string | null {
   const rel = path.relative(libraryPath, path.dirname(absFilePath));
-  if (!rel || rel === "." || rel.startsWith("..")) return null;
+  if (rel.startsWith("..")) return null;
+  if (!rel || rel === ".") {
+    const trimmed = fallbackName.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
   // Normalise to forward slashes so the album name is platform-independent.
   const normalised = rel.split(path.sep).filter(Boolean).join("/");
   return normalised || null;
@@ -567,7 +578,7 @@ export async function importFile(
   }
 
   if (library.auto_albums) {
-    const albumName = deriveAutoAlbumName(library.path, absFilePath);
+    const albumName = deriveAutoAlbumName(library.path, absFilePath, library.name);
     if (albumName) {
       try {
         await attachToAutoAlbum(ownerId, albumName, row!.id);
