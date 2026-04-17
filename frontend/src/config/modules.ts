@@ -57,6 +57,37 @@ export const modules: ModuleConfig[] = [
     ],
   },
   {
+    id: 'dokumente',
+    label: 'Dokumente',
+    icon: 'pi pi-file-pdf',
+    basePath: '/dokumente',
+    permission: 'documents.view',
+    routes: [
+      {
+        path: '',
+        name: 'dokumente-list',
+        component: () => import('../views/DocumentsView.vue'),
+        meta: { permission: 'documents.view' },
+      },
+      {
+        path: 'upload',
+        name: 'dokumente-upload',
+        component: () => import('../views/DocumentUploadView.vue'),
+        meta: { permission: 'documents.upload' },
+      },
+      {
+        path: ':id',
+        name: 'dokumente-detail',
+        component: () => import('../views/DocumentDetailView.vue'),
+        meta: { permission: 'documents.view' },
+      },
+    ],
+    menuItems: [
+      { label: 'Alle Dokumente', icon: 'pi pi-file', routeName: 'dokumente-list', permission: 'documents.view' },
+      { label: 'Hochladen', icon: 'pi pi-upload', routeName: 'dokumente-upload', permission: 'documents.upload' },
+    ],
+  },
+  {
     id: 'admin',
     label: 'Admin',
     icon: 'pi pi-cog',
