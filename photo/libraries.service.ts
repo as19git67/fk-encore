@@ -604,41 +604,69 @@ async function* walkSupportedFiles(root: string): AsyncGenerator<string> {
   }
 }
 
-export async function scanLibrary(libraryId: number): Promise<ScanReport> {
-  const library = await getLibrary(libraryId);
-  if (!library) throw new Error(`library ${libraryId} not found`);
-  ensureReadableDirectory(library.path);
+/**
+ * In-process locks keyed by library id. Prevents two overlapping scans of the
+ * same library from walking the same files in parallel (which would double the
+ * I/O load and race on inserts that only dedupe via the hash unique index).
+ *
+ * Only guards against a single-instance backend — for a multi-replica setup a
+ * DB-backed advisory lock would be the right place to add protection.
+ */
+const activeScans = new Map<number, Promise<ScanReport>>();
 
-  const report: ScanReport = {
-    scanned: 0,
-    imported: 0,
-    skipped_duplicate: 0,
-    skipped_unsupported: 0,
-    skipped_empty: 0,
-    errors: 0,
-  };
-
-  for await (const file of walkSupportedFiles(library.path)) {
-    report.scanned++;
-    try {
-      const outcome = await importFile(library, file);
-      if (outcome.kind === "imported") report.imported++;
-      else if (outcome.kind === "skipped_duplicate") report.skipped_duplicate++;
-      else if (outcome.kind === "skipped_empty") report.skipped_empty++;
-      else report.skipped_unsupported++;
-    } catch (err: any) {
-      report.errors++;
-      console.error(`[libraries] import failed for ${file}:`, err?.message ?? err);
-    }
+export class ScanAlreadyRunningError extends Error {
+  constructor(libraryId: number) {
+    super(`scan already running for library ${libraryId}`);
+    this.name = "ScanAlreadyRunningError";
   }
+}
 
-  await dbExec(
-    db
-      .update(photoLibraries)
-      .set({ last_scan_at: new Date().toISOString() })
-      .where(eq(photoLibraries.id, libraryId))
-  );
-  return report;
+export async function scanLibrary(libraryId: number): Promise<ScanReport> {
+  if (activeScans.has(libraryId)) {
+    throw new ScanAlreadyRunningError(libraryId);
+  }
+  const run = (async () => {
+    const library = await getLibrary(libraryId);
+    if (!library) throw new Error(`library ${libraryId} not found`);
+    ensureReadableDirectory(library.path);
+
+    const report: ScanReport = {
+      scanned: 0,
+      imported: 0,
+      skipped_duplicate: 0,
+      skipped_unsupported: 0,
+      skipped_empty: 0,
+      errors: 0,
+    };
+
+    for await (const file of walkSupportedFiles(library.path)) {
+      report.scanned++;
+      try {
+        const outcome = await importFile(library, file);
+        if (outcome.kind === "imported") report.imported++;
+        else if (outcome.kind === "skipped_duplicate") report.skipped_duplicate++;
+        else if (outcome.kind === "skipped_empty") report.skipped_empty++;
+        else report.skipped_unsupported++;
+      } catch (err: any) {
+        report.errors++;
+        console.error(`[libraries] import failed for ${file}:`, err?.message ?? err);
+      }
+    }
+
+    await dbExec(
+      db
+        .update(photoLibraries)
+        .set({ last_scan_at: new Date().toISOString() })
+        .where(eq(photoLibraries.id, libraryId))
+    );
+    return report;
+  })();
+  activeScans.set(libraryId, run);
+  try {
+    return await run;
+  } finally {
+    activeScans.delete(libraryId);
+  }
 }
 
 /**
