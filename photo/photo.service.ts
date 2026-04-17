@@ -795,6 +795,12 @@ export interface ExifMetadata {
   state: string | null;
   /** IPTC Country-PrimaryLocationName. */
   country: string | null;
+  /**
+   * XMP `xmp:Rating` — integer 1..5 for a star rating, or `null` when the tag is
+   * absent. `-1` (rejected) and `0` (unrated) are normalised to `null` so they
+   * are indistinguishable from a missing tag downstream.
+   */
+  rating: number | null;
 }
 
 /**
@@ -852,6 +858,44 @@ function asString(v: unknown): string | null {
   return t.length > 0 ? t : null;
 }
 
+/**
+ * Normalise XMP `xmp:Rating` to an integer 1..5. Lightroom etc. write the rating
+ * as either a number or a stringified number; `-1` means "rejected" and `0`
+ * means "unrated" — both collapse to `null` so callers only see actual stars.
+ * Exported for unit tests.
+ */
+export function parseXmpRating(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  const n = typeof v === "number" ? v : typeof v === "string" ? Number(v.trim()) : NaN;
+  if (!Number.isFinite(n)) return null;
+  const r = Math.round(n);
+  if (r < 1 || r > 5) return null;
+  return r;
+}
+
+/**
+ * Build the "Rating N" keyword used to expose a photo's star rating as a tag.
+ * Returns null when `rating` is falsy so callers can just spread it into the
+ * keyword array.
+ */
+export function ratingKeyword(rating: number | null | undefined): string | null {
+  if (!rating || rating < 1 || rating > 5) return null;
+  return `Rating ${rating}`;
+}
+
+/**
+ * Append the "Rating N" keyword derived from `rating` to an existing keyword
+ * list. Case-insensitive de-dup keeps re-imports stable and respects any
+ * tooling that already wrote an identical tag into the file itself.
+ */
+export function mergeRatingKeyword(keywords: string[], rating: number | null): string[] {
+  const extra = ratingKeyword(rating);
+  if (!extra) return keywords;
+  const lower = extra.toLowerCase();
+  if (keywords.some((k) => k.toLowerCase() === lower)) return keywords;
+  return [...keywords, extra];
+}
+
 function asStringArray(v: unknown): string[] {
   if (Array.isArray(v)) {
     return v
@@ -889,6 +933,7 @@ export async function getExifMetadata(filePath: string): Promise<ExifMetadata> {
     city: null,
     state: null,
     country: null,
+    rating: null,
   };
   try {
     const data = await exifr.parse(filePath, { gps: true, xmp: true, iptc: true });
@@ -938,6 +983,7 @@ export async function getExifMetadata(filePath: string): Promise<ExifMetadata> {
       asString(data?.["Country-PrimaryLocationName"]) ??
       asString(data?.Country) ??
       null;
+    const rating = parseXmpRating(data?.Rating ?? data?.rating);
     return {
       takenAt,
       latitude: data?.latitude ?? null,
@@ -952,6 +998,7 @@ export async function getExifMetadata(filePath: string): Promise<ExifMetadata> {
       city,
       state,
       country,
+      rating,
     };
   } catch (err) {
     console.error("Error parsing EXIF data:", err);
@@ -1207,6 +1254,7 @@ export async function uploadPhotoStream(
   const descriptionValue = combineDescription(exifMeta);
   // Pre-fill location from IPTC when present, sparing us a Nominatim call.
   const iptcLoc = iptcLocationUpdate(exifMeta);
+  const uploadKeywords = mergeRatingKeyword(exifMeta.keywords, exifMeta.rating);
 
   const row = await dbInsertReturning<typeof photos.$inferSelect>(
     db.insert(photos).values({
@@ -1220,7 +1268,7 @@ export async function uploadPhotoStream(
       latitude: exifMeta.latitude,
       longitude: exifMeta.longitude,
       description: descriptionValue,
-      keywords: exifMeta.keywords,
+      keywords: uploadKeywords,
       ...(iptcLoc ?? {}),
     }).returning()
   );
@@ -1292,6 +1340,7 @@ export async function uploadPhotoLogic(
   const descriptionValue2 = combineDescription(exifMeta2);
   // Pre-fill location from IPTC when present, sparing us a Nominatim call.
   const iptcLoc2 = iptcLocationUpdate(exifMeta2);
+  const uploadKeywords2 = mergeRatingKeyword(exifMeta2.keywords, exifMeta2.rating);
 
   const row2 = await dbInsertReturning<typeof photos.$inferSelect>(
     db.insert(photos).values({
@@ -1305,7 +1354,7 @@ export async function uploadPhotoLogic(
       latitude: exifMeta2.latitude,
       longitude: exifMeta2.longitude,
       description: descriptionValue2,
-      keywords: exifMeta2.keywords,
+      keywords: uploadKeywords2,
       ...(iptcLoc2 ?? {}),
     }).returning()
   );

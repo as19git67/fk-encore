@@ -183,6 +183,13 @@
       "when": 1776800000000,
       "tag": "0024_album_event_name",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1776900000000,
+      "tag": "0025_library_favorite_rating_threshold",
+      "breakpoints": true
     }
   ]
 }

@@ -5,7 +5,16 @@ import crypto from "crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import sharp from "sharp";
 import { exiftool } from "exiftool-vendored";
-import { combineDescription, getExifMetadata, iptcLocationUpdate, parseIptcDate, type ExifMetadata } from "./photo.service";
+import {
+  combineDescription,
+  getExifMetadata,
+  iptcLocationUpdate,
+  mergeRatingKeyword,
+  parseIptcDate,
+  parseXmpRating,
+  ratingKeyword,
+  type ExifMetadata,
+} from "./photo.service";
 
 /**
  * Unit/integration tests for IPTC metadata handling (issue #129).
@@ -184,6 +193,7 @@ describe("iptcLocationUpdate", () => {
     city: null,
     state: null,
     country: null,
+    rating: null,
   };
 
   it("returns null when no IPTC location fields are present", () => {
@@ -230,6 +240,7 @@ describe("combineDescription", () => {
     city: null,
     state: null,
     country: null,
+    rating: null,
   };
 
   it("returns null when nothing is set", () => {
@@ -259,6 +270,72 @@ describe("combineDescription", () => {
   it("skips the title when it is already contained in the description", () => {
     expect(combineDescription({ ...baseMeta, description: "Bergpanorama — Foto aus München", title: "Bergpanorama" }))
       .toBe("Bergpanorama — Foto aus München");
+  });
+});
+
+describe("parseXmpRating", () => {
+  it("accepts integer star ratings 1..5", () => {
+    expect(parseXmpRating(1)).toBe(1);
+    expect(parseXmpRating(5)).toBe(5);
+  });
+
+  it("accepts stringified numbers written by some encoders", () => {
+    expect(parseXmpRating("3")).toBe(3);
+    expect(parseXmpRating(" 4 ")).toBe(4);
+  });
+
+  it("rounds fractional ratings to the nearest whole star", () => {
+    expect(parseXmpRating(3.4)).toBe(3);
+    expect(parseXmpRating(3.6)).toBe(4);
+  });
+
+  it("treats 0 (unrated) and -1 (rejected) as 'no rating'", () => {
+    expect(parseXmpRating(0)).toBeNull();
+    expect(parseXmpRating(-1)).toBeNull();
+  });
+
+  it("rejects out-of-range and garbage values", () => {
+    expect(parseXmpRating(6)).toBeNull();
+    expect(parseXmpRating("hi")).toBeNull();
+    expect(parseXmpRating(null)).toBeNull();
+    expect(parseXmpRating(undefined)).toBeNull();
+  });
+});
+
+describe("ratingKeyword / mergeRatingKeyword", () => {
+  it("builds the 'Rating N' label for valid star counts only", () => {
+    expect(ratingKeyword(3)).toBe("Rating 3");
+    expect(ratingKeyword(null)).toBeNull();
+    expect(ratingKeyword(0)).toBeNull();
+    expect(ratingKeyword(6)).toBeNull();
+  });
+
+  it("appends the derived tag to the existing keyword list", () => {
+    expect(mergeRatingKeyword(["urlaub"], 4)).toEqual(["urlaub", "Rating 4"]);
+  });
+
+  it("leaves the list untouched when no rating is present", () => {
+    const kw = ["urlaub"];
+    expect(mergeRatingKeyword(kw, null)).toBe(kw);
+  });
+
+  it("de-duplicates case-insensitively so re-imports stay stable", () => {
+    expect(mergeRatingKeyword(["urlaub", "rating 4"], 4)).toEqual(["urlaub", "rating 4"]);
+  });
+});
+
+describe("getExifMetadata — XMP rating", () => {
+  it("reads xmp:Rating and exposes it as an integer", async () => {
+    const file = await makeTempJpeg();
+    await exiftool.write(file, { Rating: 4 }, ["-overwrite_original"]);
+    const meta = await getExifMetadata(file);
+    expect(meta.rating).toBe(4);
+  });
+
+  it("returns null when no rating tag is present", async () => {
+    const file = await makeTempJpeg();
+    const meta = await getExifMetadata(file);
+    expect(meta.rating).toBeNull();
   });
 });
 

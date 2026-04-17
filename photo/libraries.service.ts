@@ -15,10 +15,10 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import db from "../db/database";
 import { dbFirst, dbAll, dbExec, dbInsertReturning } from "../db/adapter";
-import { photoLibraries, photos, albums, albumPhotos } from "../db/schema";
+import { photoLibraries, photos, photoCuration, albums, albumPhotos } from "../db/schema";
 import {
   UPLOAD_DIR,
   SUPPORTED_EXTENSIONS,
@@ -29,6 +29,7 @@ import {
   getExifMetadata,
   iptcLocationUpdate,
   combineDescription,
+  mergeRatingKeyword,
 } from "./photo.service";
 import { enqueuePhotoScan } from "./scan-queue";
 import { triggerWorkers } from "./scan-worker";
@@ -47,6 +48,11 @@ export interface PhotoLibrary {
   import_mode: LibraryImportMode;
   auto_import: boolean;
   auto_albums: boolean;
+  /**
+   * Minimum XMP:Rating (1..5) that flips newly imported photos to "favourite"
+   * for the library owner. 0 disables the behaviour.
+   */
+  favorite_rating_threshold: number;
   created_at: string | null;
   last_scan_at: string | null;
 }
@@ -57,6 +63,7 @@ export interface CreateLibraryRequest {
   import_mode?: LibraryImportMode;
   auto_import?: boolean;
   auto_albums?: boolean;
+  favorite_rating_threshold?: number;
 }
 
 export interface UpdateLibraryRequest {
@@ -65,6 +72,16 @@ export interface UpdateLibraryRequest {
   import_mode?: LibraryImportMode;
   auto_import?: boolean;
   auto_albums?: boolean;
+  favorite_rating_threshold?: number;
+}
+
+/** 0 disables the feature; otherwise must be a 1..5 star threshold. */
+function normaliseFavoriteRatingThreshold(v: unknown): number {
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) throw new Error("favorite_rating_threshold must be a number");
+  const r = Math.trunc(n);
+  if (r < 0 || r > 5) throw new Error("favorite_rating_threshold must be between 0 and 5");
+  return r;
 }
 
 export interface ScanReport {
@@ -248,6 +265,7 @@ function rowToLibrary(row: typeof photoLibraries.$inferSelect): PhotoLibrary {
     import_mode: row.import_mode as LibraryImportMode,
     auto_import: row.auto_import,
     auto_albums: row.auto_albums,
+    favorite_rating_threshold: row.favorite_rating_threshold,
     created_at: row.created_at ?? null,
     last_scan_at: row.last_scan_at ?? null,
   };
@@ -276,6 +294,9 @@ export async function createLibrary(
         import_mode: req.import_mode ?? "link",
         auto_import: req.auto_import ?? false,
         auto_albums: req.auto_albums ?? false,
+        favorite_rating_threshold: normaliseFavoriteRatingThreshold(
+          req.favorite_rating_threshold ?? 0
+        ),
       })
       .returning()
   );
@@ -305,6 +326,11 @@ export async function updateLibrary(req: UpdateLibraryRequest): Promise<PhotoLib
   if (req.import_mode !== undefined) updates.import_mode = req.import_mode;
   if (req.auto_import !== undefined) updates.auto_import = req.auto_import;
   if (req.auto_albums !== undefined) updates.auto_albums = req.auto_albums;
+  if (req.favorite_rating_threshold !== undefined) {
+    updates.favorite_rating_threshold = normaliseFavoriteRatingThreshold(
+      req.favorite_rating_threshold
+    );
+  }
 
   if (Object.keys(updates).length > 0) {
     await dbExec(db.update(photoLibraries).set(updates).where(eq(photoLibraries.id, req.id)));
@@ -422,6 +448,21 @@ async function attachToAutoAlbum(
 }
 
 /**
+ * Mark a freshly-imported photo as "favorite" for its owner. Safe to call once
+ * per importFile() invocation — `photos.hash` dedupes re-imports upstream, so
+ * a pre-existing photo_curation row for the same (user, photo) pair is not
+ * possible here.
+ */
+async function markPhotoFavorite(userId: number, photoId: number): Promise<void> {
+  await dbExec(
+    db
+      .insert(photoCuration)
+      .values({ user_id: userId, photo_id: photoId, status: "favorite" })
+      .onConflictDoNothing()
+  );
+}
+
+/**
  * Import a single file from a library. Idempotent: a second call for the same
  * file returns `skipped_duplicate`.
  */
@@ -458,6 +499,7 @@ export async function importFile(
   const originalName = path.basename(absFilePath);
   const descriptionValue = combineDescription(exifMeta);
   const iptcLoc = iptcLocationUpdate(exifMeta);
+  const importKeywords = mergeRatingKeyword(exifMeta.keywords, exifMeta.rating);
 
   let filename: string;
   let externalPath: string | null;
@@ -504,13 +546,25 @@ export async function importFile(
         latitude: exifMeta.latitude,
         longitude: exifMeta.longitude,
         description: descriptionValue,
-        keywords: exifMeta.keywords,
+        keywords: importKeywords,
         library_id: library.id,
         external_path: externalPath,
         ...(iptcLoc ?? {}),
       })
       .returning()
   );
+
+  if (
+    library.favorite_rating_threshold > 0 &&
+    exifMeta.rating !== null &&
+    exifMeta.rating >= library.favorite_rating_threshold
+  ) {
+    try {
+      await markPhotoFavorite(ownerId, row!.id);
+    } catch (err) {
+      console.error("[libraries] favourite mark failed:", err);
+    }
+  }
 
   if (library.auto_albums) {
     const albumName = deriveAutoAlbumName(library.path, absFilePath);

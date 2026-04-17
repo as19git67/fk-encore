@@ -6,6 +6,7 @@ import InputText from 'primevue/inputtext'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import Select from 'primevue/select'
+import InputNumber from 'primevue/inputnumber'
 import ToggleSwitch from 'primevue/toggleswitch'
 import Tag from 'primevue/tag'
 import Message from 'primevue/message'
@@ -45,12 +46,14 @@ const form = ref<{
   import_mode: LibraryImportMode
   auto_import: boolean
   auto_albums: boolean
+  favorite_rating_threshold: number
 }>({
   name: '',
   path: '',
   import_mode: 'link',
   auto_import: false,
   auto_albums: false,
+  favorite_rating_threshold: 0,
 })
 const saving = ref(false)
 
@@ -125,6 +128,7 @@ async function openCreateDialog() {
     import_mode: 'link',
     auto_import: false,
     auto_albums: false,
+    favorite_rating_threshold: 0,
   }
   showEditDialog.value = true
   await loadPickerAt('')
@@ -138,6 +142,7 @@ function openEditDialog(lib: PhotoLibrary) {
     import_mode: lib.import_mode,
     auto_import: lib.auto_import,
     auto_albums: lib.auto_albums,
+    favorite_rating_threshold: lib.favorite_rating_threshold ?? 0,
   }
   showEditDialog.value = true
 }
@@ -173,6 +178,7 @@ async function handleSave() {
         import_mode: form.value.import_mode,
         auto_import: form.value.auto_import,
         auto_albums: form.value.auto_albums,
+        favorite_rating_threshold: form.value.favorite_rating_threshold,
       })
       info.value = 'Bibliothek angelegt.'
     } else {
@@ -181,6 +187,7 @@ async function handleSave() {
         import_mode: form.value.import_mode,
         auto_import: form.value.auto_import,
         auto_albums: form.value.auto_albums,
+        favorite_rating_threshold: form.value.favorite_rating_threshold,
       })
       info.value = 'Bibliothek aktualisiert.'
     }
@@ -314,6 +321,16 @@ onMounted(loadData)
             :value="data.auto_albums ? 'an' : 'aus'"
             :severity="data.auto_albums ? 'success' : 'secondary'"
           />
+        </template>
+      </Column>
+      <Column header="Favorit ab" style="width: 8rem">
+        <template #body="{ data }">
+          <Tag
+            v-if="data.favorite_rating_threshold > 0"
+            :value="`≥ ${data.favorite_rating_threshold} ★`"
+            severity="warn"
+          />
+          <Tag v-else value="aus" severity="secondary" />
         </template>
       </Column>
       <Column header="Letzter Scan" style="width: 10rem">
@@ -496,6 +513,24 @@ onMounted(loadData)
           <label for="lib-auto-albums">
             Auto-Alben aus Unterverzeichnissen (voller Unterpfad = Albumname)
           </label>
+        </div>
+
+        <div class="field">
+          <label for="lib-fav-threshold">Favorit ab Rating (XMP-Sterne)</label>
+          <InputNumber
+            id="lib-fav-threshold"
+            v-model="form.favorite_rating_threshold"
+            :min="0"
+            :max="5"
+            show-buttons
+            button-layout="horizontal"
+            :step="1"
+          />
+          <small class="hint-small">
+            0 deaktiviert die automatische Favoriten-Markierung. Beim Import wird
+            zusätzlich ein Tag <code>Rating 1</code>…<code>Rating 5</code> aus
+            dem XMP-Rating übernommen.
+          </small>
         </div>
       </div>
 
