@@ -611,8 +611,21 @@ onMounted(loadData)
 
 .field.row {
   flex-direction: row;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.field.row :deep(.p-toggleswitch) {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.field.row label {
+  flex: 1;
+  min-width: 0;
+  white-space: normal;
+  line-height: 1.25;
 }
 
 .field label {

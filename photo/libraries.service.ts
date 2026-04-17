@@ -391,7 +391,14 @@ async function attachToAutoAlbum(
     album = await dbInsertReturning<{ id: number }>(
       db
         .insert(albums)
-        .values({ user_id: ownerId, name: albumName, event_name: eventName })
+        .values({
+          user_id: ownerId,
+          name: albumName,
+          event_name: eventName,
+          // Also seed the human-readable description so the event label shows
+          // up in existing album UIs without any additional wiring.
+          description: eventName,
+        })
         .returning({ id: albums.id })
     );
   }
@@ -557,7 +564,7 @@ export async function scanLibrary(libraryId: number): Promise<ScanReport> {
   await dbExec(
     db
       .update(photoLibraries)
-      .set({ last_scan_at: sql`NOW()` })
+      .set({ last_scan_at: new Date().toISOString() })
       .where(eq(photoLibraries.id, libraryId))
   );
   return report;

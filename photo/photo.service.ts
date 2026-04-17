@@ -84,6 +84,16 @@ const rawFalse = sql.raw('false')
 
 export const UPLOAD_DIR = path.resolve(process.env.PHOTO_UPLOAD_DIR || "uploads/photos");
 export const THUMBNAIL_DIR = path.resolve(process.env.PHOTO_THUMBNAIL_DIR || "uploads/thumbnails");
+
+/**
+ * Resolve the on-disk path for a photo row. Library-linked photos
+ * (link-import mode) have `external_path` set and their `filename` is a
+ * synthetic key that does not exist under UPLOAD_DIR, so any caller that
+ * needs the actual image bytes must go through this helper.
+ */
+export function getPhotoDiskPath(photo: { filename: string; external_path?: string | null }): string {
+  return photo.external_path ? photo.external_path : path.join(UPLOAD_DIR, photo.filename);
+}
 const INSIGHTFACE_SERVICE_URL = process.env.INSIGHTFACE_SERVICE_URL || "http://localhost:8000";
 
 export const SUPPORTED_MIME_TYPES = new Set([
@@ -360,7 +370,7 @@ export async function indexPhotoEmbeddings(photoId: number, force: boolean = fal
   );
   if (!photo) return;
 
-  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  const filePath = getPhotoDiskPath(photo);
   if (!fs.existsSync(filePath)) return;
 
   // Get face IDs for this photo (global — no user filter needed)
@@ -478,7 +488,7 @@ export async function detectPhotoFaces(photoId: number, force: boolean = false):
   );
   if (!photo) return;
 
-  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  const filePath = getPhotoDiskPath(photo);
   if (!fs.existsSync(filePath)) return;
 
   let processingPath = filePath;
@@ -1078,7 +1088,7 @@ export async function indexPhotoGeocoding(photoId: number, force = false): Promi
   let iptcLoc: ReturnType<typeof iptcLocationUpdate> = null;
 
   // Try EXIF extraction if no GPS stored yet — or to discover IPTC location.
-  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  const filePath = getPhotoDiskPath(photo);
   if (fs.existsSync(filePath)) {
     const exifMeta = await getExifMetadata(filePath);
     if ((lat === null || lon === null) && exifMeta.latitude !== null && exifMeta.longitude !== null) {
@@ -1778,7 +1788,7 @@ export async function refreshPhotoMetadataLogic(userId: number, photoId: number)
     throw new Error("Photo not found or unauthorized");
   }
 
-  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  const filePath = getPhotoDiskPath(photo);
   if (!fs.existsSync(filePath)) {
     throw new Error("File not found on disk");
   }
@@ -1812,7 +1822,7 @@ export async function updatePhotoDateLogic(
     throw new Error("Photo not found or unauthorized");
   }
 
-  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  const filePath = getPhotoDiskPath(photo);
   if (!fs.existsSync(filePath)) {
     throw new Error("File not found on disk");
   }
@@ -1890,7 +1900,7 @@ export async function updatePhotoDescriptionLogic(
   //    one of the three (e.g. Windows Explorer reads XMP, Lightroom reads IPTC,
   //    legacy viewers read EXIF ImageDescription).
   try {
-    const filePath = path.join(UPLOAD_DIR, photo.filename);
+    const filePath = getPhotoDiskPath(photo);
     if (fs.existsSync(filePath)) {
       const ext = path.extname(filePath).toLowerCase();
       if (EXIF_WRITABLE_EXTENSIONS.has(ext)) {
@@ -3417,7 +3427,7 @@ export async function reindexPhotoLogic(
   let lon = photo.longitude;
 
   if (lat === null || lon === null) {
-    const filePath = path.join(UPLOAD_DIR, photo.filename);
+    const filePath = getPhotoDiskPath(photo);
     const exifMeta = await getExifMetadata(filePath);
     if (exifMeta.latitude !== null && exifMeta.longitude !== null) {
       lat = exifMeta.latitude;
@@ -3481,7 +3491,7 @@ export async function rescanPhotoGpsLogic(
   let scansQueued = false;
   let iptcLoc: ReturnType<typeof iptcLocationUpdate> = null;
 
-  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  const filePath = getPhotoDiskPath(photo);
   if (fs.existsSync(filePath)) {
     const exifMeta = await getExifMetadata(filePath);
     if ((lat === null || lon === null) && exifMeta.latitude !== null && exifMeta.longitude !== null) {
@@ -4375,7 +4385,7 @@ export async function indexPhotoLandmarks(photoId: number): Promise<void> {
   );
   if (!photo) return;
 
-  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  const filePath = getPhotoDiskPath(photo);
   if (!fs.existsSync(filePath)) return;
 
   let processingPath = filePath;
@@ -4499,7 +4509,7 @@ export async function indexPhotoQuality(photoId: number): Promise<void> {
   );
   if (!photo) return;
 
-  const filePath = path.join(UPLOAD_DIR, photo.filename);
+  const filePath = getPhotoDiskPath(photo);
   if (!fs.existsSync(filePath)) return;
 
   let processingPath = filePath;
