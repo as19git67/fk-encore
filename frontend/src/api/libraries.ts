@@ -10,6 +10,8 @@ export interface PhotoLibrary {
   import_mode: LibraryImportMode
   auto_import: boolean
   auto_albums: boolean
+  /** 1..5 = auto-favourite photos whose XMP:Rating is at least this value. 0 = disabled. */
+  favorite_rating_threshold: number
   created_at: string | null
   last_scan_at: string | null
 }
@@ -20,6 +22,7 @@ export interface CreateLibraryRequest {
   import_mode?: LibraryImportMode
   auto_import?: boolean
   auto_albums?: boolean
+  favorite_rating_threshold?: number
 }
 
 export interface UpdateLibraryRequest {
@@ -27,6 +30,7 @@ export interface UpdateLibraryRequest {
   import_mode?: LibraryImportMode
   auto_import?: boolean
   auto_albums?: boolean
+  favorite_rating_threshold?: number
 }
 
 export interface ScanReport {
