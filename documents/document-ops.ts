@@ -157,8 +157,8 @@ export async function runEmbed(documentId: number): Promise<{ chunks: number } |
     const vec = embeddings[i];
     const literal = `[${vec.join(",")}]`;
     await db.execute(sql`
-      INSERT INTO document_embeddings (document_id, chunk_idx, embedding)
-      VALUES (${documentId}, ${i}, ${literal}::vector)
+      INSERT INTO document_embeddings (document_id, chunk_idx, chunk_text, embedding)
+      VALUES (${documentId}, ${i}, ${chunks[i]}, ${literal}::vector)
     `);
   }
 

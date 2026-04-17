@@ -30,6 +30,7 @@ import {
 } from "./documents.service";
 import { enqueueDocumentScan, getQueueStatus, requeueDocument } from "./scan-queue";
 import { triggerWorkers } from "./scan-worker";
+import { searchDocuments, type SearchMode } from "./search";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -519,6 +520,101 @@ export const listDocumentCategories = api(
         sort_order: r.sort_order,
       })),
     };
+  },
+);
+
+// ─── Search ─────────────────────────────────────────────────────────────────
+
+export interface SearchDocumentsResponse {
+  items: DocumentSummary[];
+  mode: SearchMode;
+  query: string;
+}
+
+interface SearchQuery {
+  q: Query<string>;
+  mode?: Query<string>;
+  limit?: Query<number>;
+}
+
+/**
+ * Hybrid search over the caller's documents.
+ *
+ * `mode=fts` — lexical only (good for exact terms, invoice numbers).
+ * `mode=semantic` — embedding-based (good for paraphrases).
+ * `mode=hybrid` (default) — Reciprocal Rank Fusion of both branches.
+ *
+ * Returned documents keep the same shape as `GET /documents` so the
+ * frontend can reuse the list renderer.
+ */
+export const searchDocumentsEndpoint = api(
+  { expose: true, method: "GET", path: "/documents/search", auth: true },
+  async ({ q, mode, limit }: SearchQuery): Promise<SearchDocumentsResponse> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.view");
+    const userId = getUserId();
+
+    const resolvedMode: SearchMode =
+      mode === "fts" || mode === "semantic" || mode === "hybrid" ? mode : "hybrid";
+    const lim = Math.min(Math.max(limit ?? 20, 1), 100);
+    const query = (q ?? "").trim();
+    if (query.length === 0) {
+      return { items: [], mode: resolvedMode, query };
+    }
+
+    const hits = await searchDocuments({
+      userId,
+      query,
+      mode: resolvedMode,
+      limit: lim,
+    });
+    if (hits.length === 0) {
+      return { items: [], mode: resolvedMode, query };
+    }
+
+    const ids = hits.map((h) => h.document_id);
+    const rows = await dbAll<typeof documents.$inferSelect & { cat_slug: string | null }>(
+      db
+        .select({
+          id: documents.id,
+          user_id: documents.user_id,
+          sha256: documents.sha256,
+          original_filename: documents.original_filename,
+          mime_type: documents.mime_type,
+          size_bytes: documents.size_bytes,
+          disk_path: documents.disk_path,
+          uploaded_at: documents.uploaded_at,
+          status: documents.status,
+          category_id: documents.category_id,
+          title: documents.title,
+          doc_date: documents.doc_date,
+          sender: documents.sender,
+          summary: documents.summary,
+          extracted_text: documents.extracted_text,
+          classification_confidence: documents.classification_confidence,
+          cat_slug: documentCategories.slug,
+        })
+        .from(documents)
+        .leftJoin(documentCategories, eq(documents.category_id, documentCategories.id))
+        .where(and(eq(documents.user_id, userId), inArray(documents.id, ids))),
+    );
+
+    const byId = new Map<number, (typeof rows)[number]>();
+    for (const r of rows) byId.set(r.id, r);
+
+    const tagsByDoc = await fetchTagsForDocuments(ids);
+
+    // Preserve the ranked order — Postgres' WHERE IN is unordered.
+    const items = hits
+      .map((h) => {
+        const r = byId.get(h.document_id);
+        if (!r) return null;
+        return toSummary(r as any, r.cat_slug, tagsByDoc.get(r.id) ?? []);
+      })
+      .filter((x): x is DocumentSummary => x !== null);
+
+    return { items, mode: resolvedMode, query };
   },
 );
 

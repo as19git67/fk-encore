@@ -11,6 +11,7 @@ import { flattenTaxonomy, categoryTaxonomy } from "./taxonomy";
 import { DOCUMENT_SERVICES } from "./scan-queue";
 import { DuplicateDocumentError } from "./import";
 import { SUPPORTED_EXTENSIONS } from "./documents.service";
+import { reciprocalRankFusion, type SearchHit } from "./search";
 
 describe("documents.service", () => {
   it("guessExtension prefers the filename extension for supported types", () => {
@@ -88,5 +89,55 @@ describe("documents.inbox supported extensions", () => {
     expect(SUPPORTED_EXTENSIONS.has(".pdf")).toBe(true);
     expect(SUPPORTED_EXTENSIONS.has(".jpg")).toBe(false);
     expect(SUPPORTED_EXTENSIONS.has(".docx")).toBe(false);
+  });
+});
+
+describe("documents.search reciprocalRankFusion", () => {
+  it("returns an empty array when both lists are empty", () => {
+    expect(reciprocalRankFusion([[], []], 60)).toEqual([]);
+  });
+
+  it("documents appearing in both lists outrank singletons", () => {
+    const fts: SearchHit[] = [
+      { document_id: 1, score: 0.9, fts_rank: 0.9 },
+      { document_id: 2, score: 0.5, fts_rank: 0.5 },
+    ];
+    const semantic: SearchHit[] = [
+      { document_id: 2, score: 0.8, semantic_distance: 0.2 },
+      { document_id: 3, score: 0.7, semantic_distance: 0.3 },
+    ];
+    const fused = reciprocalRankFusion([fts, semantic], 60);
+    expect(fused[0].document_id).toBe(2);
+    const ids = fused.map((h) => h.document_id);
+    expect(ids.sort()).toEqual([1, 2, 3]);
+  });
+
+  it("respects rank position: rank-1 contributes more than rank-2", () => {
+    const listA: SearchHit[] = [{ document_id: 1, score: 1 }];
+    const listB: SearchHit[] = [{ document_id: 2, score: 1 }, { document_id: 1, score: 0.5 }];
+    const fused = reciprocalRankFusion([listA, listB], 60);
+    const a = fused.find((h) => h.document_id === 1)!;
+    const b = fused.find((h) => h.document_id === 2)!;
+    // doc 1 = 1/61 + 1/62, doc 2 = 1/61 → doc 1 wins
+    expect(a.score).toBeGreaterThan(b.score);
+  });
+
+  it("preserves per-branch metadata (fts_rank, semantic_distance)", () => {
+    const fts: SearchHit[] = [{ document_id: 7, score: 0.4, fts_rank: 0.4 }];
+    const semantic: SearchHit[] = [{ document_id: 7, score: 0.9, semantic_distance: 0.1 }];
+    const [hit] = reciprocalRankFusion([fts, semantic], 60);
+    expect(hit.document_id).toBe(7);
+    expect(hit.fts_rank).toBe(0.4);
+    expect(hit.semantic_distance).toBe(0.1);
+  });
+
+  it("K dampens the advantage of top ranks as it grows", () => {
+    const fts: SearchHit[] = [{ document_id: 1, score: 1 }];
+    const semantic: SearchHit[] = [{ document_id: 2, score: 1 }, { document_id: 1, score: 0.5 }];
+    const smallK = reciprocalRankFusion([fts, semantic], 1);
+    const largeK = reciprocalRankFusion([fts, semantic], 1000);
+    const gap = (f: SearchHit[]) =>
+      f.find((h) => h.document_id === 1)!.score - f.find((h) => h.document_id === 2)!.score;
+    expect(gap(smallK)).toBeGreaterThan(gap(largeK));
   });
 });
