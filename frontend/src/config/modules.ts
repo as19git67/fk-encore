@@ -87,11 +87,18 @@ export const modules: ModuleConfig[] = [
         component: () => import('../views/DataManagementView.vue'),
         meta: { permission: 'data.manage' },
       },
+      {
+        path: 'bibliotheken',
+        name: 'admin-libraries',
+        component: () => import('../views/LibrariesView.vue'),
+        meta: { permission: 'photos.libraries.manage' },
+      },
     ],
     menuItems: [
       { label: 'Benutzer', icon: 'pi pi-users', routeName: 'admin-users', permission: 'users.list' },
       { label: 'Rollen', icon: 'pi pi-shield', routeName: 'admin-roles', permission: 'roles.list' },
       { label: 'Datenverwaltung', icon: 'pi pi-database', routeName: 'admin-data', permission: 'data.manage' },
+      { label: 'Externe Bibliotheken', icon: 'pi pi-folder', routeName: 'admin-libraries', permission: 'photos.libraries.manage' },
     ],
   },
 ]

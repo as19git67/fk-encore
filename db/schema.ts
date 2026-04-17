@@ -120,6 +120,29 @@ export const rolePermissions = pgTable(
   (table) => [primaryKey({ columns: [table.role_id, table.permission_id] })]
 );
 
+// ========== Photo Libraries (external photo directories) ==========
+
+export const libraryImportModeEnum = pgEnum("library_import_mode", ["link", "move"]);
+
+export const photoLibraries = pgTable("photo_libraries", {
+  id: serial("id").primaryKey(),
+  // Owner of all photos imported from this library.
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  // Path inside the container, must be under PHOTO_LIBRARIES_ROOT.
+  path: text("path").notNull().unique(),
+  import_mode: libraryImportModeEnum("import_mode").notNull().default("link"),
+  // When true a filesystem watcher imports newly arriving files automatically.
+  auto_import: boolean("auto_import").notNull().default(false),
+  // When true an album per first-level sub-directory is auto-created and each
+  // imported photo is added to it.
+  auto_albums: boolean("auto_albums").notNull().default(false),
+  created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
+  last_scan_at: timestamp("last_scan_at", { mode: "string" }),
+});
+
 // ========== Photos ==========
 
 export const photos = pgTable("photos", {
@@ -146,6 +169,11 @@ export const photos = pgTable("photos", {
   description: text("description"),
   // IPTC Keywords / XMP dc:subject — user-facing tags imported from the file.
   keywords: text("keywords").array().notNull().default(sql`'{}'::text[]`),
+  // External photo library this row belongs to (NULL = uploaded via HTTP).
+  library_id: integer("library_id").references(() => photoLibraries.id, { onDelete: "set null" }),
+  // Absolute filesystem path for `link`-imported photos. NULL for uploads and
+  // for `move`-imported photos (which live under UPLOAD_DIR like uploads do).
+  external_path: text("external_path"),
 });
 
 // ========== Persons ==========
@@ -247,6 +275,10 @@ export const albums = pgTable("albums", {
     .references(() => users.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   description: text("description"),
+  // Optional event label derived from the source folder (e.g. "Hochzeit" from
+  // "2020-06 Hochzeit"). Only populated by the library auto-album feature;
+  // manual albums leave it null.
+  event_name: text("event_name"),
   cover_photo_id: integer("cover_photo_id")
     .references(() => photos.id, { onDelete: "set null" }),
   display_mode: text("display_mode").notNull().default("grid"), // 'grid' | 'map'

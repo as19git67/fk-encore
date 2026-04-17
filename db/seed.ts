@@ -47,6 +47,7 @@ export async function seed(db: any): Promise<void> {
     { key: "people.edit", description: "Edit people names and merge" },
     { key: "data.manage", description: "Access data management (reindex, maintenance)" },
     { key: "photos.purge", description: "Purge all photo-related data (destructive)" },
+    { key: "photos.libraries.manage", description: "Configure external photo libraries" },
   ];
 
   // Permissions that are NEVER auto-assigned to the Admin role.

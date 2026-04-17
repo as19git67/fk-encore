@@ -414,6 +414,7 @@ export interface Album {
   user_id: number
   name: string
   description?: string
+  event_name?: string
   cover_photo_id?: number
   cover_filename?: string
   display_mode: 'grid' | 'map'
