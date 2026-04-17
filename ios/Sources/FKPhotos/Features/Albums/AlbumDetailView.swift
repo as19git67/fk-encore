@@ -12,6 +12,7 @@ struct AlbumDetailView: View {
     @State private var showDeleteConfirm = false
     @State private var isDeleting = false
     @State private var selectedPhoto: PhotoWithCuration?
+    @State private var isFullscreenPresented = false
     @Environment(\.dismiss) private var dismiss
 
     private let columns = [
@@ -34,6 +35,7 @@ struct AlbumDetailView: View {
                     ForEach(photos) { photo in
                         Button {
                             selectedPhoto = photo
+                            isFullscreenPresented = true
                         } label: {
                             PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop)
                         }
@@ -45,8 +47,10 @@ struct AlbumDetailView: View {
         }
         .navigationTitle(album?.name ?? "Album")
         .navigationBarTitleDisplayMode(.large)
-        .fullScreenCover(item: $selectedPhoto) { photo in
-            PhotoFullscreenView(photo: photo)
+        .navigationDestination(isPresented: $isFullscreenPresented) {
+            if let photo = selectedPhoto {
+                PhotoFullscreenView(photo: photo)
+            }
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
