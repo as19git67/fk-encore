@@ -1,11 +1,17 @@
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import { writeMaintenanceResponseIfActive } from "../backup/maintenance";
 import * as service from "./photo.service";
 import { UPLOAD_DIR, THUMBNAIL_DIR, thumbnailShardPath } from "./photo.service";
+import { PHOTO_LIBRARIES_ROOT } from "./libraries.service";
+import { eq } from "drizzle-orm";
+import db from "../db/database";
+import { dbFirst } from "../db/adapter";
+import { photos as photosTable } from "../db/schema";
 import type {
   Album,
   AlbumWithPhotos,
@@ -326,6 +332,51 @@ export const updatePhotoDescription = api(
 /**
  * Serve a photo file.
  */
+/**
+ * Resolve a public `/photos/file/*filename` URL to a real on-disk path.
+ *
+ * Two layouts are supported:
+ *   - Uploaded photos: filename is `YYYY/YYYY-MM/<name>.<ext>` and the file
+ *     lives under UPLOAD_DIR.
+ *   - Library photos in `link` mode: filename is `__library/<id>/<basename>`
+ *     and the actual file lives under PHOTO_LIBRARIES_ROOT (looked up via
+ *     the photos.external_path column).
+ *
+ * Returns null when the path is invalid or refers to nothing on disk; in
+ * that case the caller should respond with 404.
+ */
+async function resolvePhotoFilePath(filename: string): Promise<string | null> {
+  const topSegment = filename.split("/")[0];
+  if (topSegment === "_tmp" || topSegment.startsWith(".")) {
+    return null;
+  }
+
+  if (topSegment === "__library") {
+    const row = await dbFirst<{ external_path: string | null }>(
+      db.select({ external_path: photosTable.external_path })
+        .from(photosTable)
+        .where(eq(photosTable.filename, filename))
+    );
+    if (!row?.external_path) return null;
+    const abs = path.resolve(row.external_path);
+    const rootWithSep = PHOTO_LIBRARIES_ROOT.endsWith(path.sep)
+      ? PHOTO_LIBRARIES_ROOT
+      : PHOTO_LIBRARIES_ROOT + path.sep;
+    if (abs !== PHOTO_LIBRARIES_ROOT && !abs.startsWith(rootWithSep)) {
+      console.error("Rejected library path outside PHOTO_LIBRARIES_ROOT:", abs);
+      return null;
+    }
+    return fs.existsSync(abs) ? abs : null;
+  }
+
+  const filePath = path.resolve(UPLOAD_DIR, filename);
+  const uploadDirWithSep = UPLOAD_DIR.endsWith(path.sep) ? UPLOAD_DIR : UPLOAD_DIR + path.sep;
+  if (filePath !== UPLOAD_DIR && !filePath.startsWith(uploadDirWithSep)) {
+    return null;
+  }
+  return fs.existsSync(filePath) ? filePath : null;
+}
+
 export const getPhotoFile = api.raw(
   { expose: true, method: "GET", path: "/photos/file/*filename", auth: false },
   async (req, res) => {
@@ -338,27 +389,8 @@ export const getPhotoFile = api.raw(
       const filename = rawPath.replace(/^\/+/, "");
       console.log("Serving photo file:", filename);
 
-      const filePath = path.resolve(UPLOAD_DIR, filename);
-
-      // Path-traversal guard: the resolved path must stay inside UPLOAD_DIR,
-      // and must not point at the internal staging dir.
-      const uploadDirWithSep = UPLOAD_DIR.endsWith(path.sep) ? UPLOAD_DIR : UPLOAD_DIR + path.sep;
-      if (filePath !== UPLOAD_DIR && !filePath.startsWith(uploadDirWithSep)) {
-        console.error("Rejected path outside UPLOAD_DIR:", filePath);
-        res.statusCode = 400;
-        res.end("Invalid path");
-        return;
-      }
-      const topSegment = filename.split("/")[0];
-      if (topSegment === "_tmp" || topSegment.startsWith(".")) {
-        console.error("Rejected path into internal dir:", filePath);
-        res.statusCode = 404;
-        res.end("File not found");
-        return;
-      }
-
-      if (!fs.existsSync(filePath)) {
-        console.error("File not found:", filePath);
+      const filePath = await resolvePhotoFilePath(filename);
+      if (!filePath) {
         res.statusCode = 404;
         res.end("File not found");
         return;
@@ -384,11 +416,18 @@ export const getPhotoFile = api.raw(
       if (needsConvert || needsResize) {
           try {
               // Build a deterministic cache path: <THUMBNAIL_DIR>/<shard>/<basename>_<key>.jpg
+              // For uploaded photos `filename` is timestamp-based so basename is
+              // unique. For library photos basenames can collide across libraries —
+              // disambiguate by hashing the full filename and prefixing it.
               const baseName = path.basename(filename, path.extname(filename));
+              const isLibrary = filename.startsWith("__library/");
+              const cacheBase = isLibrary
+                ? `${baseName}_${crypto.createHash("md5").update(filename).digest("hex").slice(0, 8)}`
+                : baseName;
               const cacheFile = needsResize
-                ? `${baseName}_${targetWidth}w.jpg`
-                : `${baseName}_converted.jpg`;
-              const shardPath = thumbnailShardPath(baseName);
+                ? `${cacheBase}_${targetWidth}w.jpg`
+                : `${cacheBase}_converted.jpg`;
+              const shardPath = thumbnailShardPath(cacheBase);
               const cachePath = path.join(shardPath, cacheFile);
 
               if (fs.existsSync(cachePath)) {
