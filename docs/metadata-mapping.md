@@ -99,6 +99,22 @@ the corresponding `PHAsset.isFavorite` is `true`. This is done with
 re-encoded — only the XMP block in the file container is updated. The server
 then reads the injected rating through its normal `getExifMetadata()` path.
 
+#### Favourite write-back to XMP
+
+When the owner of a photo toggles its favourite state through
+`updatePhotoCurationLogic` or `batchFavoritePhotosLogic`, the server writes
+the result back into the file's `xmp:Rating` tag via `exiftool`:
+
+| Transition                    | XMP write         |
+| ----------------------------- | ----------------- |
+| → `favorite`                  | `Rating = 5`      |
+| `favorite` → `visible`/`hidden` | `Rating = 0`    |
+
+Write-back is limited to files the requester owns (favourites are per-user
+but the file is shared) and to writable extensions
+(`.jpg`/`.jpeg`/`.tif`/`.tiff`/`.png`). Failures are logged but never fail
+the DB update.
+
 ### Fields read but not stored
 
 The following fields are returned by `getExifMetadata()` but currently have

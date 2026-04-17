@@ -1754,6 +1754,15 @@ export async function updatePhotoCurationLogic(
     }
   }
 
+  // Read the previous status so we can detect favourite transitions for
+  // the XMP write-back below.
+  const prev = await dbFirst<{ status: CurationStatus }>(
+    db.select({ status: photoCuration.status })
+      .from(photoCuration)
+      .where(and(eq(photoCuration.user_id, userId), eq(photoCuration.photo_id, photoId)))
+  );
+  const prevStatus: CurationStatus = prev?.status ?? "visible";
+
   if (status === "visible") {
     // Remove the curation row entirely (visible is the default)
     await dbExec(
@@ -1769,6 +1778,17 @@ export async function updatePhotoCurationLogic(
           set: { status, updated_at: sql`NOW()` },
         })
     );
+  }
+
+  // Sync the favourite flag into the file's XMP rating when the requester is
+  // the owner — favourites are per-user but the file is shared. Only writes
+  // on an actual transition into or out of "favorite".
+  if (photo.user_id === userId && prevStatus !== status) {
+    if (status === "favorite") {
+      await writeFavoriteRatingXmp(getPhotoDiskPath(photo), true);
+    } else if (prevStatus === "favorite") {
+      await writeFavoriteRatingXmp(getPhotoDiskPath(photo), false);
+    }
   }
 
   // After hiding a photo, check if it belongs to an unreviewed group where all
@@ -1862,6 +1882,22 @@ export async function batchFavoritePhotosLogic(
           set: { status: "favorite", updated_at: sql`NOW()` },
         })
     );
+  }
+
+  // Write the favourite flag back to XMP for photos owned by the requester.
+  // Shared photos stay read-only on disk — favourites are per-user but the
+  // file is not.
+  const ownedPhotos = await dbAll<{ id: number; filename: string; external_path: string | null }>(
+    db.select({
+      id: photos.id,
+      filename: photos.filename,
+      external_path: photos.external_path,
+    })
+    .from(photos)
+    .where(and(eq(photos.user_id, userId), inArray(photos.id, validPhotoIds)))
+  );
+  for (const p of ownedPhotos) {
+    await writeFavoriteRatingXmp(getPhotoDiskPath(p), true);
   }
 
   return { success: true, favorited: validPhotoIds.length };
@@ -2021,6 +2057,36 @@ export async function updatePhotoDescriptionLogic(
   }
 
   return { success: true, description: trimmed };
+}
+
+/**
+ * Write the favourite flag back to the photo file as `xmp:Rating`.
+ *
+ * Mapping mirrors the import direction (see `getExifMetadata` /
+ * `favorite_rating_threshold`): a favourite is persisted as rating `5`, an
+ * un-favourite as `0` (Adobe's "not rated" convention). This means toggling
+ * favourites round-trips through XMP and stays in sync with third-party tools
+ * (Lightroom, digiKam, Finder, Windows Explorer, iOS Photos sync).
+ *
+ * Callers are expected to gate on ownership — favourites are per-user but the
+ * file is shared, so only the photo owner's changes propagate to disk.
+ */
+async function writeFavoriteRatingXmp(filePath: string, isFavorite: boolean): Promise<void> {
+  if (!fs.existsSync(filePath)) return;
+  const ext = path.extname(filePath).toLowerCase();
+  if (!EXIF_WRITABLE_EXTENSIONS.has(ext)) return;
+  try {
+    await Promise.race([
+      exiftool.write(filePath, {
+        Rating: isFavorite ? 5 : 0,
+      }, ["-overwrite_original"]),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(`EXIF_WRITE_TIMEOUT after ${EXIF_WRITE_TIMEOUT_MS}ms`)), EXIF_WRITE_TIMEOUT_MS);
+      })
+    ]);
+  } catch (err) {
+    console.error("Error writing favorite rating to XMP:", err);
+  }
 }
 
 export function getPhotoFileLogic(filename: string): { data: string; mimeType: string } {
