@@ -963,12 +963,12 @@ export const getNextUnreviewedGroup = api(
  */
 export const reviewPhotoGroup = api(
   { expose: true, method: "POST", path: "/photos/groups/:id/review", auth: true },
-  async ({ id }: { id: number }): Promise<{ success: boolean }> => {
+  async ({ id, photoIds }: { id: number; photoIds?: number[] }): Promise<{ success: boolean }> => {
     checkModule();
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "photos.delete");
-    return await service.reviewPhotoGroupLogic(userId, id);
+    return await service.reviewPhotoGroupLogic(userId, id, photoIds);
   }
 );
 

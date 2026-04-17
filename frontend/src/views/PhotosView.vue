@@ -523,10 +523,36 @@ function handleGroupClose() {
   reloadPhotosInPlace().then(() => selectAfterGroup(group))
 }
 
-function handleGroupNext(reviewedGroupId: number) {
-  const next = photoGroupsList.value.find(g => !g.reviewed_at && g.id !== reviewedGroupId)
-  if (next) { activeGroup.value = next; reloadPhotosInPlace() }
-  else { const group = activeGroup.value; activeGroup.value = null; reloadPhotosInPlace().then(() => selectAfterGroup(group)) }
+async function handleGroupNext(reviewedGroupId: number) {
+  // Capture the just-reviewed group's photo set before it's cleared, so we can
+  // skip any "next" candidate that is actually the same logical group after
+  // background regrouping (same members, new id).
+  const reviewed = activeGroup.value
+  const reviewedSet = reviewed ? new Set(reviewed.photo_ids) : null
+
+  // Reload groups first so handleGroupNext picks from fresh data. Without this
+  // a stale cached entry (old id, old composition) can be re-opened here.
+  await reloadPhotosInPlace()
+
+  const next = photoGroupsList.value.find((g) => {
+    if (g.reviewed_at) return false
+    if (g.id === reviewedGroupId) return false
+    if (
+      reviewedSet &&
+      g.photo_ids.length === reviewedSet.size &&
+      g.photo_ids.every((id) => reviewedSet.has(id))
+    ) {
+      return false
+    }
+    return true
+  })
+
+  if (next) {
+    activeGroup.value = next
+  } else {
+    activeGroup.value = null
+    selectAfterGroup(reviewed)
+  }
 }
 
 function handleStartGroupReview() {

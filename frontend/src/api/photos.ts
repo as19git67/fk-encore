@@ -652,9 +652,10 @@ export function getNextUnreviewedGroup() {
   return apiFetch<PhotoGroup | null>('/photos/groups/next-unreviewed')
 }
 
-export function reviewPhotoGroup(id: number) {
+export function reviewPhotoGroup(id: number, photoIds?: number[]) {
   return apiFetch<{ success: boolean }>(`/photos/groups/${id}/review`, {
-    method: 'POST'
+    method: 'POST',
+    body: photoIds ? JSON.stringify({ photoIds }) : undefined,
   })
 }
 
