@@ -94,20 +94,29 @@ struct PhotoUploadView: View {
 
         for item in selectedItems {
             do {
-                guard let data = try await item.loadTransferable(type: Data.self) else {
-                    await MainActor.run { failedCount += 1 }
-                    continue
+                // Prefer PHAssetResourceManager for original bytes (preserves all metadata).
+                // Fall back to loadTransferable when itemIdentifier is unavailable.
+                let data: Data
+                let mimeType: String
+                let isFavorite: Bool
+
+                if let localId = item.itemIdentifier,
+                   let asset = PHAsset.fetchAssets(withLocalIdentifiers: [localId], options: nil).firstObject {
+                    let imageData = try await PHAssetLoader.loadOriginal(for: asset)
+                    data = imageData.data
+                    mimeType = imageData.mimeType
+                    isFavorite = asset.isFavorite
+                } else {
+                    guard let raw = try await item.loadTransferable(type: Data.self) else {
+                        await MainActor.run { failedCount += 1 }
+                        continue
+                    }
+                    data = raw
+                    mimeType = "image/jpeg"
+                    isFavorite = false
                 }
 
-                // Check isFavorite via PHAsset and pass it as a request header
-                let isFavorite: Bool = {
-                    guard let localId = item.itemIdentifier else { return false }
-                    let result = PHAsset.fetchAssets(withLocalIdentifiers: [localId], options: nil)
-                    return result.firstObject?.isFavorite == true
-                }()
-
                 let filename = "photo_\(Date().timeIntervalSince1970).jpg"
-                let mimeType = "image/jpeg"
 
                 let uploaded = try await APIClient.shared.uploadPhoto(
                     data: data,

@@ -156,38 +156,8 @@ actor PhotoSyncService {
     // MARK: - Asset data loading
 
     private func loadAssetData(_ asset: PHAsset, filename: String) async throws -> (Data, String) {
-        try await withCheckedThrowingContinuation { continuation in
-            let options = PHImageRequestOptions()
-            options.isNetworkAccessAllowed = true   // Allow iCloud download
-            options.deliveryMode = .highQualityFormat
-            options.version = .original
-            options.isSynchronous = false
-
-            PHImageManager.default().requestImageDataAndOrientation(
-                for: asset, options: options
-            ) { data, uti, _, info in
-                if let error = info?[PHImageErrorKey] as? Error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                guard let data else {
-                    continuation.resume(throwing: SyncError.noImageData)
-                    return
-                }
-
-                let mimeType: String
-                if let uti {
-                    if uti.contains("heic") || uti.contains("heif") { mimeType = "image/heic" }
-                    else if uti.contains("png")                      { mimeType = "image/png" }
-                    else if uti.contains("tiff")                     { mimeType = "image/tiff" }
-                    else                                             { mimeType = "image/jpeg" }
-                } else {
-                    mimeType = "image/jpeg"
-                }
-
-                continuation.resume(returning: (data, mimeType))
-            }
-        }
+        let imageData = try await PHAssetLoader.loadOriginal(for: asset)
+        return (imageData.data, imageData.mimeType)
     }
 
     enum SyncError: LocalizedError {
