@@ -35,6 +35,19 @@ services:
       # more host directories into subpaths of /mnt/libraries (see the
       # `volumes:` section below for an example).
       PHOTO_LIBRARIES_ROOT: /mnt/libraries
+      # Documents module — see documents/documents.service.ts.
+      # DOCUMENTS_DIR holds the canonical archive (sha256-named PDFs in
+      # YYYY/YYYY-MM shards). DOCUMENTS_INBOX_DIR is the watched drop
+      # zone the Raspberry Pi rsyncs scans into.
+      DOCUMENTS_DIR: /mnt/data/documents
+      DOCUMENTS_INBOX_DIR: /mnt/data/documents-inbox
+      DOCUMENTS_MAX_SIZE_MB: ${DOCUMENTS_MAX_SIZE_MB:-50}
+      # Optional: which user owns documents arriving via the inbox. Falls
+      # back to the first Admin if unset or unknown.
+      DOCUMENTS_INBOX_USER_EMAIL: ${DOCUMENTS_INBOX_USER_EMAIL:-}
+      # OCR knobs — see documents/text-extract.ts.
+      DOCUMENTS_OCR_LANG: ${DOCUMENTS_OCR_LANG:-deu+eng}
+      DOCUMENTS_OCR_DPI: ${DOCUMENTS_OCR_DPI:-200}
       ADMIN_EMAIL: admin@example.com
       ADMIN_NAME: Admin
       ADMIN_PASSWORD: changeme   # <-- hier anpassen!
@@ -80,6 +93,8 @@ services:
     volumes:
       - photos:/mnt/data/photos
       - thumbnails:/mnt/data/thumbnails
+      - documents:/mnt/data/documents
+      - documents_inbox:/mnt/data/documents-inbox
       - backup:/mnt/backup
       # External photo libraries — mount any host directories you want to
       # import from under /mnt/libraries. Use `:ro` for link-mode libraries
@@ -220,6 +235,22 @@ volumes:
     driver: local
     driver_opts:
       device: /Users/anton/vivanty_data/llm_models
+      o: bind
+      type: none
+  # Documents archive (sha256-named PDFs in YYYY/YYYY-MM shards).
+  documents:
+    driver: local
+    driver_opts:
+      device: /Users/anton/vivanty_data/documents
+      o: bind
+      type: none
+  # Inbox watched by documents/inbox-watcher.ts. The Raspberry Pi rsyncs
+  # scanned PDFs here over SSH; chokidar picks them up once they're stable.
+  # See scripts/host/README-documents-inbox.md for the Pi-side setup.
+  documents_inbox:
+    driver: local
+    driver_opts:
+      device: /Users/anton/vivanty_data/documents-inbox
       o: bind
       type: none
 

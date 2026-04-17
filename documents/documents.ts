@@ -16,6 +16,7 @@ import db from "../db/database";
 import { dbAll, dbFirst } from "../db/adapter";
 import {
   documentCategories,
+  documentCategorySuggestions,
   documentTagLinks,
   documentTags,
   documents,
@@ -625,6 +626,152 @@ export const getDocumentQueueStatus = api(
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
     return await getQueueStatus();
+  },
+);
+
+// ─── Taxonomy refinement (category suggestions) ─────────────────────────────
+
+export interface CategorySuggestionDTO {
+  id: number;
+  suggested_name: string;
+  parent_slug: string | null;
+  example_document_ids: number[];
+  rationale: string | null;
+  status: "open" | "accepted" | "rejected";
+  created_at: string | null;
+}
+
+function slugify(input: string): string {
+  return input
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+}
+
+/**
+ * List taxonomy refinements proposed by the classifier. Defaults to
+ * `open` suggestions; pass `?status=` to surface accepted/rejected
+ * for audit purposes.
+ */
+export const listCategorySuggestions = api(
+  { expose: true, method: "GET", path: "/document-category-suggestions", auth: true },
+  async ({ status }: { status?: Query<string> }): Promise<{ items: CategorySuggestionDTO[] }> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.manage_taxonomy");
+
+    const filter = status === "accepted" || status === "rejected" ? status : "open";
+    const rows = await dbAll<typeof documentCategorySuggestions.$inferSelect>(
+      db
+        .select()
+        .from(documentCategorySuggestions)
+        .where(eq(documentCategorySuggestions.status, filter as any))
+        .orderBy(desc(documentCategorySuggestions.created_at)),
+    );
+    return {
+      items: rows.map((r) => ({
+        id: r.id,
+        suggested_name: r.suggested_name,
+        parent_slug: r.parent_slug,
+        example_document_ids: r.example_document_ids ?? [],
+        rationale: r.rationale,
+        status: r.status,
+        created_at: r.created_at ?? null,
+      })),
+    };
+  },
+);
+
+export interface AcceptSuggestionRequest {
+  id: number;
+  /** Optional admin override for the auto-derived slug. */
+  slug?: string;
+  /** Optional admin override for the suggested name. */
+  name?: string;
+}
+
+/**
+ * Accept a category suggestion: create the new `document_categories`
+ * row (if no slug collision) and mark the suggestion as accepted.
+ * Returns the new category id so the UI can offer a follow-up
+ * "reclassify these examples" action.
+ */
+export const acceptCategorySuggestion = api(
+  { expose: true, method: "POST", path: "/document-category-suggestions/:id/accept", auth: true },
+  async (req: AcceptSuggestionRequest): Promise<{ category_id: number; slug: string }> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.manage_taxonomy");
+
+    const suggestion = await dbFirst<typeof documentCategorySuggestions.$inferSelect>(
+      db.select().from(documentCategorySuggestions).where(eq(documentCategorySuggestions.id, req.id)),
+    );
+    if (!suggestion) throw APIError.notFound("suggestion not found");
+    if (suggestion.status !== "open") {
+      throw APIError.failedPrecondition(`suggestion is ${suggestion.status}`);
+    }
+
+    const name = (req.name ?? suggestion.suggested_name).trim();
+    if (!name) throw APIError.invalidArgument("name must not be empty");
+    const slug = (req.slug ?? slugify(name)).trim();
+    if (!slug) throw APIError.invalidArgument("slug must not be empty");
+
+    let parentId: number | null = null;
+    if (suggestion.parent_slug) {
+      const parent = await dbFirst<{ id: number }>(
+        db.select({ id: documentCategories.id }).from(documentCategories).where(eq(documentCategories.slug, suggestion.parent_slug)),
+      );
+      parentId = parent?.id ?? null;
+    }
+
+    const existing = await dbFirst<{ id: number }>(
+      db.select({ id: documentCategories.id }).from(documentCategories).where(eq(documentCategories.slug, slug)),
+    );
+    let categoryId: number;
+    if (existing) {
+      categoryId = existing.id;
+    } else {
+      const inserted = await dbFirst<{ id: number }>(
+        db
+          .insert(documentCategories)
+          .values({ slug, name, parent_id: parentId })
+          .returning({ id: documentCategories.id }),
+      );
+      if (!inserted) throw new Error("insert documentCategories: no row returned");
+      categoryId = inserted.id;
+    }
+
+    await db
+      .update(documentCategorySuggestions)
+      .set({ status: "accepted" })
+      .where(eq(documentCategorySuggestions.id, req.id));
+
+    return { category_id: categoryId, slug };
+  },
+);
+
+export const rejectCategorySuggestion = api(
+  { expose: true, method: "POST", path: "/document-category-suggestions/:id/reject", auth: true },
+  async ({ id }: { id: number }): Promise<{ success: boolean }> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.manage_taxonomy");
+
+    const updated = await db
+      .update(documentCategorySuggestions)
+      .set({ status: "rejected" })
+      .where(and(eq(documentCategorySuggestions.id, id), eq(documentCategorySuggestions.status, "open")));
+    if ((updated as any)?.rowCount === 0) {
+      throw APIError.failedPrecondition("suggestion is not open");
+    }
+    return { success: true };
   },
 );
 
