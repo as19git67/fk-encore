@@ -1,5 +1,7 @@
 import SwiftUI
 import PhotosUI
+import Photos
+import ImageIO
 
 struct PhotoUploadView: View {
     @Environment(\.dismiss) private var dismiss
@@ -93,9 +95,17 @@ struct PhotoUploadView: View {
 
         for item in selectedItems {
             do {
-                guard let data = try await item.loadTransferable(type: Data.self) else {
+                guard var data = try await item.loadTransferable(type: Data.self) else {
                     await MainActor.run { failedCount += 1 }
                     continue
+                }
+
+                // Preserve isFavorite from the Photos library by writing XMP Rating=5
+                if let localId = item.itemIdentifier {
+                    let result = PHAsset.fetchAssets(withLocalIdentifiers: [localId], options: nil)
+                    if let asset = result.firstObject, asset.isFavorite {
+                        data = withXMPRating(data, rating: 5) ?? data
+                    }
                 }
 
                 let filename = "photo_\(Date().timeIntervalSince1970).jpg"
@@ -125,5 +135,38 @@ struct PhotoUploadView: View {
         isUploading = false
         onUploadComplete?()
         dismiss()
+    }
+
+    /// Writes XMP xmp:Rating into the JPEG/HEIC data without re-encoding pixels.
+    /// Returns nil if the operation fails (caller should fall back to original data).
+    private func withXMPRating(_ data: Data, rating: Int) -> Data? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let uti = CGImageSourceGetType(source) else { return nil }
+
+        let metadata = CGImageMetadataCreateMutable()
+        CGImageMetadataRegisterNamespaceForPrefix(
+            metadata,
+            "http://ns.adobe.com/xap/1.0/" as CFString,
+            "xmp" as CFString,
+            nil
+        )
+        guard let tag = CGImageMetadataTagCreate(
+            "http://ns.adobe.com/xap/1.0/" as CFString,
+            "xmp" as CFString,
+            "Rating" as CFString,
+            .string,
+            "\(rating)" as CFTypeRef
+        ) else { return nil }
+        CGImageMetadataSetTagWithPath(metadata, nil, "xmp:Rating" as CFString, tag)
+
+        let output = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(output, uti, 1, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageDestinationMetadata: metadata,
+            kCGImageDestinationMergeMetadata: true
+        ]
+        guard CGImageDestinationCopyImageSource(dest, source, options as CFDictionary, nil) else { return nil }
+        CGImageDestinationFinalize(dest)
+        return output as Data
     }
 }

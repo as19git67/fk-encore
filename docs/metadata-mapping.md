@@ -18,6 +18,7 @@ then project a subset of it into the DB row.
 | `longitude`   | EXIF GPS                                                                            |
 | `description` | EXIF `ImageDescription` → XMP `Description` / `dc:description` (x-default) → EXIF `UserComment` → IPTC `Caption-Abstract` |
 | `keywords[]`  | IPTC `Keywords` → XMP `dc:subject` (single string with `;` or `,` is split)         |
+| `rating`      | XMP `xmp:Rating` (integer 0–5; exifr exposes it as `Rating`)                        |
 | `author`      | IPTC `By-line` → EXIF `Artist` → XMP `dc:creator`                                   |
 | `headline`    | IPTC `Headline` (stand-alone — no longer conflated with `title`)                    |
 | `title`       | XMP `dc:title` (language-alternative resolved to `x-default` or first entry)        |
@@ -74,6 +75,30 @@ derivation) but nothing stores them permanently.
 4. If neither is set, the column stays `NULL` (or retains its prior value on
    refresh).
 
+### Curation from `rating`
+
+`ExifMetadata.rating` is not stored as a column in `photos`. Instead it
+drives an automatic entry in the `photoCuration` table:
+
+| Condition          | Effect                                                  |
+| ------------------ | ------------------------------------------------------- |
+| `rating >= 4`      | `photoCuration` row inserted/upserted with `status = 'favorite'` |
+| `rating < 4` / `null` | No curation row created (photo defaults to `visible`) |
+
+This applies to all ingest paths: `uploadPhotoStream`, `uploadPhotoLogic`,
+and external-library `importFile`.
+
+The XMP rating scale is 0–5 (Adobe convention). A value of 4 or 5 (four or
+five stars) maps to `favorite`; anything lower is ignored.
+
+#### iOS upload client
+
+The iOS app writes `xmp:Rating = 5` into the JPEG before uploading whenever
+the corresponding `PHAsset.isFavorite` is `true`. This is done with
+`CGImageDestinationCopyImageSource` (ImageIO) so the pixel data is not
+re-encoded — only the XMP block in the file container is updated. The server
+then reads the injected rating through its normal `getExifMetadata()` path.
+
 ### Fields read but not stored
 
 The following fields are returned by `getExifMetadata()` but currently have
@@ -82,6 +107,7 @@ no column in `photos`. They are effectively discarded after parsing:
 - `author` — IPTC By-line / EXIF Artist / XMP dc:creator
 - `copyright` — IPTC CopyrightNotice / EXIF Copyright / XMP dc:rights
 - `credit` — IPTC Credit
+- `rating` — XMP xmp:Rating (drives curation — see above — but not a `photos` column)
 - `state` — IPTC Province-State (used as a fallback when building
   `location_name` / `location_short`, but not stored as its own column)
 - `rating` — XMP `xmp:Rating`; surfaced indirectly in two ways instead of
