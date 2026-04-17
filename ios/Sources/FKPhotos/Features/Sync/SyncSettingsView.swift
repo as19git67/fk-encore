@@ -14,6 +14,7 @@ struct SyncSettingsView: View {
     @State private var iosAlbumNames: [String: String] = [:]
     @State private var showAuthAlert = false
     @State private var refreshTick   = 0  // Bump to re-read status values
+    @State private var showResetConfirm = false
 
     private var lastSyncDate:   Date? { PhotoSyncPreferences.lastSyncDate }
     private var uploadedCount:  Int   { PhotoSyncPreferences.uploadedCount }
@@ -149,8 +150,26 @@ struct SyncSettingsView: View {
                     Text("\(uploadedCount)")
                         .foregroundStyle(.secondary)
                 }
+                Button(role: .destructive) {
+                    showResetConfirm = true
+                } label: {
+                    Text("Upload-Verlauf zurücksetzen")
+                }
             }
             .id(refreshTick)  // Force re-render when tick changes
+            .confirmationDialog(
+                "Upload-Verlauf zurücksetzen?",
+                isPresented: $showResetConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Zurücksetzen", role: .destructive) {
+                    PhotoSyncPreferences.resetUploadHistory()
+                    refreshTick += 1
+                }
+                Button("Abbrechen", role: .cancel) {}
+            } message: {
+                Text("Alle Fotos werden beim nächsten Sync erneut geprüft und ggf. hochgeladen.")
+            }
         }
         .navigationTitle("Automatisch hochladen")
         .navigationBarTitleDisplayMode(.inline)
@@ -267,47 +286,82 @@ struct AlbumPickerView: View {
 
     @State private var albums: [(collection: PHAssetCollection, count: Int)] = []
     @State private var isLoading = true
+    @State private var searchText = ""
+
+    private var filteredAlbums: [(collection: PHAssetCollection, count: Int)] {
+        guard !searchText.isEmpty else { return albums }
+        return albums.filter {
+            ($0.collection.localizedTitle ?? "").localizedCaseInsensitiveContains(searchText)
+        }
+    }
 
     var body: some View {
-        List {
-            if isLoading {
-                ProgressView("Alben laden…")
-                    .frame(maxWidth: .infinity)
-                    .padding()
-            } else if albums.isEmpty {
-                ContentUnavailableView {
-                    Label("Keine Alben", systemImage: "photo.on.rectangle.angled")
-                } description: {
-                    Text("Es wurden keine Alben mit Fotos gefunden.")
+        VStack(spacing: 0) {
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Album suchen", text: $searchText)
+                    .autocorrectionDisabled()
+                if !searchText.isEmpty {
+                    Button { searchText = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
                 }
-            } else {
-                ForEach(albums, id: \.collection.localIdentifier) { item in
-                    Button {
-                        let id = item.collection.localIdentifier
-                        if selectedIds.contains(id) {
-                            selectedIds.remove(id)
-                        } else {
-                            selectedIds.insert(id)
-                        }
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(item.collection.localizedTitle ?? "Unbekannt")
-                                    .foregroundStyle(.primary)
-                                Text("\(item.count) Foto\(item.count == 1 ? "" : "s")")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+            }
+            .padding(8)
+            .background(.quaternary)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+
+            List {
+                if isLoading {
+                    ProgressView("Alben laden…")
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                } else if albums.isEmpty {
+                    ContentUnavailableView {
+                        Label("Keine Alben", systemImage: "photo.on.rectangle.angled")
+                    } description: {
+                        Text("Es wurden keine Alben mit Fotos gefunden.")
+                    }
+                } else if filteredAlbums.isEmpty {
+                    ContentUnavailableView {
+                        Label("Keine Treffer", systemImage: "magnifyingglass")
+                    } description: {
+                        Text("Kein Album entspricht \"\(searchText)\".")
+                    }
+                } else {
+                    ForEach(filteredAlbums, id: \.collection.localIdentifier) { item in
+                        Button {
+                            let id = item.collection.localIdentifier
+                            if selectedIds.contains(id) {
+                                selectedIds.remove(id)
+                            } else {
+                                selectedIds.insert(id)
                             }
-                            Spacer()
-                            if selectedIds.contains(item.collection.localIdentifier) {
-                                Image(systemName: "checkmark")
-                                    .foregroundStyle(Color.accentColor)
-                                    .fontWeight(.semibold)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.collection.localizedTitle ?? "Unbekannt")
+                                        .foregroundStyle(.primary)
+                                    Text("\(item.count) Foto\(item.count == 1 ? "" : "s")")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if selectedIds.contains(item.collection.localIdentifier) {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(Color.accentColor)
+                                        .fontWeight(.semibold)
+                                }
                             }
                         }
                     }
                 }
             }
+            .listStyle(.plain)
         }
         .navigationTitle("Alben auswählen")
         .navigationBarTitleDisplayMode(.inline)
@@ -324,11 +378,14 @@ struct AlbumPickerView: View {
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 var result: [(PHAssetCollection, Int)] = []
-                var seen = Set<String>()
+                var seenIds = Set<String>()
+                var seenNames = Set<String>()
                 PHAssetCollection
                     .fetchAssetCollections(with: .album, subtype: .any, options: nil)
                     .enumerateObjects { collection, _, _ in
-                        guard seen.insert(collection.localIdentifier).inserted else { return }
+                        guard seenIds.insert(collection.localIdentifier).inserted else { return }
+                        let name = collection.localizedTitle ?? ""
+                        guard seenNames.insert(name.lowercased()).inserted else { return }
                         let count = PHAsset.fetchAssets(in: collection, options: nil).count
                         if count > 0 { result.append((collection, count)) }
                     }
