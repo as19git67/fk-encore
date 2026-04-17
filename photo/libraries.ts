@@ -114,6 +114,9 @@ export const scanLibrary = api(
     try {
       return await libs.scanLibrary(id);
     } catch (err) {
+      if (err instanceof libs.ScanAlreadyRunningError) {
+        throw APIError.failedPrecondition(err.message);
+      }
       toApiError(err);
     }
   }

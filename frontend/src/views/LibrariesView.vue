@@ -6,6 +6,7 @@ import InputText from 'primevue/inputtext'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import Select from 'primevue/select'
+import InputNumber from 'primevue/inputnumber'
 import ToggleSwitch from 'primevue/toggleswitch'
 import Tag from 'primevue/tag'
 import Message from 'primevue/message'
@@ -45,12 +46,14 @@ const form = ref<{
   import_mode: LibraryImportMode
   auto_import: boolean
   auto_albums: boolean
+  favorite_rating_threshold: number
 }>({
   name: '',
   path: '',
   import_mode: 'link',
   auto_import: false,
   auto_albums: false,
+  favorite_rating_threshold: 0,
 })
 const saving = ref(false)
 
@@ -82,8 +85,19 @@ const pathSegments = computed<{ label: string; sub: string }[]>(() => {
 const showDeleteConfirm = ref(false)
 const libraryToDelete = ref<PhotoLibrary | null>(null)
 
-// Per-row busy flags so users see immediate feedback
-const busyId = ref<number | null>(null)
+// Per-row busy flags so users see immediate feedback. A Set lets multiple
+// libraries scan/reconcile concurrently without their spinners racing each
+// other like a single shared ref would.
+const busyIds = ref<Set<number>>(new Set())
+function isBusy(id: number): boolean {
+  return busyIds.value.has(id)
+}
+function markBusy(id: number, busy: boolean) {
+  const next = new Set(busyIds.value)
+  if (busy) next.add(id)
+  else next.delete(id)
+  busyIds.value = next
+}
 
 async function loadData() {
   loading.value = true
@@ -125,6 +139,7 @@ async function openCreateDialog() {
     import_mode: 'link',
     auto_import: false,
     auto_albums: false,
+    favorite_rating_threshold: 0,
   }
   showEditDialog.value = true
   await loadPickerAt('')
@@ -138,6 +153,7 @@ function openEditDialog(lib: PhotoLibrary) {
     import_mode: lib.import_mode,
     auto_import: lib.auto_import,
     auto_albums: lib.auto_albums,
+    favorite_rating_threshold: lib.favorite_rating_threshold ?? 0,
   }
   showEditDialog.value = true
 }
@@ -173,6 +189,7 @@ async function handleSave() {
         import_mode: form.value.import_mode,
         auto_import: form.value.auto_import,
         auto_albums: form.value.auto_albums,
+        favorite_rating_threshold: form.value.favorite_rating_threshold,
       })
       info.value = 'Bibliothek angelegt.'
     } else {
@@ -181,6 +198,7 @@ async function handleSave() {
         import_mode: form.value.import_mode,
         auto_import: form.value.auto_import,
         auto_albums: form.value.auto_albums,
+        favorite_rating_threshold: form.value.favorite_rating_threshold,
       })
       info.value = 'Bibliothek aktualisiert.'
     }
@@ -213,37 +231,45 @@ async function handleDelete() {
   }
 }
 
+function appendInfo(line: string) {
+  info.value = info.value ? `${info.value}\n${line}` : line
+}
+
+function appendError(line: string) {
+  error.value = error.value ? `${error.value}\n${line}` : line
+}
+
 async function runScan(lib: PhotoLibrary) {
-  error.value = ''
-  info.value = ''
-  busyId.value = lib.id
+  if (isBusy(lib.id)) return
+  markBusy(lib.id, true)
   try {
     const report: ScanReport = await scanLibrary(lib.id)
-    info.value = `Scan "${lib.name}": ${report.imported} importiert, `
+    appendInfo(
+      `Scan "${lib.name}": ${report.imported} importiert, `
       + `${report.skipped_duplicate} Duplikate, `
       + `${report.skipped_unsupported} nicht unterstützt, `
       + `${report.skipped_empty} leer, `
-      + `${report.errors} Fehler (${report.scanned} insgesamt).`
+      + `${report.errors} Fehler (${report.scanned} insgesamt).`,
+    )
     await loadData()
   } catch (err: any) {
-    error.value = err.message || 'Scan fehlgeschlagen'
+    appendError(`Scan "${lib.name}": ${err.message || 'fehlgeschlagen'}`)
   } finally {
-    busyId.value = null
+    markBusy(lib.id, false)
   }
 }
 
 async function runReconcile(lib: PhotoLibrary) {
-  error.value = ''
-  info.value = ''
-  busyId.value = lib.id
+  if (isBusy(lib.id)) return
+  markBusy(lib.id, true)
   try {
     const res = await reconcileLibrary(lib.id)
-    info.value = `Abgleich "${lib.name}": ${res.removed} verwaiste Einträge entfernt.`
+    appendInfo(`Abgleich "${lib.name}": ${res.removed} verwaiste Einträge entfernt.`)
     await loadData()
   } catch (err: any) {
-    error.value = err.message || 'Abgleich fehlgeschlagen'
+    appendError(`Abgleich "${lib.name}": ${err.message || 'fehlgeschlagen'}`)
   } finally {
-    busyId.value = null
+    markBusy(lib.id, false)
   }
 }
 
@@ -265,10 +291,10 @@ onMounted(loadData)
       <strong>Verschieben</strong> wird sie in das Upload-Verzeichnis übernommen.
     </p>
 
-    <Message v-if="error" severity="error" :closable="true" class="mb" @close="error = ''">
+    <Message v-if="error" severity="error" :closable="true" class="mb multiline" @close="error = ''">
       {{ error }}
     </Message>
-    <Message v-if="info" severity="success" :closable="true" class="mb" @close="info = ''">
+    <Message v-if="info" severity="success" :closable="true" class="mb multiline" @close="info = ''">
       {{ info }}
     </Message>
 
@@ -316,6 +342,16 @@ onMounted(loadData)
           />
         </template>
       </Column>
+      <Column header="Favorit ab" style="width: 8rem">
+        <template #body="{ data }">
+          <Tag
+            v-if="data.favorite_rating_threshold > 0"
+            :value="`≥ ${data.favorite_rating_threshold} ★`"
+            severity="warn"
+          />
+          <Tag v-else value="aus" severity="secondary" />
+        </template>
+      </Column>
       <Column header="Letzter Scan" style="width: 10rem">
         <template #body="{ data }">
           <span v-if="data.last_scan_at">{{ formatDateShort(data.last_scan_at) }}</span>
@@ -331,7 +367,8 @@ onMounted(loadData)
               severity="success"
               text
               rounded
-              :loading="busyId === data.id"
+              :loading="isBusy(data.id)"
+              :disabled="isBusy(data.id)"
               v-tooltip="'Scan ausführen'"
               @click="runScan(data)"
             />
@@ -341,7 +378,8 @@ onMounted(loadData)
               severity="info"
               text
               rounded
-              :loading="busyId === data.id"
+              :loading="isBusy(data.id)"
+              :disabled="isBusy(data.id)"
               v-tooltip="'Abgleich (verwaiste Einträge entfernen)'"
               @click="runReconcile(data)"
             />
@@ -494,8 +532,28 @@ onMounted(loadData)
         <div class="field row">
           <ToggleSwitch v-model="form.auto_albums" input-id="lib-auto-albums" />
           <label for="lib-auto-albums">
-            Auto-Alben aus Unterverzeichnissen (voller Unterpfad = Albumname)
+            Auto-Alben aus Unterverzeichnissen (voller Unterpfad = Albumname;
+            Dateien direkt im Library-Wurzelverzeichnis kommen in ein Album
+            mit dem Library-Namen)
           </label>
+        </div>
+
+        <div class="field">
+          <label for="lib-fav-threshold">Favorit ab Rating (XMP-Sterne)</label>
+          <InputNumber
+            id="lib-fav-threshold"
+            v-model="form.favorite_rating_threshold"
+            :min="0"
+            :max="5"
+            show-buttons
+            button-layout="horizontal"
+            :step="1"
+          />
+          <small class="hint-small">
+            0 deaktiviert die automatische Favoriten-Markierung. Beim Import wird
+            zusätzlich ein Tag <code>Rating-1</code>…<code>Rating-5</code> aus
+            dem XMP-Rating übernommen.
+          </small>
         </div>
       </div>
 
@@ -571,6 +629,10 @@ onMounted(loadData)
 
 .mb {
   margin-bottom: 0.5rem;
+}
+
+.multiline :deep(.p-message-text) {
+  white-space: pre-line;
 }
 
 .path {
