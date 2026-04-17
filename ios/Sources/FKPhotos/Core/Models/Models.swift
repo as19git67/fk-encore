@@ -120,6 +120,8 @@ struct PhotoWithCuration: Codable, Identifiable, Sendable {
     let ai_quality_score: Double?
     let auto_crop: AutoCrop?
     let curation_status: CurationStatus
+    let description: String?
+    let keywords: [String]?
 }
 
 // MARK: - Album
