@@ -64,13 +64,12 @@ const currentRegistered = ref(false)
 const currentMounted = ref(false)
 const loadingPaths = ref(false)
 
-// Breadcrumb segments derived from currentSub. First entry is always the root.
+// Breadcrumb segments derived from currentSub. The library root itself is not
+// shown as a labelled segment — a dedicated home button represents it.
 const pathSegments = computed<{ label: string; sub: string }[]>(() => {
-  const segs: { label: string; sub: string }[] = [
-    { label: availableRoot.value || '/', sub: '' },
-  ]
-  if (!currentSub.value) return segs
+  if (!currentSub.value) return []
   const parts = currentSub.value.split('/')
+  const segs: { label: string; sub: string }[] = []
   let acc = ''
   for (const p of parts) {
     acc = acc ? `${acc}/${p}` : p
@@ -388,16 +387,23 @@ onMounted(loadData)
           <label>Pfad</label>
           <div v-if="editingId === null" class="picker">
             <div class="breadcrumb">
+              <button
+                type="button"
+                class="crumb home"
+                :disabled="!currentSub"
+                v-tooltip="'Zur Wurzel wechseln'"
+                @click="navigateTo('')"
+              >
+                <i class="pi pi-home" />
+              </button>
               <template v-for="(seg, i) in pathSegments" :key="seg.sub">
-                <Button
-                  :label="seg.label"
+                <span class="sep">/</span>
+                <button
+                  type="button"
+                  class="crumb"
                   :disabled="i === pathSegments.length - 1"
-                  size="small"
-                  severity="secondary"
-                  text
                   @click="navigateTo(seg.sub)"
-                />
-                <span v-if="i < pathSegments.length - 1" class="sep">/</span>
+                >{{ seg.label }}</button>
               </template>
             </div>
             <div class="selected-row">
@@ -487,7 +493,7 @@ onMounted(loadData)
         <div class="field row">
           <ToggleSwitch v-model="form.auto_albums" input-id="lib-auto-albums" />
           <label for="lib-auto-albums">
-            Auto-Alben aus Unterverzeichnissen (erstes Segment = Albumname)
+            Auto-Alben aus Unterverzeichnissen (voller Unterpfad = Albumname)
           </label>
         </div>
       </div>
@@ -649,13 +655,41 @@ onMounted(loadData)
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0;
   font-family: monospace;
   font-size: 0.85rem;
 }
 
 .breadcrumb .sep {
   color: var(--p-text-muted-color);
+  padding: 0 0.1rem;
+}
+
+.crumb {
+  background: none;
+  border: 0;
+  padding: 0.1rem 0.25rem;
+  margin: 0;
+  font: inherit;
+  color: var(--p-primary-color, #3b82f6);
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.crumb:hover:not(:disabled) {
+  background: var(--p-highlight-background, rgba(59, 130, 246, 0.1));
+  text-decoration: underline;
+}
+
+.crumb:disabled {
+  color: var(--p-text-color);
+  cursor: default;
+  font-weight: 600;
+}
+
+.crumb.home {
+  display: inline-flex;
+  align-items: center;
 }
 
 .selected-row {

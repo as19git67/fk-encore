@@ -275,6 +275,10 @@ export const albums = pgTable("albums", {
     .references(() => users.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   description: text("description"),
+  // Optional event label derived from the source folder (e.g. "Hochzeit" from
+  // "2020-06 Hochzeit"). Only populated by the library auto-album feature;
+  // manual albums leave it null.
+  event_name: text("event_name"),
   cover_photo_id: integer("cover_photo_id")
     .references(() => photos.id, { onDelete: "set null" }),
   display_mode: text("display_mode").notNull().default("grid"), // 'grid' | 'map'

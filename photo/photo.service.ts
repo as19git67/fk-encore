@@ -2027,6 +2027,7 @@ export async function listAlbumsLogic(userId: number): Promise<ListAlbumsRespons
         user_id: albums.user_id,
         name: albums.name,
         description: albums.description,
+        event_name: albums.event_name,
         cover_photo_id: albums.cover_photo_id,
         display_mode: albums.display_mode,
         created_at: albums.created_at,

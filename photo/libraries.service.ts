@@ -334,20 +334,46 @@ export type ImportOutcome =
 
 /**
  * Derive the album name from the file's location relative to the library root.
- * Returns the first path segment, or null if the file sits directly in the
- * library root (in which case no auto-album should be created).
+ * Returns the full relative sub-path (using forward slashes), so a file at
+ * `2020/2020-01/img.jpg` ends up in album "2020/2020-01". Files directly in the
+ * library root return null — no auto-album is created for those.
  */
 function deriveAutoAlbumName(libraryPath: string, absFilePath: string): string | null {
   const rel = path.relative(libraryPath, path.dirname(absFilePath));
   if (!rel || rel === "." || rel.startsWith("..")) return null;
-  const first = rel.split(path.sep)[0];
-  return first?.trim() ? first : null;
+  // Normalise to forward slashes so the album name is platform-independent.
+  const normalised = rel.split(path.sep).filter(Boolean).join("/");
+  return normalised || null;
+}
+
+/**
+ * Extract an event label from an album name by stripping date-like fragments
+ * (YYYY, YYYY-MM, YYYY-MM-DD) from the last path segment. Returns null when
+ * nothing meaningful is left.
+ *
+ * Examples:
+ *   "2020/2020-01"           → null
+ *   "2020/2020-06 Hochzeit"  → "Hochzeit"
+ *   "2020-06-15-Wedding"     → "Wedding"
+ *   "Urlaub Italien"         → "Urlaub Italien"
+ */
+function deriveEventName(albumName: string): string | null {
+  const lastSeg = albumName.split("/").pop() ?? albumName;
+  const cleaned = lastSeg
+    .replace(/\b\d{4}-\d{2}-\d{2}\b/g, "")
+    .replace(/\b\d{4}-\d{2}\b/g, "")
+    .replace(/\b\d{4}\b/g, "")
+    .replace(/^[\s\-_]+|[\s\-_]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned.length >= 2 ? cleaned : null;
 }
 
 /**
  * Find or create an album with the given name for a specific user, then add
  * the photo to it. Idempotent: calling twice for the same (album, photo) is a
- * no-op thanks to the album_photos primary key.
+ * no-op thanks to the album_photos primary key. The event label is only
+ * written on first creation so manual edits made later are preserved.
  */
 async function attachToAutoAlbum(
   ownerId: number,
@@ -361,10 +387,11 @@ async function attachToAutoAlbum(
       .where(and(eq(albums.user_id, ownerId), eq(albums.name, albumName)))
   );
   if (!album) {
+    const eventName = deriveEventName(albumName);
     album = await dbInsertReturning<{ id: number }>(
       db
         .insert(albums)
-        .values({ user_id: ownerId, name: albumName })
+        .values({ user_id: ownerId, name: albumName, event_name: eventName })
         .returning({ id: albums.id })
     );
   }

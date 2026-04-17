@@ -132,13 +132,19 @@ Only meaningful for `link`-mode libraries. Returns `{ "removed": <n> }`.
   inotify, etc.). Implemented with Encore's declarative `CronJob`.
 - **Auto-albums** — when `auto_albums = true`, every imported photo that sits
   in a sub-directory of the library root is added to an album named after the
-  **first path segment** relative to the library root. Photos located directly
-  in the library root are not auto-albumed. The album is owned by the library
-  owner and created on first use; subsequent imports into the same sub-tree
-  reuse it. Adding a photo to an album is idempotent, so re-scans and watcher
-  events don't produce duplicates. Example: with library root
-  `/mnt/libraries/archive`, the file `archive/2024/holidays/IMG_0001.jpg`
-  lands in album `2024`.
+  **full relative sub-path** (forward-slash separated). Photos located
+  directly in the library root are not auto-albumed. The album is owned by
+  the library owner and created on first use; subsequent imports into the
+  same sub-tree reuse it. Adding a photo to an album is idempotent, so
+  re-scans and watcher events don't produce duplicates. Example: with library
+  root `/mnt/libraries/archive`, the file `2020/2020-06 Wedding/IMG_0001.jpg`
+  lands in album `2020/2020-06 Wedding`, distinct from `2020/2020-07`.
+- **Event label** — when the last path segment of a new auto-album contains
+  text beyond a date fragment (`YYYY`, `YYYY-MM`, `YYYY-MM-DD`), the remainder
+  is stored in `albums.event_name`. Example: `2020/2020-06 Wedding` yields
+  `event_name = "Wedding"`; pure date folders like `2020/2020-06` leave it
+  null. The field is only set at album creation time — manual edits made
+  later are preserved.
 
 ## Data model
 
@@ -168,6 +174,14 @@ auto-album feature:
 ```sql
 ALTER TABLE photo_libraries
   ADD COLUMN auto_albums BOOLEAN NOT NULL DEFAULT false;
+```
+
+Migration `0024_album_event_name.sql` adds an optional event label on albums,
+populated by the auto-album derivation (see above):
+
+```sql
+ALTER TABLE albums
+  ADD COLUMN event_name TEXT;
 ```
 
 `photos.filename` for link-imported rows follows the synthetic form
