@@ -5,6 +5,7 @@ struct PhotoMonthGridView: View {
     let month: Int
 
     @State private var photos: [PhotoWithCuration] = []
+    @State private var curationOverrides: [Int: CurationStatus] = [:]
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var selectedIndex = 0
@@ -55,14 +56,28 @@ struct PhotoMonthGridView: View {
                 } else {
                     LazyVGrid(columns: columns, spacing: 2) {
                         ForEach(photos.indices, id: \.self) { index in
+                            let photo = photos[index]
+                            let isFav = (curationOverrides[photo.id] ?? photo.curation_status) == .favorite
                             Button {
                                 selectedIndex = index
                                 isFullscreenPresented = true
                             } label: {
-                                PhotoThumbnailView(filename: photos[index].filename, autoCrop: photos[index].auto_crop)
+                                PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop)
+                                    .overlay(alignment: .bottomTrailing) {
+                                        Button {
+                                            toggleFavorite(photo)
+                                        } label: {
+                                            Image(systemName: isFav ? "heart.fill" : "heart")
+                                                .font(.caption)
+                                                .foregroundStyle(isFav ? Color.red : Color.white)
+                                                .shadow(color: .black.opacity(0.5), radius: 1.5)
+                                                .padding(5)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
                             }
                             .buttonStyle(.plain)
-                            .id(photos[index].id)
+                            .id(photo.id)
                         }
                     }
                     .padding(.horizontal, 2)
@@ -101,6 +116,22 @@ struct PhotoMonthGridView: View {
         }
         .refreshable { await loadPhotos() }
         .task { await loadPhotos() }
+    }
+
+    private func toggleFavorite(_ photo: PhotoWithCuration) {
+        let current = curationOverrides[photo.id] ?? photo.curation_status
+        let next: CurationStatus = current == .favorite ? .visible : .favorite
+        curationOverrides[photo.id] = next
+        Task {
+            struct Body: Codable { let status: CurationStatus }
+            struct Response: Codable { let success: Bool }
+            if (try? await APIClient.shared.patch(
+                "/photos/\(photo.id)/curation",
+                body: Body(status: next)
+            ) as Response) == nil {
+                curationOverrides[photo.id] = current
+            }
+        }
     }
 
     private func loadPhotos() async {

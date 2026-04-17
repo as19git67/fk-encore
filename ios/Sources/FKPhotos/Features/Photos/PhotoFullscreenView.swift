@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import MapKit
 
 // MARK: - Container (supports swipe paging between multiple photos)
 
@@ -65,7 +66,6 @@ struct PhotoFullscreenView: View {
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
         .background(Color(.systemBackground))
-        .ignoresSafeArea()
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .tabBar)
@@ -73,7 +73,6 @@ struct PhotoFullscreenView: View {
             if photos.indices.contains(newIndex) {
                 currentCurationStatus = photos[newIndex].curation_status
             }
-            withAnimation(.spring(duration: 0.4)) { showDetails = false }
         }
         .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -298,6 +297,8 @@ private struct PhotoPageView: View {
     @State private var showAllAlbums = false
     @State private var showDatePicker = false
     @State private var editedDate = Date()
+    @State private var isEditingDescription = false
+    @State private var draftDescription = ""
 
     init(photo: PhotoWithCuration, faceBBox: FaceBBox? = nil, showDetails: Binding<Bool>, curationStatus: Binding<CurationStatus>) {
         self.photo = photo
@@ -418,12 +419,76 @@ private struct PhotoPageView: View {
                     }
                 }
 
-                // Location
-                if let loc = locationText {
-                    sectionHeader("Ort")
-                    detailRow {
-                        Text(loc).font(.subheadline)
+                // Description
+                sectionHeader("Beschreibung")
+                detailRow {
+                    if isEditingDescription {
+                        HStack(alignment: .top, spacing: 8) {
+                            TextField("Beschreibung", text: $draftDescription, axis: .vertical)
+                                .font(.subheadline)
+                                .lineLimit(3...8)
+                            Button("Fertig") {
+                                isEditingDescription = false
+                                Task { await viewModel.updateDescription(draftDescription) }
+                            }
+                            .font(.subheadline.bold())
+                        }
+                    } else {
+                        HStack(alignment: .top, spacing: 8) {
+                            Text(viewModel.description ?? "Keine Beschreibung")
+                                .font(.subheadline)
+                                .foregroundStyle(viewModel.description != nil ? .primary : .secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Button {
+                                draftDescription = viewModel.description ?? ""
+                                isEditingDescription = true
+                            } label: {
+                                Image(systemName: "square.and.pencil")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
+                }
+
+                // Tags
+                if !viewModel.keywords.isEmpty {
+                    sectionHeader("Tags")
+                    detailRow {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                ForEach(viewModel.keywords, id: \.self) { tag in
+                                    Text(tag)
+                                        .font(.caption)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 3)
+                                        .background(.quaternary)
+                                        .clipShape(Capsule())
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Location
+                if let lat = viewModel.photo.latitude, let lon = viewModel.photo.longitude {
+                    sectionHeader("Ort")
+                    let coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+                    Map(initialPosition: .region(MKCoordinateRegion(
+                        center: coordinate,
+                        span: MKCoordinateSpan(latitudeDelta: 0.005, longitudeDelta: 0.005)
+                    ))) {
+                        Marker("", coordinate: coordinate).tint(.red)
+                    }
+                    .frame(height: 160)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    if let loc = locationText {
+                        detailRow { Text(loc).font(.subheadline) }
+                    }
+                } else if let loc = locationText {
+                    sectionHeader("Ort")
+                    detailRow { Text(loc).font(.subheadline) }
                 }
 
                 // AI quality

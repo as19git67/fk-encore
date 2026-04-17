@@ -779,6 +779,8 @@ export interface ExifMetadata {
   description: string | null;
   /** IPTC Keywords / XMP dc:subject — candidate tags. */
   keywords: string[];
+  /** XMP xmp:Rating (0–5). >= 4 is treated as favourite on import. */
+  rating: number | null;
   /** IPTC By-line / XMP dc:creator — creator/photographer name. */
   author: string | null;
   /** IPTC Headline. */
@@ -927,6 +929,7 @@ export async function getExifMetadata(filePath: string): Promise<ExifMetadata> {
     longitude: null,
     description: null,
     keywords: [],
+    rating: null,
     author: null,
     headline: null,
     title: null,
@@ -992,6 +995,7 @@ export async function getExifMetadata(filePath: string): Promise<ExifMetadata> {
       longitude: data?.longitude ?? null,
       description,
       keywords,
+      rating,
       author,
       headline,
       title,
@@ -1275,6 +1279,18 @@ export async function uploadPhotoStream(
     }).returning()
   );
 
+  // Mark as favourite if XMP Rating >= 4
+  if (exifMeta.rating !== null && exifMeta.rating >= 4) {
+    await dbExec(
+      db.insert(photoCuration)
+        .values({ user_id: userId, photo_id: row!.id, status: "favorite" })
+        .onConflictDoUpdate({
+          target: [photoCuration.user_id, photoCuration.photo_id],
+          set: { status: "favorite", updated_at: sql`NOW()` },
+        })
+    );
+  }
+
   // Add to scan queue and wake workers — upload returns immediately
   enqueuePhotoScan(row!.id, userId).then(() => triggerWorkers()).catch(err => {
     console.error("Enqueue error:", err);
@@ -1360,6 +1376,18 @@ export async function uploadPhotoLogic(
       ...(iptcLoc2 ?? {}),
     }).returning()
   );
+
+  // Mark as favourite if XMP Rating >= 4
+  if (exifMeta2.rating !== null && exifMeta2.rating >= 4) {
+    await dbExec(
+      db.insert(photoCuration)
+        .values({ user_id: userId, photo_id: row2!.id, status: "favorite" })
+        .onConflictDoUpdate({
+          target: [photoCuration.user_id, photoCuration.photo_id],
+          set: { status: "favorite", updated_at: sql`NOW()` },
+        })
+    );
+  }
 
   // Add to scan queue and wake workers — upload returns immediately
   enqueuePhotoScan(row2!.id, userId).then(() => triggerWorkers()).catch(err => {

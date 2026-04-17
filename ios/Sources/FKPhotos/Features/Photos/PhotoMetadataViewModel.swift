@@ -10,6 +10,8 @@ final class PhotoMetadataViewModel {
     let photo: PhotoWithCuration
     var curationStatus: CurationStatus
     private(set) var takenAt: String?
+    private(set) var description: String?
+    private(set) var keywords: [String] = []
 
     struct LandmarkEntry: Identifiable {
         let id: Int
@@ -48,6 +50,8 @@ final class PhotoMetadataViewModel {
         self.photo = photo
         self.curationStatus = photo.curation_status
         self.takenAt = photo.taken_at
+        self.description = photo.description
+        self.keywords = photo.keywords ?? []
     }
 
     @MainActor
@@ -57,7 +61,8 @@ final class PhotoMetadataViewModel {
         async let facesTask: Void = loadFaces()
         async let albumsTask: Void = loadAlbums()
         async let landmarksTask: Void = loadLandmarks()
-        _ = await (facesTask, albumsTask, landmarksTask)
+        async let detailsTask: Void = loadDetails()
+        _ = await (facesTask, albumsTask, landmarksTask, detailsTask)
     }
 
     @MainActor
@@ -171,6 +176,36 @@ final class PhotoMetadataViewModel {
         } catch {
             // silently ignore
         }
+    }
+
+    @MainActor
+    private func loadDetails() async {
+        // Skip if already populated from the photo model
+        guard photo.description == nil && photo.keywords == nil else { return }
+        struct DetailEntry: Codable { let id: Int; let description: String?; let keywords: [String]? }
+        struct DetailsResponse: Codable { let photos: [DetailEntry] }
+        do {
+            let response: DetailsResponse = try await APIClient.shared.get(
+                "/photos/details", query: ["ids": "\(photo.id)"]
+            )
+            if let entry = response.photos.first(where: { $0.id == photo.id }) {
+                description = entry.description
+                keywords = entry.keywords ?? []
+            }
+        } catch {}
+    }
+
+    @MainActor
+    func updateDescription(_ text: String?) async {
+        struct Body: Codable { let description: String? }
+        struct Response: Codable { let success: Bool; let description: String? }
+        do {
+            let result: Response = try await APIClient.shared.patch(
+                "/photos/\(photo.id)/description",
+                body: Body(description: text?.isEmpty == true ? nil : text)
+            )
+            description = result.description
+        } catch {}
     }
 
     @MainActor
