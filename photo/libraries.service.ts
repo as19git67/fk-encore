@@ -15,10 +15,10 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import db from "../db/database";
 import { dbFirst, dbAll, dbExec, dbInsertReturning } from "../db/adapter";
-import { photoLibraries, photos, albums, albumPhotos } from "../db/schema";
+import { photoLibraries, photos, photoCuration, albums, albumPhotos } from "../db/schema";
 import {
   UPLOAD_DIR,
   SUPPORTED_EXTENSIONS,
@@ -29,6 +29,7 @@ import {
   getExifMetadata,
   iptcLocationUpdate,
   combineDescription,
+  mergeRatingKeyword,
 } from "./photo.service";
 import { enqueuePhotoScan } from "./scan-queue";
 import { triggerWorkers } from "./scan-worker";
@@ -47,6 +48,11 @@ export interface PhotoLibrary {
   import_mode: LibraryImportMode;
   auto_import: boolean;
   auto_albums: boolean;
+  /**
+   * Minimum XMP:Rating (1..5) that flips newly imported photos to "favourite"
+   * for the library owner. 0 disables the behaviour.
+   */
+  favorite_rating_threshold: number;
   created_at: string | null;
   last_scan_at: string | null;
 }
@@ -57,6 +63,7 @@ export interface CreateLibraryRequest {
   import_mode?: LibraryImportMode;
   auto_import?: boolean;
   auto_albums?: boolean;
+  favorite_rating_threshold?: number;
 }
 
 export interface UpdateLibraryRequest {
@@ -65,6 +72,16 @@ export interface UpdateLibraryRequest {
   import_mode?: LibraryImportMode;
   auto_import?: boolean;
   auto_albums?: boolean;
+  favorite_rating_threshold?: number;
+}
+
+/** 0 disables the feature; otherwise must be a 1..5 star threshold. */
+function normaliseFavoriteRatingThreshold(v: unknown): number {
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) throw new Error("favorite_rating_threshold must be a number");
+  const r = Math.trunc(n);
+  if (r < 0 || r > 5) throw new Error("favorite_rating_threshold must be between 0 and 5");
+  return r;
 }
 
 export interface ScanReport {
@@ -248,6 +265,7 @@ function rowToLibrary(row: typeof photoLibraries.$inferSelect): PhotoLibrary {
     import_mode: row.import_mode as LibraryImportMode,
     auto_import: row.auto_import,
     auto_albums: row.auto_albums,
+    favorite_rating_threshold: row.favorite_rating_threshold,
     created_at: row.created_at ?? null,
     last_scan_at: row.last_scan_at ?? null,
   };
@@ -276,6 +294,9 @@ export async function createLibrary(
         import_mode: req.import_mode ?? "link",
         auto_import: req.auto_import ?? false,
         auto_albums: req.auto_albums ?? false,
+        favorite_rating_threshold: normaliseFavoriteRatingThreshold(
+          req.favorite_rating_threshold ?? 0
+        ),
       })
       .returning()
   );
@@ -305,6 +326,11 @@ export async function updateLibrary(req: UpdateLibraryRequest): Promise<PhotoLib
   if (req.import_mode !== undefined) updates.import_mode = req.import_mode;
   if (req.auto_import !== undefined) updates.auto_import = req.auto_import;
   if (req.auto_albums !== undefined) updates.auto_albums = req.auto_albums;
+  if (req.favorite_rating_threshold !== undefined) {
+    updates.favorite_rating_threshold = normaliseFavoriteRatingThreshold(
+      req.favorite_rating_threshold
+    );
+  }
 
   if (Object.keys(updates).length > 0) {
     await dbExec(db.update(photoLibraries).set(updates).where(eq(photoLibraries.id, req.id)));
@@ -345,12 +371,23 @@ export type ImportOutcome =
 /**
  * Derive the album name from the file's location relative to the library root.
  * Returns the full relative sub-path (using forward slashes), so a file at
- * `2020/2020-01/img.jpg` ends up in album "2020/2020-01". Files directly in the
- * library root return null — no auto-album is created for those.
+ * `2020/2020-01/img.jpg` ends up in album "2020/2020-01". Files directly in
+ * the library root fall back to `fallbackName` (typically the library's own
+ * name) so libraries without any sub-directory structure still get a single
+ * catch-all album. Returns null when the file escapes the library root or no
+ * fallback was provided.
  */
-function deriveAutoAlbumName(libraryPath: string, absFilePath: string): string | null {
+function deriveAutoAlbumName(
+  libraryPath: string,
+  absFilePath: string,
+  fallbackName: string
+): string | null {
   const rel = path.relative(libraryPath, path.dirname(absFilePath));
-  if (!rel || rel === "." || rel.startsWith("..")) return null;
+  if (rel.startsWith("..")) return null;
+  if (!rel || rel === ".") {
+    const trimmed = fallbackName.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
   // Normalise to forward slashes so the album name is platform-independent.
   const normalised = rel.split(path.sep).filter(Boolean).join("/");
   return normalised || null;
@@ -422,6 +459,21 @@ async function attachToAutoAlbum(
 }
 
 /**
+ * Mark a freshly-imported photo as "favorite" for its owner. Safe to call once
+ * per importFile() invocation — `photos.hash` dedupes re-imports upstream, so
+ * a pre-existing photo_curation row for the same (user, photo) pair is not
+ * possible here.
+ */
+async function markPhotoFavorite(userId: number, photoId: number): Promise<void> {
+  await dbExec(
+    db
+      .insert(photoCuration)
+      .values({ user_id: userId, photo_id: photoId, status: "favorite" })
+      .onConflictDoNothing()
+  );
+}
+
+/**
  * Import a single file from a library. Idempotent: a second call for the same
  * file returns `skipped_duplicate`.
  */
@@ -458,6 +510,7 @@ export async function importFile(
   const originalName = path.basename(absFilePath);
   const descriptionValue = combineDescription(exifMeta);
   const iptcLoc = iptcLocationUpdate(exifMeta);
+  const importKeywords = mergeRatingKeyword(exifMeta.keywords, exifMeta.rating);
 
   let filename: string;
   let externalPath: string | null;
@@ -504,7 +557,7 @@ export async function importFile(
         latitude: exifMeta.latitude,
         longitude: exifMeta.longitude,
         description: descriptionValue,
-        keywords: exifMeta.keywords,
+        keywords: importKeywords,
         library_id: library.id,
         external_path: externalPath,
         ...(iptcLoc ?? {}),
@@ -512,8 +565,20 @@ export async function importFile(
       .returning()
   );
 
+  if (
+    library.favorite_rating_threshold > 0 &&
+    exifMeta.rating !== null &&
+    exifMeta.rating >= library.favorite_rating_threshold
+  ) {
+    try {
+      await markPhotoFavorite(ownerId, row!.id);
+    } catch (err) {
+      console.error("[libraries] favourite mark failed:", err);
+    }
+  }
+
   if (library.auto_albums) {
-    const albumName = deriveAutoAlbumName(library.path, absFilePath);
+    const albumName = deriveAutoAlbumName(library.path, absFilePath, library.name);
     if (albumName) {
       try {
         await attachToAutoAlbum(ownerId, albumName, row!.id);
@@ -550,41 +615,69 @@ async function* walkSupportedFiles(root: string): AsyncGenerator<string> {
   }
 }
 
-export async function scanLibrary(libraryId: number): Promise<ScanReport> {
-  const library = await getLibrary(libraryId);
-  if (!library) throw new Error(`library ${libraryId} not found`);
-  ensureReadableDirectory(library.path);
+/**
+ * In-process locks keyed by library id. Prevents two overlapping scans of the
+ * same library from walking the same files in parallel (which would double the
+ * I/O load and race on inserts that only dedupe via the hash unique index).
+ *
+ * Only guards against a single-instance backend — for a multi-replica setup a
+ * DB-backed advisory lock would be the right place to add protection.
+ */
+const activeScans = new Map<number, Promise<ScanReport>>();
 
-  const report: ScanReport = {
-    scanned: 0,
-    imported: 0,
-    skipped_duplicate: 0,
-    skipped_unsupported: 0,
-    skipped_empty: 0,
-    errors: 0,
-  };
-
-  for await (const file of walkSupportedFiles(library.path)) {
-    report.scanned++;
-    try {
-      const outcome = await importFile(library, file);
-      if (outcome.kind === "imported") report.imported++;
-      else if (outcome.kind === "skipped_duplicate") report.skipped_duplicate++;
-      else if (outcome.kind === "skipped_empty") report.skipped_empty++;
-      else report.skipped_unsupported++;
-    } catch (err: any) {
-      report.errors++;
-      console.error(`[libraries] import failed for ${file}:`, err?.message ?? err);
-    }
+export class ScanAlreadyRunningError extends Error {
+  constructor(libraryId: number) {
+    super(`scan already running for library ${libraryId}`);
+    this.name = "ScanAlreadyRunningError";
   }
+}
 
-  await dbExec(
-    db
-      .update(photoLibraries)
-      .set({ last_scan_at: new Date().toISOString() })
-      .where(eq(photoLibraries.id, libraryId))
-  );
-  return report;
+export async function scanLibrary(libraryId: number): Promise<ScanReport> {
+  if (activeScans.has(libraryId)) {
+    throw new ScanAlreadyRunningError(libraryId);
+  }
+  const run = (async () => {
+    const library = await getLibrary(libraryId);
+    if (!library) throw new Error(`library ${libraryId} not found`);
+    ensureReadableDirectory(library.path);
+
+    const report: ScanReport = {
+      scanned: 0,
+      imported: 0,
+      skipped_duplicate: 0,
+      skipped_unsupported: 0,
+      skipped_empty: 0,
+      errors: 0,
+    };
+
+    for await (const file of walkSupportedFiles(library.path)) {
+      report.scanned++;
+      try {
+        const outcome = await importFile(library, file);
+        if (outcome.kind === "imported") report.imported++;
+        else if (outcome.kind === "skipped_duplicate") report.skipped_duplicate++;
+        else if (outcome.kind === "skipped_empty") report.skipped_empty++;
+        else report.skipped_unsupported++;
+      } catch (err: any) {
+        report.errors++;
+        console.error(`[libraries] import failed for ${file}:`, err?.message ?? err);
+      }
+    }
+
+    await dbExec(
+      db
+        .update(photoLibraries)
+        .set({ last_scan_at: new Date().toISOString() })
+        .where(eq(photoLibraries.id, libraryId))
+    );
+    return report;
+  })();
+  activeScans.set(libraryId, run);
+  try {
+    return await run;
+  } finally {
+    activeScans.delete(libraryId);
+  }
 }
 
 /**

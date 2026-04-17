@@ -139,6 +139,9 @@ export const photoLibraries = pgTable("photo_libraries", {
   // When true an album per first-level sub-directory is auto-created and each
   // imported photo is added to it.
   auto_albums: boolean("auto_albums").notNull().default(false),
+  // Minimum XMP:Rating (1..5) at which a newly imported photo is marked as
+  // favourite for the library owner. 0 disables the auto-favourite behaviour.
+  favorite_rating_threshold: integer("favorite_rating_threshold").notNull().default(0),
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
   last_scan_at: timestamp("last_scan_at", { mode: "string" }),
 });
