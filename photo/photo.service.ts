@@ -783,6 +783,8 @@ export interface ExifMetadata {
   author: string | null;
   /** IPTC Headline. */
   headline: string | null;
+  /** XMP dc:title (language-alternative resolved to x-default). */
+  title: string | null;
   /** IPTC Copyright / EXIF Copyright. */
   copyright: string | null;
   /** IPTC Credit. */
@@ -881,6 +883,7 @@ export async function getExifMetadata(filePath: string): Promise<ExifMetadata> {
     keywords: [],
     author: null,
     headline: null,
+    title: null,
     copyright: null,
     credit: null,
     city: null,
@@ -919,11 +922,9 @@ export async function getExifMetadata(filePath: string): Promise<ExifMetadata> {
       asString(data?.Creator) ??
       asString(data?.creator) ??
       null;
-    // XMP dc:title is the closest equivalent to IPTC Headline.
-    const headline =
-      asString(data?.Headline) ??
-      asString(data?.title) ??
-      null;
+    const headline = asString(data?.Headline);
+    // XMP dc:title — exifr normalises to lowercase `title`.
+    const title = asString(data?.title);
     const copyright =
       asString(data?.CopyrightNotice) ??
       asString(data?.Copyright) ??
@@ -945,6 +946,7 @@ export async function getExifMetadata(filePath: string): Promise<ExifMetadata> {
       keywords,
       author,
       headline,
+      title,
       copyright,
       credit,
       city,
@@ -1050,6 +1052,22 @@ async function geocodePhotoLocation(photoId: number, lat: number, lon: number): 
  *
  * Exported for unit tests.
  */
+/**
+ * Build the description string written to `photos.description`.
+ *
+ * Base text comes from EXIF/XMP description (with IPTC Caption-Abstract /
+ * IPTC Headline as fallbacks). If XMP dc:title is also present and not
+ * already contained in the base, it is appended, separated by a blank line.
+ */
+export function combineDescription(meta: ExifMetadata): string | null {
+  const base = meta.description ?? meta.headline ?? null;
+  const title = meta.title;
+  if (!base && !title) return null;
+  if (!base) return title;
+  if (!title || base.includes(title)) return base;
+  return `${base}\n\n${title}`;
+}
+
 export function iptcLocationUpdate(meta: ExifMetadata): {
   location_name: string;
   location_short: string | null;
@@ -1186,8 +1204,7 @@ export async function uploadPhotoStream(
   const { absPath: filePath, relPath: filename } = await reserveStoragePath(storageTs, ext);
   await fs.promises.rename(tempPath, filePath);
 
-  // Description fallback: EXIF/XMP/IPTC caption first, then IPTC Headline.
-  const descriptionValue = exifMeta.description ?? exifMeta.headline ?? null;
+  const descriptionValue = combineDescription(exifMeta);
   // Pre-fill location from IPTC when present, sparing us a Nominatim call.
   const iptcLoc = iptcLocationUpdate(exifMeta);
 
@@ -1272,8 +1289,7 @@ export async function uploadPhotoLogic(
   const { absPath: filePath, relPath: filename } = await reserveStoragePath(storageTs2, ext);
   await fs.promises.rename(tempPath, filePath);
 
-  // Description fallback: EXIF/XMP/IPTC caption first, then IPTC Headline.
-  const descriptionValue2 = exifMeta2.description ?? exifMeta2.headline ?? null;
+  const descriptionValue2 = combineDescription(exifMeta2);
   // Pre-fill location from IPTC when present, sparing us a Nominatim call.
   const iptcLoc2 = iptcLocationUpdate(exifMeta2);
 
@@ -1801,7 +1817,7 @@ export async function refreshPhotoMetadataLogic(userId: number, photoId: number)
   const iptcLoc = iptcLocationUpdate(exifMeta);
   await dbExec(db.update(photos).set({
     taken_at: exifMeta.takenAt,
-    description: exifMeta.description ?? exifMeta.headline ?? photo.description,
+    description: combineDescription(exifMeta) ?? photo.description,
     keywords: exifMeta.keywords,
     ...(iptcLoc ?? {}),
   }).where(eq(photos.id, photoId)));

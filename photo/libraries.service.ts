@@ -28,6 +28,7 @@ import {
   reserveStoragePath,
   getExifMetadata,
   iptcLocationUpdate,
+  combineDescription,
 } from "./photo.service";
 import { enqueuePhotoScan } from "./scan-queue";
 import { triggerWorkers } from "./scan-worker";
@@ -448,7 +449,7 @@ export async function importFile(
   const exifMeta = await getExifMetadata(absFilePath);
   const storageTs = pickStorageTimestamp(exifMeta.takenAt);
   const originalName = path.basename(absFilePath);
-  const descriptionValue = exifMeta.description ?? exifMeta.headline ?? null;
+  const descriptionValue = combineDescription(exifMeta);
   const iptcLoc = iptcLocationUpdate(exifMeta);
 
   let filename: string;
