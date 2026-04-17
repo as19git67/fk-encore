@@ -12,6 +12,7 @@ struct PersonDetailView: View {
         var id: Int { photo.id }
     }
     @State private var faceSelection: FaceSelection?
+    @State private var isFullscreenPresented = false
     @State private var isIgnoringAll = false
 
     // Rename / merge state
@@ -65,6 +66,7 @@ struct PersonDetailView: View {
                         Button {
                             if let stub = makePhotoStub(face) {
                                 faceSelection = FaceSelection(photo: stub, bbox: face.bbox)
+                                isFullscreenPresented = true
                             }
                         } label: {
                             FaceThumbnailView(filename: face.photo!.filename, bbox: face.bbox)
@@ -140,15 +142,17 @@ struct PersonDetailView: View {
                 Text("\"\(conflict.name)\" existiert bereits. Die Fotos dieser Person werden zu \"\(conflict.name)\" verschoben.")
             }
         }
-        .fullScreenCover(item: $faceSelection) { item in
-            PhotoFullscreenView(
-                photo: item.photo,
-                faceBBox: item.bbox,
-                personId: personId,
-                initialPersonName: personName,
-                onPersonRenamed: { personName = $0 },
-                onPersonMerged: { dismiss() }
-            )
+        .navigationDestination(isPresented: $isFullscreenPresented) {
+            if let item = faceSelection {
+                PhotoFullscreenView(
+                    photo: item.photo,
+                    faceBBox: item.bbox,
+                    personId: personId,
+                    initialPersonName: personName,
+                    onPersonRenamed: { personName = $0 },
+                    onPersonMerged: { dismiss() }
+                )
+            }
         }
         .task {
             await loadPerson()

@@ -83,7 +83,7 @@ struct PhotoMonthGridView: View {
                 }
             }
         }
-        .fullScreenCover(isPresented: $isFullscreenPresented) {
+        .navigationDestination(isPresented: $isFullscreenPresented) {
             PhotoFullscreenView(photos: photos, currentIndex: $selectedIndex)
         }
         .onChange(of: isFullscreenPresented) { _, isPresented in

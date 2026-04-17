@@ -72,7 +72,7 @@ struct PhotoGridView: View {
                 Task { await viewModel.loadPhotos() }
             }
         }
-        .fullScreenCover(isPresented: $isFullscreenPresented) {
+        .navigationDestination(isPresented: $isFullscreenPresented) {
             PhotoFullscreenView(photos: viewModel.photos, currentIndex: $selectedIndex)
         }
         .onChange(of: isFullscreenPresented) { _, isPresented in
