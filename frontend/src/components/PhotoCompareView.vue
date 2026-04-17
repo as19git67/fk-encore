@@ -7,6 +7,7 @@ import {
   getPhotoUrl,
   updatePhotoCuration,
   reviewPhotoGroup,
+  getPhotoDetailsBatch,
   type Photo,
   type PhotoGroup,
   type CurationStatus,
@@ -32,9 +33,30 @@ const emit = defineEmits<{
   next: [groupId: number]
 }>()
 
+// Members that are hidden (curation_status='hidden') are filtered out of
+// props.allPhotos when "Ausgeblendete" is off. Fetch any missing members
+// directly so the compare view always sees the full group.
+const fetchedMembers = ref(new Map<number, Photo>())
+
+async function loadMissingMembers() {
+  const missing = props.group.photo_ids.filter(
+    (id) => !props.allPhotos.some((p) => p.id === id) && !fetchedMembers.value.has(id)
+  )
+  if (missing.length === 0) return
+  try {
+    const res = await getPhotoDetailsBatch(missing)
+    const next = new Map(fetchedMembers.value)
+    for (const p of res.photos) next.set(p.id, p)
+    fetchedMembers.value = next
+    syncCuration()
+  } catch (err) {
+    console.warn('[PhotoCompareView] failed to load hidden group members', err)
+  }
+}
+
 const groupPhotos = computed(() => {
   return props.group.photo_ids
-    .map((id) => props.allPhotos.find((p) => p.id === id))
+    .map((id) => props.allPhotos.find((p) => p.id === id) ?? fetchedMembers.value.get(id))
     .filter((p): p is Photo => !!p)
 })
 
@@ -378,7 +400,7 @@ function goBackToCompare() {
 
 async function handleDone() {
   try {
-    await reviewPhotoGroup(props.group.id)
+    await reviewPhotoGroup(props.group.id, props.group.photo_ids)
     emit('close')
   } catch (err: any) {
     console.error('Failed to review group:', err)
@@ -387,7 +409,7 @@ async function handleDone() {
 
 async function handleDoneAndNext() {
   try {
-    await reviewPhotoGroup(props.group.id)
+    await reviewPhotoGroup(props.group.id, props.group.photo_ids)
     emit('next', props.group.id)
   } catch (err: any) {
     console.error('Failed to review group:', err)
@@ -432,6 +454,7 @@ onMounted(() => {
   document.body.style.overflow = 'hidden'
   window.addEventListener('keydown', handleKeydown)
   window.addEventListener('resize', onResize)
+  loadMissingMembers().then(() => initScores())
 })
 
 onUnmounted(() => {
@@ -443,10 +466,11 @@ onUnmounted(() => {
 watch(() => props.group.id, () => {
   syncCuration()
   initScores()
+  loadMissingMembers().then(() => initScores())
 })
 
 function getPhotoById(id: number): Photo | undefined {
-  return props.allPhotos.find(p => p.id === id)
+  return props.allPhotos.find(p => p.id === id) ?? fetchedMembers.value.get(id)
 }
 </script>
 
