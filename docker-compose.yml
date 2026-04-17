@@ -16,6 +16,8 @@ services:
         condition: service_healthy
       landmark:
         condition: service_healthy
+      llm_service:
+        condition: service_healthy
     ports:
       - "8080:8080"
     environment:
@@ -44,6 +46,7 @@ services:
       INSIGHTFACE_SERVICE_URL: http://insightface:8000
       EMBEDDING_SERVICE_URL: http://embedding_service:8000
       LANDMARK_SERVICE_URL: http://landmark:8000
+      LLM_SERVICE_URL: http://llm_service:8000
       ENABLE_LANDMARKS: "true"
       # SMTP for password reset emails (leave empty to log tokens to console)
       SMTP_HOST: ${SMTP_HOST:-}
@@ -137,6 +140,32 @@ services:
       retries: 3
       start_period: 120s
 
+  # ── LLM Service (Llama GGUF classifier + multilingual-e5-base embedder) ───
+  # Models are NOT baked into the image — they are mmap'ed from the llm_models
+  # volume. Run `docker compose run --rm llm_service /usr/local/bin/download_model.sh`
+  # once before first start to populate the volume.
+  llm_service:
+    image: ghcr.io/as19git67/fk-encore-llm:latest
+    container_name: fk-encore-llm
+    restart: unless-stopped
+    user: "568:568"
+    environment:
+      MODELS_DIR: /models
+      LLM_MODEL_PATH: /models/llama.gguf
+      EMBEDDING_MODEL: intfloat/multilingual-e5-base
+      LLM_CTX: "8192"
+      LLM_GPU_LAYERS: "0"
+      LOG_LEVEL: INFO
+    volumes:
+      - llm_models:/models
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      # Give the GGUF mmap + embedder load time before the first probe.
+      start_period: 60s
+
   # ── PostgreSQL (shared instance for both app and embedding service) ─────────
   postgres:
     image: pgvector/pgvector:pg18
@@ -185,6 +214,14 @@ volumes:
       device: /Users/anton/vivanty_data/backup
       o: bind
       type: none
+  # Model artefacts for the llm_service (Llama GGUF + sentence-transformers
+  # cache). Populate via `docker compose run --rm llm_service /usr/local/bin/download_model.sh`.
+  llm_models:
+    driver: local
+    driver_opts:
+      device: /Users/anton/vivanty_data/llm_models
+      o: bind
+      type: none
 
   # ── Watchtower (empfängt Deploy-Trigger via HTTP, zieht neue Images) ─────────
   watchtower:
@@ -205,5 +242,6 @@ volumes:
       fk-encore-insightface
       fk-encore-embedding
       fk-encore-landmark
+      fk-encore-llm
     ports:
       - "9000:8080"
