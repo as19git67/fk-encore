@@ -6,6 +6,11 @@ export default defineConfig({
   base: '/app/',
   plugins: [vue()],
   build: {
+    // Emit source maps so production stack traces / Network debugging in the
+    // browser dev tools point at the real TypeScript/Vue sources. The .map
+    // files are only fetched when dev tools are open, so end users don't
+    // pay the download cost. Set VITE_SOURCEMAP=false to disable.
+    sourcemap: process.env.VITE_SOURCEMAP !== 'false',
     rollupOptions: {
       output: {
         manualChunks(id) {
