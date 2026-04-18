@@ -16,7 +16,7 @@
  *   DOCUMENTS_INBOX_DIR            default: uploads/documents-inbox
  *   DOCUMENTS_INBOX_USER_EMAIL     which user owns imported docs
  *                                  (falls back to the first Admin)
- *   DOCUMENTS_INBOX_STABILITY_MS   await-write-finish window, default 5000
+ *   DOCUMENTS_INBOX_STABILITY_MS   await-write-finish window, default 10000
  */
 
 import fs from "fs";
@@ -32,6 +32,7 @@ import {
 } from "./documents.service";
 import {
   DuplicateDocumentError,
+  EmptySourceFileError,
   importDocumentFromPath,
 } from "./import";
 import { triggerWorkers } from "./scan-worker";
@@ -80,7 +81,13 @@ export function _resetInboxOwnerCache(): void {
   cachedOwnerId = null;
 }
 
-async function handleAddedFile(file: string): Promise<void> {
+/**
+ * Import a single inbox file. Exported so the hourly reconcile cron
+ * (`inbox-cron.ts`) can replay add events for files the live watcher
+ * missed (downtime, network share without inotify, watcher fired while
+ * the upstream copy was still streaming).
+ */
+export async function handleAddedFile(file: string): Promise<void> {
   if (!isSupported(file)) return;
   if (cachedOwnerId === null) {
     cachedOwnerId = await resolveInboxOwnerId();
@@ -110,6 +117,15 @@ async function handleAddedFile(file: string): Promise<void> {
       );
       return;
     }
+    if (err instanceof EmptySourceFileError) {
+      // Watcher fired before the upstream copy wrote any bytes. Leave
+      // the file in place — the reconcile cron (or the next stable
+      // rewrite event) will pick it up once it has content.
+      console.log(
+        `[documents.inbox-watcher] still empty, deferring: ${path.basename(file)}`,
+      );
+      return;
+    }
     console.error(
       `[documents.inbox-watcher] failed to import ${path.basename(file)}: ${err?.message ?? err}`,
     );
@@ -129,7 +145,7 @@ export async function startInboxWatcher(): Promise<void> {
   }
 
   const stabilityMs = parseInt(
-    process.env.DOCUMENTS_INBOX_STABILITY_MS ?? "5000",
+    process.env.DOCUMENTS_INBOX_STABILITY_MS ?? "10000",
     10,
   );
 
