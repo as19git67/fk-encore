@@ -85,12 +85,24 @@ export function listPhotoIndex(showHidden: boolean = false) {
 
 /**
  * Batch fetch full details (heavy fields) for a list of photo IDs.
+ *
+ * `signal` lets callers (e.g. the hydration loop) abort the request when the
+ * user navigates away or starts a new run — without it, hanging requests
+ * keep their (potentially multi-MB) response buffers alive in the browser.
+ *
+ * `timeoutMs` caps how long a single batch can hang. With 100 photos worth
+ * of JSONB fields the response can be large, but if the server hasn't
+ * answered in 60 s it's almost certainly overloaded — keep retrying past
+ * that just piles up dead requests in memory.
  */
-export function getPhotoDetailsBatch(ids: number[]) {
+export function getPhotoDetailsBatch(ids: number[], signal?: AbortSignal) {
   if (ids.length === 0) {
     return Promise.resolve<PhotoDetailsBatchResponse>({ photos: [] })
   }
-  return apiFetch<PhotoDetailsBatchResponse>(`/photos/details?ids=${ids.join(',')}`)
+  return apiFetch<PhotoDetailsBatchResponse>(`/photos/details?ids=${ids.join(',')}`, {
+    signal,
+    timeoutMs: 60_000,
+  })
 }
 
 /**
@@ -739,7 +751,10 @@ export interface ServerPressureStatus {
   eventLoopLagMs: number
 }
 
-export function getExternalServiceHealth() {
-  return apiFetch<{ services: ExternalServiceHealth[]; serverPressure: ServerPressureStatus }>('/photos/service-health')
+export function getExternalServiceHealth(signal?: AbortSignal) {
+  return apiFetch<{ services: ExternalServiceHealth[]; serverPressure: ServerPressureStatus }>(
+    '/photos/service-health',
+    { signal, timeoutMs: 10_000 }
+  )
 }
 

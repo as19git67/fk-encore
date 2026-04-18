@@ -9,11 +9,19 @@ export const useServiceHealthStore = defineStore('serviceHealth', () => {
   const serverPressure = ref<ServerPressureStatus>({ underPressure: false, eventLoopLagMs: 0 })
   const loading = ref(false)
   let pollTimer: ReturnType<typeof setInterval> | null = null
+  // Guard against piling up requests when the server is overloaded:
+  // setInterval keeps firing every 30s, but if the previous request is still
+  // in-flight we skip — otherwise hung requests accumulate response buffers
+  // and eventually OOM the tab.
+  let inflightController: AbortController | null = null
 
   async function refresh() {
+    if (inflightController) return
+    const controller = new AbortController()
+    inflightController = controller
     try {
       loading.value = true
-      const res = await getExternalServiceHealth()
+      const res = await getExternalServiceHealth(controller.signal)
       services.value = res.services
       if (res.serverPressure) {
         serverPressure.value = res.serverPressure
@@ -22,6 +30,7 @@ export const useServiceHealthStore = defineStore('serviceHealth', () => {
       // Silently ignore – the UI can show defaults (all unavailable)
     } finally {
       loading.value = false
+      if (inflightController === controller) inflightController = null
     }
   }
 
@@ -36,6 +45,10 @@ export const useServiceHealthStore = defineStore('serviceHealth', () => {
     if (pollTimer) {
       clearInterval(pollTimer)
       pollTimer = null
+    }
+    if (inflightController) {
+      inflightController.abort()
+      inflightController = null
     }
   }
 
