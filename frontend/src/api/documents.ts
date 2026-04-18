@@ -152,16 +152,15 @@ export function getDocumentFileUrl(id: number): string {
 }
 
 /**
- * Fetch the PDF as a blob using the standard auth header and return
- * an `object URL` suitable for `<iframe src>`. The caller is
- * responsible for revoking it via `URL.revokeObjectURL`.
+ * Fetch the PDF as raw bytes for the in-app pdfjs viewer.
+ * pdfjs takes ownership of the buffer, so we always return a fresh copy.
  */
-export async function fetchDocumentBlobUrl(id: number): Promise<string> {
+export async function fetchDocumentBytes(id: number): Promise<Uint8Array> {
   const token = localStorage.getItem('auth_token')
   const res = await fetch(`${API_BASE_URL}/documents/${id}/file`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   })
   if (!res.ok) throw new Error(`PDF ${id}: HTTP ${res.status}`)
-  const blob = await res.blob()
-  return URL.createObjectURL(blob)
+  const buf = await res.arrayBuffer()
+  return new Uint8Array(buf)
 }

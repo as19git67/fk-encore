@@ -9,7 +9,7 @@ import Tag from 'primevue/tag'
 import Chip from 'primevue/chip'
 import {
   deleteDocument,
-  fetchDocumentBlobUrl,
+  fetchDocumentBytes,
   getDocument,
   listDocumentCategories,
   reclassifyDocument,
@@ -19,6 +19,7 @@ import {
   type DocumentStatus,
 } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
+import PdfViewer from '../components/PdfViewer.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -32,7 +33,7 @@ const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
 const info = ref('')
-const pdfUrl = ref<string | null>(null)
+const pdfData = ref<Uint8Array | null>(null)
 const pdfError = ref('')
 
 const form = ref({
@@ -73,13 +74,10 @@ async function load() {
 }
 
 async function loadPdf() {
-  if (pdfUrl.value) {
-    URL.revokeObjectURL(pdfUrl.value)
-    pdfUrl.value = null
-  }
+  pdfData.value = null
   pdfError.value = ''
   try {
-    pdfUrl.value = await fetchDocumentBlobUrl(docId.value)
+    pdfData.value = await fetchDocumentBytes(docId.value)
   } catch (err: any) {
     pdfError.value = err.message || 'PDF kann nicht geladen werden'
   }
@@ -183,7 +181,7 @@ watch(() => route.params.id, (newId, oldId) => {
 onMounted(load)
 
 onBeforeUnmount(() => {
-  if (pdfUrl.value) URL.revokeObjectURL(pdfUrl.value)
+  pdfData.value = null
 })
 </script>
 
@@ -220,14 +218,7 @@ onBeforeUnmount(() => {
 
     <div v-else-if="doc" class="detail-grid">
       <div class="pdf-panel">
-        <div v-if="pdfError" class="pdf-fallback">
-          <i class="pi pi-exclamation-triangle" />
-          <span>{{ pdfError }}</span>
-        </div>
-        <iframe v-else-if="pdfUrl" :src="pdfUrl" class="pdf-frame" title="PDF-Vorschau" />
-        <div v-else class="pdf-fallback">
-          <i class="pi pi-spin pi-spinner" /> PDF wird geladen…
-        </div>
+        <PdfViewer :data="pdfData" :error-message="pdfError || null" />
       </div>
 
       <div class="meta-panel">
@@ -345,18 +336,9 @@ onBeforeUnmount(() => {
   background: var(--p-surface-card);
   border: 1px solid var(--p-content-border-color);
   border-radius: 8px;
-  min-height: 400px;
+  min-height: 500px;
   overflow: hidden;
   display: flex;
-}
-.pdf-frame { width: 100%; height: 100%; border: 0; }
-.pdf-fallback {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  width: 100%;
-  color: var(--p-text-muted-color);
 }
 
 .meta-panel {
