@@ -3755,64 +3755,17 @@ export async function cleanupOrphanedPersons(userId: number): Promise<void> {
 
 // ========== Photo Groups (Clustering) ==========
 
-class UnionFind {
-  parent: number[];
-  rank: number[];
-  constructor(n: number) {
-    this.parent = Array.from({ length: n }, (_, i) => i);
-    this.rank = new Array(n).fill(0);
-  }
-  find(x: number): number {
-    if (this.parent[x] !== x) this.parent[x] = this.find(this.parent[x]);
-    return this.parent[x];
-  }
-  union(x: number, y: number): void {
-    const rx = this.find(x), ry = this.find(y);
-    if (rx === ry) return;
-    if (this.rank[rx] < this.rank[ry]) { this.parent[rx] = ry; }
-    else if (this.rank[rx] > this.rank[ry]) { this.parent[ry] = rx; }
-    else { this.parent[ry] = rx; this.rank[rx]++; }
-  }
-}
-
 const SIMILARITY_THRESHOLD = 0.90;
-const TIME_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
-/**
- * Yield to the event loop every N outer iterations of the similarity loop.
- * Power of two so the check compiles to a bitmask. 512 keeps chunks short
- * enough (~a few hundred ms of CPU at most, even with large time windows)
- * that health checks and gallery requests stay responsive during a regroup.
- */
-const REGROUP_YIELD_STRIDE = 512;
+const TIME_WINDOW_SECONDS = 10 * 60; // 10 minutes
 /**
  * Quiet window after a regroup pass before the coalesced follow-up fires.
  * Bulk scans finish hundreds of embedding jobs in quick succession, each
  * triggering `scheduleRegroup`. Without a debounce the mutex chains back-to-
- * back full rebuilds that each take seconds of CPU. Sleeping here lets the
- * pending flag accumulate all completions that arrive in the window, so the
- * next pass sees the final state and we run the O(N²) loop once, not hundreds
- * of times.
+ * back full rebuilds. Sleeping here lets the pending flag accumulate all
+ * completions that arrive in the window so the next pass sees the final
+ * state and runs once, not hundreds of times.
  */
 const REGROUP_DEBOUNCE_MS = 30_000;
-
-/**
- * Dot product of two equal-length unit vectors.
- *
- * Used inside `findPhotoGroupsLogic` after embeddings are pre-normalized to
- * unit length: for unit vectors `cos(a,b) = a·b`, so we skip two sqrt's and
- * two norm accumulations per pair compared to `cosineSimilarity`. On a 45k
- * library with a 10-min window that saves millions of Math ops per regroup.
- * Accepts `ArrayLike<number>` so callers can pass `Float32Array` (better
- * cache locality, half the memory of `number[]`).
- */
-function dotProduct(v1: ArrayLike<number>, v2: ArrayLike<number>): number {
-  let sum = 0;
-  const len = v1.length;
-  for (let i = 0; i < len; i++) {
-    sum += v1[i] * v2[i];
-  }
-  return sum;
-}
 
 // Serialize similar-photo regrouping per user.
 // `findPhotoGroupsLogic` reads the user's accessible photos, deletes all
@@ -3905,106 +3858,52 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
     return { groups_created: 0, total_photos_grouped: 0 };
   }
 
-  // 2. Fetch DINOv2 embeddings from embedding service
+  // 2. Offload the windowed pair scan + clustering to the embedding service.
+  //
+  // The old flow fetched every embedding (~140 MB for 45k photos), then ran a
+  // 768-dim O(N²) cosine loop in JS. That blocked the Node event loop for
+  // seconds at a time and stalled every gallery request issued during a
+  // regroup. /similar-groups runs the same algorithm against pgvector-stored
+  // embeddings using numpy SIMD matmul — embeddings never cross the HTTP
+  // boundary, the computation happens in a separate process, and Node only
+  // receives the final group structures.
   const photoIds = allPhotos.map((p) => p.id.toString());
-  // Pre-normalize to unit length and store as Float32Array: the similarity
-  // loop below is O(N²) on 768-dim vectors, so doing the normalization once
-  // up-front (O(N)) turns every later similarity call into a pure dot product.
-  // Float32Array halves memory vs. number[] and is denser in CPU cache.
-  let embeddingMap: Map<number, { embedding: Float32Array; timestamp: number }>;
-  // O(1) photo→timestamp lookup; the previous Array.find scan was O(N) per
-  // embedding and turned the ingestion loop into another O(N²) hotspot.
-  const photoById = new Map(allPhotos.map((p) => [p.id, p]));
+  let remoteGroups: Array<{ cover_photo_id: string; members: Array<{ photo_id: string; similarity_rank: number }> }>;
   try {
-    const response = await fetch(`${EMBEDDING_SERVICE_URL}/get`, {
+    const response = await fetch(`${EMBEDDING_SERVICE_URL}/similar-groups`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ photo_ids: photoIds }),
+      body: JSON.stringify({
+        photo_ids: photoIds,
+        threshold: SIMILARITY_THRESHOLD,
+        time_window_seconds: TIME_WINDOW_SECONDS,
+      }),
     });
     if (!response.ok) throw new Error(`Embedding service returned ${response.status}`);
     const data = await response.json() as {
-      photos: Array<{ photo_id: string; embedding_dino: number[] | null }>;
+      groups: Array<{ cover_photo_id: string; members: Array<{ photo_id: string; similarity_rank: number }> }>;
     };
-
-    embeddingMap = new Map();
-    for (const rec of data.photos) {
-      if (!rec.embedding_dino) continue;
-      const id = parseInt(rec.photo_id);
-      const src = rec.embedding_dino;
-      const dim = src.length;
-      let norm = 0;
-      for (let i = 0; i < dim; i++) norm += src[i] * src[i];
-      // Zero-magnitude vectors can't meaningfully compare — skip (matches
-      // the previous `cosineSimilarity` behaviour of returning 0 for them,
-      // which never cleared the 0.90 threshold anyway).
-      if (norm === 0) continue;
-      const inv = 1 / Math.sqrt(norm);
-      const out = new Float32Array(dim);
-      for (let i = 0; i < dim; i++) out[i] = src[i] * inv;
-      const photo = photoById.get(id);
-      const ts = photo ? new Date(photo.taken_at || photo.created_at || 0).getTime() : 0;
-      embeddingMap.set(id, { embedding: out, timestamp: ts });
-    }
+    remoteGroups = data.groups;
   } catch (err: any) {
-    console.error("Failed to fetch embeddings:", err.message);
+    console.error("Failed to fetch similar groups:", err.message);
     throw new Error("Embedding service unavailable");
   }
 
-  if (embeddingMap.size < 2) {
-    return { groups_created: 0, total_photos_grouped: 0 };
-  }
+  // Parse IDs once; guard against members the service returned that we don't
+  // actually own (shouldn't happen — we sent the filtered set — but keeps us
+  // honest against future schema drift).
+  const accessibleIds = new Set(allPhotos.map((p) => p.id));
+  const groups = remoteGroups
+    .map((g) => ({
+      coverPhotoId: parseInt(g.cover_photo_id, 10),
+      members: g.members
+        .map((m) => ({ photoId: parseInt(m.photo_id, 10), rank: m.similarity_rank }))
+        .filter((m) => accessibleIds.has(m.photoId))
+        .sort((a, b) => a.rank - b.rank),
+    }))
+    .filter((g) => g.members.length >= 2 && accessibleIds.has(g.coverPhotoId));
 
-  // 3. Sort by timestamp for windowed comparison
-  const indexed = Array.from(embeddingMap.entries())
-    .map(([id, data]) => ({ id, ...data }))
-    .sort((a, b) => a.timestamp - b.timestamp);
-
-  // 4. Windowed pairwise comparison + Union-Find
-  //
-  // This is the one place in the request path that does O(N²) synchronous
-  // JS work (768-dim cosineSimilarity per pair). With a 45k-photo library
-  // the outer loop easily spans hundreds of thousands of inner iterations
-  // and — without a cooperative yield — blocks the Node event loop for
-  // seconds. While blocked every incoming HTTP request queues up, which
-  // is exactly how a gallery load "hangs": the index returns, then the
-  // sidebar/hydration requests that fire right after (/photos/:id/faces,
-  // /photos/:id/landmarks, /persons, /albums, /photos/albums,
-  // /photos/details) all sit behind this loop waiting for a turn.
-  //
-  // Yielding every REGROUP_YIELD_STRIDE outer iterations with setImmediate
-  // lets the HTTP server process queued requests between chunks. Using
-  // setImmediate (not setTimeout(…, 0)) keeps the total wall time low on
-  // idle servers because immediates are drained at the end of each tick.
-  const idToIdx = new Map(indexed.map((item, idx) => [item.id, idx]));
-  const uf = new UnionFind(indexed.length);
-
-  for (let i = 0; i < indexed.length; i++) {
-    for (let j = i + 1; j < indexed.length; j++) {
-      // Stop if outside time window
-      if (indexed[j].timestamp - indexed[i].timestamp > TIME_WINDOW_MS) break;
-
-      const sim = dotProduct(indexed[i].embedding, indexed[j].embedding);
-      if (sim >= SIMILARITY_THRESHOLD) {
-        uf.union(i, j);
-      }
-    }
-    if ((i & (REGROUP_YIELD_STRIDE - 1)) === REGROUP_YIELD_STRIDE - 1) {
-      await new Promise<void>((r) => setImmediate(r));
-    }
-  }
-
-  // 5. Collect connected components
-  const components = new Map<number, number[]>();
-  for (let i = 0; i < indexed.length; i++) {
-    const root = uf.find(i);
-    if (!components.has(root)) components.set(root, []);
-    components.get(root)!.push(i);
-  }
-
-  // Filter to groups of 2+
-  const groups = Array.from(components.values()).filter((g) => g.length >= 2);
-
-  // 6. Delete old un-reviewed groups, preserve reviewed ones
+  // 3. Load reviewed groups so we can preserve / expire them against the new set.
   const reviewedGroups = await dbAll<{ id: number }>(
     db.select({ id: photoGroups.id })
       .from(photoGroups)
@@ -4012,7 +3911,6 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
   );
   const reviewedIds = new Set(reviewedGroups.map((g) => g.id));
 
-  // Get reviewed group member sets for comparison
   const reviewedMemberSets = new Map<number, Set<number>>();
   for (const gid of reviewedIds) {
     const members = await dbAll<{ photo_id: number }>(
@@ -4023,8 +3921,8 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
     reviewedMemberSets.set(gid, new Set(members.map((m) => m.photo_id)));
   }
 
-  // 7. Delete un-reviewed groups and insert new ones atomically to prevent race conditions
-  // (concurrent calls can otherwise delete a group between INSERT group and INSERT members)
+  // 4. Delete un-reviewed groups and insert new ones atomically. A single
+  // transaction prevents concurrent runs from racing on the delete/insert.
   const doGroupingWork = async (tx: typeof db | any) => {
     await dbExec(
       tx.delete(photoGroups)
@@ -4034,9 +3932,8 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
     let created = 0;
     let grouped = 0;
 
-    for (const memberIndices of groups) {
-      const memberPhotoIds = memberIndices.map((idx) => indexed[idx].id);
-      const memberSet = new Set(memberPhotoIds);
+    for (const group of groups) {
+      const memberSet = new Set(group.members.map((m) => m.photoId));
 
       let alreadyReviewed = false;
       const obsoleteReviewedIds: number[] = [];
@@ -4062,47 +3959,24 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
         for (const gid of obsoleteReviewedIds) reviewedMemberSets.delete(gid);
       }
 
-      let bestCenter = memberIndices[0];
-      let bestAvgSim = -1;
-      for (const i of memberIndices) {
-        let totalSim = 0;
-        for (const j of memberIndices) {
-          if (i !== j) totalSim += dotProduct(indexed[i].embedding, indexed[j].embedding);
-        }
-        const avgSim = totalSim / (memberIndices.length - 1);
-        if (avgSim > bestAvgSim) {
-          bestAvgSim = avgSim;
-          bestCenter = i;
-        }
-      }
-      const coverPhotoId = indexed[bestCenter].id;
-
-      const centerEmb = indexed[bestCenter].embedding;
-      const ranked = memberIndices
-        .map((idx) => ({
-          photoId: indexed[idx].id,
-          sim: dotProduct(indexed[idx].embedding, centerEmb),
-        }))
-        .sort((a, b) => b.sim - a.sim);
-
-      const group = await dbInsertReturning<{ id: number }>(
+      const inserted = await dbInsertReturning<{ id: number }>(
         tx.insert(photoGroups)
-          .values({ user_id: userId, cover_photo_id: coverPhotoId })
+          .values({ user_id: userId, cover_photo_id: group.coverPhotoId })
           .returning({ id: photoGroups.id })
       );
 
-      for (let rank = 0; rank < ranked.length; rank++) {
+      for (const member of group.members) {
         await dbExec(
           tx.insert(photoGroupMembers).values({
-            group_id: group!.id,
-            photo_id: ranked[rank].photoId,
-            similarity_rank: rank,
+            group_id: inserted!.id,
+            photo_id: member.photoId,
+            similarity_rank: member.rank,
           })
         );
       }
 
       created++;
-      grouped += memberIndices.length;
+      grouped += group.members.length;
     }
 
     return { created, grouped };
