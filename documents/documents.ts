@@ -478,20 +478,30 @@ export const deleteDocument = api(
   },
 );
 
+export interface ReclassifyDocumentRequest {
+  id: number;
+  /**
+   * When true, persist `force_ocr=true` on the document row before
+   * re-queueing. The text-extract worker then skips the PDF text layer
+   * and runs OCR — used to recover documents whose pre-baked text
+   * layer has missing spaces or garbled glyphs.
+   */
+  force_ocr?: boolean;
+}
+
 export const reclassifyDocument = api(
   { expose: true, method: "POST", path: "/documents/:id/reclassify", auth: true },
-  async ({ id }: { id: number }): Promise<{ success: boolean }> => {
+  async (req: ReclassifyDocumentRequest): Promise<{ success: boolean }> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.edit");
     const userId = getUserId();
 
-    await loadOwnedDocument(userId, id);
-    await db
-      .update(documents)
-      .set({ status: "pending" })
-      .where(eq(documents.id, id));
-    await requeueDocument(id);
+    await loadOwnedDocument(userId, req.id);
+    const patch: Partial<typeof documents.$inferInsert> = { status: "pending" };
+    if (req.force_ocr !== undefined) patch.force_ocr = req.force_ocr;
+    await db.update(documents).set(patch).where(eq(documents.id, req.id));
+    await requeueDocument(req.id);
     triggerWorkers();
     return { success: true };
   },

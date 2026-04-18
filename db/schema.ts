@@ -453,6 +453,10 @@ export const documents = pgTable("documents", {
   summary: text("summary"),
   extracted_text: text("extracted_text"),
   classification_confidence: real("classification_confidence"),
+  // When true, `text_extract` skips the PDF text layer and always runs
+  // OCR. Used to recover documents whose pre-baked text layer lost its
+  // spaces (see migration 0028).
+  force_ocr: boolean("force_ocr").notNull().default(false),
   // NOTE: the generated `text_tsv tsvector` column and its GIN index are
   // added by migration 0025 and accessed only via raw SQL (drizzle-orm has
   // no first-class tsvector support).

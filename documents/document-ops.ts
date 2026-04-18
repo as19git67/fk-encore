@@ -74,7 +74,9 @@ export async function runTextExtract(documentId: number): Promise<void> {
     .set({ status: "extracting" })
     .where(eq(documents.id, documentId));
 
-  const result = await extractPdfText(row.disk_path);
+  const result = await extractPdfText(row.disk_path, {
+    forceOcr: row.force_ocr ?? false,
+  });
   const text = result.text ?? "";
 
   await db

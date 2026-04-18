@@ -12,6 +12,7 @@ import { DOCUMENT_SERVICES } from "./scan-queue";
 import { DuplicateDocumentError } from "./import";
 import { SUPPORTED_EXTENSIONS } from "./documents.service";
 import { reciprocalRankFusion, type SearchHit } from "./search";
+import { hasPoorSpacing } from "./text-extract";
 
 describe("documents.service", () => {
   it("guessExtension prefers the filename extension for supported types", () => {
@@ -89,6 +90,48 @@ describe("documents.inbox supported extensions", () => {
     expect(SUPPORTED_EXTENSIONS.has(".pdf")).toBe(true);
     expect(SUPPORTED_EXTENSIONS.has(".jpg")).toBe(false);
     expect(SUPPORTED_EXTENSIONS.has(".docx")).toBe(false);
+  });
+});
+
+describe("documents.text-extract hasPoorSpacing", () => {
+  it("returns false for short text (not enough signal to judge)", () => {
+    expect(hasPoorSpacing("Kurze Notiz ohne viel Inhalt.")).toBe(false);
+    expect(hasPoorSpacing("")).toBe(false);
+  });
+
+  it("returns false for well-formed German prose", () => {
+    // 400+ chars of realistic invoice prose.
+    const text = (
+      "Sehr geehrte Damen und Herren, anbei erhalten Sie unsere Rechnung " +
+      "für den Monat April 2026. Der Gesamtbetrag beläuft sich auf 1.234,56 " +
+      "Euro und ist innerhalb von 14 Tagen ohne Abzug zahlbar. Bitte " +
+      "überweisen Sie den Betrag auf das unten angegebene Konto unter " +
+      "Angabe der Rechnungsnummer. Mit freundlichen Grüßen, Ihre " +
+      "Buchhaltung. Dieses Schreiben wurde maschinell erstellt."
+    );
+    expect(hasPoorSpacing(text)).toBe(false);
+  });
+
+  it("flags text with no spaces at all (broken text layer)", () => {
+    // 400+ chars of glued text — a typical pdf-parse output when the
+    // PDF stores words as positioned glyph runs without space characters.
+    const glued =
+      "SehrgeehrteDamenundHerrenanbeierhaltenSieunsereRechnungfürdenMonatApril" +
+      "2026DerGesamtbetragbeläuftsichauf1234Euroundistinnerhalbvon14Tagenohne" +
+      "AbzugzahlbarBitteüberweisenSiedenBetragaufdasuntenangegebeneKontounter" +
+      "AngabederRechnungsnummerMitfreundlichenGrüßenIhreBuchhaltungDiesesSchreiben" +
+      "wurdemaschinellerstelltundenthältdahetypischerweisekeinehandschriftlicheUnterschrift";
+    expect(hasPoorSpacing(glued)).toBe(true);
+  });
+
+  it("flags text where most tokens exceed the glued-length threshold", () => {
+    // Occasional newlines but individual tokens are still absurdly long.
+    const chunks: string[] = [];
+    for (let i = 0; i < 15; i++) {
+      chunks.push("VieleWorteOhneLeerzeichenAberMitZeilenumbruchZwischendrin" + i);
+    }
+    const text = chunks.join("\n");
+    expect(hasPoorSpacing(text)).toBe(true);
   });
 });
 
