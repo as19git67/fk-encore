@@ -1,7 +1,29 @@
 import type { UserWithRoles } from '../api/users'
-import type { Photo, Person, PhotoGroup } from '../api/photos'
+import type {
+  Photo,
+  Person,
+  PhotoGroup,
+  Album,
+  AlbumWithPhotos,
+  AlbumPhoto,
+  AlbumShareWithUser,
+  AlbumPublicLink,
+  PublicAlbumResponse,
+  ScanQueueStatus,
+  ExternalServiceHealth,
+  ServerPressureStatus,
+  LandmarkItem,
+  Face,
+} from '../api/photos'
 import type { RoleWithPermissions, Permission } from '../api/roles'
 import type { PasskeyInfo } from '../api/passkeys'
+import type { PhotoLibrary, AvailablePathsResponse } from '../api/libraries'
+import type {
+  DocumentSummary,
+  DocumentDetail,
+  DocumentCategory,
+  QueueStatus as DocumentQueueStatus,
+} from '../api/documents'
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -16,8 +38,11 @@ export const MOCK_USER: UserWithRoles = {
     'users.list', 'users.read', 'users.write',
     'roles.list', 'roles.write',
     'photos.view', 'photos.upload', 'photos.delete',
+    'photos.purge',
+    'photos.libraries.manage',
     'people.view',
     'data.manage',
+    'documents.view', 'documents.upload', 'documents.edit', 'documents.delete',
   ],
 }
 
@@ -93,6 +118,13 @@ export const MOCK_PHOTOS: Photo[] = [
     taken_at: '2024-03-15T10:30:00Z',
     created_at: '2024-03-15T10:30:00Z',
     curation_status: 'visible',
+    latitude: 48.1478,
+    longitude: 11.5683,
+    location_name: 'Deutsches Museum',
+    location_city: 'München',
+    location_country: 'Deutschland',
+    location_short: 'München',
+    ai_quality_score: 0.82,
   },
   {
     id: 2,
@@ -115,6 +147,12 @@ export const MOCK_PHOTOS: Photo[] = [
     taken_at: '2024-05-10T16:45:00Z',
     created_at: '2024-05-10T16:45:00Z',
     curation_status: 'visible',
+    latitude: 53.5413,
+    longitude: 9.9833,
+    location_name: 'Hamburger Hafen',
+    location_city: 'Hamburg',
+    location_country: 'Deutschland',
+    location_short: 'Hamburg',
   },
   {
     id: 4,
@@ -126,6 +164,12 @@ export const MOCK_PHOTOS: Photo[] = [
     taken_at: '2024-02-28T12:00:00Z',
     created_at: '2024-02-28T12:00:00Z',
     curation_status: 'visible',
+    latitude: 47.5576,
+    longitude: 10.7498,
+    location_name: 'Schloss Neuschwanstein',
+    location_city: 'Schwangau',
+    location_country: 'Deutschland',
+    location_short: 'Schwangau',
   },
   {
     id: 5,
@@ -178,6 +222,38 @@ export const MOCK_PERSONS: Person[] = [
   },
 ]
 
+// ── Faces & Landmarks ─────────────────────────────────────────────────────────
+
+export const MOCK_FACES: Face[] = [
+  {
+    id: 101,
+    user_id: 1,
+    photo_id: 1,
+    bbox: { x: 0.25, y: 0.17, width: 0.07, height: 0.11 },
+    person_id: 2,
+    quality: 0.85,
+    ignored: false,
+    created_at: '2024-03-15T10:30:00Z',
+  },
+  {
+    id: 102,
+    user_id: 1,
+    photo_id: 1,
+    bbox: { x: 0.55, y: 0.2, width: 0.06, height: 0.1 },
+    ignored: false,
+    created_at: '2024-03-15T10:30:00Z',
+  },
+]
+
+export const MOCK_LANDMARKS: LandmarkItem[] = [
+  {
+    id: 201,
+    label: 'Deutsches Museum',
+    confidence: 0.92,
+    bbox: { x: 0.1, y: 0.2, width: 0.7, height: 0.6 },
+  },
+]
+
 // ── Passkeys ──────────────────────────────────────────────────────────────────
 
 export const MOCK_PASSKEYS: PasskeyInfo[] = [
@@ -196,3 +272,319 @@ export const MOCK_PASSKEYS: PasskeyInfo[] = [
     created_at: '2024-02-05T14:30:00Z',
   },
 ]
+
+// ── Albums ────────────────────────────────────────────────────────────────────
+
+export const MOCK_ALBUMS: Album[] = [
+  {
+    id: 1,
+    user_id: 1,
+    name: 'Städtereise München',
+    description: 'Ein Wochenende in der bayerischen Hauptstadt',
+    cover_photo_id: 1,
+    cover_filename: 'museum.jpg',
+    display_mode: 'map',
+    newest_photo_at: '2024-03-15T10:30:00Z',
+    oldest_photo_at: '2024-03-15T10:30:00Z',
+    photo_count: 12,
+    is_shared: true,
+    created_at: '2024-03-16T08:00:00Z',
+    updated_at: '2024-03-16T08:00:00Z',
+  },
+  {
+    id: 2,
+    user_id: 1,
+    name: 'Schlösser & Burgen',
+    description: 'Rundreise durch Bayern',
+    cover_photo_id: 4,
+    cover_filename: 'castle.jpg',
+    display_mode: 'grid',
+    newest_photo_at: '2024-02-28T12:00:00Z',
+    oldest_photo_at: '2024-02-28T12:00:00Z',
+    photo_count: 8,
+    is_shared: false,
+    created_at: '2024-03-01T08:00:00Z',
+    updated_at: '2024-03-01T08:00:00Z',
+  },
+  {
+    id: 3,
+    user_id: 1,
+    name: 'Nordsee 2024',
+    cover_photo_id: 3,
+    cover_filename: 'seagull.jpg',
+    display_mode: 'grid',
+    newest_photo_at: '2024-05-10T16:45:00Z',
+    oldest_photo_at: '2024-05-10T16:45:00Z',
+    photo_count: 24,
+    is_shared: false,
+    created_at: '2024-05-11T08:00:00Z',
+    updated_at: '2024-05-11T08:00:00Z',
+  },
+]
+
+export const MOCK_ALBUM_PHOTOS: AlbumPhoto[] = MOCK_PHOTOS.slice(0, 4).map((p) => ({
+  ...p,
+  added_by_user_id: 1,
+  added_at: p.created_at,
+  curation_stats: { fav_count: 1, hide_count: 0, member_count: 1 },
+}))
+
+export const MOCK_ALBUM_DETAIL: AlbumWithPhotos = {
+  ...MOCK_ALBUMS[0]!,
+  role: 'owner',
+  photos: MOCK_ALBUM_PHOTOS,
+  settings: {
+    album_id: 1,
+    user_id: 1,
+    hide_mode: 'mine',
+    active_view: 'all',
+    view_config: null,
+    cover_photo_id: 1,
+  },
+}
+
+export const MOCK_ALBUM_SHARES: AlbumShareWithUser[] = [
+  {
+    album_id: 1,
+    user_id: 2,
+    access_level: 'read',
+    user_name: 'Maria Schmidt',
+    user_email: 'maria@example.com',
+  },
+]
+
+export const MOCK_ALBUM_PUBLIC_LINK: AlbumPublicLink = {
+  id: 42,
+  album_id: 1,
+  token: 'abcd1234ef567890',
+  created_by_user_id: 1,
+  created_at: '2024-03-20T10:00:00Z',
+  expires_at: '2025-03-20T10:00:00Z',
+}
+
+export const MOCK_PUBLIC_ALBUM: PublicAlbumResponse = {
+  id: 1,
+  name: 'Städtereise München',
+  description: 'Ein Wochenende in der bayerischen Hauptstadt',
+  display_mode: 'map',
+  cover_filename: 'museum.jpg',
+  newest_photo_at: '2024-03-15T10:30:00Z',
+  oldest_photo_at: '2024-03-15T10:30:00Z',
+  photo_count: MOCK_ALBUM_PHOTOS.length,
+  photos: MOCK_ALBUM_PHOTOS.map(({ added_by_user_id: _a, added_at: _b, curation_stats: _c, ...rest }) => rest),
+}
+
+// ── Libraries ─────────────────────────────────────────────────────────────────
+
+export const MOCK_LIBRARIES: PhotoLibrary[] = [
+  {
+    id: 1,
+    user_id: 1,
+    name: 'Urlaub 2024',
+    path: 'Urlaub/2024',
+    import_mode: 'link',
+    auto_import: true,
+    auto_albums: true,
+    favorite_rating_threshold: 4,
+    created_at: '2024-06-01T08:00:00Z',
+    last_scan_at: '2024-06-05T14:00:00Z',
+  },
+  {
+    id: 2,
+    user_id: 1,
+    name: 'Familie archiv',
+    path: 'Archiv/Familie',
+    import_mode: 'move',
+    auto_import: false,
+    auto_albums: false,
+    favorite_rating_threshold: 4,
+    created_at: '2024-04-15T08:00:00Z',
+    last_scan_at: null,
+  },
+]
+
+export const MOCK_AVAILABLE_PATHS: AvailablePathsResponse = {
+  root: '/photos/libraries',
+  root_mounted: true,
+  sub: '',
+  abs_path: '/photos/libraries',
+  current_registered: false,
+  current_mounted: true,
+  directories: [
+    { name: 'Urlaub',   rel_path: 'Urlaub',   abs_path: '/photos/libraries/Urlaub',   already_registered: false, mounted: true },
+    { name: 'Archiv',   rel_path: 'Archiv',   abs_path: '/photos/libraries/Archiv',   already_registered: false, mounted: true },
+    { name: 'Natur',    rel_path: 'Natur',    abs_path: '/photos/libraries/Natur',    already_registered: false, mounted: false },
+  ],
+}
+
+// ── Scan Queue & Service Health ───────────────────────────────────────────────
+
+export const MOCK_SCAN_QUEUE_IDLE: ScanQueueStatus = {
+  services: [
+    { service: 'embedding',      pending: 0, processing: 0, failed: 0, done: 1240 },
+    { service: 'face_detection', pending: 0, processing: 0, failed: 0, done: 1240 },
+    { service: 'landmark',       pending: 0, processing: 0, failed: 0, done: 1240 },
+  ],
+}
+
+export const MOCK_SCAN_QUEUE_BUSY: ScanQueueStatus = {
+  services: [
+    { service: 'embedding',      pending: 42, processing: 3, failed: 1, done: 980 },
+    { service: 'face_detection', pending: 23, processing: 2, failed: 0, done: 1010 },
+    { service: 'landmark',       pending: 11, processing: 1, failed: 2, done: 1005 },
+  ],
+}
+
+export const MOCK_SERVICES_OK: ExternalServiceHealth[] = [
+  { name: 'insightface', available: true, lastChecked: '2024-06-05T15:00:00Z', lastError: null },
+  { name: 'embedding',   available: true, lastChecked: '2024-06-05T15:00:00Z', lastError: null },
+  { name: 'landmark',    available: true, lastChecked: '2024-06-05T15:00:00Z', lastError: null },
+]
+
+export const MOCK_SERVICES_DEGRADED: ExternalServiceHealth[] = [
+  { name: 'insightface', available: false, lastChecked: '2024-06-05T15:00:00Z', lastError: 'Connection refused' },
+  { name: 'embedding',   available: true,  lastChecked: '2024-06-05T15:00:00Z', lastError: null },
+  { name: 'landmark',    available: false, lastChecked: '2024-06-05T15:00:00Z', lastError: 'Timeout' },
+]
+
+export const MOCK_SERVER_PRESSURE_OK: ServerPressureStatus = {
+  underPressure: false,
+  eventLoopLagMs: 4,
+}
+
+export const MOCK_SERVER_PRESSURE_HIGH: ServerPressureStatus = {
+  underPressure: true,
+  eventLoopLagMs: 180,
+}
+
+// ── Documents ─────────────────────────────────────────────────────────────────
+
+export const MOCK_DOCUMENT_CATEGORIES: DocumentCategory[] = [
+  { id: 1, slug: 'finanzen',        name: 'Finanzen',        parent_id: null, icon: 'pi pi-euro',        sort_order: 1 },
+  { id: 2, slug: 'rechnungen',      name: 'Rechnungen',      parent_id: 1,    icon: 'pi pi-receipt',     sort_order: 2 },
+  { id: 3, slug: 'versicherungen',  name: 'Versicherungen',  parent_id: null, icon: 'pi pi-shield',      sort_order: 3 },
+  { id: 4, slug: 'behoerden',       name: 'Behörden',        parent_id: null, icon: 'pi pi-building',    sort_order: 4 },
+  { id: 5, slug: 'vertraege',       name: 'Verträge',        parent_id: null, icon: 'pi pi-file-edit',   sort_order: 5 },
+  { id: 6, slug: 'medizin',         name: 'Medizin',         parent_id: null, icon: 'pi pi-heart',       sort_order: 6 },
+]
+
+export const MOCK_DOCUMENTS: DocumentSummary[] = [
+  {
+    id: 1,
+    title: 'Stromrechnung März 2024',
+    original_filename: 'strom_rechnung_2024-03.pdf',
+    mime_type: 'application/pdf',
+    size_bytes: 184_320,
+    status: 'ready',
+    uploaded_at: '2024-03-28T09:15:00Z',
+    doc_date: '2024-03-15',
+    sender: 'Stadtwerke München',
+    category_id: 2,
+    category_slug: 'rechnungen',
+    classification_confidence: 0.94,
+    tags: ['Strom', 'Rechnung', '2024', 'SWM'],
+  },
+  {
+    id: 2,
+    title: 'Hausratversicherung Police',
+    original_filename: 'hausrat_police_2024.pdf',
+    mime_type: 'application/pdf',
+    size_bytes: 512_000,
+    status: 'ready',
+    uploaded_at: '2024-02-10T14:00:00Z',
+    doc_date: '2024-02-01',
+    sender: 'Allianz Versicherung',
+    category_id: 3,
+    category_slug: 'versicherungen',
+    classification_confidence: 0.88,
+    tags: ['Police', 'Hausrat'],
+  },
+  {
+    id: 3,
+    title: null,
+    original_filename: 'finanzamt_bescheid.pdf',
+    mime_type: 'application/pdf',
+    size_bytes: 245_760,
+    status: 'classifying',
+    uploaded_at: '2024-06-01T16:20:00Z',
+    doc_date: null,
+    sender: null,
+    category_id: null,
+    category_slug: null,
+    classification_confidence: null,
+    tags: [],
+  },
+  {
+    id: 4,
+    title: null,
+    original_filename: 'scan_0042.pdf',
+    mime_type: 'application/pdf',
+    size_bytes: 98_304,
+    status: 'failed',
+    uploaded_at: '2024-05-30T08:00:00Z',
+    doc_date: null,
+    sender: null,
+    category_id: null,
+    category_slug: null,
+    classification_confidence: null,
+    tags: [],
+  },
+  {
+    id: 5,
+    title: 'Mietvertrag Wohnung',
+    original_filename: 'mietvertrag_2023.pdf',
+    mime_type: 'application/pdf',
+    size_bytes: 1_048_576,
+    status: 'ready',
+    uploaded_at: '2023-09-01T10:00:00Z',
+    doc_date: '2023-08-15',
+    sender: 'Immobilien GmbH',
+    category_id: 5,
+    category_slug: 'vertraege',
+    classification_confidence: 0.97,
+    tags: ['Miete', 'Wohnung', 'Vertrag'],
+  },
+]
+
+export const MOCK_DOCUMENT_DETAIL: DocumentDetail = {
+  ...MOCK_DOCUMENTS[0]!,
+  summary:
+    'Monatliche Stromrechnung der Stadtwerke München für März 2024 über 98,40 EUR. Fällig am 10.04.2024. Kundennummer 123456.',
+  extracted_text_preview:
+    'STADTWERKE MÜNCHEN GmbH\nRechnung Nr. 2024-03-1156\nKunden-Nr.: 123456\nAbrechnungszeitraum: 01.03.2024 - 31.03.2024\nVerbrauch: 312 kWh\nGesamtbetrag: 98,40 EUR\n\nBitte überweisen Sie den Betrag bis zum 10.04.2024...',
+}
+
+export const MOCK_DOCUMENT_DETAIL_CLASSIFYING: DocumentDetail = {
+  ...MOCK_DOCUMENTS[2]!,
+  summary: null,
+  extracted_text_preview: null,
+}
+
+export const MOCK_DOCUMENT_DETAIL_FAILED: DocumentDetail = {
+  ...MOCK_DOCUMENTS[3]!,
+  summary: null,
+  extracted_text_preview: null,
+}
+
+export const MOCK_DOCUMENT_QUEUE_IDLE: DocumentQueueStatus = {
+  counts: [
+    { service: 'extract',   status: 'done', count: 120 },
+    { service: 'classify',  status: 'done', count: 120 },
+  ],
+  totalPending: 0,
+  totalProcessing: 0,
+  totalFailed: 0,
+}
+
+export const MOCK_DOCUMENT_QUEUE_BUSY: DocumentQueueStatus = {
+  counts: [
+    { service: 'extract',   status: 'processing', count: 2 },
+    { service: 'extract',   status: 'pending',    count: 4 },
+    { service: 'classify',  status: 'processing', count: 1 },
+    { service: 'classify',  status: 'pending',    count: 5 },
+    { service: 'classify',  status: 'failed',     count: 1 },
+  ],
+  totalPending: 9,
+  totalProcessing: 3,
+  totalFailed: 1,
+}

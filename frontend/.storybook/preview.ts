@@ -30,6 +30,10 @@ const router = createRouter({
     { path: '/fotos/alben/:id', component: { template: '<div />' } },
     { path: '/albums/shared/:token', component: { template: '<div />' } },
     { path: '/fotos/personen', component: { template: '<div />' } },
+    // Dokumente module
+    { path: '/dokumente', name: 'dokumente-list', component: { template: '<div />' } },
+    { path: '/dokumente/upload', name: 'dokumente-upload', component: { template: '<div />' } },
+    { path: '/dokumente/:id', name: 'dokumente-detail', component: { template: '<div />' } },
     // Admin module
     { path: '/admin', component: { template: '<div />' } },
     { path: '/admin/benutzer/:id', component: { template: '<div />' } },
