@@ -7,6 +7,8 @@ services:
     # Run as the TrueNAS SCALE "apps" user (UID/GID 568). Ensure the bind-
     # mounted host directories (photos, thumbnails) are owned by 568:568.
     user: "568:568"
+    labels:
+      com.centurylinklabs.watchtower.scope: fkprod
     depends_on:
       postgres:
         condition: service_healthy
@@ -108,6 +110,8 @@ services:
     container_name: fk-encore-insightface
     restart: unless-stopped
     user: "568:568"
+    labels:
+      com.centurylinklabs.watchtower.scope: fkprod
     environment:
       ORT_LOGGING_LEVEL: "3"
     healthcheck:
@@ -123,6 +127,8 @@ services:
     container_name: fk-encore-embedding
     restart: unless-stopped
     user: "568:568"
+    labels:
+      com.centurylinklabs.watchtower.scope: fkprod
     depends_on:
       postgres:
         condition: service_healthy
@@ -145,6 +151,8 @@ services:
     container_name: fk-encore-landmark
     restart: unless-stopped
     user: "568:568"
+    labels:
+      com.centurylinklabs.watchtower.scope: fkprod
     environment:
       LANDMARK_THRESHOLD: "0.35"
       LOG_LEVEL: INFO
@@ -164,6 +172,8 @@ services:
     container_name: fk-encore-llm
     restart: unless-stopped
     user: "568:568"
+    labels:
+      com.centurylinklabs.watchtower.scope: fkprod
     environment:
       MODELS_DIR: /models
       LLM_MODEL_PATH: /models/llama.gguf
@@ -199,6 +209,31 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # ── Watchtower (empfängt Deploy-Trigger via HTTP, zieht neue Images) ─────────
+  # Beobachtet ausschließlich Container mit dem Label
+  # com.centurylinklabs.watchtower.scope=fkprod (siehe WATCHTOWER_SCOPE).
+  watchtower:
+    image: containrrr/watchtower
+    container_name: fk-encore-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      WATCHTOWER_HTTP_API_UPDATE: "true"
+      WATCHTOWER_HTTP_API_TOKEN: ${WATCHTOWER_TOKEN}
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_SCOPE: fkprod
+      WATCHTOWER_NO_STARTUP_MESSAGE: "true"
+    command: >
+      --http-api-periodic-polls
+      fk-encore-app
+      fk-encore-insightface
+      fk-encore-embedding
+      fk-encore-landmark
+      fk-encore-llm
+    ports:
+      - "9000:8080"
 
 volumes:
   photos:
@@ -253,26 +288,3 @@ volumes:
       device: /Users/anton/vivanty_data/documents-inbox
       o: bind
       type: none
-
-  # ── Watchtower (empfängt Deploy-Trigger via HTTP, zieht neue Images) ─────────
-  watchtower:
-    image: containrrr/watchtower
-    container_name: fk-encore-watchtower
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      WATCHTOWER_HTTP_API_UPDATE: "true"
-      WATCHTOWER_HTTP_API_TOKEN: ${WATCHTOWER_TOKEN}
-      WATCHTOWER_CLEANUP: "true"
-      WATCHTOWER_NO_STARTUP_MESSAGE: "true"
-    # Nur diese vier Container beobachten (nicht alle Container auf dem Host)
-    command: >
-      --http-api-periodic-polls
-      fk-encore-app
-      fk-encore-insightface
-      fk-encore-embedding
-      fk-encore-landmark
-      fk-encore-llm
-    ports:
-      - "9000:8080"
