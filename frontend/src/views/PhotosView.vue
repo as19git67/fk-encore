@@ -127,11 +127,8 @@ const { selectedIndex, selectedPhotoIds, selectedPhoto, selectedPhotos, selectPh
 // grid (id, filename, dates, curation_status, auto_crop). Heavy fields
 // (location, GPS, ai_quality_*, description) are hydrated lazily via the
 // /photos/details batch endpoint as photos become visible / selected.
-// Smaller batch size keeps each /photos/details response well under a few MB
-// even when ai_quality_details / description are heavy. Combined with the
-// 60s per-request timeout in getPhotoDetailsBatch this prevents hung
-// responses from accumulating buffers and OOMing the tab on overloaded
-// servers with very large libraries.
+// Smaller batch size + the 60s per-request timeout in getPhotoDetailsBatch
+// keep hung responses from piling up in memory on overloaded servers.
 const hydration = usePhotoHydration(photos, { batchSize: 50, backgroundPauseMs: 50 })
 
 // Expand selection: if any selected photo is in a group, include all group members
