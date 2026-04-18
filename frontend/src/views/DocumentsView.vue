@@ -27,10 +27,17 @@ const categories = ref<DocumentCategory[]>([])
 const loading = ref(true)
 const error = ref('')
 
+const SEARCH_MODE_STORAGE_KEY = 'documents.searchMode'
+function loadStoredSearchMode(): SearchMode {
+  const raw = localStorage.getItem(SEARCH_MODE_STORAGE_KEY)
+  return raw === 'fts' || raw === 'semantic' || raw === 'hybrid' ? raw : 'hybrid'
+}
+
 const q = ref('')
 const selectedCategory = ref<string | null>(null)
 const selectedStatus = ref<DocumentStatus | null>(null)
-const searchMode = ref<SearchMode>('hybrid')
+const searchMode = ref<SearchMode>(loadStoredSearchMode())
+watch(searchMode, (v) => localStorage.setItem(SEARCH_MODE_STORAGE_KEY, v))
 
 const searchModeOptions = [
   { label: 'Hybrid', value: 'hybrid' },
@@ -167,7 +174,6 @@ onMounted(async () => {
         optionLabel="label"
         optionValue="value"
         :allowEmpty="false"
-        :disabled="q.trim().length === 0"
         v-tooltip.bottom="'Suchmodus: Text = genaue Wörter, Bedeutung = Paraphrasen, Hybrid = beides kombiniert'"
       />
 
