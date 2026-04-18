@@ -1,5 +1,6 @@
 import type { Ref } from 'vue'
 import { getPhotoDetailsBatch, type Photo } from '../api/photos'
+import { useServiceHealthStore } from '../stores/serviceHealth'
 
 /**
  * Detail fields that the lightweight /photos/index endpoint does not return.
@@ -20,7 +21,7 @@ export interface PhotoHydrationController {
   ensureLoaded(ids: number[]): Promise<void>
   /** Kick off a background hydration pass over all current photos. Idempotent. */
   hydrateAllInBackground(): void
-  /** Stop any in-flight background hydration. */
+  /** Stop any in-flight background hydration and abort pending requests. */
   cancel(): void
 }
 
@@ -29,18 +30,27 @@ interface Options {
   batchSize?: number
   /** Pause between background batches so the UI thread stays responsive. */
   backgroundPauseMs?: number
+  /** Pause between batches when the server reports it is under pressure. */
+  pressurePauseMs?: number
 }
 
 export function usePhotoHydration(
   photos: Ref<Photo[]>,
   options: Options = {}
 ): PhotoHydrationController {
-  const batchSize = options.batchSize ?? 100
+  const batchSize = options.batchSize ?? 50
   const backgroundPauseMs = options.backgroundPauseMs ?? 50
+  const pressurePauseMs = options.pressurePauseMs ?? 5_000
+
+  const serviceHealth = useServiceHealthStore()
 
   const hydratedIds = new Set<number>()
   /** IDs currently being fetched — dedupes concurrent ensureLoaded calls. */
   const inflightIds = new Set<number>()
+  /** Tracks all in-flight fetch controllers so cancel() actually aborts the
+   *  XHR (otherwise the browser keeps the response buffer until the server
+   *  finally responds, which on an overloaded backend can OOM the tab). */
+  const inflightControllers = new Set<AbortController>()
   let backgroundRunId = 0
 
   function applyDetails(detailed: Photo[]) {
@@ -64,17 +74,26 @@ export function usePhotoHydration(
     if (changed) photos.value = next
   }
 
-  async function fetchBatch(ids: number[]): Promise<void> {
-    if (ids.length === 0) return
+  async function fetchBatch(ids: number[]): Promise<boolean> {
+    if (ids.length === 0) return true
     for (const id of ids) inflightIds.add(id)
+    const controller = new AbortController()
+    inflightControllers.add(controller)
     try {
-      const res = await getPhotoDetailsBatch(ids)
+      const res = await getPhotoDetailsBatch(ids, controller.signal)
       applyDetails(res.photos)
+      return true
     } catch (err) {
-      // Non-fatal: detail fields stay undefined, grid still works
-      console.warn('[usePhotoHydration] details batch failed', err)
+      // Non-fatal: detail fields stay undefined, grid still works.
+      // Returning false lets the background loop back off instead of
+      // hammering an overloaded server with the next batch immediately.
+      if ((err as Error)?.name !== 'AbortError') {
+        console.warn('[usePhotoHydration] details batch failed', err)
+      }
+      return false
     } finally {
       for (const id of ids) inflightIds.delete(id)
+      inflightControllers.delete(controller)
     }
   }
 
@@ -94,7 +113,17 @@ export function usePhotoHydration(
       // Walk current photos array order — typically already sorted by date,
       // so we hydrate from newest to oldest first (matches typical scroll).
       let i = 0
+      let consecutiveFailures = 0
       while (myRun === backgroundRunId && i < photos.value.length) {
+        // Back off when the server flags pressure: the index endpoint reports
+        // event-loop lag, and continuing to fire detail batches at a stalled
+        // server is the fastest way to OOM the browser tab.
+        if (serviceHealth.serverPressure.underPressure) {
+          await new Promise(r => setTimeout(r, pressurePauseMs))
+          if (myRun !== backgroundRunId) return
+          continue
+        }
+
         const slice: number[] = []
         while (slice.length < batchSize && i < photos.value.length) {
           const p = photos.value[i++]
@@ -103,14 +132,32 @@ export function usePhotoHydration(
           }
         }
         if (slice.length > 0) {
-          await fetchBatch(slice)
+          const ok = await fetchBatch(slice)
           if (myRun !== backgroundRunId) return
-          // Yield to the event loop so user-driven detail fetches and rendering
-          // stay snappy.
-          await new Promise(r => setTimeout(r, backgroundPauseMs))
+
+          if (!ok) {
+            // Exponential backoff up to 30 s; gives the server room to recover
+            // and stops the browser from queueing more huge JSONB responses.
+            consecutiveFailures = Math.min(consecutiveFailures + 1, 5)
+            const delay = Math.min(backgroundPauseMs * 2 ** consecutiveFailures, 30_000)
+            await new Promise(r => setTimeout(r, delay))
+          } else {
+            consecutiveFailures = 0
+            // Yield to the event loop so user-driven detail fetches and rendering
+            // stay snappy.
+            await new Promise(r => setTimeout(r, backgroundPauseMs))
+          }
         }
       }
     })()
+  }
+
+  function cancelAllInflight() {
+    for (const c of inflightControllers) {
+      try { c.abort() } catch { /* ignore */ }
+    }
+    inflightControllers.clear()
+    inflightIds.clear()
   }
 
   return {
@@ -119,13 +166,14 @@ export function usePhotoHydration(
     },
     reset() {
       hydratedIds.clear()
-      inflightIds.clear()
       backgroundRunId++ // cancel in-flight background loop
+      cancelAllInflight()
     },
     ensureLoaded,
     hydrateAllInBackground,
     cancel() {
       backgroundRunId++
+      cancelAllInflight()
     },
   }
 }
