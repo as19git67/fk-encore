@@ -107,7 +107,6 @@ async function executeSearch() {
 
 const searchResultCount = computed(() => searchResultIds.value?.length ?? 0)
 
-// ── Sort ──────────────────────────────────────────────────────────────────────
 const sortBy = ref<'date' | 'quality'>('date')
 
 // ── Grouping (via composable) ─────────────────────────────────────────────────
@@ -130,6 +129,14 @@ const { selectedIndex, selectedPhotoIds, selectedPhoto, selectedPhotos, selectPh
 // Smaller batch size + the 60s per-request timeout in getPhotoDetailsBatch
 // keep hung responses from piling up in memory on overloaded servers.
 const hydration = usePhotoHydration(photos, { batchSize: 50, backgroundPauseMs: 50 })
+
+// Trigger a full hydration pass only when the user actually switches to
+// quality-sort — otherwise heavy fields are hydrated on demand via the
+// sidebar/compare view, which keeps the page-load request burst to a
+// single /photos/details call instead of walking all 45k photos.
+watch(sortBy, (mode) => {
+  if (mode === 'quality') hydration.hydrateAllInBackground()
+})
 
 // Expand selection: if any selected photo is in a group, include all group members
 const expandedSelectedPhotos = computed<Photo[]>(() => {
@@ -368,18 +375,19 @@ async function loadPhotos() {
     // Now reveal the grid (PhotoGrid will mount with correct selectedIndex)
     loading.value = false
 
-    // Stage 2: hydrate the focused photo first (its sidebar opens immediately),
-    // then walk the rest of the index in the background so all heavy fields
-    // become available without blocking the initial render.
+    // Stage 2: hydrate only the focused photo so its sidebar fields appear.
+    // A full-library background hydration used to start here, but on large
+    // libraries (45k+ photos) with a loaded server that fired hundreds of
+    // /photos/details batches which could hang and blow up browser memory.
+    // Heavy fields are now fetched on demand — when the user selects a
+    // photo, opens the compare view, runs a search, or switches to quality
+    // sort (see the sortBy watcher).
     if (selectedIndex.value >= 0) {
       const focused = photos.value[selectedIndex.value]
       if (focused) {
-        // Fire-and-forget: sidebar fields will appear as soon as the request
-        // resolves, no spinner needed since the grid is already interactive.
         hydration.ensureLoaded([focused.id])
       }
     }
-    hydration.hydrateAllInBackground()
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Fotos'
     loading.value = false
@@ -402,7 +410,7 @@ async function reloadPhotosInPlace() {
       const focused = photos.value[selectedIndex.value]
       if (focused) hydration.ensureLoaded([focused.id])
     }
-    hydration.hydrateAllInBackground()
+    if (sortBy.value === 'quality') hydration.hydrateAllInBackground()
   } catch { /* silently fail */ }
 }
 
