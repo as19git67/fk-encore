@@ -1,0 +1,17 @@
+# Web framework
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+pydantic==2.9.2
+
+# LLM runtime (CPU wheel by default; rebuild with CMAKE_ARGS for BLAS/GPU)
+llama-cpp-python==0.3.2
+
+# Embeddings — intfloat/multilingual-e5-base (768-dim, strong on German)
+sentence-transformers==3.2.1
+
+# CPU-only torch pins keep the image slim; override for GPU builds.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.5.1+cpu
+
+# HuggingFace download helper used by download_model.sh
+huggingface_hub==0.26.2

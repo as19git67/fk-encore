@@ -1,0 +1,167 @@
+/**
+ * Typed client for the `documents` backend service.
+ *
+ * All endpoints are gated server-side by `module.documents` plus a
+ * fine-grained permission (view/upload/edit/delete). The types here
+ * mirror the DTOs in `documents/documents.ts`.
+ */
+
+import { API_BASE_URL, apiFetch } from './client'
+
+export type DocumentStatus = 'pending' | 'extracting' | 'classifying' | 'ready' | 'failed'
+export type SearchMode = 'fts' | 'semantic' | 'hybrid'
+
+export interface DocumentSummary {
+  id: number
+  title: string | null
+  original_filename: string
+  mime_type: string
+  size_bytes: number
+  status: DocumentStatus
+  uploaded_at: string | null
+  doc_date: string | null
+  sender: string | null
+  category_id: number | null
+  category_slug: string | null
+  classification_confidence: number | null
+  tags: string[]
+}
+
+export interface DocumentDetail extends DocumentSummary {
+  summary: string | null
+  extracted_text_preview: string | null
+}
+
+export interface DocumentCategory {
+  id: number
+  slug: string
+  name: string
+  parent_id: number | null
+  icon: string | null
+  sort_order: number
+}
+
+export interface ListDocumentsResponse {
+  items: DocumentSummary[]
+  total: number
+}
+
+export interface SearchDocumentsResponse {
+  items: DocumentSummary[]
+  mode: SearchMode
+  query: string
+}
+
+export interface ListDocumentsQuery {
+  category?: string
+  tag?: string
+  q?: string
+  status?: DocumentStatus
+  limit?: number
+  offset?: number
+}
+
+export interface UpdateDocumentPayload {
+  title?: string | null
+  doc_date?: string | null
+  sender?: string | null
+  summary?: string | null
+  category_slug?: string | null
+  tags?: string[]
+}
+
+export interface QueueStatus {
+  counts: Array<{ service: string; status: string; count: number }>
+  totalPending: number
+  totalProcessing: number
+  totalFailed: number
+}
+
+function buildQuery(params: Record<string, unknown>): string {
+  const qs = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === '') continue
+    qs.set(key, String(value))
+  }
+  const s = qs.toString()
+  return s.length > 0 ? `?${s}` : ''
+}
+
+export function listDocuments(params: ListDocumentsQuery = {}) {
+  return apiFetch<ListDocumentsResponse>(`/documents${buildQuery(params as Record<string, unknown>)}`)
+}
+
+export function getDocument(id: number) {
+  return apiFetch<DocumentDetail>(`/documents/${id}`)
+}
+
+export function listDocumentCategories() {
+  return apiFetch<{ items: DocumentCategory[] }>('/document-categories')
+}
+
+export function getDocumentQueueStatus() {
+  return apiFetch<QueueStatus>('/document-queue/status')
+}
+
+export function searchDocuments(q: string, mode: SearchMode = 'hybrid', limit = 20) {
+  return apiFetch<SearchDocumentsResponse>(
+    `/documents/search${buildQuery({ q, mode, limit })}`,
+  )
+}
+
+/**
+ * Upload a PDF. Body is the raw file; the backend reads the filename
+ * from the `X-File-Name` header and the MIME type from `Content-Type`.
+ */
+export function uploadDocument(file: File, signal?: AbortSignal) {
+  return apiFetch<DocumentSummary>('/documents', {
+    method: 'POST',
+    body: file,
+    signal,
+    headers: {
+      'Content-Type': file.type || 'application/pdf',
+      'X-File-Name': file.name,
+    },
+  })
+}
+
+export function updateDocument(id: number, payload: UpdateDocumentPayload) {
+  return apiFetch<DocumentDetail>(`/documents/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteDocument(id: number) {
+  return apiFetch<{ success: boolean }>(`/documents/${id}`, { method: 'DELETE' })
+}
+
+export function reclassifyDocument(id: number) {
+  return apiFetch<{ success: boolean }>(`/documents/${id}/reclassify`, { method: 'POST' })
+}
+
+/**
+ * Build the URL the `<iframe>` in the detail view points at.
+ * Auth is cookie-less, so we append the token as a query parameter —
+ * only the bearer-less raw endpoint needs this.
+ */
+export function getDocumentFileUrl(id: number): string {
+  const token = localStorage.getItem('auth_token') ?? ''
+  const qs = token ? `?token=${encodeURIComponent(token)}` : ''
+  return `${API_BASE_URL}/documents/${id}/file${qs}`
+}
+
+/**
+ * Fetch the PDF as a blob using the standard auth header and return
+ * an `object URL` suitable for `<iframe src>`. The caller is
+ * responsible for revoking it via `URL.revokeObjectURL`.
+ */
+export async function fetchDocumentBlobUrl(id: number): Promise<string> {
+  const token = localStorage.getItem('auth_token')
+  const res = await fetch(`${API_BASE_URL}/documents/${id}/file`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) throw new Error(`PDF ${id}: HTTP ${res.status}`)
+  const blob = await res.blob()
+  return URL.createObjectURL(blob)
+}
