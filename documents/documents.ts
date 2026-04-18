@@ -1,0 +1,869 @@
+/**
+ * API endpoints for the documents module.
+ *
+ * Upload goes through the raw endpoint so the PDF body streams
+ * straight to disk; every other endpoint is a typed Encore API.
+ */
+
+import fs from "fs";
+import path from "path";
+import crypto from "crypto";
+import { api, APIError, type Query } from "encore.dev/api";
+import { getAuthData } from "~encore/auth";
+import { requirePermission } from "../user/auth-handler";
+import { and, asc, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
+import db from "../db/database";
+import { dbAll, dbFirst } from "../db/adapter";
+import {
+  documentCategories,
+  documentCategorySuggestions,
+  documentTagLinks,
+  documentTags,
+  documents,
+} from "../db/schema";
+import {
+  DOCUMENTS_MAX_BYTES,
+  SUPPORTED_MIME_TYPES,
+  assertPathUnderDocumentsRoot,
+  ensureDir,
+  getDocumentDiskPath,
+  guessExtension,
+} from "./documents.service";
+import { enqueueDocumentScan, getQueueStatus, requeueDocument } from "./scan-queue";
+import { triggerWorkers } from "./scan-worker";
+import { searchDocuments, type SearchMode } from "./search";
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function getUserId(): number {
+  const authData = getAuthData();
+  if (!authData) throw APIError.unauthenticated("Unauthorized");
+  return parseInt(authData.userID, 10);
+}
+
+function checkModule(): void {
+  const authData = getAuthData();
+  if (!authData) throw APIError.unauthenticated("Unauthorized");
+  requirePermission(authData, "module.documents");
+}
+
+// ─── DTOs ───────────────────────────────────────────────────────────────────
+
+export interface DocumentSummary {
+  id: number;
+  title: string | null;
+  original_filename: string;
+  mime_type: string;
+  size_bytes: number;
+  status: "pending" | "extracting" | "classifying" | "ready" | "failed";
+  uploaded_at: string | null;
+  doc_date: string | null;
+  sender: string | null;
+  category_id: number | null;
+  category_slug: string | null;
+  classification_confidence: number | null;
+  tags: string[];
+}
+
+export interface DocumentDetail extends DocumentSummary {
+  summary: string | null;
+  extracted_text_preview: string | null;
+}
+
+export interface DocumentCategoryDTO {
+  id: number;
+  slug: string;
+  name: string;
+  parent_id: number | null;
+  icon: string | null;
+  sort_order: number;
+}
+
+export interface ListDocumentsResponse {
+  items: DocumentSummary[];
+  total: number;
+}
+
+interface ListQuery {
+  category?: Query<string>;
+  tag?: Query<string>;
+  q?: Query<string>;
+  status?: Query<string>;
+  limit?: Query<number>;
+  offset?: Query<number>;
+}
+
+// ─── Upload (raw) ───────────────────────────────────────────────────────────
+
+/**
+ * Stream a PDF into DOCUMENTS_DIR. The sha256 digest is computed while
+ * streaming and acts as the dedup key — re-uploading the same file
+ * returns 409 without touching disk twice.
+ */
+export const uploadDocument = api.raw(
+  { expose: true, method: "POST", path: "/documents", auth: true, bodyLimit: null },
+  async (req, res) => {
+    try {
+      checkModule();
+    } catch {
+      res.statusCode = 403;
+      res.end(JSON.stringify({ error: "Forbidden" }));
+      return;
+    }
+
+    const authData = getAuthData()!;
+    try {
+      requirePermission(authData, "documents.upload");
+    } catch {
+      res.statusCode = 403;
+      res.end(JSON.stringify({ error: "Missing permission: documents.upload" }));
+      return;
+    }
+
+    const userId = getUserId();
+    const originalName = (req.headers["x-file-name"] as string) || "document.pdf";
+    const mimeType = ((req.headers["content-type"] as string) || "application/pdf")
+      .toLowerCase()
+      .split(";")[0]
+      .trim();
+
+    if (!SUPPORTED_MIME_TYPES.has(mimeType)) {
+      res.statusCode = 415;
+      res.end(JSON.stringify({ error: "Unsupported file type", message: "Nur PDF-Dateien werden unterstützt." }));
+      return;
+    }
+
+    try {
+      const result = await streamAndStorePdf(req, originalName, mimeType, userId);
+      res.statusCode = 201;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify(result));
+    } catch (err: any) {
+      if (err.message === "DOCUMENT_ALREADY_EXISTS") {
+        res.statusCode = 409;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "Duplicate document", message: "Dokument wurde bereits hochgeladen." }));
+        return;
+      }
+      if (err.message === "DOCUMENT_TOO_LARGE") {
+        res.statusCode = 413;
+        res.end(JSON.stringify({ error: "Payload too large", message: "Datei überschreitet die erlaubte Größe." }));
+        return;
+      }
+      console.error("[documents] upload error:", err);
+      res.statusCode = 500;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: err?.message ?? "Internal Server Error" }));
+    }
+  },
+);
+
+async function streamAndStorePdf(
+  req: NodeJS.ReadableStream,
+  originalName: string,
+  mimeType: string,
+  userId: number,
+): Promise<DocumentSummary> {
+  const ext = guessExtension(originalName, mimeType);
+  const hash = crypto.createHash("sha256");
+  const chunks: Buffer[] = [];
+  let size = 0;
+
+  for await (const raw of req) {
+    const chunk = Buffer.isBuffer(raw)
+      ? raw
+      : typeof raw === "string"
+        ? Buffer.from(raw, "utf8")
+        : Buffer.from(raw as Uint8Array);
+    size += chunk.length;
+    if (size > DOCUMENTS_MAX_BYTES) throw new Error("DOCUMENT_TOO_LARGE");
+    hash.update(chunk);
+    chunks.push(chunk);
+  }
+  const digest = hash.digest("hex");
+  const buffer = Buffer.concat(chunks, size);
+
+  const existing = await dbFirst<typeof documents.$inferSelect>(
+    db.select().from(documents).where(eq(documents.sha256, digest)),
+  );
+  if (existing) throw new Error("DOCUMENT_ALREADY_EXISTS");
+
+  const { absPath, relPath, dirAbs } = getDocumentDiskPath(digest, ext, new Date());
+  assertPathUnderDocumentsRoot(absPath);
+  await ensureDir(dirAbs);
+  await fs.promises.writeFile(absPath, buffer);
+
+  const row = await dbFirst<typeof documents.$inferSelect>(
+    db
+      .insert(documents)
+      .values({
+        user_id: userId,
+        sha256: digest,
+        original_filename: originalName,
+        mime_type: mimeType,
+        size_bytes: size,
+        disk_path: absPath,
+      })
+      .returning(),
+  );
+  if (!row) throw new Error("insert documents: no row returned");
+
+  await enqueueDocumentScan(row.id);
+  triggerWorkers();
+
+  return toSummary(row, null, []);
+}
+
+// ─── List / get / file ──────────────────────────────────────────────────────
+
+export const listDocuments = api(
+  { expose: true, method: "GET", path: "/documents", auth: true },
+  async ({ category, tag, q, status, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.view");
+    const userId = getUserId();
+
+    const lim = Math.min(Math.max(limit ?? 50, 1), 200);
+    const off = Math.max(offset ?? 0, 0);
+    const conds = [eq(documents.user_id, userId)];
+
+    if (status && status.length > 0) {
+      conds.push(eq(documents.status, status as any));
+    }
+    if (category && category.length > 0) {
+      const cat = await dbFirst<{ id: number }>(
+        db.select({ id: documentCategories.id }).from(documentCategories).where(eq(documentCategories.slug, category)),
+      );
+      conds.push(eq(documents.category_id, cat?.id ?? -1));
+    }
+    if (q && q.trim().length > 0) {
+      const pat = `%${q.trim()}%`;
+      const matchedByTitle = or(
+        ilike(documents.title, pat),
+        ilike(documents.sender, pat),
+        ilike(documents.original_filename, pat),
+        ilike(documents.summary, pat),
+      );
+      if (matchedByTitle) conds.push(matchedByTitle);
+    }
+
+    let docIdFilter: number[] | null = null;
+    if (tag && tag.length > 0) {
+      const tagRow = await dbFirst<{ id: number }>(
+        db.select({ id: documentTags.id }).from(documentTags).where(eq(documentTags.name, tag.toLowerCase())),
+      );
+      if (!tagRow) {
+        return { items: [], total: 0 };
+      }
+      const links = await dbAll<{ document_id: number }>(
+        db
+          .select({ document_id: documentTagLinks.document_id })
+          .from(documentTagLinks)
+          .where(eq(documentTagLinks.tag_id, tagRow.id)),
+      );
+      docIdFilter = links.map((l) => l.document_id);
+      if (docIdFilter.length === 0) return { items: [], total: 0 };
+      conds.push(inArray(documents.id, docIdFilter));
+    }
+
+    const rows = await dbAll<typeof documents.$inferSelect & { cat_slug: string | null }>(
+      db
+        .select({
+          id: documents.id,
+          user_id: documents.user_id,
+          sha256: documents.sha256,
+          original_filename: documents.original_filename,
+          mime_type: documents.mime_type,
+          size_bytes: documents.size_bytes,
+          disk_path: documents.disk_path,
+          uploaded_at: documents.uploaded_at,
+          status: documents.status,
+          category_id: documents.category_id,
+          title: documents.title,
+          doc_date: documents.doc_date,
+          sender: documents.sender,
+          summary: documents.summary,
+          extracted_text: documents.extracted_text,
+          classification_confidence: documents.classification_confidence,
+          cat_slug: documentCategories.slug,
+        })
+        .from(documents)
+        .leftJoin(documentCategories, eq(documents.category_id, documentCategories.id))
+        .where(and(...conds))
+        .orderBy(desc(documents.uploaded_at))
+        .limit(lim)
+        .offset(off),
+    );
+
+    const ids = rows.map((r) => r.id);
+    const tagsByDoc = await fetchTagsForDocuments(ids);
+
+    const total = (
+      await db.execute<{ count: string }>(
+        sql`SELECT COUNT(*)::text as count FROM documents WHERE ${sql.join(
+          conds.map((c) => sql`(${c})`),
+          sql` AND `,
+        )}`,
+      )
+    ).rows[0];
+
+    return {
+      items: rows.map((r) => toSummary(r as any, r.cat_slug, tagsByDoc.get(r.id) ?? [])),
+      total: parseInt(total?.count ?? "0", 10),
+    };
+  },
+);
+
+export const getDocument = api(
+  { expose: true, method: "GET", path: "/documents/:id", auth: true },
+  async ({ id }: { id: number }): Promise<DocumentDetail> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.view");
+    const userId = getUserId();
+
+    const row = await loadOwnedDocument(userId, id);
+    const cat = row.category_id
+      ? await dbFirst<{ slug: string }>(
+          db.select({ slug: documentCategories.slug }).from(documentCategories).where(eq(documentCategories.id, row.category_id)),
+        )
+      : undefined;
+
+    const tagsMap = await fetchTagsForDocuments([id]);
+    const tags = tagsMap.get(id) ?? [];
+
+    const preview = (row.extracted_text ?? "").slice(0, 2000);
+    return {
+      ...toSummary(row, cat?.slug ?? null, tags),
+      summary: row.summary,
+      extracted_text_preview: preview.length > 0 ? preview : null,
+    };
+  },
+);
+
+/**
+ * Stream the PDF back to the client. Only the owner can read it.
+ * Path-traversal protection comes from the sha256-based disk path plus
+ * `assertPathUnderDocumentsRoot`.
+ */
+export const getDocumentFile = api.raw(
+  { expose: true, method: "GET", path: "/documents/:id/file", auth: true },
+  async (req, res) => {
+    try {
+      checkModule();
+    } catch {
+      res.statusCode = 403;
+      res.end("Forbidden");
+      return;
+    }
+
+    const authData = getAuthData();
+    if (!authData) {
+      res.statusCode = 401;
+      res.end("Unauthorized");
+      return;
+    }
+    try {
+      requirePermission(authData, "documents.view");
+    } catch {
+      res.statusCode = 403;
+      res.end("Forbidden");
+      return;
+    }
+
+    const userId = parseInt(authData.userID, 10);
+    const m = /\/documents\/(\d+)\/file/.exec(req.url ?? "");
+    const docId = m ? parseInt(m[1], 10) : NaN;
+    if (!Number.isFinite(docId)) {
+      res.statusCode = 400;
+      res.end("Invalid id");
+      return;
+    }
+
+    try {
+      const row = await loadOwnedDocument(userId, docId);
+      assertPathUnderDocumentsRoot(row.disk_path);
+      const stat = await fs.promises.stat(row.disk_path);
+      res.statusCode = 200;
+      res.setHeader("Content-Type", row.mime_type || "application/pdf");
+      res.setHeader("Content-Length", String(stat.size));
+      res.setHeader(
+        "Content-Disposition",
+        `inline; filename="${encodeURIComponent(row.original_filename)}"`,
+      );
+      const stream = fs.createReadStream(row.disk_path);
+      stream.pipe(res);
+      stream.on("error", (err) => {
+        console.error("[documents] file stream error:", err);
+        res.end();
+      });
+    } catch (err: any) {
+      const code = err instanceof APIError ? (err as any).statusCode ?? 500 : 500;
+      res.statusCode = code === 500 ? 404 : code;
+      res.end(err?.message ?? "Not found");
+    }
+  },
+);
+
+// ─── Mutations ──────────────────────────────────────────────────────────────
+
+export interface UpdateDocumentRequest {
+  id: number;
+  title?: string | null;
+  doc_date?: string | null;
+  sender?: string | null;
+  summary?: string | null;
+  category_slug?: string | null;
+  tags?: string[];
+}
+
+export const updateDocument = api(
+  { expose: true, method: "PATCH", path: "/documents/:id", auth: true },
+  async (req: UpdateDocumentRequest): Promise<DocumentDetail> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.edit");
+    const userId = getUserId();
+
+    const existing = await loadOwnedDocument(userId, req.id);
+
+    const patch: Partial<typeof documents.$inferInsert> = {};
+    if (req.title !== undefined) patch.title = req.title?.trim() || null;
+    if (req.doc_date !== undefined) patch.doc_date = req.doc_date?.trim() || null;
+    if (req.sender !== undefined) patch.sender = req.sender?.trim() || null;
+    if (req.summary !== undefined) patch.summary = req.summary?.trim() || null;
+
+    if (req.category_slug !== undefined) {
+      if (req.category_slug === null || req.category_slug === "") {
+        patch.category_id = null;
+      } else {
+        const cat = await dbFirst<{ id: number }>(
+          db.select({ id: documentCategories.id }).from(documentCategories).where(eq(documentCategories.slug, req.category_slug)),
+        );
+        if (!cat) throw APIError.invalidArgument(`unknown category slug: ${req.category_slug}`);
+        patch.category_id = cat.id;
+      }
+    }
+
+    if (Object.keys(patch).length > 0) {
+      await db.update(documents).set(patch).where(eq(documents.id, existing.id));
+    }
+
+    if (req.tags !== undefined) {
+      await replaceTags(existing.id, req.tags);
+    }
+
+    return await loadDetail(userId, existing.id);
+  },
+);
+
+export const deleteDocument = api(
+  { expose: true, method: "DELETE", path: "/documents/:id", auth: true },
+  async ({ id }: { id: number }): Promise<{ success: boolean }> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.delete");
+    const userId = getUserId();
+
+    const row = await loadOwnedDocument(userId, id);
+    await db.delete(documents).where(eq(documents.id, id));
+    try {
+      assertPathUnderDocumentsRoot(row.disk_path);
+      await fs.promises.unlink(row.disk_path).catch(() => {});
+    } catch (err) {
+      console.warn(`[documents] delete: failed to unlink ${row.disk_path}: ${(err as Error).message}`);
+    }
+    return { success: true };
+  },
+);
+
+export const reclassifyDocument = api(
+  { expose: true, method: "POST", path: "/documents/:id/reclassify", auth: true },
+  async ({ id }: { id: number }): Promise<{ success: boolean }> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.edit");
+    const userId = getUserId();
+
+    await loadOwnedDocument(userId, id);
+    await db
+      .update(documents)
+      .set({ status: "pending" })
+      .where(eq(documents.id, id));
+    await requeueDocument(id);
+    triggerWorkers();
+    return { success: true };
+  },
+);
+
+// ─── Taxonomy + queue ───────────────────────────────────────────────────────
+
+export const listDocumentCategories = api(
+  { expose: true, method: "GET", path: "/document-categories", auth: true },
+  async (): Promise<{ items: DocumentCategoryDTO[] }> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.view");
+    const rows = await dbAll<typeof documentCategories.$inferSelect>(
+      db
+        .select()
+        .from(documentCategories)
+        .orderBy(asc(documentCategories.sort_order), asc(documentCategories.name)),
+    );
+    return {
+      items: rows.map((r) => ({
+        id: r.id,
+        slug: r.slug,
+        name: r.name,
+        parent_id: r.parent_id ?? null,
+        icon: r.icon ?? null,
+        sort_order: r.sort_order,
+      })),
+    };
+  },
+);
+
+// ─── Search ─────────────────────────────────────────────────────────────────
+
+export interface SearchDocumentsResponse {
+  items: DocumentSummary[];
+  mode: SearchMode;
+  query: string;
+}
+
+interface SearchQuery {
+  q: Query<string>;
+  mode?: Query<string>;
+  limit?: Query<number>;
+}
+
+/**
+ * Hybrid search over the caller's documents.
+ *
+ * `mode=fts` — lexical only (good for exact terms, invoice numbers).
+ * `mode=semantic` — embedding-based (good for paraphrases).
+ * `mode=hybrid` (default) — Reciprocal Rank Fusion of both branches.
+ *
+ * Returned documents keep the same shape as `GET /documents` so the
+ * frontend can reuse the list renderer.
+ */
+export const searchDocumentsEndpoint = api(
+  { expose: true, method: "GET", path: "/documents/search", auth: true },
+  async ({ q, mode, limit }: SearchQuery): Promise<SearchDocumentsResponse> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.view");
+    const userId = getUserId();
+
+    const resolvedMode: SearchMode =
+      mode === "fts" || mode === "semantic" || mode === "hybrid" ? mode : "hybrid";
+    const lim = Math.min(Math.max(limit ?? 20, 1), 100);
+    const query = (q ?? "").trim();
+    if (query.length === 0) {
+      return { items: [], mode: resolvedMode, query };
+    }
+
+    const hits = await searchDocuments({
+      userId,
+      query,
+      mode: resolvedMode,
+      limit: lim,
+    });
+    if (hits.length === 0) {
+      return { items: [], mode: resolvedMode, query };
+    }
+
+    const ids = hits.map((h) => h.document_id);
+    const rows = await dbAll<typeof documents.$inferSelect & { cat_slug: string | null }>(
+      db
+        .select({
+          id: documents.id,
+          user_id: documents.user_id,
+          sha256: documents.sha256,
+          original_filename: documents.original_filename,
+          mime_type: documents.mime_type,
+          size_bytes: documents.size_bytes,
+          disk_path: documents.disk_path,
+          uploaded_at: documents.uploaded_at,
+          status: documents.status,
+          category_id: documents.category_id,
+          title: documents.title,
+          doc_date: documents.doc_date,
+          sender: documents.sender,
+          summary: documents.summary,
+          extracted_text: documents.extracted_text,
+          classification_confidence: documents.classification_confidence,
+          cat_slug: documentCategories.slug,
+        })
+        .from(documents)
+        .leftJoin(documentCategories, eq(documents.category_id, documentCategories.id))
+        .where(and(eq(documents.user_id, userId), inArray(documents.id, ids))),
+    );
+
+    const byId = new Map<number, (typeof rows)[number]>();
+    for (const r of rows) byId.set(r.id, r);
+
+    const tagsByDoc = await fetchTagsForDocuments(ids);
+
+    // Preserve the ranked order — Postgres' WHERE IN is unordered.
+    const items = hits
+      .map((h) => {
+        const r = byId.get(h.document_id);
+        if (!r) return null;
+        return toSummary(r as any, r.cat_slug, tagsByDoc.get(r.id) ?? []);
+      })
+      .filter((x): x is DocumentSummary => x !== null);
+
+    return { items, mode: resolvedMode, query };
+  },
+);
+
+export const getDocumentQueueStatus = api(
+  { expose: true, method: "GET", path: "/document-queue/status", auth: true },
+  async () => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.view");
+    return await getQueueStatus();
+  },
+);
+
+// ─── Taxonomy refinement (category suggestions) ─────────────────────────────
+
+export interface CategorySuggestionDTO {
+  id: number;
+  suggested_name: string;
+  parent_slug: string | null;
+  example_document_ids: number[];
+  rationale: string | null;
+  status: "open" | "accepted" | "rejected";
+  created_at: string | null;
+}
+
+function slugify(input: string): string {
+  return input
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+}
+
+/**
+ * List taxonomy refinements proposed by the classifier. Defaults to
+ * `open` suggestions; pass `?status=` to surface accepted/rejected
+ * for audit purposes.
+ */
+export const listCategorySuggestions = api(
+  { expose: true, method: "GET", path: "/document-category-suggestions", auth: true },
+  async ({ status }: { status?: Query<string> }): Promise<{ items: CategorySuggestionDTO[] }> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.manage_taxonomy");
+
+    const filter = status === "accepted" || status === "rejected" ? status : "open";
+    const rows = await dbAll<typeof documentCategorySuggestions.$inferSelect>(
+      db
+        .select()
+        .from(documentCategorySuggestions)
+        .where(eq(documentCategorySuggestions.status, filter as any))
+        .orderBy(desc(documentCategorySuggestions.created_at)),
+    );
+    return {
+      items: rows.map((r) => ({
+        id: r.id,
+        suggested_name: r.suggested_name,
+        parent_slug: r.parent_slug,
+        example_document_ids: r.example_document_ids ?? [],
+        rationale: r.rationale,
+        status: r.status,
+        created_at: r.created_at ?? null,
+      })),
+    };
+  },
+);
+
+export interface AcceptSuggestionRequest {
+  id: number;
+  /** Optional admin override for the auto-derived slug. */
+  slug?: string;
+  /** Optional admin override for the suggested name. */
+  name?: string;
+}
+
+/**
+ * Accept a category suggestion: create the new `document_categories`
+ * row (if no slug collision) and mark the suggestion as accepted.
+ * Returns the new category id so the UI can offer a follow-up
+ * "reclassify these examples" action.
+ */
+export const acceptCategorySuggestion = api(
+  { expose: true, method: "POST", path: "/document-category-suggestions/:id/accept", auth: true },
+  async (req: AcceptSuggestionRequest): Promise<{ category_id: number; slug: string }> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.manage_taxonomy");
+
+    const suggestion = await dbFirst<typeof documentCategorySuggestions.$inferSelect>(
+      db.select().from(documentCategorySuggestions).where(eq(documentCategorySuggestions.id, req.id)),
+    );
+    if (!suggestion) throw APIError.notFound("suggestion not found");
+    if (suggestion.status !== "open") {
+      throw APIError.failedPrecondition(`suggestion is ${suggestion.status}`);
+    }
+
+    const name = (req.name ?? suggestion.suggested_name).trim();
+    if (!name) throw APIError.invalidArgument("name must not be empty");
+    const slug = (req.slug ?? slugify(name)).trim();
+    if (!slug) throw APIError.invalidArgument("slug must not be empty");
+
+    let parentId: number | null = null;
+    if (suggestion.parent_slug) {
+      const parent = await dbFirst<{ id: number }>(
+        db.select({ id: documentCategories.id }).from(documentCategories).where(eq(documentCategories.slug, suggestion.parent_slug)),
+      );
+      parentId = parent?.id ?? null;
+    }
+
+    const existing = await dbFirst<{ id: number }>(
+      db.select({ id: documentCategories.id }).from(documentCategories).where(eq(documentCategories.slug, slug)),
+    );
+    let categoryId: number;
+    if (existing) {
+      categoryId = existing.id;
+    } else {
+      const inserted = await dbFirst<{ id: number }>(
+        db
+          .insert(documentCategories)
+          .values({ slug, name, parent_id: parentId })
+          .returning({ id: documentCategories.id }),
+      );
+      if (!inserted) throw new Error("insert documentCategories: no row returned");
+      categoryId = inserted.id;
+    }
+
+    await db
+      .update(documentCategorySuggestions)
+      .set({ status: "accepted" })
+      .where(eq(documentCategorySuggestions.id, req.id));
+
+    return { category_id: categoryId, slug };
+  },
+);
+
+export const rejectCategorySuggestion = api(
+  { expose: true, method: "POST", path: "/document-category-suggestions/:id/reject", auth: true },
+  async ({ id }: { id: number }): Promise<{ success: boolean }> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.manage_taxonomy");
+
+    const updated = await db
+      .update(documentCategorySuggestions)
+      .set({ status: "rejected" })
+      .where(and(eq(documentCategorySuggestions.id, id), eq(documentCategorySuggestions.status, "open")));
+    if ((updated as any)?.rowCount === 0) {
+      throw APIError.failedPrecondition("suggestion is not open");
+    }
+    return { success: true };
+  },
+);
+
+// ─── Internal helpers ───────────────────────────────────────────────────────
+
+async function loadOwnedDocument(userId: number, id: number) {
+  const row = await dbFirst<typeof documents.$inferSelect>(
+    db.select().from(documents).where(and(eq(documents.id, id), eq(documents.user_id, userId))),
+  );
+  if (!row) throw APIError.notFound("document not found");
+  return row;
+}
+
+async function loadDetail(userId: number, id: number): Promise<DocumentDetail> {
+  const row = await loadOwnedDocument(userId, id);
+  const cat = row.category_id
+    ? await dbFirst<{ slug: string }>(
+        db.select({ slug: documentCategories.slug }).from(documentCategories).where(eq(documentCategories.id, row.category_id)),
+      )
+    : undefined;
+  const tagsMap = await fetchTagsForDocuments([id]);
+  const preview = (row.extracted_text ?? "").slice(0, 2000);
+  return {
+    ...toSummary(row, cat?.slug ?? null, tagsMap.get(id) ?? []),
+    summary: row.summary,
+    extracted_text_preview: preview.length > 0 ? preview : null,
+  };
+}
+
+async function fetchTagsForDocuments(ids: number[]): Promise<Map<number, string[]>> {
+  const map = new Map<number, string[]>();
+  if (ids.length === 0) return map;
+  const rows = await dbAll<{ document_id: number; name: string }>(
+    db
+      .select({ document_id: documentTagLinks.document_id, name: documentTags.name })
+      .from(documentTagLinks)
+      .innerJoin(documentTags, eq(documentTagLinks.tag_id, documentTags.id))
+      .where(inArray(documentTagLinks.document_id, ids)),
+  );
+  for (const r of rows) {
+    const arr = map.get(r.document_id) ?? [];
+    arr.push(r.name);
+    map.set(r.document_id, arr);
+  }
+  return map;
+}
+
+async function replaceTags(documentId: number, tags: readonly string[]): Promise<void> {
+  await db.delete(documentTagLinks).where(eq(documentTagLinks.document_id, documentId));
+  const seen = new Set<string>();
+  for (const raw of tags) {
+    const name = raw.trim().toLowerCase();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    const inserted = await db
+      .insert(documentTags)
+      .values({ name })
+      .onConflictDoNothing()
+      .returning({ id: documentTags.id });
+    let tagId: number | undefined = inserted[0]?.id;
+    if (tagId === undefined) {
+      const found = await dbFirst<{ id: number }>(
+        db.select({ id: documentTags.id }).from(documentTags).where(eq(documentTags.name, name)),
+      );
+      tagId = found?.id;
+    }
+    if (tagId === undefined) continue;
+    await db
+      .insert(documentTagLinks)
+      .values({ document_id: documentId, tag_id: tagId })
+      .onConflictDoNothing();
+  }
+}
+
+function toSummary(
+  row: typeof documents.$inferSelect,
+  categorySlug: string | null,
+  tags: string[],
+): DocumentSummary {
+  return {
+    id: row.id,
+    title: row.title,
+    original_filename: row.original_filename,
+    mime_type: row.mime_type,
+    size_bytes: row.size_bytes,
+    status: row.status,
+    uploaded_at: row.uploaded_at ?? null,
+    doc_date: row.doc_date,
+    sender: row.sender,
+    category_id: row.category_id,
+    category_slug: categorySlug,
+    classification_confidence: row.classification_confidence,
+    tags,
+  };
+}
