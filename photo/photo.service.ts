@@ -8,6 +8,7 @@ import { eq, and, or, sql, inArray, ilike, isNull, isNotNull, desc } from "drizz
 import { APIError } from "encore.dev/api";
 import { enqueuePhotoScan, DeferJobError } from "./scan-queue";
 import { triggerWorkers } from "./scan-worker";
+import { isUnderPressure } from "./event-loop-pressure";
 import db from "../db/database";
 import { dbFirst, dbAll, dbExec, dbInsertReturning } from '../db/adapter';
 import type { IncomingMessage } from "http";
@@ -3776,6 +3777,13 @@ class UnionFind {
 
 const SIMILARITY_THRESHOLD = 0.90;
 const TIME_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+/**
+ * Yield to the event loop every N outer iterations of the similarity loop.
+ * Power of two so the check compiles to a bitmask. 512 keeps chunks short
+ * enough (~a few hundred ms of CPU at most, even with large time windows)
+ * that health checks and gallery requests stay responsive during a regroup.
+ */
+const REGROUP_YIELD_STRIDE = 512;
 
 // Serialize similar-photo regrouping per user.
 // `findPhotoGroupsLogic` reads the user's accessible photos, deletes all
@@ -3806,6 +3814,16 @@ export function scheduleRegroup(userId: number): Promise<void> {
     try {
       do {
         groupingPending.delete(userId);
+        // Back off when the event loop is already lagging. Regroup is a
+        // pure-CPU O(N²) pass that would prolong the stall; latency-sensitive
+        // requests (health checks, gallery hydration) should drain first.
+        // Bounded so the pass still eventually runs on a permanently busy
+        // server — otherwise regroup could starve indefinitely.
+        let wait = 0;
+        while (isUnderPressure() && wait < 30_000) {
+          await new Promise((r) => setTimeout(r, 500));
+          wait += 500;
+        }
         try {
           await findPhotoGroupsLogic(userId);
         } catch (err) {
@@ -3888,6 +3906,21 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
     .sort((a, b) => a.timestamp - b.timestamp);
 
   // 4. Windowed pairwise comparison + Union-Find
+  //
+  // This is the one place in the request path that does O(N²) synchronous
+  // JS work (768-dim cosineSimilarity per pair). With a 45k-photo library
+  // the outer loop easily spans hundreds of thousands of inner iterations
+  // and — without a cooperative yield — blocks the Node event loop for
+  // seconds. While blocked every incoming HTTP request queues up, which
+  // is exactly how a gallery load "hangs": the index returns, then the
+  // sidebar/hydration requests that fire right after (/photos/:id/faces,
+  // /photos/:id/landmarks, /persons, /albums, /photos/albums,
+  // /photos/details) all sit behind this loop waiting for a turn.
+  //
+  // Yielding every REGROUP_YIELD_STRIDE outer iterations with setImmediate
+  // lets the HTTP server process queued requests between chunks. Using
+  // setImmediate (not setTimeout(…, 0)) keeps the total wall time low on
+  // idle servers because immediates are drained at the end of each tick.
   const idToIdx = new Map(indexed.map((item, idx) => [item.id, idx]));
   const uf = new UnionFind(indexed.length);
 
@@ -3900,6 +3933,9 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
       if (sim >= SIMILARITY_THRESHOLD) {
         uf.union(i, j);
       }
+    }
+    if ((i & (REGROUP_YIELD_STRIDE - 1)) === REGROUP_YIELD_STRIDE - 1) {
+      await new Promise<void>((r) => setImmediate(r));
     }
   }
 
