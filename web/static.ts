@@ -20,7 +20,7 @@ function getDistDir(): string {
 function contentTypeFor(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === ".html") return "text/html; charset=utf-8";
-  if (ext === ".js") return "application/javascript; charset=utf-8";
+  if (ext === ".js" || ext === ".mjs") return "application/javascript; charset=utf-8";
   if (ext === ".css") return "text/css; charset=utf-8";
   if (ext === ".json") return "application/json; charset=utf-8";
   if (ext === ".svg") return "image/svg+xml";
