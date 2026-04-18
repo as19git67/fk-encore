@@ -28,9 +28,13 @@ RUN groupadd --gid 568 apps \
     && getent group 568
 
 # curl stays in the runtime image for the download script and healthcheck.
+# libgomp1 provides libgomp.so.1, required by llama-cpp-python's libllama.so
+# (OpenMP runtime) — without it model load fails with
+# "libgomp.so.1: cannot open shared object file".
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
