@@ -29,6 +29,36 @@ const _require = createRequire(import.meta.url);
 type PdfParseFn = (buffer: Buffer) => Promise<{ text: string; numpages: number }>;
 const pdfParse: PdfParseFn = _require("pdf-parse");
 
+// PDF.js (bundled inside pdf-parse) emits noisy "Warning: ..." lines
+// through console.log when it hits benign edge cases while building a
+// font's glyph map — most commonly "Ran out of space in font private
+// use area" on PDFs that pack many custom glyphs. These warnings don't
+// affect the extracted text, so we swallow a small, known-benign set
+// to keep the container log readable. Anything that doesn't match the
+// allow-list is passed through unchanged.
+const SUPPRESSED_PDFJS_WARNINGS = [
+  "Ran out of space in font private use area",
+];
+
+async function pdfParseQuiet(buffer: Buffer): ReturnType<PdfParseFn> {
+  const originalLog = console.log;
+  console.log = (...args: unknown[]) => {
+    const first = args[0];
+    if (
+      typeof first === "string" &&
+      SUPPRESSED_PDFJS_WARNINGS.some((p) => first.includes(p))
+    ) {
+      return;
+    }
+    originalLog(...args);
+  };
+  try {
+    return await pdfParse(buffer);
+  } finally {
+    console.log = originalLog;
+  }
+}
+
 /** Minimum number of characters before we accept a text-layer result. */
 const MIN_TEXT_LAYER_CHARS = parseInt(
   process.env.DOCUMENTS_MIN_TEXT_CHARS ?? "80",
@@ -61,7 +91,7 @@ export async function extractPdfText(absPath: string): Promise<ExtractResult> {
   let textLayer = "";
   let pageCount = 0;
   try {
-    const parsed = await pdfParse(buffer);
+    const parsed = await pdfParseQuiet(buffer);
     textLayer = (parsed.text ?? "").trim();
     pageCount = parsed.numpages ?? 0;
   } catch (err) {

@@ -3,6 +3,10 @@ import { Service } from "encore.dev/service";
 // Start the background scan worker as a side-effect of loading this module.
 import "./scan-worker";
 
+// Register the hourly cron that replays inbox files the live watcher
+// missed (downtime, network share without inotify, etc).
+import "./inbox-cron";
+
 import { startInboxWatcher } from "./inbox-watcher";
 
 // Fire-and-forget: chokidar init should never block service boot.
