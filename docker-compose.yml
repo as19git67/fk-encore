@@ -262,53 +262,32 @@ services:
 volumes:
   photos:
     driver: local
-    driver_opts:
-      device: /Users/anton/vivanty_data/photos
-      o: bind
-      type: none
+    driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/photos }
   thumbnails:
     driver: local
-    driver_opts:
-      device: /Users/anton/vivanty_data/thumbnails
-      o: bind
-      type: none
+    driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/thumbnails }
   pgdata:
     driver: local
-    driver_opts:
-      device: /Users/anton/vivanty_data/pgdata
-      o: bind
-      type: none
+    driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/pgdata }
   # Backup volume — consumed by the /internal/backup/* endpoints and by
   # the restore-on-startup hook. The host-side backup script (see
   # scripts/host/fk-encore-backup.sh) is expected to be able to read and
   # write files in the same directory.
   backup:
     driver: local
-    driver_opts:
-      device: /Users/anton/vivanty_data/backup
-      o: bind
-      type: none
+    driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/backup }
   # Model artefacts for the llm_service (Llama GGUF + sentence-transformers
   # cache). Populate via `docker compose run --rm llm_service /usr/local/bin/download_model.sh`.
   llm_models:
     driver: local
-    driver_opts:
-      device: /Users/anton/vivanty_data/llm_models
-      o: bind
-      type: none
+    driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/llm_models }
   # Documents archive (sha256-named PDFs in YYYY/YYYY-MM shards).
   documents:
     driver: local
-    driver_opts:
-      device: /Users/anton/vivanty_data/documents
-      o: bind
-      type: none
+    driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/documents }
   # Inbox watched by documents/inbox-watcher.ts. The Raspberry Pi rsyncs
   # scanned PDFs here over SSH; chokidar picks them up once they're stable.
   # See scripts/host/README-documents-inbox.md for the Pi-side setup.
   documents_inbox:
     driver: local
-    driver_opts:
-      device: /Users/anton/vivanty_data/documents-inbox
-      o: bind
-      type: none
+    driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/documents-inbox }

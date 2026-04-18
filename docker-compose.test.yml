@@ -234,48 +234,27 @@ services:
 volumes:
   photos:
     driver: local
-    driver_opts:
-      device: /mnt/data/fk-encore-test/photos
-      o: bind
-      type: none
+    driver_opts: { type: none, o: bind, device: /mnt/data/fk-encore-test/photos }
   thumbnails:
     driver: local
-    driver_opts:
-      device: /mnt/data/fk-encore-test/thumbnails
-      o: bind
-      type: none
+    driver_opts: { type: none, o: bind, device: /mnt/data/fk-encore-test/thumbnails }
   pgdata:
     driver: local
-    driver_opts:
-      device: /mnt/data/fk-encore-test/pgdata
-      o: bind
-      type: none
+    driver_opts: { type: none, o: bind, device: /mnt/data/fk-encore-test/pgdata }
   backup:
     driver: local
-    driver_opts:
-      device: /mnt/data/fk-encore-test/backup
-      o: bind
-      type: none
+    driver_opts: { type: none, o: bind, device: /mnt/data/fk-encore-test/backup }
   # Model artefacts for the llm_service (Llama GGUF + sentence-transformers
   # cache). Populate via
   # `docker compose run --rm llm_service /usr/local/bin/download_model.sh`.
   llm_models:
     driver: local
-    driver_opts:
-      device: /mnt/data/fk-encore-test/llm_models
-      o: bind
-      type: none
+    driver_opts: { type: none, o: bind, device: /mnt/data/fk-encore-test/llm_models }
   # Documents archive (sha256-named PDFs in YYYY/YYYY-MM shards).
   documents:
     driver: local
-    driver_opts:
-      device: /mnt/data/fk-encore-test/documents
-      o: bind
-      type: none
+    driver_opts: { type: none, o: bind, device: /mnt/data/fk-encore-test/documents }
   # Inbox watched by documents/inbox-watcher.ts.
   documents_inbox:
     driver: local
-    driver_opts:
-      device: /mnt/data/fk-encore-test/documents-inbox
-      o: bind
-      type: none
+    driver_opts: { type: none, o: bind, device: /mnt/data/fk-encore-test/documents-inbox }
