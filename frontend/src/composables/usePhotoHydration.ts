@@ -99,12 +99,48 @@ export function usePhotoHydration(
     }
   }
 
+  /**
+   * Wait until the server is no longer reporting event-loop pressure, up to
+   * `maxWaitMs`. Polls the already-cached pressure flag (refreshed every 30 s
+   * by the serviceHealth store) at a short interval so we react quickly once
+   * the flag flips. Returns early when the deadline is reached so a user
+   * action never blocks forever on a permanently busy server.
+   */
+  async function waitForPressureToEase(maxWaitMs: number): Promise<void> {
+    if (!serviceHealth.serverPressure.underPressure) return
+    const deadline = Date.now() + maxWaitMs
+    while (serviceHealth.serverPressure.underPressure) {
+      if (Date.now() >= deadline) return
+      await new Promise(r => setTimeout(r, 250))
+    }
+  }
+
   async function ensureLoaded(ids: number[]): Promise<void> {
     const todo = ids.filter(id => !hydratedIds.has(id) && !inflightIds.has(id))
     if (todo.length === 0) return
+    // Respect server pressure before firing: on a loaded server with tens of
+    // thousands of photos a user-triggered details batch would otherwise sit
+    // in the Node event-loop queue for the full 60 s client timeout, leaving
+    // the sidebar stuck. Give the server a brief window to recover before
+    // adding more work; if pressure persists we still try, so the UI isn't
+    // blocked indefinitely.
+    await waitForPressureToEase(pressurePauseMs * 2)
+
     // Split into batches and run sequentially so we don't hammer the API.
     for (let i = 0; i < todo.length; i += batchSize) {
-      await fetchBatch(todo.slice(i, i + batchSize))
+      const batch = todo.slice(i, i + batchSize)
+      let ok = await fetchBatch(batch)
+      if (!ok) {
+        // A single retry after a short delay covers the common case where the
+        // first attempt timed out because the server was briefly saturated
+        // (quality-sort kicks off 900 parallel workers elsewhere, scans fire,
+        // …). Without this the sidebar would stay empty until the user
+        // reselects the photo.
+        await new Promise(r => setTimeout(r, 2_000))
+        await waitForPressureToEase(pressurePauseMs * 2)
+        ok = await fetchBatch(batch)
+        if (!ok) break
+      }
     }
   }
 

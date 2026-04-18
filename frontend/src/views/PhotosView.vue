@@ -375,19 +375,14 @@ async function loadPhotos() {
     // Now reveal the grid (PhotoGrid will mount with correct selectedIndex)
     loading.value = false
 
-    // Stage 2: hydrate only the focused photo so its sidebar fields appear.
-    // A full-library background hydration used to start here, but on large
-    // libraries (45k+ photos) with a loaded server that fired hundreds of
-    // /photos/details batches which could hang and blow up browser memory.
-    // Heavy fields are now fetched on demand — when the user selects a
-    // photo, opens the compare view, runs a search, or switches to quality
-    // sort (see the sortBy watcher).
-    if (selectedIndex.value >= 0) {
-      const focused = photos.value[selectedIndex.value]
-      if (focused) {
-        hydration.ensureLoaded([focused.id])
-      }
-    }
+    // Stage 2: hydrating the focused photo is handled by the watcher on
+    // selectedPhoto.id above — assigning selectedIndex (from -1 to targetIdx)
+    // fires it. A full-library background hydration used to start here, but
+    // on large libraries (45k+ photos) with a loaded server that fired
+    // hundreds of /photos/details batches which could hang and blow up
+    // browser memory. Heavy fields are now fetched on demand — when the user
+    // selects a photo, opens the compare view, runs a search, or switches
+    // to quality sort (see the sortBy watcher).
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Fotos'
     loading.value = false
