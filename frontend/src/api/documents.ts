@@ -136,8 +136,16 @@ export function deleteDocument(id: number) {
   return apiFetch<{ success: boolean }>(`/documents/${id}`, { method: 'DELETE' })
 }
 
-export function reclassifyDocument(id: number) {
-  return apiFetch<{ success: boolean }>(`/documents/${id}/reclassify`, { method: 'POST' })
+export function reclassifyDocument(
+  id: number,
+  options: { forceOcr?: boolean } = {},
+) {
+  const body: Record<string, unknown> = { id }
+  if (options.forceOcr !== undefined) body.force_ocr = options.forceOcr
+  return apiFetch<{ success: boolean }>(`/documents/${id}/reclassify`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
 }
 
 /**
