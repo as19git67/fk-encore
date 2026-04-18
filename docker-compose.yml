@@ -1,4 +1,23 @@
 services:
+  # ── Bind-mount permission fixer ────────────────────────────────────────────
+  # Runs once as root before the app/llm_service start and ensures the three
+  # bind-mounted host directories (documents archive, documents inbox, llm
+  # model cache) are owned by 568:568 — the TrueNAS SCALE "apps" user that
+  # every other container runs as. Without this, a freshly provisioned host
+  # directory would be root-owned and the non-root services would fail to
+  # write into it. Exits 0 on success; depends_on / service_completed_success-
+  # fully gates the dependent services on that exit.
+  chown-init:
+    image: alpine:3.20
+    container_name: fk-encore-chown-init
+    restart: "no"
+    user: "0:0"
+    command: ["sh", "-c", "chown -R 568:568 /mnt/documents /mnt/documents-inbox /mnt/models"]
+    volumes:
+      - documents:/mnt/documents
+      - documents_inbox:/mnt/documents-inbox
+      - llm_models:/mnt/models
+
   # ── Main Encore.ts Application ─────────────────────────────────────────────
   app:
     image: ghcr.io/as19git67/fk-encore:latest
@@ -10,6 +29,8 @@ services:
     labels:
       com.centurylinklabs.watchtower.scope: fkprod
     depends_on:
+      chown-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       insightface:
@@ -174,6 +195,9 @@ services:
     user: "568:568"
     labels:
       com.centurylinklabs.watchtower.scope: fkprod
+    depends_on:
+      chown-init:
+        condition: service_completed_successfully
     environment:
       MODELS_DIR: /models
       LLM_MODEL_PATH: /models/llama.gguf
