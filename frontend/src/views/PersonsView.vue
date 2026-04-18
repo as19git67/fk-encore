@@ -42,6 +42,11 @@ const showHidden = ref(false)
 const isFullscreen = ref(false)
 const selectedIndex = ref(-1)
 
+// Remember the most recently opened person across reloads. The selected
+// photo within a person isn't persisted — it re-derives from selectedIndex
+// resetting to 0 when the person reloads.
+const LAST_PERSON_KEY = 'persons_last_selected_id'
+
 // ── Person face / photo items ─────────────────────────────────────────────────
 const personFaceItems = computed(() => {
   if (!selectedPersonDetail.value) return []
@@ -247,8 +252,14 @@ async function loadData() {
       if (still) await selectPersonItem(still)
       else if (persons.value.length > 0) await selectPersonItem(persons.value[0]!)
       else { selectedPerson.value = null; selectedPersonDetail.value = null }
-    } else if (persons.value.length > 0) {
-      await selectPersonItem(persons.value[0]!)
+    } else {
+      // No query, no in-memory selection (fresh page load) → restore the
+      // previously opened person if it still exists, otherwise fall back
+      // to the first entry in the list.
+      const storedId = Number(localStorage.getItem(LAST_PERSON_KEY))
+      const stored = storedId ? persons.value.find(p => p.id === storedId) : undefined
+      if (stored) await selectPersonItem(stored)
+      else if (persons.value.length > 0) await selectPersonItem(persons.value[0]!)
     }
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Personen'
@@ -261,6 +272,7 @@ async function selectPersonItem(person: Person, focusPhotoId?: number) {
   const alreadyLoaded = selectedPerson.value?.id === person.id && !!selectedPersonDetail.value
   if (!alreadyLoaded) {
     selectedPerson.value = person
+    localStorage.setItem(LAST_PERSON_KEY, String(person.id))
     selectedIndex.value = -1
     detectedFaces.value = []
     detectedLandmarks.value = []
