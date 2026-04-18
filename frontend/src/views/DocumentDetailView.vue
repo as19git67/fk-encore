@@ -123,14 +123,16 @@ async function save() {
   }
 }
 
-async function onReclassify() {
+async function onReclassify(options: { forceOcr?: boolean } = {}) {
   if (!doc.value) return
   saving.value = true
   error.value = ''
   info.value = ''
   try {
-    await reclassifyDocument(doc.value.id)
-    info.value = 'KI-Neuanalyse wurde gestartet.'
+    await reclassifyDocument(doc.value.id, options)
+    info.value = options.forceOcr
+      ? 'OCR wurde erzwungen — Neuanalyse läuft.'
+      : 'KI-Neuanalyse wurde gestartet.'
     // Refresh after a short delay so status updates become visible.
     setTimeout(load, 1500)
   } catch (err: any) {
@@ -196,7 +198,16 @@ onBeforeUnmount(() => {
           label="Neu klassifizieren"
           text
           :loading="saving"
-          @click="onReclassify"
+          @click="onReclassify()"
+        />
+        <Button
+          v-if="auth.hasPermission('documents.edit') && doc"
+          icon="pi pi-eye"
+          label="OCR erzwingen"
+          text
+          :loading="saving"
+          title="Text-Layer der PDF ignorieren und komplett per OCR neu einlesen (hilft bei Scans mit fehlenden Leerzeichen)."
+          @click="onReclassify({ forceOcr: true })"
         />
         <Button
           v-if="auth.hasPermission('documents.delete') && doc"
