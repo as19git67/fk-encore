@@ -233,7 +233,10 @@ watch(() => selectedPhoto.value?.id ?? null, (photoId) => {
     hydration.ensureLoaded([photoId])
     loadDetectedFaces(photoId)
     loadLandmarks(photoId)
-    loadPersons()
+    // Persons list is independent of which photo is selected — loaded once
+    // at init (see below). Re-fetching it on every selection change adds to
+    // the request burst that fires when the gallery opens and keeps every
+    // arrow-key navigation hammering /persons for no benefit.
   } else {
     detectedFaces.value = []
     detectedLandmarks.value = []
@@ -732,6 +735,7 @@ async function handleDrop(e: DragEvent) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadPhotos()
+loadPersons()
 serviceHealth.startPolling()
 
 import { onUnmounted } from 'vue'
