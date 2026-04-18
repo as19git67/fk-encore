@@ -62,6 +62,33 @@ async def delete_all_photos(session: AsyncSession) -> int:
     return result.rowcount or 0
 
 
+async def get_dino_embeddings_sorted_by_time(
+    session: AsyncSession, photo_ids: List[str]
+) -> List[Tuple[str, float, List[float]]]:
+    """Fetch (photo_id, timestamp_seconds, embedding_dino) for photos with
+    a non-null DINOv2 embedding AND timestamp, ordered by timestamp ascending.
+
+    Rows missing either field are skipped — they can't participate in the
+    windowed pair search. Uses the ORM so pgvector's registered type adapter
+    produces a clean list from the `vector` column rather than raw driver
+    output.
+    """
+    stmt = (
+        select(Photo.photo_id, Photo.timestamp, Photo.embedding_dino)
+        .where(
+            Photo.photo_id.in_(photo_ids),
+            Photo.embedding_dino.is_not(None),
+            Photo.timestamp.is_not(None),
+        )
+        .order_by(Photo.timestamp.asc())
+    )
+    result = await session.execute(stmt)
+    rows: List[Tuple[str, float, List[float]]] = []
+    for photo_id, ts, emb in result.all():
+        rows.append((photo_id, ts.timestamp(), list(emb)))
+    return rows
+
+
 async def search_by_clip(
     session: AsyncSession, query_vector: List[float], k: int
 ) -> List[Tuple[str, float]]:
