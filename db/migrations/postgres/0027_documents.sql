@@ -1,4 +1,4 @@
--- Migration 0025: Document management module.
+-- Migration 0027: Document management module.
 --
 -- Creates the core tables for the documents/ service (private document
 -- archive with AI classification), plus:

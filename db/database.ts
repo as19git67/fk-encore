@@ -78,6 +78,22 @@ async function createDb(): Promise<DbInstance> {
 const DB_RETRY_INITIAL_DELAY_MS = 2_000;
 const DB_RETRY_MAX_DELAY_MS = 30_000;
 
+// Only these errors are treated as transient and retried. Anything else
+// (failed migration, missing extension, bad credentials, syntax error…)
+// is a programming/environment problem and should crash the process
+// immediately rather than spin forever in the reconnect loop.
+function isTransientConnectionError(err: any): boolean {
+  const code = err?.code;
+  if (code === "ECONNREFUSED" || code === "ETIMEDOUT" || code === "ENOTFOUND") {
+    return true;
+  }
+  // Postgres SQLSTATE class 08 (connection_exception) + 57P03 (cannot_connect_now)
+  if (typeof code === "string" && (code.startsWith("08") || code === "57P03")) {
+    return true;
+  }
+  return false;
+}
+
 let dbInstance: DbInstance | null = null;
 
 export async function initializeDb(): Promise<DbInstance> {
@@ -111,6 +127,12 @@ export async function initializeDb(): Promise<DbInstance> {
       }
       return db;
     } catch (err: any) {
+      if (!isTransientConnectionError(err)) {
+        // Schema / migration / configuration errors: fail fast so the
+        // real cause is visible instead of looping silently.
+        console.error(`[db] Non-transient error during init — aborting:`, err);
+        throw err;
+      }
       const msg = err?.message ?? String(err);
       console.error(`[db] Connection failed (attempt ${attempt}): ${msg}`);
       console.log(`[db] Retrying in ${delay / 1000}s…`);
