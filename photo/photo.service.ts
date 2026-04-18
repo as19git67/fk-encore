@@ -3784,6 +3784,35 @@ const TIME_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
  * that health checks and gallery requests stay responsive during a regroup.
  */
 const REGROUP_YIELD_STRIDE = 512;
+/**
+ * Quiet window after a regroup pass before the coalesced follow-up fires.
+ * Bulk scans finish hundreds of embedding jobs in quick succession, each
+ * triggering `scheduleRegroup`. Without a debounce the mutex chains back-to-
+ * back full rebuilds that each take seconds of CPU. Sleeping here lets the
+ * pending flag accumulate all completions that arrive in the window, so the
+ * next pass sees the final state and we run the O(N²) loop once, not hundreds
+ * of times.
+ */
+const REGROUP_DEBOUNCE_MS = 30_000;
+
+/**
+ * Dot product of two equal-length unit vectors.
+ *
+ * Used inside `findPhotoGroupsLogic` after embeddings are pre-normalized to
+ * unit length: for unit vectors `cos(a,b) = a·b`, so we skip two sqrt's and
+ * two norm accumulations per pair compared to `cosineSimilarity`. On a 45k
+ * library with a 10-min window that saves millions of Math ops per regroup.
+ * Accepts `ArrayLike<number>` so callers can pass `Float32Array` (better
+ * cache locality, half the memory of `number[]`).
+ */
+function dotProduct(v1: ArrayLike<number>, v2: ArrayLike<number>): number {
+  let sum = 0;
+  const len = v1.length;
+  for (let i = 0; i < len; i++) {
+    sum += v1[i] * v2[i];
+  }
+  return sum;
+}
 
 // Serialize similar-photo regrouping per user.
 // `findPhotoGroupsLogic` reads the user's accessible photos, deletes all
@@ -3829,6 +3858,13 @@ export function scheduleRegroup(userId: number): Promise<void> {
         } catch (err) {
           console.error(`[regroup] error for user ${userId}:`, err);
         }
+        // Debounce: wait a quiet window before running the follow-up pass so
+        // bursts of trigger events (e.g. every scan-worker embedding job during
+        // a bulk scan) coalesce into a single rebuild instead of chaining
+        // back-to-back O(N²) loops.
+        if (groupingPending.has(userId)) {
+          await new Promise((r) => setTimeout(r, REGROUP_DEBOUNCE_MS));
+        }
       } while (groupingPending.has(userId));
     } finally {
       groupingRunning.delete(userId);
@@ -3871,7 +3907,14 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
 
   // 2. Fetch DINOv2 embeddings from embedding service
   const photoIds = allPhotos.map((p) => p.id.toString());
-  let embeddingMap: Map<number, { embedding: number[]; timestamp: number }>;
+  // Pre-normalize to unit length and store as Float32Array: the similarity
+  // loop below is O(N²) on 768-dim vectors, so doing the normalization once
+  // up-front (O(N)) turns every later similarity call into a pure dot product.
+  // Float32Array halves memory vs. number[] and is denser in CPU cache.
+  let embeddingMap: Map<number, { embedding: Float32Array; timestamp: number }>;
+  // O(1) photo→timestamp lookup; the previous Array.find scan was O(N) per
+  // embedding and turned the ingestion loop into another O(N²) hotspot.
+  const photoById = new Map(allPhotos.map((p) => [p.id, p]));
   try {
     const response = await fetch(`${EMBEDDING_SERVICE_URL}/get`, {
       method: "POST",
@@ -3887,9 +3930,20 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
     for (const rec of data.photos) {
       if (!rec.embedding_dino) continue;
       const id = parseInt(rec.photo_id);
-      const photo = allPhotos.find((p) => p.id === id);
+      const src = rec.embedding_dino;
+      const dim = src.length;
+      let norm = 0;
+      for (let i = 0; i < dim; i++) norm += src[i] * src[i];
+      // Zero-magnitude vectors can't meaningfully compare — skip (matches
+      // the previous `cosineSimilarity` behaviour of returning 0 for them,
+      // which never cleared the 0.90 threshold anyway).
+      if (norm === 0) continue;
+      const inv = 1 / Math.sqrt(norm);
+      const out = new Float32Array(dim);
+      for (let i = 0; i < dim; i++) out[i] = src[i] * inv;
+      const photo = photoById.get(id);
       const ts = photo ? new Date(photo.taken_at || photo.created_at || 0).getTime() : 0;
-      embeddingMap.set(id, { embedding: rec.embedding_dino, timestamp: ts });
+      embeddingMap.set(id, { embedding: out, timestamp: ts });
     }
   } catch (err: any) {
     console.error("Failed to fetch embeddings:", err.message);
@@ -3929,7 +3983,7 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
       // Stop if outside time window
       if (indexed[j].timestamp - indexed[i].timestamp > TIME_WINDOW_MS) break;
 
-      const sim = cosineSimilarity(indexed[i].embedding, indexed[j].embedding);
+      const sim = dotProduct(indexed[i].embedding, indexed[j].embedding);
       if (sim >= SIMILARITY_THRESHOLD) {
         uf.union(i, j);
       }
@@ -4013,7 +4067,7 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
       for (const i of memberIndices) {
         let totalSim = 0;
         for (const j of memberIndices) {
-          if (i !== j) totalSim += cosineSimilarity(indexed[i].embedding, indexed[j].embedding);
+          if (i !== j) totalSim += dotProduct(indexed[i].embedding, indexed[j].embedding);
         }
         const avgSim = totalSim / (memberIndices.length - 1);
         if (avgSim > bestAvgSim) {
@@ -4027,7 +4081,7 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
       const ranked = memberIndices
         .map((idx) => ({
           photoId: indexed[idx].id,
-          sim: cosineSimilarity(indexed[idx].embedding, centerEmb),
+          sim: dotProduct(indexed[idx].embedding, centerEmb),
         }))
         .sort((a, b) => b.sim - a.sim);
 
