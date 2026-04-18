@@ -64,6 +64,7 @@ repo_stub.upsert_photos = AsyncMock(return_value=1)
 repo_stub.get_photos_by_ids = AsyncMock(return_value=[])
 repo_stub.search_by_clip = AsyncMock(return_value=[])
 repo_stub.search_by_dino = AsyncMock(return_value=[])
+repo_stub.get_dino_embeddings_sorted_by_time = AsyncMock(return_value=[])
 sys.modules["app.db.repository"] = repo_stub
 
 # app.services.embedding_service stub
@@ -99,6 +100,13 @@ class _FakeDINOEmbedder:
 embed_stub.CLIPEmbedder = _FakeCLIPEmbedder
 embed_stub.DINOv2Embedder = _FakeDINOEmbedder
 sys.modules["app.services.embedding_service"] = embed_stub
+
+# app.services.similar_groups stub — the real module imports numpy and runs
+# the windowed pair scan, neither of which this test needs to exercise.
+similar_groups_stub = types.ModuleType("app.services.similar_groups")
+similar_groups_stub.find_similar_groups = lambda rows, threshold, time_window_seconds: []
+sys.modules["app.services.similar_groups"] = similar_groups_stub
+
 sys.modules["app.services"] = types.ModuleType("app.services")
 
 # ---------------------------------------------------------------------------

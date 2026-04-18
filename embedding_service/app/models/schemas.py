@@ -83,3 +83,23 @@ class ParseQueryResponse(BaseModel):
     location: Optional[str] = Field(None, description="Detected location (city, country, region)")
     from_date: Optional[str] = Field(None, description="ISO 8601 start date, inclusive")
     to_date: Optional[str] = Field(None, description="ISO 8601 end date, inclusive")
+
+
+class SimilarGroupsRequest(BaseModel):
+    photo_ids: List[str] = Field(..., min_length=2, description="Photo IDs to consider for grouping")
+    threshold: float = Field(default=0.90, ge=0.0, le=1.0, description="Minimum cosine similarity for a pair")
+    time_window_seconds: int = Field(default=600, ge=0, description="Max seconds between capture times for a pair to count")
+
+
+class SimilarGroupMember(BaseModel):
+    photo_id: str
+    similarity_rank: int = Field(..., description="0 = cover photo (medoid)")
+
+
+class SimilarGroup(BaseModel):
+    cover_photo_id: str
+    members: List[SimilarGroupMember]
+
+
+class SimilarGroupsResponse(BaseModel):
+    groups: List[SimilarGroup]

@@ -36,9 +36,14 @@ from app.models.schemas import (
     SearchRequest,
     SearchResponse,
     SearchResult,
+    SimilarGroup,
+    SimilarGroupMember,
+    SimilarGroupsRequest,
+    SimilarGroupsResponse,
     TextSearchRequest,
 )
 from app.services.embedding_service import CLIPEmbedder, DINOv2Embedder
+from app.services.similar_groups import find_similar_groups
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -556,6 +561,42 @@ async def get_photos(request: GetRequest, db: DbDep) -> GetResponse:
         )
 
     return GetResponse(photos=records)
+
+
+# ---------------------------------------------------------------------------
+# /similar-groups
+# ---------------------------------------------------------------------------
+
+@router.post("/similar-groups", response_model=SimilarGroupsResponse, tags=["embeddings"])
+async def similar_groups(request: SimilarGroupsRequest, db: DbDep) -> SimilarGroupsResponse:
+    """Find visually-similar photo groups within a time window.
+
+    The main app calls this once per regroup to offload the O(N²) windowed
+    pair comparison onto this service, where numpy runs the 768-dim math on
+    SIMD-backed BLAS and nothing has to cross the HTTP boundary except the
+    final group structure.
+    """
+    rows = await repository.get_dino_embeddings_sorted_by_time(db, request.photo_ids)
+    if len(rows) < 2:
+        return SimilarGroupsResponse(groups=[])
+
+    groups = find_similar_groups(
+        rows,
+        threshold=request.threshold,
+        time_window_seconds=float(request.time_window_seconds),
+    )
+
+    payload = [
+        SimilarGroup(
+            cover_photo_id=cover,
+            members=[
+                SimilarGroupMember(photo_id=pid, similarity_rank=rank)
+                for rank, pid in enumerate(ranked_members)
+            ],
+        )
+        for cover, ranked_members in groups
+    ]
+    return SimilarGroupsResponse(groups=payload)
 
 
 # ---------------------------------------------------------------------------
