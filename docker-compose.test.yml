@@ -1,12 +1,22 @@
-# Test-Umgebung: verwendet den 'test'-Tag (gebaut aus PRs)
-# Auf TrueNAS in einem separaten Verzeichnis ablegen, z. B. /mnt/data/fk-encore-test/
-# Eigene .env-Datei mit TEST-spezifischen Werten anlegen.
+# Test-Umgebung: verwendet den 'test'-Tag (gebaut aus PRs).
+# Auf TrueNAS in einem separaten Verzeichnis ablegen, z. B.
+# /mnt/data/fk-encore-test/. Eigene .env-Datei mit TEST-spezifischen Werten
+# anlegen (insbesondere WATCHTOWER_TOKEN). Strukturell ein Spiegel von
+# docker-compose.yml — Unterschiede:
+#   * Image-Tag :test (statt :latest)
+#   * container_name + Watchtower-Scope tragen Suffix -test / fktest
+#   * Host-Ports verschoben, damit prod und test parallel laufen können
+#     (app 18080, postgres 15432, watchtower 9001)
+
+name: fk-encore-test
 
 services:
+  # ── Main Encore.ts Application ─────────────────────────────────────────────
   app:
     image: ghcr.io/as19git67/fk-encore:test
     container_name: fk-encore-app-test
     restart: unless-stopped
+    user: "568:568"
     labels:
       com.centurylinklabs.watchtower.scope: fktest
     depends_on:
@@ -18,8 +28,10 @@ services:
         condition: service_healthy
       landmark:
         condition: service_healthy
+      llm_service:
+        condition: service_healthy
     ports:
-      - "8081:8080"       # anderer Host-Port als Produktion
+      - "18080:8080"
     environment:
       PORT: "8080"
       DB_TYPE: postgres
@@ -29,32 +41,54 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DATABASE: encore_test
       PHOTO_UPLOAD_DIR: /mnt/data/photos
+      PHOTO_THUMBNAIL_DIR: /mnt/data/thumbnails
+      # Root directory for external photo libraries (issue #75). Every path
+      # registered through /libraries must live under this root.
+      PHOTO_LIBRARIES_ROOT: /mnt/libraries
+      # Documents module — see documents/documents.service.ts.
+      DOCUMENTS_DIR: /mnt/data/documents
+      DOCUMENTS_INBOX_DIR: /mnt/data/documents-inbox
+      DOCUMENTS_MAX_SIZE_MB: ${DOCUMENTS_MAX_SIZE_MB:-50}
+      DOCUMENTS_INBOX_USER_EMAIL: ${DOCUMENTS_INBOX_USER_EMAIL:-}
+      DOCUMENTS_OCR_LANG: ${DOCUMENTS_OCR_LANG:-deu+eng}
+      DOCUMENTS_OCR_DPI: ${DOCUMENTS_OCR_DPI:-200}
       ADMIN_EMAIL: admin@example.com
       ADMIN_NAME: Admin
       ADMIN_PASSWORD: changeme
       RP_ID: localhost
       RP_NAME: Vivanty App (Test)
-      RP_ORIGIN: http://localhost:8081
+      RP_ORIGIN: http://localhost:18080
       ENABLE_LOCAL_FACES: "true"
       FACE_DISTANCE_THRESHOLD: "0.42"
       INSIGHTFACE_SERVICE_URL: http://insightface:8000
       EMBEDDING_SERVICE_URL: http://embedding_service:8000
       LANDMARK_SERVICE_URL: http://landmark:8000
+      LLM_SERVICE_URL: http://llm_service:8000
       ENABLE_LANDMARKS: "true"
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-noreply@example.com}
-      APP_URL: ${APP_URL:-http://localhost:8081}
+      APP_URL: ${APP_URL:-http://localhost:18080}
+      BACKUP_DIR: /mnt/backup
+      BACKUP_AUTO_STOP_MS: ${BACKUP_AUTO_STOP_MS:-1800000}
+      BACKUP_TOKEN: ${BACKUP_TOKEN:-}
+      BACKUP_ALLOW_CIDRS: ${BACKUP_ALLOW_CIDRS:-}
+      BACKUP_TRUST_XFF: ${BACKUP_TRUST_XFF:-true}
     volumes:
       - photos:/mnt/data/photos
       - thumbnails:/mnt/data/thumbnails
+      - documents:/mnt/data/documents
+      - documents_inbox:/mnt/data/documents-inbox
+      - backup:/mnt/backup
 
+  # ── InsightFace Service (Face Detection) ───────────────────────────────────
   insightface:
-    image: ghcr.io/as19git67/fk-encore-insightface:latest
+    image: ghcr.io/as19git67/fk-encore-insightface:test
     container_name: fk-encore-insightface-test
     restart: unless-stopped
+    user: "568:568"
     labels:
       com.centurylinklabs.watchtower.scope: fktest
     environment:
@@ -66,10 +100,12 @@ services:
       retries: 5
       start_period: 20s
 
+  # ── Embedding Service (CLIP + DINOv2) ──────────────────────────────────────
   embedding_service:
-    image: ghcr.io/as19git67/fk-encore-embedding:latest
+    image: ghcr.io/as19git67/fk-encore-embedding:test
     container_name: fk-encore-embedding-test
     restart: unless-stopped
+    user: "568:568"
     labels:
       com.centurylinklabs.watchtower.scope: fktest
     depends_on:
@@ -88,10 +124,12 @@ services:
       retries: 5
       start_period: 20s
 
+  # ── Landmark Detection Service (Grounding DINO) ────────────────────────────
   landmark:
-    image: ghcr.io/as19git67/fk-encore-landmark:latest
+    image: ghcr.io/as19git67/fk-encore-landmark:test
     container_name: fk-encore-landmark-test
     restart: unless-stopped
+    user: "568:568"
     labels:
       com.centurylinklabs.watchtower.scope: fktest
     environment:
@@ -104,12 +142,40 @@ services:
       retries: 3
       start_period: 120s
 
+  # ── LLM Service (Llama GGUF classifier + multilingual-e5-base embedder) ───
+  # Models are NOT baked into the image — they are mmap'ed from the llm_models
+  # volume. Run `docker compose run --rm llm_service /usr/local/bin/download_model.sh`
+  # once before first start to populate the volume.
+  llm_service:
+    image: ghcr.io/as19git67/fk-encore-llm:test
+    container_name: fk-encore-llm-test
+    restart: unless-stopped
+    user: "568:568"
+    labels:
+      com.centurylinklabs.watchtower.scope: fktest
+    environment:
+      MODELS_DIR: /models
+      LLM_MODEL_PATH: /models/llama.gguf
+      EMBEDDING_MODEL: intfloat/multilingual-e5-base
+      LLM_CTX: "8192"
+      LLM_GPU_LAYERS: "0"
+      LOG_LEVEL: INFO
+    volumes:
+      - llm_models:/models
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ── PostgreSQL ─────────────────────────────────────────────────────────────
   postgres:
     image: pgvector/pgvector:pg18
     container_name: fk-encore-db-test
     restart: unless-stopped
     ports:
-      - "5433:5432"       # anderer Host-Port als Produktion
+      - "15432:5432"
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -122,7 +188,9 @@ services:
       timeout: 5s
       retries: 10
 
-  # ── Watchtower (Port 9001 — separater Endpunkt vom Produktions-Watchtower) ───
+  # ── Watchtower (Port 9001 — separater Endpunkt vom Produktions-Watchtower) ──
+  # Beobachtet ausschließlich Container mit dem Label
+  # com.centurylinklabs.watchtower.scope=fktest (siehe WATCHTOWER_SCOPE).
   watchtower:
     image: containrrr/watchtower
     container_name: fk-encore-watchtower-test
@@ -135,7 +203,13 @@ services:
       WATCHTOWER_CLEANUP: "true"
       WATCHTOWER_SCOPE: fktest
       WATCHTOWER_NO_STARTUP_MESSAGE: "true"
-    command: --http-api-periodic-polls
+    command: >
+      --http-api-periodic-polls
+      fk-encore-app-test
+      fk-encore-insightface-test
+      fk-encore-embedding-test
+      fk-encore-landmark-test
+      fk-encore-llm-test
     ports:
       - "9001:8080"
 
@@ -156,5 +230,34 @@ volumes:
     driver: local
     driver_opts:
       device: /mnt/data/fk-encore-test/pgdata
+      o: bind
+      type: none
+  backup:
+    driver: local
+    driver_opts:
+      device: /mnt/data/fk-encore-test/backup
+      o: bind
+      type: none
+  # Model artefacts for the llm_service (Llama GGUF + sentence-transformers
+  # cache). Populate via
+  # `docker compose run --rm llm_service /usr/local/bin/download_model.sh`.
+  llm_models:
+    driver: local
+    driver_opts:
+      device: /mnt/data/fk-encore-test/llm_models
+      o: bind
+      type: none
+  # Documents archive (sha256-named PDFs in YYYY/YYYY-MM shards).
+  documents:
+    driver: local
+    driver_opts:
+      device: /mnt/data/fk-encore-test/documents
+      o: bind
+      type: none
+  # Inbox watched by documents/inbox-watcher.ts.
+  documents_inbox:
+    driver: local
+    driver_opts:
+      device: /mnt/data/fk-encore-test/documents-inbox
       o: bind
       type: none
