@@ -57,6 +57,24 @@ const loading = ref(true)
 const error = ref('')
 
 const selectedIndex = ref(-1)
+
+// Per-album map of the last photo the user had selected, so reopening an
+// album restores the scroll/selection position rather than snapping to top.
+const LAST_PHOTO_MAP_KEY = 'albums_last_photo_by_album'
+
+function loadLastPhotoMap(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(LAST_PHOTO_MAP_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch { return {} }
+}
+
+function saveLastPhotoForAlbum(id: number, photoId: number) {
+  const map = loadLastPhotoMap()
+  map[String(id)] = photoId
+  localStorage.setItem(LAST_PHOTO_MAP_KEY, JSON.stringify(map))
+}
+
 const isFullscreen = ref(false)
 watch(isFullscreen, (val) => {
   if (!val) nextTick(() => photoGridRef.value?.scrollToPhoto(selectedIndex.value, 'instant'))
@@ -303,6 +321,10 @@ watch(selectedIndex, () => {
   }
 })
 
+watch(selectedPhoto, (photo) => {
+  if (photo && album.value) saveLastPhotoForAlbum(album.value.id, photo.id)
+})
+
 // ── Data loading ──────────────────────────────────────────────────────────────
 async function loadData() {
   loading.value = true
@@ -319,16 +341,25 @@ async function loadData() {
     // stack's cover photo (which is what's actually rendered in the grid).
     const queryPhotoId = Number(route.query.photoId)
     let targetIdx = -1
-    if (queryPhotoId) {
-      let effectiveId = queryPhotoId
-      if (hiddenByStack.value.has(queryPhotoId)) {
-        const group = photoToGroup.value.get(queryPhotoId)
+    function resolveToIndex(photoId: number): number {
+      let effectiveId = photoId
+      if (hiddenByStack.value.has(photoId)) {
+        const group = photoToGroup.value.get(photoId)
         if (group?.cover_photo_id) effectiveId = group.cover_photo_id
       }
-      targetIdx = albumPhotos.value.findIndex(p => p.id === effectiveId)
+      return albumPhotos.value.findIndex(p => p.id === effectiveId)
+    }
+    if (queryPhotoId) {
+      targetIdx = resolveToIndex(queryPhotoId)
       if (targetIdx >= 0) {
         router.replace({ query: { ...route.query, photoId: undefined } })
       }
+    }
+    if (targetIdx < 0) {
+      // No explicit query target — fall back to the last-viewed photo for
+      // this album, so reopening the album restores the previous position.
+      const storedPhotoId = loadLastPhotoMap()[String(albumId.value)]
+      if (storedPhotoId) targetIdx = resolveToIndex(storedPhotoId)
     }
     if (targetIdx < 0) {
       selectedIndex.value = album.value.photos.length > 0 ? 0 : -1
