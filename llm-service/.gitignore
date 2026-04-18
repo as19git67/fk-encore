@@ -1,0 +1,8 @@
+# Model artefacts are large and live in a bind-mounted volume, not in git.
+models/*
+!models/.gitkeep
+
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/

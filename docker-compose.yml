@@ -16,6 +16,8 @@ services:
         condition: service_healthy
       landmark:
         condition: service_healthy
+      llm_service:
+        condition: service_healthy
     ports:
       - "8080:8080"
     environment:
@@ -33,6 +35,19 @@ services:
       # more host directories into subpaths of /mnt/libraries (see the
       # `volumes:` section below for an example).
       PHOTO_LIBRARIES_ROOT: /mnt/libraries
+      # Documents module — see documents/documents.service.ts.
+      # DOCUMENTS_DIR holds the canonical archive (sha256-named PDFs in
+      # YYYY/YYYY-MM shards). DOCUMENTS_INBOX_DIR is the watched drop
+      # zone the Raspberry Pi rsyncs scans into.
+      DOCUMENTS_DIR: /mnt/data/documents
+      DOCUMENTS_INBOX_DIR: /mnt/data/documents-inbox
+      DOCUMENTS_MAX_SIZE_MB: ${DOCUMENTS_MAX_SIZE_MB:-50}
+      # Optional: which user owns documents arriving via the inbox. Falls
+      # back to the first Admin if unset or unknown.
+      DOCUMENTS_INBOX_USER_EMAIL: ${DOCUMENTS_INBOX_USER_EMAIL:-}
+      # OCR knobs — see documents/text-extract.ts.
+      DOCUMENTS_OCR_LANG: ${DOCUMENTS_OCR_LANG:-deu+eng}
+      DOCUMENTS_OCR_DPI: ${DOCUMENTS_OCR_DPI:-200}
       ADMIN_EMAIL: admin@example.com
       ADMIN_NAME: Admin
       ADMIN_PASSWORD: changeme   # <-- hier anpassen!
@@ -44,6 +59,7 @@ services:
       INSIGHTFACE_SERVICE_URL: http://insightface:8000
       EMBEDDING_SERVICE_URL: http://embedding_service:8000
       LANDMARK_SERVICE_URL: http://landmark:8000
+      LLM_SERVICE_URL: http://llm_service:8000
       ENABLE_LANDMARKS: "true"
       # SMTP for password reset emails (leave empty to log tokens to console)
       SMTP_HOST: ${SMTP_HOST:-}
@@ -77,6 +93,8 @@ services:
     volumes:
       - photos:/mnt/data/photos
       - thumbnails:/mnt/data/thumbnails
+      - documents:/mnt/data/documents
+      - documents_inbox:/mnt/data/documents-inbox
       - backup:/mnt/backup
       # External photo libraries — mount any host directories you want to
       # import from under /mnt/libraries. Use `:ro` for link-mode libraries
@@ -137,6 +155,32 @@ services:
       retries: 3
       start_period: 120s
 
+  # ── LLM Service (Llama GGUF classifier + multilingual-e5-base embedder) ───
+  # Models are NOT baked into the image — they are mmap'ed from the llm_models
+  # volume. Run `docker compose run --rm llm_service /usr/local/bin/download_model.sh`
+  # once before first start to populate the volume.
+  llm_service:
+    image: ghcr.io/as19git67/fk-encore-llm:latest
+    container_name: fk-encore-llm
+    restart: unless-stopped
+    user: "568:568"
+    environment:
+      MODELS_DIR: /models
+      LLM_MODEL_PATH: /models/llama.gguf
+      EMBEDDING_MODEL: intfloat/multilingual-e5-base
+      LLM_CTX: "8192"
+      LLM_GPU_LAYERS: "0"
+      LOG_LEVEL: INFO
+    volumes:
+      - llm_models:/models
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      # Give the GGUF mmap + embedder load time before the first probe.
+      start_period: 60s
+
   # ── PostgreSQL (shared instance for both app and embedding service) ─────────
   postgres:
     image: pgvector/pgvector:pg18
@@ -185,6 +229,30 @@ volumes:
       device: /Users/anton/vivanty_data/backup
       o: bind
       type: none
+  # Model artefacts for the llm_service (Llama GGUF + sentence-transformers
+  # cache). Populate via `docker compose run --rm llm_service /usr/local/bin/download_model.sh`.
+  llm_models:
+    driver: local
+    driver_opts:
+      device: /Users/anton/vivanty_data/llm_models
+      o: bind
+      type: none
+  # Documents archive (sha256-named PDFs in YYYY/YYYY-MM shards).
+  documents:
+    driver: local
+    driver_opts:
+      device: /Users/anton/vivanty_data/documents
+      o: bind
+      type: none
+  # Inbox watched by documents/inbox-watcher.ts. The Raspberry Pi rsyncs
+  # scanned PDFs here over SSH; chokidar picks them up once they're stable.
+  # See scripts/host/README-documents-inbox.md for the Pi-side setup.
+  documents_inbox:
+    driver: local
+    driver_opts:
+      device: /Users/anton/vivanty_data/documents-inbox
+      o: bind
+      type: none
 
   # ── Watchtower (empfängt Deploy-Trigger via HTTP, zieht neue Images) ─────────
   watchtower:
@@ -205,5 +273,6 @@ volumes:
       fk-encore-insightface
       fk-encore-embedding
       fk-encore-landmark
+      fk-encore-llm
     ports:
       - "9000:8080"

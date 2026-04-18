@@ -23,6 +23,25 @@ export async function setup() {
   } finally {
     await pool.end();
   }
+
+  // Install the pgvector extension up-front. Migration 0027 does the same
+  // via `CREATE EXTENSION IF NOT EXISTS vector`, but if the Postgres server
+  // lacks the pgvector library that migration will hang in the reconnect
+  // loop. Failing here with a clear message is much easier to diagnose.
+  const testPool = new Pool({
+    connectionString: `postgres://${user}:${password}@${host}:${port}/${testDb}`,
+  });
+  try {
+    await testPool.query(`CREATE EXTENSION IF NOT EXISTS vector`);
+  } catch (err: any) {
+    throw new Error(
+      `[globalSetup] Failed to enable pgvector on ${testDb}: ${err?.message ?? err}. ` +
+      `The test database needs a Postgres server with pgvector installed — use the ` +
+      `pgvector/pgvector:pg18 image (see docker-compose.test.yml).`,
+    );
+  } finally {
+    await testPool.end();
+  }
 }
 
 export async function teardown() {

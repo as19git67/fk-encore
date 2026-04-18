@@ -393,3 +393,117 @@ export const photoScanQueue = pgTable("photo_scan_queue", {
   started_at: timestamp("started_at", { mode: "string" }),
   finished_at: timestamp("finished_at", { mode: "string" }),
 });
+
+// ========== Documents ==========
+
+export const documentStatusEnum = pgEnum("document_status", [
+  "pending",
+  "extracting",
+  "classifying",
+  "ready",
+  "failed",
+]);
+
+export const documentJobServiceEnum = pgEnum("document_job_service", [
+  "text_extract",
+  "classify",
+  "embed",
+]);
+
+export const documentJobStatusEnum = pgEnum("document_job_status", [
+  "pending",
+  "processing",
+  "failed",
+  "done",
+]);
+
+export const documentSuggestionStatusEnum = pgEnum("document_suggestion_status", [
+  "open",
+  "accepted",
+  "rejected",
+]);
+
+export const documentCategories = pgTable("document_categories", {
+  id: serial("id").primaryKey(),
+  slug: text("slug").unique().notNull(),
+  name: text("name").notNull(),
+  parent_id: integer("parent_id").references((): any => documentCategories.id, { onDelete: "set null" }),
+  icon: text("icon"),
+  sort_order: integer("sort_order").notNull().default(0),
+});
+
+export const documents = pgTable("documents", {
+  id: serial("id").primaryKey(),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  sha256: text("sha256").unique().notNull(),
+  original_filename: text("original_filename").notNull(),
+  mime_type: text("mime_type").notNull(),
+  size_bytes: integer("size_bytes").notNull(),
+  disk_path: text("disk_path").notNull(),
+  uploaded_at: timestamp("uploaded_at", { mode: "string" }).defaultNow(),
+  status: documentStatusEnum("status").notNull().default("pending"),
+  // AI-produced fields (nullable until the worker has run).
+  category_id: integer("category_id").references(() => documentCategories.id, { onDelete: "set null" }),
+  title: text("title"),
+  // ISO date-only (YYYY-MM-DD) — date printed on the document itself, if detected.
+  doc_date: text("doc_date"),
+  sender: text("sender"),
+  summary: text("summary"),
+  extracted_text: text("extracted_text"),
+  classification_confidence: real("classification_confidence"),
+  // NOTE: the generated `text_tsv tsvector` column and its GIN index are
+  // added by migration 0025 and accessed only via raw SQL (drizzle-orm has
+  // no first-class tsvector support).
+});
+
+export const documentTags = pgTable("document_tags", {
+  id: serial("id").primaryKey(),
+  name: text("name").unique().notNull(),
+  color: text("color"),
+});
+
+export const documentTagLinks = pgTable(
+  "document_tag_links",
+  {
+    document_id: integer("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    tag_id: integer("tag_id")
+      .notNull()
+      .references(() => documentTags.id, { onDelete: "cascade" }),
+  },
+  (table) => [primaryKey({ columns: [table.document_id, table.tag_id] })]
+);
+
+export const documentScanQueue = pgTable("document_scan_queue", {
+  id: serial("id").primaryKey(),
+  document_id: integer("document_id")
+    .notNull()
+    .references(() => documents.id, { onDelete: "cascade" }),
+  service: documentJobServiceEnum("service").notNull(),
+  status: documentJobStatusEnum("status").notNull().default("pending"),
+  attempts: integer("attempts").notNull().default(0),
+  error_msg: text("error_msg"),
+  enqueued_at: timestamp("enqueued_at", { mode: "string" }).notNull().defaultNow(),
+  started_at: timestamp("started_at", { mode: "string" }),
+  finished_at: timestamp("finished_at", { mode: "string" }),
+});
+
+// AI-proposed taxonomy refinements. Populated by the classifier when
+// confidence is low or documents end up in "sonstiges". Admin accepts /
+// rejects entries in the UI; accepted ones create new document_categories.
+export const documentCategorySuggestions = pgTable("document_category_suggestions", {
+  id: serial("id").primaryKey(),
+  suggested_name: text("suggested_name").notNull(),
+  parent_slug: text("parent_slug"),
+  example_document_ids: integer("example_document_ids").array().notNull().default(sql`'{}'::integer[]`),
+  rationale: text("rationale"),
+  status: documentSuggestionStatusEnum("status").notNull().default("open"),
+  created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
+});
+
+// NOTE: `document_embeddings` (pgvector) is created via raw SQL in migration
+// 0025 and accessed only through raw queries — drizzle-orm has no native
+// vector column type.
