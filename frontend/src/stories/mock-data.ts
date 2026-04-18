@@ -18,6 +18,12 @@ import type {
 import type { RoleWithPermissions, Permission } from '../api/roles'
 import type { PasskeyInfo } from '../api/passkeys'
 import type { PhotoLibrary, AvailablePathsResponse } from '../api/libraries'
+import type {
+  DocumentSummary,
+  DocumentDetail,
+  DocumentCategory,
+  QueueStatus as DocumentQueueStatus,
+} from '../api/documents'
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -36,6 +42,7 @@ export const MOCK_USER: UserWithRoles = {
     'photos.libraries.manage',
     'people.view',
     'data.manage',
+    'documents.view', 'documents.upload', 'documents.edit', 'documents.delete',
   ],
 }
 
@@ -378,6 +385,7 @@ export const MOCK_LIBRARIES: PhotoLibrary[] = [
     import_mode: 'link',
     auto_import: true,
     auto_albums: true,
+    favorite_rating_threshold: 4,
     created_at: '2024-06-01T08:00:00Z',
     last_scan_at: '2024-06-05T14:00:00Z',
   },
@@ -389,6 +397,7 @@ export const MOCK_LIBRARIES: PhotoLibrary[] = [
     import_mode: 'move',
     auto_import: false,
     auto_albums: false,
+    favorite_rating_threshold: 4,
     created_at: '2024-04-15T08:00:00Z',
     last_scan_at: null,
   },
@@ -446,4 +455,136 @@ export const MOCK_SERVER_PRESSURE_OK: ServerPressureStatus = {
 export const MOCK_SERVER_PRESSURE_HIGH: ServerPressureStatus = {
   underPressure: true,
   eventLoopLagMs: 180,
+}
+
+// ── Documents ─────────────────────────────────────────────────────────────────
+
+export const MOCK_DOCUMENT_CATEGORIES: DocumentCategory[] = [
+  { id: 1, slug: 'finanzen',        name: 'Finanzen',        parent_id: null, icon: 'pi pi-euro',        sort_order: 1 },
+  { id: 2, slug: 'rechnungen',      name: 'Rechnungen',      parent_id: 1,    icon: 'pi pi-receipt',     sort_order: 2 },
+  { id: 3, slug: 'versicherungen',  name: 'Versicherungen',  parent_id: null, icon: 'pi pi-shield',      sort_order: 3 },
+  { id: 4, slug: 'behoerden',       name: 'Behörden',        parent_id: null, icon: 'pi pi-building',    sort_order: 4 },
+  { id: 5, slug: 'vertraege',       name: 'Verträge',        parent_id: null, icon: 'pi pi-file-edit',   sort_order: 5 },
+  { id: 6, slug: 'medizin',         name: 'Medizin',         parent_id: null, icon: 'pi pi-heart',       sort_order: 6 },
+]
+
+export const MOCK_DOCUMENTS: DocumentSummary[] = [
+  {
+    id: 1,
+    title: 'Stromrechnung März 2024',
+    original_filename: 'strom_rechnung_2024-03.pdf',
+    mime_type: 'application/pdf',
+    size_bytes: 184_320,
+    status: 'ready',
+    uploaded_at: '2024-03-28T09:15:00Z',
+    doc_date: '2024-03-15',
+    sender: 'Stadtwerke München',
+    category_id: 2,
+    category_slug: 'rechnungen',
+    classification_confidence: 0.94,
+    tags: ['Strom', 'Rechnung', '2024', 'SWM'],
+  },
+  {
+    id: 2,
+    title: 'Hausratversicherung Police',
+    original_filename: 'hausrat_police_2024.pdf',
+    mime_type: 'application/pdf',
+    size_bytes: 512_000,
+    status: 'ready',
+    uploaded_at: '2024-02-10T14:00:00Z',
+    doc_date: '2024-02-01',
+    sender: 'Allianz Versicherung',
+    category_id: 3,
+    category_slug: 'versicherungen',
+    classification_confidence: 0.88,
+    tags: ['Police', 'Hausrat'],
+  },
+  {
+    id: 3,
+    title: null,
+    original_filename: 'finanzamt_bescheid.pdf',
+    mime_type: 'application/pdf',
+    size_bytes: 245_760,
+    status: 'classifying',
+    uploaded_at: '2024-06-01T16:20:00Z',
+    doc_date: null,
+    sender: null,
+    category_id: null,
+    category_slug: null,
+    classification_confidence: null,
+    tags: [],
+  },
+  {
+    id: 4,
+    title: null,
+    original_filename: 'scan_0042.pdf',
+    mime_type: 'application/pdf',
+    size_bytes: 98_304,
+    status: 'failed',
+    uploaded_at: '2024-05-30T08:00:00Z',
+    doc_date: null,
+    sender: null,
+    category_id: null,
+    category_slug: null,
+    classification_confidence: null,
+    tags: [],
+  },
+  {
+    id: 5,
+    title: 'Mietvertrag Wohnung',
+    original_filename: 'mietvertrag_2023.pdf',
+    mime_type: 'application/pdf',
+    size_bytes: 1_048_576,
+    status: 'ready',
+    uploaded_at: '2023-09-01T10:00:00Z',
+    doc_date: '2023-08-15',
+    sender: 'Immobilien GmbH',
+    category_id: 5,
+    category_slug: 'vertraege',
+    classification_confidence: 0.97,
+    tags: ['Miete', 'Wohnung', 'Vertrag'],
+  },
+]
+
+export const MOCK_DOCUMENT_DETAIL: DocumentDetail = {
+  ...MOCK_DOCUMENTS[0]!,
+  summary:
+    'Monatliche Stromrechnung der Stadtwerke München für März 2024 über 98,40 EUR. Fällig am 10.04.2024. Kundennummer 123456.',
+  extracted_text_preview:
+    'STADTWERKE MÜNCHEN GmbH\nRechnung Nr. 2024-03-1156\nKunden-Nr.: 123456\nAbrechnungszeitraum: 01.03.2024 - 31.03.2024\nVerbrauch: 312 kWh\nGesamtbetrag: 98,40 EUR\n\nBitte überweisen Sie den Betrag bis zum 10.04.2024...',
+}
+
+export const MOCK_DOCUMENT_DETAIL_CLASSIFYING: DocumentDetail = {
+  ...MOCK_DOCUMENTS[2]!,
+  summary: null,
+  extracted_text_preview: null,
+}
+
+export const MOCK_DOCUMENT_DETAIL_FAILED: DocumentDetail = {
+  ...MOCK_DOCUMENTS[3]!,
+  summary: null,
+  extracted_text_preview: null,
+}
+
+export const MOCK_DOCUMENT_QUEUE_IDLE: DocumentQueueStatus = {
+  counts: [
+    { service: 'extract',   status: 'done', count: 120 },
+    { service: 'classify',  status: 'done', count: 120 },
+  ],
+  totalPending: 0,
+  totalProcessing: 0,
+  totalFailed: 0,
+}
+
+export const MOCK_DOCUMENT_QUEUE_BUSY: DocumentQueueStatus = {
+  counts: [
+    { service: 'extract',   status: 'processing', count: 2 },
+    { service: 'extract',   status: 'pending',    count: 4 },
+    { service: 'classify',  status: 'processing', count: 1 },
+    { service: 'classify',  status: 'pending',    count: 5 },
+    { service: 'classify',  status: 'failed',     count: 1 },
+  ],
+  totalPending: 9,
+  totalProcessing: 3,
+  totalFailed: 1,
 }

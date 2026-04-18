@@ -6,6 +6,8 @@ import {
   MOCK_PUBLIC_ALBUM, MOCK_LIBRARIES, MOCK_AVAILABLE_PATHS,
   MOCK_SCAN_QUEUE_IDLE, MOCK_SERVICES_OK, MOCK_SERVER_PRESSURE_OK,
   MOCK_FACES, MOCK_LANDMARKS,
+  MOCK_DOCUMENTS, MOCK_DOCUMENT_CATEGORIES, MOCK_DOCUMENT_DETAIL,
+  MOCK_DOCUMENT_QUEUE_IDLE,
 } from './mock-data'
 
 // Generates a deterministic placeholder SVG for a photo filename
@@ -241,6 +243,67 @@ export const defaultHandlers = [
     }),
   ),
   http.post('/api/libraries/:id/reconcile', () => HttpResponse.json({ removed: 0 })),
+
+  // ── Documents ──────────────────────────────────────────────────────────────
+  http.get('/api/documents', ({ request }) => {
+    const url = new URL(request.url)
+    const category = url.searchParams.get('category')
+    const status = url.searchParams.get('status')
+    let items = MOCK_DOCUMENTS
+    if (category) items = items.filter((d) => d.category_slug === category)
+    if (status) items = items.filter((d) => d.status === status)
+    return HttpResponse.json({ items, total: items.length })
+  }),
+  http.get('/api/documents/search', ({ request }) => {
+    const url = new URL(request.url)
+    const q = (url.searchParams.get('q') ?? '').toLowerCase()
+    const mode = (url.searchParams.get('mode') ?? 'hybrid') as 'fts' | 'semantic' | 'hybrid'
+    const items = q.length === 0
+      ? MOCK_DOCUMENTS
+      : MOCK_DOCUMENTS.filter((d) =>
+        (d.title ?? '').toLowerCase().includes(q) ||
+        d.original_filename.toLowerCase().includes(q) ||
+        (d.sender ?? '').toLowerCase().includes(q) ||
+        d.tags.some((t) => t.toLowerCase().includes(q)),
+      )
+    return HttpResponse.json({ items, mode, query: q })
+  }),
+  http.get('/api/document-categories', () =>
+    HttpResponse.json({ items: MOCK_DOCUMENT_CATEGORIES }),
+  ),
+  http.get('/api/document-queue/status', () =>
+    HttpResponse.json(MOCK_DOCUMENT_QUEUE_IDLE),
+  ),
+  http.get('/api/documents/:id', ({ params }) => {
+    const id = Number(params.id)
+    const summary = MOCK_DOCUMENTS.find((d) => d.id === id) ?? MOCK_DOCUMENTS[0]!
+    return HttpResponse.json({
+      ...summary,
+      summary: MOCK_DOCUMENT_DETAIL.summary,
+      extracted_text_preview: MOCK_DOCUMENT_DETAIL.extracted_text_preview,
+    })
+  }),
+  http.patch('/api/documents/:id', async ({ params, request }) => {
+    const id = Number(params.id)
+    const summary = MOCK_DOCUMENTS.find((d) => d.id === id) ?? MOCK_DOCUMENTS[0]!
+    const patch = (await request.json().catch(() => ({}))) as Record<string, unknown>
+    return HttpResponse.json({
+      ...summary,
+      ...patch,
+      summary: (patch.summary as string) ?? MOCK_DOCUMENT_DETAIL.summary,
+      extracted_text_preview: MOCK_DOCUMENT_DETAIL.extracted_text_preview,
+    })
+  }),
+  http.delete('/api/documents/:id', () => HttpResponse.json({ success: true })),
+  http.post('/api/documents/:id/reclassify', () => HttpResponse.json({ success: true })),
+  http.post('/api/documents', () => HttpResponse.json(MOCK_DOCUMENTS[0]!)),
+  http.get('/api/documents/:id/file', () => {
+    // Minimal valid PDF ("%PDF-…") so the iframe doesn't show a network error.
+    const pdf = '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n' +
+      '2 0 obj<</Type/Pages/Count 0/Kids[]>>endobj\n' +
+      'trailer<</Root 1 0 R>>\n%%EOF\n'
+    return new HttpResponse(pdf, { headers: { 'Content-Type': 'application/pdf' } })
+  }),
 
   // ── System ─────────────────────────────────────────────────────────────────
   http.get('/api/build-info', () => HttpResponse.json({ build: 'storybook-dev' })),
