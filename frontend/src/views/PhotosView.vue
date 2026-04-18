@@ -127,7 +127,9 @@ const { selectedIndex, selectedPhotoIds, selectedPhoto, selectedPhotos, selectPh
 // grid (id, filename, dates, curation_status, auto_crop). Heavy fields
 // (location, GPS, ai_quality_*, description) are hydrated lazily via the
 // /photos/details batch endpoint as photos become visible / selected.
-const hydration = usePhotoHydration(photos, { batchSize: 100, backgroundPauseMs: 50 })
+// Smaller batch size + the 60s per-request timeout in getPhotoDetailsBatch
+// keep hung responses from piling up in memory on overloaded servers.
+const hydration = usePhotoHydration(photos, { batchSize: 50, backgroundPauseMs: 50 })
 
 // Expand selection: if any selected photo is in a group, include all group members
 const expandedSelectedPhotos = computed<Photo[]>(() => {

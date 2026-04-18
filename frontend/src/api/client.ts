@@ -34,9 +34,41 @@ async function tryRefresh(): Promise<boolean> {
   return refreshPromise
 }
 
+export interface ApiFetchOptions extends RequestInit {
+  /**
+   * Abort the request after this many milliseconds. Prevents hanging requests
+   * from accumulating in the browser when the server is overloaded — critical
+   * for polling/batch endpoints because dangling fetches keep their response
+   * buffers in memory and can OOM the tab.
+   */
+  timeoutMs?: number
+}
+
+/**
+ * Combine an external AbortSignal with an internal timeout signal.
+ * Returns the combined signal plus a cleanup that clears the timer so
+ * the request doesn't keep a setTimeout pinned after it resolves.
+ */
+function withTimeout(signal: AbortSignal | undefined, timeoutMs: number | undefined): {
+  signal: AbortSignal | undefined
+  cleanup: () => void
+} {
+  if (!timeoutMs || timeoutMs <= 0) return { signal, cleanup: () => {} }
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(new DOMException('Request timed out', 'TimeoutError')), timeoutMs)
+
+  if (signal) {
+    if (signal.aborted) controller.abort(signal.reason)
+    else signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true })
+  }
+
+  return { signal: controller.signal, cleanup: () => clearTimeout(timer) }
+}
+
 export async function apiFetch<T>(
   path: string,
-  options: RequestInit = {}
+  options: ApiFetchOptions = {}
 ): Promise<T> {
   const token = localStorage.getItem('auth_token')
 
@@ -53,36 +85,45 @@ export async function apiFetch<T>(
     headers['Authorization'] = `Bearer ${token}`
   }
 
-  let response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers,
-  })
+  const { timeoutMs, signal: callerSignal, ...fetchInit } = options
+  const { signal, cleanup } = withTimeout(callerSignal ?? undefined, timeoutMs)
 
-  // On 401, try refreshing the access token and retry once
-  if (response.status === 401 && path !== '/auth/refresh') {
-    const refreshed = await tryRefresh()
-    if (refreshed) {
-      const newToken = localStorage.getItem('auth_token')
-      headers['Authorization'] = `Bearer ${newToken}`
-      response = await fetch(`${API_BASE_URL}${path}`, {
-        ...options,
-        headers,
-      })
+  try {
+    let response = await fetch(`${API_BASE_URL}${path}`, {
+      ...fetchInit,
+      headers,
+      signal,
+    })
+
+    // On 401, try refreshing the access token and retry once
+    if (response.status === 401 && path !== '/auth/refresh') {
+      const refreshed = await tryRefresh()
+      if (refreshed) {
+        const newToken = localStorage.getItem('auth_token')
+        headers['Authorization'] = `Bearer ${newToken}`
+        response = await fetch(`${API_BASE_URL}${path}`, {
+          ...fetchInit,
+          headers,
+          signal,
+        })
+      }
     }
-  }
 
-  if (response.status === 401) {
-    localStorage.removeItem('auth_token')
-    localStorage.removeItem('refresh_token')
-    localStorage.removeItem('auth_user')
-    window.location.href = `${import.meta.env.BASE_URL}login`
-    throw new Error('Unauthorized')
-  }
+    if (response.status === 401) {
+      localStorage.removeItem('auth_token')
+      localStorage.removeItem('refresh_token')
+      localStorage.removeItem('auth_user')
+      window.location.href = `${import.meta.env.BASE_URL}login`
+      throw new Error('Unauthorized')
+    }
 
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}))
-    throw new Error(body.message || body.code || `Request failed: ${response.status}`)
-  }
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}))
+      throw new Error(body.message || body.code || `Request failed: ${response.status}`)
+    }
 
-  return response.json()
+    return response.json()
+  } finally {
+    cleanup()
+  }
 }
