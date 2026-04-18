@@ -95,7 +95,7 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
         <i v-if="item.photo.curation_status === 'favorite'" class="pi pi-heart-fill favorite-badge" />
         <i v-if="item.photo.curation_status === 'hidden'" class="pi pi-eye-slash hidden-badge" />
 
-        <div class="photo-info">
+        <div v-if="visiblePhotoIds.has(item.photo.id)" class="photo-info">
           <span class="name">{{ item.photo.original_name }}</span>
           <div class="photo-actions">
             <Button

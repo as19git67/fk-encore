@@ -269,7 +269,7 @@ defineExpose({
               </span>
             </div>
 
-            <div class="photo-info">
+            <div v-if="visiblePhotoIds.has(item.photo.id)" class="photo-info">
               <span class="name">
                 {{ item.group ? `${item.group.member_count} ähnliche Fotos` : item.photo.original_name }}
               </span>
