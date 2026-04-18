@@ -11,6 +11,19 @@
 name: fk-encore-test
 
 services:
+  # ── Bind-mount permission fixer ────────────────────────────────────────────
+  # Mirror of docker-compose.yml's chown-init. See that file for the rationale.
+  chown-init:
+    image: alpine:3.20
+    container_name: fk-encore-chown-init-test
+    restart: "no"
+    user: "0:0"
+    command: ["sh", "-c", "chown -R 568:568 /mnt/documents /mnt/documents-inbox /mnt/models"]
+    volumes:
+      - documents:/mnt/documents
+      - documents_inbox:/mnt/documents-inbox
+      - llm_models:/mnt/models
+
   # ── Main Encore.ts Application ─────────────────────────────────────────────
   app:
     image: ghcr.io/as19git67/fk-encore:test
@@ -20,6 +33,8 @@ services:
     labels:
       com.centurylinklabs.watchtower.scope: fktest
     depends_on:
+      chown-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       insightface:
@@ -153,6 +168,9 @@ services:
     user: "568:568"
     labels:
       com.centurylinklabs.watchtower.scope: fktest
+    depends_on:
+      chown-init:
+        condition: service_completed_successfully
     environment:
       MODELS_DIR: /models
       LLM_MODEL_PATH: /models/llama.gguf
