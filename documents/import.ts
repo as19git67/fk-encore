@@ -41,6 +41,21 @@ export class DuplicateDocumentError extends Error {
 }
 
 /**
+ * Thrown when the source file is 0 bytes. Typically means the upstream
+ * copy (rsync/scp) has only just created the file and not yet started
+ * streaming content. The inbox watcher swallows this to keep the file
+ * around for the reconcile cron / next stable-rewrite event.
+ */
+export class EmptySourceFileError extends Error {
+  readonly sourcePath: string;
+  constructor(sourcePath: string) {
+    super("DOCUMENT_SOURCE_EMPTY");
+    this.name = "EmptySourceFileError";
+    this.sourcePath = sourcePath;
+  }
+}
+
+/**
  * Import a PDF that is already on disk (typical inbox flow: the file
  * arrived via rsync/scp).
  *
@@ -58,7 +73,7 @@ export async function importDocumentFromPath(params: {
   const { userId, sourcePath } = params;
   const stat = await fs.promises.stat(sourcePath);
   if (!stat.isFile()) throw new Error(`not a file: ${sourcePath}`);
-  if (stat.size === 0) throw new Error(`empty file: ${sourcePath}`);
+  if (stat.size === 0) throw new EmptySourceFileError(sourcePath);
   if (stat.size > DOCUMENTS_MAX_BYTES) {
     throw new Error(`DOCUMENT_TOO_LARGE (${stat.size} bytes, max ${DOCUMENTS_MAX_BYTES})`);
   }
