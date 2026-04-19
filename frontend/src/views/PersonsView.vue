@@ -6,6 +6,9 @@ import Message from 'primevue/message'
 import Dialog from 'primevue/dialog'
 import ToggleSwitch from 'primevue/toggleswitch'
 import InputText from 'primevue/inputtext'
+import SelectButton from 'primevue/selectbutton'
+import InputNumber from 'primevue/inputnumber'
+import Chip from 'primevue/chip'
 import { useConfirm } from 'primevue/useconfirm'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import HeicImage from '../components/HeicImage.vue'
@@ -43,10 +46,81 @@ const isFullscreen = ref(false)
 const selectedIndex = ref(-1)
 const nameFilter = ref('')
 
+// ── Person filter menu ──────────────────────────────────────────────────────
+type PersonNamedFilter = 'all' | 'named' | 'unnamed'
+
+interface PersonFilter {
+  named: PersonNamedFilter
+  faceCountMin?: number
+}
+
+const EMPTY_PERSON_FILTER: PersonFilter = { named: 'all' }
+const appliedPersonFilter = ref<PersonFilter>({ ...EMPTY_PERSON_FILTER })
+const draftPersonFilter = ref<PersonFilter>({ ...EMPTY_PERSON_FILTER })
+const showPersonFilterMenu = ref(false)
+
+const namedOptions: Array<{ label: string; value: PersonNamedFilter }> = [
+  { label: 'Alle', value: 'all' },
+  { label: 'Mit Namen', value: 'named' },
+  { label: 'Unbenannt', value: 'unnamed' },
+]
+
+const activePersonFilterCount = computed(() => {
+  const f = appliedPersonFilter.value
+  let n = 0
+  if (f.named !== 'all') n++
+  if (f.faceCountMin !== undefined) n++
+  return n
+})
+
+function openPersonFilterMenu() {
+  draftPersonFilter.value = { ...appliedPersonFilter.value }
+  showPersonFilterMenu.value = true
+}
+
+function applyPersonFilter() {
+  appliedPersonFilter.value = { ...draftPersonFilter.value }
+  showPersonFilterMenu.value = false
+}
+
+function resetPersonFilter() {
+  draftPersonFilter.value = { ...EMPTY_PERSON_FILTER }
+  appliedPersonFilter.value = { ...EMPTY_PERSON_FILTER }
+}
+
+function personFilterChips(): Array<{ label: string; clear: () => void }> {
+  const f = appliedPersonFilter.value
+  const chips: Array<{ label: string; clear: () => void }> = []
+  if (f.named !== 'all') {
+    chips.push({
+      label: f.named === 'named' ? 'Mit Namen' : 'Unbenannt',
+      clear: () => { appliedPersonFilter.value = { ...f, named: 'all' } },
+    })
+  }
+  if (f.faceCountMin !== undefined) {
+    chips.push({
+      label: `Mind. ${f.faceCountMin} Fotos`,
+      clear: () => { appliedPersonFilter.value = { ...f, faceCountMin: undefined } },
+    })
+  }
+  return chips
+}
+
+function matchesPersonFilter(p: Person, f: PersonFilter): boolean {
+  const isUnnamed = !p.name || p.name === 'Unbenannt'
+  if (f.named === 'named' && isUnnamed) return false
+  if (f.named === 'unnamed' && !isUnnamed) return false
+  if (f.faceCountMin !== undefined && Number(p.faceCount || 0) < f.faceCountMin) return false
+  return true
+}
+
 const filteredPersons = computed(() => {
   const q = nameFilter.value.trim().toLocaleLowerCase()
-  if (!q) return persons.value
-  return persons.value.filter(p => p.name.toLocaleLowerCase().includes(q))
+  const f = appliedPersonFilter.value
+  return persons.value.filter(p => {
+    if (q && !p.name.toLocaleLowerCase().includes(q)) return false
+    return matchesPersonFilter(p, f)
+  })
 })
 
 function personCoverUrl(person: Person) {
@@ -471,9 +545,26 @@ onUnmounted(() => serviceHealth.stopPolling())
             @click="nameFilter = ''"
           />
         </div>
+        <Button
+          :icon="activePersonFilterCount > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'"
+          :label="activePersonFilterCount > 0 ? `Filter (${activePersonFilterCount})` : 'Filter'"
+          size="small"
+          :severity="activePersonFilterCount > 0 ? 'primary' : 'secondary'"
+          :outlined="activePersonFilterCount === 0"
+          @click="openPersonFilterMenu"
+        />
         <span class="persons-filter-count">
           {{ filteredPersons.length }} von {{ persons.length }}
         </span>
+      </div>
+      <div v-if="activePersonFilterCount > 0" class="persons-filter-chips">
+        <Chip
+          v-for="(chip, i) in personFilterChips()"
+          :key="i"
+          :label="chip.label"
+          removable
+          @remove="chip.clear()"
+        />
       </div>
 
       <div v-if="filteredPersons.length === 0" class="info-text">
@@ -612,6 +703,29 @@ onUnmounted(() => serviceHealth.stopPolling())
         </div>
       </div>
     </Dialog>
+
+    <!-- Person filter dialog -->
+    <Dialog v-model:visible="showPersonFilterMenu" header="Filter" modal :style="{ width: 'min(100%, 480px)' }">
+      <div class="person-filter-menu">
+        <div class="pfm-row">
+          <label class="pfm-label">Benennung</label>
+          <SelectButton
+            v-model="draftPersonFilter.named"
+            :options="namedOptions" option-label="label" option-value="value"
+            :allow-empty="false"
+          />
+        </div>
+        <div class="pfm-row">
+          <label class="pfm-label">Mindestanzahl Fotos</label>
+          <InputNumber v-model="draftPersonFilter.faceCountMin" :min="0" show-buttons />
+        </div>
+      </div>
+      <template #footer>
+        <Button label="Zurücksetzen" text severity="secondary" @click="resetPersonFilter" />
+        <Button label="Abbrechen" text @click="showPersonFilterMenu = false" />
+        <Button label="Anwenden" icon="pi pi-check" @click="applyPersonFilter" />
+      </template>
+    </Dialog>
   </div>
 </template>
 
@@ -685,7 +799,19 @@ onUnmounted(() => serviceHealth.stopPolling())
   background: var(--p-content-background);
   padding-bottom: 0.25rem;
   z-index: 1;
+  flex-wrap: wrap;
 }
+
+.persons-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-block: 0.25rem 0.5rem;
+}
+
+.person-filter-menu { display: flex; flex-direction: column; gap: 1rem; }
+.pfm-row { display: flex; flex-direction: column; gap: 0.5rem; }
+.pfm-label { font-weight: 500; font-size: 0.9rem; color: var(--p-text-muted-color); }
 
 .persons-filter-input {
   position: relative;

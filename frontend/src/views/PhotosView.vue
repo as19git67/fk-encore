@@ -3,7 +3,6 @@ import { ref, shallowRef, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
-import ToggleSwitch from 'primevue/toggleswitch'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import PhotoGrid from '../components/PhotoGrid.vue'
@@ -11,6 +10,9 @@ import TimelineNav from '../components/TimelineNav.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import NaturalSearchBar from '../components/NaturalSearchBar.vue'
+import FilterMenu from '../components/FilterMenu.vue'
+import FilterChips from '../components/FilterChips.vue'
+import { useFilter } from '../composables/useFilter'
 import {
   listPhotoIndex, uploadPhotoWithProgress, updatePhotoDate, reindexPhoto, ignoreFace,
   getPhotoFaces, getPhotoLandmarks, updatePhotoCuration,
@@ -39,7 +41,34 @@ const loading = ref(true)
 const uploading = ref(false)
 const uploadAbortController = ref<AbortController | null>(null)
 const error = ref('')
-const showHidden = ref(false)
+
+// ── Filter state ─────────────────────────────────────────────────────────────
+// Unified filter system replaces the old boolean `showHidden` toggle. The
+// applied filter drives data fetching; the draft is edited in FilterMenu and
+// committed to `applied` when the user presses "Anwenden".
+const { applied: filter, draft: filterDraft, activeCount, openEdit, apply: applyFilter, reset: resetFilter, removeKey } =
+  useFilter({ preserveKeys: ['photoId'] })
+const filterMenuOpen = ref(false)
+
+function openFilterMenu() {
+  openEdit()
+  filterMenuOpen.value = true
+}
+
+async function onApplyFilter() {
+  applyFilter()
+  await loadPhotos()
+}
+
+async function onResetFilter() {
+  resetFilter()
+  await loadPhotos()
+}
+
+async function onRemoveFilterKey(keys: Array<keyof typeof filter.value>) {
+  removeKey(keys)
+  await loadPhotos()
+}
 
 const canUpload = computed(() => auth.hasPermission('photos.upload'))
 const canDelete = computed(() => auth.hasPermission('photos.delete'))
@@ -329,7 +358,7 @@ async function loadPhotos() {
   try {
     // Stage 1: lightweight index (small payload, fast even with thousands of photos)
     const [indexRes, groupsRes] = await Promise.all([
-      listPhotoIndex(showHidden.value),
+      listPhotoIndex(filter.value),
       listPhotoGroups().catch(() => ({ groups: [] })),
     ])
     photos.value = (indexRes.photos as Photo[]).sort((a, b) =>
@@ -395,7 +424,7 @@ async function loadPhotos() {
 async function reloadPhotosInPlace() {
   try {
     const [indexRes, groupsRes] = await Promise.all([
-      listPhotoIndex(showHidden.value),
+      listPhotoIndex(filter.value),
       listPhotoGroups().catch(() => ({ groups: [] })),
     ])
     hydration.reset()
@@ -779,10 +808,14 @@ onUnmounted(() => {
             :outlined="!selectMode"
             @click="selectMode ? exitSelectMode() : enterSelectMode()"
           />
-          <div v-if="canDelete" class="toggle-hidden">
-            <label for="showHidden" class="text-sm">Ausgeblendete</label>
-            <ToggleSwitch v-model="showHidden" inputId="showHidden" @update:modelValue="loadPhotos" />
-          </div>
+          <Button
+            :icon="activeCount > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'"
+            :label="activeCount > 0 ? `Filter (${activeCount})` : 'Filter'"
+            size="small"
+            :severity="activeCount > 0 ? 'primary' : 'secondary'"
+            :outlined="activeCount === 0"
+            @click="openFilterMenu"
+          />
           <Button
             v-if="canManageData && unreviewedGroupCount > 0"
             :label="`Gruppen bearbeiten (${unreviewedGroupCount} offen)`"
@@ -816,7 +849,16 @@ onUnmounted(() => {
           @click="sortBy = sortBy === 'date' ? 'quality' : 'date'"
         />
       </NaturalSearchBar>
+
+      <FilterChips :filter="filter" @remove="onRemoveFilterKey" />
     </div>
+
+    <FilterMenu
+      v-model:visible="filterMenuOpen"
+      v-model:draft="filterDraft"
+      @apply="onApplyFilter"
+      @reset="onResetFilter"
+    />
 
     <Message v-if="searchError" severity="error" @close="searchError = ''">{{ searchError }}</Message>
     <Message v-if="error" severity="error" @close="error = ''; uploadErrors = []">
@@ -1144,12 +1186,6 @@ onUnmounted(() => {
   display: flex;
   gap: 0.5rem;
   align-items: center;
-}
-
-.toggle-hidden {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
 }
 
 .info-text {
@@ -1504,9 +1540,6 @@ onUnmounted(() => {
   .subheader .actions :deep(.p-button) {
     padding: 0.5rem;
     min-width: 2.25rem;
-  }
-  .toggle-hidden label {
-    display: none;
   }
 }
 

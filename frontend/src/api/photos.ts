@@ -67,9 +67,76 @@ export interface DeleteResponse {
   message: string
 }
 
-export function listPhotos(showHidden: boolean = false) {
-  const query = showHidden ? '?showHidden=true' : ''
-  return apiFetch<ListPhotosResponse>(`/photos${query}`)
+export type HiddenMode = 'exclude' | 'include' | 'only'
+export type MembershipMode = 'include' | 'exclude'
+export type MediaType = 'photo' | 'video' | 'raw' | 'heic'
+
+export interface PhotoFilter {
+  hiddenMode?: HiddenMode
+  favorite?: boolean
+  albumHighlight?: boolean
+  groupHighlight?: boolean
+  inGroup?: boolean
+  othersFavorited?: boolean
+  othersHidden?: boolean
+  qualityMin?: number
+  qualityMax?: number
+  notInAnyAlbum?: boolean
+  albumIds?: number[]
+  albumMode?: MembershipMode
+  personIds?: number[]
+  personMode?: MembershipMode
+  mediaTypes?: MediaType[]
+  hasGps?: boolean
+  hasFaces?: boolean
+  hasAssignedPerson?: boolean
+  dateFrom?: string
+  dateTo?: string
+  importedDaysAgo?: number
+  sizeMin?: number
+  sizeMax?: number
+}
+
+function buildPhotoFilterQuery(filter: PhotoFilter | boolean | undefined): string {
+  // Backwards-compat: legacy callers still pass a boolean `showHidden`.
+  const f: PhotoFilter =
+    typeof filter === 'boolean'
+      ? { hiddenMode: filter ? 'include' : 'exclude' }
+      : filter ?? {}
+
+  const params = new URLSearchParams()
+  const add = (k: string, v: string | number | boolean) => params.set(k, String(v))
+
+  if (f.hiddenMode) add('hiddenMode', f.hiddenMode)
+  if (f.favorite) add('favorite', true)
+  if (f.albumHighlight) add('albumHighlight', true)
+  if (f.groupHighlight) add('groupHighlight', true)
+  if (f.inGroup) add('inGroup', true)
+  if (f.othersFavorited) add('othersFavorited', true)
+  if (f.othersHidden) add('othersHidden', true)
+  if (f.qualityMin !== undefined) add('qualityMin', f.qualityMin)
+  if (f.qualityMax !== undefined) add('qualityMax', f.qualityMax)
+  if (f.notInAnyAlbum) add('notInAnyAlbum', true)
+  if (f.albumIds && f.albumIds.length) add('albumIds', f.albumIds.join(','))
+  if (f.albumMode) add('albumMode', f.albumMode)
+  if (f.personIds && f.personIds.length) add('personIds', f.personIds.join(','))
+  if (f.personMode) add('personMode', f.personMode)
+  if (f.mediaTypes && f.mediaTypes.length) add('mediaTypes', f.mediaTypes.join(','))
+  if (f.hasGps !== undefined) add('hasGps', f.hasGps)
+  if (f.hasFaces !== undefined) add('hasFaces', f.hasFaces)
+  if (f.hasAssignedPerson !== undefined) add('hasAssignedPerson', f.hasAssignedPerson)
+  if (f.dateFrom) add('dateFrom', f.dateFrom)
+  if (f.dateTo) add('dateTo', f.dateTo)
+  if (f.importedDaysAgo !== undefined) add('importedDaysAgo', f.importedDaysAgo)
+  if (f.sizeMin !== undefined) add('sizeMin', f.sizeMin)
+  if (f.sizeMax !== undefined) add('sizeMax', f.sizeMax)
+
+  const s = params.toString()
+  return s ? `?${s}` : ''
+}
+
+export function listPhotos(filter?: PhotoFilter | boolean) {
+  return apiFetch<ListPhotosResponse>(`/photos${buildPhotoFilterQuery(filter)}`)
 }
 
 /**
@@ -78,9 +145,8 @@ export function listPhotos(showHidden: boolean = false) {
  * initial gallery load, then call `getPhotoDetailsBatch` to hydrate the
  * heavy fields (location, GPS, AI quality, description) on demand.
  */
-export function listPhotoIndex(showHidden: boolean = false) {
-  const query = showHidden ? '?showHidden=true' : ''
-  return apiFetch<ListPhotoIndexResponse>(`/photos/index${query}`)
+export function listPhotoIndex(filter?: PhotoFilter | boolean) {
+  return apiFetch<ListPhotoIndexResponse>(`/photos/index${buildPhotoFilterQuery(filter)}`)
 }
 
 /**

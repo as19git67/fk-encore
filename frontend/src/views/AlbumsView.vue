@@ -7,6 +7,9 @@ import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import SelectButton from 'primevue/selectbutton'
 import Select from 'primevue/select'
+import InputNumber from 'primevue/inputnumber'
+import DatePicker from 'primevue/datepicker'
+import Chip from 'primevue/chip'
 import HeicImage from '../components/HeicImage.vue'
 import {
   type Album,
@@ -91,6 +94,131 @@ function observeCards() {
 
 const filterQuery = ref('')
 
+// ── Album filter menu ────────────────────────────────────────────────────────
+type AlbumOwnerFilter = 'all' | 'mine' | 'shared'
+type AlbumDisplayFilter = 'all' | 'grid' | 'map'
+
+interface AlbumFilter {
+  owner: AlbumOwnerFilter
+  display: AlbumDisplayFilter
+  photoCountMin?: number
+  dateFrom?: string  // ISO YYYY-MM-DD
+  dateTo?: string
+  onlyEmpty: boolean
+}
+
+const EMPTY_ALBUM_FILTER: AlbumFilter = {
+  owner: 'all',
+  display: 'all',
+  onlyEmpty: false,
+}
+const appliedAlbumFilter = ref<AlbumFilter>({ ...EMPTY_ALBUM_FILTER })
+const draftAlbumFilter = ref<AlbumFilter>({ ...EMPTY_ALBUM_FILTER })
+const showAlbumFilterMenu = ref(false)
+const draftDateFrom = ref<Date | null>(null)
+const draftDateTo = ref<Date | null>(null)
+
+const ownerOptions: Array<{ label: string; value: AlbumOwnerFilter }> = [
+  { label: 'Alle', value: 'all' },
+  { label: 'Eigene', value: 'mine' },
+  { label: 'Geteilt mit mir', value: 'shared' },
+]
+const displayFilterOptions: Array<{ label: string; value: AlbumDisplayFilter }> = [
+  { label: 'Alle', value: 'all' },
+  { label: 'Raster', value: 'grid' },
+  { label: 'Karte', value: 'map' },
+]
+
+const activeAlbumFilterCount = computed(() => {
+  const f = appliedAlbumFilter.value
+  let n = 0
+  if (f.owner !== 'all') n++
+  if (f.display !== 'all') n++
+  if (f.photoCountMin !== undefined) n++
+  if (f.dateFrom || f.dateTo) n++
+  if (f.onlyEmpty) n++
+  return n
+})
+
+function openAlbumFilterMenu() {
+  draftAlbumFilter.value = { ...appliedAlbumFilter.value }
+  draftDateFrom.value = appliedAlbumFilter.value.dateFrom ? new Date(appliedAlbumFilter.value.dateFrom) : null
+  draftDateTo.value = appliedAlbumFilter.value.dateTo ? new Date(appliedAlbumFilter.value.dateTo) : null
+  showAlbumFilterMenu.value = true
+}
+
+function applyAlbumFilter() {
+  appliedAlbumFilter.value = {
+    ...draftAlbumFilter.value,
+    dateFrom: draftDateFrom.value ? draftDateFrom.value.toISOString().slice(0, 10) : undefined,
+    dateTo: draftDateTo.value ? draftDateTo.value.toISOString().slice(0, 10) : undefined,
+  }
+  showAlbumFilterMenu.value = false
+}
+
+function resetAlbumFilter() {
+  draftAlbumFilter.value = { ...EMPTY_ALBUM_FILTER }
+  draftDateFrom.value = null
+  draftDateTo.value = null
+  appliedAlbumFilter.value = { ...EMPTY_ALBUM_FILTER }
+}
+
+function albumFilterChips(): Array<{ label: string; clear: () => void }> {
+  const f = appliedAlbumFilter.value
+  const chips: Array<{ label: string; clear: () => void }> = []
+  if (f.owner !== 'all') {
+    chips.push({
+      label: f.owner === 'mine' ? 'Eigene' : 'Geteilt mit mir',
+      clear: () => { appliedAlbumFilter.value = { ...f, owner: 'all' } },
+    })
+  }
+  if (f.display !== 'all') {
+    chips.push({
+      label: f.display === 'grid' ? 'Darstellung: Raster' : 'Darstellung: Karte',
+      clear: () => { appliedAlbumFilter.value = { ...f, display: 'all' } },
+    })
+  }
+  if (f.photoCountMin !== undefined) {
+    chips.push({
+      label: `Mind. ${f.photoCountMin} Fotos`,
+      clear: () => { appliedAlbumFilter.value = { ...f, photoCountMin: undefined } },
+    })
+  }
+  if (f.dateFrom || f.dateTo) {
+    chips.push({
+      label: `Neuestes ${f.dateFrom ?? '…'} – ${f.dateTo ?? '…'}`,
+      clear: () => { appliedAlbumFilter.value = { ...f, dateFrom: undefined, dateTo: undefined } },
+    })
+  }
+  if (f.onlyEmpty) {
+    chips.push({
+      label: 'Leere Alben',
+      clear: () => { appliedAlbumFilter.value = { ...f, onlyEmpty: false } },
+    })
+  }
+  return chips
+}
+
+function matchesAlbumFilter(album: Album, f: AlbumFilter): boolean {
+  const userId = auth.user?.id
+  if (f.owner === 'mine' && userId !== undefined && album.user_id !== userId) return false
+  if (f.owner === 'shared' && (userId === undefined || album.user_id === userId)) return false
+  if (f.display !== 'all' && album.display_mode !== f.display) return false
+  if (f.photoCountMin !== undefined && album.photo_count < f.photoCountMin) return false
+  if (f.onlyEmpty && album.photo_count > 0) return false
+  if (f.dateFrom || f.dateTo) {
+    const newest = album.newest_photo_at ? new Date(album.newest_photo_at).getTime() : 0
+    if (!newest) return false
+    if (f.dateFrom && newest < new Date(f.dateFrom).getTime()) return false
+    if (f.dateTo) {
+      // +1 day to make dateTo inclusive
+      const end = new Date(f.dateTo).getTime() + 86400000
+      if (newest >= end) return false
+    }
+  }
+  return true
+}
+
 const sortedAlbums = computed(() => {
   return [...albums.value].sort((a, b) => {
     const dateA = a.newest_photo_at ? new Date(a.newest_photo_at).getTime() : 0
@@ -106,11 +234,14 @@ const sortedAlbums = computed(() => {
 
 const filteredAlbums = computed(() => {
   const q = filterQuery.value.trim().toLocaleLowerCase()
-  if (!q) return sortedAlbums.value
+  const f = appliedAlbumFilter.value
   return sortedAlbums.value.filter(album => {
-    if (album.name.toLocaleLowerCase().includes(q)) return true
-    if (album.description?.toLocaleLowerCase().includes(q)) return true
-    return false
+    if (q) {
+      const nameMatch = album.name.toLocaleLowerCase().includes(q)
+      const descMatch = album.description?.toLocaleLowerCase().includes(q) ?? false
+      if (!nameMatch && !descMatch) return false
+    }
+    return matchesAlbumFilter(album, f)
   })
 })
 
@@ -382,6 +513,23 @@ onMounted(loadData)
               @click="filterQuery = ''"
           />
         </span>
+        <Button
+          :icon="activeAlbumFilterCount > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'"
+          :label="activeAlbumFilterCount > 0 ? `Filter (${activeAlbumFilterCount})` : 'Filter'"
+          size="small"
+          :severity="activeAlbumFilterCount > 0 ? 'primary' : 'secondary'"
+          :outlined="activeAlbumFilterCount === 0"
+          @click="openAlbumFilterMenu"
+        />
+      </div>
+      <div v-if="activeAlbumFilterCount > 0" class="album-filter-chips">
+        <Chip
+          v-for="(chip, i) in albumFilterChips()"
+          :key="i"
+          :label="chip.label"
+          removable
+          @remove="chip.clear()"
+        />
       </div>
     </div>
 
@@ -545,6 +693,50 @@ onMounted(loadData)
         </div>
       </template>
     </Dialog>
+
+    <!-- Album filter dialog -->
+    <Dialog v-model:visible="showAlbumFilterMenu" header="Filter" modal :style="{ width: 'min(100%, 560px)' }">
+      <div class="album-filter-menu">
+        <div class="afm-row">
+          <label class="afm-label">Besitzer</label>
+          <SelectButton
+            v-model="draftAlbumFilter.owner"
+            :options="ownerOptions" option-label="label" option-value="value"
+            :allow-empty="false"
+          />
+        </div>
+        <div class="afm-row">
+          <label class="afm-label">Darstellung</label>
+          <SelectButton
+            v-model="draftAlbumFilter.display"
+            :options="displayFilterOptions" option-label="label" option-value="value"
+            :allow-empty="false"
+          />
+        </div>
+        <div class="afm-row">
+          <label class="afm-label">Mindestanzahl Fotos</label>
+          <InputNumber v-model="draftAlbumFilter.photoCountMin" :min="0" show-buttons />
+        </div>
+        <div class="afm-row">
+          <label class="afm-label">Datum (neuestes Foto)</label>
+          <div class="afm-daterange">
+            <DatePicker v-model="draftDateFrom" date-format="dd.mm.yy" placeholder="Von" show-icon />
+            <DatePicker v-model="draftDateTo" date-format="dd.mm.yy" placeholder="Bis" show-icon />
+          </div>
+        </div>
+        <div class="afm-row">
+          <div style="display: flex; align-items: center; gap: 0.6rem;">
+            <input id="onlyEmpty" type="checkbox" v-model="draftAlbumFilter.onlyEmpty" />
+            <label for="onlyEmpty">Nur leere Alben</label>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <Button label="Zurücksetzen" text severity="secondary" @click="resetAlbumFilter" />
+        <Button label="Abbrechen" text @click="showAlbumFilterMenu = false" />
+        <Button label="Anwenden" icon="pi pi-check" @click="applyAlbumFilter" />
+      </template>
+    </Dialog>
   </div>
 </template>
 
@@ -588,7 +780,24 @@ onMounted(loadData)
 
 .filter-row {
   margin-block: 0.5rem 1rem;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
 }
+
+.album-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-block: 0 0.75rem;
+}
+
+.album-filter-menu { display: flex; flex-direction: column; gap: 1rem; }
+.afm-row { display: flex; flex-direction: column; gap: 0.5rem; }
+.afm-label { font-weight: 500; font-size: 0.9rem; color: var(--p-text-muted-color); }
+.afm-daterange { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.afm-daterange > * { flex: 1 1 140px; }
 
 .filter-input-wrapper {
   position: relative;
