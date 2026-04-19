@@ -244,6 +244,7 @@ defineExpose({
   <div class="photo-grid-scroll" ref="scrollRef">
     <template v-for="yearGroup in groupedPhotos" :key="yearGroup.year">
       <h2
+        v-if="yearGroup.year"
         class="year-title"
         :data-section-id="yearGroup.sectionId"
         data-section-header

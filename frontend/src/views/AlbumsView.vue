@@ -7,7 +7,12 @@ import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import SelectButton from 'primevue/selectbutton'
 import Select from 'primevue/select'
+import InputNumber from 'primevue/inputnumber'
+import DatePicker from 'primevue/datepicker'
+import Chip from 'primevue/chip'
 import HeicImage from '../components/HeicImage.vue'
+import SortMenu from '../components/SortMenu.vue'
+import type { SortField, SortState } from '../composables/useSort'
 import {
   type Album,
   type AlbumShareWithUser,
@@ -91,26 +96,209 @@ function observeCards() {
 
 const filterQuery = ref('')
 
-const sortedAlbums = computed(() => {
-  return [...albums.value].sort((a, b) => {
-    const dateA = a.newest_photo_at ? new Date(a.newest_photo_at).getTime() : 0
-    const dateB = b.newest_photo_at ? new Date(b.newest_photo_at).getTime() : 0
+// ── Album filter menu ────────────────────────────────────────────────────────
+type AlbumOwnerFilter = 'all' | 'mine' | 'shared'
+type AlbumDisplayFilter = 'all' | 'grid' | 'map'
 
-    if (dateA !== dateB) {
-      return dateB - dateA // Newest first
+interface AlbumFilter {
+  owner: AlbumOwnerFilter
+  display: AlbumDisplayFilter
+  photoCountMin?: number
+  dateFrom?: string  // ISO YYYY-MM-DD
+  dateTo?: string
+  onlyEmpty: boolean
+}
+
+const EMPTY_ALBUM_FILTER: AlbumFilter = {
+  owner: 'all',
+  display: 'all',
+  onlyEmpty: false,
+}
+const appliedAlbumFilter = ref<AlbumFilter>({ ...EMPTY_ALBUM_FILTER })
+const draftAlbumFilter = ref<AlbumFilter>({ ...EMPTY_ALBUM_FILTER })
+const showAlbumFilterMenu = ref(false)
+const draftDateFrom = ref<Date | null>(null)
+const draftDateTo = ref<Date | null>(null)
+
+const ownerOptions: Array<{ label: string; value: AlbumOwnerFilter }> = [
+  { label: 'Alle', value: 'all' },
+  { label: 'Eigene', value: 'mine' },
+  { label: 'Geteilt mit mir', value: 'shared' },
+]
+const displayFilterOptions: Array<{ label: string; value: AlbumDisplayFilter }> = [
+  { label: 'Alle', value: 'all' },
+  { label: 'Raster', value: 'grid' },
+  { label: 'Karte', value: 'map' },
+]
+
+const activeAlbumFilterCount = computed(() => {
+  const f = appliedAlbumFilter.value
+  let n = 0
+  if (f.owner !== 'all') n++
+  if (f.display !== 'all') n++
+  if (f.photoCountMin !== undefined) n++
+  if (f.dateFrom || f.dateTo) n++
+  if (f.onlyEmpty) n++
+  return n
+})
+
+function openAlbumFilterMenu() {
+  draftAlbumFilter.value = { ...appliedAlbumFilter.value }
+  draftDateFrom.value = appliedAlbumFilter.value.dateFrom ? new Date(appliedAlbumFilter.value.dateFrom) : null
+  draftDateTo.value = appliedAlbumFilter.value.dateTo ? new Date(appliedAlbumFilter.value.dateTo) : null
+  showAlbumFilterMenu.value = true
+}
+
+function applyAlbumFilter() {
+  appliedAlbumFilter.value = {
+    ...draftAlbumFilter.value,
+    dateFrom: draftDateFrom.value ? draftDateFrom.value.toISOString().slice(0, 10) : undefined,
+    dateTo: draftDateTo.value ? draftDateTo.value.toISOString().slice(0, 10) : undefined,
+  }
+  showAlbumFilterMenu.value = false
+}
+
+function resetAlbumFilter() {
+  draftAlbumFilter.value = { ...EMPTY_ALBUM_FILTER }
+  draftDateFrom.value = null
+  draftDateTo.value = null
+  appliedAlbumFilter.value = { ...EMPTY_ALBUM_FILTER }
+}
+
+function albumFilterChips(): Array<{ label: string; clear: () => void }> {
+  const f = appliedAlbumFilter.value
+  const chips: Array<{ label: string; clear: () => void }> = []
+  if (f.owner !== 'all') {
+    chips.push({
+      label: f.owner === 'mine' ? 'Eigene' : 'Geteilt mit mir',
+      clear: () => { appliedAlbumFilter.value = { ...f, owner: 'all' } },
+    })
+  }
+  if (f.display !== 'all') {
+    chips.push({
+      label: f.display === 'grid' ? 'Darstellung: Raster' : 'Darstellung: Karte',
+      clear: () => { appliedAlbumFilter.value = { ...f, display: 'all' } },
+    })
+  }
+  if (f.photoCountMin !== undefined) {
+    chips.push({
+      label: `Mind. ${f.photoCountMin} Fotos`,
+      clear: () => { appliedAlbumFilter.value = { ...f, photoCountMin: undefined } },
+    })
+  }
+  if (f.dateFrom || f.dateTo) {
+    chips.push({
+      label: `Neuestes ${f.dateFrom ?? '…'} – ${f.dateTo ?? '…'}`,
+      clear: () => { appliedAlbumFilter.value = { ...f, dateFrom: undefined, dateTo: undefined } },
+    })
+  }
+  if (f.onlyEmpty) {
+    chips.push({
+      label: 'Leere Alben',
+      clear: () => { appliedAlbumFilter.value = { ...f, onlyEmpty: false } },
+    })
+  }
+  return chips
+}
+
+function matchesAlbumFilter(album: Album, f: AlbumFilter): boolean {
+  const userId = auth.user?.id
+  if (f.owner === 'mine' && userId !== undefined && album.user_id !== userId) return false
+  if (f.owner === 'shared' && (userId === undefined || album.user_id === userId)) return false
+  if (f.display !== 'all' && album.display_mode !== f.display) return false
+  if (f.photoCountMin !== undefined && album.photo_count < f.photoCountMin) return false
+  if (f.onlyEmpty && album.photo_count > 0) return false
+  if (f.dateFrom || f.dateTo) {
+    const newest = album.newest_photo_at ? new Date(album.newest_photo_at).getTime() : 0
+    if (!newest) return false
+    if (f.dateFrom && newest < new Date(f.dateFrom).getTime()) return false
+    if (f.dateTo) {
+      // +1 day to make dateTo inclusive
+      const end = new Date(f.dateTo).getTime() + 86400000
+      if (newest >= end) return false
     }
+  }
+  return true
+}
 
+// ── Album sort menu ──────────────────────────────────────────────────────────
+const ALBUM_SORT_FIELDS: SortField[] = [
+  { value: 'newest_photo_at', label: 'Neuestes Foto' },
+  { value: 'name', label: 'Name' },
+  { value: 'created_at', label: 'Erstellungsdatum' },
+  { value: 'photo_count', label: 'Foto-Anzahl' },
+]
+const DEFAULT_ALBUM_SORT: SortState = { field: 'newest_photo_at', direction: 'desc' }
+const appliedAlbumSort = ref<SortState>({ ...DEFAULT_ALBUM_SORT })
+const draftAlbumSort = ref<SortState>({ ...DEFAULT_ALBUM_SORT })
+const showAlbumSortMenu = ref(false)
+
+const isAlbumSortDefault = computed(() =>
+  appliedAlbumSort.value.field === DEFAULT_ALBUM_SORT.field &&
+  appliedAlbumSort.value.direction === DEFAULT_ALBUM_SORT.direction
+)
+const albumSortFieldLabel = computed(() =>
+  ALBUM_SORT_FIELDS.find(f => f.value === appliedAlbumSort.value.field)?.label ?? appliedAlbumSort.value.field
+)
+const albumSortChipLabel = computed(() =>
+  `Sortierung: ${albumSortFieldLabel.value} ${appliedAlbumSort.value.direction === 'asc' ? '↑' : '↓'}`
+)
+
+function openAlbumSortMenu() {
+  draftAlbumSort.value = { ...appliedAlbumSort.value }
+  showAlbumSortMenu.value = true
+}
+function applyAlbumSort() {
+  appliedAlbumSort.value = { ...draftAlbumSort.value }
+  showAlbumSortMenu.value = false
+}
+function resetAlbumSort() {
+  draftAlbumSort.value = { ...DEFAULT_ALBUM_SORT }
+  appliedAlbumSort.value = { ...DEFAULT_ALBUM_SORT }
+  showAlbumSortMenu.value = false
+}
+
+function compareAlbumsByField(a: Album, b: Album, field: string): number {
+  switch (field) {
+    case 'newest_photo_at': {
+      const da = a.newest_photo_at ? new Date(a.newest_photo_at).getTime() : 0
+      const db = b.newest_photo_at ? new Date(b.newest_photo_at).getTime() : 0
+      return da - db
+    }
+    case 'created_at': {
+      const da = a.created_at ? new Date(a.created_at).getTime() : 0
+      const db = b.created_at ? new Date(b.created_at).getTime() : 0
+      return da - db
+    }
+    case 'photo_count':
+      return (a.photo_count ?? 0) - (b.photo_count ?? 0)
+    case 'name':
+      return a.name.localeCompare(b.name)
+    default:
+      return 0
+  }
+}
+
+const sortedAlbums = computed(() => {
+  const { field, direction } = appliedAlbumSort.value
+  const mult = direction === 'asc' ? 1 : -1
+  return [...albums.value].sort((a, b) => {
+    const primary = mult * compareAlbumsByField(a, b, field)
+    if (primary !== 0) return primary
     return a.name.localeCompare(b.name)
   })
 })
 
 const filteredAlbums = computed(() => {
   const q = filterQuery.value.trim().toLocaleLowerCase()
-  if (!q) return sortedAlbums.value
+  const f = appliedAlbumFilter.value
   return sortedAlbums.value.filter(album => {
-    if (album.name.toLocaleLowerCase().includes(q)) return true
-    if (album.description?.toLocaleLowerCase().includes(q)) return true
-    return false
+    if (q) {
+      const nameMatch = album.name.toLocaleLowerCase().includes(q)
+      const descMatch = album.description?.toLocaleLowerCase().includes(q) ?? false
+      if (!nameMatch && !descMatch) return false
+    }
+    return matchesAlbumFilter(album, f)
   })
 })
 
@@ -382,6 +570,37 @@ onMounted(loadData)
               @click="filterQuery = ''"
           />
         </span>
+        <Button
+          :icon="activeAlbumFilterCount > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'"
+          :label="activeAlbumFilterCount > 0 ? `Filter (${activeAlbumFilterCount})` : 'Filter'"
+          size="small"
+          :severity="activeAlbumFilterCount > 0 ? 'primary' : 'secondary'"
+          :outlined="activeAlbumFilterCount === 0"
+          @click="openAlbumFilterMenu"
+        />
+        <Button
+          icon="pi pi-sort-alt"
+          label="Sortierung"
+          size="small"
+          :severity="isAlbumSortDefault ? 'secondary' : 'primary'"
+          :outlined="isAlbumSortDefault"
+          @click="openAlbumSortMenu"
+        />
+      </div>
+      <div v-if="activeAlbumFilterCount > 0 || !isAlbumSortDefault" class="album-filter-chips">
+        <Chip
+          v-for="(chip, i) in albumFilterChips()"
+          :key="`f-${i}`"
+          :label="chip.label"
+          removable
+          @remove="chip.clear()"
+        />
+        <Chip
+          v-if="!isAlbumSortDefault"
+          :label="albumSortChipLabel"
+          removable
+          @remove="resetAlbumSort()"
+        />
       </div>
     </div>
 
@@ -545,6 +764,58 @@ onMounted(loadData)
         </div>
       </template>
     </Dialog>
+
+    <!-- Album filter dialog -->
+    <Dialog v-model:visible="showAlbumFilterMenu" header="Filter" modal :style="{ width: 'min(100%, 560px)' }">
+      <div class="album-filter-menu">
+        <div class="afm-row">
+          <label class="afm-label">Besitzer</label>
+          <SelectButton
+            v-model="draftAlbumFilter.owner"
+            :options="ownerOptions" option-label="label" option-value="value"
+            :allow-empty="false"
+          />
+        </div>
+        <div class="afm-row">
+          <label class="afm-label">Darstellung</label>
+          <SelectButton
+            v-model="draftAlbumFilter.display"
+            :options="displayFilterOptions" option-label="label" option-value="value"
+            :allow-empty="false"
+          />
+        </div>
+        <div class="afm-row">
+          <label class="afm-label">Mindestanzahl Fotos</label>
+          <InputNumber v-model="draftAlbumFilter.photoCountMin" :min="0" show-buttons />
+        </div>
+        <div class="afm-row">
+          <label class="afm-label">Datum (neuestes Foto)</label>
+          <div class="afm-daterange">
+            <DatePicker v-model="draftDateFrom" date-format="dd.mm.yy" placeholder="Von" show-icon />
+            <DatePicker v-model="draftDateTo" date-format="dd.mm.yy" placeholder="Bis" show-icon />
+          </div>
+        </div>
+        <div class="afm-row">
+          <div style="display: flex; align-items: center; gap: 0.6rem;">
+            <input id="onlyEmpty" type="checkbox" v-model="draftAlbumFilter.onlyEmpty" />
+            <label for="onlyEmpty">Nur leere Alben</label>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <Button label="Zurücksetzen" text severity="secondary" @click="resetAlbumFilter" />
+        <Button label="Abbrechen" text @click="showAlbumFilterMenu = false" />
+        <Button label="Anwenden" icon="pi pi-check" @click="applyAlbumFilter" />
+      </template>
+    </Dialog>
+
+    <SortMenu
+      v-model:visible="showAlbumSortMenu"
+      v-model:draft="draftAlbumSort"
+      :fields="ALBUM_SORT_FIELDS"
+      @apply="applyAlbumSort"
+      @reset="resetAlbumSort"
+    />
   </div>
 </template>
 
@@ -588,7 +859,24 @@ onMounted(loadData)
 
 .filter-row {
   margin-block: 0.5rem 1rem;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
 }
+
+.album-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-block: 0 0.75rem;
+}
+
+.album-filter-menu { display: flex; flex-direction: column; gap: 1rem; }
+.afm-row { display: flex; flex-direction: column; gap: 0.5rem; }
+.afm-label { font-weight: 500; font-size: 0.9rem; color: var(--p-text-muted-color); }
+.afm-daterange { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.afm-daterange > * { flex: 1 1 140px; }
 
 .filter-input-wrapper {
   position: relative;
@@ -617,34 +905,41 @@ onMounted(loadData)
 
 .albums-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(var(--grid-min-col), 1fr));
+  gap: var(--grid-gap);
 }
 
 .album-card {
   position: relative;
-  background: var(--p-surface-card);
-  border: 1px solid var(--p-content-border-color);
-  border-radius: 8px;
+  background: var(--p-content-background);
+  border: 4px solid transparent;
+  border-radius: var(--radius-md);
   padding: 0;
   cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
-  display: flex;
-  flex-direction: column;
+  transition: transform 0.2s;
   overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  outline: none;
+}
+
+.album-card:hover { transform: scale(1.02); }
+
+.album-card:focus-visible {
+  outline: 2px solid var(--p-primary-300);
+  outline-offset: -2px;
 }
 
 /* Placeholder: card slot is reserved so the grid layout stays stable even
- * while the card's content is torn down. Height matches a typical hydrated
- * card (200px cover + ~1 line name + ~1 line meta + paddings). */
+ * while the card's content is torn down. Matches the cover height used
+ * once the card is hydrated. */
 .album-card--placeholder {
-  min-height: 290px;
+  min-height: 200px;
 }
 
 .shared-badge {
   position: absolute;
-  bottom: 0.5rem;
-  right: 0.5rem;
+  top: 0.5rem;
+  left: 0.5rem;
   z-index: 1;
   font-size: 0.9rem;
   color: white;
@@ -663,17 +958,14 @@ onMounted(loadData)
   gap: 0.25rem;
   padding: 0.25rem;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--p-surface-card) 82%, transparent);
+  background: rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(4px);
+  opacity: 0;
+  transition: opacity 0.2s;
 }
-
-.album-card:hover,
-.album-card:focus-visible {
-  transform: translateY(-4px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  outline: 2px solid var(--p-primary-color);
-  outline-offset: 2px;
-}
+.album-actions :deep(.p-button) { color: #fff; }
+.album-card:hover .album-actions,
+.album-card:focus-within .album-actions { opacity: 1; }
 
 .album-cover {
   width: 100%;
@@ -695,23 +987,40 @@ onMounted(loadData)
 }
 
 .album-info {
-  padding: 0.75rem 1rem 1rem;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 0.4rem 0.6rem 0.5rem;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.1rem;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  color: #fff;
 }
 .album-name {
-  font-weight: 600;
+  font-weight: 500;
+  font-size: 0.85rem;
   display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .album-desc {
-  font-size: 0.9rem;
-  color: var(--p-text-muted-color);
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .album-meta {
-  font-size: 0.85rem;
-  color: var(--p-text-muted-color);
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.75);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .info-text {
