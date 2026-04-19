@@ -423,6 +423,11 @@ export const documentSuggestionStatusEnum = pgEnum("document_suggestion_status",
   "rejected",
 ]);
 
+export const documentTaxSourceEnum = pgEnum("document_tax_source", [
+  "ai",
+  "user",
+]);
+
 export const documentCategories = pgTable("document_categories", {
   id: serial("id").primaryKey(),
   slug: text("slug").unique().notNull(),
@@ -457,10 +462,36 @@ export const documents = pgTable("documents", {
   // OCR. Used to recover documents whose pre-baked text layer lost its
   // spaces (see migration 0028).
   force_ocr: boolean("force_ocr").notNull().default(false),
+  // Tax-return metadata (migration 0029). Filled by the LLM classifier;
+  // the user can override via the tax-detail endpoint (flips
+  // `tax_reviewed` to true). Section assignments live in the N:M
+  // join table `document_tax_sections` below.
+  tax_relevant: boolean("tax_relevant").notNull().default(false),
+  tax_year: integer("tax_year"),
+  tax_year_confidence: real("tax_year_confidence"),
+  tax_reviewed: boolean("tax_reviewed").notNull().default(false),
   // NOTE: the generated `text_tsv tsvector` column and its GIN index are
   // added by migration 0025 and accessed only via raw SQL (drizzle-orm has
   // no first-class tsvector support).
 });
+
+// N:M mapping of a document to one or more German tax-return sections
+// (Anlagen / Abzugsbereiche). Slug values are NOT a Postgres enum —
+// they are validated in the service layer against
+// `documents/tax-sections.ts`, so new sections don't need a migration.
+export const documentTaxSections = pgTable(
+  "document_tax_sections",
+  {
+    document_id: integer("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    tax_section: text("tax_section").notNull(),
+    confidence: real("confidence"),
+    source: documentTaxSourceEnum("source").notNull().default("ai"),
+    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.document_id, table.tax_section] })]
+);
 
 export const documentTags = pgTable("document_tags", {
   id: serial("id").primaryKey(),
