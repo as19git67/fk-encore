@@ -483,6 +483,8 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     category_slug: 'rechnungen',
     classification_confidence: 0.94,
     tags: ['Strom', 'Rechnung', '2024', 'SWM'],
+    tax_relevant: false,
+    tax_year: null,
   },
   {
     id: 2,
@@ -498,6 +500,8 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     category_slug: 'versicherungen',
     classification_confidence: 0.88,
     tags: ['Police', 'Hausrat'],
+    tax_relevant: false,
+    tax_year: null,
   },
   {
     id: 3,
@@ -513,6 +517,8 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     category_slug: null,
     classification_confidence: null,
     tags: [],
+    tax_relevant: false,
+    tax_year: null,
   },
   {
     id: 4,
@@ -528,6 +534,8 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     category_slug: null,
     classification_confidence: null,
     tags: [],
+    tax_relevant: false,
+    tax_year: null,
   },
   {
     id: 5,
@@ -543,6 +551,8 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     category_slug: 'vertraege',
     classification_confidence: 0.97,
     tags: ['Miete', 'Wohnung', 'Vertrag'],
+    tax_relevant: false,
+    tax_year: null,
   },
 ]
 
@@ -552,18 +562,27 @@ export const MOCK_DOCUMENT_DETAIL: DocumentDetail = {
     'Monatliche Stromrechnung der Stadtwerke München für März 2024 über 98,40 EUR. Fällig am 10.04.2024. Kundennummer 123456.',
   extracted_text_preview:
     'STADTWERKE MÜNCHEN GmbH\nRechnung Nr. 2024-03-1156\nKunden-Nr.: 123456\nAbrechnungszeitraum: 01.03.2024 - 31.03.2024\nVerbrauch: 312 kWh\nGesamtbetrag: 98,40 EUR\n\nBitte überweisen Sie den Betrag bis zum 10.04.2024...',
+  tax_reviewed: false,
+  tax_year_confidence: null,
+  tax_sections: [],
 }
 
 export const MOCK_DOCUMENT_DETAIL_CLASSIFYING: DocumentDetail = {
   ...MOCK_DOCUMENTS[2]!,
   summary: null,
   extracted_text_preview: null,
+  tax_reviewed: false,
+  tax_year_confidence: null,
+  tax_sections: [],
 }
 
 export const MOCK_DOCUMENT_DETAIL_FAILED: DocumentDetail = {
   ...MOCK_DOCUMENTS[3]!,
   summary: null,
   extracted_text_preview: null,
+  tax_reviewed: false,
+  tax_year_confidence: null,
+  tax_sections: [],
 }
 
 export const MOCK_DOCUMENT_QUEUE_IDLE: DocumentQueueStatus = {

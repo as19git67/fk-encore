@@ -76,6 +76,12 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'documents.upload' },
       },
       {
+        path: 'steuer',
+        name: 'dokumente-steuer',
+        component: () => import('../views/DocumentsSteuerView.vue'),
+        meta: { permission: 'documents.view' },
+      },
+      {
         path: ':id',
         name: 'dokumente-detail',
         component: () => import('../views/DocumentDetailView.vue'),
@@ -84,6 +90,7 @@ export const modules: ModuleConfig[] = [
     ],
     menuItems: [
       { label: 'Alle Dokumente', icon: 'pi pi-file', routeName: 'dokumente-list', permission: 'documents.view' },
+      { label: 'Steuer', icon: 'pi pi-receipt', routeName: 'dokumente-steuer', permission: 'documents.view' },
       { label: 'Hochladen', icon: 'pi pi-upload', routeName: 'dokumente-upload', permission: 'documents.upload' },
     ],
   },

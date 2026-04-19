@@ -2,6 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
+import Checkbox from 'primevue/checkbox'
+import InputNumber from 'primevue/inputnumber'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import Select from 'primevue/select'
@@ -12,11 +14,15 @@ import {
   fetchDocumentBytes,
   getDocument,
   listDocumentCategories,
+  listTaxSectionsCatalog,
   reclassifyDocument,
   updateDocument,
+  updateDocumentTax,
   type DocumentCategory,
   type DocumentDetail,
   type DocumentStatus,
+  type TaxSectionCatalogEntry,
+  type TaxSectionGroup,
 } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
 import PdfViewer from '../components/PdfViewer.vue'
@@ -29,8 +35,11 @@ const docId = computed(() => parseInt(route.params.id as string, 10))
 
 const doc = ref<DocumentDetail | null>(null)
 const categories = ref<DocumentCategory[]>([])
+const taxCatalog = ref<TaxSectionCatalogEntry[]>([])
 const loading = ref(true)
 const saving = ref(false)
+const savingTax = ref(false)
+const editingTax = ref(false)
 const error = ref('')
 const info = ref('')
 const pdfData = ref<Uint8Array | null>(null)
@@ -43,6 +52,30 @@ const form = ref({
   summary: '' as string,
   category_slug: null as string | null,
   tagsText: '' as string,
+})
+
+const taxForm = ref({
+  tax_relevant: false,
+  tax_year: null as number | null,
+  sections: new Set<string>(),
+})
+
+const TAX_GROUP_LABELS: Record<TaxSectionGroup, string> = {
+  einkuenfte: 'Einkünfte',
+  abzuege: 'Abzüge',
+  bescheid: 'Bescheide',
+  rahmen: 'Stammdaten',
+}
+
+const taxCatalogByGroup = computed(() => {
+  const order: TaxSectionGroup[] = ['einkuenfte', 'abzuege', 'bescheid', 'rahmen']
+  return order
+    .map((g) => ({
+      group: g,
+      label: TAX_GROUP_LABELS[g],
+      items: taxCatalog.value.filter((s) => s.group === g),
+    }))
+    .filter((b) => b.items.length > 0)
 })
 
 const categoryOptions = computed(() => {
@@ -58,13 +91,18 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [detail, cats] = await Promise.all([
+    const [detail, cats, taxCats] = await Promise.all([
       getDocument(docId.value),
       listDocumentCategories(),
+      // Catalog is static-ish — a fresh fetch per detail view is fine and
+      // means new sections appear without a hard reload.
+      listTaxSectionsCatalog(),
     ])
     doc.value = detail
     categories.value = cats.items
+    taxCatalog.value = taxCats.items
     resetForm()
+    resetTaxForm()
     await loadPdf()
   } catch (err: any) {
     error.value = err.message || 'Dokument konnte nicht geladen werden'
@@ -92,6 +130,54 @@ function resetForm() {
     summary: doc.value.summary ?? '',
     category_slug: doc.value.category_slug,
     tagsText: doc.value.tags.join(', '),
+  }
+}
+
+function resetTaxForm() {
+  if (!doc.value) return
+  taxForm.value = {
+    tax_relevant: doc.value.tax_relevant,
+    tax_year: doc.value.tax_year,
+    sections: new Set(doc.value.tax_sections.map((s) => s.slug)),
+  }
+  editingTax.value = false
+}
+
+function toggleTaxSection(slug: string, checked: boolean) {
+  const next = new Set(taxForm.value.sections)
+  if (checked) next.add(slug)
+  else next.delete(slug)
+  taxForm.value.sections = next
+}
+
+async function saveTax() {
+  if (!doc.value) return
+  savingTax.value = true
+  error.value = ''
+  info.value = ''
+  try {
+    if (taxForm.value.tax_relevant) {
+      if (taxForm.value.tax_year == null) {
+        throw new Error('Bitte ein Steuerjahr auswählen.')
+      }
+      if (taxForm.value.sections.size === 0) {
+        throw new Error('Bitte mindestens eine Steuer-Sektion auswählen.')
+      }
+    }
+    const updated = await updateDocumentTax(doc.value.id, {
+      tax_relevant: taxForm.value.tax_relevant,
+      tax_year: taxForm.value.tax_relevant ? taxForm.value.tax_year : null,
+      tax_sections: taxForm.value.tax_relevant
+        ? Array.from(taxForm.value.sections)
+        : [],
+    })
+    doc.value = updated
+    resetTaxForm()
+    info.value = 'Steuer-Zuordnung gespeichert.'
+  } catch (err: any) {
+    error.value = err.message || 'Speichern der Steuer-Zuordnung fehlgeschlagen'
+  } finally {
+    savingTax.value = false
   }
 }
 
@@ -296,6 +382,130 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
+        <section class="tax-card">
+          <div class="tax-card-header">
+            <h2 class="tax-card-title">
+              <i class="pi pi-receipt" /> Steuer
+            </h2>
+            <div class="tax-badges">
+              <Tag
+                v-if="doc.tax_relevant"
+                severity="success"
+                value="Steuerrelevant"
+              />
+              <Tag
+                v-else
+                severity="secondary"
+                value="Nicht steuerrelevant"
+              />
+              <Tag
+                v-if="doc.tax_reviewed"
+                severity="info"
+                value="Manuell bestätigt"
+                v-tooltip.bottom="'Diese Werte wurden vom Nutzer bestätigt und werden bei Neuanalysen nicht überschrieben.'"
+              />
+            </div>
+          </div>
+
+          <div v-if="!editingTax" class="tax-view-mode">
+            <div v-if="doc.tax_relevant && doc.tax_year" class="tax-info-row">
+              <span class="label">Steuerjahr</span>
+              <span>{{ doc.tax_year }}</span>
+            </div>
+            <div
+              v-if="doc.tax_relevant && !doc.tax_reviewed && doc.tax_year_confidence != null"
+              class="tax-info-row"
+            >
+              <span class="label">Jahr-Konfidenz</span>
+              <span>{{ (doc.tax_year_confidence * 100).toFixed(0) }}%</span>
+            </div>
+            <div v-if="doc.tax_sections.length > 0" class="tax-sections-view">
+              <span class="label">Zugeordnete Sektionen</span>
+              <div class="tax-sections-list">
+                <Chip
+                  v-for="s in doc.tax_sections"
+                  :key="s.slug"
+                  :label="
+                    s.name +
+                    (s.source === 'ai' && s.confidence != null
+                      ? ` · ${Math.round(s.confidence * 100)}%`
+                      : '')
+                  "
+                  :icon="s.source === 'user' ? 'pi pi-user-edit' : 'pi pi-sparkles'"
+                  :class="['tax-section-chip', `tax-section-chip--${s.source}`]"
+                />
+              </div>
+            </div>
+            <div v-else-if="!doc.tax_relevant" class="tax-empty-hint">
+              Dieses Dokument wird nicht für die Steuererklärung benötigt.
+            </div>
+            <Button
+              v-if="auth.hasPermission('documents.edit')"
+              icon="pi pi-pencil"
+              label="Bearbeiten"
+              text
+              size="small"
+              @click="editingTax = true"
+            />
+          </div>
+
+          <div v-else class="tax-edit-mode">
+            <label class="tax-toggle-row">
+              <Checkbox v-model="taxForm.tax_relevant" :binary="true" />
+              <span>Dokument ist steuerrelevant</span>
+            </label>
+
+            <div v-if="taxForm.tax_relevant" class="tax-edit-fields">
+              <label>
+                <span class="label">Steuerjahr</span>
+                <InputNumber
+                  v-model="taxForm.tax_year"
+                  :min="2000"
+                  :max="2100"
+                  :useGrouping="false"
+                  showButtons
+                  placeholder="z. B. 2025"
+                />
+              </label>
+
+              <div class="tax-sections-edit">
+                <span class="label">Sektionen der Steuererklärung</span>
+                <div
+                  v-for="group in taxCatalogByGroup"
+                  :key="group.group"
+                  class="tax-section-group"
+                >
+                  <div class="tax-section-group-label">{{ group.label }}</div>
+                  <label
+                    v-for="sec in group.items"
+                    :key="sec.slug"
+                    class="tax-section-option"
+                    :title="sec.hint"
+                  >
+                    <Checkbox
+                      :modelValue="taxForm.sections.has(sec.slug)"
+                      :binary="true"
+                      @update:modelValue="(v: boolean) => toggleTaxSection(sec.slug, v)"
+                    />
+                    <span>{{ sec.name }}</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="save-row">
+              <Button label="Abbrechen" text size="small" @click="resetTaxForm" />
+              <Button
+                label="Speichern"
+                icon="pi pi-check"
+                size="small"
+                :loading="savingTax"
+                @click="saveTax"
+              />
+            </div>
+          </div>
+        </section>
+
         <div class="extra-info">
           <div><strong>Datei:</strong> {{ doc.original_filename }}</div>
           <div v-if="doc.classification_confidence != null">
@@ -416,5 +626,106 @@ onBeforeUnmount(() => {
   white-space: pre-wrap;
   max-height: 180px;
   overflow-y: auto;
+}
+
+.tax-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  background: color-mix(in srgb, var(--p-primary-color) 4%, transparent);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 8px;
+}
+.tax-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.tax-card-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.tax-badges {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.tax-view-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.tax-info-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  font-size: 0.9rem;
+}
+.tax-sections-view {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.tax-sections-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.tax-section-chip.tax-section-chip--user {
+  background: color-mix(in srgb, var(--p-green-500) 18%, transparent);
+}
+.tax-empty-hint {
+  font-size: 0.9rem;
+  color: var(--p-text-muted-color);
+}
+
+.tax-edit-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.tax-toggle-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.tax-edit-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.tax-sections-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.tax-section-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  padding: 0.25rem 0;
+}
+.tax-section-group-label {
+  width: 100%;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--p-primary-color);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.tax-section-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  cursor: pointer;
 }
 </style>
