@@ -12,6 +12,33 @@ data/*.db-wal
 data/*.db-shm
 frontend/dist
 /tsconfig.tsbuildinfo
+
+# TypeScript build outputs from `tsc -b` at the repo root (composite project).
+# The .ts sources live next to these and are the canonical version.
+/backup/*.js
+/backup/*.d.ts
+/backup/*.js.map
+/db/*.js
+/db/*.d.ts
+/db/*.js.map
+/documents/*.js
+/documents/*.d.ts
+/documents/*.js.map
+/photo/*.js
+/photo/*.d.ts
+/photo/*.js.map
+/role/*.js
+/role/*.d.ts
+/role/*.js.map
+/user/*.js
+/user/*.d.ts
+/user/*.js.map
+/web/*.js
+/web/*.d.ts
+/web/*.js.map
+/drizzle.config.js
+/drizzle.config.d.ts
+/drizzle.config.js.map
 /test_output.txt
 /docker-compose-otdev.yml
 __pycache__/

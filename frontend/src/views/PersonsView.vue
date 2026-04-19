@@ -42,6 +42,25 @@ const showHidden = ref(false)
 const isFullscreen = ref(false)
 const selectedIndex = ref(-1)
 
+// Remember the most recently opened person across reloads, plus a per-person
+// map of the last photo the user had selected, so reopening a person restores
+// the previous scroll/selection position instead of snapping back to the top.
+const LAST_PERSON_KEY = 'persons_last_selected_id'
+const LAST_PHOTO_MAP_KEY = 'persons_last_photo_by_person'
+
+function loadLastPhotoMap(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(LAST_PHOTO_MAP_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch { return {} }
+}
+
+function saveLastPhotoForPerson(personId: number, photoId: number) {
+  const map = loadLastPhotoMap()
+  map[String(personId)] = photoId
+  localStorage.setItem(LAST_PHOTO_MAP_KEY, JSON.stringify(map))
+}
+
 // ── Person face / photo items ─────────────────────────────────────────────────
 const personFaceItems = computed(() => {
   if (!selectedPersonDetail.value) return []
@@ -118,8 +137,10 @@ async function loadSidebarData(photoId: number) {
 }
 
 watch(selectedPhoto, (photo) => {
-  if (photo) loadSidebarData(photo.id)
-  else { detectedFaces.value = []; detectedLandmarks.value = [] }
+  if (photo) {
+    loadSidebarData(photo.id)
+    if (selectedPerson.value) saveLastPhotoForPerson(selectedPerson.value.id, photo.id)
+  } else { detectedFaces.value = []; detectedLandmarks.value = [] }
 })
 
 // ── Keyboard navigation (via composable) ─────────────────────────────────────
@@ -247,8 +268,14 @@ async function loadData() {
       if (still) await selectPersonItem(still)
       else if (persons.value.length > 0) await selectPersonItem(persons.value[0]!)
       else { selectedPerson.value = null; selectedPersonDetail.value = null }
-    } else if (persons.value.length > 0) {
-      await selectPersonItem(persons.value[0]!)
+    } else {
+      // No query, no in-memory selection (fresh page load) → restore the
+      // previously opened person if it still exists, otherwise fall back
+      // to the first entry in the list.
+      const storedId = Number(localStorage.getItem(LAST_PERSON_KEY))
+      const stored = storedId ? persons.value.find(p => p.id === storedId) : undefined
+      if (stored) await selectPersonItem(stored)
+      else if (persons.value.length > 0) await selectPersonItem(persons.value[0]!)
     }
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Personen'
@@ -261,6 +288,7 @@ async function selectPersonItem(person: Person, focusPhotoId?: number) {
   const alreadyLoaded = selectedPerson.value?.id === person.id && !!selectedPersonDetail.value
   if (!alreadyLoaded) {
     selectedPerson.value = person
+    localStorage.setItem(LAST_PERSON_KEY, String(person.id))
     selectedIndex.value = -1
     detectedFaces.value = []
     detectedLandmarks.value = []
@@ -274,12 +302,18 @@ async function selectPersonItem(person: Person, focusPhotoId?: number) {
       loadingDetails.value = false
     }
   }
-  // Jump to a specific photo if requested, otherwise fall back to the first.
+  // Jump to a specific photo if requested, otherwise restore the previously
+  // selected photo for this person (if any), falling back to the first.
   if (focusPhotoId) {
     const idx = uniquePhotoFaceItems.value.findIndex(i => i.photo.id === focusPhotoId)
     selectedIndex.value = idx >= 0 ? idx : (uniquePhotoFaceItems.value.length > 0 ? 0 : -1)
-  } else if (!alreadyLoaded && uniquePhotoFaceItems.value.length > 0) {
-    selectedIndex.value = 0
+  } else if (!alreadyLoaded) {
+    const storedPhotoId = loadLastPhotoMap()[String(person.id)]
+    const restoredIdx = storedPhotoId
+      ? uniquePhotoFaceItems.value.findIndex(i => i.photo.id === storedPhotoId)
+      : -1
+    if (restoredIdx >= 0) selectedIndex.value = restoredIdx
+    else if (uniquePhotoFaceItems.value.length > 0) selectedIndex.value = 0
   }
 }
 

@@ -115,11 +115,33 @@ onUnmounted(() => {
   sectionObserver?.disconnect()
 })
 
+// ── Thumbnail hydration gating ───────────────────────────────────────────────
+// On initial load the gallery typically has to scroll to a previously selected
+// photo deep in the library. If we set up the thumbnail IntersectionObserver
+// immediately, the top-of-page photos would be flagged as visible and start
+// decoding thumbnails the user never sees during the jump — which both
+// delays the scroll and wastes network/CPU. While `initialObserverDeferred`
+// is true we intentionally skip setupObserver (visiblePhotoIds stays empty,
+// so no <HeicImage> mounts). The initial scrollToPhoto's done callback
+// clears the flag and attaches the observer at the final scroll position.
+//
+// NOTE: the value is decided synchronously at component setup so it's already
+// true by the time the scrollRef watch fires (watchers flush before
+// onMounted). If a stored/deep-link selection is known at mount time we
+// defer the observer; otherwise we attach it immediately like before.
+let initialObserverDeferred =
+  props.selectedIndex >= 0 && props.groupedPhotos.length > 0
+
+function maybeSetupObserver(el: HTMLElement) {
+  if (initialObserverDeferred) return
+  setupObserver(el)
+}
+
 // ── Re-observe after groupedPhotos changes ───────────────────────────────────
 watch(() => props.groupedPhotos, async () => {
   await nextTick()
   if (scrollRef.value) {
-    setupObserver(scrollRef.value)
+    maybeSetupObserver(scrollRef.value)
     setupSectionObserver(scrollRef.value)
   }
   updateColumnCount()
@@ -128,7 +150,7 @@ watch(() => props.groupedPhotos, async () => {
 watch(scrollRef, async (el) => {
   if (el) {
     await nextTick()
-    setupObserver(el)
+    maybeSetupObserver(el)
     setupSectionObserver(el)
     updateColumnCount()
   }
@@ -137,10 +159,15 @@ watch(scrollRef, async (el) => {
 // ── Scroll selected photo into view ─────────────────────────────────────────
 let initialScrollDone = false
 
-function scrollToPhoto(idx: number, behavior: ScrollBehavior = 'smooth') {
-  if (idx < 0) { console.log('[PhotoGrid] scrollToPhoto: idx < 0, skipping'); return }
+function scrollToPhoto(
+  idx: number,
+  behavior: ScrollBehavior = 'smooth',
+  done?: () => void,
+) {
+  const finish = () => { if (done) { try { done() } catch { /* ignore */ } } }
+  if (idx < 0) { console.log('[PhotoGrid] scrollToPhoto: idx < 0, skipping'); finish(); return }
   const photo = props.photos[idx]
-  if (!photo) { console.log('[PhotoGrid] scrollToPhoto: no photo at idx', idx); return }
+  if (!photo) { console.log('[PhotoGrid] scrollToPhoto: no photo at idx', idx); finish(); return }
 
   console.log('[PhotoGrid] scrollToPhoto: idx=', idx, 'photoId=', photo.id, 'behavior=', behavior)
 
@@ -149,7 +176,7 @@ function scrollToPhoto(idx: number, behavior: ScrollBehavior = 'smooth') {
     const container = scrollRef.value
     if (!container) {
       if (attempts++ < 30) requestAnimationFrame(tryScroll)
-      else console.log('[PhotoGrid] scrollToPhoto: gave up, no container after 30 attempts')
+      else { console.log('[PhotoGrid] scrollToPhoto: gave up, no container after 30 attempts'); finish() }
       return
     }
     const el = container.querySelector(`[data-photo-id="${photo.id}"]`) as HTMLElement | null
@@ -159,13 +186,21 @@ function scrollToPhoto(idx: number, behavior: ScrollBehavior = 'smooth') {
       const targetTop = container.scrollTop + elRect.top - containerRect.top - containerRect.height / 2 + elRect.height / 2
       console.log('[PhotoGrid] scrollToPhoto: SCROLLING to photoId=', photo.id, 'targetTop=', targetTop, 'containerScrollHeight=', container.scrollHeight)
       container.scrollTo({ top: Math.max(0, targetTop), behavior })
+      finish()
     } else if (attempts++ < 30) {
       requestAnimationFrame(tryScroll)
     } else {
       console.log('[PhotoGrid] scrollToPhoto: gave up, element not found for photoId=', photo.id)
+      finish()
     }
   }
   tryScroll()
+}
+
+function releaseDeferredObserver() {
+  if (!initialObserverDeferred) return
+  initialObserverDeferred = false
+  if (scrollRef.value) setupObserver(scrollRef.value)
 }
 
 // Initial scroll: use onMounted + setTimeout to ensure DOM is fully laid out
@@ -173,7 +208,8 @@ onMounted(() => {
   console.log('[PhotoGrid] onMounted: selectedIndex=', props.selectedIndex, 'groupedPhotos.length=', props.groupedPhotos.length, 'scrollRef=', !!scrollRef.value)
   if (props.selectedIndex >= 0 && props.groupedPhotos.length > 0) {
     initialScrollDone = true
-    setTimeout(() => scrollToPhoto(props.selectedIndex, 'instant'), 50)
+    initialObserverDeferred = true
+    setTimeout(() => scrollToPhoto(props.selectedIndex, 'instant', releaseDeferredObserver), 50)
   }
 })
 
@@ -182,7 +218,8 @@ watch(() => props.selectedIndex, (idx) => {
   if (initialScrollDone) return
   if (idx >= 0 && props.groupedPhotos.length > 0) {
     initialScrollDone = true
-    nextTick(() => scrollToPhoto(idx, 'instant'))
+    initialObserverDeferred = true
+    nextTick(() => scrollToPhoto(idx, 'instant', releaseDeferredObserver))
   }
 })
 
