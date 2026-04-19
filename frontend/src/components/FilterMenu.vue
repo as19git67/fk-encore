@@ -85,7 +85,6 @@ const mediaTypeOptions: Array<{ label: string; value: MediaType }> = [
   { label: 'Foto', value: 'photo' },
   { label: 'Video', value: 'video' },
   { label: 'RAW', value: 'raw' },
-  { label: 'HEIC', value: 'heic' },
 ]
 const triOptions: Array<{ label: string; value: 'any' | 'yes' | 'no' }> = [
   { label: 'Egal', value: 'any' },

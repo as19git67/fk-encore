@@ -68,7 +68,7 @@ const chips = computed<ChipDef[]>(() => {
     out.push({ label: `${prefix}: ${names.join(', ')}`, keys: ['personIds', 'personMode'] })
   }
   if (f.mediaTypes?.length) {
-    const labels: Record<string, string> = { photo: 'Foto', video: 'Video', raw: 'RAW', heic: 'HEIC' }
+    const labels: Record<string, string> = { photo: 'Foto', video: 'Video', raw: 'RAW' }
     out.push({
       label: `Medientyp: ${f.mediaTypes.map((t) => labels[t] ?? t).join(', ')}`,
       keys: ['mediaTypes'],

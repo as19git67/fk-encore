@@ -16,7 +16,7 @@ import type { PhotoFilter, HiddenMode, MembershipMode, MediaType } from '../api/
 
 const HIDDEN_MODES: HiddenMode[] = ['exclude', 'include', 'only']
 const MEMBERSHIP_MODES: MembershipMode[] = ['include', 'exclude']
-const MEDIA_TYPES: MediaType[] = ['photo', 'video', 'raw', 'heic']
+const MEDIA_TYPES: MediaType[] = ['photo', 'video', 'raw']
 
 function parseBool(v: unknown): boolean | undefined {
   if (v === 'true' || v === '1') return true

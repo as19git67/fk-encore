@@ -69,7 +69,7 @@ export interface DeleteResponse {
 
 export type HiddenMode = 'exclude' | 'include' | 'only'
 export type MembershipMode = 'include' | 'exclude'
-export type MediaType = 'photo' | 'video' | 'raw' | 'heic'
+export type MediaType = 'photo' | 'video' | 'raw'
 
 export interface PhotoFilter {
   hiddenMode?: HiddenMode

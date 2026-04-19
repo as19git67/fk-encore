@@ -14,7 +14,7 @@ import {
 
 export type HiddenMode = "exclude" | "include" | "only";
 export type MembershipMode = "include" | "exclude";
-export type MediaType = "photo" | "video" | "raw" | "heic";
+export type MediaType = "photo" | "video" | "raw";
 
 export interface PhotoFilterParams {
   hiddenMode?: HiddenMode;
@@ -77,7 +77,7 @@ function parseIntArray(s: string): number[] {
 }
 
 function parseMediaTypes(s: string): MediaType[] {
-  const valid: MediaType[] = ["photo", "video", "raw", "heic"];
+  const valid: MediaType[] = ["photo", "video", "raw"];
   return s
     .split(",")
     .map((x) => x.trim())
@@ -229,8 +229,9 @@ export function buildPhotoFilterConditions(
     for (const t of filter.mediaTypes) {
       switch (t) {
         case "photo":
+          // HEIC/HEIF zählen zu Fotos; nur RAW (image/x-*) wird ausgeschlossen.
           patterns.push(
-            sql`(${photos.mime_type} LIKE 'image/%' AND ${photos.mime_type} NOT IN ('image/heic','image/heif') AND ${photos.mime_type} NOT LIKE 'image/x-%')`
+            sql`(${photos.mime_type} LIKE 'image/%' AND ${photos.mime_type} NOT LIKE 'image/x-%')`
           );
           break;
         case "video":
@@ -238,9 +239,6 @@ export function buildPhotoFilterConditions(
           break;
         case "raw":
           patterns.push(sql`${photos.mime_type} LIKE 'image/x-%'`);
-          break;
-        case "heic":
-          patterns.push(sql`${photos.mime_type} IN ('image/heic','image/heif')`);
           break;
       }
     }
