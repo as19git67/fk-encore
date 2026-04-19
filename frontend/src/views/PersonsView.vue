@@ -8,18 +8,18 @@ import ToggleSwitch from 'primevue/toggleswitch'
 import InputText from 'primevue/inputtext'
 import { useConfirm } from 'primevue/useconfirm'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
-import PersonNav from '../components/PersonNav.vue'
+import HeicImage from '../components/HeicImage.vue'
 import FacePhotoGrid from '../components/FacePhotoGrid.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import {
   listPersons, updatePerson, mergePersons, getPersonDetails,
   ignoreFace, ignorePersonFaces, updatePhotoCuration, reindexPhoto,
-  getPhotoFaces, getPhotoLandmarks,
+  getPhotoFaces, getPhotoLandmarks, getPhotoUrl,
   type CurationStatus, type Person, type Photo, type PersonDetails,
   type Face, type LandmarkItem,
 } from '../api/photos'
-import { faceBoxStyle } from '../utils/faceBbox'
+import { faceBoxStyle, thumbnailImageStyle } from '../utils/faceBbox'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
@@ -41,6 +41,18 @@ const loadingDetails = ref(false)
 const showHidden = ref(false)
 const isFullscreen = ref(false)
 const selectedIndex = ref(-1)
+const nameFilter = ref('')
+
+const filteredPersons = computed(() => {
+  const q = nameFilter.value.trim().toLocaleLowerCase()
+  if (!q) return persons.value
+  return persons.value.filter(p => p.name.toLocaleLowerCase().includes(q))
+})
+
+function personCoverUrl(person: Person) {
+  if (person.cover_filename) return getPhotoUrl(person.cover_filename, 400)
+  return 'https://www.primefaces.org/wp-content/uploads/2020/05/placeholder.png'
+}
 
 // Remember the most recently opened person across reloads, plus a per-person
 // map of the last photo the user had selected, so reopening a person restores
@@ -144,10 +156,8 @@ watch(selectedPhoto, (photo) => {
 })
 
 // ── Keyboard navigation (via composable) ─────────────────────────────────────
-const personNavRef = ref<InstanceType<typeof PersonNav> | null>(null)
-
 useGalleryKeyboard({
-  isBlocked: () => document.activeElement?.tagName === 'INPUT',
+  isBlocked: () => document.activeElement?.tagName === 'INPUT' || !selectedPerson.value,
   onLeft() {
     if (isFullscreen.value) { if (selectedIndex.value > 0) selectedIndex.value--; return }
     const total = uniquePhotoFaceItems.value.length
@@ -160,8 +170,8 @@ useGalleryKeyboard({
     if (total === 0) return
     selectedIndex.value = selectedIndex.value + 1 < total ? selectedIndex.value + 1 : 0
   },
-  onUp() { personNavRef.value?.navigateUp() },
-  onDown() { personNavRef.value?.navigateDown() },
+  onUp() { /* no-op: nav panel removed */ },
+  onDown() { /* no-op: nav panel removed */ },
   onSpace() { if (selectedIndex.value !== -1) isFullscreen.value = !isFullscreen.value },
   onExtra(e) {
     if (e.key === 'Escape' && isFullscreen.value) { isFullscreen.value = false; e.preventDefault() }
@@ -264,19 +274,14 @@ async function loadData() {
       await selectPersonItem(queryPerson, queryPhotoId || undefined)
       router.replace({ query: { ...route.query, personId: undefined, photoId: undefined } })
     } else if (selectedPerson.value) {
+      // After a rename/reload, keep the currently opened person on screen
+      // if it still exists. Otherwise return to the grid overview.
       const still = persons.value.find(p => p.id === selectedPerson.value!.id)
       if (still) await selectPersonItem(still)
-      else if (persons.value.length > 0) await selectPersonItem(persons.value[0]!)
       else { selectedPerson.value = null; selectedPersonDetail.value = null }
-    } else {
-      // No query, no in-memory selection (fresh page load) → restore the
-      // previously opened person if it still exists, otherwise fall back
-      // to the first entry in the list.
-      const storedId = Number(localStorage.getItem(LAST_PERSON_KEY))
-      const stored = storedId ? persons.value.find(p => p.id === storedId) : undefined
-      if (stored) await selectPersonItem(stored)
-      else if (persons.value.length > 0) await selectPersonItem(persons.value[0]!)
     }
+    // Fresh page load with no query and no in-memory selection → show the
+    // person grid as the first level of the view.
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Personen'
   } finally {
@@ -317,9 +322,17 @@ async function selectPersonItem(person: Person, focusPhotoId?: number) {
   }
 }
 
-// ── PersonNav events ──────────────────────────────────────────────────────────
+// ── Grid events ───────────────────────────────────────────────────────────────
 async function handlePersonSelected(person: Person) {
   await selectPersonItem(person)
+}
+
+function backToGrid() {
+  selectedPerson.value = null
+  selectedPersonDetail.value = null
+  selectedIndex.value = -1
+  detectedFaces.value = []
+  detectedLandmarks.value = []
 }
 
 // ── Rename ────────────────────────────────────────────────────────────────────
@@ -347,13 +360,6 @@ function onRenameDialogShow() {
   const input = (renameInputRef.value as any)?.$el || renameInputRef.value
   if (input instanceof HTMLInputElement) { input.focus(); input.select() }
   else if (input && typeof input.focus === 'function') { input.focus(); if (typeof input.select === 'function') input.select() }
-}
-
-async function handleRenameFromNav(person: Person) {
-  // Person comes in with the new name set by PersonNav inline rename
-  personToRename.value = persons.value.find(p => p.id === person.id) ?? null
-  newName.value = person.name
-  await handleRename()
 }
 
 async function handleRename(): Promise<boolean> {
@@ -396,7 +402,6 @@ async function handleIgnorePerson(person: Person) {
 }
 
 // ── Mobile drawer state ───────────────────────────────────────────────────────
-const mobilePersonNavOpen = ref(false)
 const mobileSidebarOpen = ref(false)
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -414,6 +419,14 @@ onUnmounted(() => serviceHealth.stopPolling())
     <div class="subheader">
       <div class="header">
         <div class="header-left">
+          <Button
+            v-if="selectedPerson"
+            icon="pi pi-arrow-left"
+            text rounded
+            aria-label="Zurück zur Übersicht"
+            v-tooltip="'Zurück zur Übersicht'"
+            @click="backToGrid"
+          />
           <h1 class="title">{{ selectedPersonDetail ? selectedPersonDetail.name : 'Personen' }}</h1>
         </div>
         <div class="actions">
@@ -438,19 +451,60 @@ onUnmounted(() => serviceHealth.stopPolling())
     </div>
     <div v-else-if="!loading && persons.length === 0" class="info-text">Keine Personen erkannt.</div>
 
-    <div v-else class="gallery-layout">
-      <!-- LEFT: Person nav – auf Mobile als Slide-in-Drawer -->
-      <div class="person-nav-drawer" :class="{ 'is-open': mobilePersonNavOpen }">
-        <PersonNav
-          ref="personNavRef"
-          :persons="persons"
-          :selectedPerson="selectedPerson"
-          @update:selectedPerson="handlePersonSelected($event); mobilePersonNavOpen = false"
-          @rename="handleRenameFromNav"
-          @ignore="handleIgnorePerson"
-        />
+    <!-- LEVEL 1: Person grid (default) ─────────────────────────────────────── -->
+    <div v-else-if="!selectedPerson" class="persons-grid-layout">
+      <div class="persons-filter-bar">
+        <div class="persons-filter-input">
+          <i class="pi pi-search persons-filter-icon" />
+          <InputText
+            v-model="nameFilter"
+            placeholder="Nach Namen filtern…"
+            fluid
+            autocomplete="off"
+          />
+          <Button
+            v-if="nameFilter"
+            class="persons-filter-clear"
+            icon="pi pi-times"
+            text rounded size="small"
+            aria-label="Filter löschen"
+            @click="nameFilter = ''"
+          />
+        </div>
+        <span class="persons-filter-count">
+          {{ filteredPersons.length }} von {{ persons.length }}
+        </span>
       </div>
 
+      <div v-if="filteredPersons.length === 0" class="info-text">
+        Keine Personen passen zum Filter.
+      </div>
+      <div v-else class="persons-grid">
+        <button
+          v-for="person in filteredPersons"
+          :key="person.id"
+          type="button"
+          class="person-card"
+          @click="handlePersonSelected(person)"
+        >
+          <div class="person-card-avatar">
+            <HeicImage
+              :src="personCoverUrl(person)"
+              :alt="person.name"
+              objectFit="cover"
+              :imageStyle="thumbnailImageStyle(person.cover_bbox)"
+            />
+          </div>
+          <div class="person-card-info">
+            <div class="person-card-name">{{ person.name }}</div>
+            <div class="person-card-count">{{ person.faceCount || 0 }} Fotos</div>
+          </div>
+        </button>
+      </div>
+    </div>
+
+    <!-- LEVEL 2: Detail view for a selected person ─────────────────────────── -->
+    <div v-else class="gallery-layout">
       <!-- CENTER: Face photo grid -->
       <FacePhotoGrid
         :items="uniquePhotoFaceItems"
@@ -501,21 +555,10 @@ onUnmounted(() => serviceHealth.stopPolling())
 
     <!-- Mobile: Backdrop zum Schließen von Drawern -->
     <div
-      v-if="mobilePersonNavOpen || mobileSidebarOpen"
+      v-if="mobileSidebarOpen"
       class="mobile-backdrop"
-      @click="mobilePersonNavOpen = false; mobileSidebarOpen = false"
+      @click="mobileSidebarOpen = false"
     />
-
-    <!-- Mobile: Floating-Button zum Öffnen der Personenliste -->
-    <button
-      v-if="!loading && persons.length > 0"
-      class="mobile-fab mobile-fab--persons"
-      :class="{ active: mobilePersonNavOpen }"
-      @click="mobilePersonNavOpen = !mobilePersonNavOpen; mobileSidebarOpen = false"
-      aria-label="Personenliste"
-    >
-      <i class="pi pi-users" />
-    </button>
 
 
     <!-- Fullscreen overlay -->
@@ -533,7 +576,7 @@ onUnmounted(() => serviceHealth.stopPolling())
       @toggle-favorite="handleToggleFavorite"
       @hide="handleHidePhoto"
       @restore="handleRestorePhoto"
-      @show-details="isFullscreen = false; mobileSidebarOpen = true; mobilePersonNavOpen = false"
+      @show-details="isFullscreen = false; mobileSidebarOpen = true"
     >
       <!-- Face box overlay in fullscreen -->
       <div class="face-box face-box-fullscreen" :style="faceBoxStyle(selectedPersonFace?.bbox)" />
@@ -543,7 +586,7 @@ onUnmounted(() => serviceHealth.stopPolling())
       </template>
       <template #topbar-actions>
         <Button icon="pi pi-images" rounded text severity="secondary" v-tooltip.bottom="'In Fotos anzeigen'" @click.stop="navigateToPhoto(selectedPhoto.id)" />
-        <Button icon="pi pi-info-circle" rounded text severity="secondary" v-tooltip.bottom="'Details'" @click.stop="isFullscreen = false; mobileSidebarOpen = true; mobilePersonNavOpen = false" />
+        <Button icon="pi pi-info-circle" rounded text severity="secondary" v-tooltip.bottom="'Details'" @click.stop="isFullscreen = false; mobileSidebarOpen = true" />
         <Button v-if="canDelete" :icon="selectedPhoto.curation_status === 'hidden' ? 'pi pi-eye-slash' : 'pi pi-eye'" rounded text :severity="selectedPhoto.curation_status === 'hidden' ? 'danger' : 'secondary'" @click.stop="selectedPhoto.curation_status === 'hidden' ? handleRestorePhoto(selectedPhoto.id) : handleHidePhoto(selectedPhoto.id)" />
         <Button v-if="canDelete" :icon="selectedPhoto.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'" rounded text :severity="selectedPhoto.curation_status === 'favorite' ? 'warn' : 'secondary'" @click.stop="handleToggleFavorite(selectedPhoto.id, selectedPhoto.curation_status)" />
         <Button v-if="selectedPersonFace" icon="pi pi-trash" rounded text severity="danger" v-tooltip.bottom="'Gesicht ignorieren'" @click.stop="handleIgnoreFace(selectedPersonFace.id)" />
@@ -622,9 +665,119 @@ onUnmounted(() => serviceHealth.stopPolling())
   overflow: hidden;
 }
 
-/* ── Person Nav Drawer Wrapper ───────────────────────────────────────────── */
-.person-nav-drawer {
-  display: contents;
+/* ── Person Grid (Level 1) ──────────────────────────────────────────────── */
+.persons-grid-layout {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.persons-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  position: sticky;
+  top: 0;
+  background: var(--p-content-background);
+  padding-bottom: 0.25rem;
+  z-index: 1;
+}
+
+.persons-filter-input {
+  position: relative;
+  flex: 1;
+  max-width: 28rem;
+  display: flex;
+  align-items: center;
+}
+.persons-filter-input :deep(.p-inputtext) {
+  padding-left: 2.25rem;
+  padding-right: 2.25rem;
+  width: 100%;
+}
+.persons-filter-icon {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--p-text-muted-color);
+  pointer-events: none;
+  font-size: 0.9rem;
+}
+.persons-filter-clear {
+  position: absolute;
+  right: 0.25rem;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.persons-filter-count {
+  font-size: 0.85rem;
+  color: var(--p-text-muted-color);
+  white-space: nowrap;
+}
+
+.persons-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.person-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 0.5rem 0.9rem;
+  background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 10px;
+  cursor: pointer;
+  color: inherit;
+  text-align: center;
+  transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+  outline: none;
+}
+.person-card:hover,
+.person-card:focus-visible {
+  transform: translateY(-2px);
+  border-color: var(--p-primary-color);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+}
+
+.person-card-avatar {
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: var(--p-content-hover-background);
+}
+
+.person-card-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.person-card-name {
+  font-size: 0.95rem;
+  font-weight: 500;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.person-card-count {
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
 }
 
 /* ── Person Sidebar Sheet Wrapper ────────────────────────────────────────── */
@@ -644,60 +797,17 @@ onUnmounted(() => serviceHealth.stopPolling())
   z-index: 490;
 }
 
-/* ── Mobile FABs ─────────────────────────────────────────────────────────── */
-.mobile-fab {
-  display: none;
-  position: fixed;
-  bottom: 1.5rem;
-  z-index: 495;
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  border: none;
-  cursor: pointer;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.1rem;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
-  transition: background 0.2s, transform 0.2s;
-}
-
-.mobile-fab--persons {
-  left: 1rem;
-  background: var(--p-content-background);
-  color: var(--p-primary-color);
-  border: 1px solid var(--p-content-border-color);
-}
-.mobile-fab--persons.active {
-  background: var(--p-primary-color);
-  color: white;
-}
-
-
-
 /* ── Mobile Breakpoint ───────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .mobile-backdrop { display: block; }
-  .mobile-fab { display: flex; }
 
-  /* Person Nav Drawer → linker Slide-in-Drawer */
-  .person-nav-drawer {
-    display: block;
-    position: fixed;
-    left: 0;
-    top: var(--menubar-height, 3.5rem);
-    bottom: 0;
-    width: 200px;
-    z-index: 500;
-    background: var(--p-content-background);
-    border-right: 1px solid var(--p-content-border-color);
-    transform: translateX(-100%);
-    transition: transform 0.25s ease;
-    box-shadow: 3px 0 12px rgba(0, 0, 0, 0.2);
-    overflow-y: auto;
+  .persons-grid {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 0.75rem;
   }
-  .person-nav-drawer.is-open {
-    transform: translateX(0);
+  .person-card-avatar {
+    width: 110px;
+    height: 110px;
   }
 
   /* Person Sidebar Sheet → Bottom Sheet */
