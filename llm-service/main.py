@@ -129,12 +129,36 @@ class TaxonomyNode(BaseModel):
     parent_slug: str | None = None
 
 
+class TaxSectionEntry(BaseModel):
+    """One German income-tax section (Anlage / Abzugsbereich) sent to the
+    classifier so it can pick from a fixed label set, identical in spirit to
+    :class:`TaxonomyNode` but flat (no parent) and with an extra human hint.
+    """
+
+    slug: str
+    name: str
+    group: str  # "einkuenfte" | "abzuege" | "bescheid" | "rahmen"
+    hint: str | None = None
+
+
 class ClassifyRequest(BaseModel):
     text: str = Field(..., min_length=1)
     taxonomy: list[TaxonomyNode] = Field(..., min_length=1)
+    # Optional: if non-empty the classifier is asked to additionally decide
+    # whether the document is relevant for the German income-tax return and
+    # which section(s) it belongs to. Empty list = tax detection disabled.
+    tax_sections: list[TaxSectionEntry] = Field(default_factory=list)
     # Optional hints: sender hint from OCR, upload filename, user locale.
     locale: str = "de"
     max_tags: int = 6
+
+
+class TaxAssignment(BaseModel):
+    """One (slug, confidence) tuple returned by the classifier for a
+    tax-return section it thinks the document belongs to."""
+
+    slug: str
+    confidence: float = Field(..., ge=0.0, le=1.0)
 
 
 class ClassifyResponse(BaseModel):
@@ -145,6 +169,12 @@ class ClassifyResponse(BaseModel):
     summary: str
     tags: list[str]
     confidence: float = Field(..., ge=0.0, le=1.0)
+    # Tax-return fields — default "not relevant" so existing callers that
+    # don't send ``tax_sections`` still get a valid response.
+    tax_relevant: bool = False
+    tax_year: int | None = Field(default=None, ge=2000, le=2100)
+    tax_year_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    tax_sections: list[TaxAssignment] = Field(default_factory=list)
 
 
 _SYSTEM_PROMPT = """Du bist ein präziser Klassifikator für private Haushalts-Dokumente.
@@ -166,6 +196,35 @@ Halluziniere keine Daten, Beträge oder Absender. Bei Unsicherheit: null bzw.
 niedrige confidence."""
 
 
+_TAX_SYSTEM_PROMPT = """
+
+STEUER-ERKENNUNG (nur wenn dir unten eine Liste von Steuer-Sektionen gezeigt wird)
+Beurteile zusätzlich, ob das Dokument als Beleg für die deutsche
+Einkommensteuererklärung dient.
+
+Zusätzliche Felder:
+- tax_relevant (bool): true, wenn das Dokument üblicherweise als Beleg,
+  Bescheinigung oder Bescheid für die Einkommensteuererklärung dient
+  (Lohnsteuerbescheinigung, Jahressteuerbescheinigung der Bank, Spenden-
+  quittung, Handwerker-/Haushaltshilfe-Rechnung mit Kontobeleg, Krankheits-
+  kosten, Vermietungsbelege, Kinderbetreuung, Steuerbescheid, …). false bei
+  rein privaten Belegen ohne Steuerbezug (Supermarktkassenbon, Werbung,
+  privater Schriftverkehr).
+- tax_year (int | null): vierstelliges Kalenderjahr, für das der Beleg
+  steuerlich zählt. Bei Jahresbescheinigungen ("Jahressteuerbescheinigung
+  2024"): das genannte Jahr. Bei Einzelrechnungen: das Jahr des Leistungs-
+  bzw. Zahlungsdatums (Zuflussprinzip). Bei Unsicherheit: null.
+- tax_year_confidence (0..1): Vertrauen in das Steuerjahr.
+- tax_sections: Liste der passenden Sektions-Slugs aus der unten gegebenen
+  Liste, jeweils mit eigener confidence. Ein Beleg darf mehreren Sektionen
+  zugeordnet werden (z.B. Handwerkerrechnung für das vermietete Objekt →
+  sowohl werbungskosten-v als auch ggf. haushaltsnahe, falls Eigennutzungs-
+  anteil). Leere Liste = keine passende Sektion / nicht steuerrelevant.
+  Format: [{"slug": "anlage-n", "confidence": 0.91}, ...]. Verwende nur
+  Slugs aus der Liste; erfinde keine neuen.
+"""
+
+
 def _taxonomy_outline(nodes: list[TaxonomyNode]) -> str:
     by_parent: dict[str | None, list[TaxonomyNode]] = {}
     for n in nodes:
@@ -182,6 +241,47 @@ def _taxonomy_outline(nodes: list[TaxonomyNode]) -> str:
     return "\n".join(render(None, 0))
 
 
+_TAX_GROUP_LABELS: dict[str, str] = {
+    "einkuenfte": "Einkünfte",
+    "abzuege": "Abzüge",
+    "bescheid": "Bescheide",
+    "rahmen": "Rahmen / Stammdaten",
+}
+_TAX_GROUP_ORDER: tuple[str, ...] = ("einkuenfte", "abzuege", "bescheid", "rahmen")
+
+
+def _tax_sections_outline(entries: list[TaxSectionEntry]) -> str:
+    """Render the tax-section list grouped by ``group`` in a stable order.
+    Empty input yields an empty string (caller must gate on that)."""
+
+    if not entries:
+        return ""
+
+    by_group: dict[str, list[TaxSectionEntry]] = {}
+    for e in entries:
+        by_group.setdefault(e.group, []).append(e)
+
+    lines: list[str] = []
+    seen: set[str] = set()
+    for group in _TAX_GROUP_ORDER:
+        if group not in by_group:
+            continue
+        seen.add(group)
+        lines.append(f"[{_TAX_GROUP_LABELS[group]}]")
+        for e in by_group[group]:
+            hint = f" — {e.hint}" if e.hint else ""
+            lines.append(f"- {e.slug}: {e.name}{hint}")
+    # Render any unexpected groups at the end so we never silently drop entries.
+    for group, items in by_group.items():
+        if group in seen:
+            continue
+        lines.append(f"[{group}]")
+        for e in items:
+            hint = f" — {e.hint}" if e.hint else ""
+            lines.append(f"- {e.slug}: {e.name}{hint}")
+    return "\n".join(lines)
+
+
 @app.post("/classify", response_model=ClassifyResponse)
 async def classify(req: ClassifyRequest) -> ClassifyResponse:
     llm = _state["llm"]
@@ -193,8 +293,17 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
     # the taxonomy and the response.
     text = req.text[:6000]
 
+    tax_active = bool(req.tax_sections)
+    system_prompt = _SYSTEM_PROMPT + (_TAX_SYSTEM_PROMPT if tax_active else "")
+
+    tax_block = (
+        f"\n\nSteuer-Sektionen (slug: Name — Hinweis):\n{_tax_sections_outline(req.tax_sections)}"
+        if tax_active
+        else ""
+    )
+
     user_prompt = (
-        f"Taxonomie (slug: Name):\n{_taxonomy_outline(req.taxonomy)}\n\n"
+        f"Taxonomie (slug: Name):\n{_taxonomy_outline(req.taxonomy)}{tax_block}\n\n"
         f"Max. Tags: {req.max_tags}\n\n"
         f"Dokumenttext:\n---\n{text}\n---"
     )
@@ -202,12 +311,14 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
     try:
         completion = llm.create_chat_completion(
             messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
             response_format={"type": "json_object"},
             temperature=0.2,
-            max_tokens=512,
+            # 768 tokens leaves headroom for the extra tax fields (up to a
+            # handful of tax_sections entries) without touching n_ctx.
+            max_tokens=768,
         )
     except Exception as exc:  # llama.cpp raises a generic Exception family
         log.exception("llm.create_chat_completion failed")
@@ -219,6 +330,24 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
     except json.JSONDecodeError as exc:
         log.warning("LLM returned non-JSON payload: %r", raw[:200])
         raise HTTPException(status_code=502, detail=f"llm returned invalid JSON: {exc}") from exc
+
+    # If tax detection is off, ignore any tax_* fields the LLM might have
+    # hallucinated — they're not validated against a slug whitelist here.
+    if not tax_active:
+        for k in ("tax_relevant", "tax_year", "tax_year_confidence", "tax_sections"):
+            data.pop(k, None)
+    else:
+        # Drop tax_sections entries whose slug is not in the provided list —
+        # the LLM sometimes invents neighbouring labels. The caller also
+        # validates, but doing it here keeps the 502 schema-mismatch path
+        # tight and the HTTP response tidy.
+        allowed = {e.slug for e in req.tax_sections}
+        raw_sections = data.get("tax_sections")
+        if isinstance(raw_sections, list):
+            data["tax_sections"] = [
+                s for s in raw_sections
+                if isinstance(s, dict) and s.get("slug") in allowed
+            ]
 
     # Coerce into ClassifyResponse; missing fields raise a 422 back to the caller
     # which is fine — that is a bug signal worth surfacing.
