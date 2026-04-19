@@ -749,9 +749,9 @@ onUnmounted(() => serviceHealth.stopPolling())
 }
 
 .person-card-avatar {
-  width: 140px;
-  height: 140px;
-  border-radius: 50%;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 6px;
   overflow: hidden;
   flex-shrink: 0;
   background: var(--p-content-hover-background);
@@ -804,10 +804,6 @@ onUnmounted(() => serviceHealth.stopPolling())
   .persons-grid {
     grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
     gap: 0.75rem;
-  }
-  .person-card-avatar {
-    width: 110px;
-    height: 110px;
   }
 
   /* Person Sidebar Sheet → Bottom Sheet */
