@@ -806,15 +806,29 @@ onUnmounted(() => {
           <Button
             v-if="canManageData && unreviewedGroupCount > 0"
             :label="`Gruppen bearbeiten (${unreviewedGroupCount} offen)`"
-            icon="pi pi-images" severity="success"
+            icon="pi pi-images"
+            severity="success"
             @click="handleStartGroupReview"
           />
-          <Button v-if="canUpload && uploading" label="Abbrechen" icon="pi pi-times" severity="danger" @click="cancelUpload" />
-          <label v-else-if="canUpload" class="upload-button-label">
-            <input type="file" accept="image/*" multiple class="upload-input-hidden"
-              @change="handleUpload({ files: ($event.target as HTMLInputElement).files ? Array.from(($event.target as HTMLInputElement).files!) : [] })" />
-            <Button label="Fotos hochladen" icon="pi pi-upload" as="span" />
-          </label>
+          <template v-if="canUpload">
+            <Button
+              v-if="uploading"
+              label="Abbrechen"
+              icon="pi pi-times"
+              severity="danger"
+              @click="cancelUpload"
+            />
+            <label v-else class="upload-button-label">
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                class="upload-input-hidden"
+                @change="handleUpload({ files: ($event.target as HTMLInputElement).files ? Array.from(($event.target as HTMLInputElement).files!) : [] })"
+              />
+              <Button label="Fotos hochladen" icon="pi pi-upload" as="span" />
+            </label>
+          </template>
         </div>
       </div>
 
