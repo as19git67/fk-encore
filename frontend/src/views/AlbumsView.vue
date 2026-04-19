@@ -617,34 +617,41 @@ onMounted(loadData)
 
 .albums-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(var(--grid-min-col), 1fr));
+  gap: var(--grid-gap);
 }
 
 .album-card {
   position: relative;
-  background: var(--p-surface-card);
-  border: 1px solid var(--p-content-border-color);
-  border-radius: 8px;
+  background: var(--p-content-background);
+  border: 4px solid transparent;
+  border-radius: var(--radius-md);
   padding: 0;
   cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
-  display: flex;
-  flex-direction: column;
+  transition: transform 0.2s;
   overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  outline: none;
+}
+
+.album-card:hover { transform: scale(1.02); }
+
+.album-card:focus-visible {
+  outline: 2px solid var(--p-primary-300);
+  outline-offset: -2px;
 }
 
 /* Placeholder: card slot is reserved so the grid layout stays stable even
- * while the card's content is torn down. Height matches a typical hydrated
- * card (200px cover + ~1 line name + ~1 line meta + paddings). */
+ * while the card's content is torn down. Matches the cover height used
+ * once the card is hydrated. */
 .album-card--placeholder {
-  min-height: 290px;
+  min-height: 200px;
 }
 
 .shared-badge {
   position: absolute;
-  bottom: 0.5rem;
-  right: 0.5rem;
+  top: 0.5rem;
+  left: 0.5rem;
   z-index: 1;
   font-size: 0.9rem;
   color: white;
@@ -663,17 +670,14 @@ onMounted(loadData)
   gap: 0.25rem;
   padding: 0.25rem;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--p-surface-card) 82%, transparent);
+  background: rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(4px);
+  opacity: 0;
+  transition: opacity 0.2s;
 }
-
-.album-card:hover,
-.album-card:focus-visible {
-  transform: translateY(-4px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  outline: 2px solid var(--p-primary-color);
-  outline-offset: 2px;
-}
+.album-actions :deep(.p-button) { color: #fff; }
+.album-card:hover .album-actions,
+.album-card:focus-within .album-actions { opacity: 1; }
 
 .album-cover {
   width: 100%;
@@ -695,23 +699,40 @@ onMounted(loadData)
 }
 
 .album-info {
-  padding: 0.75rem 1rem 1rem;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 0.4rem 0.6rem 0.5rem;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.1rem;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  color: #fff;
 }
 .album-name {
-  font-weight: 600;
+  font-weight: 500;
+  font-size: 0.85rem;
   display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .album-desc {
-  font-size: 0.9rem;
-  color: var(--p-text-muted-color);
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .album-meta {
-  font-size: 0.85rem;
-  color: var(--p-text-muted-color);
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.75);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .info-text {
