@@ -42,15 +42,33 @@ const emit = defineEmits<{
 const scrollRef = ref<HTMLElement | null>(null)
 const { visiblePhotoIds, setupObserver } = usePhotoLazyLoad('200px')
 
+function scrollToSelected(behavior: ScrollBehavior = 'auto') {
+  const idx = props.selectedIndex
+  if (idx < 0 || !scrollRef.value) return
+  const item = props.items[idx]
+  if (!item) return
+  const el = scrollRef.value.querySelector(`[data-photo-id="${item.photo.id}"]`)
+  el?.scrollIntoView({ behavior, block: 'nearest' })
+}
+
 watch(scrollRef, (el) => { if (el) nextTick(() => setupObserver(el)) })
 
 watch(() => props.items, async () => {
   await nextTick()
-  if (scrollRef.value) setupObserver(scrollRef.value)
+  if (scrollRef.value) {
+    setupObserver(scrollRef.value)
+    // Scroll to the (possibly restored) selection once items have rendered.
+    scrollToSelected('auto')
+  }
 })
 
+watch(() => props.selectedIndex, () => nextTick(() => scrollToSelected('smooth')))
+
 onMounted(() => {
-  if (scrollRef.value) setupObserver(scrollRef.value)
+  if (scrollRef.value) {
+    setupObserver(scrollRef.value)
+    nextTick(() => scrollToSelected('auto'))
+  }
 })
 
 // ── Face bbox helpers (extracted to utils/faceBbox.ts) ────────────────────────

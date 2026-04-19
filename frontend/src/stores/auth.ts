@@ -62,6 +62,8 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('auth_token')
     localStorage.removeItem('refresh_token')
     localStorage.removeItem('auth_user')
+    // Don't strand the next user on the previous user's last view.
+    localStorage.removeItem('app_last_route')
   }
 
   function hasPermission(permission: string): boolean {
