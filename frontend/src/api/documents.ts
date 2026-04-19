@@ -10,6 +10,8 @@ import { API_BASE_URL, apiFetch } from './client'
 
 export type DocumentStatus = 'pending' | 'extracting' | 'classifying' | 'ready' | 'failed'
 export type SearchMode = 'fts' | 'semantic' | 'hybrid'
+export type TaxSectionGroup = 'einkuenfte' | 'abzuege' | 'bescheid' | 'rahmen'
+export type TaxAssignmentSource = 'ai' | 'user'
 
 export interface DocumentSummary {
   id: number
@@ -25,11 +27,24 @@ export interface DocumentSummary {
   category_slug: string | null
   classification_confidence: number | null
   tags: string[]
+  tax_relevant: boolean
+  tax_year: number | null
+}
+
+export interface DocumentTaxSection {
+  slug: string
+  name: string
+  group: TaxSectionGroup
+  confidence: number | null
+  source: TaxAssignmentSource
 }
 
 export interface DocumentDetail extends DocumentSummary {
   summary: string | null
   extracted_text_preview: string | null
+  tax_reviewed: boolean
+  tax_year_confidence: number | null
+  tax_sections: DocumentTaxSection[]
 }
 
 export interface DocumentCategory {
@@ -171,4 +186,70 @@ export async function fetchDocumentBytes(id: number): Promise<Uint8Array> {
   if (!res.ok) throw new Error(`PDF ${id}: HTTP ${res.status}`)
   const buf = await res.arrayBuffer()
   return new Uint8Array(buf)
+}
+
+// ─── Tax-return helpers ───────────────────────────────────────────────────
+
+export interface TaxSectionCatalogEntry {
+  slug: string
+  name: string
+  group: TaxSectionGroup
+  hint: string
+}
+
+export function listTaxSectionsCatalog() {
+  return apiFetch<{ items: TaxSectionCatalogEntry[] }>('/documents/tax/sections')
+}
+
+export interface TaxYearCount {
+  year: number
+  count: number
+}
+
+export interface TaxYearsResponse {
+  years: TaxYearCount[]
+}
+
+export interface TaxDocumentAssignment {
+  document: DocumentSummary
+  confidence: number | null
+  source: TaxAssignmentSource
+}
+
+export interface TaxSectionBucket {
+  slug: string
+  name: string
+  group: TaxSectionGroup
+  documents: TaxDocumentAssignment[]
+}
+
+export interface ListTaxDocumentsResponse {
+  year: number | null
+  total_documents: number
+  sections: TaxSectionBucket[]
+}
+
+export interface UpdateDocumentTaxPayload {
+  tax_relevant: boolean
+  tax_year?: number | null
+  tax_sections?: string[]
+}
+
+export function listTaxYears() {
+  return apiFetch<TaxYearsResponse>('/documents/tax/years')
+}
+
+export function listTaxDocuments(params: { year?: number; section?: string } = {}) {
+  return apiFetch<ListTaxDocumentsResponse>(`/documents/tax${buildQuery(params as Record<string, unknown>)}`)
+}
+
+export function updateDocumentTax(id: number, payload: UpdateDocumentTaxPayload) {
+  return apiFetch<DocumentDetail>(`/documents/${id}/tax`, {
+    method: 'POST',
+    body: JSON.stringify({ id, ...payload }),
+  })
+}
+
+export function backfillDocumentTax() {
+  return apiFetch<{ queued: number }>('/documents/tax/backfill', { method: 'POST' })
 }

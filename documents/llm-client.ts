@@ -12,8 +12,13 @@
  * so the scan-worker can defer (not fail) the job and retry later.
  */
 
+import { isValidTaxSectionSlug, type TaxSectionGroup } from "./tax-sections";
+
 const LLM_SERVICE_URL = (process.env.LLM_SERVICE_URL || "http://localhost:8002").replace(/\/$/, "");
 const DEFAULT_TIMEOUT_MS = parseInt(process.env.LLM_SERVICE_TIMEOUT_MS ?? "120000", 10);
+
+const TAX_YEAR_MIN = 2000;
+const TAX_YEAR_MAX = 2100;
 
 export class LlmServiceUnavailableError extends Error {
   constructor(reason: string) {
@@ -28,6 +33,18 @@ export interface TaxonomyEntry {
   parent_slug: string | null;
 }
 
+export interface TaxSectionRequestEntry {
+  slug: string;
+  name: string;
+  group: TaxSectionGroup;
+  hint?: string;
+}
+
+export interface TaxAssignment {
+  slug: string;
+  confidence: number;
+}
+
 export interface Classification {
   category_slug: string;
   title: string;
@@ -36,11 +53,21 @@ export interface Classification {
   summary: string;
   tags: string[];
   confidence: number;
+  // Tax-return metadata. `tax_sections` is empty when tax detection was
+  // off (no `tax_sections` list was sent) or when the LLM didn't find
+  // a match.
+  tax_relevant: boolean;
+  tax_year: number | null;
+  tax_year_confidence: number;
+  tax_sections: TaxAssignment[];
 }
 
 export interface ClassifyRequest {
   text: string;
   taxonomy: TaxonomyEntry[];
+  // When provided, the classifier additionally decides tax-relevance,
+  // tax year, and a list of matching sections. Omit/empty to disable.
+  tax_sections?: TaxSectionRequestEntry[];
 }
 
 export interface EmbedRequest {
@@ -128,7 +155,7 @@ export async function isLlmServiceHealthy(timeoutMs = 2000): Promise<boolean> {
  * Zod — the shape is small enough to hand-check and keeps the
  * dependency surface tiny.
  */
-function parseClassification(raw: unknown): Classification {
+export function parseClassification(raw: unknown): Classification {
   if (!raw || typeof raw !== "object") {
     throw new Error("classify: response was not an object");
   }
@@ -145,9 +172,7 @@ function parseClassification(raw: unknown): Classification {
     .filter((t): t is string => typeof t === "string")
     .map((t) => t.trim())
     .filter((t) => t.length > 0);
-  const conf = typeof r.confidence === "number" && Number.isFinite(r.confidence)
-    ? Math.max(0, Math.min(1, r.confidence))
-    : 0;
+  const conf = clamp01(r.confidence);
 
   return {
     category_slug: slug,
@@ -157,5 +182,58 @@ function parseClassification(raw: unknown): Classification {
     summary,
     tags,
     confidence: conf,
+    ...parseTaxFields(r),
   };
+}
+
+function parseTaxFields(r: Record<string, unknown>): {
+  tax_relevant: boolean;
+  tax_year: number | null;
+  tax_year_confidence: number;
+  tax_sections: TaxAssignment[];
+} {
+  const tax_relevant = r.tax_relevant === true;
+
+  const yr = r.tax_year;
+  const tax_year =
+    typeof yr === "number" && Number.isInteger(yr) && yr >= TAX_YEAR_MIN && yr <= TAX_YEAR_MAX
+      ? yr
+      : null;
+
+  const tax_year_confidence = clamp01(r.tax_year_confidence);
+
+  const sectionsRaw = Array.isArray(r.tax_sections) ? r.tax_sections : [];
+  const bySlug = new Map<string, TaxAssignment>();
+  for (const entry of sectionsRaw) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as Record<string, unknown>;
+    const s = typeof e.slug === "string" ? e.slug.trim().toLowerCase() : "";
+    if (!s || !isValidTaxSectionSlug(s)) continue;
+    const c = clamp01(e.confidence);
+    const prev = bySlug.get(s);
+    if (!prev || c > prev.confidence) bySlug.set(s, { slug: s, confidence: c });
+  }
+
+  // Drop sections with 0 confidence and keep the order deterministic.
+  const tax_sections = Array.from(bySlug.values())
+    .filter((s) => s.confidence > 0)
+    .sort((a, b) => b.confidence - a.confidence || a.slug.localeCompare(b.slug));
+
+  // If nothing passed validation, don't pretend the document is tax-relevant —
+  // a `tax_relevant=true` without any section is useless downstream.
+  const coercedRelevant = tax_sections.length === 0 ? false : tax_relevant;
+
+  return {
+    tax_relevant: coercedRelevant,
+    tax_year: coercedRelevant ? tax_year : null,
+    tax_year_confidence: coercedRelevant ? tax_year_confidence : 0,
+    tax_sections,
+  };
+}
+
+function clamp01(v: unknown): number {
+  if (typeof v !== "number" || !Number.isFinite(v)) return 0;
+  if (v < 0) return 0;
+  if (v > 1) return 1;
+  return v;
 }
