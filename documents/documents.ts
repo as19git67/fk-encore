@@ -38,6 +38,7 @@ import {
   findTaxSection,
   isValidTaxSectionSlug,
   orderTaxSectionSlugs,
+  TAX_SECTIONS,
   type TaxSectionGroup,
 } from "./tax-sections";
 
@@ -647,6 +648,35 @@ export const backfillDocumentTax = api(
 );
 
 // ─── Tax listing / grouping ────────────────────────────────────────────────
+
+export interface TaxSectionDTO {
+  slug: string;
+  name: string;
+  group: TaxSectionGroup;
+  hint: string;
+}
+
+/**
+ * Canonical list of German tax-return sections the classifier understands.
+ * Exposed so the detail view's override form can render the same set of
+ * checkboxes without duplicating the list.
+ */
+export const listTaxSectionsCatalog = api(
+  { expose: true, method: "GET", path: "/documents/tax/sections", auth: true },
+  async (): Promise<{ items: TaxSectionDTO[] }> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.view");
+    return {
+      items: TAX_SECTIONS.map((s) => ({
+        slug: s.slug,
+        name: s.name,
+        group: s.group,
+        hint: s.hint,
+      })),
+    };
+  },
+);
 
 export interface TaxYearCount {
   year: number;
