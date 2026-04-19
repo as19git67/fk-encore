@@ -4,15 +4,19 @@
 #
 # Runs on the TrueNAS SCALE host as root (via cron or a TrueNAS periodic
 # task). Coordinates with the fk-encore app over HTTP so that the ZFS
-# snapshot taken in step 2 is application-consistent:
+# snapshot taken in step 3 is application-consistent:
 #
 #   1. POST /internal/backup/start
-#        -> app pauses scan workers, calls pg_backup_start(), and writes a
-#           pg_dump to $BACKUP_DIR/encore-$LABEL.dump
-#   2. zfs snapshot -r $ZFS_DATASET@$LABEL
+#        -> app returns 202 immediately and begins prep in the background:
+#           pauses scan workers, calls pg_backup_start(), writes pg_dump
+#           to $BACKUP_DIR/encore-$LABEL.dump
+#   2. Poll GET /internal/backup/status until phase=ready (or phase=failed).
+#        -> this decouples the HTTP request timeout from the (potentially
+#           minute-long) pg_dump on the server.
+#   3. zfs snapshot -r $ZFS_DATASET@$LABEL
 #        -> host-side snapshot, captures pgdata + photos consistently
 #        -> the pg_dump from step 1 is inside the snapshot too
-#   3. POST /internal/backup/stop
+#   4. POST /internal/backup/stop
 #        -> app calls pg_backup_stop(), resumes scan workers, leaves
 #           maintenance mode
 #
@@ -22,6 +26,7 @@
 #   2  /start failed
 #   3  zfs snapshot failed (attempts /stop before exiting)
 #   4  /stop failed
+#   5  /start prep timed out or failed (no phase=ready within deadline)
 #
 # Configuration (env vars override defaults):
 #   FK_ENCORE_URL           base URL of the app, default http://localhost:8080
@@ -30,7 +35,12 @@
 #                           places it — on a ZFS dataset, upgrade-safe)
 #   ZFS_DATASET             dataset for snapshot, default tank/vivanty
 #   LABEL                   snapshot + dump label, default daily-<UTC timestamp>
-#   CURL_TIMEOUT            seconds, default 30
+#   CURL_TIMEOUT            seconds per HTTP call, default 30
+#   READY_TIMEOUT_SEC       overall deadline for prep to reach phase=ready,
+#                           default 3600 (1 h). Must be large enough for the
+#                           slowest expected pg_dump + drain.
+#   READY_POLL_INTERVAL_SEC poll cadence while waiting for phase=ready,
+#                           default 5
 #   SNAPSHOT_RETENTION_DAYS age in days above which `daily-*` snapshots of
 #                           $ZFS_DATASET are pruned after a successful run.
 #                           Default 30. Set to 0 to disable pruning. Only
@@ -52,6 +62,8 @@ FK_BACKUP_TOKEN_FILE="${FK_BACKUP_TOKEN_FILE:-$SCRIPT_DIR/backup-token}"
 ZFS_DATASET="${ZFS_DATASET:-tank/vivanty}"
 LABEL="${LABEL:-daily-$(date -u +%Y%m%d-%H%M%S)}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-30}"
+READY_TIMEOUT_SEC="${READY_TIMEOUT_SEC:-3600}"
+READY_POLL_INTERVAL_SEC="${READY_POLL_INTERVAL_SEC:-5}"
 SNAPSHOT_RETENTION_DAYS="${SNAPSHOT_RETENTION_DAYS:-30}"
 
 if ! [[ "$SNAPSHOT_RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
@@ -114,6 +126,66 @@ call_api() {
 
   log "HTTP $http_status from $method $path: $(tr -d '\n' < "$tmp_body")"
   return 1
+}
+
+# Extract the top-level value of a JSON string field via the most portable
+# mechanism available. Falls back to a grep/sed scrape so we do not add a
+# jq hard-dep (jq is still *preferred* when present for correctness).
+json_field() {
+  local field="$1" body="$2"
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s' "$body" | jq -r --arg f "$field" '.[$f] // empty'
+    return
+  fi
+  # Matches  "field": "value"  or  "field":null  — returns empty for null.
+  printf '%s' "$body" \
+    | grep -o "\"$field\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" \
+    | head -n1 \
+    | sed -E 's/^"[^"]+"[[:space:]]*:[[:space:]]*"([^"]*)"$/\1/'
+}
+
+# Poll /internal/backup/status every READY_POLL_INTERVAL_SEC until:
+#   phase=ready   -> return 0
+#   phase=failed  -> return 1 (error logged from status body)
+#   deadline hit  -> return 2 (timeout; caller exits 5 and /stop trap fires)
+wait_until_ready() {
+  local deadline
+  deadline=$(( $(date -u +%s) + READY_TIMEOUT_SEC ))
+
+  while true; do
+    local status_body phase error
+    if ! status_body="$(call_api GET /internal/backup/status)"; then
+      log "WARN: /internal/backup/status call failed; will retry"
+    else
+      phase="$(json_field phase "$status_body")"
+      case "$phase" in
+        ready)
+          log "prep ready: $status_body"
+          return 0
+          ;;
+        failed)
+          error="$(json_field error "$status_body")"
+          log "FATAL: prep failed: ${error:-<no error detail>}"
+          return 1
+          ;;
+        draining|dumping|stopping)
+          # still working — keep polling
+          ;;
+        idle|"")
+          log "WARN: unexpected phase=${phase:-<empty>} while waiting for ready — body=$status_body"
+          ;;
+        *)
+          log "WARN: unknown phase=$phase — body=$status_body"
+          ;;
+      esac
+    fi
+
+    if (( $(date -u +%s) >= deadline )); then
+      log "FATAL: prep did not reach phase=ready within ${READY_TIMEOUT_SEC}s"
+      return 2
+    fi
+    sleep "$READY_POLL_INTERVAL_SEC"
+  done
 }
 
 stop_backup() {
@@ -180,6 +252,9 @@ prune_old_snapshots() {
 trap 'rc=$?; if [[ "${STARTED:-0}" == "1" ]]; then stop_backup || true; fi; exit $rc' EXIT
 
 # -- 1. /start ------------------------------------------------------------
+# The endpoint returns 202 immediately after arming maintenance mode; the
+# actual pauseWorkers / pg_backup_start / pg_dump sequence runs in the
+# background on the app side.
 log "calling /internal/backup/start label=$LABEL"
 START_BODY="$(jq -nc --arg label "$LABEL" '{label:$label}' 2>/dev/null || printf '{"label":"%s"}' "$LABEL")"
 if ! START_RESP="$(call_api POST "/internal/backup/start" --data "$START_BODY")"; then
@@ -187,9 +262,17 @@ if ! START_RESP="$(call_api POST "/internal/backup/start" --data "$START_BODY")"
   exit 2
 fi
 STARTED=1
-log "/start ok: $START_RESP"
+log "/start accepted: $START_RESP"
 
-# -- 2. zfs snapshot -----------------------------------------------------
+# -- 2. poll /status until phase=ready -----------------------------------
+if ! wait_until_ready; then
+  case "$?" in
+    1) log "FATAL: prep failed server-side — /stop will be attempted via trap"; exit 5 ;;
+    2) log "FATAL: prep timeout — /stop will be attempted via trap"; exit 5 ;;
+  esac
+fi
+
+# -- 3. zfs snapshot -----------------------------------------------------
 SNAP="${ZFS_DATASET}@${LABEL}"
 log "creating ZFS snapshot $SNAP (recursive)"
 if ! zfs snapshot -r "$SNAP"; then
@@ -198,7 +281,7 @@ if ! zfs snapshot -r "$SNAP"; then
 fi
 log "zfs snapshot ok"
 
-# -- 3. /stop -----------------------------------------------------------
+# -- 4. /stop -----------------------------------------------------------
 # Handled by the trap; clear STARTED so the trap reports success.
 if ! stop_backup; then
   exit 4

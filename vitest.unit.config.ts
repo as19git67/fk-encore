@@ -1,0 +1,12 @@
+import { defineConfig } from "vitest/config";
+
+// Vitest config for pure-unit tests that do not need Postgres or the Encore
+// runtime. Used for tests like backup/state.test.ts which exercise only
+// module-local state.
+export default defineConfig({
+  test: {
+    include: ["backup/state.test.ts"],
+    exclude: ["node_modules/**", "encore.gen/**", "frontend/**"],
+    fileParallelism: false,
+  },
+});
