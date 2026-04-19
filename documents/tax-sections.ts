@@ -199,3 +199,21 @@ export const TAX_SECTION_GROUP_ORDER: readonly TaxSectionGroup[] = [
   "bescheid",
   "rahmen",
 ];
+
+/**
+ * Return `TaxSection` metadata for the supplied slugs, in canonical order
+ * (group order → declaration order inside a group). Invalid or duplicate
+ * slugs are silently dropped so the frontend can pass whatever the DB
+ * contains.
+ */
+export function orderTaxSectionSlugs(slugs: readonly string[]): TaxSection[] {
+  const present = new Set<string>();
+  for (const s of slugs) {
+    if (typeof s !== "string") continue;
+    const norm = s.trim().toLowerCase();
+    if (isValidTaxSectionSlug(norm)) present.add(norm);
+  }
+  // TAX_SECTIONS is declared in canonical order (see file top), so a
+  // simple filter preserves the ordering we want.
+  return TAX_SECTIONS.filter((s) => present.has(s.slug));
+}

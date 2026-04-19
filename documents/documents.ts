@@ -37,6 +37,7 @@ import { searchDocuments, type SearchMode } from "./search";
 import {
   findTaxSection,
   isValidTaxSectionSlug,
+  orderTaxSectionSlugs,
   type TaxSectionGroup,
 } from "./tax-sections";
 
@@ -642,6 +643,215 @@ export const backfillDocumentTax = api(
     }
     if (rows.length > 0) triggerWorkers();
     return { queued: rows.length };
+  },
+);
+
+// ─── Tax listing / grouping ────────────────────────────────────────────────
+
+export interface TaxYearCount {
+  year: number;
+  count: number;
+}
+
+export interface TaxYearsResponse {
+  years: TaxYearCount[];
+}
+
+/**
+ * Distinct tax years for the caller, with a document count per year.
+ * Used by the Steuer view's year-selector chips.
+ */
+export const listTaxYears = api(
+  { expose: true, method: "GET", path: "/documents/tax/years", auth: true },
+  async (): Promise<TaxYearsResponse> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.view");
+    const userId = getUserId();
+
+    const rows = await db.execute<{ tax_year: number; count: string }>(sql`
+      SELECT tax_year, COUNT(*)::text as count
+      FROM documents
+      WHERE user_id = ${userId}
+        AND tax_relevant = true
+        AND tax_year IS NOT NULL
+      GROUP BY tax_year
+      ORDER BY tax_year DESC
+    `);
+    return {
+      years: rows.rows.map((r) => ({
+        year: r.tax_year,
+        count: parseInt(r.count, 10),
+      })),
+    };
+  },
+);
+
+export interface TaxDocumentAssignmentDTO {
+  document: DocumentSummary;
+  confidence: number | null;
+  source: "ai" | "user";
+}
+
+export interface TaxSectionBucket {
+  slug: string;
+  name: string;
+  group: TaxSectionGroup;
+  documents: TaxDocumentAssignmentDTO[];
+}
+
+export interface ListTaxDocumentsResponse {
+  year: number | null;
+  total_documents: number;
+  sections: TaxSectionBucket[];
+}
+
+interface ListTaxDocumentsQuery {
+  year?: Query<number>;
+  section?: Query<string>;
+}
+
+/**
+ * List all tax-relevant documents for the caller, grouped by German
+ * tax-return section (Anlage). Sections appear in canonical order
+ * (Einkünfte → Abzüge → Bescheid → Rahmen); inside each section
+ * user-pinned assignments precede AI ones, then by confidence desc.
+ *
+ *   ?year=2025   — restrict to one tax year (omit for "all years")
+ *   ?section=anlage-n — restrict to one section (still returned as a
+ *                      one-element array so the client renderer stays
+ *                      uniform)
+ */
+export const listTaxDocuments = api(
+  { expose: true, method: "GET", path: "/documents/tax", auth: true },
+  async ({ year, section }: ListTaxDocumentsQuery): Promise<ListTaxDocumentsResponse> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.view");
+    const userId = getUserId();
+
+    const sectionFilter =
+      typeof section === "string" && section.trim().length > 0
+        ? section.trim().toLowerCase()
+        : null;
+    if (sectionFilter !== null && !isValidTaxSectionSlug(sectionFilter)) {
+      throw APIError.invalidArgument(`unknown tax section slug: ${section}`);
+    }
+
+    const yearFilter =
+      typeof year === "number" && Number.isInteger(year) && year >= 2000 && year <= 2100
+        ? year
+        : null;
+
+    const conds = [
+      eq(documents.user_id, userId),
+      eq(documents.tax_relevant, true),
+    ];
+    if (yearFilter !== null) conds.push(eq(documents.tax_year, yearFilter));
+
+    const docRows = await dbAll<typeof documents.$inferSelect & { cat_slug: string | null }>(
+      db
+        .select({
+          id: documents.id,
+          user_id: documents.user_id,
+          sha256: documents.sha256,
+          original_filename: documents.original_filename,
+          mime_type: documents.mime_type,
+          size_bytes: documents.size_bytes,
+          disk_path: documents.disk_path,
+          uploaded_at: documents.uploaded_at,
+          status: documents.status,
+          category_id: documents.category_id,
+          title: documents.title,
+          doc_date: documents.doc_date,
+          sender: documents.sender,
+          summary: documents.summary,
+          extracted_text: documents.extracted_text,
+          classification_confidence: documents.classification_confidence,
+          force_ocr: documents.force_ocr,
+          tax_relevant: documents.tax_relevant,
+          tax_year: documents.tax_year,
+          tax_year_confidence: documents.tax_year_confidence,
+          tax_reviewed: documents.tax_reviewed,
+          cat_slug: documentCategories.slug,
+        })
+        .from(documents)
+        .leftJoin(documentCategories, eq(documents.category_id, documentCategories.id))
+        .where(and(...conds))
+        .orderBy(desc(documents.doc_date), desc(documents.uploaded_at)),
+    );
+
+    if (docRows.length === 0) {
+      return { year: yearFilter, total_documents: 0, sections: [] };
+    }
+
+    const docIds = docRows.map((r) => r.id);
+    const tagsByDoc = await fetchTagsForDocuments(docIds);
+    const summaryById = new Map<number, DocumentSummary>();
+    for (const r of docRows) {
+      summaryById.set(r.id, toSummary(r as any, r.cat_slug, tagsByDoc.get(r.id) ?? []));
+    }
+
+    const assignments = await dbAll<{
+      document_id: number;
+      tax_section: string;
+      confidence: number | null;
+      source: "ai" | "user";
+    }>(
+      db
+        .select({
+          document_id: documentTaxSections.document_id,
+          tax_section: documentTaxSections.tax_section,
+          confidence: documentTaxSections.confidence,
+          source: documentTaxSections.source,
+        })
+        .from(documentTaxSections)
+        .where(inArray(documentTaxSections.document_id, docIds)),
+    );
+
+    // Index assignments by slug, dropping unknown slugs and (if
+    // requested) slugs outside the section filter.
+    const bySlug = new Map<string, TaxDocumentAssignmentDTO[]>();
+    const slugsPresent = new Set<string>();
+    for (const a of assignments) {
+      if (sectionFilter !== null && a.tax_section !== sectionFilter) continue;
+      if (!isValidTaxSectionSlug(a.tax_section)) continue;
+      const doc = summaryById.get(a.document_id);
+      if (!doc) continue;
+      slugsPresent.add(a.tax_section);
+      const arr = bySlug.get(a.tax_section) ?? [];
+      arr.push({ document: doc, confidence: a.confidence, source: a.source });
+      bySlug.set(a.tax_section, arr);
+    }
+
+    const orderedSections = orderTaxSectionSlugs(Array.from(slugsPresent));
+    const sections: TaxSectionBucket[] = [];
+    const distinctDocs = new Set<number>();
+    for (const meta of orderedSections) {
+      const docs = bySlug.get(meta.slug) ?? [];
+      docs.sort((a, b) => {
+        if (a.source !== b.source) return a.source === "user" ? -1 : 1;
+        const ca = a.confidence ?? 0;
+        const cb = b.confidence ?? 0;
+        if (ca !== cb) return cb - ca;
+        const da = a.document.doc_date ?? "";
+        const dbb = b.document.doc_date ?? "";
+        return dbb.localeCompare(da);
+      });
+      for (const d of docs) distinctDocs.add(d.document.id);
+      sections.push({
+        slug: meta.slug,
+        name: meta.name,
+        group: meta.group,
+        documents: docs,
+      });
+    }
+
+    return {
+      year: yearFilter,
+      total_documents: distinctDocs.size,
+      sections,
+    };
   },
 );
 
