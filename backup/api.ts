@@ -56,16 +56,16 @@ import {
 import { pauseWorkers, resumeWorkers } from "../photo/scan-worker";
 
 const BACKUP_DIR = process.env.BACKUP_DIR ?? "/mnt/backup";
-const AUTO_STOP_MS = parseInt(process.env.BACKUP_AUTO_STOP_MS ?? `${30 * 60 * 1000}`, 10);
+const AUTO_STOP_MS = parseInt(process.env.BACKUP_AUTO_STOP_MS ?? `${60 * 60 * 1000}`, 10);
 
 /**
  * How long pauseWorkers() waits for in-flight scan jobs to drain before
- * continuing anyway. Scan jobs are short-lived so 15 s is plenty; anything
+ * continuing anyway. Scan jobs are short-lived so 30 s is plenty; anything
  * still running at that point will happily commit through pg_backup_start
  * (Postgres snapshots the pre-image). Kept short so a loaded server does
  * not stall the backup prep on idle scans.
  */
-const DRAIN_TIMEOUT_MS = 15_000;
+const DRAIN_TIMEOUT_MS = 30_000;
 
 /**
  * Module-scope handles to the in-flight prep task. They exist for the

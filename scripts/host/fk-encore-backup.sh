@@ -35,9 +35,9 @@
 #                           places it — on a ZFS dataset, upgrade-safe)
 #   ZFS_DATASET             dataset for snapshot, default tank/vivanty
 #   LABEL                   snapshot + dump label, default daily-<UTC timestamp>
-#   CURL_TIMEOUT            seconds per HTTP call, default 30
+#   CURL_TIMEOUT            seconds per HTTP call, default 60
 #   READY_TIMEOUT_SEC       overall deadline for prep to reach phase=ready,
-#                           default 3600 (1 h). Must be large enough for the
+#                           default 7200 (2 h). Must be large enough for the
 #                           slowest expected pg_dump + drain.
 #   READY_POLL_INTERVAL_SEC poll cadence while waiting for phase=ready,
 #                           default 5
@@ -61,8 +61,8 @@ FK_ENCORE_URL="${FK_ENCORE_URL:-http://localhost:8080}"
 FK_BACKUP_TOKEN_FILE="${FK_BACKUP_TOKEN_FILE:-$SCRIPT_DIR/backup-token}"
 ZFS_DATASET="${ZFS_DATASET:-tank/vivanty}"
 LABEL="${LABEL:-daily-$(date -u +%Y%m%d-%H%M%S)}"
-CURL_TIMEOUT="${CURL_TIMEOUT:-30}"
-READY_TIMEOUT_SEC="${READY_TIMEOUT_SEC:-3600}"
+CURL_TIMEOUT="${CURL_TIMEOUT:-60}"
+READY_TIMEOUT_SEC="${READY_TIMEOUT_SEC:-7200}"
 READY_POLL_INTERVAL_SEC="${READY_POLL_INTERVAL_SEC:-5}"
 SNAPSHOT_RETENTION_DAYS="${SNAPSHOT_RETENTION_DAYS:-30}"
 
