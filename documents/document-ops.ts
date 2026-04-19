@@ -13,6 +13,7 @@ import {
   documentCategories,
   documentTagLinks,
   documentTags,
+  documentTaxSections,
   documents,
 } from "../db/schema";
 import { extractPdfText } from "./text-extract";
@@ -23,8 +24,11 @@ import {
   classifyDocument,
   embedTexts,
   type Classification,
+  type TaxAssignment,
+  type TaxSectionRequestEntry,
   type TaxonomyEntry,
 } from "./llm-client";
+import { TAX_SECTIONS } from "./tax-sections";
 import { flattenTaxonomy } from "./taxonomy";
 
 /** Maximum characters of extracted text we feed the classifier. */
@@ -104,30 +108,82 @@ export async function runClassify(documentId: number): Promise<{ classification:
 
   const taxonomy = await loadTaxonomyForClassifier();
   const clipped = text.slice(0, CLASSIFY_TEXT_LIMIT);
-  const classification = await classifyDocument({ text: clipped, taxonomy });
+  const tax_sections: TaxSectionRequestEntry[] = TAX_SECTIONS.map((s) => ({
+    slug: s.slug,
+    name: s.name,
+    group: s.group,
+    hint: s.hint,
+  }));
+  const classification = await classifyDocument({ text: clipped, taxonomy, tax_sections });
 
   const catSlug = classification.category_slug;
   const cat = await dbFirst<{ id: number }>(
     db.select({ id: documentCategories.id }).from(documentCategories).where(eq(documentCategories.slug, catSlug)),
   );
 
-  await db
-    .update(documents)
-    .set({
-      category_id: cat?.id ?? null,
-      title: classification.title || row.title || row.original_filename,
-      doc_date: classification.doc_date,
-      sender: classification.sender,
-      summary: classification.summary,
-      classification_confidence: classification.confidence,
-      status: "ready",
-    })
-    .where(eq(documents.id, documentId));
+  const patch: Partial<typeof documents.$inferInsert> = {
+    category_id: cat?.id ?? null,
+    title: classification.title || row.title || row.original_filename,
+    doc_date: classification.doc_date,
+    sender: classification.sender,
+    summary: classification.summary,
+    classification_confidence: classification.confidence,
+    status: "ready",
+  };
+  // Only overwrite tax fields when the user has not pinned them via the
+  // /documents/:id/tax endpoint. `tax_reviewed=true` means the human has
+  // asserted the ground truth and the classifier must not undo it.
+  if (!row.tax_reviewed) {
+    patch.tax_relevant = classification.tax_relevant;
+    patch.tax_year = classification.tax_year;
+    patch.tax_year_confidence = classification.tax_year_confidence;
+  }
+
+  await db.update(documents).set(patch).where(eq(documents.id, documentId));
 
   await replaceTagLinks(documentId, classification.tags);
 
+  if (!row.tax_reviewed) {
+    await replaceAiTaxSections(documentId, classification.tax_sections);
+  }
+
   const lowConfidence = classification.confidence < LOW_CONFIDENCE_THRESHOLD;
   return { classification, lowConfidence };
+}
+
+/**
+ * Replace the AI-source tax-section rows for a document.
+ *
+ * User-source rows (`source='user'`) are left untouched so a re-classify
+ * does not wipe out a manual override. The composite primary key
+ * `(document_id, tax_section)` means a slug that exists with source='user'
+ * will block an AI insert via `onConflictDoNothing`, which is the
+ * behaviour we want.
+ */
+async function replaceAiTaxSections(
+  documentId: number,
+  assignments: readonly TaxAssignment[],
+): Promise<void> {
+  await db
+    .delete(documentTaxSections)
+    .where(
+      and(
+        eq(documentTaxSections.document_id, documentId),
+        eq(documentTaxSections.source, "ai"),
+      ),
+    );
+
+  for (const a of assignments) {
+    await db
+      .insert(documentTaxSections)
+      .values({
+        document_id: documentId,
+        tax_section: a.slug,
+        confidence: a.confidence,
+        source: "ai",
+      })
+      .onConflictDoNothing();
+  }
 }
 
 /**
@@ -254,6 +310,37 @@ function chunkText(text: string, maxChars: number): string[] {
   }
   if (current.length > 0) chunks.push(current);
   return chunks;
+}
+
+/**
+ * Replace every tax-section assignment for a document with a user-supplied
+ * set. Used by `POST /documents/:id/tax` when the caller overrides the
+ * classifier. All previous rows (AI and user) are removed so the override
+ * is authoritative.
+ */
+export async function replaceUserTaxSections(
+  documentId: number,
+  slugs: readonly string[],
+): Promise<void> {
+  await db
+    .delete(documentTaxSections)
+    .where(eq(documentTaxSections.document_id, documentId));
+
+  const seen = new Set<string>();
+  for (const slug of slugs) {
+    const s = slug.trim().toLowerCase();
+    if (!s || seen.has(s)) continue;
+    seen.add(s);
+    await db
+      .insert(documentTaxSections)
+      .values({
+        document_id: documentId,
+        tax_section: s,
+        confidence: 1,
+        source: "user",
+      })
+      .onConflictDoNothing();
+  }
 }
 
 /** Exported for tests / seed completeness checks. */

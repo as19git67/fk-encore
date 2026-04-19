@@ -19,6 +19,7 @@ import {
   documentCategorySuggestions,
   documentTagLinks,
   documentTags,
+  documentTaxSections,
   documents,
 } from "../db/schema";
 import {
@@ -29,9 +30,15 @@ import {
   getDocumentDiskPath,
   guessExtension,
 } from "./documents.service";
+import { replaceUserTaxSections } from "./document-ops";
 import { enqueueDocumentScan, getQueueStatus, requeueDocument } from "./scan-queue";
 import { triggerWorkers } from "./scan-worker";
 import { searchDocuments, type SearchMode } from "./search";
+import {
+  findTaxSection,
+  isValidTaxSectionSlug,
+  type TaxSectionGroup,
+} from "./tax-sections";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -63,11 +70,24 @@ export interface DocumentSummary {
   category_slug: string | null;
   classification_confidence: number | null;
   tags: string[];
+  tax_relevant: boolean;
+  tax_year: number | null;
+}
+
+export interface DocumentTaxSectionDTO {
+  slug: string;
+  name: string;
+  group: TaxSectionGroup;
+  confidence: number | null;
+  source: "ai" | "user";
 }
 
 export interface DocumentDetail extends DocumentSummary {
   summary: string | null;
   extracted_text_preview: string | null;
+  tax_reviewed: boolean;
+  tax_year_confidence: number | null;
+  tax_sections: DocumentTaxSectionDTO[];
 }
 
 export interface DocumentCategoryDTO {
@@ -286,6 +306,11 @@ export const listDocuments = api(
           summary: documents.summary,
           extracted_text: documents.extracted_text,
           classification_confidence: documents.classification_confidence,
+          force_ocr: documents.force_ocr,
+          tax_relevant: documents.tax_relevant,
+          tax_year: documents.tax_year,
+          tax_year_confidence: documents.tax_year_confidence,
+          tax_reviewed: documents.tax_reviewed,
           cat_slug: documentCategories.slug,
         })
         .from(documents)
@@ -332,12 +357,16 @@ export const getDocument = api(
 
     const tagsMap = await fetchTagsForDocuments([id]);
     const tags = tagsMap.get(id) ?? [];
+    const taxSections = await fetchTaxSectionsForDocument(id);
 
     const preview = (row.extracted_text ?? "").slice(0, 2000);
     return {
       ...toSummary(row, cat?.slug ?? null, tags),
       summary: row.summary,
       extracted_text_preview: preview.length > 0 ? preview : null,
+      tax_reviewed: row.tax_reviewed ?? false,
+      tax_year_confidence: row.tax_year_confidence ?? null,
+      tax_sections: taxSections,
     };
   },
 );
@@ -507,6 +536,115 @@ export const reclassifyDocument = api(
   },
 );
 
+// ─── Tax override ──────────────────────────────────────────────────────────
+
+export interface UpdateDocumentTaxRequest {
+  id: number;
+  tax_relevant: boolean;
+  tax_year?: number | null;
+  tax_sections?: string[];
+}
+
+/**
+ * Manually assign tax-return metadata to a document.
+ *
+ * Flipping any of these fields marks the document as `tax_reviewed=true`,
+ * which keeps future classifier runs from overwriting the choice. Passing
+ * `tax_relevant=false` wipes the year, confidence, and all section
+ * assignments so the document disappears from the Steuer view.
+ */
+export const updateDocumentTax = api(
+  { expose: true, method: "POST", path: "/documents/:id/tax", auth: true },
+  async (req: UpdateDocumentTaxRequest): Promise<DocumentDetail> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.edit");
+    const userId = getUserId();
+
+    const existing = await loadOwnedDocument(userId, req.id);
+
+    let year: number | null = null;
+    if (req.tax_relevant) {
+      if (req.tax_year === undefined || req.tax_year === null) {
+        throw APIError.invalidArgument("tax_year is required when tax_relevant=true");
+      }
+      if (!Number.isInteger(req.tax_year) || req.tax_year < 2000 || req.tax_year > 2100) {
+        throw APIError.invalidArgument("tax_year must be an integer between 2000 and 2100");
+      }
+      year = req.tax_year;
+    }
+
+    const slugs = req.tax_sections ?? [];
+    if (req.tax_relevant && slugs.length === 0) {
+      throw APIError.invalidArgument("tax_sections must not be empty when tax_relevant=true");
+    }
+    for (const s of slugs) {
+      if (!isValidTaxSectionSlug(s.trim().toLowerCase())) {
+        throw APIError.invalidArgument(`unknown tax section slug: ${s}`);
+      }
+    }
+
+    await db
+      .update(documents)
+      .set({
+        tax_relevant: req.tax_relevant,
+        tax_year: year,
+        // A manual override has full confidence — the human *is* the
+        // ground truth from here on.
+        tax_year_confidence: req.tax_relevant ? 1 : 0,
+        tax_reviewed: true,
+      })
+      .where(eq(documents.id, existing.id));
+
+    if (req.tax_relevant) {
+      await replaceUserTaxSections(
+        existing.id,
+        slugs.map((s) => s.trim().toLowerCase()),
+      );
+    } else {
+      await replaceUserTaxSections(existing.id, []);
+    }
+
+    return await loadDetail(userId, existing.id);
+  },
+);
+
+// ─── Tax backfill ──────────────────────────────────────────────────────────
+
+/**
+ * Re-queue the `classify` job for every ready document the caller owns
+ * whose tax status hasn't been reviewed yet. Used after rolling out the
+ * tax-detection feature so existing uploads get their tax metadata
+ * without the user having to re-upload.
+ */
+export const backfillDocumentTax = api(
+  { expose: true, method: "POST", path: "/documents/tax/backfill", auth: true },
+  async (): Promise<{ queued: number }> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.edit");
+    const userId = getUserId();
+
+    const rows = await dbAll<{ id: number }>(
+      db
+        .select({ id: documents.id })
+        .from(documents)
+        .where(
+          and(
+            eq(documents.user_id, userId),
+            eq(documents.status, "ready"),
+            eq(documents.tax_reviewed, false),
+          ),
+        ),
+    );
+    for (const r of rows) {
+      await requeueDocument(r.id, ["classify"]);
+    }
+    if (rows.length > 0) triggerWorkers();
+    return { queued: rows.length };
+  },
+);
+
 // ─── Taxonomy + queue ───────────────────────────────────────────────────────
 
 export const listDocumentCategories = api(
@@ -604,6 +742,11 @@ export const searchDocumentsEndpoint = api(
           summary: documents.summary,
           extracted_text: documents.extracted_text,
           classification_confidence: documents.classification_confidence,
+          force_ocr: documents.force_ocr,
+          tax_relevant: documents.tax_relevant,
+          tax_year: documents.tax_year,
+          tax_year_confidence: documents.tax_year_confidence,
+          tax_reviewed: documents.tax_reviewed,
           cat_slug: documentCategories.slug,
         })
         .from(documents)
@@ -803,11 +946,15 @@ async function loadDetail(userId: number, id: number): Promise<DocumentDetail> {
       )
     : undefined;
   const tagsMap = await fetchTagsForDocuments([id]);
+  const taxSections = await fetchTaxSectionsForDocument(id);
   const preview = (row.extracted_text ?? "").slice(0, 2000);
   return {
     ...toSummary(row, cat?.slug ?? null, tagsMap.get(id) ?? []),
     summary: row.summary,
     extracted_text_preview: preview.length > 0 ? preview : null,
+    tax_reviewed: row.tax_reviewed ?? false,
+    tax_year_confidence: row.tax_year_confidence ?? null,
+    tax_sections: taxSections,
   };
 }
 
@@ -875,5 +1022,45 @@ function toSummary(
     category_slug: categorySlug,
     classification_confidence: row.classification_confidence,
     tags,
+    tax_relevant: row.tax_relevant ?? false,
+    tax_year: row.tax_year ?? null,
   };
+}
+
+async function fetchTaxSectionsForDocument(documentId: number): Promise<DocumentTaxSectionDTO[]> {
+  const rows = await dbAll<{
+    tax_section: string;
+    confidence: number | null;
+    source: "ai" | "user";
+  }>(
+    db
+      .select({
+        tax_section: documentTaxSections.tax_section,
+        confidence: documentTaxSections.confidence,
+        source: documentTaxSections.source,
+      })
+      .from(documentTaxSections)
+      .where(eq(documentTaxSections.document_id, documentId)),
+  );
+  const items: DocumentTaxSectionDTO[] = [];
+  for (const r of rows) {
+    const meta = findTaxSection(r.tax_section);
+    if (!meta) continue;
+    items.push({
+      slug: meta.slug,
+      name: meta.name,
+      group: meta.group,
+      confidence: r.confidence,
+      source: r.source,
+    });
+  }
+  // Sort: user-sourced first, then descending confidence, stable by slug.
+  items.sort((a, b) => {
+    if (a.source !== b.source) return a.source === "user" ? -1 : 1;
+    const ca = a.confidence ?? 0;
+    const cb = b.confidence ?? 0;
+    if (ca !== cb) return cb - ca;
+    return a.slug.localeCompare(b.slug);
+  });
+  return items;
 }
