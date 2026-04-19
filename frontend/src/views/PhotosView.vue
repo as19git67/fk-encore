@@ -3,14 +3,18 @@ import { ref, shallowRef, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
-import ToggleSwitch from 'primevue/toggleswitch'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import PhotoGrid from '../components/PhotoGrid.vue'
-import TimelineNav from '../components/TimelineNav.vue'
+import Chip from 'primevue/chip'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import NaturalSearchBar from '../components/NaturalSearchBar.vue'
+import FilterMenu from '../components/FilterMenu.vue'
+import FilterChips from '../components/FilterChips.vue'
+import SortMenu from '../components/SortMenu.vue'
+import { useFilter } from '../composables/useFilter'
+import { useSort, type SortField, type SortState } from '../composables/useSort'
 import {
   listPhotoIndex, uploadPhotoWithProgress, updatePhotoDate, reindexPhoto, ignoreFace,
   getPhotoFaces, getPhotoLandmarks, updatePhotoCuration,
@@ -21,8 +25,7 @@ import {
 import { listPersons, type Person } from '../api/photos'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
-import { usePhotoGrouping } from '../composables/usePhotoGrouping'
-import type { PhotoItem } from '../composables/usePhotoGrouping'
+import type { YearGroup, PhotoItem } from '../composables/usePhotoGrouping'
 import { usePhotoSelection } from '../composables/usePhotoSelection'
 import { usePhotoHydration } from '../composables/usePhotoHydration'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
@@ -39,7 +42,70 @@ const loading = ref(true)
 const uploading = ref(false)
 const uploadAbortController = ref<AbortController | null>(null)
 const error = ref('')
-const showHidden = ref(false)
+
+// ── Filter state ─────────────────────────────────────────────────────────────
+// Unified filter system replaces the old boolean `showHidden` toggle. The
+// applied filter drives data fetching; the draft is edited in FilterMenu and
+// committed to `applied` when the user presses "Anwenden".
+const { applied: filter, draft: filterDraft, activeCount, openEdit, apply: applyFilter, reset: resetFilter, removeKey } =
+  useFilter({ preserveKeys: ['photoId', 'sortBy', 'sortDir'] })
+const filterMenuOpen = ref(false)
+
+function openFilterMenu() {
+  openEdit()
+  filterMenuOpen.value = true
+}
+
+async function onApplyFilter() {
+  applyFilter()
+  await loadPhotos()
+}
+
+async function onResetFilter() {
+  resetFilter()
+  await loadPhotos()
+}
+
+async function onRemoveFilterKey(keys: Array<keyof typeof filter.value>) {
+  removeKey(keys)
+  await loadPhotos()
+}
+
+// ── Sort state ───────────────────────────────────────────────────────────────
+const SORT_FIELDS: SortField[] = [
+  { value: 'taken_at', label: 'Aufnahmedatum' },
+  { value: 'created_at', label: 'Importdatum' },
+  { value: 'ai_quality_score', label: 'Qualität' },
+  { value: 'filename', label: 'Dateiname' },
+  { value: 'size', label: 'Dateigröße' },
+]
+const DEFAULT_SORT: SortState = { field: 'taken_at', direction: 'asc' }
+const {
+  applied: sort,
+  draft: sortDraft,
+  isDefault: isSortDefault,
+  fieldLabel: sortFieldLabel,
+  openEdit: openSortEdit,
+  apply: applySort,
+  reset: resetSort,
+} = useSort({ fields: SORT_FIELDS, defaultState: DEFAULT_SORT })
+const sortMenuOpen = ref(false)
+
+function openSortMenu() {
+  openSortEdit()
+  sortMenuOpen.value = true
+}
+function onApplySort() {
+  applySort()
+  sortMenuOpen.value = false
+}
+function onResetSort() {
+  resetSort()
+  sortMenuOpen.value = false
+}
+const sortChipLabel = computed(() =>
+  `Sortierung: ${sortFieldLabel.value} ${sort.value.direction === 'asc' ? '↑' : '↓'}`
+)
 
 const canUpload = computed(() => auth.hasPermission('photos.upload'))
 const canDelete = computed(() => auth.hasPermission('photos.delete'))
@@ -107,14 +173,67 @@ async function executeSearch() {
 
 const searchResultCount = computed(() => searchResultIds.value?.length ?? 0)
 
-const sortBy = ref<'date' | 'quality'>('date')
+// ── Sort & flat photo list (no year/month grouping) ──────────────────────────
+// Photos in `photos.value` are kept in display order: that keeps arrow-key
+// navigation (which steps `selectedIndex` through `photos.value`) aligned with
+// what the user sees. `groupedPhotos` just wraps the list in a single
+// synthetic YearGroup so PhotoGrid's existing contract still works, with the
+// year and month titles both empty so neither renders.
+function compareByField(a: Photo, b: Photo, field: string): number {
+  switch (field) {
+    case 'taken_at':
+      return new Date(a.taken_at || a.created_at).getTime() -
+        new Date(b.taken_at || b.created_at).getTime()
+    case 'created_at':
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    case 'ai_quality_score':
+      return (a.ai_quality_score ?? -Infinity) - (b.ai_quality_score ?? -Infinity)
+    case 'filename':
+      return (a.filename ?? '').localeCompare(b.filename ?? '')
+    case 'size':
+      return (a.size ?? 0) - (b.size ?? 0)
+    default:
+      return 0
+  }
+}
+function sortPhotosByApplied(list: Photo[]): Photo[] {
+  const { field, direction } = sort.value
+  const mult = direction === 'asc' ? 1 : -1
+  return [...list].sort((a, b) => mult * compareByField(a, b, field))
+}
+watch(sort, () => {
+  photos.value = sortPhotosByApplied(photos.value)
+}, { deep: true })
 
-// ── Grouping (via composable) ─────────────────────────────────────────────────
-const { groupedPhotos } = usePhotoGrouping(photos, {
-  hiddenByStack,
-  photoToGroup,
-  searchResultIds,
-  sortBy,
+const groupedPhotos = computed<YearGroup[]>(() => {
+  const ids = searchResultIds.value
+  const hidden = hiddenByStack.value
+  const groupMap = photoToGroup.value
+
+  const indexById = new Map<number, number>()
+  for (let i = 0; i < photos.value.length; i++) indexById.set(photos.value[i]!.id, i)
+
+  let base: Photo[]
+  if (ids !== null) {
+    const byId = new Map<number, Photo>()
+    for (const p of photos.value) byId.set(p.id, p)
+    base = ids.map((id) => byId.get(id)).filter((p): p is Photo => p !== undefined)
+  } else {
+    base = photos.value.filter((p) => !hidden.has(p.id))
+  }
+
+  const items: PhotoItem[] = base.map((photo) => {
+    const index = indexById.get(photo.id) ?? -1
+    const stackGroup = ids === null ? groupMap.get(photo.id) : undefined
+    const group = stackGroup && !stackGroup.reviewed_at ? stackGroup : undefined
+    return { photo, index, group }
+  })
+
+  return [{
+    year: '',
+    sectionId: 'all',
+    months: [{ month: '', sectionId: 'all', photos: items }],
+  }]
 })
 
 // ── Selection (via composable) ────────────────────────────────────────────────
@@ -129,14 +248,6 @@ const { selectedIndex, selectedPhotoIds, selectedPhoto, selectedPhotos, selectPh
 // Smaller batch size + the 60s per-request timeout in getPhotoDetailsBatch
 // keep hung responses from piling up in memory on overloaded servers.
 const hydration = usePhotoHydration(photos, { batchSize: 50, backgroundPauseMs: 50 })
-
-// Trigger a full hydration pass only when the user actually switches to
-// quality-sort — otherwise heavy fields are hydrated on demand via the
-// sidebar/compare view, which keeps the page-load request burst to a
-// single /photos/details call instead of walking all 45k photos.
-watch(sortBy, (mode) => {
-  if (mode === 'quality') hydration.hydrateAllInBackground()
-})
 
 // Expand selection: if any selected photo is in a group, include all group members
 const expandedSelectedPhotos = computed<Photo[]>(() => {
@@ -161,7 +272,6 @@ const nextPhoto = computed(() =>
 )
 
 // ── Mobile drawer state ───────────────────────────────────────────────────────
-const mobileTimelineOpen = ref(false)
 const mobileSidebarOpen = ref(false)
 
 // ── Select mode (mobile + desktop) ──────────────────────────────────────────
@@ -275,12 +385,8 @@ watch(isFullscreen, (val) => {
 // ── Column count (received from PhotoGrid) ────────────────────────────────────
 const columnCount = ref(4)
 
-// ── Active section (received from PhotoGrid, passed to TimelineNav) ───────────
-const activeSection = ref('')
-
 // ── Ref to PhotoGrid component ────────────────────────────────────────────────
 const photoGridRef = ref<InstanceType<typeof PhotoGrid> | null>(null)
-const timelineNavRef = ref<InstanceType<typeof TimelineNav> | null>(null)
 
 // ── Keyboard navigation (via composable) ─────────────────────────────────────
 useGalleryKeyboard({
@@ -301,8 +407,16 @@ useGalleryKeyboard({
       else selectedIndex.value = 0
     }
   },
-  onUp() { timelineNavRef.value?.navigateUp() },
-  onDown() { timelineNavRef.value?.navigateDown() },
+  onUp() {
+    if (selectedIndex.value < 0) return
+    const next = selectedIndex.value - columnCount.value
+    if (next >= 0) selectedIndex.value = next
+  },
+  onDown() {
+    if (selectedIndex.value < 0) return
+    const next = selectedIndex.value + columnCount.value
+    if (next < photos.value.length) selectedIndex.value = next
+  },
   onSpace() {
     if (selectedIndex.value !== -1) isFullscreen.value = !isFullscreen.value
   },
@@ -329,13 +443,10 @@ async function loadPhotos() {
   try {
     // Stage 1: lightweight index (small payload, fast even with thousands of photos)
     const [indexRes, groupsRes] = await Promise.all([
-      listPhotoIndex(showHidden.value),
+      listPhotoIndex(filter.value),
       listPhotoGroups().catch(() => ({ groups: [] })),
     ])
-    photos.value = (indexRes.photos as Photo[]).sort((a, b) =>
-      new Date(a.taken_at || a.created_at).getTime() -
-      new Date(b.taken_at || b.created_at).getTime()
-    )
+    photos.value = sortPhotosByApplied(indexRes.photos as Photo[])
     photoGroupsList.value = groupsRes.groups
 
     // Determine which photo to focus: query param > localStorage > newest
@@ -384,8 +495,7 @@ async function loadPhotos() {
     // on large libraries (45k+ photos) with a loaded server that fired
     // hundreds of /photos/details batches which could hang and blow up
     // browser memory. Heavy fields are now fetched on demand — when the user
-    // selects a photo, opens the compare view, runs a search, or switches
-    // to quality sort (see the sortBy watcher).
+    // selects a photo, opens the compare view, or runs a search.
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Fotos'
     loading.value = false
@@ -395,20 +505,16 @@ async function loadPhotos() {
 async function reloadPhotosInPlace() {
   try {
     const [indexRes, groupsRes] = await Promise.all([
-      listPhotoIndex(showHidden.value),
+      listPhotoIndex(filter.value),
       listPhotoGroups().catch(() => ({ groups: [] })),
     ])
     hydration.reset()
-    photos.value = (indexRes.photos as Photo[]).sort((a, b) =>
-      new Date(a.taken_at || a.created_at).getTime() -
-      new Date(b.taken_at || b.created_at).getTime()
-    )
+    photos.value = sortPhotosByApplied(indexRes.photos as Photo[])
     photoGroupsList.value = groupsRes.groups
     if (selectedIndex.value >= 0) {
       const focused = photos.value[selectedIndex.value]
       if (focused) hydration.ensureLoaded([focused.id])
     }
-    if (sortBy.value === 'quality') hydration.hydrateAllInBackground()
   } catch { /* silently fail */ }
 }
 
@@ -574,29 +680,6 @@ function handleStartGroupReview() {
 watch(activeGroup, (group) => {
   if (group?.photo_ids?.length) hydration.ensureLoaded(group.photo_ids)
 })
-
-// ── Timeline nav scroll ───────────────────────────────────────────────────────
-function handleScrollTo(sectionId: string) {
-  photoGridRef.value?.scrollToSection(sectionId)
-  activeSection.value = sectionId
-
-  // Select first photo in the target section
-  for (const yearGroup of groupedPhotos.value) {
-    if (yearGroup.sectionId === sectionId) {
-      const firstMonth = yearGroup.months[0]
-      if (firstMonth?.photos.length) {
-        selectPhoto(firstMonth.photos[0]!.index)
-      }
-      return
-    }
-    for (const monthGroup of yearGroup.months) {
-      if (monthGroup.sectionId === sectionId && monthGroup.photos.length) {
-        selectPhoto(monthGroup.photos[0]!.index)
-        return
-      }
-    }
-  }
-}
 
 // ── Upload / Drag & Drop ──────────────────────────────────────────────────────
 const uploadErrors = ref<string[]>([])
@@ -779,22 +862,48 @@ onUnmounted(() => {
             :outlined="!selectMode"
             @click="selectMode ? exitSelectMode() : enterSelectMode()"
           />
-          <div v-if="canDelete" class="toggle-hidden">
-            <label for="showHidden" class="text-sm">Ausgeblendete</label>
-            <ToggleSwitch v-model="showHidden" inputId="showHidden" @update:modelValue="loadPhotos" />
-          </div>
+          <Button
+            :icon="activeCount > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'"
+            :label="activeCount > 0 ? `Filter (${activeCount})` : 'Filter'"
+            size="small"
+            :severity="activeCount > 0 ? 'primary' : 'secondary'"
+            :outlined="activeCount === 0"
+            @click="openFilterMenu"
+          />
+          <Button
+            icon="pi pi-sort-alt"
+            :label="isSortDefault ? 'Sortierung' : `Sortierung: ${sortFieldLabel}`"
+            size="small"
+            :severity="isSortDefault ? 'secondary' : 'primary'"
+            :outlined="isSortDefault"
+            @click="openSortMenu"
+          />
           <Button
             v-if="canManageData && unreviewedGroupCount > 0"
             :label="`Gruppen bearbeiten (${unreviewedGroupCount} offen)`"
-            icon="pi pi-images" severity="success"
+            icon="pi pi-images"
+            severity="success"
             @click="handleStartGroupReview"
           />
-          <Button v-if="canUpload && uploading" label="Abbrechen" icon="pi pi-times" severity="danger" @click="cancelUpload" />
-          <label v-else-if="canUpload" class="upload-button-label">
-            <input type="file" accept="image/*" multiple class="upload-input-hidden"
-              @change="handleUpload({ files: ($event.target as HTMLInputElement).files ? Array.from(($event.target as HTMLInputElement).files!) : [] })" />
-            <Button label="Fotos hochladen" icon="pi pi-upload" as="span" />
-          </label>
+          <template v-if="canUpload">
+            <Button
+              v-if="uploading"
+              label="Abbrechen"
+              icon="pi pi-times"
+              severity="danger"
+              @click="cancelUpload"
+            />
+            <label v-else class="upload-button-label">
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                class="upload-input-hidden"
+                @change="handleUpload({ files: ($event.target as HTMLInputElement).files ? Array.from(($event.target as HTMLInputElement).files!) : [] })"
+              />
+              <Button label="Fotos hochladen" icon="pi pi-upload" as="span" />
+            </label>
+          </template>
         </div>
       </div>
 
@@ -808,15 +917,33 @@ onUnmounted(() => {
         :semantic-chip="semanticChip"
         @search="executeSearch"
         @clear="clearSearch"
-      >
-        <Button
-          :icon="sortBy === 'date' ? 'pi pi-calendar' : 'pi pi-star'"
-          :label="sortBy === 'date' ? 'Datum' : 'Qualität'"
-          size="small" severity="secondary" outlined
-          @click="sortBy = sortBy === 'date' ? 'quality' : 'date'"
+      />
+
+      <div class="chip-row">
+        <FilterChips :filter="filter" @remove="onRemoveFilterKey" />
+        <Chip
+          v-if="!isSortDefault"
+          :label="sortChipLabel"
+          removable
+          @remove="onResetSort"
         />
-      </NaturalSearchBar>
+      </div>
     </div>
+
+    <FilterMenu
+      v-model:visible="filterMenuOpen"
+      v-model:draft="filterDraft"
+      @apply="onApplyFilter"
+      @reset="onResetFilter"
+    />
+
+    <SortMenu
+      v-model:visible="sortMenuOpen"
+      v-model:draft="sortDraft"
+      :fields="SORT_FIELDS"
+      @apply="onApplySort"
+      @reset="onResetSort"
+    />
 
     <Message v-if="searchError" severity="error" @close="searchError = ''">{{ searchError }}</Message>
     <Message v-if="error" severity="error" @close="error = ''; uploadErrors = []">
@@ -872,7 +999,7 @@ onUnmounted(() => {
             label="Details / Album"
             icon="pi pi-book"
             size="small"
-            @click="mobileSidebarOpen = true; mobileTimelineOpen = false"
+            @click="mobileSidebarOpen = true"
           />
           <Button
             label="Auswahl aufheben"
@@ -885,18 +1012,8 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Three-column layout -->
+      <!-- Two-column layout: PhotoGrid | Sidebar -->
       <div class="gallery-layout">
-      <!-- LEFT: Timeline nav – auf Mobile als Slide-in-Drawer -->
-      <div class="timeline-drawer" :class="{ 'is-open': mobileTimelineOpen }">
-        <TimelineNav
-          ref="timelineNavRef"
-          :groupedPhotos="groupedPhotos"
-          :activeSection="activeSection"
-          @scroll-to="handleScrollTo"
-        />
-      </div>
-
       <!-- CENTER: Photo grid -->
       <PhotoGrid
         ref="photoGridRef"
@@ -909,7 +1026,6 @@ onUnmounted(() => {
         :suppressScroll="isFullscreen"
         :selectMode="selectMode"
         @update:columnCount="columnCount = $event"
-        @section-change="activeSection = $event"
         @photo-click="handlePhotoClick"
         @photo-dblclick="isFullscreen = true"
 
@@ -975,7 +1091,7 @@ onUnmounted(() => {
       @toggle-favorite="handleToggleFavorite"
       @hide="handleDelete"
       @restore="handleRestore"
-      @show-details="isFullscreen = false; mobileSidebarOpen = true; mobileTimelineOpen = false"
+      @show-details="isFullscreen = false; mobileSidebarOpen = true"
     />
     <!-- end fullscreen overlay -->
 
@@ -988,23 +1104,12 @@ onUnmounted(() => {
       @next="handleGroupNext"
     />
 
-    <!-- Mobile: Backdrop zum Schließen von Drawern -->
+    <!-- Mobile: Backdrop zum Schließen des Sidebar-Drawers -->
     <div
-      v-if="mobileTimelineOpen || mobileSidebarOpen"
+      v-if="mobileSidebarOpen"
       class="mobile-backdrop"
-      @click="mobileTimelineOpen = false; mobileSidebarOpen = false"
+      @click="mobileSidebarOpen = false"
     />
-
-    <!-- Mobile: Floating-Button zum Öffnen der Zeitleiste -->
-    <button
-      v-if="!loading && !uploading && photos.length > 0 && !selectMode"
-      class="mobile-fab mobile-fab--timeline"
-      :class="{ active: mobileTimelineOpen }"
-      @click="mobileTimelineOpen = !mobileTimelineOpen; mobileSidebarOpen = false"
-      aria-label="Zeitleiste"
-    >
-      <i class="pi pi-calendar" />
-    </button>
 
     <!-- Mobile: Floating-Button Auswahlmodus starten (nur wenn nicht im Auswahlmodus) -->
     <button
@@ -1029,7 +1134,7 @@ onUnmounted(() => {
           label="Details / Album"
           icon="pi pi-book"
           size="small"
-          @click="mobileSidebarOpen = true; mobileTimelineOpen = false"
+          @click="mobileSidebarOpen = true"
         />
         <Button
           label="Abbrechen"
@@ -1146,10 +1251,11 @@ onUnmounted(() => {
   align-items: center;
 }
 
-.toggle-hidden {
+.chip-row {
   display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
   align-items: center;
-  gap: 0.5rem;
 }
 
 .info-text {
@@ -1334,20 +1440,8 @@ onUnmounted(() => {
   transition: background 0.2s, transform 0.2s;
 }
 
-.mobile-fab--timeline {
-  left: 1rem;
-  background: var(--p-content-background);
-  color: var(--p-primary-color);
-  border: 1px solid var(--p-content-border-color);
-}
-.mobile-fab--timeline.active {
-  background: var(--p-primary-color);
-  color: white;
-}
-
 .mobile-fab--select {
-  left: 50%;
-  transform: translateX(-50%);
+  left: 1rem;
   background: var(--p-content-background);
   color: var(--p-text-muted-color);
   border: 1px solid var(--p-content-border-color);
@@ -1388,12 +1482,6 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-/* ── Timeline Drawer Wrapper ─────────────────────────────────────────────── */
-.timeline-drawer {
-  /* Desktop: normaler Flex-Child, Wrapper unsichtbar */
-  display: contents;
-}
-
 /* ── Sidebar Sheet Wrapper ───────────────────────────────────────────────── */
 .sidebar-sheet {
   /* Desktop: normaler Flex-Child, Wrapper unsichtbar */
@@ -1409,26 +1497,6 @@ onUnmounted(() => {
   .mobile-backdrop { display: block; }
   .mobile-fab { display: flex; }
   .mobile-select-bar { display: flex; }
-
-  /* Timeline Drawer → linker Slide-in-Drawer */
-  .timeline-drawer {
-    display: block;
-    position: fixed;
-    left: 0;
-    top: var(--menubar-height, 3.5rem);
-    bottom: 0;
-    width: 80px;
-    z-index: var(--z-mobile-drawer);
-    background: var(--p-content-background);
-    border-right: 1px solid var(--p-content-border-color);
-    transform: translateX(-100%);
-    transition: transform 0.25s ease;
-    box-shadow: 3px 0 12px rgba(0, 0, 0, 0.2);
-    overflow-y: auto;
-  }
-  .timeline-drawer.is-open {
-    transform: translateX(0);
-  }
 
   /* Sidebar Sheet → Bottom Sheet */
   .sidebar-sheet {
@@ -1504,9 +1572,6 @@ onUnmounted(() => {
   .subheader .actions :deep(.p-button) {
     padding: 0.5rem;
     min-width: 2.25rem;
-  }
-  .toggle-hidden label {
-    display: none;
   }
 }
 
