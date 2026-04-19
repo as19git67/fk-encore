@@ -487,7 +487,7 @@ onUnmounted(() => serviceHealth.stopPolling())
           class="person-card"
           @click="handlePersonSelected(person)"
         >
-          <div class="person-card-avatar">
+          <div class="person-card-thumb">
             <HeicImage
               :src="personCoverUrl(person)"
               :alt="person.name"
@@ -496,8 +496,8 @@ onUnmounted(() => serviceHealth.stopPolling())
             />
           </div>
           <div class="person-card-info">
-            <div class="person-card-name">{{ person.name }}</div>
-            <div class="person-card-count">{{ person.faceCount || 0 }} Fotos</div>
+            <span class="person-card-name">{{ person.name }}</span>
+            <span class="person-card-count">{{ person.faceCount || 0 }} Fotos</span>
           </div>
         </button>
       </div>
@@ -722,62 +722,69 @@ onUnmounted(() => serviceHealth.stopPolling())
 
 .persons-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(var(--grid-min-col), 1fr));
+  gap: var(--grid-gap);
 }
 
 .person-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.75rem 0.5rem 0.9rem;
+  position: relative;
+  padding: 0;
+  border-radius: var(--radius-md);
+  overflow: hidden;
   background: var(--p-content-background);
-  border: 1px solid var(--p-content-border-color);
-  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   cursor: pointer;
-  color: inherit;
-  text-align: center;
-  transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+  transition: transform 0.2s;
+  border: 4px solid transparent;
   outline: none;
-}
-.person-card:hover,
-.person-card:focus-visible {
-  transform: translateY(-2px);
-  border-color: var(--p-primary-color);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  color: inherit;
+  text-align: left;
 }
 
-.person-card-avatar {
-  width: 100%;
-  aspect-ratio: 1 / 1;
-  border-radius: 6px;
-  overflow: hidden;
-  flex-shrink: 0;
-  background: var(--p-content-hover-background);
+.person-card:hover { transform: scale(1.02); }
+
+.person-card:focus-visible {
+  outline: 2px solid var(--p-primary-300);
+  outline-offset: -2px;
 }
+
+.person-card-thumb {
+  width: 100%;
+  height: 200px;
+  background: var(--p-content-hover-background);
+  overflow: hidden;
+}
+
+.person-card-thumb :deep(.heic-image-container) { width: 100%; height: 100%; }
 
 .person-card-info {
+  padding: 0.35rem 0.6rem;
   display: flex;
-  flex-direction: column;
+  justify-content: space-between;
   align-items: center;
-  gap: 0.15rem;
-  width: 100%;
-  min-width: 0;
+  gap: 0.5rem;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  color: #fff;
 }
 
 .person-card-name {
-  font-size: 0.95rem;
+  font-size: 0.85rem;
   font-weight: 500;
-  max-width: 100%;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
 }
 
 .person-card-count {
-  font-size: 0.8rem;
-  color: var(--p-text-muted-color);
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.8);
+  flex-shrink: 0;
 }
 
 /* ── Person Sidebar Sheet Wrapper ────────────────────────────────────────── */
