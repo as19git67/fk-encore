@@ -136,14 +136,11 @@ async function executeSearch() {
 
 const searchResultCount = computed(() => searchResultIds.value?.length ?? 0)
 
-const sortBy = ref<'date' | 'quality'>('date')
-
 // ── Grouping (via composable) ─────────────────────────────────────────────────
 const { groupedPhotos } = usePhotoGrouping(photos, {
   hiddenByStack,
   photoToGroup,
   searchResultIds,
-  sortBy,
 })
 
 // ── Selection (via composable) ────────────────────────────────────────────────
@@ -158,14 +155,6 @@ const { selectedIndex, selectedPhotoIds, selectedPhoto, selectedPhotos, selectPh
 // Smaller batch size + the 60s per-request timeout in getPhotoDetailsBatch
 // keep hung responses from piling up in memory on overloaded servers.
 const hydration = usePhotoHydration(photos, { batchSize: 50, backgroundPauseMs: 50 })
-
-// Trigger a full hydration pass only when the user actually switches to
-// quality-sort — otherwise heavy fields are hydrated on demand via the
-// sidebar/compare view, which keeps the page-load request burst to a
-// single /photos/details call instead of walking all 45k photos.
-watch(sortBy, (mode) => {
-  if (mode === 'quality') hydration.hydrateAllInBackground()
-})
 
 // Expand selection: if any selected photo is in a group, include all group members
 const expandedSelectedPhotos = computed<Photo[]>(() => {
@@ -413,8 +402,7 @@ async function loadPhotos() {
     // on large libraries (45k+ photos) with a loaded server that fired
     // hundreds of /photos/details batches which could hang and blow up
     // browser memory. Heavy fields are now fetched on demand — when the user
-    // selects a photo, opens the compare view, runs a search, or switches
-    // to quality sort (see the sortBy watcher).
+    // selects a photo, opens the compare view, or runs a search.
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Fotos'
     loading.value = false
@@ -437,7 +425,6 @@ async function reloadPhotosInPlace() {
       const focused = photos.value[selectedIndex.value]
       if (focused) hydration.ensureLoaded([focused.id])
     }
-    if (sortBy.value === 'quality') hydration.hydrateAllInBackground()
   } catch { /* silently fail */ }
 }
 
@@ -841,14 +828,7 @@ onUnmounted(() => {
         :semantic-chip="semanticChip"
         @search="executeSearch"
         @clear="clearSearch"
-      >
-        <Button
-          :icon="sortBy === 'date' ? 'pi pi-calendar' : 'pi pi-star'"
-          :label="sortBy === 'date' ? 'Datum' : 'Qualität'"
-          size="small" severity="secondary" outlined
-          @click="sortBy = sortBy === 'date' ? 'quality' : 'date'"
-        />
-      </NaturalSearchBar>
+      />
 
       <FilterChips :filter="filter" @remove="onRemoveFilterKey" />
     </div>
