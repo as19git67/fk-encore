@@ -15,6 +15,8 @@ import HeicImage from '../components/HeicImage.vue'
 import FacePhotoGrid from '../components/FacePhotoGrid.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
+import SortMenu from '../components/SortMenu.vue'
+import type { SortField, SortState } from '../composables/useSort'
 import {
   listPersons, updatePerson, mergePersons, getPersonDetails,
   ignoreFace, ignorePersonFaces, updatePhotoCuration, reindexPhoto,
@@ -114,10 +116,75 @@ function matchesPersonFilter(p: Person, f: PersonFilter): boolean {
   return true
 }
 
+// ── Person sort menu ────────────────────────────────────────────────────────
+const PERSON_SORT_FIELDS: SortField[] = [
+  { value: 'faceCount', label: 'Foto-Anzahl' },
+  { value: 'name', label: 'Name' },
+  { value: 'updated_at', label: 'Zuletzt gesehen' },
+]
+const DEFAULT_PERSON_SORT: SortState = { field: 'faceCount', direction: 'desc' }
+const appliedPersonSort = ref<SortState>({ ...DEFAULT_PERSON_SORT })
+const draftPersonSort = ref<SortState>({ ...DEFAULT_PERSON_SORT })
+const showPersonSortMenu = ref(false)
+
+const isPersonSortDefault = computed(() =>
+  appliedPersonSort.value.field === DEFAULT_PERSON_SORT.field &&
+  appliedPersonSort.value.direction === DEFAULT_PERSON_SORT.direction
+)
+const personSortFieldLabel = computed(() =>
+  PERSON_SORT_FIELDS.find(f => f.value === appliedPersonSort.value.field)?.label ?? appliedPersonSort.value.field
+)
+const personSortChipLabel = computed(() =>
+  `Sortierung: ${personSortFieldLabel.value} ${appliedPersonSort.value.direction === 'asc' ? '↑' : '↓'}`
+)
+
+function openPersonSortMenu() {
+  draftPersonSort.value = { ...appliedPersonSort.value }
+  showPersonSortMenu.value = true
+}
+function applyPersonSort() {
+  appliedPersonSort.value = { ...draftPersonSort.value }
+  showPersonSortMenu.value = false
+}
+function resetPersonSort() {
+  draftPersonSort.value = { ...DEFAULT_PERSON_SORT }
+  appliedPersonSort.value = { ...DEFAULT_PERSON_SORT }
+  showPersonSortMenu.value = false
+}
+
+function comparePersonsByField(a: Person, b: Person, field: string): number {
+  switch (field) {
+    case 'faceCount':
+      return Number(a.faceCount || 0) - Number(b.faceCount || 0)
+    case 'name':
+      return a.name.localeCompare(b.name)
+    case 'updated_at': {
+      const da = a.updated_at ? new Date(a.updated_at).getTime() : 0
+      const db = b.updated_at ? new Date(b.updated_at).getTime() : 0
+      return da - db
+    }
+    default:
+      return 0
+  }
+}
+
+const sortedPersons = computed(() => {
+  const { field, direction } = appliedPersonSort.value
+  const mult = direction === 'asc' ? 1 : -1
+  return [...persons.value].sort((a, b) => {
+    // Keep "Unbenannt" pinned at the end regardless of sort.
+    if (a.name === 'Unbenannt' && b.name !== 'Unbenannt') return 1
+    if (a.name !== 'Unbenannt' && b.name === 'Unbenannt') return -1
+    const primary = mult * comparePersonsByField(a, b, field)
+    if (primary !== 0) return primary
+    return a.name.localeCompare(b.name)
+  })
+})
+
 const filteredPersons = computed(() => {
   const q = nameFilter.value.trim().toLocaleLowerCase()
   const f = appliedPersonFilter.value
-  return persons.value.filter(p => {
+  return sortedPersons.value.filter(p => {
     if (q && !p.name.toLocaleLowerCase().includes(q)) return false
     return matchesPersonFilter(p, f)
   })
@@ -330,13 +397,7 @@ async function loadData() {
   error.value = ''
   try {
     const res = await listPersons()
-    persons.value = res.persons
-      .filter(p => Number(p.faceCount || 0) > 1)
-      .sort((a, b) => {
-        if (a.name === 'Unbenannt' && b.name !== 'Unbenannt') return 1
-        if (a.name !== 'Unbenannt' && b.name === 'Unbenannt') return -1
-        return Number(b.faceCount || 0) - Number(a.faceCount || 0)
-      })
+    persons.value = res.persons.filter(p => Number(p.faceCount || 0) > 1)
     // Honor ?personId=… (and optional ?photoId=… to jump to a specific photo).
     const queryPersonId = Number(route.query.personId)
     const queryPhotoId = Number(route.query.photoId)
@@ -553,17 +614,31 @@ onUnmounted(() => serviceHealth.stopPolling())
           :outlined="activePersonFilterCount === 0"
           @click="openPersonFilterMenu"
         />
+        <Button
+          icon="pi pi-sort-alt"
+          label="Sortierung"
+          size="small"
+          :severity="isPersonSortDefault ? 'secondary' : 'primary'"
+          :outlined="isPersonSortDefault"
+          @click="openPersonSortMenu"
+        />
         <span class="persons-filter-count">
           {{ filteredPersons.length }} von {{ persons.length }}
         </span>
       </div>
-      <div v-if="activePersonFilterCount > 0" class="persons-filter-chips">
+      <div v-if="activePersonFilterCount > 0 || !isPersonSortDefault" class="persons-filter-chips">
         <Chip
           v-for="(chip, i) in personFilterChips()"
-          :key="i"
+          :key="`f-${i}`"
           :label="chip.label"
           removable
           @remove="chip.clear()"
+        />
+        <Chip
+          v-if="!isPersonSortDefault"
+          :label="personSortChipLabel"
+          removable
+          @remove="resetPersonSort()"
         />
       </div>
 
@@ -726,6 +801,14 @@ onUnmounted(() => serviceHealth.stopPolling())
         <Button label="Anwenden" icon="pi pi-check" @click="applyPersonFilter" />
       </template>
     </Dialog>
+
+    <SortMenu
+      v-model:visible="showPersonSortMenu"
+      v-model:draft="draftPersonSort"
+      :fields="PERSON_SORT_FIELDS"
+      @apply="applyPersonSort"
+      @reset="resetPersonSort"
+    />
   </div>
 </template>
 

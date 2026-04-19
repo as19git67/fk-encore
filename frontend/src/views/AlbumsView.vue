@@ -11,6 +11,8 @@ import InputNumber from 'primevue/inputnumber'
 import DatePicker from 'primevue/datepicker'
 import Chip from 'primevue/chip'
 import HeicImage from '../components/HeicImage.vue'
+import SortMenu from '../components/SortMenu.vue'
+import type { SortField, SortState } from '../composables/useSort'
 import {
   type Album,
   type AlbumShareWithUser,
@@ -219,15 +221,70 @@ function matchesAlbumFilter(album: Album, f: AlbumFilter): boolean {
   return true
 }
 
-const sortedAlbums = computed(() => {
-  return [...albums.value].sort((a, b) => {
-    const dateA = a.newest_photo_at ? new Date(a.newest_photo_at).getTime() : 0
-    const dateB = b.newest_photo_at ? new Date(b.newest_photo_at).getTime() : 0
+// ── Album sort menu ──────────────────────────────────────────────────────────
+const ALBUM_SORT_FIELDS: SortField[] = [
+  { value: 'newest_photo_at', label: 'Neuestes Foto' },
+  { value: 'name', label: 'Name' },
+  { value: 'created_at', label: 'Erstellungsdatum' },
+  { value: 'photo_count', label: 'Foto-Anzahl' },
+]
+const DEFAULT_ALBUM_SORT: SortState = { field: 'newest_photo_at', direction: 'desc' }
+const appliedAlbumSort = ref<SortState>({ ...DEFAULT_ALBUM_SORT })
+const draftAlbumSort = ref<SortState>({ ...DEFAULT_ALBUM_SORT })
+const showAlbumSortMenu = ref(false)
 
-    if (dateA !== dateB) {
-      return dateB - dateA // Newest first
+const isAlbumSortDefault = computed(() =>
+  appliedAlbumSort.value.field === DEFAULT_ALBUM_SORT.field &&
+  appliedAlbumSort.value.direction === DEFAULT_ALBUM_SORT.direction
+)
+const albumSortFieldLabel = computed(() =>
+  ALBUM_SORT_FIELDS.find(f => f.value === appliedAlbumSort.value.field)?.label ?? appliedAlbumSort.value.field
+)
+const albumSortChipLabel = computed(() =>
+  `Sortierung: ${albumSortFieldLabel.value} ${appliedAlbumSort.value.direction === 'asc' ? '↑' : '↓'}`
+)
+
+function openAlbumSortMenu() {
+  draftAlbumSort.value = { ...appliedAlbumSort.value }
+  showAlbumSortMenu.value = true
+}
+function applyAlbumSort() {
+  appliedAlbumSort.value = { ...draftAlbumSort.value }
+  showAlbumSortMenu.value = false
+}
+function resetAlbumSort() {
+  draftAlbumSort.value = { ...DEFAULT_ALBUM_SORT }
+  appliedAlbumSort.value = { ...DEFAULT_ALBUM_SORT }
+  showAlbumSortMenu.value = false
+}
+
+function compareAlbumsByField(a: Album, b: Album, field: string): number {
+  switch (field) {
+    case 'newest_photo_at': {
+      const da = a.newest_photo_at ? new Date(a.newest_photo_at).getTime() : 0
+      const db = b.newest_photo_at ? new Date(b.newest_photo_at).getTime() : 0
+      return da - db
     }
+    case 'created_at': {
+      const da = a.created_at ? new Date(a.created_at).getTime() : 0
+      const db = b.created_at ? new Date(b.created_at).getTime() : 0
+      return da - db
+    }
+    case 'photo_count':
+      return (a.photo_count ?? 0) - (b.photo_count ?? 0)
+    case 'name':
+      return a.name.localeCompare(b.name)
+    default:
+      return 0
+  }
+}
 
+const sortedAlbums = computed(() => {
+  const { field, direction } = appliedAlbumSort.value
+  const mult = direction === 'asc' ? 1 : -1
+  return [...albums.value].sort((a, b) => {
+    const primary = mult * compareAlbumsByField(a, b, field)
+    if (primary !== 0) return primary
     return a.name.localeCompare(b.name)
   })
 })
@@ -521,14 +578,28 @@ onMounted(loadData)
           :outlined="activeAlbumFilterCount === 0"
           @click="openAlbumFilterMenu"
         />
+        <Button
+          icon="pi pi-sort-alt"
+          label="Sortierung"
+          size="small"
+          :severity="isAlbumSortDefault ? 'secondary' : 'primary'"
+          :outlined="isAlbumSortDefault"
+          @click="openAlbumSortMenu"
+        />
       </div>
-      <div v-if="activeAlbumFilterCount > 0" class="album-filter-chips">
+      <div v-if="activeAlbumFilterCount > 0 || !isAlbumSortDefault" class="album-filter-chips">
         <Chip
           v-for="(chip, i) in albumFilterChips()"
-          :key="i"
+          :key="`f-${i}`"
           :label="chip.label"
           removable
           @remove="chip.clear()"
+        />
+        <Chip
+          v-if="!isAlbumSortDefault"
+          :label="albumSortChipLabel"
+          removable
+          @remove="resetAlbumSort()"
         />
       </div>
     </div>
@@ -737,6 +808,14 @@ onMounted(loadData)
         <Button label="Anwenden" icon="pi pi-check" @click="applyAlbumFilter" />
       </template>
     </Dialog>
+
+    <SortMenu
+      v-model:visible="showAlbumSortMenu"
+      v-model:draft="draftAlbumSort"
+      :fields="ALBUM_SORT_FIELDS"
+      @apply="applyAlbumSort"
+      @reset="resetAlbumSort"
+    />
   </div>
 </template>
 

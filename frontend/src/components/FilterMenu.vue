@@ -48,11 +48,29 @@ function has(key: string): boolean {
 
 const local = ref<PhotoFilter>({ ...props.draft })
 
-// Mirror draft → local when dialog opens; mirror local → parent on every edit.
-watch(() => props.visible, (v) => {
-  if (v) local.value = { ...props.draft }
-})
+// Mirror local → parent on every edit. The draft → local sync happens only
+// when the dialog opens (see the visible watcher below). Watching the draft
+// continuously would form a feedback loop with the local/range watchers:
+// local edit → emit → parent draft → watch draft → reset qualityRange/dateFrom
+// → range watchers write back to local → emit → … until Vue's scheduler
+// gives up and the UI freezes.
 watch(local, (v) => emit('update:draft', v), { deep: true })
+
+// Sync all derived editor state (ranges, dates, selections) from the draft
+// once, at the moment the dialog transitions from hidden → visible.
+watch(() => props.visible, (v) => {
+  if (!v) return
+  local.value = { ...props.draft }
+  qualityRange.value = [props.draft.qualityMin ?? 0, props.draft.qualityMax ?? 100]
+  dateFrom.value = props.draft.dateFrom ? new Date(props.draft.dateFrom) : null
+  dateTo.value = props.draft.dateTo ? new Date(props.draft.dateTo) : null
+  selectedAlbums.value = props.draft.albumIds?.length && albums.value.length
+    ? albums.value.filter(a => props.draft.albumIds!.includes(a.id))
+    : []
+  selectedPersons.value = props.draft.personIds?.length && persons.value.length
+    ? persons.value.filter(p => props.draft.personIds!.includes(p.id))
+    : []
+})
 
 const hiddenOptions: Array<{ label: string; value: HiddenMode }> = [
   { label: 'Ohne ausgeblendete', value: 'exclude' },
@@ -87,11 +105,6 @@ watch(qualityRange, ([min, max]) => {
     qualityMax: max < 100 ? max : undefined,
   }
 })
-watch(() => props.draft, (d) => {
-  qualityRange.value = [d.qualityMin ?? 0, d.qualityMax ?? 100]
-  dateFrom.value = d.dateFrom ? new Date(d.dateFrom) : null
-  dateTo.value = d.dateTo ? new Date(d.dateTo) : null
-}, { deep: true })
 
 const dateFrom = ref<Date | null>(props.draft.dateFrom ? new Date(props.draft.dateFrom) : null)
 const dateTo = ref<Date | null>(props.draft.dateTo ? new Date(props.draft.dateTo) : null)
