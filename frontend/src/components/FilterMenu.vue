@@ -10,7 +10,6 @@ import AutoComplete from 'primevue/autocomplete'
 import DatePicker from 'primevue/datepicker'
 import type { PhotoFilter, HiddenMode, MembershipMode, MediaType, Album, Person } from '../api/photos'
 import { listAlbums, listPersons } from '../api/photos'
-import { countActiveFilters } from '../composables/useFilter'
 
 /**
  * Modal filter editor. Takes the `draft` ref, edits it in place, and emits
@@ -124,8 +123,6 @@ const albumsLoaded = ref(false)
 const personsLoaded = ref(false)
 const selectedAlbums = ref<Album[]>([])
 const selectedPersons = ref<Person[]>([])
-const albumQuery = ref('')
-const personQuery = ref('')
 const albumSuggestions = ref<Album[]>([])
 const personSuggestions = ref<Person[]>([])
 
