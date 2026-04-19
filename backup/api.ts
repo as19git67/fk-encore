@@ -1,25 +1,29 @@
 /**
  * Internal endpoints that coordinate the backup flow.
  *
- *   POST /internal/backup/start
- *     - Enters maintenance mode (catch-all middleware returns 503 for
- *       everything except /internal/backup/*).
- *     - Pauses the photo scan workers.
- *     - Calls pg_backup_start() on the PostgreSQL cluster. This is a
- *       cluster-wide operation that also covers the `embeddings` database
- *       living in the same instance.
- *     - Runs pg_dump for the primary `encore` database to
- *       $BACKUP_DIR/encore-<label>.dump as a fast-path restore option.
- *     - Arms a safety timer that force-stops the flow if /stop is never
- *       called.
+ * The flow is intentionally ASYNC: /start validates and kicks off the prep
+ * work in the background, then returns 202 immediately. The host-side cron
+ * script polls /status until `phase === "ready"` before taking its ZFS
+ * snapshot, then calls /stop. This decouples the HTTP timeout on the host
+ * from the (potentially minutes-long) pg_dump on the server.
  *
- *   POST /internal/backup/stop
- *     - Calls pg_backup_stop(), resumes scan workers, leaves maintenance.
- *     - Idempotent: calling it while idle is a no-op.
+ *   POST /internal/backup/start
+ *     - 202 Accepted, returns { label, startedAt, dumpFile, phase: "draining" }
+ *     - Enters maintenance mode immediately.
+ *     - In the background: pauseWorkers -> pg_backup_start -> pg_dump -> phase:"ready"
+ *     - Arms a safety timer (BACKUP_AUTO_STOP_MS) that force-stops if /stop
+ *       never arrives.
  *
  *   GET  /internal/backup/status
- *     - Returns the current state (active, label, startedAt). Used by the
- *       host-side cron script to poll if something went wrong.
+ *     - { active, phase, label, startedAt, dumpFile, error }
+ *     - Phase is one of idle | draining | dumping | ready | stopping | failed.
+ *
+ *   POST /internal/backup/stop
+ *     - phase=ready   : unwind (pg_backup_stop + resumeWorkers), -> idle
+ *     - phase=failed  : acknowledge failure, clear state -> idle
+ *     - phase=idle    : no-op
+ *     - phase=stopping: 409 "already stopping"
+ *     - phase=draining/dumping: 409 "still preparing, poll /status"
  *
  * Auth (defence in depth, see backup/auth.ts):
  *   1. The remote IP must match BACKUP_ALLOW_CIDRS (default: loopback +
@@ -42,12 +46,38 @@ import {
   isInBackupMode,
   getBackupState,
   setBackupActive,
+  setPhase,
+  markPgBackupStarted,
+  hasPgBackupStarted,
+  markFailed,
   clearBackupActive,
+  type BackupPhase,
 } from "./state";
 import { pauseWorkers, resumeWorkers } from "../photo/scan-worker";
 
 const BACKUP_DIR = process.env.BACKUP_DIR ?? "/mnt/backup";
-const AUTO_STOP_MS = parseInt(process.env.BACKUP_AUTO_STOP_MS ?? `${30 * 60 * 1000}`, 10);
+const AUTO_STOP_MS = parseInt(process.env.BACKUP_AUTO_STOP_MS ?? `${60 * 60 * 1000}`, 10);
+
+/**
+ * How long pauseWorkers() waits for in-flight scan jobs to drain before
+ * continuing anyway. Scan jobs are short-lived so 30 s is plenty; anything
+ * still running at that point will happily commit through pg_backup_start
+ * (Postgres snapshots the pre-image). Kept short so a loaded server does
+ * not stall the backup prep on idle scans.
+ */
+const DRAIN_TIMEOUT_MS = 30_000;
+
+/**
+ * Module-scope handles to the in-flight prep task. They exist for the
+ * lifetime of a single backup run and are reset on every /start.
+ *
+ *   prepTask      — the promise of the full prep pipeline
+ *   prepAbort     — signals the pg_dump child to terminate when we need
+ *                   to bail out (auto-stop timer fires, or /stop during
+ *                   the unlikely case of forced cancellation).
+ */
+let prepTask: Promise<void> | null = null;
+let prepAbort: AbortController | null = null;
 
 interface StartBody {
   /**
@@ -61,18 +91,23 @@ interface StartResponse {
   label: string;
   startedAt: string;
   dumpFile: string;
+  phase: BackupPhase;
 }
 
 interface StopResponse {
   ok: true;
   wasActive: boolean;
   label: string | null;
+  phase: BackupPhase;
 }
 
 interface StatusResponse {
   active: boolean;
+  phase: BackupPhase;
   label: string | null;
   startedAt: string | null;
+  dumpFile: string | null;
+  error: string | null;
 }
 
 function validateLabel(label: string): void {
@@ -110,10 +145,6 @@ function parseJsonBody<T>(raw: string): T {
   }
 }
 
-/**
- * Map thrown errors to an HTTP response. Centralised so each raw handler
- * only has to `throw APIError.*()` as if it were a typed endpoint.
- */
 function writeJson(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -155,6 +186,82 @@ const API_ERROR_STATUS: Record<string, number> = {
   unauthenticated: 401,
 };
 
+/**
+ * Background prep pipeline. Transitions phase draining → dumping → ready.
+ * Thrown errors are converted to `failed` by the caller (handlePrepFailure).
+ */
+async function runPrep(label: string, dumpFile: string, signal: AbortSignal): Promise<void> {
+  // 1. Drain scan workers. Bounded wait — if workers are still busy after
+  //    DRAIN_TIMEOUT_MS, continue anyway; pg_backup_start handles ongoing
+  //    writes correctly (they replay through WAL).
+  await pauseWorkers(DRAIN_TIMEOUT_MS);
+  if (signal.aborted) throw new Error("prep aborted after drain");
+
+  // 2. Enter Postgres backup mode (forced checkpoint so the subsequent
+  //    snapshot captures a consistent state). Cluster-wide.
+  setPhase("dumping");
+  const pool = getBackupPool();
+  await pool.query("SELECT pg_backup_start($1, true)", [label]);
+  markPgBackupStarted();
+  if (signal.aborted) throw new Error("prep aborted after pg_backup_start");
+
+  // 3. Fast-path pg_dump of the primary `encore` database — allows a
+  //    selective restore of the main DB without rolling back the whole
+  //    ZFS dataset.
+  await pgDump(dumpFile, undefined, signal);
+
+  // 4. Done. The host-side script will now take a ZFS snapshot and call
+  //    /internal/backup/stop.
+  setPhase("ready");
+  log.info("backup.prep.ready", { label, dumpFile });
+}
+
+async function handlePrepFailure(label: string, err: unknown): Promise<void> {
+  const message = err instanceof Error ? err.message : String(err);
+  log.error(err as any, "backup.prep.failed", { label, message });
+  await bestEffortUnwind(label);
+  markFailed(message);
+}
+
+/**
+ * Run pg_backup_stop() if we ever called pg_backup_start(), and resume the
+ * scan workers. Swallows errors — this is the cleanup path.
+ */
+async function bestEffortUnwind(label: string): Promise<void> {
+  if (hasPgBackupStarted()) {
+    try {
+      const pool = getBackupPool();
+      await pool.query("SELECT pg_backup_stop()");
+    } catch (err: any) {
+      // 55000 = object_not_in_prerequisite_state — already stopped.
+      if (err?.code !== "55000") {
+        log.warn("backup.unwind.pg_backup_stop.error", { label, message: err?.message });
+      }
+    }
+  }
+  resumeWorkers();
+}
+
+/**
+ * Called by the auto-stop timer if /stop never arrives. Cancels the in-
+ * flight prep (if any), unwinds the cluster, and transitions to `failed`.
+ */
+async function autoStopTimeoutFired(label: string): Promise<void> {
+  log.warn("backup.auto-stop", {
+    label,
+    reason: `no /internal/backup/stop received within ${AUTO_STOP_MS} ms`,
+  });
+
+  // Cancel the in-flight prep task if it is still running (kills pg_dump).
+  prepAbort?.abort();
+  if (prepTask) {
+    await prepTask.catch(() => {});
+  }
+
+  await bestEffortUnwind(label);
+  markFailed(`auto-stop: no /stop within ${AUTO_STOP_MS} ms`);
+}
+
 export const startBackup = api.raw(
   { expose: true, method: "POST", path: "/internal/backup/start" },
   async (req, res) => {
@@ -167,10 +274,20 @@ export const startBackup = api.raw(
       const { label } = body;
       validateLabel(label);
 
+      // If the last run ended in `failed`, clear the residue so the host
+      // script can retry without a manual /stop in between.
+      if (getBackupState().phase === "failed") {
+        log.info("backup.start.clearing-failed-residue", {
+          previousLabel: getBackupState().label,
+          previousError: getBackupState().error,
+        });
+        clearBackupActive();
+      }
+
       if (isInBackupMode()) {
         const existing = getBackupState();
         throw APIError.failedPrecondition(
-          `backup already running (label=${existing.label}, startedAt=${existing.startedAt?.toISOString()})`,
+          `backup already running (label=${existing.label}, phase=${existing.phase}, startedAt=${existing.startedAt?.toISOString()})`,
         );
       }
 
@@ -179,59 +296,32 @@ export const startBackup = api.raw(
 
       log.info("backup.start", { label });
 
-      // 1. Stop background writers so no new rows are written after
-      //    pg_backup_start holds the WAL. Workers also respect the
-      //    maintenance flag, but we stop them explicitly to drain
-      //    in-flight jobs cleanly.
-      await pauseWorkers();
+      const dumpFile = path.join(BACKUP_DIR, `encore-${label}.dump`);
 
-      // 2. Enter maintenance mode and arm the safety timer. We do this
-      //    BEFORE calling pg_backup_start so that if anything below
-      //    throws, the maintenance flag is cleared by the error handler.
+      // Arm the safety timer BEFORE starting prep so a crash in the
+      // prep setup itself is still caught.
       const autoStopTimer = setTimeout(() => {
-        log.warn("backup.auto-stop", {
-          label,
-          reason: `no /internal/backup/stop received within ${AUTO_STOP_MS} ms`,
-        });
-        forceStop().catch((err) =>
+        autoStopTimeoutFired(label).catch((err) =>
           log.error(err, "backup.auto-stop.failed", { label }),
         );
       }, AUTO_STOP_MS);
       autoStopTimer.unref?.();
-      setBackupActive(label, autoStopTimer);
 
-      try {
-        // 3. Put Postgres into backup mode. This is cluster-wide and also
-        //    covers the `embeddings` database.
-        //    `fast=true` forces an immediate checkpoint so the subsequent
-        //    filesystem snapshot captures a consistent state without
-        //    having to wait for the next natural checkpoint.
-        const pool = getBackupPool();
-        await pool.query("SELECT pg_backup_start($1, true)", [label]);
+      setBackupActive(label, autoStopTimer, dumpFile);
 
-        // 4. Write a fast-path pg_dump of the primary `encore` database
-        //    into $BACKUP_DIR. This is in addition to the filesystem
-        //    snapshot that the host-side script takes next, and allows
-        //    restoring only the main DB quickly without rolling back the
-        //    full ZFS dataset.
-        const dumpFile = path.join(BACKUP_DIR, `encore-${label}.dump`);
-        await pgDump(dumpFile);
+      // Kick off the prep task. It owns the phase transitions from here.
+      prepAbort = new AbortController();
+      prepTask = runPrep(label, dumpFile, prepAbort.signal).catch((err) =>
+        handlePrepFailure(label, err),
+      );
 
-        log.info("backup.start.ready", { label, dumpFile });
-        const response: StartResponse = {
-          label,
-          startedAt: getBackupState().startedAt!.toISOString(),
-          dumpFile,
-        };
-        writeJson(res, 200, response);
-      } catch (err) {
-        // Unwind on any failure so the system does not get stuck in
-        // backup mode.
-        await forceStop().catch((cleanupErr) =>
-          log.error(cleanupErr, "backup.start.cleanup-failed", { label }),
-        );
-        throw err;
-      }
+      const response: StartResponse = {
+        label,
+        startedAt: getBackupState().startedAt!.toISOString(),
+        dumpFile,
+        phase: getBackupState().phase,
+      };
+      writeJson(res, 202, response);
     } catch (err) {
       writeError(res, err);
     }
@@ -244,18 +334,48 @@ export const stopBackup = api.raw(
     try {
       assertBackupRequest(req);
 
-      if (!isInBackupMode()) {
-        const response: StopResponse = { ok: true, wasActive: false, label: null };
+      const current = getBackupState();
+
+      // No active run — idempotent no-op. Host scripts rely on this.
+      if (current.phase === "idle") {
+        const response: StopResponse = { ok: true, wasActive: false, label: null, phase: "idle" };
         writeJson(res, 200, response);
         return;
       }
 
-      const label = getBackupState().label;
+      // Previous run failed — /stop acknowledges and resets.
+      if (current.phase === "failed") {
+        const label = current.label;
+        log.info("backup.stop.acknowledge-failed", { label, error: current.error });
+        clearBackupActive();
+        const response: StopResponse = { ok: true, wasActive: false, label, phase: "idle" };
+        writeJson(res, 200, response);
+        return;
+      }
+
+      // Still preparing — refuse so the host re-polls /status instead of
+      // racing against the still-running pg_dump. The safety timer
+      // remains the last-resort backstop.
+      if (current.phase === "draining" || current.phase === "dumping") {
+        throw APIError.failedPrecondition(
+          `backup still preparing (phase=${current.phase}); poll /internal/backup/status until phase=ready`,
+        );
+      }
+
+      // Already stopping — another /stop is in flight.
+      if (current.phase === "stopping") {
+        throw APIError.failedPrecondition("backup stop already in progress");
+      }
+
+      // phase === "ready" — do the normal unwind.
+      const label = current.label;
       log.info("backup.stop", { label });
+      setPhase("stopping");
 
-      await forceStop();
+      await bestEffortUnwind(label ?? "<unknown>");
+      clearBackupActive();
 
-      const response: StopResponse = { ok: true, wasActive: true, label };
+      const response: StopResponse = { ok: true, wasActive: true, label, phase: "idle" };
       writeJson(res, 200, response);
     } catch (err) {
       writeError(res, err);
@@ -271,8 +391,11 @@ export const backupStatus = api.raw(
       const s = getBackupState();
       const response: StatusResponse = {
         active: s.active,
+        phase: s.phase,
         label: s.label,
         startedAt: s.startedAt?.toISOString() ?? null,
+        dumpFile: s.dumpFile,
+        error: s.error,
       };
       writeJson(res, 200, response);
     } catch (err) {
@@ -280,26 +403,3 @@ export const backupStatus = api.raw(
     }
   },
 );
-
-/**
- * Internal cleanup routine — safe to call multiple times.
- * Runs pg_backup_stop (tolerating the "not in progress" error),
- * resumes workers, and clears the state flag.
- */
-async function forceStop(): Promise<void> {
-  // pg_backup_stop may throw if we are not in backup mode; that is fine
-  // during cleanup paths where we want best-effort.
-  try {
-    const pool = getBackupPool();
-    await pool.query("SELECT pg_backup_stop()");
-  } catch (err: any) {
-    // 55000 = object_not_in_prerequisite_state — raised when not in backup
-    // mode. Treat as already-stopped.
-    if (err?.code !== "55000") {
-      log.warn("backup.pg_backup_stop.error", { message: err?.message });
-    }
-  }
-
-  resumeWorkers();
-  clearBackupActive();
-}

@@ -1,0 +1,101 @@
+name: Compose validation & chown-init smoke test
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'docker-compose.yml'
+      - 'docker-compose.test.yml'
+      - 'docker-compose-dev.yml'
+      - '.github/workflows/compose-validate.yml'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'docker-compose.yml'
+      - 'docker-compose.test.yml'
+      - 'docker-compose-dev.yml'
+      - '.github/workflows/compose-validate.yml'
+
+jobs:
+  validate:
+    name: docker compose config
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      # --quiet exits non-zero on any syntax / reference / volume-ref error,
+      # so this is a cheap guard against broken compose files. The prod file
+      # references unset env vars (WATCHTOWER_TOKEN etc.) which compose
+      # treats as empty strings — that is fine for a config check.
+      - name: Validate docker-compose.yml
+        run: docker compose -f docker-compose.yml config --quiet
+
+      - name: Validate docker-compose.test.yml
+        run: docker compose -f docker-compose.test.yml config --quiet
+
+      - name: Validate docker-compose-dev.yml
+        run: docker compose -f docker-compose-dev.yml config --quiet
+
+  chown-init-smoke:
+    name: chown-init smoke test
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      # Spins up the chown-init service against a throwaway compose file that
+      # mirrors the command + mount layout from docker-compose.yml but uses
+      # default local volumes (no host bind paths — those point at a specific
+      # TrueNAS host and do not exist on CI runners). The goal is to prove
+      # that the command actually sets 568:568 recursively, across a directory
+      # that already contains files owned by someone else (root, here).
+      - name: Run chown-init with throwaway volumes
+        run: |
+          cat > docker-compose.ci.yml <<'EOF'
+          services:
+            chown-init:
+              image: alpine:3.20
+              user: "0:0"
+              command: ["sh", "-c", "chown -R 568:568 /mnt/documents /mnt/documents-inbox /mnt/models"]
+              volumes:
+                - documents:/mnt/documents
+                - documents_inbox:/mnt/documents-inbox
+                - llm_models:/mnt/models
+          volumes:
+            documents:
+            documents_inbox:
+            llm_models:
+          EOF
+
+          # Seed each volume with a root-owned file so the recursive chown has
+          # something non-568 to flip.
+          docker compose -f docker-compose.ci.yml run --rm --user 0:0 \
+            --entrypoint sh chown-init -c '
+              touch /mnt/documents/seed.pdf \
+                    /mnt/documents-inbox/seed.pdf \
+                    /mnt/models/seed.bin
+            '
+
+          # Now run the real chown-init command.
+          docker compose -f docker-compose.ci.yml run --rm chown-init
+
+          # Inspect ownership from inside a second container (the volumes are
+          # Docker-managed, so we cannot stat them from the runner FS).
+          docker compose -f docker-compose.ci.yml run --rm --user 0:0 \
+            --entrypoint sh chown-init -c '
+              set -e
+              for p in /mnt/documents /mnt/documents-inbox /mnt/models; do
+                dir_owner=$(stat -c "%u:%g" "$p")
+                file_owner=$(stat -c "%u:%g" "$p"/seed.*)
+                echo "$p: dir=$dir_owner file=$file_owner"
+                [ "$dir_owner" = "568:568" ] || { echo "FAIL: $p dir owner $dir_owner"; exit 1; }
+                [ "$file_owner" = "568:568" ] || { echo "FAIL: $p file owner $file_owner"; exit 1; }
+              done
+              echo "chown-init smoke OK"
+            '
+
+      - name: Clean up volumes
+        if: always()
+        run: docker compose -f docker-compose.ci.yml down -v || true
