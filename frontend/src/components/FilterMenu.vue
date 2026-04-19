@@ -73,9 +73,9 @@ watch(() => props.visible, (v) => {
 })
 
 const hiddenOptions: Array<{ label: string; value: HiddenMode }> = [
-  { label: 'Ohne ausgeblendete', value: 'exclude' },
-  { label: 'Mit ausgeblendeten', value: 'include' },
-  { label: 'Nur ausgeblendete', value: 'only' },
+  { label: 'Ohne', value: 'exclude' },
+  { label: 'Mit', value: 'include' },
+  { label: 'Nur', value: 'only' },
 ]
 const membershipOptions: Array<{ label: string; value: MembershipMode }> = [
   { label: 'Einschließen', value: 'include' },
