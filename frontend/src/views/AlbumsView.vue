@@ -89,6 +89,8 @@ function observeCards() {
   flushVisible()
 }
 
+const filterQuery = ref('')
+
 const sortedAlbums = computed(() => {
   return [...albums.value].sort((a, b) => {
     const dateA = a.newest_photo_at ? new Date(a.newest_photo_at).getTime() : 0
@@ -102,8 +104,18 @@ const sortedAlbums = computed(() => {
   })
 })
 
+const filteredAlbums = computed(() => {
+  const q = filterQuery.value.trim().toLocaleLowerCase()
+  if (!q) return sortedAlbums.value
+  return sortedAlbums.value.filter(album => {
+    if (album.name.toLocaleLowerCase().includes(q)) return true
+    if (album.description?.toLocaleLowerCase().includes(q)) return true
+    return false
+  })
+})
+
 watch(loading, (newLoading) => {
-  if (!newLoading && sortedAlbums.value.length > 0) {
+  if (!newLoading && filteredAlbums.value.length > 0) {
     nextTick(() => {
       firstAlbumRef.value?.focus()
       observeCards()
@@ -111,8 +123,8 @@ watch(loading, (newLoading) => {
   }
 })
 
-// Re-observe whenever the set of rendered cards changes (create, rename, delete).
-watch(sortedAlbums, () => {
+// Re-observe whenever the set of rendered cards changes (create, rename, delete, filter).
+watch(filteredAlbums, () => {
   nextTick(() => observeCards())
 })
 
@@ -349,6 +361,28 @@ onMounted(loadData)
         <h1 class="title">Meine Alben</h1>
         <Button label="Neues Album" icon="pi pi-plus" @click="showCreateDialog = true"/>
       </div>
+      <div v-if="!loading && albums.length > 0" class="filter-row">
+        <span class="p-input-icon-left filter-input-wrapper">
+          <i class="pi pi-search filter-icon" />
+          <InputText
+              v-model="filterQuery"
+              placeholder="Alben filtern…"
+              class="filter-input"
+              aria-label="Alben filtern"
+          />
+          <Button
+              v-if="filterQuery"
+              icon="pi pi-times"
+              text
+              rounded
+              size="small"
+              class="filter-clear"
+              v-tooltip="'Filter zurücksetzen'"
+              aria-label="Filter zurücksetzen"
+              @click="filterQuery = ''"
+          />
+        </span>
+      </div>
     </div>
 
     <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
@@ -359,10 +393,13 @@ onMounted(loadData)
     <div v-else-if="albums.length === 0" class="info-text">
       Keine Alben vorhanden. Erstelle dein erstes Album!
     </div>
+    <div v-else-if="filteredAlbums.length === 0" class="info-text">
+      Keine Alben passen zum Filter „{{ filterQuery }}“.
+    </div>
 
     <div v-else ref="gridEl" class="albums-grid">
       <div
-          v-for="(album, index) in sortedAlbums"
+          v-for="(album, index) in filteredAlbums"
           :key="album.id"
           :ref="el => { if (index === 0) firstAlbumRef = (el as HTMLElement) }"
           :data-album-id="album.id"
@@ -547,7 +584,35 @@ onMounted(loadData)
   justify-content: space-between;
   align-items: center;
   margin-block: 0.25rem;
-  margin-bottom: 1rem;
+}
+
+.filter-row {
+  margin-block: 0.5rem 1rem;
+}
+
+.filter-input-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: min(100%, 24rem);
+}
+
+.filter-icon {
+  position: absolute;
+  left: 0.65rem;
+  color: var(--p-text-muted-color);
+  pointer-events: none;
+}
+
+.filter-input {
+  width: 100%;
+  padding-left: 2rem;
+  padding-right: 2.25rem;
+}
+
+.filter-clear {
+  position: absolute;
+  right: 0.25rem;
 }
 
 .albums-grid {
