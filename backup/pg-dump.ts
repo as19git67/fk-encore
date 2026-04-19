@@ -33,8 +33,13 @@ async function run(
   command: string,
   args: string[],
   env: PgEnv,
+  signal?: AbortSignal,
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error(`${command} aborted before spawn`));
+      return;
+    }
     const child = spawn(command, args, {
       env: { ...process.env, ...env },
       stdio: ["ignore", "pipe", "pipe"],
@@ -45,8 +50,23 @@ async function run(
     child.stdout.on("data", (chunk) => (stdout += chunk.toString()));
     child.stderr.on("data", (chunk) => (stderr += chunk.toString()));
 
-    child.on("error", (err) => reject(new Error(`failed to spawn ${command}: ${err.message}`)));
-    child.on("close", (code) => {
+    // Forward aborts to the child process so a caller that gave up waiting
+    // can actually stop the running pg_dump instead of just leaking it.
+    const onAbort = () => {
+      if (!child.killed) child.kill("SIGTERM");
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+
+    child.on("error", (err) => {
+      signal?.removeEventListener("abort", onAbort);
+      reject(new Error(`failed to spawn ${command}: ${err.message}`));
+    });
+    child.on("close", (code, sig) => {
+      signal?.removeEventListener("abort", onAbort);
+      if (signal?.aborted) {
+        reject(new Error(`${command} aborted (signal=${sig ?? "none"})`));
+        return;
+      }
       if (code === 0) {
         resolve({ stdout, stderr });
       } else {
@@ -59,8 +79,16 @@ async function run(
 /**
  * Dump the given database in PostgreSQL custom format (-Fc) to the given file.
  * Custom format is compressed and supports selective restore via pg_restore.
+ *
+ * Passing an `AbortSignal` lets the caller terminate the pg_dump child process
+ * mid-flight (e.g. when a backup safety timer fires while the dump is still
+ * running on a loaded server).
  */
-export async function pgDump(outputPath: string, database?: string): Promise<void> {
+export async function pgDump(
+  outputPath: string,
+  database?: string,
+  signal?: AbortSignal,
+): Promise<void> {
   const dir = path.dirname(outputPath);
   await fs.promises.mkdir(dir, { recursive: true });
 
@@ -74,6 +102,7 @@ export async function pgDump(outputPath: string, database?: string): Promise<voi
       "--file", outputPath,
     ],
     pgEnv(database),
+    signal,
   );
 }
 
