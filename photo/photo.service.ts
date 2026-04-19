@@ -70,6 +70,10 @@ import type {
   LandmarkBBox,
 } from "../db/types";
 import sharp from "sharp";
+import {
+  buildPhotoFilterConditions,
+  type PhotoFilterParams,
+} from "./photo.filters";
 
 // heic-convert is a CJS module without TS types; load via createRequire
 const _require = createRequire(import.meta.url);
@@ -1420,7 +1424,13 @@ export async function uploadPhotoLogic(
   };
 }
 
-export async function listPhotosLogic(userId: number, showHidden: boolean = false): Promise<ListPhotosResponse> {
+export async function listPhotosLogic(
+  userId: number,
+  filter: PhotoFilterParams = {}
+): Promise<ListPhotosResponse> {
+  const filterConds = buildPhotoFilterConditions(userId, filter);
+  const whereClause = and(eq(photos.user_id, userId), ...filterConds);
+
   const rows = await dbAll<{
     id: number; user_id: number; filename: string; original_name: string;
     mime_type: string; size: number; hash: string | null; taken_at: string | null;
@@ -1463,14 +1473,12 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
         photoCuration,
         and(eq(photos.id, photoCuration.photo_id), eq(photoCuration.user_id, userId))
       )
-      .where(eq(photos.user_id, userId))
+      .where(whereClause)
       .orderBy(sql`${photoDateOrder} DESC`)
   );
 
-  const filtered = showHidden ? rows : rows.filter((r) => (r.curation_status ?? "visible") !== "hidden");
-
   return {
-    photos: filtered.map((r) => ({
+    photos: rows.map((r) => ({
       id: r.id,
       user_id: r.user_id,
       filename: r.filename,
@@ -1507,8 +1515,11 @@ export async function listPhotosLogic(userId: number, showHidden: boolean = fals
  */
 export async function listPhotoIndexLogic(
   userId: number,
-  showHidden: boolean = false
+  filter: PhotoFilterParams = {}
 ): Promise<ListPhotoIndexResponse> {
+  const filterConds = buildPhotoFilterConditions(userId, filter);
+  const whereClause = and(eq(photos.user_id, userId), ...filterConds);
+
   const rows = await dbAll<{
     id: number; user_id: number; filename: string; original_name: string;
     mime_type: string; size: number;
@@ -1534,15 +1545,11 @@ export async function listPhotoIndexLogic(
         photoCuration,
         and(eq(photos.id, photoCuration.photo_id), eq(photoCuration.user_id, userId))
       )
-      .where(eq(photos.user_id, userId))
+      .where(whereClause)
       .orderBy(sql`${photoDateOrder} DESC`)
   );
 
-  const filtered = showHidden
-    ? rows
-    : rows.filter((r) => (r.curation_status ?? "visible") !== "hidden");
-
-  const result: PhotoIndexEntry[] = filtered.map((r) => ({
+  const result: PhotoIndexEntry[] = rows.map((r) => ({
     id: r.id,
     user_id: r.user_id,
     filename: r.filename,

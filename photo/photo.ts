@@ -44,6 +44,63 @@ import type {
   PhotoLocationsResponse,
 } from "../db/types";
 import { Query } from "encore.dev/api";
+import { parsePhotoFilterQuery, type PhotoFilterQuery } from "./photo.filters";
+
+type PhotoFilterQueryParams = {
+  showHidden?: Query<boolean>;
+  hiddenMode?: Query<string>;
+  favorite?: Query<boolean>;
+  albumHighlight?: Query<boolean>;
+  groupHighlight?: Query<boolean>;
+  inGroup?: Query<boolean>;
+  othersFavorited?: Query<boolean>;
+  othersHidden?: Query<boolean>;
+  qualityMin?: Query<number>;
+  qualityMax?: Query<number>;
+  notInAnyAlbum?: Query<boolean>;
+  albumIds?: Query<string>;
+  albumMode?: Query<string>;
+  personIds?: Query<string>;
+  personMode?: Query<string>;
+  mediaTypes?: Query<string>;
+  hasGps?: Query<boolean>;
+  hasFaces?: Query<boolean>;
+  hasAssignedPerson?: Query<boolean>;
+  dateFrom?: Query<string>;
+  dateTo?: Query<string>;
+  importedDaysAgo?: Query<number>;
+  sizeMin?: Query<number>;
+  sizeMax?: Query<number>;
+};
+
+function toFilterQuery(p: PhotoFilterQueryParams): PhotoFilterQuery {
+  return {
+    showHidden: p.showHidden,
+    hiddenMode: p.hiddenMode,
+    favorite: p.favorite,
+    albumHighlight: p.albumHighlight,
+    groupHighlight: p.groupHighlight,
+    inGroup: p.inGroup,
+    othersFavorited: p.othersFavorited,
+    othersHidden: p.othersHidden,
+    qualityMin: p.qualityMin,
+    qualityMax: p.qualityMax,
+    notInAnyAlbum: p.notInAnyAlbum,
+    albumIds: p.albumIds,
+    albumMode: p.albumMode,
+    personIds: p.personIds,
+    personMode: p.personMode,
+    mediaTypes: p.mediaTypes,
+    hasGps: p.hasGps,
+    hasFaces: p.hasFaces,
+    hasAssignedPerson: p.hasAssignedPerson,
+    dateFrom: p.dateFrom,
+    dateTo: p.dateTo,
+    importedDaysAgo: p.importedDaysAgo,
+    sizeMin: p.sizeMin,
+    sizeMax: p.sizeMax,
+  };
+}
 
 // Helper to get userId as number
 function getUserId(): number {
@@ -143,13 +200,14 @@ export const checkPhotoHash = api(
  */
 export const listPhotos = api(
   { expose: true, method: "GET", path: "/photos", auth: true },
-  async ({ showHidden }: { showHidden?: Query<boolean> }): Promise<ListPhotosResponse> => {
+  async (params: PhotoFilterQueryParams): Promise<ListPhotosResponse> => {
     checkModule();
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "photos.view");
 
-    return await service.listPhotosLogic(userId, showHidden ?? false);
+    const filter = parsePhotoFilterQuery(toFilterQuery(params));
+    return await service.listPhotosLogic(userId, filter);
   }
 );
 
@@ -165,13 +223,14 @@ export const listPhotos = api(
  */
 export const listPhotoIndex = api(
   { expose: true, method: "GET", path: "/photos/index", auth: true },
-  async ({ showHidden }: { showHidden?: Query<boolean> }): Promise<ListPhotoIndexResponse> => {
+  async (params: PhotoFilterQueryParams): Promise<ListPhotoIndexResponse> => {
     checkModule();
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "photos.view");
 
-    return await service.listPhotoIndexLogic(userId, showHidden ?? false);
+    const filter = parsePhotoFilterQuery(toFilterQuery(params));
+    return await service.listPhotoIndexLogic(userId, filter);
   }
 );
 

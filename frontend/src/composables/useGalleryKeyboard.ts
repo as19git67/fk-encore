@@ -22,7 +22,7 @@ export interface GalleryKeyboardOptions {
  *
  * Navigation contract (as agreed):
  *  ←  / →   → always navigate in the photo grid
- *  ↑  / ↓   → always navigate in the nav panel (TimelineNav or PersonNav)
+ *  ↑  / ↓   → always navigate in the nav panel (e.g. TimelineNav)
  *  Space     → toggle fullscreen
  *
  * When no nav panel is present (e.g. AlbumDetailView), the caller can wire
