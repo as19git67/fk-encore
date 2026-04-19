@@ -321,23 +321,33 @@ aber nur die Tax-Felder aktualisiert (spart Tokens).
 
 ---
 
-## 8. Offene Entscheidungen (pro Punkt User-Input)
+## 8. Entschiedene Fragen
 
-1. **Mehrere Sektionen pro Dokument?** Beispiel: Handwerkerrechnung für
-   vermietetes Objekt = `werbungskosten-v`; dieselbe Firma für die selbst
-   genutzte Immobilie = `haushaltsnahe`. Aktueller Plan: **genau eine**
-   Section. Alternative: Many-to-Many `document_tax_sections`. Empfehlung:
-   mit 1:1 starten, bei Bedarf später aufbohren.
-2. **Beträge extrahieren?** Steuerbeleg ohne Betrag ist unbefriedigend; aber
-   Betrags-Extraktion aus OCR ist fehleranfällig. Vorschlag: erste
-   Iteration ohne Betrag, zweite Iteration `amount_cents`/`currency`
-   optional.
-3. **`werbungskosten-*` vs. eine Sektion `werbungskosten`?** Feinere
-   Aufspaltung nach Anlage (N/V/KAP/R) ist praktisch für den Steuer-Druck;
-   Nachteil: KI muss zwischen ihnen unterscheiden (Arbeitnehmerfahrt vs.
-   Mietobjektfahrt). Aktuell: aufgespalten. Fallback der KI: wenn unsicher
-   → `werbungskosten-n` (häufigster Fall) plus niedrige Confidence.
-4. **Datenschutz / Retention**: Steuerbelege müssen in DE ≥ 2 Jahre (privat,
-   Einkommensteuer) bis 10 Jahre (Vermieter/Selbstständig) aufbewahrt
-   werden. Keine Änderung am Purge-Verhalten nötig — das Modul löscht
-   Dokumente ohnehin nie automatisch.
+1. **Mehrere Sektionen pro Dokument**: **N:M** über Join-Tabelle
+   `document_tax_sections`. Begründung: reale Belege passen häufig in
+   mehrere Anlagen (Handwerker am Mietobjekt = Anlage V + ggf. §35a,
+   Lohnabrechnung = Anlage N + §35a für Versorgungsleistungen, …).
+2. **Betragsextraktion**: Erst in **Iteration 2**. Iteration 1 liefert
+   nur Klassifikation; der Druckauszug nennt „Betrag lt. Beleg" —
+   Nutzer:in trägt selbst in ELSTER ein.
+3. **`werbungskosten-*` feingranular**: Pro Anlage ein eigener Slug
+   (N/V/KAP/R). Fallback der KI: wenn unsicher → `werbungskosten-n`
+   (häufigster Fall) mit niedriger Confidence.
+4. **Datenschutz / Retention**: Steuerbelege müssen in DE ≥ 2 Jahre
+   (privat, Einkommensteuer) bis 10 Jahre (Vermieter/Selbstständig)
+   aufbewahrt werden. Keine Änderung am Purge-Verhalten nötig — das
+   Modul löscht Dokumente ohnehin nie automatisch.
+
+### 8.1 Konsequenzen aus der N:M-Entscheidung
+
+- `documents` trägt nur die **dokument-weiten** Felder:
+  `tax_relevant` (bool), `tax_year` (int), `tax_year_confidence` (real),
+  `tax_reviewed` (bool). Keine `tax_section`-Spalte auf `documents`
+  mehr — sie wandert in die Join-Tabelle.
+- `document_tax_sections` (neu) speichert pro (document_id, tax_section)
+  die KI-`confidence` und eine `source`-Enum `{ai, user}`. Damit kann
+  der Klassifizierer gefahrlos neu laufen: er löscht nur seine eigenen
+  `source='ai'`-Zeilen und ersetzt sie, User-Zuweisungen
+  (`source='user'`) bleiben unangetastet.
+- Der LLM-Prompt liefert `tax_sections: Array<{slug, confidence}>`
+  statt eines einzelnen Slug.
