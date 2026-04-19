@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {onMounted, ref, computed, watch, nextTick} from 'vue'
+import {onMounted, onBeforeUnmount, ref, computed, watch, nextTick} from 'vue'
 import {useRouter} from 'vue-router'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
@@ -27,6 +27,67 @@ const error = ref('')
 const auth = useAuthStore()
 
 const firstAlbumRef = ref<HTMLElement | null>(null)
+const gridEl = ref<HTMLElement | null>(null)
+
+// ── Virtualized rendering ─────────────────────────────────────────────────────
+// Album cards are expensive (HeicImage + PrimeVue Buttons with tooltips + image
+// decode). Rendering the full card for hundreds/thousands of albums makes
+// scrolling unusable. Instead each card reserves its layout slot via a
+// placeholder with min-height, and only renders its real content while it
+// intersects the viewport (plus a small buffer, so the content is ready by
+// the time the user sees it). When a card scrolls back out of view its
+// content is torn down again, keeping DOM / memory bounded regardless of
+// how many albums exist.
+const visibleAlbumIds = ref(new Set<number>())
+let cardObserver: IntersectionObserver | null = null
+let pendingVisible = new Set<number>()
+let visibleFlushTimer: ReturnType<typeof setTimeout> | null = null
+
+function flushVisible() {
+  visibleAlbumIds.value = new Set(pendingVisible)
+  visibleFlushTimer = null
+}
+
+function observeCards() {
+  cardObserver?.disconnect()
+  pendingVisible = new Set()
+  if (visibleFlushTimer) { clearTimeout(visibleFlushTimer); visibleFlushTimer = null }
+  const root = gridEl.value
+  if (!root) { visibleAlbumIds.value = new Set(); return }
+
+  cardObserver = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        const id = Number((entry.target as HTMLElement).dataset.albumId)
+        if (!id) continue
+        if (entry.isIntersecting) pendingVisible.add(id)
+        else pendingVisible.delete(id)
+      }
+      if (visibleFlushTimer) clearTimeout(visibleFlushTimer)
+      visibleFlushTimer = setTimeout(flushVisible, 100)
+    },
+    // 400px buffer: start hydrating a card shortly before it enters the
+    // viewport so the user never sees an empty placeholder during normal
+    // scrolling. Use the document scroller (null) because .albums-view is
+    // the scroll container and is an ancestor of .albums-grid.
+    { root: null, rootMargin: '400px 0px' }
+  )
+
+  const cards = root.querySelectorAll<HTMLElement>('[data-album-id]')
+  cards.forEach(el => cardObserver!.observe(el))
+
+  // Seed immediately from current viewport so the first paint isn't empty.
+  const viewportBottom = window.innerHeight + 400
+  const viewportTop = -400
+  cards.forEach(el => {
+    const rect = el.getBoundingClientRect()
+    if (rect.bottom > viewportTop && rect.top < viewportBottom) {
+      const id = Number(el.dataset.albumId)
+      if (id) pendingVisible.add(id)
+    }
+  })
+  flushVisible()
+}
 
 const sortedAlbums = computed(() => {
   return [...albums.value].sort((a, b) => {
@@ -45,8 +106,20 @@ watch(loading, (newLoading) => {
   if (!newLoading && sortedAlbums.value.length > 0) {
     nextTick(() => {
       firstAlbumRef.value?.focus()
+      observeCards()
     })
   }
+})
+
+// Re-observe whenever the set of rendered cards changes (create, rename, delete).
+watch(sortedAlbums, () => {
+  nextTick(() => observeCards())
+})
+
+onBeforeUnmount(() => {
+  cardObserver?.disconnect()
+  cardObserver = null
+  if (visibleFlushTimer) { clearTimeout(visibleFlushTimer); visibleFlushTimer = null }
 })
 
 const showCreateDialog = ref(false)
@@ -287,42 +360,46 @@ onMounted(loadData)
       Keine Alben vorhanden. Erstelle dein erstes Album!
     </div>
 
-    <div v-else class="albums-grid">
+    <div v-else ref="gridEl" class="albums-grid">
       <div
           v-for="(album, index) in sortedAlbums"
           :key="album.id"
           :ref="el => { if (index === 0) firstAlbumRef = (el as HTMLElement) }"
+          :data-album-id="album.id"
           class="album-card"
+          :class="{ 'album-card--placeholder': !visibleAlbumIds.has(album.id) }"
           tabindex="0"
           @click="router.push(`/fotos/alben/${album.id}`)"
           @keydown.enter="router.push(`/fotos/alben/${album.id}`)"
           @keydown.space.prevent="router.push(`/fotos/alben/${album.id}`)"
       >
-        <div v-if="canManageAlbum(album)" class="album-actions" @click.stop>
-          <Button icon="pi pi-share-alt" text rounded size="small" v-tooltip="'Freigeben'" @click="openShareDialog(album)" />
-          <Button icon="pi pi-pencil" text rounded size="small" v-tooltip="'Bearbeiten'" @click="openRenameDialog(album)" />
-          <Button icon="pi pi-trash" text rounded size="small" severity="danger" v-tooltip="'Löschen'" @click="openDeleteDialog(album)" />
-        </div>
-        <div class="album-cover">
-          <HeicImage
-            v-if="album.cover_filename"
-            :src="getPhotoUrl(album.cover_filename, 400)"
-            :alt="album.name"
-            objectFit="cover"
-          />
-          <div v-else class="album-icon"><i class="pi pi-images"/></div>
-        </div>
-        <i v-if="album.is_shared" class="pi pi-share-alt shared-badge" v-tooltip="'Freigegeben'" />
-        <div class="album-info">
-          <span class="album-name">{{ album.name }}</span>
-          <span v-if="album.description" class="album-desc">{{ album.description }}</span>
-          <span class="album-meta">
-            {{ album.photo_count }} {{ album.photo_count === 1 ? 'Foto' : 'Fotos' }}
-            <template v-if="album.oldest_photo_at && album.newest_photo_at">
-              • {{ new Date(album.oldest_photo_at).toLocaleDateString() }} - {{ new Date(album.newest_photo_at).toLocaleDateString() }}
-            </template>
-          </span>
-        </div>
+        <template v-if="visibleAlbumIds.has(album.id)">
+          <div v-if="canManageAlbum(album)" class="album-actions" @click.stop>
+            <Button icon="pi pi-share-alt" text rounded size="small" v-tooltip="'Freigeben'" @click="openShareDialog(album)" />
+            <Button icon="pi pi-pencil" text rounded size="small" v-tooltip="'Bearbeiten'" @click="openRenameDialog(album)" />
+            <Button icon="pi pi-trash" text rounded size="small" severity="danger" v-tooltip="'Löschen'" @click="openDeleteDialog(album)" />
+          </div>
+          <div class="album-cover">
+            <HeicImage
+              v-if="album.cover_filename"
+              :src="getPhotoUrl(album.cover_filename, 400)"
+              :alt="album.name"
+              objectFit="cover"
+            />
+            <div v-else class="album-icon"><i class="pi pi-images"/></div>
+          </div>
+          <i v-if="album.is_shared" class="pi pi-share-alt shared-badge" v-tooltip="'Freigegeben'" />
+          <div class="album-info">
+            <span class="album-name">{{ album.name }}</span>
+            <span v-if="album.description" class="album-desc">{{ album.description }}</span>
+            <span class="album-meta">
+              {{ album.photo_count }} {{ album.photo_count === 1 ? 'Foto' : 'Fotos' }}
+              <template v-if="album.oldest_photo_at && album.newest_photo_at">
+                • {{ new Date(album.oldest_photo_at).toLocaleDateString() }} - {{ new Date(album.newest_photo_at).toLocaleDateString() }}
+              </template>
+            </span>
+          </div>
+        </template>
       </div>
     </div>
 
@@ -490,6 +567,13 @@ onMounted(loadData)
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* Placeholder: card slot is reserved so the grid layout stays stable even
+ * while the card's content is torn down. Height matches a typical hydrated
+ * card (200px cover + ~1 line name + ~1 line meta + paddings). */
+.album-card--placeholder {
+  min-height: 290px;
 }
 
 .shared-badge {
