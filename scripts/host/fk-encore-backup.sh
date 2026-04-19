@@ -40,7 +40,7 @@
 #                           default 7200 (2 h). Must be large enough for the
 #                           slowest expected pg_dump + drain.
 #   READY_POLL_INTERVAL_SEC poll cadence while waiting for phase=ready,
-#                           default 5
+#                           default 10
 #   SNAPSHOT_RETENTION_DAYS age in days above which `daily-*` snapshots of
 #                           $ZFS_DATASET are pruned after a successful run.
 #                           Default 30. Set to 0 to disable pruning. Only
@@ -63,7 +63,7 @@ ZFS_DATASET="${ZFS_DATASET:-tank/vivanty}"
 LABEL="${LABEL:-daily-$(date -u +%Y%m%d-%H%M%S)}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-60}"
 READY_TIMEOUT_SEC="${READY_TIMEOUT_SEC:-7200}"
-READY_POLL_INTERVAL_SEC="${READY_POLL_INTERVAL_SEC:-5}"
+READY_POLL_INTERVAL_SEC="${READY_POLL_INTERVAL_SEC:-10}"
 SNAPSHOT_RETENTION_DAYS="${SNAPSHOT_RETENTION_DAYS:-30}"
 
 if ! [[ "$SNAPSHOT_RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
