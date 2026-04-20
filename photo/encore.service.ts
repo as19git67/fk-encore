@@ -8,6 +8,9 @@ import "./scan-worker";
 // Register the hourly cron job that reconciles external photo libraries.
 import "./library-cron";
 
+// Register the daily cron job that rebuilds Rueckblicke (recaps).
+import "./recaps-cron";
+
 import { startConfiguredWatchers } from "./library-watcher";
 
 // Migrate any legacy flat-layout photos to the YYYY/YYYY-MM/... layout.
