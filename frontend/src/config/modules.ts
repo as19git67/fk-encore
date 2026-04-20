@@ -49,10 +49,17 @@ export const modules: ModuleConfig[] = [
         component: () => import('../views/PersonsView.vue'),
         meta: { permission: 'people.view' },
       },
+      {
+        path: 'rueckblicke',
+        name: 'fotos-recaps',
+        component: () => import('../views/RecapsView.vue'),
+        meta: { permission: 'photos.view' },
+      },
     ],
     menuItems: [
       { label: 'Galerie', icon: 'pi pi-images', routeName: 'fotos-gallery', permission: 'photos.view' },
       { label: 'Alben', icon: 'pi pi-folder-open', routeName: 'fotos-albums', permission: 'photos.view' },
+      { label: 'Rückblicke', icon: 'pi pi-history', routeName: 'fotos-recaps', permission: 'photos.view' },
       { label: 'Personen', icon: 'pi pi-users', routeName: 'fotos-people', permission: 'people.view' },
     ],
   },
