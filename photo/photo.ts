@@ -145,9 +145,10 @@ export const uploadPhoto = api.raw(
 
     const fileName = (req.headers["x-file-name"] as string) || "photo.jpg";
     const mimeType = (req.headers["content-type"] as string) || "image/jpeg";
+    const isFavorite = req.headers["x-is-favorite"] === "true";
 
     try {
-      const photo = await service.uploadPhotoStream(userId, req, fileName, mimeType);
+      const photo = await service.uploadPhotoStream(userId, req, fileName, mimeType, isFavorite);
 
       res.statusCode = 201;
       res.setHeader("Content-Type", "application/json");

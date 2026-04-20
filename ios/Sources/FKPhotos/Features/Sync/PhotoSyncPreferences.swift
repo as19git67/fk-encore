@@ -99,6 +99,13 @@ struct PhotoSyncPreferences {
         UserDefaults.standard.set(Array(ids), forKey: uploadedIdsKey)
     }
 
+    /// Clears the uploaded-asset history and resets the last sync date so all
+    /// photos are considered unseen on the next sync run.
+    static func resetUploadHistory() {
+        UserDefaults.standard.removeObject(forKey: uploadedIdsKey)
+        UserDefaults.standard.removeObject(forKey: lastSyncDateKey)
+    }
+
     /// Number of photos successfully uploaded so far.
     static var uploadedCount: Int {
         (UserDefaults.standard.stringArray(forKey: uploadedIdsKey) ?? []).count
