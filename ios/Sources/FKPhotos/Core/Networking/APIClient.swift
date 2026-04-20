@@ -228,11 +228,15 @@ actor APIClient {
         return result
     }
 
-    private func parseErrorMessage(_ data: Data) -> String {
+    private func parseErrorMessage(_ data: Data) -> String? {
+        // Try JSON error body first (Encore error format)
         if let errorBody = try? JSONDecoder().decode(APIErrorBody.self, from: data) {
             return errorBody.message
         }
-        return String(data: data, encoding: .utf8) ?? "Unknown error"
+        // Ignore HTML responses (e.g. nginx 502 pages) — caller uses status code instead
+        let text = String(data: data, encoding: .utf8) ?? ""
+        if text.trimmingCharacters(in: .whitespaces).hasPrefix("<") { return nil }
+        return text.isEmpty ? nil : text
     }
 }
 
@@ -240,14 +244,22 @@ actor APIClient {
 
 enum APIError: Error, LocalizedError {
     case invalidResponse
-    case httpError(Int, String)
+    case httpError(Int, String?)
 
     var errorDescription: String? {
         switch self {
         case .invalidResponse:
-            return "Invalid server response"
+            return "Ungültige Server-Antwort"
         case .httpError(let code, let message):
-            return "HTTP \(code): \(message)"
+            switch code {
+            case 502, 503: return "Server nicht erreichbar (HTTP \(code))"
+            case 504:      return "Server antwortet nicht – Zeitüberschreitung"
+            case 401:      return "Nicht angemeldet"
+            case 403:      return "Keine Berechtigung"
+            case 404:      return "Nicht gefunden"
+            case 500:      return message ?? "Interner Serverfehler"
+            default:       return message ?? "HTTP \(code)"
+            }
         }
     }
 }
