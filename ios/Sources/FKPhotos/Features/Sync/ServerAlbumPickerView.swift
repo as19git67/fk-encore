@@ -20,8 +20,14 @@ struct ServerAlbumPickerView: View {
     @State private var pendingClearSelection = false
 
     private var filteredAlbums: [Album] {
-        if searchText.isEmpty { return albums }
-        return albums.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+        let source = searchText.isEmpty ? albums : albums.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+        // Selected album first, then alphabetically
+        return source.sorted {
+            let lSelected = $0.id == selectedAlbumId
+            let rSelected = $1.id == selectedAlbumId
+            if lSelected != rSelected { return lSelected }
+            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
     }
 
     var body: some View {

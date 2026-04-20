@@ -1,7 +1,6 @@
 import SwiftUI
 import PhotosUI
 import Photos
-import ImageIO
 
 struct PhotoUploadView: View {
     @Environment(\.dismiss) private var dismiss
@@ -95,26 +94,34 @@ struct PhotoUploadView: View {
 
         for item in selectedItems {
             do {
-                guard var data = try await item.loadTransferable(type: Data.self) else {
-                    await MainActor.run { failedCount += 1 }
-                    continue
-                }
+                // Load current (edited) version via PHImageManager when possible.
+                // Falls back to loadTransferable when itemIdentifier is unavailable.
+                let data: Data
+                let mimeType: String
+                let isFavorite: Bool
 
-                // Preserve isFavorite from the Photos library by writing XMP Rating=5
-                if let localId = item.itemIdentifier {
-                    let result = PHAsset.fetchAssets(withLocalIdentifiers: [localId], options: nil)
-                    if let asset = result.firstObject, asset.isFavorite {
-                        data = withXMPRating(data, rating: 5) ?? data
+                if let localId = item.itemIdentifier,
+                   let asset = PHAsset.fetchAssets(withLocalIdentifiers: [localId], options: nil).firstObject {
+                    (data, mimeType) = try await loadCurrentVersion(of: asset)
+                    isFavorite = asset.isFavorite
+                } else {
+                    guard let raw = try await item.loadTransferable(type: Data.self) else {
+                        await MainActor.run { failedCount += 1 }
+                        continue
                     }
+                    data = raw
+                    mimeType = "image/jpeg"
+                    isFavorite = false
                 }
 
-                let filename = "photo_\(Date().timeIntervalSince1970).jpg"
-                let mimeType = "image/jpeg"
+                let ext = mimeType.contains("heic") ? "heic" : "jpg"
+                let filename = "photo_\(Date().timeIntervalSince1970).\(ext)"
 
                 let uploaded = try await APIClient.shared.uploadPhoto(
                     data: data,
                     filename: filename,
-                    mimeType: mimeType
+                    mimeType: mimeType,
+                    isFavorite: isFavorite
                 )
 
                 if let aid = albumId {
@@ -137,36 +144,36 @@ struct PhotoUploadView: View {
         dismiss()
     }
 
-    /// Writes XMP xmp:Rating into the JPEG/HEIC data without re-encoding pixels.
-    /// Returns nil if the operation fails (caller should fall back to original data).
-    private func withXMPRating(_ data: Data, rating: Int) -> Data? {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-              let uti = CGImageSourceGetType(source) else { return nil }
+    /// Loads the current (edited) version of the photo using PHImageManager.
+    /// Unedited HEIC photos remain HEIC; edited photos are rendered as JPEG by iOS.
+    private func loadCurrentVersion(of asset: PHAsset) async throws -> (Data, String) {
+        try await withCheckedThrowingContinuation { continuation in
+            let options = PHImageRequestOptions()
+            options.version = .current
+            options.deliveryMode = .highQualityFormat
+            options.isNetworkAccessAllowed = true
+            options.isSynchronous = false
 
-        let metadata = CGImageMetadataCreateMutable()
-        CGImageMetadataRegisterNamespaceForPrefix(
-            metadata,
-            "http://ns.adobe.com/xap/1.0/" as CFString,
-            "xmp" as CFString,
-            nil
-        )
-        guard let tag = CGImageMetadataTagCreate(
-            "http://ns.adobe.com/xap/1.0/" as CFString,
-            "xmp" as CFString,
-            "Rating" as CFString,
-            .string,
-            "\(rating)" as CFTypeRef
-        ) else { return nil }
-        CGImageMetadataSetTagWithPath(metadata, nil, "xmp:Rating" as CFString, tag)
-
-        let output = NSMutableData()
-        guard let dest = CGImageDestinationCreateWithData(output, uti, 1, nil) else { return nil }
-        let options: [CFString: Any] = [
-            kCGImageDestinationMetadata: metadata,
-            kCGImageDestinationMergeMetadata: true
-        ]
-        guard CGImageDestinationCopyImageSource(dest, source, options as CFDictionary, nil) else { return nil }
-        CGImageDestinationFinalize(dest)
-        return output as Data
+            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, uti, _, info in
+                if let error = info?[PHImageErrorKey] as? Error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let data else {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                let mime: String
+                if let uti {
+                    if uti.contains("heic") || uti.contains("heif") { mime = "image/heic" }
+                    else if uti.contains("png")                      { mime = "image/png" }
+                    else if uti.contains("tiff")                     { mime = "image/tiff" }
+                    else                                             { mime = "image/jpeg" }
+                } else {
+                    mime = "image/jpeg"
+                }
+                continuation.resume(returning: (data, mime))
+            }
+        }
     }
 }
