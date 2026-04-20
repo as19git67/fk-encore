@@ -780,6 +780,16 @@ onMounted(loadData)
             <SelectButton v-model="shareAccessLevel" :options="accessLevelOptions" optionLabel="label" optionValue="value" :allowEmpty="false" />
             <Button label="Freigeben" icon="pi pi-check" :loading="sharing" :disabled="!shareUserId" @click="handleShare" />
           </div>
+          <div class="share-access-explanation">
+            <div class="share-access-explanation-row">
+              <span class="share-badge share-badge--read">Nur lesen</span>
+              <span>Das Album und seine Fotos können angesehen werden – keine Änderungen möglich.</span>
+            </div>
+            <div class="share-access-explanation-row">
+              <span class="share-badge share-badge--write">Bearbeiten</span>
+              <span>Zusätzlich können Albumdetails geändert sowie Fotos hinzugefügt oder entfernt werden.</span>
+            </div>
+          </div>
         </div>
       </template>
     </Dialog>
@@ -1072,6 +1082,9 @@ onMounted(loadData)
 .share-user-select { flex: 1; min-width: 180px; }
 .share-userid-input { width: 120px; }
 .share-hint { font-size: 0.8rem; color: var(--p-text-muted-color); margin-top: 0.4rem; display: block; }
+.share-access-explanation { margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.8rem; color: var(--p-text-muted-color); }
+.share-access-explanation-row { display: flex; align-items: flex-start; gap: 0.5rem; line-height: 1.3; }
+.share-access-explanation-row .share-badge { flex-shrink: 0; margin-top: 0.1rem; }
 .public-link-block { display: flex; flex-direction: column; gap: 0.4rem; }
 .public-link-row { display: flex; gap: 0.5rem; align-items: center; }
 .public-link-input { flex: 1; font-size: 0.8rem; }
