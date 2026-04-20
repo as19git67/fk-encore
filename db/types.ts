@@ -361,8 +361,12 @@ export interface Person {
   updated_at: string;
 }
 
-export interface ListPersonsResponse { 
-  persons: (Person & { faceCount: number })[];
+export interface ListPersonsResponse {
+  persons: (Person & {
+    faceCount: number;
+    oldest_photo_at?: string;
+    newest_photo_at?: string;
+  })[];
   enableLocalFaces: boolean;
 }
 export interface PersonDetails extends Person { faces: Face[] }
