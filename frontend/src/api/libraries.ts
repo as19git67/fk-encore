@@ -98,13 +98,13 @@ export function deleteLibrary(id: number) {
 }
 
 export function scanLibrary(id: number) {
-  return apiFetch<{ queued: boolean }>(`/libraries/${id}/scan`, {
+  return apiFetch<ScanReport>(`/libraries/${id}/scan`, {
     method: 'POST',
   })
 }
 
 export function reconcileLibrary(id: number) {
-  return apiFetch<{ queued: boolean }>(`/libraries/${id}/reconcile`, {
+  return apiFetch<{ removed: number }>(`/libraries/${id}/reconcile`, {
     method: 'POST',
   })
 }

@@ -14,11 +14,10 @@ import type {
   PhotoLibrary,
   CreateLibraryRequest,
   UpdateLibraryRequest,
+  ScanReport,
   LibraryRootInfo,
 } from "./libraries.service";
 import { startWatcher, stopWatcher } from "./library-watcher";
-import { enqueueLibraryScan } from "./library-scan-queue";
-import { triggerLibraryScanWorker } from "./scan-worker";
 
 function getUserId(): number {
   const authData = getAuthData();
@@ -110,17 +109,14 @@ export const deleteLibrary = api(
 
 export const scanLibrary = api(
   { expose: true, method: "POST", path: "/libraries/:id/scan", auth: true },
-  async ({ id }: { id: number }): Promise<{ queued: boolean }> => {
+  async ({ id }: { id: number }): Promise<ScanReport> => {
     checkPermission();
-    const lib = await libs.getLibrary(id);
-    if (!lib) throw APIError.notFound(`library ${id} not found`);
     try {
-      const jobId = await enqueueLibraryScan(id, false);
-      if (jobId !== null) triggerLibraryScanWorker();
-      // jobId === null means a scan was already pending/processing; from the
-      // caller's perspective the request still succeeded — work is in flight.
-      return { queued: jobId !== null };
+      return await libs.scanLibrary(id);
     } catch (err) {
+      if (err instanceof libs.ScanAlreadyRunningError) {
+        throw APIError.failedPrecondition(err.message);
+      }
       toApiError(err);
     }
   }
@@ -128,16 +124,10 @@ export const scanLibrary = api(
 
 export const reconcileLibrary = api(
   { expose: true, method: "POST", path: "/libraries/:id/reconcile", auth: true },
-  async ({ id }: { id: number }): Promise<{ queued: boolean }> => {
+  async ({ id }: { id: number }): Promise<{ removed: number }> => {
     checkPermission();
-    const lib = await libs.getLibrary(id);
-    if (!lib) throw APIError.notFound(`library ${id} not found`);
     try {
-      // Reconcile is merged with scan — the worker runs reconcileLibrary()
-      // first and then scans for new files in the same job.
-      const jobId = await enqueueLibraryScan(id, true);
-      if (jobId !== null) triggerLibraryScanWorker();
-      return { queued: jobId !== null };
+      return await libs.reconcileLibrary(id);
     } catch (err) {
       toApiError(err);
     }

@@ -17,13 +17,6 @@ import { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY } from "./photo.se
 export type ScanService = "embedding" | "face_detection" | "face_assignment" | "landmark" | "quality" | "geocoding";
 export type ScanStatus = "pending" | "processing" | "failed" | "done";
 
-/**
- * Service identifiers surfaced in QueueStatus.services. Includes the
- * DB-backed ScanService values plus synthetic rows aggregated from other
- * queues (currently: library_scan).
- */
-export type QueueServiceId = ScanService | "library_scan";
-
 /** Services that run once per photo (no user_id in queue). */
 const GLOBAL_SERVICES: ReadonlySet<ScanService> = new Set([
   "face_detection", "embedding", "landmark", "quality", "geocoding",
@@ -50,7 +43,7 @@ export class DeferJobError extends Error {
 }
 
 export interface QueueServiceStatus {
-  service: QueueServiceId;
+  service: ScanService;
   pending: number;
   processing: number;
   failed: number;
@@ -202,7 +195,7 @@ export async function getQueueStatus(userId: number): Promise<QueueStatus> {
     GROUP BY service, status
   `);
 
-  const map = new Map<QueueServiceId, QueueServiceStatus>();
+  const map = new Map<ScanService, QueueServiceStatus>();
   for (const svc of (["embedding", "face_detection", "face_assignment", "landmark", "quality", "geocoding"] as ScanService[])) {
     map.set(svc, { service: svc, pending: 0, processing: 0, failed: 0, done: 0 });
   }
@@ -213,25 +206,6 @@ export async function getQueueStatus(userId: number): Promise<QueueStatus> {
       entry[row.status] = Number(row.count);
     }
   }
-
-  // Library scans live in their own table but are surfaced as just another
-  // row in the same status table so the admin sees the complete picture.
-  const libRows = await db.execute<{ status: ScanStatus; count: string }>(sql`
-    SELECT status, COUNT(*)::int as count
-    FROM library_scan_queue
-    GROUP BY status
-  `);
-  const libEntry: QueueServiceStatus = {
-    service: "library_scan",
-    pending: 0,
-    processing: 0,
-    failed: 0,
-    done: 0,
-  };
-  for (const row of libRows.rows) {
-    libEntry[row.status] = Number(row.count);
-  }
-  map.set("library_scan", libEntry);
 
   return { services: Array.from(map.values()) };
 }

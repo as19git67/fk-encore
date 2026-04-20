@@ -3721,10 +3721,6 @@ export async function rescanPhotoGpsLogic(
 // ── Scan Queue API helpers ───────────────────────────────────────────────────
 
 import { getQueueStatus, requeueFailed, requeueForRescan, cancelPendingScans } from "./scan-queue";
-import {
-  requeueFailedLibraryScans,
-  cancelPendingLibraryScans,
-} from "./library-scan-queue";
 
 export async function getScanQueueStatusLogic(userId: number) {
   return getQueueStatus(userId);
@@ -3738,17 +3734,13 @@ export async function rescanPhotosLogic(userId: number, force: boolean): Promise
 
 export async function retryFailedScansLogic(userId: number): Promise<{ retried: number }> {
   const retried = await requeueFailed(userId);
-  // Also retry any failed library-scan jobs so the "Fehler wiederholen"
-  // button in Datenverwaltung covers the whole status table.
-  const retriedLib = await requeueFailedLibraryScans();
   triggerWorkers();
-  return { retried: retried + retriedLib };
+  return { retried };
 }
 
 export async function cancelPendingScansLogic(userId: number): Promise<{ cancelled: number }> {
   const cancelled = await cancelPendingScans(userId);
-  const cancelledLib = await cancelPendingLibraryScans();
-  return { cancelled: cancelled + cancelledLib };
+  return { cancelled };
 }
 
 /**
