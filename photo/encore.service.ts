@@ -2,6 +2,8 @@ import { Service } from "encore.dev/service";
 import { maintenanceMiddleware } from "../backup/maintenance";
 import { migrateStorageLayout } from "./storage-migration";
 
+console.log("[boot] photo/encore.service.ts: begin");
+
 // Start background scan workers when the service boots.
 import "./scan-worker";
 
@@ -24,7 +26,11 @@ startConfiguredWatchers().catch((err) => {
   console.error("[photo] failed to start library watchers:", err);
 });
 
+console.log("[boot] photo/encore.service.ts: registering Service");
+
 // Photo service for managing photos and albums.
 export default new Service("photo", {
   middlewares: [maintenanceMiddleware],
 });
+
+console.log("[boot] photo/encore.service.ts: end");

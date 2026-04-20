@@ -9,6 +9,8 @@ import type {
   DeleteResponse,
 } from "../db/types";
 
+console.log("[boot] user/user-roles.service.ts: all imports resolved");
+
 export async function assignRoleLogic(req: AssignRoleRequest): Promise<UserRolesResponse> {
   const user = await dbFirst<{ id: number }>(
     db.select({ id: users.id }).from(users).where(eq(users.id, req.userId))

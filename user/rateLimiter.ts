@@ -1,6 +1,8 @@
 import { APIError } from "encore.dev/api";
 import { currentRequest } from "encore.dev";
 
+console.log("[boot] user/rateLimiter.ts: all imports resolved");
+
 interface RateLimitEntry {
   count: number;
   resetAt: number;

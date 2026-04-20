@@ -8,6 +8,8 @@ import type {
 import { loginLogic, logoutLogic, refreshTokenLogic, requestPasswordResetLogic, resetPasswordLogic } from "./auth.service";
 import { getAuthToken } from "./auth-handler";
 
+console.log("[boot] user/auth.ts: all imports resolved");
+
 /** Login — no auth required */
 export const login = api(
   { expose: true, method: "POST", path: "/auth/login" },

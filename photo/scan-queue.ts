@@ -12,7 +12,7 @@
 import { eq, and, inArray, sql, not, isNull } from "drizzle-orm";
 import db from "../db/database";
 import { photoScanQueue, photos, faces, photoLandmarks } from "../db/schema";
-import { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY } from "./photo.service";
+import { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY } from "./scan-config";
 
 export type ScanService = "embedding" | "face_detection" | "face_assignment" | "landmark" | "quality" | "geocoding";
 export type ScanStatus = "pending" | "processing" | "failed" | "done";

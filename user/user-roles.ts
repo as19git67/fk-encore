@@ -12,6 +12,8 @@ import {
 import { requirePermission } from "./auth-handler";
 import { getAuthData } from "~encore/auth";
 
+console.log("[boot] user/user-roles.ts: all imports resolved");
+
 /** Assign a role to a user — requires roles.assign */
 export const assignRole = api(
   { expose: true, auth: true, method: "POST", path: "/users/:userId/roles" },

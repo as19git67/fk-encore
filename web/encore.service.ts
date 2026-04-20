@@ -1,5 +1,7 @@
 import { Service } from "encore.dev/service";
 
+console.log("[boot] web/encore.service.ts: begin");
+
 // Restrict default permissions for files/dirs the app (and any spawned
 // children, e.g. exiftool via exiftool-vendored) create at runtime:
 //   files -> 0660 (rw-rw----)
@@ -16,5 +18,7 @@ process.umask(0o007);
 // working during backups. The raw SPA handler (/app/*) and the typed
 // /api/build-info endpoint opt into maintenance mode individually; see
 // web/static.ts.
+console.log("[boot] web/encore.service.ts: registering Service");
 export default new Service("web");
+console.log("[boot] web/encore.service.ts: end");
 

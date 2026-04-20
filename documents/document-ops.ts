@@ -31,6 +31,8 @@ import {
 import { TAX_SECTIONS } from "./tax-sections";
 import { flattenTaxonomy } from "./taxonomy";
 
+console.log("[boot] documents/document-ops.ts: all imports resolved");
+
 /** Maximum characters of extracted text we feed the classifier. */
 const CLASSIFY_TEXT_LIMIT = parseInt(
   process.env.DOCUMENTS_CLASSIFY_CHAR_LIMIT ?? "6000",

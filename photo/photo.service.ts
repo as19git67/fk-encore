@@ -7,9 +7,20 @@ import { exiftool } from "exiftool-vendored";
 import { eq, and, or, sql, inArray, ilike, isNull, isNotNull, desc } from "drizzle-orm";
 import { APIError } from "encore.dev/api";
 import { enqueuePhotoScan, DeferJobError } from "./scan-queue";
-import { triggerWorkers } from "./scan-worker";
 import { isUnderPressure } from "./event-loop-pressure";
+import { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY } from "./scan-config";
+export { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY } from "./scan-config";
 import db from "../db/database";
+
+// Dynamic import breaks the static async-init cycle between
+// photo.service and scan-worker. Both modules become esbuild async-init
+// (transitively via db/database.ts top-level await); a static import here
+// would deadlock init_scan_worker <-> init_photo_service at boot.
+function triggerWorkers(): void {
+  import("./scan-worker")
+    .then((m) => m.triggerWorkers())
+    .catch((err) => console.error("[photo.service] triggerWorkers failed:", err));
+}
 import { dbFirst, dbAll, dbExec, dbInsertReturning } from '../db/adapter';
 import type { IncomingMessage } from "http";
 import { pipeline } from "stream/promises";
@@ -74,6 +85,8 @@ import {
   buildPhotoFilterConditions,
   type PhotoFilterParams,
 } from "./photo.filters";
+
+console.log("[boot] photo/photo.service.ts: all imports resolved");
 
 // heic-convert is a CJS module without TS types; load via createRequire
 const _require = createRequire(import.meta.url);
@@ -152,10 +165,7 @@ function getUploadMimeType(filePath: string): string {
 // We convert it to a "distance" if we want, or just use similarity directly.
 // The config value is now treated as minimum similarity for a match.
 const FACE_SIMILARITY_THRESHOLD = parseFloat(process.env.FACE_DISTANCE_THRESHOLD || "0.45");
-export const ENABLE_LOCAL_FACES = process.env.ENABLE_LOCAL_FACES === "true";
 const LANDMARK_SERVICE_URL = process.env.LANDMARK_SERVICE_URL || "http://localhost:8002";
-export const ENABLE_LANDMARKS = process.env.ENABLE_LANDMARKS === "true";
-export const ENABLE_QUALITY = process.env.ENABLE_QUALITY !== "false"; // enabled by default
 
 // ── AI system user for virtual curation votes ────────────────────────────────
 const AI_USER_EMAIL = "ai@system.local";

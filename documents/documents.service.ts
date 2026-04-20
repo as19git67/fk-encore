@@ -15,6 +15,8 @@
 import fs from "fs";
 import path from "path";
 
+console.log("[boot] documents/documents.service.ts: all imports resolved");
+
 export const DOCUMENTS_DIR = path.resolve(
   process.env.DOCUMENTS_DIR || "uploads/documents",
 );

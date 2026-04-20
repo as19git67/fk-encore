@@ -20,6 +20,8 @@ import { toUser, getRolesForUser, getPermissionsForUser } from "./user.service";
 import { checkRateLimit, resetRateLimit, getClientIp } from "./rateLimiter";
 import { sendPasswordResetEmail } from "./mail";
 
+console.log("[boot] user/auth.service.ts: all imports resolved");
+
 const nowSql = sql`NOW()`
 
 // ---------- Token Lifetimes ----------

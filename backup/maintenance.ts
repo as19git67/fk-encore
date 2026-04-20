@@ -16,6 +16,8 @@
 import { middleware, APIError } from "encore.dev/api";
 import { isInBackupMode } from "./state";
 
+console.log("[boot] backup/maintenance.ts: all imports resolved");
+
 export const maintenanceMiddleware = middleware({}, async (req, next) => {
   if (isInBackupMode()) {
     throw APIError.unavailable(

@@ -107,20 +107,24 @@ export async function initializeDb(): Promise<DbInstance> {
     try {
       const db = await createDb();
       await seed(db);
-      // Run backup-related startup housekeeping exactly once:
-      //   - defensive pg_backup_stop() in case the previous process crashed
-      //     while the cluster was in backup mode,
-      //   - apply any pending `restore-*.dump` file from $BACKUP_DIR.
+      // Run backup-related startup housekeeping exactly once. The only
+      // piece that blocks boot here is the pending-restore check — if a
+      // `restore-*.dump` trigger sits in $BACKUP_DIR the cluster will be
+      // rolled back before the app serves traffic. Defensive pg_backup_stop
+      // and host-script seeding run in the background inside
+      // runStartupHousekeeping; see backup/startup.ts.
       // Loaded lazily so tests (which mock encore.dev/api but not /log)
       // never pull in the backup module's encore.dev/log dependency.
       if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
         try {
           const { runStartupHousekeeping } = await import("../backup/startup");
-          // Hard cap on housekeeping: pg_backup_stop / pg_restore are
-          // best-effort recovery steps. If they hang (e.g. stuck WAL
-          // archiver), boot must still proceed so the app becomes
-          // responsive and the operator can intervene.
+          // Hard cap on the boot-critical part of housekeeping (currently
+          // only the pending-restore check). Defensive pg_backup_stop and
+          // host-script seeding fire in the background inside
+          // runStartupHousekeeping so a stuck WAL archiver, a slow backup
+          // volume, or a broken PG socket can never block the boot.
           const HOUSEKEEPING_TIMEOUT_MS = 60_000;
+          console.log("[db] backup housekeeping: start");
           await Promise.race([
             runStartupHousekeeping(),
             new Promise<void>((_, reject) =>
@@ -130,6 +134,7 @@ export async function initializeDb(): Promise<DbInstance> {
               ).unref?.(),
             ),
           ]);
+          console.log("[db] backup housekeeping: done");
         } catch (err: any) {
           console.error(`[db] backup housekeeping failed: ${err?.message ?? err}`);
         }
@@ -138,6 +143,7 @@ export async function initializeDb(): Promise<DbInstance> {
       if (attempt > 1) {
         console.log(`[db] Connected successfully after ${attempt} attempt(s).`);
       }
+      console.log("[db] initializeDb complete");
       return db;
     } catch (err: any) {
       if (!isTransientConnectionError(err)) {
@@ -158,5 +164,6 @@ export async function initializeDb(): Promise<DbInstance> {
 // Top-level await: blocks module load until DB is ready.
 // The process will NOT crash on ECONNREFUSED — it retries until the DB is up.
 const db = await initializeDb();
+console.log("[db] module load complete — Encore services can now boot");
 
 export default db;

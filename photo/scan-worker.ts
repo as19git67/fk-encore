@@ -56,6 +56,8 @@ import {
   WORKER_PRESSURE_DELAY_MS,
 } from "./event-loop-pressure";
 
+console.log("[boot] photo/scan-worker.ts: all imports resolved");
+
 const POLL_INTERVAL_MS = 30_000; // fallback poll when idle
 
 /** Maps each scan-service to the external ML-service it depends on. */

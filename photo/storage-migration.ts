@@ -12,6 +12,8 @@ import {
   reserveStoragePath,
 } from "./photo.service";
 
+console.log("[boot] photo/storage-migration.ts: all imports resolved");
+
 /**
  * Flag file marking a completed migration. Presence prevents the migration
  * from re-running on subsequent starts.

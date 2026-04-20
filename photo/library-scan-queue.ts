@@ -13,6 +13,8 @@ import db from "../db/database";
 import { libraryScanQueue } from "../db/schema";
 import type { ScanReport } from "./libraries.service";
 
+console.log("[boot] photo/library-scan-queue.ts: all imports resolved");
+
 export interface LibraryScanQueueStatus {
   pending: number;
   processing: number;

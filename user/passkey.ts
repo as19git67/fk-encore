@@ -20,6 +20,8 @@ import {
 import { getAuthData } from "~encore/auth";
 import { checkRateLimit, resetRateLimit, getClientIp } from "./rateLimiter";
 
+console.log("[boot] user/passkey.ts: all imports resolved");
+
 // ========== Registration (auth required — user must be logged in to add a passkey) ==========
 
 /** Get passkey registration options — auth required */
