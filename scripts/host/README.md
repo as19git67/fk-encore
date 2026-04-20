@@ -28,10 +28,11 @@ directory onto the backup volume at:
 /mnt/<dataset>/<backup-dir>/host-scripts/
     ├── install-backup-hook.sh
     ├── fk-encore-backup.sh
+    ├── format-backup-log.sh
     └── README.md
 ```
 
-(The container only ever overwrites those three files. Anything else in
+(The container only ever overwrites those four files. Anything else in
 that directory — most importantly the `backup-token` written by the
 installer — is preserved across image upgrades.)
 
@@ -48,6 +49,7 @@ upgrade-safe too.
 |--------------------------|------|
 | `fk-encore-backup.sh`    | The daily driver. Stateless; reads everything from env vars / the sibling token file. The cron job calls this. |
 | `install-backup-hook.sh` | One-time setup helper. Generates the token file (if absent) and prints the cron-job fields to fill in the TrueNAS UI. |
+| `format-backup-log.sh`   | Optional log formatter. Reads `fk-encore-backup.sh` output (stdin or file) and emits a human-readable protocol followed by the raw log. Intended for cron mail. |
 
 ## Install
 
@@ -122,6 +124,23 @@ ls -la /mnt/tank/vivanty/backup/   # should contain encore-<label>.dump
 When run manually, logs go to stderr. When invoked by the TrueNAS cron
 job, stdout/stderr flow into the cron mail (unless you hid them in the
 form).
+
+### Readable cron-mail summary
+
+Pipe the raw log through `format-backup-log.sh` to get a compact protocol
+(label, duration, per-step timeline, prune list, warnings/errors) ahead of
+the raw log. In the TrueNAS UI cron-job **Command** field:
+
+```bash
+bash -c 'set -o pipefail; ZFS_DATASET=tank/vivanty \
+    /mnt/tank/vivanty/backup/host-scripts/fk-encore-backup.sh 2>&1 \
+    | /mnt/tank/vivanty/backup/host-scripts/format-backup-log.sh'
+```
+
+`set -o pipefail` ensures the overall exit code is non-zero when
+`fk-encore-backup.sh` fails, so TrueNAS still flags the job as failed even
+though the formatter itself always exits successfully. The formatter can
+also be pointed at a saved log: `format-backup-log.sh /path/to/backup.log`.
 
 ## Restore
 
