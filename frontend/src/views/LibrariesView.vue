@@ -20,7 +20,6 @@ import {
   reconcileLibrary,
   type PhotoLibrary,
   type LibraryImportMode,
-  type ScanReport,
   type AvailableDirectory,
 } from '../api/libraries'
 import { useAuthStore } from '../stores/auth'
@@ -243,13 +242,11 @@ async function runScan(lib: PhotoLibrary) {
   if (isBusy(lib.id)) return
   markBusy(lib.id, true)
   try {
-    const report: ScanReport = await scanLibrary(lib.id)
+    const res = await scanLibrary(lib.id)
     appendInfo(
-      `Scan "${lib.name}": ${report.imported} importiert, `
-      + `${report.skipped_duplicate} Duplikate, `
-      + `${report.skipped_unsupported} nicht unterstützt, `
-      + `${report.skipped_empty} leer, `
-      + `${report.errors} Fehler (${report.scanned} insgesamt).`,
+      res.queued
+        ? `Scan "${lib.name}" eingereiht — Fortschritt siehe Datenverwaltung.`
+        : `Scan "${lib.name}" läuft bereits.`,
     )
     await loadData()
   } catch (err: any) {
@@ -264,7 +261,11 @@ async function runReconcile(lib: PhotoLibrary) {
   markBusy(lib.id, true)
   try {
     const res = await reconcileLibrary(lib.id)
-    appendInfo(`Abgleich "${lib.name}": ${res.removed} verwaiste Einträge entfernt.`)
+    appendInfo(
+      res.queued
+        ? `Abgleich "${lib.name}" eingereiht — Fortschritt siehe Datenverwaltung.`
+        : `Abgleich "${lib.name}" läuft bereits.`,
+    )
     await loadData()
   } catch (err: any) {
     appendError(`Abgleich "${lib.name}": ${err.message || 'fehlgeschlagen'}`)

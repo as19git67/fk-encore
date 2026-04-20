@@ -38,6 +38,7 @@ const serviceLabels: Record<string, string> = {
   landmark: 'Sehenswürdigkeiten',
   quality: 'Qualität',
   geocoding: 'Geocoding',
+  library_scan: 'Bibliotheks-Scan',
 }
 
 const totalPending = computed(() =>

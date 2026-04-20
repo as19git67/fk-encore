@@ -225,6 +225,13 @@
       "when": 1777400000000,
       "tag": "0030_recaps",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1777500000000,
+      "tag": "0031_library_scan_queue",
+      "breakpoints": true
     }
   ]
 }

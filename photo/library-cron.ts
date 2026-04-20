@@ -3,35 +3,32 @@
  *
  * The chokidar watcher catches live filesystem events, but events are lost
  * during downtime or when files arrive on a network share that doesn't fire
- * inotify. This job iterates every link-mode library, drops rows whose
- * `external_path` no longer exists, and runs a fresh scan to import anything
- * new. Move-mode libraries also get a re-scan so files dropped while the
- * service was down still get picked up.
+ * inotify. This job enqueues a scan-with-reconcile job per library so the
+ * library-scan worker picks them up and the progress appears in the
+ * Scan-Queue status table.
  */
 
 import { CronJob } from "encore.dev/cron";
 import { api } from "encore.dev/api";
-import { listLibraries, reconcileLibrary, scanLibrary } from "./libraries.service";
+import { listLibraries } from "./libraries.service";
+import { enqueueLibraryScan } from "./library-scan-queue";
+import { triggerLibraryScanWorker } from "./scan-worker";
 
 export const reconcileAllLibraries = api(
   { expose: false, method: "POST", path: "/internal/libraries/reconcile" },
-  async (): Promise<{ libraries: number; removed: number; imported: number }> => {
+  async (): Promise<{ libraries: number; queued: number }> => {
     const libs = await listLibraries();
-    let removed = 0;
-    let imported = 0;
+    let queued = 0;
     for (const lib of libs) {
       try {
-        if (lib.import_mode === "link") {
-          const r = await reconcileLibrary(lib.id);
-          removed += r.removed;
-        }
-        const s = await scanLibrary(lib.id);
-        imported += s.imported;
+        const jobId = await enqueueLibraryScan(lib.id, lib.import_mode === "link");
+        if (jobId !== null) queued++;
       } catch (err: any) {
-        console.error(`[library-cron] reconcile failed for library ${lib.id}:`, err?.message ?? err);
+        console.error(`[library-cron] enqueue failed for library ${lib.id}:`, err?.message ?? err);
       }
     }
-    return { libraries: libs.length, removed, imported };
+    if (queued > 0) triggerLibraryScanWorker();
+    return { libraries: libs.length, queued };
   }
 );
 

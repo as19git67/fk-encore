@@ -23,6 +23,12 @@ import {
   type ScanService,
 } from "./scan-queue";
 import {
+  dequeueNextLibraryScan,
+  markLibraryScanDone,
+  markLibraryScanFailed,
+  resetStuckLibraryScans,
+} from "./library-scan-queue";
+import {
   indexPhotoEmbeddings,
   detectPhotoFaces,
   assignFacesForUser,
@@ -263,6 +269,81 @@ class ScanWorker {
   }
 }
 
+/**
+ * Worker for external-library scans. Runs one job at a time (filesystem
+ * walks are I/O-bound and already parallelise internally via individual
+ * file imports). Each job calls scanLibrary(), optionally preceded by
+ * reconcileLibrary() when the enqueuing code asked for it.
+ *
+ * The worker shares the same pause / shutdown lifecycle as the per-photo
+ * ScanWorkers so backups see a quiet queue.
+ */
+class LibraryScanWorker {
+  private running = 0;
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
+  readonly service = "library_scan" as const;
+  readonly concurrency = 1;
+
+  tick(): void {
+    while (this.running < this.concurrency) {
+      this.running++;
+      this.processNext()
+        .then((hadWork) => {
+          this.running--;
+          if (hadWork && this.running < this.concurrency) {
+            const delay = isUnderPressure() ? WORKER_PRESSURE_DELAY_MS : 0;
+            setTimeout(() => this.tick(), delay);
+          }
+        })
+        .catch(() => {
+          this.running--;
+        });
+    }
+  }
+
+  private async processNext(): Promise<boolean> {
+    if (workersPaused) return false;
+    if (isUnderPressure()) return false;
+
+    const job = await dequeueNextLibraryScan();
+    if (!job) return false;
+
+    try {
+      // Dynamic import breaks the scan-worker ↔ libraries.service cycle
+      // (libraries.service imports triggerWorkers from here).
+      const libs = await import("./libraries.service");
+      let removed: number | null = null;
+      if (job.reconcile) {
+        const r = await libs.reconcileLibrary(job.library_id);
+        removed = r.removed;
+      }
+      const report = await libs.scanLibrary(job.library_id);
+      await markLibraryScanDone(job.id, report, removed);
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      console.error(`[scan-worker] library_scan job ${job.id} failed:`, msg);
+      await markLibraryScanFailed(job.id, msg).catch(() => {});
+    }
+    return true;
+  }
+
+  start(): void {
+    this.pollTimer = setInterval(() => this.tick(), POLL_INTERVAL_MS);
+    this.tick();
+  }
+
+  stop(): void {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+  }
+
+  inFlight(): number {
+    return this.running;
+  }
+}
+
 const embeddingConcurrency = parseInt(process.env.SCAN_EMBEDDING_CONCURRENCY ?? "1", 10);
 const faceConcurrency = parseInt(process.env.SCAN_FACE_CONCURRENCY ?? "1", 10);
 const faceAssignConcurrency = parseInt(process.env.SCAN_FACE_ASSIGN_CONCURRENCY ?? "1", 10);
@@ -275,6 +356,7 @@ const faceAssignWorker = new ScanWorker("face_assignment", faceAssignConcurrency
 const landmarkWorker = new ScanWorker("landmark", landmarkConcurrency);
 const qualityWorker = new ScanWorker("quality", qualityConcurrency);
 const geocodingWorker = new ScanWorker("geocoding", 1); // always 1 — Nominatim rate limit
+const libraryScanWorker = new LibraryScanWorker();
 
 /** Wake all workers to check for new work. Non-blocking. */
 export function triggerWorkers(): void {
@@ -285,15 +367,23 @@ export function triggerWorkers(): void {
   landmarkWorker.tick();
   qualityWorker.tick();
   geocodingWorker.tick();
+  libraryScanWorker.tick();
 }
 
-const ALL_WORKERS: ScanWorker[] = [
+/** Wake just the library-scan worker. Called after enqueueLibraryScan(). */
+export function triggerLibraryScanWorker(): void {
+  if (workersPaused) return;
+  libraryScanWorker.tick();
+}
+
+const ALL_WORKERS: Array<{ stop(): void; start(): void; inFlight(): number }> = [
   embeddingWorker,
   faceWorker,
   faceAssignWorker,
   landmarkWorker,
   qualityWorker,
   geocodingWorker,
+  libraryScanWorker,
 ];
 
 /**
@@ -326,6 +416,7 @@ export function resumeWorkers(): void {
 export async function startWorkers(): Promise<void> {
   // Reset jobs that were stuck in 'processing' state when the server last stopped
   await resetStuckJobs();
+  await resetStuckLibraryScans();
 
   // Start event-loop pressure monitor so workers can back off when
   // the server is exhausted, giving health checks priority.
@@ -356,8 +447,9 @@ export async function startWorkers(): Promise<void> {
   landmarkWorker.start();
   qualityWorker.start();
   geocodingWorker.start();
+  libraryScanWorker.start();
   console.log(
-    `[scan-worker] embedding(c=${embeddingConcurrency}), face_detection(c=${faceConcurrency}), face_assignment(c=${faceAssignConcurrency}), landmark(c=${landmarkConcurrency}), quality(c=${qualityConcurrency}), geocoding(c=1)`,
+    `[scan-worker] embedding(c=${embeddingConcurrency}), face_detection(c=${faceConcurrency}), face_assignment(c=${faceAssignConcurrency}), landmark(c=${landmarkConcurrency}), quality(c=${qualityConcurrency}), geocoding(c=1), library_scan(c=1)`,
   );
 }
 
