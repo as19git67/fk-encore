@@ -9,6 +9,7 @@ import {
   listRecaps,
   getRecap,
   dismissRecap,
+  markRecapSeen,
   rebuildRecaps,
   type RecapSummary,
   type RecapDetails,
@@ -93,6 +94,14 @@ async function loadDetail(id: number) {
       detailPhotos.value = res.recap.photo_ids
         .map((pid) => byId.get(pid))
         .filter((p): p is Photo => !!p)
+    }
+    // Opening the detail counts as "seen". Fire-and-forget; a failed
+    // stamp is harmless — the badge just stays until the next rebuild.
+    if (!res.recap.seen_at) {
+      const stamp = new Date().toISOString()
+      markRecapSeen(id).catch(() => {})
+      const summary = recaps.value.find((r) => r.id === id)
+      if (summary) summary.seen_at = stamp
     }
   } catch (err: any) {
     detailError.value = err?.message ?? 'Rückblick konnte nicht geladen werden.'
@@ -205,6 +214,7 @@ function openPlayer() {
             <i class="pi pi-images" />
           </div>
           <span class="recap-kind-badge">{{ kindLabels[r.kind] }}</span>
+          <span v-if="!r.seen_at" class="recap-new-badge">Neu</span>
         </div>
         <div class="recap-meta">
           <div class="recap-title">{{ r.title }}</div>
@@ -361,6 +371,20 @@ function openPlayer() {
   color: #fff;
   border-radius: 999px;
   font-size: 0.75rem;
+}
+
+.recap-new-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 2px 10px;
+  background: var(--p-primary-color, #2563eb);
+  color: var(--p-primary-contrast-color, #fff);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
 .recap-meta {

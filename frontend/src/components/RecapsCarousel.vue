@@ -91,6 +91,7 @@ onMounted(load)
           <div v-else class="recaps-carousel-cover-fallback">
             <i class="pi pi-images" />
           </div>
+          <span v-if="!r.seen_at" class="recaps-carousel-new">Neu</span>
           <div class="recaps-carousel-overlay">
             <span class="recaps-carousel-kind">{{ kindLabels[r.kind] }}</span>
             <span class="recaps-carousel-title">{{ r.title }}</span>
@@ -200,6 +201,20 @@ onMounted(load)
   flex-direction: column;
   align-items: flex-start;
   text-align: left;
+}
+
+.recaps-carousel-new {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 2px 10px;
+  background: var(--p-primary-color, #2563eb);
+  color: var(--p-primary-contrast-color, #fff);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
 .recaps-carousel-kind {

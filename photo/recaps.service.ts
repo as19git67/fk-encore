@@ -63,6 +63,7 @@ export interface RecapSummary {
   photo_count: number;
   created_at: string;
   dismissed_at: string | null;
+  seen_at: string | null;
 }
 
 export interface RecapDetails extends RecapSummary {
@@ -1171,6 +1172,7 @@ export async function listRecapsForUser(
     period_end: string | null;
     created_at: string;
     dismissed_at: string | null;
+    seen_at: string | null;
     photo_count: number;
   }>(
     db
@@ -1184,11 +1186,17 @@ export async function listRecapsForUser(
         period_end: recaps.period_end,
         created_at: recaps.created_at,
         dismissed_at: recaps.dismissed_at,
+        seen_at: recaps.seen_at,
         photo_count: sql<number>`(SELECT COUNT(*)::int FROM ${recapPhotos} WHERE ${recapPhotos.recap_id} = ${recaps.id})`,
       })
       .from(recaps)
       .where(and(...conditions))
-      .orderBy(sql`${recaps.score} DESC`, sql`${recaps.created_at} DESC`)
+      // Unseen recaps surface first; within each bucket, ranked by score.
+      .orderBy(
+        sql`${recaps.seen_at} IS NOT NULL`,
+        sql`${recaps.score} DESC`,
+        sql`${recaps.created_at} DESC`
+      )
   );
 
   return rows.map((r) => ({
@@ -1202,6 +1210,7 @@ export async function listRecapsForUser(
     photo_count: r.photo_count ?? 0,
     created_at: r.created_at,
     dismissed_at: r.dismissed_at,
+    seen_at: r.seen_at,
   }));
 }
 
@@ -1219,6 +1228,7 @@ export async function getRecapForUser(
     period_end: string | null;
     created_at: string;
     dismissed_at: string | null;
+    seen_at: string | null;
     seed: Record<string, unknown> | null;
   }>(
     db
@@ -1232,6 +1242,7 @@ export async function getRecapForUser(
         period_end: recaps.period_end,
         created_at: recaps.created_at,
         dismissed_at: recaps.dismissed_at,
+        seen_at: recaps.seen_at,
         seed: recaps.seed,
       })
       .from(recaps)
@@ -1258,10 +1269,39 @@ export async function getRecapForUser(
     period_end: row.period_end,
     created_at: row.created_at,
     dismissed_at: row.dismissed_at,
+    seen_at: row.seen_at,
     seed: row.seed ?? {},
     photo_count: photoRows.length,
     photo_ids: photoRows.map((p) => p.photo_id),
   };
+}
+
+/**
+ * Mark a recap as seen. Idempotent — the first call stamps `seen_at`,
+ * subsequent calls are no-ops. Returns `true` if the recap exists for
+ * this user (regardless of whether it was already seen), so the frontend
+ * can distinguish "not found" from "already seen".
+ */
+export async function markRecapSeen(
+  userId: number,
+  recapId: number
+): Promise<boolean> {
+  const existing = await dbFirst<{ seen_at: string | null }>(
+    db
+      .select({ seen_at: recaps.seen_at })
+      .from(recaps)
+      .where(and(eq(recaps.id, recapId), eq(recaps.user_id, userId)))
+      .limit(1)
+  );
+  if (!existing) return false;
+  if (existing.seen_at) return true;
+  await dbExec(
+    db
+      .update(recaps)
+      .set({ seen_at: new Date().toISOString() })
+      .where(and(eq(recaps.id, recapId), eq(recaps.user_id, userId)))
+  );
+  return true;
 }
 
 export async function dismissRecap(userId: number, recapId: number): Promise<boolean> {
