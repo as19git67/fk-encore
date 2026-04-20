@@ -231,7 +231,10 @@ async function bestEffortUnwind(label: string): Promise<void> {
   if (hasPgBackupStarted()) {
     try {
       const pool = getBackupPool();
-      await pool.query("SELECT pg_backup_stop()");
+      // wait_for_archive=false: don't let a stuck WAL archiver block the
+      // unwind. The host script's ZFS snapshot already captured consistent
+      // state; WAL archival is orthogonal to our backup flow.
+      await pool.query("SELECT pg_backup_stop(false)");
     } catch (err: any) {
       // 55000 = object_not_in_prerequisite_state — already stopped.
       if (err?.code !== "55000") {
