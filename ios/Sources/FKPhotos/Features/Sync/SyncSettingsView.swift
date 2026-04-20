@@ -15,6 +15,8 @@ struct SyncSettingsView: View {
     @State private var showAuthAlert = false
     @State private var refreshTick   = 0  // Bump to re-read status values
     @State private var showResetConfirm = false
+    @State private var isSyncing     = false
+    @State private var syncError: String?
 
     private var lastSyncDate:   Date? { PhotoSyncPreferences.lastSyncDate }
     private var uploadedCount:  Int   { PhotoSyncPreferences.uploadedCount }
@@ -118,6 +120,38 @@ struct SyncSettingsView: View {
                     Text("Netzwerk")
                 } footer: {
                     Text("Wenn aktiviert, werden Fotos nur über WLAN hochgeladen.")
+                }
+
+                // ── Manual trigger ─────────────────────────────────────
+                Section {
+                    Button {
+                        syncError = nil
+                        isSyncing = true
+                        Task {
+                            do {
+                                try await PhotoSyncService.shared.sync()
+                            } catch {
+                                syncError = error.localizedDescription
+                            }
+                            isSyncing = false
+                            refreshTick += 1
+                        }
+                    } label: {
+                        HStack {
+                            Text("Jetzt synchronisieren")
+                            Spacer()
+                            if isSyncing {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(isSyncing)
+
+                    if let error = syncError {
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
                 }
             }
 

@@ -160,7 +160,7 @@ actor PhotoSyncService {
             let options = PHImageRequestOptions()
             options.isNetworkAccessAllowed = true   // Allow iCloud download
             options.deliveryMode = .highQualityFormat
-            options.version = .original
+            options.version = .current  // include edits; unedited HEIC stays HEIC, edited renders as JPEG
             options.isSynchronous = false
 
             PHImageManager.default().requestImageDataAndOrientation(
