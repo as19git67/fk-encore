@@ -14,7 +14,9 @@ import PhotoCompareView from '../components/PhotoCompareView.vue'
 import NaturalSearchBar from '../components/NaturalSearchBar.vue'
 import FilterMenu from '../components/FilterMenu.vue'
 import FilterChips from '../components/FilterChips.vue'
+import SortMenu from '../components/SortMenu.vue'
 import { useFilter } from '../composables/useFilter'
+import { useSort, type SortField, type SortState } from '../composables/useSort'
 import { matchesPhotoFilter, type PhotoFilterContext } from '../utils/photoFilter'
 
 const TripMap = defineAsyncComponent(() => import('../components/TripMap.vue'))
@@ -112,14 +114,71 @@ function onRemoveFilterKey(keys: Array<keyof typeof filter.value>) {
   removeKey(keys)
 }
 
-// Raw album photos, sorted oldest-first (pre-filter). Used as the source for
-// grouping (stacks) and the filter-context sets so that client-side filtering
-// doesn't cause the stacks to shrink.
+// ── Sort state ────────────────────────────────────────────────────────────────
+const SORT_FIELDS: SortField[] = [
+  { value: 'taken_at', label: 'Aufnahmedatum' },
+  { value: 'created_at', label: 'Importdatum' },
+  { value: 'ai_quality_score', label: 'Qualität' },
+  { value: 'filename', label: 'Dateiname' },
+  { value: 'size', label: 'Dateigröße' },
+]
+const DEFAULT_SORT: SortState = { field: 'taken_at', direction: 'asc' }
+const {
+  applied: sort,
+  draft: sortDraft,
+  isDefault: isSortDefault,
+  fieldLabel: sortFieldLabel,
+  openEdit: openSortEdit,
+  apply: applySort,
+  reset: resetSort,
+} = useSort({ fields: SORT_FIELDS, defaultState: DEFAULT_SORT })
+const sortMenuOpen = ref(false)
+
+function openSortMenu() {
+  openSortEdit()
+  sortMenuOpen.value = true
+}
+function onApplySort() {
+  applySort()
+  sortMenuOpen.value = false
+}
+function onResetSort() {
+  resetSort()
+  sortMenuOpen.value = false
+}
+const sortChipLabel = computed(() =>
+  `Sortierung: ${sortFieldLabel.value} ${sort.value.direction === 'asc' ? '↑' : '↓'}`
+)
+
+function comparePhotos(a: Photo, b: Photo): number {
+  const { field, direction } = sort.value
+  const dir = direction === 'asc' ? 1 : -1
+  switch (field) {
+    case 'taken_at':
+    case 'created_at': {
+      const ta = new Date((a as any)[field] || a.created_at).getTime()
+      const tb = new Date((b as any)[field] || b.created_at).getTime()
+      return (ta - tb) * dir
+    }
+    case 'ai_quality_score': {
+      const qa = a.ai_quality_score ?? -Infinity
+      const qb = b.ai_quality_score ?? -Infinity
+      return (qa - qb) * dir
+    }
+    case 'filename':
+      return a.filename.localeCompare(b.filename) * dir
+    case 'size':
+      return (a.size - b.size) * dir
+    default:
+      return 0
+  }
+}
+
+// Raw album photos, sorted per the applied sort state (pre-filter). Used as
+// the source for grouping (stacks) and the filter-context sets so that
+// client-side filtering doesn't cause the stacks to shrink.
 const rawAlbumPhotos = computed<Photo[]>(() =>
-  [...((album.value?.photos ?? []) as Photo[])].sort((a, b) =>
-    new Date(a.taken_at || a.created_at).getTime() -
-    new Date(b.taken_at || b.created_at).getTime()
-  )
+  [...((album.value?.photos ?? []) as Photo[])].sort(comparePhotos)
 )
 
 const curationStatsMap = computed(() => {
@@ -817,6 +876,14 @@ watch(albumId, () => {
             :outlined="activeCount === 0"
             @click="openFilterMenu"
           />
+          <Button
+            icon="pi pi-sort-alt"
+            :label="isSortDefault ? 'Sortierung' : `Sortierung: ${sortFieldLabel}`"
+            size="small"
+            :severity="isSortDefault ? 'secondary' : 'primary'"
+            :outlined="isSortDefault"
+            @click="openSortMenu"
+          />
         </div>
 
         <!-- 6. Action buttons -->
@@ -832,10 +899,33 @@ watch(albumId, () => {
         </div>
       </div>
 
-      <div v-if="activeCount > 0" class="chip-row">
+      <!-- Natural-language search: global search, results filtered to this album -->
+      <div v-if="albumPhotos.length > 0" class="album-search">
+        <NaturalSearchBar
+          v-model="searchQuery"
+          :loading="searchLoading"
+          :result-count="searchResultCountInAlbum"
+          :has-parsed-chips="hasParsedChips"
+          :location-chip="locationChip"
+          :date-chip="dateChip"
+          :semantic-chip="semanticChip"
+          placeholder="Fotos in diesem Album suchen…"
+          @search="executeSearch"
+          @clear="clearSearch"
+        />
+        <Message v-if="searchError" severity="error" :closable="false">{{ searchError }}</Message>
+      </div>
+
+      <div v-if="activeCount > 0 || !isSortDefault" class="chip-row">
         <FilterChips :filter="filter" @remove="onRemoveFilterKey" />
         <Chip
-          v-if="rawAlbumPhotos.length > 0"
+          v-if="!isSortDefault"
+          :label="sortChipLabel"
+          removable
+          @remove="onResetSort"
+        />
+        <Chip
+          v-if="activeCount > 0 && rawAlbumPhotos.length > 0"
           :label="`${albumPhotos.length} von ${rawAlbumPhotos.length}`"
         />
       </div>
@@ -849,24 +939,15 @@ watch(albumId, () => {
       @reset="onResetFilter"
     />
 
-    <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
+    <SortMenu
+      v-model:visible="sortMenuOpen"
+      v-model:draft="sortDraft"
+      :fields="SORT_FIELDS"
+      @apply="onApplySort"
+      @reset="onResetSort"
+    />
 
-    <!-- Natural-language search: global search, results filtered to this album -->
-    <div v-if="album && albumPhotos.length > 0" class="album-search">
-      <NaturalSearchBar
-        v-model="searchQuery"
-        :loading="searchLoading"
-        :result-count="searchResultCountInAlbum"
-        :has-parsed-chips="hasParsedChips"
-        :location-chip="locationChip"
-        :date-chip="dateChip"
-        :semantic-chip="semanticChip"
-        placeholder="Fotos in diesem Album suchen…"
-        @search="executeSearch"
-        @clear="clearSearch"
-      />
-      <Message v-if="searchError" severity="error" :closable="false">{{ searchError }}</Message>
-    </div>
+    <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
 
     <div v-if="loading && !album" class="info-text">
       <i class="pi pi-spin pi-spinner" /> Album wird geladen…
@@ -1199,9 +1280,9 @@ watch(albumId, () => {
   padding: 0 1em 0.5em;
 }
 
-/* ── Album-scoped natural search bar ─────────────────────────────────────── */
+/* ── Album-scoped natural search bar (inside subheader) ──────────────────── */
 .album-search {
-  padding: 0 1rem;
+  padding: 0 1em 0.5em;
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
