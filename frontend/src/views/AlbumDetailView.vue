@@ -832,6 +832,23 @@ watch(albumId, () => {
         </div>
       </div>
 
+      <!-- Natural-language search: global search, results filtered to this album -->
+      <div v-if="albumPhotos.length > 0" class="album-search">
+        <NaturalSearchBar
+          v-model="searchQuery"
+          :loading="searchLoading"
+          :result-count="searchResultCountInAlbum"
+          :has-parsed-chips="hasParsedChips"
+          :location-chip="locationChip"
+          :date-chip="dateChip"
+          :semantic-chip="semanticChip"
+          placeholder="Fotos in diesem Album suchen…"
+          @search="executeSearch"
+          @clear="clearSearch"
+        />
+        <Message v-if="searchError" severity="error" :closable="false">{{ searchError }}</Message>
+      </div>
+
       <div v-if="activeCount > 0" class="chip-row">
         <FilterChips :filter="filter" @remove="onRemoveFilterKey" />
         <Chip
@@ -850,23 +867,6 @@ watch(albumId, () => {
     />
 
     <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
-
-    <!-- Natural-language search: global search, results filtered to this album -->
-    <div v-if="album && albumPhotos.length > 0" class="album-search">
-      <NaturalSearchBar
-        v-model="searchQuery"
-        :loading="searchLoading"
-        :result-count="searchResultCountInAlbum"
-        :has-parsed-chips="hasParsedChips"
-        :location-chip="locationChip"
-        :date-chip="dateChip"
-        :semantic-chip="semanticChip"
-        placeholder="Fotos in diesem Album suchen…"
-        @search="executeSearch"
-        @clear="clearSearch"
-      />
-      <Message v-if="searchError" severity="error" :closable="false">{{ searchError }}</Message>
-    </div>
 
     <div v-if="loading && !album" class="info-text">
       <i class="pi pi-spin pi-spinner" /> Album wird geladen…
@@ -1199,9 +1199,9 @@ watch(albumId, () => {
   padding: 0 1em 0.5em;
 }
 
-/* ── Album-scoped natural search bar ─────────────────────────────────────── */
+/* ── Album-scoped natural search bar (inside subheader) ──────────────────── */
 .album-search {
-  padding: 0 1rem;
+  padding: 0 1em 0.5em;
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
