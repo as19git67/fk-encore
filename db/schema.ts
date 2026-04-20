@@ -542,3 +542,46 @@ export const documentCategorySuggestions = pgTable("document_category_suggestion
 // NOTE: `document_embeddings` (pgvector) is created via raw SQL in migration
 // 0025 and accessed only through raw queries — drizzle-orm has no native
 // vector column type.
+
+// ========== Rueckblicke (Recaps) ==========
+
+export const recapKindEnum = pgEnum("recap_kind", [
+  "on_this_day",
+  "trip",
+  "person",
+  "place",
+  "theme",
+  "recent_highlights",
+]);
+
+export const recaps = pgTable("recaps", {
+  id: serial("id").primaryKey(),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  kind: recapKindEnum("kind").notNull(),
+  title: text("title").notNull(),
+  subtitle: text("subtitle"),
+  cover_photo_id: integer("cover_photo_id").references(() => photos.id, { onDelete: "set null" }),
+  period_start: timestamp("period_start", { mode: "string" }),
+  period_end: timestamp("period_end", { mode: "string" }),
+  score: real("score").notNull().default(0),
+  dedup_key: text("dedup_key").notNull(),
+  seed: jsonb("seed").notNull().default(sql`'{}'::jsonb`).$type<Record<string, unknown>>(),
+  created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+  dismissed_at: timestamp("dismissed_at", { mode: "string" }),
+});
+
+export const recapPhotos = pgTable(
+  "recap_photos",
+  {
+    recap_id: integer("recap_id")
+      .notNull()
+      .references(() => recaps.id, { onDelete: "cascade" }),
+    photo_id: integer("photo_id")
+      .notNull()
+      .references(() => photos.id, { onDelete: "cascade" }),
+    rank: integer("rank").notNull().default(0),
+  },
+  (table) => [primaryKey({ columns: [table.recap_id, table.photo_id] })]
+);
