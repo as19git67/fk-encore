@@ -19,6 +19,7 @@ export interface RecapSummary {
   photo_count: number
   created_at: string
   dismissed_at: string | null
+  seen_at: string | null
 }
 
 export interface RecapDetails extends RecapSummary {
@@ -44,6 +45,12 @@ export function getRecap(id: number) {
 
 export function dismissRecap(id: number) {
   return apiFetch<{ dismissed: boolean }>(`/recaps/${id}/dismiss`, {
+    method: 'POST',
+  })
+}
+
+export function markRecapSeen(id: number) {
+  return apiFetch<{ seen: boolean }>(`/recaps/${id}/seen`, {
     method: 'POST',
   })
 }
