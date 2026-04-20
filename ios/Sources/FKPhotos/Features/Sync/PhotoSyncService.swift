@@ -66,6 +66,7 @@ actor PhotoSyncService {
                 let uploaded = try await APIClient.shared.uploadPhoto(data: data, filename: filename, mimeType: mimeType, isFavorite: asset.isFavorite, capturedAt: asset.creationDate)
                 uploadedIds.insert(asset.localIdentifier)
                 PhotoSyncPreferences.saveUploadedIds(uploadedIds)
+                PhotoSyncPreferences.recordUploadedPhoto(serverPhotoId: uploaded.id, localIdentifier: asset.localIdentifier)
                 await addToTargetAlbum(photoId: uploaded.id, sourceAlbumId: sourceAlbumId)
             } catch APIError.duplicatePhoto(let existingPhotoId) {
                 // Server already has this photo (same SHA256 hash). Still attach
