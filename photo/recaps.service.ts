@@ -25,6 +25,7 @@ import {
 } from "../db/schema";
 import { generateRecapTitle, type RecapTitleContext } from "./recaps-llm-client";
 import { RECAP_THEMES, type RecapTheme } from "./recap-themes";
+import { repairMojibake } from "./text-encoding";
 
 const MIN_PHOTOS_PER_RECAP = 4;
 const MAX_PHOTOS_PER_RECAP = 30;
@@ -301,14 +302,22 @@ async function resolveTitle(opts: {
   try {
     const llm = await generateRecapTitle(opts.ctx);
     if (llm && llm.title) {
-      return { title: llm.title, subtitle: llm.subtitle, llmUsed: true };
+      return {
+        title: repairMojibake(llm.title),
+        subtitle: repairMojibake(llm.subtitle),
+        llmUsed: true,
+      };
     }
   } catch (err: any) {
     console.warn(
       `[recaps] LLM title generation failed for ${opts.dedupKey}: ${err?.message ?? err}`
     );
   }
-  return { ...opts.fallback, llmUsed: false };
+  return {
+    title: repairMojibake(opts.fallback.title),
+    subtitle: repairMojibake(opts.fallback.subtitle),
+    llmUsed: false,
+  };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -506,8 +515,12 @@ function buildTripClusters(
       end,
       centroidLat: cLat,
       centroidLon: cLon,
-      dominantCity: mostFrequent(bucket.map((p) => p.location_city)),
-      dominantCountry: mostFrequent(bucket.map((p) => p.location_country)),
+      // location_city / location_country may contain UTF-8-as-Latin-1
+      // mojibake from IPTC EXIF fields that lack a CodedCharacterSet
+      // marker. Repair at the boundary so both the fallback title and
+      // the LLM context see clean strings.
+      dominantCity: repairMojibake(mostFrequent(bucket.map((p) => p.location_city))),
+      dominantCountry: repairMojibake(mostFrequent(bucket.map((p) => p.location_country))),
     });
     bucket = [];
   };
@@ -882,7 +895,9 @@ async function buildPlaceRecaps(
 ): Promise<number> {
   const byCity = new Map<string, CandidatePhoto[]>();
   for (const p of allPhotos) {
-    const city = p.location_city?.trim();
+    // Repair IPTC Latin-1-mojibake city names at the grouping boundary so
+    // "Brüssel" and "BrÃ¼ssel" aren't treated as different cities.
+    const city = repairMojibake(p.location_city?.trim() ?? "");
     if (!city) continue;
     const arr = byCity.get(city) ?? [];
     arr.push(p);
