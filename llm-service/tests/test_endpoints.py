@@ -96,3 +96,47 @@ def test_classify_validates_empty_taxonomy():
         json={"text": "x", "taxonomy": []},
     )
     assert resp.status_code == 422
+
+
+def test_recap_title_returns_503_when_llm_missing():
+    main._state["llm"] = None
+    client = TestClient(main.app)
+    resp = client.post(
+        "/recap-title",
+        json={"kind": "trip", "place_city": "Lissabon"},
+    )
+    assert resp.status_code == 503
+    assert "llm" in resp.json()["detail"].lower()
+
+
+def test_recap_title_validates_missing_kind():
+    client = TestClient(main.app)
+    resp = client.post("/recap-title", json={})
+    assert resp.status_code == 422
+
+
+def test_recap_context_renders_expected_lines():
+    req = main.RecapTitleRequest(
+        kind="trip",
+        place_city="Lissabon",
+        place_country="Portugal",
+        date_range="Juli 2023",
+        photo_count=42,
+        keywords=["strand", "meer", "altstadt"],
+    )
+    ctx = main._recap_context(req)
+    assert "Art des Rückblicks: trip" in ctx
+    assert "Ort: Lissabon" in ctx
+    assert "Land: Portugal" in ctx
+    assert "Zeitraum: Juli 2023" in ctx
+    assert "Fotos: 42" in ctx
+    assert "Stichwörter: strand, meer, altstadt" in ctx
+
+
+def test_recap_context_skips_country_when_equal_to_city():
+    req = main.RecapTitleRequest(
+        kind="place", place_city="Berlin", place_country="Berlin"
+    )
+    ctx = main._recap_context(req)
+    assert "Ort: Berlin" in ctx
+    assert "Land: Berlin" not in ctx
