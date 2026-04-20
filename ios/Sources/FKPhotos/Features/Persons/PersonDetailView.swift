@@ -124,7 +124,7 @@ struct PersonDetailView: View {
             Text("Gib einen Namen für diese Person ein.")
         }
         .confirmationDialog(
-            conflictPerson.map { "Mit \"\($0.name)\" zusammenfuhren?" } ?? "",
+            conflictPerson.map { "Mit \"\($0.name)\" zusammenführen?" } ?? "",
             isPresented: Binding(
                 get: { conflictPerson != nil },
                 set: { if !$0 { conflictPerson = nil } }
@@ -132,7 +132,7 @@ struct PersonDetailView: View {
             titleVisibility: .visible
         ) {
             if let conflict = conflictPerson {
-                Button("Zusammenfuhren mit \"\(conflict.name)\"") {
+                Button("Zusammenführen mit \"\(conflict.name)\"") {
                     Task { await mergeInto(conflict) }
                 }
             }
