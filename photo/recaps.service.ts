@@ -25,6 +25,7 @@ import {
 } from "../db/schema";
 import { generateRecapTitle, type RecapTitleContext } from "./recaps-llm-client";
 import { RECAP_THEMES, type RecapTheme } from "./recap-themes";
+import { repairMojibake } from "./text-encoding";
 
 const MIN_PHOTOS_PER_RECAP = 4;
 const MAX_PHOTOS_PER_RECAP = 30;
@@ -301,14 +302,22 @@ async function resolveTitle(opts: {
   try {
     const llm = await generateRecapTitle(opts.ctx);
     if (llm && llm.title) {
-      return { title: llm.title, subtitle: llm.subtitle, llmUsed: true };
+      return {
+        title: repairMojibake(llm.title),
+        subtitle: repairMojibake(llm.subtitle),
+        llmUsed: true,
+      };
     }
   } catch (err: any) {
     console.warn(
       `[recaps] LLM title generation failed for ${opts.dedupKey}: ${err?.message ?? err}`
     );
   }
-  return { ...opts.fallback, llmUsed: false };
+  return {
+    title: repairMojibake(opts.fallback.title),
+    subtitle: repairMojibake(opts.fallback.subtitle),
+    llmUsed: false,
+  };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -506,8 +515,12 @@ function buildTripClusters(
       end,
       centroidLat: cLat,
       centroidLon: cLon,
-      dominantCity: mostFrequent(bucket.map((p) => p.location_city)),
-      dominantCountry: mostFrequent(bucket.map((p) => p.location_country)),
+      // location_city / location_country may contain UTF-8-as-Latin-1
+      // mojibake from IPTC EXIF fields that lack a CodedCharacterSet
+      // marker. Repair at the boundary so both the fallback title and
+      // the LLM context see clean strings.
+      dominantCity: repairMojibake(mostFrequent(bucket.map((p) => p.location_city))),
+      dominantCountry: repairMojibake(mostFrequent(bucket.map((p) => p.location_country))),
     });
     bucket = [];
   };
@@ -882,7 +895,9 @@ async function buildPlaceRecaps(
 ): Promise<number> {
   const byCity = new Map<string, CandidatePhoto[]>();
   for (const p of allPhotos) {
-    const city = p.location_city?.trim();
+    // Repair IPTC Latin-1-mojibake city names at the grouping boundary so
+    // "Brüssel" and "BrÃ¼ssel" aren't treated as different cities.
+    const city = repairMojibake(p.location_city?.trim() ?? "");
     if (!city) continue;
     const arr = byCity.get(city) ?? [];
     arr.push(p);
@@ -1116,41 +1131,76 @@ export async function rebuildRecapsForUser(
   return { on_this_day, trip, person, recent_highlights, place, theme };
 }
 
+// Promise-lock guarding rebuildRecapsForAllUsers. See the comment in the
+// function body for why this exists.
+let allUsersRebuildRunning:
+  | Promise<{ users: number; total: RebuildResult }>
+  | null = null;
+
 export async function rebuildRecapsForAllUsers(
   now: Date = new Date(),
   options: RebuildOptions = {}
-): Promise<{ users: number; total: RebuildResult }> {
-  const rows = await dbAll<{ user_id: number }>(
-    db
-      .selectDistinct({ user_id: photos.user_id })
-      .from(photos)
-      .where(isNotNull(photos.user_id))
-  );
-  const total: RebuildResult = {
-    on_this_day: 0,
-    trip: 0,
-    person: 0,
-    recent_highlights: 0,
-    place: 0,
-    theme: 0,
-  };
-  for (const row of rows) {
-    try {
-      const r = await rebuildRecapsForUser(row.user_id, now, options);
-      total.on_this_day += r.on_this_day;
-      total.trip += r.trip;
-      total.person += r.person;
-      total.recent_highlights += r.recent_highlights;
-      total.place += r.place;
-      total.theme += r.theme;
-    } catch (err: any) {
-      console.error(
-        `[recaps] rebuild failed for user ${row.user_id}:`,
-        err?.message ?? err
-      );
-    }
+): Promise<{ users: number; total: RebuildResult; skipped?: boolean }> {
+  // Encore's cron scheduler fires every 24h regardless of whether the
+  // previous run has finished. If a rebuild ever overruns (e.g. a slow
+  // embedding/llm service multiplied across many users), we don't want
+  // two passes hammering the same DB rows and HTTP backends. A simple
+  // in-process promise lock collapses a second trigger into a no-op.
+  if (allUsersRebuildRunning) {
+    console.warn(
+      "[recaps] rebuildRecapsForAllUsers already running — skipping duplicate trigger"
+    );
+    return {
+      users: 0,
+      total: {
+        on_this_day: 0,
+        trip: 0,
+        person: 0,
+        recent_highlights: 0,
+        place: 0,
+        theme: 0,
+      },
+      skipped: true,
+    };
   }
-  return { users: rows.length, total };
+  allUsersRebuildRunning = (async () => {
+    const rows = await dbAll<{ user_id: number }>(
+      db
+        .selectDistinct({ user_id: photos.user_id })
+        .from(photos)
+        .where(isNotNull(photos.user_id))
+    );
+    const total: RebuildResult = {
+      on_this_day: 0,
+      trip: 0,
+      person: 0,
+      recent_highlights: 0,
+      place: 0,
+      theme: 0,
+    };
+    for (const row of rows) {
+      try {
+        const r = await rebuildRecapsForUser(row.user_id, now, options);
+        total.on_this_day += r.on_this_day;
+        total.trip += r.trip;
+        total.person += r.person;
+        total.recent_highlights += r.recent_highlights;
+        total.place += r.place;
+        total.theme += r.theme;
+      } catch (err: any) {
+        console.error(
+          `[recaps] rebuild failed for user ${row.user_id}:`,
+          err?.message ?? err
+        );
+      }
+    }
+    return { users: rows.length, total };
+  })();
+  try {
+    return await allUsersRebuildRunning;
+  } finally {
+    allUsersRebuildRunning = null;
+  }
 }
 
 export async function listRecapsForUser(
