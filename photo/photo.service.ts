@@ -75,6 +75,8 @@ import {
   type PhotoFilterParams,
 } from "./photo.filters";
 
+console.log("[boot] photo/photo.service.ts: all imports resolved");
+
 // heic-convert is a CJS module without TS types; load via createRequire
 const _require = createRequire(import.meta.url);
 type HeicConvertFn = (opts: { buffer: ArrayBuffer | Buffer; format: 'JPEG' | 'PNG'; quality: number }) => Promise<ArrayBuffer>;
