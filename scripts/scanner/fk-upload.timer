@@ -1,0 +1,14 @@
+[Unit]
+Description=Periodically retry pending fk-encore document uploads
+
+[Timer]
+# First attempt 30 s after boot so the network is up, then every 2 minutes.
+OnBootSec=30s
+OnUnitActiveSec=2min
+Unit=fk-upload.service
+# Catch up on missed runs if the Pi was off when the timer should have fired.
+Persistent=true
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target
