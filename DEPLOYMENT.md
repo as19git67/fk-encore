@@ -109,6 +109,7 @@ need to clone the fk-encore repo on the host. The path on the host is:
 /mnt/<dataset>/<backup-dir>/host-scripts/
     ├── install-backup-hook.sh
     ├── fk-encore-backup.sh
+    ├── format-backup-log.sh
     └── README.md
 ```
 
