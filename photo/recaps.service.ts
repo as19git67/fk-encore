@@ -23,6 +23,7 @@ import {
   faces,
   userFaceAssignments,
 } from "../db/schema";
+import { generateRecapTitle, type RecapTitleContext } from "./recaps-llm-client";
 
 const MIN_PHOTOS_PER_RECAP = 4;
 const MAX_PHOTOS_PER_RECAP = 30;
@@ -240,6 +241,62 @@ async function upsertRecap(input: {
   return recapId;
 }
 
+/**
+ * Resolves the user-facing title for a recap, preferring an LLM-generated
+ * one. The result is cached in `recap.seed.llm_title = true`, so subsequent
+ * rebuilds (triggered incrementally by scan-worker) skip the LLM call.
+ *
+ * Returns both the chosen title/subtitle and whether it came from the LLM,
+ * so the caller can persist the cache flag in `seed`.
+ */
+async function resolveTitle(opts: {
+  userId: number;
+  dedupKey: string;
+  fallback: { title: string; subtitle: string | null };
+  ctx: RecapTitleContext;
+}): Promise<{ title: string; subtitle: string | null; llmUsed: boolean }> {
+  const existing = await dbFirst<{
+    title: string;
+    subtitle: string | null;
+    seed: unknown;
+  }>(
+    db
+      .select({
+        title: recaps.title,
+        subtitle: recaps.subtitle,
+        seed: recaps.seed,
+      })
+      .from(recaps)
+      .where(
+        and(eq(recaps.user_id, opts.userId), eq(recaps.dedup_key, opts.dedupKey))
+      )
+      .limit(1)
+  );
+
+  if (existing) {
+    const seed = existing.seed as Record<string, unknown> | null | undefined;
+    if (seed && seed.llm_title === true) {
+      return {
+        title: existing.title,
+        subtitle: existing.subtitle,
+        llmUsed: true,
+      };
+    }
+  }
+
+  try {
+    const llm = await generateRecapTitle(opts.ctx);
+    if (llm && llm.title) {
+      return { title: llm.title, subtitle: llm.subtitle, llmUsed: true };
+    }
+  } catch (err: any) {
+    console.warn(
+      `[recaps] LLM title generation failed for ${opts.dedupKey}: ${err?.message ?? err}`
+    );
+  }
+  return { ...opts.fallback, llmUsed: false };
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Builder: on_this_day
 // ────────────────────────────────────────────────────────────────────────────
@@ -285,29 +342,45 @@ async function buildOnThisDayRecaps(
     const periodEnd = new Date(periodStart);
     periodEnd.setHours(23, 59, 59);
 
-    const title =
+    const fallbackTitle =
       yearsAgo === 1
         ? "Vor einem Jahr"
         : `Vor ${yearsAgo} Jahren`;
-    const subtitle = periodStart.toLocaleDateString("de-DE", {
+    const fallbackSubtitle = periodStart.toLocaleDateString("de-DE", {
       day: "numeric",
       month: "long",
       year: "numeric",
     });
     const dedupKey = `on_this_day:${year}-${mm}-${dd}`;
     const score = 70 + Math.min(photosForYear.length, 20);
+    const resolved = await resolveTitle({
+      userId,
+      dedupKey,
+      fallback: { title: fallbackTitle, subtitle: fallbackSubtitle },
+      ctx: {
+        kind: "on_this_day",
+        years_ago: yearsAgo,
+        date_range: fallbackSubtitle,
+        photo_count: photosForYear.length,
+      },
+    });
 
     await upsertRecap({
       userId,
       kind: "on_this_day",
-      title,
-      subtitle,
+      title: resolved.title,
+      subtitle: resolved.subtitle,
       dedupKey,
       coverPhotoId: cover,
       periodStart,
       periodEnd,
       score,
-      seed: { years_ago: yearsAgo, month: today.getMonth() + 1, day: today.getDate() },
+      seed: {
+        years_ago: yearsAgo,
+        month: today.getMonth() + 1,
+        day: today.getDate(),
+        ...(resolved.llmUsed ? { llm_title: true } : {}),
+      },
       photoIds: rankedIds,
     });
     built++;
@@ -503,12 +576,25 @@ async function buildTripRecaps(
       ) + 1
     );
     const score = 40 + Math.min(cluster.photos.length, 40) + durationDays;
+    const fallbackSubtitle = tripSubtitle(cluster);
+    const resolved = await resolveTitle({
+      userId,
+      dedupKey,
+      fallback: { title: tripTitle(cluster), subtitle: fallbackSubtitle },
+      ctx: {
+        kind: "trip",
+        place_city: cluster.dominantCity,
+        place_country: cluster.dominantCountry,
+        date_range: fallbackSubtitle,
+        photo_count: cluster.photos.length,
+      },
+    });
 
     await upsertRecap({
       userId,
       kind: "trip",
-      title: tripTitle(cluster),
-      subtitle: tripSubtitle(cluster),
+      title: resolved.title,
+      subtitle: resolved.subtitle,
       dedupKey,
       coverPhotoId: cover,
       periodStart: cluster.start,
@@ -520,6 +606,7 @@ async function buildTripRecaps(
         centroid_lat: cluster.centroidLat,
         centroid_lon: cluster.centroidLon,
         duration_days: durationDays,
+        ...(resolved.llmUsed ? { llm_title: true } : {}),
       },
       photoIds: rankedIds,
     });
@@ -615,17 +702,33 @@ async function buildPersonRecaps(
         .map(effectiveDate)
         .filter((d): d is Date => d != null)
         .sort((a, b) => a.getTime() - b.getTime());
+      const dedupKey = `person:${person.id}:recent`;
+      const resolved = await resolveTitle({
+        userId,
+        dedupKey,
+        fallback: { title: `Mit ${person.name}`, subtitle: "Zuletzt" },
+        ctx: {
+          kind: "person",
+          person_name: person.name,
+          photo_count: recent.length,
+        },
+      });
       await upsertRecap({
         userId,
         kind: "person",
-        title: `Mit ${person.name}`,
-        subtitle: "Zuletzt",
-        dedupKey: `person:${person.id}:recent`,
+        title: resolved.title,
+        subtitle: resolved.subtitle,
+        dedupKey,
         coverPhotoId: cover,
         periodStart: sorted[0] ?? null,
         periodEnd: sorted[sorted.length - 1] ?? null,
         score: 55 + Math.min(recent.length, 25),
-        seed: { person_id: person.id, window: "recent", days: PERSON_RECENT_DAYS },
+        seed: {
+          person_id: person.id,
+          window: "recent",
+          days: PERSON_RECENT_DAYS,
+          ...(resolved.llmUsed ? { llm_title: true } : {}),
+        },
         photoIds: rankedIds,
       });
       built++;
@@ -647,17 +750,38 @@ async function buildPersonRecaps(
       const { cover, rankedIds } = curatePhotos(list);
       const start = new Date(year, 0, 1);
       const end = new Date(year, 11, 31, 23, 59, 59);
+      const dedupKey = `person:${person.id}:year:${year}`;
+      const resolved = await resolveTitle({
+        userId,
+        dedupKey,
+        fallback: {
+          title: `${person.name} · ${year}`,
+          subtitle: `Jahresrückblick ${year}`,
+        },
+        ctx: {
+          kind: "person",
+          person_name: person.name,
+          year,
+          date_range: String(year),
+          photo_count: list.length,
+        },
+      });
       await upsertRecap({
         userId,
         kind: "person",
-        title: `${person.name} · ${year}`,
-        subtitle: `Jahresrückblick ${year}`,
-        dedupKey: `person:${person.id}:year:${year}`,
+        title: resolved.title,
+        subtitle: resolved.subtitle,
+        dedupKey,
         coverPhotoId: cover,
         periodStart: start,
         periodEnd: end,
         score: 45 + Math.min(list.length, 30),
-        seed: { person_id: person.id, window: "year", year },
+        seed: {
+          person_id: person.id,
+          window: "year",
+          year,
+          ...(resolved.llmUsed ? { llm_title: true } : {}),
+        },
         photoIds: rankedIds,
       });
       built++;
@@ -698,17 +822,33 @@ async function buildRecentHighlightsRecaps(
     year: "numeric",
   });
 
+  const dedupKey = `recent_highlights:${yyyyMm}`;
+  const resolved = await resolveTitle({
+    userId,
+    dedupKey,
+    fallback: { title: "Zuletzt", subtitle: `Deine Highlights im ${monthLabel}` },
+    ctx: {
+      kind: "recent_highlights",
+      month_label: monthLabel,
+      photo_count: recent.length,
+    },
+  });
+
   await upsertRecap({
     userId,
     kind: "recent_highlights",
-    title: "Zuletzt",
-    subtitle: `Deine Highlights im ${monthLabel}`,
-    dedupKey: `recent_highlights:${yyyyMm}`,
+    title: resolved.title,
+    subtitle: resolved.subtitle,
+    dedupKey,
     coverPhotoId: cover,
     periodStart: cutoff,
     periodEnd: today,
     score: 90, // always prominently at the top of the feed
-    seed: { month: yyyyMm, distinct_days: distinctDays.size },
+    seed: {
+      month: yyyyMm,
+      distinct_days: distinctDays.size,
+      ...(resolved.llmUsed ? { llm_title: true } : {}),
+    },
     photoIds: rankedIds,
   });
   return 1;
@@ -750,13 +890,24 @@ async function buildPlaceRecaps(
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "");
     dates.sort((a, b) => a.getTime() - b.getTime());
+    const dedupKey = `place:${slug}`;
+    const resolved = await resolveTitle({
+      userId,
+      dedupKey,
+      fallback: { title: city, subtitle: `${list.length} Fotos aus ${city}` },
+      ctx: {
+        kind: "place",
+        place_city: city,
+        photo_count: list.length,
+      },
+    });
 
     await upsertRecap({
       userId,
       kind: "place",
-      title: city,
-      subtitle: `${list.length} Fotos aus ${city}`,
-      dedupKey: `place:${slug}`,
+      title: resolved.title,
+      subtitle: resolved.subtitle,
+      dedupKey,
       coverPhotoId: cover,
       periodStart: dates[0] ?? null,
       periodEnd: dates[dates.length - 1] ?? null,
@@ -765,6 +916,7 @@ async function buildPlaceRecaps(
         location_city: city,
         photo_count: list.length,
         distinct_days: distinctDays.size,
+        ...(resolved.llmUsed ? { llm_title: true } : {}),
       },
       photoIds: rankedIds,
     });
