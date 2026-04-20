@@ -40,6 +40,8 @@ import log from "encore.dev/log";
 import { getBackupPool } from "./pool";
 import { pgDump, pgRestore } from "./pg-dump";
 
+console.log("[boot] backup/startup.ts: all imports resolved");
+
 const BACKUP_DIR = process.env.BACKUP_DIR ?? "/mnt/backup";
 
 /**

@@ -13,6 +13,8 @@ import type {
   Role,
 } from "../db/types";
 
+console.log("[boot] user/user.service.ts: all imports resolved");
+
 // ---------- Helpers ----------
 
 export function toUser(row: typeof users.$inferSelect): User {

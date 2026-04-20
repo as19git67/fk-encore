@@ -14,6 +14,8 @@
 
 import { isValidTaxSectionSlug, type TaxSectionGroup } from "./tax-sections";
 
+console.log("[boot] documents/llm-client.ts: all imports resolved");
+
 const LLM_SERVICE_URL = (process.env.LLM_SERVICE_URL || "http://localhost:8002").replace(/\/$/, "");
 const DEFAULT_TIMEOUT_MS = parseInt(process.env.LLM_SERVICE_TIMEOUT_MS ?? "120000", 10);
 

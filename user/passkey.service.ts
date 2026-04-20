@@ -7,6 +7,7 @@ import {
 } from "@simplewebauthn/server";
 import { validateAuthEnvironment } from "./startupValidation";
 
+console.log("[boot] user/passkey.service.ts: top imports resolved");
 console.log("[boot] user/passkey.service.ts: validateAuthEnvironment begin");
 // Validate RP_ORIGIN / RP_NAME at service startup
 validateAuthEnvironment();
