@@ -394,6 +394,31 @@ export const photoScanQueue = pgTable("photo_scan_queue", {
   finished_at: timestamp("finished_at", { mode: "string" }),
 });
 
+// ========== Library Scan Queue ==========
+
+export const libraryScanQueue = pgTable("library_scan_queue", {
+  id: serial("id").primaryKey(),
+  library_id: integer("library_id")
+    .notNull()
+    .references(() => photoLibraries.id, { onDelete: "cascade" }),
+  status: scanStatusEnum("status").notNull().default("pending"),
+  // When true the worker also runs reconcileLibrary() before scanLibrary().
+  reconcile: boolean("reconcile").notNull().default(false),
+  attempts: integer("attempts").notNull().default(0),
+  error_msg: text("error_msg"),
+  enqueued_at: timestamp("enqueued_at", { mode: "string" }).notNull().defaultNow(),
+  started_at: timestamp("started_at", { mode: "string" }),
+  finished_at: timestamp("finished_at", { mode: "string" }),
+  // Post-run counts from ScanReport (null while pending/processing).
+  scanned: integer("scanned"),
+  imported: integer("imported"),
+  skipped_duplicate: integer("skipped_duplicate"),
+  skipped_unsupported: integer("skipped_unsupported"),
+  skipped_empty: integer("skipped_empty"),
+  errors: integer("errors"),
+  removed: integer("removed"),
+});
+
 // ========== Documents ==========
 
 export const documentStatusEnum = pgEnum("document_status", [

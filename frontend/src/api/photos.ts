@@ -364,7 +364,14 @@ export function assignFaceToPerson(faceId: number, personId: number) {
 }
 
 export interface ScanQueueServiceStatus {
-  service: 'embedding' | 'face_detection' | 'landmark'
+  service:
+    | 'embedding'
+    | 'face_detection'
+    | 'face_assignment'
+    | 'landmark'
+    | 'quality'
+    | 'geocoding'
+    | 'library_scan'
   pending: number
   processing: number
   failed: number
