@@ -35,6 +35,7 @@
 
 import fs from "fs";
 import path from "path";
+import type { PoolClient } from "pg";
 import log from "encore.dev/log";
 import { getBackupPool } from "./pool";
 import { pgDump, pgRestore } from "./pg-dump";
@@ -129,9 +130,22 @@ async function seedHostScripts(): Promise<void> {
 }
 
 async function defensiveBackupStop(): Promise<void> {
+  const pool = getBackupPool();
+  let client: PoolClient;
   try {
-    const pool = getBackupPool();
-    await pool.query("SELECT pg_backup_stop()");
+    client = await pool.connect();
+  } catch (err: any) {
+    log.warn("backup.startup.pg_backup_stop.connect-failed", { message: err?.message });
+    return;
+  }
+  try {
+    // wait_for_archive=false: if archive_mode is on but the archiver is
+    // stuck, the default pg_backup_stop() hangs indefinitely and would
+    // block app boot (this runs synchronously during db/database.ts init).
+    // We care about exiting backup mode, not about archival progress.
+    // statement_timeout is a belt-and-suspenders cap at the DB level.
+    await client.query("SET statement_timeout = '30s'");
+    await client.query("SELECT pg_backup_stop(false)");
     log.warn("backup.startup.previous-backup-stopped", {
       detail: "pg_backup_stop succeeded — the cluster was left in backup mode by a previous process",
     });
@@ -139,8 +153,16 @@ async function defensiveBackupStop(): Promise<void> {
     // 55000 = object_not_in_prerequisite_state — expected when the
     // cluster is NOT in backup mode (the normal case).
     if (err?.code !== "55000") {
-      log.warn("backup.startup.pg_backup_stop.error", { message: err?.message });
+      log.warn("backup.startup.pg_backup_stop.error", {
+        message: err?.message,
+        code: err?.code,
+      });
     }
+  } finally {
+    // Destroy the connection: if statement_timeout fired or the query
+    // otherwise left the session in a weird state, we don't want to hand
+    // that connection back to the pool for later backup operations.
+    client.release(true);
   }
 }
 

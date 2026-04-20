@@ -116,7 +116,20 @@ export async function initializeDb(): Promise<DbInstance> {
       if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
         try {
           const { runStartupHousekeeping } = await import("../backup/startup");
-          await runStartupHousekeeping();
+          // Hard cap on housekeeping: pg_backup_stop / pg_restore are
+          // best-effort recovery steps. If they hang (e.g. stuck WAL
+          // archiver), boot must still proceed so the app becomes
+          // responsive and the operator can intervene.
+          const HOUSEKEEPING_TIMEOUT_MS = 60_000;
+          await Promise.race([
+            runStartupHousekeeping(),
+            new Promise<void>((_, reject) =>
+              setTimeout(
+                () => reject(new Error(`backup housekeeping timed out after ${HOUSEKEEPING_TIMEOUT_MS}ms`)),
+                HOUSEKEEPING_TIMEOUT_MS,
+              ).unref?.(),
+            ),
+          ]);
         } catch (err: any) {
           console.error(`[db] backup housekeeping failed: ${err?.message ?? err}`);
         }

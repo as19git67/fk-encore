@@ -36,6 +36,9 @@ export function getBackupPool(): Pool {
       connectionString: getConnectionString(),
       // Small pool: backup operations are sequential by design.
       max: 2,
+      // Cap connection acquisition so a stuck server can never deadlock the
+      // boot-time defensive cleanup path (backup/startup.ts).
+      connectionTimeoutMillis: 10_000,
     });
   }
   return pool;
