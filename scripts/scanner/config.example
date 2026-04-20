@@ -1,0 +1,26 @@
+# /etc/fk-scan/config — sourced by both doscan.sh and fk-upload.sh.
+# Copy to /etc/fk-scan/config on the Pi and fill in the real values.
+# Install as: root:scanner, mode 0640 (saned must be able to read it).
+
+# --- required ---------------------------------------------------------
+# Base URL of the fk-encore API, reachable from the Pi.
+FK_ENCORE_URL="http://fk-encore.lan:4000"
+
+# --- optional overrides ----------------------------------------------
+# Spool directory for PDFs waiting to be uploaded.
+# FK_SCAN_SPOOL="/var/spool/fk-scan/pending"
+
+# Path to the refresh-token file (0600, owner saned:scanner).
+# FK_SCAN_TOKEN_FILE="/etc/fk-scan/refresh_token"
+
+# Where sane-scan-pdf's `scan` wrapper lives.
+# FK_SCAN_BIN="/home/anton/sane-scan-pdf/scan"
+
+# Arguments passed to the scan wrapper. No OCR — fk-encore does that.
+# FK_SCAN_ARGS="-d -x fujitsu -s A4 -r 300 -v -m Lineart --autorotate --skip-empty-pages"
+
+# Upload worker invoked by doscan.sh.
+# FK_UPLOAD_CMD="/usr/local/bin/fk-upload.sh"
+
+# Per-HTTP-call timeout in seconds.
+# FK_CURL_TIMEOUT="120"

@@ -1,0 +1,19 @@
+[Unit]
+Description=Drain fk-encore scan spool (one shot)
+Documentation=https://github.com/as19git67/fk-encore/tree/main/scripts/scanner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=saned
+Group=scanner
+ExecStart=/usr/local/bin/fk-upload.sh
+Nice=10
+# Lock down a bit. /etc/fk-scan and /var/spool/fk-scan must stay writable
+# for the token rotation and spool drain.
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ReadWritePaths=/etc/fk-scan /var/spool/fk-scan
