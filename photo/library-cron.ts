@@ -14,6 +14,8 @@ import { listLibraries } from "./libraries.service";
 import { enqueueLibraryScan } from "./library-scan-queue";
 import { triggerLibraryScanWorker } from "./scan-worker";
 
+console.log("[boot] photo/library-cron.ts: all imports resolved");
+
 export const reconcileAllLibraries = api(
   { expose: false, method: "POST", path: "/internal/libraries/reconcile" },
   async (): Promise<{ libraries: number; queued: number }> => {

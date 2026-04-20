@@ -18,6 +18,8 @@ import {
 import { requirePermission } from "./auth-handler";
 import { getAuthData } from "~encore/auth";
 
+console.log("[boot] user/user.ts: all imports resolved");
+
 /** Create a new user (Register) — no auth required */
 export const createUser = api(
   { expose: true, method: "POST", path: "/users" },

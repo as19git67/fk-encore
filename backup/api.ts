@@ -55,6 +55,8 @@ import {
 } from "./state";
 import { pauseWorkers, resumeWorkers } from "../photo/scan-worker";
 
+console.log("[boot] backup/api.ts: all imports resolved");
+
 const BACKUP_DIR = process.env.BACKUP_DIR ?? "/mnt/backup";
 const AUTO_STOP_MS = parseInt(process.env.BACKUP_AUTO_STOP_MS ?? `${60 * 60 * 1000}`, 10);
 
