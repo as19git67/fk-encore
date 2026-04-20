@@ -7,8 +7,10 @@ import {
 } from "@simplewebauthn/server";
 import { validateAuthEnvironment } from "./startupValidation";
 
+console.log("[boot] user/passkey.service.ts: validateAuthEnvironment begin");
 // Validate RP_ORIGIN / RP_NAME at service startup
 validateAuthEnvironment();
+console.log("[boot] user/passkey.service.ts: validateAuthEnvironment end");
 
 type AuthenticatorTransportFuture = 'ble' | 'cable' | 'hybrid' | 'internal' | 'nfc' | 'smart-card' | 'usb';
 
