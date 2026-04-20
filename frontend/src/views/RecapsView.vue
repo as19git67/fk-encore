@@ -42,6 +42,10 @@ const detailPhotos = ref<Photo[]>([])
 const detailLoading = ref(false)
 const detailError = ref('')
 const playerOpen = ref(false)
+const playerPhotos = ref<Photo[]>([])
+const playerTitle = ref<string>('')
+const playerSubtitle = ref<string | null>(null)
+const cardPlayLoadingId = ref<number | null>(null)
 
 const kindLabels: Record<RecapKind, string> = {
   on_this_day: 'Heute vor…',
@@ -166,7 +170,38 @@ watch(
 
 function openPlayer() {
   if (detailPhotos.value.length === 0) return
+  playerPhotos.value = detailPhotos.value
+  playerTitle.value = detail.value?.title ?? ''
+  playerSubtitle.value = detail.value?.subtitle ?? null
   playerOpen.value = true
+}
+
+async function playFromCard(r: RecapSummary, e: Event) {
+  e.stopPropagation()
+  if (cardPlayLoadingId.value != null) return
+  cardPlayLoadingId.value = r.id
+  try {
+    const res = await getRecap(r.id)
+    if (res.recap.photo_ids.length === 0) return
+    const photosRes = await getPhotoDetailsBatch(res.recap.photo_ids)
+    const byId = new Map(photosRes.photos.map((p) => [p.id, p]))
+    playerPhotos.value = res.recap.photo_ids
+      .map((pid) => byId.get(pid))
+      .filter((p): p is Photo => !!p)
+    playerTitle.value = res.recap.title
+    playerSubtitle.value = res.recap.subtitle ?? null
+    playerOpen.value = true
+    if (!res.recap.seen_at) {
+      const stamp = new Date().toISOString()
+      markRecapSeen(r.id).catch(() => {})
+      const summary = recaps.value.find((s) => s.id === r.id)
+      if (summary) summary.seen_at = stamp
+    }
+  } catch (err: any) {
+    error.value = err?.message ?? 'Rückblick konnte nicht gestartet werden.'
+  } finally {
+    cardPlayLoadingId.value = null
+  }
 }
 </script>
 
@@ -197,12 +232,14 @@ function openPlayer() {
     </div>
 
     <div v-else class="recaps-grid">
-      <button
+      <div
         v-for="r in recaps"
         :key="r.id"
-        type="button"
         class="recap-card"
+        role="button"
+        tabindex="0"
         @click="openRecap(r.id)"
+        @keydown.enter="openRecap(r.id)"
       >
         <div class="recap-cover">
           <HeicImage
@@ -215,13 +252,22 @@ function openPlayer() {
           </div>
           <span class="recap-kind-badge">{{ kindLabels[r.kind] }}</span>
           <span v-if="!r.seen_at" class="recap-new-badge">Neu</span>
+          <button
+            type="button"
+            class="recap-card-play"
+            :aria-label="`Rückblick „${r.title}“ abspielen`"
+            :disabled="cardPlayLoadingId != null"
+            @click.stop="playFromCard(r, $event)"
+          >
+            <i :class="cardPlayLoadingId === r.id ? 'pi pi-spin pi-spinner' : 'pi pi-play'" />
+          </button>
         </div>
         <div class="recap-meta">
           <div class="recap-title">{{ r.title }}</div>
           <div v-if="r.subtitle" class="recap-subtitle">{{ r.subtitle }}</div>
           <div class="recap-count">{{ r.photo_count }} Fotos</div>
         </div>
-      </button>
+      </div>
     </div>
 
     <!-- Detail-Overlay -->
@@ -274,9 +320,9 @@ function openPlayer() {
     </div>
 
     <RecapPlayer
-      :photos="detailPhotos"
-      :title="detail?.title"
-      :subtitle="detail?.subtitle ?? null"
+      :photos="playerPhotos"
+      :title="playerTitle"
+      :subtitle="playerSubtitle"
       :open="playerOpen"
       @close="playerOpen = false"
     />
@@ -371,6 +417,35 @@ function openPlayer() {
   color: #fff;
   border-radius: 999px;
   font-size: 0.75rem;
+}
+
+.recap-card-play {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 1.1rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.recap-card-play:hover:not(:disabled) {
+  background: var(--p-primary-color, #2563eb);
+  transform: scale(1.06);
+}
+
+.recap-card-play:disabled {
+  cursor: progress;
+  opacity: 0.85;
 }
 
 .recap-new-badge {

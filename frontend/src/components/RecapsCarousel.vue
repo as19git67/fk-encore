@@ -2,8 +2,15 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import HeicImage from './HeicImage.vue'
-import { listRecaps, type RecapSummary, type RecapKind } from '../api/recaps'
-import { getPhotoDetailsBatch, getPhotoUrl } from '../api/photos'
+import RecapPlayer from './RecapPlayer.vue'
+import {
+  listRecaps,
+  getRecap,
+  markRecapSeen,
+  type RecapSummary,
+  type RecapKind,
+} from '../api/recaps'
+import { getPhotoDetailsBatch, getPhotoUrl, type Photo } from '../api/photos'
 
 const router = useRouter()
 
@@ -11,6 +18,12 @@ const recaps = ref<RecapSummary[]>([])
 const coverFilenames = ref<Record<number, string>>({})
 const loading = ref(true)
 const error = ref('')
+
+const playerOpen = ref(false)
+const playerPhotos = ref<Photo[]>([])
+const playerTitle = ref<string>('')
+const playerSubtitle = ref<string | null>(null)
+const loadingRecapId = ref<number | null>(null)
 
 const kindLabels: Record<RecapKind, string> = {
   on_this_day: 'Heute vor…',
@@ -47,8 +60,34 @@ async function load() {
   }
 }
 
-function openRecap(r: RecapSummary) {
-  router.push({ name: 'fotos-recaps', query: { id: String(r.id) } })
+async function openRecap(r: RecapSummary) {
+  if (loadingRecapId.value != null) return
+  loadingRecapId.value = r.id
+  try {
+    const res = await getRecap(r.id)
+    if (res.recap.photo_ids.length === 0) {
+      router.push({ name: 'fotos-recaps', query: { id: String(r.id) } })
+      return
+    }
+    const photosRes = await getPhotoDetailsBatch(res.recap.photo_ids)
+    const byId = new Map(photosRes.photos.map((p) => [p.id, p]))
+    playerPhotos.value = res.recap.photo_ids
+      .map((pid) => byId.get(pid))
+      .filter((p): p is Photo => !!p)
+    playerTitle.value = res.recap.title
+    playerSubtitle.value = res.recap.subtitle ?? null
+    playerOpen.value = true
+    if (!res.recap.seen_at) {
+      const stamp = new Date().toISOString()
+      markRecapSeen(r.id).catch(() => {})
+      const summary = recaps.value.find((s) => s.id === r.id)
+      if (summary) summary.seen_at = stamp
+    }
+  } catch {
+    router.push({ name: 'fotos-recaps', query: { id: String(r.id) } })
+  } finally {
+    loadingRecapId.value = null
+  }
 }
 
 function openAll() {
@@ -80,6 +119,7 @@ onMounted(load)
         :key="r.id"
         type="button"
         class="recaps-carousel-card"
+        :disabled="loadingRecapId != null"
         @click="openRecap(r)"
       >
         <div class="recaps-carousel-cover">
@@ -92,6 +132,9 @@ onMounted(load)
             <i class="pi pi-images" />
           </div>
           <span v-if="!r.seen_at" class="recaps-carousel-new">Neu</span>
+          <span class="recaps-carousel-play" aria-hidden="true">
+            <i :class="loadingRecapId === r.id ? 'pi pi-spin pi-spinner' : 'pi pi-play-circle'" />
+          </span>
           <div class="recaps-carousel-overlay">
             <span class="recaps-carousel-kind">{{ kindLabels[r.kind] }}</span>
             <span class="recaps-carousel-title">{{ r.title }}</span>
@@ -100,6 +143,14 @@ onMounted(load)
         </div>
       </button>
     </div>
+
+    <RecapPlayer
+      :photos="playerPhotos"
+      :title="playerTitle"
+      :subtitle="playerSubtitle"
+      :open="playerOpen"
+      @close="playerOpen = false"
+    />
   </section>
 </template>
 
@@ -215,6 +266,33 @@ onMounted(load)
   font-weight: 600;
   letter-spacing: 0.02em;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.recaps-carousel-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 3rem;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+.recaps-carousel-card:hover .recaps-carousel-play,
+.recaps-carousel-card:focus-visible .recaps-carousel-play {
+  opacity: 1;
+}
+
+.recaps-carousel-card:disabled {
+  cursor: progress;
+}
+
+.recaps-carousel-card:disabled .recaps-carousel-play {
+  opacity: 1;
 }
 
 .recaps-carousel-kind {
