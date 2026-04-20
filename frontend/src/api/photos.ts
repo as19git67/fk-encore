@@ -208,7 +208,7 @@ export async function uploadPhoto(file: File, signal?: AbortSignal) {
     signal,
     headers: {
       'Content-Type': file.type,
-      'X-File-Name': file.name
+      'X-File-Name': encodeURIComponent(file.name)
     }
   })
 }
@@ -224,7 +224,7 @@ export function uploadPhotoWithProgress(
 
     xhr.open('POST', `${API_BASE_URL}/photos`)
     xhr.setRequestHeader('Content-Type', file.type)
-    xhr.setRequestHeader('X-File-Name', file.name)
+    xhr.setRequestHeader('X-File-Name', encodeURIComponent(file.name))
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
 
     if (signal) {
