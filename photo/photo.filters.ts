@@ -1,4 +1,4 @@
-import { sql, inArray } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import {
   photos,
@@ -203,23 +203,30 @@ export function buildPhotoFilterConditions(
 
   if (filter.albumIds && filter.albumIds.length > 0) {
     const m = filter.albumMode ?? "include";
+    const idList = sql.join(
+      filter.albumIds.map((id) => sql`${id}`),
+      sql`, `
+    );
     const clause = sql`${photos.id} IN (
       SELECT ap.photo_id FROM ${albumPhotos} ap
-      WHERE ${inArray(albumPhotos.album_id, filter.albumIds)}
+      WHERE ap.album_id IN (${idList})
     )`;
     conds.push(m === "include" ? clause : sql`NOT (${clause})`);
   }
 
   if (filter.personIds && filter.personIds.length > 0) {
     const m = filter.personMode ?? "include";
-    const ids = filter.personIds;
+    const idList = sql.join(
+      filter.personIds.map((id) => sql`${id}`),
+      sql`, `
+    );
     const clause = sql`EXISTS (
       SELECT 1 FROM ${faces} f
       JOIN ${userFaceAssignments} ufa
         ON ufa.face_id = f.id AND ufa.user_id = ${userId}
       WHERE f.photo_id = ${photos.id}
         AND ufa.ignored = false
-        AND ${inArray(userFaceAssignments.person_id, ids)}
+        AND ufa.person_id IN (${idList})
     )`;
     conds.push(m === "include" ? clause : sql`NOT (${clause})`);
   }
