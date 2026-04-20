@@ -7,8 +7,17 @@ import { exiftool } from "exiftool-vendored";
 import { eq, and, or, sql, inArray, ilike, isNull, isNotNull, desc } from "drizzle-orm";
 import { APIError } from "encore.dev/api";
 import { enqueuePhotoScan, DeferJobError } from "./scan-queue";
-import { triggerWorkers } from "./scan-worker";
 import { isUnderPressure } from "./event-loop-pressure";
+
+// Dynamic import breaks the static async-init cycle between
+// photo.service and scan-worker. Both modules become esbuild async-init
+// (transitively via db/database.ts top-level await); a static import here
+// would deadlock init_scan_worker <-> init_photo_service at boot.
+function triggerWorkers(): void {
+  import("./scan-worker")
+    .then((m) => m.triggerWorkers())
+    .catch((err) => console.error("[photo.service] triggerWorkers failed:", err));
+}
 import db from "../db/database";
 import { dbFirst, dbAll, dbExec, dbInsertReturning } from '../db/adapter';
 import type { IncomingMessage } from "http";
