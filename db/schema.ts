@@ -595,6 +595,7 @@ export const recaps = pgTable("recaps", {
   seed: jsonb("seed").notNull().default(sql`'{}'::jsonb`).$type<Record<string, unknown>>(),
   created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
   dismissed_at: timestamp("dismissed_at", { mode: "string" }),
+  seen_at: timestamp("seen_at", { mode: "string" }),
 });
 
 export const recapPhotos = pgTable(

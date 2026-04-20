@@ -14,13 +14,35 @@
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbExec, dbFirst, dbInsertReturning } from "../db/adapter";
-import { photos, recaps, recapPhotos, photoCuration } from "../db/schema";
+import {
+  photos,
+  recaps,
+  recapPhotos,
+  photoCuration,
+  persons,
+  faces,
+  userFaceAssignments,
+} from "../db/schema";
+import { generateRecapTitle, type RecapTitleContext } from "./recaps-llm-client";
+import { RECAP_THEMES, type RecapTheme } from "./recap-themes";
 
 const MIN_PHOTOS_PER_RECAP = 4;
 const MAX_PHOTOS_PER_RECAP = 30;
 const TRIP_MIN_DISTANCE_KM = 100;
 const TRIP_MAX_GAP_DAYS = 2;
 const TRIP_LOOKBACK_DAYS = 365 * 3;
+
+const EMBEDDING_SERVICE_URL = (
+  process.env.EMBEDDING_SERVICE_URL || "http://localhost:8001"
+).replace(/\/$/, "");
+const THEME_DEFAULT_THRESHOLD = 0.22;
+const THEME_DEFAULT_MIN_PHOTOS = 12;
+const THEME_SEARCH_K = 300;
+const THEME_HTTP_TIMEOUT_MS = parseInt(
+  process.env.RECAPS_THEME_TIMEOUT_MS ?? "15000",
+  10
+);
+const THEMES_ENABLED = (process.env.RECAPS_THEMES_ENABLED ?? "1") !== "0";
 
 export type RecapKind =
   | "on_this_day"
@@ -41,6 +63,7 @@ export interface RecapSummary {
   photo_count: number;
   created_at: string;
   dismissed_at: string | null;
+  seen_at: string | null;
 }
 
 export interface RecapDetails extends RecapSummary {
@@ -232,6 +255,62 @@ async function upsertRecap(input: {
   return recapId;
 }
 
+/**
+ * Resolves the user-facing title for a recap, preferring an LLM-generated
+ * one. The result is cached in `recap.seed.llm_title = true`, so subsequent
+ * rebuilds (triggered incrementally by scan-worker) skip the LLM call.
+ *
+ * Returns both the chosen title/subtitle and whether it came from the LLM,
+ * so the caller can persist the cache flag in `seed`.
+ */
+async function resolveTitle(opts: {
+  userId: number;
+  dedupKey: string;
+  fallback: { title: string; subtitle: string | null };
+  ctx: RecapTitleContext;
+}): Promise<{ title: string; subtitle: string | null; llmUsed: boolean }> {
+  const existing = await dbFirst<{
+    title: string;
+    subtitle: string | null;
+    seed: unknown;
+  }>(
+    db
+      .select({
+        title: recaps.title,
+        subtitle: recaps.subtitle,
+        seed: recaps.seed,
+      })
+      .from(recaps)
+      .where(
+        and(eq(recaps.user_id, opts.userId), eq(recaps.dedup_key, opts.dedupKey))
+      )
+      .limit(1)
+  );
+
+  if (existing) {
+    const seed = existing.seed as Record<string, unknown> | null | undefined;
+    if (seed && seed.llm_title === true) {
+      return {
+        title: existing.title,
+        subtitle: existing.subtitle,
+        llmUsed: true,
+      };
+    }
+  }
+
+  try {
+    const llm = await generateRecapTitle(opts.ctx);
+    if (llm && llm.title) {
+      return { title: llm.title, subtitle: llm.subtitle, llmUsed: true };
+    }
+  } catch (err: any) {
+    console.warn(
+      `[recaps] LLM title generation failed for ${opts.dedupKey}: ${err?.message ?? err}`
+    );
+  }
+  return { ...opts.fallback, llmUsed: false };
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Builder: on_this_day
 // ────────────────────────────────────────────────────────────────────────────
@@ -277,29 +356,45 @@ async function buildOnThisDayRecaps(
     const periodEnd = new Date(periodStart);
     periodEnd.setHours(23, 59, 59);
 
-    const title =
+    const fallbackTitle =
       yearsAgo === 1
         ? "Vor einem Jahr"
         : `Vor ${yearsAgo} Jahren`;
-    const subtitle = periodStart.toLocaleDateString("de-DE", {
+    const fallbackSubtitle = periodStart.toLocaleDateString("de-DE", {
       day: "numeric",
       month: "long",
       year: "numeric",
     });
     const dedupKey = `on_this_day:${year}-${mm}-${dd}`;
     const score = 70 + Math.min(photosForYear.length, 20);
+    const resolved = await resolveTitle({
+      userId,
+      dedupKey,
+      fallback: { title: fallbackTitle, subtitle: fallbackSubtitle },
+      ctx: {
+        kind: "on_this_day",
+        years_ago: yearsAgo,
+        date_range: fallbackSubtitle,
+        photo_count: photosForYear.length,
+      },
+    });
 
     await upsertRecap({
       userId,
       kind: "on_this_day",
-      title,
-      subtitle,
+      title: resolved.title,
+      subtitle: resolved.subtitle,
       dedupKey,
       coverPhotoId: cover,
       periodStart,
       periodEnd,
       score,
-      seed: { years_ago: yearsAgo, month: today.getMonth() + 1, day: today.getDate() },
+      seed: {
+        years_ago: yearsAgo,
+        month: today.getMonth() + 1,
+        day: today.getDate(),
+        ...(resolved.llmUsed ? { llm_title: true } : {}),
+      },
       photoIds: rankedIds,
     });
     built++;
@@ -495,12 +590,25 @@ async function buildTripRecaps(
       ) + 1
     );
     const score = 40 + Math.min(cluster.photos.length, 40) + durationDays;
+    const fallbackSubtitle = tripSubtitle(cluster);
+    const resolved = await resolveTitle({
+      userId,
+      dedupKey,
+      fallback: { title: tripTitle(cluster), subtitle: fallbackSubtitle },
+      ctx: {
+        kind: "trip",
+        place_city: cluster.dominantCity,
+        place_country: cluster.dominantCountry,
+        date_range: fallbackSubtitle,
+        photo_count: cluster.photos.length,
+      },
+    });
 
     await upsertRecap({
       userId,
       kind: "trip",
-      title: tripTitle(cluster),
-      subtitle: tripSubtitle(cluster),
+      title: resolved.title,
+      subtitle: resolved.subtitle,
       dedupKey,
       coverPhotoId: cover,
       periodStart: cluster.start,
@@ -512,6 +620,452 @@ async function buildTripRecaps(
         centroid_lat: cluster.centroidLat,
         centroid_lon: cluster.centroidLon,
         duration_days: durationDays,
+        ...(resolved.llmUsed ? { llm_title: true } : {}),
+      },
+      photoIds: rankedIds,
+    });
+    built++;
+  }
+
+  return built;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Builder: person
+// ────────────────────────────────────────────────────────────────────────────
+
+interface PersonInfo {
+  id: number;
+  name: string;
+}
+
+async function loadPersonsForUser(userId: number): Promise<PersonInfo[]> {
+  return dbAll<PersonInfo>(
+    db
+      .select({ id: persons.id, name: persons.name })
+      .from(persons)
+      .where(eq(persons.user_id, userId))
+  );
+}
+
+/**
+ * Map personId -> set of photoIds for photos that contain at least one face
+ * assigned to the person (and not ignored).
+ */
+async function loadPersonPhotoMap(userId: number): Promise<Map<number, Set<number>>> {
+  const rows = await dbAll<{ person_id: number; photo_id: number }>(
+    db
+      .select({ person_id: userFaceAssignments.person_id, photo_id: faces.photo_id })
+      .from(userFaceAssignments)
+      .innerJoin(faces, eq(faces.id, userFaceAssignments.face_id))
+      .where(
+        and(
+          eq(userFaceAssignments.user_id, userId),
+          eq(userFaceAssignments.ignored, false),
+          isNotNull(userFaceAssignments.person_id)
+        )
+      )
+  );
+  const map = new Map<number, Set<number>>();
+  for (const row of rows) {
+    if (row.person_id == null) continue;
+    let set = map.get(row.person_id);
+    if (!set) {
+      set = new Set<number>();
+      map.set(row.person_id, set);
+    }
+    set.add(row.photo_id);
+  }
+  return map;
+}
+
+const PERSON_RECENT_DAYS = 90;
+const PERSON_MIN_PHOTOS = 8;
+
+async function buildPersonRecaps(
+  userId: number,
+  allPhotos: CandidatePhoto[],
+  today: Date
+): Promise<number> {
+  const personList = await loadPersonsForUser(userId);
+  if (personList.length === 0) return 0;
+  const personPhotos = await loadPersonPhotoMap(userId);
+  const photosById = new Map(allPhotos.map((p) => [p.id, p]));
+  const recentCutoff = new Date(today);
+  recentCutoff.setDate(recentCutoff.getDate() - PERSON_RECENT_DAYS);
+  const currentYear = today.getFullYear();
+  let built = 0;
+
+  for (const person of personList) {
+    const photoIds = personPhotos.get(person.id);
+    if (!photoIds || photoIds.size === 0) continue;
+    const photosForPerson: CandidatePhoto[] = [];
+    for (const pid of photoIds) {
+      const p = photosById.get(pid);
+      if (p) photosForPerson.push(p);
+    }
+
+    // Window 1: last 90 days.
+    const recent = photosForPerson.filter((p) => {
+      const d = effectiveDate(p);
+      return d != null && d >= recentCutoff;
+    });
+    if (recent.length >= PERSON_MIN_PHOTOS) {
+      const { cover, rankedIds } = curatePhotos(recent);
+      const sorted = recent
+        .map(effectiveDate)
+        .filter((d): d is Date => d != null)
+        .sort((a, b) => a.getTime() - b.getTime());
+      const dedupKey = `person:${person.id}:recent`;
+      const resolved = await resolveTitle({
+        userId,
+        dedupKey,
+        fallback: { title: `Mit ${person.name}`, subtitle: "Zuletzt" },
+        ctx: {
+          kind: "person",
+          person_name: person.name,
+          photo_count: recent.length,
+        },
+      });
+      await upsertRecap({
+        userId,
+        kind: "person",
+        title: resolved.title,
+        subtitle: resolved.subtitle,
+        dedupKey,
+        coverPhotoId: cover,
+        periodStart: sorted[0] ?? null,
+        periodEnd: sorted[sorted.length - 1] ?? null,
+        score: 55 + Math.min(recent.length, 25),
+        seed: {
+          person_id: person.id,
+          window: "recent",
+          days: PERSON_RECENT_DAYS,
+          ...(resolved.llmUsed ? { llm_title: true } : {}),
+        },
+        photoIds: rankedIds,
+      });
+      built++;
+    }
+
+    // Window 2: yearly recaps for past calendar years with enough photos.
+    const byYear = new Map<number, CandidatePhoto[]>();
+    for (const p of photosForPerson) {
+      const d = effectiveDate(p);
+      if (!d) continue;
+      const year = d.getFullYear();
+      if (year >= currentYear) continue;
+      const arr = byYear.get(year) ?? [];
+      arr.push(p);
+      byYear.set(year, arr);
+    }
+    for (const [year, list] of byYear) {
+      if (list.length < PERSON_MIN_PHOTOS) continue;
+      const { cover, rankedIds } = curatePhotos(list);
+      const start = new Date(year, 0, 1);
+      const end = new Date(year, 11, 31, 23, 59, 59);
+      const dedupKey = `person:${person.id}:year:${year}`;
+      const resolved = await resolveTitle({
+        userId,
+        dedupKey,
+        fallback: {
+          title: `${person.name} · ${year}`,
+          subtitle: `Jahresrückblick ${year}`,
+        },
+        ctx: {
+          kind: "person",
+          person_name: person.name,
+          year,
+          date_range: String(year),
+          photo_count: list.length,
+        },
+      });
+      await upsertRecap({
+        userId,
+        kind: "person",
+        title: resolved.title,
+        subtitle: resolved.subtitle,
+        dedupKey,
+        coverPhotoId: cover,
+        periodStart: start,
+        periodEnd: end,
+        score: 45 + Math.min(list.length, 30),
+        seed: {
+          person_id: person.id,
+          window: "year",
+          year,
+          ...(resolved.llmUsed ? { llm_title: true } : {}),
+        },
+        photoIds: rankedIds,
+      });
+      built++;
+    }
+  }
+  return built;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Builder: recent_highlights (monthly best)
+// ────────────────────────────────────────────────────────────────────────────
+
+const RECENT_HIGHLIGHTS_DAYS = 28;
+const RECENT_HIGHLIGHTS_MIN_PHOTOS = 6;
+const RECENT_HIGHLIGHTS_MIN_DAYS = 3;
+
+async function buildRecentHighlightsRecaps(
+  userId: number,
+  allPhotos: CandidatePhoto[],
+  today: Date
+): Promise<number> {
+  const cutoff = new Date(today);
+  cutoff.setDate(cutoff.getDate() - RECENT_HIGHLIGHTS_DAYS);
+  const recent = allPhotos.filter((p) => {
+    const d = effectiveDate(p);
+    return d != null && d >= cutoff && d <= today;
+  });
+  if (recent.length < RECENT_HIGHLIGHTS_MIN_PHOTOS) return 0;
+  const distinctDays = new Set(
+    recent.map((p) => effectiveDate(p)!.toISOString().slice(0, 10))
+  );
+  if (distinctDays.size < RECENT_HIGHLIGHTS_MIN_DAYS) return 0;
+
+  const { cover, rankedIds } = curatePhotos(recent);
+  const yyyyMm = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  const monthLabel = today.toLocaleDateString("de-DE", {
+    month: "long",
+    year: "numeric",
+  });
+
+  const dedupKey = `recent_highlights:${yyyyMm}`;
+  const resolved = await resolveTitle({
+    userId,
+    dedupKey,
+    fallback: { title: "Zuletzt", subtitle: `Deine Highlights im ${monthLabel}` },
+    ctx: {
+      kind: "recent_highlights",
+      month_label: monthLabel,
+      photo_count: recent.length,
+    },
+  });
+
+  await upsertRecap({
+    userId,
+    kind: "recent_highlights",
+    title: resolved.title,
+    subtitle: resolved.subtitle,
+    dedupKey,
+    coverPhotoId: cover,
+    periodStart: cutoff,
+    periodEnd: today,
+    score: 90, // always prominently at the top of the feed
+    seed: {
+      month: yyyyMm,
+      distinct_days: distinctDays.size,
+      ...(resolved.llmUsed ? { llm_title: true } : {}),
+    },
+    photoIds: rankedIds,
+  });
+  return 1;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Builder: place
+// ────────────────────────────────────────────────────────────────────────────
+
+const PLACE_MIN_PHOTOS = 20;
+const PLACE_MIN_DISTINCT_DAYS = 3;
+
+async function buildPlaceRecaps(
+  userId: number,
+  allPhotos: CandidatePhoto[],
+  today: Date
+): Promise<number> {
+  const byCity = new Map<string, CandidatePhoto[]>();
+  for (const p of allPhotos) {
+    const city = p.location_city?.trim();
+    if (!city) continue;
+    const arr = byCity.get(city) ?? [];
+    arr.push(p);
+    byCity.set(city, arr);
+  }
+
+  let built = 0;
+  for (const [city, list] of byCity) {
+    if (list.length < PLACE_MIN_PHOTOS) continue;
+    const dates = list
+      .map(effectiveDate)
+      .filter((d): d is Date => d != null);
+    const distinctDays = new Set(dates.map((d) => d.toISOString().slice(0, 10)));
+    if (distinctDays.size < PLACE_MIN_DISTINCT_DAYS) continue;
+
+    const { cover, rankedIds } = curatePhotos(list);
+    const slug = city
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "");
+    dates.sort((a, b) => a.getTime() - b.getTime());
+    const dedupKey = `place:${slug}`;
+    const resolved = await resolveTitle({
+      userId,
+      dedupKey,
+      fallback: { title: city, subtitle: `${list.length} Fotos aus ${city}` },
+      ctx: {
+        kind: "place",
+        place_city: city,
+        photo_count: list.length,
+      },
+    });
+
+    await upsertRecap({
+      userId,
+      kind: "place",
+      title: resolved.title,
+      subtitle: resolved.subtitle,
+      dedupKey,
+      coverPhotoId: cover,
+      periodStart: dates[0] ?? null,
+      periodEnd: dates[dates.length - 1] ?? null,
+      score: 30 + Math.min(list.length / 2, 40),
+      seed: {
+        location_city: city,
+        photo_count: list.length,
+        distinct_days: distinctDays.size,
+        ...(resolved.llmUsed ? { llm_title: true } : {}),
+      },
+      photoIds: rankedIds,
+    });
+    built++;
+  }
+  return built;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Builder: theme (CLIP text-prompt search)
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Query the embedding_service for photos that match a single CLIP prompt.
+ * Returns a map from numeric photo ID to best cosine score seen for this
+ * prompt. Returns `null` on network/HTTP failure so the caller can decide
+ * whether to continue with the remaining prompts or bail out.
+ */
+async function queryThemePrompt(
+  query: string,
+  threshold: number
+): Promise<Map<number, number> | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), THEME_HTTP_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${EMBEDDING_SERVICE_URL}/search/text`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, k: THEME_SEARCH_K, threshold }),
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      results?: Array<{ photo_id: string; score: number }>;
+    };
+    const out = new Map<number, number>();
+    for (const r of data.results ?? []) {
+      const id = parseInt(r.photo_id, 10);
+      if (!Number.isFinite(id)) continue;
+      const prev = out.get(id) ?? 0;
+      if (r.score > prev) out.set(id, r.score);
+    }
+    return out;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function buildThemeRecaps(
+  userId: number,
+  allPhotos: CandidatePhoto[],
+  _today: Date
+): Promise<number> {
+  if (!THEMES_ENABLED) return 0;
+  if (allPhotos.length < THEME_DEFAULT_MIN_PHOTOS) return 0;
+
+  const userPhotosById = new Map(allPhotos.map((p) => [p.id, p]));
+  let built = 0;
+
+  for (const theme of RECAP_THEMES) {
+    const threshold = theme.threshold ?? THEME_DEFAULT_THRESHOLD;
+    const minPhotos = theme.minPhotos ?? THEME_DEFAULT_MIN_PHOTOS;
+
+    // Union scores across all prompt variants. A single failed prompt
+    // doesn't kill the whole theme — but if every prompt fails (service
+    // down) we skip this theme entirely.
+    const scored = new Map<number, number>();
+    let anySuccess = false;
+    for (const q of theme.queries) {
+      const res = await queryThemePrompt(q, threshold);
+      if (res == null) continue;
+      anySuccess = true;
+      for (const [id, score] of res) {
+        const prev = scored.get(id) ?? 0;
+        if (score > prev) scored.set(id, score);
+      }
+    }
+    if (!anySuccess) {
+      console.warn(
+        `[recaps] theme builder: embedding_service unreachable for "${theme.slug}", skipping`
+      );
+      continue;
+    }
+
+    const ranked = Array.from(scored.entries())
+      .filter(([id]) => userPhotosById.has(id))
+      .sort((a, b) => b[1] - a[1]);
+    if (ranked.length < minPhotos) continue;
+
+    const rankedIds = ranked
+      .slice(0, MAX_PHOTOS_PER_RECAP)
+      .map(([id]) => id);
+    const cover = rankedIds[0] ?? null;
+    const dates = rankedIds
+      .map((id) => userPhotosById.get(id))
+      .filter((p): p is CandidatePhoto => p != null)
+      .map(effectiveDate)
+      .filter((d): d is Date => d != null)
+      .sort((a, b) => a.getTime() - b.getTime());
+    const periodStart = dates[0] ?? null;
+    const periodEnd = dates[dates.length - 1] ?? null;
+    const dedupKey = `theme:${theme.slug}`;
+
+    const resolved = await resolveTitle({
+      userId,
+      dedupKey,
+      fallback: {
+        title: theme.title,
+        subtitle: `${ranked.length} Fotos`,
+      },
+      ctx: {
+        kind: "theme",
+        keywords: theme.keywords,
+        photo_count: ranked.length,
+      },
+    });
+
+    await upsertRecap({
+      userId,
+      kind: "theme",
+      title: resolved.title,
+      subtitle: resolved.subtitle,
+      dedupKey,
+      coverPhotoId: cover,
+      periodStart,
+      periodEnd,
+      score: 35 + Math.min(ranked.length, 30),
+      seed: {
+        theme: theme.slug,
+        keywords: theme.keywords,
+        photo_count: ranked.length,
+        threshold,
+        ...(resolved.llmUsed ? { llm_title: true } : {}),
       },
       photoIds: rankedIds,
     });
@@ -528,20 +1082,43 @@ async function buildTripRecaps(
 export interface RebuildResult {
   on_this_day: number;
   trip: number;
+  person: number;
+  recent_highlights: number;
+  place: number;
+  theme: number;
+}
+
+export interface RebuildOptions {
+  /**
+   * Run the theme builder, which makes several HTTP calls to the
+   * embedding_service. Disabled for the incremental scheduler path (each
+   * scan-worker completion would otherwise cause 16–24 HTTP calls); the
+   * daily cron and manual rebuilds keep it on.
+   */
+  includeThemes?: boolean;
 }
 
 export async function rebuildRecapsForUser(
   userId: number,
-  now: Date = new Date()
+  now: Date = new Date(),
+  options: RebuildOptions = {}
 ): Promise<RebuildResult> {
+  const includeThemes = options.includeThemes ?? true;
   const candidates = await loadVisiblePhotos(userId);
   const on_this_day = await buildOnThisDayRecaps(userId, candidates, now);
   const trip = await buildTripRecaps(userId, candidates, now);
-  return { on_this_day, trip };
+  const person = await buildPersonRecaps(userId, candidates, now);
+  const recent_highlights = await buildRecentHighlightsRecaps(userId, candidates, now);
+  const place = await buildPlaceRecaps(userId, candidates, now);
+  const theme = includeThemes
+    ? await buildThemeRecaps(userId, candidates, now)
+    : 0;
+  return { on_this_day, trip, person, recent_highlights, place, theme };
 }
 
 export async function rebuildRecapsForAllUsers(
-  now: Date = new Date()
+  now: Date = new Date(),
+  options: RebuildOptions = {}
 ): Promise<{ users: number; total: RebuildResult }> {
   const rows = await dbAll<{ user_id: number }>(
     db
@@ -549,12 +1126,23 @@ export async function rebuildRecapsForAllUsers(
       .from(photos)
       .where(isNotNull(photos.user_id))
   );
-  const total: RebuildResult = { on_this_day: 0, trip: 0 };
+  const total: RebuildResult = {
+    on_this_day: 0,
+    trip: 0,
+    person: 0,
+    recent_highlights: 0,
+    place: 0,
+    theme: 0,
+  };
   for (const row of rows) {
     try {
-      const r = await rebuildRecapsForUser(row.user_id, now);
+      const r = await rebuildRecapsForUser(row.user_id, now, options);
       total.on_this_day += r.on_this_day;
       total.trip += r.trip;
+      total.person += r.person;
+      total.recent_highlights += r.recent_highlights;
+      total.place += r.place;
+      total.theme += r.theme;
     } catch (err: any) {
       console.error(
         `[recaps] rebuild failed for user ${row.user_id}:`,
@@ -584,6 +1172,7 @@ export async function listRecapsForUser(
     period_end: string | null;
     created_at: string;
     dismissed_at: string | null;
+    seen_at: string | null;
     photo_count: number;
   }>(
     db
@@ -597,11 +1186,17 @@ export async function listRecapsForUser(
         period_end: recaps.period_end,
         created_at: recaps.created_at,
         dismissed_at: recaps.dismissed_at,
+        seen_at: recaps.seen_at,
         photo_count: sql<number>`(SELECT COUNT(*)::int FROM ${recapPhotos} WHERE ${recapPhotos.recap_id} = ${recaps.id})`,
       })
       .from(recaps)
       .where(and(...conditions))
-      .orderBy(sql`${recaps.score} DESC`, sql`${recaps.created_at} DESC`)
+      // Unseen recaps surface first; within each bucket, ranked by score.
+      .orderBy(
+        sql`${recaps.seen_at} IS NOT NULL`,
+        sql`${recaps.score} DESC`,
+        sql`${recaps.created_at} DESC`
+      )
   );
 
   return rows.map((r) => ({
@@ -615,6 +1210,7 @@ export async function listRecapsForUser(
     photo_count: r.photo_count ?? 0,
     created_at: r.created_at,
     dismissed_at: r.dismissed_at,
+    seen_at: r.seen_at,
   }));
 }
 
@@ -632,6 +1228,7 @@ export async function getRecapForUser(
     period_end: string | null;
     created_at: string;
     dismissed_at: string | null;
+    seen_at: string | null;
     seed: Record<string, unknown> | null;
   }>(
     db
@@ -645,6 +1242,7 @@ export async function getRecapForUser(
         period_end: recaps.period_end,
         created_at: recaps.created_at,
         dismissed_at: recaps.dismissed_at,
+        seen_at: recaps.seen_at,
         seed: recaps.seed,
       })
       .from(recaps)
@@ -671,10 +1269,39 @@ export async function getRecapForUser(
     period_end: row.period_end,
     created_at: row.created_at,
     dismissed_at: row.dismissed_at,
+    seen_at: row.seen_at,
     seed: row.seed ?? {},
     photo_count: photoRows.length,
     photo_ids: photoRows.map((p) => p.photo_id),
   };
+}
+
+/**
+ * Mark a recap as seen. Idempotent — the first call stamps `seen_at`,
+ * subsequent calls are no-ops. Returns `true` if the recap exists for
+ * this user (regardless of whether it was already seen), so the frontend
+ * can distinguish "not found" from "already seen".
+ */
+export async function markRecapSeen(
+  userId: number,
+  recapId: number
+): Promise<boolean> {
+  const existing = await dbFirst<{ seen_at: string | null }>(
+    db
+      .select({ seen_at: recaps.seen_at })
+      .from(recaps)
+      .where(and(eq(recaps.id, recapId), eq(recaps.user_id, userId)))
+      .limit(1)
+  );
+  if (!existing) return false;
+  if (existing.seen_at) return true;
+  await dbExec(
+    db
+      .update(recaps)
+      .set({ seen_at: new Date().toISOString() })
+      .where(and(eq(recaps.id, recapId), eq(recaps.user_id, userId)))
+  );
+  return true;
 }
 
 export async function dismissRecap(userId: number, recapId: number): Promise<boolean> {
@@ -695,4 +1322,62 @@ export async function restoreRecap(userId: number, recapId: number): Promise<boo
       .where(and(eq(recaps.id, recapId), eq(recaps.user_id, userId)))
   );
   return result.changes > 0;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Incremental rebuild scheduler
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Scan jobs (embedding, quality, geocoding, face_assignment) complete at
+// variable latency as photos flow through the pipeline. Each completion can
+// invalidate a user's recaps — e.g. a newly geocoded photo may belong to an
+// existing trip, or a reassigned face may add photos to a person-recap.
+//
+// Running the full `rebuildRecapsForUser` per completion would be wasteful
+// during bulk imports (hundreds of jobs finish in seconds). The scheduler
+// below mirrors the `scheduleRegroup` pattern in photo.service.ts:
+//   - per-user mutex: at most one rebuild in flight
+//   - coalescing: repeated triggers during a run collapse into a single
+//     follow-up pass that sees the latest state
+//   - debounce after each pass so a burst of scan completions only causes
+//     one rebuild once the burst settles
+
+const RECAPS_DEBOUNCE_MS = 60_000;
+
+const recapsRebuildRunning = new Map<number, Promise<void>>();
+const recapsRebuildPending = new Set<number>();
+
+export function scheduleRecapsRebuild(userId: number): Promise<void> {
+  const existing = recapsRebuildRunning.get(userId);
+  if (existing) {
+    recapsRebuildPending.add(userId);
+    return existing;
+  }
+  const run = (async () => {
+    try {
+      do {
+        recapsRebuildPending.delete(userId);
+        try {
+          // Incremental path: skip the theme builder to avoid hammering the
+          // embedding_service with prompt queries on every scan completion.
+          // The daily cron refreshes themes.
+          await rebuildRecapsForUser(userId, new Date(), {
+            includeThemes: false,
+          });
+        } catch (err: any) {
+          console.error(
+            `[recaps] incremental rebuild failed for user ${userId}:`,
+            err?.message ?? err
+          );
+        }
+        if (recapsRebuildPending.has(userId)) {
+          await new Promise((r) => setTimeout(r, RECAPS_DEBOUNCE_MS));
+        }
+      } while (recapsRebuildPending.has(userId));
+    } finally {
+      recapsRebuildRunning.delete(userId);
+    }
+  })();
+  recapsRebuildRunning.set(userId, run);
+  return run;
 }

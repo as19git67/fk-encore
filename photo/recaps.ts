@@ -34,6 +34,10 @@ interface DismissResponse {
   dismissed: boolean;
 }
 
+interface MarkSeenResponse {
+  seen: boolean;
+}
+
 interface RebuildResponse {
   users?: number;
   on_this_day: number;
@@ -87,6 +91,23 @@ export const dismissRecap = api(
     const ok = await recapsService.dismissRecap(userId, id);
     if (!ok) throw APIError.notFound("recap not found");
     return { dismissed: true };
+  }
+);
+
+/**
+ * Mark a recap as seen so the UI can drop the "neu"-badge and the list
+ * sort can move it out of the unseen bucket.
+ */
+export const markRecapSeen = api(
+  { expose: true, method: "POST", path: "/recaps/:id/seen", auth: true },
+  async ({ id }: { id: number }): Promise<MarkSeenResponse> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    const ok = await recapsService.markRecapSeen(userId, id);
+    if (!ok) throw APIError.notFound("recap not found");
+    return { seen: true };
   }
 );
 

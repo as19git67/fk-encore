@@ -42,6 +42,18 @@ import {
   getPhotoOwnerId,
   getUsersWithPhotoAccess,
 } from "./photo.service";
+import { scheduleRecapsRebuild } from "./recaps.service";
+
+// Scan services whose completion can invalidate recaps for every user that
+// can see the photo (global services have no user_id on the job itself).
+//   - embedding: drives `theme`-recaps (CLIP-Cluster, future)
+//   - quality:   affects curation ranking inside every recap
+//   - geocoding: enables `trip` / `place` builders
+const GLOBAL_RECAP_TRIGGER_SERVICES: Partial<Record<ScanService, true>> = {
+  embedding: true,
+  quality: true,
+  geocoding: true,
+};
 import {
   assertServiceAvailable,
   isServiceAvailable,
@@ -199,6 +211,27 @@ class ScanWorker {
       if (this.service === "face_assignment" && job.user_id) {
         cleanupOrphanedPersons(job.user_id).catch((err) =>
           console.error(`[scan-worker] cleanup error after face_assignment job ${job.id}:`, err),
+        );
+      }
+
+      // Incremental recaps rebuild. Every completed job whose outcome can
+      // change the recap feed schedules a debounced per-user rebuild via the
+      // scheduler in recaps.service. The scheduler coalesces bursts, so even
+      // a bulk scan that finishes 500 jobs in a minute triggers at most one
+      // real rebuild per user.
+      if (this.service === "face_assignment" && job.user_id) {
+        scheduleRecapsRebuild(job.user_id).catch((err) =>
+          console.error(`[scan-worker] recaps rebuild error after face_assignment job ${job.id}:`, err),
+        );
+      } else if (GLOBAL_RECAP_TRIGGER_SERVICES[this.service]) {
+        getUsersWithPhotoAccess(job.photo_id).then((userIds) => {
+          for (const uid of userIds) {
+            scheduleRecapsRebuild(uid).catch((err) =>
+              console.error(`[scan-worker] recaps rebuild error for user ${uid} after ${this.service} job ${job.id}:`, err),
+            );
+          }
+        }).catch((err) =>
+          console.error(`[scan-worker] recaps rebuild lookup error after ${this.service} job ${job.id}:`, err),
         );
       }
     } catch (err: any) {

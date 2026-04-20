@@ -4,10 +4,12 @@ import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import HeicImage from '../components/HeicImage.vue'
+import RecapPlayer from '../components/RecapPlayer.vue'
 import {
   listRecaps,
   getRecap,
   dismissRecap,
+  markRecapSeen,
   rebuildRecaps,
   type RecapSummary,
   type RecapDetails,
@@ -39,6 +41,7 @@ const detail = ref<RecapDetails | null>(null)
 const detailPhotos = ref<Photo[]>([])
 const detailLoading = ref(false)
 const detailError = ref('')
+const playerOpen = ref(false)
 
 const kindLabels: Record<RecapKind, string> = {
   on_this_day: 'Heute vor…',
@@ -91,6 +94,14 @@ async function loadDetail(id: number) {
       detailPhotos.value = res.recap.photo_ids
         .map((pid) => byId.get(pid))
         .filter((p): p is Photo => !!p)
+    }
+    // Opening the detail counts as "seen". Fire-and-forget; a failed
+    // stamp is harmless — the badge just stays until the next rebuild.
+    if (!res.recap.seen_at) {
+      const stamp = new Date().toISOString()
+      markRecapSeen(id).catch(() => {})
+      const summary = recaps.value.find((r) => r.id === id)
+      if (summary) summary.seen_at = stamp
     }
   } catch (err: any) {
     detailError.value = err?.message ?? 'Rückblick konnte nicht geladen werden.'
@@ -147,10 +158,16 @@ watch(
     else {
       detail.value = null
       detailPhotos.value = []
+      playerOpen.value = false
     }
   },
   { immediate: true }
 )
+
+function openPlayer() {
+  if (detailPhotos.value.length === 0) return
+  playerOpen.value = true
+}
 </script>
 
 <template>
@@ -197,6 +214,7 @@ watch(
             <i class="pi pi-images" />
           </div>
           <span class="recap-kind-badge">{{ kindLabels[r.kind] }}</span>
+          <span v-if="!r.seen_at" class="recap-new-badge">Neu</span>
         </div>
         <div class="recap-meta">
           <div class="recap-title">{{ r.title }}</div>
@@ -216,6 +234,12 @@ watch(
             <p v-if="detail?.subtitle" class="recap-subtitle">{{ detail.subtitle }}</p>
           </div>
           <div class="recap-detail-actions">
+            <Button
+              icon="pi pi-play"
+              label="Abspielen"
+              :disabled="detailPhotos.length === 0"
+              @click="openPlayer"
+            />
             <Button
               icon="pi pi-eye-slash"
               label="Ausblenden"
@@ -237,12 +261,25 @@ watch(
         </div>
 
         <div v-else class="recap-photo-grid">
-          <div v-for="photo in detailPhotos" :key="photo.id" class="recap-photo">
+          <div
+            v-for="photo in detailPhotos"
+            :key="photo.id"
+            class="recap-photo"
+            @click="openPlayer"
+          >
             <HeicImage :src="getPhotoUrl(photo.filename, 600)" :alt="photo.original_name" />
           </div>
         </div>
       </div>
     </div>
+
+    <RecapPlayer
+      :photos="detailPhotos"
+      :title="detail?.title"
+      :subtitle="detail?.subtitle ?? null"
+      :open="playerOpen"
+      @close="playerOpen = false"
+    />
   </div>
 </template>
 
@@ -336,6 +373,20 @@ watch(
   font-size: 0.75rem;
 }
 
+.recap-new-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 2px 10px;
+  background: var(--p-primary-color, #2563eb);
+  color: var(--p-primary-contrast-color, #fff);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
 .recap-meta {
   padding: 0.75rem 1rem 1rem;
 }
@@ -406,6 +457,12 @@ watch(
   overflow: hidden;
   border-radius: 8px;
   background: #111;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.recap-photo:hover {
+  transform: scale(1.02);
 }
 
 .recap-photo :deep(img),

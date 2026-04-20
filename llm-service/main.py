@@ -356,3 +356,115 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
     except Exception as exc:
         log.warning("LLM payload did not match schema: %r", data)
         raise HTTPException(status_code=502, detail=f"schema mismatch: {exc}") from exc
+
+
+# ─── /recap-title ──────────────────────────────────────────────────────────────
+
+
+class RecapTitleRequest(BaseModel):
+    """Context for an auto-generated photo-recap (Rückblick) title.
+
+    All fields are optional — the LLM uses what's provided. ``kind`` is the
+    only hint about the recap type; everything else is additional signal.
+    """
+
+    kind: str = Field(..., min_length=1)
+    locale: str = "de"
+    place_city: str | None = None
+    place_country: str | None = None
+    date_range: str | None = None
+    years_ago: int | None = None
+    person_name: str | None = None
+    year: int | None = None
+    month_label: str | None = None
+    photo_count: int | None = None
+    # Optional free-form keywords from image tags / embedding clusters —
+    # helpful for "theme" recaps, harmless for the others.
+    keywords: list[str] = Field(default_factory=list)
+
+
+class RecapTitleResponse(BaseModel):
+    title: str
+    subtitle: str | None = None
+
+
+_RECAP_SYSTEM_PROMPT = """Du erzeugst kurze, warmherzige Titel für private Foto-Rückblicke.
+Antworte ausschließlich mit gültigem JSON (UTF-8, ohne Markdown-Fences).
+
+Felder:
+- title: max. 40 Zeichen, aussagekräftig, deutsch, ohne Anführungszeichen,
+  ohne Emojis, ohne Ausrufezeichen. Keine Marken- oder Personennamen
+  erfinden — nur die im Kontext genannten nutzen.
+- subtitle: max. 80 Zeichen, ergänzender Untertitel (z.B. Zeitraum, Ort).
+  null wenn nichts Sinnvolles ergänzbar ist.
+
+Ton: freundlich, nüchtern, erinnerungsvoll. Keine Floskeln wie "Zurück in
+der Zeit". Vermeide Redundanz zwischen Titel und Untertitel."""
+
+
+def _recap_context(req: RecapTitleRequest) -> str:
+    parts: list[str] = [f"Art des Rückblicks: {req.kind}"]
+    if req.person_name:
+        parts.append(f"Person: {req.person_name}")
+    if req.place_city:
+        parts.append(f"Ort: {req.place_city}")
+    if req.place_country and req.place_country != req.place_city:
+        parts.append(f"Land: {req.place_country}")
+    if req.date_range:
+        parts.append(f"Zeitraum: {req.date_range}")
+    if req.year is not None:
+        parts.append(f"Jahr: {req.year}")
+    if req.years_ago is not None:
+        parts.append(f"Vor {req.years_ago} Jahr(en)")
+    if req.month_label:
+        parts.append(f"Monat: {req.month_label}")
+    if req.photo_count is not None:
+        parts.append(f"Fotos: {req.photo_count}")
+    if req.keywords:
+        parts.append("Stichwörter: " + ", ".join(req.keywords[:8]))
+    return "\n".join(parts)
+
+
+@app.post("/recap-title", response_model=RecapTitleResponse)
+async def recap_title(req: RecapTitleRequest) -> RecapTitleResponse:
+    llm = _state["llm"]
+    if llm is None:
+        raise HTTPException(status_code=503, detail="llm not loaded")
+
+    user_prompt = (
+        f"Kontext:\n{_recap_context(req)}\n\n"
+        "Erzeuge einen passenden Titel (und optional Untertitel) als JSON "
+        "mit den Feldern title und subtitle."
+    )
+
+    try:
+        completion = llm.create_chat_completion(
+            messages=[
+                {"role": "system", "content": _RECAP_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.5,
+            max_tokens=160,
+        )
+    except Exception as exc:
+        log.exception("llm.create_chat_completion failed for /recap-title")
+        raise HTTPException(status_code=500, detail=f"llm failure: {exc}") from exc
+
+    raw = completion["choices"][0]["message"]["content"].strip()
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        log.warning("/recap-title: LLM returned non-JSON: %r", raw[:200])
+        raise HTTPException(status_code=502, detail=f"llm returned invalid JSON: {exc}") from exc
+
+    title = str(data.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=502, detail="llm returned empty title")
+    # Hard-cap lengths so we never push excessive text into the DB/UI.
+    title = title[:60]
+    subtitle_raw = data.get("subtitle")
+    subtitle = str(subtitle_raw).strip()[:120] if subtitle_raw else None
+    if subtitle == "":
+        subtitle = None
+    return RecapTitleResponse(title=title, subtitle=subtitle)
