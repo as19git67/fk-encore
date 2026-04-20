@@ -8,13 +8,17 @@ final class PhotosViewModel {
     var errorMessage: String?
 
     @MainActor
-    func loadPhotos() async {
+    func loadPhotos(filter: PhotoFilter = .empty, sort: PhotoSortState = .default) async {
         isLoading = true
         errorMessage = nil
 
         do {
-            let response: ListPhotosResponse = try await APIClient.shared.get("/photos")
-            photos = response.photos.reversed()
+            let response: ListPhotosResponse = try await APIClient.shared.get(
+                "/photos",
+                query: filter.queryParams()
+            )
+            let raw = Array(response.photos.reversed())
+            photos = sort.isDefault ? raw : raw.sorted(by: sort.comparator)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -23,15 +27,12 @@ final class PhotosViewModel {
     }
 
     @MainActor
-    func setCuration(photoId: Int, status: CurationStatus) async {
+    func setCuration(photoId: Int, status: CurationStatus, filter: PhotoFilter = .empty, sort: PhotoSortState = .default) async {
         do {
             let body = CurationBody(id: photoId, status: status)
             let _: PhotoWithCuration = try await APIClient.shared.put("/photos/curation", body: body)
-
-            if let index = photos.firstIndex(where: { $0.id == photoId }) {
-                // Reload to get updated state
-                await loadPhotos()
-                _ = index // suppress unused warning
+            if photos.contains(where: { $0.id == photoId }) {
+                await loadPhotos(filter: filter, sort: sort)
             }
         } catch {
             errorMessage = error.localizedDescription

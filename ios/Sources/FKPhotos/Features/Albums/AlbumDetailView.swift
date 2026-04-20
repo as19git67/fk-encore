@@ -13,7 +13,17 @@ struct AlbumDetailView: View {
     @State private var isDeleting = false
     @State private var selectedPhoto: PhotoWithCuration?
     @State private var isFullscreenPresented = false
+    @State private var filterSort = FilterSortViewModel()
     @Environment(\.dismiss) private var dismiss
+
+    private var displayedPhotos: [PhotoWithCuration] {
+        let filtered = filterSort.appliedFilter.isEmpty
+            ? photos
+            : photos.filter { matchesFilter($0, filterSort.appliedFilter) }
+        return filterSort.appliedSort.isDefault
+            ? filtered
+            : filtered.sorted(by: filterSort.appliedSort.comparator)
+    }
 
     private let columns = [
         GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 2)
@@ -32,7 +42,7 @@ struct AlbumDetailView: View {
                 }
             } else {
                 LazyVGrid(columns: columns, spacing: 2) {
-                    ForEach(photos) { photo in
+                    ForEach(displayedPhotos) { photo in
                         Button {
                             selectedPhoto = photo
                             isFullscreenPresented = true
@@ -52,7 +62,14 @@ struct AlbumDetailView: View {
                 PhotoFullscreenView(photo: photo)
             }
         }
+        .sheet(isPresented: $filterSort.isMenuPresented) {
+            FilterSortMenuView(viewModel: filterSort, available: [.favorite, .mediaType, .hasGps, .dateRange])
+                .presentationDetents([.medium, .large])
+        }
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                FilterSortButton(viewModel: filterSort)
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     showUpload = true

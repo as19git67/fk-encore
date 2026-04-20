@@ -21,6 +21,7 @@ struct PersonDetailView: View {
     @State private var conflictPerson: PersonWithFaceCount? = nil
     @State private var isMerging = false
 
+    @State private var filterSort = FilterSortViewModel()
     @Environment(\.dismiss) private var dismiss
 
     private var isUnnamed: Bool { personName == "Unbenannt" }
@@ -37,6 +38,32 @@ struct PersonDetailView: View {
 
     private var visibleFaces: [Face] {
         faces.filter { !$0.ignored && $0.photo != nil }
+    }
+
+    private var displayedFaces: [Face] {
+        let f = filterSort.appliedFilter
+        let filtered = visibleFaces.filter { face in
+            guard let photo = face.photo else { return false }
+            // Date range — the only criterion available for FacePhoto
+            if f.dateFrom != nil || f.dateTo != nil {
+                let isoStr = photo.taken_at ?? photo.created_at
+                guard let t = ISO8601DateFormatter().date(from: isoStr) else { return false }
+                if let from = f.dateFrom, t < from { return false }
+                if let to = f.dateTo {
+                    let end = Calendar.current.date(byAdding: .day, value: 1, to: to) ?? to
+                    if t >= end { return false }
+                }
+            }
+            return true
+        }
+        guard !filterSort.appliedSort.isDefault else { return filtered }
+        let fmt = ISO8601DateFormatter()
+        return filtered.sorted { a, b in
+            guard let pa = a.photo, let pb = b.photo else { return false }
+            let va = fmt.date(from: pa.taken_at ?? pa.created_at)?.timeIntervalSince1970 ?? 0
+            let vb = fmt.date(from: pb.taken_at ?? pb.created_at)?.timeIntervalSince1970 ?? 0
+            return filterSort.appliedSort.direction == .desc ? va > vb : va < vb
+        }
     }
 
     var body: some View {
@@ -62,7 +89,7 @@ struct PersonDetailView: View {
                 }
             } else {
                 LazyVGrid(columns: columns, spacing: 2) {
-                    ForEach(visibleFaces) { face in
+                    ForEach(displayedFaces) { face in
                         Button {
                             if let stub = makePhotoStub(face) {
                                 faceSelection = FaceSelection(photo: stub, bbox: face.bbox)
@@ -86,7 +113,14 @@ struct PersonDetailView: View {
         }
         .navigationTitle(isUnnamed ? "Unbekannt" : personName)
         .navigationBarTitleDisplayMode(.large)
+        .sheet(isPresented: $filterSort.isMenuPresented) {
+            FilterSortMenuView(viewModel: filterSort, available: [.favorite, .mediaType, .hasGps, .dateRange])
+                .presentationDetents([.medium, .large])
+        }
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                FilterSortButton(viewModel: filterSort)
+            }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if isMerging {
                     ProgressView()
