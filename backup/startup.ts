@@ -57,6 +57,7 @@ const IMAGE_HOST_SCRIPTS_DIR = "/opt/fk-encore/host-scripts";
 const MANAGED_HOST_SCRIPTS = [
   "install-backup-hook.sh",
   "fk-encore-backup.sh",
+  "format-backup-log.sh",
   "README.md",
 ] as const;
 

@@ -73,6 +73,7 @@ COPY --chown=568:568 frontend/dist/ /srv/frontend/dist/
 # the admin having to clone the fk-encore repo on the host.
 COPY --chown=568:568 scripts/host/install-backup-hook.sh \
                      scripts/host/fk-encore-backup.sh \
+                     scripts/host/format-backup-log.sh \
                      scripts/host/README.md \
                      /opt/fk-encore/host-scripts/
 RUN chmod 0755 /opt/fk-encore/host-scripts/*.sh
