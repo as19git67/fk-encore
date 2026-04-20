@@ -4,7 +4,6 @@ import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import Dialog from 'primevue/dialog'
-import ToggleSwitch from 'primevue/toggleswitch'
 import InputText from 'primevue/inputtext'
 import SelectButton from 'primevue/selectbutton'
 import InputNumber from 'primevue/inputnumber'
@@ -17,13 +16,17 @@ import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import SortMenu from '../components/SortMenu.vue'
 import DateRangePresets from '../components/DateRangePresets.vue'
+import FilterMenu from '../components/FilterMenu.vue'
+import FilterChips from '../components/FilterChips.vue'
+import { useFilter } from '../composables/useFilter'
+import { matchesPhotoFilter } from '../utils/photoFilter'
 import type { SortField, SortState } from '../composables/useSort'
 import {
   listPersons, updatePerson, mergePersons, getPersonDetails,
   ignoreFace, ignorePersonFaces, updatePhotoCuration, reindexPhoto,
   getPhotoFaces, getPhotoLandmarks, getPhotoUrl,
   type CurationStatus, type Person, type Photo, type PersonDetails,
-  type Face, type LandmarkItem,
+  type Face, type LandmarkItem, type PhotoFilter,
 } from '../api/photos'
 import { faceBoxStyle, thumbnailImageStyle } from '../utils/faceBbox'
 import { useAuthStore } from '../stores/auth'
@@ -44,10 +47,41 @@ const error = ref('')
 const selectedPerson = ref<Person | null>(null)
 const selectedPersonDetail = ref<PersonDetails | null>(null)
 const loadingDetails = ref(false)
-const showHidden = ref(false)
 const isFullscreen = ref(false)
 const selectedIndex = ref(-1)
 const nameFilter = ref('')
+
+// ── Photo-level filter (detail view of a selected person) ───────────────────
+// Replaces the former `showHidden` toggle: hiddenMode + a handful of
+// photo-level criteria. Only shown when a person is opened.
+const {
+  applied: photoFilter,
+  draft: photoFilterDraft,
+  activeCount: photoFilterActiveCount,
+  openEdit: openPhotoFilterEdit,
+  apply: applyPhotoFilter,
+  reset: resetPhotoFilter,
+  removeKey: removePhotoFilterKey,
+} = useFilter({ preserveKeys: ['personId', 'photoId'] })
+const photoFilterMenuOpen = ref(false)
+const PHOTO_FILTER_AVAILABLE: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'> = [
+  'hiddenMode', 'favorite', 'mediaTypes', 'hasGps',
+  'qualityRange', 'dateRange', 'sizeRange',
+]
+
+function openPhotoFilterMenu() {
+  openPhotoFilterEdit()
+  photoFilterMenuOpen.value = true
+}
+function onApplyPhotoFilter() {
+  applyPhotoFilter()
+}
+function onResetPhotoFilter() {
+  resetPhotoFilter()
+}
+function onRemovePhotoFilterKey(keys: Array<keyof PhotoFilter>) {
+  removePhotoFilterKey(keys)
+}
 
 // ── Person filter menu ──────────────────────────────────────────────────────
 type PersonNamedFilter = 'all' | 'named' | 'unnamed'
@@ -250,9 +284,10 @@ function saveLastPhotoForPerson(personId: number, photoId: number) {
 // ── Person face / photo items ─────────────────────────────────────────────────
 const personFaceItems = computed(() => {
   if (!selectedPersonDetail.value) return []
+  const f = photoFilter.value
   return selectedPersonDetail.value.faces
-    .filter(f => !!f.photo && !f.ignored && (showHidden.value || f.photo.curation_status !== 'hidden'))
-    .map(f => ({ face: f, photo: f.photo as Photo }))
+    .filter(face => !!face.photo && !face.ignored && matchesPhotoFilter(face.photo as Photo, f))
+    .map(face => ({ face, photo: face.photo as Photo }))
 })
 
 const uniquePhotoFaceItems = computed(() => {
@@ -598,10 +633,15 @@ onUnmounted(() => serviceHealth.stopPolling())
           <h1 class="title">{{ selectedPersonDetail ? selectedPersonDetail.name : 'Personen' }}</h1>
         </div>
         <div class="actions">
-          <div v-if="selectedPersonDetail" class="toggle-hidden">
-            <label for="showHiddenPersons" class="text-sm">Ausgeblendete</label>
-            <ToggleSwitch v-model="showHidden" inputId="showHiddenPersons" />
-          </div>
+          <Button
+            v-if="selectedPersonDetail"
+            :icon="photoFilterActiveCount > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'"
+            :label="photoFilterActiveCount > 0 ? `Filter (${photoFilterActiveCount})` : 'Filter'"
+            size="small"
+            :severity="photoFilterActiveCount > 0 ? 'primary' : 'secondary'"
+            :outlined="photoFilterActiveCount === 0"
+            @click="openPhotoFilterMenu"
+          />
           <template v-if="selectedPerson">
             <Button icon="pi pi-pencil" label="Umbenennen" outlined @click="openRename(selectedPerson)" />
             <Button icon="pi pi-trash" label="Ignorieren" outlined severity="danger"
@@ -610,7 +650,18 @@ onUnmounted(() => serviceHealth.stopPolling())
           </template>
         </div>
       </div>
+      <div v-if="selectedPersonDetail && photoFilterActiveCount > 0" class="person-photo-filter-chips">
+        <FilterChips :filter="photoFilter" @remove="onRemovePhotoFilterKey" />
+      </div>
     </div>
+
+    <FilterMenu
+      v-model:visible="photoFilterMenuOpen"
+      v-model:draft="photoFilterDraft"
+      :available="PHOTO_FILTER_AVAILABLE"
+      @apply="onApplyPhotoFilter"
+      @reset="onResetPhotoFilter"
+    />
 
     <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
 
@@ -882,7 +933,12 @@ onUnmounted(() => serviceHealth.stopPolling())
 
 .actions { display: flex; gap: 0.5rem; align-items: center; }
 
-.toggle-hidden { display: flex; align-items: center; gap: 0.5rem; }
+.person-photo-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding-top: 0.4rem;
+}
 
 .info-text {
   display: flex;
@@ -1128,9 +1184,6 @@ onUnmounted(() => serviceHealth.stopPolling())
   .subheader .actions :deep(.p-button) {
     padding: 0.5rem;
     min-width: 2.25rem;
-  }
-  .toggle-hidden label {
-    display: none;
   }
 }
 

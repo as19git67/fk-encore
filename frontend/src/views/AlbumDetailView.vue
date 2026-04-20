@@ -1,8 +1,8 @@
 <script lang="ts" setup>
 import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import SelectButton from 'primevue/selectbutton'
 import Button from 'primevue/button'
+import Chip from 'primevue/chip'
 import Dialog from 'primevue/dialog'
 import Message from 'primevue/message'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
@@ -12,10 +12,13 @@ import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
 import NaturalSearchBar from '../components/NaturalSearchBar.vue'
+import FilterMenu from '../components/FilterMenu.vue'
+import FilterChips from '../components/FilterChips.vue'
+import { useFilter } from '../composables/useFilter'
+import { matchesPhotoFilter, type PhotoFilterContext } from '../utils/photoFilter'
 
 const TripMap = defineAsyncComponent(() => import('../components/TripMap.vue'))
 import {
-  type ActiveView,
   type AlbumWithPhotos,
   deleteAlbum,
   getPhotoFaces,
@@ -30,12 +33,12 @@ import {
   type LandmarkItem,
   type Person,
   type Photo,
+  type PhotoFilter,
   type PhotoGroup,
   updatePhotoCuration,
   updatePhotoDate,
   updateAlbum,
   updateAlbumUserSettings,
-  batchFavoritePhotos
 } from '../api/photos'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
@@ -81,20 +84,58 @@ watch(isFullscreen, (val) => {
 })
 const activeSection = ref('')
 
-// Flat Photo[] for composables, sorted oldest-first
-const albumPhotos = computed<Photo[]>(() =>
+// ── Filter state ──────────────────────────────────────────────────────────────
+// Client-side filter over the album photos returned by the server. The backend
+// always serves the complete album (see `loadData` where settings.active_view
+// is forced to "all"); filtering happens here via FilterMenu.
+const { applied: filter, draft: filterDraft, activeCount, openEdit, apply: applyFilter, reset: resetFilter, removeKey } =
+  useFilter({ preserveKeys: ['photoId'] })
+const filterMenuOpen = ref(false)
+const FILTER_AVAILABLE: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'> = [
+  'hiddenMode', 'favorite', 'groupHighlight', 'inGroup',
+  'othersFavorited', 'othersHidden',
+  'qualityRange', 'mediaTypes', 'hasGps',
+  'dateRange', 'sizeRange',
+]
+
+function openFilterMenu() {
+  openEdit()
+  filterMenuOpen.value = true
+}
+function onApplyFilter() {
+  applyFilter()
+}
+function onResetFilter() {
+  resetFilter()
+}
+function onRemoveFilterKey(keys: Array<keyof typeof filter.value>) {
+  removeKey(keys)
+}
+
+// Raw album photos, sorted oldest-first (pre-filter). Used as the source for
+// grouping (stacks) and the filter-context sets so that client-side filtering
+// doesn't cause the stacks to shrink.
+const rawAlbumPhotos = computed<Photo[]>(() =>
   [...((album.value?.photos ?? []) as Photo[])].sort((a, b) =>
     new Date(a.taken_at || a.created_at).getTime() -
     new Date(b.taken_at || b.created_at).getTime()
   )
 )
 
+const curationStatsMap = computed(() => {
+  const m = new Map<number, { fav_count: number; hide_count: number }>()
+  for (const p of (album.value?.photos ?? [])) {
+    if (p.curation_stats) m.set(p.id, p.curation_stats)
+  }
+  return m
+})
+
 // ── Similar-photo groups (stacks) ─────────────────────────────────────────────
 // Load all user's groups; filter to those with 2+ members in this album.
 const photoGroupsList = ref<PhotoGroup[]>([])
 const activeGroup = ref<PhotoGroup | null>(null)
 
-const albumPhotoIds = computed(() => new Set(albumPhotos.value.map(p => p.id)))
+const albumPhotoIds = computed(() => new Set(rawAlbumPhotos.value.map(p => p.id)))
 
 // Groups scoped to this album: only include groups where at least 2 photos
 // are in the album. Trim each group's member list to the album members and
@@ -146,6 +187,28 @@ const hiddenByStack = computed(() => {
     }
   }
   return set
+})
+
+// Album photos after applying the FilterMenu criteria. Stacks / grouping run
+// on top of this filtered set, so filtering narrows the grid naturally.
+const albumPhotos = computed<Photo[]>(() => {
+  const ctx: PhotoFilterContext = {
+    curationStats: curationStatsMap.value,
+    groupCoverIds: new Set(
+      albumPhotoGroups.value
+        .map(g => g.cover_photo_id)
+        .filter((id): id is number => id != null),
+    ),
+    inGroupIds: new Set(albumPhotoGroups.value.flatMap(g => g.photo_ids)),
+  }
+  return rawAlbumPhotos.value.filter(p => matchesPhotoFilter(p, filter.value, ctx))
+})
+
+// When the filter narrows the visible photos, clamp selectedIndex so the
+// sidebar/keyboard nav don't point past the end of the list.
+watch(() => albumPhotos.value.length, (len) => {
+  if (len === 0) { selectedIndex.value = -1; return }
+  if (selectedIndex.value >= len) selectedIndex.value = len - 1
 })
 
 // ── Search ────────────────────────────────────────────────────────────────────
@@ -336,6 +399,19 @@ async function loadData() {
     album.value = albumRes
     photoGroupsList.value = groupsRes.groups
 
+    // Legacy view presets (favorites / consensus / others-favorites) are
+    // replaced by the client-side FilterMenu. If a user has a non-default
+    // preset persisted from the old UI, silently reset it to "all" so the
+    // backend returns the complete album and the filter can take over.
+    if (album.value?.settings && album.value.settings.active_view !== 'all') {
+      try {
+        await updateAlbumUserSettings(albumId.value, { active_view: 'all' })
+        album.value.settings.active_view = 'all'
+        const reloaded = await getAlbum(albumId.value)
+        album.value = reloaded
+      } catch { /* ignore – filter still narrows the returned set */ }
+    }
+
     // Honor ?photoId=… query: pre-select and scroll to that photo.
     // If the target photo is hidden as a stack member, fall back to the
     // stack's cover photo (which is what's actually rendered in the grid).
@@ -370,16 +446,6 @@ async function loadData() {
     error.value = err.message || 'Fehler beim Laden des Albums'
   } finally {
     loading.value = false
-  }
-}
-
-async function handleSettingsChange() {
-  if (!album.value?.settings) return
-  try {
-    await updateAlbumUserSettings(albumId.value, album.value.settings)
-    await loadData()
-  } catch (err: any) {
-    error.value = err.message || 'Fehler beim Speichern der Einstellungen'
   }
 }
 
@@ -674,36 +740,6 @@ async function saveDescription() {
   }
 }
 
-const viewOptions = [
-  { label: 'Alle Fotos', value: 'all', icon: 'pi pi-images' },
-  { label: 'Meine Favoriten', value: 'favorites', icon: 'pi pi-heart' },
-  { label: 'Gruppen-Highlights', value: 'consensus', icon: 'pi pi-star' },
-  { label: 'Favoriten anderer', value: 'others-favorites', icon: 'pi pi-users' },
-]
-
-// Show shared-only options only for shared albums
-const availableViewOptions = computed(() => {
-  if (album.value?.is_shared || (album.value && album.value.role !== 'owner')) return viewOptions
-  return viewOptions.filter(o => o.value !== 'consensus' && o.value !== 'others-favorites')
-})
-
-// Batch favorite all visible photos (for "others-favorites" view)
-const batchFavoriting = ref(false)
-
-async function handleBatchFavoriteAll() {
-  if (!album.value) return
-  const photoIds = albumPhotos.value.map(p => p.id)
-  if (photoIds.length === 0) return
-  batchFavoriting.value = true
-  try {
-    await batchFavoritePhotos(albumId.value, photoIds)
-    await loadData()
-  } catch (err: any) {
-    error.value = err.message || 'Fehler beim Favorisieren'
-  } finally {
-    batchFavoriting.value = false
-  }
-}
 // ── Mobile drawer state ───────────────────────────────────────────────────────
 const mobileTimelineOpen = ref(false)
 const mobileSidebarOpen = ref(false)
@@ -771,41 +807,15 @@ watch(albumId, () => {
           </div>
         </div>
 
-        <!-- 5a. View switcher – DESKTOP (text labels) -->
-        <div v-if="album.settings" class="header__views-desktop">
-          <SelectButton v-model="album.settings.active_view" :options="availableViewOptions" optionLabel="label" optionValue="value" @change="handleSettingsChange" />
+        <!-- 5. Filter -->
+        <div class="header__filter">
           <Button
-            v-if="album.settings.active_view === 'others-favorites' && albumPhotos.length > 0"
-            icon="pi pi-heart-fill"
-            :label="`Alle favorisieren (${albumPhotos.length})`"
+            :icon="activeCount > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'"
+            :label="activeCount > 0 ? `Filter (${activeCount})` : 'Filter'"
             size="small"
-            severity="warn"
-            :loading="batchFavoriting"
-            @click="handleBatchFavoriteAll"
-          />
-        </div>
-
-        <!-- 5b. View switcher – MOBILE (icon-only) -->
-        <div v-if="album.settings" class="header__views-mobile">
-          <div class="mobile-view-switcher">
-            <button
-              v-for="opt in availableViewOptions"
-              :key="opt.value"
-              :class="['mobile-view-btn', { 'mobile-view-btn--active': album.settings!.active_view === opt.value }]"
-              @click="album.settings!.active_view = opt.value as ActiveView; handleSettingsChange()"
-            >
-              <i :class="opt.icon" />
-              <span v-if="album.settings!.active_view === opt.value" class="mobile-view-btn__label">{{ opt.label }}</span>
-            </button>
-          </div>
-          <Button
-            v-if="album.settings.active_view === 'others-favorites' && albumPhotos.length > 0"
-            icon="pi pi-heart-fill"
-            size="small"
-            severity="warn"
-            :loading="batchFavoriting"
-            v-tooltip="'Alle favorisieren'"
-            @click="handleBatchFavoriteAll"
+            :severity="activeCount > 0 ? 'primary' : 'secondary'"
+            :outlined="activeCount === 0"
+            @click="openFilterMenu"
           />
         </div>
 
@@ -821,7 +831,23 @@ watch(albumId, () => {
           <Button v-if="isOwner" icon="pi pi-trash" size="small" text severity="danger" v-tooltip="'Album löschen'" @click="showDeleteDialog = true" />
         </div>
       </div>
+
+      <div v-if="activeCount > 0" class="chip-row">
+        <FilterChips :filter="filter" @remove="onRemoveFilterKey" />
+        <Chip
+          v-if="rawAlbumPhotos.length > 0"
+          :label="`${albumPhotos.length} von ${rawAlbumPhotos.length}`"
+        />
+      </div>
     </div>
+
+    <FilterMenu
+      v-model:visible="filterMenuOpen"
+      v-model:draft="filterDraft"
+      :available="FILTER_AVAILABLE"
+      @apply="onApplyFilter"
+      @reset="onResetFilter"
+    />
 
     <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
 
@@ -1163,11 +1189,15 @@ watch(albumId, () => {
   white-space: nowrap;
 }
 
-/* Desktop view switcher: visible by default */
-.header__views-desktop { display: flex; align-items: center; gap: 0.5em; }
+.header__filter { display: flex; align-items: center; gap: 0.5em; }
 
-/* Mobile view switcher: hidden by default */
-.header__views-mobile { display: none; }
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0 1em 0.5em;
+}
 
 /* ── Album-scoped natural search bar ─────────────────────────────────────── */
 .album-search {
@@ -1312,11 +1342,9 @@ watch(albumId, () => {
     background: var(--p-content-hover-background);
   }
 
-  /* Swap view switcher variants */
-  .header__views-desktop { display: none; }
-  .header__views-mobile { display: flex; flex-wrap: wrap; gap: 0.35em; align-items: center; flex: 1 1 auto; order: 10; }
+  .header__filter { order: 10; }
 
-  /* Put action icons on the same row as the mobile view switcher */
+  /* Put action icons on the same row as the filter button */
   .header__actions { order: 11; }
 
   /* Compact header on mobile */
@@ -1324,39 +1352,6 @@ watch(albumId, () => {
   .header__title { font-size: 1.1em; }
   .header__description { flex: 1 1 100%; }
   .header__description-text--empty { display: none; }
-
-  /* ── Mobile view switcher (custom segmented control) ──────────────────── */
-  .mobile-view-switcher {
-    display: flex;
-    border: 1px solid var(--p-content-border-color);
-    border-radius: var(--p-border-radius, 6px);
-    overflow: hidden;
-  }
-  .mobile-view-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.3em;
-    padding: 0.4em 0.5em;
-    border: none;
-    background: var(--p-content-background);
-    color: var(--p-text-color);
-    font-size: 0.8em;
-    cursor: pointer;
-    transition: background 0.15s;
-  }
-  .mobile-view-btn + .mobile-view-btn {
-    border-left: 1px solid var(--p-content-border-color);
-  }
-  .mobile-view-btn--active {
-    flex: 1;
-    background: var(--p-primary-color);
-    color: var(--p-primary-contrast-color, #fff);
-    font-weight: 600;
-  }
-  .mobile-view-btn__label {
-    white-space: nowrap;
-  }
 }
 
 /* ── Delete dialog ──────────────────────────────────────────────────────── */
