@@ -1,11 +1,12 @@
 import SwiftUI
 
 struct PhotoGridView: View {
-    @State private var viewModel = PhotosViewModel()
+    @State private var viewModel      = PhotosViewModel()
+    @State private var filterSort     = FilterSortViewModel()
     @State private var isFullscreenPresented = false
-    @State private var selectedIndex = 0
+    @State private var selectedIndex  = 0
     @State private var scrollTarget: Int?
-    @State private var showUpload = false
+    @State private var showUpload     = false
 
     private let columns = [
         GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 2)
@@ -66,11 +67,18 @@ struct PhotoGridView: View {
                     Image(systemName: "photo.badge.plus")
                 }
             }
+            ToolbarItem(placement: .topBarLeading) {
+                FilterSortButton(viewModel: filterSort)
+            }
         }
         .sheet(isPresented: $showUpload) {
             PhotoUploadView {
-                Task { await viewModel.loadPhotos() }
+                Task { await viewModel.loadPhotos(filter: filterSort.appliedFilter, sort: filterSort.appliedSort) }
             }
+        }
+        .sheet(isPresented: $filterSort.isMenuPresented) {
+            FilterSortMenuView(viewModel: filterSort)
+                .presentationDetents([.medium, .large])
         }
         .navigationDestination(isPresented: $isFullscreenPresented) {
             PhotoFullscreenView(photos: viewModel.photos, currentIndex: $selectedIndex)
@@ -87,10 +95,10 @@ struct PhotoGridView: View {
             }
         }
         .refreshable {
-            await viewModel.loadPhotos()
+            await viewModel.loadPhotos(filter: filterSort.appliedFilter, sort: filterSort.appliedSort)
         }
-        .task {
-            await viewModel.loadPhotos()
+        .task(id: filterSort.applyToken) {
+            await viewModel.loadPhotos(filter: filterSort.appliedFilter, sort: filterSort.appliedSort)
         }
     }
 }
