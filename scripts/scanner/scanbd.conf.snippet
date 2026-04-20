@@ -1,0 +1,16 @@
+# --------------------------------------------------------------------
+# Patch for /etc/scanbd/scanbd.conf
+#
+# Die bestehende `action scan { … }`-Sektion bleibt vollständig erhalten
+# (filter, trigger, desc — scanner-spezifisch). Nur die script-Zeile
+# wird umgebogen, damit der Button in das neue Fk-Encore-Pipeline-Skript
+# läuft statt in das alte ~/doscan.sh mit OCR + Dropbox + SMB.
+#
+# Vorher (Beispiel):
+#     script = "/home/anton/doscan.sh"
+#
+# Nachher:
+#     script = "/usr/local/bin/doscan.sh"
+#
+# Danach: `sudo systemctl restart dbus-de.kmux.scanbd.server.service`.
+# --------------------------------------------------------------------
