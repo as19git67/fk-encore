@@ -321,6 +321,8 @@ export interface Person {
   created_at: string
   updated_at: string
   faceCount?: number
+  oldest_photo_at?: string
+  newest_photo_at?: string
 }
 
 export interface ListPersonsResponse {

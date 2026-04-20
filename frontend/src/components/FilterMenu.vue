@@ -7,7 +7,7 @@ import ToggleSwitch from 'primevue/toggleswitch'
 import Slider from 'primevue/slider'
 import InputNumber from 'primevue/inputnumber'
 import AutoComplete from 'primevue/autocomplete'
-import DatePicker from 'primevue/datepicker'
+import DateRangePresets from './DateRangePresets.vue'
 import type { PhotoFilter, HiddenMode, MembershipMode, MediaType, Album, Person } from '../api/photos'
 import { listAlbums, listPersons } from '../api/photos'
 
@@ -364,10 +364,7 @@ function close() {
       <!-- Date range -->
       <div v-if="has('dateRange')" class="filter-row">
         <label class="filter-label">Aufnahmedatum</label>
-        <div class="filter-daterange">
-          <DatePicker v-model="dateFrom" date-format="dd.mm.yy" placeholder="Von" show-icon />
-          <DatePicker v-model="dateTo" date-format="dd.mm.yy" placeholder="Bis" show-icon />
-        </div>
+        <DateRangePresets v-model:from="dateFrom" v-model:to="dateTo" />
       </div>
 
       <!-- Imported days ago -->

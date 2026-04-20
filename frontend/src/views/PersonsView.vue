@@ -16,6 +16,7 @@ import FacePhotoGrid from '../components/FacePhotoGrid.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import SortMenu from '../components/SortMenu.vue'
+import DateRangePresets from '../components/DateRangePresets.vue'
 import type { SortField, SortState } from '../composables/useSort'
 import {
   listPersons, updatePerson, mergePersons, getPersonDetails,
@@ -54,12 +55,16 @@ type PersonNamedFilter = 'all' | 'named' | 'unnamed'
 interface PersonFilter {
   named: PersonNamedFilter
   faceCountMin?: number
+  dateFrom?: string  // ISO YYYY-MM-DD
+  dateTo?: string
 }
 
 const EMPTY_PERSON_FILTER: PersonFilter = { named: 'all' }
 const appliedPersonFilter = ref<PersonFilter>({ ...EMPTY_PERSON_FILTER })
 const draftPersonFilter = ref<PersonFilter>({ ...EMPTY_PERSON_FILTER })
 const showPersonFilterMenu = ref(false)
+const draftPersonDateFrom = ref<Date | null>(null)
+const draftPersonDateTo = ref<Date | null>(null)
 
 const namedOptions: Array<{ label: string; value: PersonNamedFilter }> = [
   { label: 'Alle', value: 'all' },
@@ -72,21 +77,30 @@ const activePersonFilterCount = computed(() => {
   let n = 0
   if (f.named !== 'all') n++
   if (f.faceCountMin !== undefined) n++
+  if (f.dateFrom || f.dateTo) n++
   return n
 })
 
 function openPersonFilterMenu() {
   draftPersonFilter.value = { ...appliedPersonFilter.value }
+  draftPersonDateFrom.value = appliedPersonFilter.value.dateFrom ? new Date(appliedPersonFilter.value.dateFrom) : null
+  draftPersonDateTo.value = appliedPersonFilter.value.dateTo ? new Date(appliedPersonFilter.value.dateTo) : null
   showPersonFilterMenu.value = true
 }
 
 function applyPersonFilter() {
-  appliedPersonFilter.value = { ...draftPersonFilter.value }
+  appliedPersonFilter.value = {
+    ...draftPersonFilter.value,
+    dateFrom: draftPersonDateFrom.value ? draftPersonDateFrom.value.toISOString().slice(0, 10) : undefined,
+    dateTo: draftPersonDateTo.value ? draftPersonDateTo.value.toISOString().slice(0, 10) : undefined,
+  }
   showPersonFilterMenu.value = false
 }
 
 function resetPersonFilter() {
   draftPersonFilter.value = { ...EMPTY_PERSON_FILTER }
+  draftPersonDateFrom.value = null
+  draftPersonDateTo.value = null
   appliedPersonFilter.value = { ...EMPTY_PERSON_FILTER }
 }
 
@@ -105,6 +119,12 @@ function personFilterChips(): Array<{ label: string; clear: () => void }> {
       clear: () => { appliedPersonFilter.value = { ...f, faceCountMin: undefined } },
     })
   }
+  if (f.dateFrom || f.dateTo) {
+    chips.push({
+      label: `Foto ${f.dateFrom ?? '…'} – ${f.dateTo ?? '…'}`,
+      clear: () => { appliedPersonFilter.value = { ...f, dateFrom: undefined, dateTo: undefined } },
+    })
+  }
   return chips
 }
 
@@ -113,6 +133,19 @@ function matchesPersonFilter(p: Person, f: PersonFilter): boolean {
   if (f.named === 'named' && isUnnamed) return false
   if (f.named === 'unnamed' && !isUnnamed) return false
   if (f.faceCountMin !== undefined && Number(p.faceCount || 0) < f.faceCountMin) return false
+  if (f.dateFrom || f.dateTo) {
+    // A person matches when at least one of their photos falls inside the
+    // range. Use the aggregated [oldest_photo_at, newest_photo_at] span to
+    // test for overlap with [dateFrom, dateTo].
+    const oldest = p.oldest_photo_at ? new Date(p.oldest_photo_at).getTime() : 0
+    const newest = p.newest_photo_at ? new Date(p.newest_photo_at).getTime() : 0
+    if (!oldest || !newest) return false
+    if (f.dateFrom && newest < new Date(f.dateFrom).getTime()) return false
+    if (f.dateTo) {
+      const end = new Date(f.dateTo).getTime() + 86400000
+      if (oldest >= end) return false
+    }
+  }
   return true
 }
 
@@ -793,6 +826,10 @@ onUnmounted(() => serviceHealth.stopPolling())
         <div class="pfm-row">
           <label class="pfm-label">Mindestanzahl Fotos</label>
           <InputNumber v-model="draftPersonFilter.faceCountMin" :min="0" show-buttons />
+        </div>
+        <div class="pfm-row">
+          <label class="pfm-label">Fotodatum</label>
+          <DateRangePresets v-model:from="draftPersonDateFrom" v-model:to="draftPersonDateTo" />
         </div>
       </div>
       <template #footer>

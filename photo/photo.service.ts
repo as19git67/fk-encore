@@ -3265,6 +3265,7 @@ export async function listPersonsLogic(userId: number): Promise<ListPersonsRespo
     id: number; user_id: number; name: string; cover_face_id: number | null;
     created_at: string | null; updated_at: string | null; faceCount: number;
     cover_filename: string | null; cover_bbox: string | null;
+    oldest_photo_at: string | null; newest_photo_at: string | null;
   }>(db.select({
       id: persons.id,
       user_id: persons.user_id,
@@ -3314,6 +3315,24 @@ export async function listPersonsLogic(userId: number): Promise<ListPersonsRespo
         ),
         ''
       )`,
+      oldest_photo_at: sql<string>`(
+        SELECT MIN(${rawCoalesceDate})::text
+        FROM user_face_assignments ufa
+        INNER JOIN faces f ON f.id = ufa.face_id
+        INNER JOIN photos p ON p.id = f.photo_id
+        WHERE ufa.person_id = persons.id
+          AND ufa.user_id = persons.user_id
+          AND ufa.ignored = ${rawFalse}
+      )`,
+      newest_photo_at: sql<string>`(
+        SELECT MAX(${rawCoalesceDate})::text
+        FROM user_face_assignments ufa
+        INNER JOIN faces f ON f.id = ufa.face_id
+        INNER JOIN photos p ON p.id = f.photo_id
+        WHERE ufa.person_id = persons.id
+          AND ufa.user_id = persons.user_id
+          AND ufa.ignored = ${rawFalse}
+      )`,
     })
     .from(persons)
     .where(eq(persons.user_id, userId))
@@ -3331,6 +3350,8 @@ export async function listPersonsLogic(userId: number): Promise<ListPersonsRespo
       faceCount: r.faceCount,
       cover_filename: r.cover_filename ?? undefined,
       cover_bbox: r.cover_bbox ? JSON.parse(r.cover_bbox) : undefined,
+      oldest_photo_at: r.oldest_photo_at ?? undefined,
+      newest_photo_at: r.newest_photo_at ?? undefined,
     })),
     enableLocalFaces: ENABLE_LOCAL_FACES,
   };
