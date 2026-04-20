@@ -12,6 +12,8 @@
 
 import { Pool } from "pg";
 
+console.log("[boot] backup/pool.ts: all imports resolved");
+
 function buildConnectionString(database?: string): string {
   const host = process.env.POSTGRES_HOST || "localhost";
   const port = process.env.POSTGRES_PORT || "5432";

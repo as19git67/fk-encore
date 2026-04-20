@@ -34,6 +34,8 @@ import {
 import { enqueuePhotoScan } from "./scan-queue";
 import { triggerWorkers } from "./scan-worker";
 
+console.log("[boot] photo/libraries.service.ts: all imports resolved");
+
 export const PHOTO_LIBRARIES_ROOT = path.resolve(
   process.env.PHOTO_LIBRARIES_ROOT || "/mnt/libraries"
 );

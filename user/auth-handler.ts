@@ -2,6 +2,8 @@ import { Header, Gateway, APIError } from "encore.dev/api";
 import { authHandler } from "encore.dev/auth";
 import { validateToken } from "./auth.service";
 
+console.log("[boot] user/auth-handler.ts: all imports resolved");
+
 interface AuthParams {
   authorization: Header<"Authorization">;
 }
@@ -25,6 +27,7 @@ export function requirePermission(authData: AuthData, permission: string): void 
   }
 }
 
+console.log("[boot] user/auth-handler.ts: calling authHandler()");
 export const auth = authHandler<AuthParams, AuthData>(async (params): Promise<AuthData> => {
   const header = params.authorization;
   if (!header) {
@@ -45,7 +48,10 @@ export const auth = authHandler<AuthParams, AuthData>(async (params): Promise<Au
     throw APIError.unauthenticated("invalid or expired token");
   }
 });
+console.log("[boot] user/auth-handler.ts: authHandler() returned");
 
+console.log("[boot] user/auth-handler.ts: calling new Gateway()");
 export const gateway = new Gateway({
   authHandler: auth,
 });
+console.log("[boot] user/auth-handler.ts: new Gateway() returned");

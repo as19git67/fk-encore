@@ -22,6 +22,8 @@ import {
   type PhotoLibrary,
 } from "./libraries.service";
 
+console.log("[boot] photo/library-watcher.ts: all imports resolved");
+
 const watchers = new Map<number, FSWatcher>();
 
 function isSupported(file: string): boolean {

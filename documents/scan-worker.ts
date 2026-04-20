@@ -36,6 +36,8 @@ import {
   isLlmServiceHealthy,
 } from "./llm-client";
 
+console.log("[boot] documents/scan-worker.ts: all imports resolved");
+
 const POLL_INTERVAL_MS = parseInt(process.env.DOC_SCAN_POLL_INTERVAL_MS ?? "30000", 10);
 
 class DocumentScanWorker {
