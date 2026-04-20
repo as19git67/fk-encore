@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import HeicImage from '../components/HeicImage.vue'
+import RecapPlayer from '../components/RecapPlayer.vue'
 import {
   listRecaps,
   getRecap,
@@ -39,6 +40,7 @@ const detail = ref<RecapDetails | null>(null)
 const detailPhotos = ref<Photo[]>([])
 const detailLoading = ref(false)
 const detailError = ref('')
+const playerOpen = ref(false)
 
 const kindLabels: Record<RecapKind, string> = {
   on_this_day: 'Heute vor…',
@@ -147,10 +149,16 @@ watch(
     else {
       detail.value = null
       detailPhotos.value = []
+      playerOpen.value = false
     }
   },
   { immediate: true }
 )
+
+function openPlayer() {
+  if (detailPhotos.value.length === 0) return
+  playerOpen.value = true
+}
 </script>
 
 <template>
@@ -217,6 +225,12 @@ watch(
           </div>
           <div class="recap-detail-actions">
             <Button
+              icon="pi pi-play"
+              label="Abspielen"
+              :disabled="detailPhotos.length === 0"
+              @click="openPlayer"
+            />
+            <Button
               icon="pi pi-eye-slash"
               label="Ausblenden"
               severity="secondary"
@@ -237,12 +251,25 @@ watch(
         </div>
 
         <div v-else class="recap-photo-grid">
-          <div v-for="photo in detailPhotos" :key="photo.id" class="recap-photo">
+          <div
+            v-for="photo in detailPhotos"
+            :key="photo.id"
+            class="recap-photo"
+            @click="openPlayer"
+          >
             <HeicImage :src="getPhotoUrl(photo.filename, 600)" :alt="photo.original_name" />
           </div>
         </div>
       </div>
     </div>
+
+    <RecapPlayer
+      :photos="detailPhotos"
+      :title="detail?.title"
+      :subtitle="detail?.subtitle ?? null"
+      :open="playerOpen"
+      @close="playerOpen = false"
+    />
   </div>
 </template>
 
@@ -406,6 +433,12 @@ watch(
   overflow: hidden;
   border-radius: 8px;
   background: #111;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.recap-photo:hover {
+  transform: scale(1.02);
 }
 
 .recap-photo :deep(img),

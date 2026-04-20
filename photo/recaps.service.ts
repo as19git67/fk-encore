@@ -14,7 +14,15 @@
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbExec, dbFirst, dbInsertReturning } from "../db/adapter";
-import { photos, recaps, recapPhotos, photoCuration } from "../db/schema";
+import {
+  photos,
+  recaps,
+  recapPhotos,
+  photoCuration,
+  persons,
+  faces,
+  userFaceAssignments,
+} from "../db/schema";
 
 const MIN_PHOTOS_PER_RECAP = 4;
 const MAX_PHOTOS_PER_RECAP = 30;
@@ -522,12 +530,259 @@ async function buildTripRecaps(
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Builder: person
+// ────────────────────────────────────────────────────────────────────────────
+
+interface PersonInfo {
+  id: number;
+  name: string;
+}
+
+async function loadPersonsForUser(userId: number): Promise<PersonInfo[]> {
+  return dbAll<PersonInfo>(
+    db
+      .select({ id: persons.id, name: persons.name })
+      .from(persons)
+      .where(eq(persons.user_id, userId))
+  );
+}
+
+/**
+ * Map personId -> set of photoIds for photos that contain at least one face
+ * assigned to the person (and not ignored).
+ */
+async function loadPersonPhotoMap(userId: number): Promise<Map<number, Set<number>>> {
+  const rows = await dbAll<{ person_id: number; photo_id: number }>(
+    db
+      .select({ person_id: userFaceAssignments.person_id, photo_id: faces.photo_id })
+      .from(userFaceAssignments)
+      .innerJoin(faces, eq(faces.id, userFaceAssignments.face_id))
+      .where(
+        and(
+          eq(userFaceAssignments.user_id, userId),
+          eq(userFaceAssignments.ignored, false),
+          isNotNull(userFaceAssignments.person_id)
+        )
+      )
+  );
+  const map = new Map<number, Set<number>>();
+  for (const row of rows) {
+    if (row.person_id == null) continue;
+    let set = map.get(row.person_id);
+    if (!set) {
+      set = new Set<number>();
+      map.set(row.person_id, set);
+    }
+    set.add(row.photo_id);
+  }
+  return map;
+}
+
+const PERSON_RECENT_DAYS = 90;
+const PERSON_MIN_PHOTOS = 8;
+
+async function buildPersonRecaps(
+  userId: number,
+  allPhotos: CandidatePhoto[],
+  today: Date
+): Promise<number> {
+  const personList = await loadPersonsForUser(userId);
+  if (personList.length === 0) return 0;
+  const personPhotos = await loadPersonPhotoMap(userId);
+  const photosById = new Map(allPhotos.map((p) => [p.id, p]));
+  const recentCutoff = new Date(today);
+  recentCutoff.setDate(recentCutoff.getDate() - PERSON_RECENT_DAYS);
+  const currentYear = today.getFullYear();
+  let built = 0;
+
+  for (const person of personList) {
+    const photoIds = personPhotos.get(person.id);
+    if (!photoIds || photoIds.size === 0) continue;
+    const photosForPerson: CandidatePhoto[] = [];
+    for (const pid of photoIds) {
+      const p = photosById.get(pid);
+      if (p) photosForPerson.push(p);
+    }
+
+    // Window 1: last 90 days.
+    const recent = photosForPerson.filter((p) => {
+      const d = effectiveDate(p);
+      return d != null && d >= recentCutoff;
+    });
+    if (recent.length >= PERSON_MIN_PHOTOS) {
+      const { cover, rankedIds } = curatePhotos(recent);
+      const sorted = recent
+        .map(effectiveDate)
+        .filter((d): d is Date => d != null)
+        .sort((a, b) => a.getTime() - b.getTime());
+      await upsertRecap({
+        userId,
+        kind: "person",
+        title: `Mit ${person.name}`,
+        subtitle: "Zuletzt",
+        dedupKey: `person:${person.id}:recent`,
+        coverPhotoId: cover,
+        periodStart: sorted[0] ?? null,
+        periodEnd: sorted[sorted.length - 1] ?? null,
+        score: 55 + Math.min(recent.length, 25),
+        seed: { person_id: person.id, window: "recent", days: PERSON_RECENT_DAYS },
+        photoIds: rankedIds,
+      });
+      built++;
+    }
+
+    // Window 2: yearly recaps for past calendar years with enough photos.
+    const byYear = new Map<number, CandidatePhoto[]>();
+    for (const p of photosForPerson) {
+      const d = effectiveDate(p);
+      if (!d) continue;
+      const year = d.getFullYear();
+      if (year >= currentYear) continue;
+      const arr = byYear.get(year) ?? [];
+      arr.push(p);
+      byYear.set(year, arr);
+    }
+    for (const [year, list] of byYear) {
+      if (list.length < PERSON_MIN_PHOTOS) continue;
+      const { cover, rankedIds } = curatePhotos(list);
+      const start = new Date(year, 0, 1);
+      const end = new Date(year, 11, 31, 23, 59, 59);
+      await upsertRecap({
+        userId,
+        kind: "person",
+        title: `${person.name} · ${year}`,
+        subtitle: `Jahresrückblick ${year}`,
+        dedupKey: `person:${person.id}:year:${year}`,
+        coverPhotoId: cover,
+        periodStart: start,
+        periodEnd: end,
+        score: 45 + Math.min(list.length, 30),
+        seed: { person_id: person.id, window: "year", year },
+        photoIds: rankedIds,
+      });
+      built++;
+    }
+  }
+  return built;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Builder: recent_highlights (monthly best)
+// ────────────────────────────────────────────────────────────────────────────
+
+const RECENT_HIGHLIGHTS_DAYS = 28;
+const RECENT_HIGHLIGHTS_MIN_PHOTOS = 6;
+const RECENT_HIGHLIGHTS_MIN_DAYS = 3;
+
+async function buildRecentHighlightsRecaps(
+  userId: number,
+  allPhotos: CandidatePhoto[],
+  today: Date
+): Promise<number> {
+  const cutoff = new Date(today);
+  cutoff.setDate(cutoff.getDate() - RECENT_HIGHLIGHTS_DAYS);
+  const recent = allPhotos.filter((p) => {
+    const d = effectiveDate(p);
+    return d != null && d >= cutoff && d <= today;
+  });
+  if (recent.length < RECENT_HIGHLIGHTS_MIN_PHOTOS) return 0;
+  const distinctDays = new Set(
+    recent.map((p) => effectiveDate(p)!.toISOString().slice(0, 10))
+  );
+  if (distinctDays.size < RECENT_HIGHLIGHTS_MIN_DAYS) return 0;
+
+  const { cover, rankedIds } = curatePhotos(recent);
+  const yyyyMm = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  const monthLabel = today.toLocaleDateString("de-DE", {
+    month: "long",
+    year: "numeric",
+  });
+
+  await upsertRecap({
+    userId,
+    kind: "recent_highlights",
+    title: "Zuletzt",
+    subtitle: `Deine Highlights im ${monthLabel}`,
+    dedupKey: `recent_highlights:${yyyyMm}`,
+    coverPhotoId: cover,
+    periodStart: cutoff,
+    periodEnd: today,
+    score: 90, // always prominently at the top of the feed
+    seed: { month: yyyyMm, distinct_days: distinctDays.size },
+    photoIds: rankedIds,
+  });
+  return 1;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Builder: place
+// ────────────────────────────────────────────────────────────────────────────
+
+const PLACE_MIN_PHOTOS = 20;
+const PLACE_MIN_DISTINCT_DAYS = 3;
+
+async function buildPlaceRecaps(
+  userId: number,
+  allPhotos: CandidatePhoto[],
+  today: Date
+): Promise<number> {
+  const byCity = new Map<string, CandidatePhoto[]>();
+  for (const p of allPhotos) {
+    const city = p.location_city?.trim();
+    if (!city) continue;
+    const arr = byCity.get(city) ?? [];
+    arr.push(p);
+    byCity.set(city, arr);
+  }
+
+  let built = 0;
+  for (const [city, list] of byCity) {
+    if (list.length < PLACE_MIN_PHOTOS) continue;
+    const dates = list
+      .map(effectiveDate)
+      .filter((d): d is Date => d != null);
+    const distinctDays = new Set(dates.map((d) => d.toISOString().slice(0, 10)));
+    if (distinctDays.size < PLACE_MIN_DISTINCT_DAYS) continue;
+
+    const { cover, rankedIds } = curatePhotos(list);
+    const slug = city
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "");
+    dates.sort((a, b) => a.getTime() - b.getTime());
+
+    await upsertRecap({
+      userId,
+      kind: "place",
+      title: city,
+      subtitle: `${list.length} Fotos aus ${city}`,
+      dedupKey: `place:${slug}`,
+      coverPhotoId: cover,
+      periodStart: dates[0] ?? null,
+      periodEnd: dates[dates.length - 1] ?? null,
+      score: 30 + Math.min(list.length / 2, 40),
+      seed: {
+        location_city: city,
+        photo_count: list.length,
+        distinct_days: distinctDays.size,
+      },
+      photoIds: rankedIds,
+    });
+    built++;
+  }
+  return built;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Public API: rebuild + list + get + dismiss
 // ────────────────────────────────────────────────────────────────────────────
 
 export interface RebuildResult {
   on_this_day: number;
   trip: number;
+  person: number;
+  recent_highlights: number;
+  place: number;
 }
 
 export async function rebuildRecapsForUser(
@@ -537,7 +792,10 @@ export async function rebuildRecapsForUser(
   const candidates = await loadVisiblePhotos(userId);
   const on_this_day = await buildOnThisDayRecaps(userId, candidates, now);
   const trip = await buildTripRecaps(userId, candidates, now);
-  return { on_this_day, trip };
+  const person = await buildPersonRecaps(userId, candidates, now);
+  const recent_highlights = await buildRecentHighlightsRecaps(userId, candidates, now);
+  const place = await buildPlaceRecaps(userId, candidates, now);
+  return { on_this_day, trip, person, recent_highlights, place };
 }
 
 export async function rebuildRecapsForAllUsers(
@@ -549,12 +807,21 @@ export async function rebuildRecapsForAllUsers(
       .from(photos)
       .where(isNotNull(photos.user_id))
   );
-  const total: RebuildResult = { on_this_day: 0, trip: 0 };
+  const total: RebuildResult = {
+    on_this_day: 0,
+    trip: 0,
+    person: 0,
+    recent_highlights: 0,
+    place: 0,
+  };
   for (const row of rows) {
     try {
       const r = await rebuildRecapsForUser(row.user_id, now);
       total.on_this_day += r.on_this_day;
       total.trip += r.trip;
+      total.person += r.person;
+      total.recent_highlights += r.recent_highlights;
+      total.place += r.place;
     } catch (err: any) {
       console.error(
         `[recaps] rebuild failed for user ${row.user_id}:`,
@@ -695,4 +962,57 @@ export async function restoreRecap(userId: number, recapId: number): Promise<boo
       .where(and(eq(recaps.id, recapId), eq(recaps.user_id, userId)))
   );
   return result.changes > 0;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Incremental rebuild scheduler
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Scan jobs (embedding, quality, geocoding, face_assignment) complete at
+// variable latency as photos flow through the pipeline. Each completion can
+// invalidate a user's recaps — e.g. a newly geocoded photo may belong to an
+// existing trip, or a reassigned face may add photos to a person-recap.
+//
+// Running the full `rebuildRecapsForUser` per completion would be wasteful
+// during bulk imports (hundreds of jobs finish in seconds). The scheduler
+// below mirrors the `scheduleRegroup` pattern in photo.service.ts:
+//   - per-user mutex: at most one rebuild in flight
+//   - coalescing: repeated triggers during a run collapse into a single
+//     follow-up pass that sees the latest state
+//   - debounce after each pass so a burst of scan completions only causes
+//     one rebuild once the burst settles
+
+const RECAPS_DEBOUNCE_MS = 60_000;
+
+const recapsRebuildRunning = new Map<number, Promise<void>>();
+const recapsRebuildPending = new Set<number>();
+
+export function scheduleRecapsRebuild(userId: number): Promise<void> {
+  const existing = recapsRebuildRunning.get(userId);
+  if (existing) {
+    recapsRebuildPending.add(userId);
+    return existing;
+  }
+  const run = (async () => {
+    try {
+      do {
+        recapsRebuildPending.delete(userId);
+        try {
+          await rebuildRecapsForUser(userId);
+        } catch (err: any) {
+          console.error(
+            `[recaps] incremental rebuild failed for user ${userId}:`,
+            err?.message ?? err
+          );
+        }
+        if (recapsRebuildPending.has(userId)) {
+          await new Promise((r) => setTimeout(r, RECAPS_DEBOUNCE_MS));
+        }
+      } while (recapsRebuildPending.has(userId));
+    } finally {
+      recapsRebuildRunning.delete(userId);
+    }
+  })();
+  recapsRebuildRunning.set(userId, run);
+  return run;
 }

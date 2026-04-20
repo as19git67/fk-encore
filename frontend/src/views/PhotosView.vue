@@ -6,6 +6,7 @@ import Message from 'primevue/message'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import PhotoGrid from '../components/PhotoGrid.vue'
+import RecapsCarousel from '../components/RecapsCarousel.vue'
 import Chip from 'primevue/chip'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
@@ -988,6 +989,11 @@ onUnmounted(() => {
     <div v-else-if="photos.length === 0" class="info-text">Keine Fotos hochgeladen.</div>
 
     <template v-else>
+      <!-- Rückblicke-Karussell (nur ohne aktive Suche/Filter und außerhalb des Auswahlmodus) -->
+      <RecapsCarousel
+        v-if="!selectMode && !searchQuery && activeCount === 0 && !searchResultIds"
+      />
+
       <!-- Desktop: Auswahl-Aktionsleiste -->
       <div v-if="selectMode && selectModePhotos.length > 0" class="desktop-select-bar">
         <span class="desktop-select-count">
