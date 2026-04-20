@@ -63,9 +63,28 @@ const MANAGED_HOST_SCRIPTS = [
 ] as const;
 
 export async function runStartupHousekeeping(): Promise<void> {
-  await seedHostScripts();
-  await defensiveBackupStop();
+  // runPendingRestore MUST block boot: if a `restore-*.dump` trigger is
+  // sitting in BACKUP_DIR the cluster is about to be rolled back, and
+  // the app must not serve traffic against the soon-to-be-discarded DB
+  // state. In the common case (no trigger file present) this returns
+  // in a single stat+readdir and adds negligible boot latency.
+  log.info("backup.startup.begin", {});
   await runPendingRestore();
+  log.info("backup.startup.restore-check.done", {});
+
+  // seedHostScripts is pure filesystem work against the backup volume,
+  // and defensiveBackupStop is a best-effort cleanup against a stuck
+  // previous process. Neither is required for the app to be functional.
+  // If either hangs (e.g. NFS backup volume unresponsive, WAL archiver
+  // wedged, PG socket half-dead) the boot must still complete — so both
+  // run as fire-and-forget tasks after the restore check.
+  seedHostScripts().catch((err: any) => {
+    log.warn("backup.startup.seed-host-scripts.crashed", { message: err?.message });
+  });
+  defensiveBackupStop().catch((err: any) => {
+    log.warn("backup.startup.pg_backup_stop.crashed", { message: err?.message });
+  });
+  log.info("backup.startup.end", {});
 }
 
 /**
@@ -130,6 +149,7 @@ async function seedHostScripts(): Promise<void> {
 }
 
 async function defensiveBackupStop(): Promise<void> {
+  log.info("backup.startup.pg_backup_stop.begin", {});
   const pool = getBackupPool();
   let client: PoolClient;
   try {
@@ -140,9 +160,9 @@ async function defensiveBackupStop(): Promise<void> {
   }
   try {
     // wait_for_archive=false: if archive_mode is on but the archiver is
-    // stuck, the default pg_backup_stop() hangs indefinitely and would
-    // block app boot (this runs synchronously during db/database.ts init).
-    // We care about exiting backup mode, not about archival progress.
+    // stuck, the default pg_backup_stop() hangs indefinitely. Even with
+    // runStartupHousekeeping off the boot path this matters so the
+    // background task does not keep a WAL-blocking session open.
     // statement_timeout is a belt-and-suspenders cap at the DB level.
     await client.query("SET statement_timeout = '30s'");
     await client.query("SELECT pg_backup_stop(false)");
@@ -163,6 +183,7 @@ async function defensiveBackupStop(): Promise<void> {
     // otherwise left the session in a weird state, we don't want to hand
     // that connection back to the pool for later backup operations.
     client.release(true);
+    log.info("backup.startup.pg_backup_stop.end", {});
   }
 }
 
