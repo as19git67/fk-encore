@@ -7,7 +7,6 @@ import Dialog from 'primevue/dialog'
 import Message from 'primevue/message'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import PhotoGrid from '../components/PhotoGrid.vue'
-import TimelineNav from '../components/TimelineNav.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
@@ -84,7 +83,6 @@ const isFullscreen = ref(false)
 watch(isFullscreen, (val) => {
   if (!val) nextTick(() => photoGridRef.value?.scrollToPhoto(selectedIndex.value, 'instant'))
 })
-const activeSection = ref('')
 
 // ── Filter state ──────────────────────────────────────────────────────────────
 // Client-side filter over the album photos returned by the server. The backend
@@ -316,7 +314,6 @@ const { groupedPhotos } = usePhotoGrouping(albumPhotos, {
 
 // ── Navigation refs ───────────────────────────────────────────────────────────
 const photoGridRef = ref<InstanceType<typeof PhotoGrid> | null>(null)
-const timelineNavRef = ref<InstanceType<typeof TimelineNav> | null>(null)
 
 // ── Keyboard navigation (via composable) ─────────────────────────────────────
 useGalleryKeyboard({
@@ -333,8 +330,8 @@ useGalleryKeyboard({
     if (selectedIndex.value < albumPhotos.value.length - 1) selectedIndex.value++
     else selectedIndex.value = 0
   },
-  onUp() { timelineNavRef.value?.navigateUp() },
-  onDown() { timelineNavRef.value?.navigateDown() },
+  onUp() {},
+  onDown() {},
   onSpace() {
     if (selectedIndex.value !== -1) isFullscreen.value = !isFullscreen.value
   },
@@ -734,29 +731,6 @@ function handleStartGroupReview() {
   if (first) activeGroup.value = first
 }
 
-// ── Timeline nav ──────────────────────────────────────────────────────────────
-function handleScrollTo(sectionId: string) {
-  photoGridRef.value?.scrollToSection(sectionId)
-  activeSection.value = sectionId
-
-  // Select first photo in the target section
-  for (const yearGroup of groupedPhotos.value) {
-    if (yearGroup.sectionId === sectionId) {
-      const firstMonth = yearGroup.months[0]
-      if (firstMonth?.photos.length) {
-        selectedIndex.value = firstMonth.photos[0]!.index
-      }
-      return
-    }
-    for (const monthGroup of yearGroup.months) {
-      if (monthGroup.sectionId === sectionId && monthGroup.photos.length) {
-        selectedIndex.value = monthGroup.photos[0]!.index
-        return
-      }
-    }
-  }
-}
-
 // ── Album cover ───────────────────────────────────────────────────────────────
 // Effective cover: user-specific setting takes precedence over album-level
 // cover. An explicit `null` in the user settings means "the user hid the
@@ -800,7 +774,6 @@ async function saveDescription() {
 }
 
 // ── Mobile drawer state ───────────────────────────────────────────────────────
-const mobileTimelineOpen = ref(false)
 const mobileSidebarOpen = ref(false)
 /** Whether the details flyout inside the fullscreen overlay is open.
  *  Shared between the grid- and map-mode fullscreens (only one is ever
@@ -822,7 +795,6 @@ watch(albumId, () => {
   album.value = null
   selectedIndex.value = -1
   activeGroup.value = null
-  activeSection.value = ''
   detectedFaces.value = []
   detectedLandmarks.value = []
   void loadData()
@@ -963,18 +935,8 @@ watch(albumId, () => {
       @open-fullscreen="handleMapFullscreen"
     />
 
-    <!-- Three-column layout: TimelineNav | PhotoGrid | Sidebar -->
+    <!-- Two-column layout: PhotoGrid | Sidebar -->
     <div v-else-if="album && groupedPhotos.length > 0" class="gallery-layout">
-      <!-- LEFT: Timeline nav – auf Mobile als Slide-in-Drawer -->
-      <div class="timeline-drawer" :class="{ 'is-open': mobileTimelineOpen }">
-        <TimelineNav
-          ref="timelineNavRef"
-          :groupedPhotos="groupedPhotos"
-          :activeSection="activeSection"
-          @scroll-to="handleScrollTo"
-        />
-      </div>
-
       <!-- CENTER: Photo grid -->
       <PhotoGrid
         ref="photoGridRef"
@@ -986,7 +948,6 @@ watch(albumId, () => {
         :hasStacks="true"
         :suppressScroll="isFullscreen"
         @update:columnCount="() => {}"
-        @section-change="activeSection = $event"
         @photo-click="handlePhotoClick"
         @photo-dblclick="isFullscreen = true"
         @stack-click="handleStackClick"
@@ -1040,21 +1001,10 @@ watch(albumId, () => {
 
     <!-- Mobile: Backdrop zum Schließen von Drawern -->
     <div
-      v-if="mobileTimelineOpen || mobileSidebarOpen"
+      v-if="mobileSidebarOpen"
       class="mobile-backdrop"
-      @click="mobileTimelineOpen = false; mobileSidebarOpen = false"
+      @click="mobileSidebarOpen = false"
     />
-
-    <!-- Mobile: Floating-Button Zeitleiste -->
-    <button
-      v-if="album && groupedPhotos.length > 0 && displayMode === 'grid'"
-      class="mobile-fab mobile-fab--timeline"
-      :class="{ active: mobileTimelineOpen }"
-      @click="mobileTimelineOpen = !mobileTimelineOpen; mobileSidebarOpen = false"
-      aria-label="Zeitleiste"
-    >
-      <i class="pi pi-calendar" />
-    </button>
 
 
     <!-- Fullscreen overlay (Grid mode) -->
@@ -1302,9 +1252,6 @@ watch(albumId, () => {
   color: var(--p-text-muted-color);
 }
 
-/* ── Timeline Drawer Wrapper ─────────────────────────────────────────────── */
-.timeline-drawer { display: contents; }
-
 /* ── Sidebar Sheet Wrapper ───────────────────────────────────────────────── */
 .sidebar-sheet { display: contents; }
 .sidebar-sheet-header { display: none; }
@@ -1319,58 +1266,11 @@ watch(albumId, () => {
   z-index: var(--z-mobile-backdrop);
 }
 
-/* ── Mobile FABs ─────────────────────────────────────────────────────────── */
-.mobile-fab {
-  display: none;
-  position: fixed;
-  bottom: 1.5em;
-  z-index: var(--z-mobile-fab);
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  border: none;
-  cursor: pointer;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.1em;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
-  transition: background 0.2s;
-}
-.mobile-fab--timeline {
-  left: 1em;
-  background: var(--p-content-background);
-  color: var(--p-primary-color);
-  border: 1px solid var(--p-content-border-color);
-}
-.mobile-fab--timeline.active {
-  background: var(--p-primary-color);
-  color: white;
-}
-
-
 /* ── Mobile Breakpoint ───────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .mobile-backdrop { display: block; }
-  .mobile-fab { display: flex; }
 
   .album-detail-view { margin-inline: 0; }
-
-  .timeline-drawer {
-    display: block;
-    position: fixed;
-    left: 0;
-    top: var(--menubar-height, 3.5em);
-    bottom: 0;
-    width: 80px;
-    z-index: var(--z-mobile-drawer);
-    background: var(--p-content-background);
-    border-right: 1px solid var(--p-content-border-color);
-    transform: translateX(-100%);
-    transition: transform 0.25s ease;
-    box-shadow: 3px 0 12px rgba(0, 0, 0, 0.2);
-    overflow-y: auto;
-  }
-  .timeline-drawer.is-open { transform: translateX(0); }
 
   .sidebar-sheet {
     display: block;

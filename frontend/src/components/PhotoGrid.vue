@@ -69,30 +69,10 @@ const emit = defineEmits<{
   'toggle-favorite': [id: number, status: CurationStatus]
   'hide': [id: number]
   'restore': [id: number]
-  /** Fired when the topmost visible section header changes (for TimelineNav) */
-  'section-change': [sectionId: string]
 }>()
 
 const scrollRef = ref<HTMLElement | null>(null)
 const { visiblePhotoIds, setupObserver } = usePhotoLazyLoad('300px 0px')
-
-// ── Section tracking (for TimelineNav active highlight) ──────────────────────
-let sectionObserver: IntersectionObserver | null = null
-
-function setupSectionObserver(root: HTMLElement) {
-  sectionObserver?.disconnect()
-  sectionObserver = new IntersectionObserver(
-    (entries) => {
-      for (const entry of entries) {
-        if (entry.isIntersecting) {
-          emit('section-change', (entry.target as HTMLElement).dataset.sectionId ?? '')
-        }
-      }
-    },
-    { root, rootMargin: '-5% 0px -90% 0px' }
-  )
-  root.querySelectorAll('[data-section-header]').forEach(el => sectionObserver!.observe(el))
-}
 
 // ── Column tracking ──────────────────────────────────────────────────────────
 let resizeObserver: ResizeObserver | null = null
@@ -112,7 +92,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   resizeObserver?.disconnect()
-  sectionObserver?.disconnect()
 })
 
 // ── Thumbnail hydration gating ───────────────────────────────────────────────
@@ -142,7 +121,6 @@ watch(() => props.groupedPhotos, async () => {
   await nextTick()
   if (scrollRef.value) {
     maybeSetupObserver(scrollRef.value)
-    setupSectionObserver(scrollRef.value)
   }
   updateColumnCount()
 }, { immediate: false })
@@ -151,7 +129,6 @@ watch(scrollRef, async (el) => {
   if (el) {
     await nextTick()
     maybeSetupObserver(el)
-    setupSectionObserver(el)
     updateColumnCount()
   }
 })
@@ -229,12 +206,7 @@ watch(() => props.selectedIndex, (idx) => {
   scrollToPhoto(idx)
 })
 
-// ── Public: scroll to a section header ──────────────────────────────────────
 defineExpose({
-  scrollToSection(sectionId: string) {
-    const el = scrollRef.value?.querySelector(`[data-section-id="${sectionId}"]`)
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  },
   scrollToPhoto,
   scrollRef,
 })
@@ -246,8 +218,6 @@ defineExpose({
       <h2
         v-if="yearGroup.year"
         class="year-title"
-        :data-section-id="yearGroup.sectionId"
-        data-section-header
       >
         {{ yearGroup.year }}
       </h2>
@@ -256,8 +226,6 @@ defineExpose({
         <h3
           v-if="monthGroup.month"
           class="month-title"
-          :data-section-id="monthGroup.sectionId"
-          data-section-header
         >
           {{ monthGroup.month }}
         </h3>
