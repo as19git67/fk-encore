@@ -176,6 +176,48 @@ describe("getExifMetadata — IPTC fallbacks", () => {
     expect(parsed.getUTCMonth()).toBe(6); // July
     expect(parsed.getUTCDate()).toBe(20);
   });
+
+  it("recovers UTF-8 IPTC strings that exifr decoded as Latin-1", async () => {
+    // Write IPTC with `CodedCharacterSet=UTF8` so exiftool stores `ü` as the
+    // two-byte UTF-8 sequence 0xC3 0xBC. exifr's IPTC parser uses
+    // `getLatin1String()` unconditionally and returns "MÃ¼nchen" / "BrÃ¼ssel"
+    // for these bytes; the producer-boundary repair in `asString()` must
+    // recover the original strings. If this test regresses, every IPTC
+    // consumer downstream (recap grouping, search, UI) starts seeing
+    // mojibake again.
+    const file = await makeTempJpeg();
+    await exiftool.write(
+      file,
+      {
+        CodedCharacterSet: "UTF8",
+        "Caption-Abstract": "Ein Foto aus München",
+        "By-line": "Jörg Müller",
+        Keywords: ["reise", "brüssel", "café"],
+        Headline: "Über den Dächern",
+        City: "Brüssel",
+        "Province-State": "Brüssel-Hauptstadt",
+        "Country-PrimaryLocationName": "Belgien",
+      },
+      ["-overwrite_original"]
+    );
+    const meta = await getExifMetadata(file);
+    expect(meta.description).toBe("Ein Foto aus München");
+    expect(meta.author).toBe("Jörg Müller");
+    expect(meta.headline).toBe("Über den Dächern");
+    expect(meta.city).toBe("Brüssel");
+    expect(meta.state).toBe("Brüssel-Hauptstadt");
+    expect(meta.country).toBe("Belgien");
+    expect(meta.keywords).toEqual(
+      expect.arrayContaining(["reise", "brüssel", "café"]),
+    );
+    // None of the mojibake "Ã" / "Â" artefacts should survive.
+    for (const v of [meta.description, meta.author, meta.headline, meta.city, meta.state, meta.country]) {
+      expect(v).not.toMatch(/[ÂÃ][-¿]/);
+    }
+    for (const kw of meta.keywords) {
+      expect(kw).not.toMatch(/[ÂÃ][-¿]/);
+    }
+  });
 });
 
 describe("iptcLocationUpdate", () => {
