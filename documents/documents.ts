@@ -11,7 +11,7 @@ import crypto from "crypto";
 import { api, APIError, type Query } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
-import { and, asc, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbFirst } from "../db/adapter";
 import {
@@ -901,13 +901,36 @@ export const listDocumentCategories = api(
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
     const rows = await dbAll<typeof documentCategories.$inferSelect>(
-      db
-        .select()
-        .from(documentCategories)
-        .orderBy(asc(documentCategories.sort_order), asc(documentCategories.name)),
+      db.select().from(documentCategories),
     );
+
+    // `sort_order` is stored per-parent (each level starts at 0), so a flat
+    // ORDER BY would interleave roots with children of other branches. Walk
+    // the tree depth-first to return parent → its children → next parent.
+    const childrenByParent = new Map<number | null, typeof rows>();
+    for (const r of rows) {
+      const key = r.parent_id ?? null;
+      const list = childrenByParent.get(key);
+      if (list) list.push(r);
+      else childrenByParent.set(key, [r]);
+    }
+    const cmp = (a: (typeof rows)[number], b: (typeof rows)[number]) =>
+      a.sort_order - b.sort_order || a.name.localeCompare(b.name);
+    for (const list of childrenByParent.values()) list.sort(cmp);
+
+    const ordered: typeof rows = [];
+    const visit = (parentId: number | null) => {
+      const children = childrenByParent.get(parentId);
+      if (!children) return;
+      for (const c of children) {
+        ordered.push(c);
+        visit(c.id);
+      }
+    };
+    visit(null);
+
     return {
-      items: rows.map((r) => ({
+      items: ordered.map((r) => ({
         id: r.id,
         slug: r.slug,
         name: r.name,
