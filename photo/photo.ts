@@ -143,7 +143,14 @@ export const uploadPhoto = api.raw(
       return;
     }
 
-    const fileName = (req.headers["x-file-name"] as string) || "photo.jpg";
+    const rawFileName = (req.headers["x-file-name"] as string) || "photo.jpg";
+    // Client percent-encodes the filename to stay within ISO-8859-1 header limits.
+    let fileName = rawFileName;
+    try {
+      fileName = decodeURIComponent(rawFileName);
+    } catch {
+      fileName = rawFileName;
+    }
     const mimeType = (req.headers["content-type"] as string) || "image/jpeg";
     const isFavorite = req.headers["x-is-favorite"] === "true";
 

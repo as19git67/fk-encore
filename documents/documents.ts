@@ -143,7 +143,14 @@ export const uploadDocument = api.raw(
     }
 
     const userId = getUserId();
-    const originalName = (req.headers["x-file-name"] as string) || "document.pdf";
+    const rawFileName = (req.headers["x-file-name"] as string) || "document.pdf";
+    // Client percent-encodes the filename to stay within ISO-8859-1 header limits.
+    let originalName = rawFileName;
+    try {
+      originalName = decodeURIComponent(rawFileName);
+    } catch {
+      originalName = rawFileName;
+    }
     const mimeType = ((req.headers["content-type"] as string) || "application/pdf")
       .toLowerCase()
       .split(";")[0]

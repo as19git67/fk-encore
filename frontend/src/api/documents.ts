@@ -127,6 +127,10 @@ export function searchDocuments(q: string, mode: SearchMode = 'hybrid', limit = 
 /**
  * Upload a PDF. Body is the raw file; the backend reads the filename
  * from the `X-File-Name` header and the MIME type from `Content-Type`.
+ *
+ * HTTP headers are restricted to ISO-8859-1, so the filename is
+ * percent-encoded here and decoded server-side. This keeps umlauts and
+ * other Unicode characters in filenames working.
  */
 export function uploadDocument(file: File, signal?: AbortSignal) {
   return apiFetch<DocumentSummary>('/documents', {
@@ -135,7 +139,7 @@ export function uploadDocument(file: File, signal?: AbortSignal) {
     signal,
     headers: {
       'Content-Type': file.type || 'application/pdf',
-      'X-File-Name': file.name,
+      'X-File-Name': encodeURIComponent(file.name),
     },
   })
 }
