@@ -74,6 +74,41 @@ RP_ORIGIN=https://photos.my-domain.com
 EMBEDDING_DB_PASSWORD=another-password
 ```
 
+### Web Push notifications (optional)
+
+Push notifications for feed events (album shares, comments, new photos in
+shared albums) are delivered via the browser's Push API and require a
+VAPID keypair. Without the keys the feature silently stays off:
+`/push/vapid-public-key` reports `{ enabled: false }`, the Profile page
+explains "Push is not configured on the server", and feed fan-out skips
+the push leg entirely.
+
+1. Generate a VAPID keypair once (any machine, throw-away Node):
+
+   ```bash
+   npx web-push generate-vapid-keys
+   ```
+
+2. Set the three secrets in your environment. With Encore Cloud:
+
+   ```bash
+   encore secret set --type prod VapidPublicKey
+   encore secret set --type prod VapidPrivateKey
+   encore secret set --type prod VapidSubject   # e.g. mailto:admin@my-domain.com
+   ```
+
+   For self-hosted deployments put the same values into
+   `.secrets.local.cue` (local dev) or the runtime secret mechanism
+   your infrastructure uses — the keys map to
+   `secret("VapidPublicKey")`, `secret("VapidPrivateKey")` and
+   `secret("VapidSubject")` in `push/push.service.ts`.
+
+3. Restart the app. Users can then opt in per device under
+   **Profil → Benachrichtigungen**.
+
+See `docs/push-notifications.md` for architecture, subscription
+lifecycle and troubleshooting.
+
 ## Data & volumes
 
 | Volume             | Contents                                   |

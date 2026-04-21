@@ -39,3 +39,19 @@ vi.mock("encore.dev/api", () => {
 vi.mock("~encore/auth", () => ({
   getAuthData: vi.fn(() => ({ userID: "1", permissions: [] })),
 }));
+
+// `~encore/clients` is a codegen artifact that doesn't exist at test time.
+// Provide no-op stubs for every cross-service call the code under test may
+// trigger so unit tests can import services freely without spinning up the
+// Encore runtime.
+vi.mock("~encore/clients", () => ({
+  realtime: {
+    publishEvent: vi.fn(() => Promise.resolve()),
+  },
+  feed: {
+    emitFeed: vi.fn(() => Promise.resolve()),
+  },
+  push: {
+    fanoutFeed: vi.fn(() => Promise.resolve({ sent: 0, pruned: 0 })),
+  },
+}));
