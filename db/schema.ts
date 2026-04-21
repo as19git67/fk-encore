@@ -160,6 +160,10 @@ export const photos = pgTable("photos", {
   hash: text("hash"),
   taken_at: timestamp("taken_at", { mode: "string" }),
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
+  // Maintained by a DB trigger (see migration 0034) on every photo UPDATE
+  // and every photo_curation mutation. Read by the /photos/index ETag
+  // computation to emit cheap 304 Not Modified responses.
+  updated_at: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
   latitude: doublePrecision("latitude"),
   longitude: doublePrecision("longitude"),
   location_name: text("location_name"),
