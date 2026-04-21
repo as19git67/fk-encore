@@ -27,7 +27,6 @@ import type {
   RemoveAlbumShareRequest,
   ListAlbumsResponse,
   ListPhotosResponse,
-  ListPhotoIndexResponse,
   PhotoDetailsBatchResponse,
   DeleteResponse,
   Person,
@@ -232,20 +231,106 @@ export const listPhotos = api(
  * payload per row is reduced from ~20 columns to ~10 small columns and
  * the SQL query no longer materializes the heavy JSONB columns
  * (ai_quality_details, location_*, description, hash, GPS).
+ *
+ * Implemented as a raw endpoint so it can emit an ETag and short-circuit
+ * with 304 Not Modified when the client's cached copy is still current.
+ * The ETag is derived from a cheap user-scoped fingerprint:
+ *   md5(userId | MAX(photos.updated_at) | COUNT(photos) | serializedFilter)
+ * Both MAX and COUNT are served by the (user_id, updated_at DESC) index
+ * added in migration 0034, so the fingerprint query runs in single-digit
+ * ms even on large libraries. When the fingerprint and filter match the
+ * value the client supplied via If-None-Match we skip the full SELECT and
+ * JSON serialization entirely.
  */
-export const listPhotoIndex = api(
+function parsePhotoIndexQuery(url: URL): PhotoFilterQueryParams {
+  const sp = url.searchParams;
+  const readBool = (k: string): boolean | undefined => {
+    const v = sp.get(k);
+    if (v === null) return undefined;
+    return v === "true" || v === "1";
+  };
+  const readNum = (k: string): number | undefined => {
+    const v = sp.get(k);
+    if (v === null) return undefined;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  };
+  const readStr = (k: string): string | undefined => sp.get(k) ?? undefined;
+  return {
+    showHidden: readBool("showHidden"),
+    hiddenMode: readStr("hiddenMode"),
+    favorite: readBool("favorite"),
+    albumHighlight: readBool("albumHighlight"),
+    groupHighlight: readBool("groupHighlight"),
+    inGroup: readBool("inGroup"),
+    othersFavorited: readBool("othersFavorited"),
+    othersHidden: readBool("othersHidden"),
+    qualityMin: readNum("qualityMin"),
+    qualityMax: readNum("qualityMax"),
+    notInAnyAlbum: readBool("notInAnyAlbum"),
+    albumIds: readStr("albumIds"),
+    albumMode: readStr("albumMode"),
+    personIds: readStr("personIds"),
+    personMode: readStr("personMode"),
+    mediaTypes: readStr("mediaTypes"),
+    hasGps: readBool("hasGps"),
+    hasFaces: readBool("hasFaces"),
+    hasAssignedPerson: readBool("hasAssignedPerson"),
+    dateFrom: readStr("dateFrom"),
+    dateTo: readStr("dateTo"),
+    importedDaysAgo: readNum("importedDaysAgo"),
+    sizeMin: readNum("sizeMin"),
+    sizeMax: readNum("sizeMax"),
+    limit: readNum("limit"),
+    offset: readNum("offset"),
+  };
+}
+
+/**
+ * Canonical serialization of the filter + pagination pair used both for
+ * ETag hashing and for cache-key logging. Keys are sorted so that URLs
+ * with the same effective filter but different parameter order produce
+ * identical ETags.
+ */
+function serializePhotoIndexKey(params: PhotoFilterQueryParams): string {
+  const entries: Array<[string, string]> = [];
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null || v === "") continue;
+    entries.push([k, String(v)]);
+  }
+  entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return entries.map(([k, v]) => `${k}=${v}`).join("&");
+}
+
+export const listPhotoIndex = api.raw(
   { expose: true, method: "GET", path: "/photos/index", auth: true },
-  async (params: PhotoFilterQueryParams): Promise<ListPhotoIndexResponse> => {
-    checkModule();
+  async (req, res) => {
+    if (writeMaintenanceResponseIfActive(res)) return;
+    try {
+      checkModule();
+    } catch (err: any) {
+      res.statusCode = 403;
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.end(JSON.stringify({ code: "permission_denied", message: "Forbidden" }));
+      return;
+    }
+
     const userId = getUserId();
     const authData = getAuthData()!;
-    requirePermission(authData, "photos.view");
+    try {
+      requirePermission(authData, "photos.view");
+    } catch {
+      res.statusCode = 403;
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.end(JSON.stringify({ code: "permission_denied", message: "Missing permission: photos.view" }));
+      return;
+    }
 
+    const url = new URL(req.url || "", `http://${req.headers.host ?? "localhost"}`);
+    const params = parsePhotoIndexQuery(url);
     const filter = parsePhotoFilterQuery(toFilterQuery(params));
-    // Cap the per-request payload: 5000 rows per page is the hard upper
-    // limit so a misbehaving client cannot force the server to materialise
-    // tens of thousands of rows in one response. Frontend paginates via
-    // ?offset= until `total` is exhausted.
+
+    // Same cap as before: 5000 rows per page.
     const MAX_LIMIT = 5000;
     const limit = typeof params.limit === "number" && params.limit > 0
       ? Math.min(params.limit, MAX_LIMIT)
@@ -253,8 +338,40 @@ export const listPhotoIndex = api(
     const offset = typeof params.offset === "number" && params.offset > 0
       ? params.offset
       : 0;
-    return await service.listPhotoIndexLogic(userId, filter, { limit, offset });
-  }
+
+    const normalizedKey = serializePhotoIndexKey({
+      ...params,
+      limit,
+      offset: offset || undefined,
+    });
+
+    // Fingerprint query – cheap aggregated SELECT on the photos table.
+    // Runs on every request but is served by an index.
+    const fp = await service.getPhotoIndexFingerprint(userId);
+    const etag = service.photoIndexEtag(userId, fp, normalizedKey);
+
+    // Per-user data must not be cached by shared proxies. `private` +
+    // `no-cache` tells the browser it MAY store the response but MUST
+    // revalidate with If-None-Match on every subsequent fetch, which is
+    // exactly what the ETag flow relies on.
+    res.setHeader("Cache-Control", "private, no-cache");
+    res.setHeader("ETag", etag);
+    // Authorization varies the response, so proxies that ignore
+    // Cache-Control must at least key on the auth header.
+    res.setHeader("Vary", "Authorization");
+
+    const ifNoneMatch = req.headers["if-none-match"];
+    if (typeof ifNoneMatch === "string" && ifNoneMatch === etag) {
+      res.statusCode = 304;
+      res.end();
+      return;
+    }
+
+    const payload = await service.listPhotoIndexLogic(userId, filter, { limit, offset });
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.statusCode = 200;
+    res.end(JSON.stringify(payload));
+  },
 );
 
 /**
@@ -505,6 +622,26 @@ export const getPhotoFile = api.raw(
       const needsConvert = isHeicFile && shouldConvert;
       const needsResize = targetWidth !== null && !isNaN(targetWidth) && targetWidth > 0;
 
+      // The thumbnail cache and the originals on disk are both immutable for
+      // the duration of a photo's lifetime — filenames are content-addressed
+      // (upload timestamp or external library path) and we never overwrite
+      // existing files. So we can emit a strong ETag derived purely from the
+      // filename + its transform parameters, without hashing the file bytes.
+      // If-None-Match with the same value gets a cheap 304 and the browser
+      // uses its local copy, saving both the transfer and the sharp() call
+      // for cache-miss regeneration.
+      const etagSource = `${filename}|w=${targetWidth ?? ""}|c=${shouldConvert ? "1" : "0"}`;
+      const etag = `"${crypto.createHash("md5").update(etagSource).digest("hex")}"`;
+      const ifNoneMatch = req.headers["if-none-match"];
+      if (typeof ifNoneMatch === "string" && ifNoneMatch === etag) {
+        // Must still send cache-related headers on 304 per RFC 9111 § 4.3.4.
+        res.statusCode = 304;
+        res.setHeader("ETag", etag);
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        res.end();
+        return;
+      }
+
       if (needsConvert || needsResize) {
           try {
               // Build a deterministic cache path: <THUMBNAIL_DIR>/<shard>/<basename>_<key>.jpg
@@ -532,6 +669,7 @@ export const getPhotoFile = api.raw(
               if (cacheHit) {
                   res.setHeader("Content-Type", "image/jpeg");
                   res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+                  res.setHeader("ETag", etag);
                   fs.createReadStream(cachePath).pipe(res);
                   return;
               }
@@ -555,6 +693,7 @@ export const getPhotoFile = api.raw(
 
               res.setHeader("Content-Type", "image/jpeg");
               res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+              res.setHeader("ETag", etag);
               res.end(buffer);
               return;
           } catch (err) {
@@ -565,6 +704,7 @@ export const getPhotoFile = api.raw(
 
       res.setHeader("Content-Type", mimeType);
       res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      res.setHeader("ETag", etag);
       fs.createReadStream(filePath).pipe(res);
     } catch (err: any) {
       console.error("Error serving photo file:", err);
