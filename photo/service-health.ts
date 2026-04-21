@@ -31,10 +31,16 @@ export interface ServerPressureStatus {
 
 // ─── configuration ────────────────────────────────────────────────────────────
 
+// A short interval is fine: /health is a cheap ping and we want workers to
+// notice an ML-container outage within ~1 minute so they stop piling up
+// multi-minute requests that will only abort.
 const HEALTH_CHECK_INTERVAL_MS = parseInt(
-  process.env.HEALTH_CHECK_INTERVAL_MS ?? "600000",
+  process.env.HEALTH_CHECK_INTERVAL_MS ?? "60000",
   10,
 );
+// Generous timeout: on a CPU-only host the ML container may be busy with a
+// heavy inference request and still reply to /health a moment later — we
+// don't want to flap it unavailable just because it's loaded.
 const HEALTH_CHECK_TIMEOUT_MS = parseInt(
   process.env.HEALTH_CHECK_TIMEOUT_MS ?? "60000",
   10,

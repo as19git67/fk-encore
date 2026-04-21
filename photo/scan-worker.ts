@@ -72,6 +72,7 @@ import {
   WORKER_HARD_PRESSURE_DELAY_MS,
 } from "./event-loop-pressure";
 import { acquireDbSlot, releaseDbSlot } from "./worker-db-slots";
+import { MlRpcTimeoutError } from "./rpc-timeout";
 
 console.log("[boot] photo/scan-worker.ts: all imports resolved");
 
@@ -275,11 +276,20 @@ class ScanWorker {
         );
       }
     } catch (err: any) {
-      if (err instanceof DeferJobError || err instanceof ServiceUnavailableError) {
+      // MlRpcTimeoutError is treated as transient — the ML container may be
+      // slow, under load, or restarting. Marking the job as permanently
+      // failed would lose the photo's embedding/quality/landmark data until
+      // someone manually re-scans. Defer instead so the next tick retries
+      // once the container is responsive again.
+      if (
+        err instanceof DeferJobError ||
+        err instanceof ServiceUnavailableError ||
+        err instanceof MlRpcTimeoutError
+      ) {
         console.log(`[scan-worker] deferring ${this.service} job ${job.id}: ${err.message}`);
         await deferJob(job.id).catch(() => {});
         // Return false so the worker stops chasing work immediately.
-        // The service-recovery callback will wake us when the service is back.
+        // The service-recovery callback (or the next poll tick) will wake us.
         return false;
       } else {
         const msg = err?.message ?? String(err);

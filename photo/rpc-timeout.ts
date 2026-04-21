@@ -12,27 +12,39 @@
  * progress: the worker aborts, the slot is released, and the job is
  * retried or marked failed.
  *
+ * Additionally, this module owns a *per-service concurrency limiter* so a
+ * CPU-only host running the Python ML containers is never hit by more
+ * than `ML_CONCURRENCY_<NAME>` requests in parallel. Important on weak
+ * servers: without the limiter the embedding and quality workers would
+ * each drive a request at the same embedding container, each taking
+ * minutes, each making the other slower.
+ *
  * Configuration (env):
- *   ML_RPC_TIMEOUT_MS              – default timeout for most calls (default: 60000)
+ *   ML_RPC_TIMEOUT_MS              – default timeout for most calls (default: 600000 = 10 min)
  *   ML_RPC_QUICK_TIMEOUT_MS        – for latency-sensitive calls hit on
  *                                    the request path (search, parse,
- *                                    similar-groups) (default: 15000)
+ *                                    similar-groups) (default: 60000 = 1 min)
+ *   ML_CONCURRENCY_EMBEDDING       – max parallel requests to embedding   (default: 1)
+ *   ML_CONCURRENCY_INSIGHTFACE     – max parallel requests to insightface (default: 1)
+ *   ML_CONCURRENCY_LANDMARK        – max parallel requests to landmark    (default: 1)
  *
  * Callers may still override per-call by passing an explicit timeoutMs.
+ * Callers that should be serialized through the concurrency limiter pass
+ * `queue: "embedding" | "insightface" | "landmark"`.
  */
 
 export const ML_RPC_TIMEOUT_MS = (() => {
   const raw = process.env.ML_RPC_TIMEOUT_MS;
-  if (raw === undefined) return 60_000;
+  if (raw === undefined) return 600_000;
   const n = parseInt(raw, 10);
-  return Number.isFinite(n) && n > 0 ? n : 60_000;
+  return Number.isFinite(n) && n > 0 ? n : 600_000;
 })();
 
 export const ML_RPC_QUICK_TIMEOUT_MS = (() => {
   const raw = process.env.ML_RPC_QUICK_TIMEOUT_MS;
-  if (raw === undefined) return 15_000;
+  if (raw === undefined) return 60_000;
   const n = parseInt(raw, 10);
-  return Number.isFinite(n) && n > 0 ? n : 15_000;
+  return Number.isFinite(n) && n > 0 ? n : 60_000;
 })();
 
 /**
@@ -47,6 +59,81 @@ export class MlRpcTimeoutError extends Error {
   }
 }
 
+// ─── per-service concurrency limiter ──────────────────────────────────────────
+
+export type MlServiceQueueKey = "embedding" | "insightface" | "landmark";
+
+function readConcurrency(envVar: string): number {
+  const raw = process.env[envVar];
+  if (raw === undefined) return 1;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : 1;
+}
+
+const CAPACITY: Record<MlServiceQueueKey, number> = {
+  embedding: readConcurrency("ML_CONCURRENCY_EMBEDDING"),
+  insightface: readConcurrency("ML_CONCURRENCY_INSIGHTFACE"),
+  landmark: readConcurrency("ML_CONCURRENCY_LANDMARK"),
+};
+
+interface Semaphore {
+  capacity: number;
+  inUse: number;
+  waiters: Array<() => void>;
+}
+
+const semaphores: Record<MlServiceQueueKey, Semaphore> = {
+  embedding: { capacity: CAPACITY.embedding, inUse: 0, waiters: [] },
+  insightface: { capacity: CAPACITY.insightface, inUse: 0, waiters: [] },
+  landmark: { capacity: CAPACITY.landmark, inUse: 0, waiters: [] },
+};
+
+async function acquire(queue: MlServiceQueueKey, signal?: AbortSignal | null): Promise<void> {
+  const s = semaphores[queue];
+  if (s.inUse < s.capacity) {
+    s.inUse++;
+    return;
+  }
+  await new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      const idx = s.waiters.indexOf(wake);
+      if (idx >= 0) s.waiters.splice(idx, 1);
+      reject(signal?.reason ?? new Error("aborted"));
+    };
+    const wake = () => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    };
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+    s.waiters.push(wake);
+  });
+}
+
+function release(queue: MlServiceQueueKey): void {
+  const s = semaphores[queue];
+  if (s.inUse <= 0) return;
+  const next = s.waiters.shift();
+  if (next) {
+    // Hand the slot directly to the next waiter — inUse stays the same.
+    next();
+    return;
+  }
+  s.inUse--;
+}
+
+/** Observability helper for the admin endpoint. */
+export function mlQueueStats(): Record<MlServiceQueueKey, { capacity: number; inUse: number; waiting: number }> {
+  return {
+    embedding: { capacity: semaphores.embedding.capacity, inUse: semaphores.embedding.inUse, waiting: semaphores.embedding.waiters.length },
+    insightface: { capacity: semaphores.insightface.capacity, inUse: semaphores.insightface.inUse, waiting: semaphores.insightface.waiters.length },
+    landmark: { capacity: semaphores.landmark.capacity, inUse: semaphores.landmark.inUse, waiting: semaphores.landmark.waiters.length },
+  };
+}
+
 /**
  * Thin wrapper around fetch() that aborts after `timeoutMs` and raises a
  * `MlRpcTimeoutError` instead of the raw AbortError.
@@ -54,12 +141,21 @@ export class MlRpcTimeoutError extends Error {
  * The abort is via AbortSignal.timeout() when no caller-provided signal is
  * supplied; when one IS provided we chain a second signal so either the
  * caller or the timeout can abort the request.
+ *
+ * When `queue` is set, the request waits for a slot in the per-service
+ * concurrency limiter before dispatching — the timeout clock only starts
+ * AFTER the slot is acquired, so a queued request cannot falsely report a
+ * timeout because it waited a long time for its turn.
  */
 export async function fetchWithTimeout(
   input: string,
-  init: RequestInit & { timeoutMs?: number } = {},
+  init: RequestInit & { timeoutMs?: number; queue?: MlServiceQueueKey } = {},
 ): Promise<Response> {
-  const { timeoutMs = ML_RPC_TIMEOUT_MS, signal: callerSignal, ...rest } = init;
+  const { timeoutMs = ML_RPC_TIMEOUT_MS, queue, signal: callerSignal, ...rest } = init;
+
+  if (queue) {
+    await acquire(queue, callerSignal);
+  }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -80,5 +176,6 @@ export async function fetchWithTimeout(
     throw err;
   } finally {
     clearTimeout(timer);
+    if (queue) release(queue);
   }
 }

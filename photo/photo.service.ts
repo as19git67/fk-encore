@@ -340,6 +340,7 @@ async function callInsightFaceDetect(filePath: string): Promise<{ faces: any[], 
   const response = await fetchWithTimeout(`${INSIGHTFACE_SERVICE_URL}/detect`, {
     method: 'POST',
     body: formData,
+    queue: "insightface",
   });
 
   if (!response.ok) {
@@ -373,6 +374,7 @@ async function callEmbeddingServiceUpload(
   const response = await fetchWithTimeout(`${EMBEDDING_SERVICE_URL}/upload`, {
     method: 'POST',
     body: formData,
+    queue: "embedding",
   });
 
   if (!response.ok) {
@@ -4783,6 +4785,7 @@ async function callLandmarkService(
   const response = await fetchWithTimeout(`${LANDMARK_SERVICE_URL}/detect-landmarks`, {
     method: "POST",
     body: formData,
+    queue: "landmark",
   });
 
   if (!response.ok) {
@@ -4973,6 +4976,7 @@ export async function indexPhotoQuality(photoId: number): Promise<void> {
     const response = await fetchWithTimeout(`${EMBEDDING_SERVICE_URL}/quality`, {
       method: "POST",
       body: formData,
+      queue: "embedding",
     });
 
     if (!response.ok) {
