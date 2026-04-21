@@ -19,6 +19,7 @@
 import db from "../db/database";
 import { sql } from "drizzle-orm";
 import { embedTexts } from "./llm-client";
+import { loadUserHouseholdIds } from "./visibility";
 
 export type SearchMode = "fts" | "semantic" | "hybrid";
 
@@ -50,19 +51,21 @@ export async function searchDocuments(params: SearchParams): Promise<SearchHit[]
   const q = params.query.trim();
   if (q.length === 0) return [];
 
+  const householdIds = await loadUserHouseholdIds(userId);
+
   if (mode === "fts") {
-    return await runFts(userId, q, limit);
+    return await runFts(userId, householdIds, q, limit);
   }
   if (mode === "semantic") {
-    return await runSemantic(userId, q, limit);
+    return await runSemantic(userId, householdIds, q, limit);
   }
 
   const [fts, semantic] = await Promise.all([
-    runFts(userId, q, PER_BRANCH_LIMIT).catch((err) => {
+    runFts(userId, householdIds, q, PER_BRANCH_LIMIT).catch((err) => {
       console.warn(`[documents.search] fts branch failed: ${err?.message ?? err}`);
       return [] as SearchHit[];
     }),
-    runSemantic(userId, q, PER_BRANCH_LIMIT).catch((err) => {
+    runSemantic(userId, householdIds, q, PER_BRANCH_LIMIT).catch((err) => {
       console.warn(`[documents.search] semantic branch failed: ${err?.message ?? err}`);
       return [] as SearchHit[];
     }),
@@ -70,13 +73,30 @@ export async function searchDocuments(params: SearchParams): Promise<SearchHit[]
   return reciprocalRankFusion([fts, semantic], RRF_K).slice(0, limit);
 }
 
-async function runFts(userId: number, q: string, limit: number): Promise<SearchHit[]> {
+/** Raw SQL fragment matching every document visible to the caller. */
+function visibilityClause(userId: number, householdIds: number[]) {
+  if (householdIds.length === 0) {
+    return sql`(visibility = 'private' AND user_id = ${userId})`;
+  }
+  return sql`(
+    (visibility = 'private' AND user_id = ${userId})
+    OR (visibility = 'household' AND household_id = ANY(${householdIds}))
+  )`;
+}
+
+async function runFts(
+  userId: number,
+  householdIds: number[],
+  q: string,
+  limit: number,
+): Promise<SearchHit[]> {
+  const visibility = visibilityClause(userId, householdIds);
   const rows = await db.execute<{ document_id: number; rank: number }>(sql`
     SELECT
       id AS document_id,
       ts_rank(text_tsv, plainto_tsquery('german', ${q})) AS rank
     FROM documents
-    WHERE user_id = ${userId}
+    WHERE ${visibility}
       AND text_tsv @@ plainto_tsquery('german', ${q})
     ORDER BY rank DESC
     LIMIT ${limit}
@@ -88,11 +108,24 @@ async function runFts(userId: number, q: string, limit: number): Promise<SearchH
   }));
 }
 
-async function runSemantic(userId: number, q: string, limit: number): Promise<SearchHit[]> {
+async function runSemantic(
+  userId: number,
+  householdIds: number[],
+  q: string,
+  limit: number,
+): Promise<SearchHit[]> {
   const embeddings = await embedTexts([q]);
   if (embeddings.length === 0) return [];
   const vec = embeddings[0];
   const literal = `[${vec.join(",")}]`;
+
+  // The visibility clause references columns aliased as `d` in this query.
+  const visibility = householdIds.length === 0
+    ? sql`(d.visibility = 'private' AND d.user_id = ${userId})`
+    : sql`(
+        (d.visibility = 'private' AND d.user_id = ${userId})
+        OR (d.visibility = 'household' AND d.household_id = ANY(${householdIds}))
+      )`;
 
   // `<=>` is pgvector's cosine *distance*: 0 = identical, 2 = opposite.
   // GROUP BY picks the closest chunk per document.
@@ -100,7 +133,7 @@ async function runSemantic(userId: number, q: string, limit: number): Promise<Se
     SELECT de.document_id, MIN(de.embedding <=> ${literal}::vector) AS distance
     FROM document_embeddings de
     JOIN documents d ON d.id = de.document_id
-    WHERE d.user_id = ${userId}
+    WHERE ${visibility}
     GROUP BY de.document_id
     ORDER BY distance ASC
     LIMIT ${limit}
