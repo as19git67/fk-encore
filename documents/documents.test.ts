@@ -3,9 +3,20 @@ import path from "path";
 
 import {
   DOCUMENTS_DIR,
+  HOUSEHOLD_SEGMENT,
+  INBOX_SEGMENT,
+  STEUER_SEGMENT,
   assertPathUnderDocumentsRoot,
+  buildSpeakingFileName,
+  composeOwnerRootSegment,
   getDocumentDiskPath,
+  getInitialUploadDiskPath,
   guessExtension,
+  resolveDocumentDiskPath,
+  resolveTaxLinkPath,
+  slugifyName,
+  slugifyUserLogin,
+  type DocumentLocationContext,
 } from "./documents.service";
 import { flattenTaxonomy, categoryTaxonomy } from "./taxonomy";
 import { DOCUMENT_SERVICES } from "./scan-queue";
@@ -43,6 +54,179 @@ describe("documents.service", () => {
   it("assertPathUnderDocumentsRoot rejects paths outside the root", () => {
     expect(() => assertPathUnderDocumentsRoot("/etc/passwd")).toThrow(/outside DOCUMENTS_DIR/);
     expect(() => assertPathUnderDocumentsRoot(path.join(DOCUMENTS_DIR, "..", "escape"))).toThrow(/outside DOCUMENTS_DIR/);
+  });
+});
+
+describe("documents.service slugifyName", () => {
+  it("folds German umlauts to two-letter forms", () => {
+    expect(slugifyName("Öl-Rückstellung für Jäger")).toBe("oel-rueckstellung-fuer-jaeger");
+    expect(slugifyName("Straße")).toBe("strasse");
+  });
+
+  it("strips diacritics and collapses non-alphanumerics", () => {
+    expect(slugifyName("naïve résumé")).toBe("naive-resume");
+    expect(slugifyName("  Hello---World!! ")).toBe("hello-world");
+  });
+
+  it("caps length and trims trailing hyphens", () => {
+    const long = "a".repeat(80) + "-tail";
+    expect(slugifyName(long, 60).length).toBeLessThanOrEqual(60);
+    expect(slugifyName("foobar---", 60)).toBe("foobar");
+  });
+
+  it("returns empty string for inputs that reduce to nothing", () => {
+    expect(slugifyName("")).toBe("");
+    expect(slugifyName("!!!")).toBe("");
+  });
+});
+
+describe("documents.service slugifyUserLogin", () => {
+  it("uses the local part of the email address", () => {
+    expect(slugifyUserLogin("max.mueller@example.com", 1)).toBe("max-mueller");
+  });
+
+  it("falls back to user-<id> for purely unsluggable local parts", () => {
+    expect(slugifyUserLogin("!!!@example.com", 42)).toBe("user-42");
+    expect(slugifyUserLogin("", 9)).toBe("user-9");
+  });
+});
+
+describe("documents.service buildSpeakingFileName", () => {
+  const base: DocumentLocationContext = {
+    visibility: "private",
+    userLoginSlug: "max",
+    householdSlug: null,
+    categorySlugs: null,
+    status: "ready",
+    docDate: "2026-04-15",
+    uploadedAt: new Date("2026-04-17T12:00:00Z"),
+    sender: "Finanzamt München",
+    title: "Einkommensteuerbescheid 2025",
+    originalFilename: "bescheid.pdf",
+    sha256: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f7081920a1b2c3d",
+    ext: ".pdf",
+  };
+
+  it("joins date, sender, title and hash8 suffix", () => {
+    expect(buildSpeakingFileName(base)).toBe(
+      "2026-04-15_finanzamt-muenchen_einkommensteuerbescheid-2025__a1b2c3d4.pdf",
+    );
+  });
+
+  it("falls back to uploaded date when docDate is null", () => {
+    const out = buildSpeakingFileName({ ...base, docDate: null });
+    expect(out.startsWith("2026-04-17_")).toBe(true);
+  });
+
+  it("drops missing sender/title parts but keeps the date + hash", () => {
+    // Sender and title reduce to empty slugs; the date remains the sole
+    // human-readable part. `dokument` is the final fallback reserved for
+    // the pathological case where *nothing* (not even the date) would
+    // remain.
+    const out = buildSpeakingFileName({
+      ...base,
+      sender: null,
+      title: null,
+      originalFilename: "!!!.pdf",
+    });
+    expect(out).toBe("2026-04-15__a1b2c3d4.pdf");
+  });
+});
+
+describe("documents.service resolveDocumentDiskPath", () => {
+  const readyCtx: DocumentLocationContext = {
+    visibility: "private",
+    userLoginSlug: "max",
+    householdSlug: null,
+    categorySlugs: ["finanzen", "steuern"],
+    status: "ready",
+    docDate: "2026-04-15",
+    uploadedAt: new Date("2026-04-17T00:00:00Z"),
+    sender: "Finanzamt",
+    title: "Bescheid",
+    originalFilename: "bescheid.pdf",
+    sha256: "a".repeat(64),
+    ext: ".pdf",
+  };
+
+  it("places classified documents under <owner>/<category>/<year>/", () => {
+    const { relPath, inbox } = resolveDocumentDiskPath(readyCtx);
+    expect(inbox).toBe(false);
+    expect(relPath).toBe(
+      path.join("max", "finanzen", "steuern", "2026", "2026-04-15_finanzamt_bescheid__aaaaaaaa.pdf"),
+    );
+  });
+
+  it("places unclassified documents under <owner>/_inbox/YYYY-MM/", () => {
+    const { relPath, inbox } = resolveDocumentDiskPath({
+      ...readyCtx,
+      status: "pending",
+      categorySlugs: null,
+    });
+    expect(inbox).toBe(true);
+    expect(relPath.startsWith(path.join("max", INBOX_SEGMENT, "2026-04"))).toBe(true);
+  });
+
+  it("uses _haushalt/<slug> for household-visible documents", () => {
+    const { relPath } = resolveDocumentDiskPath({
+      ...readyCtx,
+      visibility: "household",
+      userLoginSlug: null,
+      householdSlug: "familie-mueller",
+    });
+    expect(relPath.startsWith(path.join(HOUSEHOLD_SEGMENT, "familie-mueller"))).toBe(true);
+  });
+
+  it("refuses household documents without a householdSlug", () => {
+    expect(() =>
+      resolveDocumentDiskPath({
+        ...readyCtx,
+        visibility: "household",
+        userLoginSlug: null,
+        householdSlug: null,
+      }),
+    ).toThrow(/householdSlug/);
+  });
+
+  it("resolveTaxLinkPath lands under <owner>/_steuer/<year>/<section>", () => {
+    const { relPath } = resolveTaxLinkPath(readyCtx, 2025, "anlage-n");
+    expect(relPath).toBe(
+      path.join("max", STEUER_SEGMENT, "2025", "anlage-n", "2026-04-15_finanzamt_bescheid__aaaaaaaa.pdf"),
+    );
+  });
+});
+
+describe("documents.service composeOwnerRootSegment / getInitialUploadDiskPath", () => {
+  it("produces the uploader root for private visibility", () => {
+    expect(
+      composeOwnerRootSegment({
+        visibility: "private",
+        userLoginSlug: "max",
+        householdSlug: null,
+      }),
+    ).toBe("max");
+  });
+
+  it("produces the _haushalt/<slug> root for household visibility", () => {
+    expect(
+      composeOwnerRootSegment({
+        visibility: "household",
+        userLoginSlug: null,
+        householdSlug: "familie-mueller",
+      }),
+    ).toBe(path.join(HOUSEHOLD_SEGMENT, "familie-mueller"));
+  });
+
+  it("initial upload path places the sha256 under owner/_inbox/YYYY-MM/", () => {
+    const { relPath } = getInitialUploadDiskPath(
+      "max",
+      "0".repeat(64),
+      ".pdf",
+      new Date("2026-04-17T00:00:00Z"),
+    );
+    expect(relPath).toBe(
+      path.join("max", INBOX_SEGMENT, "2026-04", "0".repeat(64) + ".pdf"),
+    );
   });
 });
 

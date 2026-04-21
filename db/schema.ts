@@ -457,6 +457,40 @@ export const documentTaxSourceEnum = pgEnum("document_tax_source", [
   "user",
 ]);
 
+export const documentVisibilityEnum = pgEnum("document_visibility", [
+  "private",
+  "household",
+]);
+
+export const householdMemberRoleEnum = pgEnum("household_member_role", [
+  "owner",
+  "member",
+]);
+
+// A household groups users who share a pool of documents (visibility='household').
+// The slug is used both as the URL path and as the filesystem directory name.
+export const households = pgTable("households", {
+  id: serial("id").primaryKey(),
+  slug: text("slug").unique().notNull(),
+  name: text("name").notNull(),
+  created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+});
+
+export const householdMembers = pgTable(
+  "household_members",
+  {
+    household_id: integer("household_id")
+      .notNull()
+      .references(() => households.id, { onDelete: "cascade" }),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: householdMemberRoleEnum("role").notNull().default("member"),
+    joined_at: timestamp("joined_at", { mode: "string" }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.household_id, table.user_id] })]
+);
+
 export const documentCategories = pgTable("document_categories", {
   id: serial("id").primaryKey(),
   slug: text("slug").unique().notNull(),
@@ -499,6 +533,11 @@ export const documents = pgTable("documents", {
   tax_year: integer("tax_year"),
   tax_year_confidence: real("tax_year_confidence"),
   tax_reviewed: boolean("tax_reviewed").notNull().default(false),
+  // Access control (migration 0036). `visibility` drives who can see
+  // the document; `household_id` must be set iff visibility='household'
+  // (DB CHECK constraint). `user_id` stays as the uploader regardless.
+  visibility: documentVisibilityEnum("visibility").notNull().default("private"),
+  household_id: integer("household_id").references(() => households.id, { onDelete: "restrict" }),
   // NOTE: the generated `text_tsv tsvector` column and its GIN index are
   // added by migration 0025 and accessed only via raw SQL (drizzle-orm has
   // no first-class tsvector support).
