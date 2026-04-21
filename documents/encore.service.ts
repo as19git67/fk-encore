@@ -10,11 +10,18 @@ import "./scan-worker";
 import "./inbox-cron";
 
 import { startInboxWatcher } from "./inbox-watcher";
+import { migrateLegacyLayoutOnce } from "./layout-migrator";
 
 // Fire-and-forget: chokidar init should never block service boot.
 // Failures are logged inside the watcher.
 startInboxWatcher().catch((err) =>
   console.error("[documents] failed to start inbox watcher:", err),
+);
+
+// Fire-and-forget: auto-relocate pre-0036 sha256-shard documents into the
+// new speaking layout. No-op when no legacy rows exist (cheap indexed scan).
+migrateLegacyLayoutOnce().catch((err) =>
+  console.error("[documents] failed to run layout migrator:", err),
 );
 
 console.log("[boot] documents/encore.service.ts: registering Service");
