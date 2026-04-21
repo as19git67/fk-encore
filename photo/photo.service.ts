@@ -81,6 +81,8 @@ import type {
   LandmarkBBox,
 } from "../db/types";
 import { resizeImageInPool } from "./image-pool";
+import { getHeicDecodeCached, setHeicDecodeCached } from "./heic-cache";
+import { fetchWithTimeout, ML_RPC_QUICK_TIMEOUT_MS } from "./rpc-timeout";
 import {
   buildPhotoFilterConditions,
   type PhotoFilterParams,
@@ -334,7 +336,7 @@ async function callInsightFaceDetect(filePath: string): Promise<{ faces: any[], 
   const blob = new Blob([fileData], { type: getUploadMimeType(filePath) });
   formData.append('file', blob, path.basename(filePath));
 
-  const response = await fetch(`${INSIGHTFACE_SERVICE_URL}/detect`, {
+  const response = await fetchWithTimeout(`${INSIGHTFACE_SERVICE_URL}/detect`, {
     method: 'POST',
     body: formData,
   });
@@ -367,7 +369,7 @@ async function callEmbeddingServiceUpload(
   }
   if (force) formData.append('force', '1');
 
-  const response = await fetch(`${EMBEDDING_SERVICE_URL}/upload`, {
+  const response = await fetchWithTimeout(`${EMBEDDING_SERVICE_URL}/upload`, {
     method: 'POST',
     body: formData,
   });
@@ -1524,6 +1526,59 @@ export async function listPhotosLogic(
  * Designed to make the initial photo list load fast even with many thousands
  * of photos.
  */
+
+/**
+ * Cheap user-scoped snapshot used for the /photos/index ETag.
+ *
+ * Returns:
+ *   maxUpdatedAt – MAX(photos.updated_at) across the user's photos. Bumped
+ *                  by DB triggers (see migration 0034) on every photo
+ *                  mutation AND on every per-user curation mutation.
+ *   count        – COUNT(*) across the user's photos. Catches deletes
+ *                  that do not move the MAX (e.g., an old photo is
+ *                  removed while a newer one still holds the max).
+ *
+ * The query is a single aggregated SELECT and uses the
+ * (user_id, updated_at DESC) index, so it is effectively O(1) on large
+ * libraries. When a user has zero photos, maxUpdatedAt is "0" so the
+ * resulting ETag is still well-defined.
+ */
+export async function getPhotoIndexFingerprint(
+  userId: number,
+): Promise<{ maxUpdatedAt: string; count: number }> {
+  const row = await dbFirst<{ max_u: string | null; c: number }>(
+    db
+      .select({
+        max_u: sql<string | null>`MAX(${photos.updated_at})`,
+        c: sql<number>`COUNT(*)::int`,
+      })
+      .from(photos)
+      .where(eq(photos.user_id, userId)),
+  );
+  return {
+    maxUpdatedAt: row?.max_u ?? "0",
+    count: row?.c ?? 0,
+  };
+}
+
+/**
+ * Build the ETag value for a /photos/index response given the user's
+ * fingerprint and the serialized filter+pagination string. Wrapped in
+ * quotes to conform with RFC 7232; the "W/" weak prefix is intentionally
+ * NOT used because the body really is byte-identical for a given key.
+ */
+export function photoIndexEtag(
+  userId: number,
+  fp: { maxUpdatedAt: string; count: number },
+  serializedFilter: string,
+): string {
+  const hash = crypto
+    .createHash("md5")
+    .update(`${userId}|${fp.maxUpdatedAt}|${fp.count}|${serializedFilter}`)
+    .digest("hex");
+  return `"${hash}"`;
+}
+
 export async function listPhotoIndexLogic(
   userId: number,
   filter: PhotoFilterParams = {},
@@ -2153,10 +2208,26 @@ export function getPhotoFileLogic(filename: string): { data: string; mimeType: s
 }
 
 export async function convertHeicToJpeg(filePath: string): Promise<Buffer> {
-  // sharp's bundled libvips lacks HEIC decode support; use heic-convert (libheif via WASM) instead.
+  // sharp's bundled libvips lacks HEIC decode support; use heic-convert
+  // (libheif via WASM) instead. Decoded buffers are held in a small LRU
+  // keyed by (filePath, mtimeMs) so back-to-back pipelines (quality,
+  // embedding, thumbnail prewarm, on-demand /photos/file) that touch the
+  // same HEIC pay the decode cost at most once.
+  let mtimeMs = 0;
+  try {
+    const st = await fs.promises.stat(filePath);
+    mtimeMs = st.mtimeMs;
+    const cached = getHeicDecodeCached(filePath, mtimeMs);
+    if (cached) return cached;
+  } catch {
+    // stat failed — fall through, readFile below will report the real error
+  }
+
   const inputBuffer = await fs.promises.readFile(filePath);
   const outputBuffer = await heicConvert({ buffer: inputBuffer, format: 'JPEG', quality: 0.9 });
-  return Buffer.from(outputBuffer);
+  const decoded = Buffer.from(outputBuffer);
+  if (mtimeMs > 0) setHeicDecodeCached(filePath, mtimeMs, decoded);
+  return decoded;
 }
 
 /**
@@ -4038,7 +4109,7 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
   const photoIds = allPhotos.map((p) => p.id.toString());
   let remoteGroups: Array<{ cover_photo_id: string; members: Array<{ photo_id: string; similarity_rank: number }> }>;
   try {
-    const response = await fetch(`${EMBEDDING_SERVICE_URL}/similar-groups`, {
+    const response = await fetchWithTimeout(`${EMBEDDING_SERVICE_URL}/similar-groups`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -4395,7 +4466,7 @@ export async function searchPhotosLogic(
   // 1. Call embedding service text search
   let embeddingResults: Array<{ photo_id: string; score: number }>;
   try {
-    const response = await fetch(`${EMBEDDING_SERVICE_URL}/search/text`, {
+    const response = await fetchWithTimeout(`${EMBEDDING_SERVICE_URL}/search/text`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -4403,6 +4474,9 @@ export async function searchPhotosLogic(
         k: Math.min(limit, EMBEDDING_TEXT_SEARCH_MAX_K),
         threshold,
       }),
+      // Search is on the request path — keep the timeout short so a stalled
+      // embedding service doesn't hold up the UI spinner indefinitely.
+      timeoutMs: ML_RPC_QUICK_TIMEOUT_MS,
     });
     if (!response.ok) {
       const errText = await response.text();
@@ -4697,7 +4771,7 @@ async function callLandmarkService(
   const blob = new Blob([fileData], { type: getUploadMimeType(filePath) });
   formData.append("file", blob, path.basename(filePath));
 
-  const response = await fetch(`${LANDMARK_SERVICE_URL}/detect-landmarks`, {
+  const response = await fetchWithTimeout(`${LANDMARK_SERVICE_URL}/detect-landmarks`, {
     method: "POST",
     body: formData,
   });
@@ -4887,7 +4961,7 @@ export async function indexPhotoQuality(photoId: number): Promise<void> {
       formData.append("face_bboxes", JSON.stringify(bboxes));
     }
 
-    const response = await fetch(`${EMBEDDING_SERVICE_URL}/quality`, {
+    const response = await fetchWithTimeout(`${EMBEDDING_SERVICE_URL}/quality`, {
       method: "POST",
       body: formData,
     });
@@ -5379,7 +5453,7 @@ export async function searchPhotosNaturalLogic(
   // Case B: semantic only, no structural filters → CLIP ∪ description matches
   if (!hasStructuredFilter) {
     const [clipResp, descIds] = await Promise.all([
-      fetch(`${EMBEDDING_SERVICE_URL}/search/text`, {
+      fetchWithTimeout(`${EMBEDDING_SERVICE_URL}/search/text`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -5387,6 +5461,7 @@ export async function searchPhotosNaturalLogic(
           k: Math.min(limit, EMBEDDING_TEXT_SEARCH_MAX_K),
           threshold,
         }),
+        timeoutMs: ML_RPC_QUICK_TIMEOUT_MS,
       }),
       fetchDescriptionMatchIds(),
     ]);
@@ -5432,7 +5507,7 @@ export async function searchPhotosNaturalLogic(
   // (1000) — exceeding it would produce a 422 Unprocessable Entity.
   const clipK = Math.min(candidateSet.size, limit * 5, EMBEDDING_TEXT_SEARCH_MAX_K);
   const [clipResp, descIds] = await Promise.all([
-    fetch(`${EMBEDDING_SERVICE_URL}/search/text`, {
+    fetchWithTimeout(`${EMBEDDING_SERVICE_URL}/search/text`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -5440,6 +5515,7 @@ export async function searchPhotosNaturalLogic(
         k: clipK,
         threshold,
       }),
+      timeoutMs: ML_RPC_QUICK_TIMEOUT_MS,
     }),
     // fetchDescriptionMatchIds already applies the same structural filter,
     // so we don't need to intersect manually.
@@ -5580,7 +5656,7 @@ export async function purgeAllPhotosLogic(deleteFiles: boolean): Promise<PurgeRe
     error: "",
   };
   try {
-    const resp = await fetch(`${EMBEDDING_SERVICE_URL}/photos`, { method: "DELETE" });
+    const resp = await fetchWithTimeout(`${EMBEDDING_SERVICE_URL}/photos`, { method: "DELETE" });
     if (resp.ok) {
       const body = (await resp.json().catch(() => ({}))) as { deleted?: number };
       embeddingService.ok = true;

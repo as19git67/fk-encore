@@ -24,6 +24,16 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 
+// Side-effect import so the Encore build statically sees image-worker
+// and emits it next to this file. The worker module is otherwise only
+// referenced via a runtime string path inside `new Worker(...)`, which
+// the bundler cannot discover, so the compiled image-worker.js would
+// be missing from the build output. Importing from the main thread is
+// safe: image-worker.ts guards its `parentPort.on("message", ...)` with
+// a `parentPort` null check, so evaluating it outside a worker is a
+// no-op.
+import "./image-worker";
+
 const DEFAULT_POOL_SIZE = Math.min(8, Math.max(2, Math.floor(os.cpus().length / 2)));
 
 const POOL_SIZE = (() => {

@@ -19,10 +19,6 @@
 import { parentPort } from "node:worker_threads";
 import sharp from "sharp";
 
-if (!parentPort) {
-  throw new Error("image-worker must be run as a worker_threads module");
-}
-
 interface ResizePayload {
   buffer: ArrayBuffer;
   width: number;
@@ -34,21 +30,29 @@ interface WorkerMessage {
   payload: ResizePayload;
 }
 
-parentPort.on("message", async (msg: WorkerMessage) => {
-  try {
-    if (msg.op === "resize") {
-      const input = Buffer.from(msg.payload.buffer);
-      const out = await sharp(input)
-        .rotate()
-        .resize(msg.payload.width, null, { withoutEnlargement: true })
-        .jpeg({ quality: 85 })
-        .toBuffer();
-      const ab = out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer;
-      parentPort!.postMessage({ id: msg.id, ok: true, result: ab }, [ab]);
-      return;
+// Only wire up the message handler when actually running inside a
+// worker_threads Worker. The module is also imported from the main
+// thread as a side-effect marker (see image-pool.ts) so the Encore
+// build statically sees image-worker and emits it next to image-pool
+// in the build output. In that case parentPort is null and this
+// module evaluates to a no-op.
+if (parentPort) {
+  parentPort.on("message", async (msg: WorkerMessage) => {
+    try {
+      if (msg.op === "resize") {
+        const input = Buffer.from(msg.payload.buffer);
+        const out = await sharp(input)
+          .rotate()
+          .resize(msg.payload.width, null, { withoutEnlargement: true })
+          .jpeg({ quality: 85 })
+          .toBuffer();
+        const ab = out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer;
+        parentPort!.postMessage({ id: msg.id, ok: true, result: ab }, [ab]);
+        return;
+      }
+      parentPort!.postMessage({ id: msg.id, ok: false, error: `unknown op ${msg.op}` });
+    } catch (err: any) {
+      parentPort!.postMessage({ id: msg.id, ok: false, error: err?.message ?? String(err) });
     }
-    parentPort!.postMessage({ id: msg.id, ok: false, error: `unknown op ${msg.op}` });
-  } catch (err: any) {
-    parentPort!.postMessage({ id: msg.id, ok: false, error: err?.message ?? String(err) });
-  }
-});
+  });
+}

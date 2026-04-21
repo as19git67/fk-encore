@@ -246,6 +246,13 @@
       "when": 1777700000000,
       "tag": "0033_thumbnail_scan_service",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1777800000000,
+      "tag": "0034_photos_updated_at",
+      "breakpoints": true
     }
   ]
 }
