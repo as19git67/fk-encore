@@ -298,6 +298,20 @@ the photo UI responsive under sustained scan load.
 | `EVENT_LOOP_LAG_THRESHOLD_MS`    | `500`   | Lag above which all scan services pause dequeueing. |
 | `WORKER_PRESSURE_DELAY_MS`       | `250`   | Delay between jobs under soft pressure. |
 | `WORKER_HARD_PRESSURE_DELAY_MS`  | `1000`  | Delay between jobs under hard pressure. |
+| `ML_RPC_TIMEOUT_MS`              | `600000` | Per-request timeout (ms) for worker-side ML RPCs (embedding/insightface/landmark). 10 min by default — raise on very slow hosts, lower when you have a GPU. |
+| `ML_RPC_QUICK_TIMEOUT_MS`        | `60000`  | Per-request timeout (ms) for user-facing ML RPCs (`/search/text`, `/similar-groups`). |
+| `ML_CONCURRENCY_EMBEDDING`       | `1`     | Max parallel requests to the embedding container. `embedding` and `quality` workers share this slot, so the default serializes them. Raise only with GPU. |
+| `ML_CONCURRENCY_INSIGHTFACE`     | `1`     | Max parallel requests to the insightface container. |
+| `ML_CONCURRENCY_LANDMARK`        | `1`     | Max parallel requests to the landmark container. |
+| `HEALTH_CHECK_INTERVAL_MS`       | `60000` | Interval between ML `/health` pings. Lower = faster detection of container outages; the ping itself is cheap. |
+| `HEALTH_CHECK_TIMEOUT_MS`        | `60000` | Timeout for a single health ping. Generous on purpose — a busy container may reply slowly without being unhealthy. |
+
+> **Note on timeouts:** A worker-side timeout no longer marks the job
+> as permanently failed. `MlRpcTimeoutError` is handled the same as
+> `ServiceUnavailableError` — the job returns to `pending` and is
+> retried by the next tick. This protects photos from losing their
+> embedding/quality/landmark data when the ML container is briefly
+> unresponsive.
 
 ### Reverse proxy for thumbnails
 
