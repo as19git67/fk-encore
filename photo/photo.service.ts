@@ -87,6 +87,7 @@ import {
   buildPhotoFilterConditions,
   type PhotoFilterParams,
 } from "./photo.filters";
+import { repairMojibake } from "./text-encoding";
 
 console.log("[boot] photo/photo.service.ts: all imports resolved");
 
@@ -874,7 +875,15 @@ function asString(v: unknown): string | null {
   }
   if (typeof v !== "string") return null;
   const t = v.trim();
-  return t.length > 0 ? t : null;
+  if (t.length === 0) return null;
+  // Repair UTF-8-as-Latin-1 mojibake at the producer boundary. exifr's IPTC
+  // parser unconditionally decodes strings with `getLatin1String()` even when
+  // the file actually stored UTF-8 bytes (IPTC's `CodedCharacterSet` marker
+  // is optional and frequently absent). Applying the repair here means every
+  // downstream consumer — recaps, search, UI — sees clean UTF-8 without
+  // having to defend itself. The function is a no-op on already-clean text,
+  // so XMP/EXIF paths that happen to reach this helper are unaffected.
+  return repairMojibake(t);
 }
 
 /**
@@ -920,7 +929,7 @@ export function mergeRatingKeyword(keywords: string[], rating: number | null): s
 function asStringArray(v: unknown): string[] {
   if (Array.isArray(v)) {
     return v
-      .map((x) => (typeof x === "string" ? x.trim() : ""))
+      .map((x) => (typeof x === "string" ? repairMojibake(x.trim()) : ""))
       .filter((x) => x.length > 0);
   }
   const s = asString(v);

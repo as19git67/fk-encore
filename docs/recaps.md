@@ -250,13 +250,21 @@ open:
 
 Additional smaller gaps worth tracking:
 
-- **Upstream mojibake source.** `repairMojibake()` is applied defensively
-  at title-formation boundaries and at `location_city` grouping, but the
-  producers (exifr reading IPTC fields as Latin-1 when
-  `CodedCharacterSet` is missing; llama-cpp-python's JSON-grammar mode
-  splitting tokens at multi-byte UTF-8 boundaries) are untouched. A
-  one-shot migration to backfill corrupted `photos.location_city` /
-  `photos.location_country` values is still open.
+- **Upstream mojibake source.** ✅ Addressed. `repairMojibake()` is now also
+  applied at both producers:
+  - `photo/photo.service.ts` `asString()` / `asStringArray()` repair every
+    IPTC-sourced field right after exifr hands them back, since exifr's IPTC
+    parser uses `getLatin1String()` unconditionally and has no notion of
+    `CodedCharacterSet`.
+  - `llm-service/main.py` `_repair_mojibake()` is applied to the title,
+    subtitle, sender, summary and tags fields after JSON parsing so the
+    llama-cpp-python JSON-grammar boundary splits never leak into the
+    Encore-side response.
+  - Migration `0034_backfill_location_mojibake.sql` repairs historical
+    `photos.location_city`, `location_country`, `location_name` and
+    `location_short` rows in place.
+  The defensive `repairMojibake()` calls in `recaps.service.ts` remain as
+  belt-and-braces — they're no-ops on clean strings.
 - **User-facing preferences.** There is no way to mute a specific theme
   ("I don't care about sunsets") or a specific person short of dismissing
   each generated recap one by one.
