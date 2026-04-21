@@ -11,6 +11,33 @@ import { isUnderPressure } from "./event-loop-pressure";
 import { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
 export { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
 import db from "../db/database";
+import { realtime } from "~encore/clients";
+
+/**
+ * Fire-and-forget realtime notification. Publisher-side errors must not
+ * break album/photo operations, so we swallow them with a warning.
+ */
+async function publishAlbumEvent(
+  userIds: number[],
+  type: string,
+  resourceId: number,
+  payload: Record<string, unknown> = {},
+): Promise<void> {
+  if (userIds.length === 0) return;
+  try {
+    await realtime.publishEvent({
+      userIds: userIds.map((id) => String(id)),
+      channel: "albums",
+      type,
+      resourceId: String(resourceId),
+      payload,
+    });
+  } catch (err) {
+    console.warn(
+      `[photo] realtime publish failed for album=${resourceId} type=${type}: ${(err as Error).message}`,
+    );
+  }
+}
 
 // Dynamic import breaks the static async-init cycle between
 // photo.service and scan-worker. Both modules become esbuild async-init
@@ -2886,6 +2913,16 @@ export async function addPhotoToAlbumLogic(userId: number, req: AddPhotoToAlbumR
     scheduleRegroup(user_id);
   }
 
+  // Notify everyone who sees the album — owner plus all shared users —
+  // so open album views can slot the new photo in without polling.
+  // Exclude the actor; their UI just completed the action.
+  const recipients = new Set<number>([album.user_id, ...sharedUsersForGrouping.map((s) => s.user_id)]);
+  recipients.delete(userId);
+  await publishAlbumEvent(Array.from(recipients), "photo_added", req.albumId, {
+    photoId: req.photoId,
+    addedByUserId: userId,
+  });
+
   return { success: true };
 }
 
@@ -3101,6 +3138,13 @@ export async function shareAlbumLogic(userId: number, req: ShareAlbumRequest): P
 
   // Re-run similar-photo grouping for the new shared user so shared photos are considered.
   scheduleRegroup(req.userId);
+
+  // Notify the new viewer so their album list picks the album up without
+  // a manual refresh.
+  await publishAlbumEvent([req.userId], "shared", req.albumId, {
+    accessLevel: req.accessLevel,
+    ownerUserId: album.user_id,
+  });
 
   return { success: true };
 }
