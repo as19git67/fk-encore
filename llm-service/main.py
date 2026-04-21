@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator
@@ -83,6 +84,53 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="llm-service", version="1.0.0", lifespan=lifespan)
+
+
+# ─── UTF-8 repair ──────────────────────────────────────────────────────────────
+#
+# llama-cpp-python's JSON-grammar-constrained generation works at the byte
+# level and occasionally emits a multi-byte UTF-8 codepoint split across two
+# grammar "tokens", so ``detokenize().decode("utf-8", errors="replace")``
+# inside the library can produce Latin-1 / Windows-1252 interpretations of
+# the raw bytes. The classic symptom is "Brüssel" coming back as "BrÃ¼ssel"
+# (the UTF-8 bytes ``C3 BC`` read as two separate Latin-1 characters).
+#
+# We fix this at the source — right after JSON parsing on the producer side
+# — by attempting a Latin-1 → UTF-8 round-trip and keeping the repaired form
+# only when it looks meaningfully different and remains valid UTF-8. The
+# function is a no-op on already-clean text, so it's safe to apply
+# universally to every string field we return.
+
+_MOJIBAKE_PATTERN = re.compile(r"[ÂÃ][-¿]")
+
+
+def _repair_mojibake(value: str | None) -> str | None:
+    if value is None or value == "":
+        return value
+    if not _MOJIBAKE_PATTERN.search(value):
+        return value
+    try:
+        repaired = value.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return value
+    if "�" in repaired:
+        return value
+    return repaired
+
+
+def _repair_fields(data: dict[str, Any], keys: tuple[str, ...]) -> None:
+    """In-place ``_repair_mojibake`` for the given string keys of ``data``."""
+
+    for key in keys:
+        v = data.get(key)
+        if isinstance(v, str):
+            data[key] = _repair_mojibake(v)
+
+
+def _repair_tags(data: dict[str, Any]) -> None:
+    tags = data.get("tags")
+    if isinstance(tags, list):
+        data["tags"] = [_repair_mojibake(t) if isinstance(t, str) else t for t in tags]
 
 
 # ─── /healthz ──────────────────────────────────────────────────────────────────
@@ -331,6 +379,13 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
         log.warning("LLM returned non-JSON payload: %r", raw[:200])
         raise HTTPException(status_code=502, detail=f"llm returned invalid JSON: {exc}") from exc
 
+    # Repair UTF-8-as-Latin-1 mojibake at the producer boundary — see the
+    # ``_repair_mojibake`` docstring above. Only the free-form German text
+    # fields can contain the two-byte UTF-8 codepoints (ä/ö/ü/ß, umlauts) that
+    # trigger the bug; slugs, dates and confidences are ASCII.
+    _repair_fields(data, ("title", "sender", "summary"))
+    _repair_tags(data)
+
     # If tax detection is off, ignore any tax_* fields the LLM might have
     # hallucinated — they're not validated against a slug whitelist here.
     if not tax_active:
@@ -458,13 +513,17 @@ async def recap_title(req: RecapTitleRequest) -> RecapTitleResponse:
         log.warning("/recap-title: LLM returned non-JSON: %r", raw[:200])
         raise HTTPException(status_code=502, detail=f"llm returned invalid JSON: {exc}") from exc
 
-    title = str(data.get("title") or "").strip()
-    if not title:
+    title_raw = str(data.get("title") or "").strip()
+    if not title_raw:
         raise HTTPException(status_code=502, detail="llm returned empty title")
-    # Hard-cap lengths so we never push excessive text into the DB/UI.
-    title = title[:60]
+    # Repair UTF-8-as-Latin-1 mojibake at the producer boundary before the
+    # string ever reaches the Encore caller / DB. llama-cpp-python with the
+    # JSON-grammar response format splits tokens at multi-byte UTF-8
+    # boundaries and occasionally re-decodes a ``C3 BC`` codepoint as two
+    # separate Latin-1 chars ("ü" → "Ã¼"). See ``_repair_mojibake`` above.
+    title = (_repair_mojibake(title_raw) or "")[:60]
     subtitle_raw = data.get("subtitle")
-    subtitle = str(subtitle_raw).strip()[:120] if subtitle_raw else None
+    subtitle = (_repair_mojibake(str(subtitle_raw).strip()) or "")[:120] if subtitle_raw else None
     if subtitle == "":
         subtitle = None
     return RecapTitleResponse(title=title, subtitle=subtitle)

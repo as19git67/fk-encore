@@ -9,6 +9,14 @@ library with `{ gps: true, xmp: true, iptc: true }`. The `getExifMetadata()`
 function returns a normalised `ExifMetadata` object; the import/refresh paths
 then project a subset of it into the DB row.
 
+Every string pulled from exifr is passed through `repairMojibake()` (see
+`photo/text-encoding.ts`) before it leaves `asString()` / `asStringArray()`.
+This is a producer-boundary fix for exifr's IPTC parser, which decodes
+strings with `getLatin1String()` unconditionally and has no awareness of
+IPTC's `CodedCharacterSet` marker — so anything a modern writer stored as
+UTF-8 (e.g. `München`, `Brüssel`) came back as `MÃ¼nchen` / `BrÃ¼ssel`. The
+repair is a no-op on already-clean EXIF/XMP strings.
+
 ## Parsed fields (`ExifMetadata`)
 
 | Field         | Source priority (first non-empty wins)                                              |
