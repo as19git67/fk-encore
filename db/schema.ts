@@ -682,3 +682,39 @@ export const realtimeEvents = pgTable("realtime_events", {
     .notNull()
     .defaultNow(),
 });
+
+// ========== Social Feed ==========
+//
+// Activity timeline for album participants. Every feed-worthy action
+// (a photo added to a shared album, an album being shared, a like, a
+// comment) fans out into one `feed_items` row per recipient — the
+// recipient is always the viewer, the actor is the user who performed
+// the action. Fan-out is intentional so per-user state (seen_at) is
+// cheap to maintain.
+//
+// Retention: none. Per product decision the feed is kept forever so
+// users can scroll back through every shared moment.
+
+export const feedItemKindEnum = pgEnum("feed_item_kind", [
+  "photo_added",
+  "album_shared",
+  "photo_liked",
+  "photo_commented",
+]);
+
+export const feedItems = pgTable("feed_items", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  actor_user_id: integer("actor_user_id")
+    .references(() => users.id, { onDelete: "set null" }),
+  kind: feedItemKindEnum("kind").notNull(),
+  album_id: integer("album_id").references(() => albums.id, { onDelete: "cascade" }),
+  photo_id: integer("photo_id").references(() => photos.id, { onDelete: "cascade" }),
+  payload: jsonb("payload").notNull().default(sql`'{}'::jsonb`).$type<Record<string, unknown>>(),
+  seen_at: timestamp("seen_at", { mode: "string", withTimezone: true }),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
