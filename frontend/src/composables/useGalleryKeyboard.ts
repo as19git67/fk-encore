@@ -5,9 +5,9 @@ export interface GalleryKeyboardOptions {
   onLeft: () => void
   /** Navigate to next photo (→) */
   onRight: () => void
-  /** Navigate up in the nav panel (↑) – always routed to nav panel */
+  /** Navigate up (↑) */
   onUp: () => void
-  /** Navigate down in the nav panel (↓) – always routed to nav panel */
+  /** Navigate down (↓) */
   onDown: () => void
   /** Toggle fullscreen (Space) */
   onSpace: () => void
@@ -20,13 +20,10 @@ export interface GalleryKeyboardOptions {
 /**
  * Central keyboard handler for the gallery views.
  *
- * Navigation contract (as agreed):
- *  ←  / →   → always navigate in the photo grid
- *  ↑  / ↓   → always navigate in the nav panel (e.g. TimelineNav)
+ * Navigation contract:
+ *  ←  / →   → navigate in the photo grid
+ *  ↑  / ↓   → caller-defined (may be no-op)
  *  Space     → toggle fullscreen
- *
- * When no nav panel is present (e.g. AlbumDetailView), the caller can wire
- * onUp/onDown to section-jump logic within the grid.
  */
 export function useGalleryKeyboard(options: GalleryKeyboardOptions) {
   function handleKeydown(e: KeyboardEvent) {
