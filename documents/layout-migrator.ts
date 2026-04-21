@@ -17,7 +17,7 @@
  */
 
 import { sql } from "drizzle-orm";
-import { dbAll } from "../db/adapter";
+import db from "../db/database";
 import { relocateDocument } from "./relocate";
 
 console.log("[boot] documents/layout-migrator.ts: all imports resolved");
@@ -51,21 +51,21 @@ export function migrateLegacyLayoutOnce(): Promise<void> {
 async function runMigration(): Promise<void> {
   console.log("[documents] layout-migrator: scanning for legacy-layout rows…");
 
-  const rows = await dbAll<{ id: number; disk_path: string }>(
-    sql`
-      SELECT id, disk_path
-      FROM documents
-      WHERE disk_path ~ ${LEGACY_PATH_RE}
-      ORDER BY id ASC
-    `,
-  );
+  const result = await db.execute<{ id: number; disk_path: string }>(sql`
+    SELECT id, disk_path
+    FROM documents
+    WHERE disk_path ~ ${LEGACY_PATH_RE}
+    ORDER BY id ASC
+  `);
+  const rows = result.rows;
 
   if (rows.length === 0) {
     // Show a sample of existing paths so a "0 rows" result is diagnosable
     // without shelling into Postgres. Cheap — `LIMIT 3` on an indexed table.
-    const sample = await dbAll<{ id: number; disk_path: string }>(
+    const sampleResult = await db.execute<{ id: number; disk_path: string }>(
       sql`SELECT id, disk_path FROM documents ORDER BY id ASC LIMIT 3`,
     );
+    const sample = sampleResult.rows;
     if (sample.length === 0) {
       console.log("[documents] layout-migrator: no documents in DB — nothing to do");
     } else {
