@@ -151,18 +151,59 @@ service used to hold a DB connection slot and a libuv network slot
 indefinitely, which eventually backs up the HTTP handlers behind
 `/photos/index`.
 
-- `ML_RPC_TIMEOUT_MS` (default **60 s**) — used for worker-side pipelines.
-- `ML_RPC_QUICK_TIMEOUT_MS` (default **15 s**) — used for text search
+- `ML_RPC_TIMEOUT_MS` (default **600 s / 10 min**) — used for
+  worker-side pipelines. The generous default accommodates weak
+  CPU-only hosts where a CLIP embedding or quality pass can legitimately
+  run for several minutes; the timeout is primarily a safety net for
+  true container hangs (GPU OOM, GIL deadlock, restart loop).
+- `ML_RPC_QUICK_TIMEOUT_MS` (default **60 s**) — used for text search
   and other latency-sensitive, request-path calls. A hung embedding
   service can no longer hold up the UI spinner indefinitely.
 
 A timeout raises a dedicated `MlRpcTimeoutError` (distinct from
-user-triggered `AbortError`), so workers can branch on it for retry /
-defer / mark-failed logic.
+user-triggered `AbortError`). The scan worker treats it as a **defer**
+(the job returns to `pending`), not a permanent `failed`. That matters
+on slow hardware: a one-off timeout no longer leaves a photo
+permanently without an embedding or quality score — the next tick
+retries automatically, and the service-health recovery callback wakes
+workers as soon as the ML container is responsive again.
 
 Caller-supplied `AbortSignal`s are still honoured — the implementation
 chains the two signals so either the caller or the timeout can abort the
 request.
+
+#### Per-service concurrency limiter
+
+Multiple scan workers (e.g. `embedding` and `quality`) talk to the
+**same** Python ML container. On a weak CPU-only host, running two
+heavy inference requests in parallel makes both slower than the sum of
+their sequential times and thrashes the page cache.
+
+`fetchWithTimeout` therefore exposes a per-service semaphore keyed by
+service name. Callers that should be serialized pass
+`queue: "embedding" | "insightface" | "landmark"`. The timeout clock
+only starts **after** the slot is acquired, so queueing a request never
+inflates its reported duration.
+
+Worker-side call sites using the limiter:
+
+| Call                               | Queue         | Why                           |
+|------------------------------------|---------------|-------------------------------|
+| `POST /upload` (embedding)         | `embedding`   | CLIP + DINOv2 on the photo    |
+| `POST /quality`                    | `embedding`   | Same container as `/upload`   |
+| `POST /detect` (insightface)       | `insightface` | Face detection + landmarks    |
+| `POST /detect-landmarks`           | `landmark`    | Grounding-DINO pass           |
+
+User-facing calls (`/search/text`, `/similar-groups`, `/photos DELETE`)
+deliberately bypass the limiter so a long-running worker upload does
+not freeze the search box. On a weak server this can occasionally make
+an in-flight worker job slower, but keeping the UI responsive is the
+priority.
+
+Defaults are **1** slot per service — i.e. strictly serial. Tune with
+`ML_CONCURRENCY_EMBEDDING`, `ML_CONCURRENCY_INSIGHTFACE`,
+`ML_CONCURRENCY_LANDMARK` if you run on a host with real GPU
+parallelism.
 
 ### 4. `/photos/index` ETag + 304
 
@@ -237,8 +278,13 @@ fingerprint; the DB is the only place where that guarantee is total.
 | `WORKER_PRESSURE_DELAY_MS`       | `1000`       | Phase 1 — per-job back-off under pressure |
 | `HEIC_DECODE_CACHE_ENTRIES`      | `32`         | Phase 2 — max cached HEIC decodes |
 | `HEIC_DECODE_CACHE_BYTES`        | `134217728`  | Phase 2 — byte budget for HEIC cache |
-| `ML_RPC_TIMEOUT_MS`              | `60000`      | Phase 2 — timeout for worker-side ML RPCs |
-| `ML_RPC_QUICK_TIMEOUT_MS`        | `15000`      | Phase 2 — timeout for request-path ML RPCs |
+| `ML_RPC_TIMEOUT_MS`              | `600000`     | Phase 2 — timeout for worker-side ML RPCs (10 min) |
+| `ML_RPC_QUICK_TIMEOUT_MS`        | `60000`      | Phase 2 — timeout for request-path ML RPCs (1 min) |
+| `ML_CONCURRENCY_EMBEDDING`       | `1`          | Phase 2 — max parallel requests to the embedding container |
+| `ML_CONCURRENCY_INSIGHTFACE`     | `1`          | Phase 2 — max parallel requests to the insightface container |
+| `ML_CONCURRENCY_LANDMARK`        | `1`          | Phase 2 — max parallel requests to the landmark container |
+| `HEALTH_CHECK_INTERVAL_MS`       | `60000`      | Interval between ML `/health` pings (1 min) |
+| `HEALTH_CHECK_TIMEOUT_MS`        | `60000`      | Per-ping timeout (generous for busy containers) |
 
 ---
 
