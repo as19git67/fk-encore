@@ -64,6 +64,17 @@ export const categoryTaxonomy: CategorySeed[] = [
     ],
   },
   {
+    slug: "altersvorsorge",
+    name: "Altersvorsorge",
+    icon: "pi-shield",
+    children: [
+      { slug: "altersvorsorge-lebensversicherung", name: "Kapital-Lebensversicherung" },
+      { slug: "altersvorsorge-rentenversicherung", name: "Private Rentenversicherung (inkl. Riester/Rürup)" },
+      { slug: "altersvorsorge-betrieblich", name: "Betriebliche Altersvorsorge (bAV)" },
+      { slug: "altersvorsorge-gesetzlich", name: "Gesetzliche Rente (DRV)" },
+    ],
+  },
+  {
     slug: "gesundheit",
     name: "Gesundheit",
     icon: "pi-heart",
