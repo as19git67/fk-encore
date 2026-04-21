@@ -605,6 +605,12 @@ export interface PhotoIndexEntry {
 
 export interface ListPhotoIndexResponse {
   photos: PhotoIndexEntry[];
+  /**
+   * Total number of rows matching the filter (across all pages). Only set
+   * when the request supplied a `limit` — unpaged requests omit this so
+   * existing clients do not pay the COUNT(*) cost.
+   */
+  total?: number;
 }
 
 export interface PhotoDetailsBatchResponse {

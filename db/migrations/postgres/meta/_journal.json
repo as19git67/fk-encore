@@ -239,6 +239,13 @@
       "when": 1777600000000,
       "tag": "0032_recaps_seen_at",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1777700000000,
+      "tag": "0033_thumbnail_scan_service",
+      "breakpoints": true
     }
   ]
 }

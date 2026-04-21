@@ -270,3 +270,66 @@ docker compose logs insightface
 
 The ML services together need about 4–6 GB of RAM. Increase the Docker
 memory limit if necessary (Docker Desktop → Settings → Resources).
+
+## Performance tuning
+
+A server that is running large scan passes (embedding, face detection,
+landmark, quality, thumbnail prewarm) competes with the HTTP API for
+CPU, DB connections and the libuv thread pool. The defaults below keep
+the photo UI responsive under sustained scan load.
+
+### Environment variables
+
+| Variable                         | Default | Description |
+|----------------------------------|---------|-------------|
+| `UV_THREADPOOL_SIZE`             | `16`    | Raised automatically at boot so sharp, crypto and `fs` calls never queue behind one another. Set explicitly if you want another value. |
+| `IMAGE_POOL_SIZE`                | half CPU count, min 2, max 8 | Dedicated worker threads for sharp image resizing. `0` disables the pool and falls back to in-process sharp. |
+| `POSTGRES_POOL_MAX`              | `20`    | pg pool size. Must be ≥ `WORKER_DB_RESERVED_SLOTS + 5`. |
+| `WORKER_DB_RESERVED_SLOTS`       | `3`     | Connections kept free for HTTP handlers (scan workers wait when all non-reserved slots are used). |
+| `SCAN_EMBEDDING_CONCURRENCY`     | `1`     | Parallel embedding jobs. Increase cautiously — each job holds a DB connection during the RPC. |
+| `SCAN_FACE_CONCURRENCY`          | `1`     | Parallel face-detection jobs. |
+| `SCAN_FACE_ASSIGN_CONCURRENCY`   | `1`     | Parallel face-assignment jobs (local-only, cheap). |
+| `SCAN_LANDMARK_CONCURRENCY`      | `1`     | Parallel landmark jobs. |
+| `SCAN_QUALITY_CONCURRENCY`       | `1`     | Parallel quality jobs. |
+| `SCAN_THUMBNAIL_CONCURRENCY`     | `1`     | Parallel thumbnail-prewarm jobs. Sharp runs off the main thread via `IMAGE_POOL_SIZE`, so raising this scales mostly with disk IO. |
+| `ENABLE_THUMBNAIL_PREWARM`       | `true`  | Generates 320/640/1280 thumbnails after every quality job. Set to `false` to save disk space at the cost of on-demand resizes. |
+| `THUMBNAIL_PREWARM_WIDTHS`       | `320,640,1280` | Comma-separated list of widths the prewarm worker generates. |
+| `EVENT_LOOP_SOFT_THRESHOLD_MS`   | `200`   | Lag above which expensive scan services are throttled. |
+| `EVENT_LOOP_LAG_THRESHOLD_MS`    | `500`   | Lag above which all scan services pause dequeueing. |
+| `WORKER_PRESSURE_DELAY_MS`       | `250`   | Delay between jobs under soft pressure. |
+| `WORKER_HARD_PRESSURE_DELAY_MS`  | `1000`  | Delay between jobs under hard pressure. |
+
+### Reverse proxy for thumbnails
+
+The Encore photo endpoint at `/photos/file/*` streams from the local
+`THUMBNAIL_DIR` cache on cache-hit, but every request still enters the
+Node.js event loop. For deployments with a front-end proxy (nginx,
+Caddy, Traefik) it is cheaper to serve cached thumbnails directly from
+disk and let Node handle only cache-misses.
+
+Example nginx snippet (adjust paths to your `PHOTO_THUMBNAIL_DIR`):
+
+```nginx
+# Serve thumbnails directly from disk; fall through to Node on miss.
+location ~* ^/photos/file/(?<rest>.+)$ {
+    set $cache_base "";
+    # Use Node for HEIC conversions and unsharded paths — only handle
+    # sized thumbnails here because they match the prewarm output.
+    if ($arg_w != "") {
+        try_files /thumbnails/$cache_base $rest @node;
+    }
+    proxy_pass http://app:8080;
+}
+
+location @node {
+    proxy_pass http://app:8080;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+}
+```
+
+For most installations the simpler answer is to mount
+`PHOTO_THUMBNAIL_DIR` as a shared volume and use nginx's built-in
+proxy cache in front of Encore — the prewarm worker guarantees every
+photo has its common widths ready, so the cache hit rate at the proxy
+approaches 100 %.
