@@ -71,6 +71,10 @@ type PhotoFilterQueryParams = {
   importedDaysAgo?: Query<number>;
   sizeMin?: Query<number>;
   sizeMax?: Query<number>;
+  /** Maximum number of rows to return. Omit for "all". */
+  limit?: Query<number>;
+  /** Number of rows to skip before returning `limit` rows. */
+  offset?: Query<number>;
 };
 
 function toFilterQuery(p: PhotoFilterQueryParams): PhotoFilterQuery {
@@ -231,7 +235,18 @@ export const listPhotoIndex = api(
     requirePermission(authData, "photos.view");
 
     const filter = parsePhotoFilterQuery(toFilterQuery(params));
-    return await service.listPhotoIndexLogic(userId, filter);
+    // Cap the per-request payload: 5000 rows per page is the hard upper
+    // limit so a misbehaving client cannot force the server to materialise
+    // tens of thousands of rows in one response. Frontend paginates via
+    // ?offset= until `total` is exhausted.
+    const MAX_LIMIT = 5000;
+    const limit = typeof params.limit === "number" && params.limit > 0
+      ? Math.min(params.limit, MAX_LIMIT)
+      : undefined;
+    const offset = typeof params.offset === "number" && params.offset > 0
+      ? params.offset
+      : 0;
+    return await service.listPhotoIndexLogic(userId, filter, { limit, offset });
   }
 );
 
@@ -426,7 +441,12 @@ async function resolvePhotoFilePath(filename: string): Promise<string | null> {
       console.error("Rejected library path outside PHOTO_LIBRARIES_ROOT:", abs);
       return null;
     }
-    return fs.existsSync(abs) ? abs : null;
+    try {
+      await fs.promises.access(abs);
+      return abs;
+    } catch {
+      return null;
+    }
   }
 
   const filePath = path.resolve(UPLOAD_DIR, filename);
@@ -434,7 +454,12 @@ async function resolvePhotoFilePath(filename: string): Promise<string | null> {
   if (filePath !== UPLOAD_DIR && !filePath.startsWith(uploadDirWithSep)) {
     return null;
   }
-  return fs.existsSync(filePath) ? filePath : null;
+  try {
+    await fs.promises.access(filePath);
+    return filePath;
+  } catch {
+    return null;
+  }
 }
 
 export const getPhotoFile = api.raw(
@@ -490,7 +515,14 @@ export const getPhotoFile = api.raw(
               const shardPath = thumbnailShardPath(cacheBase);
               const cachePath = path.join(shardPath, cacheFile);
 
-              if (fs.existsSync(cachePath)) {
+              let cacheHit = false;
+              try {
+                  await fs.promises.access(cachePath);
+                  cacheHit = true;
+              } catch {
+                  // cache miss — fall through to regeneration below
+              }
+              if (cacheHit) {
                   res.setHeader("Content-Type", "image/jpeg");
                   res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
                   fs.createReadStream(cachePath).pipe(res);
