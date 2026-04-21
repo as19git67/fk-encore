@@ -6,10 +6,10 @@ import exifr from "exifr";
 import { exiftool } from "exiftool-vendored";
 import { eq, and, or, sql, inArray, ilike, isNull, isNotNull, desc } from "drizzle-orm";
 import { APIError } from "encore.dev/api";
-import { enqueuePhotoScan, DeferJobError } from "./scan-queue";
+import { enqueuePhotoScan, enqueuePhotoScanBulkPerUser, DeferJobError } from "./scan-queue";
 import { isUnderPressure } from "./event-loop-pressure";
-import { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY } from "./scan-config";
-export { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY } from "./scan-config";
+import { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
+export { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
 import db from "../db/database";
 
 // Dynamic import breaks the static async-init cycle between
@@ -80,7 +80,7 @@ import type {
   FaceBBox,
   LandmarkBBox,
 } from "../db/types";
-import sharp from "sharp";
+import { resizeImageInPool } from "./image-pool";
 import {
   buildPhotoFilterConditions,
   type PhotoFilterParams,
@@ -600,12 +600,12 @@ export async function getUsersWithPhotoAccess(photoId: number): Promise<number[]
 export async function enqueueFaceAssignmentForAllUsers(photoId: number): Promise<void> {
   if (!ENABLE_LOCAL_FACES) return;
   const userIds = await getUsersWithPhotoAccess(photoId);
-  for (const userId of userIds) {
-    await enqueuePhotoScan(photoId, userId, ["face_assignment"]);
-  }
-  if (userIds.length > 0) {
-    triggerWorkers();
-  }
+  if (userIds.length === 0) return;
+  // Single bulk insert instead of N sequential enqueuePhotoScan() calls.
+  // For albums shared with many users this is the difference between
+  // one DB round-trip and hundreds.
+  await enqueuePhotoScanBulkPerUser(photoId, userIds, "face_assignment");
+  triggerWorkers();
 }
 
 /**
@@ -1526,10 +1526,57 @@ export async function listPhotosLogic(
  */
 export async function listPhotoIndexLogic(
   userId: number,
-  filter: PhotoFilterParams = {}
+  filter: PhotoFilterParams = {},
+  pagination: { limit?: number; offset?: number } = {}
 ): Promise<ListPhotoIndexResponse> {
   const filterConds = buildPhotoFilterConditions(userId, filter);
   const whereClause = and(eq(photos.user_id, userId), ...filterConds);
+
+  // Only run the COUNT(*) when the caller requested a page — otherwise the
+  // full-list path keeps its original cost profile (no extra query).
+  let total: number | undefined;
+  if (pagination.limit !== undefined) {
+    const countRow = await dbFirst<{ c: number }>(
+      db
+        .select({ c: sql<number>`COUNT(*)::int` })
+        .from(photos)
+        .leftJoin(
+          photoCuration,
+          and(eq(photos.id, photoCuration.photo_id), eq(photoCuration.user_id, userId))
+        )
+        .where(whereClause)
+    );
+    total = countRow?.c ?? 0;
+  }
+
+  let query = db
+    .select({
+      id: photos.id,
+      user_id: photos.user_id,
+      filename: photos.filename,
+      original_name: photos.original_name,
+      mime_type: photos.mime_type,
+      size: photos.size,
+      taken_at: photos.taken_at,
+      created_at: photos.created_at,
+      curation_status: photoCuration.status,
+      auto_crop: photos.auto_crop,
+    })
+    .from(photos)
+    .leftJoin(
+      photoCuration,
+      and(eq(photos.id, photoCuration.photo_id), eq(photoCuration.user_id, userId))
+    )
+    .where(whereClause)
+    .orderBy(sql`${photoDateOrder} DESC`)
+    .$dynamic();
+
+  if (pagination.limit !== undefined) {
+    query = query.limit(pagination.limit);
+  }
+  if (pagination.offset !== undefined && pagination.offset > 0) {
+    query = query.offset(pagination.offset);
+  }
 
   const rows = await dbAll<{
     id: number; user_id: number; filename: string; original_name: string;
@@ -1537,28 +1584,7 @@ export async function listPhotoIndexLogic(
     taken_at: string | null; created_at: string | null;
     curation_status: string | null;
     auto_crop: { x: number; y: number } | null;
-  }>(
-    db
-      .select({
-        id: photos.id,
-        user_id: photos.user_id,
-        filename: photos.filename,
-        original_name: photos.original_name,
-        mime_type: photos.mime_type,
-        size: photos.size,
-        taken_at: photos.taken_at,
-        created_at: photos.created_at,
-        curation_status: photoCuration.status,
-        auto_crop: photos.auto_crop,
-      })
-      .from(photos)
-      .leftJoin(
-        photoCuration,
-        and(eq(photos.id, photoCuration.photo_id), eq(photoCuration.user_id, userId))
-      )
-      .where(whereClause)
-      .orderBy(sql`${photoDateOrder} DESC`)
-  );
+  }>(query);
 
   const result: PhotoIndexEntry[] = rows.map((r) => ({
     id: r.id,
@@ -1573,7 +1599,9 @@ export async function listPhotoIndexLogic(
     auto_crop: r.auto_crop ?? undefined,
   }));
 
-  return { photos: result };
+  return total !== undefined
+    ? { photos: result, total }
+    : { photos: result };
 }
 
 /**
@@ -2137,12 +2165,99 @@ export async function convertHeicToJpeg(filePath: string): Promise<Buffer> {
  * returned as-is (no upscaling). Returns a JPEG buffer.
  */
 export async function resizeImage(imageBuffer: Buffer, targetWidth: number): Promise<Buffer> {
-  // .rotate() with no arguments auto-orients based on EXIF orientation tag
-  return sharp(imageBuffer)
-    .rotate()
-    .resize(targetWidth, null, { withoutEnlargement: true })
-    .jpeg({ quality: 85 })
-    .toBuffer();
+  // Route through the sharp worker pool when available so the main thread
+  // never blocks on libvips decode/encode. Falls back to an in-process call
+  // when the pool is disabled (see resizeImageInPool implementation).
+  return resizeImageInPool(imageBuffer, targetWidth);
+}
+
+/**
+ * Build the thumbnail cache filename for a given photo filename + target
+ * width. Mirrors the logic in photo.ts:getPhotoFile so a cache entry created
+ * here is a hit for the /photos/file endpoint.
+ */
+export function thumbnailCacheKey(filename: string, targetWidth: number): {
+  shardPath: string;
+  cachePath: string;
+} {
+  const baseName = path.basename(filename, path.extname(filename));
+  const isLibrary = filename.startsWith("__library/");
+  const cacheBase = isLibrary
+    ? `${baseName}_${crypto.createHash("md5").update(filename).digest("hex").slice(0, 8)}`
+    : baseName;
+  const shardPath = thumbnailShardPath(cacheBase);
+  const cachePath = path.join(shardPath, `${cacheBase}_${targetWidth}w.jpg`);
+  return { shardPath, cachePath };
+}
+
+/**
+ * Pre-generate thumbnails for a photo at the widths listed in
+ * THUMBNAIL_PREWARM_WIDTHS. Runs on a background worker so the /photos/file
+ * endpoint always hits the on-disk cache and never blocks on sharp() or
+ * heic-convert on the request path.
+ *
+ * Skips widths whose cache file already exists. Any IO/decode errors are
+ * logged and do not fail the job — a missing thumbnail simply means the
+ * next request re-generates it on-demand.
+ */
+export async function indexPhotoThumbnails(photoId: number): Promise<void> {
+  if (!ENABLE_THUMBNAIL_PREWARM) return;
+  if (THUMBNAIL_PREWARM_WIDTHS.length === 0) return;
+
+  const photo = await dbFirst<typeof photos.$inferSelect>(
+    db.select().from(photos).where(eq(photos.id, photoId))
+  );
+  if (!photo) return;
+
+  const filePath = getPhotoDiskPath(photo);
+  try {
+    await fs.promises.access(filePath);
+  } catch {
+    return; // source file missing — nothing to prewarm
+  }
+
+  // Figure out which widths still need to be generated. `fs.promises.access`
+  // with F_OK is the cheapest existence check (no fd open).
+  const targets: number[] = [];
+  for (const width of THUMBNAIL_PREWARM_WIDTHS) {
+    const { cachePath } = thumbnailCacheKey(photo.filename, width);
+    try {
+      await fs.promises.access(cachePath);
+      // already cached — skip
+    } catch {
+      targets.push(width);
+    }
+  }
+  if (targets.length === 0) return;
+
+  // Decode the source once and re-use the buffer for every width. HEIC files
+  // need the WASM decoder; everything else goes straight through libvips.
+  const ext = path.extname(photo.filename).toLowerCase();
+  let sourceBuffer: Buffer;
+  try {
+    if (ext === ".heic" || ext === ".heif") {
+      sourceBuffer = await convertHeicToJpeg(filePath);
+    } else {
+      sourceBuffer = await fs.promises.readFile(filePath);
+    }
+  } catch (err) {
+    console.error(`[thumbnail] source read/convert failed for photo ${photoId}:`, err);
+    return;
+  }
+
+  // Generate widths sequentially to keep peak memory + CPU low. Parallelising
+  // across widths on a single worker would fight with other scan workers
+  // for the libuv thread pool and is not worth the complexity.
+  for (const width of targets) {
+    const { shardPath, cachePath } = thumbnailCacheKey(photo.filename, width);
+    try {
+      const resized = await resizeImage(sourceBuffer, width);
+      await fs.promises.mkdir(shardPath, { recursive: true });
+      await fs.promises.writeFile(cachePath, resized);
+    } catch (err) {
+      console.error(`[thumbnail] generate w=${width} for photo ${photoId} failed:`, err);
+    }
+  }
 }
 
 // ---------- Albums ----------
@@ -2666,11 +2781,17 @@ export async function addPhotoToAlbumLogic(userId: number, req: AddPhotoToAlbumR
       db.select({ user_id: albumShares.user_id }).from(albumShares).where(eq(albumShares.album_id, req.albumId))
     );
     if (sharedUsers.length > 0) {
-      Promise.all(
-        sharedUsers.map(({ user_id }) => enqueuePhotoScan(req.photoId, user_id, ["face_assignment"]))
-      ).then(() => triggerWorkers()).catch(err => {
-        console.error("Error enqueueing face assignments for shared album photo:", err);
-      });
+      // Bulk insert replaces N parallel enqueuePhotoScan() round-trips so
+      // sharing an album with hundreds of users stays cheap.
+      enqueuePhotoScanBulkPerUser(
+        req.photoId,
+        sharedUsers.map((s) => s.user_id),
+        "face_assignment",
+      )
+        .then(() => triggerWorkers())
+        .catch((err) => {
+          console.error("Error enqueueing face assignments for shared album photo:", err);
+        });
     }
   }
 

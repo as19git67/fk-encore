@@ -12,9 +12,9 @@
 import { eq, and, inArray, sql, not, isNull } from "drizzle-orm";
 import db from "../db/database";
 import { photoScanQueue, photos, faces, photoLandmarks } from "../db/schema";
-import { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY } from "./scan-config";
+import { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM } from "./scan-config";
 
-export type ScanService = "embedding" | "face_detection" | "face_assignment" | "landmark" | "quality" | "geocoding";
+export type ScanService = "embedding" | "face_detection" | "face_assignment" | "landmark" | "quality" | "geocoding" | "thumbnail";
 export type ScanStatus = "pending" | "processing" | "failed" | "done";
 
 /**
@@ -26,7 +26,7 @@ export type QueueServiceId = ScanService | "library_scan";
 
 /** Services that run once per photo (no user_id in queue). */
 const GLOBAL_SERVICES: ReadonlySet<ScanService> = new Set([
-  "face_detection", "embedding", "landmark", "quality", "geocoding",
+  "face_detection", "embedding", "landmark", "quality", "geocoding", "thumbnail",
 ]);
 
 /** Services that run once per user per photo. */
@@ -70,6 +70,7 @@ function enabledServices(): ScanService[] {
   }
   if (ENABLE_LANDMARKS) services.push("landmark");
   if (ENABLE_QUALITY) services.push("quality");
+  if (ENABLE_THUMBNAIL_PREWARM) services.push("thumbnail");
   return services;
 }
 
@@ -127,6 +128,58 @@ export async function enqueuePhotoScan(
           );
       }
     }
+  }
+}
+
+/**
+ * Enqueue the same (photoId, service) for many users in a single INSERT.
+ *
+ * Replaces the pattern `Promise.all(users.map(id => enqueuePhotoScan(..)))`
+ * which would hit the DB N times and issue N client/pool round-trips. One
+ * bulk insert keeps fan-out cheap even for albums shared with hundreds of
+ * users.
+ *
+ * Only makes sense for per-user services (face_assignment). Global services
+ * should use enqueuePhotoScan() directly — they have at most one row per
+ * photo, so there is no fan-out to batch.
+ */
+export async function enqueuePhotoScanBulkPerUser(
+  photoId: number,
+  userIds: number[],
+  service: ScanService,
+  force = false,
+): Promise<void> {
+  if (userIds.length === 0) return;
+  if (isGlobalService(service)) {
+    throw new Error(`enqueuePhotoScanBulkPerUser cannot be used for global service '${service}'`);
+  }
+
+  const rows = userIds.map((user_id) => ({
+    photo_id: photoId,
+    user_id,
+    service,
+    force,
+  }));
+
+  await db
+    .insert(photoScanQueue)
+    .values(rows)
+    .onConflictDoNothing();
+
+  if (force) {
+    // Upgrade any already-pending duplicates to force=true so a rescan
+    // actually re-runs. Cheap: one UPDATE regardless of userIds length.
+    await db
+      .update(photoScanQueue)
+      .set({ force: true })
+      .where(
+        and(
+          eq(photoScanQueue.photo_id, photoId),
+          eq(photoScanQueue.service, service),
+          inArray(photoScanQueue.user_id, userIds),
+          inArray(photoScanQueue.status, ["pending", "processing"]),
+        ),
+      );
   }
 }
 
@@ -197,13 +250,13 @@ export async function getQueueStatus(userId: number): Promise<QueueStatus> {
   const rows = await db.execute<{ service: ScanService; status: ScanStatus; count: string }>(sql`
     SELECT service, status, COUNT(*)::int as count
     FROM photo_scan_queue
-    WHERE (user_id IS NULL AND service IN ('face_detection', 'embedding', 'landmark', 'quality', 'geocoding'))
+    WHERE (user_id IS NULL AND service IN ('face_detection', 'embedding', 'landmark', 'quality', 'geocoding', 'thumbnail'))
        OR (user_id = ${userId} AND service = 'face_assignment')
     GROUP BY service, status
   `);
 
   const map = new Map<QueueServiceId, QueueServiceStatus>();
-  for (const svc of (["embedding", "face_detection", "face_assignment", "landmark", "quality", "geocoding"] as ScanService[])) {
+  for (const svc of (["embedding", "face_detection", "face_assignment", "landmark", "quality", "geocoding", "thumbnail"] as ScanService[])) {
     map.set(svc, { service: svc, pending: 0, processing: 0, failed: 0, done: 0 });
   }
 

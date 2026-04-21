@@ -64,8 +64,19 @@ async function createDb(): Promise<DbInstance> {
     await ensureDatabaseExists(connectionString);
   }
 
-  const pool = new Pool({ connectionString });
+  // Pool size is configurable so the scan-worker semaphore (see
+  // photo/worker-db-slots.ts) and the HTTP request handlers can share the
+  // pool without starving each other. Default: 20 (pg default is 10, which
+  // is too tight once scan workers hold connections across RPC waits).
+  const poolMax = Math.max(
+    2,
+    parseInt(process.env.POSTGRES_POOL_MAX ?? (isTest ? "10" : "20"), 10),
+  );
+  const pool = new Pool({ connectionString, max: poolMax });
   const db = drizzle(pool, { schema });
+  if (!isTest) {
+    console.log(`[db] pool max=${poolMax}`);
+  }
 
   const migrationsFolder = path.join(process.cwd(), "db", "migrations", "postgres");
   if (fs.existsSync(migrationsFolder)) {
