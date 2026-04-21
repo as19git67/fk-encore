@@ -67,6 +67,8 @@ export async function seed(db: any): Promise<void> {
     { key: "documents.edit", description: "Edit document metadata and reclassify" },
     { key: "documents.delete", description: "Delete documents" },
     { key: "documents.manage_taxonomy", description: "Manage document categories and AI suggestions" },
+    { key: "households.view", description: "View households the user belongs to" },
+    { key: "households.manage", description: "Create and edit households, manage members" },
   ];
 
   // Permissions that are NEVER auto-assigned to the Admin role.
@@ -134,6 +136,8 @@ export async function seed(db: any): Promise<void> {
       "documents.upload",
       "documents.edit",
       "documents.delete",
+      "households.view",
+      "households.manage",
     ],
   };
 

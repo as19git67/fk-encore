@@ -1,0 +1,149 @@
+# Dokumenten-Ordner-Struktur & Haushaltskonzept
+
+Dieses Dokument beschreibt, wie hochgeladene Dokumente auf der Platte unter
+`DOCUMENTS_DIR` abgelegt werden und wie Dokumente zwischen Einzelpersonen und
+Familien/Haushalten geteilt werden können.
+
+Status: implementiert in Migration `0036_documents_households`.
+
+---
+
+## 1. Ziele
+
+- **Durchstöberbar im Dateisystem**: Ein Anwender soll auch ohne die Web-App
+  auf einem File-Share direkt zur gesuchten Rechnung bzw. zum Bescheid
+  navigieren können.
+- **Sprechende Dateinamen**: `YYYY-MM-DD_<absender>_<titel>__<hash8>.pdf` statt
+  opaker SHA-256-Shards.
+- **Umzug bei Reklassifikation**: Ändert sich die Kategorie, das Datum, der
+  Absender oder die Sichtbarkeit, wandert die Datei automatisch an ihren neuen
+  kanonischen Platz.
+- **Pro-Person-Isolation**: Private Dokumente eines Nutzers sind für andere
+  nicht sichtbar — weder im UI noch im Dateisystem.
+- **Familien-Pool**: Ein gemeinsamer Haushalt (z. B. eine Familie) kann eine
+  gemeinsame Dokumentenablage verwenden, damit das Elternteil, das die Post aus
+  dem Briefkasten geholt hat, nicht exklusiver Eigentümer der eingescannten
+  Bescheide bleibt.
+- **Steuer-Sicht per Hardlink**: Steuerrelevante Dokumente erscheinen zusätzlich
+  unter `_steuer/<jahr>/<anlage>/` als Hardlink auf die kanonische Datei — ohne
+  die Bytes zu verdoppeln.
+
+---
+
+## 2. Sichtbarkeitsmodell
+
+Ein Dokument besitzt genau eine Sichtbarkeit:
+
+| `visibility`  | `user_id`     | `household_id` | Wer sieht es?                            |
+|---------------|---------------|----------------|------------------------------------------|
+| `private`     | Uploader      | `NULL`         | nur der Uploader                         |
+| `household`   | Uploader      | Haushalt-ID    | jedes Mitglied dieses Haushalts          |
+
+Der Uploader (`user_id`) bleibt in beiden Fällen erhalten — auch
+Haushaltsdokumente "gehören" nominell der Person, die sie eingescannt hat.
+Admin-Mutationen (Löschen, Sichtbarkeit umschalten) dürfen der Uploader *oder*
+ein Haushalts-Owner — siehe `loadAdministrableDocument` in
+`documents/visibility.ts`.
+
+Die Datenbank setzt das Konsistenzregel als CHECK-Constraint durch:
+`(visibility='private' AND household_id IS NULL) OR (visibility='household'
+AND household_id IS NOT NULL)`.
+
+Das Löschen eines Haushalts ist durch `ON DELETE RESTRICT` blockiert, solange
+noch Dokumente daran hängen — damit niemand versehentlich Haushaltsdokumente
+verwaist.
+
+### Haushalts-Rollen
+
+- `owner` — darf Mitglieder einladen/entfernen, den Haushalt umbenennen,
+  Dokumente anderer Mitglieder löschen.
+- `member` — sieht alle Haushaltsdokumente, darf eigene hochladen, darf aber
+  keine fremden Dokumente löschen.
+
+---
+
+## 3. Ordner-Schema
+
+```
+DOCUMENTS_DIR/
+├── <user-login-slug>/                    ← private Dokumente
+│   ├── _inbox/YYYY-MM/                   ← noch nicht klassifiziert
+│   ├── <category-path>/<year>/*.pdf      ← klassifiziert
+│   └── _steuer/<year>/<anlage>/*.pdf     ← Hardlinks in Steuer-Sicht
+└── _haushalt/<household-slug>/           ← Haushaltsdokumente
+    ├── _inbox/YYYY-MM/
+    ├── <category-path>/<year>/*.pdf
+    └── _steuer/<year>/<anlage>/*.pdf
+```
+
+Der `<user-login-slug>` wird aus dem Local-Part der E-Mail-Adresse abgeleitet
+(`max.mueller@example.com` → `max-mueller`). Für rein numerische oder leere
+Local-Parts fällt der Algorithmus auf `user-<id>` zurück.
+
+Der `<household-slug>` wird beim Anlegen aus dem Haushaltsnamen erzeugt und
+ist im Schema `UNIQUE`.
+
+Das Dateinamens-Schema ist:
+
+```
+YYYY-MM-DD_<absender-slug>_<titel-slug>__<hash8>.pdf
+```
+
+Fehlende Bestandteile entfallen (Dokument ohne Absender → `YYYY-MM-DD_<titel>__<hash8>.pdf`).
+Das `__<hash8>`-Suffix sind die ersten 8 hex-Stellen des SHA-256 und
+garantieren Eindeutigkeit auch wenn zwei Dokumente vom selben Absender am
+selben Tag mit demselben Titel hochgeladen werden.
+
+---
+
+## 4. Lebenszyklus einer Datei
+
+1. **Upload** (`POST /documents` oder Inbox-Watcher): Die Datei landet unter
+   `<owner-root>/_inbox/<YYYY-MM>/<sha256>.pdf`. Die Sichtbarkeit ist
+   zunächst `private` — das Hochschieben in einen Haushalt macht der Nutzer
+   aktiv über das UI.
+2. **Klassifikation** (Worker-Pipeline `text_extract → classify → embed`): Der
+   `classify`-Job schreibt Kategorie, Datum, Absender, Titel und Steuerfelder
+   in die DB. Danach ruft er `relocateDocument(id)` auf — das verschiebt die
+   Datei an ihren kanonischen Platz und baut die Steuer-Hardlinks auf.
+3. **Nutzer-Korrektur** (`PATCH /documents/:id`): Das Ändern einer der Felder
+   triggert erneut `relocateDocument`. Der Verschiebevorgang ist idempotent —
+   steht die Datei bereits richtig, passiert nichts ausser einem Rebuild der
+   Steuer-Links.
+4. **Sichtbarkeits-Wechsel** (`POST /documents/:id/visibility`): Versetzt das
+   Dokument zwischen privatem Bereich und Haushaltsbereich; die Datei wandert
+   in die entsprechende Owner-Root, alte Steuer-Hardlinks werden weggeräumt.
+5. **Löschen** (`DELETE /documents/:id`): Entfernt die Steuer-Hardlinks zuerst,
+   dann den DB-Eintrag (cascadet Tags + Tax-Zuordnungen), dann die kanonische
+   Datei, und räumt leere Ordner nach oben hin auf.
+
+`relocateDocument` ist in `documents/relocate.ts` implementiert. Es ist
+cross-device-sicher (fällt bei EXDEV auf `copy+unlink` zurück) und path-traversal-
+gesichert (`assertPathUnderDocumentsRoot` vor jeder fs-Operation).
+
+---
+
+## 5. Relevante Module
+
+| Datei                             | Zweck                                                    |
+|-----------------------------------|----------------------------------------------------------|
+| `db/migrations/postgres/0036_…`   | Schema-Erweiterung: households + documents.visibility    |
+| `documents/documents.service.ts`  | Path-Builder (`resolveDocumentDiskPath`, Slugifier, …)   |
+| `documents/relocate.ts`           | Physische Umzüge + Steuer-Hardlink-Rebuild               |
+| `documents/visibility.ts`         | Zugriffskontrolle (`loadVisibleDocument`, …)             |
+| `documents/households.ts`         | API-Endpoints zum Anlegen/Verwalten von Haushalten       |
+| `documents/documents.ts`          | `POST /documents/:id/visibility`, Upload, CRUD, Suche    |
+
+---
+
+## 6. Migration bestehender Uploads
+
+Vor Version 0036 hochgeladene Dokumente liegen unter dem alten
+`YYYY/YYYY-MM/<sha256>.pdf`-Schema. Migration 0036 ändert nur das DB-Schema —
+die Dateien wandern erst beim Aufruf von
+`POST /documents/layout/backfill`. Dieser Endpunkt iteriert alle sichtbaren
+Dokumente des Aufrufers, ruft `relocateDocument` auf jedes einzelne auf und
+meldet zurück, wie viele tatsächlich verschoben, übersprungen oder gescheitert
+sind.
+
+`relocateDocument` ist idempotent: mehrfache Aufrufe sind gefahrlos.

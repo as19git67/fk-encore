@@ -26,11 +26,23 @@ import {
   DOCUMENTS_MAX_BYTES,
   SUPPORTED_MIME_TYPES,
   assertPathUnderDocumentsRoot,
+  composeOwnerRootSegment,
   ensureDir,
-  getDocumentDiskPath,
+  getInitialUploadDiskPath,
   guessExtension,
+  pruneEmptyDirs,
+  slugifyUserLogin,
 } from "./documents.service";
+import { users } from "../db/schema";
 import { replaceUserTaxSections } from "./document-ops";
+import { dropTaxLinks, relocateDocument } from "./relocate";
+import {
+  assertHouseholdMember,
+  loadAdministrableDocument,
+  loadUserHouseholdIds,
+  loadVisibleDocument,
+  visibleDocumentsWhere,
+} from "./visibility";
 import { enqueueDocumentScan, getQueueStatus, requeueDocument } from "./scan-queue";
 import { triggerWorkers } from "./scan-worker";
 import { searchDocuments, type SearchMode } from "./search";
@@ -217,7 +229,27 @@ async function streamAndStorePdf(
   );
   if (existing) throw new Error("DOCUMENT_ALREADY_EXISTS");
 
-  const { absPath, relPath, dirAbs } = getDocumentDiskPath(digest, ext, new Date());
+  // New uploads land as `visibility='private'` under the uploader's
+  // personal root; the owner can later move the document into a
+  // household via `POST /documents/:id/visibility`.
+  const uploader = await dbFirst<{ email: string }>(
+    db.select({ email: users.email }).from(users).where(eq(users.id, userId)),
+  );
+  const userLoginSlug = slugifyUserLogin(
+    uploader?.email ?? `user-${userId}@local`,
+    userId,
+  );
+  const ownerRootSeg = composeOwnerRootSegment({
+    visibility: "private",
+    userLoginSlug,
+    householdSlug: null,
+  });
+  const { absPath, dirAbs } = getInitialUploadDiskPath(
+    ownerRootSeg,
+    digest,
+    ext,
+    new Date(),
+  );
   assertPathUnderDocumentsRoot(absPath);
   await ensureDir(dirAbs);
   await fs.promises.writeFile(absPath, buffer);
@@ -232,6 +264,7 @@ async function streamAndStorePdf(
         mime_type: mimeType,
         size_bytes: size,
         disk_path: absPath,
+        visibility: "private",
       })
       .returning(),
   );
@@ -255,7 +288,8 @@ export const listDocuments = api(
 
     const lim = Math.min(Math.max(limit ?? 50, 1), 200);
     const off = Math.max(offset ?? 0, 0);
-    const conds = [eq(documents.user_id, userId)];
+    const householdIds = await loadUserHouseholdIds(userId);
+    const conds = [visibleDocumentsWhere(userId, householdIds)];
 
     if (status && status.length > 0) {
       conds.push(eq(documents.status, status as any));
@@ -357,7 +391,7 @@ export const getDocument = api(
     requirePermission(authData, "documents.view");
     const userId = getUserId();
 
-    const row = await loadOwnedDocument(userId, id);
+    const row = await loadVisibleDocument(userId, id);
     const cat = row.category_id
       ? await dbFirst<{ slug: string }>(
           db.select({ slug: documentCategories.slug }).from(documentCategories).where(eq(documentCategories.id, row.category_id)),
@@ -420,7 +454,7 @@ export const getDocumentFile = api.raw(
     }
 
     try {
-      const row = await loadOwnedDocument(userId, docId);
+      const row = await loadVisibleDocument(userId, docId);
       assertPathUnderDocumentsRoot(row.disk_path);
       const stat = await fs.promises.stat(row.disk_path);
       res.statusCode = 200;
@@ -464,7 +498,7 @@ export const updateDocument = api(
     requirePermission(authData, "documents.edit");
     const userId = getUserId();
 
-    const existing = await loadOwnedDocument(userId, req.id);
+    const existing = await loadVisibleDocument(userId, req.id);
 
     const patch: Partial<typeof documents.$inferInsert> = {};
     if (req.title !== undefined) patch.title = req.title?.trim() || null;
@@ -492,6 +526,76 @@ export const updateDocument = api(
       await replaceTags(existing.id, req.tags);
     }
 
+    // Metadata that contributes to the canonical path may have changed;
+    // move the file and rebuild tax hardlinks. `relocateDocument` is
+    // idempotent when nothing actually moved.
+    if (Object.keys(patch).length > 0) {
+      try {
+        await relocateDocument(existing.id);
+      } catch (err) {
+        console.warn(
+          `[documents] relocate after update(${existing.id}) failed: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    return await loadDetail(userId, existing.id);
+  },
+);
+
+export interface UpdateDocumentVisibilityRequest {
+  id: number;
+  visibility: "private" | "household";
+  /** Required when `visibility='household'`; must be a household the caller belongs to. */
+  household_id?: number | null;
+}
+
+/**
+ * Flip a document between private (uploader-only) and household
+ * (shared with every member of the named household) visibility.
+ *
+ * Only the original uploader or a household owner may change visibility
+ * — this is a `loadAdministrableDocument` check. Moving a document
+ * *into* a household additionally requires active membership in that
+ * household. The physical file is relocated immediately so the
+ * filesystem view matches the DB.
+ */
+export const updateDocumentVisibility = api(
+  { expose: true, method: "POST", path: "/documents/:id/visibility", auth: true },
+  async (req: UpdateDocumentVisibilityRequest): Promise<DocumentDetail> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.edit");
+    const userId = getUserId();
+
+    const existing = await loadAdministrableDocument(userId, req.id);
+
+    if (req.visibility === "household") {
+      if (req.household_id == null) {
+        throw APIError.invalidArgument(
+          "household_id is required when visibility='household'",
+        );
+      }
+      await assertHouseholdMember(userId, req.household_id);
+      await db
+        .update(documents)
+        .set({ visibility: "household", household_id: req.household_id })
+        .where(eq(documents.id, existing.id));
+    } else {
+      await db
+        .update(documents)
+        .set({ visibility: "private", household_id: null })
+        .where(eq(documents.id, existing.id));
+    }
+
+    try {
+      await relocateDocument(existing.id);
+    } catch (err) {
+      console.warn(
+        `[documents] relocate after visibility change(${existing.id}) failed: ${(err as Error).message}`,
+      );
+    }
+
     return await loadDetail(userId, existing.id);
   },
 );
@@ -504,11 +608,22 @@ export const deleteDocument = api(
     requirePermission(authData, "documents.delete");
     const userId = getUserId();
 
-    const row = await loadOwnedDocument(userId, id);
+    const row = await loadAdministrableDocument(userId, id);
+    // Drop tax hardlinks first so we don't leave dangling entries under
+    // `_steuer/` after the canonical inode is freed. The DB delete then
+    // cascades through tag/tax rows via FK ON DELETE.
+    try {
+      await dropTaxLinks(id);
+    } catch (err) {
+      console.warn(
+        `[documents] delete: dropTaxLinks(${id}) failed: ${(err as Error).message}`,
+      );
+    }
     await db.delete(documents).where(eq(documents.id, id));
     try {
       assertPathUnderDocumentsRoot(row.disk_path);
       await fs.promises.unlink(row.disk_path).catch(() => {});
+      await pruneEmptyDirs(path.dirname(row.disk_path));
     } catch (err) {
       console.warn(`[documents] delete: failed to unlink ${row.disk_path}: ${(err as Error).message}`);
     }
@@ -535,7 +650,7 @@ export const reclassifyDocument = api(
     requirePermission(authData, "documents.edit");
     const userId = getUserId();
 
-    await loadOwnedDocument(userId, req.id);
+    await loadVisibleDocument(userId, req.id);
     const patch: Partial<typeof documents.$inferInsert> = { status: "pending" };
     if (req.force_ocr !== undefined) patch.force_ocr = req.force_ocr;
     await db.update(documents).set(patch).where(eq(documents.id, req.id));
@@ -570,7 +685,7 @@ export const updateDocumentTax = api(
     requirePermission(authData, "documents.edit");
     const userId = getUserId();
 
-    const existing = await loadOwnedDocument(userId, req.id);
+    const existing = await loadVisibleDocument(userId, req.id);
 
     let year: number | null = null;
     if (req.tax_relevant) {
@@ -614,6 +729,15 @@ export const updateDocumentTax = api(
       await replaceUserTaxSections(existing.id, []);
     }
 
+    // Rebuild the `_steuer/` hardlink view against the new tax metadata.
+    try {
+      await relocateDocument(existing.id);
+    } catch (err) {
+      console.warn(
+        `[documents] relocate after tax update(${existing.id}) failed: ${(err as Error).message}`,
+      );
+    }
+
     return await loadDetail(userId, existing.id);
   },
 );
@@ -634,13 +758,14 @@ export const backfillDocumentTax = api(
     requirePermission(authData, "documents.edit");
     const userId = getUserId();
 
+    const householdIds = await loadUserHouseholdIds(userId);
     const rows = await dbAll<{ id: number }>(
       db
         .select({ id: documents.id })
         .from(documents)
         .where(
           and(
-            eq(documents.user_id, userId),
+            visibleDocumentsWhere(userId, householdIds),
             eq(documents.status, "ready"),
             eq(documents.tax_reviewed, false),
           ),
@@ -651,6 +776,56 @@ export const backfillDocumentTax = api(
     }
     if (rows.length > 0) triggerWorkers();
     return { queued: rows.length };
+  },
+);
+
+// ─── Layout backfill ───────────────────────────────────────────────────────
+
+export interface RelocateDocumentsResponse {
+  relocated: number;
+  skipped: number;
+  failed: number;
+}
+
+/**
+ * One-shot maintenance endpoint: walk every document visible to the
+ * caller and call `relocateDocument` so files land at their canonical
+ * speaking path. Run once after upgrading to the folder-structure
+ * release; harmless to re-run because `relocateDocument` is idempotent.
+ */
+export const relocateDocumentsBackfill = api(
+  { expose: true, method: "POST", path: "/documents/layout/backfill", auth: true },
+  async (): Promise<RelocateDocumentsResponse> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.edit");
+    const userId = getUserId();
+
+    const householdIds = await loadUserHouseholdIds(userId);
+    const rows = await dbAll<{ id: number; disk_path: string }>(
+      db
+        .select({ id: documents.id, disk_path: documents.disk_path })
+        .from(documents)
+        .where(visibleDocumentsWhere(userId, householdIds)),
+    );
+
+    let relocated = 0;
+    let skipped = 0;
+    let failed = 0;
+    for (const r of rows) {
+      try {
+        const before = r.disk_path;
+        const after = await relocateDocument(r.id);
+        if (before === after) skipped += 1;
+        else relocated += 1;
+      } catch (err) {
+        failed += 1;
+        console.warn(
+          `[documents] layout backfill: relocate(${r.id}) failed: ${(err as Error).message}`,
+        );
+      }
+    }
+    return { relocated, skipped, failed };
   },
 );
 
@@ -706,10 +881,17 @@ export const listTaxYears = api(
     requirePermission(authData, "documents.view");
     const userId = getUserId();
 
+    const householdIds = await loadUserHouseholdIds(userId);
+    const visibility = householdIds.length === 0
+      ? sql`(visibility = 'private' AND user_id = ${userId})`
+      : sql`(
+          (visibility = 'private' AND user_id = ${userId})
+          OR (visibility = 'household' AND household_id = ANY(${householdIds}))
+        )`;
     const rows = await db.execute<{ tax_year: number; count: string }>(sql`
       SELECT tax_year, COUNT(*)::text as count
       FROM documents
-      WHERE user_id = ${userId}
+      WHERE ${visibility}
         AND tax_relevant = true
         AND tax_year IS NOT NULL
       GROUP BY tax_year
@@ -780,8 +962,9 @@ export const listTaxDocuments = api(
         ? year
         : null;
 
+    const householdIds = await loadUserHouseholdIds(userId);
     const conds = [
-      eq(documents.user_id, userId),
+      visibleDocumentsWhere(userId, householdIds),
       eq(documents.tax_relevant, true),
     ];
     if (yearFilter !== null) conds.push(eq(documents.tax_year, yearFilter));
@@ -993,6 +1176,7 @@ export const searchDocumentsEndpoint = api(
     }
 
     const ids = hits.map((h) => h.document_id);
+    const householdIds = await loadUserHouseholdIds(userId);
     const rows = await dbAll<typeof documents.$inferSelect & { cat_slug: string | null }>(
       db
         .select({
@@ -1021,7 +1205,7 @@ export const searchDocumentsEndpoint = api(
         })
         .from(documents)
         .leftJoin(documentCategories, eq(documents.category_id, documentCategories.id))
-        .where(and(eq(documents.user_id, userId), inArray(documents.id, ids))),
+        .where(and(visibleDocumentsWhere(userId, householdIds), inArray(documents.id, ids))),
     );
 
     const byId = new Map<number, (typeof rows)[number]>();
@@ -1200,16 +1384,8 @@ export const rejectCategorySuggestion = api(
 
 // ─── Internal helpers ───────────────────────────────────────────────────────
 
-async function loadOwnedDocument(userId: number, id: number) {
-  const row = await dbFirst<typeof documents.$inferSelect>(
-    db.select().from(documents).where(and(eq(documents.id, id), eq(documents.user_id, userId))),
-  );
-  if (!row) throw APIError.notFound("document not found");
-  return row;
-}
-
 async function loadDetail(userId: number, id: number): Promise<DocumentDetail> {
-  const row = await loadOwnedDocument(userId, id);
+  const row = await loadVisibleDocument(userId, id);
   const cat = row.category_id
     ? await dbFirst<{ slug: string }>(
         db.select({ slug: documentCategories.slug }).from(documentCategories).where(eq(documentCategories.id, row.category_id)),
