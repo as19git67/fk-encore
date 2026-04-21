@@ -20,6 +20,7 @@ import { extractPdfText } from "./text-extract";
 import {
   assertPathUnderDocumentsRoot,
 } from "./documents.service";
+import { relocateDocument } from "./relocate";
 import {
   classifyDocument,
   embedTexts,
@@ -147,6 +148,17 @@ export async function runClassify(documentId: number): Promise<{ classification:
 
   if (!row.tax_reviewed) {
     await replaceAiTaxSections(documentId, classification.tax_sections);
+  }
+
+  // The classifier filled in category / doc_date / sender / title / tax
+  // metadata — everything the speaking path depends on. Move the file
+  // to its canonical location now (and rebuild the `_steuer/` view).
+  try {
+    await relocateDocument(documentId);
+  } catch (err) {
+    console.warn(
+      `[documents] relocate after classify(${documentId}) failed: ${(err as Error).message}`,
+    );
   }
 
   const lowConfidence = classification.confidence < LOW_CONFIDENCE_THRESHOLD;

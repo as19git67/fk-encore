@@ -13,13 +13,15 @@ import crypto from "crypto";
 import { eq } from "drizzle-orm";
 import db from "../db/database";
 import { dbFirst } from "../db/adapter";
-import { documents } from "../db/schema";
+import { documents, users } from "../db/schema";
 import {
   DOCUMENTS_MAX_BYTES,
   assertPathUnderDocumentsRoot,
+  composeOwnerRootSegment,
   ensureDir,
-  getDocumentDiskPath,
+  getInitialUploadDiskPath,
   guessExtension,
+  slugifyUserLogin,
 } from "./documents.service";
 import { enqueueDocumentScan } from "./scan-queue";
 
@@ -93,7 +95,28 @@ export async function importDocumentFromPath(params: {
     throw new DuplicateDocumentError(existing.id);
   }
 
-  const { absPath, dirAbs } = getDocumentDiskPath(digest, ext, new Date());
+  // Watcher-imported files follow the same layout as UI uploads: they
+  // land in the uploader's `_inbox/YYYY-MM/` until the classifier gives
+  // them a category and `relocateDocument` moves them to the canonical
+  // speaking path.
+  const uploader = await dbFirst<{ email: string }>(
+    db.select({ email: users.email }).from(users).where(eq(users.id, userId)),
+  );
+  const userLoginSlug = slugifyUserLogin(
+    uploader?.email ?? `user-${userId}@local`,
+    userId,
+  );
+  const ownerRootSeg = composeOwnerRootSegment({
+    visibility: "private",
+    userLoginSlug,
+    householdSlug: null,
+  });
+  const { absPath, dirAbs } = getInitialUploadDiskPath(
+    ownerRootSeg,
+    digest,
+    ext,
+    new Date(),
+  );
   assertPathUnderDocumentsRoot(absPath);
   await ensureDir(dirAbs);
   await moveFile(sourcePath, absPath);
@@ -108,6 +131,7 @@ export async function importDocumentFromPath(params: {
         mime_type: mimeType,
         size_bytes: stat.size,
         disk_path: absPath,
+        visibility: "private",
       })
       .returning(),
   );
