@@ -19,20 +19,38 @@
 
 import { Worker } from "node:worker_threads";
 import os from "node:os";
-import path from "node:path";
-import fs from "node:fs";
-import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 
-// Side-effect import so the Encore build statically sees image-worker
-// and emits it next to this file. The worker module is otherwise only
-// referenced via a runtime string path inside `new Worker(...)`, which
-// the bundler cannot discover, so the compiled image-worker.js would
-// be missing from the build output. Importing from the main thread is
-// safe: image-worker.ts guards its `parentPort.on("message", ...)` with
-// a `parentPort` null check, so evaluating it outside a worker is a
-// no-op.
-import "./image-worker";
+// Worker source inlined as a string so we don't depend on the Encore build
+// emitting a separate worker file. Encore's bundler inlines small modules
+// into the combined output, so a side-effect `import "./image-worker"` did
+// not actually produce `image-worker.js` next to `image-pool.js` — spawning
+// a Worker from that path then failed with ERR_MODULE_NOT_FOUND. Using
+// `new Worker(code, { eval: true })` runs the code in a fresh worker
+// context and sidesteps the bundler entirely. `require('sharp')` resolves
+// via the app's node_modules exactly as it does on the main thread.
+const WORKER_SOURCE = `
+const { parentPort } = require('node:worker_threads');
+const sharp = require('sharp');
+parentPort.on('message', async (msg) => {
+  try {
+    if (msg.op === 'resize') {
+      const input = Buffer.from(msg.payload.buffer);
+      const out = await sharp(input)
+        .rotate()
+        .resize(msg.payload.width, null, { withoutEnlargement: true })
+        .jpeg({ quality: 85 })
+        .toBuffer();
+      const ab = out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength);
+      parentPort.postMessage({ id: msg.id, ok: true, result: ab }, [ab]);
+      return;
+    }
+    parentPort.postMessage({ id: msg.id, ok: false, error: 'unknown op ' + msg.op });
+  } catch (err) {
+    parentPort.postMessage({ id: msg.id, ok: false, error: (err && err.message) || String(err) });
+  }
+});
+`;
 
 const DEFAULT_POOL_SIZE = Math.min(8, Math.max(2, Math.floor(os.cpus().length / 2)));
 
@@ -61,33 +79,8 @@ let started = false;
 let nextJobId = 1;
 const waitingQueue: Array<(w: PooledWorker) => void> = [];
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-/**
- * Resolve the worker module path. In dev (tsx/ts-node) the source is loaded
- * directly; in production (encore build) the transpiled .js sits next to this
- * file. Prefer .js when present to avoid requiring a TS loader inside workers.
- */
-function workerScriptPath(): string {
-  const jsPath = path.join(__dirname, "image-worker.js");
-  const tsPath = path.join(__dirname, "image-worker.ts");
-  try {
-    if (fs.existsSync(jsPath)) return jsPath;
-  } catch {
-    // fall through to .ts
-  }
-  return tsPath;
-}
-
 function spawnWorker(): PooledWorker {
-  const scriptPath = workerScriptPath();
-  // Use execArgv + the tsx loader so .ts files can be loaded inside the
-  // worker during dev (Encore dev mode runs TS sources directly).
-  const isTs = scriptPath.endsWith(".ts");
-  const worker = new Worker(scriptPath, {
-    execArgv: isTs ? ["--import", "tsx"] : undefined,
-  });
+  const worker = new Worker(WORKER_SOURCE, { eval: true });
   const w: PooledWorker = { worker, busy: false, pending: new Map() };
 
   worker.on("message", (msg: { id: number; ok: boolean; result?: ArrayBuffer; error?: string }) => {
