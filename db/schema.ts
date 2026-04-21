@@ -746,6 +746,30 @@ export const photoLikes = pgTable(
   (table) => [primaryKey({ columns: [table.photo_id, table.user_id] })],
 );
 
+// ========== Web Push Subscriptions ==========
+//
+// Each row is one browser subscription produced by the Push API. A
+// single user can have many rows (multiple devices / browsers). The
+// endpoint is globally unique so resubscribing from the same browser
+// refreshes the same row via ON CONFLICT.
+
+export const pushSubscriptions = pgTable("push_subscriptions", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  // Full PushSubscription.endpoint URL (browser-specific). Used as a
+  // natural dedup key.
+  endpoint: text("endpoint").notNull().unique(),
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
+  user_agent: text("user_agent"),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  last_used_at: timestamp("last_used_at", { mode: "string", withTimezone: true }),
+});
+
 export const photoComments = pgTable("photo_comments", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
   photo_id: integer("photo_id")

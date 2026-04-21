@@ -15,7 +15,7 @@ import { and, desc, eq, isNull, lt, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbExec, dbFirst } from "../db/adapter";
 import { feedItems, users, albums, photos } from "../db/schema";
-import { realtime } from "~encore/clients";
+import { realtime, push } from "~encore/clients";
 
 export type FeedItemKind =
   | "photo_added"
@@ -259,6 +259,48 @@ export async function emitFeedItems(input: EmitFeedInput): Promise<void> {
   } catch (err) {
     console.warn(
       `[feed] realtime publish failed for kind=${input.kind}: ${(err as Error).message}`,
+    );
+  }
+
+  // Web push fan-out. Best-effort — users without push subscriptions
+  // get nothing, and any delivery error is swallowed so a flaky push
+  // service never breaks the primary operation.
+  try {
+    const [actorRow, albumRow] = await Promise.all([
+      dbFirst<{ name: string | null }>(
+        db.select({ name: users.name }).from(users).where(eq(users.id, input.actorUserId)),
+      ),
+      input.albumId != null
+        ? dbFirst<{ name: string | null }>(
+            db.select({ name: albums.name }).from(albums).where(eq(albums.id, input.albumId)),
+          )
+        : Promise.resolve<{ name: string | null } | undefined>(undefined),
+    ]);
+    const actorName = actorRow?.name ?? null;
+    const albumName = albumRow?.name ?? null;
+
+    await Promise.all(
+      rows.map((row) =>
+        push
+          .fanoutFeed({
+            userId: row.user_id,
+            kind: input.kind,
+            actorName,
+            albumName,
+            albumId: input.albumId ?? null,
+            photoId: input.photoId ?? null,
+            payload: input.payload ?? {},
+          })
+          .catch((err: unknown) => {
+            console.warn(
+              `[feed] push fanout failed kind=${input.kind} user=${row.user_id}: ${(err as Error).message}`,
+            );
+          }),
+      ),
+    );
+  } catch (err) {
+    console.warn(
+      `[feed] push metadata lookup failed kind=${input.kind}: ${(err as Error).message}`,
     );
   }
 }
