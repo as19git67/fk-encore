@@ -49,9 +49,11 @@ export function migrateLegacyLayoutOnce(): Promise<void> {
 }
 
 async function runMigration(): Promise<void> {
-  const rows = await dbAll<{ id: number }>(
+  console.log("[documents] layout-migrator: scanning for legacy-layout rows…");
+
+  const rows = await dbAll<{ id: number; disk_path: string }>(
     sql`
-      SELECT id
+      SELECT id, disk_path
       FROM documents
       WHERE disk_path ~ ${LEGACY_PATH_RE}
       ORDER BY id ASC
@@ -59,13 +61,25 @@ async function runMigration(): Promise<void> {
   );
 
   if (rows.length === 0) {
-    // Nothing to do — either a fresh install or a previously-completed
-    // migration. Stay quiet to avoid noise on every restart.
+    // Show a sample of existing paths so a "0 rows" result is diagnosable
+    // without shelling into Postgres. Cheap — `LIMIT 3` on an indexed table.
+    const sample = await dbAll<{ id: number; disk_path: string }>(
+      sql`SELECT id, disk_path FROM documents ORDER BY id ASC LIMIT 3`,
+    );
+    if (sample.length === 0) {
+      console.log("[documents] layout-migrator: no documents in DB — nothing to do");
+    } else {
+      console.log(
+        `[documents] layout-migrator: no legacy rows. Sample paths: ${sample
+          .map((r) => `#${r.id}=${r.disk_path}`)
+          .join(" | ")}`,
+      );
+    }
     return;
   }
 
   console.log(
-    `[documents] layout-migrator: relocating ${rows.length} legacy-layout document(s)`,
+    `[documents] layout-migrator: relocating ${rows.length} legacy-layout document(s) (e.g. #${rows[0].id}=${rows[0].disk_path})`,
   );
 
   let relocated = 0;
