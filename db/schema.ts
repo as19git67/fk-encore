@@ -1,4 +1,4 @@
-import { pgTable, text, integer, primaryKey, serial, boolean, timestamp, real, doublePrecision, pgEnum, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, primaryKey, serial, boolean, timestamp, real, doublePrecision, pgEnum, jsonb, bigserial } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 // ========== Users ==========
@@ -654,3 +654,31 @@ export const recapPhotos = pgTable(
   },
   (table) => [primaryKey({ columns: [table.recap_id, table.photo_id] })]
 );
+
+// ========== Realtime Outbox ==========
+//
+// Every event published via realtime.publishEvent lands here before
+// being forwarded to the PubSub topic. On reconnect, clients pass the
+// last `seq` they processed via the `lastEventId` handshake parameter
+// and the server replays everything they missed from this table.
+//
+// Retention is enforced by realtime/retention-cron.ts.
+
+export const realtimeEvents = pgTable("realtime_events", {
+  id: text("id").primaryKey(),
+  // Monotonically increasing cursor, used as the resume anchor. Shared
+  // across all users — simpler than per-user counters and the values
+  // never leak between users anyway (queries are always user-scoped).
+  seq: bigserial("seq", { mode: "number" }).notNull().unique(),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  channel: text("channel").notNull(),
+  type: text("type").notNull(),
+  resource_id: text("resource_id").notNull(),
+  payload: jsonb("payload").notNull().default(sql`'{}'::jsonb`).$type<Record<string, unknown>>(),
+  version: integer("version").notNull().default(1),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});

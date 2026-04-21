@@ -267,6 +267,13 @@
       "when": 1778000000000,
       "tag": "0036_documents_households",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1778100000000,
+      "tag": "0037_realtime_events",
+      "breakpoints": true
     }
   ]
 }

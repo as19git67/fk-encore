@@ -81,6 +81,7 @@ class SessionManager {
 
     const outbound: ClientEvent = {
       id: event.id,
+      seq: event.seq,
       userId: event.userId as unknown as string,
       channel: event.channel,
       type: event.type,

@@ -18,8 +18,16 @@ export type EventChannel =
  * pair (`type`, `version`).
  */
 export interface RealtimeEvent {
-  /** uuid — used for deduplication and resume (phase 4). */
+  /** uuid — used for client-side deduplication. */
   id: string;
+  /**
+   * Monotonically increasing cursor assigned by the outbox INSERT.
+   * Clients persist the highest `seq` they've processed and pass it
+   * back as `lastEventId` on reconnect to replay missed events.
+   * Zero for transport-level events that are never persisted
+   * (heartbeats, handshake notices).
+   */
+  seq: number;
   /** Target user. Attribute drives PubSub ordering per user. */
   userId: Attribute<string>;
   channel: EventChannel;
@@ -42,6 +50,7 @@ export interface RealtimeEvent {
  */
 export interface ClientEvent {
   id: string;
+  seq: number;
   userId: string;
   channel: EventChannel;
   type: string;

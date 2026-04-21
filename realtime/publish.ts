@@ -1,14 +1,18 @@
 import { api } from "encore.dev/api";
 import { randomUUID } from "crypto";
+import db from "../db/database";
+import { dbFirst } from "../db/adapter";
+import { realtimeEvents } from "../db/schema";
 import { userEvents, type EventChannel } from "./events";
 
 console.log("[boot] realtime/publish.ts: all imports resolved");
 
 export interface PublishEventRequest {
   /**
-   * Target users. One PubSub message is emitted per user (fan-out-on-
-   * write). Empty array is a no-op. For album/team events with large
-   * member counts we will switch to fan-out-on-read in phase 4.
+   * Target users. One outbox row + PubSub message is emitted per user
+   * (fan-out-on-write). Empty array is a no-op. For album/team events
+   * with large member counts we will switch to fan-out-on-read in a
+   * later phase.
    */
   userIds: string[];
   channel: EventChannel;
@@ -30,6 +34,11 @@ export interface PublishEventRequest {
  * The helper intentionally does NOT check permissions: the caller
  * owns the decision about who should receive the event. Permission
  * filtering happens on the subscribe side.
+ *
+ * Per recipient we INSERT a row into the outbox (getting a monotonic
+ * `seq` back) and then publish a PubSub message with the same
+ * envelope. The DB write happens first so a client resuming after a
+ * crash still sees the event even if PubSub delivery failed.
  */
 export const publishEvent = api(
   { expose: false },
@@ -40,12 +49,39 @@ export const publishEvent = api(
     const version = req.version ?? 1;
     // Deduplicate to avoid sending the same event twice to a user who
     // appears more than once in the callers list (e.g. owner + explicit
-    // share). Cheap since the lists are small in phase 1.
+    // share). Cheap since the lists are small.
     const unique = Array.from(new Set(req.userIds));
     await Promise.all(
-      unique.map((userId) =>
-        userEvents.publish({
-          id: randomUUID(),
+      unique.map(async (userId) => {
+        const userIdNum = Number(userId);
+        if (!Number.isInteger(userIdNum)) {
+          console.warn(
+            `[realtime] publishEvent: skipping non-integer userId=${userId}`,
+          );
+          return;
+        }
+        const id = randomUUID();
+        const row = await dbFirst<{ seq: number }>(
+          db
+            .insert(realtimeEvents)
+            .values({
+              id,
+              user_id: userIdNum,
+              channel: req.channel,
+              type: req.type,
+              resource_id: req.resourceId,
+              payload,
+              version,
+            })
+            .returning({ seq: realtimeEvents.seq }),
+        );
+        if (!row) {
+          console.warn(`[realtime] publishEvent: outbox INSERT returned no row (user=${userId})`);
+          return;
+        }
+        await userEvents.publish({
+          id,
+          seq: row.seq,
           userId,
           channel: req.channel,
           type: req.type,
@@ -53,8 +89,8 @@ export const publishEvent = api(
           timestamp,
           payload,
           version,
-        }),
-      ),
+        });
+      }),
     );
   },
 );
