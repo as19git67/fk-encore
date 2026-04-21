@@ -17,7 +17,7 @@ import { realtime, feed } from "~encore/clients";
  * Fire-and-forget realtime notification. Publisher-side errors must not
  * break album/photo operations, so we swallow them with a warning.
  */
-async function publishAlbumEvent(
+export async function publishAlbumEvent(
   userIds: number[],
   type: string,
   resourceId: number,
@@ -44,10 +44,10 @@ async function publishAlbumEvent(
  * — an outage of the feed service must never break a photo/album
  * operation.
  */
-async function emitFeedItem(
+export async function emitFeedItem(
   recipients: number[],
   actorUserId: number,
-  kind: "photo_added" | "album_shared",
+  kind: "photo_added" | "album_shared" | "photo_liked" | "photo_commented",
   opts: {
     albumId?: number | null;
     photoId?: number | null;
