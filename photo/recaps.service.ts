@@ -29,6 +29,11 @@ import { repairMojibake } from "./text-encoding";
 
 const MIN_PHOTOS_PER_RECAP = 4;
 const MAX_PHOTOS_PER_RECAP = 30;
+// Visible feed is capped so the page stays snappy for libraries with thousands
+// of recaps (e.g. users with many assigned persons generate hundreds of
+// per-year person-recaps). The underlying rows remain in the DB — only the
+// user-facing listing is trimmed to the top-N by score.
+const MAX_VISIBLE_RECAPS = 50;
 const TRIP_MIN_DISTANCE_KM = 100;
 const TRIP_MAX_GAP_DAYS = 2;
 const TRIP_LOOKBACK_DAYS = 365 * 3;
@@ -1247,6 +1252,7 @@ export async function listRecapsForUser(
         sql`${recaps.score} DESC`,
         sql`${recaps.created_at} DESC`
       )
+      .limit(MAX_VISIBLE_RECAPS)
   );
 
   return rows.map((r) => ({
