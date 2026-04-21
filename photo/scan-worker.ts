@@ -35,6 +35,7 @@ import {
   indexPhotoLandmarks,
   indexPhotoQuality,
   indexPhotoGeocoding,
+  indexPhotoThumbnails,
   scheduleRegroup,
   cleanupOrphanedPersons,
   hasFacesForPhoto,
@@ -64,9 +65,13 @@ import {
 } from "./service-health";
 import {
   isUnderPressure,
+  isUnderSoftPressure,
+  getPressureLevel,
   startPressureMonitor,
   WORKER_PRESSURE_DELAY_MS,
+  WORKER_HARD_PRESSURE_DELAY_MS,
 } from "./event-loop-pressure";
+import { acquireDbSlot, releaseDbSlot } from "./worker-db-slots";
 
 console.log("[boot] photo/scan-worker.ts: all imports resolved");
 
@@ -79,6 +84,25 @@ const SERVICE_DEPENDENCY: Partial<Record<ScanService, ExternalServiceName>> = {
   // face_assignment has no external dependency — it only reads from the local DB
   landmark: "landmark",
   quality: "embedding",
+};
+
+/**
+ * Services that are EXPENSIVE (hold a DB connection across a large external
+ * RPC and/or do HEIC decoding on the libuv thread pool). When the event loop
+ * reports soft pressure we skip dequeuing these so user-facing traffic can
+ * catch up. Cheap services (face_assignment, geocoding, thumbnail) still
+ * run under soft pressure because pausing them would leave the queue
+ * visibly stuck for users even when the server could handle them.
+ *
+ * thumbnail is intentionally NOT marked expensive: it offloads sharp() to
+ * the worker_threads pool (see photo/image-pool.ts) so the main event loop
+ * is unaffected.
+ */
+const EXPENSIVE_SERVICES: Partial<Record<ScanService, true>> = {
+  embedding: true,
+  face_detection: true,
+  landmark: true,
+  quality: true,
 };
 
 /**
@@ -123,7 +147,12 @@ class ScanWorker {
         if (hadWork && this.running < this.concurrency) {
           // Yield to the event loop before processing the next job.
           // Under pressure, add a longer delay so health checks get through.
-          const delay = isUnderPressure() ? WORKER_PRESSURE_DELAY_MS : 0;
+          const level = getPressureLevel();
+          const delay = level === "hard"
+            ? WORKER_HARD_PRESSURE_DELAY_MS
+            : level === "soft"
+              ? WORKER_PRESSURE_DELAY_MS
+              : 0;
           setTimeout(() => this.tick(), delay);
         }
       }).catch(() => {
@@ -147,10 +176,17 @@ class ScanWorker {
       return false;
     }
 
-    // Pre-check: if the event loop is under pressure, skip this cycle
+    // Pre-check: if the event loop is under hard pressure, skip this cycle
     // so that health checks and other latency-sensitive requests can be
     // served in time.  The periodic timer will wake us once pressure drops.
     if (isUnderPressure()) {
+      return false;
+    }
+
+    // Under soft pressure, defer expensive services (embedding, face_detection,
+    // landmark, quality) that hold DB connections across a heavy RPC. Cheap
+    // services keep flowing so the queue never looks stuck from the UI.
+    if (isUnderSoftPressure() && EXPENSIVE_SERVICES[this.service]) {
       return false;
     }
 
@@ -164,6 +200,10 @@ class ScanWorker {
     const job = await dequeueNextJob(this.service);
     if (!job) return false; // queue empty — stop polling
 
+    // Reserve a DB slot so this worker cannot starve the HTTP handlers of
+    // pool connections while it holds them across an external RPC call.
+    // Released in finally below regardless of outcome.
+    await acquireDbSlot();
     try {
       await this.runJob(job);
       await markJobDone(job.id);
@@ -246,6 +286,8 @@ class ScanWorker {
         console.error(`[scan-worker] ${this.service} job ${job.id} failed:`, msg);
         await markJobFailed(job.id, msg).catch(() => {});
       }
+    } finally {
+      releaseDbSlot();
     }
 
     return true; // a job was dequeued and completed (or permanently failed)
@@ -280,6 +322,9 @@ class ScanWorker {
         await indexPhotoGeocoding(job.photo_id, job.force);
         // Respect Nominatim rate limit (1 req/s)
         await new Promise((r) => setTimeout(r, 1100));
+        break;
+      case "thumbnail":
+        await indexPhotoThumbnails(job.photo_id);
         break;
     }
   }
@@ -326,7 +371,12 @@ class LibraryScanWorker {
         .then((hadWork) => {
           this.running--;
           if (hadWork && this.running < this.concurrency) {
-            const delay = isUnderPressure() ? WORKER_PRESSURE_DELAY_MS : 0;
+            const level = getPressureLevel();
+            const delay = level === "hard"
+              ? WORKER_HARD_PRESSURE_DELAY_MS
+              : level === "soft"
+                ? WORKER_PRESSURE_DELAY_MS
+                : 0;
             setTimeout(() => this.tick(), delay);
           }
         })
@@ -338,7 +388,9 @@ class LibraryScanWorker {
 
   private async processNext(): Promise<boolean> {
     if (workersPaused) return false;
-    if (isUnderPressure()) return false;
+    // library_scan is the heaviest job in the system (walks a whole tree
+    // and triggers dozens of sub-enqueues). Pause even under soft pressure.
+    if (isUnderSoftPressure()) return false;
 
     const job = await dequeueNextLibraryScan();
     if (!job) return false;
@@ -384,6 +436,7 @@ const faceConcurrency = parseInt(process.env.SCAN_FACE_CONCURRENCY ?? "1", 10);
 const faceAssignConcurrency = parseInt(process.env.SCAN_FACE_ASSIGN_CONCURRENCY ?? "1", 10);
 const landmarkConcurrency = parseInt(process.env.SCAN_LANDMARK_CONCURRENCY ?? "1", 10);
 const qualityConcurrency = parseInt(process.env.SCAN_QUALITY_CONCURRENCY ?? "1", 10);
+const thumbnailConcurrency = parseInt(process.env.SCAN_THUMBNAIL_CONCURRENCY ?? "1", 10);
 
 const embeddingWorker = new ScanWorker("embedding", embeddingConcurrency);
 const faceWorker = new ScanWorker("face_detection", faceConcurrency);
@@ -391,6 +444,7 @@ const faceAssignWorker = new ScanWorker("face_assignment", faceAssignConcurrency
 const landmarkWorker = new ScanWorker("landmark", landmarkConcurrency);
 const qualityWorker = new ScanWorker("quality", qualityConcurrency);
 const geocodingWorker = new ScanWorker("geocoding", 1); // always 1 — Nominatim rate limit
+const thumbnailWorker = new ScanWorker("thumbnail", thumbnailConcurrency);
 const libraryScanWorker = new LibraryScanWorker();
 
 /** Wake all workers to check for new work. Non-blocking. */
@@ -402,6 +456,7 @@ export function triggerWorkers(): void {
   landmarkWorker.tick();
   qualityWorker.tick();
   geocodingWorker.tick();
+  thumbnailWorker.tick();
   libraryScanWorker.tick();
 }
 
@@ -418,6 +473,7 @@ const ALL_WORKERS: Array<{ stop(): void; start(): void; inFlight(): number }> = 
   landmarkWorker,
   qualityWorker,
   geocodingWorker,
+  thumbnailWorker,
   libraryScanWorker,
 ];
 
@@ -482,9 +538,10 @@ export async function startWorkers(): Promise<void> {
   landmarkWorker.start();
   qualityWorker.start();
   geocodingWorker.start();
+  thumbnailWorker.start();
   libraryScanWorker.start();
   console.log(
-    `[scan-worker] embedding(c=${embeddingConcurrency}), face_detection(c=${faceConcurrency}), face_assignment(c=${faceAssignConcurrency}), landmark(c=${landmarkConcurrency}), quality(c=${qualityConcurrency}), geocoding(c=1), library_scan(c=1)`,
+    `[scan-worker] embedding(c=${embeddingConcurrency}), face_detection(c=${faceConcurrency}), face_assignment(c=${faceAssignConcurrency}), landmark(c=${landmarkConcurrency}), quality(c=${qualityConcurrency}), geocoding(c=1), thumbnail(c=${thumbnailConcurrency}), library_scan(c=1)`,
   );
 }
 

@@ -1,3 +1,8 @@
+// MUST be imported first so UV_THREADPOOL_SIZE is set before libuv
+// initialises its default loop (any subsequent import that pulls a
+// native addon can trigger initialisation).
+import "./boot-tuning";
+
 import { Service } from "encore.dev/service";
 import { maintenanceMiddleware } from "../backup/maintenance";
 import { migrateStorageLayout } from "./storage-migration";
