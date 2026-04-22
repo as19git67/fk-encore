@@ -1,12 +1,19 @@
+import log from "encore.dev/log";
 import type { ClientEvent, EventChannel, RealtimeEvent } from "./events";
 
 /**
  * Stream writer interface matching Encore's streamOut handler. Kept as
  * a local abstraction so unit tests can plug in a mock without pulling
  * the Encore runtime.
+ *
+ * Encore.ts's streamOut `send()` is synchronous on the server side and
+ * returns `undefined`, not a `Promise<void>` — see the long comment in
+ * realtime/subscribe.ts. We type the return as `unknown` here so both
+ * the real runtime and test mocks (which may legitimately return
+ * `Promise<void>`) stay compatible.
  */
 export interface StreamWriter {
-  send(msg: ClientEvent): Promise<void>;
+  send(msg: ClientEvent): unknown;
   close?(): Promise<void>;
 }
 
@@ -71,33 +78,40 @@ class SessionManager {
   }
 
   /**
-   * Deliver an event to every local session of the target user that is
-   * subscribed to the event's channel. Send failures are swallowed so
-   * one dead socket does not break fan-out to the user's other tabs.
+   * Deliver an event to every local session of the target user that
+   * is subscribed to the event's channel.
+   *
+   * Encore.ts's streamOut `send()` is synchronous and returns
+   * `undefined`; errors (most commonly `Error: channel closed` once
+   * the browser has disconnected) are thrown synchronously. Catch
+   * them per-session and `close()` the offending session so the
+   * subscribe handler's `await session.done` unblocks and the stale
+   * entry is unregistered.
    */
   async dispatch(event: RealtimeEvent): Promise<void> {
     const set = this.sessionsByUser.get(event.userId);
     if (!set || set.size === 0) return;
 
-    // `RealtimeEvent` and `ClientEvent` are now the same shape; the
-    // alias is kept so older imports keep working.
     const outbound: ClientEvent = event;
-
-    const sends: Promise<void>[] = [];
     for (const session of set) {
       if (!session.channels.has(event.channel)) continue;
-      sends.push(
-        session.stream.send(outbound).catch((err) => {
-          console.warn(
-            `[realtime] send failed for user=${session.userId} channel=${event.channel}: ${(err as Error).message}`,
-          );
-          // Surface the disconnect so the handler can clean up and the
-          // subscribe endpoint returns.
-          session.close();
-        }),
-      );
+      try {
+        session.stream.send(outbound);
+      } catch (err: unknown) {
+        const message = (err as Error)?.message ?? String(err);
+        if (!message.includes("channel closed")) {
+          // `channel closed` is the expected result of a disconnected
+          // client — no log needed. Anything else is worth a warn.
+          log.warn("realtime: dispatch send threw unexpectedly", {
+            userId: session.userId,
+            channel: event.channel,
+            type: event.type,
+            message,
+          });
+        }
+        session.close();
+      }
     }
-    await Promise.all(sends);
   }
 
   /** Test/debug helper — number of connected sessions overall. */

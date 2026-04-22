@@ -807,6 +807,16 @@ useRealtimeEvent('albums', 'photo_added', (ev) => {
   if (Number(ev.resourceId) !== albumId.value) return
   void loadData()
 })
+
+// Refresh when another participant favourites or hides a photo from
+// this album. Repaints the heart icon, fav-count badge and the
+// "Meinungen" bars in the open detail view.
+useRealtimeEvent('photos', 'curation.changed', (ev) => {
+  const photoId = Number(ev.resourceId)
+  if (!Number.isFinite(photoId)) return
+  if (!album.value?.photos?.some((p) => p.id === photoId)) return
+  void loadData()
+})
 </script>
 
 <template>

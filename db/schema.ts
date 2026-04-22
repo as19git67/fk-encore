@@ -698,7 +698,7 @@ export const realtimeEvents = pgTable("realtime_events", {
 export const feedItemKindEnum = pgEnum("feed_item_kind", [
   "photo_added",
   "album_shared",
-  "photo_liked",
+  "photo_favorited",
   "photo_commented",
 ]);
 
@@ -719,32 +719,18 @@ export const feedItems = pgTable("feed_items", {
     .defaultNow(),
 });
 
-// ========== Photo Reactions ==========
+// ========== Photo Comments ==========
 //
-// Likes and comments on photos. The audience is everyone with access
-// to the photo — owner plus every user the photo has been shared to
-// via an album (see getUsersWithPhotoAccess in photo.service.ts).
+// Audience for a comment is everyone with access to the photo — owner
+// plus every user the photo has been shared to via an album (see
+// getUsersWithPhotoAccess in photo.service.ts). Comments are
+// individual rows; edit/delete is the author's own prerogative (plus
+// photo owner can moderate — enforced in the service layer, not the
+// DB).
 //
-// Likes are idempotent per (photo, user): one row maximum, unliking
-// deletes it. Comments are individual rows; edit/delete is the
-// author's own prerogative (plus photo owner can moderate — enforced
-// in the service layer, not the DB).
-
-export const photoLikes = pgTable(
-  "photo_likes",
-  {
-    photo_id: integer("photo_id")
-      .notNull()
-      .references(() => photos.id, { onDelete: "cascade" }),
-    user_id: integer("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (table) => [primaryKey({ columns: [table.photo_id, table.user_id] })],
-);
+// Note: the original "like" concept has been consolidated into the
+// existing favorite curation state (`photo_curation.status =
+// 'favorite'`). Migration 0041 drops the former `photo_likes` table.
 
 // ========== Web Push Subscriptions ==========
 //
