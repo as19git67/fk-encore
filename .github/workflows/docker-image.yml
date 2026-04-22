@@ -143,15 +143,16 @@ jobs:
       # container to crash immediately with
       #     Error: failed to initialize runtime: unable to parse runtime config
       #     Caused by: environment variable not present
-      # Without `--skip-config` and without `--config <file>`, `encore
-      # build docker` auto-generates a minimal infra-config.json with all
-      # services/gateways marked as hosted and bakes it into the image at
-      # /encore/infra.config.json (plus the matching ENCORE_INFRA_CONFIG_PATH
-      # env var). That is exactly what we want: our app does not use any
-      # Encore-managed infrastructure resources (no SQLDatabase, no PubSub,
-      # no Bucket), so the auto-generated config stays empty of resources
-      # and the app reads its own runtime settings from plain `process.env`
-      # variables supplied by the TrueNAS container config.
+      #
+      # `--config infra-config.json` baked the file into the image at
+      # /encore/infra.config.json. The file maps the three VAPID secrets
+      # to host env vars (`VAPID_PUBLIC_KEY` etc.) — set those on the
+      # container at runtime to enable web-push, leave them unset to
+      # keep push disabled. We do NOT use SQLDatabase/PubSub/Bucket
+      # Encore-managed resources, so the rest of the auto-generated
+      # config stays empty and everything else (DB URL, photo paths,
+      # …) is read from plain `process.env` variables supplied by the
+      # TrueNAS container config.
       #
       # --base    : keeps image layout consistent with the old Dockerfile.
       # --os/--arch : explicit to avoid surprises if runners change arch.
@@ -175,6 +176,7 @@ jobs:
       - name: Build Encore application image (Stage A)
         run: |
           encore build docker \
+            --config=infra-config.json \
             --base=node:24-bookworm-slim \
             --os=linux \
             --arch=amd64 \

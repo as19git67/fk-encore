@@ -74,6 +74,45 @@ RP_ORIGIN=https://photos.my-domain.com
 EMBEDDING_DB_PASSWORD=another-password
 ```
 
+### Web Push notifications (optional)
+
+Push notifications for feed events (album shares, comments, new photos
+in shared albums) are delivered via the browser's Push API and require
+a VAPID keypair. Without the keys the feature silently stays off:
+`/push/vapid-public-key` reports `{ enabled: false }`, the Profile
+page explains "Push is not configured on the server", and feed fan-out
+skips the push leg entirely.
+
+1. Generate a VAPID keypair once (any machine, throw-away Node):
+
+   ```bash
+   npx web-push generate-vapid-keys
+   ```
+
+2. Add the three values to `.env` next to `docker-compose.yml`:
+
+   ```env
+   VAPID_PUBLIC_KEY=<public key from step 1>
+   VAPID_PRIVATE_KEY=<private key from step 1>
+   VAPID_SUBJECT=mailto:admin@my-domain.com
+   ```
+
+   The compose file forwards them as the Encore secrets
+   `VapidPublicKey` / `VapidPrivateKey` / `VapidSubject` (mapping
+   defined in `infra-config.json` and baked into the image at build
+   time).
+
+3. Restart the app:
+
+   ```bash
+   docker compose up -d --no-deps app
+   ```
+
+   Users can then opt in per device under **Profil → Benachrichtigungen**.
+
+See `docs/push-notifications.md` for architecture, subscription
+lifecycle and troubleshooting.
+
 ## Data & volumes
 
 | Volume             | Contents                                   |

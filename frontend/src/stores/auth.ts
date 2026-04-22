@@ -4,6 +4,16 @@ import type { UserWithRoles } from '../api/users'
 import * as usersApi from '../api/users'
 import { startAuthentication } from '@simplewebauthn/browser'
 import { passkeyAuthOptions, passkeyAuthVerify } from '../api/passkeys'
+import { realtimeBus, type RealtimeChannel } from '../composables/useRealtime'
+
+const REALTIME_CHANNELS: RealtimeChannel[] = ['documents', 'photos', 'albums', 'feed']
+
+function connectRealtime() {
+  realtimeBus.connect({
+    channels: REALTIME_CHANNELS,
+    getToken: () => localStorage.getItem('auth_token'),
+  })
+}
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<UserWithRoles | null>(null)
@@ -21,6 +31,7 @@ export const useAuthStore = defineStore('auth', () => {
       } catch {
         user.value = null
       }
+      if (token.value) connectRealtime()
     }
   }
 
@@ -30,6 +41,7 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.setItem('auth_token', responseToken)
     localStorage.setItem('refresh_token', responseRefreshToken)
     localStorage.setItem('auth_user', JSON.stringify(responseUser))
+    connectRealtime()
   }
 
   async function login(email: string, password: string) {
@@ -64,6 +76,7 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('auth_user')
     // Don't strand the next user on the previous user's last view.
     localStorage.removeItem('app_last_route')
+    realtimeBus.disconnect()
   }
 
   function hasPermission(permission: string): boolean {

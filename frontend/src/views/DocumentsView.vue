@@ -18,6 +18,7 @@ import {
   type SearchMode,
 } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
+import { useRealtimeEvent } from '../composables/useRealtime'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -138,6 +139,28 @@ function formatSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
+
+// Live-update the status badge when the backend pipeline progresses.
+// For intermediate states (extracting, classifying) we only patch the
+// status so the tag re-renders. When a document reaches a terminal
+// state (ready / failed) the classifier has filled in category, title,
+// sender, tags, etc. — fields the payload does not carry — so we
+// reload the list to reflect them without a manual refresh.
+useRealtimeEvent('documents', 'status.changed', (ev) => {
+  const id = Number(ev.resourceId)
+  if (!Number.isFinite(id)) return
+  const doc = items.value.find((d) => d.id === id)
+  if (!doc) return
+  const payload = ev.payload as { status?: DocumentStatus; confidence?: number }
+  if (!payload.status) return
+  doc.status = payload.status
+  if (typeof payload.confidence === 'number') {
+    doc.classification_confidence = payload.confidence
+  }
+  if (payload.status === 'ready' || payload.status === 'failed') {
+    load()
+  }
+})
 
 onMounted(async () => {
   await Promise.all([loadCategories(), load()])

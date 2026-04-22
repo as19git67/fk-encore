@@ -1,4 +1,4 @@
-import { pgTable, text, integer, primaryKey, serial, boolean, timestamp, real, doublePrecision, pgEnum, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, primaryKey, serial, boolean, timestamp, real, doublePrecision, pgEnum, jsonb, bigserial } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 // ========== Users ==========
@@ -654,3 +654,133 @@ export const recapPhotos = pgTable(
   },
   (table) => [primaryKey({ columns: [table.recap_id, table.photo_id] })]
 );
+
+// ========== Realtime Outbox ==========
+//
+// Every event published via realtime.publishEvent lands here before
+// being forwarded to the PubSub topic. On reconnect, clients pass the
+// last `seq` they processed via the `lastEventId` handshake parameter
+// and the server replays everything they missed from this table.
+//
+// Retention is enforced by realtime/retention-cron.ts.
+
+export const realtimeEvents = pgTable("realtime_events", {
+  id: text("id").primaryKey(),
+  // Monotonically increasing cursor, used as the resume anchor. Shared
+  // across all users — simpler than per-user counters and the values
+  // never leak between users anyway (queries are always user-scoped).
+  seq: bigserial("seq", { mode: "number" }).notNull().unique(),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  channel: text("channel").notNull(),
+  type: text("type").notNull(),
+  resource_id: text("resource_id").notNull(),
+  payload: jsonb("payload").notNull().default(sql`'{}'::jsonb`).$type<Record<string, unknown>>(),
+  version: integer("version").notNull().default(1),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+// ========== Social Feed ==========
+//
+// Activity timeline for album participants. Every feed-worthy action
+// (a photo added to a shared album, an album being shared, a like, a
+// comment) fans out into one `feed_items` row per recipient — the
+// recipient is always the viewer, the actor is the user who performed
+// the action. Fan-out is intentional so per-user state (seen_at) is
+// cheap to maintain.
+//
+// Retention: none. Per product decision the feed is kept forever so
+// users can scroll back through every shared moment.
+
+export const feedItemKindEnum = pgEnum("feed_item_kind", [
+  "photo_added",
+  "album_shared",
+  "photo_liked",
+  "photo_commented",
+]);
+
+export const feedItems = pgTable("feed_items", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  actor_user_id: integer("actor_user_id")
+    .references(() => users.id, { onDelete: "set null" }),
+  kind: feedItemKindEnum("kind").notNull(),
+  album_id: integer("album_id").references(() => albums.id, { onDelete: "cascade" }),
+  photo_id: integer("photo_id").references(() => photos.id, { onDelete: "cascade" }),
+  payload: jsonb("payload").notNull().default(sql`'{}'::jsonb`).$type<Record<string, unknown>>(),
+  seen_at: timestamp("seen_at", { mode: "string", withTimezone: true }),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+// ========== Photo Reactions ==========
+//
+// Likes and comments on photos. The audience is everyone with access
+// to the photo — owner plus every user the photo has been shared to
+// via an album (see getUsersWithPhotoAccess in photo.service.ts).
+//
+// Likes are idempotent per (photo, user): one row maximum, unliking
+// deletes it. Comments are individual rows; edit/delete is the
+// author's own prerogative (plus photo owner can moderate — enforced
+// in the service layer, not the DB).
+
+export const photoLikes = pgTable(
+  "photo_likes",
+  {
+    photo_id: integer("photo_id")
+      .notNull()
+      .references(() => photos.id, { onDelete: "cascade" }),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.photo_id, table.user_id] })],
+);
+
+// ========== Web Push Subscriptions ==========
+//
+// Each row is one browser subscription produced by the Push API. A
+// single user can have many rows (multiple devices / browsers). The
+// endpoint is globally unique so resubscribing from the same browser
+// refreshes the same row via ON CONFLICT.
+
+export const pushSubscriptions = pgTable("push_subscriptions", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  // Full PushSubscription.endpoint URL (browser-specific). Used as a
+  // natural dedup key.
+  endpoint: text("endpoint").notNull().unique(),
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
+  user_agent: text("user_agent"),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  last_used_at: timestamp("last_used_at", { mode: "string", withTimezone: true }),
+});
+
+export const photoComments = pgTable("photo_comments", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  photo_id: integer("photo_id")
+    .notNull()
+    .references(() => photos.id, { onDelete: "cascade" }),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  body: text("body").notNull(),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  edited_at: timestamp("edited_at", { mode: "string", withTimezone: true }),
+});

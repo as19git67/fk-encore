@@ -24,6 +24,7 @@ import {
 } from '../api/photos'
 import { listUsers, type UserWithRoles } from '../api/users'
 import { useAuthStore } from '../stores/auth'
+import { useRealtimeEvent } from '../composables/useRealtime'
 import ServiceStatusBar from "../components/ServiceStatusBar.vue";
 
 const albums = ref<Album[]>([])
@@ -552,6 +553,22 @@ function formatExpiryDate(dateStr: string): string {
 const isLinkExpired = computed(() => {
   if (!publicLink.value?.expires_at) return false
   return new Date(publicLink.value.expires_at) < new Date()
+})
+
+// Refresh the album list when someone shares a new album with us — the
+// backend fires `albums.shared` only to the sharee, so receiving this
+// event is a reliable cue that our list is stale.
+useRealtimeEvent('albums', 'shared', () => {
+  loadData()
+})
+
+// New photos added to any visible album — the list view only shows
+// cover + count, so refresh so the count/cover stays current.
+useRealtimeEvent('albums', 'photo_added', (ev) => {
+  const albumId = Number(ev.resourceId)
+  if (!Number.isFinite(albumId)) return
+  if (!albums.value.some((a) => a.id === albumId)) return
+  loadData()
 })
 
 onMounted(loadData)

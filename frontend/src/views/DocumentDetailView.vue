@@ -25,6 +25,7 @@ import {
   type TaxSectionGroup,
 } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
+import { useRealtimeEvent } from '../composables/useRealtime'
 import PdfViewer from '../components/PdfViewer.vue'
 
 const route = useRoute()
@@ -264,6 +265,26 @@ function statusLabel(status: DocumentStatus): string {
 
 watch(() => route.params.id, (newId, oldId) => {
   if (newId !== oldId) load()
+})
+
+// Reflect backend pipeline progress live. For intermediate stages we
+// only update the status field so the tag re-renders; for terminal
+// stages (ready / failed) the classifier has populated title,
+// category, tax fields, etc. — reload the whole document so the
+// editor sees the fresh values. If the user has unsaved edits a full
+// reload would clobber them, so we skip reloading while a save is
+// in progress.
+useRealtimeEvent('documents', 'status.changed', (ev) => {
+  if (!doc.value || doc.value.id !== Number(ev.resourceId)) return
+  const payload = ev.payload as { status?: DocumentStatus; confidence?: number }
+  if (!payload.status) return
+  doc.value.status = payload.status
+  if (typeof payload.confidence === 'number') {
+    doc.value.classification_confidence = payload.confidence
+  }
+  if ((payload.status === 'ready' || payload.status === 'failed') && !saving.value && !savingTax.value) {
+    load()
+  }
 })
 
 onMounted(load)

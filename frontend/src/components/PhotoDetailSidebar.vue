@@ -5,6 +5,7 @@ import Checkbox from 'primevue/checkbox'
 import HeicImage from './HeicImage.vue'
 import PhotoMiniMap from './PhotoMiniMap.vue'
 import PhotoLocationMenu from './PhotoLocationMenu.vue'
+import PhotoReactions from './PhotoReactions.vue'
 import { getPhotoUrl, listAlbums, getPhotosAlbums, batchUpdateAlbumPhotos, updateAlbum, updateAlbumUserSettings, createAlbum, updatePhotoDescription, type Album } from '../api/photos'
 import { getAlbumCheckState as calculateAlbumCheckState, getNewPendingAction } from '../utils/albumSelection'
 import type { Photo, Face, LandmarkItem, Person, CurationStatus } from '../api/photos'
@@ -389,6 +390,13 @@ watch(() => props.photo.id, () => {
           :exclude-all-photos="locationMenuExcludeAllPhotos"
           :exclude-album-id="albumId"
         />
+      </div>
+
+      <!-- Likes and comments (visible to everyone with photo access). -->
+      <div class="sidebar-divider" />
+      <div class="sidebar-section">
+        <div class="section-label"><i class="pi pi-comments" /> Reaktionen</div>
+        <PhotoReactions :photo-id="photo.id" />
       </div>
 
       <!-- Curation opinions (shared albums only) -->

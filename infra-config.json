@@ -1,0 +1,8 @@
+{
+  "$schema": "https://encore.dev/schemas/infra.schema.json",
+  "secrets": {
+    "VapidPublicKey": { "$env": "VAPID_PUBLIC_KEY" },
+    "VapidPrivateKey": { "$env": "VAPID_PRIVATE_KEY" },
+    "VapidSubject": { "$env": "VAPID_SUBJECT" }
+  }
+}

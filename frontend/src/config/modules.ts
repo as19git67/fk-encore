@@ -55,10 +55,17 @@ export const modules: ModuleConfig[] = [
         component: () => import('../views/RecapsView.vue'),
         meta: { permission: 'photos.view' },
       },
+      {
+        path: 'feed',
+        name: 'fotos-feed',
+        component: () => import('../views/FeedView.vue'),
+        meta: { permission: 'photos.view' },
+      },
     ],
     menuItems: [
       { label: 'Galerie', icon: 'pi pi-images', routeName: 'fotos-gallery', permission: 'photos.view' },
       { label: 'Alben', icon: 'pi pi-folder-open', routeName: 'fotos-albums', permission: 'photos.view' },
+      { label: 'Feed', icon: 'pi pi-bell', routeName: 'fotos-feed', permission: 'photos.view' },
       { label: 'Rückblicke', icon: 'pi pi-history', routeName: 'fotos-recaps', permission: 'photos.view' },
       { label: 'Personen', icon: 'pi pi-users', routeName: 'fotos-people', permission: 'people.view' },
     ],

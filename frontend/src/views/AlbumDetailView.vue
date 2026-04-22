@@ -48,6 +48,7 @@ import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 import { useNaturalSearch } from '../composables/useNaturalSearch'
 import type { PhotoItem } from '../composables/usePhotoGrouping'
 import { onUnmounted } from 'vue'
+import { useRealtimeEvent } from '../composables/useRealtime'
 
 const route = useRoute()
 const router = useRouter()
@@ -797,6 +798,13 @@ watch(albumId, () => {
   activeGroup.value = null
   detectedFaces.value = []
   detectedLandmarks.value = []
+  void loadData()
+})
+
+// Reload when someone else adds a photo to the album we're currently viewing,
+// so shared participants see new photos without a manual refresh.
+useRealtimeEvent('albums', 'photo_added', (ev) => {
+  if (Number(ev.resourceId) !== albumId.value) return
   void loadData()
 })
 </script>

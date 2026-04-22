@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import Card from 'primevue/card'
 import Chip from 'primevue/chip'
 import Button from 'primevue/button'
@@ -22,6 +22,7 @@ import {
   startRegistration,
   browserSupportsWebAuthn,
 } from '@simplewebauthn/browser'
+import { usePushNotifications } from '../composables/usePushNotifications'
 
 const auth = useAuthStore()
 
@@ -114,7 +115,37 @@ async function handleChangePassword() {
   }
 }
 
-onMounted(loadPasskeys)
+// ── Push notifications ──────────────────────────────────────────────────────
+const push = usePushNotifications()
+
+const pushLabel = computed(() => {
+  switch (push.status.value) {
+    case 'unsupported':
+      return 'Dein Browser unterstützt keine Push-Nachrichten.'
+    case 'disabled-server':
+      return 'Push ist auf dem Server nicht konfiguriert.'
+    case 'denied':
+      return 'Benachrichtigungen wurden im Browser blockiert. Bitte in den Browser-Einstellungen freigeben.'
+    case 'subscribed':
+      return 'Push-Nachrichten sind auf diesem Gerät aktiv.'
+    case 'unsubscribed':
+    default:
+      return 'Push-Nachrichten sind auf diesem Gerät nicht aktiv.'
+  }
+})
+
+async function togglePush() {
+  if (push.status.value === 'subscribed') {
+    await push.unsubscribe()
+  } else {
+    await push.subscribe()
+  }
+}
+
+onMounted(async () => {
+  await loadPasskeys()
+  await push.refreshState()
+})
 </script>
 
 <template>
@@ -171,6 +202,30 @@ onMounted(loadPasskeys)
             icon="pi pi-lock"
             :loading="pwLoading"
             @click="handleChangePassword"
+          />
+        </div>
+      </template>
+    </Card>
+
+    <Card class="mb">
+      <template #title>Benachrichtigungen</template>
+      <template #content>
+        <p class="description">
+          Erhalte Push-Nachrichten auf diesem Gerät, wenn jemand Fotos zu geteilten Alben hinzufügt,
+          kommentiert oder ein Album mit dir teilt.
+        </p>
+        <Message v-if="push.error.value" severity="error" :closable="false" class="mb">
+          {{ push.error.value }}
+        </Message>
+        <div class="push-row">
+          <span class="push-label">{{ pushLabel }}</span>
+          <Button
+            v-if="push.canToggle.value"
+            :label="push.status.value === 'subscribed' ? 'Deaktivieren' : 'Aktivieren'"
+            :icon="push.status.value === 'subscribed' ? 'pi pi-bell-slash' : 'pi pi-bell'"
+            :loading="push.busy.value"
+            :severity="push.status.value === 'subscribed' ? 'secondary' : 'primary'"
+            @click="togglePush"
           />
         </div>
       </template>
@@ -295,6 +350,18 @@ onMounted(loadPasskeys)
 
 .pw-input {
   width: 100%;
+}
+
+.push-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.push-label {
+  flex: 1;
+  min-width: 0;
 }
 </style>
 
