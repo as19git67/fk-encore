@@ -26,14 +26,16 @@ self.addEventListener('push', (event) => {
   const title = payload.title || 'Vivanty'
   const options = {
     body: payload.body || '',
-    icon: '/icon-192.png',
-    badge: '/icon-192.png',
+    icon: '/app/icon-192.png',
+    badge: '/app/icon-192.png',
     tag: payload.tag,
     // Keep previous notifications visible when multiple arrive with
     // different tags, but collapse when the same tag repeats.
     renotify: !!payload.tag,
     data: {
-      url: payload.url || '/',
+      // Default to the SPA root; bare "/" redirects but /app/ is the
+      // canonical entry and avoids a round-trip.
+      url: payload.url || '/app/',
       ...(payload.data || {}),
     },
   }
@@ -43,7 +45,7 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
-  const targetUrl = (event.notification.data && event.notification.data.url) || '/'
+  const targetUrl = (event.notification.data && event.notification.data.url) || '/app/'
   event.waitUntil(
     (async () => {
       const allClients = await self.clients.matchAll({

@@ -47,7 +47,7 @@ export async function publishAlbumEvent(
 export async function emitFeedItem(
   recipients: number[],
   actorUserId: number,
-  kind: "photo_added" | "album_shared" | "photo_liked" | "photo_commented",
+  kind: "photo_added" | "album_shared" | "photo_favorited" | "photo_commented",
   opts: {
     albumId?: number | null;
     photoId?: number | null;
@@ -1963,6 +1963,62 @@ export async function updatePhotoCurationLogic(
     }
   }
 
+  // Social fan-out on "→ favorite" transition: notify everyone who can
+  // see the photo via a shared album. We only emit on the transition
+  // (not on repeat favourites of an already-favourited photo) to keep
+  // the event count bounded, and only when the photo is actually
+  // shared — a private favourite is strictly personal.
+  if (prevStatus !== status) {
+    const audience = await getUsersWithPhotoAccess(photoId);
+    const recipients = audience.filter((uid) => uid !== userId);
+
+    // Live update for every open photo view that can see this photo —
+    // including the actor's own session so things that aren't visible
+    // in the optimistic local toggle (fav-count aggregate, "Meinungen"
+    // bars, other tabs) refresh in place. The push + feed fan-out
+    // below still excludes the actor; this is purely a UI-refresh
+    // signal. Best-effort; realtime outages must not block the
+    // curation update itself.
+    if (audience.length > 0) {
+      try {
+        await realtime.publishEvent({
+          userIds: audience.map((id) => String(id)),
+          channel: "photos",
+          type: "curation.changed",
+          resourceId: String(photoId),
+          payload: { userId, status, prevStatus },
+        });
+      } catch (err) {
+        console.warn(
+          `[photo] realtime publish curation.changed failed photo=${photoId}: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    // Push + feed only on the explicit "into favorite" transition so
+    // un-favouriting doesn't spam recipients.
+    if (status === "favorite" && recipients.length > 0) {
+      // Pick any album that both (a) contains the photo and (b) has
+      // at least one recipient with access — used as the deep-link
+      // target for the push notification. Owner-only albums are
+      // skipped because recipients wouldn't be able to open them.
+      const albumRow = await dbFirst<{ album_id: number }>(
+        db
+          .select({ album_id: albumPhotos.album_id })
+          .from(albumPhotos)
+          .innerJoin(albumShares, eq(albumShares.album_id, albumPhotos.album_id))
+          .where(eq(albumPhotos.photo_id, photoId))
+          .limit(1),
+      );
+      if (albumRow) {
+        await emitFeedItem(recipients, userId, "photo_favorited", {
+          albumId: albumRow.album_id,
+          photoId,
+        });
+      }
+    }
+  }
+
   // After hiding a photo, check if it belongs to an unreviewed group where all
   // remaining members are now hidden. If so, mark the group as reviewed.
   if (status === "hidden") {
@@ -3109,6 +3165,13 @@ export async function batchUpdateAlbumPhotosLogic(userId: number, req: BatchAlbu
 
   if (action === "add") {
     for (const albumId of albumIds) {
+      // Look up the album owner once per albumId — we need it as a
+      // notification recipient and it doesn't change across photoIds.
+      const album = await dbFirst<{ user_id: number }>(
+        db.select({ user_id: albums.user_id }).from(albums).where(eq(albums.id, albumId))
+      );
+      const addedPhotoIds: number[] = [];
+
       for (const photoId of photoIds) {
         const exists = await dbFirst(
           db.select().from(albumPhotos).where(and(eq(albumPhotos.album_id, albumId), eq(albumPhotos.photo_id, photoId)))
@@ -3122,6 +3185,7 @@ export async function batchUpdateAlbumPhotosLogic(userId: number, req: BatchAlbu
               added_at: new Date().toISOString()
             })
           );
+          addedPhotoIds.push(photoId);
         }
       }
 
@@ -3138,6 +3202,30 @@ export async function batchUpdateAlbumPhotosLogic(userId: number, req: BatchAlbu
           ).then(() => triggerWorkers()).catch(err => {
             console.error("Error enqueueing face assignments for batch album add:", err);
           });
+        }
+      }
+
+      // Realtime + feed fanout for every newly-inserted (album, photo)
+      // pair. The single-photo path in `addPhotoToAlbumLogic` does the
+      // same; this branch handles the batch case the UI actually calls.
+      if (addedPhotoIds.length > 0 && album) {
+        const sharedForFeed = await dbAll<{ user_id: number }>(
+          db.select({ user_id: albumShares.user_id }).from(albumShares).where(eq(albumShares.album_id, albumId))
+        );
+        const recipients = new Set<number>([album.user_id, ...sharedForFeed.map((s) => s.user_id)]);
+        recipients.delete(userId);
+        const recipientList = Array.from(recipients);
+        if (recipientList.length > 0) {
+          for (const photoId of addedPhotoIds) {
+            await publishAlbumEvent(recipientList, "photo_added", albumId, {
+              photoId,
+              addedByUserId: userId,
+            });
+            await emitFeedItem(recipientList, userId, "photo_added", {
+              albumId,
+              photoId,
+            });
+          }
         }
       }
     }

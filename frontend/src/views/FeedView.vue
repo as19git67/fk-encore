@@ -78,8 +78,8 @@ function kindLabel(item: FeedItem): string {
       return `${actor} hat ein Foto zu „${album}" hinzugefügt`
     case 'album_shared':
       return `${actor} hat das Album „${album}" mit dir geteilt`
-    case 'photo_liked':
-      return `${actor} hat ein Foto mit ❤ markiert`
+    case 'photo_favorited':
+      return `${actor} hat ein Foto favorisiert`
     case 'photo_commented':
       return `${actor} hat ein Foto kommentiert`
     default:

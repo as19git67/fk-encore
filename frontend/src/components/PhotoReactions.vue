@@ -4,15 +4,9 @@ import Button from 'primevue/button'
 import {
   createComment,
   deleteComment,
-  getLikeSummary,
-  likePhoto,
   listComments,
-  listLikers,
-  unlikePhoto,
   updateComment,
   type PhotoComment,
-  type PhotoLikeSummary,
-  type PhotoLiker,
 } from '../api/reactions'
 import { useAuthStore } from '../stores/auth'
 import { useRealtimeEvent } from '../composables/useRealtime'
@@ -24,10 +18,7 @@ const props = defineProps<{
 const auth = useAuthStore()
 const currentUserId = computed(() => auth.user?.id ?? null)
 
-const likeSummary = ref<PhotoLikeSummary>({ count: 0, likedByMe: false })
 const comments = ref<PhotoComment[]>([])
-const likers = ref<PhotoLiker[]>([])
-const likersOpen = ref(false)
 const loading = ref(false)
 const error = ref('')
 
@@ -35,65 +26,30 @@ const commentInput = ref('')
 const submitting = ref(false)
 const editingId = ref<number | null>(null)
 const editingText = ref('')
-const likeBusy = ref(false)
+
+// Scroll container for the comment list. Kept at the bottom (newest
+// comment visible) after every content change so the user always
+// lands on the most recent message — mirrors the chat-style UX.
+const commentsRef = ref<HTMLElement | null>(null)
+
+async function scrollToLatest(): Promise<void> {
+  await nextTick()
+  const el = commentsRef.value
+  if (el) el.scrollTop = el.scrollHeight
+}
 
 async function load() {
   if (!props.photoId) return
   loading.value = true
   error.value = ''
   try {
-    const [s, c] = await Promise.all([
-      getLikeSummary(props.photoId),
-      listComments(props.photoId),
-    ])
-    likeSummary.value = s
+    const c = await listComments(props.photoId)
     comments.value = c.comments
-    // Likers are loaded lazily when the user opens the popover.
-    likers.value = []
-    likersOpen.value = false
+    await scrollToLatest()
   } catch (err: unknown) {
     error.value = (err as Error)?.message || 'Fehler beim Laden'
   } finally {
     loading.value = false
-  }
-}
-
-async function toggleLike() {
-  if (likeBusy.value) return
-  likeBusy.value = true
-  const wasLiked = likeSummary.value.likedByMe
-  // Optimistic update so the heart reacts instantly; server reply
-  // replaces the values.
-  likeSummary.value = {
-    count: likeSummary.value.count + (wasLiked ? -1 : 1),
-    likedByMe: !wasLiked,
-  }
-  try {
-    likeSummary.value = wasLiked
-      ? await unlikePhoto(props.photoId)
-      : await likePhoto(props.photoId)
-    if (likersOpen.value) {
-      const l = await listLikers(props.photoId)
-      likers.value = l.likers
-    }
-  } catch (err: unknown) {
-    // Rollback on failure.
-    likeSummary.value = { count: likeSummary.value.count + (wasLiked ? 1 : -1), likedByMe: wasLiked }
-    error.value = (err as Error)?.message || 'Fehler'
-  } finally {
-    likeBusy.value = false
-  }
-}
-
-async function openLikers() {
-  likersOpen.value = !likersOpen.value
-  if (likersOpen.value && likers.value.length === 0 && likeSummary.value.count > 0) {
-    try {
-      const l = await listLikers(props.photoId)
-      likers.value = l.likers
-    } catch (err: unknown) {
-      error.value = (err as Error)?.message || 'Fehler'
-    }
   }
 }
 
@@ -105,6 +61,7 @@ async function submitComment() {
     const created = await createComment(props.photoId, body)
     comments.value.push(created)
     commentInput.value = ''
+    await scrollToLatest()
   } catch (err: unknown) {
     error.value = (err as Error)?.message || 'Kommentar fehlgeschlagen'
   } finally {
@@ -145,8 +102,26 @@ async function removeComment(c: PhotoComment) {
   }
 }
 
-function canEdit(c: PhotoComment): boolean {
+// Edit is only offered when the user's comment is *the* latest in
+// the thread. Once anyone else has replied the conversation has moved
+// on and prior entries stay frozen so we never rewrite a line that
+// someone has already reacted to. Delete remains available on every
+// own comment.
+const lastCommentId = computed<number | null>(() => {
+  if (comments.value.length === 0) return null
+  return comments.value[comments.value.length - 1]?.id ?? null
+})
+
+function isOwn(c: PhotoComment): boolean {
   return currentUserId.value !== null && c.author.id === currentUserId.value
+}
+
+function canEdit(c: PhotoComment): boolean {
+  return isOwn(c) && c.id === lastCommentId.value
+}
+
+function canDelete(c: PhotoComment): boolean {
+  return isOwn(c)
 }
 
 function formatRelative(iso: string): string {
@@ -171,34 +146,15 @@ function matchesPhoto(resourceId: string | number): boolean {
   return Number(resourceId) === props.photoId
 }
 
-async function refreshLikes() {
-  try {
-    likeSummary.value = await getLikeSummary(props.photoId)
-    if (likersOpen.value) {
-      const l = await listLikers(props.photoId)
-      likers.value = l.likers
-    }
-  } catch {
-    // Ignore — next interaction will re-sync.
-  }
-}
-
 async function refreshComments() {
   try {
     const c = await listComments(props.photoId)
     comments.value = c.comments
+    await scrollToLatest()
   } catch {
     // Ignore — next open will re-sync.
   }
 }
-
-useRealtimeEvent('photos', 'liked', (ev) => {
-  if (matchesPhoto(ev.resourceId)) void refreshLikes()
-})
-
-useRealtimeEvent('photos', 'unliked', (ev) => {
-  if (matchesPhoto(ev.resourceId)) void refreshLikes()
-})
 
 useRealtimeEvent('photos', 'commented', (ev) => {
   if (matchesPhoto(ev.resourceId)) void refreshComments()
@@ -229,95 +185,74 @@ watch(
   <div class="reactions">
     <div v-if="error" class="reactions__error">{{ error }}</div>
 
-    <div class="reactions__like-row">
-      <Button
-        :icon="likeSummary.likedByMe ? 'pi pi-heart-fill' : 'pi pi-heart'"
-        :severity="likeSummary.likedByMe ? 'danger' : 'secondary'"
-        text
-        rounded
-        :loading="likeBusy"
-        :disabled="loading"
-        @click="toggleLike"
-        v-tooltip.top="likeSummary.likedByMe ? 'Gefällt dir nicht mehr' : 'Gefällt mir'"
-      />
-      <button
-        type="button"
-        class="reactions__count"
-        :disabled="likeSummary.count === 0"
-        @click="openLikers"
-      >
-        {{ likeSummary.count }}
-        {{ likeSummary.count === 1 ? 'Person' : 'Personen' }}
-      </button>
-    </div>
-
-    <div v-if="likersOpen && likers.length > 0" class="reactions__likers">
-      <span v-for="l in likers" :key="l.userId" class="reactions__liker">
-        {{ l.name ?? 'Unbekannt' }}
-      </span>
-    </div>
-
-    <div class="reactions__comments">
+    <div ref="commentsRef" class="reactions__comments">
       <div
         v-for="c in comments"
         :key="c.id"
-        class="reactions__comment"
+        :class="['reactions__row', isOwn(c) ? 'is-own' : 'is-other']"
       >
-        <div class="reactions__comment-head">
-          <strong>{{ c.author.name ?? 'Unbekannt' }}</strong>
-          <span class="reactions__comment-time">
-            {{ formatRelative(c.createdAt) }}
-            <span v-if="c.editedAt" class="reactions__comment-edited">(bearbeitet)</span>
-          </span>
+        <div class="reactions__bubble">
+          <div v-if="!isOwn(c)" class="reactions__author">
+            {{ c.author.name ?? 'Unbekannt' }}
+          </div>
+          <template v-if="editingId === c.id">
+            <textarea
+              v-model="editingText"
+              class="p-inputtext reactions__edit-textarea"
+              rows="2"
+            />
+            <div class="reactions__edit-actions">
+              <Button
+                icon="pi pi-check"
+                severity="success"
+                text
+                rounded
+                size="small"
+                @click="saveEdit(c)"
+              />
+              <Button
+                icon="pi pi-times"
+                severity="secondary"
+                text
+                rounded
+                size="small"
+                @click="cancelEdit"
+              />
+            </div>
+          </template>
+          <template v-else>
+            <div class="reactions__body">{{ c.body }}</div>
+            <div class="reactions__meta">
+              <span>{{ formatRelative(c.createdAt) }}</span>
+              <span v-if="c.editedAt" class="reactions__edited">(bearbeitet)</span>
+            </div>
+            <div
+              v-if="isOwn(c) && (canEdit(c) || canDelete(c))"
+              class="reactions__actions"
+            >
+              <Button
+                v-if="canEdit(c)"
+                icon="pi pi-pencil"
+                severity="secondary"
+                text
+                rounded
+                size="small"
+                v-tooltip.top="'Bearbeiten'"
+                @click="startEdit(c)"
+              />
+              <Button
+                v-if="canDelete(c)"
+                icon="pi pi-trash"
+                severity="danger"
+                text
+                rounded
+                size="small"
+                v-tooltip.top="'Löschen'"
+                @click="removeComment(c)"
+              />
+            </div>
+          </template>
         </div>
-        <template v-if="editingId === c.id">
-          <textarea
-            v-model="editingText"
-            class="p-inputtext reactions__edit-textarea"
-            rows="2"
-          />
-          <div class="reactions__edit-actions">
-            <Button
-              icon="pi pi-check"
-              severity="success"
-              text
-              rounded
-              size="small"
-              @click="saveEdit(c)"
-            />
-            <Button
-              icon="pi pi-times"
-              severity="secondary"
-              text
-              rounded
-              size="small"
-              @click="cancelEdit"
-            />
-          </div>
-        </template>
-        <template v-else>
-          <div class="reactions__comment-body">{{ c.body }}</div>
-          <div v-if="canEdit(c)" class="reactions__comment-actions">
-            <Button
-              icon="pi pi-pencil"
-              severity="secondary"
-              text
-              rounded
-              size="small"
-              v-tooltip.top="'Bearbeiten'"
-              @click="startEdit(c)"
-            />
-            <Button
-              icon="pi pi-trash"
-              severity="danger"
-              text
-              rounded
-              size="small"
-              v-tooltip.top="'Löschen'"
-              @click="removeComment(c)"
-            />
-          </div>
-        </template>
       </div>
 
       <div v-if="!loading && comments.length === 0" class="reactions__empty">
@@ -357,39 +292,6 @@ watch(
   font-size: 0.85em;
 }
 
-.reactions__like-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.reactions__count {
-  border: none;
-  background: transparent;
-  color: var(--p-text-muted-color);
-  font-size: 0.9em;
-  cursor: pointer;
-  padding: 0 0.25em;
-}
-.reactions__count:disabled {
-  cursor: default;
-}
-.reactions__count:not(:disabled):hover {
-  text-decoration: underline;
-}
-
-.reactions__likers {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35em;
-  font-size: 0.85em;
-}
-.reactions__liker {
-  background: var(--p-surface-ground);
-  border-radius: 999px;
-  padding: 0.1em 0.55em;
-}
-
 .reactions__comments {
   display: flex;
   flex-direction: column;
@@ -398,48 +300,73 @@ watch(
   overflow-y: auto;
 }
 
-.reactions__comment {
-  background: var(--p-surface-ground);
-  border-radius: 8px;
-  padding: 0.45rem 0.6rem;
+.reactions__row {
+  display: flex;
+  font-size: 0.8em;
+}
+.reactions__row.is-own {
+  justify-content: flex-end;
+}
+.reactions__row.is-other {
+  justify-content: flex-start;
+}
+
+.reactions__bubble {
+  max-width: 82%;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.15rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 14px;
+  word-break: break-word;
+}
+.is-other .reactions__bubble {
+  background: var(--p-surface-ground);
+  color: var(--p-text-color);
+  border-bottom-left-radius: 4px;
+}
+.is-own .reactions__bubble {
+  background: var(--p-primary-color);
+  color: var(--p-primary-contrast-color, #fff);
+  border-bottom-right-radius: 4px;
 }
 
-.reactions__comment-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 0.5rem;
+.reactions__author {
   font-size: 0.85em;
-}
-
-.reactions__comment-time {
+  font-weight: 600;
   color: var(--p-text-muted-color);
-  font-size: 0.9em;
 }
 
-.reactions__comment-edited {
-  margin-left: 0.25em;
+.reactions__body {
+  white-space: pre-wrap;
+}
+
+.reactions__meta {
+  display: flex;
+  gap: 0.35em;
+  font-size: 0.8em;
+  opacity: 0.75;
+  align-self: flex-end;
+}
+.is-other .reactions__meta {
+  align-self: flex-start;
+}
+
+.reactions__edited {
   font-style: italic;
 }
 
-.reactions__comment-body {
-  font-size: 0.95em;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.reactions__comment-actions {
+.reactions__actions {
   align-self: flex-end;
   display: flex;
   gap: 0.15rem;
+  margin-top: 0.1rem;
 }
 
 .reactions__edit-textarea {
   width: 100%;
-  font-size: 0.95em;
+  font-size: 0.85em;
 }
 
 .reactions__edit-actions {
