@@ -1,5 +1,5 @@
 import { Readable } from "stream";
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import fs from "fs";
 import path from "path";
 import { eq, sql } from "drizzle-orm";
@@ -123,32 +123,45 @@ describe("Photo Module", () => {
     });
 
     it("should increment the counter when two uploads collide on the same second", async () => {
-      const a = await service.uploadPhotoLogic(user1.id, {
-        data: Buffer.from("collision-a"),
-        name: "a.jpg",
-        mimeType: "image/jpeg",
-      });
-      const b = await service.uploadPhotoLogic(user1.id, {
-        data: Buffer.from("collision-b"),
-        name: "b.jpg",
-        mimeType: "image/jpeg",
-      });
+      // Freeze the wall clock so the two sequential uploads always
+      // derive their filename from the same second. Without this the
+      // test is flaky under a slow CI runner: if the first upload
+      // takes longer than ~1s, the second one ends up in the next
+      // second and the shared-stem assertion fails. Only `Date` is
+      // faked — `setTimeout`/`setInterval` stay real so nothing in
+      // the upload pipeline stalls on the frozen clock.
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-01-01T12:00:00.000Z"));
+      try {
+        const a = await service.uploadPhotoLogic(user1.id, {
+          data: Buffer.from("collision-a"),
+          name: "a.jpg",
+          mimeType: "image/jpeg",
+        });
+        const b = await service.uploadPhotoLogic(user1.id, {
+          data: Buffer.from("collision-b"),
+          name: "b.jpg",
+          mimeType: "image/jpeg",
+        });
 
-      expect(a.filename).not.toBe(b.filename);
+        expect(a.filename).not.toBe(b.filename);
 
-      // Both filenames share the same stem up to the counter suffix; the
-      // counters are sequential two-digit numbers.
-      const stem = (name: string) => name.replace(/_\d{2}\.[^./]+$/, "");
-      expect(stem(a.filename)).toBe(stem(b.filename));
+        // Both filenames share the same stem up to the counter suffix; the
+        // counters are sequential two-digit numbers.
+        const stem = (name: string) => name.replace(/_\d{2}\.[^./]+$/, "");
+        expect(stem(a.filename)).toBe(stem(b.filename));
 
-      const counter = (name: string) =>
-        parseInt(name.match(/_(\d{2})\.[^./]+$/)![1], 10);
-      const counters = [counter(a.filename), counter(b.filename)].sort();
-      expect(counters[0]).toBe(0);
-      expect(counters[1]).toBe(1);
+        const counter = (name: string) =>
+          parseInt(name.match(/_(\d{2})\.[^./]+$/)![1], 10);
+        const counters = [counter(a.filename), counter(b.filename)].sort();
+        expect(counters[0]).toBe(0);
+        expect(counters[1]).toBe(1);
 
-      fs.unlinkSync(path.join(UPLOAD_DIR, a.filename));
-      fs.unlinkSync(path.join(UPLOAD_DIR, b.filename));
+        fs.unlinkSync(path.join(UPLOAD_DIR, a.filename));
+        fs.unlinkSync(path.join(UPLOAD_DIR, b.filename));
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("should list only own photos", async () => {

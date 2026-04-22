@@ -18,7 +18,11 @@ export type PushStatus =
   | 'unsubscribed'    // supported + allowed, not yet subscribed
   | 'subscribed'      // fully active
 
-const SW_URL = '/push-sw.js'
+// The SPA is mounted under `/app/` by the Encore static handler
+// (web/static.ts), so the service-worker file is only reachable
+// there. A bare `/push-sw.js` falls through to Encore's API router
+// and returns "endpoint not found".
+const SW_URL = '/app/push-sw.js'
 
 function urlBase64ToArrayBuffer(base64String: string): ArrayBuffer {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)

@@ -1,32 +1,26 @@
 /**
- * Likes and comments on photos.
+ * Photo comments.
  *
  * Audience rules mirror photo access: anyone who can see the photo
  * (owner + users with album access via `getUsersWithPhotoAccess`) can
- * like and comment. Each action fans out a realtime `photos/…` event
- * and a feed entry to the full audience minus the actor.
+ * comment. Each new comment fans out a realtime `photos/…` event and a
+ * feed entry to the full audience minus the actor.
+ *
+ * The former "Like" feature has been consolidated into the existing
+ * Favorite curation flow — `updatePhotoCurationLogic` emits the
+ * equivalent `photo_favorited` feed event when a user favourites a
+ * photo in a shared album.
  */
 
 import { and, asc, eq, sql } from "drizzle-orm";
 import { APIError } from "encore.dev/api";
 import db from "../db/database";
 import { dbAll, dbExec, dbFirst } from "../db/adapter";
-import { photoLikes, photoComments, photos, users } from "../db/schema";
+import { photoComments, photos, users } from "../db/schema";
 import { realtime } from "~encore/clients";
 import { getUsersWithPhotoAccess, emitFeedItem } from "./photo.service";
 
 const MAX_COMMENT_LENGTH = 2000;
-
-export interface PhotoLikeSummary {
-  count: number;
-  likedByMe: boolean;
-}
-
-export interface PhotoLiker {
-  userId: number;
-  name: string | null;
-  createdAt: string;
-}
 
 export interface PhotoComment {
   id: number;
@@ -81,113 +75,6 @@ async function publishPhotoEvent(
 
 function recipientsExcludingActor(audience: number[], actorUserId: number): number[] {
   return audience.filter((uid) => uid !== actorUserId);
-}
-
-export async function likePhoto(
-  userId: number,
-  photoId: number,
-): Promise<PhotoLikeSummary> {
-  const audience = await assertPhotoAccess(userId, photoId);
-
-  // Upsert-style: ON CONFLICT DO NOTHING keeps the idempotent contract
-  // — a double-click from the client doesn't double-emit events.
-  const inserted = await dbAll<{ photo_id: number }>(
-    db
-      .insert(photoLikes)
-      .values({ photo_id: photoId, user_id: userId })
-      .onConflictDoNothing()
-      .returning({ photo_id: photoLikes.photo_id }),
-  );
-
-  const summary = await getLikeSummary(userId, photoId);
-
-  if (inserted.length > 0) {
-    const recipients = recipientsExcludingActor(audience, userId);
-    await publishPhotoEvent(recipients, "liked", photoId, {
-      userId,
-      totalLikes: summary.count,
-    });
-    await emitFeedItem(recipients, userId, "photo_liked", {
-      photoId,
-    });
-  }
-
-  return summary;
-}
-
-export async function unlikePhoto(
-  userId: number,
-  photoId: number,
-): Promise<PhotoLikeSummary> {
-  const audience = await assertPhotoAccess(userId, photoId);
-
-  const { changes } = await dbExec(
-    db
-      .delete(photoLikes)
-      .where(
-        and(
-          eq(photoLikes.photo_id, photoId),
-          eq(photoLikes.user_id, userId),
-        ),
-      ),
-  );
-
-  const summary = await getLikeSummary(userId, photoId);
-
-  if (changes > 0) {
-    const recipients = recipientsExcludingActor(audience, userId);
-    // No feed entry for unlikes — they shouldn't show up as activity.
-    await publishPhotoEvent(recipients, "unliked", photoId, {
-      userId,
-      totalLikes: summary.count,
-    });
-  }
-
-  return summary;
-}
-
-export async function getLikeSummary(
-  userId: number,
-  photoId: number,
-): Promise<PhotoLikeSummary> {
-  const row = await dbFirst<{ count: number; liked: number }>(
-    db
-      .select({
-        count: sql<number>`count(*)::int`,
-        liked: sql<number>`count(*) FILTER (WHERE ${photoLikes.user_id} = ${userId})::int`,
-      })
-      .from(photoLikes)
-      .where(eq(photoLikes.photo_id, photoId)),
-  );
-  return {
-    count: row?.count ?? 0,
-    likedByMe: (row?.liked ?? 0) > 0,
-  };
-}
-
-export async function listLikers(
-  userId: number,
-  photoId: number,
-): Promise<PhotoLiker[]> {
-  await assertPhotoAccess(userId, photoId);
-
-  const rows = await dbAll<{ user_id: number; name: string | null; created_at: string }>(
-    db
-      .select({
-        user_id: photoLikes.user_id,
-        name: users.name,
-        created_at: photoLikes.created_at,
-      })
-      .from(photoLikes)
-      .leftJoin(users, eq(users.id, photoLikes.user_id))
-      .where(eq(photoLikes.photo_id, photoId))
-      .orderBy(asc(photoLikes.created_at)),
-  );
-  return rows.map((r) => ({
-    userId: r.user_id,
-    name: r.name,
-    createdAt: r.created_at,
-  }));
 }
 
 export async function listComments(

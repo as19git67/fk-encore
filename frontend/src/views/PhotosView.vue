@@ -823,10 +823,21 @@ loadPersons()
 serviceHealth.startPolling()
 
 import { onUnmounted } from 'vue'
+import { useRealtimeEvent } from '../composables/useRealtime'
 onUnmounted(() => {
   serviceHealth.stopPolling()
   if (uploadResultTimeout) clearTimeout(uploadResultTimeout)
   hydration.cancel()
+})
+
+// Refresh in place when another participant favourites or hides a
+// photo currently visible in the grid — keeps the heart, fav-count
+// badge and "Meinungen" bars in sync without a manual reload.
+useRealtimeEvent('photos', 'curation.changed', (ev) => {
+  const photoId = Number(ev.resourceId)
+  if (!Number.isFinite(photoId)) return
+  if (!photos.value.some((p) => p.id === photoId)) return
+  void reloadPhotosInPlace()
 })
 </script>
 

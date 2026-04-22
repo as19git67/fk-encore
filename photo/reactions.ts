@@ -1,9 +1,13 @@
 /**
- * HTTP endpoints for photo reactions (likes + comments).
+ * HTTP endpoints for photo comments.
  *
  * Lives in the `photo` service so it shares auth, DB and realtime wiring
  * with the rest of the photo module. Access control is delegated to
  * reactions.service, which piggy-backs on `getUsersWithPhotoAccess`.
+ *
+ * Likes were rolled into the Favorite curation flow; the former
+ * `/photos/:id/like*` endpoints are gone. Use the existing
+ * `/photos/:id/curation` endpoint with `status=favorite` instead.
  */
 
 import { api, APIError } from "encore.dev/api";
@@ -22,41 +26,6 @@ function requirePhotosView() {
   if (!authData) throw APIError.unauthenticated("Unauthorized");
   requirePermission(authData, "photos.view");
 }
-
-// ---------- Likes ----------
-
-export const likePhoto = api(
-  { expose: true, method: "POST", path: "/photos/:id/like", auth: true },
-  async ({ id }: { id: number }): Promise<svc.PhotoLikeSummary> => {
-    requirePhotosView();
-    return await svc.likePhoto(getUserId(), id);
-  },
-);
-
-export const unlikePhoto = api(
-  { expose: true, method: "DELETE", path: "/photos/:id/like", auth: true },
-  async ({ id }: { id: number }): Promise<svc.PhotoLikeSummary> => {
-    requirePhotosView();
-    return await svc.unlikePhoto(getUserId(), id);
-  },
-);
-
-export const getLikeSummary = api(
-  { expose: true, method: "GET", path: "/photos/:id/likes/summary", auth: true },
-  async ({ id }: { id: number }): Promise<svc.PhotoLikeSummary> => {
-    requirePhotosView();
-    return await svc.getLikeSummary(getUserId(), id);
-  },
-);
-
-export const listLikers = api(
-  { expose: true, method: "GET", path: "/photos/:id/likes", auth: true },
-  async ({ id }: { id: number }): Promise<{ likers: svc.PhotoLiker[] }> => {
-    requirePhotosView();
-    const likers = await svc.listLikers(getUserId(), id);
-    return { likers };
-  },
-);
 
 // ---------- Comments ----------
 

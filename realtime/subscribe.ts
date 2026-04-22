@@ -1,5 +1,6 @@
 import { api } from "encore.dev/api";
 import { Query } from "encore.dev/api";
+import log from "encore.dev/log";
 import { getAuthData } from "~encore/auth";
 import { randomUUID } from "crypto";
 import { and, asc, eq, gt } from "drizzle-orm";
@@ -11,7 +12,6 @@ import type { ClientEvent, EventChannel } from "./events";
 import { hasChannelPermission, parseChannels } from "./permissions";
 import { sessionManager } from "./session-manager";
 
-console.log("[boot] realtime/subscribe.ts: all imports resolved");
 
 interface HandshakeParams {
   /** Comma-separated channel list, e.g. `"documents,photos"`. Omit to receive every channel the user is permitted for. */
@@ -26,11 +26,13 @@ interface HandshakeParams {
 }
 
 /**
- * Server-side keep-alive interval. Stays below the 60 s idle timeout
- * commonly applied by nginx / cloud load balancers so idle sockets
- * aren't silently dropped mid-session.
+ * Server-side keep-alive interval. 10 s comfortably beats the idle
+ * timeouts of every reverse proxy we care about (nginx 60s, Traefik
+ * 60s, Cloudflare WS 100s) and leaves enough head-room for the
+ * client's 60 s heartbeat-timeout watchdog even if the event loop
+ * is briefly saturated by scan workers.
  */
-const HEARTBEAT_INTERVAL_MS = 25_000;
+const HEARTBEAT_INTERVAL_MS = 10_000;
 
 /**
  * Cap on the number of events replayed in a single handshake. A
@@ -39,6 +41,42 @@ const HEARTBEAT_INTERVAL_MS = 25_000;
  * which is why we send `system/resume.truncated` when the cap hits.
  */
 const REPLAY_LIMIT = 500;
+
+/**
+ * IMPORTANT: Encore.ts's streamOut `stream.send()` is **synchronous and
+ * returns `undefined`** on the server side — not a Promise. Observed
+ * in production logs 2026-04-22: `isPromise:false` right after every
+ * send call. As a consequence:
+ *
+ * 1. Never `await` a send; `await undefined` resolves instantly but
+ *    the pattern is misleading.
+ * 2. `.catch()` does nothing (undefined has no such method); errors
+ *    surface as SYNCHRONOUS throws from send() — always wrap in
+ *    try/catch.
+ * 3. A dead socket throws `Error: channel closed` on the next send.
+ *    When we see that, tear the session down via `session.close()`
+ *    so the handler exits the `await session.done` loop and the
+ *    sessionManager drops the stale entry.
+ *
+ * Ordered delivery of queued frames is handled by the Rust runtime.
+ */
+function safeSend(
+  stream: { send(msg: ClientEvent): unknown },
+  msg: ClientEvent,
+  onDead: () => void,
+): void {
+  try {
+    stream.send(msg);
+  } catch (err: unknown) {
+    const message = (err as Error)?.message ?? String(err);
+    // `channel closed` is the expected result after a client
+    // disconnect — swallow quietly. Anything else is worth a warn.
+    if (!message.includes("channel closed")) {
+      log.warn("realtime: send threw unexpectedly", { message });
+    }
+    onDead();
+  }
+}
 
 /**
  * Long-lived WebSocket carrying every realtime event for the
@@ -81,35 +119,49 @@ export const subscribe = api.streamOut<HandshakeParams, ClientEvent>(
       stream,
     );
 
-    await stream
-      .send(systemEvent(userID, "session.ready", { channels: allowed }))
-      .catch(() => {});
+    safeSend(
+      stream,
+      systemEvent(userID, "session.ready", { channels: allowed }),
+      () => session.close(),
+    );
     if (denied.length > 0) {
-      await stream
-        .send(systemEvent(userID, "channel.denied", { channels: denied }))
-        .catch(() => {});
+      safeSend(
+        stream,
+        systemEvent(userID, "channel.denied", { channels: denied }),
+        () => session.close(),
+      );
     }
 
     // Replay missed events, if the client provided a cursor.
     const lastSeq = parseLastSeq(handshake.lastEventId);
     if (lastSeq !== null) {
       try {
-        await replayFromOutbox(userID, lastSeq, new Set(allowed), stream);
-      } catch (err) {
-        console.warn(
-          `[realtime] replay failed for user=${userID} lastSeq=${lastSeq}: ${(err as Error).message}`,
+        await replayFromOutbox(
+          userID,
+          lastSeq,
+          new Set(allowed),
+          stream,
+          () => session.close(),
         );
+      } catch (err) {
+        log.warn("realtime: replay failed", {
+          userID,
+          lastSeq,
+          error: (err as Error)?.message ?? String(err),
+        });
       }
     }
 
-    // Application-level heartbeats keep the socket warm and let the
-    // client detect a dead connection even when the TCP layer has no
-    // reason to produce an error. A failed send surfaces the
-    // disconnect via `session.close()`, causing `done` to resolve.
+    // Application-level heartbeat. On a dead channel stream.send
+    // throws synchronously; `safeSend` catches, logs, and triggers
+    // `session.close()` which resolves `session.done` and unblocks
+    // the finally block below.
     const heartbeat = setInterval(() => {
-      stream
-        .send(systemEvent(userID, "heartbeat", {}))
-        .catch(() => session.close());
+      safeSend(
+        stream,
+        systemEvent(userID, "heartbeat", {}),
+        () => session.close(),
+      );
     }, HEARTBEAT_INTERVAL_MS);
 
     try {
@@ -164,7 +216,8 @@ async function replayFromOutbox(
   userID: string,
   lastSeq: number,
   allowedChannels: ReadonlySet<EventChannel>,
-  stream: { send(msg: ClientEvent): Promise<void> },
+  stream: { send(msg: ClientEvent): unknown },
+  onDead: () => void,
 ): Promise<void> {
   const userIdNum = Number(userID);
   if (!Number.isInteger(userIdNum)) return;
@@ -201,8 +254,9 @@ async function replayFromOutbox(
     // stays in the outbox — future sessions with the right scope can
     // still see it until retention removes it.
     if (!allowedChannels.has(row.channel as EventChannel)) continue;
-    await stream
-      .send({
+    safeSend(
+      stream,
+      {
         id: row.id,
         seq: row.seq,
         userId: userID,
@@ -212,18 +266,19 @@ async function replayFromOutbox(
         timestamp: row.created_at,
         payload: row.payload,
         version: row.version,
-      })
-      .catch(() => {});
+      },
+      onDead,
+    );
   }
 
   if (truncated) {
-    await stream
-      .send(
-        systemEvent(userID, "resume.truncated", {
-          replayed: toSend.length,
-          limit: REPLAY_LIMIT,
-        }),
-      )
-      .catch(() => {});
+    safeSend(
+      stream,
+      systemEvent(userID, "resume.truncated", {
+        replayed: toSend.length,
+        limit: REPLAY_LIMIT,
+      }),
+      onDead,
+    );
   }
 }
