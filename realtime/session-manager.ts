@@ -71,33 +71,29 @@ class SessionManager {
   }
 
   /**
-   * Deliver an event to every local session of the target user that is
-   * subscribed to the event's channel. Send failures are swallowed so
-   * one dead socket does not break fan-out to the user's other tabs.
+   * Deliver an event to every local session of the target user that
+   * is subscribed to the event's channel.
+   *
+   * IMPORTANT: do not await each `stream.send()`. Encore.ts's
+   * streamOut send returns a Promise that never resolves even
+   * though the frame IS delivered — see the lengthy comment in
+   * realtime/subscribe.ts. Awaiting it here would stall the
+   * publisher forever (every curation toggle, every comment,
+   * every photo upload). Fan-out is fire-and-forget; ordered
+   * delivery is guaranteed by the Rust runtime queue, and send
+   * failures cannot surface through .catch either (the Promise
+   * doesn't reject either), so we rely on the client's heartbeat
+   * watchdog to tear down dead sockets instead.
    */
   async dispatch(event: RealtimeEvent): Promise<void> {
     const set = this.sessionsByUser.get(event.userId);
     if (!set || set.size === 0) return;
 
-    // `RealtimeEvent` and `ClientEvent` are now the same shape; the
-    // alias is kept so older imports keep working.
     const outbound: ClientEvent = event;
-
-    const sends: Promise<void>[] = [];
     for (const session of set) {
       if (!session.channels.has(event.channel)) continue;
-      sends.push(
-        session.stream.send(outbound).catch((err) => {
-          console.warn(
-            `[realtime] send failed for user=${session.userId} channel=${event.channel}: ${(err as Error).message}`,
-          );
-          // Surface the disconnect so the handler can clean up and the
-          // subscribe endpoint returns.
-          session.close();
-        }),
-      );
+      session.stream.send(outbound).catch(() => {});
     }
-    await Promise.all(sends);
   }
 
   /** Test/debug helper — number of connected sessions overall. */

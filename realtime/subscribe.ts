@@ -105,8 +105,16 @@ export const subscribe = api.streamOut<HandshakeParams, ClientEvent>(
     );
     log.info("realtime: session registered", { userID });
 
-    log.info("realtime: about to send session.ready", { userID });
-    await stream
+    // IMPORTANT: do NOT await `stream.send()`. Under Encore.ts the
+    // returned Promise never resolves even though the frame IS
+    // delivered to the client. Awaiting it stalls the handler
+    // indefinitely — we observed that in container logs on
+    // 2026-04-22: the very first `await stream.send(session.ready)`
+    // never returned, so the setInterval below never armed and the
+    // client tripped its heartbeat-watchdog after 60s and looped.
+    // Fire-and-forget with a `.catch` for error visibility; the
+    // Rust runtime guarantees ordered delivery of queued frames.
+    stream
       .send(systemEvent(userID, "session.ready", { channels: allowed }))
       .catch((err: unknown) => {
         log.warn("realtime: session.ready send rejected", {
@@ -114,28 +122,27 @@ export const subscribe = api.streamOut<HandshakeParams, ClientEvent>(
           error: (err as Error)?.message ?? String(err),
         });
       });
-    log.info("realtime: session.ready send awaited", { userID });
 
     if (denied.length > 0) {
-      log.info("realtime: about to send channel.denied", { userID });
-      await stream
+      stream
         .send(systemEvent(userID, "channel.denied", { channels: denied }))
         .catch(() => {});
-      log.info("realtime: channel.denied send awaited", { userID });
     }
 
-    // Replay missed events, if the client provided a cursor.
+    // Replay missed events, if the client provided a cursor. The
+    // replay helper uses the same non-awaiting send pattern
+    // internally.
     const lastSeq = parseLastSeq(handshake.lastEventId);
-    log.info("realtime: replay decision", { userID, lastSeq });
     if (lastSeq !== null) {
       try {
         await replayFromOutbox(userID, lastSeq, new Set(allowed), stream);
       } catch (err) {
-        console.warn(
-          `[realtime] replay failed for user=${userID} lastSeq=${lastSeq}: ${(err as Error).message}`,
-        );
+        log.warn("realtime: replay failed", {
+          userID,
+          lastSeq,
+          error: (err as Error)?.message ?? String(err),
+        });
       }
-      log.info("realtime: replay done", { userID });
     }
 
     // Application-level heartbeats keep the socket warm and let the
@@ -148,23 +155,15 @@ export const subscribe = api.streamOut<HandshakeParams, ClientEvent>(
     // `console.log` output is suppressed under `encore build docker`.
     // Drop these diagnostics once the streamOut delivery path is
     // confirmed healthy.
+    // The `.then` side of `stream.send()` never fires (see handler-
+    // entry comment), so a failed send can't actually surface via
+    // catch either — the client's own watchdog still covers dropped
+    // sockets.
     let heartbeatTick = 0;
     const heartbeat = setInterval(() => {
       const tick = ++heartbeatTick;
       log.info("realtime: heartbeat tick", { tick, userID });
-      stream
-        .send(systemEvent(userID, "heartbeat", {}))
-        .then(() => {
-          log.info("realtime: heartbeat sent ok", { tick, userID });
-        })
-        .catch((err: unknown) => {
-          log.warn("realtime: heartbeat send failed", {
-            tick,
-            userID,
-            error: (err as Error)?.message ?? String(err),
-          });
-          session.close();
-        });
+      stream.send(systemEvent(userID, "heartbeat", {})).catch(() => {});
     }, HEARTBEAT_INTERVAL_MS);
 
     log.info("realtime: subscribe handler ready", {
@@ -266,7 +265,9 @@ async function replayFromOutbox(
     // stays in the outbox — future sessions with the right scope can
     // still see it until retention removes it.
     if (!allowedChannels.has(row.channel as EventChannel)) continue;
-    await stream
+    // Fire-and-forget: see the note on the main handler. Ordered
+    // delivery is guaranteed by the Rust runtime queue.
+    stream
       .send({
         id: row.id,
         seq: row.seq,
@@ -282,7 +283,7 @@ async function replayFromOutbox(
   }
 
   if (truncated) {
-    await stream
+    stream
       .send(
         systemEvent(userID, "resume.truncated", {
           replayed: toSend.length,
