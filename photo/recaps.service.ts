@@ -11,7 +11,7 @@
  * bereits, aktualisiert der Builder nur Cover/Titel/Photo-Set.
  */
 
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbExec, dbFirst, dbInsertReturning } from "../db/adapter";
 import {
@@ -673,12 +673,17 @@ interface PersonInfo {
   name: string;
 }
 
+// Default name for auto-detected faces that the user has not yet labelled.
+// These are skipped everywhere in the recap pipeline — an "Unbenannt"-recap
+// carries no memory value for the user.
+const UNNAMED_PERSON = "Unbenannt";
+
 async function loadPersonsForUser(userId: number): Promise<PersonInfo[]> {
   return dbAll<PersonInfo>(
     db
       .select({ id: persons.id, name: persons.name })
       .from(persons)
-      .where(eq(persons.user_id, userId))
+      .where(and(eq(persons.user_id, userId), ne(persons.name, UNNAMED_PERSON)))
   );
 }
 
@@ -721,6 +726,23 @@ async function buildPersonRecaps(
   allPhotos: CandidatePhoto[],
   today: Date
 ): Promise<number> {
+  // Clean up any recaps that were created for unnamed persons in previous
+  // runs (before this filter existed). Recaps are keyed by person.id in the
+  // seed JSON; join back to `persons` to identify the unnamed ones.
+  await dbExec(
+    db.delete(recaps).where(
+      and(
+        eq(recaps.user_id, userId),
+        eq(recaps.kind, "person"),
+        sql`EXISTS (
+          SELECT 1 FROM ${persons}
+          WHERE ${persons.id} = (${recaps.seed} ->> 'person_id')::int
+            AND ${persons.name} = ${UNNAMED_PERSON}
+        )`
+      )
+    )
+  );
+
   const personList = await loadPersonsForUser(userId);
   if (personList.length === 0) return 0;
   const personPhotos = await loadPersonPhotoMap(userId);
