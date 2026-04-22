@@ -44,6 +44,45 @@ const HEARTBEAT_INTERVAL_MS = 10_000;
 const REPLAY_LIMIT = 500;
 
 /**
+ * IMPORTANT: Encore.ts's streamOut `stream.send()` is **synchronous and
+ * returns `undefined`** on the server side — not a Promise. Observed
+ * in production logs 2026-04-22: `isPromise:false` right after every
+ * send call. As a consequence:
+ *
+ * 1. Never `await` a send; `await undefined` resolves instantly but
+ *    the pattern is misleading.
+ * 2. `.catch()` does nothing (undefined has no such method); errors
+ *    surface as SYNCHRONOUS throws from send() — always wrap in
+ *    try/catch.
+ * 3. A dead socket throws `Error: channel closed` on the next send.
+ *    When we see that, tear the session down via `session.close()`
+ *    so the handler exits the `await session.done` loop and the
+ *    sessionManager drops the stale entry.
+ *
+ * Ordered delivery of queued frames is handled by the Rust runtime.
+ */
+function safeSend(
+  stream: { send(msg: ClientEvent): unknown },
+  msg: ClientEvent,
+  onDead: () => void,
+): void {
+  try {
+    stream.send(msg);
+  } catch (err: unknown) {
+    const message = (err as Error)?.message ?? String(err);
+    // `channel closed` is the expected error after a client disconnect;
+    // log as info, not warn, and trigger cleanup. Anything else is
+    // unexpected and worth a warn.
+    if (message.includes("channel closed")) {
+      log.info("realtime: send on closed channel — closing session", { message });
+    } else {
+      log.warn("realtime: send threw unexpectedly", { message });
+    }
+    onDead();
+  }
+}
+
+/**
  * Long-lived WebSocket carrying every realtime event for the
  * authenticated user. One connection serves every feature; clients
  * multiplex by `channel` + `type`. See `permissions.ts` for the
@@ -63,28 +102,9 @@ const REPLAY_LIMIT = 500;
 export const subscribe = api.streamOut<HandshakeParams, ClientEvent>(
   { path: "/realtime/subscribe", expose: true, auth: true },
   async (handshake, stream) => {
-    // Belt-and-suspenders diagnostic: emit on both loggers at the
-    // earliest point in the handler, before anything that could
-    // throw or return early. If NEITHER line appears in the
-    // container logs after a fresh connect, the deployed image
-    // does not contain this code.
-    console.log(
-      `[realtime] subscribe handler ENTERED (console.log) at ${new Date().toISOString()}`,
-    );
-    log.info("realtime: subscribe handler ENTERED", {
-      at: new Date().toISOString(),
-    });
-
     const auth = getAuthData();
-    if (!auth) {
-      log.warn("realtime: subscribe handler has NO auth data — exiting");
-      return;
-    }
+    if (!auth) return;
     const { userID, permissions } = auth;
-    log.info("realtime: subscribe handler has auth", {
-      userID,
-      permissionCount: permissions.length,
-    });
 
     const requested = parseChannels(handshake.channels);
     const allowed: EventChannel[] = [];
@@ -93,7 +113,6 @@ export const subscribe = api.streamOut<HandshakeParams, ClientEvent>(
       if (hasChannelPermission(ch, permissions)) allowed.push(ch);
       else denied.push(ch);
     }
-    log.info("realtime: channels resolved", { userID, allowed, denied });
 
     // Register the session BEFORE replaying so live events published
     // during replay reach the socket too. Any overlap with replayed
@@ -103,58 +122,31 @@ export const subscribe = api.streamOut<HandshakeParams, ClientEvent>(
       new Set(allowed),
       stream,
     );
-    log.info("realtime: session registered", { userID });
 
-    // Granular diagnostic: wrap each send so we can tell whether the
-    // synchronous call itself throws or whether the later-than-expected
-    // absence of `handler ready` is caused by something else.
-    log.info("realtime: before session.ready send", { userID });
-    try {
-      const p = stream.send(
-        systemEvent(userID, "session.ready", { channels: allowed }),
-      );
-      log.info("realtime: session.ready send returned", {
-        userID,
-        isPromise: !!(p && typeof (p as Promise<unknown>).then === "function"),
-      });
-      (p as Promise<void>)?.catch?.((err: unknown) => {
-        log.warn("realtime: session.ready send rejected async", {
-          userID,
-          error: (err as Error)?.message ?? String(err),
-        });
-      });
-    } catch (err: unknown) {
-      log.warn("realtime: session.ready send threw synchronously", {
-        userID,
-        error: (err as Error)?.message ?? String(err),
-      });
-    }
-    log.info("realtime: after session.ready send", { userID });
-
+    safeSend(
+      stream,
+      systemEvent(userID, "session.ready", { channels: allowed }),
+      () => session.close(),
+    );
     if (denied.length > 0) {
-      log.info("realtime: before channel.denied send", { userID });
-      try {
-        const p = stream.send(
-          systemEvent(userID, "channel.denied", { channels: denied }),
-        );
-        (p as Promise<void>)?.catch?.(() => {});
-      } catch (err: unknown) {
-        log.warn("realtime: channel.denied send threw synchronously", {
-          userID,
-          error: (err as Error)?.message ?? String(err),
-        });
-      }
-      log.info("realtime: after channel.denied send", { userID });
+      safeSend(
+        stream,
+        systemEvent(userID, "channel.denied", { channels: denied }),
+        () => session.close(),
+      );
     }
 
-    log.info("realtime: before parseLastSeq", { userID });
+    // Replay missed events, if the client provided a cursor.
     const lastSeq = parseLastSeq(handshake.lastEventId);
-    log.info("realtime: parseLastSeq done", { userID, lastSeq });
-
     if (lastSeq !== null) {
-      log.info("realtime: before replayFromOutbox", { userID, lastSeq });
       try {
-        await replayFromOutbox(userID, lastSeq, new Set(allowed), stream);
+        await replayFromOutbox(
+          userID,
+          lastSeq,
+          new Set(allowed),
+          stream,
+          () => session.close(),
+        );
       } catch (err) {
         log.warn("realtime: replay failed", {
           userID,
@@ -162,46 +154,23 @@ export const subscribe = api.streamOut<HandshakeParams, ClientEvent>(
           error: (err as Error)?.message ?? String(err),
         });
       }
-      log.info("realtime: after replayFromOutbox", { userID });
     }
 
-    log.info("realtime: before setInterval", { userID });
-
-    // Application-level heartbeats keep the socket warm and let the
-    // client detect a dead connection even when the TCP layer has no
-    // reason to produce an error. A failed send surfaces the
-    // disconnect via `session.close()`, causing `done` to resolve.
-    //
-    // Instrumentation uses `encore.dev/log` so events land in the
-    // structured log pipeline (and container stdout); plain
-    // `console.log` output is suppressed under `encore build docker`.
-    // Drop these diagnostics once the streamOut delivery path is
-    // confirmed healthy.
-    // The `.then` side of `stream.send()` never fires (see handler-
-    // entry comment), so a failed send can't actually surface via
-    // catch either — the client's own watchdog still covers dropped
-    // sockets.
-    let heartbeatTick = 0;
+    // Application-level heartbeat. On a dead channel stream.send
+    // throws synchronously; `safeSend` catches, logs, and triggers
+    // `session.close()` which resolves `session.done` and unblocks
+    // the finally block below.
     const heartbeat = setInterval(() => {
-      const tick = ++heartbeatTick;
-      log.info("realtime: heartbeat tick", { tick, userID });
-      try {
-        const p = stream.send(systemEvent(userID, "heartbeat", {}));
-        (p as Promise<void>)?.catch?.(() => {});
-      } catch (err: unknown) {
-        log.warn("realtime: heartbeat send threw synchronously", {
-          tick,
-          userID,
-          error: (err as Error)?.message ?? String(err),
-        });
-      }
+      safeSend(
+        stream,
+        systemEvent(userID, "heartbeat", {}),
+        () => session.close(),
+      );
     }, HEARTBEAT_INTERVAL_MS);
-    log.info("realtime: after setInterval (heartbeat armed)", { userID });
 
     log.info("realtime: subscribe handler ready", {
       userID,
       channels: allowed,
-      denied,
     });
 
     try {
@@ -209,10 +178,7 @@ export const subscribe = api.streamOut<HandshakeParams, ClientEvent>(
     } finally {
       clearInterval(heartbeat);
       sessionManager.unregister(session);
-      log.info("realtime: subscribe handler ended", {
-        userID,
-        ticks: heartbeatTick,
-      });
+      log.info("realtime: subscribe handler ended", { userID });
     }
   },
 );
@@ -260,7 +226,8 @@ async function replayFromOutbox(
   userID: string,
   lastSeq: number,
   allowedChannels: ReadonlySet<EventChannel>,
-  stream: { send(msg: ClientEvent): Promise<void> },
+  stream: { send(msg: ClientEvent): unknown },
+  onDead: () => void,
 ): Promise<void> {
   const userIdNum = Number(userID);
   if (!Number.isInteger(userIdNum)) return;
@@ -297,10 +264,9 @@ async function replayFromOutbox(
     // stays in the outbox — future sessions with the right scope can
     // still see it until retention removes it.
     if (!allowedChannels.has(row.channel as EventChannel)) continue;
-    // Fire-and-forget: see the note on the main handler. Ordered
-    // delivery is guaranteed by the Rust runtime queue.
-    stream
-      .send({
+    safeSend(
+      stream,
+      {
         id: row.id,
         seq: row.seq,
         userId: userID,
@@ -310,18 +276,19 @@ async function replayFromOutbox(
         timestamp: row.created_at,
         payload: row.payload,
         version: row.version,
-      })
-      .catch(() => {});
+      },
+      onDead,
+    );
   }
 
   if (truncated) {
-    stream
-      .send(
-        systemEvent(userID, "resume.truncated", {
-          replayed: toSend.length,
-          limit: REPLAY_LIMIT,
-        }),
-      )
-      .catch(() => {});
+    safeSend(
+      stream,
+      systemEvent(userID, "resume.truncated", {
+        replayed: toSend.length,
+        limit: REPLAY_LIMIT,
+      }),
+      onDead,
+    );
   }
 }

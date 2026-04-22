@@ -1,12 +1,19 @@
+import log from "encore.dev/log";
 import type { ClientEvent, EventChannel, RealtimeEvent } from "./events";
 
 /**
  * Stream writer interface matching Encore's streamOut handler. Kept as
  * a local abstraction so unit tests can plug in a mock without pulling
  * the Encore runtime.
+ *
+ * Encore.ts's streamOut `send()` is synchronous on the server side and
+ * returns `undefined`, not a `Promise<void>` — see the long comment in
+ * realtime/subscribe.ts. We type the return as `unknown` here so both
+ * the real runtime and test mocks (which may legitimately return
+ * `Promise<void>`) stay compatible.
  */
 export interface StreamWriter {
-  send(msg: ClientEvent): Promise<void>;
+  send(msg: ClientEvent): unknown;
   close?(): Promise<void>;
 }
 
@@ -74,16 +81,12 @@ class SessionManager {
    * Deliver an event to every local session of the target user that
    * is subscribed to the event's channel.
    *
-   * IMPORTANT: do not await each `stream.send()`. Encore.ts's
-   * streamOut send returns a Promise that never resolves even
-   * though the frame IS delivered — see the lengthy comment in
-   * realtime/subscribe.ts. Awaiting it here would stall the
-   * publisher forever (every curation toggle, every comment,
-   * every photo upload). Fan-out is fire-and-forget; ordered
-   * delivery is guaranteed by the Rust runtime queue, and send
-   * failures cannot surface through .catch either (the Promise
-   * doesn't reject either), so we rely on the client's heartbeat
-   * watchdog to tear down dead sockets instead.
+   * Encore.ts's streamOut `send()` is synchronous and returns
+   * `undefined`; errors (most commonly `Error: channel closed` once
+   * the browser has disconnected) are thrown synchronously. Catch
+   * them per-session and `close()` the offending session so the
+   * subscribe handler's `await session.done` unblocks and the stale
+   * entry is unregistered.
    */
   async dispatch(event: RealtimeEvent): Promise<void> {
     const set = this.sessionsByUser.get(event.userId);
@@ -92,7 +95,26 @@ class SessionManager {
     const outbound: ClientEvent = event;
     for (const session of set) {
       if (!session.channels.has(event.channel)) continue;
-      session.stream.send(outbound).catch(() => {});
+      try {
+        session.stream.send(outbound);
+      } catch (err: unknown) {
+        const message = (err as Error)?.message ?? String(err);
+        if (message.includes("channel closed")) {
+          log.info("realtime: dispatch on closed channel — closing session", {
+            userId: session.userId,
+            channel: event.channel,
+            type: event.type,
+          });
+        } else {
+          log.warn("realtime: dispatch send threw unexpectedly", {
+            userId: session.userId,
+            channel: event.channel,
+            type: event.type,
+            message,
+          });
+        }
+        session.close();
+      }
     }
   }
 
