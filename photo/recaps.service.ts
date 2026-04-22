@@ -720,39 +720,62 @@ async function loadPersonPhotoMap(userId: number): Promise<Map<number, Set<numbe
 
 const PERSON_RECENT_DAYS = 90;
 const PERSON_MIN_PHOTOS = 8;
+// Only the top-N most-photographed persons per user get dedicated recaps.
+// Without this cap, a user with many recognised faces generates hundreds of
+// per-year recaps, most of them for peripheral persons. Choosing 15 keeps the
+// close-circle covered (family, partners, close friends) without swamping
+// the feed or the DB.
+const PERSON_MAX_PERSONS = 15;
 
 async function buildPersonRecaps(
   userId: number,
   allPhotos: CandidatePhoto[],
   today: Date
 ): Promise<number> {
-  // Clean up any recaps that were created for unnamed persons in previous
-  // runs (before this filter existed). Recaps are keyed by person.id in the
-  // seed JSON; join back to `persons` to identify the unnamed ones.
+  const personList = await loadPersonsForUser(userId);
+  const personPhotos =
+    personList.length > 0 ? await loadPersonPhotoMap(userId) : new Map();
+
+  // Rank persons by total assigned photo count and keep only the top-N that
+  // also clear the PERSON_MIN_PHOTOS threshold. Persons below the threshold
+  // cannot produce a recap anyway, so excluding them here also lets the
+  // cleanup query below prune their stale recaps in a single pass.
+  const rankedPersons = personList
+    .map((p) => ({ person: p, count: personPhotos.get(p.id)?.size ?? 0 }))
+    .filter((x) => x.count >= PERSON_MIN_PHOTOS)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, PERSON_MAX_PERSONS)
+    .map((x) => x.person);
+  const rankedIds = new Set(rankedPersons.map((p) => p.id));
+
+  // Prune any person-recap whose referenced person is no longer in the
+  // selected set — covers unnamed persons, persons that dropped out of the
+  // top-N, deleted persons and renamed persons. Without this, old recaps
+  // would persist forever because dedup keys are per-person.
   await dbExec(
     db.delete(recaps).where(
       and(
         eq(recaps.user_id, userId),
         eq(recaps.kind, "person"),
-        sql`EXISTS (
-          SELECT 1 FROM ${persons}
-          WHERE ${persons.id} = (${recaps.seed} ->> 'person_id')::int
-            AND ${persons.name} = ${UNNAMED_PERSON}
-        )`
+        rankedIds.size > 0
+          ? sql`(${recaps.seed} ->> 'person_id')::int NOT IN (${sql.join(
+              Array.from(rankedIds).map((id) => sql`${id}`),
+              sql`, `
+            )})`
+          : sql`TRUE`
       )
     )
   );
 
-  const personList = await loadPersonsForUser(userId);
-  if (personList.length === 0) return 0;
-  const personPhotos = await loadPersonPhotoMap(userId);
+  if (rankedPersons.length === 0) return 0;
+
   const photosById = new Map(allPhotos.map((p) => [p.id, p]));
   const recentCutoff = new Date(today);
   recentCutoff.setDate(recentCutoff.getDate() - PERSON_RECENT_DAYS);
   const currentYear = today.getFullYear();
   let built = 0;
 
-  for (const person of personList) {
+  for (const person of rankedPersons) {
     const photoIds = personPhotos.get(person.id);
     if (!photoIds || photoIds.size === 0) continue;
     const photosForPerson: CandidatePhoto[] = [];
