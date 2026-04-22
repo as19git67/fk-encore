@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import Button from 'primevue/button'
+import Popover from 'primevue/popover'
 import {
   createComment,
   deleteComment,
@@ -26,6 +27,34 @@ const commentInput = ref('')
 const submitting = ref(false)
 const editingId = ref<number | null>(null)
 const editingText = ref('')
+
+// One shared popover serves as the action menu for the currently tapped
+// own-comment bubble. `actionTarget` tracks which comment the menu applies to.
+const actionPopover = ref<InstanceType<typeof Popover> | null>(null)
+const actionTarget = ref<PhotoComment | null>(null)
+
+function openActions(event: Event, c: PhotoComment) {
+  if (editingId.value === c.id) return
+  actionTarget.value = c
+  actionPopover.value?.show(event)
+}
+
+function closeActions() {
+  actionPopover.value?.hide()
+  actionTarget.value = null
+}
+
+function handleEditFromMenu() {
+  const c = actionTarget.value
+  closeActions()
+  if (c) startEdit(c)
+}
+
+function handleDeleteFromMenu() {
+  const c = actionTarget.value
+  closeActions()
+  if (c) void removeComment(c)
+}
 
 // Scroll container for the comment list. Kept at the bottom (newest
 // comment visible) after every content change so the user always
@@ -191,7 +220,22 @@ watch(
         :key="c.id"
         :class="['reactions__row', isOwn(c) ? 'is-own' : 'is-other']"
       >
-        <div class="reactions__bubble">
+        <div
+          :class="[
+            'reactions__bubble',
+            {
+              'reactions__bubble--actionable':
+                isOwn(c) && editingId !== c.id && (canEdit(c) || canDelete(c)),
+            },
+          ]"
+          :role="isOwn(c) && editingId !== c.id && (canEdit(c) || canDelete(c)) ? 'button' : undefined"
+          :tabindex="isOwn(c) && editingId !== c.id && (canEdit(c) || canDelete(c)) ? 0 : undefined"
+          :aria-haspopup="isOwn(c) && editingId !== c.id && (canEdit(c) || canDelete(c)) ? 'menu' : undefined"
+          :title="isOwn(c) && editingId !== c.id && (canEdit(c) || canDelete(c)) ? 'Aktionen' : undefined"
+          @click="isOwn(c) && editingId !== c.id && (canEdit(c) || canDelete(c)) && openActions($event, c)"
+          @keydown.enter.prevent="isOwn(c) && editingId !== c.id && (canEdit(c) || canDelete(c)) && openActions($event, c)"
+          @keydown.space.prevent="isOwn(c) && editingId !== c.id && (canEdit(c) || canDelete(c)) && openActions($event, c)"
+        >
           <div v-if="!isOwn(c)" class="reactions__author">
             {{ c.author.name ?? 'Unbekannt' }}
           </div>
@@ -226,31 +270,6 @@ watch(
               <span>{{ formatRelative(c.createdAt) }}</span>
               <span v-if="c.editedAt" class="reactions__edited">(bearbeitet)</span>
             </div>
-            <div
-              v-if="isOwn(c) && (canEdit(c) || canDelete(c))"
-              class="reactions__actions"
-            >
-              <Button
-                v-if="canEdit(c)"
-                icon="pi pi-pencil"
-                severity="secondary"
-                text
-                rounded
-                size="small"
-                v-tooltip.top="'Bearbeiten'"
-                @click="startEdit(c)"
-              />
-              <Button
-                v-if="canDelete(c)"
-                icon="pi pi-trash"
-                severity="danger"
-                text
-                rounded
-                size="small"
-                v-tooltip.top="'Löschen'"
-                @click="removeComment(c)"
-              />
-            </div>
           </template>
         </div>
       </div>
@@ -259,6 +278,27 @@ watch(
         Noch keine Kommentare.
       </div>
     </div>
+
+    <Popover ref="actionPopover">
+      <div class="reactions__menu">
+        <button
+          v-if="actionTarget && canEdit(actionTarget)"
+          type="button"
+          class="reactions__menu-item"
+          @click="handleEditFromMenu"
+        >
+          <i class="pi pi-pencil" /> Ändern
+        </button>
+        <button
+          v-if="actionTarget && canDelete(actionTarget)"
+          type="button"
+          class="reactions__menu-item reactions__menu-item--danger"
+          @click="handleDeleteFromMenu"
+        >
+          <i class="pi pi-trash" /> Löschen
+        </button>
+      </div>
+    </Popover>
 
     <form class="reactions__composer" @submit.prevent="submitComment">
       <textarea
@@ -321,8 +361,16 @@ watch(
   border-radius: 14px;
   word-break: break-word;
 }
+.reactions__bubble--actionable {
+  cursor: pointer;
+}
+.reactions__bubble--actionable:hover,
+.reactions__bubble--actionable:focus-visible {
+  filter: brightness(0.95);
+  outline: none;
+}
 .is-other .reactions__bubble {
-  background: var(--p-surface-ground);
+  background: var(--p-surface-200, #e5e7eb);
   color: var(--p-text-color);
   border-bottom-left-radius: 4px;
 }
@@ -357,13 +405,6 @@ watch(
   font-style: italic;
 }
 
-.reactions__actions {
-  align-self: flex-end;
-  display: flex;
-  gap: 0.15rem;
-  margin-top: 0.1rem;
-}
-
 .reactions__edit-textarea {
   width: 100%;
   font-size: 0.85em;
@@ -373,6 +414,33 @@ watch(
   align-self: flex-end;
   display: flex;
   gap: 0.2rem;
+}
+
+.reactions__menu {
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+}
+.reactions__menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: transparent;
+  border: none;
+  font: inherit;
+  color: var(--p-text-color);
+  cursor: pointer;
+  text-align: left;
+  border-radius: 4px;
+}
+.reactions__menu-item:hover,
+.reactions__menu-item:focus-visible {
+  background: var(--p-surface-100, #f3f4f6);
+  outline: none;
+}
+.reactions__menu-item--danger {
+  color: var(--p-red-500, #ef4444);
 }
 
 .reactions__empty {
