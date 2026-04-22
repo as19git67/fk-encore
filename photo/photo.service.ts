@@ -1968,10 +1968,35 @@ export async function updatePhotoCurationLogic(
   // (not on repeat favourites of an already-favourited photo) to keep
   // the event count bounded, and only when the photo is actually
   // shared — a private favourite is strictly personal.
-  if (status === "favorite" && prevStatus !== "favorite") {
+  if (prevStatus !== status) {
     const audience = await getUsersWithPhotoAccess(photoId);
     const recipients = audience.filter((uid) => uid !== userId);
+
+    // Live update for any open photo view that someone else is looking
+    // at — keeps the heart icon, fav-count and "Meinungen" bars in
+    // sync without a manual refresh. Fired on every status transition
+    // (favorite, hidden, visible) so opinion bars also reflect the
+    // remove operation. Best-effort; realtime outages must not block
+    // the curation update itself.
     if (recipients.length > 0) {
+      try {
+        await realtime.publishEvent({
+          userIds: recipients.map((id) => String(id)),
+          channel: "photos",
+          type: "curation.changed",
+          resourceId: String(photoId),
+          payload: { userId, status, prevStatus },
+        });
+      } catch (err) {
+        console.warn(
+          `[photo] realtime publish curation.changed failed photo=${photoId}: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    // Push + feed only on the explicit "into favorite" transition so
+    // un-favouriting doesn't spam recipients.
+    if (status === "favorite" && recipients.length > 0) {
       // Pick any album that both (a) contains the photo and (b) has
       // at least one recipient with access — used as the deep-link
       // target for the push notification. Owner-only albums are

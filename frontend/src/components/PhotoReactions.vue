@@ -89,8 +89,28 @@ async function removeComment(c: PhotoComment) {
   }
 }
 
-function canEdit(c: PhotoComment): boolean {
+// Only the user's MOST RECENT own comment is editable. Older entries
+// stay frozen so an established comment thread can't be rewritten
+// retroactively. Delete remains available on every own comment.
+const lastOwnCommentId = computed<number | null>(() => {
+  if (currentUserId.value === null) return null
+  for (let i = comments.value.length - 1; i >= 0; i -= 1) {
+    const c = comments.value[i]
+    if (c && c.author.id === currentUserId.value) return c.id
+  }
+  return null
+})
+
+function isOwn(c: PhotoComment): boolean {
   return currentUserId.value !== null && c.author.id === currentUserId.value
+}
+
+function canEdit(c: PhotoComment): boolean {
+  return isOwn(c) && c.id === lastOwnCommentId.value
+}
+
+function canDelete(c: PhotoComment): boolean {
+  return isOwn(c)
 }
 
 function formatRelative(iso: string): string {
@@ -193,8 +213,9 @@ watch(
         </template>
         <template v-else>
           <div class="reactions__comment-body">{{ c.body }}</div>
-          <div v-if="canEdit(c)" class="reactions__comment-actions">
+          <div v-if="isOwn(c)" class="reactions__comment-actions">
             <Button
+              v-if="canEdit(c)"
               icon="pi pi-pencil"
               severity="secondary"
               text
@@ -204,6 +225,7 @@ watch(
               @click="startEdit(c)"
             />
             <Button
+              v-if="canDelete(c)"
               icon="pi pi-trash"
               severity="danger"
               text
