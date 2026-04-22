@@ -63,9 +63,28 @@ const REPLAY_LIMIT = 500;
 export const subscribe = api.streamOut<HandshakeParams, ClientEvent>(
   { path: "/realtime/subscribe", expose: true, auth: true },
   async (handshake, stream) => {
+    // Belt-and-suspenders diagnostic: emit on both loggers at the
+    // earliest point in the handler, before anything that could
+    // throw or return early. If NEITHER line appears in the
+    // container logs after a fresh connect, the deployed image
+    // does not contain this code.
+    console.log(
+      `[realtime] subscribe handler ENTERED (console.log) at ${new Date().toISOString()}`,
+    );
+    log.info("realtime: subscribe handler ENTERED", {
+      at: new Date().toISOString(),
+    });
+
     const auth = getAuthData();
-    if (!auth) return;
+    if (!auth) {
+      log.warn("realtime: subscribe handler has NO auth data — exiting");
+      return;
+    }
     const { userID, permissions } = auth;
+    log.info("realtime: subscribe handler has auth", {
+      userID,
+      permissionCount: permissions.length,
+    });
 
     const requested = parseChannels(handshake.channels);
     const allowed: EventChannel[] = [];
