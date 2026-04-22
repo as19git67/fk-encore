@@ -93,6 +93,7 @@ export const subscribe = api.streamOut<HandshakeParams, ClientEvent>(
       if (hasChannelPermission(ch, permissions)) allowed.push(ch);
       else denied.push(ch);
     }
+    log.info("realtime: channels resolved", { userID, allowed, denied });
 
     // Register the session BEFORE replaying so live events published
     // during replay reach the socket too. Any overlap with replayed
@@ -102,18 +103,30 @@ export const subscribe = api.streamOut<HandshakeParams, ClientEvent>(
       new Set(allowed),
       stream,
     );
+    log.info("realtime: session registered", { userID });
 
+    log.info("realtime: about to send session.ready", { userID });
     await stream
       .send(systemEvent(userID, "session.ready", { channels: allowed }))
-      .catch(() => {});
+      .catch((err: unknown) => {
+        log.warn("realtime: session.ready send rejected", {
+          userID,
+          error: (err as Error)?.message ?? String(err),
+        });
+      });
+    log.info("realtime: session.ready send awaited", { userID });
+
     if (denied.length > 0) {
+      log.info("realtime: about to send channel.denied", { userID });
       await stream
         .send(systemEvent(userID, "channel.denied", { channels: denied }))
         .catch(() => {});
+      log.info("realtime: channel.denied send awaited", { userID });
     }
 
     // Replay missed events, if the client provided a cursor.
     const lastSeq = parseLastSeq(handshake.lastEventId);
+    log.info("realtime: replay decision", { userID, lastSeq });
     if (lastSeq !== null) {
       try {
         await replayFromOutbox(userID, lastSeq, new Set(allowed), stream);
@@ -122,6 +135,7 @@ export const subscribe = api.streamOut<HandshakeParams, ClientEvent>(
           `[realtime] replay failed for user=${userID} lastSeq=${lastSeq}: ${(err as Error).message}`,
         );
       }
+      log.info("realtime: replay done", { userID });
     }
 
     // Application-level heartbeats keep the socket warm and let the
