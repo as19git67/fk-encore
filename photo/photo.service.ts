@@ -3109,6 +3109,13 @@ export async function batchUpdateAlbumPhotosLogic(userId: number, req: BatchAlbu
 
   if (action === "add") {
     for (const albumId of albumIds) {
+      // Look up the album owner once per albumId — we need it as a
+      // notification recipient and it doesn't change across photoIds.
+      const album = await dbFirst<{ user_id: number }>(
+        db.select({ user_id: albums.user_id }).from(albums).where(eq(albums.id, albumId))
+      );
+      const addedPhotoIds: number[] = [];
+
       for (const photoId of photoIds) {
         const exists = await dbFirst(
           db.select().from(albumPhotos).where(and(eq(albumPhotos.album_id, albumId), eq(albumPhotos.photo_id, photoId)))
@@ -3122,6 +3129,7 @@ export async function batchUpdateAlbumPhotosLogic(userId: number, req: BatchAlbu
               added_at: new Date().toISOString()
             })
           );
+          addedPhotoIds.push(photoId);
         }
       }
 
@@ -3138,6 +3146,30 @@ export async function batchUpdateAlbumPhotosLogic(userId: number, req: BatchAlbu
           ).then(() => triggerWorkers()).catch(err => {
             console.error("Error enqueueing face assignments for batch album add:", err);
           });
+        }
+      }
+
+      // Realtime + feed fanout for every newly-inserted (album, photo)
+      // pair. The single-photo path in `addPhotoToAlbumLogic` does the
+      // same; this branch handles the batch case the UI actually calls.
+      if (addedPhotoIds.length > 0 && album) {
+        const sharedForFeed = await dbAll<{ user_id: number }>(
+          db.select({ user_id: albumShares.user_id }).from(albumShares).where(eq(albumShares.album_id, albumId))
+        );
+        const recipients = new Set<number>([album.user_id, ...sharedForFeed.map((s) => s.user_id)]);
+        recipients.delete(userId);
+        const recipientList = Array.from(recipients);
+        if (recipientList.length > 0) {
+          for (const photoId of addedPhotoIds) {
+            await publishAlbumEvent(recipientList, "photo_added", albumId, {
+              photoId,
+              addedByUserId: userId,
+            });
+            await emitFeedItem(recipientList, userId, "photo_added", {
+              albumId,
+              photoId,
+            });
+          }
         }
       }
     }
