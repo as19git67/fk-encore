@@ -1,5 +1,3 @@
-import { Topic, Attribute } from "encore.dev/pubsub";
-
 export type EventChannel =
   | "documents"
   | "photos"
@@ -8,14 +6,13 @@ export type EventChannel =
   | "system";
 
 /**
- * Envelope for every realtime event. The same shape is used for PubSub
- * messages and for the outbound WebSocket stream — clients receive the
- * exact JSON below (minus the `Attribute<>` marker, which is a compile-
- * time wrapper treated as `string` at runtime).
+ * Envelope for every realtime event. Identical to the wire shape: the
+ * publish API hands events directly to the in-process session manager,
+ * which forwards them verbatim to connected WebSocket clients.
  *
- * Versioning: bump `version` for a given `type` whenever `payload` shape
- * changes in a backwards-incompatible way. Clients should branch on the
- * pair (`type`, `version`).
+ * Versioning: bump `version` for a given `type` whenever `payload`
+ * shape changes in a backwards-incompatible way. Clients should branch
+ * on the pair (`type`, `version`).
  */
 export interface RealtimeEvent {
   /** uuid — used for client-side deduplication. */
@@ -28,8 +25,8 @@ export interface RealtimeEvent {
    * (heartbeats, handshake notices).
    */
   seq: number;
-  /** Target user. Attribute drives PubSub ordering per user. */
-  userId: Attribute<string>;
+  /** Target user (numeric user id rendered as a string). */
+  userId: string;
   channel: EventChannel;
   /** Event name inside the channel, e.g. "status.changed". */
   type: string;
@@ -43,29 +40,5 @@ export interface RealtimeEvent {
   version: number;
 }
 
-/**
- * Client-facing event shape. Identical to `RealtimeEvent` at runtime —
- * the `Attribute<>` marker is stripped so the stream handler can
- * forward messages without a cast.
- */
-export interface ClientEvent {
-  id: string;
-  seq: number;
-  userId: string;
-  channel: EventChannel;
-  type: string;
-  resourceId: string;
-  timestamp: string;
-  payload: Record<string, unknown>;
-  version: number;
-}
-
-/**
- * Single per-user topic. `orderingAttribute: "userId"` guarantees that
- * events for the same user are delivered in publish order, which is
- * important for status chains like pending → extracting → ready.
- */
-export const userEvents = new Topic<RealtimeEvent>("user-events", {
-  deliveryGuarantee: "at-least-once",
-  orderingAttribute: "userId",
-});
+/** Alias kept for callers that still distinguish "wire" from "internal". */
+export type ClientEvent = RealtimeEvent;

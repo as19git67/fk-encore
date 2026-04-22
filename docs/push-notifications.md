@@ -71,7 +71,7 @@ Each payload carries:
 
 ## Operator setup
 
-Push requires three secrets:
+Push requires three Encore secrets:
 
 | Secret name        | Value |
 |--------------------|-------|
@@ -79,21 +79,37 @@ Push requires three secrets:
 | `VapidPrivateKey`  | Base64url-encoded VAPID private key |
 | `VapidSubject`     | RFC 8292 "sub" — a `mailto:` or `https://` URL identifying the server operator |
 
+`infra-config.json` (baked into the docker image at build time via
+`encore build docker --config=infra-config.json`) maps each secret to
+an environment variable, so deploys never carry the secret values in
+the image:
+
+```json
+{
+  "secrets": {
+    "VapidPublicKey":  { "$env": "VAPID_PUBLIC_KEY" },
+    "VapidPrivateKey": { "$env": "VAPID_PRIVATE_KEY" },
+    "VapidSubject":    { "$env": "VAPID_SUBJECT" }
+  }
+}
+```
+
 Generate the keypair once (any machine, throw-away Node):
 
 ```bash
 npx web-push generate-vapid-keys
 ```
 
-Copy the output into the Encore secret store:
+For docker-compose deploys put the values in `.env` next to
+`docker-compose.yml`:
 
-```bash
-encore secret set --type prod VapidPublicKey
-encore secret set --type prod VapidPrivateKey
-encore secret set --type prod VapidSubject   # mailto:admin@my-domain.com
+```env
+VAPID_PUBLIC_KEY=…
+VAPID_PRIVATE_KEY=…
+VAPID_SUBJECT=mailto:admin@my-domain.com
 ```
 
-For local development use `.secrets.local.cue`:
+For local `encore run` development use `.secrets.local.cue`:
 
 ```cue
 VapidPublicKey: "…"

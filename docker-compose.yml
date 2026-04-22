@@ -113,6 +113,13 @@ services:
       # internal). We therefore trust XFF by default — only set to
       # "false" in test rigs that bypass Encore.
       BACKUP_TRUST_XFF: ${BACKUP_TRUST_XFF:-true}
+      # Web Push (optional) — see docs/push-notifications.md.
+      # Generate the keypair once with `npx web-push generate-vapid-keys`,
+      # then put both keys plus an operator contact into .env. Leaving
+      # any of them empty keeps push silently disabled.
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-}
     volumes:
       - photos:/mnt/data/photos
       - thumbnails:/mnt/data/thumbnails

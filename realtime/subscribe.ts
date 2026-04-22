@@ -1,6 +1,5 @@
 import { api } from "encore.dev/api";
 import { Query } from "encore.dev/api";
-import { Subscription } from "encore.dev/pubsub";
 import { getAuthData } from "~encore/auth";
 import { randomUUID } from "crypto";
 import { and, asc, eq, gt } from "drizzle-orm";
@@ -8,11 +7,7 @@ import { and, asc, eq, gt } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll } from "../db/adapter";
 import { realtimeEvents } from "../db/schema";
-import {
-  userEvents,
-  type ClientEvent,
-  type EventChannel,
-} from "./events";
+import type { ClientEvent, EventChannel } from "./events";
 import { hasChannelPermission, parseChannels } from "./permissions";
 import { sessionManager } from "./session-manager";
 
@@ -125,18 +120,6 @@ export const subscribe = api.streamOut<HandshakeParams, ClientEvent>(
     }
   },
 );
-
-/**
- * Dispatcher subscription — one per Encore instance. Forwards every
- * user-event to the locally connected sessions of the target user.
- * Remote users (connected to another instance) are handled by their
- * own dispatcher running on that instance.
- */
-const _dispatcher = new Subscription(userEvents, "dispatch", {
-  handler: async (ev) => {
-    await sessionManager.dispatch(ev);
-  },
-});
 
 function systemEvent(
   userID: string,

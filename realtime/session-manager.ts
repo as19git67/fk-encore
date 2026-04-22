@@ -28,10 +28,10 @@ interface InternalSession extends Session {
  * A user may have multiple concurrent sessions (multiple tabs, mobile
  * + desktop, etc.) so every userId maps to a Set.
  *
- * Phase-1 assumption: single Encore instance. When scaling horizontally
- * the dispatcher below still works — every instance runs its own
- * PubSub subscription and only forwards to its locally connected
- * sessions, which is the desired behaviour.
+ * Single-instance assumption: `publish.ts` calls `dispatch` directly
+ * after the outbox INSERT. Horizontal scaling would need a real
+ * broker between the publisher and this dispatcher; for our self-host
+ * deploy a process-local Map is enough.
  */
 class SessionManager {
   private readonly sessionsByUser = new Map<string, Set<InternalSession>>();
@@ -76,20 +76,12 @@ class SessionManager {
    * one dead socket does not break fan-out to the user's other tabs.
    */
   async dispatch(event: RealtimeEvent): Promise<void> {
-    const set = this.sessionsByUser.get(event.userId as unknown as string);
+    const set = this.sessionsByUser.get(event.userId);
     if (!set || set.size === 0) return;
 
-    const outbound: ClientEvent = {
-      id: event.id,
-      seq: event.seq,
-      userId: event.userId as unknown as string,
-      channel: event.channel,
-      type: event.type,
-      resourceId: event.resourceId,
-      timestamp: event.timestamp,
-      payload: event.payload,
-      version: event.version,
-    };
+    // `RealtimeEvent` and `ClientEvent` are now the same shape; the
+    // alias is kept so older imports keep working.
+    const outbound: ClientEvent = event;
 
     const sends: Promise<void>[] = [];
     for (const session of set) {

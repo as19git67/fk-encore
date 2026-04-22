@@ -3,7 +3,8 @@ import { randomUUID } from "crypto";
 import db from "../db/database";
 import { dbFirst } from "../db/adapter";
 import { realtimeEvents } from "../db/schema";
-import { userEvents, type EventChannel } from "./events";
+import type { EventChannel } from "./events";
+import { sessionManager } from "./session-manager";
 
 console.log("[boot] realtime/publish.ts: all imports resolved");
 
@@ -36,9 +37,11 @@ export interface PublishEventRequest {
  * filtering happens on the subscribe side.
  *
  * Per recipient we INSERT a row into the outbox (getting a monotonic
- * `seq` back) and then publish a PubSub message with the same
- * envelope. The DB write happens first so a client resuming after a
- * crash still sees the event even if PubSub delivery failed.
+ * `seq` back) and then hand the event to the in-process session
+ * manager which forwards it to every connected WebSocket session of
+ * that user. The DB write happens first so a client resuming after a
+ * crash still sees the event via outbox replay even if it was offline
+ * during the live dispatch.
  */
 export const publishEvent = api(
   { expose: false },
@@ -79,7 +82,7 @@ export const publishEvent = api(
           console.warn(`[realtime] publishEvent: outbox INSERT returned no row (user=${userId})`);
           return;
         }
-        await userEvents.publish({
+        await sessionManager.dispatch({
           id,
           seq: row.seq,
           userId,
