@@ -12,7 +12,6 @@ import type { ClientEvent, EventChannel } from "./events";
 import { hasChannelPermission, parseChannels } from "./permissions";
 import { sessionManager } from "./session-manager";
 
-log.info("boot: realtime/subscribe.ts: all imports resolved");
 
 interface HandshakeParams {
   /** Comma-separated channel list, e.g. `"documents,photos"`. Omit to receive every channel the user is permitted for. */
@@ -70,12 +69,9 @@ function safeSend(
     stream.send(msg);
   } catch (err: unknown) {
     const message = (err as Error)?.message ?? String(err);
-    // `channel closed` is the expected error after a client disconnect;
-    // log as info, not warn, and trigger cleanup. Anything else is
-    // unexpected and worth a warn.
-    if (message.includes("channel closed")) {
-      log.info("realtime: send on closed channel — closing session", { message });
-    } else {
+    // `channel closed` is the expected result after a client
+    // disconnect — swallow quietly. Anything else is worth a warn.
+    if (!message.includes("channel closed")) {
       log.warn("realtime: send threw unexpectedly", { message });
     }
     onDead();
@@ -168,17 +164,11 @@ export const subscribe = api.streamOut<HandshakeParams, ClientEvent>(
       );
     }, HEARTBEAT_INTERVAL_MS);
 
-    log.info("realtime: subscribe handler ready", {
-      userID,
-      channels: allowed,
-    });
-
     try {
       await session.done;
     } finally {
       clearInterval(heartbeat);
       sessionManager.unregister(session);
-      log.info("realtime: subscribe handler ended", { userID });
     }
   },
 );

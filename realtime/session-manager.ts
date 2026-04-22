@@ -90,35 +90,18 @@ class SessionManager {
    */
   async dispatch(event: RealtimeEvent): Promise<void> {
     const set = this.sessionsByUser.get(event.userId);
-    if (!set || set.size === 0) {
-      log.info("realtime: dispatch no sessions", {
-        userId: event.userId,
-        channel: event.channel,
-        type: event.type,
-      });
-      return;
-    }
+    if (!set || set.size === 0) return;
 
     const outbound: ClientEvent = event;
-    let delivered = 0;
-    let skipped = 0;
     for (const session of set) {
-      if (!session.channels.has(event.channel)) {
-        skipped += 1;
-        continue;
-      }
+      if (!session.channels.has(event.channel)) continue;
       try {
         session.stream.send(outbound);
-        delivered += 1;
       } catch (err: unknown) {
         const message = (err as Error)?.message ?? String(err);
-        if (message.includes("channel closed")) {
-          log.info("realtime: dispatch on closed channel — closing session", {
-            userId: session.userId,
-            channel: event.channel,
-            type: event.type,
-          });
-        } else {
+        if (!message.includes("channel closed")) {
+          // `channel closed` is the expected result of a disconnected
+          // client — no log needed. Anything else is worth a warn.
           log.warn("realtime: dispatch send threw unexpectedly", {
             userId: session.userId,
             channel: event.channel,
@@ -129,13 +112,6 @@ class SessionManager {
         session.close();
       }
     }
-    log.info("realtime: dispatch done", {
-      userId: event.userId,
-      channel: event.channel,
-      type: event.type,
-      delivered,
-      skipped,
-    });
   }
 
   /** Test/debug helper — number of connected sessions overall. */
