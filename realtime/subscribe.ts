@@ -105,35 +105,54 @@ export const subscribe = api.streamOut<HandshakeParams, ClientEvent>(
     );
     log.info("realtime: session registered", { userID });
 
-    // IMPORTANT: do NOT await `stream.send()`. Under Encore.ts the
-    // returned Promise never resolves even though the frame IS
-    // delivered to the client. Awaiting it stalls the handler
-    // indefinitely — we observed that in container logs on
-    // 2026-04-22: the very first `await stream.send(session.ready)`
-    // never returned, so the setInterval below never armed and the
-    // client tripped its heartbeat-watchdog after 60s and looped.
-    // Fire-and-forget with a `.catch` for error visibility; the
-    // Rust runtime guarantees ordered delivery of queued frames.
-    stream
-      .send(systemEvent(userID, "session.ready", { channels: allowed }))
-      .catch((err: unknown) => {
-        log.warn("realtime: session.ready send rejected", {
+    // Granular diagnostic: wrap each send so we can tell whether the
+    // synchronous call itself throws or whether the later-than-expected
+    // absence of `handler ready` is caused by something else.
+    log.info("realtime: before session.ready send", { userID });
+    try {
+      const p = stream.send(
+        systemEvent(userID, "session.ready", { channels: allowed }),
+      );
+      log.info("realtime: session.ready send returned", {
+        userID,
+        isPromise: !!(p && typeof (p as Promise<unknown>).then === "function"),
+      });
+      (p as Promise<void>)?.catch?.((err: unknown) => {
+        log.warn("realtime: session.ready send rejected async", {
           userID,
           error: (err as Error)?.message ?? String(err),
         });
       });
+    } catch (err: unknown) {
+      log.warn("realtime: session.ready send threw synchronously", {
+        userID,
+        error: (err as Error)?.message ?? String(err),
+      });
+    }
+    log.info("realtime: after session.ready send", { userID });
 
     if (denied.length > 0) {
-      stream
-        .send(systemEvent(userID, "channel.denied", { channels: denied }))
-        .catch(() => {});
+      log.info("realtime: before channel.denied send", { userID });
+      try {
+        const p = stream.send(
+          systemEvent(userID, "channel.denied", { channels: denied }),
+        );
+        (p as Promise<void>)?.catch?.(() => {});
+      } catch (err: unknown) {
+        log.warn("realtime: channel.denied send threw synchronously", {
+          userID,
+          error: (err as Error)?.message ?? String(err),
+        });
+      }
+      log.info("realtime: after channel.denied send", { userID });
     }
 
-    // Replay missed events, if the client provided a cursor. The
-    // replay helper uses the same non-awaiting send pattern
-    // internally.
+    log.info("realtime: before parseLastSeq", { userID });
     const lastSeq = parseLastSeq(handshake.lastEventId);
+    log.info("realtime: parseLastSeq done", { userID, lastSeq });
+
     if (lastSeq !== null) {
+      log.info("realtime: before replayFromOutbox", { userID, lastSeq });
       try {
         await replayFromOutbox(userID, lastSeq, new Set(allowed), stream);
       } catch (err) {
@@ -143,7 +162,10 @@ export const subscribe = api.streamOut<HandshakeParams, ClientEvent>(
           error: (err as Error)?.message ?? String(err),
         });
       }
+      log.info("realtime: after replayFromOutbox", { userID });
     }
+
+    log.info("realtime: before setInterval", { userID });
 
     // Application-level heartbeats keep the socket warm and let the
     // client detect a dead connection even when the TCP layer has no
@@ -163,8 +185,18 @@ export const subscribe = api.streamOut<HandshakeParams, ClientEvent>(
     const heartbeat = setInterval(() => {
       const tick = ++heartbeatTick;
       log.info("realtime: heartbeat tick", { tick, userID });
-      stream.send(systemEvent(userID, "heartbeat", {})).catch(() => {});
+      try {
+        const p = stream.send(systemEvent(userID, "heartbeat", {}));
+        (p as Promise<void>)?.catch?.(() => {});
+      } catch (err: unknown) {
+        log.warn("realtime: heartbeat send threw synchronously", {
+          tick,
+          userID,
+          error: (err as Error)?.message ?? String(err),
+        });
+      }
     }, HEARTBEAT_INTERVAL_MS);
+    log.info("realtime: after setInterval (heartbeat armed)", { userID });
 
     log.info("realtime: subscribe handler ready", {
       userID,
