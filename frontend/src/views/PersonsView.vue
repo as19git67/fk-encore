@@ -612,7 +612,27 @@ loadData()
 serviceHealth.startPolling()
 
 import { onUnmounted } from 'vue'
+import { useRealtimeEvent } from '../composables/useRealtime'
 onUnmounted(() => serviceHealth.stopPolling())
+
+// Refresh the opened person's photos when their curation state
+// changes elsewhere so the heart, fav-count and "Meinungen" bars in
+// the detail sidebar stay current. We only reload when a person is
+// actually open — the grid-level overview doesn't show stats.
+useRealtimeEvent('photos', 'curation.changed', async (ev) => {
+  if (!selectedPerson.value) return
+  const photoId = Number(ev.resourceId)
+  if (!Number.isFinite(photoId)) return
+  const hits = selectedPersonDetail.value?.faces.some(
+    (f) => f.photo && f.photo.id === photoId,
+  )
+  if (!hits) return
+  try {
+    selectedPersonDetail.value = await getPersonDetails(selectedPerson.value.id)
+  } catch {
+    // Ignore — next reload will re-sync.
+  }
+})
 </script>
 
 <template>
