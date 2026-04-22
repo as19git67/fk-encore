@@ -27,6 +27,17 @@ const submitting = ref(false)
 const editingId = ref<number | null>(null)
 const editingText = ref('')
 
+// Scroll container for the comment list. Kept at the bottom (newest
+// comment visible) after every content change so the user always
+// lands on the most recent message — mirrors the chat-style UX.
+const commentsRef = ref<HTMLElement | null>(null)
+
+async function scrollToLatest(): Promise<void> {
+  await nextTick()
+  const el = commentsRef.value
+  if (el) el.scrollTop = el.scrollHeight
+}
+
 async function load() {
   if (!props.photoId) return
   loading.value = true
@@ -34,6 +45,7 @@ async function load() {
   try {
     const c = await listComments(props.photoId)
     comments.value = c.comments
+    await scrollToLatest()
   } catch (err: unknown) {
     error.value = (err as Error)?.message || 'Fehler beim Laden'
   } finally {
@@ -49,6 +61,7 @@ async function submitComment() {
     const created = await createComment(props.photoId, body)
     comments.value.push(created)
     commentInput.value = ''
+    await scrollToLatest()
   } catch (err: unknown) {
     error.value = (err as Error)?.message || 'Kommentar fehlgeschlagen'
   } finally {
@@ -89,16 +102,14 @@ async function removeComment(c: PhotoComment) {
   }
 }
 
-// Only the user's MOST RECENT own comment is editable. Older entries
-// stay frozen so an established comment thread can't be rewritten
-// retroactively. Delete remains available on every own comment.
-const lastOwnCommentId = computed<number | null>(() => {
-  if (currentUserId.value === null) return null
-  for (let i = comments.value.length - 1; i >= 0; i -= 1) {
-    const c = comments.value[i]
-    if (c && c.author.id === currentUserId.value) return c.id
-  }
-  return null
+// Edit is only offered when the user's comment is *the* latest in
+// the thread. Once anyone else has replied the conversation has moved
+// on and prior entries stay frozen so we never rewrite a line that
+// someone has already reacted to. Delete remains available on every
+// own comment.
+const lastCommentId = computed<number | null>(() => {
+  if (comments.value.length === 0) return null
+  return comments.value[comments.value.length - 1]?.id ?? null
 })
 
 function isOwn(c: PhotoComment): boolean {
@@ -106,7 +117,7 @@ function isOwn(c: PhotoComment): boolean {
 }
 
 function canEdit(c: PhotoComment): boolean {
-  return isOwn(c) && c.id === lastOwnCommentId.value
+  return isOwn(c) && c.id === lastCommentId.value
 }
 
 function canDelete(c: PhotoComment): boolean {
@@ -139,6 +150,7 @@ async function refreshComments() {
   try {
     const c = await listComments(props.photoId)
     comments.value = c.comments
+    await scrollToLatest()
   } catch {
     // Ignore — next open will re-sync.
   }
@@ -173,69 +185,74 @@ watch(
   <div class="reactions">
     <div v-if="error" class="reactions__error">{{ error }}</div>
 
-    <div class="reactions__comments">
+    <div ref="commentsRef" class="reactions__comments">
       <div
         v-for="c in comments"
         :key="c.id"
-        class="reactions__comment"
+        :class="['reactions__row', isOwn(c) ? 'is-own' : 'is-other']"
       >
-        <div class="reactions__comment-head">
-          <strong>{{ c.author.name ?? 'Unbekannt' }}</strong>
-          <span class="reactions__comment-time">
-            {{ formatRelative(c.createdAt) }}
-            <span v-if="c.editedAt" class="reactions__comment-edited">(bearbeitet)</span>
-          </span>
+        <div class="reactions__bubble">
+          <div v-if="!isOwn(c)" class="reactions__author">
+            {{ c.author.name ?? 'Unbekannt' }}
+          </div>
+          <template v-if="editingId === c.id">
+            <textarea
+              v-model="editingText"
+              class="p-inputtext reactions__edit-textarea"
+              rows="2"
+            />
+            <div class="reactions__edit-actions">
+              <Button
+                icon="pi pi-check"
+                severity="success"
+                text
+                rounded
+                size="small"
+                @click="saveEdit(c)"
+              />
+              <Button
+                icon="pi pi-times"
+                severity="secondary"
+                text
+                rounded
+                size="small"
+                @click="cancelEdit"
+              />
+            </div>
+          </template>
+          <template v-else>
+            <div class="reactions__body">{{ c.body }}</div>
+            <div class="reactions__meta">
+              <span>{{ formatRelative(c.createdAt) }}</span>
+              <span v-if="c.editedAt" class="reactions__edited">(bearbeitet)</span>
+            </div>
+            <div
+              v-if="isOwn(c) && (canEdit(c) || canDelete(c))"
+              class="reactions__actions"
+            >
+              <Button
+                v-if="canEdit(c)"
+                icon="pi pi-pencil"
+                severity="secondary"
+                text
+                rounded
+                size="small"
+                v-tooltip.top="'Bearbeiten'"
+                @click="startEdit(c)"
+              />
+              <Button
+                v-if="canDelete(c)"
+                icon="pi pi-trash"
+                severity="danger"
+                text
+                rounded
+                size="small"
+                v-tooltip.top="'Löschen'"
+                @click="removeComment(c)"
+              />
+            </div>
+          </template>
         </div>
-        <template v-if="editingId === c.id">
-          <textarea
-            v-model="editingText"
-            class="p-inputtext reactions__edit-textarea"
-            rows="2"
-          />
-          <div class="reactions__edit-actions">
-            <Button
-              icon="pi pi-check"
-              severity="success"
-              text
-              rounded
-              size="small"
-              @click="saveEdit(c)"
-            />
-            <Button
-              icon="pi pi-times"
-              severity="secondary"
-              text
-              rounded
-              size="small"
-              @click="cancelEdit"
-            />
-          </div>
-        </template>
-        <template v-else>
-          <div class="reactions__comment-body">{{ c.body }}</div>
-          <div v-if="isOwn(c)" class="reactions__comment-actions">
-            <Button
-              v-if="canEdit(c)"
-              icon="pi pi-pencil"
-              severity="secondary"
-              text
-              rounded
-              size="small"
-              v-tooltip.top="'Bearbeiten'"
-              @click="startEdit(c)"
-            />
-            <Button
-              v-if="canDelete(c)"
-              icon="pi pi-trash"
-              severity="danger"
-              text
-              rounded
-              size="small"
-              v-tooltip.top="'Löschen'"
-              @click="removeComment(c)"
-            />
-          </div>
-        </template>
       </div>
 
       <div v-if="!loading && comments.length === 0" class="reactions__empty">
@@ -283,48 +300,73 @@ watch(
   overflow-y: auto;
 }
 
-.reactions__comment {
-  background: var(--p-surface-ground);
-  border-radius: 8px;
-  padding: 0.45rem 0.6rem;
+.reactions__row {
+  display: flex;
+  font-size: 0.8em;
+}
+.reactions__row.is-own {
+  justify-content: flex-end;
+}
+.reactions__row.is-other {
+  justify-content: flex-start;
+}
+
+.reactions__bubble {
+  max-width: 82%;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.15rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 14px;
+  word-break: break-word;
+}
+.is-other .reactions__bubble {
+  background: var(--p-surface-ground);
+  color: var(--p-text-color);
+  border-bottom-left-radius: 4px;
+}
+.is-own .reactions__bubble {
+  background: var(--p-primary-color);
+  color: var(--p-primary-contrast-color, #fff);
+  border-bottom-right-radius: 4px;
 }
 
-.reactions__comment-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 0.5rem;
+.reactions__author {
   font-size: 0.85em;
-}
-
-.reactions__comment-time {
+  font-weight: 600;
   color: var(--p-text-muted-color);
-  font-size: 0.9em;
 }
 
-.reactions__comment-edited {
-  margin-left: 0.25em;
+.reactions__body {
+  white-space: pre-wrap;
+}
+
+.reactions__meta {
+  display: flex;
+  gap: 0.35em;
+  font-size: 0.8em;
+  opacity: 0.75;
+  align-self: flex-end;
+}
+.is-other .reactions__meta {
+  align-self: flex-start;
+}
+
+.reactions__edited {
   font-style: italic;
 }
 
-.reactions__comment-body {
-  font-size: 0.95em;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.reactions__comment-actions {
+.reactions__actions {
   align-self: flex-end;
   display: flex;
   gap: 0.15rem;
+  margin-top: 0.1rem;
 }
 
 .reactions__edit-textarea {
   width: 100%;
-  font-size: 0.95em;
+  font-size: 0.85em;
 }
 
 .reactions__edit-actions {
