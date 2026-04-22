@@ -106,17 +106,39 @@ export const subscribe = api.streamOut<HandshakeParams, ClientEvent>(
     // client detect a dead connection even when the TCP layer has no
     // reason to produce an error. A failed send surfaces the
     // disconnect via `session.close()`, causing `done` to resolve.
+    //
+    // Instrumentation: each tick logs once so operators can see in
+    // container logs whether the timer is firing and whether the
+    // underlying `stream.send` succeeds or rejects. Drop these lines
+    // once the streamOut delivery issue under Encore.ts is confirmed
+    // resolved.
+    let heartbeatTick = 0;
     const heartbeat = setInterval(() => {
+      const tick = ++heartbeatTick;
+      console.log(`[realtime] heartbeat tick=${tick} user=${userID}`);
       stream
         .send(systemEvent(userID, "heartbeat", {}))
-        .catch(() => session.close());
+        .then(() => {
+          console.log(`[realtime] heartbeat tick=${tick} user=${userID} sent ok`);
+        })
+        .catch((err) => {
+          console.warn(
+            `[realtime] heartbeat tick=${tick} user=${userID} send failed: ${(err as Error).message ?? err}`,
+          );
+          session.close();
+        });
     }, HEARTBEAT_INTERVAL_MS);
+
+    console.log(
+      `[realtime] subscribe handler ready user=${userID} channels=[${allowed.join(",")}] denied=[${denied.join(",")}]`,
+    );
 
     try {
       await session.done;
     } finally {
       clearInterval(heartbeat);
       sessionManager.unregister(session);
+      console.log(`[realtime] subscribe handler ended user=${userID} ticks=${heartbeatTick}`);
     }
   },
 );
