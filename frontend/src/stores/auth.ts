@@ -6,7 +6,7 @@ import { startAuthentication } from '@simplewebauthn/browser'
 import { passkeyAuthOptions, passkeyAuthVerify } from '../api/passkeys'
 import { realtimeBus, type RealtimeChannel } from '../composables/useRealtime'
 
-const REALTIME_CHANNELS: RealtimeChannel[] = ['documents', 'photos', 'albums', 'feed']
+const REALTIME_CHANNELS: RealtimeChannel[] = ['documents', 'photos', 'albums', 'feed', 'scan-queue']
 
 function connectRealtime() {
   realtimeBus.connect({

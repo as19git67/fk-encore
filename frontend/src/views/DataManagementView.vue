@@ -18,6 +18,7 @@ import {
 } from '../api/photos'
 import { getBuildInfo } from '../api/system'
 import { useAuthStore } from '../stores/auth'
+import { useRealtimeEvent } from '../composables/useRealtime'
 
 const auth = useAuthStore()
 const canPurgePhotos = computed(() => auth.hasPermission('photos.purge'))
@@ -30,6 +31,11 @@ const rescanLoading = ref(false)
 const retryLoading = ref(false)
 const cancelLoading = ref(false)
 const cancelledPending = ref(false)  // true after cancel until queue settles
+// Fallback polling: only armed when the realtime channel is unreachable
+// (e.g. permission denied server-side, or WS closed while the view stays
+// open). When events flow normally we rely on push — see useRealtimeEvent
+// below which refetches on every `scan-queue/state.changed`.
+const POLL_FALLBACK_MS = 15000
 let pollInterval: ReturnType<typeof setInterval> | null = null
 
 const serviceLabels: Record<string, string> = {
@@ -58,8 +64,8 @@ async function fetchQueueStatus() {
     // Reset cancelled state once the queue has fully settled
     if (cancelledPending.value && !isActive.value) {
       cancelledPending.value = false
-      stopPolling()
     }
+    if (!isActive.value) stopPolling()
   } catch {
     // ignore polling errors
   }
@@ -67,7 +73,7 @@ async function fetchQueueStatus() {
 
 function startPolling() {
   if (pollInterval) return
-  pollInterval = setInterval(fetchQueueStatus, 5000)
+  pollInterval = setInterval(fetchQueueStatus, POLL_FALLBACK_MS)
 }
 
 function stopPolling() {
@@ -76,6 +82,14 @@ function stopPolling() {
     pollInterval = null
   }
 }
+
+// Push updates: backend emits `scan-queue/state.changed` (debounced to
+// at most one event every 500ms) for every queue mutation. We just
+// refetch — the REST endpoint remains the source of truth and the
+// handler stays trivial.
+useRealtimeEvent('scan-queue', 'state.changed', () => {
+  fetchQueueStatus()
+})
 
 async function handleRescan(force: boolean) {
   queueError.value = ''
@@ -111,10 +125,6 @@ async function handleCancel() {
     await cancelPendingScans()
     cancelledPending.value = true
     await fetchQueueStatus()
-    if (!isActive.value) {
-      stopPolling()
-      cancelledPending.value = false
-    }
   } catch (err: any) {
     queueError.value = err.message || 'Fehler beim Abbrechen'
   } finally {
