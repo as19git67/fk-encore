@@ -1972,16 +1972,17 @@ export async function updatePhotoCurationLogic(
     const audience = await getUsersWithPhotoAccess(photoId);
     const recipients = audience.filter((uid) => uid !== userId);
 
-    // Live update for any open photo view that someone else is looking
-    // at — keeps the heart icon, fav-count and "Meinungen" bars in
-    // sync without a manual refresh. Fired on every status transition
-    // (favorite, hidden, visible) so opinion bars also reflect the
-    // remove operation. Best-effort; realtime outages must not block
-    // the curation update itself.
-    if (recipients.length > 0) {
+    // Live update for every open photo view that can see this photo —
+    // including the actor's own session so things that aren't visible
+    // in the optimistic local toggle (fav-count aggregate, "Meinungen"
+    // bars, other tabs) refresh in place. The push + feed fan-out
+    // below still excludes the actor; this is purely a UI-refresh
+    // signal. Best-effort; realtime outages must not block the
+    // curation update itself.
+    if (audience.length > 0) {
       try {
         await realtime.publishEvent({
-          userIds: recipients.map((id) => String(id)),
+          userIds: audience.map((id) => String(id)),
           channel: "photos",
           type: "curation.changed",
           resourceId: String(photoId),
