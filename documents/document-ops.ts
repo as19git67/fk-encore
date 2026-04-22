@@ -31,8 +31,37 @@ import {
 } from "./llm-client";
 import { TAX_SECTIONS } from "./tax-sections";
 import { flattenTaxonomy } from "./taxonomy";
+import { realtime } from "~encore/clients";
 
 console.log("[boot] documents/document-ops.ts: all imports resolved");
+
+type DocumentStatus = "pending" | "extracting" | "classifying" | "ready" | "failed";
+
+/**
+ * Fire-and-forget realtime notification for a document status change.
+ * Errors are swallowed — the scan pipeline must not break when the
+ * realtime service is unavailable.
+ */
+async function publishStatusChanged(
+  documentId: number,
+  ownerUserId: number,
+  status: DocumentStatus,
+  extra: Record<string, unknown> = {},
+): Promise<void> {
+  try {
+    await realtime.publishEvent({
+      userIds: [String(ownerUserId)],
+      channel: "documents",
+      type: "status.changed",
+      resourceId: String(documentId),
+      payload: { status, ...extra },
+    });
+  } catch (err) {
+    console.warn(
+      `[documents] realtime publish failed for doc=${documentId} status=${status}: ${(err as Error).message}`,
+    );
+  }
+}
 
 /** Maximum characters of extracted text we feed the classifier. */
 const CLASSIFY_TEXT_LIMIT = parseInt(
@@ -80,6 +109,7 @@ export async function runTextExtract(documentId: number): Promise<void> {
     .update(documents)
     .set({ status: "extracting" })
     .where(eq(documents.id, documentId));
+  await publishStatusChanged(documentId, row.user_id, "extracting");
 
   const result = await extractPdfText(row.disk_path, {
     forceOcr: row.force_ocr ?? false,
@@ -93,6 +123,7 @@ export async function runTextExtract(documentId: number): Promise<void> {
       status: "classifying",
     })
     .where(eq(documents.id, documentId));
+  await publishStatusChanged(documentId, row.user_id, "classifying");
 }
 
 /**
@@ -143,6 +174,10 @@ export async function runClassify(documentId: number): Promise<{ classification:
   }
 
   await db.update(documents).set(patch).where(eq(documents.id, documentId));
+  await publishStatusChanged(documentId, row.user_id, "ready", {
+    category_slug: catSlug,
+    confidence: classification.confidence,
+  });
 
   await replaceTagLinks(documentId, classification.tags);
 
@@ -241,11 +276,17 @@ export async function runEmbed(documentId: number): Promise<{ chunks: number } |
  * Mark a document as failed. Called by the worker after a job has
  * exhausted retries so the UI can surface the error.
  */
-export async function markDocumentFailed(documentId: number, _reason: string): Promise<void> {
+export async function markDocumentFailed(documentId: number, reason: string): Promise<void> {
+  const row = await dbFirst<{ user_id: number }>(
+    db.select({ user_id: documents.user_id }).from(documents).where(eq(documents.id, documentId)),
+  );
   await db
     .update(documents)
     .set({ status: "failed" })
     .where(eq(documents.id, documentId));
+  if (row) {
+    await publishStatusChanged(documentId, row.user_id, "failed", { reason });
+  }
 }
 
 async function loadTaxonomyForClassifier(): Promise<TaxonomyEntry[]> {
