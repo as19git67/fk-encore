@@ -236,9 +236,9 @@ export function buildFeedNotification(input: {
       title = "Album geteilt";
       body = `${actor} hat das Album „${album}" mit dir geteilt`;
       break;
-    case "photo_liked":
-      title = "Gefällt mir";
-      body = `${actor} hat ein Foto mit ❤ markiert`;
+    case "photo_favorited":
+      title = "Neuer Favorit";
+      body = `${actor} hat ein Foto favorisiert`;
       break;
     case "photo_commented": {
       const excerpt =

@@ -3,7 +3,7 @@ import { apiFetch } from './client'
 export type FeedItemKind =
   | 'photo_added'
   | 'album_shared'
-  | 'photo_liked'
+  | 'photo_favorited'
   | 'photo_commented'
 
 export interface FeedActor {

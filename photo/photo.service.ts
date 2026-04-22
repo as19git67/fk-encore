@@ -47,7 +47,7 @@ export async function publishAlbumEvent(
 export async function emitFeedItem(
   recipients: number[],
   actorUserId: number,
-  kind: "photo_added" | "album_shared" | "photo_liked" | "photo_commented",
+  kind: "photo_added" | "album_shared" | "photo_favorited" | "photo_commented",
   opts: {
     albumId?: number | null;
     photoId?: number | null;
@@ -1960,6 +1960,36 @@ export async function updatePhotoCurationLogic(
       await writeFavoriteRatingXmp(getPhotoDiskPath(photo), true);
     } else if (prevStatus === "favorite") {
       await writeFavoriteRatingXmp(getPhotoDiskPath(photo), false);
+    }
+  }
+
+  // Social fan-out on "→ favorite" transition: notify everyone who can
+  // see the photo via a shared album. We only emit on the transition
+  // (not on repeat favourites of an already-favourited photo) to keep
+  // the event count bounded, and only when the photo is actually
+  // shared — a private favourite is strictly personal.
+  if (status === "favorite" && prevStatus !== "favorite") {
+    const audience = await getUsersWithPhotoAccess(photoId);
+    const recipients = audience.filter((uid) => uid !== userId);
+    if (recipients.length > 0) {
+      // Pick any album that both (a) contains the photo and (b) has
+      // at least one recipient with access — used as the deep-link
+      // target for the push notification. Owner-only albums are
+      // skipped because recipients wouldn't be able to open them.
+      const albumRow = await dbFirst<{ album_id: number }>(
+        db
+          .select({ album_id: albumPhotos.album_id })
+          .from(albumPhotos)
+          .innerJoin(albumShares, eq(albumShares.album_id, albumPhotos.album_id))
+          .where(eq(albumPhotos.photo_id, photoId))
+          .limit(1),
+      );
+      if (albumRow) {
+        await emitFeedItem(recipients, userId, "photo_favorited", {
+          albumId: albumRow.album_id,
+          photoId,
+        });
+      }
     }
   }
 

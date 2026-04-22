@@ -4,15 +4,9 @@ import Button from 'primevue/button'
 import {
   createComment,
   deleteComment,
-  getLikeSummary,
-  likePhoto,
   listComments,
-  listLikers,
-  unlikePhoto,
   updateComment,
   type PhotoComment,
-  type PhotoLikeSummary,
-  type PhotoLiker,
 } from '../api/reactions'
 import { useAuthStore } from '../stores/auth'
 import { useRealtimeEvent } from '../composables/useRealtime'
@@ -24,10 +18,7 @@ const props = defineProps<{
 const auth = useAuthStore()
 const currentUserId = computed(() => auth.user?.id ?? null)
 
-const likeSummary = ref<PhotoLikeSummary>({ count: 0, likedByMe: false })
 const comments = ref<PhotoComment[]>([])
-const likers = ref<PhotoLiker[]>([])
-const likersOpen = ref(false)
 const loading = ref(false)
 const error = ref('')
 
@@ -35,65 +26,18 @@ const commentInput = ref('')
 const submitting = ref(false)
 const editingId = ref<number | null>(null)
 const editingText = ref('')
-const likeBusy = ref(false)
 
 async function load() {
   if (!props.photoId) return
   loading.value = true
   error.value = ''
   try {
-    const [s, c] = await Promise.all([
-      getLikeSummary(props.photoId),
-      listComments(props.photoId),
-    ])
-    likeSummary.value = s
+    const c = await listComments(props.photoId)
     comments.value = c.comments
-    // Likers are loaded lazily when the user opens the popover.
-    likers.value = []
-    likersOpen.value = false
   } catch (err: unknown) {
     error.value = (err as Error)?.message || 'Fehler beim Laden'
   } finally {
     loading.value = false
-  }
-}
-
-async function toggleLike() {
-  if (likeBusy.value) return
-  likeBusy.value = true
-  const wasLiked = likeSummary.value.likedByMe
-  // Optimistic update so the heart reacts instantly; server reply
-  // replaces the values.
-  likeSummary.value = {
-    count: likeSummary.value.count + (wasLiked ? -1 : 1),
-    likedByMe: !wasLiked,
-  }
-  try {
-    likeSummary.value = wasLiked
-      ? await unlikePhoto(props.photoId)
-      : await likePhoto(props.photoId)
-    if (likersOpen.value) {
-      const l = await listLikers(props.photoId)
-      likers.value = l.likers
-    }
-  } catch (err: unknown) {
-    // Rollback on failure.
-    likeSummary.value = { count: likeSummary.value.count + (wasLiked ? 1 : -1), likedByMe: wasLiked }
-    error.value = (err as Error)?.message || 'Fehler'
-  } finally {
-    likeBusy.value = false
-  }
-}
-
-async function openLikers() {
-  likersOpen.value = !likersOpen.value
-  if (likersOpen.value && likers.value.length === 0 && likeSummary.value.count > 0) {
-    try {
-      const l = await listLikers(props.photoId)
-      likers.value = l.likers
-    } catch (err: unknown) {
-      error.value = (err as Error)?.message || 'Fehler'
-    }
   }
 }
 
@@ -171,18 +115,6 @@ function matchesPhoto(resourceId: string | number): boolean {
   return Number(resourceId) === props.photoId
 }
 
-async function refreshLikes() {
-  try {
-    likeSummary.value = await getLikeSummary(props.photoId)
-    if (likersOpen.value) {
-      const l = await listLikers(props.photoId)
-      likers.value = l.likers
-    }
-  } catch {
-    // Ignore — next interaction will re-sync.
-  }
-}
-
 async function refreshComments() {
   try {
     const c = await listComments(props.photoId)
@@ -191,14 +123,6 @@ async function refreshComments() {
     // Ignore — next open will re-sync.
   }
 }
-
-useRealtimeEvent('photos', 'liked', (ev) => {
-  if (matchesPhoto(ev.resourceId)) void refreshLikes()
-})
-
-useRealtimeEvent('photos', 'unliked', (ev) => {
-  if (matchesPhoto(ev.resourceId)) void refreshLikes()
-})
 
 useRealtimeEvent('photos', 'commented', (ev) => {
   if (matchesPhoto(ev.resourceId)) void refreshComments()
@@ -228,34 +152,6 @@ watch(
 <template>
   <div class="reactions">
     <div v-if="error" class="reactions__error">{{ error }}</div>
-
-    <div class="reactions__like-row">
-      <Button
-        :icon="likeSummary.likedByMe ? 'pi pi-heart-fill' : 'pi pi-heart'"
-        :severity="likeSummary.likedByMe ? 'danger' : 'secondary'"
-        text
-        rounded
-        :loading="likeBusy"
-        :disabled="loading"
-        @click="toggleLike"
-        v-tooltip.top="likeSummary.likedByMe ? 'Gefällt dir nicht mehr' : 'Gefällt mir'"
-      />
-      <button
-        type="button"
-        class="reactions__count"
-        :disabled="likeSummary.count === 0"
-        @click="openLikers"
-      >
-        {{ likeSummary.count }}
-        {{ likeSummary.count === 1 ? 'Person' : 'Personen' }}
-      </button>
-    </div>
-
-    <div v-if="likersOpen && likers.length > 0" class="reactions__likers">
-      <span v-for="l in likers" :key="l.userId" class="reactions__liker">
-        {{ l.name ?? 'Unbekannt' }}
-      </span>
-    </div>
 
     <div class="reactions__comments">
       <div
@@ -355,39 +251,6 @@ watch(
 .reactions__error {
   color: var(--p-message-error-color, #c00);
   font-size: 0.85em;
-}
-
-.reactions__like-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.reactions__count {
-  border: none;
-  background: transparent;
-  color: var(--p-text-muted-color);
-  font-size: 0.9em;
-  cursor: pointer;
-  padding: 0 0.25em;
-}
-.reactions__count:disabled {
-  cursor: default;
-}
-.reactions__count:not(:disabled):hover {
-  text-decoration: underline;
-}
-
-.reactions__likers {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35em;
-  font-size: 0.85em;
-}
-.reactions__liker {
-  background: var(--p-surface-ground);
-  border-radius: 999px;
-  padding: 0.1em 0.55em;
 }
 
 .reactions__comments {
