@@ -5,19 +5,37 @@ from __future__ import annotations
 import logging
 from typing import List, Optional, Tuple
 
-from sqlalchemy import select, text
+from sqlalchemy import String, select, text
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import bindparam
+from sqlalchemy.sql.expression import any_
 
 from app.db.orm_models import Photo
 
 logger = logging.getLogger(__name__)
 
 
+def _photo_id_any(photo_ids: List[str]):
+    """Build a WHERE-clause fragment using PostgreSQL's `= ANY($1)`.
+
+    SQLAlchemy's `.in_(list)` expands to one bound parameter per element,
+    which trips asyncpg's hard limit of 32767 parameters per query once the
+    list grows large (hit by /similar-groups when an album has ~30k+ photos).
+    Binding the whole list as a single text[] array sidesteps the limit.
+    """
+    return Photo.photo_id == any_(
+        bindparam("photo_ids_arr", list(photo_ids), type_=ARRAY(String))
+    )
+
+
 async def get_existing_photo_ids(session: AsyncSession, photo_ids: List[str]) -> set[str]:
     """Return the subset of photo_ids that already exist in the DB."""
+    if not photo_ids:
+        return set()
     result = await session.execute(
-        select(Photo.photo_id).where(Photo.photo_id.in_(photo_ids))
+        select(Photo.photo_id).where(_photo_id_any(photo_ids))
     )
     return {row[0] for row in result.fetchall()}
 
@@ -49,8 +67,10 @@ async def upsert_photos(session: AsyncSession, photos: List[dict], overwrite: bo
 
 async def get_photos_by_ids(session: AsyncSession, photo_ids: List[str]) -> List[Photo]:
     """Fetch Photo rows for the given IDs."""
+    if not photo_ids:
+        return []
     result = await session.execute(
-        select(Photo).where(Photo.photo_id.in_(photo_ids))
+        select(Photo).where(_photo_id_any(photo_ids))
     )
     return list(result.scalars().all())
 
@@ -73,10 +93,12 @@ async def get_dino_embeddings_sorted_by_time(
     produces a clean list from the `vector` column rather than raw driver
     output.
     """
+    if not photo_ids:
+        return []
     stmt = (
         select(Photo.photo_id, Photo.timestamp, Photo.embedding_dino)
         .where(
-            Photo.photo_id.in_(photo_ids),
+            _photo_id_any(photo_ids),
             Photo.embedding_dino.is_not(None),
             Photo.timestamp.is_not(None),
         )
