@@ -102,7 +102,14 @@ skips the push leg entirely.
    defined in `infra-config.json` and baked into the image at build
    time).
 
-3. Restart the app:
+3. Make sure your **host-side `docker-compose.yml`** has the three
+   `VAPID_*` entries in the `app` service's `environment:` block. If
+   you upgraded from an older release, the compose file on disk may
+   predate this change — see [Upgrading](#upgrading) for a one-liner
+   that pulls the current compose file. Without these entries the
+   container never sees the variables, regardless of what's in `.env`.
+
+4. Restart the app:
 
    ```bash
    docker compose up -d --no-deps app
@@ -255,6 +262,34 @@ docker exec fk-encore-app sh -c \
 ```
 
 ## Common tasks
+
+### Upgrading
+
+New images published to GHCR are pulled automatically by Watchtower (see
+the per-environment `WATCHTOWER_URL_*` secrets in the CI workflow). Two
+things do **not** update themselves and must be synced manually whenever
+you pull a newer release:
+
+1. **`docker-compose.yml` on the host.** Only environment variables
+   listed under a service's `environment:` block are forwarded into its
+   container — putting a new variable into `.env` alone has no effect.
+   When a release introduces new env vars, pull the updated compose
+   file too:
+
+   ```bash
+   # Replace <branch-or-tag> with `main` (or the release tag you're on).
+   curl -fsSL -o docker-compose.yml \
+     https://raw.githubusercontent.com/as19git67/fk-encore/<branch-or-tag>/docker-compose.yml
+   docker compose up -d app
+   ```
+
+   If you've hand-customised the compose file, diff it against the repo
+   copy before overwriting and merge the new `environment:` keys.
+
+2. **`.env`** — add any new variables documented in the release notes.
+   Unset variables default to empty strings via `${VAR:-}` placeholders,
+   so missing values never break the container — affected features just
+   stay off.
 
 ### Rebuild all services
 
