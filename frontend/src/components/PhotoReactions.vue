@@ -71,16 +71,20 @@ function handleDeleteFromMenu() {
   if (c) void removeComment(c)
 }
 
-// Scroll container for the comment list. Kept at the bottom (newest
-// comment visible) after every content change so the user always
-// lands on the most recent message — mirrors the chat-style UX.
-const commentsRef = ref<HTMLElement | null>(null)
-
-async function scrollToLatest(): Promise<void> {
-  await nextTick()
-  const el = commentsRef.value
-  if (el) el.scrollTop = el.scrollHeight
-}
+// When there are more than VISIBLE_COMMENT_COUNT comments we collapse to
+// the newest few by default. The user can expand via a toggle rendered
+// inside the composer (where their focus already is). The list has no
+// inner scroll — the page/sidebar provides the single scrollbar.
+const VISIBLE_COMMENT_COUNT = 3
+const expanded = ref(false)
+const hiddenCount = computed(() =>
+  Math.max(0, comments.value.length - VISIBLE_COMMENT_COUNT)
+)
+const visibleComments = computed(() =>
+  expanded.value || hiddenCount.value === 0
+    ? comments.value
+    : comments.value.slice(-VISIBLE_COMMENT_COUNT)
+)
 
 async function load() {
   if (!props.photoId) return
@@ -89,7 +93,6 @@ async function load() {
   try {
     const c = await listComments(props.photoId)
     comments.value = c.comments
-    await scrollToLatest()
   } catch (err: unknown) {
     error.value = (err as Error)?.message || 'Fehler beim Laden'
   } finally {
@@ -105,7 +108,6 @@ async function submitComment() {
     const created = await createComment(props.photoId, body)
     comments.value.push(created)
     commentInput.value = ''
-    await scrollToLatest()
   } catch (err: unknown) {
     error.value = (err as Error)?.message || 'Kommentar fehlgeschlagen'
   } finally {
@@ -194,7 +196,6 @@ async function refreshComments() {
   try {
     const c = await listComments(props.photoId)
     comments.value = c.comments
-    await scrollToLatest()
   } catch {
     // Ignore — next open will re-sync.
   }
@@ -229,9 +230,9 @@ watch(
   <div class="reactions">
     <div v-if="error" class="reactions__error">{{ error }}</div>
 
-    <div ref="commentsRef" class="reactions__comments">
+    <div class="reactions__comments">
       <div
-        v-for="c in comments"
+        v-for="c in visibleComments"
         :key="c.id"
         :class="['reactions__row', isOwn(c) ? 'is-own' : 'is-other']"
       >
@@ -318,6 +319,16 @@ watch(
     </Popover>
 
     <form class="reactions__composer" @submit.prevent="submitComment">
+      <button
+        v-if="hiddenCount > 0 || expanded"
+        type="button"
+        class="reactions__toggle"
+        :title="expanded ? 'Einklappen' : `${hiddenCount} ältere anzeigen`"
+        @click="expanded = !expanded"
+      >
+        <i :class="expanded ? 'pi pi-chevron-down' : 'pi pi-chevron-up'" />
+        <span v-if="!expanded">{{ hiddenCount }}</span>
+      </button>
       <textarea
         ref="composerTextarea"
         v-model="commentInput"
@@ -355,8 +366,6 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  max-height: 320px;
-  overflow-y: auto;
 }
 
 .reactions__row {
@@ -389,7 +398,10 @@ watch(
   outline: none;
 }
 .is-other .reactions__bubble {
-  background: var(--p-surface-200, #e5e7eb);
+  /* Derive the tint from the current text color so the bubble always
+     contrasts against the body text — works in both light and dark mode
+     regardless of the exact PrimeVue surface palette. */
+  background: color-mix(in srgb, var(--p-text-color) 12%, transparent);
   color: var(--p-text-color);
   border-bottom-left-radius: 4px;
 }
@@ -466,7 +478,7 @@ watch(
 .reactions__composer {
   display: flex;
   gap: 0.4rem;
-  align-items: flex-start;
+  align-items: center;
 }
 
 .reactions__composer-textarea {
@@ -475,6 +487,28 @@ watch(
   resize: none;
   overflow-y: auto;
   max-height: 8em;
+  padding: 0.45rem 0.7rem;
+  line-height: 1.3;
+}
+
+.reactions__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--p-surface-border-color, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+  color: var(--p-text-color);
+  font: inherit;
+  font-size: 0.8em;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.reactions__toggle:hover,
+.reactions__toggle:focus-visible {
+  background: color-mix(in srgb, var(--p-text-color) 16%, transparent);
+  outline: none;
 }
 
 .reactions__edit-textarea {
