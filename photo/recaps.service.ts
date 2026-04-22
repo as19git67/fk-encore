@@ -11,7 +11,7 @@
  * bereits, aktualisiert der Builder nur Cover/Titel/Photo-Set.
  */
 
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbExec, dbFirst, dbInsertReturning } from "../db/adapter";
 import {
@@ -29,6 +29,27 @@ import { repairMojibake } from "./text-encoding";
 
 const MIN_PHOTOS_PER_RECAP = 4;
 const MAX_PHOTOS_PER_RECAP = 30;
+// Visible feed is capped so the page stays snappy for libraries with thousands
+// of recaps (e.g. users with many assigned persons generate hundreds of
+// per-year person-recaps). The underlying rows remain in the DB — only the
+// user-facing listing is trimmed.
+const MAX_VISIBLE_RECAPS = 50;
+// Per-kind quotas prevent one noisy kind (typically `person`) from crowding
+// out the rest of the feed. Each kind first takes up to its quota by score;
+// any leftover slots are then filled from the remaining top-scoring recaps
+// across all kinds. Quotas sum to MAX_VISIBLE_RECAPS.
+const RECAP_KIND_QUOTA: Record<RecapKind, number> = {
+  recent_highlights: 4,
+  on_this_day: 8,
+  trip: 10,
+  person: 15,
+  place: 8,
+  theme: 5,
+};
+// Candidate pool size per kind (fetched via window function). Sized to
+// MAX_VISIBLE_RECAPS so that a user with only one populated kind can still
+// fill the feed from leftovers after the quota pass.
+const RECAP_KIND_POOL = MAX_VISIBLE_RECAPS;
 const TRIP_MIN_DISTANCE_KM = 100;
 const TRIP_MAX_GAP_DAYS = 2;
 const TRIP_LOOKBACK_DAYS = 365 * 3;
@@ -652,12 +673,17 @@ interface PersonInfo {
   name: string;
 }
 
+// Default name for auto-detected faces that the user has not yet labelled.
+// These are skipped everywhere in the recap pipeline — an "Unbenannt"-recap
+// carries no memory value for the user.
+const UNNAMED_PERSON = "Unbenannt";
+
 async function loadPersonsForUser(userId: number): Promise<PersonInfo[]> {
   return dbAll<PersonInfo>(
     db
       .select({ id: persons.id, name: persons.name })
       .from(persons)
-      .where(eq(persons.user_id, userId))
+      .where(and(eq(persons.user_id, userId), ne(persons.name, UNNAMED_PERSON)))
   );
 }
 
@@ -694,6 +720,12 @@ async function loadPersonPhotoMap(userId: number): Promise<Map<number, Set<numbe
 
 const PERSON_RECENT_DAYS = 90;
 const PERSON_MIN_PHOTOS = 8;
+// Only the top-N most-photographed persons per user get dedicated recaps.
+// Without this cap, a user with many recognised faces generates hundreds of
+// per-year recaps, most of them for peripheral persons. Choosing 15 keeps the
+// close-circle covered (family, partners, close friends) without swamping
+// the feed or the DB.
+const PERSON_MAX_PERSONS = 15;
 
 async function buildPersonRecaps(
   userId: number,
@@ -701,15 +733,49 @@ async function buildPersonRecaps(
   today: Date
 ): Promise<number> {
   const personList = await loadPersonsForUser(userId);
-  if (personList.length === 0) return 0;
-  const personPhotos = await loadPersonPhotoMap(userId);
+  const personPhotos =
+    personList.length > 0 ? await loadPersonPhotoMap(userId) : new Map();
+
+  // Rank persons by total assigned photo count and keep only the top-N that
+  // also clear the PERSON_MIN_PHOTOS threshold. Persons below the threshold
+  // cannot produce a recap anyway, so excluding them here also lets the
+  // cleanup query below prune their stale recaps in a single pass.
+  const rankedPersons = personList
+    .map((p) => ({ person: p, count: personPhotos.get(p.id)?.size ?? 0 }))
+    .filter((x) => x.count >= PERSON_MIN_PHOTOS)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, PERSON_MAX_PERSONS)
+    .map((x) => x.person);
+  const rankedIds = new Set(rankedPersons.map((p) => p.id));
+
+  // Prune any person-recap whose referenced person is no longer in the
+  // selected set — covers unnamed persons, persons that dropped out of the
+  // top-N, deleted persons and renamed persons. Without this, old recaps
+  // would persist forever because dedup keys are per-person.
+  await dbExec(
+    db.delete(recaps).where(
+      and(
+        eq(recaps.user_id, userId),
+        eq(recaps.kind, "person"),
+        rankedIds.size > 0
+          ? sql`(${recaps.seed} ->> 'person_id')::int NOT IN (${sql.join(
+              Array.from(rankedIds).map((id) => sql`${id}`),
+              sql`, `
+            )})`
+          : sql`TRUE`
+      )
+    )
+  );
+
+  if (rankedPersons.length === 0) return 0;
+
   const photosById = new Map(allPhotos.map((p) => [p.id, p]));
   const recentCutoff = new Date(today);
   recentCutoff.setDate(recentCutoff.getDate() - PERSON_RECENT_DAYS);
   const currentYear = today.getFullYear();
   let built = 0;
 
-  for (const person of personList) {
+  for (const person of rankedPersons) {
     const photoIds = personPhotos.get(person.id);
     if (!photoIds || photoIds.size === 0) continue;
     const photosForPerson: CandidatePhoto[] = [];
@@ -1207,12 +1273,19 @@ export async function listRecapsForUser(
   userId: number,
   includeDismissed = false
 ): Promise<RecapSummary[]> {
-  const conditions = [eq(recaps.user_id, userId)];
-  if (!includeDismissed) {
-    conditions.push(sql`${recaps.dismissed_at} IS NULL` as any);
-  }
+  // Two-phase selection to keep the feed balanced across recap kinds:
+  //   1. SQL: fetch top RECAP_KIND_POOL candidates per kind using a window
+  //      function, ranked by (unseen first, score DESC, created_at DESC).
+  //   2. TS: apply per-kind quotas, then fill remaining slots from leftover
+  //      candidates by the same ranking.
+  //
+  // Without quotas, a user with many assigned persons can end up with all 50
+  // visible slots occupied by person-recaps, hiding trips, places, themes etc.
+  const dismissedFilter = includeDismissed
+    ? sql``
+    : sql`AND dismissed_at IS NULL`;
 
-  const rows = await dbAll<{
+  type Row = {
     id: number;
     kind: RecapKind;
     title: string;
@@ -1223,33 +1296,78 @@ export async function listRecapsForUser(
     created_at: string;
     dismissed_at: string | null;
     seen_at: string | null;
+    score: number;
     photo_count: number;
-  }>(
-    db
-      .select({
-        id: recaps.id,
-        kind: recaps.kind,
-        title: recaps.title,
-        subtitle: recaps.subtitle,
-        cover_photo_id: recaps.cover_photo_id,
-        period_start: recaps.period_start,
-        period_end: recaps.period_end,
-        created_at: recaps.created_at,
-        dismissed_at: recaps.dismissed_at,
-        seen_at: recaps.seen_at,
-        photo_count: sql<number>`(SELECT COUNT(*)::int FROM ${recapPhotos} WHERE ${recapPhotos.recap_id} = ${recaps.id})`,
-      })
-      .from(recaps)
-      .where(and(...conditions))
-      // Unseen recaps surface first; within each bucket, ranked by score.
-      .orderBy(
-        sql`${recaps.seen_at} IS NOT NULL`,
-        sql`${recaps.score} DESC`,
-        sql`${recaps.created_at} DESC`
-      )
-  );
+  };
 
-  return rows.map((r) => ({
+  const result = await db.execute<Row>(sql`
+    SELECT id, kind, title, subtitle, cover_photo_id,
+           period_start, period_end, created_at, dismissed_at, seen_at, score,
+           (SELECT COUNT(*)::int FROM ${recapPhotos}
+              WHERE ${recapPhotos.recap_id} = r.id) AS photo_count
+    FROM (
+      SELECT *,
+             ROW_NUMBER() OVER (
+               PARTITION BY kind
+               ORDER BY (seen_at IS NOT NULL),
+                        score DESC,
+                        created_at DESC
+             ) AS rn
+      FROM recaps
+      WHERE user_id = ${userId}
+            ${dismissedFilter}
+    ) r
+    WHERE rn <= ${RECAP_KIND_POOL}
+  `);
+  const candidates = result.rows;
+
+  const rankOrder = (a: Row, b: Row): number => {
+    const aSeen = a.seen_at ? 1 : 0;
+    const bSeen = b.seen_at ? 1 : 0;
+    if (aSeen !== bSeen) return aSeen - bSeen;
+    if (a.score !== b.score) return b.score - a.score;
+    return a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0;
+  };
+
+  // Phase 1: bucket candidates by kind, each bucket already sorted via SQL.
+  const byKind = new Map<RecapKind, Row[]>();
+  for (const row of candidates) {
+    const list = byKind.get(row.kind) ?? [];
+    list.push(row);
+    byKind.set(row.kind, list);
+  }
+  for (const list of byKind.values()) list.sort(rankOrder);
+
+  // Phase 2a: take up to quota from each kind.
+  const picked: Row[] = [];
+  const pickedIds = new Set<number>();
+  for (const [kind, quota] of Object.entries(RECAP_KIND_QUOTA) as [
+    RecapKind,
+    number,
+  ][]) {
+    const pool = byKind.get(kind) ?? [];
+    for (const row of pool.slice(0, quota)) {
+      picked.push(row);
+      pickedIds.add(row.id);
+    }
+  }
+
+  // Phase 2b: fill remaining slots from leftover candidates, best-scoring first.
+  if (picked.length < MAX_VISIBLE_RECAPS) {
+    const leftovers = candidates
+      .filter((r) => !pickedIds.has(r.id))
+      .sort(rankOrder);
+    for (const row of leftovers) {
+      if (picked.length >= MAX_VISIBLE_RECAPS) break;
+      picked.push(row);
+      pickedIds.add(row.id);
+    }
+  }
+
+  // Final ordering shown in the UI.
+  picked.sort(rankOrder);
+
+  return picked.map((r) => ({
     id: r.id,
     kind: r.kind,
     title: r.title,
