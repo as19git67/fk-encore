@@ -3372,6 +3372,53 @@ export async function removeAlbumShareLogic(userId: number, req: RemoveAlbumShar
 }
 
 /**
+ * Leave an album share. The caller must be a shared participant (not the
+ * owner) — this removes their own entry from album_shares, clears their
+ * per-user settings and cleans up face data for photos they lose access to.
+ */
+export async function leaveAlbumLogic(userId: number, albumId: number): Promise<{ success: boolean }> {
+  const album = await dbFirst<typeof albums.$inferSelect>(
+    db.select().from(albums).where(eq(albums.id, albumId))
+  );
+  if (!album) throw APIError.notFound("Album not found");
+  if (album.user_id === userId) {
+    throw APIError.failedPrecondition("Eigentümer können die Freigabe nicht verlassen");
+  }
+
+  const share = await dbFirst<typeof albumShares.$inferSelect>(
+    db.select().from(albumShares).where(and(eq(albumShares.album_id, albumId), eq(albumShares.user_id, userId)))
+  );
+  if (!share) throw APIError.notFound("Du bist kein Teilnehmer dieses Albums");
+
+  const albumPhotoIds = (await dbAll<{ photo_id: number }>(
+    db.select({ photo_id: albumPhotos.photo_id }).from(albumPhotos).where(eq(albumPhotos.album_id, albumId))
+  )).map(r => r.photo_id);
+
+  await dbExec(
+    db.delete(albumShares).where(and(eq(albumShares.album_id, albumId), eq(albumShares.user_id, userId)))
+  );
+  await dbExec(
+    db.delete(albumUserSettings).where(and(eq(albumUserSettings.album_id, albumId), eq(albumUserSettings.user_id, userId)))
+  );
+
+  if (albumPhotoIds.length > 0) {
+    cleanupAfterUnshare(userId, albumPhotoIds).catch(err => {
+      console.error(`Error cleaning up after leaving album ${albumId}:`, err);
+    });
+  }
+
+  scheduleRegroup(userId);
+
+  // Notify the leaving user's other sessions so their album list updates,
+  // and the owner so the shares panel reflects the change.
+  await publishAlbumEvent([userId, album.user_id], "unshared", albumId, {
+    leftUserId: userId,
+  });
+
+  return { success: true };
+}
+
+/**
  * After an album share is removed, delete the user's face data for photos
  * they no longer have access to (not owned and not in any other shared album).
  */
