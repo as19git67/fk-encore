@@ -254,10 +254,13 @@ export function buildFeedNotification(input: {
   }
 
   // Deep-link into the album (optionally with a photo anchor) so
-  // clicking the notification lands on the right page.
-  let url = "/fotos/feed";
+  // clicking the notification lands on the right page. URLs are
+  // prefixed with `/app/` because the SPA is mounted there (see
+  // web/static.ts + frontend/vite.config.ts `base`); bare `/fotos/...`
+  // would fall through to the API router.
+  let url = "/app/fotos/feed";
   if (input.albumId) {
-    url = `/fotos/alben/${input.albumId}`;
+    url = `/app/fotos/alben/${input.albumId}`;
     if (input.photoId) url += `?photoId=${input.photoId}`;
   }
 
