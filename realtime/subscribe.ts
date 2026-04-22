@@ -1,5 +1,6 @@
 import { api } from "encore.dev/api";
 import { Query } from "encore.dev/api";
+import log from "encore.dev/log";
 import { getAuthData } from "~encore/auth";
 import { randomUUID } from "crypto";
 import { and, asc, eq, gt } from "drizzle-orm";
@@ -11,7 +12,7 @@ import type { ClientEvent, EventChannel } from "./events";
 import { hasChannelPermission, parseChannels } from "./permissions";
 import { sessionManager } from "./session-manager";
 
-console.log("[boot] realtime/subscribe.ts: all imports resolved");
+log.info("boot: realtime/subscribe.ts: all imports resolved");
 
 interface HandshakeParams {
   /** Comma-separated channel list, e.g. `"documents,photos"`. Omit to receive every channel the user is permitted for. */
@@ -107,38 +108,45 @@ export const subscribe = api.streamOut<HandshakeParams, ClientEvent>(
     // reason to produce an error. A failed send surfaces the
     // disconnect via `session.close()`, causing `done` to resolve.
     //
-    // Instrumentation: each tick logs once so operators can see in
-    // container logs whether the timer is firing and whether the
-    // underlying `stream.send` succeeds or rejects. Drop these lines
-    // once the streamOut delivery issue under Encore.ts is confirmed
-    // resolved.
+    // Instrumentation uses `encore.dev/log` so events land in the
+    // structured log pipeline (and container stdout); plain
+    // `console.log` output is suppressed under `encore build docker`.
+    // Drop these diagnostics once the streamOut delivery path is
+    // confirmed healthy.
     let heartbeatTick = 0;
     const heartbeat = setInterval(() => {
       const tick = ++heartbeatTick;
-      console.log(`[realtime] heartbeat tick=${tick} user=${userID}`);
+      log.info("realtime: heartbeat tick", { tick, userID });
       stream
         .send(systemEvent(userID, "heartbeat", {}))
         .then(() => {
-          console.log(`[realtime] heartbeat tick=${tick} user=${userID} sent ok`);
+          log.info("realtime: heartbeat sent ok", { tick, userID });
         })
-        .catch((err) => {
-          console.warn(
-            `[realtime] heartbeat tick=${tick} user=${userID} send failed: ${(err as Error).message ?? err}`,
-          );
+        .catch((err: unknown) => {
+          log.warn("realtime: heartbeat send failed", {
+            tick,
+            userID,
+            error: (err as Error)?.message ?? String(err),
+          });
           session.close();
         });
     }, HEARTBEAT_INTERVAL_MS);
 
-    console.log(
-      `[realtime] subscribe handler ready user=${userID} channels=[${allowed.join(",")}] denied=[${denied.join(",")}]`,
-    );
+    log.info("realtime: subscribe handler ready", {
+      userID,
+      channels: allowed,
+      denied,
+    });
 
     try {
       await session.done;
     } finally {
       clearInterval(heartbeat);
       sessionManager.unregister(session);
-      console.log(`[realtime] subscribe handler ended user=${userID} ticks=${heartbeatTick}`);
+      log.info("realtime: subscribe handler ended", {
+        userID,
+        ticks: heartbeatTick,
+      });
     }
   },
 );
