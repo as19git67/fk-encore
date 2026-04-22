@@ -699,6 +699,34 @@ describe("Photo Module", () => {
       expect(res.success).toBe(true);
     });
 
+    it("should expose curation_stats and viewer role when a read-share user fetches the album", async () => {
+      const album = await service.createAlbumLogic(user1.id, { name: "Opinions Visible" });
+      const photo = await service.uploadPhotoLogic(user1.id, {
+        data: Buffer.from([1, 2, 3]),
+        name: "shared.jpg",
+        mimeType: "image/jpeg",
+      });
+      await service.addPhotoToAlbumLogic(user1.id, { albumId: album.id, photoId: photo.id });
+
+      // Share with user2 as read — in the UI that maps to role 'viewer'.
+      await service.shareAlbumLogic(user1.id, { albumId: album.id, userId: user2.id, accessLevel: "read" });
+
+      // Owner favorites the photo so the aggregate counts are non-zero.
+      await service.updatePhotoCurationLogic(user1.id, photo.id, 'favorite');
+
+      const asViewer = await service.getAlbumLogic(user2.id, album.id);
+
+      expect(asViewer.role).toBe("viewer");
+      expect(asViewer.is_shared).toBe(true);
+      expect(asViewer.photos).toHaveLength(1);
+
+      const stats = (asViewer.photos[0] as any).curation_stats;
+      expect(stats).toBeDefined();
+      expect(stats.member_count).toBeGreaterThan(1);
+      expect(stats.fav_count).toBe(1);
+      expect(stats.hide_count).toBe(0);
+    });
+
     it("should not allow hiding photos for users without any album share", async () => {
       const album = await service.createAlbumLogic(user1.id, { name: "No Share" });
       const photo = await service.uploadPhotoLogic(user1.id, {
