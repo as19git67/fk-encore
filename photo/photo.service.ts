@@ -11,6 +11,65 @@ import { isUnderPressure } from "./event-loop-pressure";
 import { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
 export { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
 import db from "../db/database";
+import { realtime, feed } from "~encore/clients";
+
+/**
+ * Fire-and-forget realtime notification. Publisher-side errors must not
+ * break album/photo operations, so we swallow them with a warning.
+ */
+export async function publishAlbumEvent(
+  userIds: number[],
+  type: string,
+  resourceId: number,
+  payload: Record<string, unknown> = {},
+): Promise<void> {
+  if (userIds.length === 0) return;
+  try {
+    await realtime.publishEvent({
+      userIds: userIds.map((id) => String(id)),
+      channel: "albums",
+      type,
+      resourceId: String(resourceId),
+      payload,
+    });
+  } catch (err) {
+    console.warn(
+      `[photo] realtime publish failed for album=${resourceId} type=${type}: ${(err as Error).message}`,
+    );
+  }
+}
+
+/**
+ * Fire-and-forget feed entry. Mirrors `publishAlbumEvent`: best-effort
+ * — an outage of the feed service must never break a photo/album
+ * operation.
+ */
+export async function emitFeedItem(
+  recipients: number[],
+  actorUserId: number,
+  kind: "photo_added" | "album_shared" | "photo_liked" | "photo_commented",
+  opts: {
+    albumId?: number | null;
+    photoId?: number | null;
+    payload?: Record<string, unknown>;
+  } = {},
+): Promise<void> {
+  if (recipients.length === 0) return;
+  try {
+    await feed.emitFeed({
+      recipients,
+      actorUserId,
+      kind,
+      albumId: opts.albumId ?? null,
+      photoId: opts.photoId ?? null,
+      payload: opts.payload ?? {},
+    });
+  } catch (err) {
+    console.warn(
+      `[photo] feed emit failed kind=${kind}: ${(err as Error).message}`,
+    );
+  }
+}
 
 // Dynamic import breaks the static async-init cycle between
 // photo.service and scan-worker. Both modules become esbuild async-init
@@ -2886,6 +2945,23 @@ export async function addPhotoToAlbumLogic(userId: number, req: AddPhotoToAlbumR
     scheduleRegroup(user_id);
   }
 
+  // Notify everyone who sees the album — owner plus all shared users —
+  // so open album views can slot the new photo in without polling.
+  // Exclude the actor; their UI just completed the action.
+  const recipients = new Set<number>([album.user_id, ...sharedUsersForGrouping.map((s) => s.user_id)]);
+  recipients.delete(userId);
+  const recipientList = Array.from(recipients);
+  await publishAlbumEvent(recipientList, "photo_added", req.albumId, {
+    photoId: req.photoId,
+    addedByUserId: userId,
+  });
+  // Same audience gets a persistent feed entry so the activity shows
+  // up later even if the user was offline when the photo was added.
+  await emitFeedItem(recipientList, userId, "photo_added", {
+    albumId: req.albumId,
+    photoId: req.photoId,
+  });
+
   return { success: true };
 }
 
@@ -3101,6 +3177,19 @@ export async function shareAlbumLogic(userId: number, req: ShareAlbumRequest): P
 
   // Re-run similar-photo grouping for the new shared user so shared photos are considered.
   scheduleRegroup(req.userId);
+
+  // Notify the new viewer so their album list picks the album up without
+  // a manual refresh.
+  await publishAlbumEvent([req.userId], "shared", req.albumId, {
+    accessLevel: req.accessLevel,
+    ownerUserId: album.user_id,
+  });
+  // Persistent feed entry — the recipient will see the share even if
+  // they weren't online when it happened.
+  await emitFeedItem([req.userId], userId, "album_shared", {
+    albumId: req.albumId,
+    payload: { accessLevel: req.accessLevel },
+  });
 
   return { success: true };
 }
