@@ -27,11 +27,13 @@ interface HandshakeParams {
 }
 
 /**
- * Server-side keep-alive interval. Stays below the 60 s idle timeout
- * commonly applied by nginx / cloud load balancers so idle sockets
- * aren't silently dropped mid-session.
+ * Server-side keep-alive interval. 10 s comfortably beats the idle
+ * timeouts of every reverse proxy we care about (nginx 60s, Traefik
+ * 60s, Cloudflare WS 100s) and leaves enough head-room for the
+ * client's 60 s heartbeat-timeout watchdog even if the event loop
+ * is briefly saturated by scan workers.
  */
-const HEARTBEAT_INTERVAL_MS = 25_000;
+const HEARTBEAT_INTERVAL_MS = 10_000;
 
 /**
  * Cap on the number of events replayed in a single handshake. A
