@@ -28,6 +28,21 @@ const submitting = ref(false)
 const editingId = ref<number | null>(null)
 const editingText = ref('')
 
+// The composer and the inline edit field both start at a single row and
+// grow with their content. We track the elements via refs and resize them
+// on every content change (input, programmatic set, cleared after submit).
+const composerTextarea = ref<HTMLTextAreaElement | null>(null)
+const editTextarea = ref<HTMLTextAreaElement | null>(null)
+
+function autoGrow(el: HTMLTextAreaElement | null) {
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${el.scrollHeight}px`
+}
+
+watch(commentInput, () => nextTick(() => autoGrow(composerTextarea.value)))
+watch([editingId, editingText], () => nextTick(() => autoGrow(editTextarea.value)))
+
 // One shared popover serves as the action menu for the currently tapped
 // own-comment bubble. `actionTarget` tracks which comment the menu applies to.
 const actionPopover = ref<InstanceType<typeof Popover> | null>(null)
@@ -241,9 +256,11 @@ watch(
           </div>
           <template v-if="editingId === c.id">
             <textarea
+              ref="editTextarea"
               v-model="editingText"
               class="p-inputtext reactions__edit-textarea"
-              rows="2"
+              rows="1"
+              @input="autoGrow(($event.target as HTMLTextAreaElement))"
             />
             <div class="reactions__edit-actions">
               <Button
@@ -302,11 +319,13 @@ watch(
 
     <form class="reactions__composer" @submit.prevent="submitComment">
       <textarea
+        ref="composerTextarea"
         v-model="commentInput"
         class="p-inputtext reactions__composer-textarea"
-        rows="2"
+        rows="1"
         placeholder="Kommentar schreiben…"
         :disabled="submitting"
+        @input="autoGrow(($event.target as HTMLTextAreaElement))"
       />
       <Button
         type="submit"
@@ -405,11 +424,6 @@ watch(
   font-style: italic;
 }
 
-.reactions__edit-textarea {
-  width: 100%;
-  font-size: 0.85em;
-}
-
 .reactions__edit-actions {
   align-self: flex-end;
   display: flex;
@@ -458,6 +472,16 @@ watch(
 .reactions__composer-textarea {
   flex: 1;
   min-width: 0;
-  resize: vertical;
+  resize: none;
+  overflow-y: auto;
+  max-height: 8em;
+}
+
+.reactions__edit-textarea {
+  width: 100%;
+  font-size: 0.85em;
+  resize: none;
+  overflow-y: auto;
+  max-height: 8em;
 }
 </style>
