@@ -253,8 +253,12 @@ class RealtimeBus {
     try {
       event = JSON.parse(raw) as RealtimeEvent
     } catch {
+      console.warn('[realtime] JSON parse failed', raw)
       return
     }
+    // Diagnostic: drop once live delivery is confirmed working.
+    console.log('[realtime] frame', event.channel, event.type, event)
+
     // Drop duplicates that arrive via both replay and live delivery
     // during the overlap window of a reconnect.
     if (event.id && this.seenIds.has(event.id)) return
@@ -275,8 +279,16 @@ class RealtimeBus {
   }
 
   private dispatch(event: RealtimeEvent): void {
-    const exact = this.handlers.get(`${event.channel}:${event.type}` as HandlerKey)
-    const wildcard = this.handlers.get(`${event.channel}:*` as HandlerKey)
+    const exactKey = `${event.channel}:${event.type}` as HandlerKey
+    const wildcardKey = `${event.channel}:*` as HandlerKey
+    const exact = this.handlers.get(exactKey)
+    const wildcard = this.handlers.get(wildcardKey)
+    console.log(
+      '[realtime] dispatch',
+      event.channel, event.type,
+      'exact=' + (exact?.size ?? 0),
+      'wildcard=' + (wildcard?.size ?? 0),
+    )
     exact?.forEach((h) => safeCall(h, event))
     wildcard?.forEach((h) => safeCall(h, event))
   }
