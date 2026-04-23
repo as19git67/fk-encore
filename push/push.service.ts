@@ -251,6 +251,10 @@ export function buildFeedNotification(input: {
         : `${actor} hat ein Foto kommentiert`;
       break;
     }
+    case "album_left":
+      title = "Freigabe verlassen";
+      body = `${actor} hat die Freigabe von „${album}" verlassen`;
+      break;
   }
 
   // Deep-link into the album (optionally with a photo anchor) so

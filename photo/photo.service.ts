@@ -47,7 +47,7 @@ export async function publishAlbumEvent(
 export async function emitFeedItem(
   recipients: number[],
   actorUserId: number,
-  kind: "photo_added" | "album_shared" | "photo_favorited" | "photo_commented",
+  kind: "photo_added" | "album_shared" | "photo_favorited" | "photo_commented" | "album_left",
   opts: {
     albumId?: number | null;
     photoId?: number | null;
@@ -3413,6 +3413,11 @@ export async function leaveAlbumLogic(userId: number, albumId: number): Promise<
   // and the owner so the shares panel reflects the change.
   await publishAlbumEvent([userId, album.user_id], "unshared", albumId, {
     leftUserId: userId,
+  });
+  // Persistent feed entry for the owner — they may have been offline
+  // when the participant left.
+  await emitFeedItem([album.user_id], userId, "album_left", {
+    albumId,
   });
 
   return { success: true };
