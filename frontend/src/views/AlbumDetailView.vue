@@ -57,6 +57,19 @@ const albumId = computed(() => Number(route.params.id))
 const auth = useAuthStore()
 const serviceHealth = useServiceHealthStore()
 
+// Shared with AlbumsView: when the user navigates back from this detail view,
+// the album list restores focus and scroll position to this album.
+const LAST_FOCUSED_ALBUM_KEY = 'albums_last_focused_album_id'
+function rememberFocusedAlbum(id: number) {
+  if (!Number.isFinite(id)) return
+  try { sessionStorage.setItem(LAST_FOCUSED_ALBUM_KEY, String(id)) } catch { /* ignore */ }
+}
+
+function navigateBackToAlbums() {
+  rememberFocusedAlbum(albumId.value)
+  router.push({ name: 'fotos-albums' })
+}
+
 // ── Data ──────────────────────────────────────────────────────────────────────
 const album = ref<AlbumWithPhotos | null>(null)
 const loading = ref(true)
@@ -802,6 +815,7 @@ const mobileSidebarOpen = ref(false)
 const fullscreenDetailsOpen = ref(false)
 
 // ── Init ──────────────────────────────────────────────────────────────────────
+rememberFocusedAlbum(albumId.value)
 void loadData()
 if (showPersons.value) void loadPersons()
 serviceHealth.startPolling()
@@ -811,7 +825,8 @@ onUnmounted(() => serviceHealth.stopPolling())
 // reused by Vue Router on param changes). Without this, jumping from one
 // album to another via the Jump Dialog updates the URL but keeps the old
 // album's data, so subsequent jumps appear to do nothing.
-watch(albumId, () => {
+watch(albumId, (id) => {
+  rememberFocusedAlbum(id)
   album.value = null
   selectedIndex.value = -1
   activeGroup.value = null
@@ -846,6 +861,16 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
       <div class="header">
         <!-- 1. Album name + role badge -->
         <div class="header__title-group">
+          <Button
+            icon="pi pi-arrow-left"
+            size="small"
+            text
+            rounded
+            class="header__back"
+            aria-label="Zurück zur Albumübersicht"
+            v-tooltip="'Zurück zur Albumübersicht'"
+            @click="navigateBackToAlbums"
+          />
           <h1 class="header__title">{{ album.name }}</h1>
           <span :class="['header__badge', `header__badge--${album.role}`]">{{ album.role }}</span>
         </div>
