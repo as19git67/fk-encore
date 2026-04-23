@@ -3,6 +3,7 @@ export type EventChannel =
   | "photos"
   | "albums"
   | "feed"
+  | "scan-queue"
   | "system";
 
 /**

@@ -18,6 +18,7 @@ export const CHANNEL_PERMISSIONS: Record<EventChannel, string | null> = {
   photos: "module.photos",
   albums: "module.photos",
   feed: "module.photos",
+  "scan-queue": "data.manage",
   system: null,
 };
 
@@ -35,6 +36,7 @@ const ALL_CHANNELS: readonly EventChannel[] = [
   "photos",
   "albums",
   "feed",
+  "scan-queue",
   "system",
 ];
 

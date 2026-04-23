@@ -14,6 +14,7 @@ import {
   updateUserLogic,
   deleteUserLogic,
   changePasswordLogic,
+  getUserIdsWithPermission,
 } from "./user.service";
 import { requirePermission } from "./auth-handler";
 import { getAuthData } from "~encore/auth";
@@ -96,6 +97,19 @@ export const changePassword = api(
       }
       throw err;
     }
+  }
+);
+
+/**
+ * Internal: look up user ids that hold a given permission. Used by other
+ * services (scan queue realtime fan-out, …) that need to address
+ * permission-scoped audiences. Not exposed externally.
+ */
+export const listUserIdsWithPermission = api(
+  { expose: false },
+  async ({ permission }: { permission: string }): Promise<{ userIds: number[] }> => {
+    const ids = await getUserIdsWithPermission(permission);
+    return { userIds: ids };
   }
 );
 

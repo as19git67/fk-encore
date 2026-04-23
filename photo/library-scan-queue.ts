@@ -12,6 +12,7 @@ import { eq, sql, and, inArray } from "drizzle-orm";
 import db from "../db/database";
 import { libraryScanQueue } from "../db/schema";
 import type { ScanReport } from "./libraries.service";
+import { notifyScanQueueChanged } from "./scan-queue-events";
 
 console.log("[boot] photo/library-scan-queue.ts: all imports resolved");
 
@@ -36,6 +37,7 @@ export async function enqueueLibraryScan(
     .values({ library_id: libraryId, reconcile })
     .onConflictDoNothing()
     .returning({ id: libraryScanQueue.id });
+  if (rows[0]) notifyScanQueueChanged();
   return rows[0]?.id ?? null;
 }
 
@@ -60,6 +62,7 @@ export async function dequeueNextLibraryScan(): Promise<
     )
     RETURNING *
   `);
+  if (rows.rows[0]) notifyScanQueueChanged();
   return rows.rows[0];
 }
 
@@ -82,6 +85,7 @@ export async function markLibraryScanDone(
       removed,
     })
     .where(eq(libraryScanQueue.id, id));
+  notifyScanQueueChanged();
 }
 
 export async function markLibraryScanFailed(id: number, error: string): Promise<void> {
@@ -89,6 +93,7 @@ export async function markLibraryScanFailed(id: number, error: string): Promise<
     .update(libraryScanQueue)
     .set({ status: "failed", error_msg: error, finished_at: sql`NOW()` })
     .where(eq(libraryScanQueue.id, id));
+  notifyScanQueueChanged();
 }
 
 /**
@@ -124,7 +129,9 @@ export async function requeueFailedLibraryScans(): Promise<number> {
       finished_at: null,
     })
     .where(eq(libraryScanQueue.status, "failed"));
-  return (res as any).rowCount ?? 0;
+  const changed = (res as any).rowCount ?? 0;
+  if (changed > 0) notifyScanQueueChanged();
+  return changed;
 }
 
 /**
@@ -134,7 +141,9 @@ export async function cancelPendingLibraryScans(): Promise<number> {
   const res = await db
     .delete(libraryScanQueue)
     .where(eq(libraryScanQueue.status, "pending"));
-  return (res as any).rowCount ?? 0;
+  const changed = (res as any).rowCount ?? 0;
+  if (changed > 0) notifyScanQueueChanged();
+  return changed;
 }
 
 /**
@@ -146,4 +155,5 @@ export async function resetStuckLibraryScans(): Promise<void> {
     .update(libraryScanQueue)
     .set({ status: "pending", started_at: null })
     .where(eq(libraryScanQueue.status, "processing"));
+  notifyScanQueueChanged();
 }
