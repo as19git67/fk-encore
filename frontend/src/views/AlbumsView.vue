@@ -582,11 +582,25 @@ const expiryOptions = [
   { label: '30 Tage', value: '30d' },
   { label: '90 Tage', value: '90d' },
 ]
-const accessLevelOptions: Array<{ label: string; value: AlbumAccessLevel }> = [
+const OWNER_ACCESS_LEVEL_OPTIONS: Array<{ label: string; value: AlbumAccessLevel }> = [
   { label: 'Nur lesen', value: 'read' },
   { label: 'Bearbeiten', value: 'write' },
   { label: 'Bearbeiten + Teilen', value: 'write_share' },
 ]
+// Delegated sharers must not grant write_share themselves — that would
+// let every invitee extend the chain and the owner would lose control.
+const DELEGATE_ACCESS_LEVEL_OPTIONS: Array<{ label: string; value: AlbumAccessLevel }> =
+  OWNER_ACCESS_LEVEL_OPTIONS.filter(o => o.value !== 'write_share')
+
+const accessLevelOptions = computed(() =>
+  shareAlbumIsOwner.value ? OWNER_ACCESS_LEVEL_OPTIONS : DELEGATE_ACCESS_LEVEL_OPTIONS
+)
+
+function canRemoveShare(share: AlbumShareWithUser) {
+  if (shareAlbumIsOwner.value) return true
+  // Delegates may only revoke invitations they created themselves.
+  return share.invited_by_user_id === auth.user?.id
+}
 
 const usersNotShared = computed(() => {
   const sharedIds = new Set(albumSharesList.value.map(s => s.user_id))
@@ -602,7 +616,7 @@ async function openShareDialog(album: Album) {
   try {
     const [sharesRes, usersRes] = await Promise.all([
       getAlbumShares(album.id),
-      shareAlbumIsOwner.value && auth.hasPermission('users.list') ? listUsers() : Promise.resolve({ users: [] }),
+      auth.hasPermission('users.list') ? listUsers() : Promise.resolve({ users: [] }),
     ])
     albumSharesList.value = sharesRes.shares
     publicLink.value = sharesRes.publicLink ?? null
@@ -907,7 +921,7 @@ onMounted(loadData)
           </div>
         </div>
 
-        <div v-if="shareAlbumIsOwner" class="share-section">
+        <div class="share-section">
           <h4 class="share-section-title">Aktuelle Freigaben</h4>
           <div v-if="albumSharesList.length === 0" class="share-empty">Noch keine Freigaben.</div>
           <div v-for="share in albumSharesList" :key="share.user_id" class="share-row">
@@ -918,10 +932,21 @@ onMounted(loadData)
             <span :class="['share-badge', share.access_level === 'read' ? 'share-badge--read' : 'share-badge--write']">
               {{ share.access_level === 'read' ? 'Nur lesen' : share.access_level === 'write_share' ? 'Bearbeiten + Teilen' : 'Bearbeiten' }}
             </span>
-            <Button icon="pi pi-times" size="small" text severity="danger" @click="handleRemoveShare(share.user_id)" />
+            <Button
+              v-if="canRemoveShare(share)"
+              icon="pi pi-times"
+              size="small"
+              text
+              severity="danger"
+              v-tooltip="'Freigabe entfernen'"
+              @click="handleRemoveShare(share.user_id)"
+            />
+          </div>
+          <div v-if="!shareAlbumIsOwner" class="share-hint">
+            Als Teilnehmer mit Teilen-Recht kannst du nur Freigaben entfernen, die du selbst erstellt hast.
           </div>
         </div>
-        <div v-if="shareAlbumIsOwner" class="share-section">
+        <div class="share-section">
           <h4 class="share-section-title">Benutzer hinzufügen</h4>
           <div class="share-add-form">
             <Select v-if="allUsers.length > 0" v-model="shareUserId" :options="usersNotShared" optionLabel="name" optionValue="id" placeholder="Benutzer auswählen…" class="share-user-select" />
@@ -938,9 +963,9 @@ onMounted(loadData)
               <span class="share-badge share-badge--write">Bearbeiten</span>
               <span>Zusätzlich können Albumdetails geändert sowie Fotos hinzugefügt oder entfernt werden.</span>
             </div>
-            <div class="share-access-explanation-row">
+            <div v-if="shareAlbumIsOwner" class="share-access-explanation-row">
               <span class="share-badge share-badge--write">Bearbeiten + Teilen</span>
-              <span>Zusätzlich kann ein öffentlicher Link erzeugt, kopiert oder gelöscht werden.</span>
+              <span>Zusätzlich kann ein öffentlicher Link erzeugt sowie weitere Benutzer eingeladen werden.</span>
             </div>
           </div>
         </div>

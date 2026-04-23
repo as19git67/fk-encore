@@ -3276,14 +3276,38 @@ export async function shareAlbumLogic(userId: number, req: ShareAlbumRequest): P
   );
   if (!album) throw new Error("Album not found");
 
-  if (album.user_id !== userId) {
-    throw new Error("Only owner can share album");
+  const isOwner = album.user_id === userId;
+  if (!isOwner) {
+    const callerShare = await dbFirst<typeof albumShares.$inferSelect>(
+      db.select().from(albumShares).where(and(eq(albumShares.album_id, req.albumId), eq(albumShares.user_id, userId)))
+    );
+    if (callerShare?.access_level !== "write_share") {
+      throw new Error("Unauthorized to share album");
+    }
+    // Sharing-delegates cannot escalate: they may grant read/write, not
+    // write_share. Otherwise every invitee could invite further and the
+    // owner loses control of the trust chain.
+    if (req.accessLevel === "write_share") {
+      throw new Error("Only the album owner can grant write_share access");
+    }
+    // Delegates cannot modify the owner's existing assignments — they may
+    // only add new participants or revise their own earlier invites.
+    const existing = await dbFirst<typeof albumShares.$inferSelect>(
+      db.select().from(albumShares).where(and(eq(albumShares.album_id, req.albumId), eq(albumShares.user_id, req.userId)))
+    );
+    if (existing && existing.invited_by_user_id !== userId) {
+      throw new Error("Cannot modify a share created by someone else");
+    }
+    // Cannot re-share to the owner (they already have full access).
+    if (req.userId === album.user_id) {
+      throw new Error("Cannot share the album with its owner");
+    }
   }
 
   await dbExec(
     db.insert(albumShares)
-      .values({ album_id: req.albumId, user_id: req.userId, access_level: req.accessLevel })
-      .onConflictDoUpdate({ target: [albumShares.album_id, albumShares.user_id], set: { access_level: req.accessLevel } })
+      .values({ album_id: req.albumId, user_id: req.userId, access_level: req.accessLevel, invited_by_user_id: userId })
+      .onConflictDoUpdate({ target: [albumShares.album_id, albumShares.user_id], set: { access_level: req.accessLevel, invited_by_user_id: userId } })
   );
 
   // Enqueue face_assignment jobs for all photos in the shared album for the new user.
@@ -3348,22 +3372,19 @@ export async function getAlbumSharesLogic(userId: number, albumId: number): Prom
     throw new Error("Unauthorized to view shares");
   }
 
-  // Participants with write_share get only the public link — not the list of
-  // other participants, since that's owner-only information.
-  const rows = isOwner
-    ? await dbAll<{ album_id: number; user_id: number; access_level: string; name: string; email: string }>(
-        db.select({
-          album_id: albumShares.album_id,
-          user_id: albumShares.user_id,
-          access_level: albumShares.access_level,
-          name: users.name,
-          email: users.email,
-        })
-        .from(albumShares)
-        .innerJoin(users, eq(users.id, albumShares.user_id))
-        .where(eq(albumShares.album_id, albumId))
-      )
-    : [];
+  const rows = await dbAll<{ album_id: number; user_id: number; access_level: string; invited_by_user_id: number | null; name: string; email: string }>(
+    db.select({
+      album_id: albumShares.album_id,
+      user_id: albumShares.user_id,
+      access_level: albumShares.access_level,
+      invited_by_user_id: albumShares.invited_by_user_id,
+      name: users.name,
+      email: users.email,
+    })
+    .from(albumShares)
+    .innerJoin(users, eq(users.id, albumShares.user_id))
+    .where(eq(albumShares.album_id, albumId))
+  );
 
   const publicLink = await dbFirst<typeof albumPublicLinks.$inferSelect>(
     db.select().from(albumPublicLinks).where(eq(albumPublicLinks.album_id, albumId))
@@ -3374,6 +3395,7 @@ export async function getAlbumSharesLogic(userId: number, albumId: number): Prom
       album_id: r.album_id,
       user_id: r.user_id,
       access_level: r.access_level as "read" | "write" | "write_share",
+      invited_by_user_id: r.invited_by_user_id ?? null,
       user_name: r.name,
       user_email: r.email,
     })),
@@ -3386,7 +3408,27 @@ export async function removeAlbumShareLogic(userId: number, req: RemoveAlbumShar
     db.select().from(albums).where(eq(albums.id, req.albumId))
   );
   if (!album) throw new Error("Album not found");
-  if (album.user_id !== userId) throw new Error("Only owner can remove shares");
+
+  const isOwner = album.user_id === userId;
+  if (!isOwner) {
+    const [callerShare, targetShare] = await Promise.all([
+      dbFirst<typeof albumShares.$inferSelect>(
+        db.select().from(albumShares).where(and(eq(albumShares.album_id, req.albumId), eq(albumShares.user_id, userId)))
+      ),
+      dbFirst<typeof albumShares.$inferSelect>(
+        db.select().from(albumShares).where(and(eq(albumShares.album_id, req.albumId), eq(albumShares.user_id, req.userId)))
+      ),
+    ]);
+    if (callerShare?.access_level !== "write_share") {
+      throw new Error("Unauthorized to remove shares");
+    }
+    // Delegates can only revoke invitations they created themselves. Shares
+    // with NULL invited_by predate this feature and are treated as owner-
+    // created, so they stay owner-managed.
+    if (!targetShare || targetShare.invited_by_user_id !== userId) {
+      throw new Error("Can only remove shares you created yourself");
+    }
+  }
 
   // Collect photo IDs in this album BEFORE deleting the share
   const albumPhotoIds = (await dbAll<{ photo_id: number }>(

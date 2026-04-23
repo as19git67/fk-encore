@@ -415,6 +415,9 @@ export interface AlbumShare {
   album_id: number;
   user_id: number;
   access_level: AlbumAccessLevel;
+  /** User who created this share. NULL for shares predating the invited_by
+   *  migration — treated as invited by the album owner. */
+  invited_by_user_id?: number | null;
 }
 
 // ── View Config for Album Views ──────────────────────────────────────────────

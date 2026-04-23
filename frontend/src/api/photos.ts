@@ -624,6 +624,8 @@ export interface AlbumShareWithUser {
   album_id: number
   user_id: number
   access_level: AlbumAccessLevel
+  /** Creator of the share. NULL for legacy rows (treated as owner-created). */
+  invited_by_user_id: number | null
   user_name: string
   user_email: string
 }
