@@ -302,6 +302,13 @@
       "when": 1778500000000,
       "tag": "0041_drop_photo_likes",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1778600000000,
+      "tag": "0042_feed_item_album_left",
+      "breakpoints": true
     }
   ]
 }

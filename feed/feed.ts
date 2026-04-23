@@ -81,7 +81,7 @@ export const markFeedSeen = api(
 interface EmitFeedRequest {
   recipients: number[];
   actorUserId: number;
-  kind: "photo_added" | "album_shared" | "photo_favorited" | "photo_commented";
+  kind: "photo_added" | "album_shared" | "photo_favorited" | "photo_commented" | "album_left";
   albumId?: number | null;
   photoId?: number | null;
   payload?: Record<string, unknown>;

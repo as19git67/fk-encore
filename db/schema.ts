@@ -700,6 +700,7 @@ export const feedItemKindEnum = pgEnum("feed_item_kind", [
   "album_shared",
   "photo_favorited",
   "photo_commented",
+  "album_left",
 ]);
 
 export const feedItems = pgTable("feed_items", {

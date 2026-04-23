@@ -562,6 +562,12 @@ useRealtimeEvent('albums', 'shared', () => {
   loadData()
 })
 
+// A participant left an album share — refresh so the album disappears for
+// the leaver and the owner's share indicators stay current.
+useRealtimeEvent('albums', 'unshared', () => {
+  loadData()
+})
+
 // New photos added to any visible album — the list view only shows
 // cover + count, so refresh so the count/cover stays current.
 useRealtimeEvent('albums', 'photo_added', (ev) => {

@@ -5,6 +5,7 @@ export type FeedItemKind =
   | 'album_shared'
   | 'photo_favorited'
   | 'photo_commented'
+  | 'album_left'
 
 export interface FeedActor {
   id: number | null
