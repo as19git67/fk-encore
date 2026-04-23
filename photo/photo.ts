@@ -869,6 +869,18 @@ export const removeAlbumShare = api(
 );
 
 /**
+ * Leave an album share. A non-owner participant removes themselves.
+ */
+export const leaveAlbum = api(
+  { expose: true, method: "DELETE", path: "/albums/:id/leave", auth: true },
+  async ({ id }: { id: number }): Promise<{ success: boolean }> => {
+    checkModule();
+    const userId = getUserId();
+    return await service.leaveAlbumLogic(userId, id);
+  }
+);
+
+/**
  * Create a public share link for an album (owner only).
  */
 export const createAlbumPublicLink = api(

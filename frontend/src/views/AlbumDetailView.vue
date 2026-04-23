@@ -26,6 +26,7 @@ import {
   getAlbum,
   getPhotoLandmarks,
   ignoreFace,
+  leaveAlbum,
   listPersons,
   listPhotoGroups,
   reindexPhoto,
@@ -678,6 +679,24 @@ async function handleDeleteAlbum() {
   }
 }
 
+// ── Leave album share ────────────────────────────────────────────────────────
+const showLeaveDialog = ref(false)
+const leavingAlbum = ref(false)
+
+async function handleLeaveAlbum() {
+  if (!album.value) return
+  leavingAlbum.value = true
+  try {
+    await leaveAlbum(album.value.id)
+    showLeaveDialog.value = false
+    router.push({ name: 'fotos-albums' })
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Verlassen der Freigabe'
+  } finally {
+    leavingAlbum.value = false
+  }
+}
+
 // ── Grid interaction ──────────────────────────────────────────────────────────
 function handlePhotoClick(item: PhotoItem) {
   selectedIndex.value = item.index
@@ -886,6 +905,7 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
           />
           <Button v-if="effectiveCoverPhotoId && displayMode !== 'map'" icon="pi pi-image" size="small" text v-tooltip="'Cover fokussieren'" @click="scrollToCover" />
           <Button v-if="isOwner" icon="pi pi-trash" size="small" text severity="danger" v-tooltip="'Album löschen'" @click="showDeleteDialog = true" />
+          <Button v-if="!isOwner" icon="pi pi-sign-out" size="small" text severity="danger" v-tooltip="'Freigabe verlassen'" @click="showLeaveDialog = true" />
         </div>
       </div>
 
@@ -1158,6 +1178,18 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
       <template #footer>
         <Button label="Abbrechen" text @click="showDeleteDialog = false" />
         <Button label="Löschen" severity="danger" :loading="deletingAlbum" @click="handleDeleteAlbum" />
+      </template>
+    </Dialog>
+
+    <!-- Leave album share confirmation dialog -->
+    <Dialog v-model:visible="showLeaveDialog" header="Freigabe verlassen" :modal="true" style="width: min(100%, 28rem)">
+      <div class="dialog-body">
+        <p>Willst du die Freigabe dieses Albums wirklich verlassen?</p>
+        <p class="muted">Du verlierst den Zugriff auf dieses Album. Der Eigentümer kann dich später erneut einladen.</p>
+      </div>
+      <template #footer>
+        <Button label="Abbrechen" text @click="showLeaveDialog = false" />
+        <Button label="Verlassen" severity="danger" :loading="leavingAlbum" @click="handleLeaveAlbum" />
       </template>
     </Dialog>
 

@@ -82,6 +82,8 @@ function kindLabel(item: FeedItem): string {
       return `${actor} hat ein Foto favorisiert`
     case 'photo_commented':
       return `${actor} hat ein Foto kommentiert`
+    case 'album_left':
+      return `${actor} hat die Freigabe von „${album}" verlassen`
     default:
       return `${actor}: ${item.kind}`
   }

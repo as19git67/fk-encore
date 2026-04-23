@@ -21,7 +21,8 @@ export type FeedItemKind =
   | "photo_added"
   | "album_shared"
   | "photo_favorited"
-  | "photo_commented";
+  | "photo_commented"
+  | "album_left";
 
 export interface FeedItem {
   id: number;
