@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import { useRoute } from 'vue-router'
-import Button from 'primevue/button'
 import Message from 'primevue/message'
 import HeicImage from '../components/HeicImage.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
@@ -249,25 +248,28 @@ onUnmounted(() => {
       </div>
 
       <!-- Map mode -->
-      <template v-if="album.display_mode === 'map' && album.photos.length > 0">
-        <div class="map-filter-bar">
-          <Button
-            :icon="activeCount > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'"
-            :label="activeCount > 0 ? `Filter (${activeCount})` : 'Filter'"
-            size="small"
-            :severity="activeCount > 0 ? 'primary' : 'secondary'"
-            :outlined="activeCount === 0"
+      <TripMap
+        v-if="album.display_mode === 'map' && album.photos.length > 0"
+        ref="tripMapRef"
+        :photos="filteredMapPhotos"
+        :albumName="album.name"
+        :albumDescription="album.description"
+        @open-fullscreen="handleMapFullscreen"
+      >
+        <template #stats-addon>
+          <span class="trip-stats-sep">&bull;</span>
+          <button
+            type="button"
+            class="map-filter-button"
+            :class="{ 'is-active': activeCount > 0 }"
+            :aria-label="activeCount > 0 ? `Filter (${activeCount})` : 'Filter'"
             @click="openFilterMenu"
-          />
-        </div>
-        <TripMap
-          ref="tripMapRef"
-          :photos="filteredMapPhotos"
-          :albumName="album.name"
-          :albumDescription="album.description"
-          @open-fullscreen="handleMapFullscreen"
-        />
-      </template>
+          >
+            <i :class="activeCount > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'" />
+            <span>{{ activeCount > 0 ? `Filter (${activeCount})` : 'Filter' }}</span>
+          </button>
+        </template>
+      </TripMap>
 
       <!-- Grid mode -->
       <div v-else class="photo-grid-scroll">
@@ -371,13 +373,37 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-.map-filter-bar {
-  display: flex;
-  justify-content: flex-end;
-  padding: 0.5rem 0.75rem;
-  background: var(--p-surface-card, #fff);
-  border-bottom: 1px solid var(--p-content-border-color, #dee2e6);
-  flex-shrink: 0;
+.trip-stats-sep {
+  margin: 0 2px;
+  opacity: 0.5;
+}
+
+.map-filter-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  line-height: 1.4;
+}
+
+.map-filter-button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.map-filter-button.is-active {
+  background: var(--p-primary-color, #3b82f6);
+  border-color: var(--p-primary-color, #3b82f6);
+  color: var(--p-primary-contrast-color, #fff);
+}
+
+.map-filter-button .pi {
+  font-size: 0.9em;
 }
 
 .shared-header .title {

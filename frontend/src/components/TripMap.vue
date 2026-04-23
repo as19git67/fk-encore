@@ -360,6 +360,7 @@ defineExpose({ selectStopByPhotoId })
       <span>{{ stops.length }} {{ stops.length === 1 ? 'Stopp' : 'Stopps' }}</span>
       <span class="trip-stats-sep">&bull;</span>
       <span>{{ photos.filter(p => p.latitude != null).length }} Fotos</span>
+      <slot name="stats-addon" />
     </div>
 
     <!-- Horizontal timeline strip -->
@@ -499,6 +500,9 @@ defineExpose({ selectStopByPhotoId })
   top: 12px;
   right: 12px;
   z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   background: rgba(0, 0, 0, 0.75);
   backdrop-filter: blur(8px);
   border-radius: 8px;
