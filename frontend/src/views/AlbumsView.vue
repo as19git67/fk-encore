@@ -566,6 +566,7 @@ async function handleDeleteAlbum() {
 // ── Album sharing ─────────────────────────────────────────────────────────────
 const showShareDialog = ref(false)
 const shareAlbumId = ref<number>(0)
+const shareAlbumOwnerId = ref<number>(0)
 const albumSharesList = ref<AlbumShareWithUser[]>([])
 const allUsers = ref<UserWithRoles[]>([])
 const shareUserId = ref<number | null>(null)
@@ -605,11 +606,18 @@ function canRemoveShare(share: AlbumShareWithUser) {
 const usersNotShared = computed(() => {
   const sharedIds = new Set(albumSharesList.value.map(s => s.user_id))
   const currentUserId = auth.user?.id
-  return allUsers.value.filter(u => u.id !== currentUserId && !sharedIds.has(u.id))
+  const ownerId = shareAlbumOwnerId.value
+  // The album owner is not in album_shares (they own it), so they would
+  // otherwise slip through sharedIds and appear as an invitable user. The
+  // current user is excluded too — you can't share with yourself.
+  return allUsers.value.filter(u =>
+    u.id !== currentUserId && u.id !== ownerId && !sharedIds.has(u.id)
+  )
 })
 
 async function openShareDialog(album: Album) {
   shareAlbumId.value = album.id
+  shareAlbumOwnerId.value = album.user_id
   shareAlbumIsOwner.value = auth.user?.id === album.user_id
   showShareDialog.value = true
   loadingShares.value = true
