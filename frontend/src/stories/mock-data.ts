@@ -348,6 +348,7 @@ export const MOCK_ALBUM_SHARES: AlbumShareWithUser[] = [
     album_id: 1,
     user_id: 2,
     access_level: 'read',
+    invited_by_user_id: 1,
     user_name: 'Maria Schmidt',
     user_email: 'maria@example.com',
   },

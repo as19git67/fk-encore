@@ -15,6 +15,7 @@ import SortMenu from '../components/SortMenu.vue'
 import type { SortField, SortState } from '../composables/useSort'
 import {
   type Album,
+  type AlbumAccessLevel,
   type AlbumShareWithUser,
   type AlbumPublicLink,
   type PublicLinkExpiry,
@@ -510,6 +511,11 @@ function canManageAlbum(album: Album) {
   return auth.user?.id === album.user_id
 }
 
+function canShareAlbum(album: Album) {
+  if (auth.user?.id === album.user_id) return true
+  return album.my_access_level === 'write_share'
+}
+
 function openRenameDialog(album: Album) {
   selectedAlbum.value = album
   renameValue.value = album.name
@@ -560,10 +566,12 @@ async function handleDeleteAlbum() {
 // ── Album sharing ─────────────────────────────────────────────────────────────
 const showShareDialog = ref(false)
 const shareAlbumId = ref<number>(0)
+const shareAlbumOwnerId = ref<number>(0)
 const albumSharesList = ref<AlbumShareWithUser[]>([])
 const allUsers = ref<UserWithRoles[]>([])
 const shareUserId = ref<number | null>(null)
-const shareAccessLevel = ref<'read' | 'write'>('read')
+const shareAccessLevel = ref<AlbumAccessLevel>('read')
+const shareAlbumIsOwner = ref(false)
 const sharing = ref(false)
 const loadingShares = ref(false)
 const publicLink = ref<AlbumPublicLink | null>(null)
@@ -575,16 +583,42 @@ const expiryOptions = [
   { label: '30 Tage', value: '30d' },
   { label: '90 Tage', value: '90d' },
 ]
-const accessLevelOptions = [{ label: 'Nur lesen', value: 'read' }, { label: 'Bearbeiten', value: 'write' }]
+const OWNER_ACCESS_LEVEL_OPTIONS: Array<{ label: string; value: AlbumAccessLevel }> = [
+  { label: 'Nur lesen', value: 'read' },
+  { label: 'Bearbeiten', value: 'write' },
+  { label: 'Bearbeiten + Teilen', value: 'write_share' },
+]
+// Delegated sharers must not grant write_share themselves — that would
+// let every invitee extend the chain and the owner would lose control.
+const DELEGATE_ACCESS_LEVEL_OPTIONS: Array<{ label: string; value: AlbumAccessLevel }> =
+  OWNER_ACCESS_LEVEL_OPTIONS.filter(o => o.value !== 'write_share')
+
+const accessLevelOptions = computed(() =>
+  shareAlbumIsOwner.value ? OWNER_ACCESS_LEVEL_OPTIONS : DELEGATE_ACCESS_LEVEL_OPTIONS
+)
+
+function canRemoveShare(share: AlbumShareWithUser) {
+  if (shareAlbumIsOwner.value) return true
+  // Delegates may only revoke invitations they created themselves.
+  return share.invited_by_user_id === auth.user?.id
+}
 
 const usersNotShared = computed(() => {
   const sharedIds = new Set(albumSharesList.value.map(s => s.user_id))
   const currentUserId = auth.user?.id
-  return allUsers.value.filter(u => u.id !== currentUserId && !sharedIds.has(u.id))
+  const ownerId = shareAlbumOwnerId.value
+  // The album owner is not in album_shares (they own it), so they would
+  // otherwise slip through sharedIds and appear as an invitable user. The
+  // current user is excluded too — you can't share with yourself.
+  return allUsers.value.filter(u =>
+    u.id !== currentUserId && u.id !== ownerId && !sharedIds.has(u.id)
+  )
 })
 
 async function openShareDialog(album: Album) {
   shareAlbumId.value = album.id
+  shareAlbumOwnerId.value = album.user_id
+  shareAlbumIsOwner.value = auth.user?.id === album.user_id
   showShareDialog.value = true
   loadingShares.value = true
   try {
@@ -786,10 +820,10 @@ onMounted(loadData)
           @keydown.space.prevent="openAlbum(album)"
       >
         <template v-if="visibleAlbumIds.has(album.id)">
-          <div v-if="canManageAlbum(album)" class="album-actions" @click.stop>
-            <Button icon="pi pi-share-alt" text rounded size="small" v-tooltip="'Freigeben'" @click="openShareDialog(album)" />
-            <Button icon="pi pi-pencil" text rounded size="small" v-tooltip="'Bearbeiten'" @click="openRenameDialog(album)" />
-            <Button icon="pi pi-trash" text rounded size="small" severity="danger" v-tooltip="'Löschen'" @click="openDeleteDialog(album)" />
+          <div v-if="canShareAlbum(album) || canManageAlbum(album)" class="album-actions" @click.stop>
+            <Button v-if="canShareAlbum(album)" icon="pi pi-share-alt" text rounded size="small" v-tooltip="'Freigeben'" @click="openShareDialog(album)" />
+            <Button v-if="canManageAlbum(album)" icon="pi pi-pencil" text rounded size="small" v-tooltip="'Bearbeiten'" @click="openRenameDialog(album)" />
+            <Button v-if="canManageAlbum(album)" icon="pi pi-trash" text rounded size="small" severity="danger" v-tooltip="'Löschen'" @click="openDeleteDialog(album)" />
           </div>
           <div class="album-cover">
             <HeicImage
@@ -903,10 +937,21 @@ onMounted(loadData)
               <span class="share-user-name">{{ share.user_name }}</span>
               <span class="share-user-email">{{ share.user_email }}</span>
             </div>
-            <span :class="['share-badge', share.access_level === 'write' ? 'share-badge--write' : 'share-badge--read']">
-              {{ share.access_level === 'write' ? 'Bearbeiten' : 'Nur lesen' }}
+            <span :class="['share-badge', share.access_level === 'read' ? 'share-badge--read' : 'share-badge--write']">
+              {{ share.access_level === 'read' ? 'Nur lesen' : share.access_level === 'write_share' ? 'Bearbeiten + Teilen' : 'Bearbeiten' }}
             </span>
-            <Button icon="pi pi-times" size="small" text severity="danger" @click="handleRemoveShare(share.user_id)" />
+            <Button
+              v-if="canRemoveShare(share)"
+              icon="pi pi-times"
+              size="small"
+              text
+              severity="danger"
+              v-tooltip="'Freigabe entfernen'"
+              @click="handleRemoveShare(share.user_id)"
+            />
+          </div>
+          <div v-if="!shareAlbumIsOwner" class="share-hint">
+            Als Teilnehmer mit Teilen-Recht kannst du nur Freigaben entfernen, die du selbst erstellt hast.
           </div>
         </div>
         <div class="share-section">
@@ -925,6 +970,10 @@ onMounted(loadData)
             <div class="share-access-explanation-row">
               <span class="share-badge share-badge--write">Bearbeiten</span>
               <span>Zusätzlich können Albumdetails geändert sowie Fotos hinzugefügt oder entfernt werden.</span>
+            </div>
+            <div v-if="shareAlbumIsOwner" class="share-access-explanation-row">
+              <span class="share-badge share-badge--write">Bearbeiten + Teilen</span>
+              <span>Zusätzlich kann ein öffentlicher Link erzeugt sowie weitere Benutzer eingeladen werden.</span>
             </div>
           </div>
         </div>

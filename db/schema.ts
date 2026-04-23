@@ -337,6 +337,7 @@ export const albumShares = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     access_level: text("access_level").notNull().default("read"),
+    invited_by_user_id: integer("invited_by_user_id").references(() => users.id, { onDelete: "set null" }),
   },
   (table) => [primaryKey({ columns: [table.album_id, table.user_id] })]
 );

@@ -2517,10 +2517,11 @@ export async function createAlbumLogic(userId: number, req: CreateAlbumRequest):
 
 export async function listAlbumsLogic(userId: number): Promise<ListAlbumsResponse> {
   // Albums owned by user OR shared with user
-  const sharedAlbumIdsRows = await dbAll<{ album_id: number }>(
-    db.select({ album_id: albumShares.album_id }).from(albumShares).where(eq(albumShares.user_id, userId))
+  const sharedAlbumIdsRows = await dbAll<{ album_id: number; access_level: string }>(
+    db.select({ album_id: albumShares.album_id, access_level: albumShares.access_level }).from(albumShares).where(eq(albumShares.user_id, userId))
   );
   const sharedAlbumIds = sharedAlbumIdsRows.map((s) => s.album_id);
+  const accessByAlbumId = new Map<number, string>(sharedAlbumIdsRows.map((s) => [s.album_id, s.access_level]));
 
   const rows = await dbAll<any>(
     db
@@ -2595,6 +2596,9 @@ export async function listAlbumsLogic(userId: number): Promise<ListAlbumsRespons
       is_shared: !!r.is_shared,
       created_at: r.created_at ?? "",
       updated_at: r.updated_at ?? "",
+      my_access_level: r.user_id === userId
+        ? "owner"
+        : (accessByAlbumId.get(r.id) as "read" | "write" | "write_share" | undefined),
     })),
   };
 }
@@ -2641,7 +2645,11 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     throw new Error("Unauthorized access to album");
   }
 
-  const role: "owner" | "admin" | "contributor" | "viewer" = isOwner ? "owner" : (share!.access_level === "write" ? "contributor" : "viewer");
+  const hasWriteAccess = share?.access_level === "write" || share?.access_level === "write_share";
+  const role: "owner" | "admin" | "contributor" | "viewer" = isOwner ? "owner" : (hasWriteAccess ? "contributor" : "viewer");
+  const myAccessLevel: "owner" | "read" | "write" | "write_share" = isOwner
+    ? "owner"
+    : (share!.access_level as "read" | "write" | "write_share");
 
   // Get user settings for this album
   let settings = await dbFirst<typeof albumUserSettings.$inferSelect>(
@@ -2775,6 +2783,7 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     created_at: album.created_at ?? "",
     updated_at: album.updated_at ?? "",
     role,
+    my_access_level: myAccessLevel,
     settings: {
       album_id: settings.album_id,
       user_id: settings.user_id,
@@ -2890,7 +2899,7 @@ export async function updateAlbumLogic(userId: number, req: UpdateAlbumRequest):
     db.select().from(albumShares).where(and(eq(albumShares.album_id, req.id), eq(albumShares.user_id, userId)))
   );
 
-  if (!isOwner && (!share || share.access_level !== "write")) {
+  if (!isOwner && (!share || (share.access_level !== "write" && share.access_level !== "write_share"))) {
     throw new Error("Unauthorized to update album");
   }
 
@@ -2969,7 +2978,7 @@ export async function addPhotoToAlbumLogic(userId: number, req: AddPhotoToAlbumR
     db.select().from(albumShares).where(and(eq(albumShares.album_id, req.albumId), eq(albumShares.user_id, userId)))
   );
 
-  if (!isOwner && (!share || share.access_level !== "write")) {
+  if (!isOwner && (!share || (share.access_level !== "write" && share.access_level !== "write_share"))) {
     throw new Error("Unauthorized to add photos to album");
   }
 
@@ -3168,7 +3177,7 @@ export async function batchUpdateAlbumPhotosLogic(userId: number, req: BatchAlbu
       db.select().from(albumShares).where(and(eq(albumShares.album_id, albumId), eq(albumShares.user_id, userId)))
     );
 
-    if (!isOwner && (!share || share.access_level !== "write")) {
+    if (!isOwner && (!share || (share.access_level !== "write" && share.access_level !== "write_share"))) {
       throw new Error(`Unauthorized to modify album ${albumId}`);
     }
   }
@@ -3267,14 +3276,38 @@ export async function shareAlbumLogic(userId: number, req: ShareAlbumRequest): P
   );
   if (!album) throw new Error("Album not found");
 
-  if (album.user_id !== userId) {
-    throw new Error("Only owner can share album");
+  const isOwner = album.user_id === userId;
+  if (!isOwner) {
+    const callerShare = await dbFirst<typeof albumShares.$inferSelect>(
+      db.select().from(albumShares).where(and(eq(albumShares.album_id, req.albumId), eq(albumShares.user_id, userId)))
+    );
+    if (callerShare?.access_level !== "write_share") {
+      throw new Error("Unauthorized to share album");
+    }
+    // Sharing-delegates cannot escalate: they may grant read/write, not
+    // write_share. Otherwise every invitee could invite further and the
+    // owner loses control of the trust chain.
+    if (req.accessLevel === "write_share") {
+      throw new Error("Only the album owner can grant write_share access");
+    }
+    // Delegates cannot modify the owner's existing assignments — they may
+    // only add new participants or revise their own earlier invites.
+    const existing = await dbFirst<typeof albumShares.$inferSelect>(
+      db.select().from(albumShares).where(and(eq(albumShares.album_id, req.albumId), eq(albumShares.user_id, req.userId)))
+    );
+    if (existing && existing.invited_by_user_id !== userId) {
+      throw new Error("Cannot modify a share created by someone else");
+    }
+    // Cannot re-share to the owner (they already have full access).
+    if (req.userId === album.user_id) {
+      throw new Error("Cannot share the album with its owner");
+    }
   }
 
   await dbExec(
     db.insert(albumShares)
-      .values({ album_id: req.albumId, user_id: req.userId, access_level: req.accessLevel })
-      .onConflictDoUpdate({ target: [albumShares.album_id, albumShares.user_id], set: { access_level: req.accessLevel } })
+      .values({ album_id: req.albumId, user_id: req.userId, access_level: req.accessLevel, invited_by_user_id: userId })
+      .onConflictDoUpdate({ target: [albumShares.album_id, albumShares.user_id], set: { access_level: req.accessLevel, invited_by_user_id: userId } })
   );
 
   // Enqueue face_assignment jobs for all photos in the shared album for the new user.
@@ -3329,13 +3362,22 @@ export async function getAlbumSharesLogic(userId: number, albumId: number): Prom
     db.select().from(albums).where(eq(albums.id, albumId))
   );
   if (!album) throw new Error("Album not found");
-  if (album.user_id !== userId) throw new Error("Only owner can view shares");
 
-  const rows = await dbAll<{ album_id: number; user_id: number; access_level: string; name: string; email: string }>(
+  const isOwner = album.user_id === userId;
+  const callerShare = isOwner ? null : await dbFirst<typeof albumShares.$inferSelect>(
+    db.select().from(albumShares).where(and(eq(albumShares.album_id, albumId), eq(albumShares.user_id, userId)))
+  );
+  const canShareLink = isOwner || callerShare?.access_level === "write_share";
+  if (!isOwner && !canShareLink) {
+    throw new Error("Unauthorized to view shares");
+  }
+
+  const rows = await dbAll<{ album_id: number; user_id: number; access_level: string; invited_by_user_id: number | null; name: string; email: string }>(
     db.select({
       album_id: albumShares.album_id,
       user_id: albumShares.user_id,
       access_level: albumShares.access_level,
+      invited_by_user_id: albumShares.invited_by_user_id,
       name: users.name,
       email: users.email,
     })
@@ -3344,7 +3386,6 @@ export async function getAlbumSharesLogic(userId: number, albumId: number): Prom
     .where(eq(albumShares.album_id, albumId))
   );
 
-  // Also fetch public link if it exists
   const publicLink = await dbFirst<typeof albumPublicLinks.$inferSelect>(
     db.select().from(albumPublicLinks).where(eq(albumPublicLinks.album_id, albumId))
   );
@@ -3353,7 +3394,8 @@ export async function getAlbumSharesLogic(userId: number, albumId: number): Prom
     shares: rows.map(r => ({
       album_id: r.album_id,
       user_id: r.user_id,
-      access_level: r.access_level as "read" | "write",
+      access_level: r.access_level as "read" | "write" | "write_share",
+      invited_by_user_id: r.invited_by_user_id ?? null,
       user_name: r.name,
       user_email: r.email,
     })),
@@ -3366,7 +3408,27 @@ export async function removeAlbumShareLogic(userId: number, req: RemoveAlbumShar
     db.select().from(albums).where(eq(albums.id, req.albumId))
   );
   if (!album) throw new Error("Album not found");
-  if (album.user_id !== userId) throw new Error("Only owner can remove shares");
+
+  const isOwner = album.user_id === userId;
+  if (!isOwner) {
+    const [callerShare, targetShare] = await Promise.all([
+      dbFirst<typeof albumShares.$inferSelect>(
+        db.select().from(albumShares).where(and(eq(albumShares.album_id, req.albumId), eq(albumShares.user_id, userId)))
+      ),
+      dbFirst<typeof albumShares.$inferSelect>(
+        db.select().from(albumShares).where(and(eq(albumShares.album_id, req.albumId), eq(albumShares.user_id, req.userId)))
+      ),
+    ]);
+    if (callerShare?.access_level !== "write_share") {
+      throw new Error("Unauthorized to remove shares");
+    }
+    // Delegates can only revoke invitations they created themselves. Shares
+    // with NULL invited_by predate this feature and are treated as owner-
+    // created, so they stay owner-managed.
+    if (!targetShare || targetShare.invited_by_user_id !== userId) {
+      throw new Error("Can only remove shares you created yourself");
+    }
+  }
 
   // Collect photo IDs in this album BEFORE deleting the share
   const albumPhotoIds = (await dbAll<{ photo_id: number }>(
@@ -3521,7 +3583,14 @@ export async function createAlbumPublicLinkLogic(userId: number, albumId: number
     db.select().from(albums).where(eq(albums.id, albumId))
   );
   if (!album) throw new Error("Album not found");
-  if (album.user_id !== userId) throw new Error("Only owner can create public link");
+  if (album.user_id !== userId) {
+    const share = await dbFirst<typeof albumShares.$inferSelect>(
+      db.select().from(albumShares).where(and(eq(albumShares.album_id, albumId), eq(albumShares.user_id, userId)))
+    );
+    if (!share || share.access_level !== "write_share") {
+      throw new Error("Unauthorized to create public link");
+    }
+  }
 
   // Check if a link already exists
   const existing = await dbFirst<typeof albumPublicLinks.$inferSelect>(
@@ -3553,7 +3622,14 @@ export async function deleteAlbumPublicLinkLogic(userId: number, albumId: number
     db.select().from(albums).where(eq(albums.id, albumId))
   );
   if (!album) throw new Error("Album not found");
-  if (album.user_id !== userId) throw new Error("Only owner can delete public link");
+  if (album.user_id !== userId) {
+    const share = await dbFirst<typeof albumShares.$inferSelect>(
+      db.select().from(albumShares).where(and(eq(albumShares.album_id, albumId), eq(albumShares.user_id, userId)))
+    );
+    if (!share || share.access_level !== "write_share") {
+      throw new Error("Unauthorized to delete public link");
+    }
+  }
 
   await dbExec(
     db.delete(albumPublicLinks).where(eq(albumPublicLinks.album_id, albumId))
