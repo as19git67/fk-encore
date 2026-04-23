@@ -37,6 +37,10 @@ def test_healthz_reports_starting_before_models_load():
     assert body["llm_loaded"] is False
     assert body["embedder_loaded"] is False
     assert body["embedding_model"] == main.EMBEDDING_MODEL
+    # Diagnostic fields are always present so ops can spot memory growth /
+    # tiny uptimes in a plain `curl` against /healthz.
+    assert isinstance(body["rss_mb"], (int, float))
+    assert body["rss_mb"] > 0
 
 
 def test_healthz_reports_ok_when_both_models_present():
