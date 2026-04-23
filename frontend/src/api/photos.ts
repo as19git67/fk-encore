@@ -680,6 +680,10 @@ export interface PublicAlbumPhoto {
   ai_quality_score?: number
   auto_crop?: { x: number; y: number }
   description?: string
+  /** Photo is a cover of a similarity group curated by the album owner. */
+  is_highlight?: boolean
+  /** Album owner has hidden this photo in their curation. */
+  is_hidden?: boolean
 }
 
 export interface PublicAlbumResponse {
