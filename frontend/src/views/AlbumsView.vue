@@ -58,6 +58,57 @@ function openAlbum(album: Album) {
   router.push(`/fotos/alben/${album.id}`)
 }
 
+// Number of columns currently shown in the grid. Derived from the computed
+// `grid-template-columns` (each track becomes a space-separated length), so
+// it stays in sync with responsive breakpoints and `auto-fill` without us
+// having to mirror the CSS formula here.
+function getGridColumnCount(): number {
+  const root = gridEl.value
+  if (!root) return 1
+  const template = window.getComputedStyle(root).gridTemplateColumns
+  if (!template || template === 'none') return 1
+  return template.split(' ').filter(s => s.trim().length > 0).length
+}
+
+function handleGridArrowNav(e: KeyboardEvent) {
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+  const root = gridEl.value
+  if (!root) return
+  const active = document.activeElement as HTMLElement | null
+  const currentCard = active?.closest('.album-card') as HTMLElement | null
+  if (!currentCard || !root.contains(currentCard)) return
+
+  const cards = Array.from(root.querySelectorAll<HTMLElement>('.album-card'))
+  const currentIndex = cards.indexOf(currentCard)
+  if (currentIndex === -1) return
+
+  const cols = getGridColumnCount()
+  let targetIndex = -1
+  switch (e.key) {
+    case 'ArrowLeft':
+      if (currentIndex > 0) targetIndex = currentIndex - 1
+      break
+    case 'ArrowRight':
+      if (currentIndex < cards.length - 1) targetIndex = currentIndex + 1
+      break
+    case 'ArrowUp':
+      if (currentIndex - cols >= 0) targetIndex = currentIndex - cols
+      break
+    case 'ArrowDown':
+      if (currentIndex + cols < cards.length) targetIndex = currentIndex + cols
+      // If there's no card directly below (partial last row), fall back to
+      // the last card so the user can always reach the end of the grid.
+      else if (currentIndex < cards.length - 1) targetIndex = cards.length - 1
+      break
+  }
+  if (targetIndex === -1) return
+
+  e.preventDefault()
+  const target = cards[targetIndex]
+  target.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  target.focus({ preventScroll: true })
+}
+
 function focusRememberedAlbum(): boolean {
   const id = readRememberedAlbumId()
   if (id === null) return false
@@ -720,7 +771,7 @@ onMounted(loadData)
       Keine Alben passen zum Filter „{{ filterQuery }}“.
     </div>
 
-    <div v-else ref="gridEl" class="albums-grid">
+    <div v-else ref="gridEl" class="albums-grid" @keydown="handleGridArrowNav">
       <div
           v-for="(album, index) in filteredAlbums"
           :key="album.id"
