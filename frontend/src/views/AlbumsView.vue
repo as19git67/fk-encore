@@ -66,6 +66,20 @@ function focusRememberedAlbum(): boolean {
   const el = root.querySelector<HTMLElement>(`[data-album-id="${id}"]`)
   if (!el) return false
   el.scrollIntoView({ block: 'center', inline: 'nearest' })
+  // `el.focus()` alone does not trigger `:focus-visible` styles for
+  // programmatic focus, so the user wouldn't see the outline. Add an
+  // explicit marker class that mirrors the focus-visible outline and
+  // clear it as soon as the user interacts with the page again.
+  el.classList.add('album-card--restored-focus')
+  const clear = () => {
+    el.classList.remove('album-card--restored-focus')
+    el.removeEventListener('blur', clear)
+    el.removeEventListener('pointerdown', clear)
+    el.removeEventListener('keydown', clear)
+  }
+  el.addEventListener('blur', clear)
+  el.addEventListener('pointerdown', clear)
+  el.addEventListener('keydown', clear)
   el.focus({ preventScroll: true })
   return true
 }
@@ -357,12 +371,23 @@ const filteredAlbums = computed(() => {
   })
 })
 
+function restoreInitialFocus() {
+  // One animation frame after the DOM flush so the grid has its final
+  // layout (card placeholders are sized, template refs are populated).
+  // If the card can't be found yet, try once more next frame.
+  requestAnimationFrame(() => {
+    if (focusRememberedAlbum()) return
+    requestAnimationFrame(() => {
+      if (focusRememberedAlbum()) return
+      firstAlbumRef.value?.focus()
+    })
+  })
+}
+
 watch(loading, (newLoading) => {
   if (!newLoading && filteredAlbums.value.length > 0) {
     nextTick(() => {
-      if (!focusRememberedAlbum()) {
-        firstAlbumRef.value?.focus()
-      }
+      restoreInitialFocus()
       observeCards()
     })
   }
@@ -1021,7 +1046,8 @@ onMounted(loadData)
 
 .album-card:hover { transform: scale(1.02); }
 
-.album-card:focus-visible {
+.album-card:focus-visible,
+.album-card.album-card--restored-focus {
   outline: 2px solid var(--p-primary-300);
   outline-offset: -2px;
 }
