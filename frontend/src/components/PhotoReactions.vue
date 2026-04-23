@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import Popover from 'primevue/popover'
+import { useConfirm } from 'primevue/useconfirm'
 import {
   createComment,
   deleteComment,
@@ -18,6 +19,7 @@ const props = defineProps<{
 
 const auth = useAuthStore()
 const currentUserId = computed(() => auth.user?.id ?? null)
+const confirm = useConfirm()
 
 const comments = ref<PhotoComment[]>([])
 const loading = ref(false)
@@ -47,17 +49,41 @@ watch([editingId, editingText], () => nextTick(() => autoGrow(editTextarea.value
 // own-comment bubble. `actionTarget` tracks which comment the menu applies to.
 const actionPopover = ref<InstanceType<typeof Popover> | null>(null)
 const actionTarget = ref<PhotoComment | null>(null)
+const actionTriggerEl = ref<HTMLElement | null>(null)
+
+// PrimeVue's built-in outside-click dismissal listens on `document` in the
+// bubble phase. Several ancestors in the fullscreen flyout use `@click.stop`,
+// so those events never reach the document and the popover stays open.
+// We intercept clicks ourselves in the capture phase, which runs before any
+// ancestor can stop propagation.
+function handleOutsidePointerDown(event: PointerEvent) {
+  const target = event.target as Node | null
+  if (!target) return
+  const trigger = actionTriggerEl.value
+  if (trigger && trigger.contains(target)) return
+  const popoverRoot = document.querySelector('.reactions__menu')?.closest('.p-popover')
+  if (popoverRoot && popoverRoot.contains(target)) return
+  closeActions()
+}
 
 function openActions(event: Event, c: PhotoComment) {
   if (editingId.value === c.id) return
   actionTarget.value = c
+  actionTriggerEl.value = event.currentTarget as HTMLElement
   actionPopover.value?.show(event)
+  document.addEventListener('pointerdown', handleOutsidePointerDown, true)
 }
 
 function closeActions() {
+  document.removeEventListener('pointerdown', handleOutsidePointerDown, true)
   actionPopover.value?.hide()
   actionTarget.value = null
+  actionTriggerEl.value = null
 }
+
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', handleOutsidePointerDown, true)
+})
 
 function handleEditFromMenu() {
   const c = actionTarget.value
@@ -68,7 +94,7 @@ function handleEditFromMenu() {
 function handleDeleteFromMenu() {
   const c = actionTarget.value
   closeActions()
-  if (c) void removeComment(c)
+  if (c) void requestDelete(c)
 }
 
 // When there are more than VISIBLE_COMMENT_COUNT comments we collapse to
@@ -138,14 +164,22 @@ async function saveEdit(c: PhotoComment) {
   }
 }
 
-async function removeComment(c: PhotoComment) {
-  if (!confirm('Kommentar wirklich löschen?')) return
-  try {
-    await deleteComment(c.id)
-    comments.value = comments.value.filter((x) => x.id !== c.id)
-  } catch (err: unknown) {
-    error.value = (err as Error)?.message || 'Löschen fehlgeschlagen'
-  }
+function requestDelete(c: PhotoComment) {
+  confirm.require({
+    message: 'Kommentar wirklich löschen?',
+    header: 'Kommentar löschen',
+    icon: 'pi pi-exclamation-triangle',
+    rejectProps: { label: 'Abbrechen', severity: 'secondary', outlined: true },
+    acceptProps: { label: 'Löschen', severity: 'danger' },
+    accept: async () => {
+      try {
+        await deleteComment(c.id)
+        comments.value = comments.value.filter((x) => x.id !== c.id)
+      } catch (err: unknown) {
+        error.value = (err as Error)?.message || 'Löschen fehlgeschlagen'
+      }
+    },
+  })
 }
 
 // Edit is only offered when the user's comment is *the* latest in
@@ -406,8 +440,12 @@ watch(
   border-bottom-left-radius: 4px;
 }
 .is-own .reactions__bubble {
-  background: var(--p-primary-color);
-  color: var(--p-primary-contrast-color, #fff);
+  /* Tint from the theme's primary color so the own-comment bubble stays
+     recognisable without shouting. Using color-mix keeps the surface
+     legible against both light and dark PrimeVue themes and avoids any
+     hardcoded palette values. */
+  background: color-mix(in srgb, var(--p-primary-color) 22%, transparent);
+  color: var(--p-text-color);
   border-bottom-right-radius: 4px;
 }
 
