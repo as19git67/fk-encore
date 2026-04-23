@@ -54,4 +54,7 @@ vi.mock("~encore/clients", () => ({
   push: {
     fanoutFeed: vi.fn(() => Promise.resolve({ sent: 0, pruned: 0 })),
   },
+  user: {
+    listUserIdsWithPermission: vi.fn(() => Promise.resolve({ userIds: [] })),
+  },
 }));

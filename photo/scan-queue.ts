@@ -13,6 +13,7 @@ import { eq, and, inArray, sql, not, isNull } from "drizzle-orm";
 import db from "../db/database";
 import { photoScanQueue, photos, faces, photoLandmarks } from "../db/schema";
 import { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM } from "./scan-config";
+import { notifyScanQueueChanged } from "./scan-queue-events";
 
 export type ScanService = "embedding" | "face_detection" | "face_assignment" | "landmark" | "quality" | "geocoding" | "thumbnail";
 export type ScanStatus = "pending" | "processing" | "failed" | "done";
@@ -88,6 +89,7 @@ export async function enqueuePhotoScan(
   force = false,
 ): Promise<void> {
   if (services.length === 0) return;
+  notifyScanQueueChanged();
 
   for (const service of services) {
     const queueUserId = isGlobalService(service) ? null : userId;
@@ -153,6 +155,7 @@ export async function enqueuePhotoScanBulkPerUser(
   if (isGlobalService(service)) {
     throw new Error(`enqueuePhotoScanBulkPerUser cannot be used for global service '${service}'`);
   }
+  notifyScanQueueChanged();
 
   const rows = userIds.map((user_id) => ({
     photo_id: photoId,
@@ -204,6 +207,7 @@ export async function dequeueNextJob(service: ScanService): Promise<typeof photo
     )
     RETURNING *
   `);
+  if (rows.rows[0]) notifyScanQueueChanged();
   return rows.rows[0];
 }
 
@@ -212,6 +216,7 @@ export async function markJobDone(id: number): Promise<void> {
     .update(photoScanQueue)
     .set({ status: "done", finished_at: sql`NOW()` })
     .where(eq(photoScanQueue.id, id));
+  notifyScanQueueChanged();
 }
 
 /**
@@ -232,6 +237,7 @@ export async function deferJob(id: number): Promise<void> {
       attempts: sql`GREATEST(0, attempts - 1)`,
     })
     .where(eq(photoScanQueue.id, id));
+  notifyScanQueueChanged();
 }
 
 export async function markJobFailed(id: number, error: string): Promise<void> {
@@ -239,6 +245,7 @@ export async function markJobFailed(id: number, error: string): Promise<void> {
     .update(photoScanQueue)
     .set({ status: "failed", error_msg: error, finished_at: sql`NOW()` })
     .where(eq(photoScanQueue.id, id));
+  notifyScanQueueChanged();
 }
 
 /**
@@ -306,7 +313,9 @@ export async function requeueFailed(userId: number): Promise<number> {
       AND photo_id IN (SELECT id FROM photos WHERE user_id = ${userId})
   `);
 
-  return ((perUserResult as any).rowCount ?? 0) + ((globalResult as any).rowCount ?? 0);
+  const changed = ((perUserResult as any).rowCount ?? 0) + ((globalResult as any).rowCount ?? 0);
+  if (changed > 0) notifyScanQueueChanged();
+  return changed;
 }
 
 /**
@@ -317,6 +326,7 @@ export async function requeueFailed(userId: number): Promise<number> {
 export async function requeueForRescan(userId: number, force: boolean): Promise<number> {
   const services = enabledServices();
   let queued = 0;
+  notifyScanQueueChanged();
 
   for (const service of services) {
     let photoIds: number[];
@@ -503,7 +513,9 @@ export async function cancelPendingScans(userId: number): Promise<number> {
       AND photo_id IN (SELECT id FROM photos WHERE user_id = ${userId})
   `);
 
-  return ((perUserResult as any).rowCount ?? 0) + ((globalResult as any).rowCount ?? 0);
+  const cancelled = ((perUserResult as any).rowCount ?? 0) + ((globalResult as any).rowCount ?? 0);
+  if (cancelled > 0) notifyScanQueueChanged();
+  return cancelled;
 }
 
 /**
@@ -515,4 +527,5 @@ export async function resetStuckJobs(): Promise<void> {
     .update(photoScanQueue)
     .set({ status: "pending", started_at: null })
     .where(eq(photoScanQueue.status, "processing"));
+  notifyScanQueueChanged();
 }

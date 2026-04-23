@@ -43,6 +43,18 @@ export async function getRolesForUser(userId: number): Promise<Role[]> {
   return rows.map((r) => ({ id: r.id, name: r.name, description: r.description ?? "" }));
 }
 
+export async function getUserIdsWithPermission(permissionKey: string): Promise<number[]> {
+  const rows = await dbAll<{ user_id: number }>(
+    db
+      .selectDistinct({ user_id: userRoles.user_id })
+      .from(userRoles)
+      .innerJoin(rolePermissions, eq(rolePermissions.role_id, userRoles.role_id))
+      .innerJoin(permissions, eq(permissions.id, rolePermissions.permission_id))
+      .where(eq(permissions.key, permissionKey))
+  );
+  return rows.map((r) => r.user_id);
+}
+
 export async function getPermissionsForUser(userId: number): Promise<string[]> {
   const rows = await dbAll<{ key: string }>(
     db
