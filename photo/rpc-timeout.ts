@@ -173,9 +173,46 @@ export async function fetchWithTimeout(
     if (controller.signal.aborted && !(callerSignal?.aborted)) {
       throw new MlRpcTimeoutError(input, timeoutMs);
     }
+    // Undici's own internal timeouts (headers / body / connect) and common
+    // transient socket errors surface as `TypeError: fetch failed` with the
+    // real error on `err.cause`. These are retryable — the ML container is
+    // slow or restarting, not permanently broken. Map them to
+    // MlRpcTimeoutError so the scan-worker defers the job instead of losing
+    // the photo's scan data.
+    if (isTransientFetchError(err)) {
+      throw new MlRpcTimeoutError(input, timeoutMs);
+    }
     throw err;
   } finally {
     clearTimeout(timer);
     if (queue) release(queue);
   }
+}
+
+/** Undici/Node error codes that indicate a retryable network-level failure. */
+const TRANSIENT_FETCH_CODES: ReadonlySet<string> = new Set([
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_SOCKET",
+  "UND_ERR_CLOSED",
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "EPIPE",
+  "ETIMEDOUT",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+]);
+
+function isTransientFetchError(err: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: any = err;
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    if (typeof current.code === "string" && TRANSIENT_FETCH_CODES.has(current.code)) {
+      return true;
+    }
+    current = current.cause;
+  }
+  return false;
 }
