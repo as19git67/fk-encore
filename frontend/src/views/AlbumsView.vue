@@ -15,6 +15,7 @@ import SortMenu from '../components/SortMenu.vue'
 import type { SortField, SortState } from '../composables/useSort'
 import {
   type Album,
+  type AlbumAccessLevel,
   type AlbumShareWithUser,
   type AlbumPublicLink,
   type PublicLinkExpiry,
@@ -510,6 +511,11 @@ function canManageAlbum(album: Album) {
   return auth.user?.id === album.user_id
 }
 
+function canShareAlbum(album: Album) {
+  if (auth.user?.id === album.user_id) return true
+  return album.my_access_level === 'write_share'
+}
+
 function openRenameDialog(album: Album) {
   selectedAlbum.value = album
   renameValue.value = album.name
@@ -563,7 +569,8 @@ const shareAlbumId = ref<number>(0)
 const albumSharesList = ref<AlbumShareWithUser[]>([])
 const allUsers = ref<UserWithRoles[]>([])
 const shareUserId = ref<number | null>(null)
-const shareAccessLevel = ref<'read' | 'write'>('read')
+const shareAccessLevel = ref<AlbumAccessLevel>('read')
+const shareAlbumIsOwner = ref(false)
 const sharing = ref(false)
 const loadingShares = ref(false)
 const publicLink = ref<AlbumPublicLink | null>(null)
@@ -575,7 +582,11 @@ const expiryOptions = [
   { label: '30 Tage', value: '30d' },
   { label: '90 Tage', value: '90d' },
 ]
-const accessLevelOptions = [{ label: 'Nur lesen', value: 'read' }, { label: 'Bearbeiten', value: 'write' }]
+const accessLevelOptions: Array<{ label: string; value: AlbumAccessLevel }> = [
+  { label: 'Nur lesen', value: 'read' },
+  { label: 'Bearbeiten', value: 'write' },
+  { label: 'Bearbeiten + Teilen', value: 'write_share' },
+]
 
 const usersNotShared = computed(() => {
   const sharedIds = new Set(albumSharesList.value.map(s => s.user_id))
@@ -585,12 +596,13 @@ const usersNotShared = computed(() => {
 
 async function openShareDialog(album: Album) {
   shareAlbumId.value = album.id
+  shareAlbumIsOwner.value = auth.user?.id === album.user_id
   showShareDialog.value = true
   loadingShares.value = true
   try {
     const [sharesRes, usersRes] = await Promise.all([
       getAlbumShares(album.id),
-      auth.hasPermission('users.list') ? listUsers() : Promise.resolve({ users: [] }),
+      shareAlbumIsOwner.value && auth.hasPermission('users.list') ? listUsers() : Promise.resolve({ users: [] }),
     ])
     albumSharesList.value = sharesRes.shares
     publicLink.value = sharesRes.publicLink ?? null
@@ -786,10 +798,10 @@ onMounted(loadData)
           @keydown.space.prevent="openAlbum(album)"
       >
         <template v-if="visibleAlbumIds.has(album.id)">
-          <div v-if="canManageAlbum(album)" class="album-actions" @click.stop>
-            <Button icon="pi pi-share-alt" text rounded size="small" v-tooltip="'Freigeben'" @click="openShareDialog(album)" />
-            <Button icon="pi pi-pencil" text rounded size="small" v-tooltip="'Bearbeiten'" @click="openRenameDialog(album)" />
-            <Button icon="pi pi-trash" text rounded size="small" severity="danger" v-tooltip="'Löschen'" @click="openDeleteDialog(album)" />
+          <div v-if="canShareAlbum(album) || canManageAlbum(album)" class="album-actions" @click.stop>
+            <Button v-if="canShareAlbum(album)" icon="pi pi-share-alt" text rounded size="small" v-tooltip="'Freigeben'" @click="openShareDialog(album)" />
+            <Button v-if="canManageAlbum(album)" icon="pi pi-pencil" text rounded size="small" v-tooltip="'Bearbeiten'" @click="openRenameDialog(album)" />
+            <Button v-if="canManageAlbum(album)" icon="pi pi-trash" text rounded size="small" severity="danger" v-tooltip="'Löschen'" @click="openDeleteDialog(album)" />
           </div>
           <div class="album-cover">
             <HeicImage
@@ -895,7 +907,7 @@ onMounted(loadData)
           </div>
         </div>
 
-        <div class="share-section">
+        <div v-if="shareAlbumIsOwner" class="share-section">
           <h4 class="share-section-title">Aktuelle Freigaben</h4>
           <div v-if="albumSharesList.length === 0" class="share-empty">Noch keine Freigaben.</div>
           <div v-for="share in albumSharesList" :key="share.user_id" class="share-row">
@@ -903,13 +915,13 @@ onMounted(loadData)
               <span class="share-user-name">{{ share.user_name }}</span>
               <span class="share-user-email">{{ share.user_email }}</span>
             </div>
-            <span :class="['share-badge', share.access_level === 'write' ? 'share-badge--write' : 'share-badge--read']">
-              {{ share.access_level === 'write' ? 'Bearbeiten' : 'Nur lesen' }}
+            <span :class="['share-badge', share.access_level === 'read' ? 'share-badge--read' : 'share-badge--write']">
+              {{ share.access_level === 'read' ? 'Nur lesen' : share.access_level === 'write_share' ? 'Bearbeiten + Teilen' : 'Bearbeiten' }}
             </span>
             <Button icon="pi pi-times" size="small" text severity="danger" @click="handleRemoveShare(share.user_id)" />
           </div>
         </div>
-        <div class="share-section">
+        <div v-if="shareAlbumIsOwner" class="share-section">
           <h4 class="share-section-title">Benutzer hinzufügen</h4>
           <div class="share-add-form">
             <Select v-if="allUsers.length > 0" v-model="shareUserId" :options="usersNotShared" optionLabel="name" optionValue="id" placeholder="Benutzer auswählen…" class="share-user-select" />
@@ -925,6 +937,10 @@ onMounted(loadData)
             <div class="share-access-explanation-row">
               <span class="share-badge share-badge--write">Bearbeiten</span>
               <span>Zusätzlich können Albumdetails geändert sowie Fotos hinzugefügt oder entfernt werden.</span>
+            </div>
+            <div class="share-access-explanation-row">
+              <span class="share-badge share-badge--write">Bearbeiten + Teilen</span>
+              <span>Zusätzlich kann ein öffentlicher Link erzeugt, kopiert oder gelöscht werden.</span>
             </div>
           </div>
         </div>

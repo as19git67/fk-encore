@@ -496,6 +496,8 @@ export function purgePhotos(deleteFiles: boolean) {
 
 // ---------- Albums ----------
 
+export type AlbumAccessLevel = 'read' | 'write' | 'write_share'
+
 export interface Album {
   id: number
   user_id: number
@@ -511,6 +513,8 @@ export interface Album {
   is_shared: boolean
   created_at: string
   updated_at: string
+  /** Access level of the current caller relative to this album. */
+  my_access_level?: 'owner' | AlbumAccessLevel
 }
 
 export type ActiveView = 'all' | 'favorites' | 'consensus' | 'others-favorites' | 'custom'
@@ -609,7 +613,7 @@ export function batchUpdateAlbumPhotos(albumIds: number[], photoIds: number[], a
   })
 }
 
-export function shareAlbum(albumId: number, userId: number, accessLevel: 'read' | 'write') {
+export function shareAlbum(albumId: number, userId: number, accessLevel: AlbumAccessLevel) {
   return apiFetch<{ success: boolean }>('/albums/share', {
     method: 'POST',
     body: JSON.stringify({ albumId, userId, accessLevel })
@@ -619,7 +623,7 @@ export function shareAlbum(albumId: number, userId: number, accessLevel: 'read' 
 export interface AlbumShareWithUser {
   album_id: number
   user_id: number
-  access_level: 'read' | 'write'
+  access_level: AlbumAccessLevel
   user_name: string
   user_email: string
 }

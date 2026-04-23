@@ -727,6 +727,37 @@ describe("Photo Module", () => {
       expect(stats.hide_count).toBe(0);
     });
 
+    it("should allow a write_share participant to create and delete a public link", async () => {
+      const album = await service.createAlbumLogic(user1.id, { name: "Share-delegated" });
+
+      // Participant with plain write cannot manage the public link.
+      await service.shareAlbumLogic(user1.id, { albumId: album.id, userId: user2.id, accessLevel: "write" });
+      await expect(service.createAlbumPublicLinkLogic(user2.id, album.id)).rejects.toThrow("Unauthorized");
+
+      // Upgrade to write_share — now the participant can create, read and delete the link.
+      await service.shareAlbumLogic(user1.id, { albumId: album.id, userId: user2.id, accessLevel: "write_share" });
+
+      const created = await service.createAlbumPublicLinkLogic(user2.id, album.id);
+      expect(created.token).toBeTruthy();
+
+      const sharesView = await service.getAlbumSharesLogic(user2.id, album.id);
+      expect(sharesView.publicLink?.token).toBe(created.token);
+      // A participant must not see the owner's share list.
+      expect(sharesView.shares).toHaveLength(0);
+
+      const deleted = await service.deleteAlbumPublicLinkLogic(user2.id, album.id);
+      expect(deleted.success).toBe(true);
+    });
+
+    it("should not allow a read-only participant to see or manage public links", async () => {
+      const album = await service.createAlbumLogic(user1.id, { name: "Read-only" });
+      await service.shareAlbumLogic(user1.id, { albumId: album.id, userId: user2.id, accessLevel: "read" });
+
+      await expect(service.getAlbumSharesLogic(user2.id, album.id)).rejects.toThrow("Unauthorized");
+      await expect(service.createAlbumPublicLinkLogic(user2.id, album.id)).rejects.toThrow("Unauthorized");
+      await expect(service.deleteAlbumPublicLinkLogic(user2.id, album.id)).rejects.toThrow("Unauthorized");
+    });
+
     it("should not allow hiding photos for users without any album share", async () => {
       const album = await service.createAlbumLogic(user1.id, { name: "No Share" });
       const photo = await service.uploadPhotoLogic(user1.id, {
