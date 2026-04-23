@@ -106,18 +106,12 @@ watch(isFullscreen, (val) => {
 const { applied: filter, draft: filterDraft, activeCount, openEdit, apply: applyFilter, reset: resetFilter, removeKey } =
   useFilter({ preserveKeys: ['photoId'] })
 const filterMenuOpen = ref(false)
-const FILTER_AVAILABLE_GRID: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'> = [
+const FILTER_AVAILABLE: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'> = [
   'hiddenMode', 'favorite', 'groupHighlight', 'inGroup',
   'othersFavorited', 'othersHidden',
   'qualityRange', 'mediaTypes', 'hasGps',
   'dateRange', 'sizeRange',
 ]
-const FILTER_AVAILABLE_MAP: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'> = [
-  'hiddenMode', 'groupHighlight',
-]
-const filterAvailable = computed(() =>
-  displayMode.value === 'map' ? FILTER_AVAILABLE_MAP : FILTER_AVAILABLE_GRID
-)
 
 function openFilterMenu() {
   openEdit()
@@ -387,15 +381,6 @@ const displayMode = ref<'grid' | 'map'>('grid')
 
 watch(album, (a) => {
   if (a) displayMode.value = a.display_mode ?? 'grid'
-}, { immediate: true })
-
-// Map mode defaults to showing only group highlights; leave the flag alone
-// once the user has made a conscious choice (true or false).
-watch(displayMode, (mode) => {
-  if (mode === 'map' && filter.value.groupHighlight === undefined) {
-    filterDraft.value = { ...filter.value, groupHighlight: true }
-    applyFilter()
-  }
 }, { immediate: true })
 
 // ── Map fullscreen ───────────────────────────────────────────────────────────
@@ -984,7 +969,7 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
     <FilterMenu
       v-model:visible="filterMenuOpen"
       v-model:draft="filterDraft"
-      :available="filterAvailable"
+      :available="FILTER_AVAILABLE"
       @apply="onApplyFilter"
       @reset="onResetFilter"
     />
