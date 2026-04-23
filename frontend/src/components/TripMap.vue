@@ -5,7 +5,6 @@ import 'leaflet/dist/leaflet.css'
 import type { Photo } from '../api/photos'
 import { getPhotoUrl } from '../api/photos'
 import { usePhotoStops, type Stop } from '../composables/usePhotoStops'
-import TripMapNoGpsPanel from './TripMapNoGpsPanel.vue'
 
 const props = defineProps<{
   photos: Photo[]
@@ -17,7 +16,7 @@ const emit = defineEmits<{
   'open-fullscreen': [stopPhotos: Photo[], startIndex: number]
 }>()
 
-const { stops, photosWithoutGps, dayPaths, dayTransitions, dayColorMap, uniqueDays, bounds } =
+const { stops, dayPaths, dayTransitions, dayColorMap, uniqueDays, bounds } =
   usePhotoStops(toRef(props, 'photos'))
 
 const mapContainer = ref<HTMLElement | null>(null)
@@ -335,10 +334,6 @@ watch(() => props.photos, () => {
   renderContent()
 }, { deep: true })
 
-function handleNoGpsPhotoClick(photo: Photo) {
-  emit('open-fullscreen', [photo], 0)
-}
-
 // ── External API ─────────────────────────────────────────────────────────────
 
 /** Select the stop that contains the given photo, if any. Used by the parent
@@ -476,13 +471,6 @@ defineExpose({ selectStopByPhotoId })
         </template>
       </div>
     </div>
-
-    <!-- Photos without GPS -->
-    <TripMapNoGpsPanel
-      v-if="photosWithoutGps.length > 0"
-      :photos="photosWithoutGps"
-      @photo-click="handleNoGpsPhotoClick"
-    />
   </div>
 </template>
 
