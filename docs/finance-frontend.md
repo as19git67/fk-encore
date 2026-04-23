@@ -298,32 +298,167 @@ Komponente wie `TransactionsView`, vorausgewähltes Konto).
   hält.
 - Zeilen-Klick führt zu `TransactionDetailView`.
 
+### 4.9 `TransactionsView`
+
+Haupt-Arbeitsansicht. DataTable mit Virtual-Scroll, Filter-Leiste,
+Multi-Select für Batch-Aktionen.
+
+```
++-----------------------------------------------------------------------+
+| Umsätze                            [ Zeitraum: 30 Tage ▾ ]  [Export]  |
++-----------------------------------------------------------------------+
+| Filter:                                                               |
+|   Konto:       [ Alle ▾ ]        Tags: [urlaub ✕] [+]                 |
+|   Betrag:      [ min ] — [ max ]  Gegenseite: [ Suche …           ]   |
+|                          [Filter anwenden]   [Leeren]                 |
++-----------------------------------------------------------------------+
+| [x] Alles auswählen (47)             [Tags auf Auswahl anwenden]      |
+|-----------------------------------------------------------------------|
+| [x] Datum       Konto       Gegenseite       Verwendung     Betrag    |
+| [x] 2024-08-12  Giro SpaXY  Hotel Firenze    Übernachtung  -340,00 €  |
+|                                                           [urlaub] [italien-2024] |
+| [ ] 2024-08-11  Giro SpaXY  Trattoria Luigi  Mittagessen    -47,30 €  |
+|                                                           [urlaub] [italien-2024] |
+| [x] 2024-08-10  Giro SpaXY  Trenitalia       Zug Rom-Flo.   -89,00 €  |
+|                                                           [urlaub] [italien-2024] |
++-----------------------------------------------------------------------+
+| Summe Auswahl: -476,30 €          Seite 1 von 3    < 1 2 3 >          |
++-----------------------------------------------------------------------+
+```
+
+Zeilen-Klick öffnet `TransactionDetailView` (§4.10). „Tags auf Auswahl
+anwenden" öffnet `BatchTagView` (§4.12). „Export" liefert CSV der
+aktuell gefilterten Liste (optional MVP-Feature).
+
+### 4.10 `TransactionDetailView`
+
+Detailansicht mit Tag-Editor. KI-Vorschläge und User-Tags sind visuell
+klar getrennt.
+
+```
++-----------------------------------------------------------------------+
+| Transaktion #421876                                         [Zurück]  |
++-----------------------------------------------------------------------+
+| Buchungsdatum:   2024-08-12     Wertstellung:  2024-08-12             |
+| Konto:           Giro Sparkasse XY (DE12 … 3456)                      |
+| Gegenseite:      Hotel Firenze                                        |
+|                  IT12 A 07601 03200 000012345678                      |
+| Verwendungszweck:                                                     |
+|   Übernachtung 09.–12.08.2024, Doppelzimmer                           |
+| Betrag:         -340,00 €                                             |
++-----------------------------------------------------------------------+
+| Tags                                                                  |
+|   User:   [urlaub ✕]  [italien-2024 ✕]  [hotel ✕]  [+ Tag]            |
+|                                                                       |
+|   KI-Vorschläge:                                                      |
+|     ◌ restaurant     ▰▱▱▱▱  0.34   [✓ übernehmen]  [✕ verwerfen]     |
+|     ◌ reise          ▰▰▰▰▱  0.62   [✓ übernehmen]  [✕ verwerfen]     |
+|                                                                       |
+|   Übernommen → wird User-Tag (blauer Chip oben).                      |
++-----------------------------------------------------------------------+
+|                                                    [Speichern]       |
++-----------------------------------------------------------------------+
+```
+
+User-Tags sind blaue Chips mit `✕`-Entfernen; KI-Vorschläge sind graue
+Chips mit Confidence-Balken. „Übernehmen" führt genau das Promotion-
+Verhalten aus `finance-tagging-and-ai.md` §2 aus (AI-Join löschen,
+User-Join anlegen, `confidence = NULL`).
+
+### 4.11 `TransactionNewView`
+
+Formular für manuelle Buchungen. Nur erreichbar, wenn der User auf
+mindestens einem Konto `level='write'` hält.
+
+```
++-----------------------------------------------------------------------+
+| Neue Buchung                                                [Zurück]  |
++-----------------------------------------------------------------------+
+| Konto *:             [ Giro Sparkasse XY ▾ ]                          |
+| Buchungsdatum *:     [ 2026-04-23 ]                                   |
+| Wertstellung:        [            ]   (optional)                      |
+| Betrag *:            [        0,00 ]  EUR                             |
+|                      ( ) Einnahme    (•) Ausgabe                      |
+| Gegenseite:          [                                       ]        |
+| IBAN Gegenseite:     [                                       ]        |
+| Verwendungszweck *:  [                                       ]        |
+|                      [                                       ]        |
+| Tags:                [+ Tag hinzufügen]                               |
++-----------------------------------------------------------------------+
+|                            [Abbrechen]            [Buchen]            |
++-----------------------------------------------------------------------+
+```
+
+Pflichtfelder mit `*` markiert. Das Konto-Dropdown zeigt ausschließlich
+Konten mit `finance_account_access.level = 'write'` für den
+eingeloggten User (bzw. alle, wenn `finance.admin`).
+
+### 4.12 `BatchTagView`
+
+Wird aus `TransactionsView` als PrimeVue-Dialog geöffnet, sobald
+mindestens eine Zeile selektiert ist und „Tags auf Auswahl anwenden"
+geklickt wird.
+
+```
++-----------------------------------------------------------------------+
+| Tags auf Auswahl anwenden                                             |
++-----------------------------------------------------------------------+
+| Auswahl:                                                              |
+|   12 Transaktionen                                                    |
+|   Zeitraum: 2024-08-10 — 2024-08-18                                   |
+|   Summe:   -876,45 €                                                  |
++-----------------------------------------------------------------------+
+| Tags hinzufügen:                                                      |
+|   [urlaub ▾]  [italien-2024 ▾]   [+ weiterer Tag]                     |
+|                                                                       |
+| Tags entfernen (optional):                                            |
+|   [alltag ▾]                                                          |
+|                                                                       |
+| Modus:  (•) Nur hinzufügen   ( ) Vorhandene ersetzen                  |
++-----------------------------------------------------------------------+
+|                          [Abbrechen]            [Anwenden]            |
++-----------------------------------------------------------------------+
+```
+
+„Vorhandene ersetzen" entfernt vor dem Hinzufügen alle bestehenden
+User-Tags der Auswahl — explizit hinter einem Radio-Button, damit
+niemand versehentlich bestehende Tags überschreibt.
+
+### 4.13 `AdminImportView`
+
+Datei-Upload für den Finanzkraft-JSON-Dump (siehe
+`finance-data-import.md`). Fortschritts-Anzeige pro Import-Stage.
+
+```
++-----------------------------------------------------------------------+
+| Datenimport (Finanzkraft-JSON)               (nur finance.admin)      |
++-----------------------------------------------------------------------+
+| Datei:  [ Durchsuchen …  finanzkraft-2026-04.json ]   2.4 MB          |
+|                                                                       |
+|                                  [Import starten]                     |
++-----------------------------------------------------------------------+
+| Fortschritt                                                           |
+|   ✓ Bankkontakte         (5 neu, 0 übersprungen)                      |
+|   ✓ Konten              (12 neu, 0 übersprungen)                      |
+|   ⟳ Transaktionen    3.142 / 48.712  ▰▰▰▱▱▱▱▱▱▱                      |
+|   ○ Tags                                                              |
+|   ○ Tag-Zuordnungen                                                   |
+|   ○ Salden-Historie                                                   |
++-----------------------------------------------------------------------+
+| Validierungsfehler: 2           [Fehlerbericht als JSON laden]        |
+|   Zeile 418:  Konto „DE99 … 0000" nicht im Bankkontakt-Export         |
+|   Zeile 931:  Betrag „abc" ist keine Zahl                             |
++-----------------------------------------------------------------------+
+```
+
+Der Fortschritt kommt per Server-Sent-Events oder Polling auf einen
+Status-Endpoint (`GET /finance/admin/import/:jobId/status`); Details
+sind in `finance-data-import.md` §7 (Offene Punkte zum Async-Pattern)
+vermerkt.
+
 ---
 
-## 5. Kurzbeschreibung der übrigen Views
-
-- **`TransactionsView`**: DataTable mit Virtual-Scroll, Filter-Leiste
-  (Datum, Tags, Betragsrange, Gegenseite). Row-Aktion öffnet
-  `TransactionDetailView`.
-- **`TransactionDetailView`**: Buchungsdatum, Betrag, Verwendungszweck,
-  Gegenseite + Tag-Editor. KI-Vorschläge erscheinen als graue Chips
-  (Badge „KI", zusätzlich Confidence-Balken); Klick promoted sie auf
-  User-Tag (siehe `finance-tagging-and-ai.md` §3). User-Tags sind
-  blaue Chips mit `×`-Button.
-- **`TransactionNewView`**: Formular für manuelle Buchung auf einem
-  Konto mit `finance.view`-Zugriff und `level='write'`. Pflichtfelder
-  Datum, Betrag, Verwendungszweck.
-- **`BatchTagView`**: Wird aus der `TransactionsView` per „Tags auf
-  Auswahl anwenden" geöffnet; zeigt die Selection und einen
-  Multi-Select für Tags, `Apply` schreibt gesammelt.
-- **`AdminImportView`**: File-Upload (accept=".json"), nach Submit
-  Fortschrittsanzeige pro Stage (Bankkontakte → … → Joins), am Ende
-  Tabelle mit Counts + optional Download der Validierungsfehler
-  (JSON).
-
----
-
-## 6. Interaktions-Besonderheiten
+## 5. Interaktions-Besonderheiten
 
 - **TAN-Flow**: Die `useBankcontactsStore`-Action `syncNow(id)` kapselt
   das Verhalten bei `409 Conflict` aus `POST /finance/statements`:
@@ -344,7 +479,7 @@ Komponente wie `TransactionsView`, vorausgewähltes Konto).
 
 ---
 
-## 7. Referenzen
+## 6. Referenzen
 
 | Stelle | Wofür |
 |---|---|
@@ -356,7 +491,7 @@ Komponente wie `TransactionsView`, vorausgewähltes Konto).
 
 ---
 
-## 8. Offene Punkte
+## 7. Offene Punkte
 
 - **CSV-Export in `AnalysisView`**: wirklich MVP oder erst später?
 - **Diff-Preview in `AccountAssignmentView`**: brauchen wir eine
