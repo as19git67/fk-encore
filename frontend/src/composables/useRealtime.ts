@@ -6,6 +6,7 @@ export type RealtimeChannel =
   | 'photos'
   | 'albums'
   | 'feed'
+  | 'scan-queue'
   | 'system'
 
 export interface RealtimeEvent {
