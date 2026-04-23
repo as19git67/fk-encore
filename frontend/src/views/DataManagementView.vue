@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import Button from 'primevue/button'
 import ProgressBar from 'primevue/progressbar'
 import Message from 'primevue/message'
@@ -31,12 +31,6 @@ const rescanLoading = ref(false)
 const retryLoading = ref(false)
 const cancelLoading = ref(false)
 const cancelledPending = ref(false)  // true after cancel until queue settles
-// Fallback polling: only armed when the realtime channel is unreachable
-// (e.g. permission denied server-side, or WS closed while the view stays
-// open). When events flow normally we rely on push — see useRealtimeEvent
-// below which refetches on every `scan-queue/state.changed`.
-const POLL_FALLBACK_MS = 15000
-let pollInterval: ReturnType<typeof setInterval> | null = null
 
 const serviceLabels: Record<string, string> = {
   embedding: 'Embeddings',
@@ -61,32 +55,19 @@ const isActive = computed(() => totalPending.value > 0 || totalProcessing.value 
 async function fetchQueueStatus() {
   try {
     queueStatus.value = await getScanQueueStatus()
-    // Reset cancelled state once the queue has fully settled
     if (cancelledPending.value && !isActive.value) {
       cancelledPending.value = false
     }
-    if (!isActive.value) stopPolling()
   } catch {
-    // ignore polling errors
-  }
-}
-
-function startPolling() {
-  if (pollInterval) return
-  pollInterval = setInterval(fetchQueueStatus, POLL_FALLBACK_MS)
-}
-
-function stopPolling() {
-  if (pollInterval) {
-    clearInterval(pollInterval)
-    pollInterval = null
+    // ignore transient errors — next push event will refresh
   }
 }
 
 // Push updates: backend emits `scan-queue/state.changed` (debounced to
 // at most one event every 500ms) for every queue mutation. We just
-// refetch — the REST endpoint remains the source of truth and the
-// handler stays trivial.
+// refetch — the REST endpoint remains the source of truth. The
+// WebSocket bus auto-reconnects with exponential backoff and replays
+// the outbox on resume, so no separate polling fallback is needed.
 useRealtimeEvent('scan-queue', 'state.changed', () => {
   fetchQueueStatus()
 })
@@ -96,8 +77,6 @@ async function handleRescan(force: boolean) {
   rescanLoading.value = true
   try {
     await rescanPhotos(force)
-    await fetchQueueStatus()
-    startPolling()
   } catch (err: any) {
     queueError.value = err.message || 'Fehler beim Starten des Scans'
   } finally {
@@ -110,8 +89,6 @@ async function handleRetry() {
   retryLoading.value = true
   try {
     await retryFailedScans()
-    await fetchQueueStatus()
-    startPolling()
   } catch (err: any) {
     queueError.value = err.message || 'Fehler beim Wiederholen'
   } finally {
@@ -124,7 +101,6 @@ async function handleCancel() {
   try {
     await cancelPendingScans()
     cancelledPending.value = true
-    await fetchQueueStatus()
   } catch (err: any) {
     queueError.value = err.message || 'Fehler beim Abbrechen'
   } finally {
@@ -220,12 +196,10 @@ async function handleGpsRescan() {
       if (gpsRescanCurrent.value < ids.length) await new Promise(r => setTimeout(r, 1100))
     }
     gpsRescanResult.value = { gpsFound, geocoded, scansQueued }
-    if (scansQueued > 0) startPolling()
   } catch (err: any) {
     gpsRescanError.value = err.message || 'Fehler beim GPS-Rescan'
   } finally {
     gpsRescanLoading.value = false
-    await fetchQueueStatus()
   }
 }
 
@@ -300,11 +274,8 @@ const buildNumber = ref('…')
 
 onMounted(async () => {
   await fetchQueueStatus()
-  if (isActive.value) startPolling()
   getBuildInfo().then(info => { buildNumber.value = info.build })
 })
-
-onUnmounted(() => stopPolling())
 </script>
 
 <template>
