@@ -309,6 +309,13 @@
       "when": 1778600000000,
       "tag": "0042_feed_item_album_left",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1778700000000,
+      "tag": "0043_album_shares_invited_by",
+      "breakpoints": true
     }
   ]
 }

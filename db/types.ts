@@ -389,6 +389,12 @@ export interface Album {
   is_shared: boolean;
   created_at: string;
   updated_at: string;
+  /**
+   * Access level of the current caller relative to this album.
+   * "owner" for the owner, otherwise the participant's access_level.
+   * Undefined if the album is returned without an authenticated context.
+   */
+  my_access_level?: "owner" | AlbumAccessLevel;
 }
 
 export interface AlbumWithPhotos extends Album {
@@ -403,10 +409,15 @@ export interface AlbumPhotoWithMeta extends PhotoWithCuration {
   curation_stats?: PhotoCurationStats;
 }
 
+export type AlbumAccessLevel = "read" | "write" | "write_share";
+
 export interface AlbumShare {
   album_id: number;
   user_id: number;
-  access_level: "read" | "write";
+  access_level: AlbumAccessLevel;
+  /** User who created this share. NULL for shares predating the invited_by
+   *  migration — treated as invited by the album owner. */
+  invited_by_user_id?: number | null;
 }
 
 // ── View Config for Album Views ──────────────────────────────────────────────
@@ -509,7 +520,7 @@ export interface PhotoLocationsResponse {
 export interface ShareAlbumRequest {
   albumId: number;
   userId: number;
-  accessLevel: "read" | "write";
+  accessLevel: AlbumAccessLevel;
 }
 
 export interface AlbumShareWithUser extends AlbumShare {
