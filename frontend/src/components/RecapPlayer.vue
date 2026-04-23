@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import HeicImage from './HeicImage.vue'
 import { getPhotoUrl, type Photo } from '../api/photos'
 
@@ -21,6 +21,10 @@ const index = ref(0)
 const paused = ref(false)
 const showControls = ref(true)
 
+const slotA = ref<Photo | null>(null)
+const slotB = ref<Photo | null>(null)
+const activeSlot = ref<'A' | 'B'>('A')
+
 let advanceTimer: ReturnType<typeof setTimeout> | null = null
 let controlsTimer: ReturnType<typeof setTimeout> | null = null
 let advanceToken = 0
@@ -28,7 +32,6 @@ let advanceToken = 0
 const preloadCache = new Map<string, Promise<boolean>>()
 const PRELOAD_WAIT_TIMEOUT_MS = 5000
 
-const current = computed(() => props.photos[index.value] ?? null)
 const total = computed(() => props.photos.length)
 
 type Motion = {
@@ -56,10 +59,9 @@ function pickMotion(seed: number): Motion {
   return { fromScale, toScale, fromX, fromY, toX, toY }
 }
 
-const motion = computed<Motion>(() => pickMotion(current.value?.id ?? index.value + 1))
-
-const animStyle = computed(() => {
-  const m = motion.value
+function animStyleFor(photo: Photo | null): Record<string, string> {
+  if (!photo) return {}
+  const m = pickMotion(photo.id)
   return {
     '--kb-from-scale': String(m.fromScale),
     '--kb-to-scale': String(m.toScale),
@@ -68,8 +70,11 @@ const animStyle = computed(() => {
     '--kb-to-x': `${m.toX}%`,
     '--kb-to-y': `${m.toY}%`,
     '--kb-duration': `${photoDurationMs.value}ms`,
-  } as Record<string, string>
-})
+  }
+}
+
+const slotAAnimStyle = computed(() => animStyleFor(slotA.value))
+const slotBAnimStyle = computed(() => animStyleFor(slotB.value))
 
 function clearAdvance() {
   if (advanceTimer) {
@@ -140,19 +145,34 @@ function scheduleAdvance() {
   }, photoDurationMs.value)
 }
 
+function goToIndex(newIndex: number) {
+  if (newIndex < 0 || newIndex >= total.value) return
+  if (newIndex === index.value && slotA.value !== null) return
+  const photo = props.photos[newIndex]
+  if (!photo) return
+  index.value = newIndex
+  const target: 'A' | 'B' = activeSlot.value === 'A' ? 'B' : 'A'
+  if (target === 'A') slotA.value = photo
+  else slotB.value = photo
+  void nextTick(() => {
+    activeSlot.value = target
+  })
+}
+
 function next() {
   if (total.value === 0) return
   if (index.value >= total.value - 1) {
     emit('close')
     return
   }
-  index.value += 1
+  goToIndex(index.value + 1)
   scheduleAdvance()
 }
 
 function prev() {
   if (total.value === 0) return
-  index.value = Math.max(0, index.value - 1)
+  if (index.value === 0) return
+  goToIndex(index.value - 1)
   scheduleAdvance()
 }
 
@@ -187,6 +207,9 @@ function bumpControls() {
 function reset() {
   index.value = 0
   paused.value = false
+  activeSlot.value = 'A'
+  slotA.value = props.photos[0] ?? null
+  slotB.value = null
   bumpControls()
   scheduleAdvance()
 }
@@ -221,20 +244,34 @@ onBeforeUnmount(() => {
     @touchstart="bumpControls"
   >
     <div class="recap-player-stage">
-      <transition name="kb-fade" mode="out-in">
+      <div class="kb-slide" :class="{ 'is-active': activeSlot === 'A' }">
         <div
-          v-if="current"
-          :key="current.id"
-          class="kb-slide"
-          :style="animStyle"
+          v-if="slotA"
+          :key="`A-${slotA.id}`"
+          class="kb-motion"
+          :style="slotAAnimStyle"
         >
           <HeicImage
-            :src="getPhotoUrl(current.filename, 1600)"
-            :alt="current.original_name"
+            :src="getPhotoUrl(slotA.filename, 1600)"
+            :alt="slotA.original_name"
             object-fit="cover"
           />
         </div>
-      </transition>
+      </div>
+      <div class="kb-slide" :class="{ 'is-active': activeSlot === 'B' }">
+        <div
+          v-if="slotB"
+          :key="`B-${slotB.id}`"
+          class="kb-motion"
+          :style="slotBAnimStyle"
+        >
+          <HeicImage
+            :src="getPhotoUrl(slotB.filename, 1600)"
+            :alt="slotB.original_name"
+            object-fit="cover"
+          />
+        </div>
+      </div>
     </div>
 
     <div class="recap-player-title" :class="{ 'is-hidden': !showControls && index > 0 }">
@@ -305,12 +342,24 @@ onBeforeUnmount(() => {
 .kb-slide {
   position: absolute;
   inset: 0;
+  opacity: 0;
+  transition: opacity 600ms ease;
+  pointer-events: none;
+}
+
+.kb-slide.is-active {
+  opacity: 1;
+}
+
+.kb-motion {
+  position: absolute;
+  inset: 0;
   animation: ken-burns var(--kb-duration, 4500ms) linear forwards;
   will-change: transform;
 }
 
-.kb-slide :deep(img),
-.kb-slide :deep(.heic-image-container) {
+.kb-motion :deep(img),
+.kb-motion :deep(.heic-image-container) {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -325,15 +374,6 @@ onBeforeUnmount(() => {
     transform: translate(var(--kb-to-x, 0%), var(--kb-to-y, 0%))
       scale(var(--kb-to-scale, 1.1));
   }
-}
-
-.kb-fade-enter-active,
-.kb-fade-leave-active {
-  transition: opacity 600ms ease;
-}
-.kb-fade-enter-from,
-.kb-fade-leave-to {
-  opacity: 0;
 }
 
 .recap-player-title {
