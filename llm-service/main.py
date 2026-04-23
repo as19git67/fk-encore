@@ -21,6 +21,9 @@ import json
 import logging
 import os
 import re
+import resource
+import signal
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -55,8 +58,58 @@ os.environ.setdefault("HF_HOME", str(MODELS_DIR / "hf-cache"))
 _state: dict[str, Any] = {"llm": None, "embedder": None}
 
 
+def _rss_mb() -> float:
+    """Resident-set size of the current process in MB. Linux ``ru_maxrss`` is
+    reported in KB; on macOS it would be bytes, but the container target is
+    Linux so we don't bother distinguishing."""
+
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+
+
+def _install_shutdown_logging(startup_monotonic: float) -> None:
+    """Wrap uvicorn's SIGTERM/SIGINT handlers so we get a log line with
+    uptime and RSS when the process is asked to exit.
+
+    Context: the service has been observed restarting every ~60-90 s with no
+    error in the logs before the restart. That pattern is consistent with an
+    external signal (compose stop / orchestrator / OOM of a sibling) or an
+    OOM kill of this process itself. SIGKILL (OOM) is not catchable so it
+    will still be silent — but if the cause is SIGTERM from the orchestrator,
+    the line below pins it down the next time it happens.
+    """
+
+    def _make_handler(signum: int, previous: Any) -> Callable[[int, Any], None]:
+        def _handler(sig: int, frame: Any) -> None:
+            uptime = time.monotonic() - startup_monotonic
+            try:
+                name = signal.Signals(sig).name
+            except ValueError:
+                name = str(sig)
+            log.warning(
+                "Received %s after %.1fs uptime (RSS=%.0f MB) — shutting down",
+                name, uptime, _rss_mb(),
+            )
+            if callable(previous):
+                previous(sig, frame)
+            elif previous in (signal.SIG_DFL, None):
+                signal.signal(sig, signal.SIG_DFL)
+                os.kill(os.getpid(), sig)
+        return _handler
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            previous = signal.getsignal(sig)
+            signal.signal(sig, _make_handler(sig, previous))
+        except (ValueError, OSError):
+            # Not on the main thread (e.g. under TestClient) — skip. Uvicorn's
+            # own handlers are also main-thread-only, so parity is fine.
+            pass
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    startup_monotonic = time.monotonic()
+
     if not LLM_MODEL_PATH.exists():
         raise RuntimeError(
             f"LLM model not found at {LLM_MODEL_PATH}. "
@@ -77,9 +130,14 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         n_gpu_layers=LLM_GPU_LAYERS,
         verbose=False,
     )
+    log.info("Llama loaded (RSS=%.0f MB)", _rss_mb())
 
     log.info("Loading embedder %s", EMBEDDING_MODEL)
     _state["embedder"] = SentenceTransformer(EMBEDDING_MODEL)
+    log.info("Embedder loaded (RSS=%.0f MB)", _rss_mb())
+
+    _install_shutdown_logging(startup_monotonic)
+    _state["startup_monotonic"] = startup_monotonic
 
     log.info("Ready.")
     yield
@@ -168,12 +226,16 @@ def _repair_tags(data: dict[str, Any]) -> None:
 
 @app.get("/healthz")
 async def healthz() -> dict[str, Any]:
+    started = _state.get("startup_monotonic")
+    uptime_s = (time.monotonic() - started) if isinstance(started, float) else None
     return {
         "status": "ok" if _state["llm"] and _state["embedder"] else "starting",
         "llm_loaded": _state["llm"] is not None,
         "embedder_loaded": _state["embedder"] is not None,
         "llm_model_path": str(LLM_MODEL_PATH),
         "embedding_model": EMBEDDING_MODEL,
+        "rss_mb": round(_rss_mb(), 1),
+        "uptime_s": round(uptime_s, 1) if uptime_s is not None else None,
     }
 
 

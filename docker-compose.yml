@@ -219,8 +219,12 @@ services:
       interval: 15s
       timeout: 10s
       retries: 5
-      # Give the GGUF mmap + embedder load time before the first probe.
-      start_period: 60s
+      # Cold-start on a spinning-rust bind mount has to warm up the GGUF
+      # mmap, load sentence-transformers and import torch before uvicorn
+      # accepts requests — that can take well over a minute on the TrueNAS
+      # SCALE box. A short start_period marks the container unhealthy mid-
+      # load, which then cascades into dependent services refusing to start.
+      start_period: 180s
 
   # ── PostgreSQL (shared instance for both app and embedding service) ─────────
   postgres:
