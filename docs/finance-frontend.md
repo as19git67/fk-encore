@@ -71,7 +71,7 @@ Photos/Documents-Routen.
 
 ---
 
-## 4. Wireframes der vier kritischen / neuen Views
+## 4. Wireframes
 
 ### 4.1 `TanDialog`
 
@@ -181,24 +181,127 @@ dem bestehenden User-Endpoint (keine eigene Finance-User-Liste).
 Bestehende Zeilen des gewählten Kontos werden vor dem Speichern als
 Diff gegen die neue Liste berechnet (Inserts / Deletes / Level-Updates).
 
+### 4.5 `BankcontactsView`
+
+Einstiegsliste für Nutzer mit `finance.accounts.manage`.
+
+```
++-----------------------------------------------------------------------+
+| Bankkontakte                                     [+ Neu anlegen]      |
++-----------------------------------------------------------------------+
+| Name            BLZ       Login            Letzter Sync       Status  |
+|-----------------------------------------------------------------------|
+| Sparkasse XY    12345678  max.mustermann   2026-04-23 06:25   ✓ OK    |
+| ING             50010517  123456789        2026-04-22 15:25   ⚠ TAN   |
+| DKB             12030000  98765432         —                  ⛔ Fehler|
++-----------------------------------------------------------------------+
+| Filter: [ Status: Alle ▾ ]      Zeile klicken → Detailansicht         |
++-----------------------------------------------------------------------+
+```
+
+Status-Spalte: `last_sync_status` (`OK`, `tan-required`, `error`) plus
+passendes Icon. Die Zeilenfarbe signalisiert Probleme (gelb für
+`tan-required`, rot für `error`). Klick öffnet `BankcontactDetailView`.
+
+### 4.6 `BankcontactDetailView`
+
+Formular-View für Stammdaten, Credentials und Sync-Aktionen. Teilt sich
+in drei klar getrennte Kartenbereiche.
+
+```
++-----------------------------------------------------------------------+
+| Bankkontakt: Sparkasse XY                              [Zurück]       |
++-----------------------------------------------------------------------+
+| Stammdaten                                                            |
+|   Name:         [ Sparkasse XY                             ]          |
+|   BLZ:          [ 12345678 ]                                          |
+|   Login:        [ max.mustermann                           ]          |
+|   Server-URL:   [ https://hbci.sparkasse-xy.de             ]          |
+|   TAN-Methode:  [ pushTAN ▾ ]      [TAN-Methoden neu laden]           |
++-----------------------------------------------------------------------+
+| Credentials                                                           |
+|   Passwort/PIN: [ ············ ]   [Neu setzen]                       |
+|   Status: ✓ verschlüsselt gespeichert  (zuletzt 2026-04-23)           |
++-----------------------------------------------------------------------+
+| Sync                                                                  |
+|   Letzter Sync:  2026-04-23 06:25 — OK, 3 Umsätze                     |
+|   [Sync jetzt]          [Sync-Zeiten bearbeiten]                      |
++-----------------------------------------------------------------------+
+|                           [Abbrechen]           [Speichern]           |
++-----------------------------------------------------------------------+
+```
+
+- Der `Passwort/PIN`-Input sendet den Klartext ausschließlich an den
+  Set-Credentials-Endpoint, der `encryption.ts` (siehe
+  `finance-fints-integration.md` §3) nutzt; im Store bleibt nur der
+  boolesche „Status gespeichert"-Flag.
+- `Sync jetzt` ruft `POST /finance/statements`; bei `409` öffnet sich
+  der `TanDialog` (§4.1).
+- `Sync-Zeiten bearbeiten` navigiert zu `SyncScheduleView` (§4.3) für
+  denselben Bankkontakt.
+- `TAN-Methoden neu laden` startet einen kurzen FinTS-Dialog nur zum
+  Lesen der verfügbaren Verfahren und aktualisiert das Dropdown.
+
+### 4.7 `AccountsView`
+
+Die einzige View, die jeder `finance.view`-User sieht. ACL-gefiltert:
+nur Konten, auf denen der User einen `finance_account_access`-Eintrag
+hat (oder alle, wenn er `finance.admin` besitzt).
+
+```
++-----------------------------------------------------------------------+
+| Konten                                     [ Bankkontakt: Alle ▾ ]    |
++-----------------------------------------------------------------------+
+| Label             IBAN              Währ.  Saldo        Letzter Umsatz|
+|-----------------------------------------------------------------------|
+| Giro Sparkasse    DE12 … 3456       EUR     2.341,50 €  2026-04-22    |
+| Tagesgeld ING     DE50 … 0517       EUR    12.000,00 €  2026-04-15    |
+| Depot DKB         DE12 … 0000       EUR    45.678,90 €  2026-04-10    |
++-----------------------------------------------------------------------+
+| Inaktive Konten anzeigen: [ ]     Zeile klicken → AccountDetailView   |
++-----------------------------------------------------------------------+
+```
+
+Der aktuelle Saldo kommt aus dem jüngsten Eintrag in
+`finance_account_balance`. Kein Inline-Editing — alle Änderungen laufen
+über `AccountDetailView` bzw. `AccountAssignmentView`.
+
+### 4.8 `AccountDetailView`
+
+Zweigeteilt: oben Saldo-Verlauf, unten Umsatz-Liste (mit derselben
+Komponente wie `TransactionsView`, vorausgewähltes Konto).
+
+```
++----------------------------------------------------------------------+
+| Giro Sparkasse XY — DE12 … 3456                           [Zurück]   |
++----------------------------------------------------------------------+
+| Aktueller Saldo: 2.341,50 €      Stand: 2026-04-22 06:25             |
+|                                                                      |
+| [ Saldo-Verlauf (PrimeVue Line Chart, 12 Monate)                  ]  |
+|                                                                      |
++----------------------------------------------------------------------+
+| Umsätze                      [Filter ▾]   [+ Manuelle Buchung]       |
+|----------------------------------------------------------------------|
+| Datum       Verwendungszweck   Gegenseite      Betrag       Tags     |
+| 2026-04-22  Miete April        B. Vermieter    -850,00 €    [miete]  |
+| 2026-04-20  Supermarkt         REWE              -47,32 €   [alltag] |
+| 2026-04-15  Gehalt April       AG GmbH        +3.800,00 €   [gehalt] |
++----------------------------------------------------------------------+
+| Zeitraum:  [ 12 Monate ▾ ]            Seite 1 von 14    < 1 2 3 >    |
++----------------------------------------------------------------------+
+```
+
+- Saldo-Chart-Zeitraum-Dropdown reused `finance_timespan`-Presets (siehe
+  `finance-data-model.md` §2.2).
+- `+ Manuelle Buchung` öffnet `TransactionNewView` mit vorausgewähltem
+  Konto — nur sichtbar, wenn der User `level='write'` auf dem Konto
+  hält.
+- Zeilen-Klick führt zu `TransactionDetailView`.
+
 ---
 
 ## 5. Kurzbeschreibung der übrigen Views
 
-- **`BankcontactsView`**: PrimeVue DataTable mit Spalten Name, BLZ,
-  Login, letzter Sync, Status. Aktion: Neu anlegen → wechselt auf
-  `BankcontactDetailView` im Edit-Modus.
-- **`BankcontactDetailView`**: Formular für Stammdaten + separate
-  Section „Credentials setzen" (Password-Feld, POST an `encryption.ts`-
-  gestützten Endpoint). Buttons: „Sync jetzt" (triggert
-  `POST /finance/statements`), „TAN-Methode wählen" (Dialog mit von
-  der Bank zurückgemeldeten Verfahren).
-- **`AccountsView`**: DataTable der für den User sichtbaren Konten
-  (ACL-gefiltert). Spalten: Label, IBAN, Währung, aktueller Saldo,
-  letzter Umsatz, Aktiv-Status.
-- **`AccountDetailView`**: Oben Saldo-Sparkline aus
-  `finance_account_balance`; darunter Transaktions-Liste (reuse von
-  `TransactionsView`-Komponente mit vorausgewähltem Konto).
 - **`TransactionsView`**: DataTable mit Virtual-Scroll, Filter-Leiste
   (Datum, Tags, Betragsrange, Gegenseite). Row-Aktion öffnet
   `TransactionDetailView`.
