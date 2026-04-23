@@ -35,6 +35,55 @@ const auth = useAuthStore()
 const firstAlbumRef = ref<HTMLElement | null>(null)
 const gridEl = ref<HTMLElement | null>(null)
 
+// Shared with AlbumDetailView: when the user opens an album we remember it
+// here, so navigating back from the detail view restores focus and scroll
+// position to the album the user came from.
+const LAST_FOCUSED_ALBUM_KEY = 'albums_last_focused_album_id'
+
+function rememberFocusedAlbum(id: number) {
+  try { sessionStorage.setItem(LAST_FOCUSED_ALBUM_KEY, String(id)) } catch { /* ignore */ }
+}
+
+function readRememberedAlbumId(): number | null {
+  try {
+    const raw = sessionStorage.getItem(LAST_FOCUSED_ALBUM_KEY)
+    if (!raw) return null
+    const id = Number(raw)
+    return Number.isFinite(id) ? id : null
+  } catch { return null }
+}
+
+function openAlbum(album: Album) {
+  rememberFocusedAlbum(album.id)
+  router.push(`/fotos/alben/${album.id}`)
+}
+
+function focusRememberedAlbum(): boolean {
+  const id = readRememberedAlbumId()
+  if (id === null) return false
+  const root = gridEl.value
+  if (!root) return false
+  const el = root.querySelector<HTMLElement>(`[data-album-id="${id}"]`)
+  if (!el) return false
+  el.scrollIntoView({ block: 'center', inline: 'nearest' })
+  // `el.focus()` alone does not trigger `:focus-visible` styles for
+  // programmatic focus, so the user wouldn't see the outline. Add an
+  // explicit marker class that mirrors the focus-visible outline and
+  // clear it as soon as the user interacts with the page again.
+  el.classList.add('album-card--restored-focus')
+  const clear = () => {
+    el.classList.remove('album-card--restored-focus')
+    el.removeEventListener('blur', clear)
+    el.removeEventListener('pointerdown', clear)
+    el.removeEventListener('keydown', clear)
+  }
+  el.addEventListener('blur', clear)
+  el.addEventListener('pointerdown', clear)
+  el.addEventListener('keydown', clear)
+  el.focus({ preventScroll: true })
+  return true
+}
+
 // ── Virtualized rendering ─────────────────────────────────────────────────────
 // Album cards are expensive (HeicImage + PrimeVue Buttons with tooltips + image
 // decode). Rendering the full card for hundreds/thousands of albums makes
@@ -322,10 +371,23 @@ const filteredAlbums = computed(() => {
   })
 })
 
+function restoreInitialFocus() {
+  // One animation frame after the DOM flush so the grid has its final
+  // layout (card placeholders are sized, template refs are populated).
+  // If the card can't be found yet, try once more next frame.
+  requestAnimationFrame(() => {
+    if (focusRememberedAlbum()) return
+    requestAnimationFrame(() => {
+      if (focusRememberedAlbum()) return
+      firstAlbumRef.value?.focus()
+    })
+  })
+}
+
 watch(loading, (newLoading) => {
   if (!newLoading && filteredAlbums.value.length > 0) {
     nextTick(() => {
-      firstAlbumRef.value?.focus()
+      restoreInitialFocus()
       observeCards()
     })
   }
@@ -667,9 +729,9 @@ onMounted(loadData)
           class="album-card"
           :class="{ 'album-card--placeholder': !visibleAlbumIds.has(album.id) }"
           tabindex="0"
-          @click="router.push(`/fotos/alben/${album.id}`)"
-          @keydown.enter="router.push(`/fotos/alben/${album.id}`)"
-          @keydown.space.prevent="router.push(`/fotos/alben/${album.id}`)"
+          @click="openAlbum(album)"
+          @keydown.enter="openAlbum(album)"
+          @keydown.space.prevent="openAlbum(album)"
       >
         <template v-if="visibleAlbumIds.has(album.id)">
           <div v-if="canManageAlbum(album)" class="album-actions" @click.stop>
@@ -984,7 +1046,8 @@ onMounted(loadData)
 
 .album-card:hover { transform: scale(1.02); }
 
-.album-card:focus-visible {
+.album-card:focus-visible,
+.album-card.album-card--restored-focus {
   outline: 2px solid var(--p-primary-300);
   outline-offset: -2px;
 }
