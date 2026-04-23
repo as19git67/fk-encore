@@ -103,8 +103,9 @@ function handleGridArrowNav(e: KeyboardEvent) {
   }
   if (targetIndex === -1) return
 
-  e.preventDefault()
   const target = cards[targetIndex]
+  if (!target) return
+  e.preventDefault()
   target.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   target.focus({ preventScroll: true })
 }
