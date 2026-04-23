@@ -91,10 +91,6 @@ function isGeoPhoto(p: Photo): p is GeoPhoto {
 export function usePhotoStops(photos: Ref<Photo[]>) {
   const geoPhotos = computed<GeoPhoto[]>(() => photos.value.filter(isGeoPhoto))
 
-  const photosWithoutGps = computed(() =>
-    photos.value.filter((p) => !isGeoPhoto(p))
-  )
-
   const stops = computed<Stop[]>(() => {
     const sorted = [...geoPhotos.value].sort(
       (a, b) => getPhotoDate(a).getTime() - getPhotoDate(b).getTime()
@@ -222,7 +218,6 @@ export function usePhotoStops(photos: Ref<Photo[]>) {
 
   return {
     stops,
-    photosWithoutGps,
     dayPaths,
     dayTransitions,
     dayColorMap,

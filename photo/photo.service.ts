@@ -4,7 +4,7 @@ import crypto from "crypto";
 import { createRequire } from "module";
 import exifr from "exifr";
 import { exiftool } from "exiftool-vendored";
-import { eq, and, or, sql, inArray, ilike, isNull, isNotNull, desc } from "drizzle-orm";
+import { eq, and, or, sql, inArray, ilike, isNull, isNotNull, desc, gt } from "drizzle-orm";
 import { APIError } from "encore.dev/api";
 import { enqueuePhotoScan, enqueuePhotoScanBulkPerUser, DeferJobError } from "./scan-queue";
 import { isUnderPressure } from "./event-loop-pressure";
@@ -2537,6 +2537,10 @@ export async function listAlbumsLogic(userId: number): Promise<ListAlbumsRespons
         is_shared: sql<boolean>`EXISTS (
           SELECT 1 FROM ${albumShares}
           WHERE ${albumShares.album_id} = ${albums.id}
+        ) OR EXISTS (
+          SELECT 1 FROM ${albumPublicLinks}
+          WHERE ${albumPublicLinks.album_id} = ${albums.id}
+            AND (${albumPublicLinks.expires_at} IS NULL OR ${albumPublicLinks.expires_at} > NOW())
         )`,
         cover_filename: sql<string>`COALESCE(
           ${photos.filename},
@@ -2661,6 +2665,22 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
   const participantIds = aiUserId ? [...humanParticipantIds, aiUserId] : humanParticipantIds;
   const memberCount = participantIds.length;
 
+  // Album counts as shared if it has other members OR an active public link
+  const activePublicLink = await dbFirst<typeof albumPublicLinks.$inferSelect>(
+    db
+      .select()
+      .from(albumPublicLinks)
+      .where(
+        and(
+          eq(albumPublicLinks.album_id, albumId),
+          or(
+            isNull(albumPublicLinks.expires_at),
+            gt(albumPublicLinks.expires_at, sql`NOW()`)
+          )
+        )
+      )
+  );
+
   // Use raw SQL for the aggregated query with curation stats
   const photoRows = (await db.execute(sql`
     SELECT
@@ -2737,8 +2757,8 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     coverFilename = newestFilteredFilename;
   }
 
-  // Check if album is shared (has other participants)
-  const isShared = memberCount > 1;
+  // Check if album is shared (has other participants or an active public link)
+  const isShared = memberCount > 1 || !!activePublicLink;
 
   return {
     id: album.id,
@@ -3559,13 +3579,23 @@ export async function getPublicAlbumLogic(token: string): Promise<PublicAlbumRes
 
   const stats = await getAlbumStats(link.album_id);
 
-  // Get all photos in the album (no curation filtering for public view)
+  // Get all photos in the album. Surface the album owner's curation so the
+  // public map view can filter on "Highlights" (group covers) and hide the
+  // photos the owner has hidden.
   const photoRows = (await db.execute(sql`
     SELECT
       p.id, p.filename, p.original_name, p.mime_type, p.size,
       p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop, p.description,
       p.latitude, p.longitude,
-      p.location_name, p.location_city, p.location_country, p.location_short
+      p.location_name, p.location_city, p.location_country, p.location_short,
+      EXISTS (
+        SELECT 1 FROM ${photoGroups} pg
+        WHERE pg.user_id = ${album.user_id} AND pg.cover_photo_id = p.id
+      ) AS is_highlight,
+      EXISTS (
+        SELECT 1 FROM ${photoCuration} pc
+        WHERE pc.user_id = ${album.user_id} AND pc.photo_id = p.id AND pc.status = 'hidden'
+      ) AS is_hidden
     FROM photos p
     INNER JOIN album_photos ap ON ap.photo_id = p.id AND ap.album_id = ${link.album_id}
     ORDER BY p.taken_at ASC NULLS LAST, p.created_at ASC
@@ -3606,6 +3636,8 @@ export async function getPublicAlbumLogic(token: string): Promise<PublicAlbumRes
       ai_quality_score: r.ai_quality_score != null ? Number(r.ai_quality_score) : undefined,
       auto_crop: r.auto_crop ?? undefined,
       description: r.description ?? undefined,
+      is_highlight: !!r.is_highlight,
+      is_hidden: !!r.is_hidden,
     })),
   };
 }
