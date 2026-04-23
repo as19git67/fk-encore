@@ -727,6 +727,78 @@ describe("Photo Module", () => {
       expect(stats.hide_count).toBe(0);
     });
 
+    it("should allow a write_share participant to create and delete a public link", async () => {
+      const album = await service.createAlbumLogic(user1.id, { name: "Share-delegated" });
+
+      // Participant with plain write cannot manage the public link.
+      await service.shareAlbumLogic(user1.id, { albumId: album.id, userId: user2.id, accessLevel: "write" });
+      await expect(service.createAlbumPublicLinkLogic(user2.id, album.id)).rejects.toThrow("Unauthorized");
+
+      // Upgrade to write_share — now the participant can create, read and delete the link.
+      await service.shareAlbumLogic(user1.id, { albumId: album.id, userId: user2.id, accessLevel: "write_share" });
+
+      const created = await service.createAlbumPublicLinkLogic(user2.id, album.id);
+      expect(created.token).toBeTruthy();
+
+      const sharesView = await service.getAlbumSharesLogic(user2.id, album.id);
+      expect(sharesView.publicLink?.token).toBe(created.token);
+      // write_share participants see the full shares list so they can decide
+      // who to invite — but they are only authorized to mutate entries they
+      // created themselves (covered by a dedicated test).
+      expect(sharesView.shares.map(s => s.user_id)).toContain(user2.id);
+
+      const deleted = await service.deleteAlbumPublicLinkLogic(user2.id, album.id);
+      expect(deleted.success).toBe(true);
+    });
+
+    it("should not allow a read-only participant to see or manage public links", async () => {
+      const album = await service.createAlbumLogic(user1.id, { name: "Read-only" });
+      await service.shareAlbumLogic(user1.id, { albumId: album.id, userId: user2.id, accessLevel: "read" });
+
+      await expect(service.getAlbumSharesLogic(user2.id, album.id)).rejects.toThrow("Unauthorized");
+      await expect(service.createAlbumPublicLinkLogic(user2.id, album.id)).rejects.toThrow("Unauthorized");
+      await expect(service.deleteAlbumPublicLinkLogic(user2.id, album.id)).rejects.toThrow("Unauthorized");
+    });
+
+    it("should let write_share participants invite users but not escalate to write_share", async () => {
+      const user3 = await createUserLogic({ email: "u3@share.com", name: "User 3", password: "pw" });
+      const album = await service.createAlbumLogic(user1.id, { name: "Delegated invites" });
+      await service.shareAlbumLogic(user1.id, { albumId: album.id, userId: user2.id, accessLevel: "write_share" });
+
+      // Delegate can invite a third user with read or write.
+      await service.shareAlbumLogic(user2.id, { albumId: album.id, userId: user3.id, accessLevel: "write" });
+
+      // But cannot grant write_share — that would let invitees chain further.
+      await expect(
+        service.shareAlbumLogic(user2.id, { albumId: album.id, userId: user3.id, accessLevel: "write_share" })
+      ).rejects.toThrow("Only the album owner can grant write_share");
+
+      // The new share records the delegate as inviter.
+      const shares = await service.getAlbumSharesLogic(user1.id, album.id);
+      const share3 = shares.shares.find(s => s.user_id === user3.id);
+      expect(share3?.invited_by_user_id).toBe(user2.id);
+      expect(share3?.access_level).toBe("write");
+    });
+
+    it("should let write_share remove only their own invitations", async () => {
+      const user3 = await createUserLogic({ email: "u3@rm.com", name: "User 3", password: "pw" });
+      const user4 = await createUserLogic({ email: "u4@rm.com", name: "User 4", password: "pw" });
+      const album = await service.createAlbumLogic(user1.id, { name: "Scoped removal" });
+      await service.shareAlbumLogic(user1.id, { albumId: album.id, userId: user2.id, accessLevel: "write_share" });
+      await service.shareAlbumLogic(user1.id, { albumId: album.id, userId: user3.id, accessLevel: "read" });
+      await service.shareAlbumLogic(user2.id, { albumId: album.id, userId: user4.id, accessLevel: "read" });
+
+      // Delegate cannot remove a share the owner created.
+      await expect(
+        service.removeAlbumShareLogic(user2.id, { albumId: album.id, userId: user3.id })
+      ).rejects.toThrow("Can only remove shares you created yourself");
+
+      // But can remove the share they created themselves.
+      await service.removeAlbumShareLogic(user2.id, { albumId: album.id, userId: user4.id });
+      const remaining = await service.getAlbumSharesLogic(user1.id, album.id);
+      expect(remaining.shares.map(s => s.user_id).sort()).toEqual([user2.id, user3.id].sort());
+    });
+
     it("should not allow hiding photos for users without any album share", async () => {
       const album = await service.createAlbumLogic(user1.id, { name: "No Share" });
       const photo = await service.uploadPhotoLogic(user1.id, {
