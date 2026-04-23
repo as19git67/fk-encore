@@ -64,3 +64,68 @@ export async function sendPasswordResetEmail(email: string, token: string): Prom
     text: `${APP_NAME} – Passwort zurücksetzen\n\nKlicke auf diesen Link: ${resetLink}\n\nDer Link ist eine Stunde gültig.`,
   });
 }
+
+export interface GuestVerifyMailParams {
+  email: string;
+  displayName: string;
+  albumName: string;
+  /** Public-link token of the album the guest registered through. */
+  linkToken: string;
+  /** Single-use verification token issued by register(). */
+  verifyToken: string;
+}
+
+/**
+ * Magic-link mail sent when a guest registers on a public album link.
+ * Clicking the link verifies the guest and drops a session cookie on
+ * the clicking device.
+ */
+export async function sendGuestVerifyEmail(params: GuestVerifyMailParams): Promise<void> {
+  const verifyLink = `${APP_URL}/share/${encodeURIComponent(params.linkToken)}/guests/verify?t=${encodeURIComponent(params.verifyToken)}`;
+
+  if (!isSmtpConfigured()) {
+    console.warn(`[Mail] SMTP not configured. Guest verify link for ${params.email}: ${verifyLink}`);
+    return;
+  }
+
+  const safeName = escapeHtml(params.displayName);
+  const safeAlbum = escapeHtml(params.albumName);
+  const html = `
+    <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+      <h2>${APP_NAME} – Zugang bestätigen</h2>
+      <p>Hallo ${safeName},</p>
+      <p>du hast dich für das Album <strong>${safeAlbum}</strong> angemeldet. Bitte bestätige deine E-Mail-Adresse, um zu kommentieren und Benachrichtigungen zu bekommen.</p>
+      <p style="margin: 1.5em 0;">
+        <a href="${verifyLink}"
+           style="display: inline-block; padding: 0.75em 1.5em; background: #4f46e5; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600;">
+          Zugang bestätigen
+        </a>
+      </p>
+      <p style="font-size: 0.85em; color: #666;">
+        Falls du diese Anfrage nicht gestellt hast, kannst du diese E-Mail ignorieren.
+      </p>
+    </div>
+  `;
+
+  await getTransporter().sendMail({
+    from: SMTP_FROM,
+    to: params.email,
+    subject: `${APP_NAME} – Zugang zum Album „${params.albumName}" bestätigen`,
+    html,
+    text:
+      `${APP_NAME} – Zugang bestätigen\n\n` +
+      `Hallo ${params.displayName},\n\n` +
+      `du hast dich für das Album "${params.albumName}" angemeldet. ` +
+      `Bitte bestätige deine E-Mail-Adresse über diesen Link:\n\n${verifyLink}\n\n` +
+      `Falls du diese Anfrage nicht gestellt hast, kannst du diese E-Mail ignorieren.`,
+  });
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
