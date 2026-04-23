@@ -23,6 +23,10 @@ const showControls = ref(true)
 
 let advanceTimer: ReturnType<typeof setTimeout> | null = null
 let controlsTimer: ReturnType<typeof setTimeout> | null = null
+let advanceToken = 0
+
+const preloadCache = new Map<string, Promise<boolean>>()
+const PRELOAD_WAIT_TIMEOUT_MS = 5000
 
 const current = computed(() => props.photos[index.value] ?? null)
 const total = computed(() => props.photos.length)
@@ -72,12 +76,66 @@ function clearAdvance() {
     clearTimeout(advanceTimer)
     advanceTimer = null
   }
+  advanceToken++
+}
+
+function photoDisplayUrl(photo: Photo): string {
+  const base = getPhotoUrl(photo.filename, 1600)
+  const pathPart = (photo.filename.split('?')[0] ?? photo.filename).toLowerCase()
+  const isHeic = pathPart.endsWith('.heic') || pathPart.endsWith('.heif')
+  if (!isHeic) return base
+  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
+  if (isSafari) return base
+  const separator = base.includes('?') ? '&' : '?'
+  return `${base}${separator}convert=true`
+}
+
+function preloadUrl(url: string): Promise<boolean> {
+  const cached = preloadCache.get(url)
+  if (cached) return cached
+  const promise = new Promise<boolean>((resolve) => {
+    const img = new Image()
+    img.onload = () => resolve(true)
+    img.onerror = () => resolve(false)
+    img.src = url
+  })
+  preloadCache.set(url, promise)
+  return promise
+}
+
+function preloadOffset(offset: number) {
+  const idx = index.value + offset
+  if (idx < 0 || idx >= total.value) return
+  const photo = props.photos[idx]
+  if (!photo) return
+  void preloadUrl(photoDisplayUrl(photo))
+}
+
+function waitForOffset(offset: number): Promise<void> {
+  const idx = index.value + offset
+  if (idx < 0 || idx >= total.value) return Promise.resolve()
+  const photo = props.photos[idx]
+  if (!photo) return Promise.resolve()
+  const preload = preloadUrl(photoDisplayUrl(photo))
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(), PRELOAD_WAIT_TIMEOUT_MS)
+    preload.finally(() => {
+      clearTimeout(timer)
+      resolve()
+    })
+  })
 }
 
 function scheduleAdvance() {
   clearAdvance()
   if (paused.value || !props.open || total.value === 0) return
-  advanceTimer = setTimeout(() => {
+  preloadOffset(1)
+  const token = ++advanceToken
+  advanceTimer = setTimeout(async () => {
+    advanceTimer = null
+    await waitForOffset(1)
+    if (token !== advanceToken) return
+    if (!props.open || paused.value) return
     next()
   }, photoDurationMs.value)
 }
@@ -139,6 +197,7 @@ watch(() => props.open, (isOpen) => {
 })
 
 watch(() => props.photos, () => {
+  preloadCache.clear()
   if (props.open) reset()
 })
 
