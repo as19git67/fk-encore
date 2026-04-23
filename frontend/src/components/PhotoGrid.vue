@@ -276,8 +276,8 @@ defineExpose({
             </div>
 
             <div v-if="visiblePhotoIds.has(item.photo.id)" class="photo-info">
-              <span class="name">
-                {{ item.group ? `${item.group.member_count} ähnliche Fotos` : item.photo.original_name }}
+              <span v-if="item.group" class="name">
+                {{ `${item.group.member_count} ähnliche Fotos` }}
               </span>
               <div v-if="!item.group && !selectMode" class="photo-actions">
                 <Button
