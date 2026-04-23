@@ -15,13 +15,16 @@ and :http:post:`/embed`, plus :http:get:`/healthz` for compose.
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import json
 import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable, TypeVar
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -84,6 +87,33 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="llm-service", version="1.0.0", lifespan=lifespan)
+
+
+# ─── Blocking-call offload ─────────────────────────────────────────────────────
+#
+# llama-cpp-python's ``create_chat_completion`` and sentence-transformers'
+# ``encode`` are synchronous and CPU-bound; calling them from the async
+# handlers directly blocks the FastAPI event loop for the full inference
+# duration (easily 10–60 s on a CPU-only box). While the loop is blocked,
+# ``/healthz`` cannot respond, so the compose healthcheck (``curl /healthz``,
+# 10 s timeout) fails, the container flips to "unhealthy" under load, and a
+# concurrent ``docker compose up -d`` bails out with "dependency failed to
+# start: service llm_service is unhealthy" for anything that depends on it.
+#
+# A single-worker executor preserves the required serialisation — a single
+# ``Llama`` instance is not thread-safe, and running llama + embedder
+# concurrently on one CPU only causes contention — while keeping the event
+# loop free to serve the healthcheck.
+_inference_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="llm-inference")
+
+_T = TypeVar("_T")
+
+
+async def _run_blocking(func: Callable[..., _T], *args: Any, **kwargs: Any) -> _T:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _inference_executor, functools.partial(func, *args, **kwargs)
+    )
 
 
 # ─── UTF-8 repair ──────────────────────────────────────────────────────────────
@@ -164,7 +194,9 @@ async def embed(req: EmbedRequest) -> EmbedResponse:
     embedder = _state["embedder"]
     if embedder is None:
         raise HTTPException(status_code=503, detail="embedder not loaded")
-    vectors = embedder.encode(req.texts, normalize_embeddings=True).tolist()
+    vectors = await _run_blocking(
+        lambda: embedder.encode(req.texts, normalize_embeddings=True).tolist()
+    )
     return EmbedResponse(embeddings=vectors, dim=len(vectors[0]) if vectors else 0)
 
 
@@ -357,7 +389,8 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
     )
 
     try:
-        completion = llm.create_chat_completion(
+        completion = await _run_blocking(
+            llm.create_chat_completion,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -493,7 +526,8 @@ async def recap_title(req: RecapTitleRequest) -> RecapTitleResponse:
     )
 
     try:
-        completion = llm.create_chat_completion(
+        completion = await _run_blocking(
+            llm.create_chat_completion,
             messages=[
                 {"role": "system", "content": _RECAP_SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt},
