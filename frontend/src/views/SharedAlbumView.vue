@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import { useRoute } from 'vue-router'
+import Button from 'primevue/button'
 import Message from 'primevue/message'
 import HeicImage from '../components/HeicImage.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
-import { getPublicAlbum, getPhotoUrl, type PublicAlbumResponse, type PublicAlbumPhoto, type Photo } from '../api/photos'
+import FilterMenu from '../components/FilterMenu.vue'
+import { getPublicAlbum, getPhotoUrl, type PhotoFilter, type PublicAlbumResponse, type PublicAlbumPhoto, type Photo } from '../api/photos'
+import { matchesPhotoFilter } from '../utils/photoFilter'
+import { countActiveFilters } from '../composables/useFilter'
 import { formatPhotoDate, formatLocationLabel } from '../utils/dateFormat'
 
 const TripMap = defineAsyncComponent(() => import('../components/TripMap.vue'))
@@ -20,13 +24,47 @@ function asPhotos(photos: PublicAlbumPhoto[]): Photo[] {
     ...p,
     user_id: 0,
     hash: undefined,
-    curation_status: 'visible' as const,
+    curation_status: p.is_hidden ? 'hidden' as const : 'visible' as const,
     ai_quality_details: undefined,
     description: p.description,
   }))
 }
 
 const albumPhotosAsPhoto = computed<Photo[]>(() => album.value ? asPhotos(album.value.photos) : [])
+
+// ── Filter (map view only) ──────────────────────────────────────────────────
+// Public / shared album opens with Highlights on and hidden photos excluded.
+// We keep this state local — no URL sync, no query params — because the
+// filter UX only makes sense while the viewer is on this page.
+const DEFAULT_FILTER: PhotoFilter = { groupHighlight: true }
+const FILTER_AVAILABLE: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'> = [
+  'hiddenMode', 'groupHighlight',
+]
+const filter = ref<PhotoFilter>({ ...DEFAULT_FILTER })
+const filterDraft = ref<PhotoFilter>({ ...DEFAULT_FILTER })
+const filterMenuOpen = ref(false)
+const activeCount = computed(() => countActiveFilters(filter.value))
+
+function openFilterMenu() {
+  filterDraft.value = { ...filter.value }
+  filterMenuOpen.value = true
+}
+function onApplyFilter() {
+  filter.value = { ...filterDraft.value }
+}
+function onResetFilter() {
+  filter.value = { ...DEFAULT_FILTER }
+  filterDraft.value = { ...DEFAULT_FILTER }
+}
+
+const groupCoverIds = computed<Set<number>>(() =>
+  new Set((album.value?.photos ?? []).filter(p => p.is_highlight).map(p => p.id))
+)
+
+const filteredMapPhotos = computed<Photo[]>(() => {
+  const ctx = { groupCoverIds: groupCoverIds.value }
+  return albumPhotosAsPhoto.value.filter(p => matchesPhotoFilter(p, filter.value, ctx))
+})
 
 // Fullscreen state — uses full Photo type so FullscreenOverlay works directly
 const isFullscreen = ref(false)
@@ -211,14 +249,25 @@ onUnmounted(() => {
       </div>
 
       <!-- Map mode -->
-      <TripMap
-        v-if="album.display_mode === 'map' && album.photos.length > 0"
-        ref="tripMapRef"
-        :photos="albumPhotosAsPhoto"
-        :albumName="album.name"
-        :albumDescription="album.description"
-        @open-fullscreen="handleMapFullscreen"
-      />
+      <template v-if="album.display_mode === 'map' && album.photos.length > 0">
+        <div class="map-filter-bar">
+          <Button
+            :icon="activeCount > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'"
+            :label="activeCount > 0 ? `Filter (${activeCount})` : 'Filter'"
+            size="small"
+            :severity="activeCount > 0 ? 'primary' : 'secondary'"
+            :outlined="activeCount === 0"
+            @click="openFilterMenu"
+          />
+        </div>
+        <TripMap
+          ref="tripMapRef"
+          :photos="filteredMapPhotos"
+          :albumName="album.name"
+          :albumDescription="album.description"
+          @open-fullscreen="handleMapFullscreen"
+        />
+      </template>
 
       <!-- Grid mode -->
       <div v-else class="photo-grid-scroll">
@@ -238,6 +287,14 @@ onUnmounted(() => {
         </div>
       </div>
     </template>
+
+    <FilterMenu
+      v-model:visible="filterMenuOpen"
+      v-model:draft="filterDraft"
+      :available="FILTER_AVAILABLE"
+      @apply="onApplyFilter"
+      @reset="onResetFilter"
+    />
 
     <!-- Fullscreen overlay (reuses shared FullscreenOverlay component) -->
     <FullscreenOverlay
@@ -309,6 +366,15 @@ onUnmounted(() => {
 .shared-header {
   padding: 1.5rem 1rem;
   text-align: center;
+  background: var(--p-surface-card, #fff);
+  border-bottom: 1px solid var(--p-content-border-color, #dee2e6);
+  flex-shrink: 0;
+}
+
+.map-filter-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.5rem 0.75rem;
   background: var(--p-surface-card, #fff);
   border-bottom: 1px solid var(--p-content-border-color, #dee2e6);
   flex-shrink: 0;
