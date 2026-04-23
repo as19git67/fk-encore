@@ -645,6 +645,12 @@ export function removeAlbumShare(albumId: number, userId: number) {
   })
 }
 
+export function leaveAlbum(albumId: number) {
+  return apiFetch<{ success: boolean }>(`/albums/${albumId}/leave`, {
+    method: 'DELETE'
+  })
+}
+
 export function createAlbumPublicLink(albumId: number, expiresIn?: PublicLinkExpiry) {
   return apiFetch<AlbumPublicLink>(`/albums/${albumId}/public-link`, {
     method: 'POST',
