@@ -24,7 +24,7 @@ import {
   photos,
   users,
 } from "../db/schema";
-import { feed, realtime } from "~encore/clients";
+import { feed, realtime, sharedalbum } from "~encore/clients";
 import { getUsersWithPhotoAccess, emitFeedItem } from "./photo.service";
 
 const MAX_COMMENT_LENGTH = 2000;
@@ -262,6 +262,24 @@ export async function createComment(
       excerpt: comment.body.slice(0, 140),
     },
   });
+  // Fan out to guests subscribed to any public-linked album that
+  // contains this photo. The actor is a user, not a guest, so no
+  // guest is excluded.
+  await sharedalbum
+    .fanoutPhoto({
+      photoId,
+      kind: "comment_added",
+      payload: {
+        commentId: comment.id,
+        authorName: author?.name ?? null,
+        excerpt: comment.body.slice(0, 140),
+      },
+    })
+    .catch((err: unknown) => {
+      console.warn(
+        `[reactions] guest fanout failed photo=${photoId}: ${(err as Error).message}`,
+      );
+    });
 
   return comment;
 }
@@ -348,6 +366,23 @@ export async function createCommentAsGuest(
       `[reactions] guest feed emit failed photo=${photoId}: ${(err as Error).message}`,
     );
   }
+  // Notify other guests on the same album(s), excluding the author.
+  await sharedalbum
+    .fanoutPhoto({
+      photoId,
+      kind: "comment_added",
+      excludeGuestId: guestId,
+      payload: {
+        commentId: comment.id,
+        authorName: guestName,
+        excerpt: comment.body.slice(0, 140),
+      },
+    })
+    .catch((err: unknown) => {
+      console.warn(
+        `[reactions] guest-to-guest fanout failed photo=${photoId}: ${(err as Error).message}`,
+      );
+    });
 
   return comment;
 }
