@@ -8,6 +8,7 @@ import Message from 'primevue/message'
 import Select from 'primevue/select'
 import Tag from 'primevue/tag'
 import { useBankcontactsStore } from '../../stores/finance/bankcontacts'
+import { useAccountsStore } from '../../stores/finance/accounts'
 import {
   probeTanMethods,
   type Bankcontact,
@@ -18,6 +19,7 @@ import TanDialog from '../../components/finance/TanDialog.vue'
 const route = useRoute()
 const router = useRouter()
 const store = useBankcontactsStore()
+const accountsStore = useAccountsStore()
 
 const isNew = computed(() => route.name === 'finance-bankcontact-new')
 
@@ -42,8 +44,16 @@ const syncing = ref(false)
 const probingMethods = ref(false)
 const tanMethodOptions = ref<TanMethodOption[]>([])
 const tanProbeInfo = ref<string | null>(null)
+const syncInfo = ref<string | null>(null)
 const errorMsg = ref<string | null>(null)
 const bc = ref<Bankcontact | null>(null)
+
+const myAccounts = computed(() => {
+  if (!bc.value) return []
+  return accountsStore.items
+    .filter((a) => a.bankcontact_id === bc.value!.id)
+    .sort((a, b) => a.label.localeCompare(b.label))
+})
 
 // Dropdown entries combine the probed list with whatever is currently
 // stored on the bankcontact — so an admin who already knows the ID
@@ -83,6 +93,9 @@ onMounted(async () => {
     form.value.server_url = existing.server_url
     form.value.tan_method = existing.tan_method ?? ''
   }
+  // Populate the accounts store so the "Konten" section can filter
+  // by bankcontact_id without each view re-fetching.
+  if (accountsStore.items.length === 0) await accountsStore.refresh()
 })
 
 async function save() {
@@ -160,10 +173,28 @@ async function triggerSync() {
   if (!bc.value) return
   syncing.value = true
   errorMsg.value = null
+  syncInfo.value = null
   try {
     const resp = await store.syncNow(bc.value.id)
     if (resp.state === 'error') {
       errorMsg.value = `${resp.errorCode}: ${resp.errorMessage}`
+    } else if (resp.state === 'idle') {
+      const parts: string[] = []
+      if (resp.accounts_seen !== undefined) {
+        parts.push(`${resp.accounts_seen} Konten erkannt`)
+      }
+      if (resp.transactions_inserted !== undefined) {
+        parts.push(`${resp.transactions_inserted} neue Transaktionen`)
+      }
+      if (resp.balances_written !== undefined) {
+        parts.push(`${resp.balances_written} Salden`)
+      }
+      syncInfo.value = parts.length
+        ? `Sync erfolgreich — ${parts.join(', ')}${resp.partial ? ' (teilweise; einige Konten brauchten TAN)' : ''}.`
+        : 'Sync erfolgreich.'
+      // Refresh the accounts store so freshly auto-created accounts
+      // appear in the "Konten"-section below without a page reload.
+      await accountsStore.refresh()
     }
     const refreshed = store.items.find((b) => b.id === bc.value!.id)
     if (refreshed) bc.value = refreshed
@@ -279,6 +310,14 @@ async function del() {
           :value="bc.last_sync_status"
         />
       </p>
+      <Message
+        v-if="syncInfo"
+        severity="success"
+        :closable="true"
+        @close="syncInfo = null"
+      >
+        {{ syncInfo }}
+      </Message>
       <div class="actions">
         <Button
           label="Sync jetzt"
@@ -293,6 +332,41 @@ async function del() {
           @click="router.push({ name: 'finance-bankcontact-schedule', params: { id: bc.id } })"
         />
       </div>
+    </section>
+
+    <section v-if="!isNew && bc" class="card">
+      <h2>Konten</h2>
+      <p v-if="myAccounts.length === 0" class="hint">
+        Noch keine Konten verknüpft. Nach dem ersten erfolgreichen Sync
+        werden die von der Bank zurückgelieferten Konten automatisch hier
+        angezeigt.
+      </p>
+      <ul v-else class="account-list">
+        <li v-for="a in myAccounts" :key="a.id" class="account-item">
+          <div class="account-main">
+            <strong>{{ a.label || a.account_number }}</strong>
+            <Tag class="type-tag" :value="a.type_label" severity="info" />
+            <Tag
+              v-if="!a.active"
+              class="type-tag"
+              value="inaktiv"
+              severity="secondary"
+            />
+          </div>
+          <div class="account-meta">
+            <span v-if="a.iban">{{ a.iban }}</span>
+            <span v-else>Kontonr. {{ a.account_number }}</span>
+            <span class="currency">{{ a.currency_symbol || a.currency_code }}</span>
+          </div>
+          <Button
+            label="Öffnen"
+            icon="pi pi-arrow-right"
+            severity="secondary"
+            text
+            @click="router.push({ name: 'finance-account-detail', params: { id: a.id } })"
+          />
+        </li>
+      </ul>
     </section>
 
     <section v-if="!isNew && bc" class="card danger-zone">
@@ -359,6 +433,47 @@ async function del() {
 }
 .probe-info {
   color: var(--p-text-muted-color);
+}
+.account-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.account-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  gap: 0.1rem 0.75rem;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.25rem;
+  background: var(--p-surface-50, var(--p-content-background));
+}
+.account-item :last-child {
+  grid-row: 1 / span 2;
+}
+.account-main {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.account-main strong {
+  font-weight: 600;
+}
+.account-meta {
+  color: var(--p-text-muted-color);
+  font-size: 0.875rem;
+  display: flex;
+  gap: 0.75rem;
+}
+.account-meta .currency {
+  font-variant: tabular-nums;
+}
+.type-tag {
+  font-size: 0.75rem;
 }
 .danger-zone {
   border-color: var(--p-red-500);

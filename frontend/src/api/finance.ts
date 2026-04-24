@@ -113,7 +113,17 @@ export async function probeTanMethods(
 // ----------------------------------------------------------------------
 
 export type SyncResponse =
-  | { state: 'idle' }
+  | {
+      state: 'idle'
+      /** Accounts seen on this sync (both pre-existing and freshly auto-created). */
+      accounts_seen?: number
+      /** Rows inserted into finance_transaction (new only; duplicates skipped silently). */
+      transactions_inserted?: number
+      /** Rows inserted into finance_account_balance. */
+      balances_written?: number
+      /** True when any per-account fetch hit a mid-flight TAN we skipped. */
+      partial?: boolean
+    }
   | {
       state: 'tan-required'
       tanReference: string
