@@ -125,10 +125,10 @@ export async function runSynchronize(
   const isResume = typeof opts.tanReference === "string"
     && !!opts.bankingInformation;
 
-  return runWithRetry(async () => {
-    if (isResume) {
-      // Resume path — bankingInformation already contains BPD; the
-      // pending dialog is simply continued with the user's TAN.
+  // The resume path submits a TAN the user already typed — retrying
+  // doesn't cost anything visible (no new push).
+  if (isResume) {
+    return runWithRetry(async () => {
       const config = FinTSConfig.fromBankingInformation(
         productId(),
         productVersion(),
@@ -145,88 +145,116 @@ export async function runSynchronize(
       const result = mapResponse(response, client.config.bankingInformation);
       if (result.state === "idle") result.client = client;
       return result;
-    }
+    }, sleep);
+  }
 
-    // Fresh path — first sync fetches BPD so availableTanMethods is
-    // populated before we can call selectTanMethod().
-    const config = FinTSConfig.forFirstTimeUse(
-      productId(),
-      productVersion(),
-      bankcontact.server_url,
-      bankcontact.blz,
-      bankcontact.login,
-      pin,
-    );
-    const client = factory(config);
+  // Fresh path — splits into two phases:
+  //
+  //   (a) RETRY-WRAPPED  : forFirstTimeUse + BPD-only synchronize().
+  //                         This part is side-effect-free from the
+  //                         user's perspective (no TAN / push yet).
+  //                         Transient transport errors retry freely.
+  //
+  //   (b) NO-RETRY       : selectTanMethod + UPD-synchronize +
+  //                         decoupled poll. A retry here would build
+  //                         a second FinTSConfig.forFirstTimeUse and
+  //                         trigger a *second* TAN push at the bank —
+  //                         which is exactly what the user was
+  //                         experiencing. Any failure past this point
+  //                         surfaces as state="error" without retry.
+  let client: FintsClientSurface;
+  try {
+    const firstSync = await runWithRetry(async () => {
+      const config = FinTSConfig.forFirstTimeUse(
+        productId(),
+        productVersion(),
+        bankcontact.server_url,
+        bankcontact.blz,
+        bankcontact.login,
+        pin,
+      );
+      const c = factory(config);
+      const bpdResponse = await c.synchronize();
+      const mapped = mapResponse(bpdResponse, c.config.bankingInformation);
+      // Stash the live client on the DialogResult so the caller
+      // below can reuse it for phase (b).
+      mapped.client = c;
+      return mapped;
+    }, sleep);
 
-    const bpdResponse = await client.synchronize();
-    // If even the BPD-only sync comes back as a failure or TAN-
-    // required, surface that verbatim — don't try the second call.
-    const bpdMapped = mapResponse(bpdResponse, client.config.bankingInformation);
-    if (bpdMapped.state !== "idle") {
-      return bpdMapped;
+    // BPD-only sync itself came back with TAN-required or error —
+    // nothing to do in phase (b); surface as-is. The client is
+    // not attached to these states (null-ish).
+    if (firstSync.state !== "idle" || !firstSync.client) {
+      const { client: _c, ...rest } = firstSync;
+      void _c;
+      return rest;
     }
+    client = firstSync.client as FintsClientSurface;
+  } catch (err) {
+    // retry budget exhausted during BPD fetch → already mapped to
+    // state=error by runWithRetry, unreachable here. Kept for type
+    // safety in case runWithRetry's signature evolves.
+    return {
+      state: "error",
+      errorCode: "transport",
+      errorMessage: err instanceof Error ? err.message : String(err),
+    };
+  }
 
-    // A TAN method must be configured before the second sync —
-    // otherwise we have no way to know which method to request.
-    // The UI's BankcontactForm exposes this as a mandatory picker
-    // populated by probeTanMethods (see docs/finance-frontend.md §3).
-    if (!bankcontact.tan_method) {
-      return {
-        state: "error",
-        errorCode: "no-tan-method",
-        errorMessage:
-          "No TAN method configured on bankcontact. Pick one from the " +
-          "available methods returned by the bank and update the " +
-          "bankcontact before retrying.",
-      };
-    }
-    // Validate the configured id against the BPD-populated list before
-    // handing it to lib-fints. lib-fints itself throws a plain Error
-    // ("TAN Method '<id>' is not supported"), which — without this
-    // guard — would ricochet through the retry loop and surface as
-    // a generic "transport error after 3 attempts", obscuring the
-    // real cause from the user.
-    const tanMethodId = parseInt(bankcontact.tan_method, 10);
-    const available = client.config.availableTanMethods ?? [];
-    if (!available.some((m) => m.id === tanMethodId)) {
-      const list = available.length
-        ? available.map((m) => `${m.id} (${m.name})`).join(", ")
-        : "none returned by bank";
-      return {
-        state: "error",
-        errorCode: "unknown-tan-method",
-        errorMessage:
-          `Configured TAN method '${tanMethodId}' is not offered by the bank. ` +
-          `Available: ${list}. Re-probe via the UI's "Abrufen" button and ` +
-          `pick an available one.`,
-      };
-    }
-    client.selectTanMethod(tanMethodId);
+  // --- Phase (b): from here on, no retry, no second forFirstTimeUse ---
 
+  if (!bankcontact.tan_method) {
+    return {
+      state: "error",
+      errorCode: "no-tan-method",
+      errorMessage:
+        "No TAN method configured on bankcontact. Pick one from the " +
+        "available methods returned by the bank and update the " +
+        "bankcontact before retrying.",
+    };
+  }
+  const tanMethodId = parseInt(bankcontact.tan_method, 10);
+  const available = client.config.availableTanMethods ?? [];
+  if (!available.some((m) => m.id === tanMethodId)) {
+    const list = available.length
+      ? available.map((m) => `${m.id} (${m.name})`).join(", ")
+      : "none returned by bank";
+    return {
+      state: "error",
+      errorCode: "unknown-tan-method",
+      errorMessage:
+        `Configured TAN method '${tanMethodId}' is not offered by the bank. ` +
+        `Available: ${list}. Re-probe via the UI's "Abrufen" button and ` +
+        `pick an available one.`,
+    };
+  }
+  client.selectTanMethod(tanMethodId);
+
+  try {
     const updResponse = await client.synchronize();
-
-    // Decoupled TAN (e.g. pushTAN): the bank does NOT ask the user to
-    // type a TAN — instead it waits for the user to approve in a
-    // separate app. The server side must poll synchronizeWithTan()
-    // (no `tan` argument) until the approval lands or the bank's
-    // maxStatusRequests budget is spent. Without this poll we'd
-    // return `tan-required` to the UI, the user tapped approve on
-    // their phone for nothing, and the next click asks the bank for
-    // *another* fresh push — which is what the user saw.
     const finalResponse = await pollDecoupledIfNeeded(
       client,
       updResponse,
       sleep,
     );
     const result = mapResponse(finalResponse, client.config.bankingInformation);
-    // Expose the live client on successful init so callers can follow
-    // up with getAccountStatements / getAccountBalance without a
-    // fresh authenticate-dance. Retained only in-process; never
-    // persisted.
     if (result.state === "idle") result.client = client;
     return result;
-  }, sleep);
+  } catch (err) {
+    // Transport error AFTER the bank has already pushed a TAN — don't
+    // retry, don't build a second dialog, just hand the failure up.
+    // The open TAN challenge on the bank's side will time out on its
+    // own; the user can trigger another sync later.
+    return {
+      state: "error",
+      errorCode: "post-first-sync-transport",
+      errorMessage:
+        "FinTS dialog failed after the bank was already asked for a " +
+        "TAN. Not retrying to avoid a duplicate push. Details: " +
+        (err instanceof Error ? err.message : String(err)),
+    };
+  }
 }
 
 /**

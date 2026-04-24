@@ -581,6 +581,73 @@ describe("fints-client — decoupled TAN polling", () => {
   });
 });
 
+describe("fints-client — no retry after the bank has seen a TAN request", () => {
+  // Regression for the "zwei Push-Nachrichten bei Sync"-bug: a
+  // transport error during phase (b) (selectTanMethod → second
+  // synchronize() → decoupled poll) must NEVER cause the retry
+  // loop to rebuild a fresh FinTSConfig.forFirstTimeUse and fire
+  // a second TAN push at the bank.
+  it("returns state=error without re-building the dialog when the UPD sync throws", async () => {
+    const id = await insertBankcontact({ tan_method: "946" });
+    const sleep = vi.fn(async (_ms: number) => {});
+    const availableTanMethods = [
+      { id: 946, name: "pushTAN 2.0", isDecoupled: true, decoupled: {
+        maxStatusRequests: 5,
+        waitingSecondsBeforeFirstStatusRequest: 1,
+        waitingSecondsBetweenStatusRequests: 1,
+      } },
+    ];
+    const config: any = {
+      bankingInformation: { systemId: "sys-1" },
+      availableTanMethods,
+    };
+    let constructorCalls = 0;
+    let bpdCalls = 0;
+    let updCalls = 0;
+    const factory = () => {
+      constructorCalls++;
+      let seenBpd = false;
+      return {
+        synchronize: vi.fn(async () => {
+          if (!seenBpd) {
+            seenBpd = true;
+            bpdCalls++;
+            return { success: true, requiresTan: false, bankAnswers: [] } as any;
+          }
+          updCalls++;
+          throw new Error("ECONNRESET (mid-dialog)");
+        }),
+        synchronizeWithTan: vi.fn(),
+        selectTanMethod: vi.fn((id: number) => {
+          config.selectedTanMethod = availableTanMethods.find((m) => m.id === id);
+        }),
+        config,
+        getAccountStatements: vi.fn(),
+        getAccountStatementsWithTan: vi.fn(),
+        getAccountBalance: vi.fn(),
+        getAccountBalanceWithTan: vi.fn(),
+      } as FintsClientSurface;
+    };
+
+    const result = await runSynchronize(id, {
+      clientFactory: factory,
+      sleep,
+    });
+
+    // Error surfaced (no-retry), with a distinct code so operators
+    // can tell this apart from "bank unreachable from the start".
+    expect(result.state).toBe("error");
+    expect(result.errorCode).toBe("post-first-sync-transport");
+
+    // The crucial assertions: the FinTSConfig was built exactly
+    // ONCE, BPD synchronize() ran ONCE — i.e. no second dialog,
+    // no second TAN push.
+    expect(constructorCalls).toBe(1);
+    expect(bpdCalls).toBe(1);
+    expect(updCalls).toBe(1);
+  });
+});
+
 // ======================================================================
 // runFetchAccounts — fetch statements + balance per account
 // ======================================================================
