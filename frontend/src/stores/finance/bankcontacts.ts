@@ -40,9 +40,10 @@ export const useBankcontactsStore = defineStore('finance.bankcontacts', () => {
     return updated
   }
 
-  async function remove(id: number) {
-    await api.deleteBankcontact(id)
+  async function remove(id: number, opts: { cascade?: boolean } = {}) {
+    const resp = await api.deleteBankcontact(id, opts)
     items.value = items.value.filter((b) => b.id !== id)
+    return resp
   }
 
   async function setCredentials(id: number, pin: string) {

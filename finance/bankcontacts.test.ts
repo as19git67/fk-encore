@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { getAuthData } from "~encore/auth";
 
 import db from "../db/database";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
   financeAccount,
   financeAccountAccess,
@@ -225,7 +225,7 @@ describe("finance/bankcontacts — delete", () => {
     await expect(getBankcontact({ id: created.id })).rejects.toThrow();
   });
 
-  it("refuses when accounts reference the bankcontact", async () => {
+  it("refuses when accounts reference the bankcontact and cascade is not set", async () => {
     withPermission("finance.accounts.manage");
     const created = await createBankcontact({
       name: "has-accounts",
@@ -249,8 +249,72 @@ describe("finance/bankcontacts — delete", () => {
       label: "Test",
     });
     await expect(deleteBankcontact({ id: created.id })).rejects.toThrow(
-      /delete them first/,
+      /cascade=true/,
     );
+  });
+
+  it("cascade-deletes accounts + transactions when cascade=true", async () => {
+    withPermission("finance.accounts.manage");
+    const created = await createBankcontact({
+      name: "to-purge",
+      blz: "1",
+      login: "u",
+      server_url: "https://x",
+    });
+    const [type] = await db
+      .select({ id: financeAccountType.id })
+      .from(financeAccountType)
+      .limit(1);
+    const [currency] = await db
+      .select({ code: financeCurrency.code })
+      .from(financeCurrency)
+      .limit(1);
+    const [acc] = await db
+      .insert(financeAccount)
+      .values({
+        bankcontact_id: created.id,
+        type_id: type.id,
+        currency_code: currency.code,
+        account_number: "000001",
+        label: "Test",
+      })
+      .returning({ id: financeAccount.id });
+    await db.insert(financeTransaction).values([
+      {
+        account_id: acc.id,
+        booking_date: "2026-04-01",
+        amount: "-10.00",
+        currency_code: currency.code,
+        dedupe_hash: "a".repeat(64),
+      },
+      {
+        account_id: acc.id,
+        booking_date: "2026-04-02",
+        amount: "-20.00",
+        currency_code: currency.code,
+        dedupe_hash: "b".repeat(64),
+      },
+    ]);
+
+    const result = await deleteBankcontact({ id: created.id, cascade: true });
+    expect(result).toEqual({
+      deleted: true,
+      accounts_deleted: 1,
+      transactions_deleted: 2,
+    });
+
+    // Bankcontact, account and transactions all gone.
+    await expect(getBankcontact({ id: created.id })).rejects.toThrow();
+    const accsAfter = await db
+      .select({ id: financeAccount.id })
+      .from(financeAccount)
+      .where(eq(financeAccount.id, acc.id));
+    expect(accsAfter).toHaveLength(0);
+    const txAfter = await db
+      .select({ id: financeTransaction.id })
+      .from(financeTransaction)
+      .where(eq(financeTransaction.account_id, acc.id));
+    expect(txAfter).toHaveLength(0);
   });
 });
 
@@ -381,6 +445,3 @@ describe("finance/bankcontacts — probe TAN methods", () => {
     ).rejects.toThrow(/Too many/);
   });
 });
-
-// Drizzle's eq() needed for inline use in the credentials test
-import { eq } from "drizzle-orm";

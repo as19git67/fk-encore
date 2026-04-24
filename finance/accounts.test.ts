@@ -17,6 +17,7 @@ import {
 } from "../db/schema";
 import {
   createAccount,
+  deleteAccount,
   getAccount,
   listAccounts,
   updateAccount,
@@ -287,5 +288,100 @@ describe("finance/accounts — update", () => {
     await expect(
       updateAccount({ id: a, label: "x" }),
     ).rejects.toThrow(/permission/);
+  });
+});
+
+describe("finance/accounts — delete", () => {
+  async function seedAccountWithTransactions(): Promise<{
+    bcId: number;
+    accountId: number;
+    txCount: number;
+  }> {
+    setAuth("1", ["finance.accounts.manage"]);
+    const bcId = await insertBankcontact();
+    const accountId = await insertAccount(bcId);
+    const [currency] = await db
+      .select({ code: financeCurrency.code })
+      .from(financeCurrency)
+      .limit(1);
+    await db.insert(financeTransaction).values([
+      {
+        account_id: accountId,
+        booking_date: "2026-03-01",
+        amount: "-5.00",
+        currency_code: currency.code,
+        dedupe_hash: "1".repeat(64),
+      },
+      {
+        account_id: accountId,
+        booking_date: "2026-03-02",
+        amount: "-7.50",
+        currency_code: currency.code,
+        dedupe_hash: "2".repeat(64),
+      },
+      {
+        account_id: accountId,
+        booking_date: "2026-03-03",
+        amount: "-3.50",
+        currency_code: currency.code,
+        dedupe_hash: "3".repeat(64),
+      },
+    ]);
+    await db.insert(financeAccountBalance).values({
+      account_id: accountId,
+      as_of: new Date().toISOString(),
+      balance: "1234.56",
+      source: "manual",
+    });
+    return { bcId, accountId, txCount: 3 };
+  }
+
+  it("removes the account, its transactions and its balance history", async () => {
+    const { accountId, txCount } = await seedAccountWithTransactions();
+
+    const result = await deleteAccount({ id: accountId });
+    expect(result.deleted).toBe(true);
+    expect(result.transactions_deleted).toBe(txCount);
+
+    const accAfter = await db
+      .select({ id: financeAccount.id })
+      .from(financeAccount)
+      .where(eq(financeAccount.id, accountId));
+    expect(accAfter).toHaveLength(0);
+
+    const txAfter = await db
+      .select({ id: financeTransaction.id })
+      .from(financeTransaction)
+      .where(eq(financeTransaction.account_id, accountId));
+    expect(txAfter).toHaveLength(0);
+
+    const balAfter = await db
+      .select()
+      .from(financeAccountBalance)
+      .where(eq(financeAccountBalance.account_id, accountId));
+    expect(balAfter).toHaveLength(0);
+  });
+
+  it("leaves the parent bankcontact alone", async () => {
+    const { bcId, accountId } = await seedAccountWithTransactions();
+
+    await deleteAccount({ id: accountId });
+
+    const [bc] = await db
+      .select()
+      .from(financeBankcontact)
+      .where(eq(financeBankcontact.id, bcId));
+    expect(bc).toBeDefined();
+  });
+
+  it("requires finance.accounts.manage", async () => {
+    const { accountId } = await seedAccountWithTransactions();
+    setAuth("1", ["finance.view"]);
+    await expect(deleteAccount({ id: accountId })).rejects.toThrow(/permission/);
+  });
+
+  it("404s on unknown account id", async () => {
+    setAuth("1", ["finance.accounts.manage"]);
+    await expect(deleteAccount({ id: 999_999 })).rejects.toThrow(/not found/);
   });
 });

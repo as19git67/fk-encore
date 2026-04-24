@@ -68,8 +68,20 @@ export async function updateBankcontact(
   })
 }
 
-export async function deleteBankcontact(id: number): Promise<{ deleted: true }> {
-  return apiFetch(`/finance/bankcontacts/${id}`, { method: 'DELETE' })
+export interface DeleteBankcontactResponse {
+  deleted: true
+  accounts_deleted: number
+  transactions_deleted: number
+}
+
+export async function deleteBankcontact(
+  id: number,
+  opts: { cascade?: boolean } = {},
+): Promise<DeleteBankcontactResponse> {
+  // Encore parses DELETE path + query params into the body, so the
+  // cascade flag travels as ?cascade=true. `id` is already in the URL.
+  const qs = opts.cascade ? '?cascade=true' : ''
+  return apiFetch(`/finance/bankcontacts/${id}${qs}`, { method: 'DELETE' })
 }
 
 export async function setBankcontactCredentials(
@@ -233,6 +245,18 @@ export async function updateAccount(
     method: 'PATCH',
     body: JSON.stringify({ id, ...input }),
   })
+}
+
+export interface DeleteAccountResponse {
+  deleted: true
+  transactions_deleted: number
+  balances_deleted: number
+}
+
+export async function deleteAccount(
+  id: number,
+): Promise<DeleteAccountResponse> {
+  return apiFetch(`/finance/accounts/${id}`, { method: 'DELETE' })
 }
 
 // ----------------------------------------------------------------------

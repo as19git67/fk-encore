@@ -27,6 +27,7 @@ import {
   financeAccountType,
   financeBankcontact,
   financeCurrency,
+  financeTransaction,
 } from "../db/schema";
 
 console.log("[boot] finance/accounts.ts: all imports resolved");
@@ -307,6 +308,66 @@ export const updateAccount = api(
     ]);
     void existing;
     return toView(row, bc, type, curr);
+  },
+);
+
+// -----------------------------------------------------------------------
+// Delete
+// -----------------------------------------------------------------------
+//
+// Hard-delete a single account and everything downstream of it:
+//   finance_transaction          (explicit; FK RESTRICT blocks otherwise)
+//   finance_transaction_embedding (cascades from transaction)
+//   finance_tag_transaction       (cascades from transaction)
+//   finance_account_balance       (cascades from account)
+//   finance_account_access        (cascades from account)
+//
+// The RESTRICT edge on transaction → account exists so a stray UI
+// click can't nuke years of bookings; this endpoint is the explicit
+// opt-in. The UI must show a summary + confirm before hitting it.
+
+interface DeleteAccountParams {
+  id: number;
+}
+
+interface DeleteAccountResponse {
+  deleted: true;
+  transactions_deleted: number;
+  balances_deleted: number;
+}
+
+export const deleteAccount = api(
+  {
+    expose: true,
+    method: "DELETE",
+    path: "/finance/accounts/:id",
+    auth: true,
+  },
+  async ({ id }: DeleteAccountParams): Promise<DeleteAccountResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.accounts.manage");
+    await loadAccount(id);
+
+    // Count before delete so the caller gets a useful summary.
+    const txRows = await db
+      .select({ id: financeTransaction.id })
+      .from(financeTransaction)
+      .where(eq(financeTransaction.account_id, id));
+    const txCount = txRows.length;
+
+    // Delete transactions first — embedding + tag_transaction cascade.
+    await db
+      .delete(financeTransaction)
+      .where(eq(financeTransaction.account_id, id));
+
+    // Delete the account — balance + access cascade.
+    await db.delete(financeAccount).where(eq(financeAccount.id, id));
+
+    return {
+      deleted: true,
+      transactions_deleted: txCount,
+      balances_deleted: 0, // cascaded; exact count not tracked
+    };
   },
 );
 

@@ -205,11 +205,39 @@ async function triggerSync() {
   }
 }
 
+async function deleteOneAccount(id: number, label: string) {
+  const ok = confirm(
+    `Konto "${label}" wirklich löschen? Alle Transaktionen, Tags ` +
+      `und die Saldo-Historie für dieses Konto werden entfernt.`,
+  )
+  if (!ok) return
+  try {
+    const resp = await accountsStore.remove(id)
+    syncInfo.value = `Konto gelöscht — ${resp.transactions_deleted} Transaktionen entfernt.`
+    errorMsg.value = null
+  } catch (err) {
+    errorMsg.value = err instanceof Error ? err.message : String(err)
+  }
+}
+
 async function del() {
   if (!bc.value) return
-  if (!confirm(`Bankkontakt "${bc.value.name}" wirklich löschen?`)) return
+  const attached = myAccounts.value.length
+  let cascade = false
+  if (attached > 0) {
+    const ok = confirm(
+      `Bankkontakt "${bc.value.name}" hat ${attached} verknüpfte Konten. ` +
+        `Mit Löschen werden *alle* Konten und ihre Transaktionen unwiderruflich entfernt.\n\n` +
+        `Fortfahren?`,
+    )
+    if (!ok) return
+    cascade = true
+  } else {
+    if (!confirm(`Bankkontakt "${bc.value.name}" wirklich löschen?`)) return
+  }
   try {
-    await store.remove(bc.value.id)
+    await store.remove(bc.value.id, { cascade })
+    await accountsStore.refresh()
     void router.push({ name: 'finance-bankcontacts' })
   } catch (err) {
     errorMsg.value = err instanceof Error ? err.message : String(err)
@@ -358,13 +386,22 @@ async function del() {
             <span v-else>Kontonr. {{ a.account_number }}</span>
             <span class="currency">{{ a.currency_symbol || a.currency_code }}</span>
           </div>
-          <Button
-            label="Öffnen"
-            icon="pi pi-arrow-right"
-            severity="secondary"
-            text
-            @click="router.push({ name: 'finance-account-detail', params: { id: a.id } })"
-          />
+          <div class="account-actions">
+            <Button
+              label="Öffnen"
+              icon="pi pi-arrow-right"
+              severity="secondary"
+              text
+              @click="router.push({ name: 'finance-account-detail', params: { id: a.id } })"
+            />
+            <Button
+              icon="pi pi-trash"
+              severity="danger"
+              text
+              aria-label="Konto löschen"
+              @click="deleteOneAccount(a.id, a.label || a.account_number)"
+            />
+          </div>
         </li>
       </ul>
     </section>
@@ -452,8 +489,11 @@ async function del() {
   border-radius: 0.25rem;
   background: var(--p-surface-50, var(--p-content-background));
 }
-.account-item :last-child {
+.account-actions {
   grid-row: 1 / span 2;
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
 }
 .account-main {
   display: flex;

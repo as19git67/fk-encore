@@ -32,9 +32,15 @@ export const useAccountsStore = defineStore('finance.accounts', () => {
     return updated
   }
 
+  async function remove(id: number) {
+    const resp = await api.deleteAccount(id)
+    items.value = items.value.filter((a) => a.id !== id)
+    return resp
+  }
+
   function byId(id: number): api.Account | undefined {
     return items.value.find((a) => a.id === id)
   }
 
-  return { items, loading, error, refresh, create, update, byId }
+  return { items, loading, error, refresh, create, update, remove, byId }
 })
