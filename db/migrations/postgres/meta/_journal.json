@@ -316,6 +316,13 @@
       "when": 1778700000000,
       "tag": "0043_album_shares_invited_by",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1778800000000,
+      "tag": "0044_tax_section_hint_overrides",
+      "breakpoints": true
     }
   ]
 }
