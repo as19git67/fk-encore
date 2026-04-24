@@ -120,3 +120,29 @@ export const fanoutFeed = api(
     return await svc.sendToUser(req.userId, notification);
   },
 );
+
+interface NotifyDocumentReviewRequest {
+  userId: number;
+  kind: svc.DocumentReviewKind;
+  documentId: number;
+  documentTitle: string | null;
+  reason: string | null;
+}
+
+/**
+ * Called by `documents/document-ops.ts` when a document needs human
+ * attention — either the classifier returned low confidence or the
+ * pipeline failed. Best-effort delivery, errors are swallowed.
+ */
+export const notifyDocumentReview = api(
+  { expose: false },
+  async (req: NotifyDocumentReviewRequest): Promise<FanoutFeedResponse> => {
+    const notification = svc.buildDocumentNotification({
+      kind: req.kind,
+      documentId: req.documentId,
+      documentTitle: req.documentTitle,
+      reason: req.reason,
+    });
+    return await svc.sendToUser(req.userId, notification);
+  },
+);

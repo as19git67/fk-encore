@@ -359,6 +359,15 @@ onBeforeUnmount(() => {
           <Tag :severity="statusSeverity(doc.status)" :value="statusLabel(doc.status)" />
         </div>
 
+        <Message
+          v-if="doc.status === 'failed' && doc.last_error"
+          severity="error"
+          :closable="false"
+          icon="pi pi-times-circle"
+        >
+          <strong>Verarbeitung fehlgeschlagen:</strong> {{ doc.last_error }}
+        </Message>
+
         <div class="meta-summary" v-if="doc.summary">
           <i class="pi pi-info-circle" />
           <span>{{ doc.summary }}</span>

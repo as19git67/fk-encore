@@ -539,6 +539,10 @@ export const documents = pgTable("documents", {
   // (DB CHECK constraint). `user_id` stays as the uploader regardless.
   visibility: documentVisibilityEnum("visibility").notNull().default("private"),
   household_id: integer("household_id").references(() => households.id, { onDelete: "restrict" }),
+  // Last failure reason from the worker pipeline. Set by markDocumentFailed,
+  // cleared whenever the document re-enters the pipeline (reclassify) so a
+  // stale error never lingers on a healthy document.
+  last_error: text("last_error"),
   // NOTE: the generated `text_tsv tsvector` column and its GIN index are
   // added by migration 0025 and accessed only via raw SQL (drizzle-orm has
   // no first-class tsvector support).

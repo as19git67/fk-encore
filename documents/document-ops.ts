@@ -31,7 +31,7 @@ import {
 } from "./llm-client";
 import { loadEffectiveTaxSections } from "./tax-hint-overrides";
 import { flattenTaxonomy } from "./taxonomy";
-import { realtime } from "~encore/clients";
+import { realtime, push } from "~encore/clients";
 
 console.log("[boot] documents/document-ops.ts: all imports resolved");
 
@@ -198,6 +198,22 @@ export async function runClassify(documentId: number): Promise<{ classification:
   }
 
   const lowConfidence = classification.confidence < LOW_CONFIDENCE_THRESHOLD;
+  if (lowConfidence) {
+    // Best-effort — push must never block the pipeline.
+    push
+      .notifyDocumentReview({
+        userId: row.user_id,
+        kind: "low_confidence",
+        documentId,
+        documentTitle: classification.title || row.title || row.original_filename,
+        reason: null,
+      })
+      .catch((err: unknown) =>
+        console.warn(
+          `[documents] notifyDocumentReview(low_confidence,${documentId}) failed: ${(err as Error).message}`,
+        ),
+      );
+  }
   return { classification, lowConfidence };
 }
 
@@ -278,15 +294,35 @@ export async function runEmbed(documentId: number): Promise<{ chunks: number } |
  * exhausted retries so the UI can surface the error.
  */
 export async function markDocumentFailed(documentId: number, reason: string): Promise<void> {
-  const row = await dbFirst<{ user_id: number }>(
-    db.select({ user_id: documents.user_id }).from(documents).where(eq(documents.id, documentId)),
+  const row = await dbFirst<{ user_id: number; title: string | null; original_filename: string }>(
+    db
+      .select({
+        user_id: documents.user_id,
+        title: documents.title,
+        original_filename: documents.original_filename,
+      })
+      .from(documents)
+      .where(eq(documents.id, documentId)),
   );
   await db
     .update(documents)
-    .set({ status: "failed" })
+    .set({ status: "failed", last_error: reason })
     .where(eq(documents.id, documentId));
   if (row) {
     await publishStatusChanged(documentId, row.user_id, "failed", { reason });
+    push
+      .notifyDocumentReview({
+        userId: row.user_id,
+        kind: "failed",
+        documentId,
+        documentTitle: row.title ?? row.original_filename,
+        reason,
+      })
+      .catch((err: unknown) =>
+        console.warn(
+          `[documents] notifyDocumentReview(failed,${documentId}) failed: ${(err as Error).message}`,
+        ),
+      );
   }
 }
 

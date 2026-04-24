@@ -11,7 +11,7 @@ import crypto from "crypto";
 import { api, APIError, type Query } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
-import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, lt, or, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbFirst } from "../db/adapter";
 import {
@@ -92,6 +92,7 @@ export interface DocumentSummary {
   tags: string[];
   tax_relevant: boolean;
   tax_year: number | null;
+  last_error: string | null;
 }
 
 export interface DocumentTaxSectionDTO {
@@ -129,9 +130,20 @@ interface ListQuery {
   tag?: Query<string>;
   q?: Query<string>;
   status?: Query<string>;
+  /**
+   * `needs_review=true` keeps only documents the human should look at:
+   * status='failed', or status='ready' with classification_confidence
+   * below LOW_CONFIDENCE_THRESHOLD. Combine with status= for a more
+   * specific filter (e.g. status=ready + needs_review=true → just the
+   * low-confidence ready ones).
+   */
+  needs_review?: Query<boolean>;
   limit?: Query<number>;
   offset?: Query<number>;
 }
+
+/** Mirrors documents/document-ops.ts — keep in sync. */
+const LOW_CONFIDENCE_THRESHOLD = 0.6;
 
 // ─── Upload (raw) ───────────────────────────────────────────────────────────
 
@@ -286,7 +298,7 @@ async function streamAndStorePdf(
 
 export const listDocuments = api(
   { expose: true, method: "GET", path: "/documents", auth: true },
-  async ({ category, tag, q, status, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
+  async ({ category, tag, q, status, needs_review, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -299,6 +311,16 @@ export const listDocuments = api(
 
     if (status && status.length > 0) {
       conds.push(eq(documents.status, status as any));
+    }
+    if (needs_review === true) {
+      const reviewCond = or(
+        eq(documents.status, "failed" as any),
+        and(
+          eq(documents.status, "ready" as any),
+          lt(documents.classification_confidence, LOW_CONFIDENCE_THRESHOLD),
+        ),
+      );
+      if (reviewCond) conds.push(reviewCond);
     }
     if (category && category.length > 0) {
       const cat = await dbFirst<{ id: number }>(
@@ -360,6 +382,7 @@ export const listDocuments = api(
           tax_year: documents.tax_year,
           tax_year_confidence: documents.tax_year_confidence,
           tax_reviewed: documents.tax_reviewed,
+          last_error: documents.last_error,
           cat_slug: documentCategories.slug,
         })
         .from(documents)
@@ -657,7 +680,10 @@ export const reclassifyDocument = api(
     const userId = getUserId();
 
     await loadVisibleDocument(userId, req.id);
-    const patch: Partial<typeof documents.$inferInsert> = { status: "pending" };
+    const patch: Partial<typeof documents.$inferInsert> = {
+      status: "pending",
+      last_error: null,
+    };
     if (req.force_ocr !== undefined) patch.force_ocr = req.force_ocr;
     await db.update(documents).set(patch).where(eq(documents.id, req.id));
     await requeueDocument(req.id);
@@ -1135,6 +1161,7 @@ export const listTaxDocuments = api(
           tax_year: documents.tax_year,
           tax_year_confidence: documents.tax_year_confidence,
           tax_reviewed: documents.tax_reviewed,
+          last_error: documents.last_error,
           cat_slug: documentCategories.slug,
         })
         .from(documents)
@@ -1343,6 +1370,7 @@ export const searchDocumentsEndpoint = api(
           tax_year: documents.tax_year,
           tax_year_confidence: documents.tax_year_confidence,
           tax_reviewed: documents.tax_reviewed,
+          last_error: documents.last_error,
           cat_slug: documentCategories.slug,
         })
         .from(documents)
@@ -1612,6 +1640,7 @@ function toSummary(
     tags,
     tax_relevant: row.tax_relevant ?? false,
     tax_year: row.tax_year ?? null,
+    last_error: row.last_error ?? null,
   };
 }
 
