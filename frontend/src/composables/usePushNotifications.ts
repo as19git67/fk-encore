@@ -6,6 +6,13 @@
  * mount to discover the current status; `subscribe`/`unsubscribe`
  * drive the flow from a user gesture (required for the permission
  * prompt).
+ *
+ * Both the user-app and the public share-page reuse the same browser
+ * primitives but talk to different backend endpoints. The factory
+ * `createPushNotifications` takes the API surface as config; the
+ * default `usePushNotifications` binds to the user-app endpoints,
+ * `useGuestPushNotifications` (separate file) binds to the guest
+ * endpoints.
  */
 
 import { ref, computed } from 'vue'
@@ -17,6 +24,16 @@ export type PushStatus =
   | 'denied'          // user denied the notification permission
   | 'unsubscribed'    // supported + allowed, not yet subscribed
   | 'subscribed'      // fully active
+
+export interface PushApi {
+  fetchVapidKey(): Promise<{ publicKey: string | null; enabled: boolean }>
+  subscribe(req: {
+    endpoint: string
+    keys: { p256dh: string; auth: string }
+    userAgent?: string
+  }): Promise<unknown>
+  unsubscribe(endpoint: string): Promise<unknown>
+}
 
 // The SPA is mounted under `/app/` by the Encore static handler
 // (web/static.ts), so the service-worker file is only reachable
@@ -57,13 +74,16 @@ async function extractKey(
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
-export function usePushNotifications() {
+export function createPushNotifications(api: PushApi) {
   const status = ref<PushStatus>('unsubscribed')
   const busy = ref(false)
   const error = ref<string | null>(null)
 
   const canToggle = computed(
-    () => status.value !== 'unsupported' && status.value !== 'disabled-server' && status.value !== 'denied',
+    () =>
+      status.value !== 'unsupported' &&
+      status.value !== 'disabled-server' &&
+      status.value !== 'denied',
   )
 
   async function registerSw(): Promise<ServiceWorkerRegistration> {
@@ -77,7 +97,7 @@ export function usePushNotifications() {
       return
     }
     try {
-      const info = await getVapidPublicKey()
+      const info = await api.fetchVapidKey()
       if (!info.enabled || !info.publicKey) {
         status.value = 'disabled-server'
         return
@@ -109,7 +129,7 @@ export function usePushNotifications() {
       if (!browserSupports()) {
         throw new Error('Push wird von diesem Browser nicht unterstützt.')
       }
-      const info = await getVapidPublicKey()
+      const info = await api.fetchVapidKey()
       if (!info.enabled || !info.publicKey) {
         status.value = 'disabled-server'
         throw new Error('Push ist auf dem Server nicht konfiguriert.')
@@ -135,7 +155,7 @@ export function usePushNotifications() {
         extractKey(sub, 'p256dh'),
         extractKey(sub, 'auth'),
       ])
-      await subscribePush({
+      await api.subscribe({
         endpoint: sub.endpoint,
         keys: { p256dh, auth: authKey },
         userAgent: navigator.userAgent,
@@ -156,7 +176,7 @@ export function usePushNotifications() {
       const reg = await navigator.serviceWorker.getRegistration(SW_URL)
       const sub = (await reg?.pushManager.getSubscription()) ?? null
       if (sub) {
-        await unsubscribePush(sub.endpoint).catch(() => undefined)
+        await api.unsubscribe(sub.endpoint).catch(() => undefined)
         await sub.unsubscribe()
       }
       status.value = 'unsubscribed'
@@ -176,4 +196,12 @@ export function usePushNotifications() {
     subscribe,
     unsubscribe,
   }
+}
+
+export function usePushNotifications() {
+  return createPushNotifications({
+    fetchVapidKey: () => getVapidPublicKey(),
+    subscribe: (req) => subscribePush(req),
+    unsubscribe: (endpoint) => unsubscribePush(endpoint),
+  })
 }
