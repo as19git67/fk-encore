@@ -6,9 +6,10 @@
  * without an additional toast.
  */
 
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
+import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 
 const props = defineProps<{
@@ -28,12 +29,22 @@ const emit = defineEmits<{
 const name = ref(props.initialName ?? '')
 const email = ref(props.initialEmail ?? '')
 const submitted = ref(false)
+const nameInput = ref<InstanceType<typeof InputText> | null>(null)
 
 const isValid = computed(() => {
   const n = name.value.trim()
   const e = email.value.trim()
   return n.length > 0 && n.length <= 80 && /.+@.+\..+/.test(e)
 })
+
+function focusName() {
+  // Grab the underlying <input> — PrimeVue's InputText wraps it and
+  // exposes the wrapping element via $el, so we drill through once.
+  const el = nameInput.value as unknown as { $el?: HTMLInputElement } | HTMLInputElement | null
+  const input = (el as { $el?: HTMLInputElement })?.$el ?? (el as HTMLInputElement | null)
+  input?.focus()
+  input?.select?.()
+}
 
 function handleClose() {
   emit('update:visible', false)
@@ -66,6 +77,10 @@ watch(
       name.value = props.initialName ?? ''
       email.value = props.initialEmail ?? ''
       submitted.value = false
+      // Initial focus on the name field. Wait for the dialog content
+      // to mount — Dialog uses a teleport + transition so the ref
+      // isn't bound yet on the same tick.
+      void nextTick(() => focusName())
     }
   },
 )
@@ -96,24 +111,25 @@ watch(
     <form v-else class="guest-dialog__form" @submit.prevent="handleSubmit">
       <label class="guest-dialog__field">
         <span>Name</span>
-        <input
+        <InputText
+          ref="nameInput"
           v-model="name"
-          class="p-inputtext"
           autocomplete="name"
           maxlength="80"
           required
           :disabled="submitting"
+          fluid
         />
       </label>
       <label class="guest-dialog__field">
         <span>E-Mail</span>
-        <input
+        <InputText
           v-model="email"
           type="email"
-          class="p-inputtext"
           autocomplete="email"
           required
           :disabled="submitting"
+          fluid
         />
       </label>
       <Message v-if="errorMessage" severity="error" :closable="false">
@@ -131,7 +147,7 @@ watch(
         <Button
           label="Abbrechen"
           severity="secondary"
-          text
+          outlined
           :disabled="submitting"
           @click="handleClose"
         />
