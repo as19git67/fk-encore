@@ -513,27 +513,31 @@ async function del() {
       </p>
       <ul v-else class="account-list">
         <li v-for="a in myAccounts" :key="a.id" class="account-item">
-          <div class="account-main">
-            <strong>{{ a.label || a.account_number }}</strong>
-            <Tag class="type-tag" :value="a.type_label" severity="info" />
-            <Tag
-              v-if="!a.active"
-              class="type-tag"
-              value="inaktiv"
-              severity="secondary"
-            />
-          </div>
-          <div class="account-meta">
-            <span v-if="a.iban">{{ a.iban }}</span>
-            <span v-else>Kontonr. {{ a.account_number }}</span>
-            <span class="currency">{{ a.currency_symbol || a.currency_code }}</span>
+          <div class="account-body">
+            <div class="account-main">
+              <strong>{{ a.label || a.account_number }}</strong>
+              <Tag class="type-tag" :value="a.type_label" severity="info" />
+              <Tag
+                v-if="!a.active"
+                class="type-tag"
+                value="inaktiv"
+                severity="secondary"
+              />
+            </div>
+            <div class="account-meta">
+              <span v-if="a.iban">{{ a.iban }}</span>
+              <span v-else>Kontonr. {{ a.account_number }}</span>
+              <span class="currency">{{ a.currency_symbol || a.currency_code }}</span>
+            </div>
           </div>
           <div class="account-actions">
             <Button
+              class="account-open"
               label="Öffnen"
               icon="pi pi-arrow-right"
               severity="secondary"
               text
+              aria-label="Konto öffnen"
               @click="router.push({ name: 'finance-account-detail', params: { id: a.id } })"
             />
             <Button
@@ -576,6 +580,27 @@ async function del() {
   .pending-item,
   .account-item {
     padding: 0.5rem;
+    gap: 0.25rem;
+  }
+  /* Collapse "Öffnen" to an icon-only button — the icon already
+     conveys the action. The aria-label keeps it accessible. */
+  .account-open :deep(.p-button-label) {
+    display: none;
+  }
+  .account-open :deep(.p-button-icon) {
+    margin: 0;
+  }
+  /* Wrap the big pending-actions row onto its own line and let the
+     primary button grow instead of overflowing. */
+  .pending-actions {
+    gap: 0.35rem;
+  }
+  .pending-actions > * {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .link-select {
+    min-width: 0;
   }
 }
 .page-header {
@@ -635,17 +660,22 @@ async function del() {
   gap: 0.25rem;
 }
 .account-item {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  grid-template-rows: auto auto;
-  gap: 0.1rem 0.75rem;
+  display: flex;
   align-items: center;
+  gap: 0.5rem;
   padding: 0.5rem 0.75rem;
   border-radius: 0.25rem;
   background: var(--p-surface-50, var(--p-content-background));
 }
+.account-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
 .account-actions {
-  grid-row: 1 / span 2;
+  flex-shrink: 0;
   display: flex;
   gap: 0.25rem;
   align-items: center;
@@ -654,15 +684,18 @@ async function del() {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  flex-wrap: wrap;
 }
 .account-main strong {
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 .account-meta {
   color: var(--p-text-muted-color);
   font-size: 0.875rem;
   display: flex;
-  gap: 0.75rem;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 .account-meta .currency {
   font-variant: tabular-nums;
