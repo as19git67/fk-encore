@@ -288,5 +288,176 @@ describe("persistFetchResult — dedupe hash", () => {
   });
 });
 
-void and;
-void financeAccountAccess;
+// ======================================================================
+
+describe("persistFetchResult — auto-ACL grant", () => {
+  async function ensureUser(id: number): Promise<void> {
+    await db.execute(
+      sql`INSERT INTO users (id, email, name, password_hash) VALUES (${id}, ${`u${id}@test.local`}, ${`User${id}`}, 'x') ON CONFLICT (id) DO NOTHING`,
+    );
+  }
+
+  it("grants write ACL for newly-created accounts when grantAclToUserId is set", async () => {
+    const bcId = await insertBankcontact();
+    await ensureUser(7);
+
+    const stats = await persistFetchResult(
+      bcId,
+      result([
+        {
+          accountNumber: "A1",
+          iban: null,
+          accountKind: "giro",
+          currency: "EUR",
+          label: "Giro A1",
+          balance: null,
+          transactions: [],
+          errors: [],
+        },
+      ]),
+      { grantAclToUserId: 7 },
+    );
+
+    expect(stats.accounts_created).toBe(1);
+    expect(stats.acl_grants).toBe(1);
+
+    const [account] = await db.select().from(financeAccount);
+    const acl = await db
+      .select()
+      .from(financeAccountAccess)
+      .where(
+        and(
+          eq(financeAccountAccess.account_id, account.id),
+          eq(financeAccountAccess.user_id, 7),
+        ),
+      );
+    expect(acl).toHaveLength(1);
+    expect(acl[0].level).toBe("write");
+  });
+
+  it("does not grant when grantAclToUserId is omitted", async () => {
+    const bcId = await insertBankcontact();
+    const stats = await persistFetchResult(
+      bcId,
+      result([
+        {
+          accountNumber: "A2",
+          iban: null,
+          accountKind: "giro",
+          currency: "EUR",
+          label: "Giro A2",
+          balance: null,
+          transactions: [],
+          errors: [],
+        },
+      ]),
+    );
+    expect(stats.accounts_created).toBe(1);
+    expect(stats.acl_grants).toBe(0);
+
+    const acl = await db.select().from(financeAccountAccess);
+    expect(acl).toHaveLength(0);
+  });
+
+  it("does not re-grant for accounts that already existed (idempotent re-sync)", async () => {
+    const bcId = await insertBankcontact();
+    await ensureUser(7);
+
+    // First sync → account created + ACL granted.
+    const first = await persistFetchResult(
+      bcId,
+      result([
+        {
+          accountNumber: "A3",
+          iban: null,
+          accountKind: "giro",
+          currency: "EUR",
+          label: "Giro A3",
+          balance: null,
+          transactions: [],
+          errors: [],
+        },
+      ]),
+      { grantAclToUserId: 7 },
+    );
+    expect(first.acl_grants).toBe(1);
+
+    // Second sync of the same bankcontact → account already exists,
+    // so the create branch (where the ACL grant lives) is not
+    // entered, and acl_grants stays at 0.
+    const second = await persistFetchResult(
+      bcId,
+      result([
+        {
+          accountNumber: "A3",
+          iban: null,
+          accountKind: "giro",
+          currency: "EUR",
+          label: "Giro A3",
+          balance: null,
+          transactions: [],
+          errors: [],
+        },
+      ]),
+      { grantAclToUserId: 7 },
+    );
+    expect(second.accounts_created).toBe(0);
+    expect(second.acl_grants).toBe(0);
+
+    // One ACL row, unchanged.
+    const acl = await db.select().from(financeAccountAccess);
+    expect(acl).toHaveLength(1);
+  });
+
+  it("leaves an existing ACL for the same (account,user) untouched if the FK writes race", async () => {
+    // Defensive: if somehow a pre-existing ACL already covers the
+    // freshly-created account (e.g. an admin granted write access
+    // while a cron ran), onConflictDoNothing must not raise and
+    // acl_grants stays at 0.
+    const bcId = await insertBankcontact();
+    await ensureUser(7);
+
+    // Pre-create the account and ACL row.
+    const [type] = await db.select({ id: financeAccountType.id }).from(financeAccountType).limit(1);
+    const [pre] = await db
+      .insert(financeAccount)
+      .values({
+        bankcontact_id: bcId,
+        type_id: type.id,
+        currency_code: "EUR",
+        account_number: "A4",
+        label: "pre-existing",
+      })
+      .returning({ id: financeAccount.id });
+    await db.insert(financeAccountAccess).values({
+      account_id: pre.id,
+      user_id: 7,
+      level: "read",
+    });
+
+    // Now run a sync against the same account_number — it will be
+    // matched to the existing row, so the create branch is skipped
+    // entirely and the ACL is not touched.
+    const stats = await persistFetchResult(
+      bcId,
+      result([
+        {
+          accountNumber: "A4",
+          iban: null,
+          accountKind: "giro",
+          currency: "EUR",
+          label: "from-sync",
+          balance: null,
+          transactions: [],
+          errors: [],
+        },
+      ]),
+      { grantAclToUserId: 7 },
+    );
+    expect(stats.accounts_created).toBe(0);
+    expect(stats.acl_grants).toBe(0);
+
+    const [acl] = await db.select().from(financeAccountAccess);
+    expect(acl.level).toBe("read"); // admin's prior decision stays
+  });
+});

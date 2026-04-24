@@ -134,8 +134,12 @@ export const completeTanSession = api(
     }
     // state === "idle" — run the statement/balance fetch with the
     // still-open client so TAN is not re-triggered for a second time.
+    // Pass the session owner so auto-created accounts get a write ACL
+    // for them — same contract as the manual triggerSync path.
     resetRateLimit(rateKey);
-    return await fetchAndPersist(session.bankcontact_id, result.client);
+    return await fetchAndPersist(session.bankcontact_id, result.client, {
+      grantAclToUserId: session.user_id,
+    });
   },
 );
 

@@ -27,6 +27,7 @@ vi.mock("./fints-client", async (orig) => {
   return {
     ...actual,
     runSynchronize: vi.fn(),
+    runFetchAccounts: vi.fn(),
   };
 });
 
@@ -55,6 +56,7 @@ beforeEach(async () => {
   __resetRateLimiterForTests();
   setAuth("1", []);
   vi.mocked(fintsClient.runSynchronize).mockReset();
+  vi.mocked(fintsClient.runFetchAccounts).mockReset();
 });
 
 async function insertBankcontact(): Promise<number> {
@@ -168,5 +170,52 @@ describe("finance/statements — triggerSync", () => {
 
     const sessions = await db.select().from(financeTanSession);
     expect(sessions).toHaveLength(0);
+  });
+
+  it("grants a write ACL to the triggering user for freshly auto-created accounts", async () => {
+    setAuth("42", ["finance.accounts.manage"]);
+    await ensureUser(42);
+    const bcId = await insertBankcontact();
+
+    // A stand-in live client — the only field fetchAndPersist reads
+    // on its way into the mocked runFetchAccounts is its truthiness.
+    const dummyClient = { stub: true };
+    mockResult({
+      state: "idle",
+      bankingInformation: { systemId: "sys-1" },
+      client: dummyClient,
+    });
+    vi.mocked(fintsClient.runFetchAccounts).mockResolvedValue({
+      accounts: [
+        {
+          accountNumber: "CHECK-01",
+          iban: "DE00000000000000000001",
+          accountKind: "giro",
+          currency: "EUR",
+          label: "Giro Max",
+          balance: null,
+          transactions: [],
+          errors: [],
+        },
+      ],
+      partial: false,
+    });
+
+    const response = await triggerSync({ bankcontactId: bcId });
+    expect(response.state).toBe("idle");
+
+    const [account] = await db
+      .select()
+      .from(financeAccount)
+      .where(eq(financeAccount.bankcontact_id, bcId));
+    expect(account).toBeDefined();
+
+    const acl = await db
+      .select()
+      .from(financeAccountAccess)
+      .where(eq(financeAccountAccess.account_id, account.id));
+    expect(acl).toHaveLength(1);
+    expect(acl[0].user_id).toBe(42);
+    expect(acl[0].level).toBe("write");
   });
 });

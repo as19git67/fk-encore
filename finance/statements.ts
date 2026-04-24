@@ -139,7 +139,9 @@ export const triggerSync = api(
     // state === "idle" — run the statement/balance fetch against the
     // same client so we don't re-do the init-dialog TAN just to pull
     // data that was unreachable before.
-    return await fetchAndPersist(p.bankcontactId, result.client);
+    return await fetchAndPersist(p.bankcontactId, result.client, {
+      grantAclToUserId: Number(auth.userID),
+    });
   },
 );
 
@@ -152,6 +154,7 @@ export const triggerSync = api(
 export async function fetchAndPersist(
   bankcontactId: number,
   client: unknown,
+  opts: { grantAclToUserId?: number } = {},
 ): Promise<SyncApiResponse> {
   if (!client) {
     // No client handed over (e.g. a legacy mock) — treat as idle
@@ -159,12 +162,15 @@ export async function fetchAndPersist(
     return { state: "idle", accounts_seen: 0, transactions_inserted: 0, balances_written: 0 };
   }
   const fetched = await runFetchAccounts(client as FintsClientSurface);
-  const stats = await persistFetchResult(bankcontactId, fetched);
+  const stats = await persistFetchResult(bankcontactId, fetched, {
+    grantAclToUserId: opts.grantAclToUserId,
+  });
   console.log(
     `[finance.statements] bankcontact=${bankcontactId} synced: ` +
       `accounts=${stats.accounts_seen} (+${stats.accounts_created} new) ` +
       `tx=${stats.transactions_inserted} (${stats.transactions_skipped_duplicate} dup) ` +
-      `balances=${stats.balances_written} partial=${fetched.partial}`,
+      `balances=${stats.balances_written} acl=${stats.acl_grants} ` +
+      `partial=${fetched.partial}`,
   );
   return {
     state: "idle",

@@ -28,6 +28,7 @@ import { and, eq } from "drizzle-orm";
 import db from "../db/database";
 import {
   financeAccount,
+  financeAccountAccess,
   financeAccountBalance,
   financeAccountKindEnum,
   financeAccountType,
@@ -44,12 +45,30 @@ export interface PersistStats {
   transactions_inserted: number;
   transactions_skipped_duplicate: number;
   balances_written: number;
+  acl_grants: number;
   errors: string[];
+}
+
+export interface PersistOptions {
+  /**
+   * When set, every newly-auto-created finance_account gets a
+   * `write`-level ACL entry for this user id. Without this, the
+   * freshly-seen account would stay invisible to non-admin callers
+   * (the ACL join filters them out of /finance/accounts).
+   *
+   * Manual-trigger callers pass the getAuthData().userID; the cron
+   * passes the "responsible user" picked from the existing ACL. When
+   * neither is available (cold start through an uncommon path) the
+   * caller can omit the field and have a finance.admin user grant
+   * access afterwards via AccountAssignmentView.
+   */
+  grantAclToUserId?: number;
 }
 
 export async function persistFetchResult(
   bankcontactId: number,
   result: FetchResult,
+  opts: PersistOptions = {},
 ): Promise<PersistStats> {
   const stats: PersistStats = {
     accounts_seen: 0,
@@ -57,6 +76,7 @@ export async function persistFetchResult(
     transactions_inserted: 0,
     transactions_skipped_duplicate: 0,
     balances_written: 0,
+    acl_grants: 0,
     errors: [],
   };
 
@@ -112,6 +132,36 @@ export async function persistFetchResult(
           .returning({ id: financeAccount.id });
         accountId = inserted.id;
         stats.accounts_created++;
+
+        // Auto-grant write ACL to the user who drove the sync so the
+        // freshly seen account is immediately visible in their
+        // AccountsView. Conflict target covers the (account,user)
+        // unique; a race where another concurrent sync wrote the row
+        // first is a no-op.
+        if (opts.grantAclToUserId !== undefined) {
+          try {
+            const granted = await db
+              .insert(financeAccountAccess)
+              .values({
+                account_id: accountId,
+                user_id: opts.grantAclToUserId,
+                level: "write",
+              })
+              .onConflictDoNothing({
+                target: [
+                  financeAccountAccess.account_id,
+                  financeAccountAccess.user_id,
+                ],
+              })
+              .returning({ account_id: financeAccountAccess.account_id });
+            if (granted.length > 0) stats.acl_grants++;
+          } catch (err) {
+            stats.errors.push(
+              `account ${snapshot.accountNumber}: acl grant failed: ` +
+                ((err as Error).message ?? String(err)),
+            );
+          }
+        }
       } catch (err) {
         stats.errors.push(
           `account ${snapshot.accountNumber}: create failed: ` +
