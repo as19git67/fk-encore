@@ -108,6 +108,12 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'documents.manage_taxonomy' },
       },
       {
+        path: 'hilfe',
+        name: 'dokumente-hilfe',
+        component: () => import('../views/DocumentsHelpView.vue'),
+        meta: { permission: 'documents.view' },
+      },
+      {
         path: ':id',
         name: 'dokumente-detail',
         component: () => import('../views/DocumentDetailView.vue'),
@@ -125,6 +131,7 @@ export const modules: ModuleConfig[] = [
         routeName: 'dokumente-kategorie-vorschlaege',
         permission: 'documents.manage_taxonomy',
       },
+      { label: 'Hilfe', icon: 'pi pi-question-circle', routeName: 'dokumente-hilfe', permission: 'documents.view' },
     ],
   },
   {
