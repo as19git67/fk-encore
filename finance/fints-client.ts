@@ -168,8 +168,8 @@ export async function runSynchronize(
 
     // A TAN method must be configured before the second sync —
     // otherwise we have no way to know which method to request.
-    // The UI's BankcontactForm exposes this as a mandatory numeric
-    // picker (see docs/finance-frontend.md §3).
+    // The UI's BankcontactForm exposes this as a mandatory picker
+    // populated by probeTanMethods (see docs/finance-frontend.md §3).
     if (!bankcontact.tan_method) {
       return {
         state: "error",
@@ -180,7 +180,28 @@ export async function runSynchronize(
           "bankcontact before retrying.",
       };
     }
-    client.selectTanMethod(parseInt(bankcontact.tan_method, 10));
+    // Validate the configured id against the BPD-populated list before
+    // handing it to lib-fints. lib-fints itself throws a plain Error
+    // ("TAN Method '<id>' is not supported"), which — without this
+    // guard — would ricochet through the retry loop and surface as
+    // a generic "transport error after 3 attempts", obscuring the
+    // real cause from the user.
+    const tanMethodId = parseInt(bankcontact.tan_method, 10);
+    const available = client.config.availableTanMethods ?? [];
+    if (!available.some((m) => m.id === tanMethodId)) {
+      const list = available.length
+        ? available.map((m) => `${m.id} (${m.name})`).join(", ")
+        : "none returned by bank";
+      return {
+        state: "error",
+        errorCode: "unknown-tan-method",
+        errorMessage:
+          `Configured TAN method '${tanMethodId}' is not offered by the bank. ` +
+          `Available: ${list}. Re-probe via the UI's "Abrufen" button and ` +
+          `pick an available one.`,
+      };
+    }
+    client.selectTanMethod(tanMethodId);
 
     const updResponse = await client.synchronize();
     const result = mapResponse(updResponse, client.config.bankingInformation);

@@ -90,7 +90,11 @@ function mockClient(
     bankAnswers?: Array<{ code: number; text: string }>;
   },
   bankingInformation: Record<string, unknown> = { systemId: "sys-1" },
-  availableTanMethods: Array<{ id: number; name: string; isDecoupled: boolean }> = [],
+  // Default matches the default tan_method "942" on insertBankcontact;
+  // tests that exercise unknown-method branches override with [].
+  availableTanMethods: Array<{ id: number; name: string; isDecoupled: boolean }> = [
+    { id: 942, name: "pushTAN", isDecoupled: true },
+  ],
 ): FintsClientSurface {
   const resp = { bankAnswers: [], ...response };
   return {
@@ -354,6 +358,58 @@ describe("fints-client — bankcontact loading", () => {
     expect(result.tanReference).toBe("first-sync-tan");
     expect(c.synchronize).toHaveBeenCalledTimes(1);
     expect(c.selectTanMethod).not.toHaveBeenCalled();
+  });
+
+  it("returns errorCode=unknown-tan-method (no retry) when the id is not in the bank's list", async () => {
+    // Admin configured 904 but the bank only offers 942 / 910 — without
+    // the pre-check lib-fints would throw "TAN Method '904' is not
+    // supported" synchronously, which the retry loop would mis-classify
+    // as a transport error.
+    const id = await insertBankcontact({ tan_method: "904" });
+    const sleep = vi.fn(async (_ms: number) => {});
+    const c = mockClient(
+      { success: true, requiresTan: false },
+      { systemId: "sys" },
+      [
+        { id: 942, name: "pushTAN", isDecoupled: true },
+        { id: 910, name: "chipTAN", isDecoupled: false },
+      ],
+    );
+
+    const result = await runSynchronize(id, {
+      clientFactory: () => c,
+      sleep,
+    });
+
+    expect(result.state).toBe("error");
+    expect(result.errorCode).toBe("unknown-tan-method");
+    expect(result.errorMessage).toMatch(/904/);
+    expect(result.errorMessage).toMatch(/942 \(pushTAN\)/);
+    expect(result.errorMessage).toMatch(/910 \(chipTAN\)/);
+    // Only the first (BPD-only) sync must have run — the validation
+    // short-circuits before we reach selectTanMethod/the second sync.
+    expect(c.synchronize).toHaveBeenCalledTimes(1);
+    expect(c.selectTanMethod).not.toHaveBeenCalled();
+    // And — crucially — we didn't retry: no sleep between attempts.
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it("reports the empty-list edge case cleanly when the bank didn't return any methods", async () => {
+    const id = await insertBankcontact({ tan_method: "942" });
+    const c = mockClient(
+      { success: true, requiresTan: false },
+      { systemId: "sys" },
+      [], // empty availableTanMethods
+    );
+
+    const result = await runSynchronize(id, {
+      clientFactory: () => c,
+      sleep: async () => {},
+    });
+
+    expect(result.state).toBe("error");
+    expect(result.errorCode).toBe("unknown-tan-method");
+    expect(result.errorMessage).toMatch(/none returned by bank/);
   });
 });
 
