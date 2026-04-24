@@ -358,6 +358,13 @@
       "when": 1779000300000,
       "tag": "0049_finance_bankcontact_tan_methods_cache",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1779000400000,
+      "tag": "0050_finance_manual_accounts",
+      "breakpoints": true
     }
   ]
 }
