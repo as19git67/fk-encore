@@ -284,3 +284,54 @@ export function buildFeedNotification(input: {
     },
   };
 }
+
+// ---------- Document-event helpers ----------
+
+export type DocumentReviewKind = "low_confidence" | "failed";
+
+/**
+ * Build a notification telling the uploader that one of their documents
+ * needs a human look. Two flavors:
+ *   - low_confidence: classification ran but the model wasn't sure.
+ *   - failed: the pipeline gave up; the reason is the worker error.
+ *
+ * The deep link points at the document detail view so a single tap
+ * opens the page where the user can re-classify or correct fields.
+ */
+export function buildDocumentNotification(input: {
+  kind: DocumentReviewKind;
+  documentId: number;
+  documentTitle: string | null;
+  reason: string | null;
+}): PushPayload {
+  const docLabel = input.documentTitle?.trim()
+    ? `„${input.documentTitle.trim()}"`
+    : `Dokument #${input.documentId}`;
+
+  let title: string;
+  let body: string;
+  switch (input.kind) {
+    case "low_confidence":
+      title = "Dokument bitte prüfen";
+      body = `${docLabel} wurde mit niedriger Konfidenz klassifiziert.`;
+      break;
+    case "failed":
+      title = "Dokument fehlgeschlagen";
+      body = input.reason
+        ? `${docLabel}: ${input.reason}`
+        : `${docLabel} konnte nicht verarbeitet werden.`;
+      break;
+  }
+
+  return {
+    title,
+    body,
+    url: `/app/dokumente/${input.documentId}`,
+    // Collapse repeated notifications for the same document.
+    tag: `document-review:${input.documentId}`,
+    data: {
+      kind: input.kind,
+      documentId: input.documentId,
+    },
+  };
+}

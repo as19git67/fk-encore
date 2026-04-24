@@ -2,6 +2,7 @@
 import { onMounted, ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
+import Checkbox from 'primevue/checkbox'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import Select from 'primevue/select'
@@ -37,7 +38,17 @@ function loadStoredSearchMode(): SearchMode {
 const q = ref('')
 const selectedCategory = ref<string | null>(null)
 const selectedStatus = ref<DocumentStatus | null>(null)
+const needsReviewOnly = ref(false)
 const searchMode = ref<SearchMode>(loadStoredSearchMode())
+
+const LOW_CONFIDENCE_THRESHOLD = 0.6
+function isLowConfidence(doc: DocumentSummary): boolean {
+  return (
+    doc.status === 'ready' &&
+    doc.classification_confidence != null &&
+    doc.classification_confidence < LOW_CONFIDENCE_THRESHOLD
+  )
+}
 watch(searchMode, (v) => localStorage.setItem(SEARCH_MODE_STORAGE_KEY, v))
 
 const searchModeOptions = [
@@ -73,6 +84,7 @@ async function load() {
       const res = await listDocuments({
         category: selectedCategory.value ?? undefined,
         status: selectedStatus.value ?? undefined,
+        needs_review: needsReviewOnly.value || undefined,
         limit: 100,
       })
       items.value = res.items
@@ -95,7 +107,7 @@ async function loadCategories() {
 }
 
 let searchDebounce: ReturnType<typeof setTimeout> | null = null
-watch([q, selectedCategory, selectedStatus, searchMode], () => {
+watch([q, selectedCategory, selectedStatus, needsReviewOnly, searchMode], () => {
   if (searchDebounce) clearTimeout(searchDebounce)
   searchDebounce = setTimeout(load, 300)
 })
@@ -219,6 +231,18 @@ onMounted(async () => {
         class="filter-select"
         :disabled="q.trim().length > 0"
       />
+
+      <label
+        class="needs-review-toggle"
+        v-tooltip.bottom="'Zeigt nur Dokumente, die geprüft werden sollten: fehlgeschlagen oder mit niedriger KI-Konfidenz.'"
+      >
+        <Checkbox
+          v-model="needsReviewOnly"
+          :binary="true"
+          :disabled="q.trim().length > 0"
+        />
+        <span>Nur zu prüfen</span>
+      </label>
     </div>
 
     <div v-if="loading" class="info-text">
@@ -243,6 +267,13 @@ onMounted(async () => {
           <div class="document-title-row">
             <span class="document-title">{{ doc.title || doc.original_filename }}</span>
             <Tag :severity="statusSeverity(doc.status)" :value="statusLabel(doc.status)" />
+            <Tag
+              v-if="isLowConfidence(doc)"
+              severity="warn"
+              icon="pi pi-exclamation-triangle"
+              :value="`Prüfen · ${Math.round((doc.classification_confidence ?? 0) * 100)}%`"
+              v-tooltip.bottom="'Niedrige KI-Konfidenz — Kategorie und Felder bitte prüfen.'"
+            />
           </div>
           <div class="document-meta">
             <span v-if="doc.category_slug" class="document-category">
@@ -251,6 +282,9 @@ onMounted(async () => {
             <span v-if="doc.sender"><i class="pi pi-user" /> {{ doc.sender }}</span>
             <span v-if="doc.doc_date"><i class="pi pi-calendar" /> {{ formatDate(doc.doc_date) }}</span>
             <span class="document-size"><i class="pi pi-database" /> {{ formatSize(doc.size_bytes) }}</span>
+          </div>
+          <div v-if="doc.status === 'failed' && doc.last_error" class="document-error">
+            <i class="pi pi-times-circle" /> {{ doc.last_error }}
           </div>
           <div v-if="doc.tags.length > 0" class="document-tags">
             <Chip v-for="tag in doc.tags" :key="tag" :label="tag" />
@@ -313,6 +347,15 @@ onMounted(async () => {
 }
 
 .filter-select { min-width: 180px; }
+
+.needs-review-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  user-select: none;
+}
+.needs-review-toggle span { font-size: 0.9rem; }
 
 .info-text {
   text-align: center;
@@ -382,6 +425,18 @@ onMounted(async () => {
   color: var(--p-text-muted-color);
 }
 .document-meta span { display: inline-flex; align-items: center; gap: 0.25rem; }
+
+.document-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--p-red-600, #c0392b);
+  background: var(--p-red-50, #fdecea);
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  word-break: break-word;
+}
 
 .document-tags {
   display: flex;

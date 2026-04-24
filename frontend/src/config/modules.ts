@@ -102,6 +102,12 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'documents.manage_taxonomy' },
       },
       {
+        path: 'kategorien/vorschlaege',
+        name: 'dokumente-kategorie-vorschlaege',
+        component: () => import('../views/DocumentCategorySuggestionsView.vue'),
+        meta: { permission: 'documents.manage_taxonomy' },
+      },
+      {
         path: ':id',
         name: 'dokumente-detail',
         component: () => import('../views/DocumentDetailView.vue'),
@@ -113,6 +119,12 @@ export const modules: ModuleConfig[] = [
       { label: 'Steuer', icon: 'pi pi-receipt', routeName: 'dokumente-steuer', permission: 'documents.view' },
       { label: 'Steuer-Hints', icon: 'pi pi-sparkles', routeName: 'dokumente-steuer-hints', permission: 'documents.manage_taxonomy' },
       { label: 'Hochladen', icon: 'pi pi-upload', routeName: 'dokumente-upload', permission: 'documents.upload' },
+      {
+        label: 'Kategorie-Vorschläge',
+        icon: 'pi pi-folder-open',
+        routeName: 'dokumente-kategorie-vorschlaege',
+        permission: 'documents.manage_taxonomy',
+      },
     ],
   },
   {

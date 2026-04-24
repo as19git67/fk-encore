@@ -29,6 +29,7 @@ export interface DocumentSummary {
   tags: string[]
   tax_relevant: boolean
   tax_year: number | null
+  last_error: string | null
 }
 
 export interface DocumentTaxSection {
@@ -72,6 +73,11 @@ export interface ListDocumentsQuery {
   tag?: string
   q?: string
   status?: DocumentStatus
+  /**
+   * Filter to documents that need a human look: status='failed' OR
+   * status='ready' with classification_confidence below 0.6.
+   */
+  needs_review?: boolean
   limit?: number
   offset?: number
 }
@@ -295,4 +301,45 @@ export function reclassifyTaxSection(slug: string, includeReviewed = false) {
       body: JSON.stringify({ slug, include_reviewed: includeReviewed }),
     },
   )
+}
+// ─── Category suggestions (admin) ────────────────────────────────────────
+
+export type CategorySuggestionStatus = 'open' | 'accepted' | 'rejected'
+
+export interface CategorySuggestion {
+  id: number
+  suggested_name: string
+  parent_slug: string | null
+  example_document_ids: number[]
+  rationale: string | null
+  status: CategorySuggestionStatus
+  created_at: string | null
+}
+
+export function listCategorySuggestions(status: CategorySuggestionStatus = 'open') {
+  return apiFetch<{ items: CategorySuggestion[] }>(
+    `/document-category-suggestions${buildQuery({ status })}`,
+  )
+}
+
+export interface AcceptCategorySuggestionPayload {
+  slug?: string
+  name?: string
+}
+
+export function acceptCategorySuggestion(id: number, payload: AcceptCategorySuggestionPayload = {}) {
+  return apiFetch<{ category_id: number; slug: string }>(
+    `/document-category-suggestions/${id}/accept`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ id, ...payload }),
+    },
+  )
+}
+
+export function rejectCategorySuggestion(id: number) {
+  return apiFetch<{ success: boolean }>(`/document-category-suggestions/${id}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ id }),
+  })
 }

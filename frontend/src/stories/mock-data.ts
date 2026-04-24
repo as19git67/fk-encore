@@ -486,6 +486,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     tags: ['Strom', 'Rechnung', '2024', 'SWM'],
     tax_relevant: false,
     tax_year: null,
+    last_error: null,
   },
   {
     id: 2,
@@ -503,6 +504,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     tags: ['Police', 'Hausrat'],
     tax_relevant: false,
     tax_year: null,
+    last_error: null,
   },
   {
     id: 3,
@@ -520,6 +522,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     tags: [],
     tax_relevant: false,
     tax_year: null,
+    last_error: null,
   },
   {
     id: 4,
@@ -537,6 +540,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     tags: [],
     tax_relevant: false,
     tax_year: null,
+    last_error: 'OCR fehlgeschlagen: Text-Layer konnte nicht extrahiert werden (tesseract: page 1 segmentation failed).',
   },
   {
     id: 5,
@@ -554,6 +558,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     tags: ['Miete', 'Wohnung', 'Vertrag'],
     tax_relevant: false,
     tax_year: null,
+    last_error: null,
   },
 ]
 
