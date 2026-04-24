@@ -22,10 +22,8 @@ Status: Feature-Plan, Umsetzung startet mit Etappe 1.
 | 7 | Datenimport | `finance-data-import.md` + `finance-frontend.md` §4.13 | ✓ |
 | 8 | Frontend-Gesamtbild | `finance-frontend.md` §1–§5 | ✓ |
 | 9 | Analyse-Abfragen | `finance-tagging-and-ai.md` §4 + `finance-frontend.md` §4.2 | post-MVP |
-| 10 | ING-Fix | `finance-fints-integration.md` §1 | post-MVP |
 
-MVP = Etappen 1–8. Etappen 9–10 sind unabhängig voneinander und können
-in beliebiger Reihenfolge nach MVP folgen.
+MVP = Etappen 1–8. Etappe 9 folgt nach MVP.
 
 ---
 
@@ -210,23 +208,7 @@ Transaktionen (§2.7).
 
 ---
 
-## 10. Etappe 10 — ING-Fix (post-MVP)
-
-**Ziel**: bekanntes Problem mit ING-Dialog-Schritten behoben —
-entweder Upstream-PR in `lib-fints` oder temporärer Workaround in
-`fints-client.ts`.
-
-**Neue Dateien**: keine, nur Änderungen in `fints-client.ts` und
-(bei Upstream-PR) am `lib-fints`-Repo.
-
-**Tests**: Reproduktions-Szenario als Integration-Test gegen echten
-ING-Testzugang (manuell, nicht CI).
-
-**Abhängigkeiten**: Etappe 3 live, echter ING-Zugang verfügbar.
-
----
-
-## 11. Parallelisierbarkeit und Teamgröße
+## 10. Parallelisierbarkeit und Teamgröße
 
 Bei einer einzelnen Person: strikt sequentiell, wie oben.
 
@@ -239,7 +221,7 @@ Bei zwei parallelen Streams:
 
 ---
 
-## 12. Referenzen
+## 11. Referenzen
 
 | Stelle | Wofür |
 |---|---|

@@ -17,13 +17,6 @@ Eigenimplementierung (`dbMixinOnlineBanking.js`).
 - **Bugfixes**: primär als **Upstream-PR**. Fork nur als Plan B, falls
   Upstream nicht zeitnah mergt. Damit bleibt unsere `package.json`
   semver-sauber und Updates problemlos.
-- **Bekannter offener Punkt**: ING-Zugang liefert in bestimmten
-  Konstellationen fehlerhafte HBCI-Dialog-Schritte. Reproduzierbar erst
-  nach Erfassung echter Credentials eines ING-Nutzers. Fix-Sequenz:
-  1. Reproduktion gegen Testzugang.
-  2. Patch lokal im Service (Workaround, falls möglich) **und**
-     Upstream-PR.
-  3. Nach Merge: Workaround entfernen.
 
 ---
 
@@ -337,7 +330,5 @@ const _ = new CronJob("finance-tan-cleanup", {
   zu mitigieren, fügt aber eine Indirektion hinzu.
 - **Retry-Budget im Sync-Cron**: nach wie vielen aufeinanderfolgenden
   Fehl-Syncs schalten wir einen Bankkontakt automatisch auf „paused"?
-- **ING-Fix**: Reproduktion erst nach Credential-Erfassung; Tracking als
-  eigenes Issue nach MVP.
 - **TAN-Push-Spam**: wenn ein Cron wiederholt `tan-required` meldet und
   der User nicht reagiert — Rate-Limit pro Bankkontakt?
