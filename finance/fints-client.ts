@@ -449,7 +449,7 @@ async function fetchOneAccount(
 ): Promise<FintsAccountSnapshot> {
   const accountKind = mapAccountKind(account.accountType);
   const currency = account.currency ?? "EUR";
-  const label = buildAccountLabel(account);
+  const label = buildAccountLabel(account, accountKind);
 
   const snapshot: FintsAccountSnapshot = {
     accountNumber: account.accountNumber,
@@ -527,11 +527,43 @@ function mapAccountKind(accountType: string | undefined): string {
   }
 }
 
-function buildAccountLabel(account: RawBankAccount): string {
-  const typeLabel = account.product ?? account.accountType ?? "Konto";
-  const holder = account.holder1 ? ` – ${account.holder1}` : "";
-  return `${typeLabel} ${account.accountNumber}${holder}`.trim();
+/**
+ * Human-readable label for an account snapshot, surfaced in the
+ * bankcontact's "Noch nicht zugeordnete Bank-Konten" block and used
+ * as the default label when the user imports the snapshot as a new
+ * finance_account. Strategy:
+ *
+ *   1. A bank-supplied `product` name ("Girokonto Plus") wins.
+ *   2. Otherwise the German kind label derived from the account type
+ *      ("Giro", "Tagesgeld", …) — not the raw English enum.
+ *   3. Appended: "– <Kontoinhaber>" when the bank returned one.
+ *
+ * Uses `||` fallbacks (not `??`) so empty strings don't leak
+ * through — lib-fints does emit `""` for absent fields on some
+ * banks, which previously collapsed the label down to just the
+ * account number.
+ */
+function buildAccountLabel(
+  account: RawBankAccount,
+  accountKind: string,
+): string {
+  const product = account.product?.trim() || "";
+  const typeLabel = product || GERMAN_KIND_LABEL[accountKind] || "Konto";
+  const holder = account.holder1?.trim() || "";
+  const suffix = holder ? ` – ${holder}` : "";
+  return `${typeLabel} ${account.accountNumber}${suffix}`.trim();
 }
+
+const GERMAN_KIND_LABEL: Record<string, string> = {
+  giro: "Girokonto",
+  tagesgeld: "Tagesgeld",
+  festgeld: "Festgeld",
+  kredit: "Kredit",
+  depot: "Depot",
+  bausparen: "Bausparen",
+  kreditkarte: "Kreditkarte",
+  sonstige: "Konto",
+};
 
 function mapStatements(
   statements: Array<{
