@@ -57,4 +57,8 @@ vi.mock("~encore/clients", () => ({
   user: {
     listUserIdsWithPermission: vi.fn(() => Promise.resolve({ userIds: [] })),
   },
+  sharedalbum: {
+    fanoutAlbum: vi.fn(() => Promise.resolve()),
+    fanoutPhoto: vi.fn(() => Promise.resolve()),
+  },
 }));

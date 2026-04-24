@@ -80,7 +80,9 @@ export const markFeedSeen = api(
 
 interface EmitFeedRequest {
   recipients: number[];
-  actorUserId: number;
+  // null when a non-user (guest) emitted the event; actor attribution
+  // then lives in `payload` (e.g. { guestName: "Anna" }).
+  actorUserId: number | null;
   kind: "photo_added" | "album_shared" | "photo_favorited" | "photo_commented" | "album_left";
   albumId?: number | null;
   photoId?: number | null;

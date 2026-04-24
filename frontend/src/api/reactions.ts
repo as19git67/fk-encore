@@ -1,11 +1,20 @@
 import { apiFetch } from './client'
 
+export type CommentAuthorKind = 'user' | 'guest'
+
 export interface PhotoComment {
   id: number
   photoId: number
   author: {
     id: number
     name: string | null
+    /**
+     * Distinguishes registered users from share-link guests so the UI
+     * can apply identity comparisons in the right namespace (a user
+     * id and a guest id can collide). Optional for backwards
+     * compatibility with payloads predating the guest feature.
+     */
+    kind?: CommentAuthorKind
   }
   body: string
   createdAt: string

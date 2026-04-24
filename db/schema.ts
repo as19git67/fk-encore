@@ -776,12 +776,113 @@ export const photoComments = pgTable("photo_comments", {
   photo_id: integer("photo_id")
     .notNull()
     .references(() => photos.id, { onDelete: "cascade" }),
-  user_id: integer("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
+  // Author: exactly one of user_id or guest_id is set (CHECK constraint
+  // photo_comments_author_chk, migration 0043).
+  user_id: integer("user_id").references(() => users.id, { onDelete: "cascade" }),
+  guest_id: integer("guest_id").references(() => guests.id, { onDelete: "cascade" }),
   body: text("body").notNull(),
   created_at: timestamp("created_at", { mode: "string", withTimezone: true })
     .notNull()
     .defaultNow(),
   edited_at: timestamp("edited_at", { mode: "string", withTimezone: true }),
+});
+
+// ========== Shared Album Guests ==========
+//
+// Recipients of a public album link who don't have an account. The
+// email is the natural global key: the same person is recognized across
+// multiple albums / multiple share-links, so comments and digest mails
+// can be consolidated even when one person has accessed several links.
+
+export const guests = pgTable("guests", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  display_name: text("display_name").notNull(),
+  // Set to a random token during registration, cleared to NULL on verify.
+  verify_token: text("verify_token").unique(),
+  verified_at: timestamp("verified_at", { mode: "string", withTimezone: true }),
+  // Stable token for one-click unsubscribe links in outgoing mails.
+  unsubscribe_token: text("unsubscribe_token").notNull().unique(),
+  notify_opt_in: boolean("notify_opt_in").notNull().default(true),
+  last_seen_at: timestamp("last_seen_at", { mode: "string", withTimezone: true }),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+// Which public share-links a guest has been through. Lets the fan-out
+// find all guests who can see a given album via any active link, and
+// deduplicates a guest who has used several links for the same album.
+export const guestLinkAccess = pgTable(
+  "guest_link_access",
+  {
+    guest_id: integer("guest_id")
+      .notNull()
+      .references(() => guests.id, { onDelete: "cascade" }),
+    public_link_id: integer("public_link_id")
+      .notNull()
+      .references(() => albumPublicLinks.id, { onDelete: "cascade" }),
+    first_seen_at: timestamp("first_seen_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    last_seen_at: timestamp("last_seen_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.guest_id, table.public_link_id] })]
+);
+
+// Cookie-backed guest session. `id` is the opaque token placed in the
+// HttpOnly share-cookie on the browser.
+export const guestSessions = pgTable("guest_sessions", {
+  id: text("id").primaryKey(),
+  guest_id: integer("guest_id")
+    .notNull()
+    .references(() => guests.id, { onDelete: "cascade" }),
+  // The public link this session was bootstrapped from. Used to credit
+  // guest_link_access on first landing and for attribution.
+  public_link_id: integer("public_link_id")
+    .notNull()
+    .references(() => albumPublicLinks.id, { onDelete: "cascade" }),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  expires_at: timestamp("expires_at", { mode: "string", withTimezone: true }).notNull(),
+});
+
+// Per-browser Web Push subscriptions for guests. Mirrors pushSubscriptions
+// but keyed on guest_id instead of user_id.
+export const guestPushSubscriptions = pgTable("guest_push_subscriptions", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  guest_id: integer("guest_id")
+    .notNull()
+    .references(() => guests.id, { onDelete: "cascade" }),
+  endpoint: text("endpoint").notNull().unique(),
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
+  user_agent: text("user_agent"),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  last_used_at: timestamp("last_used_at", { mode: "string", withTimezone: true }),
+});
+
+// Pending notifications queue for guests. One row per (guest, event).
+// `delivered_at` is set when the digest cron has sent the mail; Web
+// Push is best-effort and doesn't gate delivery.
+export const guestNotifications = pgTable("guest_notifications", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  guest_id: integer("guest_id")
+    .notNull()
+    .references(() => guests.id, { onDelete: "cascade" }),
+  album_id: integer("album_id")
+    .notNull()
+    .references(() => albums.id, { onDelete: "cascade" }),
+  // 'photo_added' | 'comment_added'
+  kind: text("kind").notNull(),
+  payload: jsonb("payload").notNull().default(sql`'{}'::jsonb`),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  delivered_at: timestamp("delivered_at", { mode: "string", withTimezone: true }),
 });

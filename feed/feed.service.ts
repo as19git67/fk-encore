@@ -194,7 +194,9 @@ export async function markSeenForUser(
 
 export interface EmitFeedInput {
   recipients: number[];
-  actorUserId: number;
+  // null when a non-user (e.g. a shared-album guest) is the actor;
+  // payload then carries a guestName instead.
+  actorUserId: number | null;
   kind: FeedItemKind;
   albumId?: number | null;
   photoId?: number | null;
@@ -268,16 +270,22 @@ export async function emitFeedItems(input: EmitFeedInput): Promise<void> {
   // service never breaks the primary operation.
   try {
     const [actorRow, albumRow] = await Promise.all([
-      dbFirst<{ name: string | null }>(
-        db.select({ name: users.name }).from(users).where(eq(users.id, input.actorUserId)),
-      ),
+      input.actorUserId != null
+        ? dbFirst<{ name: string | null }>(
+            db.select({ name: users.name }).from(users).where(eq(users.id, input.actorUserId)),
+          )
+        : Promise.resolve<{ name: string | null } | undefined>(undefined),
       input.albumId != null
         ? dbFirst<{ name: string | null }>(
             db.select({ name: albums.name }).from(albums).where(eq(albums.id, input.albumId)),
           )
         : Promise.resolve<{ name: string | null } | undefined>(undefined),
     ]);
-    const actorName = actorRow?.name ?? null;
+    // For guest-authored events the payload carries a `guestName` that
+    // the push layer can surface; fall back to that when no actorRow.
+    const actorName =
+      actorRow?.name ??
+      (typeof input.payload?.guestName === "string" ? (input.payload.guestName as string) : null);
     const albumName = albumRow?.name ?? null;
 
     await Promise.all(

@@ -5,10 +5,16 @@ import Message from 'primevue/message'
 import HeicImage from '../components/HeicImage.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import FilterMenu from '../components/FilterMenu.vue'
+import GuestStatusBanner from '../components/GuestStatusBanner.vue'
+import GuestRegisterDialog from '../components/GuestRegisterDialog.vue'
+import GuestAccountDialog from '../components/GuestAccountDialog.vue'
+import GuestPhotoReactions from '../components/GuestPhotoReactions.vue'
 import { getPublicAlbum, getPhotoUrl, type PhotoFilter, type PublicAlbumResponse, type PublicAlbumPhoto, type Photo } from '../api/photos'
 import { matchesPhotoFilter } from '../utils/photoFilter'
 import { countActiveFilters } from '../composables/useFilter'
 import { formatPhotoDate, formatLocationLabel } from '../utils/dateFormat'
+import { useGuestSession } from '../composables/useGuestSession'
+import { useGuestPushNotifications } from '../composables/useGuestPushNotifications'
 
 const TripMap = defineAsyncComponent(() => import('../components/TripMap.vue'))
 
@@ -16,6 +22,83 @@ const route = useRoute()
 const album = ref<PublicAlbumResponse | null>(null)
 const loading = ref(true)
 const error = ref('')
+
+const shareToken = computed(() => (route.params.token as string) ?? '')
+
+/**
+ * True for any map-view rendering. The map crowds the viewport, so
+ * the full-width guest banner is suppressed in favour of compact
+ * buttons in TripMap's stats-addon slot — "Anmelden" for anonymous
+ * visitors and a user icon opening the account dialog for
+ * registered (pending or verified) guests.
+ */
+const isMapView = computed(() => album.value?.display_mode === 'map')
+const isMapAnonymous = computed(
+  () => isMapView.value && guestSession.guest.value === null,
+)
+const isMapRegistered = computed(
+  () => isMapView.value && guestSession.guest.value !== null,
+)
+
+const showAccountDialog = ref(false)
+function openAccountDialog() {
+  showAccountDialog.value = true
+}
+
+// Guest identity + opt-in toggles. The composable instances are
+// created once per token and shared with the banner so unmounting
+// the banner during route changes wouldn't drop subscription state.
+const guestSession = useGuestSession(shareToken.value)
+const guestPush = useGuestPushNotifications(shareToken.value)
+
+const showRegisterDialog = ref(false)
+const registerInitial = ref<{ email: string; name: string } | undefined>(undefined)
+
+function openRegisterDialog() {
+  registerInitial.value = guestSession.guest.value
+    ? {
+        email: guestSession.guest.value.email,
+        name: guestSession.guest.value.display_name,
+      }
+    : undefined
+  showRegisterDialog.value = true
+}
+
+async function handleRegisterSubmit(payload: { email: string; displayName: string }) {
+  try {
+    await guestSession.register(payload.email, payload.displayName)
+    // Dialog stays open showing the inbox confirmation; the user
+    // closes it with the explicit "Schließen" button.
+  } catch {
+    // Error is already surfaced via guestSession.error / dialog
+    // errorMessage prop.
+  }
+}
+
+async function handleResendVerifyMail() {
+  try {
+    await guestSession.resendVerifyMail()
+    openRegisterDialog()
+  } catch {
+    // already surfaced
+  }
+}
+
+async function handleLogout() {
+  await guestSession.logout()
+  // If the guest had Web Push enabled, drop the local subscription
+  // too — the cookie is gone so the backend would refuse new sends
+  // anyway, but pruning keeps the browser from holding a dead
+  // endpoint that fires no notifications.
+  if (guestPush.status.value === 'subscribed') {
+    await guestPush.unsubscribe()
+  }
+}
+
+async function handleTogglePush(value: boolean) {
+  if (value) await guestPush.subscribe()
+  else await guestPush.unsubscribe()
+}
 
 /** Cast PublicAlbumPhoto[] to Photo[] for components that expect full Photo type */
 function asPhotos(photos: PublicAlbumPhoto[]): Photo[] {
@@ -133,16 +216,11 @@ const currentDescription = computed<string>(() => {
 
 /**
  * True when the info panel provides value beyond what the topbar already
- * shows (date + location text). Currently that means: the photo has a
- * description. Date, location and map link are shown *inside* the panel
- * when it opens, but they alone don't justify showing the button.
+ * shows (date + location text). With guest comments living inside the
+ * panel the answer is "always" — even an empty thread surfaces the
+ * composer or the verify gate.
  */
-const hasExtraDetails = computed<boolean>(() => {
-  return !!currentDescription.value
-})
-
-/** Show the info button when there are extra details OR the panel is already open. */
-const showInfoButton = computed(() => hasExtraDetails.value || showInfo.value)
+const showInfoButton = computed<boolean>(() => true)
 
 /** Maps URL — Apple Maps on Apple devices, Google Maps elsewhere. */
 const isApple = /iPhone|iPad|iPod|Mac/.test(navigator.userAgent)
@@ -220,6 +298,25 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+  // The default filter limits the view to "Highlights only". Albums
+  // that carry no group-highlight photos would open with an empty
+  // map / grid and leave the visitor staring at a blank canvas with
+  // no obvious recovery. Relax the filter automatically in that
+  // case so the visitor sees the real album content.
+  if (album.value && filter.value.groupHighlight) {
+    const ctx = { groupCoverIds: groupCoverIds.value }
+    const matches = albumPhotosAsPhoto.value.filter((p) =>
+      matchesPhotoFilter(p, filter.value, ctx),
+    )
+    if (matches.length === 0 && albumPhotosAsPhoto.value.length > 0) {
+      filter.value = {}
+      filterDraft.value = {}
+    }
+  }
+  // Guest state loads in parallel — failures don't block the album
+  // view; the banner just shows the anonymous CTA.
+  void guestSession.refresh()
+  void guestPush.refreshState()
 })
 
 onUnmounted(() => {
@@ -228,7 +325,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="shared-album-view">
+  <div class="shared-album-view" :class="{ 'shared-album-view--grid': !isMapView }">
     <div v-if="loading" class="info-text">
       <i class="pi pi-spin pi-spinner" /> Album wird geladen…
     </div>
@@ -236,6 +333,26 @@ onUnmounted(() => {
     <Message v-if="error" severity="error">{{ error }}</Message>
 
     <template v-if="album">
+      <!-- The full-width banner is only shown in grid view. In map
+           view it would eat viewport space the map needs, so we
+           replace it with compact action pills in TripMap's stats
+           overlay: "Anmelden" for anonymous visitors, a user icon
+           opening the account dialog for registered guests. -->
+      <GuestStatusBanner
+        v-if="!isMapView"
+        :guest="guestSession.guest.value"
+        :loading="guestSession.loading.value"
+        :togglingNotify="guestSession.togglingNotify.value"
+        :pushStatus="guestPush.status.value"
+        :pushBusy="guestPush.busy.value"
+        :pushCanToggle="guestPush.canToggle.value"
+        @register="openRegisterDialog"
+        @resend-verify="handleResendVerifyMail"
+        @logout="handleLogout"
+        @toggle-notify="(v) => guestSession.toggleNotifyOptIn(v)"
+        @toggle-push="handleTogglePush"
+      />
+
       <div v-if="album.display_mode !== 'map'" class="shared-header">
         <h1 class="title">{{ album.name }}</h1>
         <p v-if="album.description" class="description">{{ album.description }}</p>
@@ -257,7 +374,6 @@ onUnmounted(() => {
         @open-fullscreen="handleMapFullscreen"
       >
         <template #stats-addon>
-          <span class="trip-stats-sep">&bull;</span>
           <button
             type="button"
             class="map-filter-button"
@@ -267,6 +383,26 @@ onUnmounted(() => {
           >
             <i :class="activeCount > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'" />
             <span>{{ activeCount > 0 ? `Filter (${activeCount})` : 'Filter' }}</span>
+          </button>
+          <button
+            v-if="isMapAnonymous"
+            type="button"
+            class="map-filter-button map-filter-button--cta"
+            @click="openRegisterDialog"
+          >
+            <i class="pi pi-sign-in" />
+            <span>Anmelden</span>
+          </button>
+          <button
+            v-else-if="isMapRegistered && guestSession.guest.value"
+            type="button"
+            class="map-filter-button"
+            :class="{ 'map-filter-button--warn': !guestSession.isVerified.value }"
+            :aria-label="`Konto von ${guestSession.guest.value.display_name}`"
+            @click="openAccountDialog"
+          >
+            <i :class="guestSession.isVerified.value ? 'pi pi-user' : 'pi pi-exclamation-circle'" />
+            <span>{{ guestSession.guest.value.display_name }}</span>
           </button>
         </template>
       </TripMap>
@@ -349,10 +485,41 @@ onUnmounted(() => {
               <i class="pi pi-align-left" />
               <p>{{ currentDescription }}</p>
             </div>
+            <div v-if="currentPhoto" class="info-row info-comments">
+              <GuestPhotoReactions
+                :share-token="shareToken"
+                :photo-id="currentPhoto.id"
+                :guest="guestSession.guest.value"
+                @request-register="openRegisterDialog"
+                @request-verify="handleResendVerifyMail"
+              />
+            </div>
           </div>
         </div>
       </template>
     </FullscreenOverlay>
+
+    <GuestRegisterDialog
+      v-model:visible="showRegisterDialog"
+      :submitting="guestSession.submittingRegister.value"
+      :error-message="guestSession.error.value"
+      :initial-email="registerInitial?.email"
+      :initial-name="registerInitial?.name"
+      @submit="handleRegisterSubmit"
+    />
+
+    <GuestAccountDialog
+      v-model:visible="showAccountDialog"
+      :guest="guestSession.guest.value"
+      :togglingNotify="guestSession.togglingNotify.value"
+      :pushStatus="guestPush.status.value"
+      :pushBusy="guestPush.busy.value"
+      :pushCanToggle="guestPush.canToggle.value"
+      @resend-verify="handleResendVerifyMail"
+      @logout="handleLogout"
+      @toggle-notify="(v) => guestSession.toggleNotifyOptIn(v)"
+      @toggle-push="handleTogglePush"
+    />
   </div>
 </template>
 
@@ -402,6 +569,29 @@ onUnmounted(() => {
   color: var(--p-primary-contrast-color, #fff);
 }
 
+/* "Anmelden" pill: stays inside the dark stats overlay so it uses
+   the same visual footprint as the Filter button, but paints the
+   primary brand colour so it reads as the obvious CTA. */
+.map-filter-button--cta {
+  background: var(--p-primary-color);
+  border-color: var(--p-primary-color);
+  color: var(--p-primary-contrast-color);
+}
+.map-filter-button--cta:hover {
+  background: color-mix(in srgb, var(--p-primary-color) 85%, var(--p-primary-contrast-color));
+}
+
+/* Registered-but-unverified flag: signals that the guest still
+   needs to click the magic link. Uses Aura's amber palette so it
+   reads as a gentle warning on the dark stats overlay. */
+.map-filter-button--warn {
+  border-color: var(--p-amber-500);
+  color: var(--p-amber-500);
+}
+.map-filter-button--warn:hover {
+  background: color-mix(in srgb, var(--p-amber-500) 15%, transparent);
+}
+
 .map-filter-button .pi {
   font-size: 0.9em;
 }
@@ -448,6 +638,22 @@ onUnmounted(() => {
 
   .photo-grid-scroll {
     padding: var(--spacing-sm, 4px);
+  }
+
+  /* On phones the grid view scrolls the whole page instead of a
+     fixed-height inner container: banner + album title scroll away
+     once the grid is tall enough, freeing the viewport for photos.
+     Desktop keeps the sticky-header layout (inner scroll container)
+     because there's horizontal room for both at once. Map mode is
+     untouched — it still needs a constrained-height flex column. */
+  .shared-album-view--grid {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+  .shared-album-view--grid .photo-grid-scroll {
+    flex: 0 0 auto;
+    overflow: visible;
   }
 }
 
@@ -621,6 +827,23 @@ onUnmounted(() => {
 .info-description {
   color: rgba(255, 255, 255, 0.75);
   white-space: pre-wrap;
+}
+
+/* Comment thread inside the slide-up panel. The panel forces a dark
+   backdrop regardless of the active app theme, so the shared
+   PhotoCommentThread would pick up the light-mode `--p-text-color`
+   and render its bubble text as dark-on-dark. Override the tokens
+   the base reads (text, muted, border) with values from Aura's
+   absolute surface palette so everything inside stays legible
+   without any hardcoded colours. */
+.info-comments {
+  display: block;
+  margin-top: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid color-mix(in srgb, var(--p-surface-0) 12%, transparent);
+  --p-text-color: var(--p-surface-0);
+  --p-text-muted-color: var(--p-surface-300);
+  --p-surface-border-color: color-mix(in srgb, var(--p-surface-0) 18%, transparent);
 }
 
 @media (max-width: 768px) {

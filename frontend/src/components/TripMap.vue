@@ -355,12 +355,16 @@ defineExpose({ selectStopByPhotoId })
   <div class="trip-map-wrapper">
     <div ref="mapContainer" class="trip-map-container" />
 
-    <!-- Stats overlay -->
+    <!-- Stats overlay — two rows: counts on top, slot addon below. -->
     <div class="trip-stats">
-      <span>{{ stops.length }} {{ stops.length === 1 ? 'Stopp' : 'Stopps' }}</span>
-      <span class="trip-stats-sep">&bull;</span>
-      <span>{{ photos.filter(p => p.latitude != null).length }} Fotos</span>
-      <slot name="stats-addon" />
+      <div class="trip-stats-row">
+        <span>{{ stops.length }} {{ stops.length === 1 ? 'Stopp' : 'Stopps' }}</span>
+        <span class="trip-stats-sep">&bull;</span>
+        <span>{{ photos.filter(p => p.latitude != null).length }} Fotos</span>
+      </div>
+      <div v-if="$slots['stats-addon']" class="trip-stats-row">
+        <slot name="stats-addon" />
+      </div>
     </div>
 
     <!-- Horizontal timeline strip -->
@@ -500,15 +504,25 @@ defineExpose({ selectStopByPhotoId })
   top: 12px;
   right: 12px;
   z-index: 1000;
+  /* Two-line layout: first row holds the counts, second row holds
+     whatever a parent passes via the `stats-addon` slot (usually
+     action buttons). Right-aligned so separator bullets line up. */
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
   background: rgba(0, 0, 0, 0.75);
   backdrop-filter: blur(8px);
   border-radius: 8px;
   padding: 6px 12px;
   color: rgba(255, 255, 255, 0.9);
   font-size: 0.85rem;
+}
+
+.trip-stats-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .trip-stats-sep {
@@ -537,11 +551,19 @@ defineExpose({ selectStopByPhotoId })
   font-size: 0.85rem;
   font-weight: 600;
   flex-shrink: 0;
+  /* Inheriting would fall through to a muted colour on some
+     surrounding containers; pin it so the name stays legible in
+     both light and dark modes. */
+  color: var(--p-text-color);
 }
 
 .trip-timeline-album-desc {
   font-size: 0.8rem;
-  color: var(--p-text-muted-color, #999);
+  /* Mode-adaptive muted: blending the current text colour with the
+     surface gives a 70%-contrast shade that reads in both modes —
+     unlike --p-text-muted-color which resolves too faintly in dark
+     mode. */
+  color: color-mix(in srgb, var(--p-text-color) 70%, transparent);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
