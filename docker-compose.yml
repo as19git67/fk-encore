@@ -120,6 +120,15 @@ services:
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-}
+      # Finance module — see docs/finance-fints-integration.md §2.4.
+      # FINANCE_CREDENTIALS_KEY is the AES-256-GCM master key that
+      # encrypts bank PINs in finance_bankcontact.credentials_encrypted.
+      # Losing it means every stored credential has to be re-entered.
+      # The ZKA product-id + version are required by lib-fints under
+      # PSD2; see https://www.fints.org/de/hersteller/produktregistrierung.
+      FINANCE_CREDENTIALS_KEY: ${FINANCE_CREDENTIALS_KEY:-}
+      FINANCE_FINTS_PRODUCT_ID: ${FINANCE_FINTS_PRODUCT_ID:-}
+      FINANCE_FINTS_PRODUCT_VERSION: ${FINANCE_FINTS_PRODUCT_VERSION:-}
     volumes:
       - photos:/mnt/data/photos
       - thumbnails:/mnt/data/thumbnails
