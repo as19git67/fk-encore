@@ -83,10 +83,16 @@ describe("finance/statements — triggerSync", () => {
     setAuth("1", ["finance.accounts.manage"]);
     await ensureUser(1);
     const id = await insertBankcontact();
+    // No client on the mocked result — triggerSync will short-circuit
+    // fetchAndPersist to zero-counters. Real clients are exercised via
+    // the dedicated fints-client test.
     mockResult({ state: "idle", bankingInformation: { systemId: "sys-1" } });
 
     const response = await triggerSync({ bankcontactId: id });
-    expect(response).toEqual({ state: "idle" });
+    expect(response.state).toBe("idle");
+    if (response.state !== "idle") throw new Error("type narrow");
+    expect(response.accounts_seen).toBe(0);
+    expect(response.transactions_inserted).toBe(0);
 
     const sessions = await db.select().from(financeTanSession);
     expect(sessions).toHaveLength(0);

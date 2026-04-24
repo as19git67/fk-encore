@@ -28,7 +28,7 @@ import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
 import { financeTanSession } from "../db/schema";
 import { runSynchronize } from "./fints-client";
-import type { SyncApiResponse } from "./statements";
+import { fetchAndPersist, type SyncApiResponse } from "./statements";
 
 console.log("[boot] finance/tan-sessions.ts: all imports resolved");
 
@@ -121,8 +121,9 @@ export const completeTanSession = api(
         errorMessage: result.errorMessage ?? "FinTS dialog failed",
       };
     }
-    // state === "idle" — Etappe 5 will persist transactions here.
-    return { state: "idle" };
+    // state === "idle" — run the statement/balance fetch with the
+    // still-open client so TAN is not re-triggered for a second time.
+    return await fetchAndPersist(session.bankcontact_id, result.client);
   },
 );
 

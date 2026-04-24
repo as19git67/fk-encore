@@ -1,7 +1,16 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import db from "../db/database";
-import { financeBankcontact } from "../db/schema";
+import {
+  financeAccount,
+  financeAccountAccess,
+  financeAccountBalance,
+  financeBankcontact,
+  financeTagTransaction,
+  financeTanSession,
+  financeTransaction,
+} from "../db/schema";
+import { sql } from "drizzle-orm";
 import { runSynchronize, type FintsClientSurface } from "./fints-client";
 import type { DialogResult } from "./types";
 
@@ -29,6 +38,16 @@ vi.mock("lib-fints", () => ({
 }));
 
 beforeEach(async () => {
+  // Leftovers from preceding test files would break the delete
+  // cascade (finance_account → finance_bankcontact is RESTRICT), so
+  // drain the finance graph from leaves inward.
+  await db.execute(sql`DELETE FROM finance_transaction_embedding`);
+  await db.delete(financeTagTransaction);
+  await db.delete(financeTransaction);
+  await db.delete(financeAccountBalance);
+  await db.delete(financeTanSession);
+  await db.delete(financeAccountAccess);
+  await db.delete(financeAccount);
   await db.delete(financeBankcontact);
 });
 
@@ -74,6 +93,12 @@ function mockClient(
     synchronizeWithTan: vi.fn(async () => resp as any),
     selectTanMethod: vi.fn(),
     config: { bankingInformation } as any,
+    // Not exercised in the sync-dialog tests; the runFetchAccounts
+    // tests below override these via their own custom mocks.
+    getAccountStatements: vi.fn(),
+    getAccountStatementsWithTan: vi.fn(),
+    getAccountBalance: vi.fn(),
+    getAccountBalanceWithTan: vi.fn(),
   };
 }
 
@@ -268,5 +293,219 @@ describe("fints-client — bankcontact loading", () => {
     });
 
     expect(c.selectTanMethod).toHaveBeenCalledWith(942);
+  });
+});
+
+// ======================================================================
+// runFetchAccounts — fetch statements + balance per account
+// ======================================================================
+
+import { runFetchAccounts } from "./fints-client";
+
+function clientWith(
+  accounts: Array<{
+    accountNumber: string;
+    iban?: string;
+    accountType?: string;
+    currency?: string;
+    holder1?: string;
+  }>,
+  overrides: Partial<FintsClientSurface> = {},
+): FintsClientSurface {
+  const base = mockClient({ success: true, requiresTan: false }, {
+    systemId: "sys",
+    upd: { bankAccounts: accounts },
+  } as any);
+  return { ...base, ...overrides };
+}
+
+function stmtResp(transactions: any[], flags: Partial<{ success: boolean; requiresTan: boolean }> = {}) {
+  return {
+    success: true,
+    requiresTan: false,
+    bankAnswers: [],
+    statements: [{ transactions }],
+    ...flags,
+  } as any;
+}
+
+function balResp(balance: { date: Date; currency: string; balance: number } | null, flags: Partial<{ success: boolean; requiresTan: boolean }> = {}) {
+  return {
+    success: true,
+    requiresTan: false,
+    bankAnswers: [],
+    balance: balance ?? undefined,
+    ...flags,
+  } as any;
+}
+
+describe("runFetchAccounts — happy path", () => {
+  it("maps statements + balance per account", async () => {
+    const c = clientWith(
+      [
+        {
+          accountNumber: "1234567890",
+          iban: "DE12",
+          accountType: "CheckingAccount",
+          currency: "EUR",
+          holder1: "Max Mustermann",
+        },
+      ],
+      {
+        getAccountStatements: vi.fn(async () =>
+          stmtResp([
+            {
+              valueDate: new Date("2026-04-24"),
+              entryDate: new Date("2026-04-24"),
+              amount: -42.5,
+              purpose: "Kaffee",
+              remoteName: "Bistro",
+              remoteIdentifier: "DE99",
+              bankReference: "REF-001",
+            },
+          ]),
+        ),
+        getAccountBalance: vi.fn(async () =>
+          balResp({
+            date: new Date("2026-04-24T06:00:00Z"),
+            currency: "EUR",
+            balance: 2341.5,
+          }),
+        ),
+      },
+    );
+
+    const result = await runFetchAccounts(c);
+    expect(result.partial).toBe(false);
+    expect(result.accounts).toHaveLength(1);
+    const a = result.accounts[0];
+    expect(a.accountNumber).toBe("1234567890");
+    expect(a.iban).toBe("DE12");
+    expect(a.accountKind).toBe("giro");
+    expect(a.label).toContain("Max Mustermann");
+    expect(a.transactions).toHaveLength(1);
+    expect(a.transactions[0]).toMatchObject({
+      bookingDate: "2026-04-24",
+      amount: "-42.50",
+      purpose: "Kaffee",
+      counterparty: "Bistro",
+      counterpartyIban: "DE99",
+      fintsId: "REF-001",
+    });
+    expect(a.balance).toEqual({
+      asOf: "2026-04-24",
+      amount: "2341.50",
+      currency: "EUR",
+    });
+    expect(a.errors).toEqual([]);
+  });
+
+  it("maps multiple accounts in sequence", async () => {
+    const c = clientWith(
+      [
+        { accountNumber: "A", accountType: "CheckingAccount", currency: "EUR" },
+        { accountNumber: "B", accountType: "SavingsAccount", currency: "EUR" },
+      ],
+      {
+        getAccountStatements: vi.fn(async () => stmtResp([])),
+        getAccountBalance: vi.fn(async () =>
+          balResp({ date: new Date(), currency: "EUR", balance: 0 }),
+        ),
+      },
+    );
+    const r = await runFetchAccounts(c);
+    expect(r.accounts.map((a) => a.accountNumber)).toEqual(["A", "B"]);
+    expect(r.accounts[1].accountKind).toBe("tagesgeld");
+  });
+
+  it("returns an empty result when the bank has no accounts yet", async () => {
+    const c = clientWith([]);
+    const r = await runFetchAccounts(c);
+    expect(r.accounts).toEqual([]);
+    expect(r.partial).toBe(false);
+  });
+});
+
+describe("runFetchAccounts — mid-flight TAN and bank errors", () => {
+  it("records a soft error and sets partial=true when statements need TAN", async () => {
+    const c = clientWith(
+      [{ accountNumber: "1", accountType: "CheckingAccount", currency: "EUR" }],
+      {
+        getAccountStatements: vi.fn(async () =>
+          stmtResp([], { requiresTan: true, success: true }),
+        ),
+        getAccountBalance: vi.fn(async () =>
+          balResp({ date: new Date(), currency: "EUR", balance: 10 }),
+        ),
+      },
+    );
+    const r = await runFetchAccounts(c);
+    expect(r.partial).toBe(true);
+    expect(r.accounts[0].errors).toContain("statements-tan-required");
+    expect(r.accounts[0].transactions).toEqual([]);
+    // Balance still tried
+    expect(r.accounts[0].balance?.amount).toBe("10.00");
+  });
+
+  it("records a soft error on a bank-side statement failure", async () => {
+    const c = clientWith(
+      [{ accountNumber: "1", accountType: "CheckingAccount", currency: "EUR" }],
+      {
+        getAccountStatements: vi.fn(async () => ({
+          success: false,
+          requiresTan: false,
+          bankAnswers: [{ code: 9050, text: "nicht verfügbar" }],
+          statements: [],
+        })),
+        getAccountBalance: vi.fn(async () =>
+          balResp({ date: new Date(), currency: "EUR", balance: 0 }),
+        ),
+      },
+    );
+    const r = await runFetchAccounts(c);
+    expect(r.accounts[0].errors[0]).toMatch(/statements-error:9050/);
+  });
+
+  it("swallows a thrown exception from getAccountBalance and keeps going", async () => {
+    const c = clientWith(
+      [{ accountNumber: "1", accountType: "CheckingAccount", currency: "EUR" }],
+      {
+        getAccountStatements: vi.fn(async () => stmtResp([])),
+        getAccountBalance: vi.fn(async () => {
+          throw new Error("connection reset");
+        }),
+      },
+    );
+    const r = await runFetchAccounts(c);
+    expect(r.accounts[0].errors.some((e) => /balance-exception/.test(e))).toBe(true);
+    expect(r.accounts[0].balance).toBeNull();
+  });
+});
+
+describe("runFetchAccounts — integrates with runSynchronize", () => {
+  it("runSynchronize exposes the live client on state=idle so callers can fetch", async () => {
+    const c = mockClient({ success: true, requiresTan: false }, {
+      systemId: "sys",
+      upd: {
+        bankAccounts: [
+          { accountNumber: "1", accountType: "CheckingAccount", currency: "EUR" },
+        ],
+      },
+    } as any);
+    (c.getAccountStatements as any) = vi.fn(async () => stmtResp([]));
+    (c.getAccountBalance as any) = vi.fn(async () =>
+      balResp({ date: new Date(), currency: "EUR", balance: 0 }),
+    );
+
+    const id = await insertBankcontact();
+    const result = await runSynchronize(id, {
+      clientFactory: () => c,
+      sleep: async () => {},
+    });
+    expect(result.state).toBe("idle");
+    expect(result.client).toBeDefined();
+
+    const fetched = await runFetchAccounts(result.client as FintsClientSurface);
+    expect(fetched.accounts).toHaveLength(1);
   });
 });

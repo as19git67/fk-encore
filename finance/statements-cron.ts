@@ -36,7 +36,8 @@ import {
   financeBankcontact,
   financeTanSession,
 } from "../db/schema";
-import { runSynchronize } from "./fints-client";
+import { runFetchAccounts, runSynchronize, type FintsClientSurface } from "./fints-client";
+import { persistFetchResult } from "./statement-persist";
 import { cleanupExpiredTanSessions } from "./tan-sessions";
 import { sendToUser, type PushPayload } from "../push/push.service";
 import type { FinanceSyncSlot } from "../db/schema";
@@ -123,7 +124,22 @@ export const syncStatements = api(
             `[finance.cron] bankcontact=${bc.id} (${bc.name}) → tan-required, push sent`,
           );
         } else if (result.state === "idle") {
-          // Etappe 5 will persist transactions here in a follow-up.
+          // Pull statements + balances from the same live client —
+          // avoids a second init-dialog-TAN round trip per cron tick.
+          try {
+            const fetched = await runFetchAccounts(result.client as FintsClientSurface);
+            const stats = await persistFetchResult(bc.id, fetched);
+            console.log(
+              `[finance.cron] bankcontact=${bc.id} (${bc.name}) → ok: ` +
+                `accounts=${stats.accounts_seen} tx=${stats.transactions_inserted} ` +
+                `balances=${stats.balances_written} partial=${fetched.partial}`,
+            );
+          } catch (fetchErr) {
+            console.error(
+              `[finance.cron] bankcontact=${bc.id} (${bc.name}) fetch/persist failed:`,
+              fetchErr,
+            );
+          }
           await db
             .update(financeBankcontact)
             .set({

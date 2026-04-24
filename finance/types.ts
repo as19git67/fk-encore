@@ -20,7 +20,7 @@ export type FintsDialogState =
 /**
  * Uniform return shape of the fints-client wrapper. Fields are
  * discriminated by `state`:
- *   - state="idle":          bankingInformation set, errorCode/Message null
+ *   - state="idle":          bankingInformation + client set, errorCode null
  *   - state="tan-required":  tanChallenge + bankingInformation set
  *   - state="error":         errorCode + errorMessage set
  */
@@ -28,6 +28,14 @@ export interface DialogResult {
   state: FintsDialogState;
   /** Full lib-fints banking info snapshot, persisted in finance_tan_session.banking_information for the resume path. */
   bankingInformation?: Record<string, unknown>;
+  /**
+   * Only set when state="idle". The still-open FinTS client the
+   * caller can use to run `getAccountStatements` / `getAccountBalance`
+   * without re-authenticating. Not serialisable — consumed in-process
+   * only. Typed as `unknown` to avoid circular imports; casts live in
+   * `fints-client.ts`.
+   */
+  client?: unknown;
   /** Set when state="tan-required". Human-readable prompt from the bank. */
   tanChallenge?: string;
   /** Set when state="tan-required". Opaque lib-fints handle for the continuation call. */
@@ -51,4 +59,46 @@ export interface SyncOptions {
   tanAnswer?: string;
   /** Banking info snapshot persisted on the previous "tan-required" turn. */
   bankingInformation?: Record<string, unknown>;
+}
+
+/**
+ * Normalised FinTS transaction row, ready for INSERT into
+ * finance_transaction. `amount` stays a string to avoid float drift.
+ */
+export interface FintsTransactionData {
+  bookingDate: string;        // YYYY-MM-DD
+  valueDate: string | null;
+  amount: string;             // signed decimal, always 2 decimal places
+  currency: string;
+  purpose: string | null;
+  counterparty: string | null;
+  counterpartyIban: string | null;
+  /** Bank-stable reference if present (bankReference); otherwise null. */
+  fintsId: string | null;
+  /** Full lib-fints Transaction object, verbatim, for the raw JSONB column. */
+  raw: Record<string, unknown>;
+}
+
+/**
+ * Result of fetching one bank account via the FinTS dialog. One
+ * snapshot represents everything we learned about the account in the
+ * current sync pass.
+ */
+export interface FintsAccountSnapshot {
+  accountNumber: string;
+  iban: string | null;
+  /** Pre-mapped to the finance_account_kind enum; "sonstige" as fallback. */
+  accountKind: string;
+  currency: string;
+  label: string;
+  balance: { asOf: string; amount: string; currency: string } | null;
+  transactions: FintsTransactionData[];
+  /** Per-account soft errors — statements or balance needed an extra TAN, etc. */
+  errors: string[];
+}
+
+export interface FetchResult {
+  accounts: FintsAccountSnapshot[];
+  /** True when any account was skipped due to a mid-flight TAN requirement. */
+  partial: boolean;
 }

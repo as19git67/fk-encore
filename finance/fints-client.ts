@@ -33,7 +33,13 @@ import { secret } from "encore.dev/config";
 import db from "../db/database";
 import { financeBankcontact } from "../db/schema";
 import { decryptCredentials } from "./encryption";
-import type { DialogResult, SyncOptions } from "./types";
+import type {
+  DialogResult,
+  FetchResult,
+  FintsAccountSnapshot,
+  FintsTransactionData,
+  SyncOptions,
+} from "./types";
 
 console.log("[boot] finance/fints-client.ts: all imports resolved");
 
@@ -55,6 +61,20 @@ export interface FintsClientSurface {
   ): Promise<import("lib-fints").SynchronizeResponse>;
   selectTanMethod(id: number): unknown;
   config: { bankingInformation: BankingInformation };
+  getAccountStatements(
+    accountNumber: string,
+  ): Promise<import("lib-fints").StatementResponse>;
+  getAccountStatementsWithTan(
+    tanReference: string,
+    tan?: string,
+  ): Promise<import("lib-fints").StatementResponse>;
+  getAccountBalance(
+    accountNumber: string,
+  ): Promise<import("lib-fints").AccountBalanceResponse>;
+  getAccountBalanceWithTan(
+    tanReference: string,
+    tan?: string,
+  ): Promise<import("lib-fints").AccountBalanceResponse>;
 }
 
 /** Constructor shape the wrapper needs; the default uses `lib-fints`. */
@@ -121,8 +141,197 @@ export async function runSynchronize(
       ? await client.synchronizeWithTan(opts.tanReference!, opts.tanAnswer)
       : await client.synchronize();
 
-    return mapResponse(response, client.config.bankingInformation);
+    const result = mapResponse(response, client.config.bankingInformation);
+    // Expose the live client on successful init so callers can follow
+    // up with getAccountStatements / getAccountBalance without a
+    // fresh authenticate-dance. Retained only in-process; never
+    // persisted.
+    if (result.state === "idle") result.client = client;
+    return result;
   }, sleep);
+}
+
+// -----------------------------------------------------------------------
+// Statements + balance fetch (after a successful init dialog)
+// -----------------------------------------------------------------------
+
+/**
+ * Iterates the accounts known to the client (lib-fints populates
+ * `config.bankingInformation.upd.bankAccounts` during synchronize),
+ * fetches statements + balance for each, and returns them as a
+ * structured snapshot ready for persistence.
+ *
+ * Mid-flight TAN: if any per-account fetch comes back with
+ * `requiresTan=true`, we record a soft error on the account and move
+ * on. The caller can choose to let the user retrigger the sync
+ * (which will re-run the init dialog and then try the skipped
+ * fetches again). Most banks only require TAN on the init dialog, so
+ * this is a rare path.
+ */
+export async function runFetchAccounts(
+  client: FintsClientSurface,
+): Promise<FetchResult> {
+  const bi = client.config.bankingInformation;
+  const accounts =
+    (bi as unknown as {
+      upd?: { bankAccounts?: RawBankAccount[] };
+    }).upd?.bankAccounts ?? [];
+
+  const snapshots: FintsAccountSnapshot[] = [];
+  let partial = false;
+
+  for (const account of accounts) {
+    const snapshot = await fetchOneAccount(client, account);
+    if (snapshot.errors.length > 0) partial = true;
+    snapshots.push(snapshot);
+  }
+
+  return { accounts: snapshots, partial };
+}
+
+interface RawBankAccount {
+  accountNumber: string;
+  iban?: string;
+  currency?: string;
+  accountType?: string;
+  holder1?: string;
+  product?: string;
+}
+
+async function fetchOneAccount(
+  client: FintsClientSurface,
+  account: RawBankAccount,
+): Promise<FintsAccountSnapshot> {
+  const accountKind = mapAccountKind(account.accountType);
+  const currency = account.currency ?? "EUR";
+  const label = buildAccountLabel(account);
+
+  const snapshot: FintsAccountSnapshot = {
+    accountNumber: account.accountNumber,
+    iban: account.iban ?? null,
+    accountKind,
+    currency,
+    label,
+    balance: null,
+    transactions: [],
+    errors: [],
+  };
+
+  try {
+    const stmtResp = await client.getAccountStatements(account.accountNumber);
+    if (stmtResp.requiresTan) {
+      snapshot.errors.push("statements-tan-required");
+    } else if (!stmtResp.success) {
+      const first = stmtResp.bankAnswers.find((a) => a.code !== 0);
+      snapshot.errors.push(
+        `statements-error:${first?.code ?? "unknown"} ${first?.text ?? ""}`.trim(),
+      );
+    } else {
+      snapshot.transactions = mapStatements(stmtResp.statements ?? [], currency);
+    }
+  } catch (err) {
+    snapshot.errors.push(
+      `statements-exception:${(err as Error).message ?? String(err)}`,
+    );
+  }
+
+  try {
+    const balResp = await client.getAccountBalance(account.accountNumber);
+    if (balResp.requiresTan) {
+      snapshot.errors.push("balance-tan-required");
+    } else if (!balResp.success) {
+      const first = balResp.bankAnswers.find((a) => a.code !== 0);
+      snapshot.errors.push(
+        `balance-error:${first?.code ?? "unknown"} ${first?.text ?? ""}`.trim(),
+      );
+    } else if (balResp.balance) {
+      snapshot.balance = {
+        asOf: toIsoDate(balResp.balance.date),
+        amount: toAmountString(balResp.balance.balance),
+        currency: balResp.balance.currency ?? currency,
+      };
+    }
+  } catch (err) {
+    snapshot.errors.push(
+      `balance-exception:${(err as Error).message ?? String(err)}`,
+    );
+  }
+
+  return snapshot;
+}
+
+/** Map lib-fints AccountType (enum string) → finance_account_kind value. */
+function mapAccountKind(accountType: string | undefined): string {
+  switch (accountType) {
+    case "CheckingAccount":
+      return "giro";
+    case "SavingsAccount":
+      return "tagesgeld";
+    case "FixedDepositAccount":
+      return "festgeld";
+    case "SecuritiesAccount":
+      return "depot";
+    case "LoanMortgageAccount":
+      return "kredit";
+    case "CreditCardAccount":
+      return "kreditkarte";
+    case "HomeSavingsContract":
+      return "bausparen";
+    default:
+      return "sonstige";
+  }
+}
+
+function buildAccountLabel(account: RawBankAccount): string {
+  const typeLabel = account.product ?? account.accountType ?? "Konto";
+  const holder = account.holder1 ? ` – ${account.holder1}` : "";
+  return `${typeLabel} ${account.accountNumber}${holder}`.trim();
+}
+
+function mapStatements(
+  statements: Array<{
+    transactions?: Array<{
+      valueDate?: Date | string;
+      entryDate?: Date | string;
+      amount?: number;
+      purpose?: string;
+      remoteName?: string;
+      remoteIdentifier?: string;
+      bankReference?: string;
+      [key: string]: unknown;
+    }>;
+  }>,
+  currency: string,
+): FintsTransactionData[] {
+  const out: FintsTransactionData[] = [];
+  for (const stmt of statements) {
+    for (const t of stmt.transactions ?? []) {
+      if (t.amount === undefined || t.entryDate === undefined) continue;
+      out.push({
+        bookingDate: toIsoDate(t.entryDate),
+        valueDate: t.valueDate ? toIsoDate(t.valueDate) : null,
+        amount: toAmountString(t.amount),
+        currency,
+        purpose: t.purpose?.trim() || null,
+        counterparty: t.remoteName?.trim() || null,
+        counterpartyIban: t.remoteIdentifier?.trim() || null,
+        fintsId: t.bankReference?.trim() || null,
+        raw: t as Record<string, unknown>,
+      });
+    }
+  }
+  return out;
+}
+
+function toIsoDate(d: Date | string): string {
+  if (d instanceof Date) return d.toISOString().slice(0, 10);
+  if (typeof d === "string") return d.slice(0, 10);
+  return "";
+}
+
+function toAmountString(n: number): string {
+  if (!Number.isFinite(n)) return "0.00";
+  return n.toFixed(2);
 }
 
 // -----------------------------------------------------------------------

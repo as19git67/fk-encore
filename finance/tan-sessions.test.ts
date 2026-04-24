@@ -109,7 +109,7 @@ describe("finance/tan-sessions — complete (happy path)", () => {
       tanReference: ref,
       tan: "123456",
     });
-    expect(response).toEqual({ state: "idle" });
+    expect(response.state).toBe("idle");
 
     expect(fintsClient.runSynchronize).toHaveBeenCalledWith(bcId, {
       tanReference: "fints-ref-xyz",
