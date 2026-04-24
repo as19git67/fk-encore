@@ -17,7 +17,7 @@ finance/
 ├── types.ts                   # geteilte TypeScript-Interfaces
 ├── encryption.ts              # AES-GCM-Credential-Crypto
 ├── encryption.test.ts
-├── fints-client.ts            # lib-fints-Wrapper, dialogForSync
+├── fints-client.ts            # lib-fints-Wrapper, runSynchronize
 ├── fints-client.test.ts
 ├── llm-client.ts              # finance-spezifischer llm-service-Client
 ├── bankcontacts.ts            # CRUD + Credential-Set
@@ -71,7 +71,7 @@ export default new Service("finance");
 | Datei | Zweck | Endpoints (Pfad / Methode) | Permission |
 |---|---|---|---|
 | `encryption.ts` | AES-256-GCM, `encryptCredentials` / `decryptCredentials` | — | (intern) |
-| `fints-client.ts` | `dialogForSync(bankcontactId, opts)`; Status-Enum | — | (intern) |
+| `fints-client.ts` | `runSynchronize(bankcontactId, opts)`; State-Enum + `clientFactory`/`sleep`-Test-Seams | — | (intern) |
 | `llm-client.ts` | `embed(text)`, `suggestTags(...)`, `parseAnalysisQuery(...)` | — | (intern) |
 | `bankcontacts.ts` | Bankkontakte CRUD, Credentials setzen | `GET/POST/PUT/DELETE /finance/bankcontacts[/:id]`, `POST /finance/bankcontacts/:id/credentials` | `finance.accounts.manage` |
 | `accounts.ts` | Konten lesen/listen (ACL-gefiltert), inaktivieren | `GET /finance/accounts[/:id]`, `PATCH /finance/accounts/:id` | `finance.view` |

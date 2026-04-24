@@ -32,14 +32,18 @@ Eigenimplementierung (`dbMixinOnlineBanking.js`).
 Dünner Wrapper über `lib-fints`, der das Dialog-Management kapselt und
 den für uns relevanten Teil-Status exponiert.
 
-### 2.1 Status-Enum
+### 2.1 State-Enum
+
+Abgeleitet aus den Boolean-Flags der lib-fints-`ClientResponse`
+(`success`, `requiresTan`). Der Wrapper exponiert die abgeleitete
+Repräsentation — kein `"dialog"`-Zwischenstate mehr, weil lib-fints
+uns diesen nicht mitteilt:
 
 ```ts
 export type FintsDialogState =
-  | "idle"
-  | "dialog"         // FinTS-Dialog offen
-  | "tan-required"   // wartet auf User-TAN
-  | "error";
+  | "idle"           // Dialog sauber beendet, Daten verfügbar
+  | "tan-required"   // wartet auf User-TAN oder decoupled Approval
+  | "error";         // Transport oder FinTS-Antwort fehlgeschlagen
 ```
 
 ### 2.2 Schnittstelle (Auszug)
@@ -47,27 +51,34 @@ export type FintsDialogState =
 ```ts
 export interface DialogResult {
   state: FintsDialogState;
-  // Nur gesetzt bei state = "tan-required":
+  // Set when state = "tan-required":
   tanChallenge?: string;
-  // Roh-State der lib-fints-Session (landet in finance_tan_session):
+  tanReference?: string;
+  tanMediaName?: string;
+  // Set when state = "tan-required" oder "idle":
   bankingInformation?: Record<string, unknown>;
-  // Nur gesetzt bei state = "idle" (Dialog sauber beendet):
-  transactions?: FintsTransaction[];
-  balances?: FintsBalance[];
-  // Nur bei state = "error":
+  // Set when state = "error":
   errorCode?: string;
   errorMessage?: string;
 }
 
-export async function dialogForSync(
+export async function runSynchronize(
   bankcontactId: number,
-  opts: { tanAnswer?: string; resume?: Record<string, unknown> }
+  opts?: {
+    tanReference?: string;
+    tanAnswer?: string;
+    bankingInformation?: Record<string, unknown>;
+  },
 ): Promise<DialogResult>;
 ```
 
-Port-Vorlage: `dialogForSync` aus der Legacy-`dbMixinOnlineBanking.js`.
-Kein 1:1-Port — wir ersetzen das In-Memory-Singleton durch stateless
-Aufrufe, die ihren kompletten State aus `finance_tan_session` laden.
+Die Implementierung ist kein 1:1-Port des Legacy-`runSynchronize`.
+Wir ersetzen das In-Memory-Singleton durch einen stateless Wrapper,
+der seinen kompletten State (Credentials via DB-Lookup, Banking-Info
+via Funktions-Parameter) auf jeden Call neu auflädt. Für Etappe 2
+deckt `runSynchronize` nur das `synchronize` / `synchronizeWithTan`-
+Paar ab; `getAccountStatements` + `…WithTan` folgen in Etappe 3 als
+eigene Funktion.
 
 ### 2.3 Fehler- und Retry-Strategie
 
@@ -81,6 +92,30 @@ Aufrufe, die ihren kompletten State aus `finance_tan_session` laden.
 TAN-Methoden-Auswahl: beim ersten Dialog werden die verfügbaren Verfahren
 aus der Bankantwort gelesen. Der User wählt genau einmal im Frontend
 (`BankcontactDetailView`); die Wahl landet in `finance_bankcontact.tan_method`.
+
+### 2.4 Pflicht-Secrets: ZKA-Produkt-Registrierung
+
+`lib-fints` setzt — per PSD2-Vorgabe der Deutschen Kreditwirtschaft —
+eine Produkt-Registrierung voraus. Jeder FinTS-Aufruf braucht eine
+`productId` + `productVersion`, die man [bei der ZKA
+registriert](https://www.fints.org/de/hersteller/produktregistrierung)
+und als Konfiguration mitgibt.
+
+Beides lebt als Encore-Secret, nicht im Code:
+
+| Secret | Zweck |
+|---|---|
+| `FinanceCredentialsKey` | 32 Byte base64, AES-256-GCM-Key (siehe §3) |
+| `FinanceFintsProductId` | ZKA-registrierte Produkt-ID |
+| `FinanceFintsProductVersion` | Semantische Version des Finance-Moduls |
+
+Für lokale Entwicklung und CI reichen Dummy-Strings — echte Werte sind
+nur für Production verpflichtend. Setup:
+
+```bash
+encore secret set --type local FinanceFintsProductId "dev-placeholder"
+encore secret set --type local FinanceFintsProductVersion "0.0.1"
+```
 
 ---
 
@@ -162,7 +197,7 @@ sequenceDiagram
   participant TAN as finance.tanSessions
 
   UI->>API: POST /finance/statements { bankcontactId }
-  API->>FC: dialogForSync(bankcontactId, {})
+  API->>FC: runSynchronize(bankcontactId, {})
   FC-->>API: state=tan-required, challenge, bankingInformation
   API->>DB: INSERT tan_reference, banking_information, challenge, expires_at
   API-->>UI: 409 Conflict { tanReference, challenge }
@@ -170,7 +205,7 @@ sequenceDiagram
   UI->>TAN: POST /finance/tan-sessions/complete { tanReference, tan }
   TAN->>DB: SELECT … WHERE tan_reference=? AND expires_at>now()
   DB-->>TAN: banking_information
-  TAN->>FC: dialogForSync(bankcontactId, {resume, tanAnswer})
+  TAN->>FC: runSynchronize(bankcontactId, {resume, tanAnswer})
   FC-->>TAN: state=idle, transactions, balances
   TAN->>TAN: INSERT finance_transaction (+ finance_account_balance)
   TAN->>DB: DELETE tan_reference
@@ -202,7 +237,7 @@ export const syncStatements = api(
   { expose: false, method: "POST", path: "/internal/finance/sync-statements" },
   async (): Promise<{ contacts: number; tanRequired: number }> => {
     // 1. Bankkontakte mit passendem Slot aus sync_times laden
-    // 2. Für jeden: dialogForSync(...)
+    // 2. Für jeden: runSynchronize(...)
     // 3. Bei state=tan-required:
     //    - finance_tan_session schreiben
     //    - Push an owner-User: "TAN für Sparkasse XY benötigt"
@@ -236,7 +271,7 @@ sequenceDiagram
   Cron->>API: POST /internal/finance/sync-statements
   API->>API: Slots aus sync_times vs. now() filtern
   loop je Bankkontakt
-    API->>FC: dialogForSync(id, {})
+    API->>FC: runSynchronize(id, {})
     alt state = tan-required
       API->>DB: INSERT tan_reference
       API->>Push: notifyUser(ownerId, "TAN nötig")

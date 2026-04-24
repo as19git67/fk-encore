@@ -50,17 +50,35 @@ abgedeckt sein muss.
 
 ### 2.2 `fints-client.test.ts`
 
-`lib-fints` selbst wird **nicht** im Unit-Test angesprochen — wir mocken
-das Default-Export als Vitest-Modul-Mock und prüfen unseren Wrapper.
+`lib-fints` selbst wird **nicht** im Unit-Test angesprochen — wir
+mocken das Default-Export als Vitest-Modul-Mock auf Modul-Ebene (damit
+der Import des Wrappers nicht versucht, echte lib-fints-Klassen zu
+instanziieren). Die Test-spezifische `FinTSClient`-Implementierung
+wird dann via `clientFactory`-Parameter an `runSynchronize` injiziert
+— so bleibt jeder Einzeltest lokal konfigurierbar.
 
-- Mapping FinTS-Code 9910 → `state: "error"`, `errorCode: "9910"`.
-- Mapping `tan-required` aus lib-fints-Response → `state:
-  "tan-required"` mit gefülltem `tanChallenge` und
+- Mapping `success=true, requiresTan=false` → `state: "idle"`.
+- Mapping `success=true, requiresTan=true` → `state: "tan-required"`
+  mit gefülltem `tanChallenge`, `tanReference`, `tanMediaName` und
   `bankingInformation`.
-- Resume-Pfad: Wrapper ruft `lib-fints` mit der `bankingInformation`
-  aus dem Aufruf, nicht mit frischem Init-State.
-- Retry-Verhalten: Netzwerkfehler löst maximal 2 Retries aus (mit
-  `vi.useFakeTimers()` für die Backoff-Pausen).
+- Mapping `success=false, bankAnswers=[{code:9910}]` → `state:
+  "error"` mit `errorCode: "9910"`.
+- Multi-Antwort: bei mehreren `bankAnswers` gewinnt die erste mit
+  `code !== 0`.
+- Resume-Pfad: Wrapper ruft `synchronizeWithTan(tanReference,
+  tanAnswer)`, nicht `synchronize()`. `tanAnswer=undefined` wird
+  transparent durchgereicht (decoupled TAN / pushTAN).
+- Retry: Netzwerk-Exception wird 2× wiederholt (Backoff 2 s / 4 s).
+  Bei vollständigem Scheitern liefert der Wrapper `state: "error",
+  errorCode: "transport"` — er wirft **keine** Exception an den
+  Caller. Tests übergeben `sleep: async () => {}` statt
+  Fake-Timern — kein Polling nötig.
+- Bankkontakt nicht gefunden: `runSynchronize(unknownId, …)` wirft
+  einen klaren Fehler (nicht `state: "error"`, weil es Caller-Fehler
+  ist, kein Dialog-Fehler).
+- TAN-Methode: wenn `finance_bankcontact.tan_method` gesetzt ist,
+  ruft der Wrapper auf dem ersten Dialog `client.selectTanMethod(…)`
+  mit dem geparsten Integer auf.
 
 Integrations-Test gegen echte Bank-Server: **nicht** in der
 Test-Pipeline; manuell vor Release gegen Testzugänge.
@@ -81,7 +99,7 @@ Test-Pipeline; manuell vor Release gegen Testzugänge.
 
 ### 2.4 `statements.test.ts`
 
-- Sync-Trigger ohne TAN: gemockter `fints-client.dialogForSync`
+- Sync-Trigger ohne TAN: gemockter `fints-client.runSynchronize`
   liefert `state: "idle"` → Endpoint speichert Transaktionen,
   Antwort `200 { imported: N }`.
 - Sync-Trigger mit TAN: gemockter Client liefert `state:
@@ -163,12 +181,13 @@ Test-Pipeline; manuell vor Release gegen Testzugänge.
 
 | Externe Abhängigkeit | Strategie |
 |---|---|
-| `lib-fints` | `vi.mock("lib-fints", () => …)` auf Modul-Ebene; im Test pro Beschreibung passende Antwort konfigurieren. |
+| `lib-fints` | `vi.mock("lib-fints", () => …)` auf Modul-Ebene. Der Wrapper bietet zusätzlich einen `clientFactory`-Test-Seam, sodass einzelne Tests ohne zweites Mock eine maßgeschneiderte `FinTSClient`-Implementierung injizieren können. |
 | `llm-service` (`fetch`) | `vi.spyOn(globalThis, "fetch")` mit JSON-Response; Tests prüfen sowohl Request-Body (Prompt-Inhalt) als auch Verarbeitung der Response. |
 | `push.service` | direkter Mock von `notifyUser` aus `push/push.ts`; Tests prüfen, dass die Funktion mit korrektem `userId` und Payload gerufen wurde. |
 | Drizzle / Postgres | **nicht mocken** — echte Test-DB nutzen. |
 | `getAuthData()` aus `~encore/auth` | Helper `withAuthData(authData, fn)` aus `user/auth-handler.test.ts` wiederverwenden. |
-| Zeit (`Date.now`, Timers) | `vi.useFakeTimers()` + `vi.setSystemTime(…)`; immer in `afterEach` zurücksetzen. |
+| `secret(...)` aus `encore.dev/config` | global in `vitest.setup.ts` gemockt (liefert 32 Null-Bytes base64). Test, der echte Crypto prüft, nutzt `encryptWithKey` / `decryptWithKey` mit explizitem Key — nicht `encryptCredentials`. |
+| Zeit (`Date.now`, Timers) | `vi.useFakeTimers()` + `vi.setSystemTime(…)`; immer in `afterEach` zurücksetzen. Alternativ: Funktionen, die schlafen, akzeptieren einen `sleep`-Test-Seam (wie `runSynchronize`) — dann reicht `sleep: async () => {}`. |
 
 `fints-client.ts` selbst wird in den Endpoint-Tests gemockt, damit
 diese Tests reine Endpoint-Logik prüfen — der echte Wrapper hat seine

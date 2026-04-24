@@ -50,14 +50,22 @@ gegen frische `encore_test`-DB.
 ## 2. Etappe 2 — Credential-Crypto + FinTS-Client
 
 **Ziel**: Credentials verschlüsselt ablegen, `lib-fints` eingebunden,
-`dialogForSync` als testbare Funktion.
+`runSynchronize` als testbare Funktion.
 
 **Neue Dateien**:
 - `finance/encore.service.ts`, `finance/types.ts`
 - `finance/encryption.ts` + `.test.ts`
 - `finance/fints-client.ts` + `.test.ts`
 - `package.json` ergänzt um `lib-fints`
-- Encore-Secret `FinanceCredentialsKey` lokal + in CI gesetzt
+- `vitest.setup.ts` ergänzt um einen Mock für `encore.dev/config`,
+  damit Module, die Secrets beim Import instanziieren, in Tests
+  nicht am Fehler der fehlenden Encore-Runtime scheitern
+- Drei Encore-Secrets lokal + in CI gesetzt:
+  - `FinanceCredentialsKey` — 32 Byte base64, AES-256-GCM-Key
+  - `FinanceFintsProductId` — ZKA-registrierte Produkt-ID (lokal
+    Dummy ok, Prod Pflicht)
+  - `FinanceFintsProductVersion` — semantische Versionsnummer des
+    Finance-Moduls
 
 **Tests**: Roundtrip + Tampering (§2.1), FinTS-Wrapper-Logik mit
 gemocktem `lib-fints` (§2.2 aus `finance-testing.md`).
