@@ -960,6 +960,13 @@ export const financeBankcontact = pgTable("finance_bankcontact", {
   server_url: text("server_url").notNull(),
   tan_method: text("tan_method"),
   credentials_encrypted: text("credentials_encrypted"), // AES-GCM blob, base64
+  // Last bank-advertised list of TAN methods, cached here so the UI's
+  // "TAN-Verfahren"-picker has a populated select box after a page
+  // reload without issuing a fresh FinTS dialog on every view open.
+  // Refreshed by probeTanMethods; not authoritative — the bank can
+  // change its offerings between probes.
+  available_tan_methods: jsonb("available_tan_methods")
+    .$type<{ id: number; name: string; isDecoupled: boolean }[]>(),
   sync_times: jsonb("sync_times")
     .notNull()
     .default(sql`'[]'::jsonb`)

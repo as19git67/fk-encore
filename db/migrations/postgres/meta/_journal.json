@@ -351,6 +351,13 @@
       "when": 1779000200000,
       "tag": "0048_finance_embeddings",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1779000300000,
+      "tag": "0049_finance_bankcontact_tan_methods_cache",
+      "breakpoints": true
     }
   ]
 }

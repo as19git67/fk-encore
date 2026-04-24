@@ -32,6 +32,12 @@ console.log("[boot] finance/bankcontacts.ts: all imports resolved");
 // credentials must stay write-only, sync_times have their own endpoint
 // in Etappe 6.
 
+interface TanMethodCacheEntry {
+  id: number;
+  name: string;
+  isDecoupled: boolean;
+}
+
 interface BankcontactView {
   id: number;
   name: string;
@@ -43,6 +49,11 @@ interface BankcontactView {
   last_sync_at: string | null;
   last_sync_status: string | null;
   created_at: string | null;
+  /**
+   * Bank-advertised TAN methods from the last successful probe.
+   * Empty array when the user has never probed this bankcontact.
+   */
+  available_tan_methods: TanMethodCacheEntry[];
 }
 
 function toView(row: typeof financeBankcontact.$inferSelect): BankcontactView {
@@ -57,6 +68,7 @@ function toView(row: typeof financeBankcontact.$inferSelect): BankcontactView {
     last_sync_at: row.last_sync_at,
     last_sync_status: row.last_sync_status,
     created_at: row.created_at,
+    available_tan_methods: row.available_tan_methods ?? [],
   };
 }
 
@@ -355,6 +367,16 @@ export const probeBankcontactTanMethods = api(
     }
 
     const result = await probeTanMethods(p.id);
+    // Persist the fresh list on the bankcontact so the UI has a
+    // populated picker after a page reload without re-probing. Only
+    // stash on success — a TAN-required / error probe leaves the
+    // existing cache (if any) untouched.
+    if (result.state === "ok" && result.methods) {
+      await db
+        .update(financeBankcontact)
+        .set({ available_tan_methods: result.methods })
+        .where(eq(financeBankcontact.id, p.id));
+    }
     return {
       state: result.state,
       methods: result.methods,

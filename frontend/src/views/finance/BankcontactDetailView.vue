@@ -55,25 +55,32 @@ const myAccounts = computed(() => {
     .sort((a, b) => a.label.localeCompare(b.label))
 })
 
-// Dropdown entries combine the probed list with whatever is currently
-// stored on the bankcontact — so an admin who already knows the ID
-// keeps seeing it selected even before re-probing.
+// Dropdown entries are built from the cached list on the bankcontact
+// (persisted by the last successful probe) merged with any fresh
+// probe result from this session. Labels avoid the technical FinTS
+// id in the visible part — the user picks by bank-supplied name.
 const tanMethodSelectOptions = computed(() => {
+  const seen = new Set<string>()
   const opts: Array<{ id: string; label: string; isDecoupled: boolean }> = []
-  for (const m of tanMethodOptions.value) {
-    opts.push({
-      id: String(m.id),
-      label: `${m.id} — ${m.name}${m.isDecoupled ? ' (decoupled)' : ''}`,
-      isDecoupled: m.isDecoupled,
-    })
+  const pushOption = (m: TanMethodOption) => {
+    const key = String(m.id)
+    if (seen.has(key)) return
+    seen.add(key)
+    const suffix = m.isDecoupled ? ' — Push-Freigabe' : ''
+    opts.push({ id: key, label: `${m.name}${suffix}`, isDecoupled: m.isDecoupled })
   }
-  // If the stored id isn't in the probed list (or we haven't probed
-  // yet), surface it as a read-only option so it stays selected.
+  // Fresh probe (this session) takes precedence over the cache.
+  for (const m of tanMethodOptions.value) pushOption(m)
+  for (const m of bc.value?.available_tan_methods ?? []) pushOption(m)
+
+  // If the stored id isn't in either list, still keep it selected —
+  // rare (e.g. right after an admin edited the raw tan_method
+  // column). Label stays short and non-technical.
   const existing = form.value.tan_method.trim()
-  if (existing && !opts.some((o) => o.id === existing)) {
+  if (existing && !seen.has(existing)) {
     opts.push({
       id: existing,
-      label: `${existing} — (aktuell gespeichert, nicht abgerufen)`,
+      label: `Zuletzt gewählt — bitte „Abrufen" klicken`,
       isDecoupled: false,
     })
   }
@@ -92,6 +99,9 @@ onMounted(async () => {
     form.value.login = existing.login
     form.value.server_url = existing.server_url
     form.value.tan_method = existing.tan_method ?? ''
+    // Seed the fresh-probe ref from the cache so the picker is
+    // populated immediately on page load.
+    tanMethodOptions.value = existing.available_tan_methods ?? []
   }
   // Populate the accounts store so the "Konten" section can filter
   // by bankcontact_id without each view re-fetching.
@@ -152,6 +162,12 @@ async function probeMethods() {
     const resp = await probeTanMethods(bc.value.id)
     if (resp.state === 'ok') {
       tanMethodOptions.value = resp.methods
+      // Refresh the store so a later navigation away and back shows
+      // the populated picker from the cache (the backend already
+      // persisted resp.methods on finance_bankcontact).
+      await store.refresh()
+      const refreshed = store.items.find((b) => b.id === bc.value!.id)
+      if (refreshed) bc.value = refreshed
       if (resp.methods.length === 0) {
         tanProbeInfo.value = 'Bank lieferte keine TAN-Verfahren.'
       } else {

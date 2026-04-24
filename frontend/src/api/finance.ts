@@ -23,6 +23,13 @@ export interface Bankcontact {
   last_sync_at: string | null
   last_sync_status: string | null
   created_at: string | null
+  /**
+   * Cached list of TAN methods the bank advertises for this user,
+   * populated by the most recent probeTanMethods call. Empty array
+   * when the user has never probed this bankcontact — the UI picker
+   * shows a "TAN-Verfahren abrufen"-hint in that case.
+   */
+  available_tan_methods: TanMethodOption[]
 }
 
 export interface CreateBankcontactInput {
