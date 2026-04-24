@@ -1,0 +1,276 @@
+/**
+ * Validation for the Finanzkraft JSON export format.
+ *
+ * The actual Finanzkraft app emits a free-form JSON; this module
+ * defines the canonical shape the importer expects. It is the
+ * contract between whoever prepares the export file (the admin,
+ * manually, or a one-off migration script) and `data-import.ts`.
+ *
+ * Deliberately minimal — every field that isn't relevant for the
+ * non-user-specific import scope (see finance-data-import.md §2) is
+ * dropped here so we can't accidentally carry credentials, ACL rows
+ * or transaction-status through.
+ */
+
+console.log("[boot] finance/import-schema.ts: all imports resolved");
+
+// -----------------------------------------------------------------------
+// Shape
+// -----------------------------------------------------------------------
+
+export interface ImportBankcontact {
+  /** Natural key — (blz, login) is globally unique per bankcontact. */
+  blz: string;
+  login: string;
+  name: string;
+  server_url: string;
+  tan_method?: string | null;
+}
+
+export interface ImportAccount {
+  /** Parent bankcontact is matched via (blz, login). */
+  bankcontact_blz: string;
+  bankcontact_login: string;
+  type_kind: string; // e.g. "giro" — validated against the enum
+  currency_code: string; // e.g. "EUR"
+  /** Optional, primary natural key for dedupe when present. */
+  iban?: string | null;
+  /** Required even if iban is set — falls back as dedupe key when iban is null. */
+  account_number: string;
+  label: string;
+  active?: boolean;
+}
+
+export interface ImportTransaction {
+  /** Parent account lookup via iban OR (bankcontact + account_number). */
+  account_iban?: string | null;
+  account_bankcontact_blz?: string | null;
+  account_bankcontact_login?: string | null;
+  account_number?: string | null;
+  booking_date: string; // YYYY-MM-DD
+  value_date?: string | null;
+  /** Signed amount as a string to avoid float drift; converted to numeric(12,2). */
+  amount: string;
+  currency_code: string;
+  purpose?: string | null;
+  counterparty?: string | null;
+  counterparty_iban?: string | null;
+  fints_id?: string | null;
+  /** Optional pre-computed dedupe hash; if missing the importer recomputes. */
+  dedupe_hash?: string | null;
+  raw?: Record<string, unknown> | null;
+}
+
+export interface ImportTagLink {
+  /** Tag name — always imported as source='user'. */
+  tag: string;
+  /**
+   * How to locate the transaction. Either by fints_id (preferred, when
+   * the Finanzkraft export preserves FinTS IDs) or by
+   * (account_lookup + booking_date + dedupe_hash) — the same keys the
+   * transaction import uses.
+   */
+  fints_id?: string | null;
+  /** Same "find this transaction" keys as ImportTransaction. */
+  account_iban?: string | null;
+  account_bankcontact_blz?: string | null;
+  account_bankcontact_login?: string | null;
+  account_number?: string | null;
+  booking_date?: string | null;
+  dedupe_hash?: string | null;
+}
+
+export interface FinanzkraftExport {
+  version: string;
+  bankcontacts: ImportBankcontact[];
+  accounts: ImportAccount[];
+  transactions: ImportTransaction[];
+  tags: string[];
+  tag_links: ImportTagLink[];
+}
+
+// -----------------------------------------------------------------------
+// Validation
+// -----------------------------------------------------------------------
+
+export class ImportSchemaError extends Error {
+  constructor(public readonly path: string, message: string) {
+    super(`${path}: ${message}`);
+    this.name = "ImportSchemaError";
+  }
+}
+
+function assertString(v: unknown, path: string): string {
+  if (typeof v !== "string") {
+    throw new ImportSchemaError(path, "expected a string");
+  }
+  return v;
+}
+
+function assertNonEmptyString(v: unknown, path: string): string {
+  const s = assertString(v, path);
+  if (s.length === 0) {
+    throw new ImportSchemaError(path, "must not be empty");
+  }
+  return s;
+}
+
+function assertArray(v: unknown, path: string): unknown[] {
+  if (!Array.isArray(v)) {
+    throw new ImportSchemaError(path, "expected an array");
+  }
+  return v;
+}
+
+function assertObject(v: unknown, path: string): Record<string, unknown> {
+  if (!v || typeof v !== "object" || Array.isArray(v)) {
+    throw new ImportSchemaError(path, "expected an object");
+  }
+  return v as Record<string, unknown>;
+}
+
+function optString(
+  v: unknown,
+  path: string,
+): string | undefined {
+  if (v === undefined || v === null) return undefined;
+  return assertString(v, path);
+}
+
+function validateBankcontact(raw: unknown, i: number): ImportBankcontact {
+  const o = assertObject(raw, `bankcontacts[${i}]`);
+  return {
+    blz: assertNonEmptyString(o.blz, `bankcontacts[${i}].blz`),
+    login: assertNonEmptyString(o.login, `bankcontacts[${i}].login`),
+    name: assertNonEmptyString(o.name, `bankcontacts[${i}].name`),
+    server_url: assertNonEmptyString(
+      o.server_url,
+      `bankcontacts[${i}].server_url`,
+    ),
+    tan_method: optString(o.tan_method, `bankcontacts[${i}].tan_method`),
+  };
+}
+
+function validateAccount(raw: unknown, i: number): ImportAccount {
+  const o = assertObject(raw, `accounts[${i}]`);
+  return {
+    bankcontact_blz: assertNonEmptyString(
+      o.bankcontact_blz,
+      `accounts[${i}].bankcontact_blz`,
+    ),
+    bankcontact_login: assertNonEmptyString(
+      o.bankcontact_login,
+      `accounts[${i}].bankcontact_login`,
+    ),
+    type_kind: assertNonEmptyString(o.type_kind, `accounts[${i}].type_kind`),
+    currency_code: assertNonEmptyString(
+      o.currency_code,
+      `accounts[${i}].currency_code`,
+    ),
+    iban: optString(o.iban, `accounts[${i}].iban`) ?? null,
+    account_number: assertNonEmptyString(
+      o.account_number,
+      `accounts[${i}].account_number`,
+    ),
+    label: assertNonEmptyString(o.label, `accounts[${i}].label`),
+    active: typeof o.active === "boolean" ? o.active : undefined,
+  };
+}
+
+function validateTransaction(raw: unknown, i: number): ImportTransaction {
+  const o = assertObject(raw, `transactions[${i}]`);
+  const bookingDate = assertNonEmptyString(
+    o.booking_date,
+    `transactions[${i}].booking_date`,
+  );
+  if (!/^\d{4}-\d{2}-\d{2}/.test(bookingDate)) {
+    throw new ImportSchemaError(
+      `transactions[${i}].booking_date`,
+      "expected YYYY-MM-DD",
+    );
+  }
+  return {
+    account_iban: optString(o.account_iban, `transactions[${i}].account_iban`),
+    account_bankcontact_blz: optString(
+      o.account_bankcontact_blz,
+      `transactions[${i}].account_bankcontact_blz`,
+    ),
+    account_bankcontact_login: optString(
+      o.account_bankcontact_login,
+      `transactions[${i}].account_bankcontact_login`,
+    ),
+    account_number: optString(
+      o.account_number,
+      `transactions[${i}].account_number`,
+    ),
+    booking_date: bookingDate,
+    value_date: optString(o.value_date, `transactions[${i}].value_date`),
+    amount: assertNonEmptyString(o.amount, `transactions[${i}].amount`),
+    currency_code: assertNonEmptyString(
+      o.currency_code,
+      `transactions[${i}].currency_code`,
+    ),
+    purpose: optString(o.purpose, `transactions[${i}].purpose`),
+    counterparty: optString(
+      o.counterparty,
+      `transactions[${i}].counterparty`,
+    ),
+    counterparty_iban: optString(
+      o.counterparty_iban,
+      `transactions[${i}].counterparty_iban`,
+    ),
+    fints_id: optString(o.fints_id, `transactions[${i}].fints_id`),
+    dedupe_hash: optString(o.dedupe_hash, `transactions[${i}].dedupe_hash`),
+    raw:
+      o.raw && typeof o.raw === "object" && !Array.isArray(o.raw)
+        ? (o.raw as Record<string, unknown>)
+        : null,
+  };
+}
+
+function validateTagLink(raw: unknown, i: number): ImportTagLink {
+  const o = assertObject(raw, `tag_links[${i}]`);
+  return {
+    tag: assertNonEmptyString(o.tag, `tag_links[${i}].tag`),
+    fints_id: optString(o.fints_id, `tag_links[${i}].fints_id`),
+    account_iban: optString(o.account_iban, `tag_links[${i}].account_iban`),
+    account_bankcontact_blz: optString(
+      o.account_bankcontact_blz,
+      `tag_links[${i}].account_bankcontact_blz`,
+    ),
+    account_bankcontact_login: optString(
+      o.account_bankcontact_login,
+      `tag_links[${i}].account_bankcontact_login`,
+    ),
+    account_number: optString(
+      o.account_number,
+      `tag_links[${i}].account_number`,
+    ),
+    booking_date: optString(o.booking_date, `tag_links[${i}].booking_date`),
+    dedupe_hash: optString(o.dedupe_hash, `tag_links[${i}].dedupe_hash`),
+  };
+}
+
+export function validateExport(raw: unknown): FinanzkraftExport {
+  const o = assertObject(raw, "root");
+  const version = assertNonEmptyString(o.version, "version");
+  const bankcontacts = assertArray(o.bankcontacts, "bankcontacts").map(
+    validateBankcontact,
+  );
+  const accounts = assertArray(o.accounts, "accounts").map(validateAccount);
+  const transactions = assertArray(o.transactions, "transactions").map(
+    validateTransaction,
+  );
+  const tags = assertArray(o.tags, "tags").map((t, i) =>
+    assertNonEmptyString(t, `tags[${i}]`),
+  );
+  const tag_links = assertArray(o.tag_links, "tag_links").map(validateTagLink);
+  return {
+    version,
+    bankcontacts,
+    accounts,
+    transactions,
+    tags,
+    tag_links,
+  };
+}
