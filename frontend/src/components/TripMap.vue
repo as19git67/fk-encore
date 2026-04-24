@@ -192,8 +192,12 @@ function initMap() {
 
   map = L.map(mapContainer.value, {
     zoomControl: true,
-    attributionControl: true,
+    // Default position is bottom-right; the stats overlay moves
+    // there too, so push attribution to the top-right so the two
+    // don't stack on top of each other.
+    attributionControl: false,
   })
+  L.control.attribution({ position: 'topright' }).addTo(map)
 
   L.tileLayer('https://tile.openstreetmap.de/{z}/{x}/{y}.png', {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
@@ -497,7 +501,7 @@ defineExpose({ selectStopByPhotoId })
 /* Stats */
 .trip-stats {
   position: absolute;
-  top: 12px;
+  bottom: 12px;
   right: 12px;
   z-index: 1000;
   display: flex;

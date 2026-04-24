@@ -6,7 +6,7 @@
  * without an additional toast.
  */
 
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
@@ -77,13 +77,19 @@ watch(
       name.value = props.initialName ?? ''
       email.value = props.initialEmail ?? ''
       submitted.value = false
-      // Initial focus on the name field. Wait for the dialog content
-      // to mount — Dialog uses a teleport + transition so the ref
-      // isn't bound yet on the same tick.
-      void nextTick(() => focusName())
     }
   },
 )
+
+/**
+ * Dialog's @show event fires after the enter transition finishes —
+ * the input is finally in the DOM and focus-able. A nextTick watcher
+ * on the `visible` prop is too early: the Dialog teleports + animates
+ * its content, so the input ref isn't mounted when visible flips.
+ */
+function handleDialogShow() {
+  focusName()
+}
 </script>
 
 <template>
@@ -94,6 +100,7 @@ watch(
     :style="{ width: 'min(420px, 92vw)' }"
     :closable="!submitting"
     @update:visible="emit('update:visible', $event)"
+    @show="handleDialogShow"
   >
     <p v-if="!submitted" class="guest-dialog__intro">
       Hinterlasse Name und E-Mail-Adresse, um Fotos zu kommentieren und über
