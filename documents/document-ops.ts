@@ -29,7 +29,7 @@ import {
   type TaxSectionRequestEntry,
   type TaxonomyEntry,
 } from "./llm-client";
-import { TAX_SECTIONS } from "./tax-sections";
+import { loadEffectiveTaxSections } from "./tax-hint-overrides";
 import { flattenTaxonomy } from "./taxonomy";
 import { realtime } from "~encore/clients";
 
@@ -142,7 +142,8 @@ export async function runClassify(documentId: number): Promise<{ classification:
 
   const taxonomy = await loadTaxonomyForClassifier();
   const clipped = text.slice(0, CLASSIFY_TEXT_LIMIT);
-  const tax_sections: TaxSectionRequestEntry[] = TAX_SECTIONS.map((s) => ({
+  const effectiveSections = await loadEffectiveTaxSections();
+  const tax_sections: TaxSectionRequestEntry[] = effectiveSections.map((s) => ({
     slug: s.slug,
     name: s.name,
     group: s.group,

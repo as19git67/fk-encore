@@ -608,6 +608,15 @@ export const documentCategorySuggestions = pgTable("document_category_suggestion
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
 });
 
+// Admin overrides for the per-section `hint` string that is sent to the
+// LLM in the /classify prompt. Missing row → use the hardcoded default
+// from documents/tax-sections.ts.
+export const taxSectionHintOverrides = pgTable("tax_section_hint_overrides", {
+  slug: text("slug").primaryKey(),
+  hint: text("hint").notNull(),
+  updated_at: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+});
+
 // NOTE: `document_embeddings` (pgvector) is created via raw SQL in migration
 // 0025 and accessed only through raw queries — drizzle-orm has no native
 // vector column type.

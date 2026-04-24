@@ -257,3 +257,42 @@ export function updateDocumentTax(id: number, payload: UpdateDocumentTaxPayload)
 export function backfillDocumentTax() {
   return apiFetch<{ queued: number }>('/documents/tax/backfill', { method: 'POST' })
 }
+
+// ─── Tax hint admin ───────────────────────────────────────────────────────
+
+export interface TaxHintEntry {
+  slug: string
+  name: string
+  group: TaxSectionGroup
+  default_hint: string
+  effective_hint: string
+  is_overridden: boolean
+  updated_at: string | null
+}
+
+export function listTaxHints() {
+  return apiFetch<{ items: TaxHintEntry[] }>('/documents/tax/hints')
+}
+
+export function updateTaxHint(slug: string, hint: string) {
+  return apiFetch<TaxHintEntry>(`/documents/tax/hints/${encodeURIComponent(slug)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ slug, hint }),
+  })
+}
+
+export function resetTaxHint(slug: string) {
+  return apiFetch<TaxHintEntry>(`/documents/tax/hints/${encodeURIComponent(slug)}`, {
+    method: 'DELETE',
+  })
+}
+
+export function reclassifyTaxSection(slug: string, includeReviewed = false) {
+  return apiFetch<{ queued: number }>(
+    `/documents/tax/hints/${encodeURIComponent(slug)}/reclassify`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ slug, include_reviewed: includeReviewed }),
+    },
+  )
+}

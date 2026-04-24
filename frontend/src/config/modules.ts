@@ -96,6 +96,12 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'documents.view' },
       },
       {
+        path: 'steuer/hints',
+        name: 'dokumente-steuer-hints',
+        component: () => import('../views/TaxSectionHintsView.vue'),
+        meta: { permission: 'documents.manage_taxonomy' },
+      },
+      {
         path: ':id',
         name: 'dokumente-detail',
         component: () => import('../views/DocumentDetailView.vue'),
@@ -105,6 +111,7 @@ export const modules: ModuleConfig[] = [
     menuItems: [
       { label: 'Alle Dokumente', icon: 'pi pi-file', routeName: 'dokumente-list', permission: 'documents.view' },
       { label: 'Steuer', icon: 'pi pi-receipt', routeName: 'dokumente-steuer', permission: 'documents.view' },
+      { label: 'Steuer-Hints', icon: 'pi pi-sparkles', routeName: 'dokumente-steuer-hints', permission: 'documents.manage_taxonomy' },
       { label: 'Hochladen', icon: 'pi pi-upload', routeName: 'dokumente-upload', permission: 'documents.upload' },
     ],
   },

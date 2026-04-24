@@ -240,6 +240,20 @@ async function onDelete() {
   }
 }
 
+/**
+ * "Zurück" should return to wherever the user came from — Steuer-View,
+ * normal list, search result, etc. `window.history.state.back` is set by
+ * vue-router whenever the previous entry was an SPA navigation; if it is
+ * null (deep link or reload) we fall back to the document list.
+ */
+function goBack() {
+  if (window.history.state?.back) {
+    router.back()
+  } else {
+    router.push({ name: 'dokumente-list' })
+  }
+}
+
 function statusSeverity(status: DocumentStatus): 'success' | 'info' | 'warn' | 'danger' | 'secondary' {
   switch (status) {
     case 'ready': return 'success'
@@ -297,7 +311,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="document-detail-view">
     <div class="header">
-      <Button icon="pi pi-arrow-left" label="Zurück" text @click="router.push({ name: 'dokumente-list' })" />
+      <Button icon="pi pi-arrow-left" label="Zurück" text @click="goBack" />
       <div class="header-actions">
         <Button
           v-if="auth.hasPermission('documents.edit') && doc"

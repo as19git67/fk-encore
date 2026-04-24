@@ -35,6 +35,12 @@ import {
 } from "./documents.service";
 import { users } from "../db/schema";
 import { replaceUserTaxSections } from "./document-ops";
+import {
+  deleteTaxHintOverride,
+  listTaxHintEntries,
+  upsertTaxHintOverride,
+  type TaxHintEntry,
+} from "./tax-hint-overrides";
 import { dropTaxLinks, relocateDocument } from "./relocate";
 import {
   assertHouseholdMember,
@@ -857,6 +863,142 @@ export const listTaxSectionsCatalog = api(
         hint: s.hint,
       })),
     };
+  },
+);
+
+// ─── Tax hint admin ────────────────────────────────────────────────────────
+
+export interface TaxHintListResponse {
+  items: TaxHintEntry[];
+}
+
+/**
+ * List every tax-section with its default hint, effective hint and
+ * whether it is currently overridden. Powers the hint admin page.
+ */
+export const listTaxHints = api(
+  { expose: true, method: "GET", path: "/documents/tax/hints", auth: true },
+  async (): Promise<TaxHintListResponse> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.manage_taxonomy");
+    return { items: await listTaxHintEntries() };
+  },
+);
+
+export interface UpdateTaxHintRequest {
+  slug: string;
+  hint: string;
+}
+
+/**
+ * Set or replace the hint for a single tax section. The new hint is used
+ * on the next classification run without a service restart.
+ */
+export const updateTaxHint = api(
+  { expose: true, method: "PUT", path: "/documents/tax/hints/:slug", auth: true },
+  async (req: UpdateTaxHintRequest): Promise<TaxHintEntry> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.manage_taxonomy");
+    if (!isValidTaxSectionSlug(req.slug)) {
+      throw APIError.notFound(`unknown tax section: ${req.slug}`);
+    }
+    const hint = typeof req.hint === "string" ? req.hint.trim() : "";
+    if (hint.length === 0) {
+      throw APIError.invalidArgument("hint must not be empty");
+    }
+    await upsertTaxHintOverride(req.slug, hint);
+    const entries = await listTaxHintEntries();
+    const entry = entries.find((e) => e.slug === req.slug);
+    if (!entry) throw APIError.internal("hint entry missing after upsert");
+    return entry;
+  },
+);
+
+export interface ResetTaxHintRequest {
+  slug: string;
+}
+
+/**
+ * Remove the override for a section so the canonical default from
+ * `documents/tax-sections.ts` is used again on the next classify run.
+ */
+export const resetTaxHint = api(
+  { expose: true, method: "DELETE", path: "/documents/tax/hints/:slug", auth: true },
+  async (req: ResetTaxHintRequest): Promise<TaxHintEntry> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.manage_taxonomy");
+    if (!isValidTaxSectionSlug(req.slug)) {
+      throw APIError.notFound(`unknown tax section: ${req.slug}`);
+    }
+    await deleteTaxHintOverride(req.slug);
+    const entries = await listTaxHintEntries();
+    const entry = entries.find((e) => e.slug === req.slug);
+    if (!entry) throw APIError.internal("hint entry missing after reset");
+    return entry;
+  },
+);
+
+export interface ReclassifyTaxSectionRequest {
+  slug: string;
+  /**
+   * When true, include documents the user has already manually reviewed.
+   * Default false: tax-reviewed docs are locked and wouldn't change
+   * anyway, so re-running them wastes LLM cycles.
+   */
+  include_reviewed?: boolean;
+}
+
+export interface ReclassifyTaxSectionResponse {
+  queued: number;
+}
+
+/**
+ * Re-queue every visible document currently assigned to `slug` for a
+ * full classify run. Use this after tweaking the hint so existing
+ * documents pick up the new instruction without touching each doc
+ * individually.
+ */
+export const reclassifyTaxSection = api(
+  { expose: true, method: "POST", path: "/documents/tax/hints/:slug/reclassify", auth: true },
+  async (req: ReclassifyTaxSectionRequest): Promise<ReclassifyTaxSectionResponse> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.manage_taxonomy");
+    if (!isValidTaxSectionSlug(req.slug)) {
+      throw APIError.notFound(`unknown tax section: ${req.slug}`);
+    }
+    const userId = getUserId();
+    const householdIds = await loadUserHouseholdIds(userId);
+
+    const rows = await dbAll<{ id: number }>(
+      db
+        .select({ id: documents.id })
+        .from(documents)
+        .innerJoin(
+          documentTaxSections,
+          eq(documentTaxSections.document_id, documents.id),
+        )
+        .where(
+          and(
+            eq(documentTaxSections.tax_section, req.slug),
+            visibleDocumentsWhere(userId, householdIds),
+            req.include_reviewed ? undefined : eq(documents.tax_reviewed, false),
+          ),
+        ),
+    );
+
+    if (rows.length === 0) return { queued: 0 };
+
+    // Only the classify stage depends on the hint — text_extract output
+    // is unchanged, so we skip re-OCR and save LLM/CPU time.
+    for (const r of rows) {
+      await requeueDocument(r.id, ["classify"]);
+    }
+    triggerWorkers();
+    return { queued: rows.length };
   },
 );
 
