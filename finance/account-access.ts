@@ -33,7 +33,11 @@ console.log("[boot] finance/account-access.ts: all imports resolved");
 
 // -----------------------------------------------------------------------
 
-type AclLevel = (typeof financeAccountLevelEnum.enumValues)[number]; // "read" | "write"
+// Encore's static parser can't follow the generic indexed-access
+// `(typeof X.enumValues)[number]`. Spell the two values out; runtime
+// validation still uses financeAccountLevelEnum.enumValues so the two
+// stay aligned.
+type AclLevel = "read" | "write";
 
 interface AccessEntry {
   user_id: number;

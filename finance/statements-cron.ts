@@ -346,9 +346,12 @@ async function notifyTanRequired(
 // CronJob registration (side effects at module load)
 // -----------------------------------------------------------------------
 
+// Encore parses cron schedules at compile time and rejects template
+// literals — keep the value a bare string and assert that it matches
+// the tolerance constant above.
 const _syncCron = new CronJob("finance-sync-statements", {
   title: "Finance: sync bank statements",
-  every: `${CRON_INTERVAL_MINUTES}m`,
+  every: "5m",
   endpoint: syncStatements,
 });
 void _syncCron;

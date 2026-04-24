@@ -42,25 +42,38 @@ interface TriggerParams {
   bankcontactId: number;
 }
 
-export type SyncApiResponse =
-  | {
-      state: "idle";
-      /** Accounts the cron saw on this run. */
-      accounts_seen?: number;
-      /** Rows inserted into finance_transaction (new only). */
-      transactions_inserted?: number;
-      /** Rows inserted into finance_account_balance. */
-      balances_written?: number;
-      /** True when any per-account fetch hit a mid-flight TAN we skipped. */
-      partial?: boolean;
-    }
-  | {
-      state: "tan-required";
-      tanReference: string;
-      challenge: string;
-      tanMediaName?: string;
-    }
-  | { state: "error"; errorCode: string; errorMessage: string };
+/**
+ * Encore requires endpoint return types to be a named interface, not a
+ * discriminated union — so every state variant's fields live on the
+ * same interface as optional. Callers switch on `state` and treat the
+ * rest of the fields as variant-specific:
+ *
+ *   state = "idle"          → accounts_seen / transactions_inserted /
+ *                              balances_written / partial are meaningful
+ *   state = "tan-required"  → tanReference + challenge (+tanMediaName)
+ *   state = "error"         → errorCode + errorMessage
+ */
+export interface SyncApiResponse {
+  state: "idle" | "tan-required" | "error";
+  /** state=idle — accounts the cron saw on this run. */
+  accounts_seen?: number;
+  /** state=idle — rows inserted into finance_transaction (new only). */
+  transactions_inserted?: number;
+  /** state=idle — rows inserted into finance_account_balance. */
+  balances_written?: number;
+  /** state=idle — true when any per-account fetch hit a mid-flight TAN we skipped. */
+  partial?: boolean;
+  /** state=tan-required — our public UUID for the pending session. */
+  tanReference?: string;
+  /** state=tan-required — human-readable challenge from the bank. */
+  challenge?: string;
+  /** state=tan-required — name of the selected TAN medium, if the bank identified one. */
+  tanMediaName?: string;
+  /** state=error — first non-zero bankAnswer code, e.g. "9910" for wrong PIN. */
+  errorCode?: string;
+  /** state=error — human-readable reason. */
+  errorMessage?: string;
+}
 
 /**
  * Session-TTL for the TAN flow — 10 minutes matches the typical
