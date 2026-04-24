@@ -5,10 +5,15 @@ import Message from 'primevue/message'
 import HeicImage from '../components/HeicImage.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import FilterMenu from '../components/FilterMenu.vue'
+import GuestStatusBanner from '../components/GuestStatusBanner.vue'
+import GuestRegisterDialog from '../components/GuestRegisterDialog.vue'
+import GuestPhotoReactions from '../components/GuestPhotoReactions.vue'
 import { getPublicAlbum, getPhotoUrl, type PhotoFilter, type PublicAlbumResponse, type PublicAlbumPhoto, type Photo } from '../api/photos'
 import { matchesPhotoFilter } from '../utils/photoFilter'
 import { countActiveFilters } from '../composables/useFilter'
 import { formatPhotoDate, formatLocationLabel } from '../utils/dateFormat'
+import { useGuestSession } from '../composables/useGuestSession'
+import { useGuestPushNotifications } from '../composables/useGuestPushNotifications'
 
 const TripMap = defineAsyncComponent(() => import('../components/TripMap.vue'))
 
@@ -16,6 +21,63 @@ const route = useRoute()
 const album = ref<PublicAlbumResponse | null>(null)
 const loading = ref(true)
 const error = ref('')
+
+const shareToken = computed(() => (route.params.token as string) ?? '')
+
+// Guest identity + opt-in toggles. The composable instances are
+// created once per token and shared with the banner so unmounting
+// the banner during route changes wouldn't drop subscription state.
+const guestSession = useGuestSession(shareToken.value)
+const guestPush = useGuestPushNotifications(shareToken.value)
+
+const showRegisterDialog = ref(false)
+const registerInitial = ref<{ email: string; name: string } | undefined>(undefined)
+
+function openRegisterDialog() {
+  registerInitial.value = guestSession.guest.value
+    ? {
+        email: guestSession.guest.value.email,
+        name: guestSession.guest.value.display_name,
+      }
+    : undefined
+  showRegisterDialog.value = true
+}
+
+async function handleRegisterSubmit(payload: { email: string; displayName: string }) {
+  try {
+    await guestSession.register(payload.email, payload.displayName)
+    // Dialog stays open showing the inbox confirmation; the user
+    // closes it with the explicit "Schließen" button.
+  } catch {
+    // Error is already surfaced via guestSession.error / dialog
+    // errorMessage prop.
+  }
+}
+
+async function handleResendVerifyMail() {
+  try {
+    await guestSession.resendVerifyMail()
+    openRegisterDialog()
+  } catch {
+    // already surfaced
+  }
+}
+
+async function handleLogout() {
+  await guestSession.logout()
+  // If the guest had Web Push enabled, drop the local subscription
+  // too — the cookie is gone so the backend would refuse new sends
+  // anyway, but pruning keeps the browser from holding a dead
+  // endpoint that fires no notifications.
+  if (guestPush.status.value === 'subscribed') {
+    await guestPush.unsubscribe()
+  }
+}
+
+async function handleTogglePush(value: boolean) {
+  if (value) await guestPush.subscribe()
+  else await guestPush.unsubscribe()
+}
 
 /** Cast PublicAlbumPhoto[] to Photo[] for components that expect full Photo type */
 function asPhotos(photos: PublicAlbumPhoto[]): Photo[] {
@@ -133,16 +195,11 @@ const currentDescription = computed<string>(() => {
 
 /**
  * True when the info panel provides value beyond what the topbar already
- * shows (date + location text). Currently that means: the photo has a
- * description. Date, location and map link are shown *inside* the panel
- * when it opens, but they alone don't justify showing the button.
+ * shows (date + location text). With guest comments living inside the
+ * panel the answer is "always" — even an empty thread surfaces the
+ * composer or the verify gate.
  */
-const hasExtraDetails = computed<boolean>(() => {
-  return !!currentDescription.value
-})
-
-/** Show the info button when there are extra details OR the panel is already open. */
-const showInfoButton = computed(() => hasExtraDetails.value || showInfo.value)
+const showInfoButton = computed<boolean>(() => true)
 
 /** Maps URL — Apple Maps on Apple devices, Google Maps elsewhere. */
 const isApple = /iPhone|iPad|iPod|Mac/.test(navigator.userAgent)
@@ -220,6 +277,10 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+  // Guest state loads in parallel — failures don't block the album
+  // view; the banner just shows the anonymous CTA.
+  void guestSession.refresh()
+  void guestPush.refreshState()
 })
 
 onUnmounted(() => {
@@ -236,6 +297,20 @@ onUnmounted(() => {
     <Message v-if="error" severity="error">{{ error }}</Message>
 
     <template v-if="album">
+      <GuestStatusBanner
+        :guest="guestSession.guest.value"
+        :loading="guestSession.loading.value"
+        :togglingNotify="guestSession.togglingNotify.value"
+        :pushStatus="guestPush.status.value"
+        :pushBusy="guestPush.busy.value"
+        :pushCanToggle="guestPush.canToggle.value"
+        @register="openRegisterDialog"
+        @resend-verify="handleResendVerifyMail"
+        @logout="handleLogout"
+        @toggle-notify="(v) => guestSession.toggleNotifyOptIn(v)"
+        @toggle-push="handleTogglePush"
+      />
+
       <div v-if="album.display_mode !== 'map'" class="shared-header">
         <h1 class="title">{{ album.name }}</h1>
         <p v-if="album.description" class="description">{{ album.description }}</p>
@@ -349,10 +424,28 @@ onUnmounted(() => {
               <i class="pi pi-align-left" />
               <p>{{ currentDescription }}</p>
             </div>
+            <div v-if="currentPhoto" class="info-row info-comments">
+              <GuestPhotoReactions
+                :share-token="shareToken"
+                :photo-id="currentPhoto.id"
+                :guest="guestSession.guest.value"
+                @request-register="openRegisterDialog"
+                @request-verify="handleResendVerifyMail"
+              />
+            </div>
           </div>
         </div>
       </template>
     </FullscreenOverlay>
+
+    <GuestRegisterDialog
+      v-model:visible="showRegisterDialog"
+      :submitting="guestSession.submittingRegister.value"
+      :error-message="guestSession.error.value"
+      :initial-email="registerInitial?.email"
+      :initial-name="registerInitial?.name"
+      @submit="handleRegisterSubmit"
+    />
   </div>
 </template>
 
@@ -621,6 +714,26 @@ onUnmounted(() => {
 .info-description {
   color: rgba(255, 255, 255, 0.75);
   white-space: pre-wrap;
+}
+
+/* Comment thread inside the slide-up panel. The base component uses
+   theme tokens that work over the dark info-panel background but the
+   muted text color reads too dim against pure black, so we lift it
+   per-row inside this container. */
+.info-comments {
+  display: block;
+  margin-top: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+.info-comments :deep(.reactions__author),
+.info-comments :deep(.reactions__meta),
+.info-comments :deep(.reactions__empty),
+.info-comments :deep(.reactions__gate) {
+  color: rgba(255, 255, 255, 0.7);
+}
+.info-comments :deep(.reactions__body) {
+  color: rgba(255, 255, 255, 0.95);
 }
 
 @media (max-width: 768px) {
