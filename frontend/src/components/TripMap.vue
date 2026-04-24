@@ -192,12 +192,8 @@ function initMap() {
 
   map = L.map(mapContainer.value, {
     zoomControl: true,
-    // Default position is bottom-right; the stats overlay moves
-    // there too, so push attribution to the top-right so the two
-    // don't stack on top of each other.
-    attributionControl: false,
+    attributionControl: true,
   })
-  L.control.attribution({ position: 'topright' }).addTo(map)
 
   L.tileLayer('https://tile.openstreetmap.de/{z}/{x}/{y}.png', {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
@@ -359,12 +355,16 @@ defineExpose({ selectStopByPhotoId })
   <div class="trip-map-wrapper">
     <div ref="mapContainer" class="trip-map-container" />
 
-    <!-- Stats overlay -->
+    <!-- Stats overlay — two rows: counts on top, slot addon below. -->
     <div class="trip-stats">
-      <span>{{ stops.length }} {{ stops.length === 1 ? 'Stopp' : 'Stopps' }}</span>
-      <span class="trip-stats-sep">&bull;</span>
-      <span>{{ photos.filter(p => p.latitude != null).length }} Fotos</span>
-      <slot name="stats-addon" />
+      <div class="trip-stats-row">
+        <span>{{ stops.length }} {{ stops.length === 1 ? 'Stopp' : 'Stopps' }}</span>
+        <span class="trip-stats-sep">&bull;</span>
+        <span>{{ photos.filter(p => p.latitude != null).length }} Fotos</span>
+      </div>
+      <div v-if="$slots['stats-addon']" class="trip-stats-row">
+        <slot name="stats-addon" />
+      </div>
     </div>
 
     <!-- Horizontal timeline strip -->
@@ -501,18 +501,28 @@ defineExpose({ selectStopByPhotoId })
 /* Stats */
 .trip-stats {
   position: absolute;
-  bottom: 12px;
+  top: 12px;
   right: 12px;
   z-index: 1000;
+  /* Two-line layout: first row holds the counts, second row holds
+     whatever a parent passes via the `stats-addon` slot (usually
+     action buttons). Right-aligned so separator bullets line up. */
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
   background: rgba(0, 0, 0, 0.75);
   backdrop-filter: blur(8px);
   border-radius: 8px;
   padding: 6px 12px;
   color: rgba(255, 255, 255, 0.9);
   font-size: 0.85rem;
+}
+
+.trip-stats-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .trip-stats-sep {

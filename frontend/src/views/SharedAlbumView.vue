@@ -351,7 +351,6 @@ onUnmounted(() => {
         @open-fullscreen="handleMapFullscreen"
       >
         <template #stats-addon>
-          <span class="trip-stats-sep">&bull;</span>
           <button
             type="button"
             class="map-filter-button"
@@ -362,17 +361,15 @@ onUnmounted(() => {
             <i :class="activeCount > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'" />
             <span>{{ activeCount > 0 ? `Filter (${activeCount})` : 'Filter' }}</span>
           </button>
-          <template v-if="isMapAnonymous">
-            <span class="trip-stats-sep">&bull;</span>
-            <button
-              type="button"
-              class="map-filter-button map-filter-button--cta"
-              @click="openRegisterDialog"
-            >
-              <i class="pi pi-sign-in" />
-              <span>Anmelden</span>
-            </button>
-          </template>
+          <button
+            v-if="isMapAnonymous"
+            type="button"
+            class="map-filter-button map-filter-button--cta"
+            @click="openRegisterDialog"
+          >
+            <i class="pi pi-sign-in" />
+            <span>Anmelden</span>
+          </button>
         </template>
       </TripMap>
 
