@@ -183,12 +183,22 @@ onMounted(async () => {
   <div class="documents-view">
     <div class="header">
       <h1 class="title">Dokumente</h1>
-      <Button
-        v-if="auth.hasPermission('documents.upload')"
-        label="Hochladen"
-        icon="pi pi-upload"
-        @click="router.push({ name: 'dokumente-upload' })"
-      />
+      <div class="header-actions">
+        <Button
+          icon="pi pi-question-circle"
+          text
+          rounded
+          aria-label="Hilfe zum Dokumente-Modul"
+          v-tooltip.bottom="'Hilfe: Dokument-Flow und Aktionen'"
+          @click="router.push({ name: 'dokumente-hilfe' })"
+        />
+        <Button
+          v-if="auth.hasPermission('documents.upload')"
+          label="Hochladen"
+          icon="pi pi-upload"
+          @click="router.push({ name: 'dokumente-upload' })"
+        />
+      </div>
     </div>
 
     <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
@@ -319,6 +329,12 @@ onMounted(async () => {
   justify-content: space-between;
   align-items: center;
   margin-block: 0.25rem 0.5rem;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
 }
 
 .filters {
