@@ -716,24 +716,21 @@ onUnmounted(() => {
   white-space: pre-wrap;
 }
 
-/* Comment thread inside the slide-up panel. The base component uses
-   theme tokens that work over the dark info-panel background but the
-   muted text color reads too dim against pure black, so we lift it
-   per-row inside this container. */
+/* Comment thread inside the slide-up panel. The panel forces a dark
+   backdrop regardless of the active app theme, so the shared
+   PhotoCommentThread would pick up the light-mode `--p-text-color`
+   and render its bubble text as dark-on-dark. Override the tokens
+   the base reads (text, muted, border) with values from Aura's
+   absolute surface palette so everything inside stays legible
+   without any hardcoded colours. */
 .info-comments {
   display: block;
   margin-top: 0.5rem;
   padding-top: 0.75rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
-}
-.info-comments :deep(.reactions__author),
-.info-comments :deep(.reactions__meta),
-.info-comments :deep(.reactions__empty),
-.info-comments :deep(.reactions__gate) {
-  color: rgba(255, 255, 255, 0.7);
-}
-.info-comments :deep(.reactions__body) {
-  color: rgba(255, 255, 255, 0.95);
+  border-top: 1px solid color-mix(in srgb, var(--p-surface-0) 12%, transparent);
+  --p-text-color: var(--p-surface-0);
+  --p-text-muted-color: var(--p-surface-300);
+  --p-surface-border-color: color-mix(in srgb, var(--p-surface-0) 18%, transparent);
 }
 
 @media (max-width: 768px) {
