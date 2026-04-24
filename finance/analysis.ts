@@ -18,6 +18,7 @@ import { getAuthData } from "~encore/auth";
 import { eq, sql, type SQLWrapper } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
+import { checkRateLimit } from "../user/rateLimiter";
 import db from "../db/database";
 import { financeAccountAccess, financeTag } from "../db/schema";
 import {
@@ -65,6 +66,15 @@ export const query = api(
   async (req: QueryRequest): Promise<AnalysisResult> => {
     const auth = getAuthData()!;
     requirePermission(auth, "finance.view");
+
+    // Rate-limit per user — each call hits llm-service. The /aggregate
+    // endpoint (no LLM) is deliberately exempt.
+    // See docs/finance-rate-limiting.md §2.
+    checkRateLimit(`analysis-query:${auth.userID}`, {
+      maxAttempts: 30,
+      windowMs: 10 * 60_000,
+      message: "Too many analysis queries.",
+    });
 
     if (typeof req.question !== "string" || req.question.trim().length === 0) {
       throw APIError.invalidArgument("question must be a non-empty string");

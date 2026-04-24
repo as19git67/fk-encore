@@ -27,6 +27,7 @@ import { getAuthData } from "~encore/auth";
 import { and, eq } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
+import { checkRateLimit } from "../user/rateLimiter";
 import db from "../db/database";
 import {
   financeAccount,
@@ -94,6 +95,14 @@ export const importFinanzkraft = api(
   async (req: ImportRequest): Promise<ImportResponse> => {
     const auth = getAuthData()!;
     requirePermission(auth, "finance.admin");
+
+    // Import is expensive (minutes, large TXs). Tight per-user cap.
+    // See docs/finance-rate-limiting.md §2.
+    checkRateLimit(`finance-import:${auth.userID}`, {
+      maxAttempts: 3,
+      windowMs: 60 * 60_000,
+      message: "Too many import attempts.",
+    });
 
     let exportData: FinanzkraftExport;
     try {

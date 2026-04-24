@@ -13,6 +13,7 @@ import {
 } from "../db/schema";
 import { importFinanzkraft } from "./data-import";
 import type { FinanzkraftExport } from "./import-schema";
+import { __resetRateLimiterForTests } from "../user/rateLimiter";
 
 function setAuth(userID: string, perms: string[]) {
   vi.mocked(getAuthData).mockReturnValue({ userID, permissions: perms });
@@ -25,6 +26,9 @@ beforeEach(async () => {
   await db.delete(financeAccountAccess);
   await db.delete(financeAccount);
   await db.delete(financeBankcontact);
+  // Import is capped at 3/60min per user — reset so each test starts
+  // with a fresh quota. See docs/finance-rate-limiting.md §2.
+  __resetRateLimiterForTests();
   setAuth("1", []);
 });
 

@@ -25,6 +25,7 @@ import { getAuthData } from "~encore/auth";
 import { eq, lt } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
+import { checkRateLimit, resetRateLimit } from "../user/rateLimiter";
 import db from "../db/database";
 import { financeTanSession } from "../db/schema";
 import { runSynchronize } from "./fints-client";
@@ -53,6 +54,15 @@ export const completeTanSession = api(
   async (p: CompleteParams): Promise<SyncApiResponse> => {
     const auth = getAuthData()!;
     requirePermission(auth, "finance.accounts.manage");
+
+    // Rate-limit per tan_reference, not per IP — NATed users must not lock
+    // each other out. See docs/finance-rate-limiting.md §2.
+    const rateKey = `tan-complete:${p.tanReference}`;
+    checkRateLimit(rateKey, {
+      maxAttempts: 5,
+      windowMs: 10 * 60_000,
+      message: "Too many TAN attempts for this session.",
+    });
 
     const userId = Number(auth.userID);
     const [session] = await db
@@ -88,9 +98,10 @@ export const completeTanSession = api(
     });
 
     if (result.state === "tan-required") {
-      // Wrong TAN → bank may return a fresh challenge. Update the
-      // session so the UI can show the new prompt without starting
-      // a fresh dialog (bank typically allows 2-3 attempts).
+      // Follow-up TAN (chained auth step) — counts as success for
+      // rate-limiting purposes: the user is on the right path, reset
+      // the counter so the next TAN attempt starts fresh.
+      resetRateLimit(rateKey);
       await db
         .update(financeTanSession)
         .set({
@@ -123,6 +134,7 @@ export const completeTanSession = api(
     }
     // state === "idle" — run the statement/balance fetch with the
     // still-open client so TAN is not re-triggered for a second time.
+    resetRateLimit(rateKey);
     return await fetchAndPersist(session.bankcontact_id, result.client);
   },
 );

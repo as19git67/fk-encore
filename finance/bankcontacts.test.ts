@@ -24,6 +24,7 @@ import {
   updateBankcontact,
 } from "./bankcontacts";
 import { decryptWithKey } from "./encryption";
+import { __resetRateLimiterForTests } from "../user/rateLimiter";
 
 // vitest.setup.ts provides a global mock of encore.dev/config.secret()
 // that returns 32 zero-bytes base64 — the same key decryptWithKey uses
@@ -54,6 +55,7 @@ beforeEach(async () => {
   await db.delete(financeAccount);
   await db.delete(financeBankcontact);
   await db.delete(users);
+  __resetRateLimiterForTests();
   withoutPermission();
 });
 

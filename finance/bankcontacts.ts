@@ -14,6 +14,7 @@ import { getAuthData } from "~encore/auth";
 import { eq } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
+import { checkRateLimit } from "../user/rateLimiter";
 import db from "../db/database";
 import { financeBankcontact, financeAccount } from "../db/schema";
 import { encryptCredentials } from "./encryption";
@@ -244,6 +245,14 @@ export const setBankcontactCredentials = api(
   async (p: SetCredentialsParams): Promise<SetCredentialsResponse> => {
     const auth = getAuthData()!;
     requirePermission(auth, "finance.accounts.manage");
+
+    // Rate-limit per user×bankcontact. See docs/finance-rate-limiting.md §2.
+    checkRateLimit(`bank-creds:${auth.userID}:${p.id}`, {
+      maxAttempts: 10,
+      windowMs: 15 * 60_000,
+      message: "Too many credential updates for this bank contact.",
+    });
+
     if (typeof p.pin !== "string" || p.pin.length === 0) {
       throw APIError.invalidArgument("pin must be a non-empty string");
     }

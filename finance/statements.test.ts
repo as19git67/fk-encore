@@ -17,6 +17,7 @@ import {
 import { triggerSync } from "./statements";
 import * as fintsClient from "./fints-client";
 import type { DialogResult } from "./types";
+import { __resetRateLimiterForTests } from "../user/rateLimiter";
 
 // Mock the wrapper — endpoint tests only care about its contract, not
 // its implementation. The dedicated fints-client.test.ts covers the
@@ -51,6 +52,7 @@ beforeEach(async () => {
   await db.delete(financeAccount);
   await db.delete(financeBankcontact);
   await db.delete(users);
+  __resetRateLimiterForTests();
   setAuth("1", []);
   vi.mocked(fintsClient.runSynchronize).mockReset();
 });

@@ -18,6 +18,7 @@ import {
   suggestTagsBatch,
   suggestTagsForTransaction,
 } from "./tag-suggester";
+import { __resetRateLimiterForTests } from "../user/rateLimiter";
 
 vi.mock("./llm-client", async (orig) => {
   const actual = await orig<typeof import("./llm-client")>();
@@ -47,6 +48,7 @@ beforeEach(async () => {
   await db.delete(financeAccount);
   await db.delete(financeBankcontact);
   await db.delete(users);
+  __resetRateLimiterForTests();
   setAuth("1", []);
   vi.mocked(llmClient.embed).mockReset();
   vi.mocked(llmClient.suggestTags).mockReset();

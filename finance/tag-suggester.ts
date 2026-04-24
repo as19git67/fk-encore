@@ -31,6 +31,7 @@ import { getAuthData } from "~encore/auth";
 import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
+import { checkRateLimit } from "../user/rateLimiter";
 import db from "../db/database";
 import {
   financeAccount,
@@ -353,6 +354,14 @@ export const suggestTagsBatch = api(
   async (p: SuggestBatchParams): Promise<SuggestBatchResponse> => {
     const auth = getAuthData()!;
     requirePermission(auth, "finance.view");
+
+    // Batch runs can fan out to many llm-service calls. Strict cap.
+    // See docs/finance-rate-limiting.md §2.
+    checkRateLimit(`tag-suggest-batch:${auth.userID}`, {
+      maxAttempts: 5,
+      windowMs: 60 * 60_000,
+      message: "Too many batch tag-suggestion runs.",
+    });
 
     // ACL filter — non-admin users may only run the suggester over
     // transactions on accounts they can read.

@@ -15,6 +15,7 @@ import {
 } from "../db/schema";
 import { aggregate, query } from "./analysis";
 import * as llmClient from "./llm-client";
+import { __resetRateLimiterForTests } from "../user/rateLimiter";
 
 vi.mock("./llm-client", async (orig) => {
   const actual = await orig<typeof import("./llm-client")>();
@@ -42,6 +43,7 @@ beforeEach(async () => {
   await db.delete(financeAccount);
   await db.delete(financeBankcontact);
   await db.delete(users);
+  __resetRateLimiterForTests();
   setAuth("1", []);
   vi.mocked(llmClient.parseAnalysisQuery).mockReset();
 });

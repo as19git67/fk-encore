@@ -25,6 +25,7 @@ import { getAuthData } from "~encore/auth";
 import { eq } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
+import { checkRateLimit } from "../user/rateLimiter";
 import db from "../db/database";
 import { financeBankcontact, financeTanSession } from "../db/schema";
 import {
@@ -92,6 +93,15 @@ export const triggerSync = api(
   async (p: TriggerParams): Promise<SyncApiResponse> => {
     const auth = getAuthData()!;
     requirePermission(auth, "finance.accounts.manage");
+
+    // Rate-limit manual sync per user×bankcontact so a single user can't
+    // spam the bank's FinTS endpoint. The cron fires independently.
+    // See docs/finance-rate-limiting.md §2.
+    checkRateLimit(`sync-trigger:${auth.userID}:${p.bankcontactId}`, {
+      maxAttempts: 20,
+      windowMs: 15 * 60_000,
+      message: "Too many manual syncs for this bank contact.",
+    });
 
     await assertBankcontactExists(p.bankcontactId);
 

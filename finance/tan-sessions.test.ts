@@ -20,6 +20,7 @@ import {
 } from "./tan-sessions";
 import * as fintsClient from "./fints-client";
 import type { DialogResult } from "./types";
+import { __resetRateLimiterForTests } from "../user/rateLimiter";
 
 vi.mock("./fints-client", async (orig) => {
   const actual = await orig<typeof import("./fints-client")>();
@@ -58,6 +59,7 @@ beforeEach(async () => {
   await db.delete(financeAccount);
   await db.delete(financeBankcontact);
   await db.delete(users);
+  __resetRateLimiterForTests();
   setAuth("1", []);
   vi.mocked(fintsClient.runSynchronize).mockReset();
 });
