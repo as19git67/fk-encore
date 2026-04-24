@@ -2,11 +2,18 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { getAuthData } from "~encore/auth";
 
 import db from "../db/database";
+import { sql } from "drizzle-orm";
 import {
   financeAccount,
+  financeAccountAccess,
+  financeAccountBalance,
   financeAccountType,
   financeBankcontact,
   financeCurrency,
+  financeTagTransaction,
+  financeTanSession,
+  financeTransaction,
+  users,
 } from "../db/schema";
 import {
   createBankcontact,
@@ -36,9 +43,17 @@ function withoutPermission() {
 }
 
 beforeEach(async () => {
-  // account → bankcontact FK is RESTRICT, clear accounts first
+  // Drain the finance graph from leaves inward so FK RESTRICTs don't
+  // trip when a previous test file left transactions/balances behind.
+  await db.execute(sql`DELETE FROM finance_transaction_embedding`);
+  await db.delete(financeTagTransaction);
+  await db.delete(financeTransaction);
+  await db.delete(financeAccountBalance);
+  await db.delete(financeTanSession);
+  await db.delete(financeAccountAccess);
   await db.delete(financeAccount);
   await db.delete(financeBankcontact);
+  await db.delete(users);
   withoutPermission();
 });
 

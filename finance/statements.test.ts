@@ -3,17 +3,20 @@ import { getAuthData } from "~encore/auth";
 import { eq } from "drizzle-orm";
 
 import db from "../db/database";
+import { sql } from "drizzle-orm";
 import {
   financeAccount,
   financeAccountAccess,
+  financeAccountBalance,
   financeBankcontact,
+  financeTagTransaction,
   financeTanSession,
+  financeTransaction,
   users,
 } from "../db/schema";
 import { triggerSync } from "./statements";
 import * as fintsClient from "./fints-client";
 import type { DialogResult } from "./types";
-import { sql } from "drizzle-orm";
 
 // Mock the wrapper — endpoint tests only care about its contract, not
 // its implementation. The dedicated fints-client.test.ts covers the
@@ -37,6 +40,12 @@ async function ensureUser(id: number): Promise<void> {
 }
 
 beforeEach(async () => {
+  // Drain the finance graph from leaves inward so FK RESTRICTs don't
+  // trip when a previous test file left transactions/balances behind.
+  await db.execute(sql`DELETE FROM finance_transaction_embedding`);
+  await db.delete(financeTagTransaction);
+  await db.delete(financeTransaction);
+  await db.delete(financeAccountBalance);
   await db.delete(financeTanSession);
   await db.delete(financeAccountAccess);
   await db.delete(financeAccount);

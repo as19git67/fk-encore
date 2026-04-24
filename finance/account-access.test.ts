@@ -6,8 +6,12 @@ import db from "../db/database";
 import {
   financeAccount,
   financeAccountAccess,
+  financeAccountBalance,
   financeAccountType,
   financeBankcontact,
+  financeTagTransaction,
+  financeTanSession,
+  financeTransaction,
   users,
 } from "../db/schema";
 import {
@@ -26,6 +30,13 @@ async function ensureUser(id: number): Promise<void> {
 }
 
 beforeEach(async () => {
+  // Drain the finance graph from leaves inward so FK RESTRICTs don't
+  // trip when a previous test file left transactions/balances behind.
+  await db.execute(sql`DELETE FROM finance_transaction_embedding`);
+  await db.delete(financeTagTransaction);
+  await db.delete(financeTransaction);
+  await db.delete(financeAccountBalance);
+  await db.delete(financeTanSession);
   await db.delete(financeAccountAccess);
   await db.delete(financeAccount);
   await db.delete(financeBankcontact);

@@ -3,7 +3,17 @@ import { getAuthData } from "~encore/auth";
 import { eq } from "drizzle-orm";
 
 import db from "../db/database";
-import { financeBankcontact } from "../db/schema";
+import { sql } from "drizzle-orm";
+import {
+  financeAccount,
+  financeAccountAccess,
+  financeAccountBalance,
+  financeBankcontact,
+  financeTagTransaction,
+  financeTanSession,
+  financeTransaction,
+  users,
+} from "../db/schema";
 import { getSchedule, putSchedule } from "./sync-schedule";
 
 function setAuth(userID: string, perms: string[]) {
@@ -11,7 +21,17 @@ function setAuth(userID: string, perms: string[]) {
 }
 
 beforeEach(async () => {
+  // Drain the finance graph from leaves inward so FK RESTRICTs don't
+  // trip when a previous test file left transactions/balances behind.
+  await db.execute(sql`DELETE FROM finance_transaction_embedding`);
+  await db.delete(financeTagTransaction);
+  await db.delete(financeTransaction);
+  await db.delete(financeAccountBalance);
+  await db.delete(financeTanSession);
+  await db.delete(financeAccountAccess);
+  await db.delete(financeAccount);
   await db.delete(financeBankcontact);
+  await db.delete(users);
   setAuth("1", []);
 });
 
