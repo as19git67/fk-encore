@@ -17,6 +17,7 @@ vi.mock("encore.dev/api", () => {
     static abondoned(msg: string) { return new APIError("abondoned", msg); }
     static alreadyExists(msg: string) { return new APIError("already_exists", msg); }
     static deadlineExceeded(msg: string) { return new APIError("deadline_exceeded", msg); }
+    static failedPrecondition(msg: string) { return new APIError("failed_precondition", msg); }
     static internal(msg: string) { return new APIError("internal", msg); }
     static invalidArgument(msg: string) { return new APIError("invalid_argument", msg); }
     static notFound(msg: string) { return new APIError("not_found", msg); }
