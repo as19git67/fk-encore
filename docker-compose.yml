@@ -123,12 +123,19 @@ services:
       # Finance module — see docs/finance-fints-integration.md §2.4.
       # FINANCE_CREDENTIALS_KEY is the AES-256-GCM master key that
       # encrypts bank PINs in finance_bankcontact.credentials_encrypted.
+      # Must be a 32-byte value, base64-encoded. Generate once with:
+      #   node -e 'console.log(require("crypto").randomBytes(32).toString("base64"))'
       # Losing it means every stored credential has to be re-entered.
-      # The ZKA product-id + version are required by lib-fints under
-      # PSD2; see https://www.fints.org/de/hersteller/produktregistrierung.
       FINANCE_CREDENTIALS_KEY: ${FINANCE_CREDENTIALS_KEY:-}
-      FINANCE_FINTS_PRODUCT_ID: ${FINANCE_FINTS_PRODUCT_ID:-}
-      FINANCE_FINTS_PRODUCT_VERSION: ${FINANCE_FINTS_PRODUCT_VERSION:-}
+      # ZKA product-id + version are required by lib-fints under PSD2;
+      # see https://www.fints.org/de/hersteller/produktregistrierung.
+      # The fallbacks below let the stack boot for development and
+      # self-hosted use; production deployments should override with a
+      # registered product-id in .env (Encore treats an *empty* secret
+      # as "not set" and the FinTS dialog fails with
+      # "failed to resolve secret: environment variable not found").
+      FINANCE_FINTS_PRODUCT_ID: ${FINANCE_FINTS_PRODUCT_ID:-dev-placeholder}
+      FINANCE_FINTS_PRODUCT_VERSION: ${FINANCE_FINTS_PRODUCT_VERSION:-0.1.0}
     volumes:
       - photos:/mnt/data/photos
       - thumbnails:/mnt/data/thumbnails
