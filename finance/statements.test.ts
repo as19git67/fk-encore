@@ -3,7 +3,13 @@ import { getAuthData } from "~encore/auth";
 import { eq } from "drizzle-orm";
 
 import db from "../db/database";
-import { financeBankcontact, financeTanSession, users } from "../db/schema";
+import {
+  financeAccount,
+  financeAccountAccess,
+  financeBankcontact,
+  financeTanSession,
+  users,
+} from "../db/schema";
 import { triggerSync } from "./statements";
 import * as fintsClient from "./fints-client";
 import type { DialogResult } from "./types";
@@ -32,6 +38,8 @@ async function ensureUser(id: number): Promise<void> {
 
 beforeEach(async () => {
   await db.delete(financeTanSession);
+  await db.delete(financeAccountAccess);
+  await db.delete(financeAccount);
   await db.delete(financeBankcontact);
   await db.delete(users);
   setAuth("1", []);

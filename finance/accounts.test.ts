@@ -1,0 +1,280 @@
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { getAuthData } from "~encore/auth";
+import { eq, sql } from "drizzle-orm";
+
+import db from "../db/database";
+import {
+  financeAccount,
+  financeAccountAccess,
+  financeAccountType,
+  financeBankcontact,
+  financeCurrency,
+  users,
+} from "../db/schema";
+import {
+  createAccount,
+  getAccount,
+  listAccounts,
+  updateAccount,
+} from "./accounts";
+
+function setAuth(userID: string, perms: string[]) {
+  vi.mocked(getAuthData).mockReturnValue({ userID, permissions: perms });
+}
+
+async function ensureUser(id: number): Promise<void> {
+  await db.execute(
+    sql`INSERT INTO users (id, email, name, password_hash) VALUES (${id}, ${`u${id}@test.local`}, ${`User${id}`}, 'x') ON CONFLICT (id) DO NOTHING`,
+  );
+}
+
+beforeEach(async () => {
+  await db.delete(financeAccountAccess);
+  await db.delete(financeAccount);
+  await db.delete(financeBankcontact);
+  await db.delete(users);
+  setAuth("1", []);
+});
+
+async function insertBankcontact(): Promise<number> {
+  const [row] = await db
+    .insert(financeBankcontact)
+    .values({
+      name: "Sparkasse Test",
+      blz: "12345678",
+      login: "u",
+      server_url: "https://x",
+    })
+    .returning({ id: financeBankcontact.id });
+  return row.id;
+}
+
+async function anyTypeId(): Promise<number> {
+  const [row] = await db
+    .select({ id: financeAccountType.id })
+    .from(financeAccountType)
+    .limit(1);
+  return row.id;
+}
+
+async function insertAccount(bankcontactId: number, label = "Giro"): Promise<number> {
+  const typeId = await anyTypeId();
+  const [row] = await db
+    .insert(financeAccount)
+    .values({
+      bankcontact_id: bankcontactId,
+      type_id: typeId,
+      currency_code: "EUR",
+      account_number: `AN-${label}`,
+      label,
+    })
+    .returning({ id: financeAccount.id });
+  return row.id;
+}
+
+async function grantAcl(accountId: number, userId: number, level: "read" | "write") {
+  await ensureUser(userId);
+  await db.insert(financeAccountAccess).values({
+    account_id: accountId,
+    user_id: userId,
+    level,
+  });
+}
+
+describe("finance/accounts — create", () => {
+  it("creates an account with joined DTO fields", async () => {
+    setAuth("1", ["finance.accounts.manage"]);
+    const bcId = await insertBankcontact();
+    const result = await createAccount({
+      bankcontact_id: bcId,
+      type_kind: "giro",
+      currency_code: "EUR",
+      iban: "DE12 3456",
+      account_number: "1234567890",
+      label: "Girokonto",
+    });
+    expect(result.id).toBeGreaterThan(0);
+    expect(result.label).toBe("Girokonto");
+    expect(result.type_kind).toBe("giro");
+    expect(result.type_label).toBe("Girokonto");
+    expect(result.currency_symbol).toBe("€");
+    expect(result.bankcontact_name).toBe("Sparkasse Test");
+    expect(result.active).toBe(true);
+  });
+
+  it("rejects unknown type_kind", async () => {
+    setAuth("1", ["finance.accounts.manage"]);
+    const bcId = await insertBankcontact();
+    await expect(
+      createAccount({
+        bankcontact_id: bcId,
+        type_kind: "nonexistent",
+        currency_code: "EUR",
+        account_number: "1",
+        label: "x",
+      }),
+    ).rejects.toThrow(/account type/);
+  });
+
+  it("rejects unknown currency", async () => {
+    setAuth("1", ["finance.accounts.manage"]);
+    const bcId = await insertBankcontact();
+    await expect(
+      createAccount({
+        bankcontact_id: bcId,
+        type_kind: "giro",
+        currency_code: "XXX",
+        account_number: "1",
+        label: "x",
+      }),
+    ).rejects.toThrow(/currency/);
+  });
+
+  it("404s when bankcontact does not exist", async () => {
+    setAuth("1", ["finance.accounts.manage"]);
+    await expect(
+      createAccount({
+        bankcontact_id: 999_999,
+        type_kind: "giro",
+        currency_code: "EUR",
+        account_number: "1",
+        label: "x",
+      }),
+    ).rejects.toThrow(/bankcontact/);
+  });
+
+  it("rejects callers without finance.accounts.manage", async () => {
+    setAuth("1", ["finance.view"]);
+    const bcId = await insertBankcontact();
+    await expect(
+      createAccount({
+        bankcontact_id: bcId,
+        type_kind: "giro",
+        currency_code: "EUR",
+        account_number: "1",
+        label: "x",
+      }),
+    ).rejects.toThrow(/permission/);
+  });
+});
+
+describe("finance/accounts — list (ACL filter)", () => {
+  it("returns only accounts the user has an ACL entry for", async () => {
+    const bcId = await insertBankcontact();
+    const a = await insertAccount(bcId, "A");
+    const b = await insertAccount(bcId, "B");
+    const c = await insertAccount(bcId, "C");
+
+    setAuth("7", ["finance.view"]);
+    await grantAcl(a, 7, "read");
+    await grantAcl(c, 7, "write");
+
+    const result = await listAccounts();
+    const labels = result.items.map((i) => i.label).sort();
+    expect(labels).toEqual(["A", "C"]);
+    expect(result.items.map((i) => i.id)).not.toContain(b);
+  });
+
+  it("finance.admin bypasses the ACL and sees all accounts", async () => {
+    const bcId = await insertBankcontact();
+    await insertAccount(bcId, "A");
+    await insertAccount(bcId, "B");
+    await insertAccount(bcId, "C");
+
+    setAuth("1", ["finance.view", "finance.admin"]);
+    // No ACL entries at all
+    const result = await listAccounts();
+    expect(result.items).toHaveLength(3);
+  });
+
+  it("returns an empty list when the user has no ACL entries", async () => {
+    const bcId = await insertBankcontact();
+    await insertAccount(bcId);
+
+    setAuth("99", ["finance.view"]);
+    await ensureUser(99);
+    const result = await listAccounts();
+    expect(result.items).toHaveLength(0);
+  });
+
+  it("requires finance.view", async () => {
+    setAuth("1", []);
+    await expect(listAccounts()).rejects.toThrow(/permission/);
+  });
+});
+
+describe("finance/accounts — get (ACL enforcement)", () => {
+  it("returns the account for a user with an ACL entry", async () => {
+    const bcId = await insertBankcontact();
+    const a = await insertAccount(bcId, "Giro");
+    setAuth("7", ["finance.view"]);
+    await grantAcl(a, 7, "read");
+
+    const result = await getAccount({ id: a });
+    expect(result.id).toBe(a);
+    expect(result.label).toBe("Giro");
+  });
+
+  it("404s when the user has no ACL entry (no enumeration)", async () => {
+    const bcId = await insertBankcontact();
+    const a = await insertAccount(bcId);
+    setAuth("7", ["finance.view"]);
+    await ensureUser(7);
+    await expect(getAccount({ id: a })).rejects.toThrow(/not found/);
+  });
+
+  it("finance.admin can get any account", async () => {
+    const bcId = await insertBankcontact();
+    const a = await insertAccount(bcId, "Admin-Sees");
+    setAuth("1", ["finance.view", "finance.admin"]);
+    const result = await getAccount({ id: a });
+    expect(result.label).toBe("Admin-Sees");
+  });
+
+  it("404s when the account does not exist at all", async () => {
+    setAuth("1", ["finance.view", "finance.admin"]);
+    await expect(getAccount({ id: 999_999 })).rejects.toThrow(/not found/);
+  });
+});
+
+describe("finance/accounts — update", () => {
+  it("patches only the supplied fields", async () => {
+    const bcId = await insertBankcontact();
+    const a = await insertAccount(bcId, "Before");
+
+    setAuth("1", ["finance.accounts.manage"]);
+    const result = await updateAccount({
+      id: a,
+      label: "After",
+      active: false,
+    });
+    expect(result.label).toBe("After");
+    expect(result.active).toBe(false);
+    expect(result.iban).toBeNull(); // unchanged
+  });
+
+  it("rejects an empty patch", async () => {
+    const bcId = await insertBankcontact();
+    const a = await insertAccount(bcId);
+    setAuth("1", ["finance.accounts.manage"]);
+    await expect(updateAccount({ id: a })).rejects.toThrow(/no fields/);
+  });
+
+  it("rejects an empty label", async () => {
+    const bcId = await insertBankcontact();
+    const a = await insertAccount(bcId);
+    setAuth("1", ["finance.accounts.manage"]);
+    await expect(
+      updateAccount({ id: a, label: "   " }),
+    ).rejects.toThrow(/label/);
+  });
+
+  it("requires finance.accounts.manage", async () => {
+    const bcId = await insertBankcontact();
+    const a = await insertAccount(bcId);
+    setAuth("1", ["finance.view"]);
+    await expect(
+      updateAccount({ id: a, label: "x" }),
+    ).rejects.toThrow(/permission/);
+  });
+});

@@ -4,7 +4,13 @@ import { eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
 import db from "../db/database";
-import { financeBankcontact, financeTanSession, users } from "../db/schema";
+import {
+  financeAccount,
+  financeAccountAccess,
+  financeBankcontact,
+  financeTanSession,
+  users,
+} from "../db/schema";
 import {
   cleanupExpiredTanSessions,
   completeTanSession,
@@ -39,6 +45,8 @@ async function ensureUser(id: number): Promise<void> {
 
 beforeEach(async () => {
   await db.delete(financeTanSession);
+  await db.delete(financeAccountAccess);
+  await db.delete(financeAccount);
   await db.delete(financeBankcontact);
   await db.delete(users);
   setAuth("1", []);
