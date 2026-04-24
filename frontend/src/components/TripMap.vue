@@ -537,11 +537,19 @@ defineExpose({ selectStopByPhotoId })
   font-size: 0.85rem;
   font-weight: 600;
   flex-shrink: 0;
+  /* Inheriting would fall through to a muted colour on some
+     surrounding containers; pin it so the name stays legible in
+     both light and dark modes. */
+  color: var(--p-text-color);
 }
 
 .trip-timeline-album-desc {
   font-size: 0.8rem;
-  color: var(--p-text-muted-color, #999);
+  /* Mode-adaptive muted: blending the current text colour with the
+     surface gives a 70%-contrast shade that reads in both modes —
+     unlike --p-text-muted-color which resolves too faintly in dark
+     mode. */
+  color: color-mix(in srgb, var(--p-text-color) 70%, transparent);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -24,6 +24,18 @@ const error = ref('')
 
 const shareToken = computed(() => (route.params.token as string) ?? '')
 
+/**
+ * True when the viewer is on the map display with no registered
+ * guest session. Triggers two layout changes: the full-width banner
+ * is suppressed and a compact "Anmelden" button is folded into the
+ * TripMap stats overlay next to the Filter button. Once the guest
+ * registers the banner returns for the pending-verify prompt and
+ * later the opt-in toggles.
+ */
+const isMapAnonymous = computed(
+  () => album.value?.display_mode === 'map' && guestSession.guest.value === null,
+)
+
 // Guest identity + opt-in toggles. The composable instances are
 // created once per token and shared with the banner so unmounting
 // the banner during route changes wouldn't drop subscription state.
@@ -297,7 +309,14 @@ onUnmounted(() => {
     <Message v-if="error" severity="error">{{ error }}</Message>
 
     <template v-if="album">
+      <!-- In map mode we hide the banner when the visitor is still
+           anonymous — the map already crowds the viewport and we
+           replace it with a compact "Anmelden" pill next to the
+           Filter button inside the stats overlay. Pending/verified
+           guests keep the banner because they need verify info and
+           the mail/push toggles. -->
       <GuestStatusBanner
+        v-if="!isMapAnonymous"
         :guest="guestSession.guest.value"
         :loading="guestSession.loading.value"
         :togglingNotify="guestSession.togglingNotify.value"
@@ -343,6 +362,17 @@ onUnmounted(() => {
             <i :class="activeCount > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'" />
             <span>{{ activeCount > 0 ? `Filter (${activeCount})` : 'Filter' }}</span>
           </button>
+          <template v-if="isMapAnonymous">
+            <span class="trip-stats-sep">&bull;</span>
+            <button
+              type="button"
+              class="map-filter-button map-filter-button--cta"
+              @click="openRegisterDialog"
+            >
+              <i class="pi pi-sign-in" />
+              <span>Anmelden</span>
+            </button>
+          </template>
         </template>
       </TripMap>
 
@@ -493,6 +523,18 @@ onUnmounted(() => {
   background: var(--p-primary-color, #3b82f6);
   border-color: var(--p-primary-color, #3b82f6);
   color: var(--p-primary-contrast-color, #fff);
+}
+
+/* "Anmelden" pill: stays inside the dark stats overlay so it uses
+   the same visual footprint as the Filter button, but paints the
+   primary brand colour so it reads as the obvious CTA. */
+.map-filter-button--cta {
+  background: var(--p-primary-color);
+  border-color: var(--p-primary-color);
+  color: var(--p-primary-contrast-color);
+}
+.map-filter-button--cta:hover {
+  background: color-mix(in srgb, var(--p-primary-color) 85%, var(--p-primary-contrast-color));
 }
 
 .map-filter-button .pi {

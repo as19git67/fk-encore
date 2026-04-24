@@ -132,32 +132,34 @@ const pushTooltip = computed<string | null>(() => {
 </template>
 
 <style scoped>
-/* Banners paint a translucent primary tint over whatever surface
-   the page uses, so the background adapts to the active theme
-   (light: pale primary on white; dark: dim primary on dark). The
-   text colour follows --p-text-color and therefore flips with the
-   theme too — nothing hardcoded, no fallback to a fixed surface. */
+/* The three banner states map onto PrimeVue Aura's dedicated
+   Message severity tokens. Each one bundles a mode-adaptive
+   background + text + border colour tuned for alert-style UI, so the
+   banner stays legible whether the viewer sits on a light or a dark
+   surface without any manual colour-mix or hardcoded values. */
 .guest-banner {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
   padding: 0.6rem 1rem;
-  border-bottom: 1px solid var(--p-content-border-color);
-  background: color-mix(in srgb, var(--p-primary-color) 10%, transparent);
-  color: var(--p-text-color);
   flex-wrap: wrap;
   font-size: 0.9em;
+  border-bottom: 1px solid var(--p-message-secondary-border-color);
+  background: var(--p-message-secondary-background);
+  color: var(--p-message-secondary-color);
 }
 
 .guest-banner--anonymous {
-  background: color-mix(in srgb, var(--p-primary-color) 7%, transparent);
+  border-bottom-color: var(--p-message-info-border-color);
+  background: var(--p-message-info-background);
+  color: var(--p-message-info-color);
 }
 
-/* Amber token from Aura's absolute palette — stays a recognisable
-   "please verify" colour regardless of the active light/dark mode. */
 .guest-banner--pending {
-  background: color-mix(in srgb, var(--p-amber-500) 14%, transparent);
+  border-bottom-color: var(--p-message-warn-border-color);
+  background: var(--p-message-warn-background);
+  color: var(--p-message-warn-color);
 }
 
 .guest-banner__text {
