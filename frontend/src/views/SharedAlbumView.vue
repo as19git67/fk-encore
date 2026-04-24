@@ -325,7 +325,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="shared-album-view">
+  <div class="shared-album-view" :class="{ 'shared-album-view--grid': !isMapView }">
     <div v-if="loading" class="info-text">
       <i class="pi pi-spin pi-spinner" /> Album wird geladen…
     </div>
@@ -638,6 +638,22 @@ onUnmounted(() => {
 
   .photo-grid-scroll {
     padding: var(--spacing-sm, 4px);
+  }
+
+  /* On phones the grid view scrolls the whole page instead of a
+     fixed-height inner container: banner + album title scroll away
+     once the grid is tall enough, freeing the viewport for photos.
+     Desktop keeps the sticky-header layout (inner scroll container)
+     because there's horizontal room for both at once. Map mode is
+     untouched — it still needs a constrained-height flex column. */
+  .shared-album-view--grid {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+  .shared-album-view--grid .photo-grid-scroll {
+    flex: 0 0 auto;
+    overflow: visible;
   }
 }
 
