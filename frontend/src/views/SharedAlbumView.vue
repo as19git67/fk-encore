@@ -289,6 +289,21 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+  // The default filter limits the view to "Highlights only". Albums
+  // that carry no group-highlight photos would open with an empty
+  // map / grid and leave the visitor staring at a blank canvas with
+  // no obvious recovery. Relax the filter automatically in that
+  // case so the visitor sees the real album content.
+  if (album.value && filter.value.groupHighlight) {
+    const ctx = { groupCoverIds: groupCoverIds.value }
+    const matches = albumPhotosAsPhoto.value.filter((p) =>
+      matchesPhotoFilter(p, filter.value, ctx),
+    )
+    if (matches.length === 0 && albumPhotosAsPhoto.value.length > 0) {
+      filter.value = {}
+      filterDraft.value = {}
+    }
+  }
   // Guest state loads in parallel — failures don't block the album
   // view; the banner just shows the anonymous CTA.
   void guestSession.refresh()

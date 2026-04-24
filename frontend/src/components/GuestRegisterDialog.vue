@@ -82,13 +82,14 @@ watch(
 )
 
 /**
- * Dialog's @show event fires after the enter transition finishes —
- * the input is finally in the DOM and focus-able. A nextTick watcher
- * on the `visible` prop is too early: the Dialog teleports + animates
- * its content, so the input ref isn't mounted when visible flips.
+ * Dialog's @show event fires after the enter transition finishes,
+ * but PrimeVue's internal focus-trap runs *after* that and grabs
+ * the first tabbable element (the close button in the header).
+ * Queueing our focus into the next macro-task puts it behind the
+ * trap's grab so the name field wins.
  */
 function handleDialogShow() {
-  focusName()
+  setTimeout(focusName, 0)
 }
 </script>
 
