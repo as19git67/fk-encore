@@ -342,7 +342,7 @@ function formatRelative(iso: string): string {
 }
 
 .reactions__error {
-  color: var(--p-message-error-color, #c00);
+  color: var(--p-message-error-color);
   font-size: 0.85em;
 }
 
@@ -443,11 +443,14 @@ function formatRelative(iso: string): string {
 }
 .reactions__menu-item:hover,
 .reactions__menu-item:focus-visible {
-  background: var(--p-surface-100, #f3f4f6);
+  /* Mode-adaptive hover tint: mixing --p-text-color with transparent
+     yields a light-gray wash in light mode and a dark-gray wash in
+     dark mode, matching the same pattern the composer toggle uses. */
+  background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
   outline: none;
 }
 .reactions__menu-item--danger {
-  color: var(--p-red-500, #ef4444);
+  color: var(--p-red-500);
 }
 
 .reactions__empty {

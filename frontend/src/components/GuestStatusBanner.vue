@@ -132,38 +132,45 @@ const pushTooltip = computed<string | null>(() => {
 </template>
 
 <style scoped>
+/* Banners paint a translucent primary tint over whatever surface
+   the page uses, so the background adapts to the active theme
+   (light: pale primary on white; dark: dim primary on dark). The
+   text colour follows --p-text-color and therefore flips with the
+   theme too — nothing hardcoded, no fallback to a fixed surface. */
 .guest-banner {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
   padding: 0.6rem 1rem;
-  border-bottom: 1px solid var(--p-content-border-color, #dee2e6);
-  background: color-mix(in srgb, var(--p-primary-color) 8%, var(--p-surface-card, #fff));
+  border-bottom: 1px solid var(--p-content-border-color);
+  background: color-mix(in srgb, var(--p-primary-color) 10%, transparent);
+  color: var(--p-text-color);
   flex-wrap: wrap;
   font-size: 0.9em;
 }
 
-.guest-banner--pending {
-  background: color-mix(in srgb, #f59e0b 14%, var(--p-surface-card, #fff));
+.guest-banner--anonymous {
+  background: color-mix(in srgb, var(--p-primary-color) 7%, transparent);
 }
 
-.guest-banner--anonymous {
-  background: color-mix(in srgb, var(--p-primary-color) 6%, var(--p-surface-card, #fff));
+/* Amber token from Aura's absolute palette — stays a recognisable
+   "please verify" colour regardless of the active light/dark mode. */
+.guest-banner--pending {
+  background: color-mix(in srgb, var(--p-amber-500) 14%, transparent);
 }
 
 .guest-banner__text {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  color: var(--p-text-color);
   flex: 1 1 auto;
   min-width: 0;
 }
 
 .guest-banner__text em {
   font-style: normal;
-  color: var(--p-text-muted-color);
+  opacity: 0.75;
 }
 
 .guest-banner__controls {
@@ -176,7 +183,7 @@ const pushTooltip = computed<string | null>(() => {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  color: var(--p-text-muted-color);
+  opacity: 0.85;
   cursor: pointer;
 }
 </style>
