@@ -211,3 +211,143 @@ Historische Beispiele:
 
 ${examples}`;
 }
+
+// -----------------------------------------------------------------------
+// /classify (analysis — natural-language → AST)
+// -----------------------------------------------------------------------
+
+export interface AnalysisAst {
+  /** User-tag names, always drawn from the available vocabulary. */
+  tags: string[];
+  /** AND = transaction must carry every tag; OR = at least one. */
+  op: "AND" | "OR";
+  /** Inclusive ISO-date range; omitted ⇒ no date filter. */
+  timespan?: { from: string; to: string };
+  /** Signed amount range; omitted ⇒ no amount filter. */
+  amountRange?: { min?: number; max?: number };
+}
+
+export interface ParseAnalysisOptions {
+  /** Optional hint the user supplied separately, e.g. "2024". */
+  timespanHint?: string;
+}
+
+/**
+ * Asks the LLM to turn a German free-text question into a tag-filter
+ * AST. Only tags from `availableTags` are allowed in the response —
+ * the LLM is not permitted to invent new vocabulary.
+ */
+export async function parseAnalysisQuery(
+  question: string,
+  availableTags: string[],
+  opts: ParseAnalysisOptions = {},
+): Promise<AnalysisAst> {
+  const prompt = buildAnalysisPrompt(question, availableTags, opts.timespanHint);
+  const schema = {
+    type: "object",
+    properties: {
+      tags: { type: "array", items: { type: "string" } },
+      op: { type: "string", enum: ["AND", "OR"] },
+      timespan: {
+        type: "object",
+        properties: {
+          from: { type: "string" },
+          to: { type: "string" },
+        },
+      },
+      amountRange: {
+        type: "object",
+        properties: {
+          min: { type: "number" },
+          max: { type: "number" },
+        },
+      },
+    },
+    required: ["tags", "op"],
+  };
+
+  const resp = await postJson<
+    { prompt: string; schema: Record<string, unknown> },
+    {
+      tags?: unknown;
+      op?: unknown;
+      timespan?: unknown;
+      amountRange?: unknown;
+    }
+  >("/classify", { prompt, schema });
+
+  const vocab = new Set(availableTags);
+  const rawTags = Array.isArray(resp.tags) ? resp.tags : [];
+  const tags = rawTags
+    .filter((t): t is string => typeof t === "string")
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0 && vocab.has(t));
+  // Deduplicate
+  const uniqueTags = [...new Set(tags)];
+
+  const op = resp.op === "OR" ? "OR" : "AND";
+
+  let timespan: AnalysisAst["timespan"];
+  if (
+    resp.timespan &&
+    typeof resp.timespan === "object" &&
+    !Array.isArray(resp.timespan)
+  ) {
+    const from = (resp.timespan as any).from;
+    const to = (resp.timespan as any).to;
+    if (typeof from === "string" && typeof to === "string") {
+      timespan = { from: from.slice(0, 10), to: to.slice(0, 10) };
+    }
+  }
+
+  let amountRange: AnalysisAst["amountRange"];
+  if (
+    resp.amountRange &&
+    typeof resp.amountRange === "object" &&
+    !Array.isArray(resp.amountRange)
+  ) {
+    const min = (resp.amountRange as any).min;
+    const max = (resp.amountRange as any).max;
+    const cleaned: { min?: number; max?: number } = {};
+    if (typeof min === "number" && Number.isFinite(min)) cleaned.min = min;
+    if (typeof max === "number" && Number.isFinite(max)) cleaned.max = max;
+    if (cleaned.min !== undefined || cleaned.max !== undefined) {
+      amountRange = cleaned;
+    }
+  }
+
+  const result: AnalysisAst = { tags: uniqueTags, op };
+  if (timespan) result.timespan = timespan;
+  if (amountRange) result.amountRange = amountRange;
+  return result;
+}
+
+function buildAnalysisPrompt(
+  question: string,
+  availableTags: string[],
+  timespanHint?: string,
+): string {
+  const vocabBlock = availableTags.length > 0
+    ? availableTags.map((t) => `- ${t}`).join("\n")
+    : "(keine Tags vorhanden)";
+
+  const hintBlock = timespanHint
+    ? `\nZeitraum-Hinweis vom Nutzer: "${timespanHint}".`
+    : "";
+
+  return `Du übersetzt eine deutsche Frage zu Finanz-Transaktionen in einen strukturierten Filter (AST).
+
+Strikte Regeln:
+- 'tags' darf NUR Tags enthalten, die exakt in der Vokabel-Liste unten vorkommen. Erfinde KEINE neuen Tags.
+- 'op' ist "AND" wenn die Frage nach einer Schnittmenge mehrerer Konzepte fragt (z. B. "Urlaub in Italien 2024"), "OR" wenn sie nach einer Vereinigung fragt (z. B. "alle Miete oder Nebenkosten").
+- 'timespan' ist ein inklusiver ISO-Datum-Bereich { from, to } in YYYY-MM-DD-Format. Lasse das Feld weg, wenn die Frage keinen Zeitraum nennt.
+- 'amountRange' { min, max } als Zahlen (negative Zahlen = Ausgaben, positive = Einnahmen). Lasse das Feld weg, wenn die Frage keine Grenze nennt.
+- Antwort als JSON, kein Freitext drumherum.
+
+Verfügbare Tags (Vokabular):
+${vocabBlock}
+${hintBlock}
+
+Frage:
+"${question}"`;
+}

@@ -386,3 +386,45 @@ export async function importFinanzkraft(
     timeoutMs: 5 * 60_000,
   })
 }
+
+// ----------------------------------------------------------------------
+// Analysis (Etappe 9)
+// ----------------------------------------------------------------------
+
+export interface AnalysisAst {
+  tags: string[]
+  op: 'AND' | 'OR'
+  timespan?: { from: string; to: string }
+  amountRange?: { min?: number; max?: number }
+}
+
+export interface AnalysisResult {
+  ast: AnalysisAst
+  total: { sum: string; count: number; avg: string }
+  byMonth: Array<{ month: string; sum: string; count: number }>
+  topCounterparties: Array<{ name: string; sum: string; count: number }>
+}
+
+export async function analysisQuery(params: {
+  question: string
+  timespanHint?: string
+  accountIds?: number[]
+}): Promise<AnalysisResult> {
+  return apiFetch('/finance/analysis/query', {
+    method: 'POST',
+    body: JSON.stringify(params),
+    // LLM parse can take a few seconds; keep the default timeout
+    // (2 min) but extend to 3 to be safe.
+    timeoutMs: 3 * 60_000,
+  })
+}
+
+export async function analysisAggregate(params: {
+  ast: AnalysisAst
+  accountIds?: number[]
+}): Promise<AnalysisResult> {
+  return apiFetch('/finance/analysis/aggregate', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+}
