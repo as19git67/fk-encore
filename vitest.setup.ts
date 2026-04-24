@@ -40,6 +40,17 @@ vi.mock("~encore/auth", () => ({
   getAuthData: vi.fn(() => ({ userID: "1", permissions: [] })),
 }));
 
+// encore.dev/config is evaluated at module import time (secret() is
+// typically called at the top of a file). Return a deterministic
+// 32-zero-byte base64 string so modules that pass the secret into
+// AES-GCM don't throw at import time; tests that need a real value
+// override via vi.mocked() or call key-explicit helpers directly.
+vi.mock("encore.dev/config", () => ({
+  secret: vi.fn((_name: string) => {
+    return () => Buffer.alloc(32).toString("base64");
+  }),
+}));
+
 // `~encore/clients` is a codegen artifact that doesn't exist at test time.
 // Provide no-op stubs for every cross-service call the code under test may
 // trigger so unit tests can import services freely without spinning up the
