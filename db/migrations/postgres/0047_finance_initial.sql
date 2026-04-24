@@ -80,18 +80,30 @@ CREATE TABLE finance_bankcontact (
 );
 
 CREATE TABLE finance_account (
-    id             SERIAL PRIMARY KEY,
-    bankcontact_id INTEGER NOT NULL REFERENCES finance_bankcontact(id)
-                     ON DELETE RESTRICT,
-    type_id        INTEGER NOT NULL REFERENCES finance_account_type(id)
-                     ON DELETE RESTRICT,
-    currency_code  TEXT NOT NULL REFERENCES finance_currency(code)
-                     ON DELETE RESTRICT,
-    iban           TEXT UNIQUE,
-    account_number TEXT NOT NULL,
-    label          TEXT NOT NULL,
-    active         BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at     TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+    id                   SERIAL PRIMARY KEY,
+    -- Optional: NULL means "manual account", not linked to a bank.
+    -- On bankcontact-delete we unlink (set to NULL) instead of cascading,
+    -- so the user's bookings survive when the bank connection goes away.
+    bankcontact_id       INTEGER REFERENCES finance_bankcontact(id)
+                           ON DELETE SET NULL,
+    -- lib-fints' accountNumber for the matching bank-side account, when
+    -- linked. Used by the statement-fetch path to map bank snapshots
+    -- to fk-encore accounts. NULL for manual accounts.
+    fints_account_number TEXT,
+    type_id              INTEGER NOT NULL REFERENCES finance_account_type(id)
+                           ON DELETE RESTRICT,
+    currency_code        TEXT NOT NULL REFERENCES finance_currency(code)
+                           ON DELETE RESTRICT,
+    iban                 TEXT UNIQUE,
+    account_number       TEXT NOT NULL,
+    label                TEXT NOT NULL,
+    active               BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at           TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    -- Only one fk-encore account may be bound to a given (bankcontact,
+    -- fints_account_number) pair at a time, so the statement-fetch
+    -- path doesn't have to disambiguate.
+    CONSTRAINT finance_account_unique_bank_link
+        UNIQUE (bankcontact_id, fints_account_number)
 );
 
 

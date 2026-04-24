@@ -19,7 +19,6 @@ import db from "../db/database";
 import {
   financeAccount,
   financeBankcontact,
-  financeTransaction,
 } from "../db/schema";
 import { encryptCredentials } from "./encryption";
 import { probeTanMethods } from "./fints-client";
@@ -198,22 +197,20 @@ export const updateBankcontact = api(
 );
 
 // ---------- Delete ----------
+//
+// Accounts linked to this bankcontact are *unlinked* (bankcontact_id
+// and fints_account_number set to NULL via the FK's ON DELETE SET
+// NULL) — they turn into manual accounts and keep every transaction.
+// This matches the "beim Löschen eines Bankzugangs fallen verknüpfte
+// Konten auf manuell zurück" contract.
 
 interface DeleteParams {
   id: number;
-  /**
-   * When true, also hard-deletes every finance_account on this
-   * bankcontact and the whole transaction history attached to them.
-   * Without this flag the call fails with failed_precondition as soon
-   * as any account exists (FK ON DELETE RESTRICT).
-   */
-  cascade?: boolean;
 }
 
 interface DeleteResponse {
   deleted: true;
-  accounts_deleted: number;
-  transactions_deleted: number;
+  accounts_unlinked: number;
 }
 
 export const deleteBankcontact = api(
@@ -228,47 +225,38 @@ export const deleteBankcontact = api(
     requirePermission(auth, "finance.accounts.manage");
     await loadBankcontact(p.id);
 
-    const accounts = await db
+    // Count linked accounts for the response summary. The actual
+    // unlink happens via FK ON DELETE SET NULL once we delete the
+    // bankcontact below, so there's no race between "gather count"
+    // and "unlink".
+    const linked = await db
       .select({ id: financeAccount.id })
       .from(financeAccount)
       .where(eq(financeAccount.bankcontact_id, p.id));
 
-    if (accounts.length > 0 && !p.cascade) {
-      throw APIError.failedPrecondition(
-        "bankcontact has accounts — pass cascade=true or delete them first",
-      );
-    }
-
-    let txDeleted = 0;
-    if (accounts.length > 0) {
-      const accountIds = accounts.map((a) => a.id);
-      // Count transactions once for the response summary, then let the
-      // explicit delete take them out (transaction → account is
-      // RESTRICT; we have to clear it ourselves).
-      const txRows = await db
-        .select({ id: financeTransaction.id })
-        .from(financeTransaction)
-        .where(inArray(financeTransaction.account_id, accountIds));
-      txDeleted = txRows.length;
-
-      if (txDeleted > 0) {
-        await db
-          .delete(financeTransaction)
-          .where(inArray(financeTransaction.account_id, accountIds));
-      }
-      // account_balance + account_access cascade from finance_account.
+    // Explicitly clear fints_account_number too — ON DELETE SET NULL
+    // only touches the FK column, so without this we'd leave an
+    // orphaned fints number that the next link call for a different
+    // bankcontact could collide with.
+    if (linked.length > 0) {
       await db
-        .delete(financeAccount)
-        .where(inArray(financeAccount.id, accountIds));
+        .update(financeAccount)
+        .set({ fints_account_number: null })
+        .where(
+          inArray(
+            financeAccount.id,
+            linked.map((a) => a.id),
+          ),
+        );
     }
 
-    // finance_tan_session cascades from finance_bankcontact.
+    // finance_tan_session cascades, finance_account.bankcontact_id
+    // is set to NULL by the FK.
     await db.delete(financeBankcontact).where(eq(financeBankcontact.id, p.id));
 
     return {
       deleted: true,
-      accounts_deleted: accounts.length,
-      transactions_deleted: txDeleted,
+      accounts_unlinked: linked.length,
     };
   },
 );

@@ -49,6 +49,34 @@ async function insertBankcontact(): Promise<number> {
   return row.id;
 }
 
+/**
+ * Insert a finance_account already linked to the given bankcontact on
+ * the given bank-side account number. Mirrors what `createAccount` +
+ * `linkAccount` would produce — the two-step UI flow.
+ */
+async function insertLinkedAccount(opts: {
+  bankcontactId: number;
+  fintsAccountNumber: string;
+  label?: string;
+}): Promise<number> {
+  const [type] = await db
+    .select({ id: financeAccountType.id })
+    .from(financeAccountType)
+    .limit(1);
+  const [row] = await db
+    .insert(financeAccount)
+    .values({
+      bankcontact_id: opts.bankcontactId,
+      fints_account_number: opts.fintsAccountNumber,
+      type_id: type.id,
+      currency_code: "EUR",
+      account_number: opts.fintsAccountNumber,
+      label: opts.label ?? "Test-Konto",
+    })
+    .returning({ id: financeAccount.id });
+  return row.id;
+}
+
 function tx(
   overrides: Partial<FintsTransactionData> = {},
 ): FintsTransactionData {
@@ -72,9 +100,15 @@ function result(accounts: FetchResult["accounts"]): FetchResult {
 
 // ======================================================================
 
-describe("persistFetchResult — account auto-create", () => {
-  it("creates a new finance_account on first sighting", async () => {
+describe("persistFetchResult — matching linked accounts", () => {
+  it("writes transactions + balance to a linked finance_account", async () => {
     const bcId = await insertBankcontact();
+    const accountId = await insertLinkedAccount({
+      bankcontactId: bcId,
+      fintsAccountNumber: "1234567890",
+      label: "Hauptkonto",
+    });
+
     const stats = await persistFetchResult(
       bcId,
       result([
@@ -83,88 +117,43 @@ describe("persistFetchResult — account auto-create", () => {
           iban: "DE12345678901234567890",
           accountKind: "giro",
           currency: "EUR",
-          label: "Giro 1234 – Max",
-          balance: null,
-          transactions: [],
+          label: "Bank-Label",
+          balance: { asOf: "2026-04-24", amount: "1000.00", currency: "EUR" },
+          transactions: [tx()],
           errors: [],
         },
       ]),
     );
+
     expect(stats.accounts_seen).toBe(1);
-    expect(stats.accounts_created).toBe(1);
+    expect(stats.accounts_matched).toBe(1);
+    expect(stats.accounts_unknown).toBe(0);
+    expect(stats.unknown).toHaveLength(0);
+    expect(stats.transactions_inserted).toBe(1);
+    expect(stats.balances_written).toBe(1);
 
-    const accounts = await db.select().from(financeAccount);
-    expect(accounts).toHaveLength(1);
-    expect(accounts[0].iban).toBe("DE12345678901234567890");
-    expect(accounts[0].label).toBe("Giro 1234 – Max");
-  });
-
-  it("reuses an existing finance_account and does not overwrite its label", async () => {
-    const bcId = await insertBankcontact();
-    const [type] = await db
-      .select({ id: financeAccountType.id })
-      .from(financeAccountType)
-      .limit(1);
-    await db.insert(financeAccount).values({
-      bankcontact_id: bcId,
-      type_id: type.id,
-      currency_code: "EUR",
-      account_number: "1234567890",
-      label: "Mein Hauptkonto",
-    });
-
-    const stats = await persistFetchResult(
-      bcId,
-      result([
-        {
-          accountNumber: "1234567890",
-          iban: "DE12",
-          accountKind: "giro",
-          currency: "EUR",
-          label: "Bank-Default-Label",
-          balance: null,
-          transactions: [],
-          errors: [],
-        },
-      ]),
-    );
-    expect(stats.accounts_created).toBe(0);
+    // Linked account still has the user-set label, not the bank's.
     const [row] = await db.select().from(financeAccount);
-    expect(row.label).toBe("Mein Hauptkonto");
-  });
+    expect(row.id).toBe(accountId);
+    expect(row.label).toBe("Hauptkonto");
 
-  it("falls back to 'sonstige' for an unknown accountKind", async () => {
-    const bcId = await insertBankcontact();
-    const stats = await persistFetchResult(
-      bcId,
-      result([
-        {
-          accountNumber: "X",
-          iban: null,
-          accountKind: "unknown-bogus",
-          currency: "EUR",
-          label: "Whatever",
-          balance: null,
-          transactions: [],
-          errors: [],
-        },
-      ]),
-    );
-    expect(stats.accounts_created).toBe(1);
-    const [row] = await db
-      .select({ type_id: financeAccount.type_id })
-      .from(financeAccount);
-    const [type] = await db
+    const txs = await db
       .select()
-      .from(financeAccountType)
-      .where(eq(financeAccountType.id, row.type_id));
-    expect(type.kind).toBe("sonstige");
-  });
-});
+      .from(financeTransaction)
+      .where(eq(financeTransaction.account_id, accountId));
+    expect(txs).toHaveLength(1);
 
-describe("persistFetchResult — transactions", () => {
-  it("inserts new transactions, skips duplicates, tracks freshly-inserted ids for tag-suggester", async () => {
+    const bals = await db
+      .select()
+      .from(financeAccountBalance)
+      .where(eq(financeAccountBalance.account_id, accountId));
+    expect(bals).toHaveLength(1);
+  });
+
+  it("dedupes transactions across re-syncs via (account_id, dedupe_hash)", async () => {
     const bcId = await insertBankcontact();
+    await insertLinkedAccount({ bankcontactId: bcId, fintsAccountNumber: "1" });
+
     const snapshot = {
       accountNumber: "1",
       iban: null,
@@ -172,27 +161,21 @@ describe("persistFetchResult — transactions", () => {
       currency: "EUR",
       label: "Giro",
       balance: null,
-      transactions: [
-        tx({ bookingDate: "2026-04-01", amount: "-10.00", purpose: "A" }),
-        tx({ bookingDate: "2026-04-02", amount: "-20.00", purpose: "B" }),
-      ],
+      transactions: [tx({ bookingDate: "2026-04-01", amount: "-10.00" })],
       errors: [],
     };
-
     const first = await persistFetchResult(bcId, result([snapshot]));
-    expect(first.transactions_inserted).toBe(2);
-    expect(first.transactions_skipped_duplicate).toBe(0);
-    expect(tagSuggester.suggestTagsForTransaction).toHaveBeenCalledTimes(2);
-
-    // Second run with the same snapshot → dedup via unique index
     const second = await persistFetchResult(bcId, result([snapshot]));
+    expect(first.transactions_inserted).toBe(1);
     expect(second.transactions_inserted).toBe(0);
-    expect(second.transactions_skipped_duplicate).toBe(2);
+    expect(second.transactions_skipped_duplicate).toBe(1);
   });
 
-  it("forwards snapshot soft errors into stats.errors", async () => {
+  it("fires the tag-suggester for freshly inserted transactions", async () => {
     const bcId = await insertBankcontact();
-    const stats = await persistFetchResult(
+    await insertLinkedAccount({ bankcontactId: bcId, fintsAccountNumber: "1" });
+
+    await persistFetchResult(
       bcId,
       result([
         {
@@ -201,263 +184,128 @@ describe("persistFetchResult — transactions", () => {
           accountKind: "giro",
           currency: "EUR",
           label: "Giro",
+          balance: null,
+          transactions: [
+            tx({ purpose: "A", bookingDate: "2026-04-01" }),
+            tx({ purpose: "B", bookingDate: "2026-04-02" }),
+          ],
+          errors: [],
+        },
+      ]),
+    );
+
+    expect(tagSuggester.suggestTagsForTransaction).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("persistFetchResult — unknown / pending accounts", () => {
+  it("collects unmatched bank-side accounts in stats.unknown without creating rows", async () => {
+    const bcId = await insertBankcontact();
+
+    const stats = await persistFetchResult(
+      bcId,
+      result([
+        {
+          accountNumber: "NEW-01",
+          iban: "DE11",
+          accountKind: "giro",
+          currency: "EUR",
+          label: "Bank-Label Giro",
+          balance: { asOf: "2026-04-24", amount: "500.00", currency: "EUR" },
+          transactions: [tx()],
+          errors: [],
+        },
+      ]),
+    );
+
+    expect(stats.accounts_seen).toBe(1);
+    expect(stats.accounts_matched).toBe(0);
+    expect(stats.accounts_unknown).toBe(1);
+    expect(stats.unknown).toHaveLength(1);
+    expect(stats.unknown[0]).toMatchObject({
+      accountNumber: "NEW-01",
+      iban: "DE11",
+      accountKind: "giro",
+      currency: "EUR",
+      label: "Bank-Label Giro",
+    });
+    expect(stats.transactions_inserted).toBe(0);
+    expect(stats.balances_written).toBe(0);
+
+    // No auto-created account, no stray transactions.
+    const accounts = await db.select().from(financeAccount);
+    expect(accounts).toHaveLength(0);
+    const txs = await db.select().from(financeTransaction);
+    expect(txs).toHaveLength(0);
+  });
+
+  it("writes matched accounts and lists unknown ones in the same run", async () => {
+    const bcId = await insertBankcontact();
+    await insertLinkedAccount({ bankcontactId: bcId, fintsAccountNumber: "LINKED" });
+
+    const stats = await persistFetchResult(
+      bcId,
+      result([
+        {
+          accountNumber: "LINKED",
+          iban: null,
+          accountKind: "giro",
+          currency: "EUR",
+          label: "Bank-Linked",
+          balance: null,
+          transactions: [tx()],
+          errors: [],
+        },
+        {
+          accountNumber: "STRANGER",
+          iban: null,
+          accountKind: "giro",
+          currency: "EUR",
+          label: "Stranger",
+          balance: null,
+          transactions: [],
+          errors: [],
+        },
+      ]),
+    );
+
+    expect(stats.accounts_seen).toBe(2);
+    expect(stats.accounts_matched).toBe(1);
+    expect(stats.accounts_unknown).toBe(1);
+    expect(stats.transactions_inserted).toBe(1);
+    expect(stats.unknown.map((u) => u.accountNumber)).toEqual(["STRANGER"]);
+  });
+
+  it("forwards per-account soft errors into stats.errors for both matched and unknown", async () => {
+    const bcId = await insertBankcontact();
+    await insertLinkedAccount({ bankcontactId: bcId, fintsAccountNumber: "L" });
+
+    const stats = await persistFetchResult(
+      bcId,
+      result([
+        {
+          accountNumber: "L",
+          iban: null,
+          accountKind: "giro",
+          currency: "EUR",
+          label: "L",
           balance: null,
           transactions: [],
           errors: ["statements-tan-required"],
         },
-      ]),
-    );
-    expect(stats.errors).toContain("account 1: statements-tan-required");
-  });
-});
-
-describe("persistFetchResult — balance", () => {
-  it("writes a balance row with source='fints'", async () => {
-    const bcId = await insertBankcontact();
-    const stats = await persistFetchResult(
-      bcId,
-      result([
         {
-          accountNumber: "1",
+          accountNumber: "U",
           iban: null,
           accountKind: "giro",
           currency: "EUR",
-          label: "Giro",
-          balance: {
-            asOf: "2026-04-24",
-            amount: "2341.50",
-            currency: "EUR",
-          },
-          transactions: [],
-          errors: [],
-        },
-      ]),
-    );
-    expect(stats.balances_written).toBe(1);
-
-    const [row] = await db.select().from(financeAccountBalance);
-    expect(Number(row.balance)).toBeCloseTo(2341.5, 2);
-    expect(row.source).toBe("fints");
-  });
-
-  it("skips a balance when the snapshot has none", async () => {
-    const bcId = await insertBankcontact();
-    const stats = await persistFetchResult(
-      bcId,
-      result([
-        {
-          accountNumber: "1",
-          iban: null,
-          accountKind: "giro",
-          currency: "EUR",
-          label: "Giro",
+          label: "U",
           balance: null,
           transactions: [],
-          errors: [],
+          errors: ["balance-error:9010 x"],
         },
       ]),
     );
-    expect(stats.balances_written).toBe(0);
-    const rows = await db.select().from(financeAccountBalance);
-    expect(rows).toHaveLength(0);
-  });
-});
-
-describe("persistFetchResult — dedupe hash", () => {
-  it("treats two runs with different data as separate transactions", async () => {
-    const bcId = await insertBankcontact();
-    const first = {
-      accountNumber: "1",
-      iban: null,
-      accountKind: "giro",
-      currency: "EUR",
-      label: "Giro",
-      balance: null,
-      transactions: [tx({ purpose: "run1" })],
-      errors: [],
-    };
-    const second = {
-      ...first,
-      transactions: [tx({ purpose: "run2" })],
-    };
-    const s1 = await persistFetchResult(bcId, result([first]));
-    const s2 = await persistFetchResult(bcId, result([second]));
-    expect(s1.transactions_inserted).toBe(1);
-    expect(s2.transactions_inserted).toBe(1);
-    expect(s2.transactions_skipped_duplicate).toBe(0);
-  });
-});
-
-// ======================================================================
-
-describe("persistFetchResult — auto-ACL grant", () => {
-  async function ensureUser(id: number): Promise<void> {
-    await db.execute(
-      sql`INSERT INTO users (id, email, name, password_hash) VALUES (${id}, ${`u${id}@test.local`}, ${`User${id}`}, 'x') ON CONFLICT (id) DO NOTHING`,
-    );
-  }
-
-  it("grants write ACL for newly-created accounts when grantAclToUserId is set", async () => {
-    const bcId = await insertBankcontact();
-    await ensureUser(7);
-
-    const stats = await persistFetchResult(
-      bcId,
-      result([
-        {
-          accountNumber: "A1",
-          iban: null,
-          accountKind: "giro",
-          currency: "EUR",
-          label: "Giro A1",
-          balance: null,
-          transactions: [],
-          errors: [],
-        },
-      ]),
-      { grantAclToUserId: 7 },
-    );
-
-    expect(stats.accounts_created).toBe(1);
-    expect(stats.acl_grants).toBe(1);
-
-    const [account] = await db.select().from(financeAccount);
-    const acl = await db
-      .select()
-      .from(financeAccountAccess)
-      .where(
-        and(
-          eq(financeAccountAccess.account_id, account.id),
-          eq(financeAccountAccess.user_id, 7),
-        ),
-      );
-    expect(acl).toHaveLength(1);
-    expect(acl[0].level).toBe("write");
-  });
-
-  it("does not grant when grantAclToUserId is omitted", async () => {
-    const bcId = await insertBankcontact();
-    const stats = await persistFetchResult(
-      bcId,
-      result([
-        {
-          accountNumber: "A2",
-          iban: null,
-          accountKind: "giro",
-          currency: "EUR",
-          label: "Giro A2",
-          balance: null,
-          transactions: [],
-          errors: [],
-        },
-      ]),
-    );
-    expect(stats.accounts_created).toBe(1);
-    expect(stats.acl_grants).toBe(0);
-
-    const acl = await db.select().from(financeAccountAccess);
-    expect(acl).toHaveLength(0);
-  });
-
-  it("does not re-grant for accounts that already existed (idempotent re-sync)", async () => {
-    const bcId = await insertBankcontact();
-    await ensureUser(7);
-
-    // First sync → account created + ACL granted.
-    const first = await persistFetchResult(
-      bcId,
-      result([
-        {
-          accountNumber: "A3",
-          iban: null,
-          accountKind: "giro",
-          currency: "EUR",
-          label: "Giro A3",
-          balance: null,
-          transactions: [],
-          errors: [],
-        },
-      ]),
-      { grantAclToUserId: 7 },
-    );
-    expect(first.acl_grants).toBe(1);
-
-    // Second sync of the same bankcontact → account already exists,
-    // so the create branch (where the ACL grant lives) is not
-    // entered, and acl_grants stays at 0.
-    const second = await persistFetchResult(
-      bcId,
-      result([
-        {
-          accountNumber: "A3",
-          iban: null,
-          accountKind: "giro",
-          currency: "EUR",
-          label: "Giro A3",
-          balance: null,
-          transactions: [],
-          errors: [],
-        },
-      ]),
-      { grantAclToUserId: 7 },
-    );
-    expect(second.accounts_created).toBe(0);
-    expect(second.acl_grants).toBe(0);
-
-    // One ACL row, unchanged.
-    const acl = await db.select().from(financeAccountAccess);
-    expect(acl).toHaveLength(1);
-  });
-
-  it("leaves an existing ACL for the same (account,user) untouched if the FK writes race", async () => {
-    // Defensive: if somehow a pre-existing ACL already covers the
-    // freshly-created account (e.g. an admin granted write access
-    // while a cron ran), onConflictDoNothing must not raise and
-    // acl_grants stays at 0.
-    const bcId = await insertBankcontact();
-    await ensureUser(7);
-
-    // Pre-create the account and ACL row.
-    const [type] = await db.select({ id: financeAccountType.id }).from(financeAccountType).limit(1);
-    const [pre] = await db
-      .insert(financeAccount)
-      .values({
-        bankcontact_id: bcId,
-        type_id: type.id,
-        currency_code: "EUR",
-        account_number: "A4",
-        label: "pre-existing",
-      })
-      .returning({ id: financeAccount.id });
-    await db.insert(financeAccountAccess).values({
-      account_id: pre.id,
-      user_id: 7,
-      level: "read",
-    });
-
-    // Now run a sync against the same account_number — it will be
-    // matched to the existing row, so the create branch is skipped
-    // entirely and the ACL is not touched.
-    const stats = await persistFetchResult(
-      bcId,
-      result([
-        {
-          accountNumber: "A4",
-          iban: null,
-          accountKind: "giro",
-          currency: "EUR",
-          label: "from-sync",
-          balance: null,
-          transactions: [],
-          errors: [],
-        },
-      ]),
-      { grantAclToUserId: 7 },
-    );
-    expect(stats.accounts_created).toBe(0);
-    expect(stats.acl_grants).toBe(0);
-
-    const [acl] = await db.select().from(financeAccountAccess);
-    expect(acl.level).toBe("read"); // admin's prior decision stays
+    expect(stats.errors).toContain("account L: statements-tan-required");
+    expect(stats.errors).toContain("account U: balance-error:9010 x");
   });
 });

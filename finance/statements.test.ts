@@ -172,7 +172,7 @@ describe("finance/statements — triggerSync", () => {
     expect(sessions).toHaveLength(0);
   });
 
-  it("grants a write ACL to the triggering user for freshly auto-created accounts", async () => {
+  it("returns the bank's unknown accounts in unknown_accounts (no auto-create)", async () => {
     setAuth("42", ["finance.accounts.manage"]);
     await ensureUser(42);
     const bcId = await insertBankcontact();
@@ -203,19 +203,28 @@ describe("finance/statements — triggerSync", () => {
 
     const response = await triggerSync({ bankcontactId: bcId });
     expect(response.state).toBe("idle");
+    if (response.state !== "idle") throw new Error("type narrow");
 
-    const [account] = await db
+    expect(response.accounts_seen).toBe(1);
+    expect(response.accounts_matched).toBe(0);
+    expect(response.accounts_unknown).toBe(1);
+    expect(response.unknown_accounts).toEqual([
+      {
+        accountNumber: "CHECK-01",
+        iban: "DE00000000000000000001",
+        accountKind: "giro",
+        currency: "EUR",
+        label: "Giro Max",
+      },
+    ]);
+
+    // Nothing auto-created: no finance_account row, no ACL rows.
+    const accounts = await db
       .select()
       .from(financeAccount)
       .where(eq(financeAccount.bankcontact_id, bcId));
-    expect(account).toBeDefined();
-
-    const acl = await db
-      .select()
-      .from(financeAccountAccess)
-      .where(eq(financeAccountAccess.account_id, account.id));
-    expect(acl).toHaveLength(1);
-    expect(acl[0].user_id).toBe(42);
-    expect(acl[0].level).toBe("write");
+    expect(accounts).toHaveLength(0);
+    const acl = await db.select().from(financeAccountAccess);
+    expect(acl).toHaveLength(0);
   });
 });

@@ -38,8 +38,15 @@ console.log("[boot] finance/accounts.ts: all imports resolved");
 
 interface AccountView {
   id: number;
-  bankcontact_id: number;
-  bankcontact_name: string;
+  /** null for manual accounts (not linked to a bankcontact). */
+  bankcontact_id: number | null;
+  /** null when bankcontact_id is null; empty string when the link
+   *  references a bankcontact the caller can't read (shouldn't
+   *  happen in practice — list ops filter beforehand). */
+  bankcontact_name: string | null;
+  /** lib-fints account number on the linked bank-side account, null
+   *  for manual accounts. */
+  fints_account_number: string | null;
   type_kind: string;
   type_label: string;
   currency_code: string;
@@ -61,17 +68,19 @@ type TypeRow = typeof financeAccountType.$inferSelect;
 type CurrencyRow = typeof financeCurrency.$inferSelect;
 
 /** Join-aware row projector. The four refs are looked up once and
- * reused across rows so we don't emit N+1 queries. */
+ * reused across rows so we don't emit N+1 queries. bankcontact is
+ * null for manual accounts. */
 function toView(
   row: AccountRow,
-  bankcontact: BankcontactRow,
+  bankcontact: BankcontactRow | null,
   type: TypeRow,
   currency: CurrencyRow,
 ): AccountView {
   return {
     id: row.id,
     bankcontact_id: row.bankcontact_id,
-    bankcontact_name: bankcontact.name,
+    bankcontact_name: bankcontact?.name ?? null,
+    fints_account_number: row.fints_account_number,
     type_kind: type.kind,
     type_label: type.label,
     currency_code: currency.code,
@@ -113,6 +122,7 @@ export const listAccounts = api(
         .select({
           id: financeAccount.id,
           bankcontact_id: financeAccount.bankcontact_id,
+          fints_account_number: financeAccount.fints_account_number,
           type_id: financeAccount.type_id,
           currency_code: financeAccount.currency_code,
           iban: financeAccount.iban,
@@ -133,12 +143,19 @@ export const listAccounts = api(
     if (rows.length === 0) return { items: [] };
 
     // Batch-load the three lookup dimensions.
-    const bcIds = [...new Set(rows.map((r) => r.bankcontact_id))];
+    const bcIds = rows
+      .map((r) => r.bankcontact_id)
+      .filter((id): id is number => id !== null);
     const typeIds = [...new Set(rows.map((r) => r.type_id))];
     const currencyCodes = [...new Set(rows.map((r) => r.currency_code))];
 
     const [bankcontacts, types, currencies] = await Promise.all([
-      db.select().from(financeBankcontact).where(inArray(financeBankcontact.id, bcIds)),
+      bcIds.length > 0
+        ? db
+            .select()
+            .from(financeBankcontact)
+            .where(inArray(financeBankcontact.id, [...new Set(bcIds)]))
+        : Promise.resolve([] as BankcontactRow[]),
       db.select().from(financeAccountType).where(inArray(financeAccountType.id, typeIds)),
       db.select().from(financeCurrency).where(inArray(financeCurrency.code, currencyCodes)),
     ]);
@@ -149,7 +166,12 @@ export const listAccounts = api(
 
     return {
       items: rows.map((r) =>
-        toView(r, bcById.get(r.bankcontact_id)!, typeById.get(r.type_id)!, currByCode.get(r.currency_code)!),
+        toView(
+          r,
+          r.bankcontact_id !== null ? bcById.get(r.bankcontact_id) ?? null : null,
+          typeById.get(r.type_id)!,
+          currByCode.get(r.currency_code)!,
+        ),
       ),
     };
   },
@@ -179,7 +201,9 @@ export const getAccount = api(
       await assertAclRead(id, Number(auth.userID));
     }
     const [bc, type, curr] = await Promise.all([
-      loadBankcontact(row.bankcontact_id),
+      row.bankcontact_id !== null
+        ? loadBankcontact(row.bankcontact_id)
+        : Promise.resolve(null),
       loadType(row.type_id),
       loadCurrency(row.currency_code),
     ]);
@@ -192,7 +216,13 @@ export const getAccount = api(
 // -----------------------------------------------------------------------
 
 interface CreateParams {
-  bankcontact_id: number;
+  /** Optional. Omit for a manual account; set to link to a bankcontact
+   *  right on creation (rare — the usual path is create manual, then
+   *  POST /finance/accounts/:id/link). */
+  bankcontact_id?: number;
+  /** Required iff bankcontact_id is set — picks the bank-side account
+   *  this fk-encore account mirrors. */
+  fints_account_number?: string;
   type_kind: string;
   currency_code: string;
   iban?: string;
@@ -211,7 +241,14 @@ export const createAccount = api(
     const auth = getAuthData()!;
     requirePermission(auth, "finance.accounts.manage");
 
-    await loadBankcontact(p.bankcontact_id); // 404 if missing
+    if (p.bankcontact_id !== undefined) {
+      await loadBankcontact(p.bankcontact_id); // 404 if missing
+      if (!p.fints_account_number?.trim()) {
+        throw APIError.invalidArgument(
+          "fints_account_number required when bankcontact_id is set",
+        );
+      }
+    }
     if (!(financeAccountKindEnum.enumValues as readonly string[]).includes(p.type_kind)) {
       throw APIError.invalidArgument(`unknown account type '${p.type_kind}'`);
     }
@@ -243,7 +280,8 @@ export const createAccount = api(
     const [row] = await db
       .insert(financeAccount)
       .values({
-        bankcontact_id: p.bankcontact_id,
+        bankcontact_id: p.bankcontact_id ?? null,
+        fints_account_number: p.fints_account_number?.trim() || null,
         type_id: type.id,
         currency_code: currency.code,
         iban: p.iban?.trim() || null,
@@ -251,7 +289,27 @@ export const createAccount = api(
         label: p.label.trim(),
       })
       .returning();
-    const bc = await loadBankcontact(row.bankcontact_id);
+
+    // Give the creator write access so their own manual accounts are
+    // visible immediately (non-admin callers need an ACL row). Admins
+    // bypass ACL anyway but an extra row doesn't hurt.
+    await db
+      .insert(financeAccountAccess)
+      .values({
+        account_id: row.id,
+        user_id: Number(auth.userID),
+        level: "write",
+      })
+      .onConflictDoNothing({
+        target: [
+          financeAccountAccess.account_id,
+          financeAccountAccess.user_id,
+        ],
+      });
+
+    const bc = row.bankcontact_id !== null
+      ? await loadBankcontact(row.bankcontact_id)
+      : null;
     return toView(row, bc, type, currency);
   },
 );
@@ -302,12 +360,117 @@ export const updateAccount = api(
       .returning();
 
     const [bc, type, curr] = await Promise.all([
-      loadBankcontact(row.bankcontact_id),
+      row.bankcontact_id !== null
+        ? loadBankcontact(row.bankcontact_id)
+        : Promise.resolve(null),
       loadType(row.type_id),
       loadCurrency(row.currency_code),
     ]);
     void existing;
     return toView(row, bc, type, curr);
+  },
+);
+
+// -----------------------------------------------------------------------
+// Link / Unlink with a bankcontact
+// -----------------------------------------------------------------------
+//
+// The new primary flow is: create a manual finance_account (no
+// bankcontact), then link it to a bank-side account the user picked
+// from a probe / sync. Unlink flips it back to manual — transactions
+// and balances stay, only bankcontact_id + fints_account_number are
+// cleared.
+
+interface LinkParams {
+  id: number;
+  bankcontact_id: number;
+  fints_account_number: string;
+}
+
+export const linkAccount = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/finance/accounts/:id/link",
+    auth: true,
+  },
+  async (p: LinkParams): Promise<AccountView> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.accounts.manage");
+
+    if (!p.fints_account_number?.trim()) {
+      throw APIError.invalidArgument("fints_account_number required");
+    }
+    const account = await loadAccount(p.id);
+    await loadBankcontact(p.bankcontact_id);
+
+    // Ensure the unique (bankcontact_id, fints_account_number) slot
+    // is free. A conflict means another fk-encore account is already
+    // linked to this bank-side account, which the UI should resolve
+    // by unlinking that one first.
+    const fn = p.fints_account_number.trim();
+    const existing = await db
+      .select({ id: financeAccount.id })
+      .from(financeAccount)
+      .where(
+        and(
+          eq(financeAccount.bankcontact_id, p.bankcontact_id),
+          eq(financeAccount.fints_account_number, fn),
+        ),
+      )
+      .limit(1);
+    if (existing.length > 0 && existing[0].id !== p.id) {
+      throw APIError.alreadyExists(
+        `bank account already linked to finance_account ${existing[0].id}`,
+      );
+    }
+
+    const [row] = await db
+      .update(financeAccount)
+      .set({
+        bankcontact_id: p.bankcontact_id,
+        fints_account_number: fn,
+      })
+      .where(eq(financeAccount.id, p.id))
+      .returning();
+    void account;
+
+    const [bc, type, curr] = await Promise.all([
+      loadBankcontact(row.bankcontact_id!),
+      loadType(row.type_id),
+      loadCurrency(row.currency_code),
+    ]);
+    return toView(row, bc, type, curr);
+  },
+);
+
+interface UnlinkParams {
+  id: number;
+}
+
+export const unlinkAccount = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/finance/accounts/:id/unlink",
+    auth: true,
+  },
+  async ({ id }: UnlinkParams): Promise<AccountView> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.accounts.manage");
+    await loadAccount(id);
+
+    const [row] = await db
+      .update(financeAccount)
+      .set({ bankcontact_id: null, fints_account_number: null })
+      .where(eq(financeAccount.id, id))
+      .returning();
+
+    const [type, curr] = await Promise.all([
+      loadType(row.type_id),
+      loadCurrency(row.currency_code),
+    ]);
+    return toView(row, null, type, curr);
   },
 );
 

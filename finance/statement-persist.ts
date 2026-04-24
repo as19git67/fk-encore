@@ -3,15 +3,20 @@
  * the DB. Called after a successful sync (manual trigger,
  * TAN-complete, or cron).
  *
- * What gets written:
- *   - `finance_account`: auto-created on first sighting (keyed by
- *     `(bankcontact_id, account_number)`). Existing rows are
- *     left alone — even if the bank has updated metadata — to avoid
- *     clobbering user-set labels.
+ * Match semantics (since the manual-account flow landed):
+ *   - Snapshots are looked up by `(bankcontact_id, fints_account_number
+ *     = snapshot.accountNumber)`. Matching finance_account rows get
+ *     transactions + balance written.
+ *   - Unknown snapshots (no matching linked row) are NOT auto-created.
+ *     They're collected in `unknown` so the UI can offer the user a
+ *     choice: link to an existing manual account, import as a new
+ *     account, or ignore.
+ *
+ * What gets written for a *matched* account:
  *   - `finance_transaction`: inserted with `onConflictDoNothing` on
- *     the same `(account_id, dedupe_hash)` unique index the importer
- *     uses. `dedupe_hash` is SHA-256 over the canonical fields so a
- *     re-sync is a no-op.
+ *     the `(account_id, dedupe_hash)` unique index the importer uses.
+ *     `dedupe_hash` is SHA-256 over the canonical fields so a re-sync
+ *     is a no-op.
  *   - `finance_account_balance`: one row per account per sync,
  *     `source='fints'`. Conflict on `(account_id, as_of)` — we bump
  *     `as_of` to `now()` to avoid colliding with a balance the bank
@@ -28,10 +33,7 @@ import { and, eq } from "drizzle-orm";
 import db from "../db/database";
 import {
   financeAccount,
-  financeAccountAccess,
   financeAccountBalance,
-  financeAccountKindEnum,
-  financeAccountType,
   financeTransaction,
 } from "../db/schema";
 import type { FetchResult, FintsTransactionData } from "./types";
@@ -39,143 +41,90 @@ import { suggestTagsForTransaction } from "./tag-suggester";
 
 console.log("[boot] finance/statement-persist.ts: all imports resolved");
 
-export interface PersistStats {
-  accounts_seen: number;
-  accounts_created: number;
-  transactions_inserted: number;
-  transactions_skipped_duplicate: number;
-  balances_written: number;
-  acl_grants: number;
+/**
+ * A bank-side account the sync saw but couldn't map to any linked
+ * finance_account. Passed up to the UI so the user can decide
+ * account-by-account whether to link or import.
+ */
+export interface UnknownAccount {
+  accountNumber: string;
+  iban: string | null;
+  accountKind: string;
+  currency: string;
+  label: string;
+  balance: { asOf: string; amount: string; currency: string } | null;
+  /** Per-account error strings from the fetch path (e.g. tan-required). */
   errors: string[];
 }
 
-export interface PersistOptions {
-  /**
-   * When set, every newly-auto-created finance_account gets a
-   * `write`-level ACL entry for this user id. Without this, the
-   * freshly-seen account would stay invisible to non-admin callers
-   * (the ACL join filters them out of /finance/accounts).
-   *
-   * Manual-trigger callers pass the getAuthData().userID; the cron
-   * passes the "responsible user" picked from the existing ACL. When
-   * neither is available (cold start through an uncommon path) the
-   * caller can omit the field and have a finance.admin user grant
-   * access afterwards via AccountAssignmentView.
-   */
-  grantAclToUserId?: number;
+export interface PersistStats {
+  accounts_seen: number;
+  accounts_matched: number;
+  accounts_unknown: number;
+  transactions_inserted: number;
+  transactions_skipped_duplicate: number;
+  balances_written: number;
+  unknown: UnknownAccount[];
+  errors: string[];
 }
 
 export async function persistFetchResult(
   bankcontactId: number,
   result: FetchResult,
-  opts: PersistOptions = {},
 ): Promise<PersistStats> {
   const stats: PersistStats = {
     accounts_seen: 0,
-    accounts_created: 0,
+    accounts_matched: 0,
+    accounts_unknown: 0,
     transactions_inserted: 0,
     transactions_skipped_duplicate: 0,
     balances_written: 0,
-    acl_grants: 0,
+    unknown: [],
     errors: [],
   };
 
-  // Preload the account-type id per finance_account_kind enum value so
-  // we can auto-create finance_account rows without a per-insert query.
-  const typeRows = await db.select().from(financeAccountType);
-  const typeIdByKind = new Map(typeRows.map((t) => [t.kind as string, t.id]));
-
   for (const snapshot of result.accounts) {
     stats.accounts_seen++;
-
-    // ---- Find or auto-create the account ----
-    let accountId: number;
-    const [existing] = await db
-      .select({ id: financeAccount.id })
-      .from(financeAccount)
-      .where(
-        and(
-          eq(financeAccount.bankcontact_id, bankcontactId),
-          eq(financeAccount.account_number, snapshot.accountNumber),
-        ),
-      )
-      .limit(1);
-
-    if (existing) {
-      accountId = existing.id;
-    } else {
-      const kind =
-        (financeAccountKindEnum.enumValues as readonly string[]).includes(
-          snapshot.accountKind,
-        )
-          ? snapshot.accountKind
-          : "sonstige";
-      const typeId = typeIdByKind.get(kind);
-      if (!typeId) {
-        stats.errors.push(
-          `account ${snapshot.accountNumber}: finance_account_type ` +
-            `seed missing for '${kind}'`,
-        );
-        continue;
-      }
-      try {
-        const [inserted] = await db
-          .insert(financeAccount)
-          .values({
-            bankcontact_id: bankcontactId,
-            type_id: typeId,
-            currency_code: snapshot.currency.toUpperCase(),
-            iban: snapshot.iban ?? null,
-            account_number: snapshot.accountNumber,
-            label: snapshot.label,
-          })
-          .returning({ id: financeAccount.id });
-        accountId = inserted.id;
-        stats.accounts_created++;
-
-        // Auto-grant write ACL to the user who drove the sync so the
-        // freshly seen account is immediately visible in their
-        // AccountsView. Conflict target covers the (account,user)
-        // unique; a race where another concurrent sync wrote the row
-        // first is a no-op.
-        if (opts.grantAclToUserId !== undefined) {
-          try {
-            const granted = await db
-              .insert(financeAccountAccess)
-              .values({
-                account_id: accountId,
-                user_id: opts.grantAclToUserId,
-                level: "write",
-              })
-              .onConflictDoNothing({
-                target: [
-                  financeAccountAccess.account_id,
-                  financeAccountAccess.user_id,
-                ],
-              })
-              .returning({ account_id: financeAccountAccess.account_id });
-            if (granted.length > 0) stats.acl_grants++;
-          } catch (err) {
-            stats.errors.push(
-              `account ${snapshot.accountNumber}: acl grant failed: ` +
-                ((err as Error).message ?? String(err)),
-            );
-          }
-        }
-      } catch (err) {
-        stats.errors.push(
-          `account ${snapshot.accountNumber}: create failed: ` +
-            ((err as Error).message ?? String(err)),
-        );
-        continue;
-      }
-    }
 
     // Forward per-account soft errors (tan-required, bank answers) so
     // the caller can surface them in the sync response.
     for (const e of snapshot.errors) {
       stats.errors.push(`account ${snapshot.accountNumber}: ${e}`);
     }
+
+    // Look up the linked finance_account, if any.
+    const [matched] = await db
+      .select({ id: financeAccount.id })
+      .from(financeAccount)
+      .where(
+        and(
+          eq(financeAccount.bankcontact_id, bankcontactId),
+          eq(financeAccount.fints_account_number, snapshot.accountNumber),
+        ),
+      )
+      .limit(1);
+
+    if (!matched) {
+      stats.accounts_unknown++;
+      stats.unknown.push({
+        accountNumber: snapshot.accountNumber,
+        iban: snapshot.iban ?? null,
+        accountKind: snapshot.accountKind,
+        currency: snapshot.currency,
+        label: snapshot.label,
+        balance: snapshot.balance
+          ? {
+              asOf: snapshot.balance.asOf,
+              amount: snapshot.balance.amount,
+              currency: snapshot.balance.currency,
+            }
+          : null,
+        errors: snapshot.errors,
+      });
+      continue;
+    }
+    stats.accounts_matched++;
+    const accountId = matched.id;
 
     // ---- Insert transactions ----
     const freshlyInsertedIds: number[] = [];

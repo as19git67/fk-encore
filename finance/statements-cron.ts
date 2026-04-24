@@ -126,29 +126,18 @@ export const syncStatements = api(
         } else if (result.state === "idle") {
           // Pull statements + balances from the same live client —
           // avoids a second init-dialog-TAN round trip per cron tick.
+          // Only *linked* finance_account rows receive data; unknown
+          // bank-side accounts are logged for the admin to pick up in
+          // the UI.
           try {
-            // Auto-ACL for freshly seen accounts: grant to the same
-            // "responsible user" the cron already picks for TAN
-            // pushes. If no one owns this bankcontact yet, skip the
-            // grant — an admin will assign access via
-            // AccountAssignmentView.
-            let grantAclToUserId: number | undefined;
-            try {
-              grantAclToUserId = await firstResponsibleUser(bc.id);
-            } catch {
-              // No ACL row yet — cold start. Let persistFetchResult
-              // insert the account row without an ACL; admin assigns
-              // access after the fact.
-            }
             const fetched = await runFetchAccounts(result.client as FintsClientSurface);
-            const stats = await persistFetchResult(bc.id, fetched, {
-              grantAclToUserId,
-            });
+            const stats = await persistFetchResult(bc.id, fetched);
             console.log(
               `[finance.cron] bankcontact=${bc.id} (${bc.name}) → ok: ` +
-                `accounts=${stats.accounts_seen} tx=${stats.transactions_inserted} ` +
-                `balances=${stats.balances_written} acl=${stats.acl_grants} ` +
-                `partial=${fetched.partial}`,
+                `accounts=${stats.accounts_seen} ` +
+                `(matched=${stats.accounts_matched} unknown=${stats.accounts_unknown}) ` +
+                `tx=${stats.transactions_inserted} ` +
+                `balances=${stats.balances_written} partial=${fetched.partial}`,
             );
           } catch (fetchErr) {
             console.error(

@@ -19,7 +19,9 @@ import {
   createAccount,
   deleteAccount,
   getAccount,
+  linkAccount,
   listAccounts,
+  unlinkAccount,
   updateAccount,
 } from "./accounts";
 
@@ -93,12 +95,11 @@ async function grantAcl(accountId: number, userId: number, level: "read" | "writ
   });
 }
 
-describe("finance/accounts — create", () => {
-  it("creates an account with joined DTO fields", async () => {
+describe("finance/accounts — create (manual)", () => {
+  it("creates a manual account (no bankcontact_id) with a write-ACL for the caller", async () => {
     setAuth("1", ["finance.accounts.manage"]);
-    const bcId = await insertBankcontact();
+    await ensureUser(1);
     const result = await createAccount({
-      bankcontact_id: bcId,
       type_kind: "giro",
       currency_code: "EUR",
       iban: "DE12 3456",
@@ -110,16 +111,57 @@ describe("finance/accounts — create", () => {
     expect(result.type_kind).toBe("giro");
     expect(result.type_label).toBe("Girokonto");
     expect(result.currency_symbol).toBe("€");
-    expect(result.bankcontact_name).toBe("Sparkasse Test");
+    expect(result.bankcontact_id).toBeNull();
+    expect(result.bankcontact_name).toBeNull();
+    expect(result.fints_account_number).toBeNull();
     expect(result.active).toBe(true);
+
+    const acl = await db
+      .select()
+      .from(financeAccountAccess)
+      .where(eq(financeAccountAccess.account_id, result.id));
+    expect(acl).toHaveLength(1);
+    expect(acl[0].user_id).toBe(1);
+    expect(acl[0].level).toBe("write");
   });
 
-  it("rejects unknown type_kind", async () => {
+  it("creates a bank-linked account when both bankcontact_id and fints_account_number are set", async () => {
     setAuth("1", ["finance.accounts.manage"]);
+    await ensureUser(1);
+    const bcId = await insertBankcontact();
+    const result = await createAccount({
+      bankcontact_id: bcId,
+      fints_account_number: "1234567890",
+      type_kind: "giro",
+      currency_code: "EUR",
+      account_number: "1234567890",
+      label: "Girokonto",
+    });
+    expect(result.bankcontact_id).toBe(bcId);
+    expect(result.bankcontact_name).toBe("Sparkasse Test");
+    expect(result.fints_account_number).toBe("1234567890");
+  });
+
+  it("rejects bankcontact_id without fints_account_number", async () => {
+    setAuth("1", ["finance.accounts.manage"]);
+    await ensureUser(1);
     const bcId = await insertBankcontact();
     await expect(
       createAccount({
         bankcontact_id: bcId,
+        type_kind: "giro",
+        currency_code: "EUR",
+        account_number: "1",
+        label: "x",
+      }),
+    ).rejects.toThrow(/fints_account_number/);
+  });
+
+  it("rejects unknown type_kind", async () => {
+    setAuth("1", ["finance.accounts.manage"]);
+    await ensureUser(1);
+    await expect(
+      createAccount({
         type_kind: "nonexistent",
         currency_code: "EUR",
         account_number: "1",
@@ -130,10 +172,9 @@ describe("finance/accounts — create", () => {
 
   it("rejects unknown currency", async () => {
     setAuth("1", ["finance.accounts.manage"]);
-    const bcId = await insertBankcontact();
+    await ensureUser(1);
     await expect(
       createAccount({
-        bankcontact_id: bcId,
         type_kind: "giro",
         currency_code: "XXX",
         account_number: "1",
@@ -144,9 +185,11 @@ describe("finance/accounts — create", () => {
 
   it("404s when bankcontact does not exist", async () => {
     setAuth("1", ["finance.accounts.manage"]);
+    await ensureUser(1);
     await expect(
       createAccount({
         bankcontact_id: 999_999,
+        fints_account_number: "1",
         type_kind: "giro",
         currency_code: "EUR",
         account_number: "1",
@@ -157,10 +200,8 @@ describe("finance/accounts — create", () => {
 
   it("rejects callers without finance.accounts.manage", async () => {
     setAuth("1", ["finance.view"]);
-    const bcId = await insertBankcontact();
     await expect(
       createAccount({
-        bankcontact_id: bcId,
         type_kind: "giro",
         currency_code: "EUR",
         account_number: "1",
@@ -383,5 +424,92 @@ describe("finance/accounts — delete", () => {
   it("404s on unknown account id", async () => {
     setAuth("1", ["finance.accounts.manage"]);
     await expect(deleteAccount({ id: 999_999 })).rejects.toThrow(/not found/);
+  });
+});
+
+describe("finance/accounts — link / unlink", () => {
+  async function seedManual(): Promise<number> {
+    // finance.view is needed by getAccount; the link/unlink tests
+    // use it afterwards to assert the row is still readable.
+    setAuth("1", ["finance.accounts.manage", "finance.view"]);
+    await ensureUser(1);
+    const created = await createAccount({
+      type_kind: "giro",
+      currency_code: "EUR",
+      account_number: "MANUAL-01",
+      label: "Hauptkonto",
+    });
+    return created.id;
+  }
+
+  it("links a manual account to a bank-side account", async () => {
+    const accountId = await seedManual();
+    const bcId = await insertBankcontact();
+
+    const linked = await linkAccount({
+      id: accountId,
+      bankcontact_id: bcId,
+      fints_account_number: "DE00...1234",
+    });
+    expect(linked.bankcontact_id).toBe(bcId);
+    expect(linked.fints_account_number).toBe("DE00...1234");
+  });
+
+  it("rejects linking when another finance_account is already on the same bank-side slot", async () => {
+    const firstId = await seedManual();
+    const bcId = await insertBankcontact();
+    await linkAccount({
+      id: firstId,
+      bankcontact_id: bcId,
+      fints_account_number: "SHARED",
+    });
+
+    // Second account tries to claim the same (bankcontact, fints) slot.
+    const second = await createAccount({
+      type_kind: "giro",
+      currency_code: "EUR",
+      account_number: "MANUAL-02",
+      label: "Zweitkonto",
+    });
+    await expect(
+      linkAccount({
+        id: second.id,
+        bankcontact_id: bcId,
+        fints_account_number: "SHARED",
+      }),
+    ).rejects.toThrow(/already linked/);
+  });
+
+  it("unlinks an account, keeping the account row intact", async () => {
+    const accountId = await seedManual();
+    const bcId = await insertBankcontact();
+    await linkAccount({
+      id: accountId,
+      bankcontact_id: bcId,
+      fints_account_number: "F1",
+    });
+
+    const unlinked = await unlinkAccount({ id: accountId });
+    expect(unlinked.bankcontact_id).toBeNull();
+    expect(unlinked.bankcontact_name).toBeNull();
+    expect(unlinked.fints_account_number).toBeNull();
+
+    // Account row itself still there.
+    const still = await getAccount({ id: accountId });
+    expect(still.id).toBe(accountId);
+  });
+
+  it("requires finance.accounts.manage for both endpoints", async () => {
+    const accountId = await seedManual();
+    const bcId = await insertBankcontact();
+    setAuth("1", ["finance.view"]);
+    await expect(
+      linkAccount({
+        id: accountId,
+        bankcontact_id: bcId,
+        fints_account_number: "X",
+      }),
+    ).rejects.toThrow(/permission/);
+    await expect(unlinkAccount({ id: accountId })).rejects.toThrow(/permission/);
   });
 });

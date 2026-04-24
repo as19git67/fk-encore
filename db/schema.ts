@@ -978,25 +978,45 @@ export const financeBankcontact = pgTable("finance_bankcontact", {
     .defaultNow(),
 });
 
-export const financeAccount = pgTable("finance_account", {
-  id: serial("id").primaryKey(),
-  bankcontact_id: integer("bankcontact_id")
-    .notNull()
-    .references(() => financeBankcontact.id, { onDelete: "restrict" }),
-  type_id: integer("type_id")
-    .notNull()
-    .references(() => financeAccountType.id, { onDelete: "restrict" }),
-  currency_code: text("currency_code")
-    .notNull()
-    .references(() => financeCurrency.code, { onDelete: "restrict" }),
-  iban: text("iban").unique(),
-  account_number: text("account_number").notNull(),
-  label: text("label").notNull(),
-  active: boolean("active").notNull().default(true),
-  created_at: timestamp("created_at", { mode: "string", withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const financeAccount = pgTable(
+  "finance_account",
+  {
+    id: serial("id").primaryKey(),
+    // Nullable: null = manual account (not linked to a bank). On
+    // bankcontact-delete we SET NULL (unlink) rather than cascading,
+    // so bookings survive if the bank connection is removed.
+    bankcontact_id: integer("bankcontact_id").references(
+      () => financeBankcontact.id,
+      { onDelete: "set null" },
+    ),
+    // lib-fints' accountNumber for the linked bank-side account, used
+    // by the statement-fetch path to match bank snapshots to fk-encore
+    // accounts. NULL for manual accounts.
+    fints_account_number: text("fints_account_number"),
+    type_id: integer("type_id")
+      .notNull()
+      .references(() => financeAccountType.id, { onDelete: "restrict" }),
+    currency_code: text("currency_code")
+      .notNull()
+      .references(() => financeCurrency.code, { onDelete: "restrict" }),
+    iban: text("iban").unique(),
+    account_number: text("account_number").notNull(),
+    label: text("label").notNull(),
+    active: boolean("active").notNull().default(true),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    // Only one fk-encore account per (bankcontact, fints_account_number)
+    // pair; NULLs don't collide under Postgres' default unique semantics,
+    // so many manual accounts (both columns NULL) coexist fine.
+    uniqueIndex("finance_account_unique_bank_link").on(
+      table.bankcontact_id,
+      table.fints_account_number,
+    ),
+  ],
+);
 
 // ---------- ACL ----------
 //

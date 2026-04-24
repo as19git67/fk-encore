@@ -212,7 +212,7 @@ describe("finance/bankcontacts — update", () => {
 });
 
 describe("finance/bankcontacts — delete", () => {
-  it("deletes a bankcontact that has no accounts", async () => {
+  it("deletes a bankcontact that has no linked accounts", async () => {
     withPermission("finance.accounts.manage");
     const created = await createBankcontact({
       name: "to-delete",
@@ -221,42 +221,14 @@ describe("finance/bankcontacts — delete", () => {
       server_url: "https://x",
     });
     const result = await deleteBankcontact({ id: created.id });
-    expect(result.deleted).toBe(true);
+    expect(result).toEqual({ deleted: true, accounts_unlinked: 0 });
     await expect(getBankcontact({ id: created.id })).rejects.toThrow();
   });
 
-  it("refuses when accounts reference the bankcontact and cascade is not set", async () => {
+  it("unlinks linked accounts instead of deleting them — transactions survive", async () => {
     withPermission("finance.accounts.manage");
     const created = await createBankcontact({
       name: "has-accounts",
-      blz: "1",
-      login: "u",
-      server_url: "https://x",
-    });
-    const [type] = await db
-      .select({ id: financeAccountType.id })
-      .from(financeAccountType)
-      .limit(1);
-    const [currency] = await db
-      .select({ code: financeCurrency.code })
-      .from(financeCurrency)
-      .limit(1);
-    await db.insert(financeAccount).values({
-      bankcontact_id: created.id,
-      type_id: type.id,
-      currency_code: currency.code,
-      account_number: "000001",
-      label: "Test",
-    });
-    await expect(deleteBankcontact({ id: created.id })).rejects.toThrow(
-      /cascade=true/,
-    );
-  });
-
-  it("cascade-deletes accounts + transactions when cascade=true", async () => {
-    withPermission("finance.accounts.manage");
-    const created = await createBankcontact({
-      name: "to-purge",
       blz: "1",
       login: "u",
       server_url: "https://x",
@@ -273,48 +245,40 @@ describe("finance/bankcontacts — delete", () => {
       .insert(financeAccount)
       .values({
         bankcontact_id: created.id,
+        fints_account_number: "FINTS-001",
         type_id: type.id,
         currency_code: currency.code,
         account_number: "000001",
         label: "Test",
       })
       .returning({ id: financeAccount.id });
-    await db.insert(financeTransaction).values([
-      {
-        account_id: acc.id,
-        booking_date: "2026-04-01",
-        amount: "-10.00",
-        currency_code: currency.code,
-        dedupe_hash: "a".repeat(64),
-      },
-      {
-        account_id: acc.id,
-        booking_date: "2026-04-02",
-        amount: "-20.00",
-        currency_code: currency.code,
-        dedupe_hash: "b".repeat(64),
-      },
-    ]);
-
-    const result = await deleteBankcontact({ id: created.id, cascade: true });
-    expect(result).toEqual({
-      deleted: true,
-      accounts_deleted: 1,
-      transactions_deleted: 2,
+    await db.insert(financeTransaction).values({
+      account_id: acc.id,
+      booking_date: "2026-04-01",
+      amount: "-10.00",
+      currency_code: currency.code,
+      dedupe_hash: "a".repeat(64),
     });
 
-    // Bankcontact, account and transactions all gone.
+    const result = await deleteBankcontact({ id: created.id });
+    expect(result).toEqual({ deleted: true, accounts_unlinked: 1 });
+
+    // Bankcontact is gone, but the account survives as a manual account.
     await expect(getBankcontact({ id: created.id })).rejects.toThrow();
-    const accsAfter = await db
-      .select({ id: financeAccount.id })
+    const [after] = await db
+      .select()
       .from(financeAccount)
       .where(eq(financeAccount.id, acc.id));
-    expect(accsAfter).toHaveLength(0);
-    const txAfter = await db
-      .select({ id: financeTransaction.id })
+    expect(after).toBeDefined();
+    expect(after.bankcontact_id).toBeNull();
+    expect(after.fints_account_number).toBeNull();
+
+    // Transactions survive the unlink.
+    const txs = await db
+      .select()
       .from(financeTransaction)
       .where(eq(financeTransaction.account_id, acc.id));
-    expect(txAfter).toHaveLength(0);
+    expect(txs).toHaveLength(1);
   });
 });
 
