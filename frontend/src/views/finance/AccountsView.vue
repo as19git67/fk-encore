@@ -192,6 +192,15 @@ async function createManual() {
   gap: 1rem;
   padding: 1.5rem;
 }
+/* Tight padding on narrow screens — same pattern as the photo/album
+ * views, so the grid meets the viewport edges instead of wasting half
+ * the screen on chrome. */
+@media (max-width: 640px) {
+  .page {
+    padding: 0.75rem;
+    gap: 0.75rem;
+  }
+}
 .page-header {
   display: flex;
   justify-content: space-between;

@@ -175,6 +175,15 @@ async function save() {
   padding: 1.5rem;
   max-width: 40rem;
 }
+@media (max-width: 640px) {
+  .page {
+    padding: 0.75rem;
+    gap: 0.75rem;
+  }
+  .card {
+    padding: 0.75rem;
+  }
+}
 .page-header {
   display: flex;
   justify-content: space-between;
