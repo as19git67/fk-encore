@@ -7,6 +7,7 @@ import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import FilterMenu from '../components/FilterMenu.vue'
 import GuestStatusBanner from '../components/GuestStatusBanner.vue'
 import GuestRegisterDialog from '../components/GuestRegisterDialog.vue'
+import GuestAccountDialog from '../components/GuestAccountDialog.vue'
 import GuestPhotoReactions from '../components/GuestPhotoReactions.vue'
 import { getPublicAlbum, getPhotoUrl, type PhotoFilter, type PublicAlbumResponse, type PublicAlbumPhoto, type Photo } from '../api/photos'
 import { matchesPhotoFilter } from '../utils/photoFilter'
@@ -25,16 +26,24 @@ const error = ref('')
 const shareToken = computed(() => (route.params.token as string) ?? '')
 
 /**
- * True when the viewer is on the map display with no registered
- * guest session. Triggers two layout changes: the full-width banner
- * is suppressed and a compact "Anmelden" button is folded into the
- * TripMap stats overlay next to the Filter button. Once the guest
- * registers the banner returns for the pending-verify prompt and
- * later the opt-in toggles.
+ * True for any map-view rendering. The map crowds the viewport, so
+ * the full-width guest banner is suppressed in favour of compact
+ * buttons in TripMap's stats-addon slot — "Anmelden" for anonymous
+ * visitors and a user icon opening the account dialog for
+ * registered (pending or verified) guests.
  */
+const isMapView = computed(() => album.value?.display_mode === 'map')
 const isMapAnonymous = computed(
-  () => album.value?.display_mode === 'map' && guestSession.guest.value === null,
+  () => isMapView.value && guestSession.guest.value === null,
 )
+const isMapRegistered = computed(
+  () => isMapView.value && guestSession.guest.value !== null,
+)
+
+const showAccountDialog = ref(false)
+function openAccountDialog() {
+  showAccountDialog.value = true
+}
 
 // Guest identity + opt-in toggles. The composable instances are
 // created once per token and shared with the banner so unmounting
@@ -324,14 +333,13 @@ onUnmounted(() => {
     <Message v-if="error" severity="error">{{ error }}</Message>
 
     <template v-if="album">
-      <!-- In map mode we hide the banner when the visitor is still
-           anonymous — the map already crowds the viewport and we
-           replace it with a compact "Anmelden" pill next to the
-           Filter button inside the stats overlay. Pending/verified
-           guests keep the banner because they need verify info and
-           the mail/push toggles. -->
+      <!-- The full-width banner is only shown in grid view. In map
+           view it would eat viewport space the map needs, so we
+           replace it with compact action pills in TripMap's stats
+           overlay: "Anmelden" for anonymous visitors, a user icon
+           opening the account dialog for registered guests. -->
       <GuestStatusBanner
-        v-if="!isMapAnonymous"
+        v-if="!isMapView"
         :guest="guestSession.guest.value"
         :loading="guestSession.loading.value"
         :togglingNotify="guestSession.togglingNotify.value"
@@ -384,6 +392,17 @@ onUnmounted(() => {
           >
             <i class="pi pi-sign-in" />
             <span>Anmelden</span>
+          </button>
+          <button
+            v-else-if="isMapRegistered && guestSession.guest.value"
+            type="button"
+            class="map-filter-button"
+            :class="{ 'map-filter-button--warn': !guestSession.isVerified.value }"
+            :aria-label="`Konto von ${guestSession.guest.value.display_name}`"
+            @click="openAccountDialog"
+          >
+            <i :class="guestSession.isVerified.value ? 'pi pi-user' : 'pi pi-exclamation-circle'" />
+            <span>{{ guestSession.guest.value.display_name }}</span>
           </button>
         </template>
       </TripMap>
@@ -488,6 +507,19 @@ onUnmounted(() => {
       :initial-name="registerInitial?.name"
       @submit="handleRegisterSubmit"
     />
+
+    <GuestAccountDialog
+      v-model:visible="showAccountDialog"
+      :guest="guestSession.guest.value"
+      :togglingNotify="guestSession.togglingNotify.value"
+      :pushStatus="guestPush.status.value"
+      :pushBusy="guestPush.busy.value"
+      :pushCanToggle="guestPush.canToggle.value"
+      @resend-verify="handleResendVerifyMail"
+      @logout="handleLogout"
+      @toggle-notify="(v) => guestSession.toggleNotifyOptIn(v)"
+      @toggle-push="handleTogglePush"
+    />
   </div>
 </template>
 
@@ -547,6 +579,17 @@ onUnmounted(() => {
 }
 .map-filter-button--cta:hover {
   background: color-mix(in srgb, var(--p-primary-color) 85%, var(--p-primary-contrast-color));
+}
+
+/* Registered-but-unverified flag: signals that the guest still
+   needs to click the magic link. Uses Aura's amber palette so it
+   reads as a gentle warning on the dark stats overlay. */
+.map-filter-button--warn {
+  border-color: var(--p-amber-500);
+  color: var(--p-amber-500);
+}
+.map-filter-button--warn:hover {
+  background: color-mix(in srgb, var(--p-amber-500) 15%, transparent);
 }
 
 .map-filter-button .pi {
