@@ -85,26 +85,52 @@ Test-Pipeline; manuell vor Release gegen Testzugänge.
 
 ### 2.3 `tan-sessions.test.ts`
 
-- TTL-Verhalten: `complete` mit Reference, deren `expires_at < now()`,
-  liefert `410 Gone`; Datensatz bleibt aber unverändert (Cleanup-Cron
-  räumt auf, nicht der Endpoint).
-- Falsche TAN: `complete` mit gemocktem `fints-client`, der
-  `state: "error"` liefert → 401 an den Caller, Session bleibt für
-  weitere Versuche aktiv.
-- User-Bezug: Caller A darf Reference von Caller B nicht abschließen
-  (403); Test mit zwei verschiedenen `getAuthData()`-Mocks.
-- Erfolg: bei `state: "idle"` werden sowohl die Transaktionen
-  persistiert (Insert in `finance_transaction`) als auch die Session
-  gelöscht — beides in einer Transaktion.
+Wie in §2.4: alle `complete`-Antworten laufen über die gemeinsame
+discriminated-union-Response. Fehler-Fälle bleiben Encore-`APIError`s
+(echte HTTP 4xx, kein discriminator-Wrapper), weil sie vor dem Aufruf
+an lib-fints zurückgewiesen werden.
+
+- Happy-Path: gemockter `fints-client.runSynchronize` liefert
+  `state: "idle"` → Endpoint liefert `{ state: "idle" }` und löscht
+  die Session.
+- Falsche TAN: Client liefert erneut `state: "tan-required"` mit
+  neuem Challenge → Endpoint **hält die Session** (`challenge` +
+  `banking_information` aktualisiert), Response
+  `{ state: "tan-required", tanReference, challenge }`.
+- Terminal-Fehler: Client liefert `state: "error"` → Endpoint löscht
+  die Session, Response
+  `{ state: "error", errorCode, errorMessage }`.
+- TTL-Verhalten: Reference deren `expires_at < now()` → `APIError
+  .deadlineExceeded`; der Datensatz bleibt liegen, Cleanup-Cron räumt
+  ihn später.
+- Decoupled TAN: `tan: undefined` wird transparent an
+  `runSynchronize` durchgereicht (pushTAN-Flow).
+- User-Isolation: Caller A darf Reference von Caller B nicht
+  abschließen — der Endpoint wirft `not_found` (nicht `forbidden`),
+  damit Enumeration fremder Sessions nicht möglich ist.
+- Permission: Caller ohne `finance.accounts.manage` → 403, vor dem
+  DB-Lookup.
+
+Zusätzlich wird `cleanupExpiredTanSessions` getestet: zwei Zeilen
+mit gestaffeltem `expires_at`, nur die abgelaufene wird gelöscht.
 
 ### 2.4 `statements.test.ts`
 
+Alle Sync-Antworten sind `200 OK` mit einer discriminated-union-
+Response (`{ state: "idle" | "tan-required" | "error", ... }`) —
+kein HTTP 409.
+
 - Sync-Trigger ohne TAN: gemockter `fints-client.runSynchronize`
-  liefert `state: "idle"` → Endpoint speichert Transaktionen,
-  Antwort `200 { imported: N }`.
-- Sync-Trigger mit TAN: gemockter Client liefert `state:
-  "tan-required"` → Endpoint persistiert `finance_tan_session`,
-  antwortet `409 Conflict` mit `tanReference` + `challenge`.
+  liefert `state: "idle"` → Endpoint speichert Transaktionen (ab
+  Etappe 5), Response `{ state: "idle" }`.
+- Sync-Trigger mit TAN: gemockter Client liefert
+  `state: "tan-required"` → Endpoint persistiert
+  `finance_tan_session` (eigene UUID als Public-Handle, lib-fints'
+  `tanReference` in `banking_information`), Response
+  `{ state: "tan-required", tanReference, challenge, tanMediaName? }`.
+- Sync-Trigger mit Fehler: Client liefert `state: "error"` → Response
+  enthält `errorCode` + `errorMessage`, **keine** Session-Zeile wird
+  angelegt.
 - Permission-Check: User ohne `finance.accounts.manage` bekommt 403,
   bevor der Client überhaupt gerufen wird.
 

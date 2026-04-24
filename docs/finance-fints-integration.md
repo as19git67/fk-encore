@@ -198,27 +198,42 @@ sequenceDiagram
 
   UI->>API: POST /finance/statements { bankcontactId }
   API->>FC: runSynchronize(bankcontactId, {})
-  FC-->>API: state=tan-required, challenge, bankingInformation
-  API->>DB: INSERT tan_reference, banking_information, challenge, expires_at
-  API-->>UI: 409 Conflict { tanReference, challenge }
+  FC-->>API: state=tan-required, challenge, bankingInformation, fintsTanRef
+  API->>DB: INSERT tan_reference (uuid), banking_information (bi + fintsTanRef), challenge, expires_at
+  API-->>UI: 200 { state: "tan-required", tanReference, challenge, tanMediaName? }
   UI->>UI: TanDialog öffnen, User gibt TAN ein
   UI->>TAN: POST /finance/tan-sessions/complete { tanReference, tan }
-  TAN->>DB: SELECT … WHERE tan_reference=? AND expires_at>now()
-  DB-->>TAN: banking_information
-  TAN->>FC: runSynchronize(bankcontactId, {resume, tanAnswer})
-  FC-->>TAN: state=idle, transactions, balances
-  TAN->>TAN: INSERT finance_transaction (+ finance_account_balance)
+  TAN->>DB: SELECT … WHERE tan_reference=? AND user_id=? AND expires_at>now()
+  DB-->>TAN: banking_information (bi, fintsTanRef)
+  TAN->>FC: runSynchronize(bankcontactId, { tanReference: fintsTanRef, tanAnswer, bankingInformation: bi })
+  FC-->>TAN: state=idle  (Etappe 5 liefert auch transactions + balances)
   TAN->>DB: DELETE tan_reference
-  TAN-->>UI: 200 { imported: N }
+  TAN-->>UI: 200 { state: "idle" }
 ```
 
 Edge Cases:
-- **Abgelaufene Session**: `complete` liefert `410 Gone`, UI startet
-  neuen Dialog.
-- **Falsche TAN**: `complete` liefert `401`, UI zeigt Retry-Option; bis
-  zu 3 Versuche gegen dieselbe Session (vom FinTS-Server limitiert).
+- **Abgelaufene Session**: `complete` wirft `deadline_exceeded` (HTTP
+  504); die Zeile bleibt liegen und wird vom Cleanup-Cron gelöscht.
+  UI startet einen frischen Dialog.
+- **Falsche TAN**: lib-fints liefert wieder `state: "tan-required"`
+  mit neuem Challenge. Der Endpoint **hält die Session** (nur
+  `banking_information` + `challenge` werden aktualisiert) und gibt
+  `200 { state: "tan-required", tanReference (same!), challenge: new }`
+  zurück, sodass die UI direkt weiterfragen kann. Der FinTS-Server
+  limitiert selbst auf typisch 3 Versuche — danach erhält der Client
+  `state: "error"` und die Session wird gelöscht.
+- **Fremde Session**: gehört die Reference einem anderen User, wirft
+  der Endpoint `not_found` (statt `forbidden`), damit Enumeration
+  fremder Sessions nicht möglich ist.
 - **User verwirft Dialog**: Session wird nicht aktiv gelöscht, läuft
   durch TTL ab; Cleanup siehe §5.
+
+**Transport-Konvention**: Sowohl `POST /finance/statements` als auch
+`POST /finance/tan-sessions/complete` liefern eine gemeinsame
+discriminated-union-Response (`SyncApiResponse`) mit den Varianten
+`idle` / `tan-required` / `error`. Bewusst **kein** HTTP 409 Conflict
+— das würde den Encore-type-safe-Client-Generator zu einem Exception-
+Pfad zwingen. Stattdessen switcht das Frontend auf `response.state`.
 
 ---
 
