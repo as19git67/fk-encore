@@ -63,6 +63,7 @@ export interface FintsClientSurface {
   config: {
     bankingInformation: BankingInformation;
     availableTanMethods: import("lib-fints").TanMethod[];
+    selectedTanMethod?: import("lib-fints").TanMethod;
   };
   getAccountStatements(
     accountNumber: string,
@@ -204,7 +205,21 @@ export async function runSynchronize(
     client.selectTanMethod(tanMethodId);
 
     const updResponse = await client.synchronize();
-    const result = mapResponse(updResponse, client.config.bankingInformation);
+
+    // Decoupled TAN (e.g. pushTAN): the bank does NOT ask the user to
+    // type a TAN — instead it waits for the user to approve in a
+    // separate app. The server side must poll synchronizeWithTan()
+    // (no `tan` argument) until the approval lands or the bank's
+    // maxStatusRequests budget is spent. Without this poll we'd
+    // return `tan-required` to the UI, the user tapped approve on
+    // their phone for nothing, and the next click asks the bank for
+    // *another* fresh push — which is what the user saw.
+    const finalResponse = await pollDecoupledIfNeeded(
+      client,
+      updResponse,
+      sleep,
+    );
+    const result = mapResponse(finalResponse, client.config.bankingInformation);
     // Expose the live client on successful init so callers can follow
     // up with getAccountStatements / getAccountBalance without a
     // fresh authenticate-dance. Retained only in-process; never
@@ -212,6 +227,48 @@ export async function runSynchronize(
     if (result.state === "idle") result.client = client;
     return result;
   }, sleep);
+}
+
+/**
+ * If the current FinTS response demands a TAN *and* the selected
+ * method is decoupled, waits for the user's device-side approval by
+ * polling `synchronizeWithTan(ref)` (no TAN) according to the bank-
+ * supplied cadence (`decoupled.waitingSeconds…`, `maxStatusRequests`).
+ *
+ * Returns the last SynchronizeResponse, which the caller maps via
+ * mapResponse() exactly as if it had come straight from the initial
+ * synchronize() — so a successful decoupled approval becomes
+ * state="idle" and a timeout becomes state="tan-required" (with no
+ * tanReference persisted — there is no user-typed TAN to collect).
+ *
+ * Coupled methods (chipTAN, SMS etc.) return `response` unchanged;
+ * those still flow through the UI's TanDialog.
+ */
+async function pollDecoupledIfNeeded(
+  client: FintsClientSurface,
+  response: import("lib-fints").SynchronizeResponse,
+  sleep: (ms: number) => Promise<void>,
+): Promise<import("lib-fints").SynchronizeResponse> {
+  if (!response.requiresTan) return response;
+  const selected = client.config.selectedTanMethod;
+  if (!selected?.isDecoupled || !selected.decoupled) return response;
+  const ref = response.tanReference;
+  if (!ref) return response;
+
+  const d = selected.decoupled;
+  await sleep((d.waitingSecondsBeforeFirstStatusRequest ?? 0) * 1000);
+
+  let latest = await client.synchronizeWithTan(ref);
+  let polls = 1;
+  while (
+    latest.requiresTan
+    && polls < (d.maxStatusRequests ?? 1)
+  ) {
+    await sleep((d.waitingSecondsBetweenStatusRequests ?? 0) * 1000);
+    latest = await client.synchronizeWithTan(ref);
+    polls++;
+  }
+  return latest;
 }
 
 // -----------------------------------------------------------------------

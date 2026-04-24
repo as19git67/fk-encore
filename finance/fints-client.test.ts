@@ -91,17 +91,31 @@ function mockClient(
   },
   bankingInformation: Record<string, unknown> = { systemId: "sys-1" },
   // Default matches the default tan_method "942" on insertBankcontact;
-  // tests that exercise unknown-method branches override with [].
-  availableTanMethods: Array<{ id: number; name: string; isDecoupled: boolean }> = [
-    { id: 942, name: "pushTAN", isDecoupled: true },
-  ],
+  // tests that exercise unknown-method branches override with []. The
+  // default entry is NOT decoupled so the existing coupled-flow tests
+  // keep their previous behaviour (UI-side TAN dialog).
+  availableTanMethods: Array<{
+    id: number;
+    name: string;
+    isDecoupled: boolean;
+    decoupled?: {
+      maxStatusRequests: number;
+      waitingSecondsBeforeFirstStatusRequest: number;
+      waitingSecondsBetweenStatusRequests: number;
+    };
+  }> = [{ id: 942, name: "pushTAN", isDecoupled: false }],
 ): FintsClientSurface {
   const resp = { bankAnswers: [], ...response };
+  const config: any = { bankingInformation, availableTanMethods };
   return {
     synchronize: vi.fn(async () => resp as any),
     synchronizeWithTan: vi.fn(async () => resp as any),
-    selectTanMethod: vi.fn(),
-    config: { bankingInformation, availableTanMethods } as any,
+    // Mirrors lib-fints: setting selectedTanMethod from
+    // availableTanMethods lets the polling check work in tests.
+    selectTanMethod: vi.fn((id: number) => {
+      config.selectedTanMethod = availableTanMethods.find((m) => m.id === id);
+    }),
+    config,
     // Not exercised in the sync-dialog tests; the runFetchAccounts
     // tests below override these via their own custom mocks.
     getAccountStatements: vi.fn(),
@@ -410,6 +424,160 @@ describe("fints-client — bankcontact loading", () => {
     expect(result.state).toBe("error");
     expect(result.errorCode).toBe("unknown-tan-method");
     expect(result.errorMessage).toMatch(/none returned by bank/);
+  });
+});
+
+describe("fints-client — decoupled TAN polling", () => {
+  // Helper: a client whose 2nd synchronize() returns requiresTan=true
+  // and whose synchronizeWithTan() transitions to success after `n`
+  // polls. Exercises the bank-approves-eventually path.
+  function decoupledClient(
+    approveAfterPolls: number,
+  ): FintsClientSurface {
+    const availableTanMethods = [
+      {
+        id: 942,
+        name: "pushTAN",
+        isDecoupled: true,
+        decoupled: {
+          maxStatusRequests: 10,
+          waitingSecondsBeforeFirstStatusRequest: 2,
+          waitingSecondsBetweenStatusRequests: 3,
+        },
+      },
+    ];
+    const config: any = {
+      bankingInformation: { systemId: "sys-decoupled" },
+      availableTanMethods,
+    };
+    let syncCalls = 0;
+    let pollCalls = 0;
+    return {
+      synchronize: vi.fn(async () => {
+        syncCalls++;
+        // first sync → BPD (success, no TAN); second sync → TAN required.
+        if (syncCalls === 1) {
+          return { success: true, requiresTan: false, bankAnswers: [] } as any;
+        }
+        return {
+          success: true,
+          requiresTan: true,
+          tanReference: "decoupled-ref",
+          bankAnswers: [],
+        } as any;
+      }),
+      synchronizeWithTan: vi.fn(async () => {
+        pollCalls++;
+        if (pollCalls >= approveAfterPolls) {
+          return { success: true, requiresTan: false, bankAnswers: [] } as any;
+        }
+        return {
+          success: true,
+          requiresTan: true,
+          tanReference: "decoupled-ref",
+          bankAnswers: [],
+        } as any;
+      }),
+      selectTanMethod: vi.fn((id: number) => {
+        config.selectedTanMethod = availableTanMethods.find((m) => m.id === id);
+      }),
+      config,
+      getAccountStatements: vi.fn(),
+      getAccountStatementsWithTan: vi.fn(),
+      getAccountBalance: vi.fn(),
+      getAccountBalanceWithTan: vi.fn(),
+    };
+  }
+
+  it("polls synchronizeWithTan(ref) until the bank approves, then returns state=idle", async () => {
+    const id = await insertBankcontact({ tan_method: "942" });
+    const sleep = vi.fn(async (_ms: number) => {});
+    // Bank approves on the 3rd status-check call.
+    const c = decoupledClient(3);
+
+    const result = await runSynchronize(id, {
+      clientFactory: () => c,
+      sleep,
+    });
+
+    expect(result.state).toBe("idle");
+    expect(result.client).toBeDefined();
+    // Two synchronize() calls: BPD + UPD.
+    expect(c.synchronize).toHaveBeenCalledTimes(2);
+    // Three poll calls until approval.
+    expect(c.synchronizeWithTan).toHaveBeenCalledTimes(3);
+    // TAN argument must be omitted — bank is authenticating via the
+    // decoupled channel, not a user-typed code.
+    expect(vi.mocked(c.synchronizeWithTan).mock.calls[0][1]).toBeUndefined();
+    // Cadence honoured: 1× before-first (2s) + 2× between-requests (3s).
+    // Exact sleep calls: one 2000ms + N-1 of 3000ms where N=3.
+    const sleepMs = sleep.mock.calls.map((c) => c[0]);
+    expect(sleepMs.filter((ms) => ms === 2000)).toHaveLength(1);
+    expect(sleepMs.filter((ms) => ms === 3000)).toHaveLength(2);
+  });
+
+  it("returns state=tan-required when the user never approves (maxStatusRequests exhausted)", async () => {
+    const id = await insertBankcontact({ tan_method: "942" });
+    const sleep = vi.fn(async (_ms: number) => {});
+    // Approval would only ever come on the 100th attempt → never
+    // within the 10-request budget.
+    const c = decoupledClient(100);
+
+    const result = await runSynchronize(id, {
+      clientFactory: () => c,
+      sleep,
+    });
+
+    expect(result.state).toBe("tan-required");
+    // Full budget spent: one before-first sleep + 9 between-request
+    // sleeps + 10 polls.
+    expect(c.synchronizeWithTan).toHaveBeenCalledTimes(10);
+  });
+
+  it("does NOT poll coupled TAN methods — chipTAN etc. still flow through the UI", async () => {
+    const id = await insertBankcontact({ tan_method: "910" });
+    const sleep = vi.fn(async (_ms: number) => {});
+    const availableTanMethods = [
+      { id: 910, name: "chipTAN", isDecoupled: false },
+    ];
+    const config: any = {
+      bankingInformation: { systemId: "sys-coupled" },
+      availableTanMethods,
+    };
+    let syncCalls = 0;
+    const c: FintsClientSurface = {
+      synchronize: vi.fn(async () => {
+        syncCalls++;
+        if (syncCalls === 1) {
+          return { success: true, requiresTan: false, bankAnswers: [] } as any;
+        }
+        return {
+          success: true,
+          requiresTan: true,
+          tanReference: "coupled-ref",
+          tanChallenge: "Karte einlegen",
+          bankAnswers: [],
+        } as any;
+      }),
+      synchronizeWithTan: vi.fn(),
+      selectTanMethod: vi.fn((id: number) => {
+        config.selectedTanMethod = availableTanMethods.find((m) => m.id === id);
+      }),
+      config,
+      getAccountStatements: vi.fn(),
+      getAccountStatementsWithTan: vi.fn(),
+      getAccountBalance: vi.fn(),
+      getAccountBalanceWithTan: vi.fn(),
+    };
+
+    const result = await runSynchronize(id, {
+      clientFactory: () => c,
+      sleep,
+    });
+
+    expect(result.state).toBe("tan-required");
+    expect(result.tanChallenge).toBe("Karte einlegen");
+    expect(c.synchronizeWithTan).not.toHaveBeenCalled();
   });
 });
 
