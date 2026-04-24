@@ -60,6 +60,10 @@ beforeEach(async () => {
 async function insertBankcontact(
   overrides: Partial<typeof financeBankcontact.$inferInsert> = {},
 ): Promise<number> {
+  // tan_method defaults to "942" — the fresh-path sync requires a
+  // picked TAN method before the second synchronize() call (see
+  // lib-fints README §2). Tests that specifically exercise the
+  // "missing tan_method" branch can override with `tan_method: null`.
   const [row] = await db
     .insert(financeBankcontact)
     .values({
@@ -67,7 +71,7 @@ async function insertBankcontact(
       blz: "12345678",
       login: "user-42",
       server_url: "https://hbci.test/fints",
-      tan_method: null,
+      tan_method: "942",
       credentials_encrypted: null,
       ...overrides,
     })
@@ -293,6 +297,62 @@ describe("fints-client — bankcontact loading", () => {
     });
 
     expect(c.selectTanMethod).toHaveBeenCalledWith(942);
+  });
+
+  it("performs two synchronize() calls on the fresh path (BPD, then UPD)", async () => {
+    const id = await insertBankcontact({ tan_method: "942" });
+    const c = mockClient({ success: true, requiresTan: false });
+
+    await runSynchronize(id, {
+      clientFactory: () => c,
+      sleep: async () => {},
+    });
+
+    expect(c.synchronize).toHaveBeenCalledTimes(2);
+    expect(c.selectTanMethod).toHaveBeenCalledWith(942);
+    // selectTanMethod must run between the two syncs — the mocks are
+    // all vi.fn so their invocation order is recorded globally.
+    const syncOrder = (c.synchronize as any).mock.invocationCallOrder;
+    const selectOrder = (c.selectTanMethod as any).mock.invocationCallOrder;
+    expect(selectOrder[0]).toBeGreaterThan(syncOrder[0]);
+    expect(selectOrder[0]).toBeLessThan(syncOrder[1]);
+  });
+
+  it("returns state=error when tan_method is missing on a fresh sync", async () => {
+    const id = await insertBankcontact({ tan_method: null });
+    const c = mockClient({ success: true, requiresTan: false });
+
+    const result = await runSynchronize(id, {
+      clientFactory: () => c,
+      sleep: async () => {},
+    });
+
+    expect(result.state).toBe("error");
+    expect(result.errorCode).toBe("no-tan-method");
+    // First sync still ran (to retrieve BPD); the second must have
+    // been skipped because there is no TAN method to select.
+    expect(c.synchronize).toHaveBeenCalledTimes(1);
+    expect(c.selectTanMethod).not.toHaveBeenCalled();
+  });
+
+  it("short-circuits without the second sync if the first requires TAN", async () => {
+    const id = await insertBankcontact({ tan_method: "942" });
+    const c = mockClient({
+      success: true,
+      requiresTan: true,
+      tanChallenge: "Bitte bestätigen",
+      tanReference: "first-sync-tan",
+    });
+
+    const result = await runSynchronize(id, {
+      clientFactory: () => c,
+      sleep: async () => {},
+    });
+
+    expect(result.state).toBe("tan-required");
+    expect(result.tanReference).toBe("first-sync-tan");
+    expect(c.synchronize).toHaveBeenCalledTimes(1);
+    expect(c.selectTanMethod).not.toHaveBeenCalled();
   });
 });
 

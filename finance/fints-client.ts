@@ -96,6 +96,15 @@ interface RunOptions extends SyncOptions {
  * Fresh path:  `opts = {}` (or only the test seams)
  * Resume path: pass `tanReference`, `bankingInformation`, and
  *              `tanAnswer` (undefined is legit for decoupled TAN).
+ *
+ * Two-call sync contract (per lib-fints README §2): on a cold start,
+ * the first `synchronize()` returns BPD only (TAN methods etc.) and
+ * no UPD (account list), because the TAN method has to be selected
+ * *before* the call that can return UPD. The second `synchronize()`
+ * after `selectTanMethod(...)` returns the full bankingInformation
+ * with `upd.bankAccounts` populated — or requires a TAN, in which
+ * case we hand control back to the UI and resume via
+ * `synchronizeWithTan(...)`.
  */
 export async function runSynchronize(
   bankcontactId: number,
@@ -113,35 +122,65 @@ export async function runSynchronize(
     && !!opts.bankingInformation;
 
   return runWithRetry(async () => {
-    const config = isResume
-      ? FinTSConfig.fromBankingInformation(
-          productId(),
-          productVersion(),
-          opts.bankingInformation as unknown as BankingInformation,
-          bankcontact.login,
-          pin,
-          bankcontact.tan_method ? parseInt(bankcontact.tan_method, 10) : undefined,
-        )
-      : FinTSConfig.forFirstTimeUse(
-          productId(),
-          productVersion(),
-          bankcontact.server_url,
-          bankcontact.blz,
-          bankcontact.login,
-          pin,
-        );
-
-    const client = factory(config);
-
-    if (!isResume && bankcontact.tan_method) {
-      client.selectTanMethod(parseInt(bankcontact.tan_method, 10));
+    if (isResume) {
+      // Resume path — bankingInformation already contains BPD; the
+      // pending dialog is simply continued with the user's TAN.
+      const config = FinTSConfig.fromBankingInformation(
+        productId(),
+        productVersion(),
+        opts.bankingInformation as unknown as BankingInformation,
+        bankcontact.login,
+        pin,
+        bankcontact.tan_method ? parseInt(bankcontact.tan_method, 10) : undefined,
+      );
+      const client = factory(config);
+      const response = await client.synchronizeWithTan(
+        opts.tanReference!,
+        opts.tanAnswer,
+      );
+      const result = mapResponse(response, client.config.bankingInformation);
+      if (result.state === "idle") result.client = client;
+      return result;
     }
 
-    const response = isResume
-      ? await client.synchronizeWithTan(opts.tanReference!, opts.tanAnswer)
-      : await client.synchronize();
+    // Fresh path — first sync fetches BPD so availableTanMethods is
+    // populated before we can call selectTanMethod().
+    const config = FinTSConfig.forFirstTimeUse(
+      productId(),
+      productVersion(),
+      bankcontact.server_url,
+      bankcontact.blz,
+      bankcontact.login,
+      pin,
+    );
+    const client = factory(config);
 
-    const result = mapResponse(response, client.config.bankingInformation);
+    const bpdResponse = await client.synchronize();
+    // If even the BPD-only sync comes back as a failure or TAN-
+    // required, surface that verbatim — don't try the second call.
+    const bpdMapped = mapResponse(bpdResponse, client.config.bankingInformation);
+    if (bpdMapped.state !== "idle") {
+      return bpdMapped;
+    }
+
+    // A TAN method must be configured before the second sync —
+    // otherwise we have no way to know which method to request.
+    // The UI's BankcontactForm exposes this as a mandatory numeric
+    // picker (see docs/finance-frontend.md §3).
+    if (!bankcontact.tan_method) {
+      return {
+        state: "error",
+        errorCode: "no-tan-method",
+        errorMessage:
+          "No TAN method configured on bankcontact. Pick one from the " +
+          "available methods returned by the bank and update the " +
+          "bankcontact before retrying.",
+      };
+    }
+    client.selectTanMethod(parseInt(bankcontact.tan_method, 10));
+
+    const updResponse = await client.synchronize();
+    const result = mapResponse(updResponse, client.config.bankingInformation);
     // Expose the live client on successful init so callers can follow
     // up with getAccountStatements / getAccountBalance without a
     // fresh authenticate-dance. Retained only in-process; never
