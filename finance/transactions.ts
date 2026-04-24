@@ -35,6 +35,7 @@ import {
   financeTagTransaction,
   financeTransaction,
 } from "../db/schema";
+import { suggestTagsForTransaction } from "./tag-suggester";
 
 console.log("[boot] finance/transactions.ts: all imports resolved");
 
@@ -410,6 +411,11 @@ export const createTransaction = api(
     if (p.tags && p.tags.length > 0) {
       await applyUserTags(row.id, p.tags);
     }
+
+    // Best-effort AI suggestion — failures are logged and skipped so
+    // manual bookings never fail because the llm-service is down.
+    await suggestTagsForTransaction(row.id);
+
     const tags = (await annotateTags([row.id])).get(row.id) ?? [];
     return toView(row, tags);
   },

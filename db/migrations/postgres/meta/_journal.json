@@ -344,6 +344,13 @@
       "when": 1779000100000,
       "tag": "0047_finance_initial",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1779000200000,
+      "tag": "0048_finance_embeddings",
+      "breakpoints": true
     }
   ]
 }
