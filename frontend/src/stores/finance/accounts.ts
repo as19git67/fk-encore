@@ -38,9 +38,32 @@ export const useAccountsStore = defineStore('finance.accounts', () => {
     return resp
   }
 
+  async function link(id: number, input: api.LinkAccountInput) {
+    const linked = await api.linkAccount(id, input)
+    items.value = items.value.map((a) => (a.id === id ? linked : a))
+    return linked
+  }
+
+  async function unlink(id: number) {
+    const unlinked = await api.unlinkAccount(id)
+    items.value = items.value.map((a) => (a.id === id ? unlinked : a))
+    return unlinked
+  }
+
   function byId(id: number): api.Account | undefined {
     return items.value.find((a) => a.id === id)
   }
 
-  return { items, loading, error, refresh, create, update, remove, byId }
+  return {
+    items,
+    loading,
+    error,
+    refresh,
+    create,
+    update,
+    remove,
+    link,
+    unlink,
+    byId,
+  }
 })

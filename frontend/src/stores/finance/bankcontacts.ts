@@ -40,8 +40,8 @@ export const useBankcontactsStore = defineStore('finance.bankcontacts', () => {
     return updated
   }
 
-  async function remove(id: number, opts: { cascade?: boolean } = {}) {
-    const resp = await api.deleteBankcontact(id, opts)
+  async function remove(id: number) {
+    const resp = await api.deleteBankcontact(id)
     items.value = items.value.filter((b) => b.id !== id)
     return resp
   }

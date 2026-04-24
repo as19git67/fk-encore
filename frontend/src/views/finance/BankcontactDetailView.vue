@@ -13,6 +13,7 @@ import {
   probeTanMethods,
   type Bankcontact,
   type TanMethodOption,
+  type UnknownBankAccount,
 } from '../../api/finance'
 import TanDialog from '../../components/finance/TanDialog.vue'
 
@@ -47,13 +48,43 @@ const tanProbeInfo = ref<string | null>(null)
 const syncInfo = ref<string | null>(null)
 const errorMsg = ref<string | null>(null)
 const bc = ref<Bankcontact | null>(null)
+/** Bank-side accounts the most recent sync reported that aren't
+ *  linked to any finance_account yet. User resolves row by row
+ *  (Import / Link / Ignore). */
+const pendingUnknown = ref<UnknownBankAccount[]>([])
 
 const myAccounts = computed(() => {
   if (!bc.value) return []
+  const bcId = bc.value.id
   return accountsStore.items
-    .filter((a) => a.bankcontact_id === bc.value!.id)
+    .filter((a) => a.bankcontact_id === bcId)
     .sort((a, b) => a.label.localeCompare(b.label))
 })
+
+/** Manual (not-yet-linked) accounts that the user could pick to link
+ *  an unknown bank-side account to. Needed for the per-row
+ *  "Mit existierendem Konto verknüpfen"-dropdown in the pending
+ *  block. */
+const manualAccounts = computed(() =>
+  accountsStore.items
+    .filter((a) => a.bankcontact_id === null)
+    .sort((a, b) => a.label.localeCompare(b.label)),
+)
+
+const accountKindLabels: Record<string, string> = {
+  giro: 'Giro',
+  tagesgeld: 'Tagesgeld',
+  festgeld: 'Festgeld',
+  kredit: 'Kredit',
+  depot: 'Depot',
+  bausparen: 'Bausparen',
+  kreditkarte: 'Kreditkarte',
+  sonstige: 'Sonstige',
+}
+
+function kindLabel(kind: string): string {
+  return accountKindLabels[kind] ?? kind
+}
 
 // Dropdown entries are built from the cached list on the bankcontact
 // (persisted by the last successful probe) merged with any fresh
@@ -196,8 +227,8 @@ async function triggerSync() {
       errorMsg.value = `${resp.errorCode}: ${resp.errorMessage}`
     } else if (resp.state === 'idle') {
       const parts: string[] = []
-      if (resp.accounts_seen !== undefined) {
-        parts.push(`${resp.accounts_seen} Konten erkannt`)
+      if (resp.accounts_matched !== undefined) {
+        parts.push(`${resp.accounts_matched} Konten aktualisiert`)
       }
       if (resp.transactions_inserted !== undefined) {
         parts.push(`${resp.transactions_inserted} neue Transaktionen`)
@@ -205,11 +236,15 @@ async function triggerSync() {
       if (resp.balances_written !== undefined) {
         parts.push(`${resp.balances_written} Salden`)
       }
+      if (resp.accounts_unknown && resp.accounts_unknown > 0) {
+        parts.push(`${resp.accounts_unknown} noch nicht zugeordnete Konten`)
+      }
       syncInfo.value = parts.length
         ? `Sync erfolgreich — ${parts.join(', ')}${resp.partial ? ' (teilweise; einige Konten brauchten TAN)' : ''}.`
         : 'Sync erfolgreich.'
-      // Refresh the accounts store so freshly auto-created accounts
-      // appear in the "Konten"-section below without a page reload.
+      pendingUnknown.value = resp.unknown_accounts ?? []
+      // Refresh accounts store so the "Konten"-section below
+      // reflects what the sync just wrote.
       await accountsStore.refresh()
     }
     const refreshed = store.items.find((b) => b.id === bc.value!.id)
@@ -219,6 +254,51 @@ async function triggerSync() {
   } finally {
     syncing.value = false
   }
+}
+
+async function importUnknown(entry: UnknownBankAccount) {
+  if (!bc.value) return
+  errorMsg.value = null
+  try {
+    await accountsStore.create({
+      bankcontact_id: bc.value.id,
+      fints_account_number: entry.accountNumber,
+      type_kind: entry.accountKind,
+      currency_code: entry.currency,
+      iban: entry.iban ?? undefined,
+      account_number: entry.accountNumber,
+      label: entry.label,
+    })
+    pendingUnknown.value = pendingUnknown.value.filter(
+      (u) => u.accountNumber !== entry.accountNumber,
+    )
+    syncInfo.value = `Konto "${entry.label}" als neues Konto importiert.`
+  } catch (err) {
+    errorMsg.value = err instanceof Error ? err.message : String(err)
+  }
+}
+
+async function linkUnknown(entry: UnknownBankAccount, accountId: number) {
+  if (!bc.value) return
+  errorMsg.value = null
+  try {
+    await accountsStore.link(accountId, {
+      bankcontact_id: bc.value.id,
+      fints_account_number: entry.accountNumber,
+    })
+    pendingUnknown.value = pendingUnknown.value.filter(
+      (u) => u.accountNumber !== entry.accountNumber,
+    )
+    syncInfo.value = `Bank-Konto "${entry.label}" mit bestehendem Konto verknüpft.`
+  } catch (err) {
+    errorMsg.value = err instanceof Error ? err.message : String(err)
+  }
+}
+
+function ignoreUnknown(entry: UnknownBankAccount) {
+  pendingUnknown.value = pendingUnknown.value.filter(
+    (u) => u.accountNumber !== entry.accountNumber,
+  )
 }
 
 async function deleteOneAccount(id: number, label: string) {
@@ -239,20 +319,13 @@ async function deleteOneAccount(id: number, label: string) {
 async function del() {
   if (!bc.value) return
   const attached = myAccounts.value.length
-  let cascade = false
-  if (attached > 0) {
-    const ok = confirm(
-      `Bankkontakt "${bc.value.name}" hat ${attached} verknüpfte Konten. ` +
-        `Mit Löschen werden *alle* Konten und ihre Transaktionen unwiderruflich entfernt.\n\n` +
-        `Fortfahren?`,
-    )
-    if (!ok) return
-    cascade = true
-  } else {
-    if (!confirm(`Bankkontakt "${bc.value.name}" wirklich löschen?`)) return
-  }
+  const msg = attached > 0
+    ? `Bankkontakt "${bc.value.name}" löschen? ${attached} verknüpfte Konten ` +
+        `fallen auf manuell zurück (Transaktionen bleiben erhalten).`
+    : `Bankkontakt "${bc.value.name}" wirklich löschen?`
+  if (!confirm(msg)) return
   try {
-    await store.remove(bc.value.id, { cascade })
+    await store.remove(bc.value.id)
     await accountsStore.refresh()
     void router.push({ name: 'finance-bankcontacts' })
   } catch (err) {
@@ -378,12 +451,65 @@ async function del() {
       </div>
     </section>
 
+    <section v-if="!isNew && bc && pendingUnknown.length > 0" class="card">
+      <h2>Noch nicht zugeordnete Bank-Konten</h2>
+      <p class="hint">
+        Die Bank hat diese Konten gemeldet, die noch nicht mit einem
+        fk-encore-Konto verknüpft sind. Pro Konto entscheiden:
+      </p>
+      <ul class="pending-list">
+        <li
+          v-for="entry in pendingUnknown"
+          :key="entry.accountNumber"
+          class="pending-item"
+        >
+          <div class="pending-main">
+            <strong>{{ entry.label || entry.accountNumber }}</strong>
+            <Tag
+              class="type-tag"
+              :value="kindLabel(entry.accountKind)"
+              severity="info"
+            />
+          </div>
+          <div class="pending-meta">
+            <span v-if="entry.iban">{{ entry.iban }}</span>
+            <span v-else>Kontonr. {{ entry.accountNumber }}</span>
+            <span class="currency">{{ entry.currency }}</span>
+          </div>
+          <div class="pending-actions">
+            <Button
+              label="Als neues Konto importieren"
+              icon="pi pi-plus"
+              severity="primary"
+              @click="importUnknown(entry)"
+            />
+            <Select
+              v-if="manualAccounts.length > 0"
+              :options="manualAccounts"
+              option-label="label"
+              option-value="id"
+              placeholder="Mit bestehendem verknüpfen"
+              class="link-select"
+              @change="(ev: any) => linkUnknown(entry, Number(ev.value))"
+            />
+            <Button
+              label="Ignorieren"
+              severity="secondary"
+              text
+              @click="ignoreUnknown(entry)"
+            />
+          </div>
+        </li>
+      </ul>
+    </section>
+
     <section v-if="!isNew && bc" class="card">
       <h2>Konten</h2>
       <p v-if="myAccounts.length === 0" class="hint">
         Noch keine Konten verknüpft. Nach dem ersten erfolgreichen Sync
-        werden die von der Bank zurückgelieferten Konten automatisch hier
-        angezeigt.
+        erscheinen die von der Bank gemeldeten Konten oben als "Noch
+        nicht zugeordnet" — du kannst sie dort importieren oder mit
+        einem bestehenden manuellen Konto verknüpfen.
       </p>
       <ul v-else class="account-list">
         <li v-for="a in myAccounts" :key="a.id" class="account-item">
@@ -530,6 +656,46 @@ async function del() {
 }
 .type-tag {
   font-size: 0.75rem;
+}
+.pending-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.pending-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.75rem;
+  border: 1px dashed var(--p-content-border-color);
+  border-radius: 0.25rem;
+  background: var(--p-surface-50, var(--p-content-background));
+}
+.pending-main {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.pending-meta {
+  color: var(--p-text-muted-color);
+  font-size: 0.875rem;
+  display: flex;
+  gap: 0.75rem;
+}
+.pending-meta .currency {
+  font-variant: tabular-nums;
+}
+.pending-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+.link-select {
+  min-width: 18rem;
 }
 .danger-zone {
   border-color: var(--p-red-500);

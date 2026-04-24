@@ -77,18 +77,16 @@ export async function updateBankcontact(
 
 export interface DeleteBankcontactResponse {
   deleted: true
-  accounts_deleted: number
-  transactions_deleted: number
+  /** Number of finance_account rows that lost their bank link (set
+   *  to manual) as a side effect of this delete. Transactions are
+   *  preserved. */
+  accounts_unlinked: number
 }
 
 export async function deleteBankcontact(
   id: number,
-  opts: { cascade?: boolean } = {},
 ): Promise<DeleteBankcontactResponse> {
-  // Encore parses DELETE path + query params into the body, so the
-  // cascade flag travels as ?cascade=true. `id` is already in the URL.
-  const qs = opts.cascade ? '?cascade=true' : ''
-  return apiFetch(`/finance/bankcontacts/${id}${qs}`, { method: 'DELETE' })
+  return apiFetch(`/finance/bankcontacts/${id}`, { method: 'DELETE' })
 }
 
 export async function setBankcontactCredentials(
@@ -131,11 +129,25 @@ export async function probeTanMethods(
 // Sync / TAN flow
 // ----------------------------------------------------------------------
 
+export interface UnknownBankAccount {
+  accountNumber: string
+  iban: string | null
+  accountKind: string
+  currency: string
+  label: string
+}
+
 export type SyncResponse =
   | {
       state: 'idle'
-      /** Accounts seen on this sync (both pre-existing and freshly auto-created). */
+      /** Total accounts the bank reported. */
       accounts_seen?: number
+      /** Accounts matched to a linked finance_account (data written). */
+      accounts_matched?: number
+      /** Accounts the bank reported that are not linked yet. */
+      accounts_unknown?: number
+      /** Bank-side account snapshots waiting for link/import in the UI. */
+      unknown_accounts?: UnknownBankAccount[]
       /** Rows inserted into finance_transaction (new only; duplicates skipped silently). */
       transactions_inserted?: number
       /** Rows inserted into finance_account_balance. */
@@ -201,8 +213,13 @@ export async function putSchedule(
 
 export interface Account {
   id: number
-  bankcontact_id: number
-  bankcontact_name: string
+  /** null for manual accounts. */
+  bankcontact_id: number | null
+  /** null when bankcontact_id is null. */
+  bankcontact_name: string | null
+  /** lib-fints accountNumber of the linked bank-side account, null
+   *  when the account is manual. */
+  fints_account_number: string | null
   type_kind: string
   type_label: string
   currency_code: string
@@ -215,12 +232,20 @@ export interface Account {
 }
 
 export interface CreateAccountInput {
-  bankcontact_id: number
+  /** Optional: omit for a manual account. */
+  bankcontact_id?: number
+  /** Required iff bankcontact_id is set — lib-fints accountNumber. */
+  fints_account_number?: string
   type_kind: string
   currency_code: string
   iban?: string
   account_number: string
   label: string
+}
+
+export interface LinkAccountInput {
+  bankcontact_id: number
+  fints_account_number: string
 }
 
 export interface UpdateAccountInput {
@@ -264,6 +289,23 @@ export async function deleteAccount(
   id: number,
 ): Promise<DeleteAccountResponse> {
   return apiFetch(`/finance/accounts/${id}`, { method: 'DELETE' })
+}
+
+export async function linkAccount(
+  id: number,
+  input: LinkAccountInput,
+): Promise<Account> {
+  return apiFetch(`/finance/accounts/${id}/link`, {
+    method: 'POST',
+    body: JSON.stringify({ id, ...input }),
+  })
+}
+
+export async function unlinkAccount(id: number): Promise<Account> {
+  return apiFetch(`/finance/accounts/${id}/unlink`, {
+    method: 'POST',
+    body: JSON.stringify({ id }),
+  })
 }
 
 // ----------------------------------------------------------------------
