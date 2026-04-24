@@ -297,7 +297,7 @@ export function buildGuestNotification(input: {
     title = "Neuer Kommentar";
     body = excerpt ? `${actor}: ${excerpt}` : `${actor} hat kommentiert in „${album}"`;
   }
-  const url = `/app/share/${encodeURIComponent(input.albumLinkToken)}`;
+  const url = `/app/albums/shared/${encodeURIComponent(input.albumLinkToken)}`;
   return {
     title,
     body,

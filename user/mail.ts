@@ -183,7 +183,7 @@ function renderGuestDigestHtml(params: GuestDigestMailParams, unsubUrl: string):
   const name = escapeHtml(params.displayName);
   const sections = params.groups
     .map((g) => {
-      const albumUrl = `${APP_URL}/app/share/${encodeURIComponent(g.albumLinkToken)}`;
+      const albumUrl = `${APP_URL}/app/albums/shared/${encodeURIComponent(g.albumLinkToken)}`;
       const parts: string[] = [];
       if (g.newPhotos > 0) {
         parts.push(
@@ -247,7 +247,7 @@ function renderGuestDigestText(params: GuestDigestMailParams, unsubUrl: string):
         lines.push(`    …und ${g.newComments.length - 5} weitere`);
       }
     }
-    lines.push(`  Album öffnen: ${APP_URL}/app/share/${encodeURIComponent(g.albumLinkToken)}`);
+    lines.push(`  Album öffnen: ${APP_URL}/app/albums/shared/${encodeURIComponent(g.albumLinkToken)}`);
     lines.push("");
   }
   lines.push(`Abmelden: ${unsubUrl}`);

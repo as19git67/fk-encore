@@ -293,7 +293,7 @@ export async function verify(linkToken: string, verifyToken: string): Promise<Ve
     guestId: guest.id,
     sessionToken,
     sessionMaxAgeMs: GUEST_SESSION_TTL_MS,
-    redirectPath: `/app/share/${encodeURIComponent(link.token)}`,
+    redirectPath: `/app/albums/shared/${encodeURIComponent(link.token)}`,
   };
 }
 
