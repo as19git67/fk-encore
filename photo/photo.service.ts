@@ -11,7 +11,7 @@ import { isUnderPressure } from "./event-loop-pressure";
 import { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
 export { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
 import db from "../db/database";
-import { realtime, feed } from "~encore/clients";
+import { realtime, feed, sharedalbum } from "~encore/clients";
 
 /**
  * Fire-and-forget realtime notification. Publisher-side errors must not
@@ -3046,6 +3046,18 @@ export async function addPhotoToAlbumLogic(userId: number, req: AddPhotoToAlbumR
     albumId: req.albumId,
     photoId: req.photoId,
   });
+  // Fan out to guests who have accessed a public link of this album.
+  await sharedalbum
+    .fanoutAlbum({
+      albumId: req.albumId,
+      kind: "photo_added",
+      payload: { photoIds: [req.photoId] },
+    })
+    .catch((err: unknown) => {
+      console.warn(
+        `[photo] guest fanout failed album=${req.albumId}: ${(err as Error).message}`,
+      );
+    });
 
   return { success: true };
 }
@@ -3256,6 +3268,20 @@ export async function batchUpdateAlbumPhotosLogic(userId: number, req: BatchAlbu
             });
           }
         }
+        // One guest-fanout call per batch (not per photo) — the digest
+        // cron groups per-guest anyway, so N photo notifications for
+        // the same album-add burst collapse cleanly.
+        await sharedalbum
+          .fanoutAlbum({
+            albumId,
+            kind: "photo_added",
+            payload: { photoIds: addedPhotoIds },
+          })
+          .catch((err: unknown) => {
+            console.warn(
+              `[photo] guest fanout failed album=${albumId}: ${(err as Error).message}`,
+            );
+          });
       }
     }
   } else if (action === "remove") {
