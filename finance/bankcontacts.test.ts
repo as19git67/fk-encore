@@ -20,11 +20,21 @@ import {
   deleteBankcontact,
   getBankcontact,
   listBankcontacts,
+  probeBankcontactTanMethods,
   setBankcontactCredentials,
   updateBankcontact,
 } from "./bankcontacts";
 import { decryptWithKey } from "./encryption";
+import * as fintsClient from "./fints-client";
 import { __resetRateLimiterForTests } from "../user/rateLimiter";
+
+vi.mock("./fints-client", async (orig) => {
+  const actual = await orig<typeof import("./fints-client")>();
+  return {
+    ...actual,
+    probeTanMethods: vi.fn(),
+  };
+});
 
 // vitest.setup.ts provides a global mock of encore.dev/config.secret()
 // that returns 32 zero-bytes base64 — the same key decryptWithKey uses
@@ -56,6 +66,7 @@ beforeEach(async () => {
   await db.delete(financeBankcontact);
   await db.delete(users);
   __resetRateLimiterForTests();
+  vi.mocked(fintsClient.probeTanMethods).mockReset();
   withoutPermission();
 });
 
@@ -280,6 +291,94 @@ describe("finance/bankcontacts — credentials", () => {
     await expect(
       setBankcontactCredentials({ id: created.id, pin: "" }),
     ).rejects.toThrow(/pin/);
+  });
+});
+
+describe("finance/bankcontacts — probe TAN methods", () => {
+  async function createdWithCreds(): Promise<number> {
+    withPermission("finance.accounts.manage");
+    const created = await createBankcontact({
+      name: "Sparkasse",
+      blz: "12345678",
+      login: "u",
+      server_url: "https://fints.test",
+    });
+    await setBankcontactCredentials({ id: created.id, pin: "hunter2" });
+    return created.id;
+  }
+
+  it("rejects callers without finance.accounts.manage", async () => {
+    withoutPermission();
+    await expect(
+      probeBankcontactTanMethods({ id: 1 }),
+    ).rejects.toThrow(/permission/);
+    expect(fintsClient.probeTanMethods).not.toHaveBeenCalled();
+  });
+
+  it("refuses to probe when the bankcontact has no credentials", async () => {
+    withPermission("finance.accounts.manage");
+    const created = await createBankcontact({
+      name: "x",
+      blz: "1",
+      login: "u",
+      server_url: "https://x",
+    });
+    await expect(
+      probeBankcontactTanMethods({ id: created.id }),
+    ).rejects.toThrow(/credentials/);
+    expect(fintsClient.probeTanMethods).not.toHaveBeenCalled();
+  });
+
+  it("returns the bank's method list on a successful probe", async () => {
+    const id = await createdWithCreds();
+    vi.mocked(fintsClient.probeTanMethods).mockResolvedValue({
+      state: "ok",
+      methods: [
+        { id: 942, name: "pushTAN", isDecoupled: true },
+        { id: 910, name: "chipTAN", isDecoupled: false },
+      ],
+    });
+
+    const result = await probeBankcontactTanMethods({ id });
+    expect(result).toEqual({
+      state: "ok",
+      methods: [
+        { id: 942, name: "pushTAN", isDecoupled: true },
+        { id: 910, name: "chipTAN", isDecoupled: false },
+      ],
+      errorCode: undefined,
+      errorMessage: undefined,
+    });
+    expect(fintsClient.probeTanMethods).toHaveBeenCalledWith(id);
+  });
+
+  it("surfaces the error branch verbatim (e.g. wrong PIN)", async () => {
+    const id = await createdWithCreds();
+    vi.mocked(fintsClient.probeTanMethods).mockResolvedValue({
+      state: "error",
+      errorCode: "9910",
+      errorMessage: "PIN falsch",
+    });
+
+    const result = await probeBankcontactTanMethods({ id });
+    expect(result.state).toBe("error");
+    expect(result.errorCode).toBe("9910");
+    expect(result.methods).toBeUndefined();
+  });
+
+  it("rate-limits after 10 probes for the same user×bankcontact", async () => {
+    const id = await createdWithCreds();
+    vi.mocked(fintsClient.probeTanMethods).mockResolvedValue({
+      state: "ok",
+      methods: [],
+    });
+
+    for (let i = 0; i < 10; i++) {
+      await probeBankcontactTanMethods({ id });
+    }
+    await expect(
+      probeBankcontactTanMethods({ id }),
+    ).rejects.toThrow(/Too many/);
   });
 });
 

@@ -18,6 +18,7 @@ import { checkRateLimit } from "../user/rateLimiter";
 import db from "../db/database";
 import { financeBankcontact, financeAccount } from "../db/schema";
 import { encryptCredentials } from "./encryption";
+import { probeTanMethods } from "./fints-client";
 
 console.log("[boot] finance/bankcontacts.ts: all imports resolved");
 
@@ -264,6 +265,61 @@ export const setBankcontactCredentials = api(
       .set({ credentials_encrypted: blob })
       .where(eq(financeBankcontact.id, p.id));
     return { credentials_set: true };
+  },
+);
+
+// ---------- Probe TAN methods ----------
+//
+// Runs the first half of the FinTS init dialog to retrieve the list
+// of TAN methods the bank offers for this user, so the admin can
+// pick one in the UI without knowing the numeric ID upfront. Needs
+// credentials already stored on the bankcontact.
+
+interface ProbeTanMethodsParams {
+  id: number;
+}
+
+interface ProbeTanMethodsApiResult {
+  state: "ok" | "tan-required" | "error";
+  methods?: Array<{ id: number; name: string; isDecoupled: boolean }>;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+export const probeBankcontactTanMethods = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/finance/bankcontacts/:id/tan-methods",
+    auth: true,
+  },
+  async (p: ProbeTanMethodsParams): Promise<ProbeTanMethodsApiResult> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.accounts.manage");
+
+    // Rate-limit per user×bankcontact so this doesn't become a
+    // cheap way to burn credentials against the bank's log. Same
+    // scope as bank-creds; 10/15m keeps retries generous.
+    checkRateLimit(`tan-probe:${auth.userID}:${p.id}`, {
+      maxAttempts: 10,
+      windowMs: 15 * 60_000,
+      message: "Too many TAN-method probes for this bank contact.",
+    });
+
+    const row = await loadBankcontact(p.id);
+    if (!row.credentials_encrypted) {
+      throw APIError.failedPrecondition(
+        "set credentials via POST /finance/bankcontacts/:id/credentials first",
+      );
+    }
+
+    const result = await probeTanMethods(p.id);
+    return {
+      state: result.state,
+      methods: result.methods,
+      errorCode: result.errorCode,
+      errorMessage: result.errorMessage,
+    };
   },
 );
 

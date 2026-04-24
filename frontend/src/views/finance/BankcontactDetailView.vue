@@ -5,9 +5,14 @@ import InputText from 'primevue/inputtext'
 import Password from 'primevue/password'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
+import Select from 'primevue/select'
 import Tag from 'primevue/tag'
 import { useBankcontactsStore } from '../../stores/finance/bankcontacts'
-import type { Bankcontact } from '../../api/finance'
+import {
+  probeTanMethods,
+  type Bankcontact,
+  type TanMethodOption,
+} from '../../api/finance'
 import TanDialog from '../../components/finance/TanDialog.vue'
 
 const route = useRoute()
@@ -34,8 +39,36 @@ const pin = ref('')
 const saving = ref(false)
 const savingPin = ref(false)
 const syncing = ref(false)
+const probingMethods = ref(false)
+const tanMethodOptions = ref<TanMethodOption[]>([])
+const tanProbeInfo = ref<string | null>(null)
 const errorMsg = ref<string | null>(null)
 const bc = ref<Bankcontact | null>(null)
+
+// Dropdown entries combine the probed list with whatever is currently
+// stored on the bankcontact — so an admin who already knows the ID
+// keeps seeing it selected even before re-probing.
+const tanMethodSelectOptions = computed(() => {
+  const opts: Array<{ id: string; label: string; isDecoupled: boolean }> = []
+  for (const m of tanMethodOptions.value) {
+    opts.push({
+      id: String(m.id),
+      label: `${m.id} — ${m.name}${m.isDecoupled ? ' (decoupled)' : ''}`,
+      isDecoupled: m.isDecoupled,
+    })
+  }
+  // If the stored id isn't in the probed list (or we haven't probed
+  // yet), surface it as a read-only option so it stays selected.
+  const existing = form.value.tan_method.trim()
+  if (existing && !opts.some((o) => o.id === existing)) {
+    opts.push({
+      id: existing,
+      label: `${existing} — (aktuell gespeichert, nicht abgerufen)`,
+      isDecoupled: false,
+    })
+  }
+  return opts
+})
 
 onMounted(async () => {
   if (store.items.length === 0) await store.refresh()
@@ -97,6 +130,32 @@ async function setCreds() {
   }
 }
 
+async function probeMethods() {
+  if (!bc.value) return
+  probingMethods.value = true
+  errorMsg.value = null
+  tanProbeInfo.value = null
+  try {
+    const resp = await probeTanMethods(bc.value.id)
+    if (resp.state === 'ok') {
+      tanMethodOptions.value = resp.methods
+      if (resp.methods.length === 0) {
+        tanProbeInfo.value = 'Bank lieferte keine TAN-Verfahren.'
+      } else {
+        tanProbeInfo.value = `${resp.methods.length} Verfahren gefunden.`
+      }
+    } else if (resp.state === 'tan-required') {
+      errorMsg.value = `${resp.errorCode}: ${resp.errorMessage}`
+    } else {
+      errorMsg.value = `${resp.errorCode}: ${resp.errorMessage}`
+    }
+  } catch (err) {
+    errorMsg.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    probingMethods.value = false
+  }
+}
+
 async function triggerSync() {
   if (!bc.value) return
   syncing.value = true
@@ -151,8 +210,34 @@ async function del() {
       <div class="field"><label>Login</label><InputText v-model="form.login" /></div>
       <div class="field"><label>Server-URL</label><InputText v-model="form.server_url" /></div>
       <div class="field">
-        <label>TAN-Methode (optional)</label>
-        <InputText v-model="form.tan_method" placeholder="z. B. 942" />
+        <label>TAN-Verfahren</label>
+        <div v-if="!isNew && bc?.credentials_set" class="tan-method-row">
+          <Select
+            v-model="form.tan_method"
+            :options="tanMethodSelectOptions"
+            option-label="label"
+            option-value="id"
+            placeholder="Zuerst 'Abrufen' klicken"
+            :disabled="tanMethodSelectOptions.length === 0"
+            class="tan-method-select"
+          />
+          <Button
+            label="Abrufen"
+            icon="pi pi-refresh"
+            severity="secondary"
+            :loading="probingMethods"
+            @click="probeMethods"
+          />
+        </div>
+        <InputText
+          v-else
+          v-model="form.tan_method"
+          placeholder="z. B. 942 — nach Credential-Set abrufbar"
+        />
+        <small v-if="tanProbeInfo" class="probe-info">{{ tanProbeInfo }}</small>
+        <small v-else-if="!isNew && !bc?.credentials_set" class="probe-info">
+          Passwort setzen, um die Verfahren bei der Bank abzufragen.
+        </small>
       </div>
       <div class="actions">
         <Button label="Speichern" :loading="saving" @click="save" />
@@ -263,6 +348,17 @@ async function del() {
 }
 .status-tag {
   margin-left: 0.5rem;
+}
+.tan-method-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+.tan-method-select {
+  flex: 1;
+}
+.probe-info {
+  color: var(--p-text-muted-color);
 }
 .danger-zone {
   border-color: var(--p-red-500);

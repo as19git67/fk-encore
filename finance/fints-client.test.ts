@@ -11,7 +11,7 @@ import {
   financeTransaction,
 } from "../db/schema";
 import { sql } from "drizzle-orm";
-import { runSynchronize, type FintsClientSurface } from "./fints-client";
+import { probeTanMethods, runSynchronize, type FintsClientSurface } from "./fints-client";
 import type { DialogResult } from "./types";
 
 // lib-fints is mocked at module level so the wrapper's mapping/retry
@@ -90,13 +90,14 @@ function mockClient(
     bankAnswers?: Array<{ code: number; text: string }>;
   },
   bankingInformation: Record<string, unknown> = { systemId: "sys-1" },
+  availableTanMethods: Array<{ id: number; name: string; isDecoupled: boolean }> = [],
 ): FintsClientSurface {
   const resp = { bankAnswers: [], ...response };
   return {
     synchronize: vi.fn(async () => resp as any),
     synchronizeWithTan: vi.fn(async () => resp as any),
     selectTanMethod: vi.fn(),
-    config: { bankingInformation } as any,
+    config: { bankingInformation, availableTanMethods } as any,
     // Not exercised in the sync-dialog tests; the runFetchAccounts
     // tests below override these via their own custom mocks.
     getAccountStatements: vi.fn(),
@@ -567,5 +568,109 @@ describe("runFetchAccounts — integrates with runSynchronize", () => {
 
     const fetched = await runFetchAccounts(result.client as FintsClientSurface);
     expect(fetched.accounts).toHaveLength(1);
+  });
+});
+
+// ======================================================================
+// probeTanMethods — first-sync TAN method lookup for the UI picker
+// ======================================================================
+
+describe("fints-client — probeTanMethods", () => {
+  it("returns ok + the bank's available TAN methods after a successful first sync", async () => {
+    const id = await insertBankcontact();
+    const c = mockClient(
+      { success: true, requiresTan: false },
+      { systemId: "sys-probe" },
+      [
+        { id: 942, name: "pushTAN", isDecoupled: true },
+        { id: 910, name: "chipTAN", isDecoupled: false },
+      ],
+    );
+
+    const result = await probeTanMethods(id, {
+      clientFactory: () => c,
+      sleep: async () => {},
+    });
+
+    expect(result.state).toBe("ok");
+    expect(result.methods).toEqual([
+      { id: 942, name: "pushTAN", isDecoupled: true },
+      { id: 910, name: "chipTAN", isDecoupled: false },
+    ]);
+    // Only one sync — the probe never reaches the UPD step.
+    expect(c.synchronize).toHaveBeenCalledTimes(1);
+    expect(c.selectTanMethod).not.toHaveBeenCalled();
+  });
+
+  it("returns state=tan-required when the first sync itself demands a TAN", async () => {
+    const id = await insertBankcontact();
+    const c = mockClient(
+      {
+        success: true,
+        requiresTan: true,
+        tanChallenge: "Bitte bestätigen",
+        tanReference: "pre-probe-tan",
+      },
+      { systemId: "sys" },
+      [],
+    );
+
+    const result = await probeTanMethods(id, {
+      clientFactory: () => c,
+      sleep: async () => {},
+    });
+
+    expect(result.state).toBe("tan-required");
+    expect(result.errorCode).toBe("tan-before-probe");
+    expect(result.methods).toBeUndefined();
+  });
+
+  it("maps a failing first sync to state=error with the bank's code", async () => {
+    const id = await insertBankcontact();
+    const c = mockClient(
+      {
+        success: false,
+        requiresTan: false,
+        bankAnswers: [{ code: 9010, text: "Login fehlgeschlagen" }],
+      },
+      { systemId: "sys" },
+      [],
+    );
+
+    const result = await probeTanMethods(id, {
+      clientFactory: () => c,
+      sleep: async () => {},
+    });
+
+    expect(result.state).toBe("error");
+    expect(result.errorCode).toBe("9010");
+    expect(result.errorMessage).toBe("Login fehlgeschlagen");
+  });
+
+  it("retries transport errors up to 2 times before returning error state", async () => {
+    const id = await insertBankcontact();
+    const sleep = vi.fn(async (_ms: number) => {});
+    const factory = vi.fn(() => {
+      const c = mockClient({ success: true, requiresTan: false }, {}, []);
+      (c.synchronize as any).mockRejectedValueOnce(new Error("ECONNRESET"));
+      (c.synchronize as any).mockRejectedValueOnce(new Error("ECONNRESET"));
+      (c.synchronize as any).mockRejectedValueOnce(new Error("ECONNRESET"));
+      return c;
+    });
+
+    const result = await probeTanMethods(id, { clientFactory: factory, sleep });
+
+    expect(result.state).toBe("error");
+    expect(result.errorCode).toBe("transport");
+    expect(sleep).toHaveBeenCalledTimes(2);
+  });
+
+  it("throws notFound when the bankcontact id does not exist", async () => {
+    await expect(
+      probeTanMethods(999_999, {
+        clientFactory: () => mockClient({ success: true, requiresTan: false }),
+        sleep: async () => {},
+      }),
+    ).rejects.toThrow(/not found/);
   });
 });

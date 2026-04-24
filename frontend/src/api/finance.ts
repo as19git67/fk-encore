@@ -83,6 +83,32 @@ export async function setBankcontactCredentials(
 }
 
 // ----------------------------------------------------------------------
+// TAN-method probe (first-sync lookup for the UI picker)
+// ----------------------------------------------------------------------
+
+export interface TanMethodOption {
+  id: number
+  name: string
+  isDecoupled: boolean
+}
+
+export type ProbeTanMethodsResponse =
+  | { state: 'ok'; methods: TanMethodOption[] }
+  | { state: 'tan-required'; errorCode: string; errorMessage: string }
+  | { state: 'error'; errorCode: string; errorMessage: string }
+
+export async function probeTanMethods(
+  id: number,
+): Promise<ProbeTanMethodsResponse> {
+  return apiFetch(`/finance/bankcontacts/${id}/tan-methods`, {
+    method: 'POST',
+    // Two FinTS round-trips possible (retry on transport error), so
+    // allow more than the default 30s.
+    timeoutMs: 60_000,
+  })
+}
+
+// ----------------------------------------------------------------------
 // Sync / TAN flow
 // ----------------------------------------------------------------------
 

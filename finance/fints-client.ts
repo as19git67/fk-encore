@@ -60,7 +60,10 @@ export interface FintsClientSurface {
     tan?: string,
   ): Promise<import("lib-fints").SynchronizeResponse>;
   selectTanMethod(id: number): unknown;
-  config: { bankingInformation: BankingInformation };
+  config: {
+    bankingInformation: BankingInformation;
+    availableTanMethods: import("lib-fints").TanMethod[];
+  };
   getAccountStatements(
     accountNumber: string,
   ): Promise<import("lib-fints").StatementResponse>;
@@ -188,6 +191,103 @@ export async function runSynchronize(
     if (result.state === "idle") result.client = client;
     return result;
   }, sleep);
+}
+
+// -----------------------------------------------------------------------
+// Probe for available TAN methods (pre-sync UI lookup)
+// -----------------------------------------------------------------------
+
+export interface ProbeTanMethod {
+  id: number;
+  name: string;
+  isDecoupled: boolean;
+}
+
+export interface ProbeTanMethodsResult {
+  /** Matches DialogResult so callers can handle the TAN / error
+   *  branches uniformly with the regular sync flow. */
+  state: "ok" | "tan-required" | "error";
+  methods?: ProbeTanMethod[];
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+/**
+ * Runs *only* the first synchronize() dialog — the one that populates
+ * BPD including the list of TAN methods the bank offers for this
+ * user. No TAN method is selected afterwards, so the bank isn't
+ * asked for UPD (account list) and the user doesn't see a TAN
+ * challenge on the pre-sync pass.
+ *
+ * This is what powers the "TAN-Verfahren abrufen"-button in
+ * BankcontactDetailView: the admin doesn't have to know the numeric
+ * FinTS ID of the method upfront anymore.
+ */
+export async function probeTanMethods(
+  bankcontactId: number,
+  opts: { clientFactory?: FintsClientFactory; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<ProbeTanMethodsResult> {
+  const bankcontact = await loadBankcontact(bankcontactId);
+  const pin = bankcontact.credentials_encrypted
+    ? decryptCredentials(bankcontact.credentials_encrypted)
+    : "";
+
+  const factory = opts.clientFactory ?? defaultFactory;
+  const sleep = opts.sleep ?? defaultSleep;
+
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const config = FinTSConfig.forFirstTimeUse(
+        productId(),
+        productVersion(),
+        bankcontact.server_url,
+        bankcontact.blz,
+        bankcontact.login,
+        pin,
+      );
+      const client = factory(config);
+
+      const response = await client.synchronize();
+      // If the first sync itself demands a TAN, hand that back — the
+      // caller (UI) has to tell the user to remove the TAN lock on
+      // their account before the probe can go through. Rare in
+      // practice; most banks only challenge on the second sync.
+      if (response.requiresTan) {
+        return {
+          state: "tan-required",
+          errorCode: "tan-before-probe",
+          errorMessage:
+            "Bank requires a TAN before exposing the method list. " +
+            "Please reach out to the bank to reset the session.",
+        };
+      }
+      if (!response.success) {
+        const first = response.bankAnswers.find((a) => a.code !== 0)
+          ?? response.bankAnswers[0];
+        return {
+          state: "error",
+          errorCode: first ? String(first.code) : "unknown",
+          errorMessage: first?.text ?? "FinTS probe failed",
+        };
+      }
+      const methods = (client.config.availableTanMethods ?? []).map((m) => ({
+        id: m.id,
+        name: m.name,
+        isDecoupled: m.isDecoupled,
+      }));
+      return { state: "ok", methods };
+    } catch (err) {
+      lastErr = err;
+      if (attempt < MAX_RETRIES) await sleep(RETRY_BACKOFF_MS[attempt]);
+    }
+  }
+  const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+  return {
+    state: "error",
+    errorCode: "transport",
+    errorMessage: `FinTS transport error after ${MAX_RETRIES + 1} attempts: ${msg}`,
+  };
 }
 
 // -----------------------------------------------------------------------
