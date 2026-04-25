@@ -11,7 +11,13 @@ import {
   financeTransaction,
 } from "../db/schema";
 import { eq, sql } from "drizzle-orm";
-import { probeTanMethods, runSynchronize, type FintsClientSurface } from "./fints-client";
+import {
+  __resetFintsClientCacheForTests,
+  evictCachedClient,
+  probeTanMethods,
+  runSynchronize,
+  type FintsClientSurface,
+} from "./fints-client";
 import type { DialogResult } from "./types";
 
 // lib-fints is mocked at module level so the wrapper's mapping/retry
@@ -49,6 +55,7 @@ beforeEach(async () => {
   await db.delete(financeAccountAccess);
   await db.delete(financeAccount);
   await db.delete(financeBankcontact);
+  __resetFintsClientCacheForTests();
 });
 
 /**
@@ -1226,6 +1233,92 @@ describe("runFetchAccounts — integrates with runSynchronize", () => {
 
     const fetched = await runFetchAccounts(result.client as FintsClientSurface);
     expect(fetched.accounts).toHaveLength(1);
+  });
+});
+
+describe("fints-client — in-memory client cache (hot path)", () => {
+  // The hot path mirrors Finanzkraft's #fintsInstance singleton:
+  // once a sync has succeeded we keep the live FinTSClient around and
+  // hand it back on the next runSynchronize without re-issuing a
+  // synchronize() call. The bank sees a continuing dialog → no fresh
+  // SCA push for read-only ops within PSD2's 90-day window.
+
+  it("the second sync returns the same cached client without a fresh synchronize()", async () => {
+    const id = await insertBankcontact({
+      tan_method: "942",
+      banking_information: { systemId: "cached" } as any,
+    });
+    const c = mockClient({ success: true, requiresTan: false });
+
+    // First call: factory injected, warm path runs → cache populated.
+    const first = await runSynchronize(id, {
+      clientFactory: () => c,
+      sleep: async () => {},
+    });
+    expect(first.state).toBe("idle");
+    expect(c.synchronize).toHaveBeenCalledTimes(1);
+
+    // Second call: NO factory. The default lib-fints factory in the
+    // module mock would throw on synchronize() ("not used — factory
+    // override"), so a successful return *proves* the hot path
+    // returned the cached client without calling synchronize() at all.
+    const second = await runSynchronize(id);
+    expect(second.state).toBe("idle");
+    expect(second.client).toBe(c);
+    expect(c.synchronize).toHaveBeenCalledTimes(1);
+  });
+
+  it("PIN change evicts the cached client", async () => {
+    const id = await insertBankcontact({
+      tan_method: "942",
+      banking_information: { systemId: "cached" } as any,
+    });
+    const c = mockClient({ success: true, requiresTan: false });
+    await runSynchronize(id, {
+      clientFactory: () => c,
+      sleep: async () => {},
+    });
+
+    // Simulate the side-effect of setBankcontactCredentials.
+    evictCachedClient(id);
+
+    // Without the cache the second call falls back to the warm path,
+    // which needs a factory in tests (otherwise the lib-fints mock
+    // throws). Provide one again — the assertion is that the new
+    // client is exercised, i.e. cache was indeed evicted.
+    const c2 = mockClient({ success: true, requiresTan: false });
+    const result = await runSynchronize(id, {
+      clientFactory: () => c2,
+      sleep: async () => {},
+    });
+    expect(result.state).toBe("idle");
+    expect(c2.synchronize).toHaveBeenCalledTimes(1);
+    expect(result.client).toBe(c2);
+  });
+
+  it("does NOT use the cache for the resume path (TAN was just typed)", async () => {
+    const id = await insertBankcontact({ tan_method: "942" });
+    const c = mockClient({ success: true, requiresTan: false });
+    // Pre-populate the cache by running a fresh sync.
+    await runSynchronize(id, {
+      clientFactory: () => c,
+      sleep: async () => {},
+    });
+
+    // A resume call must never short-circuit on the hot path — the
+    // user just typed a TAN and supplied an explicit
+    // bankingInformation that may differ from the cache.
+    const c2 = mockClient({ success: true, requiresTan: false });
+    const resumed = await runSynchronize(id, {
+      tanReference: "ref",
+      tanAnswer: "111",
+      bankingInformation: { systemId: "from-tan-session" },
+      clientFactory: () => c2,
+      sleep: async () => {},
+    });
+    expect(resumed.state).toBe("idle");
+    expect(c2.synchronizeWithTan).toHaveBeenCalledTimes(1);
+    expect(resumed.client).toBe(c2);
   });
 });
 

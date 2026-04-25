@@ -21,7 +21,11 @@ import {
   financeBankcontact,
 } from "../db/schema";
 import { encryptCredentials } from "./encryption";
-import { clearBankingInformationCache, probeTanMethods } from "./fints-client";
+import {
+  clearBankingInformationCache,
+  evictCachedClient,
+  probeTanMethods,
+} from "./fints-client";
 
 console.log("[boot] finance/bankcontacts.ts: all imports resolved");
 
@@ -253,6 +257,10 @@ export const deleteBankcontact = api(
     // finance_tan_session cascades, finance_account.bankcontact_id
     // is set to NULL by the FK.
     await db.delete(financeBankcontact).where(eq(financeBankcontact.id, p.id));
+    // The cached client (if any) is now pointing at a row that no
+    // longer exists — evict it so the next bankcontact created with
+    // the same id doesn't accidentally inherit the dialog.
+    evictCachedClient(p.id);
 
     return {
       deleted: true,
@@ -307,8 +315,11 @@ export const setBankcontactCredentials = api(
       .where(eq(financeBankcontact.id, p.id));
     // Drop the warm-start cache: lib-fints' systemId is bound to the
     // PIN/customer combo, so a stale cache after a PIN change would
-    // just produce wrong-PIN errors on the next warm sync.
+    // just produce wrong-PIN errors on the next warm sync. Also
+    // evict any in-process client — its dialog state is tied to the
+    // old PIN.
     await clearBankingInformationCache(p.id);
+    evictCachedClient(p.id);
     return { credentials_set: true };
   },
 );

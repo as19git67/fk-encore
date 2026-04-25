@@ -122,6 +122,69 @@ interface RunOptions extends SyncOptions {
  * `client.config.bankingInformation` back to the bankcontact row so
  * the next sync hits the warm path.
  */
+/**
+ * Process-level cache of live FinTSClient instances, keyed by
+ * bankcontact id. Mirrors Finanzkraft's #fintsInstance singleton:
+ * once the bank has accepted our SCA on a given client, we keep that
+ * client around and reuse it for follow-up syncs / statement
+ * fetches. The bank sees a continuing dialog (no fresh systemId, no
+ * fresh authenticate) and — for read-only operations within PSD2's
+ * 90-day window — lets us through without another TAN push.
+ *
+ * TTL bounds the leak: a long-idle entry is evicted on the next
+ * lookup so we don't keep open dialogs forever and the bank can
+ * garbage-collect its side too.
+ *
+ * Lost on container restart, which is fine — the warm path then
+ * rebuilds the client from the persisted bankingInformation, also
+ * usually without a TAN.
+ */
+interface CachedClientEntry {
+  client: FintsClientSurface;
+  expiresAt: number;
+}
+const liveClientCache = new Map<number, CachedClientEntry>();
+const LIVE_CLIENT_TTL_MS = 30 * 60_000; // 30 min — covers human follow-ups
+
+function takeCachedClient(bankcontactId: number): FintsClientSurface | null {
+  const entry = liveClientCache.get(bankcontactId);
+  if (!entry) return null;
+  if (entry.expiresAt < Date.now()) {
+    liveClientCache.delete(bankcontactId);
+    return null;
+  }
+  // Refresh the TTL on access — active use keeps it alive.
+  entry.expiresAt = Date.now() + LIVE_CLIENT_TTL_MS;
+  return entry.client;
+}
+
+function rememberClient(
+  bankcontactId: number,
+  client: FintsClientSurface,
+): void {
+  liveClientCache.set(bankcontactId, {
+    client,
+    expiresAt: Date.now() + LIVE_CLIENT_TTL_MS,
+  });
+}
+
+/**
+ * Drop a client from the in-memory cache. Used after credential
+ * changes, bankcontact deletions, or any branch where the cached
+ * client would no longer represent a valid bank-side session.
+ */
+export function evictCachedClient(bankcontactId: number): void {
+  liveClientCache.delete(bankcontactId);
+}
+
+/**
+ * Test hook: clear every cached client. Tests that build a fresh
+ * mock client per case need this to avoid leaks between cases.
+ */
+export function __resetFintsClientCacheForTests(): void {
+  liveClientCache.clear();
+}
+
 export async function runSynchronize(
   bankcontactId: number,
   opts: RunOptions = {},
@@ -136,6 +199,26 @@ export async function runSynchronize(
 
   const isResume = typeof opts.tanReference === "string"
     && !!opts.bankingInformation;
+
+  // ── Hot path: in-memory cached client ─────────────────────────────
+  // Skipped for resume (the user just typed a TAN, the request has
+  // an explicit bankingInformation that may differ from our cache)
+  // and when a test injected its own clientFactory (those tests
+  // expect their factory to actually run).
+  if (!isResume && !opts.clientFactory) {
+    const cached = takeCachedClient(bankcontactId);
+    if (cached) {
+      console.log(
+        `[fints] hot-cache hit for bankcontact=${bankcontactId} — ` +
+          `reusing live client, no synchronize() roundtrip`,
+      );
+      return {
+        state: "idle",
+        client: cached,
+        bankingInformation: cached.config.bankingInformation as unknown as Record<string, unknown>,
+      };
+    }
+  }
 
   // ── Resume path ────────────────────────────────────────────────────
   if (isResume) {
@@ -162,9 +245,11 @@ export async function runSynchronize(
         bankcontactId,
         (result.client as FintsClientSurface).config.bankingInformation,
       );
+      rememberClient(bankcontactId, result.client as FintsClientSurface);
       console.log(
         `[fints] resume sync ok for bankcontact=${bankcontactId}, ` +
-          `bankingInformation cached for next warm-start`,
+          `bankingInformation cached for next warm-start, ` +
+          `live client cached for hot-path reuse`,
       );
     }
     return result;
@@ -197,9 +282,11 @@ export async function runSynchronize(
           bankcontactId,
           (warm.client as FintsClientSurface).config.bankingInformation,
         );
+        rememberClient(bankcontactId, warm.client as FintsClientSurface);
         console.log(
           `[fints] warm sync ok for bankcontact=${bankcontactId} ` +
-            `(no TAN required), bankingInformation refreshed`,
+            `(no TAN required), bankingInformation refreshed, ` +
+            `live client cached for hot-path reuse`,
         );
         return warm;
       }
@@ -322,6 +409,7 @@ export async function runSynchronize(
         bankcontactId,
         client.config.bankingInformation,
       );
+      rememberClient(bankcontactId, client);
       console.log(
         `[fints] cold sync ok for bankcontact=${bankcontactId}, ` +
           `bankingInformation cached for next warm-start`,
