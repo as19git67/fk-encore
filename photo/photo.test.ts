@@ -1,5 +1,5 @@
 import { Readable } from "stream";
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterAll, vi } from "vitest";
 import fs from "fs";
 import path from "path";
 import { eq, sql } from "drizzle-orm";
@@ -8,6 +8,7 @@ import { photos, faces, userFaceAssignments, persons, albums, albumPhotos, album
 import { dbInsertReturning, dbExec } from "../db/adapter";
 import { UPLOAD_DIR, computeFaceCompositionScore } from "./photo.service";
 import * as service from "./photo.service";
+import { stopImagePool } from "./image-pool";
 import { DeferJobError } from "./scan-queue";
 import { createUserLogic, getPermissionsForUser } from "../user/user.service";
 import { createRoleLogic, assignPermissionLogic } from "../role/role.service";
@@ -17,6 +18,16 @@ import { assignRoleLogic } from "../user/user-roles.service";
 describe("Photo Module", () => {
   let user1: any;
   let user2: any;
+
+  // Photo uploads trigger thumbnail generation, which spins up the
+  // worker_threads-based image pool lazily. Without an explicit shutdown the
+  // workers stay alive past Vitest's teardown — a late console.log from one
+  // of them then races with the closed RPC channel and surfaces as
+  // `EnvironmentTeardownError: Closing rpc while "onUserConsoleLog" was
+  // pending`.
+  afterAll(async () => {
+    await stopImagePool();
+  });
 
   beforeEach(async () => {
     // Clean tables (respecting foreign keys)

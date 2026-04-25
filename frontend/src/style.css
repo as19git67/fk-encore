@@ -47,3 +47,21 @@ a:hover {
 .mt-md { margin-top: var(--spacing-md); }
 .mt-lg { margin-top: var(--spacing-lg); }
 .my-xl { margin-top: var(--spacing-xl); margin-bottom: var(--spacing-xl); }
+
+/* ── Finance: TAN-method dropdown panel ─────────────────────────────────────
+ * The PrimeVue Select panel is teleported to <body>, so scoped CSS in
+ * BankcontactDetailView can't reach it. The TAN-method options can be very
+ * long ("SecureGo plus (Direktfreigabe) — Push-Freigabe") — without these
+ * rules the panel grows wider than the trigger and on mobile pushes past
+ * the viewport edge. */
+.tan-method-panel .p-select-option {
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.3;
+  padding-block: 0.5rem;
+}
+.tan-method-panel {
+  /* Cap panel width so a verbose option doesn't stretch the overlay
+   * beyond the visible page; options inside wrap to multiple lines. */
+  max-width: min(calc(100vw - 1rem), 32rem);
+}

@@ -94,9 +94,12 @@ auslöst. Countdown bindet gegen `expires_at` aus der TAN-Session.
 +---------------------------------------------+
 ```
 
-Flow (siehe `finance-fints-integration.md` §4): bei `409` aus
-`POST /finance/statements` öffnet die UI den Dialog mit `tanReference`
-und `challenge`; Submit ruft `POST /finance/tan-sessions/complete`.
+Flow (siehe `finance-fints-integration.md` §4): wenn
+`POST /finance/statements` mit `{ state: "tan-required" }` antwortet,
+öffnet die UI den Dialog mit `tanReference` und `challenge`; Submit
+ruft `POST /finance/tan-sessions/complete`, das dieselbe
+discriminated-union-Response liefert (bei Erfolg `state: "idle"`,
+bei falscher TAN erneut `state: "tan-required"` mit neuem Challenge).
 
 ### 4.2 `AnalysisView`
 
@@ -235,8 +238,8 @@ in drei klar getrennte Kartenbereiche.
   Set-Credentials-Endpoint, der `encryption.ts` (siehe
   `finance-fints-integration.md` §3) nutzt; im Store bleibt nur der
   boolesche „Status gespeichert"-Flag.
-- `Sync jetzt` ruft `POST /finance/statements`; bei `409` öffnet sich
-  der `TanDialog` (§4.1).
+- `Sync jetzt` ruft `POST /finance/statements`; liefert die Antwort
+  `{ state: "tan-required", ... }`, öffnet sich der `TanDialog` (§4.1).
 - `Sync-Zeiten bearbeiten` navigiert zu `SyncScheduleView` (§4.3) für
   denselben Bankkontakt.
 - `TAN-Methoden neu laden` startet einen kurzen FinTS-Dialog nur zum
@@ -460,9 +463,9 @@ vermerkt.
 
 ## 5. Interaktions-Besonderheiten
 
-- **TAN-Flow**: Die `useBankcontactsStore`-Action `syncNow(id)` kapselt
-  das Verhalten bei `409 Conflict` aus `POST /finance/statements`:
-  öffnet `TanDialog`, blockt weitere Sync-Trigger für diesen Bankkontakt
+- **TAN-Flow**: Die `useBankcontactsStore`-Action `syncNow(id)`
+  switcht auf `response.state`: bei `"tan-required"` öffnet sie den
+  `TanDialog` und blockt weitere Sync-Trigger für diesen Bankkontakt
   bis `complete` oder Abbruch. Push-Notifications (aus dem Cron, siehe
   `finance-fints-integration.md` §5.1) führen im Foreground-Tab
   automatisch zu einem Store-Refresh, damit der User den Dialog direkt

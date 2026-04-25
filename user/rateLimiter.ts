@@ -11,8 +11,8 @@ interface RateLimitEntry {
 // In-memory store – replace with Encore Cache (Redis) for multi-instance deployments
 const store = new Map<string, RateLimitEntry>();
 
-const MAX_ATTEMPTS = 10;
-const WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const DEFAULT_MAX_ATTEMPTS = 10;
+const DEFAULT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 
 /**
  * Extract the client IP from the current Encore request context.
@@ -34,41 +34,80 @@ export function getClientIp(): string {
   return "unknown";
 }
 
+export interface RateLimitOpts {
+  /** Default: 10. */
+  maxAttempts?: number;
+  /** Default: 15 minutes. */
+  windowMs?: number;
+  /**
+   * Custom error message when the limit is hit. The computed
+   * Retry-After seconds are appended automatically.
+   */
+  message?: string;
+}
+
 /**
- * Enforce a sliding-window rate limit keyed by IP address.
- * Throws HTTP 429 when the limit is exceeded.
+ * Enforce a sliding-window rate limit keyed by `key`. The original
+ * auth path passed an IP here; newer callers (finance) key by
+ * composite like `"tan-complete:<uuid>"` — see
+ * docs/finance-rate-limiting.md §2 for the contract.
+ *
+ * Throws APIError.resourceExhausted (HTTP 429) with a message that
+ * tells the caller how many seconds to wait.
  */
-export function checkRateLimit(ip: string): void {
+export function checkRateLimit(
+  key: string,
+  opts: RateLimitOpts = {},
+): void {
+  const maxAttempts = opts.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+  const windowMs = opts.windowMs ?? DEFAULT_WINDOW_MS;
   const now = Date.now();
-  const entry = store.get(ip);
+  const entry = store.get(key);
 
   if (!entry || entry.resetAt < now) {
-    store.set(ip, { count: 1, resetAt: now + WINDOW_MS });
+    store.set(key, { count: 1, resetAt: now + windowMs });
     return;
   }
 
-  if (entry.count >= MAX_ATTEMPTS) {
+  if (entry.count >= maxAttempts) {
+    const retryAfterSec = Math.max(1, Math.ceil((entry.resetAt - now) / 1000));
+    const base =
+      opts.message ??
+      `Too many attempts. Try again in ${formatDuration(windowMs)}.`;
     throw APIError.resourceExhausted(
-      "Too many authentication attempts. Try again in 15 minutes."
+      `${base} Retry after ${retryAfterSec}s.`,
     );
   }
 
   entry.count += 1;
 }
 
-/**
- * Reset the counter for an IP on successful authentication.
- */
-export function resetRateLimit(ip: string): void {
-  store.delete(ip);
+/** Reset the counter for a key on successful authentication / action. */
+export function resetRateLimit(key: string): void {
+  store.delete(key);
 }
 
-/**
- * Periodic cleanup to prevent unbounded memory growth.
- */
+/** Periodic cleanup to prevent unbounded memory growth. */
 export function purgeExpiredEntries(): void {
   const now = Date.now();
   for (const [key, entry] of store.entries()) {
     if (entry.resetAt < now) store.delete(key);
   }
+}
+
+/**
+ * Test-only reset — clears the whole store so tests don't leak state
+ * through the in-memory Map. Not intended for production code paths.
+ */
+export function __resetRateLimiterForTests(): void {
+  store.clear();
+}
+
+function formatDuration(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  if (minutes >= 60 && minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return `${hours}h`;
+  }
+  return `${minutes}m`;
 }

@@ -337,6 +337,76 @@
       "when": 1779000000000,
       "tag": "0046_shared_album_guests",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1779000100000,
+      "tag": "0047_finance_initial",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1779000200000,
+      "tag": "0048_finance_embeddings",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1779000300000,
+      "tag": "0049_finance_bankcontact_tan_methods_cache",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1779000400000,
+      "tag": "0050_finance_manual_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1779000500000,
+      "tag": "0051_finance_bankcontact_banking_information",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1779000600000,
+      "tag": "0052_finance_tan_session_photo",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1779000700000,
+      "tag": "0053_finance_tan_session_mid_fetch",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1779000800000,
+      "tag": "0054_finance_account_kind_bargeld",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1779000900000,
+      "tag": "0055_finance_transaction_sepa_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1779001000000,
+      "tag": "0056_finance_transaction_drop_fints_id",
+      "breakpoints": true
     }
   ]
 }

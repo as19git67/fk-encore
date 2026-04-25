@@ -25,6 +25,7 @@ export async function seed(db: any): Promise<void> {
     { name: "User", description: "Basic user access (login, profile)" },
     { name: "Photo User", description: "Access to the photos module" },
     { name: "Dokumente User", description: "Access to the documents module" },
+    { name: "Finance User", description: "Access to the finance module" },
   ];
 
   for (const role of defaultRoles) {
@@ -69,11 +70,21 @@ export async function seed(db: any): Promise<void> {
     { key: "documents.manage_taxonomy", description: "Manage document categories and AI suggestions" },
     { key: "households.view", description: "View households the user belongs to" },
     { key: "households.manage", description: "Create and edit households, manage members" },
+    // --- Finance module ---
+    { key: "module.finance", description: "Enable finance module" },
+    { key: "finance.view", description: "View accounts and transactions (ACL-filtered)" },
+    { key: "finance.accounts.manage", description: "Manage bank contacts and accounts" },
+    { key: "finance.admin", description: "Finance admin (ACL bypass, data import)" },
   ];
 
   // Permissions that are NEVER auto-assigned to the Admin role.
   // These must be granted manually to a dedicated role for safety.
-  const adminExcludedPermissions = new Set<string>(["photos.purge"]);
+  //   - photos.purge wipes the photo library (destructive).
+  //   - finance.admin bypasses the finance_account_access ACL.
+  const adminExcludedPermissions = new Set<string>([
+    "photos.purge",
+    "finance.admin",
+  ]);
 
   for (const perm of allPermissions) {
     const existing = (await db.select({ id: schema.permissions.id }).from(schema.permissions).where(eq(schema.permissions.key, perm.key)))[0];
@@ -138,6 +149,11 @@ export async function seed(db: any): Promise<void> {
       "documents.delete",
       "households.view",
       "households.manage",
+    ],
+    "Finance User": [
+      "module.finance",
+      "finance.view",
+      "finance.accounts.manage",
     ],
   };
 
