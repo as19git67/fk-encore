@@ -27,7 +27,7 @@
 import { api, APIError } from "encore.dev/api";
 import { CronJob } from "encore.dev/cron";
 import { randomUUID } from "node:crypto";
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 
 import db from "../db/database";
 import {
@@ -35,6 +35,7 @@ import {
   financeAccountAccess,
   financeBankcontact,
   financeTanSession,
+  financeTransaction,
 } from "../db/schema";
 import { runFetchAccounts, runSynchronize, type FintsClientSurface } from "./fints-client";
 import { persistFetchResult } from "./statement-persist";
@@ -130,10 +131,11 @@ export const syncStatements = api(
           // bank-side accounts are logged for the admin to pick up in
           // the UI.
           try {
-            // Same linked-only filter as the manual triggerSync path
-            // — see statements.ts fetchAndPersist comment.
+            // Same linked-only + per-account-from filter as the manual
+            // triggerSync path — see statements.ts fetchAndPersist comment.
             const linkedRows = await db
               .select({
+                id: financeAccount.id,
                 fints_account_number: financeAccount.fints_account_number,
               })
               .from(financeAccount)
@@ -148,9 +150,32 @@ export const syncStatements = api(
                 .map((r) => r.fints_account_number)
                 .filter((n): n is string => n !== null && n.length > 0),
             );
+            const fromByAccountNumber = new Map<string, Date>();
+            if (linkedRows.length > 0) {
+              const ids = linkedRows.map((r) => r.id);
+              const maxes = await db
+                .select({
+                  account_id: financeTransaction.account_id,
+                  latest: sql<string | null>`MAX(${financeTransaction.booking_date})`,
+                })
+                .from(financeTransaction)
+                .where(inArray(financeTransaction.account_id, ids))
+                .groupBy(financeTransaction.account_id);
+              const overlapMs = 14 * 24 * 60 * 60_000;
+              for (const m of maxes) {
+                if (!m.latest) continue;
+                const row = linkedRows.find((r) => r.id === m.account_id);
+                if (!row?.fints_account_number) continue;
+                fromByAccountNumber.set(
+                  row.fints_account_number,
+                  new Date(new Date(m.latest).getTime() - overlapMs),
+                );
+              }
+            }
+            const defaultFrom = new Date(Date.now() - 90 * 24 * 60 * 60_000);
             const fetched = await runFetchAccounts(
               result.client as FintsClientSurface,
-              { linkedAccountNumbers },
+              { linkedAccountNumbers, fromByAccountNumber, defaultFrom },
             );
             const stats = await persistFetchResult(bc.id, fetched);
             console.log(

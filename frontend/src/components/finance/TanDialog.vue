@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
@@ -10,6 +10,19 @@ const store = useBankcontactsStore()
 const tan = ref('')
 const submitting = ref(false)
 const errorMsg = ref<string | null>(null)
+const tanInput = ref<{ $el?: HTMLInputElement } | null>(null)
+
+/**
+ * Focus the TAN input as soon as the dialog opens (and on each
+ * follow-up challenge). PrimeVue InputText exposes the underlying
+ * <input> via `.$el`. nextTick lets the dialog finish mounting
+ * before we try to focus.
+ */
+function focusTanInput() {
+  void nextTick(() => {
+    tanInput.value?.$el?.focus?.()
+  })
+}
 
 const visible = computed({
   get: () => store.pendingTan !== null,
@@ -32,9 +45,12 @@ const photoDataUri = computed(() => {
 
 watch(
   () => store.pendingTan?.tanReference,
-  () => {
+  (ref) => {
     tan.value = ''
     errorMsg.value = null
+    // Each challenge (initial + follow-up after wrong-TAN) deserves
+    // a fresh focus so the user can start typing right away.
+    if (ref) focusTanInput()
   },
 )
 
@@ -62,6 +78,7 @@ async function submit() {
     :modal="true"
     :style="{ width: '30rem' }"
     :header="`TAN erforderlich${store.pendingTan?.tanMediaName ? ' — ' + store.pendingTan.tanMediaName : ''}`"
+    @show="focusTanInput"
   >
     <div class="tan-dialog-body">
       <p class="challenge">
@@ -83,11 +100,13 @@ async function submit() {
       <label>
         <span>TAN (leer lassen bei decoupled / pushTAN)</span>
         <InputText
+          ref="tanInput"
           v-model="tan"
           :disabled="submitting"
           autocomplete="one-time-code"
           inputmode="numeric"
           maxlength="12"
+          @keyup.enter="submit"
         />
       </label>
 

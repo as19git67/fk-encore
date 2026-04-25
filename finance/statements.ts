@@ -22,7 +22,7 @@
 import { randomUUID } from "node:crypto";
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
 import { checkRateLimit } from "../user/rateLimiter";
@@ -31,6 +31,7 @@ import {
   financeAccount,
   financeBankcontact,
   financeTanSession,
+  financeTransaction,
 } from "../db/schema";
 import {
   runFetchAccounts,
@@ -151,6 +152,13 @@ export const triggerSync = api(
         tan_photo_base64: result.tanPhotoBase64 ?? null,
         expires_at: new Date(Date.now() + TAN_SESSION_TTL_MS).toISOString(),
       });
+      await db
+        .update(financeBankcontact)
+        .set({
+          last_sync_at: new Date().toISOString(),
+          last_sync_status: "tan-required",
+        })
+        .where(eq(financeBankcontact.id, p.bankcontactId));
       return {
         state: "tan-required",
         tanReference,
@@ -162,6 +170,13 @@ export const triggerSync = api(
     }
 
     if (result.state === "error") {
+      await db
+        .update(financeBankcontact)
+        .set({
+          last_sync_at: new Date().toISOString(),
+          last_sync_status: `error:${result.errorCode ?? "unknown"}`,
+        })
+        .where(eq(financeBankcontact.id, p.bankcontactId));
       return {
         state: "error",
         errorCode: result.errorCode ?? "unknown",
@@ -214,8 +229,19 @@ export async function fetchAndPersist(
   // actually wants in fk-encore. Unknown bank-side accounts still
   // surface in the response for the UI's "noch nicht zugeordnet"-
   // block, just without the per-account TAN cost.
+  //
+  // We also pull the latest finance_transaction.booking_date per
+  // linked account so getAccountStatements(accountNumber, from) only
+  // asks the bank for new bookings — with a 14-day overlap so a
+  // late-arriving / re-dated booking is still caught and deduped via
+  // finance_transaction.dedupe_hash. Without an explicit `from` some
+  // banks (comdirect for one) return arbitrary archival data instead
+  // of recent transactions.
   const linkedRows = await db
-    .select({ fints_account_number: financeAccount.fints_account_number })
+    .select({
+      id: financeAccount.id,
+      fints_account_number: financeAccount.fints_account_number,
+    })
     .from(financeAccount)
     .where(
       and(
@@ -229,8 +255,41 @@ export async function fetchAndPersist(
       .filter((n): n is string => n !== null && n.length > 0),
   );
 
+  // MAX(booking_date) per linked account → fromByAccountNumber.
+  const fromByAccountNumber = new Map<string, Date>();
+  if (linkedRows.length > 0) {
+    const ids = linkedRows.map((r) => r.id);
+    const maxes = await db
+      .select({
+        account_id: financeTransaction.account_id,
+        latest: sql<string | null>`MAX(${financeTransaction.booking_date})`,
+      })
+      .from(financeTransaction)
+      .where(inArray(financeTransaction.account_id, ids))
+      .groupBy(financeTransaction.account_id);
+    const overlapMs = 14 * 24 * 60 * 60_000;
+    for (const m of maxes) {
+      if (!m.latest) continue;
+      const row = linkedRows.find((r) => r.id === m.account_id);
+      if (!row?.fints_account_number) continue;
+      const latest = new Date(m.latest);
+      // pull a generous overlap window
+      fromByAccountNumber.set(
+        row.fints_account_number,
+        new Date(latest.getTime() - overlapMs),
+      );
+    }
+  }
+  // Accounts with no prior data start 90 days back — covers PSD2's
+  // read-only window without forcing extra SCA. Tune if you want
+  // more first-time history (and accept the SCA prompt that comes
+  // with going past 90 days).
+  const defaultFrom = new Date(Date.now() - 90 * 24 * 60 * 60_000);
+
   const fetched = await runFetchAccounts(client as FintsClientSurface, {
     linkedAccountNumbers,
+    fromByAccountNumber,
+    defaultFrom,
   });
   const stats = await persistFetchResult(bankcontactId, fetched);
 
@@ -264,6 +323,13 @@ export async function fetchAndPersist(
         `account=${fetched.pendingTan.accountNumber} for coupled TAN; ` +
         `${fetched.pendingTan.remainingAccountNumbers.length} accounts queued`,
     );
+    await db
+      .update(financeBankcontact)
+      .set({
+        last_sync_at: new Date().toISOString(),
+        last_sync_status: "tan-required",
+      })
+      .where(eq(financeBankcontact.id, bankcontactId));
     return {
       state: "tan-required",
       tanReference,
@@ -281,6 +347,13 @@ export async function fetchAndPersist(
       `tx=${stats.transactions_inserted} (${stats.transactions_skipped_duplicate} dup) ` +
       `balances=${stats.balances_written} partial=${fetched.partial}`,
   );
+  await db
+    .update(financeBankcontact)
+    .set({
+      last_sync_at: new Date().toISOString(),
+      last_sync_status: fetched.partial ? "partial" : "ok",
+    })
+    .where(eq(financeBankcontact.id, bankcontactId));
   return {
     state: "idle",
     accounts_seen: stats.accounts_seen,

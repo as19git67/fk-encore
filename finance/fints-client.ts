@@ -67,6 +67,8 @@ export interface FintsClientSurface {
   };
   getAccountStatements(
     accountNumber: string,
+    from?: Date,
+    to?: Date,
   ): Promise<import("lib-fints").StatementResponse>;
   getAccountStatementsWithTan(
     tanReference: string,
@@ -711,6 +713,23 @@ export interface RunFetchOptions {
    * bank-side account is fetched — original behaviour.
    */
   linkedAccountNumbers?: ReadonlySet<string>;
+  /**
+   * Per-account "fetch transactions starting from" date. The caller
+   * (statements.fetchAndPersist) builds this from
+   *   max(latest finance_transaction.booking_date for the account) - overlap
+   * so re-syncs only ask the bank for new bookings (deduped via
+   * finance_transaction.dedupe_hash). Accounts with no entry get a
+   * configurable default — typically `new Date(now - 90 days)` to
+   * cover PSD2's read-only window.
+   *
+   * Without these, comdirect & friends sometimes return arbitrary
+   * archival data (years-old transactions instead of the latest
+   * ones), because each bank picks its own "default" range when
+   * none is specified.
+   */
+  fromByAccountNumber?: ReadonlyMap<string, Date>;
+  /** Fallback `from` for accounts not in the map. */
+  defaultFrom?: Date;
   sleep?: (ms: number) => Promise<void>;
 }
 
@@ -761,7 +780,10 @@ export async function runFetchAccounts(
     const fetch = opts.linkedAccountNumbers
       ? opts.linkedAccountNumbers.has(account.accountNumber)
       : true;
-    const r = await fetchOneAccount(client, account, sleep, { fetch });
+    const from = fetch
+      ? opts.fromByAccountNumber?.get(account.accountNumber) ?? opts.defaultFrom
+      : undefined;
+    const r = await fetchOneAccount(client, account, sleep, { fetch, from });
     if (r.snapshot.errors.length > 0) partial = true;
     snapshots.push(r.snapshot);
 
@@ -824,7 +846,7 @@ async function fetchOneAccount(
   client: FintsClientSurface,
   account: RawBankAccount,
   sleep: (ms: number) => Promise<void>,
-  opts: { fetch: boolean } = { fetch: true },
+  opts: { fetch: boolean; from?: Date } = { fetch: true },
 ): Promise<FetchOneResult> {
   const accountKind = mapAccountKind(account.accountType);
   const currency = account.currency ?? "EUR";
@@ -849,7 +871,19 @@ async function fetchOneAccount(
   }
 
   try {
-    let stmtResp = await client.getAccountStatements(account.accountNumber);
+    let stmtResp;
+    if (opts.from) {
+      console.log(
+        `[fints] statements ${account.accountNumber}: from=` +
+          opts.from.toISOString().slice(0, 10),
+      );
+      stmtResp = await client.getAccountStatements(
+        account.accountNumber,
+        opts.from,
+      );
+    } else {
+      stmtResp = await client.getAccountStatements(account.accountNumber);
+    }
     // Bank requires SCA for the statement query? Poll the decoupled
     // continuation until the user approves on their device, then
     // continue as if the first call had succeeded.

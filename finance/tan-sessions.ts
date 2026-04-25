@@ -27,7 +27,7 @@ import { eq, lt } from "drizzle-orm";
 import { requirePermission } from "../user/auth-handler";
 import { checkRateLimit, resetRateLimit } from "../user/rateLimiter";
 import db from "../db/database";
-import { financeTanSession } from "../db/schema";
+import { financeBankcontact, financeTanSession } from "../db/schema";
 import {
   resumeFetchAfterTan,
   runSynchronize,
@@ -146,6 +146,13 @@ export const completeTanSession = api(
       .where(eq(financeTanSession.tan_reference, p.tanReference));
 
     if (result.state === "error") {
+      await db
+        .update(financeBankcontact)
+        .set({
+          last_sync_at: new Date().toISOString(),
+          last_sync_status: `error:${result.errorCode ?? "unknown"}`,
+        })
+        .where(eq(financeBankcontact.id, session.bankcontact_id));
       return {
         state: "error",
         errorCode: result.errorCode ?? "unknown",
