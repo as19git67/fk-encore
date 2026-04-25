@@ -72,27 +72,45 @@ async function postJson<TBody, TResp>(
 // -----------------------------------------------------------------------
 
 interface EmbedRequest {
-  text: string;
+  // The Python service expects a batch (`{ texts }`) and returns
+  // `{ embeddings, dim }`. We only ever embed one transaction snippet at
+  // a time, so we wrap it in a single-element array and unwrap on the
+  // response side.
+  texts: string[];
 }
 interface EmbedResponse {
-  embedding: number[];
+  embeddings: number[][];
+  dim: number;
 }
 
 export async function embed(text: string): Promise<number[]> {
   const resp = await postJson<EmbedRequest, EmbedResponse>("/embed", {
-    text,
+    texts: [text],
   });
-  if (!Array.isArray(resp?.embedding) || resp.embedding.length === 0) {
+  const vec = resp?.embeddings?.[0];
+  if (!Array.isArray(vec) || vec.length === 0) {
     throw new LlmServiceUnavailableError(
-      "/embed response missing 'embedding' array",
+      "/embed response missing 'embeddings[0]' vector",
     );
   }
-  return resp.embedding;
+  return vec;
 }
 
 // -----------------------------------------------------------------------
-// /classify (used for finance tag suggestion)
+// /json-prompt — generic JSON-mode chat completion.
+//
+// `/classify` on llm-service is a hardcoded document classifier
+// (taxonomy → category_slug + tags + summary). The finance prompts don't
+// fit that shape, so we use the generic endpoint and let our own
+// prompt steer the LLM into the expected JSON object.
 // -----------------------------------------------------------------------
+
+interface JsonPromptRequest {
+  prompt: string;
+  system?: string;
+  max_tokens?: number;
+  temperature?: number;
+}
 
 export interface SuggestTagsInput {
   /** Transaction to annotate. */
@@ -123,14 +141,7 @@ export interface TagSuggestion {
   confidence: number;
 }
 
-interface ClassifyRequest {
-  /** The `/classify` endpoint on llm-service is generic; we pass a
-   * finance-specific prompt so the existing route can stay unchanged. */
-  prompt: string;
-  schema: Record<string, unknown>;
-}
-
-interface ClassifyResponse {
+interface SuggestTagsResponse {
   tags?: TagSuggestion[];
 }
 
@@ -138,28 +149,11 @@ export async function suggestTags(
   input: SuggestTagsInput,
 ): Promise<TagSuggestion[]> {
   const prompt = buildTagSuggestionPrompt(input);
-  const schema = {
-    type: "object",
-    properties: {
-      tags: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            tag: { type: "string" },
-            confidence: { type: "number", minimum: 0, maximum: 1 },
-          },
-          required: ["tag", "confidence"],
-        },
-      },
-    },
-    required: ["tags"],
-  };
 
-  const resp = await postJson<ClassifyRequest, ClassifyResponse>("/classify", {
-    prompt,
-    schema,
-  });
+  const resp = await postJson<JsonPromptRequest, SuggestTagsResponse>(
+    "/json-prompt",
+    { prompt },
+  );
 
   const raw = resp?.tags;
   if (!Array.isArray(raw)) return [];
@@ -213,7 +207,7 @@ ${examples}`;
 }
 
 // -----------------------------------------------------------------------
-// /classify (analysis — natural-language → AST)
+// /json-prompt (analysis — natural-language → AST)
 // -----------------------------------------------------------------------
 
 export interface AnalysisAst {
@@ -243,38 +237,16 @@ export async function parseAnalysisQuery(
   opts: ParseAnalysisOptions = {},
 ): Promise<AnalysisAst> {
   const prompt = buildAnalysisPrompt(question, availableTags, opts.timespanHint);
-  const schema = {
-    type: "object",
-    properties: {
-      tags: { type: "array", items: { type: "string" } },
-      op: { type: "string", enum: ["AND", "OR"] },
-      timespan: {
-        type: "object",
-        properties: {
-          from: { type: "string" },
-          to: { type: "string" },
-        },
-      },
-      amountRange: {
-        type: "object",
-        properties: {
-          min: { type: "number" },
-          max: { type: "number" },
-        },
-      },
-    },
-    required: ["tags", "op"],
-  };
 
   const resp = await postJson<
-    { prompt: string; schema: Record<string, unknown> },
+    JsonPromptRequest,
     {
       tags?: unknown;
       op?: unknown;
       timespan?: unknown;
       amountRange?: unknown;
     }
-  >("/classify", { prompt, schema });
+  >("/json-prompt", { prompt });
 
   const vocab = new Set(availableTags);
   const rawTags = Array.isArray(resp.tags) ? resp.tags : [];
