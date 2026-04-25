@@ -415,32 +415,67 @@ export async function clearBankingInformationCache(
  * Coupled methods (chipTAN, SMS etc.) return `response` unchanged;
  * those still flow through the UI's TanDialog.
  */
+/**
+ * Generic decoupled-TAN poll loop. Used by every operation that can
+ * trigger a pushTAN approval (synchronize, getAccountStatements,
+ * getAccountBalance, …). The continuation `withTan(ref)` is whatever
+ * the operation's `…WithTan(ref)` counterpart is, called without a
+ * user-supplied code (decoupled methods derive the approval from the
+ * separate device).
+ *
+ * Returns the final response. If the bank still wants TAN after the
+ * `maxStatusRequests` budget, that's surfaced as the un-approved
+ * response (callers map it to "tan-required" / soft error). Coupled
+ * methods (chipTAN, SMS, …) return the initial response unchanged —
+ * those still need a real TAN from the user.
+ */
+async function pollDecoupled<
+  T extends {
+    requiresTan: boolean;
+    success?: boolean;
+    tanReference?: string;
+  },
+>(
+  client: FintsClientSurface,
+  initial: T,
+  withTan: (ref: string) => Promise<T>,
+  sleep: (ms: number) => Promise<void>,
+): Promise<T> {
+  if (!initial.requiresTan) return initial;
+  const selected = client.config.selectedTanMethod;
+  if (!selected?.isDecoupled || !selected.decoupled) return initial;
+  const ref = initial.tanReference;
+  if (!ref) return initial;
+
+  const d = selected.decoupled;
+  await sleep((d.waitingSecondsBeforeFirstStatusRequest ?? 0) * 1000);
+
+  let latest = await withTan(ref);
+  let polls = 1;
+  while (latest.requiresTan && polls < (d.maxStatusRequests ?? 1)) {
+    await sleep((d.waitingSecondsBetweenStatusRequests ?? 0) * 1000);
+    latest = await withTan(ref);
+    polls++;
+  }
+  return latest;
+}
+
+/**
+ * Thin wrapper used by the synchronize() paths.
+ */
 async function pollDecoupledIfNeeded(
   client: FintsClientSurface,
   response: import("lib-fints").SynchronizeResponse,
   sleep: (ms: number) => Promise<void>,
 ): Promise<import("lib-fints").SynchronizeResponse> {
-  if (!response.requiresTan) return response;
-  const selected = client.config.selectedTanMethod;
-  if (!selected?.isDecoupled || !selected.decoupled) return response;
-  const ref = response.tanReference;
-  if (!ref) return response;
-
-  const d = selected.decoupled;
-  await sleep((d.waitingSecondsBeforeFirstStatusRequest ?? 0) * 1000);
-
-  let latest = await client.synchronizeWithTan(ref);
-  let polls = 1;
-  while (
-    latest.requiresTan
-    && polls < (d.maxStatusRequests ?? 1)
-  ) {
-    await sleep((d.waitingSecondsBetweenStatusRequests ?? 0) * 1000);
-    latest = await client.synchronizeWithTan(ref);
-    polls++;
-  }
-  return latest;
+  return pollDecoupled(
+    client,
+    response,
+    (ref) => client.synchronizeWithTan(ref),
+    sleep,
+  );
 }
+
 
 // -----------------------------------------------------------------------
 // Probe for available TAN methods (pre-sync UI lookup)
@@ -549,15 +584,20 @@ export async function probeTanMethods(
  * fetches statements + balance for each, and returns them as a
  * structured snapshot ready for persistence.
  *
- * Mid-flight TAN: if any per-account fetch comes back with
- * `requiresTan=true`, we record a soft error on the account and move
- * on. The caller can choose to let the user retrigger the sync
- * (which will re-run the init dialog and then try the skipped
- * fetches again). Most banks only require TAN on the init dialog, so
- * this is a rare path.
+ * Mid-flight decoupled TAN: PSD2's SCA rules let the bank demand a
+ * fresh approval per "Umsatzabfrage" (statement query), independently
+ * of the init-dialog TAN. When `getAccountStatements` (or
+ * `getAccountBalance`) comes back with `requiresTan=true` *and* the
+ * selected method is decoupled (pushTAN, BestSign, …), we poll the
+ * `…WithTan(ref)` continuation until the user approves on their
+ * device or the bank's `maxStatusRequests` budget is spent. For
+ * coupled methods (chipTAN/SMS) we still record the soft error and
+ * leave the per-account data missing — the UI doesn't yet have a
+ * mid-fetch TAN dialog.
  */
 export async function runFetchAccounts(
   client: FintsClientSurface,
+  sleep: (ms: number) => Promise<void> = defaultSleep,
 ): Promise<FetchResult> {
   const bi = client.config.bankingInformation;
   const accounts =
@@ -569,7 +609,7 @@ export async function runFetchAccounts(
   let partial = false;
 
   for (const account of accounts) {
-    const snapshot = await fetchOneAccount(client, account);
+    const snapshot = await fetchOneAccount(client, account, sleep);
     if (snapshot.errors.length > 0) partial = true;
     snapshots.push(snapshot);
   }
@@ -589,6 +629,7 @@ interface RawBankAccount {
 async function fetchOneAccount(
   client: FintsClientSurface,
   account: RawBankAccount,
+  sleep: (ms: number) => Promise<void>,
 ): Promise<FintsAccountSnapshot> {
   const accountKind = mapAccountKind(account.accountType);
   const currency = account.currency ?? "EUR";
@@ -606,8 +647,25 @@ async function fetchOneAccount(
   };
 
   try {
-    const stmtResp = await client.getAccountStatements(account.accountNumber);
+    let stmtResp = await client.getAccountStatements(account.accountNumber);
+    // Bank requires SCA for the statement query? Poll the decoupled
+    // continuation until the user approves on their device, then
+    // continue as if the first call had succeeded.
     if (stmtResp.requiresTan) {
+      console.log(
+        `[fints] statements ${account.accountNumber} → tan-required, ` +
+          `polling decoupled approval`,
+      );
+      stmtResp = await pollDecoupled(
+        client,
+        stmtResp,
+        (ref) => client.getAccountStatementsWithTan(ref),
+        sleep,
+      );
+    }
+    if (stmtResp.requiresTan) {
+      // Either coupled (chipTAN/SMS) — caller has no UI for it yet —
+      // or decoupled-poll exhausted its budget without approval.
       snapshot.errors.push("statements-tan-required");
     } else if (!stmtResp.success) {
       const first = stmtResp.bankAnswers.find((a) => a.code !== 0);
@@ -624,7 +682,19 @@ async function fetchOneAccount(
   }
 
   try {
-    const balResp = await client.getAccountBalance(account.accountNumber);
+    let balResp = await client.getAccountBalance(account.accountNumber);
+    if (balResp.requiresTan) {
+      console.log(
+        `[fints] balance ${account.accountNumber} → tan-required, ` +
+          `polling decoupled approval`,
+      );
+      balResp = await pollDecoupled(
+        client,
+        balResp,
+        (ref) => client.getAccountBalanceWithTan(ref),
+        sleep,
+      );
+    }
     if (balResp.requiresTan) {
       snapshot.errors.push("balance-tan-required");
     } else if (!balResp.success) {

@@ -980,6 +980,168 @@ describe("runFetchAccounts — mid-flight TAN and bank errors", () => {
   });
 });
 
+describe("runFetchAccounts — decoupled TAN per account", () => {
+  function decoupledMethod() {
+    return {
+      id: 942,
+      name: "pushTAN",
+      isDecoupled: true,
+      decoupled: {
+        maxStatusRequests: 5,
+        waitingSecondsBeforeFirstStatusRequest: 1,
+        waitingSecondsBetweenStatusRequests: 1,
+      },
+    };
+  }
+
+  it("polls getAccountStatementsWithTan when the statement query needs SCA — succeeds after N polls", async () => {
+    const sleep = vi.fn(async (_ms: number) => {});
+    const c = clientWith(
+      [{ accountNumber: "1", accountType: "CheckingAccount", currency: "EUR" }],
+      {
+        getAccountStatements: vi.fn(async () => ({
+          success: true,
+          requiresTan: true,
+          tanReference: "stmt-tan-1",
+          bankAnswers: [],
+          statements: [],
+        })),
+        getAccountBalance: vi.fn(async () =>
+          balResp({ date: new Date(), currency: "EUR", balance: 100 }),
+        ),
+      },
+    );
+    // Pretend selectTanMethod was already called earlier — surface
+    // the decoupled method on the config.
+    (c.config as any).selectedTanMethod = decoupledMethod();
+
+    let pollCount = 0;
+    (c.getAccountStatementsWithTan as any) = vi.fn(async () => {
+      pollCount++;
+      if (pollCount >= 3) {
+        return stmtResp([
+          {
+            valueDate: new Date("2026-04-01"),
+            entryDate: new Date("2026-04-01"),
+            amount: -10,
+            purpose: "x",
+            remoteName: "y",
+          },
+        ]);
+      }
+      return {
+        success: true,
+        requiresTan: true,
+        tanReference: "stmt-tan-1",
+        bankAnswers: [],
+        statements: [],
+      };
+    });
+
+    const r = await runFetchAccounts(c, sleep);
+
+    expect(r.accounts[0].errors).not.toContain("statements-tan-required");
+    expect(r.accounts[0].transactions).toHaveLength(1);
+    // balance still ran fine without TAN
+    expect(r.accounts[0].balance?.amount).toBe("100.00");
+    expect(c.getAccountStatementsWithTan).toHaveBeenCalledTimes(3);
+    // Cadence honoured: one before-first sleep + 2 between-requests.
+    expect(sleep).toHaveBeenCalled();
+  });
+
+  it("polls getAccountBalanceWithTan when the balance query needs SCA", async () => {
+    const sleep = vi.fn(async (_ms: number) => {});
+    const c = clientWith(
+      [{ accountNumber: "1", accountType: "CheckingAccount", currency: "EUR" }],
+      {
+        getAccountStatements: vi.fn(async () => stmtResp([])),
+        getAccountBalance: vi.fn(async () => ({
+          success: true,
+          requiresTan: true,
+          tanReference: "bal-tan-1",
+          bankAnswers: [],
+        })),
+      },
+    );
+    (c.config as any).selectedTanMethod = decoupledMethod();
+    (c.getAccountBalanceWithTan as any) = vi.fn(async () =>
+      balResp({ date: new Date(), currency: "EUR", balance: 250 }),
+    );
+
+    const r = await runFetchAccounts(c, sleep);
+
+    expect(r.accounts[0].errors).not.toContain("balance-tan-required");
+    expect(r.accounts[0].balance?.amount).toBe("250.00");
+    expect(c.getAccountBalanceWithTan).toHaveBeenCalled();
+  });
+
+  it("falls through to a soft error when the decoupled budget is exhausted without approval", async () => {
+    const sleep = vi.fn(async (_ms: number) => {});
+    const c = clientWith(
+      [{ accountNumber: "1", accountType: "CheckingAccount", currency: "EUR" }],
+      {
+        getAccountStatements: vi.fn(async () => ({
+          success: true,
+          requiresTan: true,
+          tanReference: "stmt-tan-1",
+          bankAnswers: [],
+          statements: [],
+        })),
+        getAccountBalance: vi.fn(async () =>
+          balResp({ date: new Date(), currency: "EUR", balance: 1 }),
+        ),
+      },
+    );
+    (c.config as any).selectedTanMethod = decoupledMethod();
+    // Always returns requiresTan=true → poll exhausts.
+    (c.getAccountStatementsWithTan as any) = vi.fn(async () => ({
+      success: true,
+      requiresTan: true,
+      tanReference: "stmt-tan-1",
+      bankAnswers: [],
+      statements: [],
+    }));
+
+    const r = await runFetchAccounts(c, sleep);
+
+    expect(r.accounts[0].errors).toContain("statements-tan-required");
+    expect(r.partial).toBe(true);
+    // Used the full budget (5 polls).
+    expect(c.getAccountStatementsWithTan).toHaveBeenCalledTimes(5);
+  });
+
+  it("does NOT poll for coupled methods (chipTAN etc.) — soft error stays", async () => {
+    const c = clientWith(
+      [{ accountNumber: "1", accountType: "CheckingAccount", currency: "EUR" }],
+      {
+        getAccountStatements: vi.fn(async () => ({
+          success: true,
+          requiresTan: true,
+          tanReference: "stmt-tan-1",
+          bankAnswers: [],
+          statements: [],
+        })),
+        getAccountBalance: vi.fn(async () =>
+          balResp({ date: new Date(), currency: "EUR", balance: 1 }),
+        ),
+      },
+    );
+    // Coupled method → no decoupled.* — pollDecoupled returns the
+    // initial response unchanged.
+    (c.config as any).selectedTanMethod = {
+      id: 910,
+      name: "chipTAN",
+      isDecoupled: false,
+    };
+
+    const r = await runFetchAccounts(c);
+
+    expect(r.accounts[0].errors).toContain("statements-tan-required");
+    // No polling call should have happened.
+    expect(c.getAccountStatementsWithTan).not.toHaveBeenCalled();
+  });
+});
+
 describe("runFetchAccounts — integrates with runSynchronize", () => {
   it("runSynchronize exposes the live client on state=idle so callers can fetch", async () => {
     const c = mockClient({ success: true, requiresTan: false }, {
