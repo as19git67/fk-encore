@@ -368,6 +368,7 @@ async function del() {
             placeholder="Zuerst 'Abrufen' klicken"
             :disabled="tanMethodSelectOptions.length === 0"
             class="tan-method-select"
+            panel-class="tan-method-panel"
           />
           <Button
             label="Abrufen"
@@ -647,6 +648,18 @@ async function del() {
 }
 .tan-method-select {
   flex: 1;
+  /* Without min-width: 0 a flex item refuses to shrink below its
+   * content width — which lets a long Select-label push the
+   * "Abrufen"-button off the right edge on narrow viewports. */
+  min-width: 0;
+}
+/* Truncate the displayed selection in the trigger; the full text
+ * is still visible inside the dropdown panel. */
+.tan-method-select :deep(.p-select-label) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 .probe-info {
   color: var(--p-text-muted-color);
