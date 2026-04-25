@@ -162,6 +162,10 @@ export async function runSynchronize(
         bankcontactId,
         (result.client as FintsClientSurface).config.bankingInformation,
       );
+      console.log(
+        `[fints] resume sync ok for bankcontact=${bankcontactId}, ` +
+          `bankingInformation cached for next warm-start`,
+      );
     }
     return result;
   }
@@ -175,6 +179,10 @@ export async function runSynchronize(
     ? parseInt(bankcontact.tan_method, 10)
     : NaN;
   if (cachedBi && Number.isFinite(cachedTanMethodId)) {
+    console.log(
+      `[fints] warm-start sync for bankcontact=${bankcontactId} — ` +
+        `reusing cached bankingInformation, single synchronize()`,
+    );
     try {
       const warm = await runWarmSync(
         bankcontact,
@@ -189,11 +197,21 @@ export async function runSynchronize(
           bankcontactId,
           (warm.client as FintsClientSurface).config.bankingInformation,
         );
+        console.log(
+          `[fints] warm sync ok for bankcontact=${bankcontactId} ` +
+            `(no TAN required), bankingInformation refreshed`,
+        );
         return warm;
       }
       // tan-required / coupled — return as-is, the UI / TAN flow
       // takes over and the resume branch will persist BI later.
-      if (warm.state === "tan-required") return warm;
+      if (warm.state === "tan-required") {
+        console.log(
+          `[fints] warm sync for bankcontact=${bankcontactId} → ` +
+            `tan-required (PSD2 90-day window likely expired)`,
+        );
+        return warm;
+      }
       // state=error from a warm sync usually means the bank rejected
       // the cached systemId or the session is otherwise stale.
       // Fall through to the cold path below.
@@ -224,6 +242,11 @@ export async function runSynchronize(
   //                         trigger a *second* TAN push at the bank.
   //                         Any failure past this point surfaces as
   //                         state="error" without retry.
+  console.log(
+    `[fints] cold-start sync for bankcontact=${bankcontactId} — ` +
+      `forFirstTimeUse + two-call dance` +
+      (cachedBi ? ` (cached BI was discarded after warm path failed)` : ``),
+  );
   let client: FintsClientSurface;
   try {
     const firstSync = await runWithRetry(async () => {
@@ -298,6 +321,10 @@ export async function runSynchronize(
       await persistBankingInformation(
         bankcontactId,
         client.config.bankingInformation,
+      );
+      console.log(
+        `[fints] cold sync ok for bankcontact=${bankcontactId}, ` +
+          `bankingInformation cached for next warm-start`,
       );
     }
     return result;
