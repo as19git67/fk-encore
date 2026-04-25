@@ -144,6 +144,13 @@ export function hasPoorSpacing(text: string): boolean {
  * when it would have passed the length threshold. When the text layer
  * looks broken (see `hasPoorSpacing`), we also fall through to OCR.
  */
+// Postgres `text` columns reject NUL bytes, which pdf-parse occasionally
+// emits on PDFs with broken character maps (Tesla order confirmations
+// being a known offender).
+function stripNulBytes(text: string): string {
+  return text.replace(/\u0000/g, "");
+}
+
 export async function extractPdfText(
   absPath: string,
   options: ExtractOptions = {},
@@ -154,7 +161,7 @@ export async function extractPdfText(
   let pageCount = 0;
   try {
     const parsed = await pdfParseQuiet(buffer);
-    textLayer = (parsed.text ?? "").trim();
+    textLayer = stripNulBytes((parsed.text ?? "").trim());
     pageCount = parsed.numpages ?? 0;
   } catch (err) {
     // pdf-parse throws on malformed PDFs; treat as "no text layer" and
