@@ -6,9 +6,10 @@ import HeicImage from './HeicImage.vue'
 import PhotoMiniMap from './PhotoMiniMap.vue'
 import PhotoLocationMenu from './PhotoLocationMenu.vue'
 import PhotoReactions from './PhotoReactions.vue'
-import { getPhotoUrl, listAlbums, getPhotosAlbums, batchUpdateAlbumPhotos, updateAlbum, updateAlbumUserSettings, createAlbum, updatePhotoDescription, type Album } from '../api/photos'
+import { getPhotoUrl, getPhotosAlbums, batchUpdateAlbumPhotos, updateAlbum, updateAlbumUserSettings, createAlbum, updatePhotoDescription } from '../api/photos'
 import { getAlbumCheckState as calculateAlbumCheckState, getNewPendingAction } from '../utils/albumSelection'
 import type { Photo, Face, LandmarkItem, Person, CurationStatus } from '../api/photos'
+import { useReferenceData } from '../composables/useReferenceData'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { formatPhotoDateCompact } from '../utils/dateFormat'
@@ -46,7 +47,7 @@ const props = defineProps<{
 
 const editDate = defineModel<Date | null>('editDate', { default: null })
 
-const albums = ref<Album[]>([])
+const { albums, albumsLoaded, fetchAlbums, invalidateAlbums } = useReferenceData()
 const loadingAlbums = ref(false)
 const photoAlbumMap = ref<Record<number, number[]>>({}) // photoId -> albumIds[]
 const pendingAlbumChanges = ref<Record<number, 'add' | 'remove'>>({})
@@ -54,10 +55,10 @@ const savingAlbums = ref(false)
 const isAlbumsExpanded = ref(false)
 
 async function loadAlbums() {
+  if (albumsLoaded.value) return
   loadingAlbums.value = true
   try {
-    const res = await listAlbums()
-    albums.value = res.albums.sort((a, b) => a.name.localeCompare(b.name))
+    await fetchAlbums()
   } finally {
     loadingAlbums.value = false
   }
@@ -181,7 +182,8 @@ async function handleCreateAlbumAndAdd() {
     await batchUpdateAlbumPhotos([album.id], photoIds, 'add')
     newAlbumName.value = ''
     showNewAlbumInput.value = false
-    await loadAlbums()
+    invalidateAlbums()
+    await fetchAlbums(true)
     await loadPhotosAlbums()
   } catch (err) {
     console.error('Failed to create album:', err)

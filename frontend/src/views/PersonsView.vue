@@ -32,6 +32,12 @@ import { faceBoxStyle, thumbnailImageStyle } from '../utils/faceBbox'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
+import { useReferenceData } from '../composables/useReferenceData'
+
+// Eigene gefilterte Liste (nur Personen mit faceCount > 1) — wir teilen sie
+// nicht mit dem app-weiten Composable, invalidieren aber dessen Cache nach
+// Umbenennen/Mergen, damit Galerie/FilterMenu die geänderten Namen sehen.
+const { invalidatePersons } = useReferenceData()
 
 const auth = useAuthStore()
 const serviceHealth = useServiceHealthStore()
@@ -64,6 +70,9 @@ const {
   removeKey: removePhotoFilterKey,
 } = useFilter({ preserveKeys: ['personId', 'photoId'] })
 const photoFilterMenuOpen = ref(false)
+// Lazy-Mount: siehe PhotosView. Beim Öffnen einer Personenseite vermeiden wir
+// dadurch einen unnötigen /albums- und /persons-Roundtrip.
+const photoFilterMenuMounted = ref(false)
 const PHOTO_FILTER_AVAILABLE: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'> = [
   'hiddenMode', 'favorite', 'mediaTypes', 'hasGps',
   'qualityRange', 'dateRange', 'sizeRange',
@@ -71,6 +80,7 @@ const PHOTO_FILTER_AVAILABLE: Array<keyof PhotoFilter | 'dateRange' | 'qualityRa
 
 function openPhotoFilterMenu() {
   openPhotoFilterEdit()
+  photoFilterMenuMounted.value = true
   photoFilterMenuOpen.value = true
 }
 function onApplyPhotoFilter() {
@@ -574,6 +584,7 @@ async function handleRename(): Promise<boolean> {
   try {
     await updatePerson(sourcePersonId, trimmedName)
     if (mergeCandidate) await mergePersons([mergeCandidate.id], sourcePersonId)
+    invalidatePersons()
     showRenameDialog.value = false
     await loadData()
     if (selectedPersonDetail.value?.id === sourcePersonId) selectedPersonDetail.value.name = trimmedName
@@ -676,6 +687,7 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
     </div>
 
     <FilterMenu
+      v-if="photoFilterMenuMounted"
       v-model:visible="photoFilterMenuOpen"
       v-model:draft="photoFilterDraft"
       :available="PHOTO_FILTER_AVAILABLE"

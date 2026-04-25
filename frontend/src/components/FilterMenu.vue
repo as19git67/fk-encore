@@ -9,7 +9,7 @@ import InputNumber from 'primevue/inputnumber'
 import AutoComplete from 'primevue/autocomplete'
 import DateRangePresets from './DateRangePresets.vue'
 import type { PhotoFilter, HiddenMode, MembershipMode, MediaType, Album, Person } from '../api/photos'
-import { listAlbums, listPersons } from '../api/photos'
+import { useReferenceData } from '../composables/useReferenceData'
 
 /**
  * Modal filter editor. Takes the `draft` ref, edits it in place, and emits
@@ -129,32 +129,25 @@ function setTri(key: 'hasGps' | 'hasFaces' | 'hasAssignedPerson', v: 'any' | 'ye
 }
 
 // --- Album / Person autocomplete -------------------------------------------
-const albums = ref<Album[]>([])
-const persons = ref<Person[]>([])
-const albumsLoaded = ref(false)
-const personsLoaded = ref(false)
+// Listen kommen aus dem app-weiten Composable, sodass parallele Aufrufer
+// (PhotosView, FilterChips, PhotoDetailSidebar) sich denselben Request teilen.
+const { albums, persons, fetchAlbums, fetchPersons } = useReferenceData()
 const selectedAlbums = ref<Album[]>([])
 const selectedPersons = ref<Person[]>([])
 const albumSuggestions = ref<Album[]>([])
 const personSuggestions = ref<Person[]>([])
 
 async function loadAlbumsIfNeeded() {
-  if (albumsLoaded.value) return
   try {
-    const res = await listAlbums()
-    albums.value = res.albums
-    albumsLoaded.value = true
+    await fetchAlbums()
     if (props.draft.albumIds?.length) {
       selectedAlbums.value = albums.value.filter(a => props.draft.albumIds!.includes(a.id))
     }
   } catch { /* ignore */ }
 }
 async function loadPersonsIfNeeded() {
-  if (personsLoaded.value) return
   try {
-    const res = await listPersons()
-    persons.value = res.persons
-    personsLoaded.value = true
+    await fetchPersons()
     if (props.draft.personIds?.length) {
       selectedPersons.value = persons.value.filter(p => props.draft.personIds!.includes(p.id))
     }
