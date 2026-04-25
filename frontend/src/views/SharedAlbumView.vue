@@ -125,10 +125,13 @@ const FILTER_AVAILABLE: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' |
 const filter = ref<PhotoFilter>({ ...DEFAULT_FILTER })
 const filterDraft = ref<PhotoFilter>({ ...DEFAULT_FILTER })
 const filterMenuOpen = ref(false)
+// Lazy-Mount: siehe PhotosView.
+const filterMenuMounted = ref(false)
 const activeCount = computed(() => countActiveFilters(filter.value))
 
 function openFilterMenu() {
   filterDraft.value = { ...filter.value }
+  filterMenuMounted.value = true
   filterMenuOpen.value = true
 }
 function onApplyFilter() {
@@ -427,6 +430,7 @@ onUnmounted(() => {
     </template>
 
     <FilterMenu
+      v-if="filterMenuMounted"
       v-model:visible="filterMenuOpen"
       v-model:draft="filterDraft"
       :available="FILTER_AVAILABLE"

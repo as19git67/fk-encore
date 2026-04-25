@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { computed, watch } from 'vue'
 import Chip from 'primevue/chip'
-import type { PhotoFilter, Album, Person } from '../api/photos'
-import { listAlbums, listPersons } from '../api/photos'
+import type { PhotoFilter } from '../api/photos'
+import { useReferenceData } from '../composables/useReferenceData'
 
 /**
  * Compact summary of currently applied filters, rendered as removable chips.
@@ -18,20 +18,20 @@ const emit = defineEmits<{
   (e: 'remove', keys: Array<keyof PhotoFilter>): void
 }>()
 
-const albums = ref<Album[]>([])
-const persons = ref<Person[]>([])
+// Reaktiv aus dem app-weiten Cache lesen. Wir triggern den Fetch ausschließlich
+// dann, wenn der Filter tatsächlich nach Album/Person filtert — sonst würden
+// wir beim Galerie-Laden die teuren /persons- und /albums-Endpunkte aus einer
+// passiven Anzeigekomponente erneut anstoßen.
+const { albums, persons, fetchAlbums, fetchPersons } = useReferenceData()
 
-async function loadReferences() {
-  if (props.filter.albumIds?.length && albums.value.length === 0) {
-    try { albums.value = (await listAlbums()).albums } catch { /* ignore */ }
-  }
-  if (props.filter.personIds?.length && persons.value.length === 0) {
-    try { persons.value = (await listPersons()).persons } catch { /* ignore */ }
-  }
-}
-
-onMounted(loadReferences)
-watch(() => [props.filter.albumIds, props.filter.personIds], loadReferences, { deep: true })
+watch(
+  () => [props.filter.albumIds?.length ?? 0, props.filter.personIds?.length ?? 0] as const,
+  ([albumCount, personCount]) => {
+    if (albumCount > 0) void fetchAlbums().catch(() => { /* ignore */ })
+    if (personCount > 0) void fetchPersons().catch(() => { /* ignore */ })
+  },
+  { immediate: true },
+)
 
 interface ChipDef {
   label: string
