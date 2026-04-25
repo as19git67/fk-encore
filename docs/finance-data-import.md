@@ -158,24 +158,107 @@ und legt pro Konto fest, welche fk-encore-User es als `read` oder
 
 ---
 
-## 8. Referenzen
+## 8. Filesystem-Dropbox + tägliches Backup
+
+Der HTTP-Pfad in `AdminImportView` läuft in das 5-Minuten-Gateway-
+Timeout, sobald der Import länger braucht — eine echte Migration mit
+~50 000 Transaktionen ist deutlich darüber. Für genau diese Fälle gibt
+es einen Filesystem-Pfad, der ohne HTTP auskommt:
+
+### 8.1 Import-Dropbox
+
+`finance/import-pending.ts` registriert einen Cron alle **5 Minuten**,
+der `${FINANCE_IMPORT_DIR}/` (Default `/data/finance-import` →
+gemountet als `/mnt/data/finance-import`) nach Dateien mit dem Suffix
+**`*.pending.json`** durchsucht.
+
+- Jede gefundene Datei wird mit `wipe_first: true` durch
+  `runImport()` geschickt — die Dropbox-Semantik ist *"diese Datei IST
+  der gewünschte Finanz-Stand"*.
+- Erfolg: rename auf `<basename>.imported-<ISO-timestamp>.json`. Bei
+  Validierungsfehlern liegt eine Schwester-Datei
+  `<basename>.imported-<ts>.errors.json` daneben.
+- Fehler: rename auf `<basename>.failed-<ts>.json` plus
+  `<basename>.failed-<ts>.error.txt`.
+
+Singleton-Mutex auf Modul-Ebene verhindert überlappende Ticks bei
+sehr großen Imports; während ein Tick läuft, schreibt der nächste nur
+`skipped_locked: true` und beendet sich.
+
+Logging: Stage-Boundaries via `encore.dev/log`, Tx-Stage zusätzlich
+ein Heartbeat alle **1000 Zeilen** mit Counts + Elapsed — sodass ein
+50k-Lauf ~50 Progress-Lines im Container-Log produziert statt 5
+Minuten Stille.
+
+### 8.2 Tägliches Backup
+
+`finance/export-cron.ts` schreibt um **03:00 UTC** einen vollständigen
+Snapshot aller `finance_*`-User-Tabellen nach
+`${FINANCE_EXPORT_DIR}/finance-export-YYYY-MM-DD.json` (Default
+`/data/finance-export` → `/mnt/data/finance-export`). Format ist
+exakt das gleiche wie der `runImport`-Input, sodass der Worst-Case-
+Restore ein einziger `cp` ist:
+
+```sh
+cp /mnt/data/finance-export/finance-export-2026-04-20.json \
+   /mnt/data/finance-import/restore-2026-04-25.pending.json
+# nächster 5-min-Tick wipt + restored
+```
+
+Rotation: Standardmäßig werden die letzten 30 Snapshots behalten,
+ältere gelöscht (`FINANCE_EXPORT_KEEP` env var override). Da der
+Filename den Tag enthält, überschreibt sich ein Same-Day-Re-Run
+selbst — keine Doppel-Snapshots.
+
+### 8.3 Was im Snapshot steckt
+
+| Tabelle | Im Snapshot? | Anmerkung |
+|---|---|---|
+| `finance_currency` | ✓ | Wird beim Import in Stage 0 idempotent geseedet. |
+| `finance_bankcontact` | ✓ | Ohne `credentials_encrypted` (key-locked, Klartext nicht herstellbar). |
+| `finance_account` | ✓ | inkl. `fints_account_number` für Live-Sync-Kontinuität. |
+| `finance_transaction` | ✓ | Alle Spalten inkl. SEPA-Felder aus 0055. |
+| `finance_tag` (source='user') | ✓ | AI-Vorschläge nicht — werden vom LLM neu gerechnet. |
+| `finance_tag_transaction` (user-Tags) | ✓ | Composite-Key `(account, booking_date, dedupe_hash)`. |
+| `finance_account_balance` | ✗ | Wird durch nächsten Sync neu abgeleitet. |
+| `finance_account_access` | ✗ | Admin setzt manuell via `AccountAssignmentView`. |
+| `finance_tan_session` | ✗ | Transient (10 min TTL). |
+
+### 8.4 Volume-Setup (`docker-compose.yml`)
+
+Beide Verzeichnisse sind als bind-Mounts auf den Host gehängt:
+
+```yaml
+finance_import:
+  driver: local
+  driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/finance-import }
+finance_export:
+  driver: local
+  driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/finance-export }
+```
+
+Die Hostpfade kannst du anpassen. Für Multi-Host-Backups einfach den
+Export-Pfad auf z.B. einen NAS/SMB-Mount zeigen lassen.
+
+---
+
+## 9. Referenzen
 
 | Stelle | Wofür |
 |---|---|
 | `finance-data-model.md` §3 | Duplikaterkennung, `dedupe_hash` |
 | `finance-data-model.md` §5 | Permission `finance.admin`, ACL-Filter |
 | `finance-frontend.md` | `AdminImportView`, `AccountAssignmentView` |
+| `finance/import-pending.ts` | Dropbox-Cron, Suffix-Pattern, Singleton-Lock |
+| `finance/export-cron.ts` | Daily-Snapshot, Rotation |
 
 ---
 
-## 9. Offene Punkte
+## 10. Offene Punkte
 
-- **Export-Format**: Schema des Finanzkraft-JSON-Exports ist noch nicht
-  fixiert. Muss als Zod-Schema vor Implementierung in
-  `finance/import-schema.ts` landen.
-- **Fehler-Bericht-Format**: reicht JSON in der Response, oder soll das
-  Ergebnis als CSV/JSON-Datei downloadbar sein (für große Error-Listen)?
-- **Volumen-Obergrenze**: ab welcher JSON-Größe switchen wir vom
-  synchronen Endpoint auf einen Background-Job mit Polling?
 - **Saldo-Historie**: Welche `as_of`-Granularität liegt im Export vor
-  (pro Buchung, pro Tag, pro Monat)?
+  (pro Buchung, pro Tag, pro Monat)? Aktuell wird sie weder im Snapshot
+  noch im Import berücksichtigt — entsteht durch den nächsten Sync neu.
+- **Push-Notification bei failed-Imports**: Aktuell bleibt eine
+  `*.failed-…json` einfach im Verzeichnis liegen. Optional könnte
+  push.service.ts den Owner-User anpingen.

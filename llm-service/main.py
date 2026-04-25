@@ -508,6 +508,70 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
         raise HTTPException(status_code=502, detail=f"schema mismatch: {exc}") from exc
 
 
+# ─── /json-prompt ──────────────────────────────────────────────────────────────
+
+
+class JsonPromptRequest(BaseModel):
+    """Generic JSON-mode chat completion.
+
+    Used by callers whose prompt isn't the hardcoded document classifier
+    (e.g. finance tag-suggestion, free-text-to-AST analysis queries). The
+    server only enforces ``response_format={"type": "json_object"}``; the
+    caller is responsible for prompting the LLM into the desired shape and
+    validating the response.
+    """
+
+    prompt: str = Field(..., min_length=1)
+    system: str | None = None
+    max_tokens: int = Field(default=768, gt=0, le=4096)
+    temperature: float = Field(default=0.2, ge=0.0, le=2.0)
+
+
+@app.post("/json-prompt")
+async def json_prompt(req: JsonPromptRequest) -> dict[str, Any]:
+    llm = _state["llm"]
+    if llm is None:
+        raise HTTPException(status_code=503, detail="llm not loaded")
+
+    messages: list[dict[str, str]] = []
+    if req.system:
+        messages.append({"role": "system", "content": req.system})
+    messages.append({"role": "user", "content": req.prompt})
+
+    try:
+        completion = await _run_blocking(
+            llm.create_chat_completion,
+            messages=messages,
+            response_format={"type": "json_object"},
+            temperature=req.temperature,
+            max_tokens=req.max_tokens,
+        )
+    except Exception as exc:
+        log.exception("/json-prompt: llm.create_chat_completion failed")
+        raise HTTPException(status_code=500, detail=f"llm failure: {exc}") from exc
+
+    raw = completion["choices"][0]["message"]["content"].strip()
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        log.warning("/json-prompt: LLM returned non-JSON: %r", raw[:200])
+        raise HTTPException(status_code=502, detail=f"llm returned invalid JSON: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=502, detail="llm returned non-object JSON")
+
+    # Mojibake repair on shallow string fields — same fix as /classify, only
+    # applied to top-level strings and string list members. Finance prompts
+    # don't return nested objects, so we don't recurse.
+    for k, v in list(data.items()):
+        if isinstance(v, str):
+            data[k] = _repair_mojibake(v)
+        elif isinstance(v, list):
+            data[k] = [_repair_mojibake(x) if isinstance(x, str) else x for x in v]
+
+    return data
+
+
 # ─── /recap-title ──────────────────────────────────────────────────────────────
 
 

@@ -1,4 +1,4 @@
-import { pgTable, text, integer, primaryKey, serial, boolean, timestamp, real, doublePrecision, pgEnum, jsonb, bigserial } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, primaryKey, serial, boolean, timestamp, real, doublePrecision, pgEnum, jsonb, bigserial, numeric, uuid, uniqueIndex, index } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 // ========== Users ==========
@@ -885,4 +885,354 @@ export const guestNotifications = pgTable("guest_notifications", {
     .notNull()
     .defaultNow(),
   delivered_at: timestamp("delivered_at", { mode: "string", withTimezone: true }),
+});
+
+
+// ========== Finance Module ==========
+//
+// Greenfield finance module (no legacy port). Classification uses flat
+// multi-label tags — no category tree, no rule engine. Credentials are
+// stored AES-GCM-encrypted (see finance/encryption.ts), never in plain
+// text. The TAN flow is stateful in finance_tan_session (no in-memory
+// singleton). See docs/finance-data-model.md.
+
+export const financeAccountLevelEnum = pgEnum("finance_account_level", [
+  "read",
+  "write",
+]);
+
+export const financeTagSourceEnum = pgEnum("finance_tag_source", [
+  "user",
+  "ai",
+]);
+
+export const financeAccountKindEnum = pgEnum("finance_account_kind", [
+  "giro",
+  "tagesgeld",
+  "festgeld",
+  "kredit",
+  "depot",
+  "bausparen",
+  "kreditkarte",
+  "bargeld",
+  "sonstige",
+]);
+
+// ---------- Stammdaten ----------
+
+export const financeCurrency = pgTable("finance_currency", {
+  code: text("code").primaryKey(), // ISO 4217, e.g. "EUR", "USD"
+  symbol: text("symbol").notNull(),
+  decimals: integer("decimals").notNull().default(2),
+});
+
+export const financeAccountType = pgTable("finance_account_type", {
+  id: serial("id").primaryKey(),
+  kind: financeAccountKindEnum("kind").notNull().unique(),
+  label: text("label").notNull(),
+});
+
+export const financeTimespan = pgTable("finance_timespan", {
+  id: serial("id").primaryKey(),
+  slug: text("slug").notNull().unique(),
+  label: text("label").notNull(),
+  offset_days: integer("offset_days"),
+  offset_months: integer("offset_months"),
+});
+
+// ---------- Bankkontakte ----------
+//
+// sync_times is an array of cron-like slots, e.g.
+//   [{ weekdays: [1,2,3,4,5], time: "06:25", tz: "Europe/Berlin" }]
+// The sync cron evaluates each slot against `now()` in the declared tz,
+// so DST transitions Just Work without a separate UTC cache column.
+
+export interface FinanceSyncSlot {
+  weekdays: number[]; // 0 = Sunday … 6 = Saturday
+  time: string;       // "HH:MM"
+  tz: string;         // IANA time zone, e.g. "Europe/Berlin"
+}
+
+export const financeBankcontact = pgTable("finance_bankcontact", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  blz: text("blz").notNull(),
+  login: text("login").notNull(),
+  server_url: text("server_url").notNull(),
+  tan_method: text("tan_method"),
+  credentials_encrypted: text("credentials_encrypted"), // AES-GCM blob, base64
+  // Last bank-advertised list of TAN methods, cached here so the UI's
+  // "TAN-Verfahren"-picker has a populated select box after a page
+  // reload without issuing a fresh FinTS dialog on every view open.
+  // Refreshed by probeTanMethods; not authoritative — the bank can
+  // change its offerings between probes.
+  available_tan_methods: jsonb("available_tan_methods")
+    .$type<{ id: number; name: string; isDecoupled: boolean }[]>(),
+  // Persisted lib-fints bankingInformation (BPD + UPD + the bank-
+  // assigned `systemId`) from the last successful FinTS dialog.
+  // Reusing it via `FinTSConfig.fromBankingInformation` lets the bank
+  // recognise the client across syncs and skip the TAN under PSD2's
+  // 90-day rule. Cleared whenever credentials change so a stale
+  // session doesn't haunt the next dialog. Untyped here so the file
+  // stays ignorant of lib-fints' internal shape — fints-client casts
+  // before handing it to FinTSConfig.
+  banking_information: jsonb("banking_information").$type<Record<string, unknown>>(),
+  sync_times: jsonb("sync_times")
+    .notNull()
+    .default(sql`'[]'::jsonb`)
+    .$type<FinanceSyncSlot[]>(),
+  last_sync_at: timestamp("last_sync_at", { mode: "string", withTimezone: true }),
+  last_sync_status: text("last_sync_status"),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const financeAccount = pgTable(
+  "finance_account",
+  {
+    id: serial("id").primaryKey(),
+    // Nullable: null = manual account (not linked to a bank). On
+    // bankcontact-delete we SET NULL (unlink) rather than cascading,
+    // so bookings survive if the bank connection is removed.
+    bankcontact_id: integer("bankcontact_id").references(
+      () => financeBankcontact.id,
+      { onDelete: "set null" },
+    ),
+    // lib-fints' accountNumber for the linked bank-side account, used
+    // by the statement-fetch path to match bank snapshots to fk-encore
+    // accounts. NULL for manual accounts.
+    fints_account_number: text("fints_account_number"),
+    type_id: integer("type_id")
+      .notNull()
+      .references(() => financeAccountType.id, { onDelete: "restrict" }),
+    currency_code: text("currency_code")
+      .notNull()
+      .references(() => financeCurrency.code, { onDelete: "restrict" }),
+    iban: text("iban").unique(),
+    account_number: text("account_number").notNull(),
+    label: text("label").notNull(),
+    active: boolean("active").notNull().default(true),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    // Only one fk-encore account per (bankcontact, fints_account_number)
+    // pair; NULLs don't collide under Postgres' default unique semantics,
+    // so many manual accounts (both columns NULL) coexist fine.
+    uniqueIndex("finance_account_unique_bank_link").on(
+      table.bankcontact_id,
+      table.fints_account_number,
+    ),
+  ],
+);
+
+// ---------- ACL ----------
+//
+// Replaces the two legacy Finanzkraft roles Fk_AccountReader /
+// Fk_AccountWriter with a row-level access list. fk-encore's role matrix
+// (admin / user / photo user / …) stays untouched.
+
+export const financeAccountAccess = pgTable(
+  "finance_account_access",
+  {
+    account_id: integer("account_id")
+      .notNull()
+      .references(() => financeAccount.id, { onDelete: "cascade" }),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    level: financeAccountLevelEnum("level").notNull(),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.account_id, table.user_id] })]
+);
+
+// ---------- Transaktionen + Salden ----------
+//
+// dedupe_hash = SHA-256 over (booking_date, value_date, amount, currency,
+// purpose, counterparty_iban). When the bank provides a stable fints_id
+// the importer prefers that for duplicate detection; the hash is the
+// fallback for manual bookings and imports where fints_id is missing.
+
+export const financeTransaction = pgTable(
+  "finance_transaction",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    account_id: integer("account_id")
+      .notNull()
+      .references(() => financeAccount.id, { onDelete: "restrict" }),
+    booking_date: timestamp("booking_date", { mode: "string" }).notNull(),
+    value_date: timestamp("value_date", { mode: "string" }),
+    amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+    currency_code: text("currency_code")
+      .notNull()
+      .references(() => financeCurrency.code, { onDelete: "restrict" }),
+    purpose: text("purpose"),
+    counterparty: text("counterparty"),
+    counterparty_iban: text("counterparty_iban"),
+    counterparty_bic: text("counterparty_bic"),
+    counterparty_bank_id: text("counterparty_bank_id"),
+    /** SEPA End-to-End reference (EREF). */
+    end_to_end_ref: text("end_to_end_ref"),
+    /** SEPA Mandate reference (MREF) for direct debits. */
+    mandate_ref: text("mandate_ref"),
+    /** SEPA Creditor identifier (CRED / CI). */
+    creditor_id: text("creditor_id"),
+    /** Bank-side reference (REF) — internal booking number, not E2E. */
+    bank_ref: text("bank_ref"),
+    /** Abweichender Auftraggeber (ABWA): the actual payer when
+     *  different from the account-holder of the debiting account. */
+    originator_name: text("originator_name"),
+    /** Abweichender Zahlungsempfänger (ABWE): final beneficiary when
+     *  different from the receiver-account holder. */
+    recipient_name: text("recipient_name"),
+    /** MT940 Geschäftsvorfall-Code (NTRF / RCDT / ICDT / …). */
+    gv_code: text("gv_code"),
+    /** MT940 entry text ("Lastschrift", "Gutschrift", "Überweisung", …). */
+    entry_text: text("entry_text"),
+    /** Primanota number — bank-internal posting batch id. */
+    prima_nota_no: text("prima_nota_no"),
+    /** When the booking was settled in a different currency than the
+     *  account, `original_amount` + `original_currency_code` carry the
+     *  pre-conversion booking and `exchange_rate` records the rate
+     *  applied. All three null for plain same-currency bookings. */
+    original_amount: numeric("original_amount", { precision: 14, scale: 2 }),
+    original_currency_code: text("original_currency_code"),
+    exchange_rate: numeric("exchange_rate", { precision: 12, scale: 6 }),
+    dedupe_hash: text("dedupe_hash").notNull(),
+    raw: jsonb("raw").$type<Record<string, unknown>>(),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("finance_transaction_dedupe_unique").on(
+      table.account_id,
+      table.dedupe_hash,
+    ),
+    index("finance_transaction_account_booking_idx").on(
+      table.account_id,
+      table.booking_date,
+    ),
+  ]
+);
+
+export const financeAccountBalance = pgTable(
+  "finance_account_balance",
+  {
+    account_id: integer("account_id")
+      .notNull()
+      .references(() => financeAccount.id, { onDelete: "cascade" }),
+    as_of: timestamp("as_of", { mode: "string", withTimezone: true }).notNull(),
+    balance: numeric("balance", { precision: 14, scale: 2 }).notNull(),
+    source: text("source").notNull(), // "fints" | "manual" | "import"
+  },
+  (table) => [primaryKey({ columns: [table.account_id, table.as_of] })]
+);
+
+// ---------- Tags ----------
+//
+// Same tag name can exist once as source='user' and once as source='ai'
+// (the uniqueIndex is over the pair). Promotion = delete the 'ai' row
+// and upsert the 'user' row. `confidence` is only meaningful for AI
+// rows and stays NULL for user tags.
+
+export const financeTag = pgTable(
+  "finance_tag",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    source: financeTagSourceEnum("source").notNull().default("user"),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("finance_tag_name_source_unique").on(table.name, table.source),
+  ]
+);
+
+export const financeTagTransaction = pgTable(
+  "finance_tag_transaction",
+  {
+    tag_id: integer("tag_id")
+      .notNull()
+      .references(() => financeTag.id, { onDelete: "cascade" }),
+    transaction_id: integer("transaction_id")
+      .notNull()
+      .references(() => financeTransaction.id, { onDelete: "cascade" }),
+    confidence: numeric("confidence", { precision: 4, scale: 3 }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tag_id, table.transaction_id] }),
+    index("finance_tag_transaction_transaction_idx").on(table.transaction_id),
+  ]
+);
+
+// ---------- TAN-Sessions + System-Preferences ----------
+
+export const financeTanSession = pgTable(
+  "finance_tan_session",
+  {
+    tan_reference: uuid("tan_reference").primaryKey(),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    bankcontact_id: integer("bankcontact_id")
+      .notNull()
+      .references(() => financeBankcontact.id, { onDelete: "cascade" }),
+    banking_information: jsonb("banking_information")
+      .notNull()
+      .$type<Record<string, unknown>>(),
+    challenge: text("challenge").notNull(),
+    /**
+     * photoTAN / Flicker-TAN matrix from the bank's last challenge,
+     * if any. Persisted (rather than just held in-memory) so the
+     * dialog survives a page reload — the user has to scan the
+     * matrix on a separate device, and that takes a moment.
+     */
+    tan_photo_mime: text("tan_photo_mime"),
+    tan_photo_base64: text("tan_photo_base64"),
+    tan_media_name: text("tan_media_name"),
+    /**
+     * What kind of FinTS dialog this session resumes:
+     *   "sync"       — initial synchronize() / synchronizeWithTan
+     *   "statements" — getAccountStatements / …WithTan, mid-fetch
+     * Drives the branch in tan-sessions.complete.
+     */
+    kind: text("kind").notNull().default("sync").$type<"sync" | "statements">(),
+    /**
+     * Mid-fetch resume state for kind="statements": which bank
+     * accountNumber the dialog was waiting on, and which others are
+     * still queued behind it. After the user submits the TAN we
+     * continue the loop from there.
+     */
+    fetch_context: jsonb("fetch_context").$type<{
+      currentAccountNumber: string;
+      remainingAccountNumbers: string[];
+      linkedAccountNumbers: string[];
+    } | null>(),
+    expires_at: timestamp("expires_at", { mode: "string", withTimezone: true }).notNull(),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("finance_tan_session_expires_idx").on(table.expires_at),
+  ]
+);
+
+export const financeSystemPref = pgTable("finance_system_pref", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").notNull().$type<unknown>(),
+  updated_at: timestamp("updated_at", { mode: "string", withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });

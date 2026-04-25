@@ -8,6 +8,35 @@ vi.mock("encore.dev", () => ({
   })),
 }));
 
+// `encore.dev/log` ships as a thin native-module wrapper that hits the
+// ENCORE_RUNTIME_LIB guard the moment it's imported. Tests don't care
+// about log destinations — silence it with no-ops.
+vi.mock("encore.dev/log", () => ({
+  default: {
+    trace: vi.fn(),
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    with: vi.fn(() => ({
+      trace: vi.fn(),
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    })),
+  },
+}));
+
+// `encore.dev/cron` evaluates `new CronJob(...)` at module import; the
+// constructor reaches into the runtime. Stub it so the module loads
+// without ENCORE_RUNTIME_LIB.
+vi.mock("encore.dev/cron", () => ({
+  CronJob: class {
+    constructor(_id: string, _opts: unknown) {}
+  },
+}));
+
 vi.mock("encore.dev/api", () => {
   class APIError extends Error {
     constructor(public code: string, message: string) {
@@ -17,6 +46,7 @@ vi.mock("encore.dev/api", () => {
     static abondoned(msg: string) { return new APIError("abondoned", msg); }
     static alreadyExists(msg: string) { return new APIError("already_exists", msg); }
     static deadlineExceeded(msg: string) { return new APIError("deadline_exceeded", msg); }
+    static failedPrecondition(msg: string) { return new APIError("failed_precondition", msg); }
     static internal(msg: string) { return new APIError("internal", msg); }
     static invalidArgument(msg: string) { return new APIError("invalid_argument", msg); }
     static notFound(msg: string) { return new APIError("not_found", msg); }
@@ -38,6 +68,17 @@ vi.mock("encore.dev/api", () => {
 
 vi.mock("~encore/auth", () => ({
   getAuthData: vi.fn(() => ({ userID: "1", permissions: [] })),
+}));
+
+// encore.dev/config is evaluated at module import time (secret() is
+// typically called at the top of a file). Return a deterministic
+// 32-zero-byte base64 string so modules that pass the secret into
+// AES-GCM don't throw at import time; tests that need a real value
+// override via vi.mocked() or call key-explicit helpers directly.
+vi.mock("encore.dev/config", () => ({
+  secret: vi.fn((_name: string) => {
+    return () => Buffer.alloc(32).toString("base64");
+  }),
 }));
 
 // `~encore/clients` is a codegen artifact that doesn't exist at test time.

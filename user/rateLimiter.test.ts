@@ -1,11 +1,16 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { checkRateLimit, resetRateLimit, purgeExpiredEntries } from "./rateLimiter";
+import {
+  checkRateLimit,
+  resetRateLimit,
+  purgeExpiredEntries,
+  __resetRateLimiterForTests,
+} from "./rateLimiter";
 import { APIError } from "encore.dev/api";
 
-// Reset internal store between tests by resetting + purging
+// Reset internal store between tests — hard reset so no stale entries
+// from earlier tests (esp. ones using fake timers) survive.
 beforeEach(() => {
-  // Purge all entries to start fresh
-  purgeExpiredEntries();
+  __resetRateLimiterForTests();
 });
 
 afterEach(() => {
@@ -118,5 +123,100 @@ describe("purgeExpiredEntries", () => {
 
     // Should still be blocked
     expect(() => checkRateLimit(ip)).toThrow();
+  });
+});
+
+describe("checkRateLimit with options", () => {
+  it("honours a custom maxAttempts", () => {
+    const key = "opts-max:a";
+    for (let i = 0; i < 3; i++) {
+      expect(() =>
+        checkRateLimit(key, { maxAttempts: 3, windowMs: 60_000 }),
+      ).not.toThrow();
+    }
+    expect(() =>
+      checkRateLimit(key, { maxAttempts: 3, windowMs: 60_000 }),
+    ).toThrow();
+  });
+
+  it("honours a custom windowMs", () => {
+    vi.useFakeTimers();
+    const key = "opts-win:a";
+    for (let i = 0; i < 3; i++) {
+      checkRateLimit(key, { maxAttempts: 3, windowMs: 60_000 });
+    }
+    expect(() =>
+      checkRateLimit(key, { maxAttempts: 3, windowMs: 60_000 }),
+    ).toThrow();
+
+    // Just before the custom window elapses → still blocked
+    vi.advanceTimersByTime(30_000);
+    expect(() =>
+      checkRateLimit(key, { maxAttempts: 3, windowMs: 60_000 }),
+    ).toThrow();
+
+    // Past the window → fresh counter
+    vi.advanceTimersByTime(40_000);
+    expect(() =>
+      checkRateLimit(key, { maxAttempts: 3, windowMs: 60_000 }),
+    ).not.toThrow();
+  });
+
+  it("includes Retry-After seconds and the custom message", () => {
+    const key = "opts-msg:a";
+    for (let i = 0; i < 2; i++) {
+      checkRateLimit(key, {
+        maxAttempts: 2,
+        windowMs: 60_000,
+        message: "custom message",
+      });
+    }
+    try {
+      checkRateLimit(key, {
+        maxAttempts: 2,
+        windowMs: 60_000,
+        message: "custom message",
+      });
+      throw new Error("expected to throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(APIError);
+      expect((err as APIError).code).toBe("resource_exhausted");
+      expect((err as APIError).message).toMatch(/custom message/);
+      expect((err as APIError).message).toMatch(/Retry after \d+s/);
+    }
+  });
+
+  it("tracks Finance composite keys independently from IP keys", () => {
+    // Same process, different key namespaces must not interfere.
+    const financeKey = "tan-complete:abc-123";
+    const ipKey = "1.2.3.4";
+
+    for (let i = 0; i < 5; i++) {
+      checkRateLimit(financeKey, { maxAttempts: 5, windowMs: 60_000 });
+    }
+    expect(() =>
+      checkRateLimit(financeKey, { maxAttempts: 5, windowMs: 60_000 }),
+    ).toThrow();
+
+    // Auth path still has its full quota.
+    for (let i = 0; i < 10; i++) {
+      expect(() => checkRateLimit(ipKey)).not.toThrow();
+    }
+  });
+});
+
+describe("__resetRateLimiterForTests", () => {
+  it("clears the whole store", () => {
+    const a = "reset-helper:a";
+    const b = "reset-helper:b";
+    for (let i = 0; i < 10; i++) checkRateLimit(a);
+    for (let i = 0; i < 10; i++) checkRateLimit(b);
+    expect(() => checkRateLimit(a)).toThrow();
+    expect(() => checkRateLimit(b)).toThrow();
+
+    __resetRateLimiterForTests();
+
+    expect(() => checkRateLimit(a)).not.toThrow();
+    expect(() => checkRateLimit(b)).not.toThrow();
   });
 });
