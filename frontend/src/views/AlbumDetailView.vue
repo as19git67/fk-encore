@@ -105,6 +105,8 @@ watch(isFullscreen, (val) => {
 const { applied: filter, draft: filterDraft, activeCount, openEdit, apply: applyFilter, reset: resetFilter, removeKey } =
   useFilter({ preserveKeys: ['photoId'] })
 const filterMenuOpen = ref(false)
+// Lazy-Mount: siehe PhotosView. Spart /persons + /albums beim Album-Öffnen.
+const filterMenuMounted = ref(false)
 const FILTER_AVAILABLE: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'> = [
   'hiddenMode', 'favorite', 'groupHighlight', 'inGroup',
   'othersFavorited', 'othersHidden',
@@ -114,6 +116,7 @@ const FILTER_AVAILABLE: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' |
 
 function openFilterMenu() {
   openEdit()
+  filterMenuMounted.value = true
   filterMenuOpen.value = true
 }
 function onApplyFilter() {
@@ -969,6 +972,7 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
     </div>
 
     <FilterMenu
+      v-if="filterMenuMounted"
       v-model:visible="filterMenuOpen"
       v-model:draft="filterDraft"
       :available="FILTER_AVAILABLE"

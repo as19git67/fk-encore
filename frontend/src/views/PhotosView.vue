@@ -51,9 +51,14 @@ const error = ref('')
 const { applied: filter, draft: filterDraft, activeCount, openEdit, apply: applyFilter, reset: resetFilter, removeKey } =
   useFilter({ preserveKeys: ['photoId', 'sortBy', 'sortDir'] })
 const filterMenuOpen = ref(false)
+// Lazy-Mount: FilterMenu soll erst angelegt werden, wenn der User den Filter
+// tatsächlich öffnet. Sein onMounted-Hook prefetcht /persons und /albums —
+// das wollen wir nicht beim Galerie-Aufruf bezahlen.
+const filterMenuMounted = ref(false)
 
 function openFilterMenu() {
   openEdit()
+  filterMenuMounted.value = true
   filterMenuOpen.value = true
 }
 
@@ -939,6 +944,7 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
     </div>
 
     <FilterMenu
+      v-if="filterMenuMounted"
       v-model:visible="filterMenuOpen"
       v-model:draft="filterDraft"
       @apply="onApplyFilter"
