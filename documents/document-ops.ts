@@ -75,6 +75,24 @@ const EMBED_CHUNK_CHARS = parseInt(
   10,
 );
 
+/**
+ * Characters of overlap between consecutive chunks. The previous
+ * implementation produced strictly disjoint chunks, which meant a
+ * sentence split across the boundary lost half its context to either
+ * chunk and degraded recall on phrases like "Vermieterbescheinigung
+ * für 2024" if "Vermieterbescheinigung" ended one chunk and "2024"
+ * started the next. ~150 chars (≈25–30 words) is the rule-of-thumb
+ * sweet spot in retrieval literature: enough to bridge a sentence,
+ * cheap in storage (≈10 % more chunks).
+ *
+ * Set to 0 to disable overlap entirely; the chunker falls back to
+ * the historical disjoint behaviour.
+ */
+const EMBED_CHUNK_OVERLAP_CHARS = parseInt(
+  process.env.DOCUMENTS_EMBED_CHUNK_OVERLAP_CHARS ?? "150",
+  10,
+);
+
 /** Max chunks embedded per document — guardrail against huge PDFs. */
 const EMBED_MAX_CHUNKS = parseInt(
   process.env.DOCUMENTS_EMBED_MAX_CHUNKS ?? "32",
@@ -263,7 +281,8 @@ export async function runEmbed(documentId: number): Promise<{ chunks: number } |
   const text = (row.extracted_text ?? "").trim();
   if (text.length === 0) return { deferred: true };
 
-  const chunks = chunkText(text, EMBED_CHUNK_CHARS).slice(0, EMBED_MAX_CHUNKS);
+  const chunks = chunkText(text, EMBED_CHUNK_CHARS, EMBED_CHUNK_OVERLAP_CHARS)
+    .slice(0, EMBED_MAX_CHUNKS);
   if (chunks.length === 0) return { chunks: 0 };
 
   // `kind: "passage"` is the default but spelt out so the asymmetric
@@ -383,12 +402,32 @@ async function replaceTagLinks(documentId: number, tagNames: readonly string[]):
 
 /**
  * Split `text` into chunks of roughly `maxChars` characters, preferring
- * paragraph boundaries so a chunk rarely ends mid-sentence.
+ * paragraph boundaries so a chunk rarely ends mid-sentence. When
+ * `overlapChars > 0`, each non-leading chunk starts with the trailing
+ * `overlapChars`-window of its predecessor (snapped to a whitespace
+ * boundary so words aren't sliced) — this keeps phrases that straddle
+ * a chunk boundary recoverable from at least one of the two chunks.
+ *
+ * Exported for unit tests.
  */
-function chunkText(text: string, maxChars: number): string[] {
+export function chunkText(text: string, maxChars: number, overlapChars: number = 0): string[] {
   const paragraphs = text.split(/\n{2,}/).map((p) => p.trim()).filter((p) => p.length > 0);
   const chunks: string[] = [];
   let current = "";
+
+  // Tail of `s` of about `overlapChars` characters, snapped forward to
+  // the next whitespace so we don't slice mid-word. Returns the empty
+  // string when overlap is disabled or the source is shorter than the
+  // overlap window (in which case carrying the whole string would just
+  // duplicate the previous chunk wholesale).
+  const tail = (s: string): string => {
+    if (overlapChars <= 0 || s.length <= overlapChars) return "";
+    const start = s.length - overlapChars;
+    const ws = s.indexOf(" ", start);
+    if (ws !== -1 && ws < s.length - 1) return s.slice(ws + 1);
+    return s.slice(start);
+  };
+
   for (const p of paragraphs) {
     if (current.length === 0) {
       current = p;
@@ -396,11 +435,15 @@ function chunkText(text: string, maxChars: number): string[] {
       current = `${current}\n\n${p}`;
     } else {
       chunks.push(current);
-      current = p;
+      const carry = tail(current);
+      current = carry.length > 0 ? `${carry}\n\n${p}` : p;
     }
     while (current.length > maxChars) {
-      chunks.push(current.slice(0, maxChars));
-      current = current.slice(maxChars);
+      // Hard split inside an over-long single paragraph.
+      const cut = current.slice(0, maxChars);
+      chunks.push(cut);
+      const carry = tail(cut);
+      current = carry + current.slice(maxChars);
     }
   }
   if (current.length > 0) chunks.push(current);
