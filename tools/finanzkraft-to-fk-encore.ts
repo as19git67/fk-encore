@@ -156,6 +156,162 @@ const TYPE_KIND_MAP: Record<string, string> = {
 };
 
 // ---------------------------------------------------------------------------
+// Field-coverage tracking
+// ---------------------------------------------------------------------------
+//
+// Every attribute the converter sees is classified into one of four
+// dispositions so the summary at the end can flag both the deliberate
+// drops (ACL, joined columns) and any genuinely new field that
+// Finanzkraft might ship in a future version. The whole point is to
+// notice when an upgrade slips a new `Fk_Transaction:foo` past the
+// converter and ends up nowhere.
+
+type FieldDisposition = "first-class" | "raw" | "dropped" | "unknown";
+
+/**
+ * Account top-level field disposition. Whatever isn't listed here ends
+ * up in the `unknown` bucket.
+ */
+const ACCOUNT_FIELD_DISPOSITION: Record<string, FieldDisposition> = {
+  // mapped 1:1 into accounts[]
+  id: "first-class",
+  name: "first-class",
+  iban: "first-class",
+  number: "first-class",
+  account_type_id: "first-class",
+  closedAt: "first-class",
+  currency_id: "first-class",
+  // joined columns from the Finanzkraft export — redundant with the
+  // current foreign-key target, no value in carrying them.
+  currency_name: "dropped",
+  currency_short: "dropped",
+  // historical balances — fk-encore stores these in
+  // finance_account_balance, but the import schema doesn't yet support
+  // pre-loading that table; bringing it over is a future enhancement.
+  startBalance: "dropped",
+  balance: "dropped",
+  balanceDate: "dropped",
+  // bankcontact link is reset by the user post-import.
+  idBankcontact: "dropped",
+  // ACL re-set in fk-encore via AccountAssignmentView.
+  reader: "dropped",
+  writer: "dropped",
+};
+
+/**
+ * Explicit first-class transaction fields. Any other `Fk_Transaction:*`
+ * attribute is treated as raw passthrough (lands in the `raw` jsonb
+ * blob). Joined `Fk_Account:*`/`Fk_Currency:*`/`Fk_Category:*` columns
+ * are dropped — the same data is on the parent account / category isn't
+ * imported. Anything else is "unknown" and warrants a warning.
+ */
+const TRANSACTION_FIELDS_FIRST_CLASS = new Set([
+  "Fk_Transaction:id",
+  "Fk_Transaction:idAccount",
+  "Fk_Transaction:bookingDate",
+  "Fk_Transaction:valueDate",
+  "Fk_Transaction:amount",
+  "Fk_Transaction:text",
+  "Fk_Transaction:notes",
+  "Fk_Transaction:payee",
+  "Fk_Transaction:IBAN",
+  "Fk_Transaction:payeePayerAcctNo",
+  "Fk_Currency:id",
+  "Fk_Tags:tags",
+]);
+
+const TRANSACTION_FIELDS_DROPPED = new Set([
+  "Fk_Account:id",
+  "Fk_Account:name",
+  "Fk_Account:iban",
+  "Fk_Currency:name",
+  "Fk_Currency:short",
+  "Fk_Category:id",
+  "Fk_Category:name",
+  "Fk_Category:fullName",
+]);
+
+function classifyTransactionField(key: string): FieldDisposition {
+  if (TRANSACTION_FIELDS_FIRST_CLASS.has(key)) return "first-class";
+  if (TRANSACTION_FIELDS_DROPPED.has(key)) return "dropped";
+  if (key.startsWith("Fk_Transaction:")) return "raw";
+  return "unknown";
+}
+
+interface FieldStats {
+  /** How many records carried this attribute (with a non-null value). */
+  count: number;
+  disposition: FieldDisposition;
+}
+
+class CoverageTracker {
+  private readonly accounts = new Map<string, FieldStats>();
+  private readonly transactions = new Map<string, FieldStats>();
+  private accountRows = 0;
+  private transactionRows = 0;
+
+  observeAccount(record: Record<string, unknown>): void {
+    this.accountRows++;
+    for (const [key, value] of Object.entries(record)) {
+      if (value === undefined || value === null) continue;
+      const disposition = ACCOUNT_FIELD_DISPOSITION[key] ?? "unknown";
+      const cur = this.accounts.get(key) ?? { count: 0, disposition };
+      cur.count++;
+      this.accounts.set(key, cur);
+    }
+  }
+
+  observeTransaction(record: Record<string, unknown>): void {
+    this.transactionRows++;
+    for (const [key, value] of Object.entries(record)) {
+      if (value === undefined || value === null) continue;
+      const disposition = classifyTransactionField(key);
+      const cur = this.transactions.get(key) ?? { count: 0, disposition };
+      cur.count++;
+      this.transactions.set(key, cur);
+    }
+  }
+
+  printSummary(out: NodeJS.WritableStream): void {
+    const writeBucket = (
+      label: string,
+      bucket: Map<string, FieldStats>,
+      rows: number,
+    ): void => {
+      out.write(`  ${label} (${rows} row${rows === 1 ? "" : "s"}):\n`);
+      const groups: Record<FieldDisposition, [string, number][]> = {
+        "first-class": [],
+        raw: [],
+        dropped: [],
+        unknown: [],
+      };
+      for (const [key, stats] of bucket) {
+        groups[stats.disposition].push([key, stats.count]);
+      }
+      for (const [name, entries] of Object.entries(groups) as [
+        FieldDisposition,
+        [string, number][],
+      ][]) {
+        if (entries.length === 0) continue;
+        entries.sort((a, b) => a[0].localeCompare(b[0]));
+        const formatted = entries.map(([k, n]) => `${k}(${n})`).join(", ");
+        out.write(`    ${name.padEnd(11)}: ${formatted}\n`);
+      }
+      const unknownCount = groups.unknown.length;
+      if (unknownCount > 0) {
+        out.write(
+          `    >>> ${unknownCount} unknown field(s) — converter is missing a mapping! <<<\n`,
+        );
+      }
+    };
+
+    out.write(`[finanzkraft-converter] field coverage:\n`);
+    writeBucket("Accounts", this.accounts, this.accountRows);
+    writeBucket("Transactions", this.transactions, this.transactionRows);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Conversion
 // ---------------------------------------------------------------------------
 
@@ -252,7 +408,12 @@ function extractTags(t: FkTransaction): string[] {
 }
 
 function convert(input: FinanzkraftExport): OutExport {
-  const accounts: OutAccount[] = input.Accounts.map(convertAccount);
+  const coverage = new CoverageTracker();
+
+  const accounts: OutAccount[] = input.Accounts.map((a) => {
+    coverage.observeAccount(a as unknown as Record<string, unknown>);
+    return convertAccount(a);
+  });
 
   const accountByFkId = new Map<number, OutAccount>();
   for (let i = 0; i < input.Accounts.length; i++) {
@@ -265,6 +426,7 @@ function convert(input: FinanzkraftExport): OutExport {
   let skippedTransactions = 0;
 
   for (const t of input.Transactions) {
+    coverage.observeTransaction(t as unknown as Record<string, unknown>);
     const out = convertTransaction(t, accountByFkId);
     if (!out) {
       skippedTransactions++;
@@ -283,6 +445,8 @@ function convert(input: FinanzkraftExport): OutExport {
         `(missing parent account or no usable date)\n`,
     );
   }
+
+  coverage.printSummary(process.stderr);
 
   return {
     version: "finanzkraft-1.0",

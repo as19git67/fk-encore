@@ -74,6 +74,35 @@ useful when iterating on mapping changes. Stammdaten (currencies,
 account types, timespans, system prefs) survive the wipe. The button
 turns red and asks for confirmation.
 
+### Coverage summary
+
+After every run the converter prints a field-coverage report on stderr,
+e.g.:
+
+```
+[finanzkraft-converter] field coverage:
+  Accounts (47 rows):
+    first-class: account_type_id(47), currency_id(47), iban(34), id(47), …
+    dropped    : balance(31), balanceDate(31), reader(15), writer(43), …
+    unknown    : someBrandNewField(2)
+    >>> 1 unknown field(s) — converter is missing a mapping! <<<
+  Transactions (53428 rows):
+    first-class: Fk_Transaction:amount(53428), …
+    raw        : Fk_Transaction:CRED(8421), Fk_Transaction:MREF(8421), …
+    dropped    : Fk_Account:id(53428), Fk_Currency:name(53428), …
+```
+
+- `first-class` = mapped 1:1 to a fk-encore column.
+- `raw` = archived in `transactions[].raw` (jsonb) — not lost, but
+  not query-able from the UI either.
+- `dropped` = deliberately not carried over (joined columns, ACL,
+  balance history that the import schema doesn't yet support).
+- `unknown` = the converter has never heard of this attribute. If
+  this list is non-empty, decide what to do with it (extend
+  `ACCOUNT_FIELD_DISPOSITION` / `TRANSACTION_FIELDS_*` in the
+  converter source) and re-run. Until then those values are simply
+  skipped.
+
 ### Troubleshooting
 
 - *"skipped N transactions (missing parent account or no usable date)"* —
