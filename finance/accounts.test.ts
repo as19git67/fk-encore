@@ -330,6 +330,48 @@ describe("finance/accounts — update", () => {
       updateAccount({ id: a, label: "x" }),
     ).rejects.toThrow(/permission/);
   });
+
+  it("updates type_kind, currency_code and account_number when provided", async () => {
+    const bcId = await insertBankcontact();
+    const a = await insertAccount(bcId);
+    setAuth("1", ["finance.accounts.manage"]);
+    const result = await updateAccount({
+      id: a,
+      type_kind: "tagesgeld",
+      currency_code: "USD",
+      account_number: "RENAMED-001",
+    });
+    expect(result.type_kind).toBe("tagesgeld");
+    expect(result.currency_code).toBe("USD");
+    expect(result.account_number).toBe("RENAMED-001");
+  });
+
+  it("rejects an unknown type_kind", async () => {
+    const bcId = await insertBankcontact();
+    const a = await insertAccount(bcId);
+    setAuth("1", ["finance.accounts.manage"]);
+    await expect(
+      updateAccount({ id: a, type_kind: "no-such-type" }),
+    ).rejects.toThrow(/account type/);
+  });
+
+  it("rejects an unknown currency_code", async () => {
+    const bcId = await insertBankcontact();
+    const a = await insertAccount(bcId);
+    setAuth("1", ["finance.accounts.manage"]);
+    await expect(
+      updateAccount({ id: a, currency_code: "XYZ" }),
+    ).rejects.toThrow(/currency/);
+  });
+
+  it("rejects an empty account_number", async () => {
+    const bcId = await insertBankcontact();
+    const a = await insertAccount(bcId);
+    setAuth("1", ["finance.accounts.manage"]);
+    await expect(
+      updateAccount({ id: a, account_number: "   " }),
+    ).rejects.toThrow(/account_number/);
+  });
 });
 
 describe("finance/accounts — delete", () => {

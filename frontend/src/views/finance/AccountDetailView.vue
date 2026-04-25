@@ -7,6 +7,7 @@ import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
+import ToggleSwitch from 'primevue/toggleswitch'
 import Tag from 'primevue/tag'
 import Message from 'primevue/message'
 import { useAccountsStore } from '../../stores/finance/accounts'
@@ -92,6 +93,66 @@ async function doUnlink() {
     alert(err instanceof Error ? err.message : String(err))
   }
 }
+
+// --- Edit Stammdaten -------------------------------------------------
+
+const editDialogVisible = ref(false)
+const editErrorMsg = ref<string | null>(null)
+const editing = ref(false)
+const editForm = ref({
+  label: '',
+  type_kind: 'giro',
+  currency_code: 'EUR',
+  account_number: '',
+  iban: '',
+  active: true,
+})
+
+const typeOptions = [
+  { kind: 'giro', label: 'Girokonto' },
+  { kind: 'tagesgeld', label: 'Tagesgeld' },
+  { kind: 'festgeld', label: 'Festgeld' },
+  { kind: 'kredit', label: 'Kredit' },
+  { kind: 'depot', label: 'Depot' },
+  { kind: 'bausparen', label: 'Bausparen' },
+  { kind: 'kreditkarte', label: 'Kreditkarte' },
+  { kind: 'sonstige', label: 'Sonstige' },
+]
+
+function openEdit() {
+  if (!account.value) return
+  editForm.value = {
+    label: account.value.label,
+    type_kind: account.value.type_kind,
+    currency_code: account.value.currency_code,
+    account_number: account.value.account_number,
+    iban: account.value.iban ?? '',
+    active: account.value.active,
+  }
+  editErrorMsg.value = null
+  editDialogVisible.value = true
+}
+
+async function saveEdit() {
+  if (!account.value) return
+  editing.value = true
+  editErrorMsg.value = null
+  try {
+    await accountsStore.update(account.value.id, {
+      label: editForm.value.label.trim(),
+      type_kind: editForm.value.type_kind,
+      currency_code: editForm.value.currency_code.trim() || 'EUR',
+      account_number: editForm.value.account_number.trim(),
+      iban: editForm.value.iban.trim() || null,
+      active: editForm.value.active,
+    })
+    editDialogVisible.value = false
+  } catch (err) {
+    editErrorMsg.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    editing.value = false
+  }
+}
 </script>
 
 <template>
@@ -106,13 +167,22 @@ async function doUnlink() {
           <span v-else class="manual-hint">manuell</span>
         </p>
       </div>
-      <Button
-        label="Zurück"
-        icon="pi pi-arrow-left"
-        severity="secondary"
-        text
-        @click="router.push({ name: 'finance-accounts' })"
-      />
+      <div class="header-actions">
+        <Button
+          v-if="canWrite && account"
+          label="Bearbeiten"
+          icon="pi pi-pencil"
+          severity="secondary"
+          @click="openEdit"
+        />
+        <Button
+          label="Zurück"
+          icon="pi pi-arrow-left"
+          severity="secondary"
+          text
+          @click="router.push({ name: 'finance-accounts' })"
+        />
+      </div>
     </header>
 
     <Message v-if="txStore.error" severity="error" :closable="false">
@@ -190,6 +260,61 @@ async function doUnlink() {
       </DataTable>
       <p class="hint">Zeige {{ txStore.items.length }} von {{ txStore.total }} Buchungen</p>
     </section>
+
+    <Dialog
+      v-model:visible="editDialogVisible"
+      modal
+      header="Stammdaten bearbeiten"
+      :style="{ width: '30rem' }"
+    >
+      <Message v-if="editErrorMsg" severity="error" :closable="false">
+        {{ editErrorMsg }}
+      </Message>
+      <p v-if="account?.bankcontact_name" class="hint">
+        Dieses Konto ist mit dem Bankzugang
+        <strong>{{ account.bankcontact_name }}</strong> verknüpft. IBAN
+        und Kontonummer kommen normalerweise von der Bank — Änderungen
+        hier wirken nur lokal.
+      </p>
+      <div class="field"><label>Label</label><InputText v-model="editForm.label" /></div>
+      <div class="field">
+        <label>Kontotyp</label>
+        <Select
+          v-model="editForm.type_kind"
+          :options="typeOptions"
+          option-label="label"
+          option-value="kind"
+        />
+      </div>
+      <div class="field">
+        <label>Währung</label>
+        <InputText v-model="editForm.currency_code" maxlength="3" />
+      </div>
+      <div class="field">
+        <label>Interne Kontonummer</label>
+        <InputText v-model="editForm.account_number" />
+      </div>
+      <div class="field"><label>IBAN</label><InputText v-model="editForm.iban" /></div>
+      <div class="field field--inline">
+        <label>Aktiv</label>
+        <ToggleSwitch v-model="editForm.active" />
+      </div>
+      <template #footer>
+        <Button
+          label="Abbrechen"
+          severity="secondary"
+          text
+          @click="editDialogVisible = false"
+        />
+        <Button
+          label="Speichern"
+          icon="pi pi-check"
+          :loading="editing"
+          :disabled="!editForm.label.trim() || !editForm.account_number.trim()"
+          @click="saveEdit"
+        />
+      </template>
+    </Dialog>
 
     <Dialog
       v-model:visible="linkDialogVisible"
@@ -288,6 +413,11 @@ async function doUnlink() {
   margin: 0;
   font-size: 1rem;
 }
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
 .actions {
   display: flex;
   gap: 0.5rem;
@@ -297,6 +427,11 @@ async function doUnlink() {
   flex-direction: column;
   gap: 0.25rem;
   margin-bottom: 0.5rem;
+}
+.field--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.75rem;
 }
 .tag-chip {
   margin-right: 0.25rem;

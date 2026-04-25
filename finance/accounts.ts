@@ -315,7 +315,7 @@ export const createAccount = api(
 );
 
 // -----------------------------------------------------------------------
-// Patch (finance.accounts.manage — label / active / iban)
+// Patch (finance.accounts.manage — Stammdaten + active)
 // -----------------------------------------------------------------------
 
 interface PatchParams {
@@ -323,6 +323,9 @@ interface PatchParams {
   label?: string;
   iban?: string | null;
   active?: boolean;
+  type_kind?: string;
+  currency_code?: string;
+  account_number?: string;
 }
 
 export const updateAccount = api(
@@ -338,16 +341,55 @@ export const updateAccount = api(
 
     const existing = await loadAccount(p.id);
     const patch: Partial<typeof financeAccount.$inferInsert> = {};
+
     if (p.label !== undefined) {
       if (!p.label.trim()) {
         throw APIError.invalidArgument("label cannot be empty");
       }
       patch.label = p.label.trim();
     }
+
     if (p.iban !== undefined) {
       patch.iban = p.iban === null ? null : p.iban.trim() || null;
     }
+
     if (p.active !== undefined) patch.active = p.active;
+
+    if (p.account_number !== undefined) {
+      if (!p.account_number.trim()) {
+        throw APIError.invalidArgument("account_number cannot be empty");
+      }
+      patch.account_number = p.account_number.trim();
+    }
+
+    if (p.type_kind !== undefined) {
+      if (
+        !(financeAccountKindEnum.enumValues as readonly string[]).includes(p.type_kind)
+      ) {
+        throw APIError.invalidArgument(`unknown account type '${p.type_kind}'`);
+      }
+      const [type] = await db
+        .select()
+        .from(financeAccountType)
+        .where(eq(financeAccountType.kind, p.type_kind as any))
+        .limit(1);
+      if (!type) {
+        throw APIError.invalidArgument(`unknown account type '${p.type_kind}'`);
+      }
+      patch.type_id = type.id;
+    }
+
+    if (p.currency_code !== undefined) {
+      const [currency] = await db
+        .select()
+        .from(financeCurrency)
+        .where(eq(financeCurrency.code, p.currency_code))
+        .limit(1);
+      if (!currency) {
+        throw APIError.invalidArgument(`unknown currency '${p.currency_code}'`);
+      }
+      patch.currency_code = currency.code;
+    }
 
     if (Object.keys(patch).length === 0) {
       throw APIError.invalidArgument("no fields to update");

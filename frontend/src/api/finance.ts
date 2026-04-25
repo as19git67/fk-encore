@@ -256,6 +256,9 @@ export interface UpdateAccountInput {
   label?: string
   iban?: string | null
   active?: boolean
+  type_kind?: string
+  currency_code?: string
+  account_number?: string
 }
 
 export async function listAccounts(): Promise<{ items: Account[] }> {
