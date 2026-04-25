@@ -27,13 +27,11 @@ import {
   getPhotoLandmarks,
   ignoreFace,
   leaveAlbum,
-  listPersons,
   listPhotoGroups,
   reindexPhoto,
   type CurationStatus,
   type Face,
   type LandmarkItem,
-  type Person,
   type Photo,
   type PhotoFilter,
   type PhotoGroup,
@@ -47,6 +45,7 @@ import { useServiceHealthStore } from '../stores/serviceHealth'
 import { usePhotoGrouping } from '../composables/usePhotoGrouping'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 import { useNaturalSearch } from '../composables/useNaturalSearch'
+import { useReferenceData } from '../composables/useReferenceData'
 import type { PhotoItem } from '../composables/usePhotoGrouping'
 import { onUnmounted } from 'vue'
 import { useRealtimeEvent } from '../composables/useRealtime'
@@ -427,7 +426,7 @@ const loadingFaces = ref(false)
 const detectedLandmarks = ref<LandmarkItem[]>([])
 const loadingLandmarks = ref(false)
 const reindexingPhoto = ref(false)
-const persons = ref<Person[]>([])
+const { persons, fetchPersons, invalidateAlbums } = useReferenceData()
 
 // The sidebar (including the fullscreen details flyout) follows either
 // the grid selection or, when the map fullscreen is open, the photo
@@ -521,7 +520,7 @@ async function loadData() {
 }
 
 async function loadPersons() {
-  try { persons.value = (await listPersons()).persons } catch { /* ignore */ }
+  try { await fetchPersons() } catch { /* ignore */ }
 }
 
 async function loadSidebarData(photoId: number) {
@@ -664,6 +663,7 @@ async function handleSetMapCover(photoId: number) {
   try {
     if (canWrite.value) {
       await updateAlbum(albumId.value, { coverPhotoId: newCoverId })
+      invalidateAlbums()
       album.value.cover_photo_id = newCoverId ?? undefined
     } else {
       await updateAlbumUserSettings(albumId.value, { cover_photo_id: newCoverId })
@@ -683,6 +683,7 @@ async function handleDeleteAlbum() {
   deletingAlbum.value = true
   try {
     await deleteAlbum(album.value.id)
+    invalidateAlbums()
     showDeleteDialog.value = false
     router.push({ name: 'fotos-albums' })
   } catch (err: any) {
@@ -797,6 +798,7 @@ async function saveDescription() {
   updatingAlbum.value = true
   try {
     await updateAlbum(albumId.value, { description: descDraft.value })
+    invalidateAlbums()
     album.value.description = descDraft.value
     editingDescription.value = false
   } catch (err: any) {

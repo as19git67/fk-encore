@@ -26,7 +26,13 @@ import {
 import { listUsers, type UserWithRoles } from '../api/users'
 import { useAuthStore } from '../stores/auth'
 import { useRealtimeEvent } from '../composables/useRealtime'
+import { useReferenceData } from '../composables/useReferenceData'
 import ServiceStatusBar from "../components/ServiceStatusBar.vue";
+
+// Wir behalten die View-eigene Albumliste (eigene Sortier-/Filter-Logik),
+// invalidieren aber nach jeder Mutation den app-weiten Cache, damit die
+// Foto-Galerie beim nächsten Öffnen nicht auf eine veraltete Liste schaut.
+const { invalidateAlbums } = useReferenceData()
 
 const albums = ref<Album[]>([])
 const loading = ref(true)
@@ -494,6 +500,7 @@ async function handleCreateAlbum() {
   creating.value = true
   try {
     const album = await createAlbum(newAlbumName.value.trim(), newAlbumDesc.value.trim() || undefined, newAlbumDisplayMode.value)
+    invalidateAlbums()
     showCreateDialog.value = false
     newAlbumName.value = ''
     newAlbumDesc.value = ''
@@ -537,6 +544,7 @@ async function handleRenameAlbum() {
   updatingAlbum.value = true
   try {
     await updateAlbum(selectedAlbum.value.id, { name: newName, description: renameDesc.value.trim(), displayMode: renameDisplayMode.value })
+    invalidateAlbums()
     showRenameDialog.value = false
     selectedAlbum.value = null
     await loadData()
@@ -553,6 +561,7 @@ async function handleDeleteAlbum() {
   updatingAlbum.value = true
   try {
     await deleteAlbum(selectedAlbum.value.id)
+    invalidateAlbums()
     showDeleteDialog.value = false
     selectedAlbum.value = null
     await loadData()

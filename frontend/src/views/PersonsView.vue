@@ -32,6 +32,12 @@ import { faceBoxStyle, thumbnailImageStyle } from '../utils/faceBbox'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
+import { useReferenceData } from '../composables/useReferenceData'
+
+// Eigene gefilterte Liste (nur Personen mit faceCount > 1) — wir teilen sie
+// nicht mit dem app-weiten Composable, invalidieren aber dessen Cache nach
+// Umbenennen/Mergen, damit Galerie/FilterMenu die geänderten Namen sehen.
+const { invalidatePersons } = useReferenceData()
 
 const auth = useAuthStore()
 const serviceHealth = useServiceHealthStore()
@@ -574,6 +580,7 @@ async function handleRename(): Promise<boolean> {
   try {
     await updatePerson(sourcePersonId, trimmedName)
     if (mergeCandidate) await mergePersons([mergeCandidate.id], sourcePersonId)
+    invalidatePersons()
     showRenameDialog.value = false
     await loadData()
     if (selectedPersonDetail.value?.id === sourcePersonId) selectedPersonDetail.value.name = trimmedName

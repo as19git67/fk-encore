@@ -23,7 +23,6 @@ import {
   type Photo, type Face, type CurationStatus, type PhotoGroup,
   type LandmarkItem,
 } from '../api/photos'
-import { listPersons, type Person } from '../api/photos'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
 import type { YearGroup, PhotoItem } from '../composables/usePhotoGrouping'
@@ -31,6 +30,7 @@ import { usePhotoSelection } from '../composables/usePhotoSelection'
 import { usePhotoHydration } from '../composables/usePhotoHydration'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 import { useNaturalSearch } from '../composables/useNaturalSearch'
+import { useReferenceData } from '../composables/useReferenceData'
 
 const auth = useAuthStore()
 const serviceHealth = useServiceHealthStore()
@@ -321,7 +321,7 @@ const loadingFaces = ref(false)
 const detectedLandmarks = ref<LandmarkItem[]>([])
 const loadingLandmarks = ref(false)
 const reindexingPhoto = ref(false)
-const persons = ref<Person[]>([])
+const { persons, fetchPersons } = useReferenceData()
 const isEditingDate = ref(false)
 const editDate = ref<Date | null>(null)
 const updatingDate = ref(false)
@@ -353,10 +353,6 @@ watch(() => selectedPhoto.value?.id ?? null, (photoId) => {
     detectedLandmarks.value = []
   }
 })
-
-async function loadPersons() {
-  try { persons.value = (await listPersons()).persons } catch { /* ignore */ }
-}
 
 async function loadDetectedFaces(photoId: number) {
   loadingFaces.value = true
@@ -819,7 +815,7 @@ async function handleDrop(e: DragEvent) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadPhotos()
-loadPersons()
+void fetchPersons().catch(() => { /* ignore */ })
 serviceHealth.startPolling()
 
 import { onUnmounted } from 'vue'
