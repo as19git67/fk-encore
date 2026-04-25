@@ -25,7 +25,7 @@ const authStore = useAuthStore()
 const accountId = computed(() => Number(route.params.id))
 const account = computed(() => accountsStore.byId(accountId.value))
 
-const canWrite = computed(() => authStore.hasPermission('finance.admin'))
+const canWrite = computed(() => authStore.hasPermission('finance.accounts.manage'))
 
 onMounted(async () => {
   if (accountsStore.items.length === 0) await accountsStore.refresh()
