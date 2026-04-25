@@ -266,7 +266,10 @@ export async function runEmbed(documentId: number): Promise<{ chunks: number } |
   const chunks = chunkText(text, EMBED_CHUNK_CHARS).slice(0, EMBED_MAX_CHUNKS);
   if (chunks.length === 0) return { chunks: 0 };
 
-  const embeddings = await embedTexts(chunks);
+  // `kind: "passage"` is the default but spelt out so the asymmetric
+  // contract with the search-side `embedTexts(_, "query")` call is
+  // visible at this site.
+  const embeddings = await embedTexts(chunks, "passage");
   if (embeddings.length !== chunks.length) {
     throw new Error(
       `embed: LLM returned ${embeddings.length} vectors for ${chunks.length} chunks`,

@@ -114,7 +114,10 @@ async function runSemantic(
   q: string,
   limit: number,
 ): Promise<SearchHit[]> {
-  const embeddings = await embedTexts([q]);
+  // `kind: "query"` so the embedding service applies the e5-family
+  // `query: ` prefix the corpus side does not get. See
+  // `_apply_embedding_prefix` in `llm-service/main.py`.
+  const embeddings = await embedTexts([q], "query");
   if (embeddings.length === 0) return [];
   const vec = embeddings[0];
   const literal = `[${vec.join(",")}]`;
