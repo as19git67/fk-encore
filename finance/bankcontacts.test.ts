@@ -85,7 +85,10 @@ describe("finance/bankcontacts — create", () => {
     expect(result.tan_method).toBeNull();
     expect(result.last_sync_at).toBeNull();
     expect((result as any).credentials_encrypted).toBeUndefined();
-    expect((result as any).sync_times).toBeUndefined();
+    // sync_times is intentionally exposed (empty array for a fresh
+    // contact) so the BankcontactsView overview widget can compute the
+    // next sync moment without one extra round-trip per row.
+    expect(result.sync_times).toEqual([]);
   });
 
   it("trims whitespace from string fields", async () => {

@@ -19,6 +19,7 @@ import db from "../db/database";
 import {
   financeAccount,
   financeBankcontact,
+  type FinanceSyncSlot,
 } from "../db/schema";
 import { encryptCredentials } from "./encryption";
 import {
@@ -57,6 +58,12 @@ interface BankcontactView {
    * Empty array when the user has never probed this bankcontact.
    */
   available_tan_methods: TanMethodCacheEntry[];
+  /**
+   * UI-configured cron-like slots driving the sync cron. Surfaced on
+   * the list response so the frontend overview widget can compute the
+   * next sync moment without an extra round-trip per bankcontact.
+   */
+  sync_times: FinanceSyncSlot[];
 }
 
 function toView(row: typeof financeBankcontact.$inferSelect): BankcontactView {
@@ -72,6 +79,7 @@ function toView(row: typeof financeBankcontact.$inferSelect): BankcontactView {
     last_sync_status: row.last_sync_status,
     created_at: row.created_at,
     available_tan_methods: row.available_tan_methods ?? [],
+    sync_times: (row.sync_times as FinanceSyncSlot[] | null) ?? [],
   };
 }
 

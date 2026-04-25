@@ -30,6 +30,12 @@ export interface Bankcontact {
    * shows a "TAN-Verfahren abrufen"-hint in that case.
    */
   available_tan_methods: TanMethodOption[]
+  /**
+   * UI-configured cron-like sync slots. Empty array when the user
+   * hasn't set up any schedule yet. Used by the BankcontactsView
+   * overview widget to compute the next sync moment.
+   */
+  sync_times: SyncSlot[]
 }
 
 export interface CreateBankcontactInput {
