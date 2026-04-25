@@ -213,11 +213,18 @@ export const modules: ModuleConfig[] = [
         component: () => import('../views/finance/AdminImportView.vue'),
         meta: { permission: 'finance.admin' },
       },
+      {
+        path: 'bankkontakte/hilfe',
+        name: 'finance-bankcontacts-help',
+        component: () => import('../views/finance/BankcontactsHelpView.vue'),
+        meta: { permission: 'finance.accounts.manage' },
+      },
     ],
     menuItems: [
       { label: 'Konten', icon: 'pi pi-wallet', routeName: 'finance-accounts', permission: 'finance.view' },
       { label: 'Umsätze', icon: 'pi pi-list', routeName: 'finance-transactions', permission: 'finance.view' },
       { label: 'Bankkontakte', icon: 'pi pi-building', routeName: 'finance-bankcontacts', permission: 'finance.accounts.manage' },
+      { label: 'Bankkontakte-Hilfe', icon: 'pi pi-question-circle', routeName: 'finance-bankcontacts-help', permission: 'finance.accounts.manage' },
       { label: 'Analyse', icon: 'pi pi-chart-bar', routeName: 'finance-analysis', permission: 'finance.view' },
       { label: 'Konto-Zugriff', icon: 'pi pi-key', routeName: 'finance-admin-access', permission: 'finance.admin' },
       { label: 'Import', icon: 'pi pi-cloud-upload', routeName: 'finance-admin-import', permission: 'finance.admin' },

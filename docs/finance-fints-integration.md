@@ -291,7 +291,70 @@ sequenceDiagram
   end
 ```
 
-### 5.2 Cleanup abgelaufener TAN-Sessions
+### 5.2 Inkrementeller Abruf — `from`-Fenster pro Konto
+
+`getAccountStatements(accountNumber, from?)` lässt die Bank ab einem
+Stichdatum bis heute liefern. Ohne `from` pickt jede Bank einen anderen,
+oft uralten Default (comdirect z. B. liefert dann teils 3+ Jahre statt
+neuer Buchungen). Wir setzen `from` deshalb pro Konto in
+`fetchAndPersist`:
+
+| Konto-Status | `from` |
+|---|---|
+| Hat bereits Buchungen in `finance_transaction` | `MAX(booking_date) − 14 Tage` |
+| Frisch verlinktes Konto, noch keine Daten | `now() − 90 Tage` |
+
+Die 14-Tage-Überlappung fängt Spät-Buchungen und Nachträge auf;
+Duplikate werden über den Unique-Index `dedupe_hash` (siehe
+`finance-data-model.md` §3) ohne Datenbank-Konflikt verworfen. Die
+90-Tage-Erstabfrage liegt bewusst innerhalb des PSD2-Read-Only-Fensters
+und löst deshalb keine zusätzliche SCA aus — wer mehr Historie braucht,
+muss entweder den Finanzkraft-Import nutzen
+(`finance-data-import.md`) oder den Default-Wert in `statements.ts`
+temporär hochsetzen und die einmalige TAN-Aufforderung in Kauf nehmen.
+
+`to` lassen wir leer; die Bank liefert dann bis zum aktuellen Tag.
+
+```ts
+// finance/statements.ts (Auszug)
+const fromByAccountNumber = new Map<string, Date>();
+const overlapMs = 14 * 24 * 60 * 60_000;
+for (const m of maxes) {
+  fromByAccountNumber.set(
+    row.fints_account_number,
+    new Date(new Date(m.latest).getTime() - overlapMs),
+  );
+}
+const defaultFrom = new Date(Date.now() - 90 * 24 * 60 * 60_000);
+
+await runFetchAccounts(client, {
+  linkedAccountNumbers,
+  fromByAccountNumber,
+  defaultFrom,
+});
+```
+
+`runFetchAccounts` (`finance/fints-client.ts`) ruft pro Konto den
+passenden Wert ab; nicht-verlinkte Bank-Konten werden komplett
+übersprungen, damit jede TAN nur einmal angefordert wird (siehe §5.3
+unten).
+
+### 5.3 Nur verlinkte Konten abrufen
+
+Bevor `runFetchAccounts` ein Bank-Konto öffnet, prüft es
+`linkedAccountNumbers`. Steht das Konto nicht drin (z. B. weil der User
+es bewusst nicht in fk-encore verlinkt hat), überspringt der Loop
+sowohl `getAccountStatements` als auch `getAccountBalance`. Resultat:
+
+- Keine SCA-Push-Aufforderung für Konten, an denen wir gar nicht
+  interessiert sind.
+- Keine doppelten TAN-Eingaben, wenn die Bank pro Konto-Block neu
+  fragt.
+- Bank-Konten, die noch nie in fk-encore verlinkt wurden, tauchen in
+  der `pendingAccounts`-Antwort auf, damit das Frontend sie zur
+  Verlinkung anbieten kann (siehe `finance-frontend.md` §4.3).
+
+### 5.4 Cleanup abgelaufener TAN-Sessions
 
 ```ts
 export const cleanupTanSessions = api(

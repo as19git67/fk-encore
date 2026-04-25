@@ -176,11 +176,21 @@ function openDetail(id: number) {
   <div class="page">
     <header class="page-header">
       <h1>Bankkontakte</h1>
-      <Button
-        label="Neu anlegen"
-        icon="pi pi-plus"
-        @click="router.push({ name: 'finance-bankcontact-new' })"
-      />
+      <div class="header-actions">
+        <Button
+          icon="pi pi-question-circle"
+          severity="secondary"
+          text
+          aria-label="Hilfe"
+          v-tooltip.bottom="'Hilfe / Wie funktioniert das?'"
+          @click="router.push({ name: 'finance-bankcontacts-help' })"
+        />
+        <Button
+          label="Neu anlegen"
+          icon="pi pi-plus"
+          @click="router.push({ name: 'finance-bankcontact-new' })"
+        />
+      </div>
     </header>
 
     <Message v-if="store.error" severity="error" :closable="false">
@@ -276,6 +286,11 @@ function openDetail(id: number) {
 }
 .page-header h1 {
   margin: 0;
+}
+.header-actions {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
 }
 .overview {
   display: grid;
