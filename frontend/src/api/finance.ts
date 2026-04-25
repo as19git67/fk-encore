@@ -239,6 +239,11 @@ export interface Account {
   label: string
   active: boolean
   created_at: string | null
+  /** Number of users with an explicit ACL entry (read/write) on this
+   *  account. 0 means non-admin users can't see it yet — surfaced so
+   *  the admin assignment view can flag accounts that still need to
+   *  be wired up after a Finanzkraft import. */
+  access_count: number
 }
 
 export interface CreateAccountInput {

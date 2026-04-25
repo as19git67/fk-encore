@@ -16,7 +16,7 @@
 
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, count, eq, inArray } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
@@ -56,6 +56,12 @@ interface AccountView {
   label: string;
   active: boolean;
   created_at: string | null;
+  /** Number of users with an entry in finance_account_access for this
+   *  account. 0 means "not yet assigned to anyone" — useful for the
+   *  AccountAssignmentView selector and the post-import workflow.
+   *  Always populated; admins see 0 even if they themselves bypass
+   *  the ACL because they're not enrolled. */
+  access_count: number;
 }
 
 interface ListResponse {
@@ -75,6 +81,7 @@ function toView(
   bankcontact: BankcontactRow | null,
   type: TypeRow,
   currency: CurrencyRow,
+  accessCount: number,
 ): AccountView {
   return {
     id: row.id,
@@ -90,6 +97,7 @@ function toView(
     label: row.label,
     active: row.active,
     created_at: row.created_at,
+    access_count: accessCount,
   };
 }
 
@@ -149,7 +157,8 @@ export const listAccounts = api(
     const typeIds = [...new Set(rows.map((r) => r.type_id))];
     const currencyCodes = [...new Set(rows.map((r) => r.currency_code))];
 
-    const [bankcontacts, types, currencies] = await Promise.all([
+    const accountIds = rows.map((r) => r.id);
+    const [bankcontacts, types, currencies, accessCounts] = await Promise.all([
       bcIds.length > 0
         ? db
             .select()
@@ -158,11 +167,20 @@ export const listAccounts = api(
         : Promise.resolve([] as BankcontactRow[]),
       db.select().from(financeAccountType).where(inArray(financeAccountType.id, typeIds)),
       db.select().from(financeCurrency).where(inArray(financeCurrency.code, currencyCodes)),
+      db
+        .select({
+          account_id: financeAccountAccess.account_id,
+          n: count(),
+        })
+        .from(financeAccountAccess)
+        .where(inArray(financeAccountAccess.account_id, accountIds))
+        .groupBy(financeAccountAccess.account_id),
     ]);
 
     const bcById = new Map(bankcontacts.map((b) => [b.id, b]));
     const typeById = new Map(types.map((t) => [t.id, t]));
     const currByCode = new Map(currencies.map((c) => [c.code, c]));
+    const countByAccount = new Map(accessCounts.map((r) => [r.account_id, r.n]));
 
     return {
       items: rows.map((r) =>
@@ -171,6 +189,7 @@ export const listAccounts = api(
           r.bankcontact_id !== null ? bcById.get(r.bankcontact_id) ?? null : null,
           typeById.get(r.type_id)!,
           currByCode.get(r.currency_code)!,
+          countByAccount.get(r.id) ?? 0,
         ),
       ),
     };
@@ -200,16 +219,25 @@ export const getAccount = api(
     if (!hasAdmin(auth)) {
       await assertAclRead(id, Number(auth.userID));
     }
-    const [bc, type, curr] = await Promise.all([
+    const [bc, type, curr, accessCount] = await Promise.all([
       row.bankcontact_id !== null
         ? loadBankcontact(row.bankcontact_id)
         : Promise.resolve(null),
       loadType(row.type_id),
       loadCurrency(row.currency_code),
+      countAccessForAccount(row.id),
     ]);
-    return toView(row, bc, type, curr);
+    return toView(row, bc, type, curr, accessCount);
   },
 );
+
+async function countAccessForAccount(accountId: number): Promise<number> {
+  const [row] = await db
+    .select({ n: count() })
+    .from(financeAccountAccess)
+    .where(eq(financeAccountAccess.account_id, accountId));
+  return row?.n ?? 0;
+}
 
 // -----------------------------------------------------------------------
 // Create (finance.accounts.manage)
@@ -310,7 +338,8 @@ export const createAccount = api(
     const bc = row.bankcontact_id !== null
       ? await loadBankcontact(row.bankcontact_id)
       : null;
-    return toView(row, bc, type, currency);
+    // Newly created — no ACL entries yet by definition.
+    return toView(row, bc, type, currency, 0);
   },
 );
 
@@ -401,15 +430,16 @@ export const updateAccount = api(
       .where(eq(financeAccount.id, p.id))
       .returning();
 
-    const [bc, type, curr] = await Promise.all([
+    const [bc, type, curr, accessCount] = await Promise.all([
       row.bankcontact_id !== null
         ? loadBankcontact(row.bankcontact_id)
         : Promise.resolve(null),
       loadType(row.type_id),
       loadCurrency(row.currency_code),
+      countAccessForAccount(row.id),
     ]);
     void existing;
-    return toView(row, bc, type, curr);
+    return toView(row, bc, type, curr, accessCount);
   },
 );
 
@@ -477,12 +507,13 @@ export const linkAccount = api(
       .returning();
     void account;
 
-    const [bc, type, curr] = await Promise.all([
+    const [bc, type, curr, accessCount] = await Promise.all([
       loadBankcontact(row.bankcontact_id!),
       loadType(row.type_id),
       loadCurrency(row.currency_code),
+      countAccessForAccount(row.id),
     ]);
-    return toView(row, bc, type, curr);
+    return toView(row, bc, type, curr, accessCount);
   },
 );
 
@@ -508,11 +539,12 @@ export const unlinkAccount = api(
       .where(eq(financeAccount.id, id))
       .returning();
 
-    const [type, curr] = await Promise.all([
+    const [type, curr, accessCount] = await Promise.all([
       loadType(row.type_id),
       loadCurrency(row.currency_code),
+      countAccessForAccount(row.id),
     ]);
-    return toView(row, null, type, curr);
+    return toView(row, null, type, curr, accessCount);
   },
 );
 

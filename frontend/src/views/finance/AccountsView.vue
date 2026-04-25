@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -9,9 +9,23 @@ import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
 import Message from 'primevue/message'
 import { useAccountsStore } from '../../stores/finance/accounts'
+import { useAuthStore } from '../../stores/auth'
 
 const store = useAccountsStore()
 const router = useRouter()
+const authStore = useAuthStore()
+
+// "I have finance.view but the listAccounts response is empty" — that
+// almost always means the user has no ACL entries yet. Distinguish from
+// "still loading" / "request failed". Admins bypass the ACL on the
+// backend, so they should never hit this banner — guard explicitly.
+const showAclEmptyHint = computed(
+  () =>
+    !store.loading &&
+    !store.error &&
+    store.items.length === 0 &&
+    !authStore.hasPermission('finance.admin'),
+)
 
 onMounted(() => {
   void store.refresh()
@@ -101,6 +115,12 @@ async function createManual() {
 
     <Message v-if="store.error" severity="error" :closable="false">
       {{ store.error }}
+    </Message>
+
+    <Message v-if="showAclEmptyHint" severity="info" :closable="false">
+      Du hast noch keine Konten freigeschaltet. Bitte wende dich an einen
+      Administrator — er kann dir über „Konto-Zugriff" Lese- oder
+      Schreibrechte für einzelne Konten vergeben.
     </Message>
 
     <DataTable

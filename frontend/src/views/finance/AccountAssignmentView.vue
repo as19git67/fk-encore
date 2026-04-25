@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import Select from 'primevue/select'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
@@ -10,6 +10,41 @@ import type { UserWithRoles } from '../../api/users'
 
 const accountsStore = useAccountsStore()
 const selectedAccountId = ref<number | null>(null)
+
+interface AccountOption {
+  id: number
+  label: string
+  access_count: number
+}
+
+// Unassigned accounts (access_count === 0) come first so the admin
+// has a visible TODO list right after a fresh Finanzkraft import.
+// Within each group we keep the natural label ordering from the store.
+const accountOptions = computed<AccountOption[]>(() => {
+  const items = accountsStore.items.map((a) => {
+    const suffix =
+      a.access_count === 0
+        ? ' — noch keine Zuweisung'
+        : a.access_count === 1
+          ? ' — 1 Person'
+          : ` — ${a.access_count} Personen`
+    return {
+      id: a.id,
+      label: `${a.label}${suffix}`,
+      access_count: a.access_count,
+    }
+  })
+  return items.sort((x, y) => {
+    if ((x.access_count === 0) !== (y.access_count === 0)) {
+      return x.access_count === 0 ? -1 : 1
+    }
+    return x.label.localeCompare(y.label, 'de')
+  })
+})
+
+const unassignedCount = computed(
+  () => accountsStore.items.filter((a) => a.access_count === 0).length,
+)
 const entries = ref<
   Array<{ user_id: number; user_email: string; user_name: string; level: 'read' | 'write' }>
 >([])
@@ -79,6 +114,9 @@ async function save() {
     )
     entries.value = resp.items
     diff.value = resp.diff
+    // Re-pull the account list so the selector's "noch keine Zuweisung"
+    // tag and the unassigned counter reflect the change immediately.
+    await accountsStore.refresh()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -104,17 +142,27 @@ async function save() {
     >
       Gespeichert: +{{ diff.inserted }} / ~{{ diff.updated }} / −{{ diff.deleted }}
     </Message>
+    <Message
+      v-if="unassignedCount > 0"
+      severity="warn"
+      :closable="false"
+    >
+      {{ unassignedCount }} {{ unassignedCount === 1 ? 'Konto' : 'Konten' }}
+      ohne Zuweisung — für non-admin User unsichtbar, bis hier Zugriffe
+      vergeben sind.
+    </Message>
 
     <section class="card">
       <label>
         <span>Konto wählen</span>
         <Select
           v-model="selectedAccountId"
-          :options="accountsStore.items"
+          :options="accountOptions"
           optionLabel="label"
           optionValue="id"
           placeholder="Konto auswählen …"
           class="full"
+          filter
         />
       </label>
     </section>

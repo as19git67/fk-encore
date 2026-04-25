@@ -1,14 +1,24 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import FileUpload from 'primevue/fileupload'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import { importFinanzkraft, type ImportResponse } from '../../api/finance'
 
+const router = useRouter()
 const selected = ref<File | null>(null)
 const running = ref(false)
 const result = ref<ImportResponse | null>(null)
 const error = ref<string | null>(null)
+
+// Number of newly inserted accounts — drives the post-import "Zugriffe
+// vergeben"-CTA. Skipped (already-existing) accounts already have their
+// ACL from a previous run, so they don't count.
+const newAccountCount = computed<number>(() => {
+  const counts = result.value?.counts as Record<string, number> | undefined
+  return counts?.accounts ?? 0
+})
 
 function onSelect(event: { files: File[] }) {
   selected.value = event.files[0] ?? null
@@ -83,6 +93,25 @@ function downloadErrors() {
         />
       </div>
     </section>
+
+    <Message
+      v-if="result && newAccountCount > 0"
+      severity="info"
+      :closable="false"
+      class="post-import-cta"
+    >
+      <p>
+        {{ newAccountCount }} neue {{ newAccountCount === 1 ? 'Konto' : 'Konten' }}
+        importiert. Damit non-admin User sie sehen, müssen jetzt manuell
+        Zugriffe vergeben werden.
+      </p>
+      <Button
+        label="Konto-Zugriffe vergeben"
+        icon="pi pi-key"
+        size="small"
+        @click="router.push({ name: 'finance-admin-access' })"
+      />
+    </Message>
 
     <section v-if="result" class="card">
       <h2>Ergebnis</h2>
@@ -186,6 +215,15 @@ function downloadErrors() {
 }
 .hint {
   color: var(--p-text-muted-color);
+  margin: 0;
+}
+.post-import-cta :deep(.p-message-text) {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+.post-import-cta p {
   margin: 0;
 }
 </style>
