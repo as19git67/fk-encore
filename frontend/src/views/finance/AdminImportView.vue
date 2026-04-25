@@ -3,6 +3,8 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import FileUpload from 'primevue/fileupload'
 import Button from 'primevue/button'
+import Checkbox from 'primevue/checkbox'
+import Dialog from 'primevue/dialog'
 import Message from 'primevue/message'
 import { importFinanzkraft, type ImportResponse } from '../../api/finance'
 
@@ -11,6 +13,12 @@ const selected = ref<File | null>(null)
 const running = ref(false)
 const result = ref<ImportResponse | null>(null)
 const error = ref<string | null>(null)
+
+// "Wipe first" = TRUNCATE finance_*-tables before importing. Useful for
+// iterative testing of mapping changes. Behind a confirmation dialog so
+// no one nukes their data with a stray click.
+const wipeFirst = ref(false)
+const confirmVisible = ref(false)
 
 // Number of newly inserted accounts — drives the post-import "Zugriffe
 // vergeben"-CTA. Skipped (already-existing) accounts already have their
@@ -26,7 +34,17 @@ function onSelect(event: { files: File[] }) {
   result.value = null
 }
 
+function onClickStart() {
+  if (!selected.value) return
+  if (wipeFirst.value) {
+    confirmVisible.value = true
+    return
+  }
+  void runImport()
+}
+
 async function runImport() {
+  confirmVisible.value = false
   if (!selected.value) return
   running.value = true
   error.value = null
@@ -34,7 +52,9 @@ async function runImport() {
   try {
     const text = await selected.value.text()
     const parsed = JSON.parse(text)
-    result.value = await importFinanzkraft(parsed)
+    result.value = await importFinanzkraft(parsed, {
+      wipeFirst: wipeFirst.value,
+    })
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -83,13 +103,23 @@ function downloadErrors() {
       <p v-if="selected" class="hint">
         {{ selected.name }} · {{ (selected.size / 1024 / 1024).toFixed(2) }} MB
       </p>
+      <div class="wipe-row">
+        <Checkbox v-model="wipeFirst" inputId="wipeFirst" binary />
+        <label for="wipeFirst">
+          <strong>Vorher alle Finanzdaten löschen</strong>
+          <span class="hint">
+            (Bankkontakte, Konten, Transaktionen, Tags, ACL, Salden,
+            offene TAN-Sessions). Stammdaten bleiben.
+          </span>
+        </label>
+      </div>
       <div class="actions">
         <Button
           label="Import starten"
           icon="pi pi-cloud-upload"
           :disabled="!selected || running"
           :loading="running"
-          @click="runImport"
+          @click="onClickStart"
         />
       </div>
     </section>
@@ -147,6 +177,39 @@ function downloadErrors() {
         </ul>
       </div>
     </section>
+
+    <Dialog
+      v-model:visible="confirmVisible"
+      modal
+      header="Wirklich alle Finanzdaten löschen?"
+      :style="{ width: '32rem' }"
+    >
+      <p>
+        Beim Import werden zuerst <strong>alle</strong> Bankkontakte,
+        Konten, Transaktionen, Tags, ACL-Einträge, Saldenhistorie und
+        offene TAN-Sessions <strong>unwiderruflich gelöscht</strong> und
+        anschließend die Datei eingespielt.
+      </p>
+      <p class="hint">
+        Stammdaten (Währungen, Kontotypen, Zeiträume) bleiben erhalten.
+      </p>
+      <template #footer>
+        <Button
+          label="Abbrechen"
+          severity="secondary"
+          text
+          :disabled="running"
+          @click="confirmVisible = false"
+        />
+        <Button
+          label="Löschen + Importieren"
+          icon="pi pi-trash"
+          severity="danger"
+          :loading="running"
+          @click="runImport"
+        />
+      </template>
+    </Dialog>
   </div>
 </template>
 
@@ -185,6 +248,25 @@ function downloadErrors() {
 .actions {
   display: flex;
   justify-content: flex-end;
+}
+.wipe-row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  padding: 0.6rem 0.85rem;
+  background: color-mix(in srgb, var(--p-red-500, #ef4444) 8%, transparent);
+  border-left: 3px solid var(--p-red-500, #ef4444);
+  border-radius: 6px;
+}
+.wipe-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  cursor: pointer;
+  line-height: 1.35;
+}
+.wipe-row label .hint {
+  font-size: 0.85rem;
 }
 .result-table {
   width: 100%;

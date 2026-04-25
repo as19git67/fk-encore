@@ -63,6 +63,7 @@ const typeOptions = [
   { kind: 'depot', label: 'Depot' },
   { kind: 'bausparen', label: 'Bausparen' },
   { kind: 'kreditkarte', label: 'Kreditkarte' },
+  { kind: 'bargeld', label: 'Bargeld' },
   { kind: 'sonstige', label: 'Sonstige' },
 ]
 

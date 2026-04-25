@@ -28,9 +28,13 @@ export interface ImportBankcontact {
 }
 
 export interface ImportAccount {
-  /** Parent bankcontact is matched via (blz, login). */
-  bankcontact_blz: string;
-  bankcontact_login: string;
+  /**
+   * Parent bankcontact lookup keys. Both null/missing → manual account
+   * (no bankcontact_id). Mixing one set / one null is a validation error
+   * because it suggests the export is malformed.
+   */
+  bankcontact_blz?: string | null;
+  bankcontact_login?: string | null;
   type_kind: string; // e.g. "giro" — validated against the enum
   currency_code: string; // e.g. "EUR"
   /** Optional, primary natural key for dedupe when present. */
@@ -153,15 +157,19 @@ function validateBankcontact(raw: unknown, i: number): ImportBankcontact {
 
 function validateAccount(raw: unknown, i: number): ImportAccount {
   const o = assertObject(raw, `accounts[${i}]`);
+  // bankcontact_blz/login: both present (linked) or both absent (manual);
+  // mixing the two is a malformed-export signal we surface immediately.
+  const blz = optString(o.bankcontact_blz, `accounts[${i}].bankcontact_blz`) ?? null;
+  const login = optString(o.bankcontact_login, `accounts[${i}].bankcontact_login`) ?? null;
+  if ((blz === null) !== (login === null)) {
+    throw new ImportSchemaError(
+      `accounts[${i}]`,
+      "bankcontact_blz and bankcontact_login must be both set or both omitted",
+    );
+  }
   return {
-    bankcontact_blz: assertNonEmptyString(
-      o.bankcontact_blz,
-      `accounts[${i}].bankcontact_blz`,
-    ),
-    bankcontact_login: assertNonEmptyString(
-      o.bankcontact_login,
-      `accounts[${i}].bankcontact_login`,
-    ),
+    bankcontact_blz: blz,
+    bankcontact_login: login,
     type_kind: assertNonEmptyString(o.type_kind, `accounts[${i}].type_kind`),
     currency_code: assertNonEmptyString(
       o.currency_code,

@@ -24,7 +24,7 @@
 import { createHash } from "node:crypto";
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
 import { checkRateLimit } from "../user/rateLimiter";
@@ -63,6 +63,17 @@ interface ImportRequest {
    * enough.
    */
   export: unknown;
+  /**
+   * When true, every finance_* row (bankcontacts, accounts, transactions,
+   * tags, balances, ACL entries, embeddings, TAN sessions) is wiped
+   * before the import starts. Stammdaten (currencies, account_type,
+   * timespan, system_pref) are NOT touched.
+   *
+   * This is the "clean slate" path for iterative testing with the
+   * Finanzkraft export — without it a re-import is idempotent (skips
+   * existing rows) which makes it hard to test mapping changes.
+   */
+  wipe_first?: boolean;
 }
 
 interface ValidationError {
@@ -112,6 +123,10 @@ export const importFinanzkraft = api(
         throw APIError.invalidArgument(err.message);
       }
       throw err;
+    }
+
+    if (req.wipe_first) {
+      await wipeFinanceData();
     }
 
     const counts: EntityCounts = {
@@ -184,6 +199,15 @@ function accountKey(bc: string, accountNumber: string): string {
   return `${bc}::${accountNumber}`;
 }
 
+/** Natural key for manual accounts (no bankcontact). Includes label so
+ * two cash wallets with the same synthetic account_number don't collide
+ * — e.g. the Finanzkraft converter assigns "fk-1", "fk-2" to its two
+ * cash accounts but they have different labels ("Bargeld Anton" vs.
+ * "Bargeld Martina"). */
+function manualAccountKey(accountNumber: string, label: string): string {
+  return `manual::${accountNumber}::${label}`;
+}
+
 function transactionLookupKey(
   accountId: number,
   bookingDate: string,
@@ -209,6 +233,41 @@ function computeDedupeHash(t: ImportTransaction): string {
     t.counterparty_iban ?? "",
   ].join("|");
   return createHash("sha256").update(canonical).digest("hex");
+}
+
+// -----------------------------------------------------------------------
+// Wipe (req.wipe_first)
+// -----------------------------------------------------------------------
+
+/**
+ * Truncate every finance_* table that holds user data so a re-run of the
+ * importer starts on a clean slate. Stammdaten (currencies, account
+ * types, timespans, system prefs) are deliberately preserved — they're
+ * shipped via the migration seed and re-creating them here would risk
+ * drifting from that seed.
+ *
+ * `finance_transaction_embedding` is included even though it lives only
+ * as a raw migration (not in db/schema.ts), because pgvector rows
+ * reference transactions and would block the TRUNCATE without CASCADE.
+ *
+ * One TRUNCATE statement with a comma-separated list lets Postgres do
+ * the whole wipe in one transaction — no partial state visible to a
+ * concurrent reader.
+ */
+async function wipeFinanceData(): Promise<void> {
+  await db.execute(sql`
+    TRUNCATE TABLE
+      finance_tag_transaction,
+      finance_transaction_embedding,
+      finance_transaction,
+      finance_tag,
+      finance_account_balance,
+      finance_account_access,
+      finance_account,
+      finance_tan_session,
+      finance_bankcontact
+    RESTART IDENTITY CASCADE
+  `);
 }
 
 // -----------------------------------------------------------------------
@@ -295,40 +354,61 @@ async function importAccounts(
       bankcontact_id: financeAccount.bankcontact_id,
       iban: financeAccount.iban,
       account_number: financeAccount.account_number,
+      label: financeAccount.label,
     })
     .from(financeAccount);
   for (const row of existing) {
-    // Compose the natural key using the bankcontact's (blz, login):
-    // we need the bankcontact row's natural key, but we only have
-    // bankcontact_id here. Instead, key directly by
-    // (bankcontact_id, account_number).
-    idByKey.set(accountKey(String(row.bankcontact_id), row.account_number), row.id);
+    if (row.bankcontact_id !== null) {
+      idByKey.set(
+        accountKey(String(row.bankcontact_id), row.account_number),
+        row.id,
+      );
+    } else {
+      // Manual accounts have no bankcontact — natural key is
+      // (account_number, label) so the same physical wallet imported
+      // twice doesn't duplicate.
+      idByKey.set(manualAccountKey(row.account_number, row.label), row.id);
+      idByKey.set(`manual::${row.account_number}`, row.id);
+    }
     if (row.iban) idByIban.set(row.iban, row.id);
   }
 
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
 
-    const bcId = bankcontactIdByKey.get(
-      bankcontactKey(r.bankcontact_blz, r.bankcontact_login),
-    );
-    if (!bcId) {
-      errors.push({
-        entity: "accounts",
-        row: i,
-        message: `unknown bankcontact (blz=${r.bankcontact_blz}, login=${r.bankcontact_login})`,
-      });
-      continue;
+    let bcId: number | null = null;
+    if (r.bankcontact_blz && r.bankcontact_login) {
+      const found = bankcontactIdByKey.get(
+        bankcontactKey(r.bankcontact_blz, r.bankcontact_login),
+      );
+      if (!found) {
+        errors.push({
+          entity: "accounts",
+          row: i,
+          message: `unknown bankcontact (blz=${r.bankcontact_blz}, login=${r.bankcontact_login})`,
+        });
+        continue;
+      }
+      bcId = found;
     }
 
-    // Idempotency: iban wins when present, (bankcontact_id,
-    // account_number) is the fallback natural key.
+    // Idempotency: iban wins when present. For linked accounts the
+    // fallback is (bc_id, account_number); for manual accounts it's
+    // (account_number, label) since there is no bc.
     const ibanMatch = r.iban ? idByIban.get(r.iban) : undefined;
-    const numberMatch = idByKey.get(accountKey(String(bcId), r.account_number));
+    const numberMatch =
+      bcId !== null
+        ? idByKey.get(accountKey(String(bcId), r.account_number))
+        : idByKey.get(manualAccountKey(r.account_number, r.label));
     if (ibanMatch || numberMatch) {
       skipped.accounts++;
       const finalId = ibanMatch ?? numberMatch!;
-      idByKey.set(accountKey(String(bcId), r.account_number), finalId);
+      if (bcId !== null) {
+        idByKey.set(accountKey(String(bcId), r.account_number), finalId);
+      } else {
+        idByKey.set(manualAccountKey(r.account_number, r.label), finalId);
+        idByKey.set(`manual::${r.account_number}`, finalId);
+      }
       if (r.iban) idByIban.set(r.iban, finalId);
       continue;
     }
@@ -380,7 +460,14 @@ async function importAccounts(
           active: r.active ?? true,
         })
         .returning({ id: financeAccount.id });
-      idByKey.set(accountKey(String(bcId), r.account_number), inserted.id);
+      if (bcId !== null) {
+        idByKey.set(accountKey(String(bcId), r.account_number), inserted.id);
+      } else {
+        idByKey.set(manualAccountKey(r.account_number, r.label), inserted.id);
+        // Stage 3 (transactions) uses the simpler manual::<number> key
+        // when the row has no iban/bankcontact context.
+        idByKey.set(`manual::${r.account_number}`, inserted.id);
+      }
       if (r.iban) idByIban.set(r.iban, inserted.id);
       counts.accounts++;
     } catch (err: any) {
@@ -531,20 +618,18 @@ function resolveAccountId(
     const id = accountIdByKey.get(`iban::${r.account_iban}`);
     if (id) return id;
   }
-  // Fall back to (bankcontact key → bc_id → account_number)
-  if (
-    r.account_bankcontact_blz &&
-    r.account_bankcontact_login &&
-    r.account_number
-  ) {
-    // We don't have bc_id directly here; accountIdByKey is keyed by
-    // (String(bc_id), account_number). The bankcontactIdByKey from
-    // stage 1 isn't visible to stage 3, so we reverse-lookup via the
-    // iban match above or fall through. For MVP the iban path is
-    // the expected primary; the composite fallback is kept in the
-    // interface for future import formats.
-    return null;
+  // Manual-account fallback: stage 2 indexes manual rows under
+  // `manual::<account_number>` so cash wallets / non-IBAN accounts
+  // (Finanzkraft import) can still be resolved by their synthetic
+  // account_number.
+  if (r.account_number) {
+    const id = accountIdByKey.get(`manual::${r.account_number}`);
+    if (id) return id;
   }
+  // Composite (bankcontact_blz+login+account_number) fallback is left
+  // unimplemented — the bankcontactIdByKey isn't passed to stage 3,
+  // and our two import shapes (Finanzkraft converter, future ones)
+  // both rely on iban or the manual::<number> path above.
   return null;
 }
 

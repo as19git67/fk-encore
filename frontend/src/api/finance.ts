@@ -504,10 +504,14 @@ export interface ImportResponse {
 
 export async function importFinanzkraft(
   exportJson: unknown,
+  options: { wipeFirst?: boolean } = {},
 ): Promise<ImportResponse> {
   return apiFetch('/finance/admin/import', {
     method: 'POST',
-    body: JSON.stringify({ export: exportJson }),
+    body: JSON.stringify({
+      export: exportJson,
+      wipe_first: options.wipeFirst === true,
+    }),
     // Large imports can take a while — allow up to 5 minutes before
     // the client aborts.
     timeoutMs: 5 * 60_000,

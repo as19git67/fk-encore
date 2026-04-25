@@ -914,6 +914,7 @@ export const financeAccountKindEnum = pgEnum("finance_account_kind", [
   "depot",
   "bausparen",
   "kreditkarte",
+  "bargeld",
   "sonstige",
 ]);
 

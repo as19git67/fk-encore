@@ -294,7 +294,7 @@ CREATE TYPE finance_account_level AS ENUM ('read', 'write');
 CREATE TYPE finance_tag_source AS ENUM ('user', 'ai');
 CREATE TYPE finance_account_kind AS ENUM (
   'giro','tagesgeld','festgeld','kredit','depot','bausparen',
-  'kreditkarte','sonstige'
+  'kreditkarte','bargeld','sonstige'
 );
 
 CREATE TABLE finance_currency (
