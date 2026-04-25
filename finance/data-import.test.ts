@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { getAuthData } from "~encore/auth";
 import { eq } from "drizzle-orm";
@@ -13,6 +14,28 @@ import {
 } from "../db/schema";
 import { importFinanzkraft } from "./data-import";
 import type { FinanzkraftExport } from "./import-schema";
+
+/** Mirror of computeDedupeHash in data-import.ts so test fixtures can
+ *  pre-compute the same hash the importer would, which the new
+ *  composite tag-link lookup relies on. */
+function dedupe(
+  bookingDate: string,
+  amount: string,
+  currency: string,
+  purpose: string,
+  counterpartyIban = "",
+  valueDate = "",
+): string {
+  const canonical = [
+    bookingDate,
+    valueDate,
+    amount,
+    currency.toUpperCase(),
+    purpose,
+    counterpartyIban,
+  ].join("|");
+  return createHash("sha256").update(canonical).digest("hex");
+}
 import { __resetRateLimiterForTests } from "../user/rateLimiter";
 
 function setAuth(userID: string, perms: string[]) {
@@ -67,7 +90,6 @@ function miniExport(): FinanzkraftExport {
         currency_code: "EUR",
         purpose: "Supermarkt",
         counterparty: "REWE",
-        fints_id: "FINTS-001",
       },
       {
         account_iban: "DE12345678901234567890",
@@ -76,13 +98,22 @@ function miniExport(): FinanzkraftExport {
         currency_code: "EUR",
         purpose: "Gehalt August",
         counterparty: "AG GmbH",
-        fints_id: "FINTS-002",
       },
     ],
     tags: ["alltag", "gehalt"],
     tag_links: [
-      { tag: "alltag", fints_id: "FINTS-001" },
-      { tag: "gehalt", fints_id: "FINTS-002" },
+      {
+        tag: "alltag",
+        account_iban: "DE12345678901234567890",
+        booking_date: "2024-08-10",
+        dedupe_hash: dedupe("2024-08-10", "-47.30", "EUR", "Supermarkt"),
+      },
+      {
+        tag: "gehalt",
+        account_iban: "DE12345678901234567890",
+        booking_date: "2024-08-15",
+        dedupe_hash: dedupe("2024-08-15", "3800.00", "EUR", "Gehalt August"),
+      },
     ],
   };
 }
@@ -180,18 +211,14 @@ describe("finance/data-import — idempotency", () => {
     expect((await db.select().from(financeTagTransaction)).length).toBe(2);
   });
 
-  it("transactions dedupe via (account_id, dedupe_hash) even without fints_id", async () => {
+  it("transactions dedupe via (account_id, dedupe_hash)", async () => {
     setAuth("1", ["finance.admin"]);
-    const withoutFintsId: FinanzkraftExport = {
+    const exportData: FinanzkraftExport = {
       ...miniExport(),
-      transactions: miniExport().transactions.map((t) => ({
-        ...t,
-        fints_id: null,
-      })),
-      tag_links: [], // fints_id-only linking would fail; skip here
+      tag_links: [],
     };
-    await importFinanzkraft({ export: withoutFintsId });
-    const r2 = await importFinanzkraft({ export: withoutFintsId });
+    await importFinanzkraft({ export: exportData });
+    const r2 = await importFinanzkraft({ export: exportData });
     expect(r2.skipped.transactions).toBe(2);
     expect(r2.counts.transactions).toBe(0);
   });
@@ -261,7 +288,14 @@ describe("finance/data-import — validation errors", () => {
     setAuth("1", ["finance.admin"]);
     const bad: FinanzkraftExport = {
       ...miniExport(),
-      tag_links: [{ tag: "nonexistent", fints_id: "FINTS-001" }],
+      tag_links: [
+        {
+          tag: "nonexistent",
+          account_iban: "DE12345678901234567890",
+          booking_date: "2024-08-10",
+          dedupe_hash: dedupe("2024-08-10", "-47.30", "EUR", "Supermarkt"),
+        },
+      ],
     };
     const result = await importFinanzkraft({ export: bad });
     expect(result.errors.some((e) => /unknown tag/.test(e.message))).toBe(

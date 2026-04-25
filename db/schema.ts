@@ -1076,7 +1076,6 @@ export const financeTransaction = pgTable(
     counterparty_iban: text("counterparty_iban"),
     counterparty_bic: text("counterparty_bic"),
     counterparty_bank_id: text("counterparty_bank_id"),
-    fints_id: text("fints_id"),
     /** SEPA End-to-End reference (EREF). */
     end_to_end_ref: text("end_to_end_ref"),
     /** SEPA Mandate reference (MREF) for direct debits. */

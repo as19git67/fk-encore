@@ -920,7 +920,7 @@ describe("runFetchAccounts — happy path", () => {
       purpose: "Kaffee",
       counterparty: "Bistro",
       counterpartyIban: "DE99",
-      fintsId: "REF-001",
+      bankRef: "REF-001",
     });
     expect(a.balance).toEqual({
       asOf: "2026-04-24",

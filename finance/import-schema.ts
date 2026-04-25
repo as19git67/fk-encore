@@ -65,7 +65,6 @@ export interface ImportTransaction {
   counterparty_iban?: string | null;
   counterparty_bic?: string | null;
   counterparty_bank_id?: string | null;
-  fints_id?: string | null;
   /** SEPA / MT940 fields — match the columns added in migration 0055. */
   end_to_end_ref?: string | null;
   mandate_ref?: string | null;
@@ -89,13 +88,11 @@ export interface ImportTagLink {
   /** Tag name — always imported as source='user'. */
   tag: string;
   /**
-   * How to locate the transaction. Either by fints_id (preferred, when
-   * the Finanzkraft export preserves FinTS IDs) or by
-   * (account_lookup + booking_date + dedupe_hash) — the same keys the
-   * transaction import uses.
+   * Composite key to locate the parent transaction:
+   * `account_iban` (or `account_number` for cash wallets) + `booking_date`
+   * + `dedupe_hash`. The exporter must compute the same dedupe hash the
+   * transaction row carries — see `computeDedupeHash` in data-import.ts.
    */
-  fints_id?: string | null;
-  /** Same "find this transaction" keys as ImportTransaction. */
   account_iban?: string | null;
   account_bankcontact_blz?: string | null;
   account_bankcontact_login?: string | null;
@@ -276,7 +273,6 @@ function validateTransaction(raw: unknown, i: number): ImportTransaction {
       o.counterparty_bank_id,
       `transactions[${i}].counterparty_bank_id`,
     ),
-    fints_id: optString(o.fints_id, `transactions[${i}].fints_id`),
     end_to_end_ref: optString(
       o.end_to_end_ref,
       `transactions[${i}].end_to_end_ref`,
@@ -322,7 +318,6 @@ function validateTagLink(raw: unknown, i: number): ImportTagLink {
   const o = assertObject(raw, `tag_links[${i}]`);
   return {
     tag: assertNonEmptyString(o.tag, `tag_links[${i}].tag`),
-    fints_id: optString(o.fints_id, `tag_links[${i}].fints_id`),
     account_iban: optString(o.account_iban, `tag_links[${i}].account_iban`),
     account_bankcontact_blz: optString(
       o.account_bankcontact_blz,

@@ -33,6 +33,7 @@
  *   node tools/finanzkraft-to-fk-encore.js < export.json > import.json
  */
 
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 // ---------------------------------------------------------------------------
@@ -151,7 +152,7 @@ interface OutTransaction {
   counterparty_iban: string | null;
   counterparty_bic: string | null;
   counterparty_bank_id: string | null;
-  fints_id: string;
+  dedupe_hash: string;
   end_to_end_ref: string | null;
   mandate_ref: string | null;
   creditor_id: string | null;
@@ -168,7 +169,10 @@ interface OutTransaction {
 
 interface OutTagLink {
   tag: string;
-  fints_id: string;
+  account_iban: string | null;
+  account_number: string;
+  booking_date: string;
+  dedupe_hash: string;
 }
 
 interface OutExport {
@@ -526,6 +530,31 @@ function collectCurrencies(input: FinanzkraftExport): OutCurrency[] {
     .map(([code, symbol]) => ({ code, symbol, decimals: 2 }));
 }
 
+/**
+ * Mirror `computeDedupeHash` from finance/data-import.ts. Has to use
+ * exactly the same canonical-field ordering or the importer will see
+ * the converter-supplied hashes as different from what it would
+ * compute itself, breaking re-import idempotency.
+ */
+function computeDedupeHash(
+  bookingDate: string,
+  valueDate: string | null,
+  amount: string,
+  currencyCode: string,
+  purpose: string | null,
+  counterpartyIban: string | null,
+): string {
+  const canonical = [
+    bookingDate,
+    valueDate ?? "",
+    amount,
+    currencyCode.toUpperCase(),
+    purpose ?? "",
+    counterpartyIban ?? "",
+  ].join("|");
+  return createHash("sha256").update(canonical).digest("hex");
+}
+
 function isoDate(s: string | undefined): string | null {
   if (!s) return null;
   // Finanzkraft emits ISO timestamps like "2026-04-13T12:00:00.000Z"
@@ -560,14 +589,28 @@ function convertTransaction(
   const originalAmountNum = t["Fk_Transaction:originalAmount"];
   const exchangeRateNum = t["Fk_Transaction:exchangeRate"];
   const primaNotaRaw = t["Fk_Transaction:primaNotaNo"];
+  const amount = t["Fk_Transaction:amount"].toFixed(2);
+  const currencyCode = t["Fk_Currency:id"].toUpperCase();
+  const counterpartyIban =
+    t["Fk_Transaction:IBAN"]?.trim() ||
+    t["Fk_Transaction:payeePayerAcctNo"]?.trim() ||
+    null;
+  const dedupeHash = computeDedupeHash(
+    bookingDate,
+    valueDate,
+    amount,
+    currencyCode,
+    purpose,
+    counterpartyIban,
+  );
 
   return {
     account_iban: account.iban,
     account_number: account.account_number,
     booking_date: bookingDate,
     value_date: valueDate,
-    amount: t["Fk_Transaction:amount"].toFixed(2),
-    currency_code: t["Fk_Currency:id"].toUpperCase(),
+    amount,
+    currency_code: currencyCode,
     purpose,
     counterparty: t["Fk_Transaction:payee"]?.trim() || null,
     counterparty_iban:
@@ -576,7 +619,7 @@ function convertTransaction(
       null,
     counterparty_bic: t["Fk_Transaction:BIC"]?.trim() || null,
     counterparty_bank_id: t["Fk_Transaction:payeeBankId"]?.trim() || null,
-    fints_id: `fk-${t["Fk_Transaction:id"]}`,
+    dedupe_hash: dedupeHash,
     end_to_end_ref: t["Fk_Transaction:EREF"]?.trim() || null,
     mandate_ref: t["Fk_Transaction:MREF"]?.trim() || null,
     creditor_id: t["Fk_Transaction:CRED"]?.trim() || null,
@@ -645,7 +688,13 @@ function convert(input: FinanzkraftExport): OutExport {
     transactions.push(out);
     for (const tag of extractTags(t)) {
       tagSet.add(tag);
-      tagLinks.push({ tag, fints_id: out.fints_id });
+      tagLinks.push({
+        tag,
+        account_iban: out.account_iban,
+        account_number: out.account_number,
+        booking_date: out.booking_date,
+        dedupe_hash: out.dedupe_hash,
+      });
     }
   }
 

@@ -81,8 +81,11 @@ export interface FintsTransactionData {
   purpose: string | null;
   counterparty: string | null;
   counterpartyIban: string | null;
-  /** Bank-stable reference if present (bankReference); otherwise null. */
-  fintsId: string | null;
+  /** lib-fints `bankReference` — the bank's internal booking-batch
+   *  reference. Often missing; not used for idempotency (that's
+   *  `dedupe_hash` over the canonical fields). Maps to the `bank_ref`
+   *  column. */
+  bankRef: string | null;
   /** Full lib-fints Transaction object, verbatim, for the raw JSONB column. */
   raw: Record<string, unknown>;
 }

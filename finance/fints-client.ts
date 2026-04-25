@@ -1240,7 +1240,7 @@ function mapStatements(
         purpose: t.purpose?.trim() || null,
         counterparty: t.remoteName?.trim() || null,
         counterpartyIban: t.remoteIdentifier?.trim() || null,
-        fintsId: t.bankReference?.trim() || null,
+        bankRef: t.bankReference?.trim() || null,
         raw: t as Record<string, unknown>,
       });
     }

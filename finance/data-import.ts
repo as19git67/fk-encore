@@ -187,6 +187,7 @@ export const importFinanzkraft = api(
     await importTagLinks(
       exportData.tag_links,
       tagIdByName,
+      accountIdByKey,
       transactionIdByLookup,
       counts,
       skipped,
@@ -549,7 +550,6 @@ async function importTransactions(
   errors: ValidationError[],
 ): Promise<Map<string, number>> {
   const idByLookup = new Map<string, number>();
-  const idByFintsId = new Map<string, number>();
 
   const currencies = await db.select({ code: financeCurrency.code }).from(financeCurrency);
   const currencySet = new Set(currencies.map((c) => c.code));
@@ -606,7 +606,6 @@ async function importTransactions(
           counterparty_iban: r.counterparty_iban ?? null,
           counterparty_bic: r.counterparty_bic ?? null,
           counterparty_bank_id: r.counterparty_bank_id ?? null,
-          fints_id: r.fints_id ?? null,
           end_to_end_ref: r.end_to_end_ref ?? null,
           mandate_ref: r.mandate_ref ?? null,
           creditor_id: r.creditor_id ?? null,
@@ -633,7 +632,6 @@ async function importTransactions(
           transactionLookupKey(accountId, bookingDate, dedupeHash),
           inserted.id,
         );
-        if (r.fints_id) idByFintsId.set(r.fints_id, inserted.id);
       } else {
         skipped.transactions++;
         // Need to resolve the existing row's id for tag linking
@@ -652,7 +650,6 @@ async function importTransactions(
             transactionLookupKey(accountId, bookingDate, dedupeHash),
             existing.id,
           );
-          if (r.fints_id) idByFintsId.set(r.fints_id, existing.id);
         }
       }
     } catch (err: any) {
@@ -664,11 +661,6 @@ async function importTransactions(
     }
   }
 
-  // Store the fints_id index under a distinct prefix so the tag-link
-  // stage can find either by fints_id or by the composite lookup.
-  for (const [fintsId, id] of idByFintsId) {
-    idByLookup.set(`fints::${fintsId}`, id);
-  }
   return idByLookup;
 }
 
@@ -746,6 +738,7 @@ async function importTags(
 async function importTagLinks(
   rows: ImportTagLink[],
   tagIdByName: Map<string, number>,
+  accountIdByKey: Map<string, number>,
   transactionIdByLookup: Map<string, number>,
   counts: EntityCounts,
   skipped: EntityCounts,
@@ -763,16 +756,15 @@ async function importTagLinks(
       continue;
     }
 
+    // Composite lookup: account_id (resolved from iban / manual::number)
+    // + booking_date + dedupe_hash. The same key shape stage 3 used to
+    // index inserted rows, so a hit means we're pointing at the right
+    // row. The hash must match what stage 3 saw — exporters that
+    // pre-compute it should use the same canonical-field set as
+    // computeDedupeHash().
     let transactionId: number | undefined;
-    if (r.fints_id) {
-      transactionId = transactionIdByLookup.get(`fints::${r.fints_id}`);
-    }
-    if (!transactionId && r.dedupe_hash && r.booking_date && r.account_iban) {
-      // Reverse-lookup by composite — we only stored lookups keyed by
-      // resolved accountId, so we'd need a DB query. For MVP we take
-      // the fints_id path (which the exporter should provide when
-      // available) or fall back to a DB query here.
-      const accountId = transactionIdByLookup.get(`iban::${r.account_iban}`);
+    if (r.dedupe_hash && r.booking_date) {
+      const accountId = resolveAccountId(r, accountIdByKey);
       if (accountId) {
         transactionId = transactionIdByLookup.get(
           transactionLookupKey(
@@ -787,7 +779,9 @@ async function importTagLinks(
       errors.push({
         entity: "tag_links",
         row: i,
-        message: "cannot locate target transaction (need fints_id or iban+booking_date+dedupe_hash)",
+        message:
+          "cannot locate target transaction (need account_iban or " +
+          "account_number, plus booking_date and dedupe_hash)",
       });
       continue;
     }

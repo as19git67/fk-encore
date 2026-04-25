@@ -142,7 +142,7 @@ export async function persistFetchResult(
             purpose: tx.purpose,
             counterparty: tx.counterparty,
             counterparty_iban: tx.counterpartyIban,
-            fints_id: tx.fintsId,
+            bank_ref: tx.bankRef,
             dedupe_hash: dedupeHash,
             raw: tx.raw,
           })
