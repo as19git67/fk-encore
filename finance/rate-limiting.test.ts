@@ -43,7 +43,7 @@ import { __resetRateLimiterForTests } from "../user/rateLimiter";
 import { setBankcontactCredentials } from "./bankcontacts";
 import { completeTanSession } from "./tan-sessions";
 import { triggerSync } from "./statements";
-import { importFinanzkraft } from "./data-import";
+import { importFinanceData } from "./data-import";
 import { query as analysisQuery } from "./analysis";
 import { suggestTagsBatch } from "./tag-suggester";
 import type { FinanzkraftExport } from "./import-schema";
@@ -332,10 +332,10 @@ describe("rate-limiting — POST /finance/admin/import", () => {
     };
 
     for (let i = 0; i < 3; i++) {
-      await importFinanzkraft({ export: emptyExport });
+      await importFinanceData({ export: emptyExport });
     }
     try {
-      await importFinanzkraft({ export: emptyExport });
+      await importFinanceData({ export: emptyExport });
       throw new Error("expected 429");
     } catch (err) {
       expect429(err);

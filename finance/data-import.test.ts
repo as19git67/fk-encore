@@ -12,7 +12,7 @@ import {
   financeTagTransaction,
   financeTransaction,
 } from "../db/schema";
-import { importFinanzkraft } from "./data-import";
+import { importFinanceData } from "./data-import";
 import type { FinanzkraftExport } from "./import-schema";
 
 /** Mirror of computeDedupeHash in data-import.ts so test fixtures can
@@ -124,7 +124,7 @@ describe("finance/data-import — permission", () => {
   it("rejects callers without finance.admin", async () => {
     setAuth("1", ["finance.accounts.manage"]);
     await expect(
-      importFinanzkraft({ export: miniExport() }),
+      importFinanceData({ export: miniExport() }),
     ).rejects.toThrow(/permission/);
   });
 });
@@ -132,7 +132,7 @@ describe("finance/data-import — permission", () => {
 describe("finance/data-import — happy path", () => {
   it("imports bankcontacts, accounts, transactions, tags and tag-links", async () => {
     setAuth("1", ["finance.admin"]);
-    const result = await importFinanzkraft({ export: miniExport() });
+    const result = await importFinanceData({ export: miniExport() });
     expect(result.errors).toEqual([]);
     expect(result.counts).toEqual({
       currencies: 0,
@@ -173,7 +173,7 @@ describe("finance/data-import — happy path", () => {
 
   it("never writes ACL rows", async () => {
     setAuth("1", ["finance.admin"]);
-    await importFinanzkraft({ export: miniExport() });
+    await importFinanceData({ export: miniExport() });
     const acl = await db.select().from(financeAccountAccess);
     expect(acl).toEqual([]);
   });
@@ -182,10 +182,10 @@ describe("finance/data-import — happy path", () => {
 describe("finance/data-import — idempotency", () => {
   it("re-running the same export produces zero inserts, all-skipped", async () => {
     setAuth("1", ["finance.admin"]);
-    const first = await importFinanzkraft({ export: miniExport() });
+    const first = await importFinanceData({ export: miniExport() });
     expect(first.counts.transactions).toBe(2);
 
-    const second = await importFinanzkraft({ export: miniExport() });
+    const second = await importFinanceData({ export: miniExport() });
     expect(second.errors).toEqual([]);
     expect(second.counts).toEqual({
       currencies: 0,
@@ -217,8 +217,8 @@ describe("finance/data-import — idempotency", () => {
       ...miniExport(),
       tag_links: [],
     };
-    await importFinanzkraft({ export: exportData });
-    const r2 = await importFinanzkraft({ export: exportData });
+    await importFinanceData({ export: exportData });
+    const r2 = await importFinanceData({ export: exportData });
     expect(r2.skipped.transactions).toBe(2);
     expect(r2.counts.transactions).toBe(0);
   });
@@ -238,7 +238,7 @@ describe("finance/data-import — validation errors", () => {
       transactions: [],
       tag_links: [],
     };
-    const result = await importFinanzkraft({ export: bad });
+    const result = await importFinanceData({ export: bad });
     expect(result.counts.bankcontacts).toBe(1);
     expect(result.counts.accounts).toBe(0);
     expect(result.errors.some((e) => /type_kind/.test(e.message))).toBe(true);
@@ -257,7 +257,7 @@ describe("finance/data-import — validation errors", () => {
       transactions: [],
       tag_links: [],
     };
-    const result = await importFinanzkraft({ export: bad });
+    const result = await importFinanceData({ export: bad });
     expect(result.errors.some((e) => /currency_code/.test(e.message))).toBe(
       true,
     );
@@ -277,7 +277,7 @@ describe("finance/data-import — validation errors", () => {
       ],
       tag_links: [],
     };
-    const result = await importFinanzkraft({ export: bad });
+    const result = await importFinanceData({ export: bad });
     expect(result.counts.transactions).toBe(0);
     expect(result.errors.some((e) => /parent account/.test(e.message))).toBe(
       true,
@@ -297,7 +297,7 @@ describe("finance/data-import — validation errors", () => {
         },
       ],
     };
-    const result = await importFinanzkraft({ export: bad });
+    const result = await importFinanceData({ export: bad });
     expect(result.errors.some((e) => /unknown tag/.test(e.message))).toBe(
       true,
     );
@@ -317,7 +317,7 @@ describe("finance/data-import — validation errors", () => {
       ],
       tag_links: [],
     };
-    const result = await importFinanzkraft({ export: bad });
+    const result = await importFinanceData({ export: bad });
     expect(result.counts.transactions).toBe(0);
     expect(result.errors.some((e) => /not a number/.test(e.message))).toBe(
       true,
@@ -329,14 +329,14 @@ describe("finance/data-import — schema validation", () => {
   it("rejects non-object root", async () => {
     setAuth("1", ["finance.admin"]);
     await expect(
-      importFinanzkraft({ export: "not an object" }),
+      importFinanceData({ export: "not an object" }),
     ).rejects.toThrow(/root/);
   });
 
   it("rejects missing version", async () => {
     setAuth("1", ["finance.admin"]);
     await expect(
-      importFinanzkraft({
+      importFinanceData({
         export: {
           bankcontacts: [],
           accounts: [],
@@ -353,7 +353,7 @@ describe("finance/data-import — schema validation", () => {
     const bad = miniExport();
     (bad.bankcontacts[0] as any).blz = "";
     await expect(
-      importFinanzkraft({ export: bad }),
+      importFinanceData({ export: bad }),
     ).rejects.toThrow(/blz/);
   });
 });

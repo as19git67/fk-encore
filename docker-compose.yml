@@ -136,11 +136,21 @@ services:
       # "failed to resolve secret: environment variable not found").
       FINANCE_FINTS_PRODUCT_ID: ${FINANCE_FINTS_PRODUCT_ID:-dev-placeholder}
       FINANCE_FINTS_PRODUCT_VERSION: ${FINANCE_FINTS_PRODUCT_VERSION:-0.1.0}
+      # Finance import / export drop boxes. The cron in
+      # finance/import-pending.ts scans FINANCE_IMPORT_DIR every 5 min
+      # for `*.pending.json` files; the daily snapshot from
+      # finance/export-cron.ts writes into FINANCE_EXPORT_DIR. Keep N
+      # snapshots before rotating older ones (default 30).
+      FINANCE_IMPORT_DIR: /mnt/data/finance-import
+      FINANCE_EXPORT_DIR: /mnt/data/finance-export
+      FINANCE_EXPORT_KEEP: ${FINANCE_EXPORT_KEEP:-30}
     volumes:
       - photos:/mnt/data/photos
       - thumbnails:/mnt/data/thumbnails
       - documents:/mnt/data/documents
       - documents_inbox:/mnt/data/documents-inbox
+      - finance_import:/mnt/data/finance-import
+      - finance_export:/mnt/data/finance-export
       - backup:/mnt/backup
       # External photo libraries — mount any host directories you want to
       # import from under /mnt/libraries. Use `:ro` for link-mode libraries
@@ -318,3 +328,17 @@ volumes:
   documents_inbox:
     driver: local
     driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/documents-inbox }
+  # Finance dropbox: copy `<basename>.pending.json` files here and the
+  # cron in finance/import-pending.ts picks them up within 5 min.
+  # Renamed to `<basename>.imported-<timestamp>.json` on success or
+  # `<basename>.failed-<timestamp>.json` (with a `.error.txt`) on
+  # failure. See docs/finance-data-import.md §3.
+  finance_import:
+    driver: local
+    driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/finance-import }
+  # Finance daily snapshot target (one file per day,
+  # `finance-export-YYYY-MM-DD.json`). Worst-case recovery is `cp` of
+  # any snapshot into finance-import/ with a `.pending.json` suffix.
+  finance_export:
+    driver: local
+    driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/finance-export }

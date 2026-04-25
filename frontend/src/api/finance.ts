@@ -242,7 +242,7 @@ export interface Account {
   /** Number of users with an explicit ACL entry (read/write) on this
    *  account. 0 means non-admin users can't see it yet — surfaced so
    *  the admin assignment view can flag accounts that still need to
-   *  be wired up after a Finanzkraft import. */
+   *  be wired up after a bulk data import. */
   access_count: number
 }
 
@@ -481,7 +481,7 @@ export async function suggestTagsBatch(
 }
 
 // ----------------------------------------------------------------------
-// Admin: Finanzkraft import
+// Admin: data import
 // ----------------------------------------------------------------------
 
 export interface ImportResponse {
@@ -504,7 +504,7 @@ export interface ImportResponse {
   errors: Array<{ entity: string; row: number; message: string }>
 }
 
-export async function importFinanzkraft(
+export async function importFinanceData(
   exportJson: unknown,
   options: { wipeFirst?: boolean } = {},
 ): Promise<ImportResponse> {

@@ -8,6 +8,35 @@ vi.mock("encore.dev", () => ({
   })),
 }));
 
+// `encore.dev/log` ships as a thin native-module wrapper that hits the
+// ENCORE_RUNTIME_LIB guard the moment it's imported. Tests don't care
+// about log destinations — silence it with no-ops.
+vi.mock("encore.dev/log", () => ({
+  default: {
+    trace: vi.fn(),
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    with: vi.fn(() => ({
+      trace: vi.fn(),
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    })),
+  },
+}));
+
+// `encore.dev/cron` evaluates `new CronJob(...)` at module import; the
+// constructor reaches into the runtime. Stub it so the module loads
+// without ENCORE_RUNTIME_LIB.
+vi.mock("encore.dev/cron", () => ({
+  CronJob: class {
+    constructor(_id: string, _opts: unknown) {}
+  },
+}));
+
 vi.mock("encore.dev/api", () => {
   class APIError extends Error {
     constructor(public code: string, message: string) {

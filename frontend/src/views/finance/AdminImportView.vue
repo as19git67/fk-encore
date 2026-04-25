@@ -6,7 +6,7 @@ import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
 import Dialog from 'primevue/dialog'
 import Message from 'primevue/message'
-import { importFinanzkraft, type ImportResponse } from '../../api/finance'
+import { importFinanceData, type ImportResponse } from '../../api/finance'
 
 const router = useRouter()
 const selected = ref<File | null>(null)
@@ -52,7 +52,7 @@ async function runImport() {
   try {
     const text = await selected.value.text()
     const parsed = JSON.parse(text)
-    result.value = await importFinanzkraft(parsed, {
+    result.value = await importFinanceData(parsed, {
       wipeFirst: wipeFirst.value,
     })
   } catch (err) {
@@ -70,7 +70,7 @@ function downloadErrors() {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = 'finanzkraft-import-errors.json'
+  a.download = 'finance-import-errors.json'
   a.click()
   URL.revokeObjectURL(url)
 }
@@ -79,12 +79,16 @@ function downloadErrors() {
 <template>
   <div class="page">
     <header class="page-header">
-      <h1>Datenimport (Finanzkraft-JSON)</h1>
+      <h1>Datenimport</h1>
     </header>
     <p class="hint">
-      Importiert Bankkontakte, Konten, Transaktionen und Tags aus einem
-      Finanzkraft-Export. Credentials und ACL werden **nicht** importiert
-      und müssen manuell gesetzt werden.
+      Importiert Bankkontakte, Konten, Transaktionen und Tags aus einer
+      JSON-Datei im fk-encore-Importformat. Credentials und ACL werden
+      <strong>nicht</strong> importiert und müssen manuell gesetzt
+      werden. Für sehr große Importe (>5 Min.) bitte stattdessen das
+      Drop-Verzeichnis <code>/data/finance-import/</code> mit
+      <code>*.pending.json</code> verwenden — dort gibt es kein Timeout
+      und die Verarbeitung läuft im Hintergrund per Cron.
     </p>
 
     <Message v-if="error" severity="error" :closable="true" @close="error = null">

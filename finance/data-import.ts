@@ -23,6 +23,7 @@
 
 import { createHash } from "node:crypto";
 import { api, APIError } from "encore.dev/api";
+import log from "encore.dev/log";
 import { getAuthData } from "~encore/auth";
 import { and, eq, sql } from "drizzle-orm";
 
@@ -98,7 +99,7 @@ export interface ImportResponse {
   errors: ValidationError[];
 }
 
-export const importFinanzkraft = api(
+export const importFinanceData = api(
   {
     expose: true,
     method: "POST",
@@ -117,86 +118,138 @@ export const importFinanzkraft = api(
       message: "Too many import attempts.",
     });
 
-    let exportData: FinanzkraftExport;
-    try {
-      exportData = validateExport(req.export);
-    } catch (err) {
-      if (err instanceof ImportSchemaError) {
-        throw APIError.invalidArgument(err.message);
-      }
-      throw err;
-    }
-
-    if (req.wipe_first) {
-      await wipeFinanceData();
-    }
-
-    const counts: EntityCounts = {
-      currencies: 0,
-      bankcontacts: 0,
-      accounts: 0,
-      transactions: 0,
-      tags: 0,
-      tag_links: 0,
-    };
-    const skipped: EntityCounts = { ...counts };
-    const errors: ValidationError[] = [];
-
-    // Stage 0: Currencies (any new ISO codes mentioned by accounts /
-    // transactions are upserted before the typed-FK stages run, so the
-    // import can bring CHF/GBP/etc. without a prior manual migration).
-    if (exportData.currencies && exportData.currencies.length > 0) {
-      await importCurrencies(exportData.currencies, counts, skipped, errors);
-    }
-
-    // Stage 1: Bankcontacts
-    const bankcontactIdByKey = await importBankcontacts(
-      exportData.bankcontacts,
-      counts,
-      skipped,
-      errors,
-    );
-
-    // Stage 2: Accounts (needs bankcontactIdByKey)
-    const accountIdByKey = await importAccounts(
-      exportData.accounts,
-      bankcontactIdByKey,
-      counts,
-      skipped,
-      errors,
-    );
-
-    // Stage 3: Transactions (needs accountIdByKey)
-    const transactionIdByLookup = await importTransactions(
-      exportData.transactions,
-      accountIdByKey,
-      counts,
-      skipped,
-      errors,
-    );
-
-    // Stage 4: Tags (user-source)
-    const tagIdByName = await importTags(
-      exportData.tags,
-      counts,
-      skipped,
-      errors,
-    );
-
-    // Stage 5: Tag links
-    await importTagLinks(
-      exportData.tag_links,
-      tagIdByName,
-      accountIdByKey,
-      transactionIdByLookup,
-      counts,
-      skipped,
-      errors,
-    );
-
-    return { counts, skipped, errors };
+    return runImport(req);
   },
 );
+
+/**
+ * Internal entry point used by both the HTTP endpoint above and the
+ * pending-imports cron in `import-pending.ts`. Skips auth + rate-limit
+ * (callers handle those — the cron is not exposed externally).
+ */
+export async function runImport(req: ImportRequest): Promise<ImportResponse> {
+  let exportData: FinanzkraftExport;
+  try {
+    exportData = validateExport(req.export);
+  } catch (err) {
+    if (err instanceof ImportSchemaError) {
+      throw APIError.invalidArgument(err.message);
+    }
+    throw err;
+  }
+
+  log.info("runImport: start", {
+    wipe_first: !!req.wipe_first,
+    currencies: exportData.currencies?.length ?? 0,
+    bankcontacts: exportData.bankcontacts.length,
+    accounts: exportData.accounts.length,
+    transactions: exportData.transactions.length,
+    tags: exportData.tags.length,
+    tag_links: exportData.tag_links.length,
+  });
+  const startedAt = Date.now();
+
+  if (req.wipe_first) {
+    log.info("runImport: wiping finance_* tables");
+    await wipeFinanceData();
+  }
+
+  const counts: EntityCounts = {
+    currencies: 0,
+    bankcontacts: 0,
+    accounts: 0,
+    transactions: 0,
+    tags: 0,
+    tag_links: 0,
+  };
+  const skipped: EntityCounts = { ...counts };
+  const errors: ValidationError[] = [];
+
+  // Stage 0: Currencies (any new ISO codes mentioned by accounts /
+  // transactions are upserted before the typed-FK stages run, so the
+  // import can bring CHF/GBP/etc. without a prior manual migration).
+  if (exportData.currencies && exportData.currencies.length > 0) {
+    await importCurrencies(exportData.currencies, counts, skipped, errors);
+    log.info("runImport: stage 0 currencies done", {
+      inserted: counts.currencies,
+      skipped: skipped.currencies,
+    });
+  }
+
+  // Stage 1: Bankcontacts
+  const bankcontactIdByKey = await importBankcontacts(
+    exportData.bankcontacts,
+    counts,
+    skipped,
+    errors,
+  );
+  log.info("runImport: stage 1 bankcontacts done", {
+    inserted: counts.bankcontacts,
+    skipped: skipped.bankcontacts,
+  });
+
+  // Stage 2: Accounts (needs bankcontactIdByKey)
+  const accountIdByKey = await importAccounts(
+    exportData.accounts,
+    bankcontactIdByKey,
+    counts,
+    skipped,
+    errors,
+  );
+  log.info("runImport: stage 2 accounts done", {
+    inserted: counts.accounts,
+    skipped: skipped.accounts,
+  });
+
+  // Stage 3: Transactions (needs accountIdByKey)
+  const transactionIdByLookup = await importTransactions(
+    exportData.transactions,
+    accountIdByKey,
+    counts,
+    skipped,
+    errors,
+  );
+  log.info("runImport: stage 3 transactions done", {
+    inserted: counts.transactions,
+    skipped: skipped.transactions,
+  });
+
+  // Stage 4: Tags (user-source)
+  const tagIdByName = await importTags(
+    exportData.tags,
+    counts,
+    skipped,
+    errors,
+  );
+  log.info("runImport: stage 4 tags done", {
+    inserted: counts.tags,
+    skipped: skipped.tags,
+  });
+
+  // Stage 5: Tag links
+  await importTagLinks(
+    exportData.tag_links,
+    tagIdByName,
+    accountIdByKey,
+    transactionIdByLookup,
+    counts,
+    skipped,
+    errors,
+  );
+  log.info("runImport: stage 5 tag_links done", {
+    inserted: counts.tag_links,
+    skipped: skipped.tag_links,
+  });
+
+  log.info("runImport: complete", {
+    duration_ms: Date.now() - startedAt,
+    counts,
+    skipped,
+    errors: errors.length,
+  });
+
+  return { counts, skipped, errors };
+}
 
 // -----------------------------------------------------------------------
 // Helpers: natural keys
@@ -554,7 +607,22 @@ async function importTransactions(
   const currencies = await db.select({ code: financeCurrency.code }).from(financeCurrency);
   const currencySet = new Set(currencies.map((c) => c.code));
 
+  // Heartbeat for long imports — emits a log line every 1000 rows so a
+  // ~50k transaction load shows ~50 progress lines in the container
+  // log instead of a 5-minute silence.
+  const PROGRESS_EVERY = 1000;
+  const stageStart = Date.now();
+
   for (let i = 0; i < rows.length; i++) {
+    if (i > 0 && i % PROGRESS_EVERY === 0) {
+      log.info("importTransactions: progress", {
+        processed: i,
+        total: rows.length,
+        inserted: counts.transactions,
+        skipped: skipped.transactions,
+        elapsed_ms: Date.now() - stageStart,
+      });
+    }
     const r = rows[i];
     const accountId = resolveAccountId(r, accountIdByKey);
     if (!accountId) {
