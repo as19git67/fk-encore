@@ -164,7 +164,6 @@ interface OutTransaction {
   original_amount: string | null;
   original_currency_code: string | null;
   exchange_rate: string | null;
-  raw: Record<string, unknown> | null;
 }
 
 interface OutTagLink {
@@ -321,6 +320,13 @@ const TRANSACTION_FIELDS_DROPPED = new Set([
   "Fk_Category:id",
   "Fk_Category:name",
   "Fk_Category:fullName",
+  // Finanzkraft-internal classification — categories aren't imported
+  // (we use tags instead), the bare id has no value, oldCategory is a
+  // legacy hierarchy-string from before the rename, and `processed`
+  // is a workflow flag that doesn't translate to fk-encore's model.
+  "Fk_Transaction:idCategory",
+  "Fk_Transaction:oldCategory",
+  "Fk_Transaction:processed",
 ]);
 
 const TRANSACTION_FIELDS_FIRST_CLASS_EXTRA = new Set([
@@ -331,7 +337,11 @@ function classifyTransactionField(key: string): FieldDisposition {
   if (TRANSACTION_FIELDS_FIRST_CLASS.has(key)) return "first-class";
   if (TRANSACTION_FIELDS_FIRST_CLASS_EXTRA.has(key)) return "first-class";
   if (TRANSACTION_FIELDS_DROPPED.has(key)) return "dropped";
-  if (key.startsWith("Fk_Transaction:")) return "raw";
+  // No catch-all `raw` bucket — every Finanzkraft attribute now has to
+  // be classified explicitly. New fields shipped by future Finanzkraft
+  // versions hit "unknown" and trigger the >>> warning <<< in the
+  // coverage summary, so the user notices and can decide whether to
+  // add them to FIRST_CLASS / DROPPED.
   return "unknown";
 }
 
@@ -547,19 +557,6 @@ function convertTransaction(
   if (t["Fk_Transaction:notes"]?.trim()) textParts.push(t["Fk_Transaction:notes"].trim());
   const purpose = textParts.length > 0 ? textParts.join(" / ") : null;
 
-  // Carry every parsed bank-mandate field into `raw` so the original
-  // SEPA structure (CRED/MREF/REF/EREF, IBAN/BIC, gvCode, original
-  // currency, exchange rate) survives the migration.
-  const raw: Record<string, unknown> = {
-    finanzkraft_id: t["Fk_Transaction:id"],
-  };
-  for (const [key, value] of Object.entries(t)) {
-    if (value === undefined || value === null || value === "") continue;
-    if (key.startsWith("Fk_Transaction:") || key === "Fk_Tags:tags") {
-      raw[key] = value;
-    }
-  }
-
   const originalAmountNum = t["Fk_Transaction:originalAmount"];
   const exchangeRateNum = t["Fk_Transaction:exchangeRate"];
   const primaNotaRaw = t["Fk_Transaction:primaNotaNo"];
@@ -595,7 +592,6 @@ function convertTransaction(
       t["Fk_Transaction:originalCurrency"]?.trim().toUpperCase() || null,
     exchange_rate:
       exchangeRateNum != null ? exchangeRateNum.toFixed(6) : null,
-    raw,
   };
 }
 

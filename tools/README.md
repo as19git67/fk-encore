@@ -59,7 +59,7 @@ shape that fk-encore's `/finance/admin/import` endpoint expects.
 | `Transactions[].Fk_Transaction:gvCode` / `entryText` / `primaNotaNo` | `transactions[].gv_code` / `entry_text` / `prima_nota_no` | MT940/FinTS metadata. |
 | `Transactions[].Fk_Transaction:id` | `transactions[].fints_id = "fk-<id>"` | Used for tag-link cross-reference. |
 | `Transactions[].Fk_Tags:tags` (pipe-separated) | global `tags[]` + `tag_links[]` | All tags imported with `source='user'`. |
-| any other `Fk_Transaction:*` | `transactions[].raw` jsonb | Full archival (e.g. `idCategory`, `oldCategory`, `processed`). |
+| `Transactions[].Fk_Transaction:idCategory` / `oldCategory` / `processed` | (dropped) | Categories aren't imported (we use tags); the raw id and the legacy hierarchy-string have no value. `processed` is a Finanzkraft-internal workflow flag. |
 
 ### What gets dropped on purpose
 
@@ -102,15 +102,15 @@ e.g.:
 ```
 
 - `first-class` = mapped 1:1 to a fk-encore column.
-- `raw` = archived in `transactions[].raw` (jsonb) — not lost, but
-  not query-able from the UI either.
 - `dropped` = deliberately not carried over (joined columns, ACL,
-  balance history that the import schema doesn't yet support).
+  balance history, categories, encrypted credentials, status flags).
 - `unknown` = the converter has never heard of this attribute. If
   this list is non-empty, decide what to do with it (extend
   `ACCOUNT_FIELD_DISPOSITION` / `TRANSACTION_FIELDS_*` in the
   converter source) and re-run. Until then those values are simply
-  skipped.
+  dropped — the converter no longer maintains a catch-all `raw`
+  bucket precisely so a new field gets noticed instead of silently
+  surviving in the jsonb.
 
 ### Troubleshooting
 
