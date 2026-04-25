@@ -458,6 +458,7 @@ async function importAccounts(
           account_number: r.account_number,
           label: r.label,
           active: r.active ?? true,
+          fints_account_number: r.fints_account_number ?? null,
         })
         .returning({ id: financeAccount.id });
       if (bcId !== null) {
@@ -556,7 +557,21 @@ async function importTransactions(
           purpose: r.purpose ?? null,
           counterparty: r.counterparty ?? null,
           counterparty_iban: r.counterparty_iban ?? null,
+          counterparty_bic: r.counterparty_bic ?? null,
+          counterparty_bank_id: r.counterparty_bank_id ?? null,
           fints_id: r.fints_id ?? null,
+          end_to_end_ref: r.end_to_end_ref ?? null,
+          mandate_ref: r.mandate_ref ?? null,
+          creditor_id: r.creditor_id ?? null,
+          bank_ref: r.bank_ref ?? null,
+          originator_name: r.originator_name ?? null,
+          recipient_name: r.recipient_name ?? null,
+          gv_code: r.gv_code ?? null,
+          entry_text: r.entry_text ?? null,
+          prima_nota_no: r.prima_nota_no ?? null,
+          original_amount: r.original_amount ?? null,
+          original_currency_code: r.original_currency_code ?? null,
+          exchange_rate: r.exchange_rate ?? null,
           dedupe_hash: dedupeHash,
           raw: r.raw ?? null,
         })

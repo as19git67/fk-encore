@@ -25,12 +25,14 @@ shape that fk-encore's `/finance/admin/import` endpoint expects.
    tags=K …`) on stderr; stdout is the import-ready JSON.
 
 3. Open **Finanzen → Import** in the fk-encore UI, pick
-   `/tmp/fk-encore-import.json`, and start the import.
+   `/tmp/fk-encore-import.json`, and start the import. (For an
+   iterative re-run, tick the **"Vorher alle Finanzdaten löschen"**
+   checkbox.)
 
-4. After import: open **Finanzen → Bankkontakte**, create the real
-   bankcontacts (BLZ, login, server-URL, PIN, TAN-Verfahren). Then on
-   each imported account go to its detail page and link it to the
-   matching bankcontact via IBAN.
+4. After import: open **Finanzen → Bankkontakte**. The pseudo-
+   bankcontacts are already there — you only need to set the **real
+   login + PIN** on each, pick a TAN-Verfahren, and the linked
+   accounts come online. Cash wallets stay manual.
 
 5. Open **Finanzen → Konto-Zugriff** and grant per-user read/write
    access for each account.
@@ -39,18 +41,24 @@ shape that fk-encore's `/finance/admin/import` endpoint expects.
 
 | Finanzkraft entity | fk-encore target | Notes |
 |---|---|---|
-| `Accounts[]` | `accounts[]` | Always imported as **manual** (no bankcontact link). User wires them up later. |
+| `Accounts[].bankcontact_*` | `bankcontacts[]` (one row per `bankcontact_id`) | Pseudo-bankcontact: name + BLZ + server-URL come straight through, login is set to a placeholder `fk-bc-<id>`. The user fixes login+PIN+TAN-Verfahren in the new UI. |
+| `Accounts[]` | `accounts[]` | Linked accounts get `bankcontact_blz/login` set to the matching pseudo-bankcontact; cash wallets stay manual. |
+| `Accounts[].fintsAccountNumber` | `accounts[].fints_account_number` | Pre-fills the lib-fints accountNumber so a sync works the moment credentials are entered. |
 | `Accounts[].account_type_id` | `accounts[].type_kind` | `cash`→`bargeld`, `checking`→`giro`, `credit`→`kreditkarte`, `daily`→`tagesgeld`, `savings`→`tagesgeld`, `security`→`depot`, `other`→`sonstige` |
 | `Accounts[].closedAt !== null` | `accounts[].active = false` | |
 | `Accounts[].number == null` | `accounts[].account_number = "fk-<id>"` | Synthetic key for cash wallets without a real account number. |
 | `Transactions[].Fk_Transaction:bookingDate` (or fallback `valueDate`) | `transactions[].booking_date` | Pre-1999 records only have valueDate. |
-| `Transactions[].Fk_Transaction:amount` | `transactions[].amount` | Already in account currency, two decimals. |
+| `Transactions[].Fk_Transaction:amount` | `transactions[].amount` | In account currency. Two decimals. |
+| `Transactions[].Fk_Transaction:originalAmount/Currency/exchangeRate` | `transactions[].original_amount/original_currency_code/exchange_rate` | Multi-currency bookings keep the pre-conversion values for archival. |
 | `Transactions[].Fk_Transaction:text` + `:notes` | `transactions[].purpose` | Joined with " / " when both present. |
 | `Transactions[].Fk_Transaction:payee` | `transactions[].counterparty` | |
-| `Transactions[].Fk_Transaction:IBAN` | `transactions[].counterparty_iban` | Falls back to `payeePayerAcctNo`. |
+| `Transactions[].Fk_Transaction:IBAN` / `BIC` / `payeeBankId` | `transactions[].counterparty_iban` / `_bic` / `_bank_id` | |
+| `Transactions[].Fk_Transaction:EREF` / `MREF` / `CRED` / `REF` | `transactions[].end_to_end_ref` / `mandate_ref` / `creditor_id` / `bank_ref` | SEPA references — proper columns, not `raw`. |
+| `Transactions[].Fk_Transaction:ABWA` / `ABWE` | `transactions[].originator_name` / `recipient_name` | Abweichender Auftraggeber / Empfänger. |
+| `Transactions[].Fk_Transaction:gvCode` / `entryText` / `primaNotaNo` | `transactions[].gv_code` / `entry_text` / `prima_nota_no` | MT940/FinTS metadata. |
 | `Transactions[].Fk_Transaction:id` | `transactions[].fints_id = "fk-<id>"` | Used for tag-link cross-reference. |
 | `Transactions[].Fk_Tags:tags` (pipe-separated) | global `tags[]` + `tag_links[]` | All tags imported with `source='user'`. |
-| every `Fk_Transaction:*` field | `transactions[].raw` | Full archival (CRED/MREF/REF, original currency, exchange rate, etc.). |
+| any other `Fk_Transaction:*` | `transactions[].raw` jsonb | Full archival (e.g. `idCategory`, `oldCategory`, `processed`). |
 
 ### What gets dropped on purpose
 

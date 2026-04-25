@@ -1,11 +1,6 @@
--- Add 'bargeld' to the finance_account_kind enum + seed the matching
--- finance_account_type row so the Finanzkraft import (which has a
--- dedicated cash account type, not a generic "sonstige") can land on
--- a clean kind. The frontend uses the kind to switch UI affordances —
--- e.g. cash wallets shouldn't offer SEPA-style metadata fields.
+-- Add 'bargeld' to the finance_account_kind enum. Postgres requires the
+-- ADD VALUE to be committed before the enum value can be referenced (see
+-- migration 0055 for the matching seed row), so this migration is kept
+-- intentionally small.
 
 ALTER TYPE finance_account_kind ADD VALUE IF NOT EXISTS 'bargeld' BEFORE 'sonstige';
-
-INSERT INTO finance_account_type (kind, label)
-VALUES ('bargeld', 'Bargeld')
-ON CONFLICT (kind) DO NOTHING;

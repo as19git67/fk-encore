@@ -1074,7 +1074,36 @@ export const financeTransaction = pgTable(
     purpose: text("purpose"),
     counterparty: text("counterparty"),
     counterparty_iban: text("counterparty_iban"),
+    counterparty_bic: text("counterparty_bic"),
+    counterparty_bank_id: text("counterparty_bank_id"),
     fints_id: text("fints_id"),
+    /** SEPA End-to-End reference (EREF). */
+    end_to_end_ref: text("end_to_end_ref"),
+    /** SEPA Mandate reference (MREF) for direct debits. */
+    mandate_ref: text("mandate_ref"),
+    /** SEPA Creditor identifier (CRED / CI). */
+    creditor_id: text("creditor_id"),
+    /** Bank-side reference (REF) — internal booking number, not E2E. */
+    bank_ref: text("bank_ref"),
+    /** Abweichender Auftraggeber (ABWA): the actual payer when
+     *  different from the account-holder of the debiting account. */
+    originator_name: text("originator_name"),
+    /** Abweichender Zahlungsempfänger (ABWE): final beneficiary when
+     *  different from the receiver-account holder. */
+    recipient_name: text("recipient_name"),
+    /** MT940 Geschäftsvorfall-Code (NTRF / RCDT / ICDT / …). */
+    gv_code: text("gv_code"),
+    /** MT940 entry text ("Lastschrift", "Gutschrift", "Überweisung", …). */
+    entry_text: text("entry_text"),
+    /** Primanota number — bank-internal posting batch id. */
+    prima_nota_no: text("prima_nota_no"),
+    /** When the booking was settled in a different currency than the
+     *  account, `original_amount` + `original_currency_code` carry the
+     *  pre-conversion booking and `exchange_rate` records the rate
+     *  applied. All three null for plain same-currency bookings. */
+    original_amount: numeric("original_amount", { precision: 14, scale: 2 }),
+    original_currency_code: text("original_currency_code"),
+    exchange_rate: numeric("exchange_rate", { precision: 12, scale: 6 }),
     dedupe_hash: text("dedupe_hash").notNull(),
     raw: jsonb("raw").$type<Record<string, unknown>>(),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true })

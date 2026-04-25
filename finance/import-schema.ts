@@ -43,6 +43,10 @@ export interface ImportAccount {
   account_number: string;
   label: string;
   active?: boolean;
+  /** lib-fints accountNumber for the bank-side account, when known.
+   *  Pre-fills `finance_account.fints_account_number` so a sync works
+   *  the moment the user wires up real credentials on the bankcontact. */
+  fints_account_number?: string | null;
 }
 
 export interface ImportTransaction {
@@ -59,7 +63,23 @@ export interface ImportTransaction {
   purpose?: string | null;
   counterparty?: string | null;
   counterparty_iban?: string | null;
+  counterparty_bic?: string | null;
+  counterparty_bank_id?: string | null;
   fints_id?: string | null;
+  /** SEPA / MT940 fields — match the columns added in migration 0055. */
+  end_to_end_ref?: string | null;
+  mandate_ref?: string | null;
+  creditor_id?: string | null;
+  bank_ref?: string | null;
+  originator_name?: string | null;
+  recipient_name?: string | null;
+  gv_code?: string | null;
+  entry_text?: string | null;
+  prima_nota_no?: string | null;
+  /** Multi-currency booking metadata. All three together or none. */
+  original_amount?: string | null;
+  original_currency_code?: string | null;
+  exchange_rate?: string | null;
   /** Optional pre-computed dedupe hash; if missing the importer recomputes. */
   dedupe_hash?: string | null;
   raw?: Record<string, unknown> | null;
@@ -182,6 +202,10 @@ function validateAccount(raw: unknown, i: number): ImportAccount {
     ),
     label: assertNonEmptyString(o.label, `accounts[${i}].label`),
     active: typeof o.active === "boolean" ? o.active : undefined,
+    fints_account_number: optString(
+      o.fints_account_number,
+      `accounts[${i}].fints_account_number`,
+    ),
   };
 }
 
@@ -227,7 +251,48 @@ function validateTransaction(raw: unknown, i: number): ImportTransaction {
       o.counterparty_iban,
       `transactions[${i}].counterparty_iban`,
     ),
+    counterparty_bic: optString(
+      o.counterparty_bic,
+      `transactions[${i}].counterparty_bic`,
+    ),
+    counterparty_bank_id: optString(
+      o.counterparty_bank_id,
+      `transactions[${i}].counterparty_bank_id`,
+    ),
     fints_id: optString(o.fints_id, `transactions[${i}].fints_id`),
+    end_to_end_ref: optString(
+      o.end_to_end_ref,
+      `transactions[${i}].end_to_end_ref`,
+    ),
+    mandate_ref: optString(o.mandate_ref, `transactions[${i}].mandate_ref`),
+    creditor_id: optString(o.creditor_id, `transactions[${i}].creditor_id`),
+    bank_ref: optString(o.bank_ref, `transactions[${i}].bank_ref`),
+    originator_name: optString(
+      o.originator_name,
+      `transactions[${i}].originator_name`,
+    ),
+    recipient_name: optString(
+      o.recipient_name,
+      `transactions[${i}].recipient_name`,
+    ),
+    gv_code: optString(o.gv_code, `transactions[${i}].gv_code`),
+    entry_text: optString(o.entry_text, `transactions[${i}].entry_text`),
+    prima_nota_no: optString(
+      o.prima_nota_no,
+      `transactions[${i}].prima_nota_no`,
+    ),
+    original_amount: optString(
+      o.original_amount,
+      `transactions[${i}].original_amount`,
+    ),
+    original_currency_code: optString(
+      o.original_currency_code,
+      `transactions[${i}].original_currency_code`,
+    ),
+    exchange_rate: optString(
+      o.exchange_rate,
+      `transactions[${i}].exchange_rate`,
+    ),
     dedupe_hash: optString(o.dedupe_hash, `transactions[${i}].dedupe_hash`),
     raw:
       o.raw && typeof o.raw === "object" && !Array.isArray(o.raw)

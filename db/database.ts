@@ -83,6 +83,21 @@ async function createDb(): Promise<DbInstance> {
     await migrate(db, { migrationsFolder });
   }
 
+  // Post-migration seeds. These exist for cases where Postgres forbids
+  // referencing a value in the same transaction that introduces it —
+  // e.g. ALTER TYPE … ADD VALUE followed by an INSERT using the new
+  // enum literal (PG error 55P04). Drizzle's migrator wraps all
+  // pending migrations in a single transaction, so a seed-INSERT in a
+  // sibling migration would still see the freshly-added value as
+  // uncommitted. Running the seed here, after migrate() returns, lets
+  // the value be visible. Every statement is idempotent so re-runs
+  // are safe.
+  await pool.query(`
+    INSERT INTO finance_account_type (kind, label)
+    VALUES ('bargeld', 'Bargeld')
+    ON CONFLICT (kind) DO NOTHING
+  `);
+
   return db;
 }
 
