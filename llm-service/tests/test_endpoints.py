@@ -71,6 +71,60 @@ def test_embed_validates_empty_list():
     assert resp.status_code == 422
 
 
+def test_embed_validates_kind_value():
+    client = TestClient(main.app)
+    resp = client.post("/embed", json={"texts": ["x"], "kind": "bogus"})
+    assert resp.status_code == 422
+
+
+def test_apply_embedding_prefix_is_e5_aware(monkeypatch):
+    """E5 family adds the trained prefix; other models pass through."""
+    monkeypatch.setattr(main, "EMBEDDING_MODEL", "intfloat/multilingual-e5-base")
+    assert main._apply_embedding_prefix(["foo"], "passage") == ["passage: foo"]
+    assert main._apply_embedding_prefix(["foo"], "query") == ["query: foo"]
+
+    monkeypatch.setattr(main, "EMBEDDING_MODEL", "BAAI/bge-m3")
+    assert main._apply_embedding_prefix(["foo"], "passage") == ["foo"]
+    assert main._apply_embedding_prefix(["foo"], "query") == ["foo"]
+
+
+def test_embed_applies_prefix_to_encoder_input(monkeypatch):
+    """The exact strings passed to ``embedder.encode`` carry the e5 prefix
+    when an e5 model is configured. This is the regression guard for the
+    prefix bug — without it queries and passages live in misaligned spaces."""
+
+    monkeypatch.setattr(main, "EMBEDDING_MODEL", "intfloat/multilingual-e5-base")
+
+    class _Vec(list):
+        def tolist(self):
+            return [[0.1, 0.2]] * len(self)
+
+    seen: dict[str, list[str]] = {}
+
+    class _StubEmbedder:
+        def encode(self, texts, normalize_embeddings=True):
+            seen["texts"] = list(texts)
+            return _Vec(texts)
+
+    main._state["embedder"] = _StubEmbedder()
+    try:
+        client = TestClient(main.app)
+        resp = client.post("/embed", json={"texts": ["hallo"], "kind": "query"})
+        assert resp.status_code == 200
+        assert seen["texts"] == ["query: hallo"]
+
+        resp = client.post("/embed", json={"texts": ["welt"], "kind": "passage"})
+        assert resp.status_code == 200
+        assert seen["texts"] == ["passage: welt"]
+
+        # Default kind is `passage`.
+        resp = client.post("/embed", json={"texts": ["x"]})
+        assert resp.status_code == 200
+        assert seen["texts"] == ["passage: x"]
+    finally:
+        main._state["embedder"] = None
+
+
 def test_classify_returns_503_when_llm_missing():
     main._state["llm"] = None
     client = TestClient(main.app)

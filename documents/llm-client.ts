@@ -6,7 +6,9 @@
  *                    category slug + title + date + sender + summary +
  *                    tags + confidence.
  *   POST /embed    — sentence-transformers multilingual-e5-base, 768-d
- *                    embeddings suitable for pgvector.
+ *                    embeddings suitable for pgvector. The caller passes
+ *                    `kind: "passage" | "query"` so the server can apply
+ *                    the e5 prefix that the model was trained with.
  *
  * Both calls throw `LlmServiceUnavailableError` on network/5xx failure
  * so the scan-worker can defer (not fail) the job and retry later.
@@ -72,8 +74,16 @@ export interface ClassifyRequest {
   tax_sections?: TaxSectionRequestEntry[];
 }
 
+/**
+ * Whether the embedded text is corpus content (`passage`) or a search
+ * query (`query`). Drives the e5-family prefix on the service side —
+ * see `_apply_embedding_prefix` in `llm-service/main.py`.
+ */
+export type EmbedKind = "passage" | "query";
+
 export interface EmbedRequest {
   texts: string[];
+  kind?: EmbedKind;
 }
 
 export interface EmbedResponse {
@@ -130,9 +140,12 @@ export async function classifyDocument(req: ClassifyRequest): Promise<Classifica
   return parseClassification(raw);
 }
 
-export async function embedTexts(texts: string[]): Promise<number[][]> {
+export async function embedTexts(
+  texts: string[],
+  kind: EmbedKind = "passage",
+): Promise<number[][]> {
   if (texts.length === 0) return [];
-  const res = await postJson<EmbedResponse>("/embed", { texts } satisfies EmbedRequest);
+  const res = await postJson<EmbedResponse>("/embed", { texts, kind } satisfies EmbedRequest);
   if (!Array.isArray(res.embeddings)) {
     throw new Error("/embed response is missing `embeddings` array");
   }

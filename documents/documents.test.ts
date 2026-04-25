@@ -23,6 +23,7 @@ import { DOCUMENT_SERVICES } from "./scan-queue";
 import { DuplicateDocumentError } from "./import";
 import { SUPPORTED_EXTENSIONS } from "./documents.service";
 import { reciprocalRankFusion, type SearchHit } from "./search";
+import { chunkText } from "./document-ops";
 import { hasPoorSpacing } from "./text-extract";
 
 describe("documents.service", () => {
@@ -366,5 +367,66 @@ describe("documents.search reciprocalRankFusion", () => {
     const gap = (f: SearchHit[]) =>
       f.find((h) => h.document_id === 1)!.score - f.find((h) => h.document_id === 2)!.score;
     expect(gap(smallK)).toBeGreaterThan(gap(largeK));
+  });
+});
+
+describe("documents.document-ops chunkText", () => {
+  it("returns the input as a single chunk when it fits in maxChars", () => {
+    expect(chunkText("hello world", 100)).toEqual(["hello world"]);
+  });
+
+  it("splits on paragraph boundaries when paragraphs do not all fit", () => {
+    const text = "para one is here.\n\npara two is also here.\n\npara three is too.";
+    const chunks = chunkText(text, 30);
+    // Each chunk holds roughly one paragraph, never more than maxChars.
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const c of chunks) expect(c.length).toBeLessThanOrEqual(30);
+  });
+
+  it("disjoint chunks (overlap=0) preserve the historical behaviour", () => {
+    const text = "AAAA AAAA\n\nBBBB BBBB\n\nCCCC CCCC";
+    const chunks = chunkText(text, 12, 0);
+    // No chunk shares its prefix with the previous chunk's suffix.
+    for (let i = 1; i < chunks.length; i++) {
+      const prev = chunks[i - 1];
+      const cur = chunks[i];
+      const prevTail = prev.slice(-4);
+      expect(cur.startsWith(prevTail)).toBe(false);
+    }
+  });
+
+  it("non-zero overlap copies a word-aligned tail of the previous chunk", () => {
+    const text = "alpha beta gamma\n\ndelta epsilon zeta\n\neta theta iota";
+    const chunks = chunkText(text, 20, 8);
+    expect(chunks.length).toBeGreaterThanOrEqual(2);
+    // Each chunk after the first must start with text that appeared
+    // somewhere near the end of the previous chunk — that's the
+    // overlap window. We validate this by asserting that the first
+    // word of chunk[i] also appears in chunk[i-1].
+    for (let i = 1; i < chunks.length; i++) {
+      const firstWord = chunks[i].split(/\s/)[0];
+      expect(chunks[i - 1]).toContain(firstWord);
+    }
+  });
+
+  it("overlap is suppressed when the previous chunk is shorter than the overlap window", () => {
+    // Each paragraph (`AAAA`) is 4 chars, overlap window 8 chars — the
+    // chunker must NOT carry the entire short chunk as overlap because
+    // that would just duplicate it wholesale.
+    const text = "AAAA\n\nBBBB\n\nCCCC";
+    const chunks = chunkText(text, 4, 8);
+    expect(chunks).toEqual(["AAAA", "BBBB", "CCCC"]);
+  });
+
+  it("hard-splits an over-long single paragraph and overlaps each cut", () => {
+    const long = "abcdefghij".repeat(10); // 100 chars, no whitespace
+    const chunks = chunkText(long, 30, 10);
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const c of chunks) expect(c.length).toBeLessThanOrEqual(30);
+    // Each subsequent chunk starts with the last 10 chars of its
+    // predecessor (no whitespace to snap to, so the raw window is used).
+    for (let i = 1; i < chunks.length; i++) {
+      expect(chunks[i].startsWith(chunks[i - 1].slice(-10))).toBe(true);
+    }
   });
 });

@@ -811,6 +811,62 @@ export const backfillDocumentTax = api(
   },
 );
 
+// ─── Embeddings backfill ───────────────────────────────────────────────────
+
+/**
+ * Re-queue the `embed` job for every ready document the caller owns and
+ * drop the existing embedding rows. Used after embedding-strategy changes
+ * that shift the vector space — for example switching the e5-family
+ * `query: ` / `passage: ` prefix on/off, changing chunk overlap, or
+ * migrating the column type from `vector` to `halfvec`. Idempotent: a
+ * second run just re-runs the embed workers on the same rows.
+ *
+ * The job is scoped to the caller's visible documents; an admin can run
+ * it per user. The previous embeddings are deleted up-front so that
+ * search keeps returning *something* during the rebuild — partial new
+ * vectors live alongside no old vectors, which is preferable to mixing
+ * old and new vectors in the same ranking.
+ */
+export const backfillDocumentEmbeddings = api(
+  { expose: true, method: "POST", path: "/documents/embeddings/backfill", auth: true },
+  async (): Promise<{ queued: number; cleared: number }> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.edit");
+    const userId = getUserId();
+
+    const householdIds = await loadUserHouseholdIds(userId);
+    const rows = await dbAll<{ id: number }>(
+      db
+        .select({ id: documents.id })
+        .from(documents)
+        .where(
+          and(
+            visibleDocumentsWhere(userId, householdIds),
+            eq(documents.status, "ready"),
+          ),
+        ),
+    );
+
+    let cleared = 0;
+    if (rows.length > 0) {
+      const ids = rows.map((r) => r.id);
+      const deleted = await db.execute<{ document_id: number }>(sql`
+        DELETE FROM document_embeddings
+        WHERE document_id = ANY(${ids}::int[])
+        RETURNING document_id
+      `);
+      cleared = deleted.rows.length;
+    }
+
+    for (const r of rows) {
+      await requeueDocument(r.id, ["embed"]);
+    }
+    if (rows.length > 0) triggerWorkers();
+    return { queued: rows.length, cleared };
+  },
+);
+
 // ─── Layout backfill ───────────────────────────────────────────────────────
 
 export interface RelocateDocumentsResponse {

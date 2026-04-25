@@ -244,6 +244,14 @@ async def healthz() -> dict[str, Any]:
 
 class EmbedRequest(BaseModel):
     texts: list[str] = Field(..., min_length=1)
+    # e5-family models (``intfloat/multilingual-e5-*``, ``intfloat/e5-*``)
+    # are trained with explicit ``query: `` / ``passage: `` prefixes; without
+    # them retrieval quality drops by several nDCG points because query and
+    # passage vectors live in subtly misaligned subspaces. Callers therefore
+    # tell us what they're embedding so the service can apply the right
+    # prefix. Default ``passage`` matches the corpus-side use which is the
+    # more common path (every document chunk goes through here).
+    kind: str = Field(default="passage", pattern="^(passage|query)$")
 
 
 class EmbedResponse(BaseModel):
@@ -251,13 +259,31 @@ class EmbedResponse(BaseModel):
     dim: int
 
 
+def _is_e5_model(name: str) -> bool:
+    """E5 family detection by repo name. Covers ``intfloat/e5-*`` and
+    ``intfloat/multilingual-e5-*`` variants."""
+
+    n = name.lower()
+    return n.startswith("intfloat/e5-") or n.startswith("intfloat/multilingual-e5-")
+
+
+def _apply_embedding_prefix(texts: list[str], kind: str) -> list[str]:
+    """Prepend the model-appropriate prefix. No-op for non-e5 models."""
+
+    if not _is_e5_model(EMBEDDING_MODEL):
+        return texts
+    prefix = "query: " if kind == "query" else "passage: "
+    return [prefix + t for t in texts]
+
+
 @app.post("/embed", response_model=EmbedResponse)
 async def embed(req: EmbedRequest) -> EmbedResponse:
     embedder = _state["embedder"]
     if embedder is None:
         raise HTTPException(status_code=503, detail="embedder not loaded")
+    prepared = _apply_embedding_prefix(req.texts, req.kind)
     vectors = await _run_blocking(
-        lambda: embedder.encode(req.texts, normalize_embeddings=True).tolist()
+        lambda: embedder.encode(prepared, normalize_embeddings=True).tolist()
     )
     return EmbedResponse(embeddings=vectors, dim=len(vectors[0]) if vectors else 0)
 

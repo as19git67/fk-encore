@@ -407,6 +407,13 @@
       "when": 1779001000000,
       "tag": "0056_finance_transaction_drop_fints_id",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1779001100000,
+      "tag": "0057_documents_halfvec",
+      "breakpoints": true
     }
   ]
 }
