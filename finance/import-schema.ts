@@ -104,8 +104,25 @@ export interface ImportTagLink {
   dedupe_hash?: string | null;
 }
 
+export interface ImportCurrency {
+  /** ISO-4217 currency code (3 letters, will be uppercased on insert). */
+  code: string;
+  /** Display symbol — €, $, £, … Falls back to `code` when missing. */
+  symbol?: string | null;
+  /** Number of decimal places. Default 2. */
+  decimals?: number | null;
+}
+
 export interface FinanzkraftExport {
   version: string;
+  /**
+   * Currencies to upsert into `finance_currency` before any other stage
+   * runs. Lets the import bring in transactions denominated in
+   * currencies the database doesn't yet seed (CHF, GBP, …) without
+   * needing a manual migration. Optional — fk-encore ships with EUR
+   * and USD pre-seeded; add only what's missing.
+   */
+  currencies?: ImportCurrency[];
   bankcontacts: ImportBankcontact[];
   accounts: ImportAccount[];
   transactions: ImportTransaction[];
@@ -324,9 +341,39 @@ function validateTagLink(raw: unknown, i: number): ImportTagLink {
   };
 }
 
+function validateCurrency(raw: unknown, i: number): ImportCurrency {
+  const o = assertObject(raw, `currencies[${i}]`);
+  const code = assertNonEmptyString(o.code, `currencies[${i}].code`);
+  if (code.length !== 3 || !/^[A-Za-z]{3}$/.test(code)) {
+    throw new ImportSchemaError(
+      `currencies[${i}].code`,
+      `expected a 3-letter ISO-4217 code, got "${code}"`,
+    );
+  }
+  let decimals: number | null = null;
+  if (o.decimals !== undefined && o.decimals !== null) {
+    if (typeof o.decimals !== "number" || !Number.isInteger(o.decimals)) {
+      throw new ImportSchemaError(
+        `currencies[${i}].decimals`,
+        "expected an integer",
+      );
+    }
+    decimals = o.decimals;
+  }
+  return {
+    code,
+    symbol: optString(o.symbol, `currencies[${i}].symbol`) ?? null,
+    decimals,
+  };
+}
+
 export function validateExport(raw: unknown): FinanzkraftExport {
   const o = assertObject(raw, "root");
   const version = assertNonEmptyString(o.version, "version");
+  const currencies =
+    o.currencies === undefined
+      ? undefined
+      : assertArray(o.currencies, "currencies").map(validateCurrency);
   const bankcontacts = assertArray(o.bankcontacts, "bankcontacts").map(
     validateBankcontact,
   );
@@ -340,6 +387,7 @@ export function validateExport(raw: unknown): FinanzkraftExport {
   const tag_links = assertArray(o.tag_links, "tag_links").map(validateTagLink);
   return {
     version,
+    currencies,
     bankcontacts,
     accounts,
     transactions,

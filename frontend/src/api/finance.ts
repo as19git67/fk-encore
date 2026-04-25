@@ -486,6 +486,7 @@ export async function suggestTagsBatch(
 
 export interface ImportResponse {
   counts: {
+    currencies: number
     bankcontacts: number
     accounts: number
     transactions: number
@@ -493,6 +494,7 @@ export interface ImportResponse {
     tag_links: number
   }
   skipped: {
+    currencies: number
     bankcontacts: number
     accounts: number
     transactions: number

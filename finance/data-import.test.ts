@@ -104,6 +104,7 @@ describe("finance/data-import — happy path", () => {
     const result = await importFinanzkraft({ export: miniExport() });
     expect(result.errors).toEqual([]);
     expect(result.counts).toEqual({
+      currencies: 0,
       bankcontacts: 1,
       accounts: 1,
       transactions: 2,
@@ -111,6 +112,7 @@ describe("finance/data-import — happy path", () => {
       tag_links: 2,
     });
     expect(result.skipped).toEqual({
+      currencies: 0,
       bankcontacts: 0,
       accounts: 0,
       transactions: 0,
@@ -155,6 +157,7 @@ describe("finance/data-import — idempotency", () => {
     const second = await importFinanzkraft({ export: miniExport() });
     expect(second.errors).toEqual([]);
     expect(second.counts).toEqual({
+      currencies: 0,
       bankcontacts: 0,
       accounts: 0,
       transactions: 0,
@@ -162,6 +165,7 @@ describe("finance/data-import — idempotency", () => {
       tag_links: 0,
     });
     expect(second.skipped).toEqual({
+      currencies: 0,
       bankcontacts: 1,
       accounts: 1,
       transactions: 2,

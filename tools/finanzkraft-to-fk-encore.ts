@@ -113,6 +113,12 @@ interface FinanzkraftExport {
 // fk-encore import shape (subset of finance/import-schema.ts)
 // ---------------------------------------------------------------------------
 
+interface OutCurrency {
+  code: string;
+  symbol: string;
+  decimals: number;
+}
+
 interface OutBankcontact {
   blz: string;
   login: string;
@@ -168,6 +174,7 @@ interface OutTagLink {
 
 interface OutExport {
   version: string;
+  currencies: OutCurrency[];
   bankcontacts: OutBankcontact[];
   accounts: OutAccount[];
   transactions: OutTransaction[];
@@ -237,10 +244,11 @@ const ACCOUNT_FIELD_DISPOSITION: Record<string, FieldDisposition> = {
   // columns above, captured here only so the coverage tracker doesn't
   // flag it as unknown.
   idBankcontact: "first-class",
-  // joined columns from the Finanzkraft export — redundant with the
-  // current foreign-key target, no value in carrying them.
+  // joined columns from the Finanzkraft export. `currency_short` feeds
+  // the symbol into the auto-generated currencies[] entry; the rest is
+  // redundant with the foreign-key target, no value in carrying them.
+  currency_short: "first-class",
   currency_name: "dropped",
-  currency_short: "dropped",
   // encrypted credentials. The Finanzkraft master key isn't available
   // to the converter, so these blobs are useless. The user re-enters
   // login + PIN in the new app.
@@ -310,14 +318,18 @@ const TRANSACTION_FIELDS_DROPPED = new Set([
   "Fk_Account:name",
   "Fk_Account:iban",
   "Fk_Currency:name",
-  "Fk_Currency:short",
   "Fk_Category:id",
   "Fk_Category:name",
   "Fk_Category:fullName",
 ]);
 
+const TRANSACTION_FIELDS_FIRST_CLASS_EXTRA = new Set([
+  "Fk_Currency:short",
+]);
+
 function classifyTransactionField(key: string): FieldDisposition {
   if (TRANSACTION_FIELDS_FIRST_CLASS.has(key)) return "first-class";
+  if (TRANSACTION_FIELDS_FIRST_CLASS_EXTRA.has(key)) return "first-class";
   if (TRANSACTION_FIELDS_DROPPED.has(key)) return "dropped";
   if (key.startsWith("Fk_Transaction:")) return "raw";
   return "unknown";
@@ -470,6 +482,40 @@ function aggregateBankcontacts(accounts: FkAccount[]): PseudoBankcontact[] {
   return [...byId.values()].sort((x, y) => x.id - y.id);
 }
 
+/**
+ * Walk every account + transaction (incl. originalCurrency on
+ * multi-currency bookings) and emit one entry per ISO code, picking up
+ * the symbol from `currency_short` (account level) or `Fk_Currency:short`
+ * (transaction level) when present. Falls back to the code itself as
+ * the symbol if Finanzkraft never told us one.
+ *
+ * Always emits at least EUR + USD with their canonical symbols so a
+ * minimal export still ends up with a sensible seed; the importer's
+ * `ON CONFLICT` makes that idempotent against the migration seed.
+ */
+function collectCurrencies(input: FinanzkraftExport): OutCurrency[] {
+  const symbolByCode = new Map<string, string>();
+  const observe = (codeRaw: string | null | undefined, symbol?: string | null): void => {
+    if (!codeRaw) return;
+    const code = codeRaw.trim().toUpperCase();
+    if (!/^[A-Z]{3}$/.test(code)) return;
+    const sym = symbol?.trim();
+    if (!symbolByCode.has(code) || (sym && symbolByCode.get(code) === code)) {
+      symbolByCode.set(code, sym || code);
+    }
+  };
+  for (const a of input.Accounts) {
+    observe(a.currency_id, (a as Record<string, unknown>).currency_short as string);
+  }
+  for (const t of input.Transactions) {
+    observe(t["Fk_Currency:id"], t["Fk_Currency:short"]);
+    observe(t["Fk_Transaction:originalCurrency"], null);
+  }
+  return [...symbolByCode.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([code, symbol]) => ({ code, symbol, decimals: 2 }));
+}
+
 function isoDate(s: string | undefined): string | null {
   if (!s) return null;
   // Finanzkraft emits ISO timestamps like "2026-04-13T12:00:00.000Z"
@@ -616,8 +662,11 @@ function convert(input: FinanzkraftExport): OutExport {
 
   coverage.printSummary(process.stderr);
 
+  const currencies = collectCurrencies(input);
+
   return {
     version: "finanzkraft-1.0",
+    currencies,
     bankcontacts,
     accounts,
     transactions,
@@ -655,7 +704,8 @@ function main(): void {
   process.stdout.write("\n");
 
   process.stderr.write(
-    `[finanzkraft-converter] bankcontacts=${output.bankcontacts.length} ` +
+    `[finanzkraft-converter] currencies=${output.currencies.length} ` +
+      `bankcontacts=${output.bankcontacts.length} ` +
       `accounts=${output.accounts.length} ` +
       `transactions=${output.transactions.length} ` +
       `tags=${output.tags.length} tag_links=${output.tag_links.length}\n`,

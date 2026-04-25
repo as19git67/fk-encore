@@ -41,6 +41,7 @@ shape that fk-encore's `/finance/admin/import` endpoint expects.
 
 | Finanzkraft entity | fk-encore target | Notes |
 |---|---|---|
+| `Accounts[].currency_id` + `currency_short` (and `Fk_Currency:id`/`:short` on transactions, plus `Fk_Transaction:originalCurrency`) | `currencies[]` (Stage 0) | Every ISO code seen in the export is upserted into `finance_currency` before any other stage runs, so transactions in CHF/GBP/JPY/… land cleanly without a manual seed. The matching `Fk_Currency:short` becomes the symbol; missing symbols fall back to the code. |
 | `Accounts[].bankcontact_*` | `bankcontacts[]` (one row per `bankcontact_id`) | Pseudo-bankcontact: name + BLZ + server-URL come straight through, login is set to a placeholder `fk-bc-<id>`. The user fixes login+PIN+TAN-Verfahren in the new UI. |
 | `Accounts[]` | `accounts[]` | Linked accounts get `bankcontact_blz/login` set to the matching pseudo-bankcontact; cash wallets stay manual. |
 | `Accounts[].fintsAccountNumber` | `accounts[].fints_account_number` | Pre-fills the lib-fints accountNumber so a sync works the moment credentials are entered. |

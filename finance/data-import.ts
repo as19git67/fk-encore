@@ -45,6 +45,7 @@ import {
   type FinanzkraftExport,
   type ImportAccount,
   type ImportBankcontact,
+  type ImportCurrency,
   type ImportTagLink,
   type ImportTransaction,
 } from "./import-schema";
@@ -83,6 +84,7 @@ interface ValidationError {
 }
 
 interface EntityCounts {
+  currencies: number;
   bankcontacts: number;
   accounts: number;
   transactions: number;
@@ -130,6 +132,7 @@ export const importFinanzkraft = api(
     }
 
     const counts: EntityCounts = {
+      currencies: 0,
       bankcontacts: 0,
       accounts: 0,
       transactions: 0,
@@ -138,6 +141,13 @@ export const importFinanzkraft = api(
     };
     const skipped: EntityCounts = { ...counts };
     const errors: ValidationError[] = [];
+
+    // Stage 0: Currencies (any new ISO codes mentioned by accounts /
+    // transactions are upserted before the typed-FK stages run, so the
+    // import can bring CHF/GBP/etc. without a prior manual migration).
+    if (exportData.currencies && exportData.currencies.length > 0) {
+      await importCurrencies(exportData.currencies, counts, skipped, errors);
+    }
 
     // Stage 1: Bankcontacts
     const bankcontactIdByKey = await importBankcontacts(
@@ -268,6 +278,43 @@ async function wipeFinanceData(): Promise<void> {
       finance_bankcontact
     RESTART IDENTITY CASCADE
   `);
+}
+
+// -----------------------------------------------------------------------
+// Stage 0: currencies
+// -----------------------------------------------------------------------
+
+async function importCurrencies(
+  rows: ImportCurrency[],
+  counts: EntityCounts,
+  skipped: EntityCounts,
+  errors: ValidationError[],
+): Promise<void> {
+  const existing = await db.select({ code: financeCurrency.code }).from(financeCurrency);
+  const present = new Set(existing.map((r) => r.code));
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const code = r.code.trim().toUpperCase();
+    if (present.has(code)) {
+      skipped.currencies++;
+      continue;
+    }
+    try {
+      await db.insert(financeCurrency).values({
+        code,
+        symbol: r.symbol?.trim() || code,
+        decimals: r.decimals ?? 2,
+      });
+      counts.currencies++;
+      present.add(code);
+    } catch (err: any) {
+      errors.push({
+        entity: "currencies",
+        row: i,
+        message: err?.message ?? String(err),
+      });
+    }
+  }
 }
 
 // -----------------------------------------------------------------------
