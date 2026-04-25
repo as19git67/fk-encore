@@ -167,23 +167,35 @@ es einen Filesystem-Pfad, der ohne HTTP auskommt:
 
 ### 8.1 Import-Dropbox
 
-`finance/import-pending.ts` registriert einen Cron alle **5 Minuten**,
-der `${FINANCE_IMPORT_DIR}/` (Default `/data/finance-import` →
-gemountet als `/mnt/data/finance-import`) nach Dateien mit dem Suffix
-**`*.pending.json`** durchsucht.
+`finance/import-pending.ts` startet beim Boot einen **chokidar-Watcher**
+auf `${FINANCE_IMPORT_DIR}/` (Default `/data/finance-import` →
+gemountet als `/mnt/data/finance-import`) und beim ersten Tick einen
+**Boot-Scan** über alle Dateien, die schon im Verzeichnis liegen.
+Erkannt werden Dateien mit dem Suffix **`*.pending.json`**, sobald
+ihre Größe `FINANCE_IMPORT_STABILITY_MS` ms (Default 5 s) lang stabil
+geblieben ist.
 
-- Jede gefundene Datei wird mit `wipe_first: true` durch
-  `runImport()` geschickt — die Dropbox-Semantik ist *"diese Datei IST
-  der gewünschte Finanz-Stand"*.
+- Jede erkannte Datei wird mit `wipe_first: true` durch `runImport()`
+  geschickt — die Dropbox-Semantik ist *"diese Datei IST der gewünschte
+  Finanz-Stand"*.
 - Erfolg: rename auf `<basename>.imported-<ISO-timestamp>.json`. Bei
   Validierungsfehlern liegt eine Schwester-Datei
   `<basename>.imported-<ts>.errors.json` daneben.
 - Fehler: rename auf `<basename>.failed-<ts>.json` plus
   `<basename>.failed-<ts>.error.txt`.
 
-Singleton-Mutex auf Modul-Ebene verhindert überlappende Ticks bei
-sehr großen Imports; während ein Tick läuft, schreibt der nächste nur
-`skipped_locked: true` und beendet sich.
+Daneben registriert das Modul den 5-Minuten-CronJob
+`finance-import-pending-scan` und exponiert intern
+`POST /internal/finance/scan-pending-imports` — beide zielen auf den
+gleichen Mutex-geschützten `runScan()`. Der CronJob feuert in
+Selfhost-Docker-Builds nicht automatisch (Encore.ts-Crons brauchen die
+Encore-Cloud-Control-Plane), der Watcher übernimmt den Live-Pickup;
+der Endpoint bleibt für manuelle Trigger und für den Tag, an dem die
+App auf Encore Cloud umzieht.
+
+Singleton-Mutex auf Modul-Ebene verhindert überlappende Läufe bei sehr
+großen Imports; während ein Lauf läuft, gibt der nächste sofort
+`skipped_locked: true` zurück und beendet sich.
 
 Logging: Stage-Boundaries via `encore.dev/log`, Tx-Stage zusätzlich
 ein Heartbeat alle **1000 Zeilen** mit Counts + Elapsed — sodass ein

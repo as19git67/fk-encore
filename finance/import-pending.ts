@@ -7,8 +7,9 @@
  * for the initial bulk-load.
  *
  * Pattern: drop a file matching `*.pending.json` into
- * `${FINANCE_IMPORT_DIR}`, the cron picks it up within a few minutes,
- * runs `runImport` directly (no HTTP, no timeout), and renames it:
+ * `${FINANCE_IMPORT_DIR}`. A chokidar watcher picks the file up the
+ * moment its size has been stable for `STABILITY_MS`, runs `runImport`
+ * directly (no HTTP, no gateway timeout), and renames it:
  *
  *   - on success → `<base>.imported-<timestamp>.json`
  *   - on failure → `<base>.failed-<timestamp>.json`
@@ -16,23 +17,36 @@
  *                    with the validation-error list / exception message
  *
  * The `.pending.json` → `.imported-…json` / `.failed-…json` swap means
- * a re-scan only sees the two-suffix `.pending.json` files. The export
- * cron writes to the same directory using a different name pattern
- * (`finance-export-YYYY-MM-DD.json`), so backups can sit next to
- * pending uploads without colliding.
+ * the watcher only reacts to new two-suffix `.pending.json` files. The
+ * export cron writes to the same directory using a different name
+ * pattern (`finance-export-YYYY-MM-DD.json`), so backups can sit next
+ * to pending uploads without colliding.
  *
  * `wipe_first: true` is the default so the dropbox is unambiguous: the
  * file *is* the desired finance state; everything previously stored
  * gets replaced. If you want additive imports use the AdminImportView
  * UI instead.
  *
- * Singleton mutex: the cron runs every 5 min and a 50k-tx import takes
- * minutes, so two ticks could overlap. A module-level boolean guards
- * against that — concurrent ticks see `inFlight=true` and bail.
+ * Why a chokidar watcher and not just the CronJob below: Encore.ts
+ * CronJobs are scheduled by the Encore Cloud control plane. In our
+ * self-hosted `encore build docker` deployment there is no control
+ * plane wiring up the cron triggers, so the CronJob registers but
+ * never actually fires. The chokidar watcher gives us live, immediate
+ * pickup that doesn't depend on Encore Cloud — same pattern as
+ * `documents/inbox-watcher.ts`. The CronJob + API endpoint stay as a
+ * manual-trigger surface (curl POST /internal/finance/scan-pending-
+ * imports) and for forward-compat with a future cloud migration.
+ *
+ * Singleton mutex: a 50k-tx import takes minutes, so a second drop
+ * arriving mid-flight could fire `processPending()` again. A module-
+ * level boolean guards against that — concurrent invocations see
+ * `inFlight=true` and bail out.
  */
 
+import { existsSync } from "node:fs";
 import { readFile, readdir, rename, stat, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
+import chokidar, { type FSWatcher } from "chokidar";
 import { api } from "encore.dev/api";
 import { CronJob } from "encore.dev/cron";
 import log from "encore.dev/log";
@@ -57,24 +71,32 @@ interface ScanResult {
   skipped_locked: boolean;
 }
 
+/**
+ * Singleton-mutex wrapper around `processPending()` shared by the API
+ * endpoint, the CronJob, and the chokidar watcher. Pulled out so the
+ * watcher can invoke it as a plain function without going through the
+ * Encore RPC surface.
+ */
+async function runScan(): Promise<ScanResult> {
+  if (inFlight) {
+    log.info("scanPendingImports: previous tick still running, skipping");
+    return { scanned: 0, imported: 0, failed: 0, skipped_locked: true };
+  }
+  inFlight = true;
+  try {
+    return await processPending();
+  } finally {
+    inFlight = false;
+  }
+}
+
 export const scanPendingImports = api(
   {
     expose: false,
     method: "POST",
     path: "/internal/finance/scan-pending-imports",
   },
-  async (): Promise<ScanResult> => {
-    if (inFlight) {
-      log.info("scanPendingImports: previous tick still running, skipping");
-      return { scanned: 0, imported: 0, failed: 0, skipped_locked: true };
-    }
-    inFlight = true;
-    try {
-      return await processPending();
-    } finally {
-      inFlight = false;
-    }
-  },
+  async (): Promise<ScanResult> => runScan(),
 );
 
 async function processPending(): Promise<ScanResult> {
@@ -184,3 +206,112 @@ const _ = new CronJob("finance-import-pending-scan", {
   every: "5m",
   endpoint: scanPendingImports,
 });
+
+// -----------------------------------------------------------------------
+// chokidar watcher (real-time pickup, independent of Encore Cloud cron)
+// -----------------------------------------------------------------------
+
+let watcher: FSWatcher | null = null;
+
+/**
+ * `awaitWriteFinish` window. Operators copy export files into the
+ * dropbox via `cp` / `rsync` / a docker volume mount; for a 50 MB JSON
+ * the write takes a few hundred ms, so 5 s of stability is plenty
+ * without making the user wait long after the copy.
+ */
+const STABILITY_MS = parseInt(
+  process.env.FINANCE_IMPORT_STABILITY_MS ?? "5000",
+  10,
+);
+
+function isPending(file: string): boolean {
+  return file.endsWith(PENDING_SUFFIX);
+}
+
+/**
+ * Boot the dropbox watcher. Idempotent — subsequent calls are no-ops.
+ *
+ * - mkdir -p the dropbox so a fresh container with an empty bind-mount
+ *   doesn't make chokidar throw.
+ * - Run one full scan immediately so files dropped while the container
+ *   was down get picked up at boot, instead of waiting for the next
+ *   filesystem event (which never arrives for stale files).
+ * - Subscribe to chokidar `add` events for live pickup.
+ */
+export async function startFinanceImportWatcher(): Promise<void> {
+  if (watcher) return;
+
+  try {
+    await mkdir(FINANCE_IMPORT_DIR, { recursive: true });
+  } catch (err) {
+    log.error("startFinanceImportWatcher: cannot create import dir", {
+      dir: FINANCE_IMPORT_DIR,
+      err: (err as Error).message,
+    });
+    return;
+  }
+
+  if (!existsSync(FINANCE_IMPORT_DIR)) {
+    log.warn("startFinanceImportWatcher: dir missing after mkdir, skipping", {
+      dir: FINANCE_IMPORT_DIR,
+    });
+    return;
+  }
+
+  // Boot scan: pick up `.pending.json` files that were dropped while
+  // the container was offline. chokidar runs with `ignoreInitial: true`
+  // below (default false would also work, but we want a single explicit
+  // batched scan here instead of N independent add events at boot).
+  try {
+    const result = await runScan();
+    if (result.scanned > 0) {
+      log.info("startFinanceImportWatcher: boot scan done", result);
+    }
+  } catch (err) {
+    log.error("startFinanceImportWatcher: boot scan failed", {
+      err: (err as Error).message,
+    });
+  }
+
+  watcher = chokidar.watch(FINANCE_IMPORT_DIR, {
+    ignored: (p, stats) => {
+      const base = path.basename(p);
+      if (base.startsWith(".")) return true;
+      if (stats?.isFile()) return !isPending(p);
+      return false;
+    },
+    ignoreInitial: true,
+    persistent: true,
+    awaitWriteFinish: { stabilityThreshold: STABILITY_MS, pollInterval: 500 },
+  });
+
+  watcher.on("add", (file) => {
+    log.info("financeImportWatcher: pending file detected", {
+      file: path.basename(file),
+    });
+    // Same singleton-mutex path as the cron and HTTP endpoint —
+    // runScan() handles whatever's in the dir, not a single file, so
+    // concurrent adds collapse to one scan.
+    runScan().catch((err) =>
+      log.error("financeImportWatcher: scan failed", {
+        err: (err as Error).message,
+      }),
+    );
+  });
+  watcher.on("error", (err) => {
+    log.error("financeImportWatcher: chokidar error", {
+      err: (err as Error).message,
+    });
+  });
+
+  log.info("financeImportWatcher: watching", {
+    dir: FINANCE_IMPORT_DIR,
+    stability_ms: STABILITY_MS,
+  });
+}
+
+export async function stopFinanceImportWatcher(): Promise<void> {
+  if (!watcher) return;
+  await watcher.close();
+  watcher = null;
+}

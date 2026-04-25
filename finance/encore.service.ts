@@ -22,6 +22,19 @@ import "./statements-cron";
 import "./import-pending";
 import "./export-cron";
 
+import { startFinanceImportWatcher } from "./import-pending";
+
+// Fire-and-forget: the dropbox watcher must not block service boot.
+// Failures are logged inside the watcher. Mirrors the documents
+// inbox-watcher startup in documents/encore.service.ts. Needed because
+// Encore.ts CronJobs only fire under Encore Cloud — in self-hosted
+// `encore build docker` deployments the cron registers but never
+// triggers, so without this watcher *.pending.json files would sit in
+// the dropbox forever.
+startFinanceImportWatcher().catch((err) =>
+  console.error("[finance] failed to start import watcher:", err),
+);
+
 console.log("[boot] finance/encore.service.ts: registering Service");
 export default new Service("finance");
 console.log("[boot] finance/encore.service.ts: end");
