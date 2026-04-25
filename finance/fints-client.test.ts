@@ -1190,6 +1190,38 @@ describe("runFetchAccounts — linked-only filter", () => {
     expect(r.partial).toBe(false);
   });
 
+  it("deduplicates bank-side accounts that share an accountNumber (e.g. comdirect giro + Visa sub-account)", async () => {
+    // Comdirect's UPD response can list the same accountNumber twice
+    // with different subAccountIds — without dedup we'd fire two
+    // identical getAccountStatements / getAccountBalance calls and
+    // trigger two SCA pushes for the same data.
+    const c = clientWith(
+      [
+        { accountNumber: "401873500", accountType: "CheckingAccount", currency: "EUR" },
+        { accountNumber: "401873505", accountType: "CheckingAccount", currency: "EUR" },
+        // Duplicate of the first — different subAccountId in real life.
+        { accountNumber: "401873500", accountType: "CheckingAccount", currency: "EUR" },
+      ],
+      {
+        getAccountStatements: vi.fn(async () => stmtResp([])),
+        getAccountBalance: vi.fn(async () =>
+          balResp({ date: new Date(), currency: "EUR", balance: 1 }),
+        ),
+      },
+    );
+
+    const r = await runFetchAccounts(c, {
+      linkedAccountNumbers: new Set(["401873500", "401873505"]),
+    });
+
+    // Two unique accountNumbers → two snapshots, two stmt calls.
+    expect(r.accounts).toHaveLength(2);
+    expect(c.getAccountStatements).toHaveBeenCalledTimes(2);
+    expect(c.getAccountStatements).toHaveBeenCalledWith("401873500");
+    expect(c.getAccountStatements).toHaveBeenCalledWith("401873505");
+    expect(c.getAccountBalance).toHaveBeenCalledTimes(2);
+  });
+
   it("falls back to all-accounts when linkedAccountNumbers is omitted", async () => {
     const c = clientWith([
       { accountNumber: "A", accountType: "CheckingAccount", currency: "EUR" },

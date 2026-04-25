@@ -724,8 +724,25 @@ export async function runFetchAccounts(
 
   const snapshots: FintsAccountSnapshot[] = [];
   let partial = false;
+  // Some banks (e.g. comdirect) report the same accountNumber twice
+  // in upd.bankAccounts with different subAccountIds (giro + Visa
+  // sub-account on the same number). lib-fints' getAccountStatements
+  // / getAccountBalance only take the accountNumber, so a second
+  // call would just retrigger the same SCA push for the same data.
+  // Dedupe at this layer.
+  const seenAccountNumbers = new Set<string>();
 
   for (const account of accounts) {
+    if (seenAccountNumbers.has(account.accountNumber)) {
+      console.log(
+        `[fints] skipping duplicate bank-side account ${account.accountNumber} ` +
+          `(subAccountId=${account.subAccountId ?? "<none>"}) — ` +
+          `lib-fints addresses by accountNumber only, no need to re-fetch`,
+      );
+      continue;
+    }
+    seenAccountNumbers.add(account.accountNumber);
+
     const fetch = opts.linkedAccountNumbers
       ? opts.linkedAccountNumbers.has(account.accountNumber)
       : true;
@@ -739,6 +756,10 @@ export async function runFetchAccounts(
 
 interface RawBankAccount {
   accountNumber: string;
+  /** Lib-fints includes the FinTS sub-account discriminator. We don't
+   *  use it for routing (getAccountStatements doesn't take it), but
+   *  log it so duplicate-accountNumber cases are diagnosable. */
+  subAccountId?: string;
   iban?: string;
   currency?: string;
   accountType?: string;
