@@ -110,13 +110,18 @@ export const completeTanSession = api(
             fintsTanRef: result.tanReference ?? info.fintsTanRef,
           },
           challenge: result.tanChallenge ?? session.challenge,
+          tan_media_name: result.tanMediaName ?? session.tan_media_name,
+          tan_photo_mime: result.tanPhotoMime ?? null,
+          tan_photo_base64: result.tanPhotoBase64 ?? null,
         })
         .where(eq(financeTanSession.tan_reference, p.tanReference));
       return {
         state: "tan-required",
         tanReference: p.tanReference,
         challenge: result.tanChallenge ?? session.challenge,
-        tanMediaName: result.tanMediaName,
+        tanMediaName: result.tanMediaName ?? session.tan_media_name ?? undefined,
+        tanPhotoMime: result.tanPhotoMime,
+        tanPhotoBase64: result.tanPhotoBase64,
       };
     }
 

@@ -1005,17 +1005,23 @@ function mapResponse(
     tanChallenge?: string;
     tanReference?: string;
     tanMediaName?: string;
+    tanPhoto?: { mimeType: string; image: Uint8Array };
     bankAnswers: BankAnswer[];
   },
   bankingInformation: BankingInformation,
 ): DialogResult {
   if (response.requiresTan) {
+    const photo = response.tanPhoto;
     return {
       state: "tan-required",
       bankingInformation: bankingInformation as unknown as Record<string, unknown>,
       tanChallenge: response.tanChallenge,
       tanReference: response.tanReference,
       tanMediaName: response.tanMediaName,
+      tanPhotoMime: photo?.mimeType,
+      tanPhotoBase64: photo
+        ? Buffer.from(photo.image).toString("base64")
+        : undefined,
     };
   }
   if (response.success) {

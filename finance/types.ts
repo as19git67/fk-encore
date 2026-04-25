@@ -42,6 +42,14 @@ export interface DialogResult {
   tanReference?: string;
   /** Name of the selected TAN medium (pushTAN device, etc.), set when state="tan-required" and the bank identified one. */
   tanMediaName?: string;
+  /**
+   * Set when state="tan-required" and the bank's challenge was a
+   * photoTAN / Flicker-TAN matrix. Image is base64-encoded for JSON
+   * transport; the UI builds `data:${tanPhotoMime};base64,${tanPhotoBase64}`
+   * and feeds it to an <img>.
+   */
+  tanPhotoMime?: string;
+  tanPhotoBase64?: string;
   /** Set when state="error". First non-zero bankAnswers code, e.g. "9910" for wrong PIN. */
   errorCode?: string;
   /** Set when state="error". Human-readable reason (bankAnswers[0].text or network/parse failure). */

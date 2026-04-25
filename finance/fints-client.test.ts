@@ -94,6 +94,7 @@ function mockClient(
     tanChallenge?: string;
     tanReference?: string;
     tanMediaName?: string;
+    tanPhoto?: { mimeType: string; image: Uint8Array };
     bankAnswers?: Array<{ code: number; text: string }>;
   },
   bankingInformation: Record<string, unknown> = { systemId: "sys-1" },
@@ -162,6 +163,29 @@ describe("fints-client — response mapping", () => {
     expect(result.tanReference).toBe("tanref-abc");
     expect(result.tanMediaName).toBe("Pixel 7");
     expect(result.bankingInformation).toBeDefined();
+  });
+
+  it("base64-encodes the lib-fints photoTAN bytes for JSON transport", async () => {
+    const id = await insertBankcontact();
+    // PNG header bytes — arbitrary, just need a non-trivial payload.
+    const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const result = await runSynchronize(id, {
+      clientFactory: () =>
+        mockClient({
+          success: true,
+          requiresTan: true,
+          tanChallenge: "PhotoTAN scannen",
+          tanReference: "ref-photo",
+          tanMediaName: "PhotoTAN",
+          tanPhoto: { mimeType: "image/png", image: pngBytes },
+        }),
+      sleep: async () => {},
+    });
+    expect(result.state).toBe("tan-required");
+    expect(result.tanPhotoMime).toBe("image/png");
+    expect(result.tanPhotoBase64).toBe(
+      Buffer.from(pngBytes).toString("base64"),
+    );
   });
 
   it("maps FinTS code 9910 (wrong PIN) → state=error with errorCode '9910'", async () => {

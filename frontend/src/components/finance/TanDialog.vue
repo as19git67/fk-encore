@@ -18,6 +18,18 @@ const visible = computed({
   },
 })
 
+/**
+ * photoTAN / Flicker-TAN: lib-fints surfaces the matrix as
+ * { mimeType, image: Uint8Array }, the backend base64-encodes the
+ * image and ships it as `tanPhotoMime` + `tanPhotoBase64`. Stitched
+ * back together for an <img>.
+ */
+const photoDataUri = computed(() => {
+  const p = store.pendingTan
+  if (!p?.tanPhotoMime || !p?.tanPhotoBase64) return null
+  return `data:${p.tanPhotoMime};base64,${p.tanPhotoBase64}`
+})
+
 watch(
   () => store.pendingTan?.tanReference,
   () => {
@@ -55,6 +67,18 @@ async function submit() {
       <p class="challenge">
         {{ store.pendingTan?.challenge }}
       </p>
+
+      <figure v-if="photoDataUri" class="tan-photo">
+        <img
+          :src="photoDataUri"
+          alt="TAN-Bildmatrix"
+          class="tan-photo__img"
+        />
+        <figcaption class="tan-photo__caption">
+          Mit der TAN-App auf deinem Zweitgerät einscannen — die App
+          zeigt dann den TAN-Code an.
+        </figcaption>
+      </figure>
 
       <label>
         <span>TAN (leer lassen bei decoupled / pushTAN)</span>
@@ -102,5 +126,28 @@ async function submit() {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
+}
+.tan-photo {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: var(--p-surface-50, var(--p-content-background));
+  border-radius: 0.5rem;
+}
+.tan-photo__img {
+  max-width: 100%;
+  height: auto;
+  /* photoTAN matrices are tiny — let them render at native size up
+   * to ~15rem so the user can hit them with a phone scan. */
+  width: 15rem;
+  image-rendering: crisp-edges;
+}
+.tan-photo__caption {
+  font-size: 0.875rem;
+  color: var(--p-text-muted-color);
+  text-align: center;
 }
 </style>

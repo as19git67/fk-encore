@@ -13,6 +13,8 @@ export const useBankcontactsStore = defineStore('finance.bankcontacts', () => {
     tanReference: string
     challenge: string
     tanMediaName?: string
+    tanPhotoMime?: string
+    tanPhotoBase64?: string
   } | null>(null)
 
   async function refresh() {
@@ -66,6 +68,8 @@ export const useBankcontactsStore = defineStore('finance.bankcontacts', () => {
         tanReference: resp.tanReference,
         challenge: resp.challenge,
         tanMediaName: resp.tanMediaName,
+        tanPhotoMime: resp.tanPhotoMime,
+        tanPhotoBase64: resp.tanPhotoBase64,
       }
     }
     // Pull the fresh row so last_sync_at / status update in the UI.
@@ -83,6 +87,8 @@ export const useBankcontactsStore = defineStore('finance.bankcontacts', () => {
         tanReference: resp.tanReference,
         challenge: resp.challenge,
         tanMediaName: resp.tanMediaName,
+        tanPhotoMime: resp.tanPhotoMime,
+        tanPhotoBase64: resp.tanPhotoBase64,
       }
     } else {
       pendingTan.value = null

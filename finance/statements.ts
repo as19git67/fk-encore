@@ -94,6 +94,10 @@ export interface SyncApiResponse {
   challenge?: string;
   /** state=tan-required — name of the selected TAN medium, if the bank identified one. */
   tanMediaName?: string;
+  /** state=tan-required — photoTAN / Flicker matrix mime type (e.g. "image/png"). */
+  tanPhotoMime?: string;
+  /** state=tan-required — photoTAN / Flicker matrix as base64. UI renders via data URI. */
+  tanPhotoBase64?: string;
   /** state=error — first non-zero bankAnswer code, e.g. "9910" for wrong PIN. */
   errorCode?: string;
   /** state=error — human-readable reason. */
@@ -142,6 +146,9 @@ export const triggerSync = api(
           fintsTanRef: result.tanReference ?? "",
         },
         challenge: result.tanChallenge ?? "",
+        tan_media_name: result.tanMediaName ?? null,
+        tan_photo_mime: result.tanPhotoMime ?? null,
+        tan_photo_base64: result.tanPhotoBase64 ?? null,
         expires_at: new Date(Date.now() + TAN_SESSION_TTL_MS).toISOString(),
       });
       return {
@@ -149,6 +156,8 @@ export const triggerSync = api(
         tanReference,
         challenge: result.tanChallenge ?? "",
         tanMediaName: result.tanMediaName,
+        tanPhotoMime: result.tanPhotoMime,
+        tanPhotoBase64: result.tanPhotoBase64,
       };
     }
 

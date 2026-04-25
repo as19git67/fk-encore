@@ -1163,6 +1163,15 @@ export const financeTanSession = pgTable(
       .notNull()
       .$type<Record<string, unknown>>(),
     challenge: text("challenge").notNull(),
+    /**
+     * photoTAN / Flicker-TAN matrix from the bank's last challenge,
+     * if any. Persisted (rather than just held in-memory) so the
+     * dialog survives a page reload — the user has to scan the
+     * matrix on a separate device, and that takes a moment.
+     */
+    tan_photo_mime: text("tan_photo_mime"),
+    tan_photo_base64: text("tan_photo_base64"),
+    tan_media_name: text("tan_media_name"),
     expires_at: timestamp("expires_at", { mode: "string", withTimezone: true }).notNull(),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true })
       .notNull()

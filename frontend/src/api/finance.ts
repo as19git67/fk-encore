@@ -160,6 +160,10 @@ export type SyncResponse =
       tanReference: string
       challenge: string
       tanMediaName?: string
+      /** photoTAN / Flicker-TAN matrix mime type, e.g. "image/png". */
+      tanPhotoMime?: string
+      /** photoTAN / Flicker-TAN matrix as base64 — UI builds a data URI. */
+      tanPhotoBase64?: string
     }
   | { state: 'error'; errorCode: string; errorMessage: string }
 
