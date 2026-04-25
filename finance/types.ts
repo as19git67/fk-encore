@@ -109,4 +109,23 @@ export interface FetchResult {
   accounts: FintsAccountSnapshot[];
   /** True when any account was skipped due to a mid-flight TAN requirement. */
   partial: boolean;
+  /**
+   * Set when the per-account fetch hit a coupled-TAN (photoTAN,
+   * chipTAN, …) that needs UI input. The caller's job: persist a
+   * tan_session row with this info + the loop state, return
+   * state="tan-required" to the API caller, and resume the loop in
+   * tan-sessions.complete after the user submits.
+   */
+  pendingTan?: {
+    /** lib-fints reference for getAccountStatementsWithTan(ref, tan). */
+    tanReference: string;
+    tanChallenge?: string;
+    tanMediaName?: string;
+    tanPhotoMime?: string;
+    tanPhotoBase64?: string;
+    /** The bank-side accountNumber that triggered the TAN. */
+    accountNumber: string;
+    /** Account numbers still queued behind the current one. */
+    remainingAccountNumbers: string[];
+  };
 }

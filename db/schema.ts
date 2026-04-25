@@ -1172,6 +1172,24 @@ export const financeTanSession = pgTable(
     tan_photo_mime: text("tan_photo_mime"),
     tan_photo_base64: text("tan_photo_base64"),
     tan_media_name: text("tan_media_name"),
+    /**
+     * What kind of FinTS dialog this session resumes:
+     *   "sync"       — initial synchronize() / synchronizeWithTan
+     *   "statements" — getAccountStatements / …WithTan, mid-fetch
+     * Drives the branch in tan-sessions.complete.
+     */
+    kind: text("kind").notNull().default("sync").$type<"sync" | "statements">(),
+    /**
+     * Mid-fetch resume state for kind="statements": which bank
+     * accountNumber the dialog was waiting on, and which others are
+     * still queued behind it. After the user submits the TAN we
+     * continue the loop from there.
+     */
+    fetch_context: jsonb("fetch_context").$type<{
+      currentAccountNumber: string;
+      remainingAccountNumbers: string[];
+      linkedAccountNumbers: string[];
+    } | null>(),
     expires_at: timestamp("expires_at", { mode: "string", withTimezone: true }).notNull(),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true })
       .notNull()

@@ -172,7 +172,9 @@ export const triggerSync = api(
     // state === "idle" — run the statement/balance fetch against the
     // same client so we don't re-do the init-dialog TAN just to pull
     // data that was unreachable before.
-    return await fetchAndPersist(p.bankcontactId, result.client);
+    return await fetchAndPersist(p.bankcontactId, result.client, {
+      userId: Number(auth.userID),
+    });
   },
 );
 
@@ -181,10 +183,18 @@ export const triggerSync = api(
  * client and maps the outcome to `SyncApiResponse`. Shared by the
  * manual trigger (`statements.triggerSync`) and the cron/TAN-resume
  * paths.
+ *
+ * userId is needed to persist a tan_session of kind="statements"
+ * when a per-account fetch hits a coupled-TAN. The cron passes its
+ * "responsible user" pick; otherwise pass the auth.userID. If
+ * omitted we still process what we can but a coupled-TAN turns into
+ * a soft error rather than a session — the cron flavour, where
+ * there's no UI to surface the photoTAN to anyway.
  */
 export async function fetchAndPersist(
   bankcontactId: number,
   client: unknown,
+  opts: { userId?: number } = {},
 ): Promise<SyncApiResponse> {
   if (!client) {
     // No client handed over (e.g. a legacy mock) — treat as idle
@@ -223,6 +233,47 @@ export async function fetchAndPersist(
     linkedAccountNumbers,
   });
   const stats = await persistFetchResult(bankcontactId, fetched);
+
+  // Mid-fetch coupled-TAN: persist a tan_session row of kind
+  // "statements" so tan-sessions.complete can resume the loop after
+  // the user submits the TAN. The live client stays in
+  // liveClientCache (TTL 30 min) so the resume can keep using it.
+  if (fetched.pendingTan && opts.userId !== undefined) {
+    const tanReference = randomUUID();
+    await db.insert(financeTanSession).values({
+      tan_reference: tanReference,
+      user_id: opts.userId,
+      bankcontact_id: bankcontactId,
+      kind: "statements",
+      banking_information: {
+        fintsTanRef: fetched.pendingTan.tanReference,
+      },
+      challenge: fetched.pendingTan.tanChallenge ?? "",
+      tan_media_name: fetched.pendingTan.tanMediaName ?? null,
+      tan_photo_mime: fetched.pendingTan.tanPhotoMime ?? null,
+      tan_photo_base64: fetched.pendingTan.tanPhotoBase64 ?? null,
+      fetch_context: {
+        currentAccountNumber: fetched.pendingTan.accountNumber,
+        remainingAccountNumbers: fetched.pendingTan.remainingAccountNumbers,
+        linkedAccountNumbers: [...linkedAccountNumbers],
+      },
+      expires_at: new Date(Date.now() + TAN_SESSION_TTL_MS).toISOString(),
+    });
+    console.log(
+      `[finance.statements] bankcontact=${bankcontactId} paused at ` +
+        `account=${fetched.pendingTan.accountNumber} for coupled TAN; ` +
+        `${fetched.pendingTan.remainingAccountNumbers.length} accounts queued`,
+    );
+    return {
+      state: "tan-required",
+      tanReference,
+      challenge: fetched.pendingTan.tanChallenge ?? "",
+      tanMediaName: fetched.pendingTan.tanMediaName,
+      tanPhotoMime: fetched.pendingTan.tanPhotoMime,
+      tanPhotoBase64: fetched.pendingTan.tanPhotoBase64,
+    };
+  }
+
   console.log(
     `[finance.statements] bankcontact=${bankcontactId} synced: ` +
       `accounts=${stats.accounts_seen} (matched=${stats.accounts_matched} ` +

@@ -28,8 +28,14 @@ import { requirePermission } from "../user/auth-handler";
 import { checkRateLimit, resetRateLimit } from "../user/rateLimiter";
 import db from "../db/database";
 import { financeTanSession } from "../db/schema";
-import { runSynchronize } from "./fints-client";
+import {
+  resumeFetchAfterTan,
+  runSynchronize,
+  takeCachedClient,
+  type FintsClientSurface,
+} from "./fints-client";
 import { fetchAndPersist, type SyncApiResponse } from "./statements";
+import { persistFetchResult } from "./statement-persist";
 
 console.log("[boot] finance/tan-sessions.ts: all imports resolved");
 
@@ -84,6 +90,15 @@ export const completeTanSession = api(
       // Row stays; cleanup cron removes it. Return a distinct error
       // code so the UI can tell the user to restart the dialog.
       throw APIError.deadlineExceeded("TAN session expired");
+    }
+
+    // ── kind="statements" ─────────────────────────────────────────
+    // Mid-fetch dialog: the loop in runFetchAccounts paused on a
+    // coupled TAN (photoTAN/chipTAN). The live client that started
+    // the dialog should still be in liveClientCache; if it isn't
+    // (container restart, TTL expiry), we have to bail.
+    if (session.kind === "statements") {
+      return await resumeStatementsTan(session, p, rateKey);
     }
 
     const info = session.banking_information as {
@@ -145,6 +160,115 @@ export const completeTanSession = api(
     return await fetchAndPersist(session.bankcontact_id, result.client);
   },
 );
+
+/**
+ * Resume a kind="statements" session: continue the paused
+ * getAccountStatements call with the user's TAN, persist the data
+ * we get back, then keep iterating any accounts queued behind it.
+ *
+ * If the live client is no longer in the in-memory cache (container
+ * restart, TTL expiry), the bank's session is gone too — there's no
+ * way to continue the dialog. Surface this as state="error" with a
+ * distinct code so the UI tells the user to retrigger sync.
+ */
+async function resumeStatementsTan(
+  session: typeof financeTanSession.$inferSelect,
+  p: CompleteParams,
+  rateKey: string,
+): Promise<SyncApiResponse> {
+  const cached = takeCachedClient(session.bankcontact_id);
+  if (!cached) {
+    await db
+      .delete(financeTanSession)
+      .where(eq(financeTanSession.tan_reference, p.tanReference));
+    return {
+      state: "error",
+      errorCode: "live-client-evicted",
+      errorMessage:
+        "Die laufende Bank-Sitzung wurde gerade geschlossen — bitte den " +
+        "Sync erneut starten.",
+    };
+  }
+  const ctx = session.fetch_context;
+  if (!ctx) {
+    await db
+      .delete(financeTanSession)
+      .where(eq(financeTanSession.tan_reference, p.tanReference));
+    return {
+      state: "error",
+      errorCode: "missing-fetch-context",
+      errorMessage: "TAN-Session ohne Fetch-Kontext — bitte Sync erneut starten.",
+    };
+  }
+  const info = session.banking_information as { fintsTanRef: string };
+
+  const fetched = await resumeFetchAfterTan(cached, {
+    tanReference: info.fintsTanRef,
+    tan: p.tan,
+    currentAccountNumber: ctx.currentAccountNumber,
+    remainingAccountNumbers: ctx.remainingAccountNumbers,
+  });
+  const stats = await persistFetchResult(session.bankcontact_id, fetched);
+
+  // Bank still wants TAN (wrong code or chained challenge) — refresh
+  // the session with the new lib-fints reference + photo and prompt
+  // again.
+  if (fetched.pendingTan) {
+    resetRateLimit(rateKey);
+    await db
+      .update(financeTanSession)
+      .set({
+        banking_information: { fintsTanRef: fetched.pendingTan.tanReference },
+        challenge: fetched.pendingTan.tanChallenge ?? "",
+        tan_media_name: fetched.pendingTan.tanMediaName ?? null,
+        tan_photo_mime: fetched.pendingTan.tanPhotoMime ?? null,
+        tan_photo_base64: fetched.pendingTan.tanPhotoBase64 ?? null,
+        fetch_context: {
+          currentAccountNumber: fetched.pendingTan.accountNumber,
+          remainingAccountNumbers: fetched.pendingTan.remainingAccountNumbers,
+          linkedAccountNumbers: ctx.linkedAccountNumbers,
+        },
+      })
+      .where(eq(financeTanSession.tan_reference, p.tanReference));
+    return {
+      state: "tan-required",
+      tanReference: p.tanReference,
+      challenge: fetched.pendingTan.tanChallenge ?? "",
+      tanMediaName: fetched.pendingTan.tanMediaName,
+      tanPhotoMime: fetched.pendingTan.tanPhotoMime,
+      tanPhotoBase64: fetched.pendingTan.tanPhotoBase64,
+    };
+  }
+
+  // Done — drop session and report what was processed.
+  resetRateLimit(rateKey);
+  await db
+    .delete(financeTanSession)
+    .where(eq(financeTanSession.tan_reference, p.tanReference));
+
+  console.log(
+    `[finance.tan-sessions] resumed statements fetch for bankcontact=` +
+      `${session.bankcontact_id}: tx=${stats.transactions_inserted} ` +
+      `(${stats.transactions_skipped_duplicate} dup) ` +
+      `balances=${stats.balances_written} partial=${fetched.partial}`,
+  );
+  return {
+    state: "idle",
+    accounts_seen: stats.accounts_seen,
+    accounts_matched: stats.accounts_matched,
+    accounts_unknown: stats.accounts_unknown,
+    unknown_accounts: stats.unknown.map((u) => ({
+      accountNumber: u.accountNumber,
+      iban: u.iban,
+      accountKind: u.accountKind,
+      currency: u.currency,
+      label: u.label,
+    })),
+    transactions_inserted: stats.transactions_inserted,
+    balances_written: stats.balances_written,
+    partial: fetched.partial || undefined,
+  };
+}
 
 /**
  * Internal endpoint: delete all TAN sessions past their expires_at.

@@ -146,7 +146,18 @@ interface CachedClientEntry {
 const liveClientCache = new Map<number, CachedClientEntry>();
 const LIVE_CLIENT_TTL_MS = 30 * 60_000; // 30 min — covers human follow-ups
 
-function takeCachedClient(bankcontactId: number): FintsClientSurface | null {
+/**
+ * Public read-side of the in-memory client cache. Used by the
+ * mid-fetch resume path in tan-sessions.complete to grab the same
+ * live client that paused for the TAN — so we can continue the
+ * dialog with `getAccountStatementsWithTan(ref, tan)` instead of
+ * starting a fresh init dialog (which would trigger a new TAN).
+ *
+ * Returns null if the entry has expired or never existed; the
+ * caller surfaces that as state="error" so the UI prompts the user
+ * to retrigger sync.
+ */
+export function takeCachedClient(bankcontactId: number): FintsClientSurface | null {
   const entry = liveClientCache.get(bankcontactId);
   if (!entry) return null;
   if (entry.expiresAt < Date.now()) {
@@ -731,7 +742,7 @@ export async function runFetchAccounts(
   // call would just retrigger the same SCA push for the same data.
   // Dedupe at this layer.
   const seenAccountNumbers = new Set<string>();
-
+  const dedupedAccounts: RawBankAccount[] = [];
   for (const account of accounts) {
     if (seenAccountNumbers.has(account.accountNumber)) {
       console.log(
@@ -742,13 +753,36 @@ export async function runFetchAccounts(
       continue;
     }
     seenAccountNumbers.add(account.accountNumber);
+    dedupedAccounts.push(account);
+  }
 
+  for (let i = 0; i < dedupedAccounts.length; i++) {
+    const account = dedupedAccounts[i];
     const fetch = opts.linkedAccountNumbers
       ? opts.linkedAccountNumbers.has(account.accountNumber)
       : true;
-    const snapshot = await fetchOneAccount(client, account, sleep, { fetch });
-    if (snapshot.errors.length > 0) partial = true;
-    snapshots.push(snapshot);
+    const r = await fetchOneAccount(client, account, sleep, { fetch });
+    if (r.snapshot.errors.length > 0) partial = true;
+    snapshots.push(r.snapshot);
+
+    if (r.pendingTan) {
+      // Coupled TAN (photoTAN/chipTAN) demanded mid-fetch. Stop the
+      // loop, hand the queue + the TAN info back to the caller; the
+      // resume path picks up from `account.accountNumber` after the
+      // user submits.
+      const remaining = dedupedAccounts
+        .slice(i + 1)
+        .map((a) => a.accountNumber);
+      return {
+        accounts: snapshots,
+        partial: true,
+        pendingTan: {
+          ...r.pendingTan,
+          accountNumber: account.accountNumber,
+          remainingAccountNumbers: remaining,
+        },
+      };
+    }
   }
 
   return { accounts: snapshots, partial };
@@ -767,12 +801,31 @@ interface RawBankAccount {
   product?: string;
 }
 
+interface FetchOneResult {
+  snapshot: FintsAccountSnapshot;
+  /**
+   * Set when the per-account statements call hit a coupled-TAN
+   * (photoTAN, chipTAN, …) that the decoupled-poll helper can't
+   * unblock. The runFetchAccounts loop stops, the caller persists a
+   * tan_session row of kind="statements", returns "tan-required" to
+   * the UI, and resumes via tan-sessions.complete after the user
+   * submits the TAN.
+   */
+  pendingTan?: {
+    tanReference: string;
+    tanChallenge?: string;
+    tanMediaName?: string;
+    tanPhotoMime?: string;
+    tanPhotoBase64?: string;
+  };
+}
+
 async function fetchOneAccount(
   client: FintsClientSurface,
   account: RawBankAccount,
   sleep: (ms: number) => Promise<void>,
   opts: { fetch: boolean } = { fetch: true },
-): Promise<FintsAccountSnapshot> {
+): Promise<FetchOneResult> {
   const accountKind = mapAccountKind(account.accountType);
   const currency = account.currency ?? "EUR";
   const label = buildAccountLabel(account, accountKind);
@@ -792,7 +845,7 @@ async function fetchOneAccount(
   // route them into stats.unknown so the UI can offer link / import.
   // No statements / balance call → no per-account SCA push.
   if (!opts.fetch) {
-    return snapshot;
+    return { snapshot };
   }
 
   try {
@@ -813,9 +866,30 @@ async function fetchOneAccount(
       );
     }
     if (stmtResp.requiresTan) {
-      // Either coupled (chipTAN/SMS) — caller has no UI for it yet —
-      // or decoupled-poll exhausted its budget without approval.
-      snapshot.errors.push("statements-tan-required");
+      // Coupled method (photoTAN/chipTAN/SMS) or decoupled-poll
+      // exhausted its budget. Hand the TAN info up — the runFetch
+      // loop stops here and the caller persists a session.
+      const ref = stmtResp.tanReference;
+      if (!ref) {
+        snapshot.errors.push("statements-tan-required-no-ref");
+        return { snapshot };
+      }
+      console.log(
+        `[fints] statements ${account.accountNumber} → coupled-TAN, ` +
+          `pausing fetch loop, returning to UI`,
+      );
+      return {
+        snapshot,
+        pendingTan: {
+          tanReference: ref,
+          tanChallenge: stmtResp.tanChallenge,
+          tanMediaName: stmtResp.tanMediaName,
+          tanPhotoMime: stmtResp.tanPhoto?.mimeType,
+          tanPhotoBase64: stmtResp.tanPhoto
+            ? Buffer.from(stmtResp.tanPhoto.image).toString("base64")
+            : undefined,
+        },
+      };
     } else if (!stmtResp.success) {
       const first = stmtResp.bankAnswers.find((a) => a.code !== 0);
       snapshot.errors.push(
@@ -864,7 +938,185 @@ async function fetchOneAccount(
     );
   }
 
-  return snapshot;
+  return { snapshot };
+}
+
+/**
+ * Resume a mid-fetch dialog after the user submitted a TAN. The
+ * caller (tan-sessions.complete with kind="statements") has the live
+ * client cached and the fetch_context that records the
+ * `currentAccountNumber` we paused on plus the queue of accounts
+ * waiting behind it.
+ *
+ * Steps:
+ *   1. continue the paused statements call via
+ *      getAccountStatementsWithTan(ref, tan).
+ *   2. if the bank returns *another* TAN challenge (wrong TAN, or
+ *      bank wants a follow-up): bubble back as { pendingTan } so the
+ *      caller can refresh the session row and re-prompt.
+ *   3. on success: process the statements + the per-account balance
+ *      for the current account, then continue the loop with the
+ *      remaining accounts via runFetchAccounts-style iteration.
+ */
+export async function resumeFetchAfterTan(
+  client: FintsClientSurface,
+  ctx: {
+    tanReference: string;
+    tan?: string;
+    currentAccountNumber: string;
+    remainingAccountNumbers: string[];
+  },
+  sleep: (ms: number) => Promise<void> = defaultSleep,
+): Promise<FetchResult> {
+  const bi = client.config.bankingInformation as unknown as {
+    upd?: { bankAccounts?: RawBankAccount[] };
+  };
+  const allAccounts = bi.upd?.bankAccounts ?? [];
+
+  // Find the bank account record for the paused accountNumber so we
+  // can build a snapshot with the right metadata (label/kind/iban).
+  const currentAccount = allAccounts.find(
+    (a) => a.accountNumber === ctx.currentAccountNumber,
+  );
+  if (!currentAccount) {
+    return {
+      accounts: [],
+      partial: true,
+    };
+  }
+
+  const accountKind = mapAccountKind(currentAccount.accountType);
+  const currency = currentAccount.currency ?? "EUR";
+  const snapshot: FintsAccountSnapshot = {
+    accountNumber: currentAccount.accountNumber,
+    iban: currentAccount.iban ?? null,
+    accountKind,
+    currency,
+    label: buildAccountLabel(currentAccount, accountKind),
+    balance: null,
+    transactions: [],
+    errors: [],
+  };
+
+  let stmtResp;
+  try {
+    stmtResp = await client.getAccountStatementsWithTan(
+      ctx.tanReference,
+      ctx.tan,
+    );
+  } catch (err) {
+    snapshot.errors.push(
+      `statements-exception:${(err as Error).message ?? String(err)}`,
+    );
+    return { accounts: [snapshot], partial: true };
+  }
+
+  // Decoupled fall-through (e.g. user took too long but the bank now
+  // accepts a polled status check).
+  if (stmtResp.requiresTan) {
+    stmtResp = await pollDecoupled(
+      client,
+      stmtResp,
+      (ref) => client.getAccountStatementsWithTan(ref),
+      sleep,
+    );
+  }
+  if (stmtResp.requiresTan) {
+    // Bank still wants another TAN — could be wrong TAN or chained
+    // SCA. Bubble back so the session refreshes with the new
+    // challenge / photo.
+    const ref = stmtResp.tanReference;
+    if (!ref) {
+      snapshot.errors.push("statements-tan-required-no-ref");
+      return { accounts: [snapshot], partial: true };
+    }
+    return {
+      accounts: [snapshot],
+      partial: true,
+      pendingTan: {
+        tanReference: ref,
+        tanChallenge: stmtResp.tanChallenge,
+        tanMediaName: stmtResp.tanMediaName,
+        tanPhotoMime: stmtResp.tanPhoto?.mimeType,
+        tanPhotoBase64: stmtResp.tanPhoto
+          ? Buffer.from(stmtResp.tanPhoto.image).toString("base64")
+          : undefined,
+        accountNumber: ctx.currentAccountNumber,
+        remainingAccountNumbers: ctx.remainingAccountNumbers,
+      },
+    };
+  }
+  if (!stmtResp.success) {
+    const first = stmtResp.bankAnswers.find((a) => a.code !== 0);
+    snapshot.errors.push(
+      `statements-error:${first?.code ?? "unknown"} ${first?.text ?? ""}`.trim(),
+    );
+  } else {
+    snapshot.transactions = mapStatements(
+      stmtResp.statements ?? [],
+      currency,
+    );
+  }
+
+  // Balance for the resumed account — typically already in the same
+  // session, no fresh TAN.
+  try {
+    let balResp = await client.getAccountBalance(currentAccount.accountNumber);
+    if (balResp.requiresTan) {
+      balResp = await pollDecoupled(
+        client,
+        balResp,
+        (ref) => client.getAccountBalanceWithTan(ref),
+        sleep,
+      );
+    }
+    if (balResp.requiresTan) {
+      snapshot.errors.push("balance-tan-required");
+    } else if (!balResp.success) {
+      const first = balResp.bankAnswers.find((a) => a.code !== 0);
+      snapshot.errors.push(
+        `balance-error:${first?.code ?? "unknown"} ${first?.text ?? ""}`.trim(),
+      );
+    } else if (balResp.balance) {
+      snapshot.balance = {
+        asOf: toIsoDate(balResp.balance.date),
+        amount: toAmountString(balResp.balance.balance),
+        currency: balResp.balance.currency ?? currency,
+      };
+    }
+  } catch (err) {
+    snapshot.errors.push(
+      `balance-exception:${(err as Error).message ?? String(err)}`,
+    );
+  }
+
+  // Resume the loop with the queued accounts. Each one is a fresh
+  // getAccountStatements call on the same client; if the bank
+  // demands TAN again, fetchOneAccount returns pendingTan as before.
+  const snapshots: FintsAccountSnapshot[] = [snapshot];
+  let partial = snapshot.errors.length > 0;
+  for (let i = 0; i < ctx.remainingAccountNumbers.length; i++) {
+    const acn = ctx.remainingAccountNumbers[i];
+    const acc = allAccounts.find((a) => a.accountNumber === acn);
+    if (!acc) continue;
+    const r = await fetchOneAccount(client, acc, sleep, { fetch: true });
+    if (r.snapshot.errors.length > 0) partial = true;
+    snapshots.push(r.snapshot);
+    if (r.pendingTan) {
+      const remaining = ctx.remainingAccountNumbers.slice(i + 1);
+      return {
+        accounts: snapshots,
+        partial: true,
+        pendingTan: {
+          ...r.pendingTan,
+          accountNumber: acn,
+          remainingAccountNumbers: remaining,
+        },
+      };
+    }
+  }
+
+  return { accounts: snapshots, partial };
 }
 
 /** Map lib-fints AccountType (enum string) → finance_account_kind value. */

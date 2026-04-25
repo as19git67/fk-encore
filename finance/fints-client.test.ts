@@ -15,6 +15,7 @@ import {
   __resetFintsClientCacheForTests,
   evictCachedClient,
   probeTanMethods,
+  resumeFetchAfterTan,
   runSynchronize,
   type FintsClientSurface,
 } from "./fints-client";
@@ -956,13 +957,15 @@ describe("runFetchAccounts — happy path", () => {
 });
 
 describe("runFetchAccounts — mid-flight TAN and bank errors", () => {
-  it("records a soft error and sets partial=true when statements need TAN", async () => {
+  it("returns pendingTan and stops the loop when statements need TAN", async () => {
     const c = clientWith(
       [{ accountNumber: "1", accountType: "CheckingAccount", currency: "EUR" }],
       {
-        getAccountStatements: vi.fn(async () =>
-          stmtResp([], { requiresTan: true, success: true }),
-        ),
+        getAccountStatements: vi.fn(async () => ({
+          ...stmtResp([], { requiresTan: true, success: true }),
+          tanReference: "needs-tan-1",
+          tanChallenge: "Bitte bestätigen",
+        })),
         getAccountBalance: vi.fn(async () =>
           balResp({ date: new Date(), currency: "EUR", balance: 10 }),
         ),
@@ -970,10 +973,14 @@ describe("runFetchAccounts — mid-flight TAN and bank errors", () => {
     );
     const r = await runFetchAccounts(c);
     expect(r.partial).toBe(true);
-    expect(r.accounts[0].errors).toContain("statements-tan-required");
+    expect(r.pendingTan).toBeDefined();
+    expect(r.pendingTan?.tanReference).toBe("needs-tan-1");
+    expect(r.pendingTan?.accountNumber).toBe("1");
+    expect(r.pendingTan?.remainingAccountNumbers).toEqual([]);
     expect(r.accounts[0].transactions).toEqual([]);
-    // Balance still tried
-    expect(r.accounts[0].balance?.amount).toBe("10.00");
+    // Balance not attempted — the loop pauses on the statements TAN
+    // and the resume path fetches balance after the user submits.
+    expect(r.accounts[0].balance).toBeNull();
   });
 
   it("records a soft error on a bank-side statement failure", async () => {
@@ -1135,13 +1142,16 @@ describe("runFetchAccounts — decoupled TAN per account", () => {
 
     const r = await runFetchAccounts(c, sleep);
 
-    expect(r.accounts[0].errors).toContain("statements-tan-required");
+    // After 5 polls the response still has requiresTan=true with a
+    // tanReference, which now bubbles up as pendingTan instead of a
+    // soft error — the UI gets a second chance to enter a TAN.
     expect(r.partial).toBe(true);
+    expect(r.pendingTan?.tanReference).toBe("stmt-tan-1");
     // Used the full budget (5 polls).
     expect(c.getAccountStatementsWithTan).toHaveBeenCalledTimes(5);
   });
 
-  it("does NOT poll for coupled methods (chipTAN etc.) — soft error stays", async () => {
+  it("does NOT poll for coupled methods (chipTAN etc.) — bubbles as pendingTan", async () => {
     const c = clientWith(
       [{ accountNumber: "1", accountType: "CheckingAccount", currency: "EUR" }],
       {
@@ -1167,9 +1177,11 @@ describe("runFetchAccounts — decoupled TAN per account", () => {
 
     const r = await runFetchAccounts(c);
 
-    expect(r.accounts[0].errors).toContain("statements-tan-required");
-    // No polling call should have happened.
+    // Coupled method → no polling, but the loop pauses so the UI
+    // can collect the TAN.
     expect(c.getAccountStatementsWithTan).not.toHaveBeenCalled();
+    expect(r.pendingTan?.tanReference).toBe("stmt-tan-1");
+    expect(r.partial).toBe(true);
   });
 });
 
@@ -1261,6 +1273,91 @@ describe("runFetchAccounts — linked-only filter", () => {
 
     expect(c.getAccountStatements).toHaveBeenCalledTimes(2);
     expect(c.getAccountBalance).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("resumeFetchAfterTan — mid-fetch coupled-TAN resume", () => {
+  it("continues the paused statements call after the user's TAN, fetches balance, then iterates the queue", async () => {
+    const upd = {
+      bankAccounts: [
+        { accountNumber: "A", accountType: "CheckingAccount", currency: "EUR", holder1: "u" },
+        { accountNumber: "B", accountType: "CheckingAccount", currency: "EUR", holder1: "u" },
+        { accountNumber: "C", accountType: "CheckingAccount", currency: "EUR", holder1: "u" },
+      ],
+    };
+    const c = mockClient({ success: true, requiresTan: false }, {
+      systemId: "s",
+      upd,
+    } as any);
+
+    let stmtTanCalls = 0;
+    (c.getAccountStatementsWithTan as any) = vi.fn(async (_ref: string, _tan?: string) => {
+      stmtTanCalls++;
+      return stmtResp([
+        {
+          valueDate: new Date("2026-04-01"),
+          entryDate: new Date("2026-04-01"),
+          amount: -10,
+          purpose: "x",
+          remoteName: "y",
+        },
+      ]);
+    });
+    (c.getAccountStatements as any) = vi.fn(async () => stmtResp([]));
+    (c.getAccountBalance as any) = vi.fn(async () =>
+      balResp({ date: new Date(), currency: "EUR", balance: 42 }),
+    );
+
+    const result = await resumeFetchAfterTan(c, {
+      tanReference: "ref-A",
+      tan: "123456",
+      currentAccountNumber: "A",
+      remainingAccountNumbers: ["B", "C"],
+    });
+
+    expect(result.pendingTan).toBeUndefined();
+    expect(result.accounts).toHaveLength(3);
+    // The resumed account got its TAN-continued statements.
+    expect(c.getAccountStatementsWithTan).toHaveBeenCalledWith("ref-A", "123456");
+    expect(stmtTanCalls).toBe(1);
+    expect(result.accounts[0].accountNumber).toBe("A");
+    expect(result.accounts[0].transactions).toHaveLength(1);
+    // B and C ran through getAccountStatements normally.
+    expect(c.getAccountStatements).toHaveBeenCalledTimes(2);
+    expect(result.accounts[1].accountNumber).toBe("B");
+    expect(result.accounts[2].accountNumber).toBe("C");
+  });
+
+  it("re-pends with a fresh challenge when the bank rejects the submitted TAN", async () => {
+    const upd = {
+      bankAccounts: [
+        { accountNumber: "A", accountType: "CheckingAccount", currency: "EUR", holder1: "u" },
+      ],
+    };
+    const c = mockClient({ success: true, requiresTan: false }, {
+      systemId: "s",
+      upd,
+    } as any);
+
+    (c.getAccountStatementsWithTan as any) = vi.fn(async () => ({
+      success: true,
+      requiresTan: true,
+      tanReference: "ref-A-2",
+      tanChallenge: "Falsche TAN, bitte erneut",
+      bankAnswers: [],
+      statements: [],
+    }));
+
+    const result = await resumeFetchAfterTan(c, {
+      tanReference: "ref-A",
+      tan: "wrong",
+      currentAccountNumber: "A",
+      remainingAccountNumbers: [],
+    });
+
+    expect(result.pendingTan?.tanReference).toBe("ref-A-2");
+    expect(result.pendingTan?.tanChallenge).toBe("Falsche TAN, bitte erneut");
+    expect(result.pendingTan?.accountNumber).toBe("A");
   });
 });
 
