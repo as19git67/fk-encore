@@ -10,7 +10,7 @@ import {
   financeTanSession,
   financeTransaction,
 } from "../db/schema";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { probeTanMethods, runSynchronize, type FintsClientSurface } from "./fints-client";
 import type { DialogResult } from "./types";
 
@@ -645,6 +645,152 @@ describe("fints-client — no retry after the bank has seen a TAN request", () =
     expect(constructorCalls).toBe(1);
     expect(bpdCalls).toBe(1);
     expect(updCalls).toBe(1);
+  });
+});
+
+describe("fints-client — warm-start path (cached bankingInformation)", () => {
+  // Cached BI on the bankcontact must:
+  //   - take the warm path (single synchronize() via fromBankingInformation),
+  //   - never call forFirstTimeUse,
+  //   - persist the updated BI back to the bankcontact on success.
+  it("uses fromBankingInformation and a single sync when BI is cached", async () => {
+    const id = await insertBankcontact({
+      tan_method: "942",
+      banking_information: { systemId: "cached-sys" } as any,
+    });
+    const sleep = vi.fn(async (_ms: number) => {});
+    const c = mockClient(
+      { success: true, requiresTan: false },
+      { systemId: "cached-sys-updated" },
+    );
+
+    const result = await runSynchronize(id, {
+      clientFactory: () => c,
+      sleep,
+    });
+
+    expect(result.state).toBe("idle");
+    // Single sync — no second call, no selectTanMethod (the method id
+    // is baked into the config via fromBankingInformation).
+    expect(c.synchronize).toHaveBeenCalledTimes(1);
+    expect(c.selectTanMethod).not.toHaveBeenCalled();
+    // Updated BI was written back to the row.
+    const [row] = await db
+      .select({ bi: financeBankcontact.banking_information })
+      .from(financeBankcontact)
+      .where(eq(financeBankcontact.id, id));
+    expect(row.bi).toEqual({ systemId: "cached-sys-updated" });
+  });
+
+  it("falls back to the cold path when the warm sync errors out (e.g. stale systemId)", async () => {
+    const id = await insertBankcontact({
+      tan_method: "942",
+      banking_information: { systemId: "stale" } as any,
+    });
+    const sleep = vi.fn(async (_ms: number) => {});
+
+    let callsOnFreshClient = 0;
+    let callsOnWarmClient = 0;
+    const factory = vi.fn(() => {
+      // First factory call → warm client (errors), subsequent calls →
+      // cold client (succeeds for both BPD and UPD).
+      const isWarm = callsOnWarmClient === 0 && factory.mock.calls.length === 1;
+      const c = mockClient({ success: true, requiresTan: false });
+      if (isWarm) {
+        (c.synchronize as any).mockImplementation(async () => {
+          callsOnWarmClient++;
+          return { success: false, requiresTan: false, bankAnswers: [] } as any;
+        });
+      } else {
+        (c.synchronize as any).mockImplementation(async () => {
+          callsOnFreshClient++;
+          return { success: true, requiresTan: false, bankAnswers: [] } as any;
+        });
+      }
+      return c;
+    });
+
+    const result = await runSynchronize(id, {
+      clientFactory: factory,
+      sleep,
+    });
+
+    expect(result.state).toBe("idle");
+    // Two FinTSClient instances total: warm (errored) + cold (BPD+UPD
+    // share the same client).
+    expect(factory).toHaveBeenCalledTimes(2);
+    expect(callsOnWarmClient).toBe(1);
+    // Cold path runs BPD then UPD on the *same* client.
+    expect(callsOnFreshClient).toBe(2);
+  });
+
+  it("falls back to the cold path when the warm sync throws (transport error)", async () => {
+    const id = await insertBankcontact({
+      tan_method: "942",
+      banking_information: { systemId: "stale" } as any,
+    });
+    const sleep = vi.fn(async (_ms: number) => {});
+    let factoryCalls = 0;
+
+    const factory = vi.fn(() => {
+      factoryCalls++;
+      const c = mockClient({ success: true, requiresTan: false });
+      if (factoryCalls === 1) {
+        // Warm attempt throws — should be caught and fall through.
+        (c.synchronize as any).mockRejectedValueOnce(new Error("ECONNRESET"));
+      }
+      return c;
+    });
+
+    const result = await runSynchronize(id, {
+      clientFactory: factory,
+      sleep,
+    });
+
+    expect(result.state).toBe("idle");
+    expect(factoryCalls).toBeGreaterThanOrEqual(2);
+  });
+
+  it("does NOT take the warm path when only banking_information is cached but tan_method is missing", async () => {
+    const id = await insertBankcontact({
+      tan_method: null,
+      banking_information: { systemId: "cached" } as any,
+    });
+    const sleep = vi.fn(async (_ms: number) => {});
+    const c = mockClient({ success: true, requiresTan: false });
+
+    const result = await runSynchronize(id, {
+      clientFactory: () => c,
+      sleep,
+    });
+
+    // Cold path takes BPD-sync but bails at "no-tan-method" before the
+    // second sync.
+    expect(result.state).toBe("error");
+    expect(result.errorCode).toBe("no-tan-method");
+    expect(c.synchronize).toHaveBeenCalledTimes(1);
+  });
+
+  it("persists BI after a successful resume too (TAN-complete path)", async () => {
+    const id = await insertBankcontact({ tan_method: "942" });
+    const c = mockClient(
+      { success: true, requiresTan: false },
+      { systemId: "post-tan-sys" },
+    );
+
+    await runSynchronize(id, {
+      tanReference: "tanref-xyz",
+      tanAnswer: "123456",
+      bankingInformation: { systemId: "saved-during-init" },
+      clientFactory: () => c,
+      sleep: async () => {},
+    });
+
+    const [row] = await db
+      .select({ bi: financeBankcontact.banking_information })
+      .from(financeBankcontact)
+      .where(eq(financeBankcontact.id, id));
+    expect(row.bi).toEqual({ systemId: "post-tan-sys" });
   });
 });
 

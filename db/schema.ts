@@ -967,6 +967,15 @@ export const financeBankcontact = pgTable("finance_bankcontact", {
   // change its offerings between probes.
   available_tan_methods: jsonb("available_tan_methods")
     .$type<{ id: number; name: string; isDecoupled: boolean }[]>(),
+  // Persisted lib-fints bankingInformation (BPD + UPD + the bank-
+  // assigned `systemId`) from the last successful FinTS dialog.
+  // Reusing it via `FinTSConfig.fromBankingInformation` lets the bank
+  // recognise the client across syncs and skip the TAN under PSD2's
+  // 90-day rule. Cleared whenever credentials change so a stale
+  // session doesn't haunt the next dialog. Untyped here so the file
+  // stays ignorant of lib-fints' internal shape — fints-client casts
+  // before handing it to FinTSConfig.
+  banking_information: jsonb("banking_information").$type<Record<string, unknown>>(),
   sync_times: jsonb("sync_times")
     .notNull()
     .default(sql`'[]'::jsonb`)

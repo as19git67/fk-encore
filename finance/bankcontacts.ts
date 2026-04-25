@@ -21,7 +21,7 @@ import {
   financeBankcontact,
 } from "../db/schema";
 import { encryptCredentials } from "./encryption";
-import { probeTanMethods } from "./fints-client";
+import { clearBankingInformationCache, probeTanMethods } from "./fints-client";
 
 console.log("[boot] finance/bankcontacts.ts: all imports resolved");
 
@@ -305,6 +305,10 @@ export const setBankcontactCredentials = api(
       .update(financeBankcontact)
       .set({ credentials_encrypted: blob })
       .where(eq(financeBankcontact.id, p.id));
+    // Drop the warm-start cache: lib-fints' systemId is bound to the
+    // PIN/customer combo, so a stale cache after a PIN change would
+    // just produce wrong-PIN errors on the next warm sync.
+    await clearBankingInformationCache(p.id);
     return { credentials_set: true };
   },
 );

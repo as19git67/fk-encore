@@ -97,18 +97,30 @@ interface RunOptions extends SyncOptions {
 /**
  * Runs a FinTS synchronize dialog for the given bankcontact.
  *
- * Fresh path:  `opts = {}` (or only the test seams)
- * Resume path: pass `tanReference`, `bankingInformation`, and
- *              `tanAnswer` (undefined is legit for decoupled TAN).
+ *   Resume path : `tanReference` + `bankingInformation` (+optional
+ *                 `tanAnswer`) — submit the TAN the user just typed,
+ *                 continue the suspended dialog. No fresh push.
  *
- * Two-call sync contract (per lib-fints README §2): on a cold start,
- * the first `synchronize()` returns BPD only (TAN methods etc.) and
- * no UPD (account list), because the TAN method has to be selected
- * *before* the call that can return UPD. The second `synchronize()`
- * after `selectTanMethod(...)` returns the full bankingInformation
- * with `upd.bankAccounts` populated — or requires a TAN, in which
- * case we hand control back to the UI and resume via
- * `synchronizeWithTan(...)`.
+ *   Warm path   : when `bankcontact.banking_information` is cached
+ *                 *and* a `tan_method` is configured, build the
+ *                 client via `FinTSConfig.fromBankingInformation`.
+ *                 The bank recognises our `systemId` and — under
+ *                 PSD2's 90-day rule for read-only ops — usually
+ *                 lets us through without a TAN. Single
+ *                 `synchronize()` call. If it does demand a TAN,
+ *                 the decoupled-poll helper handles pushTAN; coupled
+ *                 methods bubble up as `tan-required` for the UI.
+ *
+ *   Cold path   : no cached BI (or warm path threw) — the original
+ *                 two-call dance with `forFirstTimeUse`. The first
+ *                 `synchronize()` is retry-wrapped because it has no
+ *                 user-visible side effects yet; the second sync +
+ *                 decoupled poll runs exactly once to avoid a
+ *                 duplicate push (see commit 183762e).
+ *
+ * After every `state="idle"` outcome we persist the live
+ * `client.config.bankingInformation` back to the bankcontact row so
+ * the next sync hits the warm path.
  */
 export async function runSynchronize(
   bankcontactId: number,
@@ -125,10 +137,9 @@ export async function runSynchronize(
   const isResume = typeof opts.tanReference === "string"
     && !!opts.bankingInformation;
 
-  // The resume path submits a TAN the user already typed — retrying
-  // doesn't cost anything visible (no new push).
+  // ── Resume path ────────────────────────────────────────────────────
   if (isResume) {
-    return runWithRetry(async () => {
+    const result = await runWithRetry(async () => {
       const config = FinTSConfig.fromBankingInformation(
         productId(),
         productVersion(),
@@ -142,13 +153,65 @@ export async function runSynchronize(
         opts.tanReference!,
         opts.tanAnswer,
       );
-      const result = mapResponse(response, client.config.bankingInformation);
-      if (result.state === "idle") result.client = client;
-      return result;
+      const mapped = mapResponse(response, client.config.bankingInformation);
+      if (mapped.state === "idle") mapped.client = client;
+      return mapped;
     }, sleep);
+    if (result.state === "idle" && result.client) {
+      await persistBankingInformation(
+        bankcontactId,
+        (result.client as FintsClientSurface).config.bankingInformation,
+      );
+    }
+    return result;
   }
 
-  // Fresh path — splits into two phases:
+  // ── Warm path ──────────────────────────────────────────────────────
+  // Skipped without preconditions: needs both cached BI *and* a
+  // configured TAN method (the BI carries the systemId; the method id
+  // tells lib-fints which TAN procedure to keep selected).
+  const cachedBi = bankcontact.banking_information;
+  const cachedTanMethodId = bankcontact.tan_method
+    ? parseInt(bankcontact.tan_method, 10)
+    : NaN;
+  if (cachedBi && Number.isFinite(cachedTanMethodId)) {
+    try {
+      const warm = await runWarmSync(
+        bankcontact,
+        pin,
+        cachedBi as Record<string, unknown>,
+        cachedTanMethodId,
+        factory,
+        sleep,
+      );
+      if (warm.state === "idle" && warm.client) {
+        await persistBankingInformation(
+          bankcontactId,
+          (warm.client as FintsClientSurface).config.bankingInformation,
+        );
+        return warm;
+      }
+      // tan-required / coupled — return as-is, the UI / TAN flow
+      // takes over and the resume branch will persist BI later.
+      if (warm.state === "tan-required") return warm;
+      // state=error from a warm sync usually means the bank rejected
+      // the cached systemId or the session is otherwise stale.
+      // Fall through to the cold path below.
+      console.warn(
+        `[fints] warm sync for bankcontact=${bankcontactId} returned ` +
+          `state=error (${warm.errorCode}); falling back to cold init`,
+      );
+    } catch (err) {
+      console.warn(
+        `[fints] warm sync for bankcontact=${bankcontactId} threw; ` +
+          `falling back to cold init: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    }
+  }
+
+  // ── Cold path ──────────────────────────────────────────────────────
+  // Splits into two phases:
   //
   //   (a) RETRY-WRAPPED  : forFirstTimeUse + BPD-only synchronize().
   //                         This part is side-effect-free from the
@@ -158,10 +221,9 @@ export async function runSynchronize(
   //   (b) NO-RETRY       : selectTanMethod + UPD-synchronize +
   //                         decoupled poll. A retry here would build
   //                         a second FinTSConfig.forFirstTimeUse and
-  //                         trigger a *second* TAN push at the bank —
-  //                         which is exactly what the user was
-  //                         experiencing. Any failure past this point
-  //                         surfaces as state="error" without retry.
+  //                         trigger a *second* TAN push at the bank.
+  //                         Any failure past this point surfaces as
+  //                         state="error" without retry.
   let client: FintsClientSurface;
   try {
     const firstSync = await runWithRetry(async () => {
@@ -176,15 +238,10 @@ export async function runSynchronize(
       const c = factory(config);
       const bpdResponse = await c.synchronize();
       const mapped = mapResponse(bpdResponse, c.config.bankingInformation);
-      // Stash the live client on the DialogResult so the caller
-      // below can reuse it for phase (b).
       mapped.client = c;
       return mapped;
     }, sleep);
 
-    // BPD-only sync itself came back with TAN-required or error —
-    // nothing to do in phase (b); surface as-is. The client is
-    // not attached to these states (null-ish).
     if (firstSync.state !== "idle" || !firstSync.client) {
       const { client: _c, ...rest } = firstSync;
       void _c;
@@ -192,9 +249,6 @@ export async function runSynchronize(
     }
     client = firstSync.client as FintsClientSurface;
   } catch (err) {
-    // retry budget exhausted during BPD fetch → already mapped to
-    // state=error by runWithRetry, unreachable here. Kept for type
-    // safety in case runWithRetry's signature evolves.
     return {
       state: "error",
       errorCode: "transport",
@@ -239,13 +293,15 @@ export async function runSynchronize(
       sleep,
     );
     const result = mapResponse(finalResponse, client.config.bankingInformation);
-    if (result.state === "idle") result.client = client;
+    if (result.state === "idle") {
+      result.client = client;
+      await persistBankingInformation(
+        bankcontactId,
+        client.config.bankingInformation,
+      );
+    }
     return result;
   } catch (err) {
-    // Transport error AFTER the bank has already pushed a TAN — don't
-    // retry, don't build a second dialog, just hand the failure up.
-    // The open TAN challenge on the bank's side will time out on its
-    // own; the user can trigger another sync later.
     return {
       state: "error",
       errorCode: "post-first-sync-transport",
@@ -255,6 +311,66 @@ export async function runSynchronize(
         (err instanceof Error ? err.message : String(err)),
     };
   }
+}
+
+/**
+ * Warm-start path. One synchronize() call against a config built from
+ * the cached bankingInformation. Decoupled-TAN polling kicks in if the
+ * bank still wants approval; coupled TAN bubbles up to the UI.
+ *
+ * Throws on transport errors so the caller can fall back to cold init.
+ */
+async function runWarmSync(
+  bankcontact: typeof financeBankcontact.$inferSelect,
+  pin: string,
+  cachedBi: Record<string, unknown>,
+  tanMethodId: number,
+  factory: FintsClientFactory,
+  sleep: (ms: number) => Promise<void>,
+): Promise<DialogResult> {
+  const config = FinTSConfig.fromBankingInformation(
+    productId(),
+    productVersion(),
+    cachedBi as unknown as BankingInformation,
+    bankcontact.login,
+    pin,
+    tanMethodId,
+  );
+  const client = factory(config);
+  const response = await client.synchronize();
+  const finalResponse = await pollDecoupledIfNeeded(client, response, sleep);
+  const mapped = mapResponse(finalResponse, client.config.bankingInformation);
+  if (mapped.state === "idle") mapped.client = client;
+  return mapped;
+}
+
+/**
+ * Replace the cached bankingInformation on a bankcontact. Called after
+ * any successful FinTS dialog so the next sync hits the warm path.
+ */
+async function persistBankingInformation(
+  bankcontactId: number,
+  bi: BankingInformation,
+): Promise<void> {
+  await db
+    .update(financeBankcontact)
+    .set({ banking_information: bi as unknown as Record<string, unknown> })
+    .where(eq(financeBankcontact.id, bankcontactId));
+}
+
+/**
+ * Drop the cached bankingInformation. Called when credentials change
+ * (PIN updates) since the bank may invalidate the systemId tied to
+ * the old PIN, and a stale cache would just produce wrong-PIN-style
+ * errors on the next warm sync.
+ */
+export async function clearBankingInformationCache(
+  bankcontactId: number,
+): Promise<void> {
+  await db
+    .update(financeBankcontact)
+    .set({ banking_information: null })
+    .where(eq(financeBankcontact.id, bankcontactId));
 }
 
 /**

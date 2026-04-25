@@ -308,6 +308,33 @@ describe("finance/bankcontacts — credentials", () => {
     );
   });
 
+  it("clears the cached banking_information when the PIN changes", async () => {
+    // The bank's systemId is bound to the credentials/customer combo.
+    // After a PIN change the stale BI would only produce wrong-PIN
+    // errors on the next warm sync, so setBankcontactCredentials
+    // nulls it out.
+    withPermission("finance.accounts.manage");
+    const created = await createBankcontact({
+      name: "x",
+      blz: "1",
+      login: "u",
+      server_url: "https://x",
+    });
+    // Pre-seed a cached BI.
+    await db
+      .update(financeBankcontact)
+      .set({ banking_information: { systemId: "to-be-dropped" } as any })
+      .where(eq(financeBankcontact.id, created.id));
+
+    await setBankcontactCredentials({ id: created.id, pin: "hunter2" });
+
+    const [row] = await db
+      .select({ bi: financeBankcontact.banking_information })
+      .from(financeBankcontact)
+      .where(eq(financeBankcontact.id, created.id));
+    expect(row.bi).toBeNull();
+  });
+
   it("rejects empty pin", async () => {
     withPermission("finance.accounts.manage");
     const created = await createBankcontact({
