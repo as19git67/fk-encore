@@ -22,12 +22,16 @@
 import { randomUUID } from "node:crypto";
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
-import { eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
 import { checkRateLimit } from "../user/rateLimiter";
 import db from "../db/database";
-import { financeBankcontact, financeTanSession } from "../db/schema";
+import {
+  financeAccount,
+  financeBankcontact,
+  financeTanSession,
+} from "../db/schema";
 import {
   runFetchAccounts,
   runSynchronize,
@@ -186,7 +190,29 @@ export async function fetchAndPersist(
       unknown_accounts: [],
     };
   }
-  const fetched = await runFetchAccounts(client as FintsClientSurface);
+  // Pre-compute the linked accounts so runFetchAccounts only issues
+  // statement / balance calls (and SCA pushes) for accounts the user
+  // actually wants in fk-encore. Unknown bank-side accounts still
+  // surface in the response for the UI's "noch nicht zugeordnet"-
+  // block, just without the per-account TAN cost.
+  const linkedRows = await db
+    .select({ fints_account_number: financeAccount.fints_account_number })
+    .from(financeAccount)
+    .where(
+      and(
+        eq(financeAccount.bankcontact_id, bankcontactId),
+        isNotNull(financeAccount.fints_account_number),
+      ),
+    );
+  const linkedAccountNumbers = new Set(
+    linkedRows
+      .map((r) => r.fints_account_number)
+      .filter((n): n is string => n !== null && n.length > 0),
+  );
+
+  const fetched = await runFetchAccounts(client as FintsClientSurface, {
+    linkedAccountNumbers,
+  });
   const stats = await persistFetchResult(bankcontactId, fetched);
   console.log(
     `[finance.statements] bankcontact=${bankcontactId} synced: ` +

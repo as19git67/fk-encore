@@ -27,7 +27,7 @@
 import { api, APIError } from "encore.dev/api";
 import { CronJob } from "encore.dev/cron";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 
 import db from "../db/database";
 import {
@@ -130,7 +130,28 @@ export const syncStatements = api(
           // bank-side accounts are logged for the admin to pick up in
           // the UI.
           try {
-            const fetched = await runFetchAccounts(result.client as FintsClientSurface);
+            // Same linked-only filter as the manual triggerSync path
+            // — see statements.ts fetchAndPersist comment.
+            const linkedRows = await db
+              .select({
+                fints_account_number: financeAccount.fints_account_number,
+              })
+              .from(financeAccount)
+              .where(
+                and(
+                  eq(financeAccount.bankcontact_id, bc.id),
+                  isNotNull(financeAccount.fints_account_number),
+                ),
+              );
+            const linkedAccountNumbers = new Set(
+              linkedRows
+                .map((r) => r.fints_account_number)
+                .filter((n): n is string => n !== null && n.length > 0),
+            );
+            const fetched = await runFetchAccounts(
+              result.client as FintsClientSurface,
+              { linkedAccountNumbers },
+            );
             const stats = await persistFetchResult(bc.id, fetched);
             console.log(
               `[finance.cron] bankcontact=${bc.id} (${bc.name}) → ok: ` +

@@ -1142,6 +1142,65 @@ describe("runFetchAccounts — decoupled TAN per account", () => {
   });
 });
 
+describe("runFetchAccounts — linked-only filter", () => {
+  // Each unlinked bank-side account previously triggered its own
+  // getAccountStatements call — and on a PSD2-strict bank that means
+  // a per-account SCA push at the user's phone for an account they
+  // don't even use. The linkedAccountNumbers Set short-circuits
+  // those.
+  it("only calls getAccountStatements / getAccountBalance for linked accounts", async () => {
+    const c = clientWith([
+      { accountNumber: "LINKED", accountType: "CheckingAccount", currency: "EUR" },
+      { accountNumber: "OTHER-1", accountType: "SavingsAccount", currency: "EUR" },
+      { accountNumber: "OTHER-2", accountType: "FixedDepositAccount", currency: "EUR" },
+    ], {
+      getAccountStatements: vi.fn(async () => stmtResp([])),
+      getAccountBalance: vi.fn(async () =>
+        balResp({ date: new Date(), currency: "EUR", balance: 1 }),
+      ),
+    });
+
+    const r = await runFetchAccounts(c, {
+      linkedAccountNumbers: new Set(["LINKED"]),
+    });
+
+    expect(r.accounts).toHaveLength(3);
+    // LINKED got its statements + balance call.
+    expect(c.getAccountStatements).toHaveBeenCalledTimes(1);
+    expect(c.getAccountStatements).toHaveBeenCalledWith("LINKED");
+    expect(c.getAccountBalance).toHaveBeenCalledTimes(1);
+    expect(c.getAccountBalance).toHaveBeenCalledWith("LINKED");
+    // OTHER-1 and OTHER-2 still appear in the result (so the UI's
+    // pending block can offer them as imports), but with empty data.
+    const others = r.accounts.filter((a) => a.accountNumber !== "LINKED");
+    expect(others).toHaveLength(2);
+    for (const o of others) {
+      expect(o.transactions).toEqual([]);
+      expect(o.balance).toBeNull();
+      expect(o.errors).toEqual([]);
+    }
+    // The error-free unlinked accounts must NOT count as partial.
+    expect(r.partial).toBe(false);
+  });
+
+  it("falls back to all-accounts when linkedAccountNumbers is omitted", async () => {
+    const c = clientWith([
+      { accountNumber: "A", accountType: "CheckingAccount", currency: "EUR" },
+      { accountNumber: "B", accountType: "SavingsAccount", currency: "EUR" },
+    ], {
+      getAccountStatements: vi.fn(async () => stmtResp([])),
+      getAccountBalance: vi.fn(async () =>
+        balResp({ date: new Date(), currency: "EUR", balance: 1 }),
+      ),
+    });
+
+    await runFetchAccounts(c);
+
+    expect(c.getAccountStatements).toHaveBeenCalledTimes(2);
+    expect(c.getAccountBalance).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("runFetchAccounts — integrates with runSynchronize", () => {
   it("runSynchronize exposes the live client on state=idle so callers can fetch", async () => {
     const c = mockClient({ success: true, requiresTan: false }, {

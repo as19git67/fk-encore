@@ -584,6 +584,15 @@ export async function probeTanMethods(
  * fetches statements + balance for each, and returns them as a
  * structured snapshot ready for persistence.
  *
+ * Linked-only fetch: when `opts.linkedAccountNumbers` is set, we
+ * only call getAccountStatements / getAccountBalance for bank-side
+ * accounts whose `accountNumber` is in that set. Unlinked accounts
+ * still appear in the result (so persistFetchResult can offer them
+ * up as "noch nicht zugeordnete Konten" in the UI), just without
+ * statements / balance — and crucially without the per-account
+ * SCA push that would otherwise hit the user's phone for accounts
+ * they don't even want in fk-encore.
+ *
  * Mid-flight decoupled TAN: PSD2's SCA rules let the bank demand a
  * fresh approval per "Umsatzabfrage" (statement query), independently
  * of the init-dialog TAN. When `getAccountStatements` (or
@@ -595,10 +604,30 @@ export async function probeTanMethods(
  * leave the per-account data missing — the UI doesn't yet have a
  * mid-fetch TAN dialog.
  */
+export interface RunFetchOptions {
+  /**
+   * lib-fints accountNumbers of bank-side accounts that are linked
+   * to a finance_account. Only these get the heavy statements +
+   * balance calls. When omitted (e.g. legacy callers), every
+   * bank-side account is fetched — original behaviour.
+   */
+  linkedAccountNumbers?: ReadonlySet<string>;
+  sleep?: (ms: number) => Promise<void>;
+}
+
 export async function runFetchAccounts(
   client: FintsClientSurface,
-  sleep: (ms: number) => Promise<void> = defaultSleep,
+  optsOrSleep:
+    | RunFetchOptions
+    | ((ms: number) => Promise<void>) = {},
 ): Promise<FetchResult> {
+  // Back-compat: callers used to pass `sleep` directly as the second
+  // arg. Detect a function and rewrap.
+  const opts: RunFetchOptions = typeof optsOrSleep === "function"
+    ? { sleep: optsOrSleep }
+    : optsOrSleep;
+  const sleep = opts.sleep ?? defaultSleep;
+
   const bi = client.config.bankingInformation;
   const accounts =
     (bi as unknown as {
@@ -609,7 +638,10 @@ export async function runFetchAccounts(
   let partial = false;
 
   for (const account of accounts) {
-    const snapshot = await fetchOneAccount(client, account, sleep);
+    const fetch = opts.linkedAccountNumbers
+      ? opts.linkedAccountNumbers.has(account.accountNumber)
+      : true;
+    const snapshot = await fetchOneAccount(client, account, sleep, { fetch });
     if (snapshot.errors.length > 0) partial = true;
     snapshots.push(snapshot);
   }
@@ -630,6 +662,7 @@ async function fetchOneAccount(
   client: FintsClientSurface,
   account: RawBankAccount,
   sleep: (ms: number) => Promise<void>,
+  opts: { fetch: boolean } = { fetch: true },
 ): Promise<FintsAccountSnapshot> {
   const accountKind = mapAccountKind(account.accountType);
   const currency = account.currency ?? "EUR";
@@ -645,6 +678,13 @@ async function fetchOneAccount(
     transactions: [],
     errors: [],
   };
+
+  // Unlinked accounts: return metadata only. The persist layer will
+  // route them into stats.unknown so the UI can offer link / import.
+  // No statements / balance call → no per-account SCA push.
+  if (!opts.fetch) {
+    return snapshot;
+  }
 
   try {
     let stmtResp = await client.getAccountStatements(account.accountNumber);
