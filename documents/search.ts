@@ -6,7 +6,10 @@
  *                  and `plainto_tsquery('german', …)` + `ts_rank`.
  *   - `semantic` — embed the query with the same model used for the
  *                  corpus (multilingual-e5-base, 768-d) and rank by
- *                  pgvector cosine distance.
+ *                  pgvector cosine distance. Document-level scoring
+ *                  sums similarity over the top-N closest chunks per
+ *                  document so that several moderate matches outrank
+ *                  a single near-miss.
  *   - `hybrid`   — combine both result lists via Reciprocal Rank
  *                  Fusion. This is the default because FTS handles
  *                  exact words (IBANs, invoice numbers) while the
@@ -45,6 +48,23 @@ const PER_BRANCH_LIMIT = 50;
 
 /** RRF constant — standard literature value, see Cormack et al. 2009. */
 const RRF_K = 60;
+
+/**
+ * How many of the closest chunks per document feed the aggregated score.
+ * Three is a pragmatic default: enough to reward a document that mentions
+ * the query in several places, small enough not to drown out a single
+ * very-strong chunk.
+ */
+const SEMANTIC_TOP_CHUNKS_PER_DOC = 3;
+
+/**
+ * Multiplier on the requested document `limit` to size the chunk-level
+ * ANN candidate set. With max 32 chunks per document and top-3 aggregation
+ * a 4× multiplier hits the right grain: enough chunk diversity that the
+ * top-K documents are well-supported, while keeping the candidate set
+ * compact so HNSW iterative-scan stays fast.
+ */
+const SEMANTIC_CHUNK_OVERSAMPLE = 4;
 
 export async function searchDocuments(params: SearchParams): Promise<SearchHit[]> {
   const { userId, mode, limit } = params;
@@ -130,22 +150,61 @@ async function runSemantic(
         OR (d.visibility = 'household' AND d.household_id = ANY(${householdIds}))
       )`;
 
+  // Aggregate at the document level by summing similarity over the top-N
+  // closest chunks. The previous `MIN(distance)` scoring only cared about
+  // the single best chunk and lost the signal that a document with multiple
+  // moderately-close chunks is usually more relevant than one whose match
+  // is concentrated in a single passage.
+  //
+  // Pipeline:
+  //   1. ANN over chunks, capped at `chunkCandidateLimit`. The ORDER BY
+  //      lets pgvector's HNSW index drive the scan; the visibility join
+  //      prunes other users' content via iterative scan.
+  //   2. Number chunks per document by ascending distance.
+  //   3. Sum (1 − distance) over the top-N chunks per document, clamped
+  //      at zero to keep negative-similarity outliers from dragging the
+  //      score below well-formed weak hits.
+  //   4. Keep `MIN(distance)` for the diagnostic `semantic_distance`
+  //      field consumed by the UI / RRF fusion.
+  //
   // `<=>` is pgvector's cosine *distance*: 0 = identical, 2 = opposite.
-  // GROUP BY picks the closest chunk per document.
-  const rows = await db.execute<{ document_id: number; distance: number }>(sql`
-    SELECT de.document_id, MIN(de.embedding <=> ${literal}::vector) AS distance
-    FROM document_embeddings de
-    JOIN documents d ON d.id = de.document_id
-    WHERE ${visibility}
-    GROUP BY de.document_id
-    ORDER BY distance ASC
+  const chunkCandidateLimit = Math.max(limit * SEMANTIC_CHUNK_OVERSAMPLE, 100);
+  const rows = await db.execute<{
+    document_id: number;
+    best_dist: number;
+    score: number;
+  }>(sql`
+    WITH visible_chunks AS (
+      SELECT de.document_id,
+             de.embedding <=> ${literal}::vector AS dist
+      FROM document_embeddings de
+      JOIN documents d ON d.id = de.document_id
+      WHERE ${visibility}
+      ORDER BY de.embedding <=> ${literal}::vector ASC
+      LIMIT ${chunkCandidateLimit}
+    ),
+    ranked AS (
+      SELECT document_id,
+             dist,
+             ROW_NUMBER() OVER (
+               PARTITION BY document_id
+               ORDER BY dist ASC
+             ) AS rn
+      FROM visible_chunks
+    )
+    SELECT document_id,
+           MIN(dist) AS best_dist,
+           SUM(GREATEST(0, 1 - dist))
+             FILTER (WHERE rn <= ${SEMANTIC_TOP_CHUNKS_PER_DOC}) AS score
+    FROM ranked
+    GROUP BY document_id
+    ORDER BY score DESC
     LIMIT ${limit}
   `);
   return rows.rows.map((r) => ({
     document_id: Number(r.document_id),
-    // Convert cosine distance to similarity so higher = better, matching fts_rank semantics.
-    score: 1 - Number(r.distance),
-    semantic_distance: Number(r.distance),
+    score: Number(r.score),
+    semantic_distance: Number(r.best_dist),
   }));
 }
 
