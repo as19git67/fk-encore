@@ -5,9 +5,10 @@
  *   - `fts`      — lexical via the generated `text_tsv` tsvector column
  *                  and `plainto_tsquery('german', …)` + `ts_rank`.
  *   - `semantic` — embed the query with the same model used for the
- *                  corpus (multilingual-e5-base, 768-d) and rank by
- *                  pgvector cosine distance. Document-level scoring
- *                  sums similarity over the top-N closest chunks per
+ *                  corpus (multilingual-e5-base, 768-d, stored as
+ *                  `halfvec` since migration 0054) and rank by pgvector
+ *                  cosine distance. Document-level scoring sums
+ *                  similarity over the top-N closest chunks per
  *                  document so that several moderate matches outrank
  *                  a single near-miss.
  *   - `hybrid`   — combine both result lists via Reciprocal Rank
@@ -168,6 +169,10 @@ async function runSemantic(
   //      field consumed by the UI / RRF fusion.
   //
   // `<=>` is pgvector's cosine *distance*: 0 = identical, 2 = opposite.
+  // The literal is parsed as `vector` regardless of whether the column is
+  // still `vector(768)` (pgvector < 0.7) or already `halfvec(768)` (after
+  // migration 0054 on pgvector >= 0.7) — pgvector's implicit vector→halfvec
+  // cast resolves the operator dispatch transparently in both cases.
   const chunkCandidateLimit = Math.max(limit * SEMANTIC_CHUNK_OVERSAMPLE, 100);
   const rows = await db.execute<{
     document_id: number;

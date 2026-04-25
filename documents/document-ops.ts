@@ -302,6 +302,11 @@ export async function runEmbed(documentId: number): Promise<{ chunks: number } |
   for (let i = 0; i < chunks.length; i++) {
     const vec = embeddings[i];
     const literal = `[${vec.join(",")}]`;
+    // The literal is parsed as `vector` regardless of whether the column
+    // is `vector(768)` (pgvector < 0.7) or `halfvec(768)` (after migration
+    // 0054 on pgvector >= 0.7). pgvector defines an implicit assignment
+    // cast vector → halfvec, so the INSERT works against both column
+    // types without runtime introspection.
     await db.execute(sql`
       INSERT INTO document_embeddings (document_id, chunk_idx, chunk_text, embedding)
       VALUES (${documentId}, ${i}, ${chunks[i]}, ${literal}::vector)
