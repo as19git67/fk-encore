@@ -215,14 +215,14 @@ const STABILITY_MS = parseInt(
 );
 
 /**
- * inotify-based file watching does not always fire across Docker
- * bind-mount boundaries — most notably on ZFS-backed bind mounts
- * (TrueNAS SCALE) and on SMB / NFS shares. Default to polling so the
- * watcher behaves the same in dev and prod; flip
- * `FINANCE_IMPORT_POLLING=false` if you're on a filesystem where
- * inotify is reliable and want lower CPU.
+ * Polling escape hatch for filesystems where inotify doesn't fire
+ * (some bind-mount / network setups). Disabled by default — the
+ * documents-inbox and photo-library watchers run on inotify in this
+ * deployment and work, so finance-import does the same. Set
+ * `FINANCE_IMPORT_POLLING=true` if you ever land on a host where the
+ * other two watchers also turn out to be flaky.
  */
-const USE_POLLING = (process.env.FINANCE_IMPORT_POLLING ?? "true") !== "false";
+const USE_POLLING = (process.env.FINANCE_IMPORT_POLLING ?? "false") === "true";
 const POLL_INTERVAL_MS = parseInt(
   process.env.FINANCE_IMPORT_POLL_INTERVAL_MS ?? "2000",
   10,
