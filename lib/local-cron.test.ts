@@ -4,6 +4,8 @@ import {
   _resetLocalCron,
   dailyAtUtc,
   everyMs,
+  inspectJobs,
+  runJobNow,
   schedule,
   startLocalCron,
 } from "./local-cron";
@@ -114,7 +116,8 @@ describe("scheduler", () => {
     expect(runs).toBe(1);
   });
 
-  it("rejects schedule() after start", () => {
+  it("auto-arms a job that gets scheduled after start", async () => {
+    vi.useFakeTimers();
     schedule({
       name: "test-early",
       nextFire: everyMs(1000),
@@ -122,12 +125,112 @@ describe("scheduler", () => {
     });
     startLocalCron();
 
-    expect(() =>
-      schedule({
-        name: "test-late",
-        nextFire: everyMs(1000),
-        run: async () => {},
-      }),
-    ).toThrow(/cannot schedule/);
+    let lateRuns = 0;
+    schedule({
+      name: "test-late",
+      nextFire: everyMs(500),
+      run: async () => {
+        lateRuns++;
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(500);
+    expect(lateRuns).toBe(1);
+  });
+
+  it("ignores duplicate schedule() calls", () => {
+    schedule({ name: "dup", nextFire: everyMs(1000), run: async () => {} });
+    schedule({ name: "dup", nextFire: everyMs(1000), run: async () => {} });
+    expect(inspectJobs().filter((j) => j.name === "dup")).toHaveLength(1);
+  });
+});
+
+describe("inspectJobs", () => {
+  it("exposes name, schedule label, and run counters that update after each run", async () => {
+    vi.useFakeTimers();
+
+    schedule({
+      name: "inspect-tick",
+      description: "tick handler",
+      service: "test",
+      scheduleLabel: "every 1s",
+      nextFire: everyMs(1000),
+      run: async () => {},
+    });
+    startLocalCron();
+
+    let snapshot = inspectJobs();
+    expect(snapshot).toHaveLength(1);
+    expect(snapshot[0]).toMatchObject({
+      name: "inspect-tick",
+      description: "tick handler",
+      service: "test",
+      schedule_label: "every 1s",
+      status: "scheduled",
+      run_count: 0,
+      error_count: 0,
+      last_run_at: null,
+    });
+    expect(snapshot[0].next_fire_at).not.toBeNull();
+
+    await vi.advanceTimersByTimeAsync(1000);
+    snapshot = inspectJobs();
+    expect(snapshot[0].run_count).toBe(1);
+    expect(snapshot[0].status).toBe("ok");
+    expect(snapshot[0].last_run_at).not.toBeNull();
+  });
+
+  it("captures the error message when a job throws", async () => {
+    vi.useFakeTimers();
+
+    schedule({
+      name: "inspect-throw",
+      nextFire: everyMs(100),
+      run: async () => {
+        throw new Error("kaboom");
+      },
+    });
+    startLocalCron();
+
+    await vi.advanceTimersByTimeAsync(100);
+    const snapshot = inspectJobs();
+    expect(snapshot[0].status).toBe("error");
+    expect(snapshot[0].error_count).toBe(1);
+    expect(snapshot[0].last_error).toBe("kaboom");
+  });
+
+  it("marks a job deactivated when nextFire returns null on first arm", () => {
+    schedule({
+      name: "inspect-dead",
+      nextFire: () => null,
+      run: async () => {},
+    });
+    startLocalCron();
+    const [snap] = inspectJobs();
+    expect(snap.status).toBe("deactivated");
+    expect(snap.next_fire_at).toBeNull();
+  });
+});
+
+describe("runJobNow", () => {
+  it("triggers the job's handler regardless of the schedule and updates counters", async () => {
+    let runs = 0;
+    schedule({
+      name: "manual",
+      nextFire: everyMs(60_000),
+      run: async () => {
+        runs++;
+      },
+    });
+    startLocalCron();
+
+    const result = await runJobNow("manual");
+    expect(runs).toBe(1);
+    expect(result?.run_count).toBe(1);
+    expect(result?.status).toBe("ok");
+  });
+
+  it("returns null for an unknown job", async () => {
+    expect(await runJobNow("does-not-exist")).toBeNull();
   });
 });

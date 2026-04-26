@@ -1,4 +1,5 @@
 import { Service } from "encore.dev/service";
+import { startLocalCron } from "../lib/local-cron";
 
 console.log("[boot] realtime/encore.service.ts: begin");
 
@@ -6,6 +7,8 @@ console.log("[boot] realtime/encore.service.ts: begin");
 import "./subscribe";
 // Side-effect import registers the outbox retention cron.
 import "./retention-cron";
+
+startLocalCron();
 
 console.log("[boot] realtime/encore.service.ts: registering Service");
 export default new Service("realtime");

@@ -7,7 +7,7 @@
 // single mail without making individual events wait 15 minutes on
 // average.
 
-import { CronJob } from "encore.dev/cron";
+import { everyMs, schedule } from "../lib/local-cron";
 import { api } from "encore.dev/api";
 import { sql } from "drizzle-orm";
 import log from "encore.dev/log";
@@ -169,9 +169,11 @@ function pickString(v: unknown): string | null {
   return typeof v === "string" ? v : null;
 }
 
-// Kept at the bottom so the `endpoint` forward-reference resolves.
-const _ = new CronJob("guest-digest", {
-  title: "Shared-album guest notification digest",
-  every: "15m",
-  endpoint: sendGuestDigests,
+schedule({
+  name: "guest-digest",
+  description: "Shared-album guest notification digest",
+  service: "sharedalbum",
+  scheduleLabel: "every 15m",
+  nextFire: everyMs(15 * 60_000),
+  run: () => sendGuestDigests(),
 });

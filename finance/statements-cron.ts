@@ -402,12 +402,18 @@ async function notifyTanRequired(
 // exposed for manual triggering.
 schedule({
   name: "finance-sync-statements",
+  description: "Iterate bankcontacts and run FinTS sync for slots that are due",
+  service: "finance",
+  scheduleLabel: `every ${CRON_INTERVAL_MINUTES}m`,
   nextFire: everyMs(CRON_INTERVAL_MINUTES * 60_000),
   run: () => syncStatements(),
 });
 
 schedule({
   name: "finance-tan-cleanup",
+  description: "Delete expired TAN sessions",
+  service: "finance",
+  scheduleLabel: "every 1h",
   nextFire: everyMs(60 * 60_000),
   run: () => cleanupExpiredTanSessions(),
 });

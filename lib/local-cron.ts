@@ -5,9 +5,15 @@
  * in our self-hosted `encore build docker` deployment they register
  * but never fire. This module is the replacement: callers register
  * jobs at boot via `schedule()` and call `startLocalCron()` once from
- * the service file. Each job advances its own next-fire time after
- * every run, and the scheduler arms exactly one timer per job — no
- * 5-min polling, the timer wakes the moment the next job is due.
+ * a service file. Each job advances its own next-fire time after every
+ * run, and the scheduler arms exactly one timer per job — no polling,
+ * the timer wakes the moment the next job is due.
+ *
+ * Multiple services can each call `schedule()` and `startLocalCron()`
+ * independently — the calls are idempotent and ordering-safe. A
+ * `schedule()` after `startLocalCron()` arms its timer immediately, so
+ * a service whose boot file runs late in the import graph still gets
+ * its jobs registered.
  *
  * Catch-up on missed runs (e.g. container was down across the daily
  * 03:00 UTC export) is intentionally NOT done — same semantics as
@@ -15,16 +21,16 @@
  * tick. If you want a startup catch-up, do an explicit one-shot call
  * at boot before `startLocalCron()`.
  *
+ * Last-run state (status, duration, next fire) is kept per entry and
+ * surfaced via `inspectJobs()` for the admin UI. State lives only in
+ * memory — restarts reset it. That's fine for an at-a-glance health
+ * panel; long-term audit logging would need its own table.
+ *
  * Usage:
  *   schedule({
  *     name: "finance-tan-cleanup",
  *     nextFire: everyMs(60 * 60_000),
  *     run: () => cleanupExpiredTanSessions(),
- *   });
- *   schedule({
- *     name: "finance-export-snapshot",
- *     nextFire: dailyAtUtc(3, 0),
- *     run: () => runFinanceExport(),
  *   });
  *   startLocalCron();
  */
@@ -33,6 +39,15 @@ import log from "encore.dev/log";
 
 export interface ScheduledJob {
   name: string;
+  /** Human-readable description for the admin UI. */
+  description?: string;
+  /** Service the job logically belongs to (for grouping in the UI). */
+  service?: string;
+  /**
+   * Schedule shape, free-form string for display ("every 5m", "daily 03:00 UTC", …).
+   * Computed by the helpers below; pass through if you build a custom `nextFire`.
+   */
+  scheduleLabel?: string;
   /**
    * Returns the absolute Date at which the job should fire next,
    * given that the previous fire (or boot) was at `after`. Return
@@ -43,21 +58,62 @@ export interface ScheduledJob {
   run: () => Promise<unknown>;
 }
 
+export type JobStatus = "scheduled" | "running" | "ok" | "error" | "deactivated";
+
+export interface JobInspectEntry {
+  name: string;
+  description: string | null;
+  service: string | null;
+  schedule_label: string | null;
+  status: JobStatus;
+  next_fire_at: string | null;
+  last_run_at: string | null;
+  last_duration_ms: number | null;
+  last_error: string | null;
+  run_count: number;
+  error_count: number;
+}
+
 interface Entry {
   job: ScheduledJob;
   timer: NodeJS.Timeout | null;
+  status: JobStatus;
+  next_fire_at: Date | null;
+  last_run_at: Date | null;
+  last_duration_ms: number | null;
+  last_error: string | null;
+  run_count: number;
+  error_count: number;
 }
 
 const entries: Entry[] = [];
 let started = false;
 
 export function schedule(job: ScheduledJob): void {
-  if (started) {
-    throw new Error(
-      `localCron: cannot schedule '${job.name}' after startLocalCron()`,
-    );
+  // Names should be unique — keeps the admin UI unambiguous and
+  // prevents accidental double-registration from a re-imported module.
+  if (entries.some((e) => e.job.name === job.name)) {
+    log.warn("localCron: duplicate schedule() call ignored", { name: job.name });
+    return;
   }
-  entries.push({ job, timer: null });
+  const entry: Entry = {
+    job,
+    timer: null,
+    status: "scheduled",
+    next_fire_at: null,
+    last_run_at: null,
+    last_duration_ms: null,
+    last_error: null,
+    run_count: 0,
+    error_count: 0,
+  };
+  entries.push(entry);
+  if (started) {
+    // Late registration (some other service already started the
+    // scheduler): arm immediately so we don't wait for an explicit
+    // re-start.
+    armNext(entry, new Date());
+  }
 }
 
 export function startLocalCron(): void {
@@ -65,8 +121,32 @@ export function startLocalCron(): void {
   started = true;
   const now = new Date();
   for (const entry of entries) {
-    armNext(entry, now);
+    if (!entry.timer) armNext(entry, now);
   }
+}
+
+export function inspectJobs(): JobInspectEntry[] {
+  return entries.map((e) => ({
+    name: e.job.name,
+    description: e.job.description ?? null,
+    service: e.job.service ?? null,
+    schedule_label: e.job.scheduleLabel ?? null,
+    status: e.status,
+    next_fire_at: e.next_fire_at?.toISOString() ?? null,
+    last_run_at: e.last_run_at?.toISOString() ?? null,
+    last_duration_ms: e.last_duration_ms,
+    last_error: e.last_error,
+    run_count: e.run_count,
+    error_count: e.error_count,
+  }));
+}
+
+/** Trigger a job by name immediately (off the regular schedule). */
+export async function runJobNow(name: string): Promise<JobInspectEntry | null> {
+  const entry = entries.find((e) => e.job.name === name);
+  if (!entry) return null;
+  await runEntry(entry);
+  return inspectJobs().find((j) => j.name === name) ?? null;
 }
 
 /** For tests: stop all timers and reset registry. */
@@ -87,11 +167,15 @@ function armNext(entry: Entry, after: Date): void {
       name: entry.job.name,
       err: (err as Error).message,
     });
+    entry.status = "deactivated";
+    entry.next_fire_at = null;
     return;
   }
 
   if (!next) {
     log.info("localCron: job deactivated", { name: entry.job.name });
+    entry.status = "deactivated";
+    entry.next_fire_at = null;
     return;
   }
 
@@ -100,6 +184,11 @@ function armNext(entry: Entry, after: Date): void {
   // triggers, but it's cheap to guard against.
   const MAX_DELAY = 2_147_483_647;
   const delayMs = Math.max(0, next.getTime() - Date.now());
+  entry.next_fire_at = next;
+  if (entry.status !== "error" && entry.status !== "ok") {
+    entry.status = "scheduled";
+  }
+
   if (delayMs > MAX_DELAY) {
     entry.timer = setTimeout(() => armNext(entry, new Date()), MAX_DELAY);
     return;
@@ -111,24 +200,37 @@ function armNext(entry: Entry, after: Date): void {
     delay_ms: delayMs,
   });
 
-  entry.timer = setTimeout(async () => {
-    log.info("localCron: firing", { name: entry.job.name });
-    const startedAt = Date.now();
-    try {
-      await entry.job.run();
-      log.info("localCron: job ok", {
-        name: entry.job.name,
-        duration_ms: Date.now() - startedAt,
-      });
-    } catch (err) {
-      log.error("localCron: job threw", {
-        name: entry.job.name,
-        duration_ms: Date.now() - startedAt,
-        err: (err as Error).message,
-      });
-    }
-    armNext(entry, new Date());
+  entry.timer = setTimeout(() => {
+    runEntry(entry).finally(() => armNext(entry, new Date()));
   }, delayMs);
+}
+
+async function runEntry(entry: Entry): Promise<void> {
+  log.info("localCron: firing", { name: entry.job.name });
+  entry.status = "running";
+  const startedAt = Date.now();
+  entry.last_run_at = new Date(startedAt);
+  try {
+    await entry.job.run();
+    entry.last_duration_ms = Date.now() - startedAt;
+    entry.last_error = null;
+    entry.run_count++;
+    entry.status = "ok";
+    log.info("localCron: job ok", {
+      name: entry.job.name,
+      duration_ms: entry.last_duration_ms,
+    });
+  } catch (err) {
+    entry.last_duration_ms = Date.now() - startedAt;
+    entry.last_error = (err as Error).message ?? String(err);
+    entry.error_count++;
+    entry.status = "error";
+    log.error("localCron: job threw", {
+      name: entry.job.name,
+      duration_ms: entry.last_duration_ms,
+      err: entry.last_error,
+    });
+  }
 }
 
 // -----------------------------------------------------------------------

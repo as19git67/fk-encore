@@ -305,6 +305,9 @@ async function rotateExports(currentFilename: string): Promise<number> {
 // bank syncs in finance-fints-integration.md §5 without contention.
 schedule({
   name: "finance-export-snapshot",
+  description: "Daily JSON snapshot of every finance_* user-data table",
+  service: "finance",
+  scheduleLabel: "daily 03:00 UTC",
   nextFire: dailyAtUtc(3, 0),
   run: () => runFinanceExport(),
 });

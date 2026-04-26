@@ -6,6 +6,7 @@ import "./boot-tuning";
 import { Service } from "encore.dev/service";
 import { maintenanceMiddleware } from "../backup/maintenance";
 import { migrateStorageLayout } from "./storage-migration";
+import { startLocalCron } from "../lib/local-cron";
 
 console.log("[boot] photo/encore.service.ts: begin");
 
@@ -17,6 +18,8 @@ import "./library-cron";
 
 // Register the daily cron job that rebuilds Rueckblicke (recaps).
 import "./recaps-cron";
+
+startLocalCron();
 
 import { startConfiguredWatchers } from "./library-watcher";
 
