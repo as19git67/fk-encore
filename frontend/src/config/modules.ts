@@ -26,16 +26,28 @@ export const modules: ModuleConfig[] = [
     permission: 'photos.view',
     routes: [
       {
+        // The bare module path lands on the virtualized gallery so that
+        // module-switcher buttons, plain `/fotos` links and any localStorage
+        // last-route entry from before the new gallery shipped all end
+        // up on the new implementation.
         path: '',
-        name: 'fotos-gallery',
-        component: () => import('../views/PhotosView.vue'),
-        meta: { permission: 'photos.view' },
+        redirect: { name: 'fotos-gallery-v2' },
       },
       {
-        // Greenfield virtualized gallery (Phase 1: thumbnails only).
+        // Greenfield virtualized gallery (Phase 2: filter/sort/search/upload).
         path: 'galerie',
         name: 'fotos-gallery-v2',
         component: () => import('../views/GalleryView.vue'),
+        meta: { permission: 'photos.view' },
+      },
+      {
+        // Legacy gallery, kept under "Galerie alt" until the new gallery
+        // grows fullscreen + photoId-deeplink support. Internal callers
+        // (FeedView, PersonsView, PhotoLocationMenu) still resolve
+        // `name: 'fotos-gallery'` to this view via its photoId query.
+        path: 'galerie-alt',
+        name: 'fotos-gallery',
+        component: () => import('../views/PhotosView.vue'),
         meta: { permission: 'photos.view' },
       },
       {
