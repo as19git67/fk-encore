@@ -17,7 +17,7 @@ describe("everyMs", () => {
   it("returns now+interval", () => {
     const after = new Date("2026-04-26T10:00:00Z");
     const next = everyMs(5 * 60_000)(after);
-    expect(next?.toISOString()).toBe("2026-04-26T10:05:00Z");
+    expect(next?.toISOString()).toBe("2026-04-26T10:05:00.000Z");
   });
 });
 
@@ -25,25 +25,25 @@ describe("dailyAtUtc", () => {
   it("returns today's slot when it's still in the future", () => {
     const after = new Date("2026-04-26T01:00:00Z");
     const next = dailyAtUtc(3, 0)(after);
-    expect(next?.toISOString()).toBe("2026-04-26T03:00:00Z");
+    expect(next?.toISOString()).toBe("2026-04-26T03:00:00.000Z");
   });
 
   it("rolls to tomorrow when today's slot is past", () => {
     const after = new Date("2026-04-26T05:00:00Z");
     const next = dailyAtUtc(3, 0)(after);
-    expect(next?.toISOString()).toBe("2026-04-27T03:00:00Z");
+    expect(next?.toISOString()).toBe("2026-04-27T03:00:00.000Z");
   });
 
   it("rolls to tomorrow when called exactly at the slot time", () => {
     const after = new Date("2026-04-26T03:00:00Z");
     const next = dailyAtUtc(3, 0)(after);
-    expect(next?.toISOString()).toBe("2026-04-27T03:00:00Z");
+    expect(next?.toISOString()).toBe("2026-04-27T03:00:00.000Z");
   });
 
   it("supports a non-zero minute", () => {
     const after = new Date("2026-04-26T03:30:00Z");
     const next = dailyAtUtc(3, 45)(after);
-    expect(next?.toISOString()).toBe("2026-04-26T03:45:00Z");
+    expect(next?.toISOString()).toBe("2026-04-26T03:45:00.000Z");
   });
 });
 
