@@ -69,6 +69,16 @@ const emit = defineEmits<{
   'toggle-favorite': [id: number, status: CurationStatus]
   'hide': [id: number]
   'restore': [id: number]
+  /**
+   * Fires `true` when the user starts scrolling the grid and `false` after
+   * a short idle period. Lets the parent throttle expensive work that
+   * would otherwise compete with scroll frames — most importantly the
+   * background page-load loop, which appends to `photos.value` and forces
+   * Vue to re-diff a 45k-item v-for. On mobile that diff alone eats whole
+   * scroll frames, which is why scrolling felt blocked while pages were
+   * streaming in.
+   */
+  'user-scrolling': [active: boolean]
 }>()
 
 const scrollRef = ref<HTMLElement | null>(null)
@@ -92,7 +102,29 @@ onMounted(() => {
 
 onUnmounted(() => {
   resizeObserver?.disconnect()
+  if (scrollIdleTimer) clearTimeout(scrollIdleTimer)
 })
+
+// ── Scroll-active signal ────────────────────────────────────────────────────
+// Emit `true` on the first scroll event and `false` after the user has been
+// idle for `SCROLL_IDLE_MS`. Used by the parent to gate work that competes
+// with scroll frames (background page-load batches, in particular).
+const SCROLL_IDLE_MS = 1000
+let scrollIdleTimer: ReturnType<typeof setTimeout> | null = null
+let scrollActive = false
+
+function onGridScroll() {
+  if (!scrollActive) {
+    scrollActive = true
+    emit('user-scrolling', true)
+  }
+  if (scrollIdleTimer) clearTimeout(scrollIdleTimer)
+  scrollIdleTimer = setTimeout(() => {
+    scrollIdleTimer = null
+    scrollActive = false
+    emit('user-scrolling', false)
+  }, SCROLL_IDLE_MS)
+}
 
 // ── Thumbnail hydration gating ───────────────────────────────────────────────
 // On initial load the gallery typically has to scroll to a previously selected
@@ -232,7 +264,7 @@ defineExpose({
 </script>
 
 <template>
-  <div class="photo-grid-scroll" ref="scrollRef">
+  <div class="photo-grid-scroll" ref="scrollRef" @scroll.passive="onGridScroll">
     <template v-for="yearGroup in groupedPhotos" :key="yearGroup.year">
       <h2
         v-if="yearGroup.year"

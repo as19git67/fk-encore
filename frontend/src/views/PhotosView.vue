@@ -69,13 +69,20 @@ const BACKGROUND_LOAD_DELAY_MS = 1500
 const totalPhotos = ref(0)
 const backgroundLoading = ref(false)
 const backgroundLoadController = ref<AbortController | null>(null)
-// Pause flag: while the user is in fullscreen or has the mobile detail sheet
-// open we hold off on appending new pages. The same per-batch render +
-// observer-reattach cost that motivates the inter-batch delay above is what
-// makes fullscreen feel "almost frozen" on mobile — for the duration of the
-// detail view we want zero of that work.
+// Pause flag: while the user is in fullscreen, has the mobile detail sheet
+// open, or is actively scrolling the grid we hold off on appending new
+// pages. Each appended page replaces `photos.value`, which on a 45k library
+// makes Vue re-diff every grid item — that diff alone consumes whole scroll
+// frames on mobile, so before this gate scrolling felt blocked while pages
+// were streaming in. PhotoGrid emits `user-scrolling` (true on scroll
+// start, false after a short idle).
 const backgroundLoadPaused = ref(false)
+const userScrolling = ref(false)
 let backgroundLoadResume: (() => void) | null = null
+
+function onUserScrolling(active: boolean) {
+  userScrolling.value = active
+}
 
 const backgroundLoadProgress = computed(() =>
   totalPhotos.value > 0 && photos.value.length < totalPhotos.value
@@ -402,14 +409,15 @@ async function loadLandmarks(photoId: number) {
 // ── Fullscreen ────────────────────────────────────────────────────────────────
 const isFullscreen = ref(false)
 
-// Hold the background page-loader while the user is in a detail view.
-// Continuing to append pages while fullscreen is open made the UI stutter on
-// mobile (each batch re-renders the grid + reattaches the IntersectionObserver
-// to thousands of `[data-photo-id]` elements, which blocks the main thread
-// for hundreds of ms). As soon as the detail view is closed the loader
+// Hold the background page-loader while the user is in a detail view OR
+// actively scrolling the grid. Continuing to append pages while fullscreen
+// is open made the UI stutter on mobile (each batch re-renders the grid +
+// re-diffs every photo item, which blocks the main thread for hundreds of
+// ms). The same diff blocks scroll frames during normal grid scrolling.
+// As soon as the detail view closes / the user stops scrolling, the loader
 // resumes from where it left off.
-watch([isFullscreen, mobileSidebarOpen], ([fs, sheet]) => {
-  const shouldPause = fs || sheet
+watch([isFullscreen, mobileSidebarOpen, userScrolling], ([fs, sheet, scrolling]) => {
+  const shouldPause = fs || sheet || scrolling
   if (shouldPause === backgroundLoadPaused.value) return
   backgroundLoadPaused.value = shouldPause
   if (!shouldPause && backgroundLoadResume) {
@@ -1324,6 +1332,7 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
         @toggle-favorite="handleToggleFavorite"
         @hide="handleDelete"
         @restore="handleRestore"
+        @user-scrolling="onUserScrolling"
       />
 
       <!-- RIGHT: Details sidebar – auf Mobile als Bottom-Sheet -->
