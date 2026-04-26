@@ -629,6 +629,49 @@ export interface ListPhotoIndexResponse {
   total?: number;
 }
 
+// ─── Virtualized gallery grid (GET /gallery/grid) ─────────────────────────────
+// Pre-enriched per-photo payload designed to feed a virtualized scroller. The
+// shape is intentionally minimal: the client only needs what fits inside a
+// thumbnail cell. Fullscreen / detail data lives behind separate endpoints
+// and is fetched on demand when the user opens a single photo.
+
+/**
+ * The "best matching" similar-photo group this photo belongs to, with the
+ * preference computed server-side (unreviewed groups win). NULL when the
+ * photo is not in any group.
+ */
+export interface GalleryGridGroup {
+  id: number;
+  /** True when this photo is the cover_photo_id of the group. */
+  is_cover: boolean;
+  /** Total number of photos in the group. */
+  member_count: number;
+  /** True when the user has marked the group as reviewed. */
+  reviewed: boolean;
+}
+
+/** One cell in the virtualized gallery grid. */
+export interface GalleryGridEntry {
+  id: number;
+  filename: string;
+  curation: CurationStatus;
+  /** Auto-crop hint for the thumbnail container (object-position). */
+  auto_crop?: { x: number; y: number };
+  /** Group info if the photo participates in a similar-photo group. */
+  group?: GalleryGridGroup;
+}
+
+/**
+ * Window response. The client never iterates the full library — `total`
+ * drives the virtualizer's row count, `offset` locates the first returned
+ * photo in the global ordering, and `photos` is the dense window.
+ */
+export interface GalleryGridResponse {
+  total: number;
+  offset: number;
+  photos: GalleryGridEntry[];
+}
+
 export interface PhotoDetailsBatchResponse {
   photos: PhotoWithCuration[];
 }
