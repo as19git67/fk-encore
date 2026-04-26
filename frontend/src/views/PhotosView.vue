@@ -56,10 +56,26 @@ const error = ref('')
 // param > localStorage > newest), so the user sees something meaningful after
 // a single round trip; remaining pages stream in in the background and append
 // to either side of the loaded window.
+// Page size + per-batch delay are tuned for "the gallery should stay
+// responsive on mobile while the rest of the library streams in". Smaller
+// pages are not better — every appended page replaces `photos.value`, which
+// re-renders the grid and forces PhotoGrid's IntersectionObserver to
+// re-attach to every `[data-photo-id]` element. Smaller batches just mean
+// MORE of those expensive re-renders. Bigger batches with a generous
+// inter-batch sleep is the right knob: the sleep gives the main thread a
+// solid window for taps / swipes / scroll between batches.
 const PHOTO_INDEX_PAGE_SIZE = 2000
+const BACKGROUND_LOAD_DELAY_MS = 1500
 const totalPhotos = ref(0)
 const backgroundLoading = ref(false)
 const backgroundLoadController = ref<AbortController | null>(null)
+// Pause flag: while the user is in fullscreen or has the mobile detail sheet
+// open we hold off on appending new pages. The same per-batch render +
+// observer-reattach cost that motivates the inter-batch delay above is what
+// makes fullscreen feel "almost frozen" on mobile — for the duration of the
+// detail view we want zero of that work.
+const backgroundLoadPaused = ref(false)
+let backgroundLoadResume: (() => void) | null = null
 
 const backgroundLoadProgress = computed(() =>
   totalPhotos.value > 0 && photos.value.length < totalPhotos.value
@@ -386,6 +402,21 @@ async function loadLandmarks(photoId: number) {
 // ── Fullscreen ────────────────────────────────────────────────────────────────
 const isFullscreen = ref(false)
 
+// Hold the background page-loader while the user is in a detail view.
+// Continuing to append pages while fullscreen is open made the UI stutter on
+// mobile (each batch re-renders the grid + reattaches the IntersectionObserver
+// to thousands of `[data-photo-id]` elements, which blocks the main thread
+// for hundreds of ms). As soon as the detail view is closed the loader
+// resumes from where it left off.
+watch([isFullscreen, mobileSidebarOpen], ([fs, sheet]) => {
+  const shouldPause = fs || sheet
+  if (shouldPause === backgroundLoadPaused.value) return
+  backgroundLoadPaused.value = shouldPause
+  if (!shouldPause && backgroundLoadResume) {
+    backgroundLoadResume()
+  }
+})
+
 watch(isFullscreen, (val) => {
   if (!val) {
     isEditingDate.value = false
@@ -462,6 +493,12 @@ function cancelBackgroundLoad() {
   backgroundLoadController.value?.abort()
   backgroundLoadController.value = null
   backgroundLoading.value = false
+  // Release any pending awaitResume so the loop can observe the abort and
+  // exit instead of staying parked on the resolve promise forever.
+  if (backgroundLoadResume) {
+    backgroundLoadResume()
+    backgroundLoadResume = null
+  }
 }
 
 /**
@@ -595,6 +632,21 @@ async function reloadPhotosInPlace() {
   } catch { /* silently fail */ }
 }
 
+function sleepWithSignal(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve()
+  return new Promise((resolve) => {
+    const t = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    function onAbort() {
+      clearTimeout(t)
+      resolve()
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
 /**
  * Walks outward from the loaded window, alternating one page on the right
  * (older / further-along in the sort) and one page on the left (newer /
@@ -613,8 +665,36 @@ async function runBackgroundLoad(firstOffset: number, firstLen: number) {
   const sortPag = currentSortPagination()
   const filterValue = filter.value
 
+  // Wait until the user closes the detail view (fullscreen / mobile sheet)
+  // before continuing. Resolves immediately when not paused. Resolves on
+  // abort too so the loop can exit cleanly.
+  function awaitResume(signal: AbortSignal): Promise<void> {
+    if (!backgroundLoadPaused.value || signal.aborted) return Promise.resolve()
+    return new Promise<void>((resolve) => {
+      const onAbort = () => {
+        signal.removeEventListener('abort', onAbort)
+        resolve()
+      }
+      signal.addEventListener('abort', onAbort, { once: true })
+      backgroundLoadResume = () => {
+        signal.removeEventListener('abort', onAbort)
+        backgroundLoadResume = null
+        resolve()
+      }
+    })
+  }
+
   try {
     while (!ctrl.signal.aborted && (loadedFrom > 0 || loadedTo < total)) {
+      // Hold off on the next batch while the user is in fullscreen / detail
+      // view — see the comment on `backgroundLoadPaused` above for the
+      // reasoning. The current in-flight request (if any) will already have
+      // landed before we get here, so this loop checkpoints between batches.
+      if (backgroundLoadPaused.value) {
+        await awaitResume(ctrl.signal)
+        if (ctrl.signal.aborted) return
+      }
+
       // Right side first — when the page is centered on a target photo
       // and the user scrolled to it, the visually-adjacent unloaded
       // section in ASC sort lies to the right (older photos sit to the
@@ -634,7 +714,21 @@ async function runBackgroundLoad(firstOffset: number, firstLen: number) {
           appendPhotos(res.photos as Photo[], 'right')
           loadedTo += res.photos.length
         }
+        // Breathing room: let any queued user gestures (scroll, tap, image
+        // decode finishing) run before the next batch hammers the renderer
+        // again. Skipped at the boundaries so completion is not artificially
+        // delayed.
+        if (loadedFrom > 0 || loadedTo < total) {
+          await sleepWithSignal(BACKGROUND_LOAD_DELAY_MS, ctrl.signal)
+          if (ctrl.signal.aborted) return
+        }
       }
+
+      if (backgroundLoadPaused.value) {
+        await awaitResume(ctrl.signal)
+        if (ctrl.signal.aborted) return
+      }
+
       if (loadedFrom > 0 && !ctrl.signal.aborted) {
         const newOffset = Math.max(0, loadedFrom - PHOTO_INDEX_PAGE_SIZE)
         const limit = loadedFrom - newOffset
@@ -649,6 +743,10 @@ async function runBackgroundLoad(firstOffset: number, firstLen: number) {
         } else {
           appendPhotos(res.photos as Photo[], 'left')
           loadedFrom = newOffset
+        }
+        if (loadedFrom > 0 || loadedTo < total) {
+          await sleepWithSignal(BACKGROUND_LOAD_DELAY_MS, ctrl.signal)
+          if (ctrl.signal.aborted) return
         }
       }
     }
