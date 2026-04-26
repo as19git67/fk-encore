@@ -6,7 +6,9 @@ import Message from 'primevue/message'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import PhotoGrid from '../components/PhotoGrid.vue'
-import RecapsCarousel from '../components/RecapsCarousel.vue'
+// import RecapsCarousel from '../components/RecapsCarousel.vue' // TEMP: vorübergehend
+// deaktiviert, um zu prüfen, ob das Karussell auf dem Handy das Laden der Fotos
+// blockiert.
 import Chip from 'primevue/chip'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
@@ -1003,9 +1005,13 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
 
     <template v-else>
       <!-- Rückblicke-Karussell (nur ohne aktive Suche/Filter und außerhalb des Auswahlmodus) -->
+      <!--
+      TEMP: Rückblicke-Karussell vorübergehend deaktiviert, um zu prüfen, ob es
+      auf dem Handy das initiale Laden der Foto-Galerie blockiert.
       <RecapsCarousel
         v-if="!selectMode && !searchQuery && activeCount === 0 && !searchResultIds"
       />
+      -->
 
       <!-- Desktop: Auswahl-Aktionsleiste -->
       <div v-if="selectMode && selectModePhotos.length > 0" class="desktop-select-bar">
