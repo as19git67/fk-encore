@@ -1,4 +1,6 @@
 import { Service } from "encore.dev/service";
+import { startLocalCron } from "../lib/local-cron";
+import "../lib/scheduled-jobs-hooks";
 
 console.log("[boot] documents/encore.service.ts: begin");
 
@@ -8,6 +10,8 @@ import "./scan-worker";
 // Register the hourly cron that replays inbox files the live watcher
 // missed (downtime, network share without inotify, etc).
 import "./inbox-cron";
+
+startLocalCron();
 
 import { startInboxWatcher } from "./inbox-watcher";
 import { migrateLegacyLayoutOnce } from "./layout-migrator";
