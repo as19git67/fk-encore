@@ -18,13 +18,14 @@ services:
     container_name: fk-encore-chown-init-test
     restart: "no"
     user: "0:0"
-    command: ["sh", "-c", "chown -R 568:568 /mnt/documents /mnt/documents-inbox /mnt/models /mnt/finance-import /mnt/finance-export"]
+    command: ["sh", "-c", "chown -R 568:568 /mnt/documents /mnt/documents-inbox /mnt/models /mnt/finance-import /mnt/finance-export /mnt/backup"]
     volumes:
       - documents:/mnt/documents
       - documents_inbox:/mnt/documents-inbox
       - llm_models:/mnt/models
       - finance_import:/mnt/finance-import
       - finance_export:/mnt/finance-export
+      - backup:/mnt/backup
 
   # ── Main Encore.ts Application ─────────────────────────────────────────────
   app:
