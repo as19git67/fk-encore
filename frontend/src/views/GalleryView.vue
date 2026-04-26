@@ -532,10 +532,7 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
     <Message
       v-if="error"
       severity="error"
-      @close="
-        error = ''
-        uploadErrors = []
-      "
+      @close="error = ''; uploadErrors = []"
     >
       {{ error }}
       <button
