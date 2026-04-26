@@ -66,6 +66,17 @@ type GalleryGridQueryParams = {
   // — sort —
   sortBy?: Query<string>;
   sortDir?: Query<string>;
+
+  /**
+   * Optional comma-separated list of photo IDs. When supplied the server
+   * restricts the result to those photos AND orders them by their position
+   * in this list (ignoring `sortBy` / `sortDir`). Used for natural-language
+   * search results, where ranking is determined by the search engine and
+   * must be preserved across windowed fetches. The server still applies
+   * the user's own filters on top, so a search hit hidden by a filter
+   * never appears.
+   */
+  photoIds?: Query<string>;
 };
 
 function toFilterQuery(p: GalleryGridQueryParams): PhotoFilterQuery {
@@ -137,12 +148,27 @@ export const listGalleryGrid = api(
     const sortBy = normalizeGallerySortField(params.sortBy);
     const sortDir = normalizeGallerySortDir(params.sortDir);
 
+    // photoIds: parsed once here; capped to a generous upper bound so a
+    // hand-crafted huge ID list cannot stall the SQL planner.
+    const MAX_PHOTO_IDS = 5000;
+    let photoIds: number[] | undefined;
+    if (typeof params.photoIds === "string" && params.photoIds.length > 0) {
+      const parsed = params.photoIds
+        .split(",")
+        .map((s) => parseInt(s, 10))
+        .filter((n) => Number.isFinite(n) && n > 0);
+      if (parsed.length > 0) {
+        photoIds = parsed.slice(0, MAX_PHOTO_IDS);
+      }
+    }
+
     return await listGalleryGridLogic(userId, filter, {
       limit,
       offset,
       aroundPhotoId,
       sortBy,
       sortDir,
+      photoIds,
     });
   },
 );

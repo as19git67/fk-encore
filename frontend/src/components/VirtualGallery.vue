@@ -3,9 +3,9 @@
  * Virtualized photo gallery grid.
  *
  * Architecture:
- *   - The data source is a sparse array `entries` of length `total`
- *     (`useGallerySource`). The component never iterates this array; it
- *     only reads slots inside the rendered rows.
+ *   - Owns a `useGallerySource` (sparse array of length `total`). The
+ *     component never iterates this array; it only reads slots inside the
+ *     rendered rows.
  *   - TanStack `useVirtualizer` virtualizes ROWS (not items). A row holds
  *     `cols` photos; layout inside the row is a plain CSS grid. Row height
  *     is fixed (cell + gap) so the virtualizer can compute the total
@@ -13,26 +13,54 @@
  *   - As soon as a row becomes visible, the component asks the source to
  *     `ensureRange(rowStart, rowEnd)` — the source fires page fetches for
  *     any unloaded slots that overlap the visible window.
- *   - Slots that are still `null` render as a skeleton tile (just an
- *     empty box) so the grid layout stays stable while the page loads.
+ *   - Filter / sort / search state come in as reactive props. A change to
+ *     any of them triggers a fresh `init` (full reload + scroll back to
+ *     the anchor).
+ *   - Selection state (`selectMode`, `selectedIds`) is also a reactive
+ *     prop. The component just maps it to a CSS class on each cell — it
+ *     doesn't manage selection itself, the parent does (so the user can
+ *     act on the set with Album / Hide / Favorite buttons in a toolbar).
  *
- * Phase 1 deliberately omits filter, sort, search, fullscreen, selection,
- * curation actions and stack-compare. The grid emits `photo-click` so the
- * outer view can plug them in later.
+ * What it emits:
+ *   - `photo-click(entry)`        — normal tap on a non-stack cell.
+ *   - `stack-click(entry)`        — tap on a stack-cover cell (the parent
+ *                                    typically opens the compare view).
+ *   - `toggle-select(entry)`      — tap while `selectMode` is true.
+ *
+ * What it exposes (via defineExpose):
+ *   - `updateEntry(id, partial)` — optimistic in-place mutation (curation).
+ *   - `reload(opts?)`             — re-init keeping current query state.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
-import { getThumbUrl, type GalleryGridEntry } from '../api/gallery'
+import { getThumbUrl, type GalleryGridEntry, type GallerySortDir, type GallerySortField } from '../api/gallery'
 import { useGallerySource, GALLERY_PAGE_SIZE } from '../composables/useGallerySource'
+import type { PhotoFilter } from '../api/photos'
 
 const props = defineProps<{
   /** Photo to land on initially. Null = land on the last (newest in ASC) page. */
   aroundPhotoId?: number | null
+  /** Server-side filter. Changing it triggers a fresh init. */
+  filter: PhotoFilter
+  sortBy: GallerySortField
+  sortDir: GallerySortDir
+  /**
+   * Search-result IDs in ranked order. Non-null/non-empty = search mode:
+   * server returns only these photos in this order, ignoring sort.
+   */
+  searchPhotoIds?: number[] | null
+  /** When true, taps go through `toggle-select` instead of `photo-click`. */
+  selectMode?: boolean
+  /** Set of currently-selected photo IDs (driven by parent). */
+  selectedIds?: Set<number>
 }>()
 
 const emit = defineEmits<{
-  /** Fires when the user taps a photo. Phase 1: parent only logs / stores. */
   'photo-click': [entry: GalleryGridEntry]
+  'stack-click': [entry: GalleryGridEntry]
+  'toggle-select': [entry: GalleryGridEntry]
+  /** Fires after a (re)load completes so the parent can show toasts etc. */
+  'loaded': [info: { total: number; offset: number }]
 }>()
 
 // ── Data source ─────────────────────────────────────────────────────────────
@@ -55,9 +83,6 @@ const scrollRef = ref<HTMLElement | null>(null)
 let resizeObs: ResizeObserver | null = null
 
 function recalcLayout(width: number) {
-  // Fit as many `TARGET_CELL_MIN_PX` cells as possible, then expand each
-  // cell so the row exactly fills the container (gaps between cells but
-  // no padding on the outside).
   const totalGap = (n: number) => GAP_PX * Math.max(0, n - 1)
   let n = Math.max(1, Math.floor((width + GAP_PX) / (TARGET_CELL_MIN_PX + GAP_PX)))
   if (n < 1) n = 1
@@ -91,9 +116,6 @@ const virtualizer = useVirtualizer(
     count: rowCount.value,
     getScrollElement: () => scrollRef.value,
     estimateSize: () => rowHeight.value,
-    // Render a couple of rows above/below the viewport so scroll is smooth
-    // and prefetch of the next page kicks in slightly before the user
-    // sees the empty tiles.
     overscan: 4,
   })),
 )
@@ -101,66 +123,89 @@ const virtualizer = useVirtualizer(
 const virtualRows = computed(() => virtualizer.value.getVirtualItems())
 const totalSize = computed(() => virtualizer.value.getTotalSize())
 
-/**
- * Pull the photo entries for one virtual row out of the sparse `entries`
- * array. Slots not yet loaded come back as `null` and the template renders
- * them as skeleton tiles.
- */
 function rowSlots(rowIndex: number): (GalleryGridEntry | null)[] {
   const start = rowIndex * cols.value
   const end = Math.min(start + cols.value, total.value ?? 0)
   if (start >= end) return []
-  // Read directly from the shallow ref; no map/filter, just a slice.
   return entries.value.slice(start, end)
 }
 
 // ── Edge prefetch ───────────────────────────────────────────────────────────
-// Whenever the rendered virtual rows change, ask the source to make sure
-// every overlapped slot is in flight. Pages already requested are deduped
-// inside the source.
 watch(virtualRows, (rows) => {
   if (rows.length === 0 || total.value === 0) return
   const firstIdx = rows[0]!.index * cols.value
   const lastIdx = (rows[rows.length - 1]!.index + 1) * cols.value
-  // Pad the requested range a little so we prefetch the next page before
-  // it scrolls into view. One PAGE_SIZE worth of look-ahead matches the
-  // overscan rows above.
   source.ensureRange(
     Math.max(0, firstIdx - GALLERY_PAGE_SIZE),
     Math.min(total.value, lastIdx + GALLERY_PAGE_SIZE),
   )
 }, { flush: 'post' })
 
-// ── Initial load ────────────────────────────────────────────────────────────
+// ── Initial + re-init on query change ───────────────────────────────────────
 const ready = ref(false)
 
-async function startInitialLoad() {
-  const { initialOffset } = await source.init({
-    aroundPhotoId: props.aroundPhotoId ?? null,
-    sortBy: 'taken_at',
-    sortDir: 'asc',
+async function loadAndScroll(anchor: number | null | undefined) {
+  ready.value = false
+  const { initialOffset, total: totalRows } = await source.init({
+    filter: props.filter,
+    sortBy: props.sortBy,
+    sortDir: props.sortDir,
+    photoIds: props.searchPhotoIds ?? null,
+    aroundPhotoId: anchor ?? null,
   })
   ready.value = true
-  // Scroll the virtualizer to the row containing the initial photo. Done
-  // after the next frame so the virtualizer has measured the container.
+  emit('loaded', { total: totalRows, offset: initialOffset })
+  // Wait one frame so the virtualizer has measured the container with the
+  // new total before we ask it to scroll.
   await new Promise<void>((r) => requestAnimationFrame(() => r()))
-  if (cols.value > 0) {
+  if (cols.value > 0 && totalRows > 0) {
     const targetRow = Math.floor(initialOffset / cols.value)
     virtualizer.value.scrollToIndex(targetRow, { align: 'center' })
+  } else if (totalRows > 0) {
+    virtualizer.value.scrollToIndex(0, { align: 'start' })
   }
 }
 
 onMounted(() => {
-  // Wait one frame so the ResizeObserver can run once and we have a real
-  // column count before we ask the server for a window.
-  requestAnimationFrame(() => { void startInitialLoad() })
+  // Wait one frame so ResizeObserver has settled the column count.
+  requestAnimationFrame(() => { void loadAndScroll(props.aroundPhotoId) })
 })
+
+// React to query changes (filter, sort, search). Each change is a full
+// reload — same semantics as the legacy gallery's loadPhotos(), but
+// without ever materializing the full library client-side. We DO NOT
+// watch `aroundPhotoId` past mount because that prop is "initial only"
+// (a deep-link photoId or stored ID) — the parent shouldn't re-trigger
+// based on it. Selection prop changes are also intentionally NOT watched
+// here: they only affect the visual highlight on cells, which Vue picks
+// up automatically through `selectedIds.has(slot.id)` in the template.
+watch(
+  () => [props.filter, props.sortBy, props.sortDir, props.searchPhotoIds] as const,
+  () => { void loadAndScroll(null) },
+  { deep: true },
+)
 
 // ── Click handling ──────────────────────────────────────────────────────────
 function onTap(entry: GalleryGridEntry | null) {
   if (!entry) return
-  emit('photo-click', entry)
+  if (props.selectMode) {
+    emit('toggle-select', entry)
+    return
+  }
+  // Stack covers go to the compare flow; non-cover cells (which are
+  // ordinary photos in a group) and non-stack cells go to photo-click.
+  if (entry.group?.is_cover) {
+    emit('stack-click', entry)
+  } else {
+    emit('photo-click', entry)
+  }
 }
+
+// ── Public surface for the parent ───────────────────────────────────────────
+defineExpose({
+  updateEntry: source.updateEntry,
+  reload: source.reload,
+})
 </script>
 
 <template>
@@ -173,7 +218,6 @@ function onTap(entry: GalleryGridEntry | null) {
       Keine Fotos vorhanden.
     </div>
 
-    <!-- Virtual scroll spacer: total height = total rows * rowHeight -->
     <div
       v-if="ready && total > 0"
       class="vg-inner"
@@ -198,6 +242,7 @@ function onTap(entry: GalleryGridEntry | null) {
               'vg-cell--hidden': slot.curation === 'hidden',
               'vg-cell--stack': !!slot.group,
               'vg-cell--stack-cover': slot.group?.is_cover,
+              'vg-cell--selected': selectedIds && selectedIds.has(slot.id),
             }"
             :style="{ height: `${cellSize}px` }"
             @click="onTap(slot)"
@@ -223,6 +268,11 @@ function onTap(entry: GalleryGridEntry | null) {
               v-if="slot.curation === 'hidden'"
               class="pi pi-eye-slash vg-hidden-icon"
             />
+            <i
+              v-if="selectMode"
+              class="pi vg-select-icon"
+              :class="selectedIds && selectedIds.has(slot.id) ? 'pi-check-circle' : 'pi-circle'"
+            />
           </button>
           <div
             v-else
@@ -243,7 +293,6 @@ function onTap(entry: GalleryGridEntry | null) {
   overflow-y: auto;
   overflow-x: hidden;
   background: var(--p-content-background, #fff);
-  /* Native scroll on iOS (smooth + momentum). */
   -webkit-overflow-scrolling: touch;
 }
 
@@ -284,15 +333,12 @@ function onTap(entry: GalleryGridEntry | null) {
   cursor: pointer;
   border-radius: 4px;
   overflow: hidden;
-  /* Avoid layout shift while the image decodes. */
   contain: layout paint;
-  /* Eliminate native button focus ring on touch devices. */
   -webkit-tap-highlight-color: transparent;
 }
 
 .vg-cell--skeleton {
   cursor: default;
-  /* Subtle pulse so empty tiles look like loading state, not broken. */
   animation: vg-skeleton-pulse 1.4s ease-in-out infinite;
 }
 
@@ -306,7 +352,6 @@ function onTap(entry: GalleryGridEntry | null) {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  /* Prevent UA from rendering a broken-image icon while decoding. */
   background: var(--p-content-hover-background, #f3f4f6);
 }
 
@@ -332,12 +377,9 @@ function onTap(entry: GalleryGridEntry | null) {
   pointer-events: none;
 }
 
-.vg-hidden-icon {
-  color: rgba(255, 255, 255, 0.85);
-}
+.vg-hidden-icon { color: rgba(255, 255, 255, 0.85); }
 
-/* Stack styling — every group member gets a thin border so the user can
-   see they belong to a stack; only the cover gets the count badge. */
+/* Stack styling */
 .vg-cell--stack {
   outline: 2px solid var(--p-primary-300, #93c5fd);
   outline-offset: -2px;
@@ -358,5 +400,32 @@ function onTap(entry: GalleryGridEntry | null) {
   padding: 2px 6px;
   border-radius: 999px;
   pointer-events: none;
+}
+
+/* Selection */
+.vg-cell--selected {
+  outline: 3px solid var(--p-primary-500, #3b82f6);
+  outline-offset: -3px;
+}
+
+.vg-cell--selected .vg-thumb {
+  opacity: 0.8;
+}
+
+.vg-select-icon {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  font-size: 1.1rem;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 50%;
+  padding: 1px;
+  pointer-events: none;
+}
+
+.vg-cell--selected .vg-select-icon {
+  color: #fff;
+  background: var(--p-primary-500, #3b82f6);
 }
 </style>
