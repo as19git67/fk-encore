@@ -72,7 +72,7 @@ const emit = defineEmits<{
 }>()
 
 const scrollRef = ref<HTMLElement | null>(null)
-const { visiblePhotoIds, setupObserver } = usePhotoLazyLoad('300px 0px')
+const { visiblePhotoIds, setupObserver, observeNewItems } = usePhotoLazyLoad('300px 0px')
 
 // ── Column tracking ──────────────────────────────────────────────────────────
 let resizeObserver: ResizeObserver | null = null
@@ -110,17 +110,33 @@ onUnmounted(() => {
 // defer the observer; otherwise we attach it immediately like before.
 let initialObserverDeferred =
   props.selectedIndex >= 0 && props.groupedPhotos.length > 0
+// Tracks whether the IntersectionObserver has already been attached. Once
+// attached, subsequent `groupedPhotos` updates (e.g. background page-load
+// batches appending photos) only need to register the *newly-added* DOM
+// items via `observeNewItems()` — full `setupObserver` re-runs would clear
+// `visiblePhotoIds` (causing every visible thumbnail to flicker out for
+// ~150 ms) and walk every `[data-photo-id]` element with a forced layout,
+// which on a 45k-photo grid froze the UI for hundreds of ms per batch.
+let observerAttached = false
 
 function maybeSetupObserver(el: HTMLElement) {
   if (initialObserverDeferred) return
   setupObserver(el)
+  observerAttached = true
 }
 
 // ── Re-observe after groupedPhotos changes ───────────────────────────────────
 watch(() => props.groupedPhotos, async () => {
   await nextTick()
   if (scrollRef.value) {
-    maybeSetupObserver(scrollRef.value)
+    if (observerAttached) {
+      // Append-only update (background batch arriving, search-result
+      // filter changing, etc.). Just observe whatever new items appeared
+      // — keep existing observations and the visible set untouched.
+      observeNewItems()
+    } else {
+      maybeSetupObserver(scrollRef.value)
+    }
   }
   updateColumnCount()
 }, { immediate: false })
@@ -177,7 +193,10 @@ function scrollToPhoto(
 function releaseDeferredObserver() {
   if (!initialObserverDeferred) return
   initialObserverDeferred = false
-  if (scrollRef.value) setupObserver(scrollRef.value)
+  if (scrollRef.value) {
+    setupObserver(scrollRef.value)
+    observerAttached = true
+  }
 }
 
 // Initial scroll: use onMounted + setTimeout to ensure DOM is fully laid out
