@@ -1649,13 +1649,141 @@ export function photoIndexEtag(
   return `"${hash}"`;
 }
 
+/**
+ * Locate a single photo's position (0-based) inside the filtered+sorted index
+ * for a user. Returns `null` if the photo does not exist or is filtered out.
+ *
+ * Implementation: rather than running a window function over the full result
+ * set, we count rows that come *before* the target — that lets the planner
+ * use indexes on the sort column instead of materialising a row_number for
+ * every photo. The lexicographic comparison covers the secondary `id`
+ * tie-breaker so two photos sharing the same sort-key value still get a
+ * deterministic position.
+ */
+export async function locatePhotoPosition(
+  userId: number,
+  filter: PhotoFilterParams,
+  photoId: number,
+  sortBy: PhotoIndexSortField,
+  sortDir: "asc" | "desc",
+): Promise<number | null> {
+  const targetRow = await dbFirst<{
+    id: number;
+    sort_key: string | number | null;
+  }>(
+    db
+      .select({ id: photos.id, sort_key: photoSortKeyExpr(sortBy) })
+      .from(photos)
+      .where(and(eq(photos.id, photoId), eq(photos.user_id, userId))),
+  );
+  if (!targetRow) return null;
+
+  const filterConds = buildPhotoFilterConditions(userId, filter);
+  const baseWhere = and(eq(photos.user_id, userId), ...filterConds);
+
+  const targetKey = targetRow.sort_key;
+  const sortKey = photoSortKeyExpr(sortBy);
+
+  // For DESC ordering: a row comes BEFORE the target when its sort_key is
+  // greater, or equal with a greater id. NULL sort keys always sort last
+  // (matches `NULLS LAST` in the ORDER BY), so a row with NULL never
+  // precedes a non-null target, and a NULL target is preceded only by
+  // non-null rows with smaller id.
+  let beforeCondition;
+  if (sortDir === "desc") {
+    if (targetKey === null) {
+      beforeCondition = sql`(${sortKey} IS NOT NULL OR (${sortKey} IS NULL AND ${photos.id} > ${photoId}))`;
+    } else {
+      beforeCondition = sql`(${sortKey} > ${targetKey} OR (${sortKey} = ${targetKey} AND ${photos.id} > ${photoId}))`;
+    }
+  } else {
+    if (targetKey === null) {
+      // Non-null rows precede a null target in ASC order (NULLS LAST).
+      beforeCondition = sql`(${sortKey} IS NOT NULL OR (${sortKey} IS NULL AND ${photos.id} < ${photoId}))`;
+    } else {
+      beforeCondition = sql`(${sortKey} < ${targetKey} OR (${sortKey} = ${targetKey} AND ${photos.id} < ${photoId}))`;
+    }
+  }
+
+  const row = await dbFirst<{ c: number }>(
+    db
+      .select({ c: sql<number>`COUNT(*)::int` })
+      .from(photos)
+      .leftJoin(
+        photoCuration,
+        and(eq(photos.id, photoCuration.photo_id), eq(photoCuration.user_id, userId)),
+      )
+      .where(and(baseWhere, beforeCondition)),
+  );
+  return row?.c ?? 0;
+}
+
+export type PhotoIndexSortField =
+  | "taken_at"
+  | "created_at"
+  | "ai_quality_score"
+  | "filename"
+  | "size";
+
+/**
+ * SQL fragment that produces the sort key value for the requested field. The
+ * caller appends `ASC` / `DESC` itself. NULL handling matches what feels
+ * natural for each field — taken_at falls back to created_at; nullable
+ * scalars (ai_quality_score) sort to the end of the ascending order so a
+ * partially scored library does not push unscored rows to the top.
+ */
+function photoSortKeyExpr(field: PhotoIndexSortField) {
+  switch (field) {
+    case "taken_at":
+      return photoDateOrder;
+    case "created_at":
+      return sql`${photos.created_at}`;
+    case "ai_quality_score":
+      return sql`${photos.ai_quality_score}`;
+    case "filename":
+      return sql`${photos.filename}`;
+    case "size":
+      return sql`${photos.size}`;
+  }
+}
+
+function photoSortOrderBy(field: PhotoIndexSortField, dir: "asc" | "desc") {
+  const key = photoSortKeyExpr(field);
+  // NULLs always last regardless of direction – avoids "all unscored rows
+  // first" when sorting ASC by ai_quality_score on a library that is still
+  // being analysed.
+  const dirSql = dir === "asc" ? sql`ASC NULLS LAST` : sql`DESC NULLS LAST`;
+  // Tie-break on photos.id in the same direction so the ordering is fully
+  // deterministic across pages — without it, OFFSET / LIMIT can return the
+  // same row twice or skip a row on the boundary between pages when several
+  // photos share the same sort-key value.
+  const idDir = dir === "asc" ? sql`ASC` : sql`DESC`;
+  return [sql`${key} ${dirSql}`, sql`${photos.id} ${idDir}`];
+}
+
 export async function listPhotoIndexLogic(
   userId: number,
   filter: PhotoFilterParams = {},
-  pagination: { limit?: number; offset?: number } = {}
+  pagination: {
+    limit?: number;
+    offset?: number;
+    sortBy?: PhotoIndexSortField;
+    sortDir?: "asc" | "desc";
+    /**
+     * If supplied, the server centers the page on this photo: it computes
+     * the photo's position in the filtered+sorted list, then derives an
+     * offset that places the photo near the middle of the returned window.
+     * Ignored when `offset` is also supplied.
+     */
+    aroundPhotoId?: number;
+  } = {}
 ): Promise<ListPhotoIndexResponse> {
   const filterConds = buildPhotoFilterConditions(userId, filter);
   const whereClause = and(eq(photos.user_id, userId), ...filterConds);
+
+  const sortBy: PhotoIndexSortField = pagination.sortBy ?? "taken_at";
+  const sortDir: "asc" | "desc" = pagination.sortDir ?? "desc";
+  const orderBy = photoSortOrderBy(sortBy, sortDir);
 
   // Only run the COUNT(*) when the caller requested a page — otherwise the
   // full-list path keeps its original cost profile (no extra query).
@@ -1672,6 +1800,34 @@ export async function listPhotoIndexLogic(
         .where(whereClause)
     );
     total = countRow?.c ?? 0;
+  }
+
+  // Resolve the page offset. Explicit `offset` wins; otherwise, if
+  // `aroundPhotoId` is set, find the target's position and center a window
+  // of size `limit` on it.
+  let resolvedOffset: number | undefined =
+    pagination.offset !== undefined && pagination.offset > 0
+      ? pagination.offset
+      : undefined;
+
+  if (
+    resolvedOffset === undefined &&
+    pagination.aroundPhotoId !== undefined &&
+    pagination.limit !== undefined &&
+    total !== undefined
+  ) {
+    const pos = await locatePhotoPosition(
+      userId,
+      filter,
+      pagination.aroundPhotoId,
+      sortBy,
+      sortDir,
+    );
+    if (pos !== null) {
+      const half = Math.floor(pagination.limit / 2);
+      const maxOffset = Math.max(0, total - pagination.limit);
+      resolvedOffset = Math.max(0, Math.min(pos - half, maxOffset));
+    }
   }
 
   let query = db
@@ -1693,14 +1849,14 @@ export async function listPhotoIndexLogic(
       and(eq(photos.id, photoCuration.photo_id), eq(photoCuration.user_id, userId))
     )
     .where(whereClause)
-    .orderBy(sql`${photoDateOrder} DESC`)
+    .orderBy(...orderBy)
     .$dynamic();
 
   if (pagination.limit !== undefined) {
     query = query.limit(pagination.limit);
   }
-  if (pagination.offset !== undefined && pagination.offset > 0) {
-    query = query.offset(pagination.offset);
+  if (resolvedOffset !== undefined && resolvedOffset > 0) {
+    query = query.offset(resolvedOffset);
   }
 
   const rows = await dbAll<{
@@ -1724,9 +1880,14 @@ export async function listPhotoIndexLogic(
     auto_crop: r.auto_crop ?? undefined,
   }));
 
-  return total !== undefined
-    ? { photos: result, total }
-    : { photos: result };
+  const response: ListPhotoIndexResponse = { photos: result };
+  if (total !== undefined) response.total = total;
+  if (resolvedOffset !== undefined && resolvedOffset > 0) {
+    response.offset = resolvedOffset;
+  } else if (pagination.limit !== undefined) {
+    response.offset = 0;
+  }
+  return response;
 }
 
 /**

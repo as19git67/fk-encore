@@ -74,6 +74,24 @@ type PhotoFilterQueryParams = {
   limit?: Query<number>;
   /** Number of rows to skip before returning `limit` rows. */
   offset?: Query<number>;
+  /**
+   * Sort field. Valid values: "taken_at" (the default), "created_at",
+   * "ai_quality_score", "filename", "size". Unknown values fall back to
+   * "taken_at" for backward compatibility.
+   */
+  sortBy?: Query<string>;
+  /** Sort direction: "asc" or "desc". Defaults to "desc". */
+  sortDir?: Query<string>;
+  /**
+   * If supplied, the server locates that photo in the filtered+sorted result
+   * and returns a window of size `limit` centered on it (clamped to the
+   * available range). The response then includes `offset`, which is the
+   * position of the first returned photo in the global ordering — the client
+   * can use that to merge pages with surrounding/back-fill requests.
+   *
+   * Ignored if `offset` is also supplied: explicit pagination wins.
+   */
+  aroundPhotoId?: Query<number>;
 };
 
 function toFilterQuery(p: PhotoFilterQueryParams): PhotoFilterQuery {
@@ -283,7 +301,23 @@ function parsePhotoIndexQuery(url: URL): PhotoFilterQueryParams {
     sizeMax: readNum("sizeMax"),
     limit: readNum("limit"),
     offset: readNum("offset"),
+    sortBy: readStr("sortBy"),
+    sortDir: readStr("sortDir"),
+    aroundPhotoId: readNum("aroundPhotoId"),
   };
+}
+
+const VALID_SORT_FIELDS = ["taken_at", "created_at", "ai_quality_score", "filename", "size"] as const;
+type PhotoIndexSortField = (typeof VALID_SORT_FIELDS)[number];
+
+function normalizeSortField(raw: string | undefined): PhotoIndexSortField {
+  return (VALID_SORT_FIELDS as readonly string[]).includes(raw ?? "")
+    ? (raw as PhotoIndexSortField)
+    : "taken_at";
+}
+
+function normalizeSortDir(raw: string | undefined): "asc" | "desc" {
+  return raw === "asc" ? "asc" : "desc";
 }
 
 /**
@@ -335,14 +369,27 @@ export const listPhotoIndex = api.raw(
     const limit = typeof params.limit === "number" && params.limit > 0
       ? Math.min(params.limit, MAX_LIMIT)
       : undefined;
-    const offset = typeof params.offset === "number" && params.offset > 0
+    const explicitOffset = typeof params.offset === "number" && params.offset > 0
       ? params.offset
-      : 0;
+      : undefined;
+    const sortBy = normalizeSortField(params.sortBy);
+    const sortDir = normalizeSortDir(params.sortDir);
+    // aroundPhotoId is only honored when no explicit offset is supplied —
+    // explicit pagination wins so back-fill / append calls remain
+    // deterministic.
+    const aroundPhotoId =
+      explicitOffset === undefined &&
+      typeof params.aroundPhotoId === "number" && params.aroundPhotoId > 0
+        ? params.aroundPhotoId
+        : undefined;
 
     const normalizedKey = serializePhotoIndexKey({
       ...params,
       limit,
-      offset: offset || undefined,
+      offset: explicitOffset,
+      sortBy,
+      sortDir,
+      aroundPhotoId,
     });
 
     // Fingerprint query – cheap aggregated SELECT on the photos table.
@@ -367,7 +414,13 @@ export const listPhotoIndex = api.raw(
       return;
     }
 
-    const payload = await service.listPhotoIndexLogic(userId, filter, { limit, offset });
+    const payload = await service.listPhotoIndexLogic(userId, filter, {
+      limit,
+      offset: explicitOffset,
+      sortBy,
+      sortDir,
+      aroundPhotoId,
+    });
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.statusCode = 200;
     res.end(JSON.stringify(payload));

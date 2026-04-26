@@ -23,7 +23,8 @@ import {
   getPhotoFaces, getPhotoLandmarks, updatePhotoCuration,
   listPhotoGroups, computeFileHash, checkPhotoHash,
   type Photo, type Face, type CurationStatus, type PhotoGroup,
-  type LandmarkItem,
+  type LandmarkItem, type PhotoIndexPagination, type PhotoIndexSortField,
+  type PhotoIndexSortDir,
 } from '../api/photos'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
@@ -45,6 +46,26 @@ const loading = ref(true)
 const uploading = ref(false)
 const uploadAbortController = ref<AbortController | null>(null)
 const error = ref('')
+
+// ── Paginated index loading ──────────────────────────────────────────────────
+// On large libraries (45k+ photos) loading the entire /photos/index in one
+// shot used to ship a 15+ MB JSON over the wire and then sort it in JS.
+// Mobile browsers either timed out on the download or froze for many seconds
+// parsing/sorting, leaving the gallery stuck on "Lade Fotos…". We now load in
+// pages: the first page is centered on the photo we want to scroll to (query
+// param > localStorage > newest), so the user sees something meaningful after
+// a single round trip; remaining pages stream in in the background and append
+// to either side of the loaded window.
+const PHOTO_INDEX_PAGE_SIZE = 2000
+const totalPhotos = ref(0)
+const backgroundLoading = ref(false)
+const backgroundLoadController = ref<AbortController | null>(null)
+
+const backgroundLoadProgress = computed(() =>
+  totalPhotos.value > 0 && photos.value.length < totalPhotos.value
+    ? `${photos.value.length.toLocaleString('de-DE')} / ${totalPhotos.value.toLocaleString('de-DE')} geladen`
+    : ''
+)
 
 // ── Filter state ─────────────────────────────────────────────────────────────
 // Unified filter system replaces the old boolean `showHidden` toggle. The
@@ -182,35 +203,22 @@ async function executeSearch() {
 const searchResultCount = computed(() => searchResultIds.value?.length ?? 0)
 
 // ── Sort & flat photo list (no year/month grouping) ──────────────────────────
-// Photos in `photos.value` are kept in display order: that keeps arrow-key
-// navigation (which steps `selectedIndex` through `photos.value`) aligned with
-// what the user sees. `groupedPhotos` just wraps the list in a single
-// synthetic YearGroup so PhotoGrid's existing contract still works, with the
-// year and month titles both empty so neither renders.
-function compareByField(a: Photo, b: Photo, field: string): number {
-  switch (field) {
-    case 'taken_at':
-      return new Date(a.taken_at || a.created_at).getTime() -
-        new Date(b.taken_at || b.created_at).getTime()
-    case 'created_at':
-      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-    case 'ai_quality_score':
-      return (a.ai_quality_score ?? -Infinity) - (b.ai_quality_score ?? -Infinity)
-    case 'filename':
-      return (a.filename ?? '').localeCompare(b.filename ?? '')
-    case 'size':
-      return (a.size ?? 0) - (b.size ?? 0)
-    default:
-      return 0
-  }
-}
-function sortPhotosByApplied(list: Photo[]): Photo[] {
-  const { field, direction } = sort.value
-  const mult = direction === 'asc' ? 1 : -1
-  return [...list].sort((a, b) => mult * compareByField(a, b, field))
-}
+// Sorting is done server-side via `sortBy` / `sortDir` query params. The grid
+// just renders `photos.value` in the order the server delivered. Changing the
+// sort triggers a fresh paginated load so the new order is consistent across
+// pages — sorting tens of thousands of photos in JS used to lock up mobile
+// browsers for several seconds and produced incorrect results once we started
+// loading the index in chunks (each chunk would be re-sorted with its
+// neighbours, scrambling the global order until every page had arrived).
+//
+// `groupedPhotos` just wraps the list in a single synthetic YearGroup so
+// PhotoGrid's existing contract still works, with the year and month titles
+// both empty so neither renders.
 watch(sort, () => {
-  photos.value = sortPhotosByApplied(photos.value)
+  // Sort changes always invalidate the paginated cache: pages loaded for the
+  // old sort are arranged differently under the new sort, so the only safe
+  // thing is to start over.
+  loadPhotos()
 }, { deep: true })
 
 const groupedPhotos = computed<YearGroup[]>(() => {
@@ -440,66 +448,102 @@ useGalleryKeyboard({
 // Scroll selected photo into view is handled by PhotoGrid internally
 
 // ── Data loading ──────────────────────────────────────────────────────────────
+function currentSortPagination(): {
+  sortBy: PhotoIndexSortField
+  sortDir: PhotoIndexSortDir
+} {
+  return {
+    sortBy: sort.value.field as PhotoIndexSortField,
+    sortDir: sort.value.direction,
+  }
+}
+
+function cancelBackgroundLoad() {
+  backgroundLoadController.value?.abort()
+  backgroundLoadController.value = null
+  backgroundLoading.value = false
+}
+
+/**
+ * Pick the photo we want to land on after the index loads. The query param
+ * wins (it expresses an explicit deep-link), then the previously-selected
+ * photo from localStorage. `null` means "no specific target — show the
+ * library tail" (the natural default for "open the gallery").
+ */
+function pickTargetPhotoId(): { queryPhotoId: number | null; storedPhotoId: number | null } {
+  const q = Number(route.query.photoId)
+  const s = Number(localStorage.getItem(LAST_PHOTO_KEY))
+  return {
+    queryPhotoId: Number.isFinite(q) && q > 0 ? q : null,
+    storedPhotoId: Number.isFinite(s) && s > 0 ? s : null,
+  }
+}
+
 async function loadPhotos() {
+  cancelBackgroundLoad()
   loading.value = true
   error.value = ''
   hydration.reset()
+
+  const { queryPhotoId, storedPhotoId } = pickTargetPhotoId()
+  const targetPhotoId = queryPhotoId ?? storedPhotoId
+
   try {
-    // Stage 1: lightweight index (small payload, fast even with thousands of photos)
+    const pagination: PhotoIndexPagination = {
+      limit: PHOTO_INDEX_PAGE_SIZE,
+      ...currentSortPagination(),
+    }
+    if (targetPhotoId !== null) {
+      pagination.aroundPhotoId = targetPhotoId
+    } else {
+      pagination.offset = 0
+    }
+
+    // Fetch the first page (centered on the target photo) and the
+    // similar-photo groups in parallel — both small and the grid needs both
+    // before it can decide which photo to focus.
     const [indexRes, groupsRes] = await Promise.all([
-      listPhotoIndex(filter.value),
+      listPhotoIndex(filter.value, pagination),
       listPhotoGroups().catch(() => ({ groups: [] })),
     ])
-    photos.value = sortPhotosByApplied(indexRes.photos as Photo[])
+
+    photos.value = indexRes.photos as Photo[]
     photoGroupsList.value = groupsRes.groups
+    totalPhotos.value = indexRes.total ?? indexRes.photos.length
+    const firstOffset = indexRes.offset ?? 0
 
-    // Determine which photo to focus: query param > localStorage > newest
+    // Determine which photo to focus: query param > localStorage > newest.
+    // Note: with pagination the target photo is now reliably IN the loaded
+    // window because the server centers the page on it.
     let targetIdx = -1
-
-    const queryPhotoId = Number(route.query.photoId)
-    const storedPhotoId = Number(localStorage.getItem(LAST_PHOTO_KEY))
-
-    console.log('[PhotosView] loadPhotos: queryPhotoId=', queryPhotoId, 'storedPhotoId=', storedPhotoId, 'photosCount=', photos.value.length)
-
-    if (queryPhotoId) {
+    if (queryPhotoId !== null) {
       targetIdx = photos.value.findIndex(p => p.id === queryPhotoId && !hiddenByStack.value.has(p.id))
-      console.log('[PhotosView] queryPhotoId targetIdx=', targetIdx)
       router.replace({ query: { ...route.query, photoId: undefined } })
     }
-
-    if (targetIdx < 0 && storedPhotoId) {
+    if (targetIdx < 0 && storedPhotoId !== null) {
       targetIdx = photos.value.findIndex(p => p.id === storedPhotoId && !hiddenByStack.value.has(p.id))
-      console.log('[PhotosView] storedPhotoId targetIdx=', targetIdx)
     }
-
     if (targetIdx < 0 && photos.value.length > 0) {
-      // Fallback: neuestes sichtbares Foto
+      // Fallback: last (newest) visible photo in the loaded window. With ASC
+      // sort by date the newest sits at the end of the array.
       const lastVisible = [...photos.value].reverse().findIndex(p => !hiddenByStack.value.has(p.id))
       targetIdx = lastVisible >= 0 ? photos.value.length - 1 - lastVisible : photos.value.length - 1
-      console.log('[PhotosView] fallback targetIdx=', targetIdx)
     }
 
     const isMobile = window.innerWidth <= 768
-    console.log('[PhotosView] isMobile=', isMobile, 'final targetIdx=', targetIdx)
-
-    // On mobile: only skip pre-selection if there's no explicit target (query param or stored)
-    if (isMobile && !queryPhotoId && !storedPhotoId) {
+    if (isMobile && queryPhotoId === null && storedPhotoId === null) {
       selectedIndex.value = -1
     } else {
       selectedIndex.value = targetIdx
     }
-    console.log('[PhotosView] selectedIndex set to', selectedIndex.value)
 
-    // Now reveal the grid (PhotoGrid will mount with correct selectedIndex)
     loading.value = false
 
-    // Stage 2: hydrating the focused photo is handled by the watcher on
-    // selectedPhoto.id above — assigning selectedIndex (from -1 to targetIdx)
-    // fires it. A full-library background hydration used to start here, but
-    // on large libraries (45k+ photos) with a loaded server that fired
-    // hundreds of /photos/details batches which could hang and blow up
-    // browser memory. Heavy fields are now fetched on demand — when the user
-    // selects a photo, opens the compare view, or runs a search.
+    // Background: fill in the rest of the library, expanding outward from
+    // the loaded window. Aborts any previous run automatically.
+    if (photos.value.length < totalPhotos.value) {
+      void runBackgroundLoad(firstOffset, photos.value.length)
+    }
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Fotos'
     loading.value = false
@@ -507,19 +551,134 @@ async function loadPhotos() {
 }
 
 async function reloadPhotosInPlace() {
+  // Curation refresh: keep the user's view stable. We center the new first
+  // page on whatever photo they were on (or had stored) so the cursor stays
+  // close to its old position even if photos disappeared / reordered.
+  cancelBackgroundLoad()
+  const focusedId = selectedPhoto.value?.id ?? null
+  const { queryPhotoId, storedPhotoId } = pickTargetPhotoId()
+  const targetId = focusedId ?? queryPhotoId ?? storedPhotoId
+
   try {
+    const pagination: PhotoIndexPagination = {
+      limit: PHOTO_INDEX_PAGE_SIZE,
+      ...currentSortPagination(),
+    }
+    if (targetId !== null) pagination.aroundPhotoId = targetId
+    else pagination.offset = 0
+
     const [indexRes, groupsRes] = await Promise.all([
-      listPhotoIndex(filter.value),
+      listPhotoIndex(filter.value, pagination),
       listPhotoGroups().catch(() => ({ groups: [] })),
     ])
+
     hydration.reset()
-    photos.value = sortPhotosByApplied(indexRes.photos as Photo[])
+    photos.value = indexRes.photos as Photo[]
     photoGroupsList.value = groupsRes.groups
+    totalPhotos.value = indexRes.total ?? indexRes.photos.length
+    const firstOffset = indexRes.offset ?? 0
+
+    // Re-anchor the selection on the same photo by ID. If it was removed by
+    // the curation action, fall back to the nearest visible photo.
+    if (focusedId !== null) {
+      const idx = photos.value.findIndex(p => p.id === focusedId)
+      selectedIndex.value = idx >= 0 ? idx : Math.min(selectedIndex.value, photos.value.length - 1)
+    }
     if (selectedIndex.value >= 0) {
       const focused = photos.value[selectedIndex.value]
       if (focused) hydration.ensureLoaded([focused.id])
     }
+
+    if (photos.value.length < totalPhotos.value) {
+      void runBackgroundLoad(firstOffset, photos.value.length)
+    }
   } catch { /* silently fail */ }
+}
+
+/**
+ * Walks outward from the loaded window, alternating one page on the right
+ * (older / further-along in the sort) and one page on the left (newer /
+ * earlier). Each batch is appended to `photos.value` and the selection is
+ * remapped by ID so arrow-key navigation and the sidebar stay locked onto
+ * the same photo while the library streams in.
+ */
+async function runBackgroundLoad(firstOffset: number, firstLen: number) {
+  const ctrl = new AbortController()
+  backgroundLoadController.value = ctrl
+  backgroundLoading.value = true
+
+  let loadedFrom = firstOffset
+  let loadedTo = firstOffset + firstLen
+  const total = totalPhotos.value
+  const sortPag = currentSortPagination()
+  const filterValue = filter.value
+
+  try {
+    while (!ctrl.signal.aborted && (loadedFrom > 0 || loadedTo < total)) {
+      // Right side first — when the page is centered on a target photo
+      // and the user scrolled to it, the visually-adjacent unloaded
+      // section in ASC sort lies to the right (older photos sit to the
+      // right after re-sorting? — actually with backend ORDER BY ASC the
+      // returned rows go old → new, so "right" is "newer". Either way
+      // both sides need filling and stripe loading keeps it balanced).
+      if (loadedTo < total && !ctrl.signal.aborted) {
+        const res = await listPhotoIndex(
+          filterValue,
+          { ...sortPag, limit: PHOTO_INDEX_PAGE_SIZE, offset: loadedTo },
+          { signal: ctrl.signal },
+        )
+        if (ctrl.signal.aborted) return
+        if (res.photos.length === 0) {
+          loadedTo = total
+        } else {
+          appendPhotos(res.photos as Photo[], 'right')
+          loadedTo += res.photos.length
+        }
+      }
+      if (loadedFrom > 0 && !ctrl.signal.aborted) {
+        const newOffset = Math.max(0, loadedFrom - PHOTO_INDEX_PAGE_SIZE)
+        const limit = loadedFrom - newOffset
+        const res = await listPhotoIndex(
+          filterValue,
+          { ...sortPag, limit, offset: newOffset },
+          { signal: ctrl.signal },
+        )
+        if (ctrl.signal.aborted) return
+        if (res.photos.length === 0) {
+          loadedFrom = 0
+        } else {
+          appendPhotos(res.photos as Photo[], 'left')
+          loadedFrom = newOffset
+        }
+      }
+    }
+  } catch (e: any) {
+    if (e?.name !== 'AbortError') {
+      console.warn('[PhotosView] background page load failed', e)
+    }
+  } finally {
+    if (backgroundLoadController.value === ctrl) {
+      backgroundLoadController.value = null
+      backgroundLoading.value = false
+    }
+  }
+}
+
+function appendPhotos(newPhotos: Photo[], side: 'left' | 'right') {
+  if (newPhotos.length === 0) return
+  // Capture the currently selected photo's ID so we can re-anchor the
+  // selection by ID after the array grows — otherwise `selectedIndex` would
+  // drift (left-side prepends shift every existing photo's index).
+  const selectedId = selectedPhoto.value?.id ?? null
+  if (side === 'right') {
+    photos.value = photos.value.concat(newPhotos)
+  } else {
+    photos.value = newPhotos.concat(photos.value)
+  }
+  if (selectedId !== null) {
+    const idx = photos.value.findIndex(p => p.id === selectedId)
+    if (idx >= 0 && idx !== selectedIndex.value) selectedIndex.value = idx
+  }
 }
 
 // ── Curation ──────────────────────────────────────────────────────────────────
@@ -831,6 +990,7 @@ onUnmounted(() => {
   serviceHealth.stopPolling()
   if (uploadResultTimeout) clearTimeout(uploadResultTimeout)
   hydration.cancel()
+  cancelBackgroundLoad()
 })
 
 // Refresh in place when another participant favourites or hides a
@@ -998,6 +1158,13 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
     <div v-if="uploadResultMessage && !uploading" class="upload-result-bar">
       <i class="pi pi-check-circle" />
       <span>{{ uploadResultMessage }}</span>
+    </div>
+
+    <!-- Background page-load progress (shown while the rest of the index is
+         streaming in after the first page has been rendered) -->
+    <div v-if="!loading && backgroundLoading && backgroundLoadProgress" class="bg-load-bar">
+      <i class="pi pi-spin pi-spinner" />
+      <span>Weitere Fotos werden geladen: {{ backgroundLoadProgress }}</span>
     </div>
 
     <div v-if="!uploading && loading" class="info-text">Lade Fotos…</div>
@@ -1216,6 +1383,17 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
   color: var(--p-green-700);
   font-size: 0.875rem;
   animation: upload-result-fade-in 0.3s ease;
+}
+
+.bg-load-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 1rem;
+  background: var(--p-content-hover-background);
+  border-bottom: 1px solid var(--p-content-border-color);
+  color: var(--p-text-muted-color);
+  font-size: 0.8rem;
 }
 .upload-result-bar .pi-check-circle {
   color: var(--p-green-500);

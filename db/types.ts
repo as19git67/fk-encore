@@ -627,6 +627,14 @@ export interface ListPhotoIndexResponse {
    * existing clients do not pay the COUNT(*) cost.
    */
   total?: number;
+  /**
+   * Position (0-based) of the first returned photo within the filtered+sorted
+   * result set. Only set when the request supplied a `limit`. Together with
+   * `total` and the returned `photos.length` this lets a paging client merge
+   * non-contiguous pages (e.g. one centered on a target photo plus background
+   * back-fill calls) into a stable ordered array.
+   */
+  offset?: number;
 }
 
 export interface PhotoDetailsBatchResponse {

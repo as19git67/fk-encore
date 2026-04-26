@@ -56,6 +56,32 @@ export interface PhotoIndexEntry {
 
 export interface ListPhotoIndexResponse {
   photos: PhotoIndexEntry[]
+  /** Total rows matching the filter, only set when the request supplied a limit. */
+  total?: number
+  /** 0-based position of the first returned photo, only set when the request supplied a limit. */
+  offset?: number
+}
+
+export type PhotoIndexSortField =
+  | 'taken_at'
+  | 'created_at'
+  | 'ai_quality_score'
+  | 'filename'
+  | 'size'
+
+export type PhotoIndexSortDir = 'asc' | 'desc'
+
+export interface PhotoIndexPagination {
+  limit?: number
+  offset?: number
+  /**
+   * If supplied, the server centers the returned page on this photo (the
+   * page's offset is computed so the photo sits near the middle of the
+   * returned `limit` window). Ignored if `offset` is also supplied.
+   */
+  aroundPhotoId?: number
+  sortBy?: PhotoIndexSortField
+  sortDir?: PhotoIndexSortDir
 }
 
 export interface PhotoDetailsBatchResponse {
@@ -144,9 +170,29 @@ export function listPhotos(filter?: PhotoFilter | boolean) {
  * grid (id, filename, dates, curation_status, auto_crop). Use this for the
  * initial gallery load, then call `getPhotoDetailsBatch` to hydrate the
  * heavy fields (location, GPS, AI quality, description) on demand.
+ *
+ * The optional `pagination` argument enables server-side ordering and
+ * windowed loading. With a `limit` set the response also includes `total`
+ * and `offset`, which together let a client merge non-contiguous pages
+ * (e.g. a first page centered on a previously-selected photo plus
+ * background back-fill calls covering the rest of the library).
  */
-export function listPhotoIndex(filter?: PhotoFilter | boolean) {
-  return apiFetch<ListPhotoIndexResponse>(`/photos/index${buildPhotoFilterQuery(filter)}`)
+export function listPhotoIndex(
+  filter?: PhotoFilter | boolean,
+  pagination?: PhotoIndexPagination,
+  options?: { signal?: AbortSignal },
+) {
+  const filterQs = buildPhotoFilterQuery(filter)
+  const sep = filterQs ? '&' : '?'
+  const extra = new URLSearchParams()
+  if (pagination?.limit !== undefined) extra.set('limit', String(pagination.limit))
+  if (pagination?.offset !== undefined) extra.set('offset', String(pagination.offset))
+  if (pagination?.aroundPhotoId !== undefined) extra.set('aroundPhotoId', String(pagination.aroundPhotoId))
+  if (pagination?.sortBy) extra.set('sortBy', pagination.sortBy)
+  if (pagination?.sortDir) extra.set('sortDir', pagination.sortDir)
+  const extraQs = extra.toString()
+  const path = `/photos/index${filterQs}${extraQs ? sep + extraQs : ''}`
+  return apiFetch<ListPhotoIndexResponse>(path, { signal: options?.signal })
 }
 
 /**
