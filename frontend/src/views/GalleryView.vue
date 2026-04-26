@@ -1,28 +1,34 @@
 <script setup lang="ts">
 /**
- * Greenfield virtualized photo gallery — Phase 3a.
+ * Greenfield virtualized photo gallery — Phase 3b.
  *
- * Builds on Phase 2 (filter / sort / search / selection / curation / upload /
- * stack-compare around `<VirtualGallery>`) by adding the fullscreen viewer
- * with prev/next navigation and `?photoId=` deeplinks.
+ * Builds on Phase 3a (fullscreen + photoId deeplink) by adding the
+ * `<PhotoDetailSidebar>` flyout: detected faces with person names,
+ * landmarks, EXIF date editing, album membership, keywords, file
+ * metadata. The sidebar self-manages its album section (lazy-fetches
+ * the album list, owns pending changes, calls the batch-update API on
+ * save), so the parent only needs to feed it the per-photo state
+ * (faces, landmarks, edit-date refs) and the auth-derived booleans.
  *
- * Fullscreen flow:
- *   - Tapping a non-stack cell calls `openFullscreenAt(index)`.
- *   - We `loadEntryAt` the current + neighbour indexes (sparse-aware: awaits
- *     a page fetch if a slot is still null), then hydrate the three to full
- *     `Photo` shape via a single `getPhotoDetailsBatch` call.
- *   - Prev/next mutates the index and re-runs hydrate; FullscreenOverlay
- *     handles its own ←/→/Esc keyboard listeners. The grid scrolls along so
- *     closing the overlay leaves the user centered on the last-viewed photo.
- *   - A `?photoId=X` deeplink seeds both `aroundPhotoId` (so the grid
- *     centers on it) and an auto-fullscreen-on-load step. A bare
- *     LAST_PHOTO_KEY restore only re-centers the grid; it does NOT pop
- *     fullscreen open on every app refresh.
+ * Detail flyout flow:
+ *   - The `I` keyboard shortcut and the ⓘ toolbar button toggle
+ *     `detailsActive`. FullscreenOverlay slots the sidebar into its
+ *     `details-flyout` slot; the flyout's open/closed CSS class is
+ *     driven by the same boolean.
+ *   - When `fullscreenPhoto.id` changes (open / prev / next), we load
+ *     faces + landmarks for that photo in parallel with the existing
+ *     `getPhotoDetailsBatch` hydration. Loaders are guarded by the
+ *     same `hydrateToken` so out-of-order navigation can't strand a
+ *     stale list of faces on the wrong photo.
+ *   - Edit-date is parent-owned: the sidebar emits `start-edit-date`,
+ *     `update-date`, `cancel-edit-date`; the parent flips the refs
+ *     and calls `updatePhotoDate`, then mutates `fullscreenPhoto` in
+ *     place so the topbar's date label updates immediately.
  *
- * Deliberately still missing (Phase 3 slice 2):
- *   - PhotoDetailSidebar (faces, landmarks, edit-date, album mgmt)
+ * Deliberately still missing (Phase 3 slice 3):
  *   - ↑/↓ keyboard nav across grid rows
- *   - Routing FeedView / PersonsView / PhotoLocationMenu deeplinks here
+ *   - Switching FeedView / PersonsView / PhotoLocationMenu deeplinks
+ *     to the new gallery and removing "Galerie alt" from the menu
  */
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -36,10 +42,13 @@ import SortMenu from '../components/SortMenu.vue'
 import NaturalSearchBar from '../components/NaturalSearchBar.vue'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
+import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import { useFilter } from '../composables/useFilter'
 import { useSort, type SortField, type SortState } from '../composables/useSort'
 import { useNaturalSearch } from '../composables/useNaturalSearch'
+import { useReferenceData } from '../composables/useReferenceData'
 import { useAuthStore } from '../stores/auth'
+import { useServiceHealthStore } from '../stores/serviceHealth'
 import {
   type GalleryGridEntry,
   type GallerySortDir,
@@ -52,17 +61,28 @@ import {
   checkPhotoHash,
   uploadPhotoWithProgress,
   getPhotoDetailsBatch,
+  getPhotoFaces,
+  getPhotoLandmarks,
+  ignoreFace,
+  reindexPhoto,
+  updatePhotoDate,
   type Photo,
   type PhotoGroup,
   type CurationStatus,
+  type Face,
+  type LandmarkItem,
 } from '../api/photos'
 
 const auth = useAuthStore()
+const serviceHealth = useServiceHealthStore()
 const route = useRoute()
 const router = useRouter()
+const { persons, fetchPersons } = useReferenceData()
+void fetchPersons() // module-cached; no-op on subsequent visits
 
 const canUpload = computed(() => auth.hasPermission('photos.upload'))
 const canDelete = computed(() => auth.hasPermission('photos.delete'))
+const showPersons = computed(() => auth.hasPermission('people.view'))
 
 // Reuse the legacy view's localStorage key so users keep their
 // last-selected position across both gallery implementations.
@@ -451,6 +471,43 @@ const fullscreenPrev = ref<Photo | null>(null)
 const fullscreenNext = ref<Photo | null>(null)
 let hydrateToken = 0
 
+// ── Detail flyout state ─────────────────────────────────────────────────────
+// Per-photo metadata loaded on top of the batch-hydrated `Photo`. Faces and
+// landmarks are not part of the bulk details endpoint — they're fetched per
+// photo when the sidebar opens (or the user advances to a neighbour). The
+// `hydrateToken` from above gates these loaders too so a stale fetch from
+// the previous photo can't overwrite the current one's lists.
+const detailsActive = ref(false)
+const detectedFaces = ref<Face[]>([])
+const loadingFaces = ref(false)
+const detectedLandmarks = ref<LandmarkItem[]>([])
+const loadingLandmarks = ref(false)
+const reindexingPhoto = ref(false)
+const isEditingDate = ref(false)
+const editDate = ref<Date | null>(null)
+const updatingDate = ref(false)
+
+async function loadFacesAndLandmarks(photoId: number, token: number): Promise<void> {
+  loadingFaces.value = true
+  loadingLandmarks.value = true
+  detectedFaces.value = []
+  detectedLandmarks.value = []
+  try {
+    const [facesRes, landmarksRes] = await Promise.all([
+      getPhotoFaces(photoId).catch(() => ({ faces: [] })),
+      getPhotoLandmarks(photoId).catch(() => ({ landmarks: [] })),
+    ])
+    if (token !== hydrateToken) return
+    detectedFaces.value = facesRes.faces ?? []
+    detectedLandmarks.value = landmarksRes.landmarks ?? []
+  } finally {
+    if (token === hydrateToken) {
+      loadingFaces.value = false
+      loadingLandmarks.value = false
+    }
+  }
+}
+
 // Synthesize a minimal Photo from the grid entry. Used as a fallback when
 // `getPhotoDetailsBatch` fails or returns nothing for an id — at least the
 // overlay can still show the image and the curation icon. Date / location
@@ -492,6 +549,13 @@ async function hydrateFullscreen(index: number): Promise<void> {
   fullscreenPrev.value = prevEntry ? entryToMinimalPhoto(prevEntry) : null
   fullscreenNext.value = nextEntry ? entryToMinimalPhoto(nextEntry) : null
 
+  // Cancel any in-progress date edit when the photo changes.
+  isEditingDate.value = false
+
+  // Faces / landmarks fire in parallel with the details batch — they hit
+  // separate endpoints and the sidebar can render each independently.
+  void loadFacesAndLandmarks(curEntry.id, myToken)
+
   const ids = [curEntry.id]
   if (prevEntry) ids.push(prevEntry.id)
   if (nextEntry) ids.push(nextEntry.id)
@@ -525,6 +589,10 @@ function closeFullscreen() {
   fullscreenPhoto.value = null
   fullscreenPrev.value = null
   fullscreenNext.value = null
+  detailsActive.value = false
+  isEditingDate.value = false
+  detectedFaces.value = []
+  detectedLandmarks.value = []
 }
 
 async function goPrev(): Promise<void> {
@@ -571,6 +639,62 @@ function onFullscreenHide(id: number) {
 }
 function onFullscreenRestore(id: number) {
   void applyCurationToPhoto(id, 'visible')
+}
+
+function onShowDetails() {
+  detailsActive.value = !detailsActive.value
+}
+
+// ── Sidebar handlers (date edit, faces, reindex) ────────────────────────────
+function onSidebarStartEditDate() {
+  const photo = fullscreenPhoto.value
+  if (!photo) return
+  editDate.value = new Date(photo.taken_at || photo.created_at)
+  isEditingDate.value = true
+}
+
+async function onSidebarUpdateDate() {
+  const photo = fullscreenPhoto.value
+  if (!photo || !editDate.value) return
+  updatingDate.value = true
+  try {
+    const takenAt = editDate.value.toISOString()
+    await updatePhotoDate(photo.id, takenAt)
+    // Mutate the displayed photo so the topbar's date label reflects the new
+    // value immediately. The sort order in the grid may now be stale; that's
+    // acceptable until the next reload (filter / sort / search change).
+    fullscreenPhoto.value = { ...photo, taken_at: takenAt }
+    isEditingDate.value = false
+  } catch (err: any) {
+    error.value = err?.message ?? 'Fehler beim Aktualisieren des Datums.'
+  } finally {
+    updatingDate.value = false
+  }
+}
+
+function onSidebarCancelEditDate() {
+  isEditingDate.value = false
+}
+
+async function onSidebarIgnoreFace(faceId: number) {
+  const photo = fullscreenPhoto.value
+  if (!photo) return
+  try {
+    await ignoreFace(faceId)
+    // Reload faces so the ignored one disappears from the list.
+    await loadFacesAndLandmarks(photo.id, hydrateToken)
+  } catch { /* keep silent — user can retry */ }
+}
+
+async function onSidebarReindex() {
+  const photo = fullscreenPhoto.value
+  if (!photo) return
+  reindexingPhoto.value = true
+  try {
+    await reindexPhoto(photo.id)
+    await loadFacesAndLandmarks(photo.id, hydrateToken)
+  } catch { /* user can retry */ }
+  finally { reindexingPhoto.value = false }
 }
 
 // ── Photo click → open fullscreen ───────────────────────────────────────────
@@ -778,22 +902,57 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
       @next="onCompareNext"
     />
 
-    <!-- Fullscreen viewer (Phase 3a — no detail sidebar yet, so the I/info
-         button is hidden via :show-details-button="false") -->
+    <!-- Fullscreen viewer with detail-sidebar flyout. The ⓘ button (and the
+         I keyboard shortcut) toggle `detailsActive`, which both flips the
+         icon's active styling on the toolbar AND drives the slide-in
+         animation of the flyout via FullscreenOverlay's CSS. The sidebar
+         itself self-manages its album section (lazy-loads albums, owns
+         pending changes); we only feed it the per-photo state. -->
     <FullscreenOverlay
       v-if="isFullscreen && fullscreenPhoto"
       :photo="fullscreenPhoto"
       :prev-photo="fullscreenPrev"
       :next-photo="fullscreenNext"
       :can-delete="canDelete"
-      :show-details-button="false"
+      :details-active="detailsActive"
       @close="closeFullscreen"
       @prev="goPrev"
       @next="goNext"
       @toggle-favorite="onFullscreenToggleFavorite"
       @hide="onFullscreenHide"
       @restore="onFullscreenRestore"
-    />
+      @show-details="onShowDetails"
+    >
+      <template #details-flyout>
+        <PhotoDetailSidebar
+          :photo="fullscreenPhoto"
+          :faces="detectedFaces"
+          :loading-faces="loadingFaces"
+          :landmarks="detectedLandmarks"
+          :loading-landmarks="loadingLandmarks"
+          :persons="persons"
+          :can-delete="canDelete"
+          :can-upload="canUpload"
+          :reindexing-photo="reindexingPhoto"
+          :is-editing-date="isEditingDate"
+          v-model:editDate="editDate"
+          :updating-date="updatingDate"
+          :show-persons="showPersons"
+          :limit-albums-shown="true"
+          :face-service-available="serviceHealth.faceServiceAvailable"
+          :location-menu-exclude-all-photos="true"
+          :in-flyout="true"
+          @toggle-favorite="onFullscreenToggleFavorite"
+          @hide="onFullscreenHide"
+          @restore="onFullscreenRestore"
+          @start-edit-date="onSidebarStartEditDate"
+          @update-date="onSidebarUpdateDate"
+          @cancel-edit-date="onSidebarCancelEditDate"
+          @ignore-face="onSidebarIgnoreFace"
+          @reindex="onSidebarReindex"
+        />
+      </template>
+    </FullscreenOverlay>
 
     <!-- Selection action bar (mobile + desktop) -->
     <div v-if="selectMode" class="select-bar">
