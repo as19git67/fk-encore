@@ -70,8 +70,8 @@ export const modules: ModuleConfig[] = [
       },
     ],
     menuItems: [
-      { label: 'Galerie', icon: 'pi pi-images', routeName: 'fotos-gallery', permission: 'photos.view' },
-      { label: 'Galerie (neu)', icon: 'pi pi-th-large', routeName: 'fotos-gallery-v2', permission: 'photos.view' },
+      { label: 'Galerie', icon: 'pi pi-images', routeName: 'fotos-gallery-v2', permission: 'photos.view' },
+      { label: 'Galerie alt', icon: 'pi pi-th-large', routeName: 'fotos-gallery', permission: 'photos.view' },
       { label: 'Alben', icon: 'pi pi-folder-open', routeName: 'fotos-albums', permission: 'photos.view' },
       { label: 'Feed', icon: 'pi pi-bell', routeName: 'fotos-feed', permission: 'photos.view' },
       { label: 'Rückblicke', icon: 'pi pi-history', routeName: 'fotos-recaps', permission: 'photos.view' },

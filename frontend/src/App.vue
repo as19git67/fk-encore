@@ -140,9 +140,12 @@ body {
   z-index: 1100;
 }
 
-@media (max-width: 640px) {
+/* On phones (and the PrimeVue menubar's mobile collapse breakpoint) hide the
+ * user name and strip Profil / Abmelden buttons down to icon-only so the
+ * top bar fits without horizontal scroll on a 360–414 px viewport.
+ * 768 px matches the rest of the app's mobile breakpoint. */
+@media (max-width: 768px) {
   .user-name { display: none; }
-  /* Nur Icons in der Menü-Leiste */
   .menu-end :deep(.p-button-label) { display: none; }
   .menu-end :deep(.p-button) { padding: 0.5rem; }
 }
