@@ -5,10 +5,16 @@
  * <100 ms. Fallback path (text layer empty or too short): rasterize
  * pages with `pdftoppm` and run `tesseract` (deu+eng) over the PNGs.
  *
- * Both external binaries (`pdftoppm` from poppler-utils, `tesseract`
- * from tesseract-ocr) are expected to be present in the backend
- * container image — see `docker-compose.yml` for the `apt-get install`
- * line.
+ * When either `pdf-parse` or `pdftoppm` rejects the file as broken
+ * (missing trailer dictionary / unreadable xref — common for PDFs
+ * truncated in transit or assembled by buggy scanners), we attempt a
+ * one-shot repair pass through `qpdf` which rewrites the file with a
+ * fresh cross-reference table, then retry the failing step.
+ *
+ * The external binaries (`pdftoppm` from poppler-utils, `tesseract`
+ * from tesseract-ocr, `qpdf`) are expected to be present in the
+ * backend container image — see `docker/Dockerfile.runtime` for the
+ * `apt-get install` line.
  *
  * Kept deliberately small: it returns the raw text and lets the caller
  * decide what to do. No JSON, no metadata — classification happens in
@@ -159,14 +165,19 @@ export async function extractPdfText(
 
   let textLayer = "";
   let pageCount = 0;
+  let pdfParseBrokenXref = false;
   try {
     const parsed = await pdfParseQuiet(buffer);
     textLayer = stripNulBytes((parsed.text ?? "").trim());
     pageCount = parsed.numpages ?? 0;
   } catch (err) {
     // pdf-parse throws on malformed PDFs; treat as "no text layer" and
-    // fall through to OCR.
-    console.warn(`[documents.text-extract] pdf-parse failed: ${(err as Error).message}`);
+    // fall through to OCR. Remember whether the failure smells like a
+    // broken xref so the OCR path can repair the file up front instead
+    // of paying for a pdftoppm round-trip that's certain to fail.
+    const msg = (err as Error).message;
+    pdfParseBrokenXref = looksLikeBrokenXref(msg);
+    console.warn(`[documents.text-extract] pdf-parse failed: ${msg}`);
   }
 
   const textLayerLooksGood =
@@ -184,7 +195,7 @@ export async function extractPdfText(
     );
   }
 
-  const ocrText = await ocrPdf(absPath);
+  const ocrText = await ocrPdf(absPath, { repairFirst: pdfParseBrokenXref });
 
   // When we intentionally skipped a usable-length text layer (forceOcr
   // or poor spacing), prefer the OCR result outright and don't pollute
@@ -210,11 +221,46 @@ export async function extractPdfText(
  * OCR every page of a PDF by rasterizing with pdftoppm and feeding the
  * PNGs to tesseract. Concatenates the page texts with blank lines in
  * between so tesseract sentence boundaries survive the join.
+ *
+ * When `repairFirst` is true (set by the caller after pdf-parse already
+ * rejected the file as having a broken xref), we run qpdf eagerly so
+ * pdftoppm doesn't have to fail first.
  */
-async function ocrPdf(absPath: string): Promise<string> {
+async function ocrPdf(
+  absPath: string,
+  options: { repairFirst?: boolean } = {},
+): Promise<string> {
   const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "fk-docscan-"));
   try {
-    await runPdftoppm(absPath, path.join(tmpDir, "page"));
+    let pdfPath = absPath;
+    if (options.repairFirst) {
+      const repaired = await repairPdf(pdfPath, tmpDir);
+      if (repaired) pdfPath = repaired;
+    }
+
+    try {
+      await runPdftoppm(pdfPath, path.join(tmpDir, "page"));
+    } catch (err) {
+      // Many scanners and online tools emit PDFs whose cross-reference
+      // table is missing or truncated. poppler refuses to recover, but
+      // qpdf rebuilds a valid xref. Only retry once, and only when the
+      // failure signature matches — anything else (e.g. a missing
+      // pdftoppm binary, encrypted PDFs) falls straight through.
+      if (pdfPath === absPath && looksLikeBrokenXref((err as Error).message)) {
+        const repaired = await repairPdf(pdfPath, tmpDir);
+        if (repaired) {
+          console.log(
+            `[documents.text-extract] pdftoppm rejected broken xref — retrying after qpdf repair`,
+          );
+          pdfPath = repaired;
+          await runPdftoppm(pdfPath, path.join(tmpDir, "page"));
+        } else {
+          throw err;
+        }
+      } else {
+        throw err;
+      }
+    }
 
     const entries = (await fs.promises.readdir(tmpDir))
       .filter((n) => n.toLowerCase().endsWith(".png"))
@@ -264,6 +310,59 @@ function runPdftoppm(pdfPath: string, outPrefix: string): Promise<void> {
     proc.on("close", (code) => {
       if (code === 0) resolve();
       else reject(new Error(`pdftoppm exited ${code}: ${stderr.trim()}`));
+    });
+  });
+}
+
+/**
+ * Stderr signatures that mean poppler (or pdf.js inside pdf-parse)
+ * gave up because the cross-reference table or trailer is unreadable.
+ * These are recoverable by `qpdf` in the vast majority of cases.
+ *
+ * Exported for unit testing.
+ */
+export function looksLikeBrokenXref(stderr: string): boolean {
+  if (!stderr) return false;
+  return /Couldn't find trailer dictionary|Couldn't read xref table|Catalog object is wrong type|May not be a PDF file|Invalid XRef|FormatError: Bad \(uncompressed\) XRef/i.test(
+    stderr,
+  );
+}
+
+/**
+ * Rewrite `srcPath` through qpdf so a broken xref/trailer is rebuilt.
+ * Returns the repaired file path, or null when qpdf is unavailable or
+ * also fails on the input (in which case the caller should propagate
+ * the original poppler/pdf-parse error rather than masking it).
+ */
+function repairPdf(srcPath: string, tmpDir: string): Promise<string | null> {
+  const dst = path.join(tmpDir, "repaired.pdf");
+  return new Promise((resolve) => {
+    const proc = spawn(
+      "qpdf",
+      ["--warning-exit-0", srcPath, dst],
+      { stdio: ["ignore", "ignore", "pipe"] },
+    );
+    let stderr = "";
+    proc.stderr.on("data", (d) => {
+      stderr += d.toString();
+    });
+    proc.on("error", (err) => {
+      // ENOENT: qpdf missing from the image. Don't crash the worker —
+      // surface the original failure to the caller instead.
+      console.warn(
+        `[documents.text-extract] qpdf unavailable for repair: ${err.message}`,
+      );
+      resolve(null);
+    });
+    proc.on("close", (code) => {
+      if (code === 0) {
+        resolve(dst);
+      } else {
+        console.warn(
+          `[documents.text-extract] qpdf repair exited ${code}: ${stderr.trim()}`,
+        );
+        resolve(null);
+      }
     });
   });
 }

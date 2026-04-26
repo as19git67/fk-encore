@@ -24,7 +24,7 @@ import { DuplicateDocumentError } from "./import";
 import { SUPPORTED_EXTENSIONS } from "./documents.service";
 import { reciprocalRankFusion, type SearchHit } from "./search";
 import { chunkText } from "./document-ops";
-import { hasPoorSpacing } from "./text-extract";
+import { hasPoorSpacing, looksLikeBrokenXref } from "./text-extract";
 
 describe("documents.service", () => {
   it("guessExtension prefers the filename extension for supported types", () => {
@@ -317,6 +317,41 @@ describe("documents.text-extract hasPoorSpacing", () => {
     }
     const text = chunks.join("\n");
     expect(hasPoorSpacing(text)).toBe(true);
+  });
+});
+
+describe("documents.text-extract looksLikeBrokenXref", () => {
+  it("matches the poppler signature seen in production", () => {
+    // Verbatim from the user-reported failure.
+    const stderr =
+      "pdftoppm exited 1: Syntax Error: Couldn't find trailer dictionary " +
+      "Syntax Error: Couldn't find trailer dictionary " +
+      "Syntax Error: Couldn't read xref table";
+    expect(looksLikeBrokenXref(stderr)).toBe(true);
+  });
+
+  it("matches pdf.js' broken-xref signatures from pdf-parse", () => {
+    expect(looksLikeBrokenXref("FormatError: Bad (uncompressed) XRef entry")).toBe(true);
+    expect(looksLikeBrokenXref("Invalid XRef stream header")).toBe(true);
+  });
+
+  it("matches the 'May not be a PDF file' signature", () => {
+    expect(
+      looksLikeBrokenXref("May not be a PDF file (continuing anyway)"),
+    ).toBe(true);
+  });
+
+  it("does not match unrelated failures (encrypted, missing binary, OOM)", () => {
+    expect(looksLikeBrokenXref("")).toBe(false);
+    expect(
+      looksLikeBrokenXref("pdftoppm exited 1: Document is encrypted"),
+    ).toBe(false);
+    expect(
+      looksLikeBrokenXref("spawn pdftoppm ENOENT"),
+    ).toBe(false);
+    expect(
+      looksLikeBrokenXref("pdftoppm exited 137: out of memory"),
+    ).toBe(false);
   });
 });
 
