@@ -7,13 +7,16 @@
  * same pass for simplicity.
  */
 
-import { CronJob } from "encore.dev/cron";
 import { rebuildRecapsInternal } from "./recaps";
+import { everyMs, schedule } from "../lib/local-cron";
 
 console.log("[boot] photo/recaps-cron.ts: all imports resolved");
 
-const _ = new CronJob("recaps-rebuild", {
-  title: "Rebuild Rueckblicke (recaps) for all users",
-  every: "24h",
-  endpoint: rebuildRecapsInternal,
+schedule({
+  name: "recaps-rebuild",
+  description: "Rebuild Rueckblicke (recaps) for all users",
+  service: "photo",
+  scheduleLabel: "every 24h",
+  nextFire: everyMs(24 * 60 * 60_000),
+  run: () => rebuildRecapsInternal(),
 });

@@ -18,11 +18,13 @@ services:
     container_name: fk-encore-chown-init-test
     restart: "no"
     user: "0:0"
-    command: ["sh", "-c", "chown -R 568:568 /mnt/documents /mnt/documents-inbox /mnt/models"]
+    command: ["sh", "-c", "chown -R 568:568 /mnt/documents /mnt/documents-inbox /mnt/models /mnt/finance-import /mnt/finance-export"]
     volumes:
       - documents:/mnt/documents
       - documents_inbox:/mnt/documents-inbox
       - llm_models:/mnt/models
+      - finance_import:/mnt/finance-import
+      - finance_export:/mnt/finance-export
 
   # ── Main Encore.ts Application ─────────────────────────────────────────────
   app:
@@ -91,11 +93,20 @@ services:
       BACKUP_TOKEN: ${BACKUP_TOKEN:-}
       BACKUP_ALLOW_CIDRS: ${BACKUP_ALLOW_CIDRS:-}
       BACKUP_TRUST_XFF: ${BACKUP_TRUST_XFF:-true}
+      # Finance module — see docker-compose.yml for the full rationale.
+      FINANCE_CREDENTIALS_KEY: ${FINANCE_CREDENTIALS_KEY:-}
+      FINANCE_FINTS_PRODUCT_ID: ${FINANCE_FINTS_PRODUCT_ID:-dev-placeholder}
+      FINANCE_FINTS_PRODUCT_VERSION: ${FINANCE_FINTS_PRODUCT_VERSION:-0.1.0}
+      FINANCE_IMPORT_DIR: /mnt/data/finance-import
+      FINANCE_EXPORT_DIR: /mnt/data/finance-export
+      FINANCE_EXPORT_KEEP: ${FINANCE_EXPORT_KEEP:-30}
     volumes:
       - photos:/mnt/data/photos
       - thumbnails:/mnt/data/thumbnails
       - documents:/mnt/data/documents
       - documents_inbox:/mnt/data/documents-inbox
+      - finance_import:/mnt/data/finance-import
+      - finance_export:/mnt/data/finance-export
       - backup:/mnt/backup
 
   # ── InsightFace Service (Face Detection) ───────────────────────────────────
@@ -258,3 +269,12 @@ volumes:
   documents_inbox:
     driver: local
     driver_opts: { type: none, o: bind, device: /mnt/data/fk-encore-test/documents-inbox }
+  # Finance dropbox: copy `<basename>.pending.json` files here and the
+  # chokidar watcher in finance/import-pending.ts picks them up.
+  finance_import:
+    driver: local
+    driver_opts: { type: none, o: bind, device: /mnt/data/fk-encore-test/finance-import }
+  # Finance daily snapshot target (one file per day).
+  finance_export:
+    driver: local
+    driver_opts: { type: none, o: bind, device: /mnt/data/fk-encore-test/finance-export }

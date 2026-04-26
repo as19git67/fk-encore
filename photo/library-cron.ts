@@ -8,11 +8,11 @@
  * Scan-Queue status table.
  */
 
-import { CronJob } from "encore.dev/cron";
 import { api } from "encore.dev/api";
 import { listLibraries } from "./libraries.service";
 import { enqueueLibraryScan } from "./library-scan-queue";
 import { triggerLibraryScanWorker } from "./scan-worker";
+import { everyMs, schedule } from "../lib/local-cron";
 
 console.log("[boot] photo/library-cron.ts: all imports resolved");
 
@@ -34,8 +34,11 @@ export const reconcileAllLibraries = api(
   }
 );
 
-const _ = new CronJob("library-reconcile", {
-  title: "Reconcile external photo libraries",
-  every: "1h",
-  endpoint: reconcileAllLibraries,
+schedule({
+  name: "library-reconcile",
+  description: "Enqueue scan jobs for every external photo library",
+  service: "photo",
+  scheduleLabel: "every 1h",
+  nextFire: everyMs(60 * 60_000),
+  run: () => reconcileAllLibraries(),
 });

@@ -12,11 +12,18 @@ services:
     container_name: fk-encore-chown-init
     restart: "no"
     user: "0:0"
-    command: ["sh", "-c", "chown -R 568:568 /mnt/documents /mnt/documents-inbox /mnt/models"]
+    # Chown the directories themselves to the apps user (568:568) so
+    # the container can list / create files inside them. This does NOT
+    # chown files dropped later by other host users — for the finance
+    # dropbox the operator needs to land files as 568:568 (or g+r with
+    # the apps group set as primary on the dataset).
+    command: ["sh", "-c", "chown -R 568:568 /mnt/documents /mnt/documents-inbox /mnt/models /mnt/finance-import /mnt/finance-export"]
     volumes:
       - documents:/mnt/documents
       - documents_inbox:/mnt/documents-inbox
       - llm_models:/mnt/models
+      - finance_import:/mnt/finance-import
+      - finance_export:/mnt/finance-export
 
   # ── Main Encore.ts Application ─────────────────────────────────────────────
   app:

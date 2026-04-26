@@ -414,6 +414,13 @@
       "when": 1779001100000,
       "tag": "0057_documents_halfvec",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1779001200000,
+      "tag": "0058_scheduled_job_state",
+      "breakpoints": true
     }
   ]
 }

@@ -1236,3 +1236,19 @@ export const financeSystemPref = pgTable("finance_system_pref", {
     .notNull()
     .defaultNow(),
 });
+
+// ========== Scheduled job state (lib/local-cron.ts) ==========
+
+export const scheduledJobState = pgTable("scheduled_job_state", {
+  name: text("name").primaryKey(),
+  enabled: boolean("enabled").notNull().default(true),
+  last_run_at: timestamp("last_run_at", { mode: "string", withTimezone: true }),
+  last_status: text("last_status"),
+  last_duration_ms: integer("last_duration_ms"),
+  last_error: text("last_error"),
+  run_count: integer("run_count").notNull().default(0),
+  error_count: integer("error_count").notNull().default(0),
+  updated_at: timestamp("updated_at", { mode: "string", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});

@@ -267,12 +267,19 @@ export const modules: ModuleConfig[] = [
         component: () => import('../views/LibrariesView.vue'),
         meta: { permission: 'photos.libraries.manage' },
       },
+      {
+        path: 'jobs',
+        name: 'admin-scheduled-jobs',
+        component: () => import('../views/ScheduledJobsView.vue'),
+        meta: { permission: 'data.manage' },
+      },
     ],
     menuItems: [
       { label: 'Benutzer', icon: 'pi pi-users', routeName: 'admin-users', permission: 'users.list' },
       { label: 'Rollen', icon: 'pi pi-shield', routeName: 'admin-roles', permission: 'roles.list' },
       { label: 'Datenverwaltung', icon: 'pi pi-database', routeName: 'admin-data', permission: 'data.manage' },
       { label: 'Externe Bibliotheken', icon: 'pi pi-folder', routeName: 'admin-libraries', permission: 'photos.libraries.manage' },
+      { label: 'Eingeplante Jobs', icon: 'pi pi-clock', routeName: 'admin-scheduled-jobs', permission: 'data.manage' },
     ],
   },
 ]
