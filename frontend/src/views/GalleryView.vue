@@ -25,8 +25,12 @@
  *     and calls `updatePhotoDate`, then mutates `fullscreenPhoto` in
  *     place so the topbar's date label updates immediately.
  *
- * Deliberately still missing (Phase 3 slice 3):
- *   - ↑/↓ keyboard nav across grid rows
+ * Phase 3c on top of that adds keyboard navigation over the grid: a
+ * `cursorIndex` ref highlights the active cell; ←/→ step by one,
+ * ↑/↓ jump a row (= `cols` cells); Space / Enter open the cursor cell
+ * in fullscreen (or toggle its selection while in select mode).
+ *
+ * Deliberately still missing (Phase 3 slice 4):
  *   - Switching FeedView / PersonsView / PhotoLocationMenu deeplinks
  *     to the new gallery and removing "Galerie alt" from the menu
  */
@@ -47,6 +51,7 @@ import { useFilter } from '../composables/useFilter'
 import { useSort, type SortField, type SortState } from '../composables/useSort'
 import { useNaturalSearch } from '../composables/useNaturalSearch'
 import { useReferenceData } from '../composables/useReferenceData'
+import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
 import {
@@ -599,6 +604,7 @@ async function goPrev(): Promise<void> {
   if (fullscreenIndex.value === null || fullscreenIndex.value === 0) return
   const next = fullscreenIndex.value - 1
   fullscreenIndex.value = next
+  cursorIndex.value = next
   await hydrateFullscreen(next)
   galleryRef.value?.scrollToIndex(next)
 }
@@ -609,6 +615,7 @@ async function goNext(): Promise<void> {
   if (fullscreenIndex.value + 1 >= total) return
   const next = fullscreenIndex.value + 1
   fullscreenIndex.value = next
+  cursorIndex.value = next
   await hydrateFullscreen(next)
   galleryRef.value.scrollToIndex(next)
 }
@@ -697,6 +704,72 @@ async function onSidebarReindex() {
   finally { reindexingPhoto.value = false }
 }
 
+// ── Keyboard navigation across the grid ─────────────────────────────────────
+// `cursorIndex` is null until the user either restores a last-viewed photo
+// (set by `onGalleryLoaded`) or presses an arrow key for the first time.
+// VirtualGallery shows a soft ring around the matching cell.
+const cursorIndex = ref<number | null>(null)
+
+function moveCursor(delta: number, byRow: boolean) {
+  if (!galleryRef.value) return
+  const total = galleryRef.value.getTotal()
+  if (total === 0) return
+  if (cursorIndex.value === null) {
+    // First arrow press from a fresh session — drop the cursor on the first
+    // cell rather than leaping `cols` rows on the very first ↓.
+    cursorIndex.value = 0
+    galleryRef.value.scrollToIndex(0, 'auto')
+    return
+  }
+  const cols = galleryRef.value.getCols()
+  const step = byRow ? delta * cols : delta
+  let next = cursorIndex.value + step
+  if (next < 0) next = 0
+  if (next >= total) next = total - 1
+  cursorIndex.value = next
+  galleryRef.value.scrollToIndex(next, 'auto')
+}
+
+async function activateCursor() {
+  if (cursorIndex.value === null || !galleryRef.value) return
+  const idx = cursorIndex.value
+  if (selectMode.value) {
+    // In select mode Space/Enter toggles the selection of the cursor cell
+    // rather than opening fullscreen — power users selecting a batch via
+    // keyboard expect this.
+    const entry = await galleryRef.value.loadEntryAt(idx)
+    if (entry) onToggleSelect(entry)
+    return
+  }
+  await openFullscreenAt(idx)
+}
+
+useGalleryKeyboard({
+  // FullscreenOverlay owns its own ←/→/Esc/F/X/I/C window listeners (in
+  // capture phase, with stopImmediatePropagation), so they don't reach
+  // useGalleryKeyboard while fullscreen is open. We still block here for
+  // the dialogs / compare view that DON'T own their keyboard handling.
+  isBlocked: () => isFullscreen.value
+    || activeGroup.value !== null
+    || filterMenuOpen.value
+    || sortMenuOpen.value
+    || isEditingDate.value,
+  onLeft: () => moveCursor(-1, false),
+  onRight: () => moveCursor(+1, false),
+  onUp: () => moveCursor(-1, true),
+  onDown: () => moveCursor(+1, true),
+  onSpace: () => { void activateCursor() },
+  onExtra: (e) => {
+    if (e.key === 'Enter') {
+      // Enter on a regular button would already activate it — useGalleryKeyboard
+      // skips this path when a button has focus, so we only get here when
+      // focus is somewhere passive (body / the grid container).
+      e.preventDefault()
+      void activateCursor()
+    }
+  },
+})
+
 // ── Photo click → open fullscreen ───────────────────────────────────────────
 async function onPhotoClick(entry: GalleryGridEntry) {
   if (!galleryRef.value) return
@@ -704,16 +777,31 @@ async function onPhotoClick(entry: GalleryGridEntry) {
   // The user just tapped a rendered cell, so the entry is in the loaded
   // window — the null guard is defensive only.
   if (idx === null) return
+  cursorIndex.value = idx
   await openFullscreenAt(idx)
 }
 
-// ── Initial-load hook: open fullscreen on `?photoId=` deeplink ──────────────
+// ── Initial-load hook ───────────────────────────────────────────────────────
+// Two jobs after the grid finishes its first load:
+//   1. Honor an explicit `?photoId=` deeplink by opening fullscreen on it.
+//   2. Otherwise, drop the keyboard cursor on the restored last-viewed
+//      photo so arrow keys start navigating from there instead of cell 0.
 async function onGalleryLoaded() {
-  if (pendingFullscreenId.value === null || !galleryRef.value) return
-  const id = pendingFullscreenId.value
-  pendingFullscreenId.value = null
-  const idx = galleryRef.value.findLoadedIndexById(id)
-  if (idx !== null) await openFullscreenAt(idx)
+  if (!galleryRef.value) return
+  if (pendingFullscreenId.value !== null) {
+    const id = pendingFullscreenId.value
+    pendingFullscreenId.value = null
+    const idx = galleryRef.value.findLoadedIndexById(id)
+    if (idx !== null) {
+      cursorIndex.value = idx
+      await openFullscreenAt(idx)
+    }
+    return
+  }
+  if (initialAnchor.value !== null) {
+    const idx = galleryRef.value.findLoadedIndexById(initialAnchor.value)
+    if (idx !== null) cursorIndex.value = idx
+  }
 }
 
 // ── Computed sort fields for VirtualGallery ─────────────────────────────────
@@ -886,6 +974,7 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
       :search-photo-ids="searchPhotoIds"
       :select-mode="selectMode"
       :selected-ids="selectedIds"
+      :cursor-index="cursorIndex"
       @photo-click="onPhotoClick"
       @stack-click="onStackClick"
       @toggle-select="onToggleSelect"
