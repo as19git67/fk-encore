@@ -1,18 +1,28 @@
 <script setup lang="ts">
 /**
- * Greenfield virtualized photo gallery — Phase 2.
+ * Greenfield virtualized photo gallery — Phase 3a.
  *
- * Adds filter / sort / search / selection / curation / upload / stack-compare
- * around the same `<VirtualGallery>` core that ships in Phase 1. None of these
- * features touch the grid until the user actually triggers them — applying
- * a filter, picking a sort, executing a search and uploading all run a single
- * `init` on the source; selection / curation / drag-drop are local state
- * until the user commits.
+ * Builds on Phase 2 (filter / sort / search / selection / curation / upload /
+ * stack-compare around `<VirtualGallery>`) by adding the fullscreen viewer
+ * with prev/next navigation and `?photoId=` deeplinks.
  *
- * Deliberately still missing (Phase 3):
- *   - fullscreen / detail sidebar (no per-photo metadata view yet)
- *   - keyboard navigation
- *   - per-photo actions other than batch curation in select mode
+ * Fullscreen flow:
+ *   - Tapping a non-stack cell calls `openFullscreenAt(index)`.
+ *   - We `loadEntryAt` the current + neighbour indexes (sparse-aware: awaits
+ *     a page fetch if a slot is still null), then hydrate the three to full
+ *     `Photo` shape via a single `getPhotoDetailsBatch` call.
+ *   - Prev/next mutates the index and re-runs hydrate; FullscreenOverlay
+ *     handles its own ←/→/Esc keyboard listeners. The grid scrolls along so
+ *     closing the overlay leaves the user centered on the last-viewed photo.
+ *   - A `?photoId=X` deeplink seeds both `aroundPhotoId` (so the grid
+ *     centers on it) and an auto-fullscreen-on-load step. A bare
+ *     LAST_PHOTO_KEY restore only re-centers the grid; it does NOT pop
+ *     fullscreen open on every app refresh.
+ *
+ * Deliberately still missing (Phase 3 slice 2):
+ *   - PhotoDetailSidebar (faces, landmarks, edit-date, album mgmt)
+ *   - ↑/↓ keyboard nav across grid rows
+ *   - Routing FeedView / PersonsView / PhotoLocationMenu deeplinks here
  */
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -25,6 +35,7 @@ import FilterChips from '../components/FilterChips.vue'
 import SortMenu from '../components/SortMenu.vue'
 import NaturalSearchBar from '../components/NaturalSearchBar.vue'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
+import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import { useFilter } from '../composables/useFilter'
 import { useSort, type SortField, type SortState } from '../composables/useSort'
 import { useNaturalSearch } from '../composables/useNaturalSearch'
@@ -40,6 +51,8 @@ import {
   computeFileHash,
   checkPhotoHash,
   uploadPhotoWithProgress,
+  getPhotoDetailsBatch,
+  type Photo,
   type PhotoGroup,
   type CurationStatus,
 } from '../api/photos'
@@ -56,14 +69,25 @@ const canDelete = computed(() => auth.hasPermission('photos.delete'))
 const LAST_PHOTO_KEY = 'photos_last_selected_id'
 
 // ── Initial anchor (resolved once) ──────────────────────────────────────────
-const initialPhotoId = computed<number | null>(() => {
+// Two distinct concepts share the same input:
+//   - `initialAnchor` always seeds VirtualGallery's `aroundPhotoId` so the
+//     grid scrolls to the right cell on first paint;
+//   - `pendingFullscreenId` is set ONLY when the user came in via an
+//     explicit `?photoId=` deeplink (FeedView, PersonsView, PhotoLocationMenu)
+//     and signals "open fullscreen on load". A bare LAST_PHOTO_KEY restore
+//     after a normal app refresh deliberately does not auto-open fullscreen.
+const initialAnchor = ref<number | null>(null)
+const pendingFullscreenId = ref<number | null>(null)
+{
   const q = Number(route.query.photoId)
-  if (Number.isFinite(q) && q > 0) return q
-  const s = Number(localStorage.getItem(LAST_PHOTO_KEY))
-  if (Number.isFinite(s) && s > 0) return s
-  return null
-})
-const initialAnchor = ref<number | null>(initialPhotoId.value)
+  if (Number.isFinite(q) && q > 0) {
+    initialAnchor.value = q
+    pendingFullscreenId.value = q
+  } else {
+    const stored = Number(localStorage.getItem(LAST_PHOTO_KEY))
+    if (Number.isFinite(stored) && stored > 0) initialAnchor.value = stored
+  }
+}
 if (route.query.photoId !== undefined) {
   void router.replace({ query: { ...route.query, photoId: undefined } })
 }
@@ -414,11 +438,158 @@ function onDrop(e: DragEvent) {
   if (files && files.length > 0) void handleUpload(files)
 }
 
-// ── Photo click (Phase 2: just remember selection for next visit) ───────────
-function onPhotoClick(entry: GalleryGridEntry) {
+// ── Fullscreen viewer ───────────────────────────────────────────────────────
+// `fullscreenIndex` is the single source of truth: prev/next mutate it and
+// `hydrateFullscreen` rebuilds the (current, prev, next) Photo triple. The
+// `hydrateToken` guards against an out-of-order race where the user mashes
+// the next button faster than `getPhotoDetailsBatch` resolves — only the
+// most-recent hydration wins.
+const isFullscreen = ref(false)
+const fullscreenIndex = ref<number | null>(null)
+const fullscreenPhoto = ref<Photo | null>(null)
+const fullscreenPrev = ref<Photo | null>(null)
+const fullscreenNext = ref<Photo | null>(null)
+let hydrateToken = 0
+
+// Synthesize a minimal Photo from the grid entry. Used as a fallback when
+// `getPhotoDetailsBatch` fails or returns nothing for an id — at least the
+// overlay can still show the image and the curation icon. Date / location
+// formatting will fall back to empty strings, which is harmless.
+function entryToMinimalPhoto(entry: GalleryGridEntry): Photo {
+  return {
+    id: entry.id,
+    user_id: 0,
+    filename: entry.filename,
+    original_name: entry.filename,
+    mime_type: '',
+    size: 0,
+    created_at: '',
+    curation_status: entry.curation,
+    auto_crop: entry.auto_crop,
+  }
+}
+
+async function hydrateFullscreen(index: number): Promise<void> {
+  if (!galleryRef.value) return
+  const myToken = ++hydrateToken
+  const total = galleryRef.value.getTotal()
+  const [curEntry, prevEntry, nextEntry] = await Promise.all([
+    galleryRef.value.loadEntryAt(index),
+    index > 0 ? galleryRef.value.loadEntryAt(index - 1) : Promise.resolve(null),
+    index + 1 < total ? galleryRef.value.loadEntryAt(index + 1) : Promise.resolve(null),
+  ])
+  if (myToken !== hydrateToken) return
+  if (!curEntry) {
+    closeFullscreen()
+    return
+  }
+  // Persist last-viewed id for the next app start.
+  try { localStorage.setItem(LAST_PHOTO_KEY, String(curEntry.id)) } catch { /* storage off */ }
+
+  // Provisional render from the grid entry while the details call resolves.
+  // Without this the overlay flashes empty for the network round-trip.
+  fullscreenPhoto.value = entryToMinimalPhoto(curEntry)
+  fullscreenPrev.value = prevEntry ? entryToMinimalPhoto(prevEntry) : null
+  fullscreenNext.value = nextEntry ? entryToMinimalPhoto(nextEntry) : null
+
+  const ids = [curEntry.id]
+  if (prevEntry) ids.push(prevEntry.id)
+  if (nextEntry) ids.push(nextEntry.id)
   try {
-    localStorage.setItem(LAST_PHOTO_KEY, String(entry.id))
-  } catch { /* storage might be disabled */ }
+    const { photos } = await getPhotoDetailsBatch(ids)
+    if (myToken !== hydrateToken) return
+    const byId = new Map(photos.map((p) => [p.id, p]))
+    fullscreenPhoto.value = byId.get(curEntry.id) ?? fullscreenPhoto.value
+    fullscreenPrev.value = prevEntry
+      ? (byId.get(prevEntry.id) ?? fullscreenPrev.value)
+      : null
+    fullscreenNext.value = nextEntry
+      ? (byId.get(nextEntry.id) ?? fullscreenNext.value)
+      : null
+  } catch {
+    // Fall back to the minimal photo objects we already set above.
+  }
+}
+
+async function openFullscreenAt(index: number): Promise<void> {
+  if (!galleryRef.value) return
+  fullscreenIndex.value = index
+  isFullscreen.value = true
+  await hydrateFullscreen(index)
+  galleryRef.value.scrollToIndex(index)
+}
+
+function closeFullscreen() {
+  isFullscreen.value = false
+  fullscreenIndex.value = null
+  fullscreenPhoto.value = null
+  fullscreenPrev.value = null
+  fullscreenNext.value = null
+}
+
+async function goPrev(): Promise<void> {
+  if (fullscreenIndex.value === null || fullscreenIndex.value === 0) return
+  const next = fullscreenIndex.value - 1
+  fullscreenIndex.value = next
+  await hydrateFullscreen(next)
+  galleryRef.value?.scrollToIndex(next)
+}
+
+async function goNext(): Promise<void> {
+  if (fullscreenIndex.value === null || !galleryRef.value) return
+  const total = galleryRef.value.getTotal()
+  if (fullscreenIndex.value + 1 >= total) return
+  const next = fullscreenIndex.value + 1
+  fullscreenIndex.value = next
+  await hydrateFullscreen(next)
+  galleryRef.value.scrollToIndex(next)
+}
+
+async function applyCurationToPhoto(id: number, target: CurationStatus): Promise<void> {
+  // Optimistic write to grid + the three fullscreen slots that might hold
+  // this id. If the network write fails we reload the source AND re-hydrate
+  // the current fullscreen to undo the optimistic change.
+  galleryRef.value?.updateEntry(id, { curation: target })
+  for (const r of [fullscreenPhoto, fullscreenPrev, fullscreenNext]) {
+    if (r.value && r.value.id === id) {
+      r.value = { ...r.value, curation_status: target }
+    }
+  }
+  try {
+    await updatePhotoCuration(id, target)
+  } catch {
+    await galleryRef.value?.reload()
+    if (fullscreenIndex.value !== null) await hydrateFullscreen(fullscreenIndex.value)
+  }
+}
+
+function onFullscreenToggleFavorite(id: number, currentStatus: CurationStatus) {
+  void applyCurationToPhoto(id, currentStatus === 'favorite' ? 'visible' : 'favorite')
+}
+function onFullscreenHide(id: number) {
+  void applyCurationToPhoto(id, 'hidden')
+}
+function onFullscreenRestore(id: number) {
+  void applyCurationToPhoto(id, 'visible')
+}
+
+// ── Photo click → open fullscreen ───────────────────────────────────────────
+async function onPhotoClick(entry: GalleryGridEntry) {
+  if (!galleryRef.value) return
+  const idx = galleryRef.value.findLoadedIndexById(entry.id)
+  // The user just tapped a rendered cell, so the entry is in the loaded
+  // window — the null guard is defensive only.
+  if (idx === null) return
+  await openFullscreenAt(idx)
+}
+
+// ── Initial-load hook: open fullscreen on `?photoId=` deeplink ──────────────
+async function onGalleryLoaded() {
+  if (pendingFullscreenId.value === null || !galleryRef.value) return
+  const id = pendingFullscreenId.value
+  pendingFullscreenId.value = null
+  const idx = galleryRef.value.findLoadedIndexById(id)
+  if (idx !== null) await openFullscreenAt(idx)
 }
 
 // ── Computed sort fields for VirtualGallery ─────────────────────────────────
@@ -594,6 +765,7 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
       @photo-click="onPhotoClick"
       @stack-click="onStackClick"
       @toggle-select="onToggleSelect"
+      @loaded="onGalleryLoaded"
     />
 
     <!-- Stack compare overlay -->
@@ -604,6 +776,23 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
       :total-unreviewed="totalUnreviewed"
       @close="onCompareClose"
       @next="onCompareNext"
+    />
+
+    <!-- Fullscreen viewer (Phase 3a — no detail sidebar yet, so the I/info
+         button is hidden via :show-details-button="false") -->
+    <FullscreenOverlay
+      v-if="isFullscreen && fullscreenPhoto"
+      :photo="fullscreenPhoto"
+      :prev-photo="fullscreenPrev"
+      :next-photo="fullscreenNext"
+      :can-delete="canDelete"
+      :show-details-button="false"
+      @close="closeFullscreen"
+      @prev="goPrev"
+      @next="goNext"
+      @toggle-favorite="onFullscreenToggleFavorite"
+      @hide="onFullscreenHide"
+      @restore="onFullscreenRestore"
     />
 
     <!-- Selection action bar (mobile + desktop) -->

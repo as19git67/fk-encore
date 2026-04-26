@@ -87,6 +87,16 @@ export interface GallerySource {
    * reactive update so the cell re-renders.
    */
   updateEntry(photoId: number, partial: Partial<GalleryGridEntry>): void
+  /**
+   * Resolve the entry at a given absolute index. If the slot is already
+   * populated, resolves synchronously with that entry. Otherwise, fires a
+   * page fetch (deduped via the same in-flight tracking that `ensureRange`
+   * uses) and waits for the page to land. Used by the fullscreen viewer to
+   * prev/next through indexes whose pages haven't been scrolled into yet.
+   * Returns `null` for out-of-range indexes or when the underlying fetch
+   * fails.
+   */
+  loadEntryAt(index: number): Promise<GalleryGridEntry | null>
   /** Cancel all in-flight requests (e.g., on unmount). */
   cancel(): void
 }
@@ -107,12 +117,14 @@ export function useGallerySource(): GallerySource {
   }
 
   /**
-   * Pages whose fetch has been started already. Deduped by
-   * `pageStart` (= floor(offset / PAGE_SIZE) * PAGE_SIZE). A page is in
-   * the set whether its request is in flight or already resolved — once
-   * we asked for it we never ask again.
+   * Pages whose fetch has been started already, keyed by `pageStart`
+   * (= floor(offset / PAGE_SIZE) * PAGE_SIZE). A page stays in the map
+   * whether its request is in flight or already resolved — once we asked
+   * for it we never ask again. The promise lets callers (e.g. the
+   * fullscreen viewer's `loadEntryAt`) await an in-flight load instead of
+   * polling for the slot to populate.
    */
-  const requestedPages = new Set<number>()
+  const pagePromises = new Map<number, Promise<void>>()
   const inflightControllers = new Set<AbortController>()
 
   function spliceIn(offset: number, photos: GalleryGridEntry[]) {
@@ -134,41 +146,45 @@ export function useGallerySource(): GallerySource {
     return Math.floor(offset / GALLERY_PAGE_SIZE) * GALLERY_PAGE_SIZE
   }
 
-  async function fetchPage(pageOffset: number) {
-    if (requestedPages.has(pageOffset)) return
-    requestedPages.add(pageOffset)
+  function fetchPage(pageOffset: number): Promise<void> {
+    const existing = pagePromises.get(pageOffset)
+    if (existing) return existing
     const ctrl = new AbortController()
     inflightControllers.add(ctrl)
-    try {
-      const res = await getGalleryGrid(
-        {
-          limit: GALLERY_PAGE_SIZE,
-          offset: pageOffset,
-          sortBy: query.sortBy,
-          sortDir: query.sortDir,
-          filter: query.filter,
-          photoIds: query.photoIds ?? undefined,
-        },
-        { signal: ctrl.signal },
-      )
-      spliceIn(res.offset, res.photos)
-    } catch (err: any) {
-      if (err?.name === 'AbortError') return
-      // Allow a retry by removing from the requested set on failure. The
-      // virtualizer will trigger `ensureRange` again as the user keeps
-      // scrolling, so a transient network blip self-heals.
-      requestedPages.delete(pageOffset)
-      error.value = err?.message ?? 'Fehler beim Laden weiterer Fotos.'
-    } finally {
-      inflightControllers.delete(ctrl)
-    }
+    const promise = (async () => {
+      try {
+        const res = await getGalleryGrid(
+          {
+            limit: GALLERY_PAGE_SIZE,
+            offset: pageOffset,
+            sortBy: query.sortBy,
+            sortDir: query.sortDir,
+            filter: query.filter,
+            photoIds: query.photoIds ?? undefined,
+          },
+          { signal: ctrl.signal },
+        )
+        spliceIn(res.offset, res.photos)
+      } catch (err: any) {
+        if (err?.name === 'AbortError') return
+        // Allow a retry by dropping the promise on failure. The virtualizer
+        // will trigger `ensureRange` again as the user keeps scrolling, so
+        // a transient network blip self-heals.
+        pagePromises.delete(pageOffset)
+        error.value = err?.message ?? 'Fehler beim Laden weiterer Fotos.'
+      } finally {
+        inflightControllers.delete(ctrl)
+      }
+    })()
+    pagePromises.set(pageOffset, promise)
+    return promise
   }
 
   async function init(
     opts: GalleryQueryState & { aroundPhotoId?: number | null },
   ): Promise<{ initialOffset: number; total: number }> {
     cancel()
-    requestedPages.clear()
+    pagePromises.clear()
     initialLoading.value = true
     error.value = ''
     query.filter = opts.filter
@@ -195,8 +211,11 @@ export function useGallerySource(): GallerySource {
       // Allocate the sparse backing array.
       const arr: (GalleryGridEntry | null)[] = new Array(res.total).fill(null)
       entries.value = arr
+      // Mark the initial page as already loaded so a subsequent
+      // ensureRange() over the same window doesn't re-fetch it. We resolve
+      // immediately because the data is in `entries` already.
       const pageStart = pageStartForOffset(res.offset)
-      requestedPages.add(pageStart)
+      pagePromises.set(pageStart, Promise.resolve())
       spliceIn(res.offset, res.photos)
       return { initialOffset: res.offset, total: res.total }
     } catch (err: any) {
@@ -225,11 +244,19 @@ export function useGallerySource(): GallerySource {
     const hi = Math.max(lo, Math.min(end, total.value))
     let p = pageStartForOffset(lo)
     while (p < hi) {
-      if (!requestedPages.has(p)) {
+      if (!pagePromises.has(p)) {
         void fetchPage(p)
       }
       p += GALLERY_PAGE_SIZE
     }
+  }
+
+  async function loadEntryAt(index: number): Promise<GalleryGridEntry | null> {
+    if (total.value === 0 || index < 0 || index >= total.value) return null
+    const cur = entries.value[index]
+    if (cur) return cur
+    await fetchPage(pageStartForOffset(index))
+    return entries.value[index] ?? null
   }
 
   function updateEntry(photoId: number, partial: Partial<GalleryGridEntry>) {
@@ -263,6 +290,7 @@ export function useGallerySource(): GallerySource {
     ensureRange,
     reload,
     updateEntry,
+    loadEntryAt,
     cancel,
   }
 }

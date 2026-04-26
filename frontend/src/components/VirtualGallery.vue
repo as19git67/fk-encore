@@ -30,6 +30,21 @@
  * What it exposes (via defineExpose):
  *   - `updateEntry(id, partial)` — optimistic in-place mutation (curation).
  *   - `reload(opts?)`             — re-init keeping current query state.
+ *   - `getTotal()` / `getCols()`  — current total photo count / column count.
+ *                                    Used by the fullscreen viewer to compute
+ *                                    prev/next bounds and ↑/↓ row jumps.
+ *   - `loadEntryAt(index)`        — async accessor that resolves the entry at
+ *                                    `index`, awaiting the page fetch if the
+ *                                    slot is still null. Used by the
+ *                                    fullscreen viewer to navigate beyond the
+ *                                    currently-loaded window.
+ *   - `findLoadedIndexById(id)`   — linear scan over loaded entries; returns
+ *                                    `null` for ids that aren't in the
+ *                                    currently loaded window. Used to map a
+ *                                    `?photoId=` deeplink to its grid index.
+ *   - `scrollToIndex(index)`      — scroll the grid so `index` lands centered
+ *                                    in the viewport. Used to keep the grid
+ *                                    aligned with the fullscreen selection.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
@@ -202,9 +217,31 @@ function onTap(entry: GalleryGridEntry | null) {
 }
 
 // ── Public surface for the parent ───────────────────────────────────────────
+function findLoadedIndexById(id: number): number | null {
+  const arr = entries.value
+  for (let i = 0; i < arr.length; i++) {
+    if (arr[i]?.id === id) return i
+  }
+  return null
+}
+
+function scrollToIndex(index: number, align: 'start' | 'center' | 'end' = 'center') {
+  if (cols.value <= 0 || total.value === 0) return
+  const clamped = Math.max(0, Math.min(index, total.value - 1))
+  const row = Math.floor(clamped / cols.value)
+  virtualizer.value.scrollToIndex(row, { align })
+}
+
 defineExpose({
   updateEntry: source.updateEntry,
   reload: source.reload,
+  loadEntryAt: source.loadEntryAt,
+  findLoadedIndexById,
+  scrollToIndex,
+  // Getter style (rather than raw refs) so the parent reads the value with
+  // a simple call instead of `.value.ref.value` chains.
+  getTotal: () => total.value,
+  getCols: () => cols.value,
 })
 </script>
 
