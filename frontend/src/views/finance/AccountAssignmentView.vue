@@ -45,9 +45,17 @@ const accountOptions = computed<AccountOption[]>(() => {
 const unassignedCount = computed(
   () => accountsStore.items.filter((a) => a.access_count === 0).length,
 )
-const entries = ref<
-  Array<{ user_id: number; user_email: string; user_name: string; level: 'read' | 'write' }>
->([])
+interface Entry {
+  user_id: number
+  user_email: string
+  user_name: string
+  level: 'read' | 'write'
+}
+const entries = ref<Entry[]>([])
+// Snapshot of the server-side state, used to compute `isDirty` so the
+// Save button only lights up after a real change. Replaced on initial
+// load and after every successful save.
+const baseline = ref<Array<{ user_id: number; level: 'read' | 'write' }>>([])
 const users = ref<UserWithRoles[]>([])
 const addUserId = ref<number | null>(null)
 const addLevel = ref<'read' | 'write'>('read')
@@ -55,6 +63,20 @@ const loading = ref(false)
 const saving = ref(false)
 const diff = ref<{ inserted: number; updated: number; deleted: number } | null>(null)
 const error = ref<string | null>(null)
+
+function snapshot(items: Entry[]): Array<{ user_id: number; level: 'read' | 'write' }> {
+  return items.map((e) => ({ user_id: e.user_id, level: e.level }))
+}
+
+const isDirty = computed(() => {
+  if (entries.value.length !== baseline.value.length) return true
+  const baseByUser = new Map(baseline.value.map((e) => [e.user_id, e.level]))
+  for (const e of entries.value) {
+    const prev = baseByUser.get(e.user_id)
+    if (prev === undefined || prev !== e.level) return true
+  }
+  return false
+})
 
 const LEVELS: Array<{ label: string; value: 'read' | 'write' }> = [
   { label: 'read', value: 'read' },
@@ -73,12 +95,14 @@ onMounted(async () => {
 
 watch(selectedAccountId, async (id) => {
   entries.value = []
+  baseline.value = []
   diff.value = null
   if (!id) return
   loading.value = true
   try {
     const resp = await financeApi.listAccess(id)
     entries.value = resp.items
+    baseline.value = snapshot(resp.items)
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -105,6 +129,7 @@ function addEntry() {
 
 async function save() {
   if (!selectedAccountId.value) return
+  if (!isDirty.value) return
   saving.value = true
   error.value = null
   try {
@@ -113,6 +138,7 @@ async function save() {
       entries.value.map((e) => ({ user_id: e.user_id, level: e.level })),
     )
     entries.value = resp.items
+    baseline.value = snapshot(resp.items)
     diff.value = resp.diff
     // Re-pull the account list so the selector's "noch keine Zuweisung"
     // tag and the unassigned counter reflect the change immediately.
@@ -214,7 +240,12 @@ async function save() {
       </div>
 
       <div class="actions">
-        <Button label="Speichern" :loading="saving" @click="save" />
+        <Button
+          label="Speichern"
+          :loading="saving"
+          :disabled="!isDirty"
+          @click="save"
+        />
       </div>
     </section>
   </div>
