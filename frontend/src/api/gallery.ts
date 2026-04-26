@@ -8,6 +8,7 @@
  * fills the slots that the user has scrolled near.
  */
 import { apiFetch } from './client'
+import type { PhotoFilter } from './photos'
 
 export type GallerySortField =
   | 'taken_at'
@@ -52,6 +53,42 @@ export interface GalleryGridQuery {
   aroundPhotoId?: number
   sortBy?: GallerySortField
   sortDir?: GallerySortDir
+  /** Optional filter — same shape as the legacy /photos/index filter. */
+  filter?: PhotoFilter
+  /**
+   * Restrict the result set (and ordering) to this list of photo IDs in
+   * the order given. Used by natural-language search to preserve the
+   * search engine's relevance ranking. Filters still apply on top.
+   */
+  photoIds?: number[]
+}
+
+function buildFilterParams(filter: PhotoFilter | undefined, sp: URLSearchParams) {
+  if (!filter) return
+  const add = (k: string, v: string | number | boolean) => sp.set(k, String(v))
+  if (filter.hiddenMode) add('hiddenMode', filter.hiddenMode)
+  if (filter.favorite) add('favorite', true)
+  if (filter.albumHighlight) add('albumHighlight', true)
+  if (filter.groupHighlight) add('groupHighlight', true)
+  if (filter.inGroup) add('inGroup', true)
+  if (filter.othersFavorited) add('othersFavorited', true)
+  if (filter.othersHidden) add('othersHidden', true)
+  if (filter.qualityMin !== undefined) add('qualityMin', filter.qualityMin)
+  if (filter.qualityMax !== undefined) add('qualityMax', filter.qualityMax)
+  if (filter.notInAnyAlbum) add('notInAnyAlbum', true)
+  if (filter.albumIds && filter.albumIds.length) add('albumIds', filter.albumIds.join(','))
+  if (filter.albumMode) add('albumMode', filter.albumMode)
+  if (filter.personIds && filter.personIds.length) add('personIds', filter.personIds.join(','))
+  if (filter.personMode) add('personMode', filter.personMode)
+  if (filter.mediaTypes && filter.mediaTypes.length) add('mediaTypes', filter.mediaTypes.join(','))
+  if (filter.hasGps !== undefined) add('hasGps', filter.hasGps)
+  if (filter.hasFaces !== undefined) add('hasFaces', filter.hasFaces)
+  if (filter.hasAssignedPerson !== undefined) add('hasAssignedPerson', filter.hasAssignedPerson)
+  if (filter.dateFrom) add('dateFrom', filter.dateFrom)
+  if (filter.dateTo) add('dateTo', filter.dateTo)
+  if (filter.importedDaysAgo !== undefined) add('importedDaysAgo', filter.importedDaysAgo)
+  if (filter.sizeMin !== undefined) add('sizeMin', filter.sizeMin)
+  if (filter.sizeMax !== undefined) add('sizeMax', filter.sizeMax)
 }
 
 export function getGalleryGrid(
@@ -64,6 +101,10 @@ export function getGalleryGrid(
   if (query.aroundPhotoId !== undefined) sp.set('aroundPhotoId', String(query.aroundPhotoId))
   if (query.sortBy) sp.set('sortBy', query.sortBy)
   if (query.sortDir) sp.set('sortDir', query.sortDir)
+  buildFilterParams(query.filter, sp)
+  if (query.photoIds && query.photoIds.length > 0) {
+    sp.set('photoIds', query.photoIds.join(','))
+  }
   return apiFetch<GalleryGridResponse>(`/gallery/grid?${sp.toString()}`, {
     signal: options?.signal,
   })
