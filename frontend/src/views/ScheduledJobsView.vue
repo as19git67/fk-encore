@@ -145,7 +145,7 @@ function formatDuration(ms: number | null): string {
       </Column>
 
       <Column field="status" header="Status">
-        <template #body="{ data }">
+        <template #body="{ data }: { data: ScheduledJob }">
           <Tag :severity="statusSeverity[data.status]" :value="statusLabel[data.status]" />
         </template>
       </Column>
