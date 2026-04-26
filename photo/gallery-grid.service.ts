@@ -1,0 +1,294 @@
+/**
+ * Backend logic for the virtualized photo gallery grid.
+ *
+ * Goals (deliberately divergent from the legacy /photos/index):
+ *   - Server is the only place that touches the user's full photo list.
+ *     The client never iterates anything global — it only reads the
+ *     `total` count and a window of rows.
+ *   - Each row is pre-enriched with everything the grid needs to render:
+ *     thumbnail filename, square crop offset, curation status, and
+ *     similar-photo group info (id, member count, is_cover, reviewed).
+ *     No second roundtrip to /photos/groups, no client-side mapping.
+ *   - Window-around-target ("aroundPhotoId") locates the photo's position
+ *     in the filtered+sorted result and returns a window centered on it
+ *     so the gallery can `scrollToOffset` directly without a guess.
+ */
+import { and, eq, sql } from "drizzle-orm";
+import db from "../db/database";
+import { dbAll, dbFirst } from "../db/adapter";
+import { photos, photoCuration, photoGroupMembers, photoGroups } from "../db/schema";
+import {
+  buildPhotoFilterConditions,
+  type PhotoFilterParams,
+} from "./photo.filters";
+import type {
+  GalleryGridEntry,
+  GalleryGridGroup,
+  GalleryGridResponse,
+  CurationStatus,
+} from "../db/types";
+
+export type GallerySortField =
+  | "taken_at"
+  | "created_at"
+  | "ai_quality_score"
+  | "filename"
+  | "size";
+
+export type GallerySortDir = "asc" | "desc";
+
+const VALID_SORT_FIELDS = new Set<GallerySortField>([
+  "taken_at",
+  "created_at",
+  "ai_quality_score",
+  "filename",
+  "size",
+]);
+
+export function normalizeGallerySortField(raw: string | undefined): GallerySortField {
+  return raw && VALID_SORT_FIELDS.has(raw as GallerySortField)
+    ? (raw as GallerySortField)
+    : "taken_at";
+}
+
+export function normalizeGallerySortDir(raw: string | undefined): GallerySortDir {
+  return raw === "desc" ? "desc" : "asc";
+}
+
+/**
+ * COALESCE(taken_at, created_at) — fallback to upload date if no EXIF date
+ * is available. Same fragment as legacy code but local to this module so the
+ * service does not have to import private internals.
+ */
+const photoDateOrder = sql`COALESCE(${photos.taken_at}, ${photos.created_at})`;
+
+/** SQL fragment producing the value sorted by, given a sort field. */
+function sortKeyExpr(field: GallerySortField) {
+  switch (field) {
+    case "taken_at":
+      return photoDateOrder;
+    case "created_at":
+      return sql`${photos.created_at}`;
+    case "ai_quality_score":
+      return sql`${photos.ai_quality_score}`;
+    case "filename":
+      return sql`${photos.filename}`;
+    case "size":
+      return sql`${photos.size}`;
+  }
+}
+
+/** ORDER BY clauses for the grid query, with deterministic id tie-break. */
+function orderByClauses(field: GallerySortField, dir: GallerySortDir) {
+  const key = sortKeyExpr(field);
+  // NULLS LAST regardless of direction. Most importantly for ai_quality_score
+  // — ASC by quality should not flood the head of the list with the
+  // not-yet-scored photos.
+  const dirSql = dir === "asc" ? sql`ASC NULLS LAST` : sql`DESC NULLS LAST`;
+  const idDir = dir === "asc" ? sql`ASC` : sql`DESC`;
+  return [sql`${key} ${dirSql}`, sql`${photos.id} ${idDir}`];
+}
+
+/**
+ * Locate a single photo's position (0-based) in the user's filtered+sorted
+ * gallery. Returns `null` if the photo does not exist or is filtered out.
+ *
+ * Implemented as "count rows that come before the target" so the planner can
+ * use indexes on the sort column instead of materialising a window function
+ * over the full result set. The lexicographic comparison (sort_key, id)
+ * mirrors the secondary id tie-break in `orderByClauses` so two photos
+ * sharing a sort-key value still get a deterministic position.
+ */
+export async function locateGalleryPhotoPosition(
+  userId: number,
+  filter: PhotoFilterParams,
+  photoId: number,
+  sortBy: GallerySortField,
+  sortDir: GallerySortDir,
+): Promise<number | null> {
+  const targetRow = await dbFirst<{ id: number; sort_key: string | number | null }>(
+    db
+      .select({ id: photos.id, sort_key: sortKeyExpr(sortBy) })
+      .from(photos)
+      .where(and(eq(photos.id, photoId), eq(photos.user_id, userId))),
+  );
+  if (!targetRow) return null;
+
+  const filterConds = buildPhotoFilterConditions(userId, filter);
+  const baseWhere = and(eq(photos.user_id, userId), ...filterConds);
+
+  const targetKey = targetRow.sort_key;
+  const sortKey = sortKeyExpr(sortBy);
+
+  let beforeCondition;
+  if (sortDir === "asc") {
+    if (targetKey === null) {
+      // ASC + NULLS LAST: only NULL rows with smaller id precede a NULL target.
+      beforeCondition = sql`(${sortKey} IS NOT NULL OR (${sortKey} IS NULL AND ${photos.id} < ${photoId}))`;
+    } else {
+      beforeCondition = sql`(${sortKey} < ${targetKey} OR (${sortKey} = ${targetKey} AND ${photos.id} < ${photoId}))`;
+    }
+  } else {
+    if (targetKey === null) {
+      beforeCondition = sql`(${sortKey} IS NOT NULL OR (${sortKey} IS NULL AND ${photos.id} > ${photoId}))`;
+    } else {
+      beforeCondition = sql`(${sortKey} > ${targetKey} OR (${sortKey} = ${targetKey} AND ${photos.id} > ${photoId}))`;
+    }
+  }
+
+  const row = await dbFirst<{ c: number }>(
+    db
+      .select({ c: sql<number>`COUNT(*)::int` })
+      .from(photos)
+      .leftJoin(
+        photoCuration,
+        and(eq(photos.id, photoCuration.photo_id), eq(photoCuration.user_id, userId)),
+      )
+      .where(and(baseWhere, beforeCondition)),
+  );
+  return row?.c ?? 0;
+}
+
+/**
+ * Return a window of grid entries with `total` and `offset`. Used by the
+ * virtualized client gallery — see `useGallerySource`.
+ *
+ * - `aroundPhotoId` (when `offset` is not given): center the window on
+ *   that photo. Server runs a locate query to compute the offset and clamps
+ *   the window to fit `[0, total - limit]`.
+ * - `offset` wins when both are supplied — explicit pagination is needed
+ *   for the client's edge-load follow-ups.
+ *
+ * Group info is inlined per-row via a correlated subquery that picks ONE
+ * group per photo, preferring unreviewed groups over reviewed ones. With
+ * the typical ratio of "few photos in groups, most not", this is cheap
+ * because the subquery LIMIT 1 short-circuits on the empty case.
+ */
+export async function listGalleryGridLogic(
+  userId: number,
+  filter: PhotoFilterParams,
+  pagination: {
+    limit: number;
+    offset?: number;
+    sortBy: GallerySortField;
+    sortDir: GallerySortDir;
+    aroundPhotoId?: number;
+  },
+): Promise<GalleryGridResponse> {
+  const filterConds = buildPhotoFilterConditions(userId, filter);
+  const whereClause = and(eq(photos.user_id, userId), ...filterConds);
+  const orderBy = orderByClauses(pagination.sortBy, pagination.sortDir);
+
+  // total — always returned, drives the virtualizer's row count.
+  const countRow = await dbFirst<{ c: number }>(
+    db
+      .select({ c: sql<number>`COUNT(*)::int` })
+      .from(photos)
+      .leftJoin(
+        photoCuration,
+        and(eq(photos.id, photoCuration.photo_id), eq(photoCuration.user_id, userId)),
+      )
+      .where(whereClause),
+  );
+  const total = countRow?.c ?? 0;
+
+  // Resolve offset — precedence:
+  //   1. explicit `offset` (used for back-fill / scroll-edge fetches)
+  //   2. `aroundPhotoId`  (window centered on a target photo)
+  //   3. default = last page (so opening the gallery lands on the newest
+  //      photo in an ASC-by-date sort, which is the standard expectation
+  //      and avoids a useless initial fetch of the oldest rows).
+  let resolvedOffset: number;
+  if (pagination.offset !== undefined && pagination.offset >= 0) {
+    resolvedOffset = pagination.offset;
+  } else if (pagination.aroundPhotoId !== undefined && total > 0) {
+    const pos = await locateGalleryPhotoPosition(
+      userId,
+      filter,
+      pagination.aroundPhotoId,
+      pagination.sortBy,
+      pagination.sortDir,
+    );
+    if (pos !== null) {
+      const half = Math.floor(pagination.limit / 2);
+      const maxOffset = Math.max(0, total - pagination.limit);
+      resolvedOffset = Math.max(0, Math.min(pos - half, maxOffset));
+    } else {
+      // Photo no longer exists / filtered out — fall through to last-page
+      // default rather than offset 0, matching the no-anchor case.
+      resolvedOffset = Math.max(0, total - pagination.limit);
+    }
+  } else {
+    resolvedOffset = Math.max(0, total - pagination.limit);
+  }
+
+  if (total === 0) {
+    return { total: 0, offset: 0, photos: [] };
+  }
+
+  // Inline group info via a correlated subquery returning a single JSON
+  // object (or NULL when the photo is not in any group). Preferring
+  // unreviewed groups mirrors how the legacy frontend prioritized
+  // unreviewed-group display, but the decision is now made once on the
+  // server instead of being recomputed for every page on every render.
+  const groupInfo = sql<{
+    id: number;
+    is_cover: boolean;
+    member_count: number;
+    reviewed: boolean;
+  } | null>`(
+    SELECT json_build_object(
+      'id', g.id,
+      'is_cover', (g.cover_photo_id = ${photos.id}),
+      'member_count', (
+        SELECT COUNT(*)::int FROM ${photoGroupMembers} pgm2
+        WHERE pgm2.group_id = g.id
+      ),
+      'reviewed', (g.reviewed_at IS NOT NULL)
+    )
+    FROM ${photoGroupMembers} pgm
+    JOIN ${photoGroups} g ON g.id = pgm.group_id
+    WHERE pgm.photo_id = ${photos.id} AND g.user_id = ${userId}
+    ORDER BY (g.reviewed_at IS NULL) DESC, g.id DESC
+    LIMIT 1
+  )`;
+
+  const rows = await dbAll<{
+    id: number;
+    filename: string;
+    auto_crop: { x: number; y: number } | null;
+    curation_status: string | null;
+    group_info: GalleryGridGroup | null;
+  }>(
+    db
+      .select({
+        id: photos.id,
+        filename: photos.filename,
+        auto_crop: photos.auto_crop,
+        curation_status: photoCuration.status,
+        group_info: groupInfo,
+      })
+      .from(photos)
+      .leftJoin(
+        photoCuration,
+        and(eq(photos.id, photoCuration.photo_id), eq(photoCuration.user_id, userId)),
+      )
+      .where(whereClause)
+      .orderBy(...orderBy)
+      .limit(pagination.limit)
+      .offset(resolvedOffset),
+  );
+
+  const result: GalleryGridEntry[] = rows.map((r) => {
+    const entry: GalleryGridEntry = {
+      id: r.id,
+      filename: r.filename,
+      curation: (r.curation_status as CurationStatus) ?? "visible",
+    };
+    if (r.auto_crop) entry.auto_crop = r.auto_crop;
+    if (r.group_info) entry.group = r.group_info;
+    return entry;
+  });
+
+  return { total, offset: resolvedOffset, photos: result };
+}

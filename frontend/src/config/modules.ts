@@ -32,6 +32,13 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'photos.view' },
       },
       {
+        // Greenfield virtualized gallery (Phase 1: thumbnails only).
+        path: 'galerie',
+        name: 'fotos-gallery-v2',
+        component: () => import('../views/GalleryView.vue'),
+        meta: { permission: 'photos.view' },
+      },
+      {
         path: 'alben',
         name: 'fotos-albums',
         component: () => import('../views/AlbumsView.vue'),
@@ -64,6 +71,7 @@ export const modules: ModuleConfig[] = [
     ],
     menuItems: [
       { label: 'Galerie', icon: 'pi pi-images', routeName: 'fotos-gallery', permission: 'photos.view' },
+      { label: 'Galerie (neu)', icon: 'pi pi-th-large', routeName: 'fotos-gallery-v2', permission: 'photos.view' },
       { label: 'Alben', icon: 'pi pi-folder-open', routeName: 'fotos-albums', permission: 'photos.view' },
       { label: 'Feed', icon: 'pi pi-bell', routeName: 'fotos-feed', permission: 'photos.view' },
       { label: 'Rückblicke', icon: 'pi pi-history', routeName: 'fotos-recaps', permission: 'photos.view' },
