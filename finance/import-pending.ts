@@ -164,10 +164,28 @@ async function processPending(): Promise<ScanResult> {
       }
       imported++;
     } catch (err) {
-      const message = (err as Error).message ?? String(err);
+      const baseMessage = (err as Error).message ?? String(err);
+      // EACCES on read is the most common operator footgun: file
+      // dropped via host with non-apps ownership. Pull the actual
+      // mode/owner so the .error.txt explains it without grepping
+      // through container logs.
+      let message = baseMessage;
+      if ((err as NodeJS.ErrnoException)?.code === "EACCES") {
+        try {
+          const s = await stat(abs);
+          message =
+            `${baseMessage}\n\n` +
+            `File owner uid=${s.uid} gid=${s.gid} mode=${(s.mode & 0o777).toString(8)}.\n` +
+            `Container runs as uid=568 gid=568 (apps user).\n` +
+            `Fix on the host: chown 568:568 "${name}" && chmod g+r "${name}"\n` +
+            `or copy with the apps user (sudo -u apps install -m 0640 ...).\n`;
+        } catch {
+          // stat failure is rare here; keep the original message.
+        }
+      }
       log.error("scanPendingImports: import failed", {
         file: name,
-        err: message,
+        err: baseMessage,
       });
       try {
         await rename(
@@ -176,7 +194,9 @@ async function processPending(): Promise<ScanResult> {
         );
         await writeFile(
           path.join(FINANCE_IMPORT_DIR, `${base}.failed-${ts}.error.txt`),
-          message,
+          // Trailing newline so `cat <file>` doesn't run the message
+          // into the next shell prompt.
+          message.endsWith("\n") ? message : `${message}\n`,
           "utf8",
         );
       } catch (renameErr) {
