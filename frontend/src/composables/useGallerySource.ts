@@ -19,7 +19,7 @@
  *   - All work is server-driven: we never iterate over `entries` outside
  *     of the helper that splices a fetched slice into its slot range.
  */
-import { ref, shallowRef } from 'vue'
+import { ref, shallowRef, triggerRef } from 'vue'
 import type { Ref, ShallowRef } from 'vue'
 import {
   getGalleryGrid,
@@ -27,6 +27,7 @@ import {
   type GallerySortDir,
   type GallerySortField,
 } from '../api/gallery'
+import type { PhotoFilter } from '../api/photos'
 
 /**
  * Page size for windowed fetches. Smaller than the legacy 2000 because
@@ -35,6 +36,17 @@ import {
  * parse, less wasted bandwidth on idle scrolls.
  */
 export const GALLERY_PAGE_SIZE = 500
+
+export interface GalleryQueryState {
+  filter: PhotoFilter
+  sortBy: GallerySortField
+  sortDir: GallerySortDir
+  /**
+   * Search-result IDs in ranked order. When non-empty the gallery shows
+   * only these photos in this order, ignoring sort.
+   */
+  photoIds: number[] | null
+}
 
 export interface GallerySource {
   /** Reactive total row count for the current filter/sort. */
@@ -46,20 +58,35 @@ export interface GallerySource {
   /** Last error message, if any. Cleared on every successful fetch. */
   error: Ref<string>
   /**
-   * Initial fetch. Returns the offset of the centered/landed window so the
-   * virtualized scroller knows where to position the user's viewport.
+   * Initial fetch. Captures the supplied query state for use by subsequent
+   * `ensureRange` calls. Returns the offset of the centered/landed window
+   * so the virtualized scroller can position the viewport.
    */
-  init(opts: {
-    aroundPhotoId?: number | null
-    sortBy?: GallerySortField
-    sortDir?: GallerySortDir
-  }): Promise<{ initialOffset: number; total: number }>
+  init(opts: GalleryQueryState & { aroundPhotoId?: number | null }): Promise<{
+    initialOffset: number
+    total: number
+  }>
   /**
    * Make sure the slots in `[start, end)` are loaded (or in flight). Safe
    * to call on every virtualizer scroll event — no-ops when the covered
    * pages have already been requested.
    */
   ensureRange(start: number, end: number): void
+  /**
+   * Re-run `init` with the same query state and a new anchor (defaults to
+   * the currently visible window). Used after curation, upload or stack
+   * review to refresh the data without dropping the user's scroll
+   * position. Caller may supply `aroundPhotoId` to anchor on a specific
+   * photo (e.g. the one the user just acted on).
+   */
+  reload(opts?: { aroundPhotoId?: number | null }): Promise<void>
+  /**
+   * Mutate the loaded slot for `photoId` in place. Used for optimistic
+   * curation updates so the user sees the change instantly without a
+   * roundtrip. No-op if the photo isn't in the loaded window. Triggers a
+   * reactive update so the cell re-renders.
+   */
+  updateEntry(photoId: number, partial: Partial<GalleryGridEntry>): void
   /** Cancel all in-flight requests (e.g., on unmount). */
   cancel(): void
 }
@@ -70,10 +97,14 @@ export function useGallerySource(): GallerySource {
   const initialLoading = ref(false)
   const error = ref('')
 
-  // Sort state for follow-up fetches. Captured at init() time so the
-  // edge-fetches use the same parameters as the initial window.
-  let currentSortBy: GallerySortField = 'taken_at'
-  let currentSortDir: GallerySortDir = 'asc'
+  // Active query state — captured at init() time so follow-up edge fetches
+  // and reloads use exactly the same parameters.
+  const query: GalleryQueryState = {
+    filter: {},
+    sortBy: 'taken_at',
+    sortDir: 'asc',
+    photoIds: null,
+  }
 
   /**
    * Pages whose fetch has been started already. Deduped by
@@ -88,20 +119,15 @@ export function useGallerySource(): GallerySource {
     if (photos.length === 0) return
     const arr = entries.value
     if (arr.length === 0) return
-    // Mutate in place — the slots themselves are not Vue-reactive (we use
-    // shallowRef), so we trigger a single reassignment at the end to
-    // notify dependents (the virtualizer reads slots inside a computed
-    // that depends on `entries`).
     for (let i = 0; i < photos.length; i++) {
       const idx = offset + i
       if (idx >= 0 && idx < arr.length) arr[idx] = photos[i]!
     }
     // shallowRef's reactivity is on the ref itself, not on the array.
-    // Reassigning the same reference is a no-op for change detection, so
-    // we must replace the array. `slice()` is O(total) but allocates a
-    // single contiguous buffer — for 45k slots that is ~360 KB, which is
-    // cheap compared to what a deep-reactive proxy refresh would cost.
-    entries.value = arr.slice()
+    // Trigger explicitly so anything observing `entries` (the row-slot
+    // computed in VirtualGallery) refreshes — much cheaper than
+    // re-allocating a 45k-slot copy via .slice().
+    triggerRef(entries)
   }
 
   function pageStartForOffset(offset: number): number {
@@ -118,13 +144,13 @@ export function useGallerySource(): GallerySource {
         {
           limit: GALLERY_PAGE_SIZE,
           offset: pageOffset,
-          sortBy: currentSortBy,
-          sortDir: currentSortDir,
+          sortBy: query.sortBy,
+          sortDir: query.sortDir,
+          filter: query.filter,
+          photoIds: query.photoIds ?? undefined,
         },
         { signal: ctrl.signal },
       )
-      // Server may have clamped the offset (e.g., if total shrank between
-      // requests). Splice at the offset the server actually returned.
       spliceIn(res.offset, res.photos)
     } catch (err: any) {
       if (err?.name === 'AbortError') return
@@ -138,17 +164,17 @@ export function useGallerySource(): GallerySource {
     }
   }
 
-  async function init(opts: {
-    aroundPhotoId?: number | null
-    sortBy?: GallerySortField
-    sortDir?: GallerySortDir
-  }): Promise<{ initialOffset: number; total: number }> {
+  async function init(
+    opts: GalleryQueryState & { aroundPhotoId?: number | null },
+  ): Promise<{ initialOffset: number; total: number }> {
     cancel()
     requestedPages.clear()
     initialLoading.value = true
     error.value = ''
-    currentSortBy = opts.sortBy ?? 'taken_at'
-    currentSortDir = opts.sortDir ?? 'asc'
+    query.filter = opts.filter
+    query.sortBy = opts.sortBy
+    query.sortDir = opts.sortDir
+    query.photoIds = opts.photoIds && opts.photoIds.length > 0 ? opts.photoIds : null
 
     try {
       const ctrl = new AbortController()
@@ -157,20 +183,18 @@ export function useGallerySource(): GallerySource {
         {
           limit: GALLERY_PAGE_SIZE,
           aroundPhotoId: opts.aroundPhotoId ?? undefined,
-          sortBy: currentSortBy,
-          sortDir: currentSortDir,
+          sortBy: query.sortBy,
+          sortDir: query.sortDir,
+          filter: query.filter,
+          photoIds: query.photoIds ?? undefined,
         },
         { signal: ctrl.signal },
       )
       inflightControllers.delete(ctrl)
       total.value = res.total
-      // Allocate the sparse backing array. `Array(total).fill(null)` is
-      // O(total) memory allocation but no proxy creation per slot; for
-      // 45k that's ~360 KB.
+      // Allocate the sparse backing array.
       const arr: (GalleryGridEntry | null)[] = new Array(res.total).fill(null)
       entries.value = arr
-      // Mark this page as already requested so a subsequent ensureRange
-      // pass over the same window doesn't refetch it.
       const pageStart = pageStartForOffset(res.offset)
       requestedPages.add(pageStart)
       spliceIn(res.offset, res.photos)
@@ -185,19 +209,41 @@ export function useGallerySource(): GallerySource {
     }
   }
 
+  async function reload(opts?: { aroundPhotoId?: number | null }): Promise<void> {
+    await init({
+      filter: query.filter,
+      sortBy: query.sortBy,
+      sortDir: query.sortDir,
+      photoIds: query.photoIds,
+      aroundPhotoId: opts?.aroundPhotoId,
+    })
+  }
+
   function ensureRange(start: number, end: number) {
     if (total.value === 0) return
     const lo = Math.max(0, Math.min(start, total.value - 1))
     const hi = Math.max(lo, Math.min(end, total.value))
-    // Walk page-aligned offsets in [lo, hi) and fetch anything new.
     let p = pageStartForOffset(lo)
     while (p < hi) {
       if (!requestedPages.has(p)) {
-        // Fire-and-forget; ensureRange itself is sync. The page becomes
-        // visible as soon as `entries` updates after the splice.
         void fetchPage(p)
       }
       p += GALLERY_PAGE_SIZE
+    }
+  }
+
+  function updateEntry(photoId: number, partial: Partial<GalleryGridEntry>) {
+    const arr = entries.value
+    // Linear scan is fine: typically only a few hundred entries are
+    // loaded at any time (the visible window plus prefetched neighbours).
+    // Slots beyond the loaded window are `null` and are skipped quickly.
+    for (let i = 0; i < arr.length; i++) {
+      const e = arr[i]
+      if (e && e.id === photoId) {
+        arr[i] = { ...e, ...partial }
+        triggerRef(entries)
+        return
+      }
     }
   }
 
@@ -215,6 +261,8 @@ export function useGallerySource(): GallerySource {
     error,
     init,
     ensureRange,
+    reload,
+    updateEntry,
     cancel,
   }
 }

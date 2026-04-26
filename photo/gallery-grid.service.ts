@@ -13,7 +13,7 @@
  *     in the filtered+sorted result and returns a window centered on it
  *     so the gallery can `scrollToOffset` directly without a guess.
  */
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbFirst } from "../db/adapter";
 import { photos, photoCuration, photoGroupMembers, photoGroups } from "../db/schema";
@@ -173,11 +173,29 @@ export async function listGalleryGridLogic(
     sortBy: GallerySortField;
     sortDir: GallerySortDir;
     aroundPhotoId?: number;
+    /**
+     * Optional explicit ID set. When supplied, the result is restricted to
+     * these photos and ordered by their position in this array — used for
+     * natural-language search where ranking is the search engine's, not
+     * the date / quality / filename sort. Filters still apply.
+     */
+    photoIds?: number[];
   },
 ): Promise<GalleryGridResponse> {
   const filterConds = buildPhotoFilterConditions(userId, filter);
-  const whereClause = and(eq(photos.user_id, userId), ...filterConds);
-  const orderBy = orderByClauses(pagination.sortBy, pagination.sortDir);
+  const photoIdFilter = pagination.photoIds && pagination.photoIds.length > 0
+    ? inArray(photos.id, pagination.photoIds)
+    : undefined;
+  const whereClause = and(
+    eq(photos.user_id, userId),
+    ...filterConds,
+    ...(photoIdFilter ? [photoIdFilter] : []),
+  );
+  // When a photoIds list is provided, preserve its order via array_position.
+  // Otherwise, fall back to the requested column sort with id tie-break.
+  const orderBy = pagination.photoIds && pagination.photoIds.length > 0
+    ? [sql`array_position(${sql.raw(`ARRAY[${pagination.photoIds.join(",")}]::int[]`)}, ${photos.id})`]
+    : orderByClauses(pagination.sortBy, pagination.sortDir);
 
   // total — always returned, drives the virtualizer's row count.
   const countRow = await dbFirst<{ c: number }>(
@@ -195,31 +213,45 @@ export async function listGalleryGridLogic(
   // Resolve offset — precedence:
   //   1. explicit `offset` (used for back-fill / scroll-edge fetches)
   //   2. `aroundPhotoId`  (window centered on a target photo)
-  //   3. default = last page (so opening the gallery lands on the newest
-  //      photo in an ASC-by-date sort, which is the standard expectation
-  //      and avoids a useless initial fetch of the oldest rows).
+  //   3. default differs by mode:
+  //        - normal sort: last page (so opening the gallery lands on the
+  //          newest photo in an ASC-by-date sort)
+  //        - photoIds (search): first page (offset 0) — the top result is
+  //          the most relevant and that's what the user wants to see.
   let resolvedOffset: number;
   if (pagination.offset !== undefined && pagination.offset >= 0) {
     resolvedOffset = pagination.offset;
   } else if (pagination.aroundPhotoId !== undefined && total > 0) {
-    const pos = await locateGalleryPhotoPosition(
-      userId,
-      filter,
-      pagination.aroundPhotoId,
-      pagination.sortBy,
-      pagination.sortDir,
-    );
+    let pos: number | null = null;
+    if (pagination.photoIds && pagination.photoIds.length > 0) {
+      // Search mode: position is just the photo's index in the input list
+      // (or null if it isn't a search hit, in which case we let the
+      // fallback below kick in).
+      const idx = pagination.photoIds.indexOf(pagination.aroundPhotoId);
+      pos = idx >= 0 ? idx : null;
+    } else {
+      pos = await locateGalleryPhotoPosition(
+        userId,
+        filter,
+        pagination.aroundPhotoId,
+        pagination.sortBy,
+        pagination.sortDir,
+      );
+    }
     if (pos !== null) {
       const half = Math.floor(pagination.limit / 2);
       const maxOffset = Math.max(0, total - pagination.limit);
       resolvedOffset = Math.max(0, Math.min(pos - half, maxOffset));
     } else {
-      // Photo no longer exists / filtered out — fall through to last-page
-      // default rather than offset 0, matching the no-anchor case.
-      resolvedOffset = Math.max(0, total - pagination.limit);
+      // Photo no longer exists / filtered out — sensible default per mode.
+      resolvedOffset = pagination.photoIds && pagination.photoIds.length > 0
+        ? 0
+        : Math.max(0, total - pagination.limit);
     }
   } else {
-    resolvedOffset = Math.max(0, total - pagination.limit);
+    resolvedOffset = pagination.photoIds && pagination.photoIds.length > 0
+      ? 0
+      : Math.max(0, total - pagination.limit);
   }
 
   if (total === 0) {
