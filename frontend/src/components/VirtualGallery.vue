@@ -68,6 +68,13 @@ const props = defineProps<{
   selectMode?: boolean
   /** Set of currently-selected photo IDs (driven by parent). */
   selectedIds?: Set<number>
+  /**
+   * Absolute index of the keyboard-navigation cursor (or `null` when no
+   * cursor is active). The matching cell gets a distinct ring so the user
+   * can see where ↑/↓/←/→ will move next; ignored on touch-only sessions
+   * where the parent never sets it.
+   */
+  cursorIndex?: number | null
 }>()
 
 const emit = defineEmits<{
@@ -225,7 +232,7 @@ function findLoadedIndexById(id: number): number | null {
   return null
 }
 
-function scrollToIndex(index: number, align: 'start' | 'center' | 'end' = 'center') {
+function scrollToIndex(index: number, align: 'start' | 'center' | 'end' | 'auto' = 'center') {
   if (cols.value <= 0 || total.value === 0) return
   const clamped = Math.max(0, Math.min(index, total.value - 1))
   const row = Math.floor(clamped / cols.value)
@@ -280,6 +287,7 @@ defineExpose({
               'vg-cell--stack': !!slot.group,
               'vg-cell--stack-cover': slot.group?.is_cover,
               'vg-cell--selected': selectedIds && selectedIds.has(slot.id),
+              'vg-cell--cursor': cursorIndex === row.index * cols + i,
             }"
             :style="{ height: `${cellSize}px` }"
             @click="onTap(slot)"
@@ -447,6 +455,14 @@ defineExpose({
 
 .vg-cell--selected .vg-thumb {
   opacity: 0.8;
+}
+
+/* Keyboard cursor — visually distinct from `--selected` (which is the
+   batch-curation tick) by using a soft outer ring rather than a hard
+   outline, so the two states can co-exist on the same cell. */
+.vg-cell--cursor {
+  box-shadow: 0 0 0 3px var(--p-primary-300, #93c5fd),
+              0 0 0 6px rgba(59, 130, 246, 0.25);
 }
 
 .vg-select-icon {
