@@ -175,6 +175,25 @@ databases, Pub/Sub, etc.) is provisioned in test mode before the runner starts.
 See the [Encore testing docs](https://encore.dev/docs/ts/develop/testing) for
 details.
 
+## Pre-commit / pre-push hooks
+
+The repo ships with [husky](https://typicode.github.io/husky/) hooks that run
+the same checks the CI build runs, so a green commit/push means a green CI
+build. They install automatically via `npm install` (the root `prepare`
+script).
+
+| Hook         | What it runs                                                                  | Typical time |
+|--------------|-------------------------------------------------------------------------------|--------------|
+| `pre-commit` | `node scripts/check-sfc.mjs` + `vue-tsc --noEmit -p frontend/tsconfig.app.json` | 5–20 s       |
+| `pre-push`   | `npm --prefix frontend run build` (full vue-tsc + vite build)                  | 30–60 s      |
+
+`scripts/check-sfc.mjs` runs `@vue/compiler-sfc` over every `*.vue` file —
+it catches Vue template parse errors that `vue-tsc` is too permissive to
+report (e.g. multi-line attribute expressions that vite later refuses).
+
+Bypass locally with `git commit --no-verify` / `git push --no-verify` only
+when truly necessary; CI runs the same checks anyway.
+
 ## License
 
 MPL-2.0

@@ -1,0 +1,21 @@
+#!/usr/bin/env sh
+# ─── pre-commit ──────────────────────────────────────────────────────────────
+# Runs the *fast* checks: anything that should reject a bad commit before it
+# enters local history but completes in seconds, not minutes.
+#
+#   1. SFC parse — catches Vue template attribute / expression errors that
+#      `vue-tsc --noEmit` is too permissive to report. (See scripts/check-sfc.mjs.)
+#   2. Frontend type-check — `vue-tsc --noEmit` over the app config.
+#
+# Skip with `git commit --no-verify` when you really need to (do not make a
+# habit of it — the same checks run again in CI).
+set -e
+
+# --- 1. SFC parse ---------------------------------------------------------
+node scripts/check-sfc.mjs
+
+# --- 2. Frontend type-check ----------------------------------------------
+# `--noEmit -p tsconfig.app.json` mirrors what CI's `vue-tsc -b && vite build`
+# starts with, but without the slower build step. Catches TS errors in any
+# .ts / .tsx / .vue script block under frontend/src.
+( cd frontend && npx vue-tsc --noEmit -p tsconfig.app.json )
