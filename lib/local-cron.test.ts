@@ -7,7 +7,11 @@ import {
   inspectJobs,
   runJobNow,
   schedule,
+  setJobEnabled,
+  setLocalCronHooks,
   startLocalCron,
+  type JobInspectEntry,
+  type JobPersistedState,
 } from "./local-cron";
 
 afterEach(() => {
@@ -232,5 +236,113 @@ describe("runJobNow", () => {
 
   it("returns null for an unknown job", async () => {
     expect(await runJobNow("does-not-exist")).toBeNull();
+  });
+});
+
+describe("setJobEnabled", () => {
+  it("flips the enabled flag, marks status paused, and emits onStatusChange", async () => {
+    const events: JobInspectEntry[] = [];
+    setLocalCronHooks({
+      onStatusChange: async (entry) => {
+        events.push(entry);
+      },
+    });
+    schedule({
+      name: "toggle",
+      nextFire: everyMs(60_000),
+      run: async () => {},
+    });
+    await startLocalCron();
+
+    const paused = await setJobEnabled("toggle", false);
+    expect(paused?.enabled).toBe(false);
+    expect(paused?.status).toBe("paused");
+
+    const resumed = await setJobEnabled("toggle", true);
+    expect(resumed?.enabled).toBe(true);
+    expect(resumed?.status).toBe("scheduled");
+
+    expect(events.map((e) => e.status)).toContain("paused");
+    expect(events.map((e) => e.status)).toContain("scheduled");
+  });
+
+  it("paused jobs skip the handler when their timer fires", async () => {
+    vi.useFakeTimers();
+    let runs = 0;
+    schedule({
+      name: "pause-skip",
+      nextFire: everyMs(100),
+      run: async () => {
+        runs++;
+      },
+    });
+    await startLocalCron();
+    await setJobEnabled("pause-skip", false);
+
+    await vi.advanceTimersByTimeAsync(500);
+    expect(runs).toBe(0);
+  });
+
+  it("returns null for an unknown job", async () => {
+    expect(await setJobEnabled("nope", true)).toBeNull();
+  });
+});
+
+describe("hooks", () => {
+  it("hydrates entries from the load hook on first start", async () => {
+    const persisted: JobPersistedState[] = [
+      {
+        name: "h-job",
+        enabled: false,
+        last_run_at: new Date("2026-04-25T12:00:00Z"),
+        last_status: "ok",
+        last_duration_ms: 42,
+        last_error: null,
+        run_count: 7,
+        error_count: 1,
+      },
+    ];
+    setLocalCronHooks({
+      load: async () => persisted,
+    });
+
+    schedule({
+      name: "h-job",
+      nextFire: everyMs(60_000),
+      run: async () => {},
+    });
+    await startLocalCron();
+
+    const [snap] = inspectJobs();
+    expect(snap.enabled).toBe(false);
+    expect(snap.status).toBe("paused");
+    expect(snap.run_count).toBe(7);
+    expect(snap.error_count).toBe(1);
+    expect(snap.last_duration_ms).toBe(42);
+  });
+
+  it("calls the save hook after every run with the current counters", async () => {
+    vi.useFakeTimers();
+    const saved: JobPersistedState[] = [];
+    setLocalCronHooks({
+      save: async (state) => {
+        saved.push(state);
+      },
+    });
+    schedule({
+      name: "h-save",
+      nextFire: everyMs(100),
+      run: async () => {},
+    });
+    await startLocalCron();
+
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(saved.length).toBeGreaterThanOrEqual(2);
+    const last = saved[saved.length - 1];
+    expect(last.name).toBe("h-save");
+    expect(last.last_status).toBe("ok");
+    expect(last.run_count).toBeGreaterThan(0);
   });
 });
