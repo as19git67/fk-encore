@@ -184,14 +184,17 @@ geblieben ist.
 - Fehler: rename auf `<basename>.failed-<ts>.json` plus
   `<basename>.failed-<ts>.error.txt`.
 
-Daneben registriert das Modul den 5-Minuten-CronJob
-`finance-import-pending-scan` und exponiert intern
-`POST /internal/finance/scan-pending-imports` — beide zielen auf den
-gleichen Mutex-geschützten `runScan()`. Der CronJob feuert in
-Selfhost-Docker-Builds nicht automatisch (Encore.ts-Crons brauchen die
-Encore-Cloud-Control-Plane), der Watcher übernimmt den Live-Pickup;
-der Endpoint bleibt für manuelle Trigger und für den Tag, an dem die
-App auf Encore Cloud umzieht.
+Daneben exponiert das Modul intern
+`POST /internal/finance/scan-pending-imports` — gleicher Mutex-
+geschützter `runScan()` wie der Watcher, dient als manueller Trigger.
+Einen periodischen Cron gibt es für die Dropbox bewusst nicht: der
+chokidar-Watcher reagiert ohnehin auf jedes neue File live, ein
+zusätzlicher 5-Minuten-Tick wäre nur Last ohne Mehrwert.
+
+Die anderen Finance-Schedules (FinTS-Sync, TAN-Cleanup, daily
+Snapshot) laufen über `lib/local-cron.ts` — Encore.ts-CronJobs feuern
+in Selfhost-Docker nicht automatisch, deshalb der eigene Mini-
+Scheduler.
 
 Singleton-Mutex auf Modul-Ebene verhindert überlappende Läufe bei sehr
 großen Imports; während ein Lauf läuft, gibt der nächste sofort

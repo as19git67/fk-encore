@@ -27,15 +27,12 @@
  * gets replaced. If you want additive imports use the AdminImportView
  * UI instead.
  *
- * Why a chokidar watcher and not just the CronJob below: Encore.ts
- * CronJobs are scheduled by the Encore Cloud control plane. In our
- * self-hosted `encore build docker` deployment there is no control
- * plane wiring up the cron triggers, so the CronJob registers but
- * never actually fires. The chokidar watcher gives us live, immediate
- * pickup that doesn't depend on Encore Cloud — same pattern as
- * `documents/inbox-watcher.ts`. The CronJob + API endpoint stay as a
- * manual-trigger surface (curl POST /internal/finance/scan-pending-
- * imports) and for forward-compat with a future cloud migration.
+ * Why a chokidar watcher: Encore.ts CronJobs don't fire in self-host
+ * docker (see lib/local-cron.ts). For a filesystem-event source we
+ * don't need a polling tick at all — chokidar gives us live pickup
+ * the moment a file lands. Same pattern as `documents/inbox-watcher.ts`.
+ * The internal HTTP endpoint stays as a manual-trigger surface
+ * (`curl POST /internal/finance/scan-pending-imports`).
  *
  * Singleton mutex: a 50k-tx import takes minutes, so a second drop
  * arriving mid-flight could fire `processPending()` again. A module-
@@ -48,7 +45,6 @@ import { readFile, readdir, rename, stat, writeFile, mkdir } from "node:fs/promi
 import path from "node:path";
 import chokidar, { type FSWatcher } from "chokidar";
 import { api } from "encore.dev/api";
-import { CronJob } from "encore.dev/cron";
 import log from "encore.dev/log";
 
 import { runImport } from "./data-import";
@@ -201,14 +197,8 @@ async function processPending(): Promise<ScanResult> {
   };
 }
 
-const _ = new CronJob("finance-import-pending-scan", {
-  title: "Pick up dropped finance import files",
-  every: "5m",
-  endpoint: scanPendingImports,
-});
-
 // -----------------------------------------------------------------------
-// chokidar watcher (real-time pickup, independent of Encore Cloud cron)
+// chokidar watcher (real-time pickup; primary trigger for the dropbox)
 // -----------------------------------------------------------------------
 
 let watcher: FSWatcher | null = null;

@@ -34,9 +34,10 @@
 import { mkdir, readdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { api } from "encore.dev/api";
-import { CronJob } from "encore.dev/cron";
 import log from "encore.dev/log";
 import { eq, sql } from "drizzle-orm";
+
+import { dailyAtUtc, schedule } from "../lib/local-cron";
 
 import db from "../db/database";
 import {
@@ -300,10 +301,10 @@ async function rotateExports(currentFilename: string): Promise<number> {
 
 // -----------------------------------------------------------------------
 
-const _ = new CronJob("finance-export-snapshot", {
-  title: "Daily finance JSON snapshot to /data/finance-export",
-  // 03:00 UTC every day — late enough to overlap the early-morning
-  // bank syncs in finance-fints-integration.md §5 without contention.
-  schedule: "0 3 * * *",
-  endpoint: runFinanceExport,
+// 03:00 UTC every day — late enough to overlap the early-morning
+// bank syncs in finance-fints-integration.md §5 without contention.
+schedule({
+  name: "finance-export-snapshot",
+  nextFire: dailyAtUtc(3, 0),
+  run: () => runFinanceExport(),
 });

@@ -25,7 +25,6 @@
  */
 
 import { api, APIError } from "encore.dev/api";
-import { CronJob } from "encore.dev/cron";
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 
@@ -42,6 +41,7 @@ import { persistFetchResult } from "./statement-persist";
 import { cleanupExpiredTanSessions } from "./tan-sessions";
 import { sendToUser, type PushPayload } from "../push/push.service";
 import type { FinanceSyncSlot } from "../db/schema";
+import { everyMs, schedule } from "../lib/local-cron";
 
 console.log("[boot] finance/statements-cron.ts: all imports resolved");
 
@@ -394,22 +394,20 @@ async function notifyTanRequired(
 }
 
 // -----------------------------------------------------------------------
-// CronJob registration (side effects at module load)
+// Schedule registration (side effects at module load)
 // -----------------------------------------------------------------------
 
-// Encore parses cron schedules at compile time and rejects template
-// literals — keep the value a bare string and assert that it matches
-// the tolerance constant above.
-const _syncCron = new CronJob("finance-sync-statements", {
-  title: "Finance: sync bank statements",
-  every: "5m",
-  endpoint: syncStatements,
+// Local in-process scheduler — Encore CronJobs don't fire in self-host
+// docker, see lib/local-cron.ts. The internal HTTP endpoints stay
+// exposed for manual triggering.
+schedule({
+  name: "finance-sync-statements",
+  nextFire: everyMs(CRON_INTERVAL_MINUTES * 60_000),
+  run: () => syncStatements(),
 });
-void _syncCron;
 
-const _tanCleanupCron = new CronJob("finance-tan-cleanup", {
-  title: "Finance: cleanup expired TAN sessions",
-  every: "1h",
-  endpoint: cleanupExpiredTanSessions,
+schedule({
+  name: "finance-tan-cleanup",
+  nextFire: everyMs(60 * 60_000),
+  run: () => cleanupExpiredTanSessions(),
 });
-void _tanCleanupCron;

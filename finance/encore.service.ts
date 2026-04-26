@@ -1,36 +1,40 @@
 /**
  * Service boot for the finance module.
  *
- * Side-effect imports register the cron jobs (sync + TAN cleanup) on
- * module load, matching the pattern used by documents/encore.service.ts.
+ * Side-effect imports register scheduled jobs with `lib/local-cron.ts`
+ * on module load. We then call `startLocalCron()` once to arm the
+ * timers. Encore.ts CronJobs themselves don't fire in our self-host
+ * docker setup (no Encore Cloud control plane), so we run our own
+ * scheduler — see lib/local-cron.ts.
  *
  * Architecture: docs/finance-service-layout.md.
  */
 
 import { Service } from "encore.dev/service";
 
+import { startLocalCron } from "../lib/local-cron";
+
 console.log("[boot] finance/encore.service.ts: begin");
 
-// Register cron jobs:
-//   - statements-cron:  bank syncs + TAN-session cleanup
-//   - import-pending:   filesystem dropbox for *.pending.json files
-//   - export-cron:      daily JSON snapshot of every finance_* table
-// Encore only discovers CronJobs along the import graph rooted at this
-// service file, so leaving these out means the crons never register
-// even though the files compile fine.
+// Side-effect imports — each module calls schedule() at top-level:
+//   - statements-cron:  finance-sync-statements (5m), finance-tan-cleanup (1h)
+//   - export-cron:      finance-export-snapshot (daily 03:00 UTC)
+//   - import-pending:   no scheduled job (chokidar watcher handles it),
+//                       but the module also exposes the internal scan
+//                       endpoint, so we still need it loaded.
 import "./statements-cron";
 import "./import-pending";
 import "./export-cron";
 
 import { startFinanceImportWatcher } from "./import-pending";
 
+// Arm all timers registered above. Synchronous, fire-and-forget jobs
+// run on their own timers from here on.
+startLocalCron();
+
 // Fire-and-forget: the dropbox watcher must not block service boot.
 // Failures are logged inside the watcher. Mirrors the documents
-// inbox-watcher startup in documents/encore.service.ts. Needed because
-// Encore.ts CronJobs only fire under Encore Cloud — in self-hosted
-// `encore build docker` deployments the cron registers but never
-// triggers, so without this watcher *.pending.json files would sit in
-// the dropbox forever.
+// inbox-watcher startup in documents/encore.service.ts.
 startFinanceImportWatcher().catch((err) =>
   console.error("[finance] failed to start import watcher:", err),
 );
