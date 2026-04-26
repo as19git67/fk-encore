@@ -8,12 +8,12 @@
  * small and the resume query fast.
  */
 
-import { CronJob } from "encore.dev/cron";
 import { api } from "encore.dev/api";
 import { lt, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbExec } from "../db/adapter";
 import { realtimeEvents } from "../db/schema";
+import { everyMs, schedule } from "../lib/local-cron";
 
 const RETENTION_DAYS = 7;
 
@@ -41,8 +41,11 @@ export const pruneRealtimeOutbox = api(
   },
 );
 
-const _ = new CronJob("realtime-outbox-prune", {
-  title: "Prune realtime event outbox",
-  every: "6h",
-  endpoint: pruneRealtimeOutbox,
+schedule({
+  name: "realtime-outbox-prune",
+  description: `Prune realtime_events rows older than ${RETENTION_DAYS} days`,
+  service: "realtime",
+  scheduleLabel: "every 6h",
+  nextFire: everyMs(6 * 60 * 60_000),
+  run: () => pruneRealtimeOutbox(),
 });

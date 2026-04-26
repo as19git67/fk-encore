@@ -12,13 +12,13 @@
 
 import fs from "fs";
 import path from "path";
-import { CronJob } from "encore.dev/cron";
 import { api } from "encore.dev/api";
 import {
   DOCUMENTS_INBOX_DIR,
   SUPPORTED_EXTENSIONS,
 } from "./documents.service";
 import { handleAddedFile } from "./inbox-watcher";
+import { everyMs, schedule } from "../lib/local-cron";
 
 interface ReconcileResult {
   scanned: number;
@@ -69,8 +69,11 @@ export const reconcileInbox = api(
   },
 );
 
-const _ = new CronJob("documents-inbox-reconcile", {
-  title: "Reconcile documents inbox",
-  every: "1h",
-  endpoint: reconcileInbox,
+schedule({
+  name: "documents-inbox-reconcile",
+  description: "Replay inbox files the live watcher missed",
+  service: "documents",
+  scheduleLabel: "every 1h",
+  nextFire: everyMs(60 * 60_000),
+  run: () => reconcileInbox(),
 });

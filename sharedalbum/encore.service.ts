@@ -1,8 +1,12 @@
 import { Service } from "encore.dev/service";
 import { maintenanceMiddleware } from "../backup/maintenance";
+import { startLocalCron } from "../lib/local-cron";
+import "../lib/scheduled-jobs-hooks";
 
 // Register the digest cron job at service boot.
 import "./digest-cron";
+
+startLocalCron();
 
 console.log("[boot] sharedalbum/encore.service.ts: registering Service");
 
