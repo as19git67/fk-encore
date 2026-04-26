@@ -65,7 +65,7 @@ describe("scheduler", () => {
         runs.push(Date.now());
       },
     });
-    startLocalCron();
+    await startLocalCron();
 
     await vi.advanceTimersByTimeAsync(1000);
     expect(runs).toHaveLength(1);
@@ -89,7 +89,7 @@ describe("scheduler", () => {
         if (attempts === 1) throw new Error("boom");
       },
     });
-    startLocalCron();
+    await startLocalCron();
 
     await vi.advanceTimersByTimeAsync(500);
     expect(attempts).toBe(1);
@@ -112,7 +112,7 @@ describe("scheduler", () => {
         runs++;
       },
     });
-    startLocalCron();
+    await startLocalCron();
 
     await vi.advanceTimersByTimeAsync(100);
     expect(runs).toBe(1);
@@ -127,7 +127,7 @@ describe("scheduler", () => {
       nextFire: everyMs(1000),
       run: async () => {},
     });
-    startLocalCron();
+    await startLocalCron();
 
     let lateRuns = 0;
     schedule({
@@ -161,7 +161,7 @@ describe("inspectJobs", () => {
       nextFire: everyMs(1000),
       run: async () => {},
     });
-    startLocalCron();
+    await startLocalCron();
 
     let snapshot = inspectJobs();
     expect(snapshot).toHaveLength(1);
@@ -194,7 +194,7 @@ describe("inspectJobs", () => {
         throw new Error("kaboom");
       },
     });
-    startLocalCron();
+    await startLocalCron();
 
     await vi.advanceTimersByTimeAsync(100);
     const snapshot = inspectJobs();
@@ -203,13 +203,13 @@ describe("inspectJobs", () => {
     expect(snapshot[0].last_error).toBe("kaboom");
   });
 
-  it("marks a job deactivated when nextFire returns null on first arm", () => {
+  it("marks a job deactivated when nextFire returns null on first arm", async () => {
     schedule({
       name: "inspect-dead",
       nextFire: () => null,
       run: async () => {},
     });
-    startLocalCron();
+    await startLocalCron();
     const [snap] = inspectJobs();
     expect(snap.status).toBe("deactivated");
     expect(snap.next_fire_at).toBeNull();
@@ -226,7 +226,7 @@ describe("runJobNow", () => {
         runs++;
       },
     });
-    startLocalCron();
+    await startLocalCron();
 
     const result = await runJobNow("manual");
     expect(runs).toBe(1);
