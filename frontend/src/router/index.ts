@@ -27,6 +27,14 @@ function readLastRoute(): string | null {
       raw.startsWith('/register') || raw.startsWith('/forgot-password')) {
     return null
   }
+  // One-shot migration: every existing account before the new gallery
+  // shipped has the legacy gallery `/fotos` (or its `/photos` redirect
+  // alias) saved here. We treat those exact values as "no preference"
+  // so the root redirect falls through to the new virtualized gallery
+  // — once the user navigates anywhere else (including explicitly
+  // opening "Galerie alt") the saved route updates and this migration
+  // no longer applies.
+  if (raw === '/fotos' || raw === '/photos') return null
   return raw
 }
 
