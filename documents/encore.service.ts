@@ -1,5 +1,6 @@
 import { Service } from "encore.dev/service";
 import { startLocalCron } from "../lib/local-cron";
+import "../lib/scheduled-jobs-hooks";
 
 console.log("[boot] documents/encore.service.ts: begin");
 

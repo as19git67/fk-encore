@@ -15,16 +15,17 @@
  * a service whose boot file runs late in the import graph still gets
  * its jobs registered.
  *
+ * Persistence + realtime fan-out are pluggable via `setLocalCronHooks`
+ * (see `lib/local-cron-persist.ts`). Without hooks the scheduler runs
+ * fully in-memory, which is what the unit tests use. With hooks wired
+ * up, run history survives container restarts and every status change
+ * emits a WebSocket event for the admin UI.
+ *
  * Catch-up on missed runs (e.g. container was down across the daily
  * 03:00 UTC export) is intentionally NOT done — same semantics as
  * Encore's CronJob, which also just resumes from the next future
  * tick. If you want a startup catch-up, do an explicit one-shot call
  * at boot before `startLocalCron()`.
- *
- * Last-run state (status, duration, next fire) is kept per entry and
- * surfaced via `inspectJobs()` for the admin UI. State lives only in
- * memory — restarts reset it. That's fine for an at-a-glance health
- * panel; long-term audit logging would need its own table.
  *
  * Usage:
  *   schedule({
@@ -58,7 +59,13 @@ export interface ScheduledJob {
   run: () => Promise<unknown>;
 }
 
-export type JobStatus = "scheduled" | "running" | "ok" | "error" | "deactivated";
+export type JobStatus =
+  | "scheduled"
+  | "running"
+  | "ok"
+  | "error"
+  | "deactivated"
+  | "paused";
 
 export interface JobInspectEntry {
   name: string;
@@ -66,6 +73,7 @@ export interface JobInspectEntry {
   service: string | null;
   schedule_label: string | null;
   status: JobStatus;
+  enabled: boolean;
   next_fire_at: string | null;
   last_run_at: string | null;
   last_duration_ms: number | null;
@@ -74,10 +82,42 @@ export interface JobInspectEntry {
   error_count: number;
 }
 
+/** Snapshot used for persistence I/O — Date objects, no string conversion. */
+export interface JobPersistedState {
+  name: string;
+  enabled: boolean;
+  last_run_at: Date | null;
+  last_status: JobStatus | null;
+  last_duration_ms: number | null;
+  last_error: string | null;
+  run_count: number;
+  error_count: number;
+}
+
+export interface LocalCronHooks {
+  /**
+   * Called once on the first `startLocalCron()` to hydrate the
+   * in-memory entries from persistent storage. Receives the names of
+   * all currently-registered jobs; should return whatever rows it has
+   * for those names (others are ignored). Missing rows mean "fresh
+   * job, defaults apply".
+   */
+  load?: (names: string[]) => Promise<JobPersistedState[]>;
+  /** Upsert the persisted row for `state.name`. */
+  save?: (state: JobPersistedState) => Promise<void>;
+  /**
+   * Called on every status transition (paused/scheduled → running →
+   * ok/error and on enable/disable toggles). Use to fan out realtime
+   * events to the admin UI. Errors are swallowed.
+   */
+  onStatusChange?: (entry: JobInspectEntry) => Promise<void>;
+}
+
 interface Entry {
   job: ScheduledJob;
   timer: NodeJS.Timeout | null;
   status: JobStatus;
+  enabled: boolean;
   next_fire_at: Date | null;
   last_run_at: Date | null;
   last_duration_ms: number | null;
@@ -88,6 +128,8 @@ interface Entry {
 
 const entries: Entry[] = [];
 let started = false;
+let hooks: LocalCronHooks = {};
+let hydratedOnce = false;
 
 export function schedule(job: ScheduledJob): void {
   // Names should be unique — keeps the admin UI unambiguous and
@@ -100,6 +142,7 @@ export function schedule(job: ScheduledJob): void {
     job,
     timer: null,
     status: "scheduled",
+    enabled: true,
     next_fire_at: null,
     last_run_at: null,
     last_duration_ms: null,
@@ -111,34 +154,80 @@ export function schedule(job: ScheduledJob): void {
   if (started) {
     // Late registration (some other service already started the
     // scheduler): arm immediately so we don't wait for an explicit
-    // re-start.
+    // re-start. New jobs added after start skip the load hook —
+    // they'll persist on first run via save.
     armNext(entry, new Date());
   }
 }
 
-export function startLocalCron(): void {
+export function setLocalCronHooks(newHooks: LocalCronHooks): void {
+  hooks = newHooks;
+}
+
+export async function startLocalCron(): Promise<void> {
   if (started) return;
   started = true;
+  await hydrateFromHooks();
   const now = new Date();
   for (const entry of entries) {
     if (!entry.timer) armNext(entry, now);
   }
 }
 
+async function hydrateFromHooks(): Promise<void> {
+  if (hydratedOnce || !hooks.load) {
+    hydratedOnce = true;
+    return;
+  }
+  hydratedOnce = true;
+  try {
+    const rows = await hooks.load(entries.map((e) => e.job.name));
+    const byName = new Map(rows.map((r) => [r.name, r]));
+    for (const entry of entries) {
+      const row = byName.get(entry.job.name);
+      if (!row) continue;
+      entry.enabled = row.enabled;
+      entry.last_run_at = row.last_run_at;
+      entry.last_duration_ms = row.last_duration_ms;
+      entry.last_error = row.last_error;
+      entry.run_count = row.run_count;
+      entry.error_count = row.error_count;
+      // Last status from a prior process is informational only; the
+      // current scheduling state is "scheduled" (or "paused") since
+      // we haven't fired yet in this process.
+      if (!entry.enabled) {
+        entry.status = "paused";
+      } else if (row.last_status === "ok" || row.last_status === "error") {
+        // Show the prior outcome until the next run replaces it.
+        entry.status = row.last_status;
+      }
+    }
+  } catch (err) {
+    log.error("localCron: state hydration failed", {
+      err: (err as Error).message,
+    });
+  }
+}
+
 export function inspectJobs(): JobInspectEntry[] {
-  return entries.map((e) => ({
+  return entries.map(toInspect);
+}
+
+function toInspect(e: Entry): JobInspectEntry {
+  return {
     name: e.job.name,
     description: e.job.description ?? null,
     service: e.job.service ?? null,
     schedule_label: e.job.scheduleLabel ?? null,
     status: e.status,
+    enabled: e.enabled,
     next_fire_at: e.next_fire_at?.toISOString() ?? null,
     last_run_at: e.last_run_at?.toISOString() ?? null,
     last_duration_ms: e.last_duration_ms,
     last_error: e.last_error,
     run_count: e.run_count,
     error_count: e.error_count,
-  }));
+  };
 }
 
 /** Trigger a job by name immediately (off the regular schedule). */
@@ -146,7 +235,26 @@ export async function runJobNow(name: string): Promise<JobInspectEntry | null> {
   const entry = entries.find((e) => e.job.name === name);
   if (!entry) return null;
   await runEntry(entry);
-  return inspectJobs().find((j) => j.name === name) ?? null;
+  return toInspect(entry);
+}
+
+/** Pause/resume a job. Persists via save hook and emits status event. */
+export async function setJobEnabled(
+  name: string,
+  enabled: boolean,
+): Promise<JobInspectEntry | null> {
+  const entry = entries.find((e) => e.job.name === name);
+  if (!entry) return null;
+  if (entry.enabled === enabled) return toInspect(entry);
+  entry.enabled = enabled;
+  if (!enabled) {
+    entry.status = "paused";
+  } else if (entry.status === "paused") {
+    entry.status = "scheduled";
+  }
+  await persist(entry);
+  await emitStatus(entry);
+  return toInspect(entry);
 }
 
 /** For tests: stop all timers and reset registry. */
@@ -156,6 +264,8 @@ export function _resetLocalCron(): void {
   }
   entries.length = 0;
   started = false;
+  hooks = {};
+  hydratedOnce = false;
 }
 
 function armNext(entry: Entry, after: Date): void {
@@ -169,6 +279,7 @@ function armNext(entry: Entry, after: Date): void {
     });
     entry.status = "deactivated";
     entry.next_fire_at = null;
+    void emitStatus(entry);
     return;
   }
 
@@ -176,6 +287,7 @@ function armNext(entry: Entry, after: Date): void {
     log.info("localCron: job deactivated", { name: entry.job.name });
     entry.status = "deactivated";
     entry.next_fire_at = null;
+    void emitStatus(entry);
     return;
   }
 
@@ -185,7 +297,13 @@ function armNext(entry: Entry, after: Date): void {
   const MAX_DELAY = 2_147_483_647;
   const delayMs = Math.max(0, next.getTime() - Date.now());
   entry.next_fire_at = next;
-  if (entry.status !== "error" && entry.status !== "ok") {
+  // Don't overwrite "ok"/"error" with "scheduled" — the admin UI uses
+  // the last outcome to colour the row until the next run replaces it.
+  if (
+    entry.status !== "ok" &&
+    entry.status !== "error" &&
+    entry.status !== "paused"
+  ) {
     entry.status = "scheduled";
   }
 
@@ -206,8 +324,13 @@ function armNext(entry: Entry, after: Date): void {
 }
 
 async function runEntry(entry: Entry): Promise<void> {
+  if (!entry.enabled) {
+    log.info("localCron: skipping disabled job", { name: entry.job.name });
+    return;
+  }
   log.info("localCron: firing", { name: entry.job.name });
   entry.status = "running";
+  await emitStatus(entry);
   const startedAt = Date.now();
   entry.last_run_at = new Date(startedAt);
   try {
@@ -229,6 +352,44 @@ async function runEntry(entry: Entry): Promise<void> {
       name: entry.job.name,
       duration_ms: entry.last_duration_ms,
       err: entry.last_error,
+    });
+  }
+  await persist(entry);
+  await emitStatus(entry);
+}
+
+async function persist(entry: Entry): Promise<void> {
+  if (!hooks.save) return;
+  try {
+    await hooks.save({
+      name: entry.job.name,
+      enabled: entry.enabled,
+      last_run_at: entry.last_run_at,
+      last_status:
+        entry.status === "ok" || entry.status === "error"
+          ? entry.status
+          : null,
+      last_duration_ms: entry.last_duration_ms,
+      last_error: entry.last_error,
+      run_count: entry.run_count,
+      error_count: entry.error_count,
+    });
+  } catch (err) {
+    log.warn("localCron: state persist failed", {
+      name: entry.job.name,
+      err: (err as Error).message,
+    });
+  }
+}
+
+async function emitStatus(entry: Entry): Promise<void> {
+  if (!hooks.onStatusChange) return;
+  try {
+    await hooks.onStatusChange(toInspect(entry));
+  } catch (err) {
+    log.warn("localCron: status notify failed", {
+      name: entry.job.name,
+      err: (err as Error).message,
     });
   }
 }

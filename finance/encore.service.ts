@@ -13,6 +13,9 @@
 import { Service } from "encore.dev/service";
 
 import { startLocalCron } from "../lib/local-cron";
+// Side-effect: registers DB persistence + realtime fan-out hooks for
+// the scheduler before any startLocalCron() runs.
+import "../lib/scheduled-jobs-hooks";
 
 console.log("[boot] finance/encore.service.ts: begin");
 

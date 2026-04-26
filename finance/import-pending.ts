@@ -214,6 +214,20 @@ const STABILITY_MS = parseInt(
   10,
 );
 
+/**
+ * inotify-based file watching does not always fire across Docker
+ * bind-mount boundaries — most notably on ZFS-backed bind mounts
+ * (TrueNAS SCALE) and on SMB / NFS shares. Default to polling so the
+ * watcher behaves the same in dev and prod; flip
+ * `FINANCE_IMPORT_POLLING=false` if you're on a filesystem where
+ * inotify is reliable and want lower CPU.
+ */
+const USE_POLLING = (process.env.FINANCE_IMPORT_POLLING ?? "true") !== "false";
+const POLL_INTERVAL_MS = parseInt(
+  process.env.FINANCE_IMPORT_POLL_INTERVAL_MS ?? "2000",
+  10,
+);
+
 function isPending(file: string): boolean {
   return file.endsWith(PENDING_SUFFIX);
 }
@@ -231,9 +245,18 @@ function isPending(file: string): boolean {
 export async function startFinanceImportWatcher(): Promise<void> {
   if (watcher) return;
 
+  // Use plain console.log here too: if structured `log.info` ever gets
+  // filtered or routed weirdly, we still see the boot trace in stdout.
+  console.log(
+    `[finance.import-watcher] starting, dir=${FINANCE_IMPORT_DIR} polling=${USE_POLLING} interval=${POLL_INTERVAL_MS}ms`,
+  );
+
   try {
     await mkdir(FINANCE_IMPORT_DIR, { recursive: true });
   } catch (err) {
+    console.error(
+      `[finance.import-watcher] cannot create import dir ${FINANCE_IMPORT_DIR}: ${(err as Error).message}`,
+    );
     log.error("startFinanceImportWatcher: cannot create import dir", {
       dir: FINANCE_IMPORT_DIR,
       err: (err as Error).message,
@@ -242,6 +265,9 @@ export async function startFinanceImportWatcher(): Promise<void> {
   }
 
   if (!existsSync(FINANCE_IMPORT_DIR)) {
+    console.warn(
+      `[finance.import-watcher] dir missing after mkdir, skipping: ${FINANCE_IMPORT_DIR}`,
+    );
     log.warn("startFinanceImportWatcher: dir missing after mkdir, skipping", {
       dir: FINANCE_IMPORT_DIR,
     });
@@ -254,10 +280,16 @@ export async function startFinanceImportWatcher(): Promise<void> {
   // batched scan here instead of N independent add events at boot).
   try {
     const result = await runScan();
+    console.log(
+      `[finance.import-watcher] boot scan done: scanned=${result.scanned} imported=${result.imported} failed=${result.failed}`,
+    );
     if (result.scanned > 0) {
       log.info("startFinanceImportWatcher: boot scan done", result);
     }
   } catch (err) {
+    console.error(
+      `[finance.import-watcher] boot scan failed: ${(err as Error).message}`,
+    );
     log.error("startFinanceImportWatcher: boot scan failed", {
       err: (err as Error).message,
     });
@@ -272,10 +304,16 @@ export async function startFinanceImportWatcher(): Promise<void> {
     },
     ignoreInitial: true,
     persistent: true,
+    usePolling: USE_POLLING,
+    interval: POLL_INTERVAL_MS,
+    binaryInterval: POLL_INTERVAL_MS,
     awaitWriteFinish: { stabilityThreshold: STABILITY_MS, pollInterval: 500 },
   });
 
   watcher.on("add", (file) => {
+    console.log(
+      `[finance.import-watcher] pending file detected: ${path.basename(file)}`,
+    );
     log.info("financeImportWatcher: pending file detected", {
       file: path.basename(file),
     });
@@ -289,14 +327,24 @@ export async function startFinanceImportWatcher(): Promise<void> {
     );
   });
   watcher.on("error", (err) => {
+    console.error(
+      `[finance.import-watcher] chokidar error: ${(err as Error).message}`,
+    );
     log.error("financeImportWatcher: chokidar error", {
       err: (err as Error).message,
     });
   });
+  watcher.on("ready", () => {
+    console.log("[finance.import-watcher] watcher ready");
+  });
 
+  console.log(
+    `[finance.import-watcher] watching ${FINANCE_IMPORT_DIR} (stability=${STABILITY_MS}ms)`,
+  );
   log.info("financeImportWatcher: watching", {
     dir: FINANCE_IMPORT_DIR,
     stability_ms: STABILITY_MS,
+    polling: USE_POLLING,
   });
 }
 
