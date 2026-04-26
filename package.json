@@ -9,7 +9,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
-    "dev:frontend": "cd frontend && npm run dev"
+    "dev:frontend": "cd frontend && npm run dev",
+    "check:sfc": "node scripts/check-sfc.mjs",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
@@ -20,6 +22,7 @@
     "@types/web-push": "^3.6.4",
     "@vitest/coverage-v8": "^4.1.0",
     "drizzle-kit": "^0.31.9",
+    "husky": "^9.1.7",
     "typescript": "^5.2.2",
     "vitest": "^4.1.0"
   },

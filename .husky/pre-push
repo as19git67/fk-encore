@@ -1,0 +1,12 @@
+#!/usr/bin/env sh
+# ─── pre-push ────────────────────────────────────────────────────────────────
+# Runs the *full* frontend build before letting any push leave the laptop.
+# Mirrors exactly what GitHub Actions runs in CI's frontend job, so a green
+# pre-push means the CI build will not fail on the same code.
+#
+# Slower than the pre-commit checks (~30–60 s on a clean cache) but only
+# fires once per `git push`, not per commit. Skip with `git push --no-verify`
+# in genuine emergencies; the CI will catch you anyway.
+set -e
+
+npm --prefix frontend run build
