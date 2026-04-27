@@ -401,6 +401,12 @@ function goBackToCompare() {
 async function handleDone() {
   try {
     await reviewPhotoGroup(props.group.id, props.group.photo_ids)
+    // Emit `reviewed` first so the parent's local-state mirror runs
+    // (e.g. flipping group.reviewed in the cache) before the overlay
+    // tears down on `close`. Without this, plain `close` covers both
+    // "user finished review" and "user dismissed via X" — the parent
+    // can't tell them apart.
+    emit('reviewed')
     emit('close')
   } catch (err: any) {
     console.error('Failed to review group:', err)
