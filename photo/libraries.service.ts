@@ -33,6 +33,7 @@ import {
 } from "./photo.service";
 import { enqueuePhotoScan } from "./scan-queue";
 import { triggerWorkers } from "./scan-worker";
+import { registerScanAbort, unregisterScanAbort } from "./library-scan-control";
 
 console.log("[boot] photo/libraries.service.ts: all imports resolved");
 
@@ -601,15 +602,23 @@ export async function importFile(
  * Walk a directory recursively and return absolute paths of all supported
  * image files. Skips dotfiles and the standard noise dirs (node_modules etc.)
  * so it can be safely pointed at an entire user home.
+ *
+ * Honours an optional AbortSignal so a cancelled scan stops descending into
+ * further subdirectories instead of walking the whole tree to completion.
  */
-async function* walkSupportedFiles(root: string): AsyncGenerator<string> {
+async function* walkSupportedFiles(
+  root: string,
+  signal?: AbortSignal,
+): AsyncGenerator<string> {
+  if (signal?.aborted) return;
   const entries = await fs.promises.readdir(root, { withFileTypes: true });
   for (const entry of entries) {
+    if (signal?.aborted) return;
     if (entry.name.startsWith(".")) continue;
     const full = path.join(root, entry.name);
     if (entry.isDirectory()) {
       if (entry.name === "node_modules") continue;
-      yield* walkSupportedFiles(full);
+      yield* walkSupportedFiles(full, signal);
     } else if (entry.isFile()) {
       const ext = path.extname(entry.name).toLowerCase();
       if (SUPPORTED_EXTENSIONS.has(ext)) yield full;
@@ -634,10 +643,19 @@ export class ScanAlreadyRunningError extends Error {
   }
 }
 
+export class ScanCancelledError extends Error {
+  constructor(libraryId: number) {
+    super(`scan cancelled for library ${libraryId}`);
+    this.name = "ScanCancelledError";
+  }
+}
+
 export async function scanLibrary(libraryId: number): Promise<ScanReport> {
   if (activeScans.has(libraryId)) {
     throw new ScanAlreadyRunningError(libraryId);
   }
+  const abortCtrl = registerScanAbort(libraryId);
+  const signal = abortCtrl.signal;
   const run = (async () => {
     const library = await getLibrary(libraryId);
     if (!library) throw new Error(`library ${libraryId} not found`);
@@ -652,7 +670,8 @@ export async function scanLibrary(libraryId: number): Promise<ScanReport> {
       errors: 0,
     };
 
-    for await (const file of walkSupportedFiles(library.path)) {
+    for await (const file of walkSupportedFiles(library.path, signal)) {
+      if (signal.aborted) throw new ScanCancelledError(libraryId);
       report.scanned++;
       try {
         const outcome = await importFile(library, file);
@@ -665,6 +684,8 @@ export async function scanLibrary(libraryId: number): Promise<ScanReport> {
         console.error(`[libraries] import failed for ${file}:`, err?.message ?? err);
       }
     }
+
+    if (signal.aborted) throw new ScanCancelledError(libraryId);
 
     await dbExec(
       db
@@ -679,6 +700,7 @@ export async function scanLibrary(libraryId: number): Promise<ScanReport> {
     return await run;
   } finally {
     activeScans.delete(libraryId);
+    unregisterScanAbort(libraryId, abortCtrl);
   }
 }
 

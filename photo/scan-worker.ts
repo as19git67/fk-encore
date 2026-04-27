@@ -417,9 +417,17 @@ class LibraryScanWorker {
       const report = await libs.scanLibrary(job.library_id);
       await markLibraryScanDone(job.id, report, removed);
     } catch (err: any) {
-      const msg = err?.message ?? String(err);
-      console.error(`[scan-worker] library_scan job ${job.id} failed:`, msg);
-      await markLibraryScanFailed(job.id, msg).catch(() => {});
+      if (err?.name === "ScanCancelledError") {
+        // User-triggered cancel via Datenverwaltung. Mark as failed so the
+        // row leaves 'processing' and the UI's "wird abgebrochen…" hint
+        // clears; a clear message keeps it distinguishable from real errors.
+        console.log(`[scan-worker] library_scan job ${job.id} cancelled by user`);
+        await markLibraryScanFailed(job.id, "Scan vom Benutzer abgebrochen").catch(() => {});
+      } else {
+        const msg = err?.message ?? String(err);
+        console.error(`[scan-worker] library_scan job ${job.id} failed:`, msg);
+        await markLibraryScanFailed(job.id, msg).catch(() => {});
+      }
     }
     return true;
   }
