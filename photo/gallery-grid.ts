@@ -135,7 +135,13 @@ export const listGalleryGrid = api(
     const limit = typeof params.limit === "number" && params.limit > 0
       ? Math.min(params.limit, MAX_LIMIT)
       : DEFAULT_LIMIT;
-    const offset = typeof params.offset === "number" && params.offset > 0
+    // `>= 0`, NOT `> 0`: offset=0 is the "first page" request from the
+    // virtualized gallery's edge-prefetch when the user scrolls to the
+    // top. Treating it as falsy would drop the param entirely, fall
+    // through to the no-anchor default, and return `total - limit`
+    // (= the last page) instead of page 0 — leaving the leading slots
+    // as permanent skeletons.
+    const offset = typeof params.offset === "number" && params.offset >= 0
       ? params.offset
       : undefined;
     const aroundPhotoId =
