@@ -154,6 +154,10 @@ onMounted(() => {
 onBeforeUnmount(() => {
   resizeObs?.disconnect()
   resizeObs = null
+  if (trailingTimer) {
+    clearTimeout(trailingTimer)
+    trailingTimer = null
+  }
   source.cancel()
 })
 
@@ -180,22 +184,52 @@ function rowSlots(rowIndex: number): (GalleryGridEntry | null)[] {
 }
 
 // ── Edge prefetch ───────────────────────────────────────────────────────────
-// Fire eagerly on every viewport change. The dedup in `useGallerySource`
-// (`pagePromises`) collapses repeat requests for the same page, so even an
-// end-to-end scroll-bar drag only triggers one `/gallery/grid` call per
-// page crossed. Debouncing here is a trap: a continuous wheel scroll
-// resets the timer faster than it expires, so the prefetch never fires
-// and cells the user is actually scrolling toward render as permanent
-// skeletons until they let go.
-watch(virtualRows, (rows) => {
+// Throttled, leading-edge + trailing call: the first scroll event always
+// fires immediately so cells in the new viewport start filling without a
+// perceptible delay; subsequent events within `THROTTLE_MS` coalesce into
+// a single trailing fire. Pure debounce was a trap (continuous wheel
+// scroll kept resetting the timer, prefetch never fired, permanent
+// skeletons); pure no-throttle was 300+ requests on an end-to-end scroll
+// because every scroll-event surfaced a fresh viewport and re-triggered
+// `ensureRange`.
+//
+// Each call also asks the source to abort any in-flight page whose range
+// is entirely outside the new window, so pages the user has scrolled past
+// stop downloading. Aborted pages drop out of pagePromises in fetchPage's
+// catch block, so scrolling back resurrects them.
+const THROTTLE_MS = 150
+let lastFire = 0
+let trailingTimer: ReturnType<typeof setTimeout> | null = null
+
+function runPrefetch() {
+  const rows = virtualizer.value.getVirtualItems()
   if (rows.length === 0 || total.value === 0) return
   const firstIdx = rows[0]!.index * cols.value
   const lastIdx = (rows[rows.length - 1]!.index + 1) * cols.value
-  source.ensureRange(
-    Math.max(0, firstIdx - GALLERY_PAGE_SIZE),
-    Math.min(total.value, lastIdx + GALLERY_PAGE_SIZE),
-  )
-}, { flush: 'post' })
+  const start = Math.max(0, firstIdx - GALLERY_PAGE_SIZE)
+  const end = Math.min(total.value, lastIdx + GALLERY_PAGE_SIZE)
+  source.cancelOutside(start, end)
+  source.ensureRange(start, end)
+}
+
+function schedulePrefetch() {
+  const now = Date.now()
+  const elapsed = now - lastFire
+  if (elapsed >= THROTTLE_MS) {
+    if (trailingTimer) { clearTimeout(trailingTimer); trailingTimer = null }
+    runPrefetch()
+    lastFire = now
+    return
+  }
+  if (trailingTimer) return
+  trailingTimer = setTimeout(() => {
+    trailingTimer = null
+    runPrefetch()
+    lastFire = Date.now()
+  }, THROTTLE_MS - elapsed)
+}
+
+watch(virtualRows, schedulePrefetch, { flush: 'post' })
 
 // ── Initial + re-init on query change ───────────────────────────────────────
 const ready = ref(false)
