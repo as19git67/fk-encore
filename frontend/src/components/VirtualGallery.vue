@@ -83,6 +83,12 @@ const emit = defineEmits<{
   'toggle-select': [entry: GalleryGridEntry]
   /** Fires after a (re)load completes so the parent can show toasts etc. */
   'loaded': [info: { total: number; offset: number }]
+  /**
+   * Fires whenever the scroll container's at-start / at-end state
+   * changes. Lets the parent's "jump to newest / oldest" toolbar
+   * button flip its label without polling.
+   */
+  'ends-changed': [ends: { atStart: boolean; atEnd: boolean }]
 }>()
 
 // ── Data source ─────────────────────────────────────────────────────────────
@@ -140,6 +146,26 @@ const overscan = computed(() => {
   return 4
 })
 
+// ── Scroll-end detection ────────────────────────────────────────────────────
+// Tracked reactively so the parent's "jump to newest / oldest" toolbar
+// button can flip its label/icon based on which end of the scroll
+// container the user is currently parked at. Updated on every scroll
+// event (passive listener) plus once after each (re)load so the initial
+// scroll-to-anchor settles cleanly.
+let lastEnds: { atStart: boolean; atEnd: boolean } = { atStart: true, atEnd: false }
+function updateScrollEnds() {
+  const el = scrollRef.value
+  if (!el) return
+  const next = {
+    atStart: el.scrollTop <= 1,
+    atEnd: Math.ceil(el.scrollTop + el.clientHeight) >= el.scrollHeight - 1,
+  }
+  if (next.atStart !== lastEnds.atStart || next.atEnd !== lastEnds.atEnd) {
+    lastEnds = next
+    emit('ends-changed', next)
+  }
+}
+
 onMounted(() => {
   if (scrollRef.value) {
     recalcLayout(scrollRef.value.clientWidth)
@@ -148,12 +174,14 @@ onMounted(() => {
       if (entry) recalcLayout(entry.contentRect.width)
     })
     resizeObs.observe(scrollRef.value)
+    scrollRef.value.addEventListener('scroll', updateScrollEnds, { passive: true })
   }
 })
 
 onBeforeUnmount(() => {
   resizeObs?.disconnect()
   resizeObs = null
+  scrollRef.value?.removeEventListener('scroll', updateScrollEnds)
   if (trailingTimer) {
     clearTimeout(trailingTimer)
     trailingTimer = null
@@ -254,6 +282,11 @@ async function loadAndScroll(anchor: number | null | undefined) {
   } else if (totalRows > 0) {
     virtualizer.value.scrollToIndex(0, { align: 'start' })
   }
+  // After the post-init scroll settles, refresh the at-start / at-end
+  // state so the parent's "jump to newest / oldest" toolbar button
+  // labels itself correctly without waiting for the user's first scroll.
+  await new Promise<void>((r) => requestAnimationFrame(() => r()))
+  updateScrollEnds()
 }
 
 onMounted(() => {
