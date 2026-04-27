@@ -23,6 +23,10 @@ services:
     image: ghcr.io/as19git67/fk-encore-embedding:test
     container_name: fk-encore-embedding
     restart: unless-stopped
+    # See docker-compose.yml for the rationale behind cpuset + thread count.
+    # Mirror the production layout so dev runs the embedder under the same
+    # CPU constraints and surfaces any throughput regressions before deploy.
+    cpuset: "0-11"
     depends_on:
       postgres:
         condition: service_healthy
@@ -32,6 +36,7 @@ services:
       CLIP_PRETRAINED: frozen_laion5b_s13b_b90k
       DINO_MODEL_NAME: facebook/dinov2-base
       LOG_LEVEL: INFO
+      EMBED_NUM_THREADS: "6"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 20s
