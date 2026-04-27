@@ -5,7 +5,7 @@ import HeicImage from './HeicImage.vue'
 import { getPhotoUrl, type Photo, type CurationStatus } from '../api/photos'
 import { formatPhotoDate, formatLocationLabel } from '../utils/dateFormat'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   photo: Photo
   prevPhoto: Photo | null
   nextPhoto: Photo | null
@@ -15,7 +15,15 @@ const props = defineProps<{
   /** When true the details icon switches to a close icon (✕). Default: false. */
   detailsActive?: boolean
   /** Optional slot content rendered inside the fullscreen image (e.g. face box) */
-}>()
+}>(), {
+  // Vue 3 coerces a Boolean prop that the parent didn't pass to `false`
+  // (NOT `undefined`), which collapses `props.showDetailsButton !== false`
+  // — so an unbound `showDetailsButton` would silently hide the ⓘ button
+  // and mute the I keyboard shortcut. Defaulting to `true` here makes the
+  // useful behaviour the default; callers wanting the icon hidden still
+  // pass `:show-details-button="false"` explicitly.
+  showDetailsButton: true,
+})
 
 const emit = defineEmits<{
   'close': []
