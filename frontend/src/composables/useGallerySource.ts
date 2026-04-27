@@ -88,6 +88,15 @@ export interface GallerySource {
    */
   updateEntry(photoId: number, partial: Partial<GalleryGridEntry>): void
   /**
+   * Flip `group.reviewed` to true on every loaded entry that belongs to
+   * `groupId`. Used after the user finishes a stack-review so the cells
+   * lose their stack badge / blue outline / compare-on-click behaviour
+   * without forcing a full gallery reload (which would replace the
+   * entries array and skeleton-flash every loaded cell). No-op for
+   * entries that aren't currently loaded.
+   */
+  markGroupReviewed(groupId: number): void
+  /**
    * Resolve the entry at a given absolute index. If the slot is already
    * populated, resolves synchronously with that entry. Otherwise, fires a
    * page fetch (deduped via the same in-flight tracking that `ensureRange`
@@ -324,6 +333,19 @@ export function useGallerySource(): GallerySource {
     }
   }
 
+  function markGroupReviewed(groupId: number) {
+    const arr = entries.value
+    let changed = false
+    for (let i = 0; i < arr.length; i++) {
+      const e = arr[i]
+      if (e?.group && e.group.id === groupId && !e.group.reviewed) {
+        arr[i] = { ...e, group: { ...e.group, reviewed: true } }
+        changed = true
+      }
+    }
+    if (changed) triggerRef(entries)
+  }
+
   function cancel() {
     for (const c of inflightControllers) {
       try { c.abort() } catch { /* ignore */ }
@@ -341,6 +363,7 @@ export function useGallerySource(): GallerySource {
     ensureRange,
     reload,
     updateEntry,
+    markGroupReviewed,
     loadEntryAt,
     cancelOutside,
     cancel,
