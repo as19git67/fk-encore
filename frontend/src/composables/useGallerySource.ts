@@ -97,6 +97,15 @@ export interface GallerySource {
    * fails.
    */
   loadEntryAt(index: number): Promise<GalleryGridEntry | null>
+  /**
+   * Abort any in-flight page fetches whose entire range lies outside
+   * `[start, end)`. Used by the virtualizer's prefetch watcher during
+   * fast scrolls so pages the user has scrolled past don't keep
+   * downloading after they're no longer relevant. Aborted pages are
+   * removed from the dedup map so a future ensureRange() over the same
+   * window will refetch.
+   */
+  cancelOutside(start: number, end: number): void
   /** Cancel all in-flight requests (e.g., on unmount). */
   cancel(): void
 }
@@ -122,9 +131,18 @@ export function useGallerySource(): GallerySource {
    * whether its request is in flight or already resolved — once we asked
    * for it we never ask again. The promise lets callers (e.g. the
    * fullscreen viewer's `loadEntryAt`) await an in-flight load instead of
-   * polling for the slot to populate.
+   * polling for the slot to populate. On abort the entry is removed so
+   * a subsequent ensureRange() call will refetch.
    */
   const pagePromises = new Map<number, Promise<void>>()
+  /**
+   * AbortControllers for in-flight pages, keyed the same way. Lets
+   * `cancelOutside(start, end)` abort fetches the user has scrolled past
+   * before they finish — the dominant cost during fast end-to-end
+   * scrolling. Removed from the map when the fetch settles (success,
+   * error or abort).
+   */
+  const pageControllers = new Map<number, AbortController>()
   const inflightControllers = new Set<AbortController>()
 
   function spliceIn(offset: number, photos: GalleryGridEntry[]) {
@@ -151,6 +169,7 @@ export function useGallerySource(): GallerySource {
     if (existing) return existing
     const ctrl = new AbortController()
     inflightControllers.add(ctrl)
+    pageControllers.set(pageOffset, ctrl)
     const promise = (async () => {
       try {
         const res = await getGalleryGrid(
@@ -166,7 +185,13 @@ export function useGallerySource(): GallerySource {
         )
         spliceIn(res.offset, res.photos)
       } catch (err: any) {
-        if (err?.name === 'AbortError') return
+        if (err?.name === 'AbortError') {
+          // Aborted by `cancelOutside` — drop from the dedup map so a
+          // future ensureRange() can refetch this page if the user
+          // scrolls back into it.
+          pagePromises.delete(pageOffset)
+          return
+        }
         // Allow a retry by dropping the promise on failure. The virtualizer
         // will trigger `ensureRange` again as the user keeps scrolling, so
         // a transient network blip self-heals.
@@ -174,6 +199,7 @@ export function useGallerySource(): GallerySource {
         error.value = err?.message ?? 'Fehler beim Laden weiterer Fotos.'
       } finally {
         inflightControllers.delete(ctrl)
+        pageControllers.delete(pageOffset)
       }
     })()
     pagePromises.set(pageOffset, promise)
@@ -270,6 +296,19 @@ export function useGallerySource(): GallerySource {
     return entries.value[index] ?? null
   }
 
+  function cancelOutside(start: number, end: number) {
+    // Abort any in-flight page whose entire range is outside `[start, end)`.
+    // The bookkeeping in fetchPage's catch removes the aborted entry from
+    // pagePromises, so a subsequent ensureRange() can refetch if the user
+    // scrolls back. Pages that are partially inside the window keep going.
+    for (const [pageOffset, ctrl] of pageControllers) {
+      const pageEnd = pageOffset + GALLERY_PAGE_SIZE
+      if (pageEnd <= start || pageOffset >= end) {
+        try { ctrl.abort() } catch { /* ignore */ }
+      }
+    }
+  }
+
   function updateEntry(photoId: number, partial: Partial<GalleryGridEntry>) {
     const arr = entries.value
     // Linear scan is fine: typically only a few hundred entries are
@@ -290,6 +329,7 @@ export function useGallerySource(): GallerySource {
       try { c.abort() } catch { /* ignore */ }
     }
     inflightControllers.clear()
+    pageControllers.clear()
   }
 
   return {
@@ -302,6 +342,7 @@ export function useGallerySource(): GallerySource {
     reload,
     updateEntry,
     loadEntryAt,
+    cancelOutside,
     cancel,
   }
 }
