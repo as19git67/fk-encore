@@ -15,14 +15,14 @@
  *     `detailsActive`. FullscreenOverlay slots the sidebar into its
  *     `details-flyout` slot; the flyout's open/closed CSS class is
  *     driven by the same boolean.
- *   - When `fullscreenPhoto.id` changes (open / prev / next), we load
+ *   - When `cursorPhoto.id` changes (open / prev / next), we load
  *     faces + landmarks for that photo in parallel with the existing
  *     `getPhotoDetailsBatch` hydration. Loaders are guarded by the
  *     same `hydrateToken` so out-of-order navigation can't strand a
  *     stale list of faces on the wrong photo.
  *   - Edit-date is parent-owned: the sidebar emits `start-edit-date`,
  *     `update-date`, `cancel-edit-date`; the parent flips the refs
- *     and calls `updatePhotoDate`, then mutates `fullscreenPhoto` in
+ *     and calls `updatePhotoDate`, then mutates `cursorPhoto` in
  *     place so the topbar's date label updates immediately.
  *
  * Phase 3c adds keyboard navigation over the grid: a `cursorIndex` ref
@@ -36,6 +36,16 @@
  * deeplinks resolve here instead of `PhotosView.vue` (which has been
  * deleted). `/fotos/galerie-alt` URLs still resolve via a router-level
  * legacy redirect to `/fotos/galerie`.
+ *
+ * Phase 3e unifies the per-photo state under a single `cursorPhoto`
+ * (with `cursorPrev / cursorNext` for fullscreen navigation). Both
+ * the fullscreen viewer and the new persistent desktop sidebar read
+ * from the same triple, hydrated by `hydrateCursor` on every cursor
+ * mutation (click, keyboard ←/→/↑/↓, fullscreen prev/next). The
+ * sidebar mounts on ≥768px viewports as a fixed-width column right of
+ * the grid; on mobile it's hidden and details remain reachable through
+ * the fullscreen ⓘ flyout, which still receives a sidebar instance via
+ * the `details-flyout` slot.
  */
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -466,17 +476,22 @@ function onDrop(e: DragEvent) {
   if (files && files.length > 0) void handleUpload(files)
 }
 
-// ── Fullscreen viewer ───────────────────────────────────────────────────────
-// `fullscreenIndex` is the single source of truth: prev/next mutate it and
-// `hydrateFullscreen` rebuilds the (current, prev, next) Photo triple. The
-// `hydrateToken` guards against an out-of-order race where the user mashes
-// the next button faster than `getPhotoDetailsBatch` resolves — only the
-// most-recent hydration wins.
+// ── Cursor + fullscreen state ───────────────────────────────────────────────
+// `cursorIndex` is the single source of truth for which photo is "current"
+// — it drives both the keyboard cursor highlight in the grid (slice 3c)
+// and the photo shown in the fullscreen viewer (slice 3a) and the desktop
+// detail sidebar (slice 3e). `cursorPhoto / cursorPrev / cursorNext` is
+// the hydrated triple kept in sync via `hydrateCursor`. The triple is
+// rebuilt on every cursor move (click, keyboard nav, fullscreen prev/next)
+// so the desktop sidebar always reflects whatever the user last looked at.
+// The `hydrateToken` cancels stale results when the user mashes nav faster
+// than `getPhotoDetailsBatch` resolves — only the most-recent hydration
+// wins.
 const isFullscreen = ref(false)
-const fullscreenIndex = ref<number | null>(null)
-const fullscreenPhoto = ref<Photo | null>(null)
-const fullscreenPrev = ref<Photo | null>(null)
-const fullscreenNext = ref<Photo | null>(null)
+const cursorIndex = ref<number | null>(null)
+const cursorPhoto = ref<Photo | null>(null)
+const cursorPrev = ref<Photo | null>(null)
+const cursorNext = ref<Photo | null>(null)
 let hydrateToken = 0
 
 // ── Detail flyout state ─────────────────────────────────────────────────────
@@ -534,7 +549,7 @@ function entryToMinimalPhoto(entry: GalleryGridEntry): Photo {
   }
 }
 
-async function hydrateFullscreen(index: number): Promise<void> {
+async function hydrateCursor(index: number): Promise<void> {
   if (!galleryRef.value) return
   const myToken = ++hydrateToken
   const total = galleryRef.value.getTotal()
@@ -553,9 +568,9 @@ async function hydrateFullscreen(index: number): Promise<void> {
 
   // Provisional render from the grid entry while the details call resolves.
   // Without this the overlay flashes empty for the network round-trip.
-  fullscreenPhoto.value = entryToMinimalPhoto(curEntry)
-  fullscreenPrev.value = prevEntry ? entryToMinimalPhoto(prevEntry) : null
-  fullscreenNext.value = nextEntry ? entryToMinimalPhoto(nextEntry) : null
+  cursorPhoto.value = entryToMinimalPhoto(curEntry)
+  cursorPrev.value = prevEntry ? entryToMinimalPhoto(prevEntry) : null
+  cursorNext.value = nextEntry ? entryToMinimalPhoto(nextEntry) : null
 
   // Cancel any in-progress date edit when the photo changes.
   isEditingDate.value = false
@@ -571,12 +586,12 @@ async function hydrateFullscreen(index: number): Promise<void> {
     const { photos } = await getPhotoDetailsBatch(ids)
     if (myToken !== hydrateToken) return
     const byId = new Map(photos.map((p) => [p.id, p]))
-    fullscreenPhoto.value = byId.get(curEntry.id) ?? fullscreenPhoto.value
-    fullscreenPrev.value = prevEntry
-      ? (byId.get(prevEntry.id) ?? fullscreenPrev.value)
+    cursorPhoto.value = byId.get(curEntry.id) ?? cursorPhoto.value
+    cursorPrev.value = prevEntry
+      ? (byId.get(prevEntry.id) ?? cursorPrev.value)
       : null
-    fullscreenNext.value = nextEntry
-      ? (byId.get(nextEntry.id) ?? fullscreenNext.value)
+    cursorNext.value = nextEntry
+      ? (byId.get(nextEntry.id) ?? cursorNext.value)
       : null
   } catch {
     // Fall back to the minimal photo objects we already set above.
@@ -585,41 +600,36 @@ async function hydrateFullscreen(index: number): Promise<void> {
 
 async function openFullscreenAt(index: number): Promise<void> {
   if (!galleryRef.value) return
-  fullscreenIndex.value = index
+  cursorIndex.value = index
   isFullscreen.value = true
-  await hydrateFullscreen(index)
+  await hydrateCursor(index)
   galleryRef.value.scrollToIndex(index)
 }
 
 function closeFullscreen() {
+  // Deliberately keep `cursorIndex / cursorPhoto / faces / landmarks`
+  // around so the desktop sidebar continues showing the last-viewed
+  // photo's details. Only the fullscreen-specific UI bits get reset.
   isFullscreen.value = false
-  fullscreenIndex.value = null
-  fullscreenPhoto.value = null
-  fullscreenPrev.value = null
-  fullscreenNext.value = null
   detailsActive.value = false
   isEditingDate.value = false
-  detectedFaces.value = []
-  detectedLandmarks.value = []
 }
 
 async function goPrev(): Promise<void> {
-  if (fullscreenIndex.value === null || fullscreenIndex.value === 0) return
-  const next = fullscreenIndex.value - 1
-  fullscreenIndex.value = next
+  if (cursorIndex.value === null || cursorIndex.value === 0) return
+  const next = cursorIndex.value - 1
   cursorIndex.value = next
-  await hydrateFullscreen(next)
+  await hydrateCursor(next)
   galleryRef.value?.scrollToIndex(next)
 }
 
 async function goNext(): Promise<void> {
-  if (fullscreenIndex.value === null || !galleryRef.value) return
+  if (cursorIndex.value === null || !galleryRef.value) return
   const total = galleryRef.value.getTotal()
-  if (fullscreenIndex.value + 1 >= total) return
-  const next = fullscreenIndex.value + 1
-  fullscreenIndex.value = next
+  if (cursorIndex.value + 1 >= total) return
+  const next = cursorIndex.value + 1
   cursorIndex.value = next
-  await hydrateFullscreen(next)
+  await hydrateCursor(next)
   galleryRef.value.scrollToIndex(next)
 }
 
@@ -628,7 +638,7 @@ async function applyCurationToPhoto(id: number, target: CurationStatus): Promise
   // this id. If the network write fails we reload the source AND re-hydrate
   // the current fullscreen to undo the optimistic change.
   galleryRef.value?.updateEntry(id, { curation: target })
-  for (const r of [fullscreenPhoto, fullscreenPrev, fullscreenNext]) {
+  for (const r of [cursorPhoto, cursorPrev, cursorNext]) {
     if (r.value && r.value.id === id) {
       r.value = { ...r.value, curation_status: target }
     }
@@ -637,7 +647,7 @@ async function applyCurationToPhoto(id: number, target: CurationStatus): Promise
     await updatePhotoCuration(id, target)
   } catch {
     await galleryRef.value?.reload()
-    if (fullscreenIndex.value !== null) await hydrateFullscreen(fullscreenIndex.value)
+    if (cursorIndex.value !== null) await hydrateCursor(cursorIndex.value)
   }
 }
 
@@ -657,14 +667,14 @@ function onShowDetails() {
 
 // ── Sidebar handlers (date edit, faces, reindex) ────────────────────────────
 function onSidebarStartEditDate() {
-  const photo = fullscreenPhoto.value
+  const photo = cursorPhoto.value
   if (!photo) return
   editDate.value = new Date(photo.taken_at || photo.created_at)
   isEditingDate.value = true
 }
 
 async function onSidebarUpdateDate() {
-  const photo = fullscreenPhoto.value
+  const photo = cursorPhoto.value
   if (!photo || !editDate.value) return
   updatingDate.value = true
   try {
@@ -673,7 +683,7 @@ async function onSidebarUpdateDate() {
     // Mutate the displayed photo so the topbar's date label reflects the new
     // value immediately. The sort order in the grid may now be stale; that's
     // acceptable until the next reload (filter / sort / search change).
-    fullscreenPhoto.value = { ...photo, taken_at: takenAt }
+    cursorPhoto.value = { ...photo, taken_at: takenAt }
     isEditingDate.value = false
   } catch (err: any) {
     error.value = err?.message ?? 'Fehler beim Aktualisieren des Datums.'
@@ -687,7 +697,7 @@ function onSidebarCancelEditDate() {
 }
 
 async function onSidebarIgnoreFace(faceId: number) {
-  const photo = fullscreenPhoto.value
+  const photo = cursorPhoto.value
   if (!photo) return
   try {
     await ignoreFace(faceId)
@@ -697,7 +707,7 @@ async function onSidebarIgnoreFace(faceId: number) {
 }
 
 async function onSidebarReindex() {
-  const photo = fullscreenPhoto.value
+  const photo = cursorPhoto.value
   if (!photo) return
   reindexingPhoto.value = true
   try {
@@ -708,10 +718,10 @@ async function onSidebarReindex() {
 }
 
 // ── Keyboard navigation across the grid ─────────────────────────────────────
-// `cursorIndex` is null until the user either restores a last-viewed photo
-// (set by `onGalleryLoaded`) or presses an arrow key for the first time.
+// `cursorIndex` is declared in the cursor-state block above and is null
+// until the user either restores a last-viewed photo (set by
+// `onGalleryLoaded`) or presses an arrow key for the first time.
 // VirtualGallery shows a soft ring around the matching cell.
-const cursorIndex = ref<number | null>(null)
 
 function moveCursor(delta: number, byRow: boolean) {
   if (!galleryRef.value) return
@@ -722,6 +732,7 @@ function moveCursor(delta: number, byRow: boolean) {
     // cell rather than leaping `cols` rows on the very first ↓.
     cursorIndex.value = 0
     galleryRef.value.scrollToIndex(0, 'auto')
+    void hydrateCursor(0)
     return
   }
   const cols = galleryRef.value.getCols()
@@ -731,6 +742,10 @@ function moveCursor(delta: number, byRow: boolean) {
   if (next >= total) next = total - 1
   cursorIndex.value = next
   galleryRef.value.scrollToIndex(next, 'auto')
+  // Hydrate so the desktop sidebar reflects the new cursor cell. The
+  // hydrateToken cancels stale results when the user mashes the arrow
+  // keys faster than the network responds.
+  void hydrateCursor(next)
 }
 
 async function activateCursor() {
@@ -787,23 +802,24 @@ async function onPhotoClick(entry: GalleryGridEntry) {
 // ── Initial-load hook ───────────────────────────────────────────────────────
 // Two jobs after the grid finishes its first load:
 //   1. Honor an explicit `?photoId=` deeplink by opening fullscreen on it.
-//   2. Otherwise, drop the keyboard cursor on the restored last-viewed
-//      photo so arrow keys start navigating from there instead of cell 0.
+//   2. Otherwise, drop the cursor on the restored last-viewed photo and
+//      hydrate it so the desktop sidebar shows that photo's details on
+//      first paint (instead of the user having to click anything).
 async function onGalleryLoaded() {
   if (!galleryRef.value) return
   if (pendingFullscreenId.value !== null) {
     const id = pendingFullscreenId.value
     pendingFullscreenId.value = null
     const idx = galleryRef.value.findLoadedIndexById(id)
-    if (idx !== null) {
-      cursorIndex.value = idx
-      await openFullscreenAt(idx)
-    }
+    if (idx !== null) await openFullscreenAt(idx)
     return
   }
   if (initialAnchor.value !== null) {
     const idx = galleryRef.value.findLoadedIndexById(initialAnchor.value)
-    if (idx !== null) cursorIndex.value = idx
+    if (idx !== null) {
+      cursorIndex.value = idx
+      void hydrateCursor(idx)
+    }
   }
 }
 
@@ -967,22 +983,61 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
       <span>{{ uploadResultMessage }}</span>
     </div>
 
-    <!-- The grid itself ------------------------------------------------------ -->
-    <VirtualGallery
-      ref="galleryRef"
-      :around-photo-id="initialAnchor"
-      :filter="filter"
-      :sort-by="sortByForGallery"
-      :sort-dir="sortDirForGallery"
-      :search-photo-ids="searchPhotoIds"
-      :select-mode="selectMode"
-      :selected-ids="selectedIds"
-      :cursor-index="cursorIndex"
-      @photo-click="onPhotoClick"
-      @stack-click="onStackClick"
-      @toggle-select="onToggleSelect"
-      @loaded="onGalleryLoaded"
-    />
+    <!-- Grid + persistent desktop detail panel. On <768px the panel is
+         hidden via CSS so the grid takes the full width and details
+         remain reachable via the fullscreen flyout. -->
+    <div class="content-row">
+      <div class="grid-area">
+        <VirtualGallery
+          ref="galleryRef"
+          :around-photo-id="initialAnchor"
+          :filter="filter"
+          :sort-by="sortByForGallery"
+          :sort-dir="sortDirForGallery"
+          :search-photo-ids="searchPhotoIds"
+          :select-mode="selectMode"
+          :selected-ids="selectedIds"
+          :cursor-index="cursorIndex"
+          @photo-click="onPhotoClick"
+          @stack-click="onStackClick"
+          @toggle-select="onToggleSelect"
+          @loaded="onGalleryLoaded"
+        />
+      </div>
+
+      <!-- Desktop detail panel — same component as the fullscreen flyout
+           but always visible on desktop, driven by the cursor cell. The
+           reactive cursor → hydrate flow keeps it in sync with grid
+           clicks, keyboard navigation, and fullscreen prev/next. -->
+      <aside v-if="cursorPhoto" class="desktop-sidebar">
+        <PhotoDetailSidebar
+          :photo="cursorPhoto"
+          :faces="detectedFaces"
+          :loading-faces="loadingFaces"
+          :landmarks="detectedLandmarks"
+          :loading-landmarks="loadingLandmarks"
+          :persons="persons"
+          :can-delete="canDelete"
+          :can-upload="canUpload"
+          :reindexing-photo="reindexingPhoto"
+          :is-editing-date="isEditingDate"
+          v-model:editDate="editDate"
+          :updating-date="updatingDate"
+          :show-persons="showPersons"
+          :limit-albums-shown="true"
+          :face-service-available="serviceHealth.faceServiceAvailable"
+          :location-menu-exclude-all-photos="true"
+          @toggle-favorite="onFullscreenToggleFavorite"
+          @hide="onFullscreenHide"
+          @restore="onFullscreenRestore"
+          @start-edit-date="onSidebarStartEditDate"
+          @update-date="onSidebarUpdateDate"
+          @cancel-edit-date="onSidebarCancelEditDate"
+          @ignore-face="onSidebarIgnoreFace"
+          @reindex="onSidebarReindex"
+        />
+      </aside>
+    </div>
 
     <!-- Stack compare overlay -->
     <PhotoCompareView
@@ -1001,10 +1056,10 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
          itself self-manages its album section (lazy-loads albums, owns
          pending changes); we only feed it the per-photo state. -->
     <FullscreenOverlay
-      v-if="isFullscreen && fullscreenPhoto"
-      :photo="fullscreenPhoto"
-      :prev-photo="fullscreenPrev"
-      :next-photo="fullscreenNext"
+      v-if="isFullscreen && cursorPhoto"
+      :photo="cursorPhoto"
+      :prev-photo="cursorPrev"
+      :next-photo="cursorNext"
       :can-delete="canDelete"
       :details-active="detailsActive"
       @close="closeFullscreen"
@@ -1017,7 +1072,7 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
     >
       <template #details-flyout>
         <PhotoDetailSidebar
-          :photo="fullscreenPhoto"
+          :photo="cursorPhoto"
           :faces="detectedFaces"
           :loading-faces="loadingFaces"
           :landmarks="detectedLandmarks"
@@ -1102,6 +1157,38 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
   flex-direction: column;
   height: calc(100vh - var(--menubar-height, 3.5rem));
   overflow: hidden;
+}
+
+/* ── Content row: grid + persistent desktop sidebar ──────────────────── */
+.content-row {
+  display: flex;
+  flex: 1;
+  min-height: 0;          /* required so the nested VirtualGallery scroll
+                             container actually scrolls instead of pushing
+                             the row past the viewport */
+}
+
+.grid-area {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+/* Desktop detail panel — fixed width, scrolls independently of the grid.
+   Hidden on mobile where the fullscreen flyout takes over. */
+.desktop-sidebar {
+  width: 380px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--p-content-border-color, rgba(0, 0, 0, 0.08));
+  background: var(--p-content-background, #fff);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+@media (max-width: 768px) {
+  .desktop-sidebar { display: none; }
 }
 
 /* ── Subheader ─────────────────────────────────────────────────────────── */
