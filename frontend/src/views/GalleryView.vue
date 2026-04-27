@@ -219,6 +219,57 @@ const searchResultCount = computed(() => searchResultIds.value?.length ?? 0)
 // useNaturalSearch already gives us that exact shape, just rename.
 const searchPhotoIds = computed<number[] | null>(() => searchResultIds.value)
 
+// ── Jump-to-end button ──────────────────────────────────────────────────────
+// Toolbar button that takes the user to the newest or oldest photo.
+// Label and direction depend on which end of the grid the scroll is
+// currently parked at — VirtualGallery emits `ends-changed` whenever
+// that flips. Hidden when the active sort isn't date-based, since
+// "newest / oldest" only has a meaningful semantic for `taken_at` and
+// `created_at`.
+const scrollEnds = ref({ atStart: true, atEnd: false })
+function onEndsChanged(ends: { atStart: boolean; atEnd: boolean }) {
+  scrollEnds.value = ends
+}
+
+const isDateSort = computed(
+  () => sort.value.field === 'taken_at' || sort.value.field === 'created_at',
+)
+
+const jumpButton = computed(() => {
+  if (!isDateSort.value) return null
+  const ascending = sort.value.direction === 'asc'
+  // With ASC sort: oldest at top (index 0), newest at bottom (last index).
+  // With DESC: oldest at bottom, newest at top. The label is semantic,
+  // not directional — the icon points the way the scroll has to go.
+  const atNewest = ascending ? scrollEnds.value.atEnd : scrollEnds.value.atStart
+  if (atNewest) {
+    return {
+      label: 'Zum ältesten',
+      icon: ascending ? 'pi pi-angle-double-up' : 'pi pi-angle-double-down',
+      target: 'oldest' as const,
+    }
+  }
+  return {
+    label: 'Zum neuesten',
+    icon: ascending ? 'pi pi-angle-double-down' : 'pi pi-angle-double-up',
+    target: 'newest' as const,
+  }
+})
+
+function onJumpEnd() {
+  if (!galleryRef.value || !jumpButton.value) return
+  const total = galleryRef.value.getTotal()
+  if (total === 0) return
+  const ascending = sort.value.direction === 'asc'
+  const goNewest = jumpButton.value.target === 'newest'
+  // Newest:  ASC → last,  DESC → first.
+  // Oldest:  ASC → first, DESC → last.
+  const targetIdx = (goNewest === ascending) ? total - 1 : 0
+  galleryRef.value.scrollToIndex(targetIdx, 'start')
+  cursorIndex.value = targetIdx
+  void hydrateCursor(targetIdx)
+}
+
 // ── Selection ───────────────────────────────────────────────────────────────
 const selectMode = ref(false)
 const selectedIds = ref<Set<number>>(new Set())
@@ -884,7 +935,7 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
     <!-- Subheader: title + actions -->
     <div class="subheader">
       <div class="header">
-        <h1 class="title">Meine Fotos</h1>
+        <h1 class="title">Fotos</h1>
         <div class="actions">
           <Button
             class="desktop-select-toggle"
@@ -910,6 +961,15 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
             :severity="isSortDefault ? 'secondary' : 'primary'"
             :outlined="isSortDefault"
             @click="openSortMenu"
+          />
+          <Button
+            v-if="jumpButton"
+            :icon="jumpButton.icon"
+            :label="jumpButton.label"
+            size="small"
+            severity="secondary"
+            outlined
+            @click="onJumpEnd"
           />
           <Button
             v-if="canManageData && totalUnreviewed > 0"
@@ -1047,6 +1107,7 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
           @stack-click="onStackClick"
           @toggle-select="onToggleSelect"
           @loaded="onGalleryLoaded"
+          @ends-changed="onEndsChanged"
         />
       </div>
 
