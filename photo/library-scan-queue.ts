@@ -13,6 +13,7 @@ import db from "../db/database";
 import { libraryScanQueue } from "../db/schema";
 import type { ScanReport } from "./libraries.service";
 import { notifyScanQueueChanged } from "./scan-queue-events";
+import { abortAllLibraryScans } from "./library-scan-control";
 
 console.log("[boot] photo/library-scan-queue.ts: all imports resolved");
 
@@ -135,15 +136,23 @@ export async function requeueFailedLibraryScans(): Promise<number> {
 }
 
 /**
- * Delete all pending (not yet started) library scan jobs.
+ * Cancel queued library scans:
+ *   1. Drop all 'pending' rows (they never started).
+ *   2. Signal any in-flight scans via the abort registry; the worker catches
+ *      the resulting ScanCancelledError and marks the row failed, so the UI's
+ *      `isActive` flips back to false instead of waiting forever.
+ *
+ * Note: a hung filesystem read inside a single importFile() call is not
+ * interrupted — the abort is only checked between files.
  */
 export async function cancelPendingLibraryScans(): Promise<number> {
   const res = await db
     .delete(libraryScanQueue)
     .where(eq(libraryScanQueue.status, "pending"));
-  const changed = (res as any).rowCount ?? 0;
-  if (changed > 0) notifyScanQueueChanged();
-  return changed;
+  const deleted = (res as any).rowCount ?? 0;
+  const aborted = abortAllLibraryScans();
+  if (deleted > 0 || aborted > 0) notifyScanQueueChanged();
+  return deleted + aborted;
 }
 
 /**
