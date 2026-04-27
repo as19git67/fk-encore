@@ -318,27 +318,43 @@ async function startGroupReview() {
   if (first) activeGroup.value = first
 }
 
+function applyLocalGroupReviewed(groupId: number) {
+  // Optimistic local update — the server already marked the group reviewed
+  // (handleDone in PhotoCompareView calls reviewPhotoGroup before emitting
+  // close/next). Mirroring it locally keeps the user's scroll position
+  // and the loaded entries intact:
+  //   - groupCache: flip the reviewed_at on the matching entry so
+  //     `totalUnreviewed` decrements and the green "Gruppen bearbeiten"
+  //     button label updates without a refetch.
+  //   - galleryRef.markGroupReviewed: flip `group.reviewed` on every
+  //     loaded cell of that group so badges / outlines / click-routing
+  //     gate off naturally.
+  // A full gallery reload would otherwise null the entries array and
+  // skeleton-flash every loaded cell while the new pages stream back in.
+  if (groupCache.value) {
+    groupCache.value = groupCache.value.map((g) =>
+      g.id === groupId
+        ? { ...g, reviewed_at: g.reviewed_at ?? new Date().toISOString() }
+        : g,
+    )
+  }
+  galleryRef.value?.markGroupReviewed(groupId)
+}
+
 async function onCompareClose() {
+  const reviewedGroupId = activeGroup.value?.id
   activeGroup.value = null
-  // Group state may have changed (cover swap, review). Refresh group cache
-  // and reload the gallery so badges / stack outlines reflect the new state.
-  groupCache.value = null
-  await galleryRef.value?.reload()
+  if (reviewedGroupId !== undefined) applyLocalGroupReviewed(reviewedGroupId)
 }
 
 async function onCompareNext(reviewedGroupId: number) {
-  // The user reviewed `reviewedGroupId`; pick the next unreviewed group
-  // that isn't the same one. Group cache is invalidated to pick up any
-  // server-side regrouping that happened after the review write.
-  groupCache.value = null
-  const groups = await ensureGroupCache()
+  applyLocalGroupReviewed(reviewedGroupId)
+  // Pick the next still-unreviewed group from the (now optimistically
+  // updated) cache. No refetch needed for the common case; the cache
+  // self-heals on the next stack click via ensureGroupCache.
+  const groups = groupCache.value ?? await ensureGroupCache()
   const next = groups.find((g) => !g.reviewed_at && g.id !== reviewedGroupId)
-  if (next) {
-    activeGroup.value = next
-  } else {
-    activeGroup.value = null
-    await galleryRef.value?.reload()
-  }
+  activeGroup.value = next ?? null
 }
 
 // ── Upload ──────────────────────────────────────────────────────────────────
