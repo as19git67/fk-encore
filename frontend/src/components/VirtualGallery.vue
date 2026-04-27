@@ -127,6 +127,10 @@ onMounted(() => {
 onBeforeUnmount(() => {
   resizeObs?.disconnect()
   resizeObs = null
+  if (prefetchTimer) {
+    clearTimeout(prefetchTimer)
+    prefetchTimer = null
+  }
   source.cancel()
 })
 
@@ -153,15 +157,32 @@ function rowSlots(rowIndex: number): (GalleryGridEntry | null)[] {
 }
 
 // ── Edge prefetch ───────────────────────────────────────────────────────────
-watch(virtualRows, (rows) => {
-  if (rows.length === 0 || total.value === 0) return
-  const firstIdx = rows[0]!.index * cols.value
-  const lastIdx = (rows[rows.length - 1]!.index + 1) * cols.value
-  source.ensureRange(
-    Math.max(0, firstIdx - GALLERY_PAGE_SIZE),
-    Math.min(total.value, lastIdx + GALLERY_PAGE_SIZE),
-  )
-}, { flush: 'post' })
+// Without throttling, dragging the scrollbar end-to-end fires `ensureRange`
+// on every viewport position the virtualizer surfaces — for a 50k-photo
+// library that's tens of /gallery/grid page calls in a single second, plus
+// the per-cell <img> requests they unlock. Debouncing the watch by
+// SCROLL_SETTLE_MS means rapid scrubbing only fires a single fetch when
+// the user lets go; ordinary scrolling still feels live because typical
+// scroll deltas land within one debounce window.
+const SCROLL_SETTLE_MS = 180
+let prefetchTimer: ReturnType<typeof setTimeout> | null = null
+
+function schedulePrefetch() {
+  if (prefetchTimer) clearTimeout(prefetchTimer)
+  prefetchTimer = setTimeout(() => {
+    prefetchTimer = null
+    const rows = virtualizer.value.getVirtualItems()
+    if (rows.length === 0 || total.value === 0) return
+    const firstIdx = rows[0]!.index * cols.value
+    const lastIdx = (rows[rows.length - 1]!.index + 1) * cols.value
+    source.ensureRange(
+      Math.max(0, firstIdx - GALLERY_PAGE_SIZE),
+      Math.min(total.value, lastIdx + GALLERY_PAGE_SIZE),
+    )
+  }, SCROLL_SETTLE_MS)
+}
+
+watch(virtualRows, schedulePrefetch, { flush: 'post' })
 
 // ── Initial + re-init on query change ───────────────────────────────────────
 const ready = ref(false)
@@ -214,9 +235,11 @@ function onTap(entry: GalleryGridEntry | null) {
     emit('toggle-select', entry)
     return
   }
-  // Stack covers go to the compare flow; non-cover cells (which are
-  // ordinary photos in a group) and non-stack cells go to photo-click.
-  if (entry.group?.is_cover) {
+  // Every member of an UNREVIEWED group routes to the compare flow — so
+  // the user can launch the review from any tile, not just the cover.
+  // Once the group is reviewed the badge / outline disappear and members
+  // behave like ordinary photos again (open fullscreen).
+  if (entry.group && !entry.group.reviewed) {
     emit('stack-click', entry)
   } else {
     emit('photo-click', entry)
@@ -284,8 +307,8 @@ defineExpose({
             :class="{
               'vg-cell--favorite': slot.curation === 'favorite',
               'vg-cell--hidden': slot.curation === 'hidden',
-              'vg-cell--stack': !!slot.group,
-              'vg-cell--stack-cover': slot.group?.is_cover,
+              'vg-cell--stack': !!slot.group && !slot.group.reviewed,
+              'vg-cell--stack-cover': !!slot.group && !slot.group.reviewed && slot.group.is_cover,
               'vg-cell--selected': selectedIds && selectedIds.has(slot.id),
               'vg-cell--cursor': cursorIndex === row.index * cols + i,
             }"
@@ -302,7 +325,11 @@ defineExpose({
                 : undefined"
               class="vg-thumb"
             />
-            <span v-if="slot.group?.is_cover" class="vg-stack-badge">
+            <!-- Show the member-count badge on EVERY member of an unreviewed
+                 group (not just the cover) so the user sees the stack from
+                 whichever tile they tap. Gated on `!reviewed` so reviewed
+                 groups disappear from the visual model. -->
+            <span v-if="slot.group && !slot.group.reviewed" class="vg-stack-badge">
               {{ slot.group.member_count }}
             </span>
             <i
