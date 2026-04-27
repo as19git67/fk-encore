@@ -211,11 +211,22 @@ export function useGallerySource(): GallerySource {
       // Allocate the sparse backing array.
       const arr: (GalleryGridEntry | null)[] = new Array(res.total).fill(null)
       entries.value = arr
-      // Mark the initial page as already loaded so a subsequent
-      // ensureRange() over the same window doesn't re-fetch it. We resolve
-      // immediately because the data is in `entries` already.
-      const pageStart = pageStartForOffset(res.offset)
-      pagePromises.set(pageStart, Promise.resolve())
+      // Mark only pages whose entire range was returned by the response
+      // as already loaded. The backend's `aroundPhotoId` mode returns a
+      // window centered on the anchor (offset = pos - limit/2), which is
+      // almost never page-aligned — so the page that contains the response
+      // start is typically only PARTIALLY covered. Marking it as loaded
+      // would make ensureRange() skip it forever, leaving the leading
+      // slots as permanent skeletons. Pages straddling the response edges
+      // stay unmarked so ensureRange refetches them and fills the gaps;
+      // the duplicate-fetch cost only hits on init.
+      const responseEnd = res.offset + res.photos.length
+      const firstFullPage = Math.ceil(res.offset / GALLERY_PAGE_SIZE) * GALLERY_PAGE_SIZE
+      let p = firstFullPage
+      while (p + GALLERY_PAGE_SIZE <= responseEnd) {
+        pagePromises.set(p, Promise.resolve())
+        p += GALLERY_PAGE_SIZE
+      }
       spliceIn(res.offset, res.photos)
       return { initialOffset: res.offset, total: res.total }
     } catch (err: any) {
