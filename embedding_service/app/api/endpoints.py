@@ -51,6 +51,20 @@ router = APIRouter()
 DbDep = Annotated[AsyncSession, Depends(get_db)]
 
 
+# Largest dimension we ever need to feed CLIP/DINOv2; both center-crop to 224.
+# Image.draft() applies before pixel data is decoded so libjpeg-turbo can use
+# its DCT-domain scaling, which is 4-8x faster than full decode + PIL resize.
+# No-op for clients that already pre-resize (preferred path) and for non-JPEG
+# formats — Pillow simply ignores draft() there.
+_EMBED_MAX_DIM = 512
+
+
+def _open_for_embedding(source) -> Image.Image:
+    img = Image.open(source)
+    img.draft("RGB", (_EMBED_MAX_DIM, _EMBED_MAX_DIM))
+    return img.convert("RGB")
+
+
 # ---------------------------------------------------------------------------
 # /health
 # ---------------------------------------------------------------------------
@@ -99,7 +113,7 @@ async def embed(request: EmbedRequest, db: DbDep) -> EmbedResponse:
         )
         dino_embedder = DINOv2Embedder.get_instance(model_name=settings.dino_model_name)
 
-        images = [Image.open(p).convert("RGB") for p in file_paths]
+        images = [_open_for_embedding(p) for p in file_paths]
         clip_embeddings = clip_embedder.embed(images)
         dino_embeddings = dino_embedder.embed(images)
     except FileNotFoundError as exc:
@@ -155,7 +169,7 @@ async def upload_photo(
 
     try:
         content = await file.read()
-        image = Image.open(io.BytesIO(content)).convert("RGB")
+        image = _open_for_embedding(io.BytesIO(content))
 
         clip_embedder = CLIPEmbedder.get_instance(
             model_name=settings.clip_model_name, pretrained=settings.clip_pretrained

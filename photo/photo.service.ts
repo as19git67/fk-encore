@@ -410,6 +410,12 @@ async function callInsightFaceDetect(filePath: string): Promise<{ faces: any[], 
   return data;
 }
 
+// CLIP ViT-B-32 and DINOv2-base both center-crop to 224x224, so anything
+// above ~256px carries no signal for embedding. 512 leaves headroom for
+// future larger backbones (CLIP-Large@336, DINOv2@518) without round-tripping
+// the full original — typical 12 MP JPEGs shrink ~30-100x on upload.
+const EMBED_UPLOAD_WIDTH = 512;
+
 async function callEmbeddingServiceUpload(
   photoId: string,
   filePath: string,
@@ -417,10 +423,16 @@ async function callEmbeddingServiceUpload(
   force: boolean = false
 ): Promise<void> {
   const formData = new FormData();
-  const fileData = await fs.promises.readFile(filePath);
-  const blob = new Blob([fileData], { type: getUploadMimeType(filePath) });
 
-  formData.append('file', blob, path.basename(filePath));
+  const ext = path.extname(filePath).toLowerCase();
+  const sourceBuffer = (ext === '.heic' || ext === '.heif')
+    ? await convertHeicToJpeg(filePath)
+    : await fs.promises.readFile(filePath);
+  const fileData = await resizeImage(sourceBuffer, EMBED_UPLOAD_WIDTH);
+  const blob = new Blob([fileData], { type: 'image/jpeg' });
+
+  const uploadFilename = path.basename(filePath, path.extname(filePath)) + '.jpg';
+  formData.append('file', blob, uploadFilename);
   formData.append('photo_id', photoId);
   formData.append('file_path', filePath);
   if (metadata.timestamp) formData.append('timestamp', metadata.timestamp);
