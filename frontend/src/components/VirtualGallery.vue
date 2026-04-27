@@ -311,6 +311,7 @@ function scrollToIndex(index: number, align: 'start' | 'center' | 'end' | 'auto'
 
 defineExpose({
   updateEntry: source.updateEntry,
+  markGroupReviewed: source.markGroupReviewed,
   reload: source.reload,
   loadEntryAt: source.loadEntryAt,
   findLoadedIndexById,
