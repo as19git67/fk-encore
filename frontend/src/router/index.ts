@@ -64,6 +64,7 @@ const router = createRouter({
 
     // Legacy redirects (keep old URLs working)
     { path: '/photos', redirect: '/fotos' },
+    { path: '/fotos/galerie-alt', redirect: '/fotos/galerie' },
     { path: '/albums', redirect: '/fotos/alben' },
     { path: '/albums/:id', redirect: (to) => `/fotos/alben/${to.params.id}` },
     { path: '/people', redirect: '/fotos/personen' },

@@ -105,7 +105,7 @@ watch(isFullscreen, (val) => {
 const { applied: filter, draft: filterDraft, activeCount, openEdit, apply: applyFilter, reset: resetFilter, removeKey } =
   useFilter({ preserveKeys: ['photoId'] })
 const filterMenuOpen = ref(false)
-// Lazy-Mount: siehe PhotosView. Spart /persons + /albums beim Album-Öffnen.
+// Lazy-Mount: siehe GalleryView. Spart /persons + /albums beim Album-Öffnen.
 const filterMenuMounted = ref(false)
 const FILTER_AVAILABLE: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'> = [
   'hiddenMode', 'favorite', 'groupHighlight', 'inGroup',

@@ -125,7 +125,7 @@ const FILTER_AVAILABLE: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' |
 const filter = ref<PhotoFilter>({ ...DEFAULT_FILTER })
 const filterDraft = ref<PhotoFilter>({ ...DEFAULT_FILTER })
 const filterMenuOpen = ref(false)
-// Lazy-Mount: siehe PhotosView.
+// Lazy-Mount: siehe GalleryView.
 const filterMenuMounted = ref(false)
 const activeCount = computed(() => countActiveFilters(filter.value))
 
