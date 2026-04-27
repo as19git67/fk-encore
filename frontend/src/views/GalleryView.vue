@@ -341,10 +341,19 @@ function applyLocalGroupReviewed(groupId: number) {
   galleryRef.value?.markGroupReviewed(groupId)
 }
 
-async function onCompareClose() {
+function onCompareReviewed() {
+  // Fired by PhotoCompareView's "Fertig" button after the server
+  // accepted the review. We need to capture the id BEFORE `close`
+  // clears `activeGroup`. Doesn't run when the user dismisses via
+  // the X / Esc — that path emits `close` only, leaving the group
+  // unreviewed both server- and client-side, so re-opening still
+  // surfaces it for review.
   const reviewedGroupId = activeGroup.value?.id
-  activeGroup.value = null
   if (reviewedGroupId !== undefined) applyLocalGroupReviewed(reviewedGroupId)
+}
+
+function onCompareClose() {
+  activeGroup.value = null
 }
 
 async function onCompareNext(reviewedGroupId: number) {
@@ -1082,6 +1091,7 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
       :all-photos="[]"
       :total-unreviewed="totalUnreviewed"
       @close="onCompareClose"
+      @reviewed="onCompareReviewed"
       @next="onCompareNext"
     />
 
