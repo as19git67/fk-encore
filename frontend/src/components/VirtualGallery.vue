@@ -99,6 +99,7 @@ const TARGET_CELL_MIN_PX = 140
 const GAP_PX = 4
 const cols = ref(3)
 const cellSize = ref(140)
+const containerWidth = ref(0)
 const rowHeight = computed(() => cellSize.value + GAP_PX)
 
 const scrollRef = ref<HTMLElement | null>(null)
@@ -111,7 +112,33 @@ function recalcLayout(width: number) {
   const cell = Math.floor((width - totalGap(n)) / n)
   cols.value = n
   cellSize.value = cell
+  containerWidth.value = width
 }
+
+// ── Bandwidth-aware overscan ────────────────────────────────────────────────
+// Each row of overscan mounts `cols` extra <img> tags whose lazy-load
+// deadline overlaps the visible viewport. On a phone with cells=3 and
+// the previous overscan=4 that meant 24 thumbnail requests beyond the
+// 5–6 rows actually on screen — a noticeable chunk of mobile data on a
+// fresh app start, even with the browser's lazy-load defer-margin.
+//
+// We read the `Network Information API` once at mount (Chrome / Android /
+// Firefox; iOS Safari has no equivalent so we fall through to viewport
+// width). `save-data` and 2G/3G effective types collapse the overscan
+// to 1; narrow grids (< 768 px = mobile / split-pane) get 2; the
+// original 4 stays on desktop where bandwidth isn't the bottleneck.
+function detectSlowConnection(): boolean {
+  const conn = (navigator as unknown as { connection?: { saveData?: boolean; effectiveType?: string } }).connection
+  if (!conn) return false
+  if (conn.saveData) return true
+  return ['slow-2g', '2g', '3g'].includes(conn.effectiveType ?? '')
+}
+const slowConnection = detectSlowConnection()
+const overscan = computed(() => {
+  if (slowConnection) return 1
+  if (containerWidth.value > 0 && containerWidth.value < 768) return 2
+  return 4
+})
 
 onMounted(() => {
   if (scrollRef.value) {
@@ -138,7 +165,7 @@ const virtualizer = useVirtualizer(
     count: rowCount.value,
     getScrollElement: () => scrollRef.value,
     estimateSize: () => rowHeight.value,
-    overscan: 4,
+    overscan: overscan.value,
   })),
 )
 
