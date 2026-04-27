@@ -27,27 +27,15 @@ export const modules: ModuleConfig[] = [
     routes: [
       {
         // The bare module path lands on the virtualized gallery so that
-        // module-switcher buttons, plain `/fotos` links and any localStorage
-        // last-route entry from before the new gallery shipped all end
-        // up on the new implementation.
+        // module-switcher buttons and any plain `/fotos` link end up on
+        // the new implementation.
         path: '',
-        redirect: { name: 'fotos-gallery-v2' },
+        redirect: { name: 'fotos-gallery' },
       },
       {
-        // Greenfield virtualized gallery (Phase 2: filter/sort/search/upload).
         path: 'galerie',
-        name: 'fotos-gallery-v2',
-        component: () => import('../views/GalleryView.vue'),
-        meta: { permission: 'photos.view' },
-      },
-      {
-        // Legacy gallery, kept under "Galerie alt" until the new gallery
-        // grows fullscreen + photoId-deeplink support. Internal callers
-        // (FeedView, PersonsView, PhotoLocationMenu) still resolve
-        // `name: 'fotos-gallery'` to this view via its photoId query.
-        path: 'galerie-alt',
         name: 'fotos-gallery',
-        component: () => import('../views/PhotosView.vue'),
+        component: () => import('../views/GalleryView.vue'),
         meta: { permission: 'photos.view' },
       },
       {
@@ -82,8 +70,7 @@ export const modules: ModuleConfig[] = [
       },
     ],
     menuItems: [
-      { label: 'Galerie', icon: 'pi pi-images', routeName: 'fotos-gallery-v2', permission: 'photos.view' },
-      { label: 'Galerie alt', icon: 'pi pi-th-large', routeName: 'fotos-gallery', permission: 'photos.view' },
+      { label: 'Galerie', icon: 'pi pi-images', routeName: 'fotos-gallery', permission: 'photos.view' },
       { label: 'Alben', icon: 'pi pi-folder-open', routeName: 'fotos-albums', permission: 'photos.view' },
       { label: 'Feed', icon: 'pi pi-bell', routeName: 'fotos-feed', permission: 'photos.view' },
       { label: 'Rückblicke', icon: 'pi pi-history', routeName: 'fotos-recaps', permission: 'photos.view' },

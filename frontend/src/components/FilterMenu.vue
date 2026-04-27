@@ -130,7 +130,7 @@ function setTri(key: 'hasGps' | 'hasFaces' | 'hasAssignedPerson', v: 'any' | 'ye
 
 // --- Album / Person autocomplete -------------------------------------------
 // Listen kommen aus dem app-weiten Composable, sodass parallele Aufrufer
-// (PhotosView, FilterChips, PhotoDetailSidebar) sich denselben Request teilen.
+// (GalleryView, FilterChips, PhotoDetailSidebar) sich denselben Request teilen.
 const { albums, persons, fetchAlbums, fetchPersons } = useReferenceData()
 const selectedAlbums = ref<Album[]>([])
 const selectedPersons = ref<Person[]>([])

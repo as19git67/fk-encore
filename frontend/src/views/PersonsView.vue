@@ -70,7 +70,7 @@ const {
   removeKey: removePhotoFilterKey,
 } = useFilter({ preserveKeys: ['personId', 'photoId'] })
 const photoFilterMenuOpen = ref(false)
-// Lazy-Mount: siehe PhotosView. Beim Öffnen einer Personenseite vermeiden wir
+// Lazy-Mount: siehe GalleryView. Beim Öffnen einer Personenseite vermeiden wir
 // dadurch einen unnötigen /albums- und /persons-Roundtrip.
 const photoFilterMenuMounted = ref(false)
 const PHOTO_FILTER_AVAILABLE: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'> = [
