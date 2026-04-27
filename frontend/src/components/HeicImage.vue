@@ -73,6 +73,22 @@ const checkAndConvert = async () => {
   isLoading.value = true;
 };
 
+const onImageError = () => {
+  isLoading.value = false;
+  // HEIC fallback: Safari is supposed to decode HEIC natively, but the
+  // detection has blind spots (iOS PWA standalone mode strips "Safari"
+  // from the UA, ancient iOS versions miss HDR / 10-bit HEIC variants,
+  // some album-shared photos arrive with mismatched bit depth). When the
+  // initial fetch fails AND we haven't already asked for the converted
+  // JPEG, retry once with `?convert=true`. The server caches the JPEG on
+  // disk so repeated views are cheap.
+  if (!isHeic.value) return;
+  if (displaySrc.value.includes('convert=true')) return;
+  const separator = props.src.includes('?') ? '&' : '?';
+  displaySrc.value = `${props.src}${separator}convert=true`;
+  isLoading.value = true;
+};
+
 const onImageLoad = (event: Event) => {
   isLoading.value = false;
   const img = event.target as HTMLImageElement;
@@ -236,7 +252,7 @@ watch(() => naturalAspectRatio.value, () => void nextTick(updateSlotBounds));
           :class="['full-image', objectFitClass, { 'is-loading': isLoading }]"
           :style="imageStyle"
           @load="onImageLoad"
-          @error="isLoading = false"
+          @error="onImageError"
         />
         <div class="slot-container" :style="slotContainerStyle">
           <slot></slot>
