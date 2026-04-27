@@ -100,6 +100,7 @@ void fetchPersons() // module-cached; no-op on subsequent visits
 
 const canUpload = computed(() => auth.hasPermission('photos.upload'))
 const canDelete = computed(() => auth.hasPermission('photos.delete'))
+const canManageData = computed(() => auth.hasPermission('data.manage'))
 const showPersons = computed(() => auth.hasPermission('people.view'))
 
 // Reuse the legacy view's localStorage key so users keep their
@@ -275,10 +276,11 @@ async function applyCurationToSelection(target: 'favorite' | 'hidden' | 'visible
 }
 
 // ── Stacks (compare view) ───────────────────────────────────────────────────
-// Stack-cover taps in the grid open the compare view. We don't preload
-// the user's full group list (that's an N-photo iteration in the legacy
-// gallery); instead we fetch it on demand when the user actually opens a
-// stack — typically once per session.
+// The cache is loaded eagerly on mount because the "Gruppen bearbeiten
+// (N offen)" button in the subheader needs `unreviewedCount` to decide
+// its label and visibility. Tap → compare view looks up the matching
+// PhotoGroup by id; the cache is invalidated after every review so the
+// next reader sees fresh state.
 const groupCache = ref<PhotoGroup[] | null>(null)
 const activeGroup = ref<PhotoGroup | null>(null)
 const stackBusy = ref(false)
@@ -292,6 +294,10 @@ async function ensureGroupCache(): Promise<PhotoGroup[]> {
   groupCache.value = res.groups
   return res.groups
 }
+// Fire-and-forget: a stale cache only delays the "Gruppen bearbeiten"
+// button by one HTTP round-trip on first paint and the gallery still
+// works without it.
+void ensureGroupCache()
 
 async function onStackClick(entry: GalleryGridEntry) {
   if (!entry.group) return
@@ -304,6 +310,12 @@ async function onStackClick(entry: GalleryGridEntry) {
   } finally {
     stackBusy.value = false
   }
+}
+
+async function startGroupReview() {
+  const groups = await ensureGroupCache()
+  const first = groups.find((g) => !g.reviewed_at)
+  if (first) activeGroup.value = first
 }
 
 async function onCompareClose() {
@@ -873,6 +885,14 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
             :severity="isSortDefault ? 'secondary' : 'primary'"
             :outlined="isSortDefault"
             @click="openSortMenu"
+          />
+          <Button
+            v-if="canManageData && totalUnreviewed > 0"
+            :label="`Gruppen bearbeiten (${totalUnreviewed} offen)`"
+            icon="pi pi-images"
+            size="small"
+            severity="success"
+            @click="startGroupReview"
           />
           <template v-if="canUpload">
             <Button
