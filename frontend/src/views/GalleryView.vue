@@ -25,14 +25,17 @@
  *     and calls `updatePhotoDate`, then mutates `fullscreenPhoto` in
  *     place so the topbar's date label updates immediately.
  *
- * Phase 3c on top of that adds keyboard navigation over the grid: a
- * `cursorIndex` ref highlights the active cell; ←/→ step by one,
- * ↑/↓ jump a row (= `cols` cells); Space / Enter open the cursor cell
- * in fullscreen (or toggle its selection while in select mode).
+ * Phase 3c adds keyboard navigation over the grid: a `cursorIndex` ref
+ * highlights the active cell; ←/→ step by one, ↑/↓ jump a row (=
+ * `cols` cells); Space / Enter open the cursor cell in fullscreen (or
+ * toggle its selection while in select mode).
  *
- * Deliberately still missing (Phase 3 slice 4):
- *   - Switching FeedView / PersonsView / PhotoLocationMenu deeplinks
- *     to the new gallery and removing "Galerie alt" from the menu
+ * Phase 3d removes the legacy gallery: the menu's "Galerie alt" entry
+ * is gone, the `name: 'fotos-gallery'` route name now points at this
+ * view, and FeedView / PersonsView / PhotoLocationMenu's photoId
+ * deeplinks resolve here instead of `PhotosView.vue` (which has been
+ * deleted). `/fotos/galerie-alt` URLs still resolve via a router-level
+ * legacy redirect to `/fotos/galerie`.
  */
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
