@@ -414,7 +414,7 @@ class LibraryScanWorker {
         const r = await libs.reconcileLibrary(job.library_id);
         removed = r.removed;
       }
-      const report = await libs.scanLibrary(job.library_id);
+      const report = await libs.scanLibrary(job.library_id, job.id);
       await markLibraryScanDone(job.id, report, removed);
     } catch (err: any) {
       if (err?.name === "ScanCancelledError") {

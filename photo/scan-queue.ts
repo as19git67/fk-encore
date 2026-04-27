@@ -50,12 +50,25 @@ export class DeferJobError extends Error {
   }
 }
 
+/**
+ * Live counters for an in-flight library_scan job. Only set when the
+ * library_scan row is currently 'processing'; the per-photo services
+ * don't carry per-row progress, so this stays optional.
+ */
+export interface QueueServiceProgress {
+  scanned: number;
+  imported: number;
+  skipped: number;
+  errors: number;
+}
+
 export interface QueueServiceStatus {
   service: QueueServiceId;
   pending: number;
   processing: number;
   failed: number;
   done: number;
+  progress?: QueueServiceProgress;
 }
 
 export interface QueueStatus {
@@ -291,6 +304,37 @@ export async function getQueueStatus(userId: number): Promise<QueueStatus> {
   for (const row of libRows.rows) {
     libEntry[row.status] = Number(row.count);
   }
+
+  // Live counters for the in-flight scan (worker concurrency is 1, so at
+  // most one row, but summing keeps it correct if that ever changes).
+  if (libEntry.processing > 0) {
+    const progressRows = await db.execute<{
+      scanned: number | null;
+      imported: number | null;
+      skipped_duplicate: number | null;
+      skipped_unsupported: number | null;
+      skipped_empty: number | null;
+      errors: number | null;
+    }>(sql`
+      SELECT scanned, imported, skipped_duplicate, skipped_unsupported,
+             skipped_empty, errors
+      FROM library_scan_queue
+      WHERE status = 'processing'
+    `);
+    let scanned = 0, imported = 0, skipped = 0, errors = 0;
+    for (const r of progressRows.rows) {
+      scanned += r.scanned ?? 0;
+      imported += r.imported ?? 0;
+      skipped += (r.skipped_duplicate ?? 0)
+              + (r.skipped_unsupported ?? 0)
+              + (r.skipped_empty ?? 0);
+      errors += r.errors ?? 0;
+    }
+    if (scanned > 0 || imported > 0 || skipped > 0 || errors > 0) {
+      libEntry.progress = { scanned, imported, skipped, errors };
+    }
+  }
+
   map.set("library_scan", libEntry);
 
   return { services: Array.from(map.values()) };
