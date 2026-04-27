@@ -3,7 +3,7 @@ import { ref, watch, onMounted, onUnmounted } from 'vue'
 import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
 import { getPhotoUrl, type Photo, type CurationStatus } from '../api/photos'
-import { formatPhotoDate, formatLocationLabel } from '../utils/dateFormat'
+import { formatPhotoDateCompact, formatLocationLabel } from '../utils/dateFormat'
 
 const props = withDefaults(defineProps<{
   photo: Photo
@@ -114,7 +114,9 @@ onMounted(() => window.addEventListener('keydown', handleKeydown, true))
 onUnmounted(() => window.removeEventListener('keydown', handleKeydown, true))
 
 function formatDate(photo: Photo) {
-  return formatPhotoDate(photo.taken_at || photo.created_at)
+  // Same compact format the detail sidebar uses (e.g. "14.01.2026, 09:38")
+  // — the long-weekday form was overflowing the topbar on narrow viewports.
+  return formatPhotoDateCompact(photo.taken_at || photo.created_at)
 }
 
 function locationLabel(photo: Photo) {
