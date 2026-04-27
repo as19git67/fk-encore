@@ -89,6 +89,29 @@ export async function markLibraryScanDone(
   notifyScanQueueChanged();
 }
 
+/**
+ * Live progress write while the job is still 'processing'. Called from
+ * scanLibrary every few hundred ms so the Datenverwaltung UI can show
+ * current scanned/imported counts instead of just "1 läuft".
+ */
+export async function updateLibraryScanProgress(
+  id: number,
+  report: ScanReport,
+): Promise<void> {
+  await db
+    .update(libraryScanQueue)
+    .set({
+      scanned: report.scanned,
+      imported: report.imported,
+      skipped_duplicate: report.skipped_duplicate,
+      skipped_unsupported: report.skipped_unsupported,
+      skipped_empty: report.skipped_empty,
+      errors: report.errors,
+    })
+    .where(eq(libraryScanQueue.id, id));
+  notifyScanQueueChanged();
+}
+
 export async function markLibraryScanFailed(id: number, error: string): Promise<void> {
   await db
     .update(libraryScanQueue)

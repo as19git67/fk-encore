@@ -306,7 +306,15 @@ onMounted(async () => {
           </thead>
           <tbody>
             <tr v-for="svc in queueStatus.services" :key="svc.service">
-              <td>{{ serviceLabels[svc.service] ?? svc.service }}</td>
+              <td>
+                <div>{{ serviceLabels[svc.service] ?? svc.service }}</div>
+                <div v-if="svc.progress" class="queue-progress-line">
+                  {{ svc.progress.scanned }} gescannt
+                  <template v-if="svc.progress.imported > 0"> · {{ svc.progress.imported }} importiert</template>
+                  <template v-if="svc.progress.skipped > 0"> · {{ svc.progress.skipped }} übersprungen</template>
+                  <template v-if="svc.progress.errors > 0"> · {{ svc.progress.errors }} Fehler</template>
+                </div>
+              </td>
               <td>
                 <span v-if="svc.pending > 0" class="badge badge-pending">{{ svc.pending }}</span>
                 <span v-else class="text-secondary">—</span>
@@ -335,6 +343,12 @@ onMounted(async () => {
       <div class="queue-cards mb-4">
         <div v-for="svc in queueStatus.services" :key="svc.service" class="queue-card">
           <div class="queue-card__header">{{ serviceLabels[svc.service] ?? svc.service }}</div>
+          <div v-if="svc.progress" class="queue-progress-line">
+            {{ svc.progress.scanned }} gescannt
+            <template v-if="svc.progress.imported > 0"> · {{ svc.progress.imported }} importiert</template>
+            <template v-if="svc.progress.skipped > 0"> · {{ svc.progress.skipped }} übersprungen</template>
+            <template v-if="svc.progress.errors > 0"> · {{ svc.progress.errors }} Fehler</template>
+          </div>
           <div class="queue-card__stats">
             <div class="queue-card__stat">
               <span class="queue-card__label">Ausstehend</span>
@@ -798,6 +812,12 @@ onMounted(async () => {
 .queue-card__label {
   color: var(--p-text-muted-color);
   font-size: 0.8rem;
+}
+
+.queue-progress-line {
+  color: var(--p-text-muted-color);
+  font-size: 0.75rem;
+  margin-top: 0.15rem;
 }
 
 .badge {

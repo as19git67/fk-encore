@@ -34,6 +34,7 @@ import {
 import { enqueuePhotoScan } from "./scan-queue";
 import { triggerWorkers } from "./scan-worker";
 import { registerScanAbort, unregisterScanAbort } from "./library-scan-control";
+import { updateLibraryScanProgress } from "./library-scan-queue";
 
 console.log("[boot] photo/libraries.service.ts: all imports resolved");
 
@@ -650,7 +651,17 @@ export class ScanCancelledError extends Error {
   }
 }
 
-export async function scanLibrary(libraryId: number): Promise<ScanReport> {
+/**
+ * Minimum gap between live progress flushes to library_scan_queue. Two
+ * writes per second is enough for a smooth UI counter and well below the
+ * realtime bus's own 500ms debounce window.
+ */
+const PROGRESS_FLUSH_MS = 500;
+
+export async function scanLibrary(
+  libraryId: number,
+  jobId?: number,
+): Promise<ScanReport> {
   if (activeScans.has(libraryId)) {
     throw new ScanAlreadyRunningError(libraryId);
   }
@@ -670,6 +681,22 @@ export async function scanLibrary(libraryId: number): Promise<ScanReport> {
       errors: 0,
     };
 
+    let lastFlushAt = 0;
+    let flushInFlight: Promise<void> | null = null;
+    const flushProgress = (force: boolean) => {
+      if (jobId === undefined) return;
+      const now = Date.now();
+      if (!force && now - lastFlushAt < PROGRESS_FLUSH_MS) return;
+      // Skip if a previous flush is still in flight; the next tick will pick
+      // up the latest counters anyway.
+      if (flushInFlight) return;
+      lastFlushAt = now;
+      const snapshot = { ...report };
+      flushInFlight = updateLibraryScanProgress(jobId, snapshot)
+        .catch(() => {})
+        .finally(() => { flushInFlight = null; });
+    };
+
     for await (const file of walkSupportedFiles(library.path, signal)) {
       if (signal.aborted) throw new ScanCancelledError(libraryId);
       report.scanned++;
@@ -683,9 +710,14 @@ export async function scanLibrary(libraryId: number): Promise<ScanReport> {
         report.errors++;
         console.error(`[libraries] import failed for ${file}:`, err?.message ?? err);
       }
+      flushProgress(false);
     }
 
     if (signal.aborted) throw new ScanCancelledError(libraryId);
+
+    // Wait for any pending flush so markLibraryScanDone won't race a stale
+    // intermediate write.
+    if (flushInFlight) await flushInFlight;
 
     await dbExec(
       db
