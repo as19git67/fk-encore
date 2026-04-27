@@ -363,6 +363,13 @@ export function assignFaceToPerson(faceId: number, personId: number) {
   })
 }
 
+export interface ScanQueueServiceProgress {
+  scanned: number
+  imported: number
+  skipped: number
+  errors: number
+}
+
 export interface ScanQueueServiceStatus {
   service:
     | 'embedding'
@@ -376,6 +383,8 @@ export interface ScanQueueServiceStatus {
   processing: number
   failed: number
   done: number
+  /** Live counters for an in-flight library_scan job (only set while processing). */
+  progress?: ScanQueueServiceProgress
 }
 
 export interface ScanQueueStatus {
