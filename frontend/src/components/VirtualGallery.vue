@@ -127,10 +127,6 @@ onMounted(() => {
 onBeforeUnmount(() => {
   resizeObs?.disconnect()
   resizeObs = null
-  if (prefetchTimer) {
-    clearTimeout(prefetchTimer)
-    prefetchTimer = null
-  }
   source.cancel()
 })
 
@@ -157,32 +153,22 @@ function rowSlots(rowIndex: number): (GalleryGridEntry | null)[] {
 }
 
 // ── Edge prefetch ───────────────────────────────────────────────────────────
-// Without throttling, dragging the scrollbar end-to-end fires `ensureRange`
-// on every viewport position the virtualizer surfaces — for a 50k-photo
-// library that's tens of /gallery/grid page calls in a single second, plus
-// the per-cell <img> requests they unlock. Debouncing the watch by
-// SCROLL_SETTLE_MS means rapid scrubbing only fires a single fetch when
-// the user lets go; ordinary scrolling still feels live because typical
-// scroll deltas land within one debounce window.
-const SCROLL_SETTLE_MS = 180
-let prefetchTimer: ReturnType<typeof setTimeout> | null = null
-
-function schedulePrefetch() {
-  if (prefetchTimer) clearTimeout(prefetchTimer)
-  prefetchTimer = setTimeout(() => {
-    prefetchTimer = null
-    const rows = virtualizer.value.getVirtualItems()
-    if (rows.length === 0 || total.value === 0) return
-    const firstIdx = rows[0]!.index * cols.value
-    const lastIdx = (rows[rows.length - 1]!.index + 1) * cols.value
-    source.ensureRange(
-      Math.max(0, firstIdx - GALLERY_PAGE_SIZE),
-      Math.min(total.value, lastIdx + GALLERY_PAGE_SIZE),
-    )
-  }, SCROLL_SETTLE_MS)
-}
-
-watch(virtualRows, schedulePrefetch, { flush: 'post' })
+// Fire eagerly on every viewport change. The dedup in `useGallerySource`
+// (`pagePromises`) collapses repeat requests for the same page, so even an
+// end-to-end scroll-bar drag only triggers one `/gallery/grid` call per
+// page crossed. Debouncing here is a trap: a continuous wheel scroll
+// resets the timer faster than it expires, so the prefetch never fires
+// and cells the user is actually scrolling toward render as permanent
+// skeletons until they let go.
+watch(virtualRows, (rows) => {
+  if (rows.length === 0 || total.value === 0) return
+  const firstIdx = rows[0]!.index * cols.value
+  const lastIdx = (rows[rows.length - 1]!.index + 1) * cols.value
+  source.ensureRange(
+    Math.max(0, firstIdx - GALLERY_PAGE_SIZE),
+    Math.min(total.value, lastIdx + GALLERY_PAGE_SIZE),
+  )
+}, { flush: 'post' })
 
 // ── Initial + re-init on query change ───────────────────────────────────────
 const ready = ref(false)
