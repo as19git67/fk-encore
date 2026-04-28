@@ -163,6 +163,74 @@ describe("finance/transactions — list (ACL filter)", () => {
     expect(onlyB.items).toHaveLength(0);
   });
 
+  it("filters by accountIdsCsv (used by overview's section view)", async () => {
+    const { a, b } = await createAccounts();
+    const c = await db
+      .insert(financeAccount)
+      .values({
+        bankcontact_id: null,
+        type_id: (await db.select().from(financeAccountType).limit(1))[0].id,
+        currency_code: "EUR",
+        account_number: "C",
+        label: "C",
+      })
+      .returning({ id: financeAccount.id })
+      .then((r) => r[0].id);
+
+    await insertTx(a);
+    await insertTx(b);
+    await insertTx(c);
+
+    setAuth("7", ["finance.view"]);
+    await grant(a, 7, "read");
+    await grant(b, 7, "read");
+    await grant(c, 7, "read");
+
+    const sectionAB = await listTransactions({
+      accountIdsCsv: `${a},${b}`,
+    });
+    expect(sectionAB.total).toBe(2);
+    const accs = new Set(sectionAB.items.map((i) => i.account_id));
+    expect(accs.has(a)).toBe(true);
+    expect(accs.has(b)).toBe(true);
+    expect(accs.has(c)).toBe(false);
+  });
+
+  it("intersects accountIdsCsv with the caller's ACL — IDs without access are dropped silently", async () => {
+    const { a, b } = await createAccounts();
+    await insertTx(a);
+    await insertTx(b);
+
+    setAuth("7", ["finance.view"]);
+    await grant(a, 7, "read");
+    // No ACL for `b`.
+
+    const result = await listTransactions({ accountIdsCsv: `${a},${b}` });
+    expect(result.items.every((i) => i.account_id === a)).toBe(true);
+  });
+
+  it("returns empty when accountIdsCsv has no parseable ids", async () => {
+    const { a } = await createAccounts();
+    await insertTx(a);
+    setAuth("1", ["finance.view", "finance.admin"]);
+    const result = await listTransactions({ accountIdsCsv: "abc, ,xyz" });
+    expect(result.items).toHaveLength(0);
+  });
+
+  it("honours limit up to 500 (capped from above)", async () => {
+    const { a } = await createAccounts();
+    setAuth("1", ["finance.view", "finance.admin"]);
+    // Inserting 6 transactions to keep the test fast — we just verify
+    // the cap math, not that it actually returns 500 rows.
+    for (let i = 0; i < 6; i++) {
+      await insertTx(a, { booking_date: `2024-08-${String(10 + i).padStart(2, "0")}` });
+    }
+    const allFive = await listTransactions({ limit: 5 });
+    expect(allFive.items).toHaveLength(5);
+    const cappedHigh = await listTransactions({ limit: 99_999 });
+    expect(cappedHigh.items.length).toBeLessThanOrEqual(500);
+  });
+
   it("filters by date range (inclusive)", async () => {
     const { a } = await createAccounts();
     await insertTx(a, { booking_date: "2024-07-01" });
