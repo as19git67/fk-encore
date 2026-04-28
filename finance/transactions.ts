@@ -209,6 +209,12 @@ function toView(
 
 interface ListParams {
   accountId?: number;
+  /** Comma-separated list of account ids — alternative to `accountId`
+   *  for the overview "Alle Buchungen" view that pools transactions
+   *  across all accounts in a section. Both filters can be supplied
+   *  together; the result is the intersection (i.e. accountId must
+   *  also appear in accountIdsCsv if both are set). */
+  accountIdsCsv?: string;
   from?: string; // ISO date
   to?: string;
   limit?: number;
@@ -243,11 +249,25 @@ export const listTransactions = api(
       }
       conds.push(eq(financeTransaction.account_id, p.accountId));
     }
+    if (p.accountIdsCsv) {
+      const ids = p.accountIdsCsv
+        .split(",")
+        .map((s) => Number(s.trim()))
+        .filter((n) => Number.isInteger(n) && n > 0);
+      if (ids.length === 0) return { items: [], total: 0 };
+      // Intersect with visibleIds when ACL applies; admins see all.
+      const allowed =
+        visibleIds === null ? ids : ids.filter((n) => visibleIds.includes(n));
+      if (allowed.length === 0) return { items: [], total: 0 };
+      conds.push(inArray(financeTransaction.account_id, allowed));
+    }
     if (p.from) conds.push(gte(financeTransaction.booking_date, p.from));
     if (p.to) conds.push(lte(financeTransaction.booking_date, p.to));
 
     const where = conds.length > 0 ? and(...conds) : undefined;
-    const limit = Math.min(Math.max(p.limit ?? 50, 1), 200);
+    // The overview's "Alle Buchungen" page renders up to 500 rows
+    // without pagination, so the upper cap stays at 500.
+    const limit = Math.min(Math.max(p.limit ?? 50, 1), 500);
     const offset = Math.max(p.offset ?? 0, 0);
 
     const rows = await db

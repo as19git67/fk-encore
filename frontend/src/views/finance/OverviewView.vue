@@ -5,6 +5,7 @@ import Button from 'primevue/button'
 import Message from 'primevue/message'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
+import Select from 'primevue/select'
 import { useOverviewStore } from '../../stores/finance/overview'
 import type { OverviewAccount, SaveOverviewSection } from '../../api/finance'
 
@@ -41,8 +42,15 @@ function balanceClass(acc: OverviewAccount): string {
 
 function openAccount(account: OverviewAccount) {
   void router.push({
-    name: 'finance-account-detail',
+    name: 'finance-account-transactions',
     params: { id: account.id },
+  })
+}
+
+function openSection(sectionName: string) {
+  void router.push({
+    name: 'finance-section-transactions',
+    params: { name: sectionName },
   })
 }
 
@@ -83,6 +91,16 @@ const accountById = computed(() => {
   }
   return map
 })
+
+// Options for the "In Gruppe …"-Select on each unassigned-pool row.
+// Recomputed reactively so renaming a section is reflected in the
+// dropdown without an extra dance.
+const sectionOptions = computed(() =>
+  draft.value.map((s, idx) => ({
+    label: s.name.trim() || '(unbenannt)',
+    value: idx,
+  })),
+)
 
 function accountLabel(id: number): string {
   return accountById.value.get(id)?.label ?? `#${id}`
@@ -206,12 +224,21 @@ async function saveConfig() {
           Keine Konten in dieser Gruppe.
         </div>
         <ul v-else class="account-card">
-          <li class="card-title">Alle Buchungen</li>
+          <li
+            class="account-row card-virtual"
+            @click="openSection(section.name)"
+          >
+            <div class="row-left">
+              <div class="row-title">
+                <span class="row-label">Alle Buchungen</span>
+              </div>
+            </div>
+            <i class="pi pi-chevron-right row-chevron" />
+          </li>
           <li
             v-for="acc in section.accounts"
             :key="acc.id"
             class="account-row"
-            :class="{ 'is-clickable': true }"
             @click="openAccount(acc)"
           >
             <div class="row-left">
@@ -238,7 +265,6 @@ async function saveConfig() {
       >
         <h2>Nicht zugeordnet</h2>
         <ul class="account-card">
-          <li class="card-title">Alle Buchungen</li>
           <li
             v-for="acc in store.data.unassigned"
             :key="acc.id"
@@ -356,20 +382,19 @@ async function saveConfig() {
         <li
           v-for="accId in draftUnassigned"
           :key="accId"
-          class="cfg-account-row"
+          class="cfg-account-row cfg-pool-row"
         >
-          <span>{{ accountLabel(accId) }}</span>
-          <span class="cfg-row-actions">
-            <Button
-              v-for="(section, idx) in draft"
-              :key="idx"
-              :label="`→ ${section.name || '(unbenannt)'}`"
-              severity="secondary"
-              text
-              size="small"
-              @click="moveAccountToSection(accId, idx)"
-            />
-          </span>
+          <span class="cfg-pool-label">{{ accountLabel(accId) }}</span>
+          <Select
+            :options="sectionOptions"
+            optionLabel="label"
+            optionValue="value"
+            placeholder="In Gruppe …"
+            :model-value="null"
+            class="cfg-pool-select"
+            :disabled="draft.length === 0"
+            @update:model-value="(idx: number | null) => idx !== null && moveAccountToSection(accId, idx)"
+          />
         </li>
         <li v-if="draftUnassigned.length === 0" class="cfg-empty">
           Alle Konten sind zugeordnet.
@@ -450,23 +475,26 @@ async function saveConfig() {
   overflow: hidden;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
-.card-title {
-  padding: 0.75rem 1rem 0.25rem;
-  font-weight: 600;
-  font-size: 0.95rem;
-}
 .account-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
   padding: 0.75rem 1rem;
-  border-top: 1px solid var(--p-content-border-color);
   cursor: pointer;
   transition: background 0.1s;
 }
+.account-row + .account-row {
+  border-top: 1px solid var(--p-content-border-color);
+}
 .account-row:hover {
   background: var(--p-surface-100);
+}
+.card-virtual {
+  font-weight: 600;
+}
+.row-chevron {
+  color: var(--p-text-muted-color);
 }
 .row-left {
   display: flex;
@@ -561,6 +589,26 @@ async function saveConfig() {
   display: flex;
   gap: 0.25rem;
   flex-wrap: wrap;
+}
+.cfg-pool-row {
+  flex-wrap: nowrap;
+}
+.cfg-pool-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cfg-pool-select {
+  flex-shrink: 0;
+  min-width: 10rem;
+  max-width: 14rem;
+}
+@media (max-width: 480px) {
+  .cfg-pool-select {
+    min-width: 8rem;
+  }
 }
 .cfg-empty {
   color: var(--p-text-muted-color);

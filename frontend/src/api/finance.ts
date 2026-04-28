@@ -438,6 +438,9 @@ export interface Transaction {
 
 export interface ListTransactionsQuery {
   accountId?: number
+  /** Multiple account ids — used by the overview's "Alle Buchungen"
+   *  view to pool transactions across all accounts of a section. */
+  accountIds?: number[]
   from?: string
   to?: string
   limit?: number
@@ -449,6 +452,9 @@ export async function listTransactions(
 ): Promise<{ items: Transaction[]; total: number }> {
   const params = new URLSearchParams()
   if (q.accountId !== undefined) params.set('accountId', String(q.accountId))
+  if (q.accountIds && q.accountIds.length > 0) {
+    params.set('accountIdsCsv', q.accountIds.join(','))
+  }
   if (q.from) params.set('from', q.from)
   if (q.to) params.set('to', q.to)
   if (q.limit !== undefined) params.set('limit', String(q.limit))
