@@ -441,6 +441,11 @@ export interface ListTransactionsQuery {
   /** Multiple account ids — used by the overview's "Alle Buchungen"
    *  view to pool transactions across all accounts of a section. */
   accountIds?: number[]
+  /** Free-text or amount search (matches counterparty/purpose, or
+   *  exact |amount| when the value parses as a number). */
+  q?: string
+  /** Filter by tag names (any-of match across user + ai tags). */
+  tags?: string[]
   from?: string
   to?: string
   limit?: number
@@ -455,6 +460,8 @@ export async function listTransactions(
   if (q.accountIds && q.accountIds.length > 0) {
     params.set('accountIdsCsv', q.accountIds.join(','))
   }
+  if (q.q && q.q.trim().length > 0) params.set('q', q.q.trim())
+  if (q.tags && q.tags.length > 0) params.set('tagsCsv', q.tags.join(','))
   if (q.from) params.set('from', q.from)
   if (q.to) params.set('to', q.to)
   if (q.limit !== undefined) params.set('limit', String(q.limit))

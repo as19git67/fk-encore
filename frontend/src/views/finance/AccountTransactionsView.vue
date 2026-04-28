@@ -12,9 +12,14 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
+import InputText from 'primevue/inputtext'
+import MultiSelect from 'primevue/multiselect'
+import Select from 'primevue/select'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useOverviewStore } from '../../stores/finance/overview'
+import { useTagsStore } from '../../stores/finance/tags'
 import type {
+  ListTransactionsQuery,
   OverviewAccount,
   OverviewSection,
   Transaction,
@@ -24,6 +29,7 @@ const route = useRoute()
 const router = useRouter()
 const txStore = useTransactionsStore()
 const overviewStore = useOverviewStore()
+const tagsStore = useTagsStore()
 
 const PAGE_LIMIT = 500
 
@@ -135,39 +141,147 @@ function formatShortDate(iso: string | null): string | null {
   return d.toLocaleDateString('de-DE')
 }
 
+// ── Filter state + presets ────────────────────────────────────────────
+
+type TimePreset =
+  | 'all'
+  | 'this-month'
+  | 'last-month'
+  | 'two-months-ago'
+  | 'three-months-ago'
+
+interface TimePresetOption {
+  value: TimePreset
+  label: string
+}
+
+const TIME_PRESETS: TimePresetOption[] = [
+  { value: 'all', label: 'ohne Einschränkung' },
+  { value: 'this-month', label: 'diesen Monat' },
+  { value: 'last-month', label: 'letzten Monat' },
+  { value: 'two-months-ago', label: 'vorletzten Monat' },
+  { value: 'three-months-ago', label: 'vorvorletzten Monat' },
+]
+
+// Local form state — only flushed to the actual query on "Suchen".
+// That matches the screenshot's two action buttons (Search + Clear)
+// and avoids hammering the API on every keystroke.
+const filterPanelOpen = ref(false)
+const formQuery = ref('')
+const formTags = ref<string[]>([])
+const formTimePreset = ref<TimePreset>('all')
+
+// What is actually applied to the listing right now.
+const appliedFilters = ref<{
+  q: string
+  tags: string[]
+  timePreset: TimePreset
+}>({ q: '', tags: [], timePreset: 'all' })
+
+const hasActiveFilters = computed(() => {
+  const f = appliedFilters.value
+  return f.q.trim().length > 0 || f.tags.length > 0 || f.timePreset !== 'all'
+})
+
+function timeRangeFor(preset: TimePreset, today = new Date()): {
+  from?: string
+  to?: string
+} {
+  if (preset === 'all') return {}
+  // Build the start/end of the target month in local time. We then
+  // emit YYYY-MM-DD strings that the backend compares against the
+  // booking_date (timestamp; same-zone DST quirks don't apply because
+  // booking_date is a date-only concept stored as midnight).
+  let monthsBack = 0
+  switch (preset) {
+    case 'this-month': monthsBack = 0; break
+    case 'last-month': monthsBack = 1; break
+    case 'two-months-ago': monthsBack = 2; break
+    case 'three-months-ago': monthsBack = 3; break
+  }
+  const start = new Date(today.getFullYear(), today.getMonth() - monthsBack, 1)
+  const end = new Date(today.getFullYear(), today.getMonth() - monthsBack + 1, 0)
+  return { from: isoDate(start), to: isoDate(end) }
+}
+
+function isoDate(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${dd}`
+}
+
+const tagOptions = computed(() =>
+  tagsStore.items.map((t) => ({ label: t.name, value: t.name })),
+)
+
 // ── Loading transactions ──────────────────────────────────────────────
+
+function buildQuery(): ListTransactionsQuery {
+  const m = mode.value
+  if (!m) return {}
+  const base: ListTransactionsQuery = { limit: PAGE_LIMIT }
+  if (m.kind === 'account') {
+    base.accountId = m.accountId
+  } else {
+    const sec = resolvedSection.value
+    const ids = sec ? sec.accounts.map((a) => a.id) : []
+    if (ids.length === 0) return { __empty: true } as unknown as ListTransactionsQuery
+    base.accountIds = ids
+  }
+  const f = appliedFilters.value
+  if (f.q.trim().length > 0) base.q = f.q.trim()
+  if (f.tags.length > 0) base.tags = f.tags
+  const range = timeRangeFor(f.timePreset)
+  if (range.from) base.from = range.from
+  if (range.to) base.to = range.to
+  return base
+}
 
 async function loadTransactions() {
   const m = mode.value
   if (!m) return
-  if (m.kind === 'account') {
-    await txStore.refresh({ accountId: m.accountId, limit: PAGE_LIMIT })
-    return
-  }
-  // Section mode — wait for the overview to know which accounts belong
-  // to this section.
-  const sec = resolvedSection.value
-  if (!sec) {
+  const query = buildQuery() as ListTransactionsQuery & { __empty?: boolean }
+  if (query.__empty) {
     txStore.items = []
     txStore.total = 0
     return
   }
-  const ids = sec.accounts.map((a) => a.id)
-  if (ids.length === 0) {
-    txStore.items = []
-    txStore.total = 0
-    return
+  await txStore.refresh(query)
+}
+
+function applyFilters() {
+  appliedFilters.value = {
+    q: formQuery.value,
+    tags: [...formTags.value],
+    timePreset: formTimePreset.value,
   }
-  await txStore.refresh({ accountIds: ids, limit: PAGE_LIMIT })
+  void loadTransactions()
+}
+
+function clearFilters() {
+  formQuery.value = ''
+  formTags.value = []
+  formTimePreset.value = 'all'
+  appliedFilters.value = { q: '', tags: [], timePreset: 'all' }
+  void loadTransactions()
 }
 
 onMounted(async () => {
   if (!overviewStore.data) await overviewStore.refresh()
+  if (tagsStore.items.length === 0) {
+    // load both user + ai tag names so promoted-but-unfamiliar tags
+    // still appear in the filter dropdown.
+    await tagsStore.refresh('all')
+  }
   await loadTransactions()
 })
 
 // React to route changes (navigating from one section/account to
-// another without unmounting the component).
+// another without unmounting the component). Filter form state stays
+// across the navigation so a user-applied date preset survives a
+// switch from one account to another within the same session — the
+// applied filters are explicitly account-agnostic.
 watch(
   () => [route.name, route.params.id, route.params.name],
   async () => {
@@ -235,9 +349,8 @@ function openTransaction(tx: Transaction) {
   })
 }
 
-// ── Header icon dummies ───────────────────────────────────────────────
+// ── Header icon state ─────────────────────────────────────────────────
 
-const filterDummyOpen = ref(false)
 const selectionListDummyOpen = ref(false)
 const selectMode = ref(false)
 const selection = ref<Set<number>>(new Set())
@@ -284,8 +397,11 @@ function goBack() {
           severity="secondary"
           rounded
           aria-label="Filter"
-          :class="{ 'tx-icon-active': filterDummyOpen }"
-          @click="filterDummyOpen = !filterDummyOpen"
+          :class="{
+            'tx-icon-active': filterPanelOpen,
+            'tx-icon-applied': hasActiveFilters && !filterPanelOpen,
+          }"
+          @click="filterPanelOpen = !filterPanelOpen"
         />
         <Button
           icon="pi pi-list"
@@ -306,14 +422,61 @@ function goBack() {
       </div>
     </header>
 
-    <Message
-      v-if="filterDummyOpen"
-      severity="info"
-      :closable="false"
-      class="tx-dummy"
-    >
-      Filter — Platzhalter. Die Filter-Optionen werden später ergänzt.
-    </Message>
+    <section v-if="filterPanelOpen" class="tx-filter-panel">
+      <div class="tx-filter-fields">
+        <div class="tx-filter-row">
+          <InputText
+            v-model="formQuery"
+            placeholder="Text oder Betrag suchen"
+            class="tx-filter-input"
+            @keyup.enter="applyFilters"
+          />
+          <Button
+            v-if="formQuery.length > 0"
+            icon="pi pi-times"
+            severity="secondary"
+            text
+            rounded
+            aria-label="Suchtext leeren"
+            @click="formQuery = ''"
+          />
+        </div>
+        <MultiSelect
+          v-model="formTags"
+          :options="tagOptions"
+          option-label="label"
+          option-value="value"
+          placeholder="Mögliche Kategorien auswählen"
+          :max-selected-labels="2"
+          filter
+          display="chip"
+          class="tx-filter-input"
+        />
+        <Select
+          v-model="formTimePreset"
+          :options="TIME_PRESETS"
+          option-label="label"
+          option-value="value"
+          placeholder="Zeitspanne einschränken"
+          class="tx-filter-input"
+        />
+      </div>
+      <div class="tx-filter-actions">
+        <Button
+          icon="pi pi-search"
+          aria-label="Suchen"
+          @click="applyFilters"
+        />
+        <Button
+          icon="pi pi-times"
+          severity="secondary"
+          aria-label="Filter zurücksetzen"
+          :disabled="!hasActiveFilters && formQuery.length === 0 && formTags.length === 0 && formTimePreset === 'all'"
+          @click="clearFilters"
+        />
+      </div>
+    </section>
+
     <Message
       v-if="selectionListDummyOpen"
       severity="info"
@@ -433,6 +596,55 @@ function goBack() {
 }
 .tx-header :deep(.p-button.tx-icon-active) {
   background: rgba(255, 255, 255, 0.4);
+}
+.tx-header :deep(.p-button.tx-icon-applied) {
+  background: var(--p-blue-500, #2196f3);
+  color: #fff;
+}
+
+/* ── Filter panel (expands below the sticky header) ───────────────── */
+.tx-filter-panel {
+  position: sticky;
+  top: 3.4rem;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+  padding: 0.6rem;
+  background: var(--p-surface-0);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 0.5rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+}
+.tx-filter-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.tx-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.tx-filter-input {
+  width: 100%;
+  min-width: 0;
+}
+.tx-filter-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+.tx-filter-actions :deep(.p-button) {
+  min-width: 2.5rem;
+  height: 2.5rem;
+}
+@media (max-width: 480px) {
+  .tx-filter-panel {
+    top: 3.2rem;
+  }
 }
 .tx-header > :first-child {
   grid-area: back;

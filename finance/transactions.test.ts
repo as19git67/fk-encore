@@ -231,6 +231,67 @@ describe("finance/transactions — list (ACL filter)", () => {
     expect(cappedHigh.items.length).toBeLessThanOrEqual(500);
   });
 
+  it("q filters by counterparty/purpose with case-insensitive substring match", async () => {
+    const { a } = await createAccounts();
+    await insertTx(a, { counterparty: "REWE Markt", purpose: "Lebensmittel" });
+    await insertTx(a, { counterparty: "Stadtwerke", purpose: "Stromrechnung" });
+    await insertTx(a, { counterparty: "Aldi Süd", purpose: "Wocheneinkauf" });
+
+    setAuth("1", ["finance.view", "finance.admin"]);
+
+    const rewe = await listTransactions({ q: "rewe" });
+    expect(rewe.items.map((i) => i.counterparty)).toEqual(["REWE Markt"]);
+
+    const wocheneinkauf = await listTransactions({ q: "WOCHEN" });
+    expect(wocheneinkauf.items.map((i) => i.counterparty)).toEqual(["Aldi Süd"]);
+
+    const none = await listTransactions({ q: "fluxus" });
+    expect(none.items).toHaveLength(0);
+  });
+
+  it("q matches the absolute amount when it parses as a number (sign-agnostic, comma allowed)", async () => {
+    const { a } = await createAccounts();
+    await insertTx(a, { amount: "-12.50", counterparty: "neg" });
+    await insertTx(a, { amount: "12.50", counterparty: "pos" });
+    await insertTx(a, { amount: "5.00", counterparty: "other" });
+
+    setAuth("1", ["finance.view", "finance.admin"]);
+
+    const dot = await listTransactions({ q: "12.50" });
+    expect(dot.items.map((i) => i.counterparty).sort()).toEqual(["neg", "pos"]);
+
+    const comma = await listTransactions({ q: "12,50" });
+    expect(comma.items.map((i) => i.counterparty).sort()).toEqual(["neg", "pos"]);
+  });
+
+  it("tagsCsv filters to transactions carrying any of the named tags (regardless of source)", async () => {
+    const { a } = await createAccounts();
+    const t1 = await insertTx(a, { counterparty: "T1" });
+    const t2 = await insertTx(a, { counterparty: "T2" });
+    const t3 = await insertTx(a, { counterparty: "T3" });
+
+    const lebensmittelUser = await insertTag("Lebensmittel", "user");
+    const lebensmittelAi = await insertTag("Strom", "ai");
+
+    await db.insert(financeTagTransaction).values({
+      tag_id: lebensmittelUser,
+      transaction_id: t1,
+    });
+    await db.insert(financeTagTransaction).values({
+      tag_id: lebensmittelAi,
+      transaction_id: t2,
+    });
+    // t3 carries no tags.
+
+    setAuth("1", ["finance.view", "finance.admin"]);
+
+    const lebensmittel = await listTransactions({ tagsCsv: "Lebensmittel" });
+    expect(lebensmittel.items.map((i) => i.counterparty)).toEqual(["T1"]);
+
+    const both = await listTransactions({ tagsCsv: "Lebensmittel,Strom" });
+    expect(both.items.map((i) => i.counterparty).sort()).toEqual(["T1", "T2"]);
+  });
+
   it("filters by date range (inclusive)", async () => {
     const { a } = await createAccounts();
     await insertTx(a, { booking_date: "2024-07-01" });
