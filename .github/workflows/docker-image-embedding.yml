@@ -71,12 +71,11 @@ jobs:
         with:
           context: ./embedding_service
           push: true
-          # amd64-only: production target is x86_64 (TrueNAS SCALE / Intel
-          # 12600K) and a multi-arch build pulls the 4.77 GB CLIP model
-          # twice into the same GitHub-runner disk, which has been bumping
-          # against the ~14 GB limit and failing intermittently with ENOSPC.
-          # Re-add linux/arm64 here if an arm deployment target ever appears.
-          platforms: linux/amd64
+          # Multi-arch build is back: model weights now live in the
+          # `embedding_models` volume rather than the image, so the build
+          # no longer pulls the 4.77 GB CLIP file twice onto the runner
+          # disk and the previous ENOSPC failures are gone.
+          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
