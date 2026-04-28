@@ -73,10 +73,11 @@ RUN for attempt in 1 2 3 4 5; do \
 RUN mkdir -p /models \
     && chown -R 568:568 /models /home/apps
 
-# Copy application source + downloader.
+# Copy application source + downloader / optimiser.
 COPY app/ ./app/
 COPY download_model.sh /usr/local/bin/download_model.sh
-RUN chmod +x /usr/local/bin/download_model.sh
+COPY optimize_models.sh /usr/local/bin/optimize_models.sh
+RUN chmod +x /usr/local/bin/download_model.sh /usr/local/bin/optimize_models.sh
 
 # Runtime system deps (libpq for asyncpg, curl for healthcheck + downloader)
 RUN apt-get update && apt-get install -y --no-install-recommends \

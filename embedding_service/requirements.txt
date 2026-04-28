@@ -34,3 +34,10 @@ numpy==1.26.4
 # NLP – natural language query parsing (German NER + relative date parsing)
 spacy==3.7.5
 dateparser==1.2.0
+
+# ONNX export + INT8 quantisation. Used by app/scripts/export_onnx.py
+# (build/runtime tool) and OnnxInt8Backend (production inference path).
+# onnxruntime CPU build only; the GPU variant pulls in CUDA which we don't
+# have on the production target.
+onnx==1.17.0
+onnxruntime==1.20.1
