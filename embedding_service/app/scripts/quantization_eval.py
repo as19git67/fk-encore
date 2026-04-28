@@ -90,39 +90,73 @@ class Sample:
     timestamp: float  # epoch seconds; missing timestamps are dropped earlier
 
 
-async def sample_photos(n: int) -> List[Sample]:
+async def sample_photos(n: int, with_embeddings: bool) -> Tuple[List[Sample], Optional[np.ndarray], Optional[np.ndarray]]:
     """Random sample of photos that already have both embeddings + a timestamp.
 
-    Filtering by `embedding_clip IS NOT NULL` ensures we only include photos
-    the live service successfully processed — corrupted/unreadable files are
-    excluded automatically, which keeps the eval script free of error paths
-    that aren't representative of production traffic.
+    When `with_embeddings` is True, the stored CLIP/DINOv2 vectors come back
+    in the same call so the caller can skip the (often impossible inside the
+    embedding container) image-loading step entirely. Filtering by
+    `embedding_clip IS NOT NULL` keeps corrupted / unreadable files out of
+    the sample regardless of mode.
     """
-    query = text(
-        """
-        SELECT photo_id, file_path, EXTRACT(EPOCH FROM timestamp) AS ts
-        FROM photos
-        WHERE embedding_clip IS NOT NULL
-          AND embedding_dino IS NOT NULL
-          AND timestamp IS NOT NULL
-        ORDER BY random()
-        LIMIT :limit
-        """
-    )
+    if with_embeddings:
+        query = text(
+            """
+            SELECT photo_id, file_path, EXTRACT(EPOCH FROM timestamp) AS ts,
+                   embedding_clip, embedding_dino
+            FROM photos
+            WHERE embedding_clip IS NOT NULL
+              AND embedding_dino IS NOT NULL
+              AND timestamp IS NOT NULL
+            ORDER BY random()
+            LIMIT :limit
+            """
+        )
+    else:
+        query = text(
+            """
+            SELECT photo_id, file_path, EXTRACT(EPOCH FROM timestamp) AS ts
+            FROM photos
+            WHERE embedding_clip IS NOT NULL
+              AND embedding_dino IS NOT NULL
+              AND timestamp IS NOT NULL
+            ORDER BY random()
+            LIMIT :limit
+            """
+        )
+
     async with engine.connect() as conn:
         result = await conn.execute(query, {"limit": n})
         rows = result.fetchall()
 
     samples = [Sample(photo_id=r[0], file_path=r[1], timestamp=float(r[2])) for r in rows]
-    samples.sort(key=lambda s: s.timestamp)  # similar_groups requires sorted input
-    return samples
+    # similar_groups requires timestamp-sorted input; sort sample list and
+    # the embedding matrices in lockstep so row i still describes sample i.
+    if with_embeddings:
+        order = sorted(range(len(rows)), key=lambda i: float(rows[i][2]))
+        samples = [samples[i] for i in order]
+        clip = np.asarray([list(rows[i][3]) for i in order], dtype=np.float32) if rows else np.zeros((0, 1024), dtype=np.float32)
+        dino = np.asarray([list(rows[i][4]) for i in order], dtype=np.float32) if rows else np.zeros((0, 768), dtype=np.float32)
+        return samples, clip, dino
+
+    samples.sort(key=lambda s: s.timestamp)
+    return samples, None, None
+
+
+_skipped_examples: List[str] = []
+_skipped_count = 0
 
 
 def _open_image(path: str) -> Optional[Image.Image]:
+    global _skipped_count
     try:
         return Image.open(path).convert("RGB")
     except Exception as exc:
-        logger.warning("skip %s: %s", path, exc)
+        # Per-file warnings drown the console at 500 sample size; collect a
+        # handful of representative paths and report a single summary later.
+        _skipped_count += 1
+        if len(_skipped_examples) < 3:
+            _skipped_examples.append(f"{path}: {exc}")
         return None
 
 
@@ -314,6 +348,22 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--sample", type=int, default=500, help="Number of photos to sample (default: 500)")
     p.add_argument("--reference", choices=sorted(BACKENDS.keys()), default="torch")
     p.add_argument("--candidate", choices=sorted(BACKENDS.keys()), default="torch")
+    p.add_argument(
+        "--source",
+        choices=["db", "disk"],
+        default="db",
+        help=(
+            "Where image embeddings come from. 'db' (default) reads the "
+            "stored fp32 vectors from the embedding service's own DB, which "
+            "needs no filesystem access — suitable for sanity-checking the "
+            "pipeline and for any candidate backend that can also be evaluated "
+            "from pre-stored vectors. 'disk' re-embeds each photo from its "
+            "on-disk path; required for backends like ONNX-INT8 where the "
+            "whole point is to compute fresh vectors. Note that the embedding "
+            "service container does not normally see /mnt/libraries — disk "
+            "mode therefore needs that volume mounted in too."
+        ),
+    )
     p.add_argument("--threshold", type=float, default=0.90, help="Cosine threshold for grouping (matches production)")
     p.add_argument("--window-seconds", type=float, default=600.0, help="Time window for grouping (matches production)")
     p.add_argument("--batch-size", type=int, default=8)
@@ -354,50 +404,94 @@ async def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-7s | %(message)s")
     args = parse_args()
 
-    print(f"Sampling {args.sample} photos from DB...")
-    samples = await sample_photos(args.sample)
+    use_db_source = args.source == "db"
+
+    print(f"Sampling {args.sample} photos from DB (source={args.source})...")
+    samples, clip_db, dino_db = await sample_photos(args.sample, with_embeddings=use_db_source)
     if not samples:
         print("No photos with embeddings found. Run the service against your library first.", file=sys.stderr)
         return 2
     print(f"  got {len(samples)} samples (sorted by timestamp)")
 
-    print(f"\nLoading reference backend '{args.reference}'...")
-    ref_backend = BACKENDS[args.reference]()
-    print(f"Loading candidate backend '{args.candidate}'...")
-    cand_backend = BACKENDS[args.candidate]() if args.candidate != args.reference else ref_backend
+    # In db mode the candidate vectors are identical to the reference (both
+    # come from the stored fp32 embeddings), so neither backend has to be
+    # loaded for image embedding. The text encoder is still required for
+    # Level 3, so we lazy-load it then.
+    ref_backend: Optional[object] = None
+    cand_backend: Optional[object] = None
 
-    print(f"\nEmbedding with reference '{args.reference}':")
-    samples_ref, clip_ref, dino_ref = embed_all(ref_backend, samples, args.batch_size)
-
-    if cand_backend is ref_backend:
-        # No need to redo the work for a self-comparison; downstream metrics
-        # then exercise determinism / numeric noise rather than model drift.
+    if use_db_source:
+        if args.reference != args.candidate:
+            print(
+                "ERROR: --source=db cannot compare two different backends — both sides "
+                "would just read the same stored vectors. Use --source=disk for a real "
+                "backend swap.",
+                file=sys.stderr,
+            )
+            return 2
+        clip_ref = clip_db
+        dino_ref = dino_db
         clip_cand = clip_ref.copy()
         dino_cand = dino_ref.copy()
-        samples_cand = samples_ref
+        samples_aligned = samples
+        print(f"\nUsing pre-stored fp32 vectors from DB ({len(samples)} photos, no model load needed for image pass)")
     else:
-        print(f"\nEmbedding with candidate '{args.candidate}':")
-        samples_cand, clip_cand, dino_cand = embed_all(cand_backend, samples, args.batch_size)
+        print(f"\nLoading reference backend '{args.reference}'...")
+        ref_backend = BACKENDS[args.reference]()
+        print(f"Loading candidate backend '{args.candidate}'...")
+        cand_backend = BACKENDS[args.candidate]() if args.candidate != args.reference else ref_backend
 
-    # Align: only photos that survived BOTH passes count (different backends
-    # may fail on different files in the rare corruption case).
-    ref_ids = {s.photo_id for s in samples_ref}
-    cand_ids = {s.photo_id for s in samples_cand}
-    keep_ids = ref_ids & cand_ids
-    if len(keep_ids) < len(samples_ref) or len(keep_ids) < len(samples_cand):
-        print(f"\n  aligning to {len(keep_ids)} photos that both backends embedded successfully")
-        ref_idx = [i for i, s in enumerate(samples_ref) if s.photo_id in keep_ids]
-        cand_idx = [i for i, s in enumerate(samples_cand) if s.photo_id in keep_ids]
-        samples_aligned = [samples_ref[i] for i in ref_idx]
-        clip_ref = clip_ref[ref_idx]
-        dino_ref = dino_ref[ref_idx]
-        # Re-order candidate matrices to the same photo_id sequence as ref.
-        cand_pos = {samples_cand[i].photo_id: i for i in cand_idx}
-        order = [cand_pos[s.photo_id] for s in samples_aligned]
-        clip_cand = clip_cand[order]
-        dino_cand = dino_cand[order]
-    else:
-        samples_aligned = samples_ref
+        print(f"\nEmbedding with reference '{args.reference}':")
+        samples_ref, clip_ref, dino_ref = embed_all(ref_backend, samples, args.batch_size)
+
+        if cand_backend is ref_backend:
+            # No need to redo the work for a self-comparison; downstream metrics
+            # then exercise determinism / numeric noise rather than model drift.
+            clip_cand = clip_ref.copy()
+            dino_cand = dino_ref.copy()
+            samples_cand = samples_ref
+        else:
+            print(f"\nEmbedding with candidate '{args.candidate}':")
+            samples_cand, clip_cand, dino_cand = embed_all(cand_backend, samples, args.batch_size)
+
+        if _skipped_count > 0:
+            print(f"\n  skipped {_skipped_count} photo(s) whose file was not readable.")
+            for ex in _skipped_examples:
+                print(f"    e.g. {ex}")
+            print(
+                "  hint: the embedding service container does not normally see "
+                "/mnt/libraries. Either mount it read-only into this container, or "
+                "use --source=db (which reads stored fp32 vectors from the DB and "
+                "skips disk access entirely)."
+            )
+
+        if not samples_ref:
+            print(
+                "\nERROR: no photos could be loaded from disk. Re-run with --source=db, "
+                "or mount the photo libraries into this container. Aborting.",
+                file=sys.stderr,
+            )
+            return 2
+
+        # Align: only photos that survived BOTH passes count (different backends
+        # may fail on different files in the rare corruption case).
+        ref_ids = {s.photo_id for s in samples_ref}
+        cand_ids = {s.photo_id for s in samples_cand}
+        keep_ids = ref_ids & cand_ids
+        if len(keep_ids) < len(samples_ref) or len(keep_ids) < len(samples_cand):
+            print(f"\n  aligning to {len(keep_ids)} photos that both backends embedded successfully")
+            ref_idx = [i for i, s in enumerate(samples_ref) if s.photo_id in keep_ids]
+            cand_idx = [i for i, s in enumerate(samples_cand) if s.photo_id in keep_ids]
+            samples_aligned = [samples_ref[i] for i in ref_idx]
+            clip_ref = clip_ref[ref_idx]
+            dino_ref = dino_ref[ref_idx]
+            # Re-order candidate matrices to the same photo_id sequence as ref.
+            cand_pos = {samples_cand[i].photo_id: i for i in cand_idx}
+            order = [cand_pos[s.photo_id] for s in samples_aligned]
+            clip_cand = clip_cand[order]
+            dino_cand = dino_cand[order]
+        else:
+            samples_aligned = samples_ref
 
     # ---- Level 1 — per-photo cosine ----
     print("\nLevel 1 — Embedding cosine (ref vs candidate, per photo):")
@@ -424,6 +518,14 @@ async def main() -> int:
     queries = _load_queries(args.queries_file)
     text_stats: Optional[Dict[str, float]] = None
     if queries:
+        # In db mode neither backend was instantiated above; we still need a
+        # working text encoder for the recall test. Lazy-load it here.
+        if ref_backend is None:
+            print(f"\nLoading reference backend '{args.reference}' for text encoding...")
+            ref_backend = BACKENDS[args.reference]()
+        if cand_backend is None:
+            cand_backend = ref_backend if args.reference == args.candidate else BACKENDS[args.candidate]()
+
         print(f"\nLevel 3 — CLIP text recall@{args.top_k} ({len(queries)} queries):")
         text_stats, per_query = eval_text_recall(
             ref_backend, cand_backend, queries, clip_ref, clip_cand, args.top_k
