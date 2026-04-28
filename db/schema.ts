@@ -1237,6 +1237,41 @@ export const financeSystemPref = pgTable("finance_system_pref", {
     .defaultNow(),
 });
 
+// ---------- Per-user overview-page configuration ----------
+//
+// One JSONB blob per (user_id, key). The default key is "overview" and
+// holds the user's groupings on the finance overview landing page —
+// section names + account ids in display order. Surfaced as an opaque
+// JSON document so adding more sections / fields later does not need a
+// schema change. The shape is enforced at the API boundary in
+// finance/overview.ts.
+
+export interface FinanceOverviewSection {
+  /** Display name, e.g. "Täglich", "Sparen". */
+  name: string;
+  /** Ordered list of finance_account ids that belong to this section. */
+  account_ids: number[];
+}
+
+export interface FinanceOverviewConfig {
+  sections: FinanceOverviewSection[];
+}
+
+export const financeUserPref = pgTable(
+  "finance_user_pref",
+  {
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    value: jsonb("value").notNull().$type<unknown>(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.user_id, table.key] })],
+);
+
 // ========== Scheduled job state (lib/local-cron.ts) ==========
 
 export const scheduledJobState = pgTable("scheduled_job_state", {

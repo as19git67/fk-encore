@@ -327,6 +327,62 @@ export async function unlinkAccount(id: number): Promise<Account> {
 }
 
 // ----------------------------------------------------------------------
+// Overview (configurable landing page)
+// ----------------------------------------------------------------------
+
+export interface OverviewAccount {
+  id: number
+  label: string
+  type_kind: string
+  type_label: string
+  currency_code: string
+  currency_symbol: string
+  /** Latest balance (numeric as string) or null when none recorded yet. */
+  balance: string | null
+  /** ISO timestamp of the latest balance row, null when none. */
+  balance_as_of: string | null
+  /** Count of recent transactions still without a user-source tag. */
+  pending_count: number
+}
+
+export interface OverviewSection {
+  name: string
+  accounts: OverviewAccount[]
+}
+
+export interface OverviewResponse {
+  user_email: string
+  sections: OverviewSection[]
+  unassigned: OverviewAccount[]
+  /** True when no user config is saved yet — UI surfaces a hint. */
+  is_default: boolean
+}
+
+export interface SaveOverviewSection {
+  name: string
+  account_ids: number[]
+}
+
+export interface SaveOverviewResponse {
+  saved: true
+  sections_saved: number
+  accounts_saved: number
+}
+
+export async function getOverview(): Promise<OverviewResponse> {
+  return apiFetch('/finance/overview')
+}
+
+export async function saveOverview(
+  sections: SaveOverviewSection[],
+): Promise<SaveOverviewResponse> {
+  return apiFetch('/finance/overview', {
+    method: 'PUT',
+    body: JSON.stringify({ sections }),
+  })
+}
+
+// ----------------------------------------------------------------------
 // Account access (ACL) — admin only
 // ----------------------------------------------------------------------
 
