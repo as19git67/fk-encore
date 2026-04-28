@@ -108,14 +108,42 @@ class OnnxInt8Backend:
         """Fail loudly at construction time if the operator forgot
         `optimize_models.sh`. Saves a confusing ORT error five layers
         deep when the first inference call hits a missing file.
+
+        DINOv2 is allowed to fall back to its fp32 ONNX file because the
+        int8 variant is destroyed by dynamic quantisation (DINOv2 is well
+        known for outlier-feature activations that explode the per-tensor
+        activation scale and squash everything else into a few bins —
+        mean cosine vs torch fp32 collapses to ~0.18). The fp32 ONNX
+        graph still benefits from ORT's graph optimisations and is only
+        marginally larger, so we lose almost no end-to-end speedup by
+        keeping DINOv2 in fp32.
         """
-        for fname in ("clip_image_int8.onnx", "clip_text_int8.onnx", "dinov2_int8.onnx"):
+        for fname in ("clip_image_int8.onnx", "clip_text_int8.onnx"):
             path = self.onnx_dir / fname
             if not path.exists() or path.stat().st_size == 0:
                 raise FileNotFoundError(
                     f"ONNX/INT8 artefact missing: {path}. "
                     f"Run `/usr/local/bin/optimize_models.sh` to populate {self.onnx_dir}."
                 )
+
+        # DINOv2: int8 OR fp32 must be present. _load_dino picks the right
+        # one at access time.
+        if not self._dino_path().exists():
+            raise FileNotFoundError(
+                f"Neither dinov2_int8.onnx nor dinov2.fp32.onnx in {self.onnx_dir}. "
+                f"Run `/usr/local/bin/optimize_models.sh`."
+            )
+
+    def _dino_path(self) -> Path:
+        """Prefer int8 if present, else fall back to fp32. Operators
+        suppress the bad int8 by simply removing the file:
+            rm /models/onnx/dinov2_int8.onnx
+        """
+        int8 = self.onnx_dir / "dinov2_int8.onnx"
+        fp32 = self.onnx_dir / "dinov2.fp32.onnx"
+        if int8.exists() and int8.stat().st_size > 0:
+            return int8
+        return fp32
 
     def _load_clip_image(self):
         if self._clip_image_session is None:
@@ -147,8 +175,9 @@ class OnnxInt8Backend:
         if self._dino_session is None:
             import onnxruntime as ort
 
-            path = self.onnx_dir / "dinov2_int8.onnx"
-            logger.info("loading ONNX session: %s", path.name)
+            path = self._dino_path()
+            kind = "INT8" if path.name.endswith("_int8.onnx") else "fp32"
+            logger.info("loading ONNX session: %s (%s)", path.name, kind)
             self._dino_session = ort.InferenceSession(
                 str(path),
                 _make_session_options(self.threads),
