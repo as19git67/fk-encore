@@ -374,6 +374,30 @@ function formatSelectionSum(): string {
   }).format(selectionStore.sum)
 }
 
+// Sum + currency over the currently displayed (= filtered) listing.
+// Used in the header when filters are active but the user isn't in
+// select mode — answers "wieviel habe ich für X ausgegeben" for the
+// current filter set without forcing the user into select-all.
+const filteredSum = computed(() => {
+  let sum = 0
+  for (const tx of txStore.items) {
+    const n = Number(tx.amount)
+    if (Number.isFinite(n)) sum += n
+  }
+  return sum
+})
+
+const filteredCurrency = computed(
+  () => txStore.items[0]?.currency_code ?? 'EUR',
+)
+
+function formatFilteredSum(): string {
+  return new Intl.NumberFormat('de-DE', {
+    style: 'currency',
+    currency: filteredCurrency.value,
+  }).format(filteredSum.value)
+}
+
 function openBatchTagEditor() {
   if (selectionStore.count === 0) return
   selectionPopover.value?.hide()
@@ -410,6 +434,16 @@ function goBack() {
         <div class="tx-header-meta">
           <span class="tx-header-date">
             {{ selectionStore.count }} Buchung{{ selectionStore.count === 1 ? '' : 'en' }}
+          </span>
+        </div>
+      </template>
+      <template v-else-if="hasActiveFilters">
+        <div class="tx-header-title">
+          <h1>Σ: {{ formatFilteredSum() }}</h1>
+        </div>
+        <div class="tx-header-meta">
+          <span class="tx-header-date">
+            {{ txStore.items.length }} Buchung{{ txStore.items.length === 1 ? '' : 'en' }}
           </span>
         </div>
       </template>
