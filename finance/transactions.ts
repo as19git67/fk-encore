@@ -23,7 +23,7 @@
 import { createHash } from "node:crypto";
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
-import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte, or, sql } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
@@ -215,6 +215,19 @@ interface ListParams {
    *  together; the result is the intersection (i.e. accountId must
    *  also appear in accountIdsCsv if both are set). */
   accountIdsCsv?: string;
+  /**
+   * Free-text search. When the trimmed value parses as a finite
+   * number, matches transactions whose amount has the same absolute
+   * value (so users can type "12.50" without having to know the
+   * sign). Otherwise it does a case-insensitive substring match
+   * against counterparty + purpose, joined by OR.
+   */
+  q?: string;
+  /**
+   * Comma-separated list of tag names. A transaction matches when at
+   * least one of its tags (any source) has a name in the set.
+   */
+  tagsCsv?: string;
   from?: string; // ISO date
   to?: string;
   limit?: number;
@@ -263,6 +276,44 @@ export const listTransactions = api(
     }
     if (p.from) conds.push(gte(financeTransaction.booking_date, p.from));
     if (p.to) conds.push(lte(financeTransaction.booking_date, p.to));
+
+    if (p.q && p.q.trim().length > 0) {
+      const q = p.q.trim();
+      const numericQ = Number(q.replace(",", "."));
+      if (Number.isFinite(numericQ)) {
+        // Match same absolute amount (signed and unsigned). cast to
+        // numeric so the parameter binding doesn't trip on the
+        // text-vs-numeric type for the comparison.
+        const abs = Math.abs(numericQ).toFixed(2);
+        conds.push(sql`ABS(${financeTransaction.amount}) = ${abs}::numeric`);
+      } else {
+        const like = `%${q}%`;
+        conds.push(
+          or(
+            sql`${financeTransaction.counterparty} ILIKE ${like}`,
+            sql`${financeTransaction.purpose} ILIKE ${like}`,
+          )!,
+        );
+      }
+    }
+
+    if (p.tagsCsv && p.tagsCsv.trim().length > 0) {
+      const names = p.tagsCsv
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      if (names.length === 0) return { items: [], total: 0 };
+
+      // Subquery: ids of transactions that carry any of these tags.
+      // The user-facing tag list shows names regardless of source —
+      // promoting an AI tag would otherwise hide it from the filter.
+      const taggedTxIds = db
+        .select({ id: financeTagTransaction.transaction_id })
+        .from(financeTagTransaction)
+        .innerJoin(financeTag, eq(financeTag.id, financeTagTransaction.tag_id))
+        .where(inArray(financeTag.name, names));
+      conds.push(inArray(financeTransaction.id, taggedTxIds));
+    }
 
     const where = conds.length > 0 ? and(...conds) : undefined;
     // The overview's "Alle Buchungen" page renders up to 500 rows
