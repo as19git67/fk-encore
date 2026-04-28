@@ -107,11 +107,19 @@ def _quantize_int8(fp32_path: Path, int8_path: Path) -> None:
 
 
 def _check_onnx(path: Path) -> None:
-    """Run the official onnx checker — catches malformed graphs early."""
+    """Run the official onnx checker — catches malformed graphs early.
+
+    Pass the path string instead of a loaded ModelProto: large models
+    (CLIP H/14 is ~5 GB fp32) exceed protobuf's 2 GB hard limit on a
+    single serialised message. onnx.load() builds the big ModelProto in
+    RAM fine, but check_model(model) calls SerializeToString() under the
+    hood which then fails with "Failed to serialize proto". The path
+    overload streams the file and follows external-data references
+    transparently, so it scales.
+    """
     import onnx
 
-    model = onnx.load(str(path))
-    onnx.checker.check_model(model)
+    onnx.checker.check_model(str(path))
 
 
 def _smoke_test(path: Path, dummy_inputs: dict) -> None:
