@@ -194,11 +194,14 @@ const groupedTransactions = computed<DayGroup[]>(() => {
     }
     list.push(tx)
   }
+  // Tagesgruppen absteigend (neueste oben). Innerhalb eines Tages
+  // nach id desc — die Insertion-Reihenfolge der DB ist eine grobe
+  // Annäherung an "zuletzt importiert", reicht als Tiebreaker.
   const dates = [...byDate.keys()].sort().reverse()
   return dates.map((d) => ({
     date: d,
     label: formatGroupDate(d),
-    items: byDate.get(d)!,
+    items: byDate.get(d)!.slice().sort((a, b) => b.id - a.id),
   }))
 })
 
