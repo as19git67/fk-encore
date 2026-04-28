@@ -594,7 +594,10 @@ export const batchTag = api(
       throw APIError.invalidArgument("at least one of add / remove / replace required");
     }
 
-    // ACL filter: keep only the transactions the caller may see.
+    // ACL filter: keep only the transactions the caller may see. Done
+    // outside the transaction — read-only and uses a different pool
+    // path. The actual mutations below run inside `db.transaction()`
+    // so the entire add/remove batch lands or rolls back as a unit.
     const visibleIds = await readableAccountIds(auth);
     let accessibleTxRows: Array<{ id: number }>;
     if (visibleIds === null) {
@@ -620,61 +623,66 @@ export const batchTag = api(
       return { affected_transactions: 0, added_links: 0, removed_links: 0 };
     }
 
-    let removedLinks = 0;
-    if (p.replace) {
-      // drop ALL user-tags from these transactions (keep AI suggestions)
-      const delRes = await db
-        .delete(financeTagTransaction)
-        .where(
-          and(
-            inArray(financeTagTransaction.transaction_id, txIds),
-            inArray(
-              financeTagTransaction.tag_id,
-              db
-                .select({ id: financeTag.id })
-                .from(financeTag)
-                .where(eq(financeTag.source, "user")),
-            ),
-          ),
-        )
-        .returning({ id: financeTagTransaction.transaction_id });
-      removedLinks += delRes.length;
-    } else if (remove.length > 0) {
-      const tagRows = await db
-        .select({ id: financeTag.id })
-        .from(financeTag)
-        .where(
-          and(inArray(financeTag.name, remove), eq(financeTag.source, "user")),
-        );
-      if (tagRows.length > 0) {
-        const delRes = await db
+    return await db.transaction(async (tx) => {
+      let removedLinks = 0;
+      if (p.replace) {
+        // drop ALL user-tags from these transactions (keep AI suggestions)
+        const delRes = await tx
           .delete(financeTagTransaction)
           .where(
             and(
               inArray(financeTagTransaction.transaction_id, txIds),
               inArray(
                 financeTagTransaction.tag_id,
-                tagRows.map((t) => t.id),
+                tx
+                  .select({ id: financeTag.id })
+                  .from(financeTag)
+                  .where(eq(financeTag.source, "user")),
               ),
             ),
           )
           .returning({ id: financeTagTransaction.transaction_id });
         removedLinks += delRes.length;
+      } else if (remove.length > 0) {
+        // Remove rows for any user-tag whose name appears in `remove`,
+        // across the selected transactions. AI-tag rows are left
+        // alone — they get cleared on promote.
+        const tagRows = await tx
+          .select({ id: financeTag.id })
+          .from(financeTag)
+          .where(
+            and(inArray(financeTag.name, remove), eq(financeTag.source, "user")),
+          );
+        if (tagRows.length > 0) {
+          const delRes = await tx
+            .delete(financeTagTransaction)
+            .where(
+              and(
+                inArray(financeTagTransaction.transaction_id, txIds),
+                inArray(
+                  financeTagTransaction.tag_id,
+                  tagRows.map((t) => t.id),
+                ),
+              ),
+            )
+            .returning({ id: financeTagTransaction.transaction_id });
+          removedLinks += delRes.length;
+        }
       }
-    }
 
-    let addedLinks = 0;
-    if (add.length > 0) {
-      for (const txId of txIds) {
-        addedLinks += await applyUserTags(txId, add);
+      let addedLinks = 0;
+      if (add.length > 0) {
+        for (const txId of txIds) {
+          addedLinks += await applyUserTagsTx(tx, txId, add);
+        }
       }
-    }
 
-    return {
-      affected_transactions: txIds.length,
-      added_links: addedLinks,
-      removed_links: removedLinks,
-    };
+      return {
+        affected_transactions: txIds.length,
+        added_links: addedLinks,
+        removed_links: removedLinks,
+      };
+    });
   },
 );
 
@@ -741,6 +749,63 @@ async function applyUserTags(
       .limit(1);
     if (!existing) {
       await db.insert(financeTagTransaction).values({
+        tag_id: tag.id,
+        transaction_id: transactionId,
+      });
+      added++;
+    }
+  }
+  return added;
+}
+
+/**
+ * Same as `applyUserTags`, but routes every query through the supplied
+ * transaction executor. Used by `batchTag` so the entire add/remove
+ * pass is a single atomic operation: the caller's "Speichern"-click on
+ * the multi-tag editor either commits all changes or rolls back to
+ * the prior state. Untyped executor parameter (`any`) because Drizzle
+ * doesn't expose a clean union of "db" and "tx".
+ */
+async function applyUserTagsTx(
+  tx: any,
+  transactionId: number,
+  names: string[],
+): Promise<number> {
+  if (names.length === 0) return 0;
+  const uniqueNames = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
+
+  for (const name of uniqueNames) {
+    const existing = await tx
+      .select({ id: financeTag.id })
+      .from(financeTag)
+      .where(and(eq(financeTag.name, name), eq(financeTag.source, "user")))
+      .limit(1);
+    if (existing.length === 0) {
+      await tx.insert(financeTag).values({ name, source: "user" });
+    }
+  }
+
+  const tagRows = await tx
+    .select({ id: financeTag.id, name: financeTag.name })
+    .from(financeTag)
+    .where(
+      and(inArray(financeTag.name, uniqueNames), eq(financeTag.source, "user")),
+    );
+
+  let added = 0;
+  for (const tag of tagRows as Array<{ id: number; name: string }>) {
+    const existing = await tx
+      .select({ tag_id: financeTagTransaction.tag_id })
+      .from(financeTagTransaction)
+      .where(
+        and(
+          eq(financeTagTransaction.tag_id, tag.id),
+          eq(financeTagTransaction.transaction_id, transactionId),
+        ),
+      )
+      .limit(1);
+    if (existing.length === 0) {
+      await tx.insert(financeTagTransaction).values({
         tag_id: tag.id,
         transaction_id: transactionId,
       });

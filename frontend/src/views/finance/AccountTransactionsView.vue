@@ -14,9 +14,12 @@ import Button from 'primevue/button'
 import Message from 'primevue/message'
 import InputText from 'primevue/inputtext'
 import MultiSelect from 'primevue/multiselect'
+import Checkbox from 'primevue/checkbox'
+import Popover from 'primevue/popover'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useOverviewStore } from '../../stores/finance/overview'
 import { useTagsStore } from '../../stores/finance/tags'
+import { useTxSelectionStore } from '../../stores/finance/selection'
 import DateRangePresets from '../../components/DateRangePresets.vue'
 import type {
   ListTransactionsQuery,
@@ -30,6 +33,7 @@ const router = useRouter()
 const txStore = useTransactionsStore()
 const overviewStore = useOverviewStore()
 const tagsStore = useTagsStore()
+const selectionStore = useTxSelectionStore()
 
 const PAGE_LIMIT = 500
 
@@ -309,7 +313,7 @@ function txAmountClass(tx: Transaction): string {
 
 function openTransaction(tx: Transaction) {
   if (selectMode.value) {
-    toggleSelection(tx.id)
+    selectionStore.toggle(tx)
     return
   }
   void router.push({
@@ -318,24 +322,72 @@ function openTransaction(tx: Transaction) {
   })
 }
 
-// ── Header icon state ─────────────────────────────────────────────────
+// ── Select mode + multi-selection state ───────────────────────────────
 
-const selectionListDummyOpen = ref(false)
 const selectMode = ref(false)
-const selection = ref<Set<number>>(new Set())
+const selectionPopover = ref<InstanceType<typeof Popover> | null>(null)
 
 function toggleSelectMode() {
   selectMode.value = !selectMode.value
-  if (!selectMode.value) selection.value = new Set()
+  if (!selectMode.value) {
+    selectionStore.clear()
+    selectionPopover.value?.hide()
+  }
 }
-function toggleSelection(txId: number) {
-  const next = new Set(selection.value)
-  if (next.has(txId)) next.delete(txId)
-  else next.add(txId)
-  selection.value = next
+
+/**
+ * Tristate state for the "select all" checkbox above the list:
+ *   - true   → every visible transaction is selected
+ *   - false  → none selected
+ *   - null   → at least one is selected (Checkbox renders the
+ *              indeterminate/dash glyph)
+ */
+const selectAllState = computed<boolean | null>(() => {
+  const visibleCount = txStore.items.length
+  const selectedCount = txStore.items.filter((tx) =>
+    selectionStore.has(tx.id),
+  ).length
+  if (selectedCount === 0) return false
+  if (selectedCount === visibleCount && visibleCount > 0) return true
+  return null
+})
+
+function toggleSelectAll(checked: boolean | null) {
+  // PrimeVue's binary checkbox emits true/false; we never expect null
+  // here. Treat anything truthy as "select all visible", else clear.
+  if (checked) {
+    selectionStore.set(txStore.items)
+  } else {
+    selectionStore.clear()
+  }
+}
+
+function openSelectionPopover(event: Event) {
+  if (selectionStore.count === 0) return
+  selectionPopover.value?.show(event)
+}
+
+function formatSelectionSum(): string {
+  return new Intl.NumberFormat('de-DE', {
+    style: 'currency',
+    currency: selectionStore.currency,
+  }).format(selectionStore.sum)
+}
+
+function openBatchTagEditor() {
+  if (selectionStore.count === 0) return
+  selectionPopover.value?.hide()
+  void router.push({ name: 'finance-batch-tag' })
 }
 
 function goBack() {
+  if (selectMode.value) {
+    // Leaving select mode is the more useful action than navigating
+    // away when the user expects "Zurück" → list-without-selection.
+    selectMode.value = false
+    selectionStore.clear()
+    return
+  }
   if (window.history.length > 1) router.back()
   else void router.push({ name: 'finance-overview' })
 }
@@ -351,15 +403,27 @@ function goBack() {
         aria-label="Zurück"
         @click="goBack"
       />
-      <div class="tx-header-title">
-        <h1>{{ headerTitle }}</h1>
-      </div>
-      <div class="tx-header-meta">
-        <span v-if="headerBalance" class="tx-header-balance">
-          {{ headerBalance }}
-        </span>
-        <span v-if="headerDate" class="tx-header-date">{{ headerDate }}</span>
-      </div>
+      <template v-if="selectMode">
+        <div class="tx-header-title">
+          <h1>Σ: {{ formatSelectionSum() }}</h1>
+        </div>
+        <div class="tx-header-meta">
+          <span class="tx-header-date">
+            {{ selectionStore.count }} Buchung{{ selectionStore.count === 1 ? '' : 'en' }}
+          </span>
+        </div>
+      </template>
+      <template v-else>
+        <div class="tx-header-title">
+          <h1>{{ headerTitle }}</h1>
+        </div>
+        <div class="tx-header-meta">
+          <span v-if="headerBalance" class="tx-header-balance">
+            {{ headerBalance }}
+          </span>
+          <span v-if="headerDate" class="tx-header-date">{{ headerDate }}</span>
+        </div>
+      </template>
       <div class="tx-header-actions">
         <Button
           icon="pi pi-filter"
@@ -376,9 +440,10 @@ function goBack() {
           icon="pi pi-list"
           severity="secondary"
           rounded
-          aria-label="Liste der ausgewählten"
-          :class="{ 'tx-icon-active': selectionListDummyOpen }"
-          @click="selectionListDummyOpen = !selectionListDummyOpen"
+          aria-label="Liste der ausgewählten Buchungen"
+          :disabled="!selectMode || selectionStore.count === 0"
+          :class="{ 'tx-icon-active': selectMode && selectionStore.count > 0 }"
+          @click="openSelectionPopover"
         />
         <Button
           icon="pi pi-check-square"
@@ -390,6 +455,66 @@ function goBack() {
         />
       </div>
     </header>
+
+    <!--
+      Selection popover (anchored to the list-button). Mirrors the
+      mock: each selected transaction with a counterparty + purpose
+      preview and an X to deselect individually.
+    -->
+    <Popover ref="selectionPopover" class="tx-selection-popover">
+      <h3 class="tx-selection-title">Ausgewählte Buchungen:</h3>
+      <ul class="tx-selection-list">
+        <li
+          v-for="tx in selectionStore.items"
+          :key="tx.id"
+          class="tx-selection-row"
+        >
+          <div class="tx-selection-body">
+            <div class="tx-selection-name">
+              {{ tx.counterparty || '(ohne Gegenseite)' }}
+            </div>
+            <div v-if="tx.purpose" class="tx-selection-purpose">
+              {{ tx.purpose }}
+            </div>
+          </div>
+          <Button
+            icon="pi pi-times-circle"
+            severity="secondary"
+            text
+            rounded
+            aria-label="Buchung aus Auswahl entfernen"
+            @click="selectionStore.remove(tx.id)"
+          />
+        </li>
+      </ul>
+    </Popover>
+
+    <!--
+      Tristate "select all" + batch action row, only in select mode.
+    -->
+    <div v-if="selectMode" class="tx-select-bar">
+      <div class="tx-select-bar-left">
+        <Checkbox
+          :model-value="selectAllState === true"
+          :indeterminate="selectAllState === null"
+          :binary="true"
+          aria-label="Alle Buchungen auswählen"
+          @update:model-value="toggleSelectAll"
+        />
+        <span class="tx-select-count">
+          {{ selectionStore.count }} ausgewählt
+        </span>
+      </div>
+      <div class="tx-select-bar-actions">
+        <Button
+          icon="pi pi-tag"
+          severity="secondary"
+          aria-label="Tags auf Auswahl anwenden"
+          :disabled="selectionStore.count === 0"
+          @click="openBatchTagEditor"
+        />
+      </div>
+    </div>
 
     <section v-if="filterPanelOpen" class="tx-filter-panel">
       <div class="tx-filter-fields">
@@ -442,24 +567,6 @@ function goBack() {
       </div>
     </section>
 
-    <Message
-      v-if="selectionListDummyOpen"
-      severity="info"
-      :closable="false"
-      class="tx-dummy"
-    >
-      Liste der ausgewählten — Platzhalter. {{ selection.size }} Buchung(en)
-      derzeit markiert.
-    </Message>
-    <Message
-      v-if="selectMode"
-      severity="info"
-      :closable="false"
-      class="tx-dummy"
-    >
-      Auswahl-Modus aktiv — Klick auf eine Buchung markiert sie statt sie zu öffnen.
-    </Message>
-
     <Message v-if="txStore.error" severity="error" :closable="false">
       {{ txStore.error }}
     </Message>
@@ -486,10 +593,19 @@ function goBack() {
             :key="tx.id"
             class="tx-card"
             :class="{
-              'tx-card-selected': selection.has(tx.id),
+              'tx-card-selected': selectionStore.has(tx.id),
+              'tx-card-select-mode': selectMode,
             }"
             @click="openTransaction(tx)"
           >
+            <div v-if="selectMode" class="tx-card-checkbox" @click.stop>
+              <Checkbox
+                :model-value="selectionStore.has(tx.id)"
+                :binary="true"
+                aria-label="Buchung auswählen"
+                @update:model-value="selectionStore.toggle(tx)"
+              />
+            </div>
             <div class="tx-card-body">
               <div class="tx-counterparty">
                 {{ tx.counterparty || '(ohne Gegenseite)' }}
@@ -560,11 +676,93 @@ function goBack() {
   background: rgba(255, 255, 255, 0.3);
 }
 .tx-header :deep(.p-button.tx-icon-active) {
-  background: rgba(255, 255, 255, 0.4);
+  background: var(--p-orange-500, #f97316);
+  color: #fff;
 }
 .tx-header :deep(.p-button.tx-icon-applied) {
-  background: var(--p-blue-500, #2196f3);
+  background: var(--p-orange-500, #f97316);
   color: #fff;
+}
+.tx-header :deep(.p-button:disabled) {
+  opacity: 0.55;
+}
+
+/* ── Select-mode bar (tristate + batch actions) ───────────────────── */
+.tx-select-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--p-surface-50);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 0.5rem;
+}
+.tx-select-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.tx-select-count {
+  font-weight: 600;
+  color: var(--p-text-color);
+}
+.tx-select-bar-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+/* ── Per-card checkbox slot ───────────────────────────────────────── */
+.tx-card-checkbox {
+  display: flex;
+  align-items: center;
+}
+.tx-card-select-mode {
+  /* tighten gap so the checkbox lines up with the body neatly */
+  gap: 0.6rem;
+}
+
+/* ── Selection popover ────────────────────────────────────────────── */
+.tx-selection-popover :deep(.p-popover-content) {
+  padding: 0.75rem;
+}
+.tx-selection-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.tx-selection-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 50vh;
+  min-width: 16rem;
+  overflow-y: auto;
+}
+.tx-selection-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--p-content-border-color);
+}
+.tx-selection-row:last-child {
+  border-bottom: none;
+}
+.tx-selection-body {
+  min-width: 0;
+}
+.tx-selection-name {
+  font-weight: 600;
+  word-break: break-word;
+}
+.tx-selection-purpose {
+  color: var(--p-text-muted-color);
+  font-size: 0.85rem;
 }
 
 /* ── Filter panel (expands below the sticky header) ───────────────── */
