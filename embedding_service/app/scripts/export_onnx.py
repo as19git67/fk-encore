@@ -25,6 +25,21 @@ import sys
 from pathlib import Path
 from typing import Tuple
 
+# Cap thread pools BEFORE torch / onnxruntime get imported. Both libraries
+# read OMP_NUM_THREADS / MKL_NUM_THREADS at load time and otherwise default
+# to logical-CPU count (16 on a 12600K), which fights the container's
+# cpuset="0-11" and triggers pthread_setaffinity_np EINVAL noise from ORT.
+# Match the service's EMBED_NUM_THREADS handling in app/main.py so
+# everything below sees a consistent 6-thread pool on the production target.
+def _default_thread_count() -> int:
+    return max(1, (os.cpu_count() or 2) // 2)
+
+
+_EMBED_THREADS = int(os.environ.get("EMBED_NUM_THREADS") or _default_thread_count())
+os.environ.setdefault("OMP_NUM_THREADS", str(_EMBED_THREADS))
+os.environ.setdefault("MKL_NUM_THREADS", str(_EMBED_THREADS))
+os.environ.setdefault("OPENBLAS_NUM_THREADS", str(_EMBED_THREADS))
+
 import torch
 from torch import nn
 
@@ -93,6 +108,14 @@ def _quantize_int8(fp32_path: Path, int8_path: Path) -> None:
     cast at op boundaries. That avoids the calibration step a static
     quantiser would need, costs ~1% accuracy on most transformer workloads,
     and benefits massively from VNNI on Alder Lake (the production CPU).
+
+    op_types_to_quantize is restricted to MatMul + Gemm because ORT-CPU-EP
+    has no usable ConvInteger kernel for ViT-style patch-embedding Conv2d
+    layers — the default quantiser converts them and InferenceSession then
+    aborts with "Could not find an implementation for ConvInteger". MatMul
+    + Gemm carry >95% of the FLOPs in CLIP / DINOv2 transformers anyway,
+    so leaving the leading Conv (and any other unsupported op) in fp32
+    barely costs any speedup.
     """
     from onnxruntime.quantization import quantize_dynamic, QuantType
 
@@ -101,6 +124,7 @@ def _quantize_int8(fp32_path: Path, int8_path: Path) -> None:
         model_input=str(fp32_path),
         model_output=str(int8_path),
         weight_type=QuantType.QInt8,
+        op_types_to_quantize=["MatMul", "Gemm"],
     )
     size_mb = int8_path.stat().st_size / (1024 * 1024)
     logger.info("  done: %.1f MB", size_mb)
@@ -123,10 +147,19 @@ def _check_onnx(path: Path) -> None:
 
 
 def _smoke_test(path: Path, dummy_inputs: dict) -> None:
-    """Load with onnxruntime and run one forward pass to confirm shapes match."""
+    """Load with onnxruntime and run one forward pass to confirm shapes match.
+
+    Pin the intra-op pool to _EMBED_THREADS so ORT doesn't fan out to
+    cpuset-restricted cores and emit "pthread_setaffinity_np failed"
+    warnings — those land at error-level in stdout and confuse a quick
+    operator skim of the script's output.
+    """
     import onnxruntime as ort
 
-    sess = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+    opts = ort.SessionOptions()
+    opts.intra_op_num_threads = _EMBED_THREADS
+    opts.inter_op_num_threads = 1
+    sess = ort.InferenceSession(str(path), opts, providers=["CPUExecutionProvider"])
     outputs = sess.run(None, dummy_inputs)
     shapes = [o.shape for o in outputs]
     logger.info("  smoke-test ok, output shapes: %s", shapes)
