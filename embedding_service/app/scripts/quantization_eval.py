@@ -90,6 +90,31 @@ class Sample:
     timestamp: float  # epoch seconds; missing timestamps are dropped earlier
 
 
+def _parse_vec(value, dim: int) -> np.ndarray:
+    """Coerce a pgvector column value into an (D,) float32 array.
+
+    pgvector returns either a numpy ndarray / list (when the asyncpg codec
+    is registered, as the SQLAlchemy ORM does for mapped Vector columns) or
+    the raw text representation "[0.1,0.2,...]" (which is what raw text()
+    queries get back over the same engine, since the codec sits on the
+    connection rather than the cursor). Handle both — the second form is
+    why this script's first --source=db run blew up with "inhomogeneous
+    shape" instead of producing a clean (N, D) matrix.
+    """
+    if value is None:
+        return np.zeros(dim, dtype=np.float32)
+    if isinstance(value, str):
+        # Strip "[" / "]" then split by comma. np.fromstring handles whitespace.
+        return np.fromstring(value.strip().lstrip("[").rstrip("]"), sep=",", dtype=np.float32)
+    return np.asarray(value, dtype=np.float32)
+
+
+def _stack_vecs(values: List, dim: int) -> np.ndarray:
+    if not values:
+        return np.zeros((0, dim), dtype=np.float32)
+    return np.vstack([_parse_vec(v, dim) for v in values])
+
+
 async def sample_photos(n: int, with_embeddings: bool) -> Tuple[List[Sample], Optional[np.ndarray], Optional[np.ndarray]]:
     """Random sample of photos that already have both embeddings + a timestamp.
 
@@ -135,8 +160,8 @@ async def sample_photos(n: int, with_embeddings: bool) -> Tuple[List[Sample], Op
     if with_embeddings:
         order = sorted(range(len(rows)), key=lambda i: float(rows[i][2]))
         samples = [samples[i] for i in order]
-        clip = np.asarray([list(rows[i][3]) for i in order], dtype=np.float32) if rows else np.zeros((0, 1024), dtype=np.float32)
-        dino = np.asarray([list(rows[i][4]) for i in order], dtype=np.float32) if rows else np.zeros((0, 768), dtype=np.float32)
+        clip = _stack_vecs([rows[i][3] for i in order], 1024)
+        dino = _stack_vecs([rows[i][4] for i in order], 768)
         return samples, clip, dino
 
     samples.sort(key=lambda s: s.timestamp)
