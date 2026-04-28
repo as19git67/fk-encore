@@ -14,10 +14,10 @@ import Button from 'primevue/button'
 import Message from 'primevue/message'
 import InputText from 'primevue/inputtext'
 import MultiSelect from 'primevue/multiselect'
-import Select from 'primevue/select'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useOverviewStore } from '../../stores/finance/overview'
 import { useTagsStore } from '../../stores/finance/tags'
+import DateRangePresets from '../../components/DateRangePresets.vue'
 import type {
   ListTransactionsQuery,
   OverviewAccount,
@@ -141,68 +141,36 @@ function formatShortDate(iso: string | null): string | null {
   return d.toLocaleDateString('de-DE')
 }
 
-// ── Filter state + presets ────────────────────────────────────────────
-
-type TimePreset =
-  | 'all'
-  | 'this-month'
-  | 'last-month'
-  | 'two-months-ago'
-  | 'three-months-ago'
-
-interface TimePresetOption {
-  value: TimePreset
-  label: string
-}
-
-const TIME_PRESETS: TimePresetOption[] = [
-  { value: 'all', label: 'ohne Einschränkung' },
-  { value: 'this-month', label: 'diesen Monat' },
-  { value: 'last-month', label: 'letzten Monat' },
-  { value: 'two-months-ago', label: 'vorletzten Monat' },
-  { value: 'three-months-ago', label: 'vorvorletzten Monat' },
-]
-
+// ── Filter state ──────────────────────────────────────────────────────
+//
 // Local form state — only flushed to the actual query on "Suchen".
-// That matches the screenshot's two action buttons (Search + Clear)
-// and avoids hammering the API on every keystroke.
+// Keeps the form decoupled from the live listing so users can fiddle
+// with the inputs without re-firing the API on every change. Same UX
+// approach as the photos / documents filters.
+
 const filterPanelOpen = ref(false)
 const formQuery = ref('')
 const formTags = ref<string[]>([])
-const formTimePreset = ref<TimePreset>('all')
+const formFrom = ref<Date | null>(null)
+const formTo = ref<Date | null>(null)
 
 // What is actually applied to the listing right now.
 const appliedFilters = ref<{
   q: string
   tags: string[]
-  timePreset: TimePreset
-}>({ q: '', tags: [], timePreset: 'all' })
+  from: Date | null
+  to: Date | null
+}>({ q: '', tags: [], from: null, to: null })
 
 const hasActiveFilters = computed(() => {
   const f = appliedFilters.value
-  return f.q.trim().length > 0 || f.tags.length > 0 || f.timePreset !== 'all'
+  return (
+    f.q.trim().length > 0 ||
+    f.tags.length > 0 ||
+    f.from !== null ||
+    f.to !== null
+  )
 })
-
-function timeRangeFor(preset: TimePreset, today = new Date()): {
-  from?: string
-  to?: string
-} {
-  if (preset === 'all') return {}
-  // Build the start/end of the target month in local time. We then
-  // emit YYYY-MM-DD strings that the backend compares against the
-  // booking_date (timestamp; same-zone DST quirks don't apply because
-  // booking_date is a date-only concept stored as midnight).
-  let monthsBack = 0
-  switch (preset) {
-    case 'this-month': monthsBack = 0; break
-    case 'last-month': monthsBack = 1; break
-    case 'two-months-ago': monthsBack = 2; break
-    case 'three-months-ago': monthsBack = 3; break
-  }
-  const start = new Date(today.getFullYear(), today.getMonth() - monthsBack, 1)
-  const end = new Date(today.getFullYear(), today.getMonth() - monthsBack + 1, 0)
-  return { from: isoDate(start), to: isoDate(end) }
-}
 
 function isoDate(d: Date): string {
   const y = d.getFullYear()
@@ -232,9 +200,8 @@ function buildQuery(): ListTransactionsQuery {
   const f = appliedFilters.value
   if (f.q.trim().length > 0) base.q = f.q.trim()
   if (f.tags.length > 0) base.tags = f.tags
-  const range = timeRangeFor(f.timePreset)
-  if (range.from) base.from = range.from
-  if (range.to) base.to = range.to
+  if (f.from) base.from = isoDate(f.from)
+  if (f.to) base.to = isoDate(f.to)
   return base
 }
 
@@ -254,7 +221,8 @@ function applyFilters() {
   appliedFilters.value = {
     q: formQuery.value,
     tags: [...formTags.value],
-    timePreset: formTimePreset.value,
+    from: formFrom.value,
+    to: formTo.value,
   }
   void loadTransactions()
 }
@@ -262,8 +230,9 @@ function applyFilters() {
 function clearFilters() {
   formQuery.value = ''
   formTags.value = []
-  formTimePreset.value = 'all'
-  appliedFilters.value = { q: '', tags: [], timePreset: 'all' }
+  formFrom.value = null
+  formTo.value = null
+  appliedFilters.value = { q: '', tags: [], from: null, to: null }
   void loadTransactions()
 }
 
@@ -452,13 +421,9 @@ function goBack() {
           display="chip"
           class="tx-filter-input"
         />
-        <Select
-          v-model="formTimePreset"
-          :options="TIME_PRESETS"
-          option-label="label"
-          option-value="value"
-          placeholder="Zeitspanne einschränken"
-          class="tx-filter-input"
+        <DateRangePresets
+          v-model:from="formFrom"
+          v-model:to="formTo"
         />
       </div>
       <div class="tx-filter-actions">
@@ -471,7 +436,7 @@ function goBack() {
           icon="pi pi-times"
           severity="secondary"
           aria-label="Filter zurücksetzen"
-          :disabled="!hasActiveFilters && formQuery.length === 0 && formTags.length === 0 && formTimePreset === 'all'"
+          :disabled="!hasActiveFilters && formQuery.length === 0 && formTags.length === 0 && !formFrom && !formTo"
           @click="clearFilters"
         />
       </div>
