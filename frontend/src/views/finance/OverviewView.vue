@@ -112,6 +112,7 @@ function addSection() {
 
 function removeSection(idx: number) {
   const s = draft.value[idx]
+  if (!s) return
   // Spill its accounts back into the unassigned pool so they don't
   // silently disappear from the UI on save.
   draftUnassigned.value.push(...s.account_ids)
@@ -121,9 +122,11 @@ function removeSection(idx: number) {
 function moveSection(idx: number, dir: -1 | 1) {
   const newIdx = idx + dir
   if (newIdx < 0 || newIdx >= draft.value.length) return
-  const tmp = draft.value[idx]
-  draft.value[idx] = draft.value[newIdx]
-  draft.value[newIdx] = tmp
+  const a = draft.value[idx]
+  const b = draft.value[newIdx]
+  if (!a || !b) return
+  draft.value[idx] = b
+  draft.value[newIdx] = a
 }
 
 function moveAccountToSection(accountId: number, targetIdx: number) {
@@ -132,7 +135,9 @@ function moveAccountToSection(accountId: number, targetIdx: number) {
   for (const s of draft.value) {
     s.account_ids = s.account_ids.filter((id) => id !== accountId)
   }
-  draft.value[targetIdx].account_ids.push(accountId)
+  const target = draft.value[targetIdx]
+  if (!target) return
+  target.account_ids.push(accountId)
 }
 
 function moveAccountToUnassigned(accountId: number) {
@@ -145,14 +150,18 @@ function moveAccountToUnassigned(accountId: number) {
 }
 
 function moveAccountWithinSection(sectionIdx: number, accountId: number, dir: -1 | 1) {
-  const ids = draft.value[sectionIdx].account_ids
+  const section = draft.value[sectionIdx]
+  if (!section) return
+  const ids = section.account_ids
   const cur = ids.indexOf(accountId)
   if (cur < 0) return
   const next = cur + dir
   if (next < 0 || next >= ids.length) return
-  const tmp = ids[cur]
-  ids[cur] = ids[next]
-  ids[next] = tmp
+  const a = ids[cur]
+  const b = ids[next]
+  if (a === undefined || b === undefined) return
+  ids[cur] = b
+  ids[next] = a
 }
 
 async function saveConfig() {
