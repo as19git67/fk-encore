@@ -317,10 +317,41 @@ def export_dinov2() -> Tuple[Path, Path]:
 # ---------------------------------------------------------------------------
 
 
+def _disable_mha_fastpath() -> None:
+    """Make nn.MultiheadAttention exportable.
+
+    PyTorch's fast path for MHA dispatches into a fused C++ op
+    `_native_multi_head_attention` for which the legacy ONNX exporter has
+    no symbolic — opset 17 + nn.MultiheadAttention crashes with
+    "Exporting the operator 'aten::_native_multi_head_attention' to ONNX
+    opset version 17 is not supported". OpenCLIP's transformer blocks use
+    nn.MultiheadAttention, so the visual + text towers are both affected.
+
+    Toggling the global fastpath flag forces the slow path, which decomposes
+    into standard ops (linear + softmax + bmm) that ONNX has no problem
+    with. Cost: ~5-10% slower trace; we never run inference in the trace,
+    so this is irrelevant.
+
+    The flag exists from torch 2.0 onwards, but its location moved in 2.4
+    (torch.backends.mha.set_fastpath_enabled); guard with hasattr for
+    forward-compat.
+    """
+    backend = getattr(torch.backends, "mha", None)
+    setter = getattr(backend, "set_fastpath_enabled", None) if backend else None
+    if setter is None:
+        logger.warning(
+            "torch.backends.mha.set_fastpath_enabled not available — MHA export may fail"
+        )
+        return
+    setter(False)
+    logger.info("disabled MHA fastpath for ONNX-exportability")
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-7s | %(message)s")
     ONNX_DIR.mkdir(parents=True, exist_ok=True)
     logger.info("ONNX_DIR=%s  FORCE=%s", ONNX_DIR, FORCE)
+    _disable_mha_fastpath()
 
     # Sequential is intentional: each model is several GB in fp32 RAM during
     # export and the quantiser holds a second copy. Running them concurrently
