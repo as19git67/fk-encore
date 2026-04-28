@@ -72,9 +72,32 @@ class TorchBackend:
         return np.asarray(self._clip.embed_text(query), dtype=np.float32)
 
 
-# Future: register OnnxInt8Backend once Punkt 3 lands.
+class OnnxInt8BackendAdapter:
+    """Lazy wrapper so missing onnxruntime / missing artefacts don't crash
+    the script at import time — the ONNX path is only loaded when a caller
+    actually selects --reference=onnx-int8 or --candidate=onnx-int8.
+    """
+
+    name = "onnx-int8"
+
+    def __init__(self) -> None:
+        from app.services.onnx_backend import OnnxInt8Backend
+
+        self._inner = OnnxInt8Backend()
+
+    def embed_image_clip(self, images: List[Image.Image]) -> np.ndarray:
+        return self._inner.embed_image_clip(images)
+
+    def embed_image_dino(self, images: List[Image.Image]) -> np.ndarray:
+        return self._inner.embed_image_dino(images)
+
+    def embed_text_clip(self, query: str) -> np.ndarray:
+        return self._inner.embed_text_clip(query)
+
+
 BACKENDS: Dict[str, Callable[[], object]] = {
     "torch": TorchBackend,
+    "onnx-int8": OnnxInt8BackendAdapter,
 }
 
 
