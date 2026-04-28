@@ -264,32 +264,45 @@ describe("finance/transactions — list (ACL filter)", () => {
     expect(comma.items.map((i) => i.counterparty).sort()).toEqual(["neg", "pos"]);
   });
 
-  it("tagsCsv filters to transactions carrying any of the named tags (regardless of source)", async () => {
+  it("tagsCsv filters to transactions carrying ALL named tags (regardless of source)", async () => {
     const { a } = await createAccounts();
-    const t1 = await insertTx(a, { counterparty: "T1" });
-    const t2 = await insertTx(a, { counterparty: "T2" });
-    const t3 = await insertTx(a, { counterparty: "T3" });
+    const tBoth = await insertTx(a, { counterparty: "Both" });
+    const tFoodOnly = await insertTx(a, { counterparty: "FoodOnly" });
+    const tStromOnly = await insertTx(a, { counterparty: "StromOnly" });
+    const tNone = await insertTx(a, { counterparty: "None" });
+    void tNone;
 
-    const lebensmittelUser = await insertTag("Lebensmittel", "user");
-    const lebensmittelAi = await insertTag("Strom", "ai");
+    const lebensmittel = await insertTag("Lebensmittel", "user");
+    const strom = await insertTag("Strom", "ai");
 
     await db.insert(financeTagTransaction).values({
-      tag_id: lebensmittelUser,
-      transaction_id: t1,
+      tag_id: lebensmittel,
+      transaction_id: tBoth,
     });
     await db.insert(financeTagTransaction).values({
-      tag_id: lebensmittelAi,
-      transaction_id: t2,
+      tag_id: strom,
+      transaction_id: tBoth,
     });
-    // t3 carries no tags.
+    await db.insert(financeTagTransaction).values({
+      tag_id: lebensmittel,
+      transaction_id: tFoodOnly,
+    });
+    await db.insert(financeTagTransaction).values({
+      tag_id: strom,
+      transaction_id: tStromOnly,
+    });
 
     setAuth("1", ["finance.view", "finance.admin"]);
 
-    const lebensmittel = await listTransactions({ tagsCsv: "Lebensmittel" });
-    expect(lebensmittel.items.map((i) => i.counterparty)).toEqual(["T1"]);
+    // Single-tag filter: any transaction carrying the named tag.
+    const food = await listTransactions({ tagsCsv: "Lebensmittel" });
+    expect(food.items.map((i) => i.counterparty).sort()).toEqual(
+      ["Both", "FoodOnly"],
+    );
 
+    // Multi-tag filter: only transactions carrying ALL named tags.
     const both = await listTransactions({ tagsCsv: "Lebensmittel,Strom" });
-    expect(both.items.map((i) => i.counterparty).sort()).toEqual(["T1", "T2"]);
+    expect(both.items.map((i) => i.counterparty)).toEqual(["Both"]);
   });
 
   it("filters by date range (inclusive)", async () => {
