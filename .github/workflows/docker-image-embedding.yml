@@ -71,7 +71,12 @@ jobs:
         with:
           context: ./embedding_service
           push: true
-          platforms: linux/amd64,linux/arm64
+          # amd64-only: production target is x86_64 (TrueNAS SCALE / Intel
+          # 12600K) and a multi-arch build pulls the 4.77 GB CLIP model
+          # twice into the same GitHub-runner disk, which has been bumping
+          # against the ~14 GB limit and failing intermittently with ENOSPC.
+          # Re-add linux/arm64 here if an arm deployment target ever appears.
+          platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
