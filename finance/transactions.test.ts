@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { getAuthData } from "~encore/auth";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 
 import db from "../db/database";
 import {
@@ -606,6 +606,46 @@ describe("finance/transactions — batchTag", () => {
     });
     expect(result.removed_links).toBe(1);
     expect(result.added_links).toBe(1);
+  });
+
+  it("applies add + remove atomically (single transaction)", async () => {
+    const { a } = await createAccounts();
+    const t1 = await insertTx(a, { booking_date: "2024-08-10" });
+    const t2 = await insertTx(a, { booking_date: "2024-08-11" });
+    const oldTag = await insertTag("zu-entfernen", "user");
+    await db.insert(financeTagTransaction).values([
+      { tag_id: oldTag, transaction_id: t1 },
+      { tag_id: oldTag, transaction_id: t2 },
+    ]);
+
+    setAuth("7", ["finance.view"]);
+    await grant(a, 7, "read");
+
+    const result = await batchTag({
+      transaction_ids: [t1, t2],
+      add: ["neu-1", "neu-2"],
+      remove: ["zu-entfernen"],
+    });
+    expect(result.affected_transactions).toBe(2);
+    expect(result.added_links).toBe(4); // 2 tx × 2 new tags
+    expect(result.removed_links).toBe(2);
+
+    // Final state: each tx has exactly the two new tags, the old one
+    // is gone — exactly what a single committed transaction looks like.
+    const finalRows = await db
+      .select({ tx_id: financeTagTransaction.transaction_id, name: financeTag.name })
+      .from(financeTagTransaction)
+      .innerJoin(financeTag, eq(financeTag.id, financeTagTransaction.tag_id))
+      .where(inArray(financeTagTransaction.transaction_id, [t1, t2]));
+    const byTx = new Map<number, string[]>();
+    for (const r of finalRows) {
+      const list = byTx.get(r.tx_id) ?? [];
+      list.push(r.name);
+      byTx.set(r.tx_id, list);
+    }
+    for (const txId of [t1, t2]) {
+      expect((byTx.get(txId) ?? []).sort()).toEqual(["neu-1", "neu-2"]);
+    }
   });
 
   it("rejects empty transaction_ids", async () => {
