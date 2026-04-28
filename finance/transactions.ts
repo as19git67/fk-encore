@@ -304,15 +304,20 @@ export const listTransactions = api(
         .filter((s) => s.length > 0);
       if (names.length === 0) return { items: [], total: 0 };
 
-      // Subquery: ids of transactions that carry any of these tags.
-      // The user-facing tag list shows names regardless of source —
-      // promoting an AI tag would otherwise hide it from the filter.
-      const taggedTxIds = db
-        .select({ id: financeTagTransaction.transaction_id })
-        .from(financeTagTransaction)
-        .innerJoin(financeTag, eq(financeTag.id, financeTagTransaction.tag_id))
-        .where(inArray(financeTag.name, names));
-      conds.push(inArray(financeTransaction.id, taggedTxIds));
+      // ALL-of match: the transaction must carry every named tag.
+      // Implemented as N independent IN-subqueries (one per name); for
+      // the typical 1–5 tag filter this is cleaner than a HAVING-based
+      // groupBy and Postgres flattens it just fine. Tag source is
+      // intentionally ignored — promoting an AI tag to user must not
+      // remove it from the filter set.
+      for (const name of names) {
+        const taggedWith = db
+          .select({ id: financeTagTransaction.transaction_id })
+          .from(financeTagTransaction)
+          .innerJoin(financeTag, eq(financeTag.id, financeTagTransaction.tag_id))
+          .where(eq(financeTag.name, name));
+        conds.push(inArray(financeTransaction.id, taggedWith));
+      }
     }
 
     const where = conds.length > 0 ? and(...conds) : undefined;
