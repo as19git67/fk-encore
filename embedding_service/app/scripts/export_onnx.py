@@ -116,15 +116,25 @@ def _quantize_int8(fp32_path: Path, int8_path: Path) -> None:
     + Gemm carry >95% of the FLOPs in CLIP / DINOv2 transformers anyway,
     so leaving the leading Conv (and any other unsupported op) in fp32
     barely costs any speedup.
+
+    per_channel=True is essential for transformer quantisation quality.
+    Without it the quantiser collapses every weight matrix down to a
+    single scale + zero_point pair, which is far too coarse for ViT-style
+    weight distributions: a first run with the default per-tensor mode
+    blew DINOv2's mean cosine vs the fp32 reference down to 0.18 (i.e.
+    essentially uncorrelated). Per-channel adds one scale per output row,
+    a few KB of extra metadata per layer, and the cosine recovers to the
+    expected ~0.99x.
     """
     from onnxruntime.quantization import quantize_dynamic, QuantType
 
-    logger.info("quantising %s -> %s (INT8)", fp32_path.name, int8_path.name)
+    logger.info("quantising %s -> %s (INT8, per-channel)", fp32_path.name, int8_path.name)
     quantize_dynamic(
         model_input=str(fp32_path),
         model_output=str(int8_path),
         weight_type=QuantType.QInt8,
         op_types_to_quantize=["MatMul", "Gemm"],
+        per_channel=True,
     )
     size_mb = int8_path.stat().st_size / (1024 * 1024)
     logger.info("  done: %.1f MB", size_mb)
@@ -259,10 +269,15 @@ def export_clip_text() -> Tuple[Path, Path]:
     )
     model = model.eval()
 
-    # OpenCLIP's tokenizer determines context_length; for HF-backed text
-    # encoders (xlm-roberta-large) the model's own attribute holds it.
-    ctx_len = getattr(model, "context_length", None) or TEXT_CTX_FALLBACK
-    logger.info("  text context length: %d", ctx_len)
+    # The runtime context length is what the *tokenizer* produces, not what
+    # the underlying transformer's max_position_embeddings is. For
+    # xlm-roberta-large-ViT-H-14 those disagree: the encoder accepts up to
+    # 514 positions but OpenCLIP's HFTokenizer wraps it with the CLIP
+    # convention (77). Using model.context_length here would trace at 514
+    # and crash the InferenceSession at run time with "Got: 77 Expected: 514".
+    tokenizer = open_clip.get_tokenizer(CLIP_MODEL_NAME)
+    ctx_len = getattr(tokenizer, "context_length", None) or TEXT_CTX_FALLBACK
+    logger.info("  text context length (from tokenizer): %d", ctx_len)
 
     wrapper = ClipTextWrapper(model)
     # Token IDs are int64; pad token id 1 is RoBERTa's default. Any consistent
@@ -279,8 +294,10 @@ def export_clip_text() -> Tuple[Path, Path]:
                 str(fp32),
                 input_names=["input_ids"],
                 output_names=["text_features"],
+                # seq_len axis dynamic too, so a future tokenizer with a
+                # different context length doesn't force a re-export.
                 dynamic_axes={
-                    "input_ids": {0: "batch"},
+                    "input_ids": {0: "batch", 1: "seq_len"},
                     "text_features": {0: "batch"},
                 },
                 opset_version=OPSET,

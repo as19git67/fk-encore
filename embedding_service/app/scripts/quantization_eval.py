@@ -31,6 +31,20 @@ import numpy as np
 from PIL import Image, ImageFile
 from sqlalchemy import text
 
+# Register pillow-heif's PIL opener so Image.open() can decode the .HEIC /
+# .heif files that arrive from iPhones. The production service does this
+# in app/main.py at startup, but this script doesn't import main, so the
+# registration would otherwise be missed and disk-source mode would skip
+# every iPhone photo with "cannot identify image file".
+try:
+    from pillow_heif import register_heif_opener
+
+    register_heif_opener()
+except ImportError:
+    # Local dev environments without pillow-heif still get usable cosine
+    # numbers from the JPEGs in the sample.
+    pass
+
 # Tolerate a few corrupted bytes at the end of JPEGs — same policy the
 # service uses (see app/api/endpoints.py).
 ImageFile.LOAD_TRUNCATED_IMAGES = True
