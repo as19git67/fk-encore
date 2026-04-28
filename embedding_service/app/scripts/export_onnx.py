@@ -63,6 +63,13 @@ TEXT_CTX_FALLBACK = 77
 # and runtime cost noticeably benefit.
 OPSET = 17
 
+# Force the legacy TorchScript-based exporter. The Dynamo-based exporter
+# (torch>=2.5's default) is still maturing for large transformers like
+# ViT-H-14 and pulls in onnxscript at trace time. Empirically the legacy
+# path produces a more straightforward graph that onnxruntime's
+# quantize_dynamic handles cleanly.
+USE_DYNAMO_EXPORTER = False
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -170,6 +177,7 @@ def export_clip_image() -> Tuple[Path, Path]:
                 },
                 opset_version=OPSET,
                 do_constant_folding=True,
+                dynamo=USE_DYNAMO_EXPORTER,
             )
         _check_onnx(fp32)
 
@@ -236,6 +244,7 @@ def export_clip_text() -> Tuple[Path, Path]:
                 },
                 opset_version=OPSET,
                 do_constant_folding=True,
+                dynamo=USE_DYNAMO_EXPORTER,
             )
         _check_onnx(fp32)
 
@@ -293,6 +302,7 @@ def export_dinov2() -> Tuple[Path, Path]:
                 },
                 opset_version=OPSET,
                 do_constant_folding=True,
+                dynamo=USE_DYNAMO_EXPORTER,
             )
         _check_onnx(fp32)
 

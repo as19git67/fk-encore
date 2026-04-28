@@ -38,6 +38,10 @@ dateparser==1.2.0
 # ONNX export + INT8 quantisation. Used by app/scripts/export_onnx.py
 # (build/runtime tool) and OnnxInt8Backend (production inference path).
 # onnxruntime CPU build only; the GPU variant pulls in CUDA which we don't
-# have on the production target.
+# have on the production target. onnxscript is required by torch>=2.5's
+# default Dynamo-based exporter — we currently force the legacy TorchScript
+# path via dynamo=False, but keeping onnxscript here means a future torch
+# upgrade that drops the legacy path doesn't break the export script.
 onnx==1.17.0
 onnxruntime==1.20.1
+onnxscript==0.1.0
