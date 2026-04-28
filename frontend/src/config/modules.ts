@@ -150,6 +150,12 @@ export const modules: ModuleConfig[] = [
     routes: [
       {
         path: '',
+        name: 'finance-overview',
+        component: () => import('../views/finance/OverviewView.vue'),
+        meta: { permission: 'finance.view' },
+      },
+      {
+        path: 'konten',
         name: 'finance-accounts',
         component: () => import('../views/finance/AccountsView.vue'),
         meta: { permission: 'finance.view' },
@@ -228,6 +234,7 @@ export const modules: ModuleConfig[] = [
       },
     ],
     menuItems: [
+      { label: 'Übersicht', icon: 'pi pi-th-large', routeName: 'finance-overview', permission: 'finance.view' },
       { label: 'Konten', icon: 'pi pi-wallet', routeName: 'finance-accounts', permission: 'finance.view' },
       { label: 'Umsätze', icon: 'pi pi-list', routeName: 'finance-transactions', permission: 'finance.view' },
       { label: 'Bankkontakte', icon: 'pi pi-building', routeName: 'finance-bankcontacts', permission: 'finance.accounts.manage' },
