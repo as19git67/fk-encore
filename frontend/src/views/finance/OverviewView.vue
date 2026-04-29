@@ -478,7 +478,7 @@ async function saveConfig() {
   list-style: none;
   margin: 0;
   padding: 0;
-  background: var(--p-surface-0);
+  background: var(--p-content-background);
   border: 1px solid var(--p-content-border-color);
   border-radius: 0.75rem;
   overflow: hidden;
@@ -497,7 +497,7 @@ async function saveConfig() {
   border-top: 1px solid var(--p-content-border-color);
 }
 .account-row:hover {
-  background: var(--p-surface-100);
+  background: var(--p-content-hover-background);
 }
 .card-virtual {
   font-weight: 600;
@@ -591,7 +591,7 @@ async function saveConfig() {
   gap: 0.5rem;
   padding: 0.4rem 0.5rem;
   border-radius: 0.375rem;
-  background: var(--p-surface-50);
+  background: var(--p-content-hover-background);
   flex-wrap: wrap;
 }
 .cfg-row-actions {
