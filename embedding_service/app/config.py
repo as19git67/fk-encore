@@ -22,6 +22,17 @@ class Settings(BaseSettings):
     # Lazy loading models (default: false, meaning preloading is the default)
     lazy_load_models: bool = False
 
+    # Inference backend selector. "torch" runs the original PyTorch path
+    # (CLIP H/14 + DINOv2-base in fp32). "onnx" runs the ONNX/INT8 path
+    # produced by app/scripts/export_onnx.py — INT8 for the heavy CLIP
+    # visual tower, fp32 ONNX for CLIP text + DINOv2 (see the OnnxInt8Backend
+    # for the quality rationale). Switching to "onnx" requires the ONNX
+    # artefacts to be present in ${MODELS_DIR}/onnx/ — run
+    # /usr/local/bin/optimize_models.sh once before flipping. Defaults to
+    # "torch" so an upgraded image with a not-yet-populated volume keeps
+    # working.
+    embed_backend: str = "torch"
+
     # Logging
     log_level: str = "INFO"
 

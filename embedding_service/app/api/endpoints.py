@@ -42,7 +42,7 @@ from app.models.schemas import (
     SimilarGroupsResponse,
     TextSearchRequest,
 )
-from app.services.embedding_service import CLIPEmbedder, DINOv2Embedder
+from app.services.embedding_service import clip_embedder_class, dino_embedder_class
 from app.services.similar_groups import find_similar_groups
 
 logger = logging.getLogger(__name__)
@@ -72,8 +72,11 @@ def _open_for_embedding(source) -> Image.Image:
 @router.get("/health", response_model=HealthResponse, tags=["ops"])
 async def health(db: DbDep) -> HealthResponse:
     db_ok = await check_db_connection()
-    clip_loaded = CLIPEmbedder._instance is not None
-    dino_loaded = DINOv2Embedder._instance is not None
+    # Probe the active backend's singleton, not a specific class — under
+    # EMBED_BACKEND=onnx the torch CLIPEmbedder._instance stays None forever
+    # because we never instantiate it, and the healthcheck would lie.
+    clip_loaded = clip_embedder_class()._instance is not None
+    dino_loaded = dino_embedder_class()._instance is not None
     
     # If lazy loading is disabled (default), we consider the service "ok" only if models are loaded.
     # Otherwise, "ok" (or "degraded") reflects the DB status.
@@ -108,10 +111,10 @@ async def embed(request: EmbedRequest, db: DbDep) -> EmbedResponse:
     file_paths = [p.file_path for p in new_photos]
 
     try:
-        clip_embedder = CLIPEmbedder.get_instance(
+        clip_embedder = clip_embedder_class().get_instance(
             model_name=settings.clip_model_name, pretrained=settings.clip_pretrained
         )
-        dino_embedder = DINOv2Embedder.get_instance(model_name=settings.dino_model_name)
+        dino_embedder = dino_embedder_class().get_instance(model_name=settings.dino_model_name)
 
         images = [_open_for_embedding(p) for p in file_paths]
         clip_embeddings = clip_embedder.embed(images)
@@ -171,10 +174,10 @@ async def upload_photo(
         content = await file.read()
         image = _open_for_embedding(io.BytesIO(content))
 
-        clip_embedder = CLIPEmbedder.get_instance(
+        clip_embedder = clip_embedder_class().get_instance(
             model_name=settings.clip_model_name, pretrained=settings.clip_pretrained
         )
-        dino_embedder = DINOv2Embedder.get_instance(model_name=settings.dino_model_name)
+        dino_embedder = dino_embedder_class().get_instance(model_name=settings.dino_model_name)
 
         clip_embeddings = clip_embedder.embed([image])
         dino_embeddings = dino_embedder.embed([image])
@@ -258,7 +261,7 @@ async def search(request: SearchRequest, db: DbDep) -> SearchResponse:
 async def search_by_text(request: TextSearchRequest, db: DbDep) -> SearchResponse:
     """Perform semantic image search using a natural language query via CLIP text embeddings."""
     try:
-        clip_embedder = CLIPEmbedder.get_instance(
+        clip_embedder = clip_embedder_class().get_instance(
             model_name=settings.clip_model_name, pretrained=settings.clip_pretrained
         )
         query_vector = clip_embedder.embed_text(request.query)
@@ -309,8 +312,13 @@ async def parse_query_endpoint(request: ParseQueryRequest) -> ParseQueryResponse
 # /quality
 # ---------------------------------------------------------------------------
 
-def _clip_dimension_score(img_vec: "np.ndarray", embedder: "CLIPEmbedder", positive: list, negative: list) -> float:
-    """Return a [0, 1] score for one quality dimension via CLIP text-image similarity."""
+def _clip_dimension_score(img_vec: "np.ndarray", embedder, positive: list, negative: list) -> float:
+    """Return a [0, 1] score for one quality dimension via CLIP text-image similarity.
+
+    `embedder` is duck-typed: anything with an `embed_text(text) -> list[float]`
+    method works, which covers both the torch CLIPEmbedder and the
+    OnnxClipEmbedder adapter selected by the current EMBED_BACKEND.
+    """
     import numpy as np
     pos_sims = [float(np.dot(img_vec, np.array(embedder.embed_text(t), dtype=np.float32))) for t in positive]
     neg_sims = [float(np.dot(img_vec, np.array(embedder.embed_text(t), dtype=np.float32))) for t in negative]
@@ -355,7 +363,7 @@ async def compute_quality(
 
     # ── CLIP multi-dimensional aesthetic scoring ────────────────────────────
     try:
-        clip_embedder = CLIPEmbedder.get_instance(
+        clip_embedder = clip_embedder_class().get_instance(
             model_name=settings.clip_model_name, pretrained=settings.clip_pretrained
         )
         img_vec = np.array(clip_embedder.embed([image])[0], dtype=np.float32)

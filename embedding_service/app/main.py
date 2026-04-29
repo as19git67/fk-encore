@@ -70,11 +70,15 @@ async def _on_startup() -> None:
     await ensure_database_exists()
     await run_migrations()
     if not settings.lazy_load_models:
-        logger.info("Preloading models...")
-        from app.services.embedding_service import CLIPEmbedder, DINOv2Embedder
-        await CLIPEmbedder.preload(model_name=settings.clip_model_name, pretrained=settings.clip_pretrained)
-        await DINOv2Embedder.preload(model_name=settings.dino_model_name)
+        logger.info("Preloading models (backend=%s)...", settings.embed_backend)
+        # Factory dispatch picks the configured backend (torch | onnx);
+        # both classes expose the same .preload() coroutine signature.
+        from app.services.embedding_service import clip_embedder_class, dino_embedder_class
+        await clip_embedder_class().preload(
+            model_name=settings.clip_model_name, pretrained=settings.clip_pretrained
+        )
+        await dino_embedder_class().preload(model_name=settings.dino_model_name)
     logger.info(
-        "Embedding Service started (log_level=%s, lazy_load_models=%s, threads=%d).",
-        settings.log_level, settings.lazy_load_models, _EMBED_THREADS,
+        "Embedding Service started (backend=%s, log_level=%s, lazy_load_models=%s, threads=%d).",
+        settings.embed_backend, settings.log_level, settings.lazy_load_models, _EMBED_THREADS,
     )

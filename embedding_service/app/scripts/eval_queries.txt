@@ -1,0 +1,38 @@
+# German + a few English queries for CLIP text-recall eval. One per line,
+# blanks and lines starting with "#" are ignored. Edit freely — the goal is
+# a representative cross-section of how users actually search the library.
+Sonnenuntergang am Meer
+Familie am Tisch
+Hund im Schnee
+Berglandschaft
+Geburtstag mit Kuchen
+Strand mit Palmen
+Stadt bei Nacht
+Kinder am Spielplatz
+Auto auf Landstraße
+Blumen im Garten
+Pizza auf einem Teller
+Konzert mit Bühnenlicht
+Schwimmbad im Sommer
+Skifahren im Winter
+Hochzeit Brautpaar
+Katze auf dem Sofa
+Wanderweg im Wald
+Fahrradtour im Herbst
+Selfie mit Freunden
+Meeting im Büro
+Kirche von außen
+Markt mit Obst und Gemüse
+Skyline einer Großstadt
+Frühstück am Tisch
+Schloss mit Park
+Bahnhof mit Zug
+Café mit Kaffeetasse
+Sportveranstaltung im Stadion
+Boot auf dem See
+Wüste mit Dünen
+sunset over mountains
+person riding a bike
+group photo outdoors
+indoor party with cake
+dog playing in grass

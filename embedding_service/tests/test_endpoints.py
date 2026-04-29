@@ -99,6 +99,11 @@ class _FakeDINOEmbedder:
 
 embed_stub.CLIPEmbedder = _FakeCLIPEmbedder
 embed_stub.DINOv2Embedder = _FakeDINOEmbedder
+# Factory functions added in Punkt 3c — endpoints.py imports these instead
+# of the classes directly. Stub them to always return the torch fakes
+# above, since the test never exercises the onnx codepath.
+embed_stub.clip_embedder_class = lambda: _FakeCLIPEmbedder
+embed_stub.dino_embedder_class = lambda: _FakeDINOEmbedder
 sys.modules["app.services.embedding_service"] = embed_stub
 
 # app.services.similar_groups stub — the real module imports numpy and runs
@@ -138,10 +143,16 @@ app.dependency_overrides[get_db] = override_get_db
 # ---------------------------------------------------------------------------
 
 class TestHealthEndpoint:
+    # Patches go through app.services.embedding_service rather than
+    # app.api.endpoints because the latter no longer imports the embedder
+    # classes directly — it calls clip_embedder_class() / dino_embedder_class()
+    # which return whatever the active backend uses. The test stub aliases
+    # CLIPEmbedder / DINOv2Embedder to the local fakes there, so this still
+    # patches the same singleton attribute as before.
     def test_returns_ok_when_everything_healthy(self):
         with patch("app.api.endpoints.check_db_connection", AsyncMock(return_value=True)):
-            with patch("app.api.endpoints.CLIPEmbedder._instance", MagicMock()):
-                with patch("app.api.endpoints.DINOv2Embedder._instance", MagicMock()):
+            with patch("app.services.embedding_service.CLIPEmbedder._instance", MagicMock()):
+                with patch("app.services.embedding_service.DINOv2Embedder._instance", MagicMock()):
                     response = client.get("/health")
                     assert response.status_code == 200
                     body = response.json()
@@ -152,8 +163,8 @@ class TestHealthEndpoint:
 
     def test_returns_degraded_when_models_not_loaded_but_required(self):
         with patch("app.api.endpoints.check_db_connection", AsyncMock(return_value=True)):
-            with patch("app.api.endpoints.CLIPEmbedder._instance", None):
-                with patch("app.api.endpoints.DINOv2Embedder._instance", None):
+            with patch("app.services.embedding_service.CLIPEmbedder._instance", None):
+                with patch("app.services.embedding_service.DINOv2Embedder._instance", None):
                     with patch("app.api.endpoints.settings.lazy_load_models", False):
                         response = client.get("/health")
                         assert response.status_code == 200
@@ -163,8 +174,8 @@ class TestHealthEndpoint:
 
     def test_returns_ok_when_models_not_loaded_but_lazy_loading_enabled(self):
         with patch("app.api.endpoints.check_db_connection", AsyncMock(return_value=True)):
-            with patch("app.api.endpoints.CLIPEmbedder._instance", None):
-                with patch("app.api.endpoints.DINOv2Embedder._instance", None):
+            with patch("app.services.embedding_service.CLIPEmbedder._instance", None):
+                with patch("app.services.embedding_service.DINOv2Embedder._instance", None):
                     with patch("app.api.endpoints.settings.lazy_load_models", True):
                         response = client.get("/health")
                         assert response.status_code == 200
