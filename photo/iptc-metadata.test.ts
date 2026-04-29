@@ -496,6 +496,18 @@ describe("extractDateFromFilename", () => {
     expect(extractDateFromFilename("20231399.jpg")).toBeNull();
   });
 
+  it('parses "YYYY-MM-DD at HH.MM.SS" style', () => {
+    const r = extractDateFromFilename("2013-01-27 at 06.11.33-28.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2013);
+    expect(d.getUTCMonth() + 1).toBe(1);
+    expect(d.getUTCDate()).toBe(27);
+    expect(d.getUTCHours()).toBe(6);
+    expect(d.getUTCMinutes()).toBe(11);
+    expect(d.getUTCSeconds()).toBe(33);
+  });
+
   it("ignores implausible time and falls back to midnight", () => {
     const r = extractDateFromFilename("IMG_20231225_256099.jpg");
     expect(r).not.toBeNull();

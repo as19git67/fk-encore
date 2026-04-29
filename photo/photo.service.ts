@@ -1030,7 +1030,7 @@ export function extractDateFromFilename(filename: string): string | null {
   // ISO-like date: YYYY-MM-DD / YYYY_MM_DD / YYYY.MM.DD
   // Optionally followed by separator + HH-MM-SS / HH_MM_SS / HH.MM.SS / HHMMSS
   const isoMatch = name.match(
-    /(\d{4})[-_.](\d{2})[-_.](\d{2})(?:[-_T ](\d{2})[-:_.](\d{2})[-:_.](\d{2}))?/
+    /(\d{4})[-_.](\d{2})[-_.](\d{2})(?:(?:[-_T ]| at )(\d{2})[-:_.](\d{2})[-:_.](\d{2}))?/
   );
   if (isoMatch) {
     const [, y, mo, d, h, mi, s] = isoMatch;
