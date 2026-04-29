@@ -13,8 +13,8 @@
  *     (`Fk_Tags:tags": "KFZ|Kraftstoff"`) → flattened into a global
  *     tag list + per-transaction tag_links keyed by Finanzkraft's
  *     transaction id (carried in fints_id).
- *   - Categories are intentionally NOT imported — the new finance
- *     module classifies by tag only (see docs/finance-tagging-and-ai.md).
+ *   - Categories (`Fk_Category:name`) are converted to tags so the
+ *     historical classification is preserved in fk-encore's tag model.
  *   - Old transactions (≤ ~1998) lack `bookingDate` and only have
  *     `valueDate` → fall back to the value date as booking date.
  *   - Non-EUR transactions: `Fk_Transaction:amount` is already in the
@@ -95,6 +95,8 @@ interface FkTransaction {
   "Fk_Transaction:primaNotaNo"?: number | string;
   "Fk_Transaction:idCategory"?: number;
   "Fk_Transaction:processed"?: boolean;
+  "Fk_Category:name"?: string;
+  "Fk_Category:fullName"?: string;
   "Fk_Transaction:originalCurrency"?: string;
   "Fk_Transaction:originalAmount"?: number;
   "Fk_Transaction:exchangeRate"?: number;
@@ -314,6 +316,9 @@ const TRANSACTION_FIELDS_FIRST_CLASS = new Set([
   "Fk_Transaction:exchangeRate",
   // tags (handled separately, but still first-class — we don't lose them)
   "Fk_Tags:tags",
+  // category name: converted to a tag during extraction
+  "Fk_Category:name",
+  "Fk_Category:fullName",
 ]);
 
 const TRANSACTION_FIELDS_DROPPED = new Set([
@@ -321,13 +326,12 @@ const TRANSACTION_FIELDS_DROPPED = new Set([
   "Fk_Account:name",
   "Fk_Account:iban",
   "Fk_Currency:name",
+  // Fk_Category:id has no meaning outside Finanzkraft; name and fullName
+  // are converted to tags in extractTags() and therefore first-class.
   "Fk_Category:id",
-  "Fk_Category:name",
-  "Fk_Category:fullName",
-  // Finanzkraft-internal classification — categories aren't imported
-  // (we use tags instead), the bare id has no value, oldCategory is a
-  // legacy hierarchy-string from before the rename, and `processed`
-  // is a workflow flag that doesn't translate to fk-encore's model.
+  // Finanzkraft-internal — bare id has no value, oldCategory is a
+  // legacy hierarchy-string before the rename, and `processed` is a
+  // workflow flag that doesn't translate to fk-encore's model.
   "Fk_Transaction:idCategory",
   "Fk_Transaction:oldCategory",
   "Fk_Transaction:processed",
@@ -639,12 +643,24 @@ function convertTransaction(
 }
 
 function extractTags(t: FkTransaction): string[] {
+  const tags: string[] = [];
+
+  // Tags from Fk_Tags:tags (pipe-separated)
   const raw = t["Fk_Tags:tags"];
-  if (!raw) return [];
-  return raw
-    .split("|")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+  if (raw) {
+    for (const s of raw.split("|").map((x) => x.trim()).filter((x) => x.length > 0)) {
+      tags.push(s);
+    }
+  }
+
+  // Category converted to a tag — prefer the short name; fall back to
+  // fullName if name is absent (shouldn't happen in practice).
+  const categoryTag = (t["Fk_Category:name"] ?? t["Fk_Category:fullName"])?.trim();
+  if (categoryTag && !tags.includes(categoryTag)) {
+    tags.push(categoryTag);
+  }
+
+  return tags;
 }
 
 function convert(input: FinanzkraftExport): OutExport {
