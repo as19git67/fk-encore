@@ -949,12 +949,12 @@ function goBack() {
   line-height: 1.1;
 }
 .tx-tag-user {
-  background: #432649;
-  color: #f3e0f8;
+  background: var(--p-tag-info-background);
+  color: var(--p-tag-info-color);
 }
 .tx-tag-ai {
-  background: #4caf50;
-  color: #ffffff;
+  background: var(--p-tag-success-background);
+  color: var(--p-tag-success-color);
 }
 .tx-amount {
   font-variant-numeric: tabular-nums;

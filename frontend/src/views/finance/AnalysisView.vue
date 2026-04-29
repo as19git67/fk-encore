@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import InputText from 'primevue/inputtext'
 import Button from 'primevue/button'
 import DatePicker from 'primevue/datepicker'
@@ -16,9 +16,14 @@ import {
   type AnalysisResult,
 } from '../../api/finance'
 import { useTagsStore } from '../../stores/finance/tags'
-import { onMounted } from 'vue'
 
 const tagsStore = useTagsStore()
+
+const darkMQ = window.matchMedia('(prefers-color-scheme: dark)')
+const isDark = ref(darkMQ.matches)
+function onDarkChange(e: MediaQueryListEvent) {
+  isDark.value = e.matches
+}
 
 const question = ref('')
 const parsing = ref(false)
@@ -34,6 +39,11 @@ const toDate = ref<Date | null>(null)
 
 onMounted(async () => {
   if (tagsStore.items.length === 0) await tagsStore.refresh('user')
+  darkMQ.addEventListener('change', onDarkChange)
+})
+
+onUnmounted(() => {
+  darkMQ.removeEventListener('change', onDarkChange)
 })
 
 function searchTags(event: { query: string }) {
@@ -111,17 +121,25 @@ const chartData = computed(() => {
       {
         label: 'Summe',
         data: result.value.byMonth.map((m) => Number(m.sum)),
-        backgroundColor: 'rgba(59, 130, 246, 0.6)',
+        backgroundColor: isDark.value ? 'rgba(251, 191, 36, 0.7)' : 'rgba(59, 130, 246, 0.6)',
       },
     ],
   }
 })
 
-const chartOptions = {
-  responsive: true,
-  maintainAspectRatio: false,
-  plugins: { legend: { display: false } },
-}
+const chartOptions = computed(() => {
+  const tickColor = isDark.value ? '#94a3b8' : '#64748b'
+  const gridColor = isDark.value ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { ticks: { color: tickColor }, grid: { color: gridColor } },
+      y: { ticks: { color: tickColor }, grid: { color: gridColor } },
+    },
+  }
+})
 </script>
 
 <template>
