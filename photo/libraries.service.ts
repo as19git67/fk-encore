@@ -509,9 +509,9 @@ export async function importFile(
   );
   if (dup) return { kind: "skipped_duplicate" };
 
-  const exifMeta = await getExifMetadata(absFilePath);
-  const storageTs = pickStorageTimestamp(exifMeta.takenAt);
   const originalName = path.basename(absFilePath);
+  const exifMeta = await getExifMetadata(absFilePath, originalName);
+  const storageTs = pickStorageTimestamp(exifMeta.takenAt);
   const descriptionValue = combineDescription(exifMeta);
   const iptcLoc = iptcLocationUpdate(exifMeta);
   const importKeywords = mergeRatingKeyword(exifMeta.keywords, exifMeta.rating);

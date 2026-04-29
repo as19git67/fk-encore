@@ -7,6 +7,7 @@ import sharp from "sharp";
 import { exiftool } from "exiftool-vendored";
 import {
   combineDescription,
+  extractDateFromFilename,
   getExifMetadata,
   iptcLocationUpdate,
   mergeRatingKeyword,
@@ -417,5 +418,53 @@ describe("IPTC writeback round-trip", () => {
     // Should match year/month/day regardless of local timezone handling.
     const d = new Date(meta.takenAt!);
     expect(d.getUTCFullYear()).toBe(2022);
+  });
+});
+
+describe("extractDateFromFilename", () => {
+  it("parses ISO-like YYYY-MM-DD", () => {
+    const r = extractDateFromFilename("2023-12-25_photo.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2023);
+    expect(d.getUTCMonth() + 1).toBe(12);
+    expect(d.getUTCDate()).toBe(25);
+  });
+
+  it("parses underscore-separated YYYY_MM_DD", () => {
+    const r = extractDateFromFilename("photo_2021_06_15.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2021);
+    expect(d.getUTCMonth() + 1).toBe(6);
+    expect(d.getUTCDate()).toBe(15);
+  });
+
+  it("parses compact YYYYMMDD in IMG_20231225_143022", () => {
+    const r = extractDateFromFilename("IMG_20231225_143022.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2023);
+    expect(d.getUTCMonth() + 1).toBe(12);
+    expect(d.getUTCDate()).toBe(25);
+  });
+
+  it("parses WhatsApp-style IMG-20231225-WA0001", () => {
+    const r = extractDateFromFilename("IMG-20231225-WA0001.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2023);
+    expect(d.getUTCMonth() + 1).toBe(12);
+    expect(d.getUTCDate()).toBe(25);
+  });
+
+  it("returns null for generic names without dates", () => {
+    expect(extractDateFromFilename("IMG_1234.jpg")).toBeNull();
+    expect(extractDateFromFilename("photo.jpg")).toBeNull();
+    expect(extractDateFromFilename("DSC00123.jpg")).toBeNull();
+  });
+
+  it("returns null for implausible month/day", () => {
+    expect(extractDateFromFilename("20231399.jpg")).toBeNull();
   });
 });

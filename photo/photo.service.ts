@@ -1015,13 +1015,49 @@ function asStringArray(v: unknown): string[] {
 }
 
 /**
+/**
+ * Try to extract a date from a filename when EXIF metadata is absent.
+ * Recognises ISO-like patterns (YYYY-MM-DD, YYYY_MM_DD, YYYY.MM.DD) and
+ * compact 8-digit runs (YYYYMMDD) that are common in camera/phone naming
+ * schemes (e.g. IMG_20231225_143022.jpg, 2023-12-25_photo.jpg).
+ * Returns an ISO-8601 string (midnight UTC) or null when nothing useful found.
+ */
+export function extractDateFromFilename(filename: string): string | null {
+  const name = path.basename(filename, path.extname(filename));
+
+  // ISO-like: YYYY-MM-DD / YYYY_MM_DD / YYYY.MM.DD
+  const isoMatch = name.match(/(\d{4})[-_.](\d{2})[-_.](\d{2})/);
+  if (isoMatch) {
+    const [, y, m, d] = isoMatch;
+    if (isPlausibleDate(+y, +m, +d)) {
+      return new Date(`${y}-${m}-${d}T00:00:00.000Z`).toISOString();
+    }
+  }
+
+  // Compact: YYYYMMDD not surrounded by other digits
+  const compactMatch = name.match(/(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)/);
+  if (compactMatch) {
+    const [, y, m, d] = compactMatch;
+    if (isPlausibleDate(+y, +m, +d)) {
+      return new Date(`${y}-${m}-${d}T00:00:00.000Z`).toISOString();
+    }
+  }
+
+  return null;
+}
+
+function isPlausibleDate(y: number, m: number, d: number): boolean {
+  return y >= 1900 && y <= 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31;
+}
+
+/**
  * Extract EXIF, IPTC and XMP metadata from an image file. Exported for tests.
  *
  * Always returns a defined object — on parse errors every field falls back to
  * its "not present" value (null / empty array) so callers don't need to handle
  * exceptions.
  */
-export async function getExifMetadata(filePath: string): Promise<ExifMetadata> {
+export async function getExifMetadata(filePath: string, originalFilename?: string): Promise<ExifMetadata> {
   const empty: ExifMetadata = {
     takenAt: null,
     latitude: null,
@@ -1049,6 +1085,10 @@ export async function getExifMetadata(filePath: string): Promise<ExifMetadata> {
     } else {
       // Fall back to IPTC DateCreated/TimeCreated when EXIF timestamps are missing.
       takenAt = parseIptcDate(data?.DateCreated, data?.TimeCreated);
+    }
+    // Last resort: parse a date from the original filename when all metadata is absent.
+    if (!takenAt) {
+      takenAt = extractDateFromFilename(originalFilename ?? filePath);
     }
     // Description — prefer EXIF/XMP fields, fall back to IPTC Caption-Abstract.
     // exifr normalizes XMP dc:description to lowercase `description`.
@@ -1337,7 +1377,7 @@ export async function uploadPhotoStream(
   const digest = hash.digest('hex');
 
   // Extraction of EXIF data (date + GPS) after the file is saved
-  const exifMeta = await getExifMetadata(tempPath);
+  const exifMeta = await getExifMetadata(tempPath, originalName);
 
   // Check for duplicate for this user
   const existing = await dbFirst<typeof photos.$inferSelect>(
@@ -1448,7 +1488,7 @@ export async function uploadPhotoLogic(
   fs.writeFileSync(tempPath, file.data);
 
   // Extraction of EXIF data (date + GPS)
-  const exifMeta2 = await getExifMetadata(tempPath);
+  const exifMeta2 = await getExifMetadata(tempPath, file.name);
 
   // Move the file into its final YYYY/YYYY-MM/YYYY-MM-DD_at_HH.MM.SS_NN.ext slot.
   const storageTs2 = pickStorageTimestamp(exifMeta2.takenAt);
@@ -2164,7 +2204,7 @@ export async function refreshPhotoMetadataLogic(userId: number, photoId: number)
     throw new Error("File not found on disk");
   }
 
-  const exifMeta = await getExifMetadata(filePath);
+  const exifMeta = await getExifMetadata(filePath, photo.original_name);
 
   // Always update, even if takenAt is null (to sync with current logic if it was different before).
   // Description falls back to the IPTC Headline when no caption was written.
