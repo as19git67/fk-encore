@@ -306,7 +306,7 @@ async function save() {
   list-style: none;
   padding: 0;
   margin: 0;
-  background: var(--p-surface-0);
+  background: var(--p-content-background);
   border: 1px solid var(--p-content-border-color);
   border-radius: 0.5rem;
   overflow: hidden;
@@ -322,7 +322,7 @@ async function save() {
   border-bottom: none;
 }
 .bt-tag-row-inuse {
-  background: var(--p-surface-50);
+  background: var(--p-content-hover-background);
 }
 .bt-tag-divider {
   height: 0;
