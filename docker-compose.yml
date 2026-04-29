@@ -222,6 +222,15 @@ services:
       # but HT typically doesn't help dense matmul on CPU and adds scheduling
       # noise — picking 6 keeps each OMP worker on its own physical core.
       EMBED_NUM_THREADS: "6"
+      # Inference backend: "torch" (PyTorch fp32) or "onnx" (INT8 visual
+      # tower + fp32 ONNX text/DINOv2). Flipping to "onnx" requires the
+      # ONNX artefacts to be in the embedding_models volume — populate
+      # them once with:
+      #   docker compose exec embedding_service \
+      #       /usr/local/bin/optimize_models.sh
+      # Defaults to torch so an upgrade with a not-yet-prepared volume
+      # keeps working.
+      EMBED_BACKEND: ${EMBED_BACKEND:-torch}
     volumes:
       - embedding_models:/models
     healthcheck:

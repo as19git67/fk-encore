@@ -40,6 +40,8 @@ services:
       DINO_MODEL_NAME: facebook/dinov2-base
       LOG_LEVEL: INFO
       EMBED_NUM_THREADS: "6"
+      # See docker-compose.yml for the rationale; defaults to torch.
+      EMBED_BACKEND: ${EMBED_BACKEND:-torch}
     volumes:
       - embedding_models:/models
     healthcheck:

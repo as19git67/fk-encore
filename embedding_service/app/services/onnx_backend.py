@@ -234,6 +234,23 @@ class OnnxInt8Backend:
             self._dino_processor = AutoImageProcessor.from_pretrained(self.dino_model_name)
         return self._dino_processor
 
+    def preload(self) -> None:
+        """Force-load every session and preprocessor up front.
+
+        Without this, the lazy-load methods only fire when the first
+        embed_*  call hits them — which on the production /health endpoint
+        means the first inference after boot pays the ~5 s session-load
+        latency, not the healthcheck. Calling preload() at service
+        startup keeps that pattern consistent with how the torch path
+        eagerly instantiates its embedders.
+        """
+        self._load_clip_image()
+        self._load_clip_text()
+        self._load_dino()
+        self._load_clip_preprocess()
+        self._load_clip_tokenizer()
+        self._load_dino_processor()
+
     # ------------------------------------------------------------------
     # Inference (mirrors the torch CLIPEmbedder / DINOv2Embedder API)
     # ------------------------------------------------------------------
