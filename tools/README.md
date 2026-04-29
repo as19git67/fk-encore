@@ -24,10 +24,37 @@ shape that fk-encore's `/finance/admin/import` endpoint expects.
    The converter prints a one-line summary (`accounts=N transactions=M
    tags=K …`) on stderr; stdout is the import-ready JSON.
 
-3. Open **Finanzen → Import** in the fk-encore UI, pick
-   `/tmp/fk-encore-import.json`, and start the import. (For an
-   iterative re-run, tick the **"Vorher alle Finanzdaten löschen"**
-   checkbox.)
+3. **Option A — Dropbox (empfohlen für große Exporte):**
+   Benenne die Datei mit dem Suffix `.pending.json` und lege sie in
+   das Verzeichnis, auf das `FINANCE_IMPORT_DIR` zeigt
+   (Standard: `/data/finance-import`):
+
+   ```sh
+   cp /tmp/fk-encore-import.json \
+      /data/finance-import/fk-encore-import.pending.json
+   ```
+
+   Der chokidar-Watcher erkennt die Datei automatisch, sobald ihre
+   Größe für 5 Sekunden stabil bleibt (konfigurierbar via
+   `FINANCE_IMPORT_STABILITY_MS`), und startet den Import ohne
+   HTTP-Timeout. Nach Abschluss wird die Datei umbenannt:
+
+   - Erfolg → `fk-encore-import.imported-<timestamp>.json`
+   - Fehler  → `fk-encore-import.failed-<timestamp>.json`
+              + `fk-encore-import.failed-<timestamp>.error.txt`
+
+   Validierungsfehler einzelner Zeilen brechen den Import nicht ab;
+   sie landen in einer Sibling-Datei
+   `fk-encore-import.imported-<timestamp>.errors.json`.
+
+   > **Hinweis:** Die Dropbox-Variante setzt immer `wipe_first=true`
+   > (Dropbox-Semantik: „diese Datei IST der Finance-Stand"). Für
+   > einen additiven Import ohne Wipe → Option B.
+
+   **Option B — UI-Upload:**
+   Öffne **Finanzen → Import**, wähle `/tmp/fk-encore-import.json`
+   und starte den Import. Für einen iterativen Re-Run setze den
+   Haken bei **"Vorher alle Finanzdaten löschen"**.
 
 4. After import: open **Finanzen → Bankkontakte**. The pseudo-
    bankcontacts are already there — you only need to set the **real
@@ -59,7 +86,8 @@ shape that fk-encore's `/finance/admin/import` endpoint expects.
 | `Transactions[].Fk_Transaction:gvCode` / `entryText` / `primaNotaNo` | `transactions[].gv_code` / `entry_text` / `prima_nota_no` | MT940/FinTS metadata. |
 | `Transactions[].Fk_Transaction:id` | `transactions[].fints_id = "fk-<id>"` | Used for tag-link cross-reference. |
 | `Transactions[].Fk_Tags:tags` (pipe-separated) | global `tags[]` + `tag_links[]` | All tags imported with `source='user'`. |
-| `Transactions[].Fk_Transaction:idCategory` / `oldCategory` / `processed` | (dropped) | Categories aren't imported (we use tags); the raw id and the legacy hierarchy-string have no value. `processed` is a Finanzkraft-internal workflow flag. |
+| `Transactions[].Fk_Category:name` (or `:fullName` as fallback) | global `tags[]` + `tag_links[]` | Category name appended as an additional tag, unless it already appears in `Fk_Tags:tags`. |
+| `Transactions[].Fk_Transaction:idCategory` / `Fk_Category:id` / `oldCategory` / `processed` | (dropped) | Internal IDs and the legacy hierarchy-string have no value outside Finanzkraft. `processed` is a Finanzkraft-internal workflow flag. |
 
 ### What gets dropped on purpose
 
