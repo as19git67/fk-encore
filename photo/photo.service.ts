@@ -1016,44 +1016,90 @@ function asStringArray(v: unknown): string[] {
 
 /**
 /**
- * Try to extract a date (and optional time) from a filename when EXIF metadata
- * is absent. Recognises ISO-like patterns (YYYY-MM-DD, YYYY_MM_DD, YYYY.MM.DD)
- * optionally followed by a time component (HH-MM-SS, HH_MM_SS, HHMMSS), and
- * compact 8-digit runs (YYYYMMDD) optionally followed by 6-digit time (HHMMSS).
- * Common examples: IMG_20231225_143022.jpg, 2023-12-25_14-30-22.jpg,
- *   Screenshot_2023-12-25-14-30-22.jpg, IMG-20231225-WA0001.jpg.
- * Returns an ISO-8601 string (UTC) or null when nothing useful found.
+ * Try to extract a date (and optional time) from a filename or its containing
+ * directory path when EXIF metadata is absent.
+ *
+ * Resolution order (most → least precise):
+ *   1. Full date ± time in basename  (YYYY-MM-DD, YYYYMMDD, "… at HH.MM.SS", …)
+ *   2. Year-month in basename        (YYYY-MM / YYYY_MM)
+ *   3. 4-digit year in basename      (1940 – current year)
+ *   4. Same three patterns on each directory component (innermost first)
+ *
+ * Returns an ISO-8601 string (UTC) or null when nothing useful is found.
+ * Partial dates are anchored to the first of the month / year at midnight.
  */
 export function extractDateFromFilename(filename: string): string | null {
   const name = path.basename(filename, path.extname(filename));
 
-  // ISO-like date: YYYY-MM-DD / YYYY_MM_DD / YYYY.MM.DD
-  // Optionally followed by separator + HH-MM-SS / HH_MM_SS / HH.MM.SS / HHMMSS
-  const isoMatch = name.match(
+  const fromName = tryFullDate(name) ?? tryYearMonth(name) ?? tryYearOnly(name);
+  if (fromName) return fromName;
+
+  // Walk directory components innermost-first as a last resort.
+  const dir = path.dirname(filename);
+  if (dir && dir !== ".") {
+    for (const part of dir.split(path.sep).filter(Boolean).reverse()) {
+      const fromDir = tryFullDate(part) ?? tryYearMonth(part) ?? tryYearOnly(part);
+      if (fromDir) return fromDir;
+    }
+  }
+
+  return null;
+}
+
+/** Full date (YYYY-MM-DD or YYYYMMDD) with optional time. */
+function tryFullDate(s: string): string | null {
+  // ISO-like: YYYY-MM-DD / YYYY_MM_DD / YYYY.MM.DD + optional " at " / T / _ / - + HH:MM:SS
+  const isoMatch = s.match(
     /(\d{4})[-_.](\d{2})[-_.](\d{2})(?:(?:[-_T ]| at )(\d{2})[-:_.](\d{2})[-:_.](\d{2}))?/
   );
   if (isoMatch) {
-    const [, y, mo, d, h, mi, s] = isoMatch;
+    const [, y, mo, d, h, mi, sec] = isoMatch;
     if (isPlausibleDate(+y, +mo, +d)) {
-      const time = h && mi && s && isPlausibleTime(+h, +mi, +s)
-        ? `${h}:${mi}:${s}`
+      const time = h && mi && sec && isPlausibleTime(+h, +mi, +sec)
+        ? `${h}:${mi}:${sec}`
         : "00:00:00";
       return new Date(`${y}-${mo}-${d}T${time}.000Z`).toISOString();
     }
   }
 
-  // Compact YYYYMMDD optionally followed by _HHMMSS or -HHMMSS or THHMMSS
-  const compactMatch = name.match(/(?<!\d)(\d{4})(\d{2})(\d{2})(?:[-_T](\d{2})(\d{2})(\d{2}))?(?!\d)/);
+  // Compact YYYYMMDD optionally followed by _HHMMSS / -HHMMSS / THHMMSS
+  const compactMatch = s.match(/(?<!\d)(\d{4})(\d{2})(\d{2})(?:[-_T](\d{2})(\d{2})(\d{2}))?(?!\d)/);
   if (compactMatch) {
-    const [, y, mo, d, h, mi, s] = compactMatch;
+    const [, y, mo, d, h, mi, sec] = compactMatch;
     if (isPlausibleDate(+y, +mo, +d)) {
-      const time = h && mi && s && isPlausibleTime(+h, +mi, +s)
-        ? `${h}:${mi}:${s}`
+      const time = h && mi && sec && isPlausibleTime(+h, +mi, +sec)
+        ? `${h}:${mi}:${sec}`
         : "00:00:00";
       return new Date(`${y}-${mo}-${d}T${time}.000Z`).toISOString();
     }
   }
 
+  return null;
+}
+
+/** Year + month only, e.g. "Kinderturnen 2010-11" → 2010-11-01T00:00:00Z */
+function tryYearMonth(s: string): string | null {
+  // YYYY-MM or YYYY_MM not followed by another separator+digit (would be full date)
+  const m = s.match(/(?<!\d)(\d{4})[-_](\d{2})(?![-_.\d])/);
+  if (m) {
+    const [, y, mo] = m;
+    if (isPlausibleDate(+y, +mo, 1)) {
+      return new Date(`${y}-${mo}-01T00:00:00.000Z`).toISOString();
+    }
+  }
+  return null;
+}
+
+/** 4-digit year in the plausible photo range, e.g. "Urlaub 2019" → 2019-01-01T00:00:00Z */
+function tryYearOnly(s: string): string | null {
+  const currentYear = new Date().getFullYear();
+  const m = s.match(/(?<!\d)(\d{4})(?!\d)/);
+  if (m) {
+    const y = +m[1];
+    if (y >= 1940 && y <= currentYear) {
+      return new Date(`${y}-01-01T00:00:00.000Z`).toISOString();
+    }
+  }
   return null;
 }
 

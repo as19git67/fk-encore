@@ -515,4 +515,49 @@ describe("extractDateFromFilename", () => {
     expect(d.getUTCDate()).toBe(25);
     expect(d.getUTCHours()).toBe(0);
   });
+
+  it("parses year-month from filename", () => {
+    const r = extractDateFromFilename("Kinderturnen TSV Merching 2010-11.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2010);
+    expect(d.getUTCMonth() + 1).toBe(11);
+    expect(d.getUTCDate()).toBe(1);
+  });
+
+  it("parses year-only from filename", () => {
+    const r = extractDateFromFilename("Sommerurlaub 2019.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2019);
+    expect(d.getUTCMonth() + 1).toBe(1);
+    expect(d.getUTCDate()).toBe(1);
+  });
+
+  it("ignores year-only outside photo range", () => {
+    expect(extractDateFromFilename("report_1234.jpg")).toBeNull();
+    expect(extractDateFromFilename("future_2199.jpg")).toBeNull();
+  });
+
+  it("falls back to directory year-month when basename has no date", () => {
+    const r = extractDateFromFilename("/photos/2015-06/IMG_1234.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2015);
+    expect(d.getUTCMonth() + 1).toBe(6);
+  });
+
+  it("falls back to directory year when basename has no date", () => {
+    const r = extractDateFromFilename("/photos/2017/IMG_1234.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2017);
+  });
+
+  it("prefers basename date over directory date", () => {
+    const r = extractDateFromFilename("/photos/2017/IMG_20231225_143022.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2023);
+  });
 });
