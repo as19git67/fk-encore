@@ -8,6 +8,7 @@ import { exiftool } from "exiftool-vendored";
 import {
   combineDescription,
   extractDateFromFilename,
+  fixMacRomanMojibake,
   getExifMetadata,
   iptcLocationUpdate,
   mergeRatingKeyword,
@@ -593,5 +594,47 @@ describe("extractDateFromFilename", () => {
     expect(d.getUTCHours()).toBe(14);
     expect(d.getUTCMinutes()).toBe(30);
     expect(d.getUTCSeconds()).toBe(22);
+  });
+});
+
+describe("fixMacRomanMojibake", () => {
+  it("fixes ä (0xE4 Latin-1 decoded as Mac Roman ‰)", () => {
+    expect(fixMacRomanMojibake("vollst‰ndig")).toBe("vollständig");
+  });
+
+  it("fixes ö (0xF6 Latin-1 decoded as Mac Roman ˆ)", () => {
+    expect(fixMacRomanMojibake("rˆmisch")).toBe("römisch");
+  });
+
+  it("fixes the full example string from the issue", () => {
+    const input =
+      "ca. 50 n. Chr. entstandener, vollst‰ndig erhaltender " +
+      "nordwestlicher Eckturm der rˆmischen Stadtmauer";
+    const expected =
+      "ca. 50 n. Chr. entstandener, vollständig erhaltender " +
+      "nordwestlicher Eckturm der römischen Stadtmauer";
+    expect(fixMacRomanMojibake(input)).toBe(expected);
+  });
+
+  it("fixes ü (0xFC Latin-1 decoded as Mac Roman ¸)", () => {
+    expect(fixMacRomanMojibake("M¸nchen")).toBe("München");
+  });
+
+  it("fixes Ä (0xC4 Latin-1 decoded as Mac Roman ƒ)", () => {
+    expect(fixMacRomanMojibake("ƒgypten")).toBe("Ägypten");
+  });
+
+  it("leaves clean UTF-8 strings unchanged", () => {
+    const clean = "Schönes Foto aus München";
+    expect(fixMacRomanMojibake(clean)).toBe(clean);
+  });
+
+  it("leaves ASCII strings unchanged", () => {
+    const ascii = "Hello World 2023";
+    expect(fixMacRomanMojibake(ascii)).toBe(ascii);
+  });
+
+  it("returns empty string unchanged", () => {
+    expect(fixMacRomanMojibake("")).toBe("");
   });
 });

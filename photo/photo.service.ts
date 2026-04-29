@@ -896,6 +896,110 @@ export interface ExifMetadata {
   rating: number | null;
 }
 
+// ---------------------------------------------------------------------------
+// Mac Roman → Latin-1 mojibake repair
+// ---------------------------------------------------------------------------
+// IPTC metadata written by older Mac software was encoded in Mac Roman.
+// When exifr reads such files without an explicit charset marker it may
+// decode the raw bytes as Mac Roman, producing garbled Unicode. The bytes
+// 0x80-0xFF mean completely different things in Mac Roman vs ISO-8859-1, so
+// e.g. the Latin-1 byte 0xE4 (ä) is decoded as Mac Roman ‰ (U+2030).
+//
+// Fix: map each character back to its Mac Roman byte value, then re-read
+// that byte as Latin-1 (ISO-8859-1).
+
+/** Mac Roman bytes 0x80-0xFF mapped to their Unicode code points. */
+const MAC_ROMAN_HIGH: readonly number[] = [
+  // 0x80-0x87
+  0x00C4, 0x00C5, 0x00C7, 0x00C9, 0x00D1, 0x00D6, 0x00DC, 0x00E1,
+  // 0x88-0x8F
+  0x00E0, 0x00E2, 0x00E4, 0x00E3, 0x00E5, 0x00E7, 0x00E9, 0x00E8,
+  // 0x90-0x97
+  0x00EA, 0x00EB, 0x00ED, 0x00EC, 0x00EE, 0x00EF, 0x00F1, 0x00F3,
+  // 0x98-0x9F
+  0x00F2, 0x00F4, 0x00F6, 0x00F5, 0x00FA, 0x00F9, 0x00FB, 0x00FC,
+  // 0xA0-0xA7
+  0x2020, 0x00B0, 0x00A2, 0x00A3, 0x00A7, 0x2022, 0x00B6, 0x00DF,
+  // 0xA8-0xAF
+  0x00AE, 0x00A9, 0x2122, 0x00B4, 0x00A8, 0x2260, 0x00C6, 0x00D8,
+  // 0xB0-0xB7
+  0x221E, 0x00B1, 0x2264, 0x2265, 0x00A5, 0x00B5, 0x2202, 0x03A3,
+  // 0xB8-0xBF
+  0x03A0, 0x03C0, 0x222B, 0x00AA, 0x00BA, 0x03A9, 0x00E6, 0x00F8,
+  // 0xC0-0xC7
+  0x00BF, 0x00A1, 0x00AC, 0x221A, 0x0192, 0x2248, 0x2206, 0x00AB,
+  // 0xC8-0xCF
+  0x00BB, 0x2026, 0x00A0, 0x00C0, 0x00C3, 0x00D5, 0x0152, 0x0153,
+  // 0xD0-0xD7
+  0x2013, 0x2014, 0x201C, 0x201D, 0x2018, 0x2019, 0x00F7, 0x25CA,
+  // 0xD8-0xDF
+  0x00FF, 0x0178, 0x2044, 0x20AC, 0x2039, 0x203A, 0xFB01, 0xFB02,
+  // 0xE0-0xE7
+  0x2021, 0x00B7, 0x201A, 0x201E, 0x2030, 0x00C2, 0x00CA, 0x00C1,
+  // 0xE8-0xEF
+  0x00CB, 0x00C8, 0x00CD, 0x00CE, 0x00CF, 0x00CC, 0x00D3, 0x00D4,
+  // 0xF0-0xF7
+  0xF8FF, 0x00D2, 0x00DA, 0x00DB, 0x00D9, 0x0131, 0x02C6, 0x02DC,
+  // 0xF8-0xFF
+  0x00AF, 0x02D8, 0x02D9, 0x02DA, 0x00B8, 0x02DD, 0x02DB, 0x02C7,
+];
+
+/** Reverse map: Unicode code point → Mac Roman byte (0x80-0xFF). */
+const UNICODE_TO_MAC_ROMAN_BYTE = new Map<number, number>(
+  MAC_ROMAN_HIGH.map((cp, i) => [cp, i + 0x80])
+);
+
+/**
+ * Characters whose presence strongly suggests Mac Roman mojibake.
+ * These are Mac Roman upper-half symbols that are unlikely in plain-text
+ * photo descriptions (modifier letters, math symbols, typographic ligatures).
+ */
+const MOJIBAKE_INDICATORS = new Set<number>([
+  0x2030, // ‰  (Mac Roman 0xE4 → Latin-1 ä)
+  0x02C6, // ˆ  (Mac Roman 0xF6 → Latin-1 ö)
+  0x00B8, // ¸  (Mac Roman 0xFC → Latin-1 ü)
+  0x2039, // ‹  (Mac Roman 0xDC → Latin-1 Ü)
+  0x203A, // ›  (Mac Roman 0xDD → Latin-1 Ý … rarely useful)
+  0x02D9, // ˙  (Mac Roman 0xFA → Latin-1 ú)
+  0x02DA, // ˚  (Mac Roman 0xFB → Latin-1 û)
+  0x02D8, // ˘  (Mac Roman 0xF9 → Latin-1 ù)
+  0x02DD, // ˝  (Mac Roman 0xFD → Latin-1 ý)
+  0x02DB, // ˛  (Mac Roman 0xFE → Latin-1 þ)
+  0x02C7, // ˇ  (Mac Roman 0xFF → Latin-1 ÿ)
+  0x0192, // ƒ  (Mac Roman 0xC4 → Latin-1 Ä)
+  0x25CA, // ◊  (Mac Roman 0xD7 → Latin-1 ×)
+  0xFB01, // fi (Mac Roman 0xDE → Latin-1 Þ)
+  0xFB02, // fl (Mac Roman 0xDF → Latin-1 ß)
+  0x0178, // Ÿ  (Mac Roman 0xD9 → Latin-1 Ù)
+]);
+
+/**
+ * Re-decode a string that was incorrectly decoded as Mac Roman when the
+ * underlying bytes were actually ISO-8859-1/Latin-1.
+ *
+ * Only applied when mojibake indicators are detected; otherwise the original
+ * string is returned unchanged to avoid corrupting legitimately encoded text.
+ */
+export function fixMacRomanMojibake(s: string): string {
+  // Quick check: is there any indicator character?
+  let hasMojibake = false;
+  for (let i = 0; i < s.length; i++) {
+    if (MOJIBAKE_INDICATORS.has(s.codePointAt(i)!)) { hasMojibake = true; break; }
+  }
+  if (!hasMojibake) return s;
+
+  // Re-map each character: look up its Mac Roman byte, then treat that byte
+  // as a Latin-1 code point.
+  const out: string[] = [];
+  for (let i = 0; i < s.length; i++) {
+    const cp = s.codePointAt(i)!;
+    const macByte = UNICODE_TO_MAC_ROMAN_BYTE.get(cp);
+    // macByte is a value in 0x80-0xFF; in Latin-1 that byte is the code point directly.
+    out.push(macByte !== undefined ? String.fromCodePoint(macByte) : s[i]);
+  }
+  return out.join("");
+}
+
 /**
  * Parse an IPTC DateCreated (YYYYMMDD or YYYY-MM-DD) + optional TimeCreated
  * (HHMMSS[±HHMM] or HH:MM:SS) into an ISO-8601 string. Returns null when the
@@ -1220,41 +1324,46 @@ export async function getExifMetadata(filePath: string, originalFilename?: strin
     }
     // Description — prefer EXIF/XMP fields, fall back to IPTC Caption-Abstract.
     // exifr normalizes XMP dc:description to lowercase `description`.
-    const description: string | null =
+    const fix = (s: string | null) => (s ? fixMacRomanMojibake(s) : null);
+    const description: string | null = fix(
       asString(data?.ImageDescription) ??
       asString(data?.Description) ??
       asString(data?.description) ??
       asString(data?.UserComment) ??
       asString(data?.Caption) ??
       asString(data?.["Caption-Abstract"]) ??
-      null;
+      null
+    );
     // Keywords — IPTC Keywords or XMP dc:subject (exifr emits `subject`).
     const keywords = asStringArray(
       data?.Keywords ?? data?.subject
-    );
-    const author =
+    ).map(k => fixMacRomanMojibake(k));
+    const author = fix(
       asString(data?.Byline) ??
       asString(data?.["By-line"]) ??
       asString(data?.Artist) ??
       asString(data?.Creator) ??
       asString(data?.creator) ??
-      null;
-    const headline = asString(data?.Headline);
+      null
+    );
+    const headline = fix(asString(data?.Headline));
     // XMP dc:title — exifr normalises to lowercase `title`.
-    const title = asString(data?.title);
-    const copyright =
+    const title = fix(asString(data?.title));
+    const copyright = fix(
       asString(data?.CopyrightNotice) ??
       asString(data?.Copyright) ??
       asString(data?.Rights) ??
       asString(data?.rights) ??
-      null;
-    const credit = asString(data?.Credit);
-    const city = asString(data?.City);
-    const state = asString(data?.["Province-State"]) ?? asString(data?.State);
-    const country =
+      null
+    );
+    const credit = fix(asString(data?.Credit));
+    const city = fix(asString(data?.City));
+    const state = fix(asString(data?.["Province-State"]) ?? asString(data?.State));
+    const country = fix(
       asString(data?.["Country-PrimaryLocationName"]) ??
       asString(data?.Country) ??
-      null;
+      null
+    );
     const rating = parseXmpRating(data?.Rating ?? data?.rating);
     return {
       takenAt,
