@@ -34,41 +34,30 @@ WORKDIR /app
 # Copy installed packages from builder
 COPY --from=builder /install /usr/local
 
-# Cache-related env vars as absolute paths. Set each on its own ENV line so
-# they definitely propagate to both build-time RUN steps and the runtime CMD.
+# Models are NOT baked into the image — they are downloaded into the
+# bind-mounted /models volume on first start (or explicitly populated via
+# `download_model.sh`). Keeping them out of the image cuts the multi-arch
+# CI build from ~15 min to ~3 min and from ~10 GB image size to ~800 MB,
+# and allows iterating on quantisation without rebuilding.
+#
+# spaCy's de_core_news_md (~40 MB, NER for natural-language query parsing)
+# is small enough to stay baked in: it ships as a pip-installable wheel,
+# so installing it here costs less than wiring up a separate cache path.
 ENV HOME=/home/apps
 ENV USER=apps
 ENV LOGNAME=apps
-ENV XDG_CACHE_HOME=/home/apps/.cache
-ENV HF_HOME=/home/apps/.cache/huggingface
-ENV HUGGINGFACE_HUB_CACHE=/home/apps/.cache/huggingface/hub
-ENV TORCH_HOME=/home/apps/.cache/torch
+ENV MODELS_DIR=/models
+ENV XDG_CACHE_HOME=/models/cache
+ENV HF_HOME=/models/hf-cache
+ENV HUGGINGFACE_HUB_CACHE=/models/hf-cache/hub
+ENV TORCH_HOME=/models/torch-cache
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV LOG_LEVEL=INFO
 
-# Pre-download model weights into the explicit cache dirs so the non-root
-# apps user can load them at runtime. cache_dir= is passed explicitly so the
-# download never depends on $HOME expansion. The shell retry loop rides out
-# transient huggingface.co 503s during build — the libraries' built-in retry
-# only waits up to 8s, which is too short for longer outages.
-RUN mkdir -p /home/apps/.cache/huggingface /home/apps/.cache/torch \
-    && for attempt in 1 2 3 4 5; do \
-         python -c "import open_clip; open_clip.create_model_and_transforms('xlm-roberta-large-ViT-H-14', pretrained='frozen_laion5b_s13b_b90k', cache_dir='/home/apps/.cache/huggingface'); print('OpenCLIP model pre-downloaded.')" && break; \
-         if [ "$attempt" = "5" ]; then echo "OpenCLIP download failed after 5 attempts"; exit 1; fi; \
-         sleep_time=$((attempt * 30)); \
-         echo "Attempt $attempt failed, retrying in ${sleep_time}s..."; \
-         sleep "$sleep_time"; \
-       done
-RUN for attempt in 1 2 3 4 5; do \
-         python -c "from transformers import AutoImageProcessor, AutoModel; AutoImageProcessor.from_pretrained('facebook/dinov2-base', cache_dir='/home/apps/.cache/huggingface'); AutoModel.from_pretrained('facebook/dinov2-base', cache_dir='/home/apps/.cache/huggingface'); print('DINOv2 model pre-downloaded.')" && break; \
-         if [ "$attempt" = "5" ]; then echo "DINOv2 download failed after 5 attempts"; exit 1; fi; \
-         sleep_time=$((attempt * 30)); \
-         echo "Attempt $attempt failed, retrying in ${sleep_time}s..."; \
-         sleep "$sleep_time"; \
-       done
 # spaCy German NER model for natural-language query parsing.
-# de_core_news_md (~40 MB) – good NER for LOC/GPE/DATE without the 560 MB lg footprint.
+# de_core_news_md is a pip-installable wheel — keeping it baked in avoids
+# a separate cache path; payload is small (~40 MB).
 RUN for attempt in 1 2 3 4 5; do \
          python -m spacy download de_core_news_md && break; \
          if [ "$attempt" = "5" ]; then echo "spaCy model download failed after 5 attempts"; exit 1; fi; \
@@ -76,12 +65,21 @@ RUN for attempt in 1 2 3 4 5; do \
          echo "Attempt $attempt failed, retrying in ${sleep_time}s..."; \
          sleep "$sleep_time"; \
        done
-RUN chown -R 568:568 /home/apps
 
-# Copy application source
+# /models is the bind-mount target for the embedding_models volume; the
+# embedding service writes its HF / torch caches and (later) ONNX-quantised
+# weights here. Pre-creating + chowning means the non-root runtime user
+# can populate it on first start without an extra init container.
+RUN mkdir -p /models \
+    && chown -R 568:568 /models /home/apps
+
+# Copy application source + downloader / optimiser.
 COPY app/ ./app/
+COPY download_model.sh /usr/local/bin/download_model.sh
+COPY optimize_models.sh /usr/local/bin/optimize_models.sh
+RUN chmod +x /usr/local/bin/download_model.sh /usr/local/bin/optimize_models.sh
 
-# Runtime system deps (libpq for asyncpg)
+# Runtime system deps (libpq for asyncpg, curl for healthcheck + downloader)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     curl \

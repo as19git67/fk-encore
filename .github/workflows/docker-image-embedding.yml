@@ -71,6 +71,10 @@ jobs:
         with:
           context: ./embedding_service
           push: true
+          # Multi-arch build is back: model weights now live in the
+          # `embedding_models` volume rather than the image, so the build
+          # no longer pulls the 4.77 GB CLIP file twice onto the runner
+          # disk and the previous ENOSPC failures are gone.
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
