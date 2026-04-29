@@ -99,6 +99,11 @@ class _FakeDINOEmbedder:
 
 embed_stub.CLIPEmbedder = _FakeCLIPEmbedder
 embed_stub.DINOv2Embedder = _FakeDINOEmbedder
+# Factory functions added in Punkt 3c — endpoints.py imports these instead
+# of the classes directly. Stub them to always return the torch fakes
+# above, since the test never exercises the onnx codepath.
+embed_stub.clip_embedder_class = lambda: _FakeCLIPEmbedder
+embed_stub.dino_embedder_class = lambda: _FakeDINOEmbedder
 sys.modules["app.services.embedding_service"] = embed_stub
 
 # app.services.similar_groups stub — the real module imports numpy and runs
