@@ -896,6 +896,110 @@ export interface ExifMetadata {
   rating: number | null;
 }
 
+// ---------------------------------------------------------------------------
+// Mac Roman → Latin-1 mojibake repair
+// ---------------------------------------------------------------------------
+// IPTC metadata written by older Mac software was encoded in Mac Roman.
+// When exifr reads such files without an explicit charset marker it may
+// decode the raw bytes as Mac Roman, producing garbled Unicode. The bytes
+// 0x80-0xFF mean completely different things in Mac Roman vs ISO-8859-1, so
+// e.g. the Latin-1 byte 0xE4 (ä) is decoded as Mac Roman ‰ (U+2030).
+//
+// Fix: map each character back to its Mac Roman byte value, then re-read
+// that byte as Latin-1 (ISO-8859-1).
+
+/** Mac Roman bytes 0x80-0xFF mapped to their Unicode code points. */
+const MAC_ROMAN_HIGH: readonly number[] = [
+  // 0x80-0x87
+  0x00C4, 0x00C5, 0x00C7, 0x00C9, 0x00D1, 0x00D6, 0x00DC, 0x00E1,
+  // 0x88-0x8F
+  0x00E0, 0x00E2, 0x00E4, 0x00E3, 0x00E5, 0x00E7, 0x00E9, 0x00E8,
+  // 0x90-0x97
+  0x00EA, 0x00EB, 0x00ED, 0x00EC, 0x00EE, 0x00EF, 0x00F1, 0x00F3,
+  // 0x98-0x9F
+  0x00F2, 0x00F4, 0x00F6, 0x00F5, 0x00FA, 0x00F9, 0x00FB, 0x00FC,
+  // 0xA0-0xA7
+  0x2020, 0x00B0, 0x00A2, 0x00A3, 0x00A7, 0x2022, 0x00B6, 0x00DF,
+  // 0xA8-0xAF
+  0x00AE, 0x00A9, 0x2122, 0x00B4, 0x00A8, 0x2260, 0x00C6, 0x00D8,
+  // 0xB0-0xB7
+  0x221E, 0x00B1, 0x2264, 0x2265, 0x00A5, 0x00B5, 0x2202, 0x03A3,
+  // 0xB8-0xBF
+  0x03A0, 0x03C0, 0x222B, 0x00AA, 0x00BA, 0x03A9, 0x00E6, 0x00F8,
+  // 0xC0-0xC7
+  0x00BF, 0x00A1, 0x00AC, 0x221A, 0x0192, 0x2248, 0x2206, 0x00AB,
+  // 0xC8-0xCF
+  0x00BB, 0x2026, 0x00A0, 0x00C0, 0x00C3, 0x00D5, 0x0152, 0x0153,
+  // 0xD0-0xD7
+  0x2013, 0x2014, 0x201C, 0x201D, 0x2018, 0x2019, 0x00F7, 0x25CA,
+  // 0xD8-0xDF
+  0x00FF, 0x0178, 0x2044, 0x20AC, 0x2039, 0x203A, 0xFB01, 0xFB02,
+  // 0xE0-0xE7
+  0x2021, 0x00B7, 0x201A, 0x201E, 0x2030, 0x00C2, 0x00CA, 0x00C1,
+  // 0xE8-0xEF
+  0x00CB, 0x00C8, 0x00CD, 0x00CE, 0x00CF, 0x00CC, 0x00D3, 0x00D4,
+  // 0xF0-0xF7
+  0xF8FF, 0x00D2, 0x00DA, 0x00DB, 0x00D9, 0x0131, 0x02C6, 0x02DC,
+  // 0xF8-0xFF
+  0x00AF, 0x02D8, 0x02D9, 0x02DA, 0x00B8, 0x02DD, 0x02DB, 0x02C7,
+];
+
+/** Reverse map: Unicode code point → Mac Roman byte (0x80-0xFF). */
+const UNICODE_TO_MAC_ROMAN_BYTE = new Map<number, number>(
+  MAC_ROMAN_HIGH.map((cp, i) => [cp, i + 0x80])
+);
+
+/**
+ * Characters whose presence strongly suggests Mac Roman mojibake.
+ * These are Mac Roman upper-half symbols that are unlikely in plain-text
+ * photo descriptions (modifier letters, math symbols, typographic ligatures).
+ */
+const MOJIBAKE_INDICATORS = new Set<number>([
+  0x2030, // ‰  (Mac Roman 0xE4 → Latin-1 ä)
+  0x02C6, // ˆ  (Mac Roman 0xF6 → Latin-1 ö)
+  0x00B8, // ¸  (Mac Roman 0xFC → Latin-1 ü)
+  0x2039, // ‹  (Mac Roman 0xDC → Latin-1 Ü)
+  0x203A, // ›  (Mac Roman 0xDD → Latin-1 Ý … rarely useful)
+  0x02D9, // ˙  (Mac Roman 0xFA → Latin-1 ú)
+  0x02DA, // ˚  (Mac Roman 0xFB → Latin-1 û)
+  0x02D8, // ˘  (Mac Roman 0xF9 → Latin-1 ù)
+  0x02DD, // ˝  (Mac Roman 0xFD → Latin-1 ý)
+  0x02DB, // ˛  (Mac Roman 0xFE → Latin-1 þ)
+  0x02C7, // ˇ  (Mac Roman 0xFF → Latin-1 ÿ)
+  0x0192, // ƒ  (Mac Roman 0xC4 → Latin-1 Ä)
+  0x25CA, // ◊  (Mac Roman 0xD7 → Latin-1 ×)
+  0xFB01, // fi (Mac Roman 0xDE → Latin-1 Þ)
+  0xFB02, // fl (Mac Roman 0xDF → Latin-1 ß)
+  0x0178, // Ÿ  (Mac Roman 0xD9 → Latin-1 Ù)
+]);
+
+/**
+ * Re-decode a string that was incorrectly decoded as Mac Roman when the
+ * underlying bytes were actually ISO-8859-1/Latin-1.
+ *
+ * Only applied when mojibake indicators are detected; otherwise the original
+ * string is returned unchanged to avoid corrupting legitimately encoded text.
+ */
+export function fixMacRomanMojibake(s: string): string {
+  // Quick check: is there any indicator character?
+  let hasMojibake = false;
+  for (let i = 0; i < s.length; i++) {
+    if (MOJIBAKE_INDICATORS.has(s.codePointAt(i)!)) { hasMojibake = true; break; }
+  }
+  if (!hasMojibake) return s;
+
+  // Re-map each character: look up its Mac Roman byte, then treat that byte
+  // as a Latin-1 code point.
+  const out: string[] = [];
+  for (let i = 0; i < s.length; i++) {
+    const cp = s.codePointAt(i)!;
+    const macByte = UNICODE_TO_MAC_ROMAN_BYTE.get(cp);
+    // macByte is a value in 0x80-0xFF; in Latin-1 that byte is the code point directly.
+    out.push(macByte !== undefined ? String.fromCodePoint(macByte) : s[i]);
+  }
+  return out.join("");
+}
+
 /**
  * Parse an IPTC DateCreated (YYYYMMDD or YYYY-MM-DD) + optional TimeCreated
  * (HHMMSS[±HHMM] or HH:MM:SS) into an ISO-8601 string. Returns null when the
@@ -1015,13 +1119,177 @@ function asStringArray(v: unknown): string[] {
 }
 
 /**
+/** Internal result from date-extraction helpers. */
+interface DateHit {
+  /** Base ISO-8601 date string, midnight UTC when no time was found. */
+  iso: string;
+  /** True when HH:MM:SS was actually parsed (not synthesised). */
+  hasTime: boolean;
+  /** Index in the input string where the date match ends. */
+  matchEnd: number;
+}
+
+/**
+ * Try to extract a date (and optional time) from a filename or its containing
+ * directory path when EXIF metadata is absent.
+ *
+ * Resolution order (most → least precise):
+ *   1. Full date ± time in basename  (YYYY-MM-DD, YYYYMMDD, "… at HH.MM.SS", …)
+ *   2. Year-month in basename        (YYYY-MM / YYYY_MM)
+ *   3. 4-digit year in basename      (1940 – current year)
+ *   4. Same three patterns on each directory component (innermost first)
+ *
+ * When no time is embedded, a sequence number found in the remainder of the
+ * basename is converted to HH:MM:SS so that photos with ascending filenames
+ * also sort ascending within the same day.
+ *
+ * Returns an ISO-8601 string (UTC) or null when nothing useful is found.
+ * Partial dates are anchored to the first of the month / year.
+ */
+export function extractDateFromFilename(filename: string): string | null {
+  const name = path.basename(filename, path.extname(filename));
+
+  const hit = tryFullDate(name) ?? tryYearMonth(name) ?? tryYearOnly(name);
+  if (hit) {
+    if (hit.hasTime) return hit.iso;
+    return applySequence(hit.iso, findSequenceNumber(name.slice(hit.matchEnd)));
+  }
+
+  // Walk directory components innermost-first as a last resort.
+  // When the date comes from the directory, use the full basename for the sequence.
+  const dir = path.dirname(filename);
+  if (dir && dir !== ".") {
+    for (const part of dir.split(path.sep).filter(Boolean).reverse()) {
+      const dirHit = tryFullDate(part) ?? tryYearMonth(part) ?? tryYearOnly(part);
+      if (dirHit) {
+        if (dirHit.hasTime) return dirHit.iso;
+        return applySequence(dirHit.iso, findSequenceNumber(name));
+      }
+    }
+  }
+
+  return null;
+}
+
+/** Full date (YYYY-MM-DD or YYYYMMDD) with optional time. */
+function tryFullDate(s: string): DateHit | null {
+  // ISO-like: YYYY-MM-DD / YYYY_MM_DD / YYYY.MM.DD + optional " at " / T / _ / - + HH:MM:SS
+  const isoRe = /(\d{4})[-_.](\d{2})[-_.](\d{2})(?:(?:[-_T ]| at )(\d{2})[-:_.](\d{2})[-:_.](\d{2}))?/;
+  const isoMatch = s.match(isoRe);
+  if (isoMatch) {
+    const [full, y, mo, d, h, mi, sec] = isoMatch;
+    if (isPlausibleDate(+y, +mo, +d)) {
+      const hasTime = !!(h && mi && sec && isPlausibleTime(+h, +mi, +sec));
+      const time = hasTime ? `${h}:${mi}:${sec}` : "00:00:00";
+      return {
+        iso: new Date(`${y}-${mo}-${d}T${time}.000Z`).toISOString(),
+        hasTime,
+        matchEnd: isoMatch.index! + full.length,
+      };
+    }
+  }
+
+  // Compact YYYYMMDD optionally followed by _HHMMSS / -HHMMSS / THHMMSS
+  const compactRe = /(?<!\d)(\d{4})(\d{2})(\d{2})(?:[-_T](\d{2})(\d{2})(\d{2}))?(?!\d)/;
+  const compactMatch = s.match(compactRe);
+  if (compactMatch) {
+    const [full, y, mo, d, h, mi, sec] = compactMatch;
+    if (isPlausibleDate(+y, +mo, +d)) {
+      const hasTime = !!(h && mi && sec && isPlausibleTime(+h, +mi, +sec));
+      const time = hasTime ? `${h}:${mi}:${sec}` : "00:00:00";
+      return {
+        iso: new Date(`${y}-${mo}-${d}T${time}.000Z`).toISOString(),
+        hasTime,
+        matchEnd: compactMatch.index! + full.length,
+      };
+    }
+  }
+
+  return null;
+}
+
+/** Year + month only, e.g. "Kinderturnen 2010-11" → 2010-11-01T00:00:00Z */
+function tryYearMonth(s: string): DateHit | null {
+  // YYYY-MM or YYYY_MM not followed by another separator+digit (would be full date)
+  const m = s.match(/(?<!\d)(\d{4})[-_](\d{2})(?![-_.\d])/);
+  if (m) {
+    const [full, y, mo] = m;
+    if (isPlausibleDate(+y, +mo, 1)) {
+      return {
+        iso: new Date(`${y}-${mo}-01T00:00:00.000Z`).toISOString(),
+        hasTime: false,
+        matchEnd: m.index! + full.length,
+      };
+    }
+  }
+  return null;
+}
+
+/** 4-digit year in the plausible photo range, e.g. "Urlaub 2019" → 2019-01-01T00:00:00Z */
+function tryYearOnly(s: string): DateHit | null {
+  const currentYear = new Date().getFullYear();
+  const m = s.match(/(?<!\d)(\d{4})(?!\d)/);
+  if (m) {
+    const y = +m[1];
+    if (y >= 1940 && y <= currentYear) {
+      return {
+        iso: new Date(`${y}-01-01T00:00:00.000Z`).toISOString(),
+        hasTime: false,
+        matchEnd: m.index! + m[0].length,
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Find the last run of digits in `s` that looks like a sequence counter:
+ * 1–6 digits, not a 4-digit year in the plausible photo range.
+ * Returns the numeric value, or null if nothing suitable is found.
+ */
+function findSequenceNumber(s: string): number | null {
+  const currentYear = new Date().getFullYear();
+  const groups = [...s.matchAll(/\d+/g)];
+  for (const g of groups.reverse()) {
+    const n = +g[0];
+    const len = g[0].length;
+    if (len >= 1 && len <= 6 && !(len === 4 && n >= 1940 && n <= currentYear)) {
+      return n;
+    }
+  }
+  return null;
+}
+
+/**
+ * Replace the midnight time in an ISO date string with one derived from a
+ * sequence number so that ascending filenames produce ascending timestamps.
+ * `seq % 86400` maps any counter to a valid HH:MM:SS within one day.
+ */
+function applySequence(iso: string, seq: number | null): string {
+  if (seq === null) return iso;
+  const totalSec = seq % 86400;
+  const h = Math.floor(totalSec / 3600).toString().padStart(2, "0");
+  const m = Math.floor((totalSec % 3600) / 60).toString().padStart(2, "0");
+  const s = (totalSec % 60).toString().padStart(2, "0");
+  return `${iso.slice(0, 10)}T${h}:${m}:${s}.000Z`;
+}
+
+function isPlausibleDate(y: number, m: number, d: number): boolean {
+  return y >= 1900 && y <= 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31;
+}
+
+function isPlausibleTime(h: number, m: number, s: number): boolean {
+  return h <= 23 && m <= 59 && s <= 59;
+}
+
+/**
  * Extract EXIF, IPTC and XMP metadata from an image file. Exported for tests.
  *
  * Always returns a defined object — on parse errors every field falls back to
  * its "not present" value (null / empty array) so callers don't need to handle
  * exceptions.
  */
-export async function getExifMetadata(filePath: string): Promise<ExifMetadata> {
+export async function getExifMetadata(filePath: string, originalFilename?: string): Promise<ExifMetadata> {
   const empty: ExifMetadata = {
     takenAt: null,
     latitude: null,
@@ -1050,43 +1318,57 @@ export async function getExifMetadata(filePath: string): Promise<ExifMetadata> {
       // Fall back to IPTC DateCreated/TimeCreated when EXIF timestamps are missing.
       takenAt = parseIptcDate(data?.DateCreated, data?.TimeCreated);
     }
+    // Last resort: parse a date from the original filename when all metadata is absent.
+    // Combine originalFilename (correct basename) with the directory of filePath so that
+    // parent directories like "2011-12-22 Yra" are still visible to the parser.
+    if (!takenAt) {
+      const pathToSearch = originalFilename
+        ? path.join(path.dirname(filePath), originalFilename)
+        : filePath;
+      takenAt = extractDateFromFilename(pathToSearch);
+    }
     // Description — prefer EXIF/XMP fields, fall back to IPTC Caption-Abstract.
     // exifr normalizes XMP dc:description to lowercase `description`.
-    const description: string | null =
+    const fix = (s: string | null) => (s ? fixMacRomanMojibake(s) : null);
+    const description: string | null = fix(
       asString(data?.ImageDescription) ??
       asString(data?.Description) ??
       asString(data?.description) ??
       asString(data?.UserComment) ??
       asString(data?.Caption) ??
       asString(data?.["Caption-Abstract"]) ??
-      null;
+      null
+    );
     // Keywords — IPTC Keywords or XMP dc:subject (exifr emits `subject`).
     const keywords = asStringArray(
       data?.Keywords ?? data?.subject
-    );
-    const author =
+    ).map(k => fixMacRomanMojibake(k));
+    const author = fix(
       asString(data?.Byline) ??
       asString(data?.["By-line"]) ??
       asString(data?.Artist) ??
       asString(data?.Creator) ??
       asString(data?.creator) ??
-      null;
-    const headline = asString(data?.Headline);
+      null
+    );
+    const headline = fix(asString(data?.Headline));
     // XMP dc:title — exifr normalises to lowercase `title`.
-    const title = asString(data?.title);
-    const copyright =
+    const title = fix(asString(data?.title));
+    const copyright = fix(
       asString(data?.CopyrightNotice) ??
       asString(data?.Copyright) ??
       asString(data?.Rights) ??
       asString(data?.rights) ??
-      null;
-    const credit = asString(data?.Credit);
-    const city = asString(data?.City);
-    const state = asString(data?.["Province-State"]) ?? asString(data?.State);
-    const country =
+      null
+    );
+    const credit = fix(asString(data?.Credit));
+    const city = fix(asString(data?.City));
+    const state = fix(asString(data?.["Province-State"]) ?? asString(data?.State));
+    const country = fix(
       asString(data?.["Country-PrimaryLocationName"]) ??
       asString(data?.Country) ??
-      null;
+      null
+    );
     const rating = parseXmpRating(data?.Rating ?? data?.rating);
     return {
       takenAt,
@@ -1337,7 +1619,7 @@ export async function uploadPhotoStream(
   const digest = hash.digest('hex');
 
   // Extraction of EXIF data (date + GPS) after the file is saved
-  const exifMeta = await getExifMetadata(tempPath);
+  const exifMeta = await getExifMetadata(tempPath, originalName);
 
   // Check for duplicate for this user
   const existing = await dbFirst<typeof photos.$inferSelect>(
@@ -1448,7 +1730,7 @@ export async function uploadPhotoLogic(
   fs.writeFileSync(tempPath, file.data);
 
   // Extraction of EXIF data (date + GPS)
-  const exifMeta2 = await getExifMetadata(tempPath);
+  const exifMeta2 = await getExifMetadata(tempPath, file.name);
 
   // Move the file into its final YYYY/YYYY-MM/YYYY-MM-DD_at_HH.MM.SS_NN.ext slot.
   const storageTs2 = pickStorageTimestamp(exifMeta2.takenAt);
@@ -2164,7 +2446,7 @@ export async function refreshPhotoMetadataLogic(userId: number, photoId: number)
     throw new Error("File not found on disk");
   }
 
-  const exifMeta = await getExifMetadata(filePath);
+  const exifMeta = await getExifMetadata(filePath, photo.original_name);
 
   // Always update, even if takenAt is null (to sync with current logic if it was different before).
   // Description falls back to the IPTC Headline when no caption was written.
