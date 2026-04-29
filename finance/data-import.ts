@@ -469,8 +469,10 @@ async function importAccounts(
       // (account_number, label) so the same physical wallet imported
       // twice doesn't duplicate.
       idByKey.set(manualAccountKey(row.account_number, row.label), row.id);
-      idByKey.set(`manual::${row.account_number}`, row.id);
     }
+    // All accounts (manual and linked) are reachable by account_number alone
+    // so that transactions without IBAN context can still find their parent.
+    idByKey.set(`manual::${row.account_number}`, row.id);
     if (row.iban) idByIban.set(row.iban, row.id);
   }
 
@@ -508,8 +510,8 @@ async function importAccounts(
         idByKey.set(accountKey(String(bcId), r.account_number), finalId);
       } else {
         idByKey.set(manualAccountKey(r.account_number, r.label), finalId);
-        idByKey.set(`manual::${r.account_number}`, finalId);
       }
+      idByKey.set(`manual::${r.account_number}`, finalId);
       if (r.iban) idByIban.set(r.iban, finalId);
       continue;
     }
@@ -566,10 +568,11 @@ async function importAccounts(
         idByKey.set(accountKey(String(bcId), r.account_number), inserted.id);
       } else {
         idByKey.set(manualAccountKey(r.account_number, r.label), inserted.id);
-        // Stage 3 (transactions) uses the simpler manual::<number> key
-        // when the row has no iban/bankcontact context.
-        idByKey.set(`manual::${r.account_number}`, inserted.id);
       }
+      // Stage 3 (transactions) uses the simpler manual::<number> key for
+      // accounts without an IBAN — both cash wallets and bankcontact-linked
+      // accounts that happen to have no IBAN in Finanzkraft.
+      idByKey.set(`manual::${r.account_number}`, inserted.id);
       if (r.iban) idByIban.set(r.iban, inserted.id);
       counts.accounts++;
     } catch (err: any) {
