@@ -187,18 +187,7 @@ async function saveConfig() {
 <template>
   <div class="page">
     <header class="page-header">
-      <h1 v-if="store.data?.user_email">
-        Übersicht für {{ store.data.user_email }}
-      </h1>
-      <h1 v-else>Übersicht</h1>
-      <Button
-        icon="pi pi-cog"
-        label="Übersicht konfigurieren"
-        severity="secondary"
-        text
-        :disabled="!store.data"
-        @click="openConfig"
-      />
+      <h1>Übersicht</h1>
     </header>
 
     <Message v-if="store.error" severity="error" :closable="false">
@@ -268,31 +257,16 @@ async function saveConfig() {
         </ul>
       </section>
 
-      <section
-        v-if="store.data.unassigned.length > 0"
-        class="overview-section overview-unassigned"
-      >
-        <h2>Nicht zugeordnet</h2>
-        <ul class="account-card">
-          <li
-            v-for="acc in store.data.unassigned"
-            :key="acc.id"
-            class="account-row"
-            @click="openAccount(acc)"
-          >
-            <div class="row-left">
-              <div class="row-title">
-                <span class="row-label">{{ acc.label }}</span>
-                <span v-if="acc.pending_count > 0" class="row-badge">
-                  {{ acc.pending_count }}
-                </span>
-              </div>
-              <div class="row-sub">{{ formatUpdatedAt(acc.balance_as_of) }}</div>
-            </div>
-            <div :class="balanceClass(acc)">{{ formatBalance(acc) }}</div>
-          </li>
-        </ul>
-      </section>
+      <div class="config-button-row">
+        <Button
+          icon="pi pi-cog"
+          label="Übersicht konfigurieren"
+          severity="secondary"
+          text
+          :disabled="!store.data"
+          @click="openConfig"
+        />
+      </div>
     </template>
 
     <Dialog
@@ -549,8 +523,10 @@ async function saveConfig() {
 .balance-neutral {
   color: var(--p-text-muted-color);
 }
-.overview-unassigned h2 {
-  color: var(--p-text-muted-color);
+.config-button-row {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 0.5rem;
 }
 /* ----- Dialog ----- */
 .hint {
