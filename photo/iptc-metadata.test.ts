@@ -422,16 +422,40 @@ describe("IPTC writeback round-trip", () => {
 });
 
 describe("extractDateFromFilename", () => {
-  it("parses ISO-like YYYY-MM-DD", () => {
+  it("parses ISO-like YYYY-MM-DD without time → midnight UTC", () => {
     const r = extractDateFromFilename("2023-12-25_photo.jpg");
     expect(r).not.toBeNull();
     const d = new Date(r!);
     expect(d.getUTCFullYear()).toBe(2023);
     expect(d.getUTCMonth() + 1).toBe(12);
     expect(d.getUTCDate()).toBe(25);
+    expect(d.getUTCHours()).toBe(0);
+    expect(d.getUTCMinutes()).toBe(0);
   });
 
-  it("parses underscore-separated YYYY_MM_DD", () => {
+  it("parses ISO-like YYYY-MM-DD_HH-MM-SS with time", () => {
+    const r = extractDateFromFilename("2023-12-25_14-30-22.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2023);
+    expect(d.getUTCMonth() + 1).toBe(12);
+    expect(d.getUTCDate()).toBe(25);
+    expect(d.getUTCHours()).toBe(14);
+    expect(d.getUTCMinutes()).toBe(30);
+    expect(d.getUTCSeconds()).toBe(22);
+  });
+
+  it("parses Screenshot_2023-12-25-14-30-22 style", () => {
+    const r = extractDateFromFilename("Screenshot_2023-12-25-14-30-22.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2023);
+    expect(d.getUTCHours()).toBe(14);
+    expect(d.getUTCMinutes()).toBe(30);
+    expect(d.getUTCSeconds()).toBe(22);
+  });
+
+  it("parses underscore-separated YYYY_MM_DD without time", () => {
     const r = extractDateFromFilename("photo_2021_06_15.jpg");
     expect(r).not.toBeNull();
     const d = new Date(r!);
@@ -440,22 +464,26 @@ describe("extractDateFromFilename", () => {
     expect(d.getUTCDate()).toBe(15);
   });
 
-  it("parses compact YYYYMMDD in IMG_20231225_143022", () => {
+  it("parses compact IMG_20231225_143022 with time", () => {
     const r = extractDateFromFilename("IMG_20231225_143022.jpg");
     expect(r).not.toBeNull();
     const d = new Date(r!);
     expect(d.getUTCFullYear()).toBe(2023);
     expect(d.getUTCMonth() + 1).toBe(12);
     expect(d.getUTCDate()).toBe(25);
+    expect(d.getUTCHours()).toBe(14);
+    expect(d.getUTCMinutes()).toBe(30);
+    expect(d.getUTCSeconds()).toBe(22);
   });
 
-  it("parses WhatsApp-style IMG-20231225-WA0001", () => {
+  it("parses WhatsApp-style IMG-20231225-WA0001 (no time)", () => {
     const r = extractDateFromFilename("IMG-20231225-WA0001.jpg");
     expect(r).not.toBeNull();
     const d = new Date(r!);
     expect(d.getUTCFullYear()).toBe(2023);
     expect(d.getUTCMonth() + 1).toBe(12);
     expect(d.getUTCDate()).toBe(25);
+    expect(d.getUTCHours()).toBe(0);
   });
 
   it("returns null for generic names without dates", () => {
@@ -466,5 +494,13 @@ describe("extractDateFromFilename", () => {
 
   it("returns null for implausible month/day", () => {
     expect(extractDateFromFilename("20231399.jpg")).toBeNull();
+  });
+
+  it("ignores implausible time and falls back to midnight", () => {
+    const r = extractDateFromFilename("IMG_20231225_256099.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCDate()).toBe(25);
+    expect(d.getUTCHours()).toBe(0);
   });
 });

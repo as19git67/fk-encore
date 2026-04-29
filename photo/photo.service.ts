@@ -1016,30 +1016,41 @@ function asStringArray(v: unknown): string[] {
 
 /**
 /**
- * Try to extract a date from a filename when EXIF metadata is absent.
- * Recognises ISO-like patterns (YYYY-MM-DD, YYYY_MM_DD, YYYY.MM.DD) and
- * compact 8-digit runs (YYYYMMDD) that are common in camera/phone naming
- * schemes (e.g. IMG_20231225_143022.jpg, 2023-12-25_photo.jpg).
- * Returns an ISO-8601 string (midnight UTC) or null when nothing useful found.
+ * Try to extract a date (and optional time) from a filename when EXIF metadata
+ * is absent. Recognises ISO-like patterns (YYYY-MM-DD, YYYY_MM_DD, YYYY.MM.DD)
+ * optionally followed by a time component (HH-MM-SS, HH_MM_SS, HHMMSS), and
+ * compact 8-digit runs (YYYYMMDD) optionally followed by 6-digit time (HHMMSS).
+ * Common examples: IMG_20231225_143022.jpg, 2023-12-25_14-30-22.jpg,
+ *   Screenshot_2023-12-25-14-30-22.jpg, IMG-20231225-WA0001.jpg.
+ * Returns an ISO-8601 string (UTC) or null when nothing useful found.
  */
 export function extractDateFromFilename(filename: string): string | null {
   const name = path.basename(filename, path.extname(filename));
 
-  // ISO-like: YYYY-MM-DD / YYYY_MM_DD / YYYY.MM.DD
-  const isoMatch = name.match(/(\d{4})[-_.](\d{2})[-_.](\d{2})/);
+  // ISO-like date: YYYY-MM-DD / YYYY_MM_DD / YYYY.MM.DD
+  // Optionally followed by separator + HH-MM-SS / HH_MM_SS / HH.MM.SS / HHMMSS
+  const isoMatch = name.match(
+    /(\d{4})[-_.](\d{2})[-_.](\d{2})(?:[-_T ](\d{2})[-:_.](\d{2})[-:_.](\d{2}))?/
+  );
   if (isoMatch) {
-    const [, y, m, d] = isoMatch;
-    if (isPlausibleDate(+y, +m, +d)) {
-      return new Date(`${y}-${m}-${d}T00:00:00.000Z`).toISOString();
+    const [, y, mo, d, h, mi, s] = isoMatch;
+    if (isPlausibleDate(+y, +mo, +d)) {
+      const time = h && mi && s && isPlausibleTime(+h, +mi, +s)
+        ? `${h}:${mi}:${s}`
+        : "00:00:00";
+      return new Date(`${y}-${mo}-${d}T${time}.000Z`).toISOString();
     }
   }
 
-  // Compact: YYYYMMDD not surrounded by other digits
-  const compactMatch = name.match(/(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)/);
+  // Compact YYYYMMDD optionally followed by _HHMMSS or -HHMMSS or THHMMSS
+  const compactMatch = name.match(/(?<!\d)(\d{4})(\d{2})(\d{2})(?:[-_T](\d{2})(\d{2})(\d{2}))?(?!\d)/);
   if (compactMatch) {
-    const [, y, m, d] = compactMatch;
-    if (isPlausibleDate(+y, +m, +d)) {
-      return new Date(`${y}-${m}-${d}T00:00:00.000Z`).toISOString();
+    const [, y, mo, d, h, mi, s] = compactMatch;
+    if (isPlausibleDate(+y, +mo, +d)) {
+      const time = h && mi && s && isPlausibleTime(+h, +mi, +s)
+        ? `${h}:${mi}:${s}`
+        : "00:00:00";
+      return new Date(`${y}-${mo}-${d}T${time}.000Z`).toISOString();
     }
   }
 
@@ -1048,6 +1059,10 @@ export function extractDateFromFilename(filename: string): string | null {
 
 function isPlausibleDate(y: number, m: number, d: number): boolean {
   return y >= 1900 && y <= 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31;
+}
+
+function isPlausibleTime(h: number, m: number, s: number): boolean {
+  return h <= 23 && m <= 59 && s <= 59;
 }
 
 /**
