@@ -7,6 +7,8 @@ import sharp from "sharp";
 import { exiftool } from "exiftool-vendored";
 import {
   combineDescription,
+  extractDateFromFilename,
+  fixMacRomanMojibake,
   getExifMetadata,
   iptcLocationUpdate,
   mergeRatingKeyword,
@@ -417,5 +419,232 @@ describe("IPTC writeback round-trip", () => {
     // Should match year/month/day regardless of local timezone handling.
     const d = new Date(meta.takenAt!);
     expect(d.getUTCFullYear()).toBe(2022);
+  });
+});
+
+describe("extractDateFromFilename", () => {
+  it("parses ISO-like YYYY-MM-DD without time → midnight UTC", () => {
+    const r = extractDateFromFilename("2023-12-25_photo.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2023);
+    expect(d.getUTCMonth() + 1).toBe(12);
+    expect(d.getUTCDate()).toBe(25);
+    expect(d.getUTCHours()).toBe(0);
+    expect(d.getUTCMinutes()).toBe(0);
+  });
+
+  it("parses ISO-like YYYY-MM-DD_HH-MM-SS with time", () => {
+    const r = extractDateFromFilename("2023-12-25_14-30-22.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2023);
+    expect(d.getUTCMonth() + 1).toBe(12);
+    expect(d.getUTCDate()).toBe(25);
+    expect(d.getUTCHours()).toBe(14);
+    expect(d.getUTCMinutes()).toBe(30);
+    expect(d.getUTCSeconds()).toBe(22);
+  });
+
+  it("parses Screenshot_2023-12-25-14-30-22 style", () => {
+    const r = extractDateFromFilename("Screenshot_2023-12-25-14-30-22.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2023);
+    expect(d.getUTCHours()).toBe(14);
+    expect(d.getUTCMinutes()).toBe(30);
+    expect(d.getUTCSeconds()).toBe(22);
+  });
+
+  it("parses underscore-separated YYYY_MM_DD without time", () => {
+    const r = extractDateFromFilename("photo_2021_06_15.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2021);
+    expect(d.getUTCMonth() + 1).toBe(6);
+    expect(d.getUTCDate()).toBe(15);
+  });
+
+  it("parses compact IMG_20231225_143022 with time", () => {
+    const r = extractDateFromFilename("IMG_20231225_143022.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2023);
+    expect(d.getUTCMonth() + 1).toBe(12);
+    expect(d.getUTCDate()).toBe(25);
+    expect(d.getUTCHours()).toBe(14);
+    expect(d.getUTCMinutes()).toBe(30);
+    expect(d.getUTCSeconds()).toBe(22);
+  });
+
+  it("parses WhatsApp-style IMG-20231225-WA0001 (no time)", () => {
+    const r = extractDateFromFilename("IMG-20231225-WA0001.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2023);
+    expect(d.getUTCMonth() + 1).toBe(12);
+    expect(d.getUTCDate()).toBe(25);
+    expect(d.getUTCHours()).toBe(0);
+  });
+
+  it("returns null for generic names without dates", () => {
+    expect(extractDateFromFilename("IMG_1234.jpg")).toBeNull();
+    expect(extractDateFromFilename("photo.jpg")).toBeNull();
+    expect(extractDateFromFilename("DSC00123.jpg")).toBeNull();
+  });
+
+  it("returns null for implausible month/day", () => {
+    expect(extractDateFromFilename("20231399.jpg")).toBeNull();
+  });
+
+  it('parses "YYYY-MM-DD at HH.MM.SS" style', () => {
+    const r = extractDateFromFilename("2013-01-27 at 06.11.33-28.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2013);
+    expect(d.getUTCMonth() + 1).toBe(1);
+    expect(d.getUTCDate()).toBe(27);
+    expect(d.getUTCHours()).toBe(6);
+    expect(d.getUTCMinutes()).toBe(11);
+    expect(d.getUTCSeconds()).toBe(33);
+  });
+
+  it("ignores implausible time and falls back to midnight", () => {
+    const r = extractDateFromFilename("IMG_20231225_256099.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCDate()).toBe(25);
+    expect(d.getUTCHours()).toBe(0);
+  });
+
+  it("parses year-month from filename", () => {
+    const r = extractDateFromFilename("Kinderturnen TSV Merching 2010-11.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2010);
+    expect(d.getUTCMonth() + 1).toBe(11);
+    expect(d.getUTCDate()).toBe(1);
+    // No sequence number in name → midnight
+    expect(d.getUTCHours()).toBe(0);
+    expect(d.getUTCMinutes()).toBe(0);
+  });
+
+  it("parses year-only from filename", () => {
+    const r = extractDateFromFilename("Sommerurlaub 2019.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2019);
+    expect(d.getUTCMonth() + 1).toBe(1);
+    expect(d.getUTCDate()).toBe(1);
+  });
+
+  it("ignores year-only outside photo range", () => {
+    expect(extractDateFromFilename("report_1234.jpg")).toBeNull();
+    expect(extractDateFromFilename("future_2199.jpg")).toBeNull();
+  });
+
+  it("falls back to directory year-month when basename has no date", () => {
+    const r = extractDateFromFilename("/photos/2015-06/IMG_1234.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2015);
+    expect(d.getUTCMonth() + 1).toBe(6);
+  });
+
+  it("falls back to directory year when basename has no date", () => {
+    const r = extractDateFromFilename("/photos/2017/IMG_1234.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2017);
+  });
+
+  it("prefers basename date over directory date", () => {
+    const r = extractDateFromFilename("/photos/2017/IMG_20231225_143022.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2023);
+  });
+
+  it("reads date from subdirectory name when basename has none", () => {
+    // Simulates: external_path dir = /library/9/2011-12-22 Yra, basename = IMG_0115.JPG
+    const r = extractDateFromFilename("/library/9/2011-12-22 Yra/IMG_0115.JPG");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2011);
+    expect(d.getUTCMonth() + 1).toBe(12);
+    expect(d.getUTCDate()).toBe(22);
+  });
+
+  it("derives ascending time from sequence number after date in basename", () => {
+    const r1 = extractDateFromFilename("IMG_20231225_0001.jpg");
+    const r2 = extractDateFromFilename("IMG_20231225_0002.jpg");
+    const r3 = extractDateFromFilename("IMG_20231225_0042.jpg");
+    expect(r1).not.toBeNull();
+    expect(r2).not.toBeNull();
+    expect(r3).not.toBeNull();
+    expect(new Date(r1!).getTime()).toBeLessThan(new Date(r2!).getTime());
+    expect(new Date(r2!).getTime()).toBeLessThan(new Date(r3!).getTime());
+    // All on the same day
+    expect(new Date(r1!).toISOString().slice(0, 10)).toBe("2023-12-25");
+    expect(new Date(r3!).toISOString().slice(0, 10)).toBe("2023-12-25");
+  });
+
+  it("derives time from sequence when date comes from directory", () => {
+    const r1 = extractDateFromFilename("/photos/2017/DSC_0001.jpg");
+    const r2 = extractDateFromFilename("/photos/2017/DSC_0002.jpg");
+    expect(r1).not.toBeNull();
+    expect(r2).not.toBeNull();
+    expect(new Date(r1!).getTime()).toBeLessThan(new Date(r2!).getTime());
+  });
+
+  it("does not use sequence when explicit time was parsed", () => {
+    const r = extractDateFromFilename("IMG_20231225_143022.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCHours()).toBe(14);
+    expect(d.getUTCMinutes()).toBe(30);
+    expect(d.getUTCSeconds()).toBe(22);
+  });
+});
+
+describe("fixMacRomanMojibake", () => {
+  it("fixes ä (0xE4 Latin-1 decoded as Mac Roman ‰)", () => {
+    expect(fixMacRomanMojibake("vollst‰ndig")).toBe("vollständig");
+  });
+
+  it("fixes ö (0xF6 Latin-1 decoded as Mac Roman ˆ)", () => {
+    expect(fixMacRomanMojibake("rˆmisch")).toBe("römisch");
+  });
+
+  it("fixes the full example string from the issue", () => {
+    const input =
+      "ca. 50 n. Chr. entstandener, vollst‰ndig erhaltender " +
+      "nordwestlicher Eckturm der rˆmischen Stadtmauer";
+    const expected =
+      "ca. 50 n. Chr. entstandener, vollständig erhaltender " +
+      "nordwestlicher Eckturm der römischen Stadtmauer";
+    expect(fixMacRomanMojibake(input)).toBe(expected);
+  });
+
+  it("fixes ü (0xFC Latin-1 decoded as Mac Roman ¸)", () => {
+    expect(fixMacRomanMojibake("M¸nchen")).toBe("München");
+  });
+
+  it("fixes Ä (0xC4 Latin-1 decoded as Mac Roman ƒ)", () => {
+    expect(fixMacRomanMojibake("ƒgypten")).toBe("Ägypten");
+  });
+
+  it("leaves clean UTF-8 strings unchanged", () => {
+    const clean = "Schönes Foto aus München";
+    expect(fixMacRomanMojibake(clean)).toBe(clean);
+  });
+
+  it("leaves ASCII strings unchanged", () => {
+    const ascii = "Hello World 2023";
+    expect(fixMacRomanMojibake(ascii)).toBe(ascii);
+  });
+
+  it("returns empty string unchanged", () => {
+    expect(fixMacRomanMojibake("")).toBe("");
   });
 });
