@@ -523,6 +523,9 @@ describe("extractDateFromFilename", () => {
     expect(d.getUTCFullYear()).toBe(2010);
     expect(d.getUTCMonth() + 1).toBe(11);
     expect(d.getUTCDate()).toBe(1);
+    // No sequence number in name → midnight
+    expect(d.getUTCHours()).toBe(0);
+    expect(d.getUTCMinutes()).toBe(0);
   });
 
   it("parses year-only from filename", () => {
@@ -559,5 +562,36 @@ describe("extractDateFromFilename", () => {
     expect(r).not.toBeNull();
     const d = new Date(r!);
     expect(d.getUTCFullYear()).toBe(2023);
+  });
+
+  it("derives ascending time from sequence number after date in basename", () => {
+    const r1 = extractDateFromFilename("IMG_20231225_0001.jpg");
+    const r2 = extractDateFromFilename("IMG_20231225_0002.jpg");
+    const r3 = extractDateFromFilename("IMG_20231225_0042.jpg");
+    expect(r1).not.toBeNull();
+    expect(r2).not.toBeNull();
+    expect(r3).not.toBeNull();
+    expect(new Date(r1!).getTime()).toBeLessThan(new Date(r2!).getTime());
+    expect(new Date(r2!).getTime()).toBeLessThan(new Date(r3!).getTime());
+    // All on the same day
+    expect(new Date(r1!).toISOString().slice(0, 10)).toBe("2023-12-25");
+    expect(new Date(r3!).toISOString().slice(0, 10)).toBe("2023-12-25");
+  });
+
+  it("derives time from sequence when date comes from directory", () => {
+    const r1 = extractDateFromFilename("/photos/2017/DSC_0001.jpg");
+    const r2 = extractDateFromFilename("/photos/2017/DSC_0002.jpg");
+    expect(r1).not.toBeNull();
+    expect(r2).not.toBeNull();
+    expect(new Date(r1!).getTime()).toBeLessThan(new Date(r2!).getTime());
+  });
+
+  it("does not use sequence when explicit time was parsed", () => {
+    const r = extractDateFromFilename("IMG_20231225_143022.jpg");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCHours()).toBe(14);
+    expect(d.getUTCMinutes()).toBe(30);
+    expect(d.getUTCSeconds()).toBe(22);
   });
 });

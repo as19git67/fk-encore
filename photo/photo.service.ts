@@ -1015,6 +1015,16 @@ function asStringArray(v: unknown): string[] {
 }
 
 /**
+/** Internal result from date-extraction helpers. */
+interface DateHit {
+  /** Base ISO-8601 date string, midnight UTC when no time was found. */
+  iso: string;
+  /** True when HH:MM:SS was actually parsed (not synthesised). */
+  hasTime: boolean;
+  /** Index in the input string where the date match ends. */
+  matchEnd: number;
+}
+
 /**
  * Try to extract a date (and optional time) from a filename or its containing
  * directory path when EXIF metadata is absent.
@@ -1025,21 +1035,32 @@ function asStringArray(v: unknown): string[] {
  *   3. 4-digit year in basename      (1940 – current year)
  *   4. Same three patterns on each directory component (innermost first)
  *
+ * When no time is embedded, a sequence number found in the remainder of the
+ * basename is converted to HH:MM:SS so that photos with ascending filenames
+ * also sort ascending within the same day.
+ *
  * Returns an ISO-8601 string (UTC) or null when nothing useful is found.
- * Partial dates are anchored to the first of the month / year at midnight.
+ * Partial dates are anchored to the first of the month / year.
  */
 export function extractDateFromFilename(filename: string): string | null {
   const name = path.basename(filename, path.extname(filename));
 
-  const fromName = tryFullDate(name) ?? tryYearMonth(name) ?? tryYearOnly(name);
-  if (fromName) return fromName;
+  const hit = tryFullDate(name) ?? tryYearMonth(name) ?? tryYearOnly(name);
+  if (hit) {
+    if (hit.hasTime) return hit.iso;
+    return applySequence(hit.iso, findSequenceNumber(name.slice(hit.matchEnd)));
+  }
 
   // Walk directory components innermost-first as a last resort.
+  // When the date comes from the directory, use the full basename for the sequence.
   const dir = path.dirname(filename);
   if (dir && dir !== ".") {
     for (const part of dir.split(path.sep).filter(Boolean).reverse()) {
-      const fromDir = tryFullDate(part) ?? tryYearMonth(part) ?? tryYearOnly(part);
-      if (fromDir) return fromDir;
+      const dirHit = tryFullDate(part) ?? tryYearMonth(part) ?? tryYearOnly(part);
+      if (dirHit) {
+        if (dirHit.hasTime) return dirHit.iso;
+        return applySequence(dirHit.iso, findSequenceNumber(name));
+      }
     }
   }
 
@@ -1047,30 +1068,36 @@ export function extractDateFromFilename(filename: string): string | null {
 }
 
 /** Full date (YYYY-MM-DD or YYYYMMDD) with optional time. */
-function tryFullDate(s: string): string | null {
+function tryFullDate(s: string): DateHit | null {
   // ISO-like: YYYY-MM-DD / YYYY_MM_DD / YYYY.MM.DD + optional " at " / T / _ / - + HH:MM:SS
-  const isoMatch = s.match(
-    /(\d{4})[-_.](\d{2})[-_.](\d{2})(?:(?:[-_T ]| at )(\d{2})[-:_.](\d{2})[-:_.](\d{2}))?/
-  );
+  const isoRe = /(\d{4})[-_.](\d{2})[-_.](\d{2})(?:(?:[-_T ]| at )(\d{2})[-:_.](\d{2})[-:_.](\d{2}))?/;
+  const isoMatch = s.match(isoRe);
   if (isoMatch) {
-    const [, y, mo, d, h, mi, sec] = isoMatch;
+    const [full, y, mo, d, h, mi, sec] = isoMatch;
     if (isPlausibleDate(+y, +mo, +d)) {
-      const time = h && mi && sec && isPlausibleTime(+h, +mi, +sec)
-        ? `${h}:${mi}:${sec}`
-        : "00:00:00";
-      return new Date(`${y}-${mo}-${d}T${time}.000Z`).toISOString();
+      const hasTime = !!(h && mi && sec && isPlausibleTime(+h, +mi, +sec));
+      const time = hasTime ? `${h}:${mi}:${sec}` : "00:00:00";
+      return {
+        iso: new Date(`${y}-${mo}-${d}T${time}.000Z`).toISOString(),
+        hasTime,
+        matchEnd: isoMatch.index! + full.length,
+      };
     }
   }
 
   // Compact YYYYMMDD optionally followed by _HHMMSS / -HHMMSS / THHMMSS
-  const compactMatch = s.match(/(?<!\d)(\d{4})(\d{2})(\d{2})(?:[-_T](\d{2})(\d{2})(\d{2}))?(?!\d)/);
+  const compactRe = /(?<!\d)(\d{4})(\d{2})(\d{2})(?:[-_T](\d{2})(\d{2})(\d{2}))?(?!\d)/;
+  const compactMatch = s.match(compactRe);
   if (compactMatch) {
-    const [, y, mo, d, h, mi, sec] = compactMatch;
+    const [full, y, mo, d, h, mi, sec] = compactMatch;
     if (isPlausibleDate(+y, +mo, +d)) {
-      const time = h && mi && sec && isPlausibleTime(+h, +mi, +sec)
-        ? `${h}:${mi}:${sec}`
-        : "00:00:00";
-      return new Date(`${y}-${mo}-${d}T${time}.000Z`).toISOString();
+      const hasTime = !!(h && mi && sec && isPlausibleTime(+h, +mi, +sec));
+      const time = hasTime ? `${h}:${mi}:${sec}` : "00:00:00";
+      return {
+        iso: new Date(`${y}-${mo}-${d}T${time}.000Z`).toISOString(),
+        hasTime,
+        matchEnd: compactMatch.index! + full.length,
+      };
     }
   }
 
@@ -1078,29 +1105,69 @@ function tryFullDate(s: string): string | null {
 }
 
 /** Year + month only, e.g. "Kinderturnen 2010-11" → 2010-11-01T00:00:00Z */
-function tryYearMonth(s: string): string | null {
+function tryYearMonth(s: string): DateHit | null {
   // YYYY-MM or YYYY_MM not followed by another separator+digit (would be full date)
   const m = s.match(/(?<!\d)(\d{4})[-_](\d{2})(?![-_.\d])/);
   if (m) {
-    const [, y, mo] = m;
+    const [full, y, mo] = m;
     if (isPlausibleDate(+y, +mo, 1)) {
-      return new Date(`${y}-${mo}-01T00:00:00.000Z`).toISOString();
+      return {
+        iso: new Date(`${y}-${mo}-01T00:00:00.000Z`).toISOString(),
+        hasTime: false,
+        matchEnd: m.index! + full.length,
+      };
     }
   }
   return null;
 }
 
 /** 4-digit year in the plausible photo range, e.g. "Urlaub 2019" → 2019-01-01T00:00:00Z */
-function tryYearOnly(s: string): string | null {
+function tryYearOnly(s: string): DateHit | null {
   const currentYear = new Date().getFullYear();
   const m = s.match(/(?<!\d)(\d{4})(?!\d)/);
   if (m) {
     const y = +m[1];
     if (y >= 1940 && y <= currentYear) {
-      return new Date(`${y}-01-01T00:00:00.000Z`).toISOString();
+      return {
+        iso: new Date(`${y}-01-01T00:00:00.000Z`).toISOString(),
+        hasTime: false,
+        matchEnd: m.index! + m[0].length,
+      };
     }
   }
   return null;
+}
+
+/**
+ * Find the last run of digits in `s` that looks like a sequence counter:
+ * 1–6 digits, not a 4-digit year in the plausible photo range.
+ * Returns the numeric value, or null if nothing suitable is found.
+ */
+function findSequenceNumber(s: string): number | null {
+  const currentYear = new Date().getFullYear();
+  const groups = [...s.matchAll(/\d+/g)];
+  for (const g of groups.reverse()) {
+    const n = +g[0];
+    const len = g[0].length;
+    if (len >= 1 && len <= 6 && !(len === 4 && n >= 1940 && n <= currentYear)) {
+      return n;
+    }
+  }
+  return null;
+}
+
+/**
+ * Replace the midnight time in an ISO date string with one derived from a
+ * sequence number so that ascending filenames produce ascending timestamps.
+ * `seq % 86400` maps any counter to a valid HH:MM:SS within one day.
+ */
+function applySequence(iso: string, seq: number | null): string {
+  if (seq === null) return iso;
+  const totalSec = seq % 86400;
+  const h = Math.floor(totalSec / 3600).toString().padStart(2, "0");
+  const m = Math.floor((totalSec % 3600) / 60).toString().padStart(2, "0");
+  const s = (totalSec % 60).toString().padStart(2, "0");
+  return `${iso.slice(0, 10)}T${h}:${m}:${s}.000Z`;
 }
 
 function isPlausibleDate(y: number, m: number, d: number): boolean {
