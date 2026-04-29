@@ -17,6 +17,9 @@ services:
       start_period: 20s
 
   # ── Embedding Service (CLIP + DINOv2) ──────────────────────────────────────
+  # Models live in the `embedding_models` volume (see docker-compose.yml for
+  # the full rationale). Pre-populate before first start with:
+  #   docker compose run --rm embedding_service /usr/local/bin/download_model.sh
   embedding_service:
     ports:
       - "8001:8000"
@@ -37,12 +40,18 @@ services:
       DINO_MODEL_NAME: facebook/dinov2-base
       LOG_LEVEL: INFO
       EMBED_NUM_THREADS: "6"
+      # See docker-compose.yml for the rationale; defaults to torch.
+      EMBED_BACKEND: ${EMBED_BACKEND:-torch}
+    volumes:
+      - embedding_models:/models
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 20s
       timeout: 10s
       retries: 5
-      start_period: 120s
+      # Cold-cache first start downloads ~5.5 GB of models before the
+      # service becomes healthy. See docker-compose.yml for details.
+      start_period: 600s
 
   # ── Landmark Detection Service (Grounding DINO) ────────────────────────────
   landmark:
@@ -85,5 +94,11 @@ volumes:
     driver: local
     driver_opts:
       device: /Users/anton/fk-encore_data/pgdata
+      o: bind
+      type: none
+  embedding_models:
+    driver: local
+    driver_opts:
+      device: /Users/anton/fk-encore_data/embedding_models
       o: bind
       type: none
