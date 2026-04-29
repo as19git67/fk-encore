@@ -565,6 +565,16 @@ describe("extractDateFromFilename", () => {
     expect(d.getUTCFullYear()).toBe(2023);
   });
 
+  it("reads date from subdirectory name when basename has none", () => {
+    // Simulates: external_path dir = /library/9/2011-12-22 Yra, basename = IMG_0115.JPG
+    const r = extractDateFromFilename("/library/9/2011-12-22 Yra/IMG_0115.JPG");
+    expect(r).not.toBeNull();
+    const d = new Date(r!);
+    expect(d.getUTCFullYear()).toBe(2011);
+    expect(d.getUTCMonth() + 1).toBe(12);
+    expect(d.getUTCDate()).toBe(22);
+  });
+
   it("derives ascending time from sequence number after date in basename", () => {
     const r1 = extractDateFromFilename("IMG_20231225_0001.jpg");
     const r2 = extractDateFromFilename("IMG_20231225_0002.jpg");

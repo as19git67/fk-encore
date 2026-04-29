@@ -1319,8 +1319,13 @@ export async function getExifMetadata(filePath: string, originalFilename?: strin
       takenAt = parseIptcDate(data?.DateCreated, data?.TimeCreated);
     }
     // Last resort: parse a date from the original filename when all metadata is absent.
+    // Combine originalFilename (correct basename) with the directory of filePath so that
+    // parent directories like "2011-12-22 Yra" are still visible to the parser.
     if (!takenAt) {
-      takenAt = extractDateFromFilename(originalFilename ?? filePath);
+      const pathToSearch = originalFilename
+        ? path.join(path.dirname(filePath), originalFilename)
+        : filePath;
+      takenAt = extractDateFromFilename(pathToSearch);
     }
     // Description — prefer EXIF/XMP fields, fall back to IPTC Caption-Abstract.
     // exifr normalizes XMP dc:description to lowercase `description`.
