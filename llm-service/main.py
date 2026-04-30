@@ -504,6 +504,8 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
             # handful of tax_sections entries) without touching n_ctx.
             max_tokens=768,
         )
+    except HTTPException:
+        raise
     except Exception as exc:  # llama.cpp raises a generic Exception family
         log.exception("llm.create_chat_completion failed")
         raise HTTPException(status_code=500, detail=f"llm failure: {exc}") from exc
@@ -587,6 +589,8 @@ async def json_prompt(req: JsonPromptRequest) -> dict[str, Any]:
             temperature=req.temperature,
             max_tokens=req.max_tokens,
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         log.exception("/json-prompt: llm.create_chat_completion failed")
         raise HTTPException(status_code=500, detail=f"llm failure: {exc}") from exc
@@ -703,6 +707,8 @@ async def recap_title(req: RecapTitleRequest) -> RecapTitleResponse:
             temperature=0.5,
             max_tokens=160,
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         log.exception("llm.create_chat_completion failed for /recap-title")
         raise HTTPException(status_code=500, detail=f"llm failure: {exc}") from exc
