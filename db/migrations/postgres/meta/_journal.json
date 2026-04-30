@@ -1,3 +1,5 @@
+last tag: 0060_finance_tag_queue
+last when: 1779001400000
 {
   "version": "7",
   "dialect": "postgresql",
@@ -434,6 +436,13 @@
       "version": "7",
       "when": 1779001400000,
       "tag": "0060_finance_tag_queue",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1779001401000,
+      "tag": "0061_finance_anomaly",
       "breakpoints": true
     }
   ]
