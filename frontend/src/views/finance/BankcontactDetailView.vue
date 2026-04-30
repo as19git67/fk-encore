@@ -24,6 +24,18 @@ const accountsStore = useAccountsStore()
 
 const isNew = computed(() => route.name === 'finance-bankcontact-new')
 
+const isDirty = computed(() => {
+  if (isNew.value) return true
+  if (!bc.value) return false
+  return (
+    form.value.name.trim() !== bc.value.name ||
+    form.value.blz.trim() !== bc.value.blz ||
+    form.value.login.trim() !== bc.value.login ||
+    form.value.server_url.trim() !== bc.value.server_url ||
+    (form.value.tan_method.trim() || null) !== (bc.value.tan_method ?? null)
+  )
+})
+
 const form = ref<{
   name: string
   blz: string
@@ -389,7 +401,7 @@ async function del() {
         </small>
       </div>
       <div class="actions">
-        <Button label="Speichern" :loading="saving" @click="save" />
+        <Button label="Speichern" :loading="saving" :disabled="!isDirty" @click="save" />
       </div>
     </section>
 
@@ -678,7 +690,7 @@ async function del() {
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
   border-radius: 0.25rem;
-  background: var(--p-surface-50, var(--p-content-background));
+  background: var(--p-content-hover-background);
 }
 .account-body {
   flex: 1;
@@ -731,7 +743,7 @@ async function del() {
   padding: 0.75rem;
   border: 1px dashed var(--p-content-border-color);
   border-radius: 0.25rem;
-  background: var(--p-surface-50, var(--p-content-background));
+  background: var(--p-content-hover-background);
 }
 .pending-main {
   display: flex;

@@ -324,7 +324,7 @@ function openTransaction(tx: Transaction) {
 
 // ── Select mode + multi-selection state ───────────────────────────────
 
-const selectMode = ref(false)
+const selectMode = ref(selectionStore.count > 0)
 const selectionPopover = ref<InstanceType<typeof Popover> | null>(null)
 
 function toggleSelectMode() {
@@ -364,7 +364,7 @@ function toggleSelectAll(checked: boolean | null) {
 
 function openSelectionPopover(event: Event) {
   if (selectionStore.count === 0) return
-  selectionPopover.value?.show(event)
+  selectionPopover.value?.toggle(event)
 }
 
 function formatSelectionSum(): string {
@@ -731,6 +731,14 @@ function goBack() {
   background: var(--p-content-hover-background);
   border: 1px solid var(--p-content-border-color);
   border-radius: 0.5rem;
+  position: sticky;
+  top: 3.4rem;
+  z-index: 1;
+}
+@media (max-width: 480px) {
+  .tx-select-bar {
+    top: 3.2rem;
+  }
 }
 .tx-select-bar-left {
   display: flex;
