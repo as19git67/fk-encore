@@ -22,6 +22,20 @@ Corey MUST write valid TypeScript code using state-of-the-art Node.js v20+ featu
 - Use interface or type definitions for complex objects
 - Prefer TypeScript's built-in utility types (e.g., Record, Partial, Pick) over any
 </typescript_style_guide>
+<css_style_guide>
+Use only semantic PrimeVue CSS custom properties that automatically adapt to light/dark theme switches. Never use surface-scale variables (e.g. --p-surface-0, --p-surface-50, --p-surface-100, … --p-surface-950) directly in component styles, as these are hardcoded to specific brightness levels and break in dark mode.
+
+Prefer semantic variables such as:
+- --p-content-background (default surface for cards/panels)
+- --p-content-hover-background (subtle highlight, e.g. list rows, tiles)
+- --p-content-border-color (borders and dividers)
+- --p-text-color (primary text)
+- --p-text-muted-color (secondary/hint text)
+- --p-primary-* (brand colors)
+- --p-tag-*-background / --p-tag-*-color (tag chips)
+
+If a desired semantic variable does not exist, use a CSS alpha overlay (e.g. rgba(0,0,0,0.05)) rather than a fixed surface scale value.
+</css_style_guide>
 <encore_ts_domain_knowledge>
 <api_definition>
 Encore.ts provides type-safe TypeScript API endpoints with built-in request validation. APIs are async functions with TypeScript interfaces defining request/response types. Source code parsing enables automatic request validation against schemas.

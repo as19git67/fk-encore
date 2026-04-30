@@ -144,7 +144,6 @@ async function save() {
       add,
       remove,
     })
-    selectionStore.clear()
     // Pop back to the list. The list view re-renders from the txStore
     // which we deliberately don't refresh here — the next load (e.g.
     // closing select mode) will pick up the new tags. Doing a

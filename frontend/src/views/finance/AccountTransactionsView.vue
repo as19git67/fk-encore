@@ -20,6 +20,7 @@ import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useOverviewStore } from '../../stores/finance/overview'
 import { useTagsStore } from '../../stores/finance/tags'
 import { useTxSelectionStore } from '../../stores/finance/selection'
+import { useTxFiltersStore } from '../../stores/finance/txFilters'
 import DateRangePresets from '../../components/DateRangePresets.vue'
 import type {
   ListTransactionsQuery,
@@ -34,6 +35,7 @@ const txStore = useTransactionsStore()
 const overviewStore = useOverviewStore()
 const tagsStore = useTagsStore()
 const selectionStore = useTxSelectionStore()
+const filtersStore = useTxFiltersStore()
 
 const PAGE_LIMIT = 500
 
@@ -147,34 +149,16 @@ function formatShortDate(iso: string | null): string | null {
 
 // ── Filter state ──────────────────────────────────────────────────────
 //
-// Local form state — only flushed to the actual query on "Suchen".
-// Keeps the form decoupled from the live listing so users can fiddle
-// with the inputs without re-firing the API on every change. Same UX
-// approach as the photos / documents filters.
+// Persisted in useTxFiltersStore so that navigating to BatchTagView
+// and back does not reset the user's search criteria.
 
 const filterPanelOpen = ref(false)
-const formQuery = ref('')
-const formTags = ref<string[]>([])
-const formFrom = ref<Date | null>(null)
-const formTo = ref<Date | null>(null)
+const formQuery = computed({ get: () => filtersStore.formQuery, set: (v) => { filtersStore.formQuery = v } })
+const formTags = computed({ get: () => filtersStore.formTags, set: (v) => { filtersStore.formTags = v } })
+const formFrom = computed({ get: () => filtersStore.formFrom, set: (v) => { filtersStore.formFrom = v } })
+const formTo = computed({ get: () => filtersStore.formTo, set: (v) => { filtersStore.formTo = v } })
 
-// What is actually applied to the listing right now.
-const appliedFilters = ref<{
-  q: string
-  tags: string[]
-  from: Date | null
-  to: Date | null
-}>({ q: '', tags: [], from: null, to: null })
-
-const hasActiveFilters = computed(() => {
-  const f = appliedFilters.value
-  return (
-    f.q.trim().length > 0 ||
-    f.tags.length > 0 ||
-    f.from !== null ||
-    f.to !== null
-  )
-})
+const hasActiveFilters = computed(() => filtersStore.hasActiveFilters)
 
 function isoDate(d: Date): string {
   const y = d.getFullYear()
@@ -201,11 +185,10 @@ function buildQuery(): ListTransactionsQuery {
     if (ids.length === 0) return { __empty: true } as unknown as ListTransactionsQuery
     base.accountIds = ids
   }
-  const f = appliedFilters.value
-  if (f.q.trim().length > 0) base.q = f.q.trim()
-  if (f.tags.length > 0) base.tags = f.tags
-  if (f.from) base.from = isoDate(f.from)
-  if (f.to) base.to = isoDate(f.to)
+  if (filtersStore.appliedQuery.trim().length > 0) base.q = filtersStore.appliedQuery.trim()
+  if (filtersStore.appliedTags.length > 0) base.tags = filtersStore.appliedTags
+  if (filtersStore.appliedFrom) base.from = isoDate(filtersStore.appliedFrom)
+  if (filtersStore.appliedTo) base.to = isoDate(filtersStore.appliedTo)
   return base
 }
 
@@ -222,21 +205,12 @@ async function loadTransactions() {
 }
 
 function applyFilters() {
-  appliedFilters.value = {
-    q: formQuery.value,
-    tags: [...formTags.value],
-    from: formFrom.value,
-    to: formTo.value,
-  }
+  filtersStore.apply()
   void loadTransactions()
 }
 
 function clearFilters() {
-  formQuery.value = ''
-  formTags.value = []
-  formFrom.value = null
-  formTo.value = null
-  appliedFilters.value = { q: '', tags: [], from: null, to: null }
+  filtersStore.clear()
   void loadTransactions()
 }
 
@@ -324,7 +298,7 @@ function openTransaction(tx: Transaction) {
 
 // ── Select mode + multi-selection state ───────────────────────────────
 
-const selectMode = ref(false)
+const selectMode = ref(selectionStore.count > 0)
 const selectionPopover = ref<InstanceType<typeof Popover> | null>(null)
 
 function toggleSelectMode() {
@@ -364,7 +338,7 @@ function toggleSelectAll(checked: boolean | null) {
 
 function openSelectionPopover(event: Event) {
   if (selectionStore.count === 0) return
-  selectionPopover.value?.show(event)
+  selectionPopover.value?.toggle(event)
 }
 
 function formatSelectionSum(): string {
@@ -511,14 +485,16 @@ function goBack() {
               {{ tx.purpose }}
             </div>
           </div>
-          <Button
-            icon="pi pi-times-circle"
-            severity="secondary"
-            text
-            rounded
-            aria-label="Buchung aus Auswahl entfernen"
-            @click="selectionStore.remove(tx.id)"
-          />
+          <div class="tx-selection-x">
+            <Button
+              icon="pi pi-times-circle"
+              severity="secondary"
+              text
+              rounded
+              aria-label="Buchung aus Auswahl entfernen"
+              @click="selectionStore.remove(tx.id)"
+            />
+          </div>
         </li>
       </ul>
     </Popover>
@@ -550,7 +526,11 @@ function goBack() {
       </div>
     </div>
 
-    <section v-if="filterPanelOpen" class="tx-filter-panel">
+    <section
+      v-if="filterPanelOpen"
+      class="tx-filter-panel"
+      :class="{ 'tx-filter-panel--below-select-bar': selectMode }"
+    >
       <div class="tx-filter-fields">
         <div class="tx-filter-row">
           <InputText
@@ -574,7 +554,7 @@ function goBack() {
           :options="tagOptions"
           option-label="label"
           option-value="value"
-          placeholder="Mögliche Kategorien auswählen"
+          placeholder="Tags auswählen"
           :max-selected-labels="2"
           filter
           display="chip"
@@ -731,6 +711,14 @@ function goBack() {
   background: var(--p-content-hover-background);
   border: 1px solid var(--p-content-border-color);
   border-radius: 0.5rem;
+  position: sticky;
+  top: 3.4rem;
+  z-index: 1;
+}
+@media (max-width: 480px) {
+  .tx-select-bar {
+    top: 3.2rem;
+  }
 }
 .tx-select-bar-left {
   display: flex;
@@ -788,11 +776,15 @@ function goBack() {
   border-bottom: none;
 }
 .tx-selection-body {
+  flex: 1;
   min-width: 0;
 }
 .tx-selection-name {
   font-weight: 600;
   word-break: break-word;
+}
+.tx-selection-x {
+  flex-shrink: 0;
 }
 .tx-selection-purpose {
   color: var(--p-text-muted-color);
@@ -804,6 +796,18 @@ function goBack() {
   position: sticky;
   top: 3.4rem;
   z-index: 1;
+}
+/* When the select-bar is also visible it stacks above the filter
+   panel — shift the filter panel down by the select-bar height. */
+.tx-filter-panel--below-select-bar {
+  top: 6.2rem;
+}
+@media (max-width: 480px) {
+  .tx-filter-panel--below-select-bar {
+    top: 6rem;
+  }
+}
+.tx-filter-panel {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 0.5rem;
