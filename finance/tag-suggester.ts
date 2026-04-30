@@ -29,6 +29,8 @@
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { and, eq, inArray, sql } from "drizzle-orm";
+import { enqueueTagSuggestion } from "./tag-queue";
+import { triggerTagWorker } from "./tag-worker";
 
 import { requirePermission } from "../user/auth-handler";
 import { checkRateLimit } from "../user/rateLimiter";
@@ -397,10 +399,11 @@ export const suggestTagsBatch = api(
       .where(conds.length > 0 ? and(...conds) : undefined)
       .limit(limit);
 
-    let succeeded = 0;
+    const userId = Number(auth.userID);
     for (const r of rows) {
-      if (await suggestTagsForTransaction(r.id)) succeeded++;
+      await enqueueTagSuggestion(r.id, userId);
     }
-    return { attempted: rows.length, succeeded };
+    if (rows.length > 0) triggerTagWorker();
+    return { attempted: rows.length, succeeded: rows.length };
   },
 );

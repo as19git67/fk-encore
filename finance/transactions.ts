@@ -35,7 +35,8 @@ import {
   financeTagTransaction,
   financeTransaction,
 } from "../db/schema";
-import { suggestTagsForTransaction } from "./tag-suggester";
+import { enqueueTagSuggestion } from "./tag-queue";
+import { triggerTagWorker } from "./tag-worker";
 
 console.log("[boot] finance/transactions.ts: all imports resolved");
 
@@ -488,9 +489,10 @@ export const createTransaction = api(
       await applyUserTags(row.id, p.tags);
     }
 
-    // Best-effort AI suggestion — failures are logged and skipped so
-    // manual bookings never fail because the llm-service is down.
-    await suggestTagsForTransaction(row.id);
+    // Enqueue AI tag suggestion — the worker picks it up asynchronously
+    // so a slow or unavailable llm-service never blocks the booking response.
+    await enqueueTagSuggestion(row.id, Number(auth.userID));
+    triggerTagWorker();
 
     const tags = (await annotateTags([row.id])).get(row.id) ?? [];
     return toView(row, tags);

@@ -16,6 +16,11 @@ import {
   type ScanQueueStatus,
   type PurgeResult,
 } from '../api/photos'
+import {
+  getFinanceTagQueueStatus, retryFailedFinanceTagJobs,
+  cancelPendingFinanceTagJobs, reenqueueAllFinanceTagJobs,
+  type TagQueueServiceStatus,
+} from '../api/finance'
 import { getBuildInfo } from '../api/system'
 import { useAuthStore } from '../stores/auth'
 import { useRealtimeEvent } from '../composables/useRealtime'
@@ -266,6 +271,71 @@ const purgeDbTotals = computed(() => {
   return Object.values(purgeResult.value.dbCounts).reduce((s, n) => s + n, 0)
 })
 
+// ── Finance Tag-Queue ─────────────────────────────────────────────────────────
+
+const financeTagQueueStatus = ref<TagQueueServiceStatus>({ pending: 0, processing: 0, failed: 0, done: 0 })
+const financeTagQueueError = ref('')
+const financeTagRetryLoading = ref(false)
+const financeTagCancelLoading = ref(false)
+const financeTagReenqueueLoading = ref(false)
+const financeTagCancelledPending = ref(false)
+
+const financeTagIsActive = computed(
+  () => financeTagQueueStatus.value.pending > 0 || financeTagQueueStatus.value.processing > 0
+)
+
+async function fetchFinanceTagQueueStatus() {
+  try {
+    const res = await getFinanceTagQueueStatus()
+    financeTagQueueStatus.value = res.status
+    if (financeTagCancelledPending.value && !financeTagIsActive.value) {
+      financeTagCancelledPending.value = false
+    }
+  } catch {
+    // ignore transient errors — next push event will refresh
+  }
+}
+
+useRealtimeEvent('scan-queue', 'state.changed', () => {
+  fetchFinanceTagQueueStatus()
+})
+
+async function handleFinanceTagRetry() {
+  financeTagQueueError.value = ''
+  financeTagRetryLoading.value = true
+  try {
+    await retryFailedFinanceTagJobs()
+  } catch (err: any) {
+    financeTagQueueError.value = err.message || 'Fehler beim Wiederholen'
+  } finally {
+    financeTagRetryLoading.value = false
+  }
+}
+
+async function handleFinanceTagCancel() {
+  financeTagCancelLoading.value = true
+  try {
+    await cancelPendingFinanceTagJobs()
+    financeTagCancelledPending.value = true
+  } catch (err: any) {
+    financeTagQueueError.value = err.message || 'Fehler beim Abbrechen'
+  } finally {
+    financeTagCancelLoading.value = false
+  }
+}
+
+async function handleFinanceTagReenqueue() {
+  financeTagQueueError.value = ''
+  financeTagReenqueueLoading.value = true
+  try {
+    await reenqueueAllFinanceTagJobs()
+  } catch (err: any) {
+    financeTagQueueError.value = err.message || 'Fehler beim Einreihen'
+  } finally {
+    financeTagReenqueueLoading.value = false
+  }
+}
+
 // ── Build-Info ────────────────────────────────────────────────────────────────
 
 const buildNumber = ref('…')
@@ -274,6 +344,7 @@ const buildNumber = ref('…')
 
 onMounted(async () => {
   await fetchQueueStatus()
+  await fetchFinanceTagQueueStatus()
   getBuildInfo().then(info => { buildNumber.value = info.build })
 })
 </script>
@@ -425,6 +496,76 @@ onMounted(async () => {
           :loading="retryLoading"
           :disabled="rescanLoading || retryLoading"
           @click="handleRetry"
+        />
+      </div>
+    </div>
+
+    <!-- Finance KI-Tag-Queue -->
+    <div class="data-management-group">
+      <h3>Finance KI-Tagging</h3>
+      <p>
+        Neue Buchungen werden automatisch mit KI-Tag-Vorschlägen versehen. Hier siehst du
+        den aktuellen Bearbeitungsstand und kannst fehlgeschlagene Jobs erneut starten.
+      </p>
+
+      <Message v-if="financeTagQueueError" severity="error" class="mb-3" @close="financeTagQueueError = ''">
+        {{ financeTagQueueError }}
+      </Message>
+
+      <div class="queue-table-wrapper">
+        <table class="queue-table mb-4">
+          <thead>
+            <tr>
+              <th>Dienst</th>
+              <th>Ausstehend</th>
+              <th>In Bearbeitung</th>
+              <th>Fehlgeschlagen</th>
+              <th>Fertig</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>KI-Tag-Vorschläge</td>
+              <td>{{ financeTagQueueStatus.pending }}</td>
+              <td>{{ financeTagQueueStatus.processing }}</td>
+              <td>{{ financeTagQueueStatus.failed }}</td>
+              <td>{{ financeTagQueueStatus.done }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div v-if="financeTagCancelledPending" class="mb-3 text-sm text-muted">
+        Ausstehende Jobs wurden abgebrochen.
+      </div>
+
+      <div class="queue-actions">
+        <Button
+          label="Alle einreihen"
+          icon="pi pi-refresh"
+          severity="secondary"
+          :loading="financeTagReenqueueLoading"
+          :disabled="financeTagReenqueueLoading"
+          @click="handleFinanceTagReenqueue"
+        />
+        <Button
+          v-if="financeTagQueueStatus.failed > 0"
+          label="Fehlgeschlagene wiederholen"
+          icon="pi pi-replay"
+          severity="warn"
+          :loading="financeTagRetryLoading"
+          :disabled="financeTagRetryLoading"
+          @click="handleFinanceTagRetry"
+        />
+        <Button
+          v-if="financeTagIsActive"
+          label="Abbrechen"
+          icon="pi pi-times"
+          severity="danger"
+          outlined
+          :loading="financeTagCancelLoading"
+          :disabled="financeTagCancelLoading"
+          @click="handleFinanceTagCancel"
         />
       </div>
     </div>
