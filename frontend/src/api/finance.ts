@@ -434,6 +434,7 @@ export interface Transaction {
   counterparty_iban: string | null
   tags: TagOnTransaction[]
   created_at: string | null
+  seen: boolean
 }
 
 export interface ListTransactionsQuery {
@@ -492,6 +493,25 @@ export async function createTransaction(
   return apiFetch('/finance/transactions', {
     method: 'POST',
     body: JSON.stringify(input),
+  })
+}
+
+export async function markTransactionSeen(id: number): Promise<void> {
+  await apiFetch(`/finance/transactions/${id}/seen`, { method: 'POST' })
+}
+
+export async function markAllTransactionsSeen(params: {
+  accountId?: number
+  accountIds?: number[]
+}): Promise<{ marked: number }> {
+  const body: Record<string, unknown> = {}
+  if (params.accountId !== undefined) body.accountId = params.accountId
+  if (params.accountIds && params.accountIds.length > 0) {
+    body.accountIdsCsv = params.accountIds.join(',')
+  }
+  return apiFetch('/finance/transactions/mark-all-seen', {
+    method: 'POST',
+    body: JSON.stringify(body),
   })
 }
 

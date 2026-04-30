@@ -29,7 +29,11 @@ onMounted(async () => {
   if (accountsStore.items.length === 0) await accountsStore.refresh()
   if (tagsStore.items.length === 0) await tagsStore.refresh('user')
   try {
-    tx.value = await api.getTransaction(Number(route.params.id))
+    const id = Number(route.params.id)
+    tx.value = await api.getTransaction(id)
+    if (!tx.value.seen) {
+      void api.markTransactionSeen(id)
+    }
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   }

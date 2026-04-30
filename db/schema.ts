@@ -1349,6 +1349,24 @@ export const financeAnomaly = pgTable(
   ]
 );
 
+// ---------- Transaction seen state ----------
+
+export const financeTransactionSeen = pgTable(
+  "finance_transaction_seen",
+  {
+    transaction_id: integer("transaction_id")
+      .notNull()
+      .references(() => financeTransaction.id, { onDelete: "cascade" }),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    seen_at: timestamp("seen_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.transaction_id, table.user_id] })]
+);
+
 // ========== Scheduled job state (lib/local-cron.ts) ==========
 
 export const scheduledJobState = pgTable("scheduled_job_state", {

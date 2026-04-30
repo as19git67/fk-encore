@@ -187,8 +187,7 @@ export const modules: ModuleConfig[] = [
       {
         path: 'umsaetze',
         name: 'finance-transactions',
-        component: () => import('../views/finance/TransactionsView.vue'),
-        meta: { permission: 'finance.view' },
+        redirect: { name: 'finance-overview' },
       },
       {
         path: 'umsaetze/neu',
@@ -260,7 +259,6 @@ export const modules: ModuleConfig[] = [
     menuItems: [
       { label: 'Übersicht', icon: 'pi pi-th-large', routeName: 'finance-overview', permission: 'finance.view' },
       { label: 'Konten', icon: 'pi pi-wallet', routeName: 'finance-accounts', permission: 'finance.view' },
-      { label: 'Umsätze', icon: 'pi pi-list', routeName: 'finance-transactions', permission: 'finance.view' },
       { label: 'Bankkontakte', icon: 'pi pi-building', routeName: 'finance-bankcontacts', permission: 'finance.accounts.manage' },
       { label: 'Bankkontakte-Hilfe', icon: 'pi pi-question-circle', routeName: 'finance-bankcontacts-help', permission: 'finance.accounts.manage' },
       { label: 'Analyse', icon: 'pi pi-chart-bar', routeName: 'finance-analysis', permission: 'finance.view' },
