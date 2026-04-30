@@ -37,7 +37,7 @@ beforeEach(async () => {
   await db.delete(financeAccount);
   await db.delete(financeBankcontact);
   await db.delete(users);
-  vi.mocked(tagSuggester.suggestTagsForTransaction).mockClear();
+  vi.mocked(tagQueue.enqueueTagSuggestion).mockClear();
 });
 
 async function insertBankcontact(): Promise<number> {
