@@ -196,38 +196,43 @@ async function processAccount(
         !mandate.previous_last_seen || txDateStr >= mandate.previous_last_seen;
       if (
         txIsNotOlderThanBaseline &&
-        mandate.typical_amount !== null &&
         mandate.transaction_count >= BASELINE_MIN_TRANSACTIONS
       ) {
-        const prev = Math.abs(Number(mandate.typical_amount));
-        const curr = Math.abs(Number(tx.amount));
-        const diff = curr - prev;
-        const pct = prev > 0 ? diff / prev : 0;
+        // Compare against the IMMEDIATELY previous transaction for this
+        // mandate, not the smoothed EMA. This avoids flagging gradual
+        // trends (e.g. 59 → 48 → 47) and only fires on real step-changes.
+        const prevRaw = await getPrevTransactionAmount(mandate.id, tx.id, txDateStr);
+        if (prevRaw !== null) {
+          const prev = Math.abs(Number(prevRaw));
+          const curr = Math.abs(Number(tx.amount));
+          const diff = curr - prev;
+          const pct = prev > 0 ? diff / prev : 0;
 
-        if (Math.abs(diff) >= AMOUNT_CHANGE_MIN_ABS && Math.abs(pct) >= AMOUNT_CHANGE_THRESHOLD) {
-          // Suppress when the mandate's historical amounts are already
-          // volatile — a step-change signal only matters when the prior
-          // baseline was reasonably stable.
-          const cv = await getMandateStabilityCV(mandate.id, tx.id, txDateStr);
-          const stable = cv === null || cv <= STABILITY_MAX_CV;
-          if (stable) {
-            const score = Math.min(1, Math.abs(pct) * 2).toFixed(4);
-            const inserted = await insertAnomalyIfAbsent({
-              account_id: accountId,
-              transaction_id: tx.id,
-              mandate_id: mandate.id,
-              type: "amount_change",
-              score,
-              details: {
-                previous: prev,
-                current: curr,
-                diff: Math.round(diff * 100) / 100,
-                pct: Math.round(pct * 10000) / 100,
-                // raw sign preserved so the message builder knows debit vs. credit
-                is_credit: Number(tx.amount) > 0,
-              },
-            });
-            if (inserted) anomalies++;
+          if (Math.abs(diff) >= AMOUNT_CHANGE_MIN_ABS && Math.abs(pct) >= AMOUNT_CHANGE_THRESHOLD) {
+            // Suppress when the mandate's historical amounts are already
+            // volatile — a step-change signal only matters when the prior
+            // baseline was reasonably stable.
+            const cv = await getMandateStabilityCV(mandate.id, tx.id, txDateStr);
+            const stable = cv === null || cv <= STABILITY_MAX_CV;
+            if (stable) {
+              const score = Math.min(1, Math.abs(pct) * 2).toFixed(4);
+              const inserted = await insertAnomalyIfAbsent({
+                account_id: accountId,
+                transaction_id: tx.id,
+                mandate_id: mandate.id,
+                type: "amount_change",
+                score,
+                details: {
+                  previous: prev,
+                  current: curr,
+                  diff: Math.round(diff * 100) / 100,
+                  pct: Math.round(pct * 10000) / 100,
+                  // raw sign preserved so the message builder knows debit vs. credit
+                  is_credit: Number(tx.amount) > 0,
+                },
+              });
+              if (inserted) anomalies++;
+            }
           }
         }
       }
@@ -432,6 +437,35 @@ async function getMandateStabilityCV(
     values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / values.length;
   const stddev = Math.sqrt(variance);
   return stddev / Math.abs(mean);
+}
+
+/**
+ * Returns the amount of the most recent prior transaction for the same
+ * mandate (chronologically before the candidate). Used as the comparison
+ * reference for amount_change anomalies — comparing against the immediate
+ * predecessor avoids flagging gradual drift.
+ */
+async function getPrevTransactionAmount(
+  mandateId: number,
+  excludingTxId: number,
+  beforeBookingDate: string,
+): Promise<string | null> {
+  const rows = await db.execute<{ amount: string }>(sql`
+    SELECT ft.amount
+    FROM finance_transaction ft
+    JOIN finance_recurring_mandate frm ON frm.id = ${mandateId}
+    WHERE ft.account_id = frm.account_id
+      AND ft.id <> ${excludingTxId}
+      AND ft.booking_date < ${beforeBookingDate}
+      AND (
+        (frm.mandate_ref IS NOT NULL AND ft.mandate_ref = frm.mandate_ref)
+        OR (frm.mandate_ref IS NULL AND frm.counterparty_iban IS NOT NULL AND ft.counterparty_iban = frm.counterparty_iban)
+        OR (frm.mandate_ref IS NULL AND frm.counterparty_iban IS NULL AND ft.counterparty = frm.counterparty)
+      )
+    ORDER BY ft.booking_date DESC, ft.id DESC
+    LIMIT 1
+  `);
+  return rows.rows[0]?.amount ?? null;
 }
 
 async function findDuplicate(
@@ -798,6 +832,19 @@ export const getMandateHistory = api(
 // Message builder
 // -----------------------------------------------------------------------
 
+const eurFmt = new Intl.NumberFormat("de-DE", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+const pctFmt = new Intl.NumberFormat("de-DE", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+function fmtEur(n: number): string {
+  return `${eurFmt.format(n)} €`;
+}
+
 function buildMessage(
   type: string,
   details: Record<string, unknown>,
@@ -806,27 +853,27 @@ function buildMessage(
   const name = counterparty ?? "Unbekannter Gegenüber";
   switch (type) {
     case "amount_change": {
-      const prev = Math.abs(Number(details.previous ?? 0)).toFixed(2);
-      const curr = Math.abs(Number(details.current ?? 0)).toFixed(2);
-      const absDiff = Math.abs(Number(details.diff ?? 0)).toFixed(2);
-      const absPct = Math.abs(Number(details.pct ?? 0)).toFixed(2);
+      const prev = Math.abs(Number(details.previous ?? 0));
+      const curr = Math.abs(Number(details.current ?? 0));
+      const absDiff = Math.abs(Number(details.diff ?? 0));
+      const absPct = Math.abs(Number(details.pct ?? 0));
       // is_credit is stored explicitly; fall back to false (= debit) for old records
       const isCredit = details.is_credit === true;
       const dir = Number(details.diff ?? 0) > 0 ? "erhöht" : "gesenkt";
       const kind = isCredit ? "Gutschrift" : "Lastschrift";
-      return `Die ${kind} von ${name} hat sich um ${absDiff} € (${absPct} %) von ${prev} € auf ${curr} € ${dir}.`;
+      return `Die ${kind} von ${name} hat sich um ${fmtEur(absDiff)} (${pctFmt.format(absPct)} %) von ${fmtEur(prev)} auf ${fmtEur(curr)} ${dir}.`;
     }
     case "duplicate": {
-      const amount = Math.abs(Number(details.amount ?? 0)).toFixed(2);
+      const amount = Math.abs(Number(details.amount ?? 0));
       const isCredit = Number(details.amount ?? 0) > 0;
       const kind = isCredit ? "Gutschrift" : "Buchung";
-      return `Mögliche doppelte ${kind} von ${name} über ${amount} € innerhalb weniger Tage.`;
+      return `Mögliche doppelte ${kind} von ${name} über ${fmtEur(amount)} innerhalb weniger Tage.`;
     }
     case "new_mandate": {
-      const amount = Math.abs(Number(details.amount ?? 0)).toFixed(2);
+      const amount = Math.abs(Number(details.amount ?? 0));
       const isCredit = Number(details.amount ?? 0) > 0;
       const kind = isCredit ? "Gutschrift" : "Lastschrift";
-      return `Neue regelmäßige ${kind} von ${name} über ${amount} €.`;
+      return `Neue regelmäßige ${kind} von ${name} über ${fmtEur(amount)}.`;
     }
     default:
       return `Unbekannte Anomalie (${type}).`;
