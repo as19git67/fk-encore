@@ -670,8 +670,11 @@ export interface AnomalyRunResult {
   anomalies_created: number
 }
 
-export async function runAnomalyDetection(): Promise<AnomalyRunResult> {
-  return apiFetch('/finance/anomalies/run', { method: 'POST', body: '{}' })
+export async function runAnomalyDetection(reset = false): Promise<AnomalyRunResult> {
+  return apiFetch('/finance/anomalies/run', {
+    method: 'POST',
+    body: JSON.stringify({ reset }),
+  })
 }
 
 export interface DuplicateTransactionInfo {
