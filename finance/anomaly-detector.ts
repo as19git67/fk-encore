@@ -440,6 +440,7 @@ export const triggerAnomalyDetection = api(
 );
 
 
+schedule({
   name: "finance-anomaly-detection",
   description: "Detect recurring mandate changes and duplicate transactions",
   service: "finance",
