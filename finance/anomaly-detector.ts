@@ -48,6 +48,15 @@ const BASELINE_MIN_TRANSACTIONS = 5;
  * within this window — older anomalies are not actionable.
  */
 const ANOMALY_RECENCY_DAYS = 60;
+/**
+ * Maximum coefficient of variation (stddev / |mean|) of the prior amounts
+ * for a mandate before we suppress amount_change alerts. Mandates whose
+ * historical amounts already vary a lot (variable utility bills, irregular
+ * payments) make a step-change signal unreliable. 0.15 = 15% CV.
+ */
+const STABILITY_MAX_CV = 0.15;
+/** How many recent prior amounts to sample when computing stability. */
+const STABILITY_SAMPLE_SIZE = 12;
 
 // -----------------------------------------------------------------------
 // Mandate key helpers
@@ -196,23 +205,30 @@ async function processAccount(
         const pct = prev > 0 ? diff / prev : 0;
 
         if (Math.abs(diff) >= AMOUNT_CHANGE_MIN_ABS && Math.abs(pct) >= AMOUNT_CHANGE_THRESHOLD) {
-          const score = Math.min(1, Math.abs(pct) * 2).toFixed(4);
-          const inserted = await insertAnomalyIfAbsent({
-            account_id: accountId,
-            transaction_id: tx.id,
-            mandate_id: mandate.id,
-            type: "amount_change",
-            score,
-            details: {
-              previous: prev,
-              current: curr,
-              diff: Math.round(diff * 100) / 100,
-              pct: Math.round(pct * 10000) / 100,
-              // raw sign preserved so the message builder knows debit vs. credit
-              is_credit: Number(tx.amount) > 0,
-            },
-          });
-          if (inserted) anomalies++;
+          // Suppress when the mandate's historical amounts are already
+          // volatile — a step-change signal only matters when the prior
+          // baseline was reasonably stable.
+          const cv = await getMandateStabilityCV(mandate.id, tx.id, txDateStr);
+          const stable = cv === null || cv <= STABILITY_MAX_CV;
+          if (stable) {
+            const score = Math.min(1, Math.abs(pct) * 2).toFixed(4);
+            const inserted = await insertAnomalyIfAbsent({
+              account_id: accountId,
+              transaction_id: tx.id,
+              mandate_id: mandate.id,
+              type: "amount_change",
+              score,
+              details: {
+                previous: prev,
+                current: curr,
+                diff: Math.round(diff * 100) / 100,
+                pct: Math.round(pct * 10000) / 100,
+                // raw sign preserved so the message builder knows debit vs. credit
+                is_credit: Number(tx.amount) > 0,
+              },
+            });
+            if (inserted) anomalies++;
+          }
         }
       }
 
@@ -381,6 +397,41 @@ async function findMandate(
   }
 
   return undefined;
+}
+
+/**
+ * Coefficient of variation (stddev / |mean|) of the most recent prior
+ * amounts for a mandate. Returns null when there are too few samples to
+ * judge stability. The candidate transaction itself is excluded.
+ */
+async function getMandateStabilityCV(
+  mandateId: number,
+  excludingTxId: number,
+  beforeBookingDate: string,
+): Promise<number | null> {
+  const rows = await db.execute<{ amount: string }>(sql`
+    SELECT ft.amount
+    FROM finance_transaction ft
+    JOIN finance_recurring_mandate frm ON frm.id = ${mandateId}
+    WHERE ft.account_id = frm.account_id
+      AND ft.id <> ${excludingTxId}
+      AND ft.booking_date < ${beforeBookingDate}
+      AND (
+        (frm.mandate_ref IS NOT NULL AND ft.mandate_ref = frm.mandate_ref)
+        OR (frm.mandate_ref IS NULL AND frm.counterparty_iban IS NOT NULL AND ft.counterparty_iban = frm.counterparty_iban)
+        OR (frm.mandate_ref IS NULL AND frm.counterparty_iban IS NULL AND ft.counterparty = frm.counterparty)
+      )
+    ORDER BY ft.booking_date DESC
+    LIMIT ${STABILITY_SAMPLE_SIZE}
+  `);
+  const values = rows.rows.map((r) => Math.abs(Number(r.amount))).filter((n) => Number.isFinite(n));
+  if (values.length < BASELINE_MIN_TRANSACTIONS) return null;
+  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  if (mean === 0) return null;
+  const variance =
+    values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / values.length;
+  const stddev = Math.sqrt(variance);
+  return stddev / Math.abs(mean);
 }
 
 async function findDuplicate(
