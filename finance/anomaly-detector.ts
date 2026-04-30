@@ -434,7 +434,7 @@ export const triggerAnomalyDetection = api(
   },
   async (): Promise<AnomalyRunResult> => {
     const auth = getAuthData()!;
-    requirePermission(auth, "finance.admin");
+    requirePermission(auth, "finance.view");
     return runAnomalyDetectionJob();
   },
 );
