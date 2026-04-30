@@ -485,14 +485,16 @@ function goBack() {
               {{ tx.purpose }}
             </div>
           </div>
-          <Button
-            icon="pi pi-times-circle"
-            severity="secondary"
-            text
-            rounded
-            aria-label="Buchung aus Auswahl entfernen"
-            @click="selectionStore.remove(tx.id)"
-          />
+          <div class="tx-selection-x">
+            <Button
+              icon="pi pi-times-circle"
+              severity="secondary"
+              text
+              rounded
+              aria-label="Buchung aus Auswahl entfernen"
+              @click="selectionStore.remove(tx.id)"
+            />
+          </div>
         </li>
       </ul>
     </Popover>
@@ -774,11 +776,15 @@ function goBack() {
   border-bottom: none;
 }
 .tx-selection-body {
+  flex: 1;
   min-width: 0;
 }
 .tx-selection-name {
   font-weight: 600;
   word-break: break-word;
+}
+.tx-selection-x {
+  flex-shrink: 0;
 }
 .tx-selection-purpose {
   color: var(--p-text-muted-color);
