@@ -630,3 +630,34 @@ export async function analysisAggregate(params: {
     body: JSON.stringify(params),
   })
 }
+
+// ----------------------------------------------------------------------
+// Tag Queue (admin)
+// ----------------------------------------------------------------------
+
+export interface TagQueueServiceStatus {
+  pending: number
+  processing: number
+  failed: number
+  done: number
+}
+
+export interface TagQueueStatusResponse {
+  status: TagQueueServiceStatus
+}
+
+export async function getFinanceTagQueueStatus(): Promise<TagQueueStatusResponse> {
+  return apiFetch('/finance/tag-queue/status', { method: 'GET' })
+}
+
+export async function retryFailedFinanceTagJobs(): Promise<{ requeued: number }> {
+  return apiFetch('/finance/tag-queue/retry-failed', { method: 'POST', body: '{}' })
+}
+
+export async function cancelPendingFinanceTagJobs(): Promise<{ cancelled: number }> {
+  return apiFetch('/finance/tag-queue/cancel', { method: 'POST', body: '{}' })
+}
+
+export async function reenqueueAllFinanceTagJobs(): Promise<{ enqueued: number }> {
+  return apiFetch('/finance/tag-queue/reenqueue', { method: 'POST', body: '{}' })
+}

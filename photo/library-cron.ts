@@ -1,5 +1,5 @@
 /**
- * Hourly reconcile job for external photo libraries.
+ * Daily reconcile job for external photo libraries.
  *
  * The chokidar watcher catches live filesystem events, but events are lost
  * during downtime or when files arrive on a network share that doesn't fire
@@ -38,7 +38,7 @@ schedule({
   name: "library-reconcile",
   description: "Enqueue scan jobs for every external photo library",
   service: "photo",
-  scheduleLabel: "every 1h",
-  nextFire: everyMs(60 * 60_000),
+  scheduleLabel: "every 24h",
+  nextFire: everyMs(24 * 60 * 60_000),
   run: () => reconcileAllLibraries(),
 });

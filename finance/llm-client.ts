@@ -68,6 +68,23 @@ async function postJson<TBody, TResp>(
 }
 
 // -----------------------------------------------------------------------
+// Health check
+// -----------------------------------------------------------------------
+
+export async function isLlmServiceHealthy(timeoutMs = 2000): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${LLM_SERVICE_URL}/healthz`, { signal: controller.signal });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// -----------------------------------------------------------------------
 // /embed
 // -----------------------------------------------------------------------
 

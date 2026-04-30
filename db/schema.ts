@@ -1272,6 +1272,32 @@ export const financeUserPref = pgTable(
   (table) => [primaryKey({ columns: [table.user_id, table.key] })],
 );
 
+// ========== Finance Tag Queue ==========
+
+export const financeTagQueue = pgTable(
+  "finance_tag_queue",
+  {
+    id: serial("id").primaryKey(),
+    transaction_id: integer("transaction_id")
+      .notNull()
+      .references(() => financeTransaction.id, { onDelete: "cascade" }),
+    user_id: integer("user_id")
+      .references(() => users.id, { onDelete: "set null" }),
+    status: scanStatusEnum("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    error_msg: text("error_msg"),
+    enqueued_at: timestamp("enqueued_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    started_at: timestamp("started_at", { mode: "string", withTimezone: true }),
+    finished_at: timestamp("finished_at", { mode: "string", withTimezone: true }),
+  },
+  (table) => [
+    index("idx_finance_tag_queue_pickup").on(table.enqueued_at),
+    index("idx_finance_tag_queue_status").on(table.status),
+  ]
+);
+
 // ========== Scheduled job state (lib/local-cron.ts) ==========
 
 export const scheduledJobState = pgTable("scheduled_job_state", {

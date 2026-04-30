@@ -310,19 +310,20 @@ describe("tag-suggester — filters and caps", () => {
   });
 });
 
-describe("tag-suggester — failures are swallowed", () => {
-  it("returns false when embed throws", async () => {
+describe("tag-suggester — LlmServiceUnavailableError propagates for worker retry", () => {
+  it("re-throws LlmServiceUnavailableError when embed fails (worker will defer)", async () => {
     const acc = await createAccount();
     const tx = await insertTx(acc);
     vi.mocked(llmClient.embed).mockRejectedValue(
       new llmClient.LlmServiceUnavailableError("boom"),
     );
 
-    const ok = await suggestTagsForTransaction(tx);
-    expect(ok).toBe(false);
+    await expect(suggestTagsForTransaction(tx)).rejects.toBeInstanceOf(
+      llmClient.LlmServiceUnavailableError,
+    );
   });
 
-  it("returns false when suggestTags throws, doesn't leave embedding out", async () => {
+  it("re-throws LlmServiceUnavailableError when suggestTags fails, embedding row is preserved", async () => {
     const acc = await createAccount();
     await seedNeighbour(acc, vec(0.2), ["a"]);
     const tx = await insertTx(acc);
@@ -331,8 +332,9 @@ describe("tag-suggester — failures are swallowed", () => {
       new llmClient.LlmServiceUnavailableError("down"),
     );
 
-    const ok = await suggestTagsForTransaction(tx);
-    expect(ok).toBe(false);
+    await expect(suggestTagsForTransaction(tx)).rejects.toBeInstanceOf(
+      llmClient.LlmServiceUnavailableError,
+    );
     // Embedding row is still there — can be reused on next try
     const rows = (await db.execute(
       sql`SELECT transaction_id FROM finance_transaction_embedding WHERE transaction_id = ${tx}`,

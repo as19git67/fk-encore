@@ -28,7 +28,9 @@
 
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { enqueueTagSuggestion } from "./tag-queue";
+import { triggerTagWorker } from "./tag-worker";
 
 import { requirePermission } from "../user/auth-handler";
 import { checkRateLimit } from "../user/rateLimiter";
@@ -80,12 +82,14 @@ export async function suggestTagsForTransaction(
     const inputText = buildEmbedText(tx);
 
     // 1 + 2 — embed + persist
+    // Re-throw LlmServiceUnavailableError so the worker defers the job
+    // for a later retry instead of marking it done silently.
     let vector: number[];
     try {
       vector = await embed(inputText);
     } catch (err) {
       logSkip(transactionId, "embed failed", err);
-      return false;
+      throw err;
     }
     await upsertEmbedding(transactionId, vector);
 
@@ -118,7 +122,7 @@ export async function suggestTagsForTransaction(
       });
     } catch (err) {
       logSkip(transactionId, "suggestTags failed", err);
-      return false;
+      throw err;
     }
 
     // 5 — restrict to the vocabulary seen in examples
@@ -144,6 +148,7 @@ export async function suggestTagsForTransaction(
     await persistAiTags(transactionId, accepted);
     return true;
   } catch (err) {
+    if (err instanceof LlmServiceUnavailableError) throw err;
     logSkip(transactionId, "tag-suggester crashed", err);
     return false;
   }
@@ -395,12 +400,20 @@ export const suggestTagsBatch = api(
       .select({ id: financeTransaction.id })
       .from(financeTransaction)
       .where(conds.length > 0 ? and(...conds) : undefined)
+      .orderBy(desc(financeTransaction.booking_date))
       .limit(limit);
 
-    let succeeded = 0;
+    const userId = Number(auth.userID);
+    let enqueued = 0;
     for (const r of rows) {
-      if (await suggestTagsForTransaction(r.id)) succeeded++;
+      try {
+        await enqueueTagSuggestion(r.id, userId);
+        enqueued++;
+      } catch (err) {
+        console.error(`[finance] failed to enqueue tag suggestion for tx=${r.id}:`, (err as Error).message);
+      }
     }
-    return { attempted: rows.length, succeeded };
+    if (enqueued > 0) triggerTagWorker();
+    return { attempted: rows.length, succeeded: enqueued };
   },
 );
