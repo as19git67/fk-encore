@@ -673,3 +673,28 @@ export interface AnomalyRunResult {
 export async function runAnomalyDetection(): Promise<AnomalyRunResult> {
   return apiFetch('/finance/anomalies/run', { method: 'POST', body: '{}' })
 }
+
+export interface AnomalyItem {
+  id: number
+  type: 'amount_change' | 'duplicate' | 'new_mandate' | string
+  score: number
+  details: Record<string, unknown>
+  created_at: string
+  transaction_id: number | null
+  mandate_id: number | null
+  counterparty: string | null
+  message: string
+}
+
+export interface ListAnomaliesResponse {
+  anomalies: AnomalyItem[]
+  total: number
+}
+
+export async function listAnomalies(): Promise<ListAnomaliesResponse> {
+  return apiFetch('/finance/anomalies')
+}
+
+export async function acknowledgeAnomaly(id: number): Promise<{ ok: boolean }> {
+  return apiFetch(`/finance/anomalies/${id}/acknowledge`, { method: 'POST', body: '{}' })
+}

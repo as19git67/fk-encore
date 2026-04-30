@@ -233,6 +233,12 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'finance.view' },
       },
       {
+        path: 'anomalien',
+        name: 'finance-anomalies',
+        component: () => import('../views/finance/AnomaliesView.vue'),
+        meta: { permission: 'finance.view' },
+      },
+      {
         path: 'admin/zugriff',
         name: 'finance-admin-access',
         component: () => import('../views/finance/AccountAssignmentView.vue'),
@@ -258,6 +264,7 @@ export const modules: ModuleConfig[] = [
       { label: 'Bankkontakte', icon: 'pi pi-building', routeName: 'finance-bankcontacts', permission: 'finance.accounts.manage' },
       { label: 'Bankkontakte-Hilfe', icon: 'pi pi-question-circle', routeName: 'finance-bankcontacts-help', permission: 'finance.accounts.manage' },
       { label: 'Analyse', icon: 'pi pi-chart-bar', routeName: 'finance-analysis', permission: 'finance.view' },
+      { label: 'Anomalien', icon: 'pi pi-exclamation-triangle', routeName: 'finance-anomalies', permission: 'finance.view' },
       { label: 'Konto-Zugriff', icon: 'pi pi-key', routeName: 'finance-admin-access', permission: 'finance.admin' },
       { label: 'Import', icon: 'pi pi-cloud-upload', routeName: 'finance-admin-import', permission: 'finance.admin' },
     ],
