@@ -177,8 +177,16 @@ async function processAccount(
       updated++;
       if (!isRecentForAlerts) continue;
 
-      // Check for amount change
+      // Check for amount change. The flagged transaction must not be older
+      // than the reference transactions used to build the baseline —
+      // otherwise we'd compare an older booking against a newer baseline,
+      // which is meaningless. Skip when this tx predates the mandate's
+      // existing last_seen (i.e. a late-arriving historical record).
+      const txDateStr = tx.booking_date.slice(0, 10);
+      const txIsNotOlderThanBaseline =
+        !mandate.previous_last_seen || txDateStr >= mandate.previous_last_seen;
       if (
+        txIsNotOlderThanBaseline &&
         mandate.typical_amount !== null &&
         mandate.transaction_count >= BASELINE_MIN_TRANSACTIONS
       ) {
@@ -241,6 +249,8 @@ interface MandateRecord {
   typical_amount: string | null;
   transaction_count: number;
   isNew: boolean;
+  /** last_seen value BEFORE this tx was applied (null for new mandates). */
+  previous_last_seen: string | null;
 }
 
 async function upsertMandate(
@@ -268,7 +278,13 @@ async function upsertMandate(
         last_seen: bookingDate,
       })
       .returning({ id: financeRecurringMandate.id });
-    return { id: row.id, typical_amount: tx.amount, transaction_count: 1, isNew: true };
+    return {
+      id: row.id,
+      typical_amount: tx.amount,
+      transaction_count: 1,
+      isNew: true,
+      previous_last_seen: null,
+    };
   }
 
   // Update baseline: running median approximation via weighted average.
@@ -307,6 +323,7 @@ async function upsertMandate(
     typical_amount: existing.typical_amount,
     transaction_count: existing.transaction_count,
     isNew: false,
+    previous_last_seen: existing.last_seen ?? null,
   };
 }
 
