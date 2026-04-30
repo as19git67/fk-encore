@@ -82,12 +82,14 @@ export async function suggestTagsForTransaction(
     const inputText = buildEmbedText(tx);
 
     // 1 + 2 — embed + persist
+    // Re-throw LlmServiceUnavailableError so the worker defers the job
+    // for a later retry instead of marking it done silently.
     let vector: number[];
     try {
       vector = await embed(inputText);
     } catch (err) {
       logSkip(transactionId, "embed failed", err);
-      return false;
+      throw err;
     }
     await upsertEmbedding(transactionId, vector);
 
@@ -120,7 +122,7 @@ export async function suggestTagsForTransaction(
       });
     } catch (err) {
       logSkip(transactionId, "suggestTags failed", err);
-      return false;
+      throw err;
     }
 
     // 5 — restrict to the vocabulary seen in examples
@@ -146,6 +148,7 @@ export async function suggestTagsForTransaction(
     await persistAiTags(transactionId, accepted);
     return true;
   } catch (err) {
+    if (err instanceof LlmServiceUnavailableError) throw err;
     logSkip(transactionId, "tag-suggester crashed", err);
     return false;
   }
