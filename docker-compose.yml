@@ -278,11 +278,14 @@ services:
         condition: service_completed_successfully
     environment:
       MODELS_DIR: /models
-      LLM_MODEL_PATH: /models/llama.gguf
-      EMBEDDING_MODEL: intfloat/multilingual-e5-base
-      LLM_CTX: "8192"
-      LLM_GPU_LAYERS: "0"
-      LOG_LEVEL: INFO
+      LLM_MODEL_PATH: ${LLM_MODEL_PATH:-/models/llama.gguf}
+      LLM_MODEL_URL: ${LLM_MODEL_URL:-https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf}
+      LLM_MODEL_SHA256: ${LLM_MODEL_SHA256:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-base}
+      LLM_CTX: ${LLM_CTX:-8192}
+      LLM_GPU_LAYERS: ${LLM_GPU_LAYERS:-0}
+      LLM_THREADS: ${LLM_THREADS:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       - llm_models:/models
     healthcheck:

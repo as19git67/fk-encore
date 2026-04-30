@@ -37,7 +37,8 @@ import {
   financeTransaction,
 } from "../db/schema";
 import type { FetchResult, FintsTransactionData } from "./types";
-import { suggestTagsForTransaction } from "./tag-suggester";
+import { enqueueTagSuggestion } from "./tag-queue";
+import { triggerTagWorker } from "./tag-worker";
 
 console.log("[boot] finance/statement-persist.ts: all imports resolved");
 
@@ -167,10 +168,14 @@ export async function persistFetchResult(
       }
     }
 
-    // Kick off KI-tag suggestion for each fresh row — best effort,
-    // errors are already swallowed inside suggestTagsForTransaction.
-    for (const id of freshlyInsertedIds) {
-      void suggestTagsForTransaction(id);
+    // Enqueue AI tag suggestion for each fresh transaction — best-effort.
+    try {
+      for (const id of freshlyInsertedIds) {
+        await enqueueTagSuggestion(id);
+      }
+      if (freshlyInsertedIds.length > 0) triggerTagWorker();
+    } catch (err) {
+      console.error(`[finance] failed to enqueue tag suggestions:`, (err as Error).message);
     }
 
     // ---- Write the balance ----
