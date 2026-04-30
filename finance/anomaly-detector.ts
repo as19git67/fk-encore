@@ -561,9 +561,12 @@ export const triggerAnomalyDetection = api(
     path: "/finance/anomalies/run",
     auth: true,
   },
-  async (): Promise<AnomalyRunResult> => {
+  async ({ reset }: { reset?: boolean }): Promise<AnomalyRunResult> => {
     const auth = getAuthData()!;
     requirePermission(auth, "finance.view");
+    if (reset) {
+      await db.delete(financeAnomaly).where(isNull(financeAnomaly.acknowledged_at));
+    }
     return runAnomalyDetectionJob();
   },
 );

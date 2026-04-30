@@ -344,12 +344,12 @@ const anomalyLoading = ref(false)
 const anomalyResult = ref<AnomalyRunResult | null>(null)
 const anomalyError = ref('')
 
-async function handleRunAnomalyDetection() {
+async function handleRunAnomalyDetection(reset = false) {
   anomalyResult.value = null
   anomalyError.value = ''
   anomalyLoading.value = true
   try {
-    anomalyResult.value = await runAnomalyDetection()
+    anomalyResult.value = await runAnomalyDetection(reset)
   } catch (err: any) {
     anomalyError.value = err.message || 'Fehler bei der Anomalie-Erkennung'
   } finally {
@@ -611,15 +611,26 @@ onMounted(async () => {
         </Message>
       </div>
 
-      <Button
-        class="data-management-group__item"
-        icon="pi pi-search"
-        outlined
-        label="Anomalien jetzt erkennen"
-        :loading="anomalyLoading"
-        :disabled="anomalyLoading"
-        @click="handleRunAnomalyDetection"
-      />
+      <div class="data-management-group__item anomaly-buttons">
+        <Button
+          icon="pi pi-search"
+          outlined
+          label="Anomalien jetzt erkennen"
+          :loading="anomalyLoading"
+          :disabled="anomalyLoading"
+          @click="handleRunAnomalyDetection(false)"
+        />
+        <Button
+          icon="pi pi-refresh"
+          severity="secondary"
+          outlined
+          label="Neu berechnen"
+          title="Löscht alle offenen Anomalien und erkennt sie neu"
+          :loading="anomalyLoading"
+          :disabled="anomalyLoading"
+          @click="handleRunAnomalyDetection(true)"
+        />
+      </div>
     </div>
 
     <!-- Foto-Gruppen -->
