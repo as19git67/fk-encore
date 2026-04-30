@@ -4,8 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Tag from 'primevue/tag'
 import Message from 'primevue/message'
-import AutoComplete from 'primevue/autocomplete'
 import InputText from 'primevue/inputtext'
+import TagAutoComplete from '../../components/finance/TagAutoComplete.vue'
 import Textarea from 'primevue/textarea'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useAccountsStore } from '../../stores/finance/accounts'
@@ -21,7 +21,6 @@ const tagsStore = useTagsStore()
 
 const tx = ref<Transaction | null>(null)
 const newTag = ref<string[]>([])
-const suggestions = ref<string[]>([])
 const error = ref<string | null>(null)
 const promoting = ref<string | null>(null)
 const saving = ref(false)
@@ -79,13 +78,6 @@ function userTags() {
 }
 function aiTags() {
   return tx.value?.tags.filter((t) => t.source === 'ai') ?? []
-}
-
-function searchTags(event: { query: string }) {
-  const q = event.query.toLowerCase()
-  suggestions.value = tagsStore.items
-    .filter((t) => t.name.toLowerCase().includes(q))
-    .map((t) => t.name)
 }
 
 async function addUserTags() {
@@ -275,13 +267,9 @@ const extractedFields = computed(() => {
         <span v-if="userTags().length === 0" class="hint">Keine Tags.</span>
       </div>
       <div class="field">
-        <AutoComplete
+        <TagAutoComplete
           v-model="newTag"
-          :suggestions="suggestions"
           placeholder="Tag hinzufügen…"
-          @complete="searchTags"
-          multiple
-          typeahead
         />
         <Button
           class="add-tag-btn"

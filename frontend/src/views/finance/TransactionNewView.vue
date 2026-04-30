@@ -2,8 +2,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import InputNumber from 'primevue/inputnumber'
-import AutoComplete from 'primevue/autocomplete'
 import Button from 'primevue/button'
+import TagAutoComplete from '../../components/finance/TagAutoComplete.vue'
 import Message from 'primevue/message'
 import Select from 'primevue/select'
 import { useAccountsStore } from '../../stores/finance/accounts'
@@ -21,7 +21,6 @@ const amount = ref<number | null>(null)
 const isExpense = ref(true)
 const counterparty = ref('')
 const tags = ref<string[]>([])
-const tagSuggestions = ref<string[]>([])
 const error = ref<string | null>(null)
 const saving = ref(false)
 
@@ -44,13 +43,6 @@ onMounted(async () => {
     // best-effort
   }
 })
-
-function searchTags(event: { query: string }) {
-  const q = event.query.toLowerCase()
-  tagSuggestions.value = tagsStore.items
-    .filter((t) => t.name.toLowerCase().includes(q))
-    .map((t) => t.name)
-}
 
 function applyRecipient(r: RecentRecipient) {
   counterparty.value = r.counterparty
@@ -157,13 +149,9 @@ async function save() {
     <!-- Tags -->
     <div class="field">
       <label class="field-label">Tags</label>
-      <AutoComplete
+      <TagAutoComplete
         v-model="tags"
-        :suggestions="tagSuggestions"
         placeholder="Tags …"
-        multiple
-        typeahead
-        @complete="searchTags"
       />
     </div>
 
