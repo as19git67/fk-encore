@@ -40,7 +40,7 @@ const DUPLICATE_WINDOW_DAYS = 5;
 /** New mandates with |amount| above this threshold get a new_mandate alert. */
 const NEW_MANDATE_ALERT_AMOUNT = 100;
 /** Minimum transactions before we trust the typical_amount baseline. */
-const BASELINE_MIN_TRANSACTIONS = 5;
+const BASELINE_MIN_TRANSACTIONS = 6;
 /**
  * Recency window for anomaly emission. Mandate baselines are still updated
  * from older transactions (so the EMA reflects history), but amount_change /
@@ -54,9 +54,9 @@ const ANOMALY_RECENCY_DAYS = 60;
  * historical amounts already vary a lot (variable utility bills, irregular
  * payments) make a step-change signal unreliable. 0.15 = 15% CV.
  */
-const STABILITY_MAX_CV = 0.15;
+const STABILITY_MAX_CV = 0.10;
 /** How many recent prior amounts to sample when computing stability. */
-const STABILITY_SAMPLE_SIZE = 12;
+const STABILITY_SAMPLE_SIZE = 18;
 
 // -----------------------------------------------------------------------
 // Mandate key helpers
@@ -194,10 +194,7 @@ async function processAccount(
       const txDateStr = tx.booking_date.slice(0, 10);
       const txIsNotOlderThanBaseline =
         !mandate.previous_last_seen || txDateStr >= mandate.previous_last_seen;
-      if (
-        txIsNotOlderThanBaseline &&
-        mandate.transaction_count >= BASELINE_MIN_TRANSACTIONS
-      ) {
+      if (txIsNotOlderThanBaseline) {
         // Compare against the IMMEDIATELY previous transaction for this
         // mandate, not the smoothed EMA. This avoids flagging gradual
         // trends (e.g. 59 → 48 → 47) and only fires on real step-changes.
@@ -209,11 +206,12 @@ async function processAccount(
           const pct = prev > 0 ? diff / prev : 0;
 
           if (Math.abs(diff) >= AMOUNT_CHANGE_MIN_ABS && Math.abs(pct) >= AMOUNT_CHANGE_THRESHOLD) {
-            // Suppress when the mandate's historical amounts are already
-            // volatile — a step-change signal only matters when the prior
-            // baseline was reasonably stable.
+            // Require a stable baseline computed from real transaction data.
+            // cv===null means too few samples — do NOT fire (insufficient evidence).
+            // mandate.transaction_count is unreliable across re-runs; the CV
+            // sample-size requirement (BASELINE_MIN_TRANSACTIONS) is the true gate.
             const cv = await getMandateStabilityCV(mandate.id, tx.id, txDateStr);
-            const stable = cv === null || cv <= STABILITY_MAX_CV;
+            const stable = cv !== null && cv <= STABILITY_MAX_CV;
             if (stable) {
               const score = Math.min(1, Math.abs(pct) * 2).toFixed(4);
               const inserted = await insertAnomalyIfAbsent({
