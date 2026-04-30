@@ -28,7 +28,7 @@ watch(
 
 watch(
   () => route.name,
-  (_name, prev) => {
+  (name, prev) => {
     if (prev === 'finance-anomalies' && auth.hasPermission('finance.view')) {
       void anomalyStore.refresh()
     }

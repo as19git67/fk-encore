@@ -193,6 +193,8 @@ async function processAccount(
               current: curr,
               diff: Math.round(diff * 100) / 100,
               pct: Math.round(pct * 10000) / 100,
+              // raw sign preserved so the message builder knows debit vs. credit
+              is_credit: Number(tx.amount) > 0,
             },
           });
           if (inserted) anomalies++;
@@ -598,7 +600,8 @@ function buildMessage(
       const curr = Math.abs(Number(details.current ?? 0)).toFixed(2);
       const absDiff = Math.abs(Number(details.diff ?? 0)).toFixed(2);
       const absPct = Math.abs(Number(details.pct ?? 0)).toFixed(2);
-      const isCredit = Number(details.current ?? 0) > 0;
+      // is_credit is stored explicitly; fall back to false (= debit) for old records
+      const isCredit = details.is_credit === true;
       const dir = Number(details.diff ?? 0) > 0 ? "erhöht" : "gesenkt";
       const kind = isCredit ? "Gutschrift" : "Lastschrift";
       return `Die ${kind} von ${name} hat sich um ${absDiff} € (${absPct} %) von ${prev} € auf ${curr} € ${dir}.`;
