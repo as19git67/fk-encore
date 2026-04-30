@@ -541,6 +541,9 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
                 s for s in raw_sections
                 if isinstance(s, dict) and s.get("slug") in allowed
             ]
+        # LLM sometimes emits null for numeric confidence fields — coerce to defaults.
+        if data.get("tax_year_confidence") is None:
+            data["tax_year_confidence"] = 0.0
 
     # Coerce into ClassifyResponse; missing fields raise a 422 back to the caller
     # which is fine — that is a bug signal worth surfacing.
