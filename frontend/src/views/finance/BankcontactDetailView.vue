@@ -547,7 +547,7 @@ async function del() {
             <Button
               class="account-open"
               label="Öffnen"
-              icon="pi pi-arrow-right"
+              icon="pi pi-external-link"
               severity="secondary"
               text
               aria-label="Konto öffnen"
@@ -691,6 +691,10 @@ async function del() {
   padding: 0.5rem 0.75rem;
   border-radius: 0.25rem;
   background: var(--p-content-hover-background);
+  border-bottom: 1px solid var(--p-content-border-color);
+}
+.account-item:last-child {
+  border-bottom: none;
 }
 .account-body {
   flex: 1;
