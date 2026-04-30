@@ -65,12 +65,27 @@ async function acknowledgeAll() {
   }
 }
 
-function openTransaction(item: AnomalyItem) {
-  if (!item.transaction_id) return
+function openTransactionId(id: number) {
   void router.push({
     name: 'finance-transaction-detail',
-    params: { id: item.transaction_id },
+    params: { id },
   })
+}
+
+/**
+ * For duplicate anomalies we know two transactions: the newer one (item.transaction_id)
+ * and the original (details.original_transaction_id). Other types have just one.
+ */
+function transactionLinks(item: AnomalyItem): { id: number; label: string }[] {
+  const links: { id: number; label: string }[] = []
+  if (item.type === 'duplicate') {
+    const original = Number(item.details.original_transaction_id ?? 0)
+    if (original > 0) links.push({ id: original, label: 'Original öffnen' })
+    if (item.transaction_id) links.push({ id: item.transaction_id, label: 'Duplikat öffnen' })
+  } else if (item.transaction_id) {
+    links.push({ id: item.transaction_id, label: 'Buchung öffnen' })
+  }
+  return links
 }
 
 function formatDate(iso: string): string {
@@ -177,13 +192,14 @@ function formatAmountChange(item: AnomalyItem): string | null {
           </div>
           <div class="card-actions">
             <Button
-              v-if="item.transaction_id"
+              v-for="link in transactionLinks(item)"
+              :key="link.id"
               icon="pi pi-external-link"
-              label="Buchung öffnen"
+              :label="link.label"
               severity="secondary"
               text
               size="small"
-              @click="openTransaction(item)"
+              @click="openTransactionId(link.id)"
             />
             <Button
               icon="pi pi-check"
