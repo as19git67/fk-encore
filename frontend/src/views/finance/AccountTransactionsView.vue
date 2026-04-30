@@ -574,7 +574,7 @@ function goBack() {
           :options="tagOptions"
           option-label="label"
           option-value="value"
-          placeholder="Mögliche Kategorien auswählen"
+          placeholder="Tags auswählen"
           :max-selected-labels="2"
           filter
           display="chip"
