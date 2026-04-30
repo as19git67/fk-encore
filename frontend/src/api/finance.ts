@@ -661,3 +661,15 @@ export async function cancelPendingFinanceTagJobs(): Promise<{ cancelled: number
 export async function reenqueueAllFinanceTagJobs(): Promise<{ enqueued: number }> {
   return apiFetch('/finance/tag-queue/reenqueue', { method: 'POST', body: '{}' })
 }
+
+export interface AnomalyRunResult {
+  accounts: number
+  transactions_processed: number
+  mandates_created: number
+  mandates_updated: number
+  anomalies_created: number
+}
+
+export async function runAnomalyDetection(): Promise<AnomalyRunResult> {
+  return apiFetch('/finance/anomalies/run', { method: 'POST', body: '{}' })
+}
