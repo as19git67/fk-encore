@@ -20,6 +20,7 @@ import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useOverviewStore } from '../../stores/finance/overview'
 import { useTagsStore } from '../../stores/finance/tags'
 import { useTxSelectionStore } from '../../stores/finance/selection'
+import { useTxFiltersStore } from '../../stores/finance/txFilters'
 import DateRangePresets from '../../components/DateRangePresets.vue'
 import type {
   ListTransactionsQuery,
@@ -34,6 +35,7 @@ const txStore = useTransactionsStore()
 const overviewStore = useOverviewStore()
 const tagsStore = useTagsStore()
 const selectionStore = useTxSelectionStore()
+const filtersStore = useTxFiltersStore()
 
 const PAGE_LIMIT = 500
 
@@ -147,34 +149,16 @@ function formatShortDate(iso: string | null): string | null {
 
 // ── Filter state ──────────────────────────────────────────────────────
 //
-// Local form state — only flushed to the actual query on "Suchen".
-// Keeps the form decoupled from the live listing so users can fiddle
-// with the inputs without re-firing the API on every change. Same UX
-// approach as the photos / documents filters.
+// Persisted in useTxFiltersStore so that navigating to BatchTagView
+// and back does not reset the user's search criteria.
 
 const filterPanelOpen = ref(false)
-const formQuery = ref('')
-const formTags = ref<string[]>([])
-const formFrom = ref<Date | null>(null)
-const formTo = ref<Date | null>(null)
+const formQuery = computed({ get: () => filtersStore.formQuery, set: (v) => { filtersStore.formQuery = v } })
+const formTags = computed({ get: () => filtersStore.formTags, set: (v) => { filtersStore.formTags = v } })
+const formFrom = computed({ get: () => filtersStore.formFrom, set: (v) => { filtersStore.formFrom = v } })
+const formTo = computed({ get: () => filtersStore.formTo, set: (v) => { filtersStore.formTo = v } })
 
-// What is actually applied to the listing right now.
-const appliedFilters = ref<{
-  q: string
-  tags: string[]
-  from: Date | null
-  to: Date | null
-}>({ q: '', tags: [], from: null, to: null })
-
-const hasActiveFilters = computed(() => {
-  const f = appliedFilters.value
-  return (
-    f.q.trim().length > 0 ||
-    f.tags.length > 0 ||
-    f.from !== null ||
-    f.to !== null
-  )
-})
+const hasActiveFilters = computed(() => filtersStore.hasActiveFilters)
 
 function isoDate(d: Date): string {
   const y = d.getFullYear()
@@ -201,11 +185,10 @@ function buildQuery(): ListTransactionsQuery {
     if (ids.length === 0) return { __empty: true } as unknown as ListTransactionsQuery
     base.accountIds = ids
   }
-  const f = appliedFilters.value
-  if (f.q.trim().length > 0) base.q = f.q.trim()
-  if (f.tags.length > 0) base.tags = f.tags
-  if (f.from) base.from = isoDate(f.from)
-  if (f.to) base.to = isoDate(f.to)
+  if (filtersStore.appliedQuery.trim().length > 0) base.q = filtersStore.appliedQuery.trim()
+  if (filtersStore.appliedTags.length > 0) base.tags = filtersStore.appliedTags
+  if (filtersStore.appliedFrom) base.from = isoDate(filtersStore.appliedFrom)
+  if (filtersStore.appliedTo) base.to = isoDate(filtersStore.appliedTo)
   return base
 }
 
@@ -222,21 +205,12 @@ async function loadTransactions() {
 }
 
 function applyFilters() {
-  appliedFilters.value = {
-    q: formQuery.value,
-    tags: [...formTags.value],
-    from: formFrom.value,
-    to: formTo.value,
-  }
+  filtersStore.apply()
   void loadTransactions()
 }
 
 function clearFilters() {
-  formQuery.value = ''
-  formTags.value = []
-  formFrom.value = null
-  formTo.value = null
-  appliedFilters.value = { q: '', tags: [], from: null, to: null }
+  filtersStore.clear()
   void loadTransactions()
 }
 
