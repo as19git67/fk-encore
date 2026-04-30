@@ -163,9 +163,10 @@ app = FastAPI(title="llm-service", version="1.0.0", lifespan=lifespan)
 # concurrently on one CPU only causes contention — while keeping the event
 # loop free to serve the healthcheck.
 _inference_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="llm-inference")
-# Semaphore mirrors max_workers=1 so that a second request gets an immediate
-# HTTP 503 instead of silently queuing behind the running inference job.
-# Initialised lazily on first use so it binds to the correct event loop.
+# Semaphore mirrors max_workers=1.  Callers wait up to acquire_timeout seconds
+# before receiving a 503, so short operations (embed ~1 s) don't spuriously
+# block a concurrent classify.  Initialised lazily on first use so it binds
+# to the correct event loop.
 _inference_sem: asyncio.Semaphore | None = None
 
 
@@ -178,15 +179,32 @@ def _get_inference_sem() -> asyncio.Semaphore:
 _T = TypeVar("_T")
 
 
-async def _run_blocking(func: Callable[..., _T], *args: Any, **kwargs: Any) -> _T:
+async def _run_blocking(
+    func: Callable[..., _T],
+    *args: Any,
+    acquire_timeout: float = 10.0,
+    **kwargs: Any,
+) -> _T:
+    """Run *func* in the shared single-worker executor.
+
+    Waits up to *acquire_timeout* seconds for the inference semaphore.  This
+    lets short operations (e.g. a ~1 s embed) finish without immediately
+    returning 503 to a caller that arrived a moment too late.  Callers that
+    genuinely hit a busy LLM (10–60 s inference) still get a fast 503 once
+    the timeout elapses.
+    """
     sem = _get_inference_sem()
-    if sem.locked():
+    try:
+        await asyncio.wait_for(sem.acquire(), timeout=acquire_timeout)
+    except asyncio.TimeoutError:
         raise HTTPException(status_code=503, detail="inference busy")
-    async with sem:
+    try:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             _inference_executor, functools.partial(func, *args, **kwargs)
         )
+    finally:
+        sem.release()
 
 
 # ─── UTF-8 repair ──────────────────────────────────────────────────────────────
