@@ -674,6 +674,13 @@ export async function runAnomalyDetection(): Promise<AnomalyRunResult> {
   return apiFetch('/finance/anomalies/run', { method: 'POST', body: '{}' })
 }
 
+export interface DuplicateTransactionInfo {
+  id: number
+  booking_date: string
+  amount: string
+  purpose: string | null
+}
+
 export interface AnomalyItem {
   id: number
   type: 'amount_change' | 'duplicate' | 'new_mandate' | string
@@ -684,6 +691,7 @@ export interface AnomalyItem {
   mandate_id: number | null
   counterparty: string | null
   message: string
+  duplicate_transactions?: DuplicateTransactionInfo[]
 }
 
 export interface ListAnomaliesResponse {
