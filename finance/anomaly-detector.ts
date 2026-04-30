@@ -548,6 +548,13 @@ schedule({
 // Public API endpoints
 // -----------------------------------------------------------------------
 
+export interface DuplicateTransactionInfo {
+  id: number;
+  booking_date: string;
+  amount: string;
+  purpose: string | null;
+}
+
 export interface AnomalyItem {
   id: number;
   type: string;
@@ -559,6 +566,8 @@ export interface AnomalyItem {
   counterparty: string | null;
   /** Human-readable German description generated from details. */
   message: string;
+  /** Only set for type=duplicate: the two (or more) matching transactions. */
+  duplicate_transactions?: DuplicateTransactionInfo[];
 }
 
 export interface ListAnomaliesResponse {
@@ -609,17 +618,62 @@ export const listAnomalies = api(
       .orderBy(sql`${financeAnomaly.created_at} DESC`)
       .limit(200);
 
-    const anomalies = rows.map((r) => ({
-      id: r.id,
-      type: r.type,
-      score: Number(r.score),
-      details: (r.details ?? {}) as Record<string, unknown>,
-      created_at: r.created_at,
-      transaction_id: r.transaction_id,
-      mandate_id: r.mandate_id,
-      counterparty: r.counterparty ?? null,
-      message: buildMessage(r.type, r.details as Record<string, unknown>, r.counterparty),
-    }));
+    // Collect all transaction IDs needed for duplicate enrichment
+    const duplicateRows = rows.filter((r) => r.type === "duplicate");
+    const dupTxIds = new Set<number>();
+    for (const r of duplicateRows) {
+      if (r.transaction_id) dupTxIds.add(r.transaction_id);
+      const orig = Number((r.details as Record<string, unknown>)?.original_transaction_id ?? 0);
+      if (orig > 0) dupTxIds.add(orig);
+    }
+
+    // Batch-load all relevant transactions in one query
+    const txMap = new Map<number, DuplicateTransactionInfo>();
+    if (dupTxIds.size > 0) {
+      const txRows = await db
+        .select({
+          id: financeTransaction.id,
+          booking_date: financeTransaction.booking_date,
+          amount: financeTransaction.amount,
+          purpose: financeTransaction.purpose,
+        })
+        .from(financeTransaction)
+        .where(inArray(financeTransaction.id, [...dupTxIds]));
+      for (const t of txRows) {
+        txMap.set(t.id, {
+          id: t.id,
+          booking_date: t.booking_date,
+          amount: t.amount,
+          purpose: t.purpose ?? null,
+        });
+      }
+    }
+
+    const anomalies = rows.map((r) => {
+      const details = (r.details ?? {}) as Record<string, unknown>;
+      let duplicate_transactions: DuplicateTransactionInfo[] | undefined;
+      if (r.type === "duplicate") {
+        const txs: DuplicateTransactionInfo[] = [];
+        const origId = Number(details.original_transaction_id ?? 0);
+        if (origId > 0 && txMap.has(origId)) txs.push(txMap.get(origId)!);
+        if (r.transaction_id && txMap.has(r.transaction_id)) txs.push(txMap.get(r.transaction_id)!);
+        // Sort oldest first so the list reads chronologically
+        txs.sort((a, b) => a.booking_date.localeCompare(b.booking_date));
+        if (txs.length > 0) duplicate_transactions = txs;
+      }
+      return {
+        id: r.id,
+        type: r.type,
+        score: Number(r.score),
+        details,
+        created_at: r.created_at,
+        transaction_id: r.transaction_id,
+        mandate_id: r.mandate_id,
+        counterparty: r.counterparty ?? null,
+        message: buildMessage(r.type, details, r.counterparty),
+        duplicate_transactions,
+      };
+    });
 
     return { anomalies, total: anomalies.length };
   },

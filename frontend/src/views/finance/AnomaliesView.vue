@@ -9,6 +9,7 @@ import {
   acknowledgeAnomaly,
   getMandateHistory,
   type AnomalyItem,
+  type DuplicateTransactionInfo,
   type MandateHistoryItem,
 } from '../../api/finance'
 
@@ -77,10 +78,6 @@ function openTransactionId(id: number) {
   })
 }
 
-/**
- * For duplicate anomalies we know two transactions: the newer one (item.transaction_id)
- * and the original (details.original_transaction_id). Other types have just one.
- */
 async function toggleHistory(item: AnomalyItem) {
   if (!item.mandate_id) return
   if (expandedHistory.value.has(item.id)) {
@@ -110,16 +107,15 @@ function formatAmount(raw: string): string {
   }).format(n)
 }
 
-function transactionLinks(item: AnomalyItem): { id: number; label: string }[] {
-  const links: { id: number; label: string }[] = []
-  if (item.type === 'duplicate') {
-    const original = Number(item.details.original_transaction_id ?? 0)
-    if (original > 0) links.push({ id: original, label: 'Original öffnen' })
-    if (item.transaction_id) links.push({ id: item.transaction_id, label: 'Duplikat öffnen' })
-  } else if (item.transaction_id) {
-    links.push({ id: item.transaction_id, label: 'Buchung öffnen' })
-  }
-  return links
+/** For non-duplicate types: single link to the transaction. */
+function singleTransactionId(item: AnomalyItem): number | null {
+  if (item.type === 'duplicate') return null
+  return item.transaction_id
+}
+
+function dupRowLabel(tx: DuplicateTransactionInfo, item: AnomalyItem): string {
+  const origId = Number(item.details.original_transaction_id ?? 0)
+  return tx.id === origId ? 'Original' : 'Duplikat'
 }
 
 function formatDate(iso: string): string {
@@ -268,16 +264,33 @@ function formatAmountChange(item: AnomalyItem): string | null {
             </div>
           </div>
 
+          <!-- Inline list for duplicate anomalies -->
+          <ul
+            v-if="item.type === 'duplicate' && item.duplicate_transactions?.length"
+            class="dup-list"
+          >
+            <li
+              v-for="tx in item.duplicate_transactions"
+              :key="tx.id"
+              class="dup-row"
+              @click="openTransactionId(tx.id)"
+            >
+              <span class="dup-label">{{ dupRowLabel(tx, item) }}</span>
+              <span class="history-date">{{ formatDate(tx.booking_date) }}</span>
+              <span class="history-amount">{{ formatAmount(tx.amount) }}</span>
+              <span class="history-purpose">{{ tx.purpose ?? '' }}</span>
+            </li>
+          </ul>
+
           <div class="card-actions">
             <Button
-              v-for="link in transactionLinks(item)"
-              :key="link.id"
+              v-if="singleTransactionId(item)"
               icon="pi pi-external-link"
-              :label="link.label"
+              label="Buchung öffnen"
               severity="secondary"
               text
               size="small"
-              @click="openTransactionId(link.id)"
+              @click="openTransactionId(singleTransactionId(item)!)"
             />
             <Button
               icon="pi pi-check"
@@ -418,6 +431,37 @@ function formatAmountChange(item: AnomalyItem): string | null {
   display: flex;
   gap: 0.5rem;
   margin-top: 0.25rem;
+}
+
+.dup-list {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  border-top: 1px solid var(--p-content-border-color);
+  padding-top: 0.4rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.dup-row {
+  display: grid;
+  grid-template-columns: 4.5rem 6.5rem 6.5rem 1fr;
+  gap: 0.5rem;
+  padding: 0.35rem 0.25rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  align-items: baseline;
+  font-size: 0.9rem;
+}
+.dup-row:hover {
+  background: var(--p-content-hover-background);
+}
+
+.dup-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--p-text-muted-color);
 }
 
 .history-section {
