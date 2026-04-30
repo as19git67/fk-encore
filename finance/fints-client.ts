@@ -81,6 +81,39 @@ export interface FintsClientSurface {
     tanReference: string,
     tan?: string,
   ): Promise<import("lib-fints").AccountBalanceResponse>;
+  canGetCreditCardStatements(accountNumber?: string): boolean;
+  getCreditCardStatements(
+    accountNumber: string,
+    from?: Date,
+  ): Promise<import("lib-fints").StatementResponse & {
+    balance?: { balance: number; date: Date; currency: string };
+    statements?: Array<{
+      transactionDate: Date;
+      valueDate: Date;
+      currency: string;
+      amount: number;
+      purpose: string;
+      originalCurrency: string;
+      originalAmount: number;
+      exchangeRate: number;
+    }>;
+  }>;
+  getCreditCardStatementsWithTan(
+    tanReference: string,
+    tan?: string,
+  ): Promise<import("lib-fints").StatementResponse & {
+    balance?: { balance: number; date: Date; currency: string };
+    statements?: Array<{
+      transactionDate: Date;
+      valueDate: Date;
+      currency: string;
+      amount: number;
+      purpose: string;
+      originalCurrency: string;
+      originalAmount: number;
+      exchangeRate: number;
+    }>;
+  }>;
 }
 
 /** Constructor shape the wrapper needs; the default uses `lib-fints`. */
@@ -870,9 +903,28 @@ async function fetchOneAccount(
     return { snapshot };
   }
 
+  // Use the dedicated credit-card FinTS transaction (DKKKU) for
+  // kreditkarte accounts when the bank supports it. This returns
+  // CreditCardStatement objects which carry original-currency fields
+  // and are structured differently from MT940/CAMT statements.
+  const isCreditCard = accountKind === "kreditkarte";
+  const useCreditCardPath =
+    isCreditCard &&
+    typeof client.canGetCreditCardStatements === "function" &&
+    client.canGetCreditCardStatements(account.accountNumber);
+
   try {
     let stmtResp;
-    if (opts.from) {
+    if (useCreditCardPath) {
+      console.log(
+        `[fints] credit-card statements ${account.accountNumber}` +
+          (opts.from ? `: from=${opts.from.toISOString().slice(0, 10)}` : ""),
+      );
+      stmtResp = await client.getCreditCardStatements(
+        account.accountNumber,
+        opts.from,
+      );
+    } else if (opts.from) {
       console.log(
         `[fints] statements ${account.accountNumber}: from=` +
           opts.from.toISOString().slice(0, 10),
@@ -895,7 +947,9 @@ async function fetchOneAccount(
       stmtResp = await pollDecoupled(
         client,
         stmtResp,
-        (ref) => client.getAccountStatementsWithTan(ref),
+        useCreditCardPath
+          ? (ref) => client.getCreditCardStatementsWithTan(ref)
+          : (ref) => client.getAccountStatementsWithTan(ref),
         sleep,
       );
     }
@@ -929,6 +983,24 @@ async function fetchOneAccount(
       snapshot.errors.push(
         `statements-error:${first?.code ?? "unknown"} ${first?.text ?? ""}`.trim(),
       );
+    } else if (useCreditCardPath) {
+      const ccStmt = stmtResp as typeof stmtResp & {
+        statements?: Array<{
+          transactionDate: Date; valueDate: Date; currency: string;
+          amount: number; purpose: string; originalCurrency: string;
+          originalAmount: number; exchangeRate: number;
+        }>;
+        balance?: { balance: number; date: Date; currency: string };
+      };
+      snapshot.transactions = mapCreditCardStatements(ccStmt.statements ?? []);
+      // Credit card response also carries the current balance.
+      if (ccStmt.balance) {
+        snapshot.balance = {
+          asOf: toIsoDate(ccStmt.balance.date),
+          amount: toAmountString(ccStmt.balance.balance),
+          currency: ccStmt.balance.currency || currency,
+        };
+      }
     } else {
       snapshot.transactions = mapStatements(stmtResp.statements ?? [], currency);
     }
@@ -936,6 +1008,12 @@ async function fetchOneAccount(
     snapshot.errors.push(
       `statements-exception:${(err as Error).message ?? String(err)}`,
     );
+  }
+
+  // Credit card path already populates balance from getCreditCardStatements.
+  // Skip the separate HKSAL balance call to avoid a potential error.
+  if (useCreditCardPath && snapshot.balance) {
+    return { snapshot };
   }
 
   try {
@@ -1032,12 +1110,16 @@ export async function resumeFetchAfterTan(
     errors: [],
   };
 
+  const isCCResume =
+    accountKind === "kreditkarte" &&
+    typeof client.canGetCreditCardStatements === "function" &&
+    client.canGetCreditCardStatements(currentAccount.accountNumber);
+
   let stmtResp;
   try {
-    stmtResp = await client.getAccountStatementsWithTan(
-      ctx.tanReference,
-      ctx.tan,
-    );
+    stmtResp = isCCResume
+      ? await client.getCreditCardStatementsWithTan(ctx.tanReference, ctx.tan)
+      : await client.getAccountStatementsWithTan(ctx.tanReference, ctx.tan);
   } catch (err) {
     snapshot.errors.push(
       `statements-exception:${(err as Error).message ?? String(err)}`,
@@ -1051,7 +1133,9 @@ export async function resumeFetchAfterTan(
     stmtResp = await pollDecoupled(
       client,
       stmtResp,
-      (ref) => client.getAccountStatementsWithTan(ref),
+      isCCResume
+        ? (ref) => client.getCreditCardStatementsWithTan(ref)
+        : (ref) => client.getAccountStatementsWithTan(ref),
       sleep,
     );
   }
@@ -1085,6 +1169,23 @@ export async function resumeFetchAfterTan(
     snapshot.errors.push(
       `statements-error:${first?.code ?? "unknown"} ${first?.text ?? ""}`.trim(),
     );
+  } else if (isCCResume) {
+    const ccStmt = stmtResp as typeof stmtResp & {
+      statements?: Array<{
+        transactionDate: Date; valueDate: Date; currency: string;
+        amount: number; purpose: string; originalCurrency: string;
+        originalAmount: number; exchangeRate: number;
+      }>;
+      balance?: { balance: number; date: Date; currency: string };
+    };
+    snapshot.transactions = mapCreditCardStatements(ccStmt.statements ?? []);
+    if (ccStmt.balance) {
+      snapshot.balance = {
+        asOf: toIsoDate(ccStmt.balance.date),
+        amount: toAmountString(ccStmt.balance.balance),
+        currency: ccStmt.balance.currency || currency,
+      };
+    }
   } else {
     snapshot.transactions = mapStatements(
       stmtResp.statements ?? [],
@@ -1213,6 +1314,42 @@ const GERMAN_KIND_LABEL: Record<string, string> = {
   sonstige: "Konto",
 };
 
+function mapCreditCardStatements(
+  statements: Array<{
+    transactionDate: Date;
+    valueDate: Date;
+    currency: string;
+    amount: number;
+    purpose: string;
+    originalCurrency: string;
+    originalAmount: number;
+    exchangeRate: number;
+  }>,
+): FintsTransactionData[] {
+  return statements.map((s) => {
+    const isForeignCurrency =
+      s.originalCurrency &&
+      s.originalCurrency !== s.currency &&
+      s.originalAmount !== 0;
+    return {
+      bookingDate: toIsoDate(s.transactionDate),
+      valueDate: toIsoDate(s.valueDate),
+      amount: toAmountString(s.amount),
+      currency: s.currency,
+      purpose: s.purpose?.trim() || null,
+      counterparty: null,
+      counterpartyIban: null,
+      bankRef: null,
+      originalAmount: isForeignCurrency ? toAmountString(s.originalAmount) : null,
+      originalCurrency: isForeignCurrency ? s.originalCurrency : null,
+      exchangeRate: isForeignCurrency && s.exchangeRate
+        ? s.exchangeRate.toFixed(6)
+        : null,
+      raw: s as unknown as Record<string, unknown>,
+    };
+  });
+}
+
 function mapStatements(
   statements: Array<{
     transactions?: Array<{
@@ -1241,6 +1378,9 @@ function mapStatements(
         counterparty: t.remoteName?.trim() || null,
         counterpartyIban: t.remoteIdentifier?.trim() || null,
         bankRef: t.bankReference?.trim() || null,
+        originalAmount: null,
+        originalCurrency: null,
+        exchangeRate: null,
         raw: t as Record<string, unknown>,
       });
     }
