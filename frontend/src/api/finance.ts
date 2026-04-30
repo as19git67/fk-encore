@@ -764,3 +764,20 @@ export async function listAnomalies(): Promise<ListAnomaliesResponse> {
 export async function acknowledgeAnomaly(id: number): Promise<{ ok: boolean }> {
   return apiFetch(`/finance/anomalies/${id}/acknowledge`, { method: 'POST', body: '{}' })
 }
+
+export interface MandateHistoryItem {
+  id: number
+  booking_date: string
+  amount: string
+  purpose: string | null
+}
+
+export interface MandateHistoryResponse {
+  mandate_id: number
+  counterparty: string | null
+  items: MandateHistoryItem[]
+}
+
+export async function getMandateHistory(mandateId: number): Promise<MandateHistoryResponse> {
+  return apiFetch(`/finance/mandates/${mandateId}/history`)
+}

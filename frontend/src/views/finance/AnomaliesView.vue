@@ -7,7 +7,9 @@ import SelectButton from 'primevue/selectbutton'
 import {
   listAnomalies,
   acknowledgeAnomaly,
+  getMandateHistory,
   type AnomalyItem,
+  type MandateHistoryItem,
 } from '../../api/finance'
 
 const router = useRouter()
@@ -16,6 +18,9 @@ const anomalies = ref<AnomalyItem[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 const acknowledging = ref<Set<number>>(new Set())
+const expandedHistory = ref<Set<number>>(new Set())
+const historyByAnomaly = ref<Map<number, MandateHistoryItem[]>>(new Map())
+const loadingHistory = ref<Set<number>>(new Set())
 
 const typeFilter = ref<string>('all')
 const typeOptions = [
@@ -76,6 +81,35 @@ function openTransactionId(id: number) {
  * For duplicate anomalies we know two transactions: the newer one (item.transaction_id)
  * and the original (details.original_transaction_id). Other types have just one.
  */
+async function toggleHistory(item: AnomalyItem) {
+  if (!item.mandate_id) return
+  if (expandedHistory.value.has(item.id)) {
+    expandedHistory.value.delete(item.id)
+    return
+  }
+  expandedHistory.value.add(item.id)
+  if (historyByAnomaly.value.has(item.id)) return
+  loadingHistory.value.add(item.id)
+  try {
+    const res = await getMandateHistory(item.mandate_id)
+    historyByAnomaly.value.set(item.id, res.items)
+  } catch (e: any) {
+    error.value = e?.message ?? 'Verlauf konnte nicht geladen werden'
+    expandedHistory.value.delete(item.id)
+  } finally {
+    loadingHistory.value.delete(item.id)
+  }
+}
+
+function formatAmount(raw: string): string {
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return raw
+  return new Intl.NumberFormat('de-DE', {
+    style: 'currency',
+    currency: 'EUR',
+  }).format(n)
+}
+
 function transactionLinks(item: AnomalyItem): { id: number; label: string }[] {
   const links: { id: number; label: string }[] = []
   if (item.type === 'duplicate') {
@@ -190,6 +224,50 @@ function formatAmountChange(item: AnomalyItem): string | null {
           <div v-if="formatAmountChange(item)" class="diff">
             {{ formatAmountChange(item) }}
           </div>
+
+          <div
+            v-if="item.type === 'amount_change' && item.mandate_id"
+            class="history-section"
+          >
+            <button
+              type="button"
+              class="history-toggle"
+              @click="toggleHistory(item)"
+            >
+              <i
+                :class="[
+                  'pi',
+                  expandedHistory.has(item.id) ? 'pi-chevron-down' : 'pi-chevron-right',
+                ]"
+              />
+              Verlauf {{ expandedHistory.has(item.id) ? 'ausblenden' : 'anzeigen' }}
+            </button>
+            <div v-if="expandedHistory.has(item.id)" class="history-body">
+              <div
+                v-if="loadingHistory.has(item.id) && !historyByAnomaly.get(item.id)"
+                class="history-loading"
+              >
+                Lädt …
+              </div>
+              <ul
+                v-else-if="(historyByAnomaly.get(item.id)?.length ?? 0) > 0"
+                class="history-list"
+              >
+                <li
+                  v-for="h in historyByAnomaly.get(item.id)"
+                  :key="h.id"
+                  class="history-row"
+                  @click="openTransactionId(h.id)"
+                >
+                  <span class="history-date">{{ formatDate(h.booking_date) }}</span>
+                  <span class="history-amount">{{ formatAmount(h.amount) }}</span>
+                  <span class="history-purpose">{{ h.purpose ?? '' }}</span>
+                </li>
+              </ul>
+              <div v-else class="history-empty">Keine weiteren Buchungen.</div>
+            </div>
+          </div>
+
           <div class="card-actions">
             <Button
               v-for="link in transactionLinks(item)"
@@ -340,5 +418,88 @@ function formatAmountChange(item: AnomalyItem): string | null {
   display: flex;
   gap: 0.5rem;
   margin-top: 0.25rem;
+}
+
+.history-section {
+  margin-top: 0.25rem;
+}
+
+.history-toggle {
+  background: none;
+  border: none;
+  padding: 0.25rem 0;
+  color: var(--p-text-muted-color);
+  font-size: 0.85rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.history-toggle:hover {
+  color: var(--p-text-color);
+}
+
+.history-body {
+  margin-top: 0.4rem;
+  border-top: 1px solid var(--p-content-border-color);
+  padding-top: 0.4rem;
+}
+
+.history-loading,
+.history-empty {
+  font-size: 0.85rem;
+  color: var(--p-text-muted-color);
+  padding: 0.4rem 0;
+}
+
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.history-row {
+  display: grid;
+  grid-template-columns: 6.5rem 6.5rem 1fr;
+  gap: 0.5rem;
+  padding: 0.35rem 0.25rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  align-items: baseline;
+  font-size: 0.9rem;
+}
+.history-row:hover {
+  background: var(--p-content-hover-background);
+}
+
+.history-date {
+  color: var(--p-text-muted-color);
+  font-variant-numeric: tabular-nums;
+}
+
+.history-amount {
+  font-family: monospace;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.history-purpose {
+  color: var(--p-text-muted-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 540px) {
+  .history-row {
+    grid-template-columns: 5.5rem 6rem;
+    grid-template-rows: auto auto;
+  }
+  .history-purpose {
+    grid-column: 1 / -1;
+    white-space: normal;
+  }
 }
 </style>

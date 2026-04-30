@@ -585,6 +585,87 @@ export const acknowledgeAnomaly = api(
 );
 
 // -----------------------------------------------------------------------
+// Mandate history: recent transactions for a given mandate, used by the UI
+// to show the trend behind an amount_change anomaly.
+// -----------------------------------------------------------------------
+
+export interface MandateHistoryItem {
+  id: number;
+  booking_date: string;
+  amount: string;
+  purpose: string | null;
+}
+
+export interface MandateHistoryResponse {
+  mandate_id: number;
+  counterparty: string | null;
+  items: MandateHistoryItem[];
+}
+
+export const getMandateHistory = api(
+  {
+    expose: true,
+    method: "GET",
+    path: "/finance/mandates/:mandateId/history",
+    auth: true,
+  },
+  async ({ mandateId }: { mandateId: number }): Promise<MandateHistoryResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+
+    const accessible = await db
+      .select({ id: financeAccountAccess.account_id })
+      .from(financeAccountAccess)
+      .where(eq(financeAccountAccess.user_id, Number(auth.userID)));
+    const accountIds = accessible.map((a) => a.id);
+    if (accountIds.length === 0) throw APIError.notFound("mandate not found");
+
+    const [mandate] = await db
+      .select()
+      .from(financeRecurringMandate)
+      .where(
+        and(
+          eq(financeRecurringMandate.id, mandateId),
+          inArray(financeRecurringMandate.account_id, accountIds),
+        ),
+      )
+      .limit(1);
+    if (!mandate) throw APIError.notFound("mandate not found");
+
+    // Match transactions belonging to this mandate using the same fallback
+    // chain that mandates were keyed on (mandate_ref+creditor_id → iban → name).
+    const rows = await db.execute<{ id: number; booking_date: string; amount: string; purpose: string | null }>(sql`
+      SELECT ft.id, ft.booking_date, ft.amount, ft.purpose
+      FROM finance_transaction ft
+      WHERE ft.account_id = ${mandate.account_id}
+        AND (
+          (${mandate.mandate_ref}::text IS NOT NULL AND ft.mandate_ref = ${mandate.mandate_ref})
+          OR (${mandate.mandate_ref}::text IS NULL
+              AND ${mandate.counterparty_iban}::text IS NOT NULL
+              AND ft.counterparty_iban = ${mandate.counterparty_iban})
+          OR (${mandate.mandate_ref}::text IS NULL
+              AND ${mandate.counterparty_iban}::text IS NULL
+              AND ${mandate.counterparty}::text IS NOT NULL
+              AND ft.counterparty = ${mandate.counterparty})
+        )
+      ORDER BY ft.booking_date DESC
+      LIMIT 24
+    `);
+
+    return {
+      mandate_id: mandate.id,
+      counterparty: mandate.counterparty,
+      items: rows.rows.map((r) => ({
+        id: r.id,
+        booking_date: r.booking_date,
+        amount: r.amount,
+        purpose: r.purpose ?? null,
+      })),
+    };
+  },
+);
+
+// -----------------------------------------------------------------------
 // Message builder
 // -----------------------------------------------------------------------
 
