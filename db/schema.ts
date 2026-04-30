@@ -1298,6 +1298,57 @@ export const financeTagQueue = pgTable(
   ]
 );
 
+// ========== Finance anomaly detection ==========
+
+export const financeRecurringMandate = pgTable(
+  "finance_recurring_mandate",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    account_id: integer("account_id")
+      .notNull()
+      .references(() => financeAccount.id, { onDelete: "cascade" }),
+    mandate_ref: text("mandate_ref"),
+    creditor_id: text("creditor_id"),
+    counterparty_iban: text("counterparty_iban"),
+    counterparty: text("counterparty"),
+    typical_amount: numeric("typical_amount", { precision: 12, scale: 2 }),
+    typical_interval_days: integer("typical_interval_days"),
+    transaction_count: integer("transaction_count").notNull().default(0),
+    first_seen: text("first_seen"),
+    last_seen: text("last_seen"),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+);
+
+export const financeAnomaly = pgTable(
+  "finance_anomaly",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    account_id: integer("account_id")
+      .notNull()
+      .references(() => financeAccount.id, { onDelete: "cascade" }),
+    transaction_id: bigserial("transaction_id", { mode: "number" })
+      .references(() => financeTransaction.id, { onDelete: "set null" }),
+    mandate_id: bigserial("mandate_id", { mode: "number" })
+      .references(() => financeRecurringMandate.id, { onDelete: "set null" }),
+    type: text("type").notNull(),
+    score: numeric("score", { precision: 5, scale: 4 }).notNull().default("1.0"),
+    details: jsonb("details").$type<Record<string, unknown>>().notNull().default({}),
+    acknowledged_at: timestamp("acknowledged_at", { mode: "string", withTimezone: true }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("idx_finance_anomaly_unread").on(table.account_id, table.created_at),
+  ]
+);
+
 // ========== Scheduled job state (lib/local-cron.ts) ==========
 
 export const scheduledJobState = pgTable("scheduled_job_state", {

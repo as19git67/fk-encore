@@ -8,13 +8,30 @@ import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
 import { useOverviewStore } from '../../stores/finance/overview'
 import type { OverviewAccount, SaveOverviewSection } from '../../api/finance'
+import { listAnomalies } from '../../api/finance'
 
 const store = useOverviewStore()
 const router = useRouter()
 
+const anomalyCount = ref<number>(0)
+
+async function loadAnomalyCount() {
+  try {
+    const res = await listAnomalies()
+    anomalyCount.value = res.total
+  } catch {
+    anomalyCount.value = 0
+  }
+}
+
 onMounted(() => {
   void store.refresh()
+  void loadAnomalyCount()
 })
+
+function openAnomalies() {
+  void router.push({ name: 'finance-anomalies' })
+}
 
 function formatBalance(acc: OverviewAccount): string {
   if (acc.balance === null) return '—'
@@ -189,6 +206,30 @@ async function saveConfig() {
     <header class="page-header">
       <h1>Übersicht</h1>
     </header>
+
+    <div
+      v-if="anomalyCount > 0"
+      class="anomaly-tile"
+      role="button"
+      tabindex="0"
+      @click="openAnomalies"
+      @keydown.enter="openAnomalies"
+      @keydown.space.prevent="openAnomalies"
+    >
+      <div class="tile-icon">
+        <i class="pi pi-exclamation-triangle" />
+      </div>
+      <div class="tile-body">
+        <div class="tile-title">
+          {{ anomalyCount }}
+          {{ anomalyCount === 1 ? 'offene Anomalie' : 'offene Anomalien' }}
+        </div>
+        <div class="tile-sub">
+          Auffälligkeiten bei wiederkehrenden Buchungen prüfen
+        </div>
+      </div>
+      <i class="pi pi-chevron-right tile-chevron" />
+    </div>
 
     <Message v-if="store.error" severity="error" :closable="false">
       {{ store.error }}
@@ -408,6 +449,44 @@ async function saveConfig() {
   flex-direction: column;
   gap: 1.25rem;
   padding: 1.5rem;
+}
+
+.anomaly-tile {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.85rem 1rem;
+  border-radius: 0.5rem;
+  background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color);
+  border-left: 4px solid var(--p-yellow-500, #f59e0b);
+  cursor: pointer;
+  transition: background-color 120ms;
+}
+.anomaly-tile:hover,
+.anomaly-tile:focus-visible {
+  background: var(--p-content-hover-background);
+  outline: none;
+}
+.anomaly-tile .tile-icon {
+  font-size: 1.4rem;
+  color: var(--p-yellow-500, #f59e0b);
+  flex: 0 0 auto;
+}
+.anomaly-tile .tile-body {
+  flex: 1;
+  min-width: 0;
+}
+.anomaly-tile .tile-title {
+  font-weight: 600;
+  color: var(--p-text-color);
+}
+.anomaly-tile .tile-sub {
+  font-size: 0.85rem;
+  color: var(--p-text-muted-color);
+}
+.anomaly-tile .tile-chevron {
+  color: var(--p-text-muted-color);
 }
 @media (max-width: 640px) {
   .page {

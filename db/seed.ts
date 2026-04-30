@@ -209,17 +209,10 @@ export async function seed(db: any): Promise<void> {
       }
     }
 
-    // Defensive cleanup for excluded permissions (in case an older seed granted them).
-    const excludedIds = allPermRows
-      .filter((p) => adminExcludedPermissions.has(p.key))
-      .map((p) => p.id);
-    if (excludedIds.length > 0) {
-      await db.delete(schema.rolePermissions).where(and(
-        eq(schema.rolePermissions.role_id, adminRole.id),
-        inArray(schema.rolePermissions.permission_id, excludedIds)
-      ));
-    }
-    console.log(`[seed] Assigned all permissions to Admin role (excluded: ${[...adminExcludedPermissions].join(", ")})`);
+    // Note: excluded permissions are only skipped during auto-assignment above.
+    // They are NOT actively removed — admins who manually grant e.g. finance.admin
+    // to the Admin role via the UI will keep that assignment across restarts.
+    console.log(`[seed] Assigned all permissions to Admin role (excluded from auto-grant: ${[...adminExcludedPermissions].join(", ")})`);
   }
 
   // --- 6. Document categories (starter taxonomy). ---
