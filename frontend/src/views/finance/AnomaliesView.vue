@@ -7,23 +7,15 @@ import SelectButton from 'primevue/selectbutton'
 import {
   listAnomalies,
   acknowledgeAnomaly,
-  getMandateHistory,
   type AnomalyItem,
-  type DuplicateTransactionInfo,
-  type MandateHistoryItem,
 } from '../../api/finance'
-import { useScrollRestore } from '../../composables/useScrollRestore'
 
 const router = useRouter()
-const { restore } = useScrollRestore('finance-anomalies')
 
 const anomalies = ref<AnomalyItem[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 const acknowledging = ref<Set<number>>(new Set())
-const expandedHistory = ref<Set<number>>(new Set())
-const historyByAnomaly = ref<Map<number, MandateHistoryItem[]>>(new Map())
-const loadingHistory = ref<Set<number>>(new Set())
 
 const typeFilter = ref<string>('all')
 const typeOptions = [
@@ -52,7 +44,7 @@ async function load() {
   }
 }
 
-onMounted(async () => { await load(); restore() })
+onMounted(load)
 
 async function acknowledge(item: AnomalyItem) {
   acknowledging.value.add(item.id)
@@ -73,51 +65,12 @@ async function acknowledgeAll() {
   }
 }
 
-function openTransactionId(id: number) {
+function openTransaction(item: AnomalyItem) {
+  if (!item.transaction_id) return
   void router.push({
     name: 'finance-transaction-detail',
-    params: { id },
+    params: { id: item.transaction_id },
   })
-}
-
-async function toggleHistory(item: AnomalyItem) {
-  if (!item.mandate_id) return
-  if (expandedHistory.value.has(item.id)) {
-    expandedHistory.value.delete(item.id)
-    return
-  }
-  expandedHistory.value.add(item.id)
-  if (historyByAnomaly.value.has(item.id)) return
-  loadingHistory.value.add(item.id)
-  try {
-    const res = await getMandateHistory(item.mandate_id)
-    historyByAnomaly.value.set(item.id, res.items)
-  } catch (e: any) {
-    error.value = e?.message ?? 'Verlauf konnte nicht geladen werden'
-    expandedHistory.value.delete(item.id)
-  } finally {
-    loadingHistory.value.delete(item.id)
-  }
-}
-
-function formatAmount(raw: string): string {
-  const n = Number(raw)
-  if (!Number.isFinite(n)) return raw
-  return new Intl.NumberFormat('de-DE', {
-    style: 'currency',
-    currency: 'EUR',
-  }).format(n)
-}
-
-/** For non-duplicate types: single link to the transaction. */
-function singleTransactionId(item: AnomalyItem): number | null {
-  if (item.type === 'duplicate') return null
-  return item.transaction_id
-}
-
-function dupRowLabel(tx: DuplicateTransactionInfo, item: AnomalyItem): string {
-  const origId = Number(item.details.original_transaction_id ?? 0)
-  return tx.id === origId ? 'Original' : 'Duplikat'
 }
 
 function formatDate(iso: string): string {
@@ -157,7 +110,7 @@ function formatAmountChange(item: AnomalyItem): string | null {
   if (item.type !== 'amount_change') return null
   const prev = Number(item.details.previous ?? 0)
   const curr = Number(item.details.current ?? 0)
-  return `${formatAmount(String(prev))} → ${formatAmount(String(curr))}`
+  return `${prev.toFixed(2)} € → ${curr.toFixed(2)} €`
 }
 </script>
 
@@ -222,77 +175,15 @@ function formatAmountChange(item: AnomalyItem): string | null {
           <div v-if="formatAmountChange(item)" class="diff">
             {{ formatAmountChange(item) }}
           </div>
-
-          <div
-            v-if="item.type === 'amount_change' && item.mandate_id"
-            class="history-section"
-          >
-            <button
-              type="button"
-              class="history-toggle"
-              @click="toggleHistory(item)"
-            >
-              <i
-                :class="[
-                  'pi',
-                  expandedHistory.has(item.id) ? 'pi-chevron-down' : 'pi-chevron-right',
-                ]"
-              />
-              Verlauf {{ expandedHistory.has(item.id) ? 'ausblenden' : 'anzeigen' }}
-            </button>
-            <div v-if="expandedHistory.has(item.id)" class="history-body">
-              <div
-                v-if="loadingHistory.has(item.id) && !historyByAnomaly.get(item.id)"
-                class="history-loading"
-              >
-                Lädt …
-              </div>
-              <ul
-                v-else-if="(historyByAnomaly.get(item.id)?.length ?? 0) > 0"
-                class="history-list"
-              >
-                <li
-                  v-for="h in historyByAnomaly.get(item.id)"
-                  :key="h.id"
-                  class="history-row"
-                  @click="openTransactionId(h.id)"
-                >
-                  <span class="history-date">{{ formatDate(h.booking_date) }}</span>
-                  <span class="history-amount">{{ formatAmount(h.amount) }}</span>
-                  <span class="history-purpose">{{ h.purpose ?? '' }}</span>
-                </li>
-              </ul>
-              <div v-else class="history-empty">Keine weiteren Buchungen.</div>
-            </div>
-          </div>
-
-          <!-- Inline list for duplicate anomalies -->
-          <ul
-            v-if="item.type === 'duplicate' && item.duplicate_transactions?.length"
-            class="dup-list"
-          >
-            <li
-              v-for="tx in item.duplicate_transactions"
-              :key="tx.id"
-              class="dup-row"
-              @click="openTransactionId(tx.id)"
-            >
-              <span class="dup-label">{{ dupRowLabel(tx, item) }}</span>
-              <span class="history-date">{{ formatDate(tx.booking_date) }}</span>
-              <span class="history-amount">{{ formatAmount(tx.amount) }}</span>
-              <span class="history-purpose">{{ tx.purpose ?? '' }}</span>
-            </li>
-          </ul>
-
           <div class="card-actions">
             <Button
-              v-if="singleTransactionId(item)"
+              v-if="item.transaction_id"
               icon="pi pi-external-link"
               label="Buchung öffnen"
               severity="secondary"
               text
               size="small"
-              @click="openTransactionId(singleTransactionId(item)!)"
+              @click="openTransaction(item)"
             />
             <Button
               icon="pi pi-check"
@@ -433,119 +324,5 @@ function formatAmountChange(item: AnomalyItem): string | null {
   display: flex;
   gap: 0.5rem;
   margin-top: 0.25rem;
-}
-
-.dup-list {
-  list-style: none;
-  margin: 0.4rem 0 0;
-  padding: 0;
-  border-top: 1px solid var(--p-content-border-color);
-  padding-top: 0.4rem;
-  display: flex;
-  flex-direction: column;
-}
-
-.dup-row {
-  display: grid;
-  grid-template-columns: 4.5rem 6.5rem 6.5rem 1fr;
-  gap: 0.5rem;
-  padding: 0.35rem 0.25rem;
-  border-radius: 0.25rem;
-  cursor: pointer;
-  align-items: baseline;
-  font-size: 0.9rem;
-}
-.dup-row:hover {
-  background: var(--p-content-hover-background);
-}
-
-.dup-label {
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  color: var(--p-text-muted-color);
-}
-
-.history-section {
-  margin-top: 0.25rem;
-}
-
-.history-toggle {
-  background: none;
-  border: none;
-  padding: 0.25rem 0;
-  color: var(--p-text-muted-color);
-  font-size: 0.85rem;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-.history-toggle:hover {
-  color: var(--p-text-color);
-}
-
-.history-body {
-  margin-top: 0.4rem;
-  border-top: 1px solid var(--p-content-border-color);
-  padding-top: 0.4rem;
-}
-
-.history-loading,
-.history-empty {
-  font-size: 0.85rem;
-  color: var(--p-text-muted-color);
-  padding: 0.4rem 0;
-}
-
-.history-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.history-row {
-  display: grid;
-  grid-template-columns: 6.5rem 6.5rem 1fr;
-  gap: 0.5rem;
-  padding: 0.35rem 0.25rem;
-  border-radius: 0.25rem;
-  cursor: pointer;
-  align-items: baseline;
-  font-size: 0.9rem;
-}
-.history-row:hover {
-  background: var(--p-content-hover-background);
-}
-
-.history-date {
-  color: var(--p-text-muted-color);
-  font-variant-numeric: tabular-nums;
-}
-
-.history-amount {
-  font-family: monospace;
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-.history-purpose {
-  color: var(--p-text-muted-color);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-@media (max-width: 540px) {
-  .history-row {
-    grid-template-columns: 5.5rem 6rem;
-    grid-template-rows: auto auto;
-  }
-  .history-purpose {
-    grid-column: 1 / -1;
-    white-space: normal;
-  }
 }
 </style>
