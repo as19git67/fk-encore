@@ -12,7 +12,7 @@
 
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
-import { and, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
@@ -103,12 +103,7 @@ export async function runAnomalyDetection(
   const transactions = await db
     .select()
     .from(financeTransaction)
-    .where(
-      and(
-        accountCond,
-        lt(financeTransaction.amount, "0"),
-      )
-    )
+    .where(accountCond)
     .orderBy(financeTransaction.account_id, financeTransaction.booking_date);
 
   // Group by account for mandate lookups
@@ -566,20 +561,26 @@ function buildMessage(
   const name = counterparty ?? "Unbekannter Gegenüber";
   switch (type) {
     case "amount_change": {
-      const prev = Number(details.previous ?? 0).toFixed(2);
-      const curr = Number(details.current ?? 0).toFixed(2);
-      const diff = Number(details.diff ?? 0).toFixed(2);
-      const pct = Number(details.pct ?? 0).toFixed(2);
+      const prev = Math.abs(Number(details.previous ?? 0)).toFixed(2);
+      const curr = Math.abs(Number(details.current ?? 0)).toFixed(2);
+      const absDiff = Math.abs(Number(details.diff ?? 0)).toFixed(2);
+      const absPct = Math.abs(Number(details.pct ?? 0)).toFixed(2);
+      const isCredit = Number(details.current ?? 0) > 0;
       const dir = Number(details.diff ?? 0) > 0 ? "erhöht" : "gesenkt";
-      return `Die Lastschrift von ${name} hat sich um ${Math.abs(Number(diff)).toFixed(2)} € (${Math.abs(Number(pct)).toFixed(2)} %) von ${prev} € auf ${curr} € ${dir}.`;
+      const kind = isCredit ? "Gutschrift" : "Lastschrift";
+      return `Die ${kind} von ${name} hat sich um ${absDiff} € (${absPct} %) von ${prev} € auf ${curr} € ${dir}.`;
     }
     case "duplicate": {
       const amount = Math.abs(Number(details.amount ?? 0)).toFixed(2);
-      return `Mögliche Doppelbuchung von ${name} über ${amount} € innerhalb weniger Tage.`;
+      const isCredit = Number(details.amount ?? 0) > 0;
+      const kind = isCredit ? "Gutschrift" : "Buchung";
+      return `Mögliche doppelte ${kind} von ${name} über ${amount} € innerhalb weniger Tage.`;
     }
     case "new_mandate": {
       const amount = Math.abs(Number(details.amount ?? 0)).toFixed(2);
-      return `Neue Lastschrift von ${name} über ${amount} €.`;
+      const isCredit = Number(details.amount ?? 0) > 0;
+      const kind = isCredit ? "Gutschrift" : "Lastschrift";
+      return `Neue regelmäßige ${kind} von ${name} über ${amount} €.`;
     }
     default:
       return `Unbekannte Anomalie (${type}).`;
