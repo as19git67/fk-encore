@@ -1103,6 +1103,7 @@ export const financeTransaction = pgTable(
     original_amount: numeric("original_amount", { precision: 14, scale: 2 }),
     original_currency_code: text("original_currency_code"),
     exchange_rate: numeric("exchange_rate", { precision: 12, scale: 6 }),
+    notice: text("notice"),
     dedupe_hash: text("dedupe_hash").notNull(),
     raw: jsonb("raw").$type<Record<string, unknown>>(),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true })
