@@ -425,7 +425,21 @@ export const runAnomalyDetectionJob = api(
   },
 );
 
-schedule({
+export const triggerAnomalyDetection = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/finance/anomalies/run",
+    auth: true,
+  },
+  async (): Promise<AnomalyRunResult> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.admin");
+    return runAnomalyDetectionJob();
+  },
+);
+
+
   name: "finance-anomaly-detection",
   description: "Detect recurring mandate changes and duplicate transactions",
   service: "finance",
