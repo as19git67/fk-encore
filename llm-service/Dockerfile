@@ -14,8 +14,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt .
 
-RUN pip install --upgrade pip \
-    && pip install --no-cache-dir --prefix=/install -r requirements.txt
+# Build llama-cpp-python without AVX-512 so the image runs on CPUs that
+# only support AVX2 (e.g. older Xeon / AMD EPYC on NAS hardware).
+# GGML_NATIVE=OFF disables march=native; the AVX-512 flags disable those
+# code paths explicitly. Without this the binary crashes with SIGILL (exit
+# 132) on first inference on non-AVX-512 hosts.
+RUN CMAKE_ARGS="-DGGML_NATIVE=OFF -DGGML_AVX512=OFF -DGGML_AVX512_VBMI=OFF -DGGML_AVX512_VNNI=OFF" \
+    pip install --upgrade pip \
+    && CMAKE_ARGS="-DGGML_NATIVE=OFF -DGGML_AVX512=OFF -DGGML_AVX512_VBMI=OFF -DGGML_AVX512_VNNI=OFF" \
+    pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 # ── Stage 2: runtime image ───────────────────────────────────────────────────
 FROM python:3.12-slim-bookworm
