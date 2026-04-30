@@ -524,7 +524,11 @@ function goBack() {
       </div>
     </div>
 
-    <section v-if="filterPanelOpen" class="tx-filter-panel">
+    <section
+      v-if="filterPanelOpen"
+      class="tx-filter-panel"
+      :class="{ 'tx-filter-panel--below-select-bar': selectMode }"
+    >
       <div class="tx-filter-fields">
         <div class="tx-filter-row">
           <InputText
@@ -786,6 +790,18 @@ function goBack() {
   position: sticky;
   top: 3.4rem;
   z-index: 1;
+}
+/* When the select-bar is also visible it stacks above the filter
+   panel — shift the filter panel down by the select-bar height. */
+.tx-filter-panel--below-select-bar {
+  top: 6.2rem;
+}
+@media (max-width: 480px) {
+  .tx-filter-panel--below-select-bar {
+    top: 6rem;
+  }
+}
+.tx-filter-panel {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 0.5rem;
