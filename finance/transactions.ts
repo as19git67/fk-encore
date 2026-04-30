@@ -489,10 +489,13 @@ export const createTransaction = api(
       await applyUserTags(row.id, p.tags);
     }
 
-    // Enqueue AI tag suggestion — the worker picks it up asynchronously
-    // so a slow or unavailable llm-service never blocks the booking response.
-    await enqueueTagSuggestion(row.id, Number(auth.userID));
-    triggerTagWorker();
+    // Enqueue AI tag suggestion — best-effort, never blocks the booking response.
+    try {
+      await enqueueTagSuggestion(row.id, Number(auth.userID));
+      triggerTagWorker();
+    } catch (err) {
+      console.error(`[finance] failed to enqueue tag suggestion for tx=${row.id}:`, (err as Error).message);
+    }
 
     const tags = (await annotateTags([row.id])).get(row.id) ?? [];
     return toView(row, tags);

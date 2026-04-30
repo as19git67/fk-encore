@@ -400,10 +400,16 @@ export const suggestTagsBatch = api(
       .limit(limit);
 
     const userId = Number(auth.userID);
+    let enqueued = 0;
     for (const r of rows) {
-      await enqueueTagSuggestion(r.id, userId);
+      try {
+        await enqueueTagSuggestion(r.id, userId);
+        enqueued++;
+      } catch (err) {
+        console.error(`[finance] failed to enqueue tag suggestion for tx=${r.id}:`, (err as Error).message);
+      }
     }
-    if (rows.length > 0) triggerTagWorker();
-    return { attempted: rows.length, succeeded: rows.length };
+    if (enqueued > 0) triggerTagWorker();
+    return { attempted: rows.length, succeeded: enqueued };
   },
 );

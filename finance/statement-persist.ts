@@ -168,12 +168,15 @@ export async function persistFetchResult(
       }
     }
 
-    // Enqueue AI tag suggestion for each fresh transaction. The worker
-    // processes them asynchronously so a slow llm-service never blocks the sync.
-    for (const id of freshlyInsertedIds) {
-      await enqueueTagSuggestion(id);
+    // Enqueue AI tag suggestion for each fresh transaction — best-effort.
+    try {
+      for (const id of freshlyInsertedIds) {
+        await enqueueTagSuggestion(id);
+      }
+      if (freshlyInsertedIds.length > 0) triggerTagWorker();
+    } catch (err) {
+      console.error(`[finance] failed to enqueue tag suggestions:`, (err as Error).message);
     }
-    if (freshlyInsertedIds.length > 0) triggerTagWorker();
 
     // ---- Write the balance ----
     if (snapshot.balance) {
