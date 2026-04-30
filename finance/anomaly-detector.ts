@@ -42,10 +42,12 @@ const NEW_MANDATE_ALERT_AMOUNT = 100;
 /** Minimum transactions before we trust the typical_amount baseline. */
 const BASELINE_MIN_TRANSACTIONS = 5;
 /**
- * new_mandate alerts are only emitted for recent transactions (booked within
- * this many days from today). Historical first-occurrences are skipped.
+ * Recency window for anomaly emission. Mandate baselines are still updated
+ * from older transactions (so the EMA reflects history), but amount_change /
+ * duplicate / new_mandate anomalies are only emitted for transactions booked
+ * within this window — older anomalies are not actionable.
  */
-const NEW_MANDATE_RECENCY_DAYS = 90;
+const ANOMALY_RECENCY_DAYS = 60;
 
 // -----------------------------------------------------------------------
 // Mandate key helpers
@@ -138,6 +140,11 @@ async function processAccount(
 ): Promise<{ processed: number; created: number; updated: number; anomalies: number }> {
   let created = 0, updated = 0, anomalies = 0;
 
+  // Cutoff for general anomaly emission. Mandate updates still happen for all
+  // transactions — only the alerting is gated on recency.
+  const recencyCutoff = new Date();
+  recencyCutoff.setDate(recencyCutoff.getDate() - ANOMALY_RECENCY_DAYS);
+
   for (const tx of transactions) {
     const key = mandateKeyFrom(tx);
     if (!isTrackable(key)) continue;
@@ -145,15 +152,14 @@ async function processAccount(
     const mandate = await upsertMandate(accountId, key, tx);
     if (!mandate) continue;
 
+    const txDate = new Date(tx.booking_date.slice(0, 10));
+    const isRecentForAlerts = txDate >= recencyCutoff;
+
     if (mandate.isNew) {
       created++;
-      // Alert for new high-value mandates — only for recent bookings to avoid
-      // flooding alerts with years of historical first-occurrences.
-      const txDate = new Date(tx.booking_date.slice(0, 10));
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - NEW_MANDATE_RECENCY_DAYS);
-      const isRecent = txDate >= cutoff;
-      if (isRecent && Math.abs(Number(tx.amount)) >= NEW_MANDATE_ALERT_AMOUNT) {
+      if (!isRecentForAlerts) continue;
+
+      if (Math.abs(Number(tx.amount)) >= NEW_MANDATE_ALERT_AMOUNT) {
         const inserted = await insertAnomalyIfAbsent({
           account_id: accountId,
           transaction_id: tx.id,
@@ -169,6 +175,7 @@ async function processAccount(
       }
     } else {
       updated++;
+      if (!isRecentForAlerts) continue;
 
       // Check for amount change
       if (
