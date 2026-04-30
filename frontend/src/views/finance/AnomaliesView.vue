@@ -155,7 +155,7 @@ function formatAmountChange(item: AnomalyItem): string | null {
   if (item.type !== 'amount_change') return null
   const prev = Number(item.details.previous ?? 0)
   const curr = Number(item.details.current ?? 0)
-  return `${prev.toFixed(2)} € → ${curr.toFixed(2)} €`
+  return `${formatAmount(String(prev))} → ${formatAmount(String(curr))}`
 }
 </script>
 
