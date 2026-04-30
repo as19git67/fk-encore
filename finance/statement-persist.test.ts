@@ -14,17 +14,16 @@ import {
   users,
 } from "../db/schema";
 import { persistFetchResult } from "./statement-persist";
-import * as tagSuggester from "./tag-suggester";
+import * as tagQueue from "./tag-queue";
 import type { FetchResult, FintsTransactionData } from "./types";
 
-// Tag-suggester would reach out to the llm-service. We don't care what
-// it does in these tests — just that persistFetchResult fires it per
-// fresh transaction.
-vi.mock("./tag-suggester", async (orig) => {
-  const actual = await orig<typeof import("./tag-suggester")>();
+// enqueueTagSuggestion would write to finance_tag_queue. We just verify
+// that persistFetchResult fires it once per freshly inserted transaction.
+vi.mock("./tag-queue", async (orig) => {
+  const actual = await orig<typeof import("./tag-queue")>();
   return {
     ...actual,
-    suggestTagsForTransaction: vi.fn(async () => true),
+    enqueueTagSuggestion: vi.fn(async () => undefined),
   };
 });
 
@@ -194,7 +193,7 @@ describe("persistFetchResult — matching linked accounts", () => {
       ]),
     );
 
-    expect(tagSuggester.suggestTagsForTransaction).toHaveBeenCalledTimes(2);
+    expect(tagQueue.enqueueTagSuggestion).toHaveBeenCalledTimes(2);
   });
 });
 
