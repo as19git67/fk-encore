@@ -736,59 +736,6 @@ export interface AnomalyRunResult {
   anomalies_created: number
 }
 
-export async function runAnomalyDetection(reset = false): Promise<AnomalyRunResult> {
-  return apiFetch('/finance/anomalies/run', {
-    method: 'POST',
-    body: JSON.stringify({ reset }),
-  })
-}
-
-export interface DuplicateTransactionInfo {
-  id: number
-  booking_date: string
-  amount: string
-  purpose: string | null
-}
-
-export interface AnomalyItem {
-  id: number
-  type: 'amount_change' | 'duplicate' | 'new_mandate' | string
-  score: number
-  details: Record<string, unknown>
-  created_at: string
-  transaction_id: number | null
-  mandate_id: number | null
-  counterparty: string | null
-  message: string
-  duplicate_transactions?: DuplicateTransactionInfo[]
-}
-
-export interface ListAnomaliesResponse {
-  anomalies: AnomalyItem[]
-  total: number
-}
-
-export async function listAnomalies(): Promise<ListAnomaliesResponse> {
-  return apiFetch('/finance/anomalies')
-}
-
-export async function acknowledgeAnomaly(id: number): Promise<{ ok: boolean }> {
-  return apiFetch(`/finance/anomalies/${id}/acknowledge`, { method: 'POST', body: '{}' })
-}
-
-export interface MandateHistoryItem {
-  id: number
-  booking_date: string
-  amount: string
-  purpose: string | null
-}
-
-export interface MandateHistoryResponse {
-  mandate_id: number
-  counterparty: string | null
-  items: MandateHistoryItem[]
-}
-
-export async function getMandateHistory(mandateId: number): Promise<MandateHistoryResponse> {
-  return apiFetch(`/finance/mandates/${mandateId}/history`)
+export async function runAnomalyDetection(): Promise<AnomalyRunResult> {
+  return apiFetch('/finance/anomalies/run', { method: 'POST', body: '{}' })
 }
