@@ -12,7 +12,7 @@
 
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
-import { and, eq, gte, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
@@ -32,31 +32,15 @@ console.log("[boot] finance/anomaly-detector.ts: all imports resolved");
 // -----------------------------------------------------------------------
 
 /** Minimum relative amount change to emit an amount_change anomaly. */
-const AMOUNT_CHANGE_THRESHOLD = 0.15; // 15 %
+const AMOUNT_CHANGE_THRESHOLD = 0.05; // 5 %
 /** Minimum absolute amount change (EUR) to avoid noise on tiny amounts. */
-const AMOUNT_CHANGE_MIN_ABS = 5.00;
+const AMOUNT_CHANGE_MIN_ABS = 0.50;
 /** Days within which a second identical booking is flagged as duplicate. */
 const DUPLICATE_WINDOW_DAYS = 5;
 /** New mandates with |amount| above this threshold get a new_mandate alert. */
-const NEW_MANDATE_ALERT_AMOUNT = 100;
+const NEW_MANDATE_ALERT_AMOUNT = 25;
 /** Minimum transactions before we trust the typical_amount baseline. */
-const BASELINE_MIN_TRANSACTIONS = 6;
-/**
- * Recency window for anomaly emission. Mandate baselines are still updated
- * from older transactions (so the EMA reflects history), but amount_change /
- * duplicate / new_mandate anomalies are only emitted for transactions booked
- * within this window — older anomalies are not actionable.
- */
-const ANOMALY_RECENCY_DAYS = 60;
-/**
- * Maximum coefficient of variation (stddev / |mean|) of the prior amounts
- * for a mandate before we suppress amount_change alerts. Mandates whose
- * historical amounts already vary a lot (variable utility bills, irregular
- * payments) make a step-change signal unreliable. 0.15 = 15% CV.
- */
-const STABILITY_MAX_CV = 0.10;
-/** How many recent prior amounts to sample when computing stability. */
-const STABILITY_SAMPLE_SIZE = 18;
+const BASELINE_MIN_TRANSACTIONS = 3;
 
 // -----------------------------------------------------------------------
 // Mandate key helpers
@@ -119,7 +103,12 @@ export async function runAnomalyDetection(
   const transactions = await db
     .select()
     .from(financeTransaction)
-    .where(accountCond)
+    .where(
+      and(
+        accountCond,
+        lt(financeTransaction.amount, "0"),
+      )
+    )
     .orderBy(financeTransaction.account_id, financeTransaction.booking_date);
 
   // Group by account for mandate lookups
@@ -149,11 +138,6 @@ async function processAccount(
 ): Promise<{ processed: number; created: number; updated: number; anomalies: number }> {
   let created = 0, updated = 0, anomalies = 0;
 
-  // Cutoff for general anomaly emission. Mandate updates still happen for all
-  // transactions — only the alerting is gated on recency.
-  const recencyCutoff = new Date();
-  recencyCutoff.setDate(recencyCutoff.getDate() - ANOMALY_RECENCY_DAYS);
-
   for (const tx of transactions) {
     const key = mandateKeyFrom(tx);
     if (!isTrackable(key)) continue;
@@ -161,13 +145,9 @@ async function processAccount(
     const mandate = await upsertMandate(accountId, key, tx);
     if (!mandate) continue;
 
-    const txDate = new Date(tx.booking_date.slice(0, 10));
-    const isRecentForAlerts = txDate >= recencyCutoff;
-
     if (mandate.isNew) {
       created++;
-      if (!isRecentForAlerts) continue;
-
+      // Alert for new high-value mandates
       if (Math.abs(Number(tx.amount)) >= NEW_MANDATE_ALERT_AMOUNT) {
         const inserted = await insertAnomalyIfAbsent({
           account_id: accountId,
@@ -184,54 +164,33 @@ async function processAccount(
       }
     } else {
       updated++;
-      if (!isRecentForAlerts) continue;
 
-      // Check for amount change. The flagged transaction must not be older
-      // than the reference transactions used to build the baseline —
-      // otherwise we'd compare an older booking against a newer baseline,
-      // which is meaningless. Skip when this tx predates the mandate's
-      // existing last_seen (i.e. a late-arriving historical record).
-      const txDateStr = tx.booking_date.slice(0, 10);
-      const txIsNotOlderThanBaseline =
-        !mandate.previous_last_seen || txDateStr >= mandate.previous_last_seen;
-      if (txIsNotOlderThanBaseline) {
-        // Compare against the IMMEDIATELY previous transaction for this
-        // mandate, not the smoothed EMA. This avoids flagging gradual
-        // trends (e.g. 59 → 48 → 47) and only fires on real step-changes.
-        const prevRaw = await getPrevTransactionAmount(mandate.id, tx.id, txDateStr);
-        if (prevRaw !== null) {
-          const prev = Math.abs(Number(prevRaw));
-          const curr = Math.abs(Number(tx.amount));
-          const diff = curr - prev;
-          const pct = prev > 0 ? diff / prev : 0;
+      // Check for amount change
+      if (
+        mandate.typical_amount !== null &&
+        mandate.transaction_count >= BASELINE_MIN_TRANSACTIONS
+      ) {
+        const prev = Math.abs(Number(mandate.typical_amount));
+        const curr = Math.abs(Number(tx.amount));
+        const diff = curr - prev;
+        const pct = prev > 0 ? diff / prev : 0;
 
-          if (Math.abs(diff) >= AMOUNT_CHANGE_MIN_ABS && Math.abs(pct) >= AMOUNT_CHANGE_THRESHOLD) {
-            // Require a stable baseline computed from real transaction data.
-            // cv===null means too few samples — do NOT fire (insufficient evidence).
-            // mandate.transaction_count is unreliable across re-runs; the CV
-            // sample-size requirement (BASELINE_MIN_TRANSACTIONS) is the true gate.
-            const cv = await getMandateStabilityCV(mandate.id, tx.id, txDateStr);
-            const stable = cv !== null && cv <= STABILITY_MAX_CV;
-            if (stable) {
-              const score = Math.min(1, Math.abs(pct) * 2).toFixed(4);
-              const inserted = await insertAnomalyIfAbsent({
-                account_id: accountId,
-                transaction_id: tx.id,
-                mandate_id: mandate.id,
-                type: "amount_change",
-                score,
-                details: {
-                  previous: prev,
-                  current: curr,
-                  diff: Math.round(diff * 100) / 100,
-                  pct: Math.round(pct * 10000) / 100,
-                  // raw sign preserved so the message builder knows debit vs. credit
-                  is_credit: Number(tx.amount) > 0,
-                },
-              });
-              if (inserted) anomalies++;
-            }
-          }
+        if (Math.abs(diff) >= AMOUNT_CHANGE_MIN_ABS && Math.abs(pct) >= AMOUNT_CHANGE_THRESHOLD) {
+          const score = Math.min(1, Math.abs(pct) * 2).toFixed(4);
+          const inserted = await insertAnomalyIfAbsent({
+            account_id: accountId,
+            transaction_id: tx.id,
+            mandate_id: mandate.id,
+            type: "amount_change",
+            score,
+            details: {
+              previous: prev,
+              current: curr,
+              diff: Math.round(diff * 100) / 100,
+              pct: Math.round(pct * 10000) / 100,
+            },
+          });
+          if (inserted) anomalies++;
         }
       }
 
@@ -268,8 +227,6 @@ interface MandateRecord {
   typical_amount: string | null;
   transaction_count: number;
   isNew: boolean;
-  /** last_seen value BEFORE this tx was applied (null for new mandates). */
-  previous_last_seen: string | null;
 }
 
 async function upsertMandate(
@@ -297,13 +254,7 @@ async function upsertMandate(
         last_seen: bookingDate,
       })
       .returning({ id: financeRecurringMandate.id });
-    return {
-      id: row.id,
-      typical_amount: tx.amount,
-      transaction_count: 1,
-      isNew: true,
-      previous_last_seen: null,
-    };
+    return { id: row.id, typical_amount: tx.amount, transaction_count: 1, isNew: true };
   }
 
   // Update baseline: running median approximation via weighted average.
@@ -342,7 +293,6 @@ async function upsertMandate(
     typical_amount: existing.typical_amount,
     transaction_count: existing.transaction_count,
     isNew: false,
-    previous_last_seen: existing.last_seen ?? null,
   };
 }
 
@@ -402,93 +352,22 @@ async function findMandate(
   return undefined;
 }
 
-/**
- * Coefficient of variation (stddev / |mean|) of the most recent prior
- * amounts for a mandate. Returns null when there are too few samples to
- * judge stability. The candidate transaction itself is excluded.
- */
-async function getMandateStabilityCV(
-  mandateId: number,
-  excludingTxId: number,
-  beforeBookingDate: string,
-): Promise<number | null> {
-  const rows = await db.execute<{ amount: string }>(sql`
-    SELECT ft.amount
-    FROM finance_transaction ft
-    JOIN finance_recurring_mandate frm ON frm.id = ${mandateId}
-    WHERE ft.account_id = frm.account_id
-      AND ft.id <> ${excludingTxId}
-      AND ft.booking_date < ${beforeBookingDate}
-      AND (
-        (frm.mandate_ref IS NOT NULL AND ft.mandate_ref = frm.mandate_ref)
-        OR (frm.mandate_ref IS NULL AND frm.counterparty_iban IS NOT NULL AND ft.counterparty_iban = frm.counterparty_iban)
-        OR (frm.mandate_ref IS NULL AND frm.counterparty_iban IS NULL AND ft.counterparty = frm.counterparty)
-      )
-    ORDER BY ft.booking_date DESC
-    LIMIT ${STABILITY_SAMPLE_SIZE}
-  `);
-  const values = rows.rows.map((r) => Math.abs(Number(r.amount))).filter((n) => Number.isFinite(n));
-  if (values.length < BASELINE_MIN_TRANSACTIONS) return null;
-  const mean = values.reduce((a, b) => a + b, 0) / values.length;
-  if (mean === 0) return null;
-  const variance =
-    values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / values.length;
-  const stddev = Math.sqrt(variance);
-  return stddev / Math.abs(mean);
-}
-
-/**
- * Returns the amount of the most recent prior transaction for the same
- * mandate (chronologically before the candidate). Used as the comparison
- * reference for amount_change anomalies — comparing against the immediate
- * predecessor avoids flagging gradual drift.
- */
-async function getPrevTransactionAmount(
-  mandateId: number,
-  excludingTxId: number,
-  beforeBookingDate: string,
-): Promise<string | null> {
-  const rows = await db.execute<{ amount: string }>(sql`
-    SELECT ft.amount
-    FROM finance_transaction ft
-    JOIN finance_recurring_mandate frm ON frm.id = ${mandateId}
-    WHERE ft.account_id = frm.account_id
-      AND ft.id <> ${excludingTxId}
-      AND ft.booking_date < ${beforeBookingDate}
-      AND (
-        (frm.mandate_ref IS NOT NULL AND ft.mandate_ref = frm.mandate_ref)
-        OR (frm.mandate_ref IS NULL AND frm.counterparty_iban IS NOT NULL AND ft.counterparty_iban = frm.counterparty_iban)
-        OR (frm.mandate_ref IS NULL AND frm.counterparty_iban IS NULL AND ft.counterparty = frm.counterparty)
-      )
-    ORDER BY ft.booking_date DESC, ft.id DESC
-    LIMIT 1
-  `);
-  return rows.rows[0]?.amount ?? null;
-}
-
 async function findDuplicate(
   tx: typeof financeTransaction.$inferSelect,
   mandateId: number,
   windowStart: string,
 ): Promise<{ id: number } | undefined> {
-  // Find a prior transaction linked to the same mandate with the same amount
-  // within the duplicate window. We join through finance_recurring_mandate to
-  // confirm the other transaction shares the same mandate (via mandate_id on
-  // the anomaly that was already created for it, OR by matching mandate fields
-  // directly on the transaction).
   const rows = await db.execute<{ id: number }>(sql`
     SELECT ft.id
     FROM finance_transaction ft
-    JOIN finance_recurring_mandate frm ON frm.id = ${mandateId}
     WHERE ft.account_id = ${tx.account_id}
       AND ft.amount = ${tx.amount}
       AND ft.booking_date >= ${windowStart}
       AND ft.booking_date < ${tx.booking_date}
       AND ft.id <> ${tx.id}
-      AND (
-        (frm.mandate_ref IS NOT NULL AND ft.mandate_ref = frm.mandate_ref)
-        OR (frm.mandate_ref IS NULL AND frm.counterparty_iban IS NOT NULL AND ft.counterparty_iban = frm.counterparty_iban)
-        OR (frm.mandate_ref IS NULL AND frm.counterparty_iban IS NULL AND ft.counterparty = frm.counterparty)
+      AND EXISTS (
+        SELECT 1 FROM finance_anomaly fa
+        WHERE fa.transaction_id = ft.id AND fa.mandate_id = ${mandateId}
       )
     LIMIT 1
   `);
@@ -508,12 +387,11 @@ async function insertAnomalyIfAbsent(values: {
   details: Record<string, unknown>;
 }): Promise<boolean> {
   try {
-    const result = await db
+    await db
       .insert(financeAnomaly)
       .values(values)
-      .onConflictDoNothing()
-      .returning({ id: financeAnomaly.id });
-    return result.length > 0;
+      .onConflictDoNothing();
+    return true;
   } catch {
     return false;
   }
@@ -552,24 +430,6 @@ export const runAnomalyDetectionJob = api(
   },
 );
 
-export const triggerAnomalyDetection = api(
-  {
-    expose: true,
-    method: "POST",
-    path: "/finance/anomalies/run",
-    auth: true,
-  },
-  async ({ reset }: { reset?: boolean }): Promise<AnomalyRunResult> => {
-    const auth = getAuthData()!;
-    requirePermission(auth, "finance.view");
-    if (reset) {
-      await db.delete(financeAnomaly).where(isNull(financeAnomaly.acknowledged_at));
-    }
-    return runAnomalyDetectionJob();
-  },
-);
-
-
 schedule({
   name: "finance-anomaly-detection",
   description: "Detect recurring mandate changes and duplicate transactions",
@@ -583,13 +443,6 @@ schedule({
 // Public API endpoints
 // -----------------------------------------------------------------------
 
-export interface DuplicateTransactionInfo {
-  id: number;
-  booking_date: string;
-  amount: string;
-  purpose: string | null;
-}
-
 export interface AnomalyItem {
   id: number;
   type: string;
@@ -601,8 +454,6 @@ export interface AnomalyItem {
   counterparty: string | null;
   /** Human-readable German description generated from details. */
   message: string;
-  /** Only set for type=duplicate: the two (or more) matching transactions. */
-  duplicate_transactions?: DuplicateTransactionInfo[];
 }
 
 export interface ListAnomaliesResponse {
@@ -653,62 +504,17 @@ export const listAnomalies = api(
       .orderBy(sql`${financeAnomaly.created_at} DESC`)
       .limit(200);
 
-    // Collect all transaction IDs needed for duplicate enrichment
-    const duplicateRows = rows.filter((r) => r.type === "duplicate");
-    const dupTxIds = new Set<number>();
-    for (const r of duplicateRows) {
-      if (r.transaction_id) dupTxIds.add(r.transaction_id);
-      const orig = Number((r.details as Record<string, unknown>)?.original_transaction_id ?? 0);
-      if (orig > 0) dupTxIds.add(orig);
-    }
-
-    // Batch-load all relevant transactions in one query
-    const txMap = new Map<number, DuplicateTransactionInfo>();
-    if (dupTxIds.size > 0) {
-      const txRows = await db
-        .select({
-          id: financeTransaction.id,
-          booking_date: financeTransaction.booking_date,
-          amount: financeTransaction.amount,
-          purpose: financeTransaction.purpose,
-        })
-        .from(financeTransaction)
-        .where(inArray(financeTransaction.id, [...dupTxIds]));
-      for (const t of txRows) {
-        txMap.set(t.id, {
-          id: t.id,
-          booking_date: t.booking_date,
-          amount: t.amount,
-          purpose: t.purpose ?? null,
-        });
-      }
-    }
-
-    const anomalies = rows.map((r) => {
-      const details = (r.details ?? {}) as Record<string, unknown>;
-      let duplicate_transactions: DuplicateTransactionInfo[] | undefined;
-      if (r.type === "duplicate") {
-        const txs: DuplicateTransactionInfo[] = [];
-        const origId = Number(details.original_transaction_id ?? 0);
-        if (origId > 0 && txMap.has(origId)) txs.push(txMap.get(origId)!);
-        if (r.transaction_id && txMap.has(r.transaction_id)) txs.push(txMap.get(r.transaction_id)!);
-        // Sort oldest first so the list reads chronologically
-        txs.sort((a, b) => a.booking_date.localeCompare(b.booking_date));
-        if (txs.length > 0) duplicate_transactions = txs;
-      }
-      return {
-        id: r.id,
-        type: r.type,
-        score: Number(r.score),
-        details,
-        created_at: r.created_at,
-        transaction_id: r.transaction_id,
-        mandate_id: r.mandate_id,
-        counterparty: r.counterparty ?? null,
-        message: buildMessage(r.type, details, r.counterparty),
-        duplicate_transactions,
-      };
-    });
+    const anomalies = rows.map((r) => ({
+      id: r.id,
+      type: r.type,
+      score: Number(r.score),
+      details: (r.details ?? {}) as Record<string, unknown>,
+      created_at: r.created_at,
+      transaction_id: r.transaction_id,
+      mandate_id: r.mandate_id,
+      counterparty: r.counterparty ?? null,
+      message: buildMessage(r.type, r.details as Record<string, unknown>, r.counterparty),
+    }));
 
     return { anomalies, total: anomalies.length };
   },
@@ -749,102 +555,8 @@ export const acknowledgeAnomaly = api(
 );
 
 // -----------------------------------------------------------------------
-// Mandate history: recent transactions for a given mandate, used by the UI
-// to show the trend behind an amount_change anomaly.
-// -----------------------------------------------------------------------
-
-export interface MandateHistoryItem {
-  id: number;
-  booking_date: string;
-  amount: string;
-  purpose: string | null;
-}
-
-export interface MandateHistoryResponse {
-  mandate_id: number;
-  counterparty: string | null;
-  items: MandateHistoryItem[];
-}
-
-export const getMandateHistory = api(
-  {
-    expose: true,
-    method: "GET",
-    path: "/finance/mandates/:mandateId/history",
-    auth: true,
-  },
-  async ({ mandateId }: { mandateId: number }): Promise<MandateHistoryResponse> => {
-    const auth = getAuthData()!;
-    requirePermission(auth, "finance.view");
-
-    const accessible = await db
-      .select({ id: financeAccountAccess.account_id })
-      .from(financeAccountAccess)
-      .where(eq(financeAccountAccess.user_id, Number(auth.userID)));
-    const accountIds = accessible.map((a) => a.id);
-    if (accountIds.length === 0) throw APIError.notFound("mandate not found");
-
-    const [mandate] = await db
-      .select()
-      .from(financeRecurringMandate)
-      .where(
-        and(
-          eq(financeRecurringMandate.id, mandateId),
-          inArray(financeRecurringMandate.account_id, accountIds),
-        ),
-      )
-      .limit(1);
-    if (!mandate) throw APIError.notFound("mandate not found");
-
-    // Match transactions belonging to this mandate using the same fallback
-    // chain that mandates were keyed on (mandate_ref+creditor_id → iban → name).
-    const rows = await db.execute<{ id: number; booking_date: string; amount: string; purpose: string | null }>(sql`
-      SELECT ft.id, ft.booking_date, ft.amount, ft.purpose
-      FROM finance_transaction ft
-      WHERE ft.account_id = ${mandate.account_id}
-        AND (
-          (${mandate.mandate_ref}::text IS NOT NULL AND ft.mandate_ref = ${mandate.mandate_ref})
-          OR (${mandate.mandate_ref}::text IS NULL
-              AND ${mandate.counterparty_iban}::text IS NOT NULL
-              AND ft.counterparty_iban = ${mandate.counterparty_iban})
-          OR (${mandate.mandate_ref}::text IS NULL
-              AND ${mandate.counterparty_iban}::text IS NULL
-              AND ${mandate.counterparty}::text IS NOT NULL
-              AND ft.counterparty = ${mandate.counterparty})
-        )
-      ORDER BY ft.booking_date DESC
-      LIMIT 24
-    `);
-
-    return {
-      mandate_id: mandate.id,
-      counterparty: mandate.counterparty,
-      items: rows.rows.map((r) => ({
-        id: r.id,
-        booking_date: r.booking_date,
-        amount: r.amount,
-        purpose: r.purpose ?? null,
-      })),
-    };
-  },
-);
-
-// -----------------------------------------------------------------------
 // Message builder
 // -----------------------------------------------------------------------
-
-const eurFmt = new Intl.NumberFormat("de-DE", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-const pctFmt = new Intl.NumberFormat("de-DE", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
-function fmtEur(n: number): string {
-  return `${eurFmt.format(n)} €`;
-}
 
 function buildMessage(
   type: string,
@@ -854,27 +566,20 @@ function buildMessage(
   const name = counterparty ?? "Unbekannter Gegenüber";
   switch (type) {
     case "amount_change": {
-      const prev = Math.abs(Number(details.previous ?? 0));
-      const curr = Math.abs(Number(details.current ?? 0));
-      const absDiff = Math.abs(Number(details.diff ?? 0));
-      const absPct = Math.abs(Number(details.pct ?? 0));
-      // is_credit is stored explicitly; fall back to false (= debit) for old records
-      const isCredit = details.is_credit === true;
+      const prev = Number(details.previous ?? 0).toFixed(2);
+      const curr = Number(details.current ?? 0).toFixed(2);
+      const diff = Number(details.diff ?? 0).toFixed(2);
+      const pct = Number(details.pct ?? 0).toFixed(2);
       const dir = Number(details.diff ?? 0) > 0 ? "erhöht" : "gesenkt";
-      const kind = isCredit ? "Gutschrift" : "Lastschrift";
-      return `Die ${kind} von ${name} hat sich um ${fmtEur(absDiff)} (${pctFmt.format(absPct)} %) von ${fmtEur(prev)} auf ${fmtEur(curr)} ${dir}.`;
+      return `Die Lastschrift von ${name} hat sich um ${Math.abs(Number(diff)).toFixed(2)} € (${Math.abs(Number(pct)).toFixed(2)} %) von ${prev} € auf ${curr} € ${dir}.`;
     }
     case "duplicate": {
-      const amount = Math.abs(Number(details.amount ?? 0));
-      const isCredit = Number(details.amount ?? 0) > 0;
-      const kind = isCredit ? "Gutschrift" : "Buchung";
-      return `Mögliche doppelte ${kind} von ${name} über ${fmtEur(amount)} innerhalb weniger Tage.`;
+      const amount = Math.abs(Number(details.amount ?? 0)).toFixed(2);
+      return `Mögliche Doppelbuchung von ${name} über ${amount} € innerhalb weniger Tage.`;
     }
     case "new_mandate": {
-      const amount = Math.abs(Number(details.amount ?? 0));
-      const isCredit = Number(details.amount ?? 0) > 0;
-      const kind = isCredit ? "Gutschrift" : "Lastschrift";
-      return `Neue regelmäßige ${kind} von ${name} über ${fmtEur(amount)}.`;
+      const amount = Math.abs(Number(details.amount ?? 0)).toFixed(2);
+      return `Neue Lastschrift von ${name} über ${amount} €.`;
     }
     default:
       return `Unbekannte Anomalie (${type}).`;
