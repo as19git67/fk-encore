@@ -28,7 +28,7 @@
 
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { enqueueTagSuggestion } from "./tag-queue";
 import { triggerTagWorker } from "./tag-worker";
 
@@ -400,6 +400,7 @@ export const suggestTagsBatch = api(
       .select({ id: financeTransaction.id })
       .from(financeTransaction)
       .where(conds.length > 0 ? and(...conds) : undefined)
+      .orderBy(desc(financeTransaction.booking_date))
       .limit(limit);
 
     const userId = Number(auth.userID);
