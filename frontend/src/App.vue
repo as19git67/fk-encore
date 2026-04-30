@@ -1,16 +1,39 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import Menubar from 'primevue/menubar'
 import Button from 'primevue/button'
 import ConfirmDialog from 'primevue/confirmdialog'
 import { useAuthStore } from './stores/auth'
+import { useAnomalyStore } from './stores/finance/anomalies'
 import { modules, detectModule } from './config/modules'
 import type { ModuleConfig } from './config/modules'
 
 const auth = useAuthStore()
+const anomalyStore = useAnomalyStore()
 const router = useRouter()
 const route = useRoute()
+
+// Load anomaly count once when the user logs in, refresh when navigating
+// away from the anomalies page (user may have acknowledged some).
+watch(
+  () => auth.isAuthenticated,
+  (authenticated) => {
+    if (authenticated && auth.hasPermission('finance.view')) {
+      void anomalyStore.refresh()
+    }
+  },
+  { immediate: true },
+)
+
+watch(
+  () => route.name,
+  (name, prev) => {
+    if (prev === 'finance-anomalies' && auth.hasPermission('finance.view')) {
+      void anomalyStore.refresh()
+    }
+  },
+)
 
 /** Active module based on current path, null = all modules mode */
 const activeModule = computed<ModuleConfig | null>(() => detectModule(route.path))
@@ -22,6 +45,9 @@ function buildModuleMenuItems(mod: ModuleConfig) {
     .map((item) => ({
       label: item.label,
       icon: item.icon,
+      badge: item.routeName === 'finance-anomalies' && anomalyStore.count > 0
+        ? String(anomalyStore.count)
+        : undefined,
       command: () => router.push({ name: item.routeName }),
     }))
 }
