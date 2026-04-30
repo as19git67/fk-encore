@@ -32,15 +32,20 @@ console.log("[boot] finance/anomaly-detector.ts: all imports resolved");
 // -----------------------------------------------------------------------
 
 /** Minimum relative amount change to emit an amount_change anomaly. */
-const AMOUNT_CHANGE_THRESHOLD = 0.05; // 5 %
+const AMOUNT_CHANGE_THRESHOLD = 0.15; // 15 %
 /** Minimum absolute amount change (EUR) to avoid noise on tiny amounts. */
-const AMOUNT_CHANGE_MIN_ABS = 0.50;
+const AMOUNT_CHANGE_MIN_ABS = 5.00;
 /** Days within which a second identical booking is flagged as duplicate. */
 const DUPLICATE_WINDOW_DAYS = 5;
 /** New mandates with |amount| above this threshold get a new_mandate alert. */
-const NEW_MANDATE_ALERT_AMOUNT = 25;
+const NEW_MANDATE_ALERT_AMOUNT = 100;
 /** Minimum transactions before we trust the typical_amount baseline. */
-const BASELINE_MIN_TRANSACTIONS = 3;
+const BASELINE_MIN_TRANSACTIONS = 5;
+/**
+ * new_mandate alerts are only emitted for recent transactions (booked within
+ * this many days from today). Historical first-occurrences are skipped.
+ */
+const NEW_MANDATE_RECENCY_DAYS = 90;
 
 // -----------------------------------------------------------------------
 // Mandate key helpers
@@ -142,8 +147,13 @@ async function processAccount(
 
     if (mandate.isNew) {
       created++;
-      // Alert for new high-value mandates
-      if (Math.abs(Number(tx.amount)) >= NEW_MANDATE_ALERT_AMOUNT) {
+      // Alert for new high-value mandates — only for recent bookings to avoid
+      // flooding alerts with years of historical first-occurrences.
+      const txDate = new Date(tx.booking_date.slice(0, 10));
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - NEW_MANDATE_RECENCY_DAYS);
+      const isRecent = txDate >= cutoff;
+      if (isRecent && Math.abs(Number(tx.amount)) >= NEW_MANDATE_ALERT_AMOUNT) {
         const inserted = await insertAnomalyIfAbsent({
           account_id: accountId,
           transaction_id: tx.id,
@@ -352,17 +362,24 @@ async function findDuplicate(
   mandateId: number,
   windowStart: string,
 ): Promise<{ id: number } | undefined> {
+  // Find a prior transaction linked to the same mandate with the same amount
+  // within the duplicate window. We join through finance_recurring_mandate to
+  // confirm the other transaction shares the same mandate (via mandate_id on
+  // the anomaly that was already created for it, OR by matching mandate fields
+  // directly on the transaction).
   const rows = await db.execute<{ id: number }>(sql`
     SELECT ft.id
     FROM finance_transaction ft
+    JOIN finance_recurring_mandate frm ON frm.id = ${mandateId}
     WHERE ft.account_id = ${tx.account_id}
       AND ft.amount = ${tx.amount}
       AND ft.booking_date >= ${windowStart}
       AND ft.booking_date < ${tx.booking_date}
       AND ft.id <> ${tx.id}
-      AND EXISTS (
-        SELECT 1 FROM finance_anomaly fa
-        WHERE fa.transaction_id = ft.id AND fa.mandate_id = ${mandateId}
+      AND (
+        (frm.mandate_ref IS NOT NULL AND ft.mandate_ref = frm.mandate_ref)
+        OR (frm.mandate_ref IS NULL AND frm.counterparty_iban IS NOT NULL AND ft.counterparty_iban = frm.counterparty_iban)
+        OR (frm.mandate_ref IS NULL AND frm.counterparty_iban IS NULL AND ft.counterparty = frm.counterparty)
       )
     LIMIT 1
   `);
@@ -382,11 +399,12 @@ async function insertAnomalyIfAbsent(values: {
   details: Record<string, unknown>;
 }): Promise<boolean> {
   try {
-    await db
+    const result = await db
       .insert(financeAnomaly)
       .values(values)
-      .onConflictDoNothing();
-    return true;
+      .onConflictDoNothing()
+      .returning({ id: financeAnomaly.id });
+    return result.length > 0;
   } catch {
     return false;
   }
