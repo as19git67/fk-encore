@@ -163,15 +163,30 @@ app = FastAPI(title="llm-service", version="1.0.0", lifespan=lifespan)
 # concurrently on one CPU only causes contention — while keeping the event
 # loop free to serve the healthcheck.
 _inference_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="llm-inference")
+# Semaphore mirrors max_workers=1 so that a second request gets an immediate
+# HTTP 503 instead of silently queuing behind the running inference job.
+# Initialised lazily on first use so it binds to the correct event loop.
+_inference_sem: asyncio.Semaphore | None = None
+
+
+def _get_inference_sem() -> asyncio.Semaphore:
+    global _inference_sem
+    if _inference_sem is None:
+        _inference_sem = asyncio.Semaphore(1)
+    return _inference_sem
 
 _T = TypeVar("_T")
 
 
 async def _run_blocking(func: Callable[..., _T], *args: Any, **kwargs: Any) -> _T:
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        _inference_executor, functools.partial(func, *args, **kwargs)
-    )
+    sem = _get_inference_sem()
+    if sem.locked():
+        raise HTTPException(status_code=503, detail="inference busy")
+    async with sem:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            _inference_executor, functools.partial(func, *args, **kwargs)
+        )
 
 
 # ─── UTF-8 repair ──────────────────────────────────────────────────────────────
