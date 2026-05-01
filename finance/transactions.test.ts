@@ -19,6 +19,7 @@ import {
   getTransaction,
   listTransactions,
   promoteAiTag,
+  updateTransaction,
 } from "./transactions";
 
 function setAuth(userID: string, perms: string[]) {
@@ -660,5 +661,41 @@ describe("finance/transactions — batchTag", () => {
     await expect(
       batchTag({ transaction_ids: [1] }),
     ).rejects.toThrow(/add \/ remove \/ replace/);
+  });
+});
+
+// ================= UPDATE =================
+
+describe("finance/transactions — updateTransaction (notice)", () => {
+  it("sets a notice on any transaction the user has read access to", async () => {
+    const { a } = await createAccounts();
+    const txId = await insertTx(a);
+    setAuth("7", ["finance.view"]);
+    await grant(a, 7, "read");
+
+    const result = await updateTransaction({ id: txId, notice: "Geschäftsessen" });
+    expect(result.notice).toBe("Geschäftsessen");
+  });
+
+  it("clears a notice when passed null", async () => {
+    const { a } = await createAccounts();
+    const txId = await insertTx(a, {});
+    await db.update(financeTransaction).set({ notice: "alt" }).where(eq(financeTransaction.id, txId));
+    setAuth("7", ["finance.view"]);
+    await grant(a, 7, "read");
+
+    const result = await updateTransaction({ id: txId, notice: null });
+    expect(result.notice).toBeNull();
+  });
+
+  it("404s for a transaction outside the caller's ACL", async () => {
+    const { a } = await createAccounts();
+    const txId = await insertTx(a);
+    setAuth("7", ["finance.view"]);
+    await ensureUser(7);
+
+    await expect(
+      updateTransaction({ id: txId, notice: "x" }),
+    ).rejects.toThrow(/not found/);
   });
 });

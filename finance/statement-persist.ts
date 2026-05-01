@@ -144,6 +144,9 @@ export async function persistFetchResult(
             counterparty: tx.counterparty,
             counterparty_iban: tx.counterpartyIban,
             bank_ref: tx.bankRef,
+            original_amount: tx.originalAmount ?? undefined,
+            original_currency_code: tx.originalCurrency ?? undefined,
+            exchange_rate: tx.exchangeRate ?? undefined,
             dedupe_hash: dedupeHash,
             raw: tx.raw,
           })
