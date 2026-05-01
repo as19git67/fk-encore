@@ -26,13 +26,28 @@ const error = ref('')
 const shareToken = computed(() => (route.params.token as string) ?? '')
 
 /**
+ * `display_mode === 'map'` is now a "map enabled" flag rather than a
+ * fixed view: when set, the visitor can flip between raster and map on
+ * the fly via `viewMode`. When the album has map disabled we lock to
+ * grid view.
+ */
+const mapEnabled = computed(() => album.value?.display_mode === 'map')
+const viewMode = ref<'grid' | 'map'>('grid')
+
+watch(album, (a) => {
+  if (!a) return
+  // Map-enabled albums open in map view (the curated experience).
+  viewMode.value = a.display_mode === 'map' ? 'map' : 'grid'
+}, { immediate: true })
+
+/**
  * True for any map-view rendering. The map crowds the viewport, so
  * the full-width guest banner is suppressed in favour of compact
  * buttons in TripMap's stats-addon slot — "Anmelden" for anonymous
  * visitors and a user icon opening the account dialog for
  * registered (pending or verified) guests.
  */
-const isMapView = computed(() => album.value?.display_mode === 'map')
+const isMapView = computed(() => mapEnabled.value && viewMode.value === 'map')
 const isMapAnonymous = computed(
   () => isMapView.value && guestSession.guest.value === null,
 )
@@ -356,7 +371,7 @@ onUnmounted(() => {
         @toggle-push="handleTogglePush"
       />
 
-      <div v-if="album.display_mode !== 'map'" class="shared-header">
+      <div v-if="!isMapView" class="shared-header">
         <h1 class="title">{{ album.name }}</h1>
         <p v-if="album.description" class="description">{{ album.description }}</p>
         <span class="meta">
@@ -365,11 +380,33 @@ onUnmounted(() => {
             · {{ new Date(album.oldest_photo_at).toLocaleDateString() }} – {{ new Date(album.newest_photo_at).toLocaleDateString() }}
           </template>
         </span>
+        <div v-if="mapEnabled" class="shared-view-mode-switch">
+          <button
+            type="button"
+            class="shared-view-mode-btn"
+            :class="{ 'is-active': viewMode === 'grid' }"
+            aria-label="Raster anzeigen"
+            @click="viewMode = 'grid'"
+          >
+            <i class="pi pi-th-large" />
+            <span>Raster</span>
+          </button>
+          <button
+            type="button"
+            class="shared-view-mode-btn"
+            :class="{ 'is-active': viewMode === 'map' }"
+            aria-label="Karte anzeigen"
+            @click="viewMode = 'map'"
+          >
+            <i class="pi pi-map" />
+            <span>Karte</span>
+          </button>
+        </div>
       </div>
 
       <!-- Map mode -->
       <TripMap
-        v-if="album.display_mode === 'map' && album.photos.length > 0"
+        v-if="isMapView && album.photos.length > 0"
         ref="tripMapRef"
         :photos="filteredMapPhotos"
         :albumName="album.name"
@@ -377,6 +414,15 @@ onUnmounted(() => {
         @open-fullscreen="handleMapFullscreen"
       >
         <template #stats-addon>
+          <button
+            type="button"
+            class="map-filter-button"
+            aria-label="Raster anzeigen"
+            @click="viewMode = 'grid'"
+          >
+            <i class="pi pi-th-large" />
+            <span>Raster</span>
+          </button>
           <button
             type="button"
             class="map-filter-button"
@@ -614,6 +660,45 @@ onUnmounted(() => {
 .shared-header .meta {
   font-size: 0.85rem;
   color: var(--p-text-muted-color);
+}
+
+/* Toggle between raster + map for albums where the owner enabled the map.
+   Lives inside the centred header, sized to read as a quiet utility. */
+.shared-view-mode-switch {
+  display: inline-flex;
+  margin-top: 0.75rem;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 999px;
+  padding: 2px;
+  gap: 2px;
+  background: var(--p-content-background, #fff);
+}
+
+.shared-view-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.75rem;
+  border: none;
+  background: transparent;
+  color: var(--p-text-color);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  border-radius: 999px;
+}
+
+.shared-view-mode-btn .pi {
+  font-size: 0.85em;
+}
+
+.shared-view-mode-btn:hover {
+  background: var(--p-content-hover-background);
+}
+
+.shared-view-mode-btn.is-active {
+  background: var(--p-primary-color);
+  color: var(--p-primary-contrast-color);
 }
 
 .photo-grid-scroll {
