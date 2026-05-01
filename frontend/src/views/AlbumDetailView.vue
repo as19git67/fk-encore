@@ -49,6 +49,10 @@ import { useReferenceData } from '../composables/useReferenceData'
 import type { PhotoItem } from '../composables/usePhotoGrouping'
 import { onUnmounted } from 'vue'
 import { useRealtimeEvent } from '../composables/useRealtime'
+import {
+  albumsViewQueryFromStorage,
+  rememberFocusedAlbumId,
+} from '../utils/albumsViewState'
 
 const route = useRoute()
 const router = useRouter()
@@ -58,15 +62,16 @@ const serviceHealth = useServiceHealthStore()
 
 // Shared with AlbumsView: when the user navigates back from this detail view,
 // the album list restores focus and scroll position to this album.
-const LAST_FOCUSED_ALBUM_KEY = 'albums_last_focused_album_id'
-function rememberFocusedAlbum(id: number) {
-  if (!Number.isFinite(id)) return
-  try { localStorage.setItem(LAST_FOCUSED_ALBUM_KEY, String(id)) } catch { /* ignore */ }
-}
+const rememberFocusedAlbum = rememberFocusedAlbumId
 
+// Read the persisted filter/sort/search from storage and hand it to the
+// router as query params, so the URL reflects the user's last filters
+// from the very first paint of the list view. Without this, leaving an
+// album lands on `/fotos/alben` (no query) and the user briefly sees an
+// unfiltered list before AlbumsView re-applies state from localStorage.
 function navigateBackToAlbums() {
   rememberFocusedAlbum(albumId.value)
-  router.push({ name: 'fotos-albums' })
+  router.push({ name: 'fotos-albums', query: albumsViewQueryFromStorage() })
 }
 
 // ── Data ──────────────────────────────────────────────────────────────────────
@@ -688,7 +693,7 @@ async function handleDeleteAlbum() {
     await deleteAlbum(album.value.id)
     invalidateAlbums()
     showDeleteDialog.value = false
-    router.push({ name: 'fotos-albums' })
+    router.push({ name: 'fotos-albums', query: albumsViewQueryFromStorage() })
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Löschen des Albums'
   } finally {
@@ -706,7 +711,7 @@ async function handleLeaveAlbum() {
   try {
     await leaveAlbum(album.value.id)
     showLeaveDialog.value = false
-    router.push({ name: 'fotos-albums' })
+    router.push({ name: 'fotos-albums', query: albumsViewQueryFromStorage() })
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Verlassen der Freigabe'
   } finally {
