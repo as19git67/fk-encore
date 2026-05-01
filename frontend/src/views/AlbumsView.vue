@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {onMounted, onBeforeUnmount, ref, computed, watch, nextTick} from 'vue'
+import {onMounted, ref, computed, watch, nextTick} from 'vue'
 import {useRouter, useRoute} from 'vue-router'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
@@ -27,6 +27,7 @@ import { listUsers, type UserWithRoles } from '../api/users'
 import { useAuthStore } from '../stores/auth'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import { useReferenceData } from '../composables/useReferenceData'
+import { usePhotoLazyLoad } from '../composables/usePhotoLazyLoad'
 import {
   albumsStateToQuery,
   DEFAULT_ALBUM_SORT,
@@ -156,63 +157,18 @@ function focusRememberedAlbum(): boolean {
 }
 
 // ── Virtualized rendering ─────────────────────────────────────────────────────
-// Album cards are expensive (HeicImage + PrimeVue Buttons with tooltips + image
-// decode). Rendering the full card for hundreds/thousands of albums makes
-// scrolling unusable. Instead each card reserves its layout slot via a
-// placeholder with min-height, and only renders its real content while it
-// intersects the viewport (plus a small buffer, so the content is ready by
-// the time the user sees it). When a card scrolls back out of view its
-// content is torn down again, keeping DOM / memory bounded regardless of
-// how many albums exist.
-const visibleAlbumIds = ref(new Set<number>())
-let cardObserver: IntersectionObserver | null = null
-let pendingVisible = new Set<number>()
-let visibleFlushTimer: ReturnType<typeof setTimeout> | null = null
+// Album cards are expensive (HeicImage + PrimeVue Buttons with tooltips +
+// image decode). The same IntersectionObserver-based hydration that drives
+// the gallery thumbnail grid (PhotoGrid / FacePhotoGrid) is reused here, so
+// that we only mount HeicImage and the action overlay for cards near the
+// viewport regardless of how many albums exist. The scroll container is
+// `.albums-view` (passed to setupObserver), not the document.
+const { visiblePhotoIds: visibleAlbumIds, setupObserver: observeCards } =
+  usePhotoLazyLoad('400px 0px', 'albumId')
+const scrollEl = ref<HTMLElement | null>(null)
 
-function flushVisible() {
-  visibleAlbumIds.value = new Set(pendingVisible)
-  visibleFlushTimer = null
-}
-
-function observeCards() {
-  cardObserver?.disconnect()
-  pendingVisible = new Set()
-  if (visibleFlushTimer) { clearTimeout(visibleFlushTimer); visibleFlushTimer = null }
-  const root = gridEl.value
-  if (!root) { visibleAlbumIds.value = new Set(); return }
-
-  cardObserver = new IntersectionObserver(
-    (entries) => {
-      for (const entry of entries) {
-        const id = Number((entry.target as HTMLElement).dataset.albumId)
-        if (!id) continue
-        if (entry.isIntersecting) pendingVisible.add(id)
-        else pendingVisible.delete(id)
-      }
-      if (visibleFlushTimer) clearTimeout(visibleFlushTimer)
-      visibleFlushTimer = setTimeout(flushVisible, 100)
-    },
-    // 400px buffer: start hydrating a card shortly before it enters the
-    // viewport so the user never sees an empty placeholder during normal
-    // scrolling. Use the document scroller (null) because .albums-view is
-    // the scroll container and is an ancestor of .albums-grid.
-    { root: null, rootMargin: '400px 0px' }
-  )
-
-  const cards = root.querySelectorAll<HTMLElement>('[data-album-id]')
-  cards.forEach(el => cardObserver!.observe(el))
-
-  // Seed immediately from current viewport so the first paint isn't empty.
-  const viewportBottom = window.innerHeight + 400
-  const viewportTop = -400
-  cards.forEach(el => {
-    const rect = el.getBoundingClientRect()
-    if (rect.bottom > viewportTop && rect.top < viewportBottom) {
-      const id = Number(el.dataset.albumId)
-      if (id) pendingVisible.add(id)
-    }
-  })
-  flushVisible()
+function refreshObserver() {
+  if (scrollEl.value) observeCards(scrollEl.value)
 }
 
 const filterQuery = ref('')
@@ -437,21 +393,17 @@ watch(loading, (newLoading) => {
   if (!newLoading && filteredAlbums.value.length > 0) {
     nextTick(() => {
       restoreInitialFocus()
-      observeCards()
+      refreshObserver()
     })
   }
 })
 
 // Re-observe whenever the set of rendered cards changes (create, rename, delete, filter).
 watch(filteredAlbums, () => {
-  nextTick(() => observeCards())
+  nextTick(() => refreshObserver())
 })
 
-onBeforeUnmount(() => {
-  cardObserver?.disconnect()
-  cardObserver = null
-  if (visibleFlushTimer) { clearTimeout(visibleFlushTimer); visibleFlushTimer = null }
-})
+// Cleanup is handled by usePhotoLazyLoad's own onUnmounted hook.
 
 const showCreateDialog = ref(false)
 const newAlbumName = ref('')
@@ -788,7 +740,7 @@ onMounted(loadData)
 </script>
 
 <template>
-  <div class="albums-view">
+  <div ref="scrollEl" class="albums-view">
 
     <!-- Service status warning bar -->
     <ServiceStatusBar />
@@ -872,28 +824,34 @@ onMounted(loadData)
           :ref="el => { if (index === 0) firstAlbumRef = (el as HTMLElement) }"
           :data-album-id="album.id"
           class="album-card"
-          :class="{ 'album-card--placeholder': !visibleAlbumIds.has(album.id) }"
           tabindex="0"
           @click="openAlbum(album)"
           @keydown.enter="openAlbum(album)"
           @keydown.space.prevent="openAlbum(album)"
       >
+        <!-- Cover always renders so the card reserves its square slot in the
+             grid even before the lazy-loader hydrates it. Same shape as the
+             gallery's .photo-thumb (`aspect-ratio: 1`). -->
+        <div class="album-cover">
+          <HeicImage
+            v-if="album.cover_filename && visibleAlbumIds.has(album.id)"
+            :src="getPhotoUrl(album.cover_filename, 400)"
+            :alt="album.name"
+            objectFit="cover"
+          />
+          <div v-else-if="!album.cover_filename" class="album-icon">
+            <i class="pi pi-images"/>
+          </div>
+        </div>
+
+        <i v-if="album.is_shared" class="pi pi-share-alt shared-badge" v-tooltip="'Freigegeben'" />
+
         <template v-if="visibleAlbumIds.has(album.id)">
           <div v-if="canShareAlbum(album) || canManageAlbum(album)" class="album-actions" @click.stop>
             <Button v-if="canShareAlbum(album)" icon="pi pi-share-alt" text rounded size="small" v-tooltip="'Freigeben'" @click="openShareDialog(album)" />
             <Button v-if="canManageAlbum(album)" icon="pi pi-pencil" text rounded size="small" v-tooltip="'Bearbeiten'" @click="openRenameDialog(album)" />
             <Button v-if="canManageAlbum(album)" icon="pi pi-trash" text rounded size="small" severity="danger" v-tooltip="'Löschen'" @click="openDeleteDialog(album)" />
           </div>
-          <div class="album-cover">
-            <HeicImage
-              v-if="album.cover_filename"
-              :src="getPhotoUrl(album.cover_filename, 400)"
-              :alt="album.name"
-              objectFit="cover"
-            />
-            <div v-else class="album-icon"><i class="pi pi-images"/></div>
-          </div>
-          <i v-if="album.is_shared" class="pi pi-share-alt shared-badge" v-tooltip="'Freigegeben'" />
           <div class="album-info">
             <span class="album-name">{{ album.name }}</span>
             <span v-if="album.description" class="album-desc">{{ album.description }}</span>
@@ -1199,6 +1157,13 @@ onMounted(loadData)
   gap: var(--grid-gap);
 }
 
+@media (max-width: 768px) {
+  .albums-grid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: var(--grid-gap-compact);
+  }
+}
+
 .album-card {
   position: relative;
   background: var(--p-content-background);
@@ -1218,13 +1183,6 @@ onMounted(loadData)
 .album-card.album-card--restored-focus {
   outline: 2px solid var(--p-primary-300);
   outline-offset: -2px;
-}
-
-/* Placeholder: card slot is reserved so the grid layout stays stable even
- * while the card's content is torn down. Matches the cover height used
- * once the card is hydrated. */
-.album-card--placeholder {
-  min-height: 200px;
 }
 
 .shared-badge {
@@ -1260,7 +1218,7 @@ onMounted(loadData)
 
 .album-cover {
   width: 100%;
-  height: 200px;
+  aspect-ratio: 1;
   background: var(--p-content-hover-background);
   overflow: hidden;
 }
