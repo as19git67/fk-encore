@@ -61,7 +61,6 @@ const auth = useAuthStore()
 // at mount; VirtualAlbumGrid handles the scroll-and-highlight as soon as
 // data + layout settle.
 const rememberedAlbumId = ref<number | null>(readRememberedAlbumId())
-const gridRef = ref<InstanceType<typeof VirtualAlbumGrid> | null>(null)
 
 function openAlbum(album: Album) {
   rememberFocusedAlbumId(album.id)
@@ -691,7 +690,6 @@ onMounted(loadData)
 
     <VirtualAlbumGrid
       v-else
-      ref="gridRef"
       :albums="filteredAlbums"
       :rememberedAlbumId="rememberedAlbumId"
       :canManage="canManageAlbum"
