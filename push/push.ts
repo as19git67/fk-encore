@@ -173,6 +173,15 @@ interface NotifyDocumentReviewRequest {
 export const notifyDocumentReview = api(
   { expose: false },
   async (req: NotifyDocumentReviewRequest): Promise<FanoutFeedResponse> => {
+    // Respect per-user notification preferences. The DocumentReviewKind
+    // values map to dedicated prefs keys so they can be toggled
+    // independently of the album/photo feed kinds.
+    const prefs = await svc.getNotificationPrefs(req.userId);
+    const prefsKind: svc.NotificationKind =
+      req.kind === "low_confidence" ? "document_low_confidence" : "document_failed";
+    if (!svc.isKindEnabled(prefs, prefsKind)) {
+      return { sent: 0, pruned: 0 };
+    }
     const notification = svc.buildDocumentNotification({
       kind: req.kind,
       documentId: req.documentId,

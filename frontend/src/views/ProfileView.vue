@@ -161,6 +161,8 @@ const NOTIFICATION_TYPES: NotificationTypeConfig[] = [
   { kind: 'photo_commented', label: 'Kommentare', description: 'Jemand hat ein Foto kommentiert' },
   { kind: 'photo_favorited', label: 'Favoriten', description: 'Jemand hat ein Foto favorisiert' },
   { kind: 'album_left', label: 'Freigabe verlassen', description: 'Jemand hat eine Albumfreigabe verlassen' },
+  { kind: 'document_low_confidence', label: 'Dokumentklassifikation unsicher', description: 'Ein Dokument wurde mit niedriger Konfidenz klassifiziert und sollte geprüft werden' },
+  { kind: 'document_failed', label: 'Dokumentverarbeitung fehlgeschlagen', description: 'Ein Dokument konnte nicht automatisch verarbeitet werden' },
 ]
 
 const notifPrefs = ref<NotificationPrefs>({})

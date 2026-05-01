@@ -38,6 +38,8 @@ export type NotificationKind =
   | 'photo_favorited'
   | 'photo_commented'
   | 'album_left'
+  | 'document_low_confidence'
+  | 'document_failed'
 
 export type NotificationPrefs = Partial<Record<NotificationKind, boolean>>
 
