@@ -12,10 +12,8 @@ import {
   type DuplicateTransactionInfo,
   type MandateHistoryItem,
 } from '../../api/finance'
-import { useScrollRestore } from '../../composables/useScrollRestore'
 
 const router = useRouter()
-const { restore } = useScrollRestore('finance-anomalies')
 
 const anomalies = ref<AnomalyItem[]>([])
 const loading = ref(false)
@@ -52,7 +50,7 @@ async function load() {
   }
 }
 
-onMounted(async () => { await load(); restore() })
+onMounted(load)
 
 async function acknowledge(item: AnomalyItem) {
   acknowledging.value.add(item.id)

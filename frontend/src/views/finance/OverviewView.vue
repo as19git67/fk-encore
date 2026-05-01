@@ -7,26 +7,16 @@ import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
 import { useOverviewStore } from '../../stores/finance/overview'
+import { useAnomalyStore } from '../../stores/finance/anomalies'
 import type { OverviewAccount, SaveOverviewSection } from '../../api/finance'
-import { listAnomalies } from '../../api/finance'
 
 const store = useOverviewStore()
+const anomalyStore = useAnomalyStore()
 const router = useRouter()
-
-const anomalyCount = ref<number>(0)
-
-async function loadAnomalyCount() {
-  try {
-    const res = await listAnomalies()
-    anomalyCount.value = res.total
-  } catch {
-    anomalyCount.value = 0
-  }
-}
 
 onMounted(() => {
   void store.refresh()
-  void loadAnomalyCount()
+  void anomalyStore.refresh()
 })
 
 function openAnomalies() {
@@ -208,7 +198,7 @@ async function saveConfig() {
     </header>
 
     <div
-      v-if="anomalyCount > 0"
+      v-if="anomalyStore.count > 0"
       class="anomaly-tile"
       role="button"
       tabindex="0"
@@ -221,8 +211,8 @@ async function saveConfig() {
       </div>
       <div class="tile-body">
         <div class="tile-title">
-          {{ anomalyCount }}
-          {{ anomalyCount === 1 ? 'offene Anomalie' : 'offene Anomalien' }}
+          {{ anomalyStore.count }}
+          {{ anomalyStore.count === 1 ? 'offene Anomalie' : 'offene Anomalien' }}
         </div>
         <div class="tile-sub">
           Auffälligkeiten bei wiederkehrenden Buchungen prüfen

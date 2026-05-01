@@ -1351,7 +1351,6 @@ export const financeAnomaly = pgTable(
 );
 
 // ---------- Transaction seen state ----------
-
 export const financeTransactionSeen = pgTable(
   "finance_transaction_seen",
   {
