@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {onMounted, onBeforeUnmount, ref, computed, watch, nextTick} from 'vue'
+import {onMounted, ref, computed, watch, nextTick} from 'vue'
 import {useRouter, useRoute} from 'vue-router'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
@@ -9,9 +9,9 @@ import SelectButton from 'primevue/selectbutton'
 import Select from 'primevue/select'
 import Checkbox from 'primevue/checkbox'
 import Chip from 'primevue/chip'
-import HeicImage from '../components/HeicImage.vue'
 import DateRangePresets from '../components/DateRangePresets.vue'
 import SortMenu from '../components/SortMenu.vue'
+import VirtualAlbumGrid from '../components/VirtualAlbumGrid.vue'
 import type { SortField, SortState } from '../composables/useSort'
 import {
   type Album,
@@ -19,7 +19,7 @@ import {
   type AlbumShareWithUser,
   type AlbumPublicLink,
   type PublicLinkExpiry,
-  createAlbum, listAlbums, getPhotoUrl, updateAlbum, deleteAlbum,
+  createAlbum, listAlbums, updateAlbum, deleteAlbum,
   getAlbumShares, shareAlbum, removeAlbumShare,
   createAlbumPublicLink, deleteAlbumPublicLink,
 } from '../api/photos'
@@ -27,6 +27,22 @@ import { listUsers, type UserWithRoles } from '../api/users'
 import { useAuthStore } from '../stores/auth'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import { useReferenceData } from '../composables/useReferenceData'
+import {
+  albumsStateToQuery,
+  DEFAULT_ALBUM_SORT,
+  EMPTY_ALBUM_FILTER,
+  hasAnyAlbumsFilterQueryParam,
+  loadAlbumsStateFromStorage,
+  parseAlbumsStateFromQuery,
+  readRememberedAlbumId,
+  rememberFocusedAlbumId,
+  saveAlbumsStateToStorage,
+  type AlbumDisplayFilter,
+  type AlbumEmptyFilter,
+  type AlbumFilter,
+  type AlbumOwnerFilter,
+  type AlbumsPersistedState,
+} from '../utils/albumsViewState'
 import ServiceStatusBar from "../components/ServiceStatusBar.vue";
 
 // Wir behalten die View-eigene Albumliste (eigene Sortier-/Filter-Logik),
@@ -39,194 +55,22 @@ const loading = ref(true)
 const error = ref('')
 const auth = useAuthStore()
 
-const firstAlbumRef = ref<HTMLElement | null>(null)
-const gridEl = ref<HTMLElement | null>(null)
-
 // Shared with AlbumDetailView: when the user opens an album we remember it
 // here, so navigating back from the detail view restores focus and scroll
-// position to the album the user came from.
-const LAST_FOCUSED_ALBUM_KEY = 'albums_last_focused_album_id'
-
-function rememberFocusedAlbum(id: number) {
-  try { localStorage.setItem(LAST_FOCUSED_ALBUM_KEY, String(id)) } catch { /* ignore */ }
-}
-
-function readRememberedAlbumId(): number | null {
-  try {
-    const raw = localStorage.getItem(LAST_FOCUSED_ALBUM_KEY)
-    if (!raw) return null
-    const id = Number(raw)
-    return Number.isFinite(id) ? id : null
-  } catch { return null }
-}
+// position to the album the user came from. The remembered ID is read once
+// at mount; VirtualAlbumGrid handles the scroll-and-highlight as soon as
+// data + layout settle.
+const rememberedAlbumId = ref<number | null>(readRememberedAlbumId())
+const gridRef = ref<InstanceType<typeof VirtualAlbumGrid> | null>(null)
 
 function openAlbum(album: Album) {
-  rememberFocusedAlbum(album.id)
+  rememberFocusedAlbumId(album.id)
   router.push(`/fotos/alben/${album.id}`)
-}
-
-// Number of columns currently shown in the grid. Derived from the computed
-// `grid-template-columns` (each track becomes a space-separated length), so
-// it stays in sync with responsive breakpoints and `auto-fill` without us
-// having to mirror the CSS formula here.
-function getGridColumnCount(): number {
-  const root = gridEl.value
-  if (!root) return 1
-  const template = window.getComputedStyle(root).gridTemplateColumns
-  if (!template || template === 'none') return 1
-  return template.split(' ').filter(s => s.trim().length > 0).length
-}
-
-function handleGridArrowNav(e: KeyboardEvent) {
-  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
-  const root = gridEl.value
-  if (!root) return
-  const active = document.activeElement as HTMLElement | null
-  const currentCard = active?.closest('.album-card') as HTMLElement | null
-  if (!currentCard || !root.contains(currentCard)) return
-
-  const cards = Array.from(root.querySelectorAll<HTMLElement>('.album-card'))
-  const currentIndex = cards.indexOf(currentCard)
-  if (currentIndex === -1) return
-
-  const cols = getGridColumnCount()
-  let targetIndex = -1
-  switch (e.key) {
-    case 'ArrowLeft':
-      if (currentIndex > 0) targetIndex = currentIndex - 1
-      break
-    case 'ArrowRight':
-      if (currentIndex < cards.length - 1) targetIndex = currentIndex + 1
-      break
-    case 'ArrowUp':
-      if (currentIndex - cols >= 0) targetIndex = currentIndex - cols
-      break
-    case 'ArrowDown':
-      if (currentIndex + cols < cards.length) targetIndex = currentIndex + cols
-      // If there's no card directly below (partial last row), fall back to
-      // the last card so the user can always reach the end of the grid.
-      else if (currentIndex < cards.length - 1) targetIndex = cards.length - 1
-      break
-  }
-  if (targetIndex === -1) return
-
-  const target = cards[targetIndex]
-  if (!target) return
-  e.preventDefault()
-  target.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-  target.focus({ preventScroll: true })
-}
-
-function focusRememberedAlbum(): boolean {
-  const id = readRememberedAlbumId()
-  if (id === null) return false
-  const root = gridEl.value
-  if (!root) return false
-  const el = root.querySelector<HTMLElement>(`[data-album-id="${id}"]`)
-  if (!el) return false
-  el.scrollIntoView({ block: 'center', inline: 'nearest' })
-  // `el.focus()` alone does not trigger `:focus-visible` styles for
-  // programmatic focus, so the user wouldn't see the outline. Add an
-  // explicit marker class that mirrors the focus-visible outline and
-  // clear it as soon as the user interacts with the page again.
-  el.classList.add('album-card--restored-focus')
-  const clear = () => {
-    el.classList.remove('album-card--restored-focus')
-    el.removeEventListener('blur', clear)
-    el.removeEventListener('pointerdown', clear)
-    el.removeEventListener('keydown', clear)
-  }
-  el.addEventListener('blur', clear)
-  el.addEventListener('pointerdown', clear)
-  el.addEventListener('keydown', clear)
-  el.focus({ preventScroll: true })
-  return true
-}
-
-// ── Virtualized rendering ─────────────────────────────────────────────────────
-// Album cards are expensive (HeicImage + PrimeVue Buttons with tooltips + image
-// decode). Rendering the full card for hundreds/thousands of albums makes
-// scrolling unusable. Instead each card reserves its layout slot via a
-// placeholder with min-height, and only renders its real content while it
-// intersects the viewport (plus a small buffer, so the content is ready by
-// the time the user sees it). When a card scrolls back out of view its
-// content is torn down again, keeping DOM / memory bounded regardless of
-// how many albums exist.
-const visibleAlbumIds = ref(new Set<number>())
-let cardObserver: IntersectionObserver | null = null
-let pendingVisible = new Set<number>()
-let visibleFlushTimer: ReturnType<typeof setTimeout> | null = null
-
-function flushVisible() {
-  visibleAlbumIds.value = new Set(pendingVisible)
-  visibleFlushTimer = null
-}
-
-function observeCards() {
-  cardObserver?.disconnect()
-  pendingVisible = new Set()
-  if (visibleFlushTimer) { clearTimeout(visibleFlushTimer); visibleFlushTimer = null }
-  const root = gridEl.value
-  if (!root) { visibleAlbumIds.value = new Set(); return }
-
-  cardObserver = new IntersectionObserver(
-    (entries) => {
-      for (const entry of entries) {
-        const id = Number((entry.target as HTMLElement).dataset.albumId)
-        if (!id) continue
-        if (entry.isIntersecting) pendingVisible.add(id)
-        else pendingVisible.delete(id)
-      }
-      if (visibleFlushTimer) clearTimeout(visibleFlushTimer)
-      visibleFlushTimer = setTimeout(flushVisible, 100)
-    },
-    // 400px buffer: start hydrating a card shortly before it enters the
-    // viewport so the user never sees an empty placeholder during normal
-    // scrolling. Use the document scroller (null) because .albums-view is
-    // the scroll container and is an ancestor of .albums-grid.
-    { root: null, rootMargin: '400px 0px' }
-  )
-
-  const cards = root.querySelectorAll<HTMLElement>('[data-album-id]')
-  cards.forEach(el => cardObserver!.observe(el))
-
-  // Seed immediately from current viewport so the first paint isn't empty.
-  const viewportBottom = window.innerHeight + 400
-  const viewportTop = -400
-  cards.forEach(el => {
-    const rect = el.getBoundingClientRect()
-    if (rect.bottom > viewportTop && rect.top < viewportBottom) {
-      const id = Number(el.dataset.albumId)
-      if (id) pendingVisible.add(id)
-    }
-  })
-  flushVisible()
 }
 
 const filterQuery = ref('')
 
 // ── Album filter menu ────────────────────────────────────────────────────────
-type AlbumOwnerFilter = 'all' | 'mine' | 'shared'
-type AlbumDisplayFilter = 'all' | 'grid' | 'map'
-type AlbumEmptyFilter = 'any' | 'only' | 'exclude'
-
-interface AlbumFilter {
-  owner: AlbumOwnerFilter
-  display: AlbumDisplayFilter
-  dateFrom?: string  // ISO YYYY-MM-DD
-  dateTo?: string
-  emptyMode: AlbumEmptyFilter
-  sharedByMe: boolean
-  sharedWithMe: boolean
-}
-
-const EMPTY_ALBUM_FILTER: AlbumFilter = {
-  owner: 'all',
-  display: 'all',
-  emptyMode: 'any',
-  sharedByMe: false,
-  sharedWithMe: false,
-}
 const appliedAlbumFilter = ref<AlbumFilter>({ ...EMPTY_ALBUM_FILTER })
 const draftAlbumFilter = ref<AlbumFilter>({ ...EMPTY_ALBUM_FILTER })
 const showAlbumFilterMenu = ref(false)
@@ -356,7 +200,6 @@ const ALBUM_SORT_FIELDS: SortField[] = [
   { value: 'created_at', label: 'Erstellungsdatum' },
   { value: 'photo_count', label: 'Foto-Anzahl' },
 ]
-const DEFAULT_ALBUM_SORT: SortState = { field: 'newest_photo_at', direction: 'desc' }
 const appliedAlbumSort = ref<SortState>({ ...DEFAULT_ALBUM_SORT })
 const draftAlbumSort = ref<SortState>({ ...DEFAULT_ALBUM_SORT })
 const showAlbumSortMenu = ref(false)
@@ -430,38 +273,9 @@ const filteredAlbums = computed(() => {
   })
 })
 
-function restoreInitialFocus() {
-  // One animation frame after the DOM flush so the grid has its final
-  // layout (card placeholders are sized, template refs are populated).
-  // If the card can't be found yet, try once more next frame.
-  requestAnimationFrame(() => {
-    if (focusRememberedAlbum()) return
-    requestAnimationFrame(() => {
-      if (focusRememberedAlbum()) return
-      firstAlbumRef.value?.focus()
-    })
-  })
-}
-
-watch(loading, (newLoading) => {
-  if (!newLoading && filteredAlbums.value.length > 0) {
-    nextTick(() => {
-      restoreInitialFocus()
-      observeCards()
-    })
-  }
-})
-
-// Re-observe whenever the set of rendered cards changes (create, rename, delete, filter).
-watch(filteredAlbums, () => {
-  nextTick(() => observeCards())
-})
-
-onBeforeUnmount(() => {
-  cardObserver?.disconnect()
-  cardObserver = null
-  if (visibleFlushTimer) { clearTimeout(visibleFlushTimer); visibleFlushTimer = null }
-})
+// VirtualAlbumGrid handles its own scroll-and-highlight when albums + layout
+// settle, using the `rememberedAlbumId` prop. No additional focus/scroll
+// orchestration needed at the view level.
 
 const showCreateDialog = ref(false)
 const newAlbumName = ref('')
@@ -491,108 +305,11 @@ const route = useRoute()
 //   - cross-tab navigation (localStorage)
 // On mount: URL takes priority for deep-linking; falls back to localStorage.
 // On change: writes to BOTH URL and localStorage so either entry point recovers.
-
-const ALBUMS_STATE_STORAGE_KEY = 'albums_view_state'
-
-interface AlbumsPersistedState {
-  filter: AlbumFilter
-  sort: SortState
-  searchQuery: string
-}
-
-function defaultAlbumsState(): AlbumsPersistedState {
-  return {
-    filter: { ...EMPTY_ALBUM_FILTER },
-    sort: { ...DEFAULT_ALBUM_SORT },
-    searchQuery: '',
-  }
-}
-
-function sanitizeFilter(raw: Partial<AlbumFilter> | undefined): AlbumFilter {
-  const f = raw ?? {}
-  const validOwners: AlbumOwnerFilter[] = ['all', 'mine', 'shared']
-  const validDisplays: AlbumDisplayFilter[] = ['all', 'grid', 'map']
-  const validEmpties: AlbumEmptyFilter[] = ['any', 'only', 'exclude']
-  return {
-    owner: validOwners.includes(f.owner as AlbumOwnerFilter) ? (f.owner as AlbumOwnerFilter) : 'all',
-    display: validDisplays.includes(f.display as AlbumDisplayFilter) ? (f.display as AlbumDisplayFilter) : 'all',
-    emptyMode: validEmpties.includes(f.emptyMode as AlbumEmptyFilter) ? (f.emptyMode as AlbumEmptyFilter) : 'any',
-    sharedByMe: f.sharedByMe === true,
-    sharedWithMe: f.sharedWithMe === true,
-    dateFrom: typeof f.dateFrom === 'string' && f.dateFrom ? f.dateFrom : undefined,
-    dateTo: typeof f.dateTo === 'string' && f.dateTo ? f.dateTo : undefined,
-  }
-}
-
-function sanitizeSort(raw: Partial<SortState> | undefined): SortState {
-  const validSortFields = ALBUM_SORT_FIELDS.map(f => f.value)
-  const f = raw ?? {}
-  return {
-    field: typeof f.field === 'string' && validSortFields.includes(f.field) ? f.field : DEFAULT_ALBUM_SORT.field,
-    direction: f.direction === 'asc' || f.direction === 'desc' ? f.direction : DEFAULT_ALBUM_SORT.direction,
-  }
-}
-
-function loadStateFromStorage(): AlbumsPersistedState {
-  try {
-    const raw = localStorage.getItem(ALBUMS_STATE_STORAGE_KEY)
-    if (!raw) return defaultAlbumsState()
-    const parsed = JSON.parse(raw) as Partial<AlbumsPersistedState>
-    return {
-      filter: sanitizeFilter(parsed?.filter),
-      sort: sanitizeSort(parsed?.sort),
-      searchQuery: typeof parsed?.searchQuery === 'string' ? parsed.searchQuery : '',
-    }
-  } catch {
-    return defaultAlbumsState()
-  }
-}
-
-function saveStateToStorage(state: AlbumsPersistedState) {
-  try {
-    localStorage.setItem(ALBUMS_STATE_STORAGE_KEY, JSON.stringify(state))
-  } catch { /* storage unavailable */ }
-}
-
-function hasAnyFilterQueryParam(q: Record<string, unknown>): boolean {
-  const keys = ['q', 'owner', 'display', 'emptyMode', 'sharedByMe', 'sharedWithMe', 'dateFrom', 'dateTo', 'sortBy', 'sortDir']
-  return keys.some(k => typeof q[k] === 'string' && (q[k] as string).length > 0)
-}
-
-function parseAlbumStateFromQuery(): AlbumsPersistedState {
-  const q = route.query
-  const filter = sanitizeFilter({
-    owner: q.owner as AlbumOwnerFilter,
-    display: q.display as AlbumDisplayFilter,
-    emptyMode: q.emptyMode as AlbumEmptyFilter,
-    sharedByMe: q.sharedByMe === '1',
-    sharedWithMe: q.sharedWithMe === '1',
-    dateFrom: typeof q.dateFrom === 'string' ? q.dateFrom : undefined,
-    dateTo: typeof q.dateTo === 'string' ? q.dateTo : undefined,
-  })
-  const sort = sanitizeSort({
-    field: typeof q.sortBy === 'string' ? q.sortBy : undefined,
-    direction: (q.sortDir === 'asc' || q.sortDir === 'desc') ? q.sortDir : undefined,
-  })
-  const searchQuery = typeof q.q === 'string' ? q.q : ''
-  return { filter, sort, searchQuery }
-}
-
-function albumStateToQuery(state: AlbumsPersistedState): Record<string, string> {
-  const out: Record<string, string> = {}
-  const { filter, sort, searchQuery } = state
-  if (searchQuery) out.q = searchQuery
-  if (filter.owner !== 'all') out.owner = filter.owner
-  if (filter.display !== 'all') out.display = filter.display
-  if (filter.emptyMode !== 'any') out.emptyMode = filter.emptyMode
-  if (filter.sharedByMe) out.sharedByMe = '1'
-  if (filter.sharedWithMe) out.sharedWithMe = '1'
-  if (filter.dateFrom) out.dateFrom = filter.dateFrom
-  if (filter.dateTo) out.dateTo = filter.dateTo
-  if (sort.field !== DEFAULT_ALBUM_SORT.field) out.sortBy = sort.field
-  if (sort.direction !== DEFAULT_ALBUM_SORT.direction) out.sortDir = sort.direction
-  return out
-}
+//
+// The serialization helpers live in utils/albumsViewState so AlbumDetailView
+// can reuse them when navigating back — without that, leaving an album would
+// land on `/fotos/alben` (no query) and the user would briefly see an
+// unfiltered list before AlbumsView re-applied state from localStorage.
 
 function currentState(): AlbumsPersistedState {
   return {
@@ -605,11 +322,11 @@ function currentState(): AlbumsPersistedState {
 let syncingUrl = false
 async function persistState() {
   const state = currentState()
-  saveStateToStorage(state)
+  saveAlbumsStateToStorage(state)
   if (syncingUrl) return
   syncingUrl = true
   try {
-    const next = albumStateToQuery(state)
+    const next = albumsStateToQuery(state)
     if (JSON.stringify(next) !== JSON.stringify(route.query)) {
       await router.replace({ query: next })
     }
@@ -619,7 +336,12 @@ async function persistState() {
 }
 
 async function loadData() {
-  loading.value = true
+  // Don't toggle `loading` to true on subsequent calls — only the initial
+  // fetch needs the spinner state. Refreshes (after rename / delete /
+  // realtime events) replace `albums.value` in place, so VirtualAlbumGrid
+  // stays mounted and the virtualizer keeps its scroll position. Without
+  // this guard, editing an album's description would unmount the grid and
+  // snap the user back to the top of the list.
   try {
     const res = await listAlbums()
     albums.value = res.albums
@@ -873,9 +595,9 @@ useRealtimeEvent('albums', 'photo_added', (ev) => {
 // ready when data arrives. URL params win for deep-linking; otherwise we
 // fall back to whatever the user had configured last (localStorage).
 {
-  const initial = hasAnyFilterQueryParam(route.query as Record<string, unknown>)
-    ? parseAlbumStateFromQuery()
-    : loadStateFromStorage()
+  const initial = hasAnyAlbumsFilterQueryParam(route.query as Record<string, unknown>)
+    ? parseAlbumsStateFromQuery(route.query as Record<string, unknown>)
+    : loadAlbumsStateFromStorage()
   appliedAlbumFilter.value = initial.filter
   draftAlbumFilter.value = { ...initial.filter }
   appliedAlbumSort.value = initial.sort
@@ -890,6 +612,18 @@ useRealtimeEvent('albums', 'photo_added', (ev) => {
 watch(appliedAlbumFilter, () => persistState(), { deep: true })
 watch(appliedAlbumSort, () => persistState(), { deep: true })
 watch(filterQuery, () => persistState())
+
+// Whenever the filter / sort / search-query changes, the visible album
+// set changes. `useVirtualizer` keeps its scroll offset in absolute
+// pixels, so a shrunk-then-restored list (user types into the filter and
+// then clears it) leaves the user clamped at the top with the
+// previously-selected album well out of view. Hand control back to the
+// grid so it re-anchors on the remembered album. Run after Vue applies
+// the new `filteredAlbums` so the row math sees the new layout.
+watch([appliedAlbumFilter, appliedAlbumSort, filterQuery], async () => {
+  await nextTick()
+  await gridRef.value?.rescrollToRemembered({ highlight: false })
+}, { deep: true })
 
 onMounted(loadData)
 </script>
@@ -972,48 +706,18 @@ onMounted(loadData)
       Keine Alben passen zum Filter „{{ filterQuery }}“.
     </div>
 
-    <div v-else ref="gridEl" class="albums-grid" @keydown="handleGridArrowNav">
-      <div
-          v-for="(album, index) in filteredAlbums"
-          :key="album.id"
-          :ref="el => { if (index === 0) firstAlbumRef = (el as HTMLElement) }"
-          :data-album-id="album.id"
-          class="album-card"
-          :class="{ 'album-card--placeholder': !visibleAlbumIds.has(album.id) }"
-          tabindex="0"
-          @click="openAlbum(album)"
-          @keydown.enter="openAlbum(album)"
-          @keydown.space.prevent="openAlbum(album)"
-      >
-        <template v-if="visibleAlbumIds.has(album.id)">
-          <div v-if="canShareAlbum(album) || canManageAlbum(album)" class="album-actions" @click.stop>
-            <Button v-if="canShareAlbum(album)" icon="pi pi-share-alt" text rounded size="small" v-tooltip="'Freigeben'" @click="openShareDialog(album)" />
-            <Button v-if="canManageAlbum(album)" icon="pi pi-pencil" text rounded size="small" v-tooltip="'Bearbeiten'" @click="openRenameDialog(album)" />
-            <Button v-if="canManageAlbum(album)" icon="pi pi-trash" text rounded size="small" severity="danger" v-tooltip="'Löschen'" @click="openDeleteDialog(album)" />
-          </div>
-          <div class="album-cover">
-            <HeicImage
-              v-if="album.cover_filename"
-              :src="getPhotoUrl(album.cover_filename, 400)"
-              :alt="album.name"
-              objectFit="cover"
-            />
-            <div v-else class="album-icon"><i class="pi pi-images"/></div>
-          </div>
-          <i v-if="album.is_shared" class="pi pi-share-alt shared-badge" v-tooltip="'Freigegeben'" />
-          <div class="album-info">
-            <span class="album-name">{{ album.name }}</span>
-            <span v-if="album.description" class="album-desc">{{ album.description }}</span>
-            <span class="album-meta">
-              {{ album.photo_count }} {{ album.photo_count === 1 ? 'Foto' : 'Fotos' }}
-              <template v-if="album.oldest_photo_at && album.newest_photo_at">
-                • {{ new Date(album.oldest_photo_at).toLocaleDateString() }} - {{ new Date(album.newest_photo_at).toLocaleDateString() }}
-              </template>
-            </span>
-          </div>
-        </template>
-      </div>
-    </div>
+    <VirtualAlbumGrid
+      v-else
+      ref="gridRef"
+      :albums="filteredAlbums"
+      :rememberedAlbumId="rememberedAlbumId"
+      :canManage="canManageAlbum"
+      :canShare="canShareAlbum"
+      @open="openAlbum"
+      @share="openShareDialog"
+      @edit="openRenameDialog"
+      @remove="openDeleteDialog"
+    />
 
     <Dialog v-model:visible="showCreateDialog" header="Neues Album erstellen" :modal="true">
       <div class="dialog-content">
@@ -1220,7 +924,9 @@ onMounted(loadData)
   display: flex;
   flex-direction: column;
   height: calc(100vh - var(--menubar-height, 3.5rem));
-  overflow-y: auto;
+  /* The VirtualAlbumGrid is the scroll container — keep this one static so
+     the subheader stays pinned to the top without sticky-positioning hacks. */
+  overflow: hidden;
   margin-inline: -0.25em;
   padding-inline: 0.5em;
   width: 100%;
@@ -1255,9 +961,9 @@ onMounted(loadData)
 }
 
 .subheader {
-  position: sticky;
-  top: 0;
-  z-index: 10;
+  /* The albums view no longer scrolls — the subheader is just normal flow
+     above the (scrollable) VirtualAlbumGrid. */
+  flex: none;
   background: var(--p-content-background);
   padding-bottom: 0.25rem;
 }
@@ -1300,126 +1006,7 @@ onMounted(loadData)
   right: 0.25rem;
 }
 
-.albums-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--grid-min-col), 1fr));
-  gap: var(--grid-gap);
-}
-
-.album-card {
-  position: relative;
-  background: var(--p-content-background);
-  border: 4px solid transparent;
-  border-radius: var(--radius-md);
-  padding: 0;
-  cursor: pointer;
-  transition: transform 0.2s;
-  overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  outline: none;
-}
-
-.album-card:hover { transform: scale(1.02); }
-
-.album-card:focus-visible,
-.album-card.album-card--restored-focus {
-  outline: 2px solid var(--p-primary-300);
-  outline-offset: -2px;
-}
-
-/* Placeholder: card slot is reserved so the grid layout stays stable even
- * while the card's content is torn down. Matches the cover height used
- * once the card is hydrated. */
-.album-card--placeholder {
-  min-height: 200px;
-}
-
-.shared-badge {
-  position: absolute;
-  top: 0.5rem;
-  left: 0.5rem;
-  z-index: 1;
-  font-size: 0.9rem;
-  color: white;
-  background: rgba(0, 0, 0, 0.55);
-  border-radius: 50%;
-  padding: 0.35rem;
-  backdrop-filter: blur(4px);
-}
-
-.album-actions {
-  position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  z-index: 1;
-  display: flex;
-  gap: 0.25rem;
-  padding: 0.25rem;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(4px);
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-.album-actions :deep(.p-button) { color: #fff; }
-.album-card:hover .album-actions,
-.album-card:focus-within .album-actions { opacity: 1; }
-
-.album-cover {
-  width: 100%;
-  height: 200px;
-  background: var(--p-content-hover-background);
-  overflow: hidden;
-}
-.album-cover :deep(.heic-image-container) {
-  width: 100%;
-  height: 100%;
-}
-.album-icon {
-  font-size: 3rem;
-  color: var(--p-primary-color);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-}
-
-.album-info {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  padding: 0.4rem 0.6rem 0.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  background: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(4px);
-  color: #fff;
-}
-.album-name {
-  font-weight: 500;
-  font-size: 0.85rem;
-  display: block;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.album-desc {
-  font-size: 0.75rem;
-  color: rgba(255, 255, 255, 0.8);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.album-meta {
-  font-size: 0.7rem;
-  color: rgba(255, 255, 255, 0.75);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+/* Album card / cover / info / actions styles live in VirtualAlbumGrid. */
 
 .info-text {
   text-align: center;
