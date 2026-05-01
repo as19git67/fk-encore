@@ -1254,6 +1254,14 @@ onMounted(loadData)
   flex-wrap: wrap;
 }
 
+.subheader {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--p-content-background);
+  padding-bottom: 0.25rem;
+}
+
 .album-filter-chips {
   display: flex;
   flex-wrap: wrap;
