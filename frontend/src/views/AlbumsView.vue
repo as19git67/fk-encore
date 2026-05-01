@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {onMounted, ref, computed, watch} from 'vue'
+import {onMounted, ref, computed, watch, nextTick} from 'vue'
 import {useRouter, useRoute} from 'vue-router'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
@@ -61,6 +61,7 @@ const auth = useAuthStore()
 // at mount; VirtualAlbumGrid handles the scroll-and-highlight as soon as
 // data + layout settle.
 const rememberedAlbumId = ref<number | null>(readRememberedAlbumId())
+const gridRef = ref<InstanceType<typeof VirtualAlbumGrid> | null>(null)
 
 function openAlbum(album: Album) {
   rememberFocusedAlbumId(album.id)
@@ -612,6 +613,18 @@ watch(appliedAlbumFilter, () => persistState(), { deep: true })
 watch(appliedAlbumSort, () => persistState(), { deep: true })
 watch(filterQuery, () => persistState())
 
+// Whenever the filter / sort / search-query changes, the visible album
+// set changes. `useVirtualizer` keeps its scroll offset in absolute
+// pixels, so a shrunk-then-restored list (user types into the filter and
+// then clears it) leaves the user clamped at the top with the
+// previously-selected album well out of view. Hand control back to the
+// grid so it re-anchors on the remembered album. Run after Vue applies
+// the new `filteredAlbums` so the row math sees the new layout.
+watch([appliedAlbumFilter, appliedAlbumSort, filterQuery], async () => {
+  await nextTick()
+  await gridRef.value?.rescrollToRemembered({ highlight: false })
+}, { deep: true })
+
 onMounted(loadData)
 </script>
 
@@ -695,6 +708,7 @@ onMounted(loadData)
 
     <VirtualAlbumGrid
       v-else
+      ref="gridRef"
       :albums="filteredAlbums"
       :rememberedAlbumId="rememberedAlbumId"
       :canManage="canManageAlbum"

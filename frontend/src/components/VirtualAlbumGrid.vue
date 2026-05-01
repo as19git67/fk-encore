@@ -130,20 +130,36 @@ function scrollToAlbum(id: number, opts: { highlight?: boolean } = {}): boolean 
   return true
 }
 
-defineExpose({ scrollToAlbum })
+/**
+ * Bring the parent-provided `rememberedAlbumId` back into view, or scroll
+ * to the top if it's not in the current visible set. The parent calls
+ * this after filter / sort / search changes — `useVirtualizer` keeps its
+ * scroll offset in absolute pixels, so a shrunk-then-restored list would
+ * otherwise leave the user clamped at the top of the new layout.
+ */
+async function rescrollToRemembered(opts: { highlight?: boolean } = {}) {
+  await new Promise<void>((r) => requestAnimationFrame(() => r()))
+  if (cols.value <= 0 || props.albums.length === 0) return
+  const target = props.rememberedAlbumId
+  if (target !== null && target !== undefined && scrollToAlbum(target, opts)) {
+    return
+  }
+  virtualizer.value.scrollToIndex(0, { align: 'start' })
+}
+
+defineExpose({ scrollToAlbum, rescrollToRemembered })
 
 // ── Initial scroll when data + layout settle ─────────────────────────────────
 // The parent loads albums asynchronously, and ResizeObserver picks the column
 // count after first paint. Try once on every relevant change, but only fire
-// the scroll once so subsequent re-filters don't yank the user back.
+// the scroll once so subsequent re-filters don't yank the user back — those
+// are driven by the parent calling `rescrollToRemembered()` explicitly.
 let initialScrollDone = false
 
 async function tryInitialScroll() {
   if (initialScrollDone) return
   if (!props.rememberedAlbumId) return
   if (cols.value <= 0 || props.albums.length === 0) return
-  // Wait one frame so the virtualizer measured against the new row count
-  // before we ask it to scroll.
   await new Promise<void>((r) => requestAnimationFrame(() => r()))
   if (scrollToAlbum(props.rememberedAlbumId, { highlight: true })) {
     initialScrollDone = true
