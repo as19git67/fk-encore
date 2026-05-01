@@ -77,6 +77,7 @@ async function save() {
       counterparty: counterparty.value.trim(),
       tags: tags.value,
     })
+    tagsStore.addLocal(tags.value)
     void router.push({ name: 'finance-transaction-detail', params: { id: created.id } })
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)

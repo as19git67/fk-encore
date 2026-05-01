@@ -87,6 +87,7 @@ async function addUserTags() {
       transaction_ids: [tx.value.id],
       add: newTag.value,
     })
+    tagsStore.addLocal(newTag.value)
     tx.value = await api.getTransaction(tx.value.id)
     syncForm()
     newTag.value = []

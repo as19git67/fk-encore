@@ -55,6 +55,7 @@ async function apply() {
       remove: mode.value === 'replace' ? undefined : removeTags.value,
       replace: mode.value === 'replace',
     })
+    tagsStore.addLocal(addTags.value)
     emit('done')
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
