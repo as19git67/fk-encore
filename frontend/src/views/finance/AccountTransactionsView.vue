@@ -10,6 +10,7 @@
 
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useScrollRestore } from '../../composables/useScrollRestore'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import InputText from 'primevue/inputtext'
@@ -38,6 +39,7 @@ const router = useRouter()
 const txStore = useTransactionsStore()
 const overviewStore = useOverviewStore()
 const tagsStore = useTagsStore()
+const { restore: restoreScroll } = useScrollRestore('finance-transactions')
 const selectionStore = useTxSelectionStore()
 const filtersStore = useTxFiltersStore()
 
@@ -226,6 +228,7 @@ onMounted(async () => {
     await tagsStore.refresh('all')
   }
   await loadTransactions()
+  restoreScroll()
 })
 
 // React to route changes (navigating from one section/account to
