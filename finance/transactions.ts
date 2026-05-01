@@ -30,6 +30,7 @@ import db from "../db/database";
 import {
   financeAccount,
   financeAccountAccess,
+  financeAccountType,
   financeCurrency,
   financeTag,
   financeTagTransaction,
@@ -585,8 +586,9 @@ export const updateTransaction = api(
 
     // Determine whether this is a cash account.
     const [acc] = await db
-      .select({ type_kind: financeAccount.type_kind })
+      .select({ type_kind: financeAccountType.kind })
       .from(financeAccount)
+      .innerJoin(financeAccountType, eq(financeAccountType.id, financeAccount.type_id))
       .where(eq(financeAccount.id, row.account_id))
       .limit(1);
     const isCash = acc?.type_kind === "bargeld";
@@ -643,8 +645,9 @@ export const deleteTransaction = api(
       throw APIError.permissionDenied("write access required to delete transactions");
     }
     const [acc] = await db
-      .select({ type_kind: financeAccount.type_kind })
+      .select({ type_kind: financeAccountType.kind })
       .from(financeAccount)
+      .innerJoin(financeAccountType, eq(financeAccountType.id, financeAccount.type_id))
       .where(eq(financeAccount.id, row.account_id))
       .limit(1);
     if (acc?.type_kind !== "bargeld") {
@@ -1097,9 +1100,10 @@ export const recentCashRecipients = api(
     const cashAccounts = await db
       .select({ id: financeAccount.id })
       .from(financeAccount)
+      .innerJoin(financeAccountType, eq(financeAccountType.id, financeAccount.type_id))
       .where(
         and(
-          eq(financeAccount.type_kind, "bargeld"),
+          eq(financeAccountType.kind, "bargeld"),
           visibleIds !== null
             ? inArray(financeAccount.id, visibleIds.length > 0 ? visibleIds : [-1])
             : undefined,
