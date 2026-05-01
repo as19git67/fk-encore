@@ -95,7 +95,7 @@ actor APIClient {
 
     // MARK: - Raw Upload (matching web frontend pattern: raw body + X-File-Name header)
 
-    func uploadPhoto(data: Data, filename: String, mimeType: String, isFavorite: Bool = false) async throws -> Photo {
+    func uploadPhoto(data: Data, filename: String, mimeType: String, isFavorite: Bool = false, capturedAt: Date? = nil) async throws -> Photo {
         var request = URLRequest(url: buildURL(path: "/photos"))
         request.httpMethod = "POST"
         request.setValue(mimeType, forHTTPHeaderField: "Content-Type")
@@ -103,10 +103,50 @@ actor APIClient {
         if isFavorite {
             request.setValue("true", forHTTPHeaderField: "X-Is-Favorite")
         }
+        // PHImageManager-rendered HEIC/JPEG often loses EXIF DateTimeOriginal,
+        // so we forward PHAsset.creationDate. The server uses it only when
+        // the file itself carries no capture timestamp.
+        if let capturedAt {
+            request.setValue(Self.iso8601Formatter.string(from: capturedAt), forHTTPHeaderField: "X-Captured-At")
+        }
         request.httpBody = data
         applyAuth(&request)
-        return try await performWithRefresh(request)
+
+        // Custom request flow because we need to surface the existing photo's
+        // id from a 409 response so callers can still attach it to a target
+        // album. Mirrors performWithRefresh' 401 → refresh → retry behavior.
+        var (responseData, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse, http.statusCode == 401, let manager = authManager {
+            let refreshed = await refreshOnce(manager: manager)
+            if refreshed {
+                applyAuth(&request)
+                (responseData, response) = try await URLSession.shared.data(for: request)
+            } else {
+                manager.handleUnauthorized()
+                throw APIError.httpError(401, parseErrorMessage(responseData))
+            }
+        }
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        if http.statusCode == 409 {
+            let photoId = (try? JSONDecoder().decode(DuplicatePhotoBody.self, from: responseData))?.photoId
+            throw APIError.duplicatePhoto(photoId: photoId)
+        }
+        guard (200...299).contains(http.statusCode) else {
+            if http.statusCode == 401 { authManager?.handleUnauthorized() }
+            throw APIError.httpError(http.statusCode, parseErrorMessage(responseData))
+        }
+        return try decoder.decode(Photo.self, from: responseData)
     }
+
+    private struct DuplicatePhotoBody: Decodable {
+        let photoId: Int?
+    }
+
+    private static let iso8601Formatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
 
     // MARK: - Download (for photos/thumbnails)
 
@@ -245,11 +285,17 @@ actor APIClient {
 enum APIError: Error, LocalizedError {
     case invalidResponse
     case httpError(Int, String?)
+    /// Raised by `uploadPhoto` when the server detected a content-hash duplicate.
+    /// Carries the existing photo's id so callers can still operate on it
+    /// (e.g. add to an album). `nil` when the server did not include an id.
+    case duplicatePhoto(photoId: Int?)
 
     var errorDescription: String? {
         switch self {
         case .invalidResponse:
             return "Ungültige Server-Antwort"
+        case .duplicatePhoto:
+            return "Foto wurde bereits hochgeladen."
         case .httpError(let code, let message):
             switch code {
             case 502, 503: return "Server nicht erreichbar (HTTP \(code))"

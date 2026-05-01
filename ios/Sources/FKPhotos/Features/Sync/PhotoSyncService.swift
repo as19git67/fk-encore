@@ -63,15 +63,19 @@ actor PhotoSyncService {
 
             do {
                 let (data, mimeType) = try await loadAssetData(asset, filename: filename)
-                let uploaded = try await APIClient.shared.uploadPhoto(data: data, filename: filename, mimeType: mimeType, isFavorite: asset.isFavorite)
+                let uploaded = try await APIClient.shared.uploadPhoto(data: data, filename: filename, mimeType: mimeType, isFavorite: asset.isFavorite, capturedAt: asset.creationDate)
                 uploadedIds.insert(asset.localIdentifier)
                 PhotoSyncPreferences.saveUploadedIds(uploadedIds)
                 await addToTargetAlbum(photoId: uploaded.id, sourceAlbumId: sourceAlbumId)
-            } catch APIError.httpError(409, _) {
-                // Server already has this photo (same SHA256 hash) – mark locally so we
-                // don't load its data again on the next cycle.
+            } catch APIError.duplicatePhoto(let existingPhotoId) {
+                // Server already has this photo (same SHA256 hash). Still attach
+                // the existing record to the target album so the user gets the
+                // expected sync outcome, then mark locally to skip next cycle.
                 uploadedIds.insert(asset.localIdentifier)
                 PhotoSyncPreferences.saveUploadedIds(uploadedIds)
+                if let existingPhotoId {
+                    await addToTargetAlbum(photoId: existingPhotoId, sourceAlbumId: sourceAlbumId)
+                }
             } catch {
                 // Transient error – asset will be retried on the next sync cycle.
             }
