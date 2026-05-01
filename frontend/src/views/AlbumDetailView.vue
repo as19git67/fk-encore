@@ -61,7 +61,7 @@ const serviceHealth = useServiceHealthStore()
 const LAST_FOCUSED_ALBUM_KEY = 'albums_last_focused_album_id'
 function rememberFocusedAlbum(id: number) {
   if (!Number.isFinite(id)) return
-  try { sessionStorage.setItem(LAST_FOCUSED_ALBUM_KEY, String(id)) } catch { /* ignore */ }
+  try { localStorage.setItem(LAST_FOCUSED_ALBUM_KEY, String(id)) } catch { /* ignore */ }
 }
 
 function navigateBackToAlbums() {

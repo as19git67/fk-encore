@@ -10,6 +10,9 @@ export const users = pgTable("users", {
   password_hash: text("password_hash").notNull(),
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
   updated_at: timestamp("updated_at", { mode: "string" }).defaultNow(),
+  // Per-user push notification preferences: maps FeedItemKind → boolean.
+  // Absent keys default to true (enabled). false = explicitly disabled.
+  notification_prefs: jsonb("notification_prefs").notNull().default({}),
 });
 
 // ========== Roles ==========
