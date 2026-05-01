@@ -1606,6 +1606,18 @@ export async function checkPhotoHashLogic(
   return { exists: !!existing };
 }
 
+/**
+ * Thrown by the upload routines when the user already has a photo with the
+ * same SHA-256 content hash. Carries the existing photo's id so callers can
+ * still operate on the duplicate (e.g. add it to a target album).
+ */
+export class PhotoAlreadyExistsError extends Error {
+  constructor(public readonly existingPhotoId: number) {
+    super("PHOTO_ALREADY_EXISTS");
+    this.name = "PhotoAlreadyExistsError";
+  }
+}
+
 export async function uploadPhotoStream(
   userId: number,
   stream: IncomingMessage,
@@ -1652,11 +1664,19 @@ export async function uploadPhotoStream(
   );
 
   if (existing) {
-    // Delete the temporary file
+    // Backfill taken_at on the existing record when we now have a value but
+    // the original upload (e.g. pre-fix iOS client) stored NULL.
+    if (!existing.taken_at && exifMeta.takenAt) {
+      await dbExec(
+        db.update(photos)
+          .set({ taken_at: exifMeta.takenAt })
+          .where(eq(photos.id, existing.id))
+      );
+    }
     if (fs.existsSync(tempPath)) {
       fs.unlinkSync(tempPath);
     }
-    throw new Error("PHOTO_ALREADY_EXISTS");
+    throw new PhotoAlreadyExistsError(existing.id);
   }
 
   // Move the file into its final YYYY/YYYY-MM/YYYY-MM-DD_at_HH.MM.SS_NN.ext slot.
@@ -1746,7 +1766,19 @@ export async function uploadPhotoLogic(
   );
 
   if (existing2) {
-    throw new Error("PHOTO_ALREADY_EXISTS");
+    // Backfill taken_at when the original record stored NULL (e.g. pre-fix
+    // iOS upload without X-Captured-At) and we now have a usable value.
+    if (!existing2.taken_at && clientCapturedAt) {
+      const parsed = normalizeClientCapturedAt(clientCapturedAt);
+      if (parsed) {
+        await dbExec(
+          db.update(photos)
+            .set({ taken_at: parsed })
+            .where(eq(photos.id, existing2.id))
+        );
+      }
+    }
+    throw new PhotoAlreadyExistsError(existing2.id);
   }
 
   const ext = normalizeImageExt(file.name, file.mimeType);

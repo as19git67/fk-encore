@@ -168,10 +168,16 @@ export const uploadPhoto = api.raw(
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(photo));
     } catch (err: any) {
-      if (err.message === "PHOTO_ALREADY_EXISTS") {
+      if (err instanceof service.PhotoAlreadyExistsError || err?.message === "PHOTO_ALREADY_EXISTS") {
         res.statusCode = 409;
         res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ error: "Duplicate photo", message: "Foto wurde bereits hochgeladen." }));
+        res.end(JSON.stringify({
+          error: "Duplicate photo",
+          message: "Foto wurde bereits hochgeladen.",
+          // Returned so the client can still operate on the existing record
+          // (e.g. add to a target album when the upload was meant to do both).
+          photoId: err instanceof service.PhotoAlreadyExistsError ? err.existingPhotoId : undefined,
+        }));
         return;
       }
       if (err.message === "UNSUPPORTED_FILE_TYPE") {

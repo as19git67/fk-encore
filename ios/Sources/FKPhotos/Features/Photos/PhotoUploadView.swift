@@ -120,20 +120,33 @@ struct PhotoUploadView: View {
                 let ext = mimeType.contains("heic") ? "heic" : "jpg"
                 let filename = "photo_\(Date().timeIntervalSince1970).\(ext)"
 
-                let uploaded = try await APIClient.shared.uploadPhoto(
-                    data: data,
-                    filename: filename,
-                    mimeType: mimeType,
-                    isFavorite: isFavorite,
-                    capturedAt: capturedAt
-                )
+                // Resolve target photo id: prefer the freshly-uploaded one,
+                // fall back to the existing id surfaced by a 409 duplicate so
+                // the user-intended album insertion still happens.
+                let targetPhotoId: Int
+                do {
+                    let uploaded = try await APIClient.shared.uploadPhoto(
+                        data: data,
+                        filename: filename,
+                        mimeType: mimeType,
+                        isFavorite: isFavorite,
+                        capturedAt: capturedAt
+                    )
+                    targetPhotoId = uploaded.id
+                } catch APIError.duplicatePhoto(let existingPhotoId) {
+                    guard let existingPhotoId else {
+                        await MainActor.run { failedCount += 1 }
+                        continue
+                    }
+                    targetPhotoId = existingPhotoId
+                }
 
                 if let aid = albumId {
                     struct AlbumPhotoBody: Codable { let albumId: Int; let photoId: Int }
                     struct AlbumPhotoResponse: Codable { let success: Bool }
                     _ = try? await APIClient.shared.post(
                         "/albums/photos",
-                        body: AlbumPhotoBody(albumId: aid, photoId: uploaded.id)
+                        body: AlbumPhotoBody(albumId: aid, photoId: targetPhotoId)
                     ) as AlbumPhotoResponse
                 }
 
