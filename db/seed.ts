@@ -180,14 +180,26 @@ export async function seed(db: any): Promise<void> {
     }
 
     // Remove stale assignments that are not in the declared set.
-    if (desiredPermIds.length > 0) {
-      await db.delete(schema.rolePermissions).where(and(
-        eq(schema.rolePermissions.role_id, role.id),
-        notInArray(schema.rolePermissions.permission_id, desiredPermIds)
-      ));
-    } else {
-      await db.delete(schema.rolePermissions).where(eq(schema.rolePermissions.role_id, role.id));
-    }
+    // Permissions in adminExcludedPermissions (e.g. finance.admin) are
+    // intentionally excluded from auto-management — if an admin manually
+    // grants them to a role they must not be silently revoked on restart.
+    const managedPermIds = [...permIdByKey.values()].filter(
+      (id) => {
+        const key = [...permIdByKey.entries()].find(([, v]) => v === id)?.[0];
+        return key !== undefined && !adminExcludedPermissions.has(key);
+      }
+    );
+    const staleClause = desiredPermIds.length > 0
+      ? and(
+          eq(schema.rolePermissions.role_id, role.id),
+          inArray(schema.rolePermissions.permission_id, managedPermIds),
+          notInArray(schema.rolePermissions.permission_id, desiredPermIds)
+        )
+      : and(
+          eq(schema.rolePermissions.role_id, role.id),
+          inArray(schema.rolePermissions.permission_id, managedPermIds)
+        );
+    await db.delete(schema.rolePermissions).where(staleClause);
 
     console.log(`[seed] Enforced permission set on role "${roleName}" (${permKeys.length} perms)`);
   }
