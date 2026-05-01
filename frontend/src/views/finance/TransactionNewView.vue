@@ -34,7 +34,7 @@ onMounted(async () => {
   if (accountsStore.items.length === 0) await accountsStore.refresh()
   if (tagsStore.items.length === 0) await tagsStore.refresh('user')
   if (cashAccounts.value.length === 1) {
-    accountId.value = cashAccounts.value[0].id
+    accountId.value = cashAccounts.value[0]!.id
   }
   try {
     const resp = await recentCashRecipients()
@@ -108,7 +108,7 @@ async function save() {
       class="account-select"
     />
     <div v-else-if="cashAccounts.length === 1" class="account-name">
-      {{ cashAccounts[0].label }}
+      {{ cashAccounts[0]!.label }}
     </div>
     <Message v-else severity="warn" :closable="false">
       Kein Bargeldkonto (Typ „bargeld") vorhanden. Bitte zuerst ein Konto anlegen.
