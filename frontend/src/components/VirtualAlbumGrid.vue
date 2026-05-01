@@ -43,31 +43,26 @@ const emit = defineEmits<{
 }>()
 
 // ── Layout: column count + cell size ────────────────────────────────────────
-const DESKTOP_MIN_PX = 200
-const DESKTOP_GAP_PX = 16
-const MOBILE_MIN_PX = 120
-const MOBILE_GAP_PX = 4
+// Constants match VirtualGallery so the album list and the photo gallery
+// render the same number of columns at every viewport width.
+const TARGET_CELL_MIN_PX = 140
+const GAP_PX = 4
 
 const cols = ref(1)
-const cellSize = ref(DESKTOP_MIN_PX)
-const gapPx = ref(DESKTOP_GAP_PX)
+const cellSize = ref(TARGET_CELL_MIN_PX)
 
-const rowHeight = computed(() => cellSize.value + gapPx.value)
+const rowHeight = computed(() => cellSize.value + GAP_PX)
 
 const scrollRef = ref<HTMLElement | null>(null)
 let resizeObs: ResizeObserver | null = null
 
 function recalcLayout(width: number) {
-  const isMobile = width < 768
-  const minPx = isMobile ? MOBILE_MIN_PX : DESKTOP_MIN_PX
-  const gap = isMobile ? MOBILE_GAP_PX : DESKTOP_GAP_PX
-  const totalGap = (n: number) => gap * Math.max(0, n - 1)
-  let n = Math.max(1, Math.floor((width + gap) / (minPx + gap)))
+  const totalGap = (n: number) => GAP_PX * Math.max(0, n - 1)
+  let n = Math.max(1, Math.floor((width + GAP_PX) / (TARGET_CELL_MIN_PX + GAP_PX)))
   if (n < 1) n = 1
   const cell = Math.floor((width - totalGap(n)) / n)
   cols.value = n
   cellSize.value = cell
-  gapPx.value = gap
 }
 
 onMounted(() => {
@@ -173,7 +168,6 @@ watch(
           transform: `translateY(${row.start}px)`,
           height: `${cellSize}px`,
           gridTemplateColumns: `repeat(${cols}, 1fr)`,
-          gap: `${gapPx}px`,
         }"
       >
         <div
@@ -246,12 +240,15 @@ watch(
   left: 0;
   right: 0;
   display: grid;
+  gap: 4px;
 }
 
 .album-card {
   position: relative;
   background: var(--p-content-background);
-  border: 4px solid transparent;
+  /* No border — outline handles focus/restored-focus and we need the full
+     cell width for a 140-px-wide tile that mirrors the gallery thumb. */
+  border: none;
   border-radius: var(--radius-md);
   padding: 0;
   cursor: pointer;

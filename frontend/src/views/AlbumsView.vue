@@ -335,7 +335,12 @@ async function persistState() {
 }
 
 async function loadData() {
-  loading.value = true
+  // Don't toggle `loading` to true on subsequent calls — only the initial
+  // fetch needs the spinner state. Refreshes (after rename / delete /
+  // realtime events) replace `albums.value` in place, so VirtualAlbumGrid
+  // stays mounted and the virtualizer keeps its scroll position. Without
+  // this guard, editing an album's description would unmount the grid and
+  // snap the user back to the top of the list.
   try {
     const res = await listAlbums()
     albums.value = res.albums
