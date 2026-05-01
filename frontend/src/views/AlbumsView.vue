@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {onMounted, ref, computed, watch, nextTick} from 'vue'
+import {onMounted, ref, computed, watch} from 'vue'
 import {useRouter, useRoute} from 'vue-router'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
@@ -9,9 +9,9 @@ import SelectButton from 'primevue/selectbutton'
 import Select from 'primevue/select'
 import Checkbox from 'primevue/checkbox'
 import Chip from 'primevue/chip'
-import HeicImage from '../components/HeicImage.vue'
 import DateRangePresets from '../components/DateRangePresets.vue'
 import SortMenu from '../components/SortMenu.vue'
+import VirtualAlbumGrid from '../components/VirtualAlbumGrid.vue'
 import type { SortField, SortState } from '../composables/useSort'
 import {
   type Album,
@@ -19,7 +19,7 @@ import {
   type AlbumShareWithUser,
   type AlbumPublicLink,
   type PublicLinkExpiry,
-  createAlbum, listAlbums, getPhotoUrl, updateAlbum, deleteAlbum,
+  createAlbum, listAlbums, updateAlbum, deleteAlbum,
   getAlbumShares, shareAlbum, removeAlbumShare,
   createAlbumPublicLink, deleteAlbumPublicLink,
 } from '../api/photos'
@@ -27,7 +27,6 @@ import { listUsers, type UserWithRoles } from '../api/users'
 import { useAuthStore } from '../stores/auth'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import { useReferenceData } from '../composables/useReferenceData'
-import { usePhotoLazyLoad } from '../composables/usePhotoLazyLoad'
 import {
   albumsStateToQuery,
   DEFAULT_ALBUM_SORT,
@@ -56,119 +55,17 @@ const loading = ref(true)
 const error = ref('')
 const auth = useAuthStore()
 
-const firstAlbumRef = ref<HTMLElement | null>(null)
-const gridEl = ref<HTMLElement | null>(null)
-
 // Shared with AlbumDetailView: when the user opens an album we remember it
 // here, so navigating back from the detail view restores focus and scroll
-// position to the album the user came from.
-const rememberFocusedAlbum = rememberFocusedAlbumId
+// position to the album the user came from. The remembered ID is read once
+// at mount; VirtualAlbumGrid handles the scroll-and-highlight as soon as
+// data + layout settle.
+const rememberedAlbumId = ref<number | null>(readRememberedAlbumId())
+const gridRef = ref<InstanceType<typeof VirtualAlbumGrid> | null>(null)
 
 function openAlbum(album: Album) {
-  rememberFocusedAlbum(album.id)
+  rememberFocusedAlbumId(album.id)
   router.push(`/fotos/alben/${album.id}`)
-}
-
-// Number of columns currently shown in the grid. Derived from the computed
-// `grid-template-columns` (each track becomes a space-separated length), so
-// it stays in sync with responsive breakpoints and `auto-fill` without us
-// having to mirror the CSS formula here.
-function getGridColumnCount(): number {
-  const root = gridEl.value
-  if (!root) return 1
-  const template = window.getComputedStyle(root).gridTemplateColumns
-  if (!template || template === 'none') return 1
-  return template.split(' ').filter(s => s.trim().length > 0).length
-}
-
-function handleGridArrowNav(e: KeyboardEvent) {
-  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
-  const root = gridEl.value
-  if (!root) return
-  const active = document.activeElement as HTMLElement | null
-  const currentCard = active?.closest('.album-card') as HTMLElement | null
-  if (!currentCard || !root.contains(currentCard)) return
-
-  const cards = Array.from(root.querySelectorAll<HTMLElement>('.album-card'))
-  const currentIndex = cards.indexOf(currentCard)
-  if (currentIndex === -1) return
-
-  const cols = getGridColumnCount()
-  let targetIndex = -1
-  switch (e.key) {
-    case 'ArrowLeft':
-      if (currentIndex > 0) targetIndex = currentIndex - 1
-      break
-    case 'ArrowRight':
-      if (currentIndex < cards.length - 1) targetIndex = currentIndex + 1
-      break
-    case 'ArrowUp':
-      if (currentIndex - cols >= 0) targetIndex = currentIndex - cols
-      break
-    case 'ArrowDown':
-      if (currentIndex + cols < cards.length) targetIndex = currentIndex + cols
-      // If there's no card directly below (partial last row), fall back to
-      // the last card so the user can always reach the end of the grid.
-      else if (currentIndex < cards.length - 1) targetIndex = cards.length - 1
-      break
-  }
-  if (targetIndex === -1) return
-
-  const target = cards[targetIndex]
-  if (!target) return
-  e.preventDefault()
-  target.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-  target.focus({ preventScroll: true })
-}
-
-function focusRememberedAlbum(): boolean {
-  const id = readRememberedAlbumId()
-  if (id === null) return false
-  const root = gridEl.value
-  if (!root) return false
-  const el = root.querySelector<HTMLElement>(`[data-album-id="${id}"]`)
-  if (!el) return false
-  // Hydrate the card before scrolling so the user sees its actual content,
-  // not an empty placeholder, while the IntersectionObserver's debounced
-  // flush catches up after scroll. Without this, returning from the detail
-  // view shows a blank tile where the remembered album should be.
-  if (!visibleAlbumIds.value.has(id)) {
-    const next = new Set(visibleAlbumIds.value)
-    next.add(id)
-    visibleAlbumIds.value = next
-  }
-  el.scrollIntoView({ block: 'center', inline: 'nearest' })
-  // `el.focus()` alone does not trigger `:focus-visible` styles for
-  // programmatic focus, so the user wouldn't see the outline. Add an
-  // explicit marker class that mirrors the focus-visible outline and
-  // clear it as soon as the user interacts with the page again.
-  el.classList.add('album-card--restored-focus')
-  const clear = () => {
-    el.classList.remove('album-card--restored-focus')
-    el.removeEventListener('blur', clear)
-    el.removeEventListener('pointerdown', clear)
-    el.removeEventListener('keydown', clear)
-  }
-  el.addEventListener('blur', clear)
-  el.addEventListener('pointerdown', clear)
-  el.addEventListener('keydown', clear)
-  el.focus({ preventScroll: true })
-  return true
-}
-
-// ── Virtualized rendering ─────────────────────────────────────────────────────
-// Album cards are expensive (HeicImage + PrimeVue Buttons with tooltips +
-// image decode). The same IntersectionObserver-based hydration that drives
-// the gallery thumbnail grid (PhotoGrid / FacePhotoGrid) is reused here, so
-// that we only mount HeicImage and the action overlay for cards near the
-// viewport regardless of how many albums exist. The scroll container is
-// `.albums-view` (passed to setupObserver), not the document.
-const { visiblePhotoIds: visibleAlbumIds, setupObserver: observeCards } =
-  usePhotoLazyLoad('400px 0px', 'albumId')
-const scrollEl = ref<HTMLElement | null>(null)
-
-function refreshObserver() {
-  if (scrollEl.value) observeCards(scrollEl.value)
 }
 
 const filterQuery = ref('')
@@ -376,34 +273,9 @@ const filteredAlbums = computed(() => {
   })
 })
 
-function restoreInitialFocus() {
-  // One animation frame after the DOM flush so the grid has its final
-  // layout (card placeholders are sized, template refs are populated).
-  // If the card can't be found yet, try once more next frame.
-  requestAnimationFrame(() => {
-    if (focusRememberedAlbum()) return
-    requestAnimationFrame(() => {
-      if (focusRememberedAlbum()) return
-      firstAlbumRef.value?.focus()
-    })
-  })
-}
-
-watch(loading, (newLoading) => {
-  if (!newLoading && filteredAlbums.value.length > 0) {
-    nextTick(() => {
-      restoreInitialFocus()
-      refreshObserver()
-    })
-  }
-})
-
-// Re-observe whenever the set of rendered cards changes (create, rename, delete, filter).
-watch(filteredAlbums, () => {
-  nextTick(() => refreshObserver())
-})
-
-// Cleanup is handled by usePhotoLazyLoad's own onUnmounted hook.
+// VirtualAlbumGrid handles its own scroll-and-highlight when albums + layout
+// settle, using the `rememberedAlbumId` prop. No additional focus/scroll
+// orchestration needed at the view level.
 
 const showCreateDialog = ref(false)
 const newAlbumName = ref('')
@@ -740,7 +612,7 @@ onMounted(loadData)
 </script>
 
 <template>
-  <div ref="scrollEl" class="albums-view">
+  <div class="albums-view">
 
     <!-- Service status warning bar -->
     <ServiceStatusBar />
@@ -817,54 +689,18 @@ onMounted(loadData)
       Keine Alben passen zum Filter „{{ filterQuery }}“.
     </div>
 
-    <div v-else ref="gridEl" class="albums-grid" @keydown="handleGridArrowNav">
-      <div
-          v-for="(album, index) in filteredAlbums"
-          :key="album.id"
-          :ref="el => { if (index === 0) firstAlbumRef = (el as HTMLElement) }"
-          :data-album-id="album.id"
-          class="album-card"
-          tabindex="0"
-          @click="openAlbum(album)"
-          @keydown.enter="openAlbum(album)"
-          @keydown.space.prevent="openAlbum(album)"
-      >
-        <!-- Cover always renders so the card reserves its square slot in the
-             grid even before the lazy-loader hydrates it. Same shape as the
-             gallery's .photo-thumb (`aspect-ratio: 1`). -->
-        <div class="album-cover">
-          <HeicImage
-            v-if="album.cover_filename && visibleAlbumIds.has(album.id)"
-            :src="getPhotoUrl(album.cover_filename, 400)"
-            :alt="album.name"
-            objectFit="cover"
-          />
-          <div v-else-if="!album.cover_filename" class="album-icon">
-            <i class="pi pi-images"/>
-          </div>
-        </div>
-
-        <i v-if="album.is_shared" class="pi pi-share-alt shared-badge" v-tooltip="'Freigegeben'" />
-
-        <template v-if="visibleAlbumIds.has(album.id)">
-          <div v-if="canShareAlbum(album) || canManageAlbum(album)" class="album-actions" @click.stop>
-            <Button v-if="canShareAlbum(album)" icon="pi pi-share-alt" text rounded size="small" v-tooltip="'Freigeben'" @click="openShareDialog(album)" />
-            <Button v-if="canManageAlbum(album)" icon="pi pi-pencil" text rounded size="small" v-tooltip="'Bearbeiten'" @click="openRenameDialog(album)" />
-            <Button v-if="canManageAlbum(album)" icon="pi pi-trash" text rounded size="small" severity="danger" v-tooltip="'Löschen'" @click="openDeleteDialog(album)" />
-          </div>
-          <div class="album-info">
-            <span class="album-name">{{ album.name }}</span>
-            <span v-if="album.description" class="album-desc">{{ album.description }}</span>
-            <span class="album-meta">
-              {{ album.photo_count }} {{ album.photo_count === 1 ? 'Foto' : 'Fotos' }}
-              <template v-if="album.oldest_photo_at && album.newest_photo_at">
-                • {{ new Date(album.oldest_photo_at).toLocaleDateString() }} - {{ new Date(album.newest_photo_at).toLocaleDateString() }}
-              </template>
-            </span>
-          </div>
-        </template>
-      </div>
-    </div>
+    <VirtualAlbumGrid
+      v-else
+      ref="gridRef"
+      :albums="filteredAlbums"
+      :rememberedAlbumId="rememberedAlbumId"
+      :canManage="canManageAlbum"
+      :canShare="canShareAlbum"
+      @open="openAlbum"
+      @share="openShareDialog"
+      @edit="openRenameDialog"
+      @remove="openDeleteDialog"
+    />
 
     <Dialog v-model:visible="showCreateDialog" header="Neues Album erstellen" :modal="true">
       <div class="dialog-content">
@@ -1071,7 +907,9 @@ onMounted(loadData)
   display: flex;
   flex-direction: column;
   height: calc(100vh - var(--menubar-height, 3.5rem));
-  overflow-y: auto;
+  /* The VirtualAlbumGrid is the scroll container — keep this one static so
+     the subheader stays pinned to the top without sticky-positioning hacks. */
+  overflow: hidden;
   margin-inline: -0.25em;
   padding-inline: 0.5em;
   width: 100%;
@@ -1106,9 +944,9 @@ onMounted(loadData)
 }
 
 .subheader {
-  position: sticky;
-  top: 0;
-  z-index: 10;
+  /* The albums view no longer scrolls — the subheader is just normal flow
+     above the (scrollable) VirtualAlbumGrid. */
+  flex: none;
   background: var(--p-content-background);
   padding-bottom: 0.25rem;
 }
@@ -1151,126 +989,7 @@ onMounted(loadData)
   right: 0.25rem;
 }
 
-.albums-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--grid-min-col), 1fr));
-  gap: var(--grid-gap);
-}
-
-@media (max-width: 768px) {
-  .albums-grid {
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-    gap: var(--grid-gap-compact);
-  }
-}
-
-.album-card {
-  position: relative;
-  background: var(--p-content-background);
-  border: 4px solid transparent;
-  border-radius: var(--radius-md);
-  padding: 0;
-  cursor: pointer;
-  transition: transform 0.2s;
-  overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  outline: none;
-}
-
-.album-card:hover { transform: scale(1.02); }
-
-.album-card:focus-visible,
-.album-card.album-card--restored-focus {
-  outline: 2px solid var(--p-primary-300);
-  outline-offset: -2px;
-}
-
-.shared-badge {
-  position: absolute;
-  top: 0.5rem;
-  left: 0.5rem;
-  z-index: 1;
-  font-size: 0.9rem;
-  color: white;
-  background: rgba(0, 0, 0, 0.55);
-  border-radius: 50%;
-  padding: 0.35rem;
-  backdrop-filter: blur(4px);
-}
-
-.album-actions {
-  position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  z-index: 1;
-  display: flex;
-  gap: 0.25rem;
-  padding: 0.25rem;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(4px);
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-.album-actions :deep(.p-button) { color: #fff; }
-.album-card:hover .album-actions,
-.album-card:focus-within .album-actions { opacity: 1; }
-
-.album-cover {
-  width: 100%;
-  aspect-ratio: 1;
-  background: var(--p-content-hover-background);
-  overflow: hidden;
-}
-.album-cover :deep(.heic-image-container) {
-  width: 100%;
-  height: 100%;
-}
-.album-icon {
-  font-size: 3rem;
-  color: var(--p-primary-color);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-}
-
-.album-info {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  padding: 0.4rem 0.6rem 0.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  background: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(4px);
-  color: #fff;
-}
-.album-name {
-  font-weight: 500;
-  font-size: 0.85rem;
-  display: block;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.album-desc {
-  font-size: 0.75rem;
-  color: rgba(255, 255, 255, 0.8);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.album-meta {
-  font-size: 0.7rem;
-  color: rgba(255, 255, 255, 0.75);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+/* Album card / cover / info / actions styles live in VirtualAlbumGrid. */
 
 .info-text {
   text-align: center;
