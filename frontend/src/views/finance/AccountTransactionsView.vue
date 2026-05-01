@@ -473,9 +473,9 @@ function goBack() {
           @click="filterPanelOpen = !filterPanelOpen"
         />
         <Button
+          :icon="hasUnseen ? 'pi pi-check' : 'pi pi-list-check'"
           severity="secondary"
           rounded
-          class="tx-mark-seen-btn"
           :disabled="!hasUnseen"
           :aria-label="
             hasUnseen
@@ -488,17 +488,7 @@ function goBack() {
               : 'Alle Buchungen sind gelesen'
           "
           @click="markAllSeen"
-        >
-          <span
-            v-if="hasUnseen"
-            class="pi pi-check tx-seen-check"
-            aria-hidden="true"
-          />
-          <span v-else class="tx-seen-check-double" aria-hidden="true">
-            <i class="pi pi-check" />
-            <i class="pi pi-check" />
-          </span>
-        </Button>
+        />
         <Button
           icon="pi pi-list"
           severity="secondary"
@@ -756,20 +746,6 @@ function goBack() {
 }
 .tx-header :deep(.p-button:disabled) {
   opacity: 0.55;
-}
-
-/* "Mark all as seen" button: single check when unseen exist,
-   double check (WhatsApp-style) when everything is already seen. */
-.tx-seen-check-double {
-  display: inline-flex;
-  align-items: center;
-  line-height: 1;
-}
-.tx-seen-check-double .pi {
-  font-size: 0.8rem;
-}
-.tx-seen-check-double .pi + .pi {
-  margin-left: -0.45em;
 }
 
 /* ── Select-mode bar (tristate + batch actions) ───────────────────── */
