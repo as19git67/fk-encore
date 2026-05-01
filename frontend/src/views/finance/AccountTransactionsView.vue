@@ -166,6 +166,8 @@ const formTo = computed({ get: () => filtersStore.formTo, set: (v) => { filtersS
 
 const hasActiveFilters = computed(() => filtersStore.hasActiveFilters)
 
+const hasUnseen = computed(() => txStore.items.some((tx) => !tx.seen))
+
 function isoDate(d: Date): string {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
@@ -471,13 +473,32 @@ function goBack() {
           @click="filterPanelOpen = !filterPanelOpen"
         />
         <Button
-          icon="pi pi-eye"
           severity="secondary"
           rounded
-          aria-label="Alle als gelesen markieren"
-          :title="'Alle als gelesen markieren'"
+          class="tx-mark-seen-btn"
+          :disabled="!hasUnseen"
+          :aria-label="
+            hasUnseen
+              ? 'Alle als gelesen markieren'
+              : 'Alle Buchungen sind gelesen'
+          "
+          :title="
+            hasUnseen
+              ? 'Alle als gelesen markieren'
+              : 'Alle Buchungen sind gelesen'
+          "
           @click="markAllSeen"
-        />
+        >
+          <span
+            v-if="hasUnseen"
+            class="pi pi-check tx-seen-check"
+            aria-hidden="true"
+          />
+          <span v-else class="tx-seen-check-double" aria-hidden="true">
+            <i class="pi pi-check" />
+            <i class="pi pi-check" />
+          </span>
+        </Button>
         <Button
           icon="pi pi-list"
           severity="secondary"
@@ -735,6 +756,20 @@ function goBack() {
 }
 .tx-header :deep(.p-button:disabled) {
   opacity: 0.55;
+}
+
+/* "Mark all as seen" button: single check when unseen exist,
+   double check (WhatsApp-style) when everything is already seen. */
+.tx-seen-check-double {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+}
+.tx-seen-check-double .pi {
+  font-size: 0.8rem;
+}
+.tx-seen-check-double .pi + .pi {
+  margin-left: -0.45em;
 }
 
 /* ── Select-mode bar (tristate + batch actions) ───────────────────── */
