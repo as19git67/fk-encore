@@ -5,7 +5,7 @@ import path from "path";
 import { eq, sql } from "drizzle-orm";
 import db from "../db/database";
 import { photos, faces, userFaceAssignments, persons, albums, albumPhotos, albumShares, users, roles, permissions, rolePermissions, userRoles } from "../db/schema";
-import { dbInsertReturning, dbExec } from "../db/adapter";
+import { dbInsertReturning, dbExec, dbFirst } from "../db/adapter";
 import { UPLOAD_DIR, computeFaceCompositionScore } from "./photo.service";
 import * as service from "./photo.service";
 import { stopImagePool } from "./image-pool";
@@ -272,6 +272,55 @@ describe("Photo Module", () => {
       })).rejects.toThrow("PHOTO_ALREADY_EXISTS");
     });
 
+    it("PhotoAlreadyExistsError carries the existing photo's id", async () => {
+      const fileData = Buffer.from("dup-with-id-data");
+      const original = await service.uploadPhotoLogic(user1.id, {
+        data: fileData,
+        name: "orig.jpg",
+        mimeType: "image/jpeg",
+      });
+
+      try {
+        await service.uploadPhotoLogic(user1.id, {
+          data: fileData,
+          name: "again.jpg",
+          mimeType: "image/jpeg",
+        });
+        throw new Error("expected duplicate to throw");
+      } catch (err) {
+        expect(err).toBeInstanceOf(service.PhotoAlreadyExistsError);
+        expect((err as InstanceType<typeof service.PhotoAlreadyExistsError>).existingPhotoId).toBe(original.id);
+      }
+
+      fs.unlinkSync(path.join(UPLOAD_DIR, original.filename));
+    });
+
+    it("backfills taken_at on duplicate when the original record was missing it", async () => {
+      const fileData = Buffer.from("dup-backfill-data");
+      const original = await service.uploadPhotoLogic(user1.id, {
+        data: fileData,
+        name: "no-exif.jpg",
+        mimeType: "image/jpeg",
+      });
+      // Sanity-check: fake data has no EXIF, so the original row stored NULL.
+      expect(original.taken_at).toBeUndefined();
+
+      const captured = "2022-07-04T12:00:00.000Z";
+      await expect(service.uploadPhotoLogic(
+        user1.id,
+        { data: fileData, name: "ios-dup.jpg", mimeType: "image/jpeg" },
+        captured,
+      )).rejects.toBeInstanceOf(service.PhotoAlreadyExistsError);
+
+      const refreshed = await dbFirst<{ taken_at: string | null }>(
+        db.select({ taken_at: photos.taken_at }).from(photos).where(eq(photos.id, original.id))
+      );
+      expect(refreshed?.taken_at).toBeTruthy();
+      expect(new Date(refreshed!.taken_at!).getUTCFullYear()).toBe(2022);
+
+      fs.unlinkSync(path.join(UPLOAD_DIR, original.filename));
+    });
+
     it("should allow same photo for different users", async () => {
       const fileData = Buffer.from("shared-identical-data");
       await service.uploadPhotoLogic(user1.id, {
@@ -289,6 +338,41 @@ describe("Photo Module", () => {
 
       expect(result.user_id).toBe(user2.id);
       expect(result.original_name).toBe("u2.jpg");
+    });
+
+    it("should use clientCapturedAt as fallback when EXIF lacks DateTimeOriginal", async () => {
+      const fileData = Buffer.from("ios-asset-data");
+      // Noon UTC keeps the day boundary safe regardless of test TZ.
+      const captured = "2024-03-15T12:00:00.000Z";
+      const result = await service.uploadPhotoLogic(
+        user1.id,
+        { data: fileData, name: "ios.jpg", mimeType: "image/jpeg" },
+        captured,
+      );
+
+      expect(result.taken_at).toBeDefined();
+      // PG stores TIMESTAMP without TZ; verify by reparsing into a Date and
+      // checking calendar fields rather than exact ISO equality.
+      const parsed = new Date(result.taken_at!);
+      expect(parsed.getUTCFullYear()).toBe(2024);
+      // Storage path is bucketed by capture date.
+      expect(result.filename.startsWith("2024/2024-03/")).toBe(true);
+
+      fs.unlinkSync(path.join(UPLOAD_DIR, result.filename));
+    });
+
+    it("should ignore an invalid clientCapturedAt", async () => {
+      const fileData = Buffer.from("ios-bad-date");
+      const result = await service.uploadPhotoLogic(
+        user1.id,
+        { data: fileData, name: "ios2.jpg", mimeType: "image/jpeg" },
+        "not-a-date",
+      );
+
+      // Falls back to filename-derived date (none → null), not a crash.
+      expect(result.taken_at).toBeUndefined();
+
+      fs.unlinkSync(path.join(UPLOAD_DIR, result.filename));
     });
 
     it("should refresh photo metadata", async () => {

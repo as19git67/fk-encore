@@ -99,11 +99,13 @@ struct PhotoUploadView: View {
                 let data: Data
                 let mimeType: String
                 let isFavorite: Bool
+                let capturedAt: Date?
 
                 if let localId = item.itemIdentifier,
                    let asset = PHAsset.fetchAssets(withLocalIdentifiers: [localId], options: nil).firstObject {
                     (data, mimeType) = try await loadCurrentVersion(of: asset)
                     isFavorite = asset.isFavorite
+                    capturedAt = asset.creationDate
                 } else {
                     guard let raw = try await item.loadTransferable(type: Data.self) else {
                         await MainActor.run { failedCount += 1 }
@@ -112,24 +114,39 @@ struct PhotoUploadView: View {
                     data = raw
                     mimeType = "image/jpeg"
                     isFavorite = false
+                    capturedAt = nil
                 }
 
                 let ext = mimeType.contains("heic") ? "heic" : "jpg"
                 let filename = "photo_\(Date().timeIntervalSince1970).\(ext)"
 
-                let uploaded = try await APIClient.shared.uploadPhoto(
-                    data: data,
-                    filename: filename,
-                    mimeType: mimeType,
-                    isFavorite: isFavorite
-                )
+                // Resolve target photo id: prefer the freshly-uploaded one,
+                // fall back to the existing id surfaced by a 409 duplicate so
+                // the user-intended album insertion still happens.
+                let targetPhotoId: Int
+                do {
+                    let uploaded = try await APIClient.shared.uploadPhoto(
+                        data: data,
+                        filename: filename,
+                        mimeType: mimeType,
+                        isFavorite: isFavorite,
+                        capturedAt: capturedAt
+                    )
+                    targetPhotoId = uploaded.id
+                } catch APIError.duplicatePhoto(let existingPhotoId) {
+                    guard let existingPhotoId else {
+                        await MainActor.run { failedCount += 1 }
+                        continue
+                    }
+                    targetPhotoId = existingPhotoId
+                }
 
                 if let aid = albumId {
                     struct AlbumPhotoBody: Codable { let albumId: Int; let photoId: Int }
                     struct AlbumPhotoResponse: Codable { let success: Bool }
                     _ = try? await APIClient.shared.post(
                         "/albums/photos",
-                        body: AlbumPhotoBody(albumId: aid, photoId: uploaded.id)
+                        body: AlbumPhotoBody(albumId: aid, photoId: targetPhotoId)
                     ) as AlbumPhotoResponse
                 }
 
