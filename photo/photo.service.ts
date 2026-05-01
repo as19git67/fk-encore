@@ -1036,6 +1036,22 @@ export function parseIptcDate(date: unknown, time: unknown): string | null {
   return d.toISOString();
 }
 
+// Validates a client-supplied capture timestamp (e.g. iOS' PHAsset.creationDate
+// forwarded as X-Captured-At). Rejects unparseable or implausible values
+// (before 1900, more than a day in the future) so a buggy client can't poison
+// the photo timeline.
+export function normalizeClientCapturedAt(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = String(raw).trim();
+  if (!trimmed) return null;
+  const d = new Date(trimmed);
+  if (Number.isNaN(d.getTime())) return null;
+  const year = d.getUTCFullYear();
+  if (year < 1900) return null;
+  if (d.getTime() > Date.now() + 24 * 60 * 60 * 1000) return null;
+  return d.toISOString();
+}
+
 function asString(v: unknown): string | null {
   // Unwrap XMP Language Alternatives — exifr returns dc:title / dc:description
   // as `{ lang: "x-default", value: "..." }` (single) or an array of such
@@ -1595,7 +1611,8 @@ export async function uploadPhotoStream(
   stream: IncomingMessage,
   originalName: string,
   mimeType: string,
-  isFavorite: boolean = false
+  isFavorite: boolean = false,
+  clientCapturedAt: string | null = null
 ): Promise<Photo> {
   if (!SUPPORTED_MIME_TYPES.has(mimeType.toLowerCase().split(";")[0].trim())) {
     throw new Error("UNSUPPORTED_FILE_TYPE");
@@ -1620,6 +1637,14 @@ export async function uploadPhotoStream(
 
   // Extraction of EXIF data (date + GPS) after the file is saved
   const exifMeta = await getExifMetadata(tempPath, originalName);
+
+  // iOS' PHImageManager strips EXIF DateTimeOriginal from rendered HEIC/JPEG. The
+  // client therefore forwards PHAsset.creationDate via X-Captured-At so we can
+  // recover the real capture time when the file itself no longer carries it.
+  if (!exifMeta.takenAt && clientCapturedAt) {
+    const parsed = normalizeClientCapturedAt(clientCapturedAt);
+    if (parsed) exifMeta.takenAt = parsed;
+  }
 
   // Check for duplicate for this user
   const existing = await dbFirst<typeof photos.$inferSelect>(
@@ -1706,7 +1731,8 @@ export async function uploadPhotoStream(
 
 export async function uploadPhotoLogic(
   userId: number,
-  file: { data: Buffer; name: string; mimeType: string }
+  file: { data: Buffer; name: string; mimeType: string },
+  clientCapturedAt: string | null = null
 ): Promise<Photo> {
   if (!SUPPORTED_MIME_TYPES.has(file.mimeType.toLowerCase().split(";")[0].trim())) {
     throw new Error("UNSUPPORTED_FILE_TYPE");
@@ -1731,6 +1757,13 @@ export async function uploadPhotoLogic(
 
   // Extraction of EXIF data (date + GPS)
   const exifMeta2 = await getExifMetadata(tempPath, file.name);
+
+  // See uploadPhotoStream — accept client-supplied capture time when EXIF is
+  // missing (typical for iOS PHImageManager outputs).
+  if (!exifMeta2.takenAt && clientCapturedAt) {
+    const parsed = normalizeClientCapturedAt(clientCapturedAt);
+    if (parsed) exifMeta2.takenAt = parsed;
+  }
 
   // Move the file into its final YYYY/YYYY-MM/YYYY-MM-DD_at_HH.MM.SS_NN.ext slot.
   const storageTs2 = pickStorageTimestamp(exifMeta2.takenAt);

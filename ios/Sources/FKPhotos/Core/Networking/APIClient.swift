@@ -95,7 +95,7 @@ actor APIClient {
 
     // MARK: - Raw Upload (matching web frontend pattern: raw body + X-File-Name header)
 
-    func uploadPhoto(data: Data, filename: String, mimeType: String, isFavorite: Bool = false) async throws -> Photo {
+    func uploadPhoto(data: Data, filename: String, mimeType: String, isFavorite: Bool = false, capturedAt: Date? = nil) async throws -> Photo {
         var request = URLRequest(url: buildURL(path: "/photos"))
         request.httpMethod = "POST"
         request.setValue(mimeType, forHTTPHeaderField: "Content-Type")
@@ -103,10 +103,22 @@ actor APIClient {
         if isFavorite {
             request.setValue("true", forHTTPHeaderField: "X-Is-Favorite")
         }
+        // PHImageManager-rendered HEIC/JPEG often loses EXIF DateTimeOriginal,
+        // so we forward PHAsset.creationDate. The server uses it only when
+        // the file itself carries no capture timestamp.
+        if let capturedAt {
+            request.setValue(Self.iso8601Formatter.string(from: capturedAt), forHTTPHeaderField: "X-Captured-At")
+        }
         request.httpBody = data
         applyAuth(&request)
         return try await performWithRefresh(request)
     }
+
+    private static let iso8601Formatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
 
     // MARK: - Download (for photos/thumbnails)
 

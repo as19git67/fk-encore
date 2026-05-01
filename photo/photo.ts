@@ -156,9 +156,13 @@ export const uploadPhoto = api.raw(
     }
     const mimeType = (req.headers["content-type"] as string) || "image/jpeg";
     const isFavorite = req.headers["x-is-favorite"] === "true";
+    // Optional fallback when the file's EXIF carries no DateTimeOriginal —
+    // the iOS client forwards PHAsset.creationDate here.
+    const capturedAtHeader = req.headers["x-captured-at"];
+    const clientCapturedAt = typeof capturedAtHeader === "string" ? capturedAtHeader : null;
 
     try {
-      const photo = await service.uploadPhotoStream(userId, req, fileName, mimeType, isFavorite);
+      const photo = await service.uploadPhotoStream(userId, req, fileName, mimeType, isFavorite, clientCapturedAt);
 
       res.statusCode = 201;
       res.setHeader("Content-Type", "application/json");

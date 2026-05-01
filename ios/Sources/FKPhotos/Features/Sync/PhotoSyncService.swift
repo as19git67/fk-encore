@@ -63,7 +63,7 @@ actor PhotoSyncService {
 
             do {
                 let (data, mimeType) = try await loadAssetData(asset, filename: filename)
-                let uploaded = try await APIClient.shared.uploadPhoto(data: data, filename: filename, mimeType: mimeType, isFavorite: asset.isFavorite)
+                let uploaded = try await APIClient.shared.uploadPhoto(data: data, filename: filename, mimeType: mimeType, isFavorite: asset.isFavorite, capturedAt: asset.creationDate)
                 uploadedIds.insert(asset.localIdentifier)
                 PhotoSyncPreferences.saveUploadedIds(uploadedIds)
                 await addToTargetAlbum(photoId: uploaded.id, sourceAlbumId: sourceAlbumId)

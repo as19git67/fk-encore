@@ -291,6 +291,41 @@ describe("Photo Module", () => {
       expect(result.original_name).toBe("u2.jpg");
     });
 
+    it("should use clientCapturedAt as fallback when EXIF lacks DateTimeOriginal", async () => {
+      const fileData = Buffer.from("ios-asset-data");
+      // Noon UTC keeps the day boundary safe regardless of test TZ.
+      const captured = "2024-03-15T12:00:00.000Z";
+      const result = await service.uploadPhotoLogic(
+        user1.id,
+        { data: fileData, name: "ios.jpg", mimeType: "image/jpeg" },
+        captured,
+      );
+
+      expect(result.taken_at).toBeDefined();
+      // PG stores TIMESTAMP without TZ; verify by reparsing into a Date and
+      // checking calendar fields rather than exact ISO equality.
+      const parsed = new Date(result.taken_at!);
+      expect(parsed.getUTCFullYear()).toBe(2024);
+      // Storage path is bucketed by capture date.
+      expect(result.filename.startsWith("2024/2024-03/")).toBe(true);
+
+      fs.unlinkSync(path.join(UPLOAD_DIR, result.filename));
+    });
+
+    it("should ignore an invalid clientCapturedAt", async () => {
+      const fileData = Buffer.from("ios-bad-date");
+      const result = await service.uploadPhotoLogic(
+        user1.id,
+        { data: fileData, name: "ios2.jpg", mimeType: "image/jpeg" },
+        "not-a-date",
+      );
+
+      // Falls back to filename-derived date (none → null), not a crash.
+      expect(result.taken_at).toBeUndefined();
+
+      fs.unlinkSync(path.join(UPLOAD_DIR, result.filename));
+    });
+
     it("should refresh photo metadata", async () => {
       const fileData = Buffer.from("data");
       const photo = await service.uploadPhotoLogic(user1.id, {

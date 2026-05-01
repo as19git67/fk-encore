@@ -99,11 +99,13 @@ struct PhotoUploadView: View {
                 let data: Data
                 let mimeType: String
                 let isFavorite: Bool
+                let capturedAt: Date?
 
                 if let localId = item.itemIdentifier,
                    let asset = PHAsset.fetchAssets(withLocalIdentifiers: [localId], options: nil).firstObject {
                     (data, mimeType) = try await loadCurrentVersion(of: asset)
                     isFavorite = asset.isFavorite
+                    capturedAt = asset.creationDate
                 } else {
                     guard let raw = try await item.loadTransferable(type: Data.self) else {
                         await MainActor.run { failedCount += 1 }
@@ -112,6 +114,7 @@ struct PhotoUploadView: View {
                     data = raw
                     mimeType = "image/jpeg"
                     isFavorite = false
+                    capturedAt = nil
                 }
 
                 let ext = mimeType.contains("heic") ? "heic" : "jpg"
@@ -121,7 +124,8 @@ struct PhotoUploadView: View {
                     data: data,
                     filename: filename,
                     mimeType: mimeType,
-                    isFavorite: isFavorite
+                    isFavorite: isFavorite,
+                    capturedAt: capturedAt
                 )
 
                 if let aid = albumId {
