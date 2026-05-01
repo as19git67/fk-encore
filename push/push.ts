@@ -5,6 +5,8 @@
  *   GET  /push/vapid-public-key   → VAPID public key (base64url).
  *   POST /push/subscribe          → register a browser subscription.
  *   POST /push/unsubscribe        → remove a browser subscription.
+ *   GET  /push/preferences        → get per-type notification preferences.
+ *   PUT  /push/preferences        → update per-type notification preferences.
  *
  * Internal endpoints (expose: false) invoked via ~encore/clients:
  *   fanoutFeed                    → send a feed notification to a user.
@@ -83,6 +85,34 @@ export const unsubscribe = api(
   },
 );
 
+// ---------- Notification preferences ----------
+
+interface NotificationPrefsResponse {
+  preferences: svc.NotificationPrefs;
+}
+
+export const getPreferences = api(
+  { expose: true, method: "GET", path: "/push/preferences", auth: true },
+  async (): Promise<NotificationPrefsResponse> => {
+    const userId = requireUserId();
+    const preferences = await svc.getNotificationPrefs(userId);
+    return { preferences };
+  },
+);
+
+interface UpdatePreferencesRequest {
+  preferences: svc.NotificationPrefs;
+}
+
+export const updatePreferences = api(
+  { expose: true, method: "PUT", path: "/push/preferences", auth: true },
+  async (req: UpdatePreferencesRequest): Promise<NotificationPrefsResponse> => {
+    const userId = requireUserId();
+    await svc.setNotificationPrefs(userId, req.preferences);
+    return { preferences: req.preferences };
+  },
+);
+
 // ---------- Internal ----------
 
 interface FanoutFeedRequest {
@@ -109,6 +139,12 @@ interface FanoutFeedResponse {
 export const fanoutFeed = api(
   { expose: false },
   async (req: FanoutFeedRequest): Promise<FanoutFeedResponse> => {
+    // Respect per-user notification preferences: skip send if the user
+    // has explicitly disabled this notification kind.
+    const prefs = await svc.getNotificationPrefs(req.userId);
+    if (!svc.isKindEnabled(prefs, req.kind as svc.NotificationKind)) {
+      return { sent: 0, pruned: 0 };
+    }
     const notification = svc.buildFeedNotification({
       kind: req.kind,
       actorName: req.actorName,

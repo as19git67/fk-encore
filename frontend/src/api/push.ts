@@ -31,3 +31,23 @@ export function unsubscribePush(endpoint: string) {
     body: JSON.stringify({ endpoint }),
   })
 }
+
+export type NotificationKind =
+  | 'photo_added'
+  | 'album_shared'
+  | 'photo_favorited'
+  | 'photo_commented'
+  | 'album_left'
+
+export type NotificationPrefs = Partial<Record<NotificationKind, boolean>>
+
+export function getPushPreferences() {
+  return apiFetch<{ preferences: NotificationPrefs }>('/push/preferences')
+}
+
+export function updatePushPreferences(preferences: NotificationPrefs) {
+  return apiFetch<{ preferences: NotificationPrefs }>('/push/preferences', {
+    method: 'PUT',
+    body: JSON.stringify({ preferences }),
+  })
+}

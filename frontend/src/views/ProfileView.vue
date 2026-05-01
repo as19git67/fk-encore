@@ -23,6 +23,12 @@ import {
   browserSupportsWebAuthn,
 } from '@simplewebauthn/browser'
 import { usePushNotifications } from '../composables/usePushNotifications'
+import {
+  getPushPreferences,
+  updatePushPreferences,
+  type NotificationKind,
+  type NotificationPrefs,
+} from '../api/push'
 
 const auth = useAuthStore()
 
@@ -142,9 +148,56 @@ async function togglePush() {
   }
 }
 
+// ── Per-type notification preferences ──────────────────────────────────────
+interface NotificationTypeConfig {
+  kind: NotificationKind
+  label: string
+  description: string
+}
+
+const NOTIFICATION_TYPES: NotificationTypeConfig[] = [
+  { kind: 'photo_added', label: 'Neue Fotos', description: 'Jemand hat Fotos zu einem geteilten Album hinzugefügt' },
+  { kind: 'album_shared', label: 'Album geteilt', description: 'Jemand hat ein Album mit dir geteilt' },
+  { kind: 'photo_commented', label: 'Kommentare', description: 'Jemand hat ein Foto kommentiert' },
+  { kind: 'photo_favorited', label: 'Favoriten', description: 'Jemand hat ein Foto favorisiert' },
+  { kind: 'album_left', label: 'Freigabe verlassen', description: 'Jemand hat eine Albumfreigabe verlassen' },
+]
+
+const notifPrefs = ref<NotificationPrefs>({})
+const notifPrefsLoading = ref(false)
+const notifPrefsError = ref('')
+
+function isNotifEnabled(kind: NotificationKind): boolean {
+  const val = notifPrefs.value[kind]
+  return val !== false
+}
+
+async function toggleNotifKind(kind: NotificationKind) {
+  const current = isNotifEnabled(kind)
+  const updated: NotificationPrefs = { ...notifPrefs.value, [kind]: !current }
+  notifPrefs.value = updated
+  try {
+    await updatePushPreferences(updated)
+  } catch (err: any) {
+    notifPrefsError.value = err.message || 'Einstellungen konnten nicht gespeichert werden.'
+    notifPrefs.value = { ...notifPrefs.value, [kind]: current }
+  }
+}
+
+async function loadNotifPrefs() {
+  notifPrefsLoading.value = true
+  notifPrefsError.value = ''
+  try {
+    const res = await getPushPreferences()
+    notifPrefs.value = res.preferences
+  } catch { /* ignore – defaults to all enabled */ }
+  finally { notifPrefsLoading.value = false }
+}
+
 onMounted(async () => {
   await loadPasskeys()
   await push.refreshState()
+  await loadNotifPrefs()
 })
 </script>
 
@@ -228,6 +281,39 @@ onMounted(async () => {
             @click="togglePush"
           />
         </div>
+
+        <template v-if="push.status.value === 'subscribed' || push.status.value === 'unsubscribed'">
+          <div class="notif-types-header">
+            <span class="notif-types-title">Benachrichtigungstypen</span>
+            <span class="notif-types-hint">Wähle, welche Ereignisse du per Push erhalten möchtest.</span>
+          </div>
+          <Message v-if="notifPrefsError" severity="error" :closable="false" class="mb">
+            {{ notifPrefsError }}
+          </Message>
+          <div class="notif-types-list">
+            <div
+              v-for="type in NOTIFICATION_TYPES"
+              :key="type.kind"
+              class="notif-type-row"
+            >
+              <div class="notif-type-info">
+                <span class="notif-type-label">{{ type.label }}</span>
+                <span class="notif-type-desc">{{ type.description }}</span>
+              </div>
+              <Button
+                :icon="isNotifEnabled(type.kind) ? 'pi pi-check-circle' : 'pi pi-circle'"
+                :severity="isNotifEnabled(type.kind) ? 'primary' : 'secondary'"
+                text
+                rounded
+                size="small"
+                :loading="notifPrefsLoading"
+                :aria-label="isNotifEnabled(type.kind) ? 'Deaktivieren' : 'Aktivieren'"
+                v-tooltip="isNotifEnabled(type.kind) ? 'Klicken zum Deaktivieren' : 'Klicken zum Aktivieren'"
+                @click="toggleNotifKind(type.kind)"
+              />
+            </div>
+          </div>
+        </template>
       </template>
     </Card>
 
@@ -362,6 +448,61 @@ onMounted(async () => {
 .push-label {
   flex: 1;
   min-width: 0;
+}
+
+.notif-types-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--p-content-border-color);
+}
+
+.notif-types-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.notif-types-hint {
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
+}
+
+.notif-types-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.notif-type-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--p-content-border-color);
+}
+
+.notif-type-row:last-child {
+  border-bottom: none;
+}
+
+.notif-type-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.notif-type-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.notif-type-desc {
+  font-size: 0.78rem;
+  color: var(--p-text-muted-color);
 }
 </style>
 

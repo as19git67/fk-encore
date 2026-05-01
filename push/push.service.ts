@@ -15,8 +15,8 @@ import webPush from "web-push";
 import { and, eq } from "drizzle-orm";
 import { secret } from "encore.dev/config";
 import db from "../db/database";
-import { dbAll, dbExec } from "../db/adapter";
-import { pushSubscriptions } from "../db/schema";
+import { dbAll, dbExec, dbFirst } from "../db/adapter";
+import { pushSubscriptions, users } from "../db/schema";
 
 // ---------- VAPID ----------
 
@@ -334,4 +334,37 @@ export function buildDocumentNotification(input: {
       documentId: input.documentId,
     },
   };
+}
+
+// ---------- Notification preferences ----------
+
+export type NotificationKind =
+  | "photo_added"
+  | "album_shared"
+  | "photo_favorited"
+  | "photo_commented"
+  | "album_left";
+
+export type NotificationPrefs = Partial<Record<NotificationKind, boolean>>;
+
+export async function getNotificationPrefs(userId: number): Promise<NotificationPrefs> {
+  const row = await dbFirst<{ notification_prefs: unknown }>(
+    db.select({ notification_prefs: users.notification_prefs }).from(users).where(eq(users.id, userId)),
+  );
+  if (!row || typeof row.notification_prefs !== "object" || row.notification_prefs === null) {
+    return {};
+  }
+  return row.notification_prefs as NotificationPrefs;
+}
+
+export async function setNotificationPrefs(userId: number, prefs: NotificationPrefs): Promise<void> {
+  await dbExec(
+    db.update(users).set({ notification_prefs: prefs }).where(eq(users.id, userId)),
+  );
+}
+
+export function isKindEnabled(prefs: NotificationPrefs, kind: NotificationKind): boolean {
+  const val = prefs[kind];
+  // undefined → not configured → enabled by default
+  return val !== false;
 }

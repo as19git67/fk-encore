@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import {onMounted, onBeforeUnmount, ref, computed, watch, nextTick} from 'vue'
-import {useRouter} from 'vue-router'
+import {useRouter, useRoute} from 'vue-router'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
@@ -48,12 +48,12 @@ const gridEl = ref<HTMLElement | null>(null)
 const LAST_FOCUSED_ALBUM_KEY = 'albums_last_focused_album_id'
 
 function rememberFocusedAlbum(id: number) {
-  try { sessionStorage.setItem(LAST_FOCUSED_ALBUM_KEY, String(id)) } catch { /* ignore */ }
+  try { localStorage.setItem(LAST_FOCUSED_ALBUM_KEY, String(id)) } catch { /* ignore */ }
 }
 
 function readRememberedAlbumId(): number | null {
   try {
-    const raw = sessionStorage.getItem(LAST_FOCUSED_ALBUM_KEY)
+    const raw = localStorage.getItem(LAST_FOCUSED_ALBUM_KEY)
     if (!raw) return null
     const id = Number(raw)
     return Number.isFinite(id) ? id : null
@@ -482,6 +482,72 @@ const displayModeOptions = [
 ]
 
 const router = useRouter()
+const route = useRoute()
+
+// ── URL query persistence (like GalleryView) ─────────────────────────────────
+// Filter, sort, and search query are encoded in the URL so they survive
+// page reloads and are saved by the router's last-route persistence.
+
+function parseAlbumStateFromQuery() {
+  const q = route.query
+  const filter: AlbumFilter = {
+    owner: (q.owner as AlbumOwnerFilter) || 'all',
+    display: (q.display as AlbumDisplayFilter) || 'all',
+    emptyMode: (q.emptyMode as AlbumEmptyFilter) || 'any',
+    sharedByMe: q.sharedByMe === '1',
+    sharedWithMe: q.sharedWithMe === '1',
+    dateFrom: typeof q.dateFrom === 'string' && q.dateFrom ? q.dateFrom : undefined,
+    dateTo: typeof q.dateTo === 'string' && q.dateTo ? q.dateTo : undefined,
+  }
+  const validOwners: AlbumOwnerFilter[] = ['all', 'mine', 'shared']
+  if (!validOwners.includes(filter.owner)) filter.owner = 'all'
+  const validDisplays: AlbumDisplayFilter[] = ['all', 'grid', 'map']
+  if (!validDisplays.includes(filter.display)) filter.display = 'all'
+  const validEmpties: AlbumEmptyFilter[] = ['any', 'only', 'exclude']
+  if (!validEmpties.includes(filter.emptyMode)) filter.emptyMode = 'any'
+
+  const sort: SortState = {
+    field: typeof q.sortBy === 'string' && q.sortBy ? q.sortBy : DEFAULT_ALBUM_SORT.field,
+    direction: (q.sortDir === 'asc' || q.sortDir === 'desc') ? q.sortDir : DEFAULT_ALBUM_SORT.direction,
+  }
+  const validSortFields = ALBUM_SORT_FIELDS.map(f => f.value)
+  if (!validSortFields.includes(sort.field)) sort.field = DEFAULT_ALBUM_SORT.field
+
+  const searchQuery = typeof q.q === 'string' ? q.q : ''
+
+  return { filter, sort, searchQuery }
+}
+
+function albumStateToQuery(
+  filter: AlbumFilter,
+  sort: SortState,
+  searchQuery: string,
+): Record<string, string | undefined> {
+  return {
+    q: searchQuery || undefined,
+    owner: filter.owner !== 'all' ? filter.owner : undefined,
+    display: filter.display !== 'all' ? filter.display : undefined,
+    emptyMode: filter.emptyMode !== 'any' ? filter.emptyMode : undefined,
+    sharedByMe: filter.sharedByMe ? '1' : undefined,
+    sharedWithMe: filter.sharedWithMe ? '1' : undefined,
+    dateFrom: filter.dateFrom || undefined,
+    dateTo: filter.dateTo || undefined,
+    sortBy: sort.field !== DEFAULT_ALBUM_SORT.field ? sort.field : undefined,
+    sortDir: sort.direction !== DEFAULT_ALBUM_SORT.direction ? sort.direction : undefined,
+  }
+}
+
+let syncingUrl = false
+async function syncUrlFromState() {
+  if (syncingUrl) return
+  syncingUrl = true
+  try {
+    const next = albumStateToQuery(appliedAlbumFilter.value, appliedAlbumSort.value, filterQuery.value)
+    await router.replace({ query: next as Record<string, string> })
+  } finally {
+    syncingUrl = false
+  }
+}
 
 async function loadData() {
   loading.value = true
@@ -733,6 +799,22 @@ useRealtimeEvent('albums', 'photo_added', (ev) => {
   if (!albums.value.some((a) => a.id === albumId)) return
   loadData()
 })
+
+// Initialize filter/sort/search from URL query params on first load.
+// This runs before loadData so the restored state is ready when data arrives.
+{
+  const { filter, sort, searchQuery } = parseAlbumStateFromQuery()
+  appliedAlbumFilter.value = filter
+  draftAlbumFilter.value = { ...filter }
+  appliedAlbumSort.value = sort
+  draftAlbumSort.value = { ...sort }
+  filterQuery.value = searchQuery
+}
+
+// Keep URL in sync whenever the applied state changes.
+watch(appliedAlbumFilter, () => syncUrlFromState(), { deep: true })
+watch(appliedAlbumSort, () => syncUrlFromState(), { deep: true })
+watch(filterQuery, () => syncUrlFromState())
 
 onMounted(loadData)
 </script>
