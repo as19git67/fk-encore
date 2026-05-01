@@ -16,5 +16,13 @@ export const useTagsStore = defineStore('finance.tags', () => {
     }
   }
 
-  return { items, loading, refresh }
+  function addLocal(names: string[]) {
+    for (const name of names) {
+      if (!items.value.some((t) => t.name === name)) {
+        items.value.push({ id: 0, name, source: 'user', created_at: null })
+      }
+    }
+  }
+
+  return { items, loading, refresh, addLocal }
 })

@@ -30,10 +30,12 @@ import db from "../db/database";
 import {
   financeAccount,
   financeAccountAccess,
+  financeAccountType,
   financeCurrency,
   financeTag,
   financeTagTransaction,
   financeTransaction,
+  financeTransactionSeen,
 } from "../db/schema";
 import { enqueueTagSuggestion } from "./tag-queue";
 import { triggerTagWorker } from "./tag-worker";
@@ -140,8 +142,40 @@ interface TransactionView {
   purpose: string | null;
   counterparty: string | null;
   counterparty_iban: string | null;
+  counterparty_bic: string | null;
+  end_to_end_ref: string | null;
+  mandate_ref: string | null;
+  creditor_id: string | null;
+  bank_ref: string | null;
+  originator_name: string | null;
+  recipient_name: string | null;
+  gv_code: string | null;
+  entry_text: string | null;
+  prima_nota_no: string | null;
+  original_amount: string | null;
+  original_currency_code: string | null;
+  exchange_rate: string | null;
+  notice: string | null;
   tags: TagOnTransaction[];
   created_at: string | null;
+  seen: boolean;
+}
+
+async function annotateSeenByUser(
+  transactionIds: number[],
+  userId: number,
+): Promise<Set<number>> {
+  if (transactionIds.length === 0) return new Set();
+  const rows = await db
+    .select({ transaction_id: financeTransactionSeen.transaction_id })
+    .from(financeTransactionSeen)
+    .where(
+      and(
+        inArray(financeTransactionSeen.transaction_id, transactionIds),
+        eq(financeTransactionSeen.user_id, userId),
+      ),
+    );
+  return new Set(rows.map((r) => r.transaction_id));
 }
 
 async function annotateTags(
@@ -188,6 +222,7 @@ function toDateString(s: string | null): string | null {
 function toView(
   row: typeof financeTransaction.$inferSelect,
   tags: TagOnTransaction[],
+  seen = false,
 ): TransactionView {
   return {
     id: row.id,
@@ -199,8 +234,23 @@ function toView(
     purpose: row.purpose,
     counterparty: row.counterparty,
     counterparty_iban: row.counterparty_iban,
+    counterparty_bic: row.counterparty_bic,
+    end_to_end_ref: row.end_to_end_ref,
+    mandate_ref: row.mandate_ref,
+    creditor_id: row.creditor_id,
+    bank_ref: row.bank_ref,
+    originator_name: row.originator_name,
+    recipient_name: row.recipient_name,
+    gv_code: row.gv_code,
+    entry_text: row.entry_text,
+    prima_nota_no: row.prima_nota_no,
+    original_amount: row.original_amount,
+    original_currency_code: row.original_currency_code,
+    exchange_rate: row.exchange_rate,
+    notice: row.notice,
     tags,
     created_at: row.created_at,
+    seen,
   };
 }
 
@@ -341,9 +391,11 @@ export const listTransactions = api(
       .from(financeTransaction)
       .where(where);
 
-    const tagsByTx = await annotateTags(rows.map((r) => r.id));
+    const txIds = rows.map((r) => r.id);
+    const tagsByTx = await annotateTags(txIds);
+    const seenSet = await annotateSeenByUser(txIds, Number(auth.userID));
     return {
-      items: rows.map((r) => toView(r, tagsByTx.get(r.id) ?? [])),
+      items: rows.map((r) => toView(r, tagsByTx.get(r.id) ?? [], seenSet.has(r.id))),
       total: totalRows.length,
     };
   },
@@ -375,7 +427,8 @@ export const getTransaction = api(
       throw APIError.notFound(`transaction ${id} not found`);
     }
     const tags = (await annotateTags([id])).get(id) ?? [];
-    return toView(row, tags);
+    const seenSet = await annotateSeenByUser([id], Number(auth.userID));
+    return toView(row, tags, seenSet.has(id));
   },
 );
 
@@ -499,6 +552,109 @@ export const createTransaction = api(
 
     const tags = (await annotateTags([row.id])).get(row.id) ?? [];
     return toView(row, tags);
+  },
+);
+
+// -----------------------------------------------------------------------
+// Update (cash accounts + notice/tags for all)
+// -----------------------------------------------------------------------
+
+interface UpdateParams {
+  id: number;
+  notice?: string | null;
+  // Fields below are only honoured for cash-account transactions.
+  booking_date?: string;
+  value_date?: string | null;
+  amount?: string | number;
+  counterparty?: string | null;
+  purpose?: string | null;
+}
+
+export const updateTransaction = api(
+  {
+    expose: true,
+    method: "PATCH",
+    path: "/finance/transactions/:id",
+    auth: true,
+  },
+  async (p: UpdateParams): Promise<TransactionView> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+    const row = await loadTransaction(p.id);
+    const level = await accountAccessLevel(auth, row.account_id);
+    if (level === null) throw APIError.notFound(`transaction ${p.id} not found`);
+
+    // Determine whether this is a cash account.
+    const [acc] = await db
+      .select({ type_kind: financeAccountType.kind })
+      .from(financeAccount)
+      .innerJoin(financeAccountType, eq(financeAccountType.id, financeAccount.type_id))
+      .where(eq(financeAccount.id, row.account_id))
+      .limit(1);
+    const isCash = acc?.type_kind === "bargeld";
+
+    const updates: Partial<typeof financeTransaction.$inferInsert> = {};
+    if (p.notice !== undefined) updates.notice = p.notice;
+    if (isCash && level === "write") {
+      if (p.booking_date !== undefined) updates.booking_date = p.booking_date;
+      if (p.value_date !== undefined) updates.value_date = p.value_date;
+      if (p.amount !== undefined) updates.amount = String(p.amount);
+      if (p.counterparty !== undefined) updates.counterparty = p.counterparty;
+      if (p.purpose !== undefined) updates.purpose = p.purpose;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      const tags = (await annotateTags([p.id])).get(p.id) ?? [];
+      const seenSet = await annotateSeenByUser([p.id], Number(auth.userID));
+      return toView(row, tags, seenSet.has(p.id));
+    }
+
+    const [updated] = await db
+      .update(financeTransaction)
+      .set(updates)
+      .where(eq(financeTransaction.id, p.id))
+      .returning();
+
+    const tags = (await annotateTags([p.id])).get(p.id) ?? [];
+    const seenSet = await annotateSeenByUser([p.id], Number(auth.userID));
+    return toView(updated, tags, seenSet.has(p.id));
+  },
+);
+
+// -----------------------------------------------------------------------
+// Delete (cash accounts only)
+// -----------------------------------------------------------------------
+
+interface DeleteTransactionResponse {
+  deleted: boolean;
+}
+
+export const deleteTransaction = api(
+  {
+    expose: true,
+    method: "DELETE",
+    path: "/finance/transactions/:id",
+    auth: true,
+  },
+  async ({ id }: IdParams): Promise<DeleteTransactionResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+    const row = await loadTransaction(id);
+    const level = await accountAccessLevel(auth, row.account_id);
+    if (level !== "write") {
+      throw APIError.permissionDenied("write access required to delete transactions");
+    }
+    const [acc] = await db
+      .select({ type_kind: financeAccountType.kind })
+      .from(financeAccount)
+      .innerJoin(financeAccountType, eq(financeAccountType.id, financeAccount.type_id))
+      .where(eq(financeAccount.id, row.account_id))
+      .limit(1);
+    if (acc?.type_kind !== "bargeld") {
+      throw APIError.permissionDenied("only cash-account transactions can be deleted");
+    }
+    await db.delete(financeTransaction).where(eq(financeTransaction.id, id));
+    return { deleted: true };
   },
 );
 
@@ -820,3 +976,176 @@ async function applyUserTagsTx(
   return added;
 }
 
+// -----------------------------------------------------------------------
+// Mark seen / mark all seen  (#249 / #250)
+// -----------------------------------------------------------------------
+
+export const markTransactionSeen = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/finance/transactions/:id/seen",
+    auth: true,
+  },
+  async ({ id }: IdParams): Promise<void> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+    const row = await loadTransaction(id);
+    const level = await accountAccessLevel(auth, row.account_id);
+    if (level === null) throw APIError.notFound(`transaction ${id} not found`);
+    const userId = Number(auth.userID);
+    await db
+      .insert(financeTransactionSeen)
+      .values({ transaction_id: id, user_id: userId })
+      .onConflictDoNothing();
+  },
+);
+
+interface MarkAllSeenParams {
+  accountId?: number;
+  accountIdsCsv?: string;
+}
+
+interface MarkAllSeenResponse {
+  marked: number;
+}
+
+export const markAllTransactionsSeen = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/finance/transactions/mark-all-seen",
+    auth: true,
+  },
+  async (p: MarkAllSeenParams): Promise<MarkAllSeenResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+    const userId = Number(auth.userID);
+    const visibleIds = await readableAccountIds(auth);
+
+    let targetIds: number[] | null = null;
+    if (p.accountId !== undefined) {
+      if (visibleIds !== null && !visibleIds.includes(p.accountId)) return { marked: 0 };
+      targetIds = [p.accountId];
+    } else if (p.accountIdsCsv) {
+      const ids = p.accountIdsCsv
+        .split(",")
+        .map((s) => Number(s.trim()))
+        .filter((n) => Number.isInteger(n) && n > 0);
+      const allowed = visibleIds === null ? ids : ids.filter((n) => visibleIds.includes(n));
+      targetIds = allowed.length > 0 ? allowed : [];
+    } else {
+      targetIds = visibleIds;
+    }
+
+    if (Array.isArray(targetIds) && targetIds.length === 0) return { marked: 0 };
+
+    const txCond = targetIds !== null
+      ? inArray(financeTransaction.account_id, targetIds)
+      : undefined;
+
+    const txRows = await db
+      .select({ id: financeTransaction.id })
+      .from(financeTransaction)
+      .where(txCond);
+
+    if (txRows.length === 0) return { marked: 0 };
+
+    const alreadySeen = await db
+      .select({ transaction_id: financeTransactionSeen.transaction_id })
+      .from(financeTransactionSeen)
+      .where(eq(financeTransactionSeen.user_id, userId));
+
+    const seenSet = new Set(alreadySeen.map((r) => r.transaction_id));
+    const unseen = txRows.filter((r) => !seenSet.has(r.id));
+
+    if (unseen.length === 0) return { marked: 0 };
+
+    await db
+      .insert(financeTransactionSeen)
+      .values(unseen.map((r) => ({ transaction_id: r.id, user_id: userId })))
+      .onConflictDoNothing();
+
+    return { marked: unseen.length };
+  },
+);
+
+// -----------------------------------------------------------------------
+// Recent cash recipients (#254)
+// -----------------------------------------------------------------------
+
+interface RecentRecipient {
+  counterparty: string;
+  tags: string[];
+}
+
+interface RecentRecipientsResponse {
+  items: RecentRecipient[];
+}
+
+export const recentCashRecipients = api(
+  {
+    expose: true,
+    method: "GET",
+    path: "/finance/transactions/recent-cash-recipients",
+    auth: true,
+  },
+  async (): Promise<RecentRecipientsResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+
+    const visibleIds = await readableAccountIds(auth);
+
+    // Find bargeld account ids visible to this user.
+    const cashAccounts = await db
+      .select({ id: financeAccount.id })
+      .from(financeAccount)
+      .innerJoin(financeAccountType, eq(financeAccountType.id, financeAccount.type_id))
+      .where(
+        and(
+          eq(financeAccountType.kind, "bargeld"),
+          visibleIds !== null
+            ? inArray(financeAccount.id, visibleIds.length > 0 ? visibleIds : [-1])
+            : undefined,
+        ),
+      );
+
+    if (cashAccounts.length === 0) return { items: [] };
+
+    const cashAccountIds = cashAccounts.map((a) => a.id);
+
+    // Fetch the 50 most recent cash transactions with a counterparty.
+    const rows = await db
+      .select({ id: financeTransaction.id, counterparty: financeTransaction.counterparty })
+      .from(financeTransaction)
+      .where(
+        and(
+          inArray(financeTransaction.account_id, cashAccountIds),
+          sql`${financeTransaction.counterparty} IS NOT NULL`,
+        ),
+      )
+      .orderBy(desc(financeTransaction.booking_date))
+      .limit(50);
+
+    // Deduplicate: keep only the latest occurrence of each counterparty.
+    const seen = new Set<string>();
+    const deduped = rows.filter((r) => {
+      const key = r.counterparty!;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    const txIds = deduped.map((r) => r.id);
+    const tagsByTx = await annotateTags(txIds);
+
+    return {
+      items: deduped.map((r) => ({
+        counterparty: r.counterparty!,
+        tags: (tagsByTx.get(r.id) ?? [])
+          .filter((t) => t.source === "user")
+          .map((t) => t.name),
+      })),
+    };
+  },
+);

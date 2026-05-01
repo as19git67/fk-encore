@@ -86,6 +86,12 @@ export interface FintsTransactionData {
    *  `dedupe_hash` over the canonical fields). Maps to the `bank_ref`
    *  column. */
   bankRef: string | null;
+  /** Original currency/amount/exchange rate for credit card transactions
+   *  booked in a foreign currency. All three are null for same-currency
+   *  transactions and non-credit-card accounts. */
+  originalAmount: string | null;
+  originalCurrency: string | null;
+  exchangeRate: string | null;
   /** Full lib-fints Transaction object, verbatim, for the raw JSONB column. */
   raw: Record<string, unknown>;
 }

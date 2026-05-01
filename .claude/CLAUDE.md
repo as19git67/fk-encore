@@ -996,6 +996,40 @@ Build:
 - encore build docker: Build portable Docker image (--base string: Define base image, --push: Push to remote repository)
 </encore_cli_reference>
 
+## Test-Pflicht vor jedem Push
+
+**Tests müssen vor jedem `git push` erfolgreich durchlaufen.** Kein Push ohne grüne Tests.
+
+Befehl:
+```bash
+npm run test
+```
+
+Erwartet: `Test Files X passed`, `Tests Y passed`, kein `failed`.
+
+### Sandbox-Setup (einmalig je Session)
+
+Die Sandbox nutzt PostgreSQL 16 mit pgvector, das lokal installiert ist. Docker ist **nicht** verfügbar.
+
+```bash
+# PostgreSQL starten (falls nicht bereits aktiv)
+pg_ctlcluster 16 main start
+
+# Prüfen ob bereit
+pg_isready -h localhost -p 5432 -U postgres
+```
+
+Voraussetzungen (bereits installiert in dieser Sandbox):
+- PostgreSQL 16 mit pgvector (`postgresql-16-pgvector`)
+- Node.js mit allen npm-Abhängigkeiten (`node_modules/` vorhanden)
+- Passwort für den `postgres`-User: `postgres`
+
+Der Testlauf (`npm run test`) erstellt die `encore_test`-Datenbank automatisch, führt alle Migrationen aus und räumt danach auf.
+
+### Drizzle-Migrationsdateien
+
+Bei Umbenennung oder Neuerstellung von Migrationsdateien muss **immer** auch `db/migrations/postgres/meta/_journal.json` aktualisiert werden. Fehlende Einträge im Journal führen dazu, dass Drizzle die Migrationen überspringt und die CI-Tests schlagen fehl.
+
 ## Aktive Feature-Pläne
 
 - **Dokumentenverwaltung** (neues Modul neben Fotos, lokale KI-Klassifikation via llm-service): `/root/.claude/plans/ein-weiteres-modul-in-peaceful-robin.md`. Wird iterativ in Etappen umgesetzt (DB/Seed → llm-service → documents-Service → Watcher → Suche → Frontend → Infra).

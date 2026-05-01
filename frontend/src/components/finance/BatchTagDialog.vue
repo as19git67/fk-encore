@@ -2,8 +2,8 @@
 import { ref, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
-import AutoComplete from 'primevue/autocomplete'
 import RadioButton from 'primevue/radiobutton'
+import TagAutoComplete from './TagAutoComplete.vue'
 import Message from 'primevue/message'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useTagsStore } from '../../stores/finance/tags'
@@ -26,8 +26,6 @@ const removeTags = ref<string[]>([])
 const mode = ref<'add' | 'replace'>('add')
 const saving = ref(false)
 const error = ref<string | null>(null)
-const suggestions = ref<string[]>([])
-
 watch(
   () => props.visible,
   async (v) => {
@@ -43,13 +41,6 @@ watch(
   },
 )
 
-function searchTags(event: { query: string }) {
-  const q = event.query.toLowerCase()
-  suggestions.value = tagsStore.items
-    .filter((t) => t.name.toLowerCase().includes(q))
-    .map((t) => t.name)
-}
-
 async function apply() {
   if (addTags.value.length === 0 && removeTags.value.length === 0 && mode.value !== 'replace') {
     error.value = 'Mindestens einen Tag angeben oder „Ersetzen" wählen.'
@@ -64,6 +55,7 @@ async function apply() {
       remove: mode.value === 'replace' ? undefined : removeTags.value,
       replace: mode.value === 'replace',
     })
+    tagsStore.addLocal(addTags.value)
     emit('done')
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -88,25 +80,15 @@ async function apply() {
 
     <div class="field">
       <label>Tags hinzufügen</label>
-      <AutoComplete
+      <TagAutoComplete
         v-model="addTags"
-        :suggestions="suggestions"
-        @complete="searchTags"
-        multiple
-        typeahead
         placeholder="Tag eingeben und Enter drücken"
       />
     </div>
 
     <div v-if="mode === 'add'" class="field">
       <label>Tags entfernen (optional)</label>
-      <AutoComplete
-        v-model="removeTags"
-        :suggestions="suggestions"
-        @complete="searchTags"
-        multiple
-        typeahead
-      />
+      <TagAutoComplete v-model="removeTags" />
     </div>
 
     <div class="mode">

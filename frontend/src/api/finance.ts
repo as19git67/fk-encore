@@ -432,8 +432,23 @@ export interface Transaction {
   purpose: string | null
   counterparty: string | null
   counterparty_iban: string | null
+  counterparty_bic: string | null
+  end_to_end_ref: string | null
+  mandate_ref: string | null
+  creditor_id: string | null
+  bank_ref: string | null
+  originator_name: string | null
+  recipient_name: string | null
+  gv_code: string | null
+  entry_text: string | null
+  prima_nota_no: string | null
+  original_amount: string | null
+  original_currency_code: string | null
+  exchange_rate: string | null
+  notice: string | null
   tags: TagOnTransaction[]
   created_at: string | null
+  seen: boolean
 }
 
 export interface ListTransactionsQuery {
@@ -492,6 +507,57 @@ export async function createTransaction(
   return apiFetch('/finance/transactions', {
     method: 'POST',
     body: JSON.stringify(input),
+  })
+}
+
+export interface UpdateTransactionInput {
+  notice?: string | null
+  booking_date?: string
+  value_date?: string | null
+  amount?: string | number
+  counterparty?: string | null
+  purpose?: string | null
+}
+
+export async function updateTransaction(
+  id: number,
+  input: UpdateTransactionInput,
+): Promise<Transaction> {
+  return apiFetch(`/finance/transactions/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function deleteTransaction(id: number): Promise<{ deleted: boolean }> {
+  return apiFetch(`/finance/transactions/${id}`, { method: 'DELETE' })
+}
+
+export interface RecentRecipient {
+  counterparty: string
+  tags: string[]
+}
+
+export async function recentCashRecipients(): Promise<{ items: RecentRecipient[] }> {
+  return apiFetch('/finance/transactions/recent-cash-recipients')
+}
+
+export async function markTransactionSeen(id: number): Promise<void> {
+  await apiFetch(`/finance/transactions/${id}/seen`, { method: 'POST' })
+}
+
+export async function markAllTransactionsSeen(params: {
+  accountId?: number
+  accountIds?: number[]
+}): Promise<{ marked: number }> {
+  const body: Record<string, unknown> = {}
+  if (params.accountId !== undefined) body.accountId = params.accountId
+  if (params.accountIds && params.accountIds.length > 0) {
+    body.accountIdsCsv = params.accountIds.join(',')
+  }
+  return apiFetch('/finance/transactions/mark-all-seen', {
+    method: 'POST',
+    body: JSON.stringify(body),
   })
 }
 
