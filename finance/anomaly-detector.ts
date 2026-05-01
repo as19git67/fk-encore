@@ -621,12 +621,23 @@ export const listAnomalies = api(
     const auth = getAuthData()!;
     requirePermission(auth, "finance.view");
 
-    const accessible = await db
-      .select({ id: financeAccountAccess.account_id })
-      .from(financeAccountAccess)
-      .where(eq(financeAccountAccess.user_id, Number(auth.userID)));
-    const accountIds = accessible.map((a) => a.id);
-    if (accountIds.length === 0) return { anomalies: [], total: 0 };
+    // `finance.admin` bypasses the ACL filter (same convention as accounts.ts /
+    // analysis.ts). Non-admins only see anomalies on accounts they have an
+    // explicit row-level grant for.
+    const isAdmin = auth.permissions.includes("finance.admin");
+    let accountIds: number[] = [];
+    if (!isAdmin) {
+      const accessible = await db
+        .select({ id: financeAccountAccess.account_id })
+        .from(financeAccountAccess)
+        .where(eq(financeAccountAccess.user_id, Number(auth.userID)));
+      accountIds = accessible.map((a) => a.id);
+      if (accountIds.length === 0) return { anomalies: [], total: 0 };
+    }
+
+    const aclCondition = isAdmin
+      ? undefined
+      : inArray(financeAnomaly.account_id, accountIds);
 
     const rows = await db
       .select({
@@ -646,7 +657,7 @@ export const listAnomalies = api(
       )
       .where(
         and(
-          inArray(financeAnomaly.account_id, accountIds),
+          ...(aclCondition ? [aclCondition] : []),
           isNull(financeAnomaly.acknowledged_at),
         )
       )
@@ -725,12 +736,20 @@ export const acknowledgeAnomaly = api(
     const auth = getAuthData()!;
     requirePermission(auth, "finance.view");
 
-    const accessible = await db
-      .select({ id: financeAccountAccess.account_id })
-      .from(financeAccountAccess)
-      .where(eq(financeAccountAccess.user_id, Number(auth.userID)));
-    const accountIds = accessible.map((a) => a.id);
-    if (accountIds.length === 0) throw APIError.notFound("anomaly not found");
+    const isAdmin = auth.permissions.includes("finance.admin");
+    let accountIds: number[] = [];
+    if (!isAdmin) {
+      const accessible = await db
+        .select({ id: financeAccountAccess.account_id })
+        .from(financeAccountAccess)
+        .where(eq(financeAccountAccess.user_id, Number(auth.userID)));
+      accountIds = accessible.map((a) => a.id);
+      if (accountIds.length === 0) throw APIError.notFound("anomaly not found");
+    }
+
+    const aclCondition = isAdmin
+      ? undefined
+      : inArray(financeAnomaly.account_id, accountIds);
 
     const result = await db
       .update(financeAnomaly)
@@ -738,7 +757,7 @@ export const acknowledgeAnomaly = api(
       .where(
         and(
           eq(financeAnomaly.id, id),
-          inArray(financeAnomaly.account_id, accountIds),
+          ...(aclCondition ? [aclCondition] : []),
           isNull(financeAnomaly.acknowledged_at),
         )
       );
@@ -777,12 +796,20 @@ export const getMandateHistory = api(
     const auth = getAuthData()!;
     requirePermission(auth, "finance.view");
 
-    const accessible = await db
-      .select({ id: financeAccountAccess.account_id })
-      .from(financeAccountAccess)
-      .where(eq(financeAccountAccess.user_id, Number(auth.userID)));
-    const accountIds = accessible.map((a) => a.id);
-    if (accountIds.length === 0) throw APIError.notFound("mandate not found");
+    const isAdmin = auth.permissions.includes("finance.admin");
+    let accountIds: number[] = [];
+    if (!isAdmin) {
+      const accessible = await db
+        .select({ id: financeAccountAccess.account_id })
+        .from(financeAccountAccess)
+        .where(eq(financeAccountAccess.user_id, Number(auth.userID)));
+      accountIds = accessible.map((a) => a.id);
+      if (accountIds.length === 0) throw APIError.notFound("mandate not found");
+    }
+
+    const aclCondition = isAdmin
+      ? undefined
+      : inArray(financeRecurringMandate.account_id, accountIds);
 
     const [mandate] = await db
       .select()
@@ -790,7 +817,7 @@ export const getMandateHistory = api(
       .where(
         and(
           eq(financeRecurringMandate.id, mandateId),
-          inArray(financeRecurringMandate.account_id, accountIds),
+          ...(aclCondition ? [aclCondition] : []),
         ),
       )
       .limit(1);
