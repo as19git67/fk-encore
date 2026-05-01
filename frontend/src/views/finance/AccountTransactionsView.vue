@@ -166,6 +166,8 @@ const formTo = computed({ get: () => filtersStore.formTo, set: (v) => { filtersS
 
 const hasActiveFilters = computed(() => filtersStore.hasActiveFilters)
 
+const hasUnseen = computed(() => txStore.items.some((tx) => !tx.seen))
+
 function isoDate(d: Date): string {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
@@ -471,11 +473,20 @@ function goBack() {
           @click="filterPanelOpen = !filterPanelOpen"
         />
         <Button
-          icon="pi pi-eye"
+          :icon="hasUnseen ? 'pi pi-check' : 'pi pi-list-check'"
           severity="secondary"
           rounded
-          aria-label="Alle als gelesen markieren"
-          :title="'Alle als gelesen markieren'"
+          :disabled="!hasUnseen"
+          :aria-label="
+            hasUnseen
+              ? 'Alle als gelesen markieren'
+              : 'Alle Buchungen sind gelesen'
+          "
+          :title="
+            hasUnseen
+              ? 'Alle als gelesen markieren'
+              : 'Alle Buchungen sind gelesen'
+          "
           @click="markAllSeen"
         />
         <Button
