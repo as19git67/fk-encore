@@ -1103,6 +1103,7 @@ export const financeTransaction = pgTable(
     original_amount: numeric("original_amount", { precision: 14, scale: 2 }),
     original_currency_code: text("original_currency_code"),
     exchange_rate: numeric("exchange_rate", { precision: 12, scale: 6 }),
+    notice: text("notice"),
     dedupe_hash: text("dedupe_hash").notNull(),
     raw: jsonb("raw").$type<Record<string, unknown>>(),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true })
@@ -1347,6 +1348,24 @@ export const financeAnomaly = pgTable(
   (table) => [
     index("idx_finance_anomaly_unread").on(table.account_id, table.created_at),
   ]
+);
+
+// ---------- Transaction seen state ----------
+
+export const financeTransactionSeen = pgTable(
+  "finance_transaction_seen",
+  {
+    transaction_id: integer("transaction_id")
+      .notNull()
+      .references(() => financeTransaction.id, { onDelete: "cascade" }),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    seen_at: timestamp("seen_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.transaction_id, table.user_id] })]
 );
 
 // ========== Scheduled job state (lib/local-cron.ts) ==========

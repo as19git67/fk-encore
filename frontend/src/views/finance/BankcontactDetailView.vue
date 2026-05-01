@@ -52,7 +52,6 @@ const form = ref<{
 
 const pin = ref('')
 const saving = ref(false)
-const savingPin = ref(false)
 const syncing = ref(false)
 const probingMethods = ref(false)
 const tanMethodOptions = ref<TanMethodOption[]>([])
@@ -163,6 +162,10 @@ async function save() {
         server_url: form.value.server_url.trim(),
         tan_method: form.value.tan_method.trim() || undefined,
       })
+      if (pin.value) {
+        await store.setCredentials(created.id, pin.value)
+        pin.value = ''
+      }
       void router.push({ name: 'finance-bankcontact-detail', params: { id: created.id } })
     } else if (bc.value) {
       const updated = await store.update(bc.value.id, {
@@ -173,26 +176,16 @@ async function save() {
         tan_method: form.value.tan_method.trim() || null,
       })
       bc.value = updated
+      if (pin.value) {
+        await store.setCredentials(bc.value.id, pin.value)
+        pin.value = ''
+        bc.value = { ...bc.value, credentials_set: true }
+      }
     }
   } catch (err) {
     errorMsg.value = err instanceof Error ? err.message : String(err)
   } finally {
     saving.value = false
-  }
-}
-
-async function setCreds() {
-  if (!bc.value) return
-  savingPin.value = true
-  errorMsg.value = null
-  try {
-    await store.setCredentials(bc.value.id, pin.value)
-    pin.value = ''
-    bc.value = { ...bc.value, credentials_set: true }
-  } catch (err) {
-    errorMsg.value = err instanceof Error ? err.message : String(err)
-  } finally {
-    savingPin.value = false
   }
 }
 
@@ -370,6 +363,18 @@ async function del() {
       <div class="field"><label>Login</label><InputText v-model="form.login" /></div>
       <div class="field"><label>Server-URL</label><InputText v-model="form.server_url" /></div>
       <div class="field">
+        <label>
+          Passwort / PIN
+          <Tag
+            v-if="!isNew && bc"
+            class="cred-tag"
+            :severity="bc.credentials_set ? 'success' : 'warn'"
+            :value="bc.credentials_set ? 'gesetzt' : 'nicht gesetzt'"
+          />
+        </label>
+        <Password v-model="pin" :feedback="false" toggle-mask :placeholder="(!isNew && bc?.credentials_set) ? '(unverändert lassen)' : 'PIN eingeben'" />
+      </div>
+      <div class="field">
         <label>TAN-Verfahren</label>
         <div v-if="!isNew && bc?.credentials_set" class="tan-method-row">
           <Select
@@ -401,31 +406,7 @@ async function del() {
         </small>
       </div>
       <div class="actions">
-        <Button label="Speichern" :loading="saving" :disabled="!isDirty" @click="save" />
-      </div>
-    </section>
-
-    <section v-if="!isNew && bc" class="card">
-      <h2>Credentials</h2>
-      <p class="hint">
-        <template v-if="bc.credentials_set">
-          <Tag severity="success" value="Verschlüsselt gespeichert" />
-        </template>
-        <template v-else>
-          <Tag severity="warn" value="Kein Passwort gesetzt" />
-        </template>
-      </p>
-      <div class="field">
-        <label>Neues Passwort / PIN</label>
-        <Password v-model="pin" :feedback="false" toggle-mask />
-      </div>
-      <div class="actions">
-        <Button
-          label="Setzen"
-          :loading="savingPin"
-          :disabled="!pin"
-          @click="setCreds"
-        />
+        <Button label="Speichern" :loading="saving" :disabled="!isDirty && !pin" @click="save" />
       </div>
     </section>
 
@@ -672,6 +653,11 @@ async function del() {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+.cred-tag {
+  font-size: 0.75rem;
+  margin-left: 0.4rem;
+  vertical-align: middle;
 }
 .probe-info {
   color: var(--p-text-muted-color);
