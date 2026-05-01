@@ -621,23 +621,23 @@ export const listAnomalies = api(
     const auth = getAuthData()!;
     requirePermission(auth, "finance.view");
 
-    // `finance.admin` bypasses the ACL filter (same convention as accounts.ts /
-    // analysis.ts). Non-admins only see anomalies on accounts they have an
-    // explicit row-level grant for.
-    const isAdmin = auth.permissions.includes("finance.admin");
-    let accountIds: number[] = [];
-    if (!isAdmin) {
-      const accessible = await db
-        .select({ id: financeAccountAccess.account_id })
-        .from(financeAccountAccess)
-        .where(eq(financeAccountAccess.user_id, Number(auth.userID)));
-      accountIds = accessible.map((a) => a.id);
-      if (accountIds.length === 0) return { anomalies: [], total: 0 };
-    }
-
-    const aclCondition = isAdmin
-      ? undefined
-      : inArray(financeAnomaly.account_id, accountIds);
+    // The anomaly feed is an actionable inbox — entries get acknowledged or
+    // followed up with edits. We therefore only show anomalies on accounts
+    // the caller has WRITE access to. `finance.admin` does NOT bypass this:
+    // an admin without an explicit account-access row sees nothing here, by
+    // design, since they have no business acknowledging alerts they don't
+    // own.
+    const writeable = await db
+      .select({ id: financeAccountAccess.account_id })
+      .from(financeAccountAccess)
+      .where(
+        and(
+          eq(financeAccountAccess.user_id, Number(auth.userID)),
+          eq(financeAccountAccess.level, "write"),
+        ),
+      );
+    const accountIds = writeable.map((a) => a.id);
+    if (accountIds.length === 0) return { anomalies: [], total: 0 };
 
     const rows = await db
       .select({
@@ -657,7 +657,7 @@ export const listAnomalies = api(
       )
       .where(
         and(
-          ...(aclCondition ? [aclCondition] : []),
+          inArray(financeAnomaly.account_id, accountIds),
           isNull(financeAnomaly.acknowledged_at),
         )
       )
@@ -736,20 +736,18 @@ export const acknowledgeAnomaly = api(
     const auth = getAuthData()!;
     requirePermission(auth, "finance.view");
 
-    const isAdmin = auth.permissions.includes("finance.admin");
-    let accountIds: number[] = [];
-    if (!isAdmin) {
-      const accessible = await db
-        .select({ id: financeAccountAccess.account_id })
-        .from(financeAccountAccess)
-        .where(eq(financeAccountAccess.user_id, Number(auth.userID)));
-      accountIds = accessible.map((a) => a.id);
-      if (accountIds.length === 0) throw APIError.notFound("anomaly not found");
-    }
-
-    const aclCondition = isAdmin
-      ? undefined
-      : inArray(financeAnomaly.account_id, accountIds);
+    // Acknowledging is a mutation: same write-only ACL as listAnomalies.
+    const writeable = await db
+      .select({ id: financeAccountAccess.account_id })
+      .from(financeAccountAccess)
+      .where(
+        and(
+          eq(financeAccountAccess.user_id, Number(auth.userID)),
+          eq(financeAccountAccess.level, "write"),
+        ),
+      );
+    const accountIds = writeable.map((a) => a.id);
+    if (accountIds.length === 0) throw APIError.notFound("anomaly not found");
 
     const result = await db
       .update(financeAnomaly)
@@ -757,7 +755,7 @@ export const acknowledgeAnomaly = api(
       .where(
         and(
           eq(financeAnomaly.id, id),
-          ...(aclCondition ? [aclCondition] : []),
+          inArray(financeAnomaly.account_id, accountIds),
           isNull(financeAnomaly.acknowledged_at),
         )
       );
@@ -796,20 +794,14 @@ export const getMandateHistory = api(
     const auth = getAuthData()!;
     requirePermission(auth, "finance.view");
 
-    const isAdmin = auth.permissions.includes("finance.admin");
-    let accountIds: number[] = [];
-    if (!isAdmin) {
-      const accessible = await db
-        .select({ id: financeAccountAccess.account_id })
-        .from(financeAccountAccess)
-        .where(eq(financeAccountAccess.user_id, Number(auth.userID)));
-      accountIds = accessible.map((a) => a.id);
-      if (accountIds.length === 0) throw APIError.notFound("mandate not found");
-    }
-
-    const aclCondition = isAdmin
-      ? undefined
-      : inArray(financeRecurringMandate.account_id, accountIds);
+    // Read-only view: any account-access level (read or write) is enough.
+    // No admin bypass — admins must hold an explicit account-access row.
+    const accessible = await db
+      .select({ id: financeAccountAccess.account_id })
+      .from(financeAccountAccess)
+      .where(eq(financeAccountAccess.user_id, Number(auth.userID)));
+    const accountIds = accessible.map((a) => a.id);
+    if (accountIds.length === 0) throw APIError.notFound("mandate not found");
 
     const [mandate] = await db
       .select()
@@ -817,7 +809,7 @@ export const getMandateHistory = api(
       .where(
         and(
           eq(financeRecurringMandate.id, mandateId),
-          ...(aclCondition ? [aclCondition] : []),
+          inArray(financeRecurringMandate.account_id, accountIds),
         ),
       )
       .limit(1);
