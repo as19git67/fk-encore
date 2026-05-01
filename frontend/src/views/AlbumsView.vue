@@ -484,66 +484,135 @@ const displayModeOptions = [
 const router = useRouter()
 const route = useRoute()
 
-// ── URL query persistence (like GalleryView) ─────────────────────────────────
-// Filter, sort, and search query are encoded in the URL so they survive
-// page reloads and are saved by the router's last-route persistence.
+// ── Sticky filter/sort/search persistence ────────────────────────────────────
+// Filter state survives:
+//   - hard reloads (URL query params)
+//   - menu navigation /fotos/alben → /fotos/galerie → /fotos/alben (localStorage)
+//   - cross-tab navigation (localStorage)
+// On mount: URL takes priority for deep-linking; falls back to localStorage.
+// On change: writes to BOTH URL and localStorage so either entry point recovers.
 
-function parseAlbumStateFromQuery() {
+const ALBUMS_STATE_STORAGE_KEY = 'albums_view_state'
+
+interface AlbumsPersistedState {
+  filter: AlbumFilter
+  sort: SortState
+  searchQuery: string
+}
+
+function defaultAlbumsState(): AlbumsPersistedState {
+  return {
+    filter: { ...EMPTY_ALBUM_FILTER },
+    sort: { ...DEFAULT_ALBUM_SORT },
+    searchQuery: '',
+  }
+}
+
+function sanitizeFilter(raw: Partial<AlbumFilter> | undefined): AlbumFilter {
+  const f = raw ?? {}
+  const validOwners: AlbumOwnerFilter[] = ['all', 'mine', 'shared']
+  const validDisplays: AlbumDisplayFilter[] = ['all', 'grid', 'map']
+  const validEmpties: AlbumEmptyFilter[] = ['any', 'only', 'exclude']
+  return {
+    owner: validOwners.includes(f.owner as AlbumOwnerFilter) ? (f.owner as AlbumOwnerFilter) : 'all',
+    display: validDisplays.includes(f.display as AlbumDisplayFilter) ? (f.display as AlbumDisplayFilter) : 'all',
+    emptyMode: validEmpties.includes(f.emptyMode as AlbumEmptyFilter) ? (f.emptyMode as AlbumEmptyFilter) : 'any',
+    sharedByMe: f.sharedByMe === true,
+    sharedWithMe: f.sharedWithMe === true,
+    dateFrom: typeof f.dateFrom === 'string' && f.dateFrom ? f.dateFrom : undefined,
+    dateTo: typeof f.dateTo === 'string' && f.dateTo ? f.dateTo : undefined,
+  }
+}
+
+function sanitizeSort(raw: Partial<SortState> | undefined): SortState {
+  const validSortFields = ALBUM_SORT_FIELDS.map(f => f.value)
+  const f = raw ?? {}
+  return {
+    field: typeof f.field === 'string' && validSortFields.includes(f.field) ? f.field : DEFAULT_ALBUM_SORT.field,
+    direction: f.direction === 'asc' || f.direction === 'desc' ? f.direction : DEFAULT_ALBUM_SORT.direction,
+  }
+}
+
+function loadStateFromStorage(): AlbumsPersistedState {
+  try {
+    const raw = localStorage.getItem(ALBUMS_STATE_STORAGE_KEY)
+    if (!raw) return defaultAlbumsState()
+    const parsed = JSON.parse(raw) as Partial<AlbumsPersistedState>
+    return {
+      filter: sanitizeFilter(parsed?.filter),
+      sort: sanitizeSort(parsed?.sort),
+      searchQuery: typeof parsed?.searchQuery === 'string' ? parsed.searchQuery : '',
+    }
+  } catch {
+    return defaultAlbumsState()
+  }
+}
+
+function saveStateToStorage(state: AlbumsPersistedState) {
+  try {
+    localStorage.setItem(ALBUMS_STATE_STORAGE_KEY, JSON.stringify(state))
+  } catch { /* storage unavailable */ }
+}
+
+function hasAnyFilterQueryParam(q: Record<string, unknown>): boolean {
+  const keys = ['q', 'owner', 'display', 'emptyMode', 'sharedByMe', 'sharedWithMe', 'dateFrom', 'dateTo', 'sortBy', 'sortDir']
+  return keys.some(k => typeof q[k] === 'string' && (q[k] as string).length > 0)
+}
+
+function parseAlbumStateFromQuery(): AlbumsPersistedState {
   const q = route.query
-  const filter: AlbumFilter = {
-    owner: (q.owner as AlbumOwnerFilter) || 'all',
-    display: (q.display as AlbumDisplayFilter) || 'all',
-    emptyMode: (q.emptyMode as AlbumEmptyFilter) || 'any',
+  const filter = sanitizeFilter({
+    owner: q.owner as AlbumOwnerFilter,
+    display: q.display as AlbumDisplayFilter,
+    emptyMode: q.emptyMode as AlbumEmptyFilter,
     sharedByMe: q.sharedByMe === '1',
     sharedWithMe: q.sharedWithMe === '1',
-    dateFrom: typeof q.dateFrom === 'string' && q.dateFrom ? q.dateFrom : undefined,
-    dateTo: typeof q.dateTo === 'string' && q.dateTo ? q.dateTo : undefined,
-  }
-  const validOwners: AlbumOwnerFilter[] = ['all', 'mine', 'shared']
-  if (!validOwners.includes(filter.owner)) filter.owner = 'all'
-  const validDisplays: AlbumDisplayFilter[] = ['all', 'grid', 'map']
-  if (!validDisplays.includes(filter.display)) filter.display = 'all'
-  const validEmpties: AlbumEmptyFilter[] = ['any', 'only', 'exclude']
-  if (!validEmpties.includes(filter.emptyMode)) filter.emptyMode = 'any'
-
-  const sort: SortState = {
-    field: typeof q.sortBy === 'string' && q.sortBy ? q.sortBy : DEFAULT_ALBUM_SORT.field,
-    direction: (q.sortDir === 'asc' || q.sortDir === 'desc') ? q.sortDir : DEFAULT_ALBUM_SORT.direction,
-  }
-  const validSortFields = ALBUM_SORT_FIELDS.map(f => f.value)
-  if (!validSortFields.includes(sort.field)) sort.field = DEFAULT_ALBUM_SORT.field
-
+    dateFrom: typeof q.dateFrom === 'string' ? q.dateFrom : undefined,
+    dateTo: typeof q.dateTo === 'string' ? q.dateTo : undefined,
+  })
+  const sort = sanitizeSort({
+    field: typeof q.sortBy === 'string' ? q.sortBy : undefined,
+    direction: (q.sortDir === 'asc' || q.sortDir === 'desc') ? q.sortDir : undefined,
+  })
   const searchQuery = typeof q.q === 'string' ? q.q : ''
-
   return { filter, sort, searchQuery }
 }
 
-function albumStateToQuery(
-  filter: AlbumFilter,
-  sort: SortState,
-  searchQuery: string,
-): Record<string, string | undefined> {
+function albumStateToQuery(state: AlbumsPersistedState): Record<string, string> {
+  const out: Record<string, string> = {}
+  const { filter, sort, searchQuery } = state
+  if (searchQuery) out.q = searchQuery
+  if (filter.owner !== 'all') out.owner = filter.owner
+  if (filter.display !== 'all') out.display = filter.display
+  if (filter.emptyMode !== 'any') out.emptyMode = filter.emptyMode
+  if (filter.sharedByMe) out.sharedByMe = '1'
+  if (filter.sharedWithMe) out.sharedWithMe = '1'
+  if (filter.dateFrom) out.dateFrom = filter.dateFrom
+  if (filter.dateTo) out.dateTo = filter.dateTo
+  if (sort.field !== DEFAULT_ALBUM_SORT.field) out.sortBy = sort.field
+  if (sort.direction !== DEFAULT_ALBUM_SORT.direction) out.sortDir = sort.direction
+  return out
+}
+
+function currentState(): AlbumsPersistedState {
   return {
-    q: searchQuery || undefined,
-    owner: filter.owner !== 'all' ? filter.owner : undefined,
-    display: filter.display !== 'all' ? filter.display : undefined,
-    emptyMode: filter.emptyMode !== 'any' ? filter.emptyMode : undefined,
-    sharedByMe: filter.sharedByMe ? '1' : undefined,
-    sharedWithMe: filter.sharedWithMe ? '1' : undefined,
-    dateFrom: filter.dateFrom || undefined,
-    dateTo: filter.dateTo || undefined,
-    sortBy: sort.field !== DEFAULT_ALBUM_SORT.field ? sort.field : undefined,
-    sortDir: sort.direction !== DEFAULT_ALBUM_SORT.direction ? sort.direction : undefined,
+    filter: { ...appliedAlbumFilter.value },
+    sort: { ...appliedAlbumSort.value },
+    searchQuery: filterQuery.value,
   }
 }
 
 let syncingUrl = false
-async function syncUrlFromState() {
+async function persistState() {
+  const state = currentState()
+  saveStateToStorage(state)
   if (syncingUrl) return
   syncingUrl = true
   try {
-    const next = albumStateToQuery(appliedAlbumFilter.value, appliedAlbumSort.value, filterQuery.value)
-    await router.replace({ query: next as Record<string, string> })
+    const next = albumStateToQuery(state)
+    if (JSON.stringify(next) !== JSON.stringify(route.query)) {
+      await router.replace({ query: next })
+    }
   } finally {
     syncingUrl = false
   }
@@ -800,21 +869,27 @@ useRealtimeEvent('albums', 'photo_added', (ev) => {
   loadData()
 })
 
-// Initialize filter/sort/search from URL query params on first load.
-// This runs before loadData so the restored state is ready when data arrives.
+// Initialize filter/sort/search before loadData so the restored state is
+// ready when data arrives. URL params win for deep-linking; otherwise we
+// fall back to whatever the user had configured last (localStorage).
 {
-  const { filter, sort, searchQuery } = parseAlbumStateFromQuery()
-  appliedAlbumFilter.value = filter
-  draftAlbumFilter.value = { ...filter }
-  appliedAlbumSort.value = sort
-  draftAlbumSort.value = { ...sort }
-  filterQuery.value = searchQuery
+  const initial = hasAnyFilterQueryParam(route.query as Record<string, unknown>)
+    ? parseAlbumStateFromQuery()
+    : loadStateFromStorage()
+  appliedAlbumFilter.value = initial.filter
+  draftAlbumFilter.value = { ...initial.filter }
+  appliedAlbumSort.value = initial.sort
+  draftAlbumSort.value = { ...initial.sort }
+  filterQuery.value = initial.searchQuery
+  // Mirror the restored state to the URL so a copy-paste or share of the
+  // address bar shows the same filters the view is rendering.
+  void persistState()
 }
 
-// Keep URL in sync whenever the applied state changes.
-watch(appliedAlbumFilter, () => syncUrlFromState(), { deep: true })
-watch(appliedAlbumSort, () => syncUrlFromState(), { deep: true })
-watch(filterQuery, () => syncUrlFromState())
+// Keep URL + localStorage in sync whenever the applied state changes.
+watch(appliedAlbumFilter, () => persistState(), { deep: true })
+watch(appliedAlbumSort, () => persistState(), { deep: true })
+watch(filterQuery, () => persistState())
 
 onMounted(loadData)
 </script>
