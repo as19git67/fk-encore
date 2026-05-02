@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Tag from 'primevue/tag'
@@ -10,7 +10,7 @@ import Textarea from 'primevue/textarea'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useAccountsStore } from '../../stores/finance/accounts'
 import { useTagsStore } from '../../stores/finance/tags'
-import type { Transaction } from '../../api/finance'
+import type { MandateHistoryItem, Transaction } from '../../api/finance'
 import * as api from '../../api/finance'
 
 const route = useRoute()
@@ -176,6 +176,67 @@ async function copyToClipboard(value: string, label: string) {
   }
 }
 
+// ── Related recurring transactions ──────────────────────────────────────────
+// Shows the other bookings of the recurring mandate this transaction
+// belongs to. Empty list (and no card) when the transaction is not
+// part of any tracked recurring series.
+const recurringItems = ref<MandateHistoryItem[] | null>(null)
+const recurringLoading = ref(false)
+const recurringError = ref<string | null>(null)
+const recurringCounterparty = ref<string | null>(null)
+
+async function loadRecurring(transactionId: number) {
+  recurringLoading.value = true
+  recurringError.value = null
+  try {
+    const res = await api.getRelatedRecurringTransactions(transactionId)
+    recurringCounterparty.value = res.counterparty
+    recurringItems.value = res.items
+  } catch (err) {
+    recurringError.value = err instanceof Error ? err.message : String(err)
+    recurringItems.value = null
+  } finally {
+    recurringLoading.value = false
+  }
+}
+
+const otherRecurringItems = computed<MandateHistoryItem[]>(() => {
+  if (!recurringItems.value || !tx.value) return []
+  return recurringItems.value.filter((it) => it.id !== tx.value!.id)
+})
+
+watch(
+  () => tx.value?.id ?? null,
+  (id) => {
+    if (id != null) void loadRecurring(id)
+    else recurringItems.value = null
+  },
+)
+
+function openTransaction(id: number) {
+  void router.push({ name: 'finance-transaction-detail', params: { id } })
+}
+
+function formatRecurringAmount(raw: string): string {
+  const currency = account.value?.currency_code ?? 'EUR'
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return raw
+  return new Intl.NumberFormat('de-DE', {
+    style: 'currency',
+    currency,
+  }).format(n)
+}
+
+function formatRecurringDate(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleDateString('de-DE', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  })
+}
+
 // Extracted SEPA / bank fields shown when non-null
 const extractedFields = computed(() => {
   if (!tx.value) return []
@@ -307,6 +368,41 @@ const extractedFields = computed(() => {
           />
         </li>
       </ul>
+    </section>
+
+    <!-- Related recurring transactions -->
+    <section
+      v-if="tx && (recurringLoading || (recurringItems && recurringItems.length > 1) || recurringError)"
+      class="card"
+    >
+      <h2>
+        Wiederkehrende Buchungen
+        <span v-if="recurringCounterparty" class="recurring-subtitle">
+          · {{ recurringCounterparty }}
+        </span>
+      </h2>
+      <Message
+        v-if="recurringError"
+        severity="error"
+        :closable="true"
+        @close="recurringError = null"
+      >
+        {{ recurringError }}
+      </Message>
+      <div v-if="recurringLoading && !recurringItems" class="hint">Lädt …</div>
+      <ul v-else-if="otherRecurringItems.length > 0" class="recurring-list">
+        <li
+          v-for="it in otherRecurringItems"
+          :key="it.id"
+          class="recurring-row"
+          @click="openTransaction(it.id)"
+        >
+          <span class="recurring-date">{{ formatRecurringDate(it.booking_date) }}</span>
+          <span class="recurring-amount">{{ formatRecurringAmount(it.amount) }}</span>
+          <span class="recurring-purpose">{{ it.purpose ?? '' }}</span>
+        </li>
+      </ul>
+      <p v-else class="hint">Keine weiteren Buchungen.</p>
     </section>
 
     <!-- Extracted SEPA fields -->
@@ -496,6 +592,57 @@ const extractedFields = computed(() => {
   gap: 0.75rem;
   justify-content: flex-end;
   padding: 0.5rem 0;
+}
+.recurring-subtitle {
+  color: var(--p-text-muted-color);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.recurring-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.recurring-row {
+  display: grid;
+  grid-template-columns: 6.5rem 6.5rem 1fr;
+  gap: 0.5rem;
+  padding: 0.4rem 0.25rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  align-items: baseline;
+  font-size: 0.9rem;
+}
+.recurring-row:hover {
+  background: var(--p-content-hover-background);
+}
+.recurring-date {
+  color: var(--p-text-muted-color);
+  font-variant-numeric: tabular-nums;
+}
+.recurring-amount {
+  font-family: monospace;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.recurring-purpose {
+  color: var(--p-text-muted-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 540px) {
+  .recurring-row {
+    grid-template-columns: 5.5rem 6rem;
+    grid-template-rows: auto auto;
+  }
+  .recurring-purpose {
+    grid-column: 1 / -1;
+    white-space: normal;
+  }
 }
 .copy-toast {
   position: fixed;

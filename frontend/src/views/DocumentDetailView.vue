@@ -572,7 +572,16 @@ onBeforeUnmount(() => {
   gap: 1rem;
   width: 100%;
   padding-inline: 0.5em;
-  height: calc(100vh - var(--menubar-height, 3.5rem));
+}
+/* On wide viewports the form sits next to the PDF, so we constrain the
+   view to the viewport and let each pane scroll independently. On narrow
+   viewports the panes stack vertically — a fixed-height container would
+   leave the form fighting the PDF for a few hundred pixels at the bottom,
+   so we fall back to natural page flow there. */
+@media (min-width: 1000px) {
+  .document-detail-view {
+    height: calc(100vh - var(--menubar-height, 3.5rem));
+  }
 }
 @media (min-width: 800px) { .document-detail-view { padding-inline: 1em; } }
 
@@ -601,17 +610,31 @@ onBeforeUnmount(() => {
   background: var(--p-surface-card);
   border: 1px solid var(--p-content-border-color);
   border-radius: 8px;
-  min-height: 500px;
   overflow: hidden;
   display: flex;
+  /* Mobile: keep the preview in view but cap it so the form below stays
+     reachable. Desktop overrides this below. */
+  height: 60dvh;
+  min-height: 320px;
+}
+
+@media (min-width: 1000px) {
+  .pdf-panel {
+    height: auto;
+    min-height: 500px;
+  }
 }
 
 .meta-panel {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  overflow-y: auto;
   padding-right: 0.25rem;
+}
+
+@media (min-width: 1000px) {
+  /* Inner-scroll only when the page is constrained to the viewport. */
+  .meta-panel { overflow-y: auto; }
 }
 
 .meta-top {
