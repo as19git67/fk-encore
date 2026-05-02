@@ -23,10 +23,6 @@ import { useTagsStore } from '../../stores/finance/tags'
 import { useTxSelectionStore } from '../../stores/finance/selection'
 import { useTxFiltersStore } from '../../stores/finance/txFilters'
 import DateRangePresets from '../../components/DateRangePresets.vue'
-import {
-  markTransactionSeen,
-  markAllTransactionsSeen,
-} from '../../api/finance'
 import type {
   ListTransactionsQuery,
   OverviewAccount,
@@ -166,8 +162,6 @@ const formTo = computed({ get: () => filtersStore.formTo, set: (v) => { filtersS
 
 const hasActiveFilters = computed(() => filtersStore.hasActiveFilters)
 
-const hasUnseen = computed(() => txStore.items.some((tx) => !tx.seen))
-
 function isoDate(d: Date): string {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
@@ -299,29 +293,10 @@ function openTransaction(tx: Transaction) {
     selectionStore.toggle(tx)
     return
   }
-  if (!tx.seen) {
-    tx.seen = true
-    void markTransactionSeen(tx.id)
-  }
   void router.push({
     name: 'finance-transaction-detail',
     params: { id: tx.id },
   })
-}
-
-async function markAllSeen() {
-  const m = mode.value
-  if (!m) return
-  if (m.kind === 'account') {
-    await markAllTransactionsSeen({ accountId: m.accountId })
-  } else {
-    const sec = resolvedSection.value
-    const ids = sec ? sec.accounts.map((a) => a.id) : []
-    if (ids.length === 0) return
-    await markAllTransactionsSeen({ accountIds: ids })
-  }
-  // Update local state
-  for (const tx of txStore.items) tx.seen = true
 }
 
 // ── Select mode + multi-selection state ───────────────────────────────
@@ -471,23 +446,6 @@ function goBack() {
             'tx-icon-applied': hasActiveFilters && !filterPanelOpen,
           }"
           @click="filterPanelOpen = !filterPanelOpen"
-        />
-        <Button
-          :icon="hasUnseen ? 'pi pi-check' : 'pi pi-list-check'"
-          severity="secondary"
-          rounded
-          :disabled="!hasUnseen"
-          :aria-label="
-            hasUnseen
-              ? 'Alle als gelesen markieren'
-              : 'Alle Buchungen sind gelesen'
-          "
-          :title="
-            hasUnseen
-              ? 'Alle als gelesen markieren'
-              : 'Alle Buchungen sind gelesen'
-          "
-          @click="markAllSeen"
         />
         <Button
           icon="pi pi-list"
@@ -657,15 +615,13 @@ function goBack() {
             }"
             @click="openTransaction(tx)"
           >
-            <div class="tx-card-lead" @click.stop>
+            <div v-if="selectMode" class="tx-card-lead" @click.stop>
               <Checkbox
-                v-if="selectMode"
                 :model-value="selectionStore.has(tx.id)"
                 :binary="true"
                 aria-label="Buchung auswählen"
                 @update:model-value="selectionStore.toggle(tx)"
               />
-              <span v-else class="tx-unread-dot" :class="{ 'tx-unread-dot--visible': !tx.seen }" />
             </div>
             <div class="tx-card-body">
               <div class="tx-counterparty">
@@ -781,23 +737,11 @@ function goBack() {
   gap: 0.4rem;
 }
 
-/* ── Per-card lead slot (dot or checkbox) ────────────────────────── */
+/* ── Per-card lead slot (selection checkbox) ─────────────────────── */
 .tx-card-lead {
   display: flex;
   align-items: center;
   flex-shrink: 0;
-  width: 1rem;
-}
-.tx-unread-dot {
-  display: inline-block;
-  width: 0.55rem;
-  height: 0.55rem;
-  border-radius: 50%;
-  background: transparent;
-  flex-shrink: 0;
-}
-.tx-unread-dot--visible {
-  background: var(--p-primary-500, #22c55e);
 }
 .tx-card-select-mode {
   gap: 0.6rem;
