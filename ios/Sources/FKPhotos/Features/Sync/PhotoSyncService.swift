@@ -105,8 +105,18 @@ actor PhotoSyncService {
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
         options.includeHiddenAssets = false
 
+        var predicates: [NSPredicate] = []
         if PhotoSyncPreferences.onlyNew, let lastSync = PhotoSyncPreferences.lastSyncDate {
-            options.predicate = NSPredicate(format: "creationDate > %@", lastSync as NSDate)
+            predicates.append(NSPredicate(format: "creationDate > %@", lastSync as NSDate))
+        }
+        if PhotoSyncPreferences.excludeScreenshots {
+            predicates.append(NSPredicate(format: "NOT ((mediaSubtype & %d) != 0)",
+                                          PHAssetMediaSubtype.photoScreenshot.rawValue))
+        }
+        if !predicates.isEmpty {
+            options.predicate = predicates.count == 1
+                ? predicates[0]
+                : NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
         }
 
         var pairs: [(PHAsset, String?)] = []  // (asset, source iOS album ID)

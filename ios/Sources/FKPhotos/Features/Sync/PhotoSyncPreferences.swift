@@ -25,6 +25,7 @@ struct PhotoSyncPreferences {
     private static let allPhotosAlbumIdKey = "sync.allPhotosAlbumId"
     private static let albumMappingsKey    = "sync.albumMappings"
     private static let serverPhotoMapKey   = "sync.serverPhotoMap"
+    private static let excludeScreenshotsKey = "sync.excludeScreenshots"
 
     // MARK: - Settings
 
@@ -50,6 +51,12 @@ struct PhotoSyncPreferences {
     static var onlyNew: Bool {
         get { (UserDefaults.standard.object(forKey: onlyNewKey) as? Bool) ?? true }
         set { UserDefaults.standard.set(newValue, forKey: onlyNewKey) }
+    }
+
+    /// Exclude screenshots from uploads. Default: true.
+    static var excludeScreenshots: Bool {
+        get { (UserDefaults.standard.object(forKey: excludeScreenshotsKey) as? Bool) ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: excludeScreenshotsKey) }
     }
 
     /// Restrict uploads to WiFi connections. Default: true.
