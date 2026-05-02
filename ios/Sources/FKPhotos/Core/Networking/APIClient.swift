@@ -22,12 +22,18 @@ actor APIClient {
     private var pendingRefreshContinuations: [CheckedContinuation<Bool, Never>] = []
 
     init() {
-        if let stored = UserDefaults.standard.string(forKey: APIClient.serverURLKey),
-           let url = URL(string: stored) {
+        // Prefer the App Group suite (readable by the Share Extension) with a
+        // migration fallback to the old standard UserDefaults location.
+        let stored = SharedStorage.defaults.string(forKey: SharedStorage.serverURLKey)
+            ?? UserDefaults.standard.string(forKey: APIClient.serverURLKey)
+        if let stored, let url = URL(string: stored) {
             self.baseURL = url
         } else {
             self.baseURL = URL(string: "http://localhost:4000")!
         }
+        // Always mirror the resolved URL to SharedStorage so the Share Extension
+        // can read it even if setBaseURL() was never explicitly called.
+        SharedStorage.defaults.set(self.baseURL.absoluteString, forKey: SharedStorage.serverURLKey)
     }
 
     func setAuthManager(_ manager: AuthManager) {
@@ -37,6 +43,7 @@ actor APIClient {
     func setBaseURL(_ url: URL) {
         self.baseURL = url
         UserDefaults.standard.set(url.absoluteString, forKey: APIClient.serverURLKey)
+        SharedStorage.defaults.set(url.absoluteString, forKey: SharedStorage.serverURLKey)
     }
 
     // MARK: - Generic Requests

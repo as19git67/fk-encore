@@ -51,7 +51,13 @@ struct AdminView: View {
                 NavigationLink {
                     SyncSettingsView()
                 } label: {
-                    Label("Automatisch hochladen", systemImage: "arrow.triangle.2.circlepath.icloud")
+                    Label("Automatisch hochladen", systemImage: "arrow.up.to.line.circle")
+                }
+
+                NavigationLink {
+                    DownloadSettingsView()
+                } label: {
+                    Label("Automatisch herunterladen", systemImage: "arrow.down.to.line.circle")
                 }
 
                 NavigationLink {

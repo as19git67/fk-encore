@@ -2,10 +2,11 @@ import SwiftUI
 import Photos
 
 struct SyncSettingsView: View {
-    @AppStorage("sync.enabled")   private var syncEnabled = false
-    @AppStorage("sync.wifiOnly")  private var wifiOnly    = true
-    @AppStorage("sync.onlyNew")   private var onlyNew     = true
-    @AppStorage("sync.albumMode") private var albumMode   = "all"
+    @AppStorage("sync.enabled")            private var syncEnabled        = false
+    @AppStorage("sync.wifiOnly")           private var wifiOnly           = true
+    @AppStorage("sync.onlyNew")            private var onlyNew            = true
+    @AppStorage("sync.albumMode")          private var albumMode          = "all"
+    @AppStorage("sync.excludeScreenshots") private var excludeScreenshots = true
 
     @State private var selectedAlbumIds: Set<String> = PhotoSyncPreferences.selectedAlbumIds
     @State private var albumServerMappings: [String: Int] = PhotoSyncPreferences.albumMappings
@@ -111,6 +112,22 @@ struct SyncSettingsView: View {
                             }
                         }
                     }
+                }
+
+                // ── Media types ────────────────────────────────────────
+                Section {
+                    Toggle("Screenshots ausschliessen", isOn: $excludeScreenshots)
+                    HStack {
+                        Text("Videos")
+                        Spacer()
+                        Text("Noch nicht unterstützt")
+                            .font(.footnote)
+                            .foregroundStyle(.tertiary)
+                    }
+                } header: {
+                    Text("Medientypen")
+                } footer: {
+                    Text("Screenshots werden standardmässig nicht hochgeladen. Video-Upload wird in einer zukünftigen Version unterstützt.")
                 }
 
                 // ── Network ────────────────────────────────────────────

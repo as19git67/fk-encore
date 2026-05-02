@@ -217,6 +217,51 @@ struct Landmark: Codable, Identifiable, Sendable {
     let created_at: String?
 }
 
+// MARK: - Album With Photos (download sync)
+
+struct PhotoCurationStats: Codable, Sendable {
+    let fav_count: Int
+}
+
+struct AlbumPhotoWithMeta: Codable, Identifiable, Sendable {
+    let id: Int
+    let user_id: Int
+    let filename: String
+    let original_name: String
+    let mime_type: String
+    let size: Int
+    let hash: String?
+    let taken_at: String?
+    let created_at: String
+    let latitude: Double?
+    let longitude: Double?
+    let location_name: String?
+    let location_city: String?
+    let location_country: String?
+    let ai_quality_score: Double?
+    let auto_crop: AutoCrop?
+    let curation_status: CurationStatus
+    let description: String?
+    let keywords: [String]?
+    let added_by_user_id: Int?
+    let added_at: String
+    let curation_stats: PhotoCurationStats?
+}
+
+struct AlbumWithPhotos: Codable, Sendable {
+    let id: Int
+    let user_id: Int
+    let name: String
+    let description: String?
+    let display_mode: String
+    let photo_count: Int
+    let is_shared: Bool
+    let created_at: String
+    let updated_at: String
+    let photos: [AlbumPhotoWithMeta]
+    let role: String
+}
+
 // MARK: - Album Sharing
 
 struct AlbumShareWithUser: Codable, Identifiable, Sendable {
