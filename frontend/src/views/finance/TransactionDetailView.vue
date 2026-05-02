@@ -216,6 +216,19 @@ const otherRecurringItems = computed<MandateHistoryItem[]>(() => {
   return recurringItems.value.filter((it) => it.id !== tx.value!.id)
 })
 
+const RECURRING_PREVIEW_COUNT = 3
+const recurringExpanded = ref(false)
+
+const visibleRecurringItems = computed(() =>
+  recurringExpanded.value
+    ? otherRecurringItems.value
+    : otherRecurringItems.value.slice(0, RECURRING_PREVIEW_COUNT),
+)
+
+const hasMoreRecurring = computed(
+  () => otherRecurringItems.value.length > RECURRING_PREVIEW_COUNT,
+)
+
 watch(
   () => tx.value?.id ?? null,
   (id) => {
@@ -415,7 +428,7 @@ const extractedFields = computed(() => {
       <div v-if="recurringLoading && !recurringItems" class="hint">Lädt …</div>
       <ul v-else-if="otherRecurringItems.length > 0" class="recurring-list">
         <li
-          v-for="it in otherRecurringItems"
+          v-for="it in visibleRecurringItems"
           :key="it.id"
           class="recurring-row"
           @click="openTransaction(it.id)"
@@ -425,7 +438,19 @@ const extractedFields = computed(() => {
           <span class="recurring-purpose">{{ it.purpose ?? '' }}</span>
         </li>
       </ul>
-      <p v-else class="hint">Keine weiteren Buchungen.</p>
+      <button
+        v-if="hasMoreRecurring"
+        class="recurring-toggle"
+        @click="recurringExpanded = !recurringExpanded"
+      >
+        <i :class="recurringExpanded ? 'pi pi-chevron-up' : 'pi pi-chevron-down'" />
+        {{
+          recurringExpanded
+            ? 'Weniger anzeigen'
+            : `${otherRecurringItems.length - RECURRING_PREVIEW_COUNT} weitere anzeigen`
+        }}
+      </button>
+      <p v-else-if="otherRecurringItems.length === 0" class="hint">Keine weiteren Buchungen.</p>
     </section>
 
     <!-- Extracted SEPA fields -->
@@ -666,6 +691,22 @@ const extractedFields = computed(() => {
     grid-column: 1 / -1;
     white-space: normal;
   }
+}
+.recurring-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: none;
+  border: none;
+  padding: 0.3rem 0;
+  cursor: pointer;
+  color: var(--p-primary-color, var(--p-text-color));
+  font-size: 0.875rem;
+  font-family: inherit;
+  margin-top: 0.25rem;
+}
+.recurring-toggle:hover {
+  text-decoration: underline;
 }
 .copy-toast {
   position: fixed;
