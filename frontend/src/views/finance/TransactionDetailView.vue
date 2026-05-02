@@ -59,17 +59,30 @@ function syncForm() {
   formBookingDate.value = tx.value.booking_date
 }
 
-onMounted(async () => {
-  if (accountsStore.items.length === 0) await accountsStore.refresh()
-  if (tagsStore.items.length === 0) await tagsStore.refresh('user')
+async function loadTransaction(id: number) {
   try {
-    const id = Number(route.params.id)
+    error.value = null
     tx.value = await api.getTransaction(id)
     syncForm()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
+    tx.value = null
   }
+}
+
+onMounted(async () => {
+  if (accountsStore.items.length === 0) await accountsStore.refresh()
+  if (tagsStore.items.length === 0) await tagsStore.refresh('user')
+  await loadTransaction(Number(route.params.id))
 })
+
+watch(
+  () => route.params.id,
+  (id) => {
+    if (id == null) return
+    void loadTransaction(Number(id))
+  },
+)
 
 function userTags() {
   return tx.value?.tags.filter((t) => t.source === 'user') ?? []
@@ -191,14 +204,17 @@ async function copyToClipboard(value: string, label: string) {
 // Shows the other bookings of the recurring mandate this transaction
 // belongs to. Empty list (and no card) when the transaction is not
 // part of any tracked recurring series.
+const RECURRING_PREVIEW_COUNT = 3
 const recurringItems = ref<MandateHistoryItem[] | null>(null)
 const recurringLoading = ref(false)
 const recurringError = ref<string | null>(null)
 const recurringCounterparty = ref<string | null>(null)
+const recurringExpanded = ref(false)
 
 async function loadRecurring(transactionId: number) {
   recurringLoading.value = true
   recurringError.value = null
+  recurringExpanded.value = false
   try {
     const res = await api.getRelatedRecurringTransactions(transactionId)
     recurringCounterparty.value = res.counterparty
@@ -215,9 +231,6 @@ const otherRecurringItems = computed<MandateHistoryItem[]>(() => {
   if (!recurringItems.value || !tx.value) return []
   return recurringItems.value.filter((it) => it.id !== tx.value!.id)
 })
-
-const RECURRING_PREVIEW_COUNT = 3
-const recurringExpanded = ref(false)
 
 const visibleRecurringItems = computed(() =>
   recurringExpanded.value
