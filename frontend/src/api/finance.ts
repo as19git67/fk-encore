@@ -571,6 +571,16 @@ export async function promoteAiTag(
   })
 }
 
+export async function rejectAiTag(
+  id: number,
+  tag: string,
+): Promise<{ rejected: boolean; tags: TagOnTransaction[] }> {
+  return apiFetch(`/finance/transactions/${id}/tags/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ id, tag }),
+  })
+}
+
 export interface BatchTagInput {
   transaction_ids: number[]
   add?: string[]

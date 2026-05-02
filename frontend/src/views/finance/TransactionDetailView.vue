@@ -23,6 +23,7 @@ const tx = ref<Transaction | null>(null)
 const newTag = ref<string[]>([])
 const error = ref<string | null>(null)
 const promoting = ref<string | null>(null)
+const rejecting = ref<string | null>(null)
 const saving = ref(false)
 const deleting = ref(false)
 const copyToast = ref<string | null>(null)
@@ -120,6 +121,19 @@ async function promote(name: string) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
     promoting.value = null
+  }
+}
+
+async function reject(name: string) {
+  if (!tx.value) return
+  rejecting.value = name
+  try {
+    const resp = await api.rejectAiTag(tx.value.id, name)
+    tx.value = { ...tx.value, tags: resp.tags }
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    rejecting.value = null
   }
 }
 
@@ -364,7 +378,19 @@ const extractedFields = computed(() => {
             label="Übernehmen"
             size="small"
             :loading="promoting === t.name"
+            :disabled="rejecting === t.name"
             @click="promote(t.name)"
+          />
+          <Button
+            icon="pi pi-times"
+            severity="secondary"
+            text
+            rounded
+            size="small"
+            v-tooltip.bottom="'Vorschlag ablehnen — wird für ähnliche Buchungen nicht erneut vorgeschlagen'"
+            :loading="rejecting === t.name"
+            :disabled="promoting === t.name"
+            @click="reject(t.name)"
           />
         </li>
       </ul>
@@ -575,7 +601,7 @@ const extractedFields = computed(() => {
 }
 .ai-item {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr auto auto auto;
   gap: 0.5rem;
   align-items: center;
 }

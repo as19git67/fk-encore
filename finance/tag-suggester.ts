@@ -39,6 +39,7 @@ import {
   financeAccount,
   financeAccountAccess,
   financeTag,
+  financeTagBlocklist,
   financeTagTransaction,
   financeTransaction,
 } from "../db/schema";
@@ -144,8 +145,18 @@ export async function suggestTagsForTransaction(
       .slice(0, MAX_SUGGESTIONS_PER_TX);
     if (accepted.length === 0) return true;
 
+    // 6b — drop suggestions the user has previously rejected for this
+    // (account, counterparty) pair so the LLM doesn't keep re-emitting
+    // them. Done after the LLM call: the model is allowed to suggest
+    // freely; we just refuse to persist what's been blocked.
+    const blocked = await loadBlocklistFor(tx);
+    const filtered = blocked.size === 0
+      ? accepted
+      : accepted.filter((s) => !blocked.has(s.tag));
+    if (filtered.length === 0) return true;
+
     // 7 — persist as source='ai'
-    await persistAiTags(transactionId, accepted);
+    await persistAiTags(transactionId, filtered);
     return true;
   } catch (err) {
     if (err instanceof LlmServiceUnavailableError) throw err;
@@ -166,6 +177,34 @@ function buildEmbedText(
     .map((s) => s.trim())
     .filter(Boolean)
     .join(" | ");
+}
+
+/**
+ * Canonical key for the (account, counterparty) blocklist scope. Lowercased
+ * and trimmed so minor textual differences ("Edeka" vs " edeka ") don't
+ * defeat the block. Cash transactions (no counterparty) collapse to "".
+ *
+ * Exported so the reject endpoint uses the exact same key the suggester
+ * looks up — drift here would silently break the feature.
+ */
+export function normalizeCounterparty(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
+async function loadBlocklistFor(
+  tx: typeof financeTransaction.$inferSelect,
+): Promise<Set<string>> {
+  const ctp = normalizeCounterparty(tx.counterparty);
+  const rows = await db
+    .select({ tag_name: financeTagBlocklist.tag_name })
+    .from(financeTagBlocklist)
+    .where(
+      and(
+        eq(financeTagBlocklist.account_id, tx.account_id),
+        eq(financeTagBlocklist.counterparty_norm, ctp),
+      ),
+    );
+  return new Set(rows.map((r) => r.tag_name));
 }
 
 /** Upsert via ON CONFLICT so re-runs on the same transaction stay idempotent. */
