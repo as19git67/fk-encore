@@ -59,17 +59,30 @@ function syncForm() {
   formBookingDate.value = tx.value.booking_date
 }
 
-onMounted(async () => {
-  if (accountsStore.items.length === 0) await accountsStore.refresh()
-  if (tagsStore.items.length === 0) await tagsStore.refresh('user')
+async function loadTransaction(id: number) {
   try {
-    const id = Number(route.params.id)
+    error.value = null
     tx.value = await api.getTransaction(id)
     syncForm()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
+    tx.value = null
   }
+}
+
+onMounted(async () => {
+  if (accountsStore.items.length === 0) await accountsStore.refresh()
+  if (tagsStore.items.length === 0) await tagsStore.refresh('user')
+  await loadTransaction(Number(route.params.id))
 })
+
+watch(
+  () => route.params.id,
+  (id) => {
+    if (id == null) return
+    void loadTransaction(Number(id))
+  },
+)
 
 function userTags() {
   return tx.value?.tags.filter((t) => t.source === 'user') ?? []
@@ -191,14 +204,17 @@ async function copyToClipboard(value: string, label: string) {
 // Shows the other bookings of the recurring mandate this transaction
 // belongs to. Empty list (and no card) when the transaction is not
 // part of any tracked recurring series.
+const RECURRING_PREVIEW_COUNT = 3
 const recurringItems = ref<MandateHistoryItem[] | null>(null)
 const recurringLoading = ref(false)
 const recurringError = ref<string | null>(null)
 const recurringCounterparty = ref<string | null>(null)
+const recurringExpanded = ref(false)
 
 async function loadRecurring(transactionId: number) {
   recurringLoading.value = true
   recurringError.value = null
+  recurringExpanded.value = false
   try {
     const res = await api.getRelatedRecurringTransactions(transactionId)
     recurringCounterparty.value = res.counterparty
@@ -211,10 +227,16 @@ async function loadRecurring(transactionId: number) {
   }
 }
 
-const otherRecurringItems = computed<MandateHistoryItem[]>(() => {
-  if (!recurringItems.value || !tx.value) return []
-  return recurringItems.value.filter((it) => it.id !== tx.value!.id)
+const visibleRecurringItems = computed(() => {
+  const all = recurringItems.value ?? []
+  return recurringExpanded.value
+    ? all
+    : all.slice(0, RECURRING_PREVIEW_COUNT)
 })
+
+const hasMoreRecurring = computed(
+  () => (recurringItems.value?.length ?? 0) > RECURRING_PREVIEW_COUNT,
+)
 
 watch(
   () => tx.value?.id ?? null,
@@ -393,9 +415,25 @@ const extractedFields = computed(() => {
       </ul>
     </section>
 
+    <!-- Extracted SEPA fields -->
+    <section v-if="tx && extractedFields.length > 0" class="card">
+      <h2>Weitere Informationen</h2>
+      <dl class="details">
+        <template v-for="f in extractedFields" :key="f.key">
+          <dt>{{ f.label }}</dt>
+          <dd>
+            <button class="copy-field" @click="copyToClipboard(f.value!, f.label)">
+              {{ f.value }}
+              <i class="pi pi-copy copy-icon" />
+            </button>
+          </dd>
+        </template>
+      </dl>
+    </section>
+
     <!-- Related recurring transactions -->
     <section
-      v-if="tx && (recurringLoading || (recurringItems && recurringItems.length > 1) || recurringError)"
+      v-if="tx && (recurringLoading || (recurringItems && recurringItems.length > 0) || recurringError)"
       class="card"
     >
       <h2>
@@ -413,9 +451,9 @@ const extractedFields = computed(() => {
         {{ recurringError }}
       </Message>
       <div v-if="recurringLoading && !recurringItems" class="hint">Lädt …</div>
-      <ul v-else-if="otherRecurringItems.length > 0" class="recurring-list">
+      <ul v-else-if="(recurringItems?.length ?? 0) > 0" class="recurring-list">
         <li
-          v-for="it in otherRecurringItems"
+          v-for="it in visibleRecurringItems"
           :key="it.id"
           class="recurring-row"
           @click="openTransaction(it.id)"
@@ -425,23 +463,18 @@ const extractedFields = computed(() => {
           <span class="recurring-purpose">{{ it.purpose ?? '' }}</span>
         </li>
       </ul>
-      <p v-else class="hint">Keine weiteren Buchungen.</p>
-    </section>
-
-    <!-- Extracted SEPA fields -->
-    <section v-if="tx && extractedFields.length > 0" class="card">
-      <h2>Weitere Informationen</h2>
-      <dl class="details">
-        <template v-for="f in extractedFields" :key="f.key">
-          <dt>{{ f.label }}</dt>
-          <dd>
-            <button class="copy-field" @click="copyToClipboard(f.value!, f.label)">
-              {{ f.value }}
-              <i class="pi pi-copy copy-icon" />
-            </button>
-          </dd>
-        </template>
-      </dl>
+      <button
+        v-if="hasMoreRecurring"
+        class="recurring-toggle"
+        @click="recurringExpanded = !recurringExpanded"
+      >
+        <i :class="recurringExpanded ? 'pi pi-chevron-up' : 'pi pi-chevron-down'" />
+        {{
+          recurringExpanded
+            ? 'Weniger anzeigen'
+            : `${(recurringItems?.length ?? 0) - RECURRING_PREVIEW_COUNT} weitere anzeigen`
+        }}
+      </button>
     </section>
 
     <!-- Actions -->
@@ -666,6 +699,22 @@ const extractedFields = computed(() => {
     grid-column: 1 / -1;
     white-space: normal;
   }
+}
+.recurring-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: none;
+  border: none;
+  padding: 0.3rem 0;
+  cursor: pointer;
+  color: var(--p-primary-color, var(--p-text-color));
+  font-size: 0.875rem;
+  font-family: inherit;
+  margin-top: 0.25rem;
+}
+.recurring-toggle:hover {
+  text-decoration: underline;
 }
 .copy-toast {
   position: fixed;
