@@ -36,7 +36,6 @@ import {
   financeTagBlocklist,
   financeTagTransaction,
   financeTransaction,
-  financeTransactionSeen,
 } from "../db/schema";
 import { enqueueTagSuggestion } from "./tag-queue";
 import { triggerTagWorker } from "./tag-worker";
@@ -160,24 +159,6 @@ interface TransactionView {
   notice: string | null;
   tags: TagOnTransaction[];
   created_at: string | null;
-  seen: boolean;
-}
-
-async function annotateSeenByUser(
-  transactionIds: number[],
-  userId: number,
-): Promise<Set<number>> {
-  if (transactionIds.length === 0) return new Set();
-  const rows = await db
-    .select({ transaction_id: financeTransactionSeen.transaction_id })
-    .from(financeTransactionSeen)
-    .where(
-      and(
-        inArray(financeTransactionSeen.transaction_id, transactionIds),
-        eq(financeTransactionSeen.user_id, userId),
-      ),
-    );
-  return new Set(rows.map((r) => r.transaction_id));
 }
 
 async function annotateTags(
@@ -224,7 +205,6 @@ function toDateString(s: string | null): string | null {
 function toView(
   row: typeof financeTransaction.$inferSelect,
   tags: TagOnTransaction[],
-  seen = false,
 ): TransactionView {
   return {
     id: row.id,
@@ -252,7 +232,6 @@ function toView(
     notice: row.notice,
     tags,
     created_at: row.created_at,
-    seen,
   };
 }
 
@@ -395,9 +374,8 @@ export const listTransactions = api(
 
     const txIds = rows.map((r) => r.id);
     const tagsByTx = await annotateTags(txIds);
-    const seenSet = await annotateSeenByUser(txIds, Number(auth.userID));
     return {
-      items: rows.map((r) => toView(r, tagsByTx.get(r.id) ?? [], seenSet.has(r.id))),
+      items: rows.map((r) => toView(r, tagsByTx.get(r.id) ?? [])),
       total: totalRows.length,
     };
   },
@@ -429,8 +407,7 @@ export const getTransaction = api(
       throw APIError.notFound(`transaction ${id} not found`);
     }
     const tags = (await annotateTags([id])).get(id) ?? [];
-    const seenSet = await annotateSeenByUser([id], Number(auth.userID));
-    return toView(row, tags, seenSet.has(id));
+    return toView(row, tags);
   },
 );
 
@@ -607,8 +584,7 @@ export const updateTransaction = api(
 
     if (Object.keys(updates).length === 0) {
       const tags = (await annotateTags([p.id])).get(p.id) ?? [];
-      const seenSet = await annotateSeenByUser([p.id], Number(auth.userID));
-      return toView(row, tags, seenSet.has(p.id));
+      return toView(row, tags);
     }
 
     const [updated] = await db
@@ -618,8 +594,7 @@ export const updateTransaction = api(
       .returning();
 
     const tags = (await annotateTags([p.id])).get(p.id) ?? [];
-    const seenSet = await annotateSeenByUser([p.id], Number(auth.userID));
-    return toView(updated, tags, seenSet.has(p.id));
+    return toView(updated, tags);
   },
 );
 
@@ -1059,100 +1034,6 @@ async function applyUserTagsTx(
   }
   return added;
 }
-
-// -----------------------------------------------------------------------
-// Mark seen / mark all seen  (#249 / #250)
-// -----------------------------------------------------------------------
-
-export const markTransactionSeen = api(
-  {
-    expose: true,
-    method: "POST",
-    path: "/finance/transactions/:id/seen",
-    auth: true,
-  },
-  async ({ id }: IdParams): Promise<void> => {
-    const auth = getAuthData()!;
-    requirePermission(auth, "finance.view");
-    const row = await loadTransaction(id);
-    const level = await accountAccessLevel(auth, row.account_id);
-    if (level === null) throw APIError.notFound(`transaction ${id} not found`);
-    const userId = Number(auth.userID);
-    await db
-      .insert(financeTransactionSeen)
-      .values({ transaction_id: id, user_id: userId })
-      .onConflictDoNothing();
-  },
-);
-
-interface MarkAllSeenParams {
-  accountId?: number;
-  accountIdsCsv?: string;
-}
-
-interface MarkAllSeenResponse {
-  marked: number;
-}
-
-export const markAllTransactionsSeen = api(
-  {
-    expose: true,
-    method: "POST",
-    path: "/finance/transactions/mark-all-seen",
-    auth: true,
-  },
-  async (p: MarkAllSeenParams): Promise<MarkAllSeenResponse> => {
-    const auth = getAuthData()!;
-    requirePermission(auth, "finance.view");
-    const userId = Number(auth.userID);
-    const visibleIds = await readableAccountIds(auth);
-
-    let targetIds: number[] | null = null;
-    if (p.accountId !== undefined) {
-      if (visibleIds !== null && !visibleIds.includes(p.accountId)) return { marked: 0 };
-      targetIds = [p.accountId];
-    } else if (p.accountIdsCsv) {
-      const ids = p.accountIdsCsv
-        .split(",")
-        .map((s) => Number(s.trim()))
-        .filter((n) => Number.isInteger(n) && n > 0);
-      const allowed = visibleIds === null ? ids : ids.filter((n) => visibleIds.includes(n));
-      targetIds = allowed.length > 0 ? allowed : [];
-    } else {
-      targetIds = visibleIds;
-    }
-
-    if (Array.isArray(targetIds) && targetIds.length === 0) return { marked: 0 };
-
-    const txCond = targetIds !== null
-      ? inArray(financeTransaction.account_id, targetIds)
-      : undefined;
-
-    const txRows = await db
-      .select({ id: financeTransaction.id })
-      .from(financeTransaction)
-      .where(txCond);
-
-    if (txRows.length === 0) return { marked: 0 };
-
-    const alreadySeen = await db
-      .select({ transaction_id: financeTransactionSeen.transaction_id })
-      .from(financeTransactionSeen)
-      .where(eq(financeTransactionSeen.user_id, userId));
-
-    const seenSet = new Set(alreadySeen.map((r) => r.transaction_id));
-    const unseen = txRows.filter((r) => !seenSet.has(r.id));
-
-    if (unseen.length === 0) return { marked: 0 };
-
-    await db
-      .insert(financeTransactionSeen)
-      .values(unseen.map((r) => ({ transaction_id: r.id, user_id: userId })))
-      .onConflictDoNothing();
-
-    return { marked: unseen.length };
-  },
-);
 
 // -----------------------------------------------------------------------
 // Recent cash recipients (#254)

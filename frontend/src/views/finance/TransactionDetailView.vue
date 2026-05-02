@@ -66,9 +66,6 @@ onMounted(async () => {
     const id = Number(route.params.id)
     tx.value = await api.getTransaction(id)
     syncForm()
-    if (!tx.value.seen) {
-      void api.markTransactionSeen(id)
-    }
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   }

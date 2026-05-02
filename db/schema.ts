@@ -1353,23 +1353,6 @@ export const financeAnomaly = pgTable(
   ]
 );
 
-// ---------- Transaction seen state ----------
-export const financeTransactionSeen = pgTable(
-  "finance_transaction_seen",
-  {
-    transaction_id: integer("transaction_id")
-      .notNull()
-      .references(() => financeTransaction.id, { onDelete: "cascade" }),
-    user_id: integer("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    seen_at: timestamp("seen_at", { mode: "string", withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (table) => [primaryKey({ columns: [table.transaction_id, table.user_id] })]
-);
-
 // ---------- AI-tag block list ----------
 // Records (account, counterparty, tag) tuples that the user has rejected
 // from the AI suggestion list. The suggester consults this table before
