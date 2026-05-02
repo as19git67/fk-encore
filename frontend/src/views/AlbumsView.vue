@@ -84,8 +84,8 @@ const ownerOptions: Array<{ label: string; value: AlbumOwnerFilter }> = [
 ]
 const displayFilterOptions: Array<{ label: string; value: AlbumDisplayFilter }> = [
   { label: 'Alle', value: 'all' },
-  { label: 'Raster', value: 'grid' },
-  { label: 'Karte', value: 'map' },
+  { label: 'Ohne Karte', value: 'grid' },
+  { label: 'Mit Karte', value: 'map' },
 ]
 const emptyFilterOptions: Array<{ label: string; value: AlbumEmptyFilter }> = [
   { label: 'Alle', value: 'any' },
@@ -138,7 +138,7 @@ function albumFilterChips(): Array<{ label: string; clear: () => void }> {
   }
   if (f.display !== 'all') {
     chips.push({
-      label: f.display === 'grid' ? 'Darstellung: Raster' : 'Darstellung: Karte',
+      label: f.display === 'grid' ? 'Ohne Karte' : 'Mit Karte',
       clear: () => { appliedAlbumFilter.value = { ...f, display: 'all' } },
     })
   }
@@ -280,20 +280,15 @@ const filteredAlbums = computed(() => {
 const showCreateDialog = ref(false)
 const newAlbumName = ref('')
 const newAlbumDesc = ref('')
-const newAlbumDisplayMode = ref<'grid' | 'map'>('grid')
+const newAlbumMapEnabled = ref(false)
 const creating = ref(false)
 const showRenameDialog = ref(false)
 const showDeleteDialog = ref(false)
 const renameValue = ref('')
 const renameDesc = ref('')
-const renameDisplayMode = ref<'grid' | 'map'>('grid')
+const renameMapEnabled = ref(false)
 const updatingAlbum = ref(false)
 const selectedAlbum = ref<Album | null>(null)
-
-const displayModeOptions = [
-  { label: 'Raster', value: 'grid' },
-  { label: 'Karte', value: 'map' },
-]
 
 const router = useRouter()
 const route = useRoute()
@@ -356,12 +351,16 @@ async function handleCreateAlbum() {
   if (!newAlbumName.value.trim()) return
   creating.value = true
   try {
-    const album = await createAlbum(newAlbumName.value.trim(), newAlbumDesc.value.trim() || undefined, newAlbumDisplayMode.value)
+    const album = await createAlbum(
+      newAlbumName.value.trim(),
+      newAlbumDesc.value.trim() || undefined,
+      newAlbumMapEnabled.value ? 'map' : 'grid',
+    )
     invalidateAlbums()
     showCreateDialog.value = false
     newAlbumName.value = ''
     newAlbumDesc.value = ''
-    newAlbumDisplayMode.value = 'grid'
+    newAlbumMapEnabled.value = false
     await loadData()
     router.push(`/fotos/alben/${album.id}`)
   } catch (err: any) {
@@ -384,7 +383,7 @@ function openRenameDialog(album: Album) {
   selectedAlbum.value = album
   renameValue.value = album.name
   renameDesc.value = album.description || ''
-  renameDisplayMode.value = album.display_mode ?? 'grid'
+  renameMapEnabled.value = (album.display_mode ?? 'grid') === 'map'
   showRenameDialog.value = true
 }
 
@@ -400,7 +399,7 @@ async function handleRenameAlbum() {
 
   updatingAlbum.value = true
   try {
-    await updateAlbum(selectedAlbum.value.id, { name: newName, description: renameDesc.value.trim(), displayMode: renameDisplayMode.value })
+    await updateAlbum(selectedAlbum.value.id, { name: newName, description: renameDesc.value.trim(), displayMode: renameMapEnabled.value ? 'map' : 'grid' })
     invalidateAlbums()
     showRenameDialog.value = false
     selectedAlbum.value = null
@@ -728,9 +727,9 @@ onMounted(loadData)
         <label for="albumDesc">Beschreibung</label>
         <textarea id="albumDesc" v-model="newAlbumDesc" rows="2" class="p-inputtextarea p-inputtext" style="width: 100%"></textarea>
       </div>
-      <div class="dialog-content" style="margin-top: 0.5rem">
-        <label>Darstellung</label>
-        <SelectButton v-model="newAlbumDisplayMode" :options="displayModeOptions" optionLabel="label" optionValue="value" :allowEmpty="false" />
+      <div class="dialog-content map-toggle-row" style="margin-top: 0.5rem">
+        <Checkbox v-model="newAlbumMapEnabled" inputId="newAlbumMapEnabled" :binary="true" />
+        <label for="newAlbumMapEnabled">Karte aktivieren</label>
       </div>
       <template #footer>
         <Button label="Abbrechen" text @click="showCreateDialog = false"/>
@@ -747,9 +746,9 @@ onMounted(loadData)
         <label for="renameAlbumDesc">Beschreibung</label>
         <textarea id="renameAlbumDesc" v-model="renameDesc" rows="2" class="p-inputtextarea p-inputtext" style="width: 100%"></textarea>
       </div>
-      <div class="dialog-content" style="margin-top: 0.5rem">
-        <label>Darstellung</label>
-        <SelectButton v-model="renameDisplayMode" :options="displayModeOptions" optionLabel="label" optionValue="value" :allowEmpty="false" />
+      <div class="dialog-content map-toggle-row" style="margin-top: 0.5rem">
+        <Checkbox v-model="renameMapEnabled" inputId="renameAlbumMapEnabled" :binary="true" />
+        <label for="renameAlbumMapEnabled">Karte aktivieren</label>
       </div>
       <template #footer>
         <Button label="Abbrechen" text @click="showRenameDialog = false" />
@@ -918,6 +917,10 @@ onMounted(loadData)
   flex-direction: row;
   align-items: center;
   gap: 0.5em;
+}
+
+.dialog-content.map-toggle-row label {
+  cursor: pointer;
 }
 
 .albums-view {
