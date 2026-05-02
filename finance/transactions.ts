@@ -33,12 +33,14 @@ import {
   financeAccountType,
   financeCurrency,
   financeTag,
+  financeTagBlocklist,
   financeTagTransaction,
   financeTransaction,
   financeTransactionSeen,
 } from "../db/schema";
 import { enqueueTagSuggestion } from "./tag-queue";
 import { triggerTagWorker } from "./tag-worker";
+import { normalizeCounterparty } from "./tag-suggester";
 
 console.log("[boot] finance/transactions.ts: all imports resolved");
 
@@ -715,6 +717,88 @@ export const promoteAiTag = api(
 
     const tags = (await annotateTags([p.id])).get(p.id) ?? [];
     return { promoted: true, tags };
+  },
+);
+
+// -----------------------------------------------------------------------
+// Reject AI tag
+// -----------------------------------------------------------------------
+// Removes the AI-tag join row for this transaction AND records the
+// (account, counterparty, tag) tuple in the suggester's block list, so
+// the LLM does not keep re-emitting the same wrong label for similar
+// transactions of the same counterparty.
+//
+// Requires write access on the account: rejecting affects future
+// suggestions for everyone with access to it, so a read-only viewer
+// must not be able to mutate the block list.
+
+interface RejectParams {
+  id: number;
+  tag: string;
+}
+
+interface RejectResponse {
+  rejected: boolean;
+  tags: TagOnTransaction[];
+}
+
+export const rejectAiTag = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/finance/transactions/:id/tags/reject",
+    auth: true,
+  },
+  async (p: RejectParams): Promise<RejectResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+    const tx = await loadTransaction(p.id);
+    const level = await accountAccessLevel(auth, tx.account_id);
+    if (level === null) {
+      throw APIError.notFound(`transaction ${p.id} not found`);
+    }
+    if (level !== "write") {
+      throw APIError.permissionDenied(
+        `write access required on account ${tx.account_id}`,
+      );
+    }
+
+    const tagName = p.tag.trim();
+    if (!tagName) throw APIError.invalidArgument("tag required");
+
+    // 1. Drop the AI-tag join row for this transaction.
+    const [aiTag] = await db
+      .select({ id: financeTag.id })
+      .from(financeTag)
+      .where(and(eq(financeTag.name, tagName), eq(financeTag.source, "ai")))
+      .limit(1);
+    if (aiTag) {
+      await db
+        .delete(financeTagTransaction)
+        .where(
+          and(
+            eq(financeTagTransaction.tag_id, aiTag.id),
+            eq(financeTagTransaction.transaction_id, p.id),
+          ),
+        );
+    }
+
+    // 2. Add to the suggester's block list. Same counterparty
+    //    normalisation the suggester uses on lookup — drift would
+    //    silently break the feature.
+    const counterpartyNorm = normalizeCounterparty(tx.counterparty);
+    await db
+      .insert(financeTagBlocklist)
+      .values({
+        account_id: tx.account_id,
+        counterparty_norm: counterpartyNorm,
+        tag_name: tagName,
+        created_by_user_id: Number(auth.userID),
+      })
+      .onConflictDoNothing();
+
+    const tags = (await annotateTags([p.id])).get(p.id) ?? [];
+    return { rejected: true, tags };
   },
 );
 
