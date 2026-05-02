@@ -1370,6 +1370,35 @@ export const financeTransactionSeen = pgTable(
   (table) => [primaryKey({ columns: [table.transaction_id, table.user_id] })]
 );
 
+// ---------- AI-tag block list ----------
+// Records (account, counterparty, tag) tuples that the user has rejected
+// from the AI suggestion list. The suggester consults this table before
+// persisting new suggestions, so a once-rejected tag does not keep
+// re-appearing on similar transactions of the same counterparty.
+export const financeTagBlocklist = pgTable(
+  "finance_tag_blocklist",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    account_id: integer("account_id")
+      .notNull()
+      .references(() => financeAccount.id, { onDelete: "cascade" }),
+    /** Lowercased + trimmed counterparty; empty string for cash transactions. */
+    counterparty_norm: text("counterparty_norm").notNull(),
+    tag_name: text("tag_name").notNull(),
+    created_by_user_id: integer("created_by_user_id")
+      .references(() => users.id, { onDelete: "set null" }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("finance_tag_blocklist_unique")
+      .on(table.account_id, table.counterparty_norm, table.tag_name),
+    index("idx_finance_tag_blocklist_lookup")
+      .on(table.account_id, table.counterparty_norm),
+  ]
+);
+
 // ========== Scheduled job state (lib/local-cron.ts) ==========
 
 export const scheduledJobState = pgTable("scheduled_job_state", {
