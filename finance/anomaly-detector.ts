@@ -964,6 +964,7 @@ export const getRelatedRecurringTransactions = api(
       SELECT ft.id, ft.booking_date, ft.amount, ft.purpose
       FROM finance_transaction ft
       WHERE ft.account_id = ${mandate.account_id}
+        AND ft.id <> ${id}
         AND (
           (${mandate.mandate_ref}::text IS NOT NULL AND ft.mandate_ref = ${mandate.mandate_ref})
           OR (${mandate.mandate_ref}::text IS NULL

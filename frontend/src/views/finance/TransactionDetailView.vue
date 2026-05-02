@@ -227,19 +227,15 @@ async function loadRecurring(transactionId: number) {
   }
 }
 
-const otherRecurringItems = computed<MandateHistoryItem[]>(() => {
-  if (!recurringItems.value || !tx.value) return []
-  return recurringItems.value.filter((it) => it.id !== tx.value!.id)
+const visibleRecurringItems = computed(() => {
+  const all = recurringItems.value ?? []
+  return recurringExpanded.value
+    ? all
+    : all.slice(0, RECURRING_PREVIEW_COUNT)
 })
 
-const visibleRecurringItems = computed(() =>
-  recurringExpanded.value
-    ? otherRecurringItems.value
-    : otherRecurringItems.value.slice(0, RECURRING_PREVIEW_COUNT),
-)
-
 const hasMoreRecurring = computed(
-  () => otherRecurringItems.value.length > RECURRING_PREVIEW_COUNT,
+  () => (recurringItems.value?.length ?? 0) > RECURRING_PREVIEW_COUNT,
 )
 
 watch(
@@ -419,9 +415,25 @@ const extractedFields = computed(() => {
       </ul>
     </section>
 
+    <!-- Extracted SEPA fields -->
+    <section v-if="tx && extractedFields.length > 0" class="card">
+      <h2>Weitere Informationen</h2>
+      <dl class="details">
+        <template v-for="f in extractedFields" :key="f.key">
+          <dt>{{ f.label }}</dt>
+          <dd>
+            <button class="copy-field" @click="copyToClipboard(f.value!, f.label)">
+              {{ f.value }}
+              <i class="pi pi-copy copy-icon" />
+            </button>
+          </dd>
+        </template>
+      </dl>
+    </section>
+
     <!-- Related recurring transactions -->
     <section
-      v-if="tx && (recurringLoading || (recurringItems && recurringItems.length > 1) || recurringError)"
+      v-if="tx && (recurringLoading || (recurringItems && recurringItems.length > 0) || recurringError)"
       class="card"
     >
       <h2>
@@ -439,7 +451,7 @@ const extractedFields = computed(() => {
         {{ recurringError }}
       </Message>
       <div v-if="recurringLoading && !recurringItems" class="hint">Lädt …</div>
-      <ul v-else-if="otherRecurringItems.length > 0" class="recurring-list">
+      <ul v-else-if="(recurringItems?.length ?? 0) > 0" class="recurring-list">
         <li
           v-for="it in visibleRecurringItems"
           :key="it.id"
@@ -460,26 +472,9 @@ const extractedFields = computed(() => {
         {{
           recurringExpanded
             ? 'Weniger anzeigen'
-            : `${otherRecurringItems.length - RECURRING_PREVIEW_COUNT} weitere anzeigen`
+            : `${(recurringItems?.length ?? 0) - RECURRING_PREVIEW_COUNT} weitere anzeigen`
         }}
       </button>
-      <p v-else-if="otherRecurringItems.length === 0" class="hint">Keine weiteren Buchungen.</p>
-    </section>
-
-    <!-- Extracted SEPA fields -->
-    <section v-if="tx && extractedFields.length > 0" class="card">
-      <h2>Weitere Informationen</h2>
-      <dl class="details">
-        <template v-for="f in extractedFields" :key="f.key">
-          <dt>{{ f.label }}</dt>
-          <dd>
-            <button class="copy-field" @click="copyToClipboard(f.value!, f.label)">
-              {{ f.value }}
-              <i class="pi pi-copy copy-icon" />
-            </button>
-          </dd>
-        </template>
-      </dl>
     </section>
 
     <!-- Actions -->
