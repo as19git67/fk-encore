@@ -222,7 +222,7 @@ function formatAmountChange(item: AnomalyItem): string | null {
           </div>
 
           <div
-            v-if="item.type === 'amount_change' && item.mandate_id"
+            v-if="(item.type === 'amount_change' || item.type === 'new_mandate') && item.mandate_id"
             class="history-section"
           >
             <button
@@ -236,7 +236,8 @@ function formatAmountChange(item: AnomalyItem): string | null {
                   expandedHistory.has(item.id) ? 'pi-chevron-down' : 'pi-chevron-right',
                 ]"
               />
-              Verlauf {{ expandedHistory.has(item.id) ? 'ausblenden' : 'anzeigen' }}
+              {{ item.type === 'new_mandate' ? 'Buchungen' : 'Verlauf' }}
+              {{ expandedHistory.has(item.id) ? 'ausblenden' : 'anzeigen' }}
             </button>
             <div v-if="expandedHistory.has(item.id)" class="history-body">
               <div

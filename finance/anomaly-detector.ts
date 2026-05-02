@@ -621,11 +621,22 @@ export const listAnomalies = api(
     const auth = getAuthData()!;
     requirePermission(auth, "finance.view");
 
-    const accessible = await db
+    // The anomaly feed is an actionable inbox — entries get acknowledged or
+    // followed up with edits. We therefore only show anomalies on accounts
+    // the caller has WRITE access to. `finance.admin` does NOT bypass this:
+    // an admin without an explicit account-access row sees nothing here, by
+    // design, since they have no business acknowledging alerts they don't
+    // own.
+    const writeable = await db
       .select({ id: financeAccountAccess.account_id })
       .from(financeAccountAccess)
-      .where(eq(financeAccountAccess.user_id, Number(auth.userID)));
-    const accountIds = accessible.map((a) => a.id);
+      .where(
+        and(
+          eq(financeAccountAccess.user_id, Number(auth.userID)),
+          eq(financeAccountAccess.level, "write"),
+        ),
+      );
+    const accountIds = writeable.map((a) => a.id);
     if (accountIds.length === 0) return { anomalies: [], total: 0 };
 
     const rows = await db
@@ -725,11 +736,17 @@ export const acknowledgeAnomaly = api(
     const auth = getAuthData()!;
     requirePermission(auth, "finance.view");
 
-    const accessible = await db
+    // Acknowledging is a mutation: same write-only ACL as listAnomalies.
+    const writeable = await db
       .select({ id: financeAccountAccess.account_id })
       .from(financeAccountAccess)
-      .where(eq(financeAccountAccess.user_id, Number(auth.userID)));
-    const accountIds = accessible.map((a) => a.id);
+      .where(
+        and(
+          eq(financeAccountAccess.user_id, Number(auth.userID)),
+          eq(financeAccountAccess.level, "write"),
+        ),
+      );
+    const accountIds = writeable.map((a) => a.id);
     if (accountIds.length === 0) throw APIError.notFound("anomaly not found");
 
     const result = await db
@@ -777,6 +794,8 @@ export const getMandateHistory = api(
     const auth = getAuthData()!;
     requirePermission(auth, "finance.view");
 
+    // Read-only view: any account-access level (read or write) is enough.
+    // No admin bypass — admins must hold an explicit account-access row.
     const accessible = await db
       .select({ id: financeAccountAccess.account_id })
       .from(financeAccountAccess)
@@ -799,6 +818,149 @@ export const getMandateHistory = api(
     // Match transactions belonging to this mandate using the same fallback
     // chain that mandates were keyed on (mandate_ref+creditor_id → iban → name).
     const rows = await db.execute<{ id: number; booking_date: string; amount: string; purpose: string | null }>(sql`
+      SELECT ft.id, ft.booking_date, ft.amount, ft.purpose
+      FROM finance_transaction ft
+      WHERE ft.account_id = ${mandate.account_id}
+        AND (
+          (${mandate.mandate_ref}::text IS NOT NULL AND ft.mandate_ref = ${mandate.mandate_ref})
+          OR (${mandate.mandate_ref}::text IS NULL
+              AND ${mandate.counterparty_iban}::text IS NOT NULL
+              AND ft.counterparty_iban = ${mandate.counterparty_iban})
+          OR (${mandate.mandate_ref}::text IS NULL
+              AND ${mandate.counterparty_iban}::text IS NULL
+              AND ${mandate.counterparty}::text IS NOT NULL
+              AND ft.counterparty = ${mandate.counterparty})
+        )
+      ORDER BY ft.booking_date DESC
+      LIMIT 24
+    `);
+
+    return {
+      mandate_id: mandate.id,
+      counterparty: mandate.counterparty,
+      items: rows.rows.map((r) => ({
+        id: r.id,
+        booking_date: r.booking_date,
+        amount: r.amount,
+        purpose: r.purpose ?? null,
+      })),
+    };
+  },
+);
+
+// -----------------------------------------------------------------------
+// Recurring transactions for a single transaction.
+//
+// Resolves the mandate the transaction belongs to (if any) and returns
+// the same history list the anomaly view shows for amount_change /
+// new_mandate alerts. Returns mandate_id=null + empty items when the
+// transaction is not part of any tracked recurring series — the UI uses
+// that as the "no recurring partners" empty state.
+//
+// Mandate matching mirrors the priority chain that anomaly detection
+// itself uses: mandate_ref → counterparty_iban → counterparty.
+// -----------------------------------------------------------------------
+
+export interface RelatedRecurringResponse {
+  mandate_id: number | null;
+  counterparty: string | null;
+  items: MandateHistoryItem[];
+}
+
+export const getRelatedRecurringTransactions = api(
+  {
+    expose: true,
+    method: "GET",
+    path: "/finance/transactions/:id/recurring",
+    auth: true,
+  },
+  async ({ id }: { id: number }): Promise<RelatedRecurringResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+
+    // Read-only view, any access level on the source account is enough.
+    // No admin bypass — admins must hold an explicit account-access row.
+    const accessible = await db
+      .select({ id: financeAccountAccess.account_id })
+      .from(financeAccountAccess)
+      .where(eq(financeAccountAccess.user_id, Number(auth.userID)));
+    const accountIds = accessible.map((a) => a.id);
+    if (accountIds.length === 0) {
+      throw APIError.notFound(`transaction ${id} not found`);
+    }
+
+    const [tx] = await db
+      .select({
+        id: financeTransaction.id,
+        account_id: financeTransaction.account_id,
+        mandate_ref: financeTransaction.mandate_ref,
+        counterparty_iban: financeTransaction.counterparty_iban,
+        counterparty: financeTransaction.counterparty,
+      })
+      .from(financeTransaction)
+      .where(
+        and(
+          eq(financeTransaction.id, id),
+          inArray(financeTransaction.account_id, accountIds),
+        ),
+      )
+      .limit(1);
+    if (!tx) throw APIError.notFound(`transaction ${id} not found`);
+
+    // Walk the priority chain to find the mandate this transaction
+    // belongs to. Try each key in turn; the first match wins.
+    const conditions = [];
+    if (tx.mandate_ref) {
+      conditions.push(
+        and(
+          eq(financeRecurringMandate.account_id, tx.account_id),
+          eq(financeRecurringMandate.mandate_ref, tx.mandate_ref),
+        ),
+      );
+    }
+    if (tx.counterparty_iban) {
+      conditions.push(
+        and(
+          eq(financeRecurringMandate.account_id, tx.account_id),
+          isNull(financeRecurringMandate.mandate_ref),
+          eq(financeRecurringMandate.counterparty_iban, tx.counterparty_iban),
+        ),
+      );
+    }
+    if (tx.counterparty) {
+      conditions.push(
+        and(
+          eq(financeRecurringMandate.account_id, tx.account_id),
+          isNull(financeRecurringMandate.mandate_ref),
+          isNull(financeRecurringMandate.counterparty_iban),
+          eq(financeRecurringMandate.counterparty, tx.counterparty),
+        ),
+      );
+    }
+
+    let mandate: typeof financeRecurringMandate.$inferSelect | null = null;
+    for (const cond of conditions) {
+      const [hit] = await db
+        .select()
+        .from(financeRecurringMandate)
+        .where(cond)
+        .limit(1);
+      if (hit) {
+        mandate = hit;
+        break;
+      }
+    }
+
+    if (!mandate) {
+      return { mandate_id: null, counterparty: null, items: [] };
+    }
+
+    const rows = await db.execute<{
+      id: number;
+      booking_date: string;
+      amount: string;
+      purpose: string | null;
+    }>(sql`
       SELECT ft.id, ft.booking_date, ft.amount, ft.purpose
       FROM finance_transaction ft
       WHERE ft.account_id = ${mandate.account_id}

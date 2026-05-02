@@ -792,3 +792,16 @@ export interface MandateHistoryResponse {
 export async function getMandateHistory(mandateId: number): Promise<MandateHistoryResponse> {
   return apiFetch(`/finance/mandates/${mandateId}/history`)
 }
+
+export interface RelatedRecurringResponse {
+  /** null when the transaction is not part of any tracked recurring series. */
+  mandate_id: number | null
+  counterparty: string | null
+  items: MandateHistoryItem[]
+}
+
+export async function getRelatedRecurringTransactions(
+  transactionId: number,
+): Promise<RelatedRecurringResponse> {
+  return apiFetch(`/finance/transactions/${transactionId}/recurring`)
+}

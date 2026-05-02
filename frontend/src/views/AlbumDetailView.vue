@@ -5,6 +5,7 @@ import Button from 'primevue/button'
 import Chip from 'primevue/chip'
 import Dialog from 'primevue/dialog'
 import Message from 'primevue/message'
+import SelectButton from 'primevue/selectbutton'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import PhotoGrid from '../components/PhotoGrid.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
@@ -383,12 +384,25 @@ const canUploadPhotos = computed(() => auth.hasPermission('photos.upload'))
 const canManageData = computed(() => auth.hasPermission('data.manage'))
 const showPersons = computed(() => auth.hasPermission('people.view'))
 
-// ── Display mode (Album-Eigenschaft) ─────────────────────────────────────────
-const displayMode = ref<'grid' | 'map'>('grid')
+// ── Display mode ─────────────────────────────────────────────────────────────
+// `album.display_mode` is the album-level setting: 'map' = map enabled,
+// 'grid' = map disabled. When map is enabled the user can flip between
+// raster and map view on the fly via `viewMode`; otherwise we lock to grid.
+const mapEnabled = computed(() => album.value?.display_mode === 'map')
+const viewMode = ref<'grid' | 'map'>('grid')
 
 watch(album, (a) => {
-  if (a) displayMode.value = a.display_mode ?? 'grid'
+  if (!a) return
+  // Default to the user's last choice when revisiting the album within the
+  // session; on initial load fall back to map view if the album has it
+  // enabled (the curated experience), otherwise grid.
+  viewMode.value = a.display_mode === 'map' ? 'map' : 'grid'
 }, { immediate: true })
+
+const viewModeOptions: Array<{ label: string; value: 'grid' | 'map'; icon: string }> = [
+  { label: 'Raster', value: 'grid', icon: 'pi pi-th-large' },
+  { label: 'Karte', value: 'map', icon: 'pi pi-map' },
+]
 
 // ── Map fullscreen ───────────────────────────────────────────────────────────
 const tripMapRef = ref<{ selectStopByPhotoId: (id: number) => boolean } | null>(null)
@@ -894,7 +908,7 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
         </div>
 
         <!-- 3. Description with edit -->
-        <div v-if="displayMode !== 'map'" class="header__description">
+        <div v-if="viewMode !== 'map'" class="header__description">
           <div v-if="!editingDescription" class="header__description-view">
             <span :class="{ 'header__description-text--empty': !album.description }" class="header__description-text">
               {{ album.description || 'Keine Beschreibung' }}
@@ -932,13 +946,28 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
 
         <!-- 6. Action buttons -->
         <div class="header__actions">
+          <SelectButton
+            v-if="mapEnabled"
+            v-model="viewMode"
+            :options="viewModeOptions"
+            optionLabel="label"
+            optionValue="value"
+            :allowEmpty="false"
+            class="view-mode-switch"
+            aria-label="Ansicht umschalten"
+          >
+            <template #option="slotProps">
+              <i :class="slotProps.option.icon" v-tooltip.bottom="slotProps.option.label" />
+              <span class="view-mode-switch__label">{{ slotProps.option.label }}</span>
+            </template>
+          </SelectButton>
           <Button
-            v-if="canManageData && unreviewedGroupCount > 0 && displayMode !== 'map'"
+            v-if="canManageData && unreviewedGroupCount > 0 && viewMode !== 'map'"
             :label="`Gruppen bearbeiten (${unreviewedGroupCount} offen)`"
             icon="pi pi-images" severity="success" size="small"
             @click="handleStartGroupReview"
           />
-          <Button v-if="effectiveCoverPhotoId && displayMode !== 'map'" icon="pi pi-image" size="small" text v-tooltip="'Cover fokussieren'" @click="scrollToCover" />
+          <Button v-if="effectiveCoverPhotoId && viewMode !== 'map'" icon="pi pi-image" size="small" text v-tooltip="'Cover fokussieren'" @click="scrollToCover" />
           <Button v-if="isOwner" icon="pi pi-trash" size="small" text severity="danger" v-tooltip="'Album löschen'" @click="showDeleteDialog = true" />
           <Button v-if="!isOwner" icon="pi pi-sign-out" size="small" text severity="danger" v-tooltip="'Freigabe verlassen'" @click="showLeaveDialog = true" />
         </div>
@@ -1001,7 +1030,7 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
 
     <!-- Map mode -->
     <TripMap
-      v-if="album && displayMode === 'map' && albumPhotos.length > 0"
+      v-if="album && viewMode === 'map' && albumPhotos.length > 0"
       ref="tripMapRef"
       :photos="albumPhotosFiltered"
       :albumName="album.name"
@@ -1099,6 +1128,20 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
       @show-details="fullscreenDetailsOpen = !fullscreenDetailsOpen"
       @toggle-cover="handleSetMapCover"
     >
+      <!-- Mobile users open fullscreen with a single tap and have no
+           visible sidebar to reach "Als Cover setzen" from. Surface the
+           toggle directly in the topbar (matching the map-mode overlay)
+           so the action is one tap away on every screen size. -->
+      <template #topbar-actions-before>
+        <Button
+          icon="pi pi-image"
+          rounded text
+          :severity="effectiveCoverPhotoId === selectedPhoto.id ? 'warn' : 'secondary'"
+          :class="{ 'fs-toolbar-btn--active': effectiveCoverPhotoId === selectedPhoto.id }"
+          v-tooltip.bottom="(effectiveCoverPhotoId === selectedPhoto.id ? 'Vom Cover entfernen' : 'Als Cover setzen') + ' (C)'"
+          @click="handleSetMapCover(selectedPhoto.id)"
+        />
+      </template>
       <template #details-flyout>
         <PhotoDetailSidebar
           :in-flyout="true"
@@ -1260,7 +1303,19 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
   gap: 0.5em 0.75em;
 }
 
-.header__actions { display: flex; align-items: center; gap: 0.25em; }
+.header__actions { display: flex; align-items: center; gap: 0.25em; flex-wrap: wrap; }
+
+/* Compact icon-first toggle: shows just the icon on narrow screens and adds
+   the label next to it once there's room. PrimeVue's SelectButton renders
+   each option as a button, so we lean on the slot to control content. */
+.view-mode-switch :deep(.p-togglebutton) {
+  padding: 0.25rem 0.5rem;
+  min-width: 2rem;
+}
+.view-mode-switch__label { display: none; margin-left: 0.35em; }
+@media (min-width: 600px) {
+  .view-mode-switch__label { display: inline; }
+}
 
 .header__title-group {
   display: flex;

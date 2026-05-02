@@ -10,7 +10,8 @@ import Tag from 'primevue/tag'
 import Message from 'primevue/message'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useAccountsStore } from '../../stores/finance/accounts'
-import type { Transaction } from '../../api/finance'
+import type { MandateHistoryItem, Transaction } from '../../api/finance'
+import * as api from '../../api/finance'
 import BatchTagDialog from '../../components/finance/BatchTagDialog.vue'
 
 const store = useTransactionsStore()
@@ -25,6 +26,74 @@ const filters = ref<{
 
 const selection = ref<Transaction[]>([])
 const batchDialogOpen = ref(false)
+
+// ── Recurring expansion ────────────────────────────────────────────────────
+// Lazily fetched per-row when the user clicks the expander, so the page
+// load isn't penalised for transactions the user never inspects.
+type RecurringState = {
+  loading: boolean
+  error: string | null
+  counterparty: string | null
+  items: MandateHistoryItem[]
+}
+const recurringByTx = ref<Record<number, RecurringState>>({})
+const expandedRows = ref<Record<number, boolean>>({})
+
+async function loadRecurring(transactionId: number) {
+  const existing = recurringByTx.value[transactionId]
+  if (existing && !existing.error) return // cached
+  recurringByTx.value = {
+    ...recurringByTx.value,
+    [transactionId]: {
+      loading: true,
+      error: null,
+      counterparty: existing?.counterparty ?? null,
+      items: existing?.items ?? [],
+    },
+  }
+  try {
+    const res = await api.getRelatedRecurringTransactions(transactionId)
+    recurringByTx.value = {
+      ...recurringByTx.value,
+      [transactionId]: {
+        loading: false,
+        error: null,
+        counterparty: res.counterparty,
+        items: res.items,
+      },
+    }
+  } catch (err) {
+    recurringByTx.value = {
+      ...recurringByTx.value,
+      [transactionId]: {
+        loading: false,
+        error: err instanceof Error ? err.message : String(err),
+        counterparty: null,
+        items: [],
+      },
+    }
+  }
+}
+
+function onRowExpand(event: { data: Transaction }) {
+  void loadRecurring(event.data.id)
+}
+
+function recurringPartners(transactionId: number): MandateHistoryItem[] {
+  const state = recurringByTx.value[transactionId]
+  if (!state) return []
+  return state.items.filter((it) => it.id !== transactionId)
+}
+
+function formatRecurringDate(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleDateString('de-DE', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  })
+}
 
 function toIso(d: Date | null): string | undefined {
   if (!d) return undefined
@@ -129,6 +198,7 @@ async function afterBatch() {
 
     <DataTable
       v-model:selection="selection"
+      v-model:expandedRows="expandedRows"
       :value="store.items"
       :loading="store.loading"
       dataKey="id"
@@ -136,9 +206,11 @@ async function afterBatch() {
       :paginator="true"
       :rows="20"
       striped-rows
+      @row-expand="onRowExpand"
       @row-click="(e) => router.push({ name: 'finance-transaction-detail', params: { id: (e.data as { id: number }).id } })"
     >
       <Column selectionMode="multiple" headerStyle="width: 3rem" @click.stop />
+      <Column expander headerStyle="width: 3rem" @click.stop />
       <Column field="booking_date" header="Datum" />
       <Column field="counterparty" header="Gegenseite" />
       <Column field="purpose" header="Verwendungszweck" />
@@ -158,6 +230,40 @@ async function afterBatch() {
           />
         </template>
       </Column>
+      <template #expansion="{ data }">
+        <div class="recurring-block" @click.stop>
+          <h3 class="recurring-title">
+            Wiederkehrende Buchungen
+            <span v-if="recurringByTx[data.id]?.counterparty" class="recurring-subtitle">
+              · {{ recurringByTx[data.id]!.counterparty }}
+            </span>
+          </h3>
+          <Message
+            v-if="recurringByTx[data.id]?.error"
+            severity="error"
+            :closable="false"
+          >
+            {{ recurringByTx[data.id]!.error }}
+          </Message>
+          <div v-else-if="recurringByTx[data.id]?.loading" class="hint">Lädt …</div>
+          <ul
+            v-else-if="recurringPartners(data.id).length > 0"
+            class="recurring-list"
+          >
+            <li
+              v-for="it in recurringPartners(data.id)"
+              :key="it.id"
+              class="recurring-row"
+              @click.stop="router.push({ name: 'finance-transaction-detail', params: { id: it.id } })"
+            >
+              <span class="recurring-date">{{ formatRecurringDate(it.booking_date) }}</span>
+              <span class="recurring-amount">{{ formatAmount(it.amount, currencyOf(data.account_id)) }}</span>
+              <span class="recurring-purpose">{{ it.purpose ?? '' }}</span>
+            </li>
+          </ul>
+          <p v-else class="hint">Keine weiteren Buchungen.</p>
+        </div>
+      </template>
     </DataTable>
 
     <p class="hint">Summe Auswahl: {{ selection.length }} Buchungen</p>
@@ -227,5 +333,70 @@ async function afterBatch() {
 .hint {
   color: var(--p-text-muted-color);
   margin: 0;
+}
+
+.recurring-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem 1rem;
+}
+.recurring-title {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--p-text-muted-color);
+}
+.recurring-subtitle {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.recurring-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.recurring-row {
+  display: grid;
+  grid-template-columns: 6.5rem 7rem 1fr;
+  gap: 0.5rem;
+  padding: 0.35rem 0.25rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  align-items: baseline;
+  font-size: 0.9rem;
+}
+.recurring-row:hover {
+  background: var(--p-content-hover-background);
+}
+.recurring-date {
+  color: var(--p-text-muted-color);
+  font-variant-numeric: tabular-nums;
+}
+.recurring-amount {
+  font-family: monospace;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.recurring-purpose {
+  color: var(--p-text-muted-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 540px) {
+  .recurring-row {
+    grid-template-columns: 5.5rem 6rem;
+    grid-template-rows: auto auto;
+  }
+  .recurring-purpose {
+    grid-column: 1 / -1;
+    white-space: normal;
+  }
 }
 </style>
