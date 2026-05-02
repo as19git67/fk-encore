@@ -31,9 +31,9 @@ public final class BackgroundSyncManager {
 
     // MARK: - Scheduling
 
-    /// Schedule the next sync run. Cancels any pending request if sync is disabled.
+    /// Schedule the next sync run. Cancels the request if both upload and download are disabled.
     public func scheduleNextSyncIfNeeded() {
-        guard PhotoSyncPreferences.syncEnabled else {
+        guard PhotoSyncPreferences.syncEnabled || DownloadSyncPreferences.downloadEnabled else {
             BGTaskScheduler.shared.cancel(
                 taskRequestWithIdentifier: PhotoSyncPreferences.taskIdentifier
             )
@@ -64,6 +64,7 @@ public final class BackgroundSyncManager {
         let work = Task {
             do {
                 try await PhotoSyncService.shared.sync()
+                try await PhotoDownloadService.shared.sync()
                 task.setTaskCompleted(success: true)
             } catch {
                 task.setTaskCompleted(success: false)

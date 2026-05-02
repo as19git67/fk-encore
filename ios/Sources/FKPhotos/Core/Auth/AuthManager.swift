@@ -34,7 +34,9 @@ public final class AuthManager: @unchecked Sendable {
             currentUser = nil
             return
         }
-        _ = token // Token exists and is valid in keychain
+        // Mirror token to App Group so the Share Extension works immediately
+        // without requiring a fresh login after the app update.
+        SharedStorage.defaults.set(token, forKey: SharedStorage.tokenKey)
         currentUser = user
         isAuthenticated = true
     }
@@ -93,6 +95,9 @@ public final class AuthManager: @unchecked Sendable {
         let userData = try JSONEncoder().encode(user)
         try KeychainHelper.save(userData, forKey: userKey)
 
+        // Mirror token to App Group so the Share Extension can authenticate.
+        SharedStorage.defaults.set(accessToken, forKey: SharedStorage.tokenKey)
+
         Task { @MainActor in
             currentUser = user
             isAuthenticated = true
@@ -103,6 +108,7 @@ public final class AuthManager: @unchecked Sendable {
         KeychainHelper.delete(forKey: tokenKey)
         KeychainHelper.delete(forKey: refreshTokenKey)
         KeychainHelper.delete(forKey: userKey)
+        SharedStorage.defaults.removeObject(forKey: SharedStorage.tokenKey)
         Task { @MainActor in
             currentUser = nil
             isAuthenticated = false
