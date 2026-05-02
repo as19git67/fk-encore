@@ -24,6 +24,8 @@ struct PhotoSyncPreferences {
     private static let uploadedIdsKey      = "sync.uploadedIds"
     private static let allPhotosAlbumIdKey = "sync.allPhotosAlbumId"
     private static let albumMappingsKey    = "sync.albumMappings"
+    private static let serverPhotoMapKey   = "sync.serverPhotoMap"
+    private static let excludeScreenshotsKey = "sync.excludeScreenshots"
 
     // MARK: - Settings
 
@@ -49,6 +51,12 @@ struct PhotoSyncPreferences {
     static var onlyNew: Bool {
         get { (UserDefaults.standard.object(forKey: onlyNewKey) as? Bool) ?? true }
         set { UserDefaults.standard.set(newValue, forKey: onlyNewKey) }
+    }
+
+    /// Exclude screenshots from uploads. Default: true.
+    static var excludeScreenshots: Bool {
+        get { (UserDefaults.standard.object(forKey: excludeScreenshotsKey) as? Bool) ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: excludeScreenshotsKey) }
     }
 
     /// Restrict uploads to WiFi connections. Default: true.
@@ -109,5 +117,28 @@ struct PhotoSyncPreferences {
     /// Number of photos successfully uploaded so far.
     static var uploadedCount: Int {
         (UserDefaults.standard.stringArray(forKey: uploadedIdsKey) ?? []).count
+    }
+
+    // MARK: - Server photo → local asset reverse mapping
+    //
+    // Maps server photo ID (String) → iOS localIdentifier (String).
+    // Built during upload; used by the download service to avoid round-tripping
+    // photos that already exist locally on this device.
+    // This mapping is intentionally NOT cleared by resetUploadHistory() because
+    // it reflects structural knowledge ("this server photo IS this local asset")
+    // that remains valid regardless of upload-history resets.
+
+    static func loadServerPhotoMap() -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: serverPhotoMapKey) as? [String: String] ?? [:]
+    }
+
+    static func saveServerPhotoMap(_ map: [String: String]) {
+        UserDefaults.standard.set(map, forKey: serverPhotoMapKey)
+    }
+
+    static func recordUploadedPhoto(serverPhotoId: Int, localIdentifier: String) {
+        var map = loadServerPhotoMap()
+        map[String(serverPhotoId)] = localIdentifier
+        saveServerPhotoMap(map)
     }
 }
