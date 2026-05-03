@@ -48,15 +48,12 @@ actor PhotoSyncService {
         guard status == .authorized || status == .limited else { return }
 
         let assets = await fetchAssets()
-        guard !assets.isEmpty else {
-            PhotoSyncPreferences.lastSyncDate = Date()
-            return
-        }
 
         // Local cache avoids loading image data for assets already known to be uploaded.
         // The server is the authoritative source: a 409 response means the photo exists
         // server-side (e.g. uploaded from another device) and is treated as success.
         var uploadedIds = PhotoSyncPreferences.loadUploadedIds()
+        var syncedFavoriteIds = PhotoSyncPreferences.syncedFavoriteLocalIds
 
         for (asset, filename, sourceAlbumId) in assets {
             guard !uploadedIds.contains(asset.localIdentifier) else { continue }
@@ -67,6 +64,14 @@ actor PhotoSyncService {
                 uploadedIds.insert(asset.localIdentifier)
                 PhotoSyncPreferences.saveUploadedIds(uploadedIds)
                 PhotoSyncPreferences.recordUploadedPhoto(serverPhotoId: uploaded.id, localIdentifier: asset.localIdentifier)
+                // Track the favourite state that was sent with this upload so that
+                // syncFavoriteChanges() can detect future changes.
+                if asset.isFavorite {
+                    syncedFavoriteIds.insert(asset.localIdentifier)
+                } else {
+                    syncedFavoriteIds.remove(asset.localIdentifier)
+                }
+                PhotoSyncPreferences.syncedFavoriteLocalIds = syncedFavoriteIds
                 await addToTargetAlbum(photoId: uploaded.id, sourceAlbumId: sourceAlbumId)
             } catch APIError.duplicatePhoto(let existingPhotoId) {
                 // Server already has this photo (same SHA256 hash). Still attach
@@ -82,7 +87,87 @@ actor PhotoSyncService {
             }
         }
 
+        // Propagate favourite-status changes for photos that were already uploaded
+        // in a previous sync cycle. Since uploaded photos are skipped above, this is
+        // the only mechanism that keeps the server in sync with late iOS favourite
+        // changes (user marks/unmarks a photo as favourite after it was uploaded).
+        await syncFavoriteChanges()
+
         PhotoSyncPreferences.lastSyncDate = Date()
+    }
+
+    // MARK: - Favourite change propagation
+
+    /// Compares the current iOS favourite state of all previously-uploaded photos
+    /// against the last-known server state and sends PATCH /photos/:id/curation
+    /// for every photo whose state has changed.
+    private func syncFavoriteChanges() async {
+        // serverPhotoMap: serverPhotoId(String) → localIdentifier(String)
+        let serverPhotoMap = PhotoSyncPreferences.loadServerPhotoMap()
+        guard !serverPhotoMap.isEmpty else { return }
+
+        // Build the reverse index: localIdentifier → serverPhotoId
+        var localToServerId: [String: Int] = [:]
+        for (serverIdStr, localId) in serverPhotoMap {
+            if let serverId = Int(serverIdStr) {
+                localToServerId[localId] = serverId
+            }
+        }
+        guard !localToServerId.isEmpty else { return }
+
+        // Fetch the current iOS favourite flag for all uploaded assets in one pass.
+        let localIds = Array(localToServerId.keys)
+        let currentFavorites: [String: Bool] = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var result: [String: Bool] = [:]
+                PHAsset.fetchAssets(withLocalIdentifiers: localIds, options: nil)
+                    .enumerateObjects { asset, _, _ in
+                        result[asset.localIdentifier] = asset.isFavorite
+                    }
+                continuation.resume(returning: result)
+            }
+        }
+
+        var syncedFavoriteIds = PhotoSyncPreferences.syncedFavoriteLocalIds
+        var changed = false
+
+        struct CurationBody: Encodable { let status: String }
+        struct CurationResponse: Decodable { let success: Bool }
+
+        for (localId, serverId) in localToServerId {
+            guard let currentFav = currentFavorites[localId] else { continue }
+            let wasSynced = syncedFavoriteIds.contains(localId)
+
+            if currentFav && !wasSynced {
+                // Newly marked as favourite in iOS → update server
+                do {
+                    _ = try await APIClient.shared.patch(
+                        "/photos/\(serverId)/curation",
+                        body: CurationBody(status: "favorite")
+                    ) as CurationResponse
+                    syncedFavoriteIds.insert(localId)
+                    changed = true
+                } catch {
+                    // Skip individual failures; will be retried on the next sync cycle.
+                }
+            } else if !currentFav && wasSynced {
+                // Favourite removed in iOS → revert to visible on server
+                do {
+                    _ = try await APIClient.shared.patch(
+                        "/photos/\(serverId)/curation",
+                        body: CurationBody(status: "visible")
+                    ) as CurationResponse
+                    syncedFavoriteIds.remove(localId)
+                    changed = true
+                } catch {
+                    // Skip individual failures; will be retried on the next sync cycle.
+                }
+            }
+        }
+
+        if changed {
+            PhotoSyncPreferences.syncedFavoriteLocalIds = syncedFavoriteIds
+        }
     }
 
     // MARK: - Asset fetching

@@ -24,8 +24,9 @@ struct PhotoSyncPreferences {
     private static let uploadedIdsKey      = "sync.uploadedIds"
     private static let allPhotosAlbumIdKey = "sync.allPhotosAlbumId"
     private static let albumMappingsKey    = "sync.albumMappings"
-    private static let serverPhotoMapKey   = "sync.serverPhotoMap"
+    private static let serverPhotoMapKey    = "sync.serverPhotoMap"
     private static let excludeScreenshotsKey = "sync.excludeScreenshots"
+    private static let syncedFavoriteIdsKey = "sync.syncedFavoriteIds"
 
     // MARK: - Settings
 
@@ -112,11 +113,24 @@ struct PhotoSyncPreferences {
     static func resetUploadHistory() {
         UserDefaults.standard.removeObject(forKey: uploadedIdsKey)
         UserDefaults.standard.removeObject(forKey: lastSyncDateKey)
+        UserDefaults.standard.removeObject(forKey: syncedFavoriteIdsKey)
     }
 
     /// Number of photos successfully uploaded so far.
     static var uploadedCount: Int {
         (UserDefaults.standard.stringArray(forKey: uploadedIdsKey) ?? []).count
+    }
+
+    // MARK: - Favourite sync tracking
+    //
+    // Tracks which local asset identifiers have been confirmed as "favourite"
+    // on the server. On each sync run the service compares the current iOS
+    // favourite state against this set and sends a PATCH /photos/:id/curation
+    // request for any photo whose state has changed (marked or un-marked).
+
+    static var syncedFavoriteLocalIds: Set<String> {
+        get { Set(UserDefaults.standard.stringArray(forKey: syncedFavoriteIdsKey) ?? []) }
+        set { UserDefaults.standard.set(Array(newValue), forKey: syncedFavoriteIdsKey) }
     }
 
     // MARK: - Server photo → local asset reverse mapping

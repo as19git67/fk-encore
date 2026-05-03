@@ -102,7 +102,7 @@ struct SyncSettingsView: View {
                                 ServerAlbumPickerView(
                                     title: iosAlbumNames[iosId] ?? "Album",
                                     selectedAlbumId: serverAlbumBinding(for: iosId),
-                                    disabledIds: DownloadSyncPreferences.selectedServerAlbumIds
+                                    disabledIds: cycleDisabledIds(forIosAlbum: iosId)
                                 )
                             } label: {
                                 HStack {
@@ -268,6 +268,16 @@ struct SyncSettingsView: View {
     }
 
     // MARK: - Helpers
+
+    /// Returns server album IDs that would create an upload→download cycle for the given iOS album.
+    /// A cycle occurs when the server album has the same name as the iOS album and is also selected
+    /// for download — downloaded photos would land in the same iOS album and be re-uploaded.
+    private func cycleDisabledIds(forIosAlbum iosId: String) -> Set<Int> {
+        let iosName = iosAlbumNames[iosId] ?? ""
+        guard !iosName.isEmpty else { return [] }
+        let downloadIds = DownloadSyncPreferences.selectedServerAlbumIds
+        return Set(serverAlbums.filter { $0.name == iosName && downloadIds.contains($0.id) }.map { $0.id })
+    }
 
     private var sortedSelectedAlbumIds: [String] {
         Array(selectedAlbumIds).sorted { id1, id2 in
