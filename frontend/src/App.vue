@@ -224,10 +224,10 @@ body {
 
 /* On mobile (≤768 px) show only icons in the sub-menu strip */
 @media (max-width: 768px) {
-  .submenu-strip :deep(.p-button-label) {
+  .submenu-strip .p-button-label {
     display: none;
   }
-  .submenu-strip :deep(.p-button) {
+  .submenu-strip .p-button {
     padding: 0.5rem;
   }
 }
