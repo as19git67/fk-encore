@@ -2303,6 +2303,53 @@ export async function hardDeletePhotoLogic(userId: number, photoId: number): Pro
   return { success: true, message: "Photo permanently deleted" };
 }
 
+export interface BatchDeleteSkippedPhoto {
+  id: number;
+  reason: 'not_owner' | 'readonly';
+}
+
+export interface BatchDeleteResult {
+  deleted: number[];
+  skipped: BatchDeleteSkippedPhoto[];
+}
+
+export async function batchDeletePhotosLogic(
+  userId: number,
+  photoIds: number[]
+): Promise<BatchDeleteResult> {
+  const deleted: number[] = [];
+  const skipped: BatchDeleteSkippedPhoto[] = [];
+
+  for (const photoId of photoIds) {
+    const photo = await dbFirst<typeof photos.$inferSelect>(
+      db.select().from(photos).where(eq(photos.id, photoId))
+    );
+
+    if (!photo) continue;
+
+    if (photo.user_id !== userId) {
+      skipped.push({ id: photoId, reason: 'not_owner' });
+      continue;
+    }
+
+    if (photo.external_path) {
+      skipped.push({ id: photoId, reason: 'readonly' });
+      continue;
+    }
+
+    const filePath = path.join(UPLOAD_DIR, photo.filename);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+    await deleteCachedThumbnails(photo.filename);
+    await dbExec(db.delete(photos).where(eq(photos.id, photoId)));
+
+    deleted.push(photoId);
+  }
+
+  return { deleted, skipped };
+}
+
 export async function updatePhotoCurationLogic(
   userId: number,
   photoId: number,

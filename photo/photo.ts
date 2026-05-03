@@ -436,6 +436,22 @@ export const hardDeletePhoto = api(
 );
 
 /**
+ * Permanently delete multiple photos. Skips photos the caller does not own
+ * and photos imported via library link (external_path set). Returns the IDs
+ * that were deleted and the IDs that were skipped with the reason.
+ */
+export const batchDeletePhotos = api(
+  { expose: true, method: "POST", path: "/photos/batch-delete", auth: true },
+  async ({ photoIds }: { photoIds: number[] }): Promise<service.BatchDeleteResult> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "data.manage");
+    return await service.batchDeletePhotosLogic(userId, photoIds);
+  }
+);
+
+/**
  * Update curation status for a photo (visible/hidden/favorite).
  */
 export const updatePhotoCuration = api(
