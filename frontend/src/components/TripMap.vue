@@ -152,16 +152,20 @@ function selectStop(stopId: number, panMap = true) {
   updateMarkerIcons()
 
   const stop = stops.value.find(s => s.id === stopId)
-  if (!stop || !map) return
+  if (!stop) return
 
-  // Auto-expand the day of the selected stop if it's not the cover/first stop
-  // (e.g. when the stop is selected via a map marker and its day is collapsed).
-  // Only one day can be expanded at a time — any previously expanded day is
-  // collapsed automatically.
+  // Auto-expand the day of the selected stop if it's not the cover/first stop.
+  // This is a reactive state change and must happen regardless of whether the
+  // Leaflet map is already initialised (it may not be when selectStopByPhotoId
+  // is called by the parent right after this component mounts).
   const dayStops = stopsByDay.value.get(stop.day) ?? []
   if (dayStops.length > 1 && dayStops[0]!.id !== stopId) {
     expandDayExclusive(stop.day)
   }
+
+  // Map pan and timeline scroll require an initialised Leaflet instance.
+  // If called before initMap() has run, onMounted will complete these once ready.
+  if (!map) return
 
   if (panMap) {
     map.flyTo([stop.lat, stop.lng], 15, { duration: 0.5 })
@@ -320,6 +324,15 @@ function handleKeydown(e: KeyboardEvent) {
 onMounted(async () => {
   await nextTick()
   initMap()
+  // If a stop was pre-selected via selectStopByPhotoId before Leaflet finished
+  // initialising, complete the map pan and timeline scroll now.
+  if (selectedStopId.value !== null && map) {
+    const preSelected = stops.value.find(s => s.id === selectedStopId.value)
+    if (preSelected) {
+      map.flyTo([preSelected.lat, preSelected.lng], 15, { duration: 0.5 })
+      nextTick(() => scrollTimelineToStop(selectedStopId.value!))
+    }
+  }
   window.addEventListener('keydown', handleKeydown)
 })
 
