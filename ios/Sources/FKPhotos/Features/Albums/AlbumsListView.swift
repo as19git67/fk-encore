@@ -6,12 +6,25 @@ struct AlbumsListView: View {
     @State private var showErrorAlert = false
     @State private var newAlbumName = ""
     @State private var newAlbumDescription = ""
+    @State private var searchText = ""
+
+    private var filteredAlbums: [Album] {
+        let base = searchText.isEmpty
+            ? viewModel.albums
+            : viewModel.albums.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+        return base.sorted {
+            ($0.newest_photo_at ?? "") > ($1.newest_photo_at ?? "")
+        }
+    }
 
     var body: some View {
         List {
             if viewModel.isLoading && viewModel.albums.isEmpty {
                 ProgressView()
                     .frame(maxWidth: .infinity)
+                    .listRowSeparator(.hidden)
+            } else if filteredAlbums.isEmpty && !viewModel.albums.isEmpty {
+                ContentUnavailableView.search(text: searchText)
                     .listRowSeparator(.hidden)
             } else if viewModel.albums.isEmpty {
                 ContentUnavailableView {
@@ -26,7 +39,7 @@ struct AlbumsListView: View {
                 }
                 .listRowSeparator(.hidden)
             } else {
-                ForEach(viewModel.albums) { album in
+                ForEach(filteredAlbums) { album in
                     NavigationLink(value: album.id) {
                         AlbumRowView(album: album)
                     }
@@ -34,12 +47,13 @@ struct AlbumsListView: View {
                 .onDelete { indexSet in
                     Task {
                         for index in indexSet {
-                            await viewModel.deleteAlbum(id: viewModel.albums[index].id)
+                            await viewModel.deleteAlbum(id: filteredAlbums[index].id)
                         }
                     }
                 }
             }
         }
+        .searchable(text: $searchText, prompt: "Album suchen")
         .navigationTitle("Alben")
         .navigationDestination(for: Int.self) { albumId in
             AlbumDetailView(albumId: albumId)
