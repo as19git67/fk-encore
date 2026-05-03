@@ -43,6 +43,7 @@ import {
 } from '../api/photos'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
+import { usePhotoNavStore } from '../stores/photoNav'
 import { usePhotoGrouping } from '../composables/usePhotoGrouping'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 import { useNaturalSearch } from '../composables/useNaturalSearch'
@@ -60,6 +61,7 @@ const router = useRouter()
 const albumId = computed(() => Number(route.params.id))
 const auth = useAuthStore()
 const serviceHealth = useServiceHealthStore()
+const photoNav = usePhotoNavStore()
 
 // Shared with AlbumsView: when the user navigates back from this detail view,
 // the album list restores focus and scroll position to this album.
@@ -410,6 +412,18 @@ const mapFullscreenPhotos = ref<Photo[]>([])
 const mapFullscreenIndex = ref(0)
 const isMapFullscreen = ref(false)
 
+// When navigating to this album via ?photoId= and the album is in map mode,
+// we need to select the stop containing that photo once TripMap has mounted.
+// TripMap is a defineAsyncComponent so it isn't available synchronously.
+const pendingMapSelectPhotoId = ref<number | null>(null)
+
+watch(tripMapRef, (ref) => {
+  if (ref && pendingMapSelectPhotoId.value !== null) {
+    ref.selectStopByPhotoId(pendingMapSelectPhotoId.value)
+    pendingMapSelectPhotoId.value = null
+  }
+})
+
 function handleMapFullscreen(stopPhotos: Photo[], startIndex: number) {
   // Use all album photos so left/right navigation works across stops
   const allPhotos = albumPhotos.value
@@ -477,7 +491,10 @@ watch(selectedIndex, () => {
 })
 
 watch(selectedPhoto, (photo) => {
-  if (photo && album.value) saveLastPhotoForAlbum(album.value.id, photo.id)
+  if (photo && album.value) {
+    saveLastPhotoForAlbum(album.value.id, photo.id)
+    photoNav.selectPhoto(photo.id)
+  }
 })
 
 // ── Data loading ──────────────────────────────────────────────────────────────
@@ -521,12 +538,18 @@ async function loadData() {
       targetIdx = resolveToIndex(queryPhotoId)
       if (targetIdx >= 0) {
         router.replace({ query: { ...route.query, photoId: undefined } })
+        // In map mode the grid index is irrelevant; request the TripMap to
+        // select the stop containing this photo once it has mounted.
+        if (albumRes.display_mode === 'map') {
+          pendingMapSelectPhotoId.value = queryPhotoId
+        }
       }
     }
     if (targetIdx < 0) {
-      // No explicit query target — fall back to the last-viewed photo for
-      // this album, so reopening the album restores the previous position.
+      // Fall back chain: album-specific last photo → shared nav store → none.
       const storedPhotoId = loadLastPhotoMap()[String(albumId.value)]
+        ?? photoNav.selectedPhotoId
+        ?? null
       if (storedPhotoId) targetIdx = resolveToIndex(storedPhotoId)
     }
     if (targetIdx < 0) {
@@ -856,6 +879,7 @@ watch(albumId, (id) => {
   activeGroup.value = null
   detectedFaces.value = []
   detectedLandmarks.value = []
+  pendingMapSelectPhotoId.value = null
   void loadData()
 })
 

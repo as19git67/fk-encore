@@ -69,6 +69,7 @@ import { useReferenceData } from '../composables/useReferenceData'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
+import { usePhotoNavStore } from '../stores/photoNav'
 import {
   type GalleryGridEntry,
   type GallerySortDir,
@@ -97,6 +98,7 @@ import {
 
 const auth = useAuthStore()
 const serviceHealth = useServiceHealthStore()
+const photoNav = usePhotoNavStore()
 const route = useRoute()
 const router = useRouter()
 const confirm = useConfirm()
@@ -108,18 +110,15 @@ const canDelete = computed(() => auth.hasPermission('photos.delete'))
 const canManageData = computed(() => auth.hasPermission('data.manage'))
 const showPersons = computed(() => auth.hasPermission('people.view'))
 
-// Reuse the legacy view's localStorage key so users keep their
-// last-selected position across both gallery implementations.
+// Kept for backwards-compatible session restore on first app load (before
+// the store has been populated by any user interaction in this session).
 const LAST_PHOTO_KEY = 'photos_last_selected_id'
 
 // ── Initial anchor (resolved once) ──────────────────────────────────────────
-// Two distinct concepts share the same input:
-//   - `initialAnchor` always seeds VirtualGallery's `aroundPhotoId` so the
-//     grid scrolls to the right cell on first paint;
-//   - `pendingFullscreenId` is set ONLY when the user came in via an
-//     explicit `?photoId=` deeplink (FeedView, PersonsView, PhotoLocationMenu)
-//     and signals "open fullscreen on load". A bare LAST_PHOTO_KEY restore
-//     after a normal app refresh deliberately does not auto-open fullscreen.
+// Priority order:
+//   1. Explicit ?photoId= deeplink → also auto-opens fullscreen.
+//   2. photoNavStore.selectedPhotoId set by a previous view this session.
+//   3. localStorage fallback for cross-session restore.
 const initialAnchor = ref<number | null>(null)
 const pendingFullscreenId = ref<number | null>(null)
 {
@@ -127,6 +126,8 @@ const pendingFullscreenId = ref<number | null>(null)
   if (Number.isFinite(q) && q > 0) {
     initialAnchor.value = q
     pendingFullscreenId.value = q
+  } else if (photoNav.selectedPhotoId !== null) {
+    initialAnchor.value = photoNav.selectedPhotoId
   } else {
     const stored = Number(localStorage.getItem(LAST_PHOTO_KEY))
     if (Number.isFinite(stored) && stored > 0) initialAnchor.value = stored
@@ -694,7 +695,8 @@ async function hydrateCursor(index: number): Promise<void> {
     closeFullscreen()
     return
   }
-  // Persist last-viewed id for the next app start.
+  // Update shared navigation store and persist for cross-session restore.
+  photoNav.selectPhoto(curEntry.id)
   try { localStorage.setItem(LAST_PHOTO_KEY, String(curEntry.id)) } catch { /* storage off */ }
 
   // Provisional render from the grid entry while the details call resolves.

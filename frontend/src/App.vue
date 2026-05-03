@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import Menubar from 'primevue/menubar'
 import Button from 'primevue/button'
+import Menu from 'primevue/menu'
 import ConfirmDialog from 'primevue/confirmdialog'
 import { useAuthStore } from './stores/auth'
 import { useAnomalyStore } from './stores/finance/anomalies'
@@ -14,8 +14,6 @@ const anomalyStore = useAnomalyStore()
 const router = useRouter()
 const route = useRoute()
 
-// Load anomaly count once when the user logs in, refresh when navigating
-// away from the anomalies page (user may have acknowledged some).
 watch(
   () => auth.isAuthenticated,
   (authenticated) => {
@@ -35,45 +33,41 @@ watch(
   },
 )
 
-/** Active module based on current path, null = all modules mode */
 const activeModule = computed<ModuleConfig | null>(() => detectModule(route.path))
 
-/** Build menu items for a single module (flat list) */
-function buildModuleMenuItems(mod: ModuleConfig) {
-  return mod.menuItems
-    .filter((item) => !item.permission || auth.hasPermission(item.permission))
-    .map((item) => ({
-      label: item.label,
-      icon: item.icon,
-      badge: item.routeName === 'finance-anomalies' && anomalyStore.count > 0
-        ? String(anomalyStore.count)
-        : undefined,
-      command: () => router.push({ name: item.routeName }),
-    }))
-}
+// ── Hamburger module menu ────────────────────────────────────────────────────
+const hamburgerMenuRef = ref()
 
-/** Menu items: single module = flat, all modules = grouped with submenus */
-const menuItems = computed(() => {
-  if (activeModule.value) {
-    return buildModuleMenuItems(activeModule.value)
-  }
-
-  // All-modules mode: grouped menu with submenus
-  return modules
+const moduleMenuItems = computed(() =>
+  modules
     .filter((mod) => !mod.permission || auth.hasPermission(mod.permission))
     .map((mod) => ({
       label: mod.label,
       icon: mod.icon,
-      items: buildModuleMenuItems(mod),
+      class: activeModule.value?.id === mod.id ? 'active-module-item' : '',
+      command: () => router.push(mod.basePath),
+    }))
+)
+
+function toggleHamburgerMenu(event: Event) {
+  hamburgerMenuRef.value?.toggle(event)
+}
+
+// ── Sub-menu items for the active module ─────────────────────────────────────
+const subMenuItems = computed(() => {
+  if (!activeModule.value) return []
+  return activeModule.value.menuItems
+    .filter((item) => !item.permission || auth.hasPermission(item.permission))
+    .map((item) => ({
+      label: item.label,
+      icon: item.icon,
+      routeName: item.routeName,
+      badge:
+        item.routeName === 'finance-anomalies' && anomalyStore.count > 0
+          ? String(anomalyStore.count)
+          : undefined,
     }))
 })
-
-/** Module switcher items (shown in single-module mode to jump to other modules) */
-const otherModules = computed(() =>
-  modules
-    .filter((mod) => mod.id !== activeModule.value?.id)
-    .filter((mod) => !mod.permission || auth.hasPermission(mod.permission)),
-)
 
 async function handleLogout() {
   await auth.logout()
@@ -83,31 +77,60 @@ async function handleLogout() {
 
 <template>
   <div class="app-container">
-    <Menubar v-if="auth.isAuthenticated" :model="menuItems" class="sticky-menubar">
-      <template #start>
-        <div v-if="activeModule" class="module-switcher">
+    <nav v-if="auth.isAuthenticated" class="sticky-navbar">
+      <!-- Left: hamburger + active module sub-menu -->
+      <div class="navbar-start">
+        <Button
+          icon="pi pi-bars"
+          severity="secondary"
+          text
+          rounded
+          aria-label="Hauptmenü"
+          v-tooltip.bottom="'Module'"
+          @click="toggleHamburgerMenu"
+        />
+        <Menu ref="hamburgerMenuRef" :model="moduleMenuItems" :popup="true" />
+
+        <!-- Sub-menu items shown inline when inside a module -->
+        <div v-if="activeModule && subMenuItems.length" class="submenu-strip">
           <Button
-            v-for="mod in otherModules"
-            :key="mod.id"
-            :icon="mod.icon"
-            :aria-label="mod.label"
-            v-tooltip.bottom="mod.label"
-            severity="secondary"
+            v-for="item in subMenuItems"
+            :key="item.routeName"
+            :label="item.label"
+            :icon="item.icon"
+            :badge="item.badge"
             text
-            rounded
             size="small"
-            @click="router.push(mod.basePath)"
+            :severity="route.name === item.routeName ? 'primary' : 'secondary'"
+            :class="{ 'submenu-item--active': route.name === item.routeName }"
+            @click="router.push({ name: item.routeName })"
           />
         </div>
-      </template>
-      <template #end>
-        <div class="menu-end">
-          <span class="user-name">{{ auth.user?.name }}</span>
-          <Button label="Profil" icon="pi pi-user" severity="secondary" text @click="router.push('/profile')" />
-          <Button label="Abmelden" icon="pi pi-sign-out" severity="secondary" text @click="handleLogout" />
-        </div>
-      </template>
-    </Menubar>
+      </div>
+
+      <!-- Right: profile + logout (icons only) -->
+      <div class="navbar-end">
+        <Button
+          icon="pi pi-user"
+          severity="secondary"
+          text
+          rounded
+          aria-label="Profil"
+          v-tooltip.bottom="'Profil'"
+          @click="router.push('/profile')"
+        />
+        <Button
+          icon="pi pi-sign-out"
+          severity="secondary"
+          text
+          rounded
+          aria-label="Abmelden"
+          v-tooltip.bottom="'Abmelden'"
+          @click="handleLogout"
+        />
+      </div>
+    </nav>
+
     <main class="content">
       <router-view />
     </main>
@@ -128,10 +151,67 @@ body {
   --menubar-height: 3.5rem;
 }
 
-.sticky-menubar {
+/* ── Sticky navbar ──────────────────────────────────────────────────────────── */
+.sticky-navbar {
   position: sticky;
   top: 0;
   z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--menubar-height);
+  padding: 0 0.5rem;
+  background: var(--p-content-background);
+  border-bottom: 1px solid var(--p-content-border-color);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+}
+
+.navbar-start {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.navbar-end {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+/* ── Inline sub-menu strip ──────────────────────────────────────────────────── */
+.submenu-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-left: 0.25rem;
+  border-left: 1px solid var(--p-content-border-color);
+  margin-left: 0.25rem;
+}
+
+.submenu-strip::-webkit-scrollbar {
+  display: none;
+}
+
+/* Active submenu item gets a stronger visual */
+.submenu-item--active {
+  font-weight: 600;
+}
+
+/* Ensure PrimeVue popup menu appears above everything */
+.p-menu.p-component {
+  z-index: 1200;
+}
+
+/* Highlight the currently active module in the hamburger popup */
+.p-menu .active-module-item .p-menuitem-link {
+  background: var(--p-primary-50, rgba(66, 133, 244, 0.08));
+  color: var(--p-primary-color);
+  font-weight: 600;
 }
 
 .content {
@@ -142,37 +222,13 @@ body {
   padding: 0;
 }
 
-.module-switcher {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  margin-right: 0.5rem;
-  padding-right: 0.5rem;
-  border-right: 1px solid var(--p-content-border-color);
-}
-
-.menu-end {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.user-name {
-  font-weight: 600;
-}
-
-/* Ensure PrimeVue mobile menubar dropdown appears above page content */
-.sticky-menubar .p-menubar-root-list {
-  z-index: 1100;
-}
-
-/* On phones (and the PrimeVue menubar's mobile collapse breakpoint) hide the
- * user name and strip Profil / Abmelden buttons down to icon-only so the
- * top bar fits without horizontal scroll on a 360–414 px viewport.
- * 768 px matches the rest of the app's mobile breakpoint. */
+/* On mobile (≤768 px) show only icons in the sub-menu strip */
 @media (max-width: 768px) {
-  .user-name { display: none; }
-  .menu-end :deep(.p-button-label) { display: none; }
-  .menu-end :deep(.p-button) { padding: 0.5rem; }
+  .submenu-strip .p-button-label {
+    display: none;
+  }
+  .submenu-strip .p-button {
+    padding: 0.5rem;
+  }
 }
 </style>

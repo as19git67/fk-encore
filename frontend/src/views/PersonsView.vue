@@ -31,6 +31,7 @@ import {
 import { faceBoxStyle, thumbnailImageStyle } from '../utils/faceBbox'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
+import { usePhotoNavStore } from '../stores/photoNav'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 import { useReferenceData } from '../composables/useReferenceData'
 
@@ -41,6 +42,7 @@ const { invalidatePersons } = useReferenceData()
 
 const auth = useAuthStore()
 const serviceHealth = useServiceHealthStore()
+const photoNav = usePhotoNavStore()
 const router = useRouter()
 const route = useRoute()
 const canDelete = computed(() => auth.hasPermission('photos.delete'))
@@ -371,6 +373,7 @@ watch(selectedPhoto, (photo) => {
   if (photo) {
     loadSidebarData(photo.id)
     if (selectedPerson.value) saveLastPhotoForPerson(selectedPerson.value.id, photo.id)
+    photoNav.selectPhoto(photo.id)
   } else { detectedFaces.value = []; detectedLandmarks.value = [] }
 })
 
