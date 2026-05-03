@@ -1,6 +1,7 @@
 import UIKit
 import SwiftUI
 import UniformTypeIdentifiers
+import Photos
 
 // MARK: - Extension entry point
 
@@ -166,7 +167,7 @@ struct ShareUploadView: View {
         isUploading = true
         errorMessage = nil
 
-        var items: [(Data, String, String)] = []
+        var items: [(Data, String, String, Bool, Date?)] = []
         for provider in itemProviders {
             if let item = await loadImageData(from: provider) {
                 items.append(item)
@@ -183,10 +184,11 @@ struct ShareUploadView: View {
         ShareConfig.saveRecentAlbumIds(Array(selectedAlbumIds))
 
         var uploadedIds: [Int] = []
-        for (data, filename, mimeType) in items {
+        for (data, filename, mimeType, isFavorite, capturedAt) in items {
             do {
                 let photoId = try await ShareAPIClient.uploadPhoto(
-                    data: data, filename: filename, mimeType: mimeType)
+                    data: data, filename: filename, mimeType: mimeType,
+                    isFavorite: isFavorite, capturedAt: capturedAt)
                 uploadedIds.append(photoId)
             } catch ShareAPIError.duplicate(let existingId) {
                 if let id = existingId { uploadedIds.append(id) }
@@ -208,7 +210,8 @@ struct ShareUploadView: View {
 
     // MARK: - Image data loading
 
-    private func loadImageData(from provider: NSItemProvider) async -> (Data, String, String)? {
+    private func loadImageData(from provider: NSItemProvider) async -> (Data, String, String, Bool, Date?)? {
+        let meta = await loadAssetMetadata(from: provider)
         let candidates: [(String, String, String)] = [
             (UTType.heic.identifier,  "heic", "image/heic"),
             (UTType.jpeg.identifier,  "jpg",  "image/jpeg"),
@@ -218,15 +221,39 @@ struct ShareUploadView: View {
         ]
         for (uti, ext, mime) in candidates {
             guard provider.hasItemConformingToTypeIdentifier(uti) else { continue }
-            let result: (Data, String, String)? = await withCheckedContinuation { cont in
+            let result: (Data, String, String, Bool, Date?)? = await withCheckedContinuation { cont in
                 provider.loadDataRepresentation(forTypeIdentifier: uti) { data, _ in
                     guard let data else { cont.resume(returning: nil); return }
-                    cont.resume(returning: (data, "photo.\(ext)", mime))
+                    cont.resume(returning: (data, "photo.\(ext)", mime, meta.isFavorite, meta.capturedAt))
                 }
             }
             if let result { return result }
         }
         return nil
+    }
+
+    /// Best-effort: reads PHAsset metadata (isFavorite, creationDate) when the
+    /// provider exposes an asset identifier (happens when sharing from Photos.app).
+    private func loadAssetMetadata(from provider: NSItemProvider) async -> (isFavorite: Bool, capturedAt: Date?) {
+        for uti in ["com.apple.photos.asset", "com.apple.photos.asset-identifiers"] {
+            guard provider.hasItemConformingToTypeIdentifier(uti) else { continue }
+            let localId: String? = await withCheckedContinuation { cont in
+                provider.loadItem(forTypeIdentifier: uti, options: nil) { item, _ in
+                    if let url = item as? URL, url.scheme == "phasset" {
+                        cont.resume(returning: url.host)
+                    } else if let ids = item as? [String], let id = ids.first {
+                        cont.resume(returning: id)
+                    } else {
+                        cont.resume(returning: nil)
+                    }
+                }
+            }
+            if let id = localId,
+               let asset = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil).firstObject {
+                return (isFavorite: asset.isFavorite, capturedAt: asset.creationDate)
+            }
+        }
+        return (isFavorite: false, capturedAt: nil)
     }
 }
 
@@ -292,10 +319,19 @@ enum ShareAPIClient {
         return data
     }
 
-    static func uploadPhoto(data: Data, filename: String, mimeType: String) async throws -> Int {
+    private static let iso8601: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    static func uploadPhoto(data: Data, filename: String, mimeType: String,
+                            isFavorite: Bool = false, capturedAt: Date? = nil) async throws -> Int {
         var request = try makeRequest(method: "POST", path: "/photos")
         request.setValue(mimeType, forHTTPHeaderField: "Content-Type")
         request.setValue(filename, forHTTPHeaderField: "X-File-Name")
+        if isFavorite { request.setValue("true", forHTTPHeaderField: "X-Is-Favorite") }
+        if let date = capturedAt { request.setValue(iso8601.string(from: date), forHTTPHeaderField: "X-Captured-At") }
         request.httpBody = data
         request.timeoutInterval = 120
 
