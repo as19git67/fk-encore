@@ -78,7 +78,8 @@ struct SyncSettingsView: View {
                         NavigationLink {
                             ServerAlbumPickerView(
                                 title: "Ziel-Album",
-                                selectedAlbumId: allPhotosAlbumBinding
+                                selectedAlbumId: allPhotosAlbumBinding,
+                                disabledIds: DownloadSyncPreferences.selectedServerAlbumIds
                             )
                         } label: {
                             HStack {
@@ -100,7 +101,8 @@ struct SyncSettingsView: View {
                             NavigationLink {
                                 ServerAlbumPickerView(
                                     title: iosAlbumNames[iosId] ?? "Album",
-                                    selectedAlbumId: serverAlbumBinding(for: iosId)
+                                    selectedAlbumId: serverAlbumBinding(for: iosId),
+                                    disabledIds: DownloadSyncPreferences.selectedServerAlbumIds
                                 )
                             } label: {
                                 HStack {
