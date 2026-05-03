@@ -1673,10 +1673,64 @@ export async function uploadPhotoStream(
           .where(eq(photos.id, existing.id))
       );
     }
+    // If the client flagged the photo as favourite on re-upload (e.g. the user
+    // marked it as favourite in iOS Photos and then shared it again), honour
+    // that intent on the existing record.
+    if (isFavorite) {
+      await dbExec(
+        db.insert(photoCuration)
+          .values({ user_id: userId, photo_id: existing.id, status: "favorite" })
+          .onConflictDoUpdate({
+            target: [photoCuration.user_id, photoCuration.photo_id],
+            set: { status: "favorite", updated_at: sql`NOW()` },
+          })
+      );
+    }
     if (fs.existsSync(tempPath)) {
       fs.unlinkSync(tempPath);
     }
     throw new PhotoAlreadyExistsError(existing.id);
+  }
+
+  // taken_at duplicate detection: iOS embeds the caption into the EXIF when
+  // sharing a photo that has a description in Photos.app. This changes the
+  // binary (and thus the hash) even though it is the same underlying photo.
+  // When the new upload brings new metadata (a description or a favourite
+  // flag) and a photo with the exact same capture second already exists for
+  // this user, update that existing record instead of creating a second one.
+  // Guard: skip when the new upload has NO new metadata so that burst photos
+  // (same taken_at, different content, no description) each keep their own record.
+  const descriptionValueEarly = combineDescription(exifMeta);
+  const hasNewMetadata = isFavorite || !!descriptionValueEarly || (exifMeta.rating !== null && exifMeta.rating >= 4);
+  if (exifMeta.takenAt && hasNewMetadata) {
+    const takenAtDup = await dbFirst<{ id: number; description: string | null }>(
+      db.select({ id: photos.id, description: photos.description })
+        .from(photos)
+        .where(and(eq(photos.user_id, userId), eq(photos.taken_at, exifMeta.takenAt)))
+    );
+    if (takenAtDup) {
+      // Update description when the existing record has none but the new upload does.
+      if (descriptionValueEarly && !takenAtDup.description) {
+        await dbExec(
+          db.update(photos)
+            .set({ description: descriptionValueEarly })
+            .where(eq(photos.id, takenAtDup.id))
+        );
+      }
+      // Honour favourite intent.
+      if (isFavorite || (exifMeta.rating !== null && exifMeta.rating >= 4)) {
+        await dbExec(
+          db.insert(photoCuration)
+            .values({ user_id: userId, photo_id: takenAtDup.id, status: "favorite" })
+            .onConflictDoUpdate({
+              target: [photoCuration.user_id, photoCuration.photo_id],
+              set: { status: "favorite", updated_at: sql`NOW()` },
+            })
+        );
+      }
+      if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+      throw new PhotoAlreadyExistsError(takenAtDup.id);
+    }
   }
 
   // Move the file into its final YYYY/YYYY-MM/YYYY-MM-DD_at_HH.MM.SS_NN.ext slot.
@@ -1684,7 +1738,7 @@ export async function uploadPhotoStream(
   const { absPath: filePath, relPath: filename } = await reserveStoragePath(storageTs, ext);
   await fs.promises.rename(tempPath, filePath);
 
-  const descriptionValue = combineDescription(exifMeta);
+  const descriptionValue = descriptionValueEarly;
   // Pre-fill location from IPTC when present, sparing us a Nominatim call.
   const iptcLoc = iptcLocationUpdate(exifMeta);
   const uploadKeywords = mergeRatingKeyword(exifMeta.keywords, exifMeta.rating);
