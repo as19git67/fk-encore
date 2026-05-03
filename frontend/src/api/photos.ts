@@ -467,6 +467,23 @@ export function hardDeletePhoto(id: number) {
   })
 }
 
+export interface BatchDeleteSkippedPhoto {
+  id: number
+  reason: 'not_owner' | 'readonly'
+}
+
+export interface BatchDeleteResult {
+  deleted: number[]
+  skipped: BatchDeleteSkippedPhoto[]
+}
+
+export function batchDeletePhotos(photoIds: number[]) {
+  return apiFetch<BatchDeleteResult>('/photos/batch-delete', {
+    method: 'POST',
+    body: JSON.stringify({ photoIds })
+  })
+}
+
 // ---------- Destructive: Purge ----------
 
 export interface PurgeFilesResult {

@@ -51,7 +51,9 @@ import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Chip from 'primevue/chip'
+import Dialog from 'primevue/dialog'
 import Message from 'primevue/message'
+import { useConfirm } from 'primevue/useconfirm'
 import VirtualGallery from '../components/VirtualGallery.vue'
 import FilterMenu from '../components/FilterMenu.vue'
 import FilterChips from '../components/FilterChips.vue'
@@ -84,6 +86,8 @@ import {
   ignoreFace,
   reindexPhoto,
   updatePhotoDate,
+  batchDeletePhotos,
+  type BatchDeleteSkippedPhoto,
   type Photo,
   type PhotoGroup,
   type CurationStatus,
@@ -95,6 +99,7 @@ const auth = useAuthStore()
 const serviceHealth = useServiceHealthStore()
 const route = useRoute()
 const router = useRouter()
+const confirm = useConfirm()
 const { persons, fetchPersons } = useReferenceData()
 void fetchPersons() // module-cached; no-op on subsequent visits
 
@@ -322,6 +327,44 @@ async function applyCurationToSelection(target: 'favorite' | 'hidden' | 'visible
     }
   } finally {
     curationBusy.value = false
+    exitSelectMode()
+  }
+}
+
+// ── Batch delete ────────────────────────────────────────────────────────────
+const deleteBusy = ref(false)
+const deleteSkipped = ref<BatchDeleteSkippedPhoto[]>([])
+const showDeleteSkippedDialog = ref(false)
+
+function deleteFromSelection() {
+  const ids = Array.from(selectedIds.value)
+  if (ids.length === 0) return
+  confirm.require({
+    message: `${ids.length} ${ids.length === 1 ? 'Foto' : 'Fotos'} endgültig löschen? Diese Aktion kann nicht rückgängig gemacht werden.`,
+    header: 'Fotos löschen',
+    icon: 'pi pi-exclamation-triangle',
+    rejectLabel: 'Abbrechen',
+    acceptLabel: 'Endgültig löschen',
+    acceptClass: 'p-button-danger',
+    accept: () => void performBatchDelete(ids),
+  })
+}
+
+async function performBatchDelete(ids: number[]) {
+  deleteBusy.value = true
+  try {
+    const result = await batchDeletePhotos(ids)
+    if (result.skipped.length > 0) {
+      deleteSkipped.value = result.skipped
+      showDeleteSkippedDialog.value = true
+    }
+    if (result.deleted.length > 0) {
+      await galleryRef.value?.reload()
+    }
+  } catch (err: any) {
+    error.value = err?.message ?? 'Fehler beim Löschen der Fotos.'
+  } finally {
+    deleteBusy.value = false
     exitSelectMode()
   }
 }
@@ -1237,6 +1280,15 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
           @click="applyCurationToSelection('hidden')"
         />
         <Button
+          v-if="selectedCount > 0 && canManageData"
+          label="Löschen"
+          icon="pi pi-trash"
+          size="small"
+          severity="danger"
+          :disabled="deleteBusy || curationBusy"
+          @click="deleteFromSelection"
+        />
+        <Button
           v-if="selectedCount > 0"
           label="Auswahl aufheben"
           icon="pi pi-replay"
@@ -1255,6 +1307,37 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
         />
       </div>
     </div>
+
+    <!-- Warning dialog: skipped photos after batch delete -->
+    <Dialog
+      v-model:visible="showDeleteSkippedDialog"
+      :modal="true"
+      header="Einige Fotos wurden übersprungen"
+      :style="{ width: '26rem' }"
+      :closable="true"
+    >
+      <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+        <p
+          v-if="deleteSkipped.filter(s => s.reason === 'not_owner').length > 0"
+          style="margin: 0"
+        >
+          <i class="pi pi-info-circle" style="margin-right: 0.4rem;" />
+          {{ deleteSkipped.filter(s => s.reason === 'not_owner').length }}
+          Foto(s) übersprungen – du bist nicht der Eigentümer.
+        </p>
+        <p
+          v-if="deleteSkipped.filter(s => s.reason === 'readonly').length > 0"
+          style="margin: 0"
+        >
+          <i class="pi pi-info-circle" style="margin-right: 0.4rem;" />
+          {{ deleteSkipped.filter(s => s.reason === 'readonly').length }}
+          Foto(s) übersprungen – Dateiquelle ist schreibgeschützt (Bibliotheks-Import).
+        </p>
+      </div>
+      <template #footer>
+        <Button label="OK" @click="showDeleteSkippedDialog = false" />
+      </template>
+    </Dialog>
   </div>
 </template>
 
