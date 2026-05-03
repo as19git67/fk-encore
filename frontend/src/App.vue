@@ -222,8 +222,8 @@ body {
   padding: 0;
 }
 
-/* On narrow viewports hide sub-menu item labels, showing only icons */
-@media (max-width: 600px) {
+/* On mobile (≤768 px) show only icons in the sub-menu strip */
+@media (max-width: 768px) {
   .submenu-strip :deep(.p-button-label) {
     display: none;
   }
