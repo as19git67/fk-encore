@@ -5,6 +5,7 @@ import SwiftUI
 struct ServerAlbumPickerView: View {
     let title: String
     @Binding var selectedAlbumId: Int?
+    var disabledIds: Set<Int> = []
 
     @Environment(\.dismiss) private var dismiss
 
@@ -54,12 +55,20 @@ struct ServerAlbumPickerView: View {
                 }
 
                 ForEach(filteredAlbums) { album in
+                    let isDisabled = disabledIds.contains(album.id)
                     Button {
                         pendingAlbumId = album.id
                     } label: {
                         HStack {
-                            Text(album.name)
-                                .foregroundStyle(.primary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(album.name)
+                                    .foregroundStyle(.primary)
+                                if isDisabled {
+                                    Text("Wird heruntergeladen")
+                                        .font(.caption)
+                                        .foregroundStyle(.orange)
+                                }
+                            }
                             Spacer()
                             if selectedAlbumId == album.id {
                                 Image(systemName: "checkmark")
@@ -68,6 +77,7 @@ struct ServerAlbumPickerView: View {
                             }
                         }
                     }
+                    .disabled(isDisabled)
                 }
             }
         }

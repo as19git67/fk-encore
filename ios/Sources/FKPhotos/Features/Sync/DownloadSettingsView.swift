@@ -34,7 +34,8 @@ struct DownloadSettingsView: View {
                     NavigationLink {
                         DownloadAlbumPickerView(
                             serverAlbums: serverAlbums,
-                            selectedIds: $selectedAlbumIds
+                            selectedIds: $selectedAlbumIds,
+                            disabledIds: uploadAlbumIds
                         )
                         .onChange(of: selectedAlbumIds) { _, newValue in
                             DownloadSyncPreferences.selectedServerAlbumIds = newValue
@@ -193,6 +194,14 @@ struct DownloadSettingsView: View {
         }
     }
 
+    /// Server album IDs that are already configured as upload targets.
+    private var uploadAlbumIds: Set<Int> {
+        var ids = Set<Int>()
+        if let id = PhotoSyncPreferences.allPhotosTargetAlbumId { ids.insert(id) }
+        ids.formUnion(PhotoSyncPreferences.albumMappings.values)
+        return ids
+    }
+
     private func loadServerAlbums() async {
         do {
             let response: ListAlbumsResponse = try await APIClient.shared.get("/albums")
@@ -208,6 +217,7 @@ struct DownloadSettingsView: View {
 struct DownloadAlbumPickerView: View {
     let serverAlbums: [Album]
     @Binding var selectedIds: Set<Int>
+    var disabledIds: Set<Int> = []
 
     @State private var searchText = ""
 
@@ -232,6 +242,7 @@ struct DownloadAlbumPickerView: View {
                 }
             } else {
                 ForEach(filteredAlbums) { album in
+                    let isDisabled = disabledIds.contains(album.id)
                     Button {
                         if selectedIds.contains(album.id) {
                             selectedIds.remove(album.id)
@@ -243,9 +254,15 @@ struct DownloadAlbumPickerView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(album.name)
                                     .foregroundStyle(.primary)
-                                Text("\(album.photo_count) Foto\(album.photo_count == 1 ? "" : "s")")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                if isDisabled {
+                                    Text("Wird hochgeladen")
+                                        .font(.caption)
+                                        .foregroundStyle(.orange)
+                                } else {
+                                    Text("\(album.photo_count) Foto\(album.photo_count == 1 ? "" : "s")")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                             Spacer()
                             if selectedIds.contains(album.id) {
@@ -255,6 +272,7 @@ struct DownloadAlbumPickerView: View {
                             }
                         }
                     }
+                    .disabled(isDisabled)
                 }
             }
         }
