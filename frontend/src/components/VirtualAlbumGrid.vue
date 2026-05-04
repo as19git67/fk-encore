@@ -292,10 +292,10 @@ watch(
 
 .album-card:hover { transform: scale(1.02); }
 
-.album-card:focus-visible,
+.album-card:focus,
 .album-card.album-card--restored-focus {
-  outline: 2px solid var(--p-primary-300);
-  outline-offset: -2px;
+  outline: 3px solid var(--p-primary-color, #3b82f6);
+  outline-offset: 2px;
 }
 
 .shared-badge {

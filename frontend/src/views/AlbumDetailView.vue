@@ -764,7 +764,6 @@ async function handleSaveAlbumSettings() {
     album.value.name = newName
     album.value.description = albumSettingsDesc.value.trim()
     album.value.display_mode = albumSettingsMapEnabled.value ? 'map' : 'grid'
-    editingDescription.value = false
     showAlbumSettingsDialog.value = false
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Speichern'
@@ -1015,31 +1014,6 @@ async function scrollToCover() {
   if (idx >= 0) selectedIndex.value = idx
 }
 
-// ── Description editing ───────────────────────────────────────────────────────
-const updatingAlbum = ref(false)
-const editingDescription = ref(false)
-const descDraft = ref('')
-
-function startEditDesc() {
-  if (!album.value) return
-  descDraft.value = album.value.description || ''
-  editingDescription.value = true
-}
-
-async function saveDescription() {
-  if (!album.value) return
-  updatingAlbum.value = true
-  try {
-    await updateAlbum(albumId.value, { description: descDraft.value })
-    invalidateAlbums()
-    album.value.description = descDraft.value
-    editingDescription.value = false
-  } catch (err: any) {
-    error.value = err.message || 'Fehler beim Speichern der Beschreibung'
-  } finally {
-    updatingAlbum.value = false
-  }
-}
 
 // ── Mobile drawer state ───────────────────────────────────────────────────────
 const mobileSidebarOpen = ref(false)
@@ -1117,23 +1091,6 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
           <template v-if="album.oldest_photo_at && album.newest_photo_at">
             &bull; {{ new Date(album.oldest_photo_at).toLocaleDateString() }} – {{ new Date(album.newest_photo_at).toLocaleDateString() }}
           </template>
-        </div>
-
-        <!-- 3. Description with edit -->
-        <div v-if="viewMode !== 'map'" class="header__description">
-          <div v-if="!editingDescription" class="header__description-view">
-            <span :class="{ 'header__description-text--empty': !album.description }" class="header__description-text">
-              {{ album.description || 'Keine Beschreibung' }}
-            </span>
-            <Button v-if="canWrite" icon="pi pi-pencil" size="small" text @click="startEditDesc" />
-          </div>
-          <div v-else class="header__description-edit">
-            <textarea v-model="descDraft" class="p-inputtextarea p-inputtext" rows="2" />
-            <div class="header__description-edit-actions">
-              <Button :loading="updatingAlbum" icon="pi pi-check" size="small" @click="saveDescription" />
-              <Button :disabled="updatingAlbum" icon="pi pi-times" size="small" text @click="editingDescription = false" />
-            </div>
-          </div>
         </div>
 
         <!-- 5. Filter -->
@@ -1642,17 +1599,6 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
   .header__badge--contributor { background: var(--p-green-900); color: var(--p-green-200); }
 }
 
-.header__description {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.header__description-view { display: flex; align-items: center; gap: 0.5em; }
-.header__description-text { font-size: 0.9em; }
-.header__description-text--empty { color: var(--p-text-muted-color); font-style: italic; }
-.header__description-edit { display: flex; align-items: center; gap: 0.5em; width: 100%; }
-.header__description-edit textarea { flex: 1; min-height: 2.5em; }
-.header__description-edit-actions { display: flex; gap: 0.25em; }
-
 .header__meta {
   font-size: 0.85em;
   color: var(--p-text-muted-color);
@@ -1770,8 +1716,6 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
   /* Compact header on mobile */
   .header { padding: 0.35em 0.65em; gap: 0.25em 0.5em; }
   .header__title { font-size: 1.1em; }
-  .header__description { flex: 1 1 100%; }
-  .header__description-text--empty { display: none; }
 }
 
 /* ── Delete / settings dialog ───────────────────────────────────────────── */
