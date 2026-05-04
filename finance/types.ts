@@ -81,6 +81,18 @@ export interface FintsTransactionData {
   purpose: string | null;
   counterparty: string | null;
   counterpartyIban: string | null;
+  /** SEPA End-to-End reference (EREF). */
+  end_to_end_ref: string | null;
+  /** SEPA Mandate reference (MREF) for direct debits. */
+  mandate_ref: string | null;
+  /** SEPA Creditor identifier (CRED / CI). */
+  creditor_id: string | null;
+  /** MT940 Geschäftsvorfall-Code (NTRF / RCDT / ICDT / …). */
+  gv_code: string | null;
+  /** MT940 entry text ("Lastschrift", "Gutschrift", "Überweisung", …). */
+  entry_text: string | null;
+  /** Primanota number — bank-internal posting batch id. */
+  prima_nota_no: string | null;
   /** lib-fints `bankReference` — the bank's internal booking-batch
    *  reference. Often missing; not used for idempotency (that's
    *  `dedupe_hash` over the canonical fields). Maps to the `bank_ref`
