@@ -951,6 +951,7 @@ async function onGalleryLoaded() {
     const idx = galleryRef.value.findLoadedIndexById(initialAnchor.value)
     if (idx !== null) {
       cursorIndex.value = idx
+      galleryRef.value.scrollToIndex(idx)
       void hydrateCursor(idx)
     }
   }
