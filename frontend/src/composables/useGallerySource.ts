@@ -262,6 +262,27 @@ export function useGallerySource(): GallerySource {
         pagePromises.set(p, Promise.resolve())
         p += GALLERY_PAGE_SIZE
       }
+
+      // Optimization: Also mark the partially-covered leading and trailing pages as
+      // "resolving" so ensureRange() doesn't immediately fire redundant page-aligned
+      // fetches for them. Since spliceIn() already filled the slots we have,
+      // and the virtualizer only needs to fill the viewport, this prevents the
+      // initial "triple call" (aroundPhotoId + page 0 + page 1).
+      //
+      // NOTE: We only do this if we actually got some photos. If the response
+      // was empty (e.g. at the very end of the gallery), we don't want to
+      // block future fetches.
+      if (res.photos.length > 0) {
+        const leadingPage = pageStartForOffset(res.offset)
+        if (!pagePromises.has(leadingPage)) {
+          pagePromises.set(leadingPage, Promise.resolve())
+        }
+        const trailingPage = pageStartForOffset(responseEnd - 1)
+        if (trailingPage >= res.offset && !pagePromises.has(trailingPage)) {
+          pagePromises.set(trailingPage, Promise.resolve())
+        }
+      }
+
       spliceIn(res.offset, res.photos)
       return { initialOffset: res.offset, total: res.total }
     } catch (err: any) {
