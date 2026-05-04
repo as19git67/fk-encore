@@ -817,7 +817,9 @@ export async function runFetchAccounts(
       ? opts.fromByAccountNumber?.get(account.accountNumber) ?? opts.defaultFrom
       : undefined;
     const r = await fetchOneAccount(client, account, sleep, { fetch, from });
-    if (r.snapshot.errors.length > 0) partial = true;
+    if (r.snapshot.errors.length > 0) {
+      partial = true;
+    }
     snapshots.push(r.snapshot);
 
     if (r.pendingTan) {
@@ -881,7 +883,14 @@ async function fetchOneAccount(
   sleep: (ms: number) => Promise<void>,
   opts: { fetch: boolean; from?: Date } = { fetch: true },
 ): Promise<FetchOneResult> {
-  const accountKind = mapAccountKind(account.accountType);
+  const canGetCC = typeof client.canGetCreditCardStatements === "function" &&
+    client.canGetCreditCardStatements(account.accountNumber);
+
+  let accountKind = mapAccountKind(account.accountType);
+  if (accountKind === "sonstige" && canGetCC) {
+    accountKind = "kreditkarte";
+  }
+
   const currency = account.currency ?? "EUR";
   const label = buildAccountLabel(account, accountKind);
 
@@ -907,11 +916,13 @@ async function fetchOneAccount(
   // kreditkarte accounts when the bank supports it. This returns
   // CreditCardStatement objects which carry original-currency fields
   // and are structured differently from MT940/CAMT statements.
+  console.log(`[fints] account ${account.accountNumber}: type=${account.accountType}, kind=${accountKind}`);
   const isCreditCard = accountKind === "kreditkarte";
-  const useCreditCardPath =
-    isCreditCard &&
-    typeof client.canGetCreditCardStatements === "function" &&
-    client.canGetCreditCardStatements(account.accountNumber);
+
+  const useCreditCardPath = isCreditCard && canGetCC;
+
+  console.log(`[fints] account ${account.accountNumber}: ${isCreditCard ? "credit-card" : "bank-account"}, canGetCC=${canGetCC}`);
+  console.log(`[fints] account ${account.accountNumber}: credit-card path=${useCreditCardPath}`);
 
   try {
     let stmtResp;
@@ -969,6 +980,7 @@ async function fetchOneAccount(
       return {
         snapshot,
         pendingTan: {
+          accountNumber: account.accountNumber,
           tanReference: ref,
           tanChallenge: stmtResp.tanChallenge,
           tanMediaName: stmtResp.tanMediaName,
@@ -978,11 +990,12 @@ async function fetchOneAccount(
             : undefined,
         },
       };
-    } else if (!stmtResp.success) {
+    } else if (stmtResp.success === false) {
       const first = stmtResp.bankAnswers.find((a) => a.code !== 0);
       snapshot.errors.push(
         `statements-error:${first?.code ?? "unknown"} ${first?.text ?? ""}`.trim(),
       );
+      return { snapshot };
     } else if (useCreditCardPath) {
       const ccStmt = stmtResp as typeof stmtResp & {
         statements?: Array<{
@@ -1032,7 +1045,7 @@ async function fetchOneAccount(
     }
     if (balResp.requiresTan) {
       snapshot.errors.push("balance-tan-required");
-    } else if (!balResp.success) {
+    } else if (balResp.success === false) {
       const first = balResp.bankAnswers.find((a) => a.code !== 0);
       snapshot.errors.push(
         `balance-error:${first?.code ?? "unknown"} ${first?.text ?? ""}`.trim(),
@@ -1207,7 +1220,7 @@ export async function resumeFetchAfterTan(
     }
     if (balResp.requiresTan) {
       snapshot.errors.push("balance-tan-required");
-    } else if (!balResp.success) {
+    } else if (balResp.success === false) {
       const first = balResp.bankAnswers.find((a) => a.code !== 0);
       snapshot.errors.push(
         `balance-error:${first?.code ?? "unknown"} ${first?.text ?? ""}`.trim(),
@@ -1268,6 +1281,7 @@ function mapAccountKind(accountType: string | undefined): string {
     case "LoanMortgageAccount":
       return "kredit";
     case "CreditCardAccount":
+    case "CreditCard":
       return "kreditkarte";
     case "HomeSavingsContract":
       return "bausparen";
@@ -1324,6 +1338,9 @@ function mapCreditCardStatements(
     originalCurrency: string;
     originalAmount: number;
     exchangeRate: number;
+    /** Some banks provide a unique transaction ID. */
+    id?: string;
+    transactionId?: string;
   }>,
 ): FintsTransactionData[] {
   return statements.map((s) => {
@@ -1339,7 +1356,13 @@ function mapCreditCardStatements(
       purpose: s.purpose?.trim() || null,
       counterparty: null,
       counterpartyIban: null,
-      bankRef: null,
+      end_to_end_ref: null,
+      mandate_ref: null,
+      creditor_id: null,
+      gv_code: null,
+      entry_text: null,
+      prima_nota_no: null,
+      bankRef: s.transactionId || s.id || null,
       originalAmount: isForeignCurrency ? toAmountString(s.originalAmount) : null,
       originalCurrency: isForeignCurrency ? s.originalCurrency : null,
       exchangeRate: isForeignCurrency && s.exchangeRate
@@ -1353,15 +1376,21 @@ function mapCreditCardStatements(
 function mapStatements(
   statements: Array<{
     transactions?: Array<{
-      valueDate?: Date | string;
-      entryDate?: Date | string;
-      amount?: number;
-      purpose?: string;
-      remoteName?: string;
-      remoteIdentifier?: string;
-      bankReference?: string;
-      [key: string]: unknown;
-    }>;
+        valueDate?: Date | string;
+        entryDate?: Date | string;
+        amount?: number;
+        purpose?: string;
+        remoteName?: string;
+        remoteIdentifier?: string;
+        bankReference?: string;
+        endToEndReference?: string;
+        mandateReference?: string;
+        creditorIdentifier?: string;
+        gvCode?: string;
+        entryText?: string;
+        primanota?: string;
+        [key: string]: unknown;
+      }>;
   }>,
   currency: string,
 ): FintsTransactionData[] {
@@ -1377,6 +1406,12 @@ function mapStatements(
         purpose: t.purpose?.trim() || null,
         counterparty: t.remoteName?.trim() || null,
         counterpartyIban: t.remoteIdentifier?.trim() || null,
+        end_to_end_ref: t.endToEndReference?.trim() || null,
+        mandate_ref: t.mandateReference?.trim() || null,
+        creditor_id: t.creditorIdentifier?.trim() || null,
+        gv_code: t.gvCode?.trim() || null,
+        entry_text: t.entryText?.trim() || null,
+        prima_nota_no: t.primanota?.trim() || null,
         bankRef: t.bankReference?.trim() || null,
         originalAmount: null,
         originalCurrency: null,
