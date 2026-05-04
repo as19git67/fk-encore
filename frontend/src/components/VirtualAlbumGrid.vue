@@ -24,22 +24,16 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
-import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
 import { type Album, getPhotoUrl } from '../api/photos'
 
 const props = defineProps<{
   albums: Album[]
   rememberedAlbumId?: number | null
-  canManage?: (album: Album) => boolean
-  canShare?: (album: Album) => boolean
 }>()
 
 const emit = defineEmits<{
   open: [album: Album]
-  share: [album: Album]
-  edit: [album: Album]
-  remove: [album: Album]
 }>()
 
 // ── Layout: column count + cell size ────────────────────────────────────────
@@ -119,14 +113,44 @@ function highlightAlbum(id: number) {
   }, 2500)
 }
 
+// ── Arrow-key navigation ─────────────────────────────────────────────────────
+function handleContainerKeydown(e: KeyboardEvent) {
+  const focused = scrollRef.value?.querySelector<HTMLElement>('[data-album-id]:focus')
+  if (!focused) return
+  const id = Number(focused.dataset.albumId)
+  const idx = props.albums.findIndex(a => a.id === id)
+  if (idx < 0) return
+
+  let nextIdx: number
+  if (e.key === 'ArrowRight') nextIdx = Math.min(idx + 1, props.albums.length - 1)
+  else if (e.key === 'ArrowLeft') nextIdx = Math.max(idx - 1, 0)
+  else if (e.key === 'ArrowDown') nextIdx = Math.min(idx + cols.value, props.albums.length - 1)
+  else if (e.key === 'ArrowUp') nextIdx = Math.max(idx - cols.value, 0)
+  else return
+
+  e.preventDefault()
+  if (nextIdx === idx) return
+  const targetAlbum = props.albums[nextIdx]
+  if (!targetAlbum) return
+  scrollToAlbum(targetAlbum.id, { focus: true })
+}
+
 // ── Public API ───────────────────────────────────────────────────────────────
-function scrollToAlbum(id: number, opts: { highlight?: boolean } = {}): boolean {
+function scrollToAlbum(id: number, opts: { highlight?: boolean; focus?: boolean } = {}): boolean {
   if (cols.value <= 0 || props.albums.length === 0) return false
   const idx = props.albums.findIndex(a => a.id === id)
   if (idx < 0) return false
   const row = Math.floor(idx / cols.value)
   virtualizer.value.scrollToIndex(row, { align: 'center' })
   if (opts.highlight) highlightAlbum(id)
+  if (opts.focus) {
+    // Wait one frame for Vue/virtualizer to render the newly-visible row,
+    // then focus the card so keyboard navigation works immediately.
+    requestAnimationFrame(() => {
+      const card = scrollRef.value?.querySelector<HTMLElement>(`[data-album-id="${id}"]`)
+      card?.focus({ preventScroll: true })
+    })
+  }
   return true
 }
 
@@ -161,7 +185,7 @@ async function tryInitialScroll() {
   if (!props.rememberedAlbumId) return
   if (cols.value <= 0 || props.albums.length === 0) return
   await new Promise<void>((r) => requestAnimationFrame(() => r()))
-  if (scrollToAlbum(props.rememberedAlbumId, { highlight: true })) {
+  if (scrollToAlbum(props.rememberedAlbumId, { highlight: true, focus: true })) {
     initialScrollDone = true
   }
 }
@@ -174,7 +198,7 @@ watch(
 </script>
 
 <template>
-  <div ref="scrollRef" class="vag">
+  <div ref="scrollRef" class="vag" @keydown="handleContainerKeydown">
     <div class="vag__inner" :style="{ height: `${totalSize}px` }">
       <div
         v-for="row in virtualRows"
@@ -209,15 +233,6 @@ watch(
             </div>
           </div>
           <i v-if="album.is_shared" class="pi pi-share-alt shared-badge" v-tooltip="'Freigegeben'" />
-          <div
-            v-if="canShare?.(album) || canManage?.(album)"
-            class="album-actions"
-            @click.stop
-          >
-            <Button v-if="canShare?.(album)" icon="pi pi-share-alt" text rounded size="small" v-tooltip="'Freigeben'" @click="emit('share', album)" />
-            <Button v-if="canManage?.(album)" icon="pi pi-pencil" text rounded size="small" v-tooltip="'Bearbeiten'" @click="emit('edit', album)" />
-            <Button v-if="canManage?.(album)" icon="pi pi-trash" text rounded size="small" severity="danger" v-tooltip="'Löschen'" @click="emit('remove', album)" />
-          </div>
           <div class="album-info">
             <span class="album-name">{{ album.name }}</span>
             <span v-if="album.description" class="album-desc">{{ album.description }}</span>
@@ -277,10 +292,10 @@ watch(
 
 .album-card:hover { transform: scale(1.02); }
 
-.album-card:focus-visible,
+.album-card:focus,
 .album-card.album-card--restored-focus {
-  outline: 2px solid var(--p-primary-300);
-  outline-offset: -2px;
+  outline: 3px solid var(--p-primary-color, #3b82f6);
+  outline-offset: 2px;
 }
 
 .shared-badge {
@@ -295,24 +310,6 @@ watch(
   padding: 0.35rem;
   backdrop-filter: blur(4px);
 }
-
-.album-actions {
-  position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  z-index: 1;
-  display: flex;
-  gap: 0.25rem;
-  padding: 0.25rem;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(4px);
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-.album-actions :deep(.p-button) { color: #fff; }
-.album-card:hover .album-actions,
-.album-card:focus-within .album-actions { opacity: 1; }
 
 .album-cover {
   width: 100%;

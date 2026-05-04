@@ -2,9 +2,12 @@
 import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
+import Checkbox from 'primevue/checkbox'
 import Chip from 'primevue/chip'
 import Dialog from 'primevue/dialog'
+import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
+import Select from 'primevue/select'
 import SelectButton from 'primevue/selectbutton'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import PhotoGrid from '../components/PhotoGrid.vue'
@@ -21,26 +24,36 @@ import { matchesPhotoFilter, type PhotoFilterContext } from '../utils/photoFilte
 
 const TripMap = defineAsyncComponent(() => import('../components/TripMap.vue'))
 import {
+  type AlbumAccessLevel,
+  type AlbumPublicLink,
+  type AlbumShareWithUser,
   type AlbumWithPhotos,
+  type PublicLinkExpiry,
+  createAlbumPublicLink,
   deleteAlbum,
-  getPhotoFaces,
+  deleteAlbumPublicLink,
   getAlbum,
+  getAlbumShares,
+  getPhotoFaces,
   getPhotoLandmarks,
   ignoreFace,
   leaveAlbum,
   listPhotoGroups,
   reindexPhoto,
+  removeAlbumShare,
+  shareAlbum,
   type CurationStatus,
   type Face,
   type LandmarkItem,
   type Photo,
   type PhotoFilter,
   type PhotoGroup,
-  updatePhotoCuration,
-  updatePhotoDate,
   updateAlbum,
   updateAlbumUserSettings,
+  updatePhotoCuration,
+  updatePhotoDate,
 } from '../api/photos'
+import { listUsers, type UserWithRoles } from '../api/users'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
 import { usePhotoNavStore } from '../stores/photoNav'
@@ -74,6 +87,8 @@ const rememberFocusedAlbum = rememberFocusedAlbumId
 // unfiltered list before AlbumsView re-applies state from localStorage.
 function navigateBackToAlbums() {
   rememberFocusedAlbum(albumId.value)
+  // Prevent AlbumsView from jumping back into this album when it mounts.
+  photoNav.consumeAlbumJump()
   router.push({ name: 'fotos-albums', query: albumsViewQueryFromStorage() })
 }
 
@@ -493,7 +508,7 @@ watch(selectedIndex, () => {
 watch(selectedPhoto, (photo) => {
   if (photo && album.value) {
     saveLastPhotoForAlbum(album.value.id, photo.id)
-    photoNav.selectPhoto(photo.id)
+    photoNav.selectPhotoInAlbum(photo.id, album.value.id)
   }
 })
 
@@ -719,6 +734,178 @@ async function handleSetMapCover(photoId: number) {
   }
 }
 
+// ── Album settings (rename + map mode) ───────────────────────────────────────
+const showAlbumSettingsDialog = ref(false)
+const albumSettingsName = ref('')
+const albumSettingsDesc = ref('')
+const albumSettingsMapEnabled = ref(false)
+const albumSettingsUpdating = ref(false)
+
+function openAlbumSettingsDialog() {
+  if (!album.value) return
+  albumSettingsName.value = album.value.name
+  albumSettingsDesc.value = album.value.description || ''
+  albumSettingsMapEnabled.value = album.value.display_mode === 'map'
+  showAlbumSettingsDialog.value = true
+}
+
+async function handleSaveAlbumSettings() {
+  if (!album.value) return
+  const newName = albumSettingsName.value.trim()
+  if (!newName) return
+  albumSettingsUpdating.value = true
+  try {
+    await updateAlbum(albumId.value, {
+      name: newName,
+      description: albumSettingsDesc.value.trim(),
+      displayMode: albumSettingsMapEnabled.value ? 'map' : 'grid',
+    })
+    invalidateAlbums()
+    album.value.name = newName
+    album.value.description = albumSettingsDesc.value.trim()
+    album.value.display_mode = albumSettingsMapEnabled.value ? 'map' : 'grid'
+    showAlbumSettingsDialog.value = false
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Speichern'
+  } finally {
+    albumSettingsUpdating.value = false
+  }
+}
+
+// ── Album sharing ─────────────────────────────────────────────────────────────
+const canShareAlbum = computed(() => {
+  if (!album.value) return false
+  if (isOwner.value) return true
+  return album.value.my_access_level === 'write_share'
+})
+
+const showShareDialog = ref(false)
+const albumSharesList = ref<AlbumShareWithUser[]>([])
+const allShareUsers = ref<UserWithRoles[]>([])
+const shareUserId = ref<number | null>(null)
+const shareAccessLevel = ref<AlbumAccessLevel>('read')
+const sharing = ref(false)
+const loadingShares = ref(false)
+const publicLink = ref<AlbumPublicLink | null>(null)
+const linkCopied = ref(false)
+const linkExpiry = ref<string | null>(null)
+const expiryOptions = [
+  { label: 'Unbegrenzt', value: null },
+  { label: '7 Tage', value: '7d' },
+  { label: '30 Tage', value: '30d' },
+  { label: '90 Tage', value: '90d' },
+]
+const OWNER_ACCESS_LEVELS: Array<{ label: string; value: AlbumAccessLevel }> = [
+  { label: 'Nur lesen', value: 'read' },
+  { label: 'Bearbeiten', value: 'write' },
+  { label: 'Bearbeiten + Teilen', value: 'write_share' },
+]
+const DELEGATE_ACCESS_LEVELS: Array<{ label: string; value: AlbumAccessLevel }> =
+  OWNER_ACCESS_LEVELS.filter(o => o.value !== 'write_share')
+
+const shareAccessLevelOptions = computed(() =>
+  isOwner.value ? OWNER_ACCESS_LEVELS : DELEGATE_ACCESS_LEVELS
+)
+
+const shareOwnerId = ref<number>(0)
+function canRemoveShare(share: AlbumShareWithUser) {
+  if (isOwner.value) return true
+  return share.invited_by_user_id === auth.user?.id
+}
+
+const usersNotShared = computed(() => {
+  const sharedIds = new Set(albumSharesList.value.map(s => s.user_id))
+  const currentUserId = auth.user?.id
+  return allShareUsers.value.filter(u =>
+    u.id !== currentUserId && u.id !== shareOwnerId.value && !sharedIds.has(u.id)
+  )
+})
+
+async function openShareDialogLocal() {
+  if (!album.value) return
+  shareOwnerId.value = album.value.user_id
+  showShareDialog.value = true
+  loadingShares.value = true
+  try {
+    const [sharesRes, usersRes] = await Promise.all([
+      getAlbumShares(albumId.value),
+      auth.hasPermission('users.list') ? listUsers() : Promise.resolve({ users: [] }),
+    ])
+    albumSharesList.value = sharesRes.shares
+    publicLink.value = sharesRes.publicLink ?? null
+    allShareUsers.value = usersRes.users
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Laden der Freigaben'
+  } finally {
+    loadingShares.value = false
+  }
+}
+
+function syncAlbumSharedStatus() {
+  if (!album.value) return
+  album.value.is_shared = albumSharesList.value.length > 0
+}
+
+async function handleShareAlbum() {
+  if (!shareUserId.value) return
+  sharing.value = true
+  try {
+    await shareAlbum(albumId.value, shareUserId.value, shareAccessLevel.value)
+    albumSharesList.value = (await getAlbumShares(albumId.value)).shares
+    syncAlbumSharedStatus()
+    shareUserId.value = null
+    shareAccessLevel.value = 'read'
+  } catch (err: any) { error.value = err.message || 'Fehler beim Freigeben' }
+  finally { sharing.value = false }
+}
+
+async function handleRemoveShare(userId: number) {
+  try {
+    await removeAlbumShare(albumId.value, userId)
+    albumSharesList.value = albumSharesList.value.filter(s => s.user_id !== userId)
+    syncAlbumSharedStatus()
+  } catch (err: any) { error.value = err.message || 'Fehler' }
+}
+
+function getPublicLinkUrl() {
+  if (!publicLink.value) return ''
+  return `${window.location.origin}${import.meta.env.BASE_URL}albums/shared/${publicLink.value.token}`
+}
+
+async function handleCreatePublicLink() {
+  try {
+    publicLink.value = await createAlbumPublicLink(albumId.value, (linkExpiry.value as PublicLinkExpiry) ?? undefined)
+    await copyPublicLink()
+  } catch (err: any) { error.value = err.message || 'Fehler beim Erstellen des Links' }
+}
+
+async function handleDeletePublicLink() {
+  try {
+    await deleteAlbumPublicLink(albumId.value)
+    publicLink.value = null
+    linkCopied.value = false
+  } catch (err: any) { error.value = err.message || 'Fehler beim Löschen des Links' }
+}
+
+async function copyPublicLink() {
+  try {
+    await navigator.clipboard.writeText(getPublicLinkUrl())
+    linkCopied.value = true
+    setTimeout(() => { linkCopied.value = false }, 2000)
+  } catch { /* clipboard not available */ }
+}
+
+function formatShareExpiryDate(dateStr: string): string {
+  const date = new Date(dateStr)
+  if (date < new Date()) return 'Abgelaufen'
+  return `Gültig bis ${date.toLocaleDateString('de-DE', { day: '2-digit', month: 'short', year: 'numeric' })}`
+}
+
+const isLinkExpired = computed(() => {
+  if (!publicLink.value?.expires_at) return false
+  return new Date(publicLink.value.expires_at) < new Date()
+})
+
 // ── Delete album ─────────────────────────────────────────────────────────────
 const showDeleteDialog = ref(false)
 const deletingAlbum = ref(false)
@@ -827,31 +1014,6 @@ async function scrollToCover() {
   if (idx >= 0) selectedIndex.value = idx
 }
 
-// ── Description editing ───────────────────────────────────────────────────────
-const updatingAlbum = ref(false)
-const editingDescription = ref(false)
-const descDraft = ref('')
-
-function startEditDesc() {
-  if (!album.value) return
-  descDraft.value = album.value.description || ''
-  editingDescription.value = true
-}
-
-async function saveDescription() {
-  if (!album.value) return
-  updatingAlbum.value = true
-  try {
-    await updateAlbum(albumId.value, { description: descDraft.value })
-    invalidateAlbums()
-    album.value.description = descDraft.value
-    editingDescription.value = false
-  } catch (err: any) {
-    error.value = err.message || 'Fehler beim Speichern der Beschreibung'
-  } finally {
-    updatingAlbum.value = false
-  }
-}
 
 // ── Mobile drawer state ───────────────────────────────────────────────────────
 const mobileSidebarOpen = ref(false)
@@ -931,23 +1093,6 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
           </template>
         </div>
 
-        <!-- 3. Description with edit -->
-        <div v-if="viewMode !== 'map'" class="header__description">
-          <div v-if="!editingDescription" class="header__description-view">
-            <span :class="{ 'header__description-text--empty': !album.description }" class="header__description-text">
-              {{ album.description || 'Keine Beschreibung' }}
-            </span>
-            <Button v-if="canWrite" icon="pi pi-pencil" size="small" text @click="startEditDesc" />
-          </div>
-          <div v-else class="header__description-edit">
-            <textarea v-model="descDraft" class="p-inputtextarea p-inputtext" rows="2" />
-            <div class="header__description-edit-actions">
-              <Button :loading="updatingAlbum" icon="pi pi-check" size="small" @click="saveDescription" />
-              <Button :disabled="updatingAlbum" icon="pi pi-times" size="small" text @click="editingDescription = false" />
-            </div>
-          </div>
-        </div>
-
         <!-- 5. Filter -->
         <div class="header__filter">
           <Button
@@ -992,6 +1137,8 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
             @click="handleStartGroupReview"
           />
           <Button v-if="effectiveCoverPhotoId && viewMode !== 'map'" icon="pi pi-image" size="small" text v-tooltip="'Cover fokussieren'" @click="scrollToCover" />
+          <Button v-if="canShareAlbum" icon="pi pi-share-alt" size="small" text v-tooltip="'Freigeben'" @click="openShareDialogLocal" />
+          <Button v-if="canWrite" icon="pi pi-cog" size="small" text v-tooltip="'Album-Einstellungen'" @click="openAlbumSettingsDialog" />
           <Button v-if="isOwner" icon="pi pi-trash" size="small" text severity="danger" v-tooltip="'Album löschen'" @click="showDeleteDialog = true" />
           <Button v-if="!isOwner" icon="pi pi-sign-out" size="small" text severity="danger" v-tooltip="'Freigabe verlassen'" @click="showLeaveDialog = true" />
         </div>
@@ -1272,6 +1419,90 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
       @next="handleGroupNext"
     />
 
+    <!-- Album settings dialog -->
+    <Dialog v-model:visible="showAlbumSettingsDialog" header="Album-Einstellungen" :modal="true" style="width: min(100%, 36rem)">
+      <div class="dialog-body">
+        <div class="dialog-field">
+          <label for="albumSettingsName">Name</label>
+          <InputText id="albumSettingsName" v-model="albumSettingsName" autofocus class="dialog-input" @keydown.enter="handleSaveAlbumSettings" />
+        </div>
+        <div class="dialog-field">
+          <label for="albumSettingsDesc">Beschreibung</label>
+          <textarea id="albumSettingsDesc" v-model="albumSettingsDesc" rows="2" class="p-inputtextarea p-inputtext dialog-input"></textarea>
+        </div>
+        <div class="dialog-field dialog-field--row">
+          <Checkbox v-model="albumSettingsMapEnabled" inputId="albumSettingsMap" :binary="true" />
+          <label for="albumSettingsMap">Karte aktivieren</label>
+        </div>
+      </div>
+      <template #footer>
+        <Button label="Abbrechen" text @click="showAlbumSettingsDialog = false" />
+        <Button label="Speichern" :disabled="!albumSettingsName.trim()" :loading="albumSettingsUpdating" @click="handleSaveAlbumSettings" />
+      </template>
+    </Dialog>
+
+    <!-- Share dialog -->
+    <Dialog v-model:visible="showShareDialog" header="Album freigeben" modal style="width: min(100%, 480px)">
+      <div v-if="loadingShares" class="share-loading"><i class="pi pi-spin pi-spinner" /> Lädt…</div>
+      <template v-else>
+        <div class="share-section">
+          <h4 class="share-section-title"><i class="pi pi-link" /> Öffentlicher Link</h4>
+          <div v-if="publicLink" class="public-link-block">
+            <div class="public-link-row">
+              <input :value="getPublicLinkUrl()" readonly class="p-inputtext public-link-input" @focus="($event.target as HTMLInputElement).select()" />
+              <Button :icon="linkCopied ? 'pi pi-check' : 'pi pi-copy'" :severity="linkCopied ? 'success' : 'secondary'" size="small" v-tooltip="'Kopieren'" @click="copyPublicLink" />
+              <Button icon="pi pi-trash" size="small" text severity="danger" v-tooltip="'Link löschen'" @click="handleDeletePublicLink" />
+            </div>
+            <div class="public-link-meta">
+              <span v-if="publicLink.expires_at" :class="['public-link-expiry', { 'public-link-expiry--expired': isLinkExpired }]">
+                <i :class="isLinkExpired ? 'pi pi-exclamation-circle' : 'pi pi-clock'" />
+                {{ formatShareExpiryDate(publicLink.expires_at) }}
+              </span>
+              <span v-else class="public-link-expiry">
+                <i class="pi pi-clock" /> Unbegrenzt gültig
+              </span>
+            </div>
+          </div>
+          <div v-else class="public-link-create">
+            <div class="public-link-create-row">
+              <Select v-model="linkExpiry" :options="expiryOptions" optionLabel="label" optionValue="value" placeholder="Gültigkeit" class="link-expiry-select" />
+              <Button label="Link erstellen" icon="pi pi-link" size="small" outlined @click="handleCreatePublicLink" />
+            </div>
+            <span class="share-hint">Jeder mit dem Link kann das Album ansehen.</span>
+          </div>
+        </div>
+        <div class="share-section">
+          <h4 class="share-section-title">Aktuelle Freigaben</h4>
+          <div v-if="albumSharesList.length === 0" class="share-empty">Noch keine Freigaben.</div>
+          <div v-for="share in albumSharesList" :key="share.user_id" class="share-row">
+            <div class="share-user-info">
+              <span class="share-user-name">{{ share.user_name }}</span>
+              <span class="share-user-email">{{ share.user_email }}</span>
+            </div>
+            <span :class="['share-badge', share.access_level === 'read' ? 'share-badge--read' : 'share-badge--write']">
+              {{ share.access_level === 'read' ? 'Nur lesen' : share.access_level === 'write_share' ? 'Bearbeiten + Teilen' : 'Bearbeiten' }}
+            </span>
+            <Button v-if="canRemoveShare(share)" icon="pi pi-times" size="small" text severity="danger" v-tooltip="'Freigabe entfernen'" @click="handleRemoveShare(share.user_id)" />
+          </div>
+          <div v-if="!isOwner" class="share-hint">Als Teilnehmer mit Teilen-Recht kannst du nur Freigaben entfernen, die du selbst erstellt hast.</div>
+        </div>
+        <div class="share-section">
+          <h4 class="share-section-title">Benutzer hinzufügen</h4>
+          <div class="share-add-form">
+            <Select v-if="allShareUsers.length > 0" v-model="shareUserId" :options="usersNotShared" optionLabel="name" optionValue="id" placeholder="Benutzer auswählen…" class="share-user-select" />
+            <input v-else v-model.number="shareUserId" type="number" placeholder="Benutzer-ID" class="p-inputtext share-userid-input" />
+            <SelectButton v-model="shareAccessLevel" :options="shareAccessLevelOptions" optionLabel="label" optionValue="value" :allowEmpty="false" />
+            <Button label="Freigeben" icon="pi pi-check" :loading="sharing" :disabled="!shareUserId" @click="handleShareAlbum" />
+          </div>
+          <div class="share-access-explanation">
+            <div class="share-access-explanation-row"><span class="share-badge share-badge--read">Nur lesen</span><span>Ansehen – keine Änderungen möglich.</span></div>
+            <div class="share-access-explanation-row"><span class="share-badge share-badge--write">Bearbeiten</span><span>Details ändern, Fotos hinzufügen oder entfernen.</span></div>
+            <div v-if="isOwner" class="share-access-explanation-row"><span class="share-badge share-badge--write">Bearbeiten + Teilen</span><span>Zusätzlich Link erzeugen und weitere Benutzer einladen.</span></div>
+          </div>
+        </div>
+      </template>
+    </Dialog>
+
     <!-- Delete album confirmation dialog -->
     <Dialog v-model:visible="showDeleteDialog" header="Album löschen" :modal="true" style="width: min(100%, 28rem)">
       <div class="dialog-body">
@@ -1367,17 +1598,6 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
   .header__badge--owner { background: var(--p-red-900); color: var(--p-red-200); }
   .header__badge--contributor { background: var(--p-green-900); color: var(--p-green-200); }
 }
-
-.header__description {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.header__description-view { display: flex; align-items: center; gap: 0.5em; }
-.header__description-text { font-size: 0.9em; }
-.header__description-text--empty { color: var(--p-text-muted-color); font-style: italic; }
-.header__description-edit { display: flex; align-items: center; gap: 0.5em; width: 100%; }
-.header__description-edit textarea { flex: 1; min-height: 2.5em; }
-.header__description-edit-actions { display: flex; gap: 0.25em; }
 
 .header__meta {
   font-size: 0.85em;
@@ -1496,12 +1716,47 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
   /* Compact header on mobile */
   .header { padding: 0.35em 0.65em; gap: 0.25em 0.5em; }
   .header__title { font-size: 1.1em; }
-  .header__description { flex: 1 1 100%; }
-  .header__description-text--empty { display: none; }
 }
 
-/* ── Delete dialog ──────────────────────────────────────────────────────── */
-.dialog-body { display: flex; flex-direction: column; gap: 0.5em; padding: 0.5em 0; }
+/* ── Delete / settings dialog ───────────────────────────────────────────── */
+.dialog-body { display: flex; flex-direction: column; gap: 0.75em; padding: 0.5em 0; }
 .dialog-body .muted { color: var(--p-text-muted-color); font-size: 0.9em; }
+.dialog-field { display: flex; flex-direction: column; gap: 0.35em; }
+.dialog-field label { font-size: 0.9em; font-weight: 500; }
+.dialog-field--row { flex-direction: row; align-items: center; gap: 0.5em; }
+.dialog-input { width: 100%; }
+
+/* ── Share dialog ────────────────────────────────────────────────────────── */
+.share-loading { padding: 1rem; text-align: center; }
+.share-section { margin-bottom: 1.5rem; }
+.share-section-title { font-size: 0.9rem; font-weight: 600; margin-bottom: 0.75rem; }
+.share-empty { font-size: 0.85rem; color: var(--p-text-muted-color); }
+.share-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.4rem 0; border-bottom: 1px solid var(--p-content-border-color); }
+.share-user-info { flex: 1; min-width: 0; }
+.share-user-name { display: block; font-size: 0.875rem; font-weight: 500; }
+.share-user-email { display: block; font-size: 0.75rem; color: var(--p-text-muted-color); }
+.share-badge { font-size: 0.7rem; padding: 0.15rem 0.4rem; border-radius: 3px; white-space: nowrap; }
+.share-badge--read { background: var(--p-content-border-color); color: var(--p-text-muted-color); }
+.share-badge--write { background: var(--p-green-100); color: var(--p-green-700); }
+.share-add-form { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.share-user-select { flex: 1; min-width: 180px; }
+.share-userid-input { width: 120px; }
+.share-hint { font-size: 0.8rem; color: var(--p-text-muted-color); margin-top: 0.4rem; display: block; }
+.share-access-explanation { margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.8rem; color: var(--p-text-muted-color); }
+.share-access-explanation-row { display: flex; align-items: flex-start; gap: 0.5rem; line-height: 1.3; }
+.share-access-explanation-row .share-badge { flex-shrink: 0; margin-top: 0.1rem; }
+.public-link-block { display: flex; flex-direction: column; gap: 0.4rem; }
+.public-link-row { display: flex; gap: 0.5rem; align-items: center; }
+.public-link-input { flex: 1; font-size: 0.8rem; }
+.public-link-meta { display: flex; align-items: center; gap: 0.5rem; }
+.public-link-expiry { font-size: 0.8rem; color: var(--p-text-muted-color); display: flex; align-items: center; gap: 0.3rem; }
+.public-link-expiry--expired { color: var(--p-red-500, #ef4444); font-weight: 500; }
+.public-link-create { display: flex; flex-direction: column; gap: 0.4rem; }
+.public-link-create-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.link-expiry-select { min-width: 140px; }
+
+@media (prefers-color-scheme: dark) {
+  .share-badge--write { background: var(--p-green-900); color: var(--p-green-200); }
+}
 
 </style>
