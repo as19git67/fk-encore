@@ -20,6 +20,17 @@ export const usePhotoNavStore = defineStore('photoNav', () => {
   // view key → scroll offset (px)
   const scrollPositions = ref<Record<string, number>>({})
 
+  /** Which album the currently selected photo was chosen from (if any). */
+  const selectedAlbumId = ref<number | null>(null)
+
+  /**
+   * One-time flag: when true, AlbumsView should auto-navigate into the
+   * remembered album instead of just highlighting it in the list.
+   * Set when the user selects a photo inside an album; consumed (reset to
+   * false) the first time AlbumsView mounts and acts on it.
+   */
+  const jumpIntoAlbum = ref<boolean>(false)
+
   /** Called when the user actively selects a photo (click or arrow key). */
   function selectPhoto(id: number) {
     if (selectedPhotoId.value !== id) {
@@ -27,6 +38,27 @@ export const usePhotoNavStore = defineStore('photoNav', () => {
       // Clear saved scroll positions so every view scrolls to the new photo.
       scrollPositions.value = {}
     }
+  }
+
+  /**
+   * Called when the user selects a photo inside an album grid.
+   * Records both the photo and the album, and arms the one-shot
+   * jumpIntoAlbum flag so AlbumsView auto-opens the album on next visit.
+   */
+  function selectPhotoInAlbum(photoId: number, albumId: number) {
+    selectPhoto(photoId)
+    selectedAlbumId.value = albumId
+    jumpIntoAlbum.value = true
+  }
+
+  /**
+   * Reads and resets the jumpIntoAlbum flag atomically.
+   * Returns true only once after selectPhotoInAlbum was called.
+   */
+  function consumeAlbumJump(): boolean {
+    const val = jumpIntoAlbum.value
+    jumpIntoAlbum.value = false
+    return val
   }
 
   /** Save the current scroll position for a view without changing selection. */
@@ -39,5 +71,13 @@ export const usePhotoNavStore = defineStore('photoNav', () => {
     return scrollPositions.value[viewKey] ?? null
   }
 
-  return { selectedPhotoId, selectPhoto, saveScrollPosition, getScrollPosition }
+  return {
+    selectedPhotoId,
+    selectedAlbumId,
+    selectPhoto,
+    selectPhotoInAlbum,
+    consumeAlbumJump,
+    saveScrollPosition,
+    getScrollPosition,
+  }
 })

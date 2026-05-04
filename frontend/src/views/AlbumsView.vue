@@ -25,6 +25,7 @@ import {
 } from '../api/photos'
 import { listUsers, type UserWithRoles } from '../api/users'
 import { useAuthStore } from '../stores/auth'
+import { usePhotoNavStore } from '../stores/photoNav'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import { useReferenceData } from '../composables/useReferenceData'
 import {
@@ -54,13 +55,16 @@ const albums = ref<Album[]>([])
 const loading = ref(true)
 const error = ref('')
 const auth = useAuthStore()
+const photoNav = usePhotoNavStore()
 
 // Shared with AlbumDetailView: when the user opens an album we remember it
 // here, so navigating back from the detail view restores focus and scroll
 // position to the album the user came from. The remembered ID is read once
 // at mount; VirtualAlbumGrid handles the scroll-and-highlight as soon as
 // data + layout settle.
-const rememberedAlbumId = ref<number | null>(readRememberedAlbumId())
+// Falls back to photoNav.selectedAlbumId so in-session navigation from
+// the gallery also highlights the correct album without needing a localStorage entry.
+const rememberedAlbumId = ref<number | null>(readRememberedAlbumId() ?? photoNav.selectedAlbumId)
 const gridRef = ref<InstanceType<typeof VirtualAlbumGrid> | null>(null)
 
 function openAlbum(album: Album) {
@@ -624,7 +628,21 @@ watch([appliedAlbumFilter, appliedAlbumSort, filterQuery], async () => {
   await gridRef.value?.rescrollToRemembered({ highlight: false })
 }, { deep: true })
 
-onMounted(loadData)
+onMounted(async () => {
+  // If the user had selected a photo inside an album and then navigated to the
+  // gallery, the first visit back to Albums should jump directly into that album
+  // (the photo selection is restored there via photoNav.selectedPhotoId).
+  // On subsequent visits the flag is false and we just show the list with the
+  // album highlighted.
+  if (photoNav.consumeAlbumJump() && photoNav.selectedAlbumId !== null) {
+    // Persist the album so VirtualAlbumGrid highlights it when the user comes
+    // back from the album detail to this list.
+    rememberFocusedAlbumId(photoNav.selectedAlbumId)
+    router.push(`/fotos/alben/${photoNav.selectedAlbumId}`)
+    return
+  }
+  await loadData()
+})
 </script>
 
 <template>

@@ -493,7 +493,7 @@ watch(selectedIndex, () => {
 watch(selectedPhoto, (photo) => {
   if (photo && album.value) {
     saveLastPhotoForAlbum(album.value.id, photo.id)
-    photoNav.selectPhoto(photo.id)
+    photoNav.selectPhotoInAlbum(photo.id, album.value.id)
   }
 })
 
