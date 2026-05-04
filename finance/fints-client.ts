@@ -915,6 +915,9 @@ async function fetchOneAccount(
     typeof client.canGetCreditCardStatements === "function" &&
     client.canGetCreditCardStatements(account.accountNumber);
 
+  console.log(`[fints] account ${account.accountNumber}: ${isCreditCard ? "credit-card" : "bank-account"}`);
+  console.log(`[fints] account ${account.accountNumber}: credit-card path=${useCreditCardPath}`);
+
   try {
     let stmtResp;
     if (useCreditCardPath) {
