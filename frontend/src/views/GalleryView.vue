@@ -681,14 +681,16 @@ function entryToMinimalPhoto(entry: GalleryGridEntry): Photo {
   }
 }
 
-async function hydrateCursor(index: number): Promise<void> {
+async function hydrateCursor(index: number, options?: { skipNeighbors?: boolean }): Promise<void> {
   if (!galleryRef.value) return
   const myToken = ++hydrateToken
   const total = galleryRef.value.getTotal()
+  const skipNeighbors = options?.skipNeighbors ?? false
+
   const [curEntry, prevEntry, nextEntry] = await Promise.all([
     galleryRef.value.loadEntryAt(index),
-    index > 0 ? galleryRef.value.loadEntryAt(index - 1) : Promise.resolve(null),
-    index + 1 < total ? galleryRef.value.loadEntryAt(index + 1) : Promise.resolve(null),
+    index > 0 && !skipNeighbors ? galleryRef.value.loadEntryAt(index - 1) : Promise.resolve(null),
+    index + 1 < total && !skipNeighbors ? galleryRef.value.loadEntryAt(index + 1) : Promise.resolve(null),
   ])
   if (myToken !== hydrateToken) return
   if (!curEntry) {
@@ -952,7 +954,7 @@ async function onGalleryLoaded() {
     if (idx !== null) {
       cursorIndex.value = idx
       galleryRef.value.scrollToIndex(idx)
-      void hydrateCursor(idx)
+      void hydrateCursor(idx, { skipNeighbors: true })
     }
   }
 }
