@@ -1078,6 +1078,7 @@ describe("runFetchAccounts — decoupled TAN per account", () => {
 
     const r = await runFetchAccounts(c, sleep);
 
+    expect(r.partial).toBe(false);
     expect(r.accounts[0].errors).not.toContain("statements-tan-required");
     expect(r.accounts[0].transactions).toHaveLength(1);
     // balance still ran fine without TAN
