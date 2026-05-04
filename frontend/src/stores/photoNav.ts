@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { LAST_FOCUSED_ALBUM_KEY } from '../utils/albumsViewState'
 
 /**
  * Shared photo navigation state across gallery, album, and persons views.
@@ -8,6 +9,8 @@ import { ref } from 'vue'
  * - `selectedPhotoId` is the single source of truth for "which photo the user
  *   last looked at". Views use this on mount to pre-select / scroll to a photo
  *   when no explicit ?photoId= deeplink is present.
+ * - `selectedAlbumId` mirrors the same idea for albums — initialized from
+ *   localStorage on first use so it survives page refreshes.
  * - `scrollPositions` stores the last scroll offset per view key. These are
  *   cleared whenever the user actively changes the selected photo (click or
  *   keyboard) so the next view always scrolls the selected photo into view
@@ -15,13 +18,23 @@ import { ref } from 'vue'
  * - When the user just scrolls (mouse / touch) without changing selection, the
  *   view saves its own position so coming back lands in the same spot.
  */
+
+function readStoredAlbumId(): number | null {
+  try {
+    const raw = localStorage.getItem(LAST_FOCUSED_ALBUM_KEY)
+    if (!raw) return null
+    const id = Number(raw)
+    return Number.isFinite(id) && id > 0 ? id : null
+  } catch { return null }
+}
+
 export const usePhotoNavStore = defineStore('photoNav', () => {
   const selectedPhotoId = ref<number | null>(null)
   // view key → scroll offset (px)
   const scrollPositions = ref<Record<string, number>>({})
 
-  /** Which album the currently selected photo was chosen from (if any). */
-  const selectedAlbumId = ref<number | null>(null)
+  /** Which album the currently selected photo was chosen from (if any). Survives page refresh. */
+  const selectedAlbumId = ref<number | null>(readStoredAlbumId())
 
   /**
    * One-time flag: when true, AlbumsView should auto-navigate into the
@@ -47,7 +60,10 @@ export const usePhotoNavStore = defineStore('photoNav', () => {
    */
   function selectPhotoInAlbum(photoId: number, albumId: number) {
     selectPhoto(photoId)
-    selectedAlbumId.value = albumId
+    if (selectedAlbumId.value !== albumId) {
+      selectedAlbumId.value = albumId
+      try { localStorage.setItem(LAST_FOCUSED_ALBUM_KEY, String(albumId)) } catch { /* storage off */ }
+    }
     jumpIntoAlbum.value = true
   }
 
