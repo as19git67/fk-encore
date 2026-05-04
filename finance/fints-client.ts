@@ -909,13 +909,14 @@ async function fetchOneAccount(
   // kreditkarte accounts when the bank supports it. This returns
   // CreditCardStatement objects which carry original-currency fields
   // and are structured differently from MT940/CAMT statements.
+  console.log(`[fints] account ${account.accountNumber}: type=${account.accountType}, kind=${accountKind}`);
   const isCreditCard = accountKind === "kreditkarte";
-  const useCreditCardPath =
-    isCreditCard &&
-    typeof client.canGetCreditCardStatements === "function" &&
+  const canGetCC = typeof client.canGetCreditCardStatements === "function" &&
     client.canGetCreditCardStatements(account.accountNumber);
 
-  console.log(`[fints] account ${account.accountNumber}: ${isCreditCard ? "credit-card" : "bank-account"}`);
+  const useCreditCardPath = isCreditCard && canGetCC;
+
+  console.log(`[fints] account ${account.accountNumber}: ${isCreditCard ? "credit-card" : "bank-account"}, canGetCC=${canGetCC}`);
   console.log(`[fints] account ${account.accountNumber}: credit-card path=${useCreditCardPath}`);
 
   try {
@@ -1275,6 +1276,7 @@ function mapAccountKind(accountType: string | undefined): string {
     case "LoanMortgageAccount":
       return "kredit";
     case "CreditCardAccount":
+    case "CreditCard":
       return "kreditkarte";
     case "HomeSavingsContract":
       return "bausparen";
