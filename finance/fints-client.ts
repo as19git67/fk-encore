@@ -817,7 +817,9 @@ export async function runFetchAccounts(
       ? opts.fromByAccountNumber?.get(account.accountNumber) ?? opts.defaultFrom
       : undefined;
     const r = await fetchOneAccount(client, account, sleep, { fetch, from });
-    if (r.snapshot.errors.length > 0) partial = true;
+    if (r.snapshot.errors.length > 0) {
+      partial = true;
+    }
     snapshots.push(r.snapshot);
 
     if (r.pendingTan) {
@@ -969,6 +971,7 @@ async function fetchOneAccount(
       return {
         snapshot,
         pendingTan: {
+          accountNumber: account.accountNumber,
           tanReference: ref,
           tanChallenge: stmtResp.tanChallenge,
           tanMediaName: stmtResp.tanMediaName,
@@ -978,11 +981,12 @@ async function fetchOneAccount(
             : undefined,
         },
       };
-    } else if (!stmtResp.success) {
+    } else if (stmtResp.success === false) {
       const first = stmtResp.bankAnswers.find((a) => a.code !== 0);
       snapshot.errors.push(
         `statements-error:${first?.code ?? "unknown"} ${first?.text ?? ""}`.trim(),
       );
+      return { snapshot };
     } else if (useCreditCardPath) {
       const ccStmt = stmtResp as typeof stmtResp & {
         statements?: Array<{
@@ -1032,7 +1036,7 @@ async function fetchOneAccount(
     }
     if (balResp.requiresTan) {
       snapshot.errors.push("balance-tan-required");
-    } else if (!balResp.success) {
+    } else if (balResp.success === false) {
       const first = balResp.bankAnswers.find((a) => a.code !== 0);
       snapshot.errors.push(
         `balance-error:${first?.code ?? "unknown"} ${first?.text ?? ""}`.trim(),
@@ -1207,7 +1211,7 @@ export async function resumeFetchAfterTan(
     }
     if (balResp.requiresTan) {
       snapshot.errors.push("balance-tan-required");
-    } else if (!balResp.success) {
+    } else if (balResp.success === false) {
       const first = balResp.bankAnswers.find((a) => a.code !== 0);
       snapshot.errors.push(
         `balance-error:${first?.code ?? "unknown"} ${first?.text ?? ""}`.trim(),
@@ -1324,6 +1328,9 @@ function mapCreditCardStatements(
     originalCurrency: string;
     originalAmount: number;
     exchangeRate: number;
+    /** Some banks provide a unique transaction ID. */
+    id?: string;
+    transactionId?: string;
   }>,
 ): FintsTransactionData[] {
   return statements.map((s) => {
@@ -1339,7 +1346,7 @@ function mapCreditCardStatements(
       purpose: s.purpose?.trim() || null,
       counterparty: null,
       counterpartyIban: null,
-      bankRef: null,
+      bankRef: s.transactionId || s.id || null,
       originalAmount: isForeignCurrency ? toAmountString(s.originalAmount) : null,
       originalCurrency: isForeignCurrency ? s.originalCurrency : null,
       exchangeRate: isForeignCurrency && s.exchangeRate

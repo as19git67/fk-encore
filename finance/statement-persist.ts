@@ -219,7 +219,9 @@ function computeDedupeHash(tx: FintsTransactionData): string {
     tx.amount,
     tx.currency.toUpperCase(),
     tx.purpose ?? "",
+    tx.counterparty ?? "",
     tx.counterpartyIban ?? "",
+    tx.bankRef ?? "",
   ].join("|");
   return createHash("sha256").update(canonical).digest("hex");
 }
