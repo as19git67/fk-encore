@@ -74,6 +74,8 @@ const rememberFocusedAlbum = rememberFocusedAlbumId
 // unfiltered list before AlbumsView re-applies state from localStorage.
 function navigateBackToAlbums() {
   rememberFocusedAlbum(albumId.value)
+  // Prevent AlbumsView from jumping back into this album when it mounts.
+  photoNav.consumeAlbumJump()
   router.push({ name: 'fotos-albums', query: albumsViewQueryFromStorage() })
 }
 

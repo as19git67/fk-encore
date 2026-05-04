@@ -120,13 +120,21 @@ function highlightAlbum(id: number) {
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
-function scrollToAlbum(id: number, opts: { highlight?: boolean } = {}): boolean {
+function scrollToAlbum(id: number, opts: { highlight?: boolean; focus?: boolean } = {}): boolean {
   if (cols.value <= 0 || props.albums.length === 0) return false
   const idx = props.albums.findIndex(a => a.id === id)
   if (idx < 0) return false
   const row = Math.floor(idx / cols.value)
   virtualizer.value.scrollToIndex(row, { align: 'center' })
   if (opts.highlight) highlightAlbum(id)
+  if (opts.focus) {
+    // Wait one frame for Vue/virtualizer to render the newly-visible row,
+    // then focus the card so keyboard navigation works immediately.
+    requestAnimationFrame(() => {
+      const card = scrollRef.value?.querySelector<HTMLElement>(`[data-album-id="${id}"]`)
+      card?.focus({ preventScroll: true })
+    })
+  }
   return true
 }
 
@@ -161,7 +169,7 @@ async function tryInitialScroll() {
   if (!props.rememberedAlbumId) return
   if (cols.value <= 0 || props.albums.length === 0) return
   await new Promise<void>((r) => requestAnimationFrame(() => r()))
-  if (scrollToAlbum(props.rememberedAlbumId, { highlight: true })) {
+  if (scrollToAlbum(props.rememberedAlbumId, { highlight: true, focus: true })) {
     initialScrollDone = true
   }
 }
