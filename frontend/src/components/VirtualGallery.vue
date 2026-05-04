@@ -277,7 +277,14 @@ async function loadAndScroll(anchor: number | null | undefined) {
   // new total before we ask it to scroll.
   await new Promise<void>((r) => requestAnimationFrame(() => r()))
   if (cols.value > 0 && totalRows > 0) {
-    const targetRow = Math.floor(initialOffset / cols.value)
+    // If we loaded around a specific anchor photo, find its exact index in
+    // the loaded window and scroll there. Falling back to initialOffset
+    // (start of the loaded window) would land ~250 photos before the target.
+    let targetRow = Math.floor(initialOffset / cols.value)
+    if (anchor) {
+      const exactIdx = findLoadedIndexById(anchor)
+      if (exactIdx !== null) targetRow = Math.floor(exactIdx / cols.value)
+    }
     virtualizer.value.scrollToIndex(targetRow, { align: 'center' })
   } else if (totalRows > 0) {
     virtualizer.value.scrollToIndex(0, { align: 'start' })
