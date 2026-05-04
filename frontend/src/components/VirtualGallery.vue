@@ -241,6 +241,7 @@ function runPrefetch() {
 }
 
 function schedulePrefetch() {
+  if (isInitialLoading.value) return
   const now = Date.now()
   const elapsed = now - lastFire
   if (elapsed >= THROTTLE_MS) {
@@ -261,6 +262,7 @@ watch(virtualRows, schedulePrefetch, { flush: 'post' })
 
 // ── Initial + re-init on query change ───────────────────────────────────────
 const ready = ref(false)
+const isInitialLoading = ref(true)
 
 async function loadAndScroll(anchor: number | null | undefined) {
   ready.value = false
@@ -294,6 +296,10 @@ async function loadAndScroll(anchor: number | null | undefined) {
   // labels itself correctly without waiting for the user's first scroll.
   await new Promise<void>((r) => requestAnimationFrame(() => r()))
   updateScrollEnds()
+  
+  // Allow prefetches to start after initial positioning is done.
+  await new Promise<void>((r) => setTimeout(r, 200))
+  isInitialLoading.value = false
 }
 
 onMounted(() => {
