@@ -477,6 +477,20 @@
       "when": 1779001406000,
       "tag": "0067_drop_finance_transaction_seen",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1779001407000,
+      "tag": "0068_gallery_performance_indices",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1779001408000,
+      "tag": "0069_rename_households_to_groups",
+      "breakpoints": true
     }
   ]
 }

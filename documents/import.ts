@@ -109,7 +109,7 @@ export async function importDocumentFromPath(params: {
   const ownerRootSeg = composeOwnerRootSegment({
     visibility: "private",
     userLoginSlug,
-    householdSlug: null,
+    groupSlug: null,
   });
   const { absPath, dirAbs } = getInitialUploadDiskPath(
     ownerRootSeg,

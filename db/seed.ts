@@ -68,8 +68,8 @@ export async function seed(db: any): Promise<void> {
     { key: "documents.edit", description: "Edit document metadata and reclassify" },
     { key: "documents.delete", description: "Delete documents" },
     { key: "documents.manage_taxonomy", description: "Manage document categories and AI suggestions" },
-    { key: "households.view", description: "View households the user belongs to" },
-    { key: "households.manage", description: "Create and edit households, manage members" },
+    { key: "groups.view", description: "View groups the user belongs to" },
+    { key: "groups.manage", description: "Create and edit groups, manage members" },
     // --- Finance module ---
     { key: "module.finance", description: "Enable finance module" },
     { key: "finance.view", description: "View accounts and transactions (ACL-filtered)" },
@@ -147,8 +147,8 @@ export async function seed(db: any): Promise<void> {
       "documents.upload",
       "documents.edit",
       "documents.delete",
-      "households.view",
-      "households.manage",
+      "groups.view",
+      "groups.manage",
     ],
     "Finance User": [
       "module.finance",
