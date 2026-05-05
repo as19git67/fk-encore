@@ -23,7 +23,7 @@
 import db from "../db/database";
 import { sql } from "drizzle-orm";
 import { embedTexts } from "./llm-client";
-import { loadUserHouseholdIds } from "./visibility";
+import { loadUserGroupIds } from "./visibility";
 
 export type SearchMode = "fts" | "semantic" | "hybrid";
 
@@ -72,21 +72,21 @@ export async function searchDocuments(params: SearchParams): Promise<SearchHit[]
   const q = params.query.trim();
   if (q.length === 0) return [];
 
-  const householdIds = await loadUserHouseholdIds(userId);
+  const groupIds = await loadUserGroupIds(userId);
 
   if (mode === "fts") {
-    return await runFts(userId, householdIds, q, limit);
+    return await runFts(userId, groupIds, q, limit);
   }
   if (mode === "semantic") {
-    return await runSemantic(userId, householdIds, q, limit);
+    return await runSemantic(userId, groupIds, q, limit);
   }
 
   const [fts, semantic] = await Promise.all([
-    runFts(userId, householdIds, q, PER_BRANCH_LIMIT).catch((err) => {
+    runFts(userId, groupIds, q, PER_BRANCH_LIMIT).catch((err) => {
       console.warn(`[documents.search] fts branch failed: ${err?.message ?? err}`);
       return [] as SearchHit[];
     }),
-    runSemantic(userId, householdIds, q, PER_BRANCH_LIMIT).catch((err) => {
+    runSemantic(userId, groupIds, q, PER_BRANCH_LIMIT).catch((err) => {
       console.warn(`[documents.search] semantic branch failed: ${err?.message ?? err}`);
       return [] as SearchHit[];
     }),
@@ -95,23 +95,23 @@ export async function searchDocuments(params: SearchParams): Promise<SearchHit[]
 }
 
 /** Raw SQL fragment matching every document visible to the caller. */
-function visibilityClause(userId: number, householdIds: number[]) {
-  if (householdIds.length === 0) {
+function visibilityClause(userId: number, groupIds: number[]) {
+  if (groupIds.length === 0) {
     return sql`(visibility = 'private' AND user_id = ${userId})`;
   }
   return sql`(
     (visibility = 'private' AND user_id = ${userId})
-    OR (visibility = 'household' AND household_id = ANY(${householdIds}))
+    OR (visibility = 'household' AND group_id = ANY(${groupIds}))
   )`;
 }
 
 async function runFts(
   userId: number,
-  householdIds: number[],
+  groupIds: number[],
   q: string,
   limit: number,
 ): Promise<SearchHit[]> {
-  const visibility = visibilityClause(userId, householdIds);
+  const visibility = visibilityClause(userId, groupIds);
   const rows = await db.execute<{ document_id: number; rank: number }>(sql`
     SELECT
       id AS document_id,
@@ -131,7 +131,7 @@ async function runFts(
 
 async function runSemantic(
   userId: number,
-  householdIds: number[],
+  groupIds: number[],
   q: string,
   limit: number,
 ): Promise<SearchHit[]> {
@@ -144,11 +144,11 @@ async function runSemantic(
   const literal = `[${vec.join(",")}]`;
 
   // The visibility clause references columns aliased as `d` in this query.
-  const visibility = householdIds.length === 0
+  const visibility = groupIds.length === 0
     ? sql`(d.visibility = 'private' AND d.user_id = ${userId})`
     : sql`(
         (d.visibility = 'private' AND d.user_id = ${userId})
-        OR (d.visibility = 'household' AND d.household_id = ANY(${householdIds}))
+        OR (d.visibility = 'household' AND d.group_id = ANY(${groupIds}))
       )`;
 
   // Aggregate at the document level by summing similarity over the top-N

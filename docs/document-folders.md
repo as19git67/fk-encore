@@ -1,8 +1,8 @@
-# Dokumenten-Ordner-Struktur & Haushaltskonzept
+# Dokumenten-Ordner-Struktur & Gruppenkonzept (ehem. Haushalte)
 
 Dieses Dokument beschreibt, wie hochgeladene Dokumente auf der Platte unter
 `DOCUMENTS_DIR` abgelegt werden und wie Dokumente zwischen Einzelpersonen und
-Familien/Haushalten geteilt werden können.
+Gruppen (z. B. Familien oder Haushalts-Teilbereichen) geteilt werden können.
 
 Status: implementiert in Migration `0036_documents_households`.
 
@@ -20,7 +20,7 @@ Status: implementiert in Migration `0036_documents_households`.
   kanonischen Platz.
 - **Pro-Person-Isolation**: Private Dokumente eines Nutzers sind für andere
   nicht sichtbar — weder im UI noch im Dateisystem.
-- **Familien-Pool**: Ein gemeinsamer Haushalt (z. B. eine Familie) kann eine
+- **Gruppen-Pool**: Eine gemeinsame Gruppe (z. B. eine Familie oder nur die Eltern) kann eine
   gemeinsame Dokumentenablage verwenden, damit das Elternteil, das die Post aus
   dem Briefkasten geholt hat, nicht exklusiver Eigentümer der eingescannten
   Bescheide bleibt.
@@ -34,30 +34,30 @@ Status: implementiert in Migration `0036_documents_households`.
 
 Ein Dokument besitzt genau eine Sichtbarkeit:
 
-| `visibility`  | `user_id`     | `household_id` | Wer sieht es?                            |
+| `visibility`  | `user_id`     | `group_id`     | Wer sieht es?                            |
 |---------------|---------------|----------------|------------------------------------------|
 | `private`     | Uploader      | `NULL`         | nur der Uploader                         |
-| `household`   | Uploader      | Haushalt-ID    | jedes Mitglied dieses Haushalts          |
+| `group`       | Uploader      | Gruppen-ID     | jedes Mitglied dieser Gruppe             |
 
 Der Uploader (`user_id`) bleibt in beiden Fällen erhalten — auch
-Haushaltsdokumente "gehören" nominell der Person, die sie eingescannt hat.
+Gruppendokumente "gehören" nominell der Person, die sie eingescannt hat.
 Admin-Mutationen (Löschen, Sichtbarkeit umschalten) dürfen der Uploader *oder*
-ein Haushalts-Owner — siehe `loadAdministrableDocument` in
+ein Gruppen-Owner — siehe `loadAdministrableDocument` in
 `documents/visibility.ts`.
 
 Die Datenbank setzt das Konsistenzregel als CHECK-Constraint durch:
-`(visibility='private' AND household_id IS NULL) OR (visibility='household'
-AND household_id IS NOT NULL)`.
+`(visibility='private' AND group_id IS NULL) OR (visibility='group'
+AND group_id IS NOT NULL)`.
 
-Das Löschen eines Haushalts ist durch `ON DELETE RESTRICT` blockiert, solange
-noch Dokumente daran hängen — damit niemand versehentlich Haushaltsdokumente
+Das Löschen einer Gruppe ist durch `ON DELETE RESTRICT` blockiert, solange
+noch Dokumente daran hängen — damit niemand versehentlich Gruppendokumente
 verwaist.
 
-### Haushalts-Rollen
+### Gruppen-Rollen
 
-- `owner` — darf Mitglieder einladen/entfernen, den Haushalt umbenennen,
+- `owner` — darf Mitglieder hinzufügen/entfernen, die Gruppe umbenennen,
   Dokumente anderer Mitglieder löschen.
-- `member` — sieht alle Haushaltsdokumente, darf eigene hochladen, darf aber
+- `member` — sieht alle Gruppendokumente, darf eigene hochladen, darf aber
   keine fremden Dokumente löschen.
 
 ---
@@ -70,7 +70,7 @@ DOCUMENTS_DIR/
 │   ├── _inbox/YYYY-MM/                   ← noch nicht klassifiziert
 │   ├── <category-path>/<year>/*.pdf      ← klassifiziert
 │   └── _steuer/<year>/<anlage>/*.pdf     ← Hardlinks in Steuer-Sicht
-└── _haushalt/<household-slug>/           ← Haushaltsdokumente
+└── _gruppe/<group-slug>/             ← Gruppendokumente
     ├── _inbox/YYYY-MM/
     ├── <category-path>/<year>/*.pdf
     └── _steuer/<year>/<anlage>/*.pdf
@@ -80,7 +80,7 @@ Der `<user-login-slug>` wird aus dem Local-Part der E-Mail-Adresse abgeleitet
 (`max.mueller@example.com` → `max-mueller`). Für rein numerische oder leere
 Local-Parts fällt der Algorithmus auf `user-<id>` zurück.
 
-Der `<household-slug>` wird beim Anlegen aus dem Haushaltsnamen erzeugt und
+Der `<group-slug>` wird beim Anlegen aus dem Gruppennamen erzeugt und
 ist im Schema `UNIQUE`.
 
 Das Dateinamens-Schema ist:
@@ -100,7 +100,7 @@ selben Tag mit demselben Titel hochgeladen werden.
 
 1. **Upload** (`POST /documents` oder Inbox-Watcher): Die Datei landet unter
    `<owner-root>/_inbox/<YYYY-MM>/<sha256>.pdf`. Die Sichtbarkeit ist
-   zunächst `private` — das Hochschieben in einen Haushalt macht der Nutzer
+   zunächst `private` — das Hochschieben in eine Gruppe macht der Nutzer
    aktiv über das UI.
 2. **Klassifikation** (Worker-Pipeline `text_extract → classify → embed`): Der
    `classify`-Job schreibt Kategorie, Datum, Absender, Titel und Steuerfelder
@@ -111,7 +111,7 @@ selben Tag mit demselben Titel hochgeladen werden.
    steht die Datei bereits richtig, passiert nichts ausser einem Rebuild der
    Steuer-Links.
 4. **Sichtbarkeits-Wechsel** (`POST /documents/:id/visibility`): Versetzt das
-   Dokument zwischen privatem Bereich und Haushaltsbereich; die Datei wandert
+   Dokument zwischen privatem Bereich und Gruppenbereich; die Datei wandert
    in die entsprechende Owner-Root, alte Steuer-Hardlinks werden weggeräumt.
 5. **Löschen** (`DELETE /documents/:id`): Entfernt die Steuer-Hardlinks zuerst,
    dann den DB-Eintrag (cascadet Tags + Tax-Zuordnungen), dann die kanonische
@@ -125,13 +125,12 @@ gesichert (`assertPathUnderDocumentsRoot` vor jeder fs-Operation).
 
 ## 5. Relevante Module
 
-| Datei                             | Zweck                                                    |
-|-----------------------------------|----------------------------------------------------------|
-| `db/migrations/postgres/0036_…`   | Schema-Erweiterung: households + documents.visibility    |
+| `db/migrations/postgres/0036_…`   | Schema-Erweiterung: households (jetzt Gruppen)      |
+| `db/migrations/postgres/0069_…`   | Umbenennung households -> groups                    |
 | `documents/documents.service.ts`  | Path-Builder (`resolveDocumentDiskPath`, Slugifier, …)   |
 | `documents/relocate.ts`           | Physische Umzüge + Steuer-Hardlink-Rebuild               |
 | `documents/visibility.ts`         | Zugriffskontrolle (`loadVisibleDocument`, …)             |
-| `documents/households.ts`         | API-Endpoints zum Anlegen/Verwalten von Haushalten       |
+| `documents/households.ts`         | API-Endpoints zum Verwalten von Gruppen                  |
 | `documents/documents.ts`          | `POST /documents/:id/visibility`, Upload, CRUD, Suche    |
 
 ---

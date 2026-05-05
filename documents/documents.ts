@@ -43,9 +43,9 @@ import {
 } from "./tax-hint-overrides";
 import { dropTaxLinks, relocateDocument } from "./relocate";
 import {
-  assertHouseholdMember,
+  assertGroupMember,
   loadAdministrableDocument,
-  loadUserHouseholdIds,
+  loadUserGroupIds,
   loadVisibleDocument,
   visibleDocumentsWhere,
 } from "./visibility";
@@ -249,7 +249,7 @@ async function streamAndStorePdf(
 
   // New uploads land as `visibility='private'` under the uploader's
   // personal root; the owner can later move the document into a
-  // household via `POST /documents/:id/visibility`.
+  // group via `POST /documents/:id/visibility`.
   const uploader = await dbFirst<{ email: string }>(
     db.select({ email: users.email }).from(users).where(eq(users.id, userId)),
   );
@@ -260,7 +260,7 @@ async function streamAndStorePdf(
   const ownerRootSeg = composeOwnerRootSegment({
     visibility: "private",
     userLoginSlug,
-    householdSlug: null,
+    groupSlug: null,
   });
   const { absPath, dirAbs } = getInitialUploadDiskPath(
     ownerRootSeg,
@@ -306,8 +306,8 @@ export const listDocuments = api(
 
     const lim = Math.min(Math.max(limit ?? 50, 1), 200);
     const off = Math.max(offset ?? 0, 0);
-    const householdIds = await loadUserHouseholdIds(userId);
-    const conds = [visibleDocumentsWhere(userId, householdIds)];
+    const groupIds = await loadUserGroupIds(userId);
+    const conds = [visibleDocumentsWhere(userId, groupIds)];
 
     if (status && status.length > 0) {
       conds.push(eq(documents.status, status as any));
@@ -574,19 +574,19 @@ export const updateDocument = api(
 
 export interface UpdateDocumentVisibilityRequest {
   id: number;
-  visibility: "private" | "household";
-  /** Required when `visibility='household'`; must be a household the caller belongs to. */
-  household_id?: number | null;
+  visibility: "private" | "group";
+  /** Required when `visibility='group'`; must be a group the caller belongs to. */
+  group_id?: number | null;
 }
 
 /**
- * Flip a document between private (uploader-only) and household
- * (shared with every member of the named household) visibility.
+ * Flip a document between private (uploader-only) and group
+ * (shared with every member of the named group) visibility.
  *
- * Only the original uploader or a household owner may change visibility
+ * Only the original uploader or a group owner may change visibility
  * — this is a `loadAdministrableDocument` check. Moving a document
- * *into* a household additionally requires active membership in that
- * household. The physical file is relocated immediately so the
+ * *into* a group additionally requires active membership in that
+ * group. The physical file is relocated immediately so the
  * filesystem view matches the DB.
  */
 export const updateDocumentVisibility = api(
@@ -599,21 +599,21 @@ export const updateDocumentVisibility = api(
 
     const existing = await loadAdministrableDocument(userId, req.id);
 
-    if (req.visibility === "household") {
-      if (req.household_id == null) {
+    if (req.visibility === "group") {
+      if (req.group_id == null) {
         throw APIError.invalidArgument(
-          "household_id is required when visibility='household'",
+          "group_id is required when visibility='group'",
         );
       }
-      await assertHouseholdMember(userId, req.household_id);
+      await assertGroupMember(userId, req.group_id);
       await db
         .update(documents)
-        .set({ visibility: "household", household_id: req.household_id })
+        .set({ visibility: "group", group_id: req.group_id })
         .where(eq(documents.id, existing.id));
     } else {
       await db
         .update(documents)
-        .set({ visibility: "private", household_id: null })
+        .set({ visibility: "private", group_id: null })
         .where(eq(documents.id, existing.id));
     }
 
@@ -790,14 +790,14 @@ export const backfillDocumentTax = api(
     requirePermission(authData, "documents.edit");
     const userId = getUserId();
 
-    const householdIds = await loadUserHouseholdIds(userId);
+    const groupIds = await loadUserGroupIds(userId);
     const rows = await dbAll<{ id: number }>(
       db
         .select({ id: documents.id })
         .from(documents)
         .where(
           and(
-            visibleDocumentsWhere(userId, householdIds),
+            visibleDocumentsWhere(userId, groupIds),
             eq(documents.status, "ready"),
             eq(documents.tax_reviewed, false),
           ),
@@ -835,14 +835,14 @@ export const backfillDocumentEmbeddings = api(
     requirePermission(authData, "documents.edit");
     const userId = getUserId();
 
-    const householdIds = await loadUserHouseholdIds(userId);
+    const groupIds = await loadUserGroupIds(userId);
     const rows = await dbAll<{ id: number }>(
       db
         .select({ id: documents.id })
         .from(documents)
         .where(
           and(
-            visibleDocumentsWhere(userId, householdIds),
+            visibleDocumentsWhere(userId, groupIds),
             eq(documents.status, "ready"),
           ),
         ),
@@ -889,12 +889,12 @@ export const relocateDocumentsBackfill = api(
     requirePermission(authData, "documents.edit");
     const userId = getUserId();
 
-    const householdIds = await loadUserHouseholdIds(userId);
+    const groupIds = await loadUserGroupIds(userId);
     const rows = await dbAll<{ id: number; disk_path: string }>(
       db
         .select({ id: documents.id, disk_path: documents.disk_path })
         .from(documents)
-        .where(visibleDocumentsWhere(userId, householdIds)),
+        .where(visibleDocumentsWhere(userId, groupIds)),
     );
 
     let relocated = 0;
@@ -1053,7 +1053,7 @@ export const reclassifyTaxSection = api(
       throw APIError.notFound(`unknown tax section: ${req.slug}`);
     }
     const userId = getUserId();
-    const householdIds = await loadUserHouseholdIds(userId);
+    const groupIds = await loadUserGroupIds(userId);
 
     const rows = await dbAll<{ id: number }>(
       db
@@ -1066,7 +1066,7 @@ export const reclassifyTaxSection = api(
         .where(
           and(
             eq(documentTaxSections.tax_section, req.slug),
-            visibleDocumentsWhere(userId, householdIds),
+            visibleDocumentsWhere(userId, groupIds),
             req.include_reviewed ? undefined : eq(documents.tax_reviewed, false),
           ),
         ),
@@ -1105,12 +1105,12 @@ export const listTaxYears = api(
     requirePermission(authData, "documents.view");
     const userId = getUserId();
 
-    const householdIds = await loadUserHouseholdIds(userId);
-    const visibility = householdIds.length === 0
+    const groupIds = await loadUserGroupIds(userId);
+    const visibility = groupIds.length === 0
       ? sql`(visibility = 'private' AND user_id = ${userId})`
       : sql`(
           (visibility = 'private' AND user_id = ${userId})
-          OR (visibility = 'household' AND household_id = ANY(${householdIds}))
+          OR (visibility = 'group' AND group_id = ANY(${groupIds}))
         )`;
     const rows = await db.execute<{ tax_year: number; count: string }>(sql`
       SELECT tax_year, COUNT(*)::text as count
@@ -1186,9 +1186,9 @@ export const listTaxDocuments = api(
         ? year
         : null;
 
-    const householdIds = await loadUserHouseholdIds(userId);
+    const groupIds = await loadUserGroupIds(userId);
     const conds = [
-      visibleDocumentsWhere(userId, householdIds),
+      visibleDocumentsWhere(userId, groupIds),
       eq(documents.tax_relevant, true),
     ];
     if (yearFilter !== null) conds.push(eq(documents.tax_year, yearFilter));
@@ -1401,7 +1401,7 @@ export const searchDocumentsEndpoint = api(
     }
 
     const ids = hits.map((h) => h.document_id);
-    const householdIds = await loadUserHouseholdIds(userId);
+    const groupIds = await loadUserGroupIds(userId);
     const rows = await dbAll<typeof documents.$inferSelect & { cat_slug: string | null }>(
       db
         .select({
@@ -1426,12 +1426,14 @@ export const searchDocumentsEndpoint = api(
           tax_year: documents.tax_year,
           tax_year_confidence: documents.tax_year_confidence,
           tax_reviewed: documents.tax_reviewed,
+          visibility: documents.visibility,
+          group_id: documents.group_id,
           last_error: documents.last_error,
           cat_slug: documentCategories.slug,
         })
         .from(documents)
         .leftJoin(documentCategories, eq(documents.category_id, documentCategories.id))
-        .where(and(visibleDocumentsWhere(userId, householdIds), inArray(documents.id, ids))),
+        .where(and(visibleDocumentsWhere(userId, groupIds), inArray(documents.id, ids))),
     );
 
     const byId = new Map<number, (typeof rows)[number]>();

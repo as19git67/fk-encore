@@ -18,9 +18,13 @@ import {
   reclassifyDocument,
   updateDocument,
   updateDocumentTax,
+  updateDocumentVisibility,
+  listGroups,
   type DocumentCategory,
   type DocumentDetail,
   type DocumentStatus,
+  type DocumentVisibility,
+  type GroupSummary,
   type TaxSectionCatalogEntry,
   type TaxSectionGroup,
 } from '../api/documents'
@@ -36,6 +40,7 @@ const docId = computed(() => parseInt(route.params.id as string, 10))
 
 const doc = ref<DocumentDetail | null>(null)
 const categories = ref<DocumentCategory[]>([])
+const groups = ref<GroupSummary[]>([])
 const taxCatalog = ref<TaxSectionCatalogEntry[]>([])
 const loading = ref(true)
 const saving = ref(false)
@@ -53,6 +58,8 @@ const form = ref({
   summary: '' as string,
   category_slug: null as string | null,
   tagsText: '' as string,
+  visibility: 'private' as DocumentVisibility,
+  group_id: null as number | null,
 })
 
 const taxForm = ref({
@@ -92,16 +99,18 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [detail, cats, taxCats] = await Promise.all([
+    const [detail, cats, taxCats, houseItems] = await Promise.all([
       getDocument(docId.value),
       listDocumentCategories(),
       // Catalog is static-ish — a fresh fetch per detail view is fine and
       // means new sections appear without a hard reload.
       listTaxSectionsCatalog(),
+      listGroups(),
     ])
     doc.value = detail
     categories.value = cats.items
     taxCatalog.value = taxCats.items
+    groups.value = houseItems.items
     resetForm()
     resetTaxForm()
     await loadPdf()
@@ -131,6 +140,8 @@ function resetForm() {
     summary: doc.value.summary ?? '',
     category_slug: doc.value.category_slug,
     tagsText: doc.value.tags.join(', '),
+    visibility: doc.value.visibility,
+    group_id: doc.value.group_id,
   }
 }
 
@@ -192,14 +203,30 @@ async function save() {
       .split(',')
       .map((t) => t.trim())
       .filter((t) => t.length > 0)
-    const updated = await updateDocument(doc.value.id, {
-      title: form.value.title.trim() || null,
-      doc_date: form.value.doc_date.trim() || null,
-      sender: form.value.sender.trim() || null,
-      summary: form.value.summary.trim() || null,
-      category_slug: form.value.category_slug,
-      tags,
-    })
+
+    // Parallel save of basic metadata and visibility
+    const tasks: Promise<any>[] = [
+      updateDocument(doc.value.id, {
+        title: form.value.title.trim() || null,
+        doc_date: form.value.doc_date.trim() || null,
+        sender: form.value.sender.trim() || null,
+        summary: form.value.summary.trim() || null,
+        category_slug: form.value.category_slug,
+        tags,
+      })
+    ]
+
+    const visibilityChanged = form.value.visibility !== doc.value.visibility ||
+                               form.value.group_id !== doc.value.group_id
+
+    if (visibilityChanged) {
+      tasks.push(updateDocumentVisibility(doc.value.id, {
+        visibility: form.value.visibility,
+        group_id: form.value.visibility === 'group' ? form.value.group_id : null
+      }))
+    }
+
+    const [updated] = await Promise.all(tasks)
     doc.value = updated
     resetForm()
     info.value = 'Änderungen gespeichert.'
@@ -406,6 +433,32 @@ onBeforeUnmount(() => {
             <span class="label">Tags (Komma-getrennt)</span>
             <InputText v-model="form.tagsText" :disabled="!auth.hasPermission('documents.edit')" />
           </label>
+
+          <div v-if="auth.hasPermission('documents.edit')" class="visibility-section">
+            <span class="label">Sichtbarkeit</span>
+            <div class="visibility-options">
+              <label class="radio-label">
+                <input type="radio" v-model="form.visibility" value="private" />
+                <span>Privat</span>
+              </label>
+              <label class="radio-label">
+                <input type="radio" v-model="form.visibility" value="group" />
+                <span>Gruppe</span>
+              </label>
+            </div>
+            <div v-if="form.visibility === 'group'" class="group-select">
+              <Select
+                v-model="form.group_id"
+                :options="groups"
+                optionLabel="name"
+                optionValue="id"
+                placeholder="Gruppe auswählen"
+                :disabled="!auth.hasPermission('documents.edit')"
+              />
+              <p v-if="groups.length === 0" class="hint">Du gehörst noch keiner Gruppe an.</p>
+            </div>
+          </div>
+
           <label>
             <span class="label">Zusammenfassung</span>
             <textarea
@@ -666,6 +719,38 @@ onBeforeUnmount(() => {
 .label { font-size: 0.85rem; color: var(--p-text-muted-color); }
 
 .current-tags { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+
+.visibility-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: var(--p-surface-ground);
+  border-radius: 6px;
+  border: 1px solid var(--p-content-border-color);
+}
+.visibility-options {
+  display: flex;
+  gap: 1.5rem;
+}
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.group-select {
+  margin-top: 0.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.hint {
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
+  margin: 0;
+}
 
 .save-row {
   display: flex;
