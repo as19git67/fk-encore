@@ -11,6 +11,10 @@ ALTER TYPE household_member_role RENAME TO group_member_role;
 ALTER TYPE document_visibility RENAME VALUE 'household' TO 'group';
 
 -- Update CHECK constraint on documents
-ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_visibility_household_check;
-ALTER TABLE documents ADD CONSTRAINT documents_visibility_group_check 
+ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_visibility_household_consistent;
+ALTER TABLE documents ADD CONSTRAINT documents_visibility_group_consistent 
     CHECK ((visibility = 'private' AND group_id IS NULL) OR (visibility = 'group' AND group_id IS NOT NULL));
+
+-- Rename Indices
+ALTER INDEX IF EXISTS idx_documents_household_id RENAME TO idx_documents_group_id;
+ALTER INDEX IF EXISTS idx_household_members_user_id RENAME TO idx_group_members_user_id;
