@@ -369,7 +369,7 @@ export const deleteGroup = api(
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 async function uniqueGroupSlug(name: string): Promise<string> {
-  const base = slugifyName(name, 48) || "haushalt";
+  const base = slugifyName(name, 48) || "gruppe";
   let candidate = base;
   for (let i = 2; i < 100; i++) {
     const hit = await dbFirst<{ id: number }>(
