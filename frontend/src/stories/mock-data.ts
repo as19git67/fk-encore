@@ -487,6 +487,8 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     tax_relevant: false,
     tax_year: null,
     last_error: null,
+    visibility: 'private',
+    group_id: null,
   },
   {
     id: 2,
@@ -505,6 +507,8 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     tax_relevant: false,
     tax_year: null,
     last_error: null,
+    visibility: 'private',
+    group_id: null,
   },
   {
     id: 3,
@@ -523,6 +527,8 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     tax_relevant: false,
     tax_year: null,
     last_error: null,
+    visibility: 'private',
+    group_id: null,
   },
   {
     id: 4,
@@ -541,6 +547,8 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     tax_relevant: false,
     tax_year: null,
     last_error: 'OCR fehlgeschlagen: Text-Layer konnte nicht extrahiert werden (tesseract: page 1 segmentation failed).',
+    visibility: 'private',
+    group_id: null,
   },
   {
     id: 5,
@@ -559,6 +567,8 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     tax_relevant: false,
     tax_year: null,
     last_error: null,
+    visibility: 'private',
+    group_id: null,
   },
 ]
 

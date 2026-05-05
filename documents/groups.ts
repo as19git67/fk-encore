@@ -1,12 +1,12 @@
 /**
- * Household management endpoints.
+ * Group management endpoints.
  *
- * A household groups users who share a pool of documents. Every member
- * can see and upload into the household; only `owner`-role members can
- * rename the household, add/remove members, or delete it.
+ * A group groups users who share a pool of documents. Every member
+ * can see and upload into the group; only `owner`-role members can
+ * rename the group, add/remove members, or delete it.
  *
  * Every document belongs to either a single user (`visibility='private'`)
- * or a single household (`visibility='household'`). Private and shared
+ * or a single group (`visibility='group'`). Private and shared
  * documents coexist per user — a family member's personal tax folder is
  * not exposed to the family pool.
  */
@@ -17,11 +17,11 @@ import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
 import { dbAll, dbFirst } from "../db/adapter";
-import { householdMembers, households, users } from "../db/schema";
+import { groupMembers, groups, users } from "../db/schema";
 import { slugifyName } from "./documents.service";
 import {
-  assertHouseholdMember,
-  assertHouseholdOwner,
+  assertGroupMember,
+  assertGroupOwner,
 } from "./visibility";
 
 function getUserId(): number {
@@ -36,7 +36,7 @@ function checkModule(): void {
   requirePermission(authData, "module.documents");
 }
 
-export interface HouseholdMemberDTO {
+export interface GroupMemberDTO {
   user_id: number;
   email: string;
   name: string | null;
@@ -44,27 +44,27 @@ export interface HouseholdMemberDTO {
   joined_at: string | null;
 }
 
-export interface HouseholdDTO {
+export interface GroupDTO {
   id: number;
   slug: string;
   name: string;
   created_at: string | null;
-  /** Caller's role in this household. */
+  /** Caller's role in this group. */
   my_role: "owner" | "member";
   member_count: number;
 }
 
-export interface HouseholdDetailDTO extends HouseholdDTO {
-  members: HouseholdMemberDTO[];
+export interface GroupDetailDTO extends GroupDTO {
+  members: GroupMemberDTO[];
 }
 
-/** List every household the caller belongs to. */
-export const listHouseholds = api(
-  { expose: true, method: "GET", path: "/households", auth: true },
-  async (): Promise<{ items: HouseholdDTO[] }> => {
+/** List every group the caller belongs to. */
+export const listGroups = api(
+  { expose: true, method: "GET", path: "/groups", auth: true },
+  async (): Promise<{ items: GroupDTO[] }> => {
     checkModule();
     const authData = getAuthData()!;
-    requirePermission(authData, "households.view");
+    requirePermission(authData, "groups.view");
     const userId = getUserId();
 
     const rows = await dbAll<{
@@ -76,31 +76,31 @@ export const listHouseholds = api(
     }>(
       db
         .select({
-          id: households.id,
-          slug: households.slug,
-          name: households.name,
-          created_at: households.created_at,
-          my_role: householdMembers.role,
+          id: groups.id,
+          slug: groups.slug,
+          name: groups.name,
+          created_at: groups.created_at,
+          my_role: groupMembers.role,
         })
-        .from(households)
+        .from(groups)
         .innerJoin(
-          householdMembers,
+          groupMembers,
           and(
-            eq(householdMembers.household_id, households.id),
-            eq(householdMembers.user_id, userId),
+            eq(groupMembers.group_id, groups.id),
+            eq(groupMembers.user_id, userId),
           ),
         ),
     );
 
-    // Count members per household in one go — trivially small (a handful
+    // Count members per group in one go — trivially small (a handful
     // at most per user).
-    const items: HouseholdDTO[] = [];
+    const items: GroupDTO[] = [];
     for (const r of rows) {
       const members = await dbAll<{ user_id: number }>(
         db
-          .select({ user_id: householdMembers.user_id })
-          .from(householdMembers)
-          .where(eq(householdMembers.household_id, r.id)),
+          .select({ user_id: groupMembers.user_id })
+          .from(groupMembers)
+          .where(eq(groupMembers.group_id, r.id)),
       );
       items.push({
         id: r.id,
@@ -115,15 +115,15 @@ export const listHouseholds = api(
   },
 );
 
-export const getHousehold = api(
-  { expose: true, method: "GET", path: "/households/:id", auth: true },
-  async ({ id }: { id: number }): Promise<HouseholdDetailDTO> => {
+export const getGroup = api(
+  { expose: true, method: "GET", path: "/groups/:id", auth: true },
+  async ({ id }: { id: number }): Promise<GroupDetailDTO> => {
     checkModule();
     const authData = getAuthData()!;
-    requirePermission(authData, "households.view");
+    requirePermission(authData, "groups.view");
     const userId = getUserId();
 
-    await assertHouseholdMember(userId, id);
+    await assertGroupMember(userId, id);
 
     const h = await dbFirst<{
       id: number;
@@ -133,15 +133,15 @@ export const getHousehold = api(
     }>(
       db
         .select({
-          id: households.id,
-          slug: households.slug,
-          name: households.name,
-          created_at: households.created_at,
+          id: groups.id,
+          slug: groups.slug,
+          name: groups.name,
+          created_at: groups.created_at,
         })
-        .from(households)
-        .where(eq(households.id, id)),
+        .from(groups)
+        .where(eq(groups.id, id)),
     );
-    if (!h) throw APIError.notFound("household not found");
+    if (!h) throw APIError.notFound("group not found");
 
     const members = await dbAll<{
       user_id: number;
@@ -152,15 +152,15 @@ export const getHousehold = api(
     }>(
       db
         .select({
-          user_id: householdMembers.user_id,
+          user_id: groupMembers.user_id,
           email: users.email,
           name: users.name,
-          role: householdMembers.role,
-          joined_at: householdMembers.joined_at,
+          role: groupMembers.role,
+          joined_at: groupMembers.joined_at,
         })
-        .from(householdMembers)
-        .innerJoin(users, eq(users.id, householdMembers.user_id))
-        .where(eq(householdMembers.household_id, id)),
+        .from(groupMembers)
+        .innerJoin(users, eq(users.id, groupMembers.user_id))
+        .where(eq(groupMembers.group_id, id)),
     );
 
     const myRole = members.find((m) => m.user_id === userId)?.role ?? "member";
@@ -174,21 +174,21 @@ export const getHousehold = api(
   },
 );
 
-export interface CreateHouseholdRequest {
+export interface CreateGroupRequest {
   name: string;
 }
 
 /**
- * Create a new household. The caller becomes its first member with
+ * Create a new group. The caller becomes its first member with
  * `owner` role. The slug is derived from the name and uniqueness is
  * enforced at the DB level; colliding names get a numeric suffix.
  */
-export const createHousehold = api(
-  { expose: true, method: "POST", path: "/households", auth: true },
-  async ({ name }: CreateHouseholdRequest): Promise<HouseholdDetailDTO> => {
+export const createGroup = api(
+  { expose: true, method: "POST", path: "/groups", auth: true },
+  async ({ name }: CreateGroupRequest): Promise<GroupDetailDTO> => {
     checkModule();
     const authData = getAuthData()!;
-    requirePermission(authData, "households.manage");
+    requirePermission(authData, "groups.manage");
     const userId = getUserId();
 
     const trimmed = (name ?? "").trim();
@@ -199,38 +199,38 @@ export const createHousehold = api(
       throw APIError.invalidArgument("name must not exceed 120 characters");
     }
 
-    const slug = await uniqueHouseholdSlug(trimmed);
+    const slug = await uniqueGroupSlug(trimmed);
 
     const created = await dbFirst<{ id: number }>(
       db
-        .insert(households)
+        .insert(groups)
         .values({ slug, name: trimmed })
-        .returning({ id: households.id }),
+        .returning({ id: groups.id }),
     );
-    if (!created) throw new Error("insert households: no row returned");
+    if (!created) throw new Error("insert groups: no row returned");
 
     await db
-      .insert(householdMembers)
-      .values({ household_id: created.id, user_id: userId, role: "owner" });
+      .insert(groupMembers)
+      .values({ group_id: created.id, user_id: userId, role: "owner" });
 
-    return await getHouseholdDetail(created.id, userId);
+    return await getGroupDetail(created.id, userId);
   },
 );
 
-export interface UpdateHouseholdRequest {
+export interface UpdateGroupRequest {
   id: number;
   name: string;
 }
 
-export const updateHousehold = api(
-  { expose: true, method: "PATCH", path: "/households/:id", auth: true },
-  async ({ id, name }: UpdateHouseholdRequest): Promise<HouseholdDetailDTO> => {
+export const updateGroup = api(
+  { expose: true, method: "PATCH", path: "/groups/:id", auth: true },
+  async ({ id, name }: UpdateGroupRequest): Promise<GroupDetailDTO> => {
     checkModule();
     const authData = getAuthData()!;
-    requirePermission(authData, "households.manage");
+    requirePermission(authData, "groups.manage");
     const userId = getUserId();
 
-    await assertHouseholdOwner(userId, id);
+    await assertGroupOwner(userId, id);
 
     const trimmed = (name ?? "").trim();
     if (trimmed.length === 0) {
@@ -238,29 +238,29 @@ export const updateHousehold = api(
     }
 
     await db
-      .update(households)
+      .update(groups)
       .set({ name: trimmed })
-      .where(eq(households.id, id));
+      .where(eq(groups.id, id));
 
-    return await getHouseholdDetail(id, userId);
+    return await getGroupDetail(id, userId);
   },
 );
 
-export interface AddHouseholdMemberRequest {
+export interface AddGroupMemberRequest {
   id: number;
   user_email: string;
   role?: "owner" | "member";
 }
 
-export const addHouseholdMember = api(
-  { expose: true, method: "POST", path: "/households/:id/members", auth: true },
-  async ({ id, user_email, role }: AddHouseholdMemberRequest): Promise<HouseholdDetailDTO> => {
+export const addGroupMember = api(
+  { expose: true, method: "POST", path: "/groups/:id/members", auth: true },
+  async ({ id, user_email, role }: AddGroupMemberRequest): Promise<GroupDetailDTO> => {
     checkModule();
     const authData = getAuthData()!;
-    requirePermission(authData, "households.manage");
+    requirePermission(authData, "groups.manage");
     const userId = getUserId();
 
-    await assertHouseholdOwner(userId, id);
+    await assertGroupOwner(userId, id);
 
     const email = (user_email ?? "").trim().toLowerCase();
     if (email.length === 0) {
@@ -274,19 +274,19 @@ export const addHouseholdMember = api(
     const desiredRole: "owner" | "member" = role === "owner" ? "owner" : "member";
 
     await db
-      .insert(householdMembers)
-      .values({ household_id: id, user_id: target.id, role: desiredRole })
+      .insert(groupMembers)
+      .values({ group_id: id, user_id: target.id, role: desiredRole })
       .onConflictDoNothing();
 
-    return await getHouseholdDetail(id, userId);
+    return await getGroupDetail(id, userId);
   },
 );
 
-export const removeHouseholdMember = api(
+export const removeGroupMember = api(
   {
     expose: true,
     method: "DELETE",
-    path: "/households/:id/members/:member_user_id",
+    path: "/groups/:id/members/:member_user_id",
     auth: true,
   },
   async ({
@@ -295,24 +295,24 @@ export const removeHouseholdMember = api(
   }: {
     id: number;
     member_user_id: number;
-  }): Promise<HouseholdDetailDTO> => {
+  }): Promise<GroupDetailDTO> => {
     checkModule();
     const authData = getAuthData()!;
-    requirePermission(authData, "households.manage");
+    requirePermission(authData, "groups.manage");
     const userId = getUserId();
 
-    await assertHouseholdOwner(userId, id);
+    await assertGroupOwner(userId, id);
 
-    // Don't strand a household without any owner. If the target is the
+    // Don't strand a group without any owner. If the target is the
     // last owner, refuse.
     const owners = await dbAll<{ user_id: number }>(
       db
-        .select({ user_id: householdMembers.user_id })
-        .from(householdMembers)
+        .select({ user_id: groupMembers.user_id })
+        .from(groupMembers)
         .where(
           and(
-            eq(householdMembers.household_id, id),
-            eq(householdMembers.role, "owner"),
+            eq(groupMembers.group_id, id),
+            eq(groupMembers.role, "owner"),
           ),
         ),
     );
@@ -321,43 +321,43 @@ export const removeHouseholdMember = api(
       owners.some((o) => o.user_id === member_user_id)
     ) {
       throw APIError.failedPrecondition(
-        "cannot remove the last owner of a household",
+        "cannot remove the last owner of a group",
       );
     }
 
     await db
-      .delete(householdMembers)
+      .delete(groupMembers)
       .where(
         and(
-          eq(householdMembers.household_id, id),
-          eq(householdMembers.user_id, member_user_id),
+          eq(groupMembers.group_id, id),
+          eq(groupMembers.user_id, member_user_id),
         ),
       );
 
-    return await getHouseholdDetail(id, userId);
+    return await getGroupDetail(id, userId);
   },
 );
 
-export const deleteHousehold = api(
-  { expose: true, method: "DELETE", path: "/households/:id", auth: true },
+export const deleteGroup = api(
+  { expose: true, method: "DELETE", path: "/groups/:id", auth: true },
   async ({ id }: { id: number }): Promise<{ success: boolean }> => {
     checkModule();
     const authData = getAuthData()!;
-    requirePermission(authData, "households.manage");
+    requirePermission(authData, "groups.manage");
     const userId = getUserId();
 
-    await assertHouseholdOwner(userId, id);
+    await assertGroupOwner(userId, id);
 
-    // The `documents_household_id_fkey` FK uses ON DELETE RESTRICT, so
-    // any lingering household-scoped document will fail this delete.
+    // The `documents_group_id_fkey` FK uses ON DELETE RESTRICT, so
+    // any lingering group-scoped document will fail this delete.
     // Surface that to the caller as a precondition error rather than a
     // raw SQL error.
     try {
-      await db.delete(households).where(eq(households.id, id));
+      await db.delete(groups).where(eq(groups.id, id));
     } catch (err: any) {
       if (err?.code === "23503") {
         throw APIError.failedPrecondition(
-          "household still owns documents — move or delete them first",
+          "group still owns documents — move or delete them first",
         );
       }
       throw err;
@@ -368,23 +368,23 @@ export const deleteHousehold = api(
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-async function uniqueHouseholdSlug(name: string): Promise<string> {
-  const base = slugifyName(name, 48) || "haushalt";
+async function uniqueGroupSlug(name: string): Promise<string> {
+  const base = slugifyName(name, 48) || "gruppe";
   let candidate = base;
   for (let i = 2; i < 100; i++) {
     const hit = await dbFirst<{ id: number }>(
-      db.select({ id: households.id }).from(households).where(eq(households.slug, candidate)),
+      db.select({ id: groups.id }).from(groups).where(eq(groups.slug, candidate)),
     );
     if (!hit) return candidate;
     candidate = `${base}-${i}`;
   }
-  throw APIError.failedPrecondition("could not allocate a unique household slug");
+  throw APIError.failedPrecondition("could not allocate a unique group slug");
 }
 
-async function getHouseholdDetail(
+async function getGroupDetail(
   id: number,
   viewerId: number,
-): Promise<HouseholdDetailDTO> {
+): Promise<GroupDetailDTO> {
   const h = await dbFirst<{
     id: number;
     slug: string;
@@ -393,15 +393,15 @@ async function getHouseholdDetail(
   }>(
     db
       .select({
-        id: households.id,
-        slug: households.slug,
-        name: households.name,
-        created_at: households.created_at,
+        id: groups.id,
+        slug: groups.slug,
+        name: groups.name,
+        created_at: groups.created_at,
       })
-      .from(households)
-      .where(eq(households.id, id)),
+      .from(groups)
+      .where(eq(groups.id, id)),
   );
-  if (!h) throw APIError.notFound("household not found");
+  if (!h) throw APIError.notFound("group not found");
 
   const members = await dbAll<{
     user_id: number;
@@ -412,15 +412,15 @@ async function getHouseholdDetail(
   }>(
     db
       .select({
-        user_id: householdMembers.user_id,
+        user_id: groupMembers.user_id,
         email: users.email,
         name: users.name,
-        role: householdMembers.role,
-        joined_at: householdMembers.joined_at,
+        role: groupMembers.role,
+        joined_at: groupMembers.joined_at,
       })
-      .from(householdMembers)
-      .innerJoin(users, eq(users.id, householdMembers.user_id))
-      .where(eq(householdMembers.household_id, id)),
+      .from(groupMembers)
+      .innerJoin(users, eq(users.id, groupMembers.user_id))
+      .where(eq(groupMembers.group_id, id)),
   );
   const myRole = members.find((m) => m.user_id === viewerId)?.role ?? "member";
 

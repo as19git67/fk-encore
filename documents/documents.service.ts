@@ -4,12 +4,12 @@
  * Documents live under `DOCUMENTS_DIR` in a *speaking* folder tree:
  *
  *   DOCUMENTS_DIR/
- *   ├── _haushalt/<household-slug>/<category-path>/<year>/<name>.pdf
+ *   ├── _gruppe/<group-slug>/<category-path>/<year>/<name>.pdf
  *   └── <user-login-slug>/<category-path>/<year>/<name>.pdf
  *
  * where:
- *   - `_haushalt/<slug>/...` is used when `documents.visibility='household'`
- *     and every member of that household sees the same physical tree;
+ *   - `_gruppe/<slug>/...` is used when `documents.visibility='group'`
+ *     and every member of that group sees the same physical tree;
  *   - `<user-login-slug>/...` is used for `visibility='private'` and is
  *     derived from the local-part of the uploader's e-mail address.
  *
@@ -53,8 +53,8 @@ export const SUPPORTED_EXTENSIONS = new Set([".pdf"]);
 export const INBOX_SEGMENT = "_inbox";
 /** Sub-directory of the owner root that hosts tax-view hardlinks. */
 export const STEUER_SEGMENT = "_steuer";
-/** Sub-directory of DOCUMENTS_DIR for household-scoped documents. */
-export const HOUSEHOLD_SEGMENT = "_haushalt";
+/** Sub-directory of DOCUMENTS_DIR for group-scoped documents. */
+export const GROUP_SEGMENT = "_gruppe";
 
 export function guessExtension(filename: string, mimeType: string): string {
   const ext = path.extname(filename).toLowerCase();
@@ -108,11 +108,11 @@ export function slugifyUserLogin(email: string, userId: number): string {
 
 export interface DocumentLocationContext {
   /** Access scope of the document. */
-  visibility: "private" | "household";
+  visibility: "private" | "group";
   /** Slug of the uploader's login — required when visibility='private'. */
   userLoginSlug: string | null;
-  /** Slug of the owning household — required when visibility='household'. */
-  householdSlug: string | null;
+  /** Slug of the owning group — required when visibility='group'. */
+  groupSlug: string | null;
   /**
    * Ordered list of category slugs from root to leaf. `null` or empty
    * when no category has been assigned yet — caller lands in the
@@ -148,11 +148,11 @@ export interface ResolvedDocumentPath {
 
 /** Build the owner-root relative path segment. */
 function ownerRootSegment(ctx: DocumentLocationContext): string {
-  if (ctx.visibility === "household") {
-    if (!ctx.householdSlug) {
-      throw new Error("household document without householdSlug");
+  if (ctx.visibility === "group") {
+    if (!ctx.groupSlug) {
+      throw new Error("group document without groupSlug");
     }
-    return path.join(HOUSEHOLD_SEGMENT, ctx.householdSlug);
+    return path.join(GROUP_SEGMENT, ctx.groupSlug);
   }
   if (!ctx.userLoginSlug) {
     throw new Error("private document without userLoginSlug");
@@ -292,9 +292,9 @@ export function getInitialUploadDiskPath(
  * have the category/status context yet.
  */
 export function composeOwnerRootSegment(params: {
-  visibility: "private" | "household";
+  visibility: "private" | "group";
   userLoginSlug: string | null;
-  householdSlug: string | null;
+  groupSlug: string | null;
 }): string {
   return ownerRootSegment({
     ...params,
@@ -307,7 +307,7 @@ export function composeOwnerRootSegment(params: {
     originalFilename: "",
     sha256: "",
     ext: ".pdf",
-  });
+  } as any);
 }
 
 /**
