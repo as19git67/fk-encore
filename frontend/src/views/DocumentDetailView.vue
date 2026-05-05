@@ -226,8 +226,8 @@ async function save() {
       }))
     }
 
-    const [updated] = await Promise.all(tasks)
-    doc.value = updated
+    const results = await Promise.all(tasks)
+    doc.value = results[results.length - 1]
     resetForm()
     info.value = 'Änderungen gespeichert.'
   } catch (err: any) {

@@ -93,6 +93,8 @@ export interface DocumentSummary {
   tax_relevant: boolean;
   tax_year: number | null;
   last_error: string | null;
+  visibility: "private" | "group";
+  group_id: number | null;
 }
 
 export interface DocumentTaxSectionDTO {
@@ -382,6 +384,8 @@ export const listDocuments = api(
           tax_year: documents.tax_year,
           tax_year_confidence: documents.tax_year_confidence,
           tax_reviewed: documents.tax_reviewed,
+          visibility: documents.visibility,
+          group_id: documents.group_id,
           last_error: documents.last_error,
           cat_slug: documentCategories.slug,
         })
@@ -1217,6 +1221,8 @@ export const listTaxDocuments = api(
           tax_year: documents.tax_year,
           tax_year_confidence: documents.tax_year_confidence,
           tax_reviewed: documents.tax_reviewed,
+          visibility: documents.visibility,
+          group_id: documents.group_id,
           last_error: documents.last_error,
           cat_slug: documentCategories.slug,
         })
@@ -1699,6 +1705,8 @@ function toSummary(
     tax_relevant: row.tax_relevant ?? false,
     tax_year: row.tax_year ?? null,
     last_error: row.last_error ?? null,
+    visibility: row.visibility,
+    group_id: row.group_id,
   };
 }
 
