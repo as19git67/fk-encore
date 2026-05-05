@@ -101,7 +101,7 @@ function visibilityClause(userId: number, groupIds: number[]) {
   }
   return sql`(
     (visibility = 'private' AND user_id = ${userId})
-    OR (visibility = 'household' AND group_id = ANY(${groupIds}))
+    OR (visibility = 'group' AND group_id = ANY(${groupIds}))
   )`;
 }
 
@@ -148,7 +148,7 @@ async function runSemantic(
     ? sql`(d.visibility = 'private' AND d.user_id = ${userId})`
     : sql`(
         (d.visibility = 'private' AND d.user_id = ${userId})
-        OR (d.visibility = 'household' AND d.group_id = ANY(${groupIds}))
+        OR (d.visibility = 'group' AND d.group_id = ANY(${groupIds}))
       )`;
 
   // Aggregate at the document level by summing similarity over the top-N

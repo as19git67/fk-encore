@@ -130,8 +130,9 @@ gesichert (`assertPathUnderDocumentsRoot` vor jeder fs-Operation).
 | `documents/documents.service.ts`  | Path-Builder (`resolveDocumentDiskPath`, Slugifier, …)   |
 | `documents/relocate.ts`           | Physische Umzüge + Steuer-Hardlink-Rebuild               |
 | `documents/visibility.ts`         | Zugriffskontrolle (`loadVisibleDocument`, …)             |
-| `documents/households.ts`         | API-Endpoints zum Verwalten von Gruppen                  |
+| `documents/groups.ts`             | API-Endpoints zum Verwalten von Gruppen                  |
 | `documents/documents.ts`          | `POST /documents/:id/visibility`, Upload, CRUD, Suche    |
+| `documents/import.ts`             | Import-Logik für Dokumente                               |
 
 ---
 
