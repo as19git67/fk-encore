@@ -285,6 +285,20 @@ async function saveConfig() {
             </div>
             <div :class="balanceClass(acc)">{{ formatBalance(acc) }}</div>
           </li>
+          <li
+            v-for="acc in section.accounts.filter(a => a.type_kind === 'bargeld')"
+            :key="'add-' + acc.id"
+            class="account-row add-cash-row"
+            @click.stop="router.push({ name: 'finance-transaction-new', query: { accountId: acc.id } })"
+          >
+            <div class="row-left">
+              <div class="row-title">
+                <span class="row-label text-blue-500">
+                  <i class="pi pi-plus-circle" /> Buchung hinzufügen
+                </span>
+              </div>
+            </div>
+          </li>
         </ul>
       </section>
 

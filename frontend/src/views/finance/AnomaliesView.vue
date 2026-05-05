@@ -351,6 +351,14 @@ function formatAmountChange(item: AnomalyItem): string | null {
   color: var(--p-primary-color);
 }
 
+.filter-row :deep(.p-selectbutton .p-button) {
+  hyphens: auto;
+  overflow-wrap: break-word;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.2;
+}
+
 .anomaly-list {
   list-style: none;
   padding: 0;

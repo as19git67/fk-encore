@@ -262,11 +262,10 @@ export const modules: ModuleConfig[] = [
       { label: 'Übersicht', icon: 'pi pi-th-large', routeName: 'finance-overview', permission: 'finance.view' },
       { label: 'Konten', icon: 'pi pi-wallet', routeName: 'finance-accounts', permission: 'finance.view' },
       { label: 'Bankkontakte', icon: 'pi pi-building', routeName: 'finance-bankcontacts', permission: 'finance.accounts.manage' },
-      { label: 'Bankkontakte-Hilfe', icon: 'pi pi-question-circle', routeName: 'finance-bankcontacts-help', permission: 'finance.accounts.manage' },
+      { label: 'Import', icon: 'pi pi-cloud-upload', routeName: 'finance-admin-import', permission: 'finance.admin' },
       { label: 'Analyse', icon: 'pi pi-chart-bar', routeName: 'finance-analysis', permission: 'finance.view' },
       { label: 'Anomalien', icon: 'pi pi-exclamation-triangle', routeName: 'finance-anomalies', permission: 'finance.view' },
       { label: 'Konto-Zugriff', icon: 'pi pi-key', routeName: 'finance-admin-access', permission: 'finance.admin' },
-      { label: 'Import', icon: 'pi pi-cloud-upload', routeName: 'finance-admin-import', permission: 'finance.admin' },
     ],
   },
   {

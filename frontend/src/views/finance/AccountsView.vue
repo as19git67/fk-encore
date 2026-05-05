@@ -1,18 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
+import ToggleSwitch from 'primevue/toggleswitch'
 import Message from 'primevue/message'
 import { useAccountsStore } from '../../stores/finance/accounts'
+import { useBankcontactsStore } from '../../stores/finance/bankcontacts'
 import { useAuthStore } from '../../stores/auth'
 
 const store = useAccountsStore()
-const router = useRouter()
+const bankcontactsStore = useBankcontactsStore()
 const authStore = useAuthStore()
 
 // "I have finance.view but the listAccounts response is empty" — that
@@ -29,6 +30,7 @@ const showAclEmptyHint = computed(
 
 onMounted(() => {
   void store.refresh()
+  void bankcontactsStore.refresh()
 })
 
 function formatIban(iban: string | null): string {
@@ -38,67 +40,91 @@ function formatIban(iban: string | null): string {
   return `${iban.slice(0, 4)} … ${iban.slice(-4)}`
 }
 
-// --- "Neues Konto"-dialog (manual account) ----------------------------
-//
-// A manual finance_account has no bankcontact_id. Linking to a bank
-// happens later on the AccountDetailView after a sync reveals the
-// bank-side account list.
+const canWrite = computed(() => authStore.hasPermission('finance.accounts.manage'))
 
-const createDialogVisible = ref(false)
-const createErrorMsg = ref<string | null>(null)
-const creating = ref(false)
-const form = ref({
+const editDialogVisible = ref(false)
+const editErrorMsg = ref<string | null>(null)
+const editing = ref(false)
+const editId = ref<number | null>(null)
+const editForm = ref({
   label: '',
   type_kind: 'giro',
   currency_code: 'EUR',
   account_number: '',
   iban: '',
+  active: true,
+  bankcontact_id: null as number | null,
 })
 
-const typeOptions = [
-  { kind: 'giro', label: 'Girokonto' },
-  { kind: 'tagesgeld', label: 'Tagesgeld' },
-  { kind: 'festgeld', label: 'Festgeld' },
-  { kind: 'kredit', label: 'Kredit' },
-  { kind: 'depot', label: 'Depot' },
-  { kind: 'bausparen', label: 'Bausparen' },
-  { kind: 'kreditkarte', label: 'Kreditkarte' },
-  { kind: 'bargeld', label: 'Bargeld' },
-  { kind: 'sonstige', label: 'Sonstige' },
-]
-
-function openCreate() {
-  form.value = {
-    label: '',
-    type_kind: 'giro',
-    currency_code: 'EUR',
-    account_number: '',
-    iban: '',
+function openEdit(acc?: any) {
+  if (acc) {
+    editId.value = acc.id
+    editForm.value = {
+      label: acc.label,
+      type_kind: acc.type_kind,
+      currency_code: acc.currency_code,
+      account_number: acc.account_number,
+      iban: acc.iban ?? '',
+      active: acc.active,
+      bankcontact_id: acc.bankcontact_id ?? null,
+    }
+  } else {
+    editId.value = null
+    editForm.value = {
+      label: '',
+      type_kind: 'giro',
+      currency_code: 'EUR',
+      account_number: '',
+      iban: '',
+      active: true,
+      bankcontact_id: null,
+    }
   }
-  createErrorMsg.value = null
-  createDialogVisible.value = true
+  editErrorMsg.value = null
+  editDialogVisible.value = true
 }
 
-async function createManual() {
-  creating.value = true
-  createErrorMsg.value = null
+async function saveAccount() {
+  editing.value = true
+  editErrorMsg.value = null
   try {
-    const created = await store.create({
-      type_kind: form.value.type_kind,
-      currency_code: form.value.currency_code.trim() || 'EUR',
-      account_number: form.value.account_number.trim(),
-      iban: form.value.iban.trim() || undefined,
-      label: form.value.label.trim(),
-    })
-    createDialogVisible.value = false
-    void router.push({
-      name: 'finance-account-detail',
-      params: { id: created.id },
-    })
+    const payload = {
+      label: editForm.value.label.trim(),
+      type_kind: editForm.value.type_kind,
+      currency_code: editForm.value.currency_code.trim().toUpperCase(),
+      account_number: editForm.value.account_number.trim(),
+      iban: editForm.value.iban.trim() || undefined,
+      active: editForm.value.active,
+    }
+
+    if (editId.value) {
+      await store.update(editId.value, payload)
+      // Link/Unlink bankcontact if changed
+      const current = store.byId(editId.value)
+      if (current && editForm.value.bankcontact_id !== current.bankcontact_id) {
+        if (editForm.value.bankcontact_id === null) {
+          await store.unlink(editId.value)
+        } else {
+          await store.link(editId.value, {
+            bankcontact_id: editForm.value.bankcontact_id,
+            fints_account_number: editForm.value.account_number.trim(),
+          })
+        }
+      }
+    } else {
+      const created = await store.create(payload)
+      if (editForm.value.bankcontact_id !== null) {
+        await store.link(created.id, {
+          bankcontact_id: editForm.value.bankcontact_id,
+          fints_account_number: editForm.value.account_number.trim(),
+        })
+      }
+    }
+    editDialogVisible.value = false
   } catch (err) {
-    createErrorMsg.value = err instanceof Error ? err.message : String(err)
+    editErrorMsg.value = err instanceof Error ? err.message : String(err)
   } finally {
-    creating.value = false
+    editing.value = false
   }
 }
 </script>
@@ -108,9 +134,10 @@ async function createManual() {
     <header class="page-header">
       <h1>Konten</h1>
       <Button
+        v-if="canWrite"
         label="Neues Konto"
         icon="pi pi-plus"
-        @click="openCreate"
+        @click="openEdit()"
       />
     </header>
 
@@ -129,7 +156,7 @@ async function createManual() {
       :loading="store.loading"
       dataKey="id"
       :rowHover="true"
-      @row-click="(e) => router.push({ name: 'finance-account-detail', params: { id: (e.data as { id: number }).id } })"
+      @row-click="(e) => openEdit(e.data)"
       striped-rows
     >
       <Column field="label" header="Label" />
@@ -153,53 +180,77 @@ async function createManual() {
     </DataTable>
 
     <Dialog
-      v-model:visible="createDialogVisible"
+      v-model:visible="editDialogVisible"
       modal
-      header="Neues Konto"
-      :style="{ width: '28rem' }"
+      :header="editId ? 'Stammdaten bearbeiten' : 'Neues Konto'"
+      :style="{ width: '30rem' }"
     >
-      <Message v-if="createErrorMsg" severity="error" :closable="false">
-        {{ createErrorMsg }}
+      <Message v-if="editErrorMsg" severity="error" :closable="false">
+        {{ editErrorMsg }}
       </Message>
-      <p class="hint">
-        Das Konto wird zunächst manuell angelegt. Bankzugang + Kontonummer
-        bei der Bank kannst du später im Konto-Detail verknüpfen.
-      </p>
-      <div class="field"><label>Label</label><InputText v-model="form.label" /></div>
+
+      <div class="field"><label>Label</label><InputText v-model="editForm.label" /></div>
       <div class="field">
         <label>Kontotyp</label>
         <Select
-          v-model="form.type_kind"
-          :options="typeOptions"
+          v-model="editForm.type_kind"
+          :options="[
+            { kind: 'giro', label: 'Girokonto' },
+            { kind: 'tagesgeld', label: 'Tagesgeld' },
+            { kind: 'festgeld', label: 'Festgeld' },
+            { kind: 'kredit', label: 'Kredit' },
+            { kind: 'depot', label: 'Depot' },
+            { kind: 'bausparen', label: 'Bausparen' },
+            { kind: 'kreditkarte', label: 'Kreditkarte' },
+            { kind: 'bargeld', label: 'Bargeld' },
+            { kind: 'sonstige', label: 'Sonstige' },
+          ]"
           option-label="label"
           option-value="kind"
         />
       </div>
       <div class="field">
         <label>Währung</label>
-        <InputText v-model="form.currency_code" maxlength="3" />
+        <InputText v-model="editForm.currency_code" maxlength="3" />
       </div>
       <div class="field">
-        <label>Interne Kontonummer</label>
-        <InputText
-          v-model="form.account_number"
-          placeholder="z. B. '1' für Hauptkonto"
+        <label>Interne Kontonummer / Bank-Kontonummer</label>
+        <InputText v-model="editForm.account_number" />
+      </div>
+      <div class="field"><label>IBAN</label><InputText v-model="editForm.iban" /></div>
+
+      <div class="field">
+        <label>Bankzugang</label>
+        <Select
+          v-model="editForm.bankcontact_id"
+          :options="[
+            { id: null, name: 'Kein Bankzugang (manuell)' },
+            ...bankcontactsStore.items.map(bc => ({ id: bc.id, name: bc.name }))
+          ]"
+          option-label="name"
+          option-value="id"
+          placeholder="Wähle einen Bankzugang"
         />
       </div>
-      <div class="field"><label>IBAN (optional)</label><InputText v-model="form.iban" /></div>
+
+      <div class="field field--inline">
+        <label>Aktiv</label>
+        <ToggleSwitch v-model="editForm.active" />
+      </div>
+
       <template #footer>
         <Button
           label="Abbrechen"
           severity="secondary"
           text
-          @click="createDialogVisible = false"
+          @click="editDialogVisible = false"
         />
         <Button
-          label="Anlegen"
+          label="Speichern"
           icon="pi pi-check"
-          :loading="creating"
-          :disabled="!form.label.trim() || !form.account_number.trim()"
-          @click="createManual"
+          :loading="editing"
+          :disabled="!editForm.label.trim() || !editForm.account_number.trim()"
+          @click="saveAccount"
         />
       </template>
     </Dialog>
@@ -243,5 +294,10 @@ async function createManual() {
 .hint {
   color: var(--p-text-muted-color);
   margin: 0 0 0.75rem;
+}
+.field--inline {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
 }
 </style>

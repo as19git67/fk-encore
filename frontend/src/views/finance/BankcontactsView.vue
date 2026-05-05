@@ -234,7 +234,7 @@ function openDetail(id: number) {
       striped-rows
     >
       <Column field="name" header="Name" />
-      <Column field="blz" header="BLZ" />
+      <Column field="blz" header="BLZ" class="hidden md:table-cell" headerClass="hidden md:table-cell" />
       <Column field="login" header="Login" />
       <Column header="Letzter Sync">
         <template #body="{ data }">

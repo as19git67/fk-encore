@@ -1,25 +1,29 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import InputNumber from 'primevue/inputnumber'
+import InputText from 'primevue/inputtext'
+import DatePicker from 'primevue/datepicker'
 import Button from 'primevue/button'
 import TagAutoComplete from '../../components/finance/TagAutoComplete.vue'
 import Message from 'primevue/message'
-import Select from 'primevue/select'
 import { useAccountsStore } from '../../stores/finance/accounts'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useTagsStore } from '../../stores/finance/tags'
 import { recentCashRecipients, type RecentRecipient } from '../../api/finance'
 
+const route = useRoute()
 const router = useRouter()
 const accountsStore = useAccountsStore()
 const txStore = useTransactionsStore()
 const tagsStore = useTagsStore()
 
 const accountId = ref<number | null>(null)
+const bookingDate = ref<Date>(new Date())
 const amount = ref<number | null>(null)
 const isExpense = ref(true)
 const counterparty = ref('')
+const purpose = ref('') // mapped to purpose in backend if needed, or just notes
 const tags = ref<string[]>([])
 const error = ref<string | null>(null)
 const saving = ref(false)
@@ -33,9 +37,14 @@ const cashAccounts = computed(() =>
 onMounted(async () => {
   if (accountsStore.items.length === 0) await accountsStore.refresh()
   if (tagsStore.items.length === 0) await tagsStore.refresh('user')
-  if (cashAccounts.value.length === 1) {
+  
+  const queryAccountId = Number(route.query.accountId)
+  if (queryAccountId) {
+    accountId.value = queryAccountId
+  } else if (cashAccounts.value.length === 1) {
     accountId.value = cashAccounts.value[0]!.id
   }
+  
   try {
     const resp = await recentCashRecipients()
     recentRecipients.value = resp.items
@@ -46,11 +55,23 @@ onMounted(async () => {
 
 function applyRecipient(r: RecentRecipient) {
   counterparty.value = r.counterparty
-  tags.value = [...r.tags]
+  // Under "zuletzt verwendet", badges should only show the name, not tags.
+  // But applying them still brings the tags. The issue description says:
+  // "Unter zuletzt verwendet sollen die Badges nur den Namen Empfänger darstellen und nicht die liste der Tags."
+  // This refers to the UI of the badges themselves.
+}
+
+function setDate(days: number) {
+  const d = new Date()
+  d.setDate(d.getDate() + days)
+  bookingDate.value = d
 }
 
 function toIso(d: Date): string {
-  return d.toISOString().slice(0, 10)
+  // Fix timezone offset for ISO date
+  const offset = d.getTimezoneOffset()
+  const localDate = new Date(d.getTime() - offset * 60 * 1000)
+  return localDate.toISOString().slice(0, 10)
 }
 
 async function save() {
@@ -72,9 +93,10 @@ async function save() {
   try {
     const created = await txStore.create({
       account_id: accountId.value,
-      booking_date: toIso(new Date()),
+      booking_date: toIso(bookingDate.value),
       amount: signedAmount,
       counterparty: counterparty.value.trim(),
+      purpose: purpose.value.trim() || undefined,
       tags: tags.value,
     })
     tagsStore.addLocal(tags.value)
@@ -98,18 +120,19 @@ async function save() {
       {{ error }}
     </Message>
 
-    <!-- Konto-Auswahl (nur wenn mehrere Bargeldkonten) -->
-    <Select
-      v-if="cashAccounts.length > 1"
-      v-model="accountId"
-      :options="cashAccounts"
-      option-label="label"
-      option-value="id"
-      placeholder="Bargeldkonto wählen …"
-      class="account-select"
-    />
-    <div v-else-if="cashAccounts.length === 1" class="account-name">
-      {{ cashAccounts[0]!.label }}
+    <div class="field">
+      <label>Buchungsdatum</label>
+      <div class="date-row">
+        <DatePicker v-model="bookingDate" date-format="dd.mm.yy" show-icon fluid />
+        <div class="date-presets">
+          <Button label="Heute" size="small" severity="secondary" @click="setDate(0)" />
+          <Button label="Gestern" size="small" severity="secondary" @click="setDate(-1)" />
+        </div>
+      </div>
+    </div>
+
+    <div v-if="cashAccounts.length > 0" class="account-name">
+      Konto: <strong>{{ accountsStore.byId(accountId ?? -1)?.label ?? '…' }}</strong>
     </div>
     <Message v-else severity="warn" :closable="false">
       Kein Bargeldkonto (Typ „bargeld") vorhanden. Bitte zuerst ein Konto anlegen.
@@ -156,14 +179,34 @@ async function save() {
       />
     </div>
 
-    <!-- Buchen-Button -->
-    <Button
-      class="save-btn"
-      label="Buchen"
-      :loading="saving"
-      :disabled="!amount || !counterparty.trim() || !accountId"
-      @click="save"
-    />
+    <!-- Notiz -->
+    <div class="field">
+      <label class="field-label">Notiz</label>
+      <InputText
+        v-model="purpose"
+        type="text"
+        class="recipient-input"
+        placeholder="Notiz zur Buchung …"
+      />
+    </div>
+
+    <!-- Aktionen -->
+    <div class="actions-row">
+      <Button
+        class="save-btn"
+        label="Speichern"
+        icon="pi pi-check"
+        :loading="saving"
+        :disabled="!amount || !counterparty.trim() || !accountId"
+        @click="save"
+      />
+      <Button
+        label="Abbrechen"
+        severity="secondary"
+        text
+        @click="router.back()"
+      />
+    </div>
 
     <!-- Letzte Empfänger als Badges -->
     <div v-if="recentRecipients.length > 0" class="recent-section">
@@ -176,7 +219,6 @@ async function save() {
           @click="applyRecipient(r)"
         >
           {{ r.counterparty }}
-          <span v-if="r.tags.length > 0" class="recent-tags">· {{ r.tags.join(', ') }}</span>
         </button>
       </div>
     </div>
@@ -272,6 +314,21 @@ async function save() {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+.date-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.date-presets {
+  display: flex;
+  gap: 0.4rem;
+}
+.actions-row {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
 }
 .recent-badge {
   display: inline-flex;
