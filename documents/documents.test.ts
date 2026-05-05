@@ -3,7 +3,7 @@ import path from "path";
 
 import {
   DOCUMENTS_DIR,
-  HOUSEHOLD_SEGMENT,
+  GROUP_SEGMENT,
   INBOX_SEGMENT,
   STEUER_SEGMENT,
   assertPathUnderDocumentsRoot,
@@ -96,7 +96,7 @@ describe("documents.service buildSpeakingFileName", () => {
   const base: DocumentLocationContext = {
     visibility: "private",
     userLoginSlug: "max",
-    householdSlug: null,
+    groupSlug: null,
     categorySlugs: null,
     status: "ready",
     docDate: "2026-04-15",
@@ -138,7 +138,7 @@ describe("documents.service resolveDocumentDiskPath", () => {
   const readyCtx: DocumentLocationContext = {
     visibility: "private",
     userLoginSlug: "max",
-    householdSlug: null,
+    groupSlug: null,
     categorySlugs: ["finanzen", "steuern"],
     status: "ready",
     docDate: "2026-04-15",
@@ -168,25 +168,25 @@ describe("documents.service resolveDocumentDiskPath", () => {
     expect(relPath.startsWith(path.join("max", INBOX_SEGMENT, "2026-04"))).toBe(true);
   });
 
-  it("uses _haushalt/<slug> for household-visible documents", () => {
+  it("uses _gruppe/<slug> for group-visible documents", () => {
     const { relPath } = resolveDocumentDiskPath({
       ...readyCtx,
-      visibility: "household",
+      visibility: "group",
       userLoginSlug: null,
-      householdSlug: "familie-mueller",
+      groupSlug: "familie-mueller",
     });
-    expect(relPath.startsWith(path.join(HOUSEHOLD_SEGMENT, "familie-mueller"))).toBe(true);
+    expect(relPath.startsWith(path.join(GROUP_SEGMENT, "familie-mueller"))).toBe(true);
   });
 
-  it("refuses household documents without a householdSlug", () => {
+  it("refuses group documents without a groupSlug", () => {
     expect(() =>
       resolveDocumentDiskPath({
         ...readyCtx,
-        visibility: "household",
+        visibility: "group",
         userLoginSlug: null,
-        householdSlug: null,
+        groupSlug: null,
       }),
-    ).toThrow(/householdSlug/);
+    ).toThrow(/groupSlug/);
   });
 
   it("resolveTaxLinkPath lands under <owner>/_steuer/<year>/<section>", () => {
@@ -203,19 +203,19 @@ describe("documents.service composeOwnerRootSegment / getInitialUploadDiskPath",
       composeOwnerRootSegment({
         visibility: "private",
         userLoginSlug: "max",
-        householdSlug: null,
+        groupSlug: null,
       }),
     ).toBe("max");
   });
 
-  it("produces the _haushalt/<slug> root for household visibility", () => {
+  it("produces the _gruppe/<slug> root for group visibility", () => {
     expect(
       composeOwnerRootSegment({
-        visibility: "household",
+        visibility: "group",
         userLoginSlug: null,
-        householdSlug: "familie-mueller",
+        groupSlug: "familie-mueller",
       }),
-    ).toBe(path.join(HOUSEHOLD_SEGMENT, "familie-mueller"));
+    ).toBe(path.join(GROUP_SEGMENT, "familie-mueller"));
   });
 
   it("initial upload path places the sha256 under owner/_inbox/YYYY-MM/", () => {

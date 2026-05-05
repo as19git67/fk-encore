@@ -3,7 +3,7 @@
  *
  * A document is reachable by the caller when either
  *   - `visibility='private'` AND `user_id = caller`
- *   - `visibility='household'` AND `household_id ∈ caller's households`
+ *   - `visibility='group'` AND `group_id ∈ caller's groups`
  *
  * Internal endpoints replace the old `loadOwnedDocument` with
  * `loadVisibleDocument` so the shared-family use case works without
@@ -14,39 +14,39 @@ import { and, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import { APIError } from "encore.dev/api";
 import db from "../db/database";
 import { dbAll, dbFirst } from "../db/adapter";
-import { documents, householdMembers } from "../db/schema";
+import { documents, groupMembers } from "../db/schema";
 
 type DocumentRow = typeof documents.$inferSelect;
 
 /** Drizzle `WHERE` fragment selecting every document visible to `userId`. */
-export function visibleDocumentsWhere(userId: number, householdIds: number[]): SQL {
+export function visibleDocumentsWhere(userId: number, groupIds: number[]): SQL {
   const privateMatch = and(
     eq(documents.visibility, "private"),
     eq(documents.user_id, userId),
   )!;
-  if (householdIds.length === 0) return privateMatch;
-  const householdMatch = and(
-    eq(documents.visibility, "household"),
-    inArray(documents.household_id, householdIds),
+  if (groupIds.length === 0) return privateMatch;
+  const groupMatch = and(
+    eq(documents.visibility, "group"),
+    inArray(documents.group_id, groupIds),
   )!;
-  return or(privateMatch, householdMatch)!;
+  return or(privateMatch, groupMatch)!;
 }
 
-/** Caller membership: fetch every household id the user belongs to. */
-export async function loadUserHouseholdIds(userId: number): Promise<number[]> {
-  const rows = await dbAll<{ household_id: number }>(
+/** Caller membership: fetch every group id the user belongs to. */
+export async function loadUserGroupIds(userId: number): Promise<number[]> {
+  const rows = await dbAll<{ group_id: number }>(
     db
-      .select({ household_id: householdMembers.household_id })
-      .from(householdMembers)
-      .where(eq(householdMembers.user_id, userId)),
+      .select({ group_id: groupMembers.group_id })
+      .from(groupMembers)
+      .where(eq(groupMembers.user_id, userId)),
   );
-  return rows.map((r) => r.household_id);
+  return rows.map((r) => r.group_id);
 }
 
 /**
  * Load a document row if (and only if) the caller may see it — i.e. it
- * is either their own private upload or a household-scoped document in
- * a household they belong to. Throws `APIError.notFound` otherwise
+ * is either their own private upload or a group-scoped document in
+ * a group they belong to. Throws `APIError.notFound` otherwise
  * (deliberately masking the difference from "does not exist" so we
  * don't leak document ids).
  */
@@ -54,12 +54,12 @@ export async function loadVisibleDocument(
   userId: number,
   documentId: number,
 ): Promise<DocumentRow> {
-  const householdIds = await loadUserHouseholdIds(userId);
+  const groupIds = await loadUserGroupIds(userId);
   const row = await dbFirst<DocumentRow>(
     db
       .select()
       .from(documents)
-      .where(and(eq(documents.id, documentId), visibleDocumentsWhere(userId, householdIds))),
+      .where(and(eq(documents.id, documentId), visibleDocumentsWhere(userId, groupIds))),
   );
   if (!row) throw APIError.notFound("document not found");
   return row;
@@ -68,7 +68,7 @@ export async function loadVisibleDocument(
 /**
  * Stricter variant for destructive operations (delete, visibility
  * change): the caller must be the uploader OR hold the `owner` role in
- * the document's household. Regular members cannot delete household
+ * the document's group. Regular members cannot delete group
  * documents they didn't upload.
  */
 export async function loadAdministrableDocument(
@@ -77,68 +77,68 @@ export async function loadAdministrableDocument(
 ): Promise<DocumentRow> {
   const row = await loadVisibleDocument(userId, documentId);
   if (row.user_id === userId) return row;
-  if (row.visibility === "household" && row.household_id != null) {
+  if (row.visibility === "group" && row.group_id != null) {
     const membership = await dbFirst<{ role: "owner" | "member" }>(
       db
-        .select({ role: householdMembers.role })
-        .from(householdMembers)
+        .select({ role: groupMembers.role })
+        .from(groupMembers)
         .where(
           and(
-            eq(householdMembers.household_id, row.household_id),
-            eq(householdMembers.user_id, userId),
+            eq(groupMembers.group_id, row.group_id),
+            eq(groupMembers.user_id, userId),
           ),
         ),
     );
     if (membership?.role === "owner") return row;
   }
   throw APIError.permissionDenied(
-    "only the uploader or a household owner may perform this action",
+    "only the uploader or a group owner may perform this action",
   );
 }
 
 /**
- * Assert that the caller is a member of `householdId`; used when
- * moving a private document into a household or when the frontend
- * enumerates household-visible documents explicitly.
+ * Assert that the caller is a member of `groupId`; used when
+ * moving a private document into a group or when the frontend
+ * enumerates group-visible documents explicitly.
  */
-export async function assertHouseholdMember(
+export async function assertGroupMember(
   userId: number,
-  householdId: number,
+  groupId: number,
 ): Promise<void> {
   const row = await dbFirst<{ user_id: number }>(
     db
-      .select({ user_id: householdMembers.user_id })
-      .from(householdMembers)
+      .select({ user_id: groupMembers.user_id })
+      .from(groupMembers)
       .where(
         and(
-          eq(householdMembers.household_id, householdId),
-          eq(householdMembers.user_id, userId),
+          eq(groupMembers.group_id, groupId),
+          eq(groupMembers.user_id, userId),
         ),
       ),
   );
   if (!row) {
-    throw APIError.permissionDenied("not a member of this household");
+    throw APIError.permissionDenied("not a member of this group");
   }
 }
 
-/** Assert household-owner role for admin-level household mutations. */
-export async function assertHouseholdOwner(
+/** Assert group-owner role for admin-level group mutations. */
+export async function assertGroupOwner(
   userId: number,
-  householdId: number,
+  groupId: number,
 ): Promise<void> {
   const row = await dbFirst<{ role: "owner" | "member" }>(
     db
-      .select({ role: householdMembers.role })
-      .from(householdMembers)
+      .select({ role: groupMembers.role })
+      .from(groupMembers)
       .where(
         and(
-          eq(householdMembers.household_id, householdId),
-          eq(householdMembers.user_id, userId),
+          eq(groupMembers.group_id, groupId),
+          eq(groupMembers.user_id, userId),
         ),
       ),
   );
   if (row?.role !== "owner") {
-    throw APIError.permissionDenied("only household owners may perform this action");
+    throw APIError.permissionDenied("only group owners may perform this action");
   }
 }
 
@@ -147,12 +147,12 @@ export async function assertHouseholdOwner(
  * issue hand-crafted SQL rather than going through the Drizzle query
  * builder. Returns the bind-ready condition string pieces.
  */
-export function visibleDocumentsSqlFragment(userId: number, householdIds: number[]) {
-  if (householdIds.length === 0) {
+export function visibleDocumentsSqlFragment(userId: number, groupIds: number[]) {
+  if (groupIds.length === 0) {
     return sql`(d.visibility = 'private' AND d.user_id = ${userId})`;
   }
   return sql`(
     (d.visibility = 'private' AND d.user_id = ${userId})
-    OR (d.visibility = 'household' AND d.household_id IN ${householdIds})
+    OR (d.visibility = 'group' AND d.group_id IN ${groupIds})
   )`;
 }

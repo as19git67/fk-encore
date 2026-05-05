@@ -22,7 +22,7 @@ import {
   documentCategories,
   documentTaxSections,
   documents,
-  households,
+  groups,
   users,
 } from "../db/schema";
 import {
@@ -43,7 +43,7 @@ type DocumentRow = typeof documents.$inferSelect;
 
 /**
  * Build the location context for a document from its DB row. Joins in
- * the uploader's login slug, the household slug (if any), and the
+ * the uploader's login slug, the group slug (if any), and the
  * category chain so the caller can hand the result to
  * `resolveDocumentDiskPath` without more queries.
  */
@@ -56,12 +56,12 @@ export async function loadDocumentLocationContext(
   const email = userRow?.email ?? `user-${doc.user_id}@local`;
   const userLoginSlug = slugifyUserLogin(email, doc.user_id);
 
-  let householdSlug: string | null = null;
-  if (doc.household_id != null) {
+  let groupSlug: string | null = null;
+  if (doc.group_id != null) {
     const h = await dbFirst<{ slug: string }>(
-      db.select({ slug: households.slug }).from(households).where(eq(households.id, doc.household_id)),
+      db.select({ slug: groups.slug }).from(groups).where(eq(groups.id, doc.group_id)),
     );
-    householdSlug = h?.slug ?? null;
+    groupSlug = h?.slug ?? null;
   }
 
   const categorySlugs = doc.category_id != null
@@ -74,7 +74,7 @@ export async function loadDocumentLocationContext(
   return {
     visibility: doc.visibility,
     userLoginSlug,
-    householdSlug,
+    groupSlug,
     categorySlugs,
     status: doc.status,
     docDate: doc.doc_date,
@@ -218,8 +218,8 @@ function deriveOwnerRootFromPath(absPath: string): string | null {
   const rel = resolved.slice(root.length + 1);
   const segments = rel.split(path.sep);
   if (segments.length === 0) return null;
-  // `_haushalt/<slug>/...` → owner root is `_haushalt/<slug>`.
-  if (segments[0] === "_haushalt" && segments.length >= 2) {
+  // `_gruppe/<slug>/...` → owner root is `_gruppe/<slug>`.
+  if (segments[0] === "_gruppe" && segments.length >= 2) {
     return path.join(root, segments[0], segments[1]);
   }
   return path.join(root, segments[0]);

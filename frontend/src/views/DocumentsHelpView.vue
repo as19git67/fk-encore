@@ -24,7 +24,7 @@ function goBack() {
     </div>
 
     <p class="intro">
-      Das Dokumente-Modul verwaltet PDFs deines Haushalts. Nach dem Upload
+      Das Dokumente-Modul verwaltet PDFs deiner Gruppen. Nach dem Upload
       werden Text extrahiert und Inhalte von einer lokalen KI klassifiziert:
       Kategorie, Titel, Absender, Datum, Tags, Zusammenfassung und – falls
       zutreffend – Steuerrelevanz samt Jahr und Sektionen. Du kannst alle

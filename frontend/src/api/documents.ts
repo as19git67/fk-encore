@@ -12,6 +12,7 @@ export type DocumentStatus = 'pending' | 'extracting' | 'classifying' | 'ready' 
 export type SearchMode = 'fts' | 'semantic' | 'hybrid'
 export type TaxSectionGroup = 'einkuenfte' | 'abzuege' | 'bescheid' | 'rahmen'
 export type TaxAssignmentSource = 'ai' | 'user'
+export type DocumentVisibility = 'private' | 'group'
 
 export interface DocumentSummary {
   id: number
@@ -30,6 +31,8 @@ export interface DocumentSummary {
   tax_relevant: boolean
   tax_year: number | null
   last_error: string | null
+  visibility: DocumentVisibility
+  group_id: number | null
 }
 
 export interface DocumentTaxSection {
@@ -159,6 +162,18 @@ export function updateDocument(id: number, payload: UpdateDocumentPayload) {
 
 export function deleteDocument(id: number) {
   return apiFetch<{ success: boolean }>(`/documents/${id}`, { method: 'DELETE' })
+}
+
+export interface UpdateDocumentVisibilityPayload {
+  visibility: DocumentVisibility
+  group_id?: number | null
+}
+
+export function updateDocumentVisibility(id: number, payload: UpdateDocumentVisibilityPayload) {
+  return apiFetch<DocumentDetail>(`/documents/${id}/visibility`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 }
 
 export function reclassifyDocument(
@@ -302,6 +317,64 @@ export function reclassifyTaxSection(slug: string, includeReviewed = false) {
     },
   )
 }
+
+// ─── Groups ──────────────────────────────────────────────────────────────
+
+export interface GroupSummary {
+  id: number
+  slug: string
+  name: string
+  my_role: 'owner' | 'member'
+  member_count: number
+}
+
+export function listGroups() {
+  return apiFetch<{ items: GroupSummary[] }>('/groups')
+}
+
+export function getGroup(id: number) {
+  return apiFetch<GroupSummary & { members: GroupMemberDTO[] }>(`/groups/${id}`)
+}
+
+export function createGroup(name: string) {
+  return apiFetch<GroupSummary>('/groups', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  })
+}
+
+export function updateGroup(id: number, name: string) {
+  return apiFetch<GroupSummary>(`/groups/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+  })
+}
+
+export function deleteGroup(id: number) {
+  return apiFetch<{ success: boolean }>(`/groups/${id}`, { method: 'DELETE' })
+}
+
+export function addGroupMember(id: number, email: string, role: 'owner' | 'member') {
+  return apiFetch<{ success: boolean }>(`/groups/${id}/members`, {
+    method: 'POST',
+    body: JSON.stringify({ user_email: email, role }),
+  })
+}
+
+export function removeGroupMember(id: number, userId: number) {
+  return apiFetch<{ success: boolean }>(`/groups/${id}/members/${userId}`, {
+    method: 'DELETE',
+  })
+}
+
+export interface GroupMemberDTO {
+  user_id: number
+  email: string
+  name: string | null
+  role: 'owner' | 'member'
+  joined_at: string | null
+}
+
 // ─── Category suggestions (admin) ────────────────────────────────────────
 
 export type CategorySuggestionStatus = 'open' | 'accepted' | 'rejected'

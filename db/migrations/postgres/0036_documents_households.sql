@@ -4,8 +4,8 @@
 -- same pool of documents) and extends the documents table with a
 -- visibility flag + household reference. A document is either:
 --
---   - visibility='private', household_id=NULL  → only the uploader sees it
---   - visibility='household', household_id=X   → every member of the
+--   - visibility='private', group_id=NULL  → only the uploader sees it
+--   - visibility='household', group_id=X   → every member of the
 --     referenced household sees it
 --
 -- The uploader is still recorded in documents.user_id — that column
@@ -14,7 +14,7 @@
 --
 -- Existing documents keep their strict single-owner semantics
 -- (visibility='private' default) so the migration is a no-op for
--- already-stored data. Creating households + opting documents in is a
+-- already-stored data. Creating groups + opting documents in is a
 -- deliberate user action afterwards.
 
 CREATE TYPE document_visibility   AS ENUM ('private', 'household');--> statement-breakpoint
