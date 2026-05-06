@@ -1,0 +1,19 @@
+services:
+  llm-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: llm-service
+    restart: unless-stopped
+    environment:
+      MODELS_DIR: /models
+      LLM_CTX: 8192
+      EMBEDDING_MODEL: intfloat/multilingual-e5-base
+      LOG_LEVEL: INFO
+    ports:
+      - "8001:8000"
+    volumes:
+      - llm_models:/models
+
+volumes:
+  llm_models:
