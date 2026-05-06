@@ -11,7 +11,8 @@ sentence-transformers==3.2.1
 
 # CPU-only torch pins keep the image slim; override for GPU builds.
 --extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.5.1+cpu
+torch==2.5.1+cpu; platform_machine == "x86_64"
+torch==2.5.1; platform_machine == "aarch64"
 
 # HuggingFace download helper used by download_model.sh
 huggingface_hub==0.26.2
