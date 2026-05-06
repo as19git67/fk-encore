@@ -22,10 +22,9 @@
  * pattern (`finance-export-YYYY-MM-DD.json`), so backups can sit next
  * to pending uploads without colliding.
  *
- * `wipe_first: true` is the default so the dropbox is unambiguous: the
+ * `wipe_first: true` is hardcoded so the dropbox is unambiguous: the
  * file *is* the desired finance state; everything previously stored
- * gets replaced. If you want additive imports use the AdminImportView
- * UI instead.
+ * gets replaced.
  *
  * Why a chokidar watcher: Encore.ts CronJobs don't fire in self-host
  * docker (see lib/local-cron.ts). For a filesystem-event source we

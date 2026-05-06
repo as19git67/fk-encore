@@ -1114,3 +1114,71 @@ export const recentCashRecipients = api(
     };
   },
 );
+
+// -----------------------------------------------------------------------
+// Search recipients (#254)
+// -----------------------------------------------------------------------
+
+interface SearchRecipientsParams {
+  q: string;
+}
+
+export const searchRecipients = api(
+  {
+    expose: true,
+    method: "GET",
+    path: "/finance/transactions/recipients",
+    auth: true,
+  },
+  async (p: SearchRecipientsParams): Promise<RecentRecipientsResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+
+    const visibleIds = await readableAccountIds(auth);
+    const q = p.q.trim();
+    if (q.length === 0) return { items: [] };
+
+    const like = `%${q}%`;
+
+    // Find all unique counterparties matching q, ordered by most recent use.
+    // We use a subquery to find the latest transaction ID for each counterparty.
+    const latestPerRecipient = db
+      .select({
+        counterparty: financeTransaction.counterparty,
+        max_id: sql<number>`MAX(${financeTransaction.id})`.as("max_id"),
+      })
+      .from(financeTransaction)
+      .where(
+        and(
+          sql`${financeTransaction.counterparty} ILIKE ${like}`,
+          visibleIds !== null
+            ? inArray(financeTransaction.account_id, visibleIds.length > 0 ? visibleIds : [-1])
+            : undefined,
+        ),
+      )
+      .groupBy(financeTransaction.counterparty)
+      .as("latest_recipients");
+
+    const rows = await db
+      .select({
+        id: financeTransaction.id,
+        counterparty: financeTransaction.counterparty,
+      })
+      .from(financeTransaction)
+      .innerJoin(latestPerRecipient, eq(financeTransaction.id, latestPerRecipient.max_id))
+      .orderBy(desc(financeTransaction.id))
+      .limit(20);
+
+    const txIds = rows.map((r) => r.id);
+    const tagsByTx = await annotateTags(txIds);
+
+    return {
+      items: rows.map((r) => ({
+        counterparty: r.counterparty!,
+        tags: (tagsByTx.get(r.id) ?? [])
+          .filter((t) => t.source === "user")
+          .map((t) => t.name),
+      })),
+    };
+  },
+);

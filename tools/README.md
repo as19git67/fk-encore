@@ -24,7 +24,7 @@ shape that fk-encore's `/finance/admin/import` endpoint expects.
    The converter prints a one-line summary (`accounts=N transactions=M
    tags=K …`) on stderr; stdout is the import-ready JSON.
 
-3. **Option A — Dropbox (empfohlen für große Exporte):**
+3. **Dropbox-Import:**
    Benenne die Datei mit dem Suffix `.pending.json` und lege sie in
    das Verzeichnis, auf das `FINANCE_IMPORT_DIR` zeigt
    (Standard: `/data/finance-import`):
@@ -47,14 +47,9 @@ shape that fk-encore's `/finance/admin/import` endpoint expects.
    sie landen in einer Sibling-Datei
    `fk-encore-import.imported-<timestamp>.errors.json`.
 
-   > **Hinweis:** Die Dropbox-Variante setzt immer `wipe_first=true`
-   > (Dropbox-Semantik: „diese Datei IST der Finance-Stand"). Für
-   > einen additiven Import ohne Wipe → Option B.
-
-   **Option B — UI-Upload:**
-   Öffne **Finanzen → Import**, wähle `/tmp/fk-encore-import.json`
-   und starte den Import. Für einen iterativen Re-Run setze den
-   Haken bei **"Vorher alle Finanzdaten löschen"**.
+   > **Hinweis:** Der Dropbox-Import setzt immer `wipe_first=true`
+   > (Dropbox-Semantik: „diese Datei IST der Finance-Stand"). Alle
+   > bestehenden Finanzdaten werden vor dem Import gelöscht.
 
 4. After import: open **Finanzen → Bankkontakte**. The pseudo-
    bankcontacts are already there — you only need to set the **real

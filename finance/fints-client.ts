@@ -33,6 +33,7 @@ import { secret } from "encore.dev/config";
 import db from "../db/database";
 import { financeBankcontact } from "../db/schema";
 import { decryptCredentials } from "./encryption";
+import { parseSepaFields } from "./sepa-parser";
 import type {
   DialogResult,
   FetchResult,
@@ -1398,21 +1399,28 @@ function mapStatements(
   for (const stmt of statements) {
     for (const t of stmt.transactions ?? []) {
       if (t.amount === undefined || t.entryDate === undefined) continue;
+      const purpose = t.purpose?.trim() || null;
+      const sepa = parseSepaFields(purpose);
+
       out.push({
         bookingDate: toIsoDate(t.entryDate),
         valueDate: t.valueDate ? toIsoDate(t.valueDate) : null,
         amount: toAmountString(t.amount),
         currency,
-        purpose: t.purpose?.trim() || null,
+        purpose,
         counterparty: t.remoteName?.trim() || null,
-        counterpartyIban: t.remoteIdentifier?.trim() || null,
-        end_to_end_ref: t.endToEndReference?.trim() || null,
-        mandate_ref: t.mandateReference?.trim() || null,
-        creditor_id: t.creditorIdentifier?.trim() || null,
+        counterpartyIban: t.remoteIdentifier?.trim() || sepa.iban || null,
+        counterparty_bic: t.remoteBankCode?.trim() || sepa.bic || null,
+        counterparty_bank_id: sepa.bankId || null,
+        end_to_end_ref: t.endToEndReference?.trim() || sepa.endToEndRef || null,
+        mandate_ref: t.mandateReference?.trim() || sepa.mandateRef || null,
+        creditor_id: t.creditorIdentifier?.trim() || sepa.creditorId || null,
+        originator_name: sepa.originatorName || null,
+        recipient_name: sepa.recipientName || null,
         gv_code: t.gvCode?.trim() || null,
         entry_text: t.entryText?.trim() || null,
         prima_nota_no: t.primanota?.trim() || null,
-        bankRef: t.bankReference?.trim() || null,
+        bankRef: t.bankReference?.trim() || sepa.reference || sepa.customerRef || null,
         originalAmount: null,
         originalCurrency: null,
         exchangeRate: null,

@@ -223,8 +223,12 @@ async function saveEdit() {
     <section class="card">
       <div class="card-head">
         <h2>Umsätze</h2>
+        <p v-if="!account" class="hint">Lädt...</p>
+        <p v-else-if="account.type_kind !== 'bargeld'" class="hint">
+          Umsätze für Bankkonten werden in der Übersicht angezeigt.
+        </p>
         <Button
-          v-if="canWrite"
+          v-if="canWrite && account?.type_kind === 'bargeld'"
           label="Manuelle Buchung"
           icon="pi pi-plus"
           size="small"
@@ -232,6 +236,7 @@ async function saveEdit() {
         />
       </div>
       <DataTable
+        v-if="account?.type_kind === 'bargeld'"
         :value="txStore.items"
         :loading="txStore.loading"
         dataKey="id"
@@ -240,8 +245,7 @@ async function saveEdit() {
         striped-rows
       >
         <Column field="booking_date" header="Datum" />
-        <Column field="counterparty" header="Gegenseite" />
-        <Column field="purpose" header="Verwendungszweck" />
+        <Column field="counterparty" header="Empfänger" />
         <Column header="Betrag">
           <template #body="{ data }">
             {{ account ? formatAmount(data.amount, account.currency_code) : data.amount }}
@@ -259,7 +263,7 @@ async function saveEdit() {
           </template>
         </Column>
       </DataTable>
-      <p class="hint">Zeige {{ txStore.items.length }} von {{ txStore.total }} Buchungen</p>
+      <p v-if="account?.type_kind === 'bargeld'" class="hint">Zeige {{ txStore.items.length }} von {{ txStore.total }} Buchungen</p>
     </section>
 
     <Dialog

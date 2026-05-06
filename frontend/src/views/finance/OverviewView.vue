@@ -8,11 +8,15 @@ import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
 import { useOverviewStore } from '../../stores/finance/overview'
 import { useAnomalyStore } from '../../stores/finance/anomalies'
+import { useAuthStore } from '../../stores/auth'
 import type { OverviewAccount, SaveOverviewSection } from '../../api/finance'
 
 const store = useOverviewStore()
 const anomalyStore = useAnomalyStore()
+const authStore = useAuthStore()
 const router = useRouter()
+
+const canWrite = computed(() => authStore.hasPermission('finance.accounts.manage'))
 
 onMounted(() => {
   void store.refresh()
@@ -281,7 +285,23 @@ async function saveConfig() {
                   {{ acc.pending_count }}
                 </span>
               </div>
-              <div class="row-sub">{{ formatUpdatedAt(acc.balance_as_of) }}</div>
+              <div class="row-sub">
+                <template v-if="acc.type_kind === 'bargeld' && canWrite">
+                  <RouterLink
+                    :to="{
+                      name: 'finance-transaction-new',
+                      query: { accountId: acc.id },
+                    }"
+                    class="text-blue-500 hover:underline inline-flex items-center gap-1"
+                    @click.stop
+                  >
+                    <i class="pi pi-plus-circle" /> Buchung hinzufügen
+                  </RouterLink>
+                </template>
+                <template v-else>
+                  {{ formatUpdatedAt(acc.balance_as_of) }}
+                </template>
+              </div>
             </div>
             <div :class="balanceClass(acc)">{{ formatBalance(acc) }}</div>
           </li>

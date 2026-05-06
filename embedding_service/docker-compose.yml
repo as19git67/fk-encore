@@ -29,12 +29,15 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/embeddings
-      CLIP_MODEL_NAME: ViT-B-32
-      CLIP_PRETRAINED: openai
+      CLIP_MODEL_NAME: xlm-roberta-large-ViT-H-14
+      CLIP_PRETRAINED: frozen_laion5b_s13b_b90k
       DINO_MODEL_NAME: facebook/dinov2-base
       LOG_LEVEL: INFO
     ports:
-      - "8001:8000"
+      - "8000:8000"
+    volumes:
+      - embedding_models:/models
 
 volumes:
   pgdata:
+  embedding_models:

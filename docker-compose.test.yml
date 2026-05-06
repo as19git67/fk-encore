@@ -144,12 +144,31 @@ services:
       CLIP_PRETRAINED: frozen_laion5b_s13b_b90k
       DINO_MODEL_NAME: facebook/dinov2-base
       LOG_LEVEL: INFO
+      # Match the 6 physical P-cores. `cpuset` exposes 12 logical threads,
+      # but HT typically doesn't help dense matmul on CPU and adds scheduling
+      # noise — picking 6 keeps each OMP worker on its own physical core.
+      EMBED_NUM_THREADS: "6"
+      # Inference backend: "torch" (PyTorch fp32) or "onnx" (INT8 visual
+      # tower + fp32 ONNX text/DINOv2). Flipping to "onnx" requires the
+      # ONNX artefacts to be in the embedding_models volume — populate
+      # them once with:
+      #   docker compose exec embedding_service \
+      #       /usr/local/bin/optimize_models.sh
+      # Defaults to torch so an upgrade with a not-yet-prepared volume
+      # keeps working.
+      EMBED_BACKEND: ${EMBED_BACKEND:-torch}
+    volumes:
+      - embedding_models:/models
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 20s
+      # First start with an empty volume downloads ~5.5 GB of model weights
+      # before the eager preload completes. 10 minutes covers a typical
+      # home-broadband pull (~10 MB/s); subsequent starts hit the warm cache
+      # and are healthy in <30 s, so the long start_period only pays once.
+      start_period: 600s
 
   # ── Landmark Detection Service (Grounding DINO) ────────────────────────────
   landmark:
@@ -262,6 +281,14 @@ volumes:
   llm_models:
     driver: local
     driver_opts: { type: none, o: bind, device: /mnt/data/fk-encore-test/llm_models }
+  # Model artefacts for the embedding_service (OpenCLIP + DINOv2 weights,
+  # plus the ONNX/INT8 quantised variants once Punkt 3 lands). The volume
+  # auto-populates on first service start; pre-populate with
+  #   docker compose run --rm embedding_service /usr/local/bin/download_model.sh
+  # to keep the first request fast.
+  embedding_models:
+    driver: local
+    driver_opts: { type: none, o: bind, device: /mnt/data/fk-encore-test/embedding_models }
   # Documents archive (sha256-named PDFs in YYYY/YYYY-MM shards).
   documents:
     driver: local

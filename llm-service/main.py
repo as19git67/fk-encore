@@ -111,10 +111,31 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     startup_monotonic = time.monotonic()
 
     if not LLM_MODEL_PATH.exists():
-        raise RuntimeError(
-            f"LLM model not found at {LLM_MODEL_PATH}. "
-            "Run download_model.sh to populate the models volume."
-        )
+        log.info("LLM model not found at %s. Attempting to download...", LLM_MODEL_PATH)
+        import subprocess
+        
+        # Look for the download script in the standard container path,
+        # or relative to main.py for local development.
+        script_path = Path("/usr/local/bin/download_model.sh")
+        if not script_path.exists():
+            script_path = Path(__file__).parent / "download_model.sh"
+
+        if script_path.exists():
+            try:
+                # We call the idempotent download script to populate both the GGUF
+                # and the sentence-transformers cache before loading begins.
+                subprocess.run([str(script_path)], check=True)
+            except Exception as e:
+                log.error("Auto-download failed: %s", e)
+                raise RuntimeError(
+                    f"LLM model not found at {LLM_MODEL_PATH} and auto-download failed. "
+                    "Run download_model.sh manually to investigate."
+                ) from e
+        else:
+            raise RuntimeError(
+                f"LLM model not found at {LLM_MODEL_PATH} and download script not found at {script_path}. "
+                "Please ensure the models volume is correctly populated."
+            )
 
     # Lazy imports keep `python main.py --help`-style inspection cheap and
     # move the heavy native-library load into startup, after logging is set up.

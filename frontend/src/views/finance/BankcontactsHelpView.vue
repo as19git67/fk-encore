@@ -153,9 +153,7 @@ function goBack() {
         <i class="pi pi-info-circle" />
         <span>
           <strong>Du brauchst mehr als 90 Tage Historie auf einem neuen Konto?</strong>
-          Zwei Wege: entweder per Daten-Import einen Finanzkraft-Export
-          einspielen (<router-link :to="{ name: 'finance-admin-import' }">Datenimport</router-link>) —
-          das berührt die Bank gar nicht — oder den Default-Wert in
+          Dazu kannst du den Default-Wert in
           <code>statements.ts</code> temporär hochsetzen. Letzteres bittet
           die Bank einmal um eine zusätzliche TAN, danach läuft alles
           wieder im normalen Inkrement-Modus.

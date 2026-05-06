@@ -541,6 +541,10 @@ export async function recentCashRecipients(): Promise<{ items: RecentRecipient[]
   return apiFetch('/finance/transactions/recent-cash-recipients')
 }
 
+export async function searchRecipients(q: string): Promise<{ items: RecentRecipient[] }> {
+  return apiFetch(`/finance/transactions/recipients?q=${encodeURIComponent(q)}`)
+}
+
 export async function promoteAiTag(
   id: number,
   tag: string,

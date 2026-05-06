@@ -1,30 +1,38 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import InputNumber from 'primevue/inputnumber'
+import InputText from 'primevue/inputtext'
+import DatePicker from 'primevue/datepicker'
 import Button from 'primevue/button'
+import AutoComplete from 'primevue/autocomplete'
 import TagAutoComplete from '../../components/finance/TagAutoComplete.vue'
 import Message from 'primevue/message'
-import Select from 'primevue/select'
 import { useAccountsStore } from '../../stores/finance/accounts'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useTagsStore } from '../../stores/finance/tags'
-import { recentCashRecipients, type RecentRecipient } from '../../api/finance'
+import { recentCashRecipients, searchRecipients, type RecentRecipient } from '../../api/finance'
 
+const route = useRoute()
 const router = useRouter()
 const accountsStore = useAccountsStore()
 const txStore = useTransactionsStore()
 const tagsStore = useTagsStore()
 
 const accountId = ref<number | null>(null)
+const bookingDate = ref<Date>(new Date())
 const amount = ref<number | null>(null)
 const isExpense = ref(true)
 const counterparty = ref('')
+const purpose = ref('') // mapped to purpose in backend if needed, or just notes
 const tags = ref<string[]>([])
 const error = ref<string | null>(null)
 const saving = ref(false)
 
+const amountInput = ref<any>(null)
+
 const recentRecipients = ref<RecentRecipient[]>([])
+const recipientSuggestions = ref<RecentRecipient[]>([])
 
 const cashAccounts = computed(() =>
   accountsStore.items.filter((a) => a.type_kind === 'bargeld'),
@@ -33,24 +41,80 @@ const cashAccounts = computed(() =>
 onMounted(async () => {
   if (accountsStore.items.length === 0) await accountsStore.refresh()
   if (tagsStore.items.length === 0) await tagsStore.refresh('user')
-  if (cashAccounts.value.length === 1) {
+  
+  const queryAccountId = Number(route.query.accountId)
+  if (queryAccountId) {
+    accountId.value = queryAccountId
+  } else if (cashAccounts.value.length === 1) {
     accountId.value = cashAccounts.value[0]!.id
   }
+  
   try {
     const resp = await recentCashRecipients()
     recentRecipients.value = resp.items
   } catch {
     // best-effort
   }
+
+  // Focus amount field
+  setTimeout(() => {
+    if (amountInput.value) {
+      const input = amountInput.value.$el.querySelector('input')
+      if (input) input.focus()
+    }
+  }, 100)
 })
 
 function applyRecipient(r: RecentRecipient) {
   counterparty.value = r.counterparty
-  tags.value = [...r.tags]
+  tags.value = [...(r.tags || [])]
+}
+
+async function findRecipients(event: { query: string }) {
+  const q = event.query.trim()
+  if (q.length === 0) {
+    recipientSuggestions.value = []
+    return
+  }
+  try {
+    const resp = await searchRecipients(q)
+    const items = resp.items
+    const exactMatch = items.some((i) => i.counterparty.toLowerCase() === q.toLowerCase())
+    if (!exactMatch && q.length > 0) {
+      recipientSuggestions.value = [
+        { counterparty: q, tags: [], isNew: true } as any,
+        ...items,
+      ]
+    } else {
+      recipientSuggestions.value = items
+    }
+  } catch {
+    recipientSuggestions.value = []
+  }
+}
+
+function onRecipientSelect(event: { value: string | RecentRecipient }) {
+  if (typeof event.value === 'string') {
+    counterparty.value = event.value
+  } else {
+    counterparty.value = event.value.counterparty
+    if (event.value.tags && event.value.tags.length > 0) {
+      tags.value = [...event.value.tags]
+    }
+  }
+}
+
+function setDate(days: number) {
+  const d = new Date()
+  d.setDate(d.getDate() + days)
+  bookingDate.value = d
 }
 
 function toIso(d: Date): string {
-  return d.toISOString().slice(0, 10)
+  // Fix timezone offset for ISO date
+  const offset = d.getTimezoneOffset()
+  const localDate = new Date(d.getTime() - offset * 60 * 1000)
+  return localDate.toISOString().slice(0, 10)
 }
 
 async function save() {
@@ -63,7 +127,12 @@ async function save() {
     error.value = 'Bitte einen Betrag eingeben.'
     return
   }
-  if (!counterparty.value.trim()) {
+  
+  const counterpartyName = (typeof counterparty.value === 'string' 
+    ? counterparty.value 
+    : (counterparty.value as any).counterparty || '').trim()
+
+  if (!counterpartyName) {
     error.value = 'Empfänger ist ein Pflichtfeld.'
     return
   }
@@ -72,9 +141,10 @@ async function save() {
   try {
     const created = await txStore.create({
       account_id: accountId.value,
-      booking_date: toIso(new Date()),
+      booking_date: toIso(bookingDate.value),
       amount: signedAmount,
-      counterparty: counterparty.value.trim(),
+      counterparty: counterpartyName,
+      purpose: purpose.value.trim() || undefined,
       tags: tags.value,
     })
     tagsStore.addLocal(tags.value)
@@ -89,62 +159,71 @@ async function save() {
 
 <template>
   <div class="page">
-    <header class="cash-header">
-      <Button icon="pi pi-chevron-left" severity="secondary" rounded aria-label="Zurück" @click="router.back()" />
-      <h1>Bargeldbuchung</h1>
-    </header>
-
-    <Message v-if="error" severity="error" :closable="true" @close="error = null">
-      {{ error }}
-    </Message>
-
-    <!-- Konto-Auswahl (nur wenn mehrere Bargeldkonten) -->
-    <Select
-      v-if="cashAccounts.length > 1"
-      v-model="accountId"
-      :options="cashAccounts"
-      option-label="label"
-      option-value="id"
-      placeholder="Bargeldkonto wählen …"
-      class="account-select"
-    />
-    <div v-else-if="cashAccounts.length === 1" class="account-name">
-      {{ cashAccounts[0]!.label }}
+    <div v-if="cashAccounts.length > 0" class="account-name-top">
+      Konto: <strong>{{ accountsStore.byId(accountId ?? -1)?.label ?? '…' }}</strong>
     </div>
     <Message v-else severity="warn" :closable="false">
       Kein Bargeldkonto (Typ „bargeld") vorhanden. Bitte zuerst ein Konto anlegen.
     </Message>
 
+    <Message v-if="error" severity="error" :closable="true" @close="error = null">
+      {{ error }}
+    </Message>
+
     <!-- Betrag + Vorzeichen -->
-    <div class="amount-block">
-      <Button
-        class="sign-btn"
-        :label="isExpense ? '− Ausgabe' : '+ Einnahme'"
-        :severity="isExpense ? 'danger' : 'success'"
-        @click="isExpense = !isExpense"
-      />
-      <InputNumber
-        v-model="amount"
-        :min="0"
-        :minFractionDigits="2"
-        :maxFractionDigits="2"
-        mode="decimal"
-        placeholder="0,00"
-        class="amount-input"
-        input-class="amount-number"
-        autofocus
-      />
+    <div class="field">
+      <label class="field-label">Betrag <span class="req">*</span></label>
+      <div class="amount-block">
+        <Button
+          class="sign-btn"
+          :label="isExpense ? '− Ausgabe' : '+ Einnahme'"
+          :severity="isExpense ? 'danger' : 'success'"
+          @click="isExpense = !isExpense"
+        />
+        <InputNumber
+          ref="amountInput"
+          v-model="amount"
+          :min="0"
+          :minFractionDigits="2"
+          :maxFractionDigits="2"
+          mode="decimal"
+          placeholder="0,00"
+          class="amount-input"
+          input-class="amount-number"
+          autofocus
+        />
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="field-label">Buchungsdatum <span class="req">*</span></label>
+      <div class="date-row">
+        <DatePicker v-model="bookingDate" date-format="dd.mm.yy" show-icon fluid />
+        <div class="date-presets">
+          <Button label="Heute" size="small" severity="primary" outlined @click="setDate(0)" />
+          <Button label="Gestern" size="small" severity="primary" outlined @click="setDate(-1)" />
+        </div>
+      </div>
     </div>
 
     <!-- Empfänger -->
     <div class="field">
       <label class="field-label">Empfänger <span class="req">*</span></label>
-      <input
+      <AutoComplete
         v-model="counterparty"
-        type="text"
-        class="p-inputtext p-component recipient-input"
+        :suggestions="recipientSuggestions"
+        optionLabel="counterparty"
         placeholder="Name eingeben …"
-      />
+        fluid
+        class="recipient-input"
+        @complete="findRecipients"
+        @item-select="onRecipientSelect"
+      >
+        <template #option="{ option }">
+          <span v-if="(option as any).isNew" class="recipient-new">+ Neu: </span>
+          <span>{{ option.counterparty }}</span>
+        </template>
+      </AutoComplete>
     </div>
 
     <!-- Tags -->
@@ -156,14 +235,35 @@ async function save() {
       />
     </div>
 
-    <!-- Buchen-Button -->
-    <Button
-      class="save-btn"
-      label="Buchen"
-      :loading="saving"
-      :disabled="!amount || !counterparty.trim() || !accountId"
-      @click="save"
-    />
+    <!-- Notiz -->
+    <div class="field">
+      <label class="field-label">Notiz</label>
+      <InputText
+        v-model="purpose"
+        type="text"
+        class="recipient-input"
+        placeholder="Notiz zur Buchung …"
+      />
+    </div>
+
+    <!-- Aktionen -->
+    <div class="actions-row">
+      <Button
+        class="save-btn"
+        label="Speichern"
+        icon="pi pi-check"
+        :loading="saving"
+        :disabled="!amount || !counterparty.trim() || !accountId"
+        @click="save"
+      />
+      <Button
+        label="Abbrechen"
+        severity="secondary"
+        outlined
+        class="cancel-btn"
+        @click="router.back()"
+      />
+    </div>
 
     <!-- Letzte Empfänger als Badges -->
     <div v-if="recentRecipients.length > 0" class="recent-section">
@@ -176,7 +276,6 @@ async function save() {
           @click="applyRecipient(r)"
         >
           {{ r.counterparty }}
-          <span v-if="r.tags.length > 0" class="recent-tags">· {{ r.tags.join(', ') }}</span>
         </button>
       </div>
     </div>
@@ -196,23 +295,14 @@ async function save() {
     padding: 0.75rem;
   }
 }
-.cash-header {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-.cash-header h1 {
-  margin: 0;
-  font-size: 1.1rem;
-  font-weight: 700;
-}
 .account-select {
   width: 100%;
 }
-.account-name {
-  font-size: 0.9rem;
-  color: var(--p-text-muted-color);
-  padding: 0.25rem 0;
+.account-name-top {
+  font-size: 1.1rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--p-content-border-color);
+  margin-bottom: 0.5rem;
 }
 .amount-block {
   display: flex;
@@ -251,8 +341,20 @@ async function save() {
   width: 100%;
   font-size: 1rem;
 }
+.recipient-new {
+  font-style: italic;
+  color: var(--p-primary-600);
+  font-weight: 600;
+}
 .save-btn {
-  width: 100%;
+  flex: 2 2 auto;
+  padding: 0.85rem;
+  font-size: 1rem;
+  font-weight: 600;
+  margin-top: 0.25rem;
+}
+.cancel-btn {
+  flex: 1 1 auto;
   padding: 0.85rem;
   font-size: 1rem;
   font-weight: 600;
@@ -273,22 +375,37 @@ async function save() {
   flex-wrap: wrap;
   gap: 0.5rem;
 }
+.date-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+.date-presets {
+  display: flex;
+  gap: 0.4rem;
+}
+.actions-row {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
 .recent-badge {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  padding: 0.3rem 0.75rem;
+  padding: 0.35rem 0.85rem;
   border-radius: 999px;
-  background: var(--p-content-hover-background);
-  border: 1px solid var(--p-content-border-color);
+  background: var(--p-primary-50);
+  border: 1px solid var(--p-primary-200);
   cursor: pointer;
   font-size: 0.85rem;
   font-family: inherit;
-  color: var(--p-text-color);
-  transition: background 0.1s;
+  color: var(--p-primary-700);
+  transition: all 0.1s;
 }
 .recent-badge:hover {
-  background: var(--p-primary-50, rgba(0,0,0,0.06));
+  background: var(--p-primary-100);
+  border-color: var(--p-primary-300);
 }
 .recent-tags {
   color: var(--p-text-muted-color);
