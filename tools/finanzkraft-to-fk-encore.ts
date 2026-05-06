@@ -26,7 +26,8 @@
  *   node --experimental-strip-types tools/finanzkraft-to-fk-encore.ts \
  *     < finanzkraft-export.json > fk-encore-import.json
  *
- *   # then upload fk-encore-import.json via /finanzen/admin/import
+ *   # then move it to the dropbox:
+ *   cp fk-encore-import.json /data/finance-import/import.pending.json
  *
  * Or, after `tsc -b`:
  *

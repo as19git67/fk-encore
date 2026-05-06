@@ -73,6 +73,7 @@ const displayValue = computed<SuggestionItem[]>(() =>
 
 <template>
   <AutoComplete
+    class="tag-ac"
     :model-value="displayValue"
     :suggestions="suggestions"
     option-label="label"
@@ -95,7 +96,26 @@ const displayValue = computed<SuggestionItem[]>(() =>
 <style scoped>
 .tag-ac-new {
   font-style: italic;
-  color: var(--p-primary-600, #16a34a);
+  color: var(--p-primary-600);
   font-weight: 600;
+}
+
+/* Make selected tags clearly look like badges/pills */
+.tag-ac :deep(.p-autocomplete-multiple-container) {
+  gap: 0.375rem;
+  flex-wrap: wrap;
+}
+.tag-ac :deep(.p-autocomplete-token) {
+  background: var(--p-primary-50);
+  border: 1px solid var(--p-primary-200);
+  color: var(--p-primary-700);
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
+}
+.tag-ac :deep(.p-autocomplete-token-label) {
+  margin-right: 0.25rem;
+}
+.tag-ac :deep(.p-autocomplete-token-icon) {
+  color: var(--p-primary-700);
 }
 </style>

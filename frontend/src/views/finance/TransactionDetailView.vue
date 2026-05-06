@@ -5,6 +5,8 @@ import Button from 'primevue/button'
 import Tag from 'primevue/tag'
 import Message from 'primevue/message'
 import InputText from 'primevue/inputtext'
+import InputNumber from 'primevue/inputnumber'
+import DatePicker from 'primevue/datepicker'
 import TagAutoComplete from '../../components/finance/TagAutoComplete.vue'
 import Textarea from 'primevue/textarea'
 import { useTransactionsStore } from '../../stores/finance/transactions'
@@ -33,10 +35,21 @@ const formNotice = ref('')
 const formCounterparty = ref('')
 const formPurpose = ref('')
 const formAmount = ref('')
-const formBookingDate = ref('')
+const formBookingDate = ref<Date>(new Date())
+
+const numFormAmount = computed({
+  get: () => Number(formAmount.value),
+  set: (val) => { formAmount.value = String(val) }
+})
 
 const account = computed(() => tx.value ? accountsStore.byId(tx.value.account_id) : undefined)
 const isCash = computed(() => account.value?.type_kind === 'bargeld')
+
+function toIso(d: Date): string {
+  const offset = d.getTimezoneOffset()
+  const localDate = new Date(d.getTime() - offset * 60 * 1000)
+  return localDate.toISOString().slice(0, 10)
+}
 
 const isDirty = computed(() => {
   if (!tx.value) return false
@@ -46,7 +59,7 @@ const isDirty = computed(() => {
     formCounterparty.value !== (tx.value.counterparty ?? '') ||
     formPurpose.value !== (tx.value.purpose ?? '') ||
     formAmount.value !== tx.value.amount ||
-    formBookingDate.value !== tx.value.booking_date
+    toIso(formBookingDate.value) !== tx.value.booking_date
   )
 })
 
@@ -56,7 +69,7 @@ function syncForm() {
   formCounterparty.value = tx.value.counterparty ?? ''
   formPurpose.value = tx.value.purpose ?? ''
   formAmount.value = tx.value.amount
-  formBookingDate.value = tx.value.booking_date
+  formBookingDate.value = new Date(tx.value.booking_date)
 }
 
 async function loadTransaction(id: number) {
@@ -158,7 +171,7 @@ async function save() {
       input.counterparty = formCounterparty.value || null
       input.purpose = formPurpose.value || null
       input.amount = formAmount.value
-      input.booking_date = formBookingDate.value
+      input.booking_date = toIso(formBookingDate.value)
     }
     tx.value = await api.updateTransaction(tx.value.id, input)
     syncForm()
@@ -306,15 +319,24 @@ const extractedFields = computed(() => {
       <dl class="details">
         <dt>Buchungsdatum</dt>
         <dd v-if="isCash">
-          <InputText v-model="formBookingDate" class="field-input" />
+          <DatePicker v-model="formBookingDate" date-format="dd.mm.yy" show-icon fluid />
         </dd>
         <dd v-else>{{ tx.booking_date }}</dd>
 
-        <dt>Wertstellung</dt><dd>{{ tx.value_date ?? '—' }}</dd>
+        <template v-if="!isCash">
+          <dt>Wertstellung</dt><dd>{{ tx.value_date ?? '—' }}</dd>
+        </template>
         <dt>Konto</dt><dd>{{ account?.label }}</dd>
         <dt>Betrag</dt>
         <dd v-if="isCash">
-          <InputText v-model="formAmount" class="field-input" />
+          <InputNumber
+            v-model="numFormAmount"
+            :minFractionDigits="2"
+            :maxFractionDigits="2"
+            mode="decimal"
+            locale="de-DE"
+            fluid
+          />
         </dd>
         <dd v-else class="amount" :class="Number(tx.amount) < 0 ? 'amount-neg' : 'amount-pos'">
           {{ formatAmount() }}
@@ -336,11 +358,10 @@ const extractedFields = computed(() => {
           </dd>
         </template>
 
-        <dt>Verwendung</dt>
-        <dd v-if="isCash">
-          <Textarea v-model="formPurpose" class="field-input" rows="3" auto-resize />
-        </dd>
-        <dd v-else class="multiline">{{ tx.purpose ?? '—' }}</dd>
+        <template v-if="!isCash">
+          <dt>Verwendung</dt>
+          <dd class="multiline">{{ tx.purpose ?? '—' }}</dd>
+        </template>
       </dl>
     </section>
 

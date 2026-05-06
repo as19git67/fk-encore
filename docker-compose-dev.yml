@@ -1,12 +1,25 @@
+# Test-Umgebung: verwendet den 'test'-Tag (gebaut aus PRs).
+# Auf TrueNAS in einem separaten Verzeichnis ablegen, z. B.
+# /mnt/data/fk-encore-test/. Eigene .env-Datei mit TEST-spezifischen Werten
+# anlegen (insbesondere WATCHTOWER_TOKEN). Strukturell ein Spiegel von
+# docker-compose.yml — Unterschiede:
+#   * Image-Tag :test (statt :latest)
+#   * container_name + Watchtower-Scope tragen Suffix -test / fktest
+#   * Host-Ports verschoben, damit prod und test parallel laufen können
+#     (app 18080, postgres 15432, watchtower 9001)
+
+name: fk-encore-test
+
 services:
-  # ── Main Encore.ts Application ─────────────────────────────────────────────
+
   # ── InsightFace Service (Face Detection) ───────────────────────────────────
   insightface:
-    ports:
-      - "8000:8000"
     image: ghcr.io/as19git67/fk-encore-insightface:test
-    container_name: fk-encore-insightface
+    container_name: fk-encore-insightface-test
     restart: unless-stopped
+    user: "568:568"
+    labels:
+      com.centurylinklabs.watchtower.scope: fktest
     environment:
       ORT_LOGGING_LEVEL: "3"
     healthcheck:
@@ -17,49 +30,56 @@ services:
       start_period: 20s
 
   # ── Embedding Service (CLIP + DINOv2) ──────────────────────────────────────
-  # Models live in the `embedding_models` volume (see docker-compose.yml for
-  # the full rationale). Pre-populate before first start with:
-  #   docker compose run --rm embedding_service /usr/local/bin/download_model.sh
   embedding_service:
-    ports:
-      - "8001:8000"
     image: ghcr.io/as19git67/fk-encore-embedding:test
-    container_name: fk-encore-embedding
+    container_name: fk-encore-embedding-test
     restart: unless-stopped
-    # See docker-compose.yml for the rationale behind cpuset + thread count.
-    # Mirror the production layout so dev runs the embedder under the same
-    # CPU constraints and surfaces any throughput regressions before deploy.
-    cpuset: "0-11"
+    user: "568:568"
+    labels:
+      com.centurylinklabs.watchtower.scope: fktest
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/embeddings
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/embeddings_test
       CLIP_MODEL_NAME: xlm-roberta-large-ViT-H-14
       CLIP_PRETRAINED: frozen_laion5b_s13b_b90k
       DINO_MODEL_NAME: facebook/dinov2-base
       LOG_LEVEL: INFO
+      # Match the 6 physical P-cores. `cpuset` exposes 12 logical threads,
+      # but HT typically doesn't help dense matmul on CPU and adds scheduling
+      # noise — picking 6 keeps each OMP worker on its own physical core.
       EMBED_NUM_THREADS: "6"
-      # See docker-compose.yml for the rationale; defaults to torch.
+      # Inference backend: "torch" (PyTorch fp32) or "onnx" (INT8 visual
+      # tower + fp32 ONNX text/DINOv2). Flipping to "onnx" requires the
+      # ONNX artefacts to be in the embedding_models volume — populate
+      # them once with:
+      #   docker compose exec embedding_service \
+      #       /usr/local/bin/optimize_models.sh
+      # Defaults to torch so an upgrade with a not-yet-prepared volume
+      # keeps working.
       EMBED_BACKEND: ${EMBED_BACKEND:-torch}
     volumes:
       - embedding_models:/models
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 20s
-      timeout: 10s
+      interval: 10s
+      timeout: 5s
       retries: 5
-      # Cold-cache first start downloads ~5.5 GB of models before the
-      # service becomes healthy. See docker-compose.yml for details.
+      # First start with an empty volume downloads ~5.5 GB of model weights
+      # before the eager preload completes. 10 minutes covers a typical
+      # home-broadband pull (~10 MB/s); subsequent starts hit the warm cache
+      # and are healthy in <30 s, so the long start_period only pays once.
       start_period: 600s
 
   # ── Landmark Detection Service (Grounding DINO) ────────────────────────────
   landmark:
-    ports:
-      - "8002:8000"
     image: ghcr.io/as19git67/fk-encore-landmark:test
-    container_name: fk-encore-landmark
+    container_name: fk-encore-landmark-test
     restart: unless-stopped
+    user: "568:568"
+    labels:
+      com.centurylinklabs.watchtower.scope: fktest
     environment:
       LANDMARK_THRESHOLD: "0.35"
       LOG_LEVEL: INFO
@@ -70,7 +90,34 @@ services:
       retries: 3
       start_period: 120s
 
-  # ── PostgreSQL (shared instance for both app and embedding service) ─────────
+  # ── LLM Service (Llama GGUF classifier + multilingual-e5-base embedder) ───
+  # Models are NOT baked into the image — they are mmap'ed from the llm_models
+  # volume. Run `docker compose run --rm llm_service /usr/local/bin/download_model.sh`
+  # once before first start to populate the volume.
+  llm_service:
+    image: ghcr.io/as19git67/fk-encore-llm:test
+    container_name: fk-encore-llm-test
+    restart: unless-stopped
+    user: "568:568"
+    labels:
+      com.centurylinklabs.watchtower.scope: fktest
+    environment:
+      MODELS_DIR: /models
+      LLM_MODEL_PATH: /models/llama.gguf
+      EMBEDDING_MODEL: intfloat/multilingual-e5-base
+      LLM_CTX: "8192"
+      LLM_GPU_LAYERS: "0"
+      LOG_LEVEL: INFO
+    volumes:
+      - llm_models:/models
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ── PostgreSQL ─────────────────────────────────────────────────────────────
   postgres:
     image: pgvector/pgvector:pg18
     container_name: fk-encore-db
@@ -89,16 +136,17 @@ services:
       timeout: 5s
       retries: 10
 
+
 volumes:
   fk_pgdata:
     driver: local
-    driver_opts:
-      device: /Users/anton/fk-encore_data/pgdata
-      o: bind
-      type: none
+    driver_opts: { type: none, o: bind, device: /Users/anton/fk-encore_data/pgdata }
   embedding_models:
     driver: local
-    driver_opts:
-      device: /Users/anton/fk-encore_data/embedding_models
-      o: bind
-      type: none
+    driver_opts: { type: none, o: bind, device: /Users/anton/fk-encore_data/embedding_models }
+  # Model artifacts for the llm_service (Llama GGUF + sentence-transformers
+  # cache). Populate via
+  # `docker compose run --rm llm_service /usr/local/bin/download_model.sh`.
+  llm_models:
+    driver: local
+    driver_opts: { type: none, o: bind, device: /Users/anton/fk-encore_data/llm_models }
