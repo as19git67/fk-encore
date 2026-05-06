@@ -94,5 +94,24 @@ export function parseSepaFields(purpose: string | null | undefined): SepaFields 
   const svwzMatch = purpose.match(/SVWZ\+([^\s]+)/i);
   if (svwzMatch) result.purposeText = svwzMatch[1];
 
+  // Support for human-readable labels (e.g. CORE / Mandatsref.: \n MS... )
+  if (!result.mandateRef) {
+    const mrefLabelMatch = purpose.match(/Mandatsref\.:\s*([^\s\r\n]+)/i);
+    if (mrefLabelMatch) result.mandateRef = mrefLabelMatch[1];
+  }
+
+  if (!result.creditorId) {
+    const credLabelMatch = purpose.match(/Gläubiger-ID:\s*([^\s\r\n]+)/i);
+    if (credLabelMatch) result.creditorId = credLabelMatch[1];
+  }
+
+  if (!result.endToEndRef) {
+    const erefLabelMatch = purpose.match(/End-to-End-Ref\.:\s*([^\s\r\n]+)/i);
+    // Ignore "nicht angegeben"
+    if (erefLabelMatch && !erefLabelMatch[1].toLowerCase().startsWith("nicht")) {
+      result.endToEndRef = erefLabelMatch[1];
+    }
+  }
+
   return result;
 }
