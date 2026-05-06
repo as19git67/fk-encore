@@ -1,6 +1,6 @@
 # Embedding Service
 
-A production-ready Python microservice that generates **OpenCLIP** (semantic) and **DINOv2** (visual similarity) image embeddings, stores them in PostgreSQL via **pgvector**, and exposes a REST API for batch embedding, similarity search, and retrieval.
+A production-ready Python microservice that generates **multilingual CLIP** (semantic) and **DINOv2** (visual similarity) image embeddings, stores them in PostgreSQL via **pgvector**, and exposes a REST API for batch embedding, similarity search, and retrieval.
 
 ---
 
@@ -9,24 +9,33 @@ A production-ready Python microservice that generates **OpenCLIP** (semantic) an
 ```
 embedding_service/
   app/
-    main.py            # FastAPI application entry point
-    config.py          # Environment-based configuration (pydantic-settings)
+    main.py              # FastAPI application entry point
+    config.py            # Environment-based configuration (pydantic-settings)
     api/
-      endpoints.py     # Route handlers: /embed, /search, /get, /health
+      endpoints.py       # Route handlers (/embed, /search, /quality, etc.)
     services/
-      embedding_service.py  # OpenCLIP + DINOv2 lazy-loaded singletons
+      embedding_service.py # Torch/ONNX lazy-loaded model singletons
+      onnx_backend.py      # ONNX Runtime inference logic
+      query_parser.py      # NLP-based natural language query parsing
+      similar_groups.py    # Sliding-window similarity clustering
     db/
-      database.py      # Async SQLAlchemy engine + session factory
-      orm_models.py    # Photo ORM model (pgvector columns)
-      repository.py    # Data access layer (upsert, query, search)
+      database.py        # Async SQLAlchemy engine + session factory
+      orm_models.py      # Photo ORM model (pgvector columns)
+      repository.py      # Data access layer (upsert, query, search)
     models/
-      schemas.py       # Pydantic request/response schemas
+      schemas.py         # Pydantic request/response schemas
+    scripts/
+      export_onnx.py     # Model export and INT8 quantization tool
   migrations/
-    001_init.sql       # Initial schema (pgvector extension, tables, HNSW indexes)
-    migrate.py         # Standalone migration runner
+    001_init.sql         # Initial schema (vector extension, tables)
+    002_clip_768.sql     # Migration to 768-dim CLIP
+    003_clip_1024.sql    # Migration to 1024-dim CLIP (XLM-RoBERTa)
+    migrate.py           # Standalone migration runner
   requirements.txt
   Dockerfile
   docker-compose.yml
+  download_model.sh      # Warm-up script for model weights
+  optimize_models.sh     # Script to generate ONNX/INT8 artefacts
 ```
 
 ---
@@ -44,15 +53,14 @@ This starts:
 - **PostgreSQL 16** with pgvector extension on port `5432`
 - **Embedding Service** on port `8000`
 
-The SQL migration (`migrations/001_init.sql`) is applied automatically on first startup via `docker-entrypoint-initdb.d`.
-
-> **Note**: mount your photo storage by editing the `volumes` section in `docker-compose.yml`.
+> **Note**: On first start, the service downloads ~5.5 GB of model weights. Use `./download_model.sh` to pre-populate the volume.
 
 ### 2. Local Development
 
 ```bash
 # Install dependencies
 pip install -r requirements.txt
+python -m spacy download de_core_news_md
 
 # Apply database schema
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/embeddings \
@@ -73,92 +81,64 @@ Interactive docs: [http://localhost:8000/docs](http://localhost:8000/docs)
 Returns service health including DB connectivity and model loading status.
 
 ### `POST /embed`
-Batch-generates CLIP + DINOv2 embeddings and stores them (skips existing `photo_id`s).
-
+Batch-generates embeddings for existing local files and stores them.
 ```json
 {
   "photos": [
-    {
-      "photo_id": "abc123",
-      "file_path": "/photos/abc123.jpg",
-      "timestamp": "2024-01-15T10:30:00",
-      "camera_id": "cam-01",
-      "face_ids": ["face_a", "face_b"]
-    }
+    { "photo_id": "abc123", "file_path": "/photos/abc123.jpg" }
   ]
 }
 ```
 
-Response:
-```json
-{ "status": "ok", "processed": 1 }
-```
+### `POST /upload`
+Uploads a photo file directly, generates embeddings, and stores them. (Multipart/Form-Data)
 
 ### `POST /search`
-Finds the `k` most similar photos using cosine similarity.
-
+Finds the `k` most similar photos using cosine similarity based on an existing photo.
 ```json
 { "photo_id": "abc123", "k": 10, "mode": "hybrid" }
 ```
+`mode`: `clip` | `dino` | `hybrid` (score fusion)
 
-`mode` options: `clip` | `dino` | `hybrid` (0.5 CLIP + 0.5 DINOv2 score fusion)
-
-### `POST /get`
-Returns embeddings and metadata for a list of photo IDs.
-
+### `POST /search_text`
+Semantic search using a natural language query (multilingual).
 ```json
-{ "photo_ids": ["abc123", "def456"] }
+{ "query": "a cat sitting on a red sofa", "k": 10 }
 ```
+
+### `POST /quality`
+Calculates a composite quality score (0.0 - 1.0) based on aesthetics, sharpness, and composition.
+
+### `POST /similar-groups`
+Clusters photos into visually similar groups within a sliding time window.
 
 ---
 
 ## Configuration
 
-All settings can be overridden via environment variables or a `.env` file:
-
 | Variable | Default | Description |
 |---|---|---|
-| `DATABASE_URL` | `postgresql+asyncpg://postgres:postgres@localhost:5432/embeddings` | Async SQLAlchemy DB URL |
-| `DB_POOL_SIZE` | `5` | Connection pool size |
-| `DB_MAX_OVERFLOW` | `10` | Max overflow connections |
-| `CLIP_MODEL_NAME` | `ViT-B-32` | OpenCLIP model architecture |
-| `CLIP_PRETRAINED` | `openai` | OpenCLIP pretrained weights |
+| `DATABASE_URL` | `postgresql+asyncpg://...` | Async SQLAlchemy DB URL |
+| `CLIP_MODEL_NAME` | `xlm-roberta-large-ViT-H-14` | OpenCLIP model architecture |
+| `CLIP_PRETRAINED` | `frozen_laion5b_s13b_b90k` | Multilingual pretrained weights |
 | `DINO_MODEL_NAME` | `facebook/dinov2-base` | HuggingFace DINOv2 model |
-| `LOG_LEVEL` | `INFO` | Logging verbosity |
+| `EMBED_BACKEND` | `torch` | Inference engine (`torch` or `onnx`) |
+| `LAZY_LOAD_MODELS`| `false` | If true, models load on first request |
 
 ---
 
-## GPU Support
+## ONNX & Quantization
 
-The service detects CUDA automatically. To use GPU, replace the torch wheel in `requirements.txt` with a CUDA-enabled build:
-
-```
-torch==2.3.1+cu121
-torchvision==0.18.1+cu121
---extra-index-url https://download.pytorch.org/whl/cu121
-```
-
-And adjust the Dockerfile base image or add the CUDA runtime accordingly.
+For faster CPU inference, the service supports ONNX with INT8 quantization for the CLIP visual tower.
+1. Run `docker compose exec embedding_service /usr/local/bin/optimize_models.sh`.
+2. Set `EMBED_BACKEND=onnx` in your environment.
 
 ---
 
 ## Database Schema
 
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;
+The service uses **pgvector** for high-performance similarity search:
+- `embedding_clip`: `VECTOR(1024)` (XLM-RoBERTa-Large-ViT-H-14)
+- `embedding_dino`: `VECTOR(768)` (DINOv2-base)
 
-CREATE TABLE photos (
-  photo_id        TEXT PRIMARY KEY,
-  file_path       TEXT NOT NULL,
-  timestamp       TIMESTAMP,
-  camera_id       TEXT,
-  face_ids        TEXT[],
-  embedding_clip  VECTOR(512),
-  embedding_dino  VECTOR(768),
-  created_at      TIMESTAMP DEFAULT NOW()
-);
-
--- HNSW indexes for fast cosine similarity search
-CREATE INDEX idx_clip_embedding ON photos USING hnsw (embedding_clip vector_cosine_ops);
-CREATE INDEX idx_dino_embedding ON photos USING hnsw (embedding_dino vector_cosine_ops);
-```
+HNSW indexes are used for sub-millisecond similarity queries.
