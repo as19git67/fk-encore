@@ -29,7 +29,7 @@ docker compose up --build
 
 This starts the **LLM Service** on port `8001`.
 
-> **Note**: On first start, the service needs the model weights. Use the following command to populate the volume:
+> **Note**: On first start, the service automatically downloads the required model weights if they are missing from the volume. You can also pre-populate the volume manually:
 > `docker compose run --rm llm-service /usr/local/bin/download_model.sh`
 
 ### 2. Local Development
