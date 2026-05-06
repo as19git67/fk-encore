@@ -53,7 +53,11 @@ This starts:
 - **PostgreSQL 16** with pgvector extension on port `5432`
 - **Embedding Service** on port `8000`
 
-> **Note**: On first start, the service downloads ~5.5 GB of model weights. Use `./download_model.sh` to pre-populate the volume.
+> **Note**: On first start, the service downloads ~5.5 GB of model weights. Use `./download_model.sh` to pre-populate the volume:
+
+```bash
+docker compose exec embedding_service /usr/local/bin/download_model.sh .
+```
 
 ### 2. Local Development
 

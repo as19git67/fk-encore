@@ -28,6 +28,8 @@ const tags = ref<string[]>([])
 const error = ref<string | null>(null)
 const saving = ref(false)
 
+const amountInput = ref<any>(null)
+
 const recentRecipients = ref<RecentRecipient[]>([])
 
 const cashAccounts = computed(() =>
@@ -51,14 +53,19 @@ onMounted(async () => {
   } catch {
     // best-effort
   }
+
+  // Focus amount field
+  setTimeout(() => {
+    if (amountInput.value) {
+      const input = amountInput.value.$el.querySelector('input')
+      if (input) input.focus()
+    }
+  }, 100)
 })
 
 function applyRecipient(r: RecentRecipient) {
   counterparty.value = r.counterparty
-  // Under "zuletzt verwendet", badges should only show the name, not tags.
-  // But applying them still brings the tags. The issue description says:
-  // "Unter zuletzt verwendet sollen die Badges nur den Namen Empfänger darstellen und nicht die liste der Tags."
-  // This refers to the UI of the badges themselves.
+  tags.value = [...(r.tags || [])]
 }
 
 function setDate(days: number) {
@@ -122,17 +129,6 @@ async function save() {
       {{ error }}
     </Message>
 
-    <div class="field">
-      <label class="field-label">Buchungsdatum <span class="req">*</span></label>
-      <div class="date-row">
-        <DatePicker v-model="bookingDate" date-format="dd.mm.yy" show-icon fluid />
-        <div class="date-presets">
-          <Button label="Heute" size="small" severity="primary" outlined @click="setDate(0)" />
-          <Button label="Gestern" size="small" severity="primary" outlined @click="setDate(-1)" />
-        </div>
-      </div>
-    </div>
-
     <!-- Betrag + Vorzeichen -->
     <div class="field">
       <label class="field-label">Betrag <span class="req">*</span></label>
@@ -144,6 +140,7 @@ async function save() {
           @click="isExpense = !isExpense"
         />
         <InputNumber
+          ref="amountInput"
           v-model="amount"
           :min="0"
           :minFractionDigits="2"
@@ -154,6 +151,17 @@ async function save() {
           input-class="amount-number"
           autofocus
         />
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="field-label">Buchungsdatum <span class="req">*</span></label>
+      <div class="date-row">
+        <DatePicker v-model="bookingDate" date-format="dd.mm.yy" show-icon fluid />
+        <div class="date-presets">
+          <Button label="Heute" size="small" severity="primary" outlined @click="setDate(0)" />
+          <Button label="Gestern" size="small" severity="primary" outlined @click="setDate(-1)" />
+        </div>
       </div>
     </div>
 
@@ -201,7 +209,7 @@ async function save() {
       <Button
         label="Abbrechen"
         severity="secondary"
-        text
+        outlined
         @click="router.back()"
       />
     </div>
@@ -308,7 +316,6 @@ async function save() {
   display: flex;
   gap: 0.75rem;
   align-items: center;
-  flex-wrap: wrap;
 }
 .date-presets {
   display: flex;
