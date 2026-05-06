@@ -5,12 +5,13 @@ import InputNumber from 'primevue/inputnumber'
 import InputText from 'primevue/inputtext'
 import DatePicker from 'primevue/datepicker'
 import Button from 'primevue/button'
+import AutoComplete from 'primevue/autocomplete'
 import TagAutoComplete from '../../components/finance/TagAutoComplete.vue'
 import Message from 'primevue/message'
 import { useAccountsStore } from '../../stores/finance/accounts'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useTagsStore } from '../../stores/finance/tags'
-import { recentCashRecipients, type RecentRecipient } from '../../api/finance'
+import { recentCashRecipients, searchRecipients, type RecentRecipient } from '../../api/finance'
 
 const route = useRoute()
 const router = useRouter()
@@ -31,6 +32,7 @@ const saving = ref(false)
 const amountInput = ref<any>(null)
 
 const recentRecipients = ref<RecentRecipient[]>([])
+const recipientSuggestions = ref<RecentRecipient[]>([])
 
 const cashAccounts = computed(() =>
   accountsStore.items.filter((a) => a.type_kind === 'bargeld'),
@@ -68,6 +70,40 @@ function applyRecipient(r: RecentRecipient) {
   tags.value = [...(r.tags || [])]
 }
 
+async function findRecipients(event: { query: string }) {
+  const q = event.query.trim()
+  if (q.length === 0) {
+    recipientSuggestions.value = []
+    return
+  }
+  try {
+    const resp = await searchRecipients(q)
+    const items = resp.items
+    const exactMatch = items.some((i) => i.counterparty.toLowerCase() === q.toLowerCase())
+    if (!exactMatch && q.length > 0) {
+      recipientSuggestions.value = [
+        { counterparty: q, tags: [], isNew: true } as any,
+        ...items,
+      ]
+    } else {
+      recipientSuggestions.value = items
+    }
+  } catch {
+    recipientSuggestions.value = []
+  }
+}
+
+function onRecipientSelect(event: { value: string | RecentRecipient }) {
+  if (typeof event.value === 'string') {
+    counterparty.value = event.value
+  } else {
+    counterparty.value = event.value.counterparty
+    if (event.value.tags && event.value.tags.length > 0) {
+      tags.value = [...event.value.tags]
+    }
+  }
+}
+
 function setDate(days: number) {
   const d = new Date()
   d.setDate(d.getDate() + days)
@@ -91,7 +127,12 @@ async function save() {
     error.value = 'Bitte einen Betrag eingeben.'
     return
   }
-  if (!counterparty.value.trim()) {
+  
+  const counterpartyName = (typeof counterparty.value === 'string' 
+    ? counterparty.value 
+    : (counterparty.value as any).counterparty || '').trim()
+
+  if (!counterpartyName) {
     error.value = 'Empfänger ist ein Pflichtfeld.'
     return
   }
@@ -102,7 +143,7 @@ async function save() {
       account_id: accountId.value,
       booking_date: toIso(bookingDate.value),
       amount: signedAmount,
-      counterparty: counterparty.value.trim(),
+      counterparty: counterpartyName,
       purpose: purpose.value.trim() || undefined,
       tags: tags.value,
     })
@@ -168,12 +209,21 @@ async function save() {
     <!-- Empfänger -->
     <div class="field">
       <label class="field-label">Empfänger <span class="req">*</span></label>
-      <input
+      <AutoComplete
         v-model="counterparty"
-        type="text"
-        class="p-inputtext p-component recipient-input"
+        :suggestions="recipientSuggestions"
+        optionLabel="counterparty"
         placeholder="Name eingeben …"
-      />
+        fluid
+        class="recipient-input"
+        @complete="findRecipients"
+        @item-select="onRecipientSelect"
+      >
+        <template #option="{ option }">
+          <span v-if="(option as any).isNew" class="recipient-new">+ Neu: </span>
+          <span>{{ option.counterparty }}</span>
+        </template>
+      </AutoComplete>
     </div>
 
     <!-- Tags -->
@@ -210,6 +260,7 @@ async function save() {
         label="Abbrechen"
         severity="secondary"
         outlined
+        class="cancel-btn"
         @click="router.back()"
       />
     </div>
@@ -290,8 +341,20 @@ async function save() {
   width: 100%;
   font-size: 1rem;
 }
+.recipient-new {
+  font-style: italic;
+  color: var(--p-primary-600);
+  font-weight: 600;
+}
 .save-btn {
-  width: 100%;
+  flex: 2 2 auto;
+  padding: 0.85rem;
+  font-size: 1rem;
+  font-weight: 600;
+  margin-top: 0.25rem;
+}
+.cancel-btn {
+  flex: 1 1 auto;
   padding: 0.85rem;
   font-size: 1rem;
   font-weight: 600;

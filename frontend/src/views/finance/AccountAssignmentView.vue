@@ -187,7 +187,7 @@ async function save() {
           optionLabel="label"
           optionValue="id"
           placeholder="Konto auswählen …"
-          class="full"
+          class="full account-select"
           filter
         />
       </label>
@@ -291,6 +291,18 @@ async function save() {
 .full {
   width: 100%;
 }
+.account-select {
+  min-width: 0;
+}
+:deep(.p-select-label) {
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+:deep(.p-select-option) {
+  white-space: normal;
+  word-break: break-word;
+}
 .entries {
   list-style: none;
   padding: 0;
@@ -334,3 +346,31 @@ async function save() {
   margin: 0;
 }
 </style>
+
+
+/* Mobile-friendly Select dropdown: constrain overlay width and wrap long options */
+@media (max-width: 640px) {
+  .account-select {
+    max-width: 100%;
+  }
+}
+/* Truncate selected label in the closed control; wrap items in the panel */
+.account-select:deep(.p-select-label) {
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.account-select:deep(.p-select-panel) {
+  max-width: 95vw;
+}
+.account-select:deep(.p-select-option-label) {
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+
+/* Ensure all PrimeVue Select panels fit on small screens */
+:deep(.p-select-panel) {
+  max-width: 95vw;
+}
