@@ -81,12 +81,20 @@ export interface FintsTransactionData {
   purpose: string | null;
   counterparty: string | null;
   counterpartyIban: string | null;
+  /** BIC of the counterparty. */
+  counterparty_bic: string | null;
+  /** Bank ID (BLZ) of the counterparty. */
+  counterparty_bank_id: string | null;
   /** SEPA End-to-End reference (EREF). */
   end_to_end_ref: string | null;
   /** SEPA Mandate reference (MREF) for direct debits. */
   mandate_ref: string | null;
   /** SEPA Creditor identifier (CRED / CI). */
   creditor_id: string | null;
+  /** Abweichender Auftraggeber (ABWA). */
+  originator_name: string | null;
+  /** Abweichender Zahlungsempfänger (ABWE). */
+  recipient_name: string | null;
   /** MT940 Geschäftsvorfall-Code (NTRF / RCDT / ICDT / …). */
   gv_code: string | null;
   /** MT940 entry text ("Lastschrift", "Gutschrift", "Überweisung", …). */

@@ -62,7 +62,6 @@ Store-Actions, nie direkt den API-Helper.
 | `TransactionNewView` | `/finance/transactions/new` | `finance.view` | manuelle Buchung |
 | `BatchTagView` | `/finance/tags/batch` | `finance.view` | Mehrfach-Tagging auf Auswahl |
 | `SyncScheduleView` | `/finance/bankcontacts/:id/schedule` | `finance.accounts.manage` | UI-Cron pro Bankkontakt (neu) |
-| `AdminImportView` | `/finance/admin/import` | `finance.admin` | Finanzkraft-JSON-Upload |
 | `AnalysisView` | `/finance/analysis` | `finance.view` | Natural-Language-Queries (neu) |
 
 Router-Guards prüfen die jeweilige Permission und leiten bei fehlender
@@ -427,37 +426,6 @@ geklickt wird.
 User-Tags der Auswahl — explizit hinter einem Radio-Button, damit
 niemand versehentlich bestehende Tags überschreibt.
 
-### 4.13 `AdminImportView`
-
-Datei-Upload für den Finanzkraft-JSON-Dump (siehe
-`finance-data-import.md`). Fortschritts-Anzeige pro Import-Stage.
-
-```
-+-----------------------------------------------------------------------+
-| Datenimport (Finanzkraft-JSON)               (nur finance.admin)      |
-+-----------------------------------------------------------------------+
-| Datei:  [ Durchsuchen …  finanzkraft-2026-04.json ]   2.4 MB          |
-|                                                                       |
-|                                  [Import starten]                     |
-+-----------------------------------------------------------------------+
-| Fortschritt                                                           |
-|   ✓ Bankkontakte         (5 neu, 0 übersprungen)                      |
-|   ✓ Konten              (12 neu, 0 übersprungen)                      |
-|   ⟳ Transaktionen    3.142 / 48.712  ▰▰▰▱▱▱▱▱▱▱                      |
-|   ○ Tags                                                              |
-|   ○ Tag-Zuordnungen                                                   |
-|   ○ Salden-Historie                                                   |
-+-----------------------------------------------------------------------+
-| Validierungsfehler: 2           [Fehlerbericht als JSON laden]        |
-|   Zeile 418:  Konto „DE99 … 0000" nicht im Bankkontakt-Export         |
-|   Zeile 931:  Betrag „abc" ist keine Zahl                             |
-+-----------------------------------------------------------------------+
-```
-
-Der Fortschritt kommt per Server-Sent-Events oder Polling auf einen
-Status-Endpoint (`GET /finance/admin/import/:jobId/status`); Details
-sind in `finance-data-import.md` §7 (Offene Punkte zum Async-Pattern)
-vermerkt.
 
 ---
 
@@ -489,7 +457,7 @@ vermerkt.
 | bestehende Photos-/Documents-Views | API-Helper-Nutzung, Store-Pattern |
 | `finance-fints-integration.md` §4 | `TanDialog`-Backend-Kontrakt |
 | `finance-tagging-and-ai.md` §3–§4 | KI-Chips, `AnalysisView`-Backend |
-| `finance-data-import.md` | `AdminImportView`-Backend |
+| `finance-data-import.md` | Import-Backend (Dropbox) |
 | `finance-data-model.md` §5 | Permissions für Router-Guards |
 
 ---
