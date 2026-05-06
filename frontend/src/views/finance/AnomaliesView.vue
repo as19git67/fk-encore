@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
-import SelectButton from 'primevue/selectbutton'
+import Select from 'primevue/select'
 import {
   listAnomalies,
   acknowledgeAnomaly,
@@ -28,7 +28,7 @@ const typeOptions = [
   { label: 'Alle', value: 'all' },
   { label: 'Betragsänderung', value: 'amount_change' },
   { label: 'Möglicherweise doppelt', value: 'duplicate' },
-  { label: 'Neuer Lastschrift', value: 'new_mandate' },
+  { label: 'Neues Lastschriftmandat', value: 'new_mandate' },
 ]
 
 const filtered = computed(() =>
@@ -185,12 +185,12 @@ function formatAmountChange(item: AnomalyItem): string | null {
     <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
 
     <div class="filter-row">
-      <SelectButton
+      <Select
         v-model="typeFilter"
         :options="typeOptions"
         option-label="label"
         option-value="value"
-        :allow-empty="false"
+        class="filter-select"
       />
     </div>
 
@@ -351,12 +351,9 @@ function formatAmountChange(item: AnomalyItem): string | null {
   color: var(--p-primary-color);
 }
 
-.filter-row :deep(.p-selectbutton .p-button) {
-  hyphens: auto;
-  overflow-wrap: break-word;
-  white-space: normal;
-  text-align: center;
-  line-height: 1.2;
+.filter-row .filter-select {
+  width: 100%;
+  max-width: 300px;
 }
 
 .anomaly-list {

@@ -235,7 +235,7 @@ function openDetail(id: number) {
     >
       <Column field="name" header="Name" />
       <Column field="blz" header="BLZ" class="hidden md:table-cell" headerClass="hidden md:table-cell" />
-      <Column field="login" header="Login" />
+      <Column field="login" header="Login" class="hidden md:table-cell" headerClass="hidden md:table-cell" />
       <Column header="Letzter Sync">
         <template #body="{ data }">
           {{ data.last_sync_at ? new Date(data.last_sync_at).toLocaleString('de-DE') : '—' }}
@@ -246,7 +246,7 @@ function openDetail(id: number) {
           <Tag :severity="statusSeverity(data.last_sync_status)" :value="statusLabel(data.last_sync_status)" />
         </template>
       </Column>
-      <Column header="Aktionen" :style="{ width: '12rem' }">
+      <Column header="Aktionen" :style="{ width: '12rem' }" class="hidden md:table-cell" headerClass="hidden md:table-cell">
         <template #body="{ data }">
           <Button
             icon="pi pi-refresh"

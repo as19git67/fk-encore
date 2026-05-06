@@ -111,52 +111,50 @@ async function save() {
 
 <template>
   <div class="page">
-    <header class="cash-header">
-      <Button icon="pi pi-chevron-left" severity="secondary" rounded aria-label="Zurück" @click="router.back()" />
-      <h1>Bargeldbuchung</h1>
-    </header>
-
-    <Message v-if="error" severity="error" :closable="true" @close="error = null">
-      {{ error }}
-    </Message>
-
-    <div class="field">
-      <label>Buchungsdatum</label>
-      <div class="date-row">
-        <DatePicker v-model="bookingDate" date-format="dd.mm.yy" show-icon fluid />
-        <div class="date-presets">
-          <Button label="Heute" size="small" severity="secondary" @click="setDate(0)" />
-          <Button label="Gestern" size="small" severity="secondary" @click="setDate(-1)" />
-        </div>
-      </div>
-    </div>
-
-    <div v-if="cashAccounts.length > 0" class="account-name">
+    <div v-if="cashAccounts.length > 0" class="account-name-top">
       Konto: <strong>{{ accountsStore.byId(accountId ?? -1)?.label ?? '…' }}</strong>
     </div>
     <Message v-else severity="warn" :closable="false">
       Kein Bargeldkonto (Typ „bargeld") vorhanden. Bitte zuerst ein Konto anlegen.
     </Message>
 
+    <Message v-if="error" severity="error" :closable="true" @close="error = null">
+      {{ error }}
+    </Message>
+
+    <div class="field">
+      <label class="field-label">Buchungsdatum <span class="req">*</span></label>
+      <div class="date-row">
+        <DatePicker v-model="bookingDate" date-format="dd.mm.yy" show-icon fluid />
+        <div class="date-presets">
+          <Button label="Heute" size="small" severity="primary" outlined @click="setDate(0)" />
+          <Button label="Gestern" size="small" severity="primary" outlined @click="setDate(-1)" />
+        </div>
+      </div>
+    </div>
+
     <!-- Betrag + Vorzeichen -->
-    <div class="amount-block">
-      <Button
-        class="sign-btn"
-        :label="isExpense ? '− Ausgabe' : '+ Einnahme'"
-        :severity="isExpense ? 'danger' : 'success'"
-        @click="isExpense = !isExpense"
-      />
-      <InputNumber
-        v-model="amount"
-        :min="0"
-        :minFractionDigits="2"
-        :maxFractionDigits="2"
-        mode="decimal"
-        placeholder="0,00"
-        class="amount-input"
-        input-class="amount-number"
-        autofocus
-      />
+    <div class="field">
+      <label class="field-label">Betrag <span class="req">*</span></label>
+      <div class="amount-block">
+        <Button
+          class="sign-btn"
+          :label="isExpense ? '− Ausgabe' : '+ Einnahme'"
+          :severity="isExpense ? 'danger' : 'success'"
+          @click="isExpense = !isExpense"
+        />
+        <InputNumber
+          v-model="amount"
+          :min="0"
+          :minFractionDigits="2"
+          :maxFractionDigits="2"
+          mode="decimal"
+          placeholder="0,00"
+          class="amount-input"
+          input-class="amount-number"
+          autofocus
+        />
+      </div>
     </div>
 
     <!-- Empfänger -->
@@ -238,23 +236,14 @@ async function save() {
     padding: 0.75rem;
   }
 }
-.cash-header {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-.cash-header h1 {
-  margin: 0;
-  font-size: 1.1rem;
-  font-weight: 700;
-}
 .account-select {
   width: 100%;
 }
-.account-name {
-  font-size: 0.9rem;
-  color: var(--p-text-muted-color);
-  padding: 0.25rem 0;
+.account-name-top {
+  font-size: 1.1rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--p-content-border-color);
+  margin-bottom: 0.5rem;
 }
 .amount-block {
   display: flex;
@@ -334,18 +323,19 @@ async function save() {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  padding: 0.3rem 0.75rem;
+  padding: 0.35rem 0.85rem;
   border-radius: 999px;
-  background: var(--p-content-hover-background);
-  border: 1px solid var(--p-content-border-color);
+  background: var(--p-primary-50);
+  border: 1px solid var(--p-primary-200);
   cursor: pointer;
   font-size: 0.85rem;
   font-family: inherit;
-  color: var(--p-text-color);
-  transition: background 0.1s;
+  color: var(--p-primary-700);
+  transition: all 0.1s;
 }
 .recent-badge:hover {
-  background: var(--p-primary-50, rgba(0,0,0,0.06));
+  background: var(--p-primary-100);
+  border-color: var(--p-primary-300);
 }
 .recent-tags {
   color: var(--p-text-muted-color);

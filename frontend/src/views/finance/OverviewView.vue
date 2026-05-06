@@ -287,17 +287,16 @@ async function saveConfig() {
               </div>
               <div class="row-sub">
                 <template v-if="acc.type_kind === 'bargeld' && canWrite">
-                  <span
-                    class="text-blue-500 hover:underline"
-                    @click.stop="
-                      router.push({
-                        name: 'finance-transaction-new',
-                        query: { accountId: acc.id },
-                      })
-                    "
+                  <RouterLink
+                    :to="{
+                      name: 'finance-transaction-new',
+                      query: { accountId: acc.id },
+                    }"
+                    class="text-blue-500 hover:underline inline-flex items-center gap-1"
+                    @click.stop
                   >
                     <i class="pi pi-plus-circle" /> Buchung hinzufügen
-                  </span>
+                  </RouterLink>
                 </template>
                 <template v-else>
                   {{ formatUpdatedAt(acc.balance_as_of) }}

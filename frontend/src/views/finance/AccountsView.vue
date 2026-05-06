@@ -160,17 +160,17 @@ async function saveAccount() {
       striped-rows
     >
       <Column field="label" header="Label" />
-      <Column header="IBAN">
+      <Column header="IBAN" class="hidden md:table-cell" headerClass="hidden md:table-cell">
         <template #body="{ data }">{{ formatIban(data.iban) }}</template>
       </Column>
       <Column field="type_label" header="Typ" />
-      <Column header="Bankkontakt">
+      <Column header="Bankkontakt" class="hidden md:table-cell" headerClass="hidden md:table-cell">
         <template #body="{ data }">
           <span v-if="data.bankcontact_name">{{ data.bankcontact_name }}</span>
           <span v-else class="manual-hint">manuell</span>
         </template>
       </Column>
-      <Column field="currency_code" header="Währung" />
+      <Column field="currency_code" header="Währung" class="hidden md:table-cell" headerClass="hidden md:table-cell" />
       <Column header="Aktiv">
         <template #body="{ data }">
           <i v-if="data.active" class="pi pi-check text-green-500" />
