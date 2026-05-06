@@ -1,6 +1,8 @@
 # ── Stage 1: build dependencies ──────────────────────────────────────────────
 FROM python:3.12-slim-bookworm AS builder
 
+ARG TARGETARCH
+
 WORKDIR /build
 
 # Build toolchain for llama-cpp-python's native extension + HTTPS for pip.
@@ -19,10 +21,13 @@ COPY requirements.txt .
 # GGML_NATIVE=OFF disables march=native; the AVX-512 flags disable those
 # code paths explicitly. Without this the binary crashes with SIGILL (exit
 # 132) on first inference on non-AVX-512 hosts.
-RUN CMAKE_ARGS="-DGGML_NATIVE=OFF -DGGML_AVX512=OFF -DGGML_AVX512_VBMI=OFF -DGGML_AVX512_VNNI=OFF" \
+RUN if [ "$TARGETARCH" = "amd64" ]; then \
+        export CMAKE_ARGS="-DGGML_NATIVE=OFF -DGGML_AVX512=OFF -DGGML_AVX512_VBMI=OFF -DGGML_AVX512_VNNI=OFF"; \
+    else \
+        export CMAKE_ARGS="-DGGML_NATIVE=OFF"; \
+    fi && \
     pip install --upgrade pip \
-    && CMAKE_ARGS="-DGGML_NATIVE=OFF -DGGML_AVX512=OFF -DGGML_AVX512_VBMI=OFF -DGGML_AVX512_VNNI=OFF" \
-    pip install --no-cache-dir --prefix=/install -r requirements.txt
+    && pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 # ── Stage 2: runtime image ───────────────────────────────────────────────────
 FROM python:3.12-slim-bookworm
