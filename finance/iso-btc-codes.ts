@@ -1,13 +1,21 @@
 /**
  * ISO 20022 Bank Transaction Code (BTC) lookup tables.
  *
- * Source: BTC_Codification_30October2023.xls published by ISO 20022 RA.
+ * English source: BTC_Codification_30October2023.xls published by ISO 20022 RA.
  * https://www.iso20022.org/catalogue-messages/additional-content-messages/external-code-sets
+ *
+ * German source: UniCredit "Geschäftsvorfall- und Rückgabecodes" (August 2022).
+ * German descriptions cover the SEPA / German banking combinations actually used
+ * by UniCredit; not all 250 SubFamily codes have a German equivalent.
  *
  * Hierarchy:
  *   Domain     → funds_code        (finance_transaction.funds_code)
  *   Family     → transaction_type  (finance_transaction.transaction_type)
  *   SubFamily  → transaction_code  (finance_transaction.transaction_code)
+ *
+ * The three levels are independently usable for generic category labels.
+ * For exact German booking texts, use `lookupBtcCombination(domain, family, subfamily)`,
+ * which looks up the specific (Domain/Family/SubFamily) triple from the UniCredit table.
  */
 
 /** ISO BTC Domain codes (ExternalBankTransactionDomain1Code). */
@@ -344,21 +352,257 @@ export const BTC_SUBFAMILIES: Record<string, string> = {
 };
 
 /**
+ * German descriptions per Domain code (derived from UniCredit GVC table).
+ * The three levels can be used independently for generic category labels.
+ */
+export const BTC_DOMAINS_DE: Record<string, string> = {
+  ACMT: "Kontoverwaltung",
+  CAMT: "Cash Management",
+  CMDT: "Rohstoffe",
+  DERV: "Derivate",
+  FORX: "Devisen",
+  LDAS: "Kredite, Einlagen & Syndizierungen",
+  PMET: "Edelmetalle",
+  PMNT: "Zahlungsverkehr",
+  SECU: "Wertpapiere",
+  TRAD: "Handelsfinanzierung",
+  XTND: "Sonstige",
+};
+
+/** German descriptions per Family code (derived from UniCredit GVC table). */
+export const BTC_FAMILIES_DE: Record<string, string> = {
+  ACOP: "Sonstige Gutschriftsoperationen",
+  ADOP: "Sonstige Belastungsoperationen",
+  BLOC: "Gesperrte Transaktionen",
+  CAPL: "Cash Pooling",
+  CCRD: "Kundenkartentransaktionen",
+  CNTR: "Kassenzähler / Kassentransaktionen",
+  CORP: "Kapitalmaßnahme",
+  CSLN: "Verbraucherkredite",
+  CUST: "Depotführung",
+  DRFT: "Wechsel",
+  FTDP: "Termingeldeinlagen",
+  FTLN: "Terminkredite",
+  FTUR: "Futures",
+  FWRD: "Devisentermingeschäfte",
+  GUAR: "Garantien / Aval",
+  ICCN: "Ausgehende Konzentrationsaufträge",
+  ICDT: "Ausgehende Überweisungen",
+  ICHQ: "Ausgestellte Schecks",
+  IDDT: "Ausgehende Lastschriften",
+  IRCT: "Ausgehende Echtzeitüberweisungen",
+  MCOP: "Sonstige Gutschriftsvorgänge",
+  MCRD: "Händlerkartentransaktionen",
+  MDOP: "Sonstige Belastungsvorgänge",
+  NTAV: "Nicht verfügbar",
+  OPCL: "Kontoeröffnung und -schließung",
+  OTHR: "Sonstige",
+  RCCN: "Eingehende Konzentrationsaufträge",
+  RCDT: "Eingehende Überweisungen",
+  RCHQ: "Eingereichte Schecks",
+  RDDT: "Eingehende Lastschriften",
+  RRCT: "Eingehende Echtzeitüberweisungen",
+  SETT: "Handel, Clearing und Abrechnung",
+  SPOT: "Kassengeschäfte",
+};
+
+/** German descriptions per SubFamily code (derived from UniCredit GVC table). */
+export const BTC_SUBFAMILIES_DE: Record<string, string> = {
+  ACCC: "Kontoschließung",
+  BBDD: "SEPA-Firmenlastschrift (B2B)",
+  BOOK: "Buchinterner Transfer / Kontoübertrag",
+  CCHQ: "Inhaberscheck / Reisescheck",
+  CDPT: "Einzahlung",
+  CHRG: "Entgelt / Gebühr",
+  COMM: "Provision",
+  CWDL: "Barabhebung",
+  DAJT: "Belastungskorrektur",
+  DPST: "Anlage (Termingeld)",
+  DVCA: "Bardividende / Zinsgutschrift",
+  ESCT: "SEPA-Überweisung",
+  ESDD: "SEPA-Basislastschrift (CORE)",
+  FCDP: "Fremdwährungseinzahlung",
+  INTR: "Zinsen",
+  NTAV: "Nicht verfügbar",
+  OODD: "Einmalige Lastschrift",
+  ORCQ: "Orderscheck",
+  OTHR: "Sonstige",
+  POSC: "Kreditkartenzahlung",
+  POSD: "POS-Zahlung (Debitkarte)",
+  POSP: "POS-Zahlung",
+  PSTE: "Storno",
+  RCDD: "Storno (Zahlungsstornierung)",
+  RIMB: "Rückerstattung",
+  RPMT: "Rückzahlung",
+  RRTN: "Rücküberweisung",
+  SALA: "Gehalts- / Rentenzahlung",
+  SDVA: "Eilüberweisung (gleichtägig)",
+  SMRT: "Geldkartentransaktion",
+  STAM: "Abrechnung bei Fälligkeit",
+  STDO: "Dauerauftrag",
+  STLR: "Abrechnung unter Vorbehalt",
+  TRAD: "Wertpapierhandel",
+  UPCQ: "Unbezahlter Scheck",
+  UPCT: "Unbezahlte Kartentransaktion",
+  UPDD: "Rückgabe / Widerspruch Lastschrift",
+  URCQ: "Scheck unter Vorbehalt",
+  XBCT: "Grenzüberschreitende Überweisung",
+  XBST: "Grenzüberschreitender Dauerauftrag",
+  XRTN: "Rücküberweisung (grenzüberschreitend)",
+};
+
+/**
+ * German booking texts for specific (Domain/Family/SubFamily) combinations
+ * as used in the German banking practice (source: UniCredit GVC table, August 2022).
+ *
+ * Key format: `"DOMAIN/FAMILY/SUBFAMILY"` (all uppercase).
+ * Not all possible combinations are present — only those actually defined by UniCredit.
+ * Fall back to per-level lookups when a combination is absent.
+ */
+export const BTC_COMBINATIONS_DE: Record<string, string> = {
+  // ACMT - Kontoverwaltung
+  "ACMT/ACOP/PSTE": "Storno",
+  "ACMT/MCOP/CHRG": "Entgelt",
+  "ACMT/MCOP/COMM": "Preise / Entgelte",
+  "ACMT/MCOP/INTR": "Zinsen",
+  "ACMT/MDOP/CHRG": "Kartenpreis / Entgelt",
+  "ACMT/MDOP/COMM": "Preise / Entgelte",
+  "ACMT/MDOP/INTR": "Eingeräumte Kontoüberziehung",
+  "ACMT/OPCL/ACCC": "Abschluss",
+  // CAMT - Cash Management
+  "CAMT/CAPL/OTHR": "Saldoberichtigung / Cash-Pooling-Übertrag",
+  // DERV - Derivate
+  "DERV/OTHR/OTHR": "Derivatebuchung",
+  // FORX - Devisen
+  "FORX/FWRD/OTHR": "Devisentermin-Kauf / -Verkauf",
+  "FORX/SPOT/OTHR": "Devisenkassa-Kauf / -Verkauf",
+  // LDAS - Kredite und Einlagen
+  "LDAS/FTDP/DPST": "Termingeld (Anlage)",
+  "LDAS/FTDP/RPMT": "Termingeld (Rückzahlung)",
+  "LDAS/MCOP/CHRG": "Kreditprovision",
+  "LDAS/MDOP/CHRG": "Kreditprovision",
+  // PMET - Edelmetalle
+  "PMET/SPOT/OTHR": "Edelmetall-Abrechnung",
+  // PMNT/CCRD - Kundenkartentransaktionen
+  "PMNT/CCRD/CWDL": "Kartenauszahlung (SEPA Card Clearing)",
+  "PMNT/CCRD/OTHR": "Kartentransaktion (SEPA Card Clearing)",
+  "PMNT/CCRD/POSC": "Kreditkartenabrechnung",
+  "PMNT/CCRD/POSD": "POS-Kartenzahlung (SEPA Card Clearing)",
+  "PMNT/CCRD/RIMB": "SEPA Cards Clearing (Wiedergutschrift)",
+  "PMNT/CCRD/SMRT": "Laden Geldkarte (SEPA Card Clearing)",
+  // PMNT/CNTR - Kassenzähler
+  "PMNT/CNTR/CDPT": "Einzahlung",
+  "PMNT/CNTR/CWDL": "Barscheck / Bargeldauszahlung",
+  "PMNT/CNTR/FCDP": "Wechseldiskontierung",
+  // PMNT/DRFT - Wechsel
+  "PMNT/DRFT/STAM": "Wechsel-Inkasso (Import)",
+  "PMNT/DRFT/STLR": "Wechsel-Inkasso (Export)",
+  // PMNT/ICDT - Ausgehende Überweisungen
+  "PMNT/ICDT/BOOK": "Kontoübertrag / Saldo (Belastung)",
+  "PMNT/ICDT/ESCT": "Überweisung (Einzelbuchung)",
+  "PMNT/ICDT/RRTN": "SEPA-Rückgabe (Retoure / Rückruf) einer Überweisung",
+  "PMNT/ICDT/SDVA": "Eilüberweisung",
+  "PMNT/ICDT/STDO": "Dauerauftrag (Ausführung)",
+  "PMNT/ICDT/XBCT": "Auslandszahlungsverkehr (Belastung)",
+  "PMNT/ICDT/XBST": "Auslandsdauerauftrag",
+  "PMNT/ICDT/XRTN": "Auslandszahlungsverkehr (Wiedergutschrift)",
+  // PMNT/ICHQ - Ausgestellte Schecks
+  "PMNT/ICHQ/CCHQ": "Inhaberscheck / Reisescheck",
+  "PMNT/ICHQ/ESCT": "Zahlungsanweisung zur Verrechnung",
+  "PMNT/ICHQ/ORCQ": "Orderscheck",
+  "PMNT/ICHQ/UPCQ": "Scheckrückgabe",
+  // PMNT/IDDT - Ausgehende Lastschriften (Einreichung)
+  "PMNT/IDDT/BBDD": "SEPA-Firmenlastschrift, Eingang vorbehalten (B2B)",
+  "PMNT/IDDT/ESDD": "SEPA-Basislastschrift (CORE, Einzelbuchung)",
+  "PMNT/IDDT/RCDD": "SEPA-Lastschrift, reversal",
+  "PMNT/IDDT/UPDD": "SEPA-Lastschrift-Rückgabe (B2B, Einzelbuchung)",
+  // PMNT/IRCT - Ausgehende Echtzeitüberweisungen
+  "PMNT/IRCT/ESCT": "Echtzeitüberweisung",
+  "PMNT/IRCT/RRTN": "Rücküberweisung aus Echtzeitüberweisung (Einzelbuchung)",
+  // PMNT/MCOP / PMNT/MDOP - Sonstige Gutschriften / Belastungen
+  "PMNT/MCOP/OTHR": "Gutschrift",
+  "PMNT/MCRD/CHRG": "Entgelteinzug Geldkarte",
+  "PMNT/MCRD/DAJT": "SEPA Cards Clearing (Reversal)",
+  "PMNT/MCRD/POSP": "POS Gutschrift",
+  "PMNT/MCRD/UPCT": "SEPA Cards Clearing (Rückbelastung)",
+  "PMNT/MDOP/OTHR": "Belastung",
+  // PMNT/RCDT - Eingehende Überweisungen
+  "PMNT/RCDT/BOOK": "Kontoübertrag / Saldo (Gutschrift)",
+  "PMNT/RCDT/ESCT": "SEPA-Gutschrift (Einzelbuchung)",
+  "PMNT/RCDT/SALA": "SEPA-Gehalts- / Pensionsgutschrift",
+  "PMNT/RCDT/SDVA": "Eilüberweisung Gutschrift",
+  "PMNT/RCDT/STDO": "SEPA-Dauerauftragsgutschrift (Einzelbuchung)",
+  "PMNT/RCDT/XBCT": "Auslandszahlungsverkehr (Gutschrift)",
+  // PMNT/RCHQ - Eingereichte Schecks
+  "PMNT/RCHQ/UPCQ": "Scheckrückgabe",
+  "PMNT/RCHQ/URCQ": "Scheckeinreichung unter Vorbehalt",
+  // PMNT/RDDT - Eingehende Lastschriften (Belastung)
+  "PMNT/RDDT/BBDD": "SEPA-Firmenlastschrift (B2B, Einzelbuchung-Soll)",
+  "PMNT/RDDT/ESDD": "SEPA-Basislastschrift (CORE, Einzelbuchung-Soll)",
+  "PMNT/RDDT/OODD": "Überweisung (PayDirekt)",
+  "PMNT/RDDT/UPDD": "SEPA-Lastschrift-Rückgabe (CORE, Wiedergutschrift)",
+  // PMNT/RRCT - Eingehende Echtzeitüberweisungen
+  "PMNT/RRCT/ESCT": "Echtzeitüberweisung (Gutschrift)",
+  "PMNT/RRCT/RRTN": "Rücküberweisung aus Echtzeitüberweisung (Reject)",
+  "PMNT/RRCT/SALA": "Echtzeit Gehalts- / Pensionsgutschrift",
+  // SECU - Wertpapiere
+  "SECU/CUST/CHRG": "Depotpreise Gebühr",
+  "SECU/CUST/DVCA": "Zinsgutschrift / Dividende",
+  "SECU/SETT/TRAD": "Effekten",
+  // TRAD - Handelsfinanzierung
+  "TRAD/GUAR/OTHR": "Aval",
+  "TRAD/MCOP/COMM": "Provision Wertpapierleihegeschäft (Gutschrift)",
+  "TRAD/MDOP/COMM": "Provision Wertpapierleihegeschäft (Belastung)",
+  // XTND - Sonstige
+  "XTND/NTAV/NTAV": "Kontoschließung / Sonstige",
+};
+
+/**
  * Returns the human-readable description for an ISO BTC code.
  *
  * @param level - Which level to look up.
  * @param code  - The 4-letter code, case-insensitive.
+ * @param lang  - "en" (default) or "de".
  * @returns The description string, or `undefined` if the code is unknown.
  */
 export function lookupBtcCode(
   level: "domain" | "family" | "subfamily",
   code: string | null | undefined,
+  lang: "en" | "de" = "en",
 ): string | undefined {
   if (!code) return undefined;
   const key = code.trim().toUpperCase();
+  if (lang === "de") {
+    switch (level) {
+      case "domain":    return BTC_DOMAINS_DE[key];
+      case "family":    return BTC_FAMILIES_DE[key];
+      case "subfamily": return BTC_SUBFAMILIES_DE[key];
+    }
+  }
   switch (level) {
     case "domain":    return BTC_DOMAINS[key];
     case "family":    return BTC_FAMILIES[key];
     case "subfamily": return BTC_SUBFAMILIES[key];
   }
+}
+
+/**
+ * Returns the German booking text for a specific (Domain, Family, SubFamily) triple
+ * from the UniCredit GVC table.
+ *
+ * Falls back to the per-level German description if the combination is not listed,
+ * then to English, then to `undefined`.
+ *
+ * @param domain    - Domain code (e.g. "PMNT"), case-insensitive.
+ * @param family    - Family code (e.g. "RCDT"), case-insensitive.
+ * @param subfamily - SubFamily code (e.g. "ESCT"), case-insensitive.
+ */
+export function lookupBtcCombination(
+  domain: string | null | undefined,
+  family: string | null | undefined,
+  subfamily: string | null | undefined,
+): string | undefined {
+  if (!domain || !family || !subfamily) return undefined;
+  const key = `${domain.trim().toUpperCase()}/${family.trim().toUpperCase()}/${subfamily.trim().toUpperCase()}`;
+  return BTC_COMBINATIONS_DE[key];
 }
