@@ -339,6 +339,11 @@ function toggleSelectAll(checked: boolean | null) {
   }
 }
 
+function clearSelection() {
+  selectionStore.clear()
+  selectionPopover.value?.hide()
+}
+
 function openSelectionPopover(event: Event) {
   if (selectionStore.count === 0) return
   selectionPopover.value?.toggle(event)
@@ -520,11 +525,18 @@ function goBack() {
       </div>
       <div class="tx-select-bar-actions">
         <Button
-          icon="pi pi-tag"
-          severity="secondary"
-          aria-label="Tags auf Auswahl anwenden"
-          :disabled="selectionStore.count === 0"
-          @click="openBatchTagEditor"
+            icon="pi pi-tag"
+            severity="secondary"
+            aria-label="Tags auf Auswahl anwenden"
+            :disabled="selectionStore.count === 0"
+            @click="openBatchTagEditor"
+        />
+        <Button
+            icon="pi pi-times"
+            severity="secondary"
+            aria-label="Nichts auswählen"
+            :disabled="selectionStore.count === 0"
+            @click="clearSelection"
         />
       </div>
     </div>
@@ -681,7 +693,7 @@ function goBack() {
   padding: 0.6rem 0.75rem;
   border-radius: 0.5rem;
   position: sticky;
-  top: 0;
+  top: 58px;
   z-index: 1;
 }
 .tx-header :deep(.p-button) {
@@ -715,13 +727,8 @@ function goBack() {
   border: 1px solid var(--p-content-border-color);
   border-radius: 0.5rem;
   position: sticky;
-  top: 3.4rem;
+  top: 120px;
   z-index: 1;
-}
-@media (max-width: 480px) {
-  .tx-select-bar {
-    top: 3.2rem;
-  }
 }
 .tx-select-bar-left {
   display: flex;
