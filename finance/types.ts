@@ -95,8 +95,15 @@ export interface FintsTransactionData {
   originator_name: string | null;
   /** Abweichender Zahlungsempfänger (ABWE). */
   recipient_name: string | null;
-  /** MT940 Geschäftsvorfall-Code (NTRF / RCDT / ICDT / …). */
-  gv_code: string | null;
+  /** ISO Bank Transaction Code — Domain (MT940 funds-code char;
+   *  CAMT: BkTxCd/Domn/Cd or credit/debit indicator). */
+  funds_code: string | null;
+  /** ISO Bank Transaction Code — Family (MT940 GVC e.g. "NTRF", "RCDT";
+   *  CAMT: BkTxCd/Domn/Fmly/Cd). Formerly gv_code. */
+  transaction_type: string | null;
+  /** ISO Bank Transaction Code — SubFamily (MT940 sub-field 61 code;
+   *  CAMT: BkTxCd/Domn/Fmly/SubFmlyCd). */
+  transaction_code: string | null;
   /** MT940 entry text ("Lastschrift", "Gutschrift", "Überweisung", …). */
   entry_text: string | null;
   /** Primanota number — bank-internal posting batch id. */

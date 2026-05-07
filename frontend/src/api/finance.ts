@@ -439,7 +439,9 @@ export interface Transaction {
   bank_ref: string | null
   originator_name: string | null
   recipient_name: string | null
-  gv_code: string | null
+  funds_code: string | null
+  transaction_type: string | null
+  transaction_code: string | null
   entry_text: string | null
   prima_nota_no: string | null
   original_amount: string | null
