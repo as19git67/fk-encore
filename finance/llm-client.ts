@@ -129,28 +129,34 @@ interface JsonPromptRequest {
   temperature?: number;
 }
 
+/** Structured SEPA/MT940 fields extracted from a transaction. */
+interface TransactionFields {
+  purpose: string | null;
+  counterparty: string | null;
+  amount: string;
+  sign: "debit" | "credit";
+  /** MT940 entry text, e.g. "Lastschrift", "Gutschrift", "Überweisung". */
+  entry_text?: string | null;
+  /** Abweichender Auftraggeber (ABWA). */
+  originator_name?: string | null;
+  /** Abweichender Zahlungsempfänger (ABWE). */
+  recipient_name?: string | null;
+  /** SEPA Mandate reference — identifies recurring direct debits. */
+  mandate_ref?: string | null;
+  /** SEPA Creditor identifier — identifies the payee organisation. */
+  creditor_id?: string | null;
+}
+
 export interface SuggestTagsInput {
   /** Transaction to annotate. */
-  transaction: {
-    purpose: string | null;
-    counterparty: string | null;
-    amount: string;
-    currency_code: string;
-    sign: "debit" | "credit"; // amount > 0 → credit, else debit
-  };
+  transaction: TransactionFields & { currency_code: string };
   /**
    * Nearest-neighbour examples from the user's history. The LLM must
    * only reuse tags that appear in at least one example — no new
    * vocabulary is invented. This is enforced in the prompt and
    * re-checked post-hoc by tag-suggester.ts.
    */
-  examples: Array<{
-    purpose: string | null;
-    counterparty: string | null;
-    amount: string;
-    sign: "debit" | "credit";
-    user_tags: string[];
-  }>;
+  examples: Array<TransactionFields & { user_tags: string[] }>;
 }
 
 export interface TagSuggestion {
@@ -192,15 +198,41 @@ export async function suggestTags(
   return result;
 }
 
+/** Renders a single transaction's fields as indented lines for the prompt. */
+function renderTxFields(
+  f: {
+    counterparty?: string | null;
+    purpose?: string | null;
+    entry_text?: string | null;
+    originator_name?: string | null;
+    recipient_name?: string | null;
+    mandate_ref?: string | null;
+    creditor_id?: string | null;
+    sign: "debit" | "credit";
+    amount: string;
+    currency_code?: string;
+  },
+): string {
+  const lines: string[] = [];
+  lines.push(`  Gegenseite: ${f.counterparty?.trim() || "-"}`);
+  lines.push(`  Verwendung: ${f.purpose?.trim() || "-"}`);
+  if (f.entry_text?.trim())      lines.push(`  Buchungstext: ${f.entry_text.trim()}`);
+  if (f.originator_name?.trim()) lines.push(`  Auftraggeber: ${f.originator_name.trim()}`);
+  if (f.recipient_name?.trim())  lines.push(`  Zahlungsempfänger: ${f.recipient_name.trim()}`);
+  if (f.mandate_ref?.trim())     lines.push(`  Mandatsreferenz: ${f.mandate_ref.trim()}`);
+  if (f.creditor_id?.trim())     lines.push(`  Gläubiger-ID: ${f.creditor_id.trim()}`);
+  const amountStr = f.currency_code
+    ? `${f.sign === "debit" ? "-" : "+"}${f.amount} ${f.currency_code}`
+    : `${f.sign === "debit" ? "-" : "+"}${f.amount}`;
+  lines.push(`  Betrag: ${amountStr}`);
+  return lines.join("\n");
+}
+
 function buildTagSuggestionPrompt(input: SuggestTagsInput): string {
   const examples = input.examples
     .map((e, i) => {
       const tags = e.user_tags.join(", ") || "(keine)";
-      return `Beispiel ${i + 1}:
-  Gegenseite: ${e.counterparty ?? "-"}
-  Verwendung: ${e.purpose ?? "-"}
-  Betrag: ${e.sign === "debit" ? "-" : "+"}${e.amount}
-  Tags: ${tags}`;
+      return `Beispiel ${i + 1}:\n${renderTxFields(e)}\n  Tags: ${tags}`;
     })
     .join("\n\n");
 
@@ -214,9 +246,7 @@ Strikte Regeln:
 - Antworte als JSON mit einem 'tags'-Array, z. B. {"tags":[{"tag":"urlaub","confidence":0.87}]}.
 
 Neue Transaktion:
-  Gegenseite: ${input.transaction.counterparty ?? "-"}
-  Verwendung: ${input.transaction.purpose ?? "-"}
-  Betrag: ${input.transaction.sign === "debit" ? "-" : "+"}${input.transaction.amount} ${input.transaction.currency_code}
+${renderTxFields(input.transaction)}
 
 Historische Beispiele:
 

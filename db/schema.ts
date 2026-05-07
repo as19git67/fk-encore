@@ -1093,8 +1093,17 @@ export const financeTransaction = pgTable(
     /** Abweichender Zahlungsempfänger (ABWE): final beneficiary when
      *  different from the receiver-account holder. */
     recipient_name: text("recipient_name"),
-    /** MT940 Geschäftsvorfall-Code (NTRF / RCDT / ICDT / …). */
-    gv_code: text("gv_code"),
+    /** ISO Bank Transaction Code — Domain (MT940: funds-code char;
+     *  CAMT: BkTxCd/Domn/Cd or credit/debit indicator). */
+    funds_code: text("funds_code"),
+    /** ISO Bank Transaction Code — Family (MT940: GVC / Geschäftsvorfall-
+     *  Code e.g. "NTRF", "RCDT", "ICDT"; CAMT: BkTxCd/Domn/Fmly/Cd).
+     *  Formerly stored as gv_code; renamed for consistency with the
+     *  flanking ISO BTC columns. */
+    transaction_type: text("transaction_type"),
+    /** ISO Bank Transaction Code — SubFamily (MT940: sub-field 61 code;
+     *  CAMT: BkTxCd/Domn/Fmly/SubFmlyCd). */
+    transaction_code: text("transaction_code"),
     /** MT940 entry text ("Lastschrift", "Gutschrift", "Überweisung", …). */
     entry_text: text("entry_text"),
     /** Primanota number — bank-internal posting batch id. */
