@@ -96,7 +96,7 @@ const displayValue = computed<SuggestionItem[]>(() =>
 <style scoped>
 .tag-ac-new {
   font-style: italic;
-  color: var(--p-primary-600);
+  color: var(--p-primary-color);
   font-weight: 600;
 }
 
@@ -106,9 +106,9 @@ const displayValue = computed<SuggestionItem[]>(() =>
   flex-wrap: wrap;
 }
 .tag-ac :deep(.p-autocomplete-token) {
-  background: var(--p-primary-50);
-  border: 1px solid var(--p-primary-200);
-  color: var(--p-primary-700);
+  background: var(--p-highlight-background);
+  border: 1px solid var(--p-content-border-color);
+  color: var(--p-highlight-color);
   border-radius: 999px;
   padding: 0.15rem 0.5rem;
 }
@@ -116,6 +116,6 @@ const displayValue = computed<SuggestionItem[]>(() =>
   margin-right: 0.25rem;
 }
 .tag-ac :deep(.p-autocomplete-token-icon) {
-  color: var(--p-primary-700);
+  color: var(--p-highlight-color);
 }
 </style>
