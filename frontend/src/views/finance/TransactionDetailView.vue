@@ -14,6 +14,7 @@ import { useAccountsStore } from '../../stores/finance/accounts'
 import { useTagsStore } from '../../stores/finance/tags'
 import type { MandateHistoryItem, Transaction } from '../../api/finance'
 import * as api from '../../api/finance'
+import { lookupBtcCodeDe } from '../../utils/btcCodes'
 
 const route = useRoute()
 const router = useRouter()
@@ -295,9 +296,9 @@ const extractedFields = computed(() => {
     { key: 'bank_ref', label: 'Bankreferenz', value: t.bank_ref },
     { key: 'originator_name', label: 'Auftraggeber', value: t.originator_name },
     { key: 'recipient_name', label: 'Zahlungsempfänger', value: t.recipient_name },
-    { key: 'funds_code', label: 'Domain-Code', value: t.funds_code },
-    { key: 'transaction_type', label: 'GV-Code (Family)', value: t.transaction_type },
-    { key: 'transaction_code', label: 'SubFamily-Code', value: t.transaction_code },
+    { key: 'funds_code', label: 'Domain-Code', value: t.funds_code ? `${t.funds_code} – ${lookupBtcCodeDe('domain', t.funds_code) ?? t.funds_code}` : null },
+    { key: 'transaction_type', label: 'GV-Code (Family)', value: t.transaction_type ? `${t.transaction_type} – ${lookupBtcCodeDe('family', t.transaction_type) ?? t.transaction_type}` : null },
+    { key: 'transaction_code', label: 'SubFamily-Code', value: t.transaction_code ? `${t.transaction_code} – ${lookupBtcCodeDe('subfamily', t.transaction_code) ?? t.transaction_code}` : null },
     { key: 'entry_text', label: 'Buchungstext', value: t.entry_text },
     { key: 'prima_nota_no', label: 'Primanota', value: t.prima_nota_no },
     { key: 'original_amount', label: 'Originalbetrag', value: t.original_amount ? `${t.original_amount} ${t.original_currency_code ?? ''}`.trim() : null },
