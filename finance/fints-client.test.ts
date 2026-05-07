@@ -930,6 +930,46 @@ describe("runFetchAccounts — happy path", () => {
     expect(a.errors).toEqual([]);
   });
 
+  it("prioritizes remoteIdentifier but falls back to remoteAccountNumber for counterpartyIban", async () => {
+    const c = clientWith(
+      [
+        {
+          accountNumber: "1234567890",
+          accountType: "CheckingAccount",
+          currency: "EUR",
+        },
+      ],
+      {
+        getAccountStatements: vi.fn(async () =>
+          stmtResp([
+            {
+              entryDate: new Date("2026-04-24"),
+              amount: -10,
+              purpose: "With remoteAccountNumber",
+              remoteName: "Account Owner",
+              remoteAccountNumber: "ACCOUNT123",
+            },
+            {
+              entryDate: new Date("2026-04-24"),
+              amount: -20,
+              purpose: "With both",
+              remoteName: "Both",
+              remoteIdentifier: "IBAN999",
+              remoteAccountNumber: "ACCOUNT999",
+            },
+          ]),
+        ),
+        getAccountBalance: vi.fn(async () => balResp(null)),
+      },
+    );
+
+    const result = await runFetchAccounts(c);
+    const txs = result.accounts[0].transactions;
+
+    expect(txs[0].counterpartyIban).toBe("ACCOUNT123");
+    expect(txs[1].counterpartyIban).toBe("IBAN999");
+  });
+
   it("maps multiple accounts in sequence", async () => {
     const c = clientWith(
       [

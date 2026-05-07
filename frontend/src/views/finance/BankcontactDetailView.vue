@@ -439,7 +439,7 @@ async function del() {
         <Button
           label="Sync-Zeiten bearbeiten"
           severity="secondary"
-          text
+          outlined
           @click="router.push({ name: 'finance-bankcontact-schedule', params: { id: bc.id } })"
         />
       </div>

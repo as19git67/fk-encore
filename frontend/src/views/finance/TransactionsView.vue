@@ -213,13 +213,13 @@ async function afterBatch() {
       <Column expander headerStyle="width: 3rem" @click.stop />
       <Column field="booking_date" header="Datum" />
       <Column field="counterparty" header="Gegenseite" />
-      <Column field="purpose" header="Verwendungszweck" />
+      <Column field="purpose" header="Verwendungszweck" class="mobile-hidden" headerClass="mobile-hidden" />
       <Column header="Betrag">
         <template #body="{ data }">
           {{ formatAmount(data.amount, currencyOf(data.account_id)) }}
         </template>
       </Column>
-      <Column header="Tags">
+      <Column header="Tags" class="mobile-hidden" headerClass="mobile-hidden">
         <template #body="{ data }">
           <Tag
             v-for="t in data.tags"

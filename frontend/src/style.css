@@ -48,6 +48,13 @@ a:hover {
 .mt-lg { margin-top: var(--spacing-lg); }
 .my-xl { margin-top: var(--spacing-xl); margin-bottom: var(--spacing-xl); }
 
+/* ── Visibility utility classes ────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .mobile-hidden {
+    display: none !important;
+  }
+}
+
 /* ── Finance: TAN-method dropdown panel ─────────────────────────────────────
  * The PrimeVue Select panel is teleported to <body>, so scoped CSS in
  * BankcontactDetailView can't reach it. The TAN-method options can be very

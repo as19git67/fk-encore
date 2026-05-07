@@ -344,16 +344,15 @@ onMounted(async () => {
           :value="passkeys"
           :loading="loading"
           striped-rows
-          table-style="min-width: 30rem"
         >
           <template #empty>Keine Passkeys registriert.</template>
           <Column field="name" header="Name" />
-          <Column field="device_type" header="Gerätetyp">
+          <Column field="device_type" header="Gerätetyp" class="mobile-hidden" headerClass="mobile-hidden">
             <template #body="{ data }">
               {{ data.device_type === 'multiDevice' ? 'Multi-Gerät' : 'Einzel-Gerät' }}
             </template>
           </Column>
-          <Column header="Backup">
+          <Column header="Backup" class="mobile-hidden" headerClass="mobile-hidden">
             <template #body="{ data }">
               <i :class="data.backed_up ? 'pi pi-check-circle' : 'pi pi-times-circle'"
                  :style="{ color: data.backed_up ? 'var(--p-green-500)' : 'var(--p-red-500)' }" />
