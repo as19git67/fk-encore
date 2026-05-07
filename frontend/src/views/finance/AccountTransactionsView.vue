@@ -342,6 +342,7 @@ function toggleSelectAll(checked: boolean | null) {
 function clearSelection() {
   selectionStore.clear()
   selectionPopover.value?.hide()
+  selectMode.value = false
 }
 
 function openSelectionPopover(event: Event) {
