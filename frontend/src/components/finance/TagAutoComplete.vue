@@ -88,7 +88,7 @@ const displayValue = computed<SuggestionItem[]>(() =>
       <span :class="option.isNew ? 'tag-ac-new' : ''">{{ option.label }}</span>
     </template>
     <template #chip="{ value }">
-      <span>{{ value.label }}</span>
+      <span class="tag-ac-chip">{{ value.label }}</span>
     </template>
   </AutoComplete>
 </template>
@@ -117,5 +117,12 @@ const displayValue = computed<SuggestionItem[]>(() =>
 }
 .tag-ac :deep(.p-autocomplete-token-icon) {
   color: var(--p-highlight-color);
+}
+.tag-ac-chip {
+  background: var(--p-tag-info-background);
+  border: 1px solid transparent;
+  color: var(--p-tag-info-color);
+  border-radius: 8px;
+  padding-inline: 5px;
 }
 </style>
