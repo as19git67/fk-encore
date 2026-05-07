@@ -343,7 +343,7 @@ async function save() {
 }
 .recipient-new {
   font-style: italic;
-  color: var(--p-primary-600);
+  color: var(--p-primary-color);
   font-weight: 600;
 }
 .save-btn {
@@ -395,17 +395,17 @@ async function save() {
   gap: 0.3rem;
   padding: 0.35rem 0.85rem;
   border-radius: 999px;
-  background: var(--p-primary-50);
-  border: 1px solid var(--p-primary-200);
+  background: var(--p-highlight-background);
+  border: 1px solid var(--p-content-border-color);
   cursor: pointer;
   font-size: 0.85rem;
   font-family: inherit;
-  color: var(--p-primary-700);
+  color: var(--p-highlight-color);
   transition: all 0.1s;
 }
 .recent-badge:hover {
-  background: var(--p-primary-100);
-  border-color: var(--p-primary-300);
+  background: color-mix(in srgb, var(--p-primary-color) 15%, transparent);
+  border-color: var(--p-primary-color);
 }
 .recent-tags {
   color: var(--p-text-muted-color);
