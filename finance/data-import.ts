@@ -673,6 +673,7 @@ async function importTransactions(
           amount,
           currency_code: currencyCode,
           purpose: r.purpose ?? null,
+          notice: r.notice ?? null,
           counterparty: r.counterparty ?? null,
           counterparty_iban: r.counterparty_iban ?? null,
           counterparty_bic: r.counterparty_bic ?? null,

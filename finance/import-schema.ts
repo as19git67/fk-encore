@@ -61,6 +61,7 @@ export interface ImportTransaction {
   amount: string;
   currency_code: string;
   purpose?: string | null;
+  notice?: string | null;
   counterparty?: string | null;
   counterparty_iban?: string | null;
   counterparty_bic?: string | null;
@@ -259,6 +260,7 @@ function validateTransaction(raw: unknown, i: number): ImportTransaction {
       `transactions[${i}].currency_code`,
     ),
     purpose: optString(o.purpose, `transactions[${i}].purpose`),
+    notice: optString(o.notice, `transactions[${i}].notice`),
     counterparty: optString(
       o.counterparty,
       `transactions[${i}].counterparty`,
