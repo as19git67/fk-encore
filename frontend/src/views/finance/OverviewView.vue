@@ -556,6 +556,10 @@ async function saveConfig() {
   cursor: pointer;
   transition: background 0.1s;
 }
+.account-row .row-sub > a {
+  display: flex;
+  gap: 0.25em;
+}
 .account-row + .account-row {
   border-top: 1px solid var(--p-content-border-color);
 }
