@@ -689,8 +689,8 @@ function goBack() {
     'back meta  actions';
   align-items: center;
   gap: 0.5rem 0.75rem;
-  background: var(--p-primary-700, #1f6e3a);
-  color: var(--p-primary-contrast-color, #fff);
+  background: var(--p-primary-color);
+  color: var(--p-primary-contrast-color);
   padding: 0.6rem 0.75rem;
   border-radius: 0.5rem;
   position: sticky;
@@ -700,17 +700,17 @@ function goBack() {
 .tx-header :deep(.p-button) {
   background: rgba(255, 255, 255, 0.18);
   border: 1px solid transparent;
-  color: var(--p-primary-contrast-color, #fff);
+  color: var(--p-primary-contrast-color);
 }
 .tx-header :deep(.p-button:hover) {
   background: rgba(255, 255, 255, 0.3);
 }
 .tx-header :deep(.p-button.tx-icon-active) {
-  background: var(--p-orange-500, #f97316);
+  background: var(--p-warn-color, #f97316);
   color: #fff;
 }
 .tx-header :deep(.p-button.tx-icon-applied) {
-  background: var(--p-orange-500, #f97316);
+  background: var(--p-warn-color, #f97316);
   color: #fff;
 }
 .tx-header :deep(.p-button:disabled) {
@@ -928,8 +928,8 @@ function goBack() {
   background: var(--p-content-hover-background);
 }
 .tx-card-selected {
-  background: var(--p-primary-50, #fff7e0);
-  border-color: var(--p-primary-300, #e0b864);
+  background: var(--p-highlight-background);
+  border-color: var(--p-primary-color);
 }
 .tx-card-body {
   display: flex;
