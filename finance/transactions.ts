@@ -150,7 +150,9 @@ interface TransactionView {
   bank_ref: string | null;
   originator_name: string | null;
   recipient_name: string | null;
-  gv_code: string | null;
+  funds_code: string | null;
+  transaction_type: string | null;
+  transaction_code: string | null;
   entry_text: string | null;
   prima_nota_no: string | null;
   original_amount: string | null;
@@ -223,7 +225,9 @@ function toView(
     bank_ref: row.bank_ref,
     originator_name: row.originator_name,
     recipient_name: row.recipient_name,
-    gv_code: row.gv_code,
+    funds_code: row.funds_code,
+    transaction_type: row.transaction_type,
+    transaction_code: row.transaction_code,
     entry_text: row.entry_text,
     prima_nota_no: row.prima_nota_no,
     original_amount: row.original_amount,

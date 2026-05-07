@@ -162,7 +162,9 @@ interface OutTransaction {
   bank_ref: string | null;
   originator_name: string | null;
   recipient_name: string | null;
-  gv_code: string | null;
+  funds_code: string | null;
+  transaction_type: string | null;
+  transaction_code: string | null;
   entry_text: string | null;
   prima_nota_no: string | null;
   original_amount: string | null;
@@ -631,7 +633,9 @@ function convertTransaction(
     bank_ref: t["Fk_Transaction:REF"]?.trim() || null,
     originator_name: t["Fk_Transaction:ABWA"]?.trim() || null,
     recipient_name: t["Fk_Transaction:ABWE"]?.trim() || null,
-    gv_code: t["Fk_Transaction:gvCode"]?.trim() || null,
+    funds_code: null,
+    transaction_type: t["Fk_Transaction:gvCode"]?.trim() || null,
+    transaction_code: null,
     entry_text: t["Fk_Transaction:entryText"]?.trim() || null,
     prima_nota_no: primaNotaRaw != null ? String(primaNotaRaw) : null,
     original_amount:

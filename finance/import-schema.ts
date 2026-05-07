@@ -72,7 +72,9 @@ export interface ImportTransaction {
   bank_ref?: string | null;
   originator_name?: string | null;
   recipient_name?: string | null;
-  gv_code?: string | null;
+  funds_code?: string | null;
+  transaction_type?: string | null;
+  transaction_code?: string | null;
   entry_text?: string | null;
   prima_nota_no?: string | null;
   /** Multi-currency booking metadata. All three together or none. */
@@ -288,7 +290,9 @@ function validateTransaction(raw: unknown, i: number): ImportTransaction {
       o.recipient_name,
       `transactions[${i}].recipient_name`,
     ),
-    gv_code: optString(o.gv_code, `transactions[${i}].gv_code`),
+    funds_code: optString(o.funds_code, `transactions[${i}].funds_code`),
+    transaction_type: optString(o.transaction_type, `transactions[${i}].transaction_type`),
+    transaction_code: optString(o.transaction_code, `transactions[${i}].transaction_code`),
     entry_text: optString(o.entry_text, `transactions[${i}].entry_text`),
     prima_nota_no: optString(
       o.prima_nota_no,
