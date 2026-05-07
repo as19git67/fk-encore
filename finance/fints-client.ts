@@ -1383,6 +1383,7 @@ function mapStatements(
         purpose?: string;
         remoteName?: string;
         remoteIdentifier?: string;
+        remoteAccountNumber?: string;
         bankReference?: string;
         endToEndReference?: string;
         mandateReference?: string;
@@ -1409,7 +1410,7 @@ function mapStatements(
         currency,
         purpose,
         counterparty: t.remoteName?.trim() || null,
-        counterpartyIban: t.remoteIdentifier?.trim() || sepa.iban || null,
+        counterpartyIban: t.remoteIdentifier?.trim() || t.remoteAccountNumber?.trim() || sepa.iban || null,
         counterparty_bic: t.remoteBankCode?.trim() || sepa.bic || null,
         counterparty_bank_id: sepa.bankId || null,
         end_to_end_ref: t.endToEndReference?.trim() || sepa.endToEndRef || null,

@@ -152,12 +152,11 @@ onMounted(loadData)
       striped-rows
       paginator
       :rows="10"
-      table-style="min-width: 50rem"
     >
-      <Column field="id" header="ID" sortable style="width: 5rem" />
+      <Column field="id" header="ID" sortable style="width: 5rem" class="mobile-hidden" headerClass="mobile-hidden" />
       <Column field="name" header="Name" sortable style="width: 10rem" />
-      <Column field="description" header="Beschreibung" style="width: 14rem" />
-      <Column header="Berechtigungen">
+      <Column field="description" header="Beschreibung" style="width: 14rem" class="mobile-hidden" headerClass="mobile-hidden" />
+      <Column header="Berechtigungen" class="mobile-hidden" headerClass="mobile-hidden">
         <template #body="{ data }">
           <div class="perm-chips">
             <Chip v-for="perm in data.permissions" :key="perm.id" :label="perm.key" class="perm-chip" />

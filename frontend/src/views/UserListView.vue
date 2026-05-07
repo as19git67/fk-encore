@@ -41,19 +41,18 @@ function formatDate(dateStr: string) {
       :rows="10"
       @row-click="onRowClick"
       :row-class="() => 'cursor-pointer'"
-      table-style="min-width: 50rem"
     >
-      <Column field="id" header="ID" sortable style="width: 5rem" />
+      <Column field="id" header="ID" sortable style="width: 5rem" class="mobile-hidden" headerClass="mobile-hidden" />
       <Column field="name" header="Name" sortable />
       <Column field="email" header="E-Mail" sortable />
-      <Column header="Rollen">
+      <Column header="Rollen" class="mobile-hidden" headerClass="mobile-hidden">
         <template #body="{ data }">
           <div class="roles-chips">
             <Chip v-for="role in data.roles" :key="role.id" :label="role.name" />
           </div>
         </template>
       </Column>
-      <Column field="created_at" header="Erstellt am" sortable>
+      <Column field="created_at" header="Erstellt am" sortable class="mobile-hidden" headerClass="mobile-hidden">
         <template #body="{ data }">
           {{ formatDate(data.created_at) }}
         </template>
