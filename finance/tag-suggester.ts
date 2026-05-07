@@ -112,12 +112,22 @@ export async function suggestTagsForTransaction(
           amount: tx.amount,
           currency_code: tx.currency_code,
           sign: Number(tx.amount) >= 0 ? "credit" : "debit",
+          entry_text: tx.entry_text ?? null,
+          originator_name: tx.originator_name ?? null,
+          recipient_name: tx.recipient_name ?? null,
+          mandate_ref: tx.mandate_ref ?? null,
+          creditor_id: tx.creditor_id ?? null,
         },
         examples: neighbours.map((n) => ({
           purpose: n.purpose,
           counterparty: n.counterparty,
           amount: n.amount,
           sign: Number(n.amount) >= 0 ? "credit" : "debit",
+          entry_text: n.entry_text,
+          originator_name: n.originator_name,
+          recipient_name: n.recipient_name,
+          mandate_ref: n.mandate_ref,
+          creditor_id: n.creditor_id,
           user_tags: n.user_tags,
         })),
       });
@@ -173,7 +183,21 @@ function buildEmbedText(
   tx: typeof financeTransaction.$inferSelect,
 ): string {
   const sign = Number(tx.amount) >= 0 ? "credit" : "debit";
-  return [tx.counterparty ?? "", tx.purpose ?? "", sign]
+  // Include all structured SEPA fields alongside purpose so that
+  // finanzkraft-imported transactions (where those fields were stripped
+  // from the purpose text and stored in dedicated columns) produce
+  // embeddings comparable to FinTS-sourced transactions (where the raw
+  // purpose still contains the SEPA tags inline).
+  return [
+    tx.counterparty ?? "",
+    tx.purpose ?? "",
+    tx.entry_text ?? "",
+    tx.originator_name ?? "",
+    tx.recipient_name ?? "",
+    tx.mandate_ref ?? "",
+    tx.creditor_id ?? "",
+    sign,
+  ]
     .map((s) => s.trim())
     .filter(Boolean)
     .join(" | ");
@@ -227,6 +251,11 @@ interface NeighbourRow {
   purpose: string | null;
   counterparty: string | null;
   amount: string;
+  entry_text: string | null;
+  originator_name: string | null;
+  recipient_name: string | null;
+  mandate_ref: string | null;
+  creditor_id: string | null;
   user_tags: string[];
 }
 
@@ -260,6 +289,8 @@ async function loadNeighbours(
         LIMIT ${NEAREST_NEIGHBOUR_K}
       )
       SELECT tx.id, tx.purpose, tx.counterparty, tx.amount,
+             tx.entry_text, tx.originator_name, tx.recipient_name,
+             tx.mandate_ref, tx.creditor_id,
              COALESCE(
                ARRAY_AGG(DISTINCT t.name ORDER BY t.name)
                  FILTER (WHERE t.source = 'user'),
@@ -269,7 +300,9 @@ async function loadNeighbours(
       JOIN finance_transaction tx ON tx.id = n.transaction_id
       LEFT JOIN finance_tag_transaction tt ON tt.transaction_id = tx.id
       LEFT JOIN finance_tag t ON t.id = tt.tag_id
-      GROUP BY tx.id, tx.purpose, tx.counterparty, tx.amount, n.distance
+      GROUP BY tx.id, tx.purpose, tx.counterparty, tx.amount,
+               tx.entry_text, tx.originator_name, tx.recipient_name,
+               tx.mandate_ref, tx.creditor_id, n.distance
       ORDER BY n.distance
     `,
   )) as unknown as { rows?: NeighbourRow[] } | NeighbourRow[];
@@ -285,6 +318,11 @@ async function loadNeighbours(
     purpose: r.purpose,
     counterparty: r.counterparty,
     amount: r.amount,
+    entry_text: r.entry_text ?? null,
+    originator_name: r.originator_name ?? null,
+    recipient_name: r.recipient_name ?? null,
+    mandate_ref: r.mandate_ref ?? null,
+    creditor_id: r.creditor_id ?? null,
     user_tags: Array.isArray(r.user_tags) ? r.user_tags : [],
   }));
 }

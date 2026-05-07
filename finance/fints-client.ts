@@ -1360,7 +1360,9 @@ function mapCreditCardStatements(
       end_to_end_ref: null,
       mandate_ref: null,
       creditor_id: null,
-      gv_code: null,
+      funds_code: null,
+      transaction_type: null,
+      transaction_code: null,
       entry_text: null,
       prima_nota_no: null,
       bankRef: s.transactionId || s.id || null,
@@ -1388,7 +1390,9 @@ function mapStatements(
         endToEndReference?: string;
         mandateReference?: string;
         creditorIdentifier?: string;
-        gvCode?: string;
+        fundsCode?: string;
+        transactionType?: string;
+        transactionCode?: string;
         entryText?: string;
         primanota?: string;
         [key: string]: unknown;
@@ -1418,7 +1422,9 @@ function mapStatements(
         creditor_id: t.creditorIdentifier?.trim() || sepa.creditorId || null,
         originator_name: sepa.originatorName || null,
         recipient_name: sepa.recipientName || null,
-        gv_code: t.gvCode?.trim() || null,
+        funds_code: t.fundsCode?.trim() || null,
+        transaction_type: t.transactionType?.trim() || null,
+        transaction_code: t.transactionCode?.trim() || null,
         entry_text: t.entryText?.trim() || null,
         prima_nota_no: t.primanota?.trim() || null,
         bankRef: t.bankReference?.trim() || sepa.reference || sepa.customerRef || null,

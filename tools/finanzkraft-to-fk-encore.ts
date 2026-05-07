@@ -151,6 +151,7 @@ interface OutTransaction {
   amount: string;
   currency_code: string;
   purpose: string | null;
+  notice: string | null;
   counterparty: string | null;
   counterparty_iban: string | null;
   counterparty_bic: string | null;
@@ -162,7 +163,9 @@ interface OutTransaction {
   bank_ref: string | null;
   originator_name: string | null;
   recipient_name: string | null;
-  gv_code: string | null;
+  funds_code: string | null;
+  transaction_type: string | null;
+  transaction_code: string | null;
   entry_text: string | null;
   prima_nota_no: string | null;
   original_amount: string | null;
@@ -540,6 +543,16 @@ function collectCurrencies(input: FinanzkraftExport): OutCurrency[] {
  * exactly the same canonical-field ordering or the importer will see
  * the converter-supplied hashes as different from what it would
  * compute itself, breaking re-import idempotency.
+ *
+ * NOTE: `purpose` here is the bank-provided text only (Fk_Transaction:text).
+ * User notes (Fk_Transaction:notes) are stored in `notice` and do NOT feed
+ * the hash — consistent with how data-import.ts computes the hash from the
+ * `purpose` field of the import JSON.
+ * COMPAT: Finanzkraft data imported with an older version of this converter
+ * (where notes were appended to purpose as "text / notes") will have a
+ * different hash for any transaction that had notes. A fresh re-import of
+ * such data will therefore not find those rows as duplicates. Use
+ * `wipe_first: true` or rely on the existing data being complete.
  */
 function computeDedupeHash(
   bookingDate: string,
@@ -583,13 +596,12 @@ function convertTransaction(
   if (!bookingDate) return null;
   const valueDate = isoDate(t["Fk_Transaction:valueDate"]);
 
-  // Purpose: Finanzkraft splits the parsed bank text into `text`
-  // (free-form) and `notes` (user-added comment). Concatenate so we
-  // don't lose either.
-  const textParts: string[] = [];
-  if (t["Fk_Transaction:text"]?.trim()) textParts.push(t["Fk_Transaction:text"].trim());
-  if (t["Fk_Transaction:notes"]?.trim()) textParts.push(t["Fk_Transaction:notes"].trim());
-  const purpose = textParts.length > 0 ? textParts.join(" / ") : null;
+  // purpose = bank-provided text only (Fk_Transaction:text).
+  // User-written notes (Fk_Transaction:notes) go into the dedicated
+  // notice column so they stay editable and don't pollute the payment
+  // description or the dedupe hash.
+  const purpose = t["Fk_Transaction:text"]?.trim() || null;
+  const notice = t["Fk_Transaction:notes"]?.trim() || null;
 
   const originalAmountNum = t["Fk_Transaction:originalAmount"];
   const exchangeRateNum = t["Fk_Transaction:exchangeRate"];
@@ -617,6 +629,7 @@ function convertTransaction(
     amount,
     currency_code: currencyCode,
     purpose,
+    notice,
     counterparty: t["Fk_Transaction:payee"]?.trim() || null,
     counterparty_iban:
       t["Fk_Transaction:IBAN"]?.trim() ||
@@ -631,7 +644,9 @@ function convertTransaction(
     bank_ref: t["Fk_Transaction:REF"]?.trim() || null,
     originator_name: t["Fk_Transaction:ABWA"]?.trim() || null,
     recipient_name: t["Fk_Transaction:ABWE"]?.trim() || null,
-    gv_code: t["Fk_Transaction:gvCode"]?.trim() || null,
+    funds_code: null,
+    transaction_type: t["Fk_Transaction:gvCode"]?.trim() || null,
+    transaction_code: null,
     entry_text: t["Fk_Transaction:entryText"]?.trim() || null,
     prima_nota_no: primaNotaRaw != null ? String(primaNotaRaw) : null,
     original_amount:
