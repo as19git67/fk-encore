@@ -310,11 +310,10 @@ onMounted(loadData)
       paginator
       :rows="10"
       data-key="id"
-      table-style="min-width: 60rem"
     >
-      <Column field="id" header="ID" sortable style="width: 4rem" />
+      <Column field="id" header="ID" sortable style="width: 4rem" class="mobile-hidden" headerClass="mobile-hidden" />
       <Column field="name" header="Name" sortable style="width: 12rem" />
-      <Column field="path" header="Pfad">
+      <Column field="path" header="Pfad" class="mobile-hidden" headerClass="mobile-hidden">
         <template #body="{ data }">
           <code class="path">{{ data.path }}</code>
         </template>
@@ -327,7 +326,7 @@ onMounted(loadData)
           />
         </template>
       </Column>
-      <Column header="Auto-Import" style="width: 8rem">
+      <Column header="Auto-Import" style="width: 8rem" class="mobile-hidden" headerClass="mobile-hidden">
         <template #body="{ data }">
           <Tag
             :value="data.auto_import ? 'an' : 'aus'"
@@ -335,7 +334,7 @@ onMounted(loadData)
           />
         </template>
       </Column>
-      <Column header="Auto-Alben" style="width: 8rem">
+      <Column header="Auto-Alben" style="width: 8rem" class="mobile-hidden" headerClass="mobile-hidden">
         <template #body="{ data }">
           <Tag
             :value="data.auto_albums ? 'an' : 'aus'"
@@ -343,7 +342,7 @@ onMounted(loadData)
           />
         </template>
       </Column>
-      <Column header="Favorit ab" style="width: 8rem">
+      <Column header="Favorit ab" style="width: 8rem" class="mobile-hidden" headerClass="mobile-hidden">
         <template #body="{ data }">
           <Tag
             v-if="data.favorite_rating_threshold > 0"
@@ -353,7 +352,7 @@ onMounted(loadData)
           <Tag v-else value="aus" severity="secondary" />
         </template>
       </Column>
-      <Column header="Letzter Scan" style="width: 10rem">
+      <Column header="Letzter Scan" style="width: 10rem" class="mobile-hidden" headerClass="mobile-hidden">
         <template #body="{ data }">
           <span v-if="data.last_scan_at">{{ formatDateShort(data.last_scan_at) }}</span>
           <span v-else class="muted">—</span>
