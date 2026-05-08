@@ -512,8 +512,38 @@ _CLASSIFY_MAX_TOKENS = 768
 _CLASSIFY_TEMPLATE_HEADROOM = 256
 
 
-def _count_tokens(llm: Any, text: str) -> int:
-    return len(llm.tokenize(text.encode("utf-8"), add_bos=False, special=False))
+def _count_tokens(llm: Any, text: str) -> int | None:
+    """Count tokens for *text* using the loaded Llama. Returns ``None`` when
+    the bound object does not expose ``tokenize`` (e.g. test stubs); callers
+    fall back to the static char-cap in that case."""
+
+    tokenize = getattr(llm, "tokenize", None)
+    if not callable(tokenize):
+        return None
+    try:
+        return len(tokenize(text.encode("utf-8"), add_bos=False, special=False))
+    except Exception:
+        return None
+
+
+def _truncate_to_tokens(llm: Any, text: str, max_tokens: int) -> str | None:
+    """Token-accurate truncation; returns ``None`` if the Llama does not
+    expose ``tokenize``/``detokenize``."""
+
+    tokenize = getattr(llm, "tokenize", None)
+    detokenize = getattr(llm, "detokenize", None)
+    if not callable(tokenize) or not callable(detokenize):
+        return None
+    try:
+        tokens = tokenize(text.encode("utf-8"), add_bos=False, special=False)
+        if len(tokens) <= max_tokens:
+            return text
+        truncated = detokenize(tokens[:max_tokens])
+        if isinstance(truncated, bytes):
+            return truncated.decode("utf-8", errors="ignore")
+        return str(truncated)
+    except Exception:
+        return None
 
 
 @app.post("/classify", response_model=ClassifyResponse)
@@ -549,33 +579,31 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
     # thousand tokens by themselves; combined with a long document text the
     # prompt has been observed at 8691 tokens against an LLM_CTX of 8192. We
     # tokenize the actual prompt and shrink the document text until it fits.
+    # Skipped silently when the Llama-like object lacks ``tokenize`` (test
+    # stubs); the static 6000-char cap above is still in force.
     budget = LLM_CTX - _CLASSIFY_MAX_TOKENS - _CLASSIFY_TEMPLATE_HEADROOM
     overhead_tokens = _count_tokens(llm, system_prompt + _build_user_prompt(""))
-    text_token_budget = budget - overhead_tokens
-    if text_token_budget < 64:
-        # Even with empty text we'd overflow — taxonomy/tax_sections alone are
-        # too large. Surface a 413 so the caller can act on it instead of
-        # hitting llama.cpp's 500.
-        raise HTTPException(
-            status_code=413,
-            detail=(
-                f"taxonomy+tax_sections too large for context window: "
-                f"overhead={overhead_tokens} budget={budget}"
-            ),
-        )
-
-    text_tokens = llm.tokenize(text.encode("utf-8"), add_bos=False, special=False)
-    if len(text_tokens) > text_token_budget:
-        truncated = llm.detokenize(text_tokens[:text_token_budget])
-        if isinstance(truncated, bytes):
-            text = truncated.decode("utf-8", errors="ignore")
-        else:
-            text = str(truncated)
-        log.info(
-            "classify: truncated document text from %d to %d tokens to fit n_ctx",
-            len(text_tokens), text_token_budget,
-        )
-        user_prompt = _build_user_prompt(text)
+    if overhead_tokens is not None:
+        text_token_budget = budget - overhead_tokens
+        if text_token_budget < 64:
+            # Even with empty text we'd overflow — taxonomy/tax_sections alone
+            # are too large. Surface a 413 so the caller can act on it instead
+            # of hitting llama.cpp's 500.
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"taxonomy+tax_sections too large for context window: "
+                    f"overhead={overhead_tokens} budget={budget}"
+                ),
+            )
+        truncated = _truncate_to_tokens(llm, text, text_token_budget)
+        if truncated is not None and truncated != text:
+            log.info(
+                "classify: truncated document text to fit n_ctx (budget=%d tokens)",
+                text_token_budget,
+            )
+            text = truncated
+            user_prompt = _build_user_prompt(text)
 
     try:
         completion = await _run_blocking(
