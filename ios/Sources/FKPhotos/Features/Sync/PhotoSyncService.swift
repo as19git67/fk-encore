@@ -1,5 +1,4 @@
 import CryptoKit
-import CoreServices
 import Foundation
 import ImageIO
 import Photos
@@ -75,6 +74,7 @@ actor PhotoSyncService {
                 uploadedIds.insert(asset.localIdentifier)
                 PhotoSyncPreferences.saveUploadedIds(uploadedIds)
                 PhotoSyncPreferences.recordUploadedPhoto(serverPhotoId: uploaded.id, localIdentifier: asset.localIdentifier)
+                await patchCaptionIfAvailable(asset: asset, serverPhotoId: uploaded.id)
                 // Persist the SHA-256 of these bytes as the Option-3 baseline so
                 // future metadata-only edits can skip the full re-upload.
                 var uploadHashMap = PhotoSyncPreferences.loadSyncedUploadHash()
@@ -236,18 +236,10 @@ actor PhotoSyncService {
         let storedHash = uploadHashMap[asset.localIdentifier]
 
         if storedHash == nil || storedHash == currentHash {
-            // Pixels unchanged — only metadata moved. Try every caption
-            // source: image bytes, PHContentEditingInput, then PHAsset KVC.
-            var caption = extractCaptionFromData(data)
-            if caption == nil {
-                caption = await captionFromEditingInput(asset)
-            }
-            if caption == nil {
-                caption = captionFromAsset(asset)
-            }
-
-            // --- Diagnostic logging (remove once caption source is identified) ---
-            await logCaptionDiagnostics(asset: asset, imageData: data, resolvedCaption: caption)
+            // Pixels unchanged — only metadata moved.
+            // PHAsset.descriptionProperties.assetDescription holds the Photos.app
+            // caption; fall back to IPTC/XMP embedded in the image bytes.
+            let caption = captionFromAsset(asset) ?? extractCaptionFromData(data)
 
             if let caption {
                 struct DescBody: Encodable { let description: String }
@@ -365,241 +357,31 @@ actor PhotoSyncService {
         return nil
     }
 
-    /// Reads caption from the asset via PHContentEditingInput. The file at
-    /// fullSizeImageURL is freshly rendered by PhotoKit and may include
-    /// metadata (IPTC / XMP) that PHImageManager bytes omit.
-    private func captionFromEditingInput(_ asset: PHAsset) async -> String? {
-        await withCheckedContinuation { continuation in
-            let options = PHContentEditingInputRequestOptions()
-            options.isNetworkAccessAllowed = true
-
-            asset.requestContentEditingInput(with: options) { input, _ in
-                guard let url = input?.fullSizeImageURL,
-                      let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-                continuation.resume(returning: self.extractCaptionFromSource(source))
-            }
-        }
-    }
-
     // MARK: - PHAsset caption via KVC
 
-    /// Attempts to read the caption directly from the PHAsset via KVC.
-    /// PHAsset exposes a private `descriptionProperties` object of type
-    /// `PHAssetDescriptionProperties` which holds the user-entered caption.
+    /// Reads the Photos.app caption from `PHAsset.descriptionProperties.assetDescription`.
+    /// Falls back to IPTC/XMP extraction from image bytes when called with data.
     nonisolated private func captionFromAsset(_ asset: PHAsset) -> String? {
-        // Primary path: PHAssetDescriptionProperties holds the caption.
-        if (asset as AnyObject).responds(to: NSSelectorFromString("descriptionProperties")),
-           let descProps = (asset as NSObject).value(forKey: "descriptionProperties") as? NSObject {
-            if let caption = captionFromDescriptionProperties(descProps), !caption.isEmpty {
-                return caption
-            }
+        guard (asset as AnyObject).responds(to: NSSelectorFromString("descriptionProperties")),
+              let descProps = (asset as NSObject).value(forKey: "descriptionProperties") as? NSObject,
+              (descProps as AnyObject).responds(to: NSSelectorFromString("assetDescription")),
+              let caption = descProps.value(forKey: "assetDescription") as? String,
+              !caption.isEmpty else {
+            return nil
         }
-        // Fallback: try other potential KVC keys directly on PHAsset.
-        let keys = ["caption", "title", "longDescription"]
-        for key in keys {
-            guard (asset as AnyObject).responds(to: NSSelectorFromString(key)) else { continue }
-            if let value = (asset as NSObject).value(forKey: key) as? String, !value.isEmpty {
-                return value
-            }
-        }
-        return nil
+        return caption
     }
 
-    /// Reads the caption string out of a `PHAssetDescriptionProperties` object
-    /// by trying every known/likely property name via KVC.
-    nonisolated private func captionFromDescriptionProperties(_ props: NSObject) -> String? {
-        let candidateKeys = [
-            "assetDescription", "description", "caption", "text",
-            "title", "userDescription", "captionText", "longDescription",
-            "comment", "imageDescription"
-        ]
-        for key in candidateKeys {
-            guard (props as AnyObject).responds(to: NSSelectorFromString(key)) else { continue }
-            if let str = props.value(forKey: key) as? String, !str.isEmpty {
-                return str
-            }
-        }
-        return nil
-    }
-
-    // MARK: - Caption diagnostics (temporary — remove once source is identified)
-
-    /// Logs all available metadata from every source so we can identify
-    /// where iOS Photos.app stores the user-entered caption.
-    private func logCaptionDiagnostics(asset: PHAsset, imageData: Data, resolvedCaption: String?) async {
-        let tag = "[CaptionDiag \(asset.localIdentifier.prefix(8))]"
-        print("\(tag) ========== CAPTION DIAGNOSTICS ==========")
-        print("\(tag) resolvedCaption: \(resolvedCaption ?? "nil")")
-        print("\(tag) asset.modificationDate: \(asset.modificationDate?.description ?? "nil")")
-
-        // 1. PHAsset KVC — extended key list
-        let kvcKeys = ["caption", "title", "descriptionProperties",
-                        "longDescription", "additionalAttributes",
-                        "localizedTitle", "comment",
-                        "adjustmentFormatIdentifier",
-                        "userCaption", "captionText", "userDescription",
-                        "extendedAttributes", "metadataInfo", "adjustmentInfo",
-                        "infoComment", "memoText", "userMemo"]
-        for key in kvcKeys {
-            guard (asset as AnyObject).responds(to: NSSelectorFromString(key)) else { continue }
-            let val: Any? = (asset as NSObject).value(forKey: key)
-            if let val { print("\(tag) PHAsset KVC[\(key)] = \(val)") }
-        }
-
-        // Deep-introspect descriptionProperties: this is a PHAssetDescriptionProperties
-        // object that likely holds the user-entered caption.
-        if (asset as AnyObject).responds(to: NSSelectorFromString("descriptionProperties")),
-           let descProps = (asset as NSObject).value(forKey: "descriptionProperties") as? NSObject {
-            print("\(tag) --- descriptionProperties Mirror ---")
-            let mirror = Mirror(reflecting: descProps)
-            print("\(tag)   class: \(type(of: descProps))")
-            print("\(tag)   children count: \(mirror.children.count)")
-            for child in mirror.children {
-                let label = child.label ?? "?"
-                let value = "\(child.value)"
-                let truncated = value.count > 200 ? String(value.prefix(200)) + "…" : value
-                print("\(tag)   child[\(label)] = \(truncated)")
-            }
-            print("\(tag) --- descriptionProperties KVC probe ---")
-            let descKeys = [
-                "assetDescription", "description", "caption", "text",
-                "title", "userDescription", "captionText", "longDescription",
-                "comment", "imageDescription", "subtitle", "headline",
-                "summary", "note", "userTitle", "displayTitle"
-            ]
-            for key in descKeys {
-                guard (descProps as AnyObject).responds(to: NSSelectorFromString(key)) else { continue }
-                let v: Any? = descProps.value(forKey: key)
-                if let v { print("\(tag)   descProps KVC[\(key)] = \(v)") }
-            }
-        }
-
-        // 2. PHAssetResource list
-        let resources = PHAssetResource.assetResources(for: asset)
-        print("\(tag) PHAssetResource count: \(resources.count)")
-        for res in resources {
-            print("\(tag)   resource type=\(res.type.rawValue) filename=\(res.originalFilename) uti=\(res.uniformTypeIdentifier)")
-        }
-
-        // 3. Image bytes — all IPTC, TIFF, EXIF keys
-        if let source = CGImageSourceCreateWithData(imageData as CFData, nil),
-           let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
-            print("\(tag) --- Properties top-level keys ---")
-            for key in props.keys {
-                let k = key as String
-                if let sub = props[key] as? [CFString: Any] {
-                    print("\(tag)   [\(k)] (\(sub.count) entries)")
-                    for (sk, sv) in sub {
-                        let svStr = "\(sv)"
-                        let truncated = svStr.count > 120 ? String(svStr.prefix(120)) + "…" : svStr
-                        print("\(tag)     \(sk as String) = \(truncated)")
-                    }
-                } else {
-                    let vStr = "\(props[key]!)"
-                    let truncated = vStr.count > 120 ? String(vStr.prefix(120)) + "…" : vStr
-                    print("\(tag)   \(k) = \(truncated)")
-                }
-            }
-
-            // 4. XMP metadata tags
-            if let metadata = CGImageSourceCopyMetadataAtIndex(source, 0, nil) {
-                print("\(tag) --- XMP metadata tags ---")
-                CGImageMetadataEnumerateTagsUsingBlock(metadata, nil, nil) { path, mtag in
-                    let prefix = CGImageMetadataTagCopyPrefix(mtag) as String? ?? "?"
-                    let name = CGImageMetadataTagCopyName(mtag) as String? ?? "?"
-                    let value = CGImageMetadataTagCopyValue(mtag)
-                    let vStr = value.map { "\($0)" } ?? "nil"
-                    let truncated = vStr.count > 120 ? String(vStr.prefix(120)) + "…" : vStr
-                    print("\(tag)   [\(path as String? ?? "?")] \(prefix):\(name) = \(truncated)")
-                    return true
-                }
-            } else {
-                print("\(tag) XMP metadata: nil (no CGImageMetadata)")
-            }
-        } else {
-            print("\(tag) CGImageSource: could not create from data")
-        }
-
-        // 5. PHContentEditingInput — request and inspect ALL properties via Mirror,
-        //    plus check adjustmentData and try Spotlight on fullSizeImageURL.
-        await logEditingInputDiagnostics(asset: asset, tag: tag)
-
-        print("\(tag) ========== END DIAGNOSTICS ==========")
-    }
-
-    /// Synchronously requests PHContentEditingInput and dumps every property
-    /// via Mirror reflection. Also parses adjustmentData and tries Spotlight.
-    private func logEditingInputDiagnostics(asset: PHAsset, tag: String) async {
-        let input: PHContentEditingInput? = await withCheckedContinuation { cont in
-            let options = PHContentEditingInputRequestOptions()
-            options.isNetworkAccessAllowed = true
-            asset.requestContentEditingInput(with: options) { input, _ in
-                cont.resume(returning: input)
-            }
-        }
-        guard let input else {
-            print("\(tag) PHContentEditingInput: nil")
-            return
-        }
-
-        print("\(tag) --- PHContentEditingInput Mirror ---")
-        let mirror = Mirror(reflecting: input)
-        for child in mirror.children {
-            let label = child.label ?? "?"
-            let value = "\(child.value)"
-            let truncated = value.count > 200 ? String(value.prefix(200)) + "…" : value
-            print("\(tag)   \(label) = \(truncated)")
-        }
-
-        // KVC on the editing input itself
-        let editingKvcKeys = ["caption", "description", "title", "comment",
-                               "imageDescription", "userCaption"]
-        for key in editingKvcKeys {
-            guard (input as AnyObject).responds(to: NSSelectorFromString(key)) else { continue }
-            let val: Any? = (input as NSObject).value(forKey: key)
-            if let val { print("\(tag) PHContentEditingInput KVC[\(key)] = \(val)") }
-        }
-
-        // adjustmentData: format identifier + raw bytes (often a plist)
-        if let adj = input.adjustmentData {
-            print("\(tag) adjustmentData.formatIdentifier = \(adj.formatIdentifier)")
-            print("\(tag) adjustmentData.formatVersion    = \(adj.formatVersion)")
-            print("\(tag) adjustmentData.data.count       = \(adj.data.count)")
-            // Try parsing as plist
-            if let plist = try? PropertyListSerialization.propertyList(from: adj.data, options: [], format: nil) {
-                print("\(tag) adjustmentData parsed as plist: \(plist)")
-            } else if let str = String(data: adj.data, encoding: .utf8) {
-                let truncated = str.count > 500 ? String(str.prefix(500)) + "…" : str
-                print("\(tag) adjustmentData as UTF-8: \(truncated)")
-            }
-        } else {
-            print("\(tag) adjustmentData: nil")
-        }
-
-        // 6. Spotlight via MDItem on the fullSizeImageURL (macOS only)
-        #if os(macOS)
-        let url = input.fullSizeImageURL
-        if let url {
-            print("\(tag) fullSizeImageURL: \(url.path)")
-            if let mdItem = MDItemCreateWithURL(nil, url as CFURL) {
-                let attrNames: [CFString] = [
-                    kMDItemDescription, kMDItemHeadline, kMDItemTitle,
-                    kMDItemComment, kMDItemSubject, kMDItemTextContent,
-                    kMDItemKeywords, kMDItemDisplayName
-                ]
-                for attr in attrNames {
-                    if let v = MDItemCopyAttribute(mdItem, attr) {
-                        print("\(tag) MDItem[\(attr as String)] = \(v)")
-                    }
-                }
-            } else {
-                print("\(tag) MDItem: nil for fullSizeImageURL")
-            }
-        }
-        #endif
+    /// Sends PATCH /photos/:id/description when the asset has a Photos.app caption
+    /// that the image bytes don't carry (PHImageManager omits it).
+    private func patchCaptionIfAvailable(asset: PHAsset, serverPhotoId: Int) async {
+        guard let caption = captionFromAsset(asset) else { return }
+        struct DescBody: Encodable { let description: String }
+        struct DescResponse: Decodable { let success: Bool }
+        _ = try? await APIClient.shared.patch(
+            "/photos/\(serverPhotoId)/description",
+            body: DescBody(description: caption)
+        ) as DescResponse
     }
 
     /// Records the sync-state baseline for an asset that was just uploaded
@@ -620,10 +402,8 @@ actor PhotoSyncService {
 
     /// Walk every locally-tracked uploaded asset, look at its current PHAsset
     /// metadata and PATCH the server when something moved since we last
-    /// synced. Mirrors the structure of syncFavoriteChanges() but covers
-    /// creationDate (taken_at). Description / keywords aren't propagated
-    /// here because PHAsset doesn't expose them — the user must re-share the
-    /// photo for the embedded IPTC caption to reach the server.
+    /// synced. Covers creationDate (taken_at) and description (via
+    /// PHAssetDescriptionProperties.assetDescription KVC).
     private func syncMetadataChanges() async {
         let serverPhotoMap = PhotoSyncPreferences.loadServerPhotoMap()
         guard !serverPhotoMap.isEmpty else { return }
