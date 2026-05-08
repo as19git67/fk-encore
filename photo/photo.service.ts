@@ -1618,6 +1618,110 @@ export class PhotoAlreadyExistsError extends Error {
   }
 }
 
+/**
+ * Merges metadata from a fresh upload (exifMeta + favorite intent) into an
+ * already-existing photo record. Used in both duplicate paths (hash-match
+ * and taken_at fallback) so re-uploading the same photo from iOS after the
+ * user edited Date / Description / Keywords / Favorite in the Photos app
+ * propagates the changes instead of silently dropping them (issue #303).
+ *
+ * Backfill rules — never overwrite user data on the server with an empty value:
+ *   - taken_at:     fill if existing is NULL (a precise EXIF-derived timestamp
+ *                   is always better than the server's NULL).
+ *   - description:  fill if existing is empty/NULL (server-side edits win
+ *                   over re-uploaded EXIF; only fill when there is nothing).
+ *   - keywords:     union with existing — never lose tags the user added on
+ *                   the server.
+ *   - lat/lon:      backfill when existing has none.
+ *   - location_*:   backfill from IPTC block when existing has none.
+ *   - favorite:     when the new upload flags the photo as favourite (or
+ *                   carries XMP rating ≥ 4) we promote the curation row to
+ *                   "favorite". We never demote on re-upload — un-favouriting
+ *                   propagates via the dedicated PATCH /photos/:id/curation
+ *                   path so it can also work for photos that were never
+ *                   re-uploaded.
+ */
+export async function mergeUploadMetadataIntoExisting(
+  userId: number,
+  existingPhotoId: number,
+  exifMeta: ExifMetadata,
+  isFavorite: boolean,
+): Promise<void> {
+  const existing = await dbFirst<typeof photos.$inferSelect>(
+    db.select().from(photos).where(eq(photos.id, existingPhotoId))
+  );
+  if (!existing) return;
+
+  const updates: Partial<typeof photos.$inferInsert> = {};
+
+  if (!existing.taken_at && exifMeta.takenAt) {
+    updates.taken_at = exifMeta.takenAt;
+  }
+
+  const incomingDescription = combineDescription(exifMeta);
+  if (incomingDescription && !(existing.description ?? "").trim()) {
+    updates.description = incomingDescription;
+  }
+
+  const incomingKeywords = mergeRatingKeyword(exifMeta.keywords, exifMeta.rating);
+  if (incomingKeywords.length > 0) {
+    const merged = mergeKeywordSets(existing.keywords ?? [], incomingKeywords);
+    if (merged.length !== (existing.keywords ?? []).length) {
+      updates.keywords = merged;
+    }
+  }
+
+  if (existing.latitude === null && exifMeta.latitude !== null) {
+    updates.latitude = exifMeta.latitude;
+  }
+  if (existing.longitude === null && exifMeta.longitude !== null) {
+    updates.longitude = exifMeta.longitude;
+  }
+
+  // Only fill in IPTC location block when the existing record has nothing —
+  // avoid clobbering Nominatim results that may already be more accurate.
+  if (!existing.location_name) {
+    const iptcLoc = iptcLocationUpdate(exifMeta);
+    if (iptcLoc) Object.assign(updates, iptcLoc);
+  }
+
+  if (Object.keys(updates).length > 0) {
+    await dbExec(
+      db.update(photos).set(updates).where(eq(photos.id, existingPhotoId))
+    );
+  }
+
+  if (isFavorite || (exifMeta.rating !== null && exifMeta.rating >= 4)) {
+    await dbExec(
+      db.insert(photoCuration)
+        .values({ user_id: userId, photo_id: existingPhotoId, status: "favorite" })
+        .onConflictDoUpdate({
+          target: [photoCuration.user_id, photoCuration.photo_id],
+          set: { status: "favorite", updated_at: sql`NOW()` },
+        })
+    );
+  }
+}
+
+/**
+ * Returns the union of two keyword arrays preserving the order of the
+ * existing array (so server-side ordering edits survive a re-upload) and
+ * appending any new keywords from the incoming set.
+ */
+function mergeKeywordSets(existing: string[], incoming: string[]): string[] {
+  if (incoming.length === 0) return existing;
+  const seen = new Set(existing.map((k) => k.toLowerCase()));
+  const merged = [...existing];
+  for (const k of incoming) {
+    const key = k.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(k);
+    }
+  }
+  return merged;
+}
+
 export async function uploadPhotoStream(
   userId: number,
   stream: IncomingMessage,
@@ -1664,28 +1768,7 @@ export async function uploadPhotoStream(
   );
 
   if (existing) {
-    // Backfill taken_at on the existing record when we now have a value but
-    // the original upload (e.g. pre-fix iOS client) stored NULL.
-    if (!existing.taken_at && exifMeta.takenAt) {
-      await dbExec(
-        db.update(photos)
-          .set({ taken_at: exifMeta.takenAt })
-          .where(eq(photos.id, existing.id))
-      );
-    }
-    // If the client flagged the photo as favourite on re-upload (e.g. the user
-    // marked it as favourite in iOS Photos and then shared it again), honour
-    // that intent on the existing record.
-    if (isFavorite) {
-      await dbExec(
-        db.insert(photoCuration)
-          .values({ user_id: userId, photo_id: existing.id, status: "favorite" })
-          .onConflictDoUpdate({
-            target: [photoCuration.user_id, photoCuration.photo_id],
-            set: { status: "favorite", updated_at: sql`NOW()` },
-          })
-      );
-    }
+    await mergeUploadMetadataIntoExisting(userId, existing.id, exifMeta, isFavorite);
     if (fs.existsSync(tempPath)) {
       fs.unlinkSync(tempPath);
     }
@@ -1703,31 +1786,13 @@ export async function uploadPhotoStream(
   const descriptionValueEarly = combineDescription(exifMeta);
   const hasNewMetadata = isFavorite || !!descriptionValueEarly || (exifMeta.rating !== null && exifMeta.rating >= 4);
   if (exifMeta.takenAt && hasNewMetadata) {
-    const takenAtDup = await dbFirst<{ id: number; description: string | null }>(
-      db.select({ id: photos.id, description: photos.description })
+    const takenAtDup = await dbFirst<{ id: number }>(
+      db.select({ id: photos.id })
         .from(photos)
         .where(and(eq(photos.user_id, userId), eq(photos.taken_at, exifMeta.takenAt)))
     );
     if (takenAtDup) {
-      // Update description when the existing record has none but the new upload does.
-      if (descriptionValueEarly && !takenAtDup.description) {
-        await dbExec(
-          db.update(photos)
-            .set({ description: descriptionValueEarly })
-            .where(eq(photos.id, takenAtDup.id))
-        );
-      }
-      // Honour favourite intent.
-      if (isFavorite || (exifMeta.rating !== null && exifMeta.rating >= 4)) {
-        await dbExec(
-          db.insert(photoCuration)
-            .values({ user_id: userId, photo_id: takenAtDup.id, status: "favorite" })
-            .onConflictDoUpdate({
-              target: [photoCuration.user_id, photoCuration.photo_id],
-              set: { status: "favorite", updated_at: sql`NOW()` },
-            })
-        );
-      }
+      await mergeUploadMetadataIntoExisting(userId, takenAtDup.id, exifMeta, isFavorite);
       if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
       throw new PhotoAlreadyExistsError(takenAtDup.id);
     }
@@ -1814,34 +1879,15 @@ export async function uploadPhotoLogic(
 
   const digest = crypto.createHash('sha256').update(file.data).digest('hex');
 
-  // Check for duplicate for this user
-  const existing2 = await dbFirst<typeof photos.$inferSelect>(
-    db.select().from(photos).where(and(eq(photos.user_id, userId), eq(photos.hash, digest)))
-  );
-
-  if (existing2) {
-    // Backfill taken_at when the original record stored NULL (e.g. pre-fix
-    // iOS upload without X-Captured-At) and we now have a usable value.
-    if (!existing2.taken_at && clientCapturedAt) {
-      const parsed = normalizeClientCapturedAt(clientCapturedAt);
-      if (parsed) {
-        await dbExec(
-          db.update(photos)
-            .set({ taken_at: parsed })
-            .where(eq(photos.id, existing2.id))
-        );
-      }
-    }
-    throw new PhotoAlreadyExistsError(existing2.id);
-  }
-
   const ext = normalizeImageExt(file.name, file.mimeType);
   const tempName = `upload_${Date.now()}_${crypto.randomBytes(6).toString("hex")}${ext}`;
   const tempPath = path.join(UPLOAD_TMP_DIR, tempName);
 
   fs.writeFileSync(tempPath, file.data);
 
-  // Extraction of EXIF data (date + GPS)
+  // Extraction of EXIF data (date + GPS) happens before dedup so a hash-match
+  // duplicate can still merge the freshly extracted metadata into the existing
+  // record (issue #303).
   const exifMeta2 = await getExifMetadata(tempPath, file.name);
 
   // See uploadPhotoStream — accept client-supplied capture time when EXIF is
@@ -1849,6 +1895,33 @@ export async function uploadPhotoLogic(
   if (!exifMeta2.takenAt && clientCapturedAt) {
     const parsed = normalizeClientCapturedAt(clientCapturedAt);
     if (parsed) exifMeta2.takenAt = parsed;
+  }
+
+  // Hash-based duplicate detection.
+  const existing2 = await dbFirst<typeof photos.$inferSelect>(
+    db.select().from(photos).where(and(eq(photos.user_id, userId), eq(photos.hash, digest)))
+  );
+
+  if (existing2) {
+    await mergeUploadMetadataIntoExisting(userId, existing2.id, exifMeta2, false);
+    if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+    throw new PhotoAlreadyExistsError(existing2.id);
+  }
+
+  // taken_at fallback dedup — same rationale as in uploadPhotoStream.
+  const descriptionValueEarly2 = combineDescription(exifMeta2);
+  const hasNewMetadata2 = !!descriptionValueEarly2 || (exifMeta2.rating !== null && exifMeta2.rating >= 4);
+  if (exifMeta2.takenAt && hasNewMetadata2) {
+    const takenAtDup2 = await dbFirst<{ id: number }>(
+      db.select({ id: photos.id })
+        .from(photos)
+        .where(and(eq(photos.user_id, userId), eq(photos.taken_at, exifMeta2.takenAt)))
+    );
+    if (takenAtDup2) {
+      await mergeUploadMetadataIntoExisting(userId, takenAtDup2.id, exifMeta2, false);
+      if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+      throw new PhotoAlreadyExistsError(takenAtDup2.id);
+    }
   }
 
   // Move the file into its final YYYY/YYYY-MM/YYYY-MM-DD_at_HH.MM.SS_NN.ext slot.
@@ -2097,6 +2170,8 @@ export async function listPhotoIndexLogic(
       size: photos.size,
       taken_at: photos.taken_at,
       created_at: photos.created_at,
+      updated_at: photos.updated_at,
+      hash: photos.hash,
       curation_status: photoCuration.status,
       auto_crop: photos.auto_crop,
     })
@@ -2120,6 +2195,7 @@ export async function listPhotoIndexLogic(
     id: number; user_id: number; filename: string; original_name: string;
     mime_type: string; size: number;
     taken_at: string | null; created_at: string | null;
+    updated_at: string | null; hash: string | null;
     curation_status: string | null;
     auto_crop: { x: number; y: number } | null;
   }>(query);
@@ -2133,6 +2209,8 @@ export async function listPhotoIndexLogic(
     size: r.size,
     taken_at: r.taken_at ?? undefined,
     created_at: r.created_at ?? "",
+    updated_at: r.updated_at ?? undefined,
+    hash: r.hash ?? undefined,
     curation_status: (r.curation_status as CurationStatus) ?? "visible",
     auto_crop: r.auto_crop ?? undefined,
   }));
@@ -3175,7 +3253,8 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
   const photoRows = (await db.execute(sql`
     SELECT
       p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash,
-      p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop, p.description,
+      p.taken_at, p.created_at, p.updated_at,
+      p.ai_quality_score, p.auto_crop, p.description,
       p.latitude, p.longitude,
       p.location_name, p.location_city, p.location_country, p.location_short,
       ap.added_by_user_id, ap.added_at,
@@ -3187,7 +3266,8 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     LEFT JOIN photo_curation my_pc ON my_pc.photo_id = p.id AND my_pc.user_id = ${userId}
     LEFT JOIN photo_curation all_pc ON all_pc.photo_id = p.id AND all_pc.user_id = ANY(ARRAY[${sql.join(participantIds.map(id => sql`${id}`), sql`, `)}]::int[])
     GROUP BY p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash,
-             p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop, p.description,
+             p.taken_at, p.created_at, p.updated_at,
+             p.ai_quality_score, p.auto_crop, p.description,
              p.latitude, p.longitude,
              p.location_name, p.location_city, p.location_country, p.location_short,
              ap.added_by_user_id, ap.added_at, my_pc.status
@@ -3284,6 +3364,7 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
       hash: r.hash ?? undefined,
       taken_at: r.taken_at ?? undefined,
       created_at: r.created_at ?? "",
+      updated_at: r.updated_at ?? undefined,
       curation_status: (r.curation_status as CurationStatus) ?? "visible",
       added_by_user_id: r.added_by_user_id ?? undefined,
       added_at: r.added_at ?? "",
@@ -3473,14 +3554,22 @@ export async function addPhotoToAlbumLogic(userId: number, req: AddPhotoToAlbumR
     throw new Error("Photo not found or not owned by user");
   }
 
-  await dbExec(
+  // Idempotent insert: when an iOS sync re-uploads a photo whose pixels match
+  // an existing record (Phase-1 dedup) the same (album, photo) pair is added
+  // again. Without ON CONFLICT this raises a unique-constraint violation and
+  // bubbles up as 500 internal error. Treat the no-op case as a clean success
+  // and skip the side-effects that already fired on the original add.
+  const inserted = await dbExec(
     db.insert(albumPhotos).values({
       album_id: req.albumId,
       photo_id: req.photoId,
       added_by_user_id: userId,
       added_at: new Date().toISOString()
-    })
+    }).onConflictDoNothing()
   );
+  if (inserted.changes === 0) {
+    return { success: true };
+  }
 
   // Enqueue face_assignment for all shared users of this album (not the owner — they
   // already have it from the upload).  Fire-and-forget so the API responds immediately.

@@ -643,12 +643,12 @@ function goBack() {
               <div v-if="tx.purpose" class="tx-purpose">
                 {{ tx.purpose }}
               </div>
-              <div v-if="tx.tags.length > 0" class="tx-tags">
+              <div v-if="tx.tags.length > 0">
                 <span
                   v-for="t in tx.tags"
                   :key="t.name + t.source"
-                  class="tx-tag"
-                  :class="`tx-tag-${t.source}`"
+                  class="p-tag p-tag-warn tag-chip"
+                  :class="`p-tag-${t.source === 'ai' ? 'success' : 'info'}`"
                 >
                   {{ t.name }}
                 </span>
