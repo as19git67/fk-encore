@@ -36,6 +36,11 @@ struct PhotoSyncPreferences {
     // photo or its metadata in Photos.app) we re-evaluate the asset on the
     // next sync run. Stored as [localIdentifier: ISO-8601 string].
     private static let syncedModDateKey     = "sync.syncedModificationDate"
+    // SHA-256 hex digest of the bytes last sent to the server for each asset.
+    // Used by Option-3 hybrid caption sync: if the hash hasn't changed since
+    // the last upload the photo pixels are identical and only the embedded
+    // IPTC/EXIF metadata (e.g. Caption) needs a PATCH; otherwise we re-upload.
+    private static let syncedUploadHashKey  = "sync.syncedUploadHash"
 
     // MARK: - Settings
 
@@ -125,6 +130,7 @@ struct PhotoSyncPreferences {
         UserDefaults.standard.removeObject(forKey: syncedFavoriteIdsKey)
         UserDefaults.standard.removeObject(forKey: syncedTakenAtKey)
         UserDefaults.standard.removeObject(forKey: syncedModDateKey)
+        UserDefaults.standard.removeObject(forKey: syncedUploadHashKey)
     }
 
     /// Number of photos successfully uploaded so far.
@@ -187,5 +193,15 @@ struct PhotoSyncPreferences {
 
     static func saveSyncedModificationDate(_ map: [String: String]) {
         UserDefaults.standard.set(map, forKey: syncedModDateKey)
+    }
+
+    // MARK: - Upload hash tracking (Option-3 hybrid caption sync)
+
+    static func loadSyncedUploadHash() -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: syncedUploadHashKey) as? [String: String] ?? [:]
+    }
+
+    static func saveSyncedUploadHash(_ map: [String: String]) {
+        UserDefaults.standard.set(map, forKey: syncedUploadHashKey)
     }
 }

@@ -1,4 +1,6 @@
+import CryptoKit
 import Foundation
+import ImageIO
 import Photos
 import Network
 
@@ -72,6 +74,11 @@ actor PhotoSyncService {
                 uploadedIds.insert(asset.localIdentifier)
                 PhotoSyncPreferences.saveUploadedIds(uploadedIds)
                 PhotoSyncPreferences.recordUploadedPhoto(serverPhotoId: uploaded.id, localIdentifier: asset.localIdentifier)
+                // Persist the SHA-256 of these bytes as the Option-3 baseline so
+                // future metadata-only edits can skip the full re-upload.
+                var uploadHashMap = PhotoSyncPreferences.loadSyncedUploadHash()
+                uploadHashMap[asset.localIdentifier] = sha256Hex(data)
+                PhotoSyncPreferences.saveSyncedUploadHash(uploadHashMap)
                 // Track the favourite state that was sent with this upload so that
                 // syncFavoriteChanges() can detect future changes.
                 if asset.isFavorite {
@@ -201,18 +208,17 @@ actor PhotoSyncService {
         }
     }
 
-    /// Re-uploads an asset's bytes so the server can re-extract IPTC/EXIF
-    /// fields (description, keywords, …) and merge them onto the existing
-    /// record via Phase 1 of #303. A 409 duplicate response is the expected
-    /// outcome on the happy path: the hash matches the existing photo and
-    /// the merge has run server-side. Anything else is silently swallowed —
-    /// re-upload will be retried on the next sync cycle.
+    /// Option-3 hybrid metadata propagation:
+    ///   1. Load asset bytes and compute SHA-256.
+    ///   2a. Hash unchanged → pixels are the same → only IPTC caption may have
+    ///       changed; extract it via ImageIO and PATCH /photos/:id/description.
+    ///   2b. Hash changed → pixels differ → full re-upload so Phase-1 server
+    ///       merge picks up new pixels + new IPTC in one round-trip.
+    ///   3. On success update the stored hash baseline.
     private func reuploadAssetForMetadataMerge(
         asset: PHAsset,
         expectedServerId: Int
     ) async {
-        // Best-effort filename; PHAssetResource lookup off the main thread to
-        // avoid the same warning loadAssetData would surface.
         let filename: String = await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let name = PHAssetResource.assetResources(for: asset).first?.originalFilename
@@ -220,23 +226,63 @@ actor PhotoSyncService {
                 continuation.resume(returning: name)
             }
         }
+
         do {
             let (data, mimeType) = try await loadAssetData(asset, filename: filename)
-            let uploadFilename = filenameMatchingMime(filename, mimeType: mimeType)
-            _ = try await APIClient.shared.uploadPhoto(
-                data: data,
-                filename: uploadFilename,
-                mimeType: mimeType,
-                isFavorite: asset.isFavorite,
-                capturedAt: asset.creationDate
-            )
+            let currentHash = sha256Hex(data)
+            var uploadHashMap = PhotoSyncPreferences.loadSyncedUploadHash()
+            let storedHash = uploadHashMap[asset.localIdentifier]
+
+            if storedHash == currentHash {
+                // Pixels unchanged — only metadata (e.g. caption) may differ.
+                // Extract IPTC caption from the bytes and PATCH the server.
+                let caption = iptcCaption(from: data)
+                struct DescBody: Encodable { let description: String? }
+                struct DescResponse: Decodable { let success: Bool }
+                _ = try await APIClient.shared.patch(
+                    "/photos/\(expectedServerId)/description",
+                    body: DescBody(description: caption)
+                ) as DescResponse
+                // Hash unchanged so no need to update uploadHashMap.
+            } else {
+                // Pixels changed — full re-upload. Phase-1 server merge handles
+                // IPTC extraction. 409 = hash-match on server = expected success.
+                let uploadFilename = filenameMatchingMime(filename, mimeType: mimeType)
+                _ = try await APIClient.shared.uploadPhoto(
+                    data: data,
+                    filename: uploadFilename,
+                    mimeType: mimeType,
+                    isFavorite: asset.isFavorite,
+                    capturedAt: asset.creationDate
+                )
+                uploadHashMap[asset.localIdentifier] = currentHash
+                PhotoSyncPreferences.saveSyncedUploadHash(uploadHashMap)
+            }
         } catch APIError.duplicatePhoto {
-            // Expected — server merged our re-uploaded EXIF onto the existing
-            // record. Nothing else to do.
+            // Full re-upload path: server merged EXIF onto existing record. Success.
         } catch {
-            // Transient failure; next sync run will retry because syncedModDate
-            // is only advanced after the call returns.
+            // Transient failure; syncedModDate not advanced so next run retries.
         }
+    }
+
+    /// Returns the SHA-256 digest of *data* as a lowercase hex string.
+    nonisolated private func sha256Hex(_ data: Data) -> String {
+        let digest = SHA256.hash(data: data)
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Extracts the IPTC CaptionAbstract field embedded in *imageData* using
+    /// ImageIO. Returns nil when no caption is present or the bytes aren't a
+    /// recognised image format.
+    nonisolated private func iptcCaption(from imageData: Data) -> String? {
+        guard let source = CGImageSourceCreateWithData(imageData as CFData, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let iptc = props[kCGImagePropertyIPTCDictionary] as? [CFString: Any],
+              let caption = iptc[kCGImagePropertyIPTCCaptionAbstract] as? String,
+              !caption.isEmpty else {
+            return nil
+        }
+        return caption
     }
 
     /// Records the sync-state baseline for an asset that was just uploaded
