@@ -3554,14 +3554,22 @@ export async function addPhotoToAlbumLogic(userId: number, req: AddPhotoToAlbumR
     throw new Error("Photo not found or not owned by user");
   }
 
-  await dbExec(
+  // Idempotent insert: when an iOS sync re-uploads a photo whose pixels match
+  // an existing record (Phase-1 dedup) the same (album, photo) pair is added
+  // again. Without ON CONFLICT this raises a unique-constraint violation and
+  // bubbles up as 500 internal error. Treat the no-op case as a clean success
+  // and skip the side-effects that already fired on the original add.
+  const inserted = await dbExec(
     db.insert(albumPhotos).values({
       album_id: req.albumId,
       photo_id: req.photoId,
       added_by_user_id: userId,
       added_at: new Date().toISOString()
-    })
+    }).onConflictDoNothing()
   );
+  if (inserted.changes === 0) {
+    return { success: true };
+  }
 
   // Enqueue face_assignment for all shared users of this album (not the owner — they
   // already have it from the upload).  Fire-and-forget so the API responds immediately.

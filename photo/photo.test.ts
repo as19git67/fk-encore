@@ -831,6 +831,25 @@ describe("Photo Module", () => {
         service.addPhotoToAlbumLogic(user1.id, { albumId: album.id, photoId: photo.id })
       ).rejects.toThrow("Photo not found or not owned by user");
     });
+
+    it("should be idempotent when the same photo is added to the same album twice (#303)", async () => {
+      // Reproduces the iOS-sync regression: when a duplicate upload merges
+      // into an existing record, the iOS client still calls POST /albums/photos
+      // for the resulting photo id. The second call must succeed silently
+      // instead of raising a unique-constraint violation.
+      const album = await service.createAlbumLogic(user1.id, { name: "Idempotent" });
+      const photo = await service.uploadPhotoLogic(user1.id, {
+        data: Buffer.from([1, 2, 3]),
+        name: "p.jpg",
+        mimeType: "image/jpeg",
+      });
+      const first = await service.addPhotoToAlbumLogic(user1.id, { albumId: album.id, photoId: photo.id });
+      expect(first.success).toBe(true);
+      const second = await service.addPhotoToAlbumLogic(user1.id, { albumId: album.id, photoId: photo.id });
+      expect(second.success).toBe(true);
+      const details = await service.getAlbumLogic(user1.id, album.id);
+      expect(details.photos).toHaveLength(1);
+    });
   });
 
   describe("Album Sharing", () => {
