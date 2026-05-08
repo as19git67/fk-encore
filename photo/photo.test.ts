@@ -321,6 +321,106 @@ describe("Photo Module", () => {
       fs.unlinkSync(path.join(UPLOAD_DIR, original.filename));
     });
 
+    it("mergeUploadMetadataIntoExisting fills in missing fields and unions keywords (#303)", async () => {
+      const fileData = Buffer.from("merge-helper-data");
+      const original = await service.uploadPhotoLogic(user1.id, {
+        data: fileData,
+        name: "orig.jpg",
+        mimeType: "image/jpeg",
+      });
+
+      // Pre-condition: existing row has a couple of user-added keywords, no
+      // description, no GPS. The merge must preserve those keywords, union in
+      // the new ones, and backfill description / GPS from the upload.
+      await dbExec(
+        db.update(photos)
+          .set({ keywords: ["sunset"], taken_at: null })
+          .where(eq(photos.id, original.id))
+      );
+
+      await service.mergeUploadMetadataIntoExisting(user1.id, original.id, {
+        takenAt: "2023-08-15T10:30:00.000Z",
+        latitude: 47.5,
+        longitude: 11.0,
+        description: "Sunset at the lake",
+        keywords: ["beach", "Sunset"],   // duplicate ignoring case
+        rating: null,
+        author: null,
+        headline: null,
+        title: null,
+        copyright: null,
+        credit: null,
+        city: null,
+        state: null,
+        country: null,
+      }, false);
+
+      const refreshed = await dbFirst<{
+        taken_at: string | null;
+        description: string | null;
+        keywords: string[] | null;
+        latitude: number | null;
+        longitude: number | null;
+      }>(
+        db.select({
+          taken_at: photos.taken_at,
+          description: photos.description,
+          keywords: photos.keywords,
+          latitude: photos.latitude,
+          longitude: photos.longitude,
+        }).from(photos).where(eq(photos.id, original.id))
+      );
+
+      expect(refreshed?.taken_at).toBeTruthy();
+      expect(refreshed?.description).toBe("Sunset at the lake");
+      // Existing keyword preserved, new one unioned (case-insensitive dedup).
+      expect(refreshed?.keywords).toEqual(["sunset", "beach"]);
+      expect(refreshed?.latitude).toBe(47.5);
+      expect(refreshed?.longitude).toBe(11.0);
+
+      fs.unlinkSync(path.join(UPLOAD_DIR, original.filename));
+    });
+
+    it("mergeUploadMetadataIntoExisting does not clobber an existing description (#303)", async () => {
+      const fileData = Buffer.from("desc-preserve-data");
+      const original = await service.uploadPhotoLogic(user1.id, {
+        data: fileData,
+        name: "with-desc.jpg",
+        mimeType: "image/jpeg",
+      });
+
+      const userDescription = "Server-side edit by the user";
+      await dbExec(
+        db.update(photos)
+          .set({ description: userDescription })
+          .where(eq(photos.id, original.id))
+      );
+
+      await service.mergeUploadMetadataIntoExisting(user1.id, original.id, {
+        takenAt: null,
+        latitude: null,
+        longitude: null,
+        description: "Old EXIF caption",
+        keywords: [],
+        rating: null,
+        author: null,
+        headline: null,
+        title: null,
+        copyright: null,
+        credit: null,
+        city: null,
+        state: null,
+        country: null,
+      }, false);
+
+      const refreshed = await dbFirst<{ description: string | null }>(
+        db.select({ description: photos.description }).from(photos).where(eq(photos.id, original.id))
+      );
+      expect(refreshed?.description).toBe(userDescription);
+
+      fs.unlinkSync(path.join(UPLOAD_DIR, original.filename));
+    });
+
     it("should allow same photo for different users", async () => {
       const fileData = Buffer.from("shared-identical-data");
       await service.uploadPhotoLogic(user1.id, {
