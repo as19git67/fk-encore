@@ -27,6 +27,15 @@ struct PhotoSyncPreferences {
     private static let serverPhotoMapKey    = "sync.serverPhotoMap"
     private static let excludeScreenshotsKey = "sync.excludeScreenshots"
     private static let syncedFavoriteIdsKey = "sync.syncedFavoriteIds"
+    // Tracks the last value we PATCHed to the server for each uploaded asset.
+    // Used to detect post-upload metadata edits (issue #303). Stored as
+    // [localIdentifier: ISO-8601 string] in UserDefaults.
+    private static let syncedTakenAtKey     = "sync.syncedTakenAt"
+    // Tracks PHAsset.modificationDate at the time of the last sync for each
+    // uploaded asset. When iOS bumps modificationDate (the user edited the
+    // photo or its metadata in Photos.app) we re-evaluate the asset on the
+    // next sync run. Stored as [localIdentifier: ISO-8601 string].
+    private static let syncedModDateKey     = "sync.syncedModificationDate"
 
     // MARK: - Settings
 
@@ -114,6 +123,8 @@ struct PhotoSyncPreferences {
         UserDefaults.standard.removeObject(forKey: uploadedIdsKey)
         UserDefaults.standard.removeObject(forKey: lastSyncDateKey)
         UserDefaults.standard.removeObject(forKey: syncedFavoriteIdsKey)
+        UserDefaults.standard.removeObject(forKey: syncedTakenAtKey)
+        UserDefaults.standard.removeObject(forKey: syncedModDateKey)
     }
 
     /// Number of photos successfully uploaded so far.
@@ -154,5 +165,27 @@ struct PhotoSyncPreferences {
         var map = loadServerPhotoMap()
         map[String(serverPhotoId)] = localIdentifier
         saveServerPhotoMap(map)
+    }
+
+    // MARK: - Metadata sync tracking
+    //
+    // Persists what we last sent to the server per local asset, so the next
+    // sync run can detect post-upload edits (date, modification timestamp).
+    // Issue #303.
+
+    static func loadSyncedTakenAt() -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: syncedTakenAtKey) as? [String: String] ?? [:]
+    }
+
+    static func saveSyncedTakenAt(_ map: [String: String]) {
+        UserDefaults.standard.set(map, forKey: syncedTakenAtKey)
+    }
+
+    static func loadSyncedModificationDate() -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: syncedModDateKey) as? [String: String] ?? [:]
+    }
+
+    static func saveSyncedModificationDate(_ map: [String: String]) {
+        UserDefaults.standard.set(map, forKey: syncedModDateKey)
     }
 }

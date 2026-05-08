@@ -54,6 +54,8 @@ actor PhotoSyncService {
         // server-side (e.g. uploaded from another device) and is treated as success.
         var uploadedIds = PhotoSyncPreferences.loadUploadedIds()
         var syncedFavoriteIds = PhotoSyncPreferences.syncedFavoriteLocalIds
+        var syncedTakenAt = PhotoSyncPreferences.loadSyncedTakenAt()
+        var syncedModDate = PhotoSyncPreferences.loadSyncedModificationDate()
 
         for (asset, filename, sourceAlbumId) in assets {
             guard !uploadedIds.contains(asset.localIdentifier) else { continue }
@@ -78,6 +80,11 @@ actor PhotoSyncService {
                     syncedFavoriteIds.remove(asset.localIdentifier)
                 }
                 PhotoSyncPreferences.syncedFavoriteLocalIds = syncedFavoriteIds
+                rememberSyncedMetadata(
+                    asset: asset,
+                    syncedTakenAt: &syncedTakenAt,
+                    syncedModDate: &syncedModDate
+                )
                 await addToTargetAlbum(photoId: uploaded.id, sourceAlbumId: sourceAlbumId)
             } catch APIError.duplicatePhoto(let existingPhotoId) {
                 // Server already has this photo (same SHA256 hash). Still attach
@@ -86,12 +93,29 @@ actor PhotoSyncService {
                 uploadedIds.insert(asset.localIdentifier)
                 PhotoSyncPreferences.saveUploadedIds(uploadedIds)
                 if let existingPhotoId {
+                    PhotoSyncPreferences.recordUploadedPhoto(serverPhotoId: existingPhotoId, localIdentifier: asset.localIdentifier)
+                    // The server merged any new metadata our upload carried (Phase 1
+                    // of #303); also send any iOS-side edits that aren't yet reflected.
+                    await propagateMetadataChanges(
+                        asset: asset,
+                        serverId: existingPhotoId,
+                        syncedTakenAt: &syncedTakenAt,
+                        syncedModDate: &syncedModDate
+                    )
                     await addToTargetAlbum(photoId: existingPhotoId, sourceAlbumId: sourceAlbumId)
                 }
+                rememberSyncedMetadata(
+                    asset: asset,
+                    syncedTakenAt: &syncedTakenAt,
+                    syncedModDate: &syncedModDate
+                )
             } catch {
                 // Transient error – asset will be retried on the next sync cycle.
             }
         }
+
+        PhotoSyncPreferences.saveSyncedTakenAt(syncedTakenAt)
+        PhotoSyncPreferences.saveSyncedModificationDate(syncedModDate)
 
         // Propagate favourite-status changes for photos that were already uploaded
         // in a previous sync cycle. Since uploaded photos are skipped above, this is
@@ -99,7 +123,157 @@ actor PhotoSyncService {
         // changes (user marks/unmarks a photo as favourite after it was uploaded).
         await syncFavoriteChanges()
 
+        // Propagate creationDate / modificationDate edits made in iOS Photos.app
+        // after the photo was already uploaded. Walks the full set of known
+        // local→server mappings, not just the newly fetched assets, because
+        // `onlyNew` filters by creationDate and would skip historical photos
+        // the user edited later (issue #303).
+        await syncMetadataChanges()
+
         PhotoSyncPreferences.lastSyncDate = Date()
+    }
+
+    // MARK: - Metadata change propagation (issue #303)
+
+    /// Look up the server photo ID for a local PHAsset identifier, if known.
+    private func serverIdFor(localIdentifier: String) -> Int? {
+        let map = PhotoSyncPreferences.loadServerPhotoMap()
+        for (serverIdStr, localId) in map where localId == localIdentifier {
+            if let id = Int(serverIdStr) { return id }
+        }
+        return nil
+    }
+
+    /// Compares the current iOS metadata of an already-uploaded asset against
+    /// the values last sent to the server. When something moved we PATCH the
+    /// server with the diff. Three signals trigger a check:
+    ///   - creationDate changed → PATCH /photos/:id/date
+    ///   - isFavorite flipped → PATCH /photos/:id/curation (handled by
+    ///     syncFavoriteChanges later in the run; we just record state here)
+    ///   - modificationDate moved past the last-recorded value → asset was
+    ///     edited in Photos.app; we still rely on the user to re-share if
+    ///     pixel data changed, but creationDate edits are caught.
+    private func propagateMetadataChanges(
+        asset: PHAsset,
+        serverId: Int,
+        syncedTakenAt: inout [String: String],
+        syncedModDate: inout [String: String]
+    ) async {
+        let localId = asset.localIdentifier
+
+        // creationDate diff
+        if let creation = asset.creationDate {
+            let isoCreation = ISO8601DateFormatter().string(from: creation)
+            if syncedTakenAt[localId] != isoCreation {
+                struct DateBody: Encodable { let taken_at: String }
+                struct DateResponse: Decodable { let success: Bool }
+                do {
+                    _ = try await APIClient.shared.patch(
+                        "/photos/\(serverId)/date",
+                        body: DateBody(taken_at: isoCreation)
+                    ) as DateResponse
+                    syncedTakenAt[localId] = isoCreation
+                } catch {
+                    // Skip individual failures; will be retried next cycle.
+                }
+            }
+        }
+
+        // Bookkeeping: remember the modificationDate so a subsequent change
+        // can be detected even when creationDate didn't move (e.g. user only
+        // changed the description).
+        if let mod = asset.modificationDate {
+            syncedModDate[localId] = ISO8601DateFormatter().string(from: mod)
+        }
+    }
+
+    /// Records the sync-state baseline for an asset that was just uploaded
+    /// (or where we just discovered the server already has it).
+    private func rememberSyncedMetadata(
+        asset: PHAsset,
+        syncedTakenAt: inout [String: String],
+        syncedModDate: inout [String: String]
+    ) {
+        let localId = asset.localIdentifier
+        if let creation = asset.creationDate {
+            syncedTakenAt[localId] = ISO8601DateFormatter().string(from: creation)
+        }
+        if let mod = asset.modificationDate {
+            syncedModDate[localId] = ISO8601DateFormatter().string(from: mod)
+        }
+    }
+
+    /// Walk every locally-tracked uploaded asset, look at its current PHAsset
+    /// metadata and PATCH the server when something moved since we last
+    /// synced. Mirrors the structure of syncFavoriteChanges() but covers
+    /// creationDate (taken_at). Description / keywords aren't propagated
+    /// here because PHAsset doesn't expose them — the user must re-share the
+    /// photo for the embedded IPTC caption to reach the server.
+    private func syncMetadataChanges() async {
+        let serverPhotoMap = PhotoSyncPreferences.loadServerPhotoMap()
+        guard !serverPhotoMap.isEmpty else { return }
+
+        var localToServerId: [String: Int] = [:]
+        for (serverIdStr, localId) in serverPhotoMap {
+            if let serverId = Int(serverIdStr) {
+                localToServerId[localId] = serverId
+            }
+        }
+        guard !localToServerId.isEmpty else { return }
+
+        let localIds = Array(localToServerId.keys)
+        let assetsByLocalId: [String: PHAsset] = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var result: [String: PHAsset] = [:]
+                PHAsset.fetchAssets(withLocalIdentifiers: localIds, options: nil)
+                    .enumerateObjects { asset, _, _ in
+                        result[asset.localIdentifier] = asset
+                    }
+                continuation.resume(returning: result)
+            }
+        }
+
+        var syncedTakenAt = PhotoSyncPreferences.loadSyncedTakenAt()
+        var syncedModDate = PhotoSyncPreferences.loadSyncedModificationDate()
+        var changed = false
+
+        for (localId, serverId) in localToServerId {
+            guard let asset = assetsByLocalId[localId] else { continue }
+
+            let prevModIso = syncedModDate[localId]
+            let currentModIso = asset.modificationDate.map { ISO8601DateFormatter().string(from: $0) }
+            // No modification recorded yet → seed the baseline so we can
+            // detect future edits without sending a needless first PATCH.
+            if prevModIso == nil {
+                if let isoMod = currentModIso {
+                    syncedModDate[localId] = isoMod
+                    changed = true
+                }
+                if let creation = asset.creationDate {
+                    syncedTakenAt[localId] = ISO8601DateFormatter().string(from: creation)
+                    changed = true
+                }
+                continue
+            }
+
+            // Optimisation: when modificationDate hasn't moved we know nothing
+            // could have changed in iOS Photos (the system bumps it on any edit
+            // including metadata-only ones).
+            if currentModIso == prevModIso { continue }
+
+            await propagateMetadataChanges(
+                asset: asset,
+                serverId: serverId,
+                syncedTakenAt: &syncedTakenAt,
+                syncedModDate: &syncedModDate
+            )
+            changed = true
+        }
+
+        if changed {
+            PhotoSyncPreferences.saveSyncedTakenAt(syncedTakenAt)
+            PhotoSyncPreferences.saveSyncedModificationDate(syncedModDate)
+        }
     }
 
     // MARK: - Favourite change propagation
