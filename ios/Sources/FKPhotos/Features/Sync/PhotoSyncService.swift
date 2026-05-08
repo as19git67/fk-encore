@@ -60,7 +60,13 @@ actor PhotoSyncService {
 
             do {
                 let (data, mimeType) = try await loadAssetData(asset, filename: filename)
-                let uploaded = try await APIClient.shared.uploadPhoto(data: data, filename: filename, mimeType: mimeType, isFavorite: asset.isFavorite, capturedAt: asset.creationDate)
+                // PHAssetResource.originalFilename keeps the .HEIC extension even
+                // when the asset was edited and PhotoKit re-renders the bytes as
+                // JPEG (issue #333). Realign the extension with the mimeType the
+                // server actually receives so downstream callers don't try to run
+                // heic-convert on JPEG bytes.
+                let uploadFilename = filenameMatchingMime(filename, mimeType: mimeType)
+                let uploaded = try await APIClient.shared.uploadPhoto(data: data, filename: uploadFilename, mimeType: mimeType, isFavorite: asset.isFavorite, capturedAt: asset.creationDate)
                 uploadedIds.insert(asset.localIdentifier)
                 PhotoSyncPreferences.saveUploadedIds(uploadedIds)
                 PhotoSyncPreferences.recordUploadedPhoto(serverPhotoId: uploaded.id, localIdentifier: asset.localIdentifier)
@@ -288,6 +294,31 @@ actor PhotoSyncService {
                 continuation.resume(returning: (data, mimeType))
             }
         }
+    }
+
+    /// Replace the filename's extension with one that matches *mimeType* when
+    /// the two disagree. Equivalent extensions (heic ↔ heif, jpg ↔ jpeg) are
+    /// considered matching and left alone so we don't churn user-recognisable
+    /// names unnecessarily.
+    nonisolated private func filenameMatchingMime(_ filename: String, mimeType: String) -> String {
+        let expectedExt: String
+        switch mimeType.lowercased() {
+        case "image/heic", "image/heif": expectedExt = "heic"
+        case "image/png":                expectedExt = "png"
+        case "image/tiff":               expectedExt = "tiff"
+        case "image/gif":                expectedExt = "gif"
+        case "image/webp":               expectedExt = "webp"
+        default:                         expectedExt = "jpg"  // image/jpeg + Fallback
+        }
+        let ns = filename as NSString
+        let currentExt = ns.pathExtension.lowercased()
+        if currentExt == expectedExt { return filename }
+        let heicLike: Set<String> = ["heic", "heif"]
+        if expectedExt == "heic" && heicLike.contains(currentExt) { return filename }
+        let jpegLike: Set<String> = ["jpg", "jpeg"]
+        if expectedExt == "jpg" && jpegLike.contains(currentExt) { return filename }
+        let stem = ns.deletingPathExtension
+        return stem.isEmpty ? "photo.\(expectedExt)" : "\(stem).\(expectedExt)"
     }
 
     enum SyncError: LocalizedError {
