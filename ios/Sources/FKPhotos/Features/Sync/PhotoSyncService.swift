@@ -90,18 +90,13 @@ actor PhotoSyncService {
                 // Server already has this photo (same SHA256 hash). Still attach
                 // the existing record to the target album so the user gets the
                 // expected sync outcome, then mark locally to skip next cycle.
+                // We don't need to chase metadata here — the bytes we just sent
+                // were extracted by the server's Phase-1 merge already, and the
+                // baselines below seed the sweep so future edits are detected.
                 uploadedIds.insert(asset.localIdentifier)
                 PhotoSyncPreferences.saveUploadedIds(uploadedIds)
                 if let existingPhotoId {
                     PhotoSyncPreferences.recordUploadedPhoto(serverPhotoId: existingPhotoId, localIdentifier: asset.localIdentifier)
-                    // The server merged any new metadata our upload carried (Phase 1
-                    // of #303); also send any iOS-side edits that aren't yet reflected.
-                    await propagateMetadataChanges(
-                        asset: asset,
-                        serverId: existingPhotoId,
-                        syncedTakenAt: &syncedTakenAt,
-                        syncedModDate: &syncedModDate
-                    )
                     await addToTargetAlbum(photoId: existingPhotoId, sourceAlbumId: sourceAlbumId)
                 }
                 rememberSyncedMetadata(
@@ -150,21 +145,29 @@ actor PhotoSyncService {
     ///   - creationDate changed → PATCH /photos/:id/date
     ///   - isFavorite flipped → PATCH /photos/:id/curation (handled by
     ///     syncFavoriteChanges later in the run; we just record state here)
-    ///   - modificationDate moved past the last-recorded value → asset was
-    ///     edited in Photos.app; we still rely on the user to re-share if
-    ///     pixel data changed, but creationDate edits are caught.
+    ///   - modificationDate moved past the last-recorded value but neither
+    ///     creationDate nor isFavorite explain it → most likely a Caption /
+    ///     description edit in iOS Photos.app, which is only stored in the
+    ///     embedded IPTC and not exposed on PHAsset. We re-upload the bytes
+    ///     so the server's Phase-1 merge can pick up the new metadata; the
+    ///     hash-match path keeps the existing record id.
     private func propagateMetadataChanges(
         asset: PHAsset,
         serverId: Int,
+        currentFavorite: Bool,
+        prevFavorite: Bool,
         syncedTakenAt: inout [String: String],
         syncedModDate: inout [String: String]
     ) async {
         let localId = asset.localIdentifier
+        let prevTakenAt = syncedTakenAt[localId]
 
-        // creationDate diff
+        // creationDate diff (cheap, idempotent PATCH)
+        var dateChanged = false
         if let creation = asset.creationDate {
             let isoCreation = ISO8601DateFormatter().string(from: creation)
-            if syncedTakenAt[localId] != isoCreation {
+            if prevTakenAt != isoCreation {
+                dateChanged = true
                 struct DateBody: Encodable { let taken_at: String }
                 struct DateResponse: Decodable { let success: Bool }
                 do {
@@ -179,11 +182,60 @@ actor PhotoSyncService {
             }
         }
 
+        // When modificationDate moved without a date or favourite delta, the
+        // user most likely edited the Caption / Description (which lives only
+        // in IPTC) or a similarly EXIF-embedded field. Re-upload so the Phase 1
+        // server merge propagates whatever the new bytes carry. Skipped when
+        // favourite or date moved alone — those have dedicated PATCH paths
+        // and a re-upload would only waste bandwidth.
+        let favoriteChanged = currentFavorite != prevFavorite
+        if !dateChanged && !favoriteChanged {
+            await reuploadAssetForMetadataMerge(asset: asset, expectedServerId: serverId)
+        }
+
         // Bookkeeping: remember the modificationDate so a subsequent change
         // can be detected even when creationDate didn't move (e.g. user only
         // changed the description).
         if let mod = asset.modificationDate {
             syncedModDate[localId] = ISO8601DateFormatter().string(from: mod)
+        }
+    }
+
+    /// Re-uploads an asset's bytes so the server can re-extract IPTC/EXIF
+    /// fields (description, keywords, …) and merge them onto the existing
+    /// record via Phase 1 of #303. A 409 duplicate response is the expected
+    /// outcome on the happy path: the hash matches the existing photo and
+    /// the merge has run server-side. Anything else is silently swallowed —
+    /// re-upload will be retried on the next sync cycle.
+    private func reuploadAssetForMetadataMerge(
+        asset: PHAsset,
+        expectedServerId: Int
+    ) async {
+        // Best-effort filename; PHAssetResource lookup off the main thread to
+        // avoid the same warning loadAssetData would surface.
+        let filename: String = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let name = PHAssetResource.assetResources(for: asset).first?.originalFilename
+                    ?? "photo_\(asset.localIdentifier.prefix(8)).jpg"
+                continuation.resume(returning: name)
+            }
+        }
+        do {
+            let (data, mimeType) = try await loadAssetData(asset, filename: filename)
+            let uploadFilename = filenameMatchingMime(filename, mimeType: mimeType)
+            _ = try await APIClient.shared.uploadPhoto(
+                data: data,
+                filename: uploadFilename,
+                mimeType: mimeType,
+                isFavorite: asset.isFavorite,
+                capturedAt: asset.creationDate
+            )
+        } catch APIError.duplicatePhoto {
+            // Expected — server merged our re-uploaded EXIF onto the existing
+            // record. Nothing else to do.
+        } catch {
+            // Transient failure; next sync run will retry because syncedModDate
+            // is only advanced after the call returns.
         }
     }
 
@@ -235,6 +287,7 @@ actor PhotoSyncService {
 
         var syncedTakenAt = PhotoSyncPreferences.loadSyncedTakenAt()
         var syncedModDate = PhotoSyncPreferences.loadSyncedModificationDate()
+        let syncedFavoriteIds = PhotoSyncPreferences.syncedFavoriteLocalIds
         var changed = false
 
         for (localId, serverId) in localToServerId {
@@ -264,6 +317,8 @@ actor PhotoSyncService {
             await propagateMetadataChanges(
                 asset: asset,
                 serverId: serverId,
+                currentFavorite: asset.isFavorite,
+                prevFavorite: syncedFavoriteIds.contains(localId),
                 syncedTakenAt: &syncedTakenAt,
                 syncedModDate: &syncedModDate
             )
