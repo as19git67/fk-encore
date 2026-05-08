@@ -504,15 +504,57 @@ def _tax_sections_outline(entries: list[TaxSectionEntry]) -> str:
     return "\n".join(lines)
 
 
+_CLASSIFY_MAX_TOKENS = 768
+# Headroom for chat-template overhead (role markers, BOS/EOS, separators) that
+# our raw-string token count does not see. 256 is generous for a Llama-style
+# template; the alternative is to recreate the template here, which couples us
+# to the model.
+_CLASSIFY_TEMPLATE_HEADROOM = 256
+
+
+def _count_tokens(llm: Any, text: str) -> int | None:
+    """Count tokens for *text* using the loaded Llama. Returns ``None`` when
+    the bound object does not expose ``tokenize`` (e.g. test stubs); callers
+    fall back to the static char-cap in that case."""
+
+    tokenize = getattr(llm, "tokenize", None)
+    if not callable(tokenize):
+        return None
+    try:
+        return len(tokenize(text.encode("utf-8"), add_bos=False, special=False))
+    except Exception:
+        return None
+
+
+def _truncate_to_tokens(llm: Any, text: str, max_tokens: int) -> str | None:
+    """Token-accurate truncation; returns ``None`` if the Llama does not
+    expose ``tokenize``/``detokenize``."""
+
+    tokenize = getattr(llm, "tokenize", None)
+    detokenize = getattr(llm, "detokenize", None)
+    if not callable(tokenize) or not callable(detokenize):
+        return None
+    try:
+        tokens = tokenize(text.encode("utf-8"), add_bos=False, special=False)
+        if len(tokens) <= max_tokens:
+            return text
+        truncated = detokenize(tokens[:max_tokens])
+        if isinstance(truncated, bytes):
+            return truncated.decode("utf-8", errors="ignore")
+        return str(truncated)
+    except Exception:
+        return None
+
+
 @app.post("/classify", response_model=ClassifyResponse)
 async def classify(req: ClassifyRequest) -> ClassifyResponse:
     llm = _state["llm"]
     if llm is None:
         raise HTTPException(status_code=503, detail="llm not loaded")
 
-    # Cap the document text so prompt + response stay within n_ctx on a 3B model.
-    # ~6000 chars ≈ 1500–2000 tokens, leaves plenty of room for the system prompt,
-    # the taxonomy and the response.
+    # Initial char-cap remains as a cheap upper bound. A token-budget pass
+    # below shrinks `text` further when the taxonomy + tax_sections outline
+    # bloat the prompt past n_ctx (issue #325).
     text = req.text[:6000]
 
     tax_active = bool(req.tax_sections)
@@ -524,11 +566,44 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
         else ""
     )
 
-    user_prompt = (
-        f"Taxonomie (slug: Name):\n{_taxonomy_outline(req.taxonomy)}{tax_block}\n\n"
-        f"Max. Tags: {req.max_tags}\n\n"
-        f"Dokumenttext:\n---\n{text}\n---"
-    )
+    def _build_user_prompt(body: str) -> str:
+        return (
+            f"Taxonomie (slug: Name):\n{_taxonomy_outline(req.taxonomy)}{tax_block}\n\n"
+            f"Max. Tags: {req.max_tags}\n\n"
+            f"Dokumenttext:\n---\n{body}\n---"
+        )
+
+    user_prompt = _build_user_prompt(text)
+
+    # Token-budget guard. The taxonomy + tax_sections outline can be several
+    # thousand tokens by themselves; combined with a long document text the
+    # prompt has been observed at 8691 tokens against an LLM_CTX of 8192. We
+    # tokenize the actual prompt and shrink the document text until it fits.
+    # Skipped silently when the Llama-like object lacks ``tokenize`` (test
+    # stubs); the static 6000-char cap above is still in force.
+    budget = LLM_CTX - _CLASSIFY_MAX_TOKENS - _CLASSIFY_TEMPLATE_HEADROOM
+    overhead_tokens = _count_tokens(llm, system_prompt + _build_user_prompt(""))
+    if overhead_tokens is not None:
+        text_token_budget = budget - overhead_tokens
+        if text_token_budget < 64:
+            # Even with empty text we'd overflow — taxonomy/tax_sections alone
+            # are too large. Surface a 413 so the caller can act on it instead
+            # of hitting llama.cpp's 500.
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"taxonomy+tax_sections too large for context window: "
+                    f"overhead={overhead_tokens} budget={budget}"
+                ),
+            )
+        truncated = _truncate_to_tokens(llm, text, text_token_budget)
+        if truncated is not None and truncated != text:
+            log.info(
+                "classify: truncated document text to fit n_ctx (budget=%d tokens)",
+                text_token_budget,
+            )
+            text = truncated
+            user_prompt = _build_user_prompt(text)
 
     try:
         completion = await _run_blocking(
@@ -539,9 +614,9 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
             ],
             response_format={"type": "json_object"},
             temperature=0.2,
-            # 768 tokens leaves headroom for the extra tax fields (up to a
-            # handful of tax_sections entries) without touching n_ctx.
-            max_tokens=768,
+            # _CLASSIFY_MAX_TOKENS leaves headroom for the extra tax fields
+            # (up to a handful of tax_sections entries) without touching n_ctx.
+            max_tokens=_CLASSIFY_MAX_TOKENS,
         )
     except HTTPException:
         raise
