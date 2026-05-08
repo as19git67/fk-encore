@@ -210,8 +210,9 @@ actor PhotoSyncService {
 
     /// Option-3 hybrid metadata propagation:
     ///   1. Load asset bytes and compute SHA-256.
-    ///   2a. Hash unchanged → pixels are the same → only IPTC caption may have
-    ///       changed; extract it via ImageIO and PATCH /photos/:id/description.
+    ///   2a. No stored baseline or hash unchanged → pixels are the same → extract
+    ///       IPTC caption via ImageIO and PATCH /photos/:id/description (if caption
+    ///       is present; never send nil to avoid clearing a server description).
     ///   2b. Hash changed → pixels differ → full re-upload so Phase-1 server
     ///       merge picks up new pixels + new IPTC in one round-trip.
     ///   3. On success update the stored hash baseline.
@@ -227,27 +228,36 @@ actor PhotoSyncService {
             }
         }
 
-        do {
-            let (data, mimeType) = try await loadAssetData(asset, filename: filename)
-            let currentHash = sha256Hex(data)
-            var uploadHashMap = PhotoSyncPreferences.loadSyncedUploadHash()
-            let storedHash = uploadHashMap[asset.localIdentifier]
+        guard let (data, mimeType) = try? await loadAssetData(asset, filename: filename) else { return }
 
-            if storedHash == currentHash {
-                // Pixels unchanged — only metadata (e.g. caption) may differ.
-                // Extract IPTC caption from the bytes and PATCH the server.
-                let caption = iptcCaption(from: data)
-                struct DescBody: Encodable { let description: String? }
+        let currentHash = sha256Hex(data)
+        var uploadHashMap = PhotoSyncPreferences.loadSyncedUploadHash()
+        let storedHash = uploadHashMap[asset.localIdentifier]
+
+        if storedHash == nil || storedHash == currentHash {
+            // No stored baseline (pre-Option-3 upload) or pixels unchanged.
+            // Use the lightweight PATCH path: extract IPTC caption and update.
+            // Guard: only PATCH when iOS actually embedded a caption — sending
+            // nil would silently clear a description the server already has.
+            if let caption = iptcCaption(from: data) {
+                struct DescBody: Encodable { let description: String }
                 struct DescResponse: Decodable { let success: Bool }
-                _ = try await APIClient.shared.patch(
-                    "/photos/\(expectedServerId)/description",
-                    body: DescBody(description: caption)
-                ) as DescResponse
-                // Hash unchanged so no need to update uploadHashMap.
-            } else {
-                // Pixels changed — full re-upload. Phase-1 server merge handles
-                // IPTC extraction. 409 = hash-match on server = expected success.
-                let uploadFilename = filenameMatchingMime(filename, mimeType: mimeType)
+                do {
+                    _ = try await APIClient.shared.patch(
+                        "/photos/\(expectedServerId)/description",
+                        body: DescBody(description: caption)
+                    ) as DescResponse
+                } catch {
+                    return  // Transient; syncedModDate not advanced → retry next cycle.
+                }
+            }
+            // Seed/refresh hash baseline so future runs use the fast comparison.
+            uploadHashMap[asset.localIdentifier] = currentHash
+            PhotoSyncPreferences.saveSyncedUploadHash(uploadHashMap)
+        } else {
+            // Hash changed → pixels differ → full re-upload.
+            let uploadFilename = filenameMatchingMime(filename, mimeType: mimeType)
+            do {
                 _ = try await APIClient.shared.uploadPhoto(
                     data: data,
                     filename: uploadFilename,
@@ -255,13 +265,15 @@ actor PhotoSyncService {
                     isFavorite: asset.isFavorite,
                     capturedAt: asset.creationDate
                 )
-                uploadHashMap[asset.localIdentifier] = currentHash
-                PhotoSyncPreferences.saveSyncedUploadHash(uploadHashMap)
+            } catch APIError.duplicatePhoto {
+                // Server merged IPTC onto existing record — expected success.
+            } catch {
+                return  // Transient; retry next cycle.
             }
-        } catch APIError.duplicatePhoto {
-            // Full re-upload path: server merged EXIF onto existing record. Success.
-        } catch {
-            // Transient failure; syncedModDate not advanced so next run retries.
+            // Update hash whether upload was new (200) or deduplicated (409)
+            // so the next sync run can detect further changes without re-uploading.
+            uploadHashMap[asset.localIdentifier] = currentHash
+            PhotoSyncPreferences.saveSyncedUploadHash(uploadHashMap)
         }
     }
 
@@ -341,17 +353,21 @@ actor PhotoSyncService {
 
             let prevModIso = syncedModDate[localId]
             let currentModIso = asset.modificationDate.map { ISO8601DateFormatter().string(from: $0) }
-            // No modification recorded yet → seed the baseline so we can
-            // detect future edits without sending a needless first PATCH.
+            // No modification baseline yet → run propagation once to catch
+            // description or date edits that happened before this tracking was
+            // introduced (e.g. user added caption while the feature was not yet
+            // deployed). propagateMetadataChanges seeds syncedModDate at the end,
+            // so subsequent runs will use the fast modDate comparison.
             if prevModIso == nil {
-                if let isoMod = currentModIso {
-                    syncedModDate[localId] = isoMod
-                    changed = true
-                }
-                if let creation = asset.creationDate {
-                    syncedTakenAt[localId] = ISO8601DateFormatter().string(from: creation)
-                    changed = true
-                }
+                await propagateMetadataChanges(
+                    asset: asset,
+                    serverId: serverId,
+                    currentFavorite: asset.isFavorite,
+                    prevFavorite: syncedFavoriteIds.contains(localId),
+                    syncedTakenAt: &syncedTakenAt,
+                    syncedModDate: &syncedModDate
+                )
+                changed = true
                 continue
             }
 
