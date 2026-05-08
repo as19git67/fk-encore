@@ -2170,6 +2170,8 @@ export async function listPhotoIndexLogic(
       size: photos.size,
       taken_at: photos.taken_at,
       created_at: photos.created_at,
+      updated_at: photos.updated_at,
+      hash: photos.hash,
       curation_status: photoCuration.status,
       auto_crop: photos.auto_crop,
     })
@@ -2193,6 +2195,7 @@ export async function listPhotoIndexLogic(
     id: number; user_id: number; filename: string; original_name: string;
     mime_type: string; size: number;
     taken_at: string | null; created_at: string | null;
+    updated_at: string | null; hash: string | null;
     curation_status: string | null;
     auto_crop: { x: number; y: number } | null;
   }>(query);
@@ -2206,6 +2209,8 @@ export async function listPhotoIndexLogic(
     size: r.size,
     taken_at: r.taken_at ?? undefined,
     created_at: r.created_at ?? "",
+    updated_at: r.updated_at ?? undefined,
+    hash: r.hash ?? undefined,
     curation_status: (r.curation_status as CurationStatus) ?? "visible",
     auto_crop: r.auto_crop ?? undefined,
   }));
@@ -3248,7 +3253,8 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
   const photoRows = (await db.execute(sql`
     SELECT
       p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash,
-      p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop, p.description,
+      p.taken_at, p.created_at, p.updated_at,
+      p.ai_quality_score, p.auto_crop, p.description,
       p.latitude, p.longitude,
       p.location_name, p.location_city, p.location_country, p.location_short,
       ap.added_by_user_id, ap.added_at,
@@ -3260,7 +3266,8 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     LEFT JOIN photo_curation my_pc ON my_pc.photo_id = p.id AND my_pc.user_id = ${userId}
     LEFT JOIN photo_curation all_pc ON all_pc.photo_id = p.id AND all_pc.user_id = ANY(ARRAY[${sql.join(participantIds.map(id => sql`${id}`), sql`, `)}]::int[])
     GROUP BY p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash,
-             p.taken_at, p.created_at, p.ai_quality_score, p.auto_crop, p.description,
+             p.taken_at, p.created_at, p.updated_at,
+             p.ai_quality_score, p.auto_crop, p.description,
              p.latitude, p.longitude,
              p.location_name, p.location_city, p.location_country, p.location_short,
              ap.added_by_user_id, ap.added_at, my_pc.status
@@ -3357,6 +3364,7 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
       hash: r.hash ?? undefined,
       taken_at: r.taken_at ?? undefined,
       created_at: r.created_at ?? "",
+      updated_at: r.updated_at ?? undefined,
       curation_status: (r.curation_status as CurationStatus) ?? "visible",
       added_by_user_id: r.added_by_user_id ?? undefined,
       added_at: r.added_at ?? "",

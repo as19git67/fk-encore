@@ -314,6 +314,12 @@ export interface Photo {
   hash?: string;
   taken_at?: string;
   created_at: string;
+  /**
+   * Server-side timestamp bumped by a DB trigger on every photo or curation
+   * update. Used by clients to detect when a cached photo entry has changed
+   * on the server (issue #303, #335).
+   */
+  updated_at?: string;
   latitude?: number;
   longitude?: number;
   location_name?: string;
@@ -615,6 +621,20 @@ export interface PhotoIndexEntry {
   size: number;
   taken_at?: string;
   created_at: string;
+  /**
+   * DB-trigger maintained timestamp. Bumped on every photo UPDATE and
+   * curation change (see migration 0034). Clients use this to detect when a
+   * cached photo's metadata has changed on the server without re-fetching
+   * the full /photos/details payload (issue #303).
+   */
+  updated_at?: string;
+  /**
+   * SHA-256 hash of the uploaded file. Included so clients (e.g. the iOS
+   * download sync) can detect when a photo's pixel data has changed on the
+   * server and replace the local copy. Optional because legacy rows from
+   * before the hash column was introduced may still carry NULL.
+   */
+  hash?: string;
   curation_status: CurationStatus;
   auto_crop?: { x: number; y: number };
 }
