@@ -2793,6 +2793,20 @@ export function getPhotoFileLogic(filename: string): { data: string; mimeType: s
   return { data, mimeType };
 }
 
+// HEIC/HEIF brands recognized by ISO/IEC 23008-12. Files with a `.heic`
+// extension whose `ftyp` box advertises a different brand (or no `ftyp` at
+// all — e.g. the iOS app occasionally uploads a JPEG with a HEIC filename)
+// would otherwise crash heic-convert with "input buffer is not a HEIC image".
+const HEIC_BRANDS = new Set([
+  'heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'hevm', 'hevs', 'mif1', 'msf1', 'mif2',
+]);
+
+export function isHeicBuffer(buf: Buffer): boolean {
+  if (buf.length < 12) return false;
+  if (buf.toString('ascii', 4, 8) !== 'ftyp') return false;
+  return HEIC_BRANDS.has(buf.toString('ascii', 8, 12));
+}
+
 export async function convertHeicToJpeg(filePath: string): Promise<Buffer> {
   // sharp's bundled libvips lacks HEIC decode support; use heic-convert
   // (libheif via WASM) instead. Decoded buffers are held in a small LRU
@@ -2810,8 +2824,16 @@ export async function convertHeicToJpeg(filePath: string): Promise<Buffer> {
   }
 
   const inputBuffer = await fs.promises.readFile(filePath);
-  const outputBuffer = await heicConvert({ buffer: inputBuffer, format: 'JPEG', quality: 0.9 });
-  const decoded = Buffer.from(outputBuffer);
+  let decoded: Buffer;
+  if (isHeicBuffer(inputBuffer)) {
+    const outputBuffer = await heicConvert({ buffer: inputBuffer, format: 'JPEG', quality: 0.9 });
+    decoded = Buffer.from(outputBuffer);
+  } else {
+    // File extension claims HEIC but content is not. Re-encode via sharp so
+    // the JPEG cache file written by the caller stays valid.
+    const sharp = (await import('sharp')).default;
+    decoded = await sharp(inputBuffer).rotate().jpeg({ quality: 90 }).toBuffer();
+  }
   if (mtimeMs > 0) setHeicDecodeCached(filePath, mtimeMs, decoded);
   return decoded;
 }

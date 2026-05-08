@@ -140,20 +140,43 @@ export async function getLibraryScanStatus(): Promise<LibraryScanQueueStatus> {
 }
 
 /**
- * Reset all failed library scans back to pending. Mirrors the per-photo
+ * Reset failed library scans back to pending. Mirrors the per-photo
  * retry-failed action triggered from Datenverwaltung.
+ *
+ * The partial unique index `uq_active_library_scan` only allows one
+ * pending/processing row per library, so a naive bulk UPDATE blows up with
+ * "duplicate key value violates unique constraint" whenever a library has
+ * more than one failed row, or has a fresh pending/processing row alongside
+ * historical failures (issue #323). We therefore:
+ *   1. Skip failures whose library already has an active sibling — that
+ *      job is the canonical retry, the failed row is just history.
+ *   2. For libraries with multiple failed rows, only flip the newest one
+ *      back to pending; older ones stay as `failed` to preserve audit
+ *      history.
  */
 export async function requeueFailedLibraryScans(): Promise<number> {
-  const res = await db
-    .update(libraryScanQueue)
-    .set({
-      status: "pending",
-      error_msg: null,
-      started_at: null,
-      finished_at: null,
-    })
-    .where(eq(libraryScanQueue.status, "failed"));
-  const changed = (res as any).rowCount ?? 0;
+  const res = await db.execute<{ id: number }>(sql`
+    WITH candidates AS (
+      SELECT id,
+             ROW_NUMBER() OVER (
+               PARTITION BY library_id ORDER BY enqueued_at DESC, id DESC
+             ) AS rn
+      FROM library_scan_queue
+      WHERE status = 'failed'
+        AND library_id NOT IN (
+          SELECT library_id FROM library_scan_queue
+          WHERE status IN ('pending', 'processing')
+        )
+    )
+    UPDATE library_scan_queue
+    SET status = 'pending',
+        error_msg = NULL,
+        started_at = NULL,
+        finished_at = NULL
+    WHERE id IN (SELECT id FROM candidates WHERE rn = 1)
+    RETURNING id
+  `);
+  const changed = res.rows.length;
   if (changed > 0) notifyScanQueueChanged();
   return changed;
 }
