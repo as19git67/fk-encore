@@ -117,7 +117,18 @@ struct PhotoUploadView: View {
                     capturedAt = nil
                 }
 
-                let ext = mimeType.contains("heic") ? "heic" : "jpg"
+                // Keep the extension aligned with the mimeType the server actually
+                // receives — see issue #333 for the HEIC-renamed-as-JPEG case
+                // PhotoKit produces for edited photos.
+                let ext: String
+                switch mimeType.lowercased() {
+                case "image/heic", "image/heif": ext = "heic"
+                case "image/png":                ext = "png"
+                case "image/tiff":               ext = "tiff"
+                case "image/gif":                ext = "gif"
+                case "image/webp":               ext = "webp"
+                default:                         ext = "jpg"
+                }
                 let filename = "photo_\(Date().timeIntervalSince1970).\(ext)"
 
                 // Resolve target photo id: prefer the freshly-uploaded one,
