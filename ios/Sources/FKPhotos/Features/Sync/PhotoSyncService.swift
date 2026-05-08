@@ -235,14 +235,19 @@ actor PhotoSyncService {
         let storedHash = uploadHashMap[asset.localIdentifier]
 
         if storedHash == nil || storedHash == currentHash {
-            // Pixels unchanged — only metadata moved. Extract caption from
-            // the exported bytes (IPTC / TIFF / EXIF / XMP). Falls back to
-            // PHContentEditingInput which re-renders the asset and may
-            // include fields the PHImageManager bytes omit.
+            // Pixels unchanged — only metadata moved. Try every caption
+            // source: image bytes, PHContentEditingInput, then PHAsset KVC.
             var caption = extractCaptionFromData(data)
             if caption == nil {
                 caption = await captionFromEditingInput(asset)
             }
+            if caption == nil {
+                caption = captionFromAsset(asset)
+            }
+
+            // --- Diagnostic logging (remove once caption source is identified) ---
+            logCaptionDiagnostics(asset: asset, imageData: data, resolvedCaption: caption)
+
             if let caption {
                 struct DescBody: Encodable { let description: String }
                 struct DescResponse: Decodable { let success: Bool }
@@ -376,6 +381,96 @@ actor PhotoSyncService {
                 continuation.resume(returning: self.extractCaptionFromSource(source))
             }
         }
+    }
+
+    // MARK: - PHAsset caption via KVC
+
+    /// Attempts to read the caption directly from the PHAsset via KVC.
+    /// PHAsset has no public caption property, but iOS may expose it
+    /// through private/undocumented keys accessible via value(forKey:).
+    nonisolated private func captionFromAsset(_ asset: PHAsset) -> String? {
+        let keys = ["caption", "title", "descriptionProperties",
+                     "longDescription", "additionalAttributes"]
+        for key in keys {
+            if let value = try? (asset as NSObject).value(forKey: key) {
+                if let str = value as? String, !str.isEmpty { return str }
+                if let dict = value as? [String: Any] {
+                    for (_, v) in dict {
+                        if let str = v as? String, !str.isEmpty { return str }
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
+    // MARK: - Caption diagnostics (temporary — remove once source is identified)
+
+    /// Logs all available metadata from every source so we can identify
+    /// where iOS Photos.app stores the user-entered caption.
+    private func logCaptionDiagnostics(asset: PHAsset, imageData: Data, resolvedCaption: String?) {
+        let tag = "[CaptionDiag \(asset.localIdentifier.prefix(8))]"
+        print("\(tag) ========== CAPTION DIAGNOSTICS ==========")
+        print("\(tag) resolvedCaption: \(resolvedCaption ?? "nil")")
+        print("\(tag) asset.modificationDate: \(asset.modificationDate?.description ?? "nil")")
+
+        // 1. PHAsset KVC — try every plausible key
+        let kvcKeys = ["caption", "title", "descriptionProperties",
+                        "longDescription", "additionalAttributes",
+                        "localizedTitle", "comment",
+                        "adjustmentFormatIdentifier"]
+        for key in kvcKeys {
+            let val: Any? = try? (asset as NSObject).value(forKey: key)
+            if let val { print("\(tag) PHAsset KVC[\(key)] = \(val)") }
+        }
+
+        // 2. PHAssetResource list
+        let resources = PHAssetResource.assetResources(for: asset)
+        print("\(tag) PHAssetResource count: \(resources.count)")
+        for res in resources {
+            print("\(tag)   resource type=\(res.type.rawValue) filename=\(res.originalFilename) uti=\(res.uniformTypeIdentifier)")
+        }
+
+        // 3. Image bytes — all IPTC, TIFF, EXIF keys
+        if let source = CGImageSourceCreateWithData(imageData as CFData, nil),
+           let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
+            print("\(tag) --- Properties top-level keys ---")
+            for key in props.keys {
+                let k = key as String
+                if let sub = props[key] as? [CFString: Any] {
+                    print("\(tag)   [\(k)] (\(sub.count) entries)")
+                    for (sk, sv) in sub {
+                        let svStr = "\(sv)"
+                        let truncated = svStr.count > 120 ? String(svStr.prefix(120)) + "…" : svStr
+                        print("\(tag)     \(sk as String) = \(truncated)")
+                    }
+                } else {
+                    let vStr = "\(props[key]!)"
+                    let truncated = vStr.count > 120 ? String(vStr.prefix(120)) + "…" : vStr
+                    print("\(tag)   \(k) = \(truncated)")
+                }
+            }
+
+            // 4. XMP metadata tags
+            if let metadata = CGImageSourceCopyMetadataAtIndex(source, 0, nil) {
+                print("\(tag) --- XMP metadata tags ---")
+                CGImageMetadataEnumerateTagsUsingBlock(metadata, nil, nil) { path, tag in
+                    let prefix = CGImageMetadataTagCopyPrefix(tag) as String? ?? "?"
+                    let name = CGImageMetadataTagCopyName(tag) as String? ?? "?"
+                    let value = CGImageMetadataTagCopyValue(tag)
+                    let vStr = value.map { "\($0)" } ?? "nil"
+                    let truncated = vStr.count > 120 ? String(vStr.prefix(120)) + "…" : vStr
+                    print("[\(path as String? ?? "?")] \(prefix):\(name) = \(truncated)")
+                    return true
+                }
+            } else {
+                print("\(tag) XMP metadata: nil (no CGImageMetadata)")
+            }
+        } else {
+            print("\(tag) CGImageSource: could not create from data")
+        }
+
+        print("\(tag) ========== END DIAGNOSTICS ==========")
     }
 
     /// Records the sync-state baseline for an asset that was just uploaded
