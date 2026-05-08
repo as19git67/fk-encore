@@ -1,4 +1,5 @@
 import CryptoKit
+import CoreServices
 import Foundation
 import ImageIO
 import Photos
@@ -246,7 +247,7 @@ actor PhotoSyncService {
             }
 
             // --- Diagnostic logging (remove once caption source is identified) ---
-            logCaptionDiagnostics(asset: asset, imageData: data, resolvedCaption: caption)
+            await logCaptionDiagnostics(asset: asset, imageData: data, resolvedCaption: caption)
 
             if let caption {
                 struct DescBody: Encodable { let description: String }
@@ -408,17 +409,20 @@ actor PhotoSyncService {
 
     /// Logs all available metadata from every source so we can identify
     /// where iOS Photos.app stores the user-entered caption.
-    private func logCaptionDiagnostics(asset: PHAsset, imageData: Data, resolvedCaption: String?) {
+    private func logCaptionDiagnostics(asset: PHAsset, imageData: Data, resolvedCaption: String?) async {
         let tag = "[CaptionDiag \(asset.localIdentifier.prefix(8))]"
         print("\(tag) ========== CAPTION DIAGNOSTICS ==========")
         print("\(tag) resolvedCaption: \(resolvedCaption ?? "nil")")
         print("\(tag) asset.modificationDate: \(asset.modificationDate?.description ?? "nil")")
 
-        // 1. PHAsset KVC — try every plausible key
+        // 1. PHAsset KVC — extended key list
         let kvcKeys = ["caption", "title", "descriptionProperties",
                         "longDescription", "additionalAttributes",
                         "localizedTitle", "comment",
-                        "adjustmentFormatIdentifier"]
+                        "adjustmentFormatIdentifier",
+                        "userCaption", "captionText", "userDescription",
+                        "extendedAttributes", "metadataInfo", "adjustmentInfo",
+                        "infoComment", "memoText", "userMemo"]
         for key in kvcKeys {
             let val: Any? = try? (asset as NSObject).value(forKey: key)
             if let val { print("\(tag) PHAsset KVC[\(key)] = \(val)") }
@@ -454,13 +458,13 @@ actor PhotoSyncService {
             // 4. XMP metadata tags
             if let metadata = CGImageSourceCopyMetadataAtIndex(source, 0, nil) {
                 print("\(tag) --- XMP metadata tags ---")
-                CGImageMetadataEnumerateTagsUsingBlock(metadata, nil, nil) { path, tag in
-                    let prefix = CGImageMetadataTagCopyPrefix(tag) as String? ?? "?"
-                    let name = CGImageMetadataTagCopyName(tag) as String? ?? "?"
-                    let value = CGImageMetadataTagCopyValue(tag)
+                CGImageMetadataEnumerateTagsUsingBlock(metadata, nil, nil) { path, mtag in
+                    let prefix = CGImageMetadataTagCopyPrefix(mtag) as String? ?? "?"
+                    let name = CGImageMetadataTagCopyName(mtag) as String? ?? "?"
+                    let value = CGImageMetadataTagCopyValue(mtag)
                     let vStr = value.map { "\($0)" } ?? "nil"
                     let truncated = vStr.count > 120 ? String(vStr.prefix(120)) + "…" : vStr
-                    print("[\(path as String? ?? "?")] \(prefix):\(name) = \(truncated)")
+                    print("\(tag)   [\(path as String? ?? "?")] \(prefix):\(name) = \(truncated)")
                     return true
                 }
             } else {
@@ -470,7 +474,80 @@ actor PhotoSyncService {
             print("\(tag) CGImageSource: could not create from data")
         }
 
+        // 5. PHContentEditingInput — request and inspect ALL properties via Mirror,
+        //    plus check adjustmentData and try Spotlight on fullSizeImageURL.
+        await logEditingInputDiagnostics(asset: asset, tag: tag)
+
         print("\(tag) ========== END DIAGNOSTICS ==========")
+    }
+
+    /// Synchronously requests PHContentEditingInput and dumps every property
+    /// via Mirror reflection. Also parses adjustmentData and tries Spotlight.
+    private func logEditingInputDiagnostics(asset: PHAsset, tag: String) async {
+        let input: PHContentEditingInput? = await withCheckedContinuation { cont in
+            let options = PHContentEditingInputRequestOptions()
+            options.isNetworkAccessAllowed = true
+            asset.requestContentEditingInput(with: options) { input, _ in
+                cont.resume(returning: input)
+            }
+        }
+        guard let input else {
+            print("\(tag) PHContentEditingInput: nil")
+            return
+        }
+
+        print("\(tag) --- PHContentEditingInput Mirror ---")
+        let mirror = Mirror(reflecting: input)
+        for child in mirror.children {
+            let label = child.label ?? "?"
+            let value = "\(child.value)"
+            let truncated = value.count > 200 ? String(value.prefix(200)) + "…" : value
+            print("\(tag)   \(label) = \(truncated)")
+        }
+
+        // KVC on the editing input itself
+        let editingKvcKeys = ["caption", "description", "title", "comment",
+                               "imageDescription", "userCaption"]
+        for key in editingKvcKeys {
+            let val: Any? = try? (input as NSObject).value(forKey: key)
+            if let val { print("\(tag) PHContentEditingInput KVC[\(key)] = \(val)") }
+        }
+
+        // adjustmentData: format identifier + raw bytes (often a plist)
+        if let adj = input.adjustmentData {
+            print("\(tag) adjustmentData.formatIdentifier = \(adj.formatIdentifier)")
+            print("\(tag) adjustmentData.formatVersion    = \(adj.formatVersion)")
+            print("\(tag) adjustmentData.data.count       = \(adj.data.count)")
+            // Try parsing as plist
+            if let plist = try? PropertyListSerialization.propertyList(from: adj.data, options: [], format: nil) {
+                print("\(tag) adjustmentData parsed as plist: \(plist)")
+            } else if let str = String(data: adj.data, encoding: .utf8) {
+                let truncated = str.count > 500 ? String(str.prefix(500)) + "…" : str
+                print("\(tag) adjustmentData as UTF-8: \(truncated)")
+            }
+        } else {
+            print("\(tag) adjustmentData: nil")
+        }
+
+        // 6. Spotlight via MDItem on the fullSizeImageURL
+        let url = input.fullSizeImageURL
+        if let url {
+            print("\(tag) fullSizeImageURL: \(url.path)")
+            if let mdItem = MDItemCreateWithURL(nil, url as CFURL) {
+                let attrNames: [CFString] = [
+                    kMDItemDescription, kMDItemHeadline, kMDItemTitle,
+                    kMDItemComment, kMDItemSubject, kMDItemTextContent,
+                    kMDItemKeywords, kMDItemDisplayName
+                ]
+                for attr in attrNames {
+                    if let v = MDItemCopyAttribute(mdItem, attr) {
+                        print("\(tag) MDItem[\(attr as String)] = \(v)")
+                    }
+                }
+            } else {
+                print("\(tag) MDItem: nil for fullSizeImageURL")
+            }
+        }
     }
 
     /// Records the sync-state baseline for an asset that was just uploaded
