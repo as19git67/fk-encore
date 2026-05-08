@@ -157,6 +157,43 @@ actor APIClient {
 
     // MARK: - Download (for photos/thumbnails)
 
+    /// Issues a GET with an `If-None-Match` header. Returns `nil` when the
+    /// server responded 304 Not Modified (caller's cached view is still
+    /// current), otherwise returns the new ETag and the body. Used by the
+    /// background sync to skip work when nothing changed (issue #303 phase 5).
+    struct CachedResponse {
+        let etag: String?
+        let body: Data
+    }
+
+    func getWithETag(_ path: String, ifNoneMatch: String?, query: [String: String]? = nil) async throws -> CachedResponse? {
+        let url = buildURL(path: path, query: query)
+        var request = URLRequest(url: url, timeoutInterval: 30)
+        request.httpMethod = "GET"
+        if let ifNoneMatch { request.setValue(ifNoneMatch, forHTTPHeaderField: "If-None-Match") }
+        applyAuth(&request)
+
+        var (data, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse, http.statusCode == 401, let manager = authManager {
+            if await refreshOnce(manager: manager) {
+                applyAuth(&request)
+                (data, response) = try await URLSession.shared.data(for: request)
+            } else {
+                manager.handleUnauthorized()
+                throw APIError.httpError(401, parseErrorMessage(data))
+            }
+        }
+
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        if http.statusCode == 304 { return nil }
+        guard (200...299).contains(http.statusCode) else {
+            if http.statusCode == 401 { authManager?.handleUnauthorized() }
+            throw APIError.httpError(http.statusCode, parseErrorMessage(data))
+        }
+        let etag = http.value(forHTTPHeaderField: "ETag") ?? http.value(forHTTPHeaderField: "Etag")
+        return CachedResponse(etag: etag, body: data)
+    }
+
     func downloadData(_ path: String, query: [String: String]? = nil) async throws -> Data {
         let url = buildURL(path: path, query: query)
         var request = URLRequest(url: url)
