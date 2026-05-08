@@ -504,15 +504,27 @@ def _tax_sections_outline(entries: list[TaxSectionEntry]) -> str:
     return "\n".join(lines)
 
 
+_CLASSIFY_MAX_TOKENS = 768
+# Headroom for chat-template overhead (role markers, BOS/EOS, separators) that
+# our raw-string token count does not see. 256 is generous for a Llama-style
+# template; the alternative is to recreate the template here, which couples us
+# to the model.
+_CLASSIFY_TEMPLATE_HEADROOM = 256
+
+
+def _count_tokens(llm: Any, text: str) -> int:
+    return len(llm.tokenize(text.encode("utf-8"), add_bos=False, special=False))
+
+
 @app.post("/classify", response_model=ClassifyResponse)
 async def classify(req: ClassifyRequest) -> ClassifyResponse:
     llm = _state["llm"]
     if llm is None:
         raise HTTPException(status_code=503, detail="llm not loaded")
 
-    # Cap the document text so prompt + response stay within n_ctx on a 3B model.
-    # ~6000 chars ≈ 1500–2000 tokens, leaves plenty of room for the system prompt,
-    # the taxonomy and the response.
+    # Initial char-cap remains as a cheap upper bound. A token-budget pass
+    # below shrinks `text` further when the taxonomy + tax_sections outline
+    # bloat the prompt past n_ctx (issue #325).
     text = req.text[:6000]
 
     tax_active = bool(req.tax_sections)
@@ -524,11 +536,46 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
         else ""
     )
 
-    user_prompt = (
-        f"Taxonomie (slug: Name):\n{_taxonomy_outline(req.taxonomy)}{tax_block}\n\n"
-        f"Max. Tags: {req.max_tags}\n\n"
-        f"Dokumenttext:\n---\n{text}\n---"
-    )
+    def _build_user_prompt(body: str) -> str:
+        return (
+            f"Taxonomie (slug: Name):\n{_taxonomy_outline(req.taxonomy)}{tax_block}\n\n"
+            f"Max. Tags: {req.max_tags}\n\n"
+            f"Dokumenttext:\n---\n{body}\n---"
+        )
+
+    user_prompt = _build_user_prompt(text)
+
+    # Token-budget guard. The taxonomy + tax_sections outline can be several
+    # thousand tokens by themselves; combined with a long document text the
+    # prompt has been observed at 8691 tokens against an LLM_CTX of 8192. We
+    # tokenize the actual prompt and shrink the document text until it fits.
+    budget = LLM_CTX - _CLASSIFY_MAX_TOKENS - _CLASSIFY_TEMPLATE_HEADROOM
+    overhead_tokens = _count_tokens(llm, system_prompt + _build_user_prompt(""))
+    text_token_budget = budget - overhead_tokens
+    if text_token_budget < 64:
+        # Even with empty text we'd overflow — taxonomy/tax_sections alone are
+        # too large. Surface a 413 so the caller can act on it instead of
+        # hitting llama.cpp's 500.
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"taxonomy+tax_sections too large for context window: "
+                f"overhead={overhead_tokens} budget={budget}"
+            ),
+        )
+
+    text_tokens = llm.tokenize(text.encode("utf-8"), add_bos=False, special=False)
+    if len(text_tokens) > text_token_budget:
+        truncated = llm.detokenize(text_tokens[:text_token_budget])
+        if isinstance(truncated, bytes):
+            text = truncated.decode("utf-8", errors="ignore")
+        else:
+            text = str(truncated)
+        log.info(
+            "classify: truncated document text from %d to %d tokens to fit n_ctx",
+            len(text_tokens), text_token_budget,
+        )
+        user_prompt = _build_user_prompt(text)
 
     try:
         completion = await _run_blocking(
@@ -539,9 +586,9 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
             ],
             response_format={"type": "json_object"},
             temperature=0.2,
-            # 768 tokens leaves headroom for the extra tax fields (up to a
-            # handful of tax_sections entries) without touching n_ctx.
-            max_tokens=768,
+            # _CLASSIFY_MAX_TOKENS leaves headroom for the extra tax fields
+            # (up to a handful of tax_sections entries) without touching n_ctx.
+            max_tokens=_CLASSIFY_MAX_TOKENS,
         )
     except HTTPException:
         raise
