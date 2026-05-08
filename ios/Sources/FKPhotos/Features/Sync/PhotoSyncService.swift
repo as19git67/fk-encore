@@ -236,10 +236,17 @@ actor PhotoSyncService {
 
         if storedHash == nil || storedHash == currentHash {
             // No stored baseline (pre-Option-3 upload) or pixels unchanged.
-            // Use the lightweight PATCH path: extract IPTC caption and update.
-            // Guard: only PATCH when iOS actually embedded a caption — sending
-            // nil would silently clear a description the server already has.
-            if let caption = iptcCaption(from: data) {
+            // Use the lightweight PATCH path: extract caption and update.
+            // PHImageManager bytes don't carry the iOS Photos.app caption, so
+            // when iptcCaption returns nil fall back to PHContentEditingInput
+            // which freshly renders the asset and embeds the caption metadata.
+            // Guard: only PATCH when we actually have a caption — sending nil
+            // would silently clear a description the server already has.
+            var caption = iptcCaption(from: data)
+            if caption == nil {
+                caption = await captionFromEditingInput(asset)
+            }
+            if let caption {
                 struct DescBody: Encodable { let description: String }
                 struct DescResponse: Decodable { let success: Bool }
                 do {
@@ -283,18 +290,58 @@ actor PhotoSyncService {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    /// Extracts the IPTC CaptionAbstract field embedded in *imageData* using
-    /// ImageIO. Returns nil when no caption is present or the bytes aren't a
-    /// recognised image format.
+    /// Extracts a user-entered caption / description from *imageData* by
+    /// inspecting all common metadata containers. iOS Photos.app stores the
+    /// "i"-panel caption in its own SQLite database — the bytes returned by
+    /// PHImageManager.requestImageDataAndOrientation do NOT carry it. This
+    /// helper still tries every plausible field for completeness; the actual
+    /// caption usually has to come from PHContentEditingInput-rendered bytes
+    /// (see captionFromEditingInput).
     nonisolated private func iptcCaption(from imageData: Data) -> String? {
         guard let source = CGImageSourceCreateWithData(imageData as CFData, nil),
-              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let iptc = props[kCGImagePropertyIPTCDictionary] as? [CFString: Any],
-              let caption = iptc[kCGImagePropertyIPTCCaptionAbstract] as? String,
-              !caption.isEmpty else {
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
             return nil
         }
-        return caption
+        return extractCaption(from: props)
+    }
+
+    /// Walks IPTC, TIFF, EXIF and XMP dictionaries looking for the first
+    /// non-empty caption-like string. Mirrors the server-side combineDescription
+    /// fallback chain so iOS and server agree on which field "wins".
+    nonisolated private func extractCaption(from props: [CFString: Any]) -> String? {
+        if let iptc = props[kCGImagePropertyIPTCDictionary] as? [CFString: Any] {
+            if let s = iptc[kCGImagePropertyIPTCCaptionAbstract] as? String, !s.isEmpty { return s }
+        }
+        if let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any] {
+            if let s = tiff[kCGImagePropertyTIFFImageDescription] as? String, !s.isEmpty { return s }
+        }
+        if let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] {
+            if let s = exif[kCGImagePropertyExifUserComment] as? String, !s.isEmpty { return s }
+        }
+        return nil
+    }
+
+    /// Reads the iOS Photos.app caption by going through PHContentEditingInput.
+    /// Unlike PHImageManager, the file at `fullSizeImageURL` is a freshly
+    /// rendered representation of the asset in its current state — depending
+    /// on the iOS version this includes the user-entered caption embedded as
+    /// IPTC / XMP metadata. Used as a fallback when the cheaper byte-based
+    /// extraction (iptcCaption) returns nil.
+    private func captionFromEditingInput(_ asset: PHAsset) async -> String? {
+        await withCheckedContinuation { continuation in
+            let options = PHContentEditingInputRequestOptions()
+            options.isNetworkAccessAllowed = true
+
+            asset.requestContentEditingInput(with: options) { input, _ in
+                guard let url = input?.fullSizeImageURL,
+                      let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                      let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                continuation.resume(returning: self.extractCaption(from: props))
+            }
+        }
     }
 
     /// Records the sync-state baseline for an asset that was just uploaded
