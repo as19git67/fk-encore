@@ -2,6 +2,7 @@ import UIKit
 import SwiftUI
 import UniformTypeIdentifiers
 import Photos
+import ImageIO
 
 // MARK: - Extension entry point
 
@@ -221,7 +222,7 @@ struct ShareUploadView: View {
         isUploading = true
         errorMessage = nil
 
-        var items: [(Data, String, String, Bool, Date?)] = []
+        var items: [(Data, String, String, Bool, Date?, String?)] = []
         for provider in itemProviders {
             if let item = await loadImageData(from: provider) {
                 items.append(item)
@@ -238,16 +239,28 @@ struct ShareUploadView: View {
         ShareConfig.saveRecentAlbumIds(Array(selectedAlbumIds))
 
         var uploadedIds: [Int] = []
-        for (data, filename, mimeType, isFavorite, capturedAt) in items {
+        for (data, filename, mimeType, isFavorite, capturedAt, caption) in items {
+            var resolvedId: Int? = nil
             do {
                 let photoId = try await ShareAPIClient.uploadPhoto(
                     data: data, filename: filename, mimeType: mimeType,
                     isFavorite: isFavorite, capturedAt: capturedAt)
                 uploadedIds.append(photoId)
+                resolvedId = photoId
             } catch ShareAPIError.duplicate(let existingId) {
-                if let id = existingId { uploadedIds.append(id) }
+                if let id = existingId {
+                    uploadedIds.append(id)
+                    resolvedId = id
+                }
             } catch {
                 errorMessage = error.localizedDescription
+            }
+            // When sharing from Photos.app the exported bytes include the
+            // Photos.app caption as IPTC. For new uploads the server already
+            // extracts it; for duplicates (photo already uploaded via background
+            // sync but without caption) we PATCH explicitly to close the gap.
+            if let id = resolvedId, let caption {
+                try? await ShareAPIClient.patchDescription(photoId: id, description: caption)
             }
             uploadProgress += 1
         }
@@ -264,7 +277,7 @@ struct ShareUploadView: View {
 
     // MARK: - Image data loading
 
-    private func loadImageData(from provider: NSItemProvider) async -> (Data, String, String, Bool, Date?)? {
+    private func loadImageData(from provider: NSItemProvider) async -> (Data, String, String, Bool, Date?, String?)? {
         let meta = await loadAssetMetadata(from: provider)
         let candidates: [(String, String, String)] = [
             (UTType.heic.identifier,  "heic", "image/heic"),
@@ -275,13 +288,40 @@ struct ShareUploadView: View {
         ]
         for (uti, ext, mime) in candidates {
             guard provider.hasItemConformingToTypeIdentifier(uti) else { continue }
-            let result: (Data, String, String, Bool, Date?)? = await withCheckedContinuation { cont in
+            let result: (Data, String, String, Bool, Date?, String?)? = await withCheckedContinuation { cont in
                 provider.loadDataRepresentation(forTypeIdentifier: uti) { data, _ in
                     guard let data else { cont.resume(returning: nil); return }
-                    cont.resume(returning: (data, "photo.\(ext)", mime, meta.isFavorite, meta.capturedAt))
+                    // Photos.app embeds the caption as IPTC when exporting via the
+                    // Share Sheet — extract it here so it can be synced to the server.
+                    let caption = Self.extractIPTCCaption(from: data)
+                    cont.resume(returning: (data, "photo.\(ext)", mime, meta.isFavorite, meta.capturedAt, caption))
                 }
             }
             if let result { return result }
+        }
+        return nil
+    }
+
+    /// Extracts caption from image bytes: IPTC, TIFF, EXIF, then XMP metadata.
+    private static func extractIPTCCaption(from data: Data) -> String? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        // Properties dictionary (IPTC / TIFF / EXIF)
+        if let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
+            if let iptc = props[kCGImagePropertyIPTCDictionary] as? [CFString: Any] {
+                if let s = iptc[kCGImagePropertyIPTCCaptionAbstract] as? String, !s.isEmpty { return s }
+                if let s = iptc[kCGImagePropertyIPTCHeadline] as? String, !s.isEmpty { return s }
+            }
+            if let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any],
+               let s = tiff[kCGImagePropertyTIFFImageDescription] as? String, !s.isEmpty { return s }
+            if let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any],
+               let s = exif[kCGImagePropertyExifUserComment] as? String, !s.isEmpty { return s }
+        }
+        // XMP metadata (dc:description) — separate API
+        if let metadata = CGImageSourceCopyMetadataAtIndex(source, 0, nil),
+           let tag = CGImageMetadataCopyTagWithPath(metadata, nil, "dc:description" as CFString),
+           let value = CGImageMetadataTagCopyValue(tag) {
+            if let str = value as? String, !str.isEmpty { return str }
+            if let arr = value as? [Any], let str = arr.first as? String, !str.isEmpty { return str }
         }
         return nil
     }
@@ -424,6 +464,18 @@ enum ShareAPIClient {
         struct Body: Encodable { let albumId: Int; let photoId: Int }
         request.httpBody = try JSONEncoder().encode(Body(albumId: albumId, photoId: photoId))
         _ = try await URLSession.shared.data(for: request)
+    }
+
+    static func patchDescription(photoId: Int, description: String) async throws {
+        var request = try makeRequest(method: "PATCH", path: "/photos/\(photoId)/description")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        struct Body: Encodable { let description: String }
+        request.httpBody = try JSONEncoder().encode(Body(description: description))
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode) else {
+            throw ShareAPIError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
     }
 
     private static func makeRequest(method: String, path: String) throws -> URLRequest {

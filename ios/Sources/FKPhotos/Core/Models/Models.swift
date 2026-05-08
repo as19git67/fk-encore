@@ -233,6 +233,10 @@ struct AlbumPhotoWithMeta: Codable, Identifiable, Sendable {
     let hash: String?
     let taken_at: String?
     let created_at: String
+    /// Server-side timestamp; bumped by a DB trigger on every metadata or
+    /// curation change. Used by the iOS download sync to detect changes
+    /// without re-fetching pixel data (issue #303).
+    let updated_at: String?
     let latitude: Double?
     let longitude: Double?
     let location_name: String?

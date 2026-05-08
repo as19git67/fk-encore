@@ -33,6 +33,16 @@ struct DownloadSyncPreferences {
     private static let includeHiddenKey    = "download.includeHidden"
     private static let lastSyncDateKey     = "download.lastSyncDate"
     private static let downloadedPhotosKey = "download.downloadedPhotos"
+    // Per-photo sync-state cache: keyed by "<albumId>:<photoId>", stores the
+    // server's hash and updated_at value at the time of the last sync. Used to
+    // detect when the server's metadata or pixel data have moved and the local
+    // copy needs refreshing (issue #303).
+    private static let downloadedStateKey  = "download.downloadedState"
+    // Last ETag observed on /photos/index. When the next sync run sends this
+    // back via If-None-Match and the server replies 304 Not Modified we know
+    // nothing changed in the user's library and the per-album walk can be
+    // skipped entirely (issue #303 phase 5).
+    private static let lastIndexETagKey    = "download.lastIndexETag"
 
     // MARK: - Settings
 
@@ -95,9 +105,53 @@ struct DownloadSyncPreferences {
     static func resetDownloadHistory() {
         UserDefaults.standard.removeObject(forKey: downloadedPhotosKey)
         UserDefaults.standard.removeObject(forKey: lastSyncDateKey)
+        UserDefaults.standard.removeObject(forKey: downloadedStateKey)
     }
 
     static var downloadedCount: Int {
         loadDownloadedPhotos().values.reduce(0) { $0 + $1.count }
+    }
+
+    // MARK: - Per-photo sync state (issue #303)
+
+    /// Server-side state we last applied to the local copy of a photo.
+    /// Used by PhotoDownloadService to skip work when nothing moved and to
+    /// refresh metadata / pixel data when something did.
+    struct DownloadedPhotoState: Codable, Hashable, Sendable {
+        let hash: String?
+        let updatedAt: String?
+        let takenAt: String?
+        let isFavorite: Bool
+    }
+
+    /// Returns the entire state map keyed by "<albumId>:<photoId>".
+    static func loadDownloadedState() -> [String: DownloadedPhotoState] {
+        guard let data = UserDefaults.standard.data(forKey: downloadedStateKey),
+              let decoded = try? JSONDecoder().decode([String: DownloadedPhotoState].self, from: data)
+        else {
+            return [:]
+        }
+        return decoded
+    }
+
+    static func saveDownloadedState(_ state: [String: DownloadedPhotoState]) {
+        if let data = try? JSONEncoder().encode(state) {
+            UserDefaults.standard.set(data, forKey: downloadedStateKey)
+        }
+    }
+
+    static func stateKey(albumId: Int, photoId: Int) -> String {
+        "\(albumId):\(photoId)"
+    }
+
+    static var lastIndexETag: String? {
+        get { UserDefaults.standard.string(forKey: lastIndexETagKey) }
+        set {
+            if let v = newValue {
+                UserDefaults.standard.set(v, forKey: lastIndexETagKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: lastIndexETagKey)
+            }
+        }
     }
 }
