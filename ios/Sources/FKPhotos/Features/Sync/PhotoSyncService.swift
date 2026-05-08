@@ -387,19 +387,39 @@ actor PhotoSyncService {
     // MARK: - PHAsset caption via KVC
 
     /// Attempts to read the caption directly from the PHAsset via KVC.
-    /// PHAsset has no public caption property, but iOS may expose it
-    /// through private/undocumented keys accessible via value(forKey:).
+    /// PHAsset exposes a private `descriptionProperties` object of type
+    /// `PHAssetDescriptionProperties` which holds the user-entered caption.
     nonisolated private func captionFromAsset(_ asset: PHAsset) -> String? {
-        let keys = ["caption", "title", "descriptionProperties",
-                     "longDescription", "additionalAttributes"]
+        // Primary path: PHAssetDescriptionProperties holds the caption.
+        if (asset as AnyObject).responds(to: NSSelectorFromString("descriptionProperties")),
+           let descProps = (asset as NSObject).value(forKey: "descriptionProperties") as? NSObject {
+            if let caption = captionFromDescriptionProperties(descProps), !caption.isEmpty {
+                return caption
+            }
+        }
+        // Fallback: try other potential KVC keys directly on PHAsset.
+        let keys = ["caption", "title", "longDescription"]
         for key in keys {
-            if let value = try? (asset as NSObject).value(forKey: key) {
-                if let str = value as? String, !str.isEmpty { return str }
-                if let dict = value as? [String: Any] {
-                    for (_, v) in dict {
-                        if let str = v as? String, !str.isEmpty { return str }
-                    }
-                }
+            guard (asset as AnyObject).responds(to: NSSelectorFromString(key)) else { continue }
+            if let value = (asset as NSObject).value(forKey: key) as? String, !value.isEmpty {
+                return value
+            }
+        }
+        return nil
+    }
+
+    /// Reads the caption string out of a `PHAssetDescriptionProperties` object
+    /// by trying every known/likely property name via KVC.
+    nonisolated private func captionFromDescriptionProperties(_ props: NSObject) -> String? {
+        let candidateKeys = [
+            "assetDescription", "description", "caption", "text",
+            "title", "userDescription", "captionText", "longDescription",
+            "comment", "imageDescription"
+        ]
+        for key in candidateKeys {
+            guard (props as AnyObject).responds(to: NSSelectorFromString(key)) else { continue }
+            if let str = props.value(forKey: key) as? String, !str.isEmpty {
+                return str
             }
         }
         return nil
@@ -424,8 +444,37 @@ actor PhotoSyncService {
                         "extendedAttributes", "metadataInfo", "adjustmentInfo",
                         "infoComment", "memoText", "userMemo"]
         for key in kvcKeys {
-            let val: Any? = try? (asset as NSObject).value(forKey: key)
+            guard (asset as AnyObject).responds(to: NSSelectorFromString(key)) else { continue }
+            let val: Any? = (asset as NSObject).value(forKey: key)
             if let val { print("\(tag) PHAsset KVC[\(key)] = \(val)") }
+        }
+
+        // Deep-introspect descriptionProperties: this is a PHAssetDescriptionProperties
+        // object that likely holds the user-entered caption.
+        if (asset as AnyObject).responds(to: NSSelectorFromString("descriptionProperties")),
+           let descProps = (asset as NSObject).value(forKey: "descriptionProperties") as? NSObject {
+            print("\(tag) --- descriptionProperties Mirror ---")
+            let mirror = Mirror(reflecting: descProps)
+            print("\(tag)   class: \(type(of: descProps))")
+            print("\(tag)   children count: \(mirror.children.count)")
+            for child in mirror.children {
+                let label = child.label ?? "?"
+                let value = "\(child.value)"
+                let truncated = value.count > 200 ? String(value.prefix(200)) + "…" : value
+                print("\(tag)   child[\(label)] = \(truncated)")
+            }
+            print("\(tag) --- descriptionProperties KVC probe ---")
+            let descKeys = [
+                "assetDescription", "description", "caption", "text",
+                "title", "userDescription", "captionText", "longDescription",
+                "comment", "imageDescription", "subtitle", "headline",
+                "summary", "note", "userTitle", "displayTitle"
+            ]
+            for key in descKeys {
+                guard (descProps as AnyObject).responds(to: NSSelectorFromString(key)) else { continue }
+                let v: Any? = descProps.value(forKey: key)
+                if let v { print("\(tag)   descProps KVC[\(key)] = \(v)") }
+            }
         }
 
         // 2. PHAssetResource list
@@ -509,7 +558,8 @@ actor PhotoSyncService {
         let editingKvcKeys = ["caption", "description", "title", "comment",
                                "imageDescription", "userCaption"]
         for key in editingKvcKeys {
-            let val: Any? = try? (input as NSObject).value(forKey: key)
+            guard (input as AnyObject).responds(to: NSSelectorFromString(key)) else { continue }
+            let val: Any? = (input as NSObject).value(forKey: key)
             if let val { print("\(tag) PHContentEditingInput KVC[\(key)] = \(val)") }
         }
 
@@ -529,7 +579,8 @@ actor PhotoSyncService {
             print("\(tag) adjustmentData: nil")
         }
 
-        // 6. Spotlight via MDItem on the fullSizeImageURL
+        // 6. Spotlight via MDItem on the fullSizeImageURL (macOS only)
+        #if os(macOS)
         let url = input.fullSizeImageURL
         if let url {
             print("\(tag) fullSizeImageURL: \(url.path)")
@@ -548,6 +599,7 @@ actor PhotoSyncService {
                 print("\(tag) MDItem: nil for fullSizeImageURL")
             }
         }
+        #endif
     }
 
     /// Records the sync-state baseline for an asset that was just uploaded
