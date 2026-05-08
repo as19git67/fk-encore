@@ -60,23 +60,69 @@ actor PhotoDownloadService {
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         guard status == .authorized || status == .limited else { return }
 
+        // Fast-skip: ask /photos/index whether anything changed since the last
+        // sync. A 304 means no photo was added, removed, or had its metadata
+        // touched user-wide → the per-album walk has nothing to do (issue #303
+        // phase 5). The first run (no stored ETag) falls through to the full
+        // walk and seeds the ETag on success.
+        let lastETag = DownloadSyncPreferences.lastIndexETag
+        if let lastETag {
+            do {
+                let resp = try await APIClient.shared.getWithETag(
+                    "/photos/index",
+                    ifNoneMatch: lastETag,
+                    query: ["limit": "1"]
+                )
+                if resp == nil {
+                    // 304 Not Modified — nothing to do, even existing-asset
+                    // metadata reconciliation is unnecessary.
+                    DownloadSyncPreferences.lastDownloadDate = Date()
+                    return
+                }
+            } catch {
+                // Treat any error as "do the full walk" — better to over-sync
+                // than miss a change.
+            }
+        }
+
         var downloadedPhotos = DownloadSyncPreferences.loadDownloadedPhotos()
+        var downloadedState  = DownloadSyncPreferences.loadDownloadedState()
 
         for albumId in albumIds {
             do {
-                try await syncAlbum(albumId: albumId, downloadedPhotos: &downloadedPhotos)
+                try await syncAlbum(
+                    albumId: albumId,
+                    downloadedPhotos: &downloadedPhotos,
+                    downloadedState: &downloadedState
+                )
             } catch {
                 // Continue with remaining albums – transient errors are retried next cycle.
             }
         }
 
         DownloadSyncPreferences.saveDownloadedPhotos(downloadedPhotos)
+        DownloadSyncPreferences.saveDownloadedState(downloadedState)
         DownloadSyncPreferences.lastDownloadDate = Date()
+
+        // Refresh the cached ETag so the next sync can short-circuit on 304.
+        // Done unconditionally (and ignoring failures) because a stale ETag
+        // only costs one extra walk; missing one would be a correctness bug.
+        if let resp = try? await APIClient.shared.getWithETag(
+            "/photos/index",
+            ifNoneMatch: nil,
+            query: ["limit": "1"]
+        ), let etag = resp.etag {
+            DownloadSyncPreferences.lastIndexETag = etag
+        }
     }
 
     // MARK: - Per-album sync
 
-    private func syncAlbum(albumId: Int, downloadedPhotos: inout [String: [String: String]]) async throws {
+    private func syncAlbum(
+        albumId: Int,
+        downloadedPhotos: inout [String: [String: String]],
+        downloadedState: inout [String: DownloadSyncPreferences.DownloadedPhotoState]
+    ) async throws {
         // Fetch and filter photos from the server
         let albumData: AlbumWithPhotos = try await APIClient.shared.get("/albums/\(albumId)")
         let serverPhotos = applyFilter(albumData.photos)
@@ -97,6 +143,9 @@ actor PhotoDownloadService {
             if let localId = albumDownloads[removedId] {
                 await moveToTrash(localIdentifier: localId, from: iosAlbum, to: trashAlbum)
                 albumDownloads.removeValue(forKey: removedId)
+                if let removedIntId = Int(removedId) {
+                    downloadedState.removeValue(forKey: DownloadSyncPreferences.stateKey(albumId: albumId, photoId: removedIntId))
+                }
             }
         }
 
@@ -112,35 +161,143 @@ actor PhotoDownloadService {
                 // just register it in the album tracking and update its metadata.
                 albumDownloads[photoKey] = existingLocalId
                 await addToAlbumIfNeeded(localIdentifier: existingLocalId, album: iosAlbum)
-                await updateFavoriteStatus(localIdentifier: existingLocalId, isFavorite: photo.curation_status == .favorite)
+                await applyServerMetadata(localIdentifier: existingLocalId, photo: photo)
+                downloadedState[DownloadSyncPreferences.stateKey(albumId: albumId, photoId: photo.id)] = makeState(from: photo)
                 downloadedPhotos[albumKey] = albumDownloads
                 DownloadSyncPreferences.saveDownloadedPhotos(downloadedPhotos)
+                DownloadSyncPreferences.saveDownloadedState(downloadedState)
             } else {
                 // Not a local asset — download from server.
                 do {
                     let localId = try await downloadAndSave(photo: photo, toAlbum: iosAlbum)
                     albumDownloads[photoKey] = localId
+                    downloadedState[DownloadSyncPreferences.stateKey(albumId: albumId, photoId: photo.id)] = makeState(from: photo)
                     // Persist incrementally so a mid-run interruption doesn't re-download
                     downloadedPhotos[albumKey] = albumDownloads
                     DownloadSyncPreferences.saveDownloadedPhotos(downloadedPhotos)
+                    DownloadSyncPreferences.saveDownloadedState(downloadedState)
                 } catch {
                     // Skip individual photo failures; they'll be retried next run.
                 }
             }
         }
 
-        // 3. Update favorite status for already-downloaded photos
+        // 3. Reconcile already-downloaded photos with current server state.
+        //    Skip work fast when neither hash nor updated_at moved (issue #303).
         let existingPhotos = serverPhotos.filter { albumDownloads.keys.contains(String($0.id)) }
         for photo in existingPhotos {
-            if let localId = albumDownloads[String(photo.id)] {
-                await updateFavoriteStatus(
-                    localIdentifier: localId,
-                    isFavorite: photo.curation_status == .favorite
-                )
+            guard let localId = albumDownloads[String(photo.id)] else { continue }
+            let key = DownloadSyncPreferences.stateKey(albumId: albumId, photoId: photo.id)
+            let prev = downloadedState[key]
+            let next = makeState(from: photo)
+
+            if prev == next { continue }  // nothing to do
+
+            // Pixel data changed on the server (e.g. user replaced the file or
+            // it was reprocessed). Re-download and replace the local asset.
+            if let prevHash = prev?.hash, let nextHash = next.hash, prevHash != nextHash {
+                do {
+                    let newLocalId = try await replaceLocalAsset(
+                        oldLocalIdentifier: localId,
+                        photo: photo,
+                        toAlbum: iosAlbum
+                    )
+                    albumDownloads[String(photo.id)] = newLocalId
+                    downloadedPhotos[albumKey] = albumDownloads
+                } catch {
+                    // Leave the old local asset in place; we'll retry next run.
+                    continue
+                }
+            } else {
+                // Metadata-only change: update creationDate / favorite status in
+                // place. Cheap PHAssetChangeRequest, no re-download needed.
+                await applyServerMetadata(localIdentifier: localId, photo: photo)
             }
+
+            downloadedState[key] = next
         }
 
         downloadedPhotos[albumKey] = albumDownloads
+    }
+
+    // MARK: - Helpers (issue #303)
+
+    private func makeState(from photo: AlbumPhotoWithMeta) -> DownloadSyncPreferences.DownloadedPhotoState {
+        DownloadSyncPreferences.DownloadedPhotoState(
+            hash: photo.hash,
+            updatedAt: photo.updated_at,
+            takenAt: photo.taken_at,
+            isFavorite: photo.curation_status == .favorite
+        )
+    }
+
+    /// Applies server-side metadata onto the local PHAsset: favorite flag and
+    /// creationDate. Description / keywords are not propagated — iOS Photos
+    /// doesn't expose user-editable description on PHAsset.
+    private func applyServerMetadata(localIdentifier: String, photo: AlbumPhotoWithMeta) async {
+        let assets = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil)
+        guard let asset = assets.firstObject else { return }
+
+        let wantFav = photo.curation_status == .favorite
+        let wantCreation: Date? = photo.taken_at.flatMap { ISO8601DateFormatter().date(from: $0) }
+
+        let needsFav = asset.isFavorite != wantFav
+        let needsDate = wantCreation != nil && asset.creationDate != wantCreation
+        guard needsFav || needsDate else { return }
+
+        try? await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            PHPhotoLibrary.shared().performChanges {
+                let req = PHAssetChangeRequest(for: asset)
+                if needsFav { req.isFavorite = wantFav }
+                if needsDate, let d = wantCreation { req.creationDate = d }
+            } completionHandler: { _, error in
+                if let error { cont.resume(throwing: error) } else { cont.resume() }
+            }
+        }
+    }
+
+    /// Re-downloads `photo` and replaces the local asset identified by
+    /// `oldLocalIdentifier`. The old asset is deleted (which on iOS moves it
+    /// to "Recently Deleted" — recoverable for 30 days) and a new one is
+    /// inserted into `album`. Returns the new local identifier.
+    private func replaceLocalAsset(
+        oldLocalIdentifier: String,
+        photo: AlbumPhotoWithMeta,
+        toAlbum album: PHAssetCollection
+    ) async throws -> String {
+        var imageData = try await APIClient.shared.downloadData("/photos/file/\(photo.filename)")
+        if let desc = photo.description, !desc.isEmpty {
+            imageData = embedDescription(imageData, description: desc) ?? imageData
+        }
+
+        var newLocalIdentifier: String?
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            PHPhotoLibrary.shared().performChanges {
+                // Delete the stale asset. If the asset isn't found (already removed
+                // by the user) this is a no-op since fetchAssets returns empty.
+                let oldAssets = PHAsset.fetchAssets(withLocalIdentifiers: [oldLocalIdentifier], options: nil)
+                if oldAssets.count > 0 {
+                    PHAssetChangeRequest.deleteAssets(oldAssets)
+                }
+
+                let creation = PHAssetCreationRequest.forAsset()
+                creation.addResource(with: .photo, data: imageData, options: nil)
+                creation.isFavorite = photo.curation_status == .favorite
+                if let takenAt = photo.taken_at, let d = ISO8601DateFormatter().date(from: takenAt) {
+                    creation.creationDate = d
+                }
+
+                guard let placeholder = creation.placeholderForCreatedAsset,
+                      let albumReq = PHAssetCollectionChangeRequest(for: album) else { return }
+                albumReq.addAssets([placeholder] as NSArray)
+                newLocalIdentifier = placeholder.localIdentifier
+            } completionHandler: { _, error in
+                if let error { cont.resume(throwing: error) } else { cont.resume() }
+            }
+        }
+
+        guard let id = newLocalIdentifier else { throw DownloadError.saveFailed }
+        return id
     }
 
     // MARK: - Filter
@@ -217,6 +374,12 @@ actor PhotoDownloadService {
                 let creation = PHAssetCreationRequest.forAsset()
                 creation.addResource(with: .photo, data: imageData, options: nil)
                 creation.isFavorite = photo.curation_status == .favorite
+                // Align the local asset's creationDate with the server's
+                // taken_at so subsequent metadata diffs (issue #303) compare
+                // apples to apples instead of always showing a delta.
+                if let takenAt = photo.taken_at, let d = ISO8601DateFormatter().date(from: takenAt) {
+                    creation.creationDate = d
+                }
 
                 guard let placeholder = creation.placeholderForCreatedAsset,
                       let albumReq = PHAssetCollectionChangeRequest(for: album) else { return }
