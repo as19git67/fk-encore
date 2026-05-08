@@ -302,20 +302,25 @@ struct ShareUploadView: View {
         return nil
     }
 
-    /// Extracts the user-entered caption / description from image bytes by checking
-    /// IPTC Caption-Abstract, TIFF ImageDescription, and EXIF UserComment in order.
-    /// When Photos.app exports a photo via Share Sheet it embeds the caption as IPTC,
-    /// which is why this works here but not via PHContentEditingInput.
+    /// Extracts caption from image bytes: IPTC, TIFF, EXIF, then XMP metadata.
     private static func extractIPTCCaption(from data: Data) -> String? {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
-        else { return nil }
-        if let iptc = props[kCGImagePropertyIPTCDictionary] as? [CFString: Any],
-           let s = iptc[kCGImagePropertyIPTCCaptionAbstract] as? String, !s.isEmpty { return s }
-        if let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any],
-           let s = tiff[kCGImagePropertyTIFFImageDescription] as? String, !s.isEmpty { return s }
-        if let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any],
-           let s = exif[kCGImagePropertyExifUserComment] as? String, !s.isEmpty { return s }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        // Properties dictionary (IPTC / TIFF / EXIF)
+        if let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
+            if let iptc = props[kCGImagePropertyIPTCDictionary] as? [CFString: Any],
+               let s = iptc[kCGImagePropertyIPTCCaptionAbstract] as? String, !s.isEmpty { return s }
+            if let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any],
+               let s = tiff[kCGImagePropertyTIFFImageDescription] as? String, !s.isEmpty { return s }
+            if let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any],
+               let s = exif[kCGImagePropertyExifUserComment] as? String, !s.isEmpty { return s }
+        }
+        // XMP metadata (dc:description) — separate API
+        if let metadata = CGImageSourceCopyMetadataAtIndex(source, 0, nil),
+           let tag = CGImageMetadataCopyTagWithPath(metadata, nil, "dc:description" as CFString),
+           let value = CGImageMetadataTagCopyValue(tag) {
+            if let str = value as? String, !str.isEmpty { return str }
+            if let arr = value as? [Any], let str = arr.first as? String, !str.isEmpty { return str }
+        }
         return nil
     }
 
