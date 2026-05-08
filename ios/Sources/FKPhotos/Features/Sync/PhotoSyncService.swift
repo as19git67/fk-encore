@@ -316,6 +316,7 @@ actor PhotoSyncService {
     nonisolated private func extractCaptionFromProperties(_ props: [CFString: Any]) -> String? {
         if let iptc = props[kCGImagePropertyIPTCDictionary] as? [CFString: Any] {
             if let s = iptc[kCGImagePropertyIPTCCaptionAbstract] as? String, !s.isEmpty { return s }
+            if let s = iptc[kCGImagePropertyIPTCHeadline] as? String, !s.isEmpty { return s }
         }
         if let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any] {
             if let s = tiff[kCGImagePropertyTIFFImageDescription] as? String, !s.isEmpty { return s }

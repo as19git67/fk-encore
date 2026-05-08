@@ -307,8 +307,10 @@ struct ShareUploadView: View {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
         // Properties dictionary (IPTC / TIFF / EXIF)
         if let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
-            if let iptc = props[kCGImagePropertyIPTCDictionary] as? [CFString: Any],
-               let s = iptc[kCGImagePropertyIPTCCaptionAbstract] as? String, !s.isEmpty { return s }
+            if let iptc = props[kCGImagePropertyIPTCDictionary] as? [CFString: Any] {
+                if let s = iptc[kCGImagePropertyIPTCCaptionAbstract] as? String, !s.isEmpty { return s }
+                if let s = iptc[kCGImagePropertyIPTCHeadline] as? String, !s.isEmpty { return s }
+            }
             if let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any],
                let s = tiff[kCGImagePropertyTIFFImageDescription] as? String, !s.isEmpty { return s }
             if let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any],
