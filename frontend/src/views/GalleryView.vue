@@ -67,6 +67,7 @@ import { useSort, type SortField, type SortState } from '../composables/useSort'
 import { useNaturalSearch } from '../composables/useNaturalSearch'
 import { useReferenceData } from '../composables/useReferenceData'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
+import { useRealtimeEvent } from '../composables/useRealtime'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
 import { usePhotoNavStore } from '../stores/photoNav'
@@ -334,6 +335,7 @@ async function applyCurationToSelection(target: 'favorite' | 'hidden' | 'visible
 
 // ── Batch delete ────────────────────────────────────────────────────────────
 const deleteBusy = ref(false)
+const deleteCount = ref(0)
 const deleteSkipped = ref<BatchDeleteSkippedPhoto[]>([])
 const showDeleteSkippedDialog = ref(false)
 
@@ -353,6 +355,7 @@ function deleteFromSelection() {
 
 async function performBatchDelete(ids: number[]) {
   deleteBusy.value = true
+  deleteCount.value = ids.length
   try {
     const result = await batchDeletePhotos(ids)
     if (result.skipped.length > 0) {
@@ -625,6 +628,7 @@ const cursorPhoto = ref<Photo | null>(null)
 const cursorPrev = ref<Photo | null>(null)
 const cursorNext = ref<Photo | null>(null)
 let hydrateToken = 0
+let curationVersion = 0
 
 // ── Detail flyout state ─────────────────────────────────────────────────────
 // Per-photo metadata loaded on top of the batch-hydrated `Photo`. Faces and
@@ -717,16 +721,26 @@ async function hydrateCursor(index: number, options?: { skipNeighbors?: boolean 
   const ids = [curEntry.id]
   if (prevEntry) ids.push(prevEntry.id)
   if (nextEntry) ids.push(nextEntry.id)
+  const myCurationVersion = curationVersion
   try {
     const { photos } = await getPhotoDetailsBatch(ids)
     if (myToken !== hydrateToken) return
     const byId = new Map(photos.map((p) => [p.id, p]))
-    cursorPhoto.value = byId.get(curEntry.id) ?? cursorPhoto.value
+    // If curation was optimistically changed while the batch was in flight
+    // (user pressed F/X faster than the round-trip), preserve the optimistic
+    // curation_status so it isn't overwritten by stale server data (#309).
+    const preserveCuration = curationVersion !== myCurationVersion
+    const merge = (batch: Photo | undefined, cur: Photo | null): Photo | null => {
+      if (!batch) return cur
+      if (preserveCuration && cur) return { ...batch, curation_status: cur.curation_status }
+      return batch
+    }
+    cursorPhoto.value = merge(byId.get(curEntry.id), cursorPhoto.value)
     cursorPrev.value = prevEntry
-      ? (byId.get(prevEntry.id) ?? cursorPrev.value)
+      ? merge(byId.get(prevEntry.id), cursorPrev.value)
       : null
     cursorNext.value = nextEntry
-      ? (byId.get(nextEntry.id) ?? cursorNext.value)
+      ? merge(byId.get(nextEntry.id), cursorNext.value)
       : null
   } catch {
     // Fall back to the minimal photo objects we already set above.
@@ -772,6 +786,7 @@ async function applyCurationToPhoto(id: number, target: CurationStatus): Promise
   // Optimistic write to grid + the three fullscreen slots that might hold
   // this id. If the network write fails we reload the source AND re-hydrate
   // the current fullscreen to undo the optimistic change.
+  ++curationVersion
   galleryRef.value?.updateEntry(id, { curation: target })
   for (const r of [cursorPhoto, cursorPrev, cursorNext]) {
     if (r.value && r.value.id === id) {
@@ -959,6 +974,29 @@ async function onGalleryLoaded() {
   }
 }
 
+// ── WebSocket: live curation updates from other clients (#344) ─────────────
+useRealtimeEvent('photos', 'curation.changed', (ev) => {
+  const photoId = Number(ev.resourceId)
+  if (!Number.isFinite(photoId)) return
+  const status = ev.payload.status as CurationStatus | undefined
+  if (!status) return
+  galleryRef.value?.updateEntry(photoId, { curation: status })
+  for (const r of [cursorPhoto, cursorPrev, cursorNext]) {
+    if (r.value && r.value.id === photoId) {
+      r.value = { ...r.value, curation_status: status }
+    }
+  }
+})
+
+useRealtimeEvent('photos', 'metadata.changed', (ev) => {
+  const photoId = Number(ev.resourceId)
+  if (!Number.isFinite(photoId)) return
+  const updates = ev.payload as Record<string, unknown>
+  if (cursorPhoto.value?.id === photoId) {
+    cursorPhoto.value = { ...cursorPhoto.value, ...updates }
+  }
+})
+
 // ── Computed sort fields for VirtualGallery ─────────────────────────────────
 const sortByForGallery = computed<GallerySortField>(() => sort.value.field as GallerySortField)
 const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as GallerySortDir)
@@ -1134,6 +1172,17 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
     <div v-if="uploadResultMessage && !uploading" class="upload-result-bar">
       <i class="pi pi-check-circle" />
       <span>{{ uploadResultMessage }}</span>
+    </div>
+
+    <!-- Delete progress bar (#299) -->
+    <div v-if="deleteBusy" class="delete-progress-bar">
+      <div class="delete-progress-bar__info">
+        <i class="pi pi-spin pi-spinner" />
+        <span>{{ deleteCount }} {{ deleteCount === 1 ? 'Foto' : 'Fotos' }} werden gelöscht…</span>
+      </div>
+      <div class="delete-progress-bar__track">
+        <div class="delete-progress-bar__fill" />
+      </div>
     </div>
 
     <!-- Grid + persistent desktop detail panel. On <768px the panel is
@@ -1514,6 +1563,45 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
   color: var(--p-green-200);
 }
 .p-dark .upload-result-bar .pi-check-circle { color: var(--p-green-400); }
+
+/* ── Delete progress bar (#299) ───────────────────────────────────────── */
+.delete-progress-bar {
+  padding: 0.5rem 1rem;
+  background: var(--p-red-50);
+  border-bottom: 1px solid var(--p-red-200);
+}
+.delete-progress-bar__info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--p-red-700);
+  margin-bottom: 0.35rem;
+}
+.delete-progress-bar__track {
+  height: 4px;
+  background: var(--p-red-100);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.delete-progress-bar__fill {
+  height: 100%;
+  width: 100%;
+  background: var(--p-red-500);
+  border-radius: 2px;
+  animation: delete-pulse 1.2s ease-in-out infinite;
+}
+@keyframes delete-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+.p-dark .delete-progress-bar {
+  background: var(--p-red-900);
+  border-color: var(--p-red-700);
+}
+.p-dark .delete-progress-bar__info { color: var(--p-red-200); }
+.p-dark .delete-progress-bar__track { background: var(--p-red-800); }
+.p-dark .delete-progress-bar__fill  { background: var(--p-red-400); }
 
 .upload-button-label { display: inline-flex; cursor: pointer; }
 .upload-input-hidden { display: none; }
