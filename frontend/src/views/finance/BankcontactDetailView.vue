@@ -57,6 +57,11 @@ const probingMethods = ref(false)
 const tanMethodOptions = ref<TanMethodOption[]>([])
 const tanProbeInfo = ref<string | null>(null)
 const syncInfo = ref<string | null>(null)
+/** Per-account bank answers/exceptions returned from the most recent sync.
+ *  Surfaced in the partial-Message block so the user sees the actual reason
+ *  ("Konto 12345 — Bank meldete: 3010 Keine Buchungen vorhanden") instead
+ *  of guessing TAN. Cleared at the start of each sync. */
+const lastSyncErrors = ref<string[]>([])
 const errorMsg = ref<string | null>(null)
 const bc = ref<Bankcontact | null>(null)
 /** Bank-side accounts the most recent sync reported that aren't
@@ -226,6 +231,7 @@ async function triggerSync() {
   syncing.value = true
   errorMsg.value = null
   syncInfo.value = null
+  lastSyncErrors.value = []
   try {
     const resp = await store.syncNow(bc.value.id)
     if (resp.state === 'error') {
@@ -244,12 +250,10 @@ async function triggerSync() {
       if (resp.accounts_unknown && resp.accounts_unknown > 0) {
         parts.push(`${resp.accounts_unknown} noch nicht zugeordnete Konten`)
       }
-      const partialNote = resp.partial
-        ? ' Hinweis: Mindestens ein Konto konnte nicht abgerufen werden (z. B. TAN nötig oder Bankfehler) — gespeichert sind die erfolgreich abgerufenen Konten. Beim nächsten Sync wird das Fehlende erneut versucht.'
-        : ''
+      lastSyncErrors.value = resp.errors ?? []
       syncInfo.value = parts.length
-        ? `Sync ${resp.partial ? 'teilweise erfolgreich' : 'erfolgreich'} — ${parts.join(', ')}.${partialNote}`
-        : `Sync ${resp.partial ? 'teilweise erfolgreich' : 'erfolgreich'}.${partialNote}`
+        ? `Sync ${resp.partial ? 'teilweise erfolgreich' : 'erfolgreich'} — ${parts.join(', ')}.`
+        : `Sync ${resp.partial ? 'teilweise erfolgreich' : 'erfolgreich'}.`
       pendingUnknown.value = resp.unknown_accounts ?? []
       // Refresh accounts store so the "Konten"-section below
       // reflects what the sync just wrote.
@@ -338,6 +342,49 @@ function syncStatusLabel(status: string): string {
   if (status === 'partial') return 'Teilweise'
   if (status.startsWith('error:')) return `Fehler ${status.slice(6)}`
   return status
+}
+
+interface ParsedSyncError {
+  account: string
+  kind: 'tan' | 'statements' | 'balance' | 'other'
+  description: string
+}
+
+/** Parse a backend error string of the form
+ *  "account <num>: <kind>:<code> <text>" into structured pieces so the
+ *  UI can render a friendly label per row. */
+function parseSyncError(raw: string): ParsedSyncError {
+  const m = raw.match(/^account\s+([^:]+):\s*(.*)$/)
+  const account = m?.[1]?.trim() ?? '?'
+  const detail = m?.[2]?.trim() ?? raw
+  if (detail === 'balance-tan-required' || detail === 'statements-tan-required-no-ref') {
+    return { account, kind: 'tan', description: 'Bank verlangte eine TAN, die nicht abgefragt werden konnte.' }
+  }
+  const sm = detail.match(/^statements-(error|exception):(.+)$/)
+  if (sm) {
+    const kind = sm[1]
+    const text = sm[2] ?? ''
+    return {
+      account,
+      kind: 'statements',
+      description: kind === 'exception'
+        ? `Umsätze konnten nicht abgerufen werden: ${text}`
+        : `Bank-Antwort beim Abruf der Umsätze: ${text}`,
+    }
+  }
+  const bm = detail.match(/^balance-(error|exception):(.+)$/)
+  if (bm) {
+    const kind = bm[1]
+    const text = bm[2] ?? ''
+    return {
+      account,
+      kind: 'balance',
+      description: kind === 'exception'
+        ? `Saldo konnte nicht abgerufen werden: ${text}`
+        : `Bank-Antwort beim Abruf des Saldos: ${text}`,
+    }
+  }
+  return { account, kind: 'other', description: detail }
 }
 
 async function del() {
@@ -446,13 +493,24 @@ async function del() {
         :closable="false"
         class="status-hint"
       >
-        Der letzte Sync war nur teilweise erfolgreich. Mindestens ein Konto konnte nicht abgerufen werden — meist weil
-        die Bank für dieses Konto eine zusätzliche TAN verlangt hat oder einen Fehler gemeldet hat. Aktualisierte
-        Konten und neue Buchungen sind gespeichert; der nächste Sync-Versuch holt die fehlenden Konten nach.
+        <p class="status-hint__lead">
+          Der letzte Sync war nur teilweise erfolgreich. Aktualisierte Konten und neue Buchungen sind gespeichert;
+          der nächste Sync-Versuch holt die fehlenden Konten nach.
+        </p>
+        <ul v-if="lastSyncErrors.length" class="sync-errors">
+          <li v-for="(raw, idx) in lastSyncErrors" :key="idx" class="sync-errors__item">
+            <strong>Konto {{ parseSyncError(raw).account }}:</strong>
+            {{ parseSyncError(raw).description }}
+          </li>
+        </ul>
+        <p v-else class="status-hint__lead">
+          Details stehen im Server-Log. Häufige Ursachen sind Bank-Antworten wie „Keine Buchungen im Zeitraum",
+          „Aktion nicht erlaubt" oder eine zusätzliche TAN, die diese Sitzung nicht abfragen konnte.
+        </p>
       </Message>
       <Message
         v-if="syncInfo"
-        severity="success"
+        :severity="lastSyncErrors.length ? 'warn' : 'success'"
         :closable="true"
         @close="syncInfo = null"
       >
@@ -665,6 +723,22 @@ async function del() {
 }
 .status-hint {
   margin-top: 0.5rem;
+}
+.status-hint__lead {
+  margin: 0 0 0.5rem;
+}
+.status-hint__lead:last-child {
+  margin-bottom: 0;
+}
+.sync-errors {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.sync-errors__item {
+  font-size: 0.9rem;
 }
 .tan-method-row {
   display: flex;

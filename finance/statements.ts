@@ -89,6 +89,11 @@ export interface SyncApiResponse {
   balances_written?: number;
   /** state=idle — true when any per-account fetch hit a mid-flight TAN we skipped. */
   partial?: boolean;
+  /** state=idle — per-account bank answers/exceptions collected during the
+   *  fetch. Populated when partial=true so the UI can show the actual reason
+   *  (e.g. "account 12345: statements-error:3010 Keine Buchungen vorhanden")
+   *  instead of guessing TAN. */
+  errors?: string[];
   /** state=tan-required — our public UUID for the pending session. */
   tanReference?: string;
   /** state=tan-required — human-readable challenge from the bank. */
@@ -369,6 +374,7 @@ export async function fetchAndPersist(
     transactions_inserted: stats.transactions_inserted,
     balances_written: stats.balances_written,
     partial: fetched.partial || undefined,
+    errors: stats.errors.length > 0 ? stats.errors : undefined,
   };
 }
 

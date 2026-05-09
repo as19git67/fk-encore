@@ -274,6 +274,7 @@ async function resumeStatementsTan(
     transactions_inserted: stats.transactions_inserted,
     balances_written: stats.balances_written,
     partial: fetched.partial || undefined,
+    errors: stats.errors.length > 0 ? stats.errors : undefined,
   };
 }
 
