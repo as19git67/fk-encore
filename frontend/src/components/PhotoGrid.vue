@@ -419,9 +419,9 @@ defineExpose({
   position: absolute;
   top: 6px;
   right: 6px;
-  color: var(--p-orange-400);
+  color: var(--p-yellow-400, #facc15);
   font-size: 1rem;
-  text-shadow: 0 0 4px rgba(0,0,0,0.5);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
 }
 
 .hidden-badge {

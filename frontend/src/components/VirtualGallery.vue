@@ -521,29 +521,31 @@ defineExpose({
   background: var(--p-content-hover-background, #f3f4f6);
 }
 
-/* Curation styling */
-.vg-cell--favorite {
-  outline: 2px solid var(--p-yellow-400, #facc15);
-  outline-offset: -2px;
-}
-
+/* Curation styling — favorites show only a gold heart, no frame (#342) */
 .vg-cell--hidden .vg-thumb {
   opacity: 0.55;
   filter: grayscale(0.4);
 }
 
-.vg-favorite-icon,
+.vg-favorite-icon {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  font-size: 0.85rem;
+  color: var(--p-yellow-400, #facc15);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+}
+
 .vg-hidden-icon {
   position: absolute;
   top: 6px;
   right: 6px;
   font-size: 0.85rem;
-  color: #fff;
+  color: rgba(255, 255, 255, 0.85);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
   pointer-events: none;
 }
-
-.vg-hidden-icon { color: rgba(255, 255, 255, 0.85); }
 
 /* Stack styling */
 .vg-cell--stack {

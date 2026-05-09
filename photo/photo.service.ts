@@ -2771,6 +2771,18 @@ export async function updatePhotoDateLogic(
     // Don't throw error if DB update succeeded, but log it
   }
 
+  try {
+    await realtime.publishEvent({
+      userIds: [String(userId)],
+      channel: "photos",
+      type: "metadata.changed",
+      resourceId: String(photoId),
+      payload: { taken_at: takenAt },
+    });
+  } catch {
+    // best-effort
+  }
+
   return { success: true, taken_at: takenAt };
 }
 
@@ -2820,6 +2832,18 @@ export async function updatePhotoDescriptionLogic(
     }
   } catch (err) {
     console.error("Error writing description to EXIF:", err);
+  }
+
+  try {
+    await realtime.publishEvent({
+      userIds: [String(userId)],
+      channel: "photos",
+      type: "metadata.changed",
+      resourceId: String(photoId),
+      payload: { description: trimmed },
+    });
+  } catch {
+    // best-effort
   }
 
   return { success: true, description: trimmed };
