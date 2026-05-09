@@ -8,6 +8,7 @@ import Slider from 'primevue/slider'
 import InputNumber from 'primevue/inputnumber'
 import AutoComplete from 'primevue/autocomplete'
 import DateRangePresets from './DateRangePresets.vue'
+import { toLocalIsoDate, parseLocalDate } from '../utils/dateFormat'
 import type { PhotoFilter, HiddenMode, MembershipMode, MediaType, Album, Person } from '../api/photos'
 import { useReferenceData } from '../composables/useReferenceData'
 
@@ -62,8 +63,8 @@ watch(() => props.visible, (v) => {
   if (!v) return
   local.value = { ...props.draft }
   qualityRange.value = [props.draft.qualityMin ?? 0, props.draft.qualityMax ?? 100]
-  dateFrom.value = props.draft.dateFrom ? new Date(props.draft.dateFrom) : null
-  dateTo.value = props.draft.dateTo ? new Date(props.draft.dateTo) : null
+  dateFrom.value = props.draft.dateFrom ? parseLocalDate(props.draft.dateFrom) : null
+  dateTo.value = props.draft.dateTo ? parseLocalDate(props.draft.dateTo) : null
   selectedAlbums.value = props.draft.albumIds?.length && albums.value.length
     ? albums.value.filter(a => props.draft.albumIds!.includes(a.id))
     : []
@@ -105,13 +106,13 @@ watch(qualityRange, ([min, max]) => {
   }
 })
 
-const dateFrom = ref<Date | null>(props.draft.dateFrom ? new Date(props.draft.dateFrom) : null)
-const dateTo = ref<Date | null>(props.draft.dateTo ? new Date(props.draft.dateTo) : null)
+const dateFrom = ref<Date | null>(props.draft.dateFrom ? parseLocalDate(props.draft.dateFrom) : null)
+const dateTo = ref<Date | null>(props.draft.dateTo ? parseLocalDate(props.draft.dateTo) : null)
 watch([dateFrom, dateTo], ([from, to]) => {
   local.value = {
     ...local.value,
-    dateFrom: from ? from.toISOString().slice(0, 10) : undefined,
-    dateTo: to ? to.toISOString().slice(0, 10) : undefined,
+    dateFrom: from ? toLocalIsoDate(from) : undefined,
+    dateTo: to ? toLocalIsoDate(to) : undefined,
   }
 })
 

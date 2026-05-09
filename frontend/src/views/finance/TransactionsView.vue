@@ -8,6 +8,7 @@ import DatePicker from 'primevue/datepicker'
 import Select from 'primevue/select'
 import Tag from 'primevue/tag'
 import Message from 'primevue/message'
+import { toLocalIsoDate } from '../../utils/dateFormat'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useAccountsStore } from '../../stores/finance/accounts'
 import type { MandateHistoryItem, Transaction } from '../../api/finance'
@@ -97,7 +98,7 @@ function formatRecurringDate(iso: string): string {
 
 function toIso(d: Date | null): string | undefined {
   if (!d) return undefined
-  return d.toISOString().slice(0, 10)
+  return toLocalIsoDate(d)
 }
 
 async function applyFilters() {

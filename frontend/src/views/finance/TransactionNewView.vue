@@ -8,6 +8,7 @@ import Button from 'primevue/button'
 import AutoComplete from 'primevue/autocomplete'
 import TagAutoComplete from '../../components/finance/TagAutoComplete.vue'
 import Message from 'primevue/message'
+import { toLocalIsoDate } from '../../utils/dateFormat'
 import { useAccountsStore } from '../../stores/finance/accounts'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useTagsStore } from '../../stores/finance/tags'
@@ -111,10 +112,7 @@ function setDate(days: number) {
 }
 
 function toIso(d: Date): string {
-  // Fix timezone offset for ISO date
-  const offset = d.getTimezoneOffset()
-  const localDate = new Date(d.getTime() - offset * 60 * 1000)
-  return localDate.toISOString().slice(0, 10)
+  return toLocalIsoDate(d)
 }
 
 async function save() {
