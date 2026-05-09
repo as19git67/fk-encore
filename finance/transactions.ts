@@ -315,21 +315,26 @@ export const listTransactions = api(
 
     if (p.q && p.q.trim().length > 0) {
       const q = p.q.trim();
+      const like = `%${q}%`;
+      const textMatch = or(
+        sql`${financeTransaction.counterparty} ILIKE ${like}`,
+        sql`${financeTransaction.purpose} ILIKE ${like}`,
+        sql`${financeTransaction.end_to_end_ref} ILIKE ${like}`,
+        sql`${financeTransaction.mandate_ref} ILIKE ${like}`,
+        sql`${financeTransaction.creditor_id} ILIKE ${like}`,
+        sql`${financeTransaction.notice} ILIKE ${like}`,
+      )!;
       const numericQ = Number(q.replace(",", "."));
       if (Number.isFinite(numericQ)) {
-        // Match same absolute amount (signed and unsigned). cast to
-        // numeric so the parameter binding doesn't trip on the
-        // text-vs-numeric type for the comparison.
         const abs = Math.abs(numericQ).toFixed(2);
-        conds.push(sql`ABS(${financeTransaction.amount}) = ${abs}::numeric`);
-      } else {
-        const like = `%${q}%`;
         conds.push(
           or(
-            sql`${financeTransaction.counterparty} ILIKE ${like}`,
-            sql`${financeTransaction.purpose} ILIKE ${like}`,
+            sql`ABS(${financeTransaction.amount}) = ${abs}::numeric`,
+            textMatch,
           )!,
         );
+      } else {
+        conds.push(textMatch);
       }
     }
 

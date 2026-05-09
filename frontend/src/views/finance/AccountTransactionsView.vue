@@ -643,6 +643,10 @@ function goBack() {
               <div v-if="tx.purpose" class="tx-purpose">
                 {{ tx.purpose }}
               </div>
+              <div v-if="tx.notice" class="tx-notice">
+                <i class="pi pi-file-edit" />
+                {{ tx.notice }}
+              </div>
               <div v-if="tx.tags.length > 0">
                 <span
                   v-for="t in tx.tags"
@@ -946,6 +950,15 @@ function goBack() {
   color: var(--p-text-muted-color);
   font-size: 0.9rem;
   white-space: pre-wrap;
+  word-break: break-word;
+}
+.tx-notice {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  color: var(--p-text-muted-color);
+  font-size: 0.85rem;
+  font-style: italic;
   word-break: break-word;
 }
 .tx-tags {
