@@ -9,6 +9,7 @@ import InputNumber from 'primevue/inputnumber'
 import DatePicker from 'primevue/datepicker'
 import TagAutoComplete from '../../components/finance/TagAutoComplete.vue'
 import Textarea from 'primevue/textarea'
+import Dialog from 'primevue/dialog'
 import { toLocalIsoDate } from '../../utils/dateFormat'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useAccountsStore } from '../../stores/finance/accounts'
@@ -160,6 +161,52 @@ async function reject(name: string) {
   }
 }
 
+const promotingAll = ref(false)
+const rejectingAll = ref(false)
+
+async function promoteAll() {
+  if (!tx.value) return
+  const tags = aiTags()
+  if (tags.length === 0) return
+  promotingAll.value = true
+  try {
+    let updated = tx.value
+    for (const t of tags) {
+      const resp = await txStore.promoteAiTag(updated.id, t.name)
+      updated = { ...updated, tags: resp.tags }
+    }
+    tx.value = updated
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    promotingAll.value = false
+  }
+}
+
+async function rejectAll() {
+  if (!tx.value) return
+  const tags = aiTags()
+  if (tags.length === 0) return
+  rejectingAll.value = true
+  try {
+    let updated = tx.value
+    for (const t of tags) {
+      const resp = await api.rejectAiTag(updated.id, t.name)
+      updated = { ...updated, tags: resp.tags }
+    }
+    tx.value = updated
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    rejectingAll.value = false
+  }
+}
+
+function cancel() {
+  syncForm()
+  router.back()
+}
+
 async function save() {
   if (!tx.value || !isDirty.value) return
   saving.value = true
@@ -175,6 +222,7 @@ async function save() {
     }
     tx.value = await api.updateTransaction(tx.value.id, input)
     syncForm()
+    router.back()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -260,7 +308,63 @@ watch(
 )
 
 function openTransaction(id: number) {
-  void router.push({ name: 'finance-transaction-detail', params: { id } })
+  void router.replace({ name: 'finance-transaction-detail', params: { id } })
+}
+
+// ── Recurring transaction popup ───────────────────────────────────────────
+const recurringPopupVisible = ref(false)
+const recurringPopupTx = ref<Transaction | null>(null)
+const recurringPopupLoading = ref(false)
+
+async function openRecurringPopup(id: number) {
+  recurringPopupLoading.value = true
+  recurringPopupVisible.value = true
+  recurringPopupTx.value = null
+  try {
+    recurringPopupTx.value = await api.getTransaction(id)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+    recurringPopupVisible.value = false
+  } finally {
+    recurringPopupLoading.value = false
+  }
+}
+
+function navigateToRecurringTx() {
+  if (!recurringPopupTx.value) return
+  recurringPopupVisible.value = false
+  openTransaction(recurringPopupTx.value.id)
+}
+
+const copyingTags = ref(false)
+
+async function copyTagsFromRecurring() {
+  if (!tx.value || !recurringPopupTx.value) return
+  const sourceTags = recurringPopupTx.value.tags.filter((t) => t.source === 'user')
+  if (sourceTags.length === 0) return
+  copyingTags.value = true
+  try {
+    await api.batchTag({
+      transaction_ids: [tx.value.id],
+      add: sourceTags.map((t) => t.name),
+    })
+    tagsStore.addLocal(sourceTags.map((t) => t.name))
+    tx.value = await api.getTransaction(tx.value.id)
+    syncForm()
+    recurringPopupVisible.value = false
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    copyingTags.value = false
+  }
+}
+
+function formatPopupAmount(t: Transaction): string {
+  const currency = account.value?.currency_code ?? 'EUR'
+  return new Intl.NumberFormat('de-DE', {
+    style: 'currency',
+    currency,
+  }).format(Number(t.amount))
 }
 
 function formatRecurringAmount(raw: string): string {
@@ -309,8 +413,31 @@ const extractedFields = computed(() => {
 <template>
   <div class="page">
     <header class="page-header">
-      <Button icon="pi pi-chevron-left" severity="secondary" rounded aria-label="Zurück" @click="router.back()" />
+      <Button
+        v-if="isDirty"
+        label="Abbrechen"
+        severity="secondary"
+        text
+        @click="cancel"
+      />
+      <Button
+        v-else
+        icon="pi pi-chevron-left"
+        severity="secondary"
+        rounded
+        aria-label="Zurück"
+        @click="router.back()"
+      />
       <h1>{{ tx?.counterparty || 'Buchung' }}</h1>
+      <Button
+        v-if="tx"
+        label="Speichern"
+        icon="pi pi-save"
+        size="small"
+        :disabled="!isDirty"
+        :loading="saving"
+        @click="save"
+      />
     </header>
 
     <div v-if="copyToast" class="copy-toast">{{ copyToast }}</div>
@@ -411,29 +538,49 @@ const extractedFields = computed(() => {
 
     <!-- KI-Vorschläge -->
     <section v-if="tx && aiTags().length > 0" class="card">
-      <h2>KI-Vorschläge</h2>
+      <div class="ai-header">
+        <h2>KI-Vorschläge</h2>
+        <div v-if="aiTags().length > 1" class="ai-bulk-actions">
+          <Button
+            label="Alle übernehmen"
+            size="small"
+            :loading="promotingAll"
+            :disabled="rejectingAll"
+            @click="promoteAll"
+          />
+          <Button
+            label="Alle ablehnen"
+            severity="secondary"
+            size="small"
+            :loading="rejectingAll"
+            :disabled="promotingAll"
+            @click="rejectAll"
+          />
+        </div>
+      </div>
       <ul class="ai-list">
         <li v-for="t in aiTags()" :key="t.name" class="ai-item">
-          <span class="name">{{ t.name }}</span>
-          <span class="confidence">{{ t.confidence !== null ? (t.confidence * 100).toFixed(0) + '%' : '—' }}</span>
-          <Button
-            label="Übernehmen"
-            size="small"
-            :loading="promoting === t.name"
-            :disabled="rejecting === t.name"
-            @click="promote(t.name)"
-          />
-          <Button
-            icon="pi pi-times"
-            severity="secondary"
-            text
-            rounded
-            size="small"
-            v-tooltip.bottom="'Vorschlag ablehnen — wird für ähnliche Buchungen nicht erneut vorgeschlagen'"
-            :loading="rejecting === t.name"
-            :disabled="promoting === t.name"
-            @click="reject(t.name)"
-          />
+          <span class="ai-label">
+            <span class="name">{{ t.name }}</span>
+            <span class="confidence">{{ t.confidence !== null ? (t.confidence * 100).toFixed(0) + '%' : '—' }}</span>
+          </span>
+          <span class="ai-actions">
+            <Button
+              label="Übernehmen"
+              size="small"
+              :loading="promoting === t.name"
+              :disabled="rejecting === t.name || promotingAll || rejectingAll"
+              @click="promote(t.name)"
+            />
+            <Button
+              label="Ablehnen"
+              severity="secondary"
+              size="small"
+              :loading="rejecting === t.name"
+              :disabled="promoting === t.name || promotingAll || rejectingAll"
+              @click="reject(t.name)"
+            />
+          </span>
         </li>
       </ul>
     </section>
@@ -479,7 +626,7 @@ const extractedFields = computed(() => {
           v-for="it in visibleRecurringItems"
           :key="it.id"
           class="recurring-row"
-          @click="openTransaction(it.id)"
+          @click="openRecurringPopup(it.id)"
         >
           <span class="recurring-date">{{ formatRecurringDate(it.booking_date) }}</span>
           <span class="recurring-amount">{{ formatRecurringAmount(it.amount) }}</span>
@@ -501,16 +648,8 @@ const extractedFields = computed(() => {
     </section>
 
     <!-- Actions -->
-    <div v-if="tx" class="page-actions">
+    <div v-if="tx && isCash" class="page-actions">
       <Button
-        label="Speichern"
-        icon="pi pi-save"
-        :disabled="!isDirty"
-        :loading="saving"
-        @click="save"
-      />
-      <Button
-        v-if="isCash"
         label="Löschen"
         icon="pi pi-trash"
         severity="danger"
@@ -518,6 +657,67 @@ const extractedFields = computed(() => {
         @click="deleteTx"
       />
     </div>
+
+    <!-- Recurring transaction popup -->
+    <Dialog
+      v-model:visible="recurringPopupVisible"
+      modal
+      header="Wiederkehrende Buchung"
+      :style="{ width: '30rem' }"
+    >
+      <div v-if="recurringPopupLoading" class="hint">Lädt …</div>
+      <template v-if="recurringPopupTx">
+        <dl class="details">
+          <dt>Buchungsdatum</dt>
+          <dd>{{ recurringPopupTx.booking_date }}</dd>
+          <template v-if="recurringPopupTx.value_date">
+            <dt>Wertstellung</dt>
+            <dd>{{ recurringPopupTx.value_date }}</dd>
+          </template>
+          <dt>Betrag</dt>
+          <dd :class="['amount', Number(recurringPopupTx.amount) < 0 ? 'amount-neg' : 'amount-pos']">
+            {{ formatPopupAmount(recurringPopupTx) }}
+          </dd>
+          <dt>Gegenseite</dt>
+          <dd>{{ recurringPopupTx.counterparty ?? '—' }}</dd>
+          <template v-if="recurringPopupTx.counterparty_iban">
+            <dt>IBAN</dt>
+            <dd>{{ recurringPopupTx.counterparty_iban }}</dd>
+          </template>
+          <dt>Verwendung</dt>
+          <dd class="multiline">{{ recurringPopupTx.purpose ?? '—' }}</dd>
+          <dt>Tags</dt>
+          <dd>
+            <div class="tags-row">
+              <Tag
+                v-for="t in recurringPopupTx.tags.filter(t => t.source === 'user')"
+                :key="t.name"
+                severity="info"
+              >
+                {{ t.name }}
+              </Tag>
+              <span v-if="recurringPopupTx.tags.filter(t => t.source === 'user').length === 0" class="hint">Keine Tags.</span>
+            </div>
+          </dd>
+        </dl>
+      </template>
+      <template #footer>
+        <Button
+          v-if="recurringPopupTx && recurringPopupTx.tags.filter(t => t.source === 'user').length > 0"
+          label="Tags übernehmen"
+          icon="pi pi-copy"
+          size="small"
+          :loading="copyingTags"
+          @click="copyTagsFromRecurring"
+        />
+        <Button
+          label="Transaktion öffnen"
+          severity="secondary"
+          size="small"
+          @click="navigateToRecurringTx"
+        />
+      </template>
+    </Dialog>
   </div>
 </template>
 
@@ -539,6 +739,18 @@ const extractedFields = computed(() => {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  position: sticky;
+  top: var(--menubar-height, 3.5rem);
+  z-index: 100;
+  background: var(--p-content-hover-background);
+  margin: -1.5rem -1.5rem 0;
+  padding: 0.75rem 1.5rem;
+}
+@media (max-width: 640px) {
+  .page-header {
+    margin: -0.75rem -0.75rem 0;
+    padding: 0.5rem 0.75rem;
+  }
 }
 .page-header h1 {
   margin: 0;
@@ -547,6 +759,8 @@ const extractedFields = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
 .card {
   border: 1px solid var(--p-content-border-color);
@@ -644,23 +858,55 @@ const extractedFields = computed(() => {
 .notice-input {
   width: 100%;
 }
+.ai-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.ai-header h2 {
+  margin: 0.25rem 0 0.25rem;
+}
+.ai-bulk-actions {
+  display: flex;
+  gap: 0.5rem;
+}
 .ai-list {
   list-style: none;
   padding: 0;
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.5rem;
 }
 .ai-item {
-  display: grid;
-  grid-template-columns: 1fr auto auto auto;
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
 }
-.ai-item .confidence {
+.ai-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+}
+.ai-label .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-label .confidence {
   color: var(--p-text-muted-color);
   font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.ai-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
 }
 .hint {
   color: var(--p-text-muted-color);
