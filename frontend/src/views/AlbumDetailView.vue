@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, defineAsyncComponent, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, ref, watch, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
@@ -123,6 +123,10 @@ const isFullscreen = ref(false)
 // ── VirtualGallery grid + cursor state (#304) ───────────────────────────────
 const galleryRef = ref<InstanceType<typeof VirtualGallery> | null>(null)
 const cursorIndex = ref<number | null>(null)
+// Photo to center on when VirtualGallery mounts (passed as aroundPhotoId).
+// Set by map stop selection and map fullscreen close so that switching from
+// map to grid always loads entries around the right photo.
+const galleryAnchorPhotoId = ref<number | null>(null)
 const cursorPhoto = ref<Photo | null>(null)
 const cursorPrev = ref<Photo | null>(null)
 const cursorNext = ref<Photo | null>(null)
@@ -486,14 +490,18 @@ const mapFullscreenPhotos = ref<Photo[]>([])
 const mapFullscreenIndex = ref(0)
 const isMapFullscreen = ref(false)
 
-// When navigating to this album via ?photoId= and the album is in map mode,
-// we need to select the stop containing that photo once TripMap has mounted.
-// TripMap is a defineAsyncComponent so it isn't available synchronously.
+// When navigating to this album via ?photoId= (or restoring a stored selection)
+// in map mode, we need to select the stop for that photo once TripMap mounts.
+// watchEffect re-runs whenever either tripMapRef or pendingMapSelectPhotoId
+// changes, covering both "TripMap mounts after photo is resolved" and the
+// rarer case where the photo id is resolved after TripMap is already mounted.
 const pendingMapSelectPhotoId = ref<number | null>(null)
 
-watch(tripMapRef, (ref) => {
-  if (ref && pendingMapSelectPhotoId.value !== null) {
-    ref.selectStopByPhotoId(pendingMapSelectPhotoId.value)
+watchEffect(() => {
+  const mapRef = tripMapRef.value
+  const photoId = pendingMapSelectPhotoId.value
+  if (mapRef && photoId !== null) {
+    mapRef.selectStopByPhotoId(photoId)
     pendingMapSelectPhotoId.value = null
   }
 })
@@ -516,7 +524,23 @@ function closeMapFullscreen() {
   if (ended && tripMapRef.value) {
     tripMapRef.value.selectStopByPhotoId(ended.id)
   }
+  // Remember the photo the user ended on: update all three tracking mechanisms
+  // so that switching to gallery view scrolls there via galleryAnchorPhotoId.
+  if (ended) {
+    galleryAnchorPhotoId.value = ended.id
+    saveLastPhotoForAlbum(albumId.value, ended.id)
+    photoNav.selectPhotoInAlbum(ended.id, albumId.value)
+  }
   isMapFullscreen.value = false
+}
+
+// Called when the user actively selects a stop in the map (click or keyboard).
+// Sets galleryAnchorPhotoId so VirtualGallery loads around the right photo on
+// the next map → grid switch.
+function handleMapStopSelected(coverPhotoId: number) {
+  galleryAnchorPhotoId.value = coverPhotoId
+  saveLastPhotoForAlbum(albumId.value, coverPhotoId)
+  photoNav.selectPhotoInAlbum(coverPhotoId, albumId.value)
 }
 
 const mapSelectedPhoto = computed(() =>
@@ -581,12 +605,19 @@ async function loadData() {
       } catch { /* ignore – filter still narrows the returned set */ }
     }
 
-    // In map mode, honour ?photoId= by selecting the stop once TripMap mounts.
-    // Grid-mode initial selection is handled by onGalleryLoaded.
-    const queryPhotoId = Number(route.query.photoId)
-    if (queryPhotoId && albumRes.display_mode === 'map') {
-      pendingMapSelectPhotoId.value = queryPhotoId
-      router.replace({ query: { ...route.query, photoId: undefined } })
+    // Resolve the anchor photo: prefer URL param, then album-specific storage,
+    // then the shared nav store.
+    const queryPhotoId = Number(route.query.photoId) || null
+    const storedPhotoId = queryPhotoId
+      ?? loadLastPhotoMap()[String(albumId.value)]
+      ?? photoNav.selectedPhotoId
+      ?? null
+    if (albumRes.display_mode === 'map') {
+      if (queryPhotoId) router.replace({ query: { ...route.query, photoId: undefined } })
+      if (storedPhotoId) pendingMapSelectPhotoId.value = storedPhotoId
+    } else {
+      // Grid mode: tell VirtualGallery which photo to center on when it mounts.
+      galleryAnchorPhotoId.value = storedPhotoId
     }
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden des Albums'
@@ -978,12 +1009,18 @@ function handleGridStackClick(entry: GalleryGridEntry) {
 
 async function onGalleryLoaded() {
   if (!galleryRef.value) return
-  const storedPhotoId = Number(route.query.photoId)
+  // galleryAnchorPhotoId was set before this mount (initial load or map→grid
+  // switch). VirtualGallery already loaded entries around it; findLoadedIndexById
+  // will find it. Consume the anchor so subsequent reloads don't re-apply it.
+  const anchor = galleryAnchorPhotoId.value
+  galleryAnchorPhotoId.value = null
+  const targetId = anchor
+    || Number(route.query.photoId)
     || loadLastPhotoMap()[String(albumId.value)]
     || photoNav.selectedPhotoId
     || null
-  if (storedPhotoId) {
-    const idx = galleryRef.value.findLoadedIndexById(storedPhotoId)
+  if (targetId) {
+    const idx = galleryRef.value.findLoadedIndexById(targetId)
     if (idx !== null) {
       cursorIndex.value = idx
       galleryRef.value.scrollToIndex(idx)
@@ -1267,6 +1304,7 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
       :albumName="album.name"
       :albumDescription="album.description"
       @open-fullscreen="handleMapFullscreen"
+      @stop-selected="handleMapStopSelected"
     />
 
     <!-- Two-column layout: VirtualGallery | Sidebar -->
@@ -1275,6 +1313,7 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
       <div class="grid-area">
         <VirtualGallery
           ref="galleryRef"
+          :around-photo-id="galleryAnchorPhotoId"
           :filter="albumGridFilter"
           :sort-by="sortByForGallery"
           :sort-dir="sortDirForGallery"

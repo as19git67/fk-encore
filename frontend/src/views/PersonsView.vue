@@ -10,8 +10,8 @@ import InputNumber from 'primevue/inputnumber'
 import Chip from 'primevue/chip'
 import { useConfirm } from 'primevue/useconfirm'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
-import HeicImage from '../components/HeicImage.vue'
 import FacePhotoGrid from '../components/FacePhotoGrid.vue'
+import PersonsGrid from '../components/PersonsGrid.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import SortMenu from '../components/SortMenu.vue'
@@ -25,11 +25,11 @@ import { toLocalIsoDate, parseLocalDate } from '../utils/dateFormat'
 import {
   listPersons, updatePerson, mergePersons, getPersonDetails,
   ignoreFace, ignorePersonFaces, updatePhotoCuration, reindexPhoto,
-  getPhotoFaces, getPhotoLandmarks, getPhotoUrl,
+  getPhotoFaces, getPhotoLandmarks,
   type CurationStatus, type Person, type Photo, type PersonDetails,
   type Face, type LandmarkItem, type PhotoFilter,
 } from '../api/photos'
-import { faceBoxStyle, thumbnailImageStyle } from '../utils/faceBbox'
+import { faceBoxStyle } from '../utils/faceBbox'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
 import { usePhotoNavStore } from '../stores/photoNav'
@@ -270,15 +270,16 @@ const filteredPersons = computed(() => {
   })
 })
 
-function personCoverUrl(person: Person) {
-  if (person.cover_filename) return getPhotoUrl(person.cover_filename, 400)
-  return 'https://www.primefaces.org/wp-content/uploads/2020/05/placeholder.png'
-}
-
 // Remember the most recently opened person across reloads, plus a per-person
 // map of the last photo the user had selected, so reopening a person restores
 // the previous scroll/selection position instead of snapping back to the top.
 const LAST_PERSON_KEY = 'persons_last_selected_id'
+const personsGridRef = ref<InstanceType<typeof PersonsGrid> | null>(null)
+// ID of the last person the user opened — drives scroll restoration when
+// returning to the persons grid after viewing a person's detail page.
+const rememberedPersonId = ref<number | null>(
+  Number(localStorage.getItem(LAST_PERSON_KEY)) || null
+)
 const LAST_PHOTO_MAP_KEY = 'persons_last_photo_by_person'
 
 function loadLastPhotoMap(): Record<string, number> {
@@ -510,6 +511,7 @@ async function selectPersonItem(person: Person, focusPhotoId?: number) {
   const alreadyLoaded = selectedPerson.value?.id === person.id && !!selectedPersonDetail.value
   if (!alreadyLoaded) {
     selectedPerson.value = person
+    rememberedPersonId.value = person.id
     localStorage.setItem(LAST_PERSON_KEY, String(person.id))
     selectedIndex.value = -1
     detectedFaces.value = []
@@ -539,17 +541,32 @@ async function selectPersonItem(person: Person, focusPhotoId?: number) {
   }
 }
 
+// After filter or sort changes the visible set shrinks / reorders; the
+// virtualizer keeps its absolute scroll offset so we re-apply the remembered
+// position so the user doesn't get stranded at the top.
+watch(filteredPersons, () => {
+  void personsGridRef.value?.rescrollToRemembered()
+})
+
 // ── Grid events ───────────────────────────────────────────────────────────────
 async function handlePersonSelected(person: Person) {
   await selectPersonItem(person)
 }
 
 function backToGrid() {
+  const lastId = selectedPerson.value?.id ?? null
   selectedPerson.value = null
   selectedPersonDetail.value = null
   selectedIndex.value = -1
   detectedFaces.value = []
   detectedLandmarks.value = []
+  // After Vue re-renders (grid visible again), scroll to and highlight the
+  // person the user just came back from.
+  if (lastId) {
+    requestAnimationFrame(() => {
+      personsGridRef.value?.scrollToPerson(lastId, { highlight: true })
+    })
+  }
 }
 
 // ── Rename ────────────────────────────────────────────────────────────────────
@@ -762,31 +779,12 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
         />
       </div>
 
-      <div v-if="filteredPersons.length === 0" class="info-text">
-        Keine Personen passen zum Filter.
-      </div>
-      <div v-else class="persons-grid">
-        <button
-          v-for="person in filteredPersons"
-          :key="person.id"
-          type="button"
-          class="person-card"
-          @click="handlePersonSelected(person)"
-        >
-          <div class="person-card-thumb">
-            <HeicImage
-              :src="personCoverUrl(person)"
-              :alt="person.name"
-              objectFit="cover"
-              :imageStyle="thumbnailImageStyle(person.cover_bbox)"
-            />
-          </div>
-          <div class="person-card-info">
-            <span class="person-card-name">{{ person.name }}</span>
-            <span class="person-card-count">{{ person.faceCount || 0 }} Fotos</span>
-          </div>
-        </button>
-      </div>
+      <PersonsGrid
+        ref="personsGridRef"
+        :persons="filteredPersons"
+        :remembered-person-id="rememberedPersonId"
+        @person-click="handlePersonSelected"
+      />
     </div>
 
     <!-- LEVEL 2: Detail view for a selected person ─────────────────────────── -->
@@ -995,22 +993,18 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
 .persons-grid-layout {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
-  padding: 1rem;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  padding: 0.75rem 0.75rem 0;
+  gap: 0.5rem;
+  overflow: hidden;
 }
 
 .persons-filter-bar {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  position: sticky;
-  top: 0;
-  background: var(--p-content-background);
-  padding-bottom: 0.25rem;
-  z-index: 1;
+  flex-shrink: 0;
   flex-wrap: wrap;
 }
 
@@ -1058,72 +1052,6 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
   white-space: nowrap;
 }
 
-.persons-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--grid-min-col), 1fr));
-  gap: var(--grid-gap);
-}
-
-.person-card {
-  position: relative;
-  padding: 0;
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  background: var(--p-content-background);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  cursor: pointer;
-  transition: transform 0.2s;
-  border: 4px solid transparent;
-  outline: none;
-  color: inherit;
-  text-align: left;
-}
-
-.person-card:hover { transform: scale(1.02); }
-
-.person-card:focus-visible {
-  outline: 2px solid var(--p-primary-300);
-  outline-offset: -2px;
-}
-
-.person-card-thumb {
-  width: 100%;
-  height: 200px;
-  background: var(--p-content-hover-background);
-  overflow: hidden;
-}
-
-.person-card-thumb :deep(.heic-image-container) { width: 100%; height: 100%; }
-
-.person-card-info {
-  padding: 0.35rem 0.6rem;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.5rem;
-  background: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(4px);
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  color: #fff;
-}
-
-.person-card-name {
-  font-size: 0.85rem;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-
-.person-card-count {
-  font-size: 0.75rem;
-  color: rgba(255, 255, 255, 0.8);
-  flex-shrink: 0;
-}
 
 /* ── Person Sidebar Sheet Wrapper ────────────────────────────────────────── */
 .person-sidebar-sheet {
@@ -1145,11 +1073,6 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
 /* ── Mobile Breakpoint ───────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .mobile-backdrop { display: block; }
-
-  .persons-grid {
-    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-    gap: 0.75rem;
-  }
 
   /* Person Sidebar Sheet → Bottom Sheet */
   .person-sidebar-sheet {
