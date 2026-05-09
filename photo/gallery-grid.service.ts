@@ -13,7 +13,7 @@
  *     in the filtered+sorted result and returns a window centered on it
  *     so the gallery can `scrollToOffset` directly without a guess.
  */
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbFirst } from "../db/adapter";
 import { photos, photoCuration, photoGroupMembers, photoGroups } from "../db/schema";
@@ -327,34 +327,51 @@ async function loadGroupInfoForPhotos(
   const out = new Map<number, GalleryGridGroup>();
   if (photoIds.length === 0) return out;
 
-  const chosenResult = await db.execute<{
+  // Use the query builder so drizzle binds `photoIds` / `groupIds` as a
+  // single PG array parameter via inArray(). A raw `ANY(${array}::int[])` in
+  // an sql template literal would expand the JS array into a tuple of N
+  // separate placeholders ($1,$2,…), which Postgres then refuses to cast to
+  // int[] ("cannot cast type record to integer[]").
+  const chosen = await dbAll<{
     photo_id: number;
     group_id: number;
     is_cover: boolean;
     reviewed: boolean;
-  }>(sql`
-    SELECT DISTINCT ON (pgm.photo_id)
-      pgm.photo_id AS photo_id,
-      g.id AS group_id,
-      (g.cover_photo_id = pgm.photo_id) AS is_cover,
-      (g.reviewed_at IS NOT NULL) AS reviewed
-    FROM ${photoGroupMembers} pgm
-    JOIN ${photoGroups} g ON g.id = pgm.group_id
-    WHERE pgm.photo_id = ANY(${photoIds}::int[])
-      AND g.user_id = ${userId}
-    ORDER BY pgm.photo_id, (g.reviewed_at IS NULL) DESC, g.id DESC
-  `);
-  const chosen = chosenResult.rows;
+  }>(
+    db
+      .selectDistinctOn([photoGroupMembers.photo_id], {
+        photo_id: photoGroupMembers.photo_id,
+        group_id: photoGroups.id,
+        is_cover: sql<boolean>`(${photoGroups.cover_photo_id} = ${photoGroupMembers.photo_id})`,
+        reviewed: sql<boolean>`(${photoGroups.reviewed_at} IS NOT NULL)`,
+      })
+      .from(photoGroupMembers)
+      .innerJoin(photoGroups, eq(photoGroups.id, photoGroupMembers.group_id))
+      .where(
+        and(
+          inArray(photoGroupMembers.photo_id, photoIds),
+          eq(photoGroups.user_id, userId),
+        ),
+      )
+      .orderBy(
+        photoGroupMembers.photo_id,
+        sql`(${photoGroups.reviewed_at} IS NULL) DESC`,
+        desc(photoGroups.id),
+      ),
+  );
   if (chosen.length === 0) return out;
 
   const groupIds = Array.from(new Set(chosen.map((c) => c.group_id)));
-  const countsResult = await db.execute<{ group_id: number; member_count: number }>(sql`
-    SELECT group_id, COUNT(*)::int AS member_count
-    FROM ${photoGroupMembers}
-    WHERE group_id = ANY(${groupIds}::int[])
-    GROUP BY group_id
-  `);
-  const counts = countsResult.rows;
+  const counts = await dbAll<{ group_id: number; member_count: number }>(
+    db
+      .select({
+        group_id: photoGroupMembers.group_id,
+        member_count: sql<number>`COUNT(*)::int`,
+      })
+      .from(photoGroupMembers)
+      .where(inArray(photoGroupMembers.group_id, groupIds))
+      .groupBy(photoGroupMembers.group_id),
+  );
   const memberCountByGroupId = new Map<number, number>();
   for (const c of counts) memberCountByGroupId.set(c.group_id, c.member_count);
 
