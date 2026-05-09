@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, defineAsyncComponent, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, ref, watch, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
@@ -486,14 +486,18 @@ const mapFullscreenPhotos = ref<Photo[]>([])
 const mapFullscreenIndex = ref(0)
 const isMapFullscreen = ref(false)
 
-// When navigating to this album via ?photoId= and the album is in map mode,
-// we need to select the stop containing that photo once TripMap has mounted.
-// TripMap is a defineAsyncComponent so it isn't available synchronously.
+// When navigating to this album via ?photoId= (or restoring a stored selection)
+// in map mode, we need to select the stop for that photo once TripMap mounts.
+// watchEffect re-runs whenever either tripMapRef or pendingMapSelectPhotoId
+// changes, covering both "TripMap mounts after photo is resolved" and the
+// rarer case where the photo id is resolved after TripMap is already mounted.
 const pendingMapSelectPhotoId = ref<number | null>(null)
 
-watch(tripMapRef, (ref) => {
-  if (ref && pendingMapSelectPhotoId.value !== null) {
-    ref.selectStopByPhotoId(pendingMapSelectPhotoId.value)
+watchEffect(() => {
+  const mapRef = tripMapRef.value
+  const photoId = pendingMapSelectPhotoId.value
+  if (mapRef && photoId !== null) {
+    mapRef.selectStopByPhotoId(photoId)
     pendingMapSelectPhotoId.value = null
   }
 })
@@ -516,7 +520,18 @@ function closeMapFullscreen() {
   if (ended && tripMapRef.value) {
     tripMapRef.value.selectStopByPhotoId(ended.id)
   }
+  // Remember the photo the user ended on so that switching to gallery view
+  // after closing fullscreen scrolls to that photo via onGalleryLoaded.
+  if (ended) {
+    photoNav.selectPhotoInAlbum(ended.id, albumId.value)
+  }
   isMapFullscreen.value = false
+}
+
+// Called when the user actively selects a stop in the map (click or keyboard).
+// Updates photoNav so that switching to gallery lands on the stop's cover photo.
+function handleMapStopSelected(coverPhotoId: number) {
+  photoNav.selectPhotoInAlbum(coverPhotoId, albumId.value)
 }
 
 const mapSelectedPhoto = computed(() =>
@@ -587,6 +602,12 @@ async function loadData() {
     if (queryPhotoId && albumRes.display_mode === 'map') {
       pendingMapSelectPhotoId.value = queryPhotoId
       router.replace({ query: { ...route.query, photoId: undefined } })
+    } else if (albumRes.display_mode === 'map') {
+      // Fallback: pre-select the stop for the last-viewed photo when revisiting.
+      const storedPhotoId = loadLastPhotoMap()[String(albumId.value)]
+        ?? photoNav.selectedPhotoId
+        ?? null
+      if (storedPhotoId) pendingMapSelectPhotoId.value = storedPhotoId
     }
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden des Albums'
@@ -1267,6 +1288,7 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
       :albumName="album.name"
       :albumDescription="album.description"
       @open-fullscreen="handleMapFullscreen"
+      @stop-selected="handleMapStopSelected"
     />
 
     <!-- Two-column layout: VirtualGallery | Sidebar -->
