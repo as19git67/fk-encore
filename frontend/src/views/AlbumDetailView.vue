@@ -466,12 +466,12 @@ const showPersons = computed(() => auth.hasPermission('people.view'))
 // raster and map view on the fly via `viewMode`; otherwise we lock to grid.
 const mapEnabled = computed(() => album.value?.display_mode === 'map')
 const viewMode = ref<'grid' | 'map'>('grid')
+let viewModeInitialized = false
 
 watch(album, (a) => {
   if (!a) return
-  // Default to the user's last choice when revisiting the album within the
-  // session; on initial load fall back to map view if the album has it
-  // enabled (the curated experience), otherwise grid.
+  if (viewModeInitialized) return
+  viewModeInitialized = true
   viewMode.value = a.display_mode === 'map' ? 'map' : 'grid'
 }, { immediate: true })
 
@@ -1084,6 +1084,7 @@ onUnmounted(() => serviceHealth.stopPolling())
 watch(albumId, (id) => {
   rememberFocusedAlbum(id)
   album.value = null
+  viewModeInitialized = false
   cursorIndex.value = null
   cursorPhoto.value = null
   cursorPrev.value = null
