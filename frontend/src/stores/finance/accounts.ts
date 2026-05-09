@@ -50,6 +50,22 @@ export const useAccountsStore = defineStore('finance.accounts', () => {
     return unlinked
   }
 
+  async function close(id: number) {
+    const resp = await api.closeAccount(id)
+    items.value = items.value.map((a) =>
+      a.id === id ? { ...a, closed_at: resp.closed_at } : a,
+    )
+    return resp
+  }
+
+  async function reopen(id: number) {
+    const resp = await api.reopenAccount(id)
+    items.value = items.value.map((a) =>
+      a.id === id ? { ...a, closed_at: null } : a,
+    )
+    return resp
+  }
+
   function byId(id: number): api.Account | undefined {
     return items.value.find((a) => a.id === id)
   }
@@ -64,6 +80,8 @@ export const useAccountsStore = defineStore('finance.accounts', () => {
     remove,
     link,
     unlink,
+    close,
+    reopen,
     byId,
   }
 })

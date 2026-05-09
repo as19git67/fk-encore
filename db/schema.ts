@@ -1019,6 +1019,11 @@ export const financeAccount = pgTable(
     account_number: text("account_number").notNull(),
     label: text("label").notNull(),
     active: boolean("active").notNull().default(true),
+    // Non-null marks the account as closed: sync ignores it and the
+    // manual booking endpoint refuses inserts. Stored as a timestamp
+    // (rather than a boolean) so the UI can show *when* it happened
+    // without a separate audit table.
+    closed_at: timestamp("closed_at", { mode: "string", withTimezone: true }),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true })
       .notNull()
       .defaultNow(),

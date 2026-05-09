@@ -55,6 +55,9 @@ interface AccountView {
   account_number: string;
   label: string;
   active: boolean;
+  /** Non-null when the account was closed. Closed accounts reject new
+   *  bookings (manual + sync) but stay visible for historical access. */
+  closed_at: string | null;
   created_at: string | null;
   /** Number of users with an entry in finance_account_access for this
    *  account. 0 means "not yet assigned to anyone" — useful for the
@@ -96,6 +99,7 @@ function toView(
     account_number: row.account_number,
     label: row.label,
     active: row.active,
+    closed_at: row.closed_at,
     created_at: row.created_at,
     access_count: accessCount,
   };
@@ -137,6 +141,7 @@ export const listAccounts = api(
           account_number: financeAccount.account_number,
           label: financeAccount.label,
           active: financeAccount.active,
+          closed_at: financeAccount.closed_at,
           created_at: financeAccount.created_at,
         })
         .from(financeAccount)
@@ -547,6 +552,86 @@ export const unlinkAccount = api(
     return toView(row, null, type, curr, accessCount);
   },
 );
+
+// -----------------------------------------------------------------------
+// Close / Reopen
+// -----------------------------------------------------------------------
+//
+// Closing flips `closed_at` to now() and is a soft state — historical
+// data stays readable, new bookings are refused. The sync path uses
+// `isAccountClosed` to skip closed accounts entirely. Reopening clears
+// the timestamp and unblocks both insert paths again.
+
+interface CloseAccountResponse {
+  id: number;
+  closed_at: string;
+}
+
+interface ReopenAccountResponse {
+  id: number;
+}
+
+export const closeAccount = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/finance/accounts/:id/close",
+    auth: true,
+  },
+  async ({ id }: IdParams): Promise<CloseAccountResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.accounts.manage");
+
+    const existing = await loadAccount(id);
+    if (existing.closed_at) {
+      // Idempotent: re-closing a closed account just returns the
+      // existing timestamp instead of bumping it.
+      return { id, closed_at: existing.closed_at };
+    }
+
+    const nowIso = new Date().toISOString();
+    const [row] = await db
+      .update(financeAccount)
+      .set({ closed_at: nowIso })
+      .where(eq(financeAccount.id, id))
+      .returning({ closed_at: financeAccount.closed_at });
+    return { id, closed_at: row.closed_at! };
+  },
+);
+
+export const reopenAccount = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/finance/accounts/:id/reopen",
+    auth: true,
+  },
+  async ({ id }: IdParams): Promise<ReopenAccountResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.accounts.manage");
+
+    await loadAccount(id);
+    await db
+      .update(financeAccount)
+      .set({ closed_at: null })
+      .where(eq(financeAccount.id, id));
+    return { id };
+  },
+);
+
+/**
+ * True if the given account exists and has been closed. Sync and
+ * insert paths call this before writing so a closed account stays
+ * truly read-only.
+ */
+export async function isAccountClosed(id: number): Promise<boolean> {
+  const [row] = await db
+    .select({ closed_at: financeAccount.closed_at })
+    .from(financeAccount)
+    .where(eq(financeAccount.id, id))
+    .limit(1);
+  return row?.closed_at != null;
+}
 
 // -----------------------------------------------------------------------
 // Delete

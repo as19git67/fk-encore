@@ -467,6 +467,22 @@ describe("finance/transactions — create (manual booking)", () => {
       }),
     ).rejects.toThrow(/account.*not found/);
   });
+
+  it("rejects bookings on a closed account", async () => {
+    const { a } = await createAccounts();
+    await db
+      .update(financeAccount)
+      .set({ closed_at: new Date().toISOString() })
+      .where(eq(financeAccount.id, a));
+    setAuth("1", ["finance.view", "finance.admin"]);
+    await expect(
+      createTransaction({
+        account_id: a,
+        booking_date: "2024-08-15",
+        amount: 100,
+      }),
+    ).rejects.toThrow(/closed/);
+  });
 });
 
 // ================= PROMOTE =================

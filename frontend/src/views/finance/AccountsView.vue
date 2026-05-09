@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Dialog from 'primevue/dialog'
@@ -15,6 +16,7 @@ import { useAuthStore } from '../../stores/auth'
 const store = useAccountsStore()
 const bankcontactsStore = useBankcontactsStore()
 const authStore = useAuthStore()
+const router = useRouter()
 
 // "I have finance.view but the listAccounts response is empty" — that
 // almost always means the user has no ACL entries yet. Distinguish from
@@ -55,6 +57,16 @@ const editForm = ref({
   active: true,
   bankcontact_id: null as number | null,
 })
+
+// Closed accounts open the detail view (which carries the reopen
+// action); only live accounts pop the inline edit dialog.
+function onRowClick(acc: any) {
+  if (acc?.closed_at) {
+    void router.push({ name: 'finance-account-detail', params: { id: acc.id } })
+    return
+  }
+  openEdit(acc)
+}
 
 function openEdit(acc?: any) {
   if (acc) {
@@ -156,10 +168,18 @@ async function saveAccount() {
       :loading="store.loading"
       dataKey="id"
       :rowHover="true"
-      @row-click="(e) => openEdit(e.data)"
+      :rowClass="(data) => (data.closed_at ? 'row-closed' : '')"
+      @row-click="(e) => onRowClick(e.data)"
       striped-rows
     >
-      <Column field="label" header="Label" />
+      <Column field="label" header="Label">
+        <template #body="{ data }">
+          <span>{{ data.label }}</span>
+          <span v-if="data.closed_at" class="closed-badge" title="Geschlossen">
+            geschlossen
+          </span>
+        </template>
+      </Column>
       <Column header="IBAN" class="mobile-hidden" headerClass="mobile-hidden">
         <template #body="{ data }">{{ formatIban(data.iban) }}</template>
       </Column>
@@ -173,7 +193,8 @@ async function saveAccount() {
       <Column field="currency_code" header="Währung" class="mobile-hidden" headerClass="mobile-hidden" />
       <Column header="Aktiv">
         <template #body="{ data }">
-          <i v-if="data.active" class="pi pi-check text-green-500" />
+          <i v-if="data.closed_at" class="pi pi-lock text-orange-500" title="Geschlossen" />
+          <i v-else-if="data.active" class="pi pi-check text-green-500" />
           <i v-else class="pi pi-times text-gray-400" />
         </template>
       </Column>
@@ -284,6 +305,20 @@ async function saveAccount() {
 .manual-hint {
   color: var(--p-text-muted-color);
   font-style: italic;
+}
+.closed-badge {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.05rem 0.5rem;
+  border-radius: 0.5rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--p-text-muted-color);
+}
+:deep(.row-closed) {
+  opacity: 0.65;
 }
 .field {
   display: flex;

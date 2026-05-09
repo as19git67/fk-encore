@@ -36,7 +36,9 @@ const recentRecipients = ref<RecentRecipient[]>([])
 const recipientSuggestions = ref<RecentRecipient[]>([])
 
 const cashAccounts = computed(() =>
-  accountsStore.items.filter((a) => a.type_kind === 'bargeld'),
+  accountsStore.items.filter(
+    (a) => a.type_kind === 'bargeld' && !a.closed_at,
+  ),
 )
 
 onMounted(async () => {

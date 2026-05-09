@@ -22,7 +22,7 @@
 import { randomUUID } from "node:crypto";
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
 import { checkRateLimit } from "../user/rateLimiter";
@@ -79,6 +79,8 @@ export interface SyncApiResponse {
   accounts_seen?: number;
   /** state=idle — accounts that matched a linked finance_account and got data. */
   accounts_matched?: number;
+  /** state=idle — matched accounts skipped because they are closed. */
+  accounts_closed?: number;
   /** state=idle — accounts the bank reported but no linked finance_account exists for. */
   accounts_unknown?: number;
   /** state=idle — bank-side accounts waiting to be imported / linked in the UI. */
@@ -223,6 +225,7 @@ export async function fetchAndPersist(
       state: "idle",
       accounts_seen: 0,
       accounts_matched: 0,
+      accounts_closed: 0,
       accounts_unknown: 0,
       transactions_inserted: 0,
       balances_written: 0,
@@ -242,6 +245,10 @@ export async function fetchAndPersist(
   // finance_transaction.dedupe_hash. Without an explicit `from` some
   // banks (comdirect for one) return arbitrary archival data instead
   // of recent transactions.
+  // Closed accounts (closed_at IS NOT NULL) are excluded so the bank
+  // fetcher never asks for them — saves a per-account TAN round-trip
+  // for accounts the user has explicitly retired. statement-persist
+  // also refuses inserts on closed accounts as a defence in depth.
   const linkedRows = await db
     .select({
       id: financeAccount.id,
@@ -252,6 +259,7 @@ export async function fetchAndPersist(
       and(
         eq(financeAccount.bankcontact_id, bankcontactId),
         isNotNull(financeAccount.fints_account_number),
+        isNull(financeAccount.closed_at),
       ),
     );
   const linkedAccountNumbers = new Set(
@@ -363,6 +371,7 @@ export async function fetchAndPersist(
     state: "idle",
     accounts_seen: stats.accounts_seen,
     accounts_matched: stats.accounts_matched,
+    accounts_closed: stats.accounts_closed,
     accounts_unknown: stats.accounts_unknown,
     unknown_accounts: stats.unknown.map((u) => ({
       accountNumber: u.accountNumber,

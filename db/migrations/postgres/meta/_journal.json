@@ -505,6 +505,13 @@
       "when": 1779001410000,
       "tag": "0071_photo_group_members_photo_id_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1779001411000,
+      "tag": "0072_finance_account_closed_at",
+      "breakpoints": true
     }
   ]
 }

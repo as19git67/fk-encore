@@ -464,6 +464,11 @@ export const createTransaction = api(
         `write access required on account ${p.account_id}`,
       );
     }
+    if (account.closed_at) {
+      throw APIError.failedPrecondition(
+        `account ${p.account_id} is closed and cannot accept new transactions`,
+      );
+    }
 
     // Validate currency if explicit; otherwise inherit from account.
     const currencyCode = (p.currency_code ?? account.currency_code).toUpperCase();

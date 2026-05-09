@@ -150,6 +150,8 @@ export type SyncResponse =
       accounts_seen?: number
       /** Accounts matched to a linked finance_account (data written). */
       accounts_matched?: number
+      /** Matched accounts skipped because they are closed. */
+      accounts_closed?: number
       /** Accounts the bank reported that are not linked yet. */
       accounts_unknown?: number
       /** Bank-side account snapshots waiting for link/import in the UI. */
@@ -242,6 +244,10 @@ export interface Account {
   account_number: string
   label: string
   active: boolean
+  /** Non-null timestamp when the account is closed. Closed accounts are
+   *  read-only — sync skips them and the manual booking endpoint refuses
+   *  inserts. Reopen via `reopenAccount` to clear. */
+  closed_at: string | null
   created_at: string | null
   /** Number of users with an explicit ACL entry (read/write) on this
    *  account. 0 means non-admin users can't see it yet — surfaced so
@@ -325,6 +331,29 @@ export async function linkAccount(
 
 export async function unlinkAccount(id: number): Promise<Account> {
   return apiFetch(`/finance/accounts/${id}/unlink`, {
+    method: 'POST',
+    body: JSON.stringify({ id }),
+  })
+}
+
+export interface CloseAccountResponse {
+  id: number
+  closed_at: string
+}
+
+export interface ReopenAccountResponse {
+  id: number
+}
+
+export async function closeAccount(id: number): Promise<CloseAccountResponse> {
+  return apiFetch(`/finance/accounts/${id}/close`, {
+    method: 'POST',
+    body: JSON.stringify({ id }),
+  })
+}
+
+export async function reopenAccount(id: number): Promise<ReopenAccountResponse> {
+  return apiFetch(`/finance/accounts/${id}/reopen`, {
     method: 'POST',
     body: JSON.stringify({ id }),
   })

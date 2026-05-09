@@ -16,11 +16,14 @@ import {
   users,
 } from "../db/schema";
 import {
+  closeAccount,
   createAccount,
   deleteAccount,
   getAccount,
+  isAccountClosed,
   linkAccount,
   listAccounts,
+  reopenAccount,
   unlinkAccount,
   updateAccount,
 } from "./accounts";
@@ -553,5 +556,65 @@ describe("finance/accounts — link / unlink", () => {
       }),
     ).rejects.toThrow(/permission/);
     await expect(unlinkAccount({ id: accountId })).rejects.toThrow(/permission/);
+  });
+});
+
+describe("finance/accounts — close / reopen", () => {
+  it("closes an open account and exposes closed_at", async () => {
+    const bcId = await insertBankcontact();
+    const a = await insertAccount(bcId);
+    setAuth("1", ["finance.accounts.manage", "finance.view"]);
+    await ensureUser(1);
+    await grantAcl(a, 1, "write");
+
+    const before = await getAccount({ id: a });
+    expect(before.closed_at).toBeNull();
+
+    const result = await closeAccount({ id: a });
+    expect(result.id).toBe(a);
+    expect(result.closed_at).toBeTruthy();
+
+    const after = await getAccount({ id: a });
+    expect(after.closed_at).toBe(result.closed_at);
+    expect(await isAccountClosed(a)).toBe(true);
+  });
+
+  it("is idempotent — re-closing keeps the original timestamp", async () => {
+    const bcId = await insertBankcontact();
+    const a = await insertAccount(bcId);
+    setAuth("1", ["finance.accounts.manage"]);
+
+    const first = await closeAccount({ id: a });
+    const second = await closeAccount({ id: a });
+    expect(second.closed_at).toBe(first.closed_at);
+  });
+
+  it("reopen clears closed_at", async () => {
+    const bcId = await insertBankcontact();
+    const a = await insertAccount(bcId);
+    setAuth("1", ["finance.accounts.manage", "finance.view"]);
+    await ensureUser(1);
+    await grantAcl(a, 1, "read");
+
+    await closeAccount({ id: a });
+    await reopenAccount({ id: a });
+
+    const view = await getAccount({ id: a });
+    expect(view.closed_at).toBeNull();
+    expect(await isAccountClosed(a)).toBe(false);
+  });
+
+  it("requires finance.accounts.manage", async () => {
+    const bcId = await insertBankcontact();
+    const a = await insertAccount(bcId);
+    setAuth("1", ["finance.view"]);
+    await expect(closeAccount({ id: a })).rejects.toThrow(/permission/);
+    await expect(reopenAccount({ id: a })).rejects.toThrow(/permission/);
+  });
+
+  it("404s on unknown account id", async () => {
+    setAuth("1", ["finance.accounts.manage"]);
+    await expect(closeAccount({ id: 999_999 })).rejects.toThrow(/not found/);
+    await expect(reopenAccount({ id: 999_999 })).rejects.toThrow(/not found/);
   });
 });

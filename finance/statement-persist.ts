@@ -61,6 +61,8 @@ export interface UnknownAccount {
 export interface PersistStats {
   accounts_seen: number;
   accounts_matched: number;
+  /** Matched accounts that were skipped because they are closed. */
+  accounts_closed: number;
   accounts_unknown: number;
   transactions_inserted: number;
   transactions_skipped_duplicate: number;
@@ -76,6 +78,7 @@ export async function persistFetchResult(
   const stats: PersistStats = {
     accounts_seen: 0,
     accounts_matched: 0,
+    accounts_closed: 0,
     accounts_unknown: 0,
     transactions_inserted: 0,
     transactions_skipped_duplicate: 0,
@@ -95,7 +98,10 @@ export async function persistFetchResult(
 
     // Look up the linked finance_account, if any.
     const [matched] = await db
-      .select({ id: financeAccount.id })
+      .select({
+        id: financeAccount.id,
+        closed_at: financeAccount.closed_at,
+      })
       .from(financeAccount)
       .where(
         and(
@@ -104,6 +110,18 @@ export async function persistFetchResult(
         ),
       )
       .limit(1);
+
+    if (matched?.closed_at) {
+      // Closed accounts stay linked so the UI can still show them, but
+      // the sync path treats them like unknown rows: no transactions,
+      // no balance, just an info-line in `errors` so the operator sees
+      // why nothing was written.
+      stats.accounts_closed++;
+      stats.errors.push(
+        `account ${snapshot.accountNumber}: skipped, account is closed`,
+      );
+      continue;
+    }
 
     if (!matched) {
       stats.accounts_unknown++;

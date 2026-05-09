@@ -24,8 +24,17 @@ const authStore = useAuthStore()
 
 const accountId = computed(() => Number(route.params.id))
 const account = computed(() => accountsStore.byId(accountId.value))
+const isClosed = computed(() => !!account.value?.closed_at)
 
 const canWrite = computed(() => authStore.hasPermission('finance.accounts.manage'))
+const canEdit = computed(() => canWrite.value && !isClosed.value)
+
+function formatClosedAt(iso: string): string {
+  return new Date(iso).toLocaleString('de-DE', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  })
+}
 
 onMounted(async () => {
   if (accountsStore.items.length === 0) await accountsStore.refresh()
@@ -154,6 +163,42 @@ async function saveEdit() {
     editing.value = false
   }
 }
+
+// --- Close / Reopen --------------------------------------------------
+
+const togglingClosed = ref(false)
+
+async function doClose() {
+  if (!account.value) return
+  if (
+    !confirm(
+      `Konto "${account.value.label}" wirklich schließen? ` +
+        `Sync und neue Buchungen werden ab sofort blockiert; ` +
+        `bisherige Daten bleiben sichtbar und können wieder reaktiviert werden.`,
+    )
+  )
+    return
+  togglingClosed.value = true
+  try {
+    await accountsStore.close(account.value.id)
+  } catch (err) {
+    alert(err instanceof Error ? err.message : String(err))
+  } finally {
+    togglingClosed.value = false
+  }
+}
+
+async function doReopen() {
+  if (!account.value) return
+  togglingClosed.value = true
+  try {
+    await accountsStore.reopen(account.value.id)
+  } catch (err) {
+    alert(err instanceof Error ? err.message : String(err))
+  } finally {
+    togglingClosed.value = false
+  }
+}
 </script>
 
 <template>
@@ -170,11 +215,27 @@ async function saveEdit() {
       </div>
       <div class="header-actions">
         <Button
-          v-if="canWrite && account"
+          v-if="canWrite && account && !isClosed"
           label="Bearbeiten"
           icon="pi pi-pencil"
           severity="secondary"
           @click="openEdit"
+        />
+        <Button
+          v-if="canWrite && account && !isClosed"
+          label="Konto schließen"
+          icon="pi pi-lock"
+          severity="warn"
+          :loading="togglingClosed"
+          @click="doClose"
+        />
+        <Button
+          v-if="canWrite && account && isClosed"
+          label="Wieder öffnen"
+          icon="pi pi-lock-open"
+          severity="secondary"
+          :loading="togglingClosed"
+          @click="doReopen"
         />
         <Button
           label="Zurück"
@@ -185,6 +246,17 @@ async function saveEdit() {
         />
       </div>
     </header>
+
+    <Message
+      v-if="account && isClosed"
+      severity="warn"
+      :closable="false"
+    >
+      Dieses Konto wurde am
+      <strong>{{ formatClosedAt(account.closed_at!) }}</strong>
+      geschlossen. Sync und neue Buchungen sind blockiert; alle Daten
+      bleiben jedoch lesbar.
+    </Message>
 
     <Message v-if="txStore.error" severity="error" :closable="false">
       {{ txStore.error }}
@@ -205,13 +277,13 @@ async function saveEdit() {
       </p>
       <div class="actions">
         <Button
-          v-if="canWrite && !account.bankcontact_id"
+          v-if="canEdit && !account.bankcontact_id"
           label="Mit Bankzugang verknüpfen"
           icon="pi pi-link"
           @click="openLink"
         />
         <Button
-          v-if="canWrite && account.bankcontact_id"
+          v-if="canEdit && account.bankcontact_id"
           label="Verknüpfung aufheben"
           icon="pi pi-unlink"
           severity="secondary"
@@ -228,7 +300,7 @@ async function saveEdit() {
           Umsätze für Bankkonten werden in der Übersicht angezeigt.
         </p>
         <Button
-          v-if="canWrite && account?.type_kind === 'bargeld'"
+          v-if="canEdit && account?.type_kind === 'bargeld'"
           label="Manuelle Buchung"
           icon="pi pi-plus"
           size="small"
