@@ -1030,6 +1030,17 @@ Der Testlauf (`npm run test`) erstellt die `encore_test`-Datenbank automatisch, 
 
 Bei Umbenennung oder Neuerstellung von Migrationsdateien muss **immer** auch `db/migrations/postgres/meta/_journal.json` aktualisiert werden. Fehlende Einträge im Journal führen dazu, dass Drizzle die Migrationen überspringt und die CI-Tests schlagen fehl.
 
+## Date-only values in the frontend
+
+For date-only values (no time component), always use the helpers from `frontend/src/utils/dateFormat.ts`:
+
+- `toLocalIsoDate(d: Date)` → `"YYYY-MM-DD"` (extracts local date, no UTC shift)
+- `parseLocalDate(s: string)` → `Date` (parses as local midnight)
+
+**Never** use:
+- `d.toISOString().slice(0, 10)` — shifts the date for timezones east of UTC
+- `new Date("YYYY-MM-DD")` — parses as UTC midnight, may display the previous day locally
+
 ## Aktive Feature-Pläne
 
 - **Dokumentenverwaltung** (neues Modul neben Fotos, lokale KI-Klassifikation via llm-service): `/root/.claude/plans/ein-weiteres-modul-in-peaceful-robin.md`. Wird iterativ in Etappen umgesetzt (DB/Seed → llm-service → documents-Service → Watcher → Suche → Frontend → Infra).
