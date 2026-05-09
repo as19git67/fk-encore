@@ -222,6 +222,7 @@ async function save() {
     }
     tx.value = await api.updateTransaction(tx.value.id, input)
     syncForm()
+    router.back()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -714,12 +715,6 @@ const extractedFields = computed(() => {
           severity="secondary"
           size="small"
           @click="navigateToRecurringTx"
-        />
-        <Button
-          label="Schließen"
-          severity="secondary"
-          text
-          @click="recurringPopupVisible = false"
         />
       </template>
     </Dialog>
