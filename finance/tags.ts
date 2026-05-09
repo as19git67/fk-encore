@@ -12,7 +12,7 @@
 
 import { api } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
-import { and, asc, eq, type SQLWrapper } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
@@ -47,23 +47,41 @@ export const listTags = api(
     const auth = getAuthData()!;
     requirePermission(auth, "finance.view");
 
-    const conds: SQLWrapper[] = [];
     const source = p.source ?? "user";
-    if (source !== "all") {
-      if (
-        !(financeTagSourceEnum.enumValues as readonly string[]).includes(source)
-      ) {
-        // Hitting this means a client supplied an invalid literal; return
-        // the empty set rather than crashing.
-        return { items: [] };
-      }
-      conds.push(eq(financeTag.source, source));
+
+    if (source === "all") {
+      // Deduplicate by name, preferring 'user' over 'ai' so that
+      // promoted tags don't appear twice in look-ahead lists (#326).
+      const rows = await db.execute<{
+        id: number;
+        name: string;
+        source: "user" | "ai";
+        created_at: string;
+      }>(sql`
+        SELECT DISTINCT ON (name) id, name, source, created_at
+        FROM finance_tag
+        ORDER BY name, CASE WHEN source = 'user' THEN 0 ELSE 1 END
+      `);
+      return {
+        items: rows.rows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          source: r.source,
+          created_at: r.created_at,
+        })),
+      };
+    }
+
+    if (
+      !(financeTagSourceEnum.enumValues as readonly string[]).includes(source)
+    ) {
+      return { items: [] };
     }
 
     const rows = await db
       .select()
       .from(financeTag)
-      .where(conds.length > 0 ? and(...conds) : undefined)
+      .where(eq(financeTag.source, source))
       .orderBy(asc(financeTag.name));
 
     return {
