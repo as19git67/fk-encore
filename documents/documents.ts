@@ -21,6 +21,7 @@ import {
   documentTags,
   documentTaxSections,
   documents,
+  documentsUserPref,
 } from "../db/schema";
 import {
   DOCUMENTS_MAX_BYTES,
@@ -249,9 +250,11 @@ async function streamAndStorePdf(
   );
   if (existing) throw new Error("DOCUMENT_ALREADY_EXISTS");
 
-  // New uploads land as `visibility='private'` under the uploader's
-  // personal root; the owner can later move the document into a
-  // group via `POST /documents/:id/visibility`.
+  // New uploads land in the uploader's personal root by default. If the
+  // user has set a default group via the upload-defaults preference and
+  // is still a member of that group, the document is created with
+  // `visibility='group', group_id=<pref>` directly so the file goes
+  // straight to the shared root.
   const uploader = await dbFirst<{ email: string }>(
     db.select({ email: users.email }).from(users).where(eq(users.id, userId)),
   );
@@ -259,6 +262,9 @@ async function streamAndStorePdf(
     uploader?.email ?? `user-${userId}@local`,
     userId,
   );
+
+  const defaultGroupId = await loadDefaultGroupForUser(userId);
+
   const ownerRootSeg = composeOwnerRootSegment({
     visibility: "private",
     userLoginSlug,
@@ -284,16 +290,66 @@ async function streamAndStorePdf(
         mime_type: mimeType,
         size_bytes: size,
         disk_path: absPath,
-        visibility: "private",
+        visibility: defaultGroupId != null ? "group" : "private",
+        group_id: defaultGroupId,
       })
       .returning(),
   );
   if (!row) throw new Error("insert documents: no row returned");
 
+  // When the document was created with a group right away the file still
+  // sits under the uploader's private root — relocate to the group root.
+  if (defaultGroupId != null) {
+    try {
+      await relocateDocument(row.id);
+    } catch (err) {
+      console.warn(
+        `[documents] upload: relocate after default-group(${row.id}) failed: ${(err as Error).message}`,
+      );
+    }
+  }
+
   await enqueueDocumentScan(row.id);
   triggerWorkers();
 
   return toSummary(row, null, []);
+}
+
+const UPLOAD_DEFAULTS_PREF_KEY = "upload_defaults";
+
+interface UploadDefaultsPref {
+  group_id: number | null;
+}
+
+/**
+ * Read the configured default group for new uploads. Returns null when
+ * the user has no preference, the preference is malformed, or the user
+ * is no longer a member of the saved group (which we treat the same
+ * as "no preference" so a stale pref doesn't fail uploads).
+ */
+async function loadDefaultGroupForUser(userId: number): Promise<number | null> {
+  const row = await dbFirst<{ value: unknown }>(
+    db
+      .select({ value: documentsUserPref.value })
+      .from(documentsUserPref)
+      .where(
+        and(
+          eq(documentsUserPref.user_id, userId),
+          eq(documentsUserPref.key, UPLOAD_DEFAULTS_PREF_KEY),
+        ),
+      ),
+  );
+  if (!row) return null;
+  const v = row.value as UploadDefaultsPref | null;
+  const groupId = v?.group_id ?? null;
+  if (groupId == null) return null;
+  // Still a member?
+  try {
+    await assertGroupMember(userId, groupId);
+  } catch {
+    return null;
+  }
+  return groupId;
 }
 
 // ─── List / get / file ──────────────────────────────────────────────────────
@@ -630,6 +686,257 @@ export const updateDocumentVisibility = api(
     }
 
     return await loadDetail(userId, existing.id);
+  },
+);
+
+// ─── Batch updates ──────────────────────────────────────────────────────────
+
+export interface BatchUpdateTagsRequest {
+  document_ids: number[];
+  /** Tag names to add to every document in `document_ids`. */
+  add?: string[];
+  /** Tag names to remove from every document in `document_ids`. */
+  remove?: string[];
+}
+
+export interface BatchUpdateTagsResponse {
+  affected_documents: number;
+  added_links: number;
+  removed_links: number;
+}
+
+/**
+ * Add and/or remove a set of tags across multiple documents in one call.
+ * Documents the caller cannot see are silently skipped — same pattern
+ * as `finance.batchTag`.
+ */
+export const batchUpdateTags = api(
+  { expose: true, method: "POST", path: "/documents/batch/tags", auth: true },
+  async (req: BatchUpdateTagsRequest): Promise<BatchUpdateTagsResponse> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.edit");
+    const userId = getUserId();
+
+    if (!Array.isArray(req.document_ids) || req.document_ids.length === 0) {
+      throw APIError.invalidArgument("document_ids required");
+    }
+    const add = (req.add ?? []).map((s) => s.trim().toLowerCase()).filter(Boolean);
+    const remove = (req.remove ?? []).map((s) => s.trim().toLowerCase()).filter(Boolean);
+    if (add.length === 0 && remove.length === 0) {
+      throw APIError.invalidArgument("at least one of add / remove required");
+    }
+
+    const groupIds = await loadUserGroupIds(userId);
+    const visibleRows = await dbAll<{ id: number }>(
+      db
+        .select({ id: documents.id })
+        .from(documents)
+        .where(
+          and(
+            inArray(documents.id, req.document_ids),
+            visibleDocumentsWhere(userId, groupIds),
+          ),
+        ),
+    );
+    const docIds = visibleRows.map((r) => r.id);
+    if (docIds.length === 0) {
+      return { affected_documents: 0, added_links: 0, removed_links: 0 };
+    }
+
+    let removedLinks = 0;
+    let addedLinks = 0;
+
+    if (remove.length > 0) {
+      const tagRows = await dbAll<{ id: number }>(
+        db.select({ id: documentTags.id }).from(documentTags).where(inArray(documentTags.name, remove)),
+      );
+      if (tagRows.length > 0) {
+        const delRes = await db
+          .delete(documentTagLinks)
+          .where(
+            and(
+              inArray(documentTagLinks.document_id, docIds),
+              inArray(
+                documentTagLinks.tag_id,
+                tagRows.map((t) => t.id),
+              ),
+            ),
+          )
+          .returning({ document_id: documentTagLinks.document_id });
+        removedLinks = delRes.length;
+      }
+    }
+
+    if (add.length > 0) {
+      // Upsert tag rows by name.
+      for (const name of add) {
+        await db
+          .insert(documentTags)
+          .values({ name })
+          .onConflictDoNothing();
+      }
+      const tagRows = await dbAll<{ id: number; name: string }>(
+        db
+          .select({ id: documentTags.id, name: documentTags.name })
+          .from(documentTags)
+          .where(inArray(documentTags.name, add)),
+      );
+      for (const docId of docIds) {
+        for (const tag of tagRows) {
+          const inserted = await db
+            .insert(documentTagLinks)
+            .values({ document_id: docId, tag_id: tag.id })
+            .onConflictDoNothing()
+            .returning({ document_id: documentTagLinks.document_id });
+          if (inserted.length > 0) addedLinks++;
+        }
+      }
+    }
+
+    return {
+      affected_documents: docIds.length,
+      added_links: addedLinks,
+      removed_links: removedLinks,
+    };
+  },
+);
+
+export interface BatchUpdateVisibilityRequest {
+  document_ids: number[];
+  visibility: "private" | "group";
+  /** Required when `visibility='group'`. */
+  group_id?: number | null;
+}
+
+export interface BatchUpdateVisibilityResponse {
+  affected_documents: number;
+  skipped_unauthorized: number;
+}
+
+/**
+ * Move multiple documents between private and a single group at once.
+ * Each document is checked individually with `loadAdministrableDocument`;
+ * documents the caller cannot administer are skipped silently and
+ * counted in the response.
+ */
+export const batchUpdateVisibility = api(
+  { expose: true, method: "POST", path: "/documents/batch/visibility", auth: true },
+  async (req: BatchUpdateVisibilityRequest): Promise<BatchUpdateVisibilityResponse> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.edit");
+    const userId = getUserId();
+
+    if (!Array.isArray(req.document_ids) || req.document_ids.length === 0) {
+      throw APIError.invalidArgument("document_ids required");
+    }
+    if (req.visibility === "group") {
+      if (req.group_id == null) {
+        throw APIError.invalidArgument(
+          "group_id is required when visibility='group'",
+        );
+      }
+      await assertGroupMember(userId, req.group_id);
+    }
+
+    let affected = 0;
+    let skipped = 0;
+    for (const id of req.document_ids) {
+      let row;
+      try {
+        row = await loadAdministrableDocument(userId, id);
+      } catch {
+        skipped++;
+        continue;
+      }
+      if (req.visibility === "group") {
+        await db
+          .update(documents)
+          .set({ visibility: "group", group_id: req.group_id! })
+          .where(eq(documents.id, row.id));
+      } else {
+        await db
+          .update(documents)
+          .set({ visibility: "private", group_id: null })
+          .where(eq(documents.id, row.id));
+      }
+      try {
+        await relocateDocument(row.id);
+      } catch (err) {
+        console.warn(
+          `[documents] batch visibility: relocate(${row.id}) failed: ${(err as Error).message}`,
+        );
+      }
+      affected++;
+    }
+
+    return { affected_documents: affected, skipped_unauthorized: skipped };
+  },
+);
+
+// ─── Upload defaults (per-user preference) ─────────────────────────────────
+
+export interface UploadDefaultsResponse {
+  group_id: number | null;
+}
+
+export interface SetUploadDefaultsRequest {
+  group_id: number | null;
+}
+
+/**
+ * Get the caller's default group for new uploads. `group_id=null` means
+ * new uploads stay private (no default set).
+ */
+export const getUploadDefaults = api(
+  { expose: true, method: "GET", path: "/documents/upload-defaults", auth: true },
+  async (): Promise<UploadDefaultsResponse> => {
+    checkModule();
+    const userId = getUserId();
+    const row = await dbFirst<{ value: unknown }>(
+      db
+        .select({ value: documentsUserPref.value })
+        .from(documentsUserPref)
+        .where(
+          and(
+            eq(documentsUserPref.user_id, userId),
+            eq(documentsUserPref.key, UPLOAD_DEFAULTS_PREF_KEY),
+          ),
+        ),
+    );
+    if (!row) return { group_id: null };
+    const v = row.value as UploadDefaultsPref | null;
+    return { group_id: v?.group_id ?? null };
+  },
+);
+
+/**
+ * Save the caller's default group for new uploads. Setting
+ * `group_id=null` clears the preference (back to private). The caller
+ * must currently be a member of the chosen group.
+ */
+export const setUploadDefaults = api(
+  { expose: true, method: "PUT", path: "/documents/upload-defaults", auth: true },
+  async (req: SetUploadDefaultsRequest): Promise<UploadDefaultsResponse> => {
+    checkModule();
+    const userId = getUserId();
+    if (req.group_id != null) {
+      await assertGroupMember(userId, req.group_id);
+    }
+    const value: UploadDefaultsPref = { group_id: req.group_id };
+    await db
+      .insert(documentsUserPref)
+      .values({
+        user_id: userId,
+        key: UPLOAD_DEFAULTS_PREF_KEY,
+        value,
+      })
+      .onConflictDoUpdate({
+        target: [documentsUserPref.user_id, documentsUserPref.key],
+        set: { value, updated_at: new Date().toISOString() },
+      });
+    return { group_id: req.group_id };
   },
 );
 

@@ -176,6 +176,58 @@ export function updateDocumentVisibility(id: number, payload: UpdateDocumentVisi
   })
 }
 
+export interface BatchUpdateTagsPayload {
+  document_ids: number[]
+  add?: string[]
+  remove?: string[]
+}
+
+export interface BatchUpdateTagsResponse {
+  affected_documents: number
+  added_links: number
+  removed_links: number
+}
+
+export function batchUpdateDocumentTags(payload: BatchUpdateTagsPayload) {
+  return apiFetch<BatchUpdateTagsResponse>(`/documents/batch/tags`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export interface BatchUpdateVisibilityPayload {
+  document_ids: number[]
+  visibility: DocumentVisibility
+  group_id?: number | null
+}
+
+export interface BatchUpdateVisibilityResponse {
+  affected_documents: number
+  skipped_unauthorized: number
+}
+
+export function batchUpdateDocumentVisibility(payload: BatchUpdateVisibilityPayload) {
+  return apiFetch<BatchUpdateVisibilityResponse>(`/documents/batch/visibility`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export interface UploadDefaults {
+  group_id: number | null
+}
+
+export function getUploadDefaults() {
+  return apiFetch<UploadDefaults>(`/documents/upload-defaults`)
+}
+
+export function setUploadDefaults(payload: UploadDefaults) {
+  return apiFetch<UploadDefaults>(`/documents/upload-defaults`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
 export function reclassifyDocument(
   id: number,
   options: { forceOcr?: boolean } = {},

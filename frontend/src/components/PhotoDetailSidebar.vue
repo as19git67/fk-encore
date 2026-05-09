@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import Button from 'primevue/button'
 import DatePicker from 'primevue/datepicker'
-import Checkbox from 'primevue/checkbox'
 import HeicImage from './HeicImage.vue'
 import PhotoMiniMap from './PhotoMiniMap.vue'
 import PhotoLocationMenu from './PhotoLocationMenu.vue'
 import PhotoReactions from './PhotoReactions.vue'
+import MultiSelectDialog from './MultiSelectDialog.vue'
 import { getPhotoUrl, getPhotosAlbums, batchUpdateAlbumPhotos, updateAlbum, updateAlbumUserSettings, createAlbum, updatePhotoDescription } from '../api/photos'
-import { getAlbumCheckState as calculateAlbumCheckState, getNewPendingAction } from '../utils/albumSelection'
+import { getAlbumCheckState as calculateAlbumCheckState } from '../utils/albumSelection'
 import type { Photo, Face, LandmarkItem, Person, CurationStatus } from '../api/photos'
 import { useReferenceData } from '../composables/useReferenceData'
 import { ref, computed, onMounted, watch } from 'vue'
@@ -50,9 +50,8 @@ const editDate = defineModel<Date | null>('editDate', { default: null })
 const { albums, albumsLoaded, fetchAlbums, invalidateAlbums } = useReferenceData()
 const loadingAlbums = ref(false)
 const photoAlbumMap = ref<Record<number, number[]>>({}) // photoId -> albumIds[]
-const pendingAlbumChanges = ref<Record<number, 'add' | 'remove'>>({})
 const savingAlbums = ref(false)
-const isAlbumsExpanded = ref(false)
+const albumDialogVisible = ref(false)
 
 async function loadAlbums() {
   if (albumsLoaded.value) return
@@ -94,7 +93,6 @@ const selectedPhotoIdsKey = computed(() => {
 })
 
 watch(selectedPhotoIdsKey, () => {
-  pendingAlbumChanges.value = {}
   loadPhotosAlbums()
 }, { immediate: true })
 
@@ -103,50 +101,44 @@ function getAlbumCheckState(albumId: number) {
   const photoIds = props.selectedPhotos && props.selectedPhotos.length > 0
     ? props.selectedPhotos.map(p => p.id)
     : [props.photo.id]
-    
+
   return calculateAlbumCheckState(albumId, photoIds, photoAlbumMap.value)
 }
 
-function getEffectiveAlbumCheckState(albumId: number) {
-  if (pendingAlbumChanges.value[albumId]) {
-    return pendingAlbumChanges.value[albumId] === 'add' ? true : false
+const currentAlbumChips = computed(() => {
+  const result: { id: number; name: string; partial: boolean }[] = []
+  for (const album of albums.value) {
+    const state = getAlbumCheckState(album.id)
+    if (state === true || state === null) {
+      result.push({ id: album.id, name: album.name, partial: state === null })
+    }
   }
-  return getAlbumCheckState(albumId)
-}
+  return result.sort((a, b) => a.name.localeCompare(b.name))
+})
 
-function handleAlbumChange(albumId: number, checked: boolean) {
-  const originalState = getAlbumCheckState(albumId)
-  const action = getNewPendingAction(checked, originalState)
-  
-  if (action === 'delete_pending') {
-    delete pendingAlbumChanges.value[albumId]
-  } else {
-    pendingAlbumChanges.value[albumId] = action
-  }
-}
+const dialogItems = computed(() =>
+  albums.value.map((a) => ({ id: a.id, label: a.name })),
+)
 
-async function saveAlbumChanges() {
-  const photoIds = props.selectedPhotos && props.selectedPhotos.length > 0
-    ? props.selectedPhotos.map(p => p.id)
+const photoIdsForBatch = computed(() => (
+  props.selectedPhotos && props.selectedPhotos.length > 0
+    ? props.selectedPhotos.map((p) => p.id)
     : [props.photo.id]
-    
+))
+
+function openAlbumDialog() {
+  albumDialogVisible.value = true
+}
+
+async function handleAlbumDialogSave(payload: { adds: number[]; removes: number[] }) {
+  const photoIds = photoIdsForBatch.value
   if (photoIds.length === 0) return
   savingAlbums.value = true
-  
-  const adds = Object.entries(pendingAlbumChanges.value)
-    .filter(([_, action]) => action === 'add')
-    .map(([id]) => parseInt(id))
-    
-  const removes = Object.entries(pendingAlbumChanges.value)
-    .filter(([_, action]) => action === 'remove')
-    .map(([id]) => parseInt(id))
-    
   try {
-    if (adds.length > 0) await batchUpdateAlbumPhotos(adds, photoIds, 'add')
-    if (removes.length > 0) await batchUpdateAlbumPhotos(removes, photoIds, 'remove')
-    
-    pendingAlbumChanges.value = {}
+    if (payload.adds.length > 0) await batchUpdateAlbumPhotos(payload.adds, photoIds, 'add')
+    if (payload.removes.length > 0) await batchUpdateAlbumPhotos(payload.removes, photoIds, 'remove')
     await loadPhotosAlbums()
+    albumDialogVisible.value = false
   } catch (err) {
     console.error('Failed to save album changes:', err)
   } finally {
@@ -154,41 +146,13 @@ async function saveAlbumChanges() {
   }
 }
 
-const sortedAlbums = computed(() => {
-  return [...albums.value].sort((a, b) => {
-    const stateA = getEffectiveAlbumCheckState(a.id)
-    const stateB = getEffectiveAlbumCheckState(b.id)
-    // selected (true) or indeterminate (null) come before unselected (false)
-    const selA = stateA === true || stateA === null ? 1 : 0
-    const selB = stateB === true || stateB === null ? 1 : 0
-    if (selA !== selB) return selB - selA
-    return a.name.localeCompare(b.name)
-  })
-})
-
-const showNewAlbumInput = ref(false)
-const newAlbumName = ref('')
-const creatingAlbum = ref(false)
-
-async function handleCreateAlbumAndAdd() {
-  const name = newAlbumName.value.trim()
-  if (!name) return
-  creatingAlbum.value = true
+async function handleAlbumDialogCreate(name: string) {
   try {
-    const album = await createAlbum(name)
-    const photoIds = props.selectedPhotos && props.selectedPhotos.length > 0
-      ? props.selectedPhotos.map(p => p.id)
-      : [props.photo.id]
-    await batchUpdateAlbumPhotos([album.id], photoIds, 'add')
-    newAlbumName.value = ''
-    showNewAlbumInput.value = false
+    await createAlbum(name)
     invalidateAlbums()
     await fetchAlbums(true)
-    await loadPhotosAlbums()
   } catch (err) {
     console.error('Failed to create album:', err)
-  } finally {
-    creatingAlbum.value = false
   }
 }
 
@@ -308,58 +272,39 @@ watch(() => props.photo.id, () => {
           <i class="pi pi-images" />
           <span>{{ selectedPhotos.length }} Fotos ausgewählt</span>
         </div>
-        
-        <div class="album-list-container">
-          <div class="section-label mt-lg">
-            <i class="pi pi-book" />
-            <span>Alben</span>
-          </div>
-          <div v-if="loadingAlbums" class="loading-row"><i class="pi pi-spin pi-spinner" /> Lade Alben…</div>
-          <div v-else class="album-checkbox-list">
-            <div v-for="album in (limitAlbumsShown && !isAlbumsExpanded ? sortedAlbums.slice(0, 3) : sortedAlbums)" :key="album.id" class="album-checkbox-item">
-              <Checkbox
-                :modelValue="getEffectiveAlbumCheckState(album.id) === true"
-                :indeterminate="getEffectiveAlbumCheckState(album.id) === null"
-                @update:modelValue="(val) => handleAlbumChange(album.id, val)"
-                :binary="true"
-                :id="'album-multi-' + album.id"
-              />
-              <label :for="'album-multi-' + album.id">{{ album.name }}</label>
-            </div>
-            <div v-if="limitAlbumsShown && sortedAlbums.length > 3" class="expand-toggle">
-              <Button 
-                :label="isAlbumsExpanded ? 'Weniger anzeigen' : 'Mehr anzeigen'" 
-                :icon="isAlbumsExpanded ? 'pi pi-chevron-up' : 'pi pi-chevron-down'" 
-                text 
-                size="small" 
-                @click="isAlbumsExpanded = !isAlbumsExpanded"
-                class="p-0"
-              />
-            </div>
-          </div>
+
+        <div class="section-label mt-lg">
+          <i class="pi pi-book" />
+          <span>Alben</span>
         </div>
-
-        <div class="new-album-inline mt-sm">
-          <div v-if="showNewAlbumInput" class="new-album-form">
-            <input v-model="newAlbumName" type="text" class="p-inputtext new-album-input" placeholder="Albumname…" @keydown.enter="handleCreateAlbumAndAdd" @keydown.escape="showNewAlbumInput = false" />
-            <Button icon="pi pi-check" size="small" :loading="creatingAlbum" :disabled="!newAlbumName.trim()" @click="handleCreateAlbumAndAdd" />
-            <Button icon="pi pi-times" size="small" text @click="showNewAlbumInput = false; newAlbumName = ''" />
-          </div>
-          <Button v-else label="Neues Album" icon="pi pi-plus" size="small" text @click="showNewAlbumInput = true" class="p-0" />
+        <div v-if="loadingAlbums" class="loading-row">
+          <i class="pi pi-spin pi-spinner" /> Lade Alben…
         </div>
-
-        <div class="sidebar-divider my-xl" />
-
-        <div class="multi-actions">
+        <template v-else>
+          <div v-if="currentAlbumChips.length === 0" class="empty-hint">
+            Keine gemeinsamen Alben
+          </div>
+          <div v-else class="album-chips">
+            <span
+              v-for="chip in currentAlbumChips"
+              :key="chip.id"
+              class="album-chip"
+              :class="{ 'album-chip--partial': chip.partial }"
+              :title="chip.partial ? 'In einigen ausgewählten Fotos' : 'In allen ausgewählten Fotos'"
+            >
+              <i class="pi pi-book" />
+              {{ chip.name }}
+            </span>
+          </div>
           <Button
-            label="Speichern"
-            icon="pi pi-save"
-            class="w-full"
-            :disabled="Object.keys(pendingAlbumChanges).length === 0"
-            :loading="savingAlbums"
-            @click="saveAlbumChanges"
+            label="Alben bearbeiten"
+            icon="pi pi-pencil"
+            size="small"
+            outlined
+            class="album-edit-btn"
+            @click="openAlbumDialog"
           />
-        </div>
+        </template>
       </div>
     </div>
     <div v-else class="sidebar-scroll">
@@ -533,60 +478,44 @@ watch(() => props.photo.id, () => {
 
       <div class="sidebar-section">
         <div class="section-label"><i class="pi pi-book" /> Alben</div>
-        <div v-if="loadingAlbums" class="loading-row"><i class="pi pi-spin pi-spinner" /> Lade Alben…</div>
-        <div v-if="!loadingAlbums && albums.length > 0" class="album-checkbox-list">
-          <div v-for="album in (limitAlbumsShown && !isAlbumsExpanded ? sortedAlbums.slice(0, 3) : sortedAlbums)" :key="album.id" class="album-checkbox-item">
-            <Checkbox
-                :modelValue="getEffectiveAlbumCheckState(album.id) === true"
-                :indeterminate="getEffectiveAlbumCheckState(album.id) === null"
-                @update:modelValue="(val) => handleAlbumChange(album.id, val)"
-                :binary="true"
-                :id="'album-single-' + album.id"
-            />
-            <label :for="'album-single-' + album.id">{{ album.name }}</label>
-            <Button
-                v-if="getEffectiveAlbumCheckState(album.id) === true && album.id !== albumId"
+        <div v-if="loadingAlbums" class="loading-row">
+          <i class="pi pi-spin pi-spinner" /> Lade Alben…
+        </div>
+        <template v-else>
+          <div v-if="currentAlbumChips.length === 0" class="empty-hint">
+            In keinem Album
+          </div>
+          <div v-else class="album-chips">
+            <span
+              v-for="chip in currentAlbumChips"
+              :key="chip.id"
+              class="album-chip"
+            >
+              <i class="pi pi-book" />
+              {{ chip.name }}
+              <Button
+                v-if="chip.id !== albumId"
                 icon="pi pi-external-link"
                 severity="secondary"
                 text
                 rounded
                 size="small"
-                class="album-jump-btn"
-                v-tooltip.left="'Zu diesem Album springen'"
-                :aria-label="`Zu Album ${album.name} springen`"
-                @click.stop="goToAlbum(album.id)"
-            />
+                class="album-chip-jump"
+                v-tooltip.top="'Zu diesem Album springen'"
+                :aria-label="`Zu Album ${chip.name} springen`"
+                @click.stop="goToAlbum(chip.id)"
+              />
+            </span>
           </div>
-          <div v-if="limitAlbumsShown && sortedAlbums.length > 3" class="expand-toggle">
-            <Button
-                :label="isAlbumsExpanded ? 'Weniger anzeigen' : 'Mehr anzeigen'"
-                :icon="isAlbumsExpanded ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"
-                text
-                size="small"
-                @click="isAlbumsExpanded = !isAlbumsExpanded"
-                class="p-0"
-            />
-          </div>
-        </div>
-        <div class="new-album-inline mt-sm">
-          <div v-if="showNewAlbumInput" class="new-album-form">
-            <input v-model="newAlbumName" type="text" class="p-inputtext new-album-input" placeholder="Albumname…" @keydown.enter="handleCreateAlbumAndAdd" @keydown.escape="showNewAlbumInput = false; newAlbumName = ''" />
-            <Button icon="pi pi-check" size="small" :loading="creatingAlbum" :disabled="!newAlbumName.trim()" @click="handleCreateAlbumAndAdd" />
-            <Button icon="pi pi-times" size="small" text @click="showNewAlbumInput = false; newAlbumName = ''" />
-          </div>
-          <Button v-else label="Neues Album" icon="pi pi-plus" size="small" text @click="showNewAlbumInput = true" class="p-0" />
-        </div>
-        <div class="multi-actions mt-md">
-          <Button v-if="Object.keys(pendingAlbumChanges).length > 0"
-                  label="Speichern"
-                  icon="pi pi-save"
-                  class="w-full"
-                  size="small"
-                  :disabled="Object.keys(pendingAlbumChanges).length === 0"
-                  :loading="savingAlbums"
-                  @click="saveAlbumChanges"
+          <Button
+            label="Alben bearbeiten"
+            icon="pi pi-pencil"
+            size="small"
+            outlined
+            class="album-edit-btn"
+            @click="openAlbumDialog"
           />
-        </div>
+        </template>
       </div>
 
       <div class="sidebar-divider" />
@@ -608,6 +537,23 @@ watch(() => props.photo.id, () => {
         </div>
       </div>
     </div>
+
+    <MultiSelectDialog
+      v-model:visible="albumDialogVisible"
+      title="Alben zuweisen"
+      :items="dialogItems"
+      :initial-state="(id) => getAlbumCheckState(id as number)"
+      :subject-count="photoIdsForBatch.length"
+      :subject-label="photoIdsForBatch.length === 1 ? 'Foto' : 'Fotos'"
+      :loading="loadingAlbums"
+      :saving="savingAlbums"
+      allow-create
+      create-label="Neues Album"
+      create-placeholder="Albumname…"
+      empty-message="Keine Alben vorhanden"
+      @save="handleAlbumDialogSave"
+      @create="handleAlbumDialogCreate"
+    />
   </aside>
 </template>
 
@@ -932,64 +878,47 @@ watch(() => props.photo.id, () => {
   gap: 0.5rem;
 }
 
-.album-checkbox-list {
-  padding: 0.25rem;
+.album-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.5rem;
+}
+
+.album-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: var(--p-content-hover-background);
   border: 1px solid var(--p-content-border-color);
-  border-radius: 6px;
-  background: var(--p-content-hover-background);
+  border-radius: 1rem;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8rem;
 }
 
-.album-checkbox-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.35rem 0.5rem;
-  font-size: 0.875rem;
-  border-radius: 4px;
+.album-chip .pi-book {
+  font-size: 0.7rem;
+  color: var(--p-text-muted-color);
 }
 
-.album-checkbox-item:hover {
-  background: var(--p-content-hover-background);
+.album-chip--partial {
+  border-style: dashed;
+  font-style: italic;
 }
 
-.expand-toggle {
-  padding-inline: 0.5rem;
+.album-chip-jump {
+  width: 1.5rem !important;
+  height: 1.5rem !important;
+  margin-left: 0.1rem;
+}
+
+.album-chip-jump :deep(.p-button-icon) {
+  font-size: 0.75rem;
+}
+
+.album-edit-btn {
   margin-top: 0.25rem;
-}
-
-.album-checkbox-item label {
-  cursor: pointer;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.album-jump-btn {
-  flex-shrink: 0;
-  width: 1.75rem !important;
-  height: 1.75rem !important;
-}
-
-.album-jump-btn :deep(.p-button-icon) {
-  font-size: 0.85rem;
-}
-
-.new-album-inline {
-  padding-inline: 0.25rem;
-}
-
-.new-album-form {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.new-album-input {
-  flex: 1;
-  min-width: 0;
-  padding: 0.35rem 0.5rem;
-  font-size: 0.85rem;
+  width: 100%;
 }
 
 /* ── Curation opinions ─────────────────────────────────────────────────── */
