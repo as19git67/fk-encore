@@ -258,39 +258,11 @@ export async function listGalleryGridLogic(
     return { total: 0, offset: 0, photos: [] };
   }
 
-  // Inline group info via a correlated subquery returning a single JSON
-  // object (or NULL when the photo is not in any group). Preferring
-  // unreviewed groups mirrors how the legacy frontend prioritized
-  // unreviewed-group display, but the decision is now made once on the
-  // server instead of being recomputed for every page on every render.
-  const groupInfo = sql<{
-    id: number;
-    is_cover: boolean;
-    member_count: number;
-    reviewed: boolean;
-  } | null>`(
-    SELECT json_build_object(
-      'id', g.id,
-      'is_cover', (g.cover_photo_id = ${photos.id}),
-      'member_count', (
-        SELECT COUNT(*)::int FROM ${photoGroupMembers} pgm2
-        WHERE pgm2.group_id = g.id
-      ),
-      'reviewed', (g.reviewed_at IS NOT NULL)
-    )
-    FROM ${photoGroupMembers} pgm
-    JOIN ${photoGroups} g ON g.id = pgm.group_id
-    WHERE pgm.photo_id = ${photos.id} AND g.user_id = ${userId}
-    ORDER BY (g.reviewed_at IS NULL) DESC, g.id DESC
-    LIMIT 1
-  )`;
-
   const rows = await dbAll<{
     id: number;
     filename: string;
     auto_crop: { x: number; y: number } | null;
     curation_status: string | null;
-    group_info: GalleryGridGroup | null;
   }>(
     db
       .select({
@@ -298,7 +270,6 @@ export async function listGalleryGridLogic(
         filename: photos.filename,
         auto_crop: photos.auto_crop,
         curation_status: photoCuration.status,
-        group_info: groupInfo,
       })
       .from(photos)
       .leftJoin(
@@ -311,6 +282,15 @@ export async function listGalleryGridLogic(
       .offset(resolvedOffset),
   );
 
+  // Group info is hydrated in two scoped queries against the returned page
+  // instead of a correlated subquery per row. This keeps the main SELECT
+  // free of nested scans and turns the group lookup into O(page_size + N
+  // distinct groups) regardless of how many groups the user has.
+  // Preferring unreviewed-then-highest-id mirrors the legacy server-side
+  // ordering and is enforced by the DISTINCT ON sort key.
+  const photoIds = rows.map((r) => r.id);
+  const groupByPhotoId = await loadGroupInfoForPhotos(userId, photoIds);
+
   const result: GalleryGridEntry[] = rows.map((r) => {
     const entry: GalleryGridEntry = {
       id: r.id,
@@ -318,9 +298,73 @@ export async function listGalleryGridLogic(
       curation: (r.curation_status as CurationStatus) ?? "visible",
     };
     if (r.auto_crop) entry.auto_crop = r.auto_crop;
-    if (r.group_info) entry.group = r.group_info;
+    const g = groupByPhotoId.get(r.id);
+    if (g) entry.group = g;
     return entry;
   });
 
   return { total, offset: resolvedOffset, photos: result };
+}
+
+/**
+ * For a given page of photo ids, return the chosen group per photo (preferring
+ * unreviewed groups, tie-break by highest group id). Splits the work into two
+ * cheap, index-friendly queries instead of running a correlated subquery per
+ * row of the main SELECT:
+ *
+ *   1. DISTINCT ON over photo_group_members joined with photo_groups, scoped
+ *      to the returned photo_ids — yields at most one (photo_id, group) pair
+ *      per photo. Uses the photo_group_members(photo_id) index.
+ *   2. GROUP BY count over photo_group_members for the small set of group_ids
+ *      that survived step 1 — uses the (group_id, photo_id) PK directly.
+ *
+ * Returns an empty map when the page contains no photos.
+ */
+async function loadGroupInfoForPhotos(
+  userId: number,
+  photoIds: number[],
+): Promise<Map<number, GalleryGridGroup>> {
+  const out = new Map<number, GalleryGridGroup>();
+  if (photoIds.length === 0) return out;
+
+  const chosenResult = await db.execute<{
+    photo_id: number;
+    group_id: number;
+    is_cover: boolean;
+    reviewed: boolean;
+  }>(sql`
+    SELECT DISTINCT ON (pgm.photo_id)
+      pgm.photo_id AS photo_id,
+      g.id AS group_id,
+      (g.cover_photo_id = pgm.photo_id) AS is_cover,
+      (g.reviewed_at IS NOT NULL) AS reviewed
+    FROM ${photoGroupMembers} pgm
+    JOIN ${photoGroups} g ON g.id = pgm.group_id
+    WHERE pgm.photo_id = ANY(${photoIds}::int[])
+      AND g.user_id = ${userId}
+    ORDER BY pgm.photo_id, (g.reviewed_at IS NULL) DESC, g.id DESC
+  `);
+  const chosen = chosenResult.rows;
+  if (chosen.length === 0) return out;
+
+  const groupIds = Array.from(new Set(chosen.map((c) => c.group_id)));
+  const countsResult = await db.execute<{ group_id: number; member_count: number }>(sql`
+    SELECT group_id, COUNT(*)::int AS member_count
+    FROM ${photoGroupMembers}
+    WHERE group_id = ANY(${groupIds}::int[])
+    GROUP BY group_id
+  `);
+  const counts = countsResult.rows;
+  const memberCountByGroupId = new Map<number, number>();
+  for (const c of counts) memberCountByGroupId.set(c.group_id, c.member_count);
+
+  for (const c of chosen) {
+    out.set(c.photo_id, {
+      id: c.group_id,
+      is_cover: c.is_cover,
+      member_count: memberCountByGroupId.get(c.group_id) ?? 0,
+      reviewed: c.reviewed,
+    });
+  }
+  return out;
 }
