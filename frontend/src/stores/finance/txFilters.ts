@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
+import { toLocalIsoDate, parseLocalDate } from '../../utils/dateFormat'
 
 /**
  * Persists the filter form and applied-filter state for the transaction
@@ -27,20 +28,20 @@ export const useTxFiltersStore = defineStore('finance.txFilters', () => {
       appliedToIso.value !== null,
   )
 
-  // Convenience: Date objects derived from ISO strings
+  // Convenience: Date objects derived from ISO date strings
   const formFrom = computed<Date | null>({
-    get: () => (formFromIso.value ? new Date(formFromIso.value) : null),
-    set: (d) => { formFromIso.value = d ? d.toISOString() : null },
+    get: () => (formFromIso.value ? parseLocalDate(formFromIso.value) : null),
+    set: (d) => { formFromIso.value = d ? toLocalIsoDate(d) : null },
   })
   const formTo = computed<Date | null>({
-    get: () => (formToIso.value ? new Date(formToIso.value) : null),
-    set: (d) => { formToIso.value = d ? d.toISOString() : null },
+    get: () => (formToIso.value ? parseLocalDate(formToIso.value) : null),
+    set: (d) => { formToIso.value = d ? toLocalIsoDate(d) : null },
   })
   const appliedFrom = computed<Date | null>(() =>
-    appliedFromIso.value ? new Date(appliedFromIso.value) : null,
+    appliedFromIso.value ? parseLocalDate(appliedFromIso.value) : null,
   )
   const appliedTo = computed<Date | null>(() =>
-    appliedToIso.value ? new Date(appliedToIso.value) : null,
+    appliedToIso.value ? parseLocalDate(appliedToIso.value) : null,
   )
 
   function apply() {

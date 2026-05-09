@@ -20,6 +20,7 @@ import { useAuthStore } from '../stores/auth'
 import { usePhotoNavStore } from '../stores/photoNav'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import { useReferenceData } from '../composables/useReferenceData'
+import { toLocalIsoDate, parseLocalDate } from '../utils/dateFormat'
 import {
   albumsStateToQuery,
   DEFAULT_ALBUM_SORT,
@@ -102,16 +103,16 @@ const activeAlbumFilterCount = computed(() => {
 
 function openAlbumFilterMenu() {
   draftAlbumFilter.value = { ...appliedAlbumFilter.value }
-  draftDateFrom.value = appliedAlbumFilter.value.dateFrom ? new Date(appliedAlbumFilter.value.dateFrom) : null
-  draftDateTo.value = appliedAlbumFilter.value.dateTo ? new Date(appliedAlbumFilter.value.dateTo) : null
+  draftDateFrom.value = appliedAlbumFilter.value.dateFrom ? parseLocalDate(appliedAlbumFilter.value.dateFrom) : null
+  draftDateTo.value = appliedAlbumFilter.value.dateTo ? parseLocalDate(appliedAlbumFilter.value.dateTo) : null
   showAlbumFilterMenu.value = true
 }
 
 function applyAlbumFilter() {
   appliedAlbumFilter.value = {
     ...draftAlbumFilter.value,
-    dateFrom: draftDateFrom.value ? draftDateFrom.value.toISOString().slice(0, 10) : undefined,
-    dateTo: draftDateTo.value ? draftDateTo.value.toISOString().slice(0, 10) : undefined,
+    dateFrom: draftDateFrom.value ? toLocalIsoDate(draftDateFrom.value) : undefined,
+    dateTo: draftDateTo.value ? toLocalIsoDate(draftDateTo.value) : undefined,
   }
   showAlbumFilterMenu.value = false
 }
