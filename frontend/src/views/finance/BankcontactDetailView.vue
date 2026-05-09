@@ -244,9 +244,12 @@ async function triggerSync() {
       if (resp.accounts_unknown && resp.accounts_unknown > 0) {
         parts.push(`${resp.accounts_unknown} noch nicht zugeordnete Konten`)
       }
+      const partialNote = resp.partial
+        ? ' Hinweis: Mindestens ein Konto konnte nicht abgerufen werden (z. B. TAN nötig oder Bankfehler) — gespeichert sind die erfolgreich abgerufenen Konten. Beim nächsten Sync wird das Fehlende erneut versucht.'
+        : ''
       syncInfo.value = parts.length
-        ? `Sync erfolgreich — ${parts.join(', ')}${resp.partial ? ' (teilweise; einige Konten brauchten TAN)' : ''}.`
-        : 'Sync erfolgreich.'
+        ? `Sync ${resp.partial ? 'teilweise erfolgreich' : 'erfolgreich'} — ${parts.join(', ')}.${partialNote}`
+        : `Sync ${resp.partial ? 'teilweise erfolgreich' : 'erfolgreich'}.${partialNote}`
       pendingUnknown.value = resp.unknown_accounts ?? []
       // Refresh accounts store so the "Konten"-section below
       // reflects what the sync just wrote.
@@ -319,6 +322,22 @@ async function deleteOneAccount(id: number, label: string) {
   } catch (err) {
     errorMsg.value = err instanceof Error ? err.message : String(err)
   }
+}
+
+function syncStatusSeverity(status: string): 'success' | 'warn' | 'danger' | 'secondary' {
+  if (status === 'ok') return 'success'
+  if (status === 'tan-required') return 'warn'
+  if (status === 'partial') return 'warn'
+  if (status.startsWith('error')) return 'danger'
+  return 'secondary'
+}
+
+function syncStatusLabel(status: string): string {
+  if (status === 'ok') return 'OK'
+  if (status === 'tan-required') return 'TAN offen'
+  if (status === 'partial') return 'Teilweise'
+  if (status.startsWith('error:')) return `Fehler ${status.slice(6)}`
+  return status
 }
 
 async function del() {
@@ -417,10 +436,20 @@ async function del() {
         <Tag
           v-if="bc.last_sync_status"
           class="status-tag"
-          :severity="bc.last_sync_status === 'ok' ? 'success' : bc.last_sync_status === 'tan-required' ? 'warn' : 'danger'"
-          :value="bc.last_sync_status"
+          :severity="syncStatusSeverity(bc.last_sync_status)"
+          :value="syncStatusLabel(bc.last_sync_status)"
         />
       </p>
+      <Message
+        v-if="bc.last_sync_status === 'partial'"
+        severity="warn"
+        :closable="false"
+        class="status-hint"
+      >
+        Der letzte Sync war nur teilweise erfolgreich. Mindestens ein Konto konnte nicht abgerufen werden — meist weil
+        die Bank für dieses Konto eine zusätzliche TAN verlangt hat oder einen Fehler gemeldet hat. Aktualisierte
+        Konten und neue Buchungen sind gespeichert; der nächste Sync-Versuch holt die fehlenden Konten nach.
+      </Message>
       <Message
         v-if="syncInfo"
         severity="success"
@@ -633,6 +662,9 @@ async function del() {
 }
 .status-tag {
   margin-left: 0.5rem;
+}
+.status-hint {
+  margin-top: 0.5rem;
 }
 .tan-method-row {
   display: flex;

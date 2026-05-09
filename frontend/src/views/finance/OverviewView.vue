@@ -257,13 +257,16 @@ async function saveConfig() {
           Keine Konten in dieser Gruppe.
         </div>
         <ul v-else class="account-card">
-          <li
-            class="account-row card-virtual"
-            @click="openSection(section.name)"
-          >
+          <li class="account-row card-virtual" @click="openSection(section.name)">
             <div class="row-left">
               <div class="row-title">
-                <span class="row-label">Alle Buchungen</span>
+                <RouterLink
+                  :to="{ name: 'finance-section-transactions', params: { name: section.name } }"
+                  class="row-label row-link"
+                  @click.stop
+                >
+                  Alle Buchungen
+                </RouterLink>
               </div>
             </div>
             <i class="pi pi-chevron-right row-chevron" />
@@ -276,7 +279,13 @@ async function saveConfig() {
           >
             <div class="row-left">
               <div class="row-title">
-                <span class="row-label">{{ acc.label }}</span>
+                <RouterLink
+                  :to="{ name: 'finance-account-transactions', params: { id: acc.id } }"
+                  class="row-label row-link"
+                  @click.stop
+                >
+                  {{ acc.label }}
+                </RouterLink>
                 <span
                   v-if="acc.pending_count > 0"
                   class="row-badge"
@@ -584,6 +593,18 @@ async function saveConfig() {
 }
 .row-label {
   font-weight: 600;
+}
+.row-link {
+  color: inherit;
+  text-decoration: none;
+}
+.row-link:hover {
+  text-decoration: underline;
+}
+.row-link:focus-visible {
+  outline: 2px solid var(--p-primary-color);
+  outline-offset: 2px;
+  border-radius: 0.125rem;
 }
 .row-badge {
   display: inline-flex;
