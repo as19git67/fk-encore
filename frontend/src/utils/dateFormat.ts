@@ -3,6 +3,20 @@
  * All photo-related dates use the browser locale; admin dates use 'de-DE'.
  */
 
+/** Extract the local date from a Date object as YYYY-MM-DD. */
+export function toLocalIsoDate(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+/** Parse a YYYY-MM-DD string as local midnight (not UTC). */
+export function parseLocalDate(s: string): Date {
+  const [y, m, d] = s.split('-').map(Number)
+  return new Date(y!, m! - 1, d)
+}
+
 /** Compact location label: name + city, country only as fallback */
 export function formatLocationLabel(loc: { location_name?: string; location_city?: string; location_country?: string }): string {
   const parts: string[] = []
