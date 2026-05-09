@@ -225,8 +225,6 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
 
 .photo-item.is-hidden { opacity: 0.35; }
 .photo-item.is-hidden:hover { opacity: 0.7; }
-.photo-item.is-favorite { border-color: var(--p-yellow-500); }
-
 .favorite-badge, .hidden-badge {
   position: absolute;
   top: 8px; right: 8px;
@@ -234,7 +232,7 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
   filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
   z-index: 5;
 }
-.favorite-badge { color: var(--p-yellow-500); }
+.favorite-badge { color: var(--p-yellow-400, #facc15); }
 .hidden-badge { color: white; }
 
 /* ── Face bbox overlay ───────────────────────────────────────────────────── */

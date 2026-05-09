@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
@@ -10,7 +10,7 @@ import Message from 'primevue/message'
 import Select from 'primevue/select'
 import SelectButton from 'primevue/selectbutton'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
-import PhotoGrid from '../components/PhotoGrid.vue'
+import VirtualGallery from '../components/VirtualGallery.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
@@ -21,6 +21,11 @@ import SortMenu from '../components/SortMenu.vue'
 import { useFilter } from '../composables/useFilter'
 import { useSort, type SortField, type SortState } from '../composables/useSort'
 import { matchesPhotoFilter, type PhotoFilterContext } from '../utils/photoFilter'
+import {
+  type GalleryGridEntry,
+  type GallerySortDir,
+  type GallerySortField,
+} from '../api/gallery'
 
 const TripMap = defineAsyncComponent(() => import('../components/TripMap.vue'))
 import {
@@ -34,6 +39,7 @@ import {
   deleteAlbumPublicLink,
   getAlbum,
   getAlbumShares,
+  getPhotoDetailsBatch,
   getPhotoFaces,
   getPhotoLandmarks,
   ignoreFace,
@@ -57,11 +63,9 @@ import { listUsers, type UserWithRoles } from '../api/users'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
 import { usePhotoNavStore } from '../stores/photoNav'
-import { usePhotoGrouping } from '../composables/usePhotoGrouping'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 import { useNaturalSearch } from '../composables/useNaturalSearch'
 import { useReferenceData } from '../composables/useReferenceData'
-import type { PhotoItem } from '../composables/usePhotoGrouping'
 import { onUnmounted } from 'vue'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import {
@@ -97,8 +101,6 @@ const album = ref<AlbumWithPhotos | null>(null)
 const loading = ref(true)
 const error = ref('')
 
-const selectedIndex = ref(-1)
-
 // Per-album map of the last photo the user had selected, so reopening an
 // album restores the scroll/selection position rather than snapping to top.
 const LAST_PHOTO_MAP_KEY = 'albums_last_photo_by_album'
@@ -117,9 +119,15 @@ function saveLastPhotoForAlbum(id: number, photoId: number) {
 }
 
 const isFullscreen = ref(false)
-watch(isFullscreen, (val) => {
-  if (!val) nextTick(() => photoGridRef.value?.scrollToPhoto(selectedIndex.value, 'instant'))
-})
+
+// ── VirtualGallery grid + cursor state (#304) ───────────────────────────────
+const galleryRef = ref<InstanceType<typeof VirtualGallery> | null>(null)
+const cursorIndex = ref<number | null>(null)
+const cursorPhoto = ref<Photo | null>(null)
+const cursorPrev = ref<Photo | null>(null)
+const cursorNext = ref<Photo | null>(null)
+let hydrateToken = 0
+let curationVersion = 0
 
 // ── Filter state ──────────────────────────────────────────────────────────────
 // Client-side filter over the album photos returned by the server. The backend
@@ -151,6 +159,14 @@ function onResetFilter() {
 function onRemoveFilterKey(keys: Array<keyof typeof filter.value>) {
   removeKey(keys)
 }
+
+// Server-side filter for VirtualGallery: user's filter + album scope.
+const albumGridFilter = computed<PhotoFilter>(() => ({
+  ...filter.value,
+  albumIds: [albumId.value],
+}))
+const sortByForGallery = computed<GallerySortField>(() => sort.value.field as GallerySortField)
+const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as GallerySortDir)
 
 // ── Sort state ────────────────────────────────────────────────────────────────
 const SORT_FIELDS: SortField[] = [
@@ -255,39 +271,12 @@ const albumPhotoGroups = computed<PhotoGroup[]>(() => {
   return result
 })
 
-const photoToGroup = computed(() => {
-  const map = new Map<number, PhotoGroup>()
-  // Reviewed first, unreviewed last — so unreviewed groups win for photos
-  // that belong to both (happens transiently when members were added and a
-  // new superset group was created alongside the old reviewed one).
-  for (const group of albumPhotoGroups.value) {
-    if (!group.reviewed_at) continue
-    for (const pid of group.photo_ids) map.set(pid, group)
-  }
-  for (const group of albumPhotoGroups.value) {
-    if (group.reviewed_at) continue
-    for (const pid of group.photo_ids) map.set(pid, group)
-  }
-  return map
-})
-
 const unreviewedGroupCount = computed(() =>
   albumPhotoGroups.value.filter(g => !g.reviewed_at).length
 )
 
-const hiddenByStack = computed(() => {
-  const set = new Set<number>()
-  for (const group of albumPhotoGroups.value) {
-    if (group.reviewed_at) continue
-    for (const pid of group.photo_ids) {
-      if (pid !== group.cover_photo_id) set.add(pid)
-    }
-  }
-  return set
-})
-
-// Album photos after applying the FilterMenu criteria. Stacks / grouping run
-// on top of this filtered set, so filtering narrows the grid naturally.
+// Album photos after applying the FilterMenu criteria. Used by the map view
+// and filter chip display (not by the VirtualGallery grid).
 const albumPhotos = computed<Photo[]>(() => {
   const ctx: PhotoFilterContext = {
     curationStats: curationStatsMap.value,
@@ -301,18 +290,8 @@ const albumPhotos = computed<Photo[]>(() => {
   return rawAlbumPhotos.value.filter(p => matchesPhotoFilter(p, filter.value, ctx))
 })
 
-// When the filter narrows the visible photos, clamp selectedIndex so the
-// sidebar/keyboard nav don't point past the end of the list.
-watch(() => albumPhotos.value.length, (len) => {
-  if (len === 0) { selectedIndex.value = -1; return }
-  if (selectedIndex.value >= len) selectedIndex.value = len - 1
-})
 
 // ── Search ────────────────────────────────────────────────────────────────────
-// Uses the natural-language search endpoint (spaCy-parsed location + date
-// filters combined with CLIP semantic search). Results are global across
-// the user's library; usePhotoGrouping's id-filter discards hits that
-// aren't in this album.
 const {
   searchQuery,
   searchResultIds,
@@ -335,9 +314,10 @@ const searchResultCountInAlbum = computed<number | null>(() => {
   return ids.filter(id => albumPhotoIds.value.has(id)).length
 })
 
-// Album photos narrowed to the active search hits. When no search is
-// running, returns the full album. Used by the map view, which doesn't go
-// through usePhotoGrouping.
+// Search IDs forwarded to VirtualGallery for search-mode rendering.
+const searchPhotoIds = computed<number[] | null>(() => searchResultIds.value)
+
+// Album photos narrowed to the active search hits. Used by the map view.
 const albumPhotosFiltered = computed<Photo[]>(() => {
   const ids = searchResultIds.value
   if (ids === null) return albumPhotos.value
@@ -345,55 +325,134 @@ const albumPhotosFiltered = computed<Photo[]>(() => {
   return albumPhotos.value.filter(p => hitSet.has(p.id))
 })
 
-// ── Grouping (via composable) ─────────────────────────────────────────────────
-const { groupedPhotos } = usePhotoGrouping(albumPhotos, {
-  hiddenByStack,
-  photoToGroup,
-  searchResultIds,
-})
+// ── Grid cursor hydration (#304) ─────────────────────────────────────────────
+function entryToMinimalPhoto(entry: GalleryGridEntry): Photo {
+  return {
+    id: entry.id,
+    user_id: 0,
+    filename: entry.filename,
+    original_name: entry.filename,
+    mime_type: '',
+    size: 0,
+    created_at: '',
+    curation_status: entry.curation,
+    auto_crop: entry.auto_crop,
+  }
+}
 
-// ── Navigation refs ───────────────────────────────────────────────────────────
-const photoGridRef = ref<InstanceType<typeof PhotoGrid> | null>(null)
+async function hydrateCursor(index: number): Promise<void> {
+  if (!galleryRef.value) return
+  const myToken = ++hydrateToken
+  const total = galleryRef.value.getTotal()
 
-// ── Keyboard navigation (via composable) ─────────────────────────────────────
-useGalleryKeyboard({
-  isBlocked: () => !!activeGroup.value,
-  onLeft() {
-    if (isFullscreen.value) { if (selectedIndex.value > 0) selectedIndex.value--; return }
-    if (selectedIndex.value > 0) selectedIndex.value--
-    else selectedIndex.value = albumPhotos.value.length - 1
-  },
-  onRight() {
-    if (isFullscreen.value) {
-      if (selectedIndex.value < albumPhotos.value.length - 1) selectedIndex.value++; return
+  const [curEntry, prevEntry, nextEntry] = await Promise.all([
+    galleryRef.value.loadEntryAt(index),
+    index > 0 ? galleryRef.value.loadEntryAt(index - 1) : Promise.resolve(null),
+    index + 1 < total ? galleryRef.value.loadEntryAt(index + 1) : Promise.resolve(null),
+  ])
+  if (myToken !== hydrateToken) return
+  if (!curEntry) return
+
+  cursorPhoto.value = entryToMinimalPhoto(curEntry)
+  cursorPrev.value = prevEntry ? entryToMinimalPhoto(prevEntry) : null
+  cursorNext.value = nextEntry ? entryToMinimalPhoto(nextEntry) : null
+
+  saveLastPhotoForAlbum(albumId.value, curEntry.id)
+  photoNav.selectPhotoInAlbum(curEntry.id, albumId.value)
+
+  void loadSidebarData(curEntry.id)
+
+  const ids = [curEntry.id]
+  if (prevEntry) ids.push(prevEntry.id)
+  if (nextEntry) ids.push(nextEntry.id)
+  const myCurationVersion = curationVersion
+  try {
+    const { photos } = await getPhotoDetailsBatch(ids)
+    if (myToken !== hydrateToken) return
+    const byId = new Map(photos.map((p) => [p.id, p]))
+    const preserveCuration = curationVersion !== myCurationVersion
+    const merge = (batch: Photo | undefined, cur: Photo | null): Photo | null => {
+      if (!batch) return cur
+      if (preserveCuration && cur) return { ...batch, curation_status: cur.curation_status }
+      return batch
     }
-    if (selectedIndex.value < albumPhotos.value.length - 1) selectedIndex.value++
-    else selectedIndex.value = 0
-  },
-  onUp() {},
-  onDown() {},
-  onSpace() {
-    if (selectedIndex.value !== -1) isFullscreen.value = !isFullscreen.value
+    cursorPhoto.value = merge(byId.get(curEntry.id), cursorPhoto.value)
+    cursorPrev.value = prevEntry ? merge(byId.get(prevEntry.id), cursorPrev.value) : null
+    cursorNext.value = nextEntry ? merge(byId.get(nextEntry.id), cursorNext.value) : null
+  } catch {
+    // keep minimal photos
+  }
+}
+
+async function openGridFullscreenAt(index: number): Promise<void> {
+  cursorIndex.value = index
+  isFullscreen.value = true
+  await hydrateCursor(index)
+  galleryRef.value?.scrollToIndex(index)
+}
+
+function closeGridFullscreen() {
+  isFullscreen.value = false
+  fullscreenDetailsOpen.value = false
+}
+
+async function gridGoPrev(): Promise<void> {
+  if (cursorIndex.value === null || cursorIndex.value === 0) return
+  const next = cursorIndex.value - 1
+  cursorIndex.value = next
+  await hydrateCursor(next)
+  galleryRef.value?.scrollToIndex(next)
+}
+
+async function gridGoNext(): Promise<void> {
+  if (cursorIndex.value === null || !galleryRef.value) return
+  const total = galleryRef.value.getTotal()
+  if (cursorIndex.value + 1 >= total) return
+  const next = cursorIndex.value + 1
+  cursorIndex.value = next
+  await hydrateCursor(next)
+  galleryRef.value?.scrollToIndex(next)
+}
+
+// ── Keyboard navigation (#304) ──────────────────────────────────────────────
+function moveCursor(delta: number, byRow: boolean) {
+  if (!galleryRef.value) return
+  const total = galleryRef.value.getTotal()
+  if (total === 0) return
+  if (cursorIndex.value === null) {
+    cursorIndex.value = 0
+    galleryRef.value.scrollToIndex(0, 'auto')
+    void hydrateCursor(0)
+    return
+  }
+  const cols = galleryRef.value.getCols()
+  const step = byRow ? delta * cols : delta
+  let next = cursorIndex.value + step
+  if (next < 0) next = 0
+  if (next >= total) next = total - 1
+  cursorIndex.value = next
+  galleryRef.value.scrollToIndex(next, 'auto')
+  void hydrateCursor(next)
+}
+
+useGalleryKeyboard({
+  isBlocked: () => !!activeGroup.value || isFullscreen.value,
+  onLeft: () => moveCursor(-1, false),
+  onRight: () => moveCursor(+1, false),
+  onUp: () => moveCursor(-1, true),
+  onDown: () => moveCursor(+1, true),
+  onSpace: () => {
+    if (cursorIndex.value !== null) void openGridFullscreenAt(cursorIndex.value)
   },
   onExtra(e) {
-    if (e.key === 'Escape' && isFullscreen.value) { isFullscreen.value = false; e.preventDefault() }
-    else if (e.key === 'Enter' && !isFullscreen.value && selectedIndex.value !== -1) { isFullscreen.value = true; e.preventDefault() }
-    else if ((e.key === 'f' || e.key === 'F') && selectedPhoto.value) { handleToggleFavorite(selectedPhoto.value.id, selectedPhoto.value.curation_status); e.preventDefault() }
+    if (e.key === 'Enter' && cursorIndex.value !== null) {
+      e.preventDefault()
+      void openGridFullscreenAt(cursorIndex.value)
+    }
   },
 })
 
 // ── Computed ──────────────────────────────────────────────────────────────────
-const selectedPhoto = computed(() =>
-  selectedIndex.value >= 0 ? albumPhotos.value[selectedIndex.value] ?? null : null
-)
-const prevPhoto = computed(() =>
-  selectedIndex.value > 0 ? albumPhotos.value[selectedIndex.value - 1] ?? null : null
-)
-const nextPhoto = computed(() =>
-  selectedIndex.value < albumPhotos.value.length - 1
-    ? albumPhotos.value[selectedIndex.value + 1] ?? null : null
-)
-
 const canWrite = computed(() => album.value?.role === 'owner' || album.value?.role === 'contributor')
 const isOwner = computed(() => album.value?.role === 'owner')
 const canDeletePhotos = computed(() => auth.hasPermission('photos.delete'))
@@ -484,7 +543,7 @@ const { persons, fetchPersons, invalidateAlbums } = useReferenceData()
 // currently shown in the map overlay. Watch the effective photo so
 // faces/landmarks reflect what the user actually sees.
 const activeDetailPhoto = computed(() =>
-  isMapFullscreen.value ? mapSelectedPhoto.value : selectedPhoto.value
+  isMapFullscreen.value ? mapSelectedPhoto.value : cursorPhoto.value
 )
 
 watch(activeDetailPhoto, (photo) => {
@@ -497,20 +556,6 @@ watch(activeDetailPhoto, (photo) => {
   }
 })
 
-watch(selectedIndex, () => {
-  const photo = selectedPhoto.value
-  if (photo && !isFullscreen.value) {
-    const el = photoGridRef.value?.scrollRef?.querySelector(`[data-photo-id="${photo.id}"]`)
-    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-  }
-})
-
-watch(selectedPhoto, (photo) => {
-  if (photo && album.value) {
-    saveLastPhotoForAlbum(album.value.id, photo.id)
-    photoNav.selectPhotoInAlbum(photo.id, album.value.id)
-  }
-})
 
 // ── Data loading ──────────────────────────────────────────────────────────────
 async function loadData() {
@@ -536,41 +581,12 @@ async function loadData() {
       } catch { /* ignore – filter still narrows the returned set */ }
     }
 
-    // Honor ?photoId=… query: pre-select and scroll to that photo.
-    // If the target photo is hidden as a stack member, fall back to the
-    // stack's cover photo (which is what's actually rendered in the grid).
+    // In map mode, honour ?photoId= by selecting the stop once TripMap mounts.
+    // Grid-mode initial selection is handled by onGalleryLoaded.
     const queryPhotoId = Number(route.query.photoId)
-    let targetIdx = -1
-    function resolveToIndex(photoId: number): number {
-      let effectiveId = photoId
-      if (hiddenByStack.value.has(photoId)) {
-        const group = photoToGroup.value.get(photoId)
-        if (group?.cover_photo_id) effectiveId = group.cover_photo_id
-      }
-      return albumPhotos.value.findIndex(p => p.id === effectiveId)
-    }
-    if (queryPhotoId) {
-      targetIdx = resolveToIndex(queryPhotoId)
-      if (targetIdx >= 0) {
-        router.replace({ query: { ...route.query, photoId: undefined } })
-        // In map mode the grid index is irrelevant; request the TripMap to
-        // select the stop containing this photo once it has mounted.
-        if (albumRes.display_mode === 'map') {
-          pendingMapSelectPhotoId.value = queryPhotoId
-        }
-      }
-    }
-    if (targetIdx < 0) {
-      // Fall back chain: album-specific last photo → shared nav store → none.
-      const storedPhotoId = loadLastPhotoMap()[String(albumId.value)]
-        ?? photoNav.selectedPhotoId
-        ?? null
-      if (storedPhotoId) targetIdx = resolveToIndex(storedPhotoId)
-    }
-    if (targetIdx < 0) {
-      selectedIndex.value = album.value.photos.length > 0 ? 0 : -1
-    } else {
-      selectedIndex.value = targetIdx
+    if (queryPhotoId && albumRes.display_mode === 'map') {
+      pendingMapSelectPhotoId.value = queryPhotoId
+      router.replace({ query: { ...route.query, photoId: undefined } })
     }
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden des Albums'
@@ -595,13 +611,6 @@ async function loadSidebarData(photoId: number) {
 }
 
 // ── Curation ──────────────────────────────────────────────────────────────────
-// Mutate the photo object directly so that Vue's reactive proxy picks up the
-// change and re-renders every template that reads `curation_status`
-// (PhotoGrid tile, PhotoDetailSidebar, FullscreenOverlay toolbar). Replacing
-// the whole `photos` array works for computeds that depend on the array
-// reference, but the `selectedPhoto` reference passed to FullscreenOverlay
-// stays tied to a stale object because `albumPhotos` is a sorted copy — so a
-// targeted mutation is the more reliable approach here.
 function updatePhotoStatus(id: number, status: CurationStatus) {
   if (!album.value) return
   const photo = album.value.photos.find(p => p.id === id)
@@ -622,27 +631,34 @@ function updatePhotoStatus(id: number, status: CurationStatus) {
   }
 }
 
-async function handleHidePhoto(id: number) {
-  const photo = album.value?.photos.find(p => p.id === id)
-  const prev = photo?.curation_status
-  updatePhotoStatus(id, 'hidden')
-  try { await updatePhotoCuration(id, 'hidden') }
-  catch (err: any) { if (prev) updatePhotoStatus(id, prev); error.value = err.message || 'Fehler' }
+async function applyCurationToAlbumPhoto(id: number, target: CurationStatus): Promise<void> {
+  ++curationVersion
+  updatePhotoStatus(id, target)
+  galleryRef.value?.updateEntry(id, { curation: target })
+  for (const r of [cursorPhoto, cursorPrev, cursorNext]) {
+    if (r.value && r.value.id === id) {
+      r.value = { ...r.value, curation_status: target }
+    }
+  }
+  try {
+    await updatePhotoCuration(id, target)
+  } catch (err: any) {
+    await galleryRef.value?.reload()
+    if (cursorIndex.value !== null) await hydrateCursor(cursorIndex.value)
+    error.value = err.message || 'Fehler'
+  }
 }
 
-async function handleRestorePhoto(id: number) {
-  const photo = album.value?.photos.find(p => p.id === id)
-  const prev = photo?.curation_status
-  updatePhotoStatus(id, 'visible')
-  try { await updatePhotoCuration(id, 'visible') }
-  catch (err: any) { if (prev) updatePhotoStatus(id, prev); error.value = err.message || 'Fehler' }
+function handleHidePhoto(id: number) {
+  void applyCurationToAlbumPhoto(id, 'hidden')
 }
 
-async function handleToggleFavorite(id: number, currentStatus: CurationStatus) {
-  const newStatus = currentStatus === 'favorite' ? 'visible' : 'favorite'
-  updatePhotoStatus(id, newStatus)
-  try { await updatePhotoCuration(id, newStatus) }
-  catch (err: any) { updatePhotoStatus(id, currentStatus); error.value = err.message || 'Fehler' }
+function handleRestorePhoto(id: number) {
+  void applyCurationToAlbumPhoto(id, 'visible')
+}
+
+function handleToggleFavorite(id: number, currentStatus: CurationStatus) {
+  void applyCurationToAlbumPhoto(id, currentStatus === 'favorite' ? 'visible' : 'favorite')
 }
 
 async function handleIgnoreFaceInSidebar(faceId: number) {
@@ -659,7 +675,7 @@ const dateEditingPhoto = ref<Photo | null>(null)
 function startEditingDate() {
   // Pick the currently active photo: map mode uses `mapSelectedPhoto`,
   // otherwise the grid/fullscreen selection.
-  const photo = mapSelectedPhoto.value || selectedPhoto.value
+  const photo = mapSelectedPhoto.value || cursorPhoto.value
   if (!photo) return
   dateEditingPhoto.value = photo
   editDate.value = new Date(photo.taken_at || photo.created_at)
@@ -684,9 +700,9 @@ async function handleUpdateDate() {
 }
 
 async function handleReindexPhoto() {
-  if (!selectedPhoto.value) return
+  if (!cursorPhoto.value) return
   reindexingPhoto.value = true
-  try { await reindexPhoto(selectedPhoto.value.id); await loadSidebarData(selectedPhoto.value.id) }
+  try { await reindexPhoto(cursorPhoto.value.id); await loadSidebarData(cursorPhoto.value.id) }
   catch (err: any) { error.value = err.message || 'Fehler' }
   finally { reindexingPhoto.value = false }
 }
@@ -943,46 +959,73 @@ async function handleLeaveAlbum() {
   }
 }
 
-// ── Grid interaction ──────────────────────────────────────────────────────────
-function handlePhotoClick(item: PhotoItem) {
-  selectedIndex.value = item.index
-  // Mobile: Single-Tap öffnet Fullscreen (kein Sidebar sichtbar)
-  if (window.innerWidth <= 768) isFullscreen.value = true
+// ── Grid interaction (#304) ──────────────────────────────────────────────────
+function handleGridPhotoClick(entry: GalleryGridEntry) {
+  if (!galleryRef.value) return
+  const idx = galleryRef.value.findLoadedIndexById(entry.id)
+  if (idx === null) return
+  cursorIndex.value = idx
+  void hydrateCursor(idx)
+  if (window.innerWidth <= 768) void openGridFullscreenAt(idx)
 }
 
-// ── Stack / similar-photo group handling ─────────────────────────────────────
-function handleStackClick(group: PhotoGroup) {
-  activeGroup.value = group
+function handleGridStackClick(entry: GalleryGridEntry) {
+  if (!entry.group) return
+  const groups = photoGroupsList.value
+  const found = groups.find((g) => g.id === entry.group!.id) ?? null
+  activeGroup.value = found
+}
+
+async function onGalleryLoaded() {
+  if (!galleryRef.value) return
+  const storedPhotoId = Number(route.query.photoId)
+    || loadLastPhotoMap()[String(albumId.value)]
+    || photoNav.selectedPhotoId
+    || null
+  if (storedPhotoId) {
+    const idx = galleryRef.value.findLoadedIndexById(storedPhotoId)
+    if (idx !== null) {
+      cursorIndex.value = idx
+      galleryRef.value.scrollToIndex(idx)
+      void hydrateCursor(idx)
+    }
+  }
+  if (route.query.photoId) {
+    router.replace({ query: { ...route.query, photoId: undefined } })
+  }
 }
 
 function selectAfterGroup(group: PhotoGroup | null) {
-  if (!group || albumPhotos.value.length === 0) {
-    selectedIndex.value = albumPhotos.value.length > 0 ? 0 : -1
-    return
+  if (!galleryRef.value) return
+  if (!group) return
+  const coverId = group.cover_photo_id
+  if (coverId) {
+    const idx = galleryRef.value.findLoadedIndexById(coverId)
+    if (idx !== null) {
+      cursorIndex.value = idx
+      galleryRef.value.scrollToIndex(idx)
+      void hydrateCursor(idx)
+      return
+    }
   }
-  const groupPhotoIds = new Set(group.photo_ids)
-  const visible = albumPhotos.value
-    .map((p, i) => ({ photo: p, index: i }))
-    .filter(({ photo }) => groupPhotoIds.has(photo.id) && !hiddenByStack.value.has(photo.id))
-  if (visible.length > 0) {
-    selectedIndex.value = visible[0]!.index
-    return
-  }
-  selectedIndex.value = albumPhotos.value.findIndex(p => !hiddenByStack.value.has(p.id))
+  cursorIndex.value = 0
+  galleryRef.value.scrollToIndex(0)
+  void hydrateCursor(0)
 }
 
 async function handleGroupClose() {
   const group = activeGroup.value
   activeGroup.value = null
-  await loadData() // reloads album photos and groups
+  await loadData()
+  await galleryRef.value?.reload()
   selectAfterGroup(group)
 }
 
 async function handleGroupNext(reviewedGroupId: number) {
   const candidateId = albumPhotoGroups.value.find(g => !g.reviewed_at && g.id !== reviewedGroupId)?.id
   await loadData()
+  await galleryRef.value?.reload()
   if (candidateId !== undefined) {
-    // Re-resolve against the freshly loaded list so photo_ids reflect the latest album state.
     const refreshed = albumPhotoGroups.value.find(g => g.id === candidateId && !g.reviewed_at)
     activeGroup.value = refreshed ?? null
   } else {
@@ -1009,9 +1052,13 @@ const effectiveCoverPhotoId = computed<number | null | undefined>(() => {
 })
 
 async function scrollToCover() {
-  if (!effectiveCoverPhotoId.value) return
-  const idx = albumPhotos.value.findIndex(p => p.id === effectiveCoverPhotoId.value)
-  if (idx >= 0) selectedIndex.value = idx
+  if (!effectiveCoverPhotoId.value || !galleryRef.value) return
+  const idx = galleryRef.value.findLoadedIndexById(effectiveCoverPhotoId.value)
+  if (idx !== null) {
+    cursorIndex.value = idx
+    galleryRef.value.scrollToIndex(idx)
+    void hydrateCursor(idx)
+  }
 }
 
 
@@ -1037,7 +1084,10 @@ onUnmounted(() => serviceHealth.stopPolling())
 watch(albumId, (id) => {
   rememberFocusedAlbum(id)
   album.value = null
-  selectedIndex.value = -1
+  cursorIndex.value = null
+  cursorPhoto.value = null
+  cursorPrev.value = null
+  cursorNext.value = null
   activeGroup.value = null
   detectedFaces.value = []
   detectedLandmarks.value = []
@@ -1059,6 +1109,15 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
   const photoId = Number(ev.resourceId)
   if (!Number.isFinite(photoId)) return
   if (!album.value?.photos?.some((p) => p.id === photoId)) return
+  const status = ev.payload.status as CurationStatus | undefined
+  if (status) {
+    galleryRef.value?.updateEntry(photoId, { curation: status })
+    for (const r of [cursorPhoto, cursorPrev, cursorNext]) {
+      if (r.value && r.value.id === photoId) {
+        r.value = { ...r.value, curation_status: status }
+      }
+    }
+  }
   void loadData()
 })
 </script>
@@ -1209,26 +1268,22 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
       @open-fullscreen="handleMapFullscreen"
     />
 
-    <!-- Two-column layout: PhotoGrid | Sidebar -->
-    <div v-else-if="album && groupedPhotos.length > 0" class="gallery-layout">
-      <!-- CENTER: Photo grid -->
-      <PhotoGrid
-        ref="photoGridRef"
-        :groupedPhotos="groupedPhotos"
-        :photos="albumPhotos"
-        :selectedIndex="selectedIndex"
-        :selectedPhotoIds="new Set(selectedPhoto ? [selectedPhoto.id] : [])"
-        :canDelete="false"
-        :hasStacks="true"
-        :suppressScroll="isFullscreen"
-        @update:columnCount="() => {}"
-        @photo-click="handlePhotoClick"
-        @photo-dblclick="isFullscreen = true"
-        @stack-click="handleStackClick"
-        @toggle-favorite="handleToggleFavorite"
-        @hide="handleHidePhoto"
-        @restore="handleRestorePhoto"
-      />
+    <!-- Two-column layout: VirtualGallery | Sidebar -->
+    <div v-else-if="album" class="gallery-layout">
+      <!-- CENTER: virtualized photo grid -->
+      <div class="grid-area">
+        <VirtualGallery
+          ref="galleryRef"
+          :filter="albumGridFilter"
+          :sort-by="sortByForGallery"
+          :sort-dir="sortDirForGallery"
+          :search-photo-ids="searchPhotoIds"
+          :cursor-index="cursorIndex"
+          @photo-click="handleGridPhotoClick"
+          @stack-click="handleGridStackClick"
+          @loaded="onGalleryLoaded"
+        />
+      </div>
 
       <!-- RIGHT: Details sidebar – auf Mobile als Bottom-Sheet -->
       <div class="sidebar-sheet" :class="{ 'is-open': mobileSidebarOpen }">
@@ -1238,8 +1293,8 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
           </button>
         </div>
         <PhotoDetailSidebar
-          v-if="selectedPhoto"
-          :photo="selectedPhoto"
+          v-if="cursorPhoto"
+          :photo="cursorPhoto"
           :can-delete="canDeletePhotos || canWrite"
           :can-upload="canUploadPhotos"
           :faces="detectedFaces"
@@ -1258,7 +1313,7 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
           :limit-albums-shown="true"
           :face-service-available="serviceHealth.faceServiceAvailable"
           @update:cover-photo-id="handleCoverPhotoIdUpdate"
-          @fullscreen="isFullscreen = true"
+          @fullscreen="cursorIndex !== null && openGridFullscreenAt(cursorIndex)"
           @toggle-favorite="handleToggleFavorite"
           @hide="handleHidePhoto"
           @restore="handleRestorePhoto"
@@ -1283,40 +1338,36 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
 
     <!-- Fullscreen overlay (Grid mode) -->
     <FullscreenOverlay
-      v-if="isFullscreen && selectedPhoto"
-      :photo="selectedPhoto"
-      :prevPhoto="prevPhoto"
-      :nextPhoto="nextPhoto"
+      v-if="isFullscreen && cursorPhoto"
+      :photo="cursorPhoto"
+      :prevPhoto="cursorPrev"
+      :nextPhoto="cursorNext"
       :canDelete="canDeletePhotos || canWrite"
       :showDetailsButton="true"
       :detailsActive="fullscreenDetailsOpen"
-      @close="isFullscreen = false; fullscreenDetailsOpen = false"
-      @prev="selectedIndex--"
-      @next="selectedIndex++"
+      @close="closeGridFullscreen"
+      @prev="gridGoPrev"
+      @next="gridGoNext"
       @toggle-favorite="handleToggleFavorite"
       @hide="handleHidePhoto"
       @restore="handleRestorePhoto"
       @show-details="fullscreenDetailsOpen = !fullscreenDetailsOpen"
       @toggle-cover="handleSetMapCover"
     >
-      <!-- Mobile users open fullscreen with a single tap and have no
-           visible sidebar to reach "Als Cover setzen" from. Surface the
-           toggle directly in the topbar (matching the map-mode overlay)
-           so the action is one tap away on every screen size. -->
       <template #topbar-actions-before>
         <Button
           icon="pi pi-image"
           rounded text
-          :severity="effectiveCoverPhotoId === selectedPhoto.id ? 'warn' : 'secondary'"
-          :class="{ 'fs-toolbar-btn--active': effectiveCoverPhotoId === selectedPhoto.id }"
-          v-tooltip.bottom="(effectiveCoverPhotoId === selectedPhoto.id ? 'Vom Cover entfernen' : 'Als Cover setzen') + ' (C)'"
-          @click="handleSetMapCover(selectedPhoto.id)"
+          :severity="effectiveCoverPhotoId === cursorPhoto.id ? 'warn' : 'secondary'"
+          :class="{ 'fs-toolbar-btn--active': effectiveCoverPhotoId === cursorPhoto.id }"
+          v-tooltip.bottom="(effectiveCoverPhotoId === cursorPhoto.id ? 'Vom Cover entfernen' : 'Als Cover setzen') + ' (C)'"
+          @click="handleSetMapCover(cursorPhoto.id)"
         />
       </template>
       <template #details-flyout>
         <PhotoDetailSidebar
           :in-flyout="true"
-          :photo="selectedPhoto"
+          :photo="cursorPhoto"
           :can-delete="canDeletePhotos || canWrite"
           :can-upload="canUploadPhotos"
           :faces="detectedFaces"
@@ -1623,11 +1674,17 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
   gap: 0.25rem;
 }
 
-/* ── Three-column layout ─────────────────────────────────────────────────── */
+/* ── Two-column layout ──────────────────────────────────────────────────── */
 .gallery-layout {
   display: flex;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
+}
+
+.grid-area {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
 }
 
