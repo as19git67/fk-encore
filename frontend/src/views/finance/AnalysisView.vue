@@ -9,6 +9,7 @@ import Message from 'primevue/message'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Chart from 'primevue/chart'
+import { toLocalIsoDate, parseLocalDate } from '../../utils/dateFormat'
 import {
   analysisAggregate,
   analysisQuery,
@@ -54,11 +55,11 @@ function searchTags(event: { query: string }) {
 }
 
 function toIso(d: Date | null): string | undefined {
-  return d ? d.toISOString().slice(0, 10) : undefined
+  return d ? toLocalIsoDate(d) : undefined
 }
 
 function fromIso(s: string | undefined): Date | null {
-  return s ? new Date(s) : null
+  return s ? parseLocalDate(s) : null
 }
 
 async function submitQuestion() {

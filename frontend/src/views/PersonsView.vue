@@ -21,6 +21,7 @@ import FilterChips from '../components/FilterChips.vue'
 import { useFilter } from '../composables/useFilter'
 import { matchesPhotoFilter } from '../utils/photoFilter'
 import type { SortField, SortState } from '../composables/useSort'
+import { toLocalIsoDate, parseLocalDate } from '../utils/dateFormat'
 import {
   listPersons, updatePerson, mergePersons, getPersonDetails,
   ignoreFace, ignorePersonFaces, updatePhotoCuration, reindexPhoto,
@@ -129,16 +130,16 @@ const activePersonFilterCount = computed(() => {
 
 function openPersonFilterMenu() {
   draftPersonFilter.value = { ...appliedPersonFilter.value }
-  draftPersonDateFrom.value = appliedPersonFilter.value.dateFrom ? new Date(appliedPersonFilter.value.dateFrom) : null
-  draftPersonDateTo.value = appliedPersonFilter.value.dateTo ? new Date(appliedPersonFilter.value.dateTo) : null
+  draftPersonDateFrom.value = appliedPersonFilter.value.dateFrom ? parseLocalDate(appliedPersonFilter.value.dateFrom) : null
+  draftPersonDateTo.value = appliedPersonFilter.value.dateTo ? parseLocalDate(appliedPersonFilter.value.dateTo) : null
   showPersonFilterMenu.value = true
 }
 
 function applyPersonFilter() {
   appliedPersonFilter.value = {
     ...draftPersonFilter.value,
-    dateFrom: draftPersonDateFrom.value ? draftPersonDateFrom.value.toISOString().slice(0, 10) : undefined,
-    dateTo: draftPersonDateTo.value ? draftPersonDateTo.value.toISOString().slice(0, 10) : undefined,
+    dateFrom: draftPersonDateFrom.value ? toLocalIsoDate(draftPersonDateFrom.value) : undefined,
+    dateTo: draftPersonDateTo.value ? toLocalIsoDate(draftPersonDateTo.value) : undefined,
   }
   showPersonFilterMenu.value = false
 }

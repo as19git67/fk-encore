@@ -9,6 +9,7 @@ import InputNumber from 'primevue/inputnumber'
 import DatePicker from 'primevue/datepicker'
 import TagAutoComplete from '../../components/finance/TagAutoComplete.vue'
 import Textarea from 'primevue/textarea'
+import { toLocalIsoDate } from '../../utils/dateFormat'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useAccountsStore } from '../../stores/finance/accounts'
 import { useTagsStore } from '../../stores/finance/tags'
@@ -47,9 +48,7 @@ const account = computed(() => tx.value ? accountsStore.byId(tx.value.account_id
 const isCash = computed(() => account.value?.type_kind === 'bargeld')
 
 function toIso(d: Date): string {
-  const offset = d.getTimezoneOffset()
-  const localDate = new Date(d.getTime() - offset * 60 * 1000)
-  return localDate.toISOString().slice(0, 10)
+  return toLocalIsoDate(d)
 }
 
 const isDirty = computed(() => {
