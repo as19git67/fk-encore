@@ -137,7 +137,7 @@ async function save() {
   const signedAmount = isExpense.value ? -Math.abs(amount.value) : Math.abs(amount.value)
   saving.value = true
   try {
-    const created = await txStore.create({
+    await txStore.create({
       account_id: accountId.value,
       booking_date: toIso(bookingDate.value),
       amount: signedAmount,
@@ -146,7 +146,7 @@ async function save() {
       tags: tags.value,
     })
     tagsStore.addLocal(tags.value)
-    void router.push({ name: 'finance-transaction-detail', params: { id: created.id } })
+    void router.push({ name: 'finance-account-transactions', params: { id: accountId.value } })
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
