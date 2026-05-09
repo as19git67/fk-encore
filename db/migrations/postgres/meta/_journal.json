@@ -498,6 +498,13 @@
       "when": 1779001409000,
       "tag": "0070_finance_transaction_iso_btc_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1779001410000,
+      "tag": "0071_photo_group_members_photo_id_idx",
+      "breakpoints": true
     }
   ]
 }

@@ -273,7 +273,10 @@ export const photoGroupMembers = pgTable(
       .references(() => photos.id, { onDelete: "cascade" }),
     similarity_rank: integer("similarity_rank").notNull().default(0),
   },
-  (table) => [primaryKey({ columns: [table.group_id, table.photo_id] })]
+  (table) => [
+    primaryKey({ columns: [table.group_id, table.photo_id] }),
+    index("photo_group_members_photo_id_idx").on(table.photo_id),
+  ]
 );
 
 // ========== Albums ==========

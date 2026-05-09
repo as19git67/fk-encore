@@ -30,12 +30,13 @@ import {
 import type { PhotoFilter } from '../api/photos'
 
 /**
- * Page size for windowed fetches. Smaller than the legacy 2000 because
- * the virtualized scroller only needs to fill the immediately-visible rows
- * plus a small overscan; smaller pages mean smaller responses, faster
- * parse, less wasted bandwidth on idle scrolls.
+ * Page size for windowed fetches. The virtualized scroller renders at most
+ * ~95 cells on a desktop viewport (6 cols × 12 visible rows + 4 overscan)
+ * and far fewer on mobile, so 150 still gives ~50% headroom over the
+ * worst-case rendered window while cutting the initial response payload
+ * (and the server work per page) to ~30% of the previous 500-row default.
  */
-export const GALLERY_PAGE_SIZE = 500
+export const GALLERY_PAGE_SIZE = 150
 
 export interface GalleryQueryState {
   filter: PhotoFilter
