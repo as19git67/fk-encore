@@ -16,8 +16,13 @@ import {
 } from "./tag-queue";
 import { triggerTagWorker } from "./tag-worker";
 import db from "../db/database";
-import { financeTransaction, financeAccountAccess } from "../db/schema";
-import { eq, and, inArray, sql } from "drizzle-orm";
+import {
+  financeTransaction,
+  financeAccountAccess,
+  financeTagTransaction,
+  financeTagQueue,
+} from "../db/schema";
+import { eq, and, inArray, sql, notExists, type SQLWrapper } from "drizzle-orm";
 
 export interface TagQueueStatusResponse {
   status: TagQueueServiceStatus;
@@ -83,7 +88,7 @@ interface ReenqueueAllResponse {
   enqueued: number;
 }
 
-/** Re-enqueue all transactions that have no AI tags yet. */
+/** Re-enqueue only untagged, unprocessed transactions (#332). */
 export const reenqueueAllTagJobs = api(
   {
     expose: true,
@@ -95,7 +100,7 @@ export const reenqueueAllTagJobs = api(
     const auth = getAuthData()!;
     requirePermission(auth, "data.manage");
 
-    const conds: ReturnType<typeof eq>[] = [];
+    const conds: SQLWrapper[] = [];
     if (!auth.permissions.includes("finance.admin")) {
       const accessible = await db
         .select({ id: financeAccountAccess.account_id })
@@ -109,10 +114,38 @@ export const reenqueueAllTagJobs = api(
       conds.push(eq(financeTransaction.account_id, p.accountId));
     }
 
+    // Skip transactions that already have any tags (user or AI)
+    conds.push(
+      notExists(
+        db
+          .select({ _: sql`1` })
+          .from(financeTagTransaction)
+          .where(
+            eq(financeTagTransaction.transaction_id, financeTransaction.id),
+          ),
+      ),
+    );
+
+    // Skip transactions already processed by the AI pipeline (status = 'done'),
+    // including those where the user later rejected all AI suggestions.
+    conds.push(
+      notExists(
+        db
+          .select({ _: sql`1` })
+          .from(financeTagQueue)
+          .where(
+            and(
+              eq(financeTagQueue.transaction_id, financeTransaction.id),
+              eq(financeTagQueue.status, "done"),
+            ),
+          ),
+      ),
+    );
+
     const rows = await db
       .select({ id: financeTransaction.id })
       .from(financeTransaction)
-      .where(conds.length > 0 ? and(...conds) : undefined);
+      .where(and(...conds));
 
     const userId = Number(auth.userID);
     for (const r of rows) {
