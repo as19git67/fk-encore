@@ -14,6 +14,10 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'open-fullscreen': [stopPhotos: Photo[], startIndex: number]
+  /** Fired when the user actively selects a stop (click or keyboard). Carries
+   *  the cover photo id of the chosen stop so the parent can keep its grid
+   *  selection in sync when the user flips back to gallery view. */
+  'stop-selected': [coverPhotoId: number]
 }>()
 
 const { stops, dayPaths, dayTransitions, dayColorMap, uniqueDays, bounds } =
@@ -147,12 +151,17 @@ function updateMarkerIcons() {
   }
 }
 
-function selectStop(stopId: number, panMap = true) {
+// silent=true suppresses the 'stop-selected' emit; used for programmatic
+// pre-selections (initial navigation, fullscreen close) where the parent
+// already knows which photo to show and we must not override its index.
+function selectStop(stopId: number, panMap = true, silent = false) {
   selectedStopId.value = stopId
   updateMarkerIcons()
 
   const stop = stops.value.find(s => s.id === stopId)
   if (!stop) return
+
+  if (!silent) emit('stop-selected', stop.coverPhoto.id)
 
   // Auto-expand the day of the selected stop if it's not the cover/first stop.
   // This is a reactive state change and must happen regardless of whether the
@@ -357,7 +366,7 @@ watch(() => props.photos, () => {
 function selectStopByPhotoId(photoId: number): boolean {
   const stop = stops.value.find((s) => s.photos.some((p) => p.id === photoId))
   if (!stop) return false
-  if (stop.id !== selectedStopId.value) selectStop(stop.id)
+  if (stop.id !== selectedStopId.value) selectStop(stop.id, true, true)
   return true
 }
 
