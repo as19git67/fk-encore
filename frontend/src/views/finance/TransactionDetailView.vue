@@ -716,12 +716,6 @@ const extractedFields = computed(() => {
           size="small"
           @click="navigateToRecurringTx"
         />
-        <Button
-          label="Schließen"
-          severity="secondary"
-          text
-          @click="recurringPopupVisible = false"
-        />
       </template>
     </Dialog>
   </div>
