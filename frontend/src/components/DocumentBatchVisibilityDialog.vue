@@ -7,13 +7,17 @@ import Select from 'primevue/select'
 import Message from 'primevue/message'
 import {
   batchUpdateDocumentVisibility,
+  type DocumentSummary,
   type DocumentVisibility,
   type GroupSummary,
 } from '../api/documents'
 
 const props = defineProps<{
   visible: boolean
-  documentIds: number[]
+  /** Documents currently selected. We read `visibility` and `group_id`
+   *  off them to pre-fill the form when all selected docs share the
+   *  same visibility (the common case for batch edits). */
+  documents: DocumentSummary[]
   groups: GroupSummary[]
 }>()
 
@@ -27,12 +31,44 @@ const groupId = ref<number | null>(null)
 const saving = ref(false)
 const error = ref<string | null>(null)
 
+const documentIds = computed(() => props.documents.map((d) => d.id))
+
+/** Common visibility across the selection, or null when mixed. */
+const commonVisibility = computed<DocumentVisibility | null>(() => {
+  const first = props.documents[0]
+  if (!first) return null
+  return props.documents.every((d) => d.visibility === first.visibility)
+    ? first.visibility
+    : null
+})
+
+/** Common group_id across the selection (only meaningful when
+ *  `commonVisibility === 'group'`), or null when mixed. */
+const commonGroupId = computed<number | null>(() => {
+  const first = props.documents[0]
+  if (!first) return null
+  return props.documents.every((d) => d.group_id === first.group_id)
+    ? first.group_id
+    : null
+})
+
 watch(
   () => props.visible,
   (v) => {
     if (!v) return
-    visibility.value = 'private'
-    groupId.value = props.groups[0]?.id ?? null
+    // Pre-fill with the common state if the selection is uniform; fall
+    // back to private + first-group otherwise so the user has a sane
+    // starting point either way.
+    if (commonVisibility.value === 'group' && commonGroupId.value != null) {
+      visibility.value = 'group'
+      groupId.value = commonGroupId.value
+    } else if (commonVisibility.value === 'private') {
+      visibility.value = 'private'
+      groupId.value = props.groups[0]?.id ?? null
+    } else {
+      visibility.value = 'private'
+      groupId.value = props.groups[0]?.id ?? null
+    }
     error.value = null
   },
 )
@@ -50,7 +86,7 @@ async function apply() {
   error.value = null
   try {
     const res = await batchUpdateDocumentVisibility({
-      document_ids: props.documentIds,
+      document_ids: documentIds.value,
       visibility: visibility.value,
       group_id: visibility.value === 'group' ? groupId.value : null,
     })
@@ -78,9 +114,18 @@ async function apply() {
     @update:visible="(v: boolean) => emit('update:visible', v)"
   >
     <p class="count">
-      Anwenden auf <strong>{{ documentIds.length }}</strong>
-      {{ documentIds.length === 1 ? 'Dokument' : 'Dokumente' }}
+      Anwenden auf <strong>{{ documents.length }}</strong>
+      {{ documents.length === 1 ? 'Dokument' : 'Dokumente' }}
     </p>
+
+    <Message
+      v-if="documents.length > 1 && commonVisibility === null"
+      severity="info"
+      :closable="false"
+      class="mixed-msg"
+    >
+      Die ausgewählten Dokumente haben unterschiedliche Sichtbarkeiten.
+    </Message>
 
     <div class="option">
       <RadioButton
@@ -132,6 +177,9 @@ async function apply() {
   margin: 0 0 1rem;
   color: var(--p-text-muted-color);
   font-size: 0.85rem;
+}
+.mixed-msg {
+  margin-bottom: 0.75rem;
 }
 .option {
   display: flex;

@@ -491,7 +491,7 @@ onMounted(async () => {
 
     <DocumentBatchVisibilityDialog
       v-model:visible="visibilityDialogVisible"
-      :document-ids="[...selectedIds]"
+      :documents="selectedDocs"
       :groups="groups"
       @done="handleBatchVisibilityDone"
     />
