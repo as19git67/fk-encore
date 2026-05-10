@@ -16,14 +16,12 @@ import {
   users,
 } from "../db/schema";
 import {
-  closeAccount,
   createAccount,
   deleteAccount,
   getAccount,
   isAccountClosed,
   linkAccount,
   listAccounts,
-  reopenAccount,
   unlinkAccount,
   updateAccount,
 } from "./accounts";
@@ -117,7 +115,7 @@ describe("finance/accounts — create (manual)", () => {
     expect(result.bankcontact_id).toBeNull();
     expect(result.bankcontact_name).toBeNull();
     expect(result.fints_account_number).toBeNull();
-    expect(result.active).toBe(true);
+    expect(result.closed_at).toBeNull();
 
     const acl = await db
       .select()
@@ -302,10 +300,8 @@ describe("finance/accounts — update", () => {
     const result = await updateAccount({
       id: a,
       label: "After",
-      active: false,
     });
     expect(result.label).toBe("After");
-    expect(result.active).toBe(false);
     expect(result.iban).toBeNull(); // unchanged
   });
 
@@ -559,8 +555,8 @@ describe("finance/accounts — link / unlink", () => {
   });
 });
 
-describe("finance/accounts — close / reopen", () => {
-  it("closes an open account and exposes closed_at", async () => {
+describe("finance/accounts — close / reopen via PATCH", () => {
+  it("PATCH closed_at marks an account closed and is reflected by isAccountClosed", async () => {
     const bcId = await insertBankcontact();
     const a = await insertAccount(bcId);
     setAuth("1", ["finance.accounts.manage", "finance.view"]);
@@ -570,51 +566,32 @@ describe("finance/accounts — close / reopen", () => {
     const before = await getAccount({ id: a });
     expect(before.closed_at).toBeNull();
 
-    const result = await closeAccount({ id: a });
-    expect(result.id).toBe(a);
-    expect(result.closed_at).toBeTruthy();
-
-    const after = await getAccount({ id: a });
-    expect(after.closed_at).toBe(result.closed_at);
+    const closedAt = "2024-09-15T12:00:00.000Z";
+    const result = await updateAccount({ id: a, closed_at: closedAt });
+    expect(result.closed_at).not.toBeNull();
+    expect(new Date(result.closed_at!).toISOString()).toBe(closedAt);
     expect(await isAccountClosed(a)).toBe(true);
   });
 
-  it("is idempotent — re-closing keeps the original timestamp", async () => {
-    const bcId = await insertBankcontact();
-    const a = await insertAccount(bcId);
-    setAuth("1", ["finance.accounts.manage"]);
-
-    const first = await closeAccount({ id: a });
-    const second = await closeAccount({ id: a });
-    expect(second.closed_at).toBe(first.closed_at);
-  });
-
-  it("reopen clears closed_at", async () => {
+  it("PATCH closed_at: null reopens a closed account", async () => {
     const bcId = await insertBankcontact();
     const a = await insertAccount(bcId);
     setAuth("1", ["finance.accounts.manage", "finance.view"]);
     await ensureUser(1);
     await grantAcl(a, 1, "read");
 
-    await closeAccount({ id: a });
-    await reopenAccount({ id: a });
-
-    const view = await getAccount({ id: a });
-    expect(view.closed_at).toBeNull();
+    await updateAccount({ id: a, closed_at: "2024-09-15T12:00:00.000Z" });
+    const reopened = await updateAccount({ id: a, closed_at: null });
+    expect(reopened.closed_at).toBeNull();
     expect(await isAccountClosed(a)).toBe(false);
   });
 
-  it("requires finance.accounts.manage", async () => {
+  it("rejects a malformed closed_at value", async () => {
     const bcId = await insertBankcontact();
     const a = await insertAccount(bcId);
-    setAuth("1", ["finance.view"]);
-    await expect(closeAccount({ id: a })).rejects.toThrow(/permission/);
-    await expect(reopenAccount({ id: a })).rejects.toThrow(/permission/);
-  });
-
-  it("404s on unknown account id", async () => {
     setAuth("1", ["finance.accounts.manage"]);
-    await expect(closeAccount({ id: 999_999 })).rejects.toThrow(/not found/);
-    await expect(reopenAccount({ id: 999_999 })).rejects.toThrow(/not found/);
+    await expect(
+      updateAccount({ id: a, closed_at: "not-a-date" }),
+    ).rejects.toThrow(/closed_at/);
   });
 });

@@ -512,6 +512,13 @@
       "when": 1779001411000,
       "tag": "0072_finance_account_closed_at",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1779001412000,
+      "tag": "0073_finance_account_drop_active",
+      "breakpoints": true
     }
   ]
 }

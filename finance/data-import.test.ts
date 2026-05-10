@@ -184,7 +184,7 @@ describe("finance/data-import — happy path", () => {
     const exp: FinanzkraftExport = {
       ...miniExport(),
       accounts: [
-        { ...miniExport().accounts[0], active: false, closed_at: closedAt },
+        { ...miniExport().accounts[0], closed_at: closedAt },
       ],
       transactions: [],
       tag_links: [],

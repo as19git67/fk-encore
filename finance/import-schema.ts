@@ -42,7 +42,6 @@ export interface ImportAccount {
   /** Required even if iban is set — falls back as dedupe key when iban is null. */
   account_number: string;
   label: string;
-  active?: boolean;
   /** ISO timestamp at which the account was closed in the source
    *  system (Finanzkraft). When set, the importer marks the account
    *  closed in fk-encore as well, blocking sync and new bookings.
@@ -223,7 +222,6 @@ function validateAccount(raw: unknown, i: number): ImportAccount {
       `accounts[${i}].account_number`,
     ),
     label: assertNonEmptyString(o.label, `accounts[${i}].label`),
-    active: typeof o.active === "boolean" ? o.active : undefined,
     closed_at: optString(o.closed_at, `accounts[${i}].closed_at`) ?? null,
     fints_account_number: optString(
       o.fints_account_number,

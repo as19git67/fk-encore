@@ -313,21 +313,6 @@ function ignoreUnknown(entry: UnknownBankAccount) {
   )
 }
 
-async function deleteOneAccount(id: number, label: string) {
-  const ok = confirm(
-    `Konto "${label}" wirklich löschen? Alle Transaktionen, Tags ` +
-      `und die Saldo-Historie für dieses Konto werden entfernt.`,
-  )
-  if (!ok) return
-  try {
-    const resp = await accountsStore.remove(id)
-    syncInfo.value = `Konto gelöscht — ${resp.transactions_deleted} Transaktionen entfernt.`
-    errorMsg.value = null
-  } catch (err) {
-    errorMsg.value = err instanceof Error ? err.message : String(err)
-  }
-}
-
 function syncStatusSeverity(status: string): 'success' | 'warn' | 'danger' | 'secondary' {
   if (status === 'ok') return 'success'
   if (status === 'tan-required') return 'warn'
@@ -599,9 +584,9 @@ async function del() {
               <strong>{{ a.label || a.account_number }}</strong>
               <Tag class="type-tag" :value="a.type_label" severity="info" />
               <Tag
-                v-if="!a.active"
+                v-if="a.closed_at"
                 class="type-tag"
-                value="inaktiv"
+                value="geschlossen"
                 severity="secondary"
               />
             </div>
@@ -610,15 +595,6 @@ async function del() {
               <span v-else>Kontonr. {{ a.account_number }}</span>
               <span class="currency">{{ a.currency_symbol || a.currency_code }}</span>
             </div>
-          </div>
-          <div class="account-actions">
-            <Button
-              icon="pi pi-trash"
-              severity="danger"
-              text
-              aria-label="Konto löschen"
-              @click="deleteOneAccount(a.id, a.label || a.account_number)"
-            />
           </div>
         </li>
       </ul>
@@ -777,12 +753,6 @@ async function del() {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
-}
-.account-actions {
-  flex-shrink: 0;
-  display: flex;
-  gap: 0.25rem;
-  align-items: center;
 }
 .account-main {
   display: flex;

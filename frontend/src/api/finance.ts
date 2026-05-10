@@ -243,10 +243,9 @@ export interface Account {
   iban: string | null
   account_number: string
   label: string
-  active: boolean
   /** Non-null timestamp when the account is closed. Closed accounts are
    *  read-only — sync skips them and the manual booking endpoint refuses
-   *  inserts. Reopen via `reopenAccount` to clear. */
+   *  inserts. Patch with `closed_at: null` to reopen. */
   closed_at: string | null
   created_at: string | null
   /** Number of users with an explicit ACL entry (read/write) on this
@@ -276,7 +275,9 @@ export interface LinkAccountInput {
 export interface UpdateAccountInput {
   label?: string
   iban?: string | null
-  active?: boolean
+  /** ISO timestamp → close as of that moment. null → reopen. Omit to
+   *  leave the close-state untouched. */
+  closed_at?: string | null
   type_kind?: string
   currency_code?: string
   account_number?: string
@@ -336,28 +337,8 @@ export async function unlinkAccount(id: number): Promise<Account> {
   })
 }
 
-export interface CloseAccountResponse {
-  id: number
-  closed_at: string
-}
-
-export interface ReopenAccountResponse {
-  id: number
-}
-
-export async function closeAccount(id: number): Promise<CloseAccountResponse> {
-  return apiFetch(`/finance/accounts/${id}/close`, {
-    method: 'POST',
-    body: JSON.stringify({ id }),
-  })
-}
-
-export async function reopenAccount(id: number): Promise<ReopenAccountResponse> {
-  return apiFetch(`/finance/accounts/${id}/reopen`, {
-    method: 'POST',
-    body: JSON.stringify({ id }),
-  })
-}
+// closeAccount / reopenAccount removed — both flows are now expressed
+// as `updateAccount(id, { closed_at: <iso> | null })`.
 
 // ----------------------------------------------------------------------
 // Overview (configurable landing page)

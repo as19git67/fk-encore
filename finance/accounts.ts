@@ -54,7 +54,6 @@ interface AccountView {
   iban: string | null;
   account_number: string;
   label: string;
-  active: boolean;
   /** Non-null when the account was closed. Closed accounts reject new
    *  bookings (manual + sync) but stay visible for historical access. */
   closed_at: string | null;
@@ -98,7 +97,6 @@ function toView(
     iban: row.iban,
     account_number: row.account_number,
     label: row.label,
-    active: row.active,
     closed_at: row.closed_at,
     created_at: row.created_at,
     access_count: accessCount,
@@ -140,7 +138,6 @@ export const listAccounts = api(
           iban: financeAccount.iban,
           account_number: financeAccount.account_number,
           label: financeAccount.label,
-          active: financeAccount.active,
           closed_at: financeAccount.closed_at,
           created_at: financeAccount.created_at,
         })
@@ -349,14 +346,19 @@ export const createAccount = api(
 );
 
 // -----------------------------------------------------------------------
-// Patch (finance.accounts.manage — Stammdaten + active)
+// Patch (finance.accounts.manage — Stammdaten + close/reopen via closed_at)
 // -----------------------------------------------------------------------
 
 interface PatchParams {
   id: number;
   label?: string;
   iban?: string | null;
-  active?: boolean;
+  /** Toggle close-state by patching this field:
+   *  - ISO-8601 timestamp → close as of that moment (sync + manual
+   *    bookings refused from then on)
+   *  - null → reopen
+   *  - undefined / omitted → leave the close-state untouched */
+  closed_at?: string | null;
   type_kind?: string;
   currency_code?: string;
   account_number?: string;
@@ -387,7 +389,19 @@ export const updateAccount = api(
       patch.iban = p.iban === null ? null : p.iban.trim() || null;
     }
 
-    if (p.active !== undefined) patch.active = p.active;
+    if (p.closed_at !== undefined) {
+      if (p.closed_at === null) {
+        patch.closed_at = null;
+      } else {
+        const ts = new Date(p.closed_at);
+        if (Number.isNaN(ts.getTime())) {
+          throw APIError.invalidArgument(
+            `closed_at must be an ISO-8601 timestamp, got '${p.closed_at}'`,
+          );
+        }
+        patch.closed_at = ts.toISOString();
+      }
+    }
 
     if (p.account_number !== undefined) {
       if (!p.account_number.trim()) {
@@ -554,70 +568,12 @@ export const unlinkAccount = api(
 );
 
 // -----------------------------------------------------------------------
-// Close / Reopen
+// Close-state helper
 // -----------------------------------------------------------------------
 //
-// Closing flips `closed_at` to now() and is a soft state — historical
-// data stays readable, new bookings are refused. The sync path uses
-// `isAccountClosed` to skip closed accounts entirely. Reopening clears
-// the timestamp and unblocks both insert paths again.
-
-interface CloseAccountResponse {
-  id: number;
-  closed_at: string;
-}
-
-interface ReopenAccountResponse {
-  id: number;
-}
-
-export const closeAccount = api(
-  {
-    expose: true,
-    method: "POST",
-    path: "/finance/accounts/:id/close",
-    auth: true,
-  },
-  async ({ id }: IdParams): Promise<CloseAccountResponse> => {
-    const auth = getAuthData()!;
-    requirePermission(auth, "finance.accounts.manage");
-
-    const existing = await loadAccount(id);
-    if (existing.closed_at) {
-      // Idempotent: re-closing a closed account just returns the
-      // existing timestamp instead of bumping it.
-      return { id, closed_at: existing.closed_at };
-    }
-
-    const nowIso = new Date().toISOString();
-    const [row] = await db
-      .update(financeAccount)
-      .set({ closed_at: nowIso })
-      .where(eq(financeAccount.id, id))
-      .returning({ closed_at: financeAccount.closed_at });
-    return { id, closed_at: row.closed_at! };
-  },
-);
-
-export const reopenAccount = api(
-  {
-    expose: true,
-    method: "POST",
-    path: "/finance/accounts/:id/reopen",
-    auth: true,
-  },
-  async ({ id }: IdParams): Promise<ReopenAccountResponse> => {
-    const auth = getAuthData()!;
-    requirePermission(auth, "finance.accounts.manage");
-
-    await loadAccount(id);
-    await db
-      .update(financeAccount)
-      .set({ closed_at: null })
-      .where(eq(financeAccount.id, id));
-    return { id };
-  },
-);
+// Closing/reopening is folded into PATCH (set `closed_at`). This helper
+// is what the sync and manual-booking paths use to fast-skip a closed
+// account before writing.
 
 /**
  * True if the given account exists and has been closed. Sync and
