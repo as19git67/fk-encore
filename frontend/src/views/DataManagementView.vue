@@ -19,9 +19,7 @@ import {
 import {
   getFinanceTagQueueStatus, retryFailedFinanceTagJobs,
   cancelPendingFinanceTagJobs, reenqueueAllFinanceTagJobs,
-  runAnomalyDetection,
   type TagQueueServiceStatus,
-  type AnomalyRunResult,
 } from '../api/finance'
 import { getBuildInfo } from '../api/system'
 import { useAuthStore } from '../stores/auth'
@@ -338,25 +336,6 @@ async function handleFinanceTagReenqueue() {
   }
 }
 
-// ── Anomalie-Erkennung ────────────────────────────────────────────────────────
-
-const anomalyLoading = ref(false)
-const anomalyResult = ref<AnomalyRunResult | null>(null)
-const anomalyError = ref('')
-
-async function handleRunAnomalyDetection(reset = false) {
-  anomalyResult.value = null
-  anomalyError.value = ''
-  anomalyLoading.value = true
-  try {
-    anomalyResult.value = await runAnomalyDetection(reset)
-  } catch (err: any) {
-    anomalyError.value = err.message || 'Fehler bei der Anomalie-Erkennung'
-  } finally {
-    anomalyLoading.value = false
-  }
-}
-
 // ── Build-Info ────────────────────────────────────────────────────────────────
 
 const buildNumber = ref('…')
@@ -587,48 +566,6 @@ onMounted(async () => {
           :loading="financeTagCancelLoading"
           :disabled="financeTagCancelLoading"
           @click="handleFinanceTagCancel"
-        />
-      </div>
-    </div>
-
-    <!-- Finance Anomalie-Erkennung -->
-    <div class="data-management-group">
-      <h3>Finance Anomalie-Erkennung</h3>
-      <p>
-        Erkennt Änderungen bei wiederkehrenden Zahlungen (Lastschriften, Gehalt, Daueraufträge),
-        mögliche Doppelbuchungen sowie neue regelmäßige Zahlungen.
-      </p>
-
-      <Message v-if="anomalyError" severity="error" class="data-management-group__item" @close="anomalyError = ''">
-        {{ anomalyError }}
-      </Message>
-
-      <div v-if="anomalyResult" class="data-management-group__item">
-        <Message severity="info" :closable="false">
-          {{ anomalyResult.accounts }} Konten · {{ anomalyResult.transactions_processed }} Buchungen verarbeitet ·
-          {{ anomalyResult.mandates_created }} neue Mandate · {{ anomalyResult.mandates_updated }} Mandate aktualisiert ·
-          <strong>{{ anomalyResult.anomalies_created }} Anomalien erkannt</strong>
-        </Message>
-      </div>
-
-      <div class="data-management-group__item anomaly-buttons">
-        <Button
-          icon="pi pi-search"
-          outlined
-          label="Anomalien jetzt erkennen"
-          :loading="anomalyLoading"
-          :disabled="anomalyLoading"
-          @click="handleRunAnomalyDetection(false)"
-        />
-        <Button
-          icon="pi pi-refresh"
-          severity="secondary"
-          outlined
-          label="Neu berechnen"
-          title="Löscht alle offenen Anomalien und erkennt sie neu"
-          :loading="anomalyLoading"
-          :disabled="anomalyLoading"
-          @click="handleRunAnomalyDetection(true)"
         />
       </div>
     </div>
@@ -922,12 +859,6 @@ onMounted(async () => {
 }
 
 .data-management-group .data-management-group__item {
-}
-
-.anomaly-buttons {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
 }
 
 .status-progress {

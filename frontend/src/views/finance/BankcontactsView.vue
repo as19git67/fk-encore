@@ -140,6 +140,7 @@ function statusSeverity(status: string | null): 'success' | 'warn' | 'danger' | 
   if (!status) return 'secondary'
   if (status === 'ok') return 'success'
   if (status === 'tan-required') return 'warn'
+  if (status === 'partial') return 'warn'
   if (status.startsWith('error')) return 'danger'
   return 'secondary'
 }
@@ -148,8 +149,17 @@ function statusLabel(status: string | null): string {
   if (!status) return '—'
   if (status === 'ok') return 'OK'
   if (status === 'tan-required') return 'TAN offen'
+  if (status === 'partial') return 'Teilweise'
   if (status.startsWith('error:')) return `Fehler ${status.slice(6)}`
   return status
+}
+
+function statusTitle(status: string | null): string | undefined {
+  if (status === 'partial')
+    return 'Sync war teilweise erfolgreich. Mindestens ein Konto konnte nicht abgerufen werden (z. B. weil eine TAN benötigt wurde oder die Bank einen Fehler meldete). Aktualisierte Konten und neue Buchungen sind aber gespeichert.'
+  if (status === 'tan-required')
+    return 'Die Bank fordert eine TAN — bitte den Sync erneut starten und den TAN-Dialog abschließen.'
+  return undefined
 }
 
 async function triggerSync(id: number) {
@@ -243,7 +253,11 @@ function openDetail(id: number) {
       </Column>
       <Column header="Status">
         <template #body="{ data }">
-          <Tag :severity="statusSeverity(data.last_sync_status)" :value="statusLabel(data.last_sync_status)" />
+          <Tag
+            :severity="statusSeverity(data.last_sync_status)"
+            :value="statusLabel(data.last_sync_status)"
+            :title="statusTitle(data.last_sync_status)"
+          />
         </template>
       </Column>
       <Column header="Aktionen" :style="{ width: '12rem' }" class="mobile-hidden" headerClass="mobile-hidden">
@@ -305,8 +319,8 @@ function openDetail(id: number) {
   row-gap: 0.1rem;
   align-items: center;
   padding: 0.85rem 1rem;
-  background: var(--p-surface-50);
-  border: 1px solid var(--p-surface-200);
+  background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color);
   border-radius: 0.5rem;
   text-align: left;
   font: inherit;
