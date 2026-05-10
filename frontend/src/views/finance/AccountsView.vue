@@ -47,6 +47,7 @@ const canWrite = computed(() => authStore.hasPermission('finance.accounts.manage
 const editDialogVisible = ref(false)
 const editErrorMsg = ref<string | null>(null)
 const editing = ref(false)
+const closing = ref(false)
 const editId = ref<number | null>(null)
 const editForm = ref({
   label: '',
@@ -137,6 +138,29 @@ async function saveAccount() {
     editErrorMsg.value = err instanceof Error ? err.message : String(err)
   } finally {
     editing.value = false
+  }
+}
+
+async function closeAccountFromDialog() {
+  if (!editId.value) return
+  const label = editForm.value.label.trim() || 'dieses Konto'
+  if (
+    !confirm(
+      `Konto "${label}" wirklich schließen? ` +
+        `Sync und neue Buchungen werden ab sofort blockiert; ` +
+        `bisherige Daten bleiben sichtbar und können wieder reaktiviert werden.`,
+    )
+  )
+    return
+  closing.value = true
+  editErrorMsg.value = null
+  try {
+    await store.close(editId.value)
+    editDialogVisible.value = false
+  } catch (err) {
+    editErrorMsg.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    closing.value = false
   }
 }
 </script>
@@ -261,6 +285,16 @@ async function saveAccount() {
 
       <template #footer>
         <Button
+          v-if="editId"
+          label="Konto schließen"
+          icon="pi pi-lock"
+          severity="warn"
+          outlined
+          :loading="closing"
+          class="footer-close-btn"
+          @click="closeAccountFromDialog"
+        />
+        <Button
           label="Abbrechen"
           severity="secondary"
           text
@@ -334,5 +368,8 @@ async function saveAccount() {
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
+}
+.footer-close-btn {
+  margin-right: auto;
 }
 </style>
