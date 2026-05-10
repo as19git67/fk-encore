@@ -78,26 +78,26 @@ const selectedDocs = computed(() =>
 )
 
 /**
- * Reactive tristate lookup. Wrapped in a `computed` so Vue tracks
- * `selectedDocs` (and transitively `selectedIds` / `items`) as render
- * dependencies of this view; the inline `(id) => …` form on the
- * template would only register the read inside the closure, not at
- * the parent render, so toggling the selection or refreshing the
- * document list wouldn't propagate updated tristates to the dialog
- * checkboxes.
+ * Tristate per known tag, materialised as a Map. Re-evaluated
+ * whenever the selection or the document list changes.
  */
-const tagInitialState = computed(() => {
+const tagInitialStates = computed<Map<string, boolean | null>>(() => {
   const docs = selectedDocs.value
-  return (tag: string): boolean | null => {
-    if (docs.length === 0) return false
+  const out = new Map<string, boolean | null>()
+  for (const tag of allKnownTags.value) {
+    if (docs.length === 0) {
+      out.set(tag, false)
+      continue
+    }
     let count = 0
     for (const d of docs) {
       if (d.tags.includes(tag)) count++
     }
-    if (count === 0) return false
-    if (count === docs.length) return true
-    return null
+    if (count === 0) out.set(tag, false)
+    else if (count === docs.length) out.set(tag, true)
+    else out.set(tag, null)
   }
+  return out
 })
 
 async function handleBatchTagsSave(payload: { adds: string[]; removes: string[] }) {
@@ -477,7 +477,7 @@ onMounted(async () => {
       v-model:visible="tagsDialogVisible"
       title="Tags auf Auswahl anwenden"
       :items="tagDialogItems"
-      :initial-state="tagInitialState"
+      :initial-states="tagInitialStates"
       :subject-count="selectedIds.size"
       :subject-label="selectedIds.size === 1 ? 'Dokument' : 'Dokumente'"
       :saving="savingBatchTags"

@@ -16,15 +16,16 @@ const props = defineProps<{
   title: string
   items: MultiSelectItem<T>[]
   /**
-   * Initial check state per item across the subject(s):
+   * Original tristate per item across the subject(s):
    *   true  = present on all subjects
    *   null  = present on some (indeterminate)
-   *   false = present on none
-   * Evaluated lazily on every render so async data loads (e.g. the
-   * parent fetching `/photos/albums` after the dialog opens) update
-   * the displayed checkboxes without any explicit refresh.
+   *   false / missing = present on none
+   * Receiving the data as a plain Map (rather than a callback) keeps
+   * Vue's reactivity bookkeeping straightforward — the parent rebuilds
+   * the Map after `/photos/albums` returns, the prop reference changes,
+   * and the dialog re-renders with the right tristate marks.
    */
-  initialState: (id: T) => boolean | null
+  initialStates: Map<T, boolean | null>
   /** "5 Fotos" / "Dokument" — populated in the count line. */
   subjectCount?: number
   subjectLabel?: string
@@ -64,12 +65,9 @@ watch(
   },
 )
 
-/** Original tristate per item, evaluated against the parent's current
- *  data. Calling `props.initialState` on demand (instead of snapshotting
- *  it once when the dialog opens) means async data loads update the
- *  display reactively. */
 function originalState(id: T): boolean | null {
-  return props.initialState(id) ?? false
+  const v = props.initialStates.get(id)
+  return v === undefined ? false : v
 }
 
 function effectiveState(id: T): boolean | null {
