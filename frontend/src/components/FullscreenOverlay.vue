@@ -286,7 +286,12 @@ function locationLabel(photo: Photo) {
            HeicImage slot) scales together with the image. -->
       <div class="fs-zoom-wrapper" :style="zoomTransformStyle">
         <div @load.capture="onCurrentImageLoad" style="display: contents">
-          <HeicImage :src="getPhotoUrl(photo.filename)" :alt="photo.original_name" objectFit="contain">
+          <HeicImage
+            :src="getPhotoUrl(photo.filename)"
+            :alt="photo.original_name"
+            objectFit="contain"
+            :staticSlot="true"
+          >
             <!-- Allow caller to inject overlays (e.g. face box) -->
             <slot />
           </HeicImage>
