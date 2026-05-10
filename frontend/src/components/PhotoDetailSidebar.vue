@@ -5,8 +5,8 @@ import HeicImage from './HeicImage.vue'
 import PhotoMiniMap from './PhotoMiniMap.vue'
 import PhotoLocationMenu from './PhotoLocationMenu.vue'
 import PhotoReactions from './PhotoReactions.vue'
-import MultiSelectDialog from './MultiSelectDialog.vue'
-import { getPhotoUrl, getPhotosAlbums, batchUpdateAlbumPhotos, updateAlbum, updateAlbumUserSettings, createAlbum, updatePhotoDescription } from '../api/photos'
+import PhotoAlbumDialog from './PhotoAlbumDialog.vue'
+import { getPhotoUrl, getPhotosAlbums, updateAlbum, updateAlbumUserSettings, updatePhotoDescription } from '../api/photos'
 import { getAlbumCheckState as calculateAlbumCheckState } from '../utils/albumSelection'
 import type { Photo, Face, LandmarkItem, Person, CurationStatus } from '../api/photos'
 import { useReferenceData } from '../composables/useReferenceData'
@@ -51,10 +51,9 @@ const props = defineProps<{
 
 const editDate = defineModel<Date | null>('editDate', { default: null })
 
-const { albums, albumsLoaded, fetchAlbums, invalidateAlbums } = useReferenceData()
+const { albums, albumsLoaded, fetchAlbums } = useReferenceData()
 const loadingAlbums = ref(false)
 const photoAlbumMap = ref<Record<number, number[]>>({}) // photoId -> albumIds[]
-const savingAlbums = ref(false)
 const albumDialogVisible = ref(false)
 
 async function loadAlbums() {
@@ -122,40 +121,8 @@ const currentAlbumChips = computed(() => {
   return result.sort((a, b) => a.name.localeCompare(b.name))
 })
 
-const dialogItems = computed(() =>
-  albums.value.map((a) => ({ id: a.id, label: a.name })),
-)
-
-const photoIdsForBatch = computed(() => albumPhotoIds.value)
-
 function openAlbumDialog() {
   albumDialogVisible.value = true
-}
-
-async function handleAlbumDialogSave(payload: { adds: number[]; removes: number[] }) {
-  const photoIds = photoIdsForBatch.value
-  if (photoIds.length === 0) return
-  savingAlbums.value = true
-  try {
-    if (payload.adds.length > 0) await batchUpdateAlbumPhotos(payload.adds, photoIds, 'add')
-    if (payload.removes.length > 0) await batchUpdateAlbumPhotos(payload.removes, photoIds, 'remove')
-    await loadPhotosAlbums()
-    albumDialogVisible.value = false
-  } catch (err) {
-    console.error('Failed to save album changes:', err)
-  } finally {
-    savingAlbums.value = false
-  }
-}
-
-async function handleAlbumDialogCreate(name: string) {
-  try {
-    await createAlbum(name)
-    invalidateAlbums()
-    await fetchAlbums(true)
-  } catch (err) {
-    console.error('Failed to create album:', err)
-  }
 }
 
 const router = useRouter()
@@ -540,21 +507,10 @@ watch(() => props.photo.id, () => {
       </div>
     </div>
 
-    <MultiSelectDialog
+    <PhotoAlbumDialog
       v-model:visible="albumDialogVisible"
-      title="Alben zuweisen"
-      :items="dialogItems"
-      :initial-state="(id) => getAlbumCheckState(id as number)"
-      :subject-count="photoIdsForBatch.length"
-      :subject-label="photoIdsForBatch.length === 1 ? 'Foto' : 'Fotos'"
-      :loading="loadingAlbums"
-      :saving="savingAlbums"
-      allow-create
-      create-label="Neues Album"
-      create-placeholder="Albumname…"
-      empty-message="Keine Alben vorhanden"
-      @save="handleAlbumDialogSave"
-      @create="handleAlbumDialogCreate"
+      :photo-ids="albumPhotoIds"
+      @saved="loadPhotosAlbums"
     />
   </aside>
 </template>
