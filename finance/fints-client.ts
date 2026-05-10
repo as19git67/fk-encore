@@ -115,6 +115,22 @@ export interface FintsClientSurface {
       exchangeRate: number;
     }>;
   }>;
+  /** Whether the cached BPD advertises HKWPD (Wertpapierdepot) for the given
+   *  account, i.e. depots/securities accounts that lib-fints can fetch. */
+  canGetPortfolio?(accountNumber?: string): boolean;
+  /** Fetch the portfolio statement (MT535) for a depot. Total value is
+   *  exposed as `portfolioStatement.totalValue`; we treat it as the
+   *  account's "balance" for sync purposes. */
+  getPortfolio?(
+    accountNumber: string,
+    currency?: string,
+    priceQuality?: "1" | "2",
+    maxEntries?: number,
+  ): Promise<import("lib-fints").PortfolioResponse>;
+  getPortfolioWithTan?(
+    tanReference: string,
+    tan?: string,
+  ): Promise<import("lib-fints").PortfolioResponse>;
 }
 
 /** Constructor shape the wrapper needs; the default uses `lib-fints`. */
@@ -913,19 +929,16 @@ async function fetchOneAccount(
     return { snapshot };
   }
 
-  // Depots / securities accounts use HKWPD (and similar) for portfolio
-  // data, not HKKAZ / HKSAL. lib-fints rejects getAccountStatements on
-  // those with "does not support account statements", which would
-  // otherwise trip the partial flag for an account that simply isn't
-  // an Umsatz-Konto. Skip the fetch and return the metadata snapshot
-  // — same shape as the unlinked path, so persist treats it as
-  // "matched, nothing to insert".
+  // Depots / securities accounts use HKWPD for portfolio data, not
+  // HKKAZ / HKSAL. lib-fints' getAccountStatements rejects them with
+  // "does not support account statements", so route the fetch through
+  // getPortfolio instead. We persist the portfolio's totalValue as the
+  // account balance — that surfaces the depot value in the overview
+  // alongside Giro/Tagesgeld balances. Holdings themselves aren't
+  // persisted yet (would need a new table); the per-position data
+  // sits in console.log for now so it's diagnosable.
   if (accountKind === "depot") {
-    console.log(
-      `[fints] account ${account.accountNumber}: kind=depot, skipping ` +
-        `statements/balance — not supported via HKKAZ/HKSAL`,
-    );
-    return { snapshot };
+    return await fetchDepotPortfolio(client, account, snapshot, sleep);
   }
 
   // Use the dedicated credit-card FinTS transaction (DKKKU) for
@@ -1079,6 +1092,117 @@ async function fetchOneAccount(
     );
   }
 
+  return { snapshot };
+}
+
+/**
+ * Fetch the portfolio statement for a depot account via HKWPD/HIWPD.
+ * Returns the snapshot pre-populated with `balance` set to the
+ * portfolio's totalValue (so the depot shows up in the overview like
+ * any other account). If the bank's BPD doesn't list HKWPD support,
+ * we silently skip — depots that the bank doesn't expose this way
+ * stay empty rather than tripping the partial flag.
+ *
+ * Holdings themselves aren't persisted yet; they're console.logged so
+ * the per-position data is diagnosable but no schema migration is
+ * required for this initial integration.
+ */
+async function fetchDepotPortfolio(
+  client: FintsClientSurface,
+  account: RawBankAccount,
+  snapshot: FintsAccountSnapshot,
+  sleep: (ms: number) => Promise<void>,
+): Promise<FetchOneResult> {
+  if (typeof client.canGetPortfolio !== "function" ||
+      typeof client.getPortfolio !== "function") {
+    console.log(
+      `[fints] account ${account.accountNumber}: kind=depot, ` +
+        `lib-fints surface lacks getPortfolio — skipping`,
+    );
+    return { snapshot };
+  }
+  if (!client.canGetPortfolio(account.accountNumber)) {
+    console.log(
+      `[fints] account ${account.accountNumber}: kind=depot, bank ` +
+        `does not advertise HKWPD — skipping`,
+    );
+    return { snapshot };
+  }
+
+  console.log(`[fints] portfolio ${account.accountNumber}`);
+  try {
+    let resp = await client.getPortfolio(account.accountNumber);
+    if (resp.requiresTan && client.getPortfolioWithTan) {
+      console.log(
+        `[fints] portfolio ${account.accountNumber} → tan-required, ` +
+          `polling decoupled approval`,
+      );
+      resp = await pollDecoupled(
+        client,
+        resp,
+        (ref) => client.getPortfolioWithTan!(ref),
+        sleep,
+      );
+    }
+    if (resp.requiresTan) {
+      const ref = resp.tanReference;
+      if (!ref) {
+        snapshot.errors.push("portfolio-tan-required-no-ref");
+        return { snapshot };
+      }
+      return {
+        snapshot,
+        pendingTan: {
+          accountNumber: account.accountNumber,
+          tanReference: ref,
+          tanChallenge: resp.tanChallenge,
+          tanMediaName: resp.tanMediaName,
+          tanPhotoMime: resp.tanPhoto?.mimeType,
+          tanPhotoBase64: resp.tanPhoto
+            ? Buffer.from(resp.tanPhoto.image).toString("base64")
+            : undefined,
+        },
+      };
+    }
+    if (resp.success === false) {
+      const first = resp.bankAnswers.find((a) => a.code !== 0);
+      snapshot.errors.push(
+        `portfolio-error:${first?.code ?? "unknown"} ${first?.text ?? ""}`.trim(),
+      );
+      return { snapshot };
+    }
+
+    const stmt = resp.portfolioStatement;
+    if (stmt && typeof stmt.totalValue === "number") {
+      snapshot.balance = {
+        asOf: toIsoDate(new Date()),
+        amount: toAmountString(stmt.totalValue),
+        currency: stmt.currency ?? snapshot.currency,
+      };
+      console.log(
+        `[fints] portfolio ${account.accountNumber}: ` +
+          `totalValue=${stmt.totalValue} ${stmt.currency ?? snapshot.currency}, ` +
+          `holdings=${stmt.holdings?.length ?? 0}`,
+      );
+      for (const h of stmt.holdings ?? []) {
+        console.log(
+          `[fints] portfolio ${account.accountNumber} holding: ` +
+            `isin=${h.isin ?? "?"} wkn=${h.wkn ?? "?"} ` +
+            `name=${(h.name ?? "").slice(0, 40)} ` +
+            `amount=${h.amount ?? 0} value=${h.value ?? 0} ${h.currency ?? ""}`,
+        );
+      }
+    } else {
+      console.log(
+        `[fints] portfolio ${account.accountNumber}: response had no ` +
+          `parsed totalValue (rawMT535=${resp.rawMT535Data ? "yes" : "no"})`,
+      );
+    }
+  } catch (err) {
+    snapshot.errors.push(
+      `portfolio-exception:${(err as Error).message ?? String(err)}`,
+    );
+  }
   return { snapshot };
 }
 

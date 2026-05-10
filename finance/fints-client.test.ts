@@ -995,34 +995,75 @@ describe("runFetchAccounts — happy path", () => {
     expect(r.partial).toBe(false);
   });
 
-  it("skips depot/securities accounts without calling HKKAZ/HKSAL", async () => {
-    // Depots use HKWPD (and similar) for portfolio data, not HKKAZ.
-    // lib-fints throws "does not support account statements" for them,
-    // which would otherwise trip the partial flag for an account that
-    // simply isn't an Umsatz-Konto.
+  it("routes depot/securities accounts through HKWPD/getPortfolio", async () => {
+    // Depots use HKWPD (Wertpapierdepot) for portfolio data, not HKKAZ.
+    // lib-fints' getAccountStatements rejects them; runFetchAccounts
+    // must instead call getPortfolio and persist the totalValue as the
+    // account balance — that surfaces the depot in the overview alongside
+    // Giro/Tagesgeld balances.
     const stmt = vi.fn(async () => stmtResp([]));
     const bal = vi.fn(async () =>
       balResp({ date: new Date(), currency: "EUR", balance: 0 }),
     );
+    const portfolio = vi.fn(async () => ({
+      success: true,
+      requiresTan: false,
+      bankAnswers: [],
+      dialogId: "d",
+      bankingInformationUpdated: false,
+      portfolioStatement: {
+        totalValue: 12_345.67,
+        currency: "EUR",
+        holdings: [
+          { isin: "DE000A1EWWW0", wkn: "A1EWWW", name: "ADIDAS", amount: 5, value: 1_000, currency: "EUR" },
+        ],
+      },
+    } as any));
+    const canPortfolio = vi.fn(() => true);
     const c = clientWith(
       [
         { accountNumber: "DEPOT-1", accountType: "SecuritiesAccount", currency: "EUR" },
         { accountNumber: "GIRO-1", accountType: "CheckingAccount", currency: "EUR" },
       ],
-      { getAccountStatements: stmt, getAccountBalance: bal },
+      {
+        getAccountStatements: stmt,
+        getAccountBalance: bal,
+        canGetPortfolio: canPortfolio,
+        getPortfolio: portfolio,
+      },
     );
     const r = await runFetchAccounts(c);
     expect(r.partial).toBe(false);
     expect(r.accounts.map((a) => a.accountNumber)).toEqual(["DEPOT-1", "GIRO-1"]);
-    expect(r.accounts[0].accountKind).toBe("depot");
-    expect(r.accounts[0].errors).toEqual([]);
-    expect(r.accounts[0].balance).toBeNull();
-    expect(r.accounts[0].transactions).toEqual([]);
-    // Only the giro account should have triggered HKKAZ/HKSAL.
+    const depot = r.accounts[0];
+    expect(depot.accountKind).toBe("depot");
+    expect(depot.errors).toEqual([]);
+    expect(depot.balance?.amount).toBe("12345.67");
+    expect(depot.balance?.currency).toBe("EUR");
+    expect(depot.transactions).toEqual([]);
+    expect(portfolio).toHaveBeenCalledTimes(1);
+    expect(portfolio.mock.calls[0]?.[0]).toBe("DEPOT-1");
+    // Depot must NOT trigger the standard statements/balance HBCI calls.
     expect(stmt).toHaveBeenCalledTimes(1);
     expect(stmt.mock.calls[0]?.[0]).toBe("GIRO-1");
     expect(bal).toHaveBeenCalledTimes(1);
     expect(bal).toHaveBeenCalledWith("GIRO-1");
+  });
+
+  it("skips depot fetch silently when bank/lib does not advertise HKWPD", async () => {
+    // Old surfaces / banks that don't support portfolio retrieval — we
+    // still complete the sync without flagging partial.
+    const portfolio = vi.fn(async () => ({}) as any);
+    const c = clientWith(
+      [{ accountNumber: "DEPOT-1", accountType: "SecuritiesAccount", currency: "EUR" }],
+      { canGetPortfolio: vi.fn(() => false), getPortfolio: portfolio },
+    );
+    const r = await runFetchAccounts(c);
+    expect(r.partial).toBe(false);
+    expect(r.accounts[0].accountKind).toBe("depot");
+    expect(r.accounts[0].balance).toBeNull();
+    expect(r.accounts[0].errors).toEqual([]);
+    expect(portfolio).not.toHaveBeenCalled();
   });
 });
 
