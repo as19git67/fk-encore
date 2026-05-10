@@ -1292,6 +1292,21 @@ export const financeUserPref = pgTable(
   (table) => [primaryKey({ columns: [table.user_id, table.key] })],
 );
 
+export const documentsUserPref = pgTable(
+  "documents_user_pref",
+  {
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    value: jsonb("value").notNull().$type<unknown>(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.user_id, table.key] })],
+);
+
 // ========== Finance Tag Queue ==========
 
 export const financeTagQueue = pgTable(

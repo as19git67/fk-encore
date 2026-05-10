@@ -519,6 +519,13 @@
       "when": 1779001412000,
       "tag": "0073_finance_account_drop_active",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1779001413000,
+      "tag": "0074_documents_user_pref",
+      "breakpoints": true
     }
   ]
 }
