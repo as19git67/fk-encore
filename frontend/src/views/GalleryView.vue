@@ -968,8 +968,15 @@ async function onGalleryLoaded() {
     const idx = galleryRef.value.findLoadedIndexById(initialAnchor.value)
     if (idx !== null) {
       cursorIndex.value = idx
-      galleryRef.value.scrollToIndex(idx)
-      void hydrateCursor(idx, { skipNeighbors: true })
+      // Mirror the goNext / goPrev pattern: hydrate first, then scroll.
+      // Calling scrollToIndex synchronously straight after the gallery's
+      // 'loaded' emit is too early — the TanStack virtualizer hasn't
+      // measured its scroll element yet on a fresh mount (typical after
+      // a hard refresh), so the scroll silently no-ops and the cursor
+      // stays highlighted off-screen until the next user interaction.
+      // Awaiting hydrate gives the virtualizer the frames it needs.
+      await hydrateCursor(idx, { skipNeighbors: true })
+      galleryRef.value?.scrollToIndex(idx)
     }
   }
 }
