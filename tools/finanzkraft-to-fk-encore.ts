@@ -462,6 +462,10 @@ function convertAccount(a: FkAccount): OutAccount {
     account_number: accountNumber,
     label: a.name.trim(),
     active: a.closedAt === null,
+    // Finanzkraft preserves the closing timestamp on retired accounts.
+    // Forward it so fk-encore marks the account closed, blocking sync
+    // and new bookings just like a close-action would.
+    closed_at: a.closedAt ?? null,
     fints_account_number: a.fintsAccountNumber?.trim() || null,
   };
 }

@@ -561,6 +561,7 @@ async function importAccounts(
           account_number: r.account_number,
           label: r.label,
           active: r.active ?? true,
+          closed_at: r.closed_at ?? null,
           fints_account_number: r.fints_account_number ?? null,
         })
         .returning({ id: financeAccount.id });

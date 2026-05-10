@@ -48,6 +48,7 @@ const editDialogVisible = ref(false)
 const editErrorMsg = ref<string | null>(null)
 const editing = ref(false)
 const closing = ref(false)
+const reopening = ref(false)
 const editId = ref<number | null>(null)
 const editForm = ref({
   label: '',
@@ -59,13 +60,23 @@ const editForm = ref({
   bankcontact_id: null as number | null,
 })
 
-// Closed accounts open the detail view (which carries the reopen
-// action); only live accounts pop the inline edit dialog.
+// Reactive view of the account currently in the dialog, so that
+// close/reopen mutations from inside the dialog flip the UI without
+// having to reopen the dialog.
+const editingAccount = computed(() =>
+  editId.value !== null ? store.byId(editId.value) ?? null : null,
+)
+const isEditingClosed = computed(() => !!editingAccount.value?.closed_at)
+const isEditingCash = computed(() => editForm.value.type_kind === 'bargeld')
+
+function formatClosedAt(iso: string): string {
+  return new Date(iso).toLocaleString('de-DE', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  })
+}
+
 function onRowClick(acc: any) {
-  if (acc?.closed_at) {
-    void router.push({ name: 'finance-account-detail', params: { id: acc.id } })
-    return
-  }
   openEdit(acc)
 }
 
@@ -163,6 +174,26 @@ async function closeAccountFromDialog() {
     closing.value = false
   }
 }
+
+async function reopenAccountFromDialog() {
+  if (!editId.value) return
+  reopening.value = true
+  editErrorMsg.value = null
+  try {
+    await store.reopen(editId.value)
+  } catch (err) {
+    editErrorMsg.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    reopening.value = false
+  }
+}
+
+function goToManualBooking() {
+  if (!editId.value) return
+  const id = editId.value
+  editDialogVisible.value = false
+  void router.push({ name: 'finance-transaction-new', query: { accountId: id } })
+}
 </script>
 
 <template>
@@ -234,7 +265,18 @@ async function closeAccountFromDialog() {
         {{ editErrorMsg }}
       </Message>
 
-      <div class="field"><label>Label</label><InputText v-model="editForm.label" /></div>
+      <Message
+        v-if="editingAccount?.closed_at"
+        severity="warn"
+        :closable="false"
+      >
+        Geschlossen am
+        <strong>{{ formatClosedAt(editingAccount.closed_at) }}</strong>.
+        Sync und neue Buchungen sind blockiert; alle Felder sind
+        schreibgeschützt. Mit „Wieder öffnen" reaktivieren.
+      </Message>
+
+      <div class="field"><label>Label</label><InputText v-model="editForm.label" :disabled="isEditingClosed" /></div>
       <div class="field">
         <label>Kontotyp</label>
         <Select
@@ -252,17 +294,18 @@ async function closeAccountFromDialog() {
           ]"
           option-label="label"
           option-value="kind"
+          :disabled="isEditingClosed"
         />
       </div>
       <div class="field">
         <label>Währung</label>
-        <InputText v-model="editForm.currency_code" maxlength="3" />
+        <InputText v-model="editForm.currency_code" maxlength="3" :disabled="isEditingClosed" />
       </div>
       <div class="field">
         <label>Interne Kontonummer / Bank-Kontonummer</label>
-        <InputText v-model="editForm.account_number" />
+        <InputText v-model="editForm.account_number" :disabled="isEditingClosed" />
       </div>
-      <div class="field"><label>IBAN</label><InputText v-model="editForm.iban" /></div>
+      <div class="field"><label>IBAN</label><InputText v-model="editForm.iban" :disabled="isEditingClosed" /></div>
 
       <div class="field">
         <label>Bankzugang</label>
@@ -275,24 +318,44 @@ async function closeAccountFromDialog() {
           option-label="name"
           option-value="id"
           placeholder="Wähle einen Bankzugang"
+          :disabled="isEditingClosed"
         />
       </div>
 
       <div class="field field--inline">
         <label>Aktiv</label>
-        <ToggleSwitch v-model="editForm.active" />
+        <ToggleSwitch v-model="editForm.active" :disabled="isEditingClosed" />
       </div>
 
       <template #footer>
         <Button
-          v-if="editId"
+          v-if="editId && isEditingCash && !isEditingClosed"
+          label="Manuelle Buchung"
+          icon="pi pi-plus"
+          severity="secondary"
+          outlined
+          class="footer-leading-btn"
+          @click="goToManualBooking"
+        />
+        <Button
+          v-if="editId && !isEditingClosed"
           label="Konto schließen"
           icon="pi pi-lock"
           severity="warn"
           outlined
           :loading="closing"
-          class="footer-close-btn"
+          :class="isEditingCash ? '' : 'footer-leading-btn'"
           @click="closeAccountFromDialog"
+        />
+        <Button
+          v-if="editId && isEditingClosed"
+          label="Wieder öffnen"
+          icon="pi pi-lock-open"
+          severity="success"
+          outlined
+          :loading="reopening"
+          class="footer-leading-btn"
+          @click="reopenAccountFromDialog"
         />
         <Button
           label="Abbrechen"
@@ -301,6 +364,7 @@ async function closeAccountFromDialog() {
           @click="editDialogVisible = false"
         />
         <Button
+          v-if="!isEditingClosed"
           label="Speichern"
           icon="pi pi-check"
           :loading="editing"
@@ -369,7 +433,7 @@ async function closeAccountFromDialog() {
   align-items: center;
   justify-content: space-between;
 }
-.footer-close-btn {
+.footer-leading-btn {
   margin-right: auto;
 }
 </style>

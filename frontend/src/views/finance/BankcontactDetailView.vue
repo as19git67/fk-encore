@@ -613,15 +613,6 @@ async function del() {
           </div>
           <div class="account-actions">
             <Button
-              class="account-open"
-              label="Öffnen"
-              icon="pi pi-external-link"
-              severity="secondary"
-              text
-              aria-label="Konto öffnen"
-              @click="router.push({ name: 'finance-account-detail', params: { id: a.id } })"
-            />
-            <Button
               icon="pi pi-trash"
               severity="danger"
               text
@@ -662,14 +653,6 @@ async function del() {
   .account-item {
     padding: 0.5rem;
     gap: 0.25rem;
-  }
-  /* Collapse "Öffnen" to an icon-only button — the icon already
-     conveys the action. The aria-label keeps it accessible. */
-  .account-open :deep(.p-button-label) {
-    display: none;
-  }
-  .account-open :deep(.p-button-icon) {
-    margin: 0;
   }
   /* Wrap the big pending-actions row onto its own line and let the
      primary button grow instead of overflowing. */

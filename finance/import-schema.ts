@@ -43,6 +43,11 @@ export interface ImportAccount {
   account_number: string;
   label: string;
   active?: boolean;
+  /** ISO timestamp at which the account was closed in the source
+   *  system (Finanzkraft). When set, the importer marks the account
+   *  closed in fk-encore as well, blocking sync and new bookings.
+   *  null/undefined → live account. */
+  closed_at?: string | null;
   /** lib-fints accountNumber for the bank-side account, when known.
    *  Pre-fills `finance_account.fints_account_number` so a sync works
    *  the moment the user wires up real credentials on the bankcontact. */
@@ -219,6 +224,7 @@ function validateAccount(raw: unknown, i: number): ImportAccount {
     ),
     label: assertNonEmptyString(o.label, `accounts[${i}].label`),
     active: typeof o.active === "boolean" ? o.active : undefined,
+    closed_at: optString(o.closed_at, `accounts[${i}].closed_at`) ?? null,
     fints_account_number: optString(
       o.fints_account_number,
       `accounts[${i}].fints_account_number`,

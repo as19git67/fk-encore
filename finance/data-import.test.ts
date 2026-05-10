@@ -177,6 +177,24 @@ describe("finance/data-import — happy path", () => {
     const acl = await db.select().from(financeAccountAccess);
     expect(acl).toEqual([]);
   });
+
+  it("preserves closed_at from the export so retired accounts stay closed", async () => {
+    setAuth("1", ["finance.admin"]);
+    const closedAt = "2023-06-15T10:30:00.000Z";
+    const exp: FinanzkraftExport = {
+      ...miniExport(),
+      accounts: [
+        { ...miniExport().accounts[0], active: false, closed_at: closedAt },
+      ],
+      transactions: [],
+      tag_links: [],
+    };
+    await importFinanceData({ export: exp });
+    const accounts = await db.select().from(financeAccount);
+    expect(accounts).toHaveLength(1);
+    expect(accounts[0].closed_at).not.toBeNull();
+    expect(new Date(accounts[0].closed_at!).toISOString()).toBe(closedAt);
+  });
 });
 
 describe("finance/data-import — idempotency", () => {
