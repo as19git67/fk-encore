@@ -62,6 +62,7 @@ import NaturalSearchBar from '../components/NaturalSearchBar.vue'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
+import PhotoAlbumDialog from '../components/PhotoAlbumDialog.vue'
 import { useFilter } from '../composables/useFilter'
 import { useSort, type SortField, type SortState } from '../composables/useSort'
 import { useNaturalSearch } from '../composables/useNaturalSearch'
@@ -300,6 +301,15 @@ function onToggleSelect(entry: GalleryGridEntry) {
   if (next.has(entry.id)) next.delete(entry.id)
   else next.add(entry.id)
   selectedIds.value = next
+}
+
+// ── Album batch dialog (entry point for the mobile select-bar where the
+//    desktop sidebar is hidden) ────────────────────────────────────────────
+const albumDialogVisible = ref(false)
+const albumDialogPhotoIds = computed(() => Array.from(selectedIds.value))
+function openAlbumDialog() {
+  if (selectedIds.value.size === 0) return
+  albumDialogVisible.value = true
 }
 
 // ── Curation (batch on selected) ────────────────────────────────────────────
@@ -968,8 +978,15 @@ async function onGalleryLoaded() {
     const idx = galleryRef.value.findLoadedIndexById(initialAnchor.value)
     if (idx !== null) {
       cursorIndex.value = idx
-      galleryRef.value.scrollToIndex(idx)
-      void hydrateCursor(idx, { skipNeighbors: true })
+      // Mirror the goNext / goPrev pattern: hydrate first, then scroll.
+      // Calling scrollToIndex synchronously straight after the gallery's
+      // 'loaded' emit is too early — the TanStack virtualizer hasn't
+      // measured its scroll element yet on a fresh mount (typical after
+      // a hard refresh), so the scroll silently no-ops and the cursor
+      // stays highlighted off-screen until the next user interaction.
+      // Awaiting hydrate gives the virtualizer the frames it needs.
+      await hydrateCursor(idx, { skipNeighbors: true })
+      galleryRef.value?.scrollToIndex(idx)
     }
   }
 }
@@ -1215,6 +1232,7 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
       <aside v-if="cursorPhoto" class="desktop-sidebar">
         <PhotoDetailSidebar
           :photo="cursorPhoto"
+          :selected-photo-ids="selectMode && selectedCount > 1 ? Array.from(selectedIds) : undefined"
           :faces="detectedFaces"
           :loading-faces="loadingFaces"
           :landmarks="detectedLandmarks"
@@ -1317,6 +1335,14 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
       </span>
       <div class="select-actions">
         <Button
+          v-if="selectedCount > 0 && canUpload"
+          label="Alben"
+          icon="pi pi-book"
+          size="small"
+          severity="secondary"
+          @click="openAlbumDialog"
+        />
+        <Button
           v-if="selectedCount > 0 && canDelete"
           label="Favorit"
           icon="pi pi-heart"
@@ -1361,6 +1387,15 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
         />
       </div>
     </div>
+
+    <!-- Mobile entry point for the album batch dialog. Reused on desktop
+         too — the sidebar's "Alben bearbeiten" button still works, but
+         on mobile (where the desktop sidebar is hidden) this is the only
+         way to open it. -->
+    <PhotoAlbumDialog
+      v-model:visible="albumDialogVisible"
+      :photo-ids="albumDialogPhotoIds"
+    />
 
     <!-- Warning dialog: skipped photos after batch delete -->
     <Dialog
