@@ -160,6 +160,10 @@ export type SyncResponse =
       balances_written?: number
       /** True when any per-account fetch hit a mid-flight TAN we skipped. */
       partial?: boolean
+      /** Per-account bank answers/exceptions when partial=true. Format
+       *  "account <num>: <kind>:<code> <text>" — e.g.
+       *  "account 12345: statements-error:3010 Keine Buchungen vorhanden". */
+      errors?: string[]
     }
   | {
       state: 'tan-required'

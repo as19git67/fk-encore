@@ -310,9 +310,16 @@ function formatAmountChange(item: AnomalyItem): string | null {
 
 <style scoped>
 .page {
-  padding: 1rem;
-  max-width: 900px;
-  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.5rem;
+}
+@media (max-width: 640px) {
+  .page {
+    padding: 0.75rem;
+    gap: 0.75rem;
+  }
 }
 
 .page-header {
@@ -321,7 +328,6 @@ function formatAmountChange(item: AnomalyItem): string | null {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 0.5rem;
-  margin-bottom: 1rem;
 }
 
 .page-header h1 {
@@ -331,10 +337,6 @@ function formatAmountChange(item: AnomalyItem): string | null {
 .header-actions {
   display: flex;
   gap: 0.5rem;
-}
-
-.filter-row {
-  margin-bottom: 1rem;
 }
 
 .loading,
