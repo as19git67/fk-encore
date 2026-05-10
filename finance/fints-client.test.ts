@@ -994,6 +994,36 @@ describe("runFetchAccounts — happy path", () => {
     expect(r.accounts).toEqual([]);
     expect(r.partial).toBe(false);
   });
+
+  it("skips depot/securities accounts without calling HKKAZ/HKSAL", async () => {
+    // Depots use HKWPD (and similar) for portfolio data, not HKKAZ.
+    // lib-fints throws "does not support account statements" for them,
+    // which would otherwise trip the partial flag for an account that
+    // simply isn't an Umsatz-Konto.
+    const stmt = vi.fn(async () => stmtResp([]));
+    const bal = vi.fn(async () =>
+      balResp({ date: new Date(), currency: "EUR", balance: 0 }),
+    );
+    const c = clientWith(
+      [
+        { accountNumber: "DEPOT-1", accountType: "SecuritiesAccount", currency: "EUR" },
+        { accountNumber: "GIRO-1", accountType: "CheckingAccount", currency: "EUR" },
+      ],
+      { getAccountStatements: stmt, getAccountBalance: bal },
+    );
+    const r = await runFetchAccounts(c);
+    expect(r.partial).toBe(false);
+    expect(r.accounts.map((a) => a.accountNumber)).toEqual(["DEPOT-1", "GIRO-1"]);
+    expect(r.accounts[0].accountKind).toBe("depot");
+    expect(r.accounts[0].errors).toEqual([]);
+    expect(r.accounts[0].balance).toBeNull();
+    expect(r.accounts[0].transactions).toEqual([]);
+    // Only the giro account should have triggered HKKAZ/HKSAL.
+    expect(stmt).toHaveBeenCalledTimes(1);
+    expect(stmt.mock.calls[0]?.[0]).toBe("GIRO-1");
+    expect(bal).toHaveBeenCalledTimes(1);
+    expect(bal).toHaveBeenCalledWith("GIRO-1");
+  });
 });
 
 describe("runFetchAccounts — mid-flight TAN and bank errors", () => {

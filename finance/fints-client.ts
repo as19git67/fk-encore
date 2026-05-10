@@ -913,6 +913,21 @@ async function fetchOneAccount(
     return { snapshot };
   }
 
+  // Depots / securities accounts use HKWPD (and similar) for portfolio
+  // data, not HKKAZ / HKSAL. lib-fints rejects getAccountStatements on
+  // those with "does not support account statements", which would
+  // otherwise trip the partial flag for an account that simply isn't
+  // an Umsatz-Konto. Skip the fetch and return the metadata snapshot
+  // — same shape as the unlinked path, so persist treats it as
+  // "matched, nothing to insert".
+  if (accountKind === "depot") {
+    console.log(
+      `[fints] account ${account.accountNumber}: kind=depot, skipping ` +
+        `statements/balance — not supported via HKKAZ/HKSAL`,
+    );
+    return { snapshot };
+  }
+
   // Use the dedicated credit-card FinTS transaction (DKKKU) for
   // kreditkarte accounts when the bank supports it. This returns
   // CreditCardStatement objects which carry original-currency fields
