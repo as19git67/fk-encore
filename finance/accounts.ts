@@ -54,7 +54,9 @@ interface AccountView {
   iban: string | null;
   account_number: string;
   label: string;
-  active: boolean;
+  /** Non-null when the account was closed. Closed accounts reject new
+   *  bookings (manual + sync) but stay visible for historical access. */
+  closed_at: string | null;
   created_at: string | null;
   /** Number of users with an entry in finance_account_access for this
    *  account. 0 means "not yet assigned to anyone" — useful for the
@@ -95,7 +97,7 @@ function toView(
     iban: row.iban,
     account_number: row.account_number,
     label: row.label,
-    active: row.active,
+    closed_at: row.closed_at,
     created_at: row.created_at,
     access_count: accessCount,
   };
@@ -136,7 +138,7 @@ export const listAccounts = api(
           iban: financeAccount.iban,
           account_number: financeAccount.account_number,
           label: financeAccount.label,
-          active: financeAccount.active,
+          closed_at: financeAccount.closed_at,
           created_at: financeAccount.created_at,
         })
         .from(financeAccount)
@@ -344,14 +346,19 @@ export const createAccount = api(
 );
 
 // -----------------------------------------------------------------------
-// Patch (finance.accounts.manage — Stammdaten + active)
+// Patch (finance.accounts.manage — Stammdaten + close/reopen via closed_at)
 // -----------------------------------------------------------------------
 
 interface PatchParams {
   id: number;
   label?: string;
   iban?: string | null;
-  active?: boolean;
+  /** Toggle close-state by patching this field:
+   *  - ISO-8601 timestamp → close as of that moment (sync + manual
+   *    bookings refused from then on)
+   *  - null → reopen
+   *  - undefined / omitted → leave the close-state untouched */
+  closed_at?: string | null;
   type_kind?: string;
   currency_code?: string;
   account_number?: string;
@@ -382,7 +389,19 @@ export const updateAccount = api(
       patch.iban = p.iban === null ? null : p.iban.trim() || null;
     }
 
-    if (p.active !== undefined) patch.active = p.active;
+    if (p.closed_at !== undefined) {
+      if (p.closed_at === null) {
+        patch.closed_at = null;
+      } else {
+        const ts = new Date(p.closed_at);
+        if (Number.isNaN(ts.getTime())) {
+          throw APIError.invalidArgument(
+            `closed_at must be an ISO-8601 timestamp, got '${p.closed_at}'`,
+          );
+        }
+        patch.closed_at = ts.toISOString();
+      }
+    }
 
     if (p.account_number !== undefined) {
       if (!p.account_number.trim()) {
@@ -547,6 +566,28 @@ export const unlinkAccount = api(
     return toView(row, null, type, curr, accessCount);
   },
 );
+
+// -----------------------------------------------------------------------
+// Close-state helper
+// -----------------------------------------------------------------------
+//
+// Closing/reopening is folded into PATCH (set `closed_at`). This helper
+// is what the sync and manual-booking paths use to fast-skip a closed
+// account before writing.
+
+/**
+ * True if the given account exists and has been closed. Sync and
+ * insert paths call this before writing so a closed account stays
+ * truly read-only.
+ */
+export async function isAccountClosed(id: number): Promise<boolean> {
+  const [row] = await db
+    .select({ closed_at: financeAccount.closed_at })
+    .from(financeAccount)
+    .where(eq(financeAccount.id, id))
+    .limit(1);
+  return row?.closed_at != null;
+}
 
 // -----------------------------------------------------------------------
 // Delete

@@ -163,12 +163,6 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'finance.view' },
       },
       {
-        path: 'konten/:id',
-        name: 'finance-account-detail',
-        component: () => import('../views/finance/AccountDetailView.vue'),
-        meta: { permission: 'finance.view' },
-      },
-      {
         path: 'uebersicht/konto/:id',
         name: 'finance-account-transactions',
         component: () => import('../views/finance/AccountTransactionsView.vue'),

@@ -137,7 +137,7 @@ interface Snapshot {
     iban: string | null;
     account_number: string;
     label: string;
-    active: boolean;
+    closed_at: string | null;
     fints_account_number: string | null;
   }>;
   transactions: Array<Record<string, unknown>>;
@@ -202,7 +202,7 @@ async function buildSnapshot(): Promise<Snapshot> {
         iban: a.iban,
         account_number: a.account_number,
         label: a.label,
-        active: a.active,
+        closed_at: a.closed_at,
         fints_account_number: a.fints_account_number,
       };
     }),
