@@ -135,8 +135,11 @@ function handleTouchStart(e: TouchEvent) {
 }
 
 function handleTouchMove(e: TouchEvent) {
+  // Always prevent default so iOS Safari doesn't re-acquire the gesture.
+  // The listener is registered { passive: false } so this call is permitted.
+  // Without it, a 1-finger swipe at zoom=1 fires touchcancel instead of touchend.
+  e.preventDefault()
   if (e.touches.length === 2) {
-    e.preventDefault()
     const t1 = e.touches[0]!
     const t2 = e.touches[1]!
     const currentDist = getDist(t1, t2)
@@ -158,7 +161,6 @@ function handleTouchMove(e: TouchEvent) {
     panY.value = mid.y - elemCenterY - localPinchY * newZoom
   } else if (e.touches.length === 1 && zoomLevel.value > 1) {
     // Pan when zoomed in
-    e.preventDefault()
     const dx = e.touches[0]!.clientX - touchStartX.value
     const dy = e.touches[0]!.clientY - touchStartY.value
     panX.value = panStartX.value + dx
@@ -169,6 +171,7 @@ function handleTouchMove(e: TouchEvent) {
 function handleTouchEnd(e: TouchEvent) {
   // Don't swipe between photos when zoomed in
   if (zoomLevel.value > 1) return
+  if (!e.changedTouches.length) return
 
   const dx = e.changedTouches[0]!.clientX - touchStartX.value
   const dy = e.changedTouches[0]!.clientY - touchStartY.value
