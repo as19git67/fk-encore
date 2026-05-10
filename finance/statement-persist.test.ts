@@ -290,6 +290,52 @@ describe("persistFetchResult — unknown / pending accounts", () => {
     expect(stats.unknown.map((u) => u.accountNumber)).toEqual(["STRANGER"]);
   });
 
+  it("skips closed accounts entirely — no transactions, no balance", async () => {
+    const bcId = await insertBankcontact();
+    const accountId = await insertLinkedAccount({
+      bankcontactId: bcId,
+      fintsAccountNumber: "CLOSED",
+    });
+    await db
+      .update(financeAccount)
+      .set({ closed_at: new Date().toISOString() })
+      .where(eq(financeAccount.id, accountId));
+
+    const stats = await persistFetchResult(
+      bcId,
+      result([
+        {
+          accountNumber: "CLOSED",
+          iban: null,
+          accountKind: "giro",
+          currency: "EUR",
+          label: "Closed",
+          balance: { asOf: "2026-04-24", amount: "1000.00", currency: "EUR" },
+          transactions: [tx()],
+          errors: [],
+        },
+      ]),
+    );
+
+    expect(stats.accounts_seen).toBe(1);
+    expect(stats.accounts_matched).toBe(0);
+    expect(stats.accounts_closed).toBe(1);
+    expect(stats.transactions_inserted).toBe(0);
+    expect(stats.balances_written).toBe(0);
+    expect(stats.errors.some((e) => e.includes("closed"))).toBe(true);
+
+    const txs = await db
+      .select()
+      .from(financeTransaction)
+      .where(eq(financeTransaction.account_id, accountId));
+    expect(txs).toHaveLength(0);
+    const bals = await db
+      .select()
+      .from(financeAccountBalance)
+      .where(eq(financeAccountBalance.account_id, accountId));
+    expect(bals).toHaveLength(0);
+  });
+
   it("forwards per-account soft errors into stats.errors for both matched and unknown", async () => {
     const bcId = await insertBankcontact();
     await insertLinkedAccount({ bankcontactId: bcId, fintsAccountNumber: "L" });

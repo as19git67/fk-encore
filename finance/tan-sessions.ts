@@ -263,6 +263,7 @@ async function resumeStatementsTan(
     state: "idle",
     accounts_seen: stats.accounts_seen,
     accounts_matched: stats.accounts_matched,
+    accounts_closed: stats.accounts_closed,
     accounts_unknown: stats.accounts_unknown,
     unknown_accounts: stats.unknown.map((u) => ({
       accountNumber: u.accountNumber,

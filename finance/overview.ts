@@ -28,7 +28,7 @@
 
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
@@ -356,13 +356,16 @@ async function loadAccessibleAccounts(
   const fields = {
     id: financeAccount.id,
     label: financeAccount.label,
-    active: financeAccount.active,
     type_kind: financeAccountType.kind,
     type_label: financeAccountType.label,
     currency_code: financeCurrency.code,
     currency_symbol: financeCurrency.symbol,
   };
 
+  // Closed accounts are filtered out of the overview — the dashboard
+  // is "current state at a glance", and a closed account by definition
+  // has no current activity. Historical access lives in the per-account
+  // transactions view.
   const rows = isAdmin
     ? await db
         .select(fields)
@@ -375,7 +378,7 @@ async function loadAccessibleAccounts(
           financeCurrency,
           eq(financeCurrency.code, financeAccount.currency_code),
         )
-        .where(eq(financeAccount.active, true))
+        .where(isNull(financeAccount.closed_at))
     : await db
         .select(fields)
         .from(financeAccount)
@@ -394,7 +397,7 @@ async function loadAccessibleAccounts(
             eq(financeAccountAccess.user_id, userId),
           ),
         )
-        .where(eq(financeAccount.active, true));
+        .where(isNull(financeAccount.closed_at));
 
   if (rows.length === 0) return [];
 
