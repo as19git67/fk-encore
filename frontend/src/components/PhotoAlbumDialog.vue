@@ -78,9 +78,20 @@ watch(
 
 const items = computed(() => albums.value.map((a) => ({ id: a.id, label: a.name })))
 
-function getAlbumCheckState(albumId: number) {
-  return calculateAlbumCheckState(albumId, props.photoIds, photoAlbumMap.value)
-}
+/**
+ * Reactive lookup function. We expose it as a computed (and not as an
+ * inline arrow on the template) so Vue tracks `photoAlbumMap` and
+ * `photoIds` as render dependencies of this component. Without that,
+ * `photoAlbumMap.value = …` after the fetch wouldn't re-render the
+ * parent, MultiSelectDialog would keep handing out stale `false`
+ * tristate values, and every album would appear unchecked even when
+ * the selected photos were already in it.
+ */
+const initialState = computed(() => {
+  const map = photoAlbumMap.value
+  const ids = props.photoIds
+  return (id: number) => calculateAlbumCheckState(id, ids, map)
+})
 
 async function onSave(payload: { adds: number[]; removes: number[] }) {
   if (props.photoIds.length === 0) return
@@ -118,7 +129,7 @@ async function onCreate(name: string) {
     :visible="visible"
     title="Alben zuweisen"
     :items="items"
-    :initial-state="(id) => getAlbumCheckState(id as number)"
+    :initial-state="initialState"
     :subject-count="photoIds.length"
     :subject-label="photoIds.length === 1 ? 'Foto' : 'Fotos'"
     :loading="loading"

@@ -20,8 +20,9 @@ const props = defineProps<{
    *   true  = present on all subjects
    *   null  = present on some (indeterminate)
    *   false = present on none
-   * Called only when the dialog opens — pending changes are derived
-   * against this baseline.
+   * Evaluated lazily on every render so async data loads (e.g. the
+   * parent fetching `/photos/albums` after the dialog opens) update
+   * the displayed checkboxes without any explicit refresh.
    */
   initialState: (id: T) => boolean | null
   /** "5 Fotos" / "Dokument" — populated in the count line. */
@@ -43,7 +44,6 @@ const emit = defineEmits<{
 }>()
 
 const pending = ref<Map<T, 'add' | 'remove'>>(new Map())
-const baseline = ref<Map<T, boolean | null>>(new Map())
 const search = ref('')
 const showCreate = ref(false)
 const newName = ref('')
@@ -54,9 +54,6 @@ watch(
   () => props.visible,
   (open) => {
     if (open) {
-      const map = new Map<T, boolean | null>()
-      for (const it of props.items) map.set(it.id, props.initialState(it.id))
-      baseline.value = map
       pending.value = new Map()
       search.value = ''
       showCreate.value = false
@@ -67,51 +64,32 @@ watch(
   },
 )
 
-// Recompute the baseline when the parent finishes its async load.
-// The synchronous open-watch above snapshots `initialState` immediately,
-// which is too early when the parent still has data in flight (typical
-// flow: open → fetch /photos/albums → tristate map populated). Watching
-// the `loading` prop transition from true → false re-runs the snapshot
-// once the parent's data is ready, without losing in-progress user
-// edits because we only refresh items the user has not yet touched.
-watch(
-  () => props.loading,
-  (now, prev) => {
-    if (prev === true && now === false && props.visible) {
-      const map = new Map<T, boolean | null>()
-      for (const it of props.items) map.set(it.id, props.initialState(it.id))
-      baseline.value = map
-    }
-  },
-)
-
-// Recompute baseline when items change while open (e.g. after creating a
-// new entry and parent refreshes the list). Existing pending changes are
-// preserved.
-watch(
-  () => props.items,
-  () => {
-    if (!props.visible) return
-    const map = new Map<T, boolean | null>()
-    for (const it of props.items) {
-      const prev = baseline.value.get(it.id)
-      map.set(it.id, prev !== undefined ? prev : props.initialState(it.id))
-    }
-    baseline.value = map
-  },
-  { deep: false },
-)
+/** Original tristate per item, evaluated against the parent's current
+ *  data. Calling `props.initialState` on demand (instead of snapshotting
+ *  it once when the dialog opens) means async data loads update the
+ *  display reactively. */
+function originalState(id: T): boolean | null {
+  return props.initialState(id) ?? false
+}
 
 function effectiveState(id: T): boolean | null {
   const p = pending.value.get(id)
   if (p === 'add') return true
   if (p === 'remove') return false
-  return baseline.value.get(id) ?? false
+  return originalState(id)
 }
 
 function toggle(id: T, checked: boolean) {
-  const original = baseline.value.get(id) ?? false
-  if (checked === original) {
+  const orig = originalState(id)
+  // Match the visual state back to the original (true = in all,
+  // false = in none, null = in some). When the user clicks an
+  // already-checked / already-unchecked checkbox to its original
+  // state, drop the pending entry; otherwise queue an add or remove
+  // applied to every selected subject.
+  const matchesOriginal =
+    (checked === true && orig === true) ||
+    (checked === false && orig === false)
+  if (matchesOriginal) {
     pending.value.delete(id)
   } else {
     pending.value.set(id, checked ? 'add' : 'remove')
