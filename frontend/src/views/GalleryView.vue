@@ -1215,6 +1215,7 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
       <aside v-if="cursorPhoto" class="desktop-sidebar">
         <PhotoDetailSidebar
           :photo="cursorPhoto"
+          :selected-photo-ids="selectMode && selectedCount > 1 ? Array.from(selectedIds) : undefined"
           :faces="detectedFaces"
           :loading-faces="loadingFaces"
           :landmarks="detectedLandmarks"

@@ -16,7 +16,11 @@ import { formatPhotoDateCompact } from '../utils/dateFormat'
 
 const props = defineProps<{
   photo: Photo
-  selectedPhotos?: Photo[]
+  /** When 2+ IDs are passed, the sidebar switches to multi-select mode
+   *  (album chips show the union with tristate "partial" markers, the
+   *  album dialog drives a batch update). `undefined` or a list of 0/1
+   *  IDs renders the regular single-photo view. */
+  selectedPhotoIds?: number[]
   faces: Face[]
   loadingFaces: boolean
   landmarks: LandmarkItem[]
@@ -63,11 +67,19 @@ async function loadAlbums() {
   }
 }
 
+/** True when the parent passed 2+ IDs (multi-select mode). */
+const isMultiSelect = computed(
+  () => (props.selectedPhotoIds?.length ?? 0) > 1,
+)
+
+/** IDs that drive the album section: every selected photo in multi-mode,
+ *  the cursor photo otherwise. */
+const albumPhotoIds = computed<number[]>(() => (
+  isMultiSelect.value ? (props.selectedPhotoIds as number[]) : [props.photo.id]
+))
+
 async function loadPhotosAlbums() {
-  const photoIds = props.selectedPhotos && props.selectedPhotos.length > 0
-    ? props.selectedPhotos.map(p => p.id)
-    : [props.photo.id]
-    
+  const photoIds = albumPhotoIds.value
   try {
     const res = await getPhotosAlbums(photoIds)
     const map: Record<number, number[]> = {}
@@ -81,28 +93,22 @@ async function loadPhotosAlbums() {
 }
 
 // Watch a stable key derived from the IDs currently shown in the sidebar.
-// The parent's `selectedPhotos` array is re-created on every photo-hydration
-// batch (photos.value is replaced in place), so watching the array reference
-// directly would re-fire /photos/albums on every hydration batch even though
-// the selection is unchanged. Watching the joined ID list avoids that.
-const selectedPhotoIdsKey = computed(() => {
-  const ids = props.selectedPhotos && props.selectedPhotos.length > 0
-    ? props.selectedPhotos.map(p => p.id)
-    : [props.photo.id]
-  return ids.join(',')
-})
+// The parent often hands us a fresh array on every render even when the
+// selection is unchanged; watching the joined ID list avoids re-firing
+// `/photos/albums` on each unrelated re-render.
+const albumPhotoIdsKey = computed(() => albumPhotoIds.value.join(','))
 
-watch(selectedPhotoIdsKey, () => {
+watch(albumPhotoIdsKey, () => {
   loadPhotosAlbums()
 }, { immediate: true })
 
 
 function getAlbumCheckState(albumId: number) {
-  const photoIds = props.selectedPhotos && props.selectedPhotos.length > 0
-    ? props.selectedPhotos.map(p => p.id)
-    : [props.photo.id]
-
-  return calculateAlbumCheckState(albumId, photoIds, photoAlbumMap.value)
+  return calculateAlbumCheckState(
+    albumId,
+    albumPhotoIds.value,
+    photoAlbumMap.value,
+  )
 }
 
 const currentAlbumChips = computed(() => {
@@ -120,11 +126,7 @@ const dialogItems = computed(() =>
   albums.value.map((a) => ({ id: a.id, label: a.name })),
 )
 
-const photoIdsForBatch = computed(() => (
-  props.selectedPhotos && props.selectedPhotos.length > 0
-    ? props.selectedPhotos.map((p) => p.id)
-    : [props.photo.id]
-))
+const photoIdsForBatch = computed(() => albumPhotoIds.value)
 
 function openAlbumDialog() {
   albumDialogVisible.value = true
@@ -266,11 +268,11 @@ watch(() => props.photo.id, () => {
     <div class="sidebar-header">
       <span class="sidebar-title">Details</span>
     </div>
-    <div v-if="selectedPhotos && selectedPhotos.length > 1" class="sidebar-scroll">
+    <div v-if="isMultiSelect" class="sidebar-scroll">
       <div class="sidebar-section">
         <div class="section-label">
           <i class="pi pi-images" />
-          <span>{{ selectedPhotos.length }} Fotos ausgewählt</span>
+          <span>{{ selectedPhotoIds!.length }} Fotos ausgewählt</span>
         </div>
 
         <div class="section-label mt-lg">
