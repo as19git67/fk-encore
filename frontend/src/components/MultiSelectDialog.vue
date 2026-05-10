@@ -67,6 +67,24 @@ watch(
   },
 )
 
+// Recompute the baseline when the parent finishes its async load.
+// The synchronous open-watch above snapshots `initialState` immediately,
+// which is too early when the parent still has data in flight (typical
+// flow: open → fetch /photos/albums → tristate map populated). Watching
+// the `loading` prop transition from true → false re-runs the snapshot
+// once the parent's data is ready, without losing in-progress user
+// edits because we only refresh items the user has not yet touched.
+watch(
+  () => props.loading,
+  (now, prev) => {
+    if (prev === true && now === false && props.visible) {
+      const map = new Map<T, boolean | null>()
+      for (const it of props.items) map.set(it.id, props.initialState(it.id))
+      baseline.value = map
+    }
+  },
+)
+
 // Recompute baseline when items change while open (e.g. after creating a
 // new entry and parent refreshes the list). Existing pending changes are
 // preserved.

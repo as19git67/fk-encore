@@ -31,22 +31,26 @@ const emit = defineEmits<{
 }>()
 
 const { albums, albumsLoaded, fetchAlbums, invalidateAlbums } = useReferenceData()
-const loadingAlbums = ref(false)
+/** Combined loading flag: true while EITHER the album list OR the
+ *  per-photo album map is in flight. The downstream MultiSelectDialog
+ *  watches this transition to refresh its tristate baseline once the
+ *  data has actually arrived (otherwise the synchronous snapshot at
+ *  open-time captures an empty `photoAlbumMap` and every album shows
+ *  as unchecked). */
+const loading = ref(false)
 const photoAlbumMap = ref<Record<number, number[]>>({})
 const saving = ref(false)
 
 async function loadAlbumsList() {
   if (albumsLoaded.value) return
-  loadingAlbums.value = true
-  try {
-    await fetchAlbums()
-  } finally {
-    loadingAlbums.value = false
-  }
+  await fetchAlbums()
 }
 
 async function loadPhotosAlbums() {
-  if (props.photoIds.length === 0) return
+  if (props.photoIds.length === 0) {
+    photoAlbumMap.value = {}
+    return
+  }
   try {
     const res = await getPhotosAlbums(props.photoIds)
     const map: Record<number, number[]> = {}
@@ -63,8 +67,12 @@ watch(
   () => props.visible,
   async (v) => {
     if (!v) return
-    await loadAlbumsList()
-    await loadPhotosAlbums()
+    loading.value = true
+    try {
+      await Promise.all([loadAlbumsList(), loadPhotosAlbums()])
+    } finally {
+      loading.value = false
+    }
   },
 )
 
@@ -113,7 +121,7 @@ async function onCreate(name: string) {
     :initial-state="(id) => getAlbumCheckState(id as number)"
     :subject-count="photoIds.length"
     :subject-label="photoIds.length === 1 ? 'Foto' : 'Fotos'"
-    :loading="loadingAlbums"
+    :loading="loading"
     :saving="saving"
     allow-create
     create-label="Neues Album"
