@@ -119,18 +119,28 @@ export interface RecomputeResult {
 }
 
 /**
- * Score every unreviewed group in `groupIds` (or every unreviewed group
- * of the user if not provided) and persist the result on photo_groups.
+ * Score groups and persist the result on photo_groups.
  *
- * Reviewed groups are skipped — once the user has decided, the KI keeps
- * its hands off. The query that drives this filter is the same one used
- * by the gallery filter (partial index 0075).
+ * Default behaviour: only **unreviewed** groups are scored — once the
+ * user has decided we keep the KI's hands off, which is also what the
+ * gallery filter assumes.
+ *
+ * The calibration export needs the opposite: reviewed groups *also*
+ * need scores so we can compare the KI's pick against the user's
+ * decision. Pass `options.includeReviewed = true` to widen the set;
+ * combined with `options.onlyMissing = true` the call becomes
+ * resumable (it scores only groups whose `ai_pick_details` is still
+ * NULL, so re-running after a 524 picks up where it stopped without
+ * redoing already-scored groups).
  */
 export async function recomputeAiPicksForGroups(
   userId: number | undefined,
   groupIds?: number[],
+  options?: { includeReviewed?: boolean; onlyMissing?: boolean },
 ): Promise<RecomputeResult> {
-  const baseConds = [isNull(photoGroups.reviewed_at)];
+  const baseConds = [];
+  if (!options?.includeReviewed) baseConds.push(isNull(photoGroups.reviewed_at));
+  if (options?.onlyMissing) baseConds.push(isNull(photoGroups.ai_pick_details));
   if (typeof userId === "number") {
     baseConds.push(eq(photoGroups.user_id, userId));
   }
@@ -138,7 +148,9 @@ export async function recomputeAiPicksForGroups(
     baseConds.push(inArray(photoGroups.id, groupIds));
   }
   const groups = await dbAll<{ id: number }>(
-    db.select({ id: photoGroups.id }).from(photoGroups).where(and(...baseConds)),
+    db.select({ id: photoGroups.id })
+      .from(photoGroups)
+      .where(baseConds.length > 0 ? and(...baseConds) : undefined),
   );
   if (groups.length === 0) {
     return { groups_scored: 0, groups_skipped: 0 };
@@ -356,9 +368,34 @@ export interface CalibrationEntry {
   }>;
 }
 
+/**
+ * Score every reviewed group that does not yet have ai_pick_details.
+ *
+ * Used by the calibration export: the regular recompute path skips
+ * reviewed groups by design (the UI never shows AI picks for reviewed
+ * groups), but the calibration dataset needs them so we can compare
+ * "what would the KI have picked?" against "what did the user keep?".
+ *
+ * Idempotent + resumable: filters on `ai_pick_details IS NULL`, so
+ * re-running after a 524 timeout only touches the groups still
+ * missing — no double-work.
+ */
+export function scoreReviewedGroupsForCalibration(): Promise<RecomputeResult> {
+  return recomputeAiPicksForGroups(undefined, undefined, {
+    includeReviewed: true,
+    onlyMissing: true,
+  });
+}
+
 export async function exportCalibrationDatasetLogic(
   userId: number,
 ): Promise<{ entries: CalibrationEntry[] }> {
+  // Make sure reviewed groups have a score before we dump them — the
+  // export is meaningless otherwise (this is exactly what bit the very
+  // first run after PR #404). The helper is a no-op on groups that
+  // already have ai_pick_details, so subsequent exports are free.
+  await scoreReviewedGroupsForCalibration();
+
   const groups = await dbAll<{
     id: number;
     reviewed_at: string;

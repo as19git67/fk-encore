@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbExec, dbInsertReturning } from "../db/adapter";
 import {
@@ -383,5 +383,59 @@ describe("exportCalibrationDatasetLogic", () => {
 
     const result = await exportCalibrationDatasetLogic(u);
     expect(result.entries).toHaveLength(0);
+  });
+
+  it("scores reviewed groups inline so the dump is never empty when signals exist", async () => {
+    // Reproduces the very first export the user got after PR #404: the
+    // groups had been reviewed (hidden via photo_curation) but
+    // recomputeAiPicks had never touched them, so ai_pick_details was
+    // NULL and the dump was structurally empty (no signals, no picks).
+    // The export must score them on the fly.
+    const u = await makeUser("calibration-empty-then-scored@test.com");
+    const a = await makePhoto(u, { details: { blur_score: 0.10 } });
+    const b = await makePhoto(u, { details: { blur_score: 0.90 } });
+    const g = await makeGroup(u, a, [a, b]);
+    // Reviewed by hand WITHOUT ever calling recomputeAiPicks — exact
+    // scenario from the user's first export.
+    await dbExec(sql`
+      INSERT INTO photo_curation (user_id, photo_id, status, updated_at)
+      VALUES (${u}, ${a}, 'hidden', NOW())
+    `);
+    await dbExec(
+      db.update(photoGroups)
+        .set({ reviewed_at: new Date().toISOString() })
+        .where(eq(photoGroups.id, g)),
+    );
+
+    const result = await exportCalibrationDatasetLogic(u);
+    expect(result.entries).toHaveLength(1);
+    const entry = result.entries[0];
+    expect(entry.group_ai_picked_photo_ids).toEqual([b]);
+    expect(entry.group_confidence).toBe("high");
+    const bRow = entry.photos.find((p) => p.photo_id === b);
+    expect(bRow?.ai_picked).toBe(true);
+    expect(Object.keys(bRow?.signals ?? {})).not.toHaveLength(0);
+  });
+
+  it("re-running the export does not re-score already-scored reviewed groups", async () => {
+    const u = await makeUser("calibration-idempotent@test.com");
+    const a = await makePhoto(u, { details: { blur_score: 0.10 } });
+    const b = await makePhoto(u, { details: { blur_score: 0.90 } });
+    const g = await makeGroup(u, a, [a, b]);
+    await dbExec(
+      db.update(photoGroups)
+        .set({ reviewed_at: new Date().toISOString() })
+        .where(eq(photoGroups.id, g)),
+    );
+
+    await exportCalibrationDatasetLogic(u);
+    const [first] = await db.select().from(photoGroups).where(eq(photoGroups.id, g));
+    const firstAt = first.ai_picked_at;
+
+    // Force a tiny sleep so any second UPDATE would advance NOW()
+    await new Promise((r) => setTimeout(r, 50));
+    await exportCalibrationDatasetLogic(u);
+    const [second] = await db.select().from(photoGroups).where(eq(photoGroups.id, g));
+    expect(second.ai_picked_at).toEqual(firstAt);
   });
 });
