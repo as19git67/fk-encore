@@ -526,6 +526,13 @@
       "when": 1779001413000,
       "tag": "0074_documents_user_pref",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1779001414000,
+      "tag": "0075_photo_groups_ai_pick",
+      "breakpoints": true
     }
   ]
 }

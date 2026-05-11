@@ -29,6 +29,11 @@ export interface GalleryGridGroup {
   member_count: number
   /** True when the user has reviewed the group. */
   reviewed: boolean
+  // AI auto-pick (Track I). When `ai_confidence` is set the group has
+  // been scored and `ai_picked` tells you whether this photo is in the
+  // pick list. Reviewed groups still set these to surface the marker.
+  ai_picked?: boolean
+  ai_confidence?: 'high' | 'medium' | 'low'
 }
 
 /** One cell in the grid. Pre-enriched server-side; no client computation. */
@@ -89,6 +94,7 @@ function buildFilterParams(filter: PhotoFilter | undefined, sp: URLSearchParams)
   if (filter.importedDaysAgo !== undefined) add('importedDaysAgo', filter.importedDaysAgo)
   if (filter.sizeMin !== undefined) add('sizeMin', filter.sizeMin)
   if (filter.sizeMax !== undefined) add('sizeMax', filter.sizeMax)
+  if (filter.showAiHidden) add('showAiHidden', true)
 }
 
 export function getGalleryGrid(
