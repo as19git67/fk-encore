@@ -83,6 +83,13 @@ export function parseFilterFromQuery(q: Record<string, unknown>): PhotoFilter {
 
   if (typeof q.dateFrom === 'string' && q.dateFrom) f.dateFrom = q.dateFrom
   if (typeof q.dateTo === 'string' && q.dateTo) f.dateTo = q.dateTo
+  // Track-I "show AI-hidden" toggle. Without serialising this round-
+  // trip the route-query watcher (a few lines below) would parse the
+  // URL back into `applied`, find showAiHidden missing, and
+  // overwrite the freshly-applied filter — racing two source.init()
+  // calls in VirtualGallery and leaving empty skeleton cells.
+  const showAiHidden = parseBool(q.showAiHidden)
+  if (showAiHidden !== undefined) f.showAiHidden = showAiHidden
   return f
 }
 
@@ -119,6 +126,7 @@ export function filterToQuery(f: PhotoFilter): Record<string, string> {
   if (f.importedDaysAgo !== undefined) out.importedDaysAgo = String(f.importedDaysAgo)
   if (f.sizeMin !== undefined) out.sizeMin = String(f.sizeMin)
   if (f.sizeMax !== undefined) out.sizeMax = String(f.sizeMax)
+  if (f.showAiHidden) out.showAiHidden = 'true'
   return out
 }
 
@@ -146,6 +154,7 @@ export function countActiveFilters(f: PhotoFilter): number {
   if (f.dateFrom || f.dateTo) n++
   if (f.importedDaysAgo !== undefined) n++
   if (f.sizeMin !== undefined || f.sizeMax !== undefined) n++
+  if (f.showAiHidden) n++
   return n
 }
 
