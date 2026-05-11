@@ -611,6 +611,18 @@ export async function detectPhotoFaces(photoId: number, force: boolean = false):
 
     console.log(`Detected ${facesDetected.length} faces in photo ${photoId} (size: ${imgWidth}x${imgHeight})`);
 
+    // Persist dimensions on the photo row (post-EXIF-rotation — the
+    // processing path runs sharp(...).rotate() upstream). Cheap UPDATE
+    // that piggybacks on the face scan so new photos get their
+    // orientation tagged without an extra scan-service step.
+    if (imgWidth > 0 && imgHeight > 0) {
+      await dbExec(
+        db.update(photos)
+          .set({ width: imgWidth, height: imgHeight })
+          .where(eq(photos.id, photoId))
+      );
+    }
+
     for (const f of facesDetected) {
       const bbox = {
         x: f.bbox[0] / imgWidth,
@@ -5218,6 +5230,58 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
   }
 
   return { groups_created: groupsCreated, total_photos_grouped: totalPhotosGrouped };
+}
+
+/**
+ * Backfill `photos.width` / `photos.height` for every photo of the
+ * given user that does not yet have them. Header-only sharp() read so
+ * each photo costs ~5 ms; 50k photos finish in roughly 5 minutes.
+ *
+ * Used to seed the AI auto-pick orientation-diversity rule once on
+ * existing libraries — going forward the face-scan path persists the
+ * dimensions automatically (see processFaceDetectionForPhoto).
+ *
+ * `.rotate()` applies the EXIF orientation tag before metadata is
+ * read, so the stored values are post-rotation (as displayed). Photos
+ * whose file is unreadable are skipped and counted in `failed`.
+ */
+export async function backfillPhotoDimensionsLogic(userId: number): Promise<{
+  scanned: number;
+  updated: number;
+  failed: number;
+}> {
+  const sharp = (await import("sharp")).default;
+  const rows = await dbAll<{ id: number; filename: string; external_path: string | null }>(
+    db.select({
+      id: photos.id,
+      filename: photos.filename,
+      external_path: photos.external_path,
+    })
+      .from(photos)
+      .where(and(eq(photos.user_id, userId), isNull(photos.width))),
+  );
+  let updated = 0;
+  let failed = 0;
+  for (const row of rows) {
+    const filePath = getPhotoDiskPath(row);
+    try {
+      const meta = await sharp(filePath).rotate().metadata();
+      if (meta.width && meta.height) {
+        await dbExec(
+          db.update(photos)
+            .set({ width: meta.width, height: meta.height })
+            .where(eq(photos.id, row.id)),
+        );
+        updated++;
+      } else {
+        failed++;
+      }
+    } catch (err) {
+      failed++;
+      console.warn(`[backfill-dimensions] photo ${row.id} (${filePath}) failed:`, (err as Error).message);
+    }
+  }
+  return { scanned: rows.length, updated, failed };
 }
 
 /**
