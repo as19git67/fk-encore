@@ -71,6 +71,13 @@ jobs:
       ADMIN_EMAIL: admin@example.com
       ADMIN_PASSWORD: admin
       ADMIN_NAME: Admin
+      # WebAuthn / Passkey relying-party config. user/startupValidation.ts
+      # throws at module-load if either is missing, so they MUST be present
+      # even though no E2E test exercises the passkey flow yet. HTTP is fine
+      # here because NODE_ENV != "production".
+      RP_ORIGIN: http://localhost:5173
+      RP_NAME: FK Encore E2E
+      RP_ID: localhost
       # Encore CI hardening: disable telemetry, force non-interactive output.
       ENCORE_TELEMETRY_DISABLED: '1'
       CI: 'true'
