@@ -11,6 +11,8 @@ import {
   findPhotoGroups,
   recomputeAiPicks,
   bulkAcceptHighConfidenceAiPicks,
+  getAiPickCalibration,
+  backfillPhotoDimensions,
   getPhotosToRefreshMetadata, refreshPhotoMetadata,
   getPhotosNeedingGpsRescan, rescanPhotoGps,
   recomputeAutoCrops,
@@ -166,6 +168,49 @@ async function handleBulkAcceptHighConfidence() {
     aiPickError.value = err.message || 'Fehler beim Bestätigen der KI-Picks'
   } finally {
     aiPickLoading.value = false
+  }
+}
+
+const dimensionsResult = ref<{ scanned: number; updated: number; failed: number } | null>(null)
+const dimensionsLoading = ref(false)
+
+async function handleBackfillDimensions() {
+  dimensionsResult.value = null
+  aiPickError.value = ''
+  dimensionsLoading.value = true
+  try {
+    dimensionsResult.value = await backfillPhotoDimensions()
+  } catch (err: any) {
+    aiPickError.value = err.message || 'Fehler beim Befüllen der Bildmaße'
+  } finally {
+    dimensionsLoading.value = false
+  }
+}
+
+const calibrationLoading = ref(false)
+
+// Browser navigating to the endpoint URL fails because Encore's auth
+// handler only accepts Authorization: Bearer (see user/auth-handler.ts).
+// This button fetches via apiFetch (which adds the Bearer token) and
+// triggers a blob download from the JSON in memory.
+async function handleDownloadCalibration() {
+  calibrationLoading.value = true
+  aiPickError.value = ''
+  try {
+    const data = await getAiPickCalibration()
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `ai-pick-calibration-${new Date().toISOString().slice(0, 10)}.json`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  } catch (err: any) {
+    aiPickError.value = err.message || 'Fehler beim Herunterladen des Kalibrierungs-Exports'
+  } finally {
+    calibrationLoading.value = false
   }
 }
 
@@ -658,6 +703,28 @@ onMounted(async () => {
         :loading="aiPickLoading"
         :disabled="aiPickLoading || groupingLoading || isActive || rescanLoading || retryLoading"
         @click="handleBulkAcceptHighConfidence"
+      />
+
+      <Message v-if="dimensionsResult" severity="info" :closable="false" class="data-management-group__item">
+        Bildmaße aktualisiert: {{ dimensionsResult.updated }} / {{ dimensionsResult.scanned }}
+        (fehlgeschlagen: {{ dimensionsResult.failed }}).
+      </Message>
+      <Button class="data-management-group__item"
+        icon="pi pi-arrows-alt"
+        outlined
+        label="Bildmaße nachtragen (für Orientierungsregel)"
+        :loading="dimensionsLoading"
+        :disabled="dimensionsLoading || aiPickLoading || groupingLoading || isActive || rescanLoading || retryLoading"
+        @click="handleBackfillDimensions"
+      />
+
+      <Button class="data-management-group__item"
+        icon="pi pi-download"
+        outlined
+        label="Kalibrierungs-Export herunterladen"
+        :loading="calibrationLoading"
+        :disabled="calibrationLoading"
+        @click="handleDownloadCalibration"
       />
     </div>
 

@@ -40,6 +40,33 @@ import type { AiPickDetails, AiPickPhotoScore } from "../db/schema";
 export const MULTI_PICK_THRESHOLD = 0.92;
 export const HIGH_CONFIDENCE_DELTA = 0.10;
 export const MEDIUM_CONFIDENCE_DELTA = 0.04;
+/**
+ * When a similar group contains photos of different orientations
+ * (portrait + landscape of the same subject — typical for "I took
+ * both because either could be the keeper depending on what device
+ * I look at it on later"), promote the best photo of each present
+ * orientation to the multi-pick set, provided its score is at least
+ * this fraction of the top score.
+ *
+ * 0.75 lets a clearly inferior orientation lose, but keeps the
+ * "second orientation, mildly worse" case both selected. Square
+ * photos are excluded from the rule entirely — a single
+ * near-square outlier in a portrait burst should not steal a slot.
+ */
+export const ORIENTATION_FLOOR = 0.75;
+
+export type Orientation = "portrait" | "landscape" | "square";
+
+export function classifyOrientation(width: number | null | undefined, height: number | null | undefined): Orientation {
+  // Pre-backfill default: assume landscape so the diversity rule
+  // degenerates to a no-op (orientations.size === 1) until dimensions
+  // are populated. Safe — no spurious picks while the backfill runs.
+  if (!width || !height || width <= 0 || height <= 0) return "landscape";
+  const ratio = width / height;
+  if (ratio > 1.1) return "landscape";
+  if (ratio < 0.9) return "portrait";
+  return "square";
+}
 
 /** Quality signals for one photo as stored in photos.ai_quality_details. */
 export interface PhotoSignals {
@@ -59,6 +86,11 @@ export interface PhotoSignals {
   //                   the full image (bbox coords are already 0..1).
   face_count: number;
   face_coverage: number;
+  // Photo orientation post-EXIF-rotation. Drives the orientation
+  // diversity rule in computeGroupPick — see ORIENTATION_FLOOR.
+  // Defaults to "landscape" when dimensions are still NULL (backfill
+  // pending), so the rule no-ops until data is available.
+  orientation?: Orientation;
 }
 
 export type AiConfidence = "high" | "medium" | "low";
@@ -143,6 +175,7 @@ export function scorePhoto(signals: PhotoSignals): AiPickPhotoScore {
     photo_id: signals.photo_id,
     score,
     has_face: hasFace,
+    ...(signals.orientation ? { orientation: signals.orientation } : {}),
     signals: used,
   };
 }
@@ -181,6 +214,31 @@ export function computeGroupPick(photos: PhotoSignals[]): AiPickResult {
   const cutoff = topScore * MULTI_PICK_THRESHOLD;
   const picked = ranked.filter((s) => s.score >= cutoff);
   const pickedIds = new Set(picked.map((p) => p.photo_id));
+
+  // Orientation-diversity rule. When a group contains photos of more
+  // than one orientation (portrait + landscape of the same subject),
+  // promote the best photo of each orientation already present — as
+  // long as it is at least ORIENTATION_FLOOR · topScore. Square photos
+  // are excluded so a single near-square outlier in a portrait burst
+  // doesn't kidnap a slot. The rule only ever adds to the pick set,
+  // never removes, so the confidence gate downstream is unaffected.
+  const orientationsInGroup = new Set<Orientation>();
+  for (const p of photos) {
+    if (p.orientation && p.orientation !== "square") orientationsInGroup.add(p.orientation);
+  }
+  if (orientationsInGroup.size > 1) {
+    const orientationByPhotoId = new Map(
+      photos.map((p) => [p.photo_id, p.orientation] as const),
+    );
+    for (const orientation of orientationsInGroup) {
+      const bestOfOrientation = ranked.find(
+        (s) => orientationByPhotoId.get(s.photo_id) === orientation,
+      );
+      if (bestOfOrientation && bestOfOrientation.score >= topScore * ORIENTATION_FLOOR) {
+        pickedIds.add(bestOfOrientation.photo_id);
+      }
+    }
+  }
 
   const bestNonPick = ranked.find((s) => !pickedIds.has(s.photo_id));
   // Δ for confidence gate is measured against the best non-pick. With

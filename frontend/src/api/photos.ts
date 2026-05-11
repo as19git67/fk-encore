@@ -840,6 +840,13 @@ export function getAiPickCalibration() {
   )
 }
 
+export function backfillPhotoDimensions() {
+  return apiFetch<{ scanned: number; updated: number; failed: number }>(
+    '/photos/backfill-dimensions',
+    { method: 'POST' },
+  )
+}
+
 // ---------- Semantic Search ----------
 
 export interface PhotoSearchResult {

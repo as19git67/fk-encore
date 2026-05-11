@@ -1264,6 +1264,23 @@ export const reviewPhotoGroup = api(
   }
 );
 
+/**
+ * Backfill width/height on every photo of the current user that does
+ * not yet have them. Needed once on existing libraries so the AI auto-
+ * pick orientation-diversity rule can classify portrait/landscape;
+ * new photos get dimensions for free via the face-scan path.
+ */
+export const backfillPhotoDimensions = api(
+  { expose: true, method: "POST", path: "/photos/backfill-dimensions", auth: true },
+  async (): Promise<{ scanned: number; updated: number; failed: number }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "data.manage");
+    return await service.backfillPhotoDimensionsLogic(userId);
+  }
+);
+
 // ========== AI Auto-Pick (Track I) ==========
 
 /**

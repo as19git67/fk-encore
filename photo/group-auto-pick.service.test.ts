@@ -32,6 +32,8 @@ interface PhotoSeed {
   details?: Record<string, number>;
   faces?: number;
   bboxWH?: [number, number][];
+  width?: number;
+  height?: number;
 }
 
 async function makePhoto(userId: number, seed: PhotoSeed = {}): Promise<number> {
@@ -43,6 +45,8 @@ async function makePhoto(userId: number, seed: PhotoSeed = {}): Promise<number> 
       mime_type: "image/jpeg",
       size: 1000,
       ai_quality_details: seed.details ?? null,
+      width: seed.width ?? null,
+      height: seed.height ?? null,
     }).returning({ id: photos.id }),
   );
   const photoId = row!.id;
@@ -169,6 +173,65 @@ describe("recomputeAiPicksForGroups", () => {
     const g2Row = rows.find((r) => r.id === g2);
     expect(g1Row?.ai_picked_photo_ids).not.toBeNull();
     expect(g2Row?.ai_picked_photo_ids).toBeNull();
+  });
+});
+
+describe("orientation diversity (Track I follow-up)", () => {
+  it("picks the best of each orientation when the group is mixed", async () => {
+    const u = await makeUser("orient-mixed@test.com");
+    // Two portraits + one landscape, scores close enough that the
+    // landscape clears the 0.75 floor.
+    const p1 = await makePhoto(u, {
+      details: { blur_score: 0.90 },
+      width: 2000, height: 3000,
+    });
+    const p2 = await makePhoto(u, {
+      details: { blur_score: 0.85 },
+      width: 2000, height: 3000,
+    });
+    const l1 = await makePhoto(u, {
+      details: { blur_score: 0.80 },
+      width: 3000, height: 2000,
+    });
+    await makeGroup(u, p1, [p1, p2, l1]);
+
+    await recomputeAiPicksForGroups(u);
+    const [row] = await db.select().from(photoGroups);
+    expect(row.ai_picked_photo_ids?.sort()).toEqual([p1, p2, l1].sort());
+    const scoresById = new Map(
+      (row.ai_pick_details?.scores ?? []).map((s) => [s.photo_id, s] as const),
+    );
+    expect(scoresById.get(p1)?.orientation).toBe("portrait");
+    expect(scoresById.get(l1)?.orientation).toBe("landscape");
+  });
+
+  it("does not promote a landscape that is far below the floor", async () => {
+    const u = await makeUser("orient-bad-landscape@test.com");
+    const p1 = await makePhoto(u, {
+      details: { blur_score: 0.90 },
+      width: 2000, height: 3000,
+    });
+    const l1 = await makePhoto(u, {
+      details: { blur_score: 0.10 },
+      width: 3000, height: 2000,
+    });
+    await makeGroup(u, p1, [p1, l1]);
+
+    await recomputeAiPicksForGroups(u);
+    const [row] = await db.select().from(photoGroups);
+    expect(row.ai_picked_photo_ids).toEqual([p1]);
+  });
+
+  it("ignores the rule when dimensions are still NULL (pre-backfill)", async () => {
+    const u = await makeUser("orient-null@test.com");
+    // No width/height — orientation undefined → rule must no-op.
+    const p1 = await makePhoto(u, { details: { blur_score: 0.90 } });
+    const p2 = await makePhoto(u, { details: { blur_score: 0.10 } });
+    await makeGroup(u, p1, [p1, p2]);
+
+    await recomputeAiPicksForGroups(u);
+    const [row] = await db.select().from(photoGroups);
+    expect(row.ai_picked_photo_ids).toEqual([p1]);
   });
 });
 
