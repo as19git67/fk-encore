@@ -34,8 +34,10 @@ import {
   type AiPickDetails,
 } from "../db/schema";
 import {
+  classifyOrientation,
   computeGroupPick,
   type AiConfidence,
+  type Orientation,
   type PhotoSignals,
 } from "./group-auto-pick";
 
@@ -44,6 +46,8 @@ interface PhotoSignalRow {
   ai_quality_details: Record<string, number> | null;
   face_count: number;
   face_coverage: number;
+  width: number | null;
+  height: number | null;
 }
 
 /**
@@ -75,6 +79,8 @@ async function loadSignalsForPhotos(photoIds: number[]): Promise<PhotoSignalRow[
           COALESCE(((${faces.bbox})::jsonb->>'height')::float, 0)
         ), 0)::float
       `,
+      width: photos.width,
+      height: photos.height,
     })
       .from(photos)
       .leftJoin(faces, eq(faces.photo_id, photos.id))
@@ -87,6 +93,10 @@ async function loadSignalsForPhotos(photoIds: number[]): Promise<PhotoSignalRow[
 /** Translate one SQL row into the input shape consumed by computeGroupPick. */
 function toPhotoSignals(row: PhotoSignalRow): PhotoSignals {
   const d = row.ai_quality_details ?? {};
+  const orientation: Orientation | undefined =
+    row.width != null && row.height != null
+      ? classifyOrientation(row.width, row.height)
+      : undefined;
   return {
     photo_id: row.photo_id,
     blur_score: typeof d.blur_score === "number" ? d.blur_score : null,
@@ -99,6 +109,7 @@ function toPhotoSignals(row: PhotoSignalRow): PhotoSignals {
     eyes_open_score: typeof d.eyes_open_score === "number" ? d.eyes_open_score : null,
     face_count: row.face_count,
     face_coverage: row.face_coverage,
+    orientation,
   };
 }
 
