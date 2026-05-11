@@ -109,7 +109,10 @@ export async function apiFetch<T>(
       }
     }
 
-    if (response.status === 401) {
+    if (response.status === 401 && path !== '/auth/login') {
+      // Token expired mid-session — kick to login. The /auth/login path
+      // itself is excluded so wrong-password attempts can surface their
+      // error in the form instead of triggering a page reload.
       localStorage.removeItem('auth_token')
       localStorage.removeItem('refresh_token')
       localStorage.removeItem('auth_user')

@@ -28,3 +28,11 @@ src/**/*.d.ts
 *.sw?
 /storybook-static/**/*
 /screenshots/*
+
+# Playwright E2E (Track M)
+/e2e/.auth/
+/e2e/.results/
+/e2e/.report/
+/e2e/.fixtures/
+/playwright-report/
+/test-results/
