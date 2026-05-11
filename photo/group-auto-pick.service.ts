@@ -127,10 +127,13 @@ export interface RecomputeResult {
  * by the gallery filter (partial index 0075).
  */
 export async function recomputeAiPicksForGroups(
-  userId: number,
+  userId: number | undefined,
   groupIds?: number[],
 ): Promise<RecomputeResult> {
-  const baseConds = [eq(photoGroups.user_id, userId), isNull(photoGroups.reviewed_at)];
+  const baseConds = [isNull(photoGroups.reviewed_at)];
+  if (typeof userId === "number") {
+    baseConds.push(eq(photoGroups.user_id, userId));
+  }
   if (groupIds && groupIds.length > 0) {
     baseConds.push(inArray(photoGroups.id, groupIds));
   }
@@ -201,6 +204,15 @@ export async function recomputeAiPicksForGroups(
 
 export function recomputeAiPicksForUser(userId: number): Promise<RecomputeResult> {
   return recomputeAiPicksForGroups(userId);
+}
+
+/**
+ * Server-wide variant: scores every unreviewed group regardless of
+ * owner. Used by the maintenance button so a single admin can seed
+ * picks for all users in one click.
+ */
+export function recomputeAiPicksForAllUsers(): Promise<RecomputeResult> {
+  return recomputeAiPicksForGroups(undefined);
 }
 
 /**
