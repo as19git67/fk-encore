@@ -8,7 +8,7 @@ const adminPassword = process.env.E2E_ADMIN_PASSWORD ?? 'admin'
 
 test.describe('Login (Tastatur-fokussiert)', () => {
   test('Tab-Reihenfolge: E-Mail → Passwort → Anmelden, Submit per Enter', async ({ page }) => {
-    await page.goto('/login')
+    await page.goto('login')
     await expect(page.getByRole('heading', { name: 'Anmelden' })).toBeVisible()
 
     const emailField = page.getByLabel('E-Mail')
@@ -33,7 +33,7 @@ test.describe('Login (Tastatur-fokussiert)', () => {
   })
 
   test('Falsches Passwort zeigt Fehlermeldung, fokussiert E-Mail wird nicht geleert', async ({ page }) => {
-    await page.goto('/login')
+    await page.goto('login')
 
     await page.getByLabel('E-Mail').fill(adminEmail)
     await page.locator('#password input').first().fill('definitely-wrong-pw')
@@ -47,7 +47,7 @@ test.describe('Login (Tastatur-fokussiert)', () => {
   })
 
   test('Passwort-Toggle per Tastatur (Space auf Augen-Icon)', async ({ page }) => {
-    await page.goto('/login')
+    await page.goto('login')
 
     const passwordInput = page.locator('#password input').first()
     await passwordInput.fill('hunter2')

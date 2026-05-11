@@ -4,7 +4,7 @@ import { test, expect } from '@playwright/test'
 
 test.describe('Navigation (Maus + Tastatur)', () => {
   test('Hamburger-Menü per Maus öffnet Modulauswahl, Pfeil/Enter wechselt Modul', async ({ page }) => {
-    await page.goto('/fotos/galerie')
+    await page.goto('fotos/galerie')
     const burger = page.getByRole('button', { name: 'Hauptmenü' })
     await expect(burger).toBeVisible()
 
@@ -19,7 +19,7 @@ test.describe('Navigation (Maus + Tastatur)', () => {
   })
 
   test('Tastatur-Fokus durchläuft Submenu-Strip in DOM-Reihenfolge', async ({ page }) => {
-    await page.goto('/fotos/galerie')
+    await page.goto('fotos/galerie')
     // Erst sicherstellen, dass der Submenu-Strip da ist
     const submenu = page.locator('.submenu-strip')
     await expect(submenu).toBeVisible()
@@ -39,7 +39,7 @@ test.describe('Navigation (Maus + Tastatur)', () => {
   })
 
   test('Profil-Button (icon-only) hat aria-label und ist per Enter aktivierbar', async ({ page }) => {
-    await page.goto('/fotos/galerie')
+    await page.goto('fotos/galerie')
 
     const profileBtn = page.getByRole('button', { name: 'Profil' })
     await expect(profileBtn).toBeVisible()

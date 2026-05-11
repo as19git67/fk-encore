@@ -3,7 +3,7 @@ import path from 'node:path'
 
 test.describe('Dokumenten-Modul (Drag-and-Drop + Tastatur)', () => {
   test('Suchfeld ist per Tastatur erreichbar und debounced', async ({ page }) => {
-    await page.goto('/dokumente')
+    await page.goto('dokumente')
     await expect(page.getByRole('heading', { name: 'Dokumente' })).toBeVisible()
 
     const search = page.getByPlaceholder('Suche in Dokumenten…')
@@ -23,7 +23,7 @@ test.describe('Dokumenten-Modul (Drag-and-Drop + Tastatur)', () => {
   })
 
   test('Zur Upload-Seite navigieren und Datei per File-Input wählen', async ({ page }) => {
-    await page.goto('/dokumente')
+    await page.goto('dokumente')
 
     const uploadBtn = page.getByRole('button', { name: 'Hochladen' })
     // Permission-abhängig — überspringen, wenn Admin sie nicht hat.
@@ -47,7 +47,7 @@ test.describe('Dokumenten-Modul (Drag-and-Drop + Tastatur)', () => {
   })
 
   test('Drag-and-Drop einer PDF auf die Dropzone fügt sie der Warteschlange hinzu', async ({ page }) => {
-    await page.goto('/dokumente/upload')
+    await page.goto('dokumente/upload')
     await expect(page.getByText('PDFs hier ablegen')).toBeVisible()
 
     const dropzone = page.locator('.dropzone')
@@ -73,7 +73,7 @@ test.describe('Dokumenten-Modul (Drag-and-Drop + Tastatur)', () => {
   })
 
   test('Enter auf Dropzone öffnet den File-Picker (Tastatur-Pfad)', async ({ page }) => {
-    await page.goto('/dokumente/upload')
+    await page.goto('dokumente/upload')
     const dropzone = page.locator('.dropzone')
     await dropzone.focus()
 

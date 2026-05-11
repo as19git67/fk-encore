@@ -5,7 +5,7 @@ import { test, expect } from '@playwright/test'
 
 test.describe('Foto-Galerie (Maus-fokus)', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/fotos/galerie')
+    await page.goto('fotos/galerie')
     // Auf das Galerie-Grid warten — sichtbare Cells oder Leerstate.
     await Promise.race([
       page.locator('.vg-cell').first().waitFor({ state: 'visible', timeout: 15_000 }),
