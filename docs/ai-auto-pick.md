@@ -117,9 +117,20 @@ einer Portrait-Burst keinen Slot kapert.
 
 - **`high` Confidence:** Nicht-Picks werden im Grid automatisch
   versteckt (über Server-Filter `aiHiddenMode=exclude`). User sieht im
-  Grid nur die Picks, mit einem `+N`-Marker am Cover-Foto.
-- **`medium`:** Marker mit Orange-Tint, **kein** Auto-Hide.
-- **`low`:** Marker neutral, **kein** Auto-Hide.
+  Grid nur die Picks, mit einem `+N`-Marker am Cover-Foto. Das
+  Marker-Icon ist ein durchgestrichenes Auge (`pi-eye-slash`) — der
+  visuelle Hinweis, dass dahinter Geschwister-Fotos versteckt sind.
+- **`medium`:** Marker mit Orange-Tint, **kein** Auto-Hide. Alle
+  Mitglieder sind woanders im Grid sichtbar; der Marker zeigt nur die
+  Gruppen-Zugehörigkeit.
+- **`low`:** Marker neutral, **kein** Auto-Hide. Reviewte Gruppen
+  verlieren ebenfalls den `pi-eye-slash`-Hinweis (die Geschwister sind
+  vom User selbst behandelt).
+
+**Im Fullscreen-Modus** zeigt der `FullscreenOverlay` denselben Marker
+oben links: durchgestrichenes Auge + `+N` bei high-confidence /
+unreviewt, `pi-images` + `+N` sonst. Tap → Review-Dialog,
+identisch zum Grid-Marker.
 
 **Click-Semantik im Grid** ist überall einheitlich, unabhängig von der
 Confidence-Stufe:

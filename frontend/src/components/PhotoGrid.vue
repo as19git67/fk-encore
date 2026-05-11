@@ -24,6 +24,35 @@ function onItemTouchEnd(e: TouchEvent, item: PhotoItem) {
   handleItemTap(item, e as unknown as MouseEvent)
 }
 
+/**
+ * "Sind die übrigen Gruppen-Mitglieder gerade KI-versteckt?"
+ *
+ * Wahr nur bei high-confidence Gruppen, die der User noch nicht reviewt
+ * hat — exakt die Bedingung, unter der die Server-seitige
+ * aiHiddenMode=exclude-Klausel die Geschwister aus dem Grid filtert.
+ * Bei medium/low confidence oder reviewten Gruppen sind die Geschwister
+ * woanders im Grid sichtbar; der +N-Marker bleibt informativ ohne
+ * "ausgeblendet"-Andeutung.
+ */
+function isAiHidingSiblings(group: any): boolean {
+  if (!group) return false
+  if (group.reviewed_at) return false
+  return group.ai_picked_confidence === 'high'
+}
+
+function badgeTitle(group: any): string {
+  if (isAiHidingSiblings(group)) {
+    return `${group.member_count - 1} ähnliche Fotos werden ausgeblendet – klicken zum Anzeigen`
+  }
+  if (group.ai_picked_confidence === 'medium') {
+    return 'KI-Vorschlag mit mittlerer Sicherheit – bitte prüfen'
+  }
+  if (group.ai_picked_confidence === 'low') {
+    return 'KI-Vorschlag mit niedriger Sicherheit'
+  }
+  return `${group.member_count} ähnliche Fotos`
+}
+
 function handleItemTap(item: PhotoItem, event: MouseEvent | TouchEvent) {
   const me = event as MouseEvent
   const hasModifier = props.selectMode || me.ctrlKey || me.metaKey || me.shiftKey
@@ -276,13 +305,13 @@ defineExpose({
               :class="{
                 'stack-badge--ai-medium': (item.group as any).ai_picked_confidence === 'medium',
                 'stack-badge--ai-low': (item.group as any).ai_picked_confidence === 'low',
+                'stack-badge--ai-hidden': isAiHidingSiblings(item.group),
               }"
-              :title="(item.group as any).ai_picked_confidence === 'medium'
-                ? 'KI-Vorschlag mit mittlerer Sicherheit – bitte prüfen'
-                : (item.group as any).ai_picked_confidence === 'low'
-                  ? 'KI-Vorschlag mit niedriger Sicherheit'
-                  : `${item.group.member_count} ähnliche Fotos`"
-            >+{{ item.group.member_count - 1 }}</span>
+              :title="badgeTitle(item.group)"
+            >
+              <i v-if="isAiHidingSiblings(item.group)" class="pi pi-eye-slash stack-badge-icon" />
+              +{{ item.group.member_count - 1 }}
+            </span>
             <i v-if="item.group?.reviewed_at" class="pi pi-check stack-reviewed-badge" />
 
             <!-- Status badges -->
@@ -449,6 +478,14 @@ defineExpose({
 .stack-badge--ai-low {
   background: rgba(0,0,0,0.5);
   box-shadow: 0 0 0 1px rgba(255,255,255,0.25);
+}
+/* High-confidence + unreviewed: the Server-Filter hides the siblings.
+   Show an eye-slash icon next to +N so the user notices that there
+   are actually hidden photos behind this cover. */
+.stack-badge-icon {
+  font-size: 0.75rem;
+  margin-right: 3px;
+  vertical-align: -1px;
 }
 
 .stack-reviewed-badge {

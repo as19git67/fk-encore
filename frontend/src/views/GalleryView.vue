@@ -74,6 +74,7 @@ import { useServiceHealthStore } from '../stores/serviceHealth'
 import { usePhotoNavStore } from '../stores/photoNav'
 import {
   type GalleryGridEntry,
+  type GalleryGridGroup,
   type GallerySortDir,
   type GallerySortField,
 } from '../api/gallery'
@@ -407,6 +408,20 @@ async function ensureGroupCache(): Promise<PhotoGroup[]> {
 // works without it.
 void ensureGroupCache()
 
+async function onFullscreenOpenGroupReview() {
+  const g = cursorGroup.value
+  if (!g) return
+  if (stackBusy.value) return
+  stackBusy.value = true
+  try {
+    const groups = await ensureGroupCache()
+    activeGroup.value = groups.find((row) => row.id === g.id) ?? null
+    if (activeGroup.value) closeFullscreen()
+  } finally {
+    stackBusy.value = false
+  }
+}
+
 async function onStackClick(entry: GalleryGridEntry) {
   if (!entry.group) return
   if (stackBusy.value) return
@@ -670,6 +685,12 @@ const cursorIndex = ref<number | null>(null)
 const cursorPhoto = ref<Photo | null>(null)
 const cursorPrev = ref<Photo | null>(null)
 const cursorNext = ref<Photo | null>(null)
+// Similar-photo-group info for the currently fullscreen photo. Lives
+// on the grid entry but the Photo type doesn't carry it, so we track
+// it separately. Drives the in-fullscreen marker that tells the user
+// "this photo is part of a group, X siblings hidden" + opens the
+// review dialog on click.
+const cursorGroup = ref<GalleryGridGroup | null>(null)
 let hydrateToken = 0
 let curationVersion = 0
 
@@ -753,6 +774,7 @@ async function hydrateCursor(index: number, options?: { skipNeighbors?: boolean 
   cursorPhoto.value = entryToMinimalPhoto(curEntry)
   cursorPrev.value = prevEntry ? entryToMinimalPhoto(prevEntry) : null
   cursorNext.value = nextEntry ? entryToMinimalPhoto(nextEntry) : null
+  cursorGroup.value = curEntry.group ?? null
 
   // Cancel any in-progress date edit when the photo changes.
   isEditingDate.value = false
@@ -1317,6 +1339,7 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
       :next-photo="cursorNext"
       :can-delete="canDelete"
       :details-active="detailsActive"
+      :group="cursorGroup"
       @close="closeFullscreen"
       @prev="goPrev"
       @next="goNext"
@@ -1324,6 +1347,7 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
       @hide="onFullscreenHide"
       @restore="onFullscreenRestore"
       @show-details="onShowDetails"
+      @open-group-review="onFullscreenOpenGroupReview"
     >
       <template #details-flyout>
         <PhotoDetailSidebar
