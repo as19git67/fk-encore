@@ -264,25 +264,20 @@ export function useGallerySource(): GallerySource {
         p += GALLERY_PAGE_SIZE
       }
 
-      // Optimization: Also mark the partially-covered leading and trailing pages as
-      // "resolving" so ensureRange() doesn't immediately fire redundant page-aligned
-      // fetches for them. Since spliceIn() already filled the slots we have,
-      // and the virtualizer only needs to fill the viewport, this prevents the
-      // initial "triple call" (aroundPhotoId + page 0 + page 1).
+      // NOTE: Don't mark partially-covered leading/trailing pages as
+      // resolved. The previous "skip the redundant page-aligned init
+      // fetch" optimisation set those pages' promises to
+      // Promise.resolve() — but it does so for the WHOLE page, not just
+      // the covered slots. When the user toggled a filter the response
+      // window was centred on the new last page, leaving the partial
+      // edges (e.g. slots 12300..12345 of a 12345..12495 response)
+      // permanently null. ensureRange() would never refetch them
+      // because the page was registered as already resolved.
       //
-      // NOTE: We only do this if we actually got some photos. If the response
-      // was empty (e.g. at the very end of the gallery), we don't want to
-      // block future fetches.
-      if (res.photos.length > 0) {
-        const leadingPage = pageStartForOffset(res.offset)
-        if (!pagePromises.has(leadingPage)) {
-          pagePromises.set(leadingPage, Promise.resolve())
-        }
-        const trailingPage = pageStartForOffset(responseEnd - 1)
-        if (trailingPage >= res.offset && !pagePromises.has(trailingPage)) {
-          pagePromises.set(trailingPage, Promise.resolve())
-        }
-      }
+      // Leaving partial pages unmarked is correct: ensureRange() will
+      // fire fetches for the visible window, the responses overwrite
+      // the already-filled slots (cheap) and fill the previously-null
+      // ones. Worst case: one redundant page-fetch right after init.
 
       spliceIn(res.offset, res.photos)
       return { initialOffset: res.offset, total: res.total }

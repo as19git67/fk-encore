@@ -190,12 +190,24 @@ export function useFilter(opts: UseFilterOptions = {}): UseFilterReturn {
 
   // Keep `applied` in sync when the URL changes (e.g. browser back/forward,
   // or an external navigation that updates query params).
+  //
+  // Equality check goes through `filterToQuery` so that a filter the user
+  // just applied stays stable across the URL round-trip. Without this,
+  // booleans that the URL representation drops when false
+  // (`favorite: false`, `showAiHidden: false`, etc.) would parse back as
+  // a *missing* key, the JSON-of-the-raw-filter would differ from the
+  // freshly-applied one, and `applied` would get clobbered to the parsed
+  // version. In VirtualGallery that fires a second `source.init()` while
+  // the first is still in flight — the race showed up as permanent
+  // skeleton cells the moment the user toggled "KI-ausgeblendete
+  // anzeigen" off.
   watch(
     () => route.query,
     (q) => {
       const next = parseFilterFromQuery(q as Record<string, unknown>)
-      // Avoid looping when we're the ones who wrote the URL.
-      if (JSON.stringify(next) !== JSON.stringify(applied.value)) {
+      const nextUrl = JSON.stringify(filterToQuery(next))
+      const appliedUrl = JSON.stringify(filterToQuery(applied.value))
+      if (nextUrl !== appliedUrl) {
         applied.value = next
       }
     }
