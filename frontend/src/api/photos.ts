@@ -95,6 +95,10 @@ export interface PhotoFilter {
   importedDaysAgo?: number
   sizeMin?: number
   sizeMax?: number
+  // AI auto-pick visibility (Track I). false (default) → AI-hidden
+  // photos are excluded from the grid; true → they are shown alongside
+  // the AI picks. Maps to the backend `aiHiddenMode=include` query.
+  showAiHidden?: boolean
 }
 
 function buildPhotoFilterQuery(filter: PhotoFilter | boolean | undefined): string {
@@ -130,6 +134,7 @@ function buildPhotoFilterQuery(filter: PhotoFilter | boolean | undefined): strin
   if (f.importedDaysAgo !== undefined) add('importedDaysAgo', f.importedDaysAgo)
   if (f.sizeMin !== undefined) add('sizeMin', f.sizeMin)
   if (f.sizeMax !== undefined) add('sizeMax', f.sizeMax)
+  if (f.showAiHidden) add('showAiHidden', true)
 
   const s = params.toString()
   return s ? `?${s}` : ''
@@ -765,6 +770,10 @@ export interface PhotoGroup {
   created_at: string
   member_count: number
   photo_ids: number[]
+  // AI auto-pick (Track I). Absent until the group has been scored.
+  ai_picked_photo_ids?: number[]
+  ai_picked_confidence?: 'high' | 'medium' | 'low'
+  ai_picked_at?: string
 }
 
 export function findPhotoGroups() {
@@ -786,6 +795,49 @@ export function reviewPhotoGroup(id: number, photoIds?: number[]) {
     method: 'POST',
     body: photoIds ? JSON.stringify({ photoIds }) : undefined,
   })
+}
+
+// ---------- AI Auto-Pick (Track I) ----------
+
+export function recomputeAiPicks() {
+  return apiFetch<{ groups_scored: number; groups_skipped: number }>(
+    '/photos/groups/recompute-ai-picks',
+    { method: 'POST' },
+  )
+}
+
+export function acceptAiPick(id: number) {
+  return apiFetch<{ success: boolean; hidden_count: number }>(
+    `/photos/groups/${id}/accept-ai-pick`,
+    { method: 'POST' },
+  )
+}
+
+export function bulkAcceptHighConfidenceAiPicks() {
+  return apiFetch<{ groups_accepted: number; hidden_count: number }>(
+    '/photos/groups/bulk-accept-ai-picks',
+    { method: 'POST' },
+  )
+}
+
+export interface AiPickCalibrationEntry {
+  group_id: number
+  group_confidence: 'high' | 'medium' | 'low' | null
+  group_ai_picked_photo_ids: number[]
+  reviewed_at: string
+  photos: Array<{
+    photo_id: number
+    user_kept: boolean
+    ai_picked: boolean
+    has_face: boolean
+    signals: Record<string, number>
+  }>
+}
+
+export function getAiPickCalibration() {
+  return apiFetch<{ entries: AiPickCalibrationEntry[] }>(
+    '/photos/groups/ai-pick-calibration',
+  )
 }
 
 // ---------- Semantic Search ----------

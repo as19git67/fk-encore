@@ -7,6 +7,7 @@ import {
   getPhotoUrl,
   updatePhotoCuration,
   reviewPhotoGroup,
+  acceptAiPick,
   getPhotoDetailsBatch,
   type Photo,
   type PhotoGroup,
@@ -389,6 +390,34 @@ function rejectSuggestions() {
   reviewDecided.value = true
 }
 
+// ── KI-Auto-Pick (Track I) ──
+// The server pre-computed `ai_picked_photo_ids` for unreviewed groups
+// (see /photos/find-groups + /photos/groups/recompute-ai-picks). When
+// the user clicks "KI-Vorschlag übernehmen" we delegate to the backend
+// endpoint, which hides every non-picked member via photo_curation
+// (skipping favorites) and marks the group reviewed in a single
+// transaction. After it returns we emit `reviewed` so the parent
+// gallery refreshes its caches.
+const hasAiPick = computed(() => {
+  const ids = props.group.ai_picked_photo_ids
+  return Array.isArray(ids) && ids.length > 0 && !props.group.reviewed_at
+})
+const aiPickButsy = ref(false)
+
+async function acceptAiPickAction() {
+  if (aiPickButsy.value) return
+  aiPickButsy.value = true
+  try {
+    await acceptAiPick(props.group.id)
+    emit('reviewed')
+    emit('close')
+  } catch (err) {
+    console.error('[PhotoCompareView] acceptAiPick failed', err)
+  } finally {
+    aiPickButsy.value = false
+  }
+}
+
 function goBackToCompare() {
   phase.value = 'compare'
   reviewDecided.value = false
@@ -655,6 +684,17 @@ function getPhotoById(id: number): Photo | undefined {
             </span>
           </div>
           <div class="compare-header-right">
+            <Button
+              v-if="hasAiPick && !reviewDecided"
+              :label="isVeryNarrow ? undefined : isNarrow ? 'KI' : 'KI-Vorschlag übernehmen'"
+              icon="pi pi-sparkles"
+              v-tooltip.bottom="isVeryNarrow ? 'KI-Vorschlag übernehmen' : 'Behält die KI-Auswahl und blendet die übrigen aus'"
+              severity="success"
+              outlined
+              size="small"
+              :loading="aiPickButsy"
+              @click="acceptAiPickAction"
+            />
             <template v-if="!reviewDecided">
               <template v-if="hasSuggestions">
                 <Button

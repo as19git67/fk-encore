@@ -50,6 +50,8 @@ type GalleryGridQueryParams = {
   importedDaysAgo?: Query<number>;
   sizeMin?: Query<number>;
   sizeMax?: Query<number>;
+  showAiHidden?: Query<boolean>;
+  aiHiddenMode?: Query<string>;
 
   // — pagination —
   /** Required. Number of rows to return. Server caps at MAX_LIMIT. */
@@ -104,6 +106,8 @@ function toFilterQuery(p: GalleryGridQueryParams): PhotoFilterQuery {
     importedDaysAgo: p.importedDaysAgo,
     sizeMin: p.sizeMin,
     sizeMax: p.sizeMax,
+    showAiHidden: p.showAiHidden,
+    aiHiddenMode: p.aiHiddenMode,
   };
 }
 

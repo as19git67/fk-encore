@@ -28,7 +28,7 @@ const props = withDefaults(defineProps<{
   available?: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'>
 }>(), {
   available: () => [
-    'hiddenMode', 'favorite', 'albumHighlight', 'groupHighlight', 'inGroup',
+    'hiddenMode', 'showAiHidden', 'favorite', 'albumHighlight', 'groupHighlight', 'inGroup',
     'othersFavorited', 'othersHidden', 'notInAnyAlbum',
     'qualityRange', 'albumIds', 'personIds', 'mediaTypes',
     'hasGps', 'hasFaces', 'hasAssignedPerson',
@@ -227,6 +227,15 @@ function close() {
           :allow-empty="false"
           @update:model-value="(v: HiddenMode) => local = { ...local, hiddenMode: v === 'exclude' ? undefined : v }"
         />
+      </div>
+
+      <!-- AI-Auto-Pick (Track I): when hochkonfidente Picks gemacht wurden
+           verstecken wir die Nicht-Picks per Default. Mit diesem Schalter
+           werden sie wieder eingeblendet, ohne den User-Hide-Filter zu
+           berühren. -->
+      <div v-if="has('showAiHidden')" class="filter-switch">
+        <ToggleSwitch v-model="local.showAiHidden" />
+        <span>KI-ausgeblendete anzeigen</span>
       </div>
 
       <!-- Boolean switches -->

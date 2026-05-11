@@ -258,7 +258,19 @@ defineExpose({
             </div>
 
             <!-- Stack badges -->
-            <span v-if="item.group" class="stack-badge">{{ item.group.member_count }}</span>
+            <span
+              v-if="item.group"
+              class="stack-badge"
+              :class="{
+                'stack-badge--ai-medium': (item.group as any).ai_picked_confidence === 'medium',
+                'stack-badge--ai-low': (item.group as any).ai_picked_confidence === 'low',
+              }"
+              :title="(item.group as any).ai_picked_confidence === 'medium'
+                ? 'KI-Vorschlag mit mittlerer Sicherheit – bitte prüfen'
+                : (item.group as any).ai_picked_confidence === 'low'
+                  ? 'KI-Vorschlag mit niedriger Sicherheit'
+                  : `${item.group.member_count} ähnliche Fotos`"
+            >+{{ item.group.member_count - 1 }}</span>
             <i v-if="item.group?.reviewed_at" class="pi pi-check stack-reviewed-badge" />
 
             <!-- Status badges -->
@@ -404,6 +416,19 @@ defineExpose({
   font-weight: 700;
   padding: 2px 6px;
   border-radius: 10px;
+}
+
+/* Medium-confidence AI pick: more prominent, orange-tinted background so
+   the user notices and reviews. Low confidence reuses the neutral style
+   but adds a subtle outline so the marker still differs from a fully
+   confident pick. */
+.stack-badge--ai-medium {
+  background: var(--p-orange-500, #f97316);
+  color: #fff;
+}
+.stack-badge--ai-low {
+  background: rgba(0,0,0,0.5);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.25);
 }
 
 .stack-reviewed-badge {

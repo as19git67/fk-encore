@@ -40,6 +40,15 @@ export interface PhotoFilterParams {
   importedDaysAgo?: number;
   sizeMin?: number;
   sizeMax?: number;
+  // AI auto-pick filter (Track I, see migration 0075):
+  //   "exclude" (default) — hide non-picked members of high-confidence
+  //                         AI-picked groups that the user has not yet
+  //                         reviewed. The grid shows only the AI pick.
+  //   "include"           — show every photo regardless of AI pick;
+  //                         the marker is still rendered.
+  //   "only"              — only photos the AI hid. Used by the "show
+  //                         KI-ausgeblendete anzeigen" filter toggle.
+  aiHiddenMode?: HiddenMode;
 }
 
 export interface PhotoFilterQuery {
@@ -67,6 +76,8 @@ export interface PhotoFilterQuery {
   importedDaysAgo?: number;
   sizeMin?: number;
   sizeMax?: number;
+  showAiHidden?: boolean;
+  aiHiddenMode?: string;
 }
 
 function parseIntArray(s: string): number[] {
@@ -113,6 +124,11 @@ export function parsePhotoFilterQuery(q: PhotoFilterQuery): PhotoFilterParams {
   if (q.importedDaysAgo !== undefined) f.importedDaysAgo = Number(q.importedDaysAgo);
   if (q.sizeMin !== undefined) f.sizeMin = Number(q.sizeMin);
   if (q.sizeMax !== undefined) f.sizeMax = Number(q.sizeMax);
+  if (q.aiHiddenMode === "exclude" || q.aiHiddenMode === "include" || q.aiHiddenMode === "only") {
+    f.aiHiddenMode = q.aiHiddenMode;
+  } else if (q.showAiHidden === true) {
+    f.aiHiddenMode = "include";
+  }
   return f;
 }
 
@@ -299,6 +315,29 @@ export function buildPhotoFilterConditions(
   }
   if (filter.sizeMax !== undefined) {
     conds.push(sql`${photos.size} <= ${filter.sizeMax}`);
+  }
+
+  // AI auto-pick visibility filter (Track I). A photo is "AI-hidden"
+  // when it is a member of a HIGH-confidence AI-picked group that the
+  // user has not yet reviewed and the photo itself is NOT one of the
+  // AI's picks. Medium / low confidence groups never auto-hide so the
+  // user always sees the runner-ups; reviewed groups respect the user's
+  // own hide decisions exclusively.
+  const aiMode = filter.aiHiddenMode ?? "exclude";
+  const aiHiddenExists = sql`EXISTS (
+    SELECT 1 FROM ${photoGroupMembers} pgm_ai
+    JOIN ${photoGroups} pg_ai ON pg_ai.id = pgm_ai.group_id
+    WHERE pgm_ai.photo_id = ${photos.id}
+      AND pg_ai.user_id = ${userId}
+      AND pg_ai.reviewed_at IS NULL
+      AND pg_ai.ai_picked_at IS NOT NULL
+      AND pg_ai.ai_picked_confidence = 'high'
+      AND NOT (${photos.id} = ANY(pg_ai.ai_picked_photo_ids))
+  )`;
+  if (aiMode === "exclude") {
+    conds.push(sql`NOT (${aiHiddenExists})`);
+  } else if (aiMode === "only") {
+    conds.push(aiHiddenExists);
   }
 
   return conds;
