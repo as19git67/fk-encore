@@ -547,6 +547,13 @@
       "when": 1779001416000,
       "tag": "0077_reset_ai_pick_state",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1779001417000,
+      "tag": "0078_reset_ai_pick_state_face_composition",
+      "breakpoints": true
     }
   ]
 }

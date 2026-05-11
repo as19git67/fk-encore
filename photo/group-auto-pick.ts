@@ -80,6 +80,12 @@ export interface PhotoSignals {
   clip_technical?: number | null;
   face_sharpness?: number | null;
   eyes_open_score?: number | null;
+  /**
+   * Face-composition score produced by the embedding service (e.g.
+   * eye line alignment, rule-of-thirds positioning of the dominant
+   * face). Range [0, 1]; missing on photos without a detected face.
+   */
+  face_composition?: number | null;
   // Derived from faces table:
   //   face_count    = number of detected faces
   //   face_coverage = Σ (bbox.width · bbox.height), normalised relative to
@@ -142,16 +148,30 @@ export function scorePhoto(signals: PhotoSignals): AiPickPhotoScore {
     const faceSharpness = clamp01(signals.face_sharpness);
     const eyesOpen = clamp01(signals.eyes_open_score);
     const faceCoverage = normaliseFaceCoverage(signals.face_coverage);
+    const faceComposition = clamp01(signals.face_composition);
+    // Face branch weights — tuned 2026-05 from the user's
+    // calibration export (~119 reviewed groups). Highlights:
+    //   - face_sharpness stays dominant (clear bimodal signal,
+    //     std 0.34 across the sample)
+    //   - face_composition (0.10) is the new signal added once
+    //     the embedding service already exposes it (40k rows on
+    //     the live DB); previously unused.
+    //   - blur (= global sharpness) is reduced to 0.05 because
+    //     on this library it is essentially constant at 1.0 —
+    //     keeping a token weight so it still discriminates the
+    //     occasional truly-blurry frame.
     score =
-      0.45 * faceSharpness +
+      0.40 * faceSharpness +
       0.20 * eyesOpen +
       0.15 * faceCoverage +
-      0.10 * blur +
+      0.10 * faceComposition +
+      0.05 * blur +
       0.05 * aesthetics +
       0.05 * exposureContrast;
     used.face_sharpness = faceSharpness;
     used.eyes_open = eyesOpen;
     used.face_coverage = faceCoverage;
+    used.face_composition = faceComposition;
     used.blur = blur;
     used.clip_aesthetics = aesthetics;
     used.contrast = contrast;

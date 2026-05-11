@@ -290,6 +290,7 @@ export interface AiPickPhotoScore {
     face_sharpness?: number;
     eyes_open?: number;
     face_coverage?: number;
+    face_composition?: number;
     blur?: number;
     contrast?: number;
     exposure?: number;
