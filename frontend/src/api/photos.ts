@@ -840,6 +840,46 @@ export function getAiPickCalibration() {
   )
 }
 
+// ---------- Review Queue (Track I — Rapid Review) ----------
+
+export interface ReviewQueuePhoto {
+  id: number
+  filename: string
+  taken_at: string | null
+  curation: 'visible' | 'hidden' | 'favorite'
+  ai_picked: boolean
+}
+
+export interface ReviewQueueGroup {
+  id: number
+  cover_photo_id: number | null
+  member_count: number
+  ai_picked_photo_ids: number[]
+  ai_picked_confidence: 'high' | 'medium' | 'low' | null
+  photos: ReviewQueuePhoto[]
+}
+
+export interface ReviewQueueResponse {
+  total: number
+  offset: number
+  groups: ReviewQueueGroup[]
+}
+
+export function getReviewQueue(opts: {
+  offset?: number
+  limit?: number
+  confidence?: 'high' | 'medium' | 'low'
+} = {}) {
+  const sp = new URLSearchParams()
+  if (opts.offset !== undefined) sp.set('offset', String(opts.offset))
+  if (opts.limit !== undefined) sp.set('limit', String(opts.limit))
+  if (opts.confidence) sp.set('confidence', opts.confidence)
+  const qs = sp.toString()
+  return apiFetch<ReviewQueueResponse>(
+    `/photos/groups/review-queue${qs ? `?${qs}` : ''}`,
+  )
+}
+
 export function backfillPhotoDimensions() {
   return apiFetch<{ scanned: number; updated: number; failed: number }>(
     '/photos/backfill-dimensions',

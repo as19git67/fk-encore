@@ -1197,10 +1197,12 @@ import {
   acceptAiPickLogic,
   bulkAcceptHighConfidencePicksLogic,
   exportCalibrationDatasetLogic,
+  listReviewQueueLogic,
   recomputeAiPicksForAllUsers,
   type BulkAcceptResult,
   type CalibrationEntry,
   type RecomputeResult,
+  type ReviewQueueResponse,
 } from "./group-auto-pick.service";
 
 /**
@@ -1386,6 +1388,40 @@ export const calibrateAiPickWeights = api(
     const { calibrateAndPersist } = await import("./group-auto-pick.calibration");
     return await calibrateAndPersist(userId);
   }
+);
+
+/**
+ * Paginated stream of the user's unreviewed similar-photo groups,
+ * enriched with thumbnail filenames + per-photo AI-pick flags. Drives
+ * the "Rapid Review" view (Track I Stufe A). Sorted high → medium →
+ * low → no-pick so the user can blast through the easy decisions
+ * first and tackle ambiguous ones at the end.
+ */
+export const listReviewQueue = api(
+  { expose: true, method: "GET", path: "/photos/groups/review-queue", auth: true },
+  async ({
+    offset,
+    limit,
+    confidence,
+  }: {
+    offset?: Query<number>;
+    limit?: Query<number>;
+    confidence?: Query<string>;
+  }): Promise<ReviewQueueResponse> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    const conf =
+      confidence === "high" || confidence === "medium" || confidence === "low"
+        ? (confidence as "high" | "medium" | "low")
+        : undefined;
+    return await listReviewQueueLogic(userId, {
+      offset: typeof offset === "number" ? offset : undefined,
+      limit: typeof limit === "number" ? limit : undefined,
+      confidence: conf,
+    });
+  },
 );
 
 /**
