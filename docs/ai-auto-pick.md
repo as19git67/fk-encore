@@ -118,10 +118,20 @@ einer Portrait-Burst keinen Slot kapert.
 - **`high` Confidence:** Nicht-Picks werden im Grid automatisch
   versteckt (über Server-Filter `aiHiddenMode=exclude`). User sieht im
   Grid nur die Picks, mit einem `+N`-Marker am Cover-Foto.
-- **`medium`:** Marker mit Orange-Tint, **kein** Auto-Hide. Klick →
-  Review-Dialog.
-- **`low`:** Marker neutral, **kein** Auto-Hide. Heutiger Review-Flow
-  beim Klick.
+- **`medium`:** Marker mit Orange-Tint, **kein** Auto-Hide.
+- **`low`:** Marker neutral, **kein** Auto-Hide.
+
+**Click-Semantik im Grid** ist überall einheitlich, unabhängig von der
+Confidence-Stufe:
+
+- **Klick auf das Foto selbst** → Fullscreen-Ansicht (wie bei jedem
+  Foto). Die KI-Auswahl ist die Standard-Ansicht — der User soll sie
+  ohne Reibung anschauen können.
+- **Klick auf den `+N`-Marker** → Review-Dialog (`PhotoCompareView`)
+  mit allen Gruppen-Mitgliedern und dem "KI-Vorschlag übernehmen"-
+  Button.
+- **Ctrl/Cmd/Shift-Klick** auf irgendeinen Teil eines Gruppen-Fotos →
+  Multi-Select der **ganzen** Gruppe.
 
 Im Review-Dialog (`PhotoCompareView.vue`) gibt es einen
 "KI-Vorschlag übernehmen"-Button. Klick →
