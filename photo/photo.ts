@@ -1354,6 +1354,41 @@ export const exportAiPickCalibration = api(
 );
 
 /**
+ * Fit per-user scoring weights from the user's reviewed groups
+ * (pairwise logistic regression — see
+ * group-auto-pick.calibration.ts). Persists the result on
+ * `ai_pick_user_weights`; next `recomputeAiPicks` pass will pick it
+ * up automatically. Returns diagnostics so the UI can surface
+ * "X % Übereinstimmung mit deinen Reviews".
+ *
+ * Requires at least `MIN_PAIRS_FOR_FIT` (10) kept-vs-hidden pairs in
+ * each branch the user wants to calibrate; below that, defaults are
+ * kept for the under-sampled branch.
+ */
+export const calibrateAiPickWeights = api(
+  { expose: true, method: "POST", path: "/photos/groups/calibrate-ai-pick-weights", auth: true },
+  async (): Promise<{
+    weights: { face: number[]; non_face: number[] };
+    metadata: {
+      pair_count_face: number;
+      pair_count_non_face: number;
+      pair_count_skipped_mixed: number;
+      top1_accuracy_face: number;
+      top1_accuracy_non_face: number;
+      top1_accuracy_face_baseline: number;
+      top1_accuracy_non_face_baseline: number;
+    };
+  }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "data.manage");
+    const { calibrateAndPersist } = await import("./group-auto-pick.calibration");
+    return await calibrateAndPersist(userId);
+  }
+);
+
+/**
  * Semantic photo search using natural language query via CLIP text embeddings.
  */
 export const searchPhotos = api(
