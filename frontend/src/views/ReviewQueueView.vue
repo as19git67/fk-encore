@@ -27,6 +27,7 @@ import PhotoCompareView from '../components/PhotoCompareView.vue'
 import {
   getReviewQueue,
   acceptAiPick,
+  pickPhotosInGroup,
   bulkAcceptHighConfidenceAiPicks,
   type ReviewQueueGroup,
   type ReviewQueueUserCalibration,
@@ -136,6 +137,23 @@ function onChangeFilter() {
 }
 
 async function onAccept(group: ReviewQueueGroup) {
+  await runAcceptAction(group, () => acceptAiPick(group.id))
+}
+
+/**
+ * Stufe C: user clicks one specific photo in a small-group card.
+ * Keep that photo, hide the rest, mark reviewed. Server-side call
+ * goes through the same `acceptAiPickLogic` path as the AI pick,
+ * with the user's choice as the override.
+ */
+async function onPickOne(group: ReviewQueueGroup, photoId: number) {
+  await runAcceptAction(group, () => pickPhotosInGroup(group.id, [photoId]))
+}
+
+async function runAcceptAction(
+  group: ReviewQueueGroup,
+  action: () => Promise<{ success: boolean; hidden_count: number }>,
+) {
   if (pendingAcceptIds.value.has(group.id)) return
   // Mark optimistically — UI hides the card right away. On failure
   // we re-insert it.
@@ -143,7 +161,8 @@ async function onAccept(group: ReviewQueueGroup) {
   set.add(group.id)
   pendingAcceptIds.value = set
   try {
-    await acceptAiPick(group.id)
+    const result = await action()
+    if (!result.success) throw new Error('Server hat die Aktion abgelehnt.')
     // Permanently remove the card. Decrement total so the counter
     // stays honest without a refetch.
     groups.value = groups.value.filter((g) => g.id !== group.id)
@@ -154,6 +173,14 @@ async function onAccept(group: ReviewQueueGroup) {
     reverted.delete(group.id)
     pendingAcceptIds.value = reverted
   }
+}
+
+// Small-group layout (≤ 3 photos): show every member at large equal
+// size, single tap = "keep this one, hide the rest". Skips the
+// dual-action footer entirely.
+const SMALL_GROUP_THRESHOLD = 3
+function isSmallGroup(group: ReviewQueueGroup): boolean {
+  return group.photos.length > 0 && group.photos.length <= SMALL_GROUP_THRESHOLD
 }
 
 function askBulkAcceptHigh() {
@@ -345,50 +372,90 @@ onMounted(() => {
           <span class="rq-card-count">{{ group.member_count }} Fotos</span>
         </div>
 
-        <!-- AI pick big. If multiple picks, show all big. -->
-        <div class="rq-card-picks">
-          <img
-            v-for="photo in group.photos.filter((p) => p.ai_picked)"
-            :key="photo.id"
-            :src="thumb(photo.filename, 800)"
-            :alt="''"
-            class="rq-card-pick"
-            loading="lazy"
-            decoding="async"
-          />
-          <!-- Fallback: no AI pick → show first photo big -->
-          <img
-            v-if="group.ai_picked_photo_ids.length === 0 && group.photos[0]"
-            :src="thumb(group.photos[0].filename, 800)"
-            :alt="''"
-            class="rq-card-pick"
-            loading="lazy"
-            decoding="async"
-          />
-        </div>
-
-        <!-- Sibling strip. Picks get a green check; non-picks dimmed. -->
-        <div v-if="group.photos.length > 1" class="rq-card-strip">
-          <div
+        <!-- Stufe C: small groups (≤ 3 photos) get a side-by-side
+             layout where every member is equally large and clickable.
+             One tap on a photo = "keep this one, hide the rest". The
+             AI's suggestion still gets a green outline + check icon
+             as a hint, but the user can ignore it. -->
+        <div
+          v-if="isSmallGroup(group)"
+          class="rq-card-oneclick"
+        >
+          <button
             v-for="photo in group.photos"
             :key="photo.id"
-            class="rq-thumb"
+            type="button"
+            class="rq-oneclick-tile"
             :class="{
-              'rq-thumb--picked': photo.ai_picked,
-              'rq-thumb--non-pick': !photo.ai_picked && group.ai_picked_photo_ids.length > 0,
+              'rq-oneclick-tile--ai-pick': photo.ai_picked,
             }"
+            :title="photo.ai_picked
+              ? 'KI-Vorschlag — Klick = dieses behalten, Rest verstecken'
+              : 'Klick = dieses behalten, Rest verstecken'"
+            :disabled="pendingAcceptIds.has(group.id)"
+            @click="onPickOne(group, photo.id)"
           >
             <img
-              :src="thumb(photo.filename, 200)"
+              :src="thumb(photo.filename, 800)"
               :alt="''"
               loading="lazy"
               decoding="async"
             />
-            <i v-if="photo.ai_picked" class="pi pi-check rq-thumb-check" />
-          </div>
+            <i v-if="photo.ai_picked" class="pi pi-check rq-oneclick-check" />
+          </button>
         </div>
 
+        <!-- Regular layout for groups with 4+ photos. AI pick big +
+             sibling strip + dual action buttons. -->
+        <template v-else>
+          <!-- AI pick big. If multiple picks, show all big. -->
+          <div class="rq-card-picks">
+            <img
+              v-for="photo in group.photos.filter((p) => p.ai_picked)"
+              :key="photo.id"
+              :src="thumb(photo.filename, 800)"
+              :alt="''"
+              class="rq-card-pick"
+              loading="lazy"
+              decoding="async"
+            />
+            <!-- Fallback: no AI pick → show first photo big -->
+            <img
+              v-if="group.ai_picked_photo_ids.length === 0 && group.photos[0]"
+              :src="thumb(group.photos[0].filename, 800)"
+              :alt="''"
+              class="rq-card-pick"
+              loading="lazy"
+              decoding="async"
+            />
+          </div>
+
+          <!-- Sibling strip. Picks get a green check; non-picks dimmed. -->
+          <div v-if="group.photos.length > 1" class="rq-card-strip">
+            <div
+              v-for="photo in group.photos"
+              :key="photo.id"
+              class="rq-thumb"
+              :class="{
+                'rq-thumb--picked': photo.ai_picked,
+                'rq-thumb--non-pick': !photo.ai_picked && group.ai_picked_photo_ids.length > 0,
+              }"
+            >
+              <img
+                :src="thumb(photo.filename, 200)"
+                :alt="''"
+                loading="lazy"
+                decoding="async"
+              />
+              <i v-if="photo.ai_picked" class="pi pi-check rq-thumb-check" />
+            </div>
+          </div>
+        </template>
+
         <div class="rq-card-actions">
+          <!-- AI accept stays available even in small-group layout, in
+               case the user wants the multi-pick result without
+               picking one specifically. -->
           <Button
             icon="pi pi-check"
             severity="success"
@@ -604,6 +671,62 @@ onMounted(() => {
   font-size: 0.85rem;
   color: var(--p-text-muted-color);
   margin: 8px 0 0 0;
+}
+
+/* Stufe C: One-Click-Pick — side-by-side equal-sized photos. Tap a
+   photo to keep it. The AI's suggestion is hinted with a green
+   outline + check icon but every photo is equally clickable. */
+.rq-card-oneclick {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.rq-oneclick-tile {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 220px;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  padding: 0;
+  background: var(--p-content-hover-background);
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.15s, transform 0.1s;
+}
+.rq-oneclick-tile:hover:not(:disabled) {
+  border-color: var(--p-primary-400, #60a5fa);
+}
+.rq-oneclick-tile:active:not(:disabled) {
+  transform: scale(0.99);
+}
+.rq-oneclick-tile:disabled {
+  cursor: not-allowed;
+}
+.rq-oneclick-tile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-height: 360px;
+  object-fit: contain;
+}
+.rq-oneclick-tile--ai-pick {
+  border-color: var(--p-green-500, #22c55e);
+}
+.rq-oneclick-check {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: var(--p-green-500, #22c55e);
+  color: #fff;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  pointer-events: none;
 }
 
 .rq-card-picks {

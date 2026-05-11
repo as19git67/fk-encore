@@ -813,6 +813,21 @@ export function acceptAiPick(id: number) {
   )
 }
 
+/**
+ * Manual single-pick action (Stufe C). Keeps the supplied photos,
+ * hides the rest, marks the group reviewed. Used by the One-Click-Pick
+ * UI in the review queue for 2- and 3-photo groups.
+ */
+export function pickPhotosInGroup(groupId: number, photoIds: number[]) {
+  return apiFetch<{ success: boolean; hidden_count: number }>(
+    `/photos/groups/${groupId}/pick-photos`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ photoIds }),
+    },
+  )
+}
+
 export function bulkAcceptHighConfidenceAiPicks() {
   return apiFetch<{ groups_accepted: number; hidden_count: number }>(
     '/photos/groups/bulk-accept-ai-picks',

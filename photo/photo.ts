@@ -1323,6 +1323,32 @@ export const acceptAiPick = api(
 );
 
 /**
+ * Manual "keep these photos, hide the rest" review action. Used by the
+ * One-Click-Pick UI in the review queue (Stufe C) when the user wants
+ * to overrule the AI suggestion in a 2- or 3-photo group: a single tap
+ * on a photo marks it as "the one I want to keep" and the rest get
+ * hidden in the same atomic step that the regular accept-AI path uses.
+ *
+ * Behaves identically to /accept-ai-pick otherwise (favorites are
+ * preserved; group is marked reviewed). Requires every supplied
+ * photo_id to actually belong to the group — protects against UI
+ * bugs that would otherwise hide every group member.
+ */
+export const pickPhotosInGroup = api(
+  { expose: true, method: "POST", path: "/photos/groups/:id/pick-photos", auth: true },
+  async ({ id, photoIds }: { id: number; photoIds: number[] }): Promise<{ success: boolean; hidden_count: number }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.delete");
+    if (!Array.isArray(photoIds) || photoIds.length === 0) {
+      throw APIError.invalidArgument("photoIds must be a non-empty array");
+    }
+    return await acceptAiPickLogic(userId, id, photoIds);
+  }
+);
+
+/**
  * Bulk-accept every unreviewed high-confidence AI pick. Used by the
  * "Alle hochkonfidenten KI-Picks bestätigen" admin button to make the
  * initial rollout against thousands of groups practical without manual

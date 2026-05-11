@@ -284,6 +284,7 @@ export function recomputeAiPicksForAllUsers(): Promise<RecomputeResult> {
 export async function acceptAiPickLogic(
   userId: number,
   groupId: number,
+  overridePickedPhotoIds?: number[],
 ): Promise<{ success: boolean; hidden_count: number }> {
   const group = await dbFirst<{
     id: number;
@@ -300,7 +301,15 @@ export async function acceptAiPickLogic(
   );
   if (!group) return { success: false, hidden_count: 0 };
   if (group.reviewed_at) return { success: true, hidden_count: 0 };
-  const picked = new Set(group.ai_picked_photo_ids ?? []);
+  // Caller-supplied override: the "one-click pick" UI for small groups
+  // (Stufe C) lets the user pick a photo other than the AI's
+  // suggestion. We treat the override as the new "kept" set; all other
+  // group members get hidden. Empty / unsupplied → fall back to the
+  // AI's pick set (the original Stufe-A accept path).
+  const pickedArray = overridePickedPhotoIds && overridePickedPhotoIds.length > 0
+    ? overridePickedPhotoIds
+    : group.ai_picked_photo_ids ?? [];
+  const picked = new Set(pickedArray);
   if (picked.size === 0) return { success: false, hidden_count: 0 };
 
   const members = await dbAll<{ photo_id: number }>(
@@ -308,6 +317,14 @@ export async function acceptAiPickLogic(
       .from(photoGroupMembers)
       .where(eq(photoGroupMembers.group_id, groupId)),
   );
+  // When the override doesn't actually exist in this group (UI bug,
+  // stale data), refuse rather than hide everything by accident.
+  const memberSet = new Set(members.map((m) => m.photo_id));
+  for (const pid of picked) {
+    if (!memberSet.has(pid)) {
+      return { success: false, hidden_count: 0 };
+    }
+  }
   const toHide = members.map((m) => m.photo_id).filter((pid) => !picked.has(pid));
   if (toHide.length === 0) {
     // All members are picked. Mark reviewed so the group leaves the
