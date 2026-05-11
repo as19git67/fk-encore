@@ -540,6 +540,13 @@
       "when": 1779001415000,
       "tag": "0076_photo_dimensions",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1779001416000,
+      "tag": "0077_reset_ai_pick_state",
+      "breakpoints": true
     }
   ]
 }
