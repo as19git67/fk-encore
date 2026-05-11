@@ -61,7 +61,7 @@ struct AlbumDetailView: View {
             PhotoFullscreenView(photos: displayedPhotos, currentIndex: $fullscreenIndex)
         }
         .sheet(isPresented: $filterSort.isMenuPresented) {
-            FilterSortMenuView(viewModel: filterSort, available: [.favorite, .mediaType, .hasGps, .dateRange])
+            FilterSortMenuView(viewModel: filterSort, available: [.favorite, .hasGps, .dateRange])
                 .presentationDetents([.medium, .large])
         }
         .toolbar {

@@ -2,7 +2,7 @@ import SwiftUI
 
 struct PhotoGridView: View {
     @State private var viewModel      = PhotosViewModel()
-    @State private var filterSort     = FilterSortViewModel()
+    @State private var filterSort     = FilterSortViewModel(persistenceKey: "photos.filterSort")
     @State private var isFullscreenPresented = false
     @State private var selectedIndex  = 0
     @State private var scrollTarget: Int?

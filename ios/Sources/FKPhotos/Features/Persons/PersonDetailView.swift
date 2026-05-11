@@ -47,7 +47,7 @@ struct PersonDetailView: View {
             // Date range — the only criterion available for FacePhoto
             if f.dateFrom != nil || f.dateTo != nil {
                 let isoStr = photo.taken_at ?? photo.created_at
-                guard let t = ISO8601DateFormatter().date(from: isoStr) else { return false }
+                guard let t = PhotoFilter.parseDate(isoStr) else { return false }
                 if let from = f.dateFrom, t < from { return false }
                 if let to = f.dateTo {
                     let end = Calendar.current.date(byAdding: .day, value: 1, to: to) ?? to
@@ -57,11 +57,10 @@ struct PersonDetailView: View {
             return true
         }
         guard !filterSort.appliedSort.isDefault else { return filtered }
-        let fmt = ISO8601DateFormatter()
         return filtered.sorted { a, b in
             guard let pa = a.photo, let pb = b.photo else { return false }
-            let va = fmt.date(from: pa.taken_at ?? pa.created_at)?.timeIntervalSince1970 ?? 0
-            let vb = fmt.date(from: pb.taken_at ?? pb.created_at)?.timeIntervalSince1970 ?? 0
+            let va = PhotoFilter.parseDate(pa.taken_at ?? pa.created_at)?.timeIntervalSince1970 ?? 0
+            let vb = PhotoFilter.parseDate(pb.taken_at ?? pb.created_at)?.timeIntervalSince1970 ?? 0
             return filterSort.appliedSort.direction == .desc ? va > vb : va < vb
         }
     }
@@ -116,7 +115,7 @@ struct PersonDetailView: View {
         .navigationTitle(isUnnamed ? "Unbekannt" : personName)
         .navigationBarTitleDisplayMode(.large)
         .sheet(isPresented: $filterSort.isMenuPresented) {
-            FilterSortMenuView(viewModel: filterSort, available: [.favorite, .mediaType, .hasGps, .dateRange])
+            FilterSortMenuView(viewModel: filterSort, available: [.favorite, .hasGps, .dateRange])
                 .presentationDetents([.medium, .large])
         }
         .toolbar {
