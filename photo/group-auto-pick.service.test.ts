@@ -1,0 +1,296 @@
+import { beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
+import db from "../db/database";
+import { dbAll, dbExec, dbInsertReturning } from "../db/adapter";
+import {
+  faces,
+  photoCuration,
+  photoGroupMembers,
+  photoGroups,
+  photos,
+  users,
+} from "../db/schema";
+import {
+  acceptAiPickLogic,
+  bulkAcceptHighConfidencePicksLogic,
+  exportCalibrationDatasetLogic,
+  recomputeAiPicksForGroups,
+} from "./group-auto-pick.service";
+
+async function makeUser(email: string): Promise<number> {
+  const row = await dbInsertReturning<{ id: number }>(
+    db.insert(users).values({
+      email,
+      name: "Test",
+      password_hash: "x",
+    }).returning({ id: users.id }),
+  );
+  return row!.id;
+}
+
+interface PhotoSeed {
+  details?: Record<string, number>;
+  faces?: number;
+  bboxWH?: [number, number][];
+}
+
+async function makePhoto(userId: number, seed: PhotoSeed = {}): Promise<number> {
+  const row = await dbInsertReturning<{ id: number }>(
+    db.insert(photos).values({
+      user_id: userId,
+      filename: `p-${Math.random().toString(36).slice(2)}.jpg`,
+      original_name: "p.jpg",
+      mime_type: "image/jpeg",
+      size: 1000,
+      ai_quality_details: seed.details ?? null,
+    }).returning({ id: photos.id }),
+  );
+  const photoId = row!.id;
+  const count = seed.faces ?? 0;
+  const sizes = seed.bboxWH ?? [];
+  for (let i = 0; i < count; i++) {
+    const [w, h] = sizes[i] ?? [0.1, 0.1];
+    await dbExec(
+      db.insert(faces).values({
+        photo_id: photoId,
+        bbox: JSON.stringify({ x: 0, y: 0, width: w, height: h }),
+        embedding: "[]",
+      }),
+    );
+  }
+  return photoId;
+}
+
+async function makeGroup(userId: number, coverPhotoId: number, memberIds: number[]): Promise<number> {
+  const row = await dbInsertReturning<{ id: number }>(
+    db.insert(photoGroups).values({
+      user_id: userId,
+      cover_photo_id: coverPhotoId,
+    }).returning({ id: photoGroups.id }),
+  );
+  const groupId = row!.id;
+  for (let i = 0; i < memberIds.length; i++) {
+    await dbExec(
+      db.insert(photoGroupMembers).values({
+        group_id: groupId,
+        photo_id: memberIds[i],
+        similarity_rank: i,
+      }),
+    );
+  }
+  return groupId;
+}
+
+beforeEach(async () => {
+  await db.delete(photoCuration);
+  await db.delete(photoGroupMembers);
+  await db.delete(photoGroups);
+  await db.delete(faces);
+  await db.delete(photos);
+  await db.delete(users);
+});
+
+describe("recomputeAiPicksForGroups", () => {
+  it("scores an unreviewed group and persists ai_picked_*", async () => {
+    const u = await makeUser("recompute@test.com");
+    // Non-face branch: blur dominates. Photo b is the obvious winner.
+    const a = await makePhoto(u, { details: { blur_score: 0.10 } });
+    const b = await makePhoto(u, { details: { blur_score: 0.90 } });
+    const c = await makePhoto(u, { details: { blur_score: 0.20 } });
+    const g = await makeGroup(u, a, [a, b, c]);
+
+    const result = await recomputeAiPicksForGroups(u);
+    expect(result.groups_scored).toBe(1);
+
+    const [row] = await db.select().from(photoGroups).where(eq(photoGroups.id, g));
+    expect(row.ai_picked_photo_ids).toEqual([b]);
+    expect(row.ai_picked_confidence).toBe("high");
+    expect(row.ai_picked_at).not.toBeNull();
+    expect(row.ai_pick_details?.scores).toHaveLength(3);
+  });
+
+  it("skips reviewed groups", async () => {
+    const u = await makeUser("skip-reviewed@test.com");
+    const a = await makePhoto(u, { details: { blur_score: 0.10 } });
+    const b = await makePhoto(u, { details: { blur_score: 0.90 } });
+    const g = await makeGroup(u, a, [a, b]);
+    await dbExec(
+      db.update(photoGroups)
+        .set({ reviewed_at: new Date().toISOString() })
+        .where(eq(photoGroups.id, g)),
+    );
+
+    const result = await recomputeAiPicksForGroups(u);
+    expect(result.groups_scored).toBe(0);
+
+    const [row] = await db.select().from(photoGroups).where(eq(photoGroups.id, g));
+    expect(row.ai_picked_photo_ids).toBeNull();
+  });
+
+  it("aggregates face_coverage from the faces table", async () => {
+    const u = await makeUser("face-coverage@test.com");
+    // Same face_sharpness + eyes_open everywhere, only face area differs.
+    // Photo b has a much larger face → wins via face_coverage weight.
+    const a = await makePhoto(u, {
+      details: { face_sharpness: 0.5, eyes_open_score: 0.5, blur_score: 0.5 },
+      faces: 1,
+      bboxWH: [[0.05, 0.05]],
+    });
+    const b = await makePhoto(u, {
+      details: { face_sharpness: 0.5, eyes_open_score: 0.5, blur_score: 0.5 },
+      faces: 1,
+      bboxWH: [[0.5, 0.5]],
+    });
+    await makeGroup(u, a, [a, b]);
+
+    await recomputeAiPicksForGroups(u);
+    const [row] = await db.select().from(photoGroups);
+    expect(row.ai_picked_photo_ids).toContain(b);
+  });
+
+  it("only scores the group ids passed in when filtered", async () => {
+    const u = await makeUser("filter-ids@test.com");
+    const a = await makePhoto(u, { details: { blur_score: 0.1 } });
+    const b = await makePhoto(u, { details: { blur_score: 0.9 } });
+    const c = await makePhoto(u, { details: { blur_score: 0.1 } });
+    const d = await makePhoto(u, { details: { blur_score: 0.9 } });
+    const g1 = await makeGroup(u, a, [a, b]);
+    const g2 = await makeGroup(u, c, [c, d]);
+
+    const result = await recomputeAiPicksForGroups(u, [g1]);
+    expect(result.groups_scored).toBe(1);
+    const rows = await dbAll<{ id: number; ai_picked_photo_ids: number[] | null }>(
+      db.select({
+        id: photoGroups.id,
+        ai_picked_photo_ids: photoGroups.ai_picked_photo_ids,
+      }).from(photoGroups),
+    );
+    const g1Row = rows.find((r) => r.id === g1);
+    const g2Row = rows.find((r) => r.id === g2);
+    expect(g1Row?.ai_picked_photo_ids).not.toBeNull();
+    expect(g2Row?.ai_picked_photo_ids).toBeNull();
+  });
+});
+
+describe("acceptAiPickLogic", () => {
+  it("hides non-picked members and marks the group reviewed", async () => {
+    const u = await makeUser("accept@test.com");
+    const a = await makePhoto(u, { details: { blur_score: 0.10 } });
+    const b = await makePhoto(u, { details: { blur_score: 0.90 } });
+    const c = await makePhoto(u, { details: { blur_score: 0.20 } });
+    const g = await makeGroup(u, a, [a, b, c]);
+    await recomputeAiPicksForGroups(u);
+
+    const result = await acceptAiPickLogic(u, g);
+    expect(result.success).toBe(true);
+    expect(result.hidden_count).toBe(2);
+
+    const curationRows = await dbAll<{ photo_id: number; status: string }>(
+      db.select({ photo_id: photoCuration.photo_id, status: photoCuration.status })
+        .from(photoCuration)
+        .where(eq(photoCuration.user_id, u)),
+    );
+    const hidden = curationRows.filter((r) => r.status === "hidden").map((r) => r.photo_id);
+    expect(hidden.sort()).toEqual([a, c].sort());
+
+    const [groupRow] = await db.select().from(photoGroups).where(eq(photoGroups.id, g));
+    expect(groupRow.reviewed_at).not.toBeNull();
+  });
+
+  it("does not clobber favorites when hiding non-picks", async () => {
+    const u = await makeUser("favorite-safe@test.com");
+    const a = await makePhoto(u, { details: { blur_score: 0.10 } });
+    const b = await makePhoto(u, { details: { blur_score: 0.90 } });
+    const g = await makeGroup(u, a, [a, b]);
+    // User favorited the photo the AI would hide.
+    await dbExec(
+      db.insert(photoCuration).values({
+        user_id: u,
+        photo_id: a,
+        status: "favorite",
+      }),
+    );
+    await recomputeAiPicksForGroups(u);
+
+    await acceptAiPickLogic(u, g);
+
+    const [row] = await db.select().from(photoCuration)
+      .where(eq(photoCuration.photo_id, a));
+    expect(row.status).toBe("favorite");
+  });
+
+  it("is a no-op on already-reviewed groups", async () => {
+    const u = await makeUser("already-reviewed@test.com");
+    const a = await makePhoto(u, { details: { blur_score: 0.10 } });
+    const b = await makePhoto(u, { details: { blur_score: 0.90 } });
+    const g = await makeGroup(u, a, [a, b]);
+    await recomputeAiPicksForGroups(u);
+    await dbExec(
+      db.update(photoGroups)
+        .set({ reviewed_at: new Date().toISOString() })
+        .where(eq(photoGroups.id, g)),
+    );
+
+    const result = await acceptAiPickLogic(u, g);
+    expect(result.hidden_count).toBe(0);
+  });
+});
+
+describe("bulkAcceptHighConfidencePicksLogic", () => {
+  it("only touches high-confidence unreviewed groups", async () => {
+    const u = await makeUser("bulk@test.com");
+    // High confidence (Δ ≈ 0.32):
+    const ha = await makePhoto(u, { details: { blur_score: 0.10 } });
+    const hb = await makePhoto(u, { details: { blur_score: 0.90 } });
+    const high = await makeGroup(u, ha, [ha, hb]);
+    // Medium confidence (Δ ≈ 0.08 — between 0.04 and 0.10):
+    const ma = await makePhoto(u, { details: { blur_score: 0.40 } });
+    const mb = await makePhoto(u, { details: { blur_score: 0.60 } });
+    const medium = await makeGroup(u, ma, [ma, mb]);
+
+    await recomputeAiPicksForGroups(u);
+    const result = await bulkAcceptHighConfidencePicksLogic(u);
+    expect(result.groups_accepted).toBe(1);
+    expect(result.hidden_count).toBe(1);
+
+    const [highRow] = await db.select().from(photoGroups).where(eq(photoGroups.id, high));
+    const [medRow] = await db.select().from(photoGroups).where(eq(photoGroups.id, medium));
+    expect(highRow.reviewed_at).not.toBeNull();
+    expect(medRow.reviewed_at).toBeNull();
+  });
+});
+
+describe("exportCalibrationDatasetLogic", () => {
+  it("emits one entry per reviewed group with kept/hidden flags", async () => {
+    const u = await makeUser("calibration@test.com");
+    const a = await makePhoto(u, { details: { blur_score: 0.10 } });
+    const b = await makePhoto(u, { details: { blur_score: 0.90 } });
+    const g = await makeGroup(u, a, [a, b]);
+    await recomputeAiPicksForGroups(u);
+    await acceptAiPickLogic(u, g);
+
+    const result = await exportCalibrationDatasetLogic(u);
+    expect(result.entries).toHaveLength(1);
+    const entry = result.entries[0];
+    expect(entry.group_id).toBe(g);
+    expect(entry.group_confidence).toBe("high");
+    expect(entry.group_ai_picked_photo_ids).toEqual([b]);
+    const aRow = entry.photos.find((p) => p.photo_id === a);
+    const bRow = entry.photos.find((p) => p.photo_id === b);
+    expect(aRow?.user_kept).toBe(false);
+    expect(aRow?.ai_picked).toBe(false);
+    expect(bRow?.user_kept).toBe(true);
+    expect(bRow?.ai_picked).toBe(true);
+  });
+
+  it("excludes unreviewed groups", async () => {
+    const u = await makeUser("calibration-unreviewed@test.com");
+    const a = await makePhoto(u, { details: { blur_score: 0.10 } });
+    const b = await makePhoto(u, { details: { blur_score: 0.90 } });
+    await makeGroup(u, a, [a, b]);
+    await recomputeAiPicksForGroups(u);
+
+    const result = await exportCalibrationDatasetLogic(u);
+    expect(result.entries).toHaveLength(0);
+  });
+});

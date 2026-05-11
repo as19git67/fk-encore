@@ -1187,6 +1187,15 @@ import type {
   ListGroupsResponse,
   FindGroupsResponse,
 } from "../db/types";
+import {
+  acceptAiPickLogic,
+  bulkAcceptHighConfidencePicksLogic,
+  exportCalibrationDatasetLogic,
+  recomputeAiPicksForUser,
+  type BulkAcceptResult,
+  type CalibrationEntry,
+  type RecomputeResult,
+} from "./group-auto-pick.service";
 
 /**
  * Find similar photo groups using DINOv2 embeddings.
@@ -1246,6 +1255,77 @@ export const reviewPhotoGroup = api(
     const authData = getAuthData()!;
     requirePermission(authData, "photos.delete");
     return await service.reviewPhotoGroupLogic(userId, id, photoIds);
+  }
+);
+
+// ========== AI Auto-Pick (Track I) ==========
+
+/**
+ * Force-recompute the AI suggested "best of group" pick for every
+ * unreviewed group of the current user. Normally this runs automatically
+ * after `/photos/find-groups`; this endpoint exists so the user can
+ * re-trigger scoring without re-running the (much heavier) embedding
+ * regroup, e.g. after a manual ai_quality_details refresh.
+ */
+export const recomputeAiPicks = api(
+  { expose: true, method: "POST", path: "/photos/groups/recompute-ai-picks", auth: true },
+  async (): Promise<RecomputeResult> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "data.manage");
+    return await recomputeAiPicksForUser(userId);
+  }
+);
+
+/**
+ * "Accept the KI suggestion for this group" — turns the AI pick into a
+ * concrete user review. Non-picked members are hidden via the existing
+ * photo_curation mechanism (skipping favorites). The group's
+ * `reviewed_at` is set, removing it from the AI-hidden filter going
+ * forward.
+ */
+export const acceptAiPick = api(
+  { expose: true, method: "POST", path: "/photos/groups/:id/accept-ai-pick", auth: true },
+  async ({ id }: { id: number }): Promise<{ success: boolean; hidden_count: number }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.delete");
+    return await acceptAiPickLogic(userId, id);
+  }
+);
+
+/**
+ * Bulk-accept every unreviewed high-confidence AI pick. Used by the
+ * "Alle hochkonfidenten KI-Picks bestätigen" admin button to make the
+ * initial rollout against thousands of groups practical without manual
+ * per-group clicks.
+ */
+export const bulkAcceptHighConfidenceAiPicks = api(
+  { expose: true, method: "POST", path: "/photos/groups/bulk-accept-ai-picks", auth: true },
+  async (): Promise<BulkAcceptResult> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "data.manage");
+    return await bulkAcceptHighConfidencePicksLogic(userId);
+  }
+);
+
+/**
+ * Calibration export. Returns every reviewed group's members alongside
+ * the AI's pick, the user's keep/hide decision, and the per-photo
+ * sub-signals — the dataset used to regress weights in Stufe D.
+ */
+export const exportAiPickCalibration = api(
+  { expose: true, method: "GET", path: "/photos/groups/ai-pick-calibration", auth: true },
+  async (): Promise<{ entries: CalibrationEntry[] }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "data.manage");
+    return await exportCalibrationDatasetLogic(userId);
   }
 );
 
