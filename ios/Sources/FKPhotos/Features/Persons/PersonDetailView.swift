@@ -11,6 +11,8 @@ struct PersonDetailView: View {
     @State private var fullscreenBBoxes: [FaceBBox?] = []
     @State private var isFullscreenPresented = false
     @State private var isIgnoringAll = false
+    @State private var showIgnoreAllConfirmation = false
+    @State private var faceIdToIgnore: Int? = nil
 
     // Rename / merge state
     @State private var isRenaming = false
@@ -101,9 +103,9 @@ struct PersonDetailView: View {
                         .buttonStyle(.plain)
                         .contextMenu {
                             Button(role: .destructive) {
-                                Task { await ignoreFace(faceId: face.id) }
+                                faceIdToIgnore = face.id
                             } label: {
-                                Label("Ignorieren", systemImage: "eye.slash")
+                                Label("Ignorieren", systemImage: "person.fill.xmark")
                             }
                         }
                     }
@@ -134,12 +136,12 @@ struct PersonDetailView: View {
                 }
                 if isUnnamed && !visibleFaces.isEmpty {
                     Button {
-                        Task { await ignoreAllFaces() }
+                        showIgnoreAllConfirmation = true
                     } label: {
                         if isIgnoringAll {
                             ProgressView()
                         } else {
-                            Label("Alle ignorieren", systemImage: "eye.slash")
+                            Label("Alle ignorieren", systemImage: "person.fill.xmark")
                         }
                     }
                     .disabled(isIgnoringAll)
@@ -178,6 +180,28 @@ struct PersonDetailView: View {
             if let conflict = conflictPerson {
                 Text("\"\(conflict.name)\" existiert bereits. Die Fotos dieser Person werden zu \"\(conflict.name)\" verschoben.")
             }
+        }
+        .alert("Alle Gesichter ignorieren?", isPresented: $showIgnoreAllConfirmation) {
+            Button("Ignorieren", role: .destructive) {
+                Task { await ignoreAllFaces() }
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: {
+            Text("Alle \(visibleFaces.count) erkannten Gesichter dieser unbekannten Person werden dauerhaft ignoriert. Die Fotos bleiben erhalten.")
+        }
+        .alert("Gesicht ignorieren?", isPresented: Binding(
+            get: { faceIdToIgnore != nil },
+            set: { if !$0 { faceIdToIgnore = nil } }
+        )) {
+            Button("Ignorieren", role: .destructive) {
+                if let faceId = faceIdToIgnore {
+                    faceIdToIgnore = nil
+                    Task { await ignoreFace(faceId: faceId) }
+                }
+            }
+            Button("Abbrechen", role: .cancel) { faceIdToIgnore = nil }
+        } message: {
+            Text("Diese Gesichtserkennung wird ignoriert und nicht mehr angezeigt. Das Foto bleibt erhalten.")
         }
         .navigationDestination(isPresented: $isFullscreenPresented) {
             if !fullscreenPhotos.isEmpty {

@@ -11,7 +11,7 @@ struct AlbumDetailView: View {
     @State private var showUpload = false
     @State private var showDeleteConfirm = false
     @State private var isDeleting = false
-    @State private var selectedPhoto: PhotoWithCuration?
+    @State private var fullscreenIndex: Int = 0
     @State private var isFullscreenPresented = false
     @State private var filterSort = FilterSortViewModel()
     @Environment(\.dismiss) private var dismiss
@@ -44,7 +44,7 @@ struct AlbumDetailView: View {
                 LazyVGrid(columns: columns, spacing: 2) {
                     ForEach(displayedPhotos) { photo in
                         Button {
-                            selectedPhoto = photo
+                            fullscreenIndex = displayedPhotos.firstIndex(where: { $0.id == photo.id }) ?? 0
                             isFullscreenPresented = true
                         } label: {
                             PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop)
@@ -58,9 +58,7 @@ struct AlbumDetailView: View {
         .navigationTitle(album?.name ?? "Album")
         .navigationBarTitleDisplayMode(.large)
         .navigationDestination(isPresented: $isFullscreenPresented) {
-            if let photo = selectedPhoto {
-                PhotoFullscreenView(photo: photo)
-            }
+            PhotoFullscreenView(photos: displayedPhotos, currentIndex: $fullscreenIndex)
         }
         .sheet(isPresented: $filterSort.isMenuPresented) {
             FilterSortMenuView(viewModel: filterSort, available: [.favorite, .mediaType, .hasGps, .dateRange])
