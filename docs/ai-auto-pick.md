@@ -359,7 +359,7 @@ auto-hidden.
 - `photo/photo.filters.ts` — `aiHiddenMode`-Filterklausel
 - `photo/gallery-grid.service.ts` — Surface der Pick-Info pro Grid-Zelle
 - `frontend/src/api/photos.ts` — API-Client-Wrapper
-- `frontend/src/components/PhotoGrid.vue` — Marker-Rendering
+- `frontend/src/components/VirtualGallery.vue` — Marker-Rendering im Haupt-Grid
 - `frontend/src/components/PhotoCompareView.vue` — "Übernehmen"-Button
 - `frontend/src/components/FilterMenu.vue` — "KI-ausgeblendete anzeigen"
 - `frontend/src/views/DataManagementView.vue` — Admin-Buttons

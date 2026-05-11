@@ -47,7 +47,7 @@ const emit = defineEmits<{
   'open-group-review': []
 }>()
 
-// Track-I marker semantics — mirrors PhotoGrid's badge logic.
+// Track-I marker semantics — mirrors VirtualGallery's badge logic.
 const isAiHidingSiblings = computed(() => {
   const g = props.group
   if (!g) return false
