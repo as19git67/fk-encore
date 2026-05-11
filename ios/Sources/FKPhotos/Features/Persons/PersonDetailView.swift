@@ -6,12 +6,9 @@ struct PersonDetailView: View {
     @State private var faces: [Face] = []
     @State private var isLoading = true
     @State private var errorMessage: String?
-    private struct FaceSelection: Identifiable {
-        let photo: PhotoWithCuration
-        let bbox: FaceBBox
-        var id: Int { photo.id }
-    }
-    @State private var faceSelection: FaceSelection?
+    @State private var fullscreenIndex: Int = 0
+    @State private var fullscreenPhotos: [PhotoWithCuration] = []
+    @State private var fullscreenBBoxes: [FaceBBox?] = []
     @State private var isFullscreenPresented = false
     @State private var isIgnoringAll = false
 
@@ -19,6 +16,7 @@ struct PersonDetailView: View {
     @State private var isRenaming = false
     @State private var newName = ""
     @State private var conflictPerson: PersonWithFaceCount? = nil
+    @State private var showMergeConfirmation = false
     @State private var isMerging = false
 
     @State private var filterSort = FilterSortViewModel()
@@ -91,10 +89,12 @@ struct PersonDetailView: View {
                 LazyVGrid(columns: columns, spacing: 2) {
                     ForEach(displayedFaces) { face in
                         Button {
-                            if let stub = makePhotoStub(face) {
-                                faceSelection = FaceSelection(photo: stub, bbox: face.bbox)
-                                isFullscreenPresented = true
-                            }
+                            let photos = displayedFaces.compactMap { makePhotoStub($0) }
+                            let bboxes: [FaceBBox?] = displayedFaces.map { $0.bbox }
+                            fullscreenPhotos = photos
+                            fullscreenBBoxes = bboxes
+                            fullscreenIndex = displayedFaces.firstIndex(where: { $0.id == face.id }) ?? 0
+                            isFullscreenPresented = true
                         } label: {
                             FaceThumbnailView(filename: face.photo!.filename, bbox: face.bbox)
                         }
@@ -160,8 +160,8 @@ struct PersonDetailView: View {
         .confirmationDialog(
             conflictPerson.map { "Mit \"\($0.name)\" zusammenführen?" } ?? "",
             isPresented: Binding(
-                get: { conflictPerson != nil },
-                set: { if !$0 { conflictPerson = nil } }
+                get: { showMergeConfirmation },
+                set: { if !$0 { showMergeConfirmation = false; conflictPerson = nil } }
             ),
             titleVisibility: .visible
         ) {
@@ -170,17 +170,21 @@ struct PersonDetailView: View {
                     Task { await mergeInto(conflict) }
                 }
             }
-            Button("Abbrechen", role: .cancel) { conflictPerson = nil }
+            Button("Abbrechen", role: .cancel) {
+                showMergeConfirmation = false
+                conflictPerson = nil
+            }
         } message: {
             if let conflict = conflictPerson {
                 Text("\"\(conflict.name)\" existiert bereits. Die Fotos dieser Person werden zu \"\(conflict.name)\" verschoben.")
             }
         }
         .navigationDestination(isPresented: $isFullscreenPresented) {
-            if let item = faceSelection {
+            if !fullscreenPhotos.isEmpty {
                 PhotoFullscreenView(
-                    photo: item.photo,
-                    faceBBox: item.bbox,
+                    photos: fullscreenPhotos,
+                    bboxes: fullscreenBBoxes,
+                    currentIndex: $fullscreenIndex,
                     personId: personId,
                     initialPersonName: personName,
                     onPersonRenamed: { personName = $0 },
@@ -205,6 +209,11 @@ struct PersonDetailView: View {
                $0.name.lowercased() == name.lowercased() && $0.id != personId
            }) {
             conflictPerson = existing
+            // Wait for the rename alert to fully dismiss before presenting the
+            // confirmation dialog — presenting two UIAlertControllers simultaneously
+            // causes unsatisfiable-constraints warnings and a system error alert.
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            showMergeConfirmation = true
             return
         }
 
