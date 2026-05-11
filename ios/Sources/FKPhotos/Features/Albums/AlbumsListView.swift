@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AlbumsListView: View {
     @State private var viewModel = AlbumsViewModel()
+    @State private var filterSort = AlbumFilterSortViewModel(persistenceKey: "albums.filterSort")
     @State private var showCreateSheet = false
     @State private var showErrorAlert = false
     @State private var newAlbumName = ""
@@ -9,12 +10,12 @@ struct AlbumsListView: View {
     @State private var searchText = ""
 
     private var filteredAlbums: [Album] {
-        let base = searchText.isEmpty
-            ? viewModel.albums
-            : viewModel.albums.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
-        return base.sorted {
-            ($0.newest_photo_at ?? "") > ($1.newest_photo_at ?? "")
-        }
+        let filtered = viewModel.albums.filter { filterSort.appliedFilter.matches($0) }
+        let sorted = filterSort.appliedSort.isDefault
+            ? filtered.sorted { ($0.newest_photo_at ?? "") > ($1.newest_photo_at ?? "") }
+            : filtered.sorted(by: filterSort.appliedSort.comparator)
+        guard !searchText.isEmpty else { return sorted }
+        return sorted.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
     }
 
     var body: some View {
@@ -58,7 +59,14 @@ struct AlbumsListView: View {
         .navigationDestination(for: Int.self) { albumId in
             AlbumDetailView(albumId: albumId)
         }
+        .sheet(isPresented: $filterSort.isMenuPresented) {
+            AlbumFilterSortMenuView(viewModel: filterSort)
+                .presentationDetents([.medium, .large])
+        }
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                AlbumFilterSortButton(viewModel: filterSort)
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     showCreateSheet = true

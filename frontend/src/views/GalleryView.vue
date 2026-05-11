@@ -47,7 +47,7 @@
  * the fullscreen ⓘ flyout, which still receives a sidebar instance via
  * the `details-flyout` slot.
  */
-import { computed, ref } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Chip from 'primevue/chip'
@@ -489,6 +489,36 @@ const isDragging = ref(false)
 let dragCounter = 0
 let uploadResultTimeout: ReturnType<typeof setTimeout> | undefined
 
+// ── Screen Wake Lock (iOS Safari 16.4+, Chrome on Android) ─────────────────
+// Keeps the screen on during upload so iOS doesn't suspend the PWA and
+// interrupt the upload. Silently no-ops on unsupported browsers.
+let wakeLock: WakeLockSentinel | null = null
+
+async function acquireWakeLock() {
+  if (!('wakeLock' in navigator)) return
+  try {
+    wakeLock = await (navigator as any).wakeLock.request('screen')
+  } catch {
+    // Permission denied or not available — upload continues without it.
+  }
+}
+
+function releaseWakeLock() {
+  wakeLock?.release().catch(() => {})
+  wakeLock = null
+}
+
+// ── Navigation guard during upload ──────────────────────────────────────────
+function onBeforeUnload(e: BeforeUnloadEvent) {
+  if (!uploading.value) return
+  e.preventDefault()
+  // Modern browsers show their own message; returning a string is legacy.
+  return ''
+}
+
+onMounted(() => window.addEventListener('beforeunload', onBeforeUnload))
+onUnmounted(() => window.removeEventListener('beforeunload', onBeforeUnload))
+
 async function handleUpload(filesIn: FileList | File[]) {
   if (!canUpload.value) return
   const files = Array.from(filesIn)
@@ -508,6 +538,8 @@ async function handleUpload(filesIn: FileList | File[]) {
     clearTimeout(uploadResultTimeout)
     uploadResultTimeout = undefined
   }
+
+  await acquireWakeLock()
 
   const duplicates: string[] = []
   const unsupported: string[] = []
@@ -575,6 +607,7 @@ async function handleUpload(filesIn: FileList | File[]) {
   } finally {
     uploading.value = false
     uploadAbortController.value = null
+    releaseWakeLock()
   }
 }
 
@@ -1173,11 +1206,11 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
       </div>
     </div>
 
-    <!-- Upload progress bar -->
+    <!-- Upload progress bar — sticky so it stays visible while scrolling on iOS -->
     <div v-if="uploading" class="upload-progress-bar">
       <div class="upload-progress-bar__info">
         <i class="pi pi-upload" />
-        <span>Foto {{ uploadCurrent }} von {{ uploadTotal }} wird hochgeladen…</span>
+        <span>{{ uploadCurrent }} von {{ uploadTotal }} Fotos werden hochgeladen…</span>
         <span class="upload-progress-bar__pct">{{ uploadProgress }}%</span>
       </div>
       <div class="upload-progress-bar__track">
@@ -1545,6 +1578,10 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
   padding: 0.5rem 1rem;
   background: var(--p-blue-50);
   border-bottom: 1px solid var(--p-blue-200);
+  /* Sticky so the bar remains visible when the gallery is scrolled on iOS */
+  position: sticky;
+  top: 0;
+  z-index: 20;
 }
 .upload-progress-bar__info {
   display: flex;

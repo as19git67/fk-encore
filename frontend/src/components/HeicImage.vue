@@ -7,6 +7,11 @@ const props = defineProps<{
   loading?: 'lazy' | 'eager';
   objectFit?: 'cover' | 'contain' | 'fill' | 'none' | 'scale-down';
   imageStyle?: any;
+  /** When true, the slot container stays at 0/0/100%/100% and skips the
+   *  getBoundingClientRect() recalculation. Use this inside a CSS-transformed
+   *  ancestor (e.g. pinch-to-zoom wrapper) where getBoundingClientRect returns
+   *  scaled values that would misplace the slot. */
+  staticSlot?: boolean;
 }>();
 
 const displaySrc = ref<string>('');
@@ -158,6 +163,16 @@ const getRenderedObjectRectInImageBox = (img: HTMLImageElement) => {
 };
 
 const updateSlotBounds = () => {
+  if (props.staticSlot) {
+    slotContainerStyle.value = {
+      top: '0px',
+      left: '0px',
+      width: '100%',
+      height: '100%',
+    };
+    return;
+  }
+
   const wrapper = imageContentWrapperRef.value;
   const img = imgRef.value;
 
