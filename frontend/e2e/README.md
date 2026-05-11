@@ -102,6 +102,21 @@ ohne falsch-positive Fehler zu produzieren.
 
 ## CI-Hinweise
 
+- `.github/workflows/playwright-e2e.yml` läuft automatisch auf jeden
+  PR und Push gegen `main`, der Frontend, Backend-Services oder die
+  Workflow-Datei selbst berührt. Zusätzlich per `workflow_dispatch`
+  manuell triggerbar.
+- Stack im CI: pgvector/pgvector:pg18 als Service, `encore run` im
+  Hintergrund mit `ADMIN_PASSWORD=admin` (der Seed erzeugt den
+  Test-Admin), Vite-Dev-Server startet Playwright selbst via
+  `webServer`-Konfiguration.
+- Artefakte:
+  - `playwright-report` — HTML-Report (immer hochgeladen)
+  - `playwright-results` — Traces + Videos der gescheiterten Tests
+  - `encore-log` — Backend-Stdout, falls Boot fehlschlägt
+- Trace eines fehlgeschlagenen Tests lokal öffnen:
+  `npx playwright show-trace <traceZip>` aus dem `playwright-results`
+  Artefakt.
 - `forbidOnly` greift, wenn `CI` gesetzt ist — vergessene `.only()`
   Marker brechen den Build ab.
 - Reporter: `github` + `html`. Den Report-Folder als CI-Artefakt
