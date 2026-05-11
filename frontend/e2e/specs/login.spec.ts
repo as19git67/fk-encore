@@ -9,7 +9,9 @@ const adminPassword = process.env.E2E_ADMIN_PASSWORD ?? 'admin'
 test.describe('Login (Tastatur-fokussiert)', () => {
   test('Tab-Reihenfolge: E-Mail → Passwort → Anmelden, Submit per Enter', async ({ page }) => {
     await page.goto('login')
-    await expect(page.getByRole('heading', { name: 'Anmelden' })).toBeVisible()
+    // PrimeVue Card title rendert nicht als role=heading. Submit-Button mit
+    // exact:true ist ein verlässlicher Indikator, dass die Form da ist.
+    await expect(page.getByRole('button', { name: 'Anmelden', exact: true })).toBeVisible()
 
     const emailField = page.getByLabel('E-Mail')
     await emailField.click()
@@ -18,9 +20,9 @@ test.describe('Login (Tastatur-fokussiert)', () => {
     await page.keyboard.type(adminEmail, { delay: 20 })
     await page.keyboard.press('Tab')
 
-    // PrimeVue Password wraps the actual <input> in a container with the
-    // toggle-mask button. After Tab we expect focus on the inner input.
-    const passwordInput = page.locator('#password input').first()
+    // InputText rendert direkt als <input id="password"> — der Toggle-Button
+    // sitzt daneben in der DOM-Reihenfolge, der Fokus landet nach Tab erst hier.
+    const passwordInput = page.locator('#password').first()
     await expect(passwordInput).toBeFocused()
     await page.keyboard.type(adminPassword, { delay: 20 })
 
@@ -36,8 +38,9 @@ test.describe('Login (Tastatur-fokussiert)', () => {
     await page.goto('login')
 
     await page.getByLabel('E-Mail').fill(adminEmail)
-    await page.locator('#password input').first().fill('definitely-wrong-pw')
-    await page.getByRole('button', { name: 'Anmelden' }).click()
+    await page.locator('#password').first().fill('definitely-wrong-pw')
+    // exact:true disambiguates from "Mit Passkey anmelden"
+    await page.getByRole('button', { name: 'Anmelden', exact: true }).click()
 
     // PrimeVue Message renders with role=alert
     await expect(page.getByRole('alert')).toBeVisible()
@@ -49,13 +52,14 @@ test.describe('Login (Tastatur-fokussiert)', () => {
   test('Passwort-Toggle per Tastatur (Space auf Augen-Icon)', async ({ page }) => {
     await page.goto('login')
 
-    const passwordInput = page.locator('#password input').first()
+    const passwordInput = page.locator('#password').first()
     await passwordInput.fill('hunter2')
     await expect(passwordInput).toHaveAttribute('type', 'password')
 
-    // Tab vom Input springt auf den Toggle-Button der PrimeVue Password
+    // Tab vom Input springt auf den Toggle-Button (echter <button>)
     await passwordInput.focus()
     await page.keyboard.press('Tab')
+    await expect(page.getByRole('button', { name: 'Passwort anzeigen' })).toBeFocused()
     await page.keyboard.press('Space')
 
     await expect(passwordInput).toHaveAttribute('type', 'text')

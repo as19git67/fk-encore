@@ -25,7 +25,9 @@ test.describe('Dokumenten-Modul (Drag-and-Drop + Tastatur)', () => {
   test('Zur Upload-Seite navigieren und Datei per File-Input wählen', async ({ page }) => {
     await page.goto('dokumente')
 
-    const uploadBtn = page.getByRole('button', { name: 'Hochladen' })
+    // Top-Nav rendert ebenfalls einen "Hochladen"-Button — wir wollen
+    // explizit den auf der Dokumenten-Seite anklicken.
+    const uploadBtn = page.getByRole('main').getByRole('button', { name: 'Hochladen' })
     // Permission-abhängig — überspringen, wenn Admin sie nicht hat.
     if ((await uploadBtn.count()) === 0) {
       test.skip(true, 'Aktueller Nutzer hat documents.upload nicht — übersprungen')
