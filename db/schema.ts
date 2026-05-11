@@ -326,6 +326,41 @@ export const photoGroupMembers = pgTable(
   ]
 );
 
+// Per-user weights for the AI auto-pick scoring formula. Fitted from
+// the user's reviewed groups via pairwise logistic regression (see
+// photo/group-auto-pick.calibration.ts). Absent rows fall back to the
+// hardcoded defaults in scorePhoto().
+export interface AiPickWeights {
+  face: number[];     // [face_sharpness, eyes_open, face_coverage,
+                      //  face_composition, blur, clip_aesthetics,
+                      //  exposure_contrast_avg]
+  non_face: number[]; // [blur, clip_aesthetics, clip_composition,
+                      //  clip_technical, exposure_contrast_avg]
+}
+
+export interface AiPickWeightsMetadata {
+  pair_count_face: number;
+  pair_count_non_face: number;
+  pair_count_skipped_mixed: number;
+  // Top-1 agreement on the training data after the fit. 0..1.
+  top1_accuracy_face: number;
+  top1_accuracy_non_face: number;
+  // Top-1 agreement of the *defaults* on the same data, for reference.
+  top1_accuracy_face_baseline: number;
+  top1_accuracy_non_face_baseline: number;
+}
+
+export const aiPickUserWeights = pgTable("ai_pick_user_weights", {
+  user_id: integer("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  weights: jsonb("weights").$type<AiPickWeights>().notNull(),
+  fitted_at: timestamp("fitted_at", { withTimezone: true, mode: "string" })
+    .notNull()
+    .defaultNow(),
+  metadata: jsonb("metadata").$type<AiPickWeightsMetadata>().notNull().default({} as any),
+});
+
 // ========== Albums ==========
 
 export const albums = pgTable("albums", {

@@ -26,6 +26,7 @@ import { and, eq, inArray, isNull, isNotNull, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbExec, dbFirst } from "../db/adapter";
 import {
+  aiPickUserWeights,
   faces,
   photoCuration,
   photoGroupMembers,
@@ -39,6 +40,7 @@ import {
   type AiConfidence,
   type Orientation,
   type PhotoSignals,
+  type ScoringWeights,
 } from "./group-auto-pick";
 
 interface PhotoSignalRow {
@@ -167,8 +169,8 @@ export async function recomputeAiPicksForGroups(
   if (groupIds && groupIds.length > 0) {
     baseConds.push(inArray(photoGroups.id, groupIds));
   }
-  const groups = await dbAll<{ id: number }>(
-    db.select({ id: photoGroups.id })
+  const groups = await dbAll<{ id: number; user_id: number }>(
+    db.select({ id: photoGroups.id, user_id: photoGroups.user_id })
       .from(photoGroups)
       .where(baseConds.length > 0 ? and(...baseConds) : undefined),
   );
@@ -185,6 +187,22 @@ export async function recomputeAiPicksForGroups(
       .from(photoGroupMembers)
       .where(inArray(photoGroupMembers.group_id, allIds)),
   );
+
+  // Per-user weights for the scoring formula (Stufe D — see
+  // group-auto-pick.calibration.ts). One row per user, falling back to
+  // the hardcoded defaults when no calibration has been run yet.
+  // Pre-fetched in a single query so the inner loop stays O(groups).
+  const distinctUserIds = Array.from(new Set(groups.map((g) => g.user_id)));
+  const weightRows = await dbAll<{ user_id: number; weights: ScoringWeights }>(
+    db.select({
+      user_id: aiPickUserWeights.user_id,
+      weights: aiPickUserWeights.weights,
+    })
+      .from(aiPickUserWeights)
+      .where(inArray(aiPickUserWeights.user_id, distinctUserIds)),
+  );
+  const weightsByUserId = new Map<number, ScoringWeights>();
+  for (const row of weightRows) weightsByUserId.set(row.user_id, row.weights);
   const byGroup = new Map<number, number[]>();
   for (const m of members) {
     const arr = byGroup.get(m.group_id);
@@ -205,7 +223,7 @@ export async function recomputeAiPicksForGroups(
   let scored = 0;
   let skipped = 0;
   const nowSql = sql`NOW()`;
-  for (const { id: groupId } of groups) {
+  for (const { id: groupId, user_id: groupUserId } of groups) {
     const photoIds = byGroup.get(groupId) ?? [];
     if (photoIds.length < 2) {
       skipped++;
@@ -218,7 +236,8 @@ export async function recomputeAiPicksForGroups(
         face_coverage: 0,
       },
     );
-    const result = computeGroupPick(groupSignals);
+    const weights = weightsByUserId.get(groupUserId);
+    const result = computeGroupPick(groupSignals, weights);
     await dbExec(
       db.update(photoGroups)
         .set({

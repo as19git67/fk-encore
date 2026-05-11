@@ -12,7 +12,9 @@ import {
   recomputeAiPicks,
   bulkAcceptHighConfidenceAiPicks,
   getAiPickCalibration,
+  calibrateAiPickWeights,
   backfillPhotoDimensions,
+  type AiPickWeightsCalibrationResult,
   getPhotosToRefreshMetadata, refreshPhotoMetadata,
   getPhotosNeedingGpsRescan, rescanPhotoGps,
   recomputeAutoCrops,
@@ -212,6 +214,27 @@ async function handleDownloadCalibration() {
   } finally {
     calibrationLoading.value = false
   }
+}
+
+const calibrateWeightsLoading = ref(false)
+const calibrateWeightsResult = ref<AiPickWeightsCalibrationResult | null>(null)
+
+async function handleCalibrateWeights() {
+  calibrateWeightsLoading.value = true
+  calibrateWeightsResult.value = null
+  aiPickError.value = ''
+  try {
+    calibrateWeightsResult.value = await calibrateAiPickWeights()
+  } catch (err: any) {
+    aiPickError.value = err.message || 'Fehler beim Kalibrieren der Gewichte'
+  } finally {
+    calibrateWeightsLoading.value = false
+  }
+}
+
+function pct(v: number | undefined | null): string {
+  if (v == null) return '–'
+  return `${Math.round(v * 100)} %`
 }
 
 // ── Metadaten ─────────────────────────────────────────────────────────────────
@@ -725,6 +748,38 @@ onMounted(async () => {
         :loading="calibrationLoading"
         :disabled="calibrationLoading"
         @click="handleDownloadCalibration"
+      />
+
+      <!-- Stufe D: per-User Gewichts-Kalibrierung. Lernt aus den
+           bereits reviewten Gruppen welche Signale dem User wichtig
+           sind, persistiert das Ergebnis in ai_pick_user_weights und
+           der nächste "KI-Picks neu berechnen"-Lauf nutzt automatisch
+           die fittierten Gewichte. -->
+      <Message v-if="calibrateWeightsResult" severity="info" :closable="false" class="data-management-group__item">
+        <div><strong>Kalibrierung abgeschlossen.</strong></div>
+        <div>
+          Personen-Burst:
+          {{ calibrateWeightsResult.metadata.pair_count_face }} Vergleichspaare,
+          Trefferquote
+          <strong>{{ pct(calibrateWeightsResult.metadata.top1_accuracy_face) }}</strong>
+          (vorher {{ pct(calibrateWeightsResult.metadata.top1_accuracy_face_baseline) }})
+        </div>
+        <div>
+          Nicht-Personen-Burst:
+          {{ calibrateWeightsResult.metadata.pair_count_non_face }} Vergleichspaare,
+          Trefferquote
+          <strong>{{ pct(calibrateWeightsResult.metadata.top1_accuracy_non_face) }}</strong>
+          (vorher {{ pct(calibrateWeightsResult.metadata.top1_accuracy_non_face_baseline) }})
+        </div>
+      </Message>
+      <Button class="data-management-group__item"
+        icon="pi pi-graduation-cap"
+        outlined
+        label="KI auf meine Vorlieben kalibrieren"
+        v-tooltip.bottom="'Lernt aus den bereits reviewten Gruppen welche Signale dir wichtig sind. Danach einmal &quot;KI-Picks neu berechnen&quot; klicken.'"
+        :loading="calibrateWeightsLoading"
+        :disabled="calibrateWeightsLoading || aiPickLoading || groupingLoading || isActive || rescanLoading || retryLoading"
+        @click="handleCalibrateWeights"
       />
     </div>
 

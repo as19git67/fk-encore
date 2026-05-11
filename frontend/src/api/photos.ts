@@ -847,6 +847,31 @@ export function backfillPhotoDimensions() {
   )
 }
 
+export interface AiPickWeights {
+  face: number[]
+  non_face: number[]
+}
+
+export interface AiPickWeightsCalibrationResult {
+  weights: AiPickWeights
+  metadata: {
+    pair_count_face: number
+    pair_count_non_face: number
+    pair_count_skipped_mixed: number
+    top1_accuracy_face: number
+    top1_accuracy_non_face: number
+    top1_accuracy_face_baseline: number
+    top1_accuracy_non_face_baseline: number
+  }
+}
+
+export function calibrateAiPickWeights() {
+  return apiFetch<AiPickWeightsCalibrationResult>(
+    '/photos/groups/calibrate-ai-pick-weights',
+    { method: 'POST' },
+  )
+}
+
 // ---------- Semantic Search ----------
 
 export interface PhotoSearchResult {
