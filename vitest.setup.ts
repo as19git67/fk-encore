@@ -102,4 +102,10 @@ vi.mock("~encore/clients", () => ({
     fanoutAlbum: vi.fn(() => Promise.resolve()),
     fanoutPhoto: vi.fn(() => Promise.resolve()),
   },
+  aiqueue: {
+    acquireSlot: vi.fn(() => Promise.resolve({ slotId: 1, status: "active", position: 0 })),
+    pollSlot: vi.fn(() => Promise.resolve({ status: "active", position: 0 })),
+    releaseSlot: vi.fn(() => Promise.resolve()),
+    cancelSlot: vi.fn(() => Promise.resolve()),
+  },
 }));

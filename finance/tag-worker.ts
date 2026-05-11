@@ -18,6 +18,7 @@ import {
 } from "./tag-queue";
 import { suggestTagsForTransaction } from "./tag-suggester";
 import { LlmServiceUnavailableError, isLlmServiceHealthy } from "./llm-client";
+import { withAiSlot, AiSlotTimeoutError } from "../ai-queue/slot-helper";
 
 console.log("[boot] finance/tag-worker.ts: all imports resolved");
 
@@ -59,10 +60,12 @@ class FinanceTagWorker {
     if (!job) return false;
 
     try {
-      await suggestTagsForTransaction(job.transaction_id);
+      await withAiSlot("llm", 2, "finance:tag-suggest", () =>
+        suggestTagsForTransaction(job.transaction_id),
+      );
       await markTagJobDone(job.id);
     } catch (err: any) {
-      if (err instanceof DeferTagJobError || err instanceof LlmServiceUnavailableError) {
+      if (err instanceof DeferTagJobError || err instanceof LlmServiceUnavailableError || err instanceof AiSlotTimeoutError) {
         console.log(
           `[finance.tag-worker] deferring job ${job.id}: ${err.message}`,
         );

@@ -1,4 +1,4 @@
-import { pgTable, text, integer, primaryKey, serial, boolean, timestamp, real, doublePrecision, pgEnum, jsonb, bigserial, numeric, uuid, uniqueIndex, index } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, primaryKey, serial, boolean, timestamp, real, doublePrecision, pgEnum, jsonb, bigserial, numeric, uuid, uniqueIndex, index, bigint } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 // ========== Users ==========
@@ -1492,6 +1492,29 @@ export const financeTagBlocklist = pgTable(
       .on(table.account_id, table.counterparty_norm, table.tag_name),
     index("idx_finance_tag_blocklist_lookup")
       .on(table.account_id, table.counterparty_norm),
+  ]
+);
+
+// ========== Scheduled job state (lib/local-cron.ts) ==========
+
+// ========== AI Model Slot Queue (ai-queue service) ==========
+
+export const aiModelSlot = pgTable(
+  "ai_model_slot",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    model_name: text("model_name").notNull(),
+    priority: integer("priority").notNull().default(2),
+    requester: text("requester").notNull(),
+    status: text("status").notNull().default("waiting"),
+    enqueued_at: timestamp("enqueued_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    activated_at: timestamp("activated_at", { mode: "string", withTimezone: true }),
+  },
+  (table) => [
+    index("idx_model_slot_dequeue")
+      .on(table.model_name, table.status, table.priority, table.enqueued_at),
   ]
 );
 
