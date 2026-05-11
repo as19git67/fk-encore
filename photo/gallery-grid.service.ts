@@ -337,6 +337,8 @@ async function loadGroupInfoForPhotos(
     group_id: number;
     is_cover: boolean;
     reviewed: boolean;
+    ai_picked_photo_ids: number[] | null;
+    ai_picked_confidence: string | null;
   }>(
     db
       .selectDistinctOn([photoGroupMembers.photo_id], {
@@ -344,6 +346,8 @@ async function loadGroupInfoForPhotos(
         group_id: photoGroups.id,
         is_cover: sql<boolean>`(${photoGroups.cover_photo_id} = ${photoGroupMembers.photo_id})`,
         reviewed: sql<boolean>`(${photoGroups.reviewed_at} IS NOT NULL)`,
+        ai_picked_photo_ids: photoGroups.ai_picked_photo_ids,
+        ai_picked_confidence: photoGroups.ai_picked_confidence,
       })
       .from(photoGroupMembers)
       .innerJoin(photoGroups, eq(photoGroups.id, photoGroupMembers.group_id))
@@ -376,12 +380,19 @@ async function loadGroupInfoForPhotos(
   for (const c of counts) memberCountByGroupId.set(c.group_id, c.member_count);
 
   for (const c of chosen) {
-    out.set(c.photo_id, {
+    const entry: GalleryGridGroup = {
       id: c.group_id,
       is_cover: c.is_cover,
       member_count: memberCountByGroupId.get(c.group_id) ?? 0,
       reviewed: c.reviewed,
-    });
+    };
+    if (c.ai_picked_photo_ids && c.ai_picked_photo_ids.length > 0) {
+      entry.ai_picked = c.ai_picked_photo_ids.includes(c.photo_id);
+      if (c.ai_picked_confidence === "high" || c.ai_picked_confidence === "medium" || c.ai_picked_confidence === "low") {
+        entry.ai_confidence = c.ai_picked_confidence;
+      }
+    }
+    out.set(c.photo_id, entry);
   }
   return out;
 }

@@ -5201,6 +5201,22 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
     : await doGroupingWork(db);
 
   console.log(`Photo grouping for user ${userId}: ${groupsCreated} groups created, ${totalPhotosGrouped} photos grouped`);
+
+  // After regroup the previously-stored AI picks for unreviewed groups
+  // refer to deleted group IDs. Re-score now so the gallery filter and
+  // marker show up-to-date suggestions on the next request. Reviewed
+  // groups are skipped (see recomputeAiPicksForGroups). Failure is
+  // logged but does not fail the regroup — the suggestion is best-effort.
+  try {
+    const { recomputeAiPicksForUser } = await import("./group-auto-pick.service");
+    const aiResult = await recomputeAiPicksForUser(userId);
+    if (aiResult.groups_scored > 0) {
+      console.log(`[ai-pick] user ${userId}: scored ${aiResult.groups_scored} groups (skipped ${aiResult.groups_skipped})`);
+    }
+  } catch (err) {
+    console.error(`[ai-pick] failed for user ${userId}:`, err);
+  }
+
   return { groups_created: groupsCreated, total_photos_grouped: totalPhotosGrouped };
 }
 
@@ -5230,6 +5246,9 @@ export async function listPhotoGroupsLogic(userId: number): Promise<ListGroupsRe
   const groups = await dbAll<{
     id: number; user_id: number; cover_photo_id: number | null;
     reviewed_at: string | null; created_at: string | null;
+    ai_picked_photo_ids: number[] | null;
+    ai_picked_confidence: string | null;
+    ai_picked_at: string | null;
   }>(
     db
       .select({
@@ -5238,6 +5257,9 @@ export async function listPhotoGroupsLogic(userId: number): Promise<ListGroupsRe
         cover_photo_id: photoGroups.cover_photo_id,
         reviewed_at: photoGroups.reviewed_at,
         created_at: photoGroups.created_at,
+        ai_picked_photo_ids: photoGroups.ai_picked_photo_ids,
+        ai_picked_confidence: photoGroups.ai_picked_confidence,
+        ai_picked_at: photoGroups.ai_picked_at,
       })
       .from(photoGroups)
       .where(eq(photoGroups.user_id, userId))
@@ -5261,6 +5283,9 @@ export async function listPhotoGroupsLogic(userId: number): Promise<ListGroupsRe
       created_at: g.created_at ?? "",
       member_count: members.length,
       photo_ids: members.map((m) => m.photo_id),
+      ai_picked_photo_ids: g.ai_picked_photo_ids ?? undefined,
+      ai_picked_confidence: g.ai_picked_confidence as PhotoGroup["ai_picked_confidence"] ?? undefined,
+      ai_picked_at: g.ai_picked_at ?? undefined,
     });
   }
 
@@ -5271,6 +5296,9 @@ export async function getNextUnreviewedGroupLogic(userId: number): Promise<Photo
   const group = await dbFirst<{
     id: number; user_id: number; cover_photo_id: number | null;
     reviewed_at: string | null; created_at: string | null;
+    ai_picked_photo_ids: number[] | null;
+    ai_picked_confidence: string | null;
+    ai_picked_at: string | null;
   }>(
     db
       .select({
@@ -5279,6 +5307,9 @@ export async function getNextUnreviewedGroupLogic(userId: number): Promise<Photo
         cover_photo_id: photoGroups.cover_photo_id,
         reviewed_at: photoGroups.reviewed_at,
         created_at: photoGroups.created_at,
+        ai_picked_photo_ids: photoGroups.ai_picked_photo_ids,
+        ai_picked_confidence: photoGroups.ai_picked_confidence,
+        ai_picked_at: photoGroups.ai_picked_at,
       })
       .from(photoGroups)
       .where(and(eq(photoGroups.user_id, userId), sql`${photoGroups.reviewed_at} IS NULL`))
@@ -5303,6 +5334,9 @@ export async function getNextUnreviewedGroupLogic(userId: number): Promise<Photo
     created_at: group.created_at ?? "",
     member_count: members.length,
     photo_ids: members.map((m) => m.photo_id),
+    ai_picked_photo_ids: group.ai_picked_photo_ids ?? undefined,
+    ai_picked_confidence: group.ai_picked_confidence as PhotoGroup["ai_picked_confidence"] ?? undefined,
+    ai_picked_at: group.ai_picked_at ?? undefined,
   };
 }
 

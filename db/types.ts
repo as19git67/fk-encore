@@ -668,6 +668,11 @@ export interface GalleryGridGroup {
   member_count: number;
   /** True when the user has marked the group as reviewed. */
   reviewed: boolean;
+  // AI auto-pick (Track I). Absent when the group has not yet been
+  // scored — the marker UI then falls back to today's review-on-click
+  // behaviour. ai_picked is true on photos in ai_picked_photo_ids.
+  ai_picked?: boolean;
+  ai_confidence?: "high" | "medium" | "low";
 }
 
 /** One cell in the virtualized gallery grid. */
@@ -704,6 +709,12 @@ export interface PhotoGroup {
   created_at: string;
   member_count: number;
   photo_ids: number[];
+  // AI auto-pick (Track I, see migration 0075). Absent when the group
+  // has not yet been scored; the gallery falls back to today's review
+  // workflow in that case.
+  ai_picked_photo_ids?: number[];
+  ai_picked_confidence?: "high" | "medium" | "low";
+  ai_picked_at?: string;
 }
 
 export interface ListGroupsResponse {

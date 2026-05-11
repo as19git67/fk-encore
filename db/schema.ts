@@ -260,7 +260,43 @@ export const photoGroups = pgTable("photo_groups", {
     .references(() => photos.id, { onDelete: "set null" }),
   reviewed_at: timestamp("reviewed_at", { mode: "string" }),
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
+  // AI auto-pick (see migration 0075). NULL until the scoring pass has
+  // run for this group; user reviewed_at always takes precedence over
+  // the AI pick.
+  ai_picked_photo_ids: integer("ai_picked_photo_ids").array(),
+  ai_picked_at: timestamp("ai_picked_at", { mode: "string" }),
+  ai_picked_confidence: text("ai_picked_confidence"),
+  ai_pick_details: jsonb("ai_pick_details").$type<AiPickDetails>(),
 });
+
+// Per-photo scoring breakdown stored in photo_groups.ai_pick_details.
+// Kept verbose so future calibration runs (Stufe D) can regress the
+// weights from User-Override events without re-fetching every signal.
+export interface AiPickPhotoScore {
+  photo_id: number;
+  score: number;
+  has_face: boolean;
+  signals: {
+    face_sharpness?: number;
+    eyes_open?: number;
+    face_coverage?: number;
+    blur?: number;
+    contrast?: number;
+    exposure?: number;
+    clip_aesthetics?: number;
+    clip_composition?: number;
+    clip_technical?: number;
+  };
+}
+
+export interface AiPickDetails {
+  // Score-difference between top-1 and the best non-pick. Drives the
+  // confidence gate (see migration 0075).
+  runner_up_delta: number;
+  // Multi-pick threshold actually applied (default 0.92).
+  multi_pick_threshold: number;
+  scores: AiPickPhotoScore[];
+}
 
 export const photoGroupMembers = pgTable(
   "photo_group_members",
