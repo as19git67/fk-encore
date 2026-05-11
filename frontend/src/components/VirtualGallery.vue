@@ -322,21 +322,44 @@ watch(
 )
 
 // ── Click handling ──────────────────────────────────────────────────────────
-function onTap(entry: GalleryGridEntry | null) {
+function onTap(entry: GalleryGridEntry | null, event?: MouseEvent) {
   if (!entry) return
   if (props.selectMode) {
     emit('toggle-select', entry)
     return
   }
-  // Every member of an UNREVIEWED group routes to the compare flow — so
-  // the user can launch the review from any tile, not just the cover.
-  // Once the group is reviewed the badge / outline disappear and members
-  // behave like ordinary photos again (open fullscreen).
-  if (entry.group && !entry.group.reviewed) {
+  // Track-I semantics (see docs/ai-auto-pick.md): only a tap on the
+  // +N marker opens the review dialog — every other tap on the tile
+  // opens the photo fullscreen, even for group members. The KI's pick
+  // is the default view; the marker is the affordance to drill into
+  // the rest of the group.
+  const target = event?.target as HTMLElement | null
+  const onMarker = !!entry.group && !!target?.closest('.vg-stack-badge')
+  if (onMarker) {
     emit('stack-click', entry)
   } else {
     emit('photo-click', entry)
   }
+}
+
+/** "Sind die übrigen Gruppenmitglieder gerade KI-versteckt?" Wahr nur
+ *  bei high-confidence Gruppen ohne reviewed_at — exakt die Bedingung
+ *  unter der der Server aiHiddenMode=exclude die Geschwister aus
+ *  diesem Grid filtert. */
+function isAiHidingSiblings(group: GalleryGridEntry['group'] | null | undefined): boolean {
+  if (!group) return false
+  if (group.reviewed) return false
+  return group.ai_confidence === 'high'
+}
+
+function badgeTitle(group: GalleryGridEntry['group'] | null | undefined): string {
+  if (!group) return ''
+  if (isAiHidingSiblings(group)) {
+    return `${group.member_count - 1} ähnliche Fotos werden ausgeblendet – klicken zum Anzeigen`
+  }
+  if (group.ai_confidence === 'medium') return 'KI-Vorschlag mit mittlerer Sicherheit – bitte prüfen'
+  if (group.ai_confidence === 'low') return 'KI-Vorschlag mit niedriger Sicherheit'
+  return `${group.member_count} ähnliche Fotos`
 }
 
 // ── Public surface for the parent ───────────────────────────────────────────
@@ -407,7 +430,7 @@ defineExpose({
               'vg-cell--cursor': cursorIndex === row.index * cols + i,
             }"
             :style="{ height: `${cellSize}px` }"
-            @click="onTap(slot)"
+            @click="onTap(slot, $event)"
           >
             <img
               :src="getThumbUrl(slot.filename, 400)"
@@ -419,12 +442,22 @@ defineExpose({
                 : undefined"
               class="vg-thumb"
             />
-            <!-- Show the member-count badge on EVERY member of an unreviewed
-                 group (not just the cover) so the user sees the stack from
-                 whichever tile they tap. Gated on `!reviewed` so reviewed
-                 groups disappear from the visual model. -->
-            <span v-if="slot.group && !slot.group.reviewed" class="vg-stack-badge">
-              {{ slot.group.member_count }}
+            <!-- Track-I marker. Shows on every member of an unreviewed
+                 group so the user can launch the review from any tile.
+                 The icon differentiates AI-hiding-siblings (pi-eye-slash,
+                 high confidence) from the medium / low confidence cases
+                 (no icon, just +N). -->
+            <span
+              v-if="slot.group && !slot.group.reviewed"
+              class="vg-stack-badge"
+              :class="{
+                'vg-stack-badge--ai-medium': slot.group.ai_confidence === 'medium',
+                'vg-stack-badge--ai-low': slot.group.ai_confidence === 'low',
+              }"
+              :title="badgeTitle(slot.group)"
+            >
+              <i v-if="isAiHidingSiblings(slot.group)" class="pi pi-eye-slash vg-stack-badge-icon" />
+              +{{ slot.group.member_count - 1 }}
             </span>
             <i
               v-if="slot.curation === 'favorite'"
@@ -565,9 +598,34 @@ defineExpose({
   color: #fff;
   font-size: 0.72rem;
   font-weight: 600;
-  padding: 2px 6px;
+  padding: 3px 8px;
   border-radius: 999px;
-  pointer-events: none;
+  /* The badge must capture clicks separately from the photo tile so
+     onTap() can route marker-clicks to the review dialog while
+     leaving plain photo-taps to fall through to the fullscreen view.
+     z-index keeps it above the <img> so iOS taps land reliably. */
+  cursor: pointer;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.vg-stack-badge:hover {
+  background: rgba(0, 0, 0, 0.9);
+}
+.vg-stack-badge--ai-medium {
+  background: var(--p-orange-500, #f97316);
+  color: #fff;
+}
+.vg-stack-badge--ai-medium:hover {
+  background: var(--p-orange-600, #ea580c);
+}
+.vg-stack-badge--ai-low {
+  background: rgba(0, 0, 0, 0.55);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+.vg-stack-badge-icon {
+  font-size: 0.7rem;
 }
 
 /* Selection */
