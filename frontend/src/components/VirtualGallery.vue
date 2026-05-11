@@ -444,10 +444,9 @@ defineExpose({
             />
             <!-- Track-I marker. Shows on every member of an unreviewed
                  group so the user can launch the review from any tile.
-                 The icon differentiates AI-hiding-siblings (pi-eye-slash)
-                 from the medium / low confidence cases (no icon, just
-                 +N) — see PhotoGrid.vue for the same logic in the
-                 album/persons views. -->
+                 The icon differentiates AI-hiding-siblings (pi-eye-slash,
+                 high confidence) from the medium / low confidence cases
+                 (no icon, just +N). -->
             <span
               v-if="slot.group && !slot.group.reviewed"
               class="vg-stack-badge"
