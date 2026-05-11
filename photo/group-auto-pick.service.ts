@@ -126,6 +126,7 @@ function toPhotoSignals(row: PhotoSignalRow): PhotoSignals {
     clip_technical: pick("clip_technical"),
     face_sharpness: pick("face_sharpness"),
     eyes_open_score: pick("eyes_open", "eyes_open_score"),
+    face_composition: pick("face_composition"),
     face_count: row.face_count,
     face_coverage: row.face_coverage,
     orientation,
