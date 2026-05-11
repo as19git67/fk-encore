@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
 import { getPhotoUrl, type Photo, type CurationStatus } from '../api/photos'
@@ -44,16 +44,135 @@ function onCurrentImageLoad() {
   currentLoaded.value = true
 }
 
-// ── Touch-Swipe für mobile Navigation ────────────────────────────────────────
+// ── Pinch-to-zoom & Touch-Swipe ─────────────────────────────────────────────
+const zoomLevel = ref(1)
+const panX = ref(0)
+const panY = ref(0)
+
+const zoomTransformStyle = computed(() => {
+  if (zoomLevel.value === 1 && panX.value === 0 && panY.value === 0) return {}
+  return {
+    transform: `translate(${panX.value}px, ${panY.value}px) scale(${zoomLevel.value})`,
+  }
+})
+
+// State for swipe (1-finger)
 const touchStartX = ref(0)
 const touchStartY = ref(0)
+const panStartX = ref(0)
+const panStartY = ref(0)
+
+// State for pinch (2-finger)
+let pinchStartDist = 0
+let pinchStartZoom = 1
+let pinchStartCenterX = 0
+let pinchStartCenterY = 0
+let pinchStartPanX = 0
+let pinchStartPanY = 0
+let elemCenterX = 0
+let elemCenterY = 0
+
+// Double-tap to reset zoom
+let lastTapTime = 0
+let lastTapX = 0
+let lastTapY = 0
+
+function getDist(t1: Touch, t2: Touch): number {
+  return Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY)
+}
+
+function getMid(t1: Touch, t2: Touch): { x: number; y: number } {
+  return { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 }
+}
+
+function resetZoom() {
+  zoomLevel.value = 1
+  panX.value = 0
+  panY.value = 0
+}
+
+// When the photo changes, reset zoom to show the full image.
+watch(() => props.photo.id, resetZoom)
+
+const contentRef = ref<HTMLElement | null>(null)
 
 function handleTouchStart(e: TouchEvent) {
-  touchStartX.value = e.touches[0]!.clientX
-  touchStartY.value = e.touches[0]!.clientY
+  if (e.touches.length === 1) {
+    const t = e.touches[0]!
+    touchStartX.value = t.clientX
+    touchStartY.value = t.clientY
+    panStartX.value = panX.value
+    panStartY.value = panY.value
+
+    // Double-tap to reset zoom
+    const now = Date.now()
+    const dx = t.clientX - lastTapX
+    const dy = t.clientY - lastTapY
+    if (now - lastTapTime < 300 && Math.hypot(dx, dy) < 40) {
+      resetZoom()
+      lastTapTime = 0
+    } else {
+      lastTapTime = now
+      lastTapX = t.clientX
+      lastTapY = t.clientY
+    }
+  } else if (e.touches.length === 2) {
+    const t1 = e.touches[0]!
+    const t2 = e.touches[1]!
+    pinchStartDist = getDist(t1, t2)
+    pinchStartZoom = zoomLevel.value
+    pinchStartPanX = panX.value
+    pinchStartPanY = panY.value
+    const mid = getMid(t1, t2)
+    pinchStartCenterX = mid.x
+    pinchStartCenterY = mid.y
+
+    // Compute element center for correct scale origin math
+    const rect = contentRef.value?.getBoundingClientRect()
+    elemCenterX = rect ? rect.left + rect.width / 2 : window.innerWidth / 2
+    elemCenterY = rect ? rect.top + rect.height / 2 : window.innerHeight / 2
+  }
+}
+
+function handleTouchMove(e: TouchEvent) {
+  // Always prevent default so iOS Safari doesn't re-acquire the gesture.
+  // The listener is registered { passive: false } so this call is permitted.
+  // Without it, a 1-finger swipe at zoom=1 fires touchcancel instead of touchend.
+  e.preventDefault()
+  if (e.touches.length === 2) {
+    const t1 = e.touches[0]!
+    const t2 = e.touches[1]!
+    const currentDist = getDist(t1, t2)
+    const mid = getMid(t1, t2)
+
+    const newZoom = Math.min(5, Math.max(1, pinchStartZoom * (currentDist / pinchStartDist)))
+    zoomLevel.value = newZoom
+
+    // Keep the pinch centre fixed: derive the pan that achieves this.
+    // With transform translate(px,py) scale(z) and transformOrigin: center:
+    //   screenPos = elemCenter + (localPos * z) + (px, py)
+    // localPos of the initial pinch centre (accounting for the pan at pinch start):
+    //   localPinchX = (pinchStartCenterX - elemCenterX - pinchStartPanX) / pinchStartZoom
+    const localPinchX = (pinchStartCenterX - elemCenterX - pinchStartPanX) / pinchStartZoom
+    const localPinchY = (pinchStartCenterY - elemCenterY - pinchStartPanY) / pinchStartZoom
+
+    // New pan to make that local point appear at the current midpoint:
+    panX.value = mid.x - elemCenterX - localPinchX * newZoom
+    panY.value = mid.y - elemCenterY - localPinchY * newZoom
+  } else if (e.touches.length === 1 && zoomLevel.value > 1) {
+    // Pan when zoomed in
+    const dx = e.touches[0]!.clientX - touchStartX.value
+    const dy = e.touches[0]!.clientY - touchStartY.value
+    panX.value = panStartX.value + dx
+    panY.value = panStartY.value + dy
+  }
 }
 
 function handleTouchEnd(e: TouchEvent) {
+  // Don't swipe between photos when zoomed in
+  if (zoomLevel.value > 1) return
+  if (!e.changedTouches.length) return
+
   const dx = e.changedTouches[0]!.clientX - touchStartX.value
   const dy = e.changedTouches[0]!.clientY - touchStartY.value
   // Nur horizontal wischen auswerten, wenn x-Bewegung dominiert
@@ -63,9 +182,26 @@ function handleTouchEnd(e: TouchEvent) {
   }
 }
 
-// ── Body-Scroll sperren während Fullscreen ──────────────────────────────────
-onMounted(() => { document.body.style.overflow = 'hidden' })
-onUnmounted(() => { document.body.style.overflow = '' })
+function handleTouchCancel() {
+  // Reset pinch state; keep whatever zoom the user had reached
+  pinchStartDist = 0
+}
+
+// Attach touchmove with passive:false so preventDefault() works in iOS Safari.
+onMounted(() => {
+  document.body.style.overflow = 'hidden'
+  const el = contentRef.value
+  if (el) {
+    el.addEventListener('touchmove', handleTouchMove, { passive: false })
+  }
+})
+onUnmounted(() => {
+  document.body.style.overflow = ''
+  const el = contentRef.value
+  if (el) {
+    el.removeEventListener('touchmove', handleTouchMove)
+  }
+})
 
 // ── Keyboard navigation ─────────────────────────────────────────────────────
 function handleKeydown(e: KeyboardEvent) {
@@ -141,12 +277,28 @@ function locationLabel(photo: Photo) {
       <HeicImage v-if="nextPhoto" :src="getPhotoUrl(nextPhoto.filename)" />
     </div>
 
-    <div class="fullscreen-content" @click.stop @touchstart="handleTouchStart" @touchend="handleTouchEnd">
-      <div @load.capture="onCurrentImageLoad" style="display: contents">
-        <HeicImage :src="getPhotoUrl(photo.filename)" :alt="photo.original_name" objectFit="contain">
-          <!-- Allow caller to inject overlays (e.g. face box) -->
-          <slot />
-        </HeicImage>
+    <div
+      ref="contentRef"
+      class="fullscreen-content"
+      @click.stop
+      @touchstart="handleTouchStart"
+      @touchend="handleTouchEnd"
+      @touchcancel="handleTouchCancel"
+    >
+      <!-- Zoom wrapper: CSS transform applied here so the face box (in the
+           HeicImage slot) scales together with the image. -->
+      <div class="fs-zoom-wrapper" :style="zoomTransformStyle">
+        <div @load.capture="onCurrentImageLoad" style="display: contents">
+          <HeicImage
+            :src="getPhotoUrl(photo.filename)"
+            :alt="photo.original_name"
+            objectFit="contain"
+            :staticSlot="true"
+          >
+            <!-- Allow caller to inject overlays (e.g. face box) -->
+            <slot />
+          </HeicImage>
+        </div>
       </div>
 
       <!-- Top bar -->
@@ -258,6 +410,24 @@ function locationLabel(photo: Photo) {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* Prevent iOS from consuming touch events for native scroll/zoom.
+     The flyout sets touch-action: auto to opt back in for scrolling. */
+  touch-action: none;
+  /* Prevent the iOS long-press image context menu which cancels touch sequences. */
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+/* ── Zoom wrapper ───────────────────────────────────────────────────────── */
+.fs-zoom-wrapper {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* transform applied via :style binding */
+  transform-origin: center center;
+  will-change: transform;
 }
 
 /* ── Top bar ────────────────────────────────────────────────────────────── */
@@ -350,6 +520,8 @@ function locationLabel(photo: Photo) {
   visibility: hidden;
   pointer-events: none;
   transition: transform 0.18s ease, opacity 0.18s ease;
+  /* Allow native scroll within the flyout despite touch-action:none on parent */
+  touch-action: auto;
 }
 
 .fs-details-flyout--open {

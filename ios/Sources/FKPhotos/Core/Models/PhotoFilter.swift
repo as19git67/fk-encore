@@ -2,11 +2,11 @@ import Foundation
 
 // MARK: - PhotoFilter
 
-struct PhotoFilter: Equatable {
-    enum HiddenMode: String, Equatable {
+struct PhotoFilter: Equatable, Codable {
+    enum HiddenMode: String, Equatable, Codable {
         case exclude, include, only
     }
-    enum MediaType: String, CaseIterable, Equatable {
+    enum MediaType: String, CaseIterable, Equatable, Codable {
         case photo, video, raw
         var label: String {
             switch self {
@@ -16,7 +16,7 @@ struct PhotoFilter: Equatable {
             }
         }
     }
-    enum TriState: Equatable {
+    enum TriState: String, Equatable, Codable {
         case any, yes, no
         var label: String {
             switch self {
@@ -66,8 +66,8 @@ struct PhotoFilter: Equatable {
 
 // MARK: - PhotoSortState
 
-struct PhotoSortState: Equatable {
-    enum Field: String, CaseIterable, Equatable {
+struct PhotoSortState: Equatable, Codable {
+    enum Field: String, CaseIterable, Equatable, Codable {
         case takenAt        = "taken_at"
         case createdAt      = "created_at"
         case size           = "size"
@@ -83,7 +83,7 @@ struct PhotoSortState: Equatable {
         }
     }
 
-    enum Direction: String, Equatable {
+    enum Direction: String, Equatable, Codable {
         case asc, desc
         var label: String { self == .asc ? "Aufsteigend" : "Absteigend" }
         var toggled: Direction { self == .asc ? .desc : .asc }
@@ -123,6 +123,51 @@ struct PhotoSortState: Equatable {
     }
 }
 
+// MARK: - ISO8601 date parsing
+
+extension PhotoFilter {
+    // Static formatters to avoid recreating them on every call.
+    // Covers ISO 8601 ("2025-03-15T10:30:00.123Z") and PostgreSQL raw format
+    // ("2025-03-15 10:30:00" / "2025-03-15 10:30:00.123") returned when
+    // Drizzle columns are declared with mode: "string".
+    private static let isoWithFrac: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let isoPlain: ISO8601DateFormatter = ISO8601DateFormatter()
+    private static let pgWithMs: DateFormatter = {
+        let f = DateFormatter()
+        f.locale   = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+        f.timeZone = TimeZone(identifier: "UTC")
+        return f
+    }()
+    private static let pgPlain: DateFormatter = {
+        let f = DateFormatter()
+        f.locale   = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        f.timeZone = TimeZone(identifier: "UTC")
+        return f
+    }()
+
+    /// Parses a date string in any format the API may return:
+    /// ISO 8601 (with/without fractional seconds) or PostgreSQL raw format,
+    /// including microseconds ("2025-08-15 10:30:00.123456").
+    static func parseDate(_ str: String) -> Date? {
+        if let d = isoWithFrac.date(from: str) { return d }
+        if let d = isoPlain.date(from: str)    { return d }
+        if let d = pgWithMs.date(from: str)    { return d }
+        if let d = pgPlain.date(from: str)     { return d }
+        // Strip fractional seconds (PostgreSQL microseconds have 6 digits which
+        // DateFormatter can't handle) and retry with the plain formatter.
+        if let dot = str.firstIndex(of: ".") {
+            return pgPlain.date(from: String(str[str.startIndex..<dot]))
+        }
+        return nil
+    }
+}
+
 // MARK: - Client-side filter matching
 
 /// Tests whether a photo matches the given filter locally.
@@ -159,7 +204,7 @@ func matchesFilter(_ photo: PhotoWithCuration, _ filter: PhotoFilter) -> Bool {
     // Date range
     if filter.dateFrom != nil || filter.dateTo != nil {
         let isoStr = photo.taken_at ?? photo.created_at
-        guard let t = ISO8601DateFormatter().date(from: isoStr) else { return false }
+        guard let t = PhotoFilter.parseDate(isoStr) else { return false }
         if let from = filter.dateFrom, t < from { return false }
         if let to = filter.dateTo {
             let end = Calendar.current.date(byAdding: .day, value: 1, to: to) ?? to

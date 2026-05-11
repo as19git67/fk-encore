@@ -12,7 +12,7 @@ final class PersonsViewModel {
         errorMessage = nil
 
         do {
-            let response: ListPersonsResponse = try await APIClient.shared.get("/persons")
+            let response: ListPersonsResponse = try await APIClient.shared.get("/persons", query: ["limit": "500"])
             persons = response.persons
         } catch {
             errorMessage = error.localizedDescription
