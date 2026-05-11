@@ -175,6 +175,12 @@ export const photos = pgTable("photos", {
   location_short: text("location_short"),
   ai_quality_score: real("ai_quality_score"),
   ai_quality_details: jsonb("ai_quality_details").$type<Record<string, number>>(),
+  // Image dimensions post-EXIF-rotation (so a portrait phone shot stored
+  // as 4032x3024 EXIF rot=6 lands here as width=3024, height=4032).
+  // Used by the AI auto-pick orientation-diversity rule. NULL until
+  // the next face scan or the dimensions-backfill admin pass populates them.
+  width: integer("width"),
+  height: integer("height"),
   auto_crop: jsonb("auto_crop").$type<{ x: number; y: number }>(),
   description: text("description"),
   // IPTC Keywords / XMP dc:subject — user-facing tags imported from the file.
@@ -276,6 +282,10 @@ export interface AiPickPhotoScore {
   photo_id: number;
   score: number;
   has_face: boolean;
+  // Recorded only when known; pre-backfill rows carry no value rather
+  // than a misleading default. Stufe-D regression can ignore the field
+  // when it's absent.
+  orientation?: "portrait" | "landscape" | "square";
   signals: {
     face_sharpness?: number;
     eyes_open?: number;

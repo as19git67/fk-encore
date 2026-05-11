@@ -3,6 +3,8 @@ import {
   HIGH_CONFIDENCE_DELTA,
   MEDIUM_CONFIDENCE_DELTA,
   MULTI_PICK_THRESHOLD,
+  ORIENTATION_FLOOR,
+  classifyOrientation,
   computeGroupPick,
   scorePhoto,
   type PhotoSignals,
@@ -185,6 +187,130 @@ describe("computeGroupPick — confidence gate", () => {
     expect(result.picked_photo_ids.sort()).toEqual([1, 2]);
     // Δ vs photo 3 ≈ 0.4·(0.88 − 0.20) ≈ 0.27
     expect(result.confidence).toBe("high");
+  });
+});
+
+describe("classifyOrientation", () => {
+  it("classifies wide ratios as landscape", () => {
+    expect(classifyOrientation(3000, 2000)).toBe("landscape");
+    expect(classifyOrientation(4032, 3024)).toBe("landscape");
+  });
+
+  it("classifies tall ratios as portrait", () => {
+    expect(classifyOrientation(2000, 3000)).toBe("portrait");
+    expect(classifyOrientation(3024, 4032)).toBe("portrait");
+  });
+
+  it("classifies near-square ratios as square", () => {
+    expect(classifyOrientation(1000, 1000)).toBe("square");
+    expect(classifyOrientation(1050, 1000)).toBe("square");
+    expect(classifyOrientation(1000, 1050)).toBe("square");
+  });
+
+  it("defaults to landscape when dimensions are missing", () => {
+    expect(classifyOrientation(null, null)).toBe("landscape");
+    expect(classifyOrientation(undefined, undefined)).toBe("landscape");
+    expect(classifyOrientation(0, 0)).toBe("landscape");
+  });
+});
+
+describe("computeGroupPick — orientation diversity", () => {
+  it("promotes the best photo of each present orientation when above the floor", () => {
+    // Two portraits, one landscape — the landscape is mildly worse
+    // (blur 0.55 vs the portraits' 0.90) but above the 0.75 floor of
+    // the top, so it joins the multi-pick.
+    const result = computeGroupPick([
+      basePhoto({ photo_id: 1, blur_score: 0.90, orientation: "portrait" }),
+      basePhoto({ photo_id: 2, blur_score: 0.85, orientation: "portrait" }),
+      basePhoto({ photo_id: 3, blur_score: 0.85, orientation: "landscape" }),
+    ]);
+    expect(result.picked_photo_ids).toContain(3);
+  });
+
+  it("excludes an orientation whose best is below the floor", () => {
+    // A single landscape that is catastrophically worse than the
+    // portrait pack (0.10 vs 0.90 blur) — the diversity rule must
+    // NOT promote it. Score gap is far below 0.75·top.
+    const result = computeGroupPick([
+      basePhoto({ photo_id: 1, blur_score: 0.90, orientation: "portrait" }),
+      basePhoto({ photo_id: 2, blur_score: 0.85, orientation: "portrait" }),
+      basePhoto({ photo_id: 3, blur_score: 0.10, orientation: "landscape" }),
+    ]);
+    expect(result.picked_photo_ids).not.toContain(3);
+  });
+
+  it("ignores square photos so a near-square outlier does not kidnap a slot", () => {
+    // A portrait burst with one square photo: the square's score is
+    // intentionally below the multi-pick cutoff. Without the square
+    // exclusion the orientation rule would still rescue it (its score
+    // is above the 0.75 floor of the top). The exclusion keeps it out.
+    const result = computeGroupPick([
+      basePhoto({ photo_id: 1, blur_score: 0.90, orientation: "portrait" }),
+      basePhoto({ photo_id: 2, blur_score: 0.50, orientation: "portrait" }),
+      basePhoto({ photo_id: 3, blur_score: 0.55, orientation: "square" }),
+    ]);
+    expect(result.picked_photo_ids).not.toContain(3);
+  });
+
+  it("no-ops when every photo shares the same orientation", () => {
+    const result = computeGroupPick([
+      basePhoto({ photo_id: 1, blur_score: 0.90, orientation: "portrait" }),
+      basePhoto({ photo_id: 2, blur_score: 0.10, orientation: "portrait" }),
+    ]);
+    // Same as before the orientation rule: top wins, runner-up
+    // excluded via the multi-pick threshold.
+    expect(result.picked_photo_ids).toEqual([1]);
+  });
+
+  it("no-ops when orientations are missing entirely (pre-backfill default)", () => {
+    // Pure pre-backfill input — orientation undefined → rule must not
+    // mistake a homogenous unknown group for diverse.
+    const result = computeGroupPick([
+      basePhoto({ photo_id: 1, blur_score: 0.90 }),
+      basePhoto({ photo_id: 2, blur_score: 0.10 }),
+    ]);
+    expect(result.picked_photo_ids).toEqual([1]);
+  });
+
+  it("respects the multi-pick set the standard rule already produced", () => {
+    // Two near-tied portraits multi-pick by score, plus one landscape
+    // mildly worse — the landscape joins via the orientation rule.
+    // Final pick set should contain all three.
+    const result = computeGroupPick([
+      basePhoto({ photo_id: 1, blur_score: 0.90, orientation: "portrait" }),
+      basePhoto({ photo_id: 2, blur_score: 0.88, orientation: "portrait" }),
+      basePhoto({ photo_id: 3, blur_score: 0.80, orientation: "landscape" }),
+    ]);
+    expect(result.picked_photo_ids.sort()).toEqual([1, 2, 3]);
+  });
+
+  it("does not affect confidence: orientation pick of a clear winner stays 'high'", () => {
+    // Top portrait clearly beats every non-pick (the landscape is part
+    // of the pick set due to the diversity rule, so the gap is
+    // measured against a much worse photo).
+    const result = computeGroupPick([
+      basePhoto({ photo_id: 1, blur_score: 0.95, orientation: "portrait" }),
+      basePhoto({ photo_id: 2, blur_score: 0.85, orientation: "landscape" }),
+      basePhoto({ photo_id: 3, blur_score: 0.20, orientation: "portrait" }),
+    ]);
+    expect(result.picked_photo_ids.sort()).toEqual([1, 2]);
+    expect(result.confidence).toBe("high");
+  });
+
+  it("persists the orientation on each per-photo score row", () => {
+    const result = computeGroupPick([
+      basePhoto({ photo_id: 1, blur_score: 0.90, orientation: "portrait" }),
+      basePhoto({ photo_id: 2, blur_score: 0.85, orientation: "landscape" }),
+    ]);
+    const p1 = result.details.scores.find((s) => s.photo_id === 1);
+    const p2 = result.details.scores.find((s) => s.photo_id === 2);
+    expect(p1?.orientation).toBe("portrait");
+    expect(p2?.orientation).toBe("landscape");
+  });
+
+  it("exposes ORIENTATION_FLOOR for documentation/tuning", () => {
+    expect(ORIENTATION_FLOOR).toBeGreaterThan(0);
+    expect(ORIENTATION_FLOOR).toBeLessThan(1);
   });
 });
 
