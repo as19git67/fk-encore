@@ -26,12 +26,24 @@ function onItemTouchEnd(e: TouchEvent, item: PhotoItem) {
 
 function handleItemTap(item: PhotoItem, event: MouseEvent | TouchEvent) {
   const me = event as MouseEvent
-  if (item.group) {
-    if (props.selectMode || me.ctrlKey || me.metaKey || me.shiftKey) {
-      emit('group-multi-select', item.group, me)
-    } else {
-      emit('stack-click', item.group)
-    }
+  const hasModifier = props.selectMode || me.ctrlKey || me.metaKey || me.shiftKey
+
+  // Modifier / select-mode: selecting a group-photo selects the whole
+  // group regardless of where the tap landed on the tile.
+  if (item.group && hasModifier) {
+    emit('group-multi-select', item.group, me)
+    return
+  }
+
+  // Normal tap on a group member: only the `+N` marker opens the
+  // review dialog. The rest of the tile behaves like a regular photo
+  // (Track I, see docs/ai-auto-pick.md) — the AI's pick is supposed
+  // to be the default view and the user should be able to view it
+  // fullscreen without leaving the gallery flow.
+  const target = event.target as HTMLElement | null
+  const onMarker = !!item.group && !!target?.closest('.stack-badge')
+  if (onMarker) {
+    emit('stack-click', item.group!)
   } else {
     emit('photo-click', item, me)
   }
@@ -245,7 +257,7 @@ defineExpose({
             @touchstart.passive="onItemTouchStart"
             @touchend="onItemTouchEnd($event, item)"
             @click="handleItemTap(item, $event)"
-            @dblclick="!item.group && emit('photo-dblclick', item)"
+            @dblclick="emit('photo-dblclick', item)"
           >
             <div class="photo-thumb">
               <HeicImage
@@ -416,6 +428,14 @@ defineExpose({
   font-weight: 700;
   padding: 2px 6px;
   border-radius: 10px;
+  cursor: pointer;
+  /* Keep the badge above the photo body so taps on it never bleed
+     through to the tile's `photo-click` handler — only the marker
+     opens the review dialog (Track I). */
+  z-index: 1;
+}
+.stack-badge:hover {
+  background: rgba(0,0,0,0.85);
 }
 
 /* Medium-confidence AI pick: more prominent, orange-tinted background so
