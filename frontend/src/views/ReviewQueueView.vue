@@ -22,12 +22,14 @@ import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import SelectButton from 'primevue/selectbutton'
+import Dialog from 'primevue/dialog'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
 import {
   getReviewQueue,
   acceptAiPick,
   bulkAcceptHighConfidenceAiPicks,
   type ReviewQueueGroup,
+  type ReviewQueueUserCalibration,
   type PhotoGroup,
 } from '../api/photos'
 import { getThumbUrl } from '../api/gallery'
@@ -40,6 +42,7 @@ const total = ref(0)
 const offset = ref(0)
 const loading = ref(false)
 const loadError = ref('')
+const userCalibration = ref<ReviewQueueUserCalibration | null>(null)
 type ConfidenceFilter = 'all' | 'high' | 'medium' | 'low'
 const confidenceFilter = ref<ConfidenceFilter>('all')
 
@@ -51,8 +54,37 @@ const filterOptions: Array<{ label: string; value: ConfidenceFilter }> = [
 ]
 
 const bulkBusy = ref(false)
+const bulkConfirmOpen = ref(false)
 const bulkResult = ref<{ groups_accepted: number; hidden_count: number } | null>(null)
 const pendingAcceptIds = ref<Set<number>>(new Set())
+
+// Average top-1 accuracy across both branches, weighted by pair count.
+// Surfaced on the bulk-accept disclaimer so the user sees the actual
+// agreement rate before committing to a destructive action.
+const calibrationAccuracyAvg = computed<number | null>(() => {
+  const c = userCalibration.value
+  if (!c) return null
+  const total = c.pair_count_face + c.pair_count_non_face
+  if (total === 0) return null
+  return (
+    (c.top1_accuracy_face * c.pair_count_face +
+      c.top1_accuracy_non_face * c.pair_count_non_face) /
+    total
+  )
+})
+
+function fmtPct(v: number | null | undefined): string {
+  if (v == null) return '–'
+  return `${Math.round(v * 100)} %`
+}
+
+function fmtDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString('de-DE')
+  } catch {
+    return iso
+  }
+}
 
 const reachedEnd = computed(() => groups.value.length >= total.value)
 
@@ -71,6 +103,7 @@ async function loadInitial() {
     groups.value = res.groups
     total.value = res.total
     offset.value = res.groups.length
+    userCalibration.value = res.user_calibration
   } catch (err: any) {
     loadError.value = err?.message ?? 'Fehler beim Laden der Review-Warteschlange.'
   } finally {
@@ -123,7 +156,12 @@ async function onAccept(group: ReviewQueueGroup) {
   }
 }
 
-async function onBulkAcceptHigh() {
+function askBulkAcceptHigh() {
+  bulkConfirmOpen.value = true
+}
+
+async function confirmBulkAcceptHigh() {
+  bulkConfirmOpen.value = false
   if (bulkBusy.value) return
   bulkBusy.value = true
   loadError.value = ''
@@ -138,6 +176,18 @@ async function onBulkAcceptHigh() {
   } finally {
     bulkBusy.value = false
   }
+}
+
+// Confidence-bar value in [0..1]. The auto-hide gate sits at
+// HIGH_CONFIDENCE_DELTA (0.10) — we map that to a full bar so the
+// visual is intuitive: full = "AI is sure", empty = "AI guessed".
+const CONFIDENCE_BAR_MAX = 0.10
+function confidenceBarFraction(g: ReviewQueueGroup): number {
+  const d = g.runner_up_delta
+  if (d == null) return 0
+  if (d <= 0) return 0
+  if (d >= CONFIDENCE_BAR_MAX) return 1
+  return d / CONFIDENCE_BAR_MAX
 }
 
 // ── Manual review (drop into existing PhotoCompareView) ──
@@ -222,7 +272,7 @@ onMounted(() => {
           label="Alle hochkonfidenten bestätigen"
           :loading="bulkBusy"
           :disabled="bulkBusy || loading"
-          @click="onBulkAcceptHigh"
+          @click="askBulkAcceptHigh"
         />
       </div>
     </header>
@@ -274,6 +324,24 @@ onMounted(() => {
           <span :class="confidenceClass(group.ai_picked_confidence)">
             {{ confidenceLabel(group.ai_picked_confidence) }}
           </span>
+          <!-- Confidence-bar: visualises Δ to the runner-up so the user
+               can tell "AI is sure" (full) vs. "barely above the next
+               photo" (almost empty) before committing the pick. -->
+          <div
+            v-if="group.runner_up_delta != null"
+            class="rq-confbar"
+            :title="`Δ zum zweitbesten Foto: ${group.runner_up_delta.toFixed(3)}`"
+            :class="{
+              'rq-confbar--high': group.ai_picked_confidence === 'high',
+              'rq-confbar--medium': group.ai_picked_confidence === 'medium',
+              'rq-confbar--low': group.ai_picked_confidence === 'low',
+            }"
+          >
+            <div
+              class="rq-confbar-fill"
+              :style="{ width: `${confidenceBarFraction(group) * 100}%` }"
+            />
+          </div>
           <span class="rq-card-count">{{ group.member_count }} Fotos</span>
         </div>
 
@@ -355,6 +423,50 @@ onMounted(() => {
       @close="onCompareClose"
       @reviewed="onCompareReviewed"
     />
+
+    <!-- Bulk-Accept disclaimer (Stufe D). Shows the user's actual
+         agreement rate on already-reviewed groups so they know the
+         risk before committing a non-trivial batch action. -->
+    <Dialog
+      v-model:visible="bulkConfirmOpen"
+      modal
+      header="Alle hochkonfidenten Gruppen bestätigen?"
+      :style="{ width: 'min(560px, 92vw)' }"
+    >
+      <p v-if="calibrationAccuracyAvg != null">
+        Bei deinen bisher reviewten Gruppen hat die KI in
+        <strong>{{ fmtPct(calibrationAccuracyAvg) }}</strong>
+        der Fälle das Foto getroffen, das du auch behalten hättest.
+      </p>
+      <p v-else>
+        Du hast noch keine eigenen Gewichte kalibriert — die KI nutzt
+        gerade die globalen Defaults. Klicke vorher "KI auf meine
+        Vorlieben kalibrieren" im DataManagement, falls die Treffer-
+        Quote auf deinen Daten bewertet werden soll.
+      </p>
+      <p v-if="userCalibration" class="rq-calib-detail">
+        Personen-Bursts:
+        <strong>{{ fmtPct(userCalibration.top1_accuracy_face) }}</strong>
+        ({{ userCalibration.pair_count_face }} Paare) &middot;
+        andere Bursts:
+        <strong>{{ fmtPct(userCalibration.top1_accuracy_non_face) }}</strong>
+        ({{ userCalibration.pair_count_non_face }} Paare) &middot;
+        Stand: {{ fmtDate(userCalibration.fitted_at) }}
+      </p>
+      <p class="rq-calib-detail">
+        Versteckte Fotos lassen sich später jederzeit über den Filter
+        "Ausgeblendete anzeigen" zurückholen.
+      </p>
+      <template #footer>
+        <Button label="Abbrechen" text @click="bulkConfirmOpen = false" />
+        <Button
+          icon="pi pi-check-circle"
+          severity="success"
+          label="Ja, alle bestätigen"
+          @click="confirmBulkAcceptHigh"
+        />
+      </template>
+    </Dialog>
   </div>
 </template>
 
@@ -459,6 +571,39 @@ onMounted(() => {
 .rq-card-count {
   color: var(--p-text-muted-color);
   font-size: 0.9rem;
+}
+
+/* Confidence-bar (Stufe D): horizontal pill that fills proportionally
+   to the auto-hide threshold. Colour tracks the confidence-chip so
+   bar and chip read as one visual unit. */
+.rq-confbar {
+  flex: 1 1 auto;
+  max-width: 220px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--p-content-hover-background);
+  overflow: hidden;
+}
+.rq-confbar-fill {
+  height: 100%;
+  background: var(--p-text-muted-color);
+  border-radius: 999px;
+  transition: width 0.2s;
+}
+.rq-confbar--high .rq-confbar-fill {
+  background: var(--p-green-500, #22c55e);
+}
+.rq-confbar--medium .rq-confbar-fill {
+  background: var(--p-orange-500, #f97316);
+}
+.rq-confbar--low .rq-confbar-fill {
+  background: var(--p-text-muted-color);
+}
+
+.rq-calib-detail {
+  font-size: 0.85rem;
+  color: var(--p-text-muted-color);
+  margin: 8px 0 0 0;
 }
 
 .rq-card-picks {

@@ -856,13 +856,24 @@ export interface ReviewQueueGroup {
   member_count: number
   ai_picked_photo_ids: number[]
   ai_picked_confidence: 'high' | 'medium' | 'low' | null
+  /** Δ vs. runner-up; drives the confidence-bar render. */
+  runner_up_delta: number | null
   photos: ReviewQueuePhoto[]
+}
+
+export interface ReviewQueueUserCalibration {
+  fitted_at: string
+  top1_accuracy_face: number
+  top1_accuracy_non_face: number
+  pair_count_face: number
+  pair_count_non_face: number
 }
 
 export interface ReviewQueueResponse {
   total: number
   offset: number
   groups: ReviewQueueGroup[]
+  user_calibration: ReviewQueueUserCalibration | null
 }
 
 export function getReviewQueue(opts: {

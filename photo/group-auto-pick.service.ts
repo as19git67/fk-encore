@@ -531,13 +531,34 @@ export interface ReviewQueueGroup {
   member_count: number;
   ai_picked_photo_ids: number[];
   ai_picked_confidence: AiConfidence | null;
+  // Δ between the top photo's score and the best non-pick. Surfaced
+  // so the card UI can render a confidence-bar (Stufe D). 0..~0.6 in
+  // practice; HIGH_CONFIDENCE_DELTA (0.10) is the auto-hide threshold.
+  // `null` for groups that have never been scored.
+  runner_up_delta: number | null;
   photos: ReviewQueuePhoto[];
+}
+
+/**
+ * User-level calibration metadata. Surfaced alongside the queue so
+ * the Bulk-Accept disclaimer can show "stimmt zu X % mit deinen
+ * letzten Reviews überein" without a second round-trip. `null` when
+ * the user has never run /calibrate-ai-pick-weights — the UI then
+ * shows the global defaults disclaimer instead.
+ */
+export interface ReviewQueueUserCalibration {
+  fitted_at: string;
+  top1_accuracy_face: number;
+  top1_accuracy_non_face: number;
+  pair_count_face: number;
+  pair_count_non_face: number;
 }
 
 export interface ReviewQueueResponse {
   total: number;
   offset: number;
   groups: ReviewQueueGroup[];
+  user_calibration: ReviewQueueUserCalibration | null;
 }
 
 /**
@@ -576,8 +597,38 @@ export async function listReviewQueueLogic(
       .where(and(...baseConds)),
   );
   const total = totalRow?.c ?? 0;
+
+  // User-level calibration metadata. Loaded unconditionally (even when
+  // total = 0) so the empty-state can still display "deine letzte
+  // Kalibrierung war am …". Cheap — one row by PK.
+  const calibRow = await dbFirst<{
+    fitted_at: string;
+    metadata: {
+      top1_accuracy_face?: number;
+      top1_accuracy_non_face?: number;
+      pair_count_face?: number;
+      pair_count_non_face?: number;
+    } | null;
+  }>(
+    db.select({
+      fitted_at: aiPickUserWeights.fitted_at,
+      metadata: aiPickUserWeights.metadata,
+    })
+      .from(aiPickUserWeights)
+      .where(eq(aiPickUserWeights.user_id, userId)),
+  );
+  const userCalibration: ReviewQueueUserCalibration | null = calibRow && calibRow.metadata
+    ? {
+        fitted_at: calibRow.fitted_at,
+        top1_accuracy_face: calibRow.metadata.top1_accuracy_face ?? 0,
+        top1_accuracy_non_face: calibRow.metadata.top1_accuracy_non_face ?? 0,
+        pair_count_face: calibRow.metadata.pair_count_face ?? 0,
+        pair_count_non_face: calibRow.metadata.pair_count_non_face ?? 0,
+      }
+    : null;
+
   if (total === 0) {
-    return { total: 0, offset, groups: [] };
+    return { total: 0, offset, groups: [], user_calibration: userCalibration };
   }
 
   // Pull the requested window. Ordering follows the contract above.
@@ -596,6 +647,7 @@ export async function listReviewQueueLogic(
     ai_picked_confidence: string | null;
     member_count: number;
     created_at: string | null;
+    runner_up_delta: number | null;
   }>(
     db.select({
       id: photoGroups.id,
@@ -607,6 +659,16 @@ export async function listReviewQueueLogic(
         WHERE m.group_id = ${photoGroups.id}
       )`,
       created_at: photoGroups.created_at,
+      // Pull the Δ out of the persisted score breakdown. Cast through
+      // jsonb_typeof so a malformed row (or one fitted before #406's
+      // schema lock) yields NULL instead of throwing.
+      runner_up_delta: sql<number | null>`
+        CASE
+          WHEN ${photoGroups.ai_pick_details} IS NULL THEN NULL
+          WHEN (${photoGroups.ai_pick_details}->>'runner_up_delta') IS NULL THEN NULL
+          ELSE (${photoGroups.ai_pick_details}->>'runner_up_delta')::float
+        END
+      `,
     })
       .from(photoGroups)
       .where(and(...baseConds))
@@ -622,7 +684,7 @@ export async function listReviewQueueLogic(
       .offset(offset),
   );
   if (groupRows.length === 0) {
-    return { total, offset, groups: [] };
+    return { total, offset, groups: [], user_calibration: userCalibration };
   }
 
   // Bulk-fetch member photo rows in a single query so the response is
@@ -675,6 +737,7 @@ export async function listReviewQueueLogic(
         g.ai_picked_confidence === "low"
           ? (g.ai_picked_confidence as AiConfidence)
           : null,
+      runner_up_delta: g.runner_up_delta,
       photos: members.map((m) => ({
         id: m.photo_id,
         filename: m.filename,
@@ -688,5 +751,5 @@ export async function listReviewQueueLogic(
     };
   });
 
-  return { total, offset, groups };
+  return { total, offset, groups, user_calibration: userCalibration };
 }
