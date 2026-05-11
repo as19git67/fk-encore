@@ -1,0 +1,227 @@
+name: Playwright E2E (Track M)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/**'
+      - 'user/**'
+      - 'photo/**'
+      - 'documents/**'
+      - 'finance/**'
+      - 'db/**'
+      - 'web/**'
+      - 'package*.json'
+      - '.github/workflows/playwright-e2e.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - 'user/**'
+      - 'photo/**'
+      - 'documents/**'
+      - 'finance/**'
+      - 'db/**'
+      - 'web/**'
+      - 'package*.json'
+      - '.github/workflows/playwright-e2e.yml'
+  workflow_dispatch: {}
+
+# Stale runs against the same branch share a Postgres-port and an Encore
+# daemon socket; cancel the previous run when a new one queues up so we
+# don't get port-binding races.
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        # Mirror the docker-image.yml choice: pgvector/pgvector:pg18 is required
+        # for migration 0027 (CREATE EXTENSION vector). encore_test isn't used
+        # here — the E2E run hits the Encore app's regular database (fk_encore).
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      # Backend / DB
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: '5432'
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DATABASE: fk_encore
+      # Seed an admin so globalSetup can log in. The same credentials are
+      # plumbed into Playwright via E2E_ADMIN_*.
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASSWORD: admin
+      ADMIN_NAME: Admin
+      # WebAuthn / Passkey relying-party config. user/startupValidation.ts
+      # throws at module-load if either is missing, so they MUST be present
+      # even though no E2E test exercises the passkey flow yet. HTTP is fine
+      # here because NODE_ENV != "production".
+      RP_ORIGIN: http://localhost:5173
+      RP_NAME: FK Encore E2E
+      RP_ID: localhost
+      # Encore CI hardening: disable telemetry, force non-interactive output.
+      ENCORE_TELEMETRY_DISABLED: '1'
+      CI: 'true'
+      # Playwright config
+      E2E_BASE_URL: http://localhost:5173/app/
+      E2E_API_URL: http://localhost:4000
+      E2E_ADMIN_EMAIL: admin@example.com
+      E2E_ADMIN_PASSWORD: admin
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+
+      # docker-image.yml uses `npm install` (not `ci`) because lockfiles drift
+      # across dev platforms. Same trade-off here.
+      - name: Install backend dependencies
+        run: npm install
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend install --legacy-peer-deps
+
+      # Pull the resolved version straight from the installed module —
+      # robust against lockfile-shape differences across npm versions.
+      - name: Resolve Playwright version
+        id: pw
+        run: |
+          version=$(node -p "require('./frontend/node_modules/@playwright/test/package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ steps.pw.outputs.version }}
+
+      # On cache-hit we still need the OS packages (libgbm, libxkbcommon …);
+      # `install-deps` is cheap and idempotent. On miss, install browsers
+      # without --with-deps to avoid double-installing OS packages.
+      - name: Install Playwright browsers
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        working-directory: frontend
+        run: npx playwright install chromium
+
+      - name: Install Playwright system deps
+        working-directory: frontend
+        run: npx playwright install-deps chromium
+
+      - name: Install Encore CLI
+        run: |
+          curl -fsSL --retry 3 --retry-delay 5 -o install.sh https://encore.dev/install.sh
+          bash install.sh
+          rm -f install.sh
+          echo "${HOME}/.encore/bin" >> "${GITHUB_PATH}"
+
+      - name: Verify Encore CLI
+        run: encore version
+
+      # Boot the backend in the background.
+      # --watch=false:    chokidar / inotify churn delays the ready signal
+      #                   in CI without giving us any benefit.
+      # --port=4000:      matches the Playwright globalSetup target.
+      # nohup … &:        survives the shell exiting; PID captured for cleanup.
+      - name: Start Encore backend
+        run: |
+          mkdir -p e2e-logs
+          nohup encore run --port=4000 --watch=false > e2e-logs/encore.log 2>&1 &
+          echo $! > e2e-logs/encore.pid
+
+      - name: Wait for backend to respond
+        run: |
+          # Migrations + seed (permissions, roles, taxonomy, admin user) run
+          # on first DB use during initializeDb(). Cold runners regularly
+          # take 60–90 s; budget 180 s to absorb the worst case while still
+          # failing decisively on genuine boot errors.
+          for i in $(seq 1 180); do
+            # 401 (bad creds) is a valid "backend is up" signal — we still
+            # exit successfully because the seed has clearly finished.
+            status=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+              -H 'Content-Type: application/json' \
+              -d '{"email":"admin@example.com","password":"admin"}' \
+              http://localhost:4000/auth/login || echo 000)
+            case "$status" in
+              200|401)
+                echo "[wait] backend ready after ${i}s (status=${status})"
+                exit 0
+                ;;
+            esac
+            sleep 1
+          done
+          echo "[wait] backend did not become ready in 180s" >&2
+          echo "----- last 200 lines of encore.log -----" >&2
+          tail -n 200 e2e-logs/encore.log >&2 || true
+          exit 1
+
+      # Vite dev server is started automatically by Playwright's `webServer`
+      # (see frontend/playwright.config.ts). E2E_NO_WEBSERVER stays unset.
+      - name: Run Playwright tests
+        working-directory: frontend
+        run: npm run e2e
+
+      - name: Stop Encore backend
+        if: always()
+        run: |
+          pid=$(cat e2e-logs/encore.pid 2>/dev/null || true)
+          if [ -n "$pid" ]; then kill "$pid" 2>/dev/null || true; fi
+          # Encore daemon stays running otherwise; stop it explicitly so
+          # workflow_dispatch loops don't accumulate stale processes.
+          encore daemon stop >/dev/null 2>&1 || true
+
+      - name: Upload Playwright HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/e2e/.report
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload Playwright traces & videos
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: frontend/e2e/.results
+          retention-days: 14
+          if-no-files-found: ignore
+
+      # Always upload the backend log: even on green runs it captures
+      # startup warnings (slow migrations, missing optional secrets) that
+      # are worth eyeballing.
+      - name: Upload backend log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: encore-log
+          path: e2e-logs/encore.log
+          retention-days: 14
+          if-no-files-found: ignore

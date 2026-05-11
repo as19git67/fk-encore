@@ -3,7 +3,6 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import Card from 'primevue/card'
 import InputText from 'primevue/inputtext'
-import Password from 'primevue/password'
 import Button from 'primevue/button'
 import Divider from 'primevue/divider'
 import Message from 'primevue/message'
@@ -15,6 +14,7 @@ const router = useRouter()
 
 const email = ref('')
 const password = ref('')
+const passwordVisible = ref(false)
 const error = ref('')
 const loading = ref(false)
 const passkeyLoading = ref(false)
@@ -76,7 +76,23 @@ async function handlePasskeyLogin() {
           </div>
           <div class="field">
             <label for="password">Passwort</label>
-            <Password id="password" v-model="password" :feedback="false" toggle-mask fluid />
+            <div class="password-row">
+              <InputText
+                id="password"
+                v-model="password"
+                :type="passwordVisible ? 'text' : 'password'"
+                fluid
+              />
+              <Button
+                type="button"
+                :icon="passwordVisible ? 'pi pi-eye-slash' : 'pi pi-eye'"
+                :aria-label="passwordVisible ? 'Passwort verbergen' : 'Passwort anzeigen'"
+                :aria-pressed="passwordVisible"
+                severity="secondary"
+                text
+                @click="passwordVisible = !passwordVisible"
+              />
+            </div>
           </div>
           <Button type="submit" label="Anmelden" icon="pi pi-sign-in" :loading="loading" fluid />
         </form>
@@ -132,5 +148,15 @@ async function handlePasskeyLogin() {
 
 .passkey-section {
   margin-bottom: 0;
+}
+
+.password-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.25rem;
+}
+
+.password-row :first-child {
+  flex: 1;
 }
 </style>
