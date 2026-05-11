@@ -70,6 +70,8 @@ type PhotoFilterQueryParams = {
   importedDaysAgo?: Query<number>;
   sizeMin?: Query<number>;
   sizeMax?: Query<number>;
+  showAiHidden?: Query<boolean>;
+  aiHiddenMode?: Query<string>;
   /** Maximum number of rows to return. Omit for "all". */
   limit?: Query<number>;
   /** Number of rows to skip before returning `limit` rows. */
@@ -102,6 +104,8 @@ function toFilterQuery(p: PhotoFilterQueryParams): PhotoFilterQuery {
     importedDaysAgo: p.importedDaysAgo,
     sizeMin: p.sizeMin,
     sizeMax: p.sizeMax,
+    showAiHidden: p.showAiHidden,
+    aiHiddenMode: p.aiHiddenMode,
   };
 }
 
@@ -291,6 +295,8 @@ function parsePhotoIndexQuery(url: URL): PhotoFilterQueryParams {
     importedDaysAgo: readNum("importedDaysAgo"),
     sizeMin: readNum("sizeMin"),
     sizeMax: readNum("sizeMax"),
+    showAiHidden: readBool("showAiHidden"),
+    aiHiddenMode: readStr("aiHiddenMode"),
     limit: readNum("limit"),
     offset: readNum("offset"),
   };
