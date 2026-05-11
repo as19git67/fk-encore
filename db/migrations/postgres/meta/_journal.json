@@ -568,6 +568,13 @@
       "when": 1779001419000,
       "tag": "0080_ai_model_slot",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1779001420000,
+      "tag": "0081_queue_priority",
+      "breakpoints": true
     }
   ]
 }

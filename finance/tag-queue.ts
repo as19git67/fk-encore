@@ -34,10 +34,11 @@ export class DeferTagJobError extends Error {
 export async function enqueueTagSuggestion(
   transactionId: number,
   userId?: number,
+  priority = 2,
 ): Promise<void> {
   await db
     .insert(financeTagQueue)
-    .values({ transaction_id: transactionId, user_id: userId ?? null })
+    .values({ transaction_id: transactionId, user_id: userId ?? null, priority })
     .onConflictDoNothing();
   notifyFinanceTagQueueChanged();
 }
@@ -57,7 +58,7 @@ export async function dequeueNextTagJob(): Promise<
     WHERE id = (
       SELECT id FROM finance_tag_queue
       WHERE status = 'pending'
-      ORDER BY enqueued_at ASC
+      ORDER BY priority ASC, enqueued_at ASC
       LIMIT 1
       FOR UPDATE SKIP LOCKED
     )
@@ -115,7 +116,7 @@ export async function getTagQueueStatus(): Promise<TagQueueServiceStatus> {
 export async function requeueFailedTagJobs(): Promise<number> {
   const result = await db
     .update(financeTagQueue)
-    .set({ status: "pending", error_msg: null, started_at: null, finished_at: null })
+    .set({ status: "pending", priority: 3, error_msg: null, started_at: null, finished_at: null })
     .where(eq(financeTagQueue.status, "failed"));
   const changed = (result as any).rowCount ?? 0;
   if (changed > 0) notifyFinanceTagQueueChanged();

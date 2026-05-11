@@ -479,6 +479,7 @@ export const photoScanQueue = pgTable("photo_scan_queue", {
     .references(() => users.id, { onDelete: "cascade" }),
   service: scanServiceEnum("service").notNull(),
   status: scanStatusEnum("status").notNull().default("pending"),
+  priority: integer("priority").notNull().default(2),
   force: boolean("force").notNull().default(false),
   attempts: integer("attempts").notNull().default(0),
   error_msg: text("error_msg"),
@@ -680,6 +681,7 @@ export const documentScanQueue = pgTable("document_scan_queue", {
     .references(() => documents.id, { onDelete: "cascade" }),
   service: documentJobServiceEnum("service").notNull(),
   status: documentJobStatusEnum("status").notNull().default("pending"),
+  priority: integer("priority").notNull().default(2),
   attempts: integer("attempts").notNull().default(0),
   error_msg: text("error_msg"),
   enqueued_at: timestamp("enqueued_at", { mode: "string" }).notNull().defaultNow(),
@@ -1401,6 +1403,7 @@ export const financeTagQueue = pgTable(
     user_id: integer("user_id")
       .references(() => users.id, { onDelete: "set null" }),
     status: scanStatusEnum("status").notNull().default("pending"),
+    priority: integer("priority").notNull().default(2),
     attempts: integer("attempts").notNull().default(0),
     error_msg: text("error_msg"),
     enqueued_at: timestamp("enqueued_at", { mode: "string", withTimezone: true })
@@ -1410,7 +1413,7 @@ export const financeTagQueue = pgTable(
     finished_at: timestamp("finished_at", { mode: "string", withTimezone: true }),
   },
   (table) => [
-    index("idx_finance_tag_queue_pickup").on(table.enqueued_at),
+    index("idx_finance_tag_queue_pickup").on(table.priority, table.enqueued_at),
     index("idx_finance_tag_queue_status").on(table.status),
   ]
 );

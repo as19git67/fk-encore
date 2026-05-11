@@ -100,6 +100,7 @@ export async function enqueuePhotoScan(
   userId: number,
   services: ScanService[] = enabledServices(),
   force = false,
+  priority = 2,
 ): Promise<void> {
   if (services.length === 0) return;
   notifyScanQueueChanged();
@@ -110,7 +111,7 @@ export async function enqueuePhotoScan(
     // Try insert first (covers the common case: new photo, not yet in queue)
     const result = await db
       .insert(photoScanQueue)
-      .values({ photo_id: photoId, user_id: queueUserId, service, force })
+      .values({ photo_id: photoId, user_id: queueUserId, service, force, priority })
       .onConflictDoNothing()
       .returning({ id: photoScanQueue.id });
 
@@ -163,6 +164,7 @@ export async function enqueuePhotoScanBulkPerUser(
   userIds: number[],
   service: ScanService,
   force = false,
+  priority = 2,
 ): Promise<void> {
   if (userIds.length === 0) return;
   if (isGlobalService(service)) {
@@ -175,6 +177,7 @@ export async function enqueuePhotoScanBulkPerUser(
     user_id,
     service,
     force,
+    priority,
   }));
 
   await db
@@ -214,7 +217,7 @@ export async function dequeueNextJob(service: ScanService): Promise<typeof photo
       SELECT id FROM photo_scan_queue
       WHERE service = ${service}
         AND status = 'pending'
-      ORDER BY enqueued_at ASC
+      ORDER BY priority ASC, enqueued_at ASC
       LIMIT 1
       FOR UPDATE SKIP LOCKED
     )
@@ -340,18 +343,18 @@ export async function getQueueStatus(userId: number): Promise<QueueStatus> {
   return { services: Array.from(map.values()) };
 }
 
-/** Reset all failed jobs for a user back to pending. */
+/** Reset all failed jobs for a user back to pending (low priority). */
 export async function requeueFailed(userId: number): Promise<number> {
   // Reset per-user failed jobs
   const perUserResult = await db
     .update(photoScanQueue)
-    .set({ status: "pending", error_msg: null, started_at: null, finished_at: null })
+    .set({ status: "pending", priority: 3, error_msg: null, started_at: null, finished_at: null })
     .where(and(eq(photoScanQueue.user_id, userId), eq(photoScanQueue.status, "failed")));
 
   // Reset global failed jobs for this user's photos
   const globalResult = await db.execute(sql`
     UPDATE photo_scan_queue
-    SET status = 'pending', error_msg = NULL, started_at = NULL, finished_at = NULL
+    SET status = 'pending', priority = 3, error_msg = NULL, started_at = NULL, finished_at = NULL
     WHERE status = 'failed'
       AND user_id IS NULL
       AND photo_id IN (SELECT id FROM photos WHERE user_id = ${userId})
@@ -417,14 +420,14 @@ export async function requeueForRescan(userId: number, force: boolean): Promise<
 
           const updated = await db
             .update(photoScanQueue)
-            .set({ status: "pending", force: true, error_msg: null, started_at: null, finished_at: null, attempts: 0 })
+            .set({ status: "pending", force: true, priority: 3, error_msg: null, started_at: null, finished_at: null, attempts: 0 })
             .where(
               and(eq(photoScanQueue.photo_id, photoId), eq(photoScanQueue.service, service), isNull(photoScanQueue.user_id)),
             );
           if (((updated as any).rowCount ?? 0) === 0) {
             await db
               .insert(photoScanQueue)
-              .values({ photo_id: photoId, user_id: null, service, force: true })
+              .values({ photo_id: photoId, user_id: null, service, force: true, priority: 3 })
               .onConflictDoNothing();
           }
         } else {
@@ -441,14 +444,14 @@ export async function requeueForRescan(userId: number, force: boolean): Promise<
 
           const updated = await db
             .update(photoScanQueue)
-            .set({ status: "pending", force: true, error_msg: null, started_at: null, finished_at: null, attempts: 0 })
+            .set({ status: "pending", force: true, priority: 3, error_msg: null, started_at: null, finished_at: null, attempts: 0 })
             .where(
               and(eq(photoScanQueue.photo_id, photoId), eq(photoScanQueue.service, service), eq(photoScanQueue.user_id, userId)),
             );
           if (((updated as any).rowCount ?? 0) === 0) {
             await db
               .insert(photoScanQueue)
-              .values({ photo_id: photoId, user_id: userId, service, force: true })
+              .values({ photo_id: photoId, user_id: userId, service, force: true, priority: 3 })
               .onConflictDoNothing();
           }
         }
@@ -474,7 +477,7 @@ export async function requeueForRescan(userId: number, force: boolean): Promise<
           `);
           await db
             .insert(photoScanQueue)
-            .values({ photo_id: photoId, user_id: null, service, force: false })
+            .values({ photo_id: photoId, user_id: null, service, force: false, priority: 3 })
             .onConflictDoNothing();
         } else {
           await db
@@ -489,7 +492,7 @@ export async function requeueForRescan(userId: number, force: boolean): Promise<
             );
           await db
             .insert(photoScanQueue)
-            .values({ photo_id: photoId, user_id: userId, service, force: false })
+            .values({ photo_id: photoId, user_id: userId, service, force: false, priority: 3 })
             .onConflictDoNothing();
         }
       }
