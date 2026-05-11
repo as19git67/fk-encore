@@ -4432,13 +4432,8 @@ function calculateOverlap(b1: any, b2: any): number {
   return intersectionArea / unionArea;
 }
 
-export async function listPersonsLogic(userId: number): Promise<ListPersonsResponse> {
-  const rows = await dbAll<{
-    id: number; user_id: number; name: string; cover_face_id: number | null;
-    created_at: string | null; updated_at: string | null; faceCount: number;
-    cover_filename: string | null; cover_bbox: string | null;
-    oldest_photo_at: string | null; newest_photo_at: string | null;
-  }>(db.select({
+export async function listPersonsLogic(userId: number, limit?: number): Promise<ListPersonsResponse> {
+  const query = db.select({
       id: persons.id,
       user_id: persons.user_id,
       name: persons.name,
@@ -4505,11 +4500,21 @@ export async function listPersonsLogic(userId: number): Promise<ListPersonsRespo
           AND ufa.user_id = persons.user_id
           AND ufa.ignored = ${rawFalse}
       )`,
-    })
-    .from(persons)
-    .where(eq(persons.user_id, userId))
-    .orderBy(sql`${persons.updated_at} DESC`)
-  );
+  })
+  .from(persons)
+  .where(eq(persons.user_id, userId))
+  .orderBy(
+    sql`CASE WHEN ${persons.name} = 'Unbenannt' THEN 1 ELSE 0 END`,
+    sql`CAST(COALESCE((SELECT count(*) FROM user_face_assignments ufa WHERE ufa.person_id = persons.id AND ufa.ignored = ${rawFalse}), 0) AS INTEGER) DESC`
+  )
+  .$dynamic();
+
+  const rows = await dbAll<{
+    id: number; user_id: number; name: string; cover_face_id: number | null;
+    created_at: string | null; updated_at: string | null; faceCount: number;
+    cover_filename: string | null; cover_bbox: string | null;
+    oldest_photo_at: string | null; newest_photo_at: string | null;
+  }>(limit !== undefined ? query.limit(limit) : query);
 
   return {
     persons: rows.map((r) => ({

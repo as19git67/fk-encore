@@ -959,12 +959,12 @@ export const updateAlbumUserSettings = api(
  */
 export const listPersons = api(
   { expose: true, method: "GET", path: "/persons", auth: true },
-  async (): Promise<ListPersonsResponse> => {
+  async ({ limit }: { limit?: Query<number> }): Promise<ListPersonsResponse> => {
     checkModule();
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "people.view");
-    return await service.listPersonsLogic(userId);
+    return await service.listPersonsLogic(userId, limit);
   }
 );
 

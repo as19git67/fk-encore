@@ -10,7 +10,12 @@ struct PersonsListView: View {
     private var sortedPersons: [PersonWithFaceCount] {
         viewModel.persons
             .filter { $0.faceCount > 1 }
-            .sorted { $0.faceCount > $1.faceCount }
+            .sorted {
+                let aUnnamed = $0.name == "Unbenannt"
+                let bUnnamed = $1.name == "Unbenannt"
+                if aUnnamed != bUnnamed { return bUnnamed }
+                return $0.faceCount > $1.faceCount
+            }
     }
 
     var body: some View {

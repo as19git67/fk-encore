@@ -1,68 +1,165 @@
 import SwiftUI
 
-// MARK: - Timeline root (year grid)
+// MARK: - Timeline root (year grid or filtered flat grid)
 
 struct PhotoTimelineView: View {
     @State private var years: [TimelineYear] = []
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var showUpload = false
+    @State private var filterSort = FilterSortViewModel(persistenceKey: "photos.filterSort")
 
-    private let columns = [
+    // Used only in filtered mode
+    @State private var photosVM = PhotosViewModel()
+    @State private var fullscreenIndex = 0
+    @State private var isFullscreenPresented = false
+    @State private var scrollTarget: Int?
+
+    private let tileColumns = [
         GridItem(.flexible(), spacing: 2),
         GridItem(.flexible(), spacing: 2),
     ]
 
+    private let gridColumns = [
+        GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 2)
+    ]
+
     var body: some View {
-        ScrollView {
-            if isLoading && years.isEmpty {
-                ProgressView()
-                    .padding(.top, 100)
-            } else if let error = errorMessage, years.isEmpty {
-                ContentUnavailableView {
-                    Label("Fehler", systemImage: "exclamationmark.triangle")
-                } description: {
-                    Text(error)
-                } actions: {
-                    Button("Erneut versuchen") { Task { await loadTimeline() } }
+        ScrollViewReader { proxy in
+            ScrollView {
+                if filterSort.activeCount > 0 {
+                    filteredContent
+                } else {
+                    timelineContent
                 }
-            } else if years.isEmpty {
-                ContentUnavailableView {
-                    Label("Keine Fotos", systemImage: "photo.on.rectangle.angled")
-                } description: {
-                    Text("Lade Fotos hoch, um loszulegen.")
-                }
-            } else {
-                LazyVGrid(columns: columns, spacing: 2) {
-                    ForEach(years) { year in
-                        NavigationLink(value: year) {
-                            TimelineTileView(
-                                title: String(year.year),
-                                subtitle: "\(year.count) Fotos",
-                                coverFilename: year.cover_filename
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
+            }
+            .onChange(of: scrollTarget) { _, id in
+                guard let id else { return }
+                withAnimation { proxy.scrollTo(id, anchor: .center) }
+                scrollTarget = nil
             }
         }
         .navigationTitle("Fotos")
         .navigationDestination(for: TimelineYear.self) { year in
             PhotoYearView(year: year)
         }
+        .navigationDestination(isPresented: $isFullscreenPresented) {
+            PhotoFullscreenView(photos: photosVM.photos, currentIndex: $fullscreenIndex)
+        }
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                FilterSortButton(viewModel: filterSort)
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button { showUpload = true } label: {
                     Image(systemName: "photo.badge.plus")
                 }
             }
         }
-        .sheet(isPresented: $showUpload) {
-            PhotoUploadView { Task { await loadTimeline() } }
+        .sheet(isPresented: $filterSort.isMenuPresented) {
+            FilterSortMenuView(viewModel: filterSort)
+                .presentationDetents([.medium, .large])
         }
-        .refreshable { await loadTimeline() }
-        .task { await loadTimeline() }
+        .sheet(isPresented: $showUpload) {
+            PhotoUploadView { Task { await reload() } }
+        }
+        .onChange(of: isFullscreenPresented) { _, isPresented in
+            if !isPresented, !photosVM.photos.isEmpty {
+                let idx = min(fullscreenIndex, photosVM.photos.count - 1)
+                let photoId = photosVM.photos[idx].id
+                Task {
+                    try? await Task.sleep(for: .milliseconds(400))
+                    scrollTarget = photoId
+                }
+            }
+        }
+        .refreshable { await reload() }
+        .task { await reload() }
+        .task(id: filterSort.applyToken) {
+            if filterSort.activeCount > 0 {
+                await photosVM.loadPhotos(filter: filterSort.appliedFilter, sort: filterSort.appliedSort)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var timelineContent: some View {
+        if isLoading && years.isEmpty {
+            ProgressView()
+                .padding(.top, 100)
+        } else if let error = errorMessage, years.isEmpty {
+            ContentUnavailableView {
+                Label("Fehler", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(error)
+            } actions: {
+                Button("Erneut versuchen") { Task { await loadTimeline() } }
+            }
+        } else if years.isEmpty {
+            ContentUnavailableView {
+                Label("Keine Fotos", systemImage: "photo.on.rectangle.angled")
+            } description: {
+                Text("Lade Fotos hoch, um loszulegen.")
+            }
+        } else {
+            LazyVGrid(columns: tileColumns, spacing: 2) {
+                ForEach(years) { year in
+                    NavigationLink(value: year) {
+                        TimelineTileView(
+                            title: String(year.year),
+                            subtitle: "\(year.count) Fotos",
+                            coverFilename: year.cover_filename
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var filteredContent: some View {
+        if photosVM.isLoading && photosVM.photos.isEmpty {
+            ProgressView("Fotos laden...")
+                .padding(.top, 100)
+        } else if let error = photosVM.errorMessage, photosVM.photos.isEmpty {
+            ContentUnavailableView {
+                Label("Fehler", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(error)
+            } actions: {
+                Button("Erneut versuchen") {
+                    Task { await photosVM.loadPhotos(filter: filterSort.appliedFilter, sort: filterSort.appliedSort) }
+                }
+            }
+        } else if photosVM.photos.isEmpty {
+            ContentUnavailableView {
+                Label("Keine Fotos", systemImage: "photo.on.rectangle.angled")
+            } description: {
+                Text("Keine Fotos entsprechen dem Filter.")
+            }
+        } else {
+            LazyVGrid(columns: gridColumns, spacing: 2) {
+                ForEach(photosVM.photos) { photo in
+                    Button {
+                        fullscreenIndex = photosVM.photos.firstIndex(where: { $0.id == photo.id }) ?? 0
+                        isFullscreenPresented = true
+                    } label: {
+                        PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop)
+                    }
+                    .buttonStyle(.plain)
+                    .id(photo.id)
+                }
+            }
+            .padding(.horizontal, 2)
+        }
+    }
+
+    private func reload() async {
+        await loadTimeline()
+        if filterSort.activeCount > 0 {
+            await photosVM.loadPhotos(filter: filterSort.appliedFilter, sort: filterSort.appliedSort)
+        }
     }
 
     private func loadTimeline() async {

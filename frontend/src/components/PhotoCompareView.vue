@@ -15,11 +15,14 @@ import {
 
 const helpPopover = ref()
 
-// ── Responsive width tracking ──
+// ── Responsive width/height tracking ──
 const windowWidth = ref(window.innerWidth)
-function onResize() { windowWidth.value = window.innerWidth }
+const windowHeight = ref(window.innerHeight)
+function onResize() { windowWidth.value = window.innerWidth; windowHeight.value = window.innerHeight }
 const isNarrow = computed(() => windowWidth.value < 900)
 const isVeryNarrow = computed(() => windowWidth.value < 500)
+/** True when height > width (portrait orientation — stack photos top/bottom). */
+const isPortrait = computed(() => windowHeight.value > windowWidth.value)
 
 const props = defineProps<{
   group: PhotoGroup
@@ -595,7 +598,7 @@ function getPhotoById(id: number): Photo | undefined {
 
         <!-- Side-by-side photos -->
         <div class="side-by-side">
-          <div class="side-by-side-photos">
+          <div class="side-by-side-photos" :class="{ 'is-portrait': isPortrait }">
             <div
               v-for="photoId in currentPair"
               :key="photoId"
@@ -860,6 +863,12 @@ function getPhotoById(id: number): Photo | undefined {
   grid-template-columns: 1fr 1fr;
   gap: 2px;
   min-height: 0;
+}
+
+/* Portrait orientation: stack photos top/bottom for better screen use */
+.side-by-side-photos.is-portrait {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr 1fr;
 }
 
 .side-by-side-item {

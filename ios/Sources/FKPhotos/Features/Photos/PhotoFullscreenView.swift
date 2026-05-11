@@ -20,6 +20,7 @@ struct PhotoFullscreenView: View {
     @State private var isRenaming = false
     @State private var newName = ""
     @State private var conflictPerson: PersonWithFaceCount? = nil
+    @State private var showMergeConfirmation = false
     @State private var isMerging = false
 
     /// Single-photo convenience init (e.g. PersonDetailView).
@@ -44,6 +45,19 @@ struct PhotoFullscreenView: View {
         self.personId = nil
         self.onPersonRenamed = nil
         self.onPersonMerged = nil
+    }
+
+    /// Multi-photo init for person context: paged navigation with per-photo face boxes.
+    init(photos: [PhotoWithCuration], bboxes: [FaceBBox?], currentIndex: Binding<Int>, personId: Int, initialPersonName: String, onPersonRenamed: ((String) -> Void)? = nil, onPersonMerged: (() -> Void)? = nil) {
+        self.photos = photos
+        self.bboxes = bboxes.count == photos.count ? bboxes : Array(repeating: nil, count: photos.count)
+        _currentIndex = currentIndex
+        let idx = currentIndex.wrappedValue
+        _currentCurationStatus = State(initialValue: photos.indices.contains(idx) ? photos[idx].curation_status : .visible)
+        self.personId = personId
+        _personName = State(initialValue: initialPersonName)
+        self.onPersonRenamed = onPersonRenamed
+        self.onPersonMerged = onPersonMerged
     }
 
     private var currentPhoto: PhotoWithCuration? {
@@ -190,8 +204,8 @@ struct PhotoFullscreenView: View {
             .confirmationDialog(
                 conflictPerson.map { "Mit \"\($0.name)\" zusammenführen?" } ?? "",
                 isPresented: Binding(
-                    get: { conflictPerson != nil },
-                    set: { if !$0 { conflictPerson = nil } }
+                    get: { showMergeConfirmation },
+                    set: { if !$0 { showMergeConfirmation = false; conflictPerson = nil } }
                 ),
                 titleVisibility: .visible
             ) {
@@ -200,7 +214,10 @@ struct PhotoFullscreenView: View {
                         Task { await mergeInto(conflict) }
                     }
                 }
-                Button("Abbrechen", role: .cancel) { conflictPerson = nil }
+                Button("Abbrechen", role: .cancel) {
+                    showMergeConfirmation = false
+                    conflictPerson = nil
+                }
             } message: {
                 if let conflict = conflictPerson {
                     Text("\"\(conflict.name)\" existiert bereits. Die Fotos dieser Person werden zu \"\(conflict.name)\" verschoben.")
@@ -225,6 +242,11 @@ struct PhotoFullscreenView: View {
                $0.name.lowercased() == name.lowercased() && $0.id != pid
            }) {
             conflictPerson = existing
+            // Wait for the rename alert to fully dismiss before presenting the
+            // confirmation dialog — simultaneous UIAlertController presentations
+            // cause unsatisfiable-constraints warnings and a system error alert.
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            showMergeConfirmation = true
             return
         }
 
@@ -352,10 +374,10 @@ private struct PhotoPageView: View {
             : geo.size.height)
 
         ZStack {
-            // Photo
+            // Photo (bbox rendered inside ZoomableImageView so it follows zoom/pan)
             Group {
                 if let image = loader.image {
-                    ZoomableImageView(image: image)
+                    ZoomableImageView(image: image, faceBBox: faceBBox)
                         .frame(width: geo.size.width, height: height)
                 } else if loader.hasError {
                     Color(.systemBackground)
@@ -370,26 +392,6 @@ private struct PhotoPageView: View {
                         .frame(width: geo.size.width, height: height)
                         .overlay { ProgressView() }
                 }
-            }
-
-            // Face bbox overlay (when navigated from Persons)
-            if let image = loader.image, let bbox = faceBBox, height > 0 {
-                let containerW = geo.size.width
-                let imageAR = image.size.width / max(image.size.height, 1)
-                let containerAR = containerW / height
-                // scaledToFit: fit within bounds (letterbox/pillarbox)
-                let renderedW: CGFloat = imageAR > containerAR ? containerW : height * imageAR
-                let renderedH: CGFloat = imageAR > containerAR ? containerW / imageAR : height
-                let originX = (containerW - renderedW) / 2
-                let originY = (height - renderedH) / 2
-                let faceCenterX = (CGFloat(bbox.x) + CGFloat(bbox.width) / 2) * renderedW + originX
-                let faceCenterY = (CGFloat(bbox.y) + CGFloat(bbox.height) / 2) * renderedH + originY
-                let faceW = max(CGFloat(bbox.width) * renderedW, 4)
-                let faceH = max(CGFloat(bbox.height) * renderedH, 4)
-                Rectangle()
-                    .stroke(Color.yellow, lineWidth: 2)
-                    .frame(width: faceW, height: faceH)
-                    .position(x: faceCenterX, y: faceCenterY)
             }
         }
         .frame(height: height)

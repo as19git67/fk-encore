@@ -9,7 +9,31 @@ struct FilterSortMenuView: View {
     var available: Set<FilterCriterion> = Set(FilterCriterion.allCases)
 
     enum FilterCriterion: String, CaseIterable {
-        case favorite, hiddenMode, mediaType, hasGps, dateRange
+        case favorite, hiddenMode, hasGps, dateRange
+    }
+
+    @State private var selectedYear: Int?  = nil
+    @State private var selectedMonth: Int? = nil
+
+    private static let calendar    = Calendar.current
+    private static let currentYear = calendar.component(.year, from: Date())
+
+    private var availableYears: [Int] {
+        Array(stride(from: Self.currentYear, through: Self.currentYear - 30, by: -1))
+    }
+
+    private static let monthFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "de_DE")
+        f.dateFormat = "LLLL"
+        return f
+    }()
+
+    private func monthName(_ month: Int) -> String {
+        var c = DateComponents()
+        c.month = month; c.day = 1; c.year = 2000
+        guard let d = Self.calendar.date(from: c) else { return "\(month)" }
+        return Self.monthFormatter.string(from: d).capitalized
     }
 
     var body: some View {
@@ -30,73 +54,68 @@ struct FilterSortMenuView: View {
                     .pickerStyle(.segmented)
                 }
 
-                // ── Filter ─────────────────────────────────────────────
-                Section("Filter") {
-                    if available.contains(.favorite) {
-                        Toggle("Nur Favoriten", isOn: Binding(
-                            get: { viewModel.draftFilter.favorite == true },
-                            set: { viewModel.draftFilter.favorite = $0 ? true : nil }
-                        ))
-                    }
-
-                    if available.contains(.hiddenMode) {
-                        Picker("Ausgeblendet", selection: $viewModel.draftFilter.hiddenMode) {
-                            Text("Ohne").tag(PhotoFilter.HiddenMode.exclude)
-                            Text("Mit").tag(PhotoFilter.HiddenMode.include)
-                            Text("Nur").tag(PhotoFilter.HiddenMode.only)
+                // ── Date range — first filter, directly below sort ─────
+                if available.contains(.dateRange) {
+                    Section("Datum") {
+                        Picker("Jahr", selection: $selectedYear) {
+                            Text("–").tag(Int?.none)
+                            ForEach(availableYears, id: \.self) { y in
+                                Text(String(y)).tag(Int?.some(y))
+                            }
                         }
-                        .pickerStyle(.segmented)
+                        .pickerStyle(.menu)
+                        .onChange(of: selectedYear) { _, _ in
+                            applyYearMonth()
+                        }
+
+                        Picker("Monat", selection: $selectedMonth) {
+                            Text("–").tag(Int?.none)
+                            ForEach(1...12, id: \.self) { m in
+                                Text(monthName(m)).tag(Int?.some(m))
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .onChange(of: selectedMonth) { _, newMonth in
+                            if newMonth != nil && selectedYear == nil {
+                                selectedYear = Self.currentYear
+                            } else {
+                                applyYearMonth()
+                            }
+                        }
+
+                        dateRow("Von", date: $viewModel.draftFilter.dateFrom, clearResetDropdowns: true)
+                        dateRow("Bis",  date: $viewModel.draftFilter.dateTo,  clearResetDropdowns: false)
                     }
                 }
 
-                if available.contains(.mediaType) {
-                    Section("Medientyp") {
-                        mediaTypeRow
-                    }
-                }
-
-                if available.contains(.hasGps) || available.contains(.dateRange) {
-                    Section("Weitere Filter") {
-                        if available.contains(.hasGps) {
-                            Picker("GPS-Daten", selection: $viewModel.draftFilter.hasGps) {
-                                ForEach([PhotoFilter.TriState.any, .yes, .no], id: \.self) { s in
-                                    Text(s.label).tag(s)
-                                }
+                // ── Other filters ──────────────────────────────────────
+                if available.contains(.favorite) || available.contains(.hiddenMode) {
+                    Section("Filter") {
+                        if available.contains(.favorite) {
+                            Toggle("Nur Favoriten", isOn: Binding(
+                                get: { viewModel.draftFilter.favorite == true },
+                                set: { viewModel.draftFilter.favorite = $0 ? true : nil }
+                            ))
+                        }
+                        if available.contains(.hiddenMode) {
+                            Picker("Ausgeblendet", selection: $viewModel.draftFilter.hiddenMode) {
+                                Text("Ohne").tag(PhotoFilter.HiddenMode.exclude)
+                                Text("Mit").tag(PhotoFilter.HiddenMode.include)
+                                Text("Nur").tag(PhotoFilter.HiddenMode.only)
                             }
                             .pickerStyle(.segmented)
                         }
+                    }
+                }
 
-                        if available.contains(.dateRange) {
-                            DatePicker(
-                                "Von",
-                                selection: Binding(
-                                    get: { viewModel.draftFilter.dateFrom ?? Date.distantPast },
-                                    set: { viewModel.draftFilter.dateFrom = $0 }
-                                ),
-                                displayedComponents: .date
-                            )
-                            .onChange(of: viewModel.draftFilter.dateFrom) { _, v in
-                                if v == Date.distantPast { viewModel.draftFilter.dateFrom = nil }
-                            }
-
-                            if viewModel.draftFilter.dateFrom != nil {
-                                DatePicker(
-                                    "Bis",
-                                    selection: Binding(
-                                        get: { viewModel.draftFilter.dateTo ?? Date() },
-                                        set: { viewModel.draftFilter.dateTo = $0 }
-                                    ),
-                                    in: (viewModel.draftFilter.dateFrom ?? .distantPast)...,
-                                    displayedComponents: .date
-                                )
-
-                                Button("Datum zurücksetzen", role: .destructive) {
-                                    viewModel.draftFilter.dateFrom = nil
-                                    viewModel.draftFilter.dateTo   = nil
-                                }
-                                .font(.footnote)
-                            }
+                if available.contains(.hasGps) {
+                    Section("GPS-Standort") {
+                        Picker("GPS-Standort", selection: $viewModel.draftFilter.hasGps) {
+                            Text("Alle").tag(PhotoFilter.TriState.any)
+                            Text("Mit GPS").tag(PhotoFilter.TriState.yes)
+                            Text("Ohne GPS").tag(PhotoFilter.TriState.no)
                         }
+                        .pickerStyle(.segmented)
                     }
                 }
             }
@@ -112,35 +131,89 @@ struct FilterSortMenuView: View {
                         .fontWeight(.semibold)
                 }
             }
+            .onAppear { initDropdowns() }
         }
     }
 
-    // Chip-style multi-select for media types
+    // MARK: - Optional date row
+
     @ViewBuilder
-    private var mediaTypeRow: some View {
-        HStack(spacing: 8) {
-            ForEach(PhotoFilter.MediaType.allCases, id: \.self) { mt in
-                let selected = viewModel.draftFilter.mediaTypes.contains(mt)
+    private func dateRow(_ label: String, date: Binding<Date?>, clearResetDropdowns: Bool) -> some View {
+        if let current = date.wrappedValue {
+            HStack {
+                DatePicker(
+                    label,
+                    selection: Binding(get: { current }, set: { date.wrappedValue = $0 }),
+                    displayedComponents: .date
+                )
                 Button {
-                    if selected {
-                        viewModel.draftFilter.mediaTypes.removeAll { $0 == mt }
-                    } else {
-                        viewModel.draftFilter.mediaTypes.append(mt)
+                    date.wrappedValue = nil
+                    if clearResetDropdowns {
+                        viewModel.draftFilter.dateTo = nil
+                        selectedYear  = nil
+                        selectedMonth = nil
                     }
                 } label: {
-                    Text(mt.label)
-                        .font(.subheadline)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(selected ? Color.accentColor : Color(.systemFill))
-                        .foregroundStyle(selected ? .white : .primary)
-                        .clipShape(Capsule())
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
             }
-            Spacer()
+        } else {
+            HStack {
+                Text(label)
+                Spacer()
+                Text("–")
+                    .foregroundStyle(.secondary)
+                Button {
+                    date.wrappedValue = Self.calendar.startOfDay(for: Date())
+                } label: {
+                    Image(systemName: "plus.circle")
+                        .foregroundStyle(Color.accentColor)
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
+
+    // MARK: - Year/month logic
+
+    private func initDropdowns() {
+        selectedYear  = nil
+        selectedMonth = nil
+        guard let from = viewModel.draftFilter.dateFrom else { return }
+        let cal = Self.calendar
+        let fromComps = cal.dateComponents([.year, .month], from: from)
+        selectedYear = fromComps.year
+        if let to = viewModel.draftFilter.dateTo, let m = fromComps.month {
+            let toComps = cal.dateComponents([.year, .month], from: to)
+            if toComps.year == fromComps.year && toComps.month == m {
+                selectedMonth = m
+            }
+        }
+    }
+
+    private func applyYearMonth() {
+        let cal = Self.calendar
+        guard let year = selectedYear else {
+            viewModel.draftFilter.dateFrom = nil
+            viewModel.draftFilter.dateTo   = nil
+            return
+        }
+        if let month = selectedMonth {
+            guard let from = cal.date(from: DateComponents(year: year, month: month, day: 1)) else { return }
+            let nextMonth = cal.date(byAdding: .month, value: 1, to: from)!
+            let lastDay   = cal.date(byAdding: .day,   value: -1, to: nextMonth)!
+            viewModel.draftFilter.dateFrom = from
+            viewModel.draftFilter.dateTo   = lastDay
+        } else {
+            let from = cal.date(from: DateComponents(year: year, month: 1,  day: 1))  ?? .distantPast
+            let to   = cal.date(from: DateComponents(year: year, month: 12, day: 31)) ?? .distantPast
+            viewModel.draftFilter.dateFrom = from
+            viewModel.draftFilter.dateTo   = to
+        }
+    }
+
 }
 
 #Preview("Leer") {
