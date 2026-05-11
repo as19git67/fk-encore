@@ -315,9 +315,30 @@ onMounted(() => {
 // based on it. Selection prop changes are also intentionally NOT watched
 // here: they only affect the visual highlight on cells, which Vue picks
 // up automatically through `selectedIds.has(slot.id)` in the template.
+/**
+ * Re-init on filter / sort / search change. Anchors the new window on
+ * whatever photo is currently in the viewport top-left so the user's
+ * position is preserved across the reload — passing `null` would make
+ * the server centre on `total - limit` (the newest page), which is
+ * what the user noticed as "Position verloren, springt zum neuesten
+ * Foto" when toggling the AI-hidden filter.
+ *
+ * Falls back to `null` (centre on newest) when no row is currently
+ * loaded — e.g. the very first init right after mount.
+ */
+function currentViewportAnchorId(): number | null {
+  const rows = virtualizer.value.getVirtualItems()
+  if (rows.length === 0) return null
+  const firstIdx = rows[0]!.index * cols.value
+  const entry = entries.value[firstIdx]
+  return entry?.id ?? null
+}
+
 watch(
   () => [props.filter, props.sortBy, props.sortDir, props.searchPhotoIds] as const,
-  () => { void loadAndScroll(null) },
+  () => {
+    void loadAndScroll(currentViewportAnchorId())
+  },
   { deep: true },
 )
 
