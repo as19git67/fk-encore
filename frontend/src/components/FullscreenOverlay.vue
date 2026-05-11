@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
 import { getPhotoUrl, type Photo, type CurationStatus } from '../api/photos'
+import type { GalleryGridGroup } from '../api/gallery'
 import { formatPhotoDateCompact, formatLocationLabel } from '../utils/dateFormat'
 
 const props = withDefaults(defineProps<{
@@ -14,6 +15,14 @@ const props = withDefaults(defineProps<{
   showDetailsButton?: boolean
   /** When true the details icon switches to a close icon (✕). Default: false. */
   detailsActive?: boolean
+  /**
+   * Similar-photo-group context for the currently shown photo, when
+   * the photo is part of a group. Drives the `+N`-marker that tells
+   * the user that more siblings exist and offers a one-click jump
+   * to the review dialog (Track I, see docs/ai-auto-pick.md).
+   * Null/undefined → no marker rendered.
+   */
+  group?: GalleryGridGroup | null
   /** Optional slot content rendered inside the fullscreen image (e.g. face box) */
 }>(), {
   // Vue 3 coerces a Boolean prop that the parent didn't pass to `false`
@@ -34,7 +43,27 @@ const emit = defineEmits<{
   'restore': [id: number]
   'show-details': []
   'toggle-cover': [id: number]
+  /** Fired when the user clicks the +N marker → parent opens review. */
+  'open-group-review': []
 }>()
+
+// Track-I marker semantics — mirrors PhotoGrid's badge logic.
+const isAiHidingSiblings = computed(() => {
+  const g = props.group
+  if (!g) return false
+  if (g.reviewed) return false
+  return g.ai_confidence === 'high'
+})
+const groupBadgeTitle = computed(() => {
+  const g = props.group
+  if (!g) return ''
+  if (isAiHidingSiblings.value) {
+    return `${g.member_count - 1} ähnliche Fotos werden ausgeblendet – klicken zum Anzeigen`
+  }
+  if (g.ai_confidence === 'medium') return 'KI-Vorschlag mit mittlerer Sicherheit – bitte prüfen'
+  if (g.ai_confidence === 'low') return 'KI-Vorschlag mit niedriger Sicherheit'
+  return `${g.member_count} ähnliche Fotos`
+})
 
 // ── Preload erst nach Laden des aktuellen Bildes ────────────────────────────
 const currentLoaded = ref(false)
@@ -301,6 +330,23 @@ function locationLabel(photo: Photo) {
         </div>
       </div>
 
+      <!-- Group marker (Track I): shown when the current photo is part
+           of a similar-photo group. Tap → open review dialog. -->
+      <button
+        v-if="group"
+        class="fs-stack-badge"
+        :class="{
+          'fs-stack-badge--ai-medium': group.ai_confidence === 'medium',
+          'fs-stack-badge--ai-low': group.ai_confidence === 'low',
+        }"
+        :title="groupBadgeTitle"
+        @click.stop="emit('open-group-review')"
+      >
+        <i v-if="isAiHidingSiblings" class="pi pi-eye-slash" />
+        <i v-else class="pi pi-images" />
+        <span class="fs-stack-badge-count">+{{ group.member_count - 1 }}</span>
+      </button>
+
       <!-- Top bar -->
       <div class="fs-topbar">
         <Button icon="pi pi-arrow-left" rounded text @click="emit('close')" />
@@ -416,6 +462,44 @@ function locationLabel(photo: Photo) {
   /* Prevent the iOS long-press image context menu which cancels touch sequences. */
   -webkit-touch-callout: none;
   user-select: none;
+}
+
+/* ── Group marker (Track I) ───────────────────────────────────────────── */
+.fs-stack-badge {
+  position: absolute;
+  top: 64px;
+  left: 12px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0,0,0,0.65);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.fs-stack-badge:hover,
+.fs-stack-badge:focus-visible {
+  background: rgba(0,0,0,0.85);
+  outline: none;
+}
+.fs-stack-badge--ai-medium {
+  background: var(--p-orange-500, #f97316);
+}
+.fs-stack-badge--ai-medium:hover {
+  background: var(--p-orange-600, #ea580c);
+}
+.fs-stack-badge--ai-low {
+  background: rgba(0,0,0,0.5);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.25);
+}
+.fs-stack-badge-count {
+  line-height: 1;
 }
 
 /* ── Zoom wrapper ───────────────────────────────────────────────────────── */
