@@ -1197,7 +1197,7 @@ import {
   acceptAiPickLogic,
   bulkAcceptHighConfidencePicksLogic,
   exportCalibrationDatasetLogic,
-  recomputeAiPicksForUser,
+  recomputeAiPicksForAllUsers,
   type BulkAcceptResult,
   type CalibrationEntry,
   type RecomputeResult,
@@ -1265,19 +1265,20 @@ export const reviewPhotoGroup = api(
 );
 
 /**
- * Backfill width/height on every photo of the current user that does
- * not yet have them. Needed once on existing libraries so the AI auto-
- * pick orientation-diversity rule can classify portrait/landscape;
- * new photos get dimensions for free via the face-scan path.
+ * Backfill width/height on every photo on the server that does not
+ * yet have them. Dimensions are a property of the file, not of the
+ * owner — `data.manage` already gates this so admin scope is fine.
+ * Needed once on existing libraries so the AI auto-pick orientation-
+ * diversity rule can classify portrait/landscape; new photos get
+ * dimensions for free via the face-scan path.
  */
 export const backfillPhotoDimensions = api(
   { expose: true, method: "POST", path: "/photos/backfill-dimensions", auth: true },
   async (): Promise<{ scanned: number; updated: number; failed: number }> => {
     checkModule();
-    const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "data.manage");
-    return await service.backfillPhotoDimensionsLogic(userId);
+    return await service.backfillPhotoDimensionsLogic();
   }
 );
 
@@ -1285,19 +1286,19 @@ export const backfillPhotoDimensions = api(
 
 /**
  * Force-recompute the AI suggested "best of group" pick for every
- * unreviewed group of the current user. Normally this runs automatically
- * after `/photos/find-groups`; this endpoint exists so the user can
- * re-trigger scoring without re-running the (much heavier) embedding
- * regroup, e.g. after a manual ai_quality_details refresh.
+ * unreviewed group across all users. Normally this runs automatically
+ * after `/photos/find-groups`; this endpoint exists so the maintenance
+ * UI can re-trigger scoring server-wide without each user having to
+ * click their own re-compute (e.g. after a backfill that newly
+ * populated width/height for the orientation-diversity rule).
  */
 export const recomputeAiPicks = api(
   { expose: true, method: "POST", path: "/photos/groups/recompute-ai-picks", auth: true },
   async (): Promise<RecomputeResult> => {
     checkModule();
-    const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "data.manage");
-    return await recomputeAiPicksForUser(userId);
+    return await recomputeAiPicksForAllUsers();
   }
 );
 

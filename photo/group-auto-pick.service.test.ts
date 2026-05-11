@@ -14,6 +14,7 @@ import {
   acceptAiPickLogic,
   bulkAcceptHighConfidencePicksLogic,
   exportCalibrationDatasetLogic,
+  recomputeAiPicksForAllUsers,
   recomputeAiPicksForGroups,
 } from "./group-auto-pick.service";
 
@@ -173,6 +174,33 @@ describe("recomputeAiPicksForGroups", () => {
     const g2Row = rows.find((r) => r.id === g2);
     expect(g1Row?.ai_picked_photo_ids).not.toBeNull();
     expect(g2Row?.ai_picked_photo_ids).toBeNull();
+  });
+});
+
+describe("recomputeAiPicksForAllUsers", () => {
+  it("scores unreviewed groups across every user", async () => {
+    const u1 = await makeUser("global-a@test.com");
+    const u2 = await makeUser("global-b@test.com");
+    const a1 = await makePhoto(u1, { details: { blur_score: 0.10 } });
+    const a2 = await makePhoto(u1, { details: { blur_score: 0.90 } });
+    const b1 = await makePhoto(u2, { details: { blur_score: 0.10 } });
+    const b2 = await makePhoto(u2, { details: { blur_score: 0.90 } });
+    await makeGroup(u1, a1, [a1, a2]);
+    await makeGroup(u2, b1, [b1, b2]);
+
+    const result = await recomputeAiPicksForAllUsers();
+    expect(result.groups_scored).toBe(2);
+
+    const rows = await dbAll<{ user_id: number; ai_picked_photo_ids: number[] | null }>(
+      db.select({
+        user_id: photoGroups.user_id,
+        ai_picked_photo_ids: photoGroups.ai_picked_photo_ids,
+      }).from(photoGroups),
+    );
+    const u1Row = rows.find((r) => r.user_id === u1);
+    const u2Row = rows.find((r) => r.user_id === u2);
+    expect(u1Row?.ai_picked_photo_ids).toEqual([a2]);
+    expect(u2Row?.ai_picked_photo_ids).toEqual([b2]);
   });
 });
 

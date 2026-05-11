@@ -5233,24 +5233,31 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
 }
 
 /**
- * Backfill `photos.width` / `photos.height` for every photo of the
- * given user that does not yet have them. Header-only sharp() read so
- * each photo costs ~5 ms; 50k photos finish in roughly 5 minutes.
+ * Backfill `photos.width` / `photos.height` for every photo that does
+ * not yet have them. Header-only sharp() read so each photo costs
+ * ~5 ms; 50 k photos finish in roughly 5 minutes.
  *
  * Used to seed the AI auto-pick orientation-diversity rule once on
  * existing libraries — going forward the face-scan path persists the
  * dimensions automatically (see processFaceDetectionForPhoto).
  *
+ * Dimensions are a property of the photo file, not of a user, so the
+ * default is server-wide. Pass a `userId` to restrict the pass to a
+ * single owner (used e.g. by per-user maintenance flows). Caller must
+ * have `data.manage` permission either way.
+ *
  * `.rotate()` applies the EXIF orientation tag before metadata is
  * read, so the stored values are post-rotation (as displayed). Photos
  * whose file is unreadable are skipped and counted in `failed`.
  */
-export async function backfillPhotoDimensionsLogic(userId: number): Promise<{
+export async function backfillPhotoDimensionsLogic(userId?: number): Promise<{
   scanned: number;
   updated: number;
   failed: number;
 }> {
   const sharp = (await import("sharp")).default;
+  const conds = [isNull(photos.width)];
+  if (typeof userId === "number") conds.push(eq(photos.user_id, userId));
   const rows = await dbAll<{ id: number; filename: string; external_path: string | null }>(
     db.select({
       id: photos.id,
@@ -5258,7 +5265,7 @@ export async function backfillPhotoDimensionsLogic(userId: number): Promise<{
       external_path: photos.external_path,
     })
       .from(photos)
-      .where(and(eq(photos.user_id, userId), isNull(photos.width))),
+      .where(and(...conds)),
   );
   let updated = 0;
   let failed = 0;
