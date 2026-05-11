@@ -464,7 +464,15 @@ function applyLocalGroupReviewed(groupId: number) {
   galleryRef.value?.markGroupReviewed(groupId)
 }
 
-function onCompareReviewed() {
+// When a review hides photos via photo_curation, the gallery's entries[]
+// cache still carries the pre-review curation status. applyLocalGroupReviewed
+// only flips group.reviewed, not per-photo curation — so the user sees
+// "ghost" photos in the grid after returning. Tracked here so we can do
+// a single reload on close instead of a reload per group during a
+// review-and-next streak.
+const compareNeedsReload = ref(false)
+
+async function onCompareReviewed() {
   // Fired by PhotoCompareView's "Fertig" button after the server
   // accepted the review. We need to capture the id BEFORE `close`
   // clears `activeGroup`. Doesn't run when the user dismisses via
@@ -473,14 +481,31 @@ function onCompareReviewed() {
   // surfaces it for review.
   const reviewedGroupId = activeGroup.value?.id
   if (reviewedGroupId !== undefined) applyLocalGroupReviewed(reviewedGroupId)
+  compareNeedsReload.value = true
 }
 
-function onCompareClose() {
+async function onCompareClose() {
   activeGroup.value = null
+  // Photos the user hid during the review session still sit in the
+  // gallery's entries[] cache with their pre-review curation status.
+  // markGroupReviewed only flips `group.reviewed`, not the per-photo
+  // curation — so the grid kept showing the hidden photos.
+  // User-report: "Früher wurde es aus dem Grid herausgenommen".
+  // Soft reload anchored on the current viewport so the user lands
+  // on the same neighbourhood after the refetch. Only fires if the
+  // user actually reviewed at least one group in this compare
+  // session; pure dismiss (X / Esc) is left alone.
+  if (compareNeedsReload.value) {
+    compareNeedsReload.value = false
+    await galleryRef.value?.reload()
+  }
 }
 
 async function onCompareNext(reviewedGroupId: number) {
   applyLocalGroupReviewed(reviewedGroupId)
+  // Mark so onCompareClose fires the deferred reload once the user
+  // leaves the streak.
+  compareNeedsReload.value = true
   // Pick the next still-unreviewed group from the (now optimistically
   // updated) cache. No refetch needed for the common case; the cache
   // self-heals on the next stack click via ensureGroupCache.
