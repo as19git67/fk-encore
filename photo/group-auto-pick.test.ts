@@ -21,6 +21,7 @@ function basePhoto(overrides: Partial<PhotoSignals> = {}): PhotoSignals {
     clip_technical: 0.5,
     face_sharpness: 0.5,
     eyes_open_score: 0.5,
+    face_composition: 0.5,
     face_count: 0,
     face_coverage: 0,
     ...overrides,
@@ -49,9 +50,26 @@ describe("scorePhoto", () => {
     const blurry = scorePhoto(
       basePhoto({ photo_id: 1, face_count: 1, face_sharpness: 0.0 }),
     );
-    // Weight 0.45 on face_sharpness → at least 0.4 spread between the
+    // Weight 0.40 on face_sharpness → at least 0.35 spread between the
     // two extremes, leaving headroom for the other signals.
-    expect(sharp.score - blurry.score).toBeGreaterThanOrEqual(0.4);
+    expect(sharp.score - blurry.score).toBeGreaterThanOrEqual(0.35);
+  });
+
+  it("rewards face_composition in the face branch", () => {
+    const wellComposed = scorePhoto(
+      basePhoto({ photo_id: 1, face_count: 1, face_composition: 1.0 }),
+    );
+    const badlyComposed = scorePhoto(
+      basePhoto({ photo_id: 1, face_count: 1, face_composition: 0.0 }),
+    );
+    // Weight 0.10 on face_composition → ~0.10 spread.
+    expect(wellComposed.score - badlyComposed.score).toBeCloseTo(0.10, 5);
+  });
+
+  it("ignores face_composition in the non-face branch", () => {
+    const a = scorePhoto(basePhoto({ photo_id: 1, face_composition: 1.0 }));
+    const b = scorePhoto(basePhoto({ photo_id: 2, face_composition: 0.0 }));
+    expect(a.score).toBeCloseTo(b.score, 6);
   });
 
   it("rewards blur_score most heavily in the non-face branch", () => {

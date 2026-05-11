@@ -95,6 +95,44 @@ beforeEach(async () => {
   await db.delete(users);
 });
 
+describe("recomputeAiPicksForGroups — face_composition", () => {
+  it("reads face_composition from ai_quality_details and uses it for the pick", async () => {
+    // Two photos with identical face_sharpness / eyes_open /
+    // face_coverage but very different face_composition. With weight
+    // 0.10 on face_composition (face branch) the spread is ≥ 0.08 →
+    // medium-or-better confidence, well-defined winner.
+    const u = await makeUser("face-composition@test.com");
+    const a = await makePhoto(u, {
+      details: {
+        face_sharpness: 0.8, eyes_open: 0.5, sharpness: 1,
+        face_composition: 0.10,
+      },
+      faces: 1,
+      bboxWH: [[0.2, 0.2]],
+    });
+    const b = await makePhoto(u, {
+      details: {
+        face_sharpness: 0.8, eyes_open: 0.5, sharpness: 1,
+        face_composition: 0.95,
+      },
+      faces: 1,
+      bboxWH: [[0.2, 0.2]],
+    });
+    await makeGroup(u, a, [a, b]);
+
+    await recomputeAiPicksForGroups(u);
+    const [row] = await db.select().from(photoGroups);
+    // Top pick must be `b`. Multi-pick may include both depending on
+    // the 0.92 threshold; the important property is that b's score
+    // beats a's.
+    expect(row.ai_picked_photo_ids).toContain(b);
+    const bScore = row.ai_pick_details?.scores.find((s) => s.photo_id === b);
+    const aScore = row.ai_pick_details?.scores.find((s) => s.photo_id === a);
+    expect(bScore && aScore && bScore.score > aScore.score).toBe(true);
+    expect(bScore?.signals.face_composition).toBeCloseTo(0.95, 5);
+  });
+});
+
 describe("recomputeAiPicksForGroups — DB key mapping", () => {
   it("reads sharpness/contrast/exposure/eyes_open from the actual DB keys", async () => {
     // The embedding service writes these signals without `_score`
