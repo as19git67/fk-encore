@@ -90,23 +90,42 @@ async function loadSignalsForPhotos(photoIds: number[]): Promise<PhotoSignalRow[
   return rows;
 }
 
-/** Translate one SQL row into the input shape consumed by computeGroupPick. */
+/**
+ * Translate one SQL row into the input shape consumed by computeGroupPick.
+ *
+ * The embedding service writes signals into `ai_quality_details` under
+ * the keys defined in `embedding_service/app/api/endpoints.py` —
+ * `sharpness`, `contrast`, `exposure`, `eyes_open` (no `_score`
+ * suffix). The PhotoSignals interface keeps the historical `_score`
+ * field names from the investigation report so the scoring formula
+ * comments stay readable; this function bridges the two.
+ *
+ * Both naming variants are accepted so the code keeps working if the
+ * embedding service ever standardises on the suffixed keys.
+ */
 function toPhotoSignals(row: PhotoSignalRow): PhotoSignals {
   const d = row.ai_quality_details ?? {};
   const orientation: Orientation | undefined =
     row.width != null && row.height != null
       ? classifyOrientation(row.width, row.height)
       : undefined;
+  const pick = (...keys: string[]): number | null => {
+    for (const k of keys) {
+      const v = d[k];
+      if (typeof v === "number") return v;
+    }
+    return null;
+  };
   return {
     photo_id: row.photo_id,
-    blur_score: typeof d.blur_score === "number" ? d.blur_score : null,
-    contrast_score: typeof d.contrast_score === "number" ? d.contrast_score : null,
-    exposure_score: typeof d.exposure_score === "number" ? d.exposure_score : null,
-    clip_aesthetics: typeof d.clip_aesthetics === "number" ? d.clip_aesthetics : null,
-    clip_composition: typeof d.clip_composition === "number" ? d.clip_composition : null,
-    clip_technical: typeof d.clip_technical === "number" ? d.clip_technical : null,
-    face_sharpness: typeof d.face_sharpness === "number" ? d.face_sharpness : null,
-    eyes_open_score: typeof d.eyes_open_score === "number" ? d.eyes_open_score : null,
+    blur_score: pick("sharpness", "blur_score"),
+    contrast_score: pick("contrast", "contrast_score"),
+    exposure_score: pick("exposure", "exposure_score"),
+    clip_aesthetics: pick("clip_aesthetics"),
+    clip_composition: pick("clip_composition"),
+    clip_technical: pick("clip_technical"),
+    face_sharpness: pick("face_sharpness"),
+    eyes_open_score: pick("eyes_open", "eyes_open_score"),
     face_count: row.face_count,
     face_coverage: row.face_coverage,
     orientation,

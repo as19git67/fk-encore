@@ -95,13 +95,48 @@ beforeEach(async () => {
   await db.delete(users);
 });
 
+describe("recomputeAiPicksForGroups — DB key mapping", () => {
+  it("reads sharpness/contrast/exposure/eyes_open from the actual DB keys", async () => {
+    // The embedding service writes these signals without `_score`
+    // suffix (verified on the live database via jsonb_each on
+    // ai_quality_details). Before the toPhotoSignals fix the four
+    // canonical names below would have been ignored and replaced by
+    // the neutral 0.5 fallback, collapsing the score gap and forcing
+    // every group into "low" confidence.
+    const u = await makeUser("db-key-mapping@test.com");
+    const a = await makePhoto(u, { details: { sharpness: 0.10 } });
+    const b = await makePhoto(u, { details: { sharpness: 0.90 } });
+    await makeGroup(u, a, [a, b]);
+
+    await recomputeAiPicksForGroups(u);
+    const [row] = await db.select().from(photoGroups);
+    expect(row.ai_picked_photo_ids).toEqual([b]);
+    expect(row.ai_picked_confidence).toBe("high");
+    const bScore = row.ai_pick_details?.scores.find((s) => s.photo_id === b);
+    // The mapped value lands in the output as `blur` (historical name
+    // kept on the AiPickPhotoScore so existing exports don't break).
+    expect(bScore?.signals.blur).toBeCloseTo(0.90, 2);
+  });
+
+  it("accepts both DB-canonical and *_score keys (forward-compat)", async () => {
+    const u = await makeUser("db-key-fallback@test.com");
+    const a = await makePhoto(u, { details: { blur_score: 0.10 } });
+    const b = await makePhoto(u, { details: { blur_score: 0.90 } });
+    await makeGroup(u, a, [a, b]);
+
+    await recomputeAiPicksForGroups(u);
+    const [row] = await db.select().from(photoGroups);
+    expect(row.ai_picked_photo_ids).toEqual([b]);
+  });
+});
+
 describe("recomputeAiPicksForGroups", () => {
   it("scores an unreviewed group and persists ai_picked_*", async () => {
     const u = await makeUser("recompute@test.com");
     // Non-face branch: blur dominates. Photo b is the obvious winner.
-    const a = await makePhoto(u, { details: { blur_score: 0.10 } });
-    const b = await makePhoto(u, { details: { blur_score: 0.90 } });
-    const c = await makePhoto(u, { details: { blur_score: 0.20 } });
+    const a = await makePhoto(u, { details: { sharpness: 0.10 } });
+    const b = await makePhoto(u, { details: { sharpness: 0.90 } });
+    const c = await makePhoto(u, { details: { sharpness: 0.20 } });
     const g = await makeGroup(u, a, [a, b, c]);
 
     const result = await recomputeAiPicksForGroups(u);
