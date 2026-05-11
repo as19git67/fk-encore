@@ -554,6 +554,13 @@
       "when": 1779001417000,
       "tag": "0078_reset_ai_pick_state_face_composition",
       "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1779001418000,
+      "tag": "0079_ai_pick_user_weights",
+      "breakpoints": true
     }
   ]
 }

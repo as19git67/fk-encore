@@ -131,8 +131,42 @@ function normaliseFaceCoverage(coverage: number): number {
   return coverage / SATURATION;
 }
 
-/** Compute the per-photo score and its sub-signal breakdown. */
-export function scorePhoto(signals: PhotoSignals): AiPickPhotoScore {
+/**
+ * Per-branch weight vectors. Order MUST match the signal access
+ * inside scorePhoto() and the calibration features in
+ * group-auto-pick.calibration.ts (faceFeatures / nonFaceFeatures).
+ */
+export interface ScoringWeights {
+  face: number[];     // [face_sharpness, eyes_open, face_coverage,
+                      //  face_composition, blur, clip_aesthetics,
+                      //  exposure_contrast_avg]
+  non_face: number[]; // [blur, clip_aesthetics, clip_composition,
+                      //  clip_technical, exposure_contrast_avg]
+}
+
+/**
+ * Defaults — tuned 2026-05 from the first calibration export.
+ *   Face: face_sharpness stays dominant (clear bimodal signal in the
+ *   sample); face_composition (0.10) was added once the embedding
+ *   service exposed it; blur (= global sharpness) dropped to 0.05
+ *   because on this library it sits near 1.0 across the board.
+ */
+export const DEFAULT_SCORING_WEIGHTS: ScoringWeights = {
+  face:     [0.40, 0.20, 0.15, 0.10, 0.05, 0.05, 0.05],
+  non_face: [0.40, 0.25, 0.15, 0.10, 0.10],
+};
+
+/**
+ * Compute the per-photo score and its sub-signal breakdown.
+ *
+ * `weights` lets the caller override the default vectors (used for
+ * per-user calibration — see group-auto-pick.calibration.ts). When
+ * absent, falls back to DEFAULT_SCORING_WEIGHTS.
+ */
+export function scorePhoto(
+  signals: PhotoSignals,
+  weights: ScoringWeights = DEFAULT_SCORING_WEIGHTS,
+): AiPickPhotoScore {
   const hasFace = signals.face_count > 0;
   const blur = clamp01(signals.blur_score);
   const contrast = clamp01(signals.contrast_score);
@@ -149,25 +183,15 @@ export function scorePhoto(signals: PhotoSignals): AiPickPhotoScore {
     const eyesOpen = clamp01(signals.eyes_open_score);
     const faceCoverage = normaliseFaceCoverage(signals.face_coverage);
     const faceComposition = clamp01(signals.face_composition);
-    // Face branch weights — tuned 2026-05 from the user's
-    // calibration export (~119 reviewed groups). Highlights:
-    //   - face_sharpness stays dominant (clear bimodal signal,
-    //     std 0.34 across the sample)
-    //   - face_composition (0.10) is the new signal added once
-    //     the embedding service already exposes it (40k rows on
-    //     the live DB); previously unused.
-    //   - blur (= global sharpness) is reduced to 0.05 because
-    //     on this library it is essentially constant at 1.0 —
-    //     keeping a token weight so it still discriminates the
-    //     occasional truly-blurry frame.
+    const w = weights.face;
     score =
-      0.40 * faceSharpness +
-      0.20 * eyesOpen +
-      0.15 * faceCoverage +
-      0.10 * faceComposition +
-      0.05 * blur +
-      0.05 * aesthetics +
-      0.05 * exposureContrast;
+      w[0] * faceSharpness +
+      w[1] * eyesOpen +
+      w[2] * faceCoverage +
+      w[3] * faceComposition +
+      w[4] * blur +
+      w[5] * aesthetics +
+      w[6] * exposureContrast;
     used.face_sharpness = faceSharpness;
     used.eyes_open = eyesOpen;
     used.face_coverage = faceCoverage;
@@ -177,12 +201,13 @@ export function scorePhoto(signals: PhotoSignals): AiPickPhotoScore {
     used.contrast = contrast;
     used.exposure = exposure;
   } else {
+    const w = weights.non_face;
     score =
-      0.40 * blur +
-      0.25 * aesthetics +
-      0.15 * composition +
-      0.10 * technical +
-      0.10 * exposureContrast;
+      w[0] * blur +
+      w[1] * aesthetics +
+      w[2] * composition +
+      w[3] * technical +
+      w[4] * exposureContrast;
     used.blur = blur;
     used.clip_aesthetics = aesthetics;
     used.clip_composition = composition;
@@ -211,7 +236,10 @@ export function scorePhoto(signals: PhotoSignals): AiPickPhotoScore {
  * Groups with fewer than 2 photos return an empty pick — they should
  * never be created as similar groups in the first place.
  */
-export function computeGroupPick(photos: PhotoSignals[]): AiPickResult {
+export function computeGroupPick(
+  photos: PhotoSignals[],
+  weights: ScoringWeights = DEFAULT_SCORING_WEIGHTS,
+): AiPickResult {
   if (photos.length < 2) {
     return {
       picked_photo_ids: photos.map((p) => p.photo_id),
@@ -219,12 +247,12 @@ export function computeGroupPick(photos: PhotoSignals[]): AiPickResult {
       details: {
         runner_up_delta: 0,
         multi_pick_threshold: MULTI_PICK_THRESHOLD,
-        scores: photos.map((p) => scorePhoto(p)),
+        scores: photos.map((p) => scorePhoto(p, weights)),
       },
     };
   }
 
-  const scores = photos.map((p) => scorePhoto(p));
+  const scores = photos.map((p) => scorePhoto(p, weights));
   // Sort by score desc, with photo_id asc as deterministic tie-break so
   // two identically-scored photos pick the lower ID consistently.
   const ranked = [...scores].sort(
