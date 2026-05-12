@@ -94,14 +94,17 @@ function selectDay(day: string) {
   nextTick(() => scrollTimelineToSelection())
 }
 
-function selectStopWithinDay(stop: Stop, opts: { silent?: boolean; pan?: boolean } = {}) {
+function selectStopWithinDay(stop: Stop, opts: { silent?: boolean } = {}) {
+  const dayChanged = selectedDay.value !== stop.day
   selectedDay.value = stop.day
   selectedStopId.value = stop.id
   renderContent()
   if (!opts.silent) emit('stop-selected', stop.coverPhoto.id)
-  if (opts.pan !== false && map) {
-    map.flyTo([stop.lat, stop.lng], Math.max(14, map.getZoom()), { duration: 0.5 })
-  }
+  // Only re-fit the map when the day actually changes. Tapping a different
+  // stop within the already-active day must keep the existing view so the
+  // user keeps seeing every cluster of the day, not just the one they
+  // tapped.
+  if (dayChanged) fitMapToSelection()
   nextTick(() => scrollTimelineToSelection())
 }
 
@@ -129,10 +132,16 @@ function scrollTimelineToSelection() {
     el = container.querySelector('[data-overview]') as HTMLElement | null
   }
   if (!el) return
+  // The day-group wrapper isn't positioned, so `el.offsetLeft` accumulates
+  // up to <body> and produces useless numbers. Compute the position from
+  // the live rects instead and clamp into the valid scroll range so the
+  // last cards in the timeline actually reach the centre.
   const containerRect = container.getBoundingClientRect()
   const elRect = el.getBoundingClientRect()
-  const scrollLeft = el.offsetLeft - containerRect.width / 2 + elRect.width / 2
-  container.scrollTo({ left: scrollLeft, behavior: 'smooth' })
+  const elLeftInContainer = (elRect.left - containerRect.left) + container.scrollLeft
+  const target = elLeftInContainer - container.clientWidth / 2 + elRect.width / 2
+  const maxScroll = Math.max(0, container.scrollWidth - container.clientWidth)
+  container.scrollTo({ left: Math.max(0, Math.min(target, maxScroll)), behavior: 'smooth' })
 }
 
 // ── Pin rendering ────────────────────────────────────────────────────────────
@@ -184,7 +193,7 @@ function handleOverviewPinClick(c: OverviewCluster) {
 }
 
 function handleStopPinClick(stop: Stop) {
-  selectStopWithinDay(stop, { pan: false })
+  selectStopWithinDay(stop)
   // Open fullscreen with the entire selected day's photos so the user can
   // browse within the day. startIndex points at this stop's first photo.
   const dayPhotos = dayPhotosFor(stop.day)
@@ -204,7 +213,124 @@ function dayPhotosFor(day: string): Photo[] {
   return out
 }
 
-function createPinIcon(pin: Pin): L.DivIcon {
+interface DrawablePin {
+  lat: number
+  lng: number
+  cover: Photo
+  /** Total photo count across all merged members. */
+  count: number
+  selected: boolean
+  onClick: () => void
+}
+
+/**
+ * Pin diameter (px) the visual merger uses as the minimum centre-to-
+ * centre distance below which two pins are considered to overlap and get
+ * merged into one. The pin thumbnail itself is 48 px; we add a bit of
+ * breathing room so adjacent pins don't visually touch.
+ */
+const PIN_OVERLAP_PX = 60
+
+/**
+ * Merge pins whose on-screen positions are closer than `PIN_OVERLAP_PX`
+ * at the map's current zoom level. Without this an album with many
+ * stops at the same town would render as a wall of overlapping
+ * thumbnails — especially on small screens, where the pin size eats a
+ * meaningful chunk of the viewport. Merging is greedy: repeatedly pick
+ * the closest pair within the threshold, merge their centroids
+ * (weighted by photo count) and continue until no overlapping pair
+ * remains.
+ */
+function mergeOverlappingPins(basePins: Pin[]): DrawablePin[] {
+  const passthrough = (): DrawablePin[] => basePins.map(p => ({
+    lat: p.lat,
+    lng: p.lng,
+    cover: p.cover,
+    count: p.count,
+    selected: p.selected,
+    onClick: p.onClick,
+  }))
+  if (!map || basePins.length === 0) return passthrough()
+  // The map's pixel projection only works once a view has been
+  // established (setView / fitBounds). The very first renderContent()
+  // can run before that and would otherwise throw from
+  // latLngToContainerPoint. Fall back to no-merge in that case — the
+  // zoomend listener will re-render properly once the initial fit lands.
+  try {
+    map.latLngToContainerPoint([basePins[0]!.lat, basePins[0]!.lng])
+  } catch {
+    return passthrough()
+  }
+  interface Work {
+    lat: number
+    lng: number
+    cover: Photo
+    count: number
+    members: Pin[]
+    selected: boolean
+  }
+  const work: Work[] = basePins.map(p => ({
+    lat: p.lat,
+    lng: p.lng,
+    cover: p.cover,
+    count: p.count,
+    members: [p],
+    selected: p.selected,
+  }))
+
+  let changed = true
+  while (changed && work.length > 1) {
+    changed = false
+    let bestI = -1
+    let bestJ = -1
+    let bestDist = Infinity
+    for (let i = 0; i < work.length; i++) {
+      const pi = map.latLngToContainerPoint([work[i]!.lat, work[i]!.lng])
+      for (let j = i + 1; j < work.length; j++) {
+        const pj = map.latLngToContainerPoint([work[j]!.lat, work[j]!.lng])
+        const d = pi.distanceTo(pj)
+        if (d < bestDist) {
+          bestDist = d
+          bestI = i
+          bestJ = j
+        }
+      }
+    }
+    if (bestDist < PIN_OVERLAP_PX && bestI >= 0) {
+      const a = work[bestI]!
+      const b = work[bestJ]!
+      const total = a.count + b.count
+      a.lat = (a.lat * a.count + b.lat * b.count) / total
+      a.lng = (a.lng * a.count + b.lng * b.count) / total
+      a.count = total
+      a.members = a.members.concat(b.members)
+      a.selected = a.selected || b.selected
+      // Best cover among all merged members so the visible thumbnail
+      // remains representative of the largest/highest-quality stop.
+      a.cover = a.members.reduce<Photo>((best, m) => {
+        return (m.cover.ai_quality_score ?? 0) > (best.ai_quality_score ?? 0)
+          ? m.cover
+          : best
+      }, a.members[0]!.cover)
+      work.splice(bestJ, 1)
+      changed = true
+    }
+  }
+
+  return work.map(w => ({
+    lat: w.lat,
+    lng: w.lng,
+    cover: w.cover,
+    count: w.count,
+    selected: w.selected,
+    // For merged pins fall back to the first member's click handler — that
+    // member drives the selection model (timeline scroll, fullscreen open)
+    // and keeps the UX consistent with unmerged pins.
+    onClick: () => w.members[0]!.onClick(),
+  }))
+}
+
+function createPinIcon(pin: DrawablePin): L.DivIcon {
   const url = getPhotoUrl(pin.cover.filename, 96)
   const badge = pin.count > 1 ? `<span class="trip-pin-badge">${pin.count}</span>` : ''
   const selectedClass = pin.selected ? ' trip-pin-selected' : ''
@@ -240,6 +366,12 @@ function initMap() {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     maxZoom: 19,
   }).addTo(map)
+
+  // Pixel-space merging depends on the current zoom: zooming in spreads
+  // pins apart and reveals previously-merged stops, zooming out merges
+  // more aggressively. Re-render the markers after every zoom change so
+  // the visible pins always reflect what fits on screen.
+  map.on('zoomend', () => renderContent())
 
   renderContent()
   fitMapToSelection()
@@ -280,7 +412,7 @@ function renderContent() {
     }
   }
 
-  for (const pin of visiblePins.value) {
+  for (const pin of mergeOverlappingPins(visiblePins.value)) {
     const marker = L.marker([pin.lat, pin.lng], { icon: createPinIcon(pin) }).addTo(map)
     marker.on('click', pin.onClick)
     markers.push(marker)
@@ -417,6 +549,7 @@ defineExpose({ selectStopByPhotoId })
             <!-- Day cover card -->
             <div
               v-if="stopsByDay.get(day) && stopsByDay.get(day)!.length > 0"
+              :data-stop-id="stopsByDay.get(day)![0]!.id"
               :class="[
                 'trip-timeline-item',
                 'trip-timeline-item--day',
