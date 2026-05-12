@@ -14,6 +14,7 @@ import {
   acceptAiPickLogic,
   bulkAcceptHighConfidencePicksLogic,
   exportCalibrationDatasetLogic,
+  listReviewQueueLogic,
   recomputeAiPicksForAllUsers,
   recomputeAiPicksForGroups,
 } from "./group-auto-pick.service";
@@ -568,5 +569,65 @@ describe("exportCalibrationDatasetLogic", () => {
     await exportCalibrationDatasetLogic(u);
     const [second] = await db.select().from(photoGroups).where(eq(photoGroups.id, g));
     expect(second.ai_picked_at).toEqual(firstAt);
+  });
+});
+
+describe("listReviewQueueLogic — high_confidence_total", () => {
+  it("returns the filter-independent count of unreviewed high-confidence groups", async () => {
+    // Three high-confidence groups, one medium, one reviewed-high. The
+    // "Alle Sicheren bestätigen"-Button needs to know that there are
+    // 3 high-confidence groups left regardless of which filter the user
+    // is currently looking at — so the count must come from a server-
+    // wide aggregate, not from the filtered page window.
+    const u = await makeUser("review-queue-high-total@test.com");
+    const groupIds: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      const a = await makePhoto(u, { details: { blur_score: 0.10 } });
+      const b = await makePhoto(u, { details: { blur_score: 0.90 } });
+      groupIds.push(await makeGroup(u, a, [a, b]));
+    }
+    // Δ ≈ 0.08 — between MEDIUM_CONFIDENCE_DELTA (0.04) and
+    // HIGH_CONFIDENCE_DELTA (0.10), lands at confidence='medium'.
+    const ma = await makePhoto(u, { details: { blur_score: 0.40 } });
+    const mb = await makePhoto(u, { details: { blur_score: 0.60 } });
+    await makeGroup(u, ma, [ma, mb]);
+    const ra = await makePhoto(u, { details: { blur_score: 0.10 } });
+    const rb = await makePhoto(u, { details: { blur_score: 0.90 } });
+    const reviewedHigh = await makeGroup(u, ra, [ra, rb]);
+    await recomputeAiPicksForGroups(u);
+    // Mark one high-confidence group reviewed — it must not count.
+    await dbExec(
+      db.update(photoGroups)
+        .set({ reviewed_at: new Date().toISOString() })
+        .where(eq(photoGroups.id, reviewedHigh)),
+    );
+
+    const all = await listReviewQueueLogic(u);
+    expect(all.high_confidence_total).toBe(3);
+
+    const onlyMedium = await listReviewQueueLogic(u, { confidence: "medium" });
+    expect(onlyMedium.total).toBe(1);
+    // High count stays 3 regardless of the active filter.
+    expect(onlyMedium.high_confidence_total).toBe(3);
+
+    const onlyLow = await listReviewQueueLogic(u, { confidence: "low" });
+    expect(onlyLow.total).toBe(0);
+    expect(onlyLow.high_confidence_total).toBe(3);
+  });
+
+  it("drops to 0 once every high-confidence group is reviewed", async () => {
+    const u = await makeUser("review-queue-high-zero@test.com");
+    const a = await makePhoto(u, { details: { blur_score: 0.10 } });
+    const b = await makePhoto(u, { details: { blur_score: 0.90 } });
+    const g = await makeGroup(u, a, [a, b]);
+    await recomputeAiPicksForGroups(u);
+
+    const before = await listReviewQueueLogic(u);
+    expect(before.high_confidence_total).toBe(1);
+
+    await acceptAiPickLogic(u, g);
+
+    const after = await listReviewQueueLogic(u);
+    expect(after.high_confidence_total).toBe(0);
   });
 });

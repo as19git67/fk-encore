@@ -40,6 +40,11 @@ const router = useRouter()
 const PAGE_SIZE = 30
 const groups = ref<ReviewQueueGroup[]>([])
 const total = ref(0)
+// Count of unreviewed high-confidence groups across the whole user
+// (independent of the active filter). Drives the disable state + label
+// of the "Alle Sicheren bestätigen" button so it never invites a click
+// that would no-op server-side.
+const highConfidenceTotal = ref(0)
 const offset = ref(0)
 const loading = ref(false)
 const loadError = ref('')
@@ -103,6 +108,7 @@ async function loadInitial() {
     })
     groups.value = res.groups
     total.value = res.total
+    highConfidenceTotal.value = res.high_confidence_total
     offset.value = res.groups.length
     userCalibration.value = res.user_calibration
   } catch (err: any) {
@@ -124,6 +130,7 @@ async function loadMore() {
     })
     groups.value = [...groups.value, ...res.groups]
     total.value = res.total
+    highConfidenceTotal.value = res.high_confidence_total
     offset.value += res.groups.length
   } catch (err: any) {
     loadError.value = err?.message ?? 'Fehler beim Nachladen.'
@@ -167,6 +174,13 @@ async function runAcceptAction(
     // stays honest without a refetch.
     groups.value = groups.value.filter((g) => g.id !== group.id)
     total.value = Math.max(0, total.value - 1)
+    // If the accepted group was high-confidence, the server-wide
+    // backlog also shrunk by one — mirror that locally so the
+    // "Alle Sicheren bestätigen" button can disable itself as the
+    // last high-confidence group leaves the queue.
+    if (group.ai_picked_confidence === 'high') {
+      highConfidenceTotal.value = Math.max(0, highConfidenceTotal.value - 1)
+    }
   } catch (err: any) {
     loadError.value = err?.message ?? 'Fehler beim Bestätigen der Gruppe.'
     const reverted = new Set(pendingAcceptIds.value)
@@ -242,8 +256,12 @@ function onCompareReviewed() {
   const reviewedId = activeGroup.value?.id
   activeGroup.value = null
   if (reviewedId !== undefined) {
+    const reviewedGroup = groups.value.find((g) => g.id === reviewedId)
     groups.value = groups.value.filter((g) => g.id !== reviewedId)
     total.value = Math.max(0, total.value - 1)
+    if (reviewedGroup?.ai_picked_confidence === 'high') {
+      highConfidenceTotal.value = Math.max(0, highConfidenceTotal.value - 1)
+    }
   }
 }
 
@@ -296,9 +314,11 @@ onMounted(() => {
           icon="pi pi-check-circle"
           severity="success"
           outlined
-          label="Alle hochkonfidenten bestätigen"
+          :label="highConfidenceTotal > 0
+            ? `Alle Sicheren bestätigen (${highConfidenceTotal})`
+            : 'Alle Sicheren bestätigen'"
           :loading="bulkBusy"
-          :disabled="bulkBusy || loading"
+          :disabled="bulkBusy || loading || highConfidenceTotal === 0"
           @click="askBulkAcceptHigh"
         />
       </div>

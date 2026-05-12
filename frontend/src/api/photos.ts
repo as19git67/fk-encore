@@ -886,6 +886,7 @@ export interface ReviewQueueUserCalibration {
 
 export interface ReviewQueueResponse {
   total: number
+  high_confidence_total: number
   offset: number
   groups: ReviewQueueGroup[]
   user_calibration: ReviewQueueUserCalibration | null

@@ -573,6 +573,12 @@ export interface ReviewQueueUserCalibration {
 
 export interface ReviewQueueResponse {
   total: number;
+  // Count of *unreviewed* groups with ai_picked_confidence = 'high',
+  // independent of the active filter. Surfaced so the
+  // "Alle Sicheren bestätigen" button can disable itself when there's
+  // nothing left to bulk-accept, even while the user is paging through
+  // the medium/low strata.
+  high_confidence_total: number;
   offset: number;
   groups: ReviewQueueGroup[];
   user_calibration: ReviewQueueUserCalibration | null;
@@ -615,6 +621,22 @@ export async function listReviewQueueLogic(
   );
   const total = totalRow?.c ?? 0;
 
+  // Filter-independent count of high-confidence unreviewed groups.
+  // The button "Alle Sicheren bestätigen" works server-wide on the
+  // user's high-confidence backlog, so its disable state has to reflect
+  // that backlog — not the filtered window the user is currently
+  // viewing.
+  const highRow = await dbFirst<{ c: number }>(
+    db.select({ c: sql<number>`COUNT(*)::int` })
+      .from(photoGroups)
+      .where(and(
+        eq(photoGroups.user_id, userId),
+        isNull(photoGroups.reviewed_at),
+        eq(photoGroups.ai_picked_confidence, "high"),
+      )),
+  );
+  const highConfidenceTotal = highRow?.c ?? 0;
+
   // User-level calibration metadata. Loaded unconditionally (even when
   // total = 0) so the empty-state can still display "deine letzte
   // Kalibrierung war am …". Cheap — one row by PK.
@@ -645,7 +667,13 @@ export async function listReviewQueueLogic(
     : null;
 
   if (total === 0) {
-    return { total: 0, offset, groups: [], user_calibration: userCalibration };
+    return {
+      total: 0,
+      high_confidence_total: highConfidenceTotal,
+      offset,
+      groups: [],
+      user_calibration: userCalibration,
+    };
   }
 
   // Pull the requested window. Ordering follows the contract above.
@@ -701,7 +729,13 @@ export async function listReviewQueueLogic(
       .offset(offset),
   );
   if (groupRows.length === 0) {
-    return { total, offset, groups: [], user_calibration: userCalibration };
+    return {
+      total,
+      high_confidence_total: highConfidenceTotal,
+      offset,
+      groups: [],
+      user_calibration: userCalibration,
+    };
   }
 
   // Bulk-fetch member photo rows in a single query so the response is
@@ -768,5 +802,11 @@ export async function listReviewQueueLogic(
     };
   });
 
-  return { total, offset, groups, user_calibration: userCalibration };
+  return {
+    total,
+    high_confidence_total: highConfidenceTotal,
+    offset,
+    groups,
+    user_calibration: userCalibration,
+  };
 }
