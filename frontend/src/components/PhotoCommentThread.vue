@@ -473,6 +473,8 @@ function formatRelative(iso: string): string {
   max-height: 8em;
   padding: 0.45rem 0.7rem;
   line-height: 1.3;
+  font-family: inherit;
+  font-size: 0.85rem;
 }
 
 .reactions__toggle {
