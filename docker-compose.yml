@@ -60,13 +60,11 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DATABASE: encore
-      PHOTO_UPLOAD_DIR: /mnt/data/photos
-      PHOTO_THUMBNAIL_DIR: /mnt/data/thumbnails
-      # Root directory for external photo libraries (issue #75). Every path
-      # registered through /libraries must live under this root. Mount one or
-      # more host directories into subpaths of /mnt/libraries (see the
-      # `volumes:` section below for an example).
-      PHOTO_LIBRARIES_ROOT: /mnt/libraries
+      # PHOTO_UPLOAD_DIR / PHOTO_THUMBNAIL_DIR / PHOTO_LIBRARIES_ROOT / BACKUP_DIR
+      # are hardcoded in the container as /mnt/data/photos, /mnt/data/thumbnails,
+      # /mnt/libraries and /mnt/backup respectively (see photo/photo.service.ts,
+      # photo/libraries.service.ts and backup/*.ts). The volume mounts below
+      # are the single source of truth — do not re-declare the paths here.
       # Documents module — see documents/documents.service.ts.
       # DOCUMENTS_DIR holds the canonical archive (sha256-named PDFs in
       # YYYY/YYYY-MM shards). DOCUMENTS_INBOX_DIR is the watched drop
@@ -100,8 +98,9 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-noreply@example.com}
       APP_URL: ${APP_URL:-http://localhost:8080}
-      # Backup subsystem — see scripts/host/README.md
-      BACKUP_DIR: /mnt/backup
+      # Backup subsystem — see scripts/host/README.md. BACKUP_DIR is hardcoded
+      # in the container as /mnt/backup (see backup/*.ts); the mount below is
+      # the single source of truth.
       # 30 minutes; overrides the auto-stop safety timer in /internal/backup/start
       BACKUP_AUTO_STOP_MS: ${BACKUP_AUTO_STOP_MS:-1800000}
       # Shared secret for /internal/backup/* — must match
@@ -264,8 +263,11 @@ services:
 
   # ── LLM Service (Llama GGUF classifier + multilingual-e5-base embedder) ───
   # Models are NOT baked into the image — they are mmap'ed from the llm_models
-  # volume. Run `docker compose run --rm llm_service /usr/local/bin/download_model.sh`
-  # once before first start to populate the volume.
+  # volume. The container's entrypoint runs `download_model.sh` automatically
+  # on every start, so a cold volume is populated on first `docker compose up`
+  # (this can take several minutes on slow networks; healthcheck start_period
+  # is set accordingly). The script is idempotent, so warm starts return in
+  # under a second. Set LLM_SKIP_DOWNLOAD=1 to bypass the check.
   llm_service:
     image: ghcr.io/as19git67/fk-encore-llm:latest
     container_name: fk-encore-llm

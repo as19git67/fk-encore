@@ -58,11 +58,10 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DATABASE: encore_test
-      PHOTO_UPLOAD_DIR: /mnt/data/photos
-      PHOTO_THUMBNAIL_DIR: /mnt/data/thumbnails
-      # Root directory for external photo libraries (issue #75). Every path
-      # registered through /libraries must live under this root.
-      PHOTO_LIBRARIES_ROOT: /mnt/libraries
+      # PHOTO_UPLOAD_DIR / PHOTO_THUMBNAIL_DIR / PHOTO_LIBRARIES_ROOT / BACKUP_DIR
+      # are hardcoded in the container as /mnt/data/photos, /mnt/data/thumbnails,
+      # /mnt/libraries and /mnt/backup respectively (see photo/photo.service.ts,
+      # photo/libraries.service.ts and backup/*.ts).
       # Documents module — see documents/documents.service.ts.
       DOCUMENTS_DIR: /mnt/data/documents
       DOCUMENTS_INBOX_DIR: /mnt/data/documents-inbox
@@ -89,7 +88,6 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-noreply@example.com}
       APP_URL: ${APP_URL:-http://localhost:18080}
-      BACKUP_DIR: /mnt/backup
       BACKUP_AUTO_STOP_MS: ${BACKUP_AUTO_STOP_MS:-1800000}
       BACKUP_TOKEN: ${BACKUP_TOKEN:-}
       BACKUP_ALLOW_CIDRS: ${BACKUP_ALLOW_CIDRS:-}
@@ -190,8 +188,8 @@ services:
 
   # ── LLM Service (Llama GGUF classifier + multilingual-e5-base embedder) ───
   # Models are NOT baked into the image — they are mmap'ed from the llm_models
-  # volume. Run `docker compose run --rm llm_service /usr/local/bin/download_model.sh`
-  # once before first start to populate the volume.
+  # volume. The container's entrypoint runs `download_model.sh` automatically
+  # on startup, so a cold volume populates itself on first `docker compose up`.
   llm_service:
     image: ghcr.io/as19git67/fk-encore-llm:test
     container_name: fk-encore-llm-test
