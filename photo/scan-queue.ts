@@ -18,12 +18,7 @@ import { notifyScanQueueChanged } from "./scan-queue-events";
 export type ScanService = "embedding" | "face_detection" | "face_assignment" | "landmark" | "quality" | "geocoding" | "thumbnail";
 export type ScanStatus = "pending" | "processing" | "failed" | "done";
 
-/**
- * Service identifiers surfaced in QueueStatus.services. Includes the
- * DB-backed ScanService values plus synthetic rows aggregated from other
- * queues (currently: library_scan).
- */
-export type QueueServiceId = ScanService | "library_scan";
+export type QueueServiceId = ScanService;
 
 /** Services that run once per photo (no user_id in queue). */
 const GLOBAL_SERVICES: ReadonlySet<ScanService> = new Set([
@@ -55,20 +50,12 @@ export class DeferJobError extends Error {
  * library_scan row is currently 'processing'; the per-photo services
  * don't carry per-row progress, so this stays optional.
  */
-export interface QueueServiceProgress {
-  scanned: number;
-  imported: number;
-  skipped: number;
-  errors: number;
-}
-
 export interface QueueServiceStatus {
   service: QueueServiceId;
   pending: number;
   processing: number;
   failed: number;
   done: number;
-  progress?: QueueServiceProgress;
 }
 
 export interface QueueStatus {
@@ -100,6 +87,7 @@ export async function enqueuePhotoScan(
   userId: number,
   services: ScanService[] = enabledServices(),
   force = false,
+  priority = 2,
 ): Promise<void> {
   if (services.length === 0) return;
   notifyScanQueueChanged();
@@ -110,7 +98,7 @@ export async function enqueuePhotoScan(
     // Try insert first (covers the common case: new photo, not yet in queue)
     const result = await db
       .insert(photoScanQueue)
-      .values({ photo_id: photoId, user_id: queueUserId, service, force })
+      .values({ photo_id: photoId, user_id: queueUserId, service, force, priority })
       .onConflictDoNothing()
       .returning({ id: photoScanQueue.id });
 
@@ -163,6 +151,7 @@ export async function enqueuePhotoScanBulkPerUser(
   userIds: number[],
   service: ScanService,
   force = false,
+  priority = 2,
 ): Promise<void> {
   if (userIds.length === 0) return;
   if (isGlobalService(service)) {
@@ -175,6 +164,7 @@ export async function enqueuePhotoScanBulkPerUser(
     user_id,
     service,
     force,
+    priority,
   }));
 
   await db
@@ -214,7 +204,7 @@ export async function dequeueNextJob(service: ScanService): Promise<typeof photo
       SELECT id FROM photo_scan_queue
       WHERE service = ${service}
         AND status = 'pending'
-      ORDER BY enqueued_at ASC
+      ORDER BY priority ASC, enqueued_at ASC
       LIMIT 1
       FOR UPDATE SKIP LOCKED
     )
@@ -287,71 +277,21 @@ export async function getQueueStatus(userId: number): Promise<QueueStatus> {
     }
   }
 
-  // Library scans live in their own table but are surfaced as just another
-  // row in the same status table so the admin sees the complete picture.
-  const libRows = await db.execute<{ status: ScanStatus; count: string }>(sql`
-    SELECT status, COUNT(*)::int as count
-    FROM library_scan_queue
-    GROUP BY status
-  `);
-  const libEntry: QueueServiceStatus = {
-    service: "library_scan",
-    pending: 0,
-    processing: 0,
-    failed: 0,
-    done: 0,
-  };
-  for (const row of libRows.rows) {
-    libEntry[row.status] = Number(row.count);
-  }
-
-  // Live counters for the in-flight scan (worker concurrency is 1, so at
-  // most one row, but summing keeps it correct if that ever changes).
-  if (libEntry.processing > 0) {
-    const progressRows = await db.execute<{
-      scanned: number | null;
-      imported: number | null;
-      skipped_duplicate: number | null;
-      skipped_unsupported: number | null;
-      skipped_empty: number | null;
-      errors: number | null;
-    }>(sql`
-      SELECT scanned, imported, skipped_duplicate, skipped_unsupported,
-             skipped_empty, errors
-      FROM library_scan_queue
-      WHERE status = 'processing'
-    `);
-    let scanned = 0, imported = 0, skipped = 0, errors = 0;
-    for (const r of progressRows.rows) {
-      scanned += r.scanned ?? 0;
-      imported += r.imported ?? 0;
-      skipped += (r.skipped_duplicate ?? 0)
-              + (r.skipped_unsupported ?? 0)
-              + (r.skipped_empty ?? 0);
-      errors += r.errors ?? 0;
-    }
-    if (scanned > 0 || imported > 0 || skipped > 0 || errors > 0) {
-      libEntry.progress = { scanned, imported, skipped, errors };
-    }
-  }
-
-  map.set("library_scan", libEntry);
-
   return { services: Array.from(map.values()) };
 }
 
-/** Reset all failed jobs for a user back to pending. */
+/** Reset all failed jobs for a user back to pending (low priority). */
 export async function requeueFailed(userId: number): Promise<number> {
   // Reset per-user failed jobs
   const perUserResult = await db
     .update(photoScanQueue)
-    .set({ status: "pending", error_msg: null, started_at: null, finished_at: null })
+    .set({ status: "pending", priority: 3, error_msg: null, started_at: null, finished_at: null })
     .where(and(eq(photoScanQueue.user_id, userId), eq(photoScanQueue.status, "failed")));
 
   // Reset global failed jobs for this user's photos
   const globalResult = await db.execute(sql`
     UPDATE photo_scan_queue
-    SET status = 'pending', error_msg = NULL, started_at = NULL, finished_at = NULL
+    SET status = 'pending', priority = 3, error_msg = NULL, started_at = NULL, finished_at = NULL
     WHERE status = 'failed'
       AND user_id IS NULL
       AND photo_id IN (SELECT id FROM photos WHERE user_id = ${userId})
@@ -417,14 +357,14 @@ export async function requeueForRescan(userId: number, force: boolean): Promise<
 
           const updated = await db
             .update(photoScanQueue)
-            .set({ status: "pending", force: true, error_msg: null, started_at: null, finished_at: null, attempts: 0 })
+            .set({ status: "pending", force: true, priority: 3, error_msg: null, started_at: null, finished_at: null, attempts: 0 })
             .where(
               and(eq(photoScanQueue.photo_id, photoId), eq(photoScanQueue.service, service), isNull(photoScanQueue.user_id)),
             );
           if (((updated as any).rowCount ?? 0) === 0) {
             await db
               .insert(photoScanQueue)
-              .values({ photo_id: photoId, user_id: null, service, force: true })
+              .values({ photo_id: photoId, user_id: null, service, force: true, priority: 3 })
               .onConflictDoNothing();
           }
         } else {
@@ -441,14 +381,14 @@ export async function requeueForRescan(userId: number, force: boolean): Promise<
 
           const updated = await db
             .update(photoScanQueue)
-            .set({ status: "pending", force: true, error_msg: null, started_at: null, finished_at: null, attempts: 0 })
+            .set({ status: "pending", force: true, priority: 3, error_msg: null, started_at: null, finished_at: null, attempts: 0 })
             .where(
               and(eq(photoScanQueue.photo_id, photoId), eq(photoScanQueue.service, service), eq(photoScanQueue.user_id, userId)),
             );
           if (((updated as any).rowCount ?? 0) === 0) {
             await db
               .insert(photoScanQueue)
-              .values({ photo_id: photoId, user_id: userId, service, force: true })
+              .values({ photo_id: photoId, user_id: userId, service, force: true, priority: 3 })
               .onConflictDoNothing();
           }
         }
@@ -474,7 +414,7 @@ export async function requeueForRescan(userId: number, force: boolean): Promise<
           `);
           await db
             .insert(photoScanQueue)
-            .values({ photo_id: photoId, user_id: null, service, force: false })
+            .values({ photo_id: photoId, user_id: null, service, force: false, priority: 3 })
             .onConflictDoNothing();
         } else {
           await db
@@ -489,7 +429,7 @@ export async function requeueForRescan(userId: number, force: boolean): Promise<
             );
           await db
             .insert(photoScanQueue)
-            .values({ photo_id: photoId, user_id: userId, service, force: false })
+            .values({ photo_id: photoId, user_id: userId, service, force: false, priority: 3 })
             .onConflictDoNothing();
         }
       }
