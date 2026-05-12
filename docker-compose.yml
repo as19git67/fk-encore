@@ -184,13 +184,13 @@ services:
       start_period: 20s
 
   # ── Embedding Service (CLIP + DINOv2) ──────────────────────────────────────
-  # Models live in the `embedding_models` volume, NOT in the image. On a
-  # cold cache the service downloads them from huggingface.co at startup
-  # (~5 min, ~5.5 GB) and the healthcheck waits via start_period. To skip
-  # the cold-start lag, populate the volume once before bringing the stack
-  # up:
-  #   docker compose run --rm embedding_service \
-  #       /usr/local/bin/download_model.sh
+  # Models live in the `embedding_models` volume, NOT in the image. The
+  # container's entrypoint runs `download_model.sh` automatically on every
+  # start, so a cold volume populates itself on first `docker compose up`
+  # (~5 min, ~5.5 GB; healthcheck start_period is sized for that). The
+  # script is idempotent — huggingface_hub re-verifies the cache against
+  # the manifest, so warm starts return within seconds. Set
+  # EMBEDDING_SKIP_DOWNLOAD=1 to bypass the check.
   embedding_service:
     image: ghcr.io/as19git67/fk-encore-embedding:latest
     container_name: fk-encore-embedding
@@ -364,15 +364,13 @@ volumes:
     driver: local
     driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/backup }
   # Model artefacts for the llm_service (Llama GGUF + sentence-transformers
-  # cache). Populate via `docker compose run --rm llm_service /usr/local/bin/download_model.sh`.
+  # cache). Auto-populated on first start by the container entrypoint.
   llm_models:
     driver: local
     driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/llm_models }
   # Model artefacts for the embedding_service (OpenCLIP + DINOv2 weights,
-  # plus the ONNX/INT8 quantised variants once Punkt 3 lands). The volume
-  # auto-populates on first service start; pre-populate with
-  #   docker compose run --rm embedding_service /usr/local/bin/download_model.sh
-  # to keep the first request fast.
+  # plus the ONNX/INT8 quantised variants once Punkt 3 lands). Auto-
+  # populated on first start by the container entrypoint.
   embedding_models:
     driver: local
     driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/embedding_models }
