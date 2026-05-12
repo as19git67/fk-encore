@@ -18,12 +18,7 @@ import { notifyScanQueueChanged } from "./scan-queue-events";
 export type ScanService = "embedding" | "face_detection" | "face_assignment" | "landmark" | "quality" | "geocoding" | "thumbnail";
 export type ScanStatus = "pending" | "processing" | "failed" | "done";
 
-/**
- * Service identifiers surfaced in QueueStatus.services. Includes the
- * DB-backed ScanService values plus synthetic rows aggregated from other
- * queues (currently: library_scan).
- */
-export type QueueServiceId = ScanService | "library_scan";
+export type QueueServiceId = ScanService;
 
 /** Services that run once per photo (no user_id in queue). */
 const GLOBAL_SERVICES: ReadonlySet<ScanService> = new Set([
@@ -55,20 +50,12 @@ export class DeferJobError extends Error {
  * library_scan row is currently 'processing'; the per-photo services
  * don't carry per-row progress, so this stays optional.
  */
-export interface QueueServiceProgress {
-  scanned: number;
-  imported: number;
-  skipped: number;
-  errors: number;
-}
-
 export interface QueueServiceStatus {
   service: QueueServiceId;
   pending: number;
   processing: number;
   failed: number;
   done: number;
-  progress?: QueueServiceProgress;
 }
 
 export interface QueueStatus {
@@ -289,56 +276,6 @@ export async function getQueueStatus(userId: number): Promise<QueueStatus> {
       entry[row.status] = Number(row.count);
     }
   }
-
-  // Library scans live in their own table but are surfaced as just another
-  // row in the same status table so the admin sees the complete picture.
-  const libRows = await db.execute<{ status: ScanStatus; count: string }>(sql`
-    SELECT status, COUNT(*)::int as count
-    FROM library_scan_queue
-    GROUP BY status
-  `);
-  const libEntry: QueueServiceStatus = {
-    service: "library_scan",
-    pending: 0,
-    processing: 0,
-    failed: 0,
-    done: 0,
-  };
-  for (const row of libRows.rows) {
-    libEntry[row.status] = Number(row.count);
-  }
-
-  // Live counters for the in-flight scan (worker concurrency is 1, so at
-  // most one row, but summing keeps it correct if that ever changes).
-  if (libEntry.processing > 0) {
-    const progressRows = await db.execute<{
-      scanned: number | null;
-      imported: number | null;
-      skipped_duplicate: number | null;
-      skipped_unsupported: number | null;
-      skipped_empty: number | null;
-      errors: number | null;
-    }>(sql`
-      SELECT scanned, imported, skipped_duplicate, skipped_unsupported,
-             skipped_empty, errors
-      FROM library_scan_queue
-      WHERE status = 'processing'
-    `);
-    let scanned = 0, imported = 0, skipped = 0, errors = 0;
-    for (const r of progressRows.rows) {
-      scanned += r.scanned ?? 0;
-      imported += r.imported ?? 0;
-      skipped += (r.skipped_duplicate ?? 0)
-              + (r.skipped_unsupported ?? 0)
-              + (r.skipped_empty ?? 0);
-      errors += r.errors ?? 0;
-    }
-    if (scanned > 0 || imported > 0 || skipped > 0 || errors > 0) {
-      libEntry.progress = { scanned, imported, skipped, errors };
-    }
-  }
-
-  map.set("library_scan", libEntry);
 
   return { services: Array.from(map.values()) };
 }
