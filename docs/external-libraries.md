@@ -24,13 +24,14 @@ across the scanner, the filesystem watcher, and the reconcile cron job.
 
 ## Required environment
 
-| Variable                | Purpose                                                                                  | Default           |
-| ----------------------- | ---------------------------------------------------------------------------------------- | ----------------- |
-| `PHOTO_LIBRARIES_ROOT`  | Mandatory prefix. Every library path must live under this directory (enforced server-side). | `/mnt/libraries` |
+The library root is hardcoded to `/mnt/libraries` inside the container (see
+`photo/libraries.service.ts`). For local `encore run` without Docker, set
+`PHOTO_LIBRARIES_ROOT` in `.env` to a host-writable path; in containers the
+mount under `/mnt/libraries` is the only source of truth.
 
-Every path supplied to `POST /libraries` is resolved against
-`PHOTO_LIBRARIES_ROOT` and rejected if it escapes it. This mirrors the existing
-path-traversal guards on the photo-serving endpoint.
+Every path supplied to `POST /libraries` is resolved against the library root
+and rejected if it escapes it. This mirrors the existing path-traversal guards
+on the photo-serving endpoint.
 
 ## Docker setup
 
@@ -40,8 +41,6 @@ for `link`-mode libraries so the container can never mutate the originals:
 ```yaml
 services:
   app:
-    environment:
-      PHOTO_LIBRARIES_ROOT: /mnt/libraries
     volumes:
       - photos:/mnt/data/photos
       - thumbnails:/mnt/data/thumbnails

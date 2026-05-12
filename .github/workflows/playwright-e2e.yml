@@ -85,6 +85,14 @@ jobs:
       E2E_API_URL: http://localhost:4000
       E2E_ADMIN_EMAIL: admin@example.com
       E2E_ADMIN_PASSWORD: admin
+      # Filesystem paths — since #144 the in-code defaults point at the
+      # production container mounts (/mnt/data/photos etc.), which the
+      # GitHub runner cannot mkdir. Pin them at workspace-relative dirs so
+      # `encore run` boots in CI exactly like a local `encore run` would.
+      PHOTO_UPLOAD_DIR: ${{ github.workspace }}/e2e-data/photos
+      PHOTO_THUMBNAIL_DIR: ${{ github.workspace }}/e2e-data/thumbnails
+      PHOTO_LIBRARIES_ROOT: ${{ github.workspace }}/e2e-data/libraries
+      BACKUP_DIR: ${{ github.workspace }}/e2e-data/backup
 
     steps:
       - name: Checkout repository

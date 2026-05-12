@@ -162,8 +162,8 @@ const photoDateOrder = sql`COALESCE(${photos.taken_at}, ${photos.created_at})`
 const rawCoalesceDate = sql.raw('COALESCE(p.taken_at, p.created_at)')
 const rawFalse = sql.raw('false')
 
-export const UPLOAD_DIR = path.resolve(process.env.PHOTO_UPLOAD_DIR || "uploads/photos");
-export const THUMBNAIL_DIR = path.resolve(process.env.PHOTO_THUMBNAIL_DIR || "uploads/thumbnails");
+export const UPLOAD_DIR = path.resolve(process.env.PHOTO_UPLOAD_DIR || "/mnt/data/photos");
+export const THUMBNAIL_DIR = path.resolve(process.env.PHOTO_THUMBNAIL_DIR || "/mnt/data/thumbnails");
 
 /**
  * Resolve the on-disk path for a photo row. Library-linked photos
@@ -212,7 +212,32 @@ const EMBEDDING_SERVICE_URL = process.env.EMBEDDING_SERVICE_URL || "http://local
 const EMBEDDING_TEXT_SEARCH_MAX_K = 1000;
 const EMBEDDING_TEXT_SEARCH_MAX_QUERY_LEN = 500;
 const EXIF_WRITE_TIMEOUT_MS = parseInt(process.env.EXIF_WRITE_TIMEOUT_MS || "8000", 10);
-const EXIF_WRITABLE_EXTENSIONS = new Set([".jpg", ".jpeg", ".tif", ".tiff", ".png"]);
+// File formats we know exiftool can safely round-trip writes for. HEIC/HEIF
+// is included: exiftool writes XMP into the `mdat`/`meta` boxes of an
+// ISO-BMFF container without re-encoding the image data, so taken_at,
+// description and xmp:Rating survive a write-back unchanged. GIF, WEBP, BMP
+// and SVG stay out — exiftool either rejects them outright or can only write
+// a subset of tags, which would leave the on-disk metadata in an unclear
+// state.
+const EXIF_WRITABLE_EXTENSIONS = new Set([".jpg", ".jpeg", ".tif", ".tiff", ".png", ".heic", ".heif"]);
+
+/**
+ * Server-wide toggle for syncing user-driven metadata edits (description,
+ * date_taken, favourite rating) back into the image file's EXIF/IPTC/XMP
+ * tags. Default `true`; set `PHOTO_XMP_WRITE_BACK=false` to keep the file
+ * bytes immutable (the DB still records the edit). Useful for libraries
+ * stored on read-only mounts or when an external tool owns the truth.
+ *
+ * Parsing matches the boolean conventions used elsewhere in the codebase:
+ * `"false"`, `"0"`, `"no"`, `"off"` (case-insensitive) disable; anything
+ * else — including an empty value or an unset variable — keeps writes
+ * enabled.
+ */
+export const XMP_WRITE_BACK_ENABLED: boolean = (() => {
+  const raw = (process.env.PHOTO_XMP_WRITE_BACK ?? "").trim().toLowerCase();
+  if (raw === "") return true;
+  return !["false", "0", "no", "off"].includes(raw);
+})();
 
 function getUploadMimeType(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
@@ -1311,7 +1336,61 @@ function isPlausibleTime(h: number, m: number, s: number): boolean {
 }
 
 /**
+ * Locate an XMP sidecar file for the given image, following the conventions
+ * used by Lightroom Classic, darktable, digiKam and RawTherapee:
+ *
+ *   1. `<filePath>.xmp`         — the extension is appended (e.g. `photo.jpg.xmp`)
+ *   2. `<basename>.xmp`         — the image extension is replaced (e.g. `photo.xmp`)
+ *
+ * The first existing candidate wins. Returns `null` if no sidecar is found.
+ *
+ * Exported for tests.
+ */
+export function findXmpSidecarPath(filePath: string): string | null {
+  const candidates = [
+    `${filePath}.xmp`,
+    `${filePath}.XMP`,
+    filePath.replace(/\.[^.]+$/, ".xmp"),
+    filePath.replace(/\.[^.]+$/, ".XMP"),
+  ];
+  for (const c of candidates) {
+    if (c === filePath) continue; // guard against files that are themselves .xmp
+    try {
+      if (fs.existsSync(c)) return c;
+    } catch {
+      /* ignore — fall through to next candidate */
+    }
+  }
+  return null;
+}
+
+/**
+ * Parse a standalone XMP sidecar file with exifr and return the raw tag map.
+ * Returns `null` on read or parse errors so the caller can fall back to the
+ * embedded metadata.
+ */
+async function parseXmpSidecar(sidecarPath: string): Promise<Record<string, any> | null> {
+  try {
+    const buf = await fs.promises.readFile(sidecarPath);
+    // exifr.parse accepts a Buffer and auto-detects the format. Standalone
+    // .xmp packets carry only XMP data, but we keep iptc enabled in case the
+    // file actually wraps a JPEG with an XMP-only producer pipeline.
+    const data = await exifr.parse(buf, { xmp: true, iptc: true, gps: true });
+    return (data as Record<string, any>) ?? null;
+  } catch (err: any) {
+    console.warn(`[xmp-sidecar] failed to parse ${sidecarPath}:`, err?.message ?? err);
+    return null;
+  }
+}
+
+/**
  * Extract EXIF, IPTC and XMP metadata from an image file. Exported for tests.
+ *
+ * If an external XMP sidecar file exists alongside the image (see
+ * `findXmpSidecarPath`), its values take precedence over the embedded
+ * metadata — sidecars represent the user's intentional edits in tools like
+ * Lightroom or darktable. Merge priority (highest → lowest):
+ *   sidecar XMP → embedded XMP → embedded IPTC → embedded EXIF
  *
  * Always returns a defined object — on parse errors every field falls back to
  * its "not present" value (null / empty array) so callers don't need to handle
@@ -1336,7 +1415,18 @@ export async function getExifMetadata(filePath: string, originalFilename?: strin
     rating: null,
   };
   try {
-    const data = await exifr.parse(filePath, { gps: true, xmp: true, iptc: true });
+    const embedded = await exifr.parse(filePath, { gps: true, xmp: true, iptc: true });
+    // Probe for an external `.xmp` sidecar (Lightroom / darktable / digiKam
+    // workflow). Sidecar values represent the user's intentional edits and
+    // therefore take precedence over the embedded metadata.
+    const sidecarPath = findXmpSidecarPath(filePath);
+    const sidecar = sidecarPath ? await parseXmpSidecar(sidecarPath) : null;
+    // Shallow merge so any tag present in the sidecar wins. Embedded keys
+    // that the sidecar does not redefine survive untouched.
+    const data: Record<string, any> = {
+      ...(embedded ?? {}),
+      ...(sidecar ?? {}),
+    };
     let takenAt: string | null = null;
     if (data?.DateTimeOriginal) {
       takenAt = new Date(data.DateTimeOriginal).toISOString();
@@ -2746,6 +2836,9 @@ export async function updatePhotoDateLogic(
 
   // 2. Update file metadata
   try {
+    if (!XMP_WRITE_BACK_ENABLED) {
+      return { success: true, taken_at: takenAt };
+    }
     const ext = path.extname(filePath).toLowerCase();
     if (!EXIF_WRITABLE_EXTENSIONS.has(ext)) {
       return { success: true, taken_at: takenAt };
@@ -2819,31 +2912,35 @@ export async function updatePhotoDescriptionLogic(
   // 2. Write description into EXIF, IPTC and XMP. Keeping the three kept in
   //    sync makes the description survive third-party tooling that only reads
   //    one of the three (e.g. Windows Explorer reads XMP, Lightroom reads IPTC,
-  //    legacy viewers read EXIF ImageDescription).
-  try {
-    const filePath = getPhotoDiskPath(photo);
-    if (fs.existsSync(filePath)) {
-      const ext = path.extname(filePath).toLowerCase();
-      if (EXIF_WRITABLE_EXTENSIONS.has(ext)) {
-        const value = trimmed ?? "";
-        await Promise.race([
-          exiftool.write(filePath, {
-            // EXIF
-            ImageDescription: value,
-            // XMP (dc:description). exiftool-vendored's `Description` write
-            // shortcut targets XMP:Description.
-            "Description": value,
-            // IPTC Caption-Abstract
-            "Caption-Abstract": value,
-          }, ["-overwrite_original"]),
-          new Promise((_, reject) => {
-            setTimeout(() => reject(new Error(`EXIF_WRITE_TIMEOUT after ${EXIF_WRITE_TIMEOUT_MS}ms`)), EXIF_WRITE_TIMEOUT_MS);
-          })
-        ]);
+  //    legacy viewers read EXIF ImageDescription). Gated on the global
+  //    XMP_WRITE_BACK_ENABLED flag so operators can keep file bytes
+  //    immutable when an external tool owns the truth.
+  if (XMP_WRITE_BACK_ENABLED) {
+    try {
+      const filePath = getPhotoDiskPath(photo);
+      if (fs.existsSync(filePath)) {
+        const ext = path.extname(filePath).toLowerCase();
+        if (EXIF_WRITABLE_EXTENSIONS.has(ext)) {
+          const value = trimmed ?? "";
+          await Promise.race([
+            exiftool.write(filePath, {
+              // EXIF
+              ImageDescription: value,
+              // XMP (dc:description). exiftool-vendored's `Description` write
+              // shortcut targets XMP:Description.
+              "Description": value,
+              // IPTC Caption-Abstract
+              "Caption-Abstract": value,
+            }, ["-overwrite_original"]),
+            new Promise((_, reject) => {
+              setTimeout(() => reject(new Error(`EXIF_WRITE_TIMEOUT after ${EXIF_WRITE_TIMEOUT_MS}ms`)), EXIF_WRITE_TIMEOUT_MS);
+            })
+          ]);
+        }
       }
+    } catch (err) {
+      console.error("Error writing description to EXIF:", err);
     }
-  } catch (err) {
-    console.error("Error writing description to EXIF:", err);
   }
 
   try {
@@ -2874,6 +2971,7 @@ export async function updatePhotoDescriptionLogic(
  * file is shared, so only the photo owner's changes propagate to disk.
  */
 async function writeFavoriteRatingXmp(filePath: string, isFavorite: boolean): Promise<void> {
+  if (!XMP_WRITE_BACK_ENABLED) return;
   if (!fs.existsSync(filePath)) return;
   const ext = path.extname(filePath).toLowerCase();
   if (!EXIF_WRITABLE_EXTENSIONS.has(ext)) return;

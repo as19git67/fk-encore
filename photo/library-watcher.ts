@@ -18,6 +18,7 @@ import {
 import {
   importFile,
   handleExternalUnlink,
+  handleExternalXmpChange,
   listLibraries,
   type PhotoLibrary,
 } from "./libraries.service";
@@ -26,8 +27,12 @@ console.log("[boot] photo/library-watcher.ts: all imports resolved");
 
 const watchers = new Map<number, FSWatcher>();
 
-function isSupported(file: string): boolean {
+function isSupportedImage(file: string): boolean {
   return SUPPORTED_EXTENSIONS.has(path.extname(file).toLowerCase());
+}
+
+function isXmpSidecar(file: string): boolean {
+  return path.extname(file).toLowerCase() === ".xmp";
 }
 
 export async function startWatcher(library: PhotoLibrary): Promise<void> {
@@ -37,10 +42,10 @@ export async function startWatcher(library: PhotoLibrary): Promise<void> {
     ignored: (p, stats) => {
       const base = path.basename(p);
       if (base.startsWith(".")) return true;
-      // Only watch directories and supported files. Returning true for an
-      // unsupported file means chokidar will skip it; for directories we
-      // recurse normally.
-      if (stats?.isFile()) return !isSupported(p);
+      // Only watch directories, supported image files and `.xmp` sidecars.
+      // Returning true for an unsupported file means chokidar will skip it;
+      // for directories we recurse normally.
+      if (stats?.isFile()) return !(isSupportedImage(p) || isXmpSidecar(p));
       return false;
     },
     ignoreInitial: true,
@@ -50,14 +55,33 @@ export async function startWatcher(library: PhotoLibrary): Promise<void> {
 
   watcher.on("add", async (file) => {
     try {
-      await importFile(library, file);
+      if (isXmpSidecar(file)) {
+        await handleExternalXmpChange(file);
+      } else {
+        await importFile(library, file);
+      }
     } catch (err: any) {
-      console.error(`[library-watcher ${library.id}] import failed for ${file}:`, err?.message ?? err);
+      console.error(`[library-watcher ${library.id}] add handler failed for ${file}:`, err?.message ?? err);
+    }
+  });
+
+  // `change` events only matter for sidecars — image bytes are content-addressed
+  // by hash on import, so an in-place edit of an existing image would surface as
+  // a new photo on the next scan rather than as a metadata update.
+  watcher.on("change", async (file) => {
+    if (!isXmpSidecar(file)) return;
+    try {
+      await handleExternalXmpChange(file);
+    } catch (err: any) {
+      console.error(`[library-watcher ${library.id}] xmp change handler failed for ${file}:`, err?.message ?? err);
     }
   });
 
   if (library.import_mode === "link") {
     watcher.on("unlink", async (file) => {
+      // Sidecar deletions are intentionally ignored — the embedded metadata in
+      // the image file is still authoritative once the sidecar is gone.
+      if (isXmpSidecar(file)) return;
       try {
         await handleExternalUnlink(file);
       } catch (err: any) {

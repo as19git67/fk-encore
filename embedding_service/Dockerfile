@@ -77,7 +77,8 @@ RUN mkdir -p /models \
 COPY app/ ./app/
 COPY download_model.sh /usr/local/bin/download_model.sh
 COPY optimize_models.sh /usr/local/bin/optimize_models.sh
-RUN chmod +x /usr/local/bin/download_model.sh /usr/local/bin/optimize_models.sh
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/download_model.sh /usr/local/bin/optimize_models.sh /usr/local/bin/entrypoint.sh
 
 # Runtime system deps (libpq for asyncpg, curl for healthcheck + downloader)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -90,4 +91,5 @@ EXPOSE 8000
 
 USER 568:568
 
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
