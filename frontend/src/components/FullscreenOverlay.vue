@@ -24,6 +24,13 @@ const props = withDefaults(defineProps<{
    */
   group?: GalleryGridGroup | null
   /** Optional slot content rendered inside the fullscreen image (e.g. face box) */
+  /**
+   * When > 0, auto-advance to the next photo this many milliseconds
+   * after the last user interaction. Any touch, click, mouse move, or
+   * key press resets the timer. Setting to 0 (default) disables the
+   * slideshow behaviour entirely.
+   */
+  autoAdvanceMs?: number
 }>(), {
   // Vue 3 coerces a Boolean prop that the parent didn't pass to `false`
   // (NOT `undefined`), which collapses `props.showDetailsButton !== false`
@@ -32,6 +39,7 @@ const props = withDefaults(defineProps<{
   // useful behaviour the default; callers wanting the icon hidden still
   // pass `:show-details-button="false"` explicitly.
   showDetailsButton: true,
+  autoAdvanceMs: 0,
 })
 
 const emit = defineEmits<{
@@ -277,6 +285,54 @@ function handleKeydown(e: KeyboardEvent) {
 }
 onMounted(() => window.addEventListener('keydown', handleKeydown, true))
 onUnmounted(() => window.removeEventListener('keydown', handleKeydown, true))
+
+// ── Idle auto-advance (slideshow) ───────────────────────────────────────────
+// When `autoAdvanceMs` > 0 the overlay auto-emits `next` after the user
+// has been idle for that long. Any pointer or keyboard interaction
+// resets the timer.
+let idleTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearIdleTimer() {
+  if (idleTimer !== null) {
+    clearTimeout(idleTimer)
+    idleTimer = null
+  }
+}
+
+function scheduleIdleAdvance() {
+  clearIdleTimer()
+  if (!props.autoAdvanceMs || props.autoAdvanceMs <= 0) return
+  if (!props.nextPhoto) return
+  idleTimer = setTimeout(() => {
+    idleTimer = null
+    if (props.nextPhoto) emit('next')
+  }, props.autoAdvanceMs)
+}
+
+function bumpIdleTimer() {
+  if (!props.autoAdvanceMs || props.autoAdvanceMs <= 0) return
+  scheduleIdleAdvance()
+}
+
+watch(() => props.photo.id, () => scheduleIdleAdvance())
+watch(() => props.autoAdvanceMs, () => scheduleIdleAdvance())
+watch(() => props.nextPhoto, () => scheduleIdleAdvance())
+
+onMounted(() => {
+  scheduleIdleAdvance()
+  window.addEventListener('pointerdown', bumpIdleTimer, true)
+  window.addEventListener('pointermove', bumpIdleTimer, true)
+  window.addEventListener('keydown', bumpIdleTimer, true)
+  window.addEventListener('wheel', bumpIdleTimer, true)
+})
+
+onUnmounted(() => {
+  clearIdleTimer()
+  window.removeEventListener('pointerdown', bumpIdleTimer, true)
+  window.removeEventListener('pointermove', bumpIdleTimer, true)
+  window.removeEventListener('keydown', bumpIdleTimer, true)
+  window.removeEventListener('wheel', bumpIdleTimer, true)
+})
 
 function formatDate(photo: Photo) {
   // Same compact format the detail sidebar uses (e.g. "14.01.2026, 09:38")

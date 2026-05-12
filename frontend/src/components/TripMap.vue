@@ -4,7 +4,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import type { Photo } from '../api/photos'
 import { getPhotoUrl } from '../api/photos'
-import { usePhotoStops, type Stop } from '../composables/usePhotoStops'
+import { usePhotoStops, type Stop, type OverviewCluster } from '../composables/usePhotoStops'
 
 const props = defineProps<{
   photos: Photo[]
@@ -13,15 +13,28 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'open-fullscreen': [stopPhotos: Photo[], startIndex: number]
-  /** Fired when the user actively selects a stop (click or keyboard). Carries
-   *  the cover photo id of the chosen stop so the parent can keep its grid
-   *  selection in sync when the user flips back to gallery view. */
+  /** Day-scoped photos for fullscreen viewing. The user can only step
+   *  through photos of the currently selected day. `day` is the day key
+   *  the scope was built from. */
+  'open-fullscreen': [dayPhotos: Photo[], startIndex: number, day: string]
+  /** Fired when the user actively selects a stop (click or keyboard).
+   *  Carries the cover photo id of the chosen stop so the parent can
+   *  keep its grid selection in sync when the user flips back to gallery
+   *  view. */
   'stop-selected': [coverPhotoId: number]
 }>()
 
-const { stops, dayPaths, dayTransitions, dayColorMap, uniqueDays, bounds } =
-  usePhotoStops(toRef(props, 'photos'))
+const {
+  stops,
+  stopsByDay,
+  dayPaths,
+  dayTransitions,
+  dayColorMap,
+  uniqueDays,
+  bounds,
+  overviewClusters,
+  boundsForDay,
+} = usePhotoStops(toRef(props, 'photos'))
 
 const mapContainer = ref<HTMLElement | null>(null)
 const timelineContainer = ref<HTMLElement | null>(null)
@@ -29,37 +42,15 @@ let map: L.Map | null = null
 const markers: L.Marker[] = []
 const polylines: L.Polyline[] = []
 
+const OVERVIEW = '__overview__'
+type DaySelection = typeof OVERVIEW | string
+
+/** Currently selected timeline entry. Defaults to the overview so the
+ *  user lands on a full-trip view. */
+const selectedDay = ref<DaySelection>(OVERVIEW)
+/** Highlighted stop within the selected day. Only meaningful when a
+ *  specific day is selected; null in overview mode. */
 const selectedStopId = ref<number | null>(null)
-
-// Track which days are currently expanded in the timeline
-const expandedDays = ref<Set<string>>(new Set())
-
-// Group stops by day while preserving chronological order
-const stopsByDay = computed<Map<string, Stop[]>>(() => {
-  const map = new Map<string, Stop[]>()
-  for (const stop of stops.value) {
-    if (!map.has(stop.day)) map.set(stop.day, [])
-    map.get(stop.day)!.push(stop)
-  }
-  return map
-})
-
-// Flat list of stop IDs currently visible in the timeline, taking the
-// expanded/collapsed state of each day into account. For a collapsed
-// day only the first (cover) stop is visible.
-const visibleStopIds = computed<number[]>(() => {
-  const ids: number[] = []
-  for (const day of uniqueDays.value) {
-    const dayStops = stopsByDay.value.get(day) ?? []
-    if (dayStops.length === 0) continue
-    if (expandedDays.value.has(day)) {
-      for (const s of dayStops) ids.push(s.id)
-    } else {
-      ids.push(dayStops[0]!.id)
-    }
-  }
-  return ids
-})
 
 function formatDayLabel(day: string): string {
   // day = YYYY-MM-DD → DD. Mon
@@ -72,39 +63,151 @@ function dayPhotoCount(day: string): number {
   return dayStops.reduce((sum, s) => sum + s.photos.length, 0)
 }
 
-function toggleDay(day: string) {
-  if (expandedDays.value.has(day)) {
-    // Collapse the day
-    expandedDays.value = new Set()
-  } else {
-    // Expand exclusively — only one day can be expanded at a time. Any
-    // previously expanded day gets collapsed automatically.
-    expandedDays.value = new Set([day])
+function getStopLabel(stop: Stop): string {
+  if (stop.locationLabel) return stop.locationLabel
+  return `Stopp ${stop.id + 1}`
+}
+
+function formatStopDate(stop: Stop): string {
+  const date = new Date(stop.coverPhoto.taken_at || stop.coverPhoto.created_at)
+  return date.toLocaleDateString('de-DE', { day: '2-digit', month: 'short' })
+}
+
+// ── Selection ────────────────────────────────────────────────────────────────
+
+function selectOverview() {
+  selectedDay.value = OVERVIEW
+  selectedStopId.value = null
+  renderContent()
+  fitMapToSelection()
+  nextTick(() => scrollTimelineToSelection())
+}
+
+function selectDay(day: string) {
+  if (!uniqueDays.value.includes(day)) return
+  selectedDay.value = day
+  const first = stopsByDay.value.get(day)?.[0]
+  selectedStopId.value = first?.id ?? null
+  renderContent()
+  fitMapToSelection()
+  if (first) emit('stop-selected', first.coverPhoto.id)
+  nextTick(() => scrollTimelineToSelection())
+}
+
+function selectStopWithinDay(stop: Stop, opts: { silent?: boolean; pan?: boolean } = {}) {
+  selectedDay.value = stop.day
+  selectedStopId.value = stop.id
+  renderContent()
+  if (!opts.silent) emit('stop-selected', stop.coverPhoto.id)
+  if (opts.pan !== false && map) {
+    map.flyTo([stop.lat, stop.lng], Math.max(14, map.getZoom()), { duration: 0.5 })
   }
+  nextTick(() => scrollTimelineToSelection())
 }
 
-function expandDayExclusive(day: string) {
-  if (expandedDays.value.has(day) && expandedDays.value.size === 1) return
-  expandedDays.value = new Set([day])
+function fitMapToSelection() {
+  if (!map) return
+  if (selectedDay.value === OVERVIEW) {
+    if (bounds.value) map.fitBounds(bounds.value, { padding: [24, 24] })
+    return
+  }
+  const b = boundsForDay(selectedDay.value)
+  if (b) map.fitBounds(b, { padding: [32, 32] })
 }
 
-function handleDayCardClick(day: string) {
+function scrollTimelineToSelection() {
+  const container = timelineContainer.value
+  if (!container) return
+  let el: HTMLElement | null = null
+  if (selectedStopId.value != null) {
+    el = container.querySelector(`[data-stop-id="${selectedStopId.value}"]`) as HTMLElement | null
+  }
+  if (!el && selectedDay.value !== OVERVIEW) {
+    el = container.querySelector(`[data-day="${selectedDay.value}"]`) as HTMLElement | null
+  }
+  if (!el && selectedDay.value === OVERVIEW) {
+    el = container.querySelector('[data-overview]') as HTMLElement | null
+  }
+  if (!el) return
+  const containerRect = container.getBoundingClientRect()
+  const elRect = el.getBoundingClientRect()
+  const scrollLeft = el.offsetLeft - containerRect.width / 2 + elRect.width / 2
+  container.scrollTo({ left: scrollLeft, behavior: 'smooth' })
+}
+
+// ── Pin rendering ────────────────────────────────────────────────────────────
+
+interface Pin {
+  key: string
+  lat: number
+  lng: number
+  cover: Photo
+  count: number
+  selected: boolean
+  onClick: () => void
+}
+
+const visiblePins = computed<Pin[]>(() => {
+  if (selectedDay.value === OVERVIEW) {
+    return overviewClusters.value.map<Pin>(c => ({
+      key: `o-${c.id}`,
+      lat: c.lat,
+      lng: c.lng,
+      cover: c.coverPhoto,
+      count: c.photos.length,
+      selected: false,
+      onClick: () => handleOverviewPinClick(c),
+    }))
+  }
+  const day = selectedDay.value
   const dayStops = stopsByDay.value.get(day) ?? []
-  const first = dayStops[0]
-  if (!first) return
-  if (dayStops.length > 1) {
-    toggleDay(day)
-  }
-  selectStop(first.id)
+  return dayStops.map<Pin>(s => ({
+    key: `s-${s.id}`,
+    lat: s.lat,
+    lng: s.lng,
+    cover: s.coverPhoto,
+    count: s.photos.length,
+    selected: s.id === selectedStopId.value,
+    onClick: () => handleStopPinClick(s),
+  }))
+})
+
+function handleOverviewPinClick(c: OverviewCluster) {
+  // Drill into the day of the cluster's cover photo. This switches the
+  // map into day mode so the user can then click an individual stop.
+  const day = (() => {
+    const cover = c.coverPhoto
+    const fromStop = stops.value.find(s => s.id === c.stopIds[0])
+    return fromStop?.day ?? (cover.taken_at || cover.created_at).slice(0, 10)
+  })()
+  if (uniqueDays.value.includes(day)) selectDay(day)
 }
 
-// ── Map initialization ───────────────────────────────────────────────────────
+function handleStopPinClick(stop: Stop) {
+  selectStopWithinDay(stop, { pan: false })
+  // Open fullscreen with the entire selected day's photos so the user can
+  // browse within the day. startIndex points at this stop's first photo.
+  const dayPhotos = dayPhotosFor(stop.day)
+  const startId = stop.photos[0]?.id
+  const startIndex = startId != null
+    ? Math.max(0, dayPhotos.findIndex(p => p.id === startId))
+    : 0
+  emit('open-fullscreen', dayPhotos, startIndex, stop.day)
+}
 
-function createPinIcon(stop: Stop, isSelected: boolean): L.DivIcon {
-  const url = getPhotoUrl(stop.coverPhoto.filename, 96)
-  const count = stop.photos.length
-  const badge = count > 1 ? `<span class="trip-pin-badge">${count}</span>` : ''
-  const selectedClass = isSelected ? ' trip-pin-selected' : ''
+function dayPhotosFor(day: string): Photo[] {
+  const dayStops = stopsByDay.value.get(day) ?? []
+  const out: Photo[] = []
+  for (const s of dayStops) {
+    for (const p of s.photos) out.push(p)
+  }
+  return out
+}
+
+function createPinIcon(pin: Pin): L.DivIcon {
+  const url = getPhotoUrl(pin.cover.filename, 96)
+  const badge = pin.count > 1 ? `<span class="trip-pin-badge">${pin.count}</span>` : ''
+  const selectedClass = pin.selected ? ' trip-pin-selected' : ''
 
   return L.divIcon({
     className: 'trip-pin-icon',
@@ -123,82 +226,7 @@ function createPinIcon(stop: Stop, isSelected: boolean): L.DivIcon {
   })
 }
 
-function createPopupContent(stop: Stop): string {
-  const url = getPhotoUrl(stop.coverPhoto.filename, 400)
-  const label = stop.locationLabel || `${stop.photos.length} Foto${stop.photos.length > 1 ? 's' : ''}`
-  const dateStr = new Date(stop.coverPhoto.taken_at || stop.coverPhoto.created_at)
-    .toLocaleDateString('de-DE', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-
-  return `
-    <div class="trip-popup">
-      <img src="${url}" alt="" class="trip-popup-img" />
-      <div class="trip-popup-info">
-        <div class="trip-popup-label">${label}</div>
-        <div class="trip-popup-date">${dateStr}</div>
-        ${stop.photos.length > 1 ? `<div class="trip-popup-count">${stop.photos.length} Fotos an diesem Stopp</div>` : ''}
-      </div>
-    </div>
-  `
-}
-
-function updateMarkerIcons() {
-  for (let i = 0; i < stops.value.length; i++) {
-    const stop = stops.value[i]!
-    const marker = markers[i]
-    if (marker) {
-      marker.setIcon(createPinIcon(stop, stop.id === selectedStopId.value))
-    }
-  }
-}
-
-// silent=true suppresses the 'stop-selected' emit; used for programmatic
-// pre-selections (initial navigation, fullscreen close) where the parent
-// already knows which photo to show and we must not override its index.
-function selectStop(stopId: number, panMap = true, silent = false) {
-  selectedStopId.value = stopId
-  updateMarkerIcons()
-
-  const stop = stops.value.find(s => s.id === stopId)
-  if (!stop) return
-
-  if (!silent) emit('stop-selected', stop.coverPhoto.id)
-
-  // Auto-expand the day of the selected stop if it's not the cover/first stop.
-  // This is a reactive state change and must happen regardless of whether the
-  // Leaflet map is already initialised (it may not be when selectStopByPhotoId
-  // is called by the parent right after this component mounts).
-  const dayStops = stopsByDay.value.get(stop.day) ?? []
-  if (dayStops.length > 1 && dayStops[0]!.id !== stopId) {
-    expandDayExclusive(stop.day)
-  }
-
-  // Map pan and timeline scroll require an initialised Leaflet instance.
-  // If called before initMap() has run, onMounted will complete these once ready.
-  if (!map) return
-
-  if (panMap) {
-    map.flyTo([stop.lat, stop.lng], 15, { duration: 0.5 })
-  }
-
-  // Scroll timeline to selected stop (wait for DOM to update if day just expanded)
-  nextTick(() => scrollTimelineToStop(stopId))
-}
-
-function scrollTimelineToStop(stopId: number) {
-  const container = timelineContainer.value
-  if (!container) return
-  let el = container.querySelector(`[data-stop-id="${stopId}"]`) as HTMLElement | null
-  // If the stop isn't directly rendered (collapsed day), scroll to the day group
-  if (!el) {
-    const stop = stops.value.find(s => s.id === stopId)
-    if (stop) el = container.querySelector(`[data-day="${stop.day}"]`) as HTMLElement | null
-  }
-  if (!el) return
-  const containerRect = container.getBoundingClientRect()
-  const elRect = el.getBoundingClientRect()
-  const scrollLeft = el.offsetLeft - containerRect.width / 2 + elRect.width / 2
-  container.scrollTo({ left: scrollLeft, behavior: 'smooth' })
-}
+// ── Map ──────────────────────────────────────────────────────────────────────
 
 function initMap() {
   if (!mapContainer.value || map) return
@@ -214,12 +242,13 @@ function initMap() {
   }).addTo(map)
 
   renderContent()
+  fitMapToSelection()
 }
 
 function clearContent() {
-  markers.forEach((m) => m.remove())
+  for (const m of markers) m.remove()
   markers.length = 0
-  polylines.forEach((p) => p.remove())
+  for (const p of polylines) p.remove()
   polylines.length = 0
 }
 
@@ -227,105 +256,67 @@ function renderContent() {
   if (!map) return
   clearContent()
 
-  // Draw day paths
-  for (const path of dayPaths.value) {
-    if (path.coordinates.length < 2) continue
-    const line = L.polyline(path.coordinates, {
-      color: path.color,
-      weight: 3,
-      opacity: 0.7,
-    }).addTo(map)
-    polylines.push(line)
+  if (selectedDay.value === OVERVIEW) {
+    // Inter-day jumps that survived the distance threshold.
+    for (const transition of dayTransitions.value) {
+      const line = L.polyline(transition.coordinates, {
+        color: transition.color,
+        weight: 2,
+        opacity: 0.5,
+        dashArray: '8, 8',
+      }).addTo(map)
+      polylines.push(line)
+    }
+  } else {
+    // Only the selected day's within-day path.
+    const path = dayPaths.value.find(p => p.day === selectedDay.value)
+    if (path && path.coordinates.length >= 2) {
+      const line = L.polyline(path.coordinates, {
+        color: path.color,
+        weight: 3,
+        opacity: 0.8,
+      }).addTo(map)
+      polylines.push(line)
+    }
   }
 
-  // Draw day transitions (dashed)
-  for (const transition of dayTransitions.value) {
-    const line = L.polyline(transition.coordinates, {
-      color: transition.color,
-      weight: 2,
-      opacity: 0.5,
-      dashArray: '8, 8',
-    }).addTo(map)
-    polylines.push(line)
-  }
-
-  // Draw stop markers
-  for (const stop of stops.value) {
-    const marker = L.marker([stop.lat, stop.lng], {
-      icon: createPinIcon(stop, stop.id === selectedStopId.value),
-    }).addTo(map)
-
-    marker.bindPopup(createPopupContent(stop), {
-      maxWidth: 280,
-      className: 'trip-popup-wrapper',
-    })
-
-    marker.on('click', () => {
-      selectStop(stop.id, false)
-      emit('open-fullscreen', stop.photos, 0)
-    })
-
+  for (const pin of visiblePins.value) {
+    const marker = L.marker([pin.lat, pin.lng], { icon: createPinIcon(pin) }).addTo(map)
+    marker.on('click', pin.onClick)
     markers.push(marker)
   }
-
-  // Fit bounds
-  if (bounds.value) {
-    map.fitBounds(bounds.value)
-  } else {
-    map.setView([51.1657, 10.4515], 5) // Default: Germany center
-  }
 }
 
-// ── Timeline helpers ────────────────────────────────────────────────────────
+// ── Keyboard navigation between stops ────────────────────────────────────────
 
-function getStopLabel(stop: Stop): string {
-  if (stop.locationLabel) return stop.locationLabel
-  return `Stopp ${stop.id + 1}`
-}
-
-function formatStopDate(stop: Stop): string {
-  const date = new Date(stop.coverPhoto.taken_at || stop.coverPhoto.created_at)
-  return date.toLocaleDateString('de-DE', { day: '2-digit', month: 'short' })
-}
-
-
-// ── Keyboard navigation between stops ───────────────────────────────────────
-
-function navigateToPrevStop() {
-  if (selectedStopId.value == null || stops.value.length === 0) return
-  const visible = visibleStopIds.value
-  const idx = visible.indexOf(selectedStopId.value)
-  if (idx > 0) selectStop(visible[idx - 1]!)
-}
-
-function navigateToNextStop() {
-  if (selectedStopId.value == null || stops.value.length === 0) return
-  const curr = stops.value.find(s => s.id === selectedStopId.value)
-  if (!curr) return
-
-  const dayStops = stopsByDay.value.get(curr.day) ?? []
-  const isCollapsed = !expandedDays.value.has(curr.day)
-  const isFirstOfDay = dayStops[0]?.id === curr.id
-
-  // If on a collapsed multi-stop day, expand it and advance to the next
-  // sibling within the day (as per issue #71: "expands automatically when
-  // on the day and going right").
-  if (isCollapsed && isFirstOfDay && dayStops.length > 1) {
-    expandDayExclusive(curr.day)
-    nextTick(() => selectStop(dayStops[1]!.id))
+function navigateToPrev() {
+  if (selectedDay.value === OVERVIEW) return
+  const dayStops = stopsByDay.value.get(selectedDay.value) ?? []
+  if (dayStops.length === 0) return
+  if (selectedStopId.value == null) {
+    selectStopWithinDay(dayStops[0]!)
     return
   }
+  const idx = dayStops.findIndex(s => s.id === selectedStopId.value)
+  if (idx > 0) selectStopWithinDay(dayStops[idx - 1]!)
+}
 
-  // Otherwise: move forward through the currently visible items
-  const visible = visibleStopIds.value
-  const idx = visible.indexOf(curr.id)
-  if (idx >= 0 && idx < visible.length - 1) selectStop(visible[idx + 1]!)
+function navigateToNext() {
+  if (selectedDay.value === OVERVIEW) return
+  const dayStops = stopsByDay.value.get(selectedDay.value) ?? []
+  if (dayStops.length === 0) return
+  if (selectedStopId.value == null) {
+    selectStopWithinDay(dayStops[0]!)
+    return
+  }
+  const idx = dayStops.findIndex(s => s.id === selectedStopId.value)
+  if (idx >= 0 && idx < dayStops.length - 1) selectStopWithinDay(dayStops[idx + 1]!)
 }
 
 function handleKeydown(e: KeyboardEvent) {
-  if (selectedStopId.value == null) return
-  if (e.key === 'ArrowLeft') { e.preventDefault(); navigateToPrevStop() }
-  else if (e.key === 'ArrowRight') { e.preventDefault(); navigateToNextStop() }
+  if (selectedDay.value === OVERVIEW) return
+  if (e.key === 'ArrowLeft') { e.preventDefault(); navigateToPrev() }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); navigateToNext() }
 }
 
 // ── Lifecycle ────────────────────────────────────────────────────────────────
@@ -333,16 +324,8 @@ function handleKeydown(e: KeyboardEvent) {
 onMounted(async () => {
   await nextTick()
   initMap()
-  // If a stop was pre-selected via selectStopByPhotoId before Leaflet finished
-  // initialising, complete the map pan and timeline scroll now.
-  if (selectedStopId.value !== null && map) {
-    const preSelected = stops.value.find(s => s.id === selectedStopId.value)
-    if (preSelected) {
-      map.flyTo([preSelected.lat, preSelected.lng], 15, { duration: 0.5 })
-      nextTick(() => scrollTimelineToStop(selectedStopId.value!))
-    }
-  }
   window.addEventListener('keydown', handleKeydown)
+  nextTick(() => scrollTimelineToSelection())
 })
 
 onUnmounted(() => {
@@ -350,23 +333,30 @@ onUnmounted(() => {
 })
 
 watch(() => props.photos, () => {
-  // Reset collapse state when the underlying photo set changes
-  expandedDays.value = new Set()
+  selectedDay.value = OVERVIEW
   selectedStopId.value = null
   renderContent()
+  fitMapToSelection()
+  nextTick(() => scrollTimelineToSelection())
 }, { deep: true })
+
+// Re-render when selection or the underlying clustering changes.
+watch(visiblePins, () => {
+  renderContent()
+})
 
 // ── External API ─────────────────────────────────────────────────────────────
 
-/** Select the stop that contains the given photo, if any. Used by the parent
- *  view to sync the map selection with the photo the user ended on in the
- *  fullscreen overlay (issue: "Wenn man in der Vollbildansicht über den Stop
- *  hinaus navigiert, sollte sich das in der Kartenansicht wiederspiegeln,
- *  sobald man die Vollbildansicht verläßt"). */
+/**
+ * Select the stop that contains the given photo, if any. Used by the
+ * parent view to sync the map selection with the photo the user ended on
+ * in the fullscreen overlay. Switches to the matching day and centres
+ * the timeline on the stop.
+ */
 function selectStopByPhotoId(photoId: number): boolean {
   const stop = stops.value.find((s) => s.photos.some((p) => p.id === photoId))
   if (!stop) return false
-  if (stop.id !== selectedStopId.value) selectStop(stop.id, true, true)
+  selectStopWithinDay(stop, { silent: true })
   return true
 }
 
@@ -396,46 +386,62 @@ defineExpose({ selectStopByPhotoId })
         <span v-if="albumDescription" class="trip-timeline-album-desc">— {{ albumDescription }}</span>
       </div>
       <div ref="timelineContainer" class="trip-timeline">
+        <!-- Overview / whole-trip card -->
+        <div
+          data-overview
+          :class="[
+            'trip-timeline-item',
+            'trip-timeline-item--overview',
+            { 'trip-timeline-item--selected': selectedDay === '__overview__' },
+          ]"
+          :title="'Ganze Reise auf der Karte'"
+          @click="selectOverview"
+        >
+          <div class="trip-timeline-overview-icon">
+            <i class="pi pi-globe" aria-hidden="true" />
+          </div>
+          <div class="trip-timeline-info">
+            <span class="trip-timeline-label">Übersicht</span>
+            <span class="trip-timeline-date">
+              {{ uniqueDays.length }} {{ uniqueDays.length === 1 ? 'Tag' : 'Tage' }}
+            </span>
+          </div>
+        </div>
+
         <template v-for="day in uniqueDays" :key="day">
           <div
             class="trip-timeline-day-group"
-            :class="{ 'trip-timeline-day-group--expanded': expandedDays.has(day) }"
+            :class="{ 'trip-timeline-day-group--expanded': selectedDay === day }"
             :data-day="day"
           >
-            <!-- Day "cover" card (representative of the whole day). In
-                 collapsed mode this is the only visible item for the day;
-                 clicking it toggles expansion when the day has >1 stop. -->
+            <!-- Day cover card -->
             <div
               v-if="stopsByDay.get(day) && stopsByDay.get(day)!.length > 0"
-              :data-stop-id="stopsByDay.get(day)![0]!.id"
               :class="[
                 'trip-timeline-item',
                 'trip-timeline-item--day',
                 {
-                  'trip-timeline-item--selected': stopsByDay.get(day)![0]!.id === selectedStopId,
+                  'trip-timeline-item--selected':
+                    selectedDay === day && stopsByDay.get(day)![0]!.id === selectedStopId,
+                  'trip-timeline-item--day-active': selectedDay === day,
                   'trip-timeline-item--expandable': stopsByDay.get(day)!.length > 1,
-                  'trip-timeline-item--expanded': expandedDays.has(day) && stopsByDay.get(day)!.length > 1,
                 },
               ]"
-              :title="stopsByDay.get(day)!.length > 1
-                ? (expandedDays.has(day) ? 'Tag einklappen' : 'Tag ausklappen')
-                : getStopLabel(stopsByDay.get(day)![0]!)"
-              @click="handleDayCardClick(day)"
+              :title="formatDayLabel(day)"
+              @click="selectDay(day)"
             >
               <div class="trip-timeline-thumb-wrap">
-                <!-- Stacked effect hint that the day holds multiple stops -->
                 <div
-                  v-if="stopsByDay.get(day)!.length > 1 && !expandedDays.has(day)"
+                  v-if="stopsByDay.get(day)!.length > 1 && selectedDay !== day"
                   class="trip-timeline-stack-hint"
                   :style="{ borderColor: dayColorMap.get(day) }"
                 />
                 <div class="trip-timeline-thumb">
                   <img
                     :src="getPhotoUrl(stopsByDay.get(day)![0]!.coverPhoto.filename, 96)"
-                    :alt="getStopLabel(stopsByDay.get(day)![0]!)"
+                    :alt="formatDayLabel(day)"
                   />
                 </div>
-                <!-- Count badge showing number of stops for the day -->
                 <span
                   v-if="stopsByDay.get(day)!.length > 1"
                   class="trip-timeline-day-badge"
@@ -445,7 +451,7 @@ defineExpose({ selectStopByPhotoId })
               <div class="trip-timeline-info">
                 <span class="trip-timeline-label">{{ formatDayLabel(day) }}</span>
                 <span class="trip-timeline-date">
-                  <template v-if="expandedDays.has(day) && stopsByDay.get(day)!.length > 1">
+                  <template v-if="selectedDay === day && stopsByDay.get(day)!.length > 1">
                     {{ dayPhotoCount(day) }}
                     {{ dayPhotoCount(day) === 1 ? 'Foto' : 'Fotos' }}
                   </template>
@@ -454,17 +460,11 @@ defineExpose({ selectStopByPhotoId })
                     {{ stopsByDay.get(day)!.length === 1 ? 'Stopp' : 'Stopps' }}
                   </template>
                 </span>
-                <span
-                  v-if="stopsByDay.get(day)!.length > 1"
-                  class="trip-timeline-chevron"
-                  :class="{ 'trip-timeline-chevron--open': expandedDays.has(day) }"
-                  aria-hidden="true"
-                >›</span>
               </div>
             </div>
 
-            <!-- Expanded siblings of the day (stops 2..N) -->
-            <template v-if="expandedDays.has(day) && (stopsByDay.get(day)?.length ?? 0) > 1">
+            <!-- Sibling stops of the active day -->
+            <template v-if="selectedDay === day && (stopsByDay.get(day)?.length ?? 0) > 1">
               <div
                 v-for="(stop, sIdx) in stopsByDay.get(day)!.slice(1)"
                 :key="stop.id"
@@ -474,9 +474,8 @@ defineExpose({ selectStopByPhotoId })
                   'trip-timeline-item--sibling',
                   { 'trip-timeline-item--selected': stop.id === selectedStopId },
                 ]"
-                @click="selectStop(stop.id)"
+                @click="selectStopWithinDay(stop)"
               >
-                <!-- Connector back to the previous stop of the same day -->
                 <div
                   class="trip-timeline-connector trip-timeline-connector--sibling"
                   :style="{ background: dayColorMap.get(day) }"
@@ -526,9 +525,6 @@ defineExpose({ selectStopByPhotoId })
   top: 12px;
   right: 12px;
   z-index: 1000;
-  /* Two-line layout: first row holds the counts, second row holds
-     whatever a parent passes via the `stats-addon` slot (usually
-     action buttons). Right-aligned so separator bullets line up. */
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -573,18 +569,11 @@ defineExpose({ selectStopByPhotoId })
   font-size: 0.85rem;
   font-weight: 600;
   flex-shrink: 0;
-  /* Inheriting would fall through to a muted colour on some
-     surrounding containers; pin it so the name stays legible in
-     both light and dark modes. */
   color: var(--p-text-color);
 }
 
 .trip-timeline-album-desc {
   font-size: 0.8rem;
-  /* Mode-adaptive muted: blending the current text colour with the
-     surface gives a 70%-contrast shade that reads in both modes —
-     unlike --p-text-muted-color which resolves too faintly in dark
-     mode. */
   color: color-mix(in srgb, var(--p-text-color) 70%, transparent);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -644,6 +633,10 @@ defineExpose({ selectStopByPhotoId })
   background: var(--p-primary-50, rgba(66,133,244,0.1));
   outline: 2px solid var(--p-primary-color, #4285F4);
   outline-offset: -2px;
+}
+
+.trip-timeline-item--day-active:not(.trip-timeline-item--selected) {
+  background: var(--p-content-hover-background, rgba(0,0,0,0.03));
 }
 
 .trip-timeline-thumb {
@@ -716,7 +709,6 @@ defineExpose({ selectStopByPhotoId })
   opacity: 0.7;
 }
 
-/* Expandable day card marker */
 .trip-timeline-item--expandable {
   cursor: pointer;
 }
@@ -725,12 +717,6 @@ defineExpose({ selectStopByPhotoId })
   border-color: var(--p-primary-color, #4285F4);
 }
 
-.trip-timeline-item--expanded .trip-timeline-thumb {
-  border-style: solid;
-}
-
-/* Wrapper around the thumb so that the stack-hint and day-badge can
-   escape the overflow:hidden of the round thumb. */
 .trip-timeline-thumb-wrap {
   position: relative;
   width: 56px;
@@ -745,7 +731,6 @@ defineExpose({ selectStopByPhotoId })
   z-index: 1;
 }
 
-/* Stacked-cards hint behind the thumb when collapsed */
 .trip-timeline-stack-hint {
   position: absolute;
   top: 3px;
@@ -759,7 +744,6 @@ defineExpose({ selectStopByPhotoId })
   pointer-events: none;
 }
 
-/* Badge showing number of stops per day on the day-cover thumb */
 .trip-timeline-day-badge {
   position: absolute;
   top: -3px;
@@ -778,17 +762,24 @@ defineExpose({ selectStopByPhotoId })
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
 }
 
-.trip-timeline-chevron {
-  font-size: 0.85rem;
-  line-height: 0.85rem;
+/* ── Overview card ──────────────────────────────────────────────────────── */
+.trip-timeline-item--overview .trip-timeline-overview-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--p-primary-color) 10%, transparent);
   color: var(--p-primary-color, #4285F4);
-  font-weight: 700;
-  transition: transform 0.15s ease;
-  margin-top: 1px;
+  border: 2px solid var(--p-primary-color, #4285F4);
+  font-size: 1.5rem;
+  margin-bottom: 0.3rem;
 }
 
-.trip-timeline-chevron--open {
-  transform: rotate(90deg);
+.trip-timeline-item--overview.trip-timeline-item--selected .trip-timeline-overview-icon {
+  background: var(--p-primary-color, #4285F4);
+  color: #fff;
 }
 
 .sr-only {
@@ -826,6 +817,12 @@ defineExpose({ selectStopByPhotoId })
   .trip-timeline-stack-hint {
     width: 44px;
     height: 44px;
+  }
+
+  .trip-timeline-item--overview .trip-timeline-overview-icon {
+    width: 44px;
+    height: 44px;
+    font-size: 1.15rem;
   }
 
   .trip-timeline-connector {
@@ -909,52 +906,5 @@ defineExpose({ selectStopByPhotoId })
   border-radius: 9px;
   padding: 0 4px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-}
-
-/* Popup styles */
-.trip-popup-wrapper .leaflet-popup-content-wrapper {
-  border-radius: 10px;
-  overflow: hidden;
-  padding: 0;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-}
-
-.trip-popup-wrapper .leaflet-popup-content {
-  margin: 0;
-  min-width: 200px;
-}
-
-.trip-popup {
-  display: flex;
-  flex-direction: column;
-}
-
-.trip-popup-img {
-  width: 100%;
-  max-height: 180px;
-  object-fit: cover;
-  display: block;
-}
-
-.trip-popup-info {
-  padding: 10px 12px;
-}
-
-.trip-popup-label {
-  font-weight: 600;
-  font-size: 0.9rem;
-  color: #333;
-}
-
-.trip-popup-date {
-  font-size: 0.8rem;
-  color: #666;
-  margin-top: 2px;
-}
-
-.trip-popup-count {
-  font-size: 0.75rem;
-  color: #999;
-  margin-top: 4px;
 }
 </style>

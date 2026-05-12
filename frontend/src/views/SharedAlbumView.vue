@@ -130,19 +130,70 @@ function asPhotos(photos: PublicAlbumPhoto[]): Photo[] {
 const albumPhotosAsPhoto = computed<Photo[]>(() => album.value ? asPhotos(album.value.photos) : [])
 
 // ── Filter (map view only) ──────────────────────────────────────────────────
-// Public / shared album opens with Highlights on and hidden photos excluded.
-// We keep this state local — no URL sync, no query params — because the
-// filter UX only makes sense while the viewer is on this page.
-const DEFAULT_FILTER: PhotoFilter = { groupHighlight: true }
-const FILTER_AVAILABLE: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'> = [
-  'hiddenMode', 'groupHighlight',
-]
-const filter = ref<PhotoFilter>({ ...DEFAULT_FILTER })
-const filterDraft = ref<PhotoFilter>({ ...DEFAULT_FILTER })
+// Public / shared album opens with Group Highlights on (when the album
+// actually contains enough of them) and hidden photos excluded.
+// The filter state is persisted locally per share token so the viewer's
+// choice survives page reloads.
+const FILTER_STORAGE_KEY = computed(() => `sharedAlbumFilter:${shareToken.value}`)
+
+function loadPersistedFilter(): PhotoFilter | null {
+  if (!shareToken.value) return null
+  try {
+    const raw = localStorage.getItem(FILTER_STORAGE_KEY.value)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? (parsed as PhotoFilter) : null
+  } catch {
+    return null
+  }
+}
+
+function persistFilter(f: PhotoFilter) {
+  if (!shareToken.value) return
+  try {
+    localStorage.setItem(FILTER_STORAGE_KEY.value, JSON.stringify(f))
+  } catch {
+    /* quota / private-mode — ignore */
+  }
+}
+
+const filter = ref<PhotoFilter>({})
+const filterDraft = ref<PhotoFilter>({})
 const filterMenuOpen = ref(false)
 // Lazy-Mount: siehe GalleryView.
 const filterMenuMounted = ref(false)
 const activeCount = computed(() => countActiveFilters(filter.value))
+
+const groupCoverIds = computed<Set<number>>(() =>
+  new Set((album.value?.photos ?? []).filter(p => p.is_highlight).map(p => p.id))
+)
+
+/**
+ * Group-Highlight filter is only offered when the album actually has
+ * enough highlight photos for the toggle to be meaningful — anything
+ * below 10% of the album would either show almost nothing or the user
+ * wouldn't notice a difference.
+ */
+const groupHighlightAvailable = computed<boolean>(() => {
+  const total = albumPhotosAsPhoto.value.length
+  if (total === 0) return false
+  return groupCoverIds.value.size / total >= 0.1
+})
+
+/** Anonymous viewers (not signed-in guests) don't get the "Ausgeblendet"
+ *  filter — they can't have hidden anything in the first place. */
+const isAnonymousViewer = computed(() => guestSession.guest.value === null)
+
+const FILTER_AVAILABLE = computed<Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'>>(() => {
+  const arr: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'> = []
+  if (!isAnonymousViewer.value) arr.push('hiddenMode')
+  if (groupHighlightAvailable.value) arr.push('groupHighlight')
+  return arr
+})
+
+/** When no filter criterion is available at all, hide the filter button
+ *  entirely — there's literally nothing to toggle. */
+const filterButtonVisible = computed(() => FILTER_AVAILABLE.value.length > 0)
 
 function openFilterMenu() {
   filterDraft.value = { ...filter.value }
@@ -151,15 +202,14 @@ function openFilterMenu() {
 }
 function onApplyFilter() {
   filter.value = { ...filterDraft.value }
+  persistFilter(filter.value)
 }
 function onResetFilter() {
-  filter.value = { ...DEFAULT_FILTER }
-  filterDraft.value = { ...DEFAULT_FILTER }
+  const reset: PhotoFilter = groupHighlightAvailable.value ? { groupHighlight: true } : {}
+  filter.value = { ...reset }
+  filterDraft.value = { ...reset }
+  persistFilter(filter.value)
 }
-
-const groupCoverIds = computed<Set<number>>(() =>
-  new Set((album.value?.photos ?? []).filter(p => p.is_highlight).map(p => p.id))
-)
 
 const filteredMapPhotos = computed<Photo[]>(() => {
   const ctx = { groupCoverIds: groupCoverIds.value }
@@ -197,13 +247,12 @@ function openFullscreen(photo: Photo) {
   isFullscreen.value = true
 }
 
-function handleMapFullscreen(stopPhotos: Photo[], startIndex: number) {
-  // Use all album photos so left/right navigation works across stops
-  const allPhotos = albumPhotosAsPhoto.value
-  const targetPhoto = stopPhotos[startIndex]
-  const globalIndex = targetPhoto ? allPhotos.findIndex(p => p.id === targetPhoto.id) : -1
-  fullscreenPhotos.value = allPhotos
-  fullscreenIndex.value = globalIndex >= 0 ? globalIndex : 0
+function handleMapFullscreen(dayPhotos: Photo[], startIndex: number, _day: string) {
+  // Scope navigation to the photos of the day TripMap currently has
+  // selected. The user can only step through the day's photos in
+  // fullscreen — other days are reached via the timeline.
+  fullscreenPhotos.value = dayPhotos
+  fullscreenIndex.value = Math.max(0, Math.min(startIndex, dayPhotos.length - 1))
   fullscreenFromMap.value = true
   isFullscreen.value = true
 }
@@ -316,20 +365,28 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
-  // The default filter limits the view to "Highlights only". Albums
-  // that carry no group-highlight photos would open with an empty
-  // map / grid and leave the visitor staring at a blank canvas with
-  // no obvious recovery. Relax the filter automatically in that
-  // case so the visitor sees the real album content.
-  if (album.value && filter.value.groupHighlight) {
-    const ctx = { groupCoverIds: groupCoverIds.value }
-    const matches = albumPhotosAsPhoto.value.filter((p) =>
-      matchesPhotoFilter(p, filter.value, ctx),
-    )
-    if (matches.length === 0 && albumPhotosAsPhoto.value.length > 0) {
-      filter.value = {}
-      filterDraft.value = {}
+  // Initialise the filter once the album content is known. Persisted
+  // viewer choice wins, but criteria that are no longer offered get
+  // dropped. When nothing is persisted we turn Group-Highlights on by
+  // default if the album has enough of them — otherwise we start with
+  // an empty filter.
+  if (album.value) {
+    const persisted = loadPersistedFilter()
+    let initial: PhotoFilter
+    if (persisted) {
+      initial = {}
+      if (persisted.hiddenMode && !isAnonymousViewer.value) {
+        initial.hiddenMode = persisted.hiddenMode
+      }
+      if (persisted.groupHighlight && groupHighlightAvailable.value) {
+        initial.groupHighlight = true
+      }
+    } else {
+      initial = groupHighlightAvailable.value ? { groupHighlight: true } : {}
     }
+    filter.value = { ...initial }
+    filterDraft.value = { ...initial }
+    persistFilter(filter.value)
   }
   // Guest state loads in parallel — failures don't block the album
   // view; the banner just shows the anonymous CTA.
@@ -424,6 +481,7 @@ onUnmounted(() => {
             <span>Raster</span>
           </button>
           <button
+            v-if="filterButtonVisible"
             type="button"
             class="map-filter-button"
             :class="{ 'is-active': activeCount > 0 }"
@@ -484,6 +542,13 @@ onUnmounted(() => {
       @reset="onResetFilter"
     />
 
+    <!--
+      Fullscreen overlay (map mode).
+      Scoped to the selected day's photos. Auto-advances every 10 s when
+      the viewer is idle so the photo collection becomes a hands-off
+      slideshow.
+    -->
+
     <!-- Fullscreen overlay (reuses shared FullscreenOverlay component) -->
     <FullscreenOverlay
       v-if="isFullscreen && currentPhoto"
@@ -493,6 +558,7 @@ onUnmounted(() => {
       :canDelete="false"
       :showDetailsButton="showInfoButton"
       :detailsActive="showInfo"
+      :autoAdvanceMs="10000"
       @close="closeFullscreen"
       @prev="goPrev"
       @next="goNext"
