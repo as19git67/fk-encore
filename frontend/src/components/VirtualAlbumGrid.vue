@@ -208,7 +208,7 @@ watch(
         class="vag__row"
         :style="{
           transform: `translateY(${row.start}px)`,
-          height: `${cellSize}px`,
+          height: `${rowHeight}px`,
           gridTemplateColumns: `repeat(${cols}, 1fr)`,
         }"
       >
@@ -275,7 +275,9 @@ watch(
   left: 0;
   right: 0;
   display: grid;
-  gap: 4px;
+  column-gap: 4px;
+  padding-bottom: 4px;
+  box-sizing: border-box;
 }
 
 .album-card {

@@ -542,8 +542,9 @@ defineExpose({
   left: 0;
   right: 0;
   display: grid;
-  gap: 4px;
-  padding: 0;
+  column-gap: 4px;
+  padding-bottom: 4px;
+  box-sizing: border-box;
 }
 
 .vg-cell {
