@@ -61,7 +61,9 @@ function recalcLayout(width: number) {
 
 onMounted(() => {
   if (scrollRef.value) {
-    recalcLayout(scrollRef.value.clientWidth)
+    const style = getComputedStyle(scrollRef.value)
+    const hPad = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
+    recalcLayout(scrollRef.value.clientWidth - hPad)
     resizeObs = new ResizeObserver((entries) => {
       const entry = entries[0]
       if (entry) recalcLayout(entry.contentRect.width)
@@ -257,7 +259,9 @@ watch(
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  contain: strict;
+  contain: layout size style;
+  padding: 6px;
+  box-sizing: border-box;
 }
 
 .vag__inner {
@@ -280,7 +284,7 @@ watch(
   /* No border — outline handles focus/restored-focus and we need the full
      cell width for a 140-px-wide tile that mirrors the gallery thumb. */
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: 4px;
   padding: 0;
   cursor: pointer;
   transition: transform 0.2s;

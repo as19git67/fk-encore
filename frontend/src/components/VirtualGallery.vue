@@ -168,7 +168,9 @@ function updateScrollEnds() {
 
 onMounted(() => {
   if (scrollRef.value) {
-    recalcLayout(scrollRef.value.clientWidth)
+    const style = getComputedStyle(scrollRef.value)
+    const hPad = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
+    recalcLayout(scrollRef.value.clientWidth - hPad)
     resizeObs = new ResizeObserver((entries) => {
       const entry = entries[0]
       if (entry) recalcLayout(entry.contentRect.width)
@@ -514,6 +516,8 @@ defineExpose({
   overflow-x: hidden;
   background: var(--p-content-background, #fff);
   -webkit-overflow-scrolling: touch;
+  padding: 6px;
+  box-sizing: border-box;
 }
 
 .vg-state {

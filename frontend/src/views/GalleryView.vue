@@ -1526,7 +1526,7 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
 /* Desktop detail panel — fixed width, scrolls independently of the grid.
    Hidden on mobile where the fullscreen flyout takes over. */
 .desktop-sidebar {
-  width: 380px;
+  width: 280px;
   flex-shrink: 0;
   border-left: 1px solid var(--p-content-border-color, rgba(0, 0, 0, 0.08));
   background: var(--p-content-background, #fff);
