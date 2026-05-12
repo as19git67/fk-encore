@@ -35,10 +35,16 @@ import {
   LlmServiceUnavailableError,
   isLlmServiceHealthy,
 } from "./llm-client";
+import { withAiSlot, AiSlotTimeoutError, type AiModel } from "../ai-queue/slot-helper";
 
 console.log("[boot] documents/scan-worker.ts: all imports resolved");
 
 const POLL_INTERVAL_MS = parseInt(process.env.DOC_SCAN_POLL_INTERVAL_MS ?? "30000", 10);
+
+const AI_MODEL_MAP: Partial<Record<DocumentScanService, AiModel>> = {
+  classify: "llm",
+  embed: "llm",
+};
 
 class DocumentScanWorker {
   private running = 0;
@@ -78,13 +84,18 @@ class DocumentScanWorker {
     if (!job) return false;
 
     try {
-      await this.runJob(job);
+      const aiModel = AI_MODEL_MAP[this.service];
+      if (aiModel) {
+        await withAiSlot(aiModel, 2, `documents:${this.service}`, () => this.runJob(job));
+      } else {
+        await this.runJob(job);
+      }
       await markJobDone(job.id);
       // Wake sibling workers so the pipeline advances without waiting
       // on the poll timer (text_extract → classify → embed).
       triggerWorkers();
     } catch (err: any) {
-      if (err instanceof DeferJobError || err instanceof LlmServiceUnavailableError) {
+      if (err instanceof DeferJobError || err instanceof LlmServiceUnavailableError || err instanceof AiSlotTimeoutError) {
         console.log(`[documents.scan-worker] deferring ${this.service} job ${job.id}: ${err.message}`);
         await deferJob(job.id).catch(() => {});
         return false;

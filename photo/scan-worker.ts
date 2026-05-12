@@ -73,6 +73,7 @@ import {
 } from "./event-loop-pressure";
 import { acquireDbSlot, releaseDbSlot } from "./worker-db-slots";
 import { MlRpcTimeoutError } from "./rpc-timeout";
+import { withAiSlot, AiSlotTimeoutError, type AiModel } from "../ai-queue/slot-helper";
 
 console.log("[boot] photo/scan-worker.ts: all imports resolved");
 
@@ -83,6 +84,14 @@ const SERVICE_DEPENDENCY: Partial<Record<ScanService, ExternalServiceName>> = {
   embedding: "embedding",
   face_detection: "insightface",
   // face_assignment has no external dependency — it only reads from the local DB
+  landmark: "landmark",
+  quality: "embedding",
+};
+
+/** Maps scan-services to the AI model queue they require. */
+const AI_MODEL_MAP: Partial<Record<ScanService, AiModel>> = {
+  embedding: "embedding",
+  face_detection: "insightface",
   landmark: "landmark",
   quality: "embedding",
 };
@@ -206,7 +215,12 @@ class ScanWorker {
     // Released in finally below regardless of outcome.
     await acquireDbSlot();
     try {
-      await this.runJob(job);
+      const aiModel = AI_MODEL_MAP[this.service];
+      if (aiModel) {
+        await withAiSlot(aiModel, 2, `photo:${this.service}`, () => this.runJob(job));
+      } else {
+        await this.runJob(job);
+      }
       await markJobDone(job.id);
 
       // After face_detection completes, enqueue face_assignment for ALL users
@@ -284,7 +298,8 @@ class ScanWorker {
       if (
         err instanceof DeferJobError ||
         err instanceof ServiceUnavailableError ||
-        err instanceof MlRpcTimeoutError
+        err instanceof MlRpcTimeoutError ||
+        err instanceof AiSlotTimeoutError
       ) {
         console.log(`[scan-worker] deferring ${this.service} job ${job.id}: ${err.message}`);
         await deferJob(job.id).catch(() => {});

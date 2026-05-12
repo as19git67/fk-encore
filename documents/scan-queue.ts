@@ -59,13 +59,14 @@ export interface QueueStatus {
 export async function enqueueDocumentScan(
   documentId: number,
   services: readonly DocumentScanService[] = DOCUMENT_SERVICES,
+  priority = 2,
 ): Promise<void> {
   if (services.length === 0) return;
 
   for (const service of services) {
     await db
       .insert(documentScanQueue)
-      .values({ document_id: documentId, service })
+      .values({ document_id: documentId, service, priority })
       .onConflictDoNothing();
   }
 }
@@ -87,7 +88,7 @@ export async function dequeueNextJob(
       SELECT id FROM document_scan_queue
       WHERE service = ${service}
         AND status = 'pending'
-      ORDER BY enqueued_at ASC
+      ORDER BY priority ASC, enqueued_at ASC
       LIMIT 1
       FOR UPDATE SKIP LOCKED
     )
@@ -138,6 +139,7 @@ export async function deleteJobsForDocument(documentId: number): Promise<void> {
 export async function requeueDocument(
   documentId: number,
   services: readonly DocumentScanService[] = DOCUMENT_SERVICES,
+  priority = 2,
 ): Promise<void> {
   // Drop any previously-failed or done rows so the partial unique index
   // does not prevent the new insert. Active (pending/processing) rows
@@ -155,7 +157,7 @@ export async function requeueDocument(
   for (const service of services) {
     await db
       .insert(documentScanQueue)
-      .values({ document_id: documentId, service })
+      .values({ document_id: documentId, service, priority })
       .onConflictDoNothing();
   }
 }

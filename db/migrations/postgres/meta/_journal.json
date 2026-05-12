@@ -561,6 +561,20 @@
       "when": 1779001418000,
       "tag": "0079_ai_pick_user_weights",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1779001419000,
+      "tag": "0080_ai_model_slot",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1779001420000,
+      "tag": "0081_queue_priority",
+      "breakpoints": true
     }
   ]
 }

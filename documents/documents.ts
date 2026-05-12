@@ -1115,7 +1115,7 @@ export const backfillDocumentTax = api(
         ),
     );
     for (const r of rows) {
-      await requeueDocument(r.id, ["classify"]);
+      await requeueDocument(r.id, ["classify"], 3);
     }
     if (rows.length > 0) triggerWorkers();
     return { queued: rows.length };
@@ -1171,7 +1171,7 @@ export const backfillDocumentEmbeddings = api(
     }
 
     for (const r of rows) {
-      await requeueDocument(r.id, ["embed"]);
+      await requeueDocument(r.id, ["embed"], 3);
     }
     if (rows.length > 0) triggerWorkers();
     return { queued: rows.length, cleared };
@@ -1388,7 +1388,7 @@ export const reclassifyTaxSection = api(
     // Only the classify stage depends on the hint — text_extract output
     // is unchanged, so we skip re-OCR and save LLM/CPU time.
     for (const r of rows) {
-      await requeueDocument(r.id, ["classify"]);
+      await requeueDocument(r.id, ["classify"], 3);
     }
     triggerWorkers();
     return { queued: rows.length };
