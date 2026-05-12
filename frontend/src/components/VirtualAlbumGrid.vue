@@ -298,7 +298,7 @@ watch(
 
 .album-card:focus,
 .album-card.album-card--restored-focus {
-  outline: 3px solid var(--p-primary-color, #3b82f6);
+  outline: 3px solid var(--p-focus-ring-color);
   outline-offset: 2px;
 }
 

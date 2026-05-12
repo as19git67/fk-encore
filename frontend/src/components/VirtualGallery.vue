@@ -655,7 +655,7 @@ defineExpose({
 
 /* Selection */
 .vg-cell--selected {
-  outline: 3px solid var(--p-primary-500, #3b82f6);
+  outline: 3px solid var(--p-focus-ring-color);
   outline-offset: -3px;
 }
 
@@ -663,12 +663,10 @@ defineExpose({
   opacity: 0.8;
 }
 
-/* Keyboard cursor — visually distinct from `--selected` (which is the
-   batch-curation tick) by using a soft outer ring rather than a hard
-   outline, so the two states can co-exist on the same cell. */
+/* Keyboard cursor */
 .vg-cell--cursor {
-  box-shadow: 0 0 0 3px var(--p-primary-300, #93c5fd),
-              0 0 0 6px rgba(59, 130, 246, 0.25);
+  outline: 3px solid var(--p-focus-ring-color);
+  outline-offset: 2px;
 }
 
 .vg-select-icon {
