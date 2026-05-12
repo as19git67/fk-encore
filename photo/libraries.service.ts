@@ -737,6 +737,82 @@ export async function scanLibrary(
 }
 
 /**
+ * Enumerate the image paths a given `.xmp` sidecar can belong to.
+ *
+ * Two naming conventions are in use across the photo-management ecosystem:
+ *
+ *   1. extension preserved → `photo.jpg.xmp`  (darktable, digiKam default)
+ *   2. extension replaced  → `photo.xmp`      (Lightroom Classic default)
+ *
+ * The first case has a unique image path; the second case is ambiguous
+ * (`photo.jpg`, `photo.png`, …) so we expand it across every supported
+ * extension. The caller probes each candidate against the photo table.
+ */
+function imagePathsForSidecar(sidecarPath: string): string[] {
+  const stripped = sidecarPath.replace(/\.[xX][mM][pP]$/, "");
+  const out = new Set<string>();
+  // case 1: photo.jpg.xmp → photo.jpg
+  const ext1 = path.extname(stripped).toLowerCase();
+  if (SUPPORTED_EXTENSIONS.has(ext1)) out.add(stripped);
+  // case 2: photo.xmp → photo.<supported-ext>
+  for (const ext of SUPPORTED_EXTENSIONS) {
+    out.add(stripped + ext);
+    out.add(stripped + ext.toUpperCase());
+  }
+  return [...out];
+}
+
+/**
+ * Re-sync the metadata of an already-imported photo after its sidecar
+ * `.xmp` file was added or modified. No-op when the sidecar cannot be
+ * mapped to a known photo row (e.g. the image was never imported, or the
+ * image lives in `move`-mode storage and the sidecar dangling next to the
+ * original location).
+ *
+ * Returns `true` when a photo row was actually updated.
+ */
+export async function handleExternalXmpChange(sidecarPath: string): Promise<boolean> {
+  const candidates = imagePathsForSidecar(sidecarPath);
+  let photo: { id: number; user_id: number; external_path: string } | undefined;
+  for (const candidate of candidates) {
+    photo = await dbFirst<{ id: number; user_id: number; external_path: string }>(
+      db
+        .select({
+          id: photos.id,
+          user_id: photos.user_id,
+          external_path: photos.external_path,
+        })
+        .from(photos)
+        .where(eq(photos.external_path, candidate))
+    );
+    if (photo) break;
+  }
+  if (!photo) return false;
+
+  // getExifMetadata re-reads the sidecar internally, so the resulting
+  // ExifMetadata already reflects the sidecar's values where present.
+  const meta = await getExifMetadata(photo.external_path, path.basename(photo.external_path));
+  const description = combineDescription(meta);
+  const keywords = mergeRatingKeyword(meta.keywords, meta.rating);
+  const iptcLoc = iptcLocationUpdate(meta);
+
+  await dbExec(
+    db
+      .update(photos)
+      .set({
+        taken_at: meta.takenAt,
+        latitude: meta.latitude,
+        longitude: meta.longitude,
+        description,
+        keywords,
+        ...(iptcLoc ?? {}),
+      })
+      .where(eq(photos.id, photo.id))
+  );
+  return true;
+}
+
+/**
  * Drop the photo row for an externally-removed link-mode file. Identifies the
  * row via `external_path`, which has a unique partial index. No-op for files
  * we never imported.

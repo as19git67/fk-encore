@@ -54,7 +54,8 @@ WORKDIR /app
 COPY --from=builder /install /usr/local
 COPY main.py ./
 COPY download_model.sh /usr/local/bin/download_model.sh
-RUN chmod +x /usr/local/bin/download_model.sh
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/download_model.sh /usr/local/bin/entrypoint.sh
 
 # Models live in a bind-mounted volume, NOT in the image. The directory is
 # created and chowned so the non-root runtime user can populate it via
@@ -77,4 +78,5 @@ EXPOSE 8000
 
 USER 568:568
 
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

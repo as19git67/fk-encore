@@ -16,6 +16,10 @@ export default defineConfig({
       RP_NAME: "FK Encore App",
       RP_ORIGIN: "http://localhost:5173",
       NODE_ENV: "test",
+      // Tests must not write to the container default (/mnt/data/...). Pin
+      // to a project-relative path so vitest runs in a sandbox/CI.
+      PHOTO_UPLOAD_DIR: "uploads/photos",
+      PHOTO_THUMBNAIL_DIR: "uploads/thumbnails",
     },
     exclude: [
       "node_modules/**",
