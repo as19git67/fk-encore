@@ -10,7 +10,6 @@ import {
   getScanQueueStatus, rescanPhotos, retryFailedScans, cancelPendingScans,
   findPhotoGroups,
   recomputeAiPicks,
-  bulkAcceptHighConfidenceAiPicks,
   getAiPickCalibration,
   calibrateAiPickWeights,
   backfillPhotoDimensions,
@@ -141,33 +140,17 @@ async function handleFindGroups() {
 // ── KI-Auto-Pick (Track I) ────────────────────────────────────────────────────
 
 const aiPickRecomputeResult = ref<{ groups_scored: number; groups_skipped: number } | null>(null)
-const aiPickBulkResult = ref<{ groups_accepted: number; hidden_count: number } | null>(null)
 const aiPickLoading = ref(false)
 const aiPickError = ref('')
 
 async function handleRecomputeAiPicks() {
   aiPickRecomputeResult.value = null
-  aiPickBulkResult.value = null
   aiPickError.value = ''
   aiPickLoading.value = true
   try {
     aiPickRecomputeResult.value = await recomputeAiPicks()
   } catch (err: any) {
     aiPickError.value = err.message || 'Fehler beim Neuberechnen der KI-Picks'
-  } finally {
-    aiPickLoading.value = false
-  }
-}
-
-async function handleBulkAcceptHighConfidence() {
-  aiPickRecomputeResult.value = null
-  aiPickBulkResult.value = null
-  aiPickError.value = ''
-  aiPickLoading.value = true
-  try {
-    aiPickBulkResult.value = await bulkAcceptHighConfidenceAiPicks()
-  } catch (err: any) {
-    aiPickError.value = err.message || 'Fehler beim Bestätigen der KI-Picks'
   } finally {
     aiPickLoading.value = false
   }
@@ -706,10 +689,6 @@ onMounted(async () => {
         {{ aiPickRecomputeResult.groups_scored }} Gruppen neu bewertet
         (übersprungen: {{ aiPickRecomputeResult.groups_skipped }}).
       </Message>
-      <Message v-if="aiPickBulkResult" severity="info" :closable="false" class="data-management-group__item">
-        {{ aiPickBulkResult.groups_accepted }} Gruppen bestätigt –
-        {{ aiPickBulkResult.hidden_count }} Fotos ausgeblendet.
-      </Message>
       <Button class="data-management-group__item"
         icon="pi pi-sparkles"
         outlined
@@ -717,15 +696,6 @@ onMounted(async () => {
         :loading="aiPickLoading"
         :disabled="aiPickLoading || groupingLoading || isActive || rescanLoading || retryLoading"
         @click="handleRecomputeAiPicks"
-      />
-      <Button class="data-management-group__item"
-        icon="pi pi-check-circle"
-        outlined
-        severity="success"
-        label="Alle hochkonfidenten KI-Picks bestätigen"
-        :loading="aiPickLoading"
-        :disabled="aiPickLoading || groupingLoading || isActive || rescanLoading || retryLoading"
-        @click="handleBulkAcceptHighConfidence"
       />
 
       <Message v-if="dimensionsResult" severity="info" :closable="false" class="data-management-group__item">

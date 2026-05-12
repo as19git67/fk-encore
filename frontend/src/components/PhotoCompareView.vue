@@ -29,6 +29,11 @@ const props = defineProps<{
   group: PhotoGroup
   allPhotos: Photo[]
   totalUnreviewed: number
+  // When true, suppress the "Fertig + Weiter" jump-to-next-group
+  // action. Set by the Gruppenreview-Queue, which manages its own
+  // navigation: closing this modal returns the user to the queue card
+  // list instead of cascading into the next unreviewed group.
+  singleGroupMode?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -137,6 +142,21 @@ function aiScoreTooltip(photoId: number): string {
     text += '\n' + lines.join(' · ')
   }
   return text
+}
+
+/**
+ * Whether the given photo id sits in the group's KI-Pick set.
+ *
+ * Surfaced in the side-by-side + review-grid tiles so the user can tell
+ * at a glance which photo the auto-pick would keep, without having to
+ * cross-reference the review-queue card. Returns false once the group
+ * has been reviewed (the pick set is only relevant for the unreviewed
+ * decision).
+ */
+function isAiPicked(photoId: number): boolean {
+  if (props.group.reviewed_at) return false
+  const ids = props.group.ai_picked_photo_ids
+  return Array.isArray(ids) && ids.includes(photoId)
 }
 
 /**
@@ -649,6 +669,14 @@ function getPhotoById(id: number): Photo | undefined {
                   <i class="pi pi-sparkles" style="font-size: 0.65rem" />
                   {{ aiScoreLabel(photoId) }}
                 </div>
+                <div
+                  v-if="isAiPicked(photoId)"
+                  class="ai-pick-badge"
+                  v-tooltip.top="'Dieses Foto würde die KI behalten'"
+                >
+                  <i class="pi pi-check-circle" style="font-size: 0.7rem" />
+                  KI-Pick
+                </div>
               </div>
             </div>
           </div>
@@ -726,7 +754,7 @@ function getPhotoById(id: number): Photo | undefined {
                   size="small"
                 />
                 <Button
-                  v-if="totalUnreviewed > 1"
+                  v-if="totalUnreviewed > 1 && !singleGroupMode"
                   :label="isVeryNarrow ? undefined : isNarrow ? 'Weiter' : 'Fertig + Weiter'"
                   icon="pi pi-arrow-right"
                   iconPos="right"
@@ -748,7 +776,7 @@ function getPhotoById(id: number): Photo | undefined {
                 size="small"
               />
               <Button
-                v-if="totalUnreviewed > 1"
+                v-if="totalUnreviewed > 1 && !singleGroupMode"
                 :label="isVeryNarrow ? undefined : isNarrow ? 'Weiter' : 'Fertig + Weiter'"
                 icon="pi pi-arrow-right"
                 iconPos="right"
@@ -789,6 +817,14 @@ function getPhotoById(id: number): Photo | undefined {
                 >
                   <i class="pi pi-sparkles" style="font-size: 0.6rem" />
                   {{ aiScoreLabel(photo.id) }}
+                </div>
+                <div
+                  v-if="isAiPicked(photo.id)"
+                  class="review-ai-pick"
+                  v-tooltip.right="'Dieses Foto würde die KI behalten'"
+                >
+                  <i class="pi pi-check-circle" style="font-size: 0.6rem" />
+                  KI-Pick
                 </div>
               </div>
               <div class="review-photo-controls">
@@ -1098,4 +1134,26 @@ kbd {
 .review-ai-score.ai-score-medium { color: #eab308; }
 .review-ai-score.ai-score-poor   { color: #ef4444; }
 .review-ai-score.ai-score-unknown { color: #9ca3af; }
+
+/* ── KI-Pick badge ── Marks the photo(s) the auto-pick would keep, so
+   the user can see in the side-by-side / review grid whether their
+   intuition agrees with the KI. Positioned top-right to stay clear of
+   the bottom-left quality badge. */
+.ai-pick-badge,
+.review-ai-pick {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 1rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #ffffff;
+  background: rgba(34, 197, 94, 0.85);
+  backdrop-filter: blur(4px);
+  cursor: help;
+}
 </style>

@@ -1195,12 +1195,14 @@ import type {
 } from "../db/types";
 import {
   acceptAiPickLogic,
+  acceptPeerConsensusLogic,
   bulkAcceptHighConfidencePicksLogic,
   exportCalibrationDatasetLogic,
   listReviewQueueLogic,
   recomputeAiPicksForAllUsers,
   type BulkAcceptResult,
   type CalibrationEntry,
+  type PeerConsensusResult,
   type RecomputeResult,
   type ReviewQueueResponse,
 } from "./group-auto-pick.service";
@@ -1345,6 +1347,26 @@ export const pickPhotosInGroup = api(
       throw APIError.invalidArgument("photoIds must be a non-empty array");
     }
     return await acceptAiPickLogic(userId, id, photoIds);
+  }
+);
+
+/**
+ * "Konsens übernehmen" — let the requester adopt the majority of their
+ * album-peers' curation decisions for one similar-photo group. See
+ * acceptPeerConsensusLogic for the consensus rule + privacy boundary.
+ *
+ * Same `photos.delete` permission as the AI-pick path: hiding a photo
+ * is a destructive-feeling action even though the underlying file
+ * stays on disk.
+ */
+export const acceptPeerConsensus = api(
+  { expose: true, method: "POST", path: "/photos/groups/:id/accept-peer-consensus", auth: true },
+  async ({ id }: { id: number }): Promise<PeerConsensusResult> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.delete");
+    return await acceptPeerConsensusLogic(userId, id);
   }
 );
 

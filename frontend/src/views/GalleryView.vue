@@ -385,11 +385,12 @@ async function performBatchDelete(ids: number[]) {
 }
 
 // ── Stacks (compare view) ───────────────────────────────────────────────────
-// The cache is loaded eagerly on mount because the "Gruppen bearbeiten
-// (N offen)" button in the subheader needs `unreviewedCount` to decide
-// its label and visibility. Tap → compare view looks up the matching
-// PhotoGroup by id; the cache is invalidated after every review so the
-// next reader sees fresh state.
+// The cache backs the per-stack click handler (tap on a stacked tile in
+// the grid → look up the matching PhotoGroup by id → open PhotoCompareView)
+// and feeds `totalUnreviewed` to the compare view's "N offen" counter.
+// Eagerly loaded on mount so the first tap doesn't pay a round-trip; the
+// cache is invalidated after every review so the next reader sees fresh
+// state.
 const groupCache = ref<PhotoGroup[] | null>(null)
 const activeGroup = ref<PhotoGroup | null>(null)
 const stackBusy = ref(false)
@@ -403,9 +404,8 @@ async function ensureGroupCache(): Promise<PhotoGroup[]> {
   groupCache.value = res.groups
   return res.groups
 }
-// Fire-and-forget: a stale cache only delays the "Gruppen bearbeiten"
-// button by one HTTP round-trip on first paint and the gallery still
-// works without it.
+// Fire-and-forget: a stale cache only delays the first stack-click by
+// one HTTP round-trip and the gallery still works without it.
 void ensureGroupCache()
 
 async function onFullscreenOpenGroupReview() {
@@ -435,20 +435,14 @@ async function onStackClick(entry: GalleryGridEntry) {
   }
 }
 
-async function startGroupReview() {
-  const groups = await ensureGroupCache()
-  const first = groups.find((g) => !g.reviewed_at)
-  if (first) activeGroup.value = first
-}
-
 function applyLocalGroupReviewed(groupId: number) {
   // Optimistic local update — the server already marked the group reviewed
   // (handleDone in PhotoCompareView calls reviewPhotoGroup before emitting
   // close/next). Mirroring it locally keeps the user's scroll position
   // and the loaded entries intact:
   //   - groupCache: flip the reviewed_at on the matching entry so
-  //     `totalUnreviewed` decrements and the green "Gruppen bearbeiten"
-  //     button label updates without a refetch.
+  //     `totalUnreviewed` decrements (which drives the compare view's
+  //     "N offen" counter) without a refetch.
   //   - galleryRef.markGroupReviewed: flip `group.reviewed` on every
   //     loaded cell of that group so badges / outlines / click-routing
   //     gate off naturally.
@@ -1153,14 +1147,6 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
             severity="secondary"
             outlined
             @click="onJumpEnd"
-          />
-          <Button
-            v-if="canManageData && totalUnreviewed > 0"
-            :label="`Gruppen bearbeiten (${totalUnreviewed} offen)`"
-            icon="pi pi-images"
-            size="small"
-            severity="success"
-            @click="startGroupReview"
           />
           <template v-if="canUpload">
             <Button

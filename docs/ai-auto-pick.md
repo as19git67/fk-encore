@@ -212,9 +212,10 @@ Partial-Index `photo_groups_ai_picked_active_idx` (Migration 0075) auf `(user_id
 | `POST` | `/photos/groups/:id/accept-ai-pick`                   | KI-Auswahl als User-Review übernehmen. |
 | `POST` | `/photos/groups/:id/pick-photos`                      | Manueller Pick (Stufe C): keep `photoIds`, hide rest. |
 | `POST` | `/photos/groups/bulk-accept-ai-picks`                 | Bulk-Apply aller hochkonfidenten Gruppen. |
+| `POST` | `/photos/groups/:id/accept-peer-consensus`            | Konsens aus Album-Peers übernehmen (PR #416). |
 | `GET`  | `/photos/groups/ai-pick-calibration`                  | Kalibrierungs-Export (JSON). Scort reviewte Gruppen on-demand. |
 | `POST` | `/photos/groups/calibrate-ai-pick-weights`            | Fit per-User-Gewichte (Stufe D). |
-| `GET`  | `/photos/groups/review-queue?offset=&limit=&confidence=` | Rapid-Review-Stream + Per-User-Calibration-Metadaten. |
+| `GET`  | `/photos/groups/review-queue?offset=&limit=&confidence=` | Rapid-Review-Stream + Per-User-Calibration-Metadaten + `peer_curation`-Aggregat pro Foto + filter-unabhängige `high_confidence_total`. |
 | `POST` | `/photos/backfill-dimensions`                         | Server-weiter Backfill von `width`/`height`. |
 
 Alle Admin-Endpoints benötigen `data.manage`, die Pick/Accept-Endpoints `photos.delete`, die Listing-Endpoints `photos.view`.
@@ -320,6 +321,28 @@ Auf den Befund "53 % der Gruppen sind low und die KI hilft dort gar nicht" wurde
 | B | Keyboard-Driven Walk (ein Foto/Bildschirm + Shortcuts) | Offen |
 | C | One-Click-Pick für 2-/3-Photo-Gruppen | **DONE** — PR #414 |
 | D | Hybrid A + Confidence-Sortierung + Disclaimer | **DONE** — PR #414 |
+
+### Phase 5: UX-Konsolidierung + Peer-Curation (PR #416)
+
+Nach dem ersten Live-Test der Rapid-Review wurden mehrere UX-Findings adressiert:
+
+- **Konsolidierung**: doppelte Einstiege weggeräumt — der "Gruppen bearbeiten"-Button im Gallery-Header und der Bulk-Accept-Button in der Datenverwaltung waren redundant zur neuen Review-Queue. Naming auf "Sicher" / "Alle Sicheren bestätigen" vereinheitlicht.
+- **Lightbox**: Strip-Thumbs sind zu klein (~80 px) zur echten Beurteilung. Tap öffnet Bildschirmfüllend; Klick irgendwo schließt.
+- **KI-Pick-Markierung im Compare-View**: Tile mit `isAiPicked()` bekommt grünes Chip — sichtbar, was die KI behalten würde.
+- **`singleGroupMode`-Prop**: Compare-View aus der Queue zeigt kein "Fertig + Weiter" — schließen kehrt zur Queue zurück.
+- **"Alle wählen"-Aktion**: dritter Card-Button — markiert Gruppe als reviewt ohne irgendetwas auszublenden. Use Case: absichtliche Burst-Reihen.
+
+**Peer-Curation aus geteilten Alben** (großer Hebel):
+
+| # | Phase | Status |
+|---|---|---|
+| 1 | Sichtbarmachen — `peer_curation: { hidden, favorite }` pro Foto in der Response, kleine Eck-Badges am Strip-Thumb | **DONE** — PR #416 |
+| 2 | "Konsens übernehmen" — Ein-Klick-Übernahme der konservativen Mehrheits-Entscheidung | **DONE** — PR #416 |
+| 3 | Trusted-Reviewer-Cascade — Opt-in-Auto-Sync zwischen vertrauten Usern | Offen, abhängig von Phase 1+2-Erfahrungen |
+
+**Privacy-Boundary**: Aggregat-Query mit doppelter EXISTS-Subquery — ein Peer-Signal zählt nur, wenn Peer **und** Requester aktuell mindestens ein Album teilen, das das Foto enthält. Eigene Curation-Rows ausgeschlossen.
+
+**Konsens-Regel** (konservativ): Foto wird nur ausgeblendet, wenn ≥1 Peer es hidden hat **und** 0 Peers es favorisiert haben. Eigener Favorit des Requesters wird niemals clobbered (gleiche ON CONFLICT-Guard wie `acceptAiPickLogic`).
 
 ## Bekannte Schwächen + offene Optionen
 
