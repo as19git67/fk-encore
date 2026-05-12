@@ -2946,7 +2946,7 @@ export async function convertHeicToJpeg(filePath: string): Promise<Buffer> {
     // File extension claims HEIC but content is not. Re-encode via sharp so
     // the JPEG cache file written by the caller stays valid.
     const sharp = (await import('sharp')).default;
-    decoded = await sharp(inputBuffer).rotate().jpeg({ quality: 90 }).toBuffer();
+    decoded = await sharp(inputBuffer, { failOn: 'none' }).rotate().jpeg({ quality: 90 }).toBuffer();
   }
   if (mtimeMs > 0) setHeicDecodeCached(filePath, mtimeMs, decoded);
   return decoded;
@@ -5272,7 +5272,7 @@ export async function backfillPhotoDimensionsLogic(userId?: number): Promise<{
   for (const row of rows) {
     const filePath = getPhotoDiskPath(row);
     try {
-      const meta = await sharp(filePath).rotate().metadata();
+      const meta = await sharp(filePath, { failOn: 'none' }).rotate().metadata();
       if (meta.width && meta.height) {
         await dbExec(
           db.update(photos)
