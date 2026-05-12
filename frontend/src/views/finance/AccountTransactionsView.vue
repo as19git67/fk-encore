@@ -647,11 +647,11 @@ function goBack() {
                 <i class="pi pi-file-edit" />
                 {{ tx.notice }}
               </div>
-              <div v-if="tx.tags.length > 0">
+              <div v-if="tx.tags.length > 0" class="tx-tags">
                 <span
                   v-for="t in tx.tags"
                   :key="t.name + t.source"
-                  class="p-tag p-tag-warn tag-chip"
+                  class="p-tag tag-chip"
                   :class="`p-tag-${t.source === 'ai' ? 'success' : 'info'}`"
                 >
                   {{ t.name }}
@@ -949,6 +949,7 @@ function goBack() {
 .tx-purpose {
   color: var(--p-text-muted-color);
   font-size: 0.9rem;
+  font-family: monospace;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -966,23 +967,6 @@ function goBack() {
   flex-wrap: wrap;
   gap: 0.35rem;
   margin-top: 0.35rem;
-}
-.tx-tag {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.18rem 0.6rem;
-  border-radius: 999px;
-  font-size: 0.78rem;
-  font-weight: 600;
-  line-height: 1.1;
-}
-.tx-tag-user {
-  background: var(--p-tag-info-background);
-  color: var(--p-tag-info-color);
-}
-.tx-tag-ai {
-  background: var(--p-tag-success-background);
-  color: var(--p-tag-success-color);
 }
 .tx-amount {
   font-variant-numeric: tabular-nums;
