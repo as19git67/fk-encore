@@ -53,7 +53,13 @@ This starts:
 - **PostgreSQL 16** with pgvector extension on port `5432`
 - **Embedding Service** on port `8000`
 
-> **Note**: On first start, the service automatically downloads ~5.5 GB of model weights if they are missing from the volume. You can also pre-populate the volume manually:
+> **Note**: The container entrypoint (`entrypoint.sh`) runs
+> `download_model.sh` automatically before `uvicorn` starts. The script
+> is idempotent — huggingface_hub re-verifies the cache against the
+> manifest, so warm volumes return in seconds; a cold volume pulls
+> ~5.5 GB, covered by the compose healthcheck's `start_period` (600 s).
+> Set `EMBEDDING_SKIP_DOWNLOAD=1` to bypass the check. Pre-populating
+> manually still works:
 
 ```bash
 docker compose exec embedding_service /usr/local/bin/download_model.sh

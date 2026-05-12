@@ -29,8 +29,14 @@ docker compose up --build
 
 This starts the **LLM Service** on port `8001`.
 
-> **Note**: On first start, the service automatically downloads the required model weights if they are missing from the volume. You can also pre-populate the volume manually:
+> **Note**: The container entrypoint (`entrypoint.sh`) runs
+> `download_model.sh` automatically before `uvicorn` starts. The script
+> is idempotent — warm volumes return in seconds; a cold volume pulls
+> ~3 GB of weights, covered by the compose healthcheck's `start_period`.
+> Set `LLM_SKIP_DOWNLOAD=1` to bypass the check (e.g. in debug shells
+> without network). Pre-populating manually with
 > `docker compose run --rm llm-service /usr/local/bin/download_model.sh`
+> still works for power users.
 
 ### 2. Local Development
 

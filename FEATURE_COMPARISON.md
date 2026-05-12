@@ -156,7 +156,7 @@ Status: April 2026 (updated)
 | Configurable storage layout | ✅ Templates | 🔶 Automatic YYYY/YYYY-MM folders with dated filenames |
 | S3-compatible backends | ✅ | ❌ |
 | Object storage | ❌ | ✅ Encore Buckets |
-| XMP sidecar support | ✅ Read & write | ❌ |
+| XMP sidecar support | ✅ Read & write | 🔶 Read (merged with embedded, sidecar wins; live re-sync on `.xmp` change). Write-back to sidecar files not yet implemented |
 
 ## 11. Metadata
 
@@ -165,7 +165,7 @@ Status: April 2026 (updated)
 | EXIF display | ✅ Extensive | ✅ |
 | EXIF extraction | ✅ 9 prioritized DateTime fields | ✅ |
 | Edit date manually | ✅ | ✅ |
-| XMP sidecar read/write | ✅ | ❌ |
+| XMP sidecar read/write | ✅ | 🔶 Sidecar read implemented (`PHOTO_XMP_WRITE_BACK` toggle for embedded write-back); sidecar write-back still on the roadmap |
 | Tag import (XMP/IPTC) | ✅ | 🔶 IPTC extraction at upload (keywords, description, dates, location, copyright) + XMP rating → `Rating-N` keyword |
 | Ratings | ✅ | 🔶 XMP rating imported as `Rating-1`…`Rating-5` tag; per-library threshold auto-favourites rated photos |
 | Descriptions | ✅ | ✅ |
@@ -268,4 +268,6 @@ be the most impactful:
 3. **Android app**
 4. **OAuth/OIDC** for enterprise use
 5. **Interactive map view**
-6. **XMP sidecar write-back** – for metadata interoperability with other tools
+6. **XMP sidecar write-back** – sidecar read landed in Track K (#146);
+   writing user edits into a `.xmp` instead of the image file itself is
+   still pending
