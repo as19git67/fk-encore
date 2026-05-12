@@ -29,6 +29,7 @@ import {
   acceptAiPick,
   pickPhotosInGroup,
   reviewPhotoGroup,
+  acceptPeerConsensus,
   bulkAcceptHighConfidenceAiPicks,
   type ReviewQueueGroup,
   type ReviewQueueUserCalibration,
@@ -172,6 +173,87 @@ async function onKeepAll(group: ReviewQueueGroup) {
     const res = await reviewPhotoGroup(group.id)
     return { success: res.success, hidden_count: 0 }
   })
+}
+
+// ── Peer-Consensus (Phase 2) ──
+// "Konsens übernehmen" lets the requester adopt the conservative
+// majority of their album-peers' curation decisions. The button only
+// makes sense when at least one photo in the group has a peer signal;
+// the dialog previews the bucket counts before the user commits.
+
+interface ConsensusPreview {
+  willHide: number
+  willKeep: number
+  noSignal: number
+}
+
+function previewConsensus(group: ReviewQueueGroup): ConsensusPreview {
+  let willHide = 0
+  let willKeep = 0
+  let noSignal = 0
+  for (const p of group.photos) {
+    const pc = p.peer_curation
+    if (pc.hidden === 0 && pc.favorite === 0) noSignal++
+    else if (pc.hidden > 0 && pc.favorite === 0) willHide++
+    else willKeep++
+  }
+  return { willHide, willKeep, noSignal }
+}
+
+function hasAnyPeerSignal(group: ReviewQueueGroup): boolean {
+  return group.photos.some(
+    (p) => p.peer_curation.hidden > 0 || p.peer_curation.favorite > 0,
+  )
+}
+
+const consensusGroup = ref<ReviewQueueGroup | null>(null)
+const consensusPreview = computed<ConsensusPreview | null>(() =>
+  consensusGroup.value ? previewConsensus(consensusGroup.value) : null,
+)
+const consensusBusy = ref(false)
+const consensusResult = ref<{
+  hidden_count: number
+  kept_count: number
+  no_signal_count: number
+} | null>(null)
+
+function askConsensus(group: ReviewQueueGroup) {
+  consensusResult.value = null
+  consensusGroup.value = group
+}
+
+async function confirmConsensus() {
+  const group = consensusGroup.value
+  if (!group || consensusBusy.value) return
+  consensusBusy.value = true
+  try {
+    const res = await acceptPeerConsensus(group.id)
+    consensusResult.value = {
+      hidden_count: res.hidden_count,
+      kept_count: res.kept_count,
+      no_signal_count: res.no_signal_count,
+    }
+    // Same optimistic-removal flow as the other accept actions: drop
+    // the card from the visible list, update counters. We don't go
+    // through runAcceptAction because the result toast lives inside
+    // the dialog and we don't want the card to vanish *before* the
+    // user sees the counts.
+    groups.value = groups.value.filter((g) => g.id !== group.id)
+    total.value = Math.max(0, total.value - 1)
+    if (group.ai_picked_confidence === 'high') {
+      highConfidenceTotal.value = Math.max(0, highConfidenceTotal.value - 1)
+    }
+  } catch (err: any) {
+    loadError.value = err?.message ?? 'Fehler beim Übernehmen des Konsens.'
+    consensusGroup.value = null
+  } finally {
+    consensusBusy.value = false
+  }
+}
+
+function closeConsensusDialog() {
+  consensusGroup.value = null
+  consensusResult.value = null
 }
 
 async function runAcceptAction(
@@ -498,8 +580,10 @@ onMounted(() => {
           </div>
 
           <!-- Sibling strip. Picks get a green check; non-picks dimmed.
-               Tap any thumb to open it in the fullscreen lightbox so the
-               user can actually verify the KI's decision. -->
+               Peer signals get a tiny coloured dot in the bottom-left
+               corner — red for "another album-member hid this", gold
+               for "another favourited this". Tap any thumb to open in
+               the fullscreen lightbox. -->
           <div v-if="group.photos.length > 1" class="rq-card-strip">
             <button
               v-for="photo in group.photos"
@@ -522,6 +606,20 @@ onMounted(() => {
                 decoding="async"
               />
               <i v-if="photo.ai_picked" class="pi pi-check rq-thumb-check" />
+              <span
+                v-if="photo.peer_curation.hidden > 0"
+                class="rq-peer-dot rq-peer-dot--hidden"
+                v-tooltip.top="`${photo.peer_curation.hidden} Album-Mitglied(er) haben dieses Foto ausgeblendet`"
+              >
+                {{ photo.peer_curation.hidden > 9 ? '9+' : photo.peer_curation.hidden }}
+              </span>
+              <span
+                v-if="photo.peer_curation.favorite > 0"
+                class="rq-peer-dot rq-peer-dot--favorite"
+                v-tooltip.top="`${photo.peer_curation.favorite} Album-Mitglied(er) haben dieses Foto favorisiert`"
+              >
+                ★
+              </span>
             </button>
           </div>
         </template>
@@ -545,6 +643,16 @@ onMounted(() => {
             v-tooltip.top="'Gruppe ohne Ausblenden als reviewed markieren'"
             :disabled="pendingAcceptIds.has(group.id)"
             @click="onKeepAll(group)"
+          />
+          <Button
+            v-if="hasAnyPeerSignal(group)"
+            icon="pi pi-users"
+            outlined
+            severity="secondary"
+            label="Konsens übernehmen"
+            v-tooltip.top="'Entscheidungen anderer Album-Mitglieder übernehmen'"
+            :disabled="pendingAcceptIds.has(group.id)"
+            @click="askConsensus(group)"
           />
           <Button
             icon="pi pi-search"
@@ -616,6 +724,77 @@ onMounted(() => {
           label="Ja, alle bestätigen"
           @click="confirmBulkAcceptHigh"
         />
+      </template>
+    </Dialog>
+
+    <!-- Konsens-Übernahme — Phase 2. Preview the bucket counts before
+         the user commits; surface the actual result after. The footer
+         slot has to be a direct child of <Dialog>, so we branch on the
+         result/preview state inside one slot rather than nesting
+         <template #footer> inside a v-if. -->
+    <Dialog
+      :visible="consensusGroup != null"
+      @update:visible="(v: boolean) => { if (!v) closeConsensusDialog() }"
+      modal
+      header="Entscheidungen anderer übernehmen?"
+      :style="{ width: 'min(520px, 92vw)' }"
+    >
+      <p v-if="consensusResult">
+        <strong>{{ consensusResult.hidden_count }}</strong>
+        Foto(s) ausgeblendet (Konsens) ·
+        <strong>{{ consensusResult.kept_count }}</strong>
+        mit Signal behalten ·
+        <strong>{{ consensusResult.no_signal_count }}</strong>
+        ohne Peer-Signal unverändert.
+      </p>
+      <template v-else-if="consensusPreview">
+        <p>
+          Konsens-Regel: <em>Ein Foto wird nur ausgeblendet, wenn
+          mindestens ein Album-Mitglied es ausgeblendet hat
+          <strong>und</strong> niemand es favorisiert hat.</em>
+          Deine eigenen Favoriten bleiben unangetastet.
+        </p>
+        <ul class="rq-consensus-preview">
+          <li>
+            <span class="rq-consensus-dot rq-consensus-dot--hide" />
+            <strong>{{ consensusPreview.willHide }}</strong>
+            Foto(s) werden ausgeblendet
+          </li>
+          <li>
+            <span class="rq-consensus-dot rq-consensus-dot--keep" />
+            <strong>{{ consensusPreview.willKeep }}</strong>
+            Foto(s) bleiben sichtbar (Peer-Signal, aber Favorit dagegen)
+          </li>
+          <li>
+            <span class="rq-consensus-dot rq-consensus-dot--none" />
+            <strong>{{ consensusPreview.noSignal }}</strong>
+            Foto(s) ohne Peer-Signal — unverändert
+          </li>
+        </ul>
+      </template>
+      <template #footer>
+        <Button
+          v-if="consensusResult"
+          label="Schließen"
+          @click="closeConsensusDialog"
+        />
+        <template v-else>
+          <Button
+            label="Abbrechen"
+            severity="secondary"
+            outlined
+            :disabled="consensusBusy"
+            @click="closeConsensusDialog"
+          />
+          <Button
+            label="Übernehmen"
+            icon="pi pi-check"
+            severity="success"
+            :loading="consensusBusy"
+            :disabled="consensusBusy"
+            @click="confirmConsensus"
+          />
+        </template>
       </template>
     </Dialog>
 
@@ -897,6 +1076,29 @@ onMounted(() => {
   outline: 2px solid var(--p-green-500, #22c55e);
   outline-offset: -2px;
 }
+.rq-peer-dot {
+  position: absolute;
+  bottom: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+.rq-peer-dot--hidden {
+  left: 3px;
+  background: rgba(220, 38, 38, 0.95); /* red — peer voted to hide */
+}
+.rq-peer-dot--favorite {
+  right: 3px;
+  background: rgba(234, 179, 8, 0.95); /* gold — peer favorited */
+}
 .rq-thumb-check {
   position: absolute;
   top: 4px;
@@ -923,6 +1125,31 @@ onMounted(() => {
   justify-content: center;
   padding: 16px 0;
 }
+
+.rq-consensus-preview {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rq-consensus-preview li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.95rem;
+}
+.rq-consensus-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.rq-consensus-dot--hide { background: rgba(220, 38, 38, 0.95); }
+.rq-consensus-dot--keep { background: rgba(234, 179, 8, 0.95); }
+.rq-consensus-dot--none { background: var(--p-content-border-color); }
 
 /* ── Lightbox ── Full-bleed overlay so the user can verify what the
    KI hid before committing. Backdrop is near-opaque (not the standard

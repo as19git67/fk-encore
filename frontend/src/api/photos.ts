@@ -814,6 +814,26 @@ export function acceptAiPick(id: number) {
 }
 
 /**
+ * Phase 2: adopt the peer-consensus decisions for one group. The
+ * server applies the conservative rule (hide iff ≥1 peer hidden AND
+ * 0 peer favorites) and returns the per-bucket counts that the UI
+ * surfaces in a toast afterwards.
+ */
+export interface PeerConsensusResult {
+  success: boolean
+  hidden_count: number
+  kept_count: number
+  no_signal_count: number
+}
+
+export function acceptPeerConsensus(id: number) {
+  return apiFetch<PeerConsensusResult>(
+    `/photos/groups/${id}/accept-peer-consensus`,
+    { method: 'POST' },
+  )
+}
+
+/**
  * Manual single-pick action (Stufe C). Keeps the supplied photos,
  * hides the rest, marks the group reviewed. Used by the One-Click-Pick
  * UI in the review queue for 2- and 3-photo groups.
@@ -863,6 +883,16 @@ export interface ReviewQueuePhoto {
   taken_at: string | null
   curation: 'visible' | 'hidden' | 'favorite'
   ai_picked: boolean
+  /**
+   * Aggregated curation status from other album-peers (Phase 1). Only
+   * explicit `hidden` and `favorite` rows are counted; `visible` is
+   * the implicit default and produces no row. Both 0 ⇒ no peer
+   * signal, UI renders no chip.
+   */
+  peer_curation: {
+    hidden: number
+    favorite: number
+  }
 }
 
 export interface ReviewQueueGroup {

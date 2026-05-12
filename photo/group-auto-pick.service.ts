@@ -22,11 +22,14 @@
  *                                  used to calibrate weights in Stufe D.
  */
 
-import { and, eq, inArray, isNull, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, isNotNull, ne, or, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbExec, dbFirst } from "../db/adapter";
 import {
   aiPickUserWeights,
+  albumPhotos,
+  albumShares,
+  albums,
   faces,
   photoCuration,
   photoGroupMembers,
@@ -471,6 +474,141 @@ export async function bulkAcceptHighConfidencePicksLogic(
   return { groups_accepted: totalAccepted, hidden_count: totalHidden };
 }
 
+export interface PeerConsensusResult {
+  success: boolean;
+  // Photos the consensus rule decided to hide. These are the rows we
+  // actually wrote into photo_curation (skipping the requester's own
+  // favorites — see the ON CONFLICT guard below).
+  hidden_count: number;
+  // Photos where peers had explicit signal but the consensus was to
+  // keep (i.e. at least one favorite vetoed the hide votes).
+  kept_count: number;
+  // Photos with no peer signal at all. Left untouched.
+  no_signal_count: number;
+}
+
+/**
+ * "Konsens übernehmen" — apply the majority of *peers'* curation
+ * decisions to the requester's own photo_curation rows for one group.
+ *
+ * Consensus rule (deliberately conservative, see investigation in
+ * docs/ai-auto-pick.md): hide a photo only if at least one peer hid it
+ * AND no peer favorited it. A single favorite vote vetoes the hide. No
+ * peer signal at all → leave the photo as-is.
+ *
+ * The privacy boundary is the same as the queue aggregate: a peer's
+ * decision only counts when peer and requester currently share at least
+ * one album containing the photo.
+ *
+ * Like acceptAiPickLogic, the user's own existing favorites are never
+ * clobbered into hidden — the ON CONFLICT guard ensures that.
+ */
+export async function acceptPeerConsensusLogic(
+  userId: number,
+  groupId: number,
+): Promise<PeerConsensusResult> {
+  const group = await dbFirst<{ id: number; reviewed_at: string | null }>(
+    db.select({ id: photoGroups.id, reviewed_at: photoGroups.reviewed_at })
+      .from(photoGroups)
+      .where(and(eq(photoGroups.id, groupId), eq(photoGroups.user_id, userId))),
+  );
+  if (!group) return { success: false, hidden_count: 0, kept_count: 0, no_signal_count: 0 };
+  if (group.reviewed_at) {
+    return { success: true, hidden_count: 0, kept_count: 0, no_signal_count: 0 };
+  }
+
+  const members = await dbAll<{ photo_id: number }>(
+    db.select({ photo_id: photoGroupMembers.photo_id })
+      .from(photoGroupMembers)
+      .where(eq(photoGroupMembers.group_id, groupId)),
+  );
+  if (members.length === 0) {
+    return { success: false, hidden_count: 0, kept_count: 0, no_signal_count: 0 };
+  }
+  const memberIds = members.map((m) => m.photo_id);
+
+  // Same EXISTS-double structure as in listReviewQueueLogic — only peers
+  // who currently share an album with the requester for this photo are
+  // allowed to influence the consensus.
+  const peerRows = await dbAll<{
+    photo_id: number;
+    hidden: number;
+    favorite: number;
+  }>(
+    db.select({
+      photo_id: photoCuration.photo_id,
+      hidden: sql<number>`SUM(CASE WHEN ${photoCuration.status} = 'hidden' THEN 1 ELSE 0 END)::int`,
+      favorite: sql<number>`SUM(CASE WHEN ${photoCuration.status} = 'favorite' THEN 1 ELSE 0 END)::int`,
+    })
+      .from(photoCuration)
+      .where(and(
+        ne(photoCuration.user_id, userId),
+        inArray(photoCuration.photo_id, memberIds),
+        sql`EXISTS (
+          SELECT 1 FROM ${albumPhotos} ap
+          WHERE ap.photo_id = ${photoCuration.photo_id}
+            AND (
+              EXISTS (SELECT 1 FROM ${albums} a WHERE a.id = ap.album_id AND a.user_id = ${userId})
+              OR EXISTS (SELECT 1 FROM ${albumShares} s WHERE s.album_id = ap.album_id AND s.user_id = ${userId})
+            )
+            AND (
+              EXISTS (SELECT 1 FROM ${albums} a WHERE a.id = ap.album_id AND a.user_id = ${photoCuration.user_id})
+              OR EXISTS (SELECT 1 FROM ${albumShares} s WHERE s.album_id = ap.album_id AND s.user_id = ${photoCuration.user_id})
+            )
+        )`,
+      ))
+      .groupBy(photoCuration.photo_id),
+  );
+  const peerByPhoto = new Map<number, { hidden: number; favorite: number }>();
+  for (const p of peerRows) peerByPhoto.set(p.photo_id, { hidden: p.hidden, favorite: p.favorite });
+
+  const toHide: number[] = [];
+  let keptWithSignal = 0;
+  let noSignal = 0;
+  for (const m of members) {
+    const peer = peerByPhoto.get(m.photo_id);
+    if (!peer || (peer.hidden === 0 && peer.favorite === 0)) {
+      noSignal++;
+      continue;
+    }
+    if (peer.hidden > 0 && peer.favorite === 0) {
+      toHide.push(m.photo_id);
+    } else {
+      keptWithSignal++;
+    }
+  }
+
+  const nowIso = new Date().toISOString();
+  for (const photoId of toHide) {
+    await db.execute(sql`
+      INSERT INTO photo_curation (user_id, photo_id, status, updated_at)
+      VALUES (${userId}, ${photoId}, 'hidden', ${nowIso})
+      ON CONFLICT (user_id, photo_id) DO UPDATE
+        SET status = CASE
+              WHEN photo_curation.status = 'favorite' THEN 'favorite'
+              ELSE 'hidden'
+            END,
+            updated_at = EXCLUDED.updated_at
+    `);
+  }
+
+  // Mark the group reviewed regardless of how many photos got hidden —
+  // the user's explicit "Konsens übernehmen" click is the review act,
+  // even if every photo turned out to have no peer signal.
+  await dbExec(
+    db.update(photoGroups)
+      .set({ reviewed_at: nowIso })
+      .where(eq(photoGroups.id, groupId)),
+  );
+
+  return {
+    success: true,
+    hidden_count: toHide.length,
+    kept_count: keptWithSignal,
+    no_signal_count: noSignal,
+  };
+}
+
 /**
  * Calibration dataset for Stufe D: pairs every reviewed similar group
  * with its members + sub-signals + the user's kept/hidden decision. The
@@ -610,6 +748,16 @@ export interface ReviewQueuePhoto {
   taken_at: string | null;
   curation: "visible" | "hidden" | "favorite";
   ai_picked: boolean;
+  // Aggregated curation status from *other* users who share at least one
+  // album containing this photo. Only explicit decisions are counted —
+  // `visible` is the implicit default and produces no row, so we cannot
+  // distinguish "actively kept" from "never reviewed". The two real
+  // signals are: `hidden` (peer voted to hide) and `favorite` (peer
+  // voted strongly to keep). Both 0 ⇒ no peer signal, render nothing.
+  peer_curation: {
+    hidden: number;
+    favorite: number;
+  };
 }
 
 export interface ReviewQueueGroup {
@@ -844,6 +992,53 @@ export async function listReviewQueueLogic(
     else membersByGroupId.set(m.group_id, [m]);
   }
 
+  // Peer-curation aggregate. For every photo in the response, count
+  // explicit curation rows from *other* users who currently share at
+  // least one album with the requester that contains the photo. Photos
+  // in private (un-shared) uploads naturally produce no peer signal,
+  // since no peer can have curated them.
+  //
+  // The double-EXISTS structure enforces the privacy boundary on both
+  // ends: the requester must reach the album (via owner or share) AND
+  // the peer must also reach the album. Otherwise stale curation rows
+  // from un-shared albums would leak into the aggregate.
+  const photoIdsForPeers = memberRows.map((m) => m.photo_id);
+  const peerByPhotoId = new Map<number, { hidden: number; favorite: number }>();
+  if (photoIdsForPeers.length > 0) {
+    const peerRows = await dbAll<{
+      photo_id: number;
+      hidden: number;
+      favorite: number;
+    }>(
+      db.select({
+        photo_id: photoCuration.photo_id,
+        hidden: sql<number>`SUM(CASE WHEN ${photoCuration.status} = 'hidden' THEN 1 ELSE 0 END)::int`,
+        favorite: sql<number>`SUM(CASE WHEN ${photoCuration.status} = 'favorite' THEN 1 ELSE 0 END)::int`,
+      })
+        .from(photoCuration)
+        .where(and(
+          ne(photoCuration.user_id, userId),
+          inArray(photoCuration.photo_id, photoIdsForPeers),
+          sql`EXISTS (
+            SELECT 1 FROM ${albumPhotos} ap
+            WHERE ap.photo_id = ${photoCuration.photo_id}
+              AND (
+                EXISTS (SELECT 1 FROM ${albums} a WHERE a.id = ap.album_id AND a.user_id = ${userId})
+                OR EXISTS (SELECT 1 FROM ${albumShares} s WHERE s.album_id = ap.album_id AND s.user_id = ${userId})
+              )
+              AND (
+                EXISTS (SELECT 1 FROM ${albums} a WHERE a.id = ap.album_id AND a.user_id = ${photoCuration.user_id})
+                OR EXISTS (SELECT 1 FROM ${albumShares} s WHERE s.album_id = ap.album_id AND s.user_id = ${photoCuration.user_id})
+              )
+          )`,
+        ))
+        .groupBy(photoCuration.photo_id),
+    );
+    for (const p of peerRows) {
+      peerByPhotoId.set(p.photo_id, { hidden: p.hidden, favorite: p.favorite });
+    }
+  }
+
   const groups: ReviewQueueGroup[] = groupRows.map((g) => {
     const members = membersByGroupId.get(g.id) ?? [];
     const pickedSet = new Set(g.ai_picked_photo_ids ?? []);
@@ -868,6 +1063,7 @@ export async function listReviewQueueLogic(
             ? m.curation
             : "visible",
         ai_picked: pickedSet.has(m.photo_id),
+        peer_curation: peerByPhotoId.get(m.photo_id) ?? { hidden: 0, favorite: 0 },
       })),
     };
   });
