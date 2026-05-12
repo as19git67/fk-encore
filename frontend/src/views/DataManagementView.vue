@@ -43,7 +43,7 @@ const cancelLoading = ref(false)
 const cancelledPending = ref(false)  // true after cancel until queue settles
 
 const serviceLabels: Record<string, string> = {
-  embedding: 'Bilderkennung',
+  embedding: 'Ähnlichkeitsanalyse',
   face_detection: 'Gesichtserkennung',
   face_assignment: 'Gesichtszuordnung',
   landmark: 'Sehenswürdigkeiten',
