@@ -28,6 +28,7 @@ import {
   getReviewQueue,
   acceptAiPick,
   pickPhotosInGroup,
+  reviewPhotoGroup,
   bulkAcceptHighConfidenceAiPicks,
   type ReviewQueueGroup,
   type ReviewQueueUserCalibration,
@@ -155,6 +156,22 @@ async function onAccept(group: ReviewQueueGroup) {
  */
 async function onPickOne(group: ReviewQueueGroup, photoId: number) {
   await runAcceptAction(group, () => pickPhotosInGroup(group.id, [photoId]))
+}
+
+/**
+ * "Alle wählen" — keep every member, mark the group reviewed.
+ *
+ * Use case: an intentional burst (z. B. eine Fotoreihe) wo der User
+ * keines der Bilder verlieren will. Wir flippen nur `reviewed_at` per
+ * reviewPhotoGroup() (ohne photoIds — der Endpoint fasst dann
+ * photo_curation nicht an) und schicken dann das gleiche optimistische
+ * Update durch runAcceptAction, damit die Card verschwindet.
+ */
+async function onKeepAll(group: ReviewQueueGroup) {
+  await runAcceptAction(group, async () => {
+    const res = await reviewPhotoGroup(group.id)
+    return { success: res.success, hidden_count: 0 }
+  })
 }
 
 async function runAcceptAction(
@@ -521,6 +538,15 @@ onMounted(() => {
             @click="onAccept(group)"
           />
           <Button
+            icon="pi pi-images"
+            outlined
+            severity="success"
+            label="Alle wählen"
+            v-tooltip.top="'Gruppe ohne Ausblenden als reviewed markieren'"
+            :disabled="pendingAcceptIds.has(group.id)"
+            @click="onKeepAll(group)"
+          />
+          <Button
             icon="pi pi-search"
             outlined
             label="Manuell prüfen"
@@ -594,15 +620,16 @@ onMounted(() => {
     </Dialog>
 
     <!-- Lightbox: tap a strip thumb (or the hero pick) to inspect at
-         full size. Backdrop click + ESC close. Single instance, kept
-         outside the v-for to avoid stale state when paginating. -->
+         full size. Click anywhere (image, backdrop) or press ESC to
+         close. Single instance, kept outside the v-for to avoid stale
+         state when paginating. -->
     <div
       v-if="lightboxFilename"
       class="rq-lightbox"
       role="dialog"
       aria-modal="true"
       aria-label="Foto in voller Größe"
-      @click.self="closeLightbox"
+      @click="closeLightbox"
     >
       <button
         type="button"
@@ -620,7 +647,6 @@ onMounted(() => {
         :src="thumb(lightboxFilename, 1600)"
         :alt="''"
         class="rq-lightbox-img"
-        @click.stop
       />
     </div>
   </div>
@@ -916,7 +942,7 @@ onMounted(() => {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
-  cursor: default;
+  cursor: zoom-out;
   user-select: none;
 }
 .rq-lightbox-close {
