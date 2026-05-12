@@ -44,6 +44,32 @@ the first locale entry.
 IPTC `Keywords` may arrive as an array or as a single string containing
 `;` / `,` separators; both shapes are normalised into `string[]`.
 
+### `.xmp` sidecar files
+
+`getExifMetadata()` additionally probes for an external XMP sidecar file
+next to the image (`findXmpSidecarPath()` in `photo.service.ts`). Two
+naming conventions are supported:
+
+1. **Extension preserved** — `photo.jpg.xmp` (darktable, digiKam default)
+2. **Extension replaced** — `photo.xmp` (Lightroom Classic default)
+
+When a sidecar is found it is parsed with the same `exifr` call as the
+embedded metadata and merged on top with **sidecar values winning**:
+
+```
+sidecar XMP → embedded XMP → embedded IPTC → embedded EXIF
+```
+
+This matches the convention used by Lightroom / darktable / digiKam,
+where the sidecar represents the user's intentional edits and the
+embedded metadata is treated as the original capture-time state.
+
+Library watchers also subscribe to `.xmp` add / change events: when a
+sidecar appears or is modified next to an already-imported photo, the
+`photos` row is re-synced via `handleExternalXmpChange()` in
+`libraries.service.ts`. Sidecar deletions are intentionally ignored —
+the embedded metadata is still authoritative once the sidecar is gone.
+
 ## Persisted columns (`photos` row)
 
 The insert in `importFile` (`libraries.service.ts`) and the upload/refresh
@@ -120,8 +146,19 @@ the result back into the file's `xmp:Rating` tag via `exiftool`:
 
 Write-back is limited to files the requester owns (favourites are per-user
 but the file is shared) and to writable extensions
-(`.jpg`/`.jpeg`/`.tif`/`.tiff`/`.png`). Failures are logged but never fail
-the DB update.
+(`.jpg`/`.jpeg`/`.tif`/`.tiff`/`.png`/`.heic`/`.heif`). For HEIC/HEIF
+exiftool updates only the XMP block inside the ISO-BMFF container — the
+image data is not re-encoded. Failures are logged but never fail the DB
+update.
+
+#### Disabling XMP write-back
+
+The whole write-back path (date_taken, description, favourite rating) is
+gated on the `PHOTO_XMP_WRITE_BACK` env var, default `true`. Set it to
+`false` / `0` / `no` / `off` (case-insensitive) to keep file bytes
+immutable — DB edits still propagate normally, only the on-disk EXIF /
+IPTC / XMP tags stay untouched. Useful for libraries on read-only
+mounts or when an external tool (e.g. Lightroom) owns the truth.
 
 ### Fields read but not stored
 
