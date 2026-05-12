@@ -17,7 +17,7 @@
  * the user wants to drill in (button "Manuell prüfen"), so this view
  * doesn't have to reinvent the per-photo hide/keep UX.
  */
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
@@ -271,6 +271,31 @@ function thumb(filename: string, w = 400): string {
   return getThumbUrl(filename, w)
 }
 
+// Strip thumbnails on the queue card are deliberately small to keep the
+// card list scannable, but at 200 px wide the user can't actually see
+// whether a non-pick sibling deserves the demotion. Tap a thumb to open
+// it bildschirmfüllend; tap the backdrop / press ESC to close. State
+// kept here (instead of inside the card v-for) so a single overlay
+// element is enough — Vue teleports it to the body.
+const lightboxFilename = ref<string | null>(null)
+const lightboxIsPicked = ref(false)
+
+function openLightbox(filename: string, isPicked: boolean) {
+  lightboxFilename.value = filename
+  lightboxIsPicked.value = isPicked
+}
+
+function closeLightbox() {
+  lightboxFilename.value = null
+}
+
+function onLightboxKey(e: KeyboardEvent) {
+  if (e.key === 'Escape' && lightboxFilename.value) closeLightbox()
+}
+
+onMounted(() => window.addEventListener('keydown', onLightboxKey))
+onBeforeUnmount(() => window.removeEventListener('keydown', onLightboxKey))
+
 function confidenceLabel(c: ReviewQueueGroup['ai_picked_confidence']): string {
   if (c === 'high') return 'Sicher'
   if (c === 'medium') return 'Mittel'
@@ -428,7 +453,10 @@ onMounted(() => {
         <!-- Regular layout for groups with 4+ photos. AI pick big +
              sibling strip + dual action buttons. -->
         <template v-else>
-          <!-- AI pick big. If multiple picks, show all big. -->
+          <!-- AI pick big. If multiple picks, show all big.
+               Tap the hero to open in fullscreen lightbox — same access
+               path as the sibling strip, since the user might also want
+               to inspect the pick at full resolution. -->
           <div class="rq-card-picks">
             <img
               v-for="photo in group.photos.filter((p) => p.ai_picked)"
@@ -438,6 +466,7 @@ onMounted(() => {
               class="rq-card-pick"
               loading="lazy"
               decoding="async"
+              @click="openLightbox(photo.filename, true)"
             />
             <!-- Fallback: no AI pick → show first photo big -->
             <img
@@ -447,19 +476,27 @@ onMounted(() => {
               class="rq-card-pick"
               loading="lazy"
               decoding="async"
+              @click="openLightbox(group.photos[0].filename, false)"
             />
           </div>
 
-          <!-- Sibling strip. Picks get a green check; non-picks dimmed. -->
+          <!-- Sibling strip. Picks get a green check; non-picks dimmed.
+               Tap any thumb to open it in the fullscreen lightbox so the
+               user can actually verify the KI's decision. -->
           <div v-if="group.photos.length > 1" class="rq-card-strip">
-            <div
+            <button
               v-for="photo in group.photos"
               :key="photo.id"
+              type="button"
               class="rq-thumb"
               :class="{
                 'rq-thumb--picked': photo.ai_picked,
                 'rq-thumb--non-pick': !photo.ai_picked && group.ai_picked_photo_ids.length > 0,
               }"
+              :aria-label="photo.ai_picked
+                ? 'KI-Pick — bildschirmfüllend ansehen'
+                : 'Bildschirmfüllend ansehen'"
+              @click="openLightbox(photo.filename, photo.ai_picked)"
             >
               <img
                 :src="thumb(photo.filename, 200)"
@@ -468,7 +505,7 @@ onMounted(() => {
                 decoding="async"
               />
               <i v-if="photo.ai_picked" class="pi pi-check rq-thumb-check" />
-            </div>
+            </button>
           </div>
         </template>
 
@@ -507,6 +544,7 @@ onMounted(() => {
       :group="activeGroup"
       :all-photos="[]"
       :total-unreviewed="total"
+      :single-group-mode="true"
       @close="onCompareClose"
       @reviewed="onCompareReviewed"
     />
@@ -554,6 +592,37 @@ onMounted(() => {
         />
       </template>
     </Dialog>
+
+    <!-- Lightbox: tap a strip thumb (or the hero pick) to inspect at
+         full size. Backdrop click + ESC close. Single instance, kept
+         outside the v-for to avoid stale state when paginating. -->
+    <div
+      v-if="lightboxFilename"
+      class="rq-lightbox"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Foto in voller Größe"
+      @click.self="closeLightbox"
+    >
+      <button
+        type="button"
+        class="rq-lightbox-close"
+        aria-label="Schließen"
+        @click="closeLightbox"
+      >
+        <i class="pi pi-times" />
+      </button>
+      <div v-if="lightboxIsPicked" class="rq-lightbox-badge">
+        <i class="pi pi-check-circle" />
+        KI-Pick
+      </div>
+      <img
+        :src="thumb(lightboxFilename, 1600)"
+        :alt="''"
+        class="rq-lightbox-img"
+        @click.stop
+      />
+    </div>
   </div>
 </template>
 
@@ -761,6 +830,7 @@ onMounted(() => {
   object-fit: contain;
   background: var(--p-content-hover-background);
   border-radius: 8px;
+  cursor: zoom-in;
 }
 
 .rq-card-strip {
@@ -777,6 +847,16 @@ onMounted(() => {
   border-radius: 6px;
   overflow: hidden;
   background: var(--p-content-hover-background);
+  /* Reset <button> defaults — the element is a button for keyboard
+     access (Enter/Space → openLightbox) but visually a thumb tile. */
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: zoom-in;
+}
+.rq-thumb:focus-visible {
+  outline: 2px solid var(--p-primary-color);
+  outline-offset: 2px;
 }
 .rq-thumb img {
   width: 100%;
@@ -816,5 +896,60 @@ onMounted(() => {
   display: flex;
   justify-content: center;
   padding: 16px 0;
+}
+
+/* ── Lightbox ── Full-bleed overlay so the user can verify what the
+   KI hid before committing. Backdrop is near-opaque (not the standard
+   modal-scrim) since the only thing that matters is seeing the photo. */
+.rq-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  cursor: zoom-out;
+}
+.rq-lightbox-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  cursor: default;
+  user-select: none;
+}
+.rq-lightbox-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 0;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+}
+.rq-lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+.rq-lightbox-badge {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 1rem;
+  background: rgba(34, 197, 94, 0.9);
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.85rem;
 }
 </style>
