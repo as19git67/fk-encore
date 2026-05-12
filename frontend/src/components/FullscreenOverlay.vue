@@ -622,8 +622,9 @@ function locationLabel(photo: Photo) {
     top: calc(2.75em + 0.25rem);
     right: 0.5rem;
     left: 0.5rem;
-    /* Keep clear of the bottom nav buttons (~4rem + safe-area + padding) */
-    bottom: calc(4rem + env(safe-area-inset-bottom, 0px) + 0.75rem);
+    /* Keep clear of the bottom nav buttons: button bottom at 4rem, button
+       height ~2.5rem (1rem icon + 2×0.75rem padding), plus 0.5rem gap. */
+    bottom: calc(7rem + env(safe-area-inset-bottom, 0px));
     width: auto;
     max-width: 480px;
     margin-left: auto;

@@ -168,7 +168,9 @@ function updateScrollEnds() {
 
 onMounted(() => {
   if (scrollRef.value) {
-    recalcLayout(scrollRef.value.clientWidth)
+    const style = getComputedStyle(scrollRef.value)
+    const hPad = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
+    recalcLayout(scrollRef.value.clientWidth - hPad)
     resizeObs = new ResizeObserver((entries) => {
       const entry = entries[0]
       if (entry) recalcLayout(entry.contentRect.width)
@@ -514,6 +516,10 @@ defineExpose({
   overflow-x: hidden;
   background: var(--p-content-background, #fff);
   -webkit-overflow-scrolling: touch;
+  contain: layout size style;
+  scrollbar-gutter: stable;
+  padding: 6px;
+  box-sizing: border-box;
 }
 
 .vg-state {
@@ -538,8 +544,9 @@ defineExpose({
   left: 0;
   right: 0;
   display: grid;
-  gap: 4px;
-  padding: 0;
+  column-gap: 4px;
+  padding-bottom: 4px;
+  box-sizing: border-box;
 }
 
 .vg-cell {
@@ -601,15 +608,7 @@ defineExpose({
   pointer-events: none;
 }
 
-/* Stack styling */
-.vg-cell--stack {
-  outline: 2px solid var(--p-primary-300, #93c5fd);
-  outline-offset: -2px;
-}
-
-.vg-cell--stack.vg-cell--stack-cover {
-  outline-color: var(--p-primary-500, #3b82f6);
-}
+/* Stack badge sits on the cover tile; no frame on the cell itself. */
 
 .vg-stack-badge {
   position: absolute;
@@ -649,22 +648,14 @@ defineExpose({
   font-size: 0.7rem;
 }
 
-/* Selection */
-.vg-cell--selected {
-  outline: 3px solid var(--p-primary-500, #3b82f6);
+.vg-cell--selected,
+.vg-cell--cursor {
+  outline: 3px solid var(--p-focus-ring-color);
   outline-offset: -3px;
 }
 
 .vg-cell--selected .vg-thumb {
   opacity: 0.8;
-}
-
-/* Keyboard cursor — visually distinct from `--selected` (which is the
-   batch-curation tick) by using a soft outer ring rather than a hard
-   outline, so the two states can co-exist on the same cell. */
-.vg-cell--cursor {
-  box-shadow: 0 0 0 3px var(--p-primary-300, #93c5fd),
-              0 0 0 6px rgba(59, 130, 246, 0.25);
 }
 
 .vg-select-icon {

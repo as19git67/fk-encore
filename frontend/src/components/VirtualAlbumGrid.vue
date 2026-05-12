@@ -61,7 +61,9 @@ function recalcLayout(width: number) {
 
 onMounted(() => {
   if (scrollRef.value) {
-    recalcLayout(scrollRef.value.clientWidth)
+    const style = getComputedStyle(scrollRef.value)
+    const hPad = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
+    recalcLayout(scrollRef.value.clientWidth - hPad)
     resizeObs = new ResizeObserver((entries) => {
       const entry = entries[0]
       if (entry) recalcLayout(entry.contentRect.width)
@@ -206,7 +208,7 @@ watch(
         class="vag__row"
         :style="{
           transform: `translateY(${row.start}px)`,
-          height: `${cellSize}px`,
+          height: `${rowHeight}px`,
           gridTemplateColumns: `repeat(${cols}, 1fr)`,
         }"
       >
@@ -257,7 +259,10 @@ watch(
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  contain: strict;
+  contain: layout size style;
+  scrollbar-gutter: stable;
+  padding: 6px;
+  box-sizing: border-box;
 }
 
 .vag__inner {
@@ -271,7 +276,9 @@ watch(
   left: 0;
   right: 0;
   display: grid;
-  gap: 4px;
+  column-gap: 4px;
+  padding-bottom: 4px;
+  box-sizing: border-box;
 }
 
 .album-card {
@@ -280,7 +287,7 @@ watch(
   /* No border — outline handles focus/restored-focus and we need the full
      cell width for a 140-px-wide tile that mirrors the gallery thumb. */
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: 4px;
   padding: 0;
   cursor: pointer;
   transition: transform 0.2s;
@@ -294,7 +301,7 @@ watch(
 
 .album-card:focus,
 .album-card.album-card--restored-focus {
-  outline: 3px solid var(--p-primary-color, #3b82f6);
+  outline: 3px solid var(--p-focus-ring-color);
   outline-offset: 2px;
 }
 
