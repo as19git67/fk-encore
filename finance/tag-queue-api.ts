@@ -149,7 +149,7 @@ export const reenqueueAllTagJobs = api(
 
     const userId = Number(auth.userID);
     for (const r of rows) {
-      await enqueueTagSuggestion(r.id, userId);
+      await enqueueTagSuggestion(r.id, userId, 3);
     }
     if (rows.length > 0) triggerTagWorker();
     return { enqueued: rows.length };
