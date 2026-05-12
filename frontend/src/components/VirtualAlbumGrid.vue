@@ -260,6 +260,7 @@ watch(
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   contain: layout size style;
+  scrollbar-gutter: stable;
   padding: 6px;
   box-sizing: border-box;
 }

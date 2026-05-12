@@ -516,6 +516,8 @@ defineExpose({
   overflow-x: hidden;
   background: var(--p-content-background, #fff);
   -webkit-overflow-scrolling: touch;
+  contain: layout size style;
+  scrollbar-gutter: stable;
   padding: 6px;
   box-sizing: border-box;
 }
@@ -606,15 +608,7 @@ defineExpose({
   pointer-events: none;
 }
 
-/* Stack styling */
-.vg-cell--stack {
-  outline: 2px solid var(--p-primary-300, #93c5fd);
-  outline-offset: -2px;
-}
-
-.vg-cell--stack.vg-cell--stack-cover {
-  outline-color: var(--p-primary-500, #3b82f6);
-}
+/* Stack badge sits on the cover tile; no frame on the cell itself. */
 
 .vg-stack-badge {
   position: absolute;
