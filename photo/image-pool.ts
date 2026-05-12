@@ -36,7 +36,10 @@ parentPort.on('message', async (msg) => {
   try {
     if (msg.op === 'resize') {
       const input = Buffer.from(msg.payload.buffer);
-      const out = await sharp(input)
+      // failOn: 'none' makes libvips tolerate JPEG warnings such as
+      // "Invalid SOS parameters for sequential JPEG" that sharp would
+      // otherwise escalate to a hard error, killing the scan job.
+      const out = await sharp(input, { failOn: 'none' })
         .rotate()
         .resize(msg.payload.width, null, { withoutEnlargement: true })
         .jpeg({ quality: 85 })
@@ -164,7 +167,7 @@ export async function resizeImageInPool(imageBuffer: Buffer, targetWidth: number
   if (!w) {
     // Pool disabled — do the work inline. Same semantics as the original
     // resizeImage so callers can rely on identical output.
-    return sharp(imageBuffer)
+    return sharp(imageBuffer, { failOn: 'none' })
       .rotate()
       .resize(targetWidth, null, { withoutEnlargement: true })
       .jpeg({ quality: 85 })
