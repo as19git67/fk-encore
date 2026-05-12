@@ -653,20 +653,14 @@ defineExpose({
   font-size: 0.7rem;
 }
 
-/* Selection */
-.vg-cell--selected {
+.vg-cell--selected,
+.vg-cell--cursor {
   outline: 3px solid var(--p-focus-ring-color);
   outline-offset: -3px;
 }
 
 .vg-cell--selected .vg-thumb {
   opacity: 0.8;
-}
-
-/* Keyboard cursor */
-.vg-cell--cursor {
-  outline: 3px solid var(--p-focus-ring-color);
-  outline-offset: 2px;
 }
 
 .vg-select-icon {
