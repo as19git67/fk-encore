@@ -813,6 +813,21 @@ export function acceptAiPick(id: number) {
   )
 }
 
+/**
+ * Manual single-pick action (Stufe C). Keeps the supplied photos,
+ * hides the rest, marks the group reviewed. Used by the One-Click-Pick
+ * UI in the review queue for 2- and 3-photo groups.
+ */
+export function pickPhotosInGroup(groupId: number, photoIds: number[]) {
+  return apiFetch<{ success: boolean; hidden_count: number }>(
+    `/photos/groups/${groupId}/pick-photos`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ photoIds }),
+    },
+  )
+}
+
 export function bulkAcceptHighConfidenceAiPicks() {
   return apiFetch<{ groups_accepted: number; hidden_count: number }>(
     '/photos/groups/bulk-accept-ai-picks',
@@ -837,6 +852,57 @@ export interface AiPickCalibrationEntry {
 export function getAiPickCalibration() {
   return apiFetch<{ entries: AiPickCalibrationEntry[] }>(
     '/photos/groups/ai-pick-calibration',
+  )
+}
+
+// ---------- Review Queue (Track I — Rapid Review) ----------
+
+export interface ReviewQueuePhoto {
+  id: number
+  filename: string
+  taken_at: string | null
+  curation: 'visible' | 'hidden' | 'favorite'
+  ai_picked: boolean
+}
+
+export interface ReviewQueueGroup {
+  id: number
+  cover_photo_id: number | null
+  member_count: number
+  ai_picked_photo_ids: number[]
+  ai_picked_confidence: 'high' | 'medium' | 'low' | null
+  /** Δ vs. runner-up; drives the confidence-bar render. */
+  runner_up_delta: number | null
+  photos: ReviewQueuePhoto[]
+}
+
+export interface ReviewQueueUserCalibration {
+  fitted_at: string
+  top1_accuracy_face: number
+  top1_accuracy_non_face: number
+  pair_count_face: number
+  pair_count_non_face: number
+}
+
+export interface ReviewQueueResponse {
+  total: number
+  offset: number
+  groups: ReviewQueueGroup[]
+  user_calibration: ReviewQueueUserCalibration | null
+}
+
+export function getReviewQueue(opts: {
+  offset?: number
+  limit?: number
+  confidence?: 'high' | 'medium' | 'low'
+} = {}) {
+  const sp = new URLSearchParams()
+  if (opts.offset !== undefined) sp.set('offset', String(opts.offset))
+  if (opts.limit !== undefined) sp.set('limit', String(opts.limit))
+  if (opts.confidence) sp.set('confidence', opts.confidence)
+  const qs = sp.toString()
+  return apiFetch<ReviewQueueResponse>(
+    `/photos/groups/review-queue${qs ? `?${qs}` : ''}`,
   )
 }
 
