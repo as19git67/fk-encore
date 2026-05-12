@@ -802,6 +802,7 @@ const extractedFields = computed(() => {
 .amount-pos { color: var(--p-text-color); }
 .amount-neg { color: var(--p-red-600, #c0392b); }
 .multiline {
+  font-family: monospace;
   white-space: pre-wrap;
 }
 .copy-field {
