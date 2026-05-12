@@ -355,33 +355,103 @@ export interface BulkAcceptResult {
 }
 
 /**
+ * Chunk size for the bulk-accept SQL pipeline. Each round-trip processes
+ * up to BULK_ACCEPT_CHUNK_SIZE high-confidence groups in a single CTE
+ * statement; the loop stops once a chunk returns zero groups.
+ *
+ * 500 keeps the IN-list small enough for Postgres to plan efficiently
+ * (typical group has ~5 members, so the inner photo_group_members join
+ * touches ~2.5k rows per chunk) and bounds the response time per
+ * round-trip to well under the Cloudflare 100 s gateway timeout, even
+ * with the worst-case 2k+ groups the initial rollout produces.
+ */
+const BULK_ACCEPT_CHUNK_SIZE = 500;
+
+/**
  * Bulk-accept every unreviewed high-confidence AI pick of the user. Used
  * by the "Alle hochkonfidenten KI-Picks bestätigen" button in
  * DataManagementView for the initial rollout against ~5k groups.
+ *
+ * Implemented as a chunked CTE pipeline so the whole rollout finishes in
+ * a handful of round-trips: the sequential per-group variant did ~5
+ * INSERTs per group via acceptAiPickLogic which, against 2k+ groups, hit
+ * the Cloudflare 100 s edge timeout and returned 502 to the browser.
+ *
+ * Each chunk:
+ *   1. picks up to BULK_ACCEPT_CHUNK_SIZE matching groups (high
+ *      confidence, unreviewed, non-empty ai_picked_photo_ids),
+ *   2. computes the non-picked members via a join with
+ *      photo_group_members,
+ *   3. upserts photo_curation = 'hidden' for them (favorite stays
+ *      favorite — same guard as acceptAiPickLogic),
+ *   4. marks the groups reviewed,
+ *   5. returns counts.
+ *
+ * Loop terminates when a chunk reports zero accepted groups; hidden_count
+ * matches the sequential semantics (counts every non-picked member, not
+ * just the rows that actually transitioned to 'hidden').
  */
 export async function bulkAcceptHighConfidencePicksLogic(
   userId: number,
 ): Promise<BulkAcceptResult> {
-  const groups = await dbAll<{ id: number }>(
-    db.select({ id: photoGroups.id })
-      .from(photoGroups)
-      .where(and(
-        eq(photoGroups.user_id, userId),
-        isNull(photoGroups.reviewed_at),
-        isNotNull(photoGroups.ai_picked_at),
-        eq(photoGroups.ai_picked_confidence, "high"),
-      )),
-  );
-  let accepted = 0;
-  let hidden = 0;
-  for (const { id } of groups) {
-    const result = await acceptAiPickLogic(userId, id);
-    if (result.success) {
-      accepted++;
-      hidden += result.hidden_count;
-    }
+  let totalAccepted = 0;
+  let totalHidden = 0;
+  // Hard cap on iterations as a safety net: with chunk size 500 and the
+  // largest plausible rollout (~50k groups), 200 iterations is ample
+  // while still preventing a runaway loop if a future bug accidentally
+  // re-selects the same groups.
+  for (let i = 0; i < 200; i++) {
+    const result = await db.execute(sql`
+      WITH targets AS (
+        SELECT pg.id AS group_id, pg.ai_picked_photo_ids
+        FROM photo_groups pg
+        WHERE pg.user_id = ${userId}
+          AND pg.reviewed_at IS NULL
+          AND pg.ai_picked_at IS NOT NULL
+          AND pg.ai_picked_confidence = 'high'
+          AND pg.ai_picked_photo_ids IS NOT NULL
+          AND array_length(pg.ai_picked_photo_ids, 1) > 0
+        LIMIT ${BULK_ACCEPT_CHUNK_SIZE}
+      ),
+      to_hide AS (
+        SELECT pgm.photo_id
+        FROM photo_group_members pgm
+        JOIN targets t ON t.group_id = pgm.group_id
+        WHERE NOT (pgm.photo_id = ANY(t.ai_picked_photo_ids))
+      ),
+      inserted AS (
+        INSERT INTO photo_curation (user_id, photo_id, status, updated_at)
+        SELECT ${userId}, photo_id, 'hidden', NOW()
+        FROM to_hide
+        ON CONFLICT (user_id, photo_id) DO UPDATE
+          SET status = CASE
+                WHEN photo_curation.status = 'favorite' THEN 'favorite'
+                ELSE 'hidden'
+              END,
+              updated_at = EXCLUDED.updated_at
+        RETURNING photo_id
+      ),
+      reviewed AS (
+        UPDATE photo_groups
+        SET reviewed_at = NOW()
+        WHERE id IN (SELECT group_id FROM targets)
+        RETURNING id
+      )
+      SELECT
+        (SELECT COUNT(*) FROM reviewed)::int AS groups_accepted,
+        (SELECT COUNT(*) FROM to_hide)::int AS hidden_count,
+        (SELECT COUNT(*) FROM inserted)::int AS rows_written
+    `);
+    const row = result.rows[0] as {
+      groups_accepted: number;
+      hidden_count: number;
+      rows_written: number;
+    };
+    if (!row || row.groups_accepted === 0) break;
+    totalAccepted += row.groups_accepted;
+    totalHidden += row.hidden_count;
   }
-  return { groups_accepted: accepted, hidden_count: hidden };
+  return { groups_accepted: totalAccepted, hidden_count: totalHidden };
 }
 
 /**

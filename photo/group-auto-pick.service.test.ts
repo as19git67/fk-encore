@@ -422,6 +422,124 @@ describe("bulkAcceptHighConfidencePicksLogic", () => {
     expect(highRow.reviewed_at).not.toBeNull();
     expect(medRow.reviewed_at).toBeNull();
   });
+
+  it("preserves favorites across the bulk run (no clobber)", async () => {
+    // Same property as acceptAiPickLogic guards in the per-group path,
+    // re-verified for the CTE pipeline: a non-picked photo that the user
+    // had previously marked 'favorite' must stay favorite after bulk-
+    // accept, never silently degrade to 'hidden'.
+    const u = await makeUser("bulk-favorite@test.com");
+    const a = await makePhoto(u, { details: { blur_score: 0.10 } });
+    const b = await makePhoto(u, { details: { blur_score: 0.90 } });
+    const g = await makeGroup(u, a, [a, b]);
+    await dbExec(
+      db.insert(photoCuration).values({
+        user_id: u,
+        photo_id: a,
+        status: "favorite",
+      }),
+    );
+    await recomputeAiPicksForGroups(u);
+
+    await bulkAcceptHighConfidencePicksLogic(u);
+
+    const [row] = await db.select().from(photoCuration)
+      .where(eq(photoCuration.photo_id, a));
+    expect(row.status).toBe("favorite");
+    const [grp] = await db.select().from(photoGroups).where(eq(photoGroups.id, g));
+    expect(grp.reviewed_at).not.toBeNull();
+  });
+
+  it("marks a multi-pick group reviewed even when no member needs hiding", async () => {
+    // When every member of a high-confidence group is in the pick set
+    // (multi-pick over the 0.92 threshold), there is nothing to hide.
+    // The group must still leave the unreviewed queue, otherwise the
+    // bulk run would loop forever on it.
+    const u = await makeUser("bulk-all-picked@test.com");
+    const a = await makePhoto(u, { details: { blur_score: 0.95 } });
+    const b = await makePhoto(u, { details: { blur_score: 0.95 } });
+    const g = await makeGroup(u, a, [a, b]);
+    await recomputeAiPicksForGroups(u);
+    // Sanity: the recompute really did mark both as picked.
+    const [scored] = await db.select().from(photoGroups).where(eq(photoGroups.id, g));
+    expect(scored.ai_picked_photo_ids?.sort()).toEqual([a, b].sort());
+    // Force the confidence to 'high' so this group matches the bulk
+    // filter — a tied multi-pick lands on 'low' naturally, but we want
+    // to exercise the "nothing to hide, still mark reviewed" path.
+    await dbExec(
+      db.update(photoGroups)
+        .set({ ai_picked_confidence: "high" })
+        .where(eq(photoGroups.id, g)),
+    );
+
+    const result = await bulkAcceptHighConfidencePicksLogic(u);
+    expect(result.groups_accepted).toBe(1);
+    expect(result.hidden_count).toBe(0);
+
+    const [row] = await db.select().from(photoGroups).where(eq(photoGroups.id, g));
+    expect(row.reviewed_at).not.toBeNull();
+    const curation = await dbAll<{ status: string }>(
+      db.select({ status: photoCuration.status }).from(photoCuration)
+        .where(eq(photoCuration.user_id, u)),
+    );
+    expect(curation).toHaveLength(0);
+  });
+
+  it("processes more groups than the per-chunk limit in a single call", { timeout: 60_000 }, async () => {
+    // Regression guard for the 502 reported by the user: the previous
+    // sequential implementation timed out on 2k+ groups. The new CTE
+    // pipeline batches in chunks of 500 and loops until the queue is
+    // empty. Crossing the chunk boundary with > 500 groups proves the
+    // loop terminates and aggregates totals correctly.
+    //
+    // 600 is plenty to cross the 500-group chunk boundary while keeping
+    // the test fast enough for a single Vitest run (~3 s on the
+    // sandbox).
+    const u = await makeUser("bulk-large@test.com");
+    const N = 600;
+    const groupIds: number[] = [];
+    for (let i = 0; i < N; i++) {
+      const a = await makePhoto(u, { details: { blur_score: 0.10 } });
+      const b = await makePhoto(u, { details: { blur_score: 0.90 } });
+      groupIds.push(await makeGroup(u, a, [a, b]));
+    }
+    await recomputeAiPicksForGroups(u);
+
+    const result = await bulkAcceptHighConfidencePicksLogic(u);
+    expect(result.groups_accepted).toBe(N);
+    expect(result.hidden_count).toBe(N);
+
+    const unreviewed = await dbAll<{ id: number }>(
+      db.select({ id: photoGroups.id }).from(photoGroups)
+        .where(eq(photoGroups.user_id, u)),
+    );
+    expect(unreviewed.length).toBe(N);
+    const stillUnreviewed = await dbAll<{ id: number; reviewed_at: string | null }>(
+      db.select({
+        id: photoGroups.id,
+        reviewed_at: photoGroups.reviewed_at,
+      }).from(photoGroups).where(eq(photoGroups.user_id, u)),
+    );
+    expect(stillUnreviewed.every((g) => g.reviewed_at !== null)).toBe(true);
+  });
+
+  it("is idempotent: a second bulk-accept run accepts zero groups", async () => {
+    // After the first run all high-confidence groups are reviewed, so
+    // the WHERE clause in the targets CTE returns nothing on the second
+    // run and the loop exits on the first iteration.
+    const u = await makeUser("bulk-idempotent@test.com");
+    const a = await makePhoto(u, { details: { blur_score: 0.10 } });
+    const b = await makePhoto(u, { details: { blur_score: 0.90 } });
+    await makeGroup(u, a, [a, b]);
+    await recomputeAiPicksForGroups(u);
+
+    const first = await bulkAcceptHighConfidencePicksLogic(u);
+    expect(first.groups_accepted).toBe(1);
+
+    const second = await bulkAcceptHighConfidencePicksLogic(u);
+    expect(second.groups_accepted).toBe(0);
+    expect(second.hidden_count).toBe(0);
+  });
 });
 
 describe("exportCalibrationDatasetLogic", () => {
