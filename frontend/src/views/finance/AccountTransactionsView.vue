@@ -24,11 +24,13 @@ import { useTxSelectionStore } from '../../stores/finance/selection'
 import { useTxFiltersStore } from '../../stores/finance/txFilters'
 import DateRangePresets from '../../components/DateRangePresets.vue'
 import type {
+  Holding,
   ListTransactionsQuery,
   OverviewAccount,
   OverviewSection,
   Transaction,
 } from '../../api/finance'
+import { listHoldings } from '../../api/finance'
 
 const route = useRoute()
 const router = useRouter()
@@ -237,6 +239,77 @@ watch(
   async () => {
     await loadTransactions()
   },
+)
+
+// ── Depot holdings (only for kind === "depot") ──────────────────────
+
+const isDepot = computed(() => {
+  if (!mode.value || mode.value.kind !== 'account') return false
+  return resolvedAccount.value?.type_kind === 'depot'
+})
+
+const holdings = ref<Holding[]>([])
+const holdingsAsOf = ref<string | null>(null)
+const holdingsLoading = ref(false)
+
+async function loadHoldings() {
+  if (!isDepot.value || !mode.value || mode.value.kind !== 'account') {
+    holdings.value = []
+    holdingsAsOf.value = null
+    return
+  }
+  holdingsLoading.value = true
+  try {
+    const resp = await listHoldings(mode.value.accountId)
+    holdings.value = resp.items
+    holdingsAsOf.value = resp.as_of
+  } catch {
+    holdings.value = []
+    holdingsAsOf.value = null
+  } finally {
+    holdingsLoading.value = false
+  }
+}
+
+const holdingsTotal = computed(() => {
+  let sum = 0
+  for (const h of holdings.value) {
+    const v = Number(h.value)
+    if (Number.isFinite(v)) sum += v
+  }
+  return sum
+})
+
+function formatCurrency(val: string | number | null, currency?: string): string {
+  if (val === null) return '–'
+  const n = typeof val === 'number' ? val : Number(val)
+  if (!Number.isFinite(n)) return String(val)
+  return new Intl.NumberFormat('de-DE', {
+    style: 'currency',
+    currency: currency || 'EUR',
+  }).format(n)
+}
+
+function formatAmount(val: string | null): string {
+  if (val === null) return '–'
+  const n = Number(val)
+  if (!Number.isFinite(n)) return val
+  return new Intl.NumberFormat('de-DE', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 4,
+  }).format(n)
+}
+
+function holdingShare(h: Holding): string {
+  if (holdingsTotal.value === 0 || h.value === null) return '–'
+  const pct = (Number(h.value) / holdingsTotal.value) * 100
+  return pct.toFixed(1) + ' %'
+}
+
+watch(isDepot, (v) => { if (v) void loadHoldings() }, { immediate: true })
+watch(
+  () => mode.value && mode.value.kind === 'account' ? mode.value.accountId : null,
+  () => { if (isDepot.value) void loadHoldings() },
 )
 
 // ── Transaction grouping (by booking_date) ───────────────────────────
@@ -594,6 +667,51 @@ function goBack() {
           :disabled="!hasActiveFilters && formQuery.length === 0 && formTags.length === 0 && !formFrom && !formTo"
           @click="clearFilters"
         />
+      </div>
+    </section>
+
+    <!-- ── Holdings table (depot accounts only) ─────────────────────── -->
+    <section v-if="isDepot" class="holdings-section">
+      <h2 class="holdings-title">
+        Positionen
+        <span v-if="holdingsAsOf" class="holdings-date">
+          ({{ formatShortDate(holdingsAsOf) }})
+        </span>
+      </h2>
+
+      <div v-if="holdingsLoading" class="tx-loading">Lädt Positionen …</div>
+      <div v-else-if="holdings.length === 0" class="tx-empty">Keine Positionen vorhanden.</div>
+      <div v-else class="holdings-table-wrap">
+        <table class="holdings-table">
+          <thead>
+            <tr>
+              <th class="holdings-col-name">Name / ISIN</th>
+              <th class="holdings-col-num">Stück</th>
+              <th class="holdings-col-num">Kurs</th>
+              <th class="holdings-col-num">Wert</th>
+              <th class="holdings-col-num">Anteil</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="h in holdings" :key="h.id">
+              <td class="holdings-col-name">
+                <span class="holdings-name">{{ h.name || '–' }}</span>
+                <span class="holdings-isin">{{ h.isin || h.wkn || '' }}</span>
+              </td>
+              <td class="holdings-col-num">{{ formatAmount(h.amount) }}</td>
+              <td class="holdings-col-num">{{ formatCurrency(h.price, h.currency ?? undefined) }}</td>
+              <td class="holdings-col-num holdings-value">{{ formatCurrency(h.value, h.currency ?? undefined) }}</td>
+              <td class="holdings-col-num">{{ holdingShare(h) }}</td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <td class="holdings-col-name" colspan="3">Gesamt</td>
+              <td class="holdings-col-num holdings-value">{{ formatCurrency(holdingsTotal) }}</td>
+              <td class="holdings-col-num">100 %</td>
+            </tr>
+          </tfoot>
+        </table>
       </div>
     </section>
 
@@ -1023,5 +1141,66 @@ function goBack() {
 }
 .tx-dummy {
   font-size: 0.85rem;
+}
+
+/* ── Holdings table ──────────────────────────────────────────────── */
+
+.holdings-section {
+  margin-bottom: 1.5rem;
+}
+.holdings-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 0.75rem;
+}
+.holdings-date {
+  font-weight: 400;
+  color: var(--p-text-muted-color);
+  font-size: 0.85rem;
+}
+.holdings-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.holdings-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.holdings-table th {
+  text-align: left;
+  font-weight: 600;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 2px solid var(--p-content-border-color);
+  white-space: nowrap;
+}
+.holdings-table td {
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--p-content-border-color);
+  vertical-align: top;
+}
+.holdings-table tfoot td {
+  font-weight: 600;
+  border-top: 2px solid var(--p-content-border-color);
+  border-bottom: none;
+}
+.holdings-col-num {
+  text-align: right !important;
+  white-space: nowrap;
+}
+.holdings-col-name {
+  min-width: 120px;
+}
+.holdings-name {
+  display: block;
+  font-weight: 500;
+}
+.holdings-isin {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color);
+}
+.holdings-value {
+  font-weight: 600;
 }
 </style>

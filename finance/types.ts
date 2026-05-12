@@ -124,6 +124,23 @@ export interface FintsTransactionData {
 }
 
 /**
+ * Normalised holding from a depot portfolio response (MT535 / HKWPD).
+ * Fields stay strings/nulls to avoid float drift — same convention as
+ * FintsTransactionData.
+ */
+export interface FintsHoldingData {
+  isin: string | null;
+  wkn: string | null;
+  name: string | null;
+  amount: string | null;
+  price: string | null;
+  value: string | null;
+  currency: string | null;
+  acquisitionDate: string | null;
+  acquisitionPrice: string | null;
+}
+
+/**
  * Result of fetching one bank account via the FinTS dialog. One
  * snapshot represents everything we learned about the account in the
  * current sync pass.
@@ -137,6 +154,9 @@ export interface FintsAccountSnapshot {
   label: string;
   balance: { asOf: string; amount: string; currency: string } | null;
   transactions: FintsTransactionData[];
+  /** Depot holdings from MT535 portfolio response. Only populated for
+   *  accounts with accountKind === "depot". */
+  holdings: FintsHoldingData[];
   /** Per-account soft errors — statements or balance needed an extra TAN, etc. */
   errors: string[];
 }

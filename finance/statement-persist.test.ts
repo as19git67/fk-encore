@@ -6,6 +6,7 @@ import {
   financeAccount,
   financeAccountAccess,
   financeAccountBalance,
+  financeAccountHolding,
   financeAccountType,
   financeBankcontact,
   financeTag,
@@ -15,7 +16,7 @@ import {
 } from "../db/schema";
 import { persistFetchResult } from "./statement-persist";
 import * as tagQueue from "./tag-queue";
-import type { FetchResult, FintsTransactionData } from "./types";
+import type { FetchResult, FintsHoldingData, FintsTransactionData } from "./types";
 
 // enqueueTagSuggestion would write to finance_tag_queue. We just verify
 // that persistFetchResult fires it once per freshly inserted transaction.
@@ -32,6 +33,7 @@ beforeEach(async () => {
   await db.delete(financeTagTransaction);
   await db.delete(financeTransaction);
   await db.delete(financeTag);
+  await db.delete(financeAccountHolding);
   await db.delete(financeAccountBalance);
   await db.delete(financeAccountAccess);
   await db.delete(financeAccount);
@@ -134,6 +136,7 @@ describe("persistFetchResult — matching linked accounts", () => {
           label: "Bank-Label",
           balance: { asOf: "2026-04-24", amount: "1000.00", currency: "EUR" },
           transactions: [tx()],
+          holdings: [],
           errors: [],
         },
       ]),
@@ -176,6 +179,7 @@ describe("persistFetchResult — matching linked accounts", () => {
       label: "Giro",
       balance: null,
       transactions: [tx({ bookingDate: "2026-04-01", amount: "-10.00" })],
+      holdings: [],
       errors: [],
     };
     const first = await persistFetchResult(bcId, result([snapshot]));
@@ -203,6 +207,7 @@ describe("persistFetchResult — matching linked accounts", () => {
             tx({ purpose: "A", bookingDate: "2026-04-01" }),
             tx({ purpose: "B", bookingDate: "2026-04-02" }),
           ],
+          holdings: [],
           errors: [],
         },
       ]),
@@ -227,6 +232,7 @@ describe("persistFetchResult — unknown / pending accounts", () => {
           label: "Bank-Label Giro",
           balance: { asOf: "2026-04-24", amount: "500.00", currency: "EUR" },
           transactions: [tx()],
+          holdings: [],
           errors: [],
         },
       ]),
@@ -268,6 +274,7 @@ describe("persistFetchResult — unknown / pending accounts", () => {
           label: "Bank-Linked",
           balance: null,
           transactions: [tx()],
+          holdings: [],
           errors: [],
         },
         {
@@ -278,6 +285,7 @@ describe("persistFetchResult — unknown / pending accounts", () => {
           label: "Stranger",
           balance: null,
           transactions: [],
+          holdings: [],
           errors: [],
         },
       ]),
@@ -312,6 +320,7 @@ describe("persistFetchResult — unknown / pending accounts", () => {
           label: "Closed",
           balance: { asOf: "2026-04-24", amount: "1000.00", currency: "EUR" },
           transactions: [tx()],
+          holdings: [],
           errors: [],
         },
       ]),
@@ -351,6 +360,7 @@ describe("persistFetchResult — unknown / pending accounts", () => {
           label: "L",
           balance: null,
           transactions: [],
+          holdings: [],
           errors: ["statements-tan-required"],
         },
         {
@@ -361,11 +371,198 @@ describe("persistFetchResult — unknown / pending accounts", () => {
           label: "U",
           balance: null,
           transactions: [],
+          holdings: [],
           errors: ["balance-error:9010 x"],
         },
       ]),
     );
     expect(stats.errors).toContain("account L: statements-tan-required");
     expect(stats.errors).toContain("account U: balance-error:9010 x");
+  });
+});
+
+// ======================================================================
+// Holdings persistence (depot accounts)
+// ======================================================================
+
+function holding(overrides: Partial<FintsHoldingData> = {}): FintsHoldingData {
+  return {
+    isin: "DE000A1EWWW0",
+    wkn: "A1EWWW",
+    name: "ADIDAS",
+    amount: "5",
+    price: "200.00",
+    value: "1000.00",
+    currency: "EUR",
+    acquisitionDate: null,
+    acquisitionPrice: null,
+    ...overrides,
+  };
+}
+
+describe("persistFetchResult — holdings persistence", () => {
+  it("writes holdings for a depot account with two positions", async () => {
+    const bcId = await insertBankcontact();
+    const accountId = await insertLinkedAccount({
+      bankcontactId: bcId,
+      fintsAccountNumber: "DEPOT-1",
+    });
+
+    const stats = await persistFetchResult(
+      bcId,
+      result([
+        {
+          accountNumber: "DEPOT-1",
+          iban: null,
+          accountKind: "depot",
+          currency: "EUR",
+          label: "Depot",
+          balance: { asOf: "2026-05-10", amount: "5000.00", currency: "EUR" },
+          transactions: [],
+          holdings: [
+            holding({ isin: "DE000A1EWWW0", name: "ADIDAS", value: "1000.00" }),
+            holding({ isin: "US0378331005", name: "APPLE", value: "4000.00" }),
+          ],
+          errors: [],
+        },
+      ]),
+    );
+
+    expect(stats.holdings_written).toBe(2);
+    expect(stats.balances_written).toBe(1);
+
+    const rows = await db
+      .select()
+      .from(financeAccountHolding)
+      .where(eq(financeAccountHolding.account_id, accountId));
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.isin).sort()).toEqual(["DE000A1EWWW0", "US0378331005"]);
+  });
+
+  it("upserts idempotently — second sync on same day does not duplicate", async () => {
+    const bcId = await insertBankcontact();
+    await insertLinkedAccount({ bankcontactId: bcId, fintsAccountNumber: "DEPOT-1" });
+
+    const snapshot = {
+      accountNumber: "DEPOT-1",
+      iban: null,
+      accountKind: "depot",
+      currency: "EUR",
+      label: "Depot",
+      balance: { asOf: "2026-05-10", amount: "5000.00", currency: "EUR" },
+      transactions: [] as FintsTransactionData[],
+      holdings: [
+        holding({ isin: "DE000A1EWWW0", name: "ADIDAS", value: "1000.00" }),
+        holding({ isin: "US0378331005", name: "APPLE", value: "4000.00" }),
+      ],
+      errors: [] as string[],
+    };
+
+    const first = await persistFetchResult(bcId, result([snapshot]));
+    const second = await persistFetchResult(bcId, result([snapshot]));
+
+    expect(first.holdings_written).toBe(2);
+    expect(second.holdings_written).toBe(2);
+
+    const allRows = await db.select().from(financeAccountHolding);
+    expect(allRows).toHaveLength(2);
+  });
+
+  it("upserts updates value when price changes on the same day", async () => {
+    const bcId = await insertBankcontact();
+    const accountId = await insertLinkedAccount({
+      bankcontactId: bcId,
+      fintsAccountNumber: "DEPOT-1",
+    });
+
+    const base = {
+      accountNumber: "DEPOT-1",
+      iban: null,
+      accountKind: "depot",
+      currency: "EUR",
+      label: "Depot",
+      balance: { asOf: "2026-05-10", amount: "5000.00", currency: "EUR" },
+      transactions: [] as FintsTransactionData[],
+      errors: [] as string[],
+    };
+
+    await persistFetchResult(bcId, result([{
+      ...base,
+      holdings: [holding({ isin: "DE000A1EWWW0", value: "1000.00", price: "200.00" })],
+    }]));
+    await persistFetchResult(bcId, result([{
+      ...base,
+      holdings: [holding({ isin: "DE000A1EWWW0", value: "1200.00", price: "240.00" })],
+    }]));
+
+    const rows = await db
+      .select()
+      .from(financeAccountHolding)
+      .where(eq(financeAccountHolding.account_id, accountId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].value).toBe("1200.00");
+    expect(rows[0].price).toBe("240.000000");
+  });
+
+  it("identifies holding by WKN when ISIN is null", async () => {
+    const bcId = await insertBankcontact();
+    const accountId = await insertLinkedAccount({
+      bankcontactId: bcId,
+      fintsAccountNumber: "DEPOT-1",
+    });
+
+    const base = {
+      accountNumber: "DEPOT-1",
+      iban: null,
+      accountKind: "depot",
+      currency: "EUR",
+      label: "Depot",
+      balance: { asOf: "2026-05-10", amount: "1000.00", currency: "EUR" },
+      transactions: [] as FintsTransactionData[],
+      errors: [] as string[],
+    };
+
+    await persistFetchResult(bcId, result([{
+      ...base,
+      holdings: [holding({ isin: null, wkn: "710000", name: "Daimler" })],
+    }]));
+    await persistFetchResult(bcId, result([{
+      ...base,
+      holdings: [holding({ isin: null, wkn: "710000", name: "Daimler", value: "2000.00" })],
+    }]));
+
+    const rows = await db
+      .select()
+      .from(financeAccountHolding)
+      .where(eq(financeAccountHolding.account_id, accountId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].wkn).toBe("710000");
+    expect(rows[0].value).toBe("2000.00");
+  });
+
+  it("does not write holdings when snapshot has no balance", async () => {
+    const bcId = await insertBankcontact();
+    await insertLinkedAccount({ bankcontactId: bcId, fintsAccountNumber: "DEPOT-1" });
+
+    const stats = await persistFetchResult(
+      bcId,
+      result([
+        {
+          accountNumber: "DEPOT-1",
+          iban: null,
+          accountKind: "depot",
+          currency: "EUR",
+          label: "Depot",
+          balance: null,
+          transactions: [],
+          holdings: [holding()],
+          errors: [],
+        },
+      ]),
+    );
+
+    expect(stats.holdings_written).toBe(0);
+    const rows = await db.select().from(financeAccountHolding);
+    expect(rows).toHaveLength(0);
   });
 });

@@ -38,6 +38,7 @@ import type {
   DialogResult,
   FetchResult,
   FintsAccountSnapshot,
+  FintsHoldingData,
   FintsTransactionData,
   SyncOptions,
 } from "./types";
@@ -919,6 +920,7 @@ async function fetchOneAccount(
     label,
     balance: null,
     transactions: [],
+    holdings: [],
     errors: [],
   };
 
@@ -1185,11 +1187,23 @@ async function fetchDepotPortfolio(
           `holdings=${stmt.holdings?.length ?? 0}`,
       );
       for (const h of stmt.holdings ?? []) {
+        const holding: FintsHoldingData = {
+          isin: h.isin ?? null,
+          wkn: h.wkn ?? null,
+          name: h.name ?? null,
+          amount: h.amount != null ? String(h.amount) : null,
+          price: h.price != null ? String(h.price) : null,
+          value: h.value != null ? toAmountString(h.value) : null,
+          currency: h.currency ?? null,
+          acquisitionDate: h.acquisitionDate ? toIsoDate(h.acquisitionDate) : null,
+          acquisitionPrice: h.acquisitionPrice != null ? String(h.acquisitionPrice) : null,
+        };
+        snapshot.holdings.push(holding);
         console.log(
           `[fints] portfolio ${account.accountNumber} holding: ` +
-            `isin=${h.isin ?? "?"} wkn=${h.wkn ?? "?"} ` +
-            `name=${(h.name ?? "").slice(0, 40)} ` +
-            `amount=${h.amount ?? 0} value=${h.value ?? 0} ${h.currency ?? ""}`,
+            `isin=${holding.isin ?? "?"} wkn=${holding.wkn ?? "?"} ` +
+            `name=${(holding.name ?? "").slice(0, 40)} ` +
+            `amount=${holding.amount ?? 0} value=${holding.value ?? 0} ${holding.currency ?? ""}`,
         );
       }
     } else {
@@ -1260,6 +1274,7 @@ export async function resumeFetchAfterTan(
     label: buildAccountLabel(currentAccount, accountKind),
     balance: null,
     transactions: [],
+    holdings: [],
     errors: [],
   };
 

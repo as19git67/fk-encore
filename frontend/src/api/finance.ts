@@ -160,6 +160,8 @@ export type SyncResponse =
       transactions_inserted?: number
       /** Rows inserted into finance_account_balance. */
       balances_written?: number
+      /** Holding rows written/upserted for depot accounts. */
+      holdings_written?: number
       /** True when any per-account fetch hit a mid-flight TAN we skipped. */
       partial?: boolean
       /** Per-account bank answers/exceptions when partial=true. Format
@@ -339,6 +341,40 @@ export async function unlinkAccount(id: number): Promise<Account> {
 
 // closeAccount / reopenAccount removed — both flows are now expressed
 // as `updateAccount(id, { closed_at: <iso> | null })`.
+
+// ----------------------------------------------------------------------
+// Holdings (depot accounts)
+// ----------------------------------------------------------------------
+
+export interface Holding {
+  id: number
+  account_id: number
+  as_of: string
+  isin: string | null
+  wkn: string | null
+  name: string | null
+  amount: string | null
+  price: string | null
+  value: string | null
+  currency: string | null
+  acquisition_date: string | null
+  acquisition_price: string | null
+}
+
+export interface ListHoldingsResponse {
+  items: Holding[]
+  as_of: string | null
+}
+
+export async function listHoldings(
+  accountId: number,
+  opts: { asOf?: string } = {},
+): Promise<ListHoldingsResponse> {
+  const params = new URLSearchParams()
+  if (opts.asOf) params.set('asOf', opts.asOf)
+  const qs = params.toString()
+  return apiFetch(`/finance/accounts/${accountId}/holdings${qs ? '?' + qs : ''}`)
+}
 
 // ----------------------------------------------------------------------
 // Overview (configurable landing page)

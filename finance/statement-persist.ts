@@ -28,15 +28,16 @@
  */
 
 import { createHash } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import db from "../db/database";
 import {
   financeAccount,
   financeAccountBalance,
+  financeAccountHolding,
   financeTransaction,
 } from "../db/schema";
-import type { FetchResult, FintsTransactionData } from "./types";
+import type { FetchResult, FintsHoldingData, FintsTransactionData } from "./types";
 import { enqueueTagSuggestion } from "./tag-queue";
 import { triggerTagWorker } from "./tag-worker";
 
@@ -67,6 +68,7 @@ export interface PersistStats {
   transactions_inserted: number;
   transactions_skipped_duplicate: number;
   balances_written: number;
+  holdings_written: number;
   unknown: UnknownAccount[];
   errors: string[];
 }
@@ -83,6 +85,7 @@ export async function persistFetchResult(
     transactions_inserted: 0,
     transactions_skipped_duplicate: 0,
     balances_written: 0,
+    holdings_written: 0,
     unknown: [],
     errors: [],
   };
@@ -235,6 +238,42 @@ export async function persistFetchResult(
           `account ${snapshot.accountNumber}: balance insert failed: ` +
             ((err as Error).message ?? String(err)),
         );
+      }
+    }
+
+    // ---- Write holdings (depot accounts) ----
+    if (snapshot.holdings && snapshot.holdings.length > 0 && snapshot.balance) {
+      const asOfDate = snapshot.balance.asOf;
+      for (const h of snapshot.holdings) {
+        try {
+          await db.execute(sql`
+            INSERT INTO finance_account_holding
+              (account_id, as_of, isin, wkn, name, amount, price, value, currency,
+               acquisition_date, acquisition_price)
+            VALUES (
+              ${accountId}, ${asOfDate}::date,
+              ${h.isin}, ${h.wkn}, ${h.name},
+              ${h.amount}, ${h.price}, ${h.value}, ${h.currency},
+              ${h.acquisitionDate ? sql`${h.acquisitionDate}::date` : sql`NULL`},
+              ${h.acquisitionPrice}
+            )
+            ON CONFLICT (account_id, as_of, COALESCE(isin, wkn, name))
+            DO UPDATE SET
+              amount = EXCLUDED.amount,
+              price  = EXCLUDED.price,
+              value  = EXCLUDED.value,
+              currency = EXCLUDED.currency,
+              acquisition_date  = EXCLUDED.acquisition_date,
+              acquisition_price = EXCLUDED.acquisition_price
+          `);
+          stats.holdings_written++;
+        } catch (err) {
+          stats.errors.push(
+            `account ${snapshot.accountNumber}: holding upsert failed ` +
+              `(${h.isin ?? h.wkn ?? h.name}): ` +
+              ((err as Error).message ?? String(err)),
+          );
+        }
       }
     }
   }
