@@ -2,42 +2,35 @@
 
 ## Summary
 
-Track I des Auto-Selection-Plans (Issue #358 / #346). Bei 50 k+ Fotos
-entstehen über die DINOv2-Ähnlichkeitssuche typischerweise 5 k+
-Similar-Groups. Manuelles Review ist nicht skalierbar. Die KI bewertet
-jede Gruppe anhand bereits vorhandener Per-Foto-Signale und schlägt
-einen "Best-of-Group"-Pick vor (oder mehrere bei knapper Entscheidung).
-Der User kann den Vorschlag übernehmen, ignorieren oder per Toggle
-übersteuern. **User-Entscheidungen haben immer Vorrang** — die KI fasst
-reviewte Gruppen nicht mehr an.
+Track I der Photo-Organisation (Issues [#358](https://github.com/as19git67/fk-encore/issues/358) / [#346](https://github.com/as19git67/fk-encore/issues/346)). Bei 50 k+ Fotos entstehen über die DINOv2-Ähnlichkeitssuche typischerweise 5 k+ Similar-Groups. Manuelles Review ist nicht skalierbar. Die KI bewertet jede Gruppe anhand bereits vorhandener Per-Foto-Signale, schlägt einen "Best-of-Group"-Pick vor (oder mehrere bei knapper Entscheidung) und versteckt die übrigen Fotos hinter einem Marker. Der User kann den Vorschlag übernehmen, ignorieren oder per Toggle übersteuern.
+
+**User-Entscheidungen haben immer Vorrang** — die KI fasst reviewte Gruppen nicht mehr an.
 
 ## Pipeline
 
 ```
                      ┌──────────────────────────────────────────┐
-                     │  embedding_service                       │
-                     │  (Python, separate Container)            │
+                     │  embedding_service (Python)              │
                      │   • DINOv2 Embeddings → pgvector         │
                      │   • Quality-Scorer schreibt nach         │
-                     │     photos.ai_quality_details (JSONB)    │
-                     │     - sharpness                          │
-                     │     - contrast                           │
-                     │     - exposure                           │
-                     │     - clip_aesthetics / composition /    │
-                     │       technical                          │
-                     │     - face_sharpness                     │
-                     │     - eyes_open                          │
-                     │     - face_composition                   │
+                     │     photos.ai_quality_details (JSONB):   │
+                     │     sharpness, contrast, exposure,       │
+                     │     clip_aesthetics/composition/technical,│
+                     │     face_sharpness, eyes_open,           │
+                     │     face_composition                     │
                      │   • InsightFace → faces.bbox (JSON)      │
+                     │   • photos.width / photos.height         │
                      └──────────────────┬───────────────────────┘
                                         │
                                         ▼
         ┌────────────────────────────────────────────────────┐
         │  photo.service.ts                                  │
-        │   • findPhotoGroupsLogic – clustert über pgvector  │
+        │   • findPhotoGroupsLogic – clustert via pgvector   │
         │     → photo_groups, photo_group_members            │
-        │   • Am Ende: recomputeAiPicksForUser()             │
-        │     scort alle unreviewten Gruppen                 │
+        │   • Am Ende: recomputeAiPicksForUser() scort alle  │
+        │     unreviewten Gruppen                            │
+        │   • backfillPhotoDimensionsLogic – einmaliger      │
+        │     width/height-Seed via sharp().rotate()         │
         └──────────────────┬─────────────────────────────────┘
                            │
                            ▼
@@ -46,8 +39,9 @@ reviewte Gruppen nicht mehr an.
         │   • loadSignalsForPhotos – ein Query pro Batch     │
         │   • Aggregiert face_coverage aus faces.bbox        │
         │   • Klassifiziert orientation aus photos.width/.h  │
+        │   • Lädt per-User-Gewichte aus                     │
+        │     ai_pick_user_weights, fällt auf Defaults zurück│
         │   • Persistiert in photo_groups.ai_pick_details    │
-        │     (per-Foto Score + Sub-Signale)                 │
         └──────────────────┬─────────────────────────────────┘
                            │
                            ▼
@@ -57,16 +51,23 @@ reviewte Gruppen nicht mehr an.
         │   • computeGroupPick – Multi-Pick + Confidence     │
         │     + Orientation-Diversität                       │
         └────────────────────────────────────────────────────┘
+                           │
+                           ▼
+        ┌────────────────────────────────────────────────────┐
+        │  group-auto-pick.calibration.ts                    │
+        │   • fitPairwiseWeights – Logistic-Regression       │
+        │     über die User-Reviews                          │
+        │   • Persistiert auf ai_pick_user_weights           │
+        └────────────────────────────────────────────────────┘
 ```
 
 ## Scoring-Formel
 
-Pro Foto wird ein Score in [0, 1] berechnet. Branch je nachdem ob
-mindestens ein Gesicht detektiert wurde:
+Pro Foto wird ein Score in [0, 1] berechnet. Branch je nachdem ob mindestens ein Gesicht detektiert wurde. Gewichte werden zur Laufzeit aus `ai_pick_user_weights` geladen — wenn keine Kalibrierung existiert, gelten die Defaults unten.
 
-### Face-Branch (`faces.count > 0`)
+### Face-Branch (`faces.count > 0`) — Default-Gewichte
 
-| Signal              | Gewicht | Quelle |
+| Signal              | Default | Quelle |
 |---------------------|---------|--------|
 | `face_sharpness`    | 0.40    | `ai_quality_details.face_sharpness` |
 | `eyes_open`         | 0.20    | `ai_quality_details.eyes_open` |
@@ -76,9 +77,9 @@ mindestens ein Gesicht detektiert wurde:
 | `clip_aesthetics`   | 0.05    | `ai_quality_details.clip_aesthetics` |
 | `exposure+contrast` | 0.05    | 0.5 · (`exposure` + `contrast`) |
 
-### Non-Face-Branch
+### Non-Face-Branch — Default-Gewichte
 
-| Signal              | Gewicht | Quelle |
+| Signal              | Default | Quelle |
 |---------------------|---------|--------|
 | `sharpness`         | 0.40    | `ai_quality_details.sharpness` |
 | `clip_aesthetics`   | 0.25    | `ai_quality_details.clip_aesthetics` |
@@ -86,9 +87,23 @@ mindestens ein Gesicht detektiert wurde:
 | `clip_technical`    | 0.10    | `ai_quality_details.clip_technical` |
 | `exposure+contrast` | 0.10    | 0.5 · (`exposure` + `contrast`) |
 
-Fehlende Einzelsignale werden auf neutral 0.5 gemappt (`clamp01`), damit
-ein Foto mit unvollständiger Qualitäts-Bewertung weder bestraft noch
-belohnt wird.
+Fehlende Einzelsignale werden auf neutral 0.5 gemappt (`clamp01`), damit ein Foto mit unvollständiger Qualitäts-Bewertung weder bestraft noch belohnt wird.
+
+## Per-User-Kalibrierung (Stufe D)
+
+Lernt aus den bereits reviewten Gruppen welche Signale dem User wichtig sind.
+
+**Pairwise logistic regression** über kept-vs-hidden-Paare innerhalb reviewter Gruppen:
+- Pro reviewter Gruppe: für jedes Paar (kept, hidden) wird ein Feature-Diff gebildet
+- Face- und Non-Face-Branch werden getrennt fittiert
+- Vanilla gradient descent: 600 iters, lr 0.10, positive Clipping + Sum-to-1-Normalisierung pro Schritt
+- Persistenz auf `ai_pick_user_weights`
+
+Safeguard `MIN_PAIRS_FOR_FIT` (10): Branches mit zu wenig Daten behalten die Defaults — ein halbtrainierter User soll nicht den anderen Branch verschlechtern.
+
+Trigger: Button **"KI auf meine Vorlieben kalibrieren"** in der `DataManagementView`. Nach einem Fit zeigt der Server pro Branch die Top-1-Trefferquote vor/nach dem Fit (Vergleich gegen die Defaults), die UI rendert das als Info-Message.
+
+Reversibel: `DELETE FROM ai_pick_user_weights WHERE user_id = X` stellt die Defaults wieder her.
 
 ## Multi-Pick und Confidence
 
@@ -106,260 +121,282 @@ confidence =
    "low"    sonst
 ```
 
-**Orientation-Diversität:** Enthält die Gruppe gleichzeitig Portrait-
-und Landscape-Fotos derselben Szene, wird zusätzlich pro vorhandener
-Orientierung das jeweils beste Foto gepickt — sofern es mindestens
-`ORIENTATION_FLOOR · top.score` (0.75) erreicht. Square-Fotos werden
-ignoriert, damit ein einzelner annähernd quadratischer Outlier in
-einer Portrait-Burst keinen Slot kapert.
+**Orientation-Diversität:** Enthält die Gruppe gleichzeitig Portrait- und Landscape-Fotos derselben Szene, wird zusätzlich pro vorhandener Orientierung das jeweils beste Foto gepickt — sofern es mindestens `ORIENTATION_FLOOR · top.score` (0.75) erreicht. Square-Fotos werden ignoriert.
 
-## UX-Verhalten
+## UX
 
-- **`high` Confidence:** Nicht-Picks werden im Grid automatisch
-  versteckt (über Server-Filter `aiHiddenMode=exclude`). User sieht im
-  Grid nur die Picks, mit einem `+N`-Marker am Cover-Foto. Das
-  Marker-Icon ist ein durchgestrichenes Auge (`pi-eye-slash`) — der
-  visuelle Hinweis, dass dahinter Geschwister-Fotos versteckt sind.
-- **`medium`:** Marker mit Orange-Tint, **kein** Auto-Hide. Alle
-  Mitglieder sind woanders im Grid sichtbar; der Marker zeigt nur die
-  Gruppen-Zugehörigkeit.
-- **`low`:** Marker neutral, **kein** Auto-Hide. Reviewte Gruppen
-  verlieren ebenfalls den `pi-eye-slash`-Hinweis (die Geschwister sind
-  vom User selbst behandelt).
+### Galerie (`VirtualGallery.vue`)
 
-**Im Fullscreen-Modus** zeigt der `FullscreenOverlay` denselben Marker
-oben links: durchgestrichenes Auge + `+N` bei high-confidence /
-unreviewt, `pi-images` + `+N` sonst. Tap → Review-Dialog,
-identisch zum Grid-Marker.
+- **`high` Confidence:** Nicht-Picks werden im Grid automatisch versteckt (Server-Filter `aiHiddenMode=exclude`). User sieht nur den Pick, mit `+N`-Marker am Cover.
+- **`medium`:** Marker mit Orange-Tint, kein Auto-Hide.
+- **`low`:** Marker neutral, kein Auto-Hide.
 
-**Click-Semantik im Grid** ist überall einheitlich, unabhängig von der
-Confidence-Stufe:
-
-- **Klick auf das Foto selbst** → Fullscreen-Ansicht (wie bei jedem
-  Foto). Die KI-Auswahl ist die Standard-Ansicht — der User soll sie
-  ohne Reibung anschauen können.
+Klick-Semantik im Grid:
+- **Klick aufs Foto** → Fullscreen-Ansicht (auch bei Gruppen-Mitgliedern)
 - **Klick auf den `+N`-Marker** → Review-Dialog (`PhotoCompareView`)
-  mit allen Gruppen-Mitgliedern und dem "KI-Vorschlag übernehmen"-
-  Button.
-- **Ctrl/Cmd/Shift-Klick** auf irgendeinen Teil eines Gruppen-Fotos →
-  Multi-Select der **ganzen** Gruppe.
+- **Ctrl/Cmd/Shift-Klick** → Multi-Select der ganzen Gruppe
 
-Im Review-Dialog (`PhotoCompareView.vue`) gibt es einen
-"KI-Vorschlag übernehmen"-Button. Klick →
-`POST /photos/groups/:id/accept-ai-pick` → die Nicht-Picks werden über
-das bestehende `photo_curation`-Mechanismus auf `hidden` gesetzt (Favoriten
-bleiben **immer** geschützt), die Gruppe wird als reviewt markiert.
+Im **Fullscreen** wird derselbe `+N`-Marker oben links eingeblendet, mit `pi-eye-slash`-Icon bei high-confidence-versteckten Geschwistern. Tap → Review-Dialog.
 
-**Bulk-Apply:** In der `DataManagementView` gibt es
-"Alle hochkonfidenten KI-Picks bestätigen"
-(`POST /photos/groups/bulk-accept-ai-picks`). Wendet das Accept für
-alle `high`-Confidence Gruppen ohne `reviewed_at` an. Macht den ersten
-Roll-out auf tausende Gruppen praktikabel.
+**Filter-Toggle "KI-ausgeblendete anzeigen"** in `FilterMenu.vue` neben "Ausgeblendete anzeigen". Aktiv → Server-Filter wird zu `aiHiddenMode=include` → alle KI-versteckten Fotos werden wieder sichtbar, Marker bleibt.
 
-**Filter-Toggle:** In `FilterMenu.vue` neben "Ausgeblendete anzeigen"
-liegt "KI-ausgeblendete anzeigen". Aktiviert setzt der Client
-`showAiHidden=true` → Server-Filter wird zu `aiHiddenMode=include` →
-alle KI-versteckten Fotos werden wieder sichtbar (Marker bleibt).
+### Rapid Review (`/fotos/review-queue`)
+
+Eigene Route + Menüeintrag "Gruppen-Review". Vertikale Karten-Liste, sortiert high → medium → low → no-pick, innerhalb gleicher Stufe nach Gruppengröße absteigend.
+
+**Per Karte:**
+- Confidence-Chip + **Confidence-Bar** (visualisiert Δ zum Runner-up; 0.10 = volle Bar)
+- Bei **≤ 3 Mitgliedern (Stufe C):** alle Fotos side-by-side gleich groß. Ein Klick auf ein Foto = "dieses behalten, Rest verstecken, reviewt". KI-Vorschlag bekommt grüne Outline + Check-Icon, ist aber kein Pflicht-Pick.
+- Bei **4+ Mitgliedern:** KI-Pick groß + Sibling-Strip mit gedimmten Nicht-Picks.
+- Action-Bar: **"KI-Pick übernehmen"** (atomar) + **"Manuell prüfen"** (öffnet `PhotoCompareView` für volle Granularität).
+
+**Header:**
+- Counter "X offen"
+- **"Alle hochkonfidenten bestätigen"** mit Disclaimer-Dialog: zeigt die Top-1-Trefferquote aus der Per-User-Kalibrierung (Stufe D) und verlangt einen zweiten Klick. Wenn keine Kalibrierung existiert, weist der Dialog darauf hin.
+- Filter-Toggle Alle / Sicher / Mittel / Unsicher.
+
+**Pagination:** 30 Karten pro Page, "Mehr laden"-Button (kein Infinite-Scroll wegen Card-Höhen-Stabilität).
+
+### Review-Dialog (`PhotoCompareView.vue`)
+
+- **"KI-Vorschlag übernehmen"** wenn die Gruppe einen Pick hat → ruft `POST /photos/groups/:id/accept-ai-pick` → hidet jedes Nicht-Picked-Mitglied via `photo_curation` (Favoriten geschützt). Group wird `reviewed_at` gesetzt.
+- Sobald die Compare-View zugemacht wird **nach** einem echten Review, lädt die Galerie automatisch nach (`compareNeedsReload`-Flag). Pure Dismiss (X / Esc) bleibt ohne Reload.
+
+### Admin (`DataManagementView.vue`)
+
+- **"Gruppen neu berechnen"** — Re-Clustering (DINOv2 + pgvector). Triggert implizit Re-Scoring.
+- **"KI-Picks neu berechnen"** — server-weit alle unreviewten Gruppen mit aktuellen Gewichten.
+- **"Alle hochkonfidenten KI-Picks bestätigen"** — Bulk-Apply, gleichzeitig der Default-Pfad ohne UI im Rapid-Review-View.
+- **"Bildmaße nachtragen"** — einmaliger Backfill für die Orientation-Regel (ohne Maße kein Effekt).
+- **"Kalibrierungs-Export herunterladen"** — JSON mit reviewten Gruppen + Sub-Signalen für Offline-Analyse.
+- **"KI auf meine Vorlieben kalibrieren"** — fittiert per-User-Gewichte; Info-Message zeigt Trefferquote vor/nach Fit.
 
 ## Datenmodell
 
-### `photo_groups` (erweitert in Migration 0075)
+### `photos`
 
-| Spalte                | Bedeutung |
-|-----------------------|-----------|
-| `ai_picked_photo_ids` | `INTEGER[]`. Mehrere Picks möglich (Multi-Pick + Orientation-Diversity). NULL = nicht gescort. |
-| `ai_picked_at`        | `TIMESTAMPTZ`. Wall-Clock des letzten Scoring-Passes. |
-| `ai_picked_confidence`| `TEXT`: `high` / `medium` / `low`. Treibt den Gallery-Filter. |
-| `ai_pick_details`     | `JSONB`. Per-Foto Score + Sub-Signale (für Stufe-D-Kalibrierung). |
+| Spalte | Migration | Bedeutung |
+|--------|-----------|-----------|
+| `ai_quality_score`     | 0003 | Composite-Score (0..1). |
+| `ai_quality_details`   | 0004 | JSONB mit Sub-Signalen unter den Keys `sharpness`, `contrast`, `exposure`, `clip_aesthetics`, `clip_composition`, `clip_technical`, `face_sharpness`, `eyes_open`, `face_composition`. |
+| `width` / `height`     | 0076 | Post-EXIF-Rotation. Für Orientation-Diversität. |
 
-`reviewed_at` (bestehende Spalte) hat Vorrang: KI-Picks werden auf
-reviewten Gruppen weder neu berechnet noch im Gallery-Filter angewandt.
+### `photo_groups`
 
-### `photos` (erweitert in Migration 0076)
+| Spalte | Migration | Bedeutung |
+|--------|-----------|-----------|
+| `ai_picked_photo_ids`  | 0075 | `INTEGER[]`. Multi-Pick erlaubt (Multi-Pick-Threshold + Orientation-Diversität). NULL = nicht gescort. |
+| `ai_picked_at`         | 0075 | Wall-Clock des letzten Scoring-Passes. |
+| `ai_picked_confidence` | 0075 | `high` / `medium` / `low`. Treibt den Gallery-Filter. |
+| `ai_pick_details`      | 0075 | JSONB. Per-Foto Score + Sub-Signale + `runner_up_delta`. |
 
-| Spalte   | Bedeutung |
-|----------|-----------|
-| `width`  | post-EXIF-Rotation. Befüllt im Face-Scan-Pfad + per Backfill-Endpoint. |
-| `height` | dito. |
+`reviewed_at` (bestehend) hat Vorrang: KI-Picks werden auf reviewten Gruppen weder neu berechnet noch im Gallery-Filter angewandt.
 
-Wird von `classifyOrientation` zur Orientation-Diversity-Regel genutzt.
-NULL → Orientation undefined → Regel no-ops (sichere Degradation).
+Partial-Index `photo_groups_ai_picked_active_idx` (Migration 0075) auf `(user_id) WHERE ai_picked_at IS NOT NULL AND reviewed_at IS NULL AND ai_picked_confidence = 'high'` — beschleunigt die häufige "soll dieses Foto AI-hidden werden?"-Query.
+
+### `ai_pick_user_weights` (Migration 0079)
+
+| Spalte | Bedeutung |
+|--------|-----------|
+| `user_id`    | PK, FK → users. |
+| `weights`    | JSONB: `{ face: number[7], non_face: number[5] }`. Beide Vektoren summieren zu 1. |
+| `fitted_at`  | Timestamp des letzten Fits. |
+| `metadata`   | JSONB: Pair-Counts + Top-1-Trefferquote vor/nach Fit. |
 
 ## API-Endpoints (`photo/photo.ts`)
 
-| Method | Path                                         | Funktion |
-|--------|----------------------------------------------|----------|
-| `POST` | `/photos/find-groups`                        | Re-clustering. Recompute der KI-Picks läuft am Ende implizit. |
-| `POST` | `/photos/groups/recompute-ai-picks`          | Server-weit, alle unreviewten Gruppen neu scoren. Admin-Button. |
-| `POST` | `/photos/groups/:id/accept-ai-pick`          | KI-Pick als User-Entscheidung übernehmen (Hide via curation). |
-| `POST` | `/photos/groups/bulk-accept-ai-picks`        | Bulk-Accept aller hochkonfidenten Gruppen des Users. |
-| `GET`  | `/photos/groups/ai-pick-calibration`         | Kalibrierungs-Export. Scort reviewte Gruppen inline bei Bedarf. |
-| `POST` | `/photos/backfill-dimensions`                | Server-weiter Backfill von width/height für Bestandsfotos. |
+| Method | Path                                                  | Funktion |
+|--------|-------------------------------------------------------|----------|
+| `POST` | `/photos/find-groups`                                 | Re-Clustering. Auto-Recompute der Picks am Ende. |
+| `POST` | `/photos/groups/recompute-ai-picks`                   | Server-weit, alle unreviewten Gruppen neu scoren. |
+| `POST` | `/photos/groups/:id/accept-ai-pick`                   | KI-Auswahl als User-Review übernehmen. |
+| `POST` | `/photos/groups/:id/pick-photos`                      | Manueller Pick (Stufe C): keep `photoIds`, hide rest. |
+| `POST` | `/photos/groups/bulk-accept-ai-picks`                 | Bulk-Apply aller hochkonfidenten Gruppen. |
+| `GET`  | `/photos/groups/ai-pick-calibration`                  | Kalibrierungs-Export (JSON). Scort reviewte Gruppen on-demand. |
+| `POST` | `/photos/groups/calibrate-ai-pick-weights`            | Fit per-User-Gewichte (Stufe D). |
+| `GET`  | `/photos/groups/review-queue?offset=&limit=&confidence=` | Rapid-Review-Stream + Per-User-Calibration-Metadaten. |
+| `POST` | `/photos/backfill-dimensions`                         | Server-weiter Backfill von `width`/`height`. |
 
-Alle Endpoints benötigen `data.manage` (außer accept-ai-pick →
-`photos.delete`).
-
-## Kalibrierungs-Workflow
-
-1. User reviewt einige Gruppen manuell (mind. 50, idealerweise 100+).
-   "Reviewt" heißt: User hat die KI-Picks bestätigt, oder per Compare-
-   Dialog Fotos auf `hidden` gesetzt.
-2. "Kalibrierungs-Export herunterladen" im DataManagement.
-   Browser bekommt eine JSON-Datei mit pro-Gruppe:
-   - `group_ai_picked_photo_ids`
-   - `group_confidence`
-   - Pro Foto: `user_kept`, `ai_picked`, alle Sub-Signale
-3. Offline-Analyse mit Python (Beispiel-Snippet siehe Investigation-
-   Kommentar auf #346) misst die Trefferquote der KI gegen die User-
-   Entscheidungen — getrennt nach Confidence-Stufe.
-4. Anhand der Ergebnisse Gewichte neu kalibrieren (Stufe D, noch nicht
-   automatisiert).
+Alle Admin-Endpoints benötigen `data.manage`, die Pick/Accept-Endpoints `photos.delete`, die Listing-Endpoints `photos.view`.
 
 ## Konfigurations-Knobs
 
-Alles in `photo/group-auto-pick.ts` als Module-Konstanten:
+Alles in `photo/group-auto-pick.ts`:
 
 | Konstante                  | Default | Bedeutung |
 |----------------------------|---------|-----------|
 | `MULTI_PICK_THRESHOLD`     | 0.92    | Multi-Pick-Cutoff relativ zum Top-Score. |
 | `HIGH_CONFIDENCE_DELTA`    | 0.10    | Score-Abstand für `high` → Auto-Hide. |
 | `MEDIUM_CONFIDENCE_DELTA`  | 0.04    | Untere Grenze für `medium`. |
-| `ORIENTATION_FLOOR`        | 0.75    | Floor für Promotion via Orientation-Diversity. |
-| `SATURATION` (in `normaliseFaceCoverage`) | 0.30 | Face-Coverage saturiert ab 30 % Bildanteil. |
+| `ORIENTATION_FLOOR`        | 0.75    | Floor für Promotion via Orientation-Diversität. |
+| `SATURATION` (in `normaliseFaceCoverage`) | 0.30 | Face-Coverage saturiert ab 30 %. |
 
-Gewichte in der `scorePhoto`-Funktion direkt; Änderungen brauchen
-neuen Recompute (`POST /photos/groups/recompute-ai-picks`) plus
-neuen Kalibrierungs-Export.
+`DEFAULT_SCORING_WEIGHTS` enthält die Defaults. In `group-auto-pick.calibration.ts`:
 
-## Bekannte Schwächen + Verbesserungs-Optionen
+| Konstante                  | Default | Bedeutung |
+|----------------------------|---------|-----------|
+| `MIN_PAIRS_FOR_FIT`        | 10      | Minimum-Paare pro Branch für Persistenz. |
+| `DEFAULT_WEIGHTS`          | (s. Formel) | Identisch zu `DEFAULT_SCORING_WEIGHTS`. |
 
-### Beobachtungen aus dem ersten produktiven Kalibrierungs-Export (~119 reviewte Gruppen)
+In `frontend/src/views/ReviewQueueView.vue`:
 
-| Confidence | N  | Top-1 in user-kept | kept ⊆ pick |
-|------------|----|---------------------|-------------|
-| `high`     | 21 | 76 %                | 38 %        |
-| `medium`   | 9  | 100 %               | 78 %        |
-| `low`      | 88 | 73 %                | 100 %       |
+| Konstante                  | Default | Bedeutung |
+|----------------------------|---------|-----------|
+| `PAGE_SIZE`                | 30      | Karten pro Page. |
+| `SMALL_GROUP_THRESHOLD`    | 3       | Bis zu so viele Mitglieder → One-Click-Pick-Layout. |
+| `CONFIDENCE_BAR_MAX`       | 0.10    | Δ-Wert für volle Confidence-Bar (= `HIGH_CONFIDENCE_DELTA`). |
 
-74 % aller Gruppen landen in `low`. Score-Gap zwischen Top und
-Runner-up bei `low`: mean **0.009**.
+## Migrations
 
-### Schwäche 1 — Burst-Diskriminierung bricht zusammen
+| # | Inhalt |
+|---|--------|
+| 0075 | `photo_groups.ai_picked_*` + Partial-Index. |
+| 0076 | `photos.width` / `photos.height`. |
+| 0077 | Reset stale picks (Key-Mapping-Bug `_score` vs. ohne). |
+| 0078 | Reset stale picks (Gewichts-Retuning + `face_composition`). |
+| 0079 | `ai_pick_user_weights` für Per-User-Kalibrierung. |
 
-Innerhalb einer Burst sind 5 von 9 Signalen quasi konstant (`sharpness`,
-`contrast`, `clip_*`): gleiche Szene, gleiche Kamera, gleiche
-Belichtung. Übrig bleiben als echte Burst-Diskriminatoren:
-`face_sharpness`, `face_coverage`, `eyes_open`, `face_composition`. Bei
-Nicht-Personen-Bursts gibt es **kein** starkes Diskriminations-Signal.
+## Brainstorming-Historie
 
-**Optionen:**
+### Phase 1: Investigations-Brainstorming (Issue #346)
 
-- **A. Pairwise-Regression mit logistic auf der vorhandenen
-  Kalibrierungs-Stichprobe.** Lernt aus User-Override-Events welche
-  Signale wo entscheidend sind. Datenmodell ist vorbereitet
-  (`ai_pick_details.scores` enthält alle Sub-Signale + Entscheidung
-  über `photo_curation`).
-- **B. Modernes Deep-IQA als zusätzliches Signal.** MUSIQ / HyperIQA /
-  MANIQA. Genauer als Laplacian-Sharpness, aber CPU-schwer (~300 ms /
-  Bild → ~5 h initial für 50 k Fotos). Würde insbesondere bei
-  Nicht-Personen-Bursts helfen.
-- **C. VLM (Vision-Language-Model) als Confidence-Tiebreaker.** Nur für
-  unsichere Gruppen (`runner_up_delta < 0.05`), das sind ~5–10 % aller
-  Gruppen. LLaVA-3B-GGUF im bestehenden `llm-service`. Praktikabel auf
-  CPU, weil nur ein Bruchteil der Gruppen.
+Sechs Ansätze gegeneinander bewertet:
 
-### Schwäche 2 — `eyes_open` schwächer als erwartet
+| Ansatz | Genauigkeit | Performance @50k | Infrastruktur | Entscheidung |
+|---|---|---|---|---|
+| CLIP-Score | mittel global, flach in Burst | 0 (vorhanden) | 0 | **Behalten als globaler Anker** |
+| BRISQUE | mittel | ~50 min one-time | 1 Dep | Zurückgestellt |
+| Composition (rule/saliency) | niedrig in Burst | 0–niedrig | 0–1 Modell | Zurückgestellt |
+| Face-Coverage/-Quality | hoch (Burst-Diskriminator) | 0 | 0 | **Übernommen — Stärkster Hebel** |
+| Sharpness/Blur | hoch | 0 | 0 | **Übernommen** |
+| Lokales LLM (Llama-3.2-3B) | n/a (text-only) | n/a | hoch | Verworfen |
+| Lokales VLM (LLaVA) | mittel–hoch | nicht praktikabel CPU | sehr hoch | Verworfen |
 
-Im Sample: range nur 0.35–0.67 (`std=0.07`). Erwartet wäre eine
-bimodale Verteilung (Augen offen ≈ 0.85, Augen zu ≈ 0.15). Mögliche
-Erklärung des Users: die Bestandsdaten sind bereits manuell von
-Blink-Frames bereinigt, also hat das Signal hier wenig zu tun.
+→ Stufe A: gewichtete Linearkombination aus den bestehenden Signalen, Multi-Pick + Confidence-Gate.
 
-**Optionen:**
+### Phase 2: UX-Brainstorming (User-Feedback zum Auto-Hide)
 
-- **D. Embedding-Service Quality-Pipeline prüfen.** Ggf. den
-  CLIP-Prompt-Pair für eyes-open neu kalibrieren oder durch einen
-  dedizierten Eye-Aspect-Ratio-Detektor (z. B. Mediapipe-Landmarks)
-  ersetzen. Würde Burst-Tiebreaking bei Portraits stark verbessern.
-- **E. Re-Validierung mit neuen Daten.** Bei künftigen Uploads bleiben
-  Blink-Frames im Sample → das Signal kann erneut bewertet werden.
+User-Plan:
+- AI-Resolution separat von User-Review speichern
+- Auto-Hide bei high-Confidence; Nicht-Picks aus Grid raus
+- Marker mit Gruppengröße (`+N`) am Cover; Klick öffnet Review
+- Filter-Toggle "KI-ausgeblendete anzeigen" analog zu "Ausgeblendete anzeigen"
 
-### Schwäche 3 — Auto-Hide ist auf den vorhandenen Daten leicht
-**zu aggressiv**
+Mein Code-Review bestätigte:
+- Trennung sauber (Trust bleibt)
+- Reversibilität gut (Toggle ist nur einen Klick entfernt)
+- Risiken: Confidence-Schwelle, Marker-Discoverability, Invalidation bei Re-Grouping, Fullscreen-Navigation, Bulk-Apply, Übergangszustand
 
-`kept ⊆ pick` bei `high` Confidence: nur 38 %. In 62 % der `high`-
-Gruppen würde Auto-Hide ein Foto verstecken, das der User bewusst
-behalten hat. **Mitigation existiert:** Filter-Toggle
-"KI-ausgeblendete anzeigen" macht alle versteckten Fotos sichtbar.
+→ PRs #402, #403, #408–#412 setzen das mit allen Risiko-Mitigationen um.
 
-**Optionen:**
+### Phase 3: Brainstorming nach erstem Kalibrierungs-Export
 
-- **F. Confidence-Schwelle anheben.** `HIGH_CONFIDENCE_DELTA` von 0.10
-  auf 0.15. Weniger `high`-Gruppen, dafür höhere Genauigkeit.
-- **G. Hide-Schwelle absolut statt relativ.** Zusätzlich zum Pick-Set:
-  verstecke nur Fotos mit `score < 0.4` (absolut), egal welche
-  Confidence-Stufe. So bleiben "schlecht aber besser als 0.4" sichtbar.
-- **H. Multi-Pick-Schwelle senken (z. B. 0.92 → 0.85).** Mehr Fotos im
-  Pick-Set → weniger versteckte Fotos. Trade-off: weniger Reibungsabbau
-  für klar dominante Gruppen.
+Aus dem ersten echten Export (119 reviewte Gruppen) wurde sichtbar dass 75 % aller Gruppen in `low` Confidence landen → die KI hilft nur bei 28 % der Gruppen.
 
-### Schwäche 4 — Stufe-D-Kalibrierung noch manuell
+Zwölf Optionen (A–L) im damals erstellten Kommentar:
 
-Die Gewichts-Kalibrierung läuft heute offline via Python-Snippet (siehe
-Investigation-Kommentar auf #346). Trefferquoten muss man von Hand
-auswerten.
+| # | Option | Status |
+|---|---|---|
+| A | Pairwise-Regression aus User-Override-Events | **DONE** — PR #413 (Stufe D) |
+| B | MUSIQ / HyperIQA als zusätzliches IQA-Signal | Offen |
+| C | VLM-Tiebreaker für unsichere Gruppen (LLaVA-3B GGUF auf CPU für ~5–10 % der Gruppen) | Offen |
+| D | `eyes_open` Pipeline neu kalibrieren (CLIP → Mediapipe Face-Landmarks) | Offen |
+| E | Re-Validierung mit ungesehenem Bestand | Laufend (User-Aufgabe) |
+| F | `HIGH_CONFIDENCE_DELTA` 0.10 → 0.15 senken | Offen |
+| G | Absolute Hide-Schwelle (score < 0.4) zusätzlich zur relativen | Offen |
+| H | `MULTI_PICK_THRESHOLD` 0.92 → 0.85 senken | Offen |
+| I | Eingebauter Calibration-Report-Endpoint (Trefferquoten in der UI) | Teilweise — Export existiert, Live-Stats fehlen |
+| J | Automatische Gewichts-Regression-Pipeline | **DONE** — PR #413 |
+| K | Re-Score reviewter Gruppen auf Trigger | Teilweise — `scoreReviewedGroupsForCalibration` läuft inline beim Export (PR #405) |
+| L | Implizite Re-Review-Markierung bei Membership-Change | Teilweise — Re-Grouping invalidiert unreviewte Gruppen, reviewte bleiben (Design-Entscheidung) |
 
-**Optionen:**
+### Phase 4: Rapid-Review-UX-Brainstorming
 
-- **I. Eingebauter Calibration-Report.** Endpoint
-  `GET /photos/groups/ai-pick-stats` der pro Confidence-Stufe die
-  aktuellen Trefferquoten zurückgibt. UI-Card in DataManagementView,
-  täglich aktualisiert.
-- **J. Automatische Gewichts-Regression.** Pairwise-Logistic auf den
-  reviewten Gruppen, Ergebnis als Vorschlag, manuell deployen. Würde
-  pro User funktionieren (Per-User-Präferenzen sind real).
+Auf den Befund "53 % der Gruppen sind low und die KI hilft dort gar nicht" wurde der UI-Hebel diskutiert. Vier Patterns:
 
-### Schwäche 5 — Reviewte Gruppen "veralten"
+| # | Idee | Status |
+|---|---|---|
+| A | Bulk-Accept-Strip (vertikale Karten-Liste) | **DONE** — PR #414 |
+| B | Keyboard-Driven Walk (ein Foto/Bildschirm + Shortcuts) | Offen |
+| C | One-Click-Pick für 2-/3-Photo-Gruppen | **DONE** — PR #414 |
+| D | Hybrid A + Confidence-Sortierung + Disclaimer | **DONE** — PR #414 |
 
-Nach einem Re-Scan oder Re-Embedding können Gruppen ihre Mitglieder
-ändern. Aktuell: unreviewte Gruppen werden bei `find-groups` komplett
-neu gebaut + rescort. **Reviewte** Gruppen bleiben unangetastet, was
-gewollt ist (User-Entscheidung bewahren) — aber wenn der Re-Scan
-zusätzliche ähnliche Fotos in eine bestehende reviewte Gruppe einsortieren
-würde, sind die neuen Fotos nicht im Pick-Set und werden auch nicht
-auto-hidden.
+## Bekannte Schwächen + offene Optionen
 
-**Optionen:**
+### Schwächen
 
-- **K. "Re-Score reviewter Gruppen" nach explizitem User-Trigger.**
-  Neuer Admin-Button, der `reviewed_at = NULL` setzt für Gruppen mit
-  veränderten Mitgliedern. Erfordert Tracking von Membership-Hashes.
-- **L. Implizite Re-Review-Markierung bei Membership-Change.** Wenn
-  ein Re-Scan einer Gruppe neue Mitglieder hinzufügt, automatisch in
-  einen "needs-re-review"-State setzen.
+1. **`eyes_open` ist schwach**: Range im User-Sample nur 0.35–0.67 (`std 0.07`). Sollte bimodal sein (Augen offen ≈ 0.85, Augen zu ≈ 0.15). Möglicherweise konservativer CLIP-Prompt oder schlecht für Personen-Bursts trainiert. **Mitigation:** `face_composition` (0.10) und `face_sharpness` (0.40) dominieren bereits; eyes_open trägt nur 0.20.
 
-## Migration-Historie
+2. **Burst-Diskriminierung bricht zusammen**: Innerhalb einer Burst sind 5 von 9 Signalen quasi konstant (gleiche Szene, Kamera, Belichtung). Echte Diskriminatoren sind `face_sharpness`, `face_coverage`, `eyes_open`, `face_composition`. Bei Nicht-Personen-Bursts gibt es kein starkes Signal — das erklärt die hohe `low`-Quote.
 
-| # | Datum | Inhalt |
-|---|-------|--------|
-| 0075 | 2026-05 | Initiale `ai_picked_*`-Spalten + Partial-Index. |
-| 0076 | 2026-05 | `photos.width`/`height` für Orientation-Diversität. |
-| 0077 | 2026-05 | Reset stale picks (Bugfix: Key-Mapping `_score` vs. ohne). |
-| 0078 | 2026-05 | Reset stale picks (Gewichts-Retuning + `face_composition`). |
+3. **Auto-Hide ist nicht "kept ⊆ pick"-perfekt**: Im Sample hatte high-Confidence nur 38 % kept⊆pick. Tendenz: User behält mehr Fotos pro Burst als die KI. **Mitigation:** Toggle "KI-ausgeblendete anzeigen" + One-Click-Pick + Per-User-Kalibrierung. Sollte sich mit Stufe D (PR #413) entspannen.
+
+4. **Multi-User-Workload**: Bei mehreren Usern auf demselben Server bekommt jeder User seine eigenen Gewichte. Backfill / Recompute / Bulk-Apply sind explizit server-weit, andere Operationen pro User.
+
+### Offene Optionen (Priorität, sortiert nach erwartetem Hebel)
+
+#### Niedrig hängend
+- **D (eyes_open ersetzen)**: Mediapipe Face Landmarks → Eye Aspect Ratio. Echtes bimodales Signal. Würde Burst-Tiebreaking bei Portraits deutlich verbessern. Aufwand: 1 PR im `embedding_service` + Re-Scan. Risiko niedrig — nur ein Signal wird besser.
+- **F/G/H (Schwellen-Tuning)**: nach dem nächsten Kalibrierungs-Export bewerten, ob die aktuellen Defaults zu konservativ/aggressiv sind. Eine Konstante zu drehen ist trivial.
+- **I (Calibration-Report-Endpoint)**: `GET /photos/groups/ai-pick-stats` mit aktuellen Trefferquoten pro Confidence-Stufe + Verteilungen. Card in DataManagement, täglich aktualisiert. Aufwand: ~1 PR.
+
+#### Mittel
+- **B aus Phase 4 (Keyboard-Walk)**: Power-User-Modus für das Review-Queue-View. Eine Karte pro Bildschirm, Leertaste = Accept, ↑ = Skip, Enter = Manual. 1 Sekunde pro Gruppe machbar.
+- **B aus Phase 3 (MUSIQ / HyperIQA)**: zusätzliches IQA-Signal in der Quality-Pipeline. ~5 h Initial-Compute auf CPU. Würde Nicht-Personen-Bursts stärken, wo aktuell wenig Diskriminierungs-Information da ist.
+
+#### Hoch
+- **C aus Phase 3 (VLM-Tiebreaker)**: LLaVA-3B GGUF im `llm-service` nur für Gruppen mit `runner_up_delta < 0.05`. Etwa 5–10 % der Gruppen. CPU-tauglich weil selektiv. Aufwand: neuer Modell-Pull, Vision-Endpoint, Prompt-Engineering — substantial.
+- **Stufe-D Auto-Re-Calibrate**: Trigger nach N neuen User-Reviews automatisch ein erneutes Fit. Spart manuelle Klicks. Voraussetzung: Effekt-Beobachtung über mehrere Wochen.
+
+## Session-Historie (Stand: Track-I-Roll-Out)
+
+15 Pull Requests in dieser Iteration:
+
+| PR | Inhalt |
+|----|--------|
+| #402 | Initialer Track-I-Stack: Migration 0075, Scoring, Multi-Pick, Confidence, find-groups-Integration, Endpoints, Marker-UX im Grid, Filter-Toggle, Compare-Dialog-Button, Admin-Buttons |
+| #403 | Orientation-Diversität + width/height (Migration 0076) |
+| #404 | Backfill + Recompute server-weit (statt user-scoped) |
+| #405 | Kalibrierungs-Export scort reviewte Gruppen inline |
+| #406 | Fix DB-Key-Mapping (sharpness/contrast/exposure/eyes_open) + Reset stale state (Migration 0077) |
+| #407 | `face_composition`-Signal + Initialdoku `docs/ai-auto-pick.md` (Migration 0078) |
+| #408 | Click-Semantik in PhotoGrid (versehentlich falsche Komponente fixiert) |
+| #409 | Hidden-Siblings-Marker in Grid + Fullscreen, URL-Sync-Fix, Filter-Persistenz |
+| #410 | Track-I-Marker in **VirtualGallery** (die echte Galerie) + PhotoGrid.vue gelöscht (toter Code) |
+| #411 | Drei Bugs in der Filter-Toggle-Pipeline (URL-Round-Trip-Race, Partial-Page-Init-Marker, Scroll-Anker) |
+| #412 | Soft-Reload nach Review (versteckte Fotos verschwinden aus Grid) |
+| #413 | **Stufe D**: per-User-Pairwise-Regression (Migration 0079) |
+| #414 | **Stufe A + D + C**: Rapid-Review-View, Confidence-Bar, Bulk-Disclaimer, One-Click-Pick (offen während Doku-Update) |
+
+Plus zwei Bonus-Erkenntnisse aus der Session:
+- **PhotoGrid.vue war toter Code.** Wurde in PRs #408 und #409 versehentlich angefasst statt VirtualGallery. Mit #410 entfernt.
+- **eyes_open ist schwach in der User-Bestandsdaten**, weil der User Blinzel-Frames bereits manuell aussortiert hatte. Bei neuen Uploads sollte das Signal wieder aussagekräftig sein.
 
 ## Relevante Source-Dateien
 
+Backend:
 - `photo/group-auto-pick.ts` — Pure Scoring-Logik (kein DB-Zugriff)
-- `photo/group-auto-pick.service.ts` — DB-Aggregation + Persistenz
-- `photo/group-auto-pick.test.ts` — Unit-Tests der reinen Logik
+- `photo/group-auto-pick.service.ts` — DB-Aggregation + Persistenz + Review-Queue + Accept-Flow
+- `photo/group-auto-pick.calibration.ts` — Pairwise-Logistic-Regression
+- `photo/group-auto-pick.test.ts` — Unit-Tests der Scoring-Logik
 - `photo/group-auto-pick.service.test.ts` — Integration-Tests mit DB
-- `photo/photo.service.ts` — `findPhotoGroupsLogic`,
-  `backfillPhotoDimensionsLogic`, Wiring an `findGroups`
+- `photo/group-auto-pick.calibration.test.ts` — Regression-Math + Feature-Vektor-Helpers
+- `photo/photo.service.ts` — `findPhotoGroupsLogic`, `backfillPhotoDimensionsLogic`, Wiring an `findGroups`
 - `photo/photo.ts` — REST-Endpoints
 - `photo/photo.filters.ts` — `aiHiddenMode`-Filterklausel
 - `photo/gallery-grid.service.ts` — Surface der Pick-Info pro Grid-Zelle
-- `frontend/src/api/photos.ts` — API-Client-Wrapper
-- `frontend/src/components/VirtualGallery.vue` — Marker-Rendering im Haupt-Grid
-- `frontend/src/components/PhotoCompareView.vue` — "Übernehmen"-Button
-- `frontend/src/components/FilterMenu.vue` — "KI-ausgeblendete anzeigen"
+- `db/schema.ts` — `photoGroups.ai_picked_*` + `aiPickUserWeights`
+
+Frontend:
+- `frontend/src/api/photos.ts` — API-Client-Wrapper für alle AI-Pick-Endpoints
+- `frontend/src/api/gallery.ts` — `GalleryGridGroup` mit `ai_picked` / `ai_confidence`
+- `frontend/src/views/GalleryView.vue` — Hauptgalerie, Wiring von Compare-Dialog + Soft-Reload
+- `frontend/src/views/ReviewQueueView.vue` — **Rapid-Review-UI** (Stufe A + C + D)
 - `frontend/src/views/DataManagementView.vue` — Admin-Buttons
+- `frontend/src/components/VirtualGallery.vue` — Marker-Rendering im Haupt-Grid
+- `frontend/src/components/FullscreenOverlay.vue` — Fullscreen-Marker
+- `frontend/src/components/FilterMenu.vue` — "KI-ausgeblendete anzeigen"-Toggle
+- `frontend/src/components/PhotoCompareView.vue` — "KI-Vorschlag übernehmen"-Button
+- `frontend/src/composables/useFilter.ts` — URL-Sync inkl. `showAiHidden`
+- `frontend/src/composables/useGallerySource.ts` — Sparse-Page-Cache mit korrigierter Partial-Page-Markierung
+- `frontend/src/config/modules.ts` — Route + Menüeintrag für `/fotos/review-queue`

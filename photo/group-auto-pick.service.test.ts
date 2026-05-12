@@ -400,6 +400,64 @@ describe("acceptAiPickLogic", () => {
   });
 });
 
+describe("acceptAiPickLogic — explicit pick override (Stufe C)", () => {
+  it("hides every member except the explicit pick set", async () => {
+    const u = await makeUser("explicit-pick@test.com");
+    const a = await makePhoto(u, { details: { blur_score: 0.10 } });
+    const b = await makePhoto(u, { details: { blur_score: 0.90 } });
+    const c = await makePhoto(u, { details: { blur_score: 0.50 } });
+    const g = await makeGroup(u, a, [a, b, c]);
+    await recomputeAiPicksForGroups(u);
+    // AI prefers b (sharper). User wants to keep `a` instead.
+    const result = await acceptAiPickLogic(u, g, [a]);
+    expect(result.success).toBe(true);
+    expect(result.hidden_count).toBe(2);
+
+    const curations = await dbAll<{ photo_id: number; status: string }>(
+      db.select({ photo_id: photoCuration.photo_id, status: photoCuration.status })
+        .from(photoCuration)
+        .where(eq(photoCuration.user_id, u)),
+    );
+    const hidden = curations.filter((r) => r.status === "hidden").map((r) => r.photo_id);
+    expect(hidden.sort()).toEqual([b, c].sort());
+
+    const [row] = await db.select().from(photoGroups).where(eq(photoGroups.id, g));
+    expect(row.reviewed_at).not.toBeNull();
+  });
+
+  it("falls back to the AI pick when override is undefined", async () => {
+    const u = await makeUser("explicit-fallback@test.com");
+    const a = await makePhoto(u, { details: { blur_score: 0.10 } });
+    const b = await makePhoto(u, { details: { blur_score: 0.90 } });
+    const g = await makeGroup(u, a, [a, b]);
+    await recomputeAiPicksForGroups(u);
+    const result = await acceptAiPickLogic(u, g);
+    expect(result.success).toBe(true);
+    // AI picked b, so a should now be the hidden one.
+    const [row] = await db.select().from(photoCuration).where(eq(photoCuration.photo_id, a));
+    expect(row.status).toBe("hidden");
+  });
+
+  it("refuses when the override references a photo outside the group", async () => {
+    const u = await makeUser("explicit-outsider@test.com");
+    const a = await makePhoto(u, { details: { blur_score: 0.10 } });
+    const b = await makePhoto(u, { details: { blur_score: 0.90 } });
+    const outsider = await makePhoto(u, { details: { blur_score: 0.50 } });
+    const g = await makeGroup(u, a, [a, b]);
+    await recomputeAiPicksForGroups(u);
+    const result = await acceptAiPickLogic(u, g, [outsider]);
+    expect(result.success).toBe(false);
+    expect(result.hidden_count).toBe(0);
+    // No curation rows should have been written.
+    const rows = await dbAll<{ photo_id: number }>(
+      db.select({ photo_id: photoCuration.photo_id })
+        .from(photoCuration)
+        .where(eq(photoCuration.user_id, u)),
+    );
+    expect(rows).toHaveLength(0);
+  });
+});
+
 describe("bulkAcceptHighConfidencePicksLogic", () => {
   it("only touches high-confidence unreviewed groups", async () => {
     const u = await makeUser("bulk@test.com");
