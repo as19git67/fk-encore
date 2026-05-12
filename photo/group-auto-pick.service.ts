@@ -284,6 +284,7 @@ export function recomputeAiPicksForAllUsers(): Promise<RecomputeResult> {
 export async function acceptAiPickLogic(
   userId: number,
   groupId: number,
+  overridePickedPhotoIds?: number[],
 ): Promise<{ success: boolean; hidden_count: number }> {
   const group = await dbFirst<{
     id: number;
@@ -300,7 +301,15 @@ export async function acceptAiPickLogic(
   );
   if (!group) return { success: false, hidden_count: 0 };
   if (group.reviewed_at) return { success: true, hidden_count: 0 };
-  const picked = new Set(group.ai_picked_photo_ids ?? []);
+  // Caller-supplied override: the "one-click pick" UI for small groups
+  // (Stufe C) lets the user pick a photo other than the AI's
+  // suggestion. We treat the override as the new "kept" set; all other
+  // group members get hidden. Empty / unsupplied → fall back to the
+  // AI's pick set (the original Stufe-A accept path).
+  const pickedArray = overridePickedPhotoIds && overridePickedPhotoIds.length > 0
+    ? overridePickedPhotoIds
+    : group.ai_picked_photo_ids ?? [];
+  const picked = new Set(pickedArray);
   if (picked.size === 0) return { success: false, hidden_count: 0 };
 
   const members = await dbAll<{ photo_id: number }>(
@@ -308,6 +317,14 @@ export async function acceptAiPickLogic(
       .from(photoGroupMembers)
       .where(eq(photoGroupMembers.group_id, groupId)),
   );
+  // When the override doesn't actually exist in this group (UI bug,
+  // stale data), refuse rather than hide everything by accident.
+  const memberSet = new Set(members.map((m) => m.photo_id));
+  for (const pid of picked) {
+    if (!memberSet.has(pid)) {
+      return { success: false, hidden_count: 0 };
+    }
+  }
   const toHide = members.map((m) => m.photo_id).filter((pid) => !picked.has(pid));
   if (toHide.length === 0) {
     // All members are picked. Mark reviewed so the group leaves the
@@ -506,4 +523,250 @@ export async function exportCalibrationDatasetLogic(
     });
   }
   return { entries };
+}
+
+// ========== Review-Queue (Track I — Stufe A: Bulk-Accept-Strip) ==========
+//
+// Backing endpoint for the "Rapid Review" view: a paginated, sorted
+// stream of the user's unreviewed groups, enriched with everything the
+// card UI needs (cover thumbnail filename, sibling thumbnails, AI-pick
+// info, confidence). Confidence-sorted (high first) so the user can
+// blast through the easy decisions with the global "alle bestätigen"
+// button before tackling medium/low manually.
+
+export interface ReviewQueuePhoto {
+  id: number;
+  filename: string;
+  taken_at: string | null;
+  curation: "visible" | "hidden" | "favorite";
+  ai_picked: boolean;
+}
+
+export interface ReviewQueueGroup {
+  id: number;
+  cover_photo_id: number | null;
+  member_count: number;
+  ai_picked_photo_ids: number[];
+  ai_picked_confidence: AiConfidence | null;
+  // Δ between the top photo's score and the best non-pick. Surfaced
+  // so the card UI can render a confidence-bar (Stufe D). 0..~0.6 in
+  // practice; HIGH_CONFIDENCE_DELTA (0.10) is the auto-hide threshold.
+  // `null` for groups that have never been scored.
+  runner_up_delta: number | null;
+  photos: ReviewQueuePhoto[];
+}
+
+/**
+ * User-level calibration metadata. Surfaced alongside the queue so
+ * the Bulk-Accept disclaimer can show "stimmt zu X % mit deinen
+ * letzten Reviews überein" without a second round-trip. `null` when
+ * the user has never run /calibrate-ai-pick-weights — the UI then
+ * shows the global defaults disclaimer instead.
+ */
+export interface ReviewQueueUserCalibration {
+  fitted_at: string;
+  top1_accuracy_face: number;
+  top1_accuracy_non_face: number;
+  pair_count_face: number;
+  pair_count_non_face: number;
+}
+
+export interface ReviewQueueResponse {
+  total: number;
+  offset: number;
+  groups: ReviewQueueGroup[];
+  user_calibration: ReviewQueueUserCalibration | null;
+}
+
+/**
+ * Sort order for the review queue:
+ *   1. ai_picked_confidence: high > medium > low > null
+ *   2. larger groups first within the same confidence (more click
+ *      savings per accept)
+ *   3. oldest groups first for stable pagination
+ *
+ * `groupConfidenceFilter` lets the UI filter the stream to a single
+ * confidence stratum. Useful for the "show me only high-confidence"
+ * variant where the user wants to bulk-accept fast.
+ */
+export async function listReviewQueueLogic(
+  userId: number,
+  opts: {
+    offset?: number;
+    limit?: number;
+    confidence?: AiConfidence;
+  } = {},
+): Promise<ReviewQueueResponse> {
+  const limit = Math.max(1, Math.min(opts.limit ?? 30, 100));
+  const offset = Math.max(0, opts.offset ?? 0);
+
+  const baseConds = [
+    eq(photoGroups.user_id, userId),
+    isNull(photoGroups.reviewed_at),
+  ];
+  if (opts.confidence) {
+    baseConds.push(eq(photoGroups.ai_picked_confidence, opts.confidence));
+  }
+
+  const totalRow = await dbFirst<{ c: number }>(
+    db.select({ c: sql<number>`COUNT(*)::int` })
+      .from(photoGroups)
+      .where(and(...baseConds)),
+  );
+  const total = totalRow?.c ?? 0;
+
+  // User-level calibration metadata. Loaded unconditionally (even when
+  // total = 0) so the empty-state can still display "deine letzte
+  // Kalibrierung war am …". Cheap — one row by PK.
+  const calibRow = await dbFirst<{
+    fitted_at: string;
+    metadata: {
+      top1_accuracy_face?: number;
+      top1_accuracy_non_face?: number;
+      pair_count_face?: number;
+      pair_count_non_face?: number;
+    } | null;
+  }>(
+    db.select({
+      fitted_at: aiPickUserWeights.fitted_at,
+      metadata: aiPickUserWeights.metadata,
+    })
+      .from(aiPickUserWeights)
+      .where(eq(aiPickUserWeights.user_id, userId)),
+  );
+  const userCalibration: ReviewQueueUserCalibration | null = calibRow && calibRow.metadata
+    ? {
+        fitted_at: calibRow.fitted_at,
+        top1_accuracy_face: calibRow.metadata.top1_accuracy_face ?? 0,
+        top1_accuracy_non_face: calibRow.metadata.top1_accuracy_non_face ?? 0,
+        pair_count_face: calibRow.metadata.pair_count_face ?? 0,
+        pair_count_non_face: calibRow.metadata.pair_count_non_face ?? 0,
+      }
+    : null;
+
+  if (total === 0) {
+    return { total: 0, offset, groups: [], user_calibration: userCalibration };
+  }
+
+  // Pull the requested window. Ordering follows the contract above.
+  const confidenceRank = sql`
+    CASE COALESCE(${photoGroups.ai_picked_confidence}, 'null')
+      WHEN 'high'   THEN 1
+      WHEN 'medium' THEN 2
+      WHEN 'low'    THEN 3
+      ELSE 4
+    END
+  `;
+  const groupRows = await dbAll<{
+    id: number;
+    cover_photo_id: number | null;
+    ai_picked_photo_ids: number[] | null;
+    ai_picked_confidence: string | null;
+    member_count: number;
+    created_at: string | null;
+    runner_up_delta: number | null;
+  }>(
+    db.select({
+      id: photoGroups.id,
+      cover_photo_id: photoGroups.cover_photo_id,
+      ai_picked_photo_ids: photoGroups.ai_picked_photo_ids,
+      ai_picked_confidence: photoGroups.ai_picked_confidence,
+      member_count: sql<number>`(
+        SELECT COUNT(*)::int FROM ${photoGroupMembers} m
+        WHERE m.group_id = ${photoGroups.id}
+      )`,
+      created_at: photoGroups.created_at,
+      // Pull the Δ out of the persisted score breakdown. Cast through
+      // jsonb_typeof so a malformed row (or one fitted before #406's
+      // schema lock) yields NULL instead of throwing.
+      runner_up_delta: sql<number | null>`
+        CASE
+          WHEN ${photoGroups.ai_pick_details} IS NULL THEN NULL
+          WHEN (${photoGroups.ai_pick_details}->>'runner_up_delta') IS NULL THEN NULL
+          ELSE (${photoGroups.ai_pick_details}->>'runner_up_delta')::float
+        END
+      `,
+    })
+      .from(photoGroups)
+      .where(and(...baseConds))
+      .orderBy(
+        confidenceRank,
+        sql`(
+          SELECT COUNT(*) FROM ${photoGroupMembers} m
+          WHERE m.group_id = ${photoGroups.id}
+        ) DESC`,
+        photoGroups.created_at,
+      )
+      .limit(limit)
+      .offset(offset),
+  );
+  if (groupRows.length === 0) {
+    return { total, offset, groups: [], user_calibration: userCalibration };
+  }
+
+  // Bulk-fetch member photo rows in a single query so the response is
+  // O(1) round-trips regardless of how many groups the page contains.
+  const groupIds = groupRows.map((g) => g.id);
+  const memberRows = await dbAll<{
+    group_id: number;
+    photo_id: number;
+    filename: string;
+    taken_at: string | null;
+    curation: string | null;
+  }>(
+    db.select({
+      group_id: photoGroupMembers.group_id,
+      photo_id: photos.id,
+      filename: photos.filename,
+      taken_at: photos.taken_at,
+      curation: photoCuration.status,
+    })
+      .from(photoGroupMembers)
+      .innerJoin(photos, eq(photos.id, photoGroupMembers.photo_id))
+      .leftJoin(
+        photoCuration,
+        and(
+          eq(photoCuration.photo_id, photoGroupMembers.photo_id),
+          eq(photoCuration.user_id, userId),
+        ),
+      )
+      .where(inArray(photoGroupMembers.group_id, groupIds))
+      .orderBy(photoGroupMembers.group_id, photos.taken_at, photos.id),
+  );
+  const membersByGroupId = new Map<number, typeof memberRows>();
+  for (const m of memberRows) {
+    const list = membersByGroupId.get(m.group_id);
+    if (list) list.push(m);
+    else membersByGroupId.set(m.group_id, [m]);
+  }
+
+  const groups: ReviewQueueGroup[] = groupRows.map((g) => {
+    const members = membersByGroupId.get(g.id) ?? [];
+    const pickedSet = new Set(g.ai_picked_photo_ids ?? []);
+    return {
+      id: g.id,
+      cover_photo_id: g.cover_photo_id,
+      member_count: g.member_count,
+      ai_picked_photo_ids: g.ai_picked_photo_ids ?? [],
+      ai_picked_confidence:
+        g.ai_picked_confidence === "high" ||
+        g.ai_picked_confidence === "medium" ||
+        g.ai_picked_confidence === "low"
+          ? (g.ai_picked_confidence as AiConfidence)
+          : null,
+      runner_up_delta: g.runner_up_delta,
+      photos: members.map((m) => ({
+        id: m.photo_id,
+        filename: m.filename,
+        taken_at: m.taken_at,
+        curation:
+          m.curation === "hidden" || m.curation === "favorite"
+            ? m.curation
+            : "visible",
+        ai_picked: pickedSet.has(m.photo_id),
+      })),
+    };
+  });
+
+  return { total, offset, groups, user_calibration: userCalibration };
 }
