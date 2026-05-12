@@ -793,7 +793,10 @@ export function getNextUnreviewedGroup() {
 export function reviewPhotoGroup(id: number, photoIds?: number[]) {
   return apiFetch<{ success: boolean }>(`/photos/groups/${id}/review`, {
     method: 'POST',
-    body: photoIds ? JSON.stringify({ photoIds }) : undefined,
+    // Always send a JSON body (even if empty) — Encore.ts can't parse
+    // a missing/empty body against the `{ photoIds?: number[] }`
+    // schema and would reject with 400 invalid_argument.
+    body: JSON.stringify(photoIds ? { photoIds } : {}),
   })
 }
 
@@ -809,6 +812,26 @@ export function recomputeAiPicks() {
 export function acceptAiPick(id: number) {
   return apiFetch<{ success: boolean; hidden_count: number }>(
     `/photos/groups/${id}/accept-ai-pick`,
+    { method: 'POST' },
+  )
+}
+
+/**
+ * Phase 2: adopt the peer-consensus decisions for one group. The
+ * server applies the conservative rule (hide iff ≥1 peer hidden AND
+ * 0 peer favorites) and returns the per-bucket counts that the UI
+ * surfaces in a toast afterwards.
+ */
+export interface PeerConsensusResult {
+  success: boolean
+  hidden_count: number
+  kept_count: number
+  no_signal_count: number
+}
+
+export function acceptPeerConsensus(id: number) {
+  return apiFetch<PeerConsensusResult>(
+    `/photos/groups/${id}/accept-peer-consensus`,
     { method: 'POST' },
   )
 }
@@ -863,6 +886,16 @@ export interface ReviewQueuePhoto {
   taken_at: string | null
   curation: 'visible' | 'hidden' | 'favorite'
   ai_picked: boolean
+  /**
+   * Aggregated curation status from other album-peers (Phase 1). Only
+   * explicit `hidden` and `favorite` rows are counted; `visible` is
+   * the implicit default and produces no row. Both 0 ⇒ no peer
+   * signal, UI renders no chip.
+   */
+  peer_curation: {
+    hidden: number
+    favorite: number
+  }
 }
 
 export interface ReviewQueueGroup {
@@ -886,6 +919,7 @@ export interface ReviewQueueUserCalibration {
 
 export interface ReviewQueueResponse {
   total: number
+  high_confidence_total: number
   offset: number
   groups: ReviewQueueGroup[]
   user_calibration: ReviewQueueUserCalibration | null

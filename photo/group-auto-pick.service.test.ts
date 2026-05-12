@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbExec, dbInsertReturning } from "../db/adapter";
 import {
+  albumPhotos,
+  albumShares,
+  albums,
   faces,
   photoCuration,
   photoGroupMembers,
@@ -12,8 +15,10 @@ import {
 } from "../db/schema";
 import {
   acceptAiPickLogic,
+  acceptPeerConsensusLogic,
   bulkAcceptHighConfidencePicksLogic,
   exportCalibrationDatasetLogic,
+  listReviewQueueLogic,
   recomputeAiPicksForAllUsers,
   recomputeAiPicksForGroups,
 } from "./group-auto-pick.service";
@@ -686,5 +691,292 @@ describe("exportCalibrationDatasetLogic", () => {
     await exportCalibrationDatasetLogic(u);
     const [second] = await db.select().from(photoGroups).where(eq(photoGroups.id, g));
     expect(second.ai_picked_at).toEqual(firstAt);
+  });
+});
+
+describe("listReviewQueueLogic — high_confidence_total", () => {
+  it("returns the filter-independent count of unreviewed high-confidence groups", async () => {
+    // Three high-confidence groups, one medium, one reviewed-high. The
+    // "Alle Sicheren bestätigen"-Button needs to know that there are
+    // 3 high-confidence groups left regardless of which filter the user
+    // is currently looking at — so the count must come from a server-
+    // wide aggregate, not from the filtered page window.
+    const u = await makeUser("review-queue-high-total@test.com");
+    const groupIds: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      const a = await makePhoto(u, { details: { blur_score: 0.10 } });
+      const b = await makePhoto(u, { details: { blur_score: 0.90 } });
+      groupIds.push(await makeGroup(u, a, [a, b]));
+    }
+    // Δ ≈ 0.08 — between MEDIUM_CONFIDENCE_DELTA (0.04) and
+    // HIGH_CONFIDENCE_DELTA (0.10), lands at confidence='medium'.
+    const ma = await makePhoto(u, { details: { blur_score: 0.40 } });
+    const mb = await makePhoto(u, { details: { blur_score: 0.60 } });
+    await makeGroup(u, ma, [ma, mb]);
+    const ra = await makePhoto(u, { details: { blur_score: 0.10 } });
+    const rb = await makePhoto(u, { details: { blur_score: 0.90 } });
+    const reviewedHigh = await makeGroup(u, ra, [ra, rb]);
+    await recomputeAiPicksForGroups(u);
+    // Mark one high-confidence group reviewed — it must not count.
+    await dbExec(
+      db.update(photoGroups)
+        .set({ reviewed_at: new Date().toISOString() })
+        .where(eq(photoGroups.id, reviewedHigh)),
+    );
+
+    const all = await listReviewQueueLogic(u);
+    expect(all.high_confidence_total).toBe(3);
+
+    const onlyMedium = await listReviewQueueLogic(u, { confidence: "medium" });
+    expect(onlyMedium.total).toBe(1);
+    // High count stays 3 regardless of the active filter.
+    expect(onlyMedium.high_confidence_total).toBe(3);
+
+    const onlyLow = await listReviewQueueLogic(u, { confidence: "low" });
+    expect(onlyLow.total).toBe(0);
+    expect(onlyLow.high_confidence_total).toBe(3);
+  });
+
+  it("drops to 0 once every high-confidence group is reviewed", async () => {
+    const u = await makeUser("review-queue-high-zero@test.com");
+    const a = await makePhoto(u, { details: { blur_score: 0.10 } });
+    const b = await makePhoto(u, { details: { blur_score: 0.90 } });
+    const g = await makeGroup(u, a, [a, b]);
+    await recomputeAiPicksForGroups(u);
+
+    const before = await listReviewQueueLogic(u);
+    expect(before.high_confidence_total).toBe(1);
+
+    await acceptAiPickLogic(u, g);
+
+    const after = await listReviewQueueLogic(u);
+    expect(after.high_confidence_total).toBe(0);
+  });
+});
+
+// ── Peer-Consensus (Phase 1 aggregate + Phase 2 accept) ──
+
+async function makeAlbum(ownerId: number, name = "Shared"): Promise<number> {
+  const row = await dbInsertReturning<{ id: number }>(
+    db.insert(albums).values({
+      user_id: ownerId,
+      name,
+    }).returning({ id: albums.id }),
+  );
+  return row!.id;
+}
+
+async function shareAlbum(albumId: number, withUserId: number): Promise<void> {
+  await dbExec(
+    db.insert(albumShares).values({
+      album_id: albumId,
+      user_id: withUserId,
+      access_level: "read",
+    }),
+  );
+}
+
+async function addPhotoToAlbum(albumId: number, photoId: number): Promise<void> {
+  await dbExec(
+    db.insert(albumPhotos).values({
+      album_id: albumId,
+      photo_id: photoId,
+    }),
+  );
+}
+
+async function setCuration(userId: number, photoId: number, status: "hidden" | "favorite"): Promise<void> {
+  await dbExec(
+    db.insert(photoCuration).values({
+      user_id: userId,
+      photo_id: photoId,
+      status,
+    }),
+  );
+}
+
+describe("listReviewQueueLogic — peer_curation aggregate (Phase 1)", () => {
+  it("counts hidden + favorite votes from peers who share at least one album", async () => {
+    // Owner (the reviewer) shares an album with two peers. Peer A hid
+    // photo X; Peer B favorited it. The aggregate must return
+    // { hidden: 1, favorite: 1 } regardless of which peer reviewed first.
+    const owner = await makeUser("owner-peer@test.com");
+    const peerA = await makeUser("peer-a@test.com");
+    const peerB = await makeUser("peer-b@test.com");
+    const album = await makeAlbum(owner);
+    await shareAlbum(album, peerA);
+    await shareAlbum(album, peerB);
+
+    const px = await makePhoto(owner, { details: { sharpness: 0.50 } });
+    const py = await makePhoto(owner, { details: { sharpness: 0.90 } });
+    await addPhotoToAlbum(album, px);
+    await addPhotoToAlbum(album, py);
+    await makeGroup(owner, px, [px, py]);
+
+    await setCuration(peerA, px, "hidden");
+    await setCuration(peerB, px, "favorite");
+
+    const res = await listReviewQueueLogic(owner);
+    expect(res.groups).toHaveLength(1);
+    const group = res.groups[0];
+    const photoX = group.photos.find((p) => p.id === px)!;
+    const photoY = group.photos.find((p) => p.id === py)!;
+    expect(photoX.peer_curation).toEqual({ hidden: 1, favorite: 1 });
+    // No peer touched py → both counts 0.
+    expect(photoY.peer_curation).toEqual({ hidden: 0, favorite: 0 });
+  });
+
+  it("does not leak peer signals from un-shared albums (privacy boundary)", async () => {
+    // Peer hid the photo, but in an album they own privately — the
+    // owner of this queue has no access to that album. The peer's
+    // decision must not appear in the owner's aggregate.
+    const owner = await makeUser("owner-private@test.com");
+    const peer = await makeUser("peer-private@test.com");
+
+    const px = await makePhoto(owner, { details: { sharpness: 0.50 } });
+    await makeGroup(owner, px, [px]);
+
+    // Peer's private album that the photo is also in, but not shared
+    // with owner.
+    const peerAlbum = await makeAlbum(peer, "Peer-Privat");
+    await addPhotoToAlbum(peerAlbum, px);
+    await setCuration(peer, px, "hidden");
+
+    const res = await listReviewQueueLogic(owner);
+    const photoX = res.groups[0].photos.find((p) => p.id === px)!;
+    // Owner can't see peer's private album → no signal leaks through.
+    expect(photoX.peer_curation).toEqual({ hidden: 0, favorite: 0 });
+  });
+
+  it("excludes the requester's own curation from the peer count", async () => {
+    // Self-curation must never show up as "peer signal" — that would
+    // be a confusing echo of the user's own past decisions.
+    const owner = await makeUser("owner-self@test.com");
+    const peer = await makeUser("peer-self@test.com");
+    const album = await makeAlbum(owner);
+    await shareAlbum(album, peer);
+
+    const px = await makePhoto(owner, { details: { sharpness: 0.50 } });
+    await addPhotoToAlbum(album, px);
+    await makeGroup(owner, px, [px]);
+
+    await setCuration(owner, px, "favorite"); // own → must be excluded
+    await setCuration(peer, px, "hidden");    // peer → counts
+
+    const res = await listReviewQueueLogic(owner);
+    const photoX = res.groups[0].photos.find((p) => p.id === px)!;
+    expect(photoX.peer_curation).toEqual({ hidden: 1, favorite: 0 });
+  });
+});
+
+describe("acceptPeerConsensusLogic (Phase 2)", () => {
+  it("hides photos when ≥1 peer hid and 0 peers favorited", async () => {
+    const owner = await makeUser("consensus-hide@test.com");
+    const peer = await makeUser("consensus-hide-peer@test.com");
+    const album = await makeAlbum(owner);
+    await shareAlbum(album, peer);
+
+    const px = await makePhoto(owner);
+    const py = await makePhoto(owner);
+    await addPhotoToAlbum(album, px);
+    await addPhotoToAlbum(album, py);
+    const g = await makeGroup(owner, px, [px, py]);
+
+    await setCuration(peer, px, "hidden"); // peer hid px
+
+    const res = await acceptPeerConsensusLogic(owner, g);
+    expect(res.success).toBe(true);
+    expect(res.hidden_count).toBe(1);
+    expect(res.kept_count).toBe(0);
+    expect(res.no_signal_count).toBe(1); // py has no signal
+
+    // Owner now has a 'hidden' row on px.
+    const [pxRow] = await db.select().from(photoCuration)
+      .where(and(eq(photoCuration.photo_id, px), eq(photoCuration.user_id, owner)));
+    expect(pxRow.status).toBe("hidden");
+
+    // Group is reviewed.
+    const [grp] = await db.select().from(photoGroups).where(eq(photoGroups.id, g));
+    expect(grp.reviewed_at).not.toBeNull();
+  });
+
+  it("does not hide when at least one peer favorited (favorite vetoes)", async () => {
+    // 2 peers hid the photo, 1 peer favorited it. Conservative rule:
+    // ANY favorite vetoes the hide consensus.
+    const owner = await makeUser("consensus-veto@test.com");
+    const peerA = await makeUser("consensus-veto-a@test.com");
+    const peerB = await makeUser("consensus-veto-b@test.com");
+    const peerC = await makeUser("consensus-veto-c@test.com");
+    const album = await makeAlbum(owner);
+    await shareAlbum(album, peerA);
+    await shareAlbum(album, peerB);
+    await shareAlbum(album, peerC);
+
+    const px = await makePhoto(owner);
+    await addPhotoToAlbum(album, px);
+    const g = await makeGroup(owner, px, [px]);
+
+    await setCuration(peerA, px, "hidden");
+    await setCuration(peerB, px, "hidden");
+    await setCuration(peerC, px, "favorite");
+
+    const res = await acceptPeerConsensusLogic(owner, g);
+    expect(res.success).toBe(true);
+    expect(res.hidden_count).toBe(0);
+    expect(res.kept_count).toBe(1);
+    expect(res.no_signal_count).toBe(0);
+
+    // Owner's curation row must remain absent (or visible) — favorite
+    // veto preserved the photo.
+    const ownerRows = await dbAll(
+      db.select().from(photoCuration)
+        .where(and(eq(photoCuration.user_id, owner), eq(photoCuration.photo_id, px))),
+    );
+    expect(ownerRows).toHaveLength(0);
+
+    // Group still marked reviewed (explicit user action).
+    const [grp] = await db.select().from(photoGroups).where(eq(photoGroups.id, g));
+    expect(grp.reviewed_at).not.toBeNull();
+  });
+
+  it("preserves the requester's own favorite (never clobbered to hidden)", async () => {
+    // Same property as acceptAiPickLogic — even if every peer hid the
+    // photo, the requester's existing 'favorite' must survive.
+    const owner = await makeUser("consensus-own-fav@test.com");
+    const peer = await makeUser("consensus-own-fav-peer@test.com");
+    const album = await makeAlbum(owner);
+    await shareAlbum(album, peer);
+
+    const px = await makePhoto(owner);
+    await addPhotoToAlbum(album, px);
+    const g = await makeGroup(owner, px, [px]);
+
+    await setCuration(owner, px, "favorite"); // owner's own favorite
+    await setCuration(peer, px, "hidden");    // peer hid
+
+    const res = await acceptPeerConsensusLogic(owner, g);
+    expect(res.success).toBe(true);
+    expect(res.hidden_count).toBe(1); // consensus *said* hide
+    // ...but the actual curation row stays 'favorite' (ON CONFLICT guard).
+    const [pxRow] = await db.select().from(photoCuration)
+      .where(and(eq(photoCuration.user_id, owner), eq(photoCuration.photo_id, px)));
+    expect(pxRow.status).toBe("favorite");
+  });
+
+  it("marks the group reviewed even when no photo has any peer signal", async () => {
+    // Explicit user click is a review act. Empty consensus must still
+    // remove the group from the queue, otherwise the user can't tell
+    // "I tried but there was nothing" apart from "the button didn't work".
+    const owner = await makeUser("consensus-empty@test.com");
+    const px = await makePhoto(owner);
+    const g = await makeGroup(owner, px, [px]);
+
+    const res = await acceptPeerConsensusLogic(owner, g);
+    expect(res.success).toBe(true);
+    expect(res.hidden_count).toBe(0);
+    expect(res.no_signal_count).toBe(1);
+
+    const [grp] = await db.select().from(photoGroups).where(eq(photoGroups.id, g));
+    expect(grp.reviewed_at).not.toBeNull();
   });
 });
