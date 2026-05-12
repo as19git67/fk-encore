@@ -793,7 +793,10 @@ export function getNextUnreviewedGroup() {
 export function reviewPhotoGroup(id: number, photoIds?: number[]) {
   return apiFetch<{ success: boolean }>(`/photos/groups/${id}/review`, {
     method: 'POST',
-    body: photoIds ? JSON.stringify({ photoIds }) : undefined,
+    // Always send a JSON body (even if empty) — Encore.ts can't parse
+    // a missing/empty body against the `{ photoIds?: number[] }`
+    // schema and would reject with 400 invalid_argument.
+    body: JSON.stringify(photoIds ? { photoIds } : {}),
   })
 }
 
