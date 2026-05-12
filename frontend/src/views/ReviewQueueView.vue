@@ -17,7 +17,7 @@
  * the user wants to drill in (button "Manuell prüfen"), so this view
  * doesn't have to reinvent the per-photo hide/keep UX.
  */
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
@@ -28,6 +28,8 @@ import {
   getReviewQueue,
   acceptAiPick,
   pickPhotosInGroup,
+  reviewPhotoGroup,
+  acceptPeerConsensus,
   bulkAcceptHighConfidenceAiPicks,
   type ReviewQueueGroup,
   type ReviewQueueUserCalibration,
@@ -40,6 +42,11 @@ const router = useRouter()
 const PAGE_SIZE = 30
 const groups = ref<ReviewQueueGroup[]>([])
 const total = ref(0)
+// Count of unreviewed high-confidence groups across the whole user
+// (independent of the active filter). Drives the disable state + label
+// of the "Alle Sicheren bestätigen" button so it never invites a click
+// that would no-op server-side.
+const highConfidenceTotal = ref(0)
 const offset = ref(0)
 const loading = ref(false)
 const loadError = ref('')
@@ -103,6 +110,7 @@ async function loadInitial() {
     })
     groups.value = res.groups
     total.value = res.total
+    highConfidenceTotal.value = res.high_confidence_total
     offset.value = res.groups.length
     userCalibration.value = res.user_calibration
   } catch (err: any) {
@@ -124,6 +132,7 @@ async function loadMore() {
     })
     groups.value = [...groups.value, ...res.groups]
     total.value = res.total
+    highConfidenceTotal.value = res.high_confidence_total
     offset.value += res.groups.length
   } catch (err: any) {
     loadError.value = err?.message ?? 'Fehler beim Nachladen.'
@@ -150,6 +159,103 @@ async function onPickOne(group: ReviewQueueGroup, photoId: number) {
   await runAcceptAction(group, () => pickPhotosInGroup(group.id, [photoId]))
 }
 
+/**
+ * "Alle wählen" — keep every member, mark the group reviewed.
+ *
+ * Use case: an intentional burst (z. B. eine Fotoreihe) wo der User
+ * keines der Bilder verlieren will. Wir flippen nur `reviewed_at` per
+ * reviewPhotoGroup() (ohne photoIds — der Endpoint fasst dann
+ * photo_curation nicht an) und schicken dann das gleiche optimistische
+ * Update durch runAcceptAction, damit die Card verschwindet.
+ */
+async function onKeepAll(group: ReviewQueueGroup) {
+  await runAcceptAction(group, async () => {
+    const res = await reviewPhotoGroup(group.id)
+    return { success: res.success, hidden_count: 0 }
+  })
+}
+
+// ── Peer-Consensus (Phase 2) ──
+// "Konsens übernehmen" lets the requester adopt the conservative
+// majority of their album-peers' curation decisions. The button only
+// makes sense when at least one photo in the group has a peer signal;
+// the dialog previews the bucket counts before the user commits.
+
+interface ConsensusPreview {
+  willHide: number
+  willKeep: number
+  noSignal: number
+}
+
+function previewConsensus(group: ReviewQueueGroup): ConsensusPreview {
+  let willHide = 0
+  let willKeep = 0
+  let noSignal = 0
+  for (const p of group.photos) {
+    const pc = p.peer_curation
+    if (pc.hidden === 0 && pc.favorite === 0) noSignal++
+    else if (pc.hidden > 0 && pc.favorite === 0) willHide++
+    else willKeep++
+  }
+  return { willHide, willKeep, noSignal }
+}
+
+function hasAnyPeerSignal(group: ReviewQueueGroup): boolean {
+  return group.photos.some(
+    (p) => p.peer_curation.hidden > 0 || p.peer_curation.favorite > 0,
+  )
+}
+
+const consensusGroup = ref<ReviewQueueGroup | null>(null)
+const consensusPreview = computed<ConsensusPreview | null>(() =>
+  consensusGroup.value ? previewConsensus(consensusGroup.value) : null,
+)
+const consensusBusy = ref(false)
+const consensusResult = ref<{
+  hidden_count: number
+  kept_count: number
+  no_signal_count: number
+} | null>(null)
+
+function askConsensus(group: ReviewQueueGroup) {
+  consensusResult.value = null
+  consensusGroup.value = group
+}
+
+async function confirmConsensus() {
+  const group = consensusGroup.value
+  if (!group || consensusBusy.value) return
+  consensusBusy.value = true
+  try {
+    const res = await acceptPeerConsensus(group.id)
+    consensusResult.value = {
+      hidden_count: res.hidden_count,
+      kept_count: res.kept_count,
+      no_signal_count: res.no_signal_count,
+    }
+    // Same optimistic-removal flow as the other accept actions: drop
+    // the card from the visible list, update counters. We don't go
+    // through runAcceptAction because the result toast lives inside
+    // the dialog and we don't want the card to vanish *before* the
+    // user sees the counts.
+    groups.value = groups.value.filter((g) => g.id !== group.id)
+    total.value = Math.max(0, total.value - 1)
+    if (group.ai_picked_confidence === 'high') {
+      highConfidenceTotal.value = Math.max(0, highConfidenceTotal.value - 1)
+    }
+  } catch (err: any) {
+    loadError.value = err?.message ?? 'Fehler beim Übernehmen des Konsens.'
+    consensusGroup.value = null
+  } finally {
+    consensusBusy.value = false
+  }
+}
+
+function closeConsensusDialog() {
+  consensusGroup.value = null
+  consensusResult.value = null
+}
+
 async function runAcceptAction(
   group: ReviewQueueGroup,
   action: () => Promise<{ success: boolean; hidden_count: number }>,
@@ -167,6 +273,13 @@ async function runAcceptAction(
     // stays honest without a refetch.
     groups.value = groups.value.filter((g) => g.id !== group.id)
     total.value = Math.max(0, total.value - 1)
+    // If the accepted group was high-confidence, the server-wide
+    // backlog also shrunk by one — mirror that locally so the
+    // "Alle Sicheren bestätigen" button can disable itself as the
+    // last high-confidence group leaves the queue.
+    if (group.ai_picked_confidence === 'high') {
+      highConfidenceTotal.value = Math.max(0, highConfidenceTotal.value - 1)
+    }
   } catch (err: any) {
     loadError.value = err?.message ?? 'Fehler beim Bestätigen der Gruppe.'
     const reverted = new Set(pendingAcceptIds.value)
@@ -242,8 +355,12 @@ function onCompareReviewed() {
   const reviewedId = activeGroup.value?.id
   activeGroup.value = null
   if (reviewedId !== undefined) {
+    const reviewedGroup = groups.value.find((g) => g.id === reviewedId)
     groups.value = groups.value.filter((g) => g.id !== reviewedId)
     total.value = Math.max(0, total.value - 1)
+    if (reviewedGroup?.ai_picked_confidence === 'high') {
+      highConfidenceTotal.value = Math.max(0, highConfidenceTotal.value - 1)
+    }
   }
 }
 
@@ -252,6 +369,31 @@ function onCompareReviewed() {
 function thumb(filename: string, w = 400): string {
   return getThumbUrl(filename, w)
 }
+
+// Strip thumbnails on the queue card are deliberately small to keep the
+// card list scannable, but at 200 px wide the user can't actually see
+// whether a non-pick sibling deserves the demotion. Tap a thumb to open
+// it bildschirmfüllend; tap the backdrop / press ESC to close. State
+// kept here (instead of inside the card v-for) so a single overlay
+// element is enough — Vue teleports it to the body.
+const lightboxFilename = ref<string | null>(null)
+const lightboxIsPicked = ref(false)
+
+function openLightbox(filename: string, isPicked: boolean) {
+  lightboxFilename.value = filename
+  lightboxIsPicked.value = isPicked
+}
+
+function closeLightbox() {
+  lightboxFilename.value = null
+}
+
+function onLightboxKey(e: KeyboardEvent) {
+  if (e.key === 'Escape' && lightboxFilename.value) closeLightbox()
+}
+
+onMounted(() => window.addEventListener('keydown', onLightboxKey))
+onBeforeUnmount(() => window.removeEventListener('keydown', onLightboxKey))
 
 function confidenceLabel(c: ReviewQueueGroup['ai_picked_confidence']): string {
   if (c === 'high') return 'Sicher'
@@ -296,9 +438,11 @@ onMounted(() => {
           icon="pi pi-check-circle"
           severity="success"
           outlined
-          label="Alle hochkonfidenten bestätigen"
+          :label="highConfidenceTotal > 0
+            ? `Alle Sicheren bestätigen (${highConfidenceTotal})`
+            : 'Alle Sicheren bestätigen'"
           :loading="bulkBusy"
-          :disabled="bulkBusy || loading"
+          :disabled="bulkBusy || loading || highConfidenceTotal === 0"
           @click="askBulkAcceptHigh"
         />
       </div>
@@ -408,7 +552,10 @@ onMounted(() => {
         <!-- Regular layout for groups with 4+ photos. AI pick big +
              sibling strip + dual action buttons. -->
         <template v-else>
-          <!-- AI pick big. If multiple picks, show all big. -->
+          <!-- AI pick big. If multiple picks, show all big.
+               Tap the hero to open in fullscreen lightbox — same access
+               path as the sibling strip, since the user might also want
+               to inspect the pick at full resolution. -->
           <div class="rq-card-picks">
             <img
               v-for="photo in group.photos.filter((p) => p.ai_picked)"
@@ -418,6 +565,7 @@ onMounted(() => {
               class="rq-card-pick"
               loading="lazy"
               decoding="async"
+              @click="openLightbox(photo.filename, true)"
             />
             <!-- Fallback: no AI pick → show first photo big -->
             <img
@@ -427,19 +575,29 @@ onMounted(() => {
               class="rq-card-pick"
               loading="lazy"
               decoding="async"
+              @click="openLightbox(group.photos[0].filename, false)"
             />
           </div>
 
-          <!-- Sibling strip. Picks get a green check; non-picks dimmed. -->
+          <!-- Sibling strip. Picks get a green check; non-picks dimmed.
+               Peer signals get a tiny coloured dot in the bottom-left
+               corner — red for "another album-member hid this", gold
+               for "another favourited this". Tap any thumb to open in
+               the fullscreen lightbox. -->
           <div v-if="group.photos.length > 1" class="rq-card-strip">
-            <div
+            <button
               v-for="photo in group.photos"
               :key="photo.id"
+              type="button"
               class="rq-thumb"
               :class="{
                 'rq-thumb--picked': photo.ai_picked,
                 'rq-thumb--non-pick': !photo.ai_picked && group.ai_picked_photo_ids.length > 0,
               }"
+              :aria-label="photo.ai_picked
+                ? 'KI-Pick — bildschirmfüllend ansehen'
+                : 'Bildschirmfüllend ansehen'"
+              @click="openLightbox(photo.filename, photo.ai_picked)"
             >
               <img
                 :src="thumb(photo.filename, 200)"
@@ -448,7 +606,21 @@ onMounted(() => {
                 decoding="async"
               />
               <i v-if="photo.ai_picked" class="pi pi-check rq-thumb-check" />
-            </div>
+              <span
+                v-if="photo.peer_curation.hidden > 0"
+                class="rq-peer-dot rq-peer-dot--hidden"
+                v-tooltip.top="`${photo.peer_curation.hidden} Album-Mitglied(er) haben dieses Foto ausgeblendet`"
+              >
+                {{ photo.peer_curation.hidden > 9 ? '9+' : photo.peer_curation.hidden }}
+              </span>
+              <span
+                v-if="photo.peer_curation.favorite > 0"
+                class="rq-peer-dot rq-peer-dot--favorite"
+                v-tooltip.top="`${photo.peer_curation.favorite} Album-Mitglied(er) haben dieses Foto favorisiert`"
+              >
+                ★
+              </span>
+            </button>
           </div>
         </template>
 
@@ -462,6 +634,25 @@ onMounted(() => {
             label="KI-Pick übernehmen"
             :disabled="pendingAcceptIds.has(group.id) || group.ai_picked_photo_ids.length === 0"
             @click="onAccept(group)"
+          />
+          <Button
+            icon="pi pi-images"
+            outlined
+            severity="success"
+            label="Alle wählen"
+            v-tooltip.top="'Gruppe ohne Ausblenden als reviewed markieren'"
+            :disabled="pendingAcceptIds.has(group.id)"
+            @click="onKeepAll(group)"
+          />
+          <Button
+            v-if="hasAnyPeerSignal(group)"
+            icon="pi pi-users"
+            outlined
+            severity="secondary"
+            label="Konsens übernehmen"
+            v-tooltip.top="'Entscheidungen anderer Album-Mitglieder übernehmen'"
+            :disabled="pendingAcceptIds.has(group.id)"
+            @click="askConsensus(group)"
           />
           <Button
             icon="pi pi-search"
@@ -487,6 +678,7 @@ onMounted(() => {
       :group="activeGroup"
       :all-photos="[]"
       :total-unreviewed="total"
+      :single-group-mode="true"
       @close="onCompareClose"
       @reviewed="onCompareReviewed"
     />
@@ -534,6 +726,108 @@ onMounted(() => {
         />
       </template>
     </Dialog>
+
+    <!-- Konsens-Übernahme — Phase 2. Preview the bucket counts before
+         the user commits; surface the actual result after. The footer
+         slot has to be a direct child of <Dialog>, so we branch on the
+         result/preview state inside one slot rather than nesting
+         <template #footer> inside a v-if. -->
+    <Dialog
+      :visible="consensusGroup != null"
+      @update:visible="(v: boolean) => { if (!v) closeConsensusDialog() }"
+      modal
+      header="Entscheidungen anderer übernehmen?"
+      :style="{ width: 'min(520px, 92vw)' }"
+    >
+      <p v-if="consensusResult">
+        <strong>{{ consensusResult.hidden_count }}</strong>
+        Foto(s) ausgeblendet (Konsens) ·
+        <strong>{{ consensusResult.kept_count }}</strong>
+        mit Signal behalten ·
+        <strong>{{ consensusResult.no_signal_count }}</strong>
+        ohne Peer-Signal unverändert.
+      </p>
+      <template v-else-if="consensusPreview">
+        <p>
+          Konsens-Regel: <em>Ein Foto wird nur ausgeblendet, wenn
+          mindestens ein Album-Mitglied es ausgeblendet hat
+          <strong>und</strong> niemand es favorisiert hat.</em>
+          Deine eigenen Favoriten bleiben unangetastet.
+        </p>
+        <ul class="rq-consensus-preview">
+          <li>
+            <span class="rq-consensus-dot rq-consensus-dot--hide" />
+            <strong>{{ consensusPreview.willHide }}</strong>
+            Foto(s) werden ausgeblendet
+          </li>
+          <li>
+            <span class="rq-consensus-dot rq-consensus-dot--keep" />
+            <strong>{{ consensusPreview.willKeep }}</strong>
+            Foto(s) bleiben sichtbar (Peer-Signal, aber Favorit dagegen)
+          </li>
+          <li>
+            <span class="rq-consensus-dot rq-consensus-dot--none" />
+            <strong>{{ consensusPreview.noSignal }}</strong>
+            Foto(s) ohne Peer-Signal — unverändert
+          </li>
+        </ul>
+      </template>
+      <template #footer>
+        <Button
+          v-if="consensusResult"
+          label="Schließen"
+          @click="closeConsensusDialog"
+        />
+        <template v-else>
+          <Button
+            label="Abbrechen"
+            severity="secondary"
+            outlined
+            :disabled="consensusBusy"
+            @click="closeConsensusDialog"
+          />
+          <Button
+            label="Übernehmen"
+            icon="pi pi-check"
+            severity="success"
+            :loading="consensusBusy"
+            :disabled="consensusBusy"
+            @click="confirmConsensus"
+          />
+        </template>
+      </template>
+    </Dialog>
+
+    <!-- Lightbox: tap a strip thumb (or the hero pick) to inspect at
+         full size. Click anywhere (image, backdrop) or press ESC to
+         close. Single instance, kept outside the v-for to avoid stale
+         state when paginating. -->
+    <div
+      v-if="lightboxFilename"
+      class="rq-lightbox"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Foto in voller Größe"
+      @click="closeLightbox"
+    >
+      <button
+        type="button"
+        class="rq-lightbox-close"
+        aria-label="Schließen"
+        @click="closeLightbox"
+      >
+        <i class="pi pi-times" />
+      </button>
+      <div v-if="lightboxIsPicked" class="rq-lightbox-badge">
+        <i class="pi pi-check-circle" />
+        KI-Pick
+      </div>
+      <img
+        :src="thumb(lightboxFilename, 1600)"
+        :alt="''"
+        class="rq-lightbox-img"
+      />
+    </div>
   </div>
 </template>
 
@@ -741,6 +1035,7 @@ onMounted(() => {
   object-fit: contain;
   background: var(--p-content-hover-background);
   border-radius: 8px;
+  cursor: zoom-in;
 }
 
 .rq-card-strip {
@@ -757,6 +1052,16 @@ onMounted(() => {
   border-radius: 6px;
   overflow: hidden;
   background: var(--p-content-hover-background);
+  /* Reset <button> defaults — the element is a button for keyboard
+     access (Enter/Space → openLightbox) but visually a thumb tile. */
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: zoom-in;
+}
+.rq-thumb:focus-visible {
+  outline: 2px solid var(--p-primary-color);
+  outline-offset: 2px;
 }
 .rq-thumb img {
   width: 100%;
@@ -770,6 +1075,29 @@ onMounted(() => {
 .rq-thumb--picked {
   outline: 2px solid var(--p-green-500, #22c55e);
   outline-offset: -2px;
+}
+.rq-peer-dot {
+  position: absolute;
+  bottom: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+.rq-peer-dot--hidden {
+  left: 3px;
+  background: rgba(220, 38, 38, 0.95); /* red — peer voted to hide */
+}
+.rq-peer-dot--favorite {
+  right: 3px;
+  background: rgba(234, 179, 8, 0.95); /* gold — peer favorited */
 }
 .rq-thumb-check {
   position: absolute;
@@ -796,5 +1124,85 @@ onMounted(() => {
   display: flex;
   justify-content: center;
   padding: 16px 0;
+}
+
+.rq-consensus-preview {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rq-consensus-preview li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.95rem;
+}
+.rq-consensus-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.rq-consensus-dot--hide { background: rgba(220, 38, 38, 0.95); }
+.rq-consensus-dot--keep { background: rgba(234, 179, 8, 0.95); }
+.rq-consensus-dot--none { background: var(--p-content-border-color); }
+
+/* ── Lightbox ── Full-bleed overlay so the user can verify what the
+   KI hid before committing. Backdrop is near-opaque (not the standard
+   modal-scrim) since the only thing that matters is seeing the photo. */
+.rq-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  cursor: zoom-out;
+}
+.rq-lightbox-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  cursor: zoom-out;
+  user-select: none;
+}
+.rq-lightbox-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 0;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+}
+.rq-lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+.rq-lightbox-badge {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 1rem;
+  background: rgba(34, 197, 94, 0.9);
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.85rem;
 }
 </style>
