@@ -232,9 +232,6 @@ watch(() => props.photo.id, () => {
 
 <template>
   <aside class="details-sidebar" :class="{ 'details-sidebar--flyout': inFlyout }">
-    <div class="sidebar-header">
-      <span class="sidebar-title">Details</span>
-    </div>
     <div v-if="isMultiSelect" class="sidebar-scroll">
       <div class="sidebar-section">
         <div class="section-label">
@@ -541,11 +538,6 @@ watch(() => props.photo.id, () => {
   overflow: visible;
 }
 
-/* Header would be redundant — the flyout already implies "Details". */
-.details-sidebar--flyout .sidebar-header {
-  display: none;
-}
-
 .mini-map {
   margin-top: 0.1rem;
   margin-bottom: 0.5rem;
@@ -559,27 +551,6 @@ watch(() => props.photo.id, () => {
     overflow-y: auto;
     border-left: none;
   }
-  /* Kein separater Header im Sheet – Close-Button kommt vom Parent */
-  .sidebar-header {
-    display: none;
-  }
-}
-
-.sidebar-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--p-content-border-color);
-  flex-shrink: 0;
-}
-
-.sidebar-title {
-  font-size: 0.8rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  color: var(--p-text-muted-color);
 }
 
 .sidebar-scroll {

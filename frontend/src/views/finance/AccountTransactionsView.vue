@@ -984,6 +984,30 @@ function goBack() {
   color: var(--p-text-muted-color);
 }
 
+/* ── Tag chips ────────────────────────────────────────────────────── */
+/* PrimeVue Tag component CSS is lazily loaded; define the base rules
+   here so spans with .p-tag classes render correctly without importing
+   the Tag component. */
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--p-tag-border-radius, 4px);
+  padding: var(--p-tag-padding, 0.25rem 0.5rem);
+  font-size: var(--p-tag-font-size, 0.75rem);
+  font-weight: var(--p-tag-font-weight, 700);
+  white-space: nowrap;
+  line-height: 1;
+}
+.p-tag-info.tag-chip {
+  background: var(--p-tag-info-background, rgba(59, 130, 246, 0.15));
+  color: var(--p-tag-info-color, var(--p-blue-600, #2563eb));
+}
+.p-tag-success.tag-chip {
+  background: var(--p-tag-success-background, rgba(34, 197, 94, 0.15));
+  color: var(--p-tag-success-color, var(--p-green-600, #16a34a));
+}
+
 /* ── Empty / loading / dummy states ───────────────────────────────── */
 .tx-loading,
 .tx-empty {
