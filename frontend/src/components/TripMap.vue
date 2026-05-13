@@ -50,6 +50,11 @@ const selectedDay = ref<DaySelection>(OVERVIEW)
 /** Highlighted stop within the selected day. Only meaningful when a
  *  specific day is selected; null in overview mode. */
 const selectedStopId = ref<number | null>(null)
+/** A specific pre-selected photo (deep link, last-viewed restore).
+ *  When set, clicking the pin of the containing stop opens fullscreen
+ *  at THIS photo instead of the stop's first photo. Cleared as soon
+ *  as the user navigates somewhere else. */
+const activePhotoId = ref<number | null>(null)
 
 function formatDayLabel(day: string): string {
   // day = YYYY-MM-DD → DD. Mon
@@ -95,6 +100,16 @@ function applySelection(
   const dayChanged = selectedDay.value !== day
   const stopChanged = selectedStopId.value !== stopId
   if (!dayChanged && !stopChanged) return
+  // Drop the active-photo hint whenever we move to a stop that doesn't
+  // contain it. The hint only applies to the stop that owns the photo
+  // — every other navigation cancels it so subsequent pin clicks open
+  // at the stop's first photo instead.
+  if (stopChanged && activePhotoId.value != null) {
+    const targetStop = stopId != null ? stops.value.find(s => s.id === stopId) : null
+    if (!targetStop || !targetStop.photos.some(p => p.id === activePhotoId.value)) {
+      activePhotoId.value = null
+    }
+  }
   selectedDay.value = day
   selectedStopId.value = stopId
   renderContent()
@@ -373,13 +388,20 @@ function handleOverviewPinClick(c: OverviewCluster) {
 function handleStopPinClick(stop: Stop) {
   applySelection(stop.day, stop.id)
   nextTick(() => scrollItemIntoCenter(stop.id))
-  // Open fullscreen with the entire selected day's photos so the user can
-  // browse within the day. startIndex points at this stop's first photo.
+  // Open fullscreen with the entire selected day's photos so the user
+  // can browse within the day. If we have a pre-selected photo (deep
+  // link, last-viewed restore) AND this stop contains it, start at
+  // THAT photo instead of the stop's first. Then consume the hint —
+  // subsequent clicks default to first-photo behaviour again.
   const dayPhotos = dayPhotosFor(stop.day)
-  const startId = stop.photos[0]?.id
+  const startId = activePhotoId.value != null
+      && stop.photos.some(p => p.id === activePhotoId.value)
+    ? activePhotoId.value
+    : stop.photos[0]?.id
   const startIndex = startId != null
     ? Math.max(0, dayPhotos.findIndex(p => p.id === startId))
     : 0
+  activePhotoId.value = null
   emit('open-fullscreen', dayPhotos, startIndex, stop.day)
 }
 
@@ -679,6 +701,11 @@ watch(visiblePins, () => {
 function selectStopByPhotoId(photoId: number): boolean {
   const stop = stops.value.find((s) => s.photos.some((p) => p.id === photoId))
   if (!stop) return false
+  // Record the specific photo BEFORE applySelection so the stop-change
+  // logic inside applySelection sees that the new stop contains the
+  // active photo and keeps the hint alive. Without this order the
+  // hint would be cleared by the very call that brought us here.
+  activePhotoId.value = photoId
   applySelection(stop.day, stop.id, { silent: true })
   nextTick(() => scrollItemIntoCenter(stop.id))
   return true
