@@ -575,6 +575,20 @@
       "when": 1779001420000,
       "tag": "0081_queue_priority",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1779001421000,
+      "tag": "0082_finance_holdings",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1779001422000,
+      "tag": "0083_depot_account_dedupe",
+      "breakpoints": true
     }
   ]
 }

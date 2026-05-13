@@ -257,7 +257,8 @@ async function resumeStatementsTan(
     `[finance.tan-sessions] resumed statements fetch for bankcontact=` +
       `${session.bankcontact_id}: tx=${stats.transactions_inserted} ` +
       `(${stats.transactions_skipped_duplicate} dup) ` +
-      `balances=${stats.balances_written} partial=${fetched.partial}`,
+      `balances=${stats.balances_written} holdings=${stats.holdings_written} ` +
+      `partial=${fetched.partial}`,
   );
   return {
     state: "idle",
@@ -274,6 +275,7 @@ async function resumeStatementsTan(
     })),
     transactions_inserted: stats.transactions_inserted,
     balances_written: stats.balances_written,
+    holdings_written: stats.holdings_written || undefined,
     partial: fetched.partial || undefined,
     errors: stats.errors.length > 0 ? stats.errors : undefined,
   };

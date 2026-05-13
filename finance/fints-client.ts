@@ -38,6 +38,7 @@ import type {
   DialogResult,
   FetchResult,
   FintsAccountSnapshot,
+  FintsHoldingData,
   FintsTransactionData,
   SyncOptions,
 } from "./types";
@@ -808,20 +809,35 @@ export async function runFetchAccounts(
   // in upd.bankAccounts with different subAccountIds (giro + Visa
   // sub-account on the same number). lib-fints' getAccountStatements
   // / getAccountBalance only take the accountNumber, so a second
-  // call would just retrigger the same SCA push for the same data.
-  // Dedupe at this layer.
-  const seenAccountNumbers = new Set<string>();
+  // call for the *same account type* would just retrigger the same
+  // SCA push for the same data. However, a depot (SecuritiesAccount)
+  // sharing a number with a giro (CheckingAccount) uses a completely
+  // different FinTS segment (HKWPD vs HKKAZ), so those must not be
+  // deduped. Key on accountNumber:accountType.
+  console.log(
+    `[fints] bank reported ${accounts.length} account(s): ` +
+      accounts
+        .map(
+          (a) =>
+            `${a.accountNumber}(type=${a.accountType ?? "?"}, ` +
+            `sub=${a.subAccountId ?? "-"})`,
+        )
+        .join(", "),
+  );
+  const seenKeys = new Set<string>();
   const dedupedAccounts: RawBankAccount[] = [];
   for (const account of accounts) {
-    if (seenAccountNumbers.has(account.accountNumber)) {
+    const eKind = effectiveAccountKind(client, account);
+    const key = `${account.accountNumber}:${eKind}`;
+    if (seenKeys.has(key)) {
       console.log(
         `[fints] skipping duplicate bank-side account ${account.accountNumber} ` +
-          `(subAccountId=${account.subAccountId ?? "<none>"}) — ` +
-          `lib-fints addresses by accountNumber only, no need to re-fetch`,
+          `(subAccountId=${account.subAccountId ?? "<none>"}, ` +
+          `effectiveKind=${eKind}) — same number+kind already queued`,
       );
       continue;
     }
-    seenAccountNumbers.add(account.accountNumber);
+    seenKeys.add(key);
     dedupedAccounts.push(account);
   }
 
@@ -843,10 +859,12 @@ export async function runFetchAccounts(
       // Coupled TAN (photoTAN/chipTAN) demanded mid-fetch. Stop the
       // loop, hand the queue + the TAN info back to the caller; the
       // resume path picks up from `account.accountNumber` after the
-      // user submits.
+      // user submits.  Queue entries use "number:type" compound keys
+      // so the resume path can distinguish a giro and a depot that
+      // share the same bank-side account number.
       const remaining = dedupedAccounts
         .slice(i + 1)
-        .map((a) => a.accountNumber);
+        .map((a) => `${a.accountNumber}:${a.accountType ?? ""}`);
       return {
         accounts: snapshots,
         partial: true,
@@ -900,13 +918,7 @@ async function fetchOneAccount(
   sleep: (ms: number) => Promise<void>,
   opts: { fetch: boolean; from?: Date } = { fetch: true },
 ): Promise<FetchOneResult> {
-  const canGetCC = typeof client.canGetCreditCardStatements === "function" &&
-    client.canGetCreditCardStatements(account.accountNumber);
-
-  let accountKind = mapAccountKind(account.accountType);
-  if (accountKind === "sonstige" && canGetCC) {
-    accountKind = "kreditkarte";
-  }
+  let accountKind = effectiveAccountKind(client, account);
 
   const currency = account.currency ?? "EUR";
   const label = buildAccountLabel(account, accountKind);
@@ -919,6 +931,7 @@ async function fetchOneAccount(
     label,
     balance: null,
     transactions: [],
+    holdings: [],
     errors: [],
   };
 
@@ -945,8 +958,11 @@ async function fetchOneAccount(
   // kreditkarte accounts when the bank supports it. This returns
   // CreditCardStatement objects which carry original-currency fields
   // and are structured differently from MT940/CAMT statements.
-  console.log(`[fints] account ${account.accountNumber}: type=${account.accountType}, kind=${accountKind}`);
+  console.log(`[fints] account ${account.accountNumber}: type=${account.accountType}, sub=${account.subAccountId ?? "-"}, kind=${accountKind}`);
   const isCreditCard = accountKind === "kreditkarte";
+  const canGetCC = isCreditCard &&
+    typeof client.canGetCreditCardStatements === "function" &&
+    client.canGetCreditCardStatements(account.accountNumber);
 
   const useCreditCardPath = isCreditCard && canGetCC;
 
@@ -1121,7 +1137,71 @@ async function fetchDepotPortfolio(
     );
     return { snapshot };
   }
-  if (!client.canGetPortfolio(account.accountNumber)) {
+
+  // lib-fints resolves accounts by the first accountNumber match in
+  // upd.bankAccounts (via config.getBankAccount). When giro and depot
+  // share the same number, that first-match picks the giro — which
+  // doesn't support HKWPD. We can't reorder the array because Dialog
+  // init rebuilds the UPD from the bank's response, undoing any
+  // reorder. Instead, monkey-patch getBankAccount on the config
+  // instance to prefer the depot entry for the shared number. This
+  // survives UPD rebuilds because the override is on the method, not
+  // the data.
+  const restore = patchGetBankAccountForDepot(client, account);
+  try {
+    return await fetchDepotPortfolioInner(client, account, snapshot, sleep);
+  } finally {
+    restore();
+  }
+}
+
+/**
+ * Monkey-patch `config.getBankAccount` so that lookups for the depot's
+ * accountNumber return the depot entry (matched by subAccountId) instead
+ * of whichever entry `.find()` hits first (usually the giro).
+ *
+ * This survives Dialog init rebuilding the UPD because it's a method
+ * override on the config instance — the rebuilt UPD replaces the *data*
+ * (`config.bankingInformation.upd`), but the patched method still
+ * searches the (now-fresh) array with the correct predicate.
+ *
+ * Returns a restore function that removes the instance-level override.
+ */
+function patchGetBankAccountForDepot(
+  client: FintsClientSurface,
+  account: RawBankAccount,
+): () => void {
+  const cfg = client.config as Record<string, unknown>;
+  const origGetBankAccount = (cfg as { getBankAccount: (n: string) => RawBankAccount }).getBankAccount;
+  if (typeof origGetBankAccount !== "function") return () => {};
+
+  const bound = origGetBankAccount.bind(cfg);
+  (cfg as { getBankAccount: (n: string) => RawBankAccount }).getBankAccount = (accountNumber: string) => {
+    if (accountNumber === account.accountNumber) {
+      const upd = (client.config.bankingInformation as Record<string, unknown>)
+        .upd as { bankAccounts?: RawBankAccount[] } | undefined;
+      const depotEntry = upd?.bankAccounts?.find(
+        (a) =>
+          a.accountNumber === accountNumber &&
+          a.subAccountId === account.subAccountId,
+      );
+      if (depotEntry) return depotEntry;
+    }
+    return bound(accountNumber);
+  };
+
+  return () => {
+    (cfg as { getBankAccount: (n: string) => RawBankAccount }).getBankAccount = origGetBankAccount;
+  };
+}
+
+async function fetchDepotPortfolioInner(
+  client: FintsClientSurface,
+  account: RawBankAccount,
+  snapshot: FintsAccountSnapshot,
+  sleep: (ms: number) => Promise<void>,
+): Promise<FetchOneResult> {
+  if (!client.canGetPortfolio!(account.accountNumber)) {
     console.log(
       `[fints] account ${account.accountNumber}: kind=depot, bank ` +
         `does not advertise HKWPD — skipping`,
@@ -1185,11 +1265,23 @@ async function fetchDepotPortfolio(
           `holdings=${stmt.holdings?.length ?? 0}`,
       );
       for (const h of stmt.holdings ?? []) {
+        const holding: FintsHoldingData = {
+          isin: h.isin ?? null,
+          wkn: h.wkn ?? null,
+          name: h.name ?? null,
+          amount: h.amount != null ? String(h.amount) : null,
+          price: h.price != null ? String(h.price) : null,
+          value: h.value != null ? toAmountString(h.value) : null,
+          currency: h.currency ?? null,
+          acquisitionDate: h.acquisitionDate ? toIsoDate(h.acquisitionDate) : null,
+          acquisitionPrice: h.acquisitionPrice != null ? String(h.acquisitionPrice) : null,
+        };
+        snapshot.holdings.push(holding);
         console.log(
           `[fints] portfolio ${account.accountNumber} holding: ` +
-            `isin=${h.isin ?? "?"} wkn=${h.wkn ?? "?"} ` +
-            `name=${(h.name ?? "").slice(0, 40)} ` +
-            `amount=${h.amount ?? 0} value=${h.value ?? 0} ${h.currency ?? ""}`,
+            `isin=${holding.isin ?? "?"} wkn=${holding.wkn ?? "?"} ` +
+            `name=${(holding.name ?? "").slice(0, 40)} ` +
+            `amount=${holding.amount ?? 0} value=${holding.value ?? 0} ${holding.currency ?? ""}`,
         );
       }
     } else {
@@ -1250,7 +1342,7 @@ export async function resumeFetchAfterTan(
     };
   }
 
-  const accountKind = mapAccountKind(currentAccount.accountType);
+  const accountKind = effectiveAccountKind(client, currentAccount);
   const currency = currentAccount.currency ?? "EUR";
   const snapshot: FintsAccountSnapshot = {
     accountNumber: currentAccount.accountNumber,
@@ -1260,6 +1352,7 @@ export async function resumeFetchAfterTan(
     label: buildAccountLabel(currentAccount, accountKind),
     balance: null,
     transactions: [],
+    holdings: [],
     errors: [],
   };
 
@@ -1381,11 +1474,18 @@ export async function resumeFetchAfterTan(
   // Resume the loop with the queued accounts. Each one is a fresh
   // getAccountStatements call on the same client; if the bank
   // demands TAN again, fetchOneAccount returns pendingTan as before.
+  // Queue entries may be "number:type" compound keys (new) or plain
+  // account numbers (old sessions serialized before this change).
   const snapshots: FintsAccountSnapshot[] = [snapshot];
   let partial = snapshot.errors.length > 0;
   for (let i = 0; i < ctx.remainingAccountNumbers.length; i++) {
-    const acn = ctx.remainingAccountNumbers[i];
-    const acc = allAccounts.find((a) => a.accountNumber === acn);
+    const entry = ctx.remainingAccountNumbers[i];
+    const colonIdx = entry.indexOf(":");
+    const acn = colonIdx >= 0 ? entry.slice(0, colonIdx) : entry;
+    const acType = colonIdx >= 0 ? entry.slice(colonIdx + 1) || undefined : undefined;
+    const acc = allAccounts.find(
+      (a) => a.accountNumber === acn && (acType === undefined || a.accountType === acType),
+    );
     if (!acc) continue;
     const r = await fetchOneAccount(client, acc, sleep, { fetch: true });
     if (r.snapshot.errors.length > 0) partial = true;
@@ -1428,6 +1528,31 @@ function mapAccountKind(accountType: string | undefined): string {
     default:
       return "sonstige";
   }
+}
+
+/**
+ * Compute the effective account kind for a bank-side account. Falls
+ * back to subAccountId-based heuristics when the bank reports all
+ * accounts as "Miscellaneous" (e.g. comdirect, 1822direkt).
+ */
+function effectiveAccountKind(
+  client: FintsClientSurface,
+  account: RawBankAccount,
+): string {
+  let kind = mapAccountKind(account.accountType);
+  if (kind !== "sonstige") return kind;
+
+  const sub = (account.subAccountId ?? "").toLowerCase();
+  if (sub.includes("depot") || sub.includes("wertpapier")) {
+    return "depot";
+  }
+  if (
+    typeof client.canGetCreditCardStatements === "function" &&
+    client.canGetCreditCardStatements(account.accountNumber)
+  ) {
+    return "kreditkarte";
+  }
+  return kind;
 }
 
 /**
