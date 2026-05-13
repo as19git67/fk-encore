@@ -45,6 +45,11 @@ Status: Feature-Plan, Umsetzung in Etappen.
 Jeder Store hält seinen Loading- und Error-State; Komponenten rufen nur
 Store-Actions, nie direkt den API-Helper.
 
+**Hinweis:** Depot-Holdings werden *nicht* über einen eigenen Store
+verwaltet, sondern on-demand direkt via `listHoldings(accountId)` aus
+dem API-Helper geladen. Die Daten leben ausschließlich im lokalen State
+der `AccountDetailView`-Komponente.
+
 ---
 
 ## 3. Views
@@ -299,6 +304,49 @@ Komponente wie `TransactionsView`, vorausgewähltes Konto).
   Konto — nur sichtbar, wenn der User `level='write'` auf dem Konto
   hält.
 - Zeilen-Klick führt zu `TransactionDetailView`.
+
+#### Depot-Ansicht
+
+Für Depot-Konten (`type_kind === 'depot'`) wechselt die
+`AccountTransactionsView` in ein depot-optimiertes Layout:
+
+- **Holdings-Tabelle** ("Positionen") wird anstelle der Umsatzliste
+  angezeigt. Spalten: Name/ISIN, Stück (amount), Kurs (price), Wert
+  (value), Anteil (share %). Eine Footer-Zeile zeigt den Gesamtwert
+  (Gesamt) und 100 %.
+- **Transaction-Toolbar** (Filter, Batch-Select, Batch-Tag-Buttons) wird
+  ausgeblendet — Depot-Konten haben keine klassischen Buchungen.
+- **"Keine Buchungen vorhanden"**-Meldung wird unterdrückt — die
+  Holdings-Tabelle behandelt ihren eigenen Leer-Zustand ("Keine
+  Positionen vorhanden").
+- **Transaction-Loading wird übersprungen** für Depot-Konten, um eine
+  unnötige DB-Abfrage zu vermeiden.
+
+Holdings werden über `GET /finance/accounts/:id/holdings` geladen und
+in einer `<table>` angezeigt. Das jüngste `as_of`-Datum erscheint in
+der Abschnittsüberschrift.
+
+Die Depot-Erkennung nutzt `resolvedAccount.value?.type_kind === 'depot'`
+aus dem Overview-Store.
+
+```
++----------------------------------------------------------------------+
+| Depot DKB — 401873500                                      [Zurück]   |
++----------------------------------------------------------------------+
+| Aktueller Wert: 45.678,90 €      Stand: 2026-05-13                   |
++----------------------------------------------------------------------+
+| Positionen (13.05.2026)                                               |
+|----------------------------------------------------------------------|
+| Name / ISIN              Stück    Kurs        Wert         Anteil    |
+| ADIDAS AG                10      215,40 €    2.154,00 €    4,7 %     |
+|   DE000A1EWWW0                                                       |
+| ISHARES CORE MSCI WO.    150      75,20 €   11.280,00 €   24,7 %     |
+|   IE00B4L5Y983                                                       |
+| …                                                                    |
+|----------------------------------------------------------------------|
+| Gesamt                                      45.678,90 €   100 %      |
++----------------------------------------------------------------------+
+```
 
 ### 4.9 `TransactionsView`
 
