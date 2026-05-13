@@ -1139,10 +1139,15 @@ async function fetchDepotPortfolio(
   }
 
   // lib-fints resolves accounts by the first accountNumber match in
-  // upd.bankAccounts. When giro and depot share the same number,
-  // canGetPortfolio/getPortfolio would check/use the giro instead of
-  // the depot. Temporarily reorder so the depot entry comes first.
-  const restore = promoteAccountInUpd(client, account);
+  // upd.bankAccounts (via config.getBankAccount). When giro and depot
+  // share the same number, that first-match picks the giro — which
+  // doesn't support HKWPD. We can't reorder the array because Dialog
+  // init rebuilds the UPD from the bank's response, undoing any
+  // reorder. Instead, monkey-patch getBankAccount on the config
+  // instance to prefer the depot entry for the shared number. This
+  // survives UPD rebuilds because the override is on the method, not
+  // the data.
+  const restore = patchGetBankAccountForDepot(client, account);
   try {
     return await fetchDepotPortfolioInner(client, account, snapshot, sleep);
   } finally {
@@ -1151,30 +1156,42 @@ async function fetchDepotPortfolio(
 }
 
 /**
- * Temporarily reorders `upd.bankAccounts` so the given account is the
- * first entry with its accountNumber. Returns a restore function.
+ * Monkey-patch `config.getBankAccount` so that lookups for the depot's
+ * accountNumber return the depot entry (matched by subAccountId) instead
+ * of whichever entry `.find()` hits first (usually the giro).
+ *
+ * This survives Dialog init rebuilding the UPD because it's a method
+ * override on the config instance — the rebuilt UPD replaces the *data*
+ * (`config.bankingInformation.upd`), but the patched method still
+ * searches the (now-fresh) array with the correct predicate.
+ *
+ * Returns a restore function that removes the instance-level override.
  */
-function promoteAccountInUpd(
+function patchGetBankAccountForDepot(
   client: FintsClientSurface,
   account: RawBankAccount,
 ): () => void {
-  const upd = (client.config.bankingInformation as Record<string, unknown>)
-    .upd as { bankAccounts?: RawBankAccount[] } | undefined;
-  const list = upd?.bankAccounts;
-  if (!list) return () => {};
+  const cfg = client.config as Record<string, unknown>;
+  const origGetBankAccount = (cfg as { getBankAccount: (n: string) => RawBankAccount }).getBankAccount;
+  if (typeof origGetBankAccount !== "function") return () => {};
 
-  const idx = list.findIndex(
-    (a) =>
-      a.accountNumber === account.accountNumber &&
-      a.subAccountId === account.subAccountId,
-  );
-  if (idx <= 0) return () => {};
+  const bound = origGetBankAccount.bind(cfg);
+  (cfg as { getBankAccount: (n: string) => RawBankAccount }).getBankAccount = (accountNumber: string) => {
+    if (accountNumber === account.accountNumber) {
+      const upd = (client.config.bankingInformation as Record<string, unknown>)
+        .upd as { bankAccounts?: RawBankAccount[] } | undefined;
+      const depotEntry = upd?.bankAccounts?.find(
+        (a) =>
+          a.accountNumber === accountNumber &&
+          a.subAccountId === account.subAccountId,
+      );
+      if (depotEntry) return depotEntry;
+    }
+    return bound(accountNumber);
+  };
 
-  const [target] = list.splice(idx, 1);
-  list.unshift(target);
   return () => {
-    list.shift();
-    list.splice(idx, 0, target);
+    (cfg as { getBankAccount: (n: string) => RawBankAccount }).getBankAccount = origGetBankAccount;
   };
 }
 

@@ -1067,11 +1067,15 @@ describe("runFetchAccounts — happy path", () => {
     expect(portfolio).not.toHaveBeenCalled();
   });
 
-  it("fetches portfolio when depot shares account number with giro (UPD reorder)", async () => {
+  it("fetches portfolio when depot shares account number with giro (getBankAccount patch)", async () => {
     // Some banks (e.g. comdirect) report giro + depot with the same
     // accountNumber, distinguished only by subAccountId. lib-fints'
-    // getBankAccount picks the first match, so without UPD reorder
+    // getBankAccount picks the first match, so without the monkey-patch
     // canGetPortfolio would check the giro (no HKWPD) instead of the depot.
+    const accounts = [
+      { accountNumber: "1234", accountType: "Miscellaneous", currency: "EUR", subAccountId: "00" },
+      { accountNumber: "1234", accountType: "Miscellaneous", currency: "EUR", subAccountId: "depot" },
+    ];
     const stmt = vi.fn(async () => stmtResp([]));
     const bal = vi.fn(async () =>
       balResp({ date: new Date(), currency: "EUR", balance: 100 }),
@@ -1090,18 +1094,38 @@ describe("runFetchAccounts — happy path", () => {
         ],
       },
     } as any));
-    const c = clientWith(
-      [
-        { accountNumber: "1234", accountType: "Miscellaneous", currency: "EUR", subAccountId: "00" },
-        { accountNumber: "1234", accountType: "Miscellaneous", currency: "EUR", subAccountId: "depot" },
-      ],
-      {
-        getAccountStatements: stmt,
-        getAccountBalance: bal,
-        canGetPortfolio: vi.fn(() => true),
-        getPortfolio: portfolio,
-      },
-    );
+    // Realistic canGetPortfolio: looks up the account via
+    // config.getBankAccount and checks its allowedTransactions. The
+    // monkey-patch must make this return the depot entry (which has
+    // HKWPD) instead of the giro (which doesn't).
+    const canPortfolio = vi.fn(function (this: any, accountNumber: string) {
+      const cfg = this?.config ?? c.config;
+      if (typeof cfg.getBankAccount === "function") {
+        try {
+          const acct = cfg.getBankAccount(accountNumber);
+          return acct?.allowedTransactions?.some((t: any) => t.transId === "HKWPD") ?? false;
+        } catch { return false; }
+      }
+      return false;
+    });
+    const c = clientWith(accounts, {
+      getAccountStatements: stmt,
+      getAccountBalance: bal,
+      getPortfolio: portfolio,
+    });
+    // Set up a realistic getBankAccount on the config — first-match
+    // semantics like lib-fints, so without the patch it returns giro.
+    const bi = c.config.bankingInformation as any;
+    bi.upd.bankAccounts[0].allowedTransactions = [{ transId: "HKKAZ" }];
+    bi.upd.bankAccounts[1].allowedTransactions = [{ transId: "HKWPD" }];
+    (c.config as any).getBankAccount = (acn: string) => {
+      const found = bi.upd.bankAccounts.find((a: any) => a.accountNumber === acn);
+      if (!found) throw new Error(`Account ${acn} not found`);
+      return found;
+    };
+    // Bind canGetPortfolio so it has access to the client's config
+    c.canGetPortfolio = canPortfolio.bind(c) as any;
+
     const r = await runFetchAccounts(c);
     expect(r.accounts).toHaveLength(2);
     expect(r.accounts.map((a) => a.accountKind)).toEqual(["sonstige", "depot"]);
@@ -1113,6 +1137,10 @@ describe("runFetchAccounts — happy path", () => {
     // Giro got standard statements + balance
     expect(stmt).toHaveBeenCalledTimes(1);
     expect(bal).toHaveBeenCalledTimes(1);
+    // After fetchDepotPortfolio, the patch must be cleaned up — the
+    // original getBankAccount should be restored.
+    const restored = (c.config as any).getBankAccount("1234");
+    expect(restored.subAccountId).toBe("00"); // back to first-match = giro
   });
 });
 
