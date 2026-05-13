@@ -75,9 +75,10 @@ alongside the external-service statuses:
 }
 ```
 
-The frontend `ServiceStatusBar` component shows a warning banner when
-`underPressure` is `true`, informing the user that background processing is
-being throttled to maintain responsiveness.
+The state is exposed so operators can scrape it from logs / dashboards. The
+frontend used to render a "Server ausgelastet" banner from this flag, but the
+notice was repetitive and added little signal in the UI — it was removed in
+favour of leaving the field as a pure server-side observability signal.
 
 ### Flow Diagram
 

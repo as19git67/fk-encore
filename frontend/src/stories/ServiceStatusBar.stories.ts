@@ -4,7 +4,7 @@ import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import { useServiceHealthStore } from '../stores/serviceHealth'
 import {
   MOCK_SERVICES_OK, MOCK_SERVICES_DEGRADED,
-  MOCK_SERVER_PRESSURE_OK, MOCK_SERVER_PRESSURE_HIGH,
+  MOCK_SERVER_PRESSURE_OK,
 } from './mock-data'
 import type { ExternalServiceHealth, ServerPressureStatus } from '../api/photos'
 
@@ -39,14 +39,4 @@ export const AlleDiensteOk: Story = {
 export const DiensteAusgefallen: Story = {
   name: 'Dienste nicht erreichbar',
   decorators: [withStoreState(MOCK_SERVICES_DEGRADED, MOCK_SERVER_PRESSURE_OK)],
-}
-
-export const ServerUnterLast: Story = {
-  name: 'Server unter Last',
-  decorators: [withStoreState(MOCK_SERVICES_OK, MOCK_SERVER_PRESSURE_HIGH)],
-}
-
-export const AllesSchief: Story = {
-  name: 'Dienste offline + Server unter Last',
-  decorators: [withStoreState(MOCK_SERVICES_DEGRADED, MOCK_SERVER_PRESSURE_HIGH)],
 }

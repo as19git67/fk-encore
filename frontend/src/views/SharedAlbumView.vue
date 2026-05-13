@@ -130,19 +130,86 @@ function asPhotos(photos: PublicAlbumPhoto[]): Photo[] {
 const albumPhotosAsPhoto = computed<Photo[]>(() => album.value ? asPhotos(album.value.photos) : [])
 
 // ── Filter (map view only) ──────────────────────────────────────────────────
-// Public / shared album opens with Highlights on and hidden photos excluded.
-// We keep this state local — no URL sync, no query params — because the
-// filter UX only makes sense while the viewer is on this page.
-const DEFAULT_FILTER: PhotoFilter = { groupHighlight: true }
-const FILTER_AVAILABLE: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'> = [
-  'hiddenMode', 'groupHighlight',
-]
-const filter = ref<PhotoFilter>({ ...DEFAULT_FILTER })
-const filterDraft = ref<PhotoFilter>({ ...DEFAULT_FILTER })
+// Public / shared album opens with Group Highlights on (when the album
+// actually contains enough of them) and hidden photos excluded.
+// The filter state is persisted locally per share token so the viewer's
+// choice survives page reloads.
+const FILTER_STORAGE_KEY = computed(() => `sharedAlbumFilter:${shareToken.value}`)
+const BANNER_DISMISSED_KEY = computed(() => `sharedAlbumGuestBannerDismissed:${shareToken.value}`)
+
+// Persist the dismissed-banner state per share token via localStorage
+// (works for anonymous visitors too — no account needed). The header's
+// compact Anmelden/Account button stays visible regardless, so the
+// viewer never loses the call-to-action.
+const bannerDismissed = ref<boolean>(false)
+try {
+  bannerDismissed.value = localStorage.getItem(BANNER_DISMISSED_KEY.value) === '1'
+} catch {
+  /* private mode / quota — fine to start with banner visible */
+}
+function dismissGuestBanner() {
+  bannerDismissed.value = true
+  try { localStorage.setItem(BANNER_DISMISSED_KEY.value, '1') } catch { /* ignore */ }
+}
+
+function loadPersistedFilter(): PhotoFilter | null {
+  if (!shareToken.value) return null
+  try {
+    const raw = localStorage.getItem(FILTER_STORAGE_KEY.value)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? (parsed as PhotoFilter) : null
+  } catch {
+    return null
+  }
+}
+
+function persistFilter(f: PhotoFilter) {
+  if (!shareToken.value) return
+  try {
+    localStorage.setItem(FILTER_STORAGE_KEY.value, JSON.stringify(f))
+  } catch {
+    /* quota / private-mode — ignore */
+  }
+}
+
+const filter = ref<PhotoFilter>({})
+const filterDraft = ref<PhotoFilter>({})
 const filterMenuOpen = ref(false)
 // Lazy-Mount: siehe GalleryView.
 const filterMenuMounted = ref(false)
 const activeCount = computed(() => countActiveFilters(filter.value))
+
+const groupCoverIds = computed<Set<number>>(() =>
+  new Set((album.value?.photos ?? []).filter(p => p.is_highlight).map(p => p.id))
+)
+
+/**
+ * Group-Highlight filter is only offered when the album actually has
+ * enough highlight photos for the toggle to be meaningful — anything
+ * below 10% of the album would either show almost nothing or the user
+ * wouldn't notice a difference.
+ */
+const groupHighlightAvailable = computed<boolean>(() => {
+  const total = albumPhotosAsPhoto.value.length
+  if (total === 0) return false
+  return groupCoverIds.value.size / total >= 0.1
+})
+
+/** Anonymous viewers (not signed-in guests) don't get the "Ausgeblendet"
+ *  filter — they can't have hidden anything in the first place. */
+const isAnonymousViewer = computed(() => guestSession.guest.value === null)
+
+const FILTER_AVAILABLE = computed<Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'>>(() => {
+  const arr: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'> = []
+  if (!isAnonymousViewer.value) arr.push('hiddenMode')
+  if (groupHighlightAvailable.value) arr.push('groupHighlight')
+  return arr
+})
+
+/** When no filter criterion is available at all, hide the filter button
+ *  entirely — there's literally nothing to toggle. */
+const filterButtonVisible = computed(() => FILTER_AVAILABLE.value.length > 0)
 
 function openFilterMenu() {
   filterDraft.value = { ...filter.value }
@@ -151,15 +218,14 @@ function openFilterMenu() {
 }
 function onApplyFilter() {
   filter.value = { ...filterDraft.value }
+  persistFilter(filter.value)
 }
 function onResetFilter() {
-  filter.value = { ...DEFAULT_FILTER }
-  filterDraft.value = { ...DEFAULT_FILTER }
+  const reset: PhotoFilter = groupHighlightAvailable.value ? { groupHighlight: true } : {}
+  filter.value = { ...reset }
+  filterDraft.value = { ...reset }
+  persistFilter(filter.value)
 }
-
-const groupCoverIds = computed<Set<number>>(() =>
-  new Set((album.value?.photos ?? []).filter(p => p.is_highlight).map(p => p.id))
-)
 
 const filteredMapPhotos = computed<Photo[]>(() => {
   const ctx = { groupCoverIds: groupCoverIds.value }
@@ -186,8 +252,6 @@ const nextPhoto = computed<Photo | null>(() => {
 })
 const hasPrev = computed(() => fullscreenIndex.value > 0)
 const hasNext = computed(() => fullscreenIndex.value < fullscreenPhotos.value.length - 1)
-const photoCounter = computed(() => `${fullscreenIndex.value + 1} / ${fullscreenPhotos.value.length}`)
-
 function openFullscreen(photo: Photo) {
   const photos = albumPhotosAsPhoto.value
   fullscreenPhotos.value = photos
@@ -197,13 +261,12 @@ function openFullscreen(photo: Photo) {
   isFullscreen.value = true
 }
 
-function handleMapFullscreen(stopPhotos: Photo[], startIndex: number) {
-  // Use all album photos so left/right navigation works across stops
-  const allPhotos = albumPhotosAsPhoto.value
-  const targetPhoto = stopPhotos[startIndex]
-  const globalIndex = targetPhoto ? allPhotos.findIndex(p => p.id === targetPhoto.id) : -1
-  fullscreenPhotos.value = allPhotos
-  fullscreenIndex.value = globalIndex >= 0 ? globalIndex : 0
+function handleMapFullscreen(dayPhotos: Photo[], startIndex: number, _day: string) {
+  // Scope navigation to the photos of the day TripMap currently has
+  // selected. The user can only step through the day's photos in
+  // fullscreen — other days are reached via the timeline.
+  fullscreenPhotos.value = dayPhotos
+  fullscreenIndex.value = Math.max(0, Math.min(startIndex, dayPhotos.length - 1))
   fullscreenFromMap.value = true
   isFullscreen.value = true
 }
@@ -316,20 +379,28 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
-  // The default filter limits the view to "Highlights only". Albums
-  // that carry no group-highlight photos would open with an empty
-  // map / grid and leave the visitor staring at a blank canvas with
-  // no obvious recovery. Relax the filter automatically in that
-  // case so the visitor sees the real album content.
-  if (album.value && filter.value.groupHighlight) {
-    const ctx = { groupCoverIds: groupCoverIds.value }
-    const matches = albumPhotosAsPhoto.value.filter((p) =>
-      matchesPhotoFilter(p, filter.value, ctx),
-    )
-    if (matches.length === 0 && albumPhotosAsPhoto.value.length > 0) {
-      filter.value = {}
-      filterDraft.value = {}
+  // Initialise the filter once the album content is known. Persisted
+  // viewer choice wins, but criteria that are no longer offered get
+  // dropped. When nothing is persisted we turn Group-Highlights on by
+  // default if the album has enough of them — otherwise we start with
+  // an empty filter.
+  if (album.value) {
+    const persisted = loadPersistedFilter()
+    let initial: PhotoFilter
+    if (persisted) {
+      initial = {}
+      if (persisted.hiddenMode && !isAnonymousViewer.value) {
+        initial.hiddenMode = persisted.hiddenMode
+      }
+      if (persisted.groupHighlight && groupHighlightAvailable.value) {
+        initial.groupHighlight = true
+      }
+    } else {
+      initial = groupHighlightAvailable.value ? { groupHighlight: true } : {}
     }
+    filter.value = { ...initial }
+    filterDraft.value = { ...initial }
+    persistFilter(filter.value)
   }
   // Guest state loads in parallel — failures don't block the album
   // view; the banner just shows the anonymous CTA.
@@ -357,7 +428,7 @@ onUnmounted(() => {
            overlay: "Anmelden" for anonymous visitors, a user icon
            opening the account dialog for registered guests. -->
       <GuestStatusBanner
-        v-if="!isMapView"
+        v-if="!isMapView && !bannerDismissed"
         :guest="guestSession.guest.value"
         :loading="guestSession.loading.value"
         :togglingNotify="guestSession.togglingNotify.value"
@@ -369,6 +440,7 @@ onUnmounted(() => {
         @logout="handleLogout"
         @toggle-notify="(v) => guestSession.toggleNotifyOptIn(v)"
         @toggle-push="handleTogglePush"
+        @dismiss="dismissGuestBanner"
       />
 
       <div v-if="!isMapView" class="shared-header">
@@ -402,6 +474,36 @@ onUnmounted(() => {
             <span>Karte</span>
           </button>
         </div>
+
+        <!-- Always-visible Anmelden / Account button. Mirrors the
+             guest banner CTA so the call-to-action stays reachable
+             even after the user dismissed the banner. Icon-only —
+             matches the dense look of the view-mode switch. -->
+        <button
+          type="button"
+          class="shared-header-account-btn"
+          :class="{ 'shared-header-account-btn--warn': guestSession.guest.value && !guestSession.isVerified.value }"
+          :aria-label="guestSession.guest.value
+            ? (guestSession.isVerified.value
+                ? `Konto von ${guestSession.guest.value.display_name}`
+                : 'E-Mail bestätigen')
+            : 'Anmelden'"
+          :title="guestSession.guest.value
+            ? (guestSession.isVerified.value
+                ? `Konto von ${guestSession.guest.value.display_name}`
+                : 'E-Mail bestätigen')
+            : 'Anmelden'"
+          @click="guestSession.guest.value ? openAccountDialog() : openRegisterDialog()"
+        >
+          <i
+            :class="!guestSession.guest.value
+              ? 'pi pi-sign-in'
+              : guestSession.isVerified.value
+                ? 'pi pi-user'
+                : 'pi pi-exclamation-circle'"
+            aria-hidden="true"
+          />
+        </button>
       </div>
 
       <!-- Map mode -->
@@ -424,6 +526,7 @@ onUnmounted(() => {
             <span>Raster</span>
           </button>
           <button
+            v-if="filterButtonVisible"
             type="button"
             class="map-filter-button"
             :class="{ 'is-active': activeCount > 0 }"
@@ -484,6 +587,13 @@ onUnmounted(() => {
       @reset="onResetFilter"
     />
 
+    <!--
+      Fullscreen overlay (map mode).
+      Scoped to the selected day's photos. Auto-advances every 10 s when
+      the viewer is idle so the photo collection becomes a hands-off
+      slideshow.
+    -->
+
     <!-- Fullscreen overlay (reuses shared FullscreenOverlay component) -->
     <FullscreenOverlay
       v-if="isFullscreen && currentPhoto"
@@ -493,6 +603,9 @@ onUnmounted(() => {
       :canDelete="false"
       :showDetailsButton="showInfoButton"
       :detailsActive="showInfo"
+      :autoAdvanceMs="10000"
+      :currentIndex="fullscreenIndex + 1"
+      :totalCount="fullscreenPhotos.length"
       @close="closeFullscreen"
       @prev="goPrev"
       @next="goNext"
@@ -508,9 +621,6 @@ onUnmounted(() => {
         </div>
       </template>
       <template #bottom-bar>
-        <div v-if="fullscreenPhotos.length > 1 && !showInfo" class="fs-counter-pill">
-          {{ photoCounter }}
-        </div>
         <div
           class="shared-album-info-panel"
           :class="{ 'is-open': showInfo }"
@@ -583,8 +693,15 @@ onUnmounted(() => {
 }
 
 .shared-header {
-  padding: 1.5rem 1rem;
-  text-align: center;
+  /* Compact single-row header in raster view. The album name, photo
+     count and (when present) the raster/map switch share a flex row;
+     the description wraps onto its own line below only if it exists.
+     Far less vertical space than the previous centred stack. */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 0.75rem;
+  padding: 0.4rem 0.75rem;
   background: var(--p-surface-card, #fff);
   border-bottom: 1px solid var(--p-content-border-color, #dee2e6);
   flex-shrink: 0;
@@ -647,26 +764,41 @@ onUnmounted(() => {
 }
 
 .shared-header .title {
-  font-size: 1.75rem;
-  font-weight: 700;
-  margin: 0 0 0.25rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
 }
 
 .shared-header .description {
   color: var(--p-text-muted-color);
-  margin: 0 0 0.5rem;
+  margin: 0;
+  font-size: 0.8rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.3;
 }
 
 .shared-header .meta {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   color: var(--p-text-muted-color);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* Toggle between raster + map for albums where the owner enabled the map.
-   Lives inside the centred header, sized to read as a quiet utility. */
+   Lives inline in the compact header at the right edge. */
 .shared-view-mode-switch {
   display: inline-flex;
-  margin-top: 0.75rem;
+  flex-shrink: 0;
+  margin-left: auto;
   border: 1px solid var(--p-content-border-color);
   border-radius: 999px;
   padding: 2px;
@@ -701,6 +833,45 @@ onUnmounted(() => {
   color: var(--p-primary-contrast-color);
 }
 
+/* Compact Anmelden / Account icon button to the right of the
+   view-mode switch. Stays visible even after the user dismissed the
+   guest banner — primary call-to-action that mustn't disappear. */
+.shared-header-account-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 50%;
+  background: var(--p-content-background, #fff);
+  color: var(--p-primary-color);
+  cursor: pointer;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.shared-header-account-btn:hover,
+.shared-header-account-btn:focus-visible {
+  background: var(--p-primary-color);
+  color: var(--p-primary-contrast-color);
+  border-color: var(--p-primary-color);
+  outline: none;
+}
+
+.shared-header-account-btn--warn {
+  color: var(--p-amber-500);
+  border-color: var(--p-amber-500);
+}
+.shared-header-account-btn--warn:hover,
+.shared-header-account-btn--warn:focus-visible {
+  background: var(--p-amber-500);
+  color: var(--p-amber-50, #fff);
+  border-color: var(--p-amber-500);
+}
+
 .photo-grid-scroll {
   flex: 1;
   min-height: 0;
@@ -728,6 +899,22 @@ onUnmounted(() => {
   .photo-grid-scroll {
     padding: var(--spacing-sm, 4px);
   }
+
+  /* Shared header on phones: hide the view-mode button labels (icons
+     stay) and tighten the description so the whole header stays on
+     one or two lines. */
+  .shared-header { padding: 0.35rem 0.6rem; gap: 0.35rem 0.5rem; }
+  .shared-header .title { font-size: 1rem; }
+  .shared-header .description {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .shared-view-mode-btn { padding: 0.25rem 0.5rem; }
+  .shared-view-mode-btn span { display: none; }
+  .shared-view-mode-btn .pi { font-size: 1em; }
 
   /* On phones the grid view scrolls the whole page instead of a
      fixed-height inner container: banner + album title scroll away
@@ -811,34 +998,6 @@ onUnmounted(() => {
   max-width: 100%;
 }
 
-/* ── Counter pill ────────────────────────────────────────────────────────── */
-
-.fs-counter-pill {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: white;
-  background: rgba(0, 0, 0, 0.4);
-  padding: 0.5rem 0.9rem;
-  border-radius: 999px;
-  font-size: 0.85rem;
-  font-weight: 500;
-  z-index: 10;
-  backdrop-filter: blur(6px);
-  pointer-events: none;
-  white-space: nowrap;
-}
-
-@media (max-width: 768px) {
-  .fs-counter-pill {
-    top: auto;
-    bottom: 4rem;
-    transform: translateX(-50%);
-    background: rgba(0, 0, 0, 0.5);
-    padding: 0.75rem 1rem;
-  }
-}
 
 /* ── Info panel (slides up from bottom, 40% height) ──────────────────────── */
 
