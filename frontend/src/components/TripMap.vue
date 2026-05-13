@@ -74,38 +74,36 @@ function formatStopDate(stop: Stop): string {
 }
 
 // ── Selection ────────────────────────────────────────────────────────────────
+//
+// The whole timeline is scroll-driven: whichever card is closest to the
+// viewport centre becomes the active selection. Tapping a card simply
+// scrolls it to centre, which then triggers the same selection logic.
 
-function selectOverview() {
-  selectedDay.value = OVERVIEW
-  selectedStopId.value = null
-  renderContent()
-  fitMapToSelection()
-  nextTick(() => scrollTimelineToSelection())
-}
+const SCROLL_SUPPRESS_MS = 400
 
-function selectDay(day: string) {
-  if (!uniqueDays.value.includes(day)) return
+let scrollRaf = 0
+let scrollSuppressTimer: ReturnType<typeof setTimeout> | null = null
+/** While true the scroll listener is dormant — used to bracket the
+ *  brief moment after a programmatic scroll fires its scroll events,
+ *  preventing the listener from fighting our own adjustments. */
+let suppressScrollHandler = false
+
+function applySelection(
+  day: DaySelection,
+  stopId: number | null,
+  opts: { silent?: boolean } = {},
+) {
+  const dayChanged = selectedDay.value !== day
+  const stopChanged = selectedStopId.value !== stopId
+  if (!dayChanged && !stopChanged) return
   selectedDay.value = day
-  const first = stopsByDay.value.get(day)?.[0]
-  selectedStopId.value = first?.id ?? null
+  selectedStopId.value = stopId
   renderContent()
-  fitMapToSelection()
-  if (first) emit('stop-selected', first.coverPhoto.id)
-  nextTick(() => scrollTimelineToSelection())
-}
-
-function selectStopWithinDay(stop: Stop, opts: { silent?: boolean } = {}) {
-  const dayChanged = selectedDay.value !== stop.day
-  selectedDay.value = stop.day
-  selectedStopId.value = stop.id
-  renderContent()
-  if (!opts.silent) emit('stop-selected', stop.coverPhoto.id)
-  // Only re-fit the map when the day actually changes. Tapping a different
-  // stop within the already-active day must keep the existing view so the
-  // user keeps seeing every cluster of the day, not just the one they
-  // tapped.
   if (dayChanged) fitMapToSelection()
-  nextTick(() => scrollTimelineToSelection())
+  if (!opts.silent && stopId != null) {
+    const stop = stops.value.find(s => s.id === stopId)
+    if (stop) emit('stop-selected', stop.coverPhoto.id)
+  }
 }
 
 function fitMapToSelection() {
@@ -123,30 +121,142 @@ function fitMapToSelection() {
   }
 }
 
-function scrollTimelineToSelection() {
+/** Identify the timeline card whose centre is closest to the viewport
+ *  centre. Used by both the scroll listener (live tracking) and by the
+ *  layout-shift compensator (anchor measurement). */
+function findCenteredItem(): { type: 'overview' } | { type: 'stop'; stop: Stop } | null {
+  const container = timelineContainer.value
+  if (!container) return null
+  const cRect = container.getBoundingClientRect()
+  const centerX = cRect.left + container.clientWidth / 2
+
+  let best: { type: 'overview' } | { type: 'stop'; stop: Stop } | null = null
+  let bestDist = Infinity
+
+  const overviewEl = container.querySelector('[data-overview]') as HTMLElement | null
+  if (overviewEl) {
+    const r = overviewEl.getBoundingClientRect()
+    const d = Math.abs((r.left + r.width / 2) - centerX)
+    if (d < bestDist) {
+      bestDist = d
+      best = { type: 'overview' }
+    }
+  }
+
+  const stopEls = container.querySelectorAll('[data-stop-id]')
+  for (let i = 0; i < stopEls.length; i++) {
+    const el = stopEls[i] as HTMLElement
+    const r = el.getBoundingClientRect()
+    const d = Math.abs((r.left + r.width / 2) - centerX)
+    if (d < bestDist) {
+      const sid = parseInt(el.dataset.stopId!, 10)
+      const stop = stops.value.find(s => s.id === sid)
+      if (stop) {
+        bestDist = d
+        best = { type: 'stop', stop }
+      }
+    }
+  }
+  return best
+}
+
+function onTimelineScroll() {
+  if (suppressScrollHandler) return
+  if (scrollRaf) return
+  scrollRaf = requestAnimationFrame(() => {
+    scrollRaf = 0
+    applyScrollDrivenSelection()
+  })
+}
+
+function applyScrollDrivenSelection() {
+  const centered = findCenteredItem()
+  if (!centered) return
+
+  if (centered.type === 'overview') {
+    if (selectedDay.value === OVERVIEW) return
+    applySelection(OVERVIEW, null)
+    return
+  }
+
+  const stop = centered.stop
+  const dayChanged = selectedDay.value !== stop.day
+
+  if (!dayChanged) {
+    if (selectedStopId.value !== stop.id) applySelection(stop.day, stop.id)
+    return
+  }
+
+  // Day transition: the old day's siblings will collapse and the new
+  // day's siblings will expand, shifting cards horizontally. Capture
+  // the new active card's position before the re-render so we can
+  // adjust scrollLeft afterwards and keep it visually centred. Without
+  // this the user's scroll position would suddenly land on a different
+  // card and the selection would chase its own tail.
+  const container = timelineContainer.value!
+  const oldEl = container.querySelector(`[data-stop-id="${stop.id}"]`) as HTMLElement | null
+  const cRect = container.getBoundingClientRect()
+  const oldScrollPos = oldEl
+    ? container.scrollLeft + (oldEl.getBoundingClientRect().left - cRect.left)
+    : null
+
+  applySelection(stop.day, stop.id)
+
+  if (oldScrollPos === null) return
+  nextTick(() => {
+    const newEl = container.querySelector(`[data-stop-id="${stop.id}"]`) as HTMLElement | null
+    if (!newEl) return
+    const newCRect = container.getBoundingClientRect()
+    const newScrollPos = container.scrollLeft + (newEl.getBoundingClientRect().left - newCRect.left)
+    const delta = newScrollPos - oldScrollPos
+    if (Math.abs(delta) <= 1) return
+    suppressScrollHandler = true
+    container.scrollLeft += delta
+    if (scrollSuppressTimer) clearTimeout(scrollSuppressTimer)
+    scrollSuppressTimer = setTimeout(() => {
+      suppressScrollHandler = false
+      scrollSuppressTimer = null
+    }, 100)
+  })
+}
+
+/** Programmatically scroll the timeline so the named card ends up
+ *  centred. Used by tap handlers and by `selectStopByPhotoId` after
+ *  the user returns from fullscreen. */
+function scrollItemIntoCenter(target: number | typeof OVERVIEW) {
   const container = timelineContainer.value
   if (!container) return
-  let el: HTMLElement | null = null
-  if (selectedStopId.value != null) {
-    el = container.querySelector(`[data-stop-id="${selectedStopId.value}"]`) as HTMLElement | null
-  }
-  if (!el && selectedDay.value !== OVERVIEW) {
-    el = container.querySelector(`[data-day="${selectedDay.value}"]`) as HTMLElement | null
-  }
-  if (!el && selectedDay.value === OVERVIEW) {
-    el = container.querySelector('[data-overview]') as HTMLElement | null
-  }
+  const el = target === OVERVIEW
+    ? container.querySelector('[data-overview]') as HTMLElement | null
+    : container.querySelector(`[data-stop-id="${target}"]`) as HTMLElement | null
   if (!el) return
-  // The day-group wrapper isn't positioned, so `el.offsetLeft` accumulates
-  // up to <body> and produces useless numbers. Compute the position from
-  // the live rects instead and clamp into the valid scroll range so the
-  // last cards in the timeline actually reach the centre.
-  const containerRect = container.getBoundingClientRect()
+  const cRect = container.getBoundingClientRect()
   const elRect = el.getBoundingClientRect()
-  const elLeftInContainer = (elRect.left - containerRect.left) + container.scrollLeft
-  const target = elLeftInContainer - container.clientWidth / 2 + elRect.width / 2
+  const elPosInScroll = container.scrollLeft + (elRect.left - cRect.left)
+  const targetScroll = elPosInScroll + elRect.width / 2 - container.clientWidth / 2
   const maxScroll = Math.max(0, container.scrollWidth - container.clientWidth)
-  container.scrollTo({ left: Math.max(0, Math.min(target, maxScroll)), behavior: 'smooth' })
+  const clamped = Math.max(0, Math.min(targetScroll, maxScroll))
+  if (Math.abs(clamped - container.scrollLeft) < 1) return
+  // Smooth-scroll fires a stream of scroll events as it animates. Mute
+  // our listener for the duration of the animation so it doesn't tug
+  // the selection through every intermediate card the scroll passes.
+  suppressScrollHandler = true
+  container.scrollTo({ left: clamped, behavior: 'smooth' })
+  if (scrollSuppressTimer) clearTimeout(scrollSuppressTimer)
+  scrollSuppressTimer = setTimeout(() => {
+    suppressScrollHandler = false
+    scrollSuppressTimer = null
+  }, SCROLL_SUPPRESS_MS)
+}
+
+function handleOverviewTap() {
+  applySelection(OVERVIEW, null)
+  nextTick(() => scrollItemIntoCenter(OVERVIEW))
+}
+
+function handleStopTap(stop: Stop) {
+  applySelection(stop.day, stop.id)
+  nextTick(() => scrollItemIntoCenter(stop.id))
 }
 
 // ── Pin rendering ────────────────────────────────────────────────────────────
@@ -194,11 +304,16 @@ function handleOverviewPinClick(c: OverviewCluster) {
     const fromStop = stops.value.find(s => s.id === c.stopIds[0])
     return fromStop?.day ?? (cover.taken_at || cover.created_at).slice(0, 10)
   })()
-  if (uniqueDays.value.includes(day)) selectDay(day)
+  if (!uniqueDays.value.includes(day)) return
+  const first = stopsByDay.value.get(day)?.[0]
+  if (!first) return
+  applySelection(day, first.id)
+  nextTick(() => scrollItemIntoCenter(first.id))
 }
 
 function handleStopPinClick(stop: Stop) {
-  selectStopWithinDay(stop)
+  applySelection(stop.day, stop.id)
+  nextTick(() => scrollItemIntoCenter(stop.id))
   // Open fullscreen with the entire selected day's photos so the user can
   // browse within the day. startIndex points at this stop's first photo.
   const dayPhotos = dayPhotosFor(stop.day)
@@ -434,11 +549,11 @@ function navigateToPrev() {
   const dayStops = stopsByDay.value.get(selectedDay.value) ?? []
   if (dayStops.length === 0) return
   if (selectedStopId.value == null) {
-    selectStopWithinDay(dayStops[0]!)
+    handleStopTap(dayStops[0]!)
     return
   }
   const idx = dayStops.findIndex(s => s.id === selectedStopId.value)
-  if (idx > 0) selectStopWithinDay(dayStops[idx - 1]!)
+  if (idx > 0) handleStopTap(dayStops[idx - 1]!)
 }
 
 function navigateToNext() {
@@ -446,11 +561,11 @@ function navigateToNext() {
   const dayStops = stopsByDay.value.get(selectedDay.value) ?? []
   if (dayStops.length === 0) return
   if (selectedStopId.value == null) {
-    selectStopWithinDay(dayStops[0]!)
+    handleStopTap(dayStops[0]!)
     return
   }
   const idx = dayStops.findIndex(s => s.id === selectedStopId.value)
-  if (idx >= 0 && idx < dayStops.length - 1) selectStopWithinDay(dayStops[idx + 1]!)
+  if (idx >= 0 && idx < dayStops.length - 1) handleStopTap(dayStops[idx + 1]!)
 }
 
 function handleKeydown(e: KeyboardEvent) {
@@ -465,11 +580,23 @@ onMounted(async () => {
   await nextTick()
   initMap()
   window.addEventListener('keydown', handleKeydown)
-  nextTick(() => scrollTimelineToSelection())
+  const container = timelineContainer.value
+  if (container) {
+    container.addEventListener('scroll', onTimelineScroll, { passive: true })
+  }
+  // Land on overview at start. The end-spacers (see CSS) make scrollLeft
+  // = 0 actually centre the overview card under the viewport centre.
+  nextTick(() => scrollItemIntoCenter(OVERVIEW))
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
+  const container = timelineContainer.value
+  if (container) {
+    container.removeEventListener('scroll', onTimelineScroll)
+  }
+  if (scrollRaf) cancelAnimationFrame(scrollRaf)
+  if (scrollSuppressTimer) clearTimeout(scrollSuppressTimer)
 })
 
 watch(() => props.photos, () => {
@@ -477,7 +604,7 @@ watch(() => props.photos, () => {
   selectedStopId.value = null
   renderContent()
   fitMapToSelection()
-  nextTick(() => scrollTimelineToSelection())
+  nextTick(() => scrollItemIntoCenter(OVERVIEW))
 }, { deep: true })
 
 // Re-render when selection or the underlying clustering changes.
@@ -496,7 +623,8 @@ watch(visiblePins, () => {
 function selectStopByPhotoId(photoId: number): boolean {
   const stop = stops.value.find((s) => s.photos.some((p) => p.id === photoId))
   if (!stop) return false
-  selectStopWithinDay(stop, { silent: true })
+  applySelection(stop.day, stop.id, { silent: true })
+  nextTick(() => scrollItemIntoCenter(stop.id))
   return true
 }
 
@@ -535,7 +663,7 @@ defineExpose({ selectStopByPhotoId })
             { 'trip-timeline-item--selected': selectedDay === '__overview__' },
           ]"
           :title="'Ganze Reise auf der Karte'"
-          @click="selectOverview"
+          @click="handleOverviewTap"
         >
           <div class="trip-timeline-overview-icon">
             <i class="pi pi-globe" aria-hidden="true" />
@@ -569,7 +697,7 @@ defineExpose({ selectStopByPhotoId })
                 },
               ]"
               :title="formatDayLabel(day)"
-              @click="selectDay(day)"
+              @click="handleStopTap(stopsByDay.get(day)![0]!)"
             >
               <div class="trip-timeline-thumb-wrap">
                 <div
@@ -615,7 +743,7 @@ defineExpose({ selectStopByPhotoId })
                   'trip-timeline-item--sibling',
                   { 'trip-timeline-item--selected': stop.id === selectedStopId },
                 ]"
-                @click="selectStopWithinDay(stop)"
+                @click="handleStopTap(stop)"
               >
                 <div
                   class="trip-timeline-connector trip-timeline-connector--sibling"
@@ -728,6 +856,23 @@ defineExpose({ selectStopByPhotoId })
   padding: 0.35rem 0.5rem 0.5rem;
   scrollbar-width: thin;
   scroll-behavior: smooth;
+}
+
+/* End spacers so every card — including the very first (Overview) and
+   the very last day — can actually be scrolled to the viewport centre.
+   Half-card width + a bit of breathing room. */
+.trip-timeline::before,
+.trip-timeline::after {
+  content: '';
+  flex: 0 0 calc(50% - 45px);
+  pointer-events: none;
+}
+
+@media (max-width: 768px) {
+  .trip-timeline::before,
+  .trip-timeline::after {
+    flex: 0 0 calc(50% - 38px);
+  }
 }
 
 .trip-timeline-day-group {
