@@ -839,6 +839,7 @@ function clientWith(
     accountType?: string;
     currency?: string;
     holder1?: string;
+    subAccountId?: string;
   }>,
   overrides: Partial<FintsClientSurface> = {},
 ): FintsClientSurface {
@@ -1064,6 +1065,54 @@ describe("runFetchAccounts — happy path", () => {
     expect(r.accounts[0].balance).toBeNull();
     expect(r.accounts[0].errors).toEqual([]);
     expect(portfolio).not.toHaveBeenCalled();
+  });
+
+  it("fetches portfolio when depot shares account number with giro (UPD reorder)", async () => {
+    // Some banks (e.g. comdirect) report giro + depot with the same
+    // accountNumber, distinguished only by subAccountId. lib-fints'
+    // getBankAccount picks the first match, so without UPD reorder
+    // canGetPortfolio would check the giro (no HKWPD) instead of the depot.
+    const stmt = vi.fn(async () => stmtResp([]));
+    const bal = vi.fn(async () =>
+      balResp({ date: new Date(), currency: "EUR", balance: 100 }),
+    );
+    const portfolio = vi.fn(async () => ({
+      success: true,
+      requiresTan: false,
+      bankAnswers: [],
+      dialogId: "d",
+      bankingInformationUpdated: false,
+      portfolioStatement: {
+        totalValue: 50_000,
+        currency: "EUR",
+        holdings: [
+          { isin: "DE000A1EWWW0", name: "ADIDAS", amount: 10, value: 50_000, currency: "EUR" },
+        ],
+      },
+    } as any));
+    const c = clientWith(
+      [
+        { accountNumber: "1234", accountType: "Miscellaneous", currency: "EUR", subAccountId: "00" },
+        { accountNumber: "1234", accountType: "Miscellaneous", currency: "EUR", subAccountId: "depot" },
+      ],
+      {
+        getAccountStatements: stmt,
+        getAccountBalance: bal,
+        canGetPortfolio: vi.fn(() => true),
+        getPortfolio: portfolio,
+      },
+    );
+    const r = await runFetchAccounts(c);
+    expect(r.accounts).toHaveLength(2);
+    expect(r.accounts.map((a) => a.accountKind)).toEqual(["sonstige", "depot"]);
+    const depot = r.accounts[1];
+    expect(depot.balance?.amount).toBe("50000.00");
+    expect(depot.holdings).toHaveLength(1);
+    expect(depot.holdings[0].isin).toBe("DE000A1EWWW0");
+    expect(portfolio).toHaveBeenCalledTimes(1);
+    // Giro got standard statements + balance
+    expect(stmt).toHaveBeenCalledTimes(1);
+    expect(bal).toHaveBeenCalledTimes(1);
   });
 });
 

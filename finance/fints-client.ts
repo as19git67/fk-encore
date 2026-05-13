@@ -1137,7 +1137,54 @@ async function fetchDepotPortfolio(
     );
     return { snapshot };
   }
-  if (!client.canGetPortfolio(account.accountNumber)) {
+
+  // lib-fints resolves accounts by the first accountNumber match in
+  // upd.bankAccounts. When giro and depot share the same number,
+  // canGetPortfolio/getPortfolio would check/use the giro instead of
+  // the depot. Temporarily reorder so the depot entry comes first.
+  const restore = promoteAccountInUpd(client, account);
+  try {
+    return await fetchDepotPortfolioInner(client, account, snapshot, sleep);
+  } finally {
+    restore();
+  }
+}
+
+/**
+ * Temporarily reorders `upd.bankAccounts` so the given account is the
+ * first entry with its accountNumber. Returns a restore function.
+ */
+function promoteAccountInUpd(
+  client: FintsClientSurface,
+  account: RawBankAccount,
+): () => void {
+  const upd = (client.config.bankingInformation as Record<string, unknown>)
+    .upd as { bankAccounts?: RawBankAccount[] } | undefined;
+  const list = upd?.bankAccounts;
+  if (!list) return () => {};
+
+  const idx = list.findIndex(
+    (a) =>
+      a.accountNumber === account.accountNumber &&
+      a.subAccountId === account.subAccountId,
+  );
+  if (idx <= 0) return () => {};
+
+  const [target] = list.splice(idx, 1);
+  list.unshift(target);
+  return () => {
+    list.shift();
+    list.splice(idx, 0, target);
+  };
+}
+
+async function fetchDepotPortfolioInner(
+  client: FintsClientSurface,
+  account: RawBankAccount,
+  snapshot: FintsAccountSnapshot,
+  sleep: (ms: number) => Promise<void>,
+): Promise<FetchOneResult> {
+  if (!client.canGetPortfolio!(account.accountNumber)) {
     console.log(
       `[fints] account ${account.accountNumber}: kind=depot, bank ` +
         `does not advertise HKWPD — skipping`,
