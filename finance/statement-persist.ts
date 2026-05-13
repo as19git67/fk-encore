@@ -28,15 +28,17 @@
  */
 
 import { createHash } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import db from "../db/database";
 import {
   financeAccount,
   financeAccountBalance,
+  financeAccountHolding,
+  financeAccountType,
   financeTransaction,
 } from "../db/schema";
-import type { FetchResult, FintsTransactionData } from "./types";
+import type { FetchResult, FintsHoldingData, FintsTransactionData } from "./types";
 import { enqueueTagSuggestion } from "./tag-queue";
 import { triggerTagWorker } from "./tag-worker";
 
@@ -67,6 +69,7 @@ export interface PersistStats {
   transactions_inserted: number;
   transactions_skipped_duplicate: number;
   balances_written: number;
+  holdings_written: number;
   unknown: UnknownAccount[];
   errors: string[];
 }
@@ -83,39 +86,70 @@ export async function persistFetchResult(
     transactions_inserted: 0,
     transactions_skipped_duplicate: 0,
     balances_written: 0,
+    holdings_written: 0,
     unknown: [],
     errors: [],
   };
 
+  // ---- Phase 1: gather candidates and exact-match by kind ----
+  type Candidate = { id: number; closed_at: string | null; kind: string };
+  type SnapshotEntry = {
+    snapshot: FetchResult["accounts"][number];
+    candidates: Candidate[];
+    matched: Candidate | undefined;
+  };
+
+  const entries: SnapshotEntry[] = [];
+  const claimedIds = new Set<number>();
+
   for (const snapshot of result.accounts) {
     stats.accounts_seen++;
 
-    // Forward per-account soft errors (tan-required, bank answers) so
-    // the caller can surface them in the sync response.
     for (const e of snapshot.errors) {
       stats.errors.push(`account ${snapshot.accountNumber}: ${e}`);
     }
 
-    // Look up the linked finance_account, if any.
-    const [matched] = await db
+    const candidates = await db
       .select({
         id: financeAccount.id,
         closed_at: financeAccount.closed_at,
+        kind: financeAccountType.kind,
       })
       .from(financeAccount)
+      .innerJoin(
+        financeAccountType,
+        eq(financeAccount.type_id, financeAccountType.id),
+      )
       .where(
         and(
           eq(financeAccount.bankcontact_id, bankcontactId),
           eq(financeAccount.fints_account_number, snapshot.accountNumber),
         ),
-      )
-      .limit(1);
+      );
 
+    const exactMatch = candidates.find((c) => c.kind === snapshot.accountKind);
+    if (exactMatch) claimedIds.add(exactMatch.id);
+    entries.push({ snapshot, candidates, matched: exactMatch });
+  }
+
+  // ---- Phase 2: fallback for unmatched snapshots ----
+  // When a snapshot's kind doesn't exactly match any candidate (e.g. the
+  // bank reports "sonstige" but the user imported the account as "giro"),
+  // fall back to the sole unclaimed candidate for that account number.
+  // "Unclaimed" means no other snapshot already matched it by exact kind,
+  // so a depot snapshot can never steal the giro's row.
+  for (const entry of entries) {
+    if (entry.matched) continue;
+    const unclaimed = entry.candidates.filter((c) => !claimedIds.has(c.id));
+    if (unclaimed.length === 1) {
+      entry.matched = unclaimed[0];
+      claimedIds.add(unclaimed[0].id);
+    }
+  }
+
+  // ---- Phase 3: process each snapshot ----
+  for (const { snapshot, matched } of entries) {
     if (matched?.closed_at) {
-      // Closed accounts stay linked so the UI can still show them, but
-      // the sync path treats them like unknown rows: no transactions,
-      // no balance, just an info-line in `errors` so the operator sees
-      // why nothing was written.
       stats.accounts_closed++;
       stats.errors.push(
         `account ${snapshot.accountNumber}: skipped, account is closed`,
@@ -235,6 +269,42 @@ export async function persistFetchResult(
           `account ${snapshot.accountNumber}: balance insert failed: ` +
             ((err as Error).message ?? String(err)),
         );
+      }
+    }
+
+    // ---- Write holdings (depot accounts) ----
+    if (snapshot.holdings && snapshot.holdings.length > 0 && snapshot.balance) {
+      const asOfDate = snapshot.balance.asOf;
+      for (const h of snapshot.holdings) {
+        try {
+          await db.execute(sql`
+            INSERT INTO finance_account_holding
+              (account_id, as_of, isin, wkn, name, amount, price, value, currency,
+               acquisition_date, acquisition_price)
+            VALUES (
+              ${accountId}, ${asOfDate}::date,
+              ${h.isin}, ${h.wkn}, ${h.name},
+              ${h.amount}, ${h.price}, ${h.value}, ${h.currency},
+              ${h.acquisitionDate ? sql`${h.acquisitionDate}::date` : sql`NULL`},
+              ${h.acquisitionPrice}
+            )
+            ON CONFLICT (account_id, as_of, COALESCE(isin, wkn, name))
+            DO UPDATE SET
+              amount = EXCLUDED.amount,
+              price  = EXCLUDED.price,
+              value  = EXCLUDED.value,
+              currency = EXCLUDED.currency,
+              acquisition_date  = EXCLUDED.acquisition_date,
+              acquisition_price = EXCLUDED.acquisition_price
+          `);
+          stats.holdings_written++;
+        } catch (err) {
+          stats.errors.push(
+            `account ${snapshot.accountNumber}: holding upsert failed ` +
+              `(${h.isin ?? h.wkn ?? h.name}): ` +
+              ((err as Error).message ?? String(err)),
+          );
+        }
       }
     }
   }

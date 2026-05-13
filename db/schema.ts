@@ -1112,12 +1112,10 @@ export const financeAccount = pgTable(
       .defaultNow(),
   },
   (table) => [
-    // Only one fk-encore account per (bankcontact, fints_account_number)
-    // pair; NULLs don't collide under Postgres' default unique semantics,
-    // so many manual accounts (both columns NULL) coexist fine.
     uniqueIndex("finance_account_unique_bank_link").on(
       table.bankcontact_id,
       table.fints_account_number,
+      table.type_id,
     ),
   ],
 );
@@ -1236,6 +1234,37 @@ export const financeAccountBalance = pgTable(
     source: text("source").notNull(), // "fints" | "manual" | "import"
   },
   (table) => [primaryKey({ columns: [table.account_id, table.as_of] })]
+);
+
+// ---------- Depot Holdings ----------
+
+export const financeAccountHolding = pgTable(
+  "finance_account_holding",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    account_id: integer("account_id")
+      .notNull()
+      .references(() => financeAccount.id, { onDelete: "cascade" }),
+    as_of: timestamp("as_of", { mode: "string" }).notNull(),
+    isin: text("isin"),
+    wkn: text("wkn"),
+    name: text("name"),
+    amount: numeric("amount", { precision: 20, scale: 8 }),
+    price: numeric("price", { precision: 20, scale: 6 }),
+    value: numeric("value", { precision: 18, scale: 2 }),
+    currency: text("currency"),
+    acquisition_date: timestamp("acquisition_date", { mode: "string" }),
+    acquisition_price: numeric("acquisition_price", { precision: 20, scale: 6 }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("finance_account_holding_account_asof_idx").on(
+      table.account_id,
+      table.as_of,
+    ),
+  ]
 );
 
 // ---------- Tags ----------

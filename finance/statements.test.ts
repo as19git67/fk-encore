@@ -195,6 +195,7 @@ describe("finance/statements — triggerSync", () => {
           label: "Giro Max",
           balance: null,
           transactions: [],
+          holdings: [],
           errors: [],
         },
       ],

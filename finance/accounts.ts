@@ -495,10 +495,9 @@ export const linkAccount = api(
     const account = await loadAccount(p.id);
     await loadBankcontact(p.bankcontact_id);
 
-    // Ensure the unique (bankcontact_id, fints_account_number) slot
-    // is free. A conflict means another fk-encore account is already
-    // linked to this bank-side account, which the UI should resolve
-    // by unlinking that one first.
+    // Ensure the unique (bankcontact_id, fints_account_number, type_id)
+    // slot is free. A conflict means another fk-encore account of the
+    // same type is already linked to this bank-side account.
     const fn = p.fints_account_number.trim();
     const existing = await db
       .select({ id: financeAccount.id })
@@ -507,6 +506,7 @@ export const linkAccount = api(
         and(
           eq(financeAccount.bankcontact_id, p.bankcontact_id),
           eq(financeAccount.fints_account_number, fn),
+          eq(financeAccount.type_id, account.type_id),
         ),
       )
       .limit(1);

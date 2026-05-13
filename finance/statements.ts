@@ -89,6 +89,8 @@ export interface SyncApiResponse {
   transactions_inserted?: number;
   /** state=idle — rows inserted into finance_account_balance. */
   balances_written?: number;
+  /** state=idle — holding rows written/upserted for depot accounts. */
+  holdings_written?: number;
   /** state=idle — true when any per-account fetch hit a mid-flight TAN we skipped. */
   partial?: boolean;
   /** state=idle — per-account bank answers/exceptions collected during the
@@ -229,6 +231,7 @@ export async function fetchAndPersist(
       accounts_unknown: 0,
       transactions_inserted: 0,
       balances_written: 0,
+      holdings_written: 0,
       unknown_accounts: [],
     };
   }
@@ -358,7 +361,8 @@ export async function fetchAndPersist(
       `accounts=${stats.accounts_seen} (matched=${stats.accounts_matched} ` +
       `unknown=${stats.accounts_unknown}) ` +
       `tx=${stats.transactions_inserted} (${stats.transactions_skipped_duplicate} dup) ` +
-      `balances=${stats.balances_written} partial=${fetched.partial}`,
+      `balances=${stats.balances_written} holdings=${stats.holdings_written} ` +
+      `partial=${fetched.partial}`,
   );
   await db
     .update(financeBankcontact)
@@ -382,6 +386,7 @@ export async function fetchAndPersist(
     })),
     transactions_inserted: stats.transactions_inserted,
     balances_written: stats.balances_written,
+    holdings_written: stats.holdings_written || undefined,
     partial: fetched.partial || undefined,
     errors: stats.errors.length > 0 ? stats.errors : undefined,
   };
