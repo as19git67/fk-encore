@@ -57,11 +57,6 @@ function formatDayLabel(day: string): string {
   return d.toLocaleDateString('de-DE', { day: '2-digit', month: 'short' })
 }
 
-function dayPhotoCount(day: string): number {
-  const dayStops = stopsByDay.value.get(day) ?? []
-  return dayStops.reduce((sum, s) => sum + s.photos.length, 0)
-}
-
 function getStopLabel(stop: Stop): string {
   if (stop.locationLabel) return stop.locationLabel
   return `Stopp ${stop.id + 1}`
@@ -236,7 +231,9 @@ function applyScrollDrivenSelection(allowDayChange: boolean) {
     const newCRect = container.getBoundingClientRect()
     const newScrollPos = container.scrollLeft + (newEl.getBoundingClientRect().left - newCRect.left)
     const delta = newScrollPos - oldScrollPos
-    if (Math.abs(delta) > 1) container.scrollLeft += delta
+    if (Math.abs(delta) > 1) {
+      container.scrollTo({ left: container.scrollLeft + delta, behavior: 'auto' })
+    }
   })
 }
 
@@ -259,7 +256,11 @@ function scrollItemIntoCenter(target: number | typeof OVERVIEW) {
   const maxScroll = Math.max(0, container.scrollWidth - container.clientWidth)
   const clamped = Math.max(0, Math.min(targetScroll, maxScroll))
   if (Math.abs(clamped - container.scrollLeft) < 1) return
-  container.scrollLeft = clamped
+  // Explicit 'auto' — instant scroll. Without this any external CSS
+  // `scroll-behavior: smooth` would re-introduce the animated scroll
+  // that lets the scroll handler briefly see intermediate cards as
+  // the centred one.
+  container.scrollTo({ left: clamped, behavior: 'auto' })
 }
 
 function handleOverviewTap() {
@@ -597,31 +598,32 @@ function renderContent() {
 // ── Keyboard navigation between stops ────────────────────────────────────────
 
 function navigateToPrev() {
-  if (selectedDay.value === OVERVIEW) return
-  const dayStops = stopsByDay.value.get(selectedDay.value) ?? []
-  if (dayStops.length === 0) return
+  const all = stops.value
+  if (all.length === 0) return
   if (selectedStopId.value == null) {
-    handleStopTap(dayStops[0]!)
+    handleStopTap(all[0]!)
     return
   }
-  const idx = dayStops.findIndex(s => s.id === selectedStopId.value)
-  if (idx > 0) handleStopTap(dayStops[idx - 1]!)
+  const idx = all.findIndex(s => s.id === selectedStopId.value)
+  // Walk one step backwards across the whole chronological list — day
+  // boundaries are not a stopping point. When crossing into the
+  // previous day handleStopTap takes care of switching `selectedDay`
+  // and refitting the map.
+  if (idx > 0) handleStopTap(all[idx - 1]!)
 }
 
 function navigateToNext() {
-  if (selectedDay.value === OVERVIEW) return
-  const dayStops = stopsByDay.value.get(selectedDay.value) ?? []
-  if (dayStops.length === 0) return
+  const all = stops.value
+  if (all.length === 0) return
   if (selectedStopId.value == null) {
-    handleStopTap(dayStops[0]!)
+    handleStopTap(all[0]!)
     return
   }
-  const idx = dayStops.findIndex(s => s.id === selectedStopId.value)
-  if (idx >= 0 && idx < dayStops.length - 1) handleStopTap(dayStops[idx + 1]!)
+  const idx = all.findIndex(s => s.id === selectedStopId.value)
+  if (idx >= 0 && idx < all.length - 1) handleStopTap(all[idx + 1]!)
 }
 
 function handleKeydown(e: KeyboardEvent) {
-  if (selectedDay.value === OVERVIEW) return
   if (e.key === 'ArrowLeft') { e.preventDefault(); navigateToPrev() }
   else if (e.key === 'ArrowRight') { e.preventDefault(); navigateToNext() }
 }
@@ -783,8 +785,11 @@ defineExpose({ selectStopByPhotoId })
                 <span class="trip-timeline-label">{{ formatDayLabel(day) }}</span>
                 <span class="trip-timeline-date">
                   <template v-if="selectedDay === day && stopsByDay.get(day)!.length > 1">
-                    {{ dayPhotoCount(day) }}
-                    {{ dayPhotoCount(day) === 1 ? 'Foto' : 'Fotos' }}
+                    <!-- Expanded: the cover represents only the FIRST stop
+                         of the day, so show that stop's photo count.
+                         Siblings render their own counts next to it. -->
+                    {{ stopsByDay.get(day)![0]!.photos.length }}
+                    {{ stopsByDay.get(day)![0]!.photos.length === 1 ? 'Foto' : 'Fotos' }}
                   </template>
                   <template v-else>
                     {{ stopsByDay.get(day)!.length }}
@@ -921,7 +926,10 @@ defineExpose({ selectStopByPhotoId })
   overflow-x: auto;
   padding: 0.35rem 0.5rem 0.5rem;
   scrollbar-width: thin;
-  scroll-behavior: smooth;
+  /* No `scroll-behavior: smooth` — we want programmatic scrolls to be
+     instant so the scroll listener doesn't see intermediate positions
+     of an animated scroll and briefly pick the wrong card as the
+     centred one. */
 }
 
 /* End spacers so every card — including the very first (Overview) and
