@@ -78,15 +78,20 @@ function formatStopDate(stop: Stop): string {
 // The whole timeline is scroll-driven: whichever card is closest to the
 // viewport centre becomes the active selection. Tapping a card simply
 // scrolls it to centre, which then triggers the same selection logic.
-
-const SCROLL_SUPPRESS_MS = 400
+//
+// To avoid yanking cards out from under the user's finger when a day
+// collapses/expands, day changes are deferred until the scroll
+// SETTLES ('scrollend' or fallback timer). While the user is still
+// dragging we only update within-day state — `selectedStopId` — so the
+// map's pin highlight tracks the scroll live but the timeline DOM
+// stays put.
 
 let scrollRaf = 0
-let scrollSuppressTimer: ReturnType<typeof setTimeout> | null = null
-/** While true the scroll listener is dormant — used to bracket the
- *  brief moment after a programmatic scroll fires its scroll events,
- *  preventing the listener from fighting our own adjustments. */
-let suppressScrollHandler = false
+let scrollEndFallbackTimer: ReturnType<typeof setTimeout> | null = null
+/** Browsers that haven't shipped native 'scrollend' get this debounce
+ *  approximation: after this long with no further scroll event we
+ *  assume the scroll has settled. */
+const SCROLL_END_FALLBACK_MS = 180
 
 function applySelection(
   day: DaySelection,
@@ -161,20 +166,40 @@ function findCenteredItem(): { type: 'overview' } | { type: 'stop'; stop: Stop }
 }
 
 function onTimelineScroll() {
-  if (suppressScrollHandler) return
-  if (scrollRaf) return
-  scrollRaf = requestAnimationFrame(() => {
-    scrollRaf = 0
-    applyScrollDrivenSelection()
-  })
+  if (!scrollRaf) {
+    scrollRaf = requestAnimationFrame(() => {
+      scrollRaf = 0
+      // Live: only follow within the already-active day. Day-level
+      // changes wait for the scroll to settle.
+      applyScrollDrivenSelection(false)
+    })
+  }
+  // Native scrollend isn't universally supported yet — use a debounce
+  // timer as a fallback. When native scrollend fires it will also call
+  // onTimelineScrollEnd, which clears this timer to avoid a double
+  // apply.
+  if (scrollEndFallbackTimer != null) clearTimeout(scrollEndFallbackTimer)
+  scrollEndFallbackTimer = setTimeout(() => {
+    scrollEndFallbackTimer = null
+    onTimelineScrollEnd()
+  }, SCROLL_END_FALLBACK_MS)
 }
 
-function applyScrollDrivenSelection() {
+function onTimelineScrollEnd() {
+  if (scrollEndFallbackTimer != null) {
+    clearTimeout(scrollEndFallbackTimer)
+    scrollEndFallbackTimer = null
+  }
+  applyScrollDrivenSelection(true)
+}
+
+function applyScrollDrivenSelection(allowDayChange: boolean) {
   const centered = findCenteredItem()
   if (!centered) return
 
   if (centered.type === 'overview') {
     if (selectedDay.value === OVERVIEW) return
+    if (!allowDayChange) return
     applySelection(OVERVIEW, null)
     return
   }
@@ -187,12 +212,15 @@ function applyScrollDrivenSelection() {
     return
   }
 
+  // Day-level changes (which trigger collapse/expand) are deferred until
+  // the scroll has settled. Mid-drag we leave the timeline DOM alone so
+  // cards don't shift out from under the user's finger.
+  if (!allowDayChange) return
+
   // Day transition: the old day's siblings will collapse and the new
   // day's siblings will expand, shifting cards horizontally. Capture
   // the new active card's position before the re-render so we can
-  // adjust scrollLeft afterwards and keep it visually centred. Without
-  // this the user's scroll position would suddenly land on a different
-  // card and the selection would chase its own tail.
+  // adjust scrollLeft afterwards and keep it visually centred.
   const container = timelineContainer.value!
   const oldEl = container.querySelector(`[data-stop-id="${stop.id}"]`) as HTMLElement | null
   const cRect = container.getBoundingClientRect()
@@ -209,20 +237,15 @@ function applyScrollDrivenSelection() {
     const newCRect = container.getBoundingClientRect()
     const newScrollPos = container.scrollLeft + (newEl.getBoundingClientRect().left - newCRect.left)
     const delta = newScrollPos - oldScrollPos
-    if (Math.abs(delta) <= 1) return
-    suppressScrollHandler = true
-    container.scrollLeft += delta
-    if (scrollSuppressTimer) clearTimeout(scrollSuppressTimer)
-    scrollSuppressTimer = setTimeout(() => {
-      suppressScrollHandler = false
-      scrollSuppressTimer = null
-    }, 100)
+    if (Math.abs(delta) > 1) container.scrollLeft += delta
   })
 }
 
 /** Programmatically scroll the timeline so the named card ends up
  *  centred. Used by tap handlers and by `selectStopByPhotoId` after
- *  the user returns from fullscreen. */
+ *  the user returns from fullscreen. Uses instant scrolling — smooth
+ *  scrolls fire a flood of scroll events that briefly highlight each
+ *  card the animation sweeps across. */
 function scrollItemIntoCenter(target: number | typeof OVERVIEW) {
   const container = timelineContainer.value
   if (!container) return
@@ -237,16 +260,7 @@ function scrollItemIntoCenter(target: number | typeof OVERVIEW) {
   const maxScroll = Math.max(0, container.scrollWidth - container.clientWidth)
   const clamped = Math.max(0, Math.min(targetScroll, maxScroll))
   if (Math.abs(clamped - container.scrollLeft) < 1) return
-  // Smooth-scroll fires a stream of scroll events as it animates. Mute
-  // our listener for the duration of the animation so it doesn't tug
-  // the selection through every intermediate card the scroll passes.
-  suppressScrollHandler = true
-  container.scrollTo({ left: clamped, behavior: 'smooth' })
-  if (scrollSuppressTimer) clearTimeout(scrollSuppressTimer)
-  scrollSuppressTimer = setTimeout(() => {
-    suppressScrollHandler = false
-    scrollSuppressTimer = null
-  }, SCROLL_SUPPRESS_MS)
+  container.scrollLeft = clamped
 }
 
 function handleOverviewTap() {
@@ -583,6 +597,7 @@ onMounted(async () => {
   const container = timelineContainer.value
   if (container) {
     container.addEventListener('scroll', onTimelineScroll, { passive: true })
+    container.addEventListener('scrollend', onTimelineScrollEnd)
   }
   // Land on overview at start. The end-spacers (see CSS) make scrollLeft
   // = 0 actually centre the overview card under the viewport centre.
@@ -594,9 +609,10 @@ onUnmounted(() => {
   const container = timelineContainer.value
   if (container) {
     container.removeEventListener('scroll', onTimelineScroll)
+    container.removeEventListener('scrollend', onTimelineScrollEnd)
   }
   if (scrollRaf) cancelAnimationFrame(scrollRaf)
-  if (scrollSuppressTimer) clearTimeout(scrollSuppressTimer)
+  if (scrollEndFallbackTimer) clearTimeout(scrollEndFallbackTimer)
 })
 
 watch(() => props.photos, () => {
