@@ -91,6 +91,16 @@ export async function persistFetchResult(
     errors: [],
   };
 
+  // Pre-compute which account numbers appear in multiple snapshots so
+  // the single-candidate fallback is only used when unambiguous. Without
+  // this, a depot snapshot would silently match the giro row when both
+  // share the same fints_account_number but the depot hasn't been
+  // imported yet.
+  const numberCounts = new Map<string, number>();
+  for (const s of result.accounts) {
+    numberCounts.set(s.accountNumber, (numberCounts.get(s.accountNumber) ?? 0) + 1);
+  }
+
   for (const snapshot of result.accounts) {
     stats.accounts_seen++;
 
@@ -102,10 +112,10 @@ export async function persistFetchResult(
 
     // Look up the linked finance_account(s). When multiple accounts
     // share the same fints_account_number (e.g. giro + depot at many
-    // German banks), we disambiguate by accountKind. When there is only
-    // one candidate we match regardless of kind — this keeps backward
-    // compatibility with accounts whose type was set manually and may
-    // not match the bank's reported accountType exactly.
+    // German banks), we disambiguate by accountKind. The single-candidate
+    // fallback (match regardless of kind) is only used when the account
+    // number is unique among snapshots — otherwise a depot snapshot would
+    // steal the giro's match.
     const candidates = await db
       .select({
         id: financeAccount.id,
@@ -124,9 +134,10 @@ export async function persistFetchResult(
         ),
       );
 
+    const uniqueNumber = (numberCounts.get(snapshot.accountNumber) ?? 0) <= 1;
     const matched =
       candidates.find((c) => c.kind === snapshot.accountKind) ??
-      (candidates.length === 1 ? candidates[0] : undefined);
+      (candidates.length === 1 && uniqueNumber ? candidates[0] : undefined);
 
     if (matched?.closed_at) {
       // Closed accounts stay linked so the UI can still show them, but

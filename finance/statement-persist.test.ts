@@ -572,6 +572,58 @@ describe("persistFetchResult — holdings persistence", () => {
     expect(rows).toHaveLength(0);
   });
 
+  it("depot goes to unknown when only giro exists for the shared account number", async () => {
+    const bcId = await insertBankcontact();
+    const giroId = await insertLinkedAccount({
+      bankcontactId: bcId,
+      fintsAccountNumber: "1234567",
+      kind: "sonstige",
+      label: "Girokonto",
+    });
+
+    const stats = await persistFetchResult(
+      bcId,
+      result([
+        {
+          accountNumber: "1234567",
+          iban: "DE89370400440532013000",
+          accountKind: "sonstige",
+          currency: "EUR",
+          label: "Girokonto",
+          balance: { asOf: "2026-05-10", amount: "1500.00", currency: "EUR" },
+          transactions: [tx()],
+          holdings: [],
+          errors: [],
+        },
+        {
+          accountNumber: "1234567",
+          iban: null,
+          accountKind: "depot",
+          currency: "EUR",
+          label: "Depot",
+          balance: { asOf: "2026-05-10", amount: "25000.00", currency: "EUR" },
+          transactions: [],
+          holdings: [holding({ isin: "DE000A1EWWW0", name: "ADIDAS", value: "25000.00" })],
+          errors: [],
+        },
+      ]),
+    );
+
+    expect(stats.accounts_matched).toBe(1);
+    expect(stats.accounts_unknown).toBe(1);
+    expect(stats.unknown.map((u) => u.accountKind)).toEqual(["depot"]);
+
+    // Giro got its balance, depot holdings were NOT written to giro.
+    const giroBalance = await db
+      .select()
+      .from(financeAccountBalance)
+      .where(eq(financeAccountBalance.account_id, giroId));
+    expect(giroBalance).toHaveLength(1);
+
+    const holdings = await db.select().from(financeAccountHolding);
+    expect(holdings).toHaveLength(0);
+  });
+
   it("matches giro and depot separately when they share the same fints_account_number", async () => {
     const bcId = await insertBankcontact();
     const giroId = await insertLinkedAccount({
