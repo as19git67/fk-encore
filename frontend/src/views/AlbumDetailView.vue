@@ -688,6 +688,17 @@ async function applyCurationToAlbumPhoto(id: number, target: CurationStatus): Pr
       r.value = { ...r.value, curation_status: target }
     }
   }
+  // Map-mode fullscreen holds its own array snapshot. Mutating a
+  // property on the shared photo object doesn't reliably re-trigger the
+  // FullscreenOverlay's reactive bindings after the first toggle, so
+  // explicitly replace the entry with a fresh object — same pattern as
+  // the cursor refs above.
+  const mfIdx = mapFullscreenPhotos.value.findIndex(p => p.id === id)
+  if (mfIdx >= 0) {
+    const next = mapFullscreenPhotos.value.slice()
+    next[mfIdx] = { ...next[mfIdx]!, curation_status: target }
+    mapFullscreenPhotos.value = next
+  }
   try {
     await updatePhotoCuration(id, target)
   } catch (err: any) {
@@ -1404,6 +1415,8 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
       :showDetailsButton="true"
       :detailsActive="fullscreenDetailsOpen"
       :autoAdvanceMs="10000"
+      :currentIndex="(cursorIndex ?? 0) + 1"
+      :totalCount="albumPhotos.length"
       @close="closeGridFullscreen"
       @prev="gridGoPrev"
       @next="gridGoNext"
@@ -1469,6 +1482,8 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
       :showDetailsButton="true"
       :detailsActive="fullscreenDetailsOpen"
       :autoAdvanceMs="10000"
+      :currentIndex="mapFullscreenIndex + 1"
+      :totalCount="mapFullscreenPhotos.length"
       @close="closeMapFullscreen(); fullscreenDetailsOpen = false"
       @prev="mapFullscreenIndex--"
       @next="mapFullscreenIndex++"

@@ -236,8 +236,6 @@ const nextPhoto = computed<Photo | null>(() => {
 })
 const hasPrev = computed(() => fullscreenIndex.value > 0)
 const hasNext = computed(() => fullscreenIndex.value < fullscreenPhotos.value.length - 1)
-const photoCounter = computed(() => `${fullscreenIndex.value + 1} / ${fullscreenPhotos.value.length}`)
-
 function openFullscreen(photo: Photo) {
   const photos = albumPhotosAsPhoto.value
   fullscreenPhotos.value = photos
@@ -559,6 +557,8 @@ onUnmounted(() => {
       :showDetailsButton="showInfoButton"
       :detailsActive="showInfo"
       :autoAdvanceMs="10000"
+      :currentIndex="fullscreenIndex + 1"
+      :totalCount="fullscreenPhotos.length"
       @close="closeFullscreen"
       @prev="goPrev"
       @next="goNext"
@@ -574,9 +574,6 @@ onUnmounted(() => {
         </div>
       </template>
       <template #bottom-bar>
-        <div v-if="fullscreenPhotos.length > 1 && !showInfo" class="fs-counter-pill">
-          {{ photoCounter }}
-        </div>
         <div
           class="shared-album-info-panel"
           :class="{ 'is-open': showInfo }"
@@ -877,34 +874,6 @@ onUnmounted(() => {
   max-width: 100%;
 }
 
-/* ── Counter pill ────────────────────────────────────────────────────────── */
-
-.fs-counter-pill {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: white;
-  background: rgba(0, 0, 0, 0.4);
-  padding: 0.5rem 0.9rem;
-  border-radius: 999px;
-  font-size: 0.85rem;
-  font-weight: 500;
-  z-index: 10;
-  backdrop-filter: blur(6px);
-  pointer-events: none;
-  white-space: nowrap;
-}
-
-@media (max-width: 768px) {
-  .fs-counter-pill {
-    top: auto;
-    bottom: 4rem;
-    transform: translateX(-50%);
-    background: rgba(0, 0, 0, 0.5);
-    padding: 0.75rem 1rem;
-  }
-}
 
 /* ── Info panel (slides up from bottom, 40% height) ──────────────────────── */
 

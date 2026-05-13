@@ -289,12 +289,58 @@ function handleStopTap(stop: Stop) {
 }
 
 /**
- * Find the smallest zoom level at which the target stop's pin sits at
- * least `PIN_OVERLAP_PX` away from every other pin in the same day, so
- * the screen-space pin merger won't fold it into a neighbour. Used when
- * the user keyboard-activates a card to "drill in" to that specific
- * cluster. Falls back to maxZoom if the album has stops sitting
- * literally on top of each other.
+ * At a given zoom level, simulate the pin merger over the target stop
+ * plus its neighbours and return true if the target ends up in its own
+ * single-member group. Checking only pairwise distance against each
+ * neighbour individually is not enough: neighbours can merge among
+ * themselves first, and the resulting centroid can sit close enough to
+ * pull the target into the merged group too.
+ */
+function isTargetSingleAtZoom(target: Stop, others: Stop[], zoom: number): boolean {
+  if (!map) return true
+  interface W { lat: number; lng: number; weight: number; hasTarget: boolean }
+  const work: W[] = [
+    { lat: target.lat, lng: target.lng, weight: 1, hasTarget: true },
+    ...others.map(o => ({ lat: o.lat, lng: o.lng, weight: 1, hasTarget: false })),
+  ]
+  let changed = true
+  while (changed && work.length > 1) {
+    changed = false
+    let bestI = -1
+    let bestJ = -1
+    let bestDist = Infinity
+    for (let i = 0; i < work.length; i++) {
+      const pi = map.project([work[i]!.lat, work[i]!.lng], zoom)
+      for (let j = i + 1; j < work.length; j++) {
+        const pj = map.project([work[j]!.lat, work[j]!.lng], zoom)
+        const d = pi.distanceTo(pj)
+        if (d < bestDist) {
+          bestDist = d
+          bestI = i
+          bestJ = j
+        }
+      }
+    }
+    if (bestDist < PIN_OVERLAP_PX && bestI >= 0) {
+      const a = work[bestI]!
+      const b = work[bestJ]!
+      const total = a.weight + b.weight
+      a.lat = (a.lat * a.weight + b.lat * b.weight) / total
+      a.lng = (a.lng * a.weight + b.lng * b.weight) / total
+      a.weight = total
+      a.hasTarget = a.hasTarget || b.hasTarget
+      work.splice(bestJ, 1)
+      changed = true
+    }
+  }
+  const targetGroup = work.find(w => w.hasTarget)
+  return targetGroup ? targetGroup.weight === 1 : true
+}
+
+/**
+ * Find the smallest zoom level at which the target stop ends up as its
+ * own pin once the merger has run. Used when the user keyboard-
+ * activates a card to "drill in" to that specific cluster.
  */
 function zoomToUnmergeStop(stop: Stop) {
   if (!map) return
@@ -302,17 +348,7 @@ function zoomToUnmergeStop(stop: Stop) {
   const maxZoom = 19
   let z = map.getZoom()
   if (others.length > 0) {
-    while (z < maxZoom) {
-      const tp = map.project([stop.lat, stop.lng], z)
-      let clear = true
-      for (const o of others) {
-        const op = map.project([o.lat, o.lng], z)
-        if (tp.distanceTo(op) < PIN_OVERLAP_PX) {
-          clear = false
-          break
-        }
-      }
-      if (clear) break
+    while (z < maxZoom && !isTargetSingleAtZoom(stop, others, z)) {
       z++
     }
   }
