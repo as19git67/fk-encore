@@ -624,6 +624,65 @@ describe("persistFetchResult — holdings persistence", () => {
     expect(holdings).toHaveLength(0);
   });
 
+  it("fallback matches giro(kind=giro) when bank reports sonstige and depot claims by exact kind", async () => {
+    const bcId = await insertBankcontact();
+    const giroId = await insertLinkedAccount({
+      bankcontactId: bcId,
+      fintsAccountNumber: "1234567",
+      kind: "giro",
+      label: "Girokonto",
+    });
+    const depotId = await insertLinkedAccount({
+      bankcontactId: bcId,
+      fintsAccountNumber: "1234567",
+      kind: "depot",
+      label: "Depot",
+    });
+
+    const stats = await persistFetchResult(
+      bcId,
+      result([
+        {
+          accountNumber: "1234567",
+          iban: "DE89370400440532013000",
+          accountKind: "sonstige",
+          currency: "EUR",
+          label: "Girokonto",
+          balance: { asOf: "2026-05-10", amount: "1500.00", currency: "EUR" },
+          transactions: [tx()],
+          holdings: [],
+          errors: [],
+        },
+        {
+          accountNumber: "1234567",
+          iban: null,
+          accountKind: "depot",
+          currency: "EUR",
+          label: "Depot",
+          balance: { asOf: "2026-05-10", amount: "25000.00", currency: "EUR" },
+          transactions: [],
+          holdings: [holding({ isin: "DE000A1EWWW0", name: "ADIDAS", value: "25000.00" })],
+          errors: [],
+        },
+      ]),
+    );
+
+    expect(stats.accounts_matched).toBe(2);
+    expect(stats.accounts_unknown).toBe(0);
+
+    const giroTxs = await db
+      .select()
+      .from(financeTransaction)
+      .where(eq(financeTransaction.account_id, giroId));
+    expect(giroTxs).toHaveLength(1);
+
+    const depotHoldings = await db
+      .select()
+      .from(financeAccountHolding)
+      .where(eq(financeAccountHolding.account_id, depotId));
+    expect(depotHoldings).toHaveLength(1);
+  });
+
   it("matches giro and depot separately when they share the same fints_account_number", async () => {
     const bcId = await insertBankcontact();
     const giroId = await insertLinkedAccount({
