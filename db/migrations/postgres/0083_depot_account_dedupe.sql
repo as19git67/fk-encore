@@ -7,6 +7,7 @@
 
 ALTER TABLE finance_account
   DROP CONSTRAINT IF EXISTS finance_account_unique_bank_link;
+DROP INDEX IF EXISTS finance_account_unique_bank_link;
 
 CREATE UNIQUE INDEX finance_account_unique_bank_link
   ON finance_account (bankcontact_id, fints_account_number, type_id);
