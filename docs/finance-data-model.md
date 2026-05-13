@@ -21,6 +21,7 @@ erDiagram
     finance_account ||--o{ finance_account_balance : "saldo-historie"
     finance_transaction ||--o{ finance_tag_transaction : "zuordnung"
     finance_tag ||--o{ finance_tag_transaction : "zuordnung"
+    finance_account ||--o{ finance_account_holding : "depot-positionen"
     finance_bankcontact ||--o{ finance_tan_session : "dialog"
     users ||--o{ finance_account_access : "berechtigt"
     users ||--o{ finance_tan_session : "initiiert"
@@ -114,23 +115,33 @@ export const financeBankcontact = pgTable("finance_bankcontact", {
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
 });
 
-export const financeAccount = pgTable("finance_account", {
-  id: serial("id").primaryKey(),
-  bankcontact_id: integer("bankcontact_id")
-    .notNull()
-    .references(() => financeBankcontact.id, { onDelete: "restrict" }),
-  type_id: integer("type_id")
-    .notNull()
-    .references(() => financeAccountType.id, { onDelete: "restrict" }),
-  currency_code: text("currency_code")
-    .notNull()
-    .references(() => financeCurrency.code, { onDelete: "restrict" }),
-  iban: text("iban").unique(),
-  account_number: text("account_number").notNull(),
-  label: text("label").notNull(),
-  active: boolean("active").notNull().default(true),
-  created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
-});
+export const financeAccount = pgTable(
+  "finance_account",
+  {
+    id: serial("id").primaryKey(),
+    bankcontact_id: integer("bankcontact_id")
+      .references(() => financeBankcontact.id, { onDelete: "set null" }),
+    type_id: integer("type_id")
+      .notNull()
+      .references(() => financeAccountType.id, { onDelete: "restrict" }),
+    currency_code: text("currency_code")
+      .notNull()
+      .references(() => financeCurrency.code, { onDelete: "restrict" }),
+    iban: text("iban").unique(),
+    fints_account_number: text("fints_account_number"),
+    account_number: text("account_number").notNull(),
+    label: text("label").notNull(),
+    closed_at: timestamp("closed_at", { mode: "string" }),
+    created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("finance_account_unique_bank_link").on(
+      table.bankcontact_id,
+      table.fints_account_number,
+      table.type_id,
+    ),
+  ]
+);
 ```
 
 ### 2.4 Konto-ACL
@@ -197,7 +208,45 @@ Bewusst keine eigene Status-Tabelle — Status wird bei Bedarf später als
 `pgEnum`-Spalte nachgezogen. Beim Finanzkraft-Import wird der historische
 Status nicht migriert (siehe `finance-data-import.md`).
 
-### 2.6 Tags
+### 2.6 Depot-Holdings
+
+```ts
+export const financeAccountHolding = pgTable(
+  "finance_account_holding",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    account_id: integer("account_id")
+      .notNull()
+      .references(() => financeAccount.id, { onDelete: "cascade" }),
+    as_of: timestamp("as_of", { mode: "string" }).notNull(),
+    isin: text("isin"),
+    wkn: text("wkn"),
+    name: text("name"),
+    amount: numeric("amount", { precision: 20, scale: 8 }),
+    price: numeric("price", { precision: 20, scale: 6 }),
+    value: numeric("value", { precision: 18, scale: 2 }),
+    currency: text("currency"),
+    acquisition_date: timestamp("acquisition_date", { mode: "string" }),
+    acquisition_price: numeric("acquisition_price", { precision: 20, scale: 6 }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("finance_account_holding_account_asof_idx").on(
+      table.account_id,
+      table.as_of,
+    ),
+  ]
+);
+```
+
+Holds per-position snapshots from depot/securities accounts (HKWPD). Each sync
+upserts all positions for a given `(account_id, as_of)`. The COALESCE-based
+unique constraint `ON CONFLICT (account_id, as_of, COALESCE(isin, wkn, name))`
+ensures idempotent re-syncs.
+
+### 2.7 Tags
 
 ```ts
 export const financeTag = pgTable(
@@ -233,7 +282,7 @@ export const financeTagTransaction = pgTable(
 );
 ```
 
-### 2.7 TAN-Sessions und System-Preferences
+### 2.8 TAN-Sessions und System-Preferences
 
 ```ts
 export const financeTanSession = pgTable("finance_tan_session", {
@@ -267,12 +316,14 @@ export const financeSystemPref = pgTable("finance_system_pref", {
 |---|---|---|
 | `finance_account` | `(bankcontact_id)` | FK-Lookup |
 | `finance_account` | `unique(iban)` | Eindeutigkeit |
+| `finance_account` | `unique(bankcontact_id, fints_account_number, type_id)` | Bank-Link-Eindeutigkeit |
 | `finance_transaction` | `(account_id, booking_date desc)` | Listen-Query |
 | `finance_transaction` | `unique(account_id, dedupe_hash)` | Duplikat-Schutz |
 | `finance_transaction` | `(fints_id)` where `fints_id is not null` | Re-Import |
 | `finance_tag_transaction` | `(transaction_id)` | Umkehrrichtung |
 | `finance_tan_session` | `(expires_at)` | Cleanup-Cron |
 | `finance_account_balance` | `(account_id, as_of desc)` | Saldo-Verlauf |
+| `finance_account_holding` | `(account_id, as_of)` | Positionen pro Konto und Stichtag |
 
 `dedupe_hash` = SHA-256 über `booking_date | value_date | amount |
 currency | purpose | counterparty_iban`. Liefert FinTS eine stabile
@@ -332,19 +383,23 @@ CREATE TABLE finance_bankcontact (
 );
 
 CREATE TABLE finance_account (
-  id             SERIAL PRIMARY KEY,
-  bankcontact_id INTEGER NOT NULL REFERENCES finance_bankcontact(id)
-                   ON DELETE RESTRICT,
-  type_id        INTEGER NOT NULL REFERENCES finance_account_type(id)
-                   ON DELETE RESTRICT,
-  currency_code  TEXT NOT NULL REFERENCES finance_currency(code)
-                   ON DELETE RESTRICT,
-  iban           TEXT UNIQUE,
-  account_number TEXT NOT NULL,
-  label          TEXT NOT NULL,
-  active         BOOLEAN NOT NULL DEFAULT TRUE,
-  created_at     TIMESTAMP DEFAULT now()
+  id                   SERIAL PRIMARY KEY,
+  bankcontact_id       INTEGER REFERENCES finance_bankcontact(id)
+                         ON DELETE SET NULL,
+  type_id              INTEGER NOT NULL REFERENCES finance_account_type(id)
+                         ON DELETE RESTRICT,
+  currency_code        TEXT NOT NULL REFERENCES finance_currency(code)
+                         ON DELETE RESTRICT,
+  iban                 TEXT UNIQUE,
+  fints_account_number TEXT,
+  account_number       TEXT NOT NULL,
+  label                TEXT NOT NULL,
+  closed_at            TIMESTAMP,
+  created_at           TIMESTAMP DEFAULT now()
 );
+
+CREATE UNIQUE INDEX finance_account_unique_bank_link
+  ON finance_account (bankcontact_id, fints_account_number, type_id);
 
 CREATE TABLE finance_account_access (
   account_id INTEGER NOT NULL REFERENCES finance_account(id) ON DELETE CASCADE,
@@ -410,6 +465,26 @@ CREATE TABLE finance_account_balance (
   source     TEXT NOT NULL,
   PRIMARY KEY (account_id, as_of)
 );
+
+CREATE TABLE finance_account_holding (
+  id                BIGSERIAL PRIMARY KEY,
+  account_id        INTEGER NOT NULL REFERENCES finance_account(id)
+                      ON DELETE CASCADE,
+  as_of             TIMESTAMP NOT NULL,
+  isin              TEXT,
+  wkn               TEXT,
+  name              TEXT,
+  amount            NUMERIC(20,8),
+  price             NUMERIC(20,6),
+  value             NUMERIC(18,2),
+  currency          TEXT,
+  acquisition_date  TIMESTAMP,
+  acquisition_price NUMERIC(20,6),
+  created_at        TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
+
+CREATE INDEX finance_account_holding_account_asof_idx
+  ON finance_account_holding (account_id, as_of);
 
 CREATE TABLE finance_tan_session (
   tan_reference       UUID PRIMARY KEY,

@@ -110,6 +110,83 @@ encore secret set --type local FinanceFintsProductId "dev-placeholder"
 encore secret set --type local FinanceFintsProductVersion "0.0.1"
 ```
 
+### 2.5 Portfolio-Abruf für Depot-Konten (HKWPD)
+
+Neben Giro-/Tagesgeld-Konten (HKKAZ/HKSAL) unterstützt der Client den
+Abruf von Wertpapier-Depots über das FinTS-Segment HKWPD/HIWPD.
+
+#### Depot-Erkennung
+
+`effectiveAccountKind()` in `fints-client.ts` erkennt Depot-Konten auf
+zwei Wegen:
+
+1. **Direkt**: `accountType === "SecuritiesAccount"` → wird sofort als
+   `"depot"` gemappt.
+2. **Fallback**: Meldet die Bank den Typ `Miscellaneous` (z. B.
+   comdirect, 1822direkt), prüft die Funktion das Feld `subAccountId`
+   auf die Strings `"depot"` oder `"wertpapier"` (case-insensitive).
+
+#### Fetch-Routing
+
+`fetchOneAccount()` routet Depot-Konten durch `fetchDepotPortfolio()`
+anstatt den Standard-Pfad HKKAZ/HKSAL. Depots verwenden weder
+`getAccountStatements` noch `getAccountBalance` — stattdessen wird
+`getPortfolio()` (HKWPD/HIWPD) aufgerufen.
+
+#### Geteilte Kontonummern und `patchGetBankAccountForDepot()`
+
+Einige Banken (z. B. comdirect) melden Giro- und Depot-Konto mit
+derselben `accountNumber`; nur die `subAccountId` unterscheidet sie.
+Das Problem: `config.getBankAccount(accountNumber)` in lib-fints nutzt
+intern `.find()` und liefert immer den ersten Treffer (meist das Giro).
+Ohne Eingriff würden `canGetPortfolio` und `getPortfolio` deshalb den
+Giro-Eintrag statt des Depots prüfen bzw. verwenden.
+
+**Lösung**: `patchGetBankAccountForDepot()` monkey-patcht
+`config.getBankAccount` auf der Client-Instanz, sodass für die geteilte
+`accountNumber` bevorzugt der Depot-Eintrag (Abgleich über
+`subAccountId`) zurückgegeben wird. Der Patch überlebt UPD-Rebuilds
+während der Dialog-Initialisierung — lib-fints ersetzt in
+`initDialogInteraction.js:167` zwar `config.bankingInformation.upd`,
+aber nicht die gepatchte Methode. Nach Abschluss des Portfolio-Abrufs
+wird der Patch wieder zurückgesetzt.
+
+Ein früherer Ansatz (Umsortierung des `upd.bankAccounts`-Arrays) schlug
+fehl, weil die Dialog-Initialisierung das UPD aus der Bankantwort neu
+aufbaut und jede Umsortierung damit rückgängig macht.
+
+#### Deduplizierung in `runFetchAccounts()`
+
+`runFetchAccounts()` dedupliziert Bank-seitige Konten nach
+`accountNumber:effectiveKind` statt nur nach `accountNumber`. Damit wird
+ein Depot nicht als vermeintliches Duplikat des Giro-Kontos übersprungen,
+wenn beide dieselbe Kontonummer tragen.
+
+#### Persist-Matching (Zwei-Phasen-Zuordnung)
+
+`persistFetchResult()` ordnet Abruf-Ergebnisse in zwei Phasen zu:
+
+1. **Phase 1 — Exakter Match**: Abgleich auf
+   `(bankcontact_id, fints_account_number, kind)`. Der gefundene
+   DB-Account wird als "claimed" markiert.
+2. **Phase 2 — Fallback**: Für nicht zugeordnete Snapshots wird der
+   einzige noch nicht beanspruchte Kandidat mit derselben Kontonummer
+   verwendet.
+
+Dieses Verfahren verhindert, dass ein Depot-Snapshot versehentlich dem
+DB-Eintrag des Giro-Kontos zugeordnet wird (und umgekehrt).
+
+#### Holdings-Persistierung
+
+Der `totalValue` des Portfolios wird als Saldo in
+`finance_account_balance` geschrieben. Die einzelnen Positionen (ISIN,
+WKN, Name, Stückzahl, Kurs, Wert) werden per Upsert in
+`finance_account_holding` persistiert:
+
+```sql
+ON CONFLICT (account_id, as_of, COALESCE(isin, wkn, name)) DO UPDATE
+```
+
 ---
 
 ## 3. `finance/encryption.ts` — Credential-Verschlüsselung

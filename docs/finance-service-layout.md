@@ -17,35 +17,53 @@ finance/
 ├── types.ts                   # geteilte TypeScript-Interfaces
 ├── encryption.ts              # AES-GCM-Credential-Crypto
 ├── encryption.test.ts
-├── fints-client.ts            # lib-fints-Wrapper, runSynchronize
+├── fints-client.ts            # lib-fints-Wrapper, runSynchronize, runFetchAccounts
 ├── fints-client.test.ts
 ├── llm-client.ts              # finance-spezifischer llm-service-Client
 ├── bankcontacts.ts            # CRUD + Credential-Set
 ├── bankcontacts.test.ts
-├── accounts.ts                # CRUD, ACL-gefilterte Listen
+├── accounts.ts                # CRUD, ACL-gefilterte Listen, Link/Unlink
 ├── accounts.test.ts
 ├── account-access.ts          # ACL-Verwaltung (finance.admin)
 ├── account-access.test.ts
 ├── statements.ts              # POST /finance/statements (Sync auslösen)
 ├── statements.test.ts
+├── statement-persist.ts       # Persist-Logik für FetchResult → DB
+├── statement-persist.test.ts
 ├── tan-sessions.ts            # POST /finance/tan-sessions/complete
 ├── tan-sessions.test.ts
 ├── transactions.ts            # Liste, Detail, manuelle Buchung
 ├── transactions.test.ts
+├── holdings.ts                # GET /finance/accounts/:id/holdings (Depot)
+├── overview.ts                # GET /finance/overview (Saldo-Übersicht)
+├── overview.test.ts
 ├── tags.ts                    # Tag-CRUD + KI-Vorschläge bestätigen
 ├── tags.test.ts
 ├── analysis.ts                # Natural-Language-Query → AST + Aggregat
 ├── analysis.test.ts
 ├── statements-cron.ts         # CronJobs: sync + tan-cleanup
+├── statements-cron.test.ts
+├── sync-schedule.ts           # Sync-Zeiten-Verwaltung
+├── sync-schedule.test.ts
 ├── data-import.ts             # POST /finance/admin/import
 ├── data-import.test.ts
 ├── tag-suggester.ts           # Embedding + classify, beim Insert genutzt
 ├── tag-suggester.test.ts
-└── import-schema.ts           # Zod-Schema für Finanzkraft-JSON
+├── tag-queue.ts               # Tag-Suggestion-Queue (async)
+├── tag-queue-api.ts           # Queue-Endpoint für manuellen Trigger
+├── tag-queue-events.ts        # PubSub events for tag queue
+├── tag-worker.ts              # Background worker für Tag-Suggestions
+├── sepa-parser.ts             # SEPA-Verwendungszweck-Parser
+├── sepa-parser.test.ts
+├── rate-limiting.test.ts      # Rate-Limiting-Tests
+├── import-schema.ts           # Zod-Schema für Finanzkraft-JSON
+├── import-pending.ts          # Pending-Import-Verarbeitung
+├── iso-btc-codes.ts           # ISO BTC-Code-Mapping
+├── export-cron.ts             # Export/Backup-Cron
+├── anomaly-detector.ts        # Anomalie-Erkennung in Transaktionen
 ```
 
-23 Produktivdateien + 11 Test-Dateien. Größenordnung deckt sich mit
-`documents/` (24 Produktivdateien).
+31 Produktivdateien + 18 Test-Dateien.
 
 ---
 
@@ -86,6 +104,13 @@ export default new Service("finance");
 | `tag-suggester.ts` | Beim TX-Insert: embed + classify, Vorschläge persistieren | — | (intern) |
 | `import-schema.ts` | Zod-Schema des Finanzkraft-JSON | — | (intern) |
 | `types.ts` | gemeinsam genutzte Interfaces (`FinanceSyncSlot`, `DialogResult`, …) | — | — |
+| `statement-persist.ts` | `persistFetchResult(bankcontactId, result)`: Schreibt Transaktionen, Salden und Holdings aus einem FetchResult in die DB. Zwei-Phasen-Matching (exact kind → unclaimed fallback). | — | (intern) |
+| `holdings.ts` | Depot-Positionen abfragen | `GET /finance/accounts/:id/holdings` | `finance.view` |
+| `overview.ts` | Konten-Übersicht mit Salden, Sektionen | `GET /finance/overview`, `PUT /finance/overview` | `finance.view` |
+| `sepa-parser.ts` | SEPA-Verwendungszweck-Parser (EREF, KREF, MREF, CRED, …) | — | (intern) |
+| `tag-queue.ts` | Asynchrone Tag-Suggestion-Queue | — | (intern) |
+| `tag-worker.ts` | Background-Worker für Tag-Suggestions | — | (intern) |
+| `anomaly-detector.ts` | Anomalie-Erkennung (ungewöhnliche Beträge, neue Gegenseiten) | — | (intern) |
 
 Jeder Handler folgt dem Pattern aus `user/auth-handler.ts:30-35`:
 
@@ -111,12 +136,16 @@ graph TD
     AC[accounts.ts]
     AA[account-access.ts]
     ST[statements.ts]
+    SP[statement-persist.ts]
     TS[tan-sessions.ts]
     TX[transactions.ts]
     TG[tags.ts]
     AN[analysis.ts]
     DI[data-import.ts]
     CR[statements-cron.ts]
+    HO[holdings.ts]
+    OV[overview.ts]
+    SE[sepa-parser.ts]
 
     FC[fints-client.ts]
     EN[encryption.ts]
@@ -130,6 +159,8 @@ graph TD
   BC --> TY
   ST --> FC
   ST --> TS
+  ST --> SP
+  SP --> TY
   TS --> FC
   TS --> EN
   CR --> FC
@@ -142,6 +173,7 @@ graph TD
   DI --> IS
   FC --> EN
   FC --> TY
+  FC --> SE
   LC --> TY
 ```
 
