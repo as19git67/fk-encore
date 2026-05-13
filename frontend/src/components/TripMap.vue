@@ -27,8 +27,7 @@ const emit = defineEmits<{
 const {
   stops,
   stopsByDay,
-  dayPaths,
-  dayTransitions,
+  longJumps,
   dayColorMap,
   uniqueDays,
   bounds,
@@ -271,6 +270,51 @@ function handleOverviewTap() {
 function handleStopTap(stop: Stop) {
   applySelection(stop.day, stop.id)
   nextTick(() => scrollItemIntoCenter(stop.id))
+}
+
+/**
+ * Find the smallest zoom level at which the target stop's pin sits at
+ * least `PIN_OVERLAP_PX` away from every other pin in the same day, so
+ * the screen-space pin merger won't fold it into a neighbour. Used when
+ * the user keyboard-activates a card to "drill in" to that specific
+ * cluster. Falls back to maxZoom if the album has stops sitting
+ * literally on top of each other.
+ */
+function zoomToUnmergeStop(stop: Stop) {
+  if (!map) return
+  const others = (stopsByDay.value.get(stop.day) ?? []).filter(s => s.id !== stop.id)
+  const maxZoom = 19
+  let z = map.getZoom()
+  if (others.length > 0) {
+    while (z < maxZoom) {
+      const tp = map.project([stop.lat, stop.lng], z)
+      let clear = true
+      for (const o of others) {
+        const op = map.project([o.lat, o.lng], z)
+        if (tp.distanceTo(op) < PIN_OVERLAP_PX) {
+          clear = false
+          break
+        }
+      }
+      if (clear) break
+      z++
+    }
+  }
+  map.setView([stop.lat, stop.lng], z)
+}
+
+/**
+ * Activation (Enter / Space on a focused stop card): select the stop
+ * AND zoom the map until the stop's pin is no longer merged with any
+ * neighbour. The user can then click the now-distinct pin to open
+ * fullscreen at the stop's first photo.
+ */
+function handleStopActivate(stop: Stop) {
+  applySelection(stop.day, stop.id)
+  nextTick(() => {
+    scrollItemIntoCenter(stop.id)
+    zoomToUnmergeStop(stop)
+  })
 }
 
 // ── Pin rendering ────────────────────────────────────────────────────────────
@@ -525,28 +569,22 @@ function renderContent() {
   if (!map) return
   clearContent()
 
-  if (selectedDay.value === OVERVIEW) {
-    // Inter-day jumps that survived the distance threshold.
-    for (const transition of dayTransitions.value) {
-      const line = L.polyline(transition.coordinates, {
-        color: transition.color,
-        weight: 2,
-        opacity: 0.5,
-        dashArray: '8, 8',
-      }).addTo(map)
-      polylines.push(line)
+  // Always-dashed lines for the top-10 % of consecutive jumps. In day
+  // mode we further restrict to the active day's intra-day jumps —
+  // inter-day jumps would extend out of the day's bounds and confuse
+  // the focused view.
+  const day = selectedDay.value
+  for (const jump of longJumps.value) {
+    if (day !== OVERVIEW) {
+      if (jump.fromDay !== day || jump.toDay !== day) continue
     }
-  } else {
-    // Only the selected day's within-day path.
-    const path = dayPaths.value.find(p => p.day === selectedDay.value)
-    if (path && path.coordinates.length >= 2) {
-      const line = L.polyline(path.coordinates, {
-        color: path.color,
-        weight: 3,
-        opacity: 0.8,
-      }).addTo(map)
-      polylines.push(line)
-    }
+    const line = L.polyline(jump.coordinates, {
+      color: jump.color,
+      weight: 2,
+      opacity: 0.6,
+      dashArray: '8, 8',
+    }).addTo(map)
+    polylines.push(line)
   }
 
   for (const pin of mergeOverlappingPins(visiblePins.value)) {
@@ -673,6 +711,8 @@ defineExpose({ selectStopByPhotoId })
         <!-- Overview / whole-trip card -->
         <div
           data-overview
+          role="button"
+          tabindex="0"
           :class="[
             'trip-timeline-item',
             'trip-timeline-item--overview',
@@ -680,6 +720,8 @@ defineExpose({ selectStopByPhotoId })
           ]"
           :title="'Ganze Reise auf der Karte'"
           @click="handleOverviewTap"
+          @keydown.enter.prevent="handleOverviewTap"
+          @keydown.space.prevent="handleOverviewTap"
         >
           <div class="trip-timeline-overview-icon">
             <i class="pi pi-globe" aria-hidden="true" />
@@ -702,6 +744,8 @@ defineExpose({ selectStopByPhotoId })
             <div
               v-if="stopsByDay.get(day) && stopsByDay.get(day)!.length > 0"
               :data-stop-id="stopsByDay.get(day)![0]!.id"
+              role="button"
+              tabindex="0"
               :class="[
                 'trip-timeline-item',
                 'trip-timeline-item--day',
@@ -714,6 +758,8 @@ defineExpose({ selectStopByPhotoId })
               ]"
               :title="formatDayLabel(day)"
               @click="handleStopTap(stopsByDay.get(day)![0]!)"
+              @keydown.enter.prevent="handleStopActivate(stopsByDay.get(day)![0]!)"
+              @keydown.space.prevent="handleStopActivate(stopsByDay.get(day)![0]!)"
             >
               <div class="trip-timeline-thumb-wrap">
                 <div
@@ -754,12 +800,16 @@ defineExpose({ selectStopByPhotoId })
                 v-for="(stop, sIdx) in stopsByDay.get(day)!.slice(1)"
                 :key="stop.id"
                 :data-stop-id="stop.id"
+                role="button"
+                tabindex="0"
                 :class="[
                   'trip-timeline-item',
                   'trip-timeline-item--sibling',
                   { 'trip-timeline-item--selected': stop.id === selectedStopId },
                 ]"
                 @click="handleStopTap(stop)"
+                @keydown.enter.prevent="handleStopActivate(stop)"
+                @keydown.space.prevent="handleStopActivate(stop)"
               >
                 <div
                   class="trip-timeline-connector trip-timeline-connector--sibling"

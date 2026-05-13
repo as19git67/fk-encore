@@ -23,12 +23,6 @@ export interface OverviewCluster {
   coverPhoto: Photo
 }
 
-export interface DayPath {
-  day: string
-  color: string
-  coordinates: [number, number][]
-}
-
 export interface DayTransition {
   fromDay: string
   toDay: string
@@ -52,9 +46,6 @@ const CLUSTER_INCLUDE_METERS = 400
 const MIN_CLUSTER_SEPARATION_METERS = 600
 /** In overview mode, stops whose centroids are closer than this get merged. */
 const OVERVIEW_MERGE_METERS = 8000
-/** Only draw a connecting line between days when their nearest stops are at
- *  least this far apart. */
-const DAY_TRANSITION_MIN_METERS = 25000
 
 const DAY_COLORS = [
   '#4285F4', '#EA4335', '#34A853', '#FBBC05', '#9C27B0',
@@ -287,45 +278,56 @@ export function usePhotoStops(photos: Ref<Photo[]>) {
     return m
   })
 
-  const dayPaths = computed<DayPath[]>(() => {
-    return uniqueDays.value
-      .map(day => ({
-        day,
-        color: dayColorMap.value.get(day) ?? DAY_COLORS[0]!,
-        coordinates: (stopsByDay.value.get(day) ?? []).map<[number, number]>(s => [s.lat, s.lng]),
-      }))
-      .filter(p => p.coordinates.length >= 2)
-  })
-
   /**
-   * Inter-day transitions are drawn only when the closest stops between
-   * the two days are at least DAY_TRANSITION_MIN_METERS apart — for short
-   * everyday hops within the same town we don't clutter the map with a
-   * dashed line.
+   * Lines on the map: take every consecutive stop pair (sorted by time)
+   * and keep only the ones whose distance is in the top 10 % — i.e. the
+   * dashed line marks "the trip's biggest jumps" without cluttering the
+   * map with short hops between neighbouring clusters. Non-consecutive
+   * pairs are explicitly NOT considered: when the user goes A → B → C,
+   * only A→B and B→C show up, not A→C.
    */
-  const dayTransitions = computed<DayTransition[]>(() => {
-    const days = uniqueDays.value
-    const transitions: DayTransition[] = []
-    for (let i = 1; i < days.length; i++) {
-      const prev = days[i - 1]!
-      const curr = days[i]!
-      const prevStops = stopsByDay.value.get(prev) ?? []
-      const currStops = stopsByDay.value.get(curr) ?? []
-      if (prevStops.length === 0 || currStops.length === 0) continue
-      // Use the last stop of the previous day (latest time) and the first
-      // stop of the current day to indicate the actual transition.
-      const from = prevStops[prevStops.length - 1]!
-      const to = currStops[0]!
-      const d = haversineDistance(from.lat, from.lng, to.lat, to.lng)
-      if (d < DAY_TRANSITION_MIN_METERS) continue
-      transitions.push({
-        fromDay: prev,
-        toDay: curr,
-        color: dayColorMap.value.get(curr) ?? DAY_COLORS[0]!,
-        coordinates: [[from.lat, from.lng], [to.lat, to.lng]],
+  const consecutiveJumps = computed<DayTransition[]>(() => {
+    const sortedStops = stops.value
+    const out: DayTransition[] = []
+    for (let i = 1; i < sortedStops.length; i++) {
+      const a = sortedStops[i - 1]!
+      const b = sortedStops[i]!
+      out.push({
+        fromDay: a.day,
+        toDay: b.day,
+        color: dayColorMap.value.get(b.day) ?? DAY_COLORS[0]!,
+        coordinates: [[a.lat, a.lng], [b.lat, b.lng]],
       })
     }
-    return transitions
+    return out
+  })
+
+  const longJumpThreshold = computed<number>(() => {
+    const links = consecutiveJumps.value
+    if (links.length === 0) return Infinity
+    const sorted = links
+      .map(l =>
+        haversineDistance(
+          l.coordinates[0]![0], l.coordinates[0]![1],
+          l.coordinates[1]![0], l.coordinates[1]![1],
+        ),
+      )
+      .sort((x, y) => x - y)
+    // 90th percentile: only distances at or above this threshold get a
+    // line drawn — that's the longest ~10 % of the consecutive jumps.
+    const idx = Math.floor(sorted.length * 0.9)
+    return sorted[idx] ?? Infinity
+  })
+
+  const longJumps = computed<DayTransition[]>(() => {
+    const threshold = longJumpThreshold.value
+    return consecutiveJumps.value.filter(j => {
+      const d = haversineDistance(
+        j.coordinates[0]![0], j.coordinates[0]![1],
+        j.coordinates[1]![0], j.coordinates[1]![1],
+      )
+      return d >= threshold
+    })
   })
 
   /**
@@ -405,8 +407,7 @@ export function usePhotoStops(photos: Ref<Photo[]>) {
   return {
     stops,
     stopsByDay,
-    dayPaths,
-    dayTransitions,
+    longJumps,
     dayColorMap,
     uniqueDays,
     bounds,
