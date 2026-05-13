@@ -110,12 +110,17 @@ function selectStopWithinDay(stop: Stop, opts: { silent?: boolean } = {}) {
 
 function fitMapToSelection() {
   if (!map) return
-  if (selectedDay.value === OVERVIEW) {
-    if (bounds.value) map.fitBounds(bounds.value, { padding: [24, 24] })
-    return
+  const b = selectedDay.value === OVERVIEW
+    ? bounds.value
+    : boundsForDay(selectedDay.value)
+  if (b) {
+    map.fitBounds(b, { padding: [24, 24], maxZoom: 16 })
+  } else {
+    // Without a view Leaflet renders neither tiles nor markers. Fall
+    // back to a centred-on-Germany view so the map at least shows map
+    // details when the album has no GPS-tagged photos (or none yet).
+    map.setView([51.1657, 10.4515], 5)
   }
-  const b = boundsForDay(selectedDay.value)
-  if (b) map.fitBounds(b, { padding: [32, 32] })
 }
 
 function scrollTimelineToSelection() {
@@ -367,14 +372,17 @@ function initMap() {
     maxZoom: 19,
   }).addTo(map)
 
+  // Establish the initial view BEFORE the first render so pixel-based
+  // pin merging projects against a real zoom level rather than failing
+  // (and falling back to no-merge) on the first paint.
+  fitMapToSelection()
+  renderContent()
+
   // Pixel-space merging depends on the current zoom: zooming in spreads
   // pins apart and reveals previously-merged stops, zooming out merges
   // more aggressively. Re-render the markers after every zoom change so
   // the visible pins always reflect what fits on screen.
   map.on('zoomend', () => renderContent())
-
-  renderContent()
-  fitMapToSelection()
 }
 
 function clearContent() {
