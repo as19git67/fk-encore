@@ -646,8 +646,15 @@ onUnmounted(() => {
 }
 
 .shared-header {
-  padding: 1.5rem 1rem;
-  text-align: center;
+  /* Compact single-row header in raster view. The album name, photo
+     count and (when present) the raster/map switch share a flex row;
+     the description wraps onto its own line below only if it exists.
+     Far less vertical space than the previous centred stack. */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 0.75rem;
+  padding: 0.4rem 0.75rem;
   background: var(--p-surface-card, #fff);
   border-bottom: 1px solid var(--p-content-border-color, #dee2e6);
   flex-shrink: 0;
@@ -710,26 +717,39 @@ onUnmounted(() => {
 }
 
 .shared-header .title {
-  font-size: 1.75rem;
-  font-weight: 700;
-  margin: 0 0 0.25rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
 }
 
 .shared-header .description {
+  /* Wraps to its own line; muted and compact. */
   color: var(--p-text-muted-color);
-  margin: 0 0 0.5rem;
+  margin: 0;
+  font-size: 0.8rem;
+  flex-basis: 100%;
+  order: 3;
+  line-height: 1.3;
 }
 
 .shared-header .meta {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   color: var(--p-text-muted-color);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* Toggle between raster + map for albums where the owner enabled the map.
-   Lives inside the centred header, sized to read as a quiet utility. */
+   Lives inline in the compact header at the right edge. */
 .shared-view-mode-switch {
   display: inline-flex;
-  margin-top: 0.75rem;
+  flex-shrink: 0;
+  margin-left: auto;
   border: 1px solid var(--p-content-border-color);
   border-radius: 999px;
   padding: 2px;
@@ -791,6 +811,22 @@ onUnmounted(() => {
   .photo-grid-scroll {
     padding: var(--spacing-sm, 4px);
   }
+
+  /* Shared header on phones: hide the view-mode button labels (icons
+     stay) and tighten the description so the whole header stays on
+     one or two lines. */
+  .shared-header { padding: 0.35rem 0.6rem; gap: 0.35rem 0.5rem; }
+  .shared-header .title { font-size: 1rem; }
+  .shared-header .description {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .shared-view-mode-btn { padding: 0.25rem 0.5rem; }
+  .shared-view-mode-btn span { display: none; }
+  .shared-view-mode-btn .pi { font-size: 1em; }
 
   /* On phones the grid view scrolls the whole page instead of a
      fixed-height inner container: banner + album title scroll away
