@@ -130,6 +130,14 @@ camelCase:
 - `finance_tag` (id, name unique)
 - `finance_tag_transaction` (transaction_id, tag_id)
 - `finance_account_balance` (id, account_id, balance numeric, recorded_at)
+- `finance_account_holding` (id, account_id, isin, wkn, name, amount numeric,
+  price numeric, value numeric) — Depot-Positionen (ISIN, WKN, Bezeichnung,
+  Stueckzahl, Kurs, Wert), persistiert via HKWPD/HIWPD-Segmente beim
+  Statement-Sync. Banken, die dieselbe Kontonummer fuer Giro- und Depotkonto
+  melden, werden durch den `getBankAccount`-Monkey-Patch in
+  `fints-client.ts` (`patchGetBankAccountForDepot`) korrekt aufgeloest. Im
+  Frontend zeigt `AccountTransactionsView` fuer Depot-Konten eine
+  "Positionen"-Tabelle anstelle der Transaktionsliste.
 - **NEU vs. Finanzkraft**: `finance_tan_session` (tan_reference PK, user_id,
   bankcontact_id, banking_information jsonb (serialisierter
   `lib-fints`-State), challenge text, expires_at) — für stateful TAN-Flow
