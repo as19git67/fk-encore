@@ -89,7 +89,7 @@ Store denselben Wert nicht doppelt führen.
 | Parameter | Ansicht | Verhalten |
 |---|---|---|
 | `?photoId=<id>` | GalleryView | öffnet das Foto direkt in der Vollbildansicht |
-| `?photoId=<id>` | AlbumDetailView | selektiert und scrollt zum Foto; öffnet TripMap-Stop wenn Album im Kartenmodus ist |
+| `?photoId=<id>` | AlbumDetailView | Im Rastermodus: selektiert und scrollt zum Foto. Im Kartenmodus: klappt den zugehörigen Tag in der Timeline auf, markiert den Cluster und scrollt die Timeline mittig auf den Stop. Klickt der Nutzer anschließend den Pin, startet die Vollbildansicht direkt mit *genau diesem* Foto (nicht dem ersten Foto des Clusters). |
 | `?q`, `?owner`, `?sortBy`, … | AlbumsView | stellt Filter/Sortierung wieder her (für Deep-Links und Tab-Sync) |
 
 URL-Parameter werden nach dem Einlesen sofort per `router.replace()` entfernt,

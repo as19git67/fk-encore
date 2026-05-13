@@ -35,6 +35,7 @@ const emit = defineEmits<{
   (e: 'logout'): void
   (e: 'toggle-notify', value: boolean): void
   (e: 'toggle-push', value: boolean): void
+  (e: 'dismiss'): void
 }>()
 
 const state = computed<'loading' | 'anonymous' | 'pending' | 'verified'>(() => {
@@ -128,6 +129,21 @@ const pushTooltip = computed<string | null>(() => {
         />
       </div>
     </template>
+
+    <!-- Dismiss control: hides the banner for the rest of the session
+         (and beyond, when the parent persists the choice). The compact
+         Anmelden/Account button in the album header remains reachable
+         regardless. -->
+    <button
+      v-if="state !== 'loading'"
+      type="button"
+      class="guest-banner__dismiss"
+      aria-label="Hinweis schließen"
+      title="Hinweis schließen"
+      @click="emit('dismiss')"
+    >
+      <i class="pi pi-times" aria-hidden="true" />
+    </button>
   </div>
 </template>
 
@@ -187,5 +203,30 @@ const pushTooltip = computed<string | null>(() => {
   gap: 0.35rem;
   opacity: 0.85;
   cursor: pointer;
+}
+
+.guest-banner__dismiss {
+  align-self: center;
+  margin-left: 0.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.guest-banner__dismiss:hover,
+.guest-banner__dismiss:focus-visible {
+  opacity: 1;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  outline: none;
 }
 </style>

@@ -11,24 +11,18 @@ const serviceLabels: Record<string, string> = {
 </script>
 
 <template>
-  <div v-if="store.hasUnavailableServices || store.serverPressure.underPressure" class="service-status-bar">
+  <div v-if="store.hasUnavailableServices" class="service-status-bar">
     <i class="pi pi-exclamation-triangle service-status-bar__icon" />
-    <template v-if="store.hasUnavailableServices">
-      <span class="service-status-bar__text">Dienste nicht verfügbar:</span>
-      <span
-        v-for="svc in store.services.filter(s => !s.available)"
-        :key="svc.name"
-        class="service-status-bar__badge"
-        :title="svc.lastError ?? undefined"
-      >
-        {{ serviceLabels[svc.name] ?? svc.name }}
-      </span>
-      <span class="service-status-bar__hint">Verarbeitung wird automatisch fortgesetzt, sobald die Dienste erreichbar sind.</span>
-    </template>
-    <template v-if="store.serverPressure.underPressure">
-      <span class="service-status-bar__text">Server ausgelastet</span>
-      <span class="service-status-bar__hint">Hintergrundverarbeitung wird gedrosselt, um die Reaktionsfähigkeit sicherzustellen.</span>
-    </template>
+    <span class="service-status-bar__text">Dienste nicht verfügbar:</span>
+    <span
+      v-for="svc in store.services.filter(s => !s.available)"
+      :key="svc.name"
+      class="service-status-bar__badge"
+      :title="svc.lastError ?? undefined"
+    >
+      {{ serviceLabels[svc.name] ?? svc.name }}
+    </span>
+    <span class="service-status-bar__hint">Verarbeitung wird automatisch fortgesetzt, sobald die Dienste erreichbar sind.</span>
   </div>
 </template>
 

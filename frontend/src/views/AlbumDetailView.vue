@@ -142,12 +142,20 @@ const { applied: filter, draft: filterDraft, activeCount, openEdit, apply: apply
 const filterMenuOpen = ref(false)
 // Lazy-Mount: siehe GalleryView. Spart /persons + /albums beim Album-Öffnen.
 const filterMenuMounted = ref(false)
-const FILTER_AVAILABLE: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'> = [
-  'hiddenMode', 'favorite', 'groupHighlight', 'inGroup',
-  'othersFavorited', 'othersHidden',
-  'qualityRange', 'mediaTypes', 'hasGps',
-  'dateRange', 'sizeRange',
-]
+const FILTER_AVAILABLE = computed<Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'>>(() => {
+  const arr: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'> = [
+    'hiddenMode', 'favorite', 'inGroup',
+    'othersFavorited', 'othersHidden',
+    'qualityRange', 'mediaTypes', 'hasGps',
+    'dateRange', 'sizeRange',
+  ]
+  // Group-Highlight toggle only when the album actually has enough of
+  // them — otherwise the choice would be either empty or invisible.
+  if (groupHighlightAvailable.value) {
+    arr.splice(2, 0, 'groupHighlight')
+  }
+  return arr
+})
 
 function openFilterMenu() {
   openEdit()
@@ -281,14 +289,24 @@ const unreviewedGroupCount = computed(() =>
 
 // Album photos after applying the FilterMenu criteria. Used by the map view
 // and filter chip display (not by the VirtualGallery grid).
+const groupCoverIds = computed<Set<number>>(() =>
+  new Set(
+    albumPhotoGroups.value
+      .map(g => g.cover_photo_id)
+      .filter((id): id is number => id != null),
+  ),
+)
+
+const groupHighlightAvailable = computed<boolean>(() => {
+  const total = rawAlbumPhotos.value.length
+  if (total === 0) return false
+  return groupCoverIds.value.size / total >= 0.1
+})
+
 const albumPhotos = computed<Photo[]>(() => {
   const ctx: PhotoFilterContext = {
     curationStats: curationStatsMap.value,
-    groupCoverIds: new Set(
-      albumPhotoGroups.value
-        .map(g => g.cover_photo_id)
-        .filter((id): id is number => id != null),
-    ),
+    groupCoverIds: groupCoverIds.value,
     inGroupIds: new Set(albumPhotoGroups.value.flatMap(g => g.photo_ids)),
   }
   return rawAlbumPhotos.value.filter(p => matchesPhotoFilter(p, filter.value, ctx))
@@ -506,13 +524,12 @@ watchEffect(() => {
   }
 })
 
-function handleMapFullscreen(stopPhotos: Photo[], startIndex: number) {
-  // Use all album photos so left/right navigation works across stops
-  const allPhotos = albumPhotos.value
-  const targetPhoto = stopPhotos[startIndex]
-  const globalIndex = targetPhoto ? allPhotos.findIndex(p => p.id === targetPhoto.id) : -1
-  mapFullscreenPhotos.value = allPhotos
-  mapFullscreenIndex.value = globalIndex >= 0 ? globalIndex : 0
+function handleMapFullscreen(dayPhotos: Photo[], startIndex: number, _day: string) {
+  // Scope fullscreen navigation to the photos of the day TripMap has
+  // selected. The user steps through the day in the overlay; switching
+  // to another day happens via the timeline.
+  mapFullscreenPhotos.value = dayPhotos
+  mapFullscreenIndex.value = Math.max(0, Math.min(startIndex, dayPhotos.length - 1))
   isMapFullscreen.value = true
 }
 
@@ -670,6 +687,17 @@ async function applyCurationToAlbumPhoto(id: number, target: CurationStatus): Pr
     if (r.value && r.value.id === id) {
       r.value = { ...r.value, curation_status: target }
     }
+  }
+  // Map-mode fullscreen holds its own array snapshot. Mutating a
+  // property on the shared photo object doesn't reliably re-trigger the
+  // FullscreenOverlay's reactive bindings after the first toggle, so
+  // explicitly replace the entry with a fresh object — same pattern as
+  // the cursor refs above.
+  const mfIdx = mapFullscreenPhotos.value.findIndex(p => p.id === id)
+  if (mfIdx >= 0) {
+    const next = mapFullscreenPhotos.value.slice()
+    next[mfIdx] = { ...next[mfIdx]!, curation_status: target }
+    mapFullscreenPhotos.value = next
   }
   try {
     await updatePhotoCuration(id, target)
@@ -1198,6 +1226,7 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
             size="small"
             :severity="activeCount > 0 ? 'primary' : 'secondary'"
             :outlined="activeCount === 0"
+            class="header__filter-btn"
             @click="openFilterMenu"
           />
           <Button
@@ -1206,8 +1235,26 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
             size="small"
             :severity="isSortDefault ? 'secondary' : 'primary'"
             :outlined="isSortDefault"
+            class="header__filter-btn"
             @click="openSortMenu"
           />
+        </div>
+
+        <!-- Natural-language search: global search, results filtered to this album -->
+        <div v-if="albumPhotos.length > 0" class="album-search">
+          <NaturalSearchBar
+            v-model="searchQuery"
+            :loading="searchLoading"
+            :result-count="searchResultCountInAlbum"
+            :has-parsed-chips="hasParsedChips"
+            :location-chip="locationChip"
+            :date-chip="dateChip"
+            :semantic-chip="semanticChip"
+            placeholder="Fotos in diesem Album suchen…"
+            @search="executeSearch"
+            @clear="clearSearch"
+          />
+          <Message v-if="searchError" severity="error" :closable="false">{{ searchError }}</Message>
         </div>
 
         <!-- 6. Action buttons -->
@@ -1239,23 +1286,6 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
           <Button v-if="isOwner" icon="pi pi-trash" size="small" text severity="danger" v-tooltip="'Album löschen'" @click="showDeleteDialog = true" />
           <Button v-if="!isOwner" icon="pi pi-sign-out" size="small" text severity="danger" v-tooltip="'Freigabe verlassen'" @click="showLeaveDialog = true" />
         </div>
-      </div>
-
-      <!-- Natural-language search: global search, results filtered to this album -->
-      <div v-if="albumPhotos.length > 0" class="album-search">
-        <NaturalSearchBar
-          v-model="searchQuery"
-          :loading="searchLoading"
-          :result-count="searchResultCountInAlbum"
-          :has-parsed-chips="hasParsedChips"
-          :location-chip="locationChip"
-          :date-chip="dateChip"
-          :semantic-chip="semanticChip"
-          placeholder="Fotos in diesem Album suchen…"
-          @search="executeSearch"
-          @clear="clearSearch"
-        />
-        <Message v-if="searchError" severity="error" :closable="false">{{ searchError }}</Message>
       </div>
 
       <div v-if="activeCount > 0 || !isSortDefault" class="chip-row">
@@ -1376,7 +1406,8 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
     />
 
 
-    <!-- Fullscreen overlay (Grid mode) -->
+    <!-- Fullscreen overlay (Grid mode). Auto-advances every 10 s when
+         the user is idle so it doubles as a slideshow. -->
     <FullscreenOverlay
       v-if="isFullscreen && cursorPhoto"
       :photo="cursorPhoto"
@@ -1385,6 +1416,9 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
       :canDelete="canDeletePhotos || canWrite"
       :showDetailsButton="true"
       :detailsActive="fullscreenDetailsOpen"
+      :autoAdvanceMs="10000"
+      :currentIndex="(cursorIndex ?? 0) + 1"
+      :totalCount="albumPhotos.length"
       @close="closeGridFullscreen"
       @prev="gridGoPrev"
       @next="gridGoNext"
@@ -1438,7 +1472,9 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
       </template>
     </FullscreenOverlay>
 
-    <!-- Fullscreen overlay (Map mode – scoped to stop photos) -->
+    <!-- Fullscreen overlay (Map mode – scoped to selected day's photos).
+         Auto-advances every 10 s when the user is idle so the day's
+         photos run as a slideshow. -->
     <FullscreenOverlay
       v-if="isMapFullscreen && mapSelectedPhoto"
       :photo="mapSelectedPhoto"
@@ -1447,6 +1483,9 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
       :canDelete="canDeletePhotos || canWrite"
       :showDetailsButton="true"
       :detailsActive="fullscreenDetailsOpen"
+      :autoAdvanceMs="10000"
+      :currentIndex="mapFullscreenIndex + 1"
+      :totalCount="mapFullscreenPhotos.length"
       @close="closeMapFullscreen(); fullscreenDetailsOpen = false"
       @prev="mapFullscreenIndex--"
       @next="mapFullscreenIndex++"
@@ -1708,7 +1747,6 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
 
 /* ── Album-scoped natural search bar (inside subheader) ──────────────────── */
 .album-search {
-  padding: 0 1em 0.5em;
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
@@ -1813,6 +1851,12 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
   /* Compact header on mobile */
   .header { padding: 0.35em 0.65em; gap: 0.25em 0.5em; }
   .header__title { font-size: 1.1em; }
+
+  /* Icon-only filter & sort buttons on mobile — labels would push the
+     header onto a second row on phones. The aria-label / tooltip
+     remain so the icons are still discoverable. */
+  .header__filter-btn :deep(.p-button-label) { display: none; }
+  .header__filter-btn :deep(.p-button-icon) { margin-right: 0; }
 }
 
 /* ── Delete / settings dialog ───────────────────────────────────────────── */

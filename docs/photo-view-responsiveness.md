@@ -72,8 +72,9 @@ responsive under scan load"*).
   workers *pause* between jobs or skip a tick entirely, giving the Node
   runtime room to service incoming requests. Health checks stay
   responsive, and as soon as pressure drops the workers resume at full
-  speed. The state is exposed via `/photos/service-health` so the UI can
-  show a banner.
+  speed. The state is still exposed via `/photos/service-health` as an
+  observability signal (used by logs / dashboards); the UI no longer
+  surfaces it as a banner.
 - **Worker yield between jobs.** Even outside of pressure, workers yield
   via `setTimeout(0)` between jobs so pending I/O callbacks — including
   incoming health checks — always get a turn.

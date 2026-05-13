@@ -15,6 +15,11 @@ const props = withDefaults(defineProps<{
   showDetailsButton?: boolean
   /** When true the details icon switches to a close icon (✕). Default: false. */
   detailsActive?: boolean
+  /** 1-based index of the current photo in the navigated set. When
+   *  provided together with `totalCount > 0`, the overlay renders an
+   *  "X / N" pill between the prev/next nav buttons. */
+  currentIndex?: number
+  totalCount?: number
   /**
    * Similar-photo-group context for the currently shown photo, when
    * the photo is part of a group. Drives the `+N`-marker that tells
@@ -24,6 +29,13 @@ const props = withDefaults(defineProps<{
    */
   group?: GalleryGridGroup | null
   /** Optional slot content rendered inside the fullscreen image (e.g. face box) */
+  /**
+   * When > 0, auto-advance to the next photo this many milliseconds
+   * after the last user interaction. Any touch, click, mouse move, or
+   * key press resets the timer. Setting to 0 (default) disables the
+   * slideshow behaviour entirely.
+   */
+  autoAdvanceMs?: number
 }>(), {
   // Vue 3 coerces a Boolean prop that the parent didn't pass to `false`
   // (NOT `undefined`), which collapses `props.showDetailsButton !== false`
@@ -32,7 +44,12 @@ const props = withDefaults(defineProps<{
   // useful behaviour the default; callers wanting the icon hidden still
   // pass `:show-details-button="false"` explicitly.
   showDetailsButton: true,
+  autoAdvanceMs: 0,
+  currentIndex: 0,
+  totalCount: 0,
 })
+
+const showCounter = computed(() => props.totalCount > 0 && props.currentIndex > 0)
 
 const emit = defineEmits<{
   'close': []
@@ -198,16 +215,55 @@ function handleTouchMove(e: TouchEvent) {
 }
 
 function handleTouchEnd(e: TouchEvent) {
-  // Don't swipe between photos when zoomed in
+  // Don't swipe / tap-navigate between photos when zoomed in
   if (zoomLevel.value > 1) return
   if (!e.changedTouches.length) return
 
-  const dx = e.changedTouches[0]!.clientX - touchStartX.value
-  const dy = e.changedTouches[0]!.clientY - touchStartY.value
-  // Nur horizontal wischen auswerten, wenn x-Bewegung dominiert
+  const touch = e.changedTouches[0]!
+  const dx = touch.clientX - touchStartX.value
+  const dy = touch.clientY - touchStartY.value
+  const movement = Math.hypot(dx, dy)
+
+  // Tap (essentially no movement): treat the side of the screen as a
+  // direction — left half = previous, right half = next. Skips the
+  // emit when the target is interactive (button / link / topbar) so
+  // toolbar taps don't double up as navigation.
+  if (movement < 10) {
+    const target = e.target as HTMLElement | null
+    if (target && target.closest('button, a, input, textarea, .fs-stack-badge, .fs-details-flyout, .fs-topbar')) return
+    if (touch.clientX < window.innerWidth / 2) {
+      if (props.prevPhoto) emit('prev')
+    } else {
+      if (props.nextPhoto) emit('next')
+    }
+    // Suppress the synthetic click event the browser is about to fire
+    // for the same gesture — otherwise the click handler below would
+    // advance the photo twice.
+    suppressNextClickUntil = performance.now() + 500
+    return
+  }
+
+  // Swipe: keep horizontal-dominant gestures with at least 40 px of
+  // travel as the explicit prev/next signal.
   if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40) {
     if (dx > 0 && props.prevPhoto) emit('prev')
     else if (dx < 0 && props.nextPhoto) emit('next')
+  }
+}
+
+let suppressNextClickUntil = 0
+
+function handleContentClick(e: MouseEvent) {
+  if (zoomLevel.value > 1) return
+  if (performance.now() < suppressNextClickUntil) return
+  const target = e.target as HTMLElement | null
+  // Skip the navigation when the click landed on an interactive
+  // element — its own @click handler should take precedence.
+  if (target && target.closest('button, a, input, textarea, .fs-stack-badge, .fs-details-flyout, .fs-topbar')) return
+  if (e.clientX < window.innerWidth / 2) {
+    if (props.prevPhoto) emit('prev')
+  } else {
+    if (props.nextPhoto) emit('next')
   }
 }
 
@@ -278,6 +334,54 @@ function handleKeydown(e: KeyboardEvent) {
 onMounted(() => window.addEventListener('keydown', handleKeydown, true))
 onUnmounted(() => window.removeEventListener('keydown', handleKeydown, true))
 
+// ── Idle auto-advance (slideshow) ───────────────────────────────────────────
+// When `autoAdvanceMs` > 0 the overlay auto-emits `next` after the user
+// has been idle for that long. Any pointer or keyboard interaction
+// resets the timer.
+let idleTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearIdleTimer() {
+  if (idleTimer !== null) {
+    clearTimeout(idleTimer)
+    idleTimer = null
+  }
+}
+
+function scheduleIdleAdvance() {
+  clearIdleTimer()
+  if (!props.autoAdvanceMs || props.autoAdvanceMs <= 0) return
+  if (!props.nextPhoto) return
+  idleTimer = setTimeout(() => {
+    idleTimer = null
+    if (props.nextPhoto) emit('next')
+  }, props.autoAdvanceMs)
+}
+
+function bumpIdleTimer() {
+  if (!props.autoAdvanceMs || props.autoAdvanceMs <= 0) return
+  scheduleIdleAdvance()
+}
+
+watch(() => props.photo.id, () => scheduleIdleAdvance())
+watch(() => props.autoAdvanceMs, () => scheduleIdleAdvance())
+watch(() => props.nextPhoto, () => scheduleIdleAdvance())
+
+onMounted(() => {
+  scheduleIdleAdvance()
+  window.addEventListener('pointerdown', bumpIdleTimer, true)
+  window.addEventListener('pointermove', bumpIdleTimer, true)
+  window.addEventListener('keydown', bumpIdleTimer, true)
+  window.addEventListener('wheel', bumpIdleTimer, true)
+})
+
+onUnmounted(() => {
+  clearIdleTimer()
+  window.removeEventListener('pointerdown', bumpIdleTimer, true)
+  window.removeEventListener('pointermove', bumpIdleTimer, true)
+  window.removeEventListener('keydown', bumpIdleTimer, true)
+  window.removeEventListener('wheel', bumpIdleTimer, true)
+})
+
 function formatDate(photo: Photo) {
   // Same compact format the detail sidebar uses (e.g. "14.01.2026, 09:38")
   // — the long-weekday form was overflowing the topbar on narrow viewports.
@@ -309,7 +413,7 @@ function locationLabel(photo: Photo) {
     <div
       ref="contentRef"
       class="fullscreen-content"
-      @click.stop
+      @click.stop="handleContentClick"
       @touchstart="handleTouchStart"
       @touchend="handleTouchEnd"
       @touchcancel="handleTouchCancel"
@@ -415,7 +519,9 @@ function locationLabel(photo: Photo) {
         <slot name="details-flyout" />
       </div>
 
-      <!-- Prev / Next buttons -->
+      <!-- Prev / Next buttons + counter pill on the same vertical
+           axis. The counter only renders when the parent supplies a
+           non-zero `total-count`. -->
       <Button
         v-if="prevPhoto"
         icon="pi pi-chevron-left"
@@ -423,6 +529,9 @@ function locationLabel(photo: Photo) {
         rounded text
         @click="emit('prev')"
       />
+      <div v-if="showCounter" class="fs-nav-counter" aria-live="polite">
+        {{ currentIndex }} / {{ totalCount }}
+      </div>
       <Button
         v-if="nextPhoto"
         icon="pi pi-chevron-right"
@@ -524,7 +633,7 @@ function locationLabel(photo: Photo) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-inline: 0.5em;
+  padding-inline: 2rem;
   background: var(--p-dialog-background);
   z-index: 10;
 }
@@ -634,8 +743,7 @@ function locationLabel(photo: Photo) {
 /* ── Prev/Next nav buttons ──────────────────────────────────────────────── */
 .fs-nav {
   position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
+  bottom: 0;
   color: white !important;
   background: rgba(0,0,0,0.4) !important;
   z-index: 10;
@@ -644,13 +752,28 @@ function locationLabel(photo: Photo) {
 .fs-nav-left { left: 1rem; }
 .fs-nav-right { right: 1rem; }
 
+/* Photo counter pill on the centre-line between the nav buttons. */
+.fs-nav-counter {
+  position: absolute;
+  bottom: 0.6rem;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #fff;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 999px;
+  padding: 0.35rem 0.85rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  z-index: 10;
+  pointer-events: none;
+  white-space: nowrap;
+  backdrop-filter: blur(6px);
+}
+
 @media (max-width: 768px) {
   .fs-nav {
     /* Auf Mobile immer sichtbar, größere Tappfläche */
     opacity: 1;
-    top: auto;
-    bottom: 4rem;
-    transform: none;
     background: rgba(0, 0, 0, 0.5) !important;
     padding: 0.75rem !important;
   }
