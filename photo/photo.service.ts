@@ -5010,10 +5010,26 @@ import { getQueueStatus, requeueFailed, requeueForRescan, cancelPendingScans } f
 import {
   requeueFailedLibraryScans,
   cancelPendingLibraryScans,
+  getLibraryScanStatus,
 } from "./library-scan-queue";
 
 export async function getScanQueueStatusLogic(userId: number) {
-  return getQueueStatus(userId);
+  const [photoStatus, libStatus] = await Promise.all([
+    getQueueStatus(userId),
+    getLibraryScanStatus(),
+  ]);
+  return {
+    services: [
+      {
+        service: "library_scan" as const,
+        pending: libStatus.pending,
+        processing: libStatus.processing,
+        failed: libStatus.failed,
+        done: libStatus.done,
+      },
+      ...photoStatus.services,
+    ],
+  };
 }
 
 export async function rescanPhotosLogic(userId: number, force: boolean): Promise<{ queued: number }> {
