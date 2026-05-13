@@ -135,6 +135,22 @@ const albumPhotosAsPhoto = computed<Photo[]>(() => album.value ? asPhotos(album.
 // The filter state is persisted locally per share token so the viewer's
 // choice survives page reloads.
 const FILTER_STORAGE_KEY = computed(() => `sharedAlbumFilter:${shareToken.value}`)
+const BANNER_DISMISSED_KEY = computed(() => `sharedAlbumGuestBannerDismissed:${shareToken.value}`)
+
+// Persist the dismissed-banner state per share token via localStorage
+// (works for anonymous visitors too — no account needed). The header's
+// compact Anmelden/Account button stays visible regardless, so the
+// viewer never loses the call-to-action.
+const bannerDismissed = ref<boolean>(false)
+try {
+  bannerDismissed.value = localStorage.getItem(BANNER_DISMISSED_KEY.value) === '1'
+} catch {
+  /* private mode / quota — fine to start with banner visible */
+}
+function dismissGuestBanner() {
+  bannerDismissed.value = true
+  try { localStorage.setItem(BANNER_DISMISSED_KEY.value, '1') } catch { /* ignore */ }
+}
 
 function loadPersistedFilter(): PhotoFilter | null {
   if (!shareToken.value) return null
@@ -412,7 +428,7 @@ onUnmounted(() => {
            overlay: "Anmelden" for anonymous visitors, a user icon
            opening the account dialog for registered guests. -->
       <GuestStatusBanner
-        v-if="!isMapView"
+        v-if="!isMapView && !bannerDismissed"
         :guest="guestSession.guest.value"
         :loading="guestSession.loading.value"
         :togglingNotify="guestSession.togglingNotify.value"
@@ -424,6 +440,7 @@ onUnmounted(() => {
         @logout="handleLogout"
         @toggle-notify="(v) => guestSession.toggleNotifyOptIn(v)"
         @toggle-push="handleTogglePush"
+        @dismiss="dismissGuestBanner"
       />
 
       <div v-if="!isMapView" class="shared-header">
@@ -457,6 +474,36 @@ onUnmounted(() => {
             <span>Karte</span>
           </button>
         </div>
+
+        <!-- Always-visible Anmelden / Account button. Mirrors the
+             guest banner CTA so the call-to-action stays reachable
+             even after the user dismissed the banner. Icon-only —
+             matches the dense look of the view-mode switch. -->
+        <button
+          type="button"
+          class="shared-header-account-btn"
+          :class="{ 'shared-header-account-btn--warn': guestSession.guest.value && !guestSession.isVerified.value }"
+          :aria-label="guestSession.guest.value
+            ? (guestSession.isVerified.value
+                ? `Konto von ${guestSession.guest.value.display_name}`
+                : 'E-Mail bestätigen')
+            : 'Anmelden'"
+          :title="guestSession.guest.value
+            ? (guestSession.isVerified.value
+                ? `Konto von ${guestSession.guest.value.display_name}`
+                : 'E-Mail bestätigen')
+            : 'Anmelden'"
+          @click="guestSession.guest.value ? openAccountDialog() : openRegisterDialog()"
+        >
+          <i
+            :class="!guestSession.guest.value
+              ? 'pi pi-sign-in'
+              : guestSession.isVerified.value
+                ? 'pi pi-user'
+                : 'pi pi-exclamation-circle'"
+            aria-hidden="true"
+          />
+        </button>
       </div>
 
       <!-- Map mode -->
@@ -728,12 +775,14 @@ onUnmounted(() => {
 }
 
 .shared-header .description {
-  /* Wraps to its own line; muted and compact. */
   color: var(--p-text-muted-color);
   margin: 0;
   font-size: 0.8rem;
-  flex-basis: 100%;
-  order: 3;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   line-height: 1.3;
 }
 
@@ -782,6 +831,45 @@ onUnmounted(() => {
 .shared-view-mode-btn.is-active {
   background: var(--p-primary-color);
   color: var(--p-primary-contrast-color);
+}
+
+/* Compact Anmelden / Account icon button to the right of the
+   view-mode switch. Stays visible even after the user dismissed the
+   guest banner — primary call-to-action that mustn't disappear. */
+.shared-header-account-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 50%;
+  background: var(--p-content-background, #fff);
+  color: var(--p-primary-color);
+  cursor: pointer;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.shared-header-account-btn:hover,
+.shared-header-account-btn:focus-visible {
+  background: var(--p-primary-color);
+  color: var(--p-primary-contrast-color);
+  border-color: var(--p-primary-color);
+  outline: none;
+}
+
+.shared-header-account-btn--warn {
+  color: var(--p-amber-500);
+  border-color: var(--p-amber-500);
+}
+.shared-header-account-btn--warn:hover,
+.shared-header-account-btn--warn:focus-visible {
+  background: var(--p-amber-500);
+  color: var(--p-amber-50, #fff);
+  border-color: var(--p-amber-500);
 }
 
 .photo-grid-scroll {
