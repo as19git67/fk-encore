@@ -827,13 +827,13 @@ export async function runFetchAccounts(
   const seenKeys = new Set<string>();
   const dedupedAccounts: RawBankAccount[] = [];
   for (const account of accounts) {
-    const key = `${account.accountNumber}:${account.accountType ?? ""}`;
+    const eKind = effectiveAccountKind(client, account);
+    const key = `${account.accountNumber}:${eKind}`;
     if (seenKeys.has(key)) {
       console.log(
         `[fints] skipping duplicate bank-side account ${account.accountNumber} ` +
           `(subAccountId=${account.subAccountId ?? "<none>"}, ` +
-          `type=${account.accountType ?? "<none>"}) — ` +
-          `same number+type already queued`,
+          `effectiveKind=${eKind}) — same number+kind already queued`,
       );
       continue;
     }
@@ -918,13 +918,7 @@ async function fetchOneAccount(
   sleep: (ms: number) => Promise<void>,
   opts: { fetch: boolean; from?: Date } = { fetch: true },
 ): Promise<FetchOneResult> {
-  const canGetCC = typeof client.canGetCreditCardStatements === "function" &&
-    client.canGetCreditCardStatements(account.accountNumber);
-
-  let accountKind = mapAccountKind(account.accountType);
-  if (accountKind === "sonstige" && canGetCC) {
-    accountKind = "kreditkarte";
-  }
+  let accountKind = effectiveAccountKind(client, account);
 
   const currency = account.currency ?? "EUR";
   const label = buildAccountLabel(account, accountKind);
@@ -964,8 +958,11 @@ async function fetchOneAccount(
   // kreditkarte accounts when the bank supports it. This returns
   // CreditCardStatement objects which carry original-currency fields
   // and are structured differently from MT940/CAMT statements.
-  console.log(`[fints] account ${account.accountNumber}: type=${account.accountType}, kind=${accountKind}`);
+  console.log(`[fints] account ${account.accountNumber}: type=${account.accountType}, sub=${account.subAccountId ?? "-"}, kind=${accountKind}`);
   const isCreditCard = accountKind === "kreditkarte";
+  const canGetCC = isCreditCard &&
+    typeof client.canGetCreditCardStatements === "function" &&
+    client.canGetCreditCardStatements(account.accountNumber);
 
   const useCreditCardPath = isCreditCard && canGetCC;
 
@@ -1281,7 +1278,7 @@ export async function resumeFetchAfterTan(
     };
   }
 
-  const accountKind = mapAccountKind(currentAccount.accountType);
+  const accountKind = effectiveAccountKind(client, currentAccount);
   const currency = currentAccount.currency ?? "EUR";
   const snapshot: FintsAccountSnapshot = {
     accountNumber: currentAccount.accountNumber,
@@ -1467,6 +1464,31 @@ function mapAccountKind(accountType: string | undefined): string {
     default:
       return "sonstige";
   }
+}
+
+/**
+ * Compute the effective account kind for a bank-side account. Falls
+ * back to subAccountId-based heuristics when the bank reports all
+ * accounts as "Miscellaneous" (e.g. comdirect, 1822direkt).
+ */
+function effectiveAccountKind(
+  client: FintsClientSurface,
+  account: RawBankAccount,
+): string {
+  let kind = mapAccountKind(account.accountType);
+  if (kind !== "sonstige") return kind;
+
+  const sub = (account.subAccountId ?? "").toLowerCase();
+  if (sub.includes("depot") || sub.includes("wertpapier")) {
+    return "depot";
+  }
+  if (
+    typeof client.canGetCreditCardStatements === "function" &&
+    client.canGetCreditCardStatements(account.accountNumber)
+  ) {
+    return "kreditkarte";
+  }
+  return kind;
 }
 
 /**
