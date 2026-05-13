@@ -197,6 +197,11 @@ function buildQuery(): ListTransactionsQuery {
 }
 
 async function loadTransactions() {
+  if (isDepot.value) {
+    txStore.items = []
+    txStore.total = 0
+    return
+  }
   const m = mode.value
   if (!m) return
   const query = buildQuery() as ListTransactionsQuery & { __empty?: boolean }
@@ -514,7 +519,7 @@ function goBack() {
           <span v-if="headerDate" class="tx-header-date">{{ headerDate }}</span>
         </div>
       </template>
-      <div class="tx-header-actions">
+      <div v-if="!isDepot" class="tx-header-actions">
         <Button
           icon="pi pi-filter"
           severity="secondary"
@@ -722,7 +727,7 @@ function goBack() {
     <div v-if="txStore.loading" class="tx-loading">Lädt …</div>
 
     <div
-      v-else-if="groupedTransactions.length === 0"
+      v-else-if="groupedTransactions.length === 0 && !isDepot"
       class="tx-empty"
     >
       Keine Buchungen vorhanden.
