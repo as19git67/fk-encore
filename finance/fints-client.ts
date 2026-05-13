@@ -809,20 +809,25 @@ export async function runFetchAccounts(
   // in upd.bankAccounts with different subAccountIds (giro + Visa
   // sub-account on the same number). lib-fints' getAccountStatements
   // / getAccountBalance only take the accountNumber, so a second
-  // call would just retrigger the same SCA push for the same data.
-  // Dedupe at this layer.
-  const seenAccountNumbers = new Set<string>();
+  // call for the *same account type* would just retrigger the same
+  // SCA push for the same data. However, a depot (SecuritiesAccount)
+  // sharing a number with a giro (CheckingAccount) uses a completely
+  // different FinTS segment (HKWPD vs HKKAZ), so those must not be
+  // deduped. Key on accountNumber:accountType.
+  const seenKeys = new Set<string>();
   const dedupedAccounts: RawBankAccount[] = [];
   for (const account of accounts) {
-    if (seenAccountNumbers.has(account.accountNumber)) {
+    const key = `${account.accountNumber}:${account.accountType ?? ""}`;
+    if (seenKeys.has(key)) {
       console.log(
         `[fints] skipping duplicate bank-side account ${account.accountNumber} ` +
-          `(subAccountId=${account.subAccountId ?? "<none>"}) — ` +
-          `lib-fints addresses by accountNumber only, no need to re-fetch`,
+          `(subAccountId=${account.subAccountId ?? "<none>"}, ` +
+          `type=${account.accountType ?? "<none>"}) — ` +
+          `same number+type already queued`,
       );
       continue;
     }
-    seenAccountNumbers.add(account.accountNumber);
+    seenKeys.add(key);
     dedupedAccounts.push(account);
   }
 
@@ -844,10 +849,12 @@ export async function runFetchAccounts(
       // Coupled TAN (photoTAN/chipTAN) demanded mid-fetch. Stop the
       // loop, hand the queue + the TAN info back to the caller; the
       // resume path picks up from `account.accountNumber` after the
-      // user submits.
+      // user submits.  Queue entries use "number:type" compound keys
+      // so the resume path can distinguish a giro and a depot that
+      // share the same bank-side account number.
       const remaining = dedupedAccounts
         .slice(i + 1)
-        .map((a) => a.accountNumber);
+        .map((a) => `${a.accountNumber}:${a.accountType ?? ""}`);
       return {
         accounts: snapshots,
         partial: true,
@@ -1396,11 +1403,18 @@ export async function resumeFetchAfterTan(
   // Resume the loop with the queued accounts. Each one is a fresh
   // getAccountStatements call on the same client; if the bank
   // demands TAN again, fetchOneAccount returns pendingTan as before.
+  // Queue entries may be "number:type" compound keys (new) or plain
+  // account numbers (old sessions serialized before this change).
   const snapshots: FintsAccountSnapshot[] = [snapshot];
   let partial = snapshot.errors.length > 0;
   for (let i = 0; i < ctx.remainingAccountNumbers.length; i++) {
-    const acn = ctx.remainingAccountNumbers[i];
-    const acc = allAccounts.find((a) => a.accountNumber === acn);
+    const entry = ctx.remainingAccountNumbers[i];
+    const colonIdx = entry.indexOf(":");
+    const acn = colonIdx >= 0 ? entry.slice(0, colonIdx) : entry;
+    const acType = colonIdx >= 0 ? entry.slice(colonIdx + 1) || undefined : undefined;
+    const acc = allAccounts.find(
+      (a) => a.accountNumber === acn && (acType === undefined || a.accountType === acType),
+    );
     if (!acc) continue;
     const r = await fetchOneAccount(client, acc, sleep, { fetch: true });
     if (r.snapshot.errors.length > 0) partial = true;

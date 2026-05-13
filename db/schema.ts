@@ -1112,12 +1112,10 @@ export const financeAccount = pgTable(
       .defaultNow(),
   },
   (table) => [
-    // Only one fk-encore account per (bankcontact, fints_account_number)
-    // pair; NULLs don't collide under Postgres' default unique semantics,
-    // so many manual accounts (both columns NULL) coexist fine.
     uniqueIndex("finance_account_unique_bank_link").on(
       table.bankcontact_id,
       table.fints_account_number,
+      table.type_id,
     ),
   ],
 );

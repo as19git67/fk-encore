@@ -35,6 +35,7 @@ import {
   financeAccount,
   financeAccountBalance,
   financeAccountHolding,
+  financeAccountType,
   financeTransaction,
 } from "../db/schema";
 import type { FetchResult, FintsHoldingData, FintsTransactionData } from "./types";
@@ -99,17 +100,24 @@ export async function persistFetchResult(
       stats.errors.push(`account ${snapshot.accountNumber}: ${e}`);
     }
 
-    // Look up the linked finance_account, if any.
+    // Look up the linked finance_account, if any. We match on
+    // accountKind too because some banks reuse the same account number
+    // for giro + depot — without the type filter the wrong row wins.
     const [matched] = await db
       .select({
         id: financeAccount.id,
         closed_at: financeAccount.closed_at,
       })
       .from(financeAccount)
+      .innerJoin(
+        financeAccountType,
+        eq(financeAccount.type_id, financeAccountType.id),
+      )
       .where(
         and(
           eq(financeAccount.bankcontact_id, bankcontactId),
           eq(financeAccount.fints_account_number, snapshot.accountNumber),
+          eq(financeAccountType.kind, snapshot.accountKind),
         ),
       )
       .limit(1);

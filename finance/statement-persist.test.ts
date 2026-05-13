@@ -59,10 +59,13 @@ async function insertLinkedAccount(opts: {
   bankcontactId: number;
   fintsAccountNumber: string;
   label?: string;
+  kind?: string;
 }): Promise<number> {
+  const kind = opts.kind ?? "giro";
   const [type] = await db
     .select({ id: financeAccountType.id })
     .from(financeAccountType)
+    .where(eq(financeAccountType.kind, kind))
     .limit(1);
   const [row] = await db
     .insert(financeAccount)
@@ -406,6 +409,7 @@ describe("persistFetchResult — holdings persistence", () => {
     const accountId = await insertLinkedAccount({
       bankcontactId: bcId,
       fintsAccountNumber: "DEPOT-1",
+      kind: "depot",
     });
 
     const stats = await persistFetchResult(
@@ -441,7 +445,7 @@ describe("persistFetchResult — holdings persistence", () => {
 
   it("upserts idempotently — second sync on same day does not duplicate", async () => {
     const bcId = await insertBankcontact();
-    await insertLinkedAccount({ bankcontactId: bcId, fintsAccountNumber: "DEPOT-1" });
+    await insertLinkedAccount({ bankcontactId: bcId, fintsAccountNumber: "DEPOT-1", kind: "depot" });
 
     const snapshot = {
       accountNumber: "DEPOT-1",
@@ -473,6 +477,7 @@ describe("persistFetchResult — holdings persistence", () => {
     const accountId = await insertLinkedAccount({
       bankcontactId: bcId,
       fintsAccountNumber: "DEPOT-1",
+      kind: "depot",
     });
 
     const base = {
@@ -509,6 +514,7 @@ describe("persistFetchResult — holdings persistence", () => {
     const accountId = await insertLinkedAccount({
       bankcontactId: bcId,
       fintsAccountNumber: "DEPOT-1",
+      kind: "depot",
     });
 
     const base = {
@@ -542,7 +548,7 @@ describe("persistFetchResult — holdings persistence", () => {
 
   it("does not write holdings when snapshot has no balance", async () => {
     const bcId = await insertBankcontact();
-    await insertLinkedAccount({ bankcontactId: bcId, fintsAccountNumber: "DEPOT-1" });
+    await insertLinkedAccount({ bankcontactId: bcId, fintsAccountNumber: "DEPOT-1", kind: "depot" });
 
     const stats = await persistFetchResult(
       bcId,
@@ -564,5 +570,75 @@ describe("persistFetchResult — holdings persistence", () => {
     expect(stats.holdings_written).toBe(0);
     const rows = await db.select().from(financeAccountHolding);
     expect(rows).toHaveLength(0);
+  });
+
+  it("matches giro and depot separately when they share the same fints_account_number", async () => {
+    const bcId = await insertBankcontact();
+    const giroId = await insertLinkedAccount({
+      bankcontactId: bcId,
+      fintsAccountNumber: "1234567",
+      kind: "giro",
+      label: "Girokonto",
+    });
+    const depotId = await insertLinkedAccount({
+      bankcontactId: bcId,
+      fintsAccountNumber: "1234567",
+      kind: "depot",
+      label: "Depot",
+    });
+
+    const stats = await persistFetchResult(
+      bcId,
+      result([
+        {
+          accountNumber: "1234567",
+          iban: "DE89370400440532013000",
+          accountKind: "giro",
+          currency: "EUR",
+          label: "Girokonto",
+          balance: { asOf: "2026-05-10", amount: "1500.00", currency: "EUR" },
+          transactions: [tx()],
+          holdings: [],
+          errors: [],
+        },
+        {
+          accountNumber: "1234567",
+          iban: null,
+          accountKind: "depot",
+          currency: "EUR",
+          label: "Depot",
+          balance: { asOf: "2026-05-10", amount: "25000.00", currency: "EUR" },
+          transactions: [],
+          holdings: [holding({ isin: "DE000A1EWWW0", name: "ADIDAS", value: "25000.00" })],
+          errors: [],
+        },
+      ]),
+    );
+
+    expect(stats.accounts_matched).toBe(2);
+    expect(stats.accounts_unknown).toBe(0);
+    expect(stats.transactions_inserted).toBe(1);
+    expect(stats.holdings_written).toBe(1);
+
+    const giroBalance = await db
+      .select()
+      .from(financeAccountBalance)
+      .where(eq(financeAccountBalance.account_id, giroId));
+    expect(giroBalance).toHaveLength(1);
+    expect(giroBalance[0].balance).toBe("1500.00");
+
+    const depotBalance = await db
+      .select()
+      .from(financeAccountBalance)
+      .where(eq(financeAccountBalance.account_id, depotId));
+    expect(depotBalance).toHaveLength(1);
+    expect(depotBalance[0].balance).toBe("25000.00");
+
+    const holdings = await db
+      .select()
+      .from(financeAccountHolding)
+      .where(eq(financeAccountHolding.account_id, depotId));
+    expect(holdings).toHaveLength(1);
+    expect(holdings[0].isin).toBe("DE000A1EWWW0");
   });
 });
