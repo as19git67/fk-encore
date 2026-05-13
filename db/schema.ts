@@ -793,6 +793,53 @@ export const taxSectionHintOverrides = pgTable("tax_section_hint_overrides", {
 // 0025 and accessed only through raw queries — drizzle-orm has no native
 // vector column type.
 
+// ========== POI Detection (Epic #383) ==========
+//
+// `osm_region_imports` tracks per-region Geofabrik extracts imported into
+// dockerised Nominatim + Overpass instances managed by the osm-admin
+// service. The bbox columns are used by the request router to map a
+// photo's GPS coordinates to the right region container.
+//
+// Status values (kept as TEXT, not an enum, so the lifecycle can evolve
+// without migrations):
+//   pending_approval | importing | ready_running | ready_stopped
+//   | blocked_disk   | failed
+
+export const osmRegionImports = pgTable("osm_region_imports", {
+  slug: text("slug").primaryKey(),
+  geofabrik_url: text("geofabrik_url").notNull(),
+  pbf_size_mb: integer("pbf_size_mb"),
+  postgres_db: text("postgres_db").notNull(),
+  bbox_min_lat: doublePrecision("bbox_min_lat").notNull(),
+  bbox_min_lon: doublePrecision("bbox_min_lon").notNull(),
+  bbox_max_lat: doublePrecision("bbox_max_lat").notNull(),
+  bbox_max_lon: doublePrecision("bbox_max_lon").notNull(),
+  status: text("status").notNull().default("pending_approval"),
+  last_used_at: timestamp("last_used_at", { withTimezone: true, mode: "string" }),
+  imported_at: timestamp("imported_at", { withTimezone: true, mode: "string" }),
+  replication_seq: text("replication_seq"),
+  last_error: text("last_error"),
+  created_at: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+  updated_at: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+});
+
+// `poi_references` is the cached pool of POI metadata + DINOv2 reference
+// embeddings used for image matching against user photos. The
+// `embedding vector(768)` column and its HNSW index live in raw SQL
+// (migration 0084) — drizzle has no native vector type, same approach as
+// `document_embeddings`.
+
+export const poiReferences = pgTable("poi_references", {
+  qid: text("qid").primaryKey(),
+  name: text("name").notNull(),
+  name_de: text("name_de"),
+  wikipedia_url: text("wikipedia_url"),
+  commons_image_url: text("commons_image_url"),
+  embedded_at: timestamp("embedded_at", { withTimezone: true, mode: "string" }),
+  created_at: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+  updated_at: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+});
+
 // ========== Rueckblicke (Recaps) ==========
 
 export const recapKindEnum = pgEnum("recap_kind", [
