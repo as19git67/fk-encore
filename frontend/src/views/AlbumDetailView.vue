@@ -1226,6 +1226,7 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
             size="small"
             :severity="activeCount > 0 ? 'primary' : 'secondary'"
             :outlined="activeCount === 0"
+            class="header__filter-btn"
             @click="openFilterMenu"
           />
           <Button
@@ -1234,8 +1235,26 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
             size="small"
             :severity="isSortDefault ? 'secondary' : 'primary'"
             :outlined="isSortDefault"
+            class="header__filter-btn"
             @click="openSortMenu"
           />
+        </div>
+
+        <!-- Natural-language search: global search, results filtered to this album -->
+        <div v-if="albumPhotos.length > 0" class="album-search">
+          <NaturalSearchBar
+            v-model="searchQuery"
+            :loading="searchLoading"
+            :result-count="searchResultCountInAlbum"
+            :has-parsed-chips="hasParsedChips"
+            :location-chip="locationChip"
+            :date-chip="dateChip"
+            :semantic-chip="semanticChip"
+            placeholder="Fotos in diesem Album suchen…"
+            @search="executeSearch"
+            @clear="clearSearch"
+          />
+          <Message v-if="searchError" severity="error" :closable="false">{{ searchError }}</Message>
         </div>
 
         <!-- 6. Action buttons -->
@@ -1267,23 +1286,6 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
           <Button v-if="isOwner" icon="pi pi-trash" size="small" text severity="danger" v-tooltip="'Album löschen'" @click="showDeleteDialog = true" />
           <Button v-if="!isOwner" icon="pi pi-sign-out" size="small" text severity="danger" v-tooltip="'Freigabe verlassen'" @click="showLeaveDialog = true" />
         </div>
-      </div>
-
-      <!-- Natural-language search: global search, results filtered to this album -->
-      <div v-if="albumPhotos.length > 0" class="album-search">
-        <NaturalSearchBar
-          v-model="searchQuery"
-          :loading="searchLoading"
-          :result-count="searchResultCountInAlbum"
-          :has-parsed-chips="hasParsedChips"
-          :location-chip="locationChip"
-          :date-chip="dateChip"
-          :semantic-chip="semanticChip"
-          placeholder="Fotos in diesem Album suchen…"
-          @search="executeSearch"
-          @clear="clearSearch"
-        />
-        <Message v-if="searchError" severity="error" :closable="false">{{ searchError }}</Message>
       </div>
 
       <div v-if="activeCount > 0 || !isSortDefault" class="chip-row">
@@ -1745,7 +1747,6 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
 
 /* ── Album-scoped natural search bar (inside subheader) ──────────────────── */
 .album-search {
-  padding: 0 1em 0.5em;
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
@@ -1850,6 +1851,12 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
   /* Compact header on mobile */
   .header { padding: 0.35em 0.65em; gap: 0.25em 0.5em; }
   .header__title { font-size: 1.1em; }
+
+  /* Icon-only filter & sort buttons on mobile — labels would push the
+     header onto a second row on phones. The aria-label / tooltip
+     remain so the icons are still discoverable. */
+  .header__filter-btn :deep(.p-button-label) { display: none; }
+  .header__filter-btn :deep(.p-button-icon) { margin-right: 0; }
 }
 
 /* ── Delete / settings dialog ───────────────────────────────────────────── */

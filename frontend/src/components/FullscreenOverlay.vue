@@ -633,7 +633,7 @@ function locationLabel(photo: Photo) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-inline: 0.5em;
+  padding-inline: 2rem;
   background: var(--p-dialog-background);
   z-index: 10;
 }
@@ -743,25 +743,21 @@ function locationLabel(photo: Photo) {
 /* ── Prev/Next nav buttons ──────────────────────────────────────────────── */
 .fs-nav {
   position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
+  bottom: 0;
   color: white !important;
   background: rgba(0,0,0,0.4) !important;
   z-index: 10;
 }
 
-/* Respect any device safe-area inset (notches, rounded corners) so the
-   nav buttons stay reachable in every orientation. The `max()` keeps
-   the visual minimum at 1 rem even on flat screens. */
-.fs-nav-left { left: max(1rem, env(safe-area-inset-left, 0px)); }
-.fs-nav-right { right: max(1rem, env(safe-area-inset-right, 0px)); }
+.fs-nav-left { left: 1rem; }
+.fs-nav-right { right: 1rem; }
 
 /* Photo counter pill on the centre-line between the nav buttons. */
 .fs-nav-counter {
   position: absolute;
-  top: 50%;
+  bottom: 0.6rem;
   left: 50%;
-  transform: translate(-50%, -50%);
+  transform: translateX(-50%);
   color: #fff;
   background: rgba(0, 0, 0, 0.5);
   border-radius: 999px;
@@ -774,31 +770,15 @@ function locationLabel(photo: Photo) {
   backdrop-filter: blur(6px);
 }
 
-/* Short-and-wide viewports (typical phone landscape) put the buttons
-   on top of the screen edges where the OS gesture area lives, making
-   them basically untappable. Pull them noticeably inwards. */
-@media (orientation: landscape) and (max-height: 600px) {
-  .fs-nav-left  { left:  max(2.5rem, env(safe-area-inset-left,  0px) + 1.25rem); }
-  .fs-nav-right { right: max(2.5rem, env(safe-area-inset-right, 0px) + 1.25rem); }
-}
-
 @media (max-width: 768px) {
   .fs-nav {
     /* Auf Mobile immer sichtbar, größere Tappfläche */
     opacity: 1;
-    top: auto;
-    bottom: 4rem;
-    transform: none;
     background: rgba(0, 0, 0, 0.5) !important;
     padding: 0.75rem !important;
   }
-  .fs-nav-left  { left:  max(0.5rem, env(safe-area-inset-left,  0px)); }
-  .fs-nav-right { right: max(0.5rem, env(safe-area-inset-right, 0px)); }
-  .fs-nav-counter {
-    top: auto;
-    bottom: 4.6rem;
-    transform: translateX(-50%);
-  }
+  .fs-nav-left { left: 0.5rem; }
+  .fs-nav-right { right: 0.5rem; }
 
   /* Datum in TopBar kürzer */
   .fs-date-bar { font-size: 0.8em; }

@@ -295,13 +295,34 @@ function handleStopTap(stop: Stop) {
  * neighbour individually is not enough: neighbours can merge among
  * themselves first, and the resulting centroid can sit close enough to
  * pull the target into the merged group too.
+ *
+ * IMPORTANT: this must match `mergeOverlappingPins` exactly. That
+ * algorithm weights the merged centroid by *photo count*, not by
+ * "number of merged stops". When the day has stops with very
+ * different photo counts, equal-weight averaging here would predict
+ * an unmerged target at a zoom where the renderer (using
+ * count-weighting) actually still merges it.
  */
 function isTargetSingleAtZoom(target: Stop, others: Stop[], zoom: number): boolean {
   if (!map) return true
-  interface W { lat: number; lng: number; weight: number; hasTarget: boolean }
+  interface W {
+    lat: number
+    lng: number
+    /** Photo-count weight for centroid averaging (mirrors the renderer). */
+    weight: number
+    /** Stops folded into this group so far. Target is "alone" iff this is 1. */
+    members: number
+    hasTarget: boolean
+  }
   const work: W[] = [
-    { lat: target.lat, lng: target.lng, weight: 1, hasTarget: true },
-    ...others.map(o => ({ lat: o.lat, lng: o.lng, weight: 1, hasTarget: false })),
+    { lat: target.lat, lng: target.lng, weight: target.photos.length, members: 1, hasTarget: true },
+    ...others.map(o => ({
+      lat: o.lat,
+      lng: o.lng,
+      weight: o.photos.length,
+      members: 1,
+      hasTarget: false,
+    } as W)),
   ]
   let changed = true
   while (changed && work.length > 1) {
@@ -328,31 +349,47 @@ function isTargetSingleAtZoom(target: Stop, others: Stop[], zoom: number): boole
       a.lat = (a.lat * a.weight + b.lat * b.weight) / total
       a.lng = (a.lng * a.weight + b.lng * b.weight) / total
       a.weight = total
+      a.members += b.members
       a.hasTarget = a.hasTarget || b.hasTarget
       work.splice(bestJ, 1)
       changed = true
     }
   }
   const targetGroup = work.find(w => w.hasTarget)
-  return targetGroup ? targetGroup.weight === 1 : true
+  return targetGroup ? targetGroup.members === 1 : true
 }
 
 /**
  * Find the smallest zoom level at which the target stop ends up as its
- * own pin once the merger has run. Used when the user keyboard-
- * activates a card to "drill in" to that specific cluster.
+ * own pin once the merger has run, then snap the map to it. Used when
+ * the user keyboard-activates a card to "drill in" to that specific
+ * cluster. The setView is instantaneous (animate:false) and we force
+ * an immediate renderContent: a default smooth animation would leave
+ * the still-merged pins on screen for ~250 ms and the user reads that
+ * as "zoom didn't unmerge".
  */
 function zoomToUnmergeStop(stop: Stop) {
   if (!map) return
   const others = (stopsByDay.value.get(stop.day) ?? []).filter(s => s.id !== stop.id)
   const maxZoom = 19
-  let z = map.getZoom()
+  // Round up the current zoom: if the map is at fractional zoom 13.7,
+  // start the search at integer 14 — the simulator and the renderer
+  // both apply the merger at the projected pixel coords for that
+  // integer step, so probing fractional zooms in between wastes a
+  // round-trip when zoomSnap is the default 1.
+  let z = Math.ceil(map.getZoom())
   if (others.length > 0) {
     while (z < maxZoom && !isTargetSingleAtZoom(stop, others, z)) {
       z++
     }
   }
-  map.setView([stop.lat, stop.lng], z)
+  map.setView([stop.lat, stop.lng], z, { animate: false })
+  // The zoomend listener also schedules a renderContent, but it can
+  // fire AFTER the user's eye has already registered the still-merged
+  // pre-setView state. Calling renderContent synchronously here makes
+  // the unmerged pin pop into existence in the same frame as the
+  // zoom change.
+  renderContent()
 }
 
 /**
