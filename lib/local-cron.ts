@@ -170,7 +170,10 @@ export async function startLocalCron(): Promise<void> {
   await hydrateFromHooks();
   const now = new Date();
   for (const entry of entries) {
-    if (!entry.timer) armNext(entry, now);
+    // Use last_run_at as reference so the interval is relative to the
+    // previous fire, not the restart time. Without this, frequent restarts
+    // keep pushing the next fire by a full interval and the job never runs.
+    if (!entry.timer) armNext(entry, entry.last_run_at ?? now);
   }
 }
 
