@@ -100,13 +100,17 @@ export async function persistFetchResult(
       stats.errors.push(`account ${snapshot.accountNumber}: ${e}`);
     }
 
-    // Look up the linked finance_account, if any. We match on
-    // accountKind too because some banks reuse the same account number
-    // for giro + depot — without the type filter the wrong row wins.
-    const [matched] = await db
+    // Look up the linked finance_account(s). When multiple accounts
+    // share the same fints_account_number (e.g. giro + depot at many
+    // German banks), we disambiguate by accountKind. When there is only
+    // one candidate we match regardless of kind — this keeps backward
+    // compatibility with accounts whose type was set manually and may
+    // not match the bank's reported accountType exactly.
+    const candidates = await db
       .select({
         id: financeAccount.id,
         closed_at: financeAccount.closed_at,
+        kind: financeAccountType.kind,
       })
       .from(financeAccount)
       .innerJoin(
@@ -117,10 +121,12 @@ export async function persistFetchResult(
         and(
           eq(financeAccount.bankcontact_id, bankcontactId),
           eq(financeAccount.fints_account_number, snapshot.accountNumber),
-          eq(financeAccountType.kind, snapshot.accountKind),
         ),
-      )
-      .limit(1);
+      );
+
+    const matched =
+      candidates.find((c) => c.kind === snapshot.accountKind) ??
+      (candidates.length === 1 ? candidates[0] : undefined);
 
     if (matched?.closed_at) {
       // Closed accounts stay linked so the UI can still show them, but

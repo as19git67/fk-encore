@@ -814,6 +814,16 @@ export async function runFetchAccounts(
   // sharing a number with a giro (CheckingAccount) uses a completely
   // different FinTS segment (HKWPD vs HKKAZ), so those must not be
   // deduped. Key on accountNumber:accountType.
+  console.log(
+    `[fints] bank reported ${accounts.length} account(s): ` +
+      accounts
+        .map(
+          (a) =>
+            `${a.accountNumber}(type=${a.accountType ?? "?"}, ` +
+            `sub=${a.subAccountId ?? "-"})`,
+        )
+        .join(", "),
+  );
   const seenKeys = new Set<string>();
   const dedupedAccounts: RawBankAccount[] = [];
   for (const account of accounts) {
