@@ -1,9 +1,7 @@
 /**
  * Persistent scan queue for external photo libraries.
  *
- * Mirrors the structure of photo_scan_queue so library scans show up in the
- * same "Scan-Queue" status table as the per-photo ML services. One logical
- * job per (library, active state): the partial unique index
+ * One logical job per (library, active state): the partial unique index
  * `uq_active_library_scan` prevents two overlapping jobs for the same
  * library from being queued.
  */

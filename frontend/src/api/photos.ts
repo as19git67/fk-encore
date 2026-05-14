@@ -370,7 +370,6 @@ export function assignFaceToPerson(faceId: number, personId: number) {
 
 export interface ScanQueueServiceStatus {
   service:
-    | 'library_scan'
     | 'embedding'
     | 'face_detection'
     | 'face_assignment'

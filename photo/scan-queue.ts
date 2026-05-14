@@ -18,7 +18,7 @@ import { notifyScanQueueChanged } from "./scan-queue-events";
 export type ScanService = "embedding" | "face_detection" | "face_assignment" | "landmark" | "quality" | "geocoding" | "thumbnail";
 export type ScanStatus = "pending" | "processing" | "failed" | "done";
 
-export type QueueServiceId = ScanService | "library_scan";
+export type QueueServiceId = ScanService;
 
 /** Services that run once per photo (no user_id in queue). */
 const GLOBAL_SERVICES: ReadonlySet<ScanService> = new Set([
