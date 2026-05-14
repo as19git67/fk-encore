@@ -659,11 +659,11 @@ export class ScanCancelledError extends Error {
 }
 
 /**
- * Minimum gap between live progress flushes to library_scan_queue. Two
- * writes per second is enough for a smooth UI counter and well below the
- * realtime bus's own 500ms debounce window.
+ * Minimum gap between live progress flushes to library_scan_queue.
+ * 10 s keeps DB and WebSocket traffic low while still giving the UI
+ * a visible counter update during longer scans.
  */
-const PROGRESS_FLUSH_MS = 500;
+const PROGRESS_FLUSH_MS = 10_000;
 
 export async function scanLibrary(
   libraryId: number,

@@ -370,7 +370,12 @@ onMounted(loadData)
             läuft<template v-if="data.active_scan.scanned"> · {{ data.active_scan.scanned }}</template>
           </span>
           <Tag v-else-if="data.active_scan.status === 'pending'" value="wartet" severity="info" />
-          <Tag v-else-if="data.active_scan.status === 'failed'" value="Fehler" severity="danger" v-tooltip="data.active_scan.error_msg || ''" />
+          <span v-else-if="data.active_scan.status === 'failed'" class="scan-error">
+            <Tag value="Fehler" severity="danger" />
+            <span v-if="data.active_scan.error_msg" class="scan-error-msg" v-tooltip.top="data.active_scan.error_msg">
+              {{ data.active_scan.error_msg }}
+            </span>
+          </span>
         </template>
       </Column>
       <Column header="Aktionen" style="width: 14rem">
@@ -840,5 +845,22 @@ onMounted(loadData)
 
 .scan-running :deep(.p-progressspinner-circle) {
   stroke: var(--p-primary-color);
+}
+
+.scan-error {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.scan-error-msg {
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 14rem;
+  cursor: default;
 }
 </style>
