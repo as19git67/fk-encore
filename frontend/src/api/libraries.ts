@@ -4,6 +4,7 @@ export type LibraryImportMode = 'link' | 'move'
 
 export interface ActiveLibraryScan {
   status: 'pending' | 'processing' | 'failed'
+  reconcile: boolean
   scanned: number | null
   error_msg: string | null
 }

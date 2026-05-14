@@ -24,6 +24,7 @@ export interface LibraryScanQueueStatus {
 
 export interface ActiveLibraryScan {
   status: "pending" | "processing" | "failed";
+  reconcile: boolean;
   scanned: number | null;
   error_msg: string | null;
 }
@@ -226,11 +227,12 @@ export async function getActiveScanPerLibrary(): Promise<Map<number, ActiveLibra
   const rows = await db.execute<{
     library_id: number;
     status: string;
+    reconcile: boolean;
     scanned: number | null;
     error_msg: string | null;
   }>(sql`
     SELECT DISTINCT ON (library_id)
-      library_id, status, scanned, error_msg
+      library_id, status, reconcile, scanned, error_msg
     FROM library_scan_queue
     WHERE status IN ('pending', 'processing', 'failed')
     ORDER BY library_id,
@@ -245,6 +247,7 @@ export async function getActiveScanPerLibrary(): Promise<Map<number, ActiveLibra
   for (const row of rows.rows) {
     map.set(row.library_id, {
       status: row.status as "pending" | "processing" | "failed",
+      reconcile: row.reconcile,
       scanned: row.scanned,
       error_msg: row.error_msg,
     });

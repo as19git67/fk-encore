@@ -86,6 +86,14 @@ const pathSegments = computed<{ label: string; sub: string }[]>(() => {
 const showDeleteConfirm = ref(false)
 const libraryToDelete = ref<PhotoLibrary | null>(null)
 
+// Error detail popup
+const showErrorDialog = ref(false)
+const errorDialogMsg = ref('')
+function openErrorDialog(msg: string) {
+  errorDialogMsg.value = msg
+  showErrorDialog.value = true
+}
+
 // Per-row busy flags so users see immediate feedback. A Set lets multiple
 // libraries scan/reconcile concurrently without their spinners racing each
 // other like a single shared ref would.
@@ -367,14 +375,19 @@ onMounted(loadData)
           <span v-if="!data.active_scan" class="muted">—</span>
           <span v-else-if="data.active_scan.status === 'processing'" class="scan-running">
             <ProgressSpinner style="width: 1rem; height: 1rem" stroke-width="6" />
-            läuft<template v-if="data.active_scan.scanned"> · {{ data.active_scan.scanned }}</template>
+            {{ data.active_scan.reconcile ? 'Abgleich' : 'Scan' }} läuft<template v-if="data.active_scan.scanned"> · {{ data.active_scan.scanned }}</template>
           </span>
-          <Tag v-else-if="data.active_scan.status === 'pending'" value="wartet" severity="info" />
+          <span v-else-if="data.active_scan.status === 'pending'" class="scan-running">
+            <Tag :value="data.active_scan.reconcile ? 'Abgleich wartet' : 'Scan wartet'" severity="info" />
+          </span>
           <span v-else-if="data.active_scan.status === 'failed'" class="scan-error">
-            <Tag value="Fehler" severity="danger" />
-            <span v-if="data.active_scan.error_msg" class="scan-error-msg" v-tooltip.top="data.active_scan.error_msg">
-              {{ data.active_scan.error_msg }}
-            </span>
+            <Tag
+              :value="data.active_scan.reconcile ? 'Abgleich Fehler' : 'Scan Fehler'"
+              severity="danger"
+              :class="data.active_scan.error_msg ? 'scan-error-clickable' : ''"
+              v-tooltip="data.active_scan.error_msg ? 'Klicken für Details' : undefined"
+              @click="data.active_scan.error_msg && openErrorDialog(data.active_scan.error_msg)"
+            />
           </span>
         </template>
       </Column>
@@ -606,6 +619,19 @@ onMounted(loadData)
       <template #footer>
         <Button label="Abbrechen" severity="secondary" @click="showDeleteConfirm = false" />
         <Button label="Entfernen" severity="danger" @click="handleDelete" />
+      </template>
+    </Dialog>
+
+    <!-- Scan Error Detail Dialog -->
+    <Dialog
+      v-model:visible="showErrorDialog"
+      header="Fehlerdetails"
+      :modal="true"
+      :style="{ width: '520px' }"
+    >
+      <pre class="error-detail">{{ errorDialogMsg }}</pre>
+      <template #footer>
+        <Button label="Schließen" severity="secondary" @click="showErrorDialog = false" />
       </template>
     </Dialog>
   </div>
@@ -848,19 +874,26 @@ onMounted(loadData)
 }
 
 .scan-error {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  min-width: 0;
 }
 
-.scan-error-msg {
-  font-size: 0.8rem;
-  color: var(--p-text-muted-color);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 14rem;
-  cursor: default;
+.scan-error-clickable {
+  cursor: pointer;
+}
+
+.error-detail {
+  margin: 0;
+  font-family: monospace;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--p-text-color);
+  background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 4px;
+  padding: 0.75rem;
+  max-height: 60vh;
+  overflow-y: auto;
 }
 </style>
