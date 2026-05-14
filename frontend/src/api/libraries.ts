@@ -2,6 +2,16 @@ import { apiFetch } from './client'
 
 export type LibraryImportMode = 'link' | 'move'
 
+export interface ActiveLibraryScan {
+  status: 'pending' | 'processing' | 'failed'
+  reconcile: boolean
+  total: number | null
+  scanned: number | null
+  imported: number | null
+  errors: number | null
+  error_msg: string | null
+}
+
 export interface PhotoLibrary {
   id: number
   user_id: number
@@ -14,6 +24,7 @@ export interface PhotoLibrary {
   favorite_rating_threshold: number
   created_at: string | null
   last_scan_at: string | null
+  active_scan: ActiveLibraryScan | null
 }
 
 export interface CreateLibraryRequest {
