@@ -108,8 +108,8 @@ function markBusy(id: number, busy: boolean) {
   busyIds.value = next
 }
 
-async function loadData() {
-  loading.value = true
+async function loadData(silent = false) {
+  if (!silent) loading.value = true
   error.value = ''
   try {
     const res = await listLibraries()
@@ -288,7 +288,7 @@ function modeLabel(mode: LibraryImportMode): string {
   return mode === 'link' ? 'Verlinken' : 'Verschieben'
 }
 
-useRealtimeEvent('scan-queue', 'state.changed', () => { loadData() })
+useRealtimeEvent('scan-queue', 'state.changed', () => { loadData(true) })
 
 onMounted(loadData)
 </script>
