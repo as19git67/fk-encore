@@ -26,6 +26,8 @@ export interface ActiveLibraryScan {
   status: "pending" | "processing" | "failed";
   reconcile: boolean;
   scanned: number | null;
+  imported: number | null;
+  errors: number | null;
   error_msg: string | null;
 }
 
@@ -229,10 +231,12 @@ export async function getActiveScanPerLibrary(): Promise<Map<number, ActiveLibra
     status: string;
     reconcile: boolean;
     scanned: number | null;
+    imported: number | null;
+    errors: number | null;
     error_msg: string | null;
   }>(sql`
     SELECT DISTINCT ON (library_id)
-      library_id, status, reconcile, scanned, error_msg
+      library_id, status, reconcile, scanned, imported, errors, error_msg
     FROM library_scan_queue
     WHERE status IN ('pending', 'processing', 'failed')
     ORDER BY library_id,
@@ -249,6 +253,8 @@ export async function getActiveScanPerLibrary(): Promise<Map<number, ActiveLibra
       status: row.status as "pending" | "processing" | "failed",
       reconcile: row.reconcile,
       scanned: row.scanned,
+      imported: row.imported,
+      errors: row.errors,
       error_msg: row.error_msg,
     });
   }

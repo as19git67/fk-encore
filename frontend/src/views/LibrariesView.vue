@@ -375,7 +375,12 @@ onMounted(loadData)
           <span v-if="!data.active_scan" class="muted">—</span>
           <span v-else-if="data.active_scan.status === 'processing'" class="scan-running">
             <ProgressSpinner style="width: 1rem; height: 1rem" stroke-width="6" />
-            {{ data.active_scan.reconcile ? 'Abgleich' : 'Scan' }} läuft<template v-if="data.active_scan.scanned"> · {{ data.active_scan.scanned }}</template>
+            <span>
+              {{ data.active_scan.reconcile ? 'Abgleich' : 'Scan' }} läuft
+              <template v-if="data.active_scan.scanned">
+                · {{ data.active_scan.imported ?? 0 }} von {{ data.active_scan.scanned }}<template v-if="data.active_scan.errors"> ({{ data.active_scan.errors }} Fehler)</template>
+              </template>
+            </span>
           </span>
           <span v-else-if="data.active_scan.status === 'pending'" class="scan-running">
             <Tag :value="data.active_scan.reconcile ? 'Abgleich wartet' : 'Scan wartet'" severity="info" />

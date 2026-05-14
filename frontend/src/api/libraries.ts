@@ -6,6 +6,8 @@ export interface ActiveLibraryScan {
   status: 'pending' | 'processing' | 'failed'
   reconcile: boolean
   scanned: number | null
+  imported: number | null
+  errors: number | null
   error_msg: string | null
 }
 
