@@ -374,7 +374,7 @@ onMounted(loadData)
         <template #body="{ data }">
           <span v-if="!data.active_scan" class="muted">—</span>
           <span v-else-if="data.active_scan.status === 'processing'" class="scan-running">
-            <ProgressSpinner style="width: 1.25rem; height: 1.25rem" stroke-width="5" />
+            <ProgressSpinner style="width: 1rem; height: 1rem" stroke-width="6" />
             <span v-if="data.active_scan.reconcile">
               Abgleich läuft<template v-if="data.active_scan.scanned"> · {{ data.active_scan.scanned }} geprüft<template v-if="data.active_scan.errors"> ({{ data.active_scan.errors }} Fehler)</template></template>
             </span>
@@ -872,6 +872,10 @@ onMounted(loadData)
   gap: 0.35rem;
   font-size: 0.85rem;
   color: var(--p-text-muted-color);
+}
+
+.scan-running :deep(.p-progressspinner) {
+  flex-shrink: 0;
 }
 
 .scan-running :deep(.p-progressspinner-circle) {
