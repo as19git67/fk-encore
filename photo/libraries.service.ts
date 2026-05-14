@@ -34,7 +34,7 @@ import {
 import { enqueuePhotoScan } from "./scan-queue";
 import { triggerWorkers } from "./scan-worker";
 import { registerScanAbort, unregisterScanAbort } from "./library-scan-control";
-import { updateLibraryScanProgress, getActiveScanPerLibrary, type ActiveLibraryScan } from "./library-scan-queue";
+import { updateLibraryScanProgress, updateLibraryScanTotal, getActiveScanPerLibrary, type ActiveLibraryScan } from "./library-scan-queue";
 
 console.log("[boot] photo/libraries.service.ts: all imports resolved");
 
@@ -687,6 +687,17 @@ export async function scanLibrary(
       skipped_empty: 0,
       errors: 0,
     };
+
+    // Count total files in parallel so the UI can show "x von y". This walk
+    // is intentionally not awaited — the scan starts immediately and the
+    // total is written once counting finishes.
+    if (jobId !== undefined) {
+      (async () => {
+        let total = 0;
+        for await (const _ of walkSupportedFiles(library.path, signal)) total++;
+        if (!signal.aborted) updateLibraryScanTotal(jobId, total).catch(() => {});
+      })().catch(() => {});
+    }
 
     let lastFlushAt = 0;
     let flushInFlight: Promise<void> | null = null;

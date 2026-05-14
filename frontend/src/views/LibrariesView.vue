@@ -376,10 +376,14 @@ onMounted(loadData)
           <span v-else-if="data.active_scan.status === 'processing'" class="scan-running">
             <ProgressSpinner style="width: 1rem; height: 1rem" stroke-width="6" />
             <span v-if="data.active_scan.reconcile">
-              Abgleich läuft<template v-if="data.active_scan.scanned"> · {{ data.active_scan.scanned }} geprüft<template v-if="data.active_scan.errors"> ({{ data.active_scan.errors }} Fehler)</template></template>
+              Abgleich läuft<template v-if="data.active_scan.scanned">
+                · {{ data.active_scan.scanned }}<template v-if="data.active_scan.total"> von {{ data.active_scan.total }}</template> geprüft<template v-if="data.active_scan.errors"> ({{ data.active_scan.errors }} Fehler)</template>
+              </template>
             </span>
             <span v-else>
-              Scan läuft<template v-if="data.active_scan.scanned"> · {{ data.active_scan.scanned }} gescannt<template v-if="data.active_scan.imported"> ({{ data.active_scan.imported }} neu<template v-if="data.active_scan.errors">, {{ data.active_scan.errors }} Fehler</template>)</template><template v-else-if="data.active_scan.errors"> ({{ data.active_scan.errors }} Fehler)</template></template>
+              Scan läuft<template v-if="data.active_scan.scanned">
+                · {{ data.active_scan.scanned }}<template v-if="data.active_scan.total"> von {{ data.active_scan.total }}</template> gescannt<template v-if="data.active_scan.imported"> ({{ data.active_scan.imported }} neu<template v-if="data.active_scan.errors">, {{ data.active_scan.errors }} Fehler</template>)</template><template v-else-if="data.active_scan.errors"> ({{ data.active_scan.errors }} Fehler)</template>
+              </template>
             </span>
           </span>
           <span v-else-if="data.active_scan.status === 'pending'" class="scan-running">
