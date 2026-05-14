@@ -589,6 +589,13 @@
       "when": 1779001422000,
       "tag": "0083_depot_account_dedupe",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1779001423000,
+      "tag": "0084_library_scan_total",
+      "breakpoints": true
     }
   ]
 }

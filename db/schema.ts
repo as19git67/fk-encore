@@ -511,6 +511,7 @@ export const libraryScanQueue = pgTable("library_scan_queue", {
   skipped_empty: integer("skipped_empty"),
   errors: integer("errors"),
   removed: integer("removed"),
+  total: integer("total"),
 });
 
 // ========== Documents ==========
