@@ -310,6 +310,10 @@ function armNext(entry: Entry, after: Date): void {
     entry.status = "scheduled";
   }
 
+  // Notify the admin UI so next_fire_at and the current status stay
+  // current without requiring a page refresh.
+  void emitStatus(entry);
+
   if (delayMs > MAX_DELAY) {
     entry.timer = setTimeout(() => armNext(entry, new Date()), MAX_DELAY);
     return;

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import ProgressSpinner from 'primevue/progressspinner'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import InputText from 'primevue/inputtext'
@@ -24,6 +25,7 @@ import {
 } from '../api/libraries'
 import { useAuthStore } from '../stores/auth'
 import { formatDateShort } from '../utils/dateFormat'
+import { useRealtimeEvent } from '../composables/useRealtime'
 
 const auth = useAuthStore()
 const libraries = ref<PhotoLibrary[]>([])
@@ -84,6 +86,14 @@ const pathSegments = computed<{ label: string; sub: string }[]>(() => {
 const showDeleteConfirm = ref(false)
 const libraryToDelete = ref<PhotoLibrary | null>(null)
 
+// Error detail popup
+const showErrorDialog = ref(false)
+const errorDialogMsg = ref('')
+function openErrorDialog(msg: string) {
+  errorDialogMsg.value = msg
+  showErrorDialog.value = true
+}
+
 // Per-row busy flags so users see immediate feedback. A Set lets multiple
 // libraries scan/reconcile concurrently without their spinners racing each
 // other like a single shared ref would.
@@ -98,8 +108,8 @@ function markBusy(id: number, busy: boolean) {
   busyIds.value = next
 }
 
-async function loadData() {
-  loading.value = true
+async function loadData(silent = false) {
+  if (!silent) loading.value = true
   error.value = ''
   try {
     const res = await listLibraries()
@@ -245,7 +255,7 @@ async function runScan(lib: PhotoLibrary) {
     const res = await scanLibrary(lib.id)
     appendInfo(
       res.queued
-        ? `Scan "${lib.name}" eingereiht — Fortschritt siehe Datenverwaltung.`
+        ? `Scan "${lib.name}" eingereiht.`
         : `Scan "${lib.name}" läuft bereits.`,
     )
     await loadData()
@@ -263,7 +273,7 @@ async function runReconcile(lib: PhotoLibrary) {
     const res = await reconcileLibrary(lib.id)
     appendInfo(
       res.queued
-        ? `Abgleich "${lib.name}" eingereiht — Fortschritt siehe Datenverwaltung.`
+        ? `Abgleich "${lib.name}" eingereiht.`
         : `Abgleich "${lib.name}" läuft bereits.`,
     )
     await loadData()
@@ -277,6 +287,8 @@ async function runReconcile(lib: PhotoLibrary) {
 function modeLabel(mode: LibraryImportMode): string {
   return mode === 'link' ? 'Verlinken' : 'Verschieben'
 }
+
+useRealtimeEvent('scan-queue', 'state.changed', () => { loadData(true) })
 
 onMounted(loadData)
 </script>
@@ -356,6 +368,36 @@ onMounted(loadData)
         <template #body="{ data }">
           <span v-if="data.last_scan_at">{{ formatDateShort(data.last_scan_at) }}</span>
           <span v-else class="muted">—</span>
+        </template>
+      </Column>
+      <Column header="Scan-Status" style="width: 18rem">
+        <template #body="{ data }">
+          <span v-if="!data.active_scan" class="muted">—</span>
+          <span v-else-if="data.active_scan.status === 'processing'" class="scan-running">
+            <ProgressSpinner style="width: 1rem; height: 1rem" stroke-width="6" />
+            <span v-if="data.active_scan.reconcile">
+              Abgleich läuft<template v-if="data.active_scan.scanned">
+                · {{ data.active_scan.scanned }}<template v-if="data.active_scan.total"> von {{ data.active_scan.total }}</template> geprüft<template v-if="data.active_scan.errors"> ({{ data.active_scan.errors }} Fehler)</template>
+              </template>
+            </span>
+            <span v-else>
+              Scan läuft<template v-if="data.active_scan.scanned">
+                · {{ data.active_scan.scanned }}<template v-if="data.active_scan.total"> von {{ data.active_scan.total }}</template> gescannt<template v-if="data.active_scan.imported"> ({{ data.active_scan.imported }} neu<template v-if="data.active_scan.errors">, {{ data.active_scan.errors }} Fehler</template>)</template><template v-else-if="data.active_scan.errors"> ({{ data.active_scan.errors }} Fehler)</template>
+              </template>
+            </span>
+          </span>
+          <span v-else-if="data.active_scan.status === 'pending'" class="scan-running">
+            <Tag :value="data.active_scan.reconcile ? 'Abgleich wartet' : 'Scan wartet'" severity="info" />
+          </span>
+          <span v-else-if="data.active_scan.status === 'failed'" class="scan-error">
+            <Tag
+              :value="data.active_scan.reconcile ? 'Abgleich Fehler' : 'Scan Fehler'"
+              severity="danger"
+              :class="data.active_scan.error_msg ? 'scan-error-clickable' : ''"
+              v-tooltip="data.active_scan.error_msg ? 'Klicken für Details' : undefined"
+              @click="data.active_scan.error_msg && openErrorDialog(data.active_scan.error_msg)"
+            />
+          </span>
         </template>
       </Column>
       <Column header="Aktionen" style="width: 14rem">
@@ -588,6 +630,19 @@ onMounted(loadData)
         <Button label="Entfernen" severity="danger" @click="handleDelete" />
       </template>
     </Dialog>
+
+    <!-- Scan Error Detail Dialog -->
+    <Dialog
+      v-model:visible="showErrorDialog"
+      header="Fehlerdetails"
+      :modal="true"
+      :style="{ width: '520px' }"
+    >
+      <pre class="error-detail">{{ errorDialogMsg }}</pre>
+      <template #footer>
+        <Button label="Schließen" severity="secondary" @click="showErrorDialog = false" />
+      </template>
+    </Dialog>
   </div>
 </template>
 
@@ -813,5 +868,45 @@ onMounted(loadData)
 
 .dir-name:hover {
   text-decoration: underline;
+}
+
+.scan-running {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--p-text-muted-color);
+}
+
+.scan-running :deep(.p-progressspinner) {
+  flex-shrink: 0;
+}
+
+.scan-running :deep(.p-progressspinner-circle) {
+  stroke: var(--p-primary-color);
+}
+
+.scan-error {
+  display: inline-flex;
+  align-items: center;
+}
+
+.scan-error-clickable {
+  cursor: pointer;
+}
+
+.error-detail {
+  margin: 0;
+  font-family: monospace;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--p-text-color);
+  background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 4px;
+  padding: 0.75rem;
+  max-height: 60vh;
+  overflow-y: auto;
 }
 </style>

@@ -1,9 +1,7 @@
 /**
  * Persistent scan queue for external photo libraries.
  *
- * Mirrors the structure of photo_scan_queue so library scans show up in the
- * same "Scan-Queue" status table as the per-photo ML services. One logical
- * job per (library, active state): the partial unique index
+ * One logical job per (library, active state): the partial unique index
  * `uq_active_library_scan` prevents two overlapping jobs for the same
  * library from being queued.
  */
@@ -22,6 +20,16 @@ export interface LibraryScanQueueStatus {
   processing: number;
   failed: number;
   done: number;
+}
+
+export interface ActiveLibraryScan {
+  status: "pending" | "processing" | "failed";
+  reconcile: boolean;
+  total: number | null;
+  scanned: number | null;
+  imported: number | null;
+  errors: number | null;
+  error_msg: string | null;
 }
 
 /**
@@ -108,6 +116,14 @@ export async function updateLibraryScanProgress(
       skipped_empty: report.skipped_empty,
       errors: report.errors,
     })
+    .where(eq(libraryScanQueue.id, id));
+  notifyScanQueueChanged();
+}
+
+export async function updateLibraryScanTotal(id: number, total: number): Promise<void> {
+  await db
+    .update(libraryScanQueue)
+    .set({ total })
     .where(eq(libraryScanQueue.id, id));
   notifyScanQueueChanged();
 }
@@ -211,4 +227,47 @@ export async function resetStuckLibraryScans(): Promise<void> {
     .set({ status: "pending", started_at: null })
     .where(eq(libraryScanQueue.status, "processing"));
   notifyScanQueueChanged();
+}
+
+/**
+ * Return the most-relevant active scan per library. Priority: processing >
+ * pending > failed. Only non-done rows are returned so libraries with no
+ * active job are absent from the map.
+ */
+export async function getActiveScanPerLibrary(): Promise<Map<number, ActiveLibraryScan>> {
+  const rows = await db.execute<{
+    library_id: number;
+    status: string;
+    reconcile: boolean;
+    total: number | null;
+    scanned: number | null;
+    imported: number | null;
+    errors: number | null;
+    error_msg: string | null;
+  }>(sql`
+    SELECT DISTINCT ON (library_id)
+      library_id, status, reconcile, total, scanned, imported, errors, error_msg
+    FROM library_scan_queue
+    WHERE status IN ('pending', 'processing', 'failed')
+    ORDER BY library_id,
+      CASE status
+        WHEN 'processing' THEN 0
+        WHEN 'pending'    THEN 1
+        WHEN 'failed'     THEN 2
+      END,
+      enqueued_at DESC
+  `);
+  const map = new Map<number, ActiveLibraryScan>();
+  for (const row of rows.rows) {
+    map.set(row.library_id, {
+      status: row.status as "pending" | "processing" | "failed",
+      reconcile: row.reconcile,
+      total: row.total,
+      scanned: row.scanned,
+      imported: row.imported,
+      errors: row.errors,
+      error_msg: row.error_msg,
+    });
+  }
+  return map;
 }
