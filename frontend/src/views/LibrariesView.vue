@@ -370,7 +370,7 @@ onMounted(loadData)
           <span v-else class="muted">—</span>
         </template>
       </Column>
-      <Column header="Scan-Status" style="width: 10rem">
+      <Column header="Scan-Status" style="width: 18rem; min-width: 14rem">
         <template #body="{ data }">
           <span v-if="!data.active_scan" class="muted">—</span>
           <span v-else-if="data.active_scan.status === 'processing'" class="scan-running">
