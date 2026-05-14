@@ -379,7 +379,7 @@ onMounted(loadData)
               Abgleich läuft<template v-if="data.active_scan.scanned"> · {{ data.active_scan.scanned }} geprüft<template v-if="data.active_scan.errors"> ({{ data.active_scan.errors }} Fehler)</template></template>
             </span>
             <span v-else>
-              Scan läuft<template v-if="data.active_scan.scanned"> · {{ data.active_scan.imported ?? 0 }} von {{ data.active_scan.scanned }} importiert<template v-if="data.active_scan.errors"> ({{ data.active_scan.errors }} Fehler)</template></template>
+              Scan läuft<template v-if="data.active_scan.scanned"> · {{ data.active_scan.scanned }} gescannt<template v-if="data.active_scan.imported"> ({{ data.active_scan.imported }} neu<template v-if="data.active_scan.errors">, {{ data.active_scan.errors }} Fehler</template>)</template><template v-else-if="data.active_scan.errors"> ({{ data.active_scan.errors }} Fehler)</template></template>
             </span>
           </span>
           <span v-else-if="data.active_scan.status === 'pending'" class="scan-running">
