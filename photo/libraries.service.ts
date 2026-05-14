@@ -34,7 +34,7 @@ import {
 import { enqueuePhotoScan } from "./scan-queue";
 import { triggerWorkers } from "./scan-worker";
 import { registerScanAbort, unregisterScanAbort } from "./library-scan-control";
-import { updateLibraryScanProgress } from "./library-scan-queue";
+import { updateLibraryScanProgress, getActiveScanPerLibrary, type ActiveLibraryScan } from "./library-scan-queue";
 
 console.log("[boot] photo/libraries.service.ts: all imports resolved");
 
@@ -59,7 +59,10 @@ export interface PhotoLibrary {
   favorite_rating_threshold: number;
   created_at: string | null;
   last_scan_at: string | null;
+  active_scan: ActiveLibraryScan | null;
 }
+
+export type { ActiveLibraryScan };
 
 export interface CreateLibraryRequest {
   name: string;
@@ -260,7 +263,7 @@ export async function listLibraryRootInfo(sub: string = ""): Promise<LibraryRoot
 
 // ---------- CRUD ----------
 
-function rowToLibrary(row: typeof photoLibraries.$inferSelect): PhotoLibrary {
+function rowToLibrary(row: typeof photoLibraries.$inferSelect, activeScan?: ActiveLibraryScan): PhotoLibrary {
   return {
     id: row.id,
     user_id: row.user_id,
@@ -272,6 +275,7 @@ function rowToLibrary(row: typeof photoLibraries.$inferSelect): PhotoLibrary {
     favorite_rating_threshold: row.favorite_rating_threshold,
     created_at: row.created_at ?? null,
     last_scan_at: row.last_scan_at ?? null,
+    active_scan: activeScan ?? null,
   };
 }
 
@@ -308,10 +312,13 @@ export async function createLibrary(
 }
 
 export async function listLibraries(): Promise<PhotoLibrary[]> {
-  const rows = await dbAll<typeof photoLibraries.$inferSelect>(
-    db.select().from(photoLibraries).orderBy(photoLibraries.id)
-  );
-  return rows.map(rowToLibrary);
+  const [rows, activeScans] = await Promise.all([
+    dbAll<typeof photoLibraries.$inferSelect>(
+      db.select().from(photoLibraries).orderBy(photoLibraries.id)
+    ),
+    getActiveScanPerLibrary(),
+  ]);
+  return rows.map((row) => rowToLibrary(row, activeScans.get(row.id)));
 }
 
 export async function getLibrary(id: number): Promise<PhotoLibrary | null> {

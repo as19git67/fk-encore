@@ -22,6 +22,12 @@ export interface LibraryScanQueueStatus {
   done: number;
 }
 
+export interface ActiveLibraryScan {
+  status: "pending" | "processing" | "failed";
+  scanned: number | null;
+  error_msg: string | null;
+}
+
 /**
  * Enqueue a scan for the given library. Returns the new job id, or null if
  * a scan for this library is already pending or processing (the partial
@@ -209,4 +215,39 @@ export async function resetStuckLibraryScans(): Promise<void> {
     .set({ status: "pending", started_at: null })
     .where(eq(libraryScanQueue.status, "processing"));
   notifyScanQueueChanged();
+}
+
+/**
+ * Return the most-relevant active scan per library. Priority: processing >
+ * pending > failed. Only non-done rows are returned so libraries with no
+ * active job are absent from the map.
+ */
+export async function getActiveScanPerLibrary(): Promise<Map<number, ActiveLibraryScan>> {
+  const rows = await db.execute<{
+    library_id: number;
+    status: string;
+    scanned: number | null;
+    error_msg: string | null;
+  }>(sql`
+    SELECT DISTINCT ON (library_id)
+      library_id, status, scanned, error_msg
+    FROM library_scan_queue
+    WHERE status IN ('pending', 'processing', 'failed')
+    ORDER BY library_id,
+      CASE status
+        WHEN 'processing' THEN 0
+        WHEN 'pending'    THEN 1
+        WHEN 'failed'     THEN 2
+      END,
+      enqueued_at DESC
+  `);
+  const map = new Map<number, ActiveLibraryScan>();
+  for (const row of rows.rows) {
+    map.set(row.library_id, {
+      status: row.status as "pending" | "processing" | "failed",
+      scanned: row.scanned,
+      error_msg: row.error_msg,
+    });
+  }
+  return map;
 }

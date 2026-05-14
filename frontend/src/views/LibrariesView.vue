@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import ProgressSpinner from 'primevue/progressspinner'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import InputText from 'primevue/inputtext'
@@ -24,6 +25,7 @@ import {
 } from '../api/libraries'
 import { useAuthStore } from '../stores/auth'
 import { formatDateShort } from '../utils/dateFormat'
+import { useRealtimeEvent } from '../composables/useRealtime'
 
 const auth = useAuthStore()
 const libraries = ref<PhotoLibrary[]>([])
@@ -245,7 +247,7 @@ async function runScan(lib: PhotoLibrary) {
     const res = await scanLibrary(lib.id)
     appendInfo(
       res.queued
-        ? `Scan "${lib.name}" eingereiht — Fortschritt siehe Datenverwaltung.`
+        ? `Scan "${lib.name}" eingereiht.`
         : `Scan "${lib.name}" läuft bereits.`,
     )
     await loadData()
@@ -263,7 +265,7 @@ async function runReconcile(lib: PhotoLibrary) {
     const res = await reconcileLibrary(lib.id)
     appendInfo(
       res.queued
-        ? `Abgleich "${lib.name}" eingereiht — Fortschritt siehe Datenverwaltung.`
+        ? `Abgleich "${lib.name}" eingereiht.`
         : `Abgleich "${lib.name}" läuft bereits.`,
     )
     await loadData()
@@ -277,6 +279,8 @@ async function runReconcile(lib: PhotoLibrary) {
 function modeLabel(mode: LibraryImportMode): string {
   return mode === 'link' ? 'Verlinken' : 'Verschieben'
 }
+
+useRealtimeEvent('scan-queue', 'state.changed', () => { loadData() })
 
 onMounted(loadData)
 </script>
@@ -356,6 +360,17 @@ onMounted(loadData)
         <template #body="{ data }">
           <span v-if="data.last_scan_at">{{ formatDateShort(data.last_scan_at) }}</span>
           <span v-else class="muted">—</span>
+        </template>
+      </Column>
+      <Column header="Scan-Status" style="width: 10rem">
+        <template #body="{ data }">
+          <span v-if="!data.active_scan" class="muted">—</span>
+          <span v-else-if="data.active_scan.status === 'processing'" class="scan-running">
+            <ProgressSpinner style="width: 1rem; height: 1rem" stroke-width="6" />
+            läuft<template v-if="data.active_scan.scanned"> · {{ data.active_scan.scanned }}</template>
+          </span>
+          <Tag v-else-if="data.active_scan.status === 'pending'" value="wartet" severity="info" />
+          <Tag v-else-if="data.active_scan.status === 'failed'" value="Fehler" severity="danger" v-tooltip="data.active_scan.error_msg || ''" />
         </template>
       </Column>
       <Column header="Aktionen" style="width: 14rem">
@@ -813,5 +828,17 @@ onMounted(loadData)
 
 .dir-name:hover {
   text-decoration: underline;
+}
+
+.scan-running {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--p-text-muted-color);
+}
+
+.scan-running :deep(.p-progressspinner-circle) {
+  stroke: var(--p-primary-color);
 }
 </style>
