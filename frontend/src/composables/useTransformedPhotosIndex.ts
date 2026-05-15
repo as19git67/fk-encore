@@ -12,7 +12,8 @@
 // waiting for the next page load.
 
 import { ref, computed } from 'vue'
-import { getMyTransformedPhotoIds } from '../api/photoTransforms'
+import { getMyTransformedPhotoIds, getRenderedPhotoUrl } from '../api/photoTransforms'
+import { getPhotoUrl } from '../api/photos'
 
 const photoIds = ref<Set<number> | null>(null)
 let loadPromise: Promise<void> | null = null
@@ -63,4 +64,29 @@ export function useTransformedPhotosIndex() {
     },
     isReady: computed(() => photoIds.value !== null),
   }
+}
+
+/**
+ * Pick the right thumbnail URL for a photo, taking the user's saved
+ * recipe into account. When the calling user has edited this photo,
+ * the URL routes through /photos/:id/render?v=user — otherwise the
+ * fast /photos/file/<filename> path. Shared by every grid in the app
+ * (gallery, album covers, person covers, recap, compare view) so a
+ * once-edited photo never reverts to the original in any surface.
+ */
+export function photoThumbnailSrc(args: {
+  photoId: number | undefined | null
+  filename: string
+  width?: number
+  userId: number | undefined | null
+}): string {
+  const { photoId, filename, width, userId } = args
+  if (photoId && userId && photoIds.value?.has(photoId)) {
+    return getRenderedPhotoUrl(photoId, {
+      variant: 'user',
+      userId,
+      width,
+    })
+  }
+  return getPhotoUrl(filename, width)
 }

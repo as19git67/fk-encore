@@ -48,9 +48,8 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
-import { getThumbUrl, type GalleryGridEntry, type GallerySortDir, type GallerySortField } from '../api/gallery'
-import { getRenderedPhotoUrl } from '../api/photoTransforms'
-import { useTransformedPhotosIndex } from '../composables/useTransformedPhotosIndex'
+import { type GalleryGridEntry, type GallerySortDir, type GallerySortField } from '../api/gallery'
+import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
 import { useAuthStore } from '../stores/auth'
 import { useGallerySource, GALLERY_PAGE_SIZE } from '../composables/useGallerySource'
 import type { PhotoFilter } from '../api/photos'
@@ -98,18 +97,18 @@ const emit = defineEmits<{
 const source = useGallerySource()
 const { entries, total, initialLoading, error } = source
 
-// User-recipe rendered tiles: when the caller has saved a transform on
-// a photo, route the thumbnail through /photos/:id/render?v=user&...
-// so the crop + colour show up in the grid. Bare /photos/file/* path
-// (via getThumbUrl) stays the fast default for everything else.
+// User-recipe-aware thumbnail URL. When the caller has saved a
+// transform on a photo, the helper routes through /photos/:id/render
+// so the crop + colour show up in the grid; otherwise the bare
+// /photos/file/* path.
 const auth = useAuthStore()
-const transformedIndex = useTransformedPhotosIndex()
 function thumbnailSrc(slot: GalleryGridEntry): string {
-  const userId = auth.user?.id
-  if (userId && transformedIndex.has(slot.id)) {
-    return getRenderedPhotoUrl(slot.id, { variant: 'user', userId, width: 400 })
-  }
-  return getThumbUrl(slot.filename, 400)
+  return photoThumbnailSrc({
+    photoId: slot.id,
+    filename: slot.filename,
+    width: 400,
+    userId: auth.user?.id,
+  })
 }
 
 // ── Layout: column count + row height ───────────────────────────────────────
