@@ -147,6 +147,7 @@ import {
   type PhotoFilterParams,
 } from "./photo.filters";
 import { repairMojibake } from "./text-encoding";
+import { computePhotoTransformSuggestions } from "./photo-transforms.service";
 
 console.log("[boot] photo/photo.service.ts: all imports resolved");
 
@@ -889,6 +890,15 @@ export async function assignFacesForUser(userId: number, photoId: number, resetI
     await computeAndStoreAutoCrop(userId, photoId);
   } catch (err) {
     console.error(`Error computing auto-crop for photo ${photoId}:`, err);
+  }
+
+  // Recompute the AI transformation-suggestion payload (global per photo).
+  // Failures here are non-fatal — the suggestion is purely advisory and the
+  // editor still works without it.
+  try {
+    await computePhotoTransformSuggestions(photoId);
+  } catch (err) {
+    console.error(`Error computing transform suggestions for photo ${photoId}:`, err);
   }
 }
 
@@ -6030,6 +6040,13 @@ export async function indexPhotoLandmarks(photoId: number): Promise<void> {
     }
   } catch (err) {
     console.error(`Error computing auto-crop for photo ${photoId}:`, err);
+  }
+
+  // Recompute the AI transformation-suggestion payload (global per photo).
+  try {
+    await computePhotoTransformSuggestions(photoId);
+  } catch (err) {
+    console.error(`Error computing transform suggestions for photo ${photoId}:`, err);
   }
 }
 
