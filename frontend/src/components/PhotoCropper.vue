@@ -243,12 +243,23 @@ onBeforeUnmount(() => {
 .cropper-wrap {
   position: relative;
   width: 100%;
+  /* max-height is intentionally limited so a tall portrait photo doesn't
+     fill the viewport and trap the controls below the fold. On the
+     desktop two-column dialog layout 70vh is fine; on narrow viewports
+     the single-column dialog stacks cropper + controls and we cap
+     tighter so a portrait crop frame still leaves room to scroll. */
   max-height: 70vh;
   margin: 0 auto;
   background: rgba(0, 0, 0, 0.05);
   user-select: none;
   touch-action: none;
   outline: none;
+}
+
+@media (max-width: 900px) {
+  .cropper-wrap {
+    max-height: 50vh;
+  }
 }
 
 .cropper-wrap:focus-visible {

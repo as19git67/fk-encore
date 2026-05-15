@@ -638,6 +638,7 @@ onMounted(() => {
     <template #footer>
       <div class="footer-buttons">
         <Button
+          icon="pi pi-refresh"
           label="Zurücksetzen"
           severity="secondary"
           outlined
@@ -645,10 +646,12 @@ onMounted(() => {
           :disabled="saving || loading"
         />
         <Button
-          label="Meinen Schnitt löschen"
+          icon="pi pi-trash"
+          label="Bearbeitung löschen"
           severity="danger"
           outlined
           @click="deleteMine"
+          v-tooltip.top="'Crop, Belichtung und alle weiteren Änderungen verwerfen'"
           :disabled="saving || loading || !bundle?.mine"
         />
         <div class="spacer" />
@@ -686,15 +689,29 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 20rem;
+  min-height: 14rem;
 }
 
+/*
+ * On the desktop two-column layout we keep the controls in an
+ * independent scroll panel so the cropper stays put while the user
+ * works through the sliders. On narrow viewports (one-column stack)
+ * we deliberately drop that — a tall portrait photo would otherwise
+ * fill the whole viewport and the controls stay trapped behind the
+ * cropper's bottom edge. There everything below the dialog header
+ * flows into a single PrimeVue Dialog scroll area.
+ */
 .controls {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  max-height: 70vh;
-  overflow-y: auto;
+}
+
+@media (min-width: 901px) {
+  .controls {
+    max-height: 70vh;
+    overflow-y: auto;
+  }
 }
 
 .control-section {
