@@ -714,7 +714,8 @@ onMounted(async () => {
       <Button class="data-management-group__item"
         icon="pi pi-arrows-alt"
         outlined
-        label="Bildmaße nachtragen (für Orientierungsregel)"
+        label="Bildmaße nachtragen"
+        v-tooltip.top="'Liest Breite und Höhe aus den Original-Dateien nach, damit die Orientierungsregel und der KI-Crop-Vorschlag korrekt arbeiten können.'"
         :loading="dimensionsLoading"
         :disabled="dimensionsLoading || aiPickLoading || groupingLoading || isActive || rescanLoading || retryLoading"
         @click="handleBackfillDimensions"
@@ -1061,6 +1062,17 @@ onMounted(async () => {
 }
 
 .data-management-group .data-management-group__item {
+}
+
+/*
+ * Force every button inside a data-management-group to size to its
+ * label rather than inherit a stretch from PrimeVue's internal flex
+ * defaults. A previous long label ("…(für Orientierungsregel)") had
+ * pulled its button to full width on certain viewports.
+ */
+.data-management-group :deep(.p-button) {
+  align-self: flex-start;
+  width: auto;
 }
 
 .status-progress {
