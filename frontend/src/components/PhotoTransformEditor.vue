@@ -158,6 +158,20 @@ const hasSuggestionForRatio = computed(() => {
   return Boolean(s.crops[selectedRatio.value])
 })
 
+/**
+ * True when the AI suggestion contains a crop for the given ratio.
+ * Used to mark the corresponding chip with a sparkles icon — the user
+ * can tell at a glance which ratios get a face-aware AI crop and
+ * which one just gets a centred fallback.
+ */
+function hasAiCropFor(ratio: PhotoTransformAspectRatio): boolean {
+  return Boolean(bundle.value?.suggestion?.crops[ratio])
+}
+
+const anyAiCropAvailable = computed(() =>
+  ratioOptions.some((opt) => hasAiCropFor(opt.key)),
+)
+
 const sortedOthers = computed<PhotoTransformOther[]>(() =>
   (bundle.value?.others ?? []).slice().sort((a, b) =>
     a.user.name.localeCompare(b.user.name),
@@ -474,9 +488,12 @@ onMounted(() => {
               v-for="opt in ratioOptions"
               :key="opt.key"
               :label="opt.label"
+              :icon="hasAiCropFor(opt.key) ? 'pi pi-sparkles' : undefined"
+              iconPos="left"
               size="small"
               :severity="selectedRatio === opt.key ? 'primary' : 'secondary'"
               :outlined="selectedRatio !== opt.key"
+              v-tooltip.top="hasAiCropFor(opt.key) ? 'KI-Crop verfügbar — Klick übernimmt ihn' : 'Zentrierter Crop in diesem Format'"
               @click="applyRatio(opt.key)"
               :disabled="loading"
             />
@@ -489,6 +506,14 @@ onMounted(() => {
               :disabled="loading"
             />
           </div>
+          <p v-if="anyAiCropAvailable" class="hint hint-ai">
+            <i class="pi pi-sparkles" /> markiert Formate mit KI-Vorschlag — beim
+            Klick springt der Cropper direkt auf den vorgeschlagenen Ausschnitt.
+          </p>
+          <p v-else class="hint">
+            Für dieses Foto liegt noch kein KI-Vorschlag vor. Formate setzen einen
+            zentrierten Crop, den du frei nachziehen kannst.
+          </p>
         </section>
 
         <section
@@ -756,6 +781,18 @@ onMounted(() => {
   font-size: 0.75rem;
   color: var(--p-text-muted-color);
   flex: 1 1 100%;
+}
+
+.hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color);
+}
+
+.hint .pi-sparkles {
+  font-size: 0.75rem;
+  color: var(--p-primary-color);
+  vertical-align: -1px;
 }
 
 .slider-row {
