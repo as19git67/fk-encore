@@ -5068,6 +5068,38 @@ export async function recomputeAllAutoCropsLogic(userId: number): Promise<{ upda
   return { updated };
 }
 
+/**
+ * Recompute the AI transformation-suggestion payload for every photo
+ * the user owns. Used as a one-shot for photos indexed before the
+ * suggestion-compute hook was added, and for picking up changes when
+ * the model_version is bumped.
+ *
+ * Each call writes / overwrites a row in photo_transform_suggestions
+ * (idempotent). Failures are logged and counted separately so a single
+ * bad image doesn't abort the whole run.
+ */
+export async function recomputeAllTransformSuggestionsLogic(
+  userId: number,
+): Promise<{ updated: number; failed: number; total: number }> {
+  const allPhotos = await dbAll<{ id: number }>(
+    db.select({ id: photos.id }).from(photos).where(eq(photos.user_id, userId)),
+  );
+
+  let updated = 0;
+  let failed = 0;
+  for (const p of allPhotos) {
+    try {
+      const payload = await computePhotoTransformSuggestions(p.id);
+      if (payload) updated++;
+      else failed++;
+    } catch (err) {
+      failed++;
+      console.error(`Error computing transform suggestions for photo ${p.id}:`, err);
+    }
+  }
+  return { updated, failed, total: allPhotos.length };
+}
+
 // ── Orphaned person cleanup ──────────────────────────────────────────────────
 
 /**

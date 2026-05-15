@@ -493,3 +493,117 @@ describe("computePhotoTransformSuggestions", () => {
     expect(oneByOne!.y).toBeCloseTo(0, 2);
   });
 });
+
+describe("recomputeAllTransformSuggestionsLogic", () => {
+  let userId: number;
+  const tmpDir = "/tmp/fk-encore-suggestion-bulk-test";
+
+  beforeEach(async () => {
+    await db.delete(faces);
+    await db.delete(photoLandmarks);
+    await db.delete(photoTransformSuggestions);
+    await db.delete(photos);
+    await db.delete(users);
+
+    const u = await createUserLogic({
+      email: `bulk-${Date.now()}@example.com`,
+      name: "B",
+      password: "pw",
+    });
+    userId = u.id;
+  });
+
+  async function makePhotoOnDisk(suffix: string, width: number, height: number) {
+    const fs = await import("fs");
+    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+    const filePath = `${tmpDir}/bulk-${Date.now()}-${suffix}.jpg`;
+    await sharp({
+      create: { width, height, channels: 3, background: { r: 60, g: 60, b: 60 } },
+    })
+      .jpeg()
+      .toFile(filePath);
+    const row = await dbInsertReturning<{ id: number }>(
+      db
+        .insert(photos)
+        .values({
+          user_id: userId,
+          filename: filePath,
+          original_name: `${suffix}.jpg`,
+          mime_type: "image/jpeg",
+          size: 1024,
+          width,
+          height,
+          external_path: filePath,
+        })
+        .returning({ id: photos.id }),
+    );
+    return row!.id;
+  }
+
+  it("writes a suggestion row for every photo the user owns", async () => {
+    const { recomputeAllTransformSuggestionsLogic } = await import("./photo.service");
+    const a = await makePhotoOnDisk("a", 200, 100);
+    const b = await makePhotoOnDisk("b", 300, 200);
+    const result = await recomputeAllTransformSuggestionsLogic(userId);
+    expect(result.total).toBe(2);
+    expect(result.updated).toBe(2);
+    expect(result.failed).toBe(0);
+    const rows = await db
+      .select()
+      .from(photoTransformSuggestions)
+      .where(eq(photoTransformSuggestions.photo_id, a));
+    expect(rows).toHaveLength(1);
+    const rowsB = await db
+      .select()
+      .from(photoTransformSuggestions)
+      .where(eq(photoTransformSuggestions.photo_id, b));
+    expect(rowsB).toHaveLength(1);
+  });
+
+  it("counts photos with missing dimensions as failed but does not abort", async () => {
+    const { recomputeAllTransformSuggestionsLogic } = await import("./photo.service");
+    const a = await makePhotoOnDisk("ok", 200, 100);
+    // Insert a photo without width/height — compute returns null → counted as failed.
+    const broken = await dbInsertReturning<{ id: number }>(
+      db
+        .insert(photos)
+        .values({
+          user_id: userId,
+          filename: `${tmpDir}/missing.jpg`,
+          original_name: "missing.jpg",
+          mime_type: "image/jpeg",
+          size: 100,
+          external_path: `${tmpDir}/missing.jpg`,
+        })
+        .returning({ id: photos.id }),
+    );
+    const result = await recomputeAllTransformSuggestionsLogic(userId);
+    expect(result.total).toBe(2);
+    expect(result.updated).toBe(1);
+    expect(result.failed).toBe(1);
+    // The ok photo got its suggestion.
+    expect(
+      (
+        await db
+          .select()
+          .from(photoTransformSuggestions)
+          .where(eq(photoTransformSuggestions.photo_id, a))
+      ).length,
+    ).toBe(1);
+    // The broken one didn't.
+    expect(
+      (
+        await db
+          .select()
+          .from(photoTransformSuggestions)
+          .where(eq(photoTransformSuggestions.photo_id, broken!.id))
+      ).length,
+    ).toBe(0);
+  });
+
+  it("returns total:0 when the user has no photos", async () => {
+    const { recomputeAllTransformSuggestionsLogic } = await import("./photo.service");
+    const result = await recomputeAllTransformSuggestionsLogic(userId);
+    expect(result).toEqual({ updated: 0, failed: 0, total: 0 });
+  });
+});

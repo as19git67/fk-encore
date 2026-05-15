@@ -1547,6 +1547,28 @@ export const recomputeAutoCrops = api(
   }
 );
 
+/**
+ * Recompute the AI transformation-suggestion payload for every photo
+ * owned by the caller. Used to backfill suggestions for photos
+ * indexed before the suggestion-compute hook existed, and to pick up
+ * the latest values when the model_version is bumped.
+ */
+export const recomputeTransformSuggestions = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/photos/recompute-transform-suggestions",
+    auth: true,
+  },
+  async (): Promise<{ updated: number; failed: number; total: number }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "data.manage");
+    return await service.recomputeAllTransformSuggestionsLogic(userId);
+  },
+);
+
 // ========== Photo Groups ==========
 
 import type {

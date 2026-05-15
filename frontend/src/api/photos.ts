@@ -426,6 +426,13 @@ export function recomputeAutoCrops() {
   })
 }
 
+export function recomputeTransformSuggestions() {
+  return apiFetch<{ updated: number; failed: number; total: number }>(
+    '/photos/recompute-transform-suggestions',
+    { method: 'POST', timeoutMs: 10 * 60 * 1000 },
+  )
+}
+
 export function reindexPhoto(id: number) {
   return apiFetch<{ success: boolean }>(`/photos/${id}/reindex`, {
     method: 'POST'

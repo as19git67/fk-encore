@@ -17,6 +17,7 @@ import {
   getPhotosToRefreshMetadata, refreshPhotoMetadata,
   getPhotosNeedingGpsRescan, rescanPhotoGps,
   recomputeAutoCrops,
+  recomputeTransformSuggestions,
   purgePhotos,
   type ScanQueueStatus,
   type PurgeResult,
@@ -302,6 +303,25 @@ async function handleGpsRescan() {
 const autoCropLoading = ref(false)
 const autoCropResult = ref<{ updated: number } | null>(null)
 const autoCropError = ref('')
+
+// ── AI-Transform-Suggestions ─────────────────────────────────────────────────
+const transformSuggestLoading = ref(false)
+const transformSuggestResult = ref<{ updated: number; failed: number; total: number } | null>(null)
+const transformSuggestError = ref('')
+
+async function handleRecomputeTransformSuggestions() {
+  transformSuggestResult.value = null
+  transformSuggestError.value = ''
+  transformSuggestLoading.value = true
+  try {
+    transformSuggestResult.value = await recomputeTransformSuggestions()
+  } catch (err: any) {
+    transformSuggestError.value =
+      err.message || 'Fehler beim Berechnen der KI-Crop-Vorschläge'
+  } finally {
+    transformSuggestLoading.value = false
+  }
+}
 
 async function handleRecomputeAutoCrops() {
   autoCropResult.value = null
@@ -801,6 +821,40 @@ onMounted(async () => {
         :loading="autoCropLoading"
         :disabled="autoCropLoading || isActive || rescanLoading || retryLoading"
         @click="handleRecomputeAutoCrops"
+      />
+    </div>
+
+    <!-- AI-Transformations-Vorschläge -->
+    <div class="data-management-group">
+      <h3>KI-Crop-Vorschläge neu berechnen</h3>
+      <p>
+        Erzeugt für jedes Foto Crop-Vorschläge in allen Seitenverhältnissen (1:1, 4:5,
+        16:9, …) plus eine Belichtungs-Empfehlung. Diese Daten füllen den
+        <em>„KI-Vorschlag“-Block</em> im Foto-Editor (Sliders-Icon). Für neu hochgeladene
+        Fotos passiert das automatisch beim Indexieren — diese Aktion ist nur nötig,
+        um bestehende Fotos nachzuziehen oder nach einem Modell-Update.
+      </p>
+
+      <Message v-if="transformSuggestError" severity="error" class="data-management-group__item" @close="transformSuggestError = ''">
+        {{ transformSuggestError }}
+      </Message>
+
+      <div v-if="transformSuggestResult" class="data-management-group__item">
+        <Message severity="info" :closable="false">
+          {{ transformSuggestResult.updated }} von {{ transformSuggestResult.total }}
+          Fotos aktualisiert<span v-if="transformSuggestResult.failed > 0">,
+            {{ transformSuggestResult.failed }} übersprungen (fehlende Maße oder
+            unlesbares Bild)</span>.
+        </Message>
+      </div>
+
+      <Button class="data-management-group__item"
+        icon="pi pi-sparkles"
+        outlined
+        label="KI-Crop-Vorschläge neu berechnen"
+        :loading="transformSuggestLoading"
+        :disabled="transformSuggestLoading || isActive || rescanLoading || retryLoading"
+        @click="handleRecomputeTransformSuggestions"
       />
     </div>
 
