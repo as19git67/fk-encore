@@ -6,6 +6,7 @@ import PhotoMiniMap from './PhotoMiniMap.vue'
 import PhotoLocationMenu from './PhotoLocationMenu.vue'
 import PhotoReactions from './PhotoReactions.vue'
 import PhotoAlbumDialog from './PhotoAlbumDialog.vue'
+import PhotoTransformEditor from './PhotoTransformEditor.vue'
 import { getPhotoUrl, getPhotosAlbums, updateAlbum, updateAlbumUserSettings, updatePhotoDescription } from '../api/photos'
 import { getAlbumCheckState as calculateAlbumCheckState } from '../utils/albumSelection'
 import type { Photo, Face, LandmarkItem, Person, CurationStatus } from '../api/photos'
@@ -55,6 +56,7 @@ const { albums, albumsLoaded, fetchAlbums } = useReferenceData()
 const loadingAlbums = ref(false)
 const photoAlbumMap = ref<Record<number, number[]>>({}) // photoId -> albumIds[]
 const albumDialogVisible = ref(false)
+const transformEditorVisible = ref(false)
 
 async function loadAlbums() {
   if (albumsLoaded.value) return
@@ -281,6 +283,7 @@ watch(() => props.photo.id, () => {
 
       <div v-if="!inFlyout" class="quick-actions">
         <Button icon="pi pi-expand" v-tooltip.bottom="'Vollbild'" @click="emit('fullscreen')" severity="secondary" text rounded />
+        <Button v-if="canUpload" icon="pi pi-sliders-h" v-tooltip.bottom="'Schnitt &amp; Belichtung bearbeiten'" @click="transformEditorVisible = true" severity="secondary" text rounded />
         <Button v-if="showNavigateToPhoto" icon="pi pi-images" v-tooltip.bottom="'In Fotos anzeigen'" @click="emit('navigate-to-photo', photo.id)" severity="secondary" text rounded />
         <template v-if="canDelete">
           <Button :icon="photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'" v-tooltip.bottom="photo.curation_status === 'favorite' ? 'Kein Favorit' : 'Favorit'" @click="emit('toggle-favorite', photo.id, photo.curation_status)" :severity="photo.curation_status === 'favorite' ? 'warn' : 'secondary'" text rounded />
@@ -508,6 +511,11 @@ watch(() => props.photo.id, () => {
       v-model:visible="albumDialogVisible"
       :photo-ids="albumPhotoIds"
       @saved="loadPhotosAlbums"
+    />
+    <PhotoTransformEditor
+      v-model:visible="transformEditorVisible"
+      :photo-id="photo.id"
+      :photo-filename="photo.filename"
     />
   </aside>
 </template>
