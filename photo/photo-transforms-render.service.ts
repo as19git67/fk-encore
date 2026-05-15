@@ -12,16 +12,18 @@ import path from "path";
 import crypto from "crypto";
 import fs from "fs/promises";
 import sharp from "sharp";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import db from "../db/database";
 import { dbFirst } from "../db/adapter";
 import {
+  photoTransforms,
   photoTransformSuggestions,
   photos,
   type PhotoTransformAspectRatio,
   type PhotoTransformCrop,
   type PhotoTransformSuggestionsPayload,
 } from "../db/schema";
+import { computeAutoExposureFromStats, type BboxNorm } from "./photo-transforms.service";
 
 // Mirror of THUMBNAIL_DIR / UPLOAD_DIR in photo.service. Inlined to avoid a
 // circular import — the existing file already imports our suggestion-compute
@@ -287,3 +289,167 @@ export async function renderSuggestedAndCache(
 
   return { buffer, cacheHit: false, cachePath, etag };
 }
+
+/**
+ * Render a photo with a specific user's stored recipe applied.
+ *
+ * `auth: false` on the consuming endpoint is intentional and on par with
+ * the existing /photos/file/* endpoint: the recipe payload (crop +
+ * exposure) is not personal data — the underlying photo is already
+ * accessible by filename without auth, and recipe coordinates leak
+ * nothing beyond aesthetic preference.
+ *
+ * Returns null when no transform row exists for (photoId, userId).
+ */
+export async function renderUserAndCache(
+  photoId: number,
+  userId: number,
+  targetWidth: number | null,
+): Promise<SuggestedRenderResult | null> {
+  const photo = await dbFirst<{
+    id: number;
+    filename: string;
+    hash: string | null;
+    external_path: string | null;
+  }>(
+    db
+      .select({
+        id: photos.id,
+        filename: photos.filename,
+        hash: photos.hash,
+        external_path: photos.external_path,
+      })
+      .from(photos)
+      .where(eq(photos.id, photoId)),
+  );
+  if (!photo) return null;
+
+  const row = await dbFirst<typeof photoTransforms.$inferSelect>(
+    db
+      .select()
+      .from(photoTransforms)
+      .where(
+        and(
+          eq(photoTransforms.photo_id, photoId),
+          eq(photoTransforms.user_id, userId),
+        ),
+      ),
+  );
+  if (!row) return null;
+
+  const recipe: PhotoTransformRecipe = {
+    crop: (row.crop as PhotoTransformCrop | null) ?? null,
+    rotation: row.rotation,
+    exposure: row.exposure,
+    contrast: row.contrast,
+    gamma: row.gamma,
+    white_point: row.white_point,
+    black_point: row.black_point,
+  };
+
+  const originalPath = resolvePhotoDiskPath(photo);
+  const keyParts = [
+    photo.hash ?? photo.filename,
+    "user",
+    userId,
+    targetWidth ?? "full",
+    recipeCacheKey(recipe),
+    // Bump on schema/version change.
+    row.updated_at ?? row.created_at ?? "",
+  ].join("|");
+  const cacheBase = `${photoId}_u${userId}_${crypto
+    .createHash("md5")
+    .update(keyParts)
+    .digest("hex")
+    .slice(0, 12)}`;
+  const shardPath = thumbnailShardPath(cacheBase);
+  const cachePath = path.join(shardPath, `${cacheBase}.jpg`);
+  const etag = `"${crypto.createHash("md5").update(keyParts).digest("hex")}"`;
+
+  try {
+    const buffer = await fs.readFile(cachePath);
+    return { buffer, cacheHit: true, cachePath, etag };
+  } catch {
+    // cache miss
+  }
+
+  const buffer = await renderPhotoWithRecipe(
+    originalPath,
+    recipe,
+    targetWidth ?? undefined,
+  );
+
+  fs.mkdir(shardPath, { recursive: true })
+    .then(() => fs.writeFile(cachePath, buffer))
+    .catch((err) =>
+      console.error(`[photo-transforms-render] user cache write failed for ${cachePath}:`, err),
+    );
+
+  return { buffer, cacheHit: false, cachePath, etag };
+}
+
+/**
+ * Look up the stored filename for a photo. Used by the render endpoint's
+ * v=original branch to emit a 302 redirect to /photos/file/<filename>.
+ */
+export async function resolvePhotoFilename(photoId: number): Promise<string | null> {
+  const row = await dbFirst<{ filename: string }>(
+    db.select({ filename: photos.filename }).from(photos).where(eq(photos.id, photoId)),
+  );
+  return row?.filename ?? null;
+}
+
+/**
+ * Compute an auto-levels recipe for a photo, optionally restricted to a
+ * crop. Reads sharp.stats() over the (optionally cropped) image and
+ * derives exposure / contrast / gamma so the cropped subject lands near
+ * mid-grey with reasonable contrast. Does not persist — the caller (the
+ * editor's Auto-Levels button) applies it locally.
+ */
+export async function computeAutoLevelsForPhoto(
+  photoId: number,
+  crop: PhotoTransformCrop | null,
+): Promise<{ exposure: number; contrast: number; gamma: number } | null> {
+  const photo = await dbFirst<{
+    filename: string;
+    external_path: string | null;
+    width: number | null;
+    height: number | null;
+  }>(
+    db
+      .select({
+        filename: photos.filename,
+        external_path: photos.external_path,
+        width: photos.width,
+        height: photos.height,
+      })
+      .from(photos)
+      .where(eq(photos.id, photoId)),
+  );
+  if (!photo) return null;
+
+  const originalPath = resolvePhotoDiskPath(photo);
+  let img = sharp(originalPath).rotate();
+
+  if (crop && photo.width && photo.height) {
+    const W = photo.width;
+    const H = photo.height;
+    const left = Math.max(0, Math.min(W - 1, Math.round(crop.x * W)));
+    const top = Math.max(0, Math.min(H - 1, Math.round(crop.y * H)));
+    const width = Math.max(1, Math.min(W - left, Math.round(crop.w * W)));
+    const height = Math.max(1, Math.min(H - top, Math.round(crop.h * H)));
+    img = img.extract({ left, top, width, height });
+  }
+
+  const stats = await img.stats();
+  const rgb = stats.channels.slice(0, 3);
+  if (rgb.length === 0) return { exposure: 0, contrast: 0, gamma: 1 };
+  const meanLuma = rgb.reduce((s, c) => s + c.mean, 0) / rgb.length / 255;
+  const meanStdev = rgb.reduce((s, c) => s + c.stdev, 0) / rgb.length / 255;
+  return computeAutoExposureFromStats(meanLuma, meanStdev);
+}
+
+// Silence unused-import warning when the BboxNorm export isn't used directly
+// (re-exported types from the suggestion-compute module stay available for
+// callers that want the same shape).
+export type { BboxNorm };

@@ -748,7 +748,12 @@ export const getPhotoFile = api.raw(
 
 // ---------- AI photo transformations ----------
 
-import { renderSuggestedAndCache } from "./photo-transforms-render.service";
+import {
+  computeAutoLevelsForPhoto,
+  renderSuggestedAndCache,
+  renderUserAndCache,
+  resolvePhotoFilename,
+} from "./photo-transforms-render.service";
 import {
   getPhotoTransformsLogic,
   upsertOwnTransformLogic,
@@ -759,7 +764,7 @@ import {
   type PhotoTransformRow,
   type UpsertTransformRequest,
 } from "./photo-transforms-crud.service";
-import type { PhotoTransformAspectRatio } from "../db/schema";
+import type { PhotoTransformAspectRatio, PhotoTransformCrop } from "../db/schema";
 
 const VALID_RATIOS: ReadonlySet<PhotoTransformAspectRatio> = new Set([
   "1:1",
@@ -775,16 +780,15 @@ const VALID_RATIOS: ReadonlySet<PhotoTransformAspectRatio> = new Set([
  * Server-render a photo with an AI-suggested or user recipe applied.
  *
  * Query params:
- *   v=suggested  — apply the AI suggestion (requires ratio=)
- *   v=original   — passthrough; equivalent to /photos/file/* without transforms
- *   v=user       — apply the requesting user's recipe (not yet implemented;
- *                  returns 501 until the transforms-CRUD API lands)
- *   ratio=…      — one of 1:1, 4:5, 5:4, 3:4, 4:3, 16:9, 9:16 (required for v=suggested)
- *   w=…          — target width in pixels; omit for full resolution
+ *   v=suggested            — apply the AI suggestion (requires ratio=)
+ *   v=user                 — apply a specific user's recipe (requires user=)
+ *   v=original             — 302 redirect to /photos/file/<filename>
+ *   ratio=…                — one of 1:1, 4:5, 5:4, 3:4, 4:3, 16:9, 9:16
+ *   user=<id>              — required for v=user; numeric user id
+ *   w=…                    — target width in pixels; omit for full resolution
  *
- * `auth: false`: mirrors /photos/file/* — addressability via numeric photo
- * IDs is on par with the existing public file endpoint, and no information
- * is leaked beyond what that endpoint already exposes.
+ * `auth: false`: mirrors /photos/file/* — recipe coordinates and exposure
+ * values leak no more than the public file endpoint already does.
  */
 export const renderPhotoTransformed = api.raw(
   { expose: true, method: "GET", path: "/photos/:id/render", auth: false },
@@ -792,8 +796,7 @@ export const renderPhotoTransformed = api.raw(
     if (writeMaintenanceResponseIfActive(res)) return;
     try {
       const url = new URL(req.url || "", `http://${req.headers.host}`);
-      // The path captured `id` segment lives in the URL; api.raw doesn't
-      // surface path params to the handler, so we parse it ourselves.
+      // api.raw doesn't surface path params; parse `:id` from the URL.
       const match = url.pathname.match(/\/photos\/(\d+)\/render$/);
       if (!match) {
         res.statusCode = 404;
@@ -808,30 +811,28 @@ export const renderPhotoTransformed = api.raw(
       }
 
       const variant = (url.searchParams.get("v") ?? "suggested").toLowerCase();
-      if (variant === "user") {
-        res.statusCode = 501;
-        res.end("v=user not implemented yet");
-        return;
-      }
-      if (variant !== "suggested" && variant !== "original") {
+      if (variant !== "suggested" && variant !== "user" && variant !== "original") {
         res.statusCode = 400;
-        res.end("v must be one of: suggested, original, user");
-        return;
-      }
-      if (variant === "original") {
-        // Defer to the standard file serving — clients should just use
-        // /photos/file/* for this case. Send a hint so the misuse is loud.
-        res.statusCode = 400;
-        res.end("v=original — use /photos/file/* instead");
+        res.end("v must be one of: suggested, user, original");
         return;
       }
 
-      const ratio = url.searchParams.get("ratio");
-      if (!ratio || !VALID_RATIOS.has(ratio as PhotoTransformAspectRatio)) {
-        res.statusCode = 400;
-        res.end(
-          `ratio must be one of: ${Array.from(VALID_RATIOS).join(", ")}`,
-        );
+      if (variant === "original") {
+        const filename = await resolvePhotoFilename(photoId);
+        if (!filename) {
+          res.statusCode = 404;
+          res.end("Photo not found");
+          return;
+        }
+        // Carry forward an optional width query param so the client can
+        // still use the existing /photos/file/* resize.
+        const widthStr = url.searchParams.get("w");
+        const qs = widthStr ? `?w=${encodeURIComponent(widthStr)}` : "";
+        // /photos/file expects URL-encoded forward slashes preserved.
+        const safe = filename.split("/").map(encodeURIComponent).join("/");
+        res.statusCode = 302;
+        res.setHeader("Location", `/photos/file/${safe}${qs}`);
+        res.end();
         return;
       }
 
@@ -843,15 +844,40 @@ export const renderPhotoTransformed = api.raw(
         return;
       }
 
-      const result = await renderSuggestedAndCache(
-        photoId,
-        ratio as PhotoTransformAspectRatio,
-        targetWidth,
-      );
-      if (!result) {
-        res.statusCode = 404;
-        res.end("No suggestion available for this photo+ratio");
-        return;
+      let result;
+      if (variant === "user") {
+        const userIdStr = url.searchParams.get("user");
+        const userId = userIdStr ? parseInt(userIdStr, 10) : NaN;
+        if (!Number.isFinite(userId)) {
+          res.statusCode = 400;
+          res.end("v=user requires a numeric user= query parameter");
+          return;
+        }
+        result = await renderUserAndCache(photoId, userId, targetWidth);
+        if (!result) {
+          res.statusCode = 404;
+          res.end("No transform exists for this photo+user");
+          return;
+        }
+      } else {
+        const ratio = url.searchParams.get("ratio");
+        if (!ratio || !VALID_RATIOS.has(ratio as PhotoTransformAspectRatio)) {
+          res.statusCode = 400;
+          res.end(
+            `ratio must be one of: ${Array.from(VALID_RATIOS).join(", ")}`,
+          );
+          return;
+        }
+        result = await renderSuggestedAndCache(
+          photoId,
+          ratio as PhotoTransformAspectRatio,
+          targetWidth,
+        );
+        if (!result) {
+          res.statusCode = 404;
+          res.end("No suggestion available for this photo+ratio");
+          return;
+        }
       }
 
       // Cheap conditional GET — every change to the recipe / model version
@@ -969,6 +995,115 @@ export const adoptPhotoTransform = api(
     const authData = getAuthData()!;
     requirePermission(authData, "photos.view");
     return await adoptTransformLogic(userId, req.id, req.from_transform_id);
+  },
+);
+
+/**
+ * Compute an auto-levels recipe for a photo (and optional crop). Returns
+ * the exposure / contrast / gamma triple — does NOT persist; the editor's
+ * "Auto-Levels" button applies it locally and the user saves when ready.
+ */
+export const computeAutoLevels = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/photos/:id/transforms/auto-levels",
+    auth: true,
+  },
+  async (
+    req: { id: number; crop?: PhotoTransformCrop | null },
+  ): Promise<{ exposure: number; contrast: number; gamma: number }> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    const result = await computeAutoLevelsForPhoto(req.id, req.crop ?? null);
+    if (!result) {
+      throw APIError.notFound(`photo ${req.id} not found`);
+    }
+    return result;
+  },
+);
+
+/**
+ * Full-resolution export with a recipe applied. Same query semantics as
+ * /photos/:id/render but: no `w` parameter, no caching, sends
+ * Content-Disposition: attachment so the browser saves the file. Used
+ * for "Download with my edits" / share workflows.
+ */
+export const exportPhotoTransformed = api.raw(
+  { expose: true, method: "GET", path: "/photos/:id/export", auth: false },
+  async (req, res) => {
+    if (writeMaintenanceResponseIfActive(res)) return;
+    try {
+      const url = new URL(req.url || "", `http://${req.headers.host}`);
+      const match = url.pathname.match(/\/photos\/(\d+)\/export$/);
+      if (!match) {
+        res.statusCode = 404;
+        res.end("Not Found");
+        return;
+      }
+      const photoId = parseInt(match[1], 10);
+      if (!Number.isFinite(photoId)) {
+        res.statusCode = 400;
+        res.end("Invalid photo id");
+        return;
+      }
+
+      const variant = (url.searchParams.get("v") ?? "user").toLowerCase();
+      if (variant !== "suggested" && variant !== "user") {
+        res.statusCode = 400;
+        res.end("v must be one of: suggested, user");
+        return;
+      }
+
+      let buffer: Buffer | null = null;
+      if (variant === "user") {
+        const userIdStr = url.searchParams.get("user");
+        const userId = userIdStr ? parseInt(userIdStr, 10) : NaN;
+        if (!Number.isFinite(userId)) {
+          res.statusCode = 400;
+          res.end("v=user requires a numeric user= query parameter");
+          return;
+        }
+        const r = await renderUserAndCache(photoId, userId, null);
+        buffer = r?.buffer ?? null;
+      } else {
+        const ratio = url.searchParams.get("ratio");
+        if (!ratio || !VALID_RATIOS.has(ratio as PhotoTransformAspectRatio)) {
+          res.statusCode = 400;
+          res.end(
+            `ratio must be one of: ${Array.from(VALID_RATIOS).join(", ")}`,
+          );
+          return;
+        }
+        const r = await renderSuggestedAndCache(
+          photoId,
+          ratio as PhotoTransformAspectRatio,
+          null,
+        );
+        buffer = r?.buffer ?? null;
+      }
+
+      if (!buffer) {
+        res.statusCode = 404;
+        res.end("No recipe available for this photo+variant");
+        return;
+      }
+
+      // Filename hint: photo-<id>-<variant>.jpg. Browsers honour the
+      // attachment disposition by triggering Save-As.
+      res.setHeader("Content-Type", "image/jpeg");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="photo-${photoId}-${variant}.jpg"`,
+      );
+      res.setHeader("Cache-Control", "no-store");
+      res.end(buffer);
+    } catch (err: any) {
+      console.error("Error exporting transformed photo:", err);
+      res.statusCode = 500;
+      res.end("Internal Server Error");
+    }
   },
 );
 

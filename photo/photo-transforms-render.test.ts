@@ -17,11 +17,15 @@ import {
 import { dbInsertReturning } from "../db/adapter";
 import { createUserLogic } from "../user/user.service";
 import {
+  computeAutoLevelsForPhoto,
   recipeCacheKey,
   recipeFromSuggestion,
   renderPhotoWithRecipe,
   renderSuggestedAndCache,
+  renderUserAndCache,
+  resolvePhotoFilename,
 } from "./photo-transforms-render.service";
+import { photoTransforms } from "../db/schema";
 
 const TMP_DIR = "/tmp/fk-encore-render-test";
 
@@ -252,5 +256,174 @@ describe("renderSuggestedAndCache", () => {
   it("returns null for an unknown photo id", async () => {
     const r = await renderSuggestedAndCache(999_999, "1:1", 100);
     expect(r).toBeNull();
+  });
+});
+
+describe("renderUserAndCache", () => {
+  let userId: number;
+  let photoId: number;
+
+  beforeEach(async () => {
+    await db.delete(photoTransforms);
+    await db.delete(photoTransformSuggestions);
+    await db.delete(photos);
+    await db.delete(users);
+
+    const u = await createUserLogic({
+      email: `ru-${Date.now()}@example.com`,
+      name: "RU",
+      password: "pw",
+    });
+    userId = u.id;
+    const filePath = await makeTestImage(`renderuser-${Date.now()}.jpg`, 400, 200, {
+      r: 80,
+      g: 80,
+      b: 80,
+    });
+    const created = await dbInsertReturning<{ id: number }>(
+      db
+        .insert(photos)
+        .values({
+          user_id: userId,
+          filename: filePath,
+          original_name: "ru.jpg",
+          mime_type: "image/jpeg",
+          size: 1024,
+          width: 400,
+          height: 200,
+          external_path: filePath,
+          hash: `hash-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        })
+        .returning({ id: photos.id }),
+    );
+    photoId = created!.id;
+  });
+
+  it("renders the user's recipe and caches the result", async () => {
+    await db.insert(photoTransforms).values({
+      photo_id: photoId,
+      user_id: userId,
+      source: "user",
+      crop: { x: 0.25, y: 0, w: 0.5, h: 1 },
+      rotation: 0,
+      exposure: 0.5,
+      contrast: 0,
+      gamma: 1,
+    });
+
+    const r1 = await renderUserAndCache(photoId, userId, 100);
+    expect(r1).not.toBeNull();
+    expect(r1!.cacheHit).toBe(false);
+    const meta = await sharp(r1!.buffer).metadata();
+    expect(meta.width).toBe(100);
+
+    for (let i = 0; i < 40; i++) {
+      if (fs.existsSync(r1!.cachePath)) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    const r2 = await renderUserAndCache(photoId, userId, 100);
+    expect(r2!.cacheHit).toBe(true);
+  });
+
+  it("returns null when no transform exists for (photo, user)", async () => {
+    const r = await renderUserAndCache(photoId, userId, 100);
+    expect(r).toBeNull();
+  });
+
+  it("returns null for an unknown photo id", async () => {
+    const r = await renderUserAndCache(999_999, userId, 100);
+    expect(r).toBeNull();
+  });
+});
+
+describe("resolvePhotoFilename", () => {
+  it("returns the stored filename", async () => {
+    await db.delete(photoTransforms);
+    await db.delete(photos);
+    await db.delete(users);
+    const u = await createUserLogic({
+      email: `rf-${Date.now()}@example.com`,
+      name: "RF",
+      password: "pw",
+    });
+    const created = await dbInsertReturning<{ id: number }>(
+      db
+        .insert(photos)
+        .values({
+          user_id: u.id,
+          filename: "2026/2026-05/test.jpg",
+          original_name: "t.jpg",
+          mime_type: "image/jpeg",
+          size: 100,
+          width: 10,
+          height: 10,
+        })
+        .returning({ id: photos.id }),
+    );
+    expect(await resolvePhotoFilename(created!.id)).toBe("2026/2026-05/test.jpg");
+  });
+
+  it("returns null for an unknown photo", async () => {
+    expect(await resolvePhotoFilename(999_999)).toBeNull();
+  });
+});
+
+describe("computeAutoLevelsForPhoto", () => {
+  let userId: number;
+  let photoId: number;
+
+  beforeEach(async () => {
+    await db.delete(photoTransforms);
+    await db.delete(photos);
+    await db.delete(users);
+    const u = await createUserLogic({
+      email: `al-${Date.now()}@example.com`,
+      name: "AL",
+      password: "pw",
+    });
+    userId = u.id;
+    const filePath = await makeTestImage(`autolevels-${Date.now()}.jpg`, 400, 200, {
+      r: 60,
+      g: 60,
+      b: 60,
+    });
+    const created = await dbInsertReturning<{ id: number }>(
+      db
+        .insert(photos)
+        .values({
+          user_id: userId,
+          filename: filePath,
+          original_name: "al.jpg",
+          mime_type: "image/jpeg",
+          size: 1024,
+          width: 400,
+          height: 200,
+          external_path: filePath,
+        })
+        .returning({ id: photos.id }),
+    );
+    photoId = created!.id;
+  });
+
+  it("returns a positive exposure for a dark image (full-frame)", async () => {
+    const r = await computeAutoLevelsForPhoto(photoId, null);
+    expect(r).not.toBeNull();
+    expect(r!.exposure).toBeGreaterThan(0);
+    expect(r!.gamma).toBe(1);
+  });
+
+  it("computes stats over the crop region when one is given", async () => {
+    const r = await computeAutoLevelsForPhoto(photoId, {
+      x: 0.1,
+      y: 0.1,
+      w: 0.5,
+      h: 0.5,
+    });
+    expect(r).not.toBeNull();
+    expect(r!.exposure).toBeGreaterThan(0);
+  });
+
+  it("returns null for an unknown photo", async () => {
+    expect(await computeAutoLevelsForPhoto(999_999, null)).toBeNull();
   });
 });
