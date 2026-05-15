@@ -540,24 +540,54 @@ describe("recomputeAllTransformSuggestionsLogic", () => {
     return row!.id;
   }
 
-  it("writes a suggestion row for every photo the user owns", async () => {
+  it("writes a suggestion row for every photo across all users (global)", async () => {
     const { recomputeAllTransformSuggestionsLogic } = await import("./photo.service");
     const a = await makePhotoOnDisk("a", 200, 100);
     const b = await makePhotoOnDisk("b", 300, 200);
-    const result = await recomputeAllTransformSuggestionsLogic(userId);
-    expect(result.total).toBe(2);
-    expect(result.updated).toBe(2);
+
+    // A second user with their own photo — the bulk recompute must
+    // process it too, because suggestions are global per-photo.
+    const u2 = await createUserLogic({
+      email: `bulk2-${Date.now()}@example.com`,
+      name: "B2",
+      password: "pw",
+    });
+    const filePath = `${tmpDir}/owner2-${Date.now()}.jpg`;
+    await sharp({
+      create: { width: 250, height: 200, channels: 3, background: { r: 60, g: 60, b: 60 } },
+    })
+      .jpeg()
+      .toFile(filePath);
+    const c = (
+      await dbInsertReturning<{ id: number }>(
+        db
+          .insert(photos)
+          .values({
+            user_id: u2.id,
+            filename: filePath,
+            original_name: "c.jpg",
+            mime_type: "image/jpeg",
+            size: 1024,
+            width: 250,
+            height: 200,
+            external_path: filePath,
+          })
+          .returning({ id: photos.id }),
+      )
+    )!.id;
+
+    const result = await recomputeAllTransformSuggestionsLogic();
+    expect(result.total).toBe(3);
+    expect(result.updated).toBe(3);
     expect(result.failed).toBe(0);
-    const rows = await db
-      .select()
-      .from(photoTransformSuggestions)
-      .where(eq(photoTransformSuggestions.photo_id, a));
-    expect(rows).toHaveLength(1);
-    const rowsB = await db
-      .select()
-      .from(photoTransformSuggestions)
-      .where(eq(photoTransformSuggestions.photo_id, b));
-    expect(rowsB).toHaveLength(1);
+
+    for (const id of [a, b, c]) {
+      const rows = await db
+        .select()
+        .from(photoTransformSuggestions)
+        .where(eq(photoTransformSuggestions.photo_id, id));
+      expect(rows).toHaveLength(1);
+    }
   });
 
   it("counts photos with missing dimensions as failed but does not abort", async () => {
@@ -577,7 +607,7 @@ describe("recomputeAllTransformSuggestionsLogic", () => {
         })
         .returning({ id: photos.id }),
     );
-    const result = await recomputeAllTransformSuggestionsLogic(userId);
+    const result = await recomputeAllTransformSuggestionsLogic();
     expect(result.total).toBe(2);
     expect(result.updated).toBe(1);
     expect(result.failed).toBe(1);
@@ -603,7 +633,7 @@ describe("recomputeAllTransformSuggestionsLogic", () => {
 
   it("returns total:0 when the user has no photos", async () => {
     const { recomputeAllTransformSuggestionsLogic } = await import("./photo.service");
-    const result = await recomputeAllTransformSuggestionsLogic(userId);
+    const result = await recomputeAllTransformSuggestionsLogic();
     expect(result).toEqual({ updated: 0, failed: 0, total: 0 });
   });
 });

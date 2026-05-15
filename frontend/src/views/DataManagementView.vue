@@ -830,9 +830,11 @@ onMounted(async () => {
       <p>
         Erzeugt für jedes Foto Crop-Vorschläge in allen Seitenverhältnissen (1:1, 4:5,
         16:9, …) plus eine Belichtungs-Empfehlung. Diese Daten füllen den
-        <em>„KI-Vorschlag“-Block</em> im Foto-Editor (Sliders-Icon). Für neu hochgeladene
-        Fotos passiert das automatisch beim Indexieren — diese Aktion ist nur nötig,
-        um bestehende Fotos nachzuziehen oder nach einem Modell-Update.
+        <em>„KI-Vorschlag“-Block</em> im Foto-Editor (Sliders-Icon). Die Vorschläge
+        sind <strong>userübergreifend</strong> — einmal angestoßen profitieren alle
+        Nutzer. Für neu hochgeladene Fotos passiert das automatisch beim Indexieren;
+        diese Aktion ist nur nötig, um bestehende Fotos nachzuziehen oder nach einem
+        Modell-Update.
       </p>
 
       <Message v-if="transformSuggestError" severity="error" class="data-management-group__item" @close="transformSuggestError = ''">

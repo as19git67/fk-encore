@@ -5070,19 +5070,25 @@ export async function recomputeAllAutoCropsLogic(userId: number): Promise<{ upda
 
 /**
  * Recompute the AI transformation-suggestion payload for every photo
- * the user owns. Used as a one-shot for photos indexed before the
+ * in the system. Used as a one-shot for photos indexed before the
  * suggestion-compute hook was added, and for picking up changes when
  * the model_version is bumped.
+ *
+ * Suggestions are stored globally (one row per photo, no user_id), so
+ * this is intentionally NOT per-user: running it once benefits every
+ * user looking at any photo.
  *
  * Each call writes / overwrites a row in photo_transform_suggestions
  * (idempotent). Failures are logged and counted separately so a single
  * bad image doesn't abort the whole run.
  */
-export async function recomputeAllTransformSuggestionsLogic(
-  userId: number,
-): Promise<{ updated: number; failed: number; total: number }> {
+export async function recomputeAllTransformSuggestionsLogic(): Promise<{
+  updated: number;
+  failed: number;
+  total: number;
+}> {
   const allPhotos = await dbAll<{ id: number }>(
-    db.select({ id: photos.id }).from(photos).where(eq(photos.user_id, userId)),
+    db.select({ id: photos.id }).from(photos),
   );
 
   let updated = 0;
