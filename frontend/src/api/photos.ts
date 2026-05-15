@@ -426,6 +426,21 @@ export function recomputeAutoCrops() {
   })
 }
 
+export function recomputeTransformSuggestions(opts: { force?: boolean } = {}) {
+  return apiFetch<{ updated: number; failed: number; skipped: number; total: number }>(
+    '/photos/recompute-transform-suggestions',
+    {
+      method: 'POST',
+      body: JSON.stringify({ force: opts.force ?? false }),
+      // 60 min ceiling. The backend keeps running past a client abort
+      // anyway (no AbortSignal plumbed in), and the default skip-logic
+      // makes re-runs cheap — but a fresh large library can still
+      // legitimately take more than 10 minutes.
+      timeoutMs: 60 * 60 * 1000,
+    },
+  )
+}
+
 export function reindexPhoto(id: number) {
   return apiFetch<{ success: boolean }>(`/photos/${id}/reindex`, {
     method: 'POST'

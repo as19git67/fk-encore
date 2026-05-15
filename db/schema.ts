@@ -449,6 +449,83 @@ export const albumUserSettings = pgTable(
   (table) => [primaryKey({ columns: [table.album_id, table.user_id] })]
 );
 
+// ========== Photo Transformations (AI crop/exposure suggestions + per-user recipes) ==========
+//
+// See docs/photos-ai-transforms.md. Originals are never overwritten; user
+// recipes live here, and the AI suggestion payload is shared per photo.
+
+export type PhotoTransformCrop = { x: number; y: number; w: number; h: number };
+
+export type PhotoTransformAspectRatio =
+  | "1:1"
+  | "4:5"
+  | "5:4"
+  | "3:4"
+  | "4:3"
+  | "16:9"
+  | "9:16";
+
+export interface PhotoTransformSuggestionsPayload {
+  // One crop per supported aspect ratio. Missing keys mean the subject hull
+  // didn't fit that ratio at this orientation; the client should fall back
+  // to the cropper UI for that one.
+  crops: Partial<Record<PhotoTransformAspectRatio, PhotoTransformCrop>>;
+  exposure: number;     // EV, e.g. -2..+2
+  contrast: number;     // -1..+1
+  gamma: number;        // multiplicative, default 1
+  white_point?: number; // 0..1, optional
+  black_point?: number; // 0..1, optional
+}
+
+export const photoTransformSuggestions = pgTable("photo_transform_suggestions", {
+  photo_id: integer("photo_id")
+    .primaryKey()
+    .references(() => photos.id, { onDelete: "cascade" }),
+  payload: jsonb("payload").$type<PhotoTransformSuggestionsPayload>().notNull(),
+  model_version: text("model_version").notNull(),
+  computed_at: timestamp("computed_at", { withTimezone: true, mode: "string" })
+    .notNull()
+    .defaultNow(),
+});
+
+export const photoTransforms = pgTable(
+  "photo_transforms",
+  {
+    id: serial("id").primaryKey(),
+    photo_id: integer("photo_id")
+      .notNull()
+      .references(() => photos.id, { onDelete: "cascade" }),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // 'ai' = materialised from a suggestion. 'user' = composed in the editor.
+    // 'adopted' = copied from another user's row (adopted_from points to it).
+    source: text("source").notNull(),
+    // Self-reference FK (defined in SQL only — drizzle struggles with circular
+    // references at table-definition time). ON DELETE SET NULL so adopted
+    // recipes survive deletion of the source.
+    adopted_from: integer("adopted_from"),
+    crop: jsonb("crop").$type<PhotoTransformCrop>(),
+    rotation: integer("rotation").notNull().default(0), // 0 | 90 | 180 | 270
+    exposure: real("exposure").notNull().default(0),
+    contrast: real("contrast").notNull().default(0),
+    gamma: real("gamma").notNull().default(1),
+    white_point: real("white_point"),
+    black_point: real("black_point"),
+    applied_at: timestamp("applied_at", { withTimezone: true, mode: "string" }),
+    created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .notNull()
+      .defaultNow(),
+    updated_at: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("photo_transforms_photo_user_uniq").on(table.photo_id, table.user_id),
+    index("photo_transforms_user_id_idx").on(table.user_id),
+  ]
+);
+
 // ========== Photo Landmarks (Grounding DINO detection results) ==========
 
 // ========== Photo Landmarks (global detection results — one set per photo) ==========
