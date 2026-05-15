@@ -112,3 +112,56 @@ export function adoptPhotoTransform(photoId: number, fromTransformId: number) {
     body: JSON.stringify({ from_transform_id: fromTransformId }),
   })
 }
+
+export interface AutoLevelsResponse {
+  exposure: number
+  contrast: number
+  gamma: number
+}
+
+/**
+ * Compute an auto-levels recipe for a photo (and optional crop). Does NOT
+ * persist — the caller applies the returned values to the editor recipe
+ * and saves explicitly. When a crop is given the stats are computed over
+ * just the cropped region so the auto-levels match what the user will
+ * actually see.
+ */
+export function computePhotoAutoLevels(
+  photoId: number,
+  crop?: PhotoTransformCrop | null,
+) {
+  return apiFetch<AutoLevelsResponse>(
+    `/photos/${photoId}/transforms/auto-levels`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ crop: crop ?? null }),
+    },
+  )
+}
+
+/** Build the render URL for a server-rendered variant. */
+export function getRenderedPhotoUrl(
+  photoId: number,
+  opts:
+    | { variant: 'suggested'; ratio: PhotoTransformAspectRatio; width?: number }
+    | { variant: 'user'; userId: number; width?: number },
+): string {
+  const params = new URLSearchParams({ v: opts.variant })
+  if (opts.variant === 'suggested') params.set('ratio', opts.ratio)
+  if (opts.variant === 'user') params.set('user', String(opts.userId))
+  if (opts.width) params.set('w', String(opts.width))
+  return `/photos/${photoId}/render?${params.toString()}`
+}
+
+/** Build the full-resolution export URL. */
+export function getExportedPhotoUrl(
+  photoId: number,
+  opts:
+    | { variant: 'suggested'; ratio: PhotoTransformAspectRatio }
+    | { variant: 'user'; userId: number },
+): string {
+  const params = new URLSearchParams({ v: opts.variant })
+  if (opts.variant === 'suggested') params.set('ratio', opts.ratio)
+  if (opts.variant === 'user') params.set('user', String(opts.userId))
+  return `/photos/${photoId}/export?${params.toString()}`
+}

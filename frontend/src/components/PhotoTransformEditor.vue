@@ -22,6 +22,7 @@ import Message from 'primevue/message'
 import { getPhotoUrl } from '../api/photos'
 import {
   adoptPhotoTransform,
+  computePhotoAutoLevels,
   deletePhotoTransform,
   getPhotoTransforms,
   materializePhotoTransform,
@@ -77,6 +78,13 @@ const selectedRatio = ref<PhotoTransformAspectRatio | 'free'>('free')
 const naturalWidth = ref<number>(0)
 const naturalHeight = ref<number>(0)
 
+/** Before/After toggle: when true the preview shows the un-transformed
+ *  original (the recipe is kept in state and re-applied on release). */
+const showOriginal = ref(false)
+
+/** Auto-Levels button spinner state. */
+const computingAutoLevels = ref(false)
+
 const ratioOptions: { key: PhotoTransformAspectRatio; label: string }[] = [
   { key: '1:1', label: '1:1' },
   { key: '4:5', label: '4:5' },
@@ -105,19 +113,31 @@ const imageAspect = computed(() => {
 
 // Effective crop used by the cropper. We always pass a crop in so the
 // user has a rectangle to drag; if the user hasn't set one yet we show
-// the full image as the "starting" crop.
-const effectiveCrop = computed(() => recipe.value.crop ?? { x: 0, y: 0, w: 1, h: 1 })
+// the full image as the "starting" crop. When the user holds the
+// Before/After toggle the cropper jumps to "no crop" so the full
+// untouched image is visible — recipe state is preserved and restored
+// on release.
+const effectiveCrop = computed(() => {
+  if (showOriginal.value) return { x: 0, y: 0, w: 1, h: 1 }
+  return recipe.value.crop ?? { x: 0, y: 0, w: 1, h: 1 }
+})
 
 // Crop aspect ratio passed to the cropper as a lock. null = free.
+// While the Before/After toggle is engaged we relax the lock so the
+// rectangle covers the entire image cleanly.
 const cropAspectRatio = computed<number | null>(() => {
+  if (showOriginal.value) return null
   if (selectedRatio.value === 'free') return null
   return aspectRatioToFloat(selectedRatio.value)
 })
 
-const cropperImgStyle = computed(() => ({
-  filter: cssFilter.value || undefined,
-  transform: cssTransform.value || undefined,
-}))
+const cropperImgStyle = computed(() => {
+  if (showOriginal.value) return {}
+  return {
+    filter: cssFilter.value || undefined,
+    transform: cssTransform.value || undefined,
+  }
+})
 
 const originalUrl = computed(() => getPhotoUrl(props.photoFilename))
 
@@ -206,6 +226,24 @@ function applyRatio(ratio: PhotoTransformAspectRatio | 'free') {
   recipe.value = {
     ...recipe.value,
     crop: suggested ?? centredCropForRatio(ratio),
+  }
+}
+
+async function applyAutoLevels() {
+  computingAutoLevels.value = true
+  error.value = null
+  try {
+    const result = await computePhotoAutoLevels(props.photoId, recipe.value.crop ?? null)
+    recipe.value = {
+      ...recipe.value,
+      exposure: result.exposure,
+      contrast: result.contrast,
+      gamma: result.gamma,
+    }
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    computingAutoLevels.value = false
   }
 }
 
@@ -483,7 +521,31 @@ onMounted(() => {
         </section>
 
         <section class="control-section">
-          <h4>Bildanpassungen</h4>
+          <div class="section-head">
+            <h4>Bildanpassungen</h4>
+            <div class="section-actions">
+              <Button
+                label="Auto"
+                size="small"
+                outlined
+                icon="pi pi-bolt"
+                v-tooltip.top="'Belichtung anhand der aktuellen Crop-Region berechnen'"
+                @click="applyAutoLevels"
+                :loading="computingAutoLevels"
+                :disabled="loading"
+              />
+              <Button
+                :icon="showOriginal ? 'pi pi-eye-slash' : 'pi pi-eye'"
+                size="small"
+                outlined
+                v-tooltip.top="'Vorher/Nachher (halten)'"
+                @pointerdown="showOriginal = true"
+                @pointerup="showOriginal = false"
+                @pointerleave="showOriginal = false"
+                @pointercancel="showOriginal = false"
+              />
+            </div>
+          </div>
           <div class="slider-row">
             <label>Belichtung</label>
             <Slider
@@ -516,6 +578,30 @@ onMounted(() => {
               class="slider"
             />
             <span class="slider-value">{{ (recipe.gamma ?? 1).toFixed(2) }}</span>
+          </div>
+          <div class="slider-row">
+            <label>Schwarzpunkt</label>
+            <Slider
+              :modelValue="recipe.black_point ?? 0"
+              @update:modelValue="(v: number | number[]) => (recipe.black_point = Array.isArray(v) ? v[0]! : (v === 0 ? null : v))"
+              :min="0"
+              :max="0.4"
+              :step="0.01"
+              class="slider"
+            />
+            <span class="slider-value">{{ (recipe.black_point ?? 0).toFixed(2) }}</span>
+          </div>
+          <div class="slider-row">
+            <label>Weißpunkt</label>
+            <Slider
+              :modelValue="recipe.white_point ?? 1"
+              @update:modelValue="(v: number | number[]) => (recipe.white_point = Array.isArray(v) ? v[0]! : (v === 1 ? null : v))"
+              :min="0.6"
+              :max="1"
+              :step="0.01"
+              class="slider"
+            />
+            <span class="slider-value">{{ (recipe.white_point ?? 1).toFixed(2) }}</span>
           </div>
         </section>
 
@@ -609,6 +695,18 @@ onMounted(() => {
   font-size: 0.875rem;
   font-weight: 600;
   color: var(--p-text-muted-color);
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.section-actions {
+  display: flex;
+  gap: 0.25rem;
 }
 
 .ratio-chips {

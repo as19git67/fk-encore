@@ -96,6 +96,9 @@ jobs:
       - name: Install frontend dependencies
         run: npm --prefix frontend install --legacy-peer-deps
 
+      - name: Run frontend tests
+        run: npm --prefix frontend run test
+
       - name: Build frontend (SPA bundle)
         run: npm --prefix frontend run build
 

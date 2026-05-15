@@ -116,6 +116,65 @@ function endDrag(ev: PointerEvent) {
 }
 
 /**
+ * Keyboard shortcuts. The cropper has tabindex=0 so it accepts focus.
+ *   Arrow keys           pan by 1 % of the image dimension
+ *   Shift + Arrow keys   pan by 5 %
+ *   Alt + Arrow keys     resize from the SE handle (width/height)
+ *   Shift + Alt + Arrow  resize from the SE handle by 5 %
+ *   Home / End           jump crop to left / right edge
+ *   PageUp / PageDown    jump crop to top / bottom edge
+ *
+ * Aspect-ratio lock is respected the same way it is during a mouse drag.
+ */
+function onKeydown(ev: KeyboardEvent) {
+  const step = ev.shiftKey ? 0.05 : 0.01
+  const ratio = props.aspectRatio
+  const start = props.crop
+  let dx = 0
+  let dy = 0
+  let handle: CropHandle = 'body'
+
+  switch (ev.key) {
+    case 'ArrowLeft':
+      dx = -step
+      break
+    case 'ArrowRight':
+      dx = step
+      break
+    case 'ArrowUp':
+      dy = -step
+      break
+    case 'ArrowDown':
+      dy = step
+      break
+    case 'Home':
+      dx = -1
+      break
+    case 'End':
+      dx = 1
+      break
+    case 'PageUp':
+      dy = -1
+      break
+    case 'PageDown':
+      dy = 1
+      break
+    default:
+      return
+  }
+
+  if (ev.altKey && (ev.key.startsWith('Arrow'))) {
+    handle = 'se'
+  }
+
+  const next = computeNextCrop(handle, start, dx, dy, ratio)
+  if (next) {
+    ev.preventDefault()
+    emit('update:crop', next)
+  }
+}
+
+/**
  * The rendered image's pixel rectangle inside the wrapper. Because the
  * wrapper has aspect-ratio: imageAspect, the image fills the wrapper
  * 1:1 — `getBoundingClientRect` on the wrapper itself is correct.
@@ -133,10 +192,12 @@ onBeforeUnmount(() => {
   <div
     class="cropper-wrap"
     ref="wrapper"
+    tabindex="0"
     :style="{ aspectRatio: String(imageAspect) }"
     @pointermove="onPointerMove"
     @pointerup="endDrag"
     @pointercancel="endDrag"
+    @keydown="onKeydown"
   >
     <img
       :src="src"
@@ -187,6 +248,12 @@ onBeforeUnmount(() => {
   background: rgba(0, 0, 0, 0.05);
   user-select: none;
   touch-action: none;
+  outline: none;
+}
+
+.cropper-wrap:focus-visible {
+  outline: 2px solid var(--p-primary-color, #6366f1);
+  outline-offset: 2px;
 }
 
 .cropper-img {
