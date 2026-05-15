@@ -394,6 +394,11 @@ function scheduleIdleAdvance() {
   clearIdleTimer()
   if (!props.autoAdvanceMs || props.autoAdvanceMs <= 0) return
   if (!props.nextPhoto) return
+  // Pause auto-advance whenever any modal / details overlay is on top
+  // of the photo — the user is reading or editing, not consuming. The
+  // timer resumes from a watcher when the overlay closes.
+  if (transformEditorVisible.value) return
+  if (props.detailsActive) return
   idleTimer = setTimeout(() => {
     idleTimer = null
     if (props.nextPhoto) emit('next')
@@ -408,6 +413,9 @@ function bumpIdleTimer() {
 watch(() => props.photo.id, () => scheduleIdleAdvance())
 watch(() => props.autoAdvanceMs, () => scheduleIdleAdvance())
 watch(() => props.nextPhoto, () => scheduleIdleAdvance())
+// Reschedule (or pause) when the editor / details overlay toggles.
+watch(transformEditorVisible, () => scheduleIdleAdvance())
+watch(() => props.detailsActive, () => scheduleIdleAdvance())
 
 onMounted(() => {
   scheduleIdleAdvance()
