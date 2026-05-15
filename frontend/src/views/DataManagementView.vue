@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import Button from 'primevue/button'
+import Checkbox from 'primevue/checkbox'
 import ProgressBar from 'primevue/progressbar'
 import Message from 'primevue/message'
 import RadioButton from 'primevue/radiobutton'
@@ -17,6 +18,7 @@ import {
   getPhotosToRefreshMetadata, refreshPhotoMetadata,
   getPhotosNeedingGpsRescan, rescanPhotoGps,
   recomputeAutoCrops,
+  recomputeTransformSuggestions,
   purgePhotos,
   type ScanQueueStatus,
   type PurgeResult,
@@ -302,6 +304,33 @@ async function handleGpsRescan() {
 const autoCropLoading = ref(false)
 const autoCropResult = ref<{ updated: number } | null>(null)
 const autoCropError = ref('')
+
+// ── AI-Transform-Suggestions ─────────────────────────────────────────────────
+const transformSuggestLoading = ref(false)
+const transformSuggestResult = ref<{
+  updated: number
+  failed: number
+  skipped: number
+  total: number
+} | null>(null)
+const transformSuggestError = ref('')
+const transformSuggestForce = ref(false)
+
+async function handleRecomputeTransformSuggestions() {
+  transformSuggestResult.value = null
+  transformSuggestError.value = ''
+  transformSuggestLoading.value = true
+  try {
+    transformSuggestResult.value = await recomputeTransformSuggestions({
+      force: transformSuggestForce.value,
+    })
+  } catch (err: any) {
+    transformSuggestError.value =
+      err.message || 'Fehler beim Berechnen der KI-Crop-Vorschläge'
+  } finally {
+    transformSuggestLoading.value = false
+  }
+}
 
 async function handleRecomputeAutoCrops() {
   autoCropResult.value = null
@@ -694,7 +723,8 @@ onMounted(async () => {
       <Button class="data-management-group__item"
         icon="pi pi-arrows-alt"
         outlined
-        label="Bildmaße nachtragen (für Orientierungsregel)"
+        label="Bildmaße nachtragen"
+        v-tooltip.top="'Liest Breite und Höhe aus den Original-Dateien nach, damit die Orientierungsregel und der KI-Crop-Vorschlag korrekt arbeiten können.'"
         :loading="dimensionsLoading"
         :disabled="dimensionsLoading || aiPickLoading || groupingLoading || isActive || rescanLoading || retryLoading"
         @click="handleBackfillDimensions"
@@ -801,6 +831,57 @@ onMounted(async () => {
         :loading="autoCropLoading"
         :disabled="autoCropLoading || isActive || rescanLoading || retryLoading"
         @click="handleRecomputeAutoCrops"
+      />
+    </div>
+
+    <!-- AI-Transformations-Vorschläge -->
+    <div class="data-management-group">
+      <h3>KI-Crop-Vorschläge neu berechnen</h3>
+      <p>
+        Erzeugt für jedes Foto Crop-Vorschläge in allen Seitenverhältnissen (1:1, 4:5,
+        16:9, …) plus eine Belichtungs-Empfehlung. Diese Daten füllen den
+        <em>„KI-Vorschlag“-Block</em> im Foto-Editor (Sliders-Icon). Die Vorschläge
+        sind <strong>userübergreifend</strong> — einmal angestoßen profitieren alle
+        Nutzer. Für neu hochgeladene Fotos passiert das automatisch beim Indexieren;
+        diese Aktion ist nur nötig, um bestehende Fotos nachzuziehen oder nach einem
+        Modell-Update.
+      </p>
+      <p>
+        Standardmäßig werden nur Fotos berechnet, die <em>noch keine</em> Vorschlags-Zeile
+        haben — Re-Runs nach einem abgebrochenen Lauf sind so günstig. Aktiviere
+        „Auch bestehende neu berechnen“ nach einem Modell-Update.
+      </p>
+
+      <Message v-if="transformSuggestError" severity="error" class="data-management-group__item" @close="transformSuggestError = ''">
+        {{ transformSuggestError }}
+      </Message>
+
+      <div v-if="transformSuggestResult" class="data-management-group__item">
+        <Message severity="info" :closable="false">
+          {{ transformSuggestResult.updated }} neu berechnet,
+          {{ transformSuggestResult.skipped }} übersprungen<span v-if="transformSuggestResult.failed > 0">,
+            {{ transformSuggestResult.failed }} fehlgeschlagen (fehlende Maße oder
+            unlesbares Bild)</span> — gesamt {{ transformSuggestResult.total }} Fotos.
+        </Message>
+      </div>
+
+      <div class="data-management-group__item force-toggle">
+        <Checkbox
+          v-model="transformSuggestForce"
+          inputId="transform-suggest-force"
+          binary
+          :disabled="transformSuggestLoading"
+        />
+        <label for="transform-suggest-force">Auch bestehende neu berechnen</label>
+      </div>
+
+      <Button class="data-management-group__item"
+        icon="pi pi-sparkles"
+        outlined
+        label="KI-Crop-Vorschläge neu berechnen"
+        :loading="transformSuggestLoading"
+        :disabled="transformSuggestLoading || isActive || rescanLoading || retryLoading"
+        @click="handleRecomputeTransformSuggestions"
       />
     </div>
 
@@ -1005,6 +1086,24 @@ onMounted(async () => {
 }
 
 .data-management-group .data-management-group__item {
+}
+
+/*
+ * Force every button inside a data-management-group to size to its
+ * label rather than inherit a stretch from PrimeVue's internal flex
+ * defaults. A previous long label ("…(für Orientierungsregel)") had
+ * pulled its button to full width on certain viewports.
+ */
+.data-management-group :deep(.p-button) {
+  align-self: flex-start;
+  width: auto;
+}
+
+.data-management-group .force-toggle {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.95em;
 }
 
 .status-progress {

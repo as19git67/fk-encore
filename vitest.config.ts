@@ -21,6 +21,12 @@ export default defineConfig({
       PHOTO_UPLOAD_DIR: "uploads/photos",
       PHOTO_THUMBNAIL_DIR: "uploads/thumbnails",
     },
+    // frontend/** is excluded entirely: those files rely on a DOM / Vue test
+    // env we haven't wired up, and even the pure-utility tests under
+    // frontend/src/utils/ trip vite:oxc with "Tsconfig not found" in CI's
+    // Node 24 (locally on Node 22 the older oxc walks up to the root
+    // tsconfig and is happy). When we add a dedicated frontend vitest
+    // config we can re-enable them there.
     exclude: [
       "node_modules/**",
       "encore.gen/**",

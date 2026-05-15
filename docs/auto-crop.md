@@ -1,5 +1,10 @@
 # Auto-Crop: Intelligent Thumbnail Positioning
 
+> **See also:** [AI Photo Transformations](./photos-ai-transforms.md) — the
+> upcoming feature that adds aspect-aware crop rectangles, exposure /
+> contrast correction and per-user variants on top of the focus-point
+> mechanism described here.
+
 ## Summary
 
 Portrait-oriented images are displayed as square thumbnails in the grid.

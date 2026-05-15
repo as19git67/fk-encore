@@ -2,7 +2,10 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
+import PhotoTransformEditor from './PhotoTransformEditor.vue'
 import { getPhotoUrl, type Photo, type CurationStatus } from '../api/photos'
+import { useUserPhotoTransform, invalidateUserTransform } from '../composables/useUserPhotoTransform'
+import { useAuthStore } from '../stores/auth'
 import type { GalleryGridGroup } from '../api/gallery'
 import { formatPhotoDateCompact, formatLocationLabel } from '../utils/dateFormat'
 
@@ -63,6 +66,46 @@ const emit = defineEmits<{
   /** Fired when the user clicks the +N marker → parent opens review. */
   'open-group-review': []
 }>()
+
+// Per-user photo recipe — applies the caller's exposure/contrast/gamma
+// to the fullscreen image via CSS filter. Crop is NOT applied here for
+// the same layout-coupling reasons as in the sidebar preview; the full
+// transformed render is available via /photos/:id/render?v=user for
+// download / share workflows.
+const currentPhotoId = computed(() => props.photo?.id ?? null)
+const {
+  recipe: userRecipe,
+  cssFilter: userPhotoFilter,
+  svgFilterMarkup: userSvgMarkup,
+  buildRenderedUrl: buildUserRenderedUrl,
+} = useUserPhotoTransform(currentPhotoId)
+
+// When the user has a saved recipe, route the visible image through the
+// server-render so the crop is reflected. Face-box overlays in the
+// <slot/> still draw against image-natural coords and will appear
+// misaligned over a cropped view — accepted trade-off; face tagging
+// typically precedes cropping, and the user can clear their crop to
+// restore the original face-box layout.
+const fsImageSrc = computed(() => {
+  // No width param → full-resolution rendered image. The server caches
+  // it on first request; subsequent loads hit the cache.
+  return buildUserRenderedUrl() ?? getPhotoUrl(props.photo.filename)
+})
+
+const fsImageStyle = computed(() =>
+  userRecipe.value || !userPhotoFilter.value
+    ? undefined
+    : { filter: userPhotoFilter.value },
+)
+
+// Editor trigger — accessible from inside the fullscreen view too, not
+// just from the desktop sidebar's quick-actions row.
+const auth = useAuthStore()
+const canEditTransform = computed(() => auth.hasPermission('photos.upload'))
+const transformEditorVisible = ref(false)
+function onTransformSaved() {
+  invalidateUserTransform(props.photo.id)
+}
 
 // Track-I marker semantics — mirrors VirtualGallery's badge logic.
 const isAiHidingSiblings = computed(() => {
@@ -351,6 +394,11 @@ function scheduleIdleAdvance() {
   clearIdleTimer()
   if (!props.autoAdvanceMs || props.autoAdvanceMs <= 0) return
   if (!props.nextPhoto) return
+  // Pause auto-advance whenever any modal / details overlay is on top
+  // of the photo — the user is reading or editing, not consuming. The
+  // timer resumes from a watcher when the overlay closes.
+  if (transformEditorVisible.value) return
+  if (props.detailsActive) return
   idleTimer = setTimeout(() => {
     idleTimer = null
     if (props.nextPhoto) emit('next')
@@ -365,6 +413,9 @@ function bumpIdleTimer() {
 watch(() => props.photo.id, () => scheduleIdleAdvance())
 watch(() => props.autoAdvanceMs, () => scheduleIdleAdvance())
 watch(() => props.nextPhoto, () => scheduleIdleAdvance())
+// Reschedule (or pause) when the editor / details overlay toggles.
+watch(transformEditorVisible, () => scheduleIdleAdvance())
+watch(() => props.detailsActive, () => scheduleIdleAdvance())
 
 onMounted(() => {
   scheduleIdleAdvance()
@@ -421,12 +472,16 @@ function locationLabel(photo: Photo) {
       <!-- Zoom wrapper: CSS transform applied here so the face box (in the
            HeicImage slot) scales together with the image. -->
       <div class="fs-zoom-wrapper" :style="zoomTransformStyle">
+        <svg v-if="userSvgMarkup && !userRecipe" width="0" height="0" style="position: absolute; pointer-events: none">
+          <defs v-html="userSvgMarkup"></defs>
+        </svg>
         <div @load.capture="onCurrentImageLoad" style="display: contents">
           <HeicImage
-            :src="getPhotoUrl(photo.filename)"
+            :src="fsImageSrc"
             :alt="photo.original_name"
             objectFit="contain"
             :staticSlot="true"
+            :imageStyle="fsImageStyle"
           >
             <!-- Allow caller to inject overlays (e.g. face box) -->
             <slot />
@@ -498,6 +553,14 @@ function locationLabel(photo: Photo) {
               @click="emit('toggle-favorite', photo.id, photo.curation_status)"
               v-tooltip.bottom="(photo.curation_status === 'favorite' ? 'Favorit entfernen' : 'Als Favorit markieren') + ' (F)'"
             />
+            <Button
+              v-if="canEditTransform"
+              icon="pi pi-sliders-h"
+              rounded text
+              severity="secondary"
+              @click="transformEditorVisible = true"
+              v-tooltip.bottom="'Schnitt &amp; Belichtung bearbeiten'"
+            />
           </slot>
         </div>
       </div>
@@ -545,6 +608,17 @@ function locationLabel(photo: Photo) {
     </div>
   </div>
   </Teleport>
+
+  <!-- Editor dialog — hosted here so it works from inside fullscreen
+       even though the sidebar's quick-actions row is hidden there. -->
+  <PhotoTransformEditor
+    v-if="canEditTransform"
+    v-model:visible="transformEditorVisible"
+    :photo-id="photo.id"
+    :photo-filename="photo.filename"
+    @saved="onTransformSaved"
+    @deleted="onTransformSaved"
+  />
 </template>
 
 <style scoped>
