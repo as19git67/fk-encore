@@ -660,9 +660,10 @@ onMounted(() => {
           </div>
         </section>
       </div>
-    </div>
 
-    <template #footer>
+      <!-- Footer lives INSIDE the editor-grid so it scrolls with the
+           rest of the content. On the desktop two-column layout the
+           grid-column rule below pulls it across both columns. -->
       <div class="footer-buttons">
         <Button
           icon="pi pi-refresh"
@@ -694,7 +695,7 @@ onMounted(() => {
           :disabled="loading"
         />
       </div>
-    </template>
+    </div>
   </Dialog>
 </template>
 
@@ -820,11 +821,16 @@ onMounted(() => {
 }
 
 /*
- * Footer fits onto one row on every viewport because the two secondary
- * actions (reset, delete) are icon-only — labels live in v-tooltip +
- * aria-label so screen-readers and hover-discovery still work. Wrap is
- * still allowed as a final safety net on extra-narrow screens, with
- * the primary Speichern button anchored to the right.
+ * Footer lives inside .editor-grid so it scrolls with the rest of
+ * the dialog content. On the two-column desktop layout it spans
+ * both columns; on the stacked mobile layout it just sits at the
+ * bottom of the single column.
+ *
+ * Horizontal padding is intentionally NOT set here — the parent
+ * .editor-grid already provides padding: 1rem on every side, so
+ * the footer aligns with the chips and sliders above. A top border
+ * separates the action row from the controls without taking up
+ * extra space.
  */
 .footer-buttons {
   display: flex;
@@ -832,6 +838,14 @@ onMounted(() => {
   justify-content: flex-end;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 1rem;
+  padding-top: 0.75rem;
+  margin-top: 0.5rem;
+  border-top: 1px solid var(--p-content-border-color);
+}
+
+@media (min-width: 901px) {
+  .footer-buttons {
+    grid-column: 1 / -1;
+  }
 }
 </style>
