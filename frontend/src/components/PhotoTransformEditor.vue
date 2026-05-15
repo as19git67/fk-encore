@@ -804,6 +804,22 @@ onMounted(() => {
   gap: 0.25rem;
 }
 
+/*
+ * Disable text selection on every button inside the editor. The
+ * "Original" press-and-hold button is the obvious case — without
+ * this, a long-press triggers the platform's text-selection /
+ * touch-callout instead of registering as a press, so the
+ * before/after toggle fails. user-select: none + the iOS-specific
+ * partners are cheap to apply everywhere and stop similar accidents
+ * on the chips, the cropper-related buttons, etc.
+ */
+:deep(.p-button) {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
 .ratio-chips {
   display: flex;
   flex-wrap: wrap;
