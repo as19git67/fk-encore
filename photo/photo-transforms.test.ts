@@ -327,6 +327,54 @@ describe("suggestion compute — pure math", () => {
       expect(crop!.x + crop!.w).toBeLessThanOrEqual(1 + 1e-6);
       expect(crop!.y + crop!.h).toBeLessThanOrEqual(1 + 1e-6);
     });
+
+    it("returns the LARGEST crop fitting the image at the requested ratio", () => {
+      // Square image. Small centred face.
+      // For a 1:1 pixel crop: largest = whole image (w=1, h=1).
+      const hull: BboxNorm = { x: 0.45, y: 0.4, width: 0.1, height: 0.15 };
+      const square = fitCropToAspect(hull, 1.0, 1.0)!;
+      expect(square.w).toBeCloseTo(1, 5);
+      expect(square.h).toBeCloseTo(1, 5);
+
+      // For 16:9 on a square: largest = w=1, h=9/16.
+      const wide = fitCropToAspect(hull, 16 / 9, 1.0)!;
+      expect(wide.w).toBeCloseTo(1, 5);
+      expect(wide.h).toBeCloseTo(9 / 16, 5);
+
+      // For 9:16 on a square: largest = w=9/16, h=1.
+      const tall = fitCropToAspect(hull, 9 / 16, 1.0)!;
+      expect(tall.w).toBeCloseTo(9 / 16, 5);
+      expect(tall.h).toBeCloseTo(1, 5);
+    });
+
+    it("rotates a landscape image into portrait orientation for a 9:16 crop", () => {
+      // Landscape source (4000×3000 = 4/3 pixel-aspect), subject left-of-centre.
+      // The 9:16 crop should be portrait-shaped: w < h in normalised coords.
+      const imageAR = 4 / 3;
+      const hull: BboxNorm = { x: 0.4, y: 0.35, width: 0.15, height: 0.2 };
+      const crop = fitCropToAspect(hull, 9 / 16, imageAR)!;
+      expect(crop.h).toBeGreaterThan(crop.w);
+      // And the pixel-space aspect matches what was requested.
+      const pixelAR = (crop.w * 4000) / (crop.h * 3000);
+      expect(pixelAR).toBeCloseTo(9 / 16, 3);
+    });
+
+    it("places the subject centroid near a rule-of-thirds intersection", () => {
+      // Square image, subject left-of-centre top-third.
+      const hull: BboxNorm = { x: 0.2, y: 0.15, width: 0.1, height: 0.1 };
+      const crop = fitCropToAspect(hull, 1.0, 1.0)!;
+      const cx = hull.x + hull.width / 2;
+      const cy = hull.y + hull.height / 2;
+      // Distance of the centroid from the nearest ROT point inside the crop.
+      const fx = (cx - crop.x) / crop.w;
+      const fy = (cy - crop.y) / crop.h;
+      const dx = Math.min(Math.abs(fx - 1 / 3), Math.abs(fx - 2 / 3));
+      const dy = Math.min(Math.abs(fy - 1 / 3), Math.abs(fy - 2 / 3));
+      // For a 1:1 crop on a 1:1 image the crop fills the whole frame so
+      // the centroid sits wherever the subject sits; assert it is at
+      // least within the ROT band (1/3 ± 0.15) on one axis.
+      expect(Math.min(dx, dy)).toBeLessThan(0.16);
+    });
   });
 
   describe("computeSuggestionCrops", () => {

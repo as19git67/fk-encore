@@ -90,33 +90,49 @@ export function padBbox(b: BboxNorm, pad: number): BboxNorm {
 }
 
 /**
- * Fit a crop rectangle of the given pixel-space aspect ratio around the
- * (padded) subject hull. The crop:
- *   - has the smallest size that fully contains the hull,
- *   - is positioned so the hull centroid sits on the closest rule-of-thirds
- *     intersection of the crop that still keeps the crop inside the image,
- *   - is in normalised (0..1) coordinates.
+ * Fit a crop rectangle of the given pixel-space aspect ratio inside the
+ * image so that:
+ *   - the crop is as LARGE as the image allows at this aspect (uses
+ *     the maximum of the available area, only constrained by [0,1]²
+ *     and the requested w/h ratio in pixel space),
+ *   - the subject hull's centroid sits on the closest rule-of-thirds
+ *     intersection of the crop that keeps the crop inside the image,
+ *   - the hull is still fully contained.
  *
- * Returns null if the hull cannot fit at this aspect ratio in this image
- * (i.e. one dimension would need to exceed 1).
+ * The "largest possible" framing is what the user asked for: the AI
+ * shouldn't tightly chop on just the face — it should keep enough
+ * of the body / surroundings so the subject reads as part of a
+ * well-composed picture. Different aspect ratios produce different
+ * shapes (landscape source + 9:16 ratio yields a tall portrait crop),
+ * which is the "ggf. aus einem landscape Bild ein Porträt" behaviour.
+ *
+ * Returns null only when the hull is wider/taller than the crop can
+ * be at this ratio (e.g. requesting 9:16 from a near-panoramic hull).
  */
 export function fitCropToAspect(
   hull: BboxNorm,
   cropAspectInPixels: number,
   imageAspectInPixels: number,
 ): PhotoTransformCrop | null {
-  // In normalised coords, crop pixel ratio = (wn * imageW) / (hn * imageH)
-  //                                        = (wn / hn) * imageAR.
-  // So wn / hn = cropAR / imageAR.
+  // Crop dimensions in normalised image coords.
+  //   wn / hn = cropAR / imageAR  (so the rendered pixel ratio equals cropAR).
+  // We want the LARGEST (wn, hn) that fits inside [0,1]²:
+  //   - If ratio >= 1 (crop is wider than the image): wn = 1, hn = 1/ratio.
+  //   - Else (taller than the image): hn = 1, wn = ratio.
   const ratio = cropAspectInPixels / imageAspectInPixels;
+  let w: number;
+  let h: number;
+  if (ratio >= 1) {
+    w = 1;
+    h = 1 / ratio;
+  } else {
+    w = ratio;
+    h = 1;
+  }
 
-  // Smallest (wn, hn) that fully contains the hull at the desired ratio:
-  //   wn = ratio * hn, wn >= hull.width, hn >= hull.height.
-  const hn = Math.max(hull.height, hull.width / ratio);
-  const wn = ratio * hn;
-  if (wn > 1 + EPS || hn > 1 + EPS) return null;
-  const w = Math.min(1, wn);
-  const h = Math.min(1, hn);
+  // If the hull is bigger than the largest crop in either dimension,
+  // there's no way to fit it — bail.
+  if (hull.width > w + EPS || hull.height > h + EPS) return null;
 
   const cx = hull.x + hull.width / 2;
   const cy = hull.y + hull.height / 2;
@@ -128,10 +144,13 @@ export function fitCropToAspect(
       // Place centroid at (fx*w, fy*h) within the crop → crop origin:
       let x = cx - fx * w;
       let y = cy - fy * h;
-      // Clamp so crop stays inside the image.
+      // Clamp so the crop stays inside the image.
       x = Math.max(0, Math.min(1 - w, x));
       y = Math.max(0, Math.min(1 - h, y));
-      // Reject if the hull is no longer fully contained.
+      // Reject if the hull is no longer fully contained (only possible
+      // when the hull is larger than w/h in some dimension, which we
+      // already filtered, OR when the centroid is so off-centre that
+      // even with clamping the hull spills out — rare but possible).
       if (
         hull.x < x - EPS ||
         hull.y < y - EPS ||
@@ -151,10 +170,17 @@ export function fitCropToAspect(
   }
 
   if (best == null) {
-    // Hull-centred fallback (no ROT bias). Always succeeds because the
-    // hull fits the crop dims by construction.
+    // Hull-centred fallback. Position so the hull is centred in the
+    // crop, then clamp; if the hull is wide/tall enough that the
+    // crop can't move freely, shift to keep the hull inside.
     let x = cx - w / 2;
     let y = cy - h / 2;
+    x = Math.max(0, Math.min(1 - w, x));
+    y = Math.max(0, Math.min(1 - h, y));
+    if (hull.x < x) x = hull.x;
+    if (hull.x + hull.width > x + w) x = hull.x + hull.width - w;
+    if (hull.y < y) y = hull.y;
+    if (hull.y + hull.height > y + h) y = hull.y + hull.height - h;
     x = Math.max(0, Math.min(1 - w, x));
     y = Math.max(0, Math.min(1 - h, y));
     best = { x, y, w, h };
