@@ -445,7 +445,7 @@ onMounted(() => {
     :showHeader="false"
     :draggable="false"
     :dismissableMask="false"
-    :closeOnEscape="false"
+    :closeOnEscape="true"
     :style="{
       width: '100vw',
       height: '100vh',
