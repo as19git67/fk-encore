@@ -242,16 +242,21 @@ onBeforeUnmount(() => {
 <style scoped>
 /*
  * Cropper fits its allocated parent cell. The parent is expected to
- * provide a bounded box (e.g. via grid-template-rows or
+ * provide a bounded box (e.g. via grid-template-rows /
  * grid-template-columns + minmax). max-width / max-height: 100 %
  * combined with the inline aspect-ratio on the wrapper means the
  * browser picks the largest size that respects both axes and the
  * aspect — i.e. a contain-fit inside the cell.
+ *
+ * The 0.5 rem reservation on each axis leaves room for the corner
+ * handles (positioned at -7 px relative to .cropper-wrap) so they
+ * never poke through the parent's overflow:hidden bound when the
+ * cropper exactly fills the cell.
  */
 .cropper-wrap {
   position: relative;
-  max-width: 100%;
-  max-height: 100%;
+  max-width: calc(100% - 1rem);
+  max-height: calc(100% - 1rem);
   width: 100%;
   margin: 0 auto;
   background: rgba(0, 0, 0, 0.05);

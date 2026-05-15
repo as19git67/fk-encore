@@ -448,7 +448,7 @@ onMounted(() => {
     :closeOnEscape="true"
     :style="{
       width: '100vw',
-      height: '100vh',
+      height: '100dvh',
       maxWidth: 'none',
       maxHeight: 'none',
       margin: 0,
@@ -456,7 +456,7 @@ onMounted(() => {
     :pt="{
       root: { style: 'border-radius: 0; box-shadow: none;' },
       content: {
-        style: 'padding: 0; height: 100vh; overflow: hidden; display: flex; flex-direction: column; background: var(--p-content-background);',
+        style: 'padding: 0; height: 100dvh; overflow: hidden; display: flex; flex-direction: column; background: var(--p-content-background);',
       },
     }"
   >
@@ -720,10 +720,17 @@ onMounted(() => {
  * Fullscreen-dialog layout. The editor-grid fills 100 % of the dialog
  * content area (the dialog itself is sized to the viewport). The grid
  * splits into two regions:
- *   - portrait viewport  → cropper on top (≤ 50 vh), controls below
+ *   - portrait viewport  → cropper on top (≤ 50 dvh), controls below
  *   - landscape viewport → cropper on the left half, controls right
  * The cropper region never scrolls; the controls region always does.
  * Footer lives at the end of .controls and therefore scrolls with it.
+ *
+ * `dvh` (dynamic viewport height) is used instead of `vh` so the
+ * mobile-browser address bar showing/hiding doesn't push the bottom
+ * of the dialog (and therefore the Save button) below the fold. iOS
+ * Safari computes `vh` against the largest viewport, which means the
+ * action row sits *underneath* the visible area whenever the bar is
+ * shown.
  */
 .editor-grid {
   flex: 1;
@@ -734,7 +741,7 @@ onMounted(() => {
 
 @media (orientation: portrait) {
   .editor-grid {
-    grid-template-rows: minmax(0, 50vh) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 50dvh) minmax(0, 1fr);
     grid-template-columns: 1fr;
   }
 }
@@ -753,7 +760,13 @@ onMounted(() => {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
-  padding: 0.75rem;
+  /*
+   * Padding has to comfortably exceed the cropper's corner-handle
+   * offset (-7 px on every side, see PhotoCropper.vue). A 0.75 rem
+   * padding was just barely enough at desktop sizes but clipped the
+   * handles on mobile when the cropper hit the cell edge.
+   */
+  padding: 1rem;
 }
 
 .controls {
