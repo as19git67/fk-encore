@@ -11,6 +11,7 @@ import { getPhotoUrl, getPhotosAlbums, updateAlbum, updateAlbumUserSettings, upd
 import { getAlbumCheckState as calculateAlbumCheckState } from '../utils/albumSelection'
 import type { Photo, Face, LandmarkItem, Person, CurationStatus } from '../api/photos'
 import { useReferenceData } from '../composables/useReferenceData'
+import { useUserPhotoTransform } from '../composables/useUserPhotoTransform'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { formatPhotoDateCompact } from '../utils/dateFormat'
@@ -57,6 +58,16 @@ const loadingAlbums = ref(false)
 const photoAlbumMap = ref<Record<number, number[]>>({}) // photoId -> albumIds[]
 const albumDialogVisible = ref(false)
 const transformEditorVisible = ref(false)
+
+// Per-user photo recipe — applied as CSS filter to the preview image
+// so the user's exposure/contrast/gamma show up in the sidebar without
+// requiring an editor visit. Crop is NOT shown here (would require
+// invasive layout changes inside HeicImage); for the full transformed
+// view the user opens the editor or downloads the export.
+const previewPhotoId = computed(() => props.photo?.id ?? null)
+const { cssFilter: userPhotoFilter, svgFilterMarkup: userSvgMarkup } =
+  useUserPhotoTransform(previewPhotoId)
+const previewImageStyle = computed(() => (userPhotoFilter.value ? { filter: userPhotoFilter.value } : undefined))
 
 async function loadAlbums() {
   if (albumsLoaded.value) return
@@ -277,7 +288,15 @@ watch(() => props.photo.id, () => {
     </div>
     <div v-else class="sidebar-scroll">
       <div v-if="!inFlyout" class="preview-container" @click="emit('fullscreen')" title="Vollbild">
-        <HeicImage :src="getPhotoUrl(photo.filename)" :alt="photo.original_name" objectFit="contain" />
+        <svg v-if="userSvgMarkup" width="0" height="0" style="position: absolute; pointer-events: none">
+          <defs v-html="userSvgMarkup"></defs>
+        </svg>
+        <HeicImage
+          :src="getPhotoUrl(photo.filename)"
+          :alt="photo.original_name"
+          objectFit="contain"
+          :imageStyle="previewImageStyle"
+        />
         <div class="preview-overlay"><i class="pi pi-expand"></i></div>
       </div>
 

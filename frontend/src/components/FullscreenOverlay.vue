@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
 import { getPhotoUrl, type Photo, type CurationStatus } from '../api/photos'
+import { useUserPhotoTransform } from '../composables/useUserPhotoTransform'
 import type { GalleryGridGroup } from '../api/gallery'
 import { formatPhotoDateCompact, formatLocationLabel } from '../utils/dateFormat'
 
@@ -63,6 +64,16 @@ const emit = defineEmits<{
   /** Fired when the user clicks the +N marker → parent opens review. */
   'open-group-review': []
 }>()
+
+// Per-user photo recipe — applies the caller's exposure/contrast/gamma
+// to the fullscreen image via CSS filter. Crop is NOT applied here for
+// the same layout-coupling reasons as in the sidebar preview; the full
+// transformed render is available via /photos/:id/render?v=user for
+// download / share workflows.
+const currentPhotoId = computed(() => props.photo?.id ?? null)
+const { cssFilter: userPhotoFilter, svgFilterMarkup: userSvgMarkup } =
+  useUserPhotoTransform(currentPhotoId)
+const fsImageStyle = computed(() => (userPhotoFilter.value ? { filter: userPhotoFilter.value } : undefined))
 
 // Track-I marker semantics — mirrors VirtualGallery's badge logic.
 const isAiHidingSiblings = computed(() => {
@@ -421,12 +432,16 @@ function locationLabel(photo: Photo) {
       <!-- Zoom wrapper: CSS transform applied here so the face box (in the
            HeicImage slot) scales together with the image. -->
       <div class="fs-zoom-wrapper" :style="zoomTransformStyle">
+        <svg v-if="userSvgMarkup" width="0" height="0" style="position: absolute; pointer-events: none">
+          <defs v-html="userSvgMarkup"></defs>
+        </svg>
         <div @load.capture="onCurrentImageLoad" style="display: contents">
           <HeicImage
             :src="getPhotoUrl(photo.filename)"
             :alt="photo.original_name"
             objectFit="contain"
             :staticSlot="true"
+            :imageStyle="fsImageStyle"
           >
             <!-- Allow caller to inject overlays (e.g. face box) -->
             <slot />

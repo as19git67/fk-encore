@@ -39,6 +39,7 @@ import {
   recipeToCssTransform,
   type PhotoTransformRecipe,
 } from '../utils/photoTransformRecipe'
+import { invalidateUserTransform } from '../composables/useUserPhotoTransform'
 import PhotoCropper from './PhotoCropper.vue'
 
 const props = defineProps<{
@@ -275,6 +276,7 @@ async function materializeAt(ratio: PhotoTransformAspectRatio) {
     bundle.value = { ...(bundle.value as PhotoTransformsBundle), mine: row }
     recipe.value = recipeFromRow(row)
     selectedRatio.value = ratio
+    invalidateUserTransform(props.photoId)
     emit('saved', row)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
@@ -290,6 +292,7 @@ async function adoptOther(other: PhotoTransformOther) {
     const row = await adoptPhotoTransform(props.photoId, other.id)
     bundle.value = { ...(bundle.value as PhotoTransformsBundle), mine: row }
     recipe.value = recipeFromRow(row)
+    invalidateUserTransform(props.photoId)
     emit('saved', row)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
@@ -340,6 +343,7 @@ async function deleteMine() {
     bundle.value = { ...(bundle.value as PhotoTransformsBundle), mine: null }
     recipe.value = recipeFromRow(null)
     selectedRatio.value = 'free'
+    invalidateUserTransform(props.photoId)
     emit('deleted')
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
