@@ -65,9 +65,27 @@ const transformEditorVisible = ref(false)
 // invasive layout changes inside HeicImage); for the full transformed
 // view the user opens the editor or downloads the export.
 const previewPhotoId = computed(() => props.photo?.id ?? null)
-const { cssFilter: userPhotoFilter, svgFilterMarkup: userSvgMarkup } =
-  useUserPhotoTransform(previewPhotoId)
-const previewImageStyle = computed(() => (userPhotoFilter.value ? { filter: userPhotoFilter.value } : undefined))
+const {
+  recipe: userRecipe,
+  cssFilter: userPhotoFilter,
+  svgFilterMarkup: userSvgMarkup,
+  buildRenderedUrl: buildUserRenderedUrl,
+} = useUserPhotoTransform(previewPhotoId)
+
+// When the user has saved a recipe (crop + colour), point the preview
+// at the server-rendered URL so the crop is reflected. Without this, a
+// saved crop would invisibly persist — see issue feedback after Phase 1.
+const previewSrc = computed(() => {
+  return buildUserRenderedUrl(800) ?? getPhotoUrl(props.photo.filename)
+})
+
+// Apply the CSS filter only when we're showing the original (no recipe
+// yet); the rendered URL already bakes the colour adjustments in.
+const previewImageStyle = computed(() =>
+  userRecipe.value || !userPhotoFilter.value
+    ? undefined
+    : { filter: userPhotoFilter.value },
+)
 
 async function loadAlbums() {
   if (albumsLoaded.value) return
@@ -288,11 +306,11 @@ watch(() => props.photo.id, () => {
     </div>
     <div v-else class="sidebar-scroll">
       <div v-if="!inFlyout" class="preview-container" @click="emit('fullscreen')" title="Vollbild">
-        <svg v-if="userSvgMarkup" width="0" height="0" style="position: absolute; pointer-events: none">
+        <svg v-if="userSvgMarkup && !userRecipe" width="0" height="0" style="position: absolute; pointer-events: none">
           <defs v-html="userSvgMarkup"></defs>
         </svg>
         <HeicImage
-          :src="getPhotoUrl(photo.filename)"
+          :src="previewSrc"
           :alt="photo.original_name"
           objectFit="contain"
           :imageStyle="previewImageStyle"

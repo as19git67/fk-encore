@@ -56,6 +56,24 @@ describe('computeNextCrop — aspect-ratio lock', () => {
     expect(r.w / r.h).toBeCloseTo(1, 3)
   })
 
+  it('corner-handle shrinking preserves the requested non-1 ratio', () => {
+    // Caller's contract: aspectRatio is the normalised w/h, not the
+    // pixel w/h. Earlier the editor was passing the pixel ratio for a
+    // non-square image and the corner branch silently produced the
+    // wrong shape. Pin the behaviour here.
+    const start = { x: 0.2, y: 0.2, w: 0.6, h: 0.6 }
+    // Try various inward drags from NW.
+    for (const [dx, dy] of [
+      [0.05, 0.05],
+      [0.1, 0.02],
+      [0.02, 0.1],
+      [0.15, 0.15],
+    ] as const) {
+      const r = computeNextCrop('nw', start, dx, dy, 0.75)!
+      expect(r.w / r.h).toBeCloseTo(0.75, 3)
+    }
+  })
+
   it('north-handle drag preserves the ratio and recentres horizontally', () => {
     const r = computeNextCrop('n', CENTER, 0, 0.1, 1.0)!
     expect(r.w / r.h).toBeCloseTo(1, 3)

@@ -123,13 +123,22 @@ const effectiveCrop = computed(() => {
   return recipe.value.crop ?? { x: 0, y: 0, w: 1, h: 1 }
 })
 
-// Crop aspect ratio passed to the cropper as a lock. null = free.
-// While the Before/After toggle is engaged we relax the lock so the
-// rectangle covers the entire image cleanly.
+// Crop aspect ratio passed to the cropper as a lock.
+//
+// The cropper math operates in normalised image coords (0..1 on both
+// axes), so the lock must be the **normalised** w/h ratio, not the
+// pixel ratio. For a 4:3 image, a 1:1 pixel crop has normalised
+// w/h = 0.75 — passing 1.0 would lock the crop to a normalised
+// square that is actually 4:3 in pixels. Divide by the image's own
+// pixel aspect to get the right normalised target.
+//
+// null = free crop / no lock.
 const cropAspectRatio = computed<number | null>(() => {
   if (showOriginal.value) return null
   if (selectedRatio.value === 'free') return null
-  return aspectRatioToFloat(selectedRatio.value)
+  const imgAR = imageAspect.value
+  if (!imgAR) return null
+  return aspectRatioToFloat(selectedRatio.value) / imgAR
 })
 
 const cropperImgStyle = computed(() => {

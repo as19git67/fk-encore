@@ -73,9 +73,30 @@ const emit = defineEmits<{
 // transformed render is available via /photos/:id/render?v=user for
 // download / share workflows.
 const currentPhotoId = computed(() => props.photo?.id ?? null)
-const { cssFilter: userPhotoFilter, svgFilterMarkup: userSvgMarkup } =
-  useUserPhotoTransform(currentPhotoId)
-const fsImageStyle = computed(() => (userPhotoFilter.value ? { filter: userPhotoFilter.value } : undefined))
+const {
+  recipe: userRecipe,
+  cssFilter: userPhotoFilter,
+  svgFilterMarkup: userSvgMarkup,
+  buildRenderedUrl: buildUserRenderedUrl,
+} = useUserPhotoTransform(currentPhotoId)
+
+// When the user has a saved recipe, route the visible image through the
+// server-render so the crop is reflected. Face-box overlays in the
+// <slot/> still draw against image-natural coords and will appear
+// misaligned over a cropped view — accepted trade-off; face tagging
+// typically precedes cropping, and the user can clear their crop to
+// restore the original face-box layout.
+const fsImageSrc = computed(() => {
+  // No width param → full-resolution rendered image. The server caches
+  // it on first request; subsequent loads hit the cache.
+  return buildUserRenderedUrl() ?? getPhotoUrl(props.photo.filename)
+})
+
+const fsImageStyle = computed(() =>
+  userRecipe.value || !userPhotoFilter.value
+    ? undefined
+    : { filter: userPhotoFilter.value },
+)
 
 // Editor trigger — accessible from inside the fullscreen view too, not
 // just from the desktop sidebar's quick-actions row.
@@ -443,12 +464,12 @@ function locationLabel(photo: Photo) {
       <!-- Zoom wrapper: CSS transform applied here so the face box (in the
            HeicImage slot) scales together with the image. -->
       <div class="fs-zoom-wrapper" :style="zoomTransformStyle">
-        <svg v-if="userSvgMarkup" width="0" height="0" style="position: absolute; pointer-events: none">
+        <svg v-if="userSvgMarkup && !userRecipe" width="0" height="0" style="position: absolute; pointer-events: none">
           <defs v-html="userSvgMarkup"></defs>
         </svg>
         <div @load.capture="onCurrentImageLoad" style="display: contents">
           <HeicImage
-            :src="getPhotoUrl(photo.filename)"
+            :src="fsImageSrc"
             :alt="photo.original_name"
             objectFit="contain"
             :staticSlot="true"

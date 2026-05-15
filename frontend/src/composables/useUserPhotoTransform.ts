@@ -13,6 +13,7 @@
 // /photos/:id/render?v=user variant.
 
 import { computed, ref, watch, type Ref } from 'vue'
+import { API_BASE_URL } from '../api/client'
 import { getPhotoTransforms, type PhotoTransformRow } from '../api/photoTransforms'
 import {
   buildRecipeSvgFilter,
@@ -97,11 +98,35 @@ export function useUserPhotoTransform(photoIdRef: Ref<number | null | undefined>
     recipeToCssFilter(recipeShape.value, svgFilterId.value),
   )
 
+  /**
+   * Server-rendered URL for the photo with the current user's recipe
+   * applied. Returns null when there is no recipe (callers should fall
+   * back to the original /photos/file/* URL).
+   *
+   * Cache-busted by the recipe's updated_at so the browser fetches the
+   * new image on every edit. The server's cache key doesn't depend on
+   * `t`, so server-side caching stays effective across users / sessions
+   * with the same recipe.
+   */
+  function buildRenderedUrl(width?: number): string | null {
+    const r = recipe.value
+    const id = photoIdRef.value
+    if (!r || !id) return null
+    const params = new URLSearchParams({
+      v: 'user',
+      user: String(r.user_id),
+    })
+    if (width) params.set('w', String(width))
+    if (r.updated_at) params.set('t', r.updated_at)
+    return `${API_BASE_URL}/photos/${id}/render?${params.toString()}`
+  }
+
   return {
     recipe,
     recipeShape,
     cssFilter,
     svgFilterId,
     svgFilterMarkup,
+    buildRenderedUrl,
   }
 }
