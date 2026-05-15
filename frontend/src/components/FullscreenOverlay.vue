@@ -2,8 +2,10 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
+import PhotoTransformEditor from './PhotoTransformEditor.vue'
 import { getPhotoUrl, type Photo, type CurationStatus } from '../api/photos'
-import { useUserPhotoTransform } from '../composables/useUserPhotoTransform'
+import { useUserPhotoTransform, invalidateUserTransform } from '../composables/useUserPhotoTransform'
+import { useAuthStore } from '../stores/auth'
 import type { GalleryGridGroup } from '../api/gallery'
 import { formatPhotoDateCompact, formatLocationLabel } from '../utils/dateFormat'
 
@@ -74,6 +76,15 @@ const currentPhotoId = computed(() => props.photo?.id ?? null)
 const { cssFilter: userPhotoFilter, svgFilterMarkup: userSvgMarkup } =
   useUserPhotoTransform(currentPhotoId)
 const fsImageStyle = computed(() => (userPhotoFilter.value ? { filter: userPhotoFilter.value } : undefined))
+
+// Editor trigger — accessible from inside the fullscreen view too, not
+// just from the desktop sidebar's quick-actions row.
+const auth = useAuthStore()
+const canEditTransform = computed(() => auth.hasPermission('photos.upload'))
+const transformEditorVisible = ref(false)
+function onTransformSaved() {
+  invalidateUserTransform(props.photo.id)
+}
 
 // Track-I marker semantics — mirrors VirtualGallery's badge logic.
 const isAiHidingSiblings = computed(() => {
@@ -513,6 +524,14 @@ function locationLabel(photo: Photo) {
               @click="emit('toggle-favorite', photo.id, photo.curation_status)"
               v-tooltip.bottom="(photo.curation_status === 'favorite' ? 'Favorit entfernen' : 'Als Favorit markieren') + ' (F)'"
             />
+            <Button
+              v-if="canEditTransform"
+              icon="pi pi-sliders-h"
+              rounded text
+              severity="secondary"
+              @click="transformEditorVisible = true"
+              v-tooltip.bottom="'Schnitt &amp; Belichtung bearbeiten'"
+            />
           </slot>
         </div>
       </div>
@@ -560,6 +579,17 @@ function locationLabel(photo: Photo) {
     </div>
   </div>
   </Teleport>
+
+  <!-- Editor dialog — hosted here so it works from inside fullscreen
+       even though the sidebar's quick-actions row is hidden there. -->
+  <PhotoTransformEditor
+    v-if="canEditTransform"
+    v-model:visible="transformEditorVisible"
+    :photo-id="photo.id"
+    :photo-filename="photo.filename"
+    @saved="onTransformSaved"
+    @deleted="onTransformSaved"
+  />
 </template>
 
 <style scoped>
