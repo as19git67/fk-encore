@@ -6,10 +6,12 @@ import PhotoMiniMap from './PhotoMiniMap.vue'
 import PhotoLocationMenu from './PhotoLocationMenu.vue'
 import PhotoReactions from './PhotoReactions.vue'
 import PhotoAlbumDialog from './PhotoAlbumDialog.vue'
+import PhotoTransformEditor from './PhotoTransformEditor.vue'
 import { getPhotoUrl, getPhotosAlbums, updateAlbum, updateAlbumUserSettings, updatePhotoDescription } from '../api/photos'
 import { getAlbumCheckState as calculateAlbumCheckState } from '../utils/albumSelection'
 import type { Photo, Face, LandmarkItem, Person, CurationStatus } from '../api/photos'
 import { useReferenceData } from '../composables/useReferenceData'
+import { useUserPhotoTransform } from '../composables/useUserPhotoTransform'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { formatPhotoDateCompact } from '../utils/dateFormat'
@@ -55,6 +57,35 @@ const { albums, albumsLoaded, fetchAlbums } = useReferenceData()
 const loadingAlbums = ref(false)
 const photoAlbumMap = ref<Record<number, number[]>>({}) // photoId -> albumIds[]
 const albumDialogVisible = ref(false)
+const transformEditorVisible = ref(false)
+
+// Per-user photo recipe — applied as CSS filter to the preview image
+// so the user's exposure/contrast/gamma show up in the sidebar without
+// requiring an editor visit. Crop is NOT shown here (would require
+// invasive layout changes inside HeicImage); for the full transformed
+// view the user opens the editor or downloads the export.
+const previewPhotoId = computed(() => props.photo?.id ?? null)
+const {
+  recipe: userRecipe,
+  cssFilter: userPhotoFilter,
+  svgFilterMarkup: userSvgMarkup,
+  buildRenderedUrl: buildUserRenderedUrl,
+} = useUserPhotoTransform(previewPhotoId)
+
+// When the user has saved a recipe (crop + colour), point the preview
+// at the server-rendered URL so the crop is reflected. Without this, a
+// saved crop would invisibly persist — see issue feedback after Phase 1.
+const previewSrc = computed(() => {
+  return buildUserRenderedUrl(800) ?? getPhotoUrl(props.photo.filename)
+})
+
+// Apply the CSS filter only when we're showing the original (no recipe
+// yet); the rendered URL already bakes the colour adjustments in.
+const previewImageStyle = computed(() =>
+  userRecipe.value || !userPhotoFilter.value
+    ? undefined
+    : { filter: userPhotoFilter.value },
+)
 
 async function loadAlbums() {
   if (albumsLoaded.value) return
@@ -275,12 +306,21 @@ watch(() => props.photo.id, () => {
     </div>
     <div v-else class="sidebar-scroll">
       <div v-if="!inFlyout" class="preview-container" @click="emit('fullscreen')" title="Vollbild">
-        <HeicImage :src="getPhotoUrl(photo.filename)" :alt="photo.original_name" objectFit="contain" />
+        <svg v-if="userSvgMarkup && !userRecipe" width="0" height="0" style="position: absolute; pointer-events: none">
+          <defs v-html="userSvgMarkup"></defs>
+        </svg>
+        <HeicImage
+          :src="previewSrc"
+          :alt="photo.original_name"
+          objectFit="contain"
+          :imageStyle="previewImageStyle"
+        />
         <div class="preview-overlay"><i class="pi pi-expand"></i></div>
       </div>
 
       <div v-if="!inFlyout" class="quick-actions">
         <Button icon="pi pi-expand" v-tooltip.bottom="'Vollbild'" @click="emit('fullscreen')" severity="secondary" text rounded />
+        <Button v-if="canUpload" icon="pi pi-sliders-h" v-tooltip.bottom="'Schnitt &amp; Belichtung bearbeiten'" @click="transformEditorVisible = true" severity="secondary" text rounded />
         <Button v-if="showNavigateToPhoto" icon="pi pi-images" v-tooltip.bottom="'In Fotos anzeigen'" @click="emit('navigate-to-photo', photo.id)" severity="secondary" text rounded />
         <template v-if="canDelete">
           <Button :icon="photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'" v-tooltip.bottom="photo.curation_status === 'favorite' ? 'Kein Favorit' : 'Favorit'" @click="emit('toggle-favorite', photo.id, photo.curation_status)" :severity="photo.curation_status === 'favorite' ? 'warn' : 'secondary'" text rounded />
@@ -508,6 +548,11 @@ watch(() => props.photo.id, () => {
       v-model:visible="albumDialogVisible"
       :photo-ids="albumPhotoIds"
       @saved="loadPhotosAlbums"
+    />
+    <PhotoTransformEditor
+      v-model:visible="transformEditorVisible"
+      :photo-id="photo.id"
+      :photo-filename="photo.filename"
     />
   </aside>
 </template>
