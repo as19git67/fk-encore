@@ -749,6 +749,16 @@ export const getPhotoFile = api.raw(
 // ---------- AI photo transformations ----------
 
 import { renderSuggestedAndCache } from "./photo-transforms-render.service";
+import {
+  getPhotoTransformsLogic,
+  upsertOwnTransformLogic,
+  deleteOwnTransformLogic,
+  materializeSuggestionLogic,
+  adoptTransformLogic,
+  type PhotoTransformsBundle,
+  type PhotoTransformRow,
+  type UpsertTransformRequest,
+} from "./photo-transforms-crud.service";
 import type { PhotoTransformAspectRatio } from "../db/schema";
 
 const VALID_RATIOS: ReadonlySet<PhotoTransformAspectRatio> = new Set([
@@ -865,6 +875,100 @@ export const renderPhotoTransformed = api.raw(
       res.statusCode = 500;
       res.end("Internal Server Error");
     }
+  },
+);
+
+/**
+ * Get the full transforms bundle for a photo: my recipe (if any), other
+ * users' recipes (with display name for the adopt banner), and the AI
+ * suggestion payload. One request — the editor uses all three at once.
+ */
+export const getPhotoTransforms = api(
+  { expose: true, method: "GET", path: "/photos/:id/transforms", auth: true },
+  async ({ id }: { id: number }): Promise<PhotoTransformsBundle> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    return await getPhotoTransformsLogic(userId, id);
+  },
+);
+
+/**
+ * Upsert (PUT-semantics: idempotent create-or-replace) the caller's
+ * transform for a photo. Source is always 'user' — the dedicated adopt
+ * and from-suggestion endpoints handle the other two sources.
+ */
+export const upsertPhotoTransform = api(
+  { expose: true, method: "PUT", path: "/photos/:id/transforms", auth: true },
+  async (
+    req: { id: number } & UpsertTransformRequest,
+  ): Promise<PhotoTransformRow> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    const { id, ...body } = req;
+    return await upsertOwnTransformLogic(userId, id, body);
+  },
+);
+
+/**
+ * Delete the caller's transform. Idempotent — returns deleted:true even
+ * if there was nothing to delete.
+ */
+export const deletePhotoTransform = api(
+  { expose: true, method: "DELETE", path: "/photos/:id/transforms", auth: true },
+  async ({ id }: { id: number }): Promise<{ deleted: boolean }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    return await deleteOwnTransformLogic(userId, id);
+  },
+);
+
+/**
+ * Materialize the AI suggestion as the caller's transform. Body picks
+ * which aspect ratio to use — required because the suggestion stores
+ * one crop per ratio but a transform has exactly one crop.
+ */
+export const materializePhotoTransform = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/photos/:id/transforms/from-suggestion",
+    auth: true,
+  },
+  async (
+    req: { id: number; ratio: PhotoTransformAspectRatio },
+  ): Promise<PhotoTransformRow> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    return await materializeSuggestionLogic(userId, req.id, req.ratio);
+  },
+);
+
+/**
+ * Adopt another user's transform on this photo as the caller's own.
+ */
+export const adoptPhotoTransform = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/photos/:id/transforms/adopt",
+    auth: true,
+  },
+  async (
+    req: { id: number; from_transform_id: number },
+  ): Promise<PhotoTransformRow> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    return await adoptTransformLogic(userId, req.id, req.from_transform_id);
   },
 );
 
