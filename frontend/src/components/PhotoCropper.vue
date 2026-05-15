@@ -240,26 +240,24 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/*
+ * Cropper fits its allocated parent cell. The parent is expected to
+ * provide a bounded box (e.g. via grid-template-rows or
+ * grid-template-columns + minmax). max-width / max-height: 100 %
+ * combined with the inline aspect-ratio on the wrapper means the
+ * browser picks the largest size that respects both axes and the
+ * aspect — i.e. a contain-fit inside the cell.
+ */
 .cropper-wrap {
   position: relative;
+  max-width: 100%;
+  max-height: 100%;
   width: 100%;
-  /* max-height is intentionally limited so a tall portrait photo doesn't
-     fill the viewport and trap the controls below the fold. On the
-     desktop two-column dialog layout 70vh is fine; on narrow viewports
-     the single-column dialog stacks cropper + controls and we cap
-     tighter so a portrait crop frame still leaves room to scroll. */
-  max-height: 70vh;
   margin: 0 auto;
   background: rgba(0, 0, 0, 0.05);
   user-select: none;
   touch-action: none;
   outline: none;
-}
-
-@media (max-width: 900px) {
-  .cropper-wrap {
-    max-height: 50vh;
-  }
 }
 
 .cropper-wrap:focus-visible {

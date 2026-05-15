@@ -441,9 +441,24 @@ onMounted(() => {
     :visible="props.visible"
     @update:visible="(v) => emit('update:visible', v)"
     modal
-    header="Foto bearbeiten"
-    :style="{ width: '64rem', maxWidth: '95vw' }"
-    :pt="{ content: { style: 'padding: 0' } }"
+    :closable="false"
+    :showHeader="false"
+    :draggable="false"
+    :dismissableMask="false"
+    :closeOnEscape="false"
+    :style="{
+      width: '100vw',
+      height: '100vh',
+      maxWidth: 'none',
+      maxHeight: 'none',
+      margin: 0,
+    }"
+    :pt="{
+      root: { style: 'border-radius: 0; box-shadow: none;' },
+      content: {
+        style: 'padding: 0; height: 100vh; overflow: hidden; display: flex; flex-direction: column; background: var(--p-content-background);',
+      },
+    }"
   >
     <!-- SVG defs for gamma / black-white-point filter, referenced by id -->
     <svg width="0" height="0" style="position: absolute; pointer-events: none">
@@ -659,12 +674,12 @@ onMounted(() => {
             />
           </div>
         </section>
-      </div>
 
-      <!-- Footer lives INSIDE the editor-grid so it scrolls with the
-           rest of the content. On the desktop two-column layout the
-           grid-column rule below pulls it across both columns. -->
-      <div class="footer-buttons">
+        <!-- Footer lives INSIDE .controls so it scrolls together with
+             the sliders / sections above. Padding matches the rest of
+             the controls column. There is intentionally NO close-X and
+             NO header — the user closes via Abbrechen or Speichern. -->
+        <div class="footer-buttons">
         <Button
           icon="pi pi-refresh"
           severity="secondary"
@@ -694,22 +709,40 @@ onMounted(() => {
           :loading="saving"
           :disabled="loading"
         />
+        </div>
       </div>
     </div>
   </Dialog>
 </template>
 
 <style scoped>
+/*
+ * Fullscreen-dialog layout. The editor-grid fills 100 % of the dialog
+ * content area (the dialog itself is sized to the viewport). The grid
+ * splits into two regions:
+ *   - portrait viewport  → cropper on top (≤ 50 vh), controls below
+ *   - landscape viewport → cropper on the left half, controls right
+ * The cropper region never scrolls; the controls region always does.
+ * Footer lives at the end of .controls and therefore scrolls with it.
+ */
 .editor-grid {
+  flex: 1;
   display: grid;
-  grid-template-columns: 1fr 22rem;
-  gap: 1rem;
-  padding: 1rem;
+  min-height: 0;
+  gap: 0;
 }
 
-@media (max-width: 900px) {
+@media (orientation: portrait) {
   .editor-grid {
+    grid-template-rows: minmax(0, 50vh) minmax(0, 1fr);
     grid-template-columns: 1fr;
+  }
+}
+
+@media (orientation: landscape) {
+  .editor-grid {
+    grid-template-columns: minmax(0, 50vw) minmax(0, 1fr);
+    grid-template-rows: 1fr;
   }
 }
 
@@ -717,29 +750,20 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 14rem;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0.75rem;
 }
 
-/*
- * On the desktop two-column layout we keep the controls in an
- * independent scroll panel so the cropper stays put while the user
- * works through the sliders. On narrow viewports (one-column stack)
- * we deliberately drop that — a tall portrait photo would otherwise
- * fill the whole viewport and the controls stay trapped behind the
- * cropper's bottom edge. There everything below the dialog header
- * flows into a single PrimeVue Dialog scroll area.
- */
 .controls {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-}
-
-@media (min-width: 901px) {
-  .controls {
-    max-height: 70vh;
-    overflow-y: auto;
-  }
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 1rem;
 }
 
 .control-section {
@@ -821,16 +845,11 @@ onMounted(() => {
 }
 
 /*
- * Footer lives inside .editor-grid so it scrolls with the rest of
- * the dialog content. On the two-column desktop layout it spans
- * both columns; on the stacked mobile layout it just sits at the
- * bottom of the single column.
- *
- * Horizontal padding is intentionally NOT set here — the parent
- * .editor-grid already provides padding: 1rem on every side, so
- * the footer aligns with the chips and sliders above. A top border
- * separates the action row from the controls without taking up
- * extra space.
+ * Footer lives at the bottom of .controls so it scrolls with the rest
+ * of the controls column. It inherits its horizontal padding from
+ * .controls (padding: 1rem) — left/right edges line up with sliders
+ * and chips above. A top border + small top padding separate the
+ * action row from the controls visually.
  */
 .footer-buttons {
   display: flex;
@@ -839,13 +858,7 @@ onMounted(() => {
   align-items: center;
   gap: 0.5rem;
   padding-top: 0.75rem;
-  margin-top: 0.5rem;
+  margin-top: auto;
   border-top: 1px solid var(--p-content-border-color);
-}
-
-@media (min-width: 901px) {
-  .footer-buttons {
-    grid-column: 1 / -1;
-  }
 }
 </style>
