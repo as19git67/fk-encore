@@ -639,22 +639,22 @@ onMounted(() => {
       <div class="footer-buttons">
         <Button
           icon="pi pi-refresh"
-          label="Zurücksetzen"
           severity="secondary"
           outlined
           @click="reset"
+          v-tooltip.top="'Slider und Crop auf den letzten gespeicherten Stand zurücksetzen'"
+          aria-label="Zurücksetzen"
           :disabled="saving || loading"
         />
         <Button
           icon="pi pi-trash"
-          label="Bearbeitung löschen"
           severity="danger"
           outlined
           @click="deleteMine"
           v-tooltip.top="'Crop, Belichtung und alle weiteren Änderungen verwerfen'"
+          aria-label="Bearbeitung löschen"
           :disabled="saving || loading || !bundle?.mine"
         />
-        <div class="spacer" />
         <Button
           label="Abbrechen"
           severity="secondary"
@@ -780,14 +780,19 @@ onMounted(() => {
   font-variant-numeric: tabular-nums;
 }
 
+/*
+ * Footer fits onto one row on every viewport because the two secondary
+ * actions (reset, delete) are icon-only — labels live in v-tooltip +
+ * aria-label so screen-readers and hover-discovery still work. Wrap is
+ * still allowed as a final safety net on extra-narrow screens, with
+ * the primary Speichern button anchored to the right.
+ */
 .footer-buttons {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 1rem;
-}
-
-.footer-buttons .spacer {
-  flex: 1;
 }
 </style>
