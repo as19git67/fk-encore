@@ -746,6 +746,128 @@ export const getPhotoFile = api.raw(
   }
 );
 
+// ---------- AI photo transformations ----------
+
+import { renderSuggestedAndCache } from "./photo-transforms-render.service";
+import type { PhotoTransformAspectRatio } from "../db/schema";
+
+const VALID_RATIOS: ReadonlySet<PhotoTransformAspectRatio> = new Set([
+  "1:1",
+  "4:5",
+  "5:4",
+  "3:4",
+  "4:3",
+  "16:9",
+  "9:16",
+]);
+
+/**
+ * Server-render a photo with an AI-suggested or user recipe applied.
+ *
+ * Query params:
+ *   v=suggested  — apply the AI suggestion (requires ratio=)
+ *   v=original   — passthrough; equivalent to /photos/file/* without transforms
+ *   v=user       — apply the requesting user's recipe (not yet implemented;
+ *                  returns 501 until the transforms-CRUD API lands)
+ *   ratio=…      — one of 1:1, 4:5, 5:4, 3:4, 4:3, 16:9, 9:16 (required for v=suggested)
+ *   w=…          — target width in pixels; omit for full resolution
+ *
+ * `auth: false`: mirrors /photos/file/* — addressability via numeric photo
+ * IDs is on par with the existing public file endpoint, and no information
+ * is leaked beyond what that endpoint already exposes.
+ */
+export const renderPhotoTransformed = api.raw(
+  { expose: true, method: "GET", path: "/photos/:id/render", auth: false },
+  async (req, res) => {
+    if (writeMaintenanceResponseIfActive(res)) return;
+    try {
+      const url = new URL(req.url || "", `http://${req.headers.host}`);
+      // The path captured `id` segment lives in the URL; api.raw doesn't
+      // surface path params to the handler, so we parse it ourselves.
+      const match = url.pathname.match(/\/photos\/(\d+)\/render$/);
+      if (!match) {
+        res.statusCode = 404;
+        res.end("Not Found");
+        return;
+      }
+      const photoId = parseInt(match[1], 10);
+      if (!Number.isFinite(photoId)) {
+        res.statusCode = 400;
+        res.end("Invalid photo id");
+        return;
+      }
+
+      const variant = (url.searchParams.get("v") ?? "suggested").toLowerCase();
+      if (variant === "user") {
+        res.statusCode = 501;
+        res.end("v=user not implemented yet");
+        return;
+      }
+      if (variant !== "suggested" && variant !== "original") {
+        res.statusCode = 400;
+        res.end("v must be one of: suggested, original, user");
+        return;
+      }
+      if (variant === "original") {
+        // Defer to the standard file serving — clients should just use
+        // /photos/file/* for this case. Send a hint so the misuse is loud.
+        res.statusCode = 400;
+        res.end("v=original — use /photos/file/* instead");
+        return;
+      }
+
+      const ratio = url.searchParams.get("ratio");
+      if (!ratio || !VALID_RATIOS.has(ratio as PhotoTransformAspectRatio)) {
+        res.statusCode = 400;
+        res.end(
+          `ratio must be one of: ${Array.from(VALID_RATIOS).join(", ")}`,
+        );
+        return;
+      }
+
+      const widthStr = url.searchParams.get("w");
+      const targetWidth = widthStr ? parseInt(widthStr, 10) : null;
+      if (widthStr != null && (!Number.isFinite(targetWidth!) || targetWidth! <= 0)) {
+        res.statusCode = 400;
+        res.end("w must be a positive integer");
+        return;
+      }
+
+      const result = await renderSuggestedAndCache(
+        photoId,
+        ratio as PhotoTransformAspectRatio,
+        targetWidth,
+      );
+      if (!result) {
+        res.statusCode = 404;
+        res.end("No suggestion available for this photo+ratio");
+        return;
+      }
+
+      // Cheap conditional GET — every change to the recipe / model version
+      // flips the etag because it's derived from the same key as the cache.
+      const ifNoneMatch = req.headers["if-none-match"];
+      if (typeof ifNoneMatch === "string" && ifNoneMatch === result.etag) {
+        res.statusCode = 304;
+        res.setHeader("ETag", result.etag);
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        res.end();
+        return;
+      }
+
+      res.setHeader("Content-Type", "image/jpeg");
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      res.setHeader("ETag", result.etag);
+      res.setHeader("X-Cache", result.cacheHit ? "HIT" : "MISS");
+      res.end(result.buffer);
+    } catch (err: any) {
+      console.error("Error rendering transformed photo:", err);
+      res.statusCode = 500;
+      res.end("Internal Server Error");
+    }
+  },
+);
+
 const ENABLE_LOCAL_FACES = process.env.ENABLE_LOCAL_FACES === "true";
 
 // ---------- Albums ----------
