@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import Button from 'primevue/button'
+import Checkbox from 'primevue/checkbox'
 import ProgressBar from 'primevue/progressbar'
 import Message from 'primevue/message'
 import RadioButton from 'primevue/radiobutton'
@@ -306,15 +307,23 @@ const autoCropError = ref('')
 
 // ── AI-Transform-Suggestions ─────────────────────────────────────────────────
 const transformSuggestLoading = ref(false)
-const transformSuggestResult = ref<{ updated: number; failed: number; total: number } | null>(null)
+const transformSuggestResult = ref<{
+  updated: number
+  failed: number
+  skipped: number
+  total: number
+} | null>(null)
 const transformSuggestError = ref('')
+const transformSuggestForce = ref(false)
 
 async function handleRecomputeTransformSuggestions() {
   transformSuggestResult.value = null
   transformSuggestError.value = ''
   transformSuggestLoading.value = true
   try {
-    transformSuggestResult.value = await recomputeTransformSuggestions()
+    transformSuggestResult.value = await recomputeTransformSuggestions({
+      force: transformSuggestForce.value,
+    })
   } catch (err: any) {
     transformSuggestError.value =
       err.message || 'Fehler beim Berechnen der KI-Crop-Vorschläge'
@@ -837,6 +846,11 @@ onMounted(async () => {
         diese Aktion ist nur nötig, um bestehende Fotos nachzuziehen oder nach einem
         Modell-Update.
       </p>
+      <p>
+        Standardmäßig werden nur Fotos berechnet, die <em>noch keine</em> Vorschlags-Zeile
+        haben — Re-Runs nach einem abgebrochenen Lauf sind so günstig. Aktiviere
+        „Auch bestehende neu berechnen“ nach einem Modell-Update.
+      </p>
 
       <Message v-if="transformSuggestError" severity="error" class="data-management-group__item" @close="transformSuggestError = ''">
         {{ transformSuggestError }}
@@ -844,11 +858,21 @@ onMounted(async () => {
 
       <div v-if="transformSuggestResult" class="data-management-group__item">
         <Message severity="info" :closable="false">
-          {{ transformSuggestResult.updated }} von {{ transformSuggestResult.total }}
-          Fotos aktualisiert<span v-if="transformSuggestResult.failed > 0">,
-            {{ transformSuggestResult.failed }} übersprungen (fehlende Maße oder
-            unlesbares Bild)</span>.
+          {{ transformSuggestResult.updated }} neu berechnet,
+          {{ transformSuggestResult.skipped }} übersprungen<span v-if="transformSuggestResult.failed > 0">,
+            {{ transformSuggestResult.failed }} fehlgeschlagen (fehlende Maße oder
+            unlesbares Bild)</span> — gesamt {{ transformSuggestResult.total }} Fotos.
         </Message>
+      </div>
+
+      <div class="data-management-group__item force-toggle">
+        <Checkbox
+          v-model="transformSuggestForce"
+          inputId="transform-suggest-force"
+          binary
+          :disabled="transformSuggestLoading"
+        />
+        <label for="transform-suggest-force">Auch bestehende neu berechnen</label>
       </div>
 
       <Button class="data-management-group__item"
@@ -1073,6 +1097,13 @@ onMounted(async () => {
 .data-management-group :deep(.p-button) {
   align-self: flex-start;
   width: auto;
+}
+
+.data-management-group .force-toggle {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.95em;
 }
 
 .status-progress {

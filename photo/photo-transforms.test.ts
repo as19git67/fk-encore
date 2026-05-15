@@ -580,6 +580,7 @@ describe("recomputeAllTransformSuggestionsLogic", () => {
     expect(result.total).toBe(3);
     expect(result.updated).toBe(3);
     expect(result.failed).toBe(0);
+    expect(result.skipped).toBe(0);
 
     for (const id of [a, b, c]) {
       const rows = await db
@@ -634,6 +635,43 @@ describe("recomputeAllTransformSuggestionsLogic", () => {
   it("returns total:0 when the user has no photos", async () => {
     const { recomputeAllTransformSuggestionsLogic } = await import("./photo.service");
     const result = await recomputeAllTransformSuggestionsLogic();
-    expect(result).toEqual({ updated: 0, failed: 0, total: 0 });
+    expect(result).toEqual({ updated: 0, failed: 0, skipped: 0, total: 0 });
+  });
+
+  it("default skip-logic — second run only touches new photos", async () => {
+    const { recomputeAllTransformSuggestionsLogic } = await import("./photo.service");
+    const a = await makePhotoOnDisk("first", 200, 100);
+
+    const first = await recomputeAllTransformSuggestionsLogic();
+    expect(first.updated).toBe(1);
+    expect(first.skipped).toBe(0);
+
+    const b = await makePhotoOnDisk("second", 300, 200);
+    const second = await recomputeAllTransformSuggestionsLogic();
+    expect(second.total).toBe(2);
+    expect(second.updated).toBe(1); // only the new photo
+    expect(second.skipped).toBe(1); // existing row preserved
+    // Both photos now have a suggestion row.
+    for (const id of [a, b]) {
+      const rows = await db
+        .select()
+        .from(photoTransformSuggestions)
+        .where(eq(photoTransformSuggestions.photo_id, id));
+      expect(rows).toHaveLength(1);
+    }
+  });
+
+  it("force:true ignores existing rows", async () => {
+    const { recomputeAllTransformSuggestionsLogic } = await import("./photo.service");
+    await makePhotoOnDisk("a", 200, 100);
+    await makePhotoOnDisk("b", 300, 200);
+
+    const first = await recomputeAllTransformSuggestionsLogic();
+    expect(first.updated).toBe(2);
+
+    const forced = await recomputeAllTransformSuggestionsLogic({ force: true });
+    expect(forced.total).toBe(2);
+    expect(forced.updated).toBe(2);
+    expect(forced.skipped).toBe(0);
   });
 });

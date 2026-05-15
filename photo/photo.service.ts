@@ -98,6 +98,7 @@ import {
   photoLandmarks,
   photoScanQueue,
   albumUserSettings,
+  photoTransformSuggestions,
   users,
 } from "../db/schema";
 import type {
@@ -5078,22 +5079,53 @@ export async function recomputeAllAutoCropsLogic(userId: number): Promise<{ upda
  * this is intentionally NOT per-user: running it once benefits every
  * user looking at any photo.
  *
- * Each call writes / overwrites a row in photo_transform_suggestions
- * (idempotent). Failures are logged and counted separately so a single
- * bad image doesn't abort the whole run.
+ * `force = false` (default): skip photos that already have a row.
+ * That makes re-runs after a partial completion (e.g. client timeout
+ * mid-loop, container restart) cheap — they pick up where the previous
+ * run left off. New uploads run through the suggestion-compute hook
+ * directly so they don't need this path.
+ *
+ * `force = true`: ignore existing rows, recompute everything. Use after
+ * bumping `PHOTO_TRANSFORM_MODEL_VERSION` or when the suggestion
+ * heuristic itself changes.
+ *
+ * Failures are logged and counted separately so a single bad image
+ * doesn't abort the whole run.
  */
-export async function recomputeAllTransformSuggestionsLogic(): Promise<{
+export async function recomputeAllTransformSuggestionsLogic(
+  opts: { force?: boolean } = {},
+): Promise<{
   updated: number;
   failed: number;
+  skipped: number;
   total: number;
 }> {
+  const force = opts.force === true;
+
   const allPhotos = await dbAll<{ id: number }>(
     db.select({ id: photos.id }).from(photos),
   );
 
+  // Build a set of photo IDs that already have a suggestion row, so we
+  // can skip them in the non-force path without a per-photo SELECT.
+  let alreadyDone: Set<number> | null = null;
+  if (!force) {
+    const existing = await dbAll<{ photo_id: number }>(
+      db
+        .select({ photo_id: photoTransformSuggestions.photo_id })
+        .from(photoTransformSuggestions),
+    );
+    alreadyDone = new Set(existing.map((r) => r.photo_id));
+  }
+
   let updated = 0;
   let failed = 0;
+  let skipped = 0;
   for (const p of allPhotos) {
+    if (alreadyDone && alreadyDone.has(p.id)) {
+      skipped++;
+      continue;
+    }
     try {
       const payload = await computePhotoTransformSuggestions(p.id);
       if (payload) updated++;
@@ -5103,7 +5135,7 @@ export async function recomputeAllTransformSuggestionsLogic(): Promise<{
       console.error(`Error computing transform suggestions for photo ${p.id}:`, err);
     }
   }
-  return { updated, failed, total: allPhotos.length };
+  return { updated, failed, skipped, total: allPhotos.length };
 }
 
 // ── Orphaned person cleanup ──────────────────────────────────────────────────

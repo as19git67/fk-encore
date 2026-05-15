@@ -426,10 +426,18 @@ export function recomputeAutoCrops() {
   })
 }
 
-export function recomputeTransformSuggestions() {
-  return apiFetch<{ updated: number; failed: number; total: number }>(
+export function recomputeTransformSuggestions(opts: { force?: boolean } = {}) {
+  return apiFetch<{ updated: number; failed: number; skipped: number; total: number }>(
     '/photos/recompute-transform-suggestions',
-    { method: 'POST', timeoutMs: 10 * 60 * 1000 },
+    {
+      method: 'POST',
+      body: JSON.stringify({ force: opts.force ?? false }),
+      // 60 min ceiling. The backend keeps running past a client abort
+      // anyway (no AbortSignal plumbed in), and the default skip-logic
+      // makes re-runs cheap — but a fresh large library can still
+      // legitimately take more than 10 minutes.
+      timeoutMs: 60 * 60 * 1000,
+    },
   )
 }
 

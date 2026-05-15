@@ -1563,11 +1563,13 @@ export const recomputeTransformSuggestions = api(
     path: "/photos/recompute-transform-suggestions",
     auth: true,
   },
-  async (): Promise<{ updated: number; failed: number; total: number }> => {
+  async (
+    req: { force?: boolean } = {},
+  ): Promise<{ updated: number; failed: number; skipped: number; total: number }> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "data.manage");
-    return await service.recomputeAllTransformSuggestionsLogic();
+    return await service.recomputeAllTransformSuggestionsLogic({ force: req.force });
   },
 );
 
