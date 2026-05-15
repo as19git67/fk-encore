@@ -36,6 +36,7 @@ export const categoryTaxonomy: CategorySeed[] = [
         children: [
           { slug: "wohnen-haus-eigentuemerversammlung", name: "Eigentümerversammlung" },
           { slug: "wohnen-haus-hausgeld", name: "Wirtschaftsplan / Hausgeld" },
+          { slug: "wohnen-haus-weg-jahresabrechnung", name: "WEG-Jahresabrechnung" },
           { slug: "wohnen-haus-grundsteuer", name: "Grundsteuer" },
           { slug: "wohnen-haus-gebaeudeversicherung", name: "Gebäudeversicherung" },
           { slug: "wohnen-haus-instandhaltung", name: "Instandhaltung / Handwerker" },
@@ -55,6 +56,7 @@ export const categoryTaxonomy: CategorySeed[] = [
       { slug: "kapitalanlage-immobilie-nebenkostenabrechnung", name: "Nebenkostenabrechnung" },
       { slug: "kapitalanlage-immobilie-eigentuemerversammlung", name: "Eigentümerversammlung" },
       { slug: "kapitalanlage-immobilie-hausgeld", name: "Wirtschaftsplan / Hausgeld" },
+      { slug: "kapitalanlage-immobilie-weg-jahresabrechnung", name: "WEG-Jahresabrechnung" },
       { slug: "kapitalanlage-immobilie-grundsteuer", name: "Grundsteuer" },
       { slug: "kapitalanlage-immobilie-gebaeudeversicherung", name: "Gebäudeversicherung" },
       { slug: "kapitalanlage-immobilie-instandhaltung", name: "Instandhaltung / Handwerker" },
