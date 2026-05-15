@@ -21,10 +21,28 @@ export default defineConfig({
       PHOTO_UPLOAD_DIR: "uploads/photos",
       PHOTO_THUMBNAIL_DIR: "uploads/thumbnails",
     },
+    // Most of frontend/ is excluded because it depends on a browser DOM /
+    // Vue test environment we haven't wired up. Pure utility modules under
+    // frontend/src/utils/ are plain TS and CAN run here, so we leave them
+    // included.
     exclude: [
       "node_modules/**",
       "encore.gen/**",
-      "frontend/**",
+      "frontend/node_modules/**",
+      "frontend/dist/**",
+      "frontend/storybook-static/**",
+      "frontend/playwright-report/**",
+      "frontend/e2e/**",
+      "frontend/.storybook/**",
+      "frontend/src/components/**",
+      "frontend/src/views/**",
+      "frontend/src/stories/**",
+      "frontend/src/router/**",
+      "frontend/src/composables/**",
+      "frontend/src/stores/**",
+      "frontend/src/api/**",
+      "frontend/src/services/**",
+      "frontend/src/config/**",
     ],
     setupFiles: ["./vitest.setup.ts"],
     // Run test files sequentially to avoid DB data races (shared Postgres instance)
