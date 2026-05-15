@@ -34,11 +34,11 @@ import {
 } from '../api/photoTransforms'
 import {
   buildRecipeSvgFilter,
-  cropImageStyle,
   recipeToCssFilter,
   recipeToCssTransform,
   type PhotoTransformRecipe,
 } from '../utils/photoTransformRecipe'
+import PhotoCropper from './PhotoCropper.vue'
 
 const props = defineProps<{
   /** Open / close state — use v-model:visible. */
@@ -97,16 +97,27 @@ const cssFilter = computed(() =>
   recipeToCssFilter(recipe.value, svgFilterId.value),
 )
 const cssTransform = computed(() => recipeToCssTransform(recipe.value))
-const cropStyle = computed(() => cropImageStyle(recipe.value.crop ?? null))
 
-const previewAspectRatio = computed<number | null>(() => {
-  if (!recipe.value.crop) return null
-  if (!naturalWidth.value || !naturalHeight.value) return null
-  return (
-    (recipe.value.crop.w * naturalWidth.value) /
-    (recipe.value.crop.h * naturalHeight.value)
-  )
+const imageAspect = computed(() => {
+  if (!naturalWidth.value || !naturalHeight.value) return 1
+  return naturalWidth.value / naturalHeight.value
 })
+
+// Effective crop used by the cropper. We always pass a crop in so the
+// user has a rectangle to drag; if the user hasn't set one yet we show
+// the full image as the "starting" crop.
+const effectiveCrop = computed(() => recipe.value.crop ?? { x: 0, y: 0, w: 1, h: 1 })
+
+// Crop aspect ratio passed to the cropper as a lock. null = free.
+const cropAspectRatio = computed<number | null>(() => {
+  if (selectedRatio.value === 'free') return null
+  return aspectRatioToFloat(selectedRatio.value)
+})
+
+const cropperImgStyle = computed(() => ({
+  filter: cssFilter.value || undefined,
+  transform: cssTransform.value || undefined,
+}))
 
 const originalUrl = computed(() => getPhotoUrl(props.photoFilename))
 
@@ -375,30 +386,28 @@ onMounted(() => {
     </svg>
 
     <div class="editor-grid">
-      <!-- Live preview -->
+      <!-- Interactive cropper. The image inside it carries the live
+           colour recipe; the user drags the rectangle / handles to set
+           the crop. -->
       <div class="preview-wrap">
-        <div
-          class="preview-frame"
-          :style="
-            previewAspectRatio
-              ? { aspectRatio: String(previewAspectRatio) }
-              : {}
-          "
-        >
-          <img
-            :src="originalUrl"
-            alt=""
-            class="preview-img"
-            :style="{
-              ...(cropStyle ?? {}),
-              filter: cssFilter || undefined,
-              transform: [cropStyle?.transform, cssTransform]
-                .filter(Boolean)
-                .join(' ') || undefined,
-            }"
-            @load="onImageLoad"
-          />
-        </div>
+        <PhotoCropper
+          v-if="naturalWidth > 0 && naturalHeight > 0"
+          :src="originalUrl"
+          :crop="effectiveCrop"
+          :image-aspect="imageAspect"
+          :aspect-ratio="cropAspectRatio"
+          :img-style="cropperImgStyle"
+          @update:crop="(c) => (recipe.crop = c)"
+        />
+        <!-- Hidden probe image: fires @load so we know the natural
+             pixel dimensions before instantiating the cropper. -->
+        <img
+          v-show="!naturalWidth"
+          :src="originalUrl"
+          alt=""
+          style="max-width: 100%; max-height: 60vh"
+          @load="onImageLoad"
+        />
       </div>
 
       <!-- Controls -->
@@ -579,29 +588,6 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   min-height: 20rem;
-}
-
-.preview-frame {
-  position: relative;
-  overflow: hidden;
-  background: rgba(0, 0, 0, 0.05);
-  border: 1px solid var(--p-content-border-color);
-  max-width: 100%;
-  max-height: 70vh;
-  width: 100%;
-}
-
-.preview-img {
-  display: block;
-  /* When no crop is applied the image scales to fit the frame; when a crop is
-     applied the cropImageStyle takes over (absolute positioning, oversized,
-     translated). */
-}
-
-.preview-frame > img:not([style*='position']) {
-  width: 100%;
-  height: auto;
-  object-fit: contain;
 }
 
 .controls {
