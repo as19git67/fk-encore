@@ -49,6 +49,9 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { getThumbUrl, type GalleryGridEntry, type GallerySortDir, type GallerySortField } from '../api/gallery'
+import { getRenderedPhotoUrl } from '../api/photoTransforms'
+import { useTransformedPhotosIndex } from '../composables/useTransformedPhotosIndex'
+import { useAuthStore } from '../stores/auth'
 import { useGallerySource, GALLERY_PAGE_SIZE } from '../composables/useGallerySource'
 import type { PhotoFilter } from '../api/photos'
 
@@ -94,6 +97,20 @@ const emit = defineEmits<{
 // ── Data source ─────────────────────────────────────────────────────────────
 const source = useGallerySource()
 const { entries, total, initialLoading, error } = source
+
+// User-recipe rendered tiles: when the caller has saved a transform on
+// a photo, route the thumbnail through /photos/:id/render?v=user&...
+// so the crop + colour show up in the grid. Bare /photos/file/* path
+// (via getThumbUrl) stays the fast default for everything else.
+const auth = useAuthStore()
+const transformedIndex = useTransformedPhotosIndex()
+function thumbnailSrc(slot: GalleryGridEntry): string {
+  const userId = auth.user?.id
+  if (userId && transformedIndex.has(slot.id)) {
+    return getRenderedPhotoUrl(slot.id, { variant: 'user', userId, width: 400 })
+  }
+  return getThumbUrl(slot.filename, 400)
+}
 
 // ── Layout: column count + row height ───────────────────────────────────────
 // Tracking column count here (rather than via CSS auto-fill) is the only
@@ -456,7 +473,7 @@ defineExpose({
             @click="onTap(slot, $event)"
           >
             <img
-              :src="getThumbUrl(slot.filename, 400)"
+              :src="thumbnailSrc(slot)"
               :alt="''"
               loading="lazy"
               decoding="async"
