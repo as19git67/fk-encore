@@ -574,9 +574,11 @@ onMounted(() => {
               />
               <Button
                 :icon="showOriginal ? 'pi pi-eye-slash' : 'pi pi-eye'"
+                :label="showOriginal ? 'Original' : 'Original'"
                 size="small"
                 outlined
-                v-tooltip.top="'Vorher/Nachher (halten)'"
+                v-tooltip.top="'Original anzeigen — Button gedrückt halten, zum Vergleichen loslassen'"
+                aria-label="Original anzeigen (gedrückt halten)"
                 @pointerdown="showOriginal = true"
                 @pointerup="showOriginal = false"
                 @pointerleave="showOriginal = false"
