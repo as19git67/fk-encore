@@ -21,28 +21,16 @@ export default defineConfig({
       PHOTO_UPLOAD_DIR: "uploads/photos",
       PHOTO_THUMBNAIL_DIR: "uploads/thumbnails",
     },
-    // Most of frontend/ is excluded because it depends on a browser DOM /
-    // Vue test environment we haven't wired up. Pure utility modules under
-    // frontend/src/utils/ are plain TS and CAN run here, so we leave them
-    // included.
+    // frontend/** is excluded entirely: those files rely on a DOM / Vue test
+    // env we haven't wired up, and even the pure-utility tests under
+    // frontend/src/utils/ trip vite:oxc with "Tsconfig not found" in CI's
+    // Node 24 (locally on Node 22 the older oxc walks up to the root
+    // tsconfig and is happy). When we add a dedicated frontend vitest
+    // config we can re-enable them there.
     exclude: [
       "node_modules/**",
       "encore.gen/**",
-      "frontend/node_modules/**",
-      "frontend/dist/**",
-      "frontend/storybook-static/**",
-      "frontend/playwright-report/**",
-      "frontend/e2e/**",
-      "frontend/.storybook/**",
-      "frontend/src/components/**",
-      "frontend/src/views/**",
-      "frontend/src/stories/**",
-      "frontend/src/router/**",
-      "frontend/src/composables/**",
-      "frontend/src/stores/**",
-      "frontend/src/api/**",
-      "frontend/src/services/**",
-      "frontend/src/config/**",
+      "frontend/**",
     ],
     setupFiles: ["./vitest.setup.ts"],
     // Run test files sequentially to avoid DB data races (shared Postgres instance)
