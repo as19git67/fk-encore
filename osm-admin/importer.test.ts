@@ -196,17 +196,18 @@ describe("descriptor builders", () => {
     ]);
   });
 
-  it("overpassDescriptor swaps PBF→bz2 url + wires DIFF_URL + named volume", () => {
+  it("overpassDescriptor wires PBF URL + osmconvert preprocess + DIFF_URL + named volume", () => {
     const d = overpassDescriptor(
       "europe-germany-bayern",
       "https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf",
-      "wiktorn/overpass-api:latest",
+      "fk-encore-overpass-pbf:latest",
     );
-    // wiktorn/overpass-api expects .osm.bz2 — we point it at Geofabrik's
-    // bz2 sibling of the pbf URL.
+    // Our extended image bundles osmconvert; the entrypoint reads PBF
+    // from stdin and emits OSM XML for the downstream update_database.
     expect(d.env?.OVERPASS_PLANET_URL).toBe(
-      "https://download.geofabrik.de/europe/germany/bayern-latest.osm.bz2",
+      "https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf",
     );
+    expect(d.env?.OVERPASS_PLANET_PREPROCESS).toBe("osmconvert -");
     expect(d.env?.OVERPASS_DIFF_URL).toBe(
       "https://download.geofabrik.de/europe/germany/bayern-updates/",
     );

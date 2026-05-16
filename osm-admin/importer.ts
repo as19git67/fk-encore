@@ -77,7 +77,7 @@ export async function tickImporter(deps: ImporterDeps = {}): Promise<TickOutcome
   const freeDisk = deps.freeDiskMb ?? (async () => null);
   const now = deps.now ?? (() => new Date());
   const nominatimImage = deps.images?.nominatim ?? "mediagis/nominatim:5.0";
-  const overpassImage = deps.images?.overpass ?? "wiktorn/overpass-api:latest";
+  const overpassImage = deps.images?.overpass ?? "fk-encore-overpass-pbf:latest";
 
   const cooldownCutoff = new Date(now().getTime() - TICK_COOLDOWN_MS).toISOString();
 
@@ -210,35 +210,29 @@ export function overpassDescriptor(
   pbfUrl: string,
   image: string,
 ): ContainerDescriptor {
-  // wiktorn/overpass-api's bundled preprocess pipeline is hardcoded
-  // for OSM XML compressed with bzip2; the image ships neither
-  // osmconvert nor osmium so we can't expand a PBF on the fly. Geofabrik
-  // publishes the equivalent `.osm.bz2` next to every `.osm.pbf` (~2–3×
-  // larger but no preprocessing tooling needed) — point overpass at
-  // that variant so the default `bunzip2 -cd` pipeline just works.
-  const bz2Url = bz2UrlFor(pbfUrl);
+  // Default image (fk-encore-overpass-pbf) extends wiktorn/overpass-api
+  // with `osmconvert` so the entrypoint's preprocess can expand a
+  // Geofabrik `.osm.pbf` to OSM XML on the fly. Sub-regional extracts
+  // (Regierungsbezirke etc.) are only published as PBF, so bz2 is not
+  // a portable choice.
+  //
+  // If the operator overrides `image` to the upstream
+  // `wiktorn/overpass-api:latest`, this preprocess will fail with
+  // "osmconvert: command not found" — see osm-admin/overpass-pbf/.
   return {
     name: `overpass-${slugSafe}`,
     image,
     env: {
       OVERPASS_META: "yes",
       OVERPASS_MODE: "init",
-      OVERPASS_PLANET_URL: bz2Url,
+      OVERPASS_PLANET_URL: pbfUrl,
+      OVERPASS_PLANET_PREPROCESS: "osmconvert -",
       OVERPASS_DIFF_URL: replicationUrlFor(pbfUrl),
     },
     volumes: [
       { hostPath: `fk-encore-osm-overpass-${slugSafe}`, containerPath: "/db" },
     ],
   };
-}
-
-/**
- * Sibling URL of a Geofabrik `.osm.pbf` — same path, `.osm.bz2`
- * extension. Used because Overpass-API's official image expects
- * OSM XML bz2 and lacks the tooling to convert a PBF.
- */
-function bz2UrlFor(pbfUrl: string): string {
-  return pbfUrl.replace(/-latest\.osm\.pbf$/, "-latest.osm.bz2");
 }
 
 /**
