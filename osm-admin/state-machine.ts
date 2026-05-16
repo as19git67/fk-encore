@@ -13,16 +13,26 @@
  * without touching the database or Docker.
  */
 
-export const REGION_STATUSES = [
+// NOTE: keep `RegionStatus` written out as a literal union rather than
+// `(typeof REGION_STATUSES)[number]`. Encore.ts' source-code parser
+// does not support indexed-access type queries today and refuses to
+// build the service if it sees one.
+export type RegionStatus =
+  | "pending_approval"
+  | "importing"
+  | "ready_running"
+  | "ready_stopped"
+  | "blocked_disk"
+  | "failed";
+
+export const REGION_STATUSES: readonly RegionStatus[] = [
   "pending_approval",
   "importing",
   "ready_running",
   "ready_stopped",
   "blocked_disk",
   "failed",
-] as const;
-
-export type RegionStatus = (typeof REGION_STATUSES)[number];
+];
 
 const TRANSITIONS: Record<RegionStatus, RegionStatus[]> = {
   pending_approval: ["importing", "failed"],
@@ -34,7 +44,7 @@ const TRANSITIONS: Record<RegionStatus, RegionStatus[]> = {
 };
 
 export function isRegionStatus(s: string): s is RegionStatus {
-  return (REGION_STATUSES as readonly string[]).includes(s);
+  return (REGION_STATUSES as readonly string[]).includes(s as string);
 }
 
 export function canTransition(from: RegionStatus, to: RegionStatus): boolean {
