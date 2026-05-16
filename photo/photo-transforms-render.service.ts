@@ -24,6 +24,7 @@ import {
   type PhotoTransformSuggestionsPayload,
 } from "../db/schema";
 import { computeAutoExposureFromStats, type BboxNorm } from "./photo-transforms.service";
+import { convertHeicToJpeg } from "./heic-convert.service";
 
 // Mirror of THUMBNAIL_DIR / UPLOAD_DIR in photo.service. Inlined to avoid a
 // circular import — the existing file already imports our suggestion-compute
@@ -412,17 +413,12 @@ export async function resolvePhotoFilename(photoId: number): Promise<string | nu
  * sharp's bundled libvips in this build lacks the libheif decoder
  * plugin — sharp(path) on a HEIC file throws "No decoding plugin
  * installed for this compression format". For HEIC paths we route
- * through the existing heic-convert helper (libheif via WASM) and
- * hand sharp the resulting JPEG buffer instead.
- *
- * Dynamic import on photo.service to avoid a hard circular import:
- * photo.service already pulls in this module's
- * computePhotoTransformSuggestions hook at module-load time.
+ * through the heic-convert helper (libheif via WASM) and hand sharp
+ * the resulting JPEG buffer instead.
  */
 async function openImageForSharp(originalPath: string): Promise<sharp.Sharp> {
   const lower = originalPath.toLowerCase();
   if (lower.endsWith(".heic") || lower.endsWith(".heif")) {
-    const { convertHeicToJpeg } = await import("./photo.service");
     const jpegBuffer = await convertHeicToJpeg(originalPath);
     return sharp(jpegBuffer);
   }

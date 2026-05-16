@@ -25,6 +25,7 @@ import {
   type PhotoTransformCrop,
   type PhotoTransformSuggestionsPayload,
 } from "../db/schema";
+import { convertHeicToJpeg } from "./heic-convert.service";
 
 // Inlined to avoid a circular import with photo.service.ts (which will
 // call computePhotoTransformSuggestions from inside its existing hooks).
@@ -333,7 +334,7 @@ async function computeAutoExposureFromFile(
   const lower = originalPath.toLowerCase();
   const isHeic = lower.endsWith(".heic") || lower.endsWith(".heif");
   const sharpInput: string | Buffer = isHeic
-    ? await (await import("./photo.service")).convertHeicToJpeg(originalPath)
+    ? await convertHeicToJpeg(originalPath)
     : originalPath;
   const stats = await sharp(sharpInput).stats();
   // Average the first three channels (R, G, B) as a coarse luminance proxy.
