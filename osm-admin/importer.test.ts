@@ -3,9 +3,14 @@ import { eq } from "drizzle-orm";
 import db from "../db/database";
 import { osmRegionImports } from "../db/schema";
 import { InMemoryDockerDriver } from "./docker-driver";
-import { slugToContainerSuffix, tickImporter } from "./importer";
+import {
+  nominatimDescriptor,
+  overpassDescriptor,
+  slugToContainerSuffix,
+  tickImporter,
+} from "./importer";
 
-async function seedImporting(slug: string, geofabrikUrl = "https://example.com/x.pbf") {
+async function seedImporting(slug: string, geofabrikUrl = "https://example.com/x-latest.osm.pbf") {
   await db.insert(osmRegionImports).values({
     slug,
     geofabrik_url: geofabrikUrl,
@@ -33,7 +38,7 @@ describe("tickImporter", () => {
     expect(out).toEqual({ slug: null, result: "noop" });
   });
 
-  it("advances importing → ready_running on the happy path", async () => {
+  it("advances importing → ready_running when both containers are healthy", async () => {
     await seedImporting("europe/germany/bayern");
     const driver = new InMemoryDockerDriver();
     const out = await tickImporter({
@@ -55,17 +60,43 @@ describe("tickImporter", () => {
     expect(row.imported_at).not.toBeNull();
     expect(row.last_error).toBeNull();
 
-    // Driver received the one-shot then the two persistent containers.
+    // Driver was asked to start exactly the two long-running containers
+    // and to probe both healthchecks.
     expect(driver.events.map((e) => e.op)).toEqual([
-      "runOneShot",
       "ensureRunning",
       "ensureRunning",
+      "waitHealthy",
+      "waitHealthy",
     ]);
-    expect(driver.events.map((e) => e.name)).toEqual([
-      "nominatim-import-europe-germany-bayern",
+    const containerNames = driver.events
+      .filter((e) => e.op === "ensureRunning")
+      .map((e) => e.name);
+    expect(containerNames).toEqual([
       "nominatim-europe-germany-bayern",
       "overpass-europe-germany-bayern",
     ]);
+  });
+
+  it("stays in `importing` and reports `waiting` when health is not yet up", async () => {
+    await seedImporting("europe/germany/bayern");
+    const driver = new InMemoryDockerDriver();
+    driver.healthyByDefault = false;
+    const out = await tickImporter({
+      driver,
+      probeSize: async () => 600,
+      freeDiskMb: async () => 100_000,
+    });
+    expect(out.result).toBe("waiting");
+    expect(out.detail).toContain("nominatim_healthy=false");
+    expect(out.detail).toContain("overpass_healthy=false");
+
+    const row = (
+      await db
+        .select()
+        .from(osmRegionImports)
+        .where(eq(osmRegionImports.slug, "europe/germany/bayern"))
+    )[0];
+    expect(row.status).toBe("importing");
   });
 
   it("transitions to blocked_disk when free space is below the threshold", async () => {
@@ -91,34 +122,10 @@ describe("tickImporter", () => {
     expect(driver.events).toEqual([]);
   });
 
-  it("transitions to failed on driver one-shot non-zero exit", async () => {
-    await seedImporting("europe/germany/bayern");
-    const driver = new InMemoryDockerDriver();
-    driver.oneShotExitCode = 137;
-    const out = await tickImporter({
-      driver,
-      probeSize: async () => 600,
-      freeDiskMb: async () => 100_000,
-    });
-    expect(out.result).toBe("failed");
-    expect(out.detail).toContain("exit=137");
-
-    const row = (
-      await db
-        .select()
-        .from(osmRegionImports)
-        .where(eq(osmRegionImports.slug, "europe/germany/bayern"))
-    )[0];
-    expect(row.status).toBe("failed");
-    expect(row.last_error).toContain("exit=137");
-    // No persistent containers were started after the failed one-shot.
-    expect(driver.events.map((e) => e.op)).toEqual(["runOneShot"]);
-  });
-
   it("transitions to failed on driver exception", async () => {
     await seedImporting("europe/germany/bayern");
     const driver = new InMemoryDockerDriver();
-    driver.runOneShot = async () => {
+    driver.ensureRunning = async () => {
       throw new Error("docker socket gone");
     };
     const out = await tickImporter({
@@ -133,7 +140,7 @@ describe("tickImporter", () => {
   it("does not re-pick a row within the cooldown window", async () => {
     await db.insert(osmRegionImports).values({
       slug: "europe/germany/bayern",
-      geofabrik_url: "https://example.com/x.pbf",
+      geofabrik_url: "https://example.com/x-latest.osm.pbf",
       postgres_db: "nom_bayern",
       bbox_min_lat: 47.5,
       bbox_min_lon: 9,
@@ -147,6 +154,64 @@ describe("tickImporter", () => {
       probeSize: async () => null,
     });
     expect(out).toEqual({ slug: null, result: "noop" });
+  });
+
+  it("does not re-probe size on subsequent ticks once cached", async () => {
+    await seedImporting("europe/germany/bayern");
+    await db
+      .update(osmRegionImports)
+      .set({ pbf_size_mb: 600 })
+      .where(eq(osmRegionImports.slug, "europe/germany/bayern"));
+    let probeCalls = 0;
+    await tickImporter({
+      driver: new InMemoryDockerDriver(),
+      probeSize: async () => {
+        probeCalls++;
+        return 600;
+      },
+      freeDiskMb: async () => 100_000,
+    });
+    expect(probeCalls).toBe(0);
+  });
+});
+
+describe("descriptor builders", () => {
+  it("nominatimDescriptor wires PBF_URL + named volume + replication URL", () => {
+    const d = nominatimDescriptor(
+      "europe/germany/bayern",
+      "europe-germany-bayern",
+      "https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf",
+      "mediagis/nominatim:5.0",
+    );
+    expect(d.name).toBe("nominatim-europe-germany-bayern");
+    expect(d.env?.PBF_URL).toMatch(/bayern-latest\.osm\.pbf$/);
+    expect(d.env?.REPLICATION_URL).toBe(
+      "https://download.geofabrik.de/europe/germany/bayern-updates/",
+    );
+    expect(d.volumes).toEqual([
+      {
+        hostPath: "fk-encore-osm-nominatim-europe-germany-bayern",
+        containerPath: "/var/lib/postgresql/16/main",
+      },
+    ]);
+  });
+
+  it("overpassDescriptor wires PLANET_URL + DIFF_URL + named volume", () => {
+    const d = overpassDescriptor(
+      "europe-germany-bayern",
+      "https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf",
+      "wiktorn/overpass-api:latest",
+    );
+    expect(d.env?.OVERPASS_PLANET_URL).toMatch(/bayern-latest\.osm\.pbf$/);
+    expect(d.env?.OVERPASS_DIFF_URL).toBe(
+      "https://download.geofabrik.de/europe/germany/bayern-updates/",
+    );
+    expect(d.volumes).toEqual([
+      {
+        hostPath: "fk-encore-osm-overpass-europe-germany-bayern",
+        containerPath: "/db",
+      },
+    ]);
   });
 });
 

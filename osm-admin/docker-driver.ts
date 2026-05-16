@@ -4,14 +4,26 @@
  * The driver interface is small on purpose — only the operations the
  * importer + router actually need. The default implementation
  * (`InMemoryDockerDriver`) records intent without touching Docker, which
- * is what the unit tests use and is also what production runs until the
- * real dockerode-based implementation lands in a follow-up slice.
+ * is what the unit tests use and is also what production runs when the
+ * dockerode driver is not explicitly activated.
+ *
+ * Architecture: each region is fully self-contained — one mediagis/
+ * nominatim container with its bundled Postgres + one wiktorn/overpass
+ * container, both backed by a per-region named Docker volume. Deleting
+ * a region is just removing those two containers + their volumes. We
+ * deliberately do not run a shared Postgres for all regions: it would
+ * require patching the upstream images.
  *
  * Container naming convention used by the importer/router:
- *   nominatim-<slug>    long-running API container
- *   overpass-<slug>     long-running API container
- *   nominatim-import-<slug>   one-shot, exits after import
- * (slug is `slugToPostgresDb`-style sanitised, no `/`.)
+ *   nominatim-<slug-suffix>    long-running container (does its own
+ *                              import on first start with empty volume)
+ *   overpass-<slug-suffix>     long-running container (same model)
+ * The slug suffix is `slugToContainerSuffix(slug)`-derived — no slashes.
+ *
+ * Healthcheck handling: `ensureRunning` only creates+starts the
+ * container. Waiting for the HTTP healthcheck is a separate explicit
+ * call (`waitHealthy`). This is what lets the importer ship long imports
+ * across many short ticks instead of blocking a single request for hours.
  */
 
 export type ContainerState =
@@ -29,19 +41,27 @@ export interface ContainerDescriptor {
   /** Optional command override; otherwise the image's default CMD runs. */
   cmd?: string[];
   env?: Record<string, string>;
-  /** Host → container volume mounts. */
+  /**
+   * Host → container volume mounts. `hostPath` may be either an
+   * absolute path (bind mount) or a named-volume identifier; Docker
+   * interprets anything that doesn't start with `/` as a volume name
+   * and creates it on demand.
+   */
   volumes?: { hostPath: string; containerPath: string; readOnly?: boolean }[];
   /** Docker network name. Defaults handled by the caller. */
   network?: string;
   hostname?: string;
-  /** Healthcheck URL that returns 200 when the container is ready. */
-  healthcheckUrl?: string;
 }
 
 export interface ContainerInfo {
   name: string;
   state: ContainerState;
   exitCode?: number;
+}
+
+export interface WaitHealthyOptions {
+  maxAttempts?: number;
+  intervalMs?: number;
 }
 
 export interface DockerDriver {
@@ -53,10 +73,12 @@ export interface DockerDriver {
   remove(name: string): Promise<void>;
   inspect(name: string): Promise<ContainerInfo>;
   /**
-   * Run a container to completion and return its exit code. The
-   * container is removed after the run (autoremove semantics).
+   * Poll an HTTP healthcheck URL until it responds 2xx. Returns true
+   * if it became healthy within the budget, false otherwise. Callers
+   * pick the budget that fits the use case (e.g. the importer probes
+   * once per tick, the cold-start router waits ~30 s).
    */
-  runOneShot(desc: ContainerDescriptor): Promise<number>;
+  waitHealthy(url: string, opts?: WaitHealthyOptions): Promise<boolean>;
 }
 
 /**
@@ -64,10 +86,10 @@ export interface DockerDriver {
  * containers transition states cleanly. Useful for end-to-end importer
  * tests that don't depend on a real Docker engine.
  *
- * The driver is also what the live osm-admin service ships with until
- * the dockerode-based real driver lands. That keeps the state-machine
- * flow exercised end-to-end (status transitions, importer ticks,
- * admin UI rendering) without requiring docker.sock on the host.
+ * The driver is also what the live osm-admin service ships with when
+ * the dockerode driver is not explicitly activated via env. That keeps
+ * the state-machine flow exercised end-to-end (status transitions,
+ * importer ticks, admin UI rendering) without requiring docker.sock.
  */
 export class InMemoryDockerDriver implements DockerDriver {
   private containers = new Map<string, ContainerInfo>();
@@ -76,11 +98,11 @@ export class InMemoryDockerDriver implements DockerDriver {
     | { op: "ensureRunning"; name: string }
     | { op: "stop"; name: string }
     | { op: "remove"; name: string }
-    | { op: "runOneShot"; name: string; exitCode: number }
+    | { op: "waitHealthy"; url: string; healthy: boolean }
   > = [];
 
-  /** Configurable test seam: forces `runOneShot` to return this code. */
-  oneShotExitCode = 0;
+  /** Configurable test seam: forces `waitHealthy` to return this value. */
+  healthyByDefault = true;
 
   async ensureRunning(desc: ContainerDescriptor): Promise<ContainerInfo> {
     this.events.push({ op: "ensureRunning", name: desc.name });
@@ -104,17 +126,16 @@ export class InMemoryDockerDriver implements DockerDriver {
     return this.containers.get(name) ?? { name, state: "missing" };
   }
 
-  async runOneShot(desc: ContainerDescriptor): Promise<number> {
-    const exit = this.oneShotExitCode;
-    this.events.push({ op: "runOneShot", name: desc.name, exitCode: exit });
-    return exit;
+  async waitHealthy(url: string, _opts?: WaitHealthyOptions): Promise<boolean> {
+    this.events.push({ op: "waitHealthy", url, healthy: this.healthyByDefault });
+    return this.healthyByDefault;
   }
 }
 
 /**
  * Singleton accessor — services and the importer share one driver per
  * process. The default is `InMemoryDockerDriver`; the real dockerode
- * driver registers itself here once it lands.
+ * driver registers itself here when `OSM_ADMIN_DOCKER_DRIVER=dockerode`.
  */
 let activeDriver: DockerDriver = new InMemoryDockerDriver();
 

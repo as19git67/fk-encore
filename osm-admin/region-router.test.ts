@@ -111,10 +111,20 @@ describe("ensureReady", () => {
     const driver = new InMemoryDockerDriver();
     await ensureReady("europe/germany/bayern", { driver });
 
-    expect(driver.events.map((e) => e.name)).toEqual([
+    // Two ensureRunning calls (nominatim + overpass) followed by two
+    // waitHealthy probes against their respective status URLs.
+    expect(driver.events.map((e) => e.op)).toEqual([
+      "ensureRunning",
+      "ensureRunning",
+      "waitHealthy",
+      "waitHealthy",
+    ]);
+    const ensured = driver.events.filter((e) => e.op === "ensureRunning");
+    expect(ensured.map((e) => e.name)).toEqual([
       "nominatim-europe-germany-bayern",
       "overpass-europe-germany-bayern",
     ]);
+
     const row = (
       await db
         .select()
@@ -123,6 +133,25 @@ describe("ensureReady", () => {
     )[0];
     expect(row.status).toBe("ready_running");
     expect(row.last_used_at).not.toBeNull();
+  });
+
+  it("throws when the cold-start healthcheck fails", async () => {
+    await seed({ slug: "europe/germany/bayern", status: "ready_stopped" });
+    const driver = new InMemoryDockerDriver();
+    driver.healthyByDefault = false;
+    await expect(
+      ensureReady("europe/germany/bayern", { driver }),
+    ).rejects.toThrow(/cold-start healthcheck failed/);
+
+    // Status must stay ready_stopped — we do not "promote" a region
+    // whose containers won't even answer their status URL.
+    const row = (
+      await db
+        .select()
+        .from(osmRegionImports)
+        .where(eq(osmRegionImports.slug, "europe/germany/bayern"))
+    )[0];
+    expect(row.status).toBe("ready_stopped");
   });
 
   it("refuses to start regions that aren't in a ready_* status", async () => {

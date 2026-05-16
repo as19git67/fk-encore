@@ -70,22 +70,11 @@ class FakeContainer implements DockerodeContainerLike {
       },
     };
   }
-
-  async wait(): Promise<{ StatusCode: number }> {
-    this.fake.events.push({ op: "wait", name: this.name });
-    const code = this.fake.oneShotExit ?? 0;
-    this.store.set(this.name, { status: "exited", exitCode: code });
-    // AutoRemove: dockerode normally evicts post-wait.
-    this.store.delete(this.name);
-    return { StatusCode: code };
-  }
 }
 
 class FakeDocker implements DockerodeClientLike {
   readonly store = new Map<string, FakeContainerState>();
   readonly events: Array<{ op: string; name: string; opts?: unknown }> = [];
-  /** Exit code for the next runOneShot wait(). */
-  oneShotExit: number | undefined = 0;
 
   async createContainer(opts: Record<string, unknown>): Promise<DockerodeContainerLike> {
     const name = opts.name as string;
@@ -104,17 +93,13 @@ function okFetch(): typeof fetch {
 }
 
 describe("DockerodeDriver", () => {
-  it("ensureRunning creates + starts + healthchecks on first call", async () => {
+  it("ensureRunning creates + starts (no healthcheck call)", async () => {
     const client = new FakeDocker();
-    const driver = new DockerodeDriver({
-      client,
-      healthcheck: { fetcher: okFetch(), maxAttempts: 1, intervalMs: 0 },
-    });
+    const driver = new DockerodeDriver({ client });
     const info = await driver.ensureRunning({
       name: "nominatim-bayern",
       image: "mediagis/nominatim:5.0",
-      env: { POSTGRES_DB: "nom_bayern" },
-      healthcheckUrl: "http://nominatim-bayern:8080/status",
+      env: { PBF_URL: "https://example.com/x.pbf" },
     });
     expect(info.state).toBe("running");
     expect(client.events.map((e) => e.op)).toEqual(["createContainer", "start"]);
@@ -123,14 +108,10 @@ describe("DockerodeDriver", () => {
   it("ensureRunning is a no-op when the container is already running", async () => {
     const client = new FakeDocker();
     client.store.set("nominatim-bayern", { status: "running" });
-    const driver = new DockerodeDriver({
-      client,
-      healthcheck: { fetcher: okFetch(), maxAttempts: 1, intervalMs: 0 },
-    });
+    const driver = new DockerodeDriver({ client });
     await driver.ensureRunning({
       name: "nominatim-bayern",
       image: "mediagis/nominatim:5.0",
-      healthcheckUrl: "http://nominatim-bayern:8080/status",
     });
     expect(client.events.map((e) => e.op)).toEqual([]);
   });
@@ -138,14 +119,10 @@ describe("DockerodeDriver", () => {
   it("ensureRunning replaces a stale exited container", async () => {
     const client = new FakeDocker();
     client.store.set("nominatim-bayern", { status: "exited", exitCode: 137 });
-    const driver = new DockerodeDriver({
-      client,
-      healthcheck: { fetcher: okFetch(), maxAttempts: 1, intervalMs: 0 },
-    });
+    const driver = new DockerodeDriver({ client });
     await driver.ensureRunning({
       name: "nominatim-bayern",
       image: "mediagis/nominatim:5.0",
-      healthcheckUrl: "http://nominatim-bayern:8080/status",
     });
     expect(client.events.map((e) => e.op)).toEqual([
       "remove",
@@ -154,39 +131,37 @@ describe("DockerodeDriver", () => {
     ]);
   });
 
-  it("propagates healthcheck failure as a thrown error", async () => {
-    const client = new FakeDocker();
-    const bad = (async () => ({ ok: false, status: 503 })) as unknown as typeof fetch;
+  it("waitHealthy returns true on first 2xx", async () => {
     const driver = new DockerodeDriver({
-      client,
-      healthcheck: { fetcher: bad, maxAttempts: 2, intervalMs: 0 },
+      client: new FakeDocker(),
+      healthcheck: { fetcher: okFetch(), maxAttempts: 1, intervalMs: 0 },
     });
-    await expect(
-      driver.ensureRunning({
-        name: "nominatim-bayern",
-        image: "mediagis/nominatim:5.0",
-        healthcheckUrl: "http://nominatim-bayern:8080/status",
-      }),
-    ).rejects.toThrow(/healthcheck did not become ready after 2 attempts/);
+    const ok = await driver.waitHealthy("http://nominatim-bayern:8080/status");
+    expect(ok).toBe(true);
   });
 
-  it("runOneShot creates + starts + waits and returns the exit code", async () => {
-    const client = new FakeDocker();
-    client.oneShotExit = 42;
-    const driver = new DockerodeDriver({ client });
-    const exit = await driver.runOneShot({
-      name: "nominatim-import-bayern",
-      image: "mediagis/nominatim:5.0",
+  it("waitHealthy returns false after the budget without throwing", async () => {
+    const bad = (async () => ({ ok: false, status: 503 })) as unknown as typeof fetch;
+    const driver = new DockerodeDriver({
+      client: new FakeDocker(),
+      healthcheck: { fetcher: bad, maxAttempts: 3, intervalMs: 0 },
     });
-    expect(exit).toBe(42);
-    expect(client.events.map((e) => e.op)).toEqual([
-      "createContainer",
-      "start",
-      "wait",
-    ]);
-    const createCall = client.events[0];
-    const hc = (createCall.opts as { HostConfig?: { AutoRemove?: boolean } })?.HostConfig;
-    expect(hc?.AutoRemove).toBe(true);
+    const ok = await driver.waitHealthy("http://nominatim-bayern:8080/status");
+    expect(ok).toBe(false);
+  });
+
+  it("waitHealthy respects per-call overrides", async () => {
+    let calls = 0;
+    const fetcher = (async () => {
+      calls++;
+      return { ok: false, status: 503 };
+    }) as unknown as typeof fetch;
+    const driver = new DockerodeDriver({
+      client: new FakeDocker(),
+      healthcheck: { fetcher, maxAttempts: 99, intervalMs: 0 },
+    });
+    await driver.waitHealthy("http://x/status", { maxAttempts: 2, intervalMs: 0 });
+    expect(calls).toBe(2);
   });
 
   it("stop is a no-op for missing containers", async () => {
@@ -220,22 +195,21 @@ describe("DockerodeDriver", () => {
     const driver = new DockerodeDriver({
       client,
       defaultNetwork: "osm-net",
-      healthcheck: { fetcher: okFetch(), maxAttempts: 1, intervalMs: 0 },
     });
     await driver.ensureRunning({
       name: "nominatim-bayern",
       image: "mediagis/nominatim:5.0",
-      env: { POSTGRES_DB: "nom_bayern" },
+      env: { PBF_URL: "https://example.com/x.pbf" },
       volumes: [
-        { hostPath: "/data/osm/bayern", containerPath: "/data" },
+        { hostPath: "fk-encore-osm-nominatim-bayern", containerPath: "/var/lib/postgresql/16/main" },
         { hostPath: "/etc/ssl", containerPath: "/etc/ssl", readOnly: true },
       ],
     });
     const opts = client.events[0].opts as Record<string, unknown>;
-    expect(opts.Env).toEqual(["POSTGRES_DB=nom_bayern"]);
+    expect(opts.Env).toEqual(["PBF_URL=https://example.com/x.pbf"]);
     const hc = opts.HostConfig as { Binds?: string[]; NetworkMode?: string };
     expect(hc.Binds).toEqual([
-      "/data/osm/bayern:/data",
+      "fk-encore-osm-nominatim-bayern:/var/lib/postgresql/16/main",
       "/etc/ssl:/etc/ssl:ro",
     ]);
     expect(hc.NetworkMode).toBe("osm-net");
