@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
 import ProgressBar from 'primevue/progressbar'
@@ -28,12 +28,18 @@ import {
   cancelPendingFinanceTagJobs, reenqueueAllFinanceTagJobs,
   type TagQueueServiceStatus,
 } from '../api/finance'
+import {
+  listOsmRegions, suggestOsmRegion, createOsmRegion,
+  approveOsmRegion, deleteOsmRegion, reverseGeocodeViaOsm,
+  type OsmRegionImport, type RegionSuggestion,
+} from '../api/osmAdmin'
 import { getBuildInfo } from '../api/system'
 import { useAuthStore } from '../stores/auth'
 import { useRealtimeEvent } from '../composables/useRealtime'
 
 const auth = useAuthStore()
 const canPurgePhotos = computed(() => auth.hasPermission('photos.purge'))
+const canManageOsm = computed(() => auth.hasPermission('osm.admin'))
 
 // ── Scan Queue ────────────────────────────────────────────────────────────────
 
@@ -458,12 +464,157 @@ async function handleFinanceTagReenqueue() {
 
 const buildNumber = ref('…')
 
+// ── OSM region admin (Epic #383) ──────────────────────────────────────────────
+
+const osmRegions = ref<OsmRegionImport[]>([])
+const osmError = ref('')
+const osmLoading = ref(false)
+const osmRefreshTimer = ref<number | null>(null)
+
+const suggestLat = ref<string>('')
+const suggestLon = ref<string>('')
+
+function parsedCoord(v: string): number | null {
+  if (!v.trim()) return null
+  const n = Number(v.replace(',', '.'))
+  return Number.isFinite(n) ? n : null
+}
+const suggestResult = ref<RegionSuggestion | null>(null)
+const suggestLoading = ref(false)
+
+const reverseResult = ref<{ regionSlug: string; result: Record<string, unknown> } | null>(null)
+const reverseLoading = ref(false)
+
+const osmStatusLabels: Record<string, string> = {
+  pending_approval: 'Wartet auf Freigabe',
+  importing: 'Wird importiert',
+  ready_running: 'Bereit (läuft)',
+  ready_stopped: 'Bereit (gestoppt)',
+  blocked_disk: 'Blockiert (Speicher)',
+  failed: 'Fehlgeschlagen',
+}
+
+const osmStatusSeverity: Record<string, string> = {
+  pending_approval: 'warn',
+  importing: 'info',
+  ready_running: 'success',
+  ready_stopped: 'secondary',
+  blocked_disk: 'danger',
+  failed: 'danger',
+}
+
+async function fetchOsmRegions() {
+  if (!canManageOsm.value) return
+  try {
+    osmRegions.value = (await listOsmRegions()).regions
+    osmError.value = ''
+  } catch (err) {
+    osmError.value = (err as Error).message ?? String(err)
+  }
+}
+
+async function handleSuggestOsmRegion() {
+  const lat = parsedCoord(suggestLat.value)
+  const lon = parsedCoord(suggestLon.value)
+  if (lat === null || lon === null) {
+    osmError.value = 'Bitte gültige Lat/Lon eingeben.'
+    return
+  }
+  suggestLoading.value = true
+  try {
+    suggestResult.value = (await suggestOsmRegion(lat, lon)).region
+    osmError.value = ''
+  } catch (err) {
+    osmError.value = (err as Error).message ?? String(err)
+  } finally {
+    suggestLoading.value = false
+  }
+}
+
+async function handleAddSuggestedRegion() {
+  if (!suggestResult.value) return
+  osmLoading.value = true
+  try {
+    await createOsmRegion(suggestResult.value.slug)
+    await fetchOsmRegions()
+    suggestResult.value = null
+  } catch (err) {
+    osmError.value = (err as Error).message ?? String(err)
+  } finally {
+    osmLoading.value = false
+  }
+}
+
+async function handleApproveOsmRegion(slug: string) {
+  osmLoading.value = true
+  try {
+    await approveOsmRegion(slug)
+    await fetchOsmRegions()
+  } catch (err) {
+    osmError.value = (err as Error).message ?? String(err)
+  } finally {
+    osmLoading.value = false
+  }
+}
+
+async function handleDeleteOsmRegion(slug: string) {
+  if (!window.confirm(`Region ${slug} entfernen? Container und Volumes bleiben aktuell stehen — Cleanup folgt in einer späteren Etappe.`)) return
+  osmLoading.value = true
+  try {
+    await deleteOsmRegion(slug)
+    await fetchOsmRegions()
+  } catch (err) {
+    osmError.value = (err as Error).message ?? String(err)
+  } finally {
+    osmLoading.value = false
+  }
+}
+
+async function handleReverseGeocode() {
+  const lat = parsedCoord(suggestLat.value)
+  const lon = parsedCoord(suggestLon.value)
+  if (lat === null || lon === null) {
+    osmError.value = 'Bitte gültige Lat/Lon eingeben.'
+    return
+  }
+  reverseLoading.value = true
+  try {
+    reverseResult.value = await reverseGeocodeViaOsm(lat, lon)
+    osmError.value = ''
+  } catch (err) {
+    osmError.value = (err as Error).message ?? String(err)
+    reverseResult.value = null
+  } finally {
+    reverseLoading.value = false
+  }
+}
+
+function formatRelative(ts: string | null): string {
+  if (!ts) return '–'
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return ts
+  return d.toLocaleString()
+}
+
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 onMounted(async () => {
   await fetchQueueStatus()
   await fetchFinanceTagQueueStatus()
+  await fetchOsmRegions()
   getBuildInfo().then(info => { buildNumber.value = info.build })
+  // Poll the OSM region list every 5s so importing/ready transitions
+  // surface without a manual reload. Cheap query (single SELECT).
+  if (canManageOsm.value) {
+    osmRefreshTimer.value = window.setInterval(fetchOsmRegions, 5_000)
+  }
+})
+
+onBeforeUnmount(() => {
+  if (osmRefreshTimer.value !== null) {
+    window.clearInterval(osmRefreshTimer.value)
+    osmRefreshTimer.value = null
+  }
 })
 </script>
 
@@ -909,6 +1060,128 @@ onMounted(async () => {
       />
     </div>
 
+    <!-- OSM-Regionen (POI-Detection, Epic #383) -->
+    <div v-if="canManageOsm" class="data-management-group">
+      <h3>OSM-Regionen</h3>
+      <p>
+        Selbst gehostete Nominatim- und Overpass-Container pro Geofabrik-Region.
+        Wird für die POI-Erkennung in Fotos verwendet. Status aktualisiert sich automatisch
+        alle 5 Sekunden.
+      </p>
+
+      <Message
+        v-if="osmError"
+        severity="error"
+        class="mb-3"
+        @close="osmError = ''"
+      >{{ osmError }}</Message>
+
+      <!-- Region-Vorschlag aus GPS-Koordinaten -->
+      <div class="osm-form">
+        <label>
+          <span>Breitengrad (lat)</span>
+          <InputText v-model="suggestLat" placeholder="48.137" />
+        </label>
+        <label>
+          <span>Längengrad (lon)</span>
+          <InputText v-model="suggestLon" placeholder="11.575" />
+        </label>
+        <Button
+          label="Region vorschlagen"
+          icon="pi pi-search"
+          :loading="suggestLoading"
+          :disabled="!suggestLat.trim() || !suggestLon.trim()"
+          @click="handleSuggestOsmRegion"
+        />
+        <Button
+          label="Reverse-Geocode testen"
+          icon="pi pi-globe"
+          severity="secondary"
+          :loading="reverseLoading"
+          :disabled="!suggestLat.trim() || !suggestLon.trim()"
+          @click="handleReverseGeocode"
+        />
+      </div>
+
+      <div v-if="suggestResult" class="osm-suggest-result">
+        <strong>Vorschlag:</strong> {{ suggestResult.slug }}
+        ({{ suggestResult.name }})
+        <span v-if="suggestResult.existing">— bereits angelegt, Status:
+          {{ osmStatusLabels[suggestResult.existingStatus ?? ''] ?? suggestResult.existingStatus }}</span>
+        <Button
+          v-if="!suggestResult.existing"
+          class="ml-2"
+          label="Anlegen"
+          icon="pi pi-plus"
+          size="small"
+          :loading="osmLoading"
+          @click="handleAddSuggestedRegion"
+        />
+      </div>
+
+      <div v-if="reverseResult" class="osm-reverse-result">
+        <strong>Reverse-Geocode-Antwort</strong> (über
+        Region <code>{{ reverseResult.regionSlug }}</code>):
+        <pre>{{ JSON.stringify(reverseResult.result, null, 2) }}</pre>
+      </div>
+
+      <!-- Region-Tabelle -->
+      <div v-if="osmRegions.length === 0" class="osm-empty">
+        Noch keine Regionen angelegt. Mit dem Formular oben einen Vorschlag
+        holen und dann „Anlegen" klicken.
+      </div>
+      <div v-else class="queue-table-wrapper">
+        <table class="queue-table mb-4">
+          <thead>
+            <tr>
+              <th>Region</th>
+              <th>Status</th>
+              <th>PBF</th>
+              <th>Importiert am</th>
+              <th>Zuletzt benutzt</th>
+              <th>Letzter Fehler</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in osmRegions" :key="r.slug">
+              <td><code>{{ r.slug }}</code></td>
+              <td>
+                <span
+                  class="osm-status"
+                  :class="`osm-status--${r.status}`"
+                  :title="osmStatusSeverity[r.status] ?? ''"
+                >{{ osmStatusLabels[r.status] ?? r.status }}</span>
+              </td>
+              <td>{{ r.pbfSizeMb !== null ? `${r.pbfSizeMb} MB` : '–' }}</td>
+              <td>{{ formatRelative(r.importedAt) }}</td>
+              <td>{{ formatRelative(r.lastUsedAt) }}</td>
+              <td class="osm-error-cell">{{ r.lastError ?? '' }}</td>
+              <td class="osm-actions">
+                <Button
+                  v-if="r.status === 'pending_approval'"
+                  icon="pi pi-check"
+                  label="Freigeben"
+                  size="small"
+                  :loading="osmLoading"
+                  @click="handleApproveOsmRegion(r.slug)"
+                />
+                <Button
+                  icon="pi pi-trash"
+                  label="Entfernen"
+                  size="small"
+                  severity="danger"
+                  text
+                  :loading="osmLoading"
+                  @click="handleDeleteOsmRegion(r.slug)"
+                />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- Danger Zone: Purge Photos -->
     <div v-if="canPurgePhotos" class="data-management-group danger-zone">
       <h3 class="danger-zone__title">Danger Zone</h3>
@@ -1214,6 +1487,80 @@ onMounted(async () => {
 .badge-failed   { background: var(--red-100);    color: var(--red-700); }
 
 /* Danger Zone */
+.osm-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+  margin-bottom: 1rem;
+}
+
+.osm-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.osm-form label span {
+  color: var(--p-text-muted-color);
+}
+
+.osm-suggest-result {
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+  background: var(--p-content-hover-background);
+  border-radius: 6px;
+}
+
+.osm-reverse-result {
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+  background: var(--p-content-hover-background);
+  border-radius: 6px;
+}
+
+.osm-reverse-result pre {
+  margin-top: 0.5rem;
+  max-height: 200px;
+  overflow: auto;
+  font-size: 0.85rem;
+}
+
+.osm-empty {
+  padding: 0.75rem;
+  color: var(--p-text-muted-color);
+  font-style: italic;
+}
+
+.osm-error-cell {
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--p-text-muted-color);
+  font-size: 0.85rem;
+}
+
+.osm-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.osm-status {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  background: var(--p-content-hover-background);
+}
+
+.osm-status--ready_running { background: var(--p-tag-success-background, rgba(0,128,0,0.12)); color: var(--p-tag-success-color); }
+.osm-status--importing     { background: var(--p-tag-info-background, rgba(0,120,200,0.12)); color: var(--p-tag-info-color); }
+.osm-status--pending_approval { background: var(--p-tag-warn-background, rgba(255,160,0,0.15)); color: var(--p-tag-warn-color); }
+.osm-status--failed,
+.osm-status--blocked_disk  { background: var(--p-tag-danger-background, rgba(220,60,60,0.15)); color: var(--p-tag-danger-color); }
+
 .danger-zone {
   margin-top: 1rem;
   border: 1px solid var(--p-red-400, #e34c4c);
