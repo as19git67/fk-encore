@@ -217,6 +217,14 @@ export function overpassDescriptor(
       OVERPASS_META: "yes",
       OVERPASS_MODE: "init",
       OVERPASS_PLANET_URL: pbfUrl,
+      // wiktorn/overpass-api's default preprocess pipes the planet
+      // file through `bunzip2 -cd`, which is correct for a `.osm.bz2`
+      // download but loops-crashes when fed a Geofabrik `.osm.pbf`
+      // (the only format Geofabrik publishes consistently across all
+      // regions). osmconvert is bundled in the image; pointing the
+      // preprocess at it expands the PBF to OSM XML on stdout, which
+      // is the format `update_database` expects downstream.
+      OVERPASS_PLANET_PREPROCESS: "osmconvert -",
       OVERPASS_DIFF_URL: replicationUrlFor(pbfUrl),
     },
     volumes: [
