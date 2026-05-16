@@ -3936,16 +3936,22 @@ export async function batchUpdateAlbumPhotosLogic(userId: number, req: BatchAlbu
         recipients.delete(userId);
         const recipientList = Array.from(recipients);
         if (recipientList.length > 0) {
+          // Realtime stays per-photo so open AlbumDetailView slots each
+          // new photo into the grid as it lands.
           for (const photoId of addedPhotoIds) {
             await publishAlbumEvent(recipientList, "photo_added", albumId, {
               photoId,
               addedByUserId: userId,
             });
-            await emitFeedItem(recipientList, userId, "photo_added", {
-              albumId,
-              photoId,
-            });
           }
+          // Feed/push fans out once per batch — the feed-service
+          // debouncer further coalesces near-simultaneous batches for
+          // the same album.
+          await emitFeedItem(recipientList, userId, "photo_added", {
+            albumId,
+            photoId: addedPhotoIds[0],
+            payload: { photoIds: addedPhotoIds },
+          });
         }
         // One guest-fanout call per batch (not per photo) — the digest
         // cron groups per-guest anyway, so N photo notifications for

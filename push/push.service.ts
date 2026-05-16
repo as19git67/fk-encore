@@ -228,10 +228,18 @@ export function buildFeedNotification(input: {
   let title = "Vivanty";
   let body = "";
   switch (input.kind) {
-    case "photo_added":
-      title = "Neues Foto";
-      body = `${actor} hat ein Foto zu „${album}" hinzugefügt`;
+    case "photo_added": {
+      const ids = input.payload?.photoIds;
+      const count = Array.isArray(ids) ? (ids as unknown[]).length : 1;
+      if (count > 1) {
+        title = "Neue Fotos";
+        body = `${actor} hat ${count} Fotos zu „${album}" hinzugefügt`;
+      } else {
+        title = "Neues Foto";
+        body = `${actor} hat ein Foto zu „${album}" hinzugefügt`;
+      }
       break;
+    }
     case "album_shared":
       title = "Album geteilt";
       body = `${actor} hat das Album „${album}" mit dir geteilt`;
