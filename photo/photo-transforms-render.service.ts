@@ -24,6 +24,7 @@ import {
   type PhotoTransformSuggestionsPayload,
 } from "../db/schema";
 import { computeAutoExposureFromStats, type BboxNorm } from "./photo-transforms.service";
+import { convertHeicToJpeg } from "./heic-convert.service";
 
 // Mirror of THUMBNAIL_DIR / UPLOAD_DIR in photo.service. Inlined to avoid a
 // circular import — the existing file already imports our suggestion-compute
@@ -125,8 +126,10 @@ export async function renderPhotoWithRecipe(
   targetWidth?: number,
 ): Promise<Buffer> {
   // Read display-orientation dimensions so the crop math works in the
-  // same coordinate frame as the suggestion compute.
-  const meta = await sharp(originalPath).rotate().metadata();
+  // same coordinate frame as the suggestion compute. openImageForSharp
+  // routes HEIC files through heic-convert (sharp's libvips build
+  // can't decode them directly in this container).
+  const meta = await (await openImageForSharp(originalPath)).rotate().metadata();
   const W = meta.width ?? 0;
   const H = meta.height ?? 0;
 
@@ -134,7 +137,7 @@ export async function renderPhotoWithRecipe(
   // Stage 1: EXIF-aware auto-rotate + extract crop, emit an intermediate
   // buffer. Stage 2: user rotation + colour ops + resize. The intermediate
   // buffer is small (cropped already) so the extra encode/decode is cheap.
-  let stage1 = sharp(originalPath).rotate();
+  let stage1 = (await openImageForSharp(originalPath)).rotate();
   if (recipe.crop && W > 0 && H > 0) {
     const left = clampInt(Math.round(recipe.crop.x * W), 0, W - 1);
     const top = clampInt(Math.round(recipe.crop.y * H), 0, H - 1);
@@ -406,6 +409,22 @@ export async function resolvePhotoFilename(photoId: number): Promise<string | nu
  * mid-grey with reasonable contrast. Does not persist — the caller (the
  * editor's Auto-Levels button) applies it locally.
  */
+/**
+ * sharp's bundled libvips in this build lacks the libheif decoder
+ * plugin — sharp(path) on a HEIC file throws "No decoding plugin
+ * installed for this compression format". For HEIC paths we route
+ * through the heic-convert helper (libheif via WASM) and hand sharp
+ * the resulting JPEG buffer instead.
+ */
+async function openImageForSharp(originalPath: string): Promise<sharp.Sharp> {
+  const lower = originalPath.toLowerCase();
+  if (lower.endsWith(".heic") || lower.endsWith(".heif")) {
+    const jpegBuffer = await convertHeicToJpeg(originalPath);
+    return sharp(jpegBuffer);
+  }
+  return sharp(originalPath);
+}
+
 export async function computeAutoLevelsForPhoto(
   photoId: number,
   crop: PhotoTransformCrop | null,
@@ -413,15 +432,11 @@ export async function computeAutoLevelsForPhoto(
   const photo = await dbFirst<{
     filename: string;
     external_path: string | null;
-    width: number | null;
-    height: number | null;
   }>(
     db
       .select({
         filename: photos.filename,
         external_path: photos.external_path,
-        width: photos.width,
-        height: photos.height,
       })
       .from(photos)
       .where(eq(photos.id, photoId)),
@@ -429,11 +444,24 @@ export async function computeAutoLevelsForPhoto(
   if (!photo) return null;
 
   const originalPath = resolvePhotoDiskPath(photo);
-  let img = sharp(originalPath).rotate();
 
-  if (crop && photo.width && photo.height) {
-    const W = photo.width;
-    const H = photo.height;
+  // Read DISPLAY dimensions from sharp itself (after EXIF auto-rotate).
+  // Using photos.width / photos.height from the DB looked tempting but
+  // those are often the pre-rotation values for cameras that bake an
+  // EXIF orientation tag — applying the crop's normalised coords
+  // against the unrotated dimensions made .extract() go out-of-
+  // bounds, which sharp throws on and Encore surfaced as a 500. We
+  // deliberately do NOT wrap the sharp calls below in try/catch —
+  // any other exception is a genuine programmer / data error and
+  // should bubble up with its full stack rather than being silenced
+  // into a misleading 404.
+  const meta = await (await openImageForSharp(originalPath)).rotate().metadata();
+  const W = meta.width;
+  const H = meta.height;
+
+  let img = (await openImageForSharp(originalPath)).rotate();
+
+  if (crop && W && H) {
     const left = Math.max(0, Math.min(W - 1, Math.round(crop.x * W)));
     const top = Math.max(0, Math.min(H - 1, Math.round(crop.y * H)));
     const width = Math.max(1, Math.min(W - left, Math.round(crop.w * W)));

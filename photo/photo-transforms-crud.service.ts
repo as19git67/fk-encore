@@ -359,6 +359,24 @@ export async function materializeSuggestionLogic(
 }
 
 /**
+ * Return the set of photo IDs the caller has stored a transform on.
+ * One bulk read is enough for the gallery / album-grid to know which
+ * tiles need the rendered URL vs the bare /photos/file/* thumbnail —
+ * avoiding N round-trips on grids with thousands of photos.
+ */
+export async function listMyTransformedPhotoIdsLogic(
+  userId: number,
+): Promise<{ photo_ids: number[] }> {
+  const rows = await dbAll<{ photo_id: number }>(
+    db
+      .select({ photo_id: photoTransforms.photo_id })
+      .from(photoTransforms)
+      .where(eq(photoTransforms.user_id, userId)),
+  );
+  return { photo_ids: rows.map((r) => r.photo_id) };
+}
+
+/**
  * Adopt another user's transform as the caller's. Copies the recipe and
  * records the source via `adopted_from`. Replaces any existing user row.
  */

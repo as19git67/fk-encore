@@ -426,4 +426,50 @@ describe("computeAutoLevelsForPhoto", () => {
   it("returns null for an unknown photo", async () => {
     expect(await computeAutoLevelsForPhoto(999_999, null)).toBeNull();
   });
+
+  it("does not throw when photos.width/height disagree with the actual file dimensions", async () => {
+    // Regression: previously the function trusted photos.width and
+    // photos.height as the basis for converting the normalised crop
+    // to pixel coords. For EXIF-rotated photos those DB values are
+    // often the pre-rotation dimensions, so .extract() would go
+    // out-of-bounds and sharp would throw — bubbling up as a 500.
+    // The function now reads dimensions from sharp directly, so a
+    // mismatch in the DB columns is harmless.
+    const fs = await import("fs");
+    const sharpMod = (await import("sharp")).default;
+    const filePath = `${TMP_DIR}/wrongdim-${Date.now()}.jpg`;
+    if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
+    await sharpMod({
+      create: { width: 300, height: 200, channels: 3, background: { r: 50, g: 50, b: 50 } },
+    })
+      .jpeg()
+      .toFile(filePath);
+
+    // Insert with DELIBERATELY-WRONG dims to mimic the EXIF-rotation
+    // case (file is 300×200; DB claims 200×300).
+    const bad = await dbInsertReturning<{ id: number }>(
+      db
+        .insert(photos)
+        .values({
+          user_id: userId,
+          filename: filePath,
+          original_name: "wrongdim.jpg",
+          mime_type: "image/jpeg",
+          size: 100,
+          width: 200,
+          height: 300,
+          external_path: filePath,
+        })
+        .returning({ id: photos.id }),
+    );
+
+    const r = await computeAutoLevelsForPhoto(bad!.id, {
+      x: 0.5,
+      y: 0.5,
+      w: 0.4,
+      h: 0.4,
+    });
+    expect(r).not.toBeNull();
+    expect(r!.gamma).toBe(1);
+  });
 });
