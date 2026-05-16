@@ -66,7 +66,16 @@ export interface LoadOptions {
 
 const DEFAULT_URL = "https://download.geofabrik.de/index-v1.json";
 const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const DEFAULT_CACHE_PATH = "data/osm/geofabrik-index.json";
+/**
+ * Default cache path. Resolves at call time so an env override
+ * (`OSM_ADMIN_CACHE_DIR`) takes effect without rebuilding. The
+ * fallback is `/tmp` because the encore container's working
+ * directory is not writable by the apps user.
+ */
+function defaultCachePath(): string {
+  const dir = process.env.OSM_ADMIN_CACHE_DIR ?? "/tmp/fk-encore-osm";
+  return path.join(dir, "geofabrik-index.json");
+}
 
 /**
  * Load the Geofabrik index, preferring a fresh cached copy if one
@@ -77,7 +86,7 @@ export async function loadGeofabrikIndex(
   opts: LoadOptions = {},
 ): Promise<GeofabrikIndex> {
   const url = opts.url ?? DEFAULT_URL;
-  const cachePath = opts.cachePath ?? DEFAULT_CACHE_PATH;
+  const cachePath = opts.cachePath ?? defaultCachePath();
   const ttlMs = opts.cacheTtlMs ?? DEFAULT_TTL_MS;
   const fetcher = opts.fetcher ?? fetch;
   const now = opts.now ?? (() => new Date());
@@ -94,7 +103,16 @@ export async function loadGeofabrikIndex(
     }
     const raw = await res.text();
     const index = parseIndex(raw, now());
-    await writeCache(cachePath, raw, index.fetchedAt);
+    // Best-effort cache write — failing to write must not abort the
+    // request. The next call will re-fetch and try again.
+    try {
+      await writeCache(cachePath, raw, index.fetchedAt);
+    } catch (err) {
+      console.warn(
+        `[osm-admin] could not persist geofabrik index cache to ${cachePath}:`,
+        (err as Error).message ?? err,
+      );
+    }
     return index;
   } catch (err) {
     if (cached) {
