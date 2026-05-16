@@ -23,7 +23,11 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import dbDefault from "../db/database";
 import { osmRegionImports } from "../db/schema";
 import { getDockerDriver, type DockerDriver } from "./docker-driver";
-import { slugToContainerSuffix } from "./importer";
+import {
+  nominatimDescriptor,
+  overpassDescriptor,
+  slugToContainerSuffix,
+} from "./importer";
 import { assertTransition, isRegionStatus, type RegionStatus } from "./state-machine";
 
 /** Geohash precision: 7 chars ≈ 153 m × 153 m at the equator. */
@@ -169,19 +173,32 @@ export async function ensureReady(
   }
 
   const suffix = slugToContainerSuffix(slug);
-  // Bring up both containers; the driver's ensureRunning is idempotent.
-  await driver.ensureRunning({
-    name: `nominatim-${suffix}`,
-    image: process.env.NOMINATIM_IMAGE ?? "mediagis/nominatim:5.0",
-    env: { POSTGRES_DB: row.postgres_db },
-    healthcheckUrl: `http://nominatim-${suffix}:8080/status`,
-  });
-  await driver.ensureRunning({
-    name: `overpass-${suffix}`,
-    image: process.env.OVERPASS_IMAGE ?? "wiktorn/overpass-api:latest",
-    env: { OVERPASS_META: "yes" },
-    healthcheckUrl: `http://overpass-${suffix}/api/status`,
-  });
+  // Bring up both containers; the driver's ensureRunning is idempotent
+  // and does not block on health. We start with the same descriptors the
+  // importer would use so a cold-start after idle-stop reattaches to
+  // the existing named volumes and reuses the imported DB.
+  await driver.ensureRunning(
+    nominatimDescriptor(slug, suffix, row.geofabrik_url, process.env.NOMINATIM_IMAGE ?? "mediagis/nominatim:5.0"),
+  );
+  await driver.ensureRunning(
+    overpassDescriptor(suffix, row.geofabrik_url, process.env.OVERPASS_IMAGE ?? "wiktorn/overpass-api:latest"),
+  );
+
+  // For a cold-start (volume already populated) the API is usually back
+  // within 5–15 s. Budget 60 s so a flapping container still surfaces.
+  const nomOk = await driver.waitHealthy(
+    `http://nominatim-${suffix}:8080/status`,
+    { maxAttempts: HEALTHCHECK_MAX_ATTEMPTS, intervalMs: HEALTHCHECK_INTERVAL_MS },
+  );
+  const ovOk = await driver.waitHealthy(
+    `http://overpass-${suffix}/api/status`,
+    { maxAttempts: HEALTHCHECK_MAX_ATTEMPTS, intervalMs: HEALTHCHECK_INTERVAL_MS },
+  );
+  if (!nomOk || !ovOk) {
+    throw new Error(
+      `${slug}: cold-start healthcheck failed (nominatim=${nomOk}, overpass=${ovOk})`,
+    );
+  }
 
   assertTransition("ready_stopped", "ready_running");
   await db
