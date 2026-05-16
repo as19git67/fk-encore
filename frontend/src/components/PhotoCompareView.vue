@@ -156,6 +156,46 @@ function aiScoreTooltip(photoId: number): string {
   return text
 }
 
+// ── Eyes-closed hint (Track N / #81) ─────────────────────────────────────
+// Surface a "Augen geschlossen" warning when the AI's per-face eyes_open
+// score is below the threshold. Escalate the visual weight when the
+// OTHER photo of the pair has open eyes — that's the actionable case
+// where the user almost certainly wants to keep the other one.
+const EYES_CLOSED_THRESHOLD = 0.5
+
+function eyesOpenScore(photoId: number): number | null {
+  const v = getPhotoById(photoId)?.ai_quality_details?.eyes_open
+  return typeof v === 'number' ? v : null
+}
+
+function hasClosedEyes(photoId: number): boolean {
+  const s = eyesOpenScore(photoId)
+  return s !== null && s < EYES_CLOSED_THRESHOLD
+}
+
+function eyesClosedTooltip(photoId: number): string {
+  const s = eyesOpenScore(photoId)
+  const pct = s !== null ? `${Math.round(s * 100)}%` : '?'
+  if (!currentPair.value) return `Augen wirken geschlossen (${pct})`
+  const [a, b] = currentPair.value
+  const otherId = photoId === a ? b : a
+  const otherClosed = hasClosedEyes(otherId)
+  if (otherClosed) return `Augen wirken geschlossen (${pct}) — auf dem anderen Foto allerdings auch.`
+  if (eyesOpenScore(otherId) === null) return `Augen wirken geschlossen (${pct})`
+  return `Augen wirken geschlossen (${pct}) — das andere Foto hat offene Augen.`
+}
+
+/** True when this photo has closed eyes AND the other photo of the pair
+ *  has open eyes — the actionable "pick the other one" hint. */
+function isClosedEyesStandout(photoId: number): boolean {
+  if (!currentPair.value) return false
+  if (!hasClosedEyes(photoId)) return false
+  const [a, b] = currentPair.value
+  const otherId = photoId === a ? b : a
+  const otherScore = eyesOpenScore(otherId)
+  return otherScore !== null && otherScore >= EYES_CLOSED_THRESHOLD
+}
+
 /**
  * Whether the given photo id sits in the group's KI-Pick set.
  *
@@ -924,6 +964,15 @@ function compareTileSrc(photo: Photo, width?: number): string {
                   <i class="pi pi-check-circle" style="font-size: 0.7rem" />
                   KI-Pick
                 </div>
+                <div
+                  v-if="hasClosedEyes(photoId)"
+                  class="eyes-closed-badge"
+                  :class="{ 'eyes-closed-badge--standout': isClosedEyesStandout(photoId) }"
+                  v-tooltip.top="eyesClosedTooltip(photoId)"
+                >
+                  <i class="pi pi-eye-slash" style="font-size: 0.7rem" />
+                  Augen zu
+                </div>
                 <Button
                   v-if="isZoomed(photoId)"
                   class="compare-zoom-reset"
@@ -1083,6 +1132,14 @@ function compareTileSrc(photo: Photo, width?: number): string {
                 >
                   <i class="pi pi-check-circle" style="font-size: 0.6rem" />
                   KI-Pick
+                </div>
+                <div
+                  v-if="hasClosedEyes(photo.id)"
+                  class="review-eyes-closed"
+                  v-tooltip.right="`Augen wirken geschlossen (${Math.round((eyesOpenScore(photo.id) ?? 0) * 100)}%)`"
+                >
+                  <i class="pi pi-eye-slash" style="font-size: 0.6rem" />
+                  Augen zu
                 </div>
               </div>
               <div class="review-photo-controls">
@@ -1436,5 +1493,39 @@ kbd {
   background: rgba(34, 197, 94, 0.85);
   backdrop-filter: blur(4px);
   cursor: help;
+}
+
+/* ── Eyes-closed hint (Track N / #81) ── Surfaced bottom-right so it
+   sits opposite the quality badge. The standout variant (one photo
+   has closed eyes while the other has open eyes) gets a stronger red
+   background to direct the user's choice. */
+.eyes-closed-badge,
+.review-eyes-closed {
+  position: absolute;
+  bottom: 0.4rem;
+  right: 0.4rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 1rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #fee2e2;
+  background: rgba(239, 68, 68, 0.7);
+  backdrop-filter: blur(4px);
+  cursor: help;
+  z-index: 3;
+}
+
+.eyes-closed-badge--standout {
+  color: #ffffff;
+  background: rgba(220, 38, 38, 0.95);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35), 0 2px 8px rgba(220, 38, 38, 0.45);
+}
+
+.review-eyes-closed {
+  font-size: 0.65rem;
+  padding: 0.1rem 0.4rem;
 }
 </style>
