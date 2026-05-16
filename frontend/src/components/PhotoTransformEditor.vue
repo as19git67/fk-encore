@@ -272,26 +272,6 @@ async function applyAutoLevels() {
   }
 }
 
-function applyAiSuggestion() {
-  const s = bundle.value?.suggestion
-  if (!s) return
-  // Copy the whole exposure recipe; let the user pick the ratio
-  // explicitly via "Anwenden" on the desired ratio chip.
-  recipe.value = {
-    ...recipe.value,
-    exposure: s.exposure,
-    contrast: s.contrast,
-    gamma: s.gamma,
-    white_point: s.white_point ?? null,
-    black_point: s.black_point ?? null,
-  }
-  // If the user already picked a ratio that the suggestion supports, snap
-  // the crop too.
-  if (selectedRatio.value !== 'free' && s.crops[selectedRatio.value]) {
-    recipe.value.crop = s.crops[selectedRatio.value]!
-  }
-}
-
 async function materializeAt(ratio: PhotoTransformAspectRatio) {
   saving.value = true
   error.value = null
@@ -545,18 +525,13 @@ onMounted(() => {
           <div class="suggestion-row">
             <span class="hint">
               Belichtung {{ bundle.suggestion.exposure.toFixed(1) }} EV,
-              Kontrast {{ bundle.suggestion.contrast.toFixed(2) }}
+              Kontrast {{ bundle.suggestion.contrast.toFixed(2) }} —
+              für die aktuelle Crop-Region: <b>Auto</b> oben in
+              „Bildanpassungen“.
             </span>
             <Button
-              label="Belichtung übernehmen"
-              size="small"
-              outlined
-              @click="applyAiSuggestion"
-              :disabled="loading"
-            />
-            <Button
               v-if="hasSuggestionForRatio && selectedRatio !== 'free'"
-              :label="`Crop & Belichtung übernehmen (${selectedRatio})`"
+              :label="`Crop &amp; Belichtung übernehmen (${selectedRatio})`"
               size="small"
               @click="materializeAt(selectedRatio as PhotoTransformAspectRatio)"
               :loading="saving"
