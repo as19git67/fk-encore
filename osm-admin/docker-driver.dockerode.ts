@@ -22,6 +22,7 @@ import {
   type ContainerInfo,
   type ContainerState,
   type DockerDriver,
+  type WaitHealthyOptions,
   setDockerDriver,
 } from "./docker-driver";
 
@@ -37,7 +38,6 @@ export interface DockerodeContainerLike {
       ExitCode?: number;
     };
   }>;
-  wait(): Promise<{ StatusCode: number }>;
 }
 
 /** Minimal slice of the dockerode client surface we use. */
@@ -87,10 +87,7 @@ export class DockerodeDriver implements DockerDriver {
 
   async ensureRunning(desc: ContainerDescriptor): Promise<ContainerInfo> {
     const existing = await this.tryInspect(desc.name);
-    if (existing && existing.state === "running") {
-      await this.awaitHealthy(desc);
-      return existing;
-    }
+    if (existing && existing.state === "running") return existing;
 
     if (existing && existing.state !== "missing") {
       // Stale instance (created/exited/removing). Force-remove and recreate
@@ -102,7 +99,6 @@ export class DockerodeDriver implements DockerDriver {
       this.buildCreateOptions(desc, /* autoRemove */ false),
     );
     await container.start();
-    await this.awaitHealthy(desc);
     return { name: desc.name, state: "running" };
   }
 
@@ -133,15 +129,19 @@ export class DockerodeDriver implements DockerDriver {
     );
   }
 
-  async runOneShot(desc: ContainerDescriptor): Promise<number> {
-    // AutoRemove on exit. We don't reuse one-shot containers across ticks.
-    await this.remove(desc.name); // clear any leftover from a previous run
-    const container = await this.client.createContainer(
-      this.buildCreateOptions(desc, /* autoRemove */ true),
-    );
-    await container.start();
-    const { StatusCode } = await container.wait();
-    return StatusCode;
+  async waitHealthy(url: string, opts: WaitHealthyOptions = {}): Promise<boolean> {
+    const maxAttempts = opts.maxAttempts ?? this.healthcheck.maxAttempts;
+    const intervalMs = opts.intervalMs ?? this.healthcheck.intervalMs;
+    for (let i = 0; i < maxAttempts; i++) {
+      try {
+        const res = await this.healthcheck.fetcher(url);
+        if (res.ok) return true;
+      } catch {
+        // swallow and retry
+      }
+      if (i + 1 < maxAttempts) await sleep(intervalMs);
+    }
+    return false;
   }
 
   // ── internal helpers ──────────────────────────────────────────────
@@ -188,26 +188,6 @@ export class DockerodeDriver implements DockerDriver {
     const info = await this.tryInspect(name);
     if (!info || info.state !== "running") return null;
     return this.client.getContainer(name);
-  }
-
-  private async awaitHealthy(desc: ContainerDescriptor): Promise<void> {
-    if (!desc.healthcheckUrl) return;
-    const { maxAttempts, intervalMs, fetcher } = this.healthcheck;
-    let lastErr: unknown = null;
-    for (let i = 0; i < maxAttempts; i++) {
-      try {
-        const res = await fetcher(desc.healthcheckUrl);
-        if (res.ok) return;
-        lastErr = new Error(`healthcheck ${res.status}`);
-      } catch (err) {
-        lastErr = err;
-      }
-      await sleep(intervalMs);
-    }
-    const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
-    throw new Error(
-      `${desc.name}: healthcheck did not become ready after ${maxAttempts} attempts (${msg})`,
-    );
   }
 }
 

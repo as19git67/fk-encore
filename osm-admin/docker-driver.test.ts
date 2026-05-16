@@ -24,22 +24,21 @@ describe("InMemoryDockerDriver", () => {
   it("records every operation in events for assertions", async () => {
     const d = new InMemoryDockerDriver();
     await d.ensureRunning({ name: "a", image: "img" });
-    await d.runOneShot({ name: "b", image: "img" });
+    await d.waitHealthy("http://a/status");
     await d.stop("a");
     await d.remove("a");
     expect(d.events).toEqual([
       { op: "ensureRunning", name: "a" },
-      { op: "runOneShot", name: "b", exitCode: 0 },
+      { op: "waitHealthy", url: "http://a/status", healthy: true },
       { op: "stop", name: "a" },
       { op: "remove", name: "a" },
     ]);
   });
 
-  it("honours the configured oneShotExitCode", async () => {
+  it("waitHealthy honours the configured healthyByDefault flag", async () => {
     const d = new InMemoryDockerDriver();
-    d.oneShotExitCode = 42;
-    const exit = await d.runOneShot({ name: "x", image: "img" });
-    expect(exit).toBe(42);
+    d.healthyByDefault = false;
+    expect(await d.waitHealthy("http://x/status")).toBe(false);
   });
 });
 

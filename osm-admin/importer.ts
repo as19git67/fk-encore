@@ -1,26 +1,29 @@
 /**
  * Region importer — single-tick worker that drives `importing` rows to
- * either `ready_running` (success), `blocked_disk` (preflight failure),
- * or `failed` (anything else).
+ * either `ready_running` (when both per-region containers report healthy),
+ * `blocked_disk` (preflight failure), or `failed` (anything else).
  *
- * Sequence per tick:
+ * Architecture: self-contained per-region containers. mediagis/nominatim
+ * and wiktorn/overpass-api bundle their own data store, so each region
+ * gets two long-running containers backed by named Docker volumes. The
+ * containers run their own import on first start (empty volume + a
+ * PBF_URL env var). We deliberately do not maintain a shared Postgres
+ * for all regions — that would require patching the upstream images.
  *
- *   1. Pick the oldest `importing` row whose last touch is older than
- *      a small cooldown (avoids the same row being retried in a tight
- *      loop). At most one row per tick — keeps Postgres + Docker load
- *      predictable.
- *   2. HEAD-probe the PBF URL to learn the size; persist on the row.
- *   3. Disk pre-check: refuse if free space < `pbfSize × 10` (Nominatim
- *      Postgres typically expands 5–10× the input). On refusal the row
- *      goes to `blocked_disk`.
- *   4. Run the one-shot import container via the docker driver.
- *   5. Bring up the persistent `nominatim-<slug>` and `overpass-<slug>`
- *      containers; mark ready when both report running.
+ * Why ticks instead of a single long-running call: a full Nominatim
+ * import takes 30 min – 3 h. We don't want to block a single HTTP
+ * request for that long, and we want the tick to be safe to interrupt
+ * (container restart). So each tick is short:
  *
- * Steps 4/5 currently delegate to the `InMemoryDockerDriver`, so the
- * state machine runs end-to-end without a real Docker engine. The real
- * dockerode driver lands in a follow-up slice and slots in via
- * `setDockerDriver`.
+ *   1. Pick the oldest `importing` row whose `updated_at` is older
+ *      than `TICK_COOLDOWN_MS`.
+ *   2. HEAD-probe PBF size if we don't have it yet, persist it.
+ *   3. Disk pre-check (best effort): refuse if free < `pbfSize × 10`.
+ *   4. ensureRunning both containers — idempotent, so subsequent ticks
+ *      no-op on this step.
+ *   5. waitHealthy with a single attempt. If both pass → ready_running.
+ *      Otherwise bump `updated_at` (cooldown gate) and stay `importing`;
+ *      the next tick re-probes.
  */
 
 import { and, asc, eq, lt, or, isNull } from "drizzle-orm";
@@ -57,17 +60,15 @@ export interface ImporterDeps {
 export interface TickOutcome {
   /** Slug picked this tick, or null if nothing to do. */
   slug: string | null;
-  /** Resulting status (or "noop" when no row was picked). */
-  result: RegionStatus | "noop";
+  /** Resulting status — "noop" when no row was picked, "waiting" when
+   *  the containers are up but not yet healthy (row stays `importing`). */
+  result: RegionStatus | "noop" | "waiting";
   /** Optional human-readable detail, e.g. the disk shortfall. */
   detail?: string;
 }
 
 /**
  * Process at most one importing row. Safe to call on a timer.
- *
- * Returns an outcome describing what happened so callers (admin UI,
- * tests) can show progress.
  */
 export async function tickImporter(deps: ImporterDeps = {}): Promise<TickOutcome> {
   const db = deps.db ?? dbDefault;
@@ -80,10 +81,6 @@ export async function tickImporter(deps: ImporterDeps = {}): Promise<TickOutcome
 
   const cooldownCutoff = new Date(now().getTime() - TICK_COOLDOWN_MS).toISOString();
 
-  // Pick the oldest importing row whose last update is older than the
-  // cooldown. `updated_at` doubles as a poor man's lease — the row is
-  // touched at each transition so a stuck tick can't be re-picked
-  // within the cooldown window.
   const picked = await db
     .select()
     .from(osmRegionImports)
@@ -105,13 +102,16 @@ export async function tickImporter(deps: ImporterDeps = {}): Promise<TickOutcome
   const slugSafe = slugToContainerSuffix(slug);
 
   try {
-    // Step 1: probe size + persist.
-    const sizeMb = await probe(row.geofabrik_url);
-    if (sizeMb !== null) {
-      await db
-        .update(osmRegionImports)
-        .set({ pbf_size_mb: sizeMb, updated_at: now().toISOString() })
-        .where(eq(osmRegionImports.slug, slug));
+    // Step 1: probe size (only if we don't already have one cached).
+    let sizeMb = row.pbf_size_mb ?? null;
+    if (sizeMb === null) {
+      sizeMb = await probe(row.geofabrik_url);
+      if (sizeMb !== null) {
+        await db
+          .update(osmRegionImports)
+          .set({ pbf_size_mb: sizeMb, updated_at: now().toISOString() })
+          .where(eq(osmRegionImports.slug, slug));
+      }
     }
 
     // Step 2: disk pre-check (best effort — skipped when callers can't
@@ -126,40 +126,34 @@ export async function tickImporter(deps: ImporterDeps = {}): Promise<TickOutcome
       }
     }
 
-    // Step 3: one-shot import container.
-    const importDesc: ContainerDescriptor = {
-      name: `nominatim-import-${slugSafe}`,
-      image: nominatimImage,
-      env: {
-        PBF_URL: row.geofabrik_url,
-        NOMINATIM_PASSWORD: process.env.NOMINATIM_PASSWORD ?? "changeme",
-        // Nominatim picks up the target DB via DSN injected by the
-        // real driver. For the in-memory driver these are ignored.
-        POSTGRES_DB: row.postgres_db,
-      },
-    };
-    const exit = await driver.runOneShot(importDesc);
-    if (exit !== 0) {
-      const detail = `import container exit=${exit}`;
-      await transition(db, slug, "importing", "failed", detail, now);
-      return { slug, result: "failed", detail };
+    // Step 3: persistent containers. Both are self-contained — the
+    // image does its own import on first start with the PBF_URL env.
+    // ensureRunning is idempotent: a no-op once the container is up.
+    await driver.ensureRunning(nominatimDescriptor(slug, slugSafe, row.geofabrik_url, nominatimImage));
+    await driver.ensureRunning(overpassDescriptor(slugSafe, row.geofabrik_url, overpassImage));
+
+    // Step 4: probe health once. Long imports take many ticks; we don't
+    // block on a giant timeout, we re-poll on the next tick.
+    const nomHealthy = await driver.waitHealthy(
+      `http://nominatim-${slugSafe}:8080/status`,
+      { maxAttempts: 1 },
+    );
+    const ovHealthy = await driver.waitHealthy(
+      `http://overpass-${slugSafe}/api/status`,
+      { maxAttempts: 1 },
+    );
+    if (!nomHealthy || !ovHealthy) {
+      // Stay in `importing`. Bump updated_at so the cooldown gates the
+      // next tick (we don't want to probe more than once every 30 s).
+      await db
+        .update(osmRegionImports)
+        .set({ updated_at: now().toISOString() })
+        .where(eq(osmRegionImports.slug, slug));
+      const detail = `nominatim_healthy=${nomHealthy} overpass_healthy=${ovHealthy}`;
+      return { slug, result: "waiting", detail };
     }
 
-    // Step 4: persistent containers.
-    await driver.ensureRunning({
-      name: `nominatim-${slugSafe}`,
-      image: nominatimImage,
-      env: { POSTGRES_DB: row.postgres_db },
-      healthcheckUrl: `http://nominatim-${slugSafe}:8080/status`,
-    });
-    await driver.ensureRunning({
-      name: `overpass-${slugSafe}`,
-      image: overpassImage,
-      env: { OVERPASS_META: "yes" },
-      healthcheckUrl: `http://overpass-${slugSafe}/api/status`,
-    });
-
-    // Step 5: mark ready + record completion time.
+    // Step 5: mark ready.
     await transition(db, slug, "importing", "ready_running", null, now, {
       imported_at: now().toISOString(),
       last_error: null,
@@ -170,6 +164,74 @@ export async function tickImporter(deps: ImporterDeps = {}): Promise<TickOutcome
     await transition(db, slug, "importing", "failed", detail, now);
     return { slug, result: "failed", detail };
   }
+}
+
+/**
+ * Container descriptor for the long-running Nominatim instance. The
+ * named volume holds the bundled Postgres data dir; on first start
+ * with an empty volume the image's init script downloads the PBF and
+ * imports it. On subsequent starts the existing DB is reused.
+ */
+export function nominatimDescriptor(
+  slug: string,
+  slugSafe: string,
+  pbfUrl: string,
+  image: string,
+): ContainerDescriptor {
+  return {
+    name: `nominatim-${slugSafe}`,
+    image,
+    env: {
+      PBF_URL: pbfUrl,
+      NOMINATIM_PASSWORD: process.env.NOMINATIM_PASSWORD ?? "changeme",
+      IMPORT_STYLE: process.env.NOMINATIM_IMPORT_STYLE ?? "address",
+      // Replication URL used by the upcoming refresh endpoint; ignored
+      // by the initial import. The mediagis image accepts it via env.
+      REPLICATION_URL: replicationUrlFor(pbfUrl),
+      REGION_SLUG: slug,
+    },
+    volumes: [
+      // Named docker volume: docker auto-creates it on first run.
+      // Path inside the container is the bundled pg16 data dir.
+      {
+        hostPath: `fk-encore-osm-nominatim-${slugSafe}`,
+        containerPath: "/var/lib/postgresql/16/main",
+      },
+    ],
+  };
+}
+
+/**
+ * Container descriptor for the long-running Overpass instance. Same
+ * import-on-empty-volume pattern as Nominatim.
+ */
+export function overpassDescriptor(
+  slugSafe: string,
+  pbfUrl: string,
+  image: string,
+): ContainerDescriptor {
+  return {
+    name: `overpass-${slugSafe}`,
+    image,
+    env: {
+      OVERPASS_META: "yes",
+      OVERPASS_MODE: "init",
+      OVERPASS_PLANET_URL: pbfUrl,
+      OVERPASS_DIFF_URL: replicationUrlFor(pbfUrl),
+    },
+    volumes: [
+      { hostPath: `fk-encore-osm-overpass-${slugSafe}`, containerPath: "/db" },
+    ],
+  };
+}
+
+/**
+ * Turn `…/bayern-latest.osm.pbf` into `…/bayern-updates/`. Geofabrik
+ * publishes minutely-diff streams under that path; the refresh worker
+ * (next slice) consumes them.
+ */
+function replicationUrlFor(pbfUrl: string): string {
+  return pbfUrl.replace(/-latest\.osm\.pbf$/, "-updates/");
 }
 
 async function transition(
@@ -204,4 +266,3 @@ export function slugToContainerSuffix(slug: string): string {
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
 }
-
