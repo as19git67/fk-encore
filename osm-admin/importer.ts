@@ -210,27 +210,35 @@ export function overpassDescriptor(
   pbfUrl: string,
   image: string,
 ): ContainerDescriptor {
+  // wiktorn/overpass-api's bundled preprocess pipeline is hardcoded
+  // for OSM XML compressed with bzip2; the image ships neither
+  // osmconvert nor osmium so we can't expand a PBF on the fly. Geofabrik
+  // publishes the equivalent `.osm.bz2` next to every `.osm.pbf` (~2–3×
+  // larger but no preprocessing tooling needed) — point overpass at
+  // that variant so the default `bunzip2 -cd` pipeline just works.
+  const bz2Url = bz2UrlFor(pbfUrl);
   return {
     name: `overpass-${slugSafe}`,
     image,
     env: {
       OVERPASS_META: "yes",
       OVERPASS_MODE: "init",
-      OVERPASS_PLANET_URL: pbfUrl,
-      // wiktorn/overpass-api's default preprocess pipes the planet
-      // file through `bunzip2 -cd`, which is correct for a `.osm.bz2`
-      // download but loops-crashes when fed a Geofabrik `.osm.pbf`
-      // (the only format Geofabrik publishes consistently across all
-      // regions). osmconvert is bundled in the image; pointing the
-      // preprocess at it expands the PBF to OSM XML on stdout, which
-      // is the format `update_database` expects downstream.
-      OVERPASS_PLANET_PREPROCESS: "osmconvert -",
+      OVERPASS_PLANET_URL: bz2Url,
       OVERPASS_DIFF_URL: replicationUrlFor(pbfUrl),
     },
     volumes: [
       { hostPath: `fk-encore-osm-overpass-${slugSafe}`, containerPath: "/db" },
     ],
   };
+}
+
+/**
+ * Sibling URL of a Geofabrik `.osm.pbf` — same path, `.osm.bz2`
+ * extension. Used because Overpass-API's official image expects
+ * OSM XML bz2 and lacks the tooling to convert a PBF.
+ */
+function bz2UrlFor(pbfUrl: string): string {
+  return pbfUrl.replace(/-latest\.osm\.pbf$/, "-latest.osm.bz2");
 }
 
 /**
