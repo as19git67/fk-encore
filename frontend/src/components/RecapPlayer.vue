@@ -2,6 +2,9 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import HeicImage from './HeicImage.vue'
 import { getPhotoUrl, type Photo } from '../api/photos'
+import { getRenderedPhotoUrl } from '../api/photoTransforms'
+import { useTransformedPhotosIndex } from '../composables/useTransformedPhotosIndex'
+import { useAuthStore } from '../stores/auth'
 
 const props = defineProps<{
   photos: Photo[]
@@ -84,7 +87,18 @@ function clearAdvance() {
   advanceToken++
 }
 
+const auth = useAuthStore()
+const transformedIndex = useTransformedPhotosIndex()
+
 function photoDisplayUrl(photo: Photo): string {
+  // If the user has a saved recipe on this photo, route through the
+  // render endpoint so the recap slide shows their crop + colour.
+  // The server-rendered output is always JPEG, so the HEIC-conversion
+  // branch below isn't needed in that path.
+  const uid = auth.user?.id
+  if (uid && transformedIndex.has(photo.id)) {
+    return getRenderedPhotoUrl(photo.id, { variant: 'user', userId: uid, width: 1600 })
+  }
   const base = getPhotoUrl(photo.filename, 1600)
   const pathPart = (photo.filename.split('?')[0] ?? photo.filename).toLowerCase()
   const isHeic = pathPart.endsWith('.heic') || pathPart.endsWith('.heif')
@@ -252,7 +266,7 @@ onBeforeUnmount(() => {
           :style="slotAAnimStyle"
         >
           <HeicImage
-            :src="getPhotoUrl(slotA.filename, 1600)"
+            :src="photoDisplayUrl(slotA)"
             :alt="slotA.original_name"
             object-fit="cover"
           />
@@ -266,7 +280,7 @@ onBeforeUnmount(() => {
           :style="slotBAnimStyle"
         >
           <HeicImage
-            :src="getPhotoUrl(slotB.filename, 1600)"
+            :src="photoDisplayUrl(slotB)"
             :alt="slotB.original_name"
             object-fit="cover"
           />

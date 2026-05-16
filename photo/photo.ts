@@ -760,6 +760,7 @@ import {
   deleteOwnTransformLogic,
   materializeSuggestionLogic,
   adoptTransformLogic,
+  listMyTransformedPhotoIdsLogic,
   type PhotoTransformsBundle,
   type PhotoTransformRow,
   type UpsertTransformRequest,
@@ -995,6 +996,28 @@ export const adoptPhotoTransform = api(
     const authData = getAuthData()!;
     requirePermission(authData, "photos.view");
     return await adoptTransformLogic(userId, req.id, req.from_transform_id);
+  },
+);
+
+/**
+ * Return the set of photo IDs the caller has a transform on. The
+ * gallery / album grid uses this as a one-shot to decide per tile
+ * whether to render the bare original or the user-recipe-rendered
+ * version — avoiding an N-fan-out of per-tile transform lookups.
+ */
+export const listMyTransformedPhotoIds = api(
+  {
+    expose: true,
+    method: "GET",
+    path: "/photos/transforms/mine",
+    auth: true,
+  },
+  async (): Promise<{ photo_ids: number[] }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    return await listMyTransformedPhotoIdsLogic(userId);
   },
 );
 
