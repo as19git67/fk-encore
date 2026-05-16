@@ -25,6 +25,14 @@ console.log("[boot] osm-admin/encore.service.ts: begin");
 import "./regions";
 
 import { tickImporter } from "./importer";
+import { registerDockerodeDriverIfEnabled } from "./docker-driver.dockerode";
+
+// Activate the dockerode driver iff explicitly requested via env. The
+// default stays InMemoryDockerDriver so CI/test environments without
+// a Docker socket keep working.
+registerDockerodeDriverIfEnabled({
+  defaultNetwork: process.env.OSM_ADMIN_DOCKER_NETWORK,
+});
 
 schedule({
   name: "osm-admin-importer",
