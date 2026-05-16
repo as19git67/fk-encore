@@ -108,8 +108,46 @@ constructs container descriptors:
 |---|---|---|
 | `NOMINATIM_PASSWORD` | Internal Postgres password inside the per-region nominatim container. Any value works; it never leaves the container. | `changeme` |
 | `NOMINATIM_IMAGE` | Override the nominatim image tag (test-pinning, fork). | `mediagis/nominatim:5.0` |
-| `OVERPASS_IMAGE` | Override the overpass image tag. | `wiktorn/overpass-api:latest` |
+| `OVERPASS_IMAGE` | Override the overpass image tag. The default is **not** an upstream image — see "Overpass PBF image" below. | `fk-encore-overpass-pbf:latest` |
 | `NOMINATIM_IMPORT_STYLE` | Nominatim import profile (`full`, `address`, `street`, `admin`). `address` is plenty for POI detection and ~30 % faster than `full`. | `address` |
+
+## Overpass PBF image
+
+The upstream `wiktorn/overpass-api` image only ingests `.osm.bz2`
+planet files. Geofabrik publishes those for top-level regions
+(countries, Bundesländer) but **not** for sub-regions like
+Regierungsbezirke (Oberbayern, Mittelfranken, …). Those are
+PBF-only. Trying to feed a PBF to the upstream image fails with
+`bunzip2: not a bzip2 file` and the container exit-loops.
+
+To handle PBFs, the importer expects an extended image
+`fk-encore-overpass-pbf:latest` on the host. It's a one-line
+extension of the upstream image that installs `osmconvert` and lets
+us point `OVERPASS_PLANET_PREPROCESS` at it.
+
+Build it once on the host:
+
+```bash
+# Either: clone the repo and run a normal build
+docker build -t fk-encore-overpass-pbf:latest osm-admin/overpass-pbf/
+
+# Or: inline build without a repo checkout
+docker build -t fk-encore-overpass-pbf:latest - <<'EOF'
+FROM wiktorn/overpass-api:latest
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends osmctools \
+  && rm -rf /var/lib/apt/lists/*
+EOF
+```
+
+The image is ~350 MB (upstream + osmctools), build takes ~30 s.
+Subsequent rebuilds use Docker's layer cache.
+
+A follow-up slice will auto-build this image at first use via
+dockerode, so this manual step disappears. Until then, the importer
+will fail with "no such image" for sub-regional Geofabrik extracts
+if the image isn't pre-built — the auto-pull path can't help because
+this image is not on any registry.
 
 ## Disk-space budget
 
