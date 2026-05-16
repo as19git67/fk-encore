@@ -75,10 +75,24 @@ class FakeContainer implements DockerodeContainerLike {
 class FakeDocker implements DockerodeClientLike {
   readonly store = new Map<string, FakeContainerState>();
   readonly events: Array<{ op: string; name: string; opts?: unknown }> = [];
+  /** Image names already "pulled" in this fake registry. */
+  readonly pulledImages = new Set<string>();
+  /** If non-null, createContainer will reject with this error before
+   *  consulting the store. Cleared after one use (so retries succeed). */
+  pendingCreateError: { statusCode?: number; message: string } | null = null;
+  /** If true, pull() rejects instead of succeeding. */
+  pullFails = false;
 
   async createContainer(opts: Record<string, unknown>): Promise<DockerodeContainerLike> {
     const name = opts.name as string;
     this.events.push({ op: "createContainer", name, opts });
+    if (this.pendingCreateError) {
+      const e = this.pendingCreateError;
+      this.pendingCreateError = null;
+      const err = new Error(e.message);
+      (err as { statusCode?: number }).statusCode = e.statusCode;
+      throw err;
+    }
     this.store.set(name, { status: "created" });
     return new FakeContainer(name, this.store, this);
   }
@@ -86,6 +100,27 @@ class FakeDocker implements DockerodeClientLike {
   getContainer(id: string): DockerodeContainerLike {
     return new FakeContainer(id, this.store, this);
   }
+
+  async pull(image: string, _opts?: object): Promise<NodeJS.ReadableStream> {
+    this.events.push({ op: "pull", name: image });
+    this.pulledImages.add(image);
+    // The dockerode driver only consumes the stream via
+    // `modem.followProgress`, so returning a placeholder is enough.
+    return { /* opaque */ } as NodeJS.ReadableStream;
+  }
+
+  modem = {
+    followProgress: (
+      _stream: NodeJS.ReadableStream,
+      onFinished: (err: unknown, output?: unknown) => void,
+    ): void => {
+      if (this.pullFails) {
+        setImmediate(() => onFinished(new Error("pull network error")));
+      } else {
+        setImmediate(() => onFinished(null, []));
+      }
+    },
+  };
 }
 
 function okFetch(): typeof fetch {
@@ -188,6 +223,47 @@ describe("DockerodeDriver", () => {
     const driver = new DockerodeDriver({ client });
     const info = await driver.inspect("nope");
     expect(info).toEqual({ name: "nope", state: "missing" });
+  });
+
+  it("auto-pulls the image and retries when createContainer fails with 'No such image'", async () => {
+    const client = new FakeDocker();
+    // First createContainer call fails with the daemon's 404-with-
+    // "No such image" message (real wording from the dockerode driver).
+    client.pendingCreateError = {
+      statusCode: 404,
+      message: "(HTTP code 404) no such container - No such image: mediagis/nominatim:5.0",
+    };
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const driver = new DockerodeDriver({ client });
+    const info = await driver.ensureRunning({
+      name: "nominatim-bayern",
+      image: "mediagis/nominatim:5.0",
+      env: { PBF_URL: "https://example.com/x.pbf" },
+    });
+    expect(info.state).toBe("running");
+    expect(client.events.map((e) => e.op)).toEqual([
+      "createContainer", // first attempt, throws image-not-found
+      "pull",            // reactive pull
+      "createContainer", // retry, succeeds
+      "start",
+    ]);
+    expect(client.pulledImages.has("mediagis/nominatim:5.0")).toBe(true);
+  });
+
+  it("propagates a pull failure as a regular driver error", async () => {
+    const client = new FakeDocker();
+    client.pendingCreateError = {
+      statusCode: 404,
+      message: "(HTTP code 404) no such container - No such image: bad/image:1",
+    };
+    client.pullFails = true;
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const driver = new DockerodeDriver({ client });
+    await expect(
+      driver.ensureRunning({ name: "x", image: "bad/image:1" }),
+    ).rejects.toThrow(/pull network error/);
   });
 
   it("propagates volumes + env + network through createContainer opts", async () => {
