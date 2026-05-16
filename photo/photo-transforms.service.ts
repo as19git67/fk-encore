@@ -25,6 +25,7 @@ import {
   type PhotoTransformCrop,
   type PhotoTransformSuggestionsPayload,
 } from "../db/schema";
+import { convertHeicToJpeg } from "./heic-convert.service";
 
 // Inlined to avoid a circular import with photo.service.ts (which will
 // call computePhotoTransformSuggestions from inside its existing hooks).
@@ -324,7 +325,18 @@ function safeParseBbox(raw: string): BboxNorm | null {
 async function computeAutoExposureFromFile(
   originalPath: string,
 ): Promise<{ exposure: number; contrast: number; gamma: number }> {
-  const stats = await sharp(originalPath).stats();
+  // sharp's libvips in this build can't decode HEIC; route HEIC paths
+  // through heic-convert first (same dance the render pipeline does
+  // in photo-transforms-render.service.ts). Previously HEIC threw
+  // here and silently fell back to a neutral { 0, 0, 1 } recipe via
+  // the try/catch in the caller — users got no real auto-exposure
+  // out of their iPhone photos.
+  const lower = originalPath.toLowerCase();
+  const isHeic = lower.endsWith(".heic") || lower.endsWith(".heif");
+  const sharpInput: string | Buffer = isHeic
+    ? await convertHeicToJpeg(originalPath)
+    : originalPath;
+  const stats = await sharp(sharpInput).stats();
   // Average the first three channels (R, G, B) as a coarse luminance proxy.
   // We deliberately avoid a luminance-weighted formula because it would
   // bias monochrome images, and the suggestion is editable anyway.

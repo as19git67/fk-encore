@@ -25,6 +25,15 @@ const cache = new Map<number, PhotoTransformRow | null>()
 const inFlight = new Map<number, Promise<PhotoTransformRow | null>>()
 
 /**
+ * Reactive version counter bumped on every invalidate. Active
+ * useUserPhotoTransform() instances watch this in addition to their
+ * own photoId — so editor save / delete / adopt invalidations trigger
+ * the FullscreenOverlay / Sidebar to refetch the recipe and re-render
+ * the visible image without needing a manual reload.
+ */
+const cacheVersion = ref(0)
+
+/**
  * Drop the cached transform for a photo. Call this from any code path
  * that mutates the recipe — Save / Delete / Adopt in the editor — so the
  * gallery / flyout pick up the new state on next view.
@@ -32,6 +41,7 @@ const inFlight = new Map<number, Promise<PhotoTransformRow | null>>()
 export function invalidateUserTransform(photoId: number) {
   cache.delete(photoId)
   inFlight.delete(photoId)
+  cacheVersion.value++
 }
 
 /**
@@ -62,9 +72,13 @@ export function useUserPhotoTransform(photoIdRef: Ref<number | null | undefined>
     if (photoIdRef.value === id) recipe.value = row
   }
 
+  // Re-load when either the watched photo or the global cacheVersion
+  // changes. The version channel is how the editor's save / delete
+  // invalidations propagate into all currently-active consumers — the
+  // visible photo refreshes without a route change.
   watch(
-    photoIdRef,
-    (id) => {
+    [photoIdRef, cacheVersion],
+    ([id]) => {
       if (!id) {
         recipe.value = null
         return

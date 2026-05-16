@@ -99,24 +99,41 @@ Rationale:
 - **Suggestions** are global (one row per photo) because computing them is
   expensive but doesn't depend on the viewing user.
 
-### Rendering pipeline (hybrid: CSS-first)
+### Rendering pipeline (hybrid: server-rendered where it counts)
 
-Most display happens in the browser via CSS / SVG filters on the largest
-cached thumbnail. `sharp` is only invoked where the bytes themselves must
-contain the transformation (grid thumbnails, exports).
+The original spec called for a CSS-first approach where the browser
+applied the recipe to a cached original thumbnail. That worked for the
+**colour** part of the recipe (exposure / contrast / gamma / BP / WP)
+but the **crop** is awkward: the existing `HeicImage` component
+already owns the layout and pulling crop math through it without
+breaking the face-box-overlay slot is invasive. In practice the
+shipped implementation routes recipe-aware surfaces through the
+server-rendered `/photos/:id/render?v=user&user=<id>&w=<width>`
+endpoint instead — the JPEG that comes back already has crop +
+colour baked in, and the same disk-sharded thumbnail cache absorbs
+the cost on every miss-but-once.
 
 | Use case | Path |
 | --- | --- |
-| Detail view / Lightbox / Editor live-preview | Cached thumbnail + CSS/SVG filters from the recipe |
-| Grid thumbnail | Server-rendered derivative (`sharp`) at the requested grid size, cached |
-| Download / Share / Print / Export | Server-rendered one-shot (`sharp`), not cached |
+| Editor live-preview (slider drag) | CSS / SVG filter on the original, cropped client-side via the editor's own cropper component |
+| Detail-Sidebar, Fullscreen, gallery grid, album covers, recap, compare view | Server-rendered URL when the calling user has a recipe; bare `/photos/file/<filename>` otherwise |
+| Download / Share / Print / Export | Server-rendered one-shot via `/photos/:id/export`, not cached |
 | External consumers (iOS app, share-links for non-users) | Server-rendered |
 
-Recipe → browser primitive mapping:
+The browser → server decision is made tile-by-tile via the
+`useTransformedPhotosIndex` composable: one `GET /photos/transforms/mine`
+lookup at app boot returns the set of `photo_id`s on which the calling
+user has a transform, and the helper `photoThumbnailSrc(...)` picks
+the URL accordingly. The set is also patched in-place from the
+editor's save / delete / adopt / materialize handlers, so newly-edited
+tiles flip to the rendered URL without a refetch.
+
+Recipe → browser primitive mapping (used inside the editor preview
+only):
 
 | Field | CSS / SVG | Notes |
 | --- | --- | --- |
-| `crop` | `transform: scale/translate` in an `overflow:hidden` wrapper, or `object-fit: cover` + `object-position` for aspect-locked containers | Original is still downloaded — fine for one-image views, prohibitive for grids |
+| `crop` | `transform: scale/translate` in an `overflow:hidden` wrapper inside the cropper component | Only inside the editor — every other surface uses the server-rendered URL |
 | `rotation` (90° steps) | `transform: rotate()` | |
 | `exposure` (EV) | `filter: brightness(2^EV)` | sRGB-gamma vs. linear-light not identical; visually close |
 | `contrast` | `filter: contrast()` | Direct match |
@@ -148,22 +165,52 @@ tree. Same shard, same filesystem, no new infrastructure.
    `source='adopted'` and `adopted_from` set.
 4. The user can then `Edit` it like their own.
 
-## Phased rollout
+## Phased rollout — shipped
 
-1. **Migration** — `photo_transforms`, `photo_transform_suggestions`, plus
-   journal entry.
+All seven planned phases have landed:
+
+1. **Migration** — `photo_transforms`, `photo_transform_suggestions`,
+   plus journal entry (`0085_photo_transforms`).
 2. **Suggestion compute** — `computePhotoTransformSuggestions(photoId)`
-   chained behind the existing face/landmark hooks.
-3. **Frontend display layer** — recipe → CSS/SVG filter helper, shared
-   `<svg><defs>` block. Detail view + live-preview only.
-4. **Server render path** — `sharp`-based `/photo/:id/render` for grid
-   sizes; `/photo/:id/export` for downloads.
-5. **Editor UI** — `vue-advanced-cropper` integration, sliders, 90°
-   rotation buttons, Save / Discard.
-6. **Adopt flow** — hint banner + one-click materialise.
-7. **Optional follow-ups** — CLAHE, learned saliency, free-angle rotation.
+   chained behind the existing face/landmark indexing hooks.
+3. **Frontend display layer** — recipe → CSS/SVG filter helper for
+   the editor's live preview (`utils/photoTransformRecipe.ts`).
+4. **Server render path** — `sharp`-based `/photos/:id/render` and
+   `/photos/:id/export`, plus the per-photo and bulk auto-levels
+   helpers. HEIC paths route through `convertHeicToJpeg` because
+   the bundled `libvips` can't decode HEIC directly.
+5. **Editor UI** — `PhotoTransformEditor.vue` with the in-house
+   `PhotoCropper.vue` (drag handles, ROT overlay, keyboard
+   shortcuts), sliders for exposure / contrast / gamma / BP / WP,
+   90° rotation buttons, Auto-Levels, Before/After hold-toggle.
+   Triggers live in both `PhotoDetailSidebar` (desktop) and
+   `FullscreenOverlay` (mobile).
+6. **Adopt flow** — bundle response includes other users' recipes;
+   one click on a chip in the editor materialises via
+   `POST /photos/:id/transforms/adopt`.
+7. **Display wiring** — `useTransformedPhotosIndex` composable
+   provides a one-shot bulk index (`GET /photos/transforms/mine`)
+   plus a tile-level helper that picks the server-rendered URL for
+   photos the caller has edited. Wired into the gallery grid,
+   album cover grid, recap player, compare view, fullscreen
+   prev/next prefetch, and the detail sidebar.
 
-## Open follow-ups for future phases
+## Endpoint summary
+
+| Method + path | Auth | Purpose |
+| --- | --- | --- |
+| `GET /photos/:id/transforms` | `photos.view` | Bundle: own row + other users' rows + suggestion |
+| `PUT /photos/:id/transforms` | `photos.view` | Upsert own recipe |
+| `DELETE /photos/:id/transforms` | `photos.view` | Delete own recipe (idempotent) |
+| `POST /photos/:id/transforms/from-suggestion` | `photos.view` | Materialize AI suggestion for chosen ratio |
+| `POST /photos/:id/transforms/adopt` | `photos.view` | Copy another user's recipe |
+| `POST /photos/:id/transforms/auto-levels` | `photos.view` | Compute exposure/contrast/gamma for a crop region; returns recipe, does not persist |
+| `GET /photos/transforms/mine` | `photos.view` | Set of photo IDs the caller has a transform on (gallery routing) |
+| `GET /photos/:id/render?v=…` | none (parity with `/photos/file/*`) | Render with a recipe applied; cached by recipe content + width |
+| `GET /photos/:id/export?v=…` | none | Full-resolution rendered JPEG with `Content-Disposition: attachment`; no cache |
+| `POST /photos/recompute-transform-suggestions` | `data.manage` | Bulk recompute suggestions over all photos (skip-existing by default; `force` overrides) |
+
+## Open follow-ups
 
 - Free-angle rotation (relax the `rotation` check constraint).
 - CLAHE / Zero-DCE for difficult low-light shots if user feedback warrants.
@@ -171,6 +218,10 @@ tree. Same shard, same filesystem, no new infrastructure.
   worth it if A/B feedback is clearly negative.
 - Optional per-user "always apply suggestion" preference, currently off
   by design.
+- `PersonsGrid` and `FacePhotoGrid` intentionally stay on the
+  original photo — those tiles render face-area zooms via
+  `cover_bbox` + CSS transform, where applying the user's whole-
+  photo crop would put the bbox into the wrong coordinate system.
 
 ## Related docs
 

@@ -106,6 +106,16 @@ export function materializePhotoTransform(
   )
 }
 
+/**
+ * One-shot list of photo IDs the caller has a transform on. Used by
+ * the gallery / album grids to decide per tile whether to render the
+ * bare original thumbnail or the user-recipe rendered URL — avoids
+ * an N-fan-out of per-tile transform lookups.
+ */
+export function getMyTransformedPhotoIds() {
+  return apiFetch<{ photo_ids: number[] }>('/photos/transforms/mine')
+}
+
 export function adoptPhotoTransform(photoId: number, fromTransformId: number) {
   return apiFetch<PhotoTransformRow>(`/photos/${photoId}/transforms/adopt`, {
     method: 'POST',
@@ -139,6 +149,13 @@ export function computePhotoAutoLevels(
   )
 }
 
+// In production both the frontend and the Encore-served API live on
+// the same origin; in dev the SPA proxies /api/* to the Encore
+// process, so any URL we hand to <img>/<a> needs the /api prefix.
+function urlPrefix(): string {
+  return import.meta.env.PROD ? '' : '/api'
+}
+
 /** Build the render URL for a server-rendered variant. */
 export function getRenderedPhotoUrl(
   photoId: number,
@@ -150,7 +167,7 @@ export function getRenderedPhotoUrl(
   if (opts.variant === 'suggested') params.set('ratio', opts.ratio)
   if (opts.variant === 'user') params.set('user', String(opts.userId))
   if (opts.width) params.set('w', String(opts.width))
-  return `/photos/${photoId}/render?${params.toString()}`
+  return `${urlPrefix()}/photos/${photoId}/render?${params.toString()}`
 }
 
 /** Build the full-resolution export URL. */
@@ -163,5 +180,5 @@ export function getExportedPhotoUrl(
   const params = new URLSearchParams({ v: opts.variant })
   if (opts.variant === 'suggested') params.set('ratio', opts.ratio)
   if (opts.variant === 'user') params.set('user', String(opts.userId))
-  return `/photos/${photoId}/export?${params.toString()}`
+  return `${urlPrefix()}/photos/${photoId}/export?${params.toString()}`
 }

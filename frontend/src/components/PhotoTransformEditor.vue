@@ -40,6 +40,7 @@ import {
   type PhotoTransformRecipe,
 } from '../utils/photoTransformRecipe'
 import { invalidateUserTransform } from '../composables/useUserPhotoTransform'
+import { markPhotoTransformed } from '../composables/useTransformedPhotosIndex'
 import PhotoCropper from './PhotoCropper.vue'
 
 const props = defineProps<{
@@ -271,26 +272,6 @@ async function applyAutoLevels() {
   }
 }
 
-function applyAiSuggestion() {
-  const s = bundle.value?.suggestion
-  if (!s) return
-  // Copy the whole exposure recipe; let the user pick the ratio
-  // explicitly via "Anwenden" on the desired ratio chip.
-  recipe.value = {
-    ...recipe.value,
-    exposure: s.exposure,
-    contrast: s.contrast,
-    gamma: s.gamma,
-    white_point: s.white_point ?? null,
-    black_point: s.black_point ?? null,
-  }
-  // If the user already picked a ratio that the suggestion supports, snap
-  // the crop too.
-  if (selectedRatio.value !== 'free' && s.crops[selectedRatio.value]) {
-    recipe.value.crop = s.crops[selectedRatio.value]!
-  }
-}
-
 async function materializeAt(ratio: PhotoTransformAspectRatio) {
   saving.value = true
   error.value = null
@@ -300,6 +281,7 @@ async function materializeAt(ratio: PhotoTransformAspectRatio) {
     recipe.value = recipeFromRow(row)
     selectedRatio.value = ratio
     invalidateUserTransform(props.photoId)
+    markPhotoTransformed(props.photoId, true)
     emit('saved', row)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
@@ -316,6 +298,7 @@ async function adoptOther(other: PhotoTransformOther) {
     bundle.value = { ...(bundle.value as PhotoTransformsBundle), mine: row }
     recipe.value = recipeFromRow(row)
     invalidateUserTransform(props.photoId)
+    markPhotoTransformed(props.photoId, true)
     emit('saved', row)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
@@ -338,6 +321,8 @@ async function save() {
       black_point: recipe.value.black_point ?? null,
     })
     bundle.value = { ...(bundle.value as PhotoTransformsBundle), mine: row }
+    invalidateUserTransform(props.photoId)
+    markPhotoTransformed(props.photoId, true)
     emit('saved', row)
     emit('update:visible', false)
   } catch (e) {
@@ -367,6 +352,7 @@ async function deleteMine() {
     recipe.value = recipeFromRow(null)
     selectedRatio.value = 'free'
     invalidateUserTransform(props.photoId)
+    markPhotoTransformed(props.photoId, false)
     emit('deleted')
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
@@ -539,18 +525,13 @@ onMounted(() => {
           <div class="suggestion-row">
             <span class="hint">
               Belichtung {{ bundle.suggestion.exposure.toFixed(1) }} EV,
-              Kontrast {{ bundle.suggestion.contrast.toFixed(2) }}
+              Kontrast {{ bundle.suggestion.contrast.toFixed(2) }} —
+              für die aktuelle Crop-Region: <b>Auto</b> oben in
+              „Bildanpassungen“.
             </span>
             <Button
-              label="Belichtung übernehmen"
-              size="small"
-              outlined
-              @click="applyAiSuggestion"
-              :disabled="loading"
-            />
-            <Button
               v-if="hasSuggestionForRatio && selectedRatio !== 'free'"
-              :label="`Crop & Belichtung übernehmen (${selectedRatio})`"
+              :label="`Crop &amp; Belichtung übernehmen (${selectedRatio})`"
               size="small"
               @click="materializeAt(selectedRatio as PhotoTransformAspectRatio)"
               :loading="saving"

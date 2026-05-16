@@ -334,3 +334,80 @@ describe("adoptTransformLogic", () => {
     );
   });
 });
+
+describe("listMyTransformedPhotoIdsLogic", () => {
+  it("returns the photo IDs the user has a transform on, scoped per-user", async () => {
+    const { listMyTransformedPhotoIdsLogic } = await import(
+      "./photo-transforms-crud.service"
+    );
+
+    // Three photos owned by userA, two with userA transforms,
+    // one with userB transform only.
+    const p1 = (
+      await dbInsertReturning<{ id: number }>(
+        db
+          .insert(photos)
+          .values({
+            user_id: userA,
+            filename: `mine-${Date.now()}-a.jpg`,
+            original_name: "a.jpg",
+            mime_type: "image/jpeg",
+            size: 1,
+            width: 100,
+            height: 100,
+          })
+          .returning({ id: photos.id }),
+      )
+    )!.id;
+    const p2 = (
+      await dbInsertReturning<{ id: number }>(
+        db
+          .insert(photos)
+          .values({
+            user_id: userA,
+            filename: `mine-${Date.now()}-b.jpg`,
+            original_name: "b.jpg",
+            mime_type: "image/jpeg",
+            size: 1,
+            width: 100,
+            height: 100,
+          })
+          .returning({ id: photos.id }),
+      )
+    )!.id;
+    const p3 = (
+      await dbInsertReturning<{ id: number }>(
+        db
+          .insert(photos)
+          .values({
+            user_id: userA,
+            filename: `mine-${Date.now()}-c.jpg`,
+            original_name: "c.jpg",
+            mime_type: "image/jpeg",
+            size: 1,
+            width: 100,
+            height: 100,
+          })
+          .returning({ id: photos.id }),
+      )
+    )!.id;
+
+    await upsertOwnTransformLogic(userA, p1, { exposure: 0.5 });
+    await upsertOwnTransformLogic(userA, p2, { contrast: 0.1 });
+    await upsertOwnTransformLogic(userB, p3, { exposure: -0.5 });
+
+    const aRes = await listMyTransformedPhotoIdsLogic(userA);
+    expect(aRes.photo_ids.sort()).toEqual([p1, p2].sort());
+
+    const bRes = await listMyTransformedPhotoIdsLogic(userB);
+    expect(bRes.photo_ids).toEqual([p3]);
+  });
+
+  it("returns an empty array when the user has no transforms", async () => {
+    const { listMyTransformedPhotoIdsLogic } = await import(
+      "./photo-transforms-crud.service"
+    );
+    const res = await listMyTransformedPhotoIdsLogic(userA);
+    expect(res.photo_ids).toEqual([]);
+  });
+});

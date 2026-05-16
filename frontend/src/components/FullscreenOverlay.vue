@@ -5,6 +5,7 @@ import HeicImage from './HeicImage.vue'
 import PhotoTransformEditor from './PhotoTransformEditor.vue'
 import { getPhotoUrl, type Photo, type CurationStatus } from '../api/photos'
 import { useUserPhotoTransform, invalidateUserTransform } from '../composables/useUserPhotoTransform'
+import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
 import { useAuthStore } from '../stores/auth'
 import type { GalleryGridGroup } from '../api/gallery'
 import { formatPhotoDateCompact, formatLocationLabel } from '../utils/dateFormat'
@@ -97,6 +98,17 @@ const fsImageStyle = computed(() =>
     ? undefined
     : { filter: userPhotoFilter.value },
 )
+
+// Prev / next prefetch URLs. Pick the right one per-neighbour so the
+// neighbour's rendered version is warm by the time the user navigates
+// to it. Imports `photoThumbnailSrc` from the shared composable.
+function neighbourPreloadSrc(p: Photo): string {
+  return photoThumbnailSrc({
+    photoId: p.id,
+    filename: p.filename,
+    userId: auth.user?.id,
+  })
+}
 
 // Editor trigger — accessible from inside the fullscreen view too, not
 // just from the desktop sidebar's quick-actions row.
@@ -457,8 +469,8 @@ function locationLabel(photo: Photo) {
   <div class="fullscreen-overlay" @click="emit('close')">
     <!-- Preload neighbours only after current image has loaded -->
     <div v-if="currentLoaded" style="display: none">
-      <HeicImage v-if="prevPhoto" :src="getPhotoUrl(prevPhoto.filename)" />
-      <HeicImage v-if="nextPhoto" :src="getPhotoUrl(nextPhoto.filename)" />
+      <HeicImage v-if="prevPhoto" :src="neighbourPreloadSrc(prevPhoto)" />
+      <HeicImage v-if="nextPhoto" :src="neighbourPreloadSrc(nextPhoto)" />
     </div>
 
     <div

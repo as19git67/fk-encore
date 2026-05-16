@@ -25,7 +25,9 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import HeicImage from './HeicImage.vue'
-import { type Album, getPhotoUrl } from '../api/photos'
+import { type Album } from '../api/photos'
+import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
+import { useAuthStore } from '../stores/auth'
 
 const props = defineProps<{
   albums: Album[]
@@ -39,6 +41,21 @@ const emit = defineEmits<{
 // ── Layout: column count + cell size ────────────────────────────────────────
 // Constants match VirtualGallery so the album list and the photo gallery
 // render the same number of columns at every viewport width.
+const auth = useAuthStore()
+
+// Album-cover thumbnail URL with user-recipe awareness: when the
+// caller has edited the album's cover photo, the cover shows their
+// crop / colour version. Without a recipe the bare /photos/file/*
+// path is used as before.
+function albumCoverSrc(album: Album): string {
+  return photoThumbnailSrc({
+    photoId: album.cover_photo_id ?? null,
+    filename: album.cover_filename ?? '',
+    width: 400,
+    userId: auth.user?.id,
+  })
+}
+
 const TARGET_CELL_MIN_PX = 140
 const GAP_PX = 4
 
@@ -226,7 +243,7 @@ watch(
           <div class="album-cover">
             <HeicImage
               v-if="album.cover_filename"
-              :src="getPhotoUrl(album.cover_filename, 400)"
+              :src="albumCoverSrc(album)"
               :alt="album.name"
               objectFit="cover"
             />

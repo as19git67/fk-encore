@@ -4,7 +4,6 @@ import Button from 'primevue/button'
 import Popover from 'primevue/popover'
 import HeicImage from './HeicImage.vue'
 import {
-  getPhotoUrl,
   updatePhotoCuration,
   reviewPhotoGroup,
   acceptAiPick,
@@ -13,6 +12,8 @@ import {
   type PhotoGroup,
   type CurationStatus,
 } from '../api/photos'
+import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
+import { useAuthStore } from '../stores/auth'
 
 const helpPopover = ref()
 
@@ -530,6 +531,22 @@ watch(() => props.group.id, () => {
 function getPhotoById(id: number): Photo | undefined {
   return props.allPhotos.find(p => p.id === id) ?? fetchedMembers.value.get(id)
 }
+
+const auth = useAuthStore()
+
+/**
+ * Photo URL aware of the caller's saved transform. Compare-view tiles
+ * always show the user's edited version when one exists — no point
+ * comparing originals if the user has expressed a preference.
+ */
+function compareTileSrc(photo: Photo, width?: number): string {
+  return photoThumbnailSrc({
+    photoId: photo.id,
+    filename: photo.filename,
+    width,
+    userId: auth.user?.id,
+  })
+}
 </script>
 
 <template>
@@ -657,7 +674,7 @@ function getPhotoById(id: number): Photo | undefined {
               <div class="side-by-side-image">
                 <HeicImage
                   v-if="getPhotoById(photoId)"
-                  :src="getPhotoUrl(getPhotoById(photoId)!.filename)"
+                  :src="compareTileSrc(getPhotoById(photoId)!)"
                   alt=""
                   objectFit="contain"
                 />
@@ -805,7 +822,7 @@ function getPhotoById(id: number): Photo | undefined {
               }"
             >
               <div class="review-photo-image">
-                <HeicImage :src="getPhotoUrl(photo.filename)" :alt="photo.original_name" />
+                <HeicImage :src="compareTileSrc(photo)" :alt="photo.original_name" />
                 <div class="review-score" :class="{ negative: (scores.get(photo.id) ?? 0) < 0 }">
                   {{ (scores.get(photo.id) ?? 0) > 0 ? '+' : '' }}{{ scores.get(photo.id) ?? 0 }}
                 </div>
