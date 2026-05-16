@@ -67,10 +67,13 @@ The `fk-encore-app` container typically runs as the TrueNAS SCALE
   `group_add`:
   ```yaml
   group_add:
-    - "${HOST_DOCKER_GID:-995}"
+    - "${HOST_DOCKER_GID:-999}"
   ```
   Resolve `HOST_DOCKER_GID` on the host with
   `getent group docker | cut -d: -f3` and set it in `.env`.
+  Typical values: **999** (TrueNAS SCALE 25.x, Debian, Ubuntu),
+  **985** (Alpine). Always verify on your specific host — the default
+  in the snippet is a fallback, not a guarantee.
 
 > ⚠️ Mounting the docker socket grants root-equivalent access to the
 > host. Acceptable for the self-hosted/private deployment model this
