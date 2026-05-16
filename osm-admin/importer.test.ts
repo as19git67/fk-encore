@@ -196,18 +196,23 @@ describe("descriptor builders", () => {
     ]);
   });
 
-  it("overpassDescriptor wires PBF URL + osmconvert preprocess + DIFF_URL + named volume", () => {
+  it("overpassDescriptor wires PBF URL + osmium-based preprocess + DIFF_URL + named volume", () => {
     const d = overpassDescriptor(
       "europe-germany-bayern",
       "https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf",
-      "fk-encore-overpass-pbf:latest",
+      "wiktorn/overpass-api:latest",
     );
-    // Our extended image bundles osmconvert; the entrypoint reads PBF
-    // from stdin and emits OSM XML for the downstream update_database.
     expect(d.env?.OVERPASS_PLANET_URL).toBe(
       "https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf",
     );
-    expect(d.env?.OVERPASS_PLANET_PREPROCESS).toBe("osmconvert -");
+    // Preprocess uses osmium (bundled in the upstream image — see line
+    // 95 of wiktorn's docker-entrypoint.sh) to convert PBF → bz2 OSM
+    // XML in place. init_osm3s.sh then consumes /db/planet.osm.bz2
+    // unchanged.
+    expect(d.env?.OVERPASS_PLANET_PREPROCESS).toContain(
+      "osmium cat --from-format=pbf --output-format=osm.bz2",
+    );
+    expect(d.env?.OVERPASS_PLANET_PREPROCESS).toContain("/db/planet.osm.bz2");
     expect(d.env?.OVERPASS_DIFF_URL).toBe(
       "https://download.geofabrik.de/europe/germany/bayern-updates/",
     );
