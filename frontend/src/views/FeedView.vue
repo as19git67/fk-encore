@@ -74,8 +74,13 @@ function kindLabel(item: FeedItem): string {
   const actor = item.actor.name ?? 'Jemand'
   const album = item.album?.name ?? 'einem Album'
   switch (item.kind) {
-    case 'photo_added':
-      return `${actor} hat ein Foto zu „${album}" hinzugefügt`
+    case 'photo_added': {
+      const ids = (item.payload as { photoIds?: unknown })?.photoIds
+      const count = Array.isArray(ids) ? ids.length : 1
+      return count > 1
+        ? `${actor} hat ${count} Fotos zu „${album}" hinzugefügt`
+        : `${actor} hat ein Foto zu „${album}" hinzugefügt`
+    }
     case 'album_shared':
       return `${actor} hat das Album „${album}" mit dir geteilt`
     case 'photo_favorited':
