@@ -196,16 +196,17 @@ describe("descriptor builders", () => {
     ]);
   });
 
-  it("overpassDescriptor wires PLANET_URL + preprocess + DIFF_URL + named volume", () => {
+  it("overpassDescriptor swaps PBF→bz2 url + wires DIFF_URL + named volume", () => {
     const d = overpassDescriptor(
       "europe-germany-bayern",
       "https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf",
       "wiktorn/overpass-api:latest",
     );
-    expect(d.env?.OVERPASS_PLANET_URL).toMatch(/bayern-latest\.osm\.pbf$/);
-    // The Geofabrik download is PBF; default `bunzip2 -cd` would crash.
-    // We override the preprocess to use osmconvert which auto-detects PBF.
-    expect(d.env?.OVERPASS_PLANET_PREPROCESS).toBe("osmconvert -");
+    // wiktorn/overpass-api expects .osm.bz2 — we point it at Geofabrik's
+    // bz2 sibling of the pbf URL.
+    expect(d.env?.OVERPASS_PLANET_URL).toBe(
+      "https://download.geofabrik.de/europe/germany/bayern-latest.osm.bz2",
+    );
     expect(d.env?.OVERPASS_DIFF_URL).toBe(
       "https://download.geofabrik.de/europe/germany/bayern-updates/",
     );
