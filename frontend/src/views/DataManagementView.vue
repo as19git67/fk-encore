@@ -1125,7 +1125,7 @@ onBeforeUnmount(() => {
         <pre>{{ JSON.stringify(reverseResult.result, null, 2) }}</pre>
       </div>
 
-      <!-- Region-Tabelle -->
+      <!-- Region-Tabelle (Desktop) -->
       <div v-if="osmRegions.length === 0" class="osm-empty">
         Noch keine Regionen angelegt. Mit dem Formular oben einen Vorschlag
         holen und dann „Anlegen" klicken.
@@ -1179,6 +1179,49 @@ onBeforeUnmount(() => {
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <!-- Region-Karten (Mobil) — visible only when osmRegions.length > 0;
+           the desktop empty-state above also applies on mobile. -->
+      <div v-if="osmRegions.length > 0" class="queue-cards mb-4">
+        <div v-for="r in osmRegions" :key="r.slug" class="queue-card osm-card">
+          <div class="queue-card__header">
+            <code>{{ r.slug }}</code>
+          </div>
+          <div class="osm-card__row">
+            <span
+              class="osm-status"
+              :class="`osm-status--${r.status}`"
+            >{{ osmStatusLabels[r.status] ?? r.status }}</span>
+            <span class="osm-card__pbf">
+              {{ r.pbfSizeMb !== null ? `${r.pbfSizeMb} MB` : '' }}
+            </span>
+          </div>
+          <div v-if="r.lastError" class="osm-card__error">{{ r.lastError }}</div>
+          <div class="osm-card__meta">
+            <span v-if="r.importedAt">Importiert: {{ formatRelative(r.importedAt) }}</span>
+            <span v-if="r.lastUsedAt">Zuletzt: {{ formatRelative(r.lastUsedAt) }}</span>
+          </div>
+          <div class="osm-card__actions">
+            <Button
+              v-if="r.status === 'pending_approval'"
+              icon="pi pi-check"
+              label="Freigeben"
+              size="small"
+              :loading="osmLoading"
+              @click="handleApproveOsmRegion(r.slug)"
+            />
+            <Button
+              icon="pi pi-trash"
+              label="Entfernen"
+              size="small"
+              severity="danger"
+              text
+              :loading="osmLoading"
+              @click="handleDeleteOsmRegion(r.slug)"
+            />
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1560,6 +1603,36 @@ onBeforeUnmount(() => {
 .osm-status--pending_approval { background: var(--p-tag-warn-background, rgba(255,160,0,0.15)); color: var(--p-tag-warn-color); }
 .osm-status--failed,
 .osm-status--blocked_disk  { background: var(--p-tag-danger-background, rgba(220,60,60,0.15)); color: var(--p-tag-danger-color); }
+
+.osm-card__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 0.35rem 0;
+}
+.osm-card__pbf {
+  color: var(--p-text-muted-color);
+  font-size: 0.85rem;
+}
+.osm-card__error {
+  margin: 0.35rem 0;
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
+  word-break: break-word;
+}
+.osm-card__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
+  margin: 0.35rem 0;
+}
+.osm-card__actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
 
 .danger-zone {
   margin-top: 1rem;
