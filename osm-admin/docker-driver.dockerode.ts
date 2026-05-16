@@ -44,6 +44,14 @@ export interface DockerodeContainerLike {
 export interface DockerodeClientLike {
   createContainer(opts: Record<string, unknown>): Promise<DockerodeContainerLike>;
   getContainer(id: string): DockerodeContainerLike;
+  pull(image: string, opts?: object): Promise<NodeJS.ReadableStream>;
+  modem: {
+    followProgress(
+      stream: NodeJS.ReadableStream,
+      onFinished: (err: unknown, output?: unknown) => void,
+      onProgress?: (event: Record<string, unknown>) => void,
+    ): void;
+  };
 }
 
 export interface DockerodeDriverOptions {
@@ -95,11 +103,37 @@ export class DockerodeDriver implements DockerDriver {
       await this.remove(desc.name);
     }
 
-    const container = await this.client.createContainer(
-      this.buildCreateOptions(desc, /* autoRemove */ false),
-    );
+    const opts = this.buildCreateOptions(desc, /* autoRemove */ false);
+    let container: DockerodeContainerLike;
+    try {
+      container = await this.client.createContainer(opts);
+    } catch (err) {
+      if (!isImageNotFoundError(err)) throw err;
+      // Daemon doesn't know the image yet — pull it once and retry. We
+      // do this reactively rather than always pulling so warm starts
+      // stay cheap; first use of a new image pays the pull cost.
+      console.log(
+        `[osm-admin] pulling image ${desc.image} (first use)…`,
+      );
+      await this.pullImage(desc.image);
+      container = await this.client.createContainer(opts);
+    }
     await container.start();
     return { name: desc.name, state: "running" };
+  }
+
+  /**
+   * Pull an image from its registry. Used reactively when ensureRunning
+   * hits a 404 "No such image" but also exposed for callers that want
+   * to warm the cache (e.g. a future admin "pre-pull" button).
+   */
+  async pullImage(image: string): Promise<void> {
+    const stream = await this.client.pull(image);
+    await new Promise<void>((resolve, reject) => {
+      this.client.modem.followProgress(stream, (err) =>
+        err ? reject(err instanceof Error ? err : new Error(String(err))) : resolve(),
+      );
+    });
   }
 
   async stop(name: string, timeoutSec = 10): Promise<void> {
@@ -215,9 +249,26 @@ function mapDockerState(status: string): ContainerState {
 function isMissingError(err: unknown): boolean {
   const status = (err as { statusCode?: number; status?: number })?.statusCode ??
     (err as { statusCode?: number; status?: number })?.status;
-  if (status === 404) return true;
+  // Be specific: a 404 with "No such image" is the image-not-found
+  // case, which the caller treats differently (pull + retry). Only
+  // genuine "No such container" / 404-without-image-message is a
+  // missing-container miss.
   const msg = (err as Error)?.message ?? "";
+  if (/no such image/i.test(msg)) return false;
+  if (status === 404) return true;
   return /no such container|not found/i.test(msg);
+}
+
+/**
+ * The daemon returns HTTP 404 with `message: "No such image: …"` for a
+ * createContainer call whose image isn't pulled yet — even though the
+ * standard reason phrase is "no such container". Match on the message
+ * body so we route this case into the pull-and-retry branch instead of
+ * propagating it as a generic missing-container failure.
+ */
+function isImageNotFoundError(err: unknown): boolean {
+  const msg = (err as Error)?.message ?? "";
+  return /no such image/i.test(msg);
 }
 
 function isAlreadyStoppedError(err: unknown): boolean {
