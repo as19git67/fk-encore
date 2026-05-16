@@ -204,6 +204,29 @@ export interface EmitFeedInput {
 }
 
 /**
+ * Public entry point. `photo_added` events get coalesced per album
+ * through the debounce buffer below so a 20-photo upload yields one
+ * feed entry (and one Web Push) per recipient instead of twenty.
+ * Every other kind passes straight through to `emitFeedItems`.
+ */
+export async function scheduleEmitFeedItems(input: EmitFeedInput): Promise<void> {
+  if (input.kind === "photo_added" && input.albumId != null) {
+    const photoIds: number[] = [];
+    if (typeof input.photoId === "number") photoIds.push(input.photoId);
+    const rawIds = input.payload?.photoIds;
+    if (Array.isArray(rawIds)) {
+      for (const id of rawIds as unknown[]) {
+        if (typeof id === "number" && Number.isFinite(id)) photoIds.push(id);
+      }
+    }
+    if (photoIds.length === 0) return;
+    enqueuePhotoAddedFeed(input.albumId, input.actorUserId, input.recipients, photoIds);
+    return;
+  }
+  await emitFeedItems(input);
+}
+
+/**
  * Fan-out entry point used by photo.service and the future reactions
  * endpoints. Writes one `feed_items` row per recipient (deduplicating
  * the input list) and publishes a realtime `feed/item.added` event so
@@ -311,5 +334,103 @@ export async function emitFeedItems(input: EmitFeedInput): Promise<void> {
     console.warn(
       `[feed] push metadata lookup failed kind=${input.kind}: ${(err as Error).message}`,
     );
+  }
+}
+
+// ---------- photo_added debounce buffer ----------
+//
+// Mirrors the guest fanout debouncer in sharedalbum/notifications.ts:
+// bursts of photo_added events for the same album coalesce into a
+// single feed_items row per recipient (with photoIds in payload) and
+// therefore a single Web Push reading "N Fotos hinzugefügt" instead of
+// N "ein Foto" pushes.
+const FEED_PHOTO_QUIET_MS = 60_000;
+const FEED_PHOTO_MAX_WAIT_MS = 10 * 60_000;
+
+interface PendingFeedFanout {
+  albumId: number;
+  actorUserId: number | null;
+  recipients: Set<number>;
+  photoIds: Set<number>;
+  firstEnqueuedAt: number;
+  timer: NodeJS.Timeout;
+}
+
+const pendingFeedFanouts = new Map<string, PendingFeedFanout>();
+
+function feedBucketKey(actorUserId: number | null, albumId: number): string {
+  return `${actorUserId ?? "g"}:${albumId}`;
+}
+
+function scheduleFeedTimer(key: string, delayMs: number): NodeJS.Timeout {
+  const t = setTimeout(() => {
+    void flushFeedFanout(key);
+  }, Math.max(0, delayMs));
+  if (typeof t.unref === "function") t.unref();
+  return t;
+}
+
+function enqueuePhotoAddedFeed(
+  albumId: number,
+  actorUserId: number | null,
+  recipients: number[],
+  photoIds: number[],
+): void {
+  const key = feedBucketKey(actorUserId, albumId);
+  const existing = pendingFeedFanouts.get(key);
+  if (existing) {
+    for (const id of photoIds) existing.photoIds.add(id);
+    for (const r of recipients) existing.recipients.add(r);
+    const elapsed = Date.now() - existing.firstEnqueuedAt;
+    const remainingCap = FEED_PHOTO_MAX_WAIT_MS - elapsed;
+    if (remainingCap <= 0) return;
+    clearTimeout(existing.timer);
+    existing.timer = scheduleFeedTimer(key, Math.min(FEED_PHOTO_QUIET_MS, remainingCap));
+    return;
+  }
+  pendingFeedFanouts.set(key, {
+    albumId,
+    actorUserId,
+    recipients: new Set(recipients),
+    photoIds: new Set(photoIds),
+    firstEnqueuedAt: Date.now(),
+    timer: scheduleFeedTimer(key, FEED_PHOTO_QUIET_MS),
+  });
+}
+
+async function flushFeedFanout(key: string): Promise<void> {
+  const bucket = pendingFeedFanouts.get(key);
+  if (!bucket) return;
+  pendingFeedFanouts.delete(key);
+  clearTimeout(bucket.timer);
+  const photoIds = Array.from(bucket.photoIds);
+  try {
+    await emitFeedItems({
+      recipients: Array.from(bucket.recipients),
+      actorUserId: bucket.actorUserId,
+      kind: "photo_added",
+      albumId: bucket.albumId,
+      // Surface the first photo on the feed_items row so existing
+      // thumbnail rendering keeps working; the full list lives in
+      // payload.photoIds for plural rendering and deep-linking.
+      photoId: photoIds[0] ?? null,
+      payload: { photoIds },
+    });
+  } catch (err) {
+    console.warn(
+      `[feed] debounced photo fanout failed album=${bucket.albumId}: ${(err as Error).message}`,
+    );
+  }
+}
+
+/**
+ * Immediately flush every pending photo_added bucket. Intended for
+ * tests so they don't have to wait the full debounce window; production
+ * code does not call this.
+ */
+export async function flushPendingFeedFanouts(): Promise<void> {
+  const keys = Array.from(pendingFeedFanouts.keys());
+  for (const key of keys) {
+    await flushFeedFanout(key);
   }
 }

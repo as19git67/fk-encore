@@ -98,6 +98,6 @@ interface EmitFeedRequest {
 export const emitFeed = api(
   { expose: false },
   async (req: EmitFeedRequest): Promise<void> => {
-    await feedService.emitFeedItems(req);
+    await feedService.scheduleEmitFeedItems(req);
   },
 );
