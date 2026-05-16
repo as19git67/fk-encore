@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   parseIndex,
   pickSmallestMatchingRegion,
@@ -108,6 +108,49 @@ function buildFixture(): GeofabrikIndex {
   });
   return parseIndex(raw, new Date("2026-01-01T00:00:00Z"));
 }
+
+describe("loadGeofabrikIndex", () => {
+  it("returns the parsed index when the cache directory is not writable", async () => {
+    const { loadGeofabrikIndex } = await import("./geofabrik-index");
+    const raw = JSON.stringify({
+      features: [
+        {
+          properties: {
+            id: "europe/germany/bayern",
+            name: "Bayern",
+            urls: { pbf: "https://example.com/bayern.osm.pbf" },
+          },
+          geometry: {
+            type: "Polygon",
+            coordinates: [[[9, 47.5], [13.5, 47.5], [13.5, 50.5], [9, 50.5], [9, 47.5]]],
+          },
+        },
+      ],
+    });
+    const fetcher = (async () => ({
+      ok: true,
+      status: 200,
+      text: async () => raw,
+    })) as unknown as typeof fetch;
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const idx = await loadGeofabrikIndex({
+      url: "https://example.com/index.json",
+      // `/dev/null` is a character device — attempting to mkdir under
+      // it fails with ENOTDIR/EACCES instantly. Portable EACCES proxy
+      // that doesn't depend on the test runner's permissions.
+      cachePath: "/dev/null/fk-encore-osm/geofabrik-index.json",
+      fetcher,
+    });
+    expect(idx.regions).toHaveLength(1);
+    expect(idx.regions[0].id).toBe("europe/germany/bayern");
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("could not persist geofabrik index cache"),
+      expect.anything(),
+    );
+    warn.mockRestore();
+  });
+});
 
 describe("parseIndex", () => {
   it("skips features without id / pbf URL / geometry", () => {
