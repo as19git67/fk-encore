@@ -23,6 +23,8 @@ console.log("[boot] osm-admin/encore.service.ts: begin");
 
 // Side-effect import: registers the admin endpoints on the service.
 import "./regions";
+// Side-effect import: registers the per-region proxy endpoints.
+import "./proxy";
 
 import { tickImporter } from "./importer";
 import { registerDockerodeDriverIfEnabled } from "./docker-driver.dockerode";
