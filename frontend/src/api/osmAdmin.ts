@@ -78,16 +78,21 @@ export async function createOsmRegion(
 export async function approveOsmRegion(
   slug: string,
 ): Promise<{ slug: string; status: RegionStatus }> {
-  return apiFetch(`/osm/regions/${encodeURIComponent(slug)}/approve`, {
+  // Slug in body: Geofabrik slugs are multi-segment (e.g.
+  // `europe/germany/bayern/oberbayern`) and Encore.ts' path matcher
+  // doesn't accept percent-encoded slashes in `:slug` placeholders.
+  return apiFetch('/osm/regions/approve', {
     method: 'POST',
+    body: JSON.stringify({ slug }),
   })
 }
 
 export async function deleteOsmRegion(
   slug: string,
 ): Promise<{ slug: string; deleted: boolean }> {
-  return apiFetch(`/osm/regions/${encodeURIComponent(slug)}`, {
-    method: 'DELETE',
+  return apiFetch('/osm/regions/delete', {
+    method: 'POST',
+    body: JSON.stringify({ slug }),
   })
 }
 

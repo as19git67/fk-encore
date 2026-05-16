@@ -141,6 +141,10 @@ export const createRegion = api(
   },
 );
 
+export interface ApproveRegionRequest {
+  slug: string;
+}
+
 export interface ApproveRegionResponse {
   slug: string;
   status: RegionStatus;
@@ -150,14 +154,21 @@ export interface ApproveRegionResponse {
  * Approve a region currently sitting in `pending_approval`. Moves the
  * row to `importing` so the importer worker can pick it up. Idempotent
  * for rows already in `importing`.
+ *
+ * The slug travels in the request body, not the path: Geofabrik slugs
+ * are multi-segment (`europe/germany/bayern/oberbayern`) and Encore.ts'
+ * path matcher does not transparently decode percent-encoded slashes.
  */
 export const approveRegion = api(
-  { expose: true, auth: true, method: "POST", path: "/osm/regions/:slug/approve" },
-  async ({ slug }: { slug: string }): Promise<ApproveRegionResponse> => {
+  { expose: true, auth: true, method: "POST", path: "/osm/regions/approve" },
+  async (req: ApproveRegionRequest): Promise<ApproveRegionResponse> => {
     requirePermission(getAuthData()!, "osm.admin");
+    if (!req.slug || typeof req.slug !== "string") {
+      throw APIError.invalidArgument("slug is required");
+    }
     try {
-      const status = await approve(slug);
-      return { slug, status };
+      const status = await approve(req.slug);
+      return { slug: req.slug, status };
     } catch (err) {
       const msg = (err as Error).message ?? String(err);
       if (msg.startsWith("unknown region")) {
@@ -171,21 +182,30 @@ export const approveRegion = api(
   },
 );
 
+export interface DeleteRegionRequest {
+  slug: string;
+}
+
 export interface DeleteRegionResponse {
   slug: string;
   deleted: boolean;
 }
 
 /**
- * Drop a region row. Once the dockerode driver is wired in, this will
- * also stop the containers and drop the Postgres database.
+ * Drop a region row. Once the dockerode driver is wired in for cleanup,
+ * this will also stop the containers and drop the named volumes.
+ *
+ * Slug in body for the same multi-segment reason as approveRegion.
  */
 export const deleteRegion = api(
-  { expose: true, auth: true, method: "DELETE", path: "/osm/regions/:slug" },
-  async ({ slug }: { slug: string }): Promise<DeleteRegionResponse> => {
+  { expose: true, auth: true, method: "POST", path: "/osm/regions/delete" },
+  async (req: DeleteRegionRequest): Promise<DeleteRegionResponse> => {
     requirePermission(getAuthData()!, "osm.admin");
-    const deleted = await remove(slug);
-    return { slug, deleted };
+    if (!req.slug || typeof req.slug !== "string") {
+      throw APIError.invalidArgument("slug is required");
+    }
+    const deleted = await remove(req.slug);
+    return { slug: req.slug, deleted };
   },
 );
 
