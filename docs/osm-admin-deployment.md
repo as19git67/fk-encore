@@ -108,46 +108,34 @@ constructs container descriptors:
 |---|---|---|
 | `NOMINATIM_PASSWORD` | Internal Postgres password inside the per-region nominatim container. Any value works; it never leaves the container. | `changeme` |
 | `NOMINATIM_IMAGE` | Override the nominatim image tag (test-pinning, fork). | `mediagis/nominatim:5.0` |
-| `OVERPASS_IMAGE` | Override the overpass image tag. The default is **not** an upstream image — see "Overpass PBF image" below. | `fk-encore-overpass-pbf:latest` |
+| `OVERPASS_IMAGE` | Override the overpass image tag. | `wiktorn/overpass-api:latest` |
 | `NOMINATIM_IMPORT_STYLE` | Nominatim import profile (`full`, `address`, `street`, `admin`). `address` is plenty for POI detection and ~30 % faster than `full`. | `address` |
 
-## Overpass PBF image
+## How Overpass ingests Geofabrik PBFs
 
-The upstream `wiktorn/overpass-api` image only ingests `.osm.bz2`
-planet files. Geofabrik publishes those for top-level regions
-(countries, Bundesländer) but **not** for sub-regions like
-Regierungsbezirke (Oberbayern, Mittelfranken, …). Those are
-PBF-only. Trying to feed a PBF to the upstream image fails with
-`bunzip2: not a bzip2 file` and the container exit-loops.
+The upstream `wiktorn/overpass-api` entrypoint downloads the planet
+to `/db/planet.osm.bz2` (filename hardcoded regardless of actual
+format) and then `eval`s `$OVERPASS_PLANET_PREPROCESS` standalone —
+no stdin redirect, no file arg. The downstream `init_osm3s.sh` then
+reads `/db/planet.osm.bz2` expecting bz2-compressed OSM XML.
 
-To handle PBFs, the importer expects an extended image
-`fk-encore-overpass-pbf:latest` on the host. It's a one-line
-extension of the upstream image that installs `osmconvert` and lets
-us point `OVERPASS_PLANET_PREPROCESS` at it.
-
-Build it once on the host:
+Geofabrik publishes `.osm.bz2` only for top-level regions
+(countries, Bundesländer). Sub-regional extracts (Regierungsbezirke
+etc.) are PBF-only. To support both, the importer sets a preprocess
+that converts the file in place using the `osmium-tool` binary
+already bundled in the upstream image (the entrypoint itself calls
+`osmium fileinfo …` on the same file):
 
 ```bash
-# Either: clone the repo and run a normal build
-docker build -t fk-encore-overpass-pbf:latest osm-admin/overpass-pbf/
-
-# Or: inline build without a repo checkout
-docker build -t fk-encore-overpass-pbf:latest - <<'EOF'
-FROM wiktorn/overpass-api:latest
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends osmctools \
-  && rm -rf /var/lib/apt/lists/*
-EOF
+mv /db/planet.osm.bz2 /db/planet.input \
+  && osmium cat --from-format=pbf --output-format=osm.bz2 -O \
+      -o /db/planet.osm.bz2 /db/planet.input \
+  && rm /db/planet.input
 ```
 
-The image is ~350 MB (upstream + osmctools), build takes ~30 s.
-Subsequent rebuilds use Docker's layer cache.
-
-A follow-up slice will auto-build this image at first use via
-dockerode, so this manual step disappears. Until then, the importer
-will fail with "no such image" for sub-regional Geofabrik extracts
-if the image isn't pre-built — the auto-pull path can't help because
-this image is not on any registry.
+After the preprocess, the file at `/db/planet.osm.bz2` is genuine
+bz2 OSM XML and the rest of the entrypoint proceeds unchanged. No
+custom image needed.
 
 ## Disk-space budget
 

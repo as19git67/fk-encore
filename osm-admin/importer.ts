@@ -77,7 +77,7 @@ export async function tickImporter(deps: ImporterDeps = {}): Promise<TickOutcome
   const freeDisk = deps.freeDiskMb ?? (async () => null);
   const now = deps.now ?? (() => new Date());
   const nominatimImage = deps.images?.nominatim ?? "mediagis/nominatim:5.0";
-  const overpassImage = deps.images?.overpass ?? "fk-encore-overpass-pbf:latest";
+  const overpassImage = deps.images?.overpass ?? "wiktorn/overpass-api:latest";
 
   const cooldownCutoff = new Date(now().getTime() - TICK_COOLDOWN_MS).toISOString();
 
@@ -210,15 +210,24 @@ export function overpassDescriptor(
   pbfUrl: string,
   image: string,
 ): ContainerDescriptor {
-  // Default image (fk-encore-overpass-pbf) extends wiktorn/overpass-api
-  // with `osmconvert` so the entrypoint's preprocess can expand a
-  // Geofabrik `.osm.pbf` to OSM XML on the fly. Sub-regional extracts
-  // (Regierungsbezirke etc.) are only published as PBF, so bz2 is not
-  // a portable choice.
+  // wiktorn/overpass-api downloads the planet to /db/planet.osm.bz2
+  // regardless of the actual format, then `eval`s
+  // $OVERPASS_PLANET_PREPROCESS (no stdin redirect, no args). After
+  // the preprocess, `init_osm3s.sh /db/planet.osm.bz2 …` consumes the
+  // file expecting bz2-compressed OSM XML.
   //
-  // If the operator overrides `image` to the upstream
-  // `wiktorn/overpass-api:latest`, this preprocess will fail with
-  // "osmconvert: command not found" — see osm-admin/overpass-pbf/.
+  // For Geofabrik PBFs (which is what we always use — Geofabrik does
+  // not publish .osm.bz2 for sub-regional extracts), we use the
+  // `osmium-tool` binary that ships with the upstream image to
+  // convert PBF → OSM XML bz2 in place. `-O` allows overwriting; the
+  // `--from-format pbf` hint helps osmium across the `.bz2` extension
+  // mismatch.
+  const planet = "/db/planet.osm.bz2";
+  const stage = "/db/planet.input";
+  const preprocess =
+    `mv ${planet} ${stage} && ` +
+    `osmium cat --from-format=pbf --output-format=osm.bz2 -O -o ${planet} ${stage} && ` +
+    `rm ${stage}`;
   return {
     name: `overpass-${slugSafe}`,
     image,
@@ -226,7 +235,7 @@ export function overpassDescriptor(
       OVERPASS_META: "yes",
       OVERPASS_MODE: "init",
       OVERPASS_PLANET_URL: pbfUrl,
-      OVERPASS_PLANET_PREPROCESS: "osmconvert -",
+      OVERPASS_PLANET_PREPROCESS: preprocess,
       OVERPASS_DIFF_URL: replicationUrlFor(pbfUrl),
     },
     volumes: [
