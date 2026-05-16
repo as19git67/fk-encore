@@ -413,15 +413,11 @@ export async function computeAutoLevelsForPhoto(
   const photo = await dbFirst<{
     filename: string;
     external_path: string | null;
-    width: number | null;
-    height: number | null;
   }>(
     db
       .select({
         filename: photos.filename,
         external_path: photos.external_path,
-        width: photos.width,
-        height: photos.height,
       })
       .from(photos)
       .where(eq(photos.id, photoId)),
@@ -429,11 +425,24 @@ export async function computeAutoLevelsForPhoto(
   if (!photo) return null;
 
   const originalPath = resolvePhotoDiskPath(photo);
+
+  // Read DISPLAY dimensions from sharp itself (after EXIF auto-rotate).
+  // Using photos.width / photos.height from the DB looked tempting but
+  // those are often the pre-rotation values for cameras that bake an
+  // EXIF orientation tag — applying the crop's normalised coords
+  // against the unrotated dimensions made .extract() go out-of-
+  // bounds, which sharp throws on and Encore surfaced as a 500. We
+  // deliberately do NOT wrap the sharp calls below in try/catch —
+  // any other exception is a genuine programmer / data error and
+  // should bubble up with its full stack rather than being silenced
+  // into a misleading 404.
+  const meta = await sharp(originalPath).rotate().metadata();
+  const W = meta.width;
+  const H = meta.height;
+
   let img = sharp(originalPath).rotate();
 
-  if (crop && photo.width && photo.height) {
-    const W = photo.width;
-    const H = photo.height;
+  if (crop && W && H) {
     const left = Math.max(0, Math.min(W - 1, Math.round(crop.x * W)));
     const top = Math.max(0, Math.min(H - 1, Math.round(crop.y * H)));
     const width = Math.max(1, Math.min(W - left, Math.round(crop.w * W)));
