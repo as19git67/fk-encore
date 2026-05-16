@@ -53,6 +53,7 @@ import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
 import { useAuthStore } from '../stores/auth'
 import { useGallerySource, GALLERY_PAGE_SIZE } from '../composables/useGallerySource'
 import type { PhotoFilter } from '../api/photos'
+import { autoCropThumbnailStyle } from '../utils/faceBbox'
 
 const props = defineProps<{
   /** Photo to land on initially. Null = land on the last (newest in ASC) page. */
@@ -476,9 +477,7 @@ defineExpose({
               :alt="''"
               loading="lazy"
               decoding="async"
-              :style="slot.auto_crop
-                ? { objectPosition: `${slot.auto_crop.x * 100}% ${slot.auto_crop.y * 100}%` }
-                : undefined"
+              :style="autoCropThumbnailStyle(slot.auto_crop)"
               class="vg-thumb"
             />
             <!-- Track-I marker. Shows on every member of an unreviewed
