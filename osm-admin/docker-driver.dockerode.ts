@@ -22,6 +22,7 @@ import {
   type ContainerInfo,
   type ContainerState,
   type DockerDriver,
+  type ExecResult,
   type WaitHealthyOptions,
   setDockerDriver,
 } from "./docker-driver";
@@ -38,6 +39,18 @@ export interface DockerodeContainerLike {
       ExitCode?: number;
     };
   }>;
+  exec(opts: {
+    Cmd: string[];
+    AttachStdout?: boolean;
+    AttachStderr?: boolean;
+    Tty?: boolean;
+  }): Promise<DockerodeExecLike>;
+}
+
+/** Minimal slice of the dockerode Exec instance we use. */
+export interface DockerodeExecLike {
+  start(opts: { Detach?: boolean; Tty?: boolean }): Promise<NodeJS.ReadableStream>;
+  inspect(): Promise<{ ExitCode: number | null; Running?: boolean }>;
 }
 
 /** Minimal slice of the dockerode volume instance we use. */
@@ -56,6 +69,12 @@ export interface DockerodeClientLike {
       stream: NodeJS.ReadableStream,
       onFinished: (err: unknown, output?: unknown) => void,
       onProgress?: (event: Record<string, unknown>) => void,
+    ): void;
+    /** Demux a multiplexed Docker stream into separate stdout/stderr writers. */
+    demuxStream?(
+      stream: NodeJS.ReadableStream,
+      stdout: NodeJS.WritableStream,
+      stderr: NodeJS.WritableStream,
     ): void;
   };
 }
@@ -169,6 +188,30 @@ export class DockerodeDriver implements DockerDriver {
     );
   }
 
+  async exec(name: string, cmd: string[]): Promise<ExecResult> {
+    const container = this.client.getContainer(name);
+    const exec = await container.exec({
+      Cmd: cmd,
+      AttachStdout: true,
+      AttachStderr: true,
+      Tty: false,
+    });
+    const stream = await exec.start({ Detach: false, Tty: false });
+    const { stdout, stderr } = await collectExecStreams(this.client, stream);
+    // Poll inspect briefly — exec.inspect can return Running=true for
+    // a moment after the stream closes on some daemons.
+    let info = await exec.inspect();
+    for (let i = 0; i < 5 && info.Running; i++) {
+      await sleep(50);
+      info = await exec.inspect();
+    }
+    return {
+      exitCode: info.ExitCode ?? -1,
+      stdout: tail(stdout),
+      stderr: tail(stderr),
+    };
+  }
+
   async removeVolume(name: string): Promise<void> {
     try {
       await this.client.getVolume(name).remove({ force: false });
@@ -246,6 +289,60 @@ export class DockerodeDriver implements DockerDriver {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+const EXEC_TAIL_LIMIT = 4 * 1024;
+
+function tail(s: string): string {
+  return s.length <= EXEC_TAIL_LIMIT
+    ? s
+    : `…(${s.length - EXEC_TAIL_LIMIT} bytes truncated)…\n${s.slice(-EXEC_TAIL_LIMIT)}`;
+}
+
+/**
+ * Drain the multiplexed docker exec stream into separate stdout/stderr
+ * buffers. Falls back to a raw read when the modem's demuxStream isn't
+ * available (some dockerode fakes in tests).
+ */
+async function collectExecStreams(
+  client: DockerodeClientLike,
+  stream: NodeJS.ReadableStream,
+): Promise<{ stdout: string; stderr: string }> {
+  const stdoutChunks: Buffer[] = [];
+  const stderrChunks: Buffer[] = [];
+  const stdoutSink: NodeJS.WritableStream = {
+    write(chunk: Buffer | string) {
+      stdoutChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      return true;
+    },
+    end() {/* no-op */ },
+  } as unknown as NodeJS.WritableStream;
+  const stderrSink: NodeJS.WritableStream = {
+    write(chunk: Buffer | string) {
+      stderrChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      return true;
+    },
+    end() {/* no-op */ },
+  } as unknown as NodeJS.WritableStream;
+
+  if (client.modem.demuxStream) {
+    client.modem.demuxStream(stream, stdoutSink, stderrSink);
+  } else {
+    stream.on("data", (chunk: Buffer | string) => {
+      stdoutChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    stream.on("end", () => resolve());
+    stream.on("close", () => resolve());
+    stream.on("error", (err) => reject(err));
+  });
+
+  return {
+    stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
+    stderr: Buffer.concat(stderrChunks).toString("utf-8"),
+  };
 }
 
 function mapDockerState(status: string): ContainerState {

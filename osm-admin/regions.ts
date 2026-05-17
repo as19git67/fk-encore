@@ -25,6 +25,7 @@ import {
   suggestRegionsFromPhotos,
   type BulkSuggestResult,
 } from "./bulk-suggest";
+import { refreshRegion, type RefreshResult } from "./refresh";
 import type { RegionStatus } from "./state-machine";
 
 export interface OsmRegionImport {
@@ -198,6 +199,35 @@ export const approveRegion = api(
       if (msg.startsWith("invalid region status transition")) {
         throw APIError.failedPrecondition(msg);
       }
+      throw err;
+    }
+  },
+);
+
+export interface RefreshRegionRequest {
+  slug: string;
+}
+
+/**
+ * Pull replication diffs into a ready region's Nominatim shard.
+ * Runs `nominatim replication --once` inside the container via
+ * dockerode exec. Returns the new sequence id when the command
+ * surfaced one. Overpass updates happen continuously via the image's
+ * own supervisord and don't need a separate trigger.
+ */
+export const refreshRegionEndpoint = api(
+  { expose: true, auth: true, method: "POST", path: "/osm/regions/refresh" },
+  async (req: RefreshRegionRequest): Promise<RefreshResult> => {
+    requirePermission(getAuthData()!, "osm.admin");
+    if (!req.slug || typeof req.slug !== "string") {
+      throw APIError.invalidArgument("slug is required");
+    }
+    try {
+      return await refreshRegion(req.slug);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      if (msg.startsWith("unknown region")) throw APIError.notFound(msg);
+      if (msg.includes("status")) throw APIError.failedPrecondition(msg);
       throw err;
     }
   },
