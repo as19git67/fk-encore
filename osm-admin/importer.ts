@@ -139,7 +139,7 @@ export async function tickImporter(deps: ImporterDeps = {}): Promise<TickOutcome
       { maxAttempts: 1 },
     );
     const ovHealthy = await driver.waitHealthy(
-      `http://overpass-${slugSafe}/api/status`,
+      overpassHealthcheckUrl(slugSafe),
       { maxAttempts: 1 },
     );
     if (!nomHealthy || !ovHealthy) {
@@ -273,6 +273,25 @@ async function transition(
       ...extra,
     })
     .where(eq(osmRegionImports.slug, slug));
+}
+
+/**
+ * Lightweight healthcheck URL for the per-region Overpass container.
+ * We intentionally hit `/api/interpreter` with a trivial `out count;`
+ * query rather than `/api/status` — the latter throws an unhandled
+ * `std::out_of_range` C++ exception in the upstream wiktorn image
+ * (the dispatcher status reporter has a bug) which surfaces as a 502
+ * to the caller. The interpreter endpoint is the one we'll actually
+ * use in production for POI queries anyway, so the healthcheck doubles
+ * as an end-to-end smoke test.
+ */
+export function overpassHealthcheckUrl(slugSafe: string): string {
+  // The encoded query is `[out:json];out count;` — minimal, returns
+  // a small JSON body with element counts.
+  return (
+    `http://overpass-${slugSafe}/api/interpreter` +
+    `?data=%5Bout%3Ajson%5D%3Bout+count%3B`
+  );
 }
 
 /**
