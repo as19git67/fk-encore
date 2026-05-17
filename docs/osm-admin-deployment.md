@@ -110,6 +110,7 @@ constructs container descriptors:
 | `NOMINATIM_IMAGE` | Override the nominatim image tag (test-pinning, fork). | `mediagis/nominatim:5.0` |
 | `OVERPASS_IMAGE` | Override the overpass image tag. | `wiktorn/overpass-api:latest` |
 | `NOMINATIM_IMPORT_STYLE` | Nominatim import profile (`full`, `address`, `street`, `admin`). `address` is plenty for POI detection and ~30 % faster than `full`. | `address` |
+| `OSM_ADMIN_DISK_PROBE_PATH` | Path the importer probes via `statfs` for the disk pre-check. Default `/` reflects the app container's overlay (close enough for typical hosts). For an exact reading of the docker data root, bind-mount it read-only and point this env at the mount. | `/` |
 
 ## How Overpass ingests Geofabrik PBFs
 

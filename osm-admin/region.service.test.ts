@@ -8,6 +8,7 @@ import {
   slugToPostgresDb,
   suggestForCoord,
 } from "./region.service";
+import { InMemoryDockerDriver } from "./docker-driver";
 import { parseIndex, type GeofabrikIndex } from "./geofabrik-index";
 
 function fixture(): GeofabrikIndex {
@@ -174,17 +175,49 @@ describe("approve", () => {
 });
 
 describe("remove", () => {
-  it("deletes an existing row", async () => {
+  it("deletes an existing row and triggers the full docker cleanup in order", async () => {
     await createPending("europe/germany/bayern", { loadIndex });
-    const deleted = await remove("europe/germany/bayern");
+    const driver = new InMemoryDockerDriver();
+    const deleted = await remove("europe/germany/bayern", { driver });
     expect(deleted).toBe(true);
+
     const rows = await db.select().from(osmRegionImports);
     expect(rows).toEqual([]);
+
+    // Containers stopped + removed before their volumes get dropped, so
+    // Docker never sees "volume in use".
+    const ops = driver.events.map((e) => `${e.op}:${e.name}`);
+    expect(ops).toEqual([
+      "stop:nominatim-europe-germany-bayern",
+      "stop:overpass-europe-germany-bayern",
+      "remove:nominatim-europe-germany-bayern",
+      "remove:overpass-europe-germany-bayern",
+      "removeVolume:fk-encore-osm-nominatim-europe-germany-bayern",
+      "removeVolume:fk-encore-osm-overpass-europe-germany-bayern",
+    ]);
   });
 
-  it("returns false when the row doesn't exist", async () => {
-    const deleted = await remove("nothing/here");
+  it("returns false when the row doesn't exist (still attempts docker cleanup)", async () => {
+    const driver = new InMemoryDockerDriver();
+    const deleted = await remove("nothing/here", { driver });
     expect(deleted).toBe(false);
+    // The driver calls happen regardless — the missing-container/volume
+    // paths are idempotent so cleanup of a dangling region (DB row gone,
+    // containers/volumes still present) also works.
+    expect(driver.events.length).toBeGreaterThan(0);
+  });
+
+  it("propagates driver errors and leaves the DB row in place", async () => {
+    await createPending("europe/germany/bayern", { loadIndex });
+    const driver = new InMemoryDockerDriver();
+    driver.removeVolume = async () => {
+      throw new Error("volume is in use");
+    };
+    await expect(
+      remove("europe/germany/bayern", { driver }),
+    ).rejects.toThrow(/in use/);
+    const rows = await db.select().from(osmRegionImports);
+    expect(rows).toHaveLength(1);
   });
 });
 

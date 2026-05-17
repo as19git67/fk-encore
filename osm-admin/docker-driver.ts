@@ -71,6 +71,8 @@ export interface DockerDriver {
   stop(name: string, timeoutSec?: number): Promise<void>;
   /** Remove the container and its writable layer. No-op if missing. */
   remove(name: string): Promise<void>;
+  /** Remove a named Docker volume. No-op if missing; throws if in use. */
+  removeVolume(name: string): Promise<void>;
   inspect(name: string): Promise<ContainerInfo>;
   /**
    * Poll an HTTP healthcheck URL until it responds 2xx. Returns true
@@ -93,11 +95,13 @@ export interface DockerDriver {
  */
 export class InMemoryDockerDriver implements DockerDriver {
   private containers = new Map<string, ContainerInfo>();
+  private volumes = new Set<string>();
   /** Public for tests: every operation appended in order. */
   readonly events: Array<
     | { op: "ensureRunning"; name: string }
     | { op: "stop"; name: string }
     | { op: "remove"; name: string }
+    | { op: "removeVolume"; name: string }
     | { op: "waitHealthy"; url: string; healthy: boolean }
   > = [];
 
@@ -108,7 +112,13 @@ export class InMemoryDockerDriver implements DockerDriver {
     this.events.push({ op: "ensureRunning", name: desc.name });
     const info: ContainerInfo = { name: desc.name, state: "running" };
     this.containers.set(desc.name, info);
+    for (const v of desc.volumes ?? []) this.volumes.add(v.hostPath);
     return info;
+  }
+
+  async removeVolume(name: string): Promise<void> {
+    this.events.push({ op: "removeVolume", name });
+    this.volumes.delete(name);
   }
 
   async stop(name: string, _timeoutSec?: number): Promise<void> {

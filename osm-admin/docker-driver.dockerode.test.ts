@@ -74,6 +74,7 @@ class FakeContainer implements DockerodeContainerLike {
 
 class FakeDocker implements DockerodeClientLike {
   readonly store = new Map<string, FakeContainerState>();
+  readonly volumes = new Set<string>();
   readonly events: Array<{ op: string; name: string; opts?: unknown }> = [];
   /** Image names already "pulled" in this fake registry. */
   readonly pulledImages = new Set<string>();
@@ -82,6 +83,8 @@ class FakeDocker implements DockerodeClientLike {
   pendingCreateError: { statusCode?: number; message: string } | null = null;
   /** If true, pull() rejects instead of succeeding. */
   pullFails = false;
+  /** Volumes that should reject removal as "in use" (409). */
+  readonly volumesInUse = new Set<string>();
 
   async createContainer(opts: Record<string, unknown>): Promise<DockerodeContainerLike> {
     const name = opts.name as string;
@@ -99,6 +102,26 @@ class FakeDocker implements DockerodeClientLike {
 
   getContainer(id: string): DockerodeContainerLike {
     return new FakeContainer(id, this.store, this);
+  }
+
+  getVolume(name: string): import("./docker-driver.dockerode").DockerodeVolumeLike {
+    return {
+      remove: async (_opts?: { force?: boolean }) => {
+        this.events.push({ op: "removeVolume", name });
+        if (this.volumesInUse.has(name)) {
+          const err = new Error("volume is in use");
+          (err as { statusCode?: number }).statusCode = 409;
+          throw err;
+        }
+        if (!this.volumes.has(name)) {
+          const err = new Error("No such volume");
+          (err as { statusCode?: number }).statusCode = 404;
+          throw err;
+        }
+        this.volumes.delete(name);
+        return {};
+      },
+    };
   }
 
   async pull(image: string, _opts?: object): Promise<NodeJS.ReadableStream> {
@@ -223,6 +246,28 @@ describe("DockerodeDriver", () => {
     const driver = new DockerodeDriver({ client });
     const info = await driver.inspect("nope");
     expect(info).toEqual({ name: "nope", state: "missing" });
+  });
+
+  it("removeVolume drops the named volume", async () => {
+    const client = new FakeDocker();
+    client.volumes.add("vol-a");
+    const driver = new DockerodeDriver({ client });
+    await driver.removeVolume("vol-a");
+    expect(client.volumes.has("vol-a")).toBe(false);
+  });
+
+  it("removeVolume tolerates a missing volume (404)", async () => {
+    const client = new FakeDocker();
+    const driver = new DockerodeDriver({ client });
+    await expect(driver.removeVolume("nope")).resolves.toBeUndefined();
+  });
+
+  it("removeVolume propagates 'in use' (409) so the caller can intervene", async () => {
+    const client = new FakeDocker();
+    client.volumes.add("vol-busy");
+    client.volumesInUse.add("vol-busy");
+    const driver = new DockerodeDriver({ client });
+    await expect(driver.removeVolume("vol-busy")).rejects.toThrow(/in use/);
   });
 
   it("auto-pulls the image and retries when createContainer fails with 'No such image'", async () => {

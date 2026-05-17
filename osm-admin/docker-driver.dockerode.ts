@@ -40,10 +40,16 @@ export interface DockerodeContainerLike {
   }>;
 }
 
+/** Minimal slice of the dockerode volume instance we use. */
+export interface DockerodeVolumeLike {
+  remove(opts?: { force?: boolean }): Promise<unknown>;
+}
+
 /** Minimal slice of the dockerode client surface we use. */
 export interface DockerodeClientLike {
   createContainer(opts: Record<string, unknown>): Promise<DockerodeContainerLike>;
   getContainer(id: string): DockerodeContainerLike;
+  getVolume(name: string): DockerodeVolumeLike;
   pull(image: string, opts?: object): Promise<NodeJS.ReadableStream>;
   modem: {
     followProgress(
@@ -161,6 +167,19 @@ export class DockerodeDriver implements DockerDriver {
     return (
       (await this.tryInspect(name)) ?? { name, state: "missing" }
     );
+  }
+
+  async removeVolume(name: string): Promise<void> {
+    try {
+      await this.client.getVolume(name).remove({ force: false });
+    } catch (err) {
+      // 404 = volume already gone (idempotent path).
+      if (isMissingError(err)) return;
+      // 409 = volume in use by another container — bubble up so the
+      // caller can handle (e.g. operator clicked Delete while the
+      // importer was still pulling).
+      throw err;
+    }
   }
 
   async waitHealthy(url: string, opts: WaitHealthyOptions = {}): Promise<boolean> {
