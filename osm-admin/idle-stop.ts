@@ -19,6 +19,7 @@ import dbDefault from "../db/database";
 import { osmRegionImports } from "../db/schema";
 import { getDockerDriver, type DockerDriver } from "./docker-driver";
 import { slugToContainerSuffix } from "./importer";
+import { containerName } from "./naming";
 import { assertTransition } from "./state-machine";
 
 const DEFAULT_IDLE_MINUTES = parseInt(
@@ -79,8 +80,8 @@ export async function tickIdleStop(
     try {
       // Both stop() calls are idempotent against missing/already-
       // stopped containers, so a partial reboot state self-heals.
-      await driver.stop(`nominatim-${suffix}`);
-      await driver.stop(`overpass-${suffix}`);
+      await driver.stop(containerName("nominatim", suffix));
+      await driver.stop(containerName("overpass", suffix));
       assertTransition("ready_running", "ready_stopped");
       await db
         .update(osmRegionImports)

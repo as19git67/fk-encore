@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import db from "../db/database";
 import { osmRegionImports } from "../db/schema";
@@ -190,6 +190,23 @@ describe("markUsed", () => {
         .where(eq(osmRegionImports.slug, "europe/germany/bayern"))
     )[0];
     expect(row.last_used_at).toBe("2026-05-16 12:00:00+00");
+  });
+});
+
+describe("OSM_ADMIN_NAME_PREFIX scopes router host names", () => {
+  const original = process.env.OSM_ADMIN_NAME_PREFIX;
+  afterEach(() => {
+    if (original === undefined) delete process.env.OSM_ADMIN_NAME_PREFIX;
+    else process.env.OSM_ADMIN_NAME_PREFIX = original;
+  });
+
+  it("pickRegion returns prefix-scoped Docker DNS hosts", async () => {
+    process.env.OSM_ADMIN_NAME_PREFIX = "test-";
+    await seed({ slug: "europe/germany/bayern", status: "ready_running" });
+    const m = await pickRegion(48.137, 11.575);
+    expect(m).not.toBeNull();
+    expect(m!.nominatimHost).toBe("test-nominatim-europe-germany-bayern");
+    expect(m!.overpassHost).toBe("test-overpass-europe-germany-bayern");
   });
 });
 

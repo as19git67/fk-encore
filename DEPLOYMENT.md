@@ -378,6 +378,7 @@ the photo UI responsive under sustained scan load.
 | `ENABLE_POI_DETECTION`           | `false` | Turn on the osm-admin POI matcher (Epic #383). Off by default — only useful once at least one OSM region has been imported via the admin UI. See [`docs/osm-admin-deployment.md`](./docs/osm-admin-deployment.md). |
 | `OSM_ADMIN_DOCKER_DRIVER`        | `inmemory` | Set to `dockerode` to manage real per-region containers (requires `/var/run/docker.sock` bind-mount). |
 | `OSM_ADMIN_DOCKER_NETWORK`       | _(none)_ | Docker network the per-region containers join (also the network the `app` container must be on). |
+| `OSM_ADMIN_NAME_PREFIX`          | _(empty)_ | Per-deployment scope for container + volume names. Set to e.g. `test-` on a second deployment that shares a Docker host with `:latest`, so the two don't collide on `nominatim-europe-germany-bayern`. See `docs/osm-admin-deployment.md`. |
 | `POI_REGION_IDLE_STOP_MINUTES`   | `30`    | Stop a region container after this many idle minutes; cold-start ~5–15 s on next request. |
 | `POI_REGION_AUTO_IMPORT_MAX_PBF_MB` | `1500` | PBF-size cutoff above which a region needs manual approval in the admin UI. |
 | `HEALTH_CHECK_INTERVAL_MS`       | `60000` | Interval between ML `/health` pings. Lower = faster detection of container outages; the ping itself is cheap. |
