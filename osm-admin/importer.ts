@@ -35,6 +35,7 @@ import {
   type DockerDriver,
 } from "./docker-driver";
 import { probePbfSizeMb } from "./pbf-probe";
+import { freeDiskMb as defaultFreeDiskMb } from "./disk-probe";
 import { assertTransition, isRegionStatus, type RegionStatus } from "./state-machine";
 
 /** Postgres footprint multiplier vs raw PBF size. Conservative side. */
@@ -74,7 +75,7 @@ export async function tickImporter(deps: ImporterDeps = {}): Promise<TickOutcome
   const db = deps.db ?? dbDefault;
   const driver = deps.driver ?? getDockerDriver();
   const probe = deps.probeSize ?? probePbfSizeMb;
-  const freeDisk = deps.freeDiskMb ?? (async () => null);
+  const freeDisk = deps.freeDiskMb ?? (() => defaultFreeDiskMb());
   const now = deps.now ?? (() => new Date());
   const nominatimImage = deps.images?.nominatim ?? "mediagis/nominatim:5.0";
   const overpassImage = deps.images?.overpass ?? "wiktorn/overpass-api:latest";

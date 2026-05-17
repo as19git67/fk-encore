@@ -29,6 +29,7 @@
 import { eq } from "drizzle-orm";
 import dbDefault from "../db/database";
 import { osmRegionImports } from "../db/schema";
+import { getDockerDriver, type DockerDriver } from "./docker-driver";
 import {
   loadGeofabrikIndex,
   pickSmallestMatchingRegion,
@@ -36,6 +37,7 @@ import {
   type GeofabrikRegion,
   type LoadOptions,
 } from "./geofabrik-index";
+import { slugToContainerSuffix } from "./importer";
 import {
   assertTransition,
   isRegionStatus,
@@ -47,6 +49,7 @@ export const DEFAULT_AUTO_APPROVE_MAX_PBF_MB = 1500;
 
 export interface RegionDeps {
   db?: typeof dbDefault;
+  driver?: DockerDriver;
   /** Override the Geofabrik index loader. Tests inject a synthetic one. */
   loadIndex?: (opts?: LoadOptions) => Promise<GeofabrikIndex>;
   /** PBF-size cutoff for auto-approve (MB). Defaults to 1500. */
@@ -230,15 +233,38 @@ export async function approve(
 }
 
 /**
- * Remove a region row. The real implementation will additionally stop
- * the per-region containers and drop the Postgres database; for now we
- * just delete the row so the admin UI flow can be exercised.
+ * Drop a region: stop+remove the two per-region containers, remove
+ * the two named Docker volumes, then delete the DB row.
+ *
+ * Each docker operation is tolerated independently — a stop on a
+ * missing container is fine, a removeVolume against a volume in use
+ * propagates the error so the admin can intervene. Container removal
+ * happens before volume removal so Docker doesn't reject the volume
+ * delete with "in use".
+ *
+ * The DB row is deleted only after the docker side succeeded; if the
+ * driver throws, the row stays so the admin can retry.
  */
 export async function remove(
   slug: string,
   deps: RegionDeps = {},
 ): Promise<boolean> {
   const db = deps.db ?? dbDefault;
+  const driver = deps.driver ?? getDockerDriver();
+
+  const suffix = slugToContainerSuffix(slug);
+  const nominatim = `nominatim-${suffix}`;
+  const overpass = `overpass-${suffix}`;
+  const nominatimVolume = `fk-encore-osm-nominatim-${suffix}`;
+  const overpassVolume = `fk-encore-osm-overpass-${suffix}`;
+
+  await driver.stop(nominatim);
+  await driver.stop(overpass);
+  await driver.remove(nominatim);
+  await driver.remove(overpass);
+  await driver.removeVolume(nominatimVolume);
+  await driver.removeVolume(overpassVolume);
+
   const result = await db
     .delete(osmRegionImports)
     .where(eq(osmRegionImports.slug, slug));

@@ -27,12 +27,19 @@ describe("InMemoryDockerDriver", () => {
     await d.waitHealthy("http://a/status");
     await d.stop("a");
     await d.remove("a");
+    await d.removeVolume("a-vol");
     expect(d.events).toEqual([
       { op: "ensureRunning", name: "a" },
       { op: "waitHealthy", url: "http://a/status", healthy: true },
       { op: "stop", name: "a" },
       { op: "remove", name: "a" },
+      { op: "removeVolume", name: "a-vol" },
     ]);
+  });
+
+  it("removeVolume is idempotent for unknown volumes", async () => {
+    const d = new InMemoryDockerDriver();
+    await expect(d.removeVolume("nope")).resolves.toBeUndefined();
   });
 
   it("waitHealthy honours the configured healthyByDefault flag", async () => {
