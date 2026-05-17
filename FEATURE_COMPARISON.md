@@ -72,7 +72,7 @@ Status: April 2026 (updated)
 | Location search (city/country) | ✅ | ✅ |
 | GPS radius search | ❌ | ⚡ Search within km radius |
 | Date / time range search | ✅ | ✅ |
-| Landmark search | ❌ | ⚡ Search by detected points of interest |
+| POI / landmark search | ❌ | ⚡ Search by detected points of interest |
 | Tag search | ✅ | ❌ |
 | Description search | ✅ | ❌ |
 | Combined filters | ✅ | ✅ (via query parsing) |
@@ -88,7 +88,7 @@ Status: April 2026 (updated)
 | Birthday & age at time of photo | ✅ | ❌ |
 | Hide people | ✅ | ✅ (ignore faces) |
 | Object / scene detection | ✅ Auto-tagging | ❌ |
-| Landmark detection | ❌ | ⚡ Grounding DINO (churches, bridges, etc.) |
+| POI detection | ❌ | ⚡ Self-hosted OSM (Nominatim + Overpass) + DINOv2 match against Wikimedia Commons reference images, with Wikipedia link out |
 | Photo quality scoring | ❌ | ⚡ AI score for every photo |
 | Intelligent focus point | ❌ | ⚡ Face / landmark-based |
 | GPU acceleration | ✅ CUDA, OpenVINO, VAAPI, ARM-NN, ROCm | ❌ |
@@ -235,7 +235,7 @@ Status: April 2026 (updated)
 
 - **Collaborative album curation** – consensus view, anonymous voting, multiple view modes
 - **AI as album participant** – quality-based voting
-- **Landmark detection** – Grounding DINO for points of interest
+- **POI detection** – self-hosted OSM (Nominatim + Overpass) + DINOv2 match against Commons reference images, with Wikipedia link out
 - **AI quality scoring** – score for every photo
 - **Intelligent auto-crop** – focus point based on faces / landmarks
 - **Hybrid search** – CLIP + DINOv2 fusion
@@ -258,7 +258,7 @@ community. It covers the entire lifecycle of photo/video management.
 
 **FK-Encore** stands out with innovative AI features and a unique collaborative
 curation concept. Album curation (consensus view, AI voting, anonymous voting)
-goes significantly beyond Immich. Landmark detection, photo quality scoring,
+goes significantly beyond Immich. POI detection, photo quality scoring,
 and hybrid search are additional unique selling points.
 
 For the further development of FK-Encore, the following Immich features would
