@@ -1042,6 +1042,26 @@ export function getPhotoLandmarks(id: number) {
   return apiFetch<{ landmarks: LandmarkItem[]; location?: PhotoLocation }>(`/photos/${id}/landmarks`)
 }
 
+export interface PoiMatchItem {
+  id: number
+  qid: string | null
+  osmRef: string
+  name: string
+  nameDe: string | null
+  wikipediaUrl: string | null
+  commonsImageUrl: string | null
+  distanceM: number | null
+  matchScore: number
+  ambiguous: boolean
+  source: string
+  regionSlug: string | null
+  createdAt: string
+}
+
+export function getPhotoPoiMatches(id: number) {
+  return apiFetch<{ matches: PoiMatchItem[] }>(`/photos/${id}/poi-matches`)
+}
+
 // ---------- Service Health ----------
 
 export type ExternalServiceName = 'insightface' | 'embedding' | 'landmark'
