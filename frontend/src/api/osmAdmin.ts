@@ -96,6 +96,27 @@ export async function deleteOsmRegion(
   })
 }
 
+export interface BulkRegionSuggestion {
+  slug: string
+  name: string
+  parent: string | null
+  pbfUrl: string
+  bbox: { minLat: number; minLon: number; maxLat: number; maxLon: number }
+  photoCount: number
+  existing: boolean
+  existingStatus: RegionStatus | null
+}
+
+export interface BulkSuggestResult {
+  geotaggedPhotoCount: number
+  unmappedPhotoCount: number
+  suggestions: BulkRegionSuggestion[]
+}
+
+export async function bulkSuggestOsmRegions(): Promise<BulkSuggestResult> {
+  return apiFetch('/osm/regions/bulk-suggest')
+}
+
 export async function reverseGeocodeViaOsm(
   lat: number,
   lon: number,
