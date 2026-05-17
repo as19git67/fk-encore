@@ -36,6 +36,8 @@ import {
 } from "./docker-driver";
 import { probePbfSizeMb } from "./pbf-probe";
 import { freeDiskMb as defaultFreeDiskMb } from "./disk-probe";
+import { enqueuePoiDetectionForRegion } from "../photo/scan-queue";
+import { ENABLE_POI_DETECTION } from "../photo/scan-config";
 import { assertTransition, isRegionStatus, type RegionStatus } from "./state-machine";
 
 /** Postgres footprint multiplier vs raw PBF size. Conservative side. */
@@ -56,6 +58,13 @@ export interface ImporterDeps {
     nominatim?: string;
     overpass?: string;
   };
+  /**
+   * Whether to backfill the poi_detection queue when a region
+   * transitions to `ready_running`. Defaults to the module-load env
+   * `ENABLE_POI_DETECTION`. Tests pass an explicit boolean since the
+   * env-captured constant is fixed at import time.
+   */
+  poiDetectionEnabled?: boolean;
 }
 
 export interface TickOutcome {
@@ -159,6 +168,29 @@ export async function tickImporter(deps: ImporterDeps = {}): Promise<TickOutcome
       imported_at: now().toISOString(),
       last_error: null,
     });
+
+    // Step 6: backfill poi_detection for any photo whose GPS falls
+    // inside this region's bbox. Photos that earlier got `no_region`
+    // (because the regional shard wasn't imported yet) and photos
+    // that were never scanned both get a fresh `pending` queue row.
+    // Skipped when the feature flag is off — there's no point queuing
+    // jobs the worker won't pick.
+    const poiEnabled = deps.poiDetectionEnabled ?? ENABLE_POI_DETECTION;
+    if (poiEnabled) {
+      const enqueued = await enqueuePoiDetectionForRegion({
+        minLat: row.bbox_min_lat,
+        minLon: row.bbox_min_lon,
+        maxLat: row.bbox_max_lat,
+        maxLon: row.bbox_max_lon,
+      });
+      if (enqueued > 0) {
+        console.log(
+          `[osm-admin] region ${slug} ready_running — backfilled ` +
+            `poi_detection for ${enqueued} photo(s) in its bbox`,
+        );
+      }
+    }
+
     return { slug, result: "ready_running" };
   } catch (err) {
     const detail = (err as Error).message ?? String(err);

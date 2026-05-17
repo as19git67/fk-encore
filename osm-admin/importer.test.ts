@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import db from "../db/database";
-import { osmRegionImports } from "../db/schema";
+import { osmRegionImports, photoScanQueue, photos, users } from "../db/schema";
 import { InMemoryDockerDriver } from "./docker-driver";
 import {
   nominatimDescriptor,
@@ -28,7 +28,34 @@ async function seedImporting(slug: string, geofabrikUrl = "https://example.com/x
 
 beforeEach(async () => {
   await db.delete(osmRegionImports);
+  await db.delete(photoScanQueue);
+  await db.delete(photos);
+  await db.delete(users);
 });
+
+async function seedPhotoAt(lat: number, lon: number, idx: number, userId: number): Promise<number> {
+  const [row] = await db
+    .insert(photos)
+    .values({
+      user_id: userId,
+      filename: `p${idx}.jpg`,
+      original_name: `p${idx}.jpg`,
+      mime_type: "image/jpeg",
+      size: 1,
+      latitude: lat,
+      longitude: lon,
+    })
+    .returning({ id: photos.id });
+  return row.id;
+}
+
+async function seedUser(): Promise<number> {
+  const [u] = await db
+    .insert(users)
+    .values({ email: `t${Date.now()}@x`, name: "T", password_hash: "x" })
+    .returning({ id: users.id });
+  return u.id;
+}
 
 describe("tickImporter", () => {
   it("is a no-op when no rows are importing", async () => {
@@ -173,6 +200,107 @@ describe("tickImporter", () => {
       freeDiskMb: async () => 100_000,
     });
     expect(probeCalls).toBe(0);
+  });
+});
+
+describe("tickImporter — poi_detection backfill on ready_running", () => {
+  it("enqueues poi_detection for photos inside the new region's bbox when enabled", async () => {
+    await seedImporting("europe/germany/bayern");
+    const userId = await seedUser();
+    // Photo in Bayern (covered by bbox above)
+    const munichId = await seedPhotoAt(48.137, 11.575, 1, userId);
+    // Photo far outside — should not be enqueued
+    await seedPhotoAt(52.5, 13.4, 2, userId);
+
+    const out = await tickImporter({
+      driver: new InMemoryDockerDriver(),
+      probeSize: async () => 600,
+      freeDiskMb: async () => 100_000,
+      poiDetectionEnabled: true,
+    });
+    expect(out.result).toBe("ready_running");
+
+    const queueRows = await db
+      .select()
+      .from(photoScanQueue)
+      .where(eq(photoScanQueue.service, "poi_detection"));
+    expect(queueRows).toHaveLength(1);
+    expect(queueRows[0].photo_id).toBe(munichId);
+    expect(queueRows[0].status).toBe("pending");
+  });
+
+  it("skips the backfill entirely when disabled", async () => {
+    await seedImporting("europe/germany/bayern");
+    const userId = await seedUser();
+    await seedPhotoAt(48.137, 11.575, 1, userId);
+
+    await tickImporter({
+      driver: new InMemoryDockerDriver(),
+      probeSize: async () => 600,
+      freeDiskMb: async () => 100_000,
+      poiDetectionEnabled: false,
+    });
+
+    const queueRows = await db
+      .select()
+      .from(photoScanQueue)
+      .where(eq(photoScanQueue.service, "poi_detection"));
+    expect(queueRows).toEqual([]);
+  });
+
+  it("replaces existing `done` poi_detection rows for photos in the bbox", async () => {
+    await seedImporting("europe/germany/bayern");
+    const userId = await seedUser();
+    const munichId = await seedPhotoAt(48.137, 11.575, 1, userId);
+    // Simulate a previously-completed scan that produced no match
+    // because the region wasn't imported yet.
+    await db.insert(photoScanQueue).values({
+      photo_id: munichId,
+      user_id: null,
+      service: "poi_detection",
+      status: "done",
+      priority: 3,
+    });
+
+    await tickImporter({
+      driver: new InMemoryDockerDriver(),
+      probeSize: async () => 600,
+      freeDiskMb: async () => 100_000,
+      poiDetectionEnabled: true,
+    });
+
+    const queueRows = await db
+      .select()
+      .from(photoScanQueue)
+      .where(eq(photoScanQueue.service, "poi_detection"));
+    expect(queueRows).toHaveLength(1);
+    expect(queueRows[0].status).toBe("pending");
+  });
+
+  it("does not duplicate when a pending row already exists", async () => {
+    await seedImporting("europe/germany/bayern");
+    const userId = await seedUser();
+    const munichId = await seedPhotoAt(48.137, 11.575, 1, userId);
+    await db.insert(photoScanQueue).values({
+      photo_id: munichId,
+      user_id: null,
+      service: "poi_detection",
+      status: "pending",
+      priority: 3,
+    });
+
+    await tickImporter({
+      driver: new InMemoryDockerDriver(),
+      probeSize: async () => 600,
+      freeDiskMb: async () => 100_000,
+      poiDetectionEnabled: true,
+    });
+
+    const queueRows = await db
+      .select()
+      .from(photoScanQueue)
+      .where(eq(photoScanQueue.service, "poi_detection"));
+    expect(queueRows).toHaveLength(1);
   });
 });
 
