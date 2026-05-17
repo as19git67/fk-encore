@@ -8,6 +8,16 @@
 
 export const ENABLE_LOCAL_FACES = process.env.ENABLE_LOCAL_FACES === "true";
 export const ENABLE_LANDMARKS = process.env.ENABLE_LANDMARKS === "true";
+/**
+ * Enable per-photo POI detection (Epic #383): for each geotagged
+ * upload, query the local Overpass shard for nearby POIs, score the
+ * candidates against cached DINOv2 reference embeddings, and persist
+ * the top match(es) in photo_poi_matches.
+ *
+ * Off by default — only useful once at least one OSM region has been
+ * imported via the osm-admin service.
+ */
+export const ENABLE_POI_DETECTION = process.env.ENABLE_POI_DETECTION === "true";
 export const ENABLE_QUALITY = process.env.ENABLE_QUALITY !== "false"; // enabled by default
 
 /**

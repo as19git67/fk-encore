@@ -542,9 +542,31 @@ export const photoLandmarks = pgTable("photo_landmarks", {
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
 });
 
+// Per-photo POI matches produced by the osm-admin POI matcher (Epic #383).
+// The (photo_id, qid|osm_ref) uniqueness + the score-sorted index are
+// declared in raw SQL (migration 0087) — drizzle's coalesce-in-index
+// support isn't strong enough.
+export const photoPoiMatches = pgTable("photo_poi_matches", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  photo_id: integer("photo_id")
+    .notNull()
+    .references(() => photos.id, { onDelete: "cascade" }),
+  qid: text("qid"),
+  osm_ref: text("osm_ref").notNull(),
+  name: text("name").notNull(),
+  name_de: text("name_de"),
+  distance_m: real("distance_m"),
+  heading_match: real("heading_match"),
+  match_score: real("match_score").notNull(),
+  ambiguous: boolean("ambiguous").notNull().default(false),
+  source: text("source").notNull(),
+  region_slug: text("region_slug"),
+  created_at: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+});
+
 // ========== Scan Queue ==========
 
-export const scanServiceEnum = pgEnum("scan_service", ["embedding", "face_detection", "face_assignment", "landmark", "quality", "geocoding", "thumbnail"]);
+export const scanServiceEnum = pgEnum("scan_service", ["embedding", "face_detection", "face_assignment", "landmark", "quality", "geocoding", "thumbnail", "poi_detection"]);
 export const scanStatusEnum = pgEnum("scan_status", ["pending", "processing", "failed", "done"]);
 
 export const photoScanQueue = pgTable("photo_scan_queue", {

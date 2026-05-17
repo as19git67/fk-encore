@@ -12,17 +12,17 @@
 import { eq, and, inArray, sql, not, isNull } from "drizzle-orm";
 import db from "../db/database";
 import { photoScanQueue, photos, faces, photoLandmarks } from "../db/schema";
-import { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM } from "./scan-config";
+import { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_POI_DETECTION, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM } from "./scan-config";
 import { notifyScanQueueChanged } from "./scan-queue-events";
 
-export type ScanService = "embedding" | "face_detection" | "face_assignment" | "landmark" | "quality" | "geocoding" | "thumbnail";
+export type ScanService = "embedding" | "face_detection" | "face_assignment" | "landmark" | "quality" | "geocoding" | "thumbnail" | "poi_detection";
 export type ScanStatus = "pending" | "processing" | "failed" | "done";
 
 export type QueueServiceId = ScanService;
 
 /** Services that run once per photo (no user_id in queue). */
 const GLOBAL_SERVICES: ReadonlySet<ScanService> = new Set([
-  "face_detection", "embedding", "landmark", "quality", "geocoding", "thumbnail",
+  "face_detection", "embedding", "landmark", "quality", "geocoding", "thumbnail", "poi_detection",
 ]);
 
 /** Services that run once per user per photo. */
@@ -70,6 +70,7 @@ function enabledServices(): ScanService[] {
     services.push("face_assignment");
   }
   if (ENABLE_LANDMARKS) services.push("landmark");
+  if (ENABLE_POI_DETECTION) services.push("poi_detection");
   if (ENABLE_QUALITY) services.push("quality");
   if (ENABLE_THUMBNAIL_PREWARM) services.push("thumbnail");
   return services;
@@ -260,13 +261,13 @@ export async function getQueueStatus(userId: number): Promise<QueueStatus> {
   const rows = await db.execute<{ service: ScanService; status: ScanStatus; count: string }>(sql`
     SELECT service, status, COUNT(*)::int as count
     FROM photo_scan_queue
-    WHERE (user_id IS NULL AND service IN ('face_detection', 'embedding', 'landmark', 'quality', 'geocoding', 'thumbnail'))
+    WHERE (user_id IS NULL AND service IN ('face_detection', 'embedding', 'landmark', 'quality', 'geocoding', 'thumbnail', 'poi_detection'))
        OR (user_id = ${userId} AND service = 'face_assignment')
     GROUP BY service, status
   `);
 
   const map = new Map<QueueServiceId, QueueServiceStatus>();
-  for (const svc of (["embedding", "face_detection", "face_assignment", "landmark", "quality", "geocoding", "thumbnail"] as ScanService[])) {
+  for (const svc of (["embedding", "face_detection", "face_assignment", "landmark", "quality", "geocoding", "thumbnail", "poi_detection"] as ScanService[])) {
     map.set(svc, { service: svc, pending: 0, processing: 0, failed: 0, done: 0 });
   }
 
