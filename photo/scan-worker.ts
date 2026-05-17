@@ -351,14 +351,21 @@ class ScanWorker {
       case "thumbnail":
         await indexPhotoThumbnails(job.photo_id);
         break;
-      case "poi_detection":
-        // The pipeline lands in Epic #383 follow-up (osm-admin POI
-        // matcher). Until then we explicitly fail enqueued jobs so the
-        // operator sees the missing wiring in the queue UI instead of
-        // jobs silently stuck in `processing`.
-        throw new Error(
-          "poi_detection worker not yet wired — see osm-admin slice 4c",
-        );
+      case "poi_detection": {
+        const { detectPoisForPhoto } = await import("../osm-admin/poi-detection");
+        const outcome = await detectPoisForPhoto(job.photo_id);
+        if (outcome.reason && outcome.matches.length === 0) {
+          // No fatal error — the photo simply produced no match this
+          // tick (missing region, no candidates, photo not embedded
+          // yet, …). Log for diagnostics but mark the job `done` so
+          // the queue doesn't retry endlessly. A re-scan can be
+          // forced explicitly from the admin UI.
+          console.log(
+            `[scan-worker] poi_detection photo=${job.photo_id}: ${outcome.reason}`,
+          );
+        }
+        break;
+      }
     }
   }
 

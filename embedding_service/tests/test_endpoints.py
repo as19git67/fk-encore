@@ -240,6 +240,41 @@ class TestGetEndpoint:
         assert response.status_code == 422
 
 
+class TestDinoEmbedRawEndpoint:
+    """The /dino/embed endpoint embeds an uploaded image and returns
+    the raw DINOv2 vector — used by the POI-detection pipeline (Epic
+    #383) for Wikimedia Commons reference images. Side-effect-free:
+    nothing gets persisted in the embedding DB."""
+
+    def _tiny_jpeg(self) -> bytes:
+        """A 1×1 white JPEG, enough to pass PIL's image-format guard."""
+        from io import BytesIO
+        from PIL import Image as PilImage
+        buf = BytesIO()
+        PilImage.new("RGB", (1, 1), color=(255, 255, 255)).save(buf, format="JPEG")
+        return buf.getvalue()
+
+    def test_returns_dino_vector_for_a_valid_image(self):
+        response = client.post(
+            "/dino/embed",
+            files={"file": ("ref.jpg", self._tiny_jpeg(), "image/jpeg")},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert isinstance(body["embedding"], list)
+        assert body["dim"] == 768
+        assert len(body["embedding"]) == 768
+        # Stub returns 0.2 for every dim.
+        assert all(isinstance(x, float) for x in body["embedding"])
+
+    def test_rejects_non_image_payload_with_422(self):
+        response = client.post(
+            "/dino/embed",
+            files={"file": ("garbage.txt", b"hello world", "text/plain")},
+        )
+        assert response.status_code == 422
+
+
 class TestTextSearchEndpoint:
     def test_empty_query_rejected(self):
         response = client.post("/search/text", json={"query": ""})
