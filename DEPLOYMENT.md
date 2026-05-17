@@ -348,7 +348,7 @@ memory limit if necessary (Docker Desktop → Settings → Resources).
 ## Performance tuning
 
 A server that is running large scan passes (embedding, face detection,
-landmark, quality, thumbnail prewarm) competes with the HTTP API for
+POI detection, quality, thumbnail prewarm) competes with the HTTP API for
 CPU, DB connections and the libuv thread pool. The defaults below keep
 the photo UI responsive under sustained scan load.
 
@@ -363,7 +363,6 @@ the photo UI responsive under sustained scan load.
 | `SCAN_EMBEDDING_CONCURRENCY`     | `1`     | Parallel embedding jobs. Increase cautiously — each job holds a DB connection during the RPC. |
 | `SCAN_FACE_CONCURRENCY`          | `1`     | Parallel face-detection jobs. |
 | `SCAN_FACE_ASSIGN_CONCURRENCY`   | `1`     | Parallel face-assignment jobs (local-only, cheap). |
-| `SCAN_LANDMARK_CONCURRENCY`      | `1`     | Parallel landmark jobs. |
 | `SCAN_QUALITY_CONCURRENCY`       | `1`     | Parallel quality jobs. |
 | `SCAN_THUMBNAIL_CONCURRENCY`     | `1`     | Parallel thumbnail-prewarm jobs. Sharp runs off the main thread via `IMAGE_POOL_SIZE`, so raising this scales mostly with disk IO. |
 | `ENABLE_THUMBNAIL_PREWARM`       | `true`  | Generates 320/640/1280 thumbnails after every quality job. Set to `false` to save disk space at the cost of on-demand resizes. |
@@ -372,11 +371,15 @@ the photo UI responsive under sustained scan load.
 | `EVENT_LOOP_LAG_THRESHOLD_MS`    | `500`   | Lag above which all scan services pause dequeueing. |
 | `WORKER_PRESSURE_DELAY_MS`       | `250`   | Delay between jobs under soft pressure. |
 | `WORKER_HARD_PRESSURE_DELAY_MS`  | `1000`  | Delay between jobs under hard pressure. |
-| `ML_RPC_TIMEOUT_MS`              | `600000` | Per-request timeout (ms) for worker-side ML RPCs (embedding/insightface/landmark). 10 min by default — raise on very slow hosts, lower when you have a GPU. |
+| `ML_RPC_TIMEOUT_MS`              | `600000` | Per-request timeout (ms) for worker-side ML RPCs (embedding/insightface). 10 min by default — raise on very slow hosts, lower when you have a GPU. |
 | `ML_RPC_QUICK_TIMEOUT_MS`        | `60000`  | Per-request timeout (ms) for user-facing ML RPCs (`/search/text`, `/similar-groups`). |
 | `ML_CONCURRENCY_EMBEDDING`       | `1`     | Max parallel requests to the embedding container. `embedding` and `quality` workers share this slot, so the default serializes them. Raise only with GPU. |
 | `ML_CONCURRENCY_INSIGHTFACE`     | `1`     | Max parallel requests to the insightface container. |
-| `ML_CONCURRENCY_LANDMARK`        | `1`     | Max parallel requests to the landmark container. |
+| `ENABLE_POI_DETECTION`           | `false` | Turn on the osm-admin POI matcher (Epic #383). Off by default — only useful once at least one OSM region has been imported via the admin UI. See [`docs/osm-admin-deployment.md`](./docs/osm-admin-deployment.md). |
+| `OSM_ADMIN_DOCKER_DRIVER`        | `inmemory` | Set to `dockerode` to manage real per-region containers (requires `/var/run/docker.sock` bind-mount). |
+| `OSM_ADMIN_DOCKER_NETWORK`       | _(none)_ | Docker network the per-region containers join (also the network the `app` container must be on). |
+| `POI_REGION_IDLE_STOP_MINUTES`   | `30`    | Stop a region container after this many idle minutes; cold-start ~5–15 s on next request. |
+| `POI_REGION_AUTO_IMPORT_MAX_PBF_MB` | `1500` | PBF-size cutoff above which a region needs manual approval in the admin UI. |
 | `HEALTH_CHECK_INTERVAL_MS`       | `60000` | Interval between ML `/health` pings. Lower = faster detection of container outages; the ping itself is cheap. |
 | `HEALTH_CHECK_TIMEOUT_MS`        | `60000` | Timeout for a single health ping. Generous on purpose — a busy container may reply slowly without being unhealthy. |
 
@@ -384,7 +387,7 @@ the photo UI responsive under sustained scan load.
 > as permanently failed. `MlRpcTimeoutError` is handled the same as
 > `ServiceUnavailableError` — the job returns to `pending` and is
 > retried by the next tick. This protects photos from losing their
-> embedding/quality/landmark data when the ML container is briefly
+> embedding/quality data when the ML container is briefly
 > unresponsive.
 
 ### Reverse proxy for thumbnails
