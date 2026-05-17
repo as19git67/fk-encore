@@ -9,7 +9,7 @@ import PhotoAlbumDialog from './PhotoAlbumDialog.vue'
 import PhotoTransformEditor from './PhotoTransformEditor.vue'
 import { getPhotoUrl, getPhotosAlbums, updateAlbum, updateAlbumUserSettings, updatePhotoDescription } from '../api/photos'
 import { getAlbumCheckState as calculateAlbumCheckState } from '../utils/albumSelection'
-import type { Photo, Face, LandmarkItem, Person, CurationStatus } from '../api/photos'
+import type { Photo, Face, LandmarkItem, PoiMatchItem, Person, CurationStatus } from '../api/photos'
 import { useReferenceData } from '../composables/useReferenceData'
 import { useUserPhotoTransform } from '../composables/useUserPhotoTransform'
 import { ref, computed, onMounted, watch } from 'vue'
@@ -27,6 +27,12 @@ const props = defineProps<{
   loadingFaces: boolean
   landmarks: LandmarkItem[]
   loadingLandmarks: boolean
+  /** POI matches produced by the osm-admin pipeline (Epic #383).
+   *  When the matches array is non-empty the sidebar shows them in
+   *  the location section, alongside (or instead of) the generic
+   *  landmark category chips. */
+  poiMatches?: PoiMatchItem[]
+  loadingPoiMatches?: boolean
   persons: Person[]
   canDelete: boolean
   canUpload: boolean
@@ -425,7 +431,7 @@ watch(() => props.photo.id, () => {
         </div>
       </div>
 
-      <template v-if="photo.location_city || photo.location_name || loadingLandmarks || landmarks.length > 0 || (inFlyout && photo.latitude != null && photo.longitude != null)">
+      <template v-if="photo.location_city || photo.location_name || loadingLandmarks || landmarks.length > 0 || (poiMatches && poiMatches.length > 0) || loadingPoiMatches || (inFlyout && photo.latitude != null && photo.longitude != null)">
         <div class="sidebar-divider" />
         <div class="sidebar-section">
           <div v-if="photo.location_name || photo.location_city" class="meta-row location-row">
@@ -444,7 +450,43 @@ watch(() => props.photo.id, () => {
             :label="photo.location_name || photo.location_city"
             class="mini-map"
           />
-          <div v-if="loadingLandmarks" class="loading-row"><i class="pi pi-spin pi-spinner" /> Gebäude werden erkannt…</div>
+          <!-- POI matches (Epic #383). Each match has a name, optional
+               Wikipedia link, optional Commons thumbnail, distance, and
+               a score; ambiguous=true means the matcher couldn't pick
+               a clear winner so we show all alternatives in a row. -->
+          <div v-if="loadingPoiMatches" class="loading-row"><i class="pi pi-spin pi-spinner" /> Sehenswürdigkeit wird erkannt…</div>
+          <div v-else-if="poiMatches && poiMatches.length > 0" class="poi-matches">
+            <div v-for="m in poiMatches" :key="m.id" class="poi-match">
+              <img
+                v-if="m.commonsImageUrl"
+                :src="m.commonsImageUrl"
+                :alt="m.name"
+                class="poi-thumb"
+                loading="lazy"
+              />
+              <div class="poi-info">
+                <div class="poi-name">
+                  <a
+                    v-if="m.wikipediaUrl"
+                    :href="m.wikipediaUrl"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >{{ m.nameDe || m.name }}</a>
+                  <span v-else>{{ m.nameDe || m.name }}</span>
+                  <span v-if="m.ambiguous" class="poi-ambiguous" title="Eindeutigkeit nicht erreicht">?</span>
+                </div>
+                <div class="poi-meta">
+                  <span v-if="m.distanceM !== null">{{ Math.round(m.distanceM) }} m</span>
+                  <span class="poi-score">{{ Math.round(m.matchScore * 100) }}%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- Fallback: when no POI match exists, fall back to the
+               generic landmark category chips from the old Grounding
+               DINO worker. Will retire entirely once POI coverage is
+               broad enough. -->
+          <div v-else-if="loadingLandmarks" class="loading-row"><i class="pi pi-spin pi-spinner" /> Gebäude werden erkannt…</div>
           <div v-else-if="landmarks.some(lm => lm.confidence >= 0.6)" class="landmark-chips">
             <template v-for="lm in landmarks" :key="lm.id">
               <span v-if="lm.confidence >= 0.6" class="landmark-tag" :title="`${Math.round(lm.confidence * 100)}%`">
@@ -742,6 +784,47 @@ watch(() => props.photo.id, () => {
 .location-row {
   margin-bottom: 0.5rem;
 }
+
+.poi-matches {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+.poi-match {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+}
+.poi-thumb {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--p-content-border-color);
+  background: var(--p-content-hover-background);
+  flex-shrink: 0;
+}
+.poi-info { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.poi-name { font-weight: 500; }
+.poi-name a { color: var(--p-primary-color); text-decoration: none; }
+.poi-name a:hover { text-decoration: underline; }
+.poi-ambiguous {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0 0.3rem;
+  background: var(--p-tag-warn-background, rgba(255,160,0,0.2));
+  color: var(--p-tag-warn-color);
+  border-radius: 0.5rem;
+  font-size: 0.7rem;
+}
+.poi-meta {
+  display: flex;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color);
+}
+.poi-score { font-variant-numeric: tabular-nums; }
 
 .landmark-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 

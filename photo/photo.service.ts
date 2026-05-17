@@ -96,6 +96,8 @@ import {
   photoGroups,
   photoGroupMembers,
   photoLandmarks,
+  photoPoiMatches,
+  poiReferences,
   photoScanQueue,
   albumUserSettings,
   photoTransformSuggestions,
@@ -6286,6 +6288,87 @@ export interface PhotoLocation {
   name?: string;
   city?: string;
   country?: string;
+}
+
+export interface PoiMatchRow {
+  id: number;
+  qid: string | null;
+  osmRef: string;
+  name: string;
+  nameDe: string | null;
+  wikipediaUrl: string | null;
+  commonsImageUrl: string | null;
+  distanceM: number | null;
+  matchScore: number;
+  ambiguous: boolean;
+  source: string;
+  regionSlug: string | null;
+  createdAt: string;
+}
+
+/**
+ * Per-photo POI matches produced by the osm-admin POI detection
+ * pipeline (Epic #383). Joins `photo_poi_matches` against
+ * `poi_references` so the response carries the Wikipedia URL and
+ * Commons thumbnail URL alongside the score.
+ */
+export async function getPoiMatchesForPhotoLogic(
+  photoId: number,
+): Promise<{ matches: PoiMatchRow[] }> {
+  const rows = await dbAll<{
+    id: string | number;
+    qid: string | null;
+    osm_ref: string;
+    name: string;
+    name_de: string | null;
+    distance_m: number | null;
+    match_score: number;
+    ambiguous: boolean;
+    source: string;
+    region_slug: string | null;
+    created_at: string;
+    ref_wikipedia_url: string | null;
+    ref_commons_image_url: string | null;
+  }>(
+    db
+      .select({
+        id: photoPoiMatches.id,
+        qid: photoPoiMatches.qid,
+        osm_ref: photoPoiMatches.osm_ref,
+        name: photoPoiMatches.name,
+        name_de: photoPoiMatches.name_de,
+        distance_m: photoPoiMatches.distance_m,
+        match_score: photoPoiMatches.match_score,
+        ambiguous: photoPoiMatches.ambiguous,
+        source: photoPoiMatches.source,
+        region_slug: photoPoiMatches.region_slug,
+        created_at: photoPoiMatches.created_at,
+        ref_wikipedia_url: poiReferences.wikipedia_url,
+        ref_commons_image_url: poiReferences.commons_image_url,
+      })
+      .from(photoPoiMatches)
+      .leftJoin(poiReferences, eq(poiReferences.qid, photoPoiMatches.qid))
+      .where(eq(photoPoiMatches.photo_id, photoId))
+      .orderBy(sql`${photoPoiMatches.match_score} DESC`),
+  );
+
+  return {
+    matches: rows.map((r) => ({
+      id: Number(r.id),
+      qid: r.qid,
+      osmRef: r.osm_ref,
+      name: r.name,
+      nameDe: r.name_de,
+      wikipediaUrl: r.ref_wikipedia_url,
+      commonsImageUrl: r.ref_commons_image_url,
+      distanceM: r.distance_m,
+      matchScore: r.match_score,
+      ambiguous: r.ambiguous,
+      source: r.source,
+      regionSlug: r.region_slug,
+      createdAt: r.created_at,
+    })),
+  };
 }
 
 export async function getLandmarksForPhotoLogic(
