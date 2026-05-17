@@ -281,6 +281,56 @@ export async function getQueueStatus(userId: number): Promise<QueueStatus> {
   return { services: Array.from(map.values()) };
 }
 
+/**
+ * Backfill `poi_detection` jobs for every photo whose GPS falls in
+ * the given bounding box. Used by the osm-admin importer when a
+ * region transitions to `ready_running`, so photos that were
+ * previously dropped with `no_region` get a fresh shot at being
+ * matched against the newly-available regional Overpass shard.
+ *
+ * Steps:
+ *   1. Delete any `done`/`failed` poi_detection rows for those
+ *      photos so they can be re-enqueued.
+ *   2. Insert pending rows for each. The partial unique index on
+ *      `(photo_id, service) WHERE status IN ('pending','processing')`
+ *      collapses concurrent inserts via ON CONFLICT DO NOTHING.
+ *
+ * Returns the number of pending rows actually inserted.
+ */
+export async function enqueuePoiDetectionForRegion(bbox: {
+  minLat: number;
+  minLon: number;
+  maxLat: number;
+  maxLon: number;
+}): Promise<number> {
+  // Drop terminal rows so the partial unique index lets us insert
+  // fresh `pending` ones.
+  await db.execute(sql`
+    DELETE FROM photo_scan_queue
+    WHERE service = 'poi_detection'
+      AND status IN ('done', 'failed')
+      AND user_id IS NULL
+      AND photo_id IN (
+        SELECT id FROM photos
+        WHERE latitude  BETWEEN ${bbox.minLat} AND ${bbox.maxLat}
+          AND longitude BETWEEN ${bbox.minLon} AND ${bbox.maxLon}
+      )
+  `);
+
+  const insertResult = await db.execute(sql`
+    INSERT INTO photo_scan_queue (photo_id, user_id, service, status, priority, force)
+    SELECT p.id, NULL, 'poi_detection', 'pending', 3, false
+    FROM photos p
+    WHERE p.latitude  BETWEEN ${bbox.minLat} AND ${bbox.maxLat}
+      AND p.longitude BETWEEN ${bbox.minLon} AND ${bbox.maxLon}
+    ON CONFLICT DO NOTHING
+  `);
+
+  const enqueued = (insertResult as { rowCount?: number }).rowCount ?? 0;
+  if (enqueued > 0) notifyScanQueueChanged();
+  return enqueued;
+}
+
 /** Reset all failed jobs for a user back to pending (low priority). */
 export async function requeueFailed(userId: number): Promise<number> {
   // Reset per-user failed jobs
