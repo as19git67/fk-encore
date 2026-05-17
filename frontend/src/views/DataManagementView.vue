@@ -31,7 +31,9 @@ import {
 import {
   listOsmRegions, suggestOsmRegion, createOsmRegion,
   approveOsmRegion, deleteOsmRegion, reverseGeocodeViaOsm,
+  bulkSuggestOsmRegions,
   type OsmRegionImport, type RegionSuggestion,
+  type BulkSuggestResult, type BulkRegionSuggestion,
 } from '../api/osmAdmin'
 import { getBuildInfo } from '../api/system'
 import { useAuthStore } from '../stores/auth'
@@ -485,6 +487,9 @@ const suggestLoading = ref(false)
 const reverseResult = ref<{ regionSlug: string; result: Record<string, unknown> } | null>(null)
 const reverseLoading = ref(false)
 
+const bulkSuggestResult = ref<BulkSuggestResult | null>(null)
+const bulkLoading = ref(false)
+
 const osmStatusLabels: Record<string, string> = {
   pending_approval: 'Wartet auf Freigabe',
   importing: 'Wird importiert',
@@ -563,6 +568,33 @@ async function handleDeleteOsmRegion(slug: string) {
   try {
     await deleteOsmRegion(slug)
     await fetchOsmRegions()
+  } catch (err) {
+    osmError.value = (err as Error).message ?? String(err)
+  } finally {
+    osmLoading.value = false
+  }
+}
+
+async function handleBulkSuggest() {
+  bulkLoading.value = true
+  try {
+    bulkSuggestResult.value = await bulkSuggestOsmRegions()
+    osmError.value = ''
+  } catch (err) {
+    osmError.value = (err as Error).message ?? String(err)
+  } finally {
+    bulkLoading.value = false
+  }
+}
+
+async function handleBulkCreate(s: BulkRegionSuggestion) {
+  if (s.existing) return
+  osmLoading.value = true
+  try {
+    await createOsmRegion(s.slug)
+    // Refresh both the region table and the bulk view so the row
+    // flips to "existing" without reloading the page.
+    await Promise.all([fetchOsmRegions(), handleBulkSuggest()])
   } catch (err) {
     osmError.value = (err as Error).message ?? String(err)
   } finally {
@@ -1125,6 +1157,63 @@ onBeforeUnmount(() => {
         <pre>{{ JSON.stringify(reverseResult.result, null, 2) }}</pre>
       </div>
 
+      <!-- Bulk-Suggest für Bestandsfotos -->
+      <div class="osm-bulk">
+        <Button
+          label="Regionen aus Foto-Bibliothek vorschlagen"
+          icon="pi pi-images"
+          :loading="bulkLoading"
+          severity="secondary"
+          @click="handleBulkSuggest"
+        />
+        <div v-if="bulkSuggestResult" class="osm-bulk-result">
+          <p>
+            <strong>{{ bulkSuggestResult.geotaggedPhotoCount }}</strong> Fotos mit GPS
+            ausgewertet,
+            <span v-if="bulkSuggestResult.unmappedPhotoCount > 0">
+              {{ bulkSuggestResult.unmappedPhotoCount }} nicht zuordenbar (z. B. auf See),
+            </span>
+            {{ bulkSuggestResult.suggestions.length }} Regionen vorgeschlagen.
+          </p>
+          <table class="osm-bulk-table">
+            <thead>
+              <tr>
+                <th>Region</th>
+                <th>Fotos</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="s in bulkSuggestResult.suggestions" :key="s.slug">
+                <td>
+                  <code>{{ s.slug }}</code>
+                  <span class="osm-bulk-name">{{ s.name }}</span>
+                </td>
+                <td>{{ s.photoCount.toLocaleString('de-DE') }}</td>
+                <td>
+                  <span v-if="s.existing"
+                    class="osm-status"
+                    :class="`osm-status--${s.existingStatus}`"
+                  >{{ osmStatusLabels[s.existingStatus ?? ''] ?? s.existingStatus }}</span>
+                  <span v-else class="text-secondary">–</span>
+                </td>
+                <td>
+                  <Button
+                    v-if="!s.existing"
+                    label="Anlegen"
+                    icon="pi pi-plus"
+                    size="small"
+                    :loading="osmLoading"
+                    @click="handleBulkCreate(s)"
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <!-- Region-Tabelle (Desktop) -->
       <div v-if="osmRegions.length === 0" class="osm-empty">
         Noch keine Regionen angelegt. Mit dem Formular oben einen Vorschlag
@@ -1568,6 +1657,34 @@ onBeforeUnmount(() => {
   max-height: 200px;
   overflow: auto;
   font-size: 0.85rem;
+}
+
+.osm-bulk {
+  margin: 1rem 0;
+}
+.osm-bulk-result {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: var(--p-content-hover-background);
+  border-radius: 6px;
+}
+.osm-bulk-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+}
+.osm-bulk-table th,
+.osm-bulk-table td {
+  text-align: left;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--p-content-border-color);
+  vertical-align: middle;
+}
+.osm-bulk-name {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
 }
 
 .osm-empty {

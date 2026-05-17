@@ -21,6 +21,10 @@ import {
   suggestForCoord,
   type RegionSuggestion,
 } from "./region.service";
+import {
+  suggestRegionsFromPhotos,
+  type BulkSuggestResult,
+} from "./bulk-suggest";
 import type { RegionStatus } from "./state-machine";
 
 export interface OsmRegionImport {
@@ -90,6 +94,23 @@ export interface SuggestRegionRequest {
 export interface SuggestRegionResponse {
   region: RegionSuggestion | null;
 }
+
+/**
+ * Bulk-suggest regions based on every GPS-tagged photo in the
+ * library. Sorted by photo count desc, with the current
+ * osm_region_imports state merged in so the admin UI can tell at a
+ * glance which regions still need to be imported.
+ *
+ * Heavy SELECT on the photos table; expected to be triggered manually
+ * from the admin UI rather than polled.
+ */
+export const bulkSuggestRegions = api(
+  { expose: true, auth: true, method: "GET", path: "/osm/regions/bulk-suggest" },
+  async (): Promise<BulkSuggestResult> => {
+    requirePermission(getAuthData()!, "osm.admin");
+    return await suggestRegionsFromPhotos();
+  },
+);
 
 /**
  * Look up the smallest Geofabrik region that covers the given GPS
