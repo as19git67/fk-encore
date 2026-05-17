@@ -64,6 +64,14 @@ export interface WaitHealthyOptions {
   intervalMs?: number;
 }
 
+export interface ExecResult {
+  exitCode: number;
+  /** Captured stdout (UTF-8). Up to ~4 KB tail; longer runs are truncated. */
+  stdout: string;
+  /** Captured stderr (UTF-8). Same tail policy. */
+  stderr: string;
+}
+
 export interface DockerDriver {
   /** Idempotent: create+start the container if it isn't already running. */
   ensureRunning(desc: ContainerDescriptor): Promise<ContainerInfo>;
@@ -74,6 +82,12 @@ export interface DockerDriver {
   /** Remove a named Docker volume. No-op if missing; throws if in use. */
   removeVolume(name: string): Promise<void>;
   inspect(name: string): Promise<ContainerInfo>;
+  /**
+   * Run a command inside an existing container. Used by the refresh
+   * flow to invoke `nominatim replication --once` in the per-region
+   * Nominatim shard without restarting the container.
+   */
+  exec(name: string, cmd: string[]): Promise<ExecResult>;
   /**
    * Poll an HTTP healthcheck URL until it responds 2xx. Returns true
    * if it became healthy within the budget, false otherwise. Callers
@@ -103,10 +117,13 @@ export class InMemoryDockerDriver implements DockerDriver {
     | { op: "remove"; name: string }
     | { op: "removeVolume"; name: string }
     | { op: "waitHealthy"; url: string; healthy: boolean }
+    | { op: "exec"; name: string; cmd: string[]; exitCode: number }
   > = [];
 
   /** Configurable test seam: forces `waitHealthy` to return this value. */
   healthyByDefault = true;
+  /** Configurable test seam: forces `exec` to return these. */
+  execResult: ExecResult = { exitCode: 0, stdout: "", stderr: "" };
 
   async ensureRunning(desc: ContainerDescriptor): Promise<ContainerInfo> {
     this.events.push({ op: "ensureRunning", name: desc.name });
@@ -139,6 +156,11 @@ export class InMemoryDockerDriver implements DockerDriver {
   async waitHealthy(url: string, _opts?: WaitHealthyOptions): Promise<boolean> {
     this.events.push({ op: "waitHealthy", url, healthy: this.healthyByDefault });
     return this.healthyByDefault;
+  }
+
+  async exec(name: string, cmd: string[]): Promise<ExecResult> {
+    this.events.push({ op: "exec", name, cmd, exitCode: this.execResult.exitCode });
+    return this.execResult;
   }
 }
 

@@ -31,7 +31,7 @@ import {
 import {
   listOsmRegions, suggestOsmRegion, createOsmRegion,
   approveOsmRegion, deleteOsmRegion, reverseGeocodeViaOsm,
-  bulkSuggestOsmRegions,
+  bulkSuggestOsmRegions, refreshOsmRegion,
   type OsmRegionImport, type RegionSuggestion,
   type BulkSuggestResult, type BulkRegionSuggestion,
 } from '../api/osmAdmin'
@@ -554,6 +554,21 @@ async function handleApproveOsmRegion(slug: string) {
   osmLoading.value = true
   try {
     await approveOsmRegion(slug)
+    await fetchOsmRegions()
+  } catch (err) {
+    osmError.value = (err as Error).message ?? String(err)
+  } finally {
+    osmLoading.value = false
+  }
+}
+
+async function handleRefreshOsmRegion(slug: string) {
+  osmLoading.value = true
+  try {
+    const r = await refreshOsmRegion(slug)
+    if (!r.ok) {
+      osmError.value = `Refresh ${slug}: ${r.detail ?? 'failed'}`
+    }
     await fetchOsmRegions()
   } catch (err) {
     osmError.value = (err as Error).message ?? String(err)
@@ -1256,6 +1271,15 @@ onBeforeUnmount(() => {
                   @click="handleApproveOsmRegion(r.slug)"
                 />
                 <Button
+                  v-if="r.status === 'ready_running'"
+                  icon="pi pi-refresh"
+                  label="Aktualisieren"
+                  size="small"
+                  text
+                  :loading="osmLoading"
+                  @click="handleRefreshOsmRegion(r.slug)"
+                />
+                <Button
                   icon="pi pi-trash"
                   label="Entfernen"
                   size="small"
@@ -1299,6 +1323,15 @@ onBeforeUnmount(() => {
               size="small"
               :loading="osmLoading"
               @click="handleApproveOsmRegion(r.slug)"
+            />
+            <Button
+              v-if="r.status === 'ready_running'"
+              icon="pi pi-refresh"
+              label="Aktualisieren"
+              size="small"
+              text
+              :loading="osmLoading"
+              @click="handleRefreshOsmRegion(r.slug)"
             />
             <Button
               icon="pi pi-trash"
