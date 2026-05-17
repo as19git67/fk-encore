@@ -6,7 +6,6 @@ const store = useServiceHealthStore()
 const serviceLabels: Record<string, string> = {
   insightface: 'Gesichtserkennung',
   embedding: 'Embedding',
-  landmark: 'Gebäudeerkennung',
 }
 </script>
 

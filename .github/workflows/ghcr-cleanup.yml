@@ -1,11 +1,14 @@
 name: GHCR Cleanup
 
-# Keeps the four container packages on ghcr.io/as19git67/* tidy:
+# Keeps the container packages on ghcr.io/as19git67/* tidy:
 #   * fk-encore              (Encore backend, built by docker-image.yml)
-#   * fk-encore-landmark     (built by docker-image-landmark.yml)
 #   * fk-encore-embedding    (built by docker-image-embedding.yml)
 #   * fk-encore-insightface  (built by docker-image-insightface.yml)
 #   * fk-encore-llm          (built by docker-image-llm.yml)
+#
+# fk-encore-landmark was retired in Epic #383 — its workflow has been
+# removed but the cleanup job still runs against the package so any
+# remaining tags age out via the retention policy.
 #
 # Policy (applied per package):
 #   1. Delete every UNTAGGED version immediately.

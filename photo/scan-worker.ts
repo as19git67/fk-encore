@@ -1,5 +1,7 @@
 /**
- * Background scan workers — one per service (embedding, face_detection, landmark, quality, geocoding).
+ * Background scan workers — one per service (embedding, face_detection, quality, geocoding, …).
+ * The legacy `landmark` worker has been retired in favour of osm-admin POI detection (Epic #383);
+ * the enum value stays in the type union for backwards-compatibility with existing queue rows.
  * Workers are started as a side-effect of importing this module (via encore.service.ts).
  *
  * Concurrency per worker is configurable via environment variables:
@@ -32,7 +34,8 @@ import {
   indexPhotoEmbeddings,
   detectPhotoFaces,
   assignFacesForUser,
-  indexPhotoLandmarks,
+  // Grounding-DINO landmark detection retired (Epic #383). The
+  // function and its endpoint go away in this slice.
   indexPhotoQuality,
   indexPhotoGeocoding,
   indexPhotoThumbnails,
@@ -84,7 +87,7 @@ const SERVICE_DEPENDENCY: Partial<Record<ScanService, ExternalServiceName>> = {
   embedding: "embedding",
   face_detection: "insightface",
   // face_assignment has no external dependency — it only reads from the local DB
-  landmark: "landmark",
+  // landmark: retired (Epic #383). No active jobs of this kind are enqueued.
   quality: "embedding",
 };
 
@@ -92,7 +95,7 @@ const SERVICE_DEPENDENCY: Partial<Record<ScanService, ExternalServiceName>> = {
 const AI_MODEL_MAP: Partial<Record<ScanService, AiModel>> = {
   embedding: "embedding",
   face_detection: "insightface",
-  landmark: "landmark",
+  // landmark: retired (Epic #383).
   quality: "embedding",
 };
 
@@ -111,7 +114,7 @@ const AI_MODEL_MAP: Partial<Record<ScanService, AiModel>> = {
 const EXPENSIVE_SERVICES: Partial<Record<ScanService, true>> = {
   embedding: true,
   face_detection: true,
-  landmark: true,
+  // landmark: retired
   quality: true,
 };
 
@@ -338,7 +341,9 @@ class ScanWorker {
         await assignFacesForUser(job.user_id, job.photo_id, job.force);
         break;
       case "landmark":
-        await indexPhotoLandmarks(job.photo_id);
+        // Retired in Epic #383. Pre-existing `pending` rows are
+        // silently completed so the queue drains cleanly during a
+        // rolling deploy; no Grounding-DINO work is done.
         break;
       case "quality":
         await indexPhotoQuality(job.photo_id);
@@ -482,14 +487,14 @@ class LibraryScanWorker {
 const embeddingConcurrency = parseInt(process.env.SCAN_EMBEDDING_CONCURRENCY ?? "1", 10);
 const faceConcurrency = parseInt(process.env.SCAN_FACE_CONCURRENCY ?? "1", 10);
 const faceAssignConcurrency = parseInt(process.env.SCAN_FACE_ASSIGN_CONCURRENCY ?? "1", 10);
-const landmarkConcurrency = parseInt(process.env.SCAN_LANDMARK_CONCURRENCY ?? "1", 10);
+// `landmark` worker retired (Epic #383). SCAN_LANDMARK_CONCURRENCY is
+// no longer read.
 const qualityConcurrency = parseInt(process.env.SCAN_QUALITY_CONCURRENCY ?? "1", 10);
 const thumbnailConcurrency = parseInt(process.env.SCAN_THUMBNAIL_CONCURRENCY ?? "1", 10);
 
 const embeddingWorker = new ScanWorker("embedding", embeddingConcurrency);
 const faceWorker = new ScanWorker("face_detection", faceConcurrency);
 const faceAssignWorker = new ScanWorker("face_assignment", faceAssignConcurrency);
-const landmarkWorker = new ScanWorker("landmark", landmarkConcurrency);
 const qualityWorker = new ScanWorker("quality", qualityConcurrency);
 const geocodingWorker = new ScanWorker("geocoding", 1); // always 1 — Nominatim rate limit
 const thumbnailWorker = new ScanWorker("thumbnail", thumbnailConcurrency);
@@ -505,7 +510,6 @@ export function triggerWorkers(): void {
   embeddingWorker.tick();
   faceWorker.tick();
   faceAssignWorker.tick();
-  landmarkWorker.tick();
   qualityWorker.tick();
   geocodingWorker.tick();
   thumbnailWorker.tick();
@@ -523,7 +527,6 @@ const ALL_WORKERS: Array<{ stop(): void; start(): void; inFlight(): number }> = 
   embeddingWorker,
   faceWorker,
   faceAssignWorker,
-  landmarkWorker,
   qualityWorker,
   geocodingWorker,
   thumbnailWorker,
@@ -580,23 +583,21 @@ export async function startWorkers(): Promise<void> {
       faceWorker.tick();
       // Also wake face_assignment — new detections may be available
       faceAssignWorker.tick();
-    } else if (name === "landmark") {
-      landmarkWorker.tick();
     }
+    // `landmark` external service retired (Epic #383).
   });
 
   console.log("[scan-worker] Workers starting...");
   embeddingWorker.start();
   faceWorker.start();
   faceAssignWorker.start();
-  landmarkWorker.start();
   qualityWorker.start();
   geocodingWorker.start();
   thumbnailWorker.start();
   poiDetectionWorker.start();
   libraryScanWorker.start();
   console.log(
-    `[scan-worker] embedding(c=${embeddingConcurrency}), face_detection(c=${faceConcurrency}), face_assignment(c=${faceAssignConcurrency}), landmark(c=${landmarkConcurrency}), quality(c=${qualityConcurrency}), geocoding(c=1), thumbnail(c=${thumbnailConcurrency}), poi_detection(c=1), library_scan(c=1)`,
+    `[scan-worker] embedding(c=${embeddingConcurrency}), face_detection(c=${faceConcurrency}), face_assignment(c=${faceAssignConcurrency}), quality(c=${qualityConcurrency}), geocoding(c=1), thumbnail(c=${thumbnailConcurrency}), poi_detection(c=1), library_scan(c=1)`,
   );
 }
 

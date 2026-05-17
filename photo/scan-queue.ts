@@ -12,9 +12,15 @@
 import { eq, and, inArray, sql, not, isNull } from "drizzle-orm";
 import db from "../db/database";
 import { photoScanQueue, photos, faces, photoLandmarks } from "../db/schema";
-import { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_POI_DETECTION, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM } from "./scan-config";
+import { ENABLE_LOCAL_FACES, ENABLE_POI_DETECTION, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM } from "./scan-config";
 import { notifyScanQueueChanged } from "./scan-queue-events";
 
+// `landmark` is retained in the type union and GLOBAL_SERVICES set so
+// pre-existing rows in `photo_scan_queue` (and the `scan_service`
+// postgres enum) remain valid. Production no longer enqueues new
+// landmark jobs — the Grounding-DINO worker has been retired in favour
+// of osm-admin POI detection (Epic #383). See ENABLE_LANDMARKS comment
+// in scan-config.ts.
 export type ScanService = "embedding" | "face_detection" | "face_assignment" | "landmark" | "quality" | "geocoding" | "thumbnail" | "poi_detection";
 export type ScanStatus = "pending" | "processing" | "failed" | "done";
 
@@ -69,7 +75,7 @@ function enabledServices(): ScanService[] {
     services.push("face_detection");
     services.push("face_assignment");
   }
-  if (ENABLE_LANDMARKS) services.push("landmark");
+  // `landmark` (Grounding DINO) is retired — see scan-config.ts.
   if (ENABLE_POI_DETECTION) services.push("poi_detection");
   if (ENABLE_QUALITY) services.push("quality");
   if (ENABLE_THUMBNAIL_PREWARM) services.push("thumbnail");

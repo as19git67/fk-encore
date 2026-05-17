@@ -1,10 +1,13 @@
 /**
  * External ML-service health monitor.
  *
- * Tracks reachability of the three external services:
+ * Tracks reachability of the external services:
  *   - insightface  (face detection)
  *   - embedding    (CLIP / DINOv2)
- *   - landmark     (Grounding DINO)
+ *
+ * The `landmark` (Grounding DINO) service has been retired in Epic
+ * #383; POI detection is handled by osm-admin's per-region Nominatim
+ * + Overpass shards instead.
  *
  * Each service is pinged at a configurable interval.
  * Workers that depend on a service can call `assertServiceAvailable()` or
@@ -15,7 +18,7 @@
 
 import { isUnderPressure, getEventLoopLagMs } from "./event-loop-pressure";
 
-export type ExternalServiceName = "insightface" | "embedding" | "landmark";
+export type ExternalServiceName = "insightface" | "embedding";
 
 export interface ServiceHealthStatus {
   name: ExternalServiceName;
@@ -51,8 +54,6 @@ const serviceUrls: Record<ExternalServiceName, string> = {
     process.env.INSIGHTFACE_SERVICE_URL ?? "http://localhost:8000",
   embedding:
     process.env.EMBEDDING_SERVICE_URL ?? "http://localhost:8001",
-  landmark:
-    process.env.LANDMARK_SERVICE_URL ?? "http://localhost:8002",
 };
 
 // ─── state ────────────────────────────────────────────────────────────────────
@@ -67,7 +68,6 @@ interface ServiceState {
 const state = new Map<ExternalServiceName, ServiceState>([
   ["insightface", { available: false, lastChecked: null, lastError: null, timer: null }],
   ["embedding",   { available: false, lastChecked: null, lastError: null, timer: null }],
-  ["landmark",    { available: false, lastChecked: null, lastError: null, timer: null }],
 ]);
 
 // Callbacks to invoke when a previously-down service comes back up.
