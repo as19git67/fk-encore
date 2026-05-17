@@ -47,6 +47,22 @@ describe("InMemoryDockerDriver", () => {
     d.healthyByDefault = false;
     expect(await d.waitHealthy("http://x/status")).toBe(false);
   });
+
+  it("exec records the call and returns the configured result", async () => {
+    const d = new InMemoryDockerDriver();
+    d.execResult = { exitCode: 0, stdout: "Updating to sequence 4775", stderr: "" };
+    const r = await d.exec("nominatim-bayern", ["nominatim", "replication", "--once"]);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain("sequence 4775");
+    expect(d.events).toEqual([
+      {
+        op: "exec",
+        name: "nominatim-bayern",
+        cmd: ["nominatim", "replication", "--once"],
+        exitCode: 0,
+      },
+    ]);
+  });
 });
 
 describe("driver singleton", () => {

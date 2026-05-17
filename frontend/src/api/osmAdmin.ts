@@ -96,6 +96,20 @@ export async function deleteOsmRegion(
   })
 }
 
+export interface RefreshOsmRegionResult {
+  slug: string
+  ok: boolean
+  replicationSeq?: string
+  detail?: string
+}
+
+export async function refreshOsmRegion(slug: string): Promise<RefreshOsmRegionResult> {
+  return apiFetch('/osm/regions/refresh', {
+    method: 'POST',
+    body: JSON.stringify({ slug }),
+  })
+}
+
 export interface BulkRegionSuggestion {
   slug: string
   name: string
