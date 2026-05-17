@@ -6,6 +6,7 @@ import { InMemoryDockerDriver } from "./docker-driver";
 import {
   nominatimDescriptor,
   overpassDescriptor,
+  overpassHealthcheckUrl,
   slugToContainerSuffix,
   tickImporter,
 } from "./importer";
@@ -222,6 +223,22 @@ describe("descriptor builders", () => {
         containerPath: "/db",
       },
     ]);
+  });
+});
+
+describe("overpassHealthcheckUrl", () => {
+  it("hits /api/interpreter with a trivial out-count query", () => {
+    const url = overpassHealthcheckUrl("europe-germany-bayern");
+    // Critical: NOT /api/status — the wiktorn image's status reporter
+    // throws std::out_of_range under load and returns 502, making the
+    // container appear unhealthy when it's actually serving fine.
+    expect(url).toBe(
+      "http://overpass-europe-germany-bayern/api/interpreter" +
+        "?data=%5Bout%3Ajson%5D%3Bout+count%3B",
+    );
+    // The encoded query decodes to "[out:json];out count;"
+    const u = new URL(url);
+    expect(u.searchParams.get("data")).toBe("[out:json];out count;");
   });
 });
 

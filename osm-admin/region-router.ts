@@ -26,6 +26,7 @@ import { getDockerDriver, type DockerDriver } from "./docker-driver";
 import {
   nominatimDescriptor,
   overpassDescriptor,
+  overpassHealthcheckUrl,
   slugToContainerSuffix,
 } from "./importer";
 import { assertTransition, isRegionStatus, type RegionStatus } from "./state-machine";
@@ -191,7 +192,7 @@ export async function ensureReady(
     { maxAttempts: HEALTHCHECK_MAX_ATTEMPTS, intervalMs: HEALTHCHECK_INTERVAL_MS },
   );
   const ovOk = await driver.waitHealthy(
-    `http://overpass-${suffix}/api/status`,
+    overpassHealthcheckUrl(suffix),
     { maxAttempts: HEALTHCHECK_MAX_ATTEMPTS, intervalMs: HEALTHCHECK_INTERVAL_MS },
   );
   if (!nomOk || !ovOk) {
