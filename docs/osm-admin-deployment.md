@@ -127,10 +127,9 @@ already bundled in the upstream image (the entrypoint itself calls
 `osmium fileinfo …` on the same file):
 
 ```bash
-mv /db/planet.osm.bz2 /db/planet.input \
-  && osmium cat --from-format=pbf --output-format=osm.bz2 -O \
-      -o /db/planet.osm.bz2 /db/planet.input \
-  && rm /db/planet.input
+mv /db/planet.osm.bz2 /db/planet.input.pbf \
+  && osmium cat -O -f osm.bz2 -o /db/planet.osm.bz2 /db/planet.input.pbf \
+  && rm /db/planet.input.pbf
 ```
 
 After the preprocess, the file at `/db/planet.osm.bz2` is genuine

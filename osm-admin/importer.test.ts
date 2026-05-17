@@ -209,10 +209,10 @@ describe("descriptor builders", () => {
     // 95 of wiktorn's docker-entrypoint.sh) to convert PBF → bz2 OSM
     // XML in place. init_osm3s.sh then consumes /db/planet.osm.bz2
     // unchanged.
-    expect(d.env?.OVERPASS_PLANET_PREPROCESS).toContain(
-      "osmium cat --from-format=pbf --output-format=osm.bz2",
-    );
+    expect(d.env?.OVERPASS_PLANET_PREPROCESS).toContain("osmium cat");
+    expect(d.env?.OVERPASS_PLANET_PREPROCESS).toContain("-f osm.bz2");
     expect(d.env?.OVERPASS_PLANET_PREPROCESS).toContain("/db/planet.osm.bz2");
+    expect(d.env?.OVERPASS_PLANET_PREPROCESS).toContain("/db/planet.input.pbf");
     expect(d.env?.OVERPASS_DIFF_URL).toBe(
       "https://download.geofabrik.de/europe/germany/bayern-updates/",
     );

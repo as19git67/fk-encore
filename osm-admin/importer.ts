@@ -219,14 +219,15 @@ export function overpassDescriptor(
   // For Geofabrik PBFs (which is what we always use — Geofabrik does
   // not publish .osm.bz2 for sub-regional extracts), we use the
   // `osmium-tool` binary that ships with the upstream image to
-  // convert PBF → OSM XML bz2 in place. `-O` allows overwriting; the
-  // `--from-format pbf` hint helps osmium across the `.bz2` extension
-  // mismatch.
+  // convert PBF → OSM XML bz2 in place. The staging file is renamed
+  // to `.pbf` so osmium auto-detects the input format; `-f osm.bz2`
+  // pins the output format despite the target's `.bz2` extension
+  // being ambiguous on its own.
   const planet = "/db/planet.osm.bz2";
-  const stage = "/db/planet.input";
+  const stage = "/db/planet.input.pbf";
   const preprocess =
     `mv ${planet} ${stage} && ` +
-    `osmium cat --from-format=pbf --output-format=osm.bz2 -O -o ${planet} ${stage} && ` +
+    `osmium cat -O -f osm.bz2 -o ${planet} ${stage} && ` +
     `rm ${stage}`;
   return {
     name: `overpass-${slugSafe}`,
