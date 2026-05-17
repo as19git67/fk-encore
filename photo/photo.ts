@@ -2002,20 +2002,11 @@ export const getPhotoLandmarks = api(
   }
 );
 
-/**
- * Trigger landmark re-detection for a specific photo.
- */
-export const reindexPhotoLandmarks = api(
-  { expose: true, method: "POST", path: "/photos/:id/index-landmarks", auth: true },
-  async ({ id }: { id: number }): Promise<{ success: boolean }> => {
-    checkModule();
-    const userId = getUserId();
-    const authData = getAuthData()!;
-    requirePermission(authData, "photos.edit");
-    await service.indexPhotoLandmarks(id);
-    return { success: true };
-  }
-);
+// `POST /photos/:id/index-landmarks` was retired in Epic #383. The
+// Grounding-DINO landmark-service container no longer ships, so a
+// trigger to re-detect "Sehenswürdigkeiten" via that worker has
+// nothing to call. POI re-detection happens via the osm-admin
+// `poi_detection` scan service (force-rescan from data management).
 
 export interface PoiMatchItem {
   id: number;

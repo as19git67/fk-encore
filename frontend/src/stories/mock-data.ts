@@ -441,13 +441,11 @@ export const MOCK_SCAN_QUEUE_BUSY: ScanQueueStatus = {
 export const MOCK_SERVICES_OK: ExternalServiceHealth[] = [
   { name: 'insightface', available: true, lastChecked: '2024-06-05T15:00:00Z', lastError: null },
   { name: 'embedding',   available: true, lastChecked: '2024-06-05T15:00:00Z', lastError: null },
-  { name: 'landmark',    available: true, lastChecked: '2024-06-05T15:00:00Z', lastError: null },
 ]
 
 export const MOCK_SERVICES_DEGRADED: ExternalServiceHealth[] = [
   { name: 'insightface', available: false, lastChecked: '2024-06-05T15:00:00Z', lastError: 'Connection refused' },
   { name: 'embedding',   available: true,  lastChecked: '2024-06-05T15:00:00Z', lastError: null },
-  { name: 'landmark',    available: false, lastChecked: '2024-06-05T15:00:00Z', lastError: 'Timeout' },
 ]
 
 export const MOCK_SERVER_PRESSURE_OK: ServerPressureStatus = {

@@ -8,8 +8,8 @@ import { eq, and, or, sql, inArray, ilike, isNull, isNotNull, desc, gt } from "d
 import { APIError } from "encore.dev/api";
 import { enqueuePhotoScan, enqueuePhotoScanBulkPerUser, DeferJobError } from "./scan-queue";
 import { isUnderPressure } from "./event-loop-pressure";
-import { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
-export { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
+import { ENABLE_LOCAL_FACES, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
+export { ENABLE_LOCAL_FACES, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
 import db from "../db/database";
 import { realtime, feed, sharedalbum } from "~encore/clients";
 
@@ -260,7 +260,8 @@ function getUploadMimeType(filePath: string): string {
 // We convert it to a "distance" if we want, or just use similarity directly.
 // The config value is now treated as minimum similarity for a match.
 const FACE_SIMILARITY_THRESHOLD = parseFloat(process.env.FACE_DISTANCE_THRESHOLD || "0.45");
-const LANDMARK_SERVICE_URL = process.env.LANDMARK_SERVICE_URL || "http://localhost:8002";
+// LANDMARK_SERVICE_URL constant retired with the Grounding-DINO
+// worker (Epic #383).
 
 // ── AI system user for virtual curation votes ────────────────────────────────
 const AI_USER_EMAIL = "ai@system.local";
@@ -4879,9 +4880,8 @@ export async function reindexPhotoLogic(
 
   await indexPhotoFaces(userId, photoId, true);
   await indexPhotoEmbeddings(photoId, true);
-  if (ENABLE_LANDMARKS) {
-    await indexPhotoLandmarks(photoId);
-  }
+  // Grounding-DINO landmark detection retired (Epic #383); POI
+  // detection (osm-admin) replaces it on a separate scan service.
   let lat = photo.latitude;
   let lon = photo.longitude;
 
@@ -5991,105 +5991,16 @@ export interface LandmarkSearchResult {
   landmarks: Array<{ label: string; confidence: number; bbox: LandmarkBBox }>;
 }
 
-async function callLandmarkService(
-  filePath: string
-): Promise<{ landmarks: Array<{ label: string; confidence: number; bbox: { x: number; y: number; width: number; height: number } }> }> {
-  const formData = new FormData();
-  const fileData = await fs.promises.readFile(filePath);
-  const blob = new Blob([fileData], { type: getUploadMimeType(filePath) });
-  formData.append("file", blob, path.basename(filePath));
-
-  const response = await fetchWithTimeout(`${LANDMARK_SERVICE_URL}/detect-landmarks`, {
-    method: "POST",
-    body: formData,
-    queue: "landmark",
-  });
-
-  if (!response.ok) {
-    throw new Error(`Landmark service returned ${response.status}: ${await response.text()}`);
-  }
-  return response.json() as Promise<{ landmarks: Array<{ label: string; confidence: number; bbox: { x: number; y: number; width: number; height: number } }> }>;
-}
-
-/**
- * Detect landmarks in a photo (global, runs once per photo).
- * userId is only used for auto-crop recomputation.
- */
-export async function indexPhotoLandmarks(photoId: number): Promise<void> {
-  if (!ENABLE_LANDMARKS) return;
-
-  const photo = await dbFirst<typeof photos.$inferSelect>(
-    db.select().from(photos).where(eq(photos.id, photoId))
-  );
-  if (!photo) return;
-
-  const filePath = getPhotoDiskPath(photo);
-  if (!fs.existsSync(filePath)) return;
-
-  let processingPath = filePath;
-  let tempPath: string | null = null;
-
-  const ext = path.extname(photo.filename).toLowerCase();
-  if (ext === ".heic" || ext === ".heif") {
-    try {
-      const inputBuffer = await fs.promises.readFile(filePath);
-      const outputBuffer = await heicConvert({ buffer: inputBuffer, format: "JPEG", quality: 1 });
-      tempPath = path.join(UPLOAD_DIR, `temp_lm_${photoId}_${Date.now()}.jpg`);
-      await fs.promises.writeFile(tempPath, outputBuffer as Buffer);
-      processingPath = tempPath;
-    } catch (err) {
-      console.error(`HEIC conversion for landmark detection failed (photo ${photoId}):`, err);
-      return;
-    }
-  }
-
-  try {
-    const result = await callLandmarkService(processingPath);
-    // Only keep landmarks with ≥60% confidence to avoid cluttering the DB
-    const confident = result.landmarks.filter(lm => lm.confidence >= 0.6);
-    if (confident.length > 0) {
-      await dbExec(db.delete(photoLandmarks).where(eq(photoLandmarks.photo_id, photoId)));
-      for (const lm of confident) {
-        await dbExec(
-          db.insert(photoLandmarks).values({
-            photo_id: photoId,
-            label: lm.label,
-            confidence: lm.confidence,
-            bbox: JSON.stringify(lm.bbox),
-          })
-        );
-      }
-      console.log(`Stored ${confident.length} landmarks for photo ${photoId} (${result.landmarks.length - confident.length} below 60% filtered)`);
-    } else if (result.landmarks.length > 0) {
-      // All landmarks below threshold – clear any stale entries
-      await dbExec(db.delete(photoLandmarks).where(eq(photoLandmarks.photo_id, photoId)));
-    }
-  } catch (err) {
-    console.error(`Landmark detection failed for photo ${photoId}:`, err);
-  } finally {
-    if (tempPath && fs.existsSync(tempPath)) {
-      fs.unlinkSync(tempPath);
-    }
-  }
-
-  // Recompute auto-crop focus point (landmarks as fallback if no faces).
-  // This is a global operation — use photo owner for the per-user face filter.
-  try {
-    const ownerId = await getPhotoOwnerId(photoId);
-    if (ownerId) {
-      await computeAndStoreAutoCrop(ownerId, photoId);
-    }
-  } catch (err) {
-    console.error(`Error computing auto-crop for photo ${photoId}:`, err);
-  }
-
-  // Recompute the AI transformation-suggestion payload (global per photo).
-  try {
-    await computePhotoTransformSuggestions(photoId);
-  } catch (err) {
-    console.error(`Error computing transform suggestions for photo ${photoId}:`, err);
-  }
-}
+// `callLandmarkService` + `indexPhotoLandmarks` retired (Epic #383).
+// The Grounding-DINO container no longer ships; landmark category
+// detection is replaced by osm-admin's POI matcher. Existing rows in
+// `photo_landmarks` stay readable via getLandmarksForPhotoLogic so the
+// photo-detail sidebar's legacy chips keep working until the POI
+// pipeline has covered every photo. Auto-crop recomputation (which
+// used to fire at the tail of indexPhotoLandmarks) still happens
+// inside detectPhotoFaces when faces are present; photos with no
+// faces keep the auto-crop computed at the time of their last face
+// scan.
 
 // ---------- AI Quality Scoring ----------
 
