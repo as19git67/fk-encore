@@ -1,6 +1,7 @@
 /**
  * Shared fetch wrapper that enforces a request-level timeout on every call
- * to an external ML service (embedding, insightface, landmark, …).
+ * to an external ML service (embedding, insightface, …). The legacy
+ * `landmark` (Grounding DINO) service has been retired in Epic #383.
  *
  * Why this matters for photo-view responsiveness:
  * A scan worker that is waiting on a slow ML service holds both a libuv
@@ -26,11 +27,10 @@
  *                                    similar-groups) (default: 60000 = 1 min)
  *   ML_CONCURRENCY_EMBEDDING       – max parallel requests to embedding   (default: 1)
  *   ML_CONCURRENCY_INSIGHTFACE     – max parallel requests to insightface (default: 1)
- *   ML_CONCURRENCY_LANDMARK        – max parallel requests to landmark    (default: 1)
  *
  * Callers may still override per-call by passing an explicit timeoutMs.
  * Callers that should be serialized through the concurrency limiter pass
- * `queue: "embedding" | "insightface" | "landmark"`.
+ * `queue: "embedding" | "insightface"`.
  */
 
 export const ML_RPC_TIMEOUT_MS = (() => {
@@ -61,7 +61,7 @@ export class MlRpcTimeoutError extends Error {
 
 // ─── per-service concurrency limiter ──────────────────────────────────────────
 
-export type MlServiceQueueKey = "embedding" | "insightface" | "landmark";
+export type MlServiceQueueKey = "embedding" | "insightface";
 
 function readConcurrency(envVar: string): number {
   const raw = process.env[envVar];
@@ -73,7 +73,6 @@ function readConcurrency(envVar: string): number {
 const CAPACITY: Record<MlServiceQueueKey, number> = {
   embedding: readConcurrency("ML_CONCURRENCY_EMBEDDING"),
   insightface: readConcurrency("ML_CONCURRENCY_INSIGHTFACE"),
-  landmark: readConcurrency("ML_CONCURRENCY_LANDMARK"),
 };
 
 interface Semaphore {
@@ -85,7 +84,6 @@ interface Semaphore {
 const semaphores: Record<MlServiceQueueKey, Semaphore> = {
   embedding: { capacity: CAPACITY.embedding, inUse: 0, waiters: [] },
   insightface: { capacity: CAPACITY.insightface, inUse: 0, waiters: [] },
-  landmark: { capacity: CAPACITY.landmark, inUse: 0, waiters: [] },
 };
 
 async function acquire(queue: MlServiceQueueKey, signal?: AbortSignal | null): Promise<void> {
@@ -130,7 +128,6 @@ export function mlQueueStats(): Record<MlServiceQueueKey, { capacity: number; in
   return {
     embedding: { capacity: semaphores.embedding.capacity, inUse: semaphores.embedding.inUse, waiting: semaphores.embedding.waiters.length },
     insightface: { capacity: semaphores.insightface.capacity, inUse: semaphores.insightface.inUse, waiting: semaphores.insightface.waiters.length },
-    landmark: { capacity: semaphores.landmark.capacity, inUse: semaphores.landmark.inUse, waiting: semaphores.landmark.waiters.length },
   };
 }
 

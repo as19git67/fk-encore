@@ -25,6 +25,16 @@ class EmbedResponse(BaseModel):
     processed: int = Field(..., description="Number of photos successfully processed")
 
 
+class DinoEmbedResponse(BaseModel):
+    """Response payload of /dino/embed — a single DINOv2 vector, no
+    persistence side-effect. Used by the POI-detection pipeline to
+    embed external reference images (Wikimedia Commons P18 photos)
+    without polluting the photo embeddings table."""
+
+    embedding: List[float] = Field(..., description="DINOv2 vector (length 768 for the default base model)")
+    dim: int = Field(..., description="Vector dimension")
+
+
 class SearchRequest(BaseModel):
     photo_id: str = Field(..., description="photo_id whose embedding is used as query")
     k: int = Field(default=10, ge=1, le=100, description="Number of nearest neighbours to return")

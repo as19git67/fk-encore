@@ -542,9 +542,31 @@ export const photoLandmarks = pgTable("photo_landmarks", {
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
 });
 
+// Per-photo POI matches produced by the osm-admin POI matcher (Epic #383).
+// The (photo_id, qid|osm_ref) uniqueness + the score-sorted index are
+// declared in raw SQL (migration 0087) — drizzle's coalesce-in-index
+// support isn't strong enough.
+export const photoPoiMatches = pgTable("photo_poi_matches", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  photo_id: integer("photo_id")
+    .notNull()
+    .references(() => photos.id, { onDelete: "cascade" }),
+  qid: text("qid"),
+  osm_ref: text("osm_ref").notNull(),
+  name: text("name").notNull(),
+  name_de: text("name_de"),
+  distance_m: real("distance_m"),
+  heading_match: real("heading_match"),
+  match_score: real("match_score").notNull(),
+  ambiguous: boolean("ambiguous").notNull().default(false),
+  source: text("source").notNull(),
+  region_slug: text("region_slug"),
+  created_at: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+});
+
 // ========== Scan Queue ==========
 
-export const scanServiceEnum = pgEnum("scan_service", ["embedding", "face_detection", "face_assignment", "landmark", "quality", "geocoding", "thumbnail"]);
+export const scanServiceEnum = pgEnum("scan_service", ["embedding", "face_detection", "face_assignment", "landmark", "quality", "geocoding", "thumbnail", "poi_detection"]);
 export const scanStatusEnum = pgEnum("scan_status", ["pending", "processing", "failed", "done"]);
 
 export const photoScanQueue = pgTable("photo_scan_queue", {
@@ -792,6 +814,53 @@ export const taxSectionHintOverrides = pgTable("tax_section_hint_overrides", {
 // NOTE: `document_embeddings` (pgvector) is created via raw SQL in migration
 // 0025 and accessed only through raw queries — drizzle-orm has no native
 // vector column type.
+
+// ========== POI Detection (Epic #383) ==========
+//
+// `osm_region_imports` tracks per-region Geofabrik extracts imported into
+// dockerised Nominatim + Overpass instances managed by the osm-admin
+// service. The bbox columns are used by the request router to map a
+// photo's GPS coordinates to the right region container.
+//
+// Status values (kept as TEXT, not an enum, so the lifecycle can evolve
+// without migrations):
+//   pending_approval | importing | ready_running | ready_stopped
+//   | blocked_disk   | failed
+
+export const osmRegionImports = pgTable("osm_region_imports", {
+  slug: text("slug").primaryKey(),
+  geofabrik_url: text("geofabrik_url").notNull(),
+  pbf_size_mb: integer("pbf_size_mb"),
+  postgres_db: text("postgres_db").notNull(),
+  bbox_min_lat: doublePrecision("bbox_min_lat").notNull(),
+  bbox_min_lon: doublePrecision("bbox_min_lon").notNull(),
+  bbox_max_lat: doublePrecision("bbox_max_lat").notNull(),
+  bbox_max_lon: doublePrecision("bbox_max_lon").notNull(),
+  status: text("status").notNull().default("pending_approval"),
+  last_used_at: timestamp("last_used_at", { withTimezone: true, mode: "string" }),
+  imported_at: timestamp("imported_at", { withTimezone: true, mode: "string" }),
+  replication_seq: text("replication_seq"),
+  last_error: text("last_error"),
+  created_at: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+  updated_at: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+});
+
+// `poi_references` is the cached pool of POI metadata + DINOv2 reference
+// embeddings used for image matching against user photos. The
+// `embedding vector(768)` column and its HNSW index live in raw SQL
+// (migration 0084) — drizzle has no native vector type, same approach as
+// `document_embeddings`.
+
+export const poiReferences = pgTable("poi_references", {
+  qid: text("qid").primaryKey(),
+  name: text("name").notNull(),
+  name_de: text("name_de"),
+  wikipedia_url: text("wikipedia_url"),
+  commons_image_url: text("commons_image_url"),
+  embedded_at: timestamp("embedded_at", { withTimezone: true, mode: "string" }),
+  created_at: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+  updated_at: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+});
 
 // ========== Rueckblicke (Recaps) ==========
 

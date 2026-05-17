@@ -8,13 +8,11 @@ on:
     paths-ignore:
       - 'embedding_service/**'
       - 'insightface-service/**'
-      - 'landmark-service/**'
   pull_request:
     branches: [ "main" ]
     paths-ignore:
       - 'embedding_service/**'
       - 'insightface-service/**'
-      - 'landmark-service/**'
 
 env:
   REGISTRY: ghcr.io

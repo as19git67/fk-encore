@@ -12,17 +12,23 @@
 import { eq, and, inArray, sql, not, isNull } from "drizzle-orm";
 import db from "../db/database";
 import { photoScanQueue, photos, faces, photoLandmarks } from "../db/schema";
-import { ENABLE_LOCAL_FACES, ENABLE_LANDMARKS, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM } from "./scan-config";
+import { ENABLE_LOCAL_FACES, ENABLE_POI_DETECTION, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM } from "./scan-config";
 import { notifyScanQueueChanged } from "./scan-queue-events";
 
-export type ScanService = "embedding" | "face_detection" | "face_assignment" | "landmark" | "quality" | "geocoding" | "thumbnail";
+// `landmark` is retained in the type union and GLOBAL_SERVICES set so
+// pre-existing rows in `photo_scan_queue` (and the `scan_service`
+// postgres enum) remain valid. Production no longer enqueues new
+// landmark jobs — the Grounding-DINO worker has been retired in favour
+// of osm-admin POI detection (Epic #383). See ENABLE_LANDMARKS comment
+// in scan-config.ts.
+export type ScanService = "embedding" | "face_detection" | "face_assignment" | "landmark" | "quality" | "geocoding" | "thumbnail" | "poi_detection";
 export type ScanStatus = "pending" | "processing" | "failed" | "done";
 
 export type QueueServiceId = ScanService;
 
 /** Services that run once per photo (no user_id in queue). */
 const GLOBAL_SERVICES: ReadonlySet<ScanService> = new Set([
-  "face_detection", "embedding", "landmark", "quality", "geocoding", "thumbnail",
+  "face_detection", "embedding", "landmark", "quality", "geocoding", "thumbnail", "poi_detection",
 ]);
 
 /** Services that run once per user per photo. */
@@ -69,7 +75,8 @@ function enabledServices(): ScanService[] {
     services.push("face_detection");
     services.push("face_assignment");
   }
-  if (ENABLE_LANDMARKS) services.push("landmark");
+  // `landmark` (Grounding DINO) is retired — see scan-config.ts.
+  if (ENABLE_POI_DETECTION) services.push("poi_detection");
   if (ENABLE_QUALITY) services.push("quality");
   if (ENABLE_THUMBNAIL_PREWARM) services.push("thumbnail");
   return services;
@@ -260,13 +267,13 @@ export async function getQueueStatus(userId: number): Promise<QueueStatus> {
   const rows = await db.execute<{ service: ScanService; status: ScanStatus; count: string }>(sql`
     SELECT service, status, COUNT(*)::int as count
     FROM photo_scan_queue
-    WHERE (user_id IS NULL AND service IN ('face_detection', 'embedding', 'landmark', 'quality', 'geocoding', 'thumbnail'))
+    WHERE (user_id IS NULL AND service IN ('face_detection', 'embedding', 'landmark', 'quality', 'geocoding', 'thumbnail', 'poi_detection'))
        OR (user_id = ${userId} AND service = 'face_assignment')
     GROUP BY service, status
   `);
 
   const map = new Map<QueueServiceId, QueueServiceStatus>();
-  for (const svc of (["embedding", "face_detection", "face_assignment", "landmark", "quality", "geocoding", "thumbnail"] as ScanService[])) {
+  for (const svc of (["embedding", "face_detection", "face_assignment", "landmark", "quality", "geocoding", "thumbnail", "poi_detection"] as ScanService[])) {
     map.set(svc, { service: svc, pending: 0, processing: 0, failed: 0, done: 0 });
   }
 
@@ -278,6 +285,56 @@ export async function getQueueStatus(userId: number): Promise<QueueStatus> {
   }
 
   return { services: Array.from(map.values()) };
+}
+
+/**
+ * Backfill `poi_detection` jobs for every photo whose GPS falls in
+ * the given bounding box. Used by the osm-admin importer when a
+ * region transitions to `ready_running`, so photos that were
+ * previously dropped with `no_region` get a fresh shot at being
+ * matched against the newly-available regional Overpass shard.
+ *
+ * Steps:
+ *   1. Delete any `done`/`failed` poi_detection rows for those
+ *      photos so they can be re-enqueued.
+ *   2. Insert pending rows for each. The partial unique index on
+ *      `(photo_id, service) WHERE status IN ('pending','processing')`
+ *      collapses concurrent inserts via ON CONFLICT DO NOTHING.
+ *
+ * Returns the number of pending rows actually inserted.
+ */
+export async function enqueuePoiDetectionForRegion(bbox: {
+  minLat: number;
+  minLon: number;
+  maxLat: number;
+  maxLon: number;
+}): Promise<number> {
+  // Drop terminal rows so the partial unique index lets us insert
+  // fresh `pending` ones.
+  await db.execute(sql`
+    DELETE FROM photo_scan_queue
+    WHERE service = 'poi_detection'
+      AND status IN ('done', 'failed')
+      AND user_id IS NULL
+      AND photo_id IN (
+        SELECT id FROM photos
+        WHERE latitude  BETWEEN ${bbox.minLat} AND ${bbox.maxLat}
+          AND longitude BETWEEN ${bbox.minLon} AND ${bbox.maxLon}
+      )
+  `);
+
+  const insertResult = await db.execute(sql`
+    INSERT INTO photo_scan_queue (photo_id, user_id, service, status, priority, force)
+    SELECT p.id, NULL, 'poi_detection', 'pending', 3, false
+    FROM photos p
+    WHERE p.latitude  BETWEEN ${bbox.minLat} AND ${bbox.maxLat}
+      AND p.longitude BETWEEN ${bbox.minLon} AND ${bbox.maxLon}
+    ON CONFLICT DO NOTHING
+  `);
+
+  const enqueued = (insertResult as { rowCount?: number }).rowCount ?? 0;
+  if (enqueued > 0) notifyScanQueueChanged();
+  return enqueued;
 }
 
 /** Reset all failed jobs for a user back to pending (low priority). */

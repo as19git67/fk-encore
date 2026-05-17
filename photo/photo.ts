@@ -2002,18 +2002,43 @@ export const getPhotoLandmarks = api(
   }
 );
 
+// `POST /photos/:id/index-landmarks` was retired in Epic #383. The
+// Grounding-DINO landmark-service container no longer ships, so a
+// trigger to re-detect "Sehenswürdigkeiten" via that worker has
+// nothing to call. POI re-detection happens via the osm-admin
+// `poi_detection` scan service (force-rescan from data management).
+
+export interface PoiMatchItem {
+  id: number;
+  qid: string | null;
+  osmRef: string;
+  name: string;
+  nameDe: string | null;
+  /** Full URL to the Wikipedia article (de preferred). Null when none exists. */
+  wikipediaUrl: string | null;
+  /** Commons image URL for the POI's P18, when available. */
+  commonsImageUrl: string | null;
+  distanceM: number | null;
+  matchScore: number;
+  ambiguous: boolean;
+  source: string;
+  regionSlug: string | null;
+  createdAt: string;
+}
+
 /**
- * Trigger landmark re-detection for a specific photo.
+ * Return per-photo POI matches produced by the osm-admin POI
+ * detection pipeline (Epic #383). Sorted by `match_score` descending
+ * so the most likely match is row 0; siblings with `ambiguous=true`
+ * follow when the matcher couldn't pick a clear winner.
  */
-export const reindexPhotoLandmarks = api(
-  { expose: true, method: "POST", path: "/photos/:id/index-landmarks", auth: true },
-  async ({ id }: { id: number }): Promise<{ success: boolean }> => {
+export const getPhotoPoiMatches = api(
+  { expose: true, method: "GET", path: "/photos/:id/poi-matches", auth: true },
+  async ({ id }: { id: number }): Promise<{ matches: PoiMatchItem[] }> => {
     checkModule();
-    const userId = getUserId();
     const authData = getAuthData()!;
-    requirePermission(authData, "photos.edit");
-    await service.indexPhotoLandmarks(id);
-    return { success: true };
+    requirePermission(authData, "photos.view");
+    return await service.getPoiMatchesForPhotoLogic(id);
   }
 );
 
