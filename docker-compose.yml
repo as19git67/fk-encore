@@ -1,15 +1,38 @@
+# fk-encore — unified compose for prod, test, and any additional
+# deployments sharing the same Docker host.
+#
+# All deployment-specific values come from an env-file. The defaults
+# below match a single-deployment production setup; copy
+# `.env.example` to `.env` and adjust as needed. To run a second
+# deployment alongside (e.g. a PR-image test stack on a port range
+# that doesn't collide), copy `.env.test.example` and bring it up
+# with `--env-file`:
+#
+#   docker compose --env-file .env up -d              # production
+#   docker compose --env-file .env.test up -d         # test/staging
+#
+# Most env vars are interpolated as `${VAR:-default}` so an unset
+# variable still produces the prod default. The variables you'd
+# typically override per deployment all share the `DEPLOY_` prefix
+# (compose-only) — application-level env vars (POSTGRES_PASSWORD,
+# SMTP_*, VAPID_*, BACKUP_*, FINANCE_*, NOMINATIM_PASSWORD, …) keep
+# their normal names so they can be reused unchanged across stacks.
+#
+# See `DEPLOYMENT.md` for the full reference.
+
+name: ${COMPOSE_PROJECT_NAME:-fk-encore}
+
 services:
   # ── Bind-mount permission fixer ────────────────────────────────────────────
-  # Runs once as root before the app/llm_service start and ensures the three
-  # bind-mounted host directories (documents archive, documents inbox, llm
-  # model cache) are owned by 568:568 — the TrueNAS SCALE "apps" user that
-  # every other container runs as. Without this, a freshly provisioned host
-  # directory would be root-owned and the non-root services would fail to
-  # write into it. Exits 0 on success; depends_on / service_completed_success-
-  # fully gates the dependent services on that exit.
+  # Runs once as root before the app/llm_service start and ensures the
+  # bind-mounted host directories are owned by 568:568 — the TrueNAS SCALE
+  # "apps" user that every other container runs as. Without this, a freshly
+  # provisioned host directory would be root-owned and the non-root services
+  # would fail to write into it. Exits 0 on success; depends_on /
+  # service_completed_successfully gates the dependent services on that exit.
   chown-init:
     image: alpine:3.20
-    container_name: fk-encore-chown-init
+    container_name: fk-encore-chown-init${DEPLOY_NAME_SUFFIX:-}
     restart: "no"
     user: "0:0"
     # Chown the directories themselves to the apps user (568:568) so
@@ -29,14 +52,18 @@ services:
 
   # ── Main Encore.ts Application ─────────────────────────────────────────────
   app:
-    image: ghcr.io/as19git67/fk-encore:latest
-    container_name: fk-encore-app
+    image: ghcr.io/as19git67/fk-encore:${DEPLOY_IMAGE_TAG:-latest}
+    container_name: fk-encore-app${DEPLOY_NAME_SUFFIX:-}
     restart: unless-stopped
     # Run as the TrueNAS SCALE "apps" user (UID/GID 568). Ensure the bind-
-    # mounted host directories (photos, thumbnails) are owned by 568:568.
+    # mounted host directories are owned by 568:568. Set DEPLOY_HOST_DOCKER_GID
+    # in `.env` to your host's docker group GID so the user can also reach
+    # /var/run/docker.sock (needed for the osm-admin POI service).
     user: "568:568"
+    group_add:
+      - "${DEPLOY_HOST_DOCKER_GID:-999}"
     labels:
-      com.centurylinklabs.watchtower.scope: fkprod
+      com.centurylinklabs.watchtower.scope: ${DEPLOY_WATCHTOWER_SCOPE:-fkprod}
     depends_on:
       chown-init:
         condition: service_completed_successfully
@@ -49,7 +76,7 @@ services:
       llm_service:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "${DEPLOY_HOST_PORT_APP:-8080}:8080"
     environment:
       PORT: "8080"
       DB_TYPE: postgres
@@ -57,98 +84,61 @@ services:
       POSTGRES_PORT: 5432
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DATABASE: encore
+      POSTGRES_DATABASE: ${DEPLOY_PG_DATABASE:-encore}
       # PHOTO_UPLOAD_DIR / PHOTO_THUMBNAIL_DIR / PHOTO_LIBRARIES_ROOT / BACKUP_DIR
       # are hardcoded in the container as /mnt/data/photos, /mnt/data/thumbnails,
       # /mnt/libraries and /mnt/backup respectively (see photo/photo.service.ts,
       # photo/libraries.service.ts and backup/*.ts). The volume mounts below
       # are the single source of truth — do not re-declare the paths here.
-      # Documents module — see documents/documents.service.ts.
-      # DOCUMENTS_DIR holds the canonical archive (sha256-named PDFs in
-      # YYYY/YYYY-MM shards). DOCUMENTS_INBOX_DIR is the watched drop
-      # zone the Raspberry Pi rsyncs scans into.
       DOCUMENTS_DIR: /mnt/data/documents
       DOCUMENTS_INBOX_DIR: /mnt/data/documents-inbox
       DOCUMENTS_MAX_SIZE_MB: ${DOCUMENTS_MAX_SIZE_MB:-50}
-      # Optional: which user owns documents arriving via the inbox. Falls
-      # back to the first Admin if unset or unknown.
       DOCUMENTS_INBOX_USER_EMAIL: ${DOCUMENTS_INBOX_USER_EMAIL:-}
-      # OCR knobs — see documents/text-extract.ts.
       DOCUMENTS_OCR_LANG: ${DOCUMENTS_OCR_LANG:-deu+eng}
       DOCUMENTS_OCR_DPI: ${DOCUMENTS_OCR_DPI:-200}
-      ADMIN_EMAIL: admin@example.com
-      ADMIN_NAME: Admin
-      ADMIN_PASSWORD: changeme   # <-- hier anpassen!
-      RP_ID: localhost
-      RP_NAME: Vivanty App
-      RP_ORIGIN: http://localhost:8080
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+      ADMIN_NAME: ${ADMIN_NAME:-Admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-changeme}   # override in .env!
+      RP_ID: ${DEPLOY_RP_ID:-localhost}
+      RP_NAME: ${DEPLOY_RP_NAME:-Vivanty App}
+      RP_ORIGIN: ${DEPLOY_RP_ORIGIN:-http://localhost:8080}
       ENABLE_LOCAL_FACES: "true"
       FACE_DISTANCE_THRESHOLD: "0.42"
       INSIGHTFACE_SERVICE_URL: http://insightface:8000
       EMBEDDING_SERVICE_URL: http://embedding_service:8000
       LLM_SERVICE_URL: http://llm_service:8000
       # ENABLE_LANDMARKS retired (Epic #383) — use ENABLE_POI_DETECTION instead.
-      # SMTP for password reset emails (leave empty to log tokens to console)
+      ENABLE_POI_DETECTION: ${ENABLE_POI_DETECTION:-false}
+      # OSM admin (Epic #383). `OSM_ADMIN_NAME_PREFIX` scopes the per-region
+      # Docker container + volume names so two deployments on the same host
+      # don't collide on `nominatim-europe-germany-bayern` etc.
+      OSM_ADMIN_DOCKER_DRIVER: ${OSM_ADMIN_DOCKER_DRIVER:-dockerode}
+      OSM_ADMIN_DOCKER_NETWORK: ${DEPLOY_OSM_NETWORK:-osm-net}
+      OSM_ADMIN_NAME_PREFIX: ${DEPLOY_OSM_NAME_PREFIX:-}
+      NOMINATIM_PASSWORD: ${NOMINATIM_PASSWORD:-changeme}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-noreply@example.com}
-      APP_URL: ${APP_URL:-http://localhost:8080}
-      # Backup subsystem — see scripts/host/README.md. BACKUP_DIR is hardcoded
-      # in the container as /mnt/backup (see backup/*.ts); the mount below is
-      # the single source of truth.
-      # 30 minutes; overrides the auto-stop safety timer in /internal/backup/start
+      APP_URL: ${DEPLOY_APP_URL:-http://localhost:8080}
+      # Backup subsystem — see scripts/host/README.md
       BACKUP_AUTO_STOP_MS: ${BACKUP_AUTO_STOP_MS:-1800000}
-      # Shared secret for /internal/backup/* — must match
-      # /etc/fk-encore/backup-token on the host. Generate with
-      # scripts/host/install-backup-hook.sh. Leaving this empty disables
-      # the backup endpoints (they respond with 401).
       BACKUP_TOKEN: ${BACKUP_TOKEN:-}
-      # Defence-in-depth: comma-separated CIDR allow-list for
-      # /internal/backup/*. Requests from outside the list are rejected
-      # before the token is even checked — so a leaked token cannot be
-      # abused from the public internet. Leave unset to use the built-in
-      # defaults (loopback + RFC1918 + IPv6 ULA, which covers the Docker
-      # bridge). Override only if the app is fronted by a reverse proxy
-      # that SNATs requests from somewhere unusual.
       BACKUP_ALLOW_CIDRS: ${BACKUP_ALLOW_CIDRS:-}
-      # Encore.ts proxies requests through its Rust HTTP layer, so the
-      # real peer IP arrives in X-Forwarded-For (the Node socket is
-      # internal). We therefore trust XFF by default — only set to
-      # "false" in test rigs that bypass Encore.
       BACKUP_TRUST_XFF: ${BACKUP_TRUST_XFF:-true}
-      # Web Push (optional) — see docs/push-notifications.md.
-      # Generate the keypair once with `npx web-push generate-vapid-keys`,
-      # then put both keys plus an operator contact into .env. Leaving
-      # any of them empty keeps push silently disabled.
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-}
-      # Finance module — see docs/finance-fints-integration.md §2.4.
-      # FINANCE_CREDENTIALS_KEY is the AES-256-GCM master key that
-      # encrypts bank PINs in finance_bankcontact.credentials_encrypted.
-      # Must be a 32-byte value, base64-encoded. Generate once with:
-      #   node -e 'console.log(require("crypto").randomBytes(32).toString("base64"))'
-      # Losing it means every stored credential has to be re-entered.
       FINANCE_CREDENTIALS_KEY: ${FINANCE_CREDENTIALS_KEY:-}
-      # ZKA product-id + version are required by lib-fints under PSD2;
-      # see https://www.fints.org/de/hersteller/produktregistrierung.
-      # The fallbacks below let the stack boot for development and
-      # self-hosted use; production deployments should override with a
-      # registered product-id in .env (Encore treats an *empty* secret
-      # as "not set" and the FinTS dialog fails with
-      # "failed to resolve secret: environment variable not found").
       FINANCE_FINTS_PRODUCT_ID: ${FINANCE_FINTS_PRODUCT_ID:-dev-placeholder}
       FINANCE_FINTS_PRODUCT_VERSION: ${FINANCE_FINTS_PRODUCT_VERSION:-0.1.0}
-      # Finance import / export drop boxes. The cron in
-      # finance/import-pending.ts scans FINANCE_IMPORT_DIR every 5 min
-      # for `*.pending.json` files; the daily snapshot from
-      # finance/export-cron.ts writes into FINANCE_EXPORT_DIR. Keep N
-      # snapshots before rotating older ones (default 30).
       FINANCE_IMPORT_DIR: /mnt/data/finance-import
       FINANCE_EXPORT_DIR: /mnt/data/finance-export
       FINANCE_EXPORT_KEEP: ${FINANCE_EXPORT_KEEP:-30}
+    networks:
+      - default
+      - osm-net
     volumes:
       - photos:/mnt/data/photos
       - thumbnails:/mnt/data/thumbnails
@@ -157,20 +147,16 @@ services:
       - finance_import:/mnt/data/finance-import
       - finance_export:/mnt/data/finance-export
       - backup:/mnt/backup
-      # External photo libraries — mount any host directories you want to
-      # import from under /mnt/libraries. Use `:ro` for link-mode libraries
-      # so the container can never modify the originals. Example:
-      #   - /Users/anton/Pictures/Archive:/mnt/libraries/archive:ro
-      #   - /Users/anton/Pictures/Inbox:/mnt/libraries/inbox
+      - /var/run/docker.sock:/var/run/docker.sock
 
   # ── InsightFace Service (Face Detection) ───────────────────────────────────
   insightface:
-    image: ghcr.io/as19git67/fk-encore-insightface:latest
-    container_name: fk-encore-insightface
+    image: ghcr.io/as19git67/fk-encore-insightface:${DEPLOY_IMAGE_TAG:-latest}
+    container_name: fk-encore-insightface${DEPLOY_NAME_SUFFIX:-}
     restart: unless-stopped
     user: "568:568"
     labels:
-      com.centurylinklabs.watchtower.scope: fkprod
+      com.centurylinklabs.watchtower.scope: ${DEPLOY_WATCHTOWER_SCOPE:-fkprod}
     environment:
       ORT_LOGGING_LEVEL: "3"
     healthcheck:
@@ -184,48 +170,27 @@ services:
   # Models live in the `embedding_models` volume, NOT in the image. The
   # container's entrypoint runs `download_model.sh` automatically on every
   # start, so a cold volume populates itself on first `docker compose up`
-  # (~5 min, ~5.5 GB; healthcheck start_period is sized for that). The
-  # script is idempotent — huggingface_hub re-verifies the cache against
-  # the manifest, so warm starts return within seconds. Set
-  # EMBEDDING_SKIP_DOWNLOAD=1 to bypass the check.
+  # (~5 min, ~5.5 GB; healthcheck start_period is sized for that).
   embedding_service:
-    image: ghcr.io/as19git67/fk-encore-embedding:latest
-    container_name: fk-encore-embedding
+    image: ghcr.io/as19git67/fk-encore-embedding:${DEPLOY_IMAGE_TAG:-latest}
+    container_name: fk-encore-embedding${DEPLOY_NAME_SUFFIX:-}
     restart: unless-stopped
     user: "568:568"
-    # Pin to the six P-core threads on Intel 12th/13th/14th Gen hybrid CPUs.
-    # On a 12600K the typical Linux topology is: P-core threads = logical
-    # CPUs 0-11, E-cores = 12-15. Including E-cores in the OMP pool causes
-    # load imbalance (P-cores wait for slower E-cores at sync points), so
-    # excluding them is usually a net win even though it surrenders 4 cores.
-    # Verify the mapping on the host with `lscpu --extended` and adjust if
-    # the BIOS / kernel laid the cores out differently.
     cpuset: "0-11"
     labels:
-      com.centurylinklabs.watchtower.scope: fkprod
+      com.centurylinklabs.watchtower.scope: ${DEPLOY_WATCHTOWER_SCOPE:-fkprod}
     depends_on:
       chown-init:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/embeddings
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/${DEPLOY_PG_EMBEDDINGS_DATABASE:-embeddings}
       CLIP_MODEL_NAME: xlm-roberta-large-ViT-H-14
       CLIP_PRETRAINED: frozen_laion5b_s13b_b90k
       DINO_MODEL_NAME: facebook/dinov2-base
       LOG_LEVEL: INFO
-      # Match the 6 physical P-cores. `cpuset` exposes 12 logical threads,
-      # but HT typically doesn't help dense matmul on CPU and adds scheduling
-      # noise — picking 6 keeps each OMP worker on its own physical core.
       EMBED_NUM_THREADS: "6"
-      # Inference backend: "torch" (PyTorch fp32) or "onnx" (INT8 visual
-      # tower + fp32 ONNX text/DINOv2). Flipping to "onnx" requires the
-      # ONNX artefacts to be in the embedding_models volume — populate
-      # them once with:
-      #   docker compose exec embedding_service \
-      #       /usr/local/bin/optimize_models.sh
-      # Defaults to torch so an upgrade with a not-yet-prepared volume
-      # keeps working.
       EMBED_BACKEND: ${EMBED_BACKEND:-torch}
     volumes:
       - embedding_models:/models
@@ -234,33 +199,22 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      # First start with an empty volume downloads ~5.5 GB of model weights
-      # before the eager preload completes. 10 minutes covers a typical
-      # home-broadband pull (~10 MB/s); subsequent starts hit the warm cache
-      # and are healthy in <30 s, so the long start_period only pays once.
       start_period: 600s
 
   # The Grounding-DINO `landmark` service was removed in Epic #383.
   # POI detection now runs through osm-admin's per-region Nominatim +
-  # Overpass shards. If you're upgrading from an earlier version, you
-  # can remove the leftover container and image:
+  # Overpass shards. Remove the leftover container/image after upgrade:
   #   docker rm -f fk-encore-landmark
   #   docker rmi ghcr.io/as19git67/fk-encore-landmark:latest
 
   # ── LLM Service (Llama GGUF classifier + multilingual-e5-base embedder) ───
-  # Models are NOT baked into the image — they are mmap'ed from the llm_models
-  # volume. The container's entrypoint runs `download_model.sh` automatically
-  # on every start, so a cold volume is populated on first `docker compose up`
-  # (this can take several minutes on slow networks; healthcheck start_period
-  # is set accordingly). The script is idempotent, so warm starts return in
-  # under a second. Set LLM_SKIP_DOWNLOAD=1 to bypass the check.
   llm_service:
-    image: ghcr.io/as19git67/fk-encore-llm:latest
-    container_name: fk-encore-llm
+    image: ghcr.io/as19git67/fk-encore-llm:${DEPLOY_IMAGE_TAG:-latest}
+    container_name: fk-encore-llm${DEPLOY_NAME_SUFFIX:-}
     restart: unless-stopped
     user: "568:568"
     labels:
-      com.centurylinklabs.watchtower.scope: fkprod
+      com.centurylinklabs.watchtower.scope: ${DEPLOY_WATCHTOWER_SCOPE:-fkprod}
     depends_on:
       chown-init:
         condition: service_completed_successfully
@@ -281,105 +235,123 @@ services:
       interval: 15s
       timeout: 10s
       retries: 5
-      # Cold-start on a spinning-rust bind mount has to warm up the GGUF
-      # mmap, load sentence-transformers and import torch before uvicorn
-      # accepts requests — that can take well over a minute on the TrueNAS
-      # SCALE box. A short start_period marks the container unhealthy mid-
-      # load, which then cascades into dependent services refusing to start.
       start_period: 180s
 
   # ── PostgreSQL (shared instance for both app and embedding service) ─────────
   postgres:
     image: pgvector/pgvector:pg18
-    container_name: fk-encore-db
+    container_name: fk-encore-db${DEPLOY_NAME_SUFFIX:-}
     restart: unless-stopped
     ports:
-      - "5432:5432"
+      - "${DEPLOY_HOST_PORT_POSTGRES:-5432}:5432"
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: encore          # primary database for the app
+      POSTGRES_DB: ${DEPLOY_PG_DATABASE:-encore}
     volumes:
       - pgdata:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d encore"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${DEPLOY_PG_DATABASE:-encore}"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-  # ── Watchtower (empfängt Deploy-Trigger via HTTP, zieht neue Images) ─────────
-  # Beobachtet ausschließlich Container mit dem Label
-  # com.centurylinklabs.watchtower.scope=fkprod (siehe WATCHTOWER_SCOPE).
+  # ── Watchtower ────────────────────────────────────────────────────────────
+  # Observes only containers carrying the configured scope label so two
+  # deployments on the same host stay independent.
   watchtower:
     image: containrrr/watchtower
-    container_name: fk-encore-watchtower
+    container_name: fk-encore-watchtower${DEPLOY_NAME_SUFFIX:-}
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       WATCHTOWER_HTTP_API_UPDATE: "true"
-      WATCHTOWER_HTTP_API_TOKEN: ${WATCHTOWER_TOKEN}
+      WATCHTOWER_HTTP_API_TOKEN: ${WATCHTOWER_TOKEN:-}
       WATCHTOWER_CLEANUP: "true"
-      WATCHTOWER_SCOPE: fkprod
+      WATCHTOWER_SCOPE: ${DEPLOY_WATCHTOWER_SCOPE:-fkprod}
       WATCHTOWER_NO_STARTUP_MESSAGE: "true"
     command: >
       --http-api-periodic-polls
-      fk-encore-app
-      fk-encore-insightface
-      fk-encore-embedding
-      fk-encore-llm
+      fk-encore-app${DEPLOY_NAME_SUFFIX:-}
+      fk-encore-insightface${DEPLOY_NAME_SUFFIX:-}
+      fk-encore-embedding${DEPLOY_NAME_SUFFIX:-}
+      fk-encore-llm${DEPLOY_NAME_SUFFIX:-}
     ports:
-      - "9000:8080"
+      - "${DEPLOY_HOST_PORT_WATCHTOWER:-9000}:8080"
 
+# ── Networks ──────────────────────────────────────────────────────────────────
+# `osm-net` carries the per-region Nominatim/Overpass shards that the
+# osm-admin service spins up at runtime. The `name:` is set explicitly so
+# Compose does not prefix it with the project name — two deployments must
+# pick distinct network names via DEPLOY_OSM_NETWORK to stay isolated.
+networks:
+  osm-net:
+    name: ${DEPLOY_OSM_NETWORK:-osm-net}
+    driver: bridge
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
+# Every persisted volume binds into ${DEPLOY_DATA_ROOT}/<subdir>. Override
+# DEPLOY_DATA_ROOT in `.env` per deployment so two stacks don't write into
+# each other's data.
 volumes:
   photos:
     driver: local
-    driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/photos }
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DEPLOY_DATA_ROOT:-./data}/photos
   thumbnails:
     driver: local
-    driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/thumbnails }
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DEPLOY_DATA_ROOT:-./data}/thumbnails
   pgdata:
     driver: local
-    driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/pgdata }
-  # Backup volume — consumed by the /internal/backup/* endpoints and by
-  # the restore-on-startup hook. The host-side backup script (see
-  # scripts/host/fk-encore-backup.sh) is expected to be able to read and
-  # write files in the same directory.
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DEPLOY_DATA_ROOT:-./data}/pgdata
   backup:
     driver: local
-    driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/backup }
-  # Model artefacts for the llm_service (Llama GGUF + sentence-transformers
-  # cache). Auto-populated on first start by the container entrypoint.
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DEPLOY_DATA_ROOT:-./data}/backup
   llm_models:
     driver: local
-    driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/llm_models }
-  # Model artefacts for the embedding_service (OpenCLIP + DINOv2 weights,
-  # plus the ONNX/INT8 quantised variants once Punkt 3 lands). Auto-
-  # populated on first start by the container entrypoint.
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DEPLOY_DATA_ROOT:-./data}/llm_models
   embedding_models:
     driver: local
-    driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/embedding_models }
-  # Documents archive (sha256-named PDFs in YYYY/YYYY-MM shards).
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DEPLOY_DATA_ROOT:-./data}/embedding_models
   documents:
     driver: local
-    driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/documents }
-  # Inbox watched by documents/inbox-watcher.ts. The Raspberry Pi rsyncs
-  # scanned PDFs here over SSH; chokidar picks them up once they're stable.
-  # See scripts/host/README-documents-inbox.md for the Pi-side setup.
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DEPLOY_DATA_ROOT:-./data}/documents
   documents_inbox:
     driver: local
-    driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/documents-inbox }
-  # Finance dropbox: copy `<basename>.pending.json` files here and the
-  # cron in finance/import-pending.ts picks them up within 5 min.
-  # Renamed to `<basename>.imported-<timestamp>.json` on success or
-  # `<basename>.failed-<timestamp>.json` (with a `.error.txt`) on
-  # failure. See docs/finance-data-import.md §3.
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DEPLOY_DATA_ROOT:-./data}/documents-inbox
   finance_import:
     driver: local
-    driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/finance-import }
-  # Finance daily snapshot target (one file per day,
-  # `finance-export-YYYY-MM-DD.json`). Worst-case recovery is `cp` of
-  # any snapshot into finance-import/ with a `.pending.json` suffix.
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DEPLOY_DATA_ROOT:-./data}/finance-import
   finance_export:
     driver: local
-    driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/finance-export }
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DEPLOY_DATA_ROOT:-./data}/finance-export
