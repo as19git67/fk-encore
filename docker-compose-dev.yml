@@ -72,23 +72,7 @@ services:
       # and are healthy in <30 s, so the long start_period only pays once.
       start_period: 600s
 
-  # ── Landmark Detection Service (Grounding DINO) ────────────────────────────
-  landmark:
-    image: ghcr.io/as19git67/fk-encore-landmark:test
-    container_name: fk-encore-landmark-test
-    restart: unless-stopped
-    user: "568:568"
-    labels:
-      com.centurylinklabs.watchtower.scope: fktest
-    environment:
-      LANDMARK_THRESHOLD: "0.35"
-      LOG_LEVEL: INFO
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 120s
+  # `landmark` (Grounding DINO) retired in Epic #383 — see comment in docker-compose.yml.
 
   # ── LLM Service (Llama GGUF classifier + multilingual-e5-base embedder) ───
   # Models are NOT baked into the image — they are mmap'ed from the llm_models
