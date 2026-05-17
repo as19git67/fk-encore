@@ -373,10 +373,11 @@ export interface ScanQueueServiceStatus {
     | 'embedding'
     | 'face_detection'
     | 'face_assignment'
-    | 'landmark'
+    | 'landmark'        // retired in Epic #383, kept for legacy queue rows
     | 'quality'
     | 'geocoding'
     | 'thumbnail'
+    | 'poi_detection'
   pending: number
   processing: number
   failed: number
@@ -1064,7 +1065,7 @@ export function getPhotoPoiMatches(id: number) {
 
 // ---------- Service Health ----------
 
-export type ExternalServiceName = 'insightface' | 'embedding' | 'landmark'
+export type ExternalServiceName = 'insightface' | 'embedding'
 
 export interface ExternalServiceHealth {
   name: ExternalServiceName

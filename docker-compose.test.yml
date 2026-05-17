@@ -44,8 +44,6 @@ services:
         condition: service_healthy
       embedding_service:
         condition: service_healthy
-      landmark:
-        condition: service_healthy
       llm_service:
         condition: service_healthy
     ports:
@@ -79,9 +77,8 @@ services:
       FACE_DISTANCE_THRESHOLD: "0.42"
       INSIGHTFACE_SERVICE_URL: http://insightface:8000
       EMBEDDING_SERVICE_URL: http://embedding_service:8000
-      LANDMARK_SERVICE_URL: http://landmark:8000
       LLM_SERVICE_URL: http://llm_service:8000
-      ENABLE_LANDMARKS: "true"
+      # ENABLE_LANDMARKS retired (Epic #383).
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
@@ -168,23 +165,7 @@ services:
       # and are healthy in <30 s, so the long start_period only pays once.
       start_period: 600s
 
-  # ── Landmark Detection Service (Grounding DINO) ────────────────────────────
-  landmark:
-    image: ghcr.io/as19git67/fk-encore-landmark:test
-    container_name: fk-encore-landmark-test
-    restart: unless-stopped
-    user: "568:568"
-    labels:
-      com.centurylinklabs.watchtower.scope: fktest
-    environment:
-      LANDMARK_THRESHOLD: "0.35"
-      LOG_LEVEL: INFO
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 120s
+  # `landmark` (Grounding DINO) retired in Epic #383 — see comment in docker-compose.yml.
 
   # ── LLM Service (Llama GGUF classifier + multilingual-e5-base embedder) ───
   # Models are NOT baked into the image — they are mmap'ed from the llm_models
@@ -255,7 +236,6 @@ services:
       fk-encore-app-test
       fk-encore-insightface-test
       fk-encore-embedding-test
-      fk-encore-landmark-test
       fk-encore-llm-test
     ports:
       - "9001:8080"
