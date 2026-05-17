@@ -351,6 +351,14 @@ class ScanWorker {
       case "thumbnail":
         await indexPhotoThumbnails(job.photo_id);
         break;
+      case "poi_detection":
+        // The pipeline lands in Epic #383 follow-up (osm-admin POI
+        // matcher). Until then we explicitly fail enqueued jobs so the
+        // operator sees the missing wiring in the queue UI instead of
+        // jobs silently stuck in `processing`.
+        throw new Error(
+          "poi_detection worker not yet wired — see osm-admin slice 4c",
+        );
     }
   }
 
@@ -478,6 +486,10 @@ const landmarkWorker = new ScanWorker("landmark", landmarkConcurrency);
 const qualityWorker = new ScanWorker("quality", qualityConcurrency);
 const geocodingWorker = new ScanWorker("geocoding", 1); // always 1 — Nominatim rate limit
 const thumbnailWorker = new ScanWorker("thumbnail", thumbnailConcurrency);
+// POI detection: one job at a time. Each invocation does an Overpass
+// radius query + optional Wikidata SPARQL + DINOv2 embedding compare;
+// fan-out beyond 1 mostly contends on the embedding service anyway.
+const poiDetectionWorker = new ScanWorker("poi_detection", 1);
 const libraryScanWorker = new LibraryScanWorker();
 
 /** Wake all workers to check for new work. Non-blocking. */
@@ -490,6 +502,7 @@ export function triggerWorkers(): void {
   qualityWorker.tick();
   geocodingWorker.tick();
   thumbnailWorker.tick();
+  poiDetectionWorker.tick();
   libraryScanWorker.tick();
 }
 
@@ -507,6 +520,7 @@ const ALL_WORKERS: Array<{ stop(): void; start(): void; inFlight(): number }> = 
   qualityWorker,
   geocodingWorker,
   thumbnailWorker,
+  poiDetectionWorker,
   libraryScanWorker,
 ];
 
@@ -572,9 +586,10 @@ export async function startWorkers(): Promise<void> {
   qualityWorker.start();
   geocodingWorker.start();
   thumbnailWorker.start();
+  poiDetectionWorker.start();
   libraryScanWorker.start();
   console.log(
-    `[scan-worker] embedding(c=${embeddingConcurrency}), face_detection(c=${faceConcurrency}), face_assignment(c=${faceAssignConcurrency}), landmark(c=${landmarkConcurrency}), quality(c=${qualityConcurrency}), geocoding(c=1), thumbnail(c=${thumbnailConcurrency}), library_scan(c=1)`,
+    `[scan-worker] embedding(c=${embeddingConcurrency}), face_detection(c=${faceConcurrency}), face_assignment(c=${faceAssignConcurrency}), landmark(c=${landmarkConcurrency}), quality(c=${qualityConcurrency}), geocoding(c=1), thumbnail(c=${thumbnailConcurrency}), poi_detection(c=1), library_scan(c=1)`,
   );
 }
 
