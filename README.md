@@ -32,8 +32,12 @@ decomposition.
 ### AI / machine learning
 - **Face recognition & clustering** – InsightFace (`buffalo_l`) with distance-based
   clustering, named people, merging, and per-face ignore
-- **Landmark detection** – Grounding DINO for churches, bridges, towers, and
-  other points of interest
+- **POI detection** – self-hosted Nominatim + Overpass shards per
+  region (managed by the `osm-admin` service), matched against the
+  photo's DINOv2 embedding to identify concrete points of interest
+  (Brandenburger Tor, Marienplatz, …) with a Wikipedia link and a
+  Wikimedia Commons reference image. Replaces the earlier
+  Grounding-DINO landmark detector (Epic #383).
 - **Semantic search** – OpenCLIP embeddings
 - **Visual similarity** – DINOv2 embeddings, plus a hybrid CLIP + DINOv2 mode
 - **Photo quality scoring** – AI score with detail metrics, used for
@@ -43,7 +47,7 @@ decomposition.
 - Natural-language search in German with query parsing and decomposition
   (location + date + semantic content combined automatically)
 - GPS radius search in kilometers
-- Landmark search, city/country search, and date-range search
+- POI / landmark search, city/country search, and date-range search
 
 ### Collaborative albums
 - Shared albums with read/write access per user
@@ -77,7 +81,7 @@ decomposition.
 | `frontend`           | Vue 3 + PrimeVue + Pinia SPA (served under `/app/`) |
 | `insightface-service` | Python – face detection & embeddings            |
 | `embedding_service`  | Python – CLIP and DINOv2 embeddings              |
-| `landmark-service`   | Python – Grounding DINO landmark detection       |
+| `osm-admin` (in `app`) | Self-hosted Nominatim + Overpass shards per OSM region, lifecycle managed via dockerode (POI detection — see [`docs/osm-admin-deployment.md`](./docs/osm-admin-deployment.md)) |
 | `embedding_postgres` | PostgreSQL + pgvector for vector search          |
 
 See [`FEATURE_COMPARISON.md`](./FEATURE_COMPARISON.md) for a detailed
