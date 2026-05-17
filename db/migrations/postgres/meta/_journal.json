@@ -603,6 +603,20 @@
       "when": 1779001424000,
       "tag": "0085_photo_transforms",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1779001425000,
+      "tag": "0086_poi_detection_foundations",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1779001426000,
+      "tag": "0087_photo_poi_matches",
+      "breakpoints": true
     }
   ]
 }

@@ -25,6 +25,7 @@ from app.config import settings
 from app.db.database import check_db_connection, get_db
 from app.db import repository
 from app.models.schemas import (
+    DinoEmbedResponse,
     EmbedRequest,
     EmbedResponse,
     GetRequest,
@@ -205,6 +206,41 @@ async def upload_photo(
     inserted = await repository.upsert_photos(db, [row], overwrite=force)
     logger.info("Uploaded photo %s processed and stored.", photo_id)
     return EmbedResponse(status="ok", processed=inserted)
+
+
+# ---------------------------------------------------------------------------
+# /dino/embed
+# ---------------------------------------------------------------------------
+
+@router.post("/dino/embed", response_model=DinoEmbedResponse, tags=["embeddings"])
+async def dino_embed_raw(
+    file: UploadFile = File(...),
+) -> DinoEmbedResponse:
+    """Compute a DINOv2 embedding for an uploaded image and return it
+    raw, without persisting anything. Used by the POI-detection
+    pipeline (Epic #383) to embed external reference images (Wikimedia
+    Commons P18 photos) into the main app's `poi_references` table.
+
+    The photo embeddings table is untouched — this endpoint is
+    side-effect-free."""
+    try:
+        content = await file.read()
+        image = _open_for_embedding(io.BytesIO(content))
+        embedder = dino_embedder_class().get_instance(model_name=settings.dino_model_name)
+        vec = embedder.embed([image])[0]
+    except UnidentifiedImageError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported or corrupted image format") from exc
+    except Exception as exc:
+        logger.exception("DINOv2 embedding generation failed")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Embedding error") from exc
+
+    # `vec` is a numpy ndarray in production and a plain list in the
+    # test stub. Normalise both into a list of Python floats so
+    # pydantic doesn't trip on ndarray, and the response schema is
+    # stable across environments.
+    raw = vec.tolist() if hasattr(vec, "tolist") else list(vec)
+    embedding = [float(x) for x in raw]
+    return DinoEmbedResponse(embedding=embedding, dim=len(embedding))
 
 
 # ---------------------------------------------------------------------------

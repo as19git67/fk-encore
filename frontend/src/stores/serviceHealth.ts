@@ -60,8 +60,6 @@ export const useServiceHealthStore = defineStore('serviceHealth', () => {
   const faceServiceAvailable = computed(() => isAvailable('insightface'))
   /** true when embedding service is reachable (semantic search, quality, grouping) */
   const embeddingServiceAvailable = computed(() => isAvailable('embedding'))
-  /** true when landmark service is reachable */
-  const landmarkServiceAvailable = computed(() => isAvailable('landmark'))
 
   /** true when at least one service is unavailable */
   const hasUnavailableServices = computed(() =>
@@ -78,7 +76,6 @@ export const useServiceHealthStore = defineStore('serviceHealth', () => {
     isAvailable,
     faceServiceAvailable,
     embeddingServiceAvailable,
-    landmarkServiceAvailable,
     hasUnavailableServices,
   }
 })
