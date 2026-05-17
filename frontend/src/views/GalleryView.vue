@@ -87,6 +87,7 @@ import {
   getPhotoDetailsBatch,
   getPhotoFaces,
   getPhotoLandmarks,
+  getPhotoPoiMatches,
   ignoreFace,
   reindexPhoto,
   updatePhotoDate,
@@ -97,6 +98,7 @@ import {
   type CurationStatus,
   type Face,
   type LandmarkItem,
+  type PoiMatchItem,
 } from '../api/photos'
 
 const auth = useAuthStore()
@@ -724,6 +726,8 @@ const detectedFaces = ref<Face[]>([])
 const loadingFaces = ref(false)
 const detectedLandmarks = ref<LandmarkItem[]>([])
 const loadingLandmarks = ref(false)
+const detectedPoiMatches = ref<PoiMatchItem[]>([])
+const loadingPoiMatches = ref(false)
 const reindexingPhoto = ref(false)
 const isEditingDate = ref(false)
 const editDate = ref<Date | null>(null)
@@ -732,20 +736,28 @@ const updatingDate = ref(false)
 async function loadFacesAndLandmarks(photoId: number, token: number): Promise<void> {
   loadingFaces.value = true
   loadingLandmarks.value = true
+  loadingPoiMatches.value = true
   detectedFaces.value = []
   detectedLandmarks.value = []
+  detectedPoiMatches.value = []
   try {
-    const [facesRes, landmarksRes] = await Promise.all([
+    // POI matches load alongside faces + landmarks. A 5xx on the POI
+    // endpoint (e.g. osm-admin service down) falls back to an empty
+    // list so the rest of the sidebar still renders.
+    const [facesRes, landmarksRes, poisRes] = await Promise.all([
       getPhotoFaces(photoId).catch(() => ({ faces: [] })),
       getPhotoLandmarks(photoId).catch(() => ({ landmarks: [] })),
+      getPhotoPoiMatches(photoId).catch(() => ({ matches: [] })),
     ])
     if (token !== hydrateToken) return
     detectedFaces.value = facesRes.faces ?? []
     detectedLandmarks.value = landmarksRes.landmarks ?? []
+    detectedPoiMatches.value = poisRes.matches ?? []
   } finally {
     if (token === hydrateToken) {
       loadingFaces.value = false
       loadingLandmarks.value = false
+      loadingPoiMatches.value = false
     }
   }
 }
@@ -1303,6 +1315,8 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
           :loading-faces="loadingFaces"
           :landmarks="detectedLandmarks"
           :loading-landmarks="loadingLandmarks"
+          :poi-matches="detectedPoiMatches"
+          :loading-poi-matches="loadingPoiMatches"
           :persons="persons"
           :can-delete="canDelete"
           :can-upload="canUpload"
@@ -1367,6 +1381,8 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
           :loading-faces="loadingFaces"
           :landmarks="detectedLandmarks"
           :loading-landmarks="loadingLandmarks"
+          :poi-matches="detectedPoiMatches"
+          :loading-poi-matches="loadingPoiMatches"
           :persons="persons"
           :can-delete="canDelete"
           :can-upload="canUpload"

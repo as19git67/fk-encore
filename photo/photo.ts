@@ -2017,6 +2017,40 @@ export const reindexPhotoLandmarks = api(
   }
 );
 
+export interface PoiMatchItem {
+  id: number;
+  qid: string | null;
+  osmRef: string;
+  name: string;
+  nameDe: string | null;
+  /** Full URL to the Wikipedia article (de preferred). Null when none exists. */
+  wikipediaUrl: string | null;
+  /** Commons image URL for the POI's P18, when available. */
+  commonsImageUrl: string | null;
+  distanceM: number | null;
+  matchScore: number;
+  ambiguous: boolean;
+  source: string;
+  regionSlug: string | null;
+  createdAt: string;
+}
+
+/**
+ * Return per-photo POI matches produced by the osm-admin POI
+ * detection pipeline (Epic #383). Sorted by `match_score` descending
+ * so the most likely match is row 0; siblings with `ambiguous=true`
+ * follow when the matcher couldn't pick a clear winner.
+ */
+export const getPhotoPoiMatches = api(
+  { expose: true, method: "GET", path: "/photos/:id/poi-matches", auth: true },
+  async ({ id }: { id: number }): Promise<{ matches: PoiMatchItem[] }> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    return await service.getPoiMatchesForPhotoLogic(id);
+  }
+);
+
 // ========== Destructive: Purge All Photos ==========
 
 /**
