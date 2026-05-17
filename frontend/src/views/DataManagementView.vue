@@ -558,7 +558,7 @@ async function handleApproveOsmRegion(slug: string) {
 }
 
 async function handleDeleteOsmRegion(slug: string) {
-  if (!window.confirm(`Region ${slug} entfernen? Container und Volumes bleiben aktuell stehen — Cleanup folgt in einer späteren Etappe.`)) return
+  if (!window.confirm(`Region ${slug} entfernen? Stoppt + löscht die zwei Container (nominatim-…, overpass-…), droppt die zwei Volumes (Postgres-Daten gehen verloren, mehrere GB) und entfernt die DB-Zeile. Nicht rückgängig zu machen.`)) return
   osmLoading.value = true
   try {
     await deleteOsmRegion(slug)
