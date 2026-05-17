@@ -27,6 +27,7 @@ import "./regions";
 import "./proxy";
 
 import { tickImporter } from "./importer";
+import { tickIdleStop } from "./idle-stop";
 import { registerDockerodeDriverIfEnabled } from "./docker-driver.dockerode";
 
 // Activate the dockerode driver iff explicitly requested via env. The
@@ -48,6 +49,24 @@ schedule({
       console.log(
         `[osm-admin] importer tick: slug=${outcome.slug} ` +
           `result=${outcome.result}${outcome.detail ? ` (${outcome.detail})` : ""}`,
+      );
+    }
+  },
+});
+
+schedule({
+  name: "osm-admin-idle-stop",
+  description: "Stop region containers idle longer than POI_REGION_IDLE_STOP_MINUTES.",
+  service: "osm-admin",
+  scheduleLabel: "every 5m",
+  nextFire: everyMs(5 * 60_000),
+  run: async () => {
+    const outcome = await tickIdleStop();
+    if (outcome.stopped.length > 0 || outcome.failed.length > 0) {
+      console.log(
+        `[osm-admin] idle-stop tick: stopped=${outcome.stopped.length}` +
+          ` failed=${outcome.failed.length}` +
+          (outcome.stopped.length > 0 ? ` — ${outcome.stopped.join(", ")}` : ""),
       );
     }
   },
