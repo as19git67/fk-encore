@@ -41,11 +41,22 @@ log = logging.getLogger("llm-service")
 
 # ─── Config ────────────────────────────────────────────────────────────────────
 
-MODELS_DIR = Path(os.environ.get("MODELS_DIR", "/models"))
-LLM_MODEL_PATH = Path(os.environ.get("LLM_MODEL_PATH", str(MODELS_DIR / "llama.gguf")))
-LLM_CTX = int(os.environ.get("LLM_CTX", "8192"))
-LLM_THREADS = int(os.environ.get("LLM_THREADS", str(os.cpu_count() or 4)))
-LLM_GPU_LAYERS = int(os.environ.get("LLM_GPU_LAYERS", "0"))
+# ``os.environ.get(key, default)`` only falls back to the default when the key
+# is *absent* — a key that is set to "" still returns "", and int("") blows up.
+# Compose passes ``${VAR:-}`` for unset overrides, which lands here as "", so
+# unwrap that explicitly.
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    return int(raw)
+
+
+MODELS_DIR = Path(os.environ.get("MODELS_DIR") or "/models")
+LLM_MODEL_PATH = Path(os.environ.get("LLM_MODEL_PATH") or str(MODELS_DIR / "llama.gguf"))
+LLM_CTX = _env_int("LLM_CTX", 8192)
+LLM_THREADS = _env_int("LLM_THREADS", os.cpu_count() or 4)
+LLM_GPU_LAYERS = _env_int("LLM_GPU_LAYERS", 0)
 
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "intfloat/multilingual-e5-base")
 # sentence-transformers respects this env var as its on-disk cache location.
