@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, useSlots } from 'vue'
 import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
 import PhotoTransformEditor from './PhotoTransformEditor.vue'
@@ -54,6 +54,14 @@ const props = withDefaults(defineProps<{
 })
 
 const showCounter = computed(() => props.totalCount > 0 && props.currentIndex > 0)
+
+const slots = useSlots()
+const hasActionBar = computed(() => {
+  if (slots['actions'] || slots['actions-before']) return true
+  if (props.showDetailsButton !== false) return true
+  if (props.canDelete) return true
+  return canEditTransform.value
+})
 
 const emit = defineEmits<{
   'close': []
@@ -285,7 +293,7 @@ function handleTouchEnd(e: TouchEvent) {
   // toolbar taps don't double up as navigation.
   if (movement < 10) {
     const target = e.target as HTMLElement | null
-    if (target && target.closest('button, a, input, textarea, .fs-stack-badge, .fs-details-flyout, .fs-topbar')) return
+    if (target && target.closest('button, a, input, textarea, .fs-stack-badge, .fs-details-flyout, .fs-topbar, .fs-actions-bar')) return
     if (touch.clientX < window.innerWidth / 2) {
       if (props.prevPhoto) emit('prev')
     } else {
@@ -314,7 +322,7 @@ function handleContentClick(e: MouseEvent) {
   const target = e.target as HTMLElement | null
   // Skip the navigation when the click landed on an interactive
   // element — its own @click handler should take precedence.
-  if (target && target.closest('button, a, input, textarea, .fs-stack-badge, .fs-details-flyout, .fs-topbar')) return
+  if (target && target.closest('button, a, input, textarea, .fs-stack-badge, .fs-details-flyout, .fs-topbar, .fs-actions-bar')) return
   if (e.clientX < window.innerWidth / 2) {
     if (props.prevPhoto) emit('prev')
   } else {
@@ -518,8 +526,8 @@ function locationLabel(photo: Photo) {
         <span class="fs-stack-badge-count">+{{ group.member_count - 1 }}</span>
       </button>
 
-      <!-- Top bar -->
-      <div class="fs-topbar">
+      <!-- Top bar: back + date/location (centered) + counter -->
+      <div class="fs-topbar" @click.stop>
         <Button icon="pi pi-arrow-left" rounded text @click="emit('close')" />
 
         <div class="fs-center">
@@ -535,45 +543,10 @@ function locationLabel(photo: Photo) {
           </slot>
         </div>
 
-        <div class="fs-toolbar">
-          <!-- Slot for extra action buttons placed before the default ones
-               (e.g. "set as cover" in the map-mode fullscreen). -->
-          <slot name="topbar-actions-before" />
-          <slot name="topbar-actions">
-            <Button
-              v-if="props.showDetailsButton !== false"
-              icon="pi pi-info-circle"
-              rounded text
-              :severity="props.detailsActive ? 'primary' : 'secondary'"
-              :class="{ 'fs-toolbar-btn--active': props.detailsActive }"
-              @click="emit('show-details')"
-              v-tooltip.bottom="(props.detailsActive ? 'Details schließen' : 'Details') + ' (I)'"
-            />
-            <Button
-              v-if="canDelete"
-              :icon="photo.curation_status === 'hidden' ? 'pi pi-eye-slash' : 'pi pi-eye'"
-              rounded text
-              :severity="photo.curation_status === 'hidden' ? 'danger' : 'secondary'"
-              @click="photo.curation_status === 'hidden' ? emit('restore', photo.id) : emit('hide', photo.id)"
-              v-tooltip.bottom="(photo.curation_status === 'hidden' ? 'Wiederherstellen' : 'Ausblenden') + ' (X)'"
-            />
-            <Button
-              v-if="canDelete"
-              :icon="photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
-              rounded text
-              :severity="photo.curation_status === 'favorite' ? 'warn' : 'secondary'"
-              @click="emit('toggle-favorite', photo.id, photo.curation_status)"
-              v-tooltip.bottom="(photo.curation_status === 'favorite' ? 'Favorit entfernen' : 'Als Favorit markieren') + ' (F)'"
-            />
-            <Button
-              v-if="canEditTransform"
-              icon="pi pi-sliders-h"
-              rounded text
-              severity="secondary"
-              @click="transformEditorVisible = true"
-              v-tooltip.bottom="'Schnitt &amp; Belichtung bearbeiten'"
-            />
-          </slot>
+        <div class="fs-topbar-right">
+          <span v-if="showCounter" class="fs-counter" aria-live="polite">
+            {{ currentIndex }} / {{ totalCount }}
+          </span>
         </div>
       </div>
 
@@ -594,26 +567,71 @@ function locationLabel(photo: Photo) {
         <slot name="details-flyout" />
       </div>
 
-      <!-- Prev / Next buttons + counter pill on the same vertical
-           axis. The counter only renders when the parent supplies a
-           non-zero `total-count`. -->
+      <!-- Vertical-centered prev/next arrows. Hidden on touch-only
+           devices (mobile, tablet) where tap-half + swipe handle
+           navigation; visible on hover-capable devices (desktop). -->
       <Button
         v-if="prevPhoto"
         icon="pi pi-chevron-left"
         class="fs-nav fs-nav-left"
         rounded text
-        @click="emit('prev')"
+        @click.stop="emit('prev')"
       />
-      <div v-if="showCounter" class="fs-nav-counter" aria-live="polite">
-        {{ currentIndex }} / {{ totalCount }}
-      </div>
       <Button
         v-if="nextPhoto"
         icon="pi pi-chevron-right"
         class="fs-nav fs-nav-right"
         rounded text
-        @click="emit('next')"
+        @click.stop="emit('next')"
       />
+
+      <!-- Bottom action bar: iOS-style centered icon row. Hidden when
+           there are no actions to show (e.g. unauthenticated shared
+           album with showDetailsButton=false). -->
+      <div
+        v-if="hasActionBar"
+        class="fs-actions-bar"
+        @click.stop
+      >
+        <!-- Slot for extra action buttons placed before the default ones
+             (e.g. "set as cover" in the map-mode fullscreen). -->
+        <slot name="actions-before" />
+        <slot name="actions">
+          <Button
+            v-if="props.showDetailsButton !== false"
+            icon="pi pi-info-circle"
+            rounded text
+            :severity="props.detailsActive ? 'primary' : 'secondary'"
+            :class="{ 'fs-toolbar-btn--active': props.detailsActive }"
+            @click="emit('show-details')"
+            v-tooltip.top="(props.detailsActive ? 'Details schließen' : 'Details') + ' (I)'"
+          />
+          <Button
+            v-if="canDelete"
+            :icon="photo.curation_status === 'hidden' ? 'pi pi-eye-slash' : 'pi pi-eye'"
+            rounded text
+            :severity="photo.curation_status === 'hidden' ? 'danger' : 'secondary'"
+            @click="photo.curation_status === 'hidden' ? emit('restore', photo.id) : emit('hide', photo.id)"
+            v-tooltip.top="(photo.curation_status === 'hidden' ? 'Wiederherstellen' : 'Ausblenden') + ' (X)'"
+          />
+          <Button
+            v-if="canDelete"
+            :icon="photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
+            rounded text
+            :severity="photo.curation_status === 'favorite' ? 'warn' : 'secondary'"
+            @click="emit('toggle-favorite', photo.id, photo.curation_status)"
+            v-tooltip.top="(photo.curation_status === 'favorite' ? 'Favorit entfernen' : 'Als Favorit markieren') + ' (F)'"
+          />
+          <Button
+            v-if="canEditTransform"
+            icon="pi pi-sliders-h"
+            rounded text
+            severity="secondary"
+            @click="transformEditorVisible = true"
+            v-tooltip.top="'Schnitt &amp; Belichtung bearbeiten'"
+          />
+        </slot>
+      </div>
 
       <!-- Optional bottom bar slot (e.g. location info in shared albums) -->
       <slot name="bottom-bar" />
@@ -719,9 +737,10 @@ function locationLabel(photo: Photo) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-inline: 2rem;
+  padding-inline: 1rem;
   background: var(--p-dialog-background);
   z-index: 10;
+  gap: 0.5rem;
 }
 
 .fs-center {
@@ -767,14 +786,24 @@ function locationLabel(photo: Photo) {
   height: 2em;
 }
 
-.fs-toolbar {
+/* Right side of the topbar — holds the counter pill (or nothing). The
+   fixed min-width matches the back button on the left so the center
+   stays visually centered even when the counter is absent. */
+.fs-topbar-right {
   display: flex;
-  gap: 0.25em;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 2em;
 }
 
-/* Highlighted state for toolbar toggle buttons (e.g. Details when open). */
-.fs-toolbar :deep(.fs-toolbar-btn--active) {
-  background: rgba(255, 255, 255, 0.12);
+.fs-counter {
+  font-size: 0.8em;
+  color: var(--p-text-color, #fff);
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 999px;
+  padding: 0.2em 0.65em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* ── Details flyout ─────────────────────────────────────────────────────── */
@@ -812,14 +841,13 @@ function locationLabel(photo: Photo) {
 
 @media (max-width: 768px) {
   .fs-details-flyout {
-    /* Mobile: right-nav button lives at the bottom, so the flyout can
-       stretch closer to the right edge. */
+    /* Mobile: arrows are hidden (touch uses tap/swipe), so the flyout
+       can stretch the full width. Keeps clear of the bottom action bar
+       (height ~3.5rem + 0.75rem margin). */
     top: calc(2.75em + 0.25rem);
     right: 0.5rem;
     left: 0.5rem;
-    /* Keep clear of the bottom nav buttons: button bottom at 4rem, button
-       height ~2.5rem (1rem icon + 2×0.75rem padding), plus 0.5rem gap. */
-    bottom: calc(7rem + env(safe-area-inset-bottom, 0px));
+    bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
     width: auto;
     max-width: 480px;
     margin-left: auto;
@@ -827,45 +855,70 @@ function locationLabel(photo: Photo) {
 }
 
 /* ── Prev/Next nav buttons ──────────────────────────────────────────────── */
+/* Vertically centered at the image's left/right edge. Tap-half + swipe
+   handle navigation on touch devices, so we hide the arrows there and
+   only show them on hover-capable devices (desktop with a mouse). */
 .fs-nav {
   position: absolute;
-  bottom: 0;
+  top: 50%;
+  transform: translateY(-50%);
   color: white !important;
-  background: rgba(0,0,0,0.4) !important;
+  background: rgba(0, 0, 0, 0.4) !important;
   z-index: 10;
+  opacity: 0;
+  transition: opacity 0.15s ease;
 }
 
 .fs-nav-left { left: 1rem; }
 .fs-nav-right { right: 1rem; }
 
-/* Photo counter pill on the centre-line between the nav buttons. */
-.fs-nav-counter {
+/* Reveal arrows on devices that can hover (typical desktop with mouse). */
+@media (hover: hover) and (pointer: fine) {
+  .fullscreen-content:hover .fs-nav,
+  .fs-nav:focus-visible {
+    opacity: 1;
+  }
+}
+
+/* Always hide on coarse pointers / no-hover devices (phones, tablets). */
+@media (hover: none), (pointer: coarse) {
+  .fs-nav {
+    display: none;
+  }
+}
+
+/* ── Bottom action bar (iOS-style) ──────────────────────────────────────── */
+.fs-actions-bar {
   position: absolute;
-  bottom: 0.6rem;
   left: 50%;
+  bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
-  color: #fff;
-  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.4em 0.75em;
+  background: rgba(0, 0, 0, 0.55);
   border-radius: 999px;
-  padding: 0.35rem 0.85rem;
-  font-size: 0.85rem;
-  font-weight: 500;
+  backdrop-filter: blur(8px);
   z-index: 10;
-  pointer-events: none;
-  white-space: nowrap;
-  backdrop-filter: blur(6px);
+  max-width: calc(100vw - 2rem);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.fs-actions-bar::-webkit-scrollbar { display: none; }
+
+.fs-actions-bar :deep(.p-button-rounded) {
+  width: 2.5em;
+  height: 2.5em;
+  color: #fff;
+}
+
+/* Highlighted state for toggle buttons (e.g. Details when open). */
+.fs-actions-bar :deep(.fs-toolbar-btn--active) {
+  background: rgba(255, 255, 255, 0.18);
 }
 
 @media (max-width: 768px) {
-  .fs-nav {
-    /* Auf Mobile immer sichtbar, größere Tappfläche */
-    opacity: 1;
-    background: rgba(0, 0, 0, 0.5) !important;
-    padding: 0.75rem !important;
-  }
-  .fs-nav-left { left: 0.5rem; }
-  .fs-nav-right { right: 0.5rem; }
-
   /* Datum in TopBar kürzer */
   .fs-date-bar { font-size: 0.8em; }
 }
