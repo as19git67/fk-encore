@@ -48,6 +48,12 @@ describe("InMemoryDockerDriver", () => {
     expect(await d.waitHealthy("http://x/status")).toBe(false);
   });
 
+  it("ensureNetwork is a recorded no-op for the in-memory driver", async () => {
+    const d = new InMemoryDockerDriver();
+    await d.ensureNetwork("osm-net");
+    expect(d.events).toEqual([{ op: "ensureNetwork", name: "osm-net" }]);
+  });
+
   it("exec records the call and returns the configured result", async () => {
     const d = new InMemoryDockerDriver();
     d.execResult = { exitCode: 0, stdout: "Updating to sequence 4775", stderr: "" };

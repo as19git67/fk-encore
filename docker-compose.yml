@@ -136,9 +136,12 @@ services:
       FINANCE_IMPORT_DIR: /mnt/data/finance-import
       FINANCE_EXPORT_DIR: /mnt/data/finance-export
       FINANCE_EXPORT_KEEP: ${FINANCE_EXPORT_KEEP:-30}
-    networks:
-      - default
-      - osm-net
+    # No explicit `networks:` block — the app is on compose's `default`
+    # network and attaches itself to the OSM bridge network at startup
+    # (see osm-admin/encore.service.ts → DockerDriver.ensureNetwork).
+    # That way the OSM network's lifecycle is owned by osm-admin and
+    # `docker compose down` never races the runtime-spawned per-region
+    # Nominatim/Overpass containers attached to it.
     volumes:
       - photos:/mnt/data/photos
       - thumbnails:/mnt/data/thumbnails
@@ -286,14 +289,11 @@ services:
       - "${DEPLOY_HOST_PORT_WATCHTOWER:-9000}:8080"
 
 # ── Networks ──────────────────────────────────────────────────────────────────
-# `osm-net` carries the per-region Nominatim/Overpass shards that the
-# osm-admin service spins up at runtime. The `name:` is set explicitly so
-# Compose does not prefix it with the project name — two deployments must
-# pick distinct network names via DEPLOY_OSM_NETWORK to stay isolated.
-networks:
-  osm-net:
-    name: ${DEPLOY_OSM_NETWORK:-osm-net}
-    driver: bridge
+# Only the implicit compose `default` bridge network is managed here.
+# The OSM bridge network (used by the per-region Nominatim/Overpass
+# containers + the app) is created and owned by osm-admin at runtime —
+# see osm-admin/encore.service.ts → DockerDriver.ensureNetwork. Its name
+# is configured via DEPLOY_OSM_NETWORK so two deployments stay isolated.
 
 # ── Volumes ───────────────────────────────────────────────────────────────────
 # Every persisted volume binds into ${DEPLOY_DATA_ROOT}/<subdir>. Override

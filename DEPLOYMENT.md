@@ -62,7 +62,7 @@ The full list of `DEPLOY_*` overrides:
 | `DEPLOY_PG_EMBEDDINGS_DATABASE` | `embeddings` | Embedding service's DB. |
 | `DEPLOY_RP_ID` / `DEPLOY_RP_NAME` / `DEPLOY_RP_ORIGIN` / `DEPLOY_APP_URL` | `localhost` / `Vivanty App` / `http://localhost:8080` / `http://localhost:8080` | Passkey identity — don't change `RP_ID` after first user registers. |
 | `DEPLOY_OSM_NAME_PREFIX` | _(empty)_ | Scopes per-region nominatim / overpass containers + volumes. |
-| `DEPLOY_OSM_NETWORK` | `osm-net` | Docker bridge for the per-region containers. |
+| `DEPLOY_OSM_NETWORK` | `osm-net` | Docker bridge the app + per-region containers share. Created at runtime by osm-admin (not by compose), so it survives `docker compose down`. |
 | `DEPLOY_DATA_ROOT` | `./data` | Bind-mount root for every persisted volume. |
 
 ## Services
@@ -355,16 +355,21 @@ docker compose restart app
 
 ### Stop everything and clean up
 
-The per-region Nominatim/Overpass containers are spawned by osm-admin
-at runtime and aren't part of compose. Run the helper first so the OSM
-bridge network can be released, otherwise `docker compose down` fails
-with `Network … Resource is still in use`.
+```bash
+docker compose down          # Stop services
+docker compose down -v       # Stop services + delete volumes (CAUTION: data loss!)
+```
+
+osm-admin owns the OSM bridge network (see `DEPLOY_OSM_NETWORK`), so
+`compose down` never touches it. The per-region Nominatim/Overpass
+containers spawned by osm-admin live outside compose — they keep
+running across stack restarts and the next `docker compose up -d`
+picks up where it left off. To force-free them too (their data lives
+in named volumes, so this is non-destructive):
 
 ```bash
 ./scripts/host/osm-down.sh            # prod (empty prefix)
 ./scripts/host/osm-down.sh test-      # test stack
-docker compose down                   # Stop services
-docker compose down -v                # Stop services + delete volumes (CAUTION: data loss!)
 ```
 
 ## Troubleshooting

@@ -89,6 +89,17 @@ export interface DockerDriver {
    */
   exec(name: string, cmd: string[]): Promise<ExecResult>;
   /**
+   * Ensure a docker bridge network exists, then attach the calling
+   * process's own container to it. Idempotent; safe to call repeatedly.
+   *
+   * osm-admin owns this network rather than declaring it in
+   * docker-compose.yml — that way `docker compose down` doesn't race
+   * the per-region Nominatim/Overpass containers that keep it open.
+   * Region containers are spawned with `NetworkMode = name`, and the
+   * app reaches them via Docker DNS thanks to the self-attach.
+   */
+  ensureNetwork(name: string): Promise<void>;
+  /**
    * Poll an HTTP healthcheck URL until it responds 2xx. Returns true
    * if it became healthy within the budget, false otherwise. Callers
    * pick the budget that fits the use case (e.g. the importer probes
@@ -116,6 +127,7 @@ export class InMemoryDockerDriver implements DockerDriver {
     | { op: "stop"; name: string }
     | { op: "remove"; name: string }
     | { op: "removeVolume"; name: string }
+    | { op: "ensureNetwork"; name: string }
     | { op: "waitHealthy"; url: string; healthy: boolean }
     | { op: "exec"; name: string; cmd: string[]; exitCode: number }
   > = [];
@@ -161,6 +173,10 @@ export class InMemoryDockerDriver implements DockerDriver {
   async exec(name: string, cmd: string[]): Promise<ExecResult> {
     this.events.push({ op: "exec", name, cmd, exitCode: this.execResult.exitCode });
     return this.execResult;
+  }
+
+  async ensureNetwork(name: string): Promise<void> {
+    this.events.push({ op: "ensureNetwork", name });
   }
 }
 

@@ -43,18 +43,13 @@ services:
     volumes:
       # In addition to the existing mounts:
       - /var/run/docker.sock:/var/run/docker.sock
-    networks:
-      - default
-      - osm-net
-
-networks:
-  osm-net:
-    driver: bridge
 ```
 
 That is the **entire compose-side change** — no per-region services,
-no shared Postgres, no named-volume declarations. Everything below is
-created by `osm-admin` at runtime via dockerode.
+no shared Postgres, no named-volume declarations, and no `osm-net`
+entry. The OSM bridge network is created and owned by `osm-admin` at
+runtime via dockerode, and the app self-attaches on startup. Everything
+below is also created by `osm-admin` at runtime.
 
 ### Docker socket access for non-root containers
 
@@ -134,40 +129,34 @@ Resulting names with `OSM_ADMIN_NAME_PREFIX="test-"`:
 | Overpass | `test-overpass-europe-germany-bayern` | `test-fk-encore-osm-overpass-europe-germany-bayern` |
 
 The Docker network is **not** auto-prefixed — it's a separate env
-(`OSM_ADMIN_DOCKER_NETWORK`). Pick a distinct value per deployment and
-declare each network with `name: …` in its compose file so Compose
-doesn't add its own project prefix on top:
-
-```yaml
-networks:
-  test-osm-net:
-    name: test-osm-net   # don't let compose prefix it
-    driver: bridge
-```
+(`OSM_ADMIN_DOCKER_NETWORK`). Pick a distinct value per deployment so
+the two sides stay isolated. The network is created lazily by
+`osm-admin` on first boot; no compose declaration is needed (and would
+cause `docker compose down` to fight the per-region containers
+attached to it).
 
 Switching prefixes on an existing deployment renames the resources
 the importer expects but doesn't migrate the actual containers or
 volumes. Plan the change with the legacy "Entfernen" cleanup or
 re-import the affected regions.
 
-### Bringing the stack down cleanly
+### Bringing the stack down
 
-Because the per-region Nominatim/Overpass containers are spawned by
-osm-admin at runtime (via dockerode), they are not part of
-`docker-compose.yml`. A plain `docker compose down` leaves them
-running and then fails to remove the OSM bridge network with:
+osm-admin owns the OSM bridge network's lifecycle (it creates the
+network on boot and self-attaches), so `docker compose down` simply
+ignores it — no more `Network ... Resource is still in use` race
+with the per-region containers. The per-region Nominatim/Overpass
+containers keep running across stack restarts, and the next
+`docker compose up -d` picks up where it left off.
 
-```
-Network test-osm-net  Resource is still in use
-```
-
-Run the helper first, passing the same prefix that's in your env-file
-(empty for prod, `test-` for the test stack), then bring the rest
-down:
+If you actively want to free the per-region containers' resources
+(RAM, disk while idle), run the helper first. Their data lives in
+named volumes, so this is non-destructive:
 
 ```bash
-./scripts/host/osm-down.sh test-          # stop + remove test region containers
-docker compose --env-file .env.test down  # now this succeeds
+./scripts/host/osm-down.sh                # prod stack (empty prefix)
+./scripts/host/osm-down.sh test-          # test stack
+docker compose --env-file .env.test down  # works either way
 ```
 
 The helper is idempotent and a no-op if no matching region containers

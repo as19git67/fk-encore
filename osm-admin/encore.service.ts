@@ -28,14 +28,31 @@ import "./proxy";
 
 import { tickImporter } from "./importer";
 import { tickIdleStop } from "./idle-stop";
+import { getDockerDriver } from "./docker-driver";
 import { registerDockerodeDriverIfEnabled } from "./docker-driver.dockerode";
 
 // Activate the dockerode driver iff explicitly requested via env. The
 // default stays InMemoryDockerDriver so CI/test environments without
 // a Docker socket keep working.
-registerDockerodeDriverIfEnabled({
+const dockerodeActive = registerDockerodeDriverIfEnabled({
   defaultNetwork: process.env.OSM_ADMIN_DOCKER_NETWORK,
 });
+
+// osm-admin owns the OSM bridge network rather than declaring it in
+// docker-compose.yml. That decouples the network's lifecycle from
+// `docker compose down` — the per-region containers that osm-admin
+// spawns at runtime would otherwise keep it busy and the down would
+// fail with "Resource is still in use". Bootstrap fire-and-forget so
+// a slow daemon doesn't block startup; failures are logged loudly.
+const osmNet = process.env.OSM_ADMIN_DOCKER_NETWORK;
+if (dockerodeActive && osmNet) {
+  getDockerDriver()
+    .ensureNetwork(osmNet)
+    .then(() => console.log(`[osm-admin] network '${osmNet}' ready, self attached`))
+    .catch((err) =>
+      console.error(`[osm-admin] failed to ensure network '${osmNet}':`, err),
+    );
+}
 
 schedule({
   name: "osm-admin-importer",
