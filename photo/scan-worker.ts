@@ -496,7 +496,7 @@ const embeddingWorker = new ScanWorker("embedding", embeddingConcurrency);
 const faceWorker = new ScanWorker("face_detection", faceConcurrency);
 const faceAssignWorker = new ScanWorker("face_assignment", faceAssignConcurrency);
 const qualityWorker = new ScanWorker("quality", qualityConcurrency);
-const geocodingWorker = new ScanWorker("geocoding", 1); // always 1 — Nominatim rate limit
+const geocodingWorker = new ScanWorker("geocoding", 1); // always 1 — public-Nominatim fallback rate limit; the local geo service has no such cap but the slow path dominates the budget
 const thumbnailWorker = new ScanWorker("thumbnail", thumbnailConcurrency);
 // POI detection: one job at a time. Each invocation hits the geo /pois
 // endpoint + optional Wikidata SPARQL + DINOv2 embedding compare;
