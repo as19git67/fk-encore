@@ -155,6 +155,8 @@ services:
     container_name: fk-encore-insightface${DEPLOY_NAME_SUFFIX:-}
     restart: unless-stopped
     user: "568:568"
+    # Pin to P-cores — see DEPLOY_ML_CPUSET in docker-compose.env.example.
+    cpuset: "${DEPLOY_ML_CPUSET:-0-11}"
     labels:
       com.centurylinklabs.watchtower.scope: ${DEPLOY_WATCHTOWER_SCOPE:-fkprod}
     environment:
@@ -176,7 +178,8 @@ services:
     container_name: fk-encore-embedding${DEPLOY_NAME_SUFFIX:-}
     restart: unless-stopped
     user: "568:568"
-    cpuset: "0-11"
+    # Pin to P-cores — see DEPLOY_ML_CPUSET in docker-compose.env.example.
+    cpuset: "${DEPLOY_ML_CPUSET:-0-11}"
     labels:
       com.centurylinklabs.watchtower.scope: ${DEPLOY_WATCHTOWER_SCOPE:-fkprod}
     depends_on:
@@ -213,6 +216,8 @@ services:
     container_name: fk-encore-llm${DEPLOY_NAME_SUFFIX:-}
     restart: unless-stopped
     user: "568:568"
+    # Pin to P-cores — see DEPLOY_ML_CPUSET in docker-compose.env.example.
+    cpuset: "${DEPLOY_ML_CPUSET:-0-11}"
     labels:
       com.centurylinklabs.watchtower.scope: ${DEPLOY_WATCHTOWER_SCOPE:-fkprod}
     depends_on:
