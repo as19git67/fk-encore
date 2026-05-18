@@ -5,15 +5,17 @@ on:
     branches: [ "main" ]
     paths:
       - 'docker-compose.yml'
-      - 'docker-compose.test.yml'
       - 'docker-compose-dev.yml'
+      - 'docker-compose.env.example'
+      - 'docker-compose.env.test.example'
       - '.github/workflows/compose-validate.yml'
   pull_request:
     branches: [ "main" ]
     paths:
       - 'docker-compose.yml'
-      - 'docker-compose.test.yml'
       - 'docker-compose-dev.yml'
+      - 'docker-compose.env.example'
+      - 'docker-compose.env.test.example'
       - '.github/workflows/compose-validate.yml'
 
 jobs:
@@ -28,11 +30,16 @@ jobs:
       # so this is a cheap guard against broken compose files. The prod file
       # references unset env vars (WATCHTOWER_TOKEN etc.) which compose
       # treats as empty strings — that is fine for a config check.
-      - name: Validate docker-compose.yml
+
+      # Default (production) interpolation — no env-file, every DEPLOY_* uses
+      # its baked-in default.
+      - name: Validate docker-compose.yml (prod defaults)
         run: docker compose -f docker-compose.yml config --quiet
 
-      - name: Validate docker-compose.test.yml
-        run: docker compose -f docker-compose.test.yml config --quiet
+      # Test deployment — feed in the test env file to make sure that path
+      # parses too (catches typos in docker-compose.env.test.example).
+      - name: Validate docker-compose.yml (test env-file)
+        run: docker compose --env-file docker-compose.env.test.example -f docker-compose.yml config --quiet
 
       - name: Validate docker-compose-dev.yml
         run: docker compose -f docker-compose-dev.yml config --quiet

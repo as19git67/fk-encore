@@ -105,11 +105,29 @@ Run the full stack (backend + frontend + ML services) via Docker Compose:
 
 ```bash
 cp docker-compose.env.example .env
-# edit .env – at minimum set ADMIN_PASSWORD
+# edit .env – at minimum set ADMIN_PASSWORD, WATCHTOWER_TOKEN,
+# NOMINATIM_PASSWORD, and DEPLOY_DATA_ROOT
 docker compose up -d
 ```
 
 The application is then reachable at <http://localhost:8080>.
+
+A single `docker-compose.yml` covers both production and any
+additional deployments (e.g. a PR-image test stack alongside prod
+on the same host). The deployment-specific values (container name
+suffix, image tag, host ports, volume bind paths, OSM scope, …)
+all flow from the env-file. To run a second deployment:
+
+```bash
+cp docker-compose.env.test.example .env.test
+# edit .env.test as needed
+docker compose --env-file .env.test up -d
+```
+
+That stack uses port 18080 by default, image tag `:test`, container
+names with a `-test` suffix, and a separate `test-osm-net` network
+so its per-region POI containers can't collide with production's.
+See [`DEPLOYMENT.md`](./DEPLOYMENT.md) for the full env reference.
 
 For active backend development, use the Encore CLI directly from the project
 root:

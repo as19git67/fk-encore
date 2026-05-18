@@ -22,6 +22,7 @@ import dbDefault from "../db/database";
 import { osmRegionImports } from "../db/schema";
 import { getDockerDriver, type DockerDriver } from "./docker-driver";
 import { slugToContainerSuffix } from "./importer";
+import { containerName } from "./naming";
 
 export interface RefreshDeps {
   db?: typeof dbDefault;
@@ -60,19 +61,19 @@ export async function refreshRegion(
   }
 
   const suffix = slugToContainerSuffix(slug);
-  const containerName = `nominatim-${suffix}`;
+  const nominatim = containerName("nominatim", suffix);
 
   // For a stopped region, the caller (admin UI) is expected to ensure
   // it's up first via the router's ensureReady. We don't auto-start
   // here so the refresh stays a focused operation.
-  const info = await driver.inspect(containerName);
+  const info = await driver.inspect(nominatim);
   if (info.state !== "running") {
     throw new Error(
-      `nominatim-${suffix} is in state ${info.state}; start the region before refreshing`,
+      `${nominatim} is in state ${info.state}; start the region before refreshing`,
     );
   }
 
-  const exec = await driver.exec(containerName, [
+  const exec = await driver.exec(nominatim, [
     "sudo",
     "-u",
     "nominatim",

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import db from "../db/database";
 import { osmRegionImports, photoScanQueue, photos, users } from "../db/schema";
@@ -379,5 +379,44 @@ describe("slugToContainerSuffix", () => {
 
   it("collapses repeated separators and trims edges", () => {
     expect(slugToContainerSuffix("/a//b/")).toBe("a-b");
+  });
+});
+
+describe("OSM_ADMIN_NAME_PREFIX flows through descriptor builders", () => {
+  const original = process.env.OSM_ADMIN_NAME_PREFIX;
+  afterEach(() => {
+    if (original === undefined) delete process.env.OSM_ADMIN_NAME_PREFIX;
+    else process.env.OSM_ADMIN_NAME_PREFIX = original;
+  });
+
+  it("scopes nominatim container and volume names", () => {
+    process.env.OSM_ADMIN_NAME_PREFIX = "test-";
+    const d = nominatimDescriptor(
+      "europe/germany/bayern",
+      "europe-germany-bayern",
+      "https://example.com/x.pbf",
+      "mediagis/nominatim:5.0",
+    );
+    expect(d.name).toBe("test-nominatim-europe-germany-bayern");
+    expect(d.volumes?.[0].hostPath).toBe(
+      "test-fk-encore-osm-nominatim-europe-germany-bayern",
+    );
+  });
+
+  it("scopes overpass container, volume, and the healthcheck URL", () => {
+    process.env.OSM_ADMIN_NAME_PREFIX = "test-";
+    const d = overpassDescriptor(
+      "europe-germany-bayern",
+      "https://example.com/x.pbf",
+      "wiktorn/overpass-api:latest",
+    );
+    expect(d.name).toBe("test-overpass-europe-germany-bayern");
+    expect(d.volumes?.[0].hostPath).toBe(
+      "test-fk-encore-osm-overpass-europe-germany-bayern",
+    );
+    expect(overpassHealthcheckUrl("europe-germany-bayern")).toBe(
+      "http://test-overpass-europe-germany-bayern/api/interpreter" +
+        "?data=%5Bout%3Ajson%5D%3Bout+count%3B",
+    );
   });
 });

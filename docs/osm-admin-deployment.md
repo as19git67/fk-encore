@@ -25,6 +25,7 @@ simulated). The real dockerode-backed driver is opt-in via env:
 ```
 OSM_ADMIN_DOCKER_DRIVER=dockerode
 OSM_ADMIN_DOCKER_NETWORK=osm-net
+OSM_ADMIN_NAME_PREFIX=             # optional, see "Sharing a host with another deployment" below
 ```
 
 When `OSM_ADMIN_DOCKER_DRIVER=dockerode`, the service talks to the host
@@ -98,6 +99,56 @@ Containers store their database under:
 
 Both are mounted via Docker named volumes, so the data survives container
 restarts and is removed only when the user explicitly deletes the region.
+
+## Sharing a host with another deployment
+
+Container and volume names are global on the host's Docker daemon. If
+two fk-encore deployments share the same host (typical: a `:test`
+instance alongside `:latest`), each must scope its OSM resources or
+they'd collide on a `name already in use` error and could even drop
+each other's data when "Entfernen" is clicked on either side.
+
+Solution: pick a distinct `OSM_ADMIN_NAME_PREFIX` per deployment.
+
+```yaml
+services:
+  # Production: keep the historical (empty) prefix so existing
+  # `fk-encore-osm-…` volumes stay intact across the upgrade.
+  app:
+    environment:
+      OSM_ADMIN_DOCKER_NETWORK: osm-net
+      # OSM_ADMIN_NAME_PREFIX: ""    # default; explicit for clarity
+
+  # Test: scope all OSM resources with `test-`.
+  app-test:
+    environment:
+      OSM_ADMIN_DOCKER_NETWORK: test-osm-net
+      OSM_ADMIN_NAME_PREFIX: "test-"
+```
+
+Resulting names with `OSM_ADMIN_NAME_PREFIX="test-"`:
+
+| Slug `europe/germany/bayern` | Container | Volume |
+|---|---|---|
+| Nominatim | `test-nominatim-europe-germany-bayern` | `test-fk-encore-osm-nominatim-europe-germany-bayern` |
+| Overpass | `test-overpass-europe-germany-bayern` | `test-fk-encore-osm-overpass-europe-germany-bayern` |
+
+The Docker network is **not** auto-prefixed — it's a separate env
+(`OSM_ADMIN_DOCKER_NETWORK`). Pick a distinct value per deployment and
+declare each network with `name: …` in its compose file so Compose
+doesn't add its own project prefix on top:
+
+```yaml
+networks:
+  test-osm-net:
+    name: test-osm-net   # don't let compose prefix it
+    driver: bridge
+```
+
+Switching prefixes on an existing deployment renames the resources
+the importer expects but doesn't migrate the actual containers or
+volumes. Plan the change with the legacy "Entfernen" cleanup or
+re-import the affected regions.
 
 ## Tuning env variables passed to the containers
 
