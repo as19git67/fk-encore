@@ -282,6 +282,59 @@ services:
       timeout: 5s
       retries: 10
 
+  # ── Geo database (PostgreSQL + PostGIS, per-region OSM data) ───────────────
+  # Backs the geo service below. One DB per imported region
+  # (nom_europe_germany_bayern, …) — created by the geo service's
+  # /import endpoint, not declared statically here.
+  geo-db:
+    image: postgis/postgis:16-3.4
+    container_name: fk-encore-geo-db${DEPLOY_NAME_SUFFIX:-}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${GEO_DB_PASSWORD:-postgres}
+      POSTGRES_DB: postgres
+    volumes:
+      - geo_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Geo service (reverse geocoding + POI lookup) ───────────────────────────
+  # Node HTTP service that owns osm2pgsql + osmium and talks to geo-db.
+  # Replaces the per-region Nominatim/Overpass Docker containers that
+  # osm-admin used to spawn at runtime.
+  geo:
+    build:
+      context: ./geo
+    image: fk-encore-geo:${DEPLOY_IMAGE_TAG:-latest}
+    container_name: fk-encore-geo${DEPLOY_NAME_SUFFIX:-}
+    restart: unless-stopped
+    user: "568:568"
+    depends_on:
+      geo-db:
+        condition: service_healthy
+    environment:
+      GEO_PORT: "8080"
+      GEO_DB_HOST: geo-db
+      GEO_DB_PORT: "5432"
+      GEO_DB_USER: postgres
+      GEO_DB_PASSWORD: ${GEO_DB_PASSWORD:-postgres}
+      GEO_DB_ADMIN_DB: postgres
+      GEO_SHARED_SECRET: ${GEO_SHARED_SECRET:-}
+      GEO_OSM2PGSQL_CACHE_MB: ${GEO_OSM2PGSQL_CACHE_MB:-2000}
+      GEO_OSM2PGSQL_PROCS: ${GEO_OSM2PGSQL_PROCS:-2}
+    volumes:
+      - geo_data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   # ── Watchtower ────────────────────────────────────────────────────────────
   # Observes only containers carrying the configured scope label so two
   # deployments on the same host stay independent.
@@ -378,3 +431,15 @@ volumes:
       type: none
       o: bind
       device: ${DEPLOY_DATA_ROOT:-./data}/finance-export
+  geo_db_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DEPLOY_DATA_ROOT:-./data}/geo-db
+  geo_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DEPLOY_DATA_ROOT:-./data}/geo
