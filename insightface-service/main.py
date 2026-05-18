@@ -1,6 +1,65 @@
 import os
 from fastapi import FastAPI, UploadFile, File, HTTPException
 import numpy as np
+
+
+def _onnx_intra_op_threads() -> int:
+    """Number of intra-op threads to hand to ONNX Runtime.
+
+    ORT otherwise queries `std::thread::hardware_concurrency()`, which
+    reports the full host topology — not the cpuset-restricted view
+    the container actually runs under. It then tries to pin each
+    worker thread to a logical CPU index and fails with
+    `pthread_setaffinity_np failed … mask: {14, }` (EINVAL) for any
+    index outside the cpuset. Reading `sched_getaffinity` gives the
+    actually-allowed CPU count, and supplying *any* explicit
+    `intra_op_num_threads` value silences ORT's automatic pinning.
+    """
+    override = os.environ.get("ORT_INTRA_OP_NUM_THREADS")
+    if override:
+        return max(1, int(override))
+    if hasattr(os, "sched_getaffinity"):
+        return max(1, len(os.sched_getaffinity(0)))
+    return max(1, os.cpu_count() or 1)
+
+
+def _install_ort_thread_cap() -> None:
+    """Monkey-patch `onnxruntime.InferenceSession` so InsightFace's
+    internal session construction picks up explicit SessionOptions.
+
+    InsightFace's model_zoo builds `InferenceSession(path, providers=…)`
+    without a `sess_options` argument, so this is the only handle we
+    have to set `intra_op_num_threads`. The patch is a no-op when the
+    caller already supplies its own SessionOptions.
+
+    Idempotent — re-installing won't stack patches.
+    """
+    try:
+        import onnxruntime as ort  # type: ignore
+    except ImportError:
+        # Tests stub `insightface` and `cv2` but not `onnxruntime`.
+        # Production always has the real package via requirements.txt.
+        return
+
+    if getattr(ort.InferenceSession.__init__, "_fk_ort_thread_cap", False):
+        return
+
+    threads = _onnx_intra_op_threads()
+    orig_init = ort.InferenceSession.__init__
+
+    def patched_init(self, path_or_bytes, sess_options=None, *args, **kwargs):
+        if sess_options is None:
+            sess_options = ort.SessionOptions()
+            sess_options.intra_op_num_threads = threads
+            sess_options.inter_op_num_threads = 1
+        return orig_init(self, path_or_bytes, sess_options, *args, **kwargs)
+
+    patched_init._fk_ort_thread_cap = True  # type: ignore[attr-defined]
+    ort.InferenceSession.__init__ = patched_init  # type: ignore[method-assign]
+
+
+_install_ort_thread_cap()
+
 import insightface
 from insightface.app import FaceAnalysis
 import cv2
