@@ -589,6 +589,12 @@ function recordViewport(photoId: number, el: HTMLElement | null) {
   if (!el) return
   const rect = el.getBoundingClientRect()
   if (rect.width <= 0 || rect.height <= 0) return
+  // Vue invokes inline function `:ref` callbacks on every component
+  // update — without this idempotency guard, writing the new Map below
+  // triggers a re-render which re-invokes the ref which writes again,
+  // freezing the browser as soon as the compare-view mounts.
+  const existing = viewportByPhoto.value.get(photoId)
+  if (existing && existing.w === rect.width && existing.h === rect.height) return
   viewportByPhoto.value = new Map(viewportByPhoto.value).set(photoId, {
     w: rect.width,
     h: rect.height,
