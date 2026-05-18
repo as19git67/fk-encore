@@ -1428,7 +1428,7 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
       @show-details="fullscreenDetailsOpen = !fullscreenDetailsOpen"
       @toggle-cover="handleSetMapCover"
     >
-      <template #topbar-actions-before>
+      <template #actions-before>
         <Button
           icon="pi pi-image"
           rounded text
@@ -1495,7 +1495,7 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
       @show-details="fullscreenDetailsOpen = !fullscreenDetailsOpen"
       @toggle-cover="handleSetMapCover"
     >
-      <template #topbar-actions-before>
+      <template #actions-before>
         <Button
           icon="pi pi-image"
           rounded text
