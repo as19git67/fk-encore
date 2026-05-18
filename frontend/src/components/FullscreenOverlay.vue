@@ -366,7 +366,7 @@ function handleKeydown(e: KeyboardEvent) {
       // Close the details flyout first if it is open; otherwise close the
       // whole fullscreen overlay.
       if (props.detailsActive) emit('show-details')
-      else emit('close')
+      else void closeOverlay()
     }
   } else if (e.key === 'f' || e.key === 'F') {
     // Skip the hotkey while typing in an input (e.g. description textarea).
@@ -519,6 +519,13 @@ async function enterRealFullscreen() {
 }
 
 async function exitRealFullscreen() {
+  // Guard against calling exitFullscreen when there's nothing to exit —
+  // the browser auto-exits when the fullscreen element leaves the DOM, so
+  // by the time the component tears down the fullscreen stack is already
+  // empty. Calling exitFullscreen() on a non-fullscreen document throws
+  // "Document not active" in Chrome and can leave the browser in a
+  // half-torn-down state that blocks input.
+  if (!getFullscreenElement()) return
   const d = document as Document & {
     webkitExitFullscreen?: () => Promise<void>
     msExitFullscreen?: () => Promise<void>
@@ -535,6 +542,27 @@ async function exitRealFullscreen() {
 async function toggleRealFullscreen() {
   if (isRealFullscreen.value) await exitRealFullscreen()
   else await enterRealFullscreen()
+}
+
+/**
+ * Close the overlay, exiting real fullscreen first when active. Awaiting
+ * the exit before emitting `close` keeps the unmount sequence ordered:
+ * browser exits fullscreen → fullscreenchange fires → state settles →
+ * parent unmounts us. Without this, the parent could remove the element
+ * mid-exit and trip the browser's fullscreen state machine.
+ */
+async function closeOverlay() {
+  if (isRealFullscreen.value) {
+    try {
+      await Promise.race([
+        exitRealFullscreen(),
+        new Promise<void>((resolve) => setTimeout(resolve, 250)),
+      ])
+    } catch {
+      // ignored — we're closing anyway
+    }
+  }
+  emit('close')
 }
 
 // When the browser leaves real fullscreen because the user pressed ESC,
@@ -561,17 +589,17 @@ onUnmounted(() => {
   document.removeEventListener('fullscreenchange', onFullscreenChange)
   document.removeEventListener('webkitfullscreenchange', onFullscreenChange)
   document.removeEventListener('msfullscreenchange', onFullscreenChange)
-  // If the overlay is being torn down while still in real fullscreen
-  // (e.g. user pressed Close without exiting first), drop fullscreen.
-  if (getFullscreenElement() === overlayRef.value) {
-    void exitRealFullscreen()
-  }
+  // No explicit exit attempt here — the browser auto-exits fullscreen
+  // when the fullscreen element leaves the DOM, and `closeOverlay()`
+  // already awaits the exit on the explicit close paths. Calling
+  // exitFullscreen here would race the auto-exit and trip Chrome's
+  // "Document not active" error.
 })
 </script>
 
 <template>
   <Teleport to="body">
-  <div ref="overlayRef" class="fullscreen-overlay" @click="emit('close')">
+  <div ref="overlayRef" class="fullscreen-overlay" @click="closeOverlay">
     <!-- Preload neighbours only after current image has loaded -->
     <div v-if="currentLoaded" style="display: none">
       <HeicImage v-if="prevPhoto" :src="neighbourPreloadSrc(prevPhoto)" />
@@ -625,7 +653,7 @@ onUnmounted(() => {
 
       <!-- Top bar: back + date/location (centered) + counter -->
       <div class="fs-topbar" @click.stop>
-        <Button icon="pi pi-arrow-left" rounded text @click="emit('close')" />
+        <Button icon="pi pi-arrow-left" rounded text @click="closeOverlay" />
 
         <div class="fs-center">
           <!-- Slot for custom center content (e.g. person name + rename btn) -->
