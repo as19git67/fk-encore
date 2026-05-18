@@ -3,16 +3,24 @@
  *
  *   POST /import { slug, postgresDb, pbfUrl }
  *
- * Steps:
+ * Imports are **asynchronous**: the HTTP call returns immediately with
+ * the queued status, the actual work runs as an in-process background
+ * task. `getImportStatus(postgresDb)` reports progress, and the caller
+ * (osm-admin's importer tick) polls until the state is `ready` or
+ * `failed`.
+ *
+ * The in-memory tracking is lost on a service restart — when that
+ * happens, an existing imported DB (with tables) is recognised by
+ * reconcileImportStatus() so the tick doesn't relaunch a still-good
+ * import.
+ *
+ * Steps inside runImport:
  *   1. Download PBF to /data/pbf/<slug>.pbf (skipped if file present).
  *   2. CREATE DATABASE <postgresDb> on geo-db (idempotent).
  *   3. CREATE EXTENSION postgis on the new DB.
  *   4. Run osm2pgsql --create with the flex style in src/osm2pgsql.lua.
  *   5. Add the trigram + GIN indexes the runtime queries need.
  *   6. ANALYZE.
- *
- * The handler streams osm2pgsql stdout/stderr into the parent process'
- * log so a stuck import is debuggable from `docker compose logs geo`.
  */
 
 import { mkdir } from "node:fs/promises";
@@ -38,17 +46,114 @@ export interface ImportRequest {
   pbfUrl: string;
 }
 
-export interface ImportResult {
+export type ImportState = "running" | "ready" | "failed";
+
+export interface ImportStatus {
   slug: string;
   postgresDb: string;
+  state: ImportState;
+  startedAt: string;
+  finishedAt?: string;
+  pbfSizeMb?: number;
+  importedAt?: string;
+  durationSeconds?: number;
+  error?: string;
+}
+
+const tracker = new Map<string, ImportStatus>();
+
+export function getImportStatus(postgresDb: string): ImportStatus | null {
+  return tracker.get(postgresDb) ?? null;
+}
+
+/**
+ * If the region database already exists with the expected tables,
+ * mark its status as ready so a freshly restarted geo service does
+ * not relaunch a successful import. Called lazily on the first status
+ * lookup for an unknown postgresDb.
+ */
+export async function reconcileImportStatus(
+  postgresDb: string,
+): Promise<ImportStatus | null> {
+  const cached = tracker.get(postgresDb);
+  if (cached) return cached;
+  if (!/^[a-z0-9_]+$/.test(postgresDb)) return null;
+
+  const admin = adminPool();
+  const exists = await admin.query(
+    `SELECT 1 FROM pg_database WHERE datname = $1`,
+    [postgresDb],
+  );
+  if (exists.rowCount === 0) return null;
+
+  // The DB exists — does it have the runtime tables?
+  try {
+    const pool = poolFor(postgresDb);
+    const tables = await pool.query<{ relname: string }>(
+      `SELECT c.relname
+         FROM pg_class c
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public'
+          AND c.relkind = 'r'
+          AND c.relname IN ('osm_highways', 'osm_pois', 'osm_admin')`,
+    );
+    if (tables.rowCount === 3) {
+      const status: ImportStatus = {
+        slug: postgresDb.replace(/^nom_/, "").replace(/_/g, "/"),
+        postgresDb,
+        state: "ready",
+        startedAt: new Date(0).toISOString(),
+        finishedAt: new Date(0).toISOString(),
+        importedAt: new Date(0).toISOString(),
+      };
+      tracker.set(postgresDb, status);
+      return status;
+    }
+  } catch {
+    // Pool error — treat as unknown.
+  }
+  return null;
+}
+
+export function startImport(req: ImportRequest): ImportStatus {
+  validateRequest(req);
+  const existing = tracker.get(req.postgresDb);
+  if (existing && existing.state === "running") {
+    return existing;
+  }
+  const status: ImportStatus = {
+    slug: req.slug,
+    postgresDb: req.postgresDb,
+    state: "running",
+    startedAt: new Date().toISOString(),
+  };
+  tracker.set(req.postgresDb, status);
+
+  // Fire and forget. Error handling lives in finalize().
+  void runImport(req)
+    .then((result) => finalize(req.postgresDb, { ...status, ...result, state: "ready", finishedAt: new Date().toISOString() }))
+    .catch((err) => finalize(req.postgresDb, {
+      ...status,
+      state: "failed",
+      finishedAt: new Date().toISOString(),
+      error: err instanceof Error ? err.message : String(err),
+    }));
+
+  return status;
+}
+
+function finalize(postgresDb: string, status: ImportStatus): void {
+  tracker.set(postgresDb, status);
+  console.log(`[geo] import ${postgresDb}: ${status.state}${status.error ? ` (${status.error})` : ""}`);
+}
+
+interface RunResult {
   pbfSizeMb: number;
   importedAt: string;
   durationSeconds: number;
 }
 
-export async function runImport(req: ImportRequest): Promise<ImportResult> {
-  validateRequest(req);
-
+async function runImport(req: ImportRequest): Promise<RunResult> {
   await mkdir(PBF_DIR, { recursive: true });
   await mkdir(FLAT_NODE_DIR, { recursive: true });
 
@@ -68,8 +173,6 @@ export async function runImport(req: ImportRequest): Promise<ImportResult> {
   await runAnalyze(req.postgresDb);
 
   return {
-    slug: req.slug,
-    postgresDb: req.postgresDb,
     pbfSizeMb: Math.round(pbfBytes / (1024 * 1024)),
     importedAt: new Date().toISOString(),
     durationSeconds: Math.round((Date.now() - startedAt) / 1000),
@@ -80,6 +183,7 @@ export async function dropRegion(postgresDb: string): Promise<boolean> {
   // node-pg can't run DROP DATABASE while clients are connected, so we
   // terminate them first via pg_terminate_backend.
   await dropPool(postgresDb);
+  tracker.delete(postgresDb);
   const admin = adminPool();
   await admin.query(
     `SELECT pg_terminate_backend(pid)
@@ -119,8 +223,6 @@ async function downloadPbf(url: string, target: string): Promise<void> {
     return;
   }
   console.log(`[geo] downloading ${url} → ${target}`);
-  // curl over spawn: streams to disk without buffering the full PBF
-  // (which can be multiple GB) in memory.
   await execCommand("curl", [
     "--fail",
     "--location",
@@ -146,9 +248,6 @@ async function ensureDatabase(name: string): Promise<void> {
 async function ensurePostgisAndSchema(database: string): Promise<void> {
   const pool = poolFor(database);
   await pool.query(`CREATE EXTENSION IF NOT EXISTS postgis`);
-  // osm2pgsql --create blows away existing tables, so we don't pre-
-  // create anything here. We do reset the search_path for any future
-  // sessions.
 }
 
 async function runOsm2pgsql(
@@ -160,7 +259,7 @@ async function runOsm2pgsql(
   const args = [
     "--create",
     "--slim",
-    "--drop",                  // we re-import full PBF every time, no diff state needed for now
+    "--drop",
     "--flat-nodes", flatNodePath,
     "--output", "flex",
     "--style", LUA_STYLE,
@@ -178,8 +277,6 @@ async function runOsm2pgsql(
 
 async function postImportIndexes(database: string): Promise<void> {
   const pool = poolFor(database);
-  // The Flex style emits GIST(geom) automatically when not_null is
-  // set, but we want a few extras for the runtime query plans.
   await pool.query(`CREATE INDEX IF NOT EXISTS osm_pois_kind_idx     ON osm_pois (kind)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS osm_pois_tags_idx     ON osm_pois USING GIN (tags)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS osm_admin_level_idx   ON osm_admin (admin_level)`);
@@ -221,3 +318,4 @@ function quoteIdent(name: string): string {
 function slugToFile(slug: string): string {
   return slug.replace(/[\\/]+/g, "_");
 }
+

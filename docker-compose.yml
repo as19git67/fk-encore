@@ -56,12 +56,8 @@ services:
     container_name: fk-encore-app${DEPLOY_NAME_SUFFIX:-}
     restart: unless-stopped
     # Run as the TrueNAS SCALE "apps" user (UID/GID 568). Ensure the bind-
-    # mounted host directories are owned by 568:568. Set DEPLOY_HOST_DOCKER_GID
-    # in `.env` to your host's docker group GID so the user can also reach
-    # /var/run/docker.sock (needed for the osm-admin POI service).
+    # mounted host directories are owned by 568:568.
     user: "568:568"
-    group_add:
-      - "${DEPLOY_HOST_DOCKER_GID:-999}"
     labels:
       com.centurylinklabs.watchtower.scope: ${DEPLOY_WATCHTOWER_SCOPE:-fkprod}
     depends_on:
@@ -109,13 +105,11 @@ services:
       LLM_SERVICE_URL: http://llm_service:8000
       # ENABLE_LANDMARKS retired (Epic #383) — use ENABLE_POI_DETECTION instead.
       ENABLE_POI_DETECTION: ${ENABLE_POI_DETECTION:-false}
-      # OSM admin (Epic #383). `OSM_ADMIN_NAME_PREFIX` scopes the per-region
-      # Docker container + volume names so two deployments on the same host
-      # don't collide on `nominatim-europe-germany-bayern` etc.
-      OSM_ADMIN_DOCKER_DRIVER: ${OSM_ADMIN_DOCKER_DRIVER:-dockerode}
-      OSM_ADMIN_DOCKER_NETWORK: ${DEPLOY_OSM_NETWORK:-osm-net}
-      OSM_ADMIN_NAME_PREFIX: ${DEPLOY_OSM_NAME_PREFIX:-}
-      NOMINATIM_PASSWORD: ${NOMINATIM_PASSWORD:-changeme}
+      # Geo service (reverse geocoding + POI lookup). Talks to the geo
+      # container over the compose default network. GEO_SHARED_SECRET is
+      # optional but recommended in shared-host deployments.
+      GEO_SERVICE_URL: ${GEO_SERVICE_URL:-http://geo:8080}
+      GEO_SHARED_SECRET: ${GEO_SHARED_SECRET:-}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
@@ -136,12 +130,10 @@ services:
       FINANCE_IMPORT_DIR: /mnt/data/finance-import
       FINANCE_EXPORT_DIR: /mnt/data/finance-export
       FINANCE_EXPORT_KEEP: ${FINANCE_EXPORT_KEEP:-30}
-    # No explicit `networks:` block — the app is on compose's `default`
-    # network and attaches itself to the OSM bridge network at startup
-    # (see osm-admin/encore.service.ts → DockerDriver.ensureNetwork).
-    # That way the OSM network's lifecycle is owned by osm-admin and
-    # `docker compose down` never races the runtime-spawned per-region
-    # Nominatim/Overpass containers attached to it.
+    # The app uses compose's `default` network to reach the geo service.
+    # The legacy Docker socket mount + OSM bridge network attachment is
+    # gone: geo replaces the runtime-spawned per-region Nominatim/Overpass
+    # containers, so the app no longer needs Docker daemon access.
     volumes:
       - photos:/mnt/data/photos
       - thumbnails:/mnt/data/thumbnails
@@ -150,7 +142,6 @@ services:
       - finance_import:/mnt/data/finance-import
       - finance_export:/mnt/data/finance-export
       - backup:/mnt/backup
-      - /var/run/docker.sock:/var/run/docker.sock
 
   # ── InsightFace Service (Face Detection) ───────────────────────────────────
   insightface:
@@ -360,11 +351,8 @@ services:
       - "${DEPLOY_HOST_PORT_WATCHTOWER:-9000}:8080"
 
 # ── Networks ──────────────────────────────────────────────────────────────────
-# Only the implicit compose `default` bridge network is managed here.
-# The OSM bridge network (used by the per-region Nominatim/Overpass
-# containers + the app) is created and owned by osm-admin at runtime —
-# see osm-admin/encore.service.ts → DockerDriver.ensureNetwork. Its name
-# is configured via DEPLOY_OSM_NETWORK so two deployments stay isolated.
+# Only the implicit compose `default` bridge network is needed; the geo
+# service is reached over it by service name.
 
 # ── Volumes ───────────────────────────────────────────────────────────────────
 # Every persisted volume binds into ${DEPLOY_DATA_ROOT}/<subdir>. Override

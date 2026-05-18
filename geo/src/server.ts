@@ -19,7 +19,13 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { adminPool, closeAllPools } from "./db.ts";
 import { reverseGeocode } from "./reverse.ts";
 import { findPoiCandidates } from "./pois.ts";
-import { dropRegion, runImport, type ImportRequest } from "./import.ts";
+import {
+  dropRegion,
+  getImportStatus,
+  reconcileImportStatus,
+  startImport,
+  type ImportRequest,
+} from "./import.ts";
 
 const PORT = parseInt(process.env.GEO_PORT ?? "8080", 10);
 const SHARED_SECRET = process.env.GEO_SHARED_SECRET ?? "";
@@ -105,8 +111,25 @@ app.post("/import", async (req, res, next) => {
     const slug = requireString(body.slug, "slug");
     const postgresDb = requireString(body.postgresDb, "postgresDb");
     const pbfUrl = requireString(body.pbfUrl, "pbfUrl");
-    const result = await runImport({ slug, postgresDb, pbfUrl });
-    res.json(result);
+    const status = startImport({ slug, postgresDb, pbfUrl });
+    res.status(202).json(status);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get("/imports/:postgresDb", async (req, res, next) => {
+  try {
+    const postgresDb = req.params.postgresDb ?? "";
+    if (!/^[a-z0-9_]+$/.test(postgresDb)) {
+      throw new HttpError(400, `postgresDb must match [a-z0-9_]+, got '${postgresDb}'`);
+    }
+    const status = getImportStatus(postgresDb) ?? await reconcileImportStatus(postgresDb);
+    if (!status) {
+      res.status(404).json({ error: "no import known for this database" });
+      return;
+    }
+    res.json(status);
   } catch (err) {
     next(err);
   }

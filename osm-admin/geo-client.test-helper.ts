@@ -1,0 +1,118 @@
+/**
+ * In-memory test double for the geo HTTP client.
+ *
+ * Used by every osm-admin unit test that previously injected an
+ * InMemoryDockerDriver. The double keeps a small slice of state per
+ * `postgresDb`: known imports (with their lifecycle state) and the
+ * canned responses for reverse/findPois that the caller queues with
+ * `setReverseResult` / `setPoiCandidates`.
+ *
+ * Default behaviour:
+ *   - `startImport` flips the database's state to "running" and
+ *     auto-transitions to "ready" on the next `getImportStatus` call
+ *     unless `setImportState` overrode it explicitly.
+ *   - `reverse` returns the canned result for the given postgresDb, or
+ *     a generic stub when none is set.
+ *   - `findPois` returns the canned candidates list, or an empty array.
+ */
+
+import type {
+  GeoClient,
+  GeoImportRequest,
+  GeoImportStatus,
+  GeoPoiCandidate,
+  GeoPoiQueryOptions,
+  GeoReverseResult,
+} from "./geo-client";
+
+interface ImportEntry {
+  state: GeoImportStatus["state"];
+  status: GeoImportStatus;
+}
+
+export class InMemoryGeoClient implements GeoClient {
+  private healthy = true;
+  private imports = new Map<string, ImportEntry>();
+  private reverseResults = new Map<string, GeoReverseResult["result"]>();
+  private poiCandidates = new Map<string, GeoPoiCandidate[]>();
+  private droppedRegions: string[] = [];
+  private startImportCalls: GeoImportRequest[] = [];
+
+  setHealthy(v: boolean): void { this.healthy = v; }
+
+  setImportState(postgresDb: string, state: GeoImportStatus["state"], extras: Partial<GeoImportStatus> = {}): void {
+    const base: GeoImportStatus = {
+      slug: postgresDb,
+      postgresDb,
+      state,
+      startedAt: new Date(0).toISOString(),
+      ...extras,
+    };
+    this.imports.set(postgresDb, { state, status: base });
+  }
+
+  setReverseResult(postgresDb: string, result: GeoReverseResult["result"]): void {
+    this.reverseResults.set(postgresDb, result);
+  }
+
+  setPoiCandidates(postgresDb: string, candidates: GeoPoiCandidate[]): void {
+    this.poiCandidates.set(postgresDb, candidates);
+  }
+
+  /** Test inspection helpers. */
+  getStartImportCalls(): GeoImportRequest[] { return [...this.startImportCalls]; }
+  getDroppedRegions(): string[] { return [...this.droppedRegions]; }
+
+  async health(): Promise<boolean> {
+    return this.healthy;
+  }
+
+  async startImport(req: GeoImportRequest): Promise<GeoImportStatus> {
+    this.startImportCalls.push({ ...req });
+    const existing = this.imports.get(req.postgresDb);
+    if (existing && existing.state === "running") return existing.status;
+    const status: GeoImportStatus = {
+      slug: req.slug,
+      postgresDb: req.postgresDb,
+      state: "running",
+      startedAt: new Date(0).toISOString(),
+    };
+    this.imports.set(req.postgresDb, { state: "running", status });
+    return status;
+  }
+
+  async getImportStatus(postgresDb: string): Promise<GeoImportStatus | null> {
+    const entry = this.imports.get(postgresDb);
+    return entry?.status ?? null;
+  }
+
+  async reverse(
+    postgresDb: string,
+    lat: number,
+    lon: number,
+  ): Promise<GeoReverseResult["result"]> {
+    const result = this.reverseResults.get(postgresDb);
+    if (result) return result;
+    return {
+      display_name: `stub for ${postgresDb} @ (${lat},${lon})`,
+      address: { country: "Stubland" },
+    };
+  }
+
+  async findPois(
+    postgresDb: string,
+    _lat: number,
+    _lon: number,
+    _opts?: GeoPoiQueryOptions,
+  ): Promise<GeoPoiCandidate[]> {
+    return this.poiCandidates.get(postgresDb) ?? [];
+  }
+
+  async dropRegion(postgresDb: string): Promise<boolean> {
+    this.droppedRegions.push(postgresDb);
+    const had = this.imports.delete(postgresDb);
+    this.reverseResults.delete(postgresDb);
+    this.poiCandidates.delete(postgresDb);
+    return had;
+  }
+}
