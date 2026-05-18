@@ -76,7 +76,7 @@ export async function seed(db: any): Promise<void> {
     { key: "finance.accounts.manage", description: "Manage bank contacts and accounts" },
     { key: "finance.admin", description: "Finance admin (ACL bypass, data import)" },
     // --- POI detection / OSM admin (Epic #383) ---
-    { key: "osm.admin", description: "Manage self-hosted Nominatim/Overpass region imports" },
+    { key: "osm.admin", description: "Manage self-hosted PostGIS region imports for reverse geocoding + POI lookup" },
   ];
 
   // Permissions that are NEVER auto-assigned to the Admin role.

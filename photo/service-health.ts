@@ -6,8 +6,8 @@
  *   - embedding    (CLIP / DINOv2)
  *
  * The `landmark` (Grounding DINO) service has been retired in Epic
- * #383; POI detection is handled by osm-admin's per-region Nominatim
- * + Overpass shards instead.
+ * #383; POI detection is handled by the geo service's PostGIS-backed
+ * /pois endpoint instead.
  *
  * Each service is pinged at a configurable interval.
  * Workers that depend on a service can call `assertServiceAvailable()` or

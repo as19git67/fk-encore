@@ -2,8 +2,8 @@
  * End-to-end POI detection pipeline for one photo (Epic #383).
  *
  *   1. Fetch the photo row (lat/lon/heading + DINOv2 embedding).
- *   2. Pick the regional Overpass shard (via region-router) and
- *      run a POI radius query.
+ *   2. Pick the regional PostGIS database (via region-router) and
+ *      ask the geo service's /pois endpoint for radius candidates.
  *   3. Enrich each candidate's wikidata QID through
  *      `poi-reference-cache` (label, image URL, Wikipedia link).
  *   4. Ensure the DINOv2 reference embeddings are populated (lazily
@@ -14,8 +14,8 @@
  *
  * The function is the public entry-point of the `poi_detection` scan
  * worker. It treats every external dependency as soft: an unreachable
- * Overpass / Wikidata / embedding service produces an empty match
- * list with a diagnostic reason rather than throwing.
+ * geo / Wikidata / embedding service produces an empty match list
+ * with a diagnostic reason rather than throwing.
  */
 
 import { eq, sql } from "drizzle-orm";

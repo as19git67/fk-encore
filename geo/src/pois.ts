@@ -1,9 +1,11 @@
 /**
- * POI candidate lookup — direct PostGIS replacement for the Overpass
- * radius+tag-filter query in osm-admin/overpass-client.ts.
+ * POI candidate lookup — radius + tag-filter query against the per-
+ * region osm_pois table. Returns up to `maxCandidates` candidates
+ * sorted by ascending distance from the query point.
  *
- * The wire shape mirrors what fetchPoiCandidates returns so the
- * caller can drop in a one-line URL swap with no parser changes.
+ * The response shape mirrors the OverpassCandidate type that the
+ * osm-admin POI matcher consumed historically, so the caller can
+ * treat geo as a drop-in replacement.
  */
 
 import { poolFor } from "./db.ts";

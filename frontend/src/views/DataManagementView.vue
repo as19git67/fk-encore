@@ -579,7 +579,7 @@ async function handleRefreshOsmRegion(slug: string) {
 }
 
 async function handleDeleteOsmRegion(slug: string) {
-  if (!window.confirm(`Region ${slug} entfernen? Stoppt + löscht die zwei Container (nominatim-…, overpass-…), droppt die zwei Volumes (Postgres-Daten gehen verloren, mehrere GB) und entfernt die DB-Zeile. Nicht rückgängig zu machen.`)) return
+  if (!window.confirm(`Region ${slug} entfernen? Droppt die PostGIS-Datenbank im geo-Service (Postgres-Daten gehen verloren, mehrere GB) und entfernt die DB-Zeile. Nicht rückgängig zu machen.`)) return
   osmLoading.value = true
   try {
     await deleteOsmRegion(slug)
@@ -1112,9 +1112,9 @@ onBeforeUnmount(() => {
     <div v-if="canManageOsm" class="data-management-group">
       <h3>OSM-Regionen</h3>
       <p>
-        Selbst gehostete Nominatim- und Overpass-Container pro Geofabrik-Region.
-        Wird für die POI-Erkennung in Fotos verwendet. Status aktualisiert sich automatisch
-        alle 5 Sekunden.
+        Selbst gehosteter geo-Service mit einer PostGIS-Datenbank pro Geofabrik-Region.
+        Wird für Reverse-Geocoding und die POI-Erkennung in Fotos verwendet. Status
+        aktualisiert sich automatisch alle 5 Sekunden.
       </p>
 
       <Message
