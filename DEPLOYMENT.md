@@ -355,9 +355,16 @@ docker compose restart app
 
 ### Stop everything and clean up
 
+The per-region Nominatim/Overpass containers are spawned by osm-admin
+at runtime and aren't part of compose. Run the helper first so the OSM
+bridge network can be released, otherwise `docker compose down` fails
+with `Network … Resource is still in use`.
+
 ```bash
-docker compose down          # Stop services
-docker compose down -v       # Stop services + delete volumes (CAUTION: data loss!)
+./scripts/host/osm-down.sh            # prod (empty prefix)
+./scripts/host/osm-down.sh test-      # test stack
+docker compose down                   # Stop services
+docker compose down -v                # Stop services + delete volumes (CAUTION: data loss!)
 ```
 
 ## Troubleshooting
