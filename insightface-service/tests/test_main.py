@@ -4,6 +4,7 @@ InsightFace and OpenCV are mocked so the tests run in CI without GPU or
 model downloads.
 """
 
+import os
 import sys
 import io
 import types
@@ -165,3 +166,88 @@ class TestDetectEndpoint:
         assert body["width"] == 640
         # restore default mock
         cv2_stub.imdecode = MagicMock(return_value=np.zeros((100, 100, 3), dtype=np.uint8))
+
+
+# ---------------------------------------------------------------------------
+# ORT thread-cap monkey-patch (regression test for the
+# `pthread_setaffinity_np failed … mask: {14, }` warning observed under
+# the production cpuset=0-11 pinning).
+# ---------------------------------------------------------------------------
+
+class TestOrtThreadCap:
+    """Build a tiny `onnxruntime` stub, run _install_ort_thread_cap()
+    against it, and assert the patched __init__ injects SessionOptions
+    on calls that don't supply their own.
+    """
+
+    def _build_ort_stub(self):
+        ort_stub = types.ModuleType("onnxruntime")
+
+        class _SessionOptions:
+            def __init__(self):
+                self.intra_op_num_threads = 0
+                self.inter_op_num_threads = 0
+
+        captured = {}
+
+        class _InferenceSession:
+            def __init__(self, path_or_bytes, sess_options=None, *args, **kwargs):
+                captured["sess_options"] = sess_options
+                captured["path"] = path_or_bytes
+                captured["kwargs"] = kwargs
+
+        ort_stub.SessionOptions = _SessionOptions
+        ort_stub.InferenceSession = _InferenceSession
+        return ort_stub, captured
+
+    def test_patch_injects_session_options_when_caller_passes_none(self, monkeypatch):
+        ort_stub, captured = self._build_ort_stub()
+        monkeypatch.setitem(sys.modules, "onnxruntime", ort_stub)
+        monkeypatch.setenv("ORT_INTRA_OP_NUM_THREADS", "8")
+
+        insightface_main._install_ort_thread_cap()
+        ort_stub.InferenceSession("model.onnx", providers=["CPUExecutionProvider"])
+
+        assert captured["sess_options"] is not None
+        assert captured["sess_options"].intra_op_num_threads == 8
+        assert captured["sess_options"].inter_op_num_threads == 1
+
+    def test_patch_respects_explicit_session_options(self, monkeypatch):
+        ort_stub, captured = self._build_ort_stub()
+        monkeypatch.setitem(sys.modules, "onnxruntime", ort_stub)
+        monkeypatch.setenv("ORT_INTRA_OP_NUM_THREADS", "4")
+
+        insightface_main._install_ort_thread_cap()
+        explicit = ort_stub.SessionOptions()
+        explicit.intra_op_num_threads = 2
+        ort_stub.InferenceSession("model.onnx", sess_options=explicit)
+
+        # Explicit options must not be overridden.
+        assert captured["sess_options"] is explicit
+        assert captured["sess_options"].intra_op_num_threads == 2
+
+    def test_patch_is_idempotent(self, monkeypatch):
+        ort_stub, _ = self._build_ort_stub()
+        monkeypatch.setitem(sys.modules, "onnxruntime", ort_stub)
+
+        insightface_main._install_ort_thread_cap()
+        first = ort_stub.InferenceSession.__init__
+        insightface_main._install_ort_thread_cap()
+        second = ort_stub.InferenceSession.__init__
+
+        assert first is second
+        assert getattr(second, "_fk_ort_thread_cap", False) is True
+
+    def test_thread_count_falls_back_to_sched_getaffinity(self, monkeypatch):
+        monkeypatch.delenv("ORT_INTRA_OP_NUM_THREADS", raising=False)
+        if not hasattr(os, "sched_getaffinity"):
+            pytest.skip("sched_getaffinity unavailable on this platform")
+
+        # Real cpuset count on the test host — just assert sanity.
+        n = insightface_main._onnx_intra_op_threads()
+        assert n >= 1
+        assert n == len(os.sched_getaffinity(0))
+
+    def test_thread_count_env_override_wins(self, monkeypatch):
+        monkeypatch.setenv("ORT_INTRA_OP_NUM_THREADS", "3")
+        assert insightface_main._onnx_intra_op_threads() == 3
