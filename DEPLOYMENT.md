@@ -64,6 +64,9 @@ The full list of `DEPLOY_*` overrides:
 | `DEPLOY_OSM_NAME_PREFIX` | _(empty)_ | Scopes per-region nominatim / overpass containers + volumes. |
 | `DEPLOY_OSM_NETWORK` | `osm-net` | Docker bridge the app + per-region containers share. Created at runtime by osm-admin (not by compose), so it survives `docker compose down`. |
 | `DEPLOY_DATA_ROOT` | `./data` | Bind-mount root for every persisted volume. |
+| `DEPLOY_INSIGHTFACE_START_PERIOD` | `180s` | Healthcheck grace for insightface — covers cold buffalo_l load. |
+| `DEPLOY_EMBEDDING_START_PERIOD` | `600s` | Healthcheck grace for embedding_service — covers CLIP + DINOv2 first-time download. |
+| `DEPLOY_LLM_START_PERIOD` | `600s` | Healthcheck grace for llm_service — covers Llama GGUF + embedder load (and download on a cold volume). |
 
 ## Services
 
