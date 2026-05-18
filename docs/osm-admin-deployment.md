@@ -150,6 +150,29 @@ the importer expects but doesn't migrate the actual containers or
 volumes. Plan the change with the legacy "Entfernen" cleanup or
 re-import the affected regions.
 
+### Bringing the stack down cleanly
+
+Because the per-region Nominatim/Overpass containers are spawned by
+osm-admin at runtime (via dockerode), they are not part of
+`docker-compose.yml`. A plain `docker compose down` leaves them
+running and then fails to remove the OSM bridge network with:
+
+```
+Network test-osm-net  Resource is still in use
+```
+
+Run the helper first, passing the same prefix that's in your env-file
+(empty for prod, `test-` for the test stack), then bring the rest
+down:
+
+```bash
+./scripts/host/osm-down.sh test-          # stop + remove test region containers
+docker compose --env-file .env.test down  # now this succeeds
+```
+
+The helper is idempotent and a no-op if no matching region containers
+exist. Use `--dry-run` to preview the targets without touching them.
+
 ## Tuning env variables passed to the containers
 
 The importer reads the following from its own environment when it
