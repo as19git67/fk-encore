@@ -16,6 +16,8 @@
  * socket.
  */
 
+import os from "node:os";
+
 import Dockerode from "dockerode";
 import {
   type ContainerDescriptor,
@@ -58,11 +60,29 @@ export interface DockerodeVolumeLike {
   remove(opts?: { force?: boolean }): Promise<unknown>;
 }
 
+/** Minimal slice of the dockerode network instance we use. */
+export interface DockerodeNetworkLike {
+  connect(opts: { Container: string }): Promise<unknown>;
+}
+
+/** Subset of the dockerode listNetworks() row shape we care about. */
+export interface DockerodeNetworkSummary {
+  Name: string;
+  Id: string;
+}
+
 /** Minimal slice of the dockerode client surface we use. */
 export interface DockerodeClientLike {
   createContainer(opts: Record<string, unknown>): Promise<DockerodeContainerLike>;
   getContainer(id: string): DockerodeContainerLike;
   getVolume(name: string): DockerodeVolumeLike;
+  getNetwork(id: string): DockerodeNetworkLike;
+  createNetwork(opts: {
+    Name: string;
+    Driver?: string;
+    CheckDuplicate?: boolean;
+  }): Promise<DockerodeNetworkLike>;
+  listNetworks(opts?: { filters?: string }): Promise<DockerodeNetworkSummary[]>;
   pull(image: string, opts?: object): Promise<NodeJS.ReadableStream>;
   modem: {
     followProgress(
@@ -88,6 +108,12 @@ export interface DockerodeDriverOptions {
    */
   defaultNetwork?: string;
   /**
+   * Container ID or name to attach to the OSM network in ensureNetwork().
+   * Defaults to `os.hostname()`, which Docker sets to the short ID of
+   * the running container. Overridden in tests.
+   */
+  selfContainer?: string;
+  /**
    * Healthcheck poll budget. Defaults: 300 attempts × 2 s = 10 min,
    * enough for a freshly imported Nominatim API to warm up.
    */
@@ -101,6 +127,12 @@ export interface DockerodeDriverOptions {
 export class DockerodeDriver implements DockerDriver {
   private readonly client: DockerodeClientLike;
   private readonly defaultNetwork: string | undefined;
+  private readonly selfContainer: string;
+  /**
+   * Networks for which `ensureNetwork()` has already completed in this
+   * process. Avoids the listNetworks round-trip on every region start.
+   */
+  private readonly readyNetworks = new Set<string>();
   private readonly healthcheck: {
     maxAttempts: number;
     intervalMs: number;
@@ -111,6 +143,7 @@ export class DockerodeDriver implements DockerDriver {
     this.client =
       opts.client ?? (new Dockerode() as unknown as DockerodeClientLike);
     this.defaultNetwork = opts.defaultNetwork;
+    this.selfContainer = opts.selfContainer ?? os.hostname();
     this.healthcheck = {
       maxAttempts: opts.healthcheck?.maxAttempts ?? 300,
       intervalMs: opts.healthcheck?.intervalMs ?? 2_000,
@@ -210,6 +243,42 @@ export class DockerodeDriver implements DockerDriver {
       stdout: tail(stdout),
       stderr: tail(stderr),
     };
+  }
+
+  async ensureNetwork(name: string): Promise<void> {
+    if (this.readyNetworks.has(name)) return;
+
+    // 1) Create the network if it doesn't exist. Concurrent create
+    // attempts on the same daemon race-condition into a 409 — swallow
+    // that since we don't care who won.
+    const existing = await this.client.listNetworks({
+      filters: JSON.stringify({ name: [name] }),
+    });
+    // listNetworks' name filter is a substring match, so re-check the
+    // exact name (an `osm-net` filter would also match `test-osm-net`).
+    const match = existing.find((n) => n.Name === name);
+    if (!match) {
+      try {
+        await this.client.createNetwork({
+          Name: name,
+          Driver: "bridge",
+          CheckDuplicate: true,
+        });
+      } catch (err) {
+        if (!isAlreadyExistsError(err)) throw err;
+      }
+    }
+
+    // 2) Attach our own container to the network. `network.connect`
+    // 403s with "endpoint already exists" if we're already attached;
+    // that's the happy idempotent case.
+    try {
+      await this.client.getNetwork(name).connect({ Container: this.selfContainer });
+    } catch (err) {
+      if (!isAlreadyConnectedError(err)) throw err;
+    }
+
+    this.readyNetworks.add(name);
   }
 
   async removeVolume(name: string): Promise<void> {
@@ -393,6 +462,32 @@ function isAlreadyStoppedError(err: unknown): boolean {
   if (status === 304) return true;
   const msg = (err as Error)?.message ?? "";
   return /not running|container.*already stopped/i.test(msg);
+}
+
+/**
+ * Daemon response when `createNetwork` races a concurrent create with
+ * the same name: HTTP 409, body contains "already exists".
+ */
+function isAlreadyExistsError(err: unknown): boolean {
+  const status = (err as { statusCode?: number; status?: number })?.statusCode ??
+    (err as { statusCode?: number; status?: number })?.status;
+  if (status === 409) return true;
+  const msg = (err as Error)?.message ?? "";
+  return /already exists/i.test(msg);
+}
+
+/**
+ * Daemon response when `network.connect` is called for a container
+ * that's already attached: HTTP 403, body contains "endpoint" /
+ * "already exists in network". This is the steady-state idempotent
+ * path on every restart after the very first.
+ */
+function isAlreadyConnectedError(err: unknown): boolean {
+  const status = (err as { statusCode?: number; status?: number })?.statusCode ??
+    (err as { statusCode?: number; status?: number })?.status;
+  const msg = (err as Error)?.message ?? "";
+  if (status === 403 && /endpoint|already/i.test(msg)) return true;
+  return /already exists in network|endpoint with name/i.test(msg);
 }
 
 /**
