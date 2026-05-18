@@ -36,6 +36,7 @@ import {
 } from "./docker-driver";
 import { probePbfSizeMb } from "./pbf-probe";
 import { freeDiskMb as defaultFreeDiskMb } from "./disk-probe";
+import { containerName, volumeName } from "./naming";
 import { enqueuePoiDetectionForRegion } from "../photo/scan-queue";
 import { ENABLE_POI_DETECTION } from "../photo/scan-config";
 import { assertTransition, isRegionStatus, type RegionStatus } from "./state-machine";
@@ -145,7 +146,7 @@ export async function tickImporter(deps: ImporterDeps = {}): Promise<TickOutcome
     // Step 4: probe health once. Long imports take many ticks; we don't
     // block on a giant timeout, we re-poll on the next tick.
     const nomHealthy = await driver.waitHealthy(
-      `http://nominatim-${slugSafe}:8080/status`,
+      `http://${containerName("nominatim", slugSafe)}:8080/status`,
       { maxAttempts: 1 },
     );
     const ovHealthy = await driver.waitHealthy(
@@ -212,7 +213,7 @@ export function nominatimDescriptor(
   image: string,
 ): ContainerDescriptor {
   return {
-    name: `nominatim-${slugSafe}`,
+    name: containerName("nominatim", slugSafe),
     image,
     env: {
       PBF_URL: pbfUrl,
@@ -227,7 +228,7 @@ export function nominatimDescriptor(
       // Named docker volume: docker auto-creates it on first run.
       // Path inside the container is the bundled pg16 data dir.
       {
-        hostPath: `fk-encore-osm-nominatim-${slugSafe}`,
+        hostPath: volumeName("nominatim", slugSafe),
         containerPath: "/var/lib/postgresql/16/main",
       },
     ],
@@ -263,7 +264,7 @@ export function overpassDescriptor(
     `osmium cat -O -f osm.bz2 -o ${planet} ${stage} && ` +
     `rm ${stage}`;
   return {
-    name: `overpass-${slugSafe}`,
+    name: containerName("overpass", slugSafe),
     image,
     env: {
       OVERPASS_META: "yes",
@@ -273,7 +274,7 @@ export function overpassDescriptor(
       OVERPASS_DIFF_URL: replicationUrlFor(pbfUrl),
     },
     volumes: [
-      { hostPath: `fk-encore-osm-overpass-${slugSafe}`, containerPath: "/db" },
+      { hostPath: volumeName("overpass", slugSafe), containerPath: "/db" },
     ],
   };
 }
@@ -322,7 +323,7 @@ export function overpassHealthcheckUrl(slugSafe: string): string {
   // The encoded query is `[out:json];out count;` — minimal, returns
   // a small JSON body with element counts.
   return (
-    `http://overpass-${slugSafe}/api/interpreter` +
+    `http://${containerName("overpass", slugSafe)}/api/interpreter` +
     `?data=%5Bout%3Ajson%5D%3Bout+count%3B`
   );
 }

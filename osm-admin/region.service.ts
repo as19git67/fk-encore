@@ -38,6 +38,7 @@ import {
   type LoadOptions,
 } from "./geofabrik-index";
 import { slugToContainerSuffix } from "./importer";
+import { containerName, volumeName } from "./naming";
 import {
   assertTransition,
   isRegionStatus,
@@ -253,10 +254,10 @@ export async function remove(
   const driver = deps.driver ?? getDockerDriver();
 
   const suffix = slugToContainerSuffix(slug);
-  const nominatim = `nominatim-${suffix}`;
-  const overpass = `overpass-${suffix}`;
-  const nominatimVolume = `fk-encore-osm-nominatim-${suffix}`;
-  const overpassVolume = `fk-encore-osm-overpass-${suffix}`;
+  const nominatim = containerName("nominatim", suffix);
+  const overpass = containerName("overpass", suffix);
+  const nominatimVolume = volumeName("nominatim", suffix);
+  const overpassVolume = volumeName("overpass", suffix);
 
   await driver.stop(nominatim);
   await driver.stop(overpass);
