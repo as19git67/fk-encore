@@ -169,7 +169,13 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 20s
+      # buffalo_l loads from disk on first start (~1-2 min on a CPU-only
+      # box). During start_period a failing curl doesn't count as an
+      # unhealthy retry — undersize this and the app's `service_healthy`
+      # gate flips early, surfacing as `dependency failed to start`
+      # before the model has finished loading. Override via env on slow
+      # disks (NFS, spinning rust).
+      start_period: ${DEPLOY_INSIGHTFACE_START_PERIOD:-180s}
 
   # ── Embedding Service (CLIP + DINOv2) ──────────────────────────────────────
   # Models live in the `embedding_models` volume, NOT in the image. The
@@ -205,7 +211,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 600s
+      # ~5 min CLIP + DINOv2 first-time download on a cold volume; the
+      # default covers that with margin. Override via env when both
+      # caches are already warm (faster healthy gate) or on very slow
+      # bandwidth (extend further).
+      start_period: ${DEPLOY_EMBEDDING_START_PERIOD:-600s}
 
   # The Grounding-DINO `landmark` service was removed in Epic #383.
   # POI detection now runs through osm-admin's per-region Nominatim +
@@ -243,7 +253,15 @@ services:
       interval: 15s
       timeout: 10s
       retries: 5
-      start_period: 180s
+      # llm_service mmap's the GGUF (~2 GB) and loads the
+      # multilingual-e5-base embedder on every start. On a cold
+      # `llm_models` volume the entrypoint additionally downloads the
+      # GGUF (also ~2 GB). Both are CPU-bound — the previous 180s was
+      # tight even for warm starts and routinely caused the app's
+      # `service_healthy` gate to fail before the loader was done.
+      # Aligned with embedding_service to keep the cold-start envelope
+      # consistent.
+      start_period: ${DEPLOY_LLM_START_PERIOD:-600s}
 
   # ── PostgreSQL (shared instance for both app and embedding service) ─────────
   postgres:
