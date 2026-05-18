@@ -4,6 +4,8 @@ import {
   registerDockerodeDriverIfEnabled,
   type DockerodeClientLike,
   type DockerodeContainerLike,
+  type DockerodeNetworkLike,
+  type DockerodeNetworkSummary,
 } from "./docker-driver.dockerode";
 import { getDockerDriver, InMemoryDockerDriver, setDockerDriver } from "./docker-driver";
 
@@ -85,6 +87,12 @@ class FakeDocker implements DockerodeClientLike {
   pullFails = false;
   /** Volumes that should reject removal as "in use" (409). */
   readonly volumesInUse = new Set<string>();
+  /** networkName → set of attached container IDs/names. */
+  readonly networks = new Map<string, Set<string>>();
+  /** If non-null, createNetwork rejects once with this error then clears. */
+  pendingCreateNetworkError: { statusCode?: number; message: string } | null = null;
+  /** Container IDs that connect() should reject as already-attached. */
+  readonly alreadyAttached = new Set<string>();
 
   async createContainer(opts: Record<string, unknown>): Promise<DockerodeContainerLike> {
     const name = opts.name as string;
@@ -119,6 +127,67 @@ class FakeDocker implements DockerodeClientLike {
           throw err;
         }
         this.volumes.delete(name);
+        return {};
+      },
+    };
+  }
+
+  async listNetworks(opts?: { filters?: string }): Promise<DockerodeNetworkSummary[]> {
+    this.events.push({ op: "listNetworks", name: opts?.filters ?? "" });
+    // The real daemon's `name` filter is a substring match. Mirror that
+    // so the driver's exact-match post-filter is exercised in tests.
+    let needle: string | null = null;
+    if (opts?.filters) {
+      try {
+        const parsed = JSON.parse(opts.filters) as { name?: string[] };
+        needle = parsed.name?.[0] ?? null;
+      } catch {
+        needle = null;
+      }
+    }
+    const all = Array.from(this.networks.keys()).map((n) => ({
+      Name: n,
+      Id: `id-${n}`,
+    }));
+    return needle ? all.filter((n) => n.Name.includes(needle!)) : all;
+  }
+
+  async createNetwork(opts: {
+    Name: string;
+    Driver?: string;
+    CheckDuplicate?: boolean;
+  }): Promise<DockerodeNetworkLike> {
+    this.events.push({ op: "createNetwork", name: opts.Name, opts });
+    if (this.pendingCreateNetworkError) {
+      const e = this.pendingCreateNetworkError;
+      this.pendingCreateNetworkError = null;
+      const err = new Error(e.message);
+      (err as { statusCode?: number }).statusCode = e.statusCode;
+      throw err;
+    }
+    if (this.networks.has(opts.Name)) {
+      const err = new Error(`network with name ${opts.Name} already exists`);
+      (err as { statusCode?: number }).statusCode = 409;
+      throw err;
+    }
+    this.networks.set(opts.Name, new Set());
+    return this.getNetwork(opts.Name);
+  }
+
+  getNetwork(name: string): DockerodeNetworkLike {
+    return {
+      connect: async (cOpts: { Container: string }) => {
+        this.events.push({ op: "connect", name, opts: cOpts });
+        if (this.alreadyAttached.has(cOpts.Container)) {
+          const err = new Error(
+            `endpoint with name ${cOpts.Container} already exists in network ${name}`,
+          );
+          (err as { statusCode?: number }).statusCode = 403;
+          throw err;
+        }
+        const attached = this.networks.get(name) ?? new Set();
+        attached.add(cOpts.Container);
+        this.networks.set(name, attached);
         return {};
       },
     };
@@ -334,6 +403,90 @@ describe("DockerodeDriver", () => {
       "/etc/ssl:/etc/ssl:ro",
     ]);
     expect(hc.NetworkMode).toBe("osm-net");
+  });
+
+  it("ensureNetwork creates the bridge network and self-attaches", async () => {
+    const client = new FakeDocker();
+    const driver = new DockerodeDriver({
+      client,
+      selfContainer: "fk-encore-app",
+    });
+    await driver.ensureNetwork("osm-net");
+
+    expect(client.events.map((e) => e.op)).toEqual([
+      "listNetworks",
+      "createNetwork",
+      "connect",
+    ]);
+    expect(client.networks.get("osm-net")?.has("fk-encore-app")).toBe(true);
+  });
+
+  it("ensureNetwork skips createNetwork when the network already exists", async () => {
+    const client = new FakeDocker();
+    client.networks.set("osm-net", new Set());
+    const driver = new DockerodeDriver({
+      client,
+      selfContainer: "fk-encore-app",
+    });
+    await driver.ensureNetwork("osm-net");
+
+    expect(client.events.map((e) => e.op)).toEqual(["listNetworks", "connect"]);
+  });
+
+  it("ensureNetwork is idempotent across repeated calls (cached)", async () => {
+    const client = new FakeDocker();
+    const driver = new DockerodeDriver({
+      client,
+      selfContainer: "fk-encore-app",
+    });
+    await driver.ensureNetwork("osm-net");
+    await driver.ensureNetwork("osm-net");
+    await driver.ensureNetwork("osm-net");
+
+    // listNetworks/createNetwork/connect should only fire on the first call.
+    expect(client.events.filter((e) => e.op === "listNetworks")).toHaveLength(1);
+    expect(client.events.filter((e) => e.op === "connect")).toHaveLength(1);
+  });
+
+  it("ensureNetwork swallows a concurrent-create 409", async () => {
+    const client = new FakeDocker();
+    client.pendingCreateNetworkError = {
+      statusCode: 409,
+      message: "network with name osm-net already exists",
+    };
+    const driver = new DockerodeDriver({
+      client,
+      selfContainer: "fk-encore-app",
+    });
+    // Should resolve cleanly even though createNetwork raced and lost.
+    await expect(driver.ensureNetwork("osm-net")).resolves.toBeUndefined();
+  });
+
+  it("ensureNetwork tolerates an already-attached endpoint (403)", async () => {
+    const client = new FakeDocker();
+    client.networks.set("osm-net", new Set(["fk-encore-app"]));
+    client.alreadyAttached.add("fk-encore-app");
+    const driver = new DockerodeDriver({
+      client,
+      selfContainer: "fk-encore-app",
+    });
+    await expect(driver.ensureNetwork("osm-net")).resolves.toBeUndefined();
+  });
+
+  it("ensureNetwork's exact-name post-filter rejects substring matches", async () => {
+    const client = new FakeDocker();
+    // Daemon has `test-osm-net`; user asked for `osm-net`. The
+    // substring-match filter would return `test-osm-net`, but the
+    // driver must still create `osm-net` because the names differ.
+    client.networks.set("test-osm-net", new Set());
+    const driver = new DockerodeDriver({
+      client,
+      selfContainer: "fk-encore-app",
+    });
+    await driver.ensureNetwork("osm-net");
+
+    expect(client.networks.has("osm-net")).toBe(true);
+    expect(client.events.map((e) => e.op)).toContain("createNetwork");
   });
 });
 
