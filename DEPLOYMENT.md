@@ -24,6 +24,47 @@ docker compose logs -f
 
 The app is then reachable at **http://localhost:8080**.
 
+## Multiple deployments on one host
+
+A single `docker-compose.yml` covers any number of deployments
+side-by-side. The wiring that differs per deployment — container
+name suffix, image tag, host ports, postgres database name, volume
+bind paths, OSM scope, watchtower scope — all flows from `DEPLOY_*`
+env variables with sensible production defaults baked into the
+compose file. To run a `:test`-tagged stack alongside production
+on the same host:
+
+```bash
+cp docker-compose.env.test.example .env.test
+# tweak DEPLOY_DATA_ROOT and any other paths/ports if you need to
+docker compose --env-file .env.test up -d
+```
+
+The test stack listens on port 18080, image tag `:test`, container
+names with a `-test` suffix, separate Postgres databases
+(`encore_test` / `embeddings_test`), and a separate `test-osm-net`
+docker network so the per-region POI containers from the two
+deployments can't see each other.
+
+The full list of `DEPLOY_*` overrides:
+
+| Variable | Prod default | Notes |
+|---|---|---|
+| `COMPOSE_PROJECT_NAME` | `fk-encore` | Isolates compose state. |
+| `DEPLOY_NAME_SUFFIX` | _(empty)_ | Suffix on every `container_name`. |
+| `DEPLOY_IMAGE_TAG` | `latest` | Pulled from ghcr.io/as19git67/fk-encore*. |
+| `DEPLOY_WATCHTOWER_SCOPE` | `fkprod` | Watchtower auto-updates only matching scope. |
+| `DEPLOY_HOST_PORT_APP` | `8080` | Must be unique per deployment. |
+| `DEPLOY_HOST_PORT_POSTGRES` | `5432` | dito. |
+| `DEPLOY_HOST_PORT_WATCHTOWER` | `9000` | dito. |
+| `DEPLOY_HOST_DOCKER_GID` | `999` | Host's `docker` group GID — `getent group docker | cut -d: -f3`. |
+| `DEPLOY_PG_DATABASE` | `encore` | Application's primary DB. |
+| `DEPLOY_PG_EMBEDDINGS_DATABASE` | `embeddings` | Embedding service's DB. |
+| `DEPLOY_RP_ID` / `DEPLOY_RP_NAME` / `DEPLOY_RP_ORIGIN` / `DEPLOY_APP_URL` | `localhost` / `Vivanty App` / `http://localhost:8080` / `http://localhost:8080` | Passkey identity — don't change `RP_ID` after first user registers. |
+| `DEPLOY_OSM_NAME_PREFIX` | _(empty)_ | Scopes per-region nominatim / overpass containers + volumes. |
+| `DEPLOY_OSM_NETWORK` | `osm-net` | Docker bridge for the per-region containers. |
+| `DEPLOY_DATA_ROOT` | `./data` | Bind-mount root for every persisted volume. |
+
 ## Services
 
 | Service              | Description                                | Internal port | Default host port  |
@@ -378,6 +419,7 @@ the photo UI responsive under sustained scan load.
 | `ENABLE_POI_DETECTION`           | `false` | Turn on the osm-admin POI matcher (Epic #383). Off by default — only useful once at least one OSM region has been imported via the admin UI. See [`docs/osm-admin-deployment.md`](./docs/osm-admin-deployment.md). |
 | `OSM_ADMIN_DOCKER_DRIVER`        | `inmemory` | Set to `dockerode` to manage real per-region containers (requires `/var/run/docker.sock` bind-mount). |
 | `OSM_ADMIN_DOCKER_NETWORK`       | _(none)_ | Docker network the per-region containers join (also the network the `app` container must be on). |
+| `OSM_ADMIN_NAME_PREFIX`          | _(empty)_ | Per-deployment scope for container + volume names. Set to e.g. `test-` on a second deployment that shares a Docker host with `:latest`, so the two don't collide on `nominatim-europe-germany-bayern`. See `docs/osm-admin-deployment.md`. |
 | `POI_REGION_IDLE_STOP_MINUTES`   | `30`    | Stop a region container after this many idle minutes; cold-start ~5–15 s on next request. |
 | `POI_REGION_AUTO_IMPORT_MAX_PBF_MB` | `1500` | PBF-size cutoff above which a region needs manual approval in the admin UI. |
 | `HEALTH_CHECK_INTERVAL_MS`       | `60000` | Interval between ML `/health` pings. Lower = faster detection of container outages; the ping itself is cheap. |

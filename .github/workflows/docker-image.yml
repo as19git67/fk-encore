@@ -32,7 +32,7 @@ jobs:
       postgres:
         # pgvector image (stock Postgres + pgvector extension) is required so
         # migration 0027 can `CREATE EXTENSION vector`. Matches the version
-        # used in docker-compose.yml / docker-compose.test.yml.
+        # used in docker-compose.yml.
         image: pgvector/pgvector:pg18
         env:
           POSTGRES_USER: postgres

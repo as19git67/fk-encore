@@ -29,6 +29,7 @@ import {
   overpassHealthcheckUrl,
   slugToContainerSuffix,
 } from "./importer";
+import { containerName } from "./naming";
 import { assertTransition, isRegionStatus, type RegionStatus } from "./state-machine";
 
 /** Geohash precision: 7 chars ≈ 153 m × 153 m at the equator. */
@@ -126,8 +127,8 @@ export async function pickRegion(
     match = {
       slug: best.slug,
       status: best.status,
-      nominatimHost: `nominatim-${suffix}`,
-      overpassHost: `overpass-${suffix}`,
+      nominatimHost: containerName("nominatim", suffix),
+      overpassHost: containerName("overpass", suffix),
       bbox: {
         minLat: best.bbox_min_lat,
         minLon: best.bbox_min_lon,
@@ -188,7 +189,7 @@ export async function ensureReady(
   // For a cold-start (volume already populated) the API is usually back
   // within 5–15 s. Budget 60 s so a flapping container still surfaces.
   const nomOk = await driver.waitHealthy(
-    `http://nominatim-${suffix}:8080/status`,
+    `http://${containerName("nominatim", suffix)}:8080/status`,
     { maxAttempts: HEALTHCHECK_MAX_ATTEMPTS, intervalMs: HEALTHCHECK_INTERVAL_MS },
   );
   const ovOk = await driver.waitHealthy(
