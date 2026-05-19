@@ -79,6 +79,15 @@ jobs:
       - name: Install backend dependencies
         run: npm install
 
+      # The geo/ subpackage is a standalone Node container with its own
+      # package.json, but Encore's source-code parser walks every .ts in
+      # the workspace and resolves imports against the nearest
+      # node_modules. Without `geo/node_modules`, the parser fails on
+      # `import express` in geo/src/server.ts even though geo/ has its
+      # own image and ships its deps separately.
+      - name: Install geo subpackage dependencies
+        run: npm --prefix geo install
+
       - name: Run tests
         run: npm test
         env:

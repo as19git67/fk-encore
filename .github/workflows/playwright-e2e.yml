@@ -112,6 +112,13 @@ jobs:
       - name: Install backend dependencies
         run: npm install
 
+      # Encore's source-code parser walks geo/src/*.ts and resolves
+      # `import express` against geo/node_modules; install it so the
+      # `encore run` boot step doesn't fail with "unable to resolve
+      # module express".
+      - name: Install geo subpackage dependencies
+        run: npm --prefix geo install
+
       - name: Install frontend dependencies
         run: npm --prefix frontend install --legacy-peer-deps
 
