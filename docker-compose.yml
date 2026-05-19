@@ -40,7 +40,7 @@ services:
     # chown files dropped later by other host users — for the finance
     # dropbox the operator needs to land files as 568:568 (or g+r with
     # the apps group set as primary on the dataset).
-    command: ["sh", "-c", "chown -R 568:568 /mnt/documents /mnt/documents-inbox /mnt/models /mnt/embedding-models /mnt/finance-import /mnt/finance-export /mnt/backup"]
+    command: ["sh", "-c", "chown -R 568:568 /mnt/documents /mnt/documents-inbox /mnt/models /mnt/embedding-models /mnt/finance-import /mnt/finance-export /mnt/backup /mnt/geo"]
     volumes:
       - documents:/mnt/documents
       - documents_inbox:/mnt/documents-inbox
@@ -49,6 +49,7 @@ services:
       - finance_import:/mnt/finance-import
       - finance_export:/mnt/finance-export
       - backup:/mnt/backup
+      - geo_data:/mnt/geo
 
   # ── Main Encore.ts Application ─────────────────────────────────────────────
   app:
@@ -209,8 +210,9 @@ services:
       start_period: ${DEPLOY_EMBEDDING_START_PERIOD:-600s}
 
   # The Grounding-DINO `landmark` service was removed in Epic #383.
-  # POI detection now runs through osm-admin's per-region Nominatim +
-  # Overpass shards. Remove the leftover container/image after upgrade:
+  # POI detection now runs through the geo service (see below) backed
+  # by per-region PostGIS databases. Remove the leftover container /
+  # image after upgrade:
   #   docker rm -f fk-encore-landmark
   #   docker rmi ghcr.io/as19git67/fk-encore-landmark:latest
 
@@ -305,6 +307,8 @@ services:
     restart: unless-stopped
     user: "568:568"
     depends_on:
+      chown-init:
+        condition: service_completed_successfully
       geo-db:
         condition: service_healthy
     environment:
