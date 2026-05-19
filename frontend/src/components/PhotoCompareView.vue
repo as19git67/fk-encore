@@ -8,12 +8,25 @@ import {
   reviewPhotoGroup,
   acceptAiPick,
   getPhotoDetailsBatch,
+  getPhotoFaces,
+  getPhotoLandmarks,
   type Photo,
   type PhotoGroup,
   type CurationStatus,
+  type Face,
+  type LandmarkItem,
 } from '../api/photos'
 import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
 import { useAuthStore } from '../stores/auth'
+import {
+  computeBboxZoom,
+  computeSyncBboxZoom,
+  pickPrimaryBbox,
+  pickBboxAtPoint,
+  findFaceForPerson,
+  clickPointToImageCoords,
+  type ZoomComputation,
+} from '../utils/compareZoom'
 
 const helpPopover = ref()
 
@@ -143,6 +156,46 @@ function aiScoreTooltip(photoId: number): string {
     text += '\n' + lines.join(' · ')
   }
   return text
+}
+
+// ── Eyes-closed hint (Track N / #81) ─────────────────────────────────────
+// Surface a "Augen geschlossen" warning when the AI's per-face eyes_open
+// score is below the threshold. Escalate the visual weight when the
+// OTHER photo of the pair has open eyes — that's the actionable case
+// where the user almost certainly wants to keep the other one.
+const EYES_CLOSED_THRESHOLD = 0.5
+
+function eyesOpenScore(photoId: number): number | null {
+  const v = getPhotoById(photoId)?.ai_quality_details?.eyes_open
+  return typeof v === 'number' ? v : null
+}
+
+function hasClosedEyes(photoId: number): boolean {
+  const s = eyesOpenScore(photoId)
+  return s !== null && s < EYES_CLOSED_THRESHOLD
+}
+
+function eyesClosedTooltip(photoId: number): string {
+  const s = eyesOpenScore(photoId)
+  const pct = s !== null ? `${Math.round(s * 100)}%` : '?'
+  if (!currentPair.value) return `Augen wirken geschlossen (${pct})`
+  const [a, b] = currentPair.value
+  const otherId = photoId === a ? b : a
+  const otherClosed = hasClosedEyes(otherId)
+  if (otherClosed) return `Augen wirken geschlossen (${pct}) — auf dem anderen Foto allerdings auch.`
+  if (eyesOpenScore(otherId) === null) return `Augen wirken geschlossen (${pct})`
+  return `Augen wirken geschlossen (${pct}) — das andere Foto hat offene Augen.`
+}
+
+/** True when this photo has closed eyes AND the other photo of the pair
+ *  has open eyes — the actionable "pick the other one" hint. */
+function isClosedEyesStandout(photoId: number): boolean {
+  if (!currentPair.value) return false
+  if (!hasClosedEyes(photoId)) return false
+  const [a, b] = currentPair.value
+  const otherId = photoId === a ? b : a
+  const otherScore = eyesOpenScore(otherId)
+  return otherScore !== null && otherScore >= EYES_CLOSED_THRESHOLD
 }
 
 /**
@@ -479,6 +532,11 @@ async function handleDoneAndNext() {
 
 function handleKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
+    if (anyZoomActive.value) {
+      resetZoom()
+      e.preventDefault()
+      return
+    }
     if (phase.value === 'review') {
       goBackToCompare()
     } else {
@@ -504,6 +562,244 @@ function handleKeydown(e: KeyboardEvent) {
     }
   }
 }
+
+// ── Zoom-to-face / landmark (Track N / #79) ───────────────────────────────
+// Double-clicking a photo zooms it so the primary face (or landmark) is
+// centred. The sync-zoom toggle mirrors the zoom to the other photo of the
+// pair — using each photo's own bbox so the same face appears at the same
+// on-screen size on both sides.
+const syncZoomEnabled = ref(false)
+const zoomByPhoto = ref(new Map<number, ZoomComputation>())
+const photoNatural = ref(new Map<number, { w: number; h: number }>())
+const viewportByPhoto = ref(new Map<number, { w: number; h: number }>())
+const facesCache = ref(new Map<number, Face[]>())
+const landmarksCache = ref(new Map<number, LandmarkItem[]>())
+
+const ZOOM_TARGET_FRACTION = 0.45
+const ZOOM_MAX = 5
+
+function onPhotoImgLoad(photoId: number, evt: Event) {
+  const img = evt.target as HTMLImageElement | null
+  if (!img || !img.naturalWidth || !img.naturalHeight) return
+  photoNatural.value = new Map(photoNatural.value).set(photoId, {
+    w: img.naturalWidth,
+    h: img.naturalHeight,
+  })
+}
+
+function recordViewport(photoId: number, el: HTMLElement | null) {
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) return
+  // Vue invokes inline function `:ref` callbacks on every component
+  // update — without this idempotency guard, writing the new Map below
+  // triggers a re-render which re-invokes the ref which writes again,
+  // freezing the browser as soon as the compare-view mounts.
+  const existing = viewportByPhoto.value.get(photoId)
+  if (existing && existing.w === rect.width && existing.h === rect.height) return
+  viewportByPhoto.value = new Map(viewportByPhoto.value).set(photoId, {
+    w: rect.width,
+    h: rect.height,
+  })
+}
+
+function getViewport(photoId: number) {
+  const natural = photoNatural.value.get(photoId)
+  const vp = viewportByPhoto.value.get(photoId)
+  if (!natural || !vp) return null
+  return { width: vp.w, height: vp.h, photoWidth: natural.w, photoHeight: natural.h }
+}
+
+async function ensureBboxData(photoId: number): Promise<{ faces: Face[]; landmarks: LandmarkItem[] }> {
+  if (!facesCache.value.has(photoId)) {
+    try {
+      const res = await getPhotoFaces(photoId)
+      facesCache.value = new Map(facesCache.value).set(photoId, res.faces ?? [])
+    } catch (err) {
+      console.warn('[PhotoCompareView] face load failed', photoId, err)
+      facesCache.value = new Map(facesCache.value).set(photoId, [])
+    }
+  }
+  // Only fetch landmarks if no usable faces are around — saves a round-trip.
+  let faces = facesCache.value.get(photoId) ?? []
+  const haveUsableFaces = faces.some((f) => !f.ignored)
+  if (!haveUsableFaces && !landmarksCache.value.has(photoId)) {
+    try {
+      const res = await getPhotoLandmarks(photoId)
+      landmarksCache.value = new Map(landmarksCache.value).set(photoId, res.landmarks ?? [])
+    } catch (err) {
+      console.warn('[PhotoCompareView] landmark load failed', photoId, err)
+      landmarksCache.value = new Map(landmarksCache.value).set(photoId, [])
+    }
+  }
+  return {
+    faces,
+    landmarks: landmarksCache.value.get(photoId) ?? [],
+  }
+}
+
+function resetZoom() {
+  if (zoomByPhoto.value.size === 0) return
+  zoomByPhoto.value = new Map()
+}
+
+function isZoomed(photoId: number): boolean {
+  return zoomByPhoto.value.has(photoId)
+}
+
+const anyZoomActive = computed(() => zoomByPhoto.value.size > 0)
+
+function zoomStyle(photoId: number): Record<string, string> {
+  const z = zoomByPhoto.value.get(photoId)
+  if (!z) return {}
+  return {
+    transform: z.transform,
+    transformOrigin: z.transformOrigin,
+    transition: 'transform 220ms ease-out',
+  }
+}
+
+async function onPhotoDoubleClick(
+  photoId: number,
+  click?: { clientX: number; clientY: number; container: HTMLElement },
+) {
+  if (isZoomed(photoId)) {
+    resetZoom()
+    return
+  }
+  if (!currentPair.value) return
+  const [a, b] = currentPair.value
+  const isLeft = photoId === a
+  const otherId = isLeft ? b : a
+
+  // Pull bbox data for the clicked photo first; the other one only if
+  // syncZoom is enabled (we still need the photo's natural dimensions
+  // either way, but those come from onImgLoad rather than from the API).
+  const clickedData = await ensureBboxData(photoId)
+  const clickedVp = getViewport(photoId)
+  if (!clickedVp) return
+
+  // Group photos: prefer the face at the click position over the global
+  // primary pick so a double-click on Bob zooms to Bob, not Alice.
+  let clickedPick: ReturnType<typeof pickPrimaryBbox> = null
+  if (click) {
+    const rect = click.container.getBoundingClientRect()
+    const point = clickPointToImageCoords(
+      clickedVp,
+      { left: rect.left, top: rect.top },
+      click.clientX,
+      click.clientY,
+    )
+    if (point) {
+      clickedPick = pickBboxAtPoint(clickedData.faces, clickedData.landmarks, point)
+    }
+  }
+  if (!clickedPick) {
+    clickedPick = pickPrimaryBbox(clickedData.faces, clickedData.landmarks)
+  }
+  if (!clickedPick) return
+
+  if (!syncZoomEnabled.value) {
+    const z = computeBboxZoom(clickedPick.bbox, clickedVp, {
+      targetFraction: ZOOM_TARGET_FRACTION,
+      maxZoom: ZOOM_MAX,
+    })
+    if (z) {
+      zoomByPhoto.value = new Map(zoomByPhoto.value).set(photoId, z)
+    }
+    return
+  }
+
+  // Sync zoom: pick a counterpart bbox in the other photo. Prefer the
+  // same person; fall back to that photo's primary bbox.
+  const otherData = await ensureBboxData(otherId)
+  const otherVp = getViewport(otherId)
+  let otherBbox = clickedPick.person_id
+    ? findFaceForPerson(otherData.faces, clickedPick.person_id)
+    : null
+  if (!otherBbox) {
+    const otherPick = pickPrimaryBbox(otherData.faces, otherData.landmarks)
+    otherBbox = otherPick?.bbox ?? null
+  }
+
+  // If the other photo has no usable bbox, just zoom the clicked one.
+  if (!otherBbox || !otherVp) {
+    const z = computeBboxZoom(clickedPick.bbox, clickedVp, {
+      targetFraction: ZOOM_TARGET_FRACTION,
+      maxZoom: ZOOM_MAX,
+    })
+    if (z) {
+      zoomByPhoto.value = new Map(zoomByPhoto.value).set(photoId, z)
+    }
+    return
+  }
+
+  const { a: zClicked, b: zOther } = computeSyncBboxZoom(
+    { bbox: clickedPick.bbox, viewport: clickedVp },
+    { bbox: otherBbox, viewport: otherVp },
+    { targetFraction: ZOOM_TARGET_FRACTION, maxZoom: ZOOM_MAX },
+  )
+  const next = new Map(zoomByPhoto.value)
+  if (zClicked) next.set(photoId, zClicked)
+  if (zOther) next.set(otherId, zOther)
+  zoomByPhoto.value = next
+}
+
+function onPhotoMouseDblClick(photoId: number, evt: MouseEvent) {
+  const container = evt.currentTarget as HTMLElement | null
+  if (!container) {
+    void onPhotoDoubleClick(photoId)
+    return
+  }
+  void onPhotoDoubleClick(photoId, {
+    clientX: evt.clientX,
+    clientY: evt.clientY,
+    container,
+  })
+}
+
+// Touch double-tap detection mirrors the FullscreenOverlay pattern: two
+// taps within 300ms and 40px count as a double-tap.
+let lastTapPhotoId: number | null = null
+let lastTapTime = 0
+let lastTapX = 0
+let lastTapY = 0
+function onPhotoTouchEnd(photoId: number, evt: TouchEvent) {
+  const t = evt.changedTouches[0]
+  if (!t) return
+  const now = performance.now()
+  if (
+    lastTapPhotoId === photoId &&
+    now - lastTapTime < 300 &&
+    Math.hypot(t.clientX - lastTapX, t.clientY - lastTapY) < 40
+  ) {
+    lastTapTime = 0
+    const container = evt.currentTarget as HTMLElement | null
+    void onPhotoDoubleClick(
+      photoId,
+      container
+        ? { clientX: t.clientX, clientY: t.clientY, container }
+        : undefined,
+    )
+    return
+  }
+  lastTapPhotoId = photoId
+  lastTapTime = now
+  lastTapX = t.clientX
+  lastTapY = t.clientY
+}
+
+// Reset zoom whenever the compared pair changes.
+watch(currentPair, () => resetZoom())
+// Recompute viewports when the window resizes (the side-by-side layout is
+// orientation-aware via grid-template-rows, so on rotate the boxes swap).
+watch([windowWidth, windowHeight], () => {
+  if (!anyZoomActive.value) return
+  // Drop transforms — they were computed for the previous viewport.
+  // The user can re-trigger zoom; this avoids a misaligned face stuck on
+  // screen after a resize.
+  resetZoom()
+})
 
 // ── Lifecycle ──
 
@@ -593,6 +889,20 @@ function compareTileSrc(photo: Photo, width?: number): string {
               @click="applyAiPreselection"
             />
             <Button
+              icon="pi pi-link"
+              :label="isVeryNarrow ? undefined : isNarrow ? 'Sync' : 'Sync-Zoom'"
+              :severity="syncZoomEnabled ? 'primary' : 'secondary'"
+              :outlined="!syncZoomEnabled"
+              size="small"
+              :aria-pressed="syncZoomEnabled"
+              v-tooltip.bottom="
+                syncZoomEnabled
+                  ? 'Doppelklick zoomt beide Fotos auf das Gesicht (gleiche Größe)'
+                  : 'Doppelklick zoomt nur das angeklickte Foto — anklicken zum Synchronisieren'
+              "
+              @click="syncZoomEnabled = !syncZoomEnabled; resetZoom()"
+            />
+            <Button
               icon="pi pi-question-circle"
               text
               rounded
@@ -671,13 +981,21 @@ function compareTileSrc(photo: Photo, width?: number): string {
               class="side-by-side-item"
               :class="{ 'is-hidden': getCuration(photoId) === 'hidden' }"
             >
-              <div class="side-by-side-image">
-                <HeicImage
-                  v-if="getPhotoById(photoId)"
-                  :src="compareTileSrc(getPhotoById(photoId)!)"
-                  alt=""
-                  objectFit="contain"
-                />
+              <div
+                class="side-by-side-image"
+                :ref="(el) => recordViewport(photoId, el as HTMLElement | null)"
+                @dblclick="(evt: MouseEvent) => onPhotoMouseDblClick(photoId, evt)"
+                @touchend="(evt: TouchEvent) => onPhotoTouchEnd(photoId, evt)"
+              >
+                <div class="compare-zoom-wrapper" :style="zoomStyle(photoId)">
+                  <HeicImage
+                    v-if="getPhotoById(photoId)"
+                    :src="compareTileSrc(getPhotoById(photoId)!)"
+                    alt=""
+                    objectFit="contain"
+                    @load="(evt: Event) => onPhotoImgLoad(photoId, evt)"
+                  />
+                </div>
                 <div
                   class="ai-quality-badge"
                   :class="aiScoreClass(photoId)"
@@ -694,6 +1012,26 @@ function compareTileSrc(photo: Photo, width?: number): string {
                   <i class="pi pi-check-circle" style="font-size: 0.7rem" />
                   KI-Pick
                 </div>
+                <div
+                  v-if="hasClosedEyes(photoId)"
+                  class="eyes-closed-badge"
+                  :class="{ 'eyes-closed-badge--standout': isClosedEyesStandout(photoId) }"
+                  v-tooltip.top="eyesClosedTooltip(photoId)"
+                >
+                  <i class="pi pi-eye-slash" style="font-size: 0.7rem" />
+                  Augen zu
+                </div>
+                <Button
+                  v-if="isZoomed(photoId)"
+                  class="compare-zoom-reset"
+                  icon="pi pi-search-minus"
+                  rounded
+                  severity="secondary"
+                  size="small"
+                  v-tooltip.left="'Zoom zurücksetzen (Esc)'"
+                  aria-label="Zoom zurücksetzen"
+                  @click.stop="resetZoom"
+                />
               </div>
             </div>
           </div>
@@ -843,6 +1181,14 @@ function compareTileSrc(photo: Photo, width?: number): string {
                   <i class="pi pi-check-circle" style="font-size: 0.6rem" />
                   KI-Pick
                 </div>
+                <div
+                  v-if="hasClosedEyes(photo.id)"
+                  class="review-eyes-closed"
+                  v-tooltip.right="`Augen wirken geschlossen (${Math.round((eyesOpenScore(photo.id) ?? 0) * 100)}%)`"
+                >
+                  <i class="pi pi-eye-slash" style="font-size: 0.6rem" />
+                  Augen zu
+                </div>
               </div>
               <div class="review-photo-controls">
                 <Button
@@ -981,6 +1327,29 @@ function compareTileSrc(photo: Photo, width?: number): string {
   min-height: 0;
   position: relative;
   overflow: hidden;
+  /* Suppress double-tap-zoom on iOS Safari — we own the gesture here for
+     zoom-to-face (Track N / #79) and don't want the browser to also zoom
+     the page. */
+  touch-action: manipulation;
+}
+
+/* Zoom wrapper around the HeicImage. Defaults to identity transform; the
+   inline :style binding writes scale + translate when the user
+   double-clicks. The transform-origin lives at the bbox centre so the
+   face stays put on screen as the image scales. */
+.compare-zoom-wrapper {
+  width: 100%;
+  height: 100%;
+  will-change: transform;
+}
+
+.compare-zoom-reset {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 4;
+  background: rgba(0, 0, 0, 0.55) !important;
+  color: #fff !important;
 }
 
 .side-by-side-image :deep(.heic-image-container) {
@@ -1172,5 +1541,39 @@ kbd {
   background: rgba(34, 197, 94, 0.85);
   backdrop-filter: blur(4px);
   cursor: help;
+}
+
+/* ── Eyes-closed hint (Track N / #81) ── Surfaced bottom-right so it
+   sits opposite the quality badge. The standout variant (one photo
+   has closed eyes while the other has open eyes) gets a stronger red
+   background to direct the user's choice. */
+.eyes-closed-badge,
+.review-eyes-closed {
+  position: absolute;
+  bottom: 0.4rem;
+  right: 0.4rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 1rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #fee2e2;
+  background: rgba(239, 68, 68, 0.7);
+  backdrop-filter: blur(4px);
+  cursor: help;
+  z-index: 3;
+}
+
+.eyes-closed-badge--standout {
+  color: #ffffff;
+  background: rgba(220, 38, 38, 0.95);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35), 0 2px 8px rgba(220, 38, 38, 0.45);
+}
+
+.review-eyes-closed {
+  font-size: 0.65rem;
+  padding: 0.1rem 0.4rem;
 }
 </style>
