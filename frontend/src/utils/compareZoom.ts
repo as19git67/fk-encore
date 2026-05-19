@@ -242,3 +242,91 @@ export function findFaceForPerson(
     (a, b) => b.bbox.width * b.bbox.height - a.bbox.width * a.bbox.height,
   )[0]!.bbox
 }
+
+/**
+ * Click-position-aware bbox picker for group photos. When the user
+ * double-clicks a specific face in a multi-person shot, that face is
+ * the intended zoom target — not whatever `pickPrimaryBbox()` would
+ * have chosen globally.
+ *
+ * The `point` is in normalized image coords (0..1 of the photo).
+ * Priority:
+ *  1. Faces whose bbox CONTAINS the point. On a stack pick the tightest
+ *     (smallest area) — that's almost certainly the face the user
+ *     actually pointed at.
+ *  2. The nearest face by centre distance, but only if it sits within
+ *     `nearRadius` of the click (default 0.15 of image diagonal).
+ *  3. Fall through to `pickPrimaryBbox` — the user clicked on neutral
+ *     background and we should pick something reasonable.
+ */
+export function pickBboxAtPoint(
+  faces: PickFaceInput[],
+  landmarks: PickLandmarkInput[],
+  point: { x: number; y: number },
+  opts: { nearRadius?: number } = {},
+): { source: 'face' | 'landmark'; bbox: BBox; person_id?: number | null } | null {
+  if (
+    !Number.isFinite(point.x) ||
+    !Number.isFinite(point.y) ||
+    point.x < 0 ||
+    point.x > 1 ||
+    point.y < 0 ||
+    point.y > 1
+  ) {
+    return pickPrimaryBbox(faces, landmarks)
+  }
+  const usable = faces.filter((f) => !f.ignored && isValidBbox(f.bbox))
+  if (usable.length === 0) return pickPrimaryBbox(faces, landmarks)
+
+  const containing = usable.filter(
+    (f) =>
+      point.x >= f.bbox.x &&
+      point.x <= f.bbox.x + f.bbox.width &&
+      point.y >= f.bbox.y &&
+      point.y <= f.bbox.y + f.bbox.height,
+  )
+  if (containing.length > 0) {
+    const tightest = [...containing].sort(
+      (a, b) => a.bbox.width * a.bbox.height - b.bbox.width * b.bbox.height,
+    )[0]!
+    return { source: 'face', bbox: tightest.bbox, person_id: tightest.person_id ?? null }
+  }
+
+  const nearRadius = opts.nearRadius ?? 0.15
+  const scored = usable.map((f) => ({
+    f,
+    d: Math.hypot(
+      f.bbox.x + f.bbox.width / 2 - point.x,
+      f.bbox.y + f.bbox.height / 2 - point.y,
+    ),
+  }))
+  scored.sort((a, b) => a.d - b.d)
+  const closest = scored[0]!
+  if (closest.d <= nearRadius) {
+    return { source: 'face', bbox: closest.f.bbox, person_id: closest.f.person_id ?? null }
+  }
+
+  return pickPrimaryBbox(faces, landmarks)
+}
+
+/**
+ * Convert a click event coordinate (viewport px) to normalized image
+ * coordinates (0..1 of the photo content), accounting for
+ * `object-fit: contain` letterboxing. Returns `null` when the click
+ * lands on a letterbox stripe — the caller should treat that as
+ * "no specific face picked".
+ */
+export function clickPointToImageCoords(
+  vp: ZoomViewport,
+  containerOffset: { left: number; top: number },
+  clickX: number,
+  clickY: number,
+): { x: number; y: number } | null {
+  if (!Number.isFinite(clickX) || !Number.isFinite(clickY)) return null
+  const rect = containedRect(vp)
+  const relX = clickX - containerOffset.left - rect.offsetX
+  const relY = clickY - containerOffset.top - rect.offsetY
+  if (relX < 0 || relX > rect.w) return null
+  if (relY < 0 || relY > rect.h) return null
+  return { x: relX / rect.w, y: relY / rect.h }
+}

@@ -5,6 +5,8 @@ import {
   computeSyncBboxZoom,
   pickPrimaryBbox,
   findFaceForPerson,
+  pickBboxAtPoint,
+  clickPointToImageCoords,
 } from './compareZoom'
 
 const VP_SQUARE_SQUARE = { width: 400, height: 400, photoWidth: 1000, photoHeight: 1000 }
@@ -221,5 +223,93 @@ describe('findFaceForPerson', () => {
         5,
       ),
     ).toBeNull()
+  })
+})
+
+describe('pickBboxAtPoint', () => {
+  const alice = { bbox: { x: 0.1, y: 0.2, width: 0.2, height: 0.25 }, person_id: 1 }
+  const bob = { bbox: { x: 0.55, y: 0.3, width: 0.15, height: 0.2 }, person_id: 2 }
+  const carol = { bbox: { x: 0.35, y: 0.55, width: 0.18, height: 0.22 }, person_id: 3 }
+
+  it('falls back to global pick when the click point is out of range', () => {
+    const r = pickBboxAtPoint([alice, bob], [], { x: -0.1, y: 0.5 })!
+    // Out-of-range click is treated as "no specific signal" — global pick wins.
+    expect(r.source).toBe('face')
+  })
+
+  it('picks the face whose bbox contains the click', () => {
+    const r = pickBboxAtPoint([alice, bob, carol], [], { x: 0.62, y: 0.4 })!
+    expect(r.person_id).toBe(2) // bob
+  })
+
+  it('picks the tightest face when click sits in overlapping bboxes', () => {
+    const big = { bbox: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 }, person_id: 9 }
+    const small = { bbox: { x: 0.4, y: 0.4, width: 0.2, height: 0.2 }, person_id: 10 }
+    const r = pickBboxAtPoint([big, small], [], { x: 0.5, y: 0.5 })!
+    expect(r.person_id).toBe(10)
+  })
+
+  it('picks the nearest face within the radius when no bbox contains the click', () => {
+    const r = pickBboxAtPoint([alice, bob, carol], [], { x: 0.34, y: 0.5 })!
+    // Click is near carol (centred at (0.44, 0.66)) and alice (0.2, 0.325).
+    // Distance: carol ~ 0.187, alice ~ 0.225. carol wins within default 0.15? No,
+    // 0.187 > 0.15 — should fall back to pickPrimaryBbox.
+    // Use a generous radius to force the near-match path.
+    const r2 = pickBboxAtPoint([alice, bob, carol], [], { x: 0.34, y: 0.5 }, { nearRadius: 0.3 })!
+    expect(r2.person_id).toBe(3) // carol
+    // Sanity: with default radius we get fallback (one of the tagged faces).
+    expect(r.source).toBe('face')
+  })
+
+  it('falls back to global pick when no face is anywhere near the click', () => {
+    const r = pickBboxAtPoint([alice], [], { x: 0.9, y: 0.9 })!
+    // Default radius (0.15) doesn't catch alice (~0.75 away) → fallback returns alice anyway.
+    expect(r.source).toBe('face')
+    expect(r.person_id).toBe(1)
+  })
+
+  it('skips ignored faces but still inspects others', () => {
+    const ignored = { bbox: { x: 0.4, y: 0.4, width: 0.2, height: 0.2 }, ignored: true, person_id: 99 }
+    const real = { bbox: { x: 0.45, y: 0.45, width: 0.1, height: 0.1 }, person_id: 7 }
+    const r = pickBboxAtPoint([ignored, real], [], { x: 0.5, y: 0.5 })!
+    expect(r.person_id).toBe(7)
+  })
+
+  it('falls back to landmarks via pickPrimaryBbox when there are no faces', () => {
+    const r = pickBboxAtPoint(
+      [],
+      [{ bbox: { x: 0.3, y: 0.3, width: 0.2, height: 0.2 }, confidence: 0.8 }],
+      { x: 0.5, y: 0.5 },
+    )!
+    expect(r.source).toBe('landmark')
+  })
+})
+
+describe('clickPointToImageCoords', () => {
+  const VP = { width: 400, height: 400, photoWidth: 1600, photoHeight: 1000 }
+  const OFFSET = { left: 100, top: 50 }
+
+  it('maps the centre of a landscape photo to (0.5, 0.5)', () => {
+    // Photo 16:10 in 400x400 → 400x250 with 75px top/bottom letterbox.
+    // Centre of content = container left + 200, top + 75 + 125 = container left + 200, top + 200.
+    const r = clickPointToImageCoords(VP, OFFSET, 100 + 200, 50 + 200)!
+    expect(r.x).toBeCloseTo(0.5, 5)
+    expect(r.y).toBeCloseTo(0.5, 5)
+  })
+
+  it('returns null for clicks on the letterbox stripe', () => {
+    // y = 50 + 10 lands above the photo content (letterbox top).
+    expect(clickPointToImageCoords(VP, OFFSET, 100 + 200, 50 + 10)).toBeNull()
+  })
+
+  it('returns null for clicks outside the container entirely', () => {
+    expect(clickPointToImageCoords(VP, OFFSET, 0, 0)).toBeNull()
+  })
+
+  it('maps a click on the top-left corner of the photo content', () => {
+    // Content starts at (offsetLeft + 0, offsetTop + 75) for this letterboxed photo.
+    const r = clickPointToImageCoords(VP, OFFSET, 100, 50 + 75)!
+    expect(r.x).toBeCloseTo(0, 5)
+    expect(r.y).toBeCloseTo(0, 5)
   })
 })

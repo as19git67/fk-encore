@@ -22,7 +22,9 @@ import {
   computeBboxZoom,
   computeSyncBboxZoom,
   pickPrimaryBbox,
+  pickBboxAtPoint,
   findFaceForPerson,
+  clickPointToImageCoords,
   type ZoomComputation,
 } from '../utils/compareZoom'
 
@@ -657,7 +659,10 @@ function zoomStyle(photoId: number): Record<string, string> {
   }
 }
 
-async function onPhotoDoubleClick(photoId: number) {
+async function onPhotoDoubleClick(
+  photoId: number,
+  click?: { clientX: number; clientY: number; container: HTMLElement },
+) {
   if (isZoomed(photoId)) {
     resetZoom()
     return
@@ -673,7 +678,25 @@ async function onPhotoDoubleClick(photoId: number) {
   const clickedData = await ensureBboxData(photoId)
   const clickedVp = getViewport(photoId)
   if (!clickedVp) return
-  const clickedPick = pickPrimaryBbox(clickedData.faces, clickedData.landmarks)
+
+  // Group photos: prefer the face at the click position over the global
+  // primary pick so a double-click on Bob zooms to Bob, not Alice.
+  let clickedPick: ReturnType<typeof pickPrimaryBbox> = null
+  if (click) {
+    const rect = click.container.getBoundingClientRect()
+    const point = clickPointToImageCoords(
+      clickedVp,
+      { left: rect.left, top: rect.top },
+      click.clientX,
+      click.clientY,
+    )
+    if (point) {
+      clickedPick = pickBboxAtPoint(clickedData.faces, clickedData.landmarks, point)
+    }
+  }
+  if (!clickedPick) {
+    clickedPick = pickPrimaryBbox(clickedData.faces, clickedData.landmarks)
+  }
   if (!clickedPick) return
 
   if (!syncZoomEnabled.value) {
@@ -722,6 +745,19 @@ async function onPhotoDoubleClick(photoId: number) {
   zoomByPhoto.value = next
 }
 
+function onPhotoMouseDblClick(photoId: number, evt: MouseEvent) {
+  const container = evt.currentTarget as HTMLElement | null
+  if (!container) {
+    void onPhotoDoubleClick(photoId)
+    return
+  }
+  void onPhotoDoubleClick(photoId, {
+    clientX: evt.clientX,
+    clientY: evt.clientY,
+    container,
+  })
+}
+
 // Touch double-tap detection mirrors the FullscreenOverlay pattern: two
 // taps within 300ms and 40px count as a double-tap.
 let lastTapPhotoId: number | null = null
@@ -738,7 +774,13 @@ function onPhotoTouchEnd(photoId: number, evt: TouchEvent) {
     Math.hypot(t.clientX - lastTapX, t.clientY - lastTapY) < 40
   ) {
     lastTapTime = 0
-    void onPhotoDoubleClick(photoId)
+    const container = evt.currentTarget as HTMLElement | null
+    void onPhotoDoubleClick(
+      photoId,
+      container
+        ? { clientX: t.clientX, clientY: t.clientY, container }
+        : undefined,
+    )
     return
   }
   lastTapPhotoId = photoId
@@ -942,8 +984,8 @@ function compareTileSrc(photo: Photo, width?: number): string {
               <div
                 class="side-by-side-image"
                 :ref="(el) => recordViewport(photoId, el as HTMLElement | null)"
-                @dblclick="onPhotoDoubleClick(photoId)"
-                @touchend="(evt) => onPhotoTouchEnd(photoId, evt)"
+                @dblclick="(evt: MouseEvent) => onPhotoMouseDblClick(photoId, evt)"
+                @touchend="(evt: TouchEvent) => onPhotoTouchEnd(photoId, evt)"
               >
                 <div class="compare-zoom-wrapper" :style="zoomStyle(photoId)">
                   <HeicImage
