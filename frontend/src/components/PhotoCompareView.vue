@@ -587,7 +587,11 @@ interface ActiveZoom {
 // double-tap / reset apply to BOTH photos; when off, they apply only to
 // the clicked photo. Toggling sync ON propagates an existing single-photo
 // zoom to the partner. Toggling OFF leaves the zoom state untouched.
-const syncZoomEnabled = ref(false)
+// Sync-Zoom defaults ON: when reviewing similar photos, the user almost
+// always wants both sides of the pair to zoom to the same person at the
+// same on-screen size. Turn off only when they want to inspect one
+// photo in isolation.
+const syncZoomEnabled = ref(true)
 const zoomByPhoto = ref(new Map<number, ActiveZoom>())
 const facesCache = ref(new Map<number, Face[]>())
 const landmarksCache = ref(new Map<number, LandmarkItem[]>())
