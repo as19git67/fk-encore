@@ -974,6 +974,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
               @click="onSyncToggleClick"
             />
             <Button
+              v-if="!isVeryNarrow"
               icon="pi pi-question-circle"
               text
               rounded
@@ -1017,7 +1018,8 @@ function compareTileSrc(photo: Photo, width?: number): string {
               </div>
             </Popover>
             <span class="compare-progress">
-              {{ comparisonsDone }}/{{ pairCount }}
+              <template v-if="isVeryNarrow">{{ comparisonsDone }}</template>
+              <template v-else>{{ comparisonsDone }}/{{ pairCount }}</template>
               <span class="compare-progress-note" v-if="estimatedTotal !== pairCount">(~{{ estimatedTotal }})</span>
             </span>
           </div>
