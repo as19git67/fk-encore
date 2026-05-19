@@ -41,10 +41,11 @@ docker compose --env-file .env.test up -d
 ```
 
 The test stack listens on port 18080, image tag `:test`, container
-names with a `-test` suffix, separate Postgres databases
-(`encore_test` / `embeddings_test`), and a separate `test-osm-net`
-docker network so the per-region POI containers from the two
-deployments can't see each other.
+names with a `-test` suffix, and separate Postgres databases
+(`encore_test` / `embeddings_test`). The `geo` + `geo-db` containers
+are scoped via `DEPLOY_NAME_SUFFIX`, so a `:test` stack on the same
+host gets its own PostGIS volume and never sees the production
+regions.
 
 The full list of `DEPLOY_*` overrides:
 
@@ -57,12 +58,9 @@ The full list of `DEPLOY_*` overrides:
 | `DEPLOY_HOST_PORT_APP` | `8080` | Must be unique per deployment. |
 | `DEPLOY_HOST_PORT_POSTGRES` | `5432` | dito. |
 | `DEPLOY_HOST_PORT_WATCHTOWER` | `9000` | dito. |
-| `DEPLOY_HOST_DOCKER_GID` | `999` | Host's `docker` group GID — `getent group docker | cut -d: -f3`. |
 | `DEPLOY_PG_DATABASE` | `encore` | Application's primary DB. |
 | `DEPLOY_PG_EMBEDDINGS_DATABASE` | `embeddings` | Embedding service's DB. |
 | `DEPLOY_RP_ID` / `DEPLOY_RP_NAME` / `DEPLOY_RP_ORIGIN` / `DEPLOY_APP_URL` | `localhost` / `Vivanty App` / `http://localhost:8080` / `http://localhost:8080` | Passkey identity — don't change `RP_ID` after first user registers. |
-| `DEPLOY_OSM_NAME_PREFIX` | _(empty)_ | Scopes per-region nominatim / overpass containers + volumes. |
-| `DEPLOY_OSM_NETWORK` | `osm-net` | Docker bridge the app + per-region containers share. Created at runtime by osm-admin (not by compose), so it survives `docker compose down`. |
 | `DEPLOY_DATA_ROOT` | `./data` | Bind-mount root for every persisted volume. |
 | `DEPLOY_INSIGHTFACE_START_PERIOD` | `180s` | Healthcheck grace for insightface — covers cold buffalo_l load. |
 | `DEPLOY_EMBEDDING_START_PERIOD` | `600s` | Healthcheck grace for embedding_service — covers CLIP + DINOv2 first-time download. |
@@ -76,6 +74,8 @@ The full list of `DEPLOY_*` overrides:
 | `insightface`        | Face recognition (InsightFace/buffalo_l)   | 8000          | – (internal only)  |
 | `embedding_service`  | Photo embeddings (CLIP + DINOv2)           | 8000          | – (internal only)  |
 | `embedding_postgres` | PostgreSQL with pgvector for embeddings    | 5432          | – (internal only)  |
+| `geo`                | Reverse-geocoding + POI lookup (Node + osm2pgsql) | 8080  | – (internal only)  |
+| `geo-db`             | PostGIS 16 — one DB per imported OSM region | 5432         | – (internal only)  |
 
 The ML services (insightface, embedding_service) are only reachable
 internally and not exposed to the outside.
@@ -363,17 +363,10 @@ docker compose down          # Stop services
 docker compose down -v       # Stop services + delete volumes (CAUTION: data loss!)
 ```
 
-osm-admin owns the OSM bridge network (see `DEPLOY_OSM_NETWORK`), so
-`compose down` never touches it. The per-region Nominatim/Overpass
-containers spawned by osm-admin live outside compose — they keep
-running across stack restarts and the next `docker compose up -d`
-picks up where it left off. To force-free them too (their data lives
-in named volumes, so this is non-destructive):
-
-```bash
-./scripts/host/osm-down.sh            # prod (empty prefix)
-./scripts/host/osm-down.sh test-      # test stack
-```
+All services — including the `geo` + `geo-db` pair — are owned by
+compose, so `docker compose down` stops them cleanly and the next
+`docker compose up -d` brings them back. Imported regions live in the
+bind-mounted `geo-db` volume and survive restarts unchanged.
 
 ## Troubleshooting
 
@@ -431,11 +424,13 @@ the photo UI responsive under sustained scan load.
 | `ML_RPC_QUICK_TIMEOUT_MS`        | `60000`  | Per-request timeout (ms) for user-facing ML RPCs (`/search/text`, `/similar-groups`). |
 | `ML_CONCURRENCY_EMBEDDING`       | `1`     | Max parallel requests to the embedding container. `embedding` and `quality` workers share this slot, so the default serializes them. Raise only with GPU. |
 | `ML_CONCURRENCY_INSIGHTFACE`     | `1`     | Max parallel requests to the insightface container. |
-| `ENABLE_POI_DETECTION`           | `false` | Turn on the osm-admin POI matcher (Epic #383). Off by default — only useful once at least one OSM region has been imported via the admin UI. See [`docs/osm-admin-deployment.md`](./docs/osm-admin-deployment.md). |
-| `OSM_ADMIN_DOCKER_DRIVER`        | `inmemory` | Set to `dockerode` to manage real per-region containers (requires `/var/run/docker.sock` bind-mount). |
-| `OSM_ADMIN_DOCKER_NETWORK`       | _(none)_ | Docker network the per-region containers join (also the network the `app` container must be on). |
-| `OSM_ADMIN_NAME_PREFIX`          | _(empty)_ | Per-deployment scope for container + volume names. Set to e.g. `test-` on a second deployment that shares a Docker host with `:latest`, so the two don't collide on `nominatim-europe-germany-bayern`. See `docs/osm-admin-deployment.md`. |
-| `POI_REGION_IDLE_STOP_MINUTES`   | `30`    | Stop a region container after this many idle minutes; cold-start ~5–15 s on next request. |
+| `ENABLE_POI_DETECTION`           | `false` | Turn on the osm-admin POI matcher. Off by default — only useful once at least one OSM region has been imported via the admin UI. See [`docs/osm-admin-deployment.md`](./docs/osm-admin-deployment.md). |
+| `GEO_SERVICE_URL`                | `http://geo:8080` | Base URL the app uses to reach the geo service. Override only when running the app outside the compose stack. |
+| `GEO_SHARED_SECRET`              | _(empty)_ | Optional bearer token; if set, every geo HTTP call must present `Authorization: Bearer <secret>`. |
+| `GEO_DB_PASSWORD`                | `postgres` | Postgres superuser password inside the `geo-db` container. |
+| `GEO_OSM2PGSQL_CACHE_MB`         | `2000`  | osm2pgsql `--cache` value, in MB. Raise on hosts with spare RAM to speed up imports of large regions. |
+| `GEO_OSM2PGSQL_PROCS`            | `2`    | osm2pgsql `--number-processes`. |
+| `GEO_REPLICATION_INTERVAL_MS`    | `3600000` | Background `osm2pgsql-replication update` loop interval, ms. Set to `off` (via `GEO_REPLICATION=off`) to disable entirely. |
 | `POI_REGION_AUTO_IMPORT_MAX_PBF_MB` | `1500` | PBF-size cutoff above which a region needs manual approval in the admin UI. |
 | `HEALTH_CHECK_INTERVAL_MS`       | `60000` | Interval between ML `/health` pings. Lower = faster detection of container outages; the ping itself is cheap. |
 | `HEALTH_CHECK_TIMEOUT_MS`        | `60000` | Timeout for a single health ping. Generous on purpose — a busy container may reply slowly without being unhealthy. |

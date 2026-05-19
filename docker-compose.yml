@@ -15,7 +15,7 @@
 # variable still produces the prod default. The variables you'd
 # typically override per deployment all share the `DEPLOY_` prefix
 # (compose-only) — application-level env vars (POSTGRES_PASSWORD,
-# SMTP_*, VAPID_*, BACKUP_*, FINANCE_*, NOMINATIM_PASSWORD, …) keep
+# SMTP_*, VAPID_*, BACKUP_*, FINANCE_*, GEO_DB_PASSWORD, …) keep
 # their normal names so they can be reused unchanged across stacks.
 #
 # See `DEPLOYMENT.md` for the full reference.

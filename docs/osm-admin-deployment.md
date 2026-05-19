@@ -1,204 +1,161 @@
-# `osm-admin` — Deployment Notes (Epic #383)
+# `osm-admin` + `geo` — Deployment Notes
 
-The `osm-admin` Encore service manages per-region Nominatim and Overpass
-containers that back the POI detection pipeline. This document captures
-the deployment bits that the application code can't infer at runtime.
+The `osm-admin` Encore service is the admin-facing API; the heavy
+lifting (osm2pgsql, replication, reverse / POI queries) runs in a
+separate container pair, `geo` + `geo-db`. This document captures the
+deployment bits that the application code can't infer at runtime.
 
 ## Architecture in one paragraph
 
-Each region (e.g. `europe/germany/bayern`) is realised as **two
-self-contained containers**: `nominatim-<slug-suffix>` (mediagis/nominatim,
-bundled Postgres included) and `overpass-<slug-suffix>` (wiktorn/overpass-api).
-Both store their data in **named Docker volumes**, which the daemon
-creates on first use — there is no shared Postgres, no bind mounts to
-manage. Importing a region = passing a Geofabrik PBF URL via env to the
-container on its first start with an empty volume. Deleting a region =
-`docker rm` on the two containers plus `docker volume rm` on their
-volumes.
+Each imported region (e.g. `europe/germany/bayern`) is realised as
+**one PostgreSQL database** inside the `geo-db` container, named
+`nom_<flattened-slug>`. The neighbouring `geo` container owns the
+`osm2pgsql` and `osm2pgsql-replication` binaries plus a small Node
+HTTP service. On `POST /import` the geo service downloads the
+Geofabrik PBF, creates the database, imports it through a Lua-driven
+Flex style that keeps only the three tables the runtime queries
+(`osm_highways`, `osm_pois`, `osm_admin`), wires up replication, and
+returns 202 immediately — the actual osm2pgsql work runs in the
+background and the importer tick in `osm-admin` polls
+`GET /imports/:postgresDb` for progress. Deleting a region =
+`DELETE /regions/:postgresDb` against the geo service plus the DB-row
+delete in `osm_region_imports`.
 
-## Activating the dockerode driver
+## Compose-side wiring
 
-The active container driver is process-local and defaults to
-`InMemoryDockerDriver` (no Docker socket needed, status transitions are
-simulated). The real dockerode-backed driver is opt-in via env:
-
-```
-OSM_ADMIN_DOCKER_DRIVER=dockerode
-OSM_ADMIN_DOCKER_NETWORK=osm-net
-OSM_ADMIN_NAME_PREFIX=             # optional, see "Sharing a host with another deployment" below
-```
-
-When `OSM_ADMIN_DOCKER_DRIVER=dockerode`, the service talks to the host
-Docker daemon via the standard unix socket. **The osm-admin container
-must therefore bind-mount `/var/run/docker.sock`**:
+The `geo` + `geo-db` services are part of the main `docker-compose.yml`
+and run as plain compose services — no special permissions, no Docker
+socket mount. Operator-tunable knobs live under the `geo` service:
 
 ```yaml
 services:
-  app:
-    # … existing config …
+  geo-db:
+    image: postgis/postgis:16-3.4
     environment:
-      OSM_ADMIN_DOCKER_DRIVER: dockerode
-      OSM_ADMIN_DOCKER_NETWORK: osm-net
-      NOMINATIM_PASSWORD: ${NOMINATIM_PASSWORD:-changeme}
+      POSTGRES_PASSWORD: ${GEO_DB_PASSWORD:-postgres}
     volumes:
-      # In addition to the existing mounts:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - geo_db_data:/var/lib/postgresql/data
+
+  geo:
+    build: ./geo
+    depends_on:
+      geo-db: { condition: service_healthy }
+    environment:
+      GEO_DB_HOST: geo-db
+      GEO_DB_PASSWORD: ${GEO_DB_PASSWORD:-postgres}
+      GEO_SHARED_SECRET: ${GEO_SHARED_SECRET:-}
+      GEO_OSM2PGSQL_CACHE_MB: ${GEO_OSM2PGSQL_CACHE_MB:-2000}
+      GEO_OSM2PGSQL_PROCS: ${GEO_OSM2PGSQL_PROCS:-2}
+    volumes:
+      - geo_data:/data
 ```
 
-That is the **entire compose-side change** — no per-region services,
-no shared Postgres, no named-volume declarations, and no `osm-net`
-entry. The OSM bridge network is created and owned by `osm-admin` at
-runtime via dockerode, and the app self-attaches on startup. Everything
-below is also created by `osm-admin` at runtime.
+The `app` container reaches the geo service via the compose default
+network at `http://geo:8080` (overridable through `GEO_SERVICE_URL`).
+The app no longer needs `/var/run/docker.sock` access; the `:568`
+runtime user no longer needs to be in the host `docker` group; and
+there is no longer a runtime-managed `osm-net` bridge network.
 
-### Docker socket access for non-root containers
+## Per-region database layout
 
-The `fk-encore-app` container typically runs as the TrueNAS SCALE
-"apps" user (`568:568`). The host's docker socket usually has mode
-`660 root:docker`, so `568` can't read it out of the box. Two options:
+The `osm_region_imports.postgres_db` column is the source of truth.
+`osm-admin/region.service.ts::slugToPostgresDb` produces the name:
 
-- **Test sandbox** (quickest): override `user: "0:0"` on the `app`
-  service so the Encore process can reach the socket.
-- **Production**: look up the host's docker group GID and pass it via
-  `group_add`:
-  ```yaml
-  group_add:
-    - "${HOST_DOCKER_GID:-999}"
-  ```
-  Resolve `HOST_DOCKER_GID` on the host with
-  `getent group docker | cut -d: -f3` and set it in `.env`.
-  Typical values: **999** (TrueNAS SCALE 25.x, Debian, Ubuntu),
-  **985** (Alpine). Always verify on your specific host — the default
-  in the snippet is a fallback, not a guarantee.
+| Slug | `osm_region_imports.postgres_db` |
+|---|---|
+| `europe/germany/bayern` | `nom_europe_germany_bayern` |
+| `europe/germany/bayern/oberbayern` | `nom_europe_germany_bayern_oberbayern` |
+| `europe/austria` | `nom_europe_austria` |
 
-> ⚠️ Mounting the docker socket grants root-equivalent access to the
-> host. Acceptable for the self-hosted/private deployment model this
-> project targets (see comments on issue #83). For multi-tenant
-> deployments, use a remote Docker API endpoint over TLS instead.
+Inside each DB the osm2pgsql Flex style (`geo/src/osm2pgsql.lua`)
+creates three tables:
 
-## Per-region container layout
+| Table | Use |
+|---|---|
+| `osm_highways` | Nearest-street lookup for the `road` / `house_number` parts of `/reverse`. |
+| `osm_pois` | Radius candidates for `/pois`; also feeds the `tourism` / `amenity` / `building` parts of `/reverse`. |
+| `osm_admin` | Containment lookup for the `country` / `state` / `city` parts of `/reverse`. |
 
-Each region the importer brings up appears on `osm-net` with
-deterministic names so the router addresses them via Docker DNS without
-any port mapping:
-
-| Slug `europe/germany/bayern` | Container name | Volume name |
-|---|---|---|
-| Nominatim | `nominatim-europe-germany-bayern` | `fk-encore-osm-nominatim-europe-germany-bayern` |
-| Overpass | `overpass-europe-germany-bayern` | `fk-encore-osm-overpass-europe-germany-bayern` |
-
-Containers store their database under:
-- Nominatim: `/var/lib/postgresql/16/main` (the bundled Postgres data
-  directory)
-- Overpass: `/db`
-
-Both are mounted via Docker named volumes, so the data survives container
-restarts and is removed only when the user explicitly deletes the region.
+Every table has a GIST index on `geom`; `osm_pois.tags` additionally
+has a GIN index so the POI matcher's `tags ? 'historic'` predicate
+plans well even on regions with millions of rows.
 
 ## Sharing a host with another deployment
 
-Container and volume names are global on the host's Docker daemon. If
-two fk-encore deployments share the same host (typical: a `:test`
-instance alongside `:latest`), each must scope its OSM resources or
-they'd collide on a `name already in use` error and could even drop
-each other's data when "Entfernen" is clicked on either side.
-
-Solution: pick a distinct `OSM_ADMIN_NAME_PREFIX` per deployment.
-
-```yaml
-services:
-  # Production: keep the historical (empty) prefix so existing
-  # `fk-encore-osm-…` volumes stay intact across the upgrade.
-  app:
-    environment:
-      OSM_ADMIN_DOCKER_NETWORK: osm-net
-      # OSM_ADMIN_NAME_PREFIX: ""    # default; explicit for clarity
-
-  # Test: scope all OSM resources with `test-`.
-  app-test:
-    environment:
-      OSM_ADMIN_DOCKER_NETWORK: test-osm-net
-      OSM_ADMIN_NAME_PREFIX: "test-"
-```
-
-Resulting names with `OSM_ADMIN_NAME_PREFIX="test-"`:
-
-| Slug `europe/germany/bayern` | Container | Volume |
-|---|---|---|
-| Nominatim | `test-nominatim-europe-germany-bayern` | `test-fk-encore-osm-nominatim-europe-germany-bayern` |
-| Overpass | `test-overpass-europe-germany-bayern` | `test-fk-encore-osm-overpass-europe-germany-bayern` |
-
-The Docker network is **not** auto-prefixed — it's a separate env
-(`OSM_ADMIN_DOCKER_NETWORK`). Pick a distinct value per deployment so
-the two sides stay isolated. The network is created lazily by
-`osm-admin` on first boot; no compose declaration is needed (and would
-cause `docker compose down` to fight the per-region containers
-attached to it).
-
-Switching prefixes on an existing deployment renames the resources
-the importer expects but doesn't migrate the actual containers or
-volumes. Plan the change with the legacy "Entfernen" cleanup or
-re-import the affected regions.
-
-### Bringing the stack down
-
-osm-admin owns the OSM bridge network's lifecycle (it creates the
-network on boot and self-attaches), so `docker compose down` simply
-ignores it — no more `Network ... Resource is still in use` race
-with the per-region containers. The per-region Nominatim/Overpass
-containers keep running across stack restarts, and the next
-`docker compose up -d` picks up where it left off.
-
-If you actively want to free the per-region containers' resources
-(RAM, disk while idle), run the helper first. Their data lives in
-named volumes, so this is non-destructive:
+When two fk-encore deployments share the same host (typical: a
+`:test` instance alongside `:latest`), they need distinct container
+names. The compose convention is:
 
 ```bash
-./scripts/host/osm-down.sh                # prod stack (empty prefix)
-./scripts/host/osm-down.sh test-          # test stack
-docker compose --env-file .env.test down  # works either way
+# Production: empty suffix
+COMPOSE_PROJECT_NAME=fk-encore
+DEPLOY_NAME_SUFFIX=
+
+# Test: scope every container + volume with `-test`
+COMPOSE_PROJECT_NAME=fk-encore-test
+DEPLOY_NAME_SUFFIX=-test
 ```
 
-The helper is idempotent and a no-op if no matching region containers
-exist. Use `--dry-run` to preview the targets without touching them.
+That gives `fk-encore-geo` / `fk-encore-geo-test`, each with its own
+`geo_db_data` volume (compose namespaces volumes under
+`COMPOSE_PROJECT_NAME`), so the two deployments stay fully
+independent. No special OSM-side prefix is needed anymore — the old
+`OSM_ADMIN_NAME_PREFIX` and `OSM_ADMIN_DOCKER_NETWORK` are gone.
 
-## Tuning env variables passed to the containers
+## Tunable env variables
 
-The importer reads the following from its own environment when it
-constructs container descriptors:
+Read by the geo service unless noted:
 
 | Env | Meaning | Default |
 |---|---|---|
-| `NOMINATIM_PASSWORD` | Internal Postgres password inside the per-region nominatim container. Any value works; it never leaves the container. | `changeme` |
-| `NOMINATIM_IMAGE` | Override the nominatim image tag (test-pinning, fork). | `mediagis/nominatim:5.0` |
-| `OVERPASS_IMAGE` | Override the overpass image tag. | `wiktorn/overpass-api:latest` |
-| `NOMINATIM_IMPORT_STYLE` | Nominatim import profile (`full`, `address`, `street`, `admin`). `address` is plenty for POI detection and ~30 % faster than `full`. | `address` |
-| `OSM_ADMIN_DISK_PROBE_PATH` | Path the importer probes via `statfs` for the disk pre-check. Default `/` reflects the app container's overlay (close enough for typical hosts). For an exact reading of the docker data root, bind-mount it read-only and point this env at the mount. | `/` |
+| `GEO_DB_HOST` / `GEO_DB_PORT` / `GEO_DB_USER` / `GEO_DB_PASSWORD` | Connection to `geo-db`. The container's default `postgres / postgres` is fine when the database isn't reachable from outside compose. | `geo-db` / `5432` / `postgres` / `postgres` |
+| `GEO_DB_ADMIN_DB` | DB used for `CREATE DATABASE`. | `postgres` |
+| `GEO_PORT` | HTTP listen port inside the container. | `8080` |
+| `GEO_DATA_DIR` | Volume mount that holds the PBF cache (`pbf/`) and osm2pgsql flat-node files (`work/`). | `/data` |
+| `GEO_SHARED_SECRET` | Optional bearer token enforced on every endpoint except `/health`. | _(empty)_ |
+| `GEO_OSM2PGSQL_CACHE_MB` | `osm2pgsql --cache`. Raise to roughly the PBF size for fastest imports. | `2000` |
+| `GEO_OSM2PGSQL_PROCS` | `osm2pgsql --number-processes`. | `2` |
+| `GEO_REPLICATION_INTERVAL_MS` | Background replication-update loop interval (ms). | `3600000` (1 h) |
+| `GEO_REPLICATION` | Set to `off` to disable the background replication loop entirely (e.g. during initial imports). | _(empty)_ |
+| `OSM_ADMIN_DISK_PROBE_PATH` | _(osm-admin side)_ Path the importer probes via `statfs` for the disk pre-check. Point at the bind-mount that backs `geo_data` for accurate readings. | `/` |
 
-## How Overpass ingests Geofabrik PBFs
+## How a region is imported
 
-The upstream `wiktorn/overpass-api` entrypoint downloads the planet
-to `/db/planet.osm.bz2` (filename hardcoded regardless of actual
-format) and then `eval`s `$OVERPASS_PLANET_PREPROCESS` standalone —
-no stdin redirect, no file arg. The downstream `init_osm3s.sh` then
-reads `/db/planet.osm.bz2` expecting bz2-compressed OSM XML.
+A full Bayern-sized osm2pgsql import takes 10–30 min; the importer tick
+in `osm-admin/encore.service.ts` polls instead of waiting:
 
-Geofabrik publishes `.osm.bz2` only for top-level regions
-(countries, Bundesländer). Sub-regional extracts (Regierungsbezirke
-etc.) are PBF-only. To support both, the importer sets a preprocess
-that converts the file in place using the `osmium-tool` binary
-already bundled in the upstream image (the entrypoint itself calls
-`osmium fileinfo …` on the same file):
+1. Every 30 s the local-cron tick picks the oldest `importing` row
+   that's outside the cooldown.
+2. The tick calls `geo.getImportStatus(postgres_db)`. If nothing's
+   known yet it posts `POST /import { slug, postgresDb, pbfUrl }` and
+   stays `importing`. The geo service runs osm2pgsql in-process and
+   updates its in-memory tracker.
+3. Subsequent ticks see `state: "running"` and stay `importing`.
+4. On `state: "ready"` the importer transitions the row to
+   `ready_running`, persists `imported_at`, and backfills
+   `poi_detection` jobs for every photo whose GPS falls in the region
+   bbox.
+5. On `state: "failed"` the row goes to `failed` with the geo
+   service's error attached to `last_error`.
 
-```bash
-mv /db/planet.osm.bz2 /db/planet.input.pbf \
-  && osmium cat -O -f osm.bz2 -o /db/planet.osm.bz2 /db/planet.input.pbf \
-  && rm /db/planet.input.pbf
-```
+If the geo service restarts mid-flight, the in-memory tracker is
+lost; the next status lookup falls back to
+`reconcileImportStatus(postgresDb)` which checks whether the database
+exists with all three runtime tables, in which case it's reported as
+`ready` and no re-import happens.
 
-After the preprocess, the file at `/db/planet.osm.bz2` is genuine
-bz2 OSM XML and the rest of the entrypoint proceeds unchanged. No
-custom image needed.
+## Region delete
+
+`DELETE /osm/regions/:slug` in the admin UI:
+
+1. Looks up `postgres_db` from `osm_region_imports`.
+2. Calls `geo.dropRegion(postgresDb)` → the geo service terminates
+   any open connections to the DB and runs `DROP DATABASE`.
+3. Deletes the `osm_region_imports` row.
+
+The geo-side drop is best-effort tolerated: if the geo service fails,
+the DB row is still removed so the admin can clean up stuck entries
+manually. Re-importing a previously-dropped region is idempotent.
 
 ## Disk-space budget
 
@@ -208,20 +165,25 @@ Rule of thumb the importer enforces before doing any work:
 free_disk_mb ≥ pbf_size_mb × 10
 ```
 
-Postgres footprint per region is typically 5–10× the raw PBF size; with
-the safety factor of 10 we never trip mid-import. Rows that fail the
-pre-check land in status `blocked_disk` and the admin UI surfaces the
-shortfall.
+The PostGIS footprint per region with the Flex style is typically
+3–6× the raw PBF size; with the safety factor of 10 we never trip
+mid-import. Rows that fail the pre-check land in status `blocked_disk`
+and the admin UI surfaces the shortfall.
 
-Quick reference (from real Geofabrik extracts as of 2024):
+Rough reference (real osm2pgsql Flex imports of the three runtime
+tables):
 
-| Region | PBF (~MB) | Combined nominatim+overpass volumes (~MB) |
+| Region | PBF (~MB) | geo-db footprint (~MB) |
 |---|---|---|
-| Hamburg | 80 | 700 |
-| Bayern | 600 | 5 500 |
-| Germany | 4 200 | 38 000 |
-| Austria | 800 | 7 000 |
-| France | 4 800 | 42 000 |
+| Hamburg | 80 | 250 |
+| Bayern | 600 | 1 800 |
+| Germany | 4 200 | 13 000 |
+| Austria | 800 | 2 500 |
+| France | 4 800 | 15 000 |
+
+(Substantially smaller than the historical
+nominatim+overpass-per-region setup, because the Flex style only keeps
+the tables actually used by `/reverse` and `/pois`.)
 
 ## Auto-approve threshold
 
@@ -231,43 +193,35 @@ POI_REGION_AUTO_IMPORT_MAX_PBF_MB=1500
 
 Regions whose probed PBF size is below this go straight to `importing`;
 larger regions land in `pending_approval` and require an admin click.
-The default (1.5 GB) covers most Bundesländer / regional extracts but
-keeps full-country imports behind manual approval.
 
-## Healthchecks and the import tick
+## Replication
 
-A full Nominatim import takes 30 min – 3 h depending on region size. The
-importer does **not** wait for that in a single call. Instead:
+After a successful `osm2pgsql --create` the import path also runs
+`osm2pgsql-replication init --server <region>-updates/` which records
+the Geofabrik replication base URL in the database (table
+`osm2pgsql_replication_status`).
 
-1. Every 30 s the local-cron tick picks the oldest `importing` row
-   that's outside the cooldown.
-2. `ensureRunning` is called for the two containers — idempotent, so
-   a no-op once they're up.
-3. A single-shot health probe runs against
-   - Nominatim: `http://nominatim-<slug>:8080/status`
-   - Overpass: `http://overpass-<slug>/api/status`
-4. If both pass → `ready_running`. Otherwise the row stays `importing`
-   and the next tick (≥ 30 s later) re-probes.
+From then on:
 
-For a cold-start of a stopped region (router's `ensureReady`) the
-budget is `60 attempts × 1 s = 60 s` because the data is already
-imported; only Postgres needs to spin up.
+- A background loop inside the geo container (interval
+  `GEO_REPLICATION_INTERVAL_MS`, default 1 h) iterates every `nom_*`
+  database and runs `osm2pgsql-replication update`.
+- The admin UI's "Refresh" button posts `POST /osm/regions/refresh`
+  which calls the same code path via `POST /refresh { postgresDb }`.
+- The new sequence number is persisted in
+  `osm_region_imports.replication_seq`. `last_error` is cleared on
+  success or set with the diagnostic on failure.
 
-## Region delete cleanup (current state)
+Both paths are idempotent: the in-database high-water mark dedupes
+concurrent updates and re-runs.
 
-`DELETE /osm/regions/:slug` currently only removes the DB row. The
-follow-up cleanup slice extends it to stop+remove the two containers
-and drop the two named volumes. Until then, deleting a region leaves
-its containers and volumes behind — they have to be cleaned up manually
-with `docker rm` + `docker volume rm`.
+## Status reference
 
-## Idle-stop sweeper (future slice)
-
-A sweeper in `osm-admin` will stop region containers after 30 min of
-inactivity (`POI_REGION_IDLE_STOP_MINUTES=30`) and start them on
-demand. Cold-start a stopped Nominatim container takes ~5–15 s — fine
-for the background POI worker, fast enough that the round-trip is
-invisible for an on-demand admin lookup.
-
-This isn't wired up yet; until it is, `ready_running` containers stay
-up indefinitely.
+| Status | Meaning |
+|---|---|
+| `pending_approval` | Region row exists but the admin hasn't clicked "Approve" yet. The importer ignores these. |
+| `importing` | The importer tick is driving this row toward ready. May stay in this state for hours during a large import. |
+| `ready_running` | The geo service has a complete PostGIS database for the region; reverse / POI lookups serve immediately. |
+| `blocked_disk` | The disk pre-check failed. Free up space and the admin can re-approve. |
+| `failed` | The geo service reported a failure (or the importer hit an unrecoverable error). `last_error` carries the detail. |
+| `ready_stopped` | _Legacy._ Left over from the docker-driven era when individual region containers could be idle-stopped. `pickRegion` still treats it as serveable for backwards compatibility; nothing transitions into it anymore. |
