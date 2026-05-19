@@ -298,14 +298,15 @@ services:
   # ── Geo service (reverse geocoding + POI lookup) ───────────────────────────
   # Node HTTP service that owns osm2pgsql + osmium and talks to geo-db.
   # Replaces the per-region Nominatim/Overpass Docker containers that
-  # osm-admin used to spawn at runtime.
+  # osm-admin used to spawn at runtime. Image is built and published by
+  # .github/workflows/docker-image-geo.yml; the server only pulls.
   geo:
-    build:
-      context: ./geo
-    image: fk-encore-geo:${DEPLOY_IMAGE_TAG:-latest}
+    image: ghcr.io/as19git67/fk-encore-geo:${DEPLOY_IMAGE_TAG:-latest}
     container_name: fk-encore-geo${DEPLOY_NAME_SUFFIX:-}
     restart: unless-stopped
     user: "568:568"
+    labels:
+      com.centurylinklabs.watchtower.scope: ${DEPLOY_WATCHTOWER_SCOPE:-fkprod}
     depends_on:
       chown-init:
         condition: service_completed_successfully
@@ -351,6 +352,7 @@ services:
       fk-encore-insightface${DEPLOY_NAME_SUFFIX:-}
       fk-encore-embedding${DEPLOY_NAME_SUFFIX:-}
       fk-encore-llm${DEPLOY_NAME_SUFFIX:-}
+      fk-encore-geo${DEPLOY_NAME_SUFFIX:-}
     ports:
       - "${DEPLOY_HOST_PORT_WATCHTOWER:-9000}:8080"
 
