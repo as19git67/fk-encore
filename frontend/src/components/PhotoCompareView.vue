@@ -563,13 +563,20 @@ function handleKeydown(e: KeyboardEvent) {
   }
 }
 
+type ZoomPick = NonNullable<ReturnType<typeof pickPrimaryBbox>>
+interface ActiveZoom {
+  pick: ZoomPick
+  computation: ZoomComputation
+}
+
 // ── Zoom-to-face / landmark (Track N / #79) ───────────────────────────────
 // Double-clicking a photo zooms it so the primary face (or landmark) is
-// centred. The sync-zoom toggle mirrors the zoom to the other photo of the
-// pair — using each photo's own bbox so the same face appears at the same
-// on-screen size on both sides.
+// centred. The sync-zoom toggle is a persistent mode setting — when on,
+// double-tap / reset apply to BOTH photos; when off, they apply only to
+// the clicked photo. Toggling sync ON propagates an existing single-photo
+// zoom to the partner. Toggling OFF leaves the zoom state untouched.
 const syncZoomEnabled = ref(false)
-const zoomByPhoto = ref(new Map<number, ZoomComputation>())
+const zoomByPhoto = ref(new Map<number, ActiveZoom>())
 const photoNatural = ref(new Map<number, { w: number; h: number }>())
 const viewportByPhoto = ref(new Map<number, { w: number; h: number }>())
 const facesCache = ref(new Map<number, Face[]>())
@@ -643,6 +650,13 @@ function resetZoom() {
   zoomByPhoto.value = new Map()
 }
 
+function resetZoomFor(photoId: number) {
+  if (!zoomByPhoto.value.has(photoId)) return
+  const next = new Map(zoomByPhoto.value)
+  next.delete(photoId)
+  zoomByPhoto.value = next
+}
+
 function isZoomed(photoId: number): boolean {
   return zoomByPhoto.value.has(photoId)
 }
@@ -653,35 +667,92 @@ function zoomStyle(photoId: number): Record<string, string> {
   const z = zoomByPhoto.value.get(photoId)
   if (!z) return {}
   return {
-    transform: z.transform,
-    transformOrigin: z.transformOrigin,
+    transform: z.computation.transform,
+    transformOrigin: z.computation.transformOrigin,
     transition: 'transform 220ms ease-out',
   }
+}
+
+function applySingleZoom(photoId: number, pick: ZoomPick, vp: ReturnType<typeof getViewport>) {
+  if (!vp) return
+  const z = computeBboxZoom(pick.bbox, vp, {
+    targetFraction: ZOOM_TARGET_FRACTION,
+    maxZoom: ZOOM_MAX,
+  })
+  if (!z) return
+  zoomByPhoto.value = new Map(zoomByPhoto.value).set(photoId, { pick, computation: z })
+}
+
+/** Find the partner photo's bbox that best matches the source pick — same
+ *  person if available, otherwise that photo's primary pick. Returns
+ *  `null` when nothing usable is around. */
+async function pickPartnerBbox(
+  srcPick: ZoomPick,
+  partnerId: number,
+): Promise<ZoomPick | null> {
+  const data = await ensureBboxData(partnerId)
+  if (srcPick.person_id) {
+    const matched = findFaceForPerson(data.faces, srcPick.person_id)
+    if (matched) {
+      return { source: 'face', bbox: matched, person_id: srcPick.person_id }
+    }
+  }
+  const fallback = pickPrimaryBbox(data.faces, data.landmarks)
+  return fallback
+}
+
+async function applySyncZoom(
+  srcId: number,
+  srcPick: ZoomPick,
+  srcVp: NonNullable<ReturnType<typeof getViewport>>,
+  partnerId: number,
+) {
+  const partnerVp = getViewport(partnerId)
+  const partnerPick = await pickPartnerBbox(srcPick, partnerId)
+
+  // No partner bbox or viewport → just zoom the clicked one.
+  if (!partnerPick || !partnerVp) {
+    applySingleZoom(srcId, srcPick, srcVp)
+    return
+  }
+
+  const { a: zSrc, b: zPartner } = computeSyncBboxZoom(
+    { bbox: srcPick.bbox, viewport: srcVp },
+    { bbox: partnerPick.bbox, viewport: partnerVp },
+    { targetFraction: ZOOM_TARGET_FRACTION, maxZoom: ZOOM_MAX },
+  )
+  const next = new Map(zoomByPhoto.value)
+  if (zSrc) next.set(srcId, { pick: srcPick, computation: zSrc })
+  if (zPartner) next.set(partnerId, { pick: partnerPick, computation: zPartner })
+  zoomByPhoto.value = next
 }
 
 async function onPhotoDoubleClick(
   photoId: number,
   click?: { clientX: number; clientY: number; container: HTMLElement },
 ) {
-  if (isZoomed(photoId)) {
-    resetZoom()
-    return
-  }
   if (!currentPair.value) return
   const [a, b] = currentPair.value
-  const isLeft = photoId === a
-  const otherId = isLeft ? b : a
+  const otherId = photoId === a ? b : a
 
-  // Pull bbox data for the clicked photo first; the other one only if
-  // syncZoom is enabled (we still need the photo's natural dimensions
-  // either way, but those come from onImgLoad rather than from the API).
+  // Already-zoomed photo: double-tap is a "toggle off" with scope set by
+  // the sync mode. Sync ON resets both photos so the pair stays in sync;
+  // sync OFF resets only this photo.
+  if (isZoomed(photoId)) {
+    if (syncZoomEnabled.value) resetZoom()
+    else resetZoomFor(photoId)
+    return
+  }
+
+  // Pull bbox data for the clicked photo; the partner photo is loaded
+  // separately inside applySyncZoom (only when needed).
   const clickedData = await ensureBboxData(photoId)
   const clickedVp = getViewport(photoId)
   if (!clickedVp) return
 
   // Group photos: prefer the face at the click position over the global
   // primary pick so a double-click on Bob zooms to Bob, not Alice.
-  let clickedPick: ReturnType<typeof pickPrimaryBbox> = null
+  let clickedPick: ZoomPick | null = null
   if (click) {
     const rect = click.container.getBoundingClientRect()
     const point = clickPointToImageCoords(
@@ -699,50 +770,39 @@ async function onPhotoDoubleClick(
   }
   if (!clickedPick) return
 
-  if (!syncZoomEnabled.value) {
-    const z = computeBboxZoom(clickedPick.bbox, clickedVp, {
-      targetFraction: ZOOM_TARGET_FRACTION,
-      maxZoom: ZOOM_MAX,
-    })
-    if (z) {
-      zoomByPhoto.value = new Map(zoomByPhoto.value).set(photoId, z)
-    }
-    return
+  if (syncZoomEnabled.value) {
+    await applySyncZoom(photoId, clickedPick, clickedVp, otherId)
+  } else {
+    applySingleZoom(photoId, clickedPick, clickedVp)
   }
+}
 
-  // Sync zoom: pick a counterpart bbox in the other photo. Prefer the
-  // same person; fall back to that photo's primary bbox.
-  const otherData = await ensureBboxData(otherId)
-  const otherVp = getViewport(otherId)
-  let otherBbox = clickedPick.person_id
-    ? findFaceForPerson(otherData.faces, clickedPick.person_id)
-    : null
-  if (!otherBbox) {
-    const otherPick = pickPrimaryBbox(otherData.faces, otherData.landmarks)
-    otherBbox = otherPick?.bbox ?? null
+/** Reset button (🔍−) handler. Sync ON → resets both photos so the pair
+ *  stays in sync; sync OFF → resets only the photo whose button was hit. */
+function onResetZoomClick(photoId: number) {
+  if (syncZoomEnabled.value) resetZoom()
+  else resetZoomFor(photoId)
+}
+
+/** Sync-Zoom toggle handler. Turning ON: leaves any existing zoom alone,
+ *  but if exactly one photo is currently zoomed, mirror its zoom to the
+ *  partner so the pair becomes in-sync. Turning OFF: leaves the zoom
+ *  state untouched — both photos keep their current transforms. */
+async function onSyncToggleClick() {
+  const turningOn = !syncZoomEnabled.value
+  syncZoomEnabled.value = turningOn
+  if (!turningOn) return
+  if (!currentPair.value) return
+  const [a, b] = currentPair.value
+  const aZoom = zoomByPhoto.value.get(a)
+  const bZoom = zoomByPhoto.value.get(b)
+  if (aZoom && !bZoom) {
+    const srcVp = getViewport(a)
+    if (srcVp) await applySyncZoom(a, aZoom.pick, srcVp, b)
+  } else if (!aZoom && bZoom) {
+    const srcVp = getViewport(b)
+    if (srcVp) await applySyncZoom(b, bZoom.pick, srcVp, a)
   }
-
-  // If the other photo has no usable bbox, just zoom the clicked one.
-  if (!otherBbox || !otherVp) {
-    const z = computeBboxZoom(clickedPick.bbox, clickedVp, {
-      targetFraction: ZOOM_TARGET_FRACTION,
-      maxZoom: ZOOM_MAX,
-    })
-    if (z) {
-      zoomByPhoto.value = new Map(zoomByPhoto.value).set(photoId, z)
-    }
-    return
-  }
-
-  const { a: zClicked, b: zOther } = computeSyncBboxZoom(
-    { bbox: clickedPick.bbox, viewport: clickedVp },
-    { bbox: otherBbox, viewport: otherVp },
-    { targetFraction: ZOOM_TARGET_FRACTION, maxZoom: ZOOM_MAX },
-  )
-  const next = new Map(zoomByPhoto.value)
-  if (zClicked) next.set(photoId, zClicked)
-  if (zOther) next.set(otherId, zOther)
-  zoomByPhoto.value = next
 }
 
 function onPhotoMouseDblClick(photoId: number, evt: MouseEvent) {
@@ -900,7 +960,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
                   ? 'Doppelklick zoomt beide Fotos auf das Gesicht (gleiche Größe)'
                   : 'Doppelklick zoomt nur das angeklickte Foto — anklicken zum Synchronisieren'
               "
-              @click="syncZoomEnabled = !syncZoomEnabled; resetZoom()"
+              @click="onSyncToggleClick"
             />
             <Button
               icon="pi pi-question-circle"
@@ -1028,9 +1088,13 @@ function compareTileSrc(photo: Photo, width?: number): string {
                   rounded
                   severity="secondary"
                   size="small"
-                  v-tooltip.left="'Zoom zurücksetzen (Esc)'"
+                  v-tooltip.left="
+                    syncZoomEnabled
+                      ? 'Zoom auf beiden Fotos zurücksetzen (Esc)'
+                      : 'Zoom auf diesem Foto zurücksetzen (Esc)'
+                  "
                   aria-label="Zoom zurücksetzen"
-                  @click.stop="resetZoom"
+                  @click.stop="onResetZoomClick(photoId)"
                 />
               </div>
             </div>
