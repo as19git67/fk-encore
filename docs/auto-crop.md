@@ -81,12 +81,27 @@ Migration: `db/migrations/postgres/0010_auto_crop.sql`
 
 ### Frontend
 
-- `PhotoGrid.vue` reads `photo.auto_crop` and applies it as `imageStyle`:
+- `VirtualGallery.vue` reads `slot.auto_crop` from the gallery entry and
+  feeds it into the `autoCropThumbnailStyle()` helper
+  (`frontend/src/utils/faceBbox.ts`). The helper combines two effects so
+  the face / landmark sits prominently in the tile (Track N / #73):
+  - `object-position` shifts the cropped region of the photo under
+    `object-fit: cover` so the focal point stays visible, and
+  - a modest `scale(1.18)` anchored at the same point makes the focal
+    point appear larger while the surrounding content is clipped further
+    by the tile's `overflow: hidden`.
   ```ts
-  { objectPosition: `${auto_crop.x * 100}% ${auto_crop.y * 100}%` }
+  // utils/faceBbox.ts
+  {
+    objectPosition: `${x * 100}% ${y * 100}%`,
+    transform: 'scale(1.18)',
+    transformOrigin: `${x * 100}% ${y * 100}%`,
+  }
   ```
-- `HeicImage.vue` applies the style to the `<img>` element (via `:style="imageStyle"`)
-- Works in all grid views: photos, albums, search results
+- Person-detail and person-cover tiles still use the bbox-precise
+  `thumbnailImageStyle()` (more aggressive zoom, 1.5×–4×) because they
+  have the full face bounding box, not just the focal point.
+- Works in all grid views: photos, albums, search results.
 
 ### Data management
 
