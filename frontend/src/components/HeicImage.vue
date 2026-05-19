@@ -14,6 +14,13 @@ const props = defineProps<{
   staticSlot?: boolean;
 }>();
 
+const emit = defineEmits<{
+  /** Forwarded native `load` event from the inner `<img>`. Consumers that
+   *  need the natural pixel dimensions (e.g. compare-view zoom math) can
+   *  read `(evt.target as HTMLImageElement).naturalWidth/Height`. */
+  load: [evt: Event];
+}>();
+
 const displaySrc = ref<string>('');
 const isHeic = ref(false);
 const isLoading = ref(false);
@@ -105,6 +112,7 @@ const onImageLoad = (event: Event) => {
     naturalAspectRatio.value = img.naturalWidth / img.naturalHeight;
   }
   updateSlotBounds();
+  emit('load', event);
 };
 
 const getRenderedObjectRectInImageBox = (img: HTMLImageElement) => {

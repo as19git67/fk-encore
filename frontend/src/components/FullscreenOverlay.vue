@@ -60,7 +60,8 @@ const hasActionBar = computed(() => {
   if (slots['actions'] || slots['actions-before']) return true
   if (props.showDetailsButton !== false) return true
   if (props.canDelete) return true
-  return canEditTransform.value
+  if (canEditTransform.value) return true
+  return fullscreenSupported.value
 })
 
 const emit = defineEmits<{
@@ -359,10 +360,13 @@ function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'ArrowLeft' && props.prevPhoto) emit('prev')
     else if (e.key === 'ArrowRight' && props.nextPhoto) emit('next')
     else if (e.key === 'Escape') {
+      // Real-fullscreen exit fires its own keydown on some browsers; the
+      // fullscreenchange handler set a short suppression window for that.
+      if (performance.now() < suppressEscUntil) return
       // Close the details flyout first if it is open; otherwise close the
       // whole fullscreen overlay.
       if (props.detailsActive) emit('show-details')
-      else emit('close')
+      else void closeOverlay()
     }
   } else if (e.key === 'f' || e.key === 'F') {
     // Skip the hotkey while typing in an input (e.g. description textarea).
@@ -470,11 +474,132 @@ function locationLabel(photo: Photo) {
 // element currently has focus — users don't have to Tab to the toolbar to
 // trigger the action. The native Space/Enter activation of the focused
 // toolbar buttons (@click handlers) also continues to work.
+
+// ── Real browser fullscreen (Track N / #80) ────────────────────────────────
+// The CSS overlay above is a "fake" fullscreen — it still leaves the
+// browser chrome (URL bar, OS taskbar) visible. The Fullscreen API lifts
+// the element to the real screen, hiding everything else. We toggle it
+// on the outer overlay element so the toolbar / nav stays inside.
+const overlayRef = ref<HTMLElement | null>(null)
+const isRealFullscreen = ref(false)
+const fullscreenSupported = ref(detectFullscreenSupport())
+
+function detectFullscreenSupport(): boolean {
+  if (typeof HTMLElement === 'undefined') return false
+  const proto = HTMLElement.prototype as HTMLElement & {
+    webkitRequestFullscreen?: () => Promise<void>
+    msRequestFullscreen?: () => Promise<void>
+  }
+  return Boolean(
+    proto.requestFullscreen || proto.webkitRequestFullscreen || proto.msRequestFullscreen,
+  )
+}
+
+function getFullscreenElement(): Element | null {
+  const d = document as Document & {
+    webkitFullscreenElement?: Element
+    msFullscreenElement?: Element
+  }
+  return d.fullscreenElement || d.webkitFullscreenElement || d.msFullscreenElement || null
+}
+
+async function enterRealFullscreen() {
+  const el = overlayRef.value as (HTMLElement & {
+    webkitRequestFullscreen?: () => Promise<void>
+    msRequestFullscreen?: () => Promise<void>
+  }) | null
+  if (!el) return
+  try {
+    if (el.requestFullscreen) await el.requestFullscreen()
+    else if (el.webkitRequestFullscreen) await el.webkitRequestFullscreen()
+    else if (el.msRequestFullscreen) await el.msRequestFullscreen()
+  } catch (err) {
+    console.warn('[FullscreenOverlay] requestFullscreen failed', err)
+  }
+}
+
+async function exitRealFullscreen() {
+  // Guard against calling exitFullscreen when there's nothing to exit —
+  // the browser auto-exits when the fullscreen element leaves the DOM, so
+  // by the time the component tears down the fullscreen stack is already
+  // empty. Calling exitFullscreen() on a non-fullscreen document throws
+  // "Document not active" in Chrome and can leave the browser in a
+  // half-torn-down state that blocks input.
+  if (!getFullscreenElement()) return
+  const d = document as Document & {
+    webkitExitFullscreen?: () => Promise<void>
+    msExitFullscreen?: () => Promise<void>
+  }
+  try {
+    if (d.exitFullscreen) await d.exitFullscreen()
+    else if (d.webkitExitFullscreen) await d.webkitExitFullscreen()
+    else if (d.msExitFullscreen) await d.msExitFullscreen()
+  } catch (err) {
+    console.warn('[FullscreenOverlay] exitFullscreen failed', err)
+  }
+}
+
+async function toggleRealFullscreen() {
+  if (isRealFullscreen.value) await exitRealFullscreen()
+  else await enterRealFullscreen()
+}
+
+/**
+ * Close the overlay, exiting real fullscreen first when active. Awaiting
+ * the exit before emitting `close` keeps the unmount sequence ordered:
+ * browser exits fullscreen → fullscreenchange fires → state settles →
+ * parent unmounts us. Without this, the parent could remove the element
+ * mid-exit and trip the browser's fullscreen state machine.
+ */
+async function closeOverlay() {
+  if (isRealFullscreen.value) {
+    try {
+      await Promise.race([
+        exitRealFullscreen(),
+        new Promise<void>((resolve) => setTimeout(resolve, 250)),
+      ])
+    } catch {
+      // ignored — we're closing anyway
+    }
+  }
+  emit('close')
+}
+
+// When the browser leaves real fullscreen because the user pressed ESC,
+// it still dispatches the keydown to JS on some browsers. Suppress the
+// next ESC briefly so the overlay-close handler doesn't piggy-back on
+// the same key press.
+let suppressEscUntil = 0
+
+function onFullscreenChange() {
+  const wasFullscreen = isRealFullscreen.value
+  isRealFullscreen.value = getFullscreenElement() === overlayRef.value
+  if (wasFullscreen && !isRealFullscreen.value) {
+    suppressEscUntil = performance.now() + 300
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('fullscreenchange', onFullscreenChange)
+  document.addEventListener('webkitfullscreenchange', onFullscreenChange)
+  document.addEventListener('msfullscreenchange', onFullscreenChange)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('fullscreenchange', onFullscreenChange)
+  document.removeEventListener('webkitfullscreenchange', onFullscreenChange)
+  document.removeEventListener('msfullscreenchange', onFullscreenChange)
+  // No explicit exit attempt here — the browser auto-exits fullscreen
+  // when the fullscreen element leaves the DOM, and `closeOverlay()`
+  // already awaits the exit on the explicit close paths. Calling
+  // exitFullscreen here would race the auto-exit and trip Chrome's
+  // "Document not active" error.
+})
 </script>
 
 <template>
   <Teleport to="body">
-  <div class="fullscreen-overlay" @click="emit('close')">
+  <div ref="overlayRef" class="fullscreen-overlay" @click="closeOverlay">
     <!-- Preload neighbours only after current image has loaded -->
     <div v-if="currentLoaded" style="display: none">
       <HeicImage v-if="prevPhoto" :src="neighbourPreloadSrc(prevPhoto)" />
@@ -528,7 +653,7 @@ function locationLabel(photo: Photo) {
 
       <!-- Top bar: back + date/location (centered) + counter -->
       <div class="fs-topbar" @click.stop>
-        <Button icon="pi pi-arrow-left" rounded text @click="emit('close')" />
+        <Button icon="pi pi-arrow-left" rounded text @click="closeOverlay" />
 
         <div class="fs-center">
           <!-- Slot for custom center content (e.g. person name + rename btn) -->
@@ -631,6 +756,19 @@ function locationLabel(photo: Photo) {
             v-tooltip.top="'Schnitt &amp; Belichtung bearbeiten'"
           />
         </slot>
+        <!-- Real browser fullscreen toggle (Track N / #80). Sits outside
+             the `actions` slot so caller overrides still get it. -->
+        <Button
+          v-if="fullscreenSupported"
+          :icon="isRealFullscreen ? 'pi pi-window-minimize' : 'pi pi-window-maximize'"
+          rounded text
+          severity="secondary"
+          :class="{ 'fs-toolbar-btn--active': isRealFullscreen }"
+          :aria-pressed="isRealFullscreen"
+          :aria-label="isRealFullscreen ? 'Vollbild beenden' : 'Vollbild'"
+          @click="toggleRealFullscreen"
+          v-tooltip.top="isRealFullscreen ? 'Vollbild beenden (ESC)' : 'Vollbild'"
+        />
       </div>
 
       <!-- Optional bottom bar slot (e.g. location info in shared albums) -->
@@ -660,6 +798,15 @@ function locationLabel(photo: Photo) {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* When the browser lifts this element to real fullscreen (Track N / #80),
+   the rgba background lets the page underneath bleed through because the
+   element no longer composites against anything. Force opaque black so
+   the photo sits on a solid background. */
+.fullscreen-overlay:fullscreen,
+.fullscreen-overlay:-webkit-full-screen {
+  background: #000;
 }
 
 .fullscreen-content {
