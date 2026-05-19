@@ -1,27 +1,30 @@
 /**
  * Apply replication diffs to an already-imported region.
  *
- * Stub for now: the geo service does not yet ship an osm2pgsql --append
- * worker (see Phase 5 of the geo migration). The endpoint stays
- * available so the admin UI's "Refresh" button continues to work; it
- * just becomes a no-op that bumps last_used_at. Real replication wiring
- * lands when /geo grows a cron-driven replication subprocess.
+ * Delegates the work to the geo service's `POST /refresh` endpoint,
+ * which runs `osm2pgsql-replication update` against the region's
+ * PostGIS database and reports back how many diffs were applied. The
+ * geo service additionally runs an hourly background loop that calls
+ * the same code path, so this endpoint is mostly for ad-hoc admin UI
+ * use; both paths are idempotent.
  */
 
 import { eq } from "drizzle-orm";
 import dbDefault from "../db/database";
 import { osmRegionImports } from "../db/schema";
+import { getGeoClient, type GeoClient } from "./geo-client";
 
 export interface RefreshDeps {
   db?: typeof dbDefault;
+  geo?: GeoClient;
   now?: () => Date;
 }
 
 export interface RefreshResult {
   slug: string;
-  /** Always true at the moment; reserved for the Phase 5 replication. */
+  /** True iff the geo service returned 2xx. */
   ok: boolean;
-  /** Reserved for the new sequence id once replication is implemented. */
+  /** New replication sequence id when the command surfaced one. */
   replicationSeq?: string;
   /** Diagnostic line on failure. */
   detail?: string;
@@ -32,6 +35,7 @@ export async function refreshRegion(
   deps: RefreshDeps = {},
 ): Promise<RefreshResult> {
   const db = deps.db ?? dbDefault;
+  const geo = deps.geo ?? getGeoClient();
   const now = deps.now ?? (() => new Date());
 
   const rows = await db
@@ -46,17 +50,39 @@ export async function refreshRegion(
     );
   }
 
-  await db
-    .update(osmRegionImports)
-    .set({
-      last_used_at: now().toISOString(),
-      updated_at: now().toISOString(),
-    })
-    .where(eq(osmRegionImports.slug, slug));
-
-  return {
-    slug,
-    ok: true,
-    detail: "replication not yet implemented in geo service",
-  };
+  try {
+    const result = await geo.refresh(row.postgres_db);
+    const replicationSeq =
+      result.sequence !== null && result.sequence !== undefined
+        ? String(result.sequence)
+        : row.replication_seq ?? undefined;
+    await db
+      .update(osmRegionImports)
+      .set({
+        replication_seq: replicationSeq ?? null,
+        last_error: null,
+        last_used_at: now().toISOString(),
+        updated_at: now().toISOString(),
+      })
+      .where(eq(osmRegionImports.slug, slug));
+    return {
+      slug,
+      ok: true,
+      replicationSeq,
+      detail:
+        result.appliedDiffs > 0
+          ? `applied ${result.appliedDiffs} diff(s)`
+          : "already up to date",
+    };
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    await db
+      .update(osmRegionImports)
+      .set({
+        last_error: `replication: ${detail}`,
+        updated_at: now().toISOString(),
+      })
+      .where(eq(osmRegionImports.slug, slug));
+    return { slug, ok: false, detail };
+  }
 }

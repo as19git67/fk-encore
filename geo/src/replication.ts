@@ -1,0 +1,226 @@
+/**
+ * Replication updater for the per-region PostGIS databases.
+ *
+ * Uses osm2pgsql's bundled `osm2pgsql-replication` tool, which stores
+ * its high-water sequence inside the database itself (in the
+ * `osm2pgsql_replication_status` table) and pulls minute/hour/day
+ * diffs from a Geofabrik replication base URL.
+ *
+ *   initReplication        ran by the importer after a fresh
+ *                           `osm2pgsql --create`. Tells the tool
+ *                           which replication base URL to track and
+ *                           which sequence to start from (derived
+ *                           from the PBF timestamp).
+ *
+ *   runReplicationUpdate    pulls every diff published since the last
+ *                           successful update and applies it with
+ *                           `osm2pgsql --append`. Idempotent — a
+ *                           re-run when no new diffs are available is
+ *                           a cheap no-op.
+ *
+ *   replicationLoop         setInterval-driven background loop that
+ *                           calls runReplicationUpdate on every
+ *                           imported region every
+ *                           GEO_REPLICATION_INTERVAL_MS (default 1h).
+ */
+
+import { spawn } from "node:child_process";
+import path from "node:path";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { adminPool, connectionInfo } from "./db.ts";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const LUA_STYLE = path.join(__dirname, "osm2pgsql.lua");
+const REPLICATION_INTERVAL_MS = parseInt(
+  process.env.GEO_REPLICATION_INTERVAL_MS ?? String(60 * 60 * 1000),
+  10,
+);
+
+export interface ReplicationResult {
+  postgresDb: string;
+  /** Number of diffs applied this run; 0 when already up to date. */
+  appliedDiffs: number;
+  /** Sequence number reported by osm2pgsql-replication after the run. */
+  sequence: number | null;
+  /** ISO timestamp of the most recently applied diff. */
+  timestamp: string | null;
+}
+
+/**
+ * Geofabrik publishes its replication state under
+ * `<region>-updates/state.txt`. The PBF download lives at
+ * `<region>-latest.osm.pbf`. Convert the latter to the former.
+ */
+export function replicationUrlFor(pbfUrl: string): string {
+  return pbfUrl.replace(/-latest\.osm\.pbf$/, "-updates/");
+}
+
+/**
+ * Initialise replication tracking for a freshly-imported region.
+ * Safe to call repeatedly — `osm2pgsql-replication init` is
+ * idempotent once the tables are created.
+ */
+export async function initReplication(
+  postgresDb: string,
+  pbfUrl: string,
+): Promise<void> {
+  const url = replicationUrlFor(pbfUrl);
+  await execCommand("osm2pgsql-replication", [
+    "init",
+    "--server", url,
+    ...pgArgs(postgresDb),
+  ]);
+}
+
+/**
+ * Pull and apply any new diffs. Returns a summary describing what
+ * happened. Caller surfaces non-zero exit codes as failures; an exit
+ * of 0 with appliedDiffs === 0 means "nothing new yet".
+ */
+export async function runReplicationUpdate(
+  postgresDb: string,
+): Promise<ReplicationResult> {
+  // `osm2pgsql-replication update` prints summary lines we parse for
+  // metrics. Capture stdout/stderr instead of inheriting.
+  const before = await readState(postgresDb);
+  await execCommand("osm2pgsql-replication", [
+    "update",
+    "--",
+    "--output", "flex",
+    "--style", LUA_STYLE,
+    "--slim",
+    "--cache", String(parseInt(process.env.GEO_OSM2PGSQL_CACHE_MB ?? "2000", 10)),
+    "--number-processes", String(parseInt(process.env.GEO_OSM2PGSQL_PROCS ?? "2", 10)),
+    ...pgArgs(postgresDb),
+  ]);
+  const after = await readState(postgresDb);
+
+  return {
+    postgresDb,
+    appliedDiffs: Math.max(0, (after.sequence ?? 0) - (before.sequence ?? 0)),
+    sequence: after.sequence,
+    timestamp: after.timestamp,
+  };
+}
+
+interface ReplicationStateRow {
+  sequence: number | null;
+  timestamp: string | null;
+}
+
+async function readState(postgresDb: string): Promise<ReplicationStateRow> {
+  // osm2pgsql ≥ 1.6 stores replication state in
+  // `osm2pgsql_replication_status` (kept across slim/flex modes).
+  const { poolFor } = await import("./db.ts");
+  const pool = poolFor(postgresDb);
+  try {
+    const res = await pool.query<{ property: string; value: string }>(
+      `SELECT property, value
+         FROM osm2pgsql_replication_status
+        WHERE property IN ('sequence', 'timestamp')`,
+    );
+    let sequence: number | null = null;
+    let timestamp: string | null = null;
+    for (const row of res.rows) {
+      if (row.property === "sequence") {
+        const n = parseInt(row.value, 10);
+        if (Number.isFinite(n)) sequence = n;
+      } else if (row.property === "timestamp") {
+        timestamp = row.value;
+      }
+    }
+    return { sequence, timestamp };
+  } catch {
+    // Table doesn't exist yet (init not run) — treat as zero.
+    return { sequence: null, timestamp: null };
+  }
+}
+
+function pgArgs(database: string): string[] {
+  const c = connectionInfo();
+  return [
+    "--database", database,
+    "--host", c.host,
+    "--port", String(c.port),
+    "--username", c.user,
+  ];
+}
+
+function execCommand(cmd: string, args: string[]): Promise<void> {
+  const c = connectionInfo();
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, {
+      stdio: ["ignore", "inherit", "inherit"],
+      env: { ...process.env, PGPASSWORD: c.password },
+    });
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`${cmd} exited with code ${code}`));
+    });
+  });
+}
+
+// ── Periodic loop ───────────────────────────────────────────────────
+
+let timer: NodeJS.Timeout | null = null;
+
+/**
+ * Start the background replication loop. Invoked once at server boot
+ * (see server.ts). Safe to call multiple times — idempotent.
+ */
+export function startReplicationLoop(): void {
+  if (timer) return;
+  console.log(`[geo] replication loop armed (interval=${REPLICATION_INTERVAL_MS}ms)`);
+  timer = setInterval(() => {
+    void tickReplication().catch((err) => {
+      console.error("[geo] replication tick failed:", err);
+    });
+  }, REPLICATION_INTERVAL_MS);
+  // Unref the timer so it doesn't keep the process alive on shutdown.
+  if (typeof timer.unref === "function") timer.unref();
+}
+
+export function stopReplicationLoop(): void {
+  if (!timer) return;
+  clearInterval(timer);
+  timer = null;
+}
+
+/**
+ * Run one replication pass across every region database (those whose
+ * datname starts with `nom_`). Errors per region are logged and do
+ * not abort the loop — a single broken region doesn't starve the
+ * others.
+ */
+export async function tickReplication(): Promise<{
+  attempted: string[];
+  succeeded: string[];
+  failed: Array<{ postgresDb: string; error: string }>;
+}> {
+  const admin = adminPool();
+  const res = await admin.query<{ datname: string }>(
+    `SELECT datname FROM pg_database WHERE datname LIKE 'nom\\_%' ESCAPE '\\' ORDER BY datname`,
+  );
+  const dbs = res.rows.map((r) => r.datname);
+  const succeeded: string[] = [];
+  const failed: Array<{ postgresDb: string; error: string }> = [];
+  for (const db of dbs) {
+    try {
+      const r = await runReplicationUpdate(db);
+      if (r.appliedDiffs > 0) {
+        console.log(`[geo] replication ${db}: +${r.appliedDiffs} diffs (seq=${r.sequence})`);
+      }
+      succeeded.push(db);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      failed.push({ postgresDb: db, error: msg });
+      console.warn(`[geo] replication ${db} failed: ${msg}`);
+    }
+  }
+  return { attempted: dbs, succeeded, failed };
+}

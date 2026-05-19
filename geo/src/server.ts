@@ -26,6 +26,11 @@ import {
   startImport,
   type ImportRequest,
 } from "./import.ts";
+import {
+  runReplicationUpdate,
+  startReplicationLoop,
+  stopReplicationLoop,
+} from "./replication.ts";
 
 const PORT = parseInt(process.env.GEO_PORT ?? "8080", 10);
 const SHARED_SECRET = process.env.GEO_SHARED_SECRET ?? "";
@@ -135,6 +140,20 @@ app.get("/imports/:postgresDb", async (req, res, next) => {
   }
 });
 
+app.post("/refresh", async (req, res, next) => {
+  try {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const postgresDb = requireString(body.postgresDb, "postgresDb");
+    if (!/^[a-z0-9_]+$/.test(postgresDb)) {
+      throw new HttpError(400, `postgresDb must match [a-z0-9_]+, got '${postgresDb}'`);
+    }
+    const result = await runReplicationUpdate(postgresDb);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.delete("/regions/:database", async (req, res, next) => {
   try {
     const database = req.params.database ?? "";
@@ -162,8 +181,15 @@ const server = app.listen(PORT, () => {
   console.log(`[geo] listening on :${PORT}`);
 });
 
+// Arm the background replication loop. Disabled when GEO_REPLICATION
+// is set to "off" — useful in tests and during initial import work.
+if (process.env.GEO_REPLICATION !== "off") {
+  startReplicationLoop();
+}
+
 function shutdown(signal: NodeJS.Signals): void {
   console.log(`[geo] ${signal} received, shutting down`);
+  stopReplicationLoop();
   server.close(async () => {
     await closeAllPools();
     process.exit(0);

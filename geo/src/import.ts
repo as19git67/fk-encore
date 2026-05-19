@@ -31,6 +31,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { adminPool, connectionInfo, dropPool, poolFor } from "./db.ts";
+import { initReplication } from "./replication.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -171,6 +172,19 @@ async function runImport(req: ImportRequest): Promise<RunResult> {
 
   await postImportIndexes(req.postgresDb);
   await runAnalyze(req.postgresDb);
+
+  // Wire the replication tracker so subsequent /refresh calls and the
+  // background loop know where to resume. Errors are non-fatal: a
+  // freshly imported region is still serveable even without working
+  // replication, and an admin can re-run init later.
+  try {
+    await initReplication(req.postgresDb, req.pbfUrl);
+  } catch (err) {
+    console.warn(
+      `[geo] initReplication failed for ${req.postgresDb}; replication disabled until manual init:`,
+      err instanceof Error ? err.message : err,
+    );
+  }
 
   return {
     pbfSizeMb: Math.round(pbfBytes / (1024 * 1024)),

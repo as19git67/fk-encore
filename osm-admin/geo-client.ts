@@ -68,6 +68,16 @@ export interface GeoPoiQueryOptions {
   maxCandidates?: number;
 }
 
+export interface GeoRefreshResult {
+  postgresDb: string;
+  /** Number of diffs applied this run; 0 when already up to date. */
+  appliedDiffs: number;
+  /** Sequence number reported by osm2pgsql-replication after the run. */
+  sequence: number | null;
+  /** ISO timestamp of the most recently applied diff. */
+  timestamp: string | null;
+}
+
 export interface GeoClient {
   health(): Promise<boolean>;
   startImport(req: GeoImportRequest): Promise<GeoImportStatus>;
@@ -79,6 +89,7 @@ export interface GeoClient {
     lon: number,
     opts?: GeoPoiQueryOptions,
   ): Promise<GeoPoiCandidate[]>;
+  refresh(postgresDb: string): Promise<GeoRefreshResult>;
   dropRegion(postgresDb: string): Promise<boolean>;
 }
 
@@ -153,6 +164,10 @@ class HttpGeoClient implements GeoClient {
       maxCandidates: opts.maxCandidates,
     });
     return body.candidates;
+  }
+
+  async refresh(postgresDb: string): Promise<GeoRefreshResult> {
+    return await this.postJson<GeoRefreshResult>("/refresh", { postgresDb });
   }
 
   async dropRegion(postgresDb: string): Promise<boolean> {

@@ -22,6 +22,7 @@ import type {
   GeoImportStatus,
   GeoPoiCandidate,
   GeoPoiQueryOptions,
+  GeoRefreshResult,
   GeoReverseResult,
 } from "./geo-client";
 
@@ -35,8 +36,10 @@ export class InMemoryGeoClient implements GeoClient {
   private imports = new Map<string, ImportEntry>();
   private reverseResults = new Map<string, GeoReverseResult["result"]>();
   private poiCandidates = new Map<string, GeoPoiCandidate[]>();
+  private refreshResults = new Map<string, GeoRefreshResult>();
   private droppedRegions: string[] = [];
   private startImportCalls: GeoImportRequest[] = [];
+  private refreshCalls: string[] = [];
 
   setHealthy(v: boolean): void { this.healthy = v; }
 
@@ -59,9 +62,14 @@ export class InMemoryGeoClient implements GeoClient {
     this.poiCandidates.set(postgresDb, candidates);
   }
 
+  setRefreshResult(postgresDb: string, result: GeoRefreshResult): void {
+    this.refreshResults.set(postgresDb, result);
+  }
+
   /** Test inspection helpers. */
   getStartImportCalls(): GeoImportRequest[] { return [...this.startImportCalls]; }
   getDroppedRegions(): string[] { return [...this.droppedRegions]; }
+  getRefreshCalls(): string[] { return [...this.refreshCalls]; }
 
   async health(): Promise<boolean> {
     return this.healthy;
@@ -106,6 +114,18 @@ export class InMemoryGeoClient implements GeoClient {
     _opts?: GeoPoiQueryOptions,
   ): Promise<GeoPoiCandidate[]> {
     return this.poiCandidates.get(postgresDb) ?? [];
+  }
+
+  async refresh(postgresDb: string): Promise<GeoRefreshResult> {
+    this.refreshCalls.push(postgresDb);
+    const cached = this.refreshResults.get(postgresDb);
+    if (cached) return cached;
+    return {
+      postgresDb,
+      appliedDiffs: 0,
+      sequence: null,
+      timestamp: null,
+    };
   }
 
   async dropRegion(postgresDb: string): Promise<boolean> {
