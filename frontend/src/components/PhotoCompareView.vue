@@ -159,20 +159,44 @@ function aiScoreTooltip(photoId: number): string {
 }
 
 // ── Eyes-closed hint (Track N / #81) ─────────────────────────────────────
-// Surface a "Augen geschlossen" warning when the AI's per-face eyes_open
-// score is below the threshold. Escalate the visual weight when the
-// OTHER photo of the pair has open eyes — that's the actionable case
-// where the user almost certainly wants to keep the other one.
-const EYES_CLOSED_THRESHOLD = 0.5
+// The `eyes_open` AI signal is weak — the score sits in a narrow band
+// (roughly 0.35–0.67 in the user's library, see docs/ai-auto-pick.md). An
+// absolute threshold would flag photos with obviously open eyes whenever
+// their score happens to land at 0.45. We therefore surface the hint only
+// when there's a meaningful RELATIVE gap: in the compare-phase against
+// the partner photo of the pair, in the review-grid against the
+// best-eyes photo of the whole group.
+const EYES_DELTA_THRESHOLD = 0.15
 
 function eyesOpenScore(photoId: number): number | null {
   const v = getPhotoById(photoId)?.ai_quality_details?.eyes_open
   return typeof v === 'number' ? v : null
 }
 
-function hasClosedEyes(photoId: number): boolean {
-  const s = eyesOpenScore(photoId)
-  return s !== null && s < EYES_CLOSED_THRESHOLD
+/** Compare-phase variant: badge fires when the OTHER photo of the
+ *  current pair has eyes_open notably higher than this photo. */
+function hasClosedEyesVsPartner(photoId: number): boolean {
+  if (!currentPair.value) return false
+  const [a, b] = currentPair.value
+  const otherId = photoId === a ? b : a
+  const my = eyesOpenScore(photoId)
+  const other = eyesOpenScore(otherId)
+  if (my === null || other === null) return false
+  return other - my > EYES_DELTA_THRESHOLD
+}
+
+/** Review-phase variant: badge fires when this photo's eyes_open sits
+ *  notably below the best-eyes photo of the displayed group. */
+function hasClosedEyesInGroup(photoId: number): boolean {
+  const my = eyesOpenScore(photoId)
+  if (my === null) return false
+  let best = -Infinity
+  for (const p of groupPhotos.value) {
+    const s = p.ai_quality_details?.eyes_open
+    if (typeof s === 'number' && s > best) best = s
+  }
+  if (best === -Infinity) return false
+  return best - my > EYES_DELTA_THRESHOLD
 }
 
 function eyesClosedTooltip(photoId: number): string {
@@ -181,21 +205,9 @@ function eyesClosedTooltip(photoId: number): string {
   if (!currentPair.value) return `Augen wirken geschlossen (${pct})`
   const [a, b] = currentPair.value
   const otherId = photoId === a ? b : a
-  const otherClosed = hasClosedEyes(otherId)
-  if (otherClosed) return `Augen wirken geschlossen (${pct}) — auf dem anderen Foto allerdings auch.`
-  if (eyesOpenScore(otherId) === null) return `Augen wirken geschlossen (${pct})`
-  return `Augen wirken geschlossen (${pct}) — das andere Foto hat offene Augen.`
-}
-
-/** True when this photo has closed eyes AND the other photo of the pair
- *  has open eyes — the actionable "pick the other one" hint. */
-function isClosedEyesStandout(photoId: number): boolean {
-  if (!currentPair.value) return false
-  if (!hasClosedEyes(photoId)) return false
-  const [a, b] = currentPair.value
-  const otherId = photoId === a ? b : a
   const otherScore = eyesOpenScore(otherId)
-  return otherScore !== null && otherScore >= EYES_CLOSED_THRESHOLD
+  const otherPct = otherScore !== null ? `${Math.round(otherScore * 100)}%` : '?'
+  return `Augen wirken geschlossen (${pct}) — das andere Foto liegt bei ${otherPct}.`
 }
 
 /**
@@ -577,44 +589,39 @@ interface ActiveZoom {
 // zoom to the partner. Toggling OFF leaves the zoom state untouched.
 const syncZoomEnabled = ref(false)
 const zoomByPhoto = ref(new Map<number, ActiveZoom>())
-const photoNatural = ref(new Map<number, { w: number; h: number }>())
-const viewportByPhoto = ref(new Map<number, { w: number; h: number }>())
 const facesCache = ref(new Map<number, Face[]>())
 const landmarksCache = ref(new Map<number, LandmarkItem[]>())
 
 const ZOOM_TARGET_FRACTION = 0.45
 const ZOOM_MAX = 5
 
-function onPhotoImgLoad(photoId: number, evt: Event) {
-  const img = evt.target as HTMLImageElement | null
-  if (!img || !img.naturalWidth || !img.naturalHeight) return
-  photoNatural.value = new Map(photoNatural.value).set(photoId, {
-    w: img.naturalWidth,
-    h: img.naturalHeight,
-  })
-}
+// Non-reactive registry of the per-photo container element. Used at zoom
+// time to read live dimensions from the DOM so the zoom path doesn't
+// depend on a separately-cached `@load` event landing first — that race
+// was the cause of "double-tap reacts only sometimes" (Track N / #79).
+const photoContainers = new Map<number, HTMLElement>()
 
 function recordViewport(photoId: number, el: HTMLElement | null) {
-  if (!el) return
-  const rect = el.getBoundingClientRect()
-  if (rect.width <= 0 || rect.height <= 0) return
-  // Vue invokes inline function `:ref` callbacks on every component
-  // update — without this idempotency guard, writing the new Map below
-  // triggers a re-render which re-invokes the ref which writes again,
-  // freezing the browser as soon as the compare-view mounts.
-  const existing = viewportByPhoto.value.get(photoId)
-  if (existing && existing.w === rect.width && existing.h === rect.height) return
-  viewportByPhoto.value = new Map(viewportByPhoto.value).set(photoId, {
-    w: rect.width,
-    h: rect.height,
-  })
+  if (el) {
+    photoContainers.set(photoId, el)
+  } else {
+    photoContainers.delete(photoId)
+  }
 }
 
 function getViewport(photoId: number) {
-  const natural = photoNatural.value.get(photoId)
-  const vp = viewportByPhoto.value.get(photoId)
-  if (!natural || !vp) return null
-  return { width: vp.w, height: vp.h, photoWidth: natural.w, photoHeight: natural.h }
+  const container = photoContainers.get(photoId)
+  if (!container) return null
+  const rect = container.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) return null
+  const img = container.querySelector('img')
+  if (!img || !img.naturalWidth || !img.naturalHeight) return null
+  return {
+    width: rect.width,
+    height: rect.height,
+    photoWidth: img.naturalWidth,
+    photoHeight: img.naturalHeight,
+  }
 }
 
 async function ensureBboxData(photoId: number): Promise<{ faces: Face[]; landmarks: LandmarkItem[] }> {
@@ -1053,7 +1060,6 @@ function compareTileSrc(photo: Photo, width?: number): string {
                     :src="compareTileSrc(getPhotoById(photoId)!)"
                     alt=""
                     objectFit="contain"
-                    @load="(evt: Event) => onPhotoImgLoad(photoId, evt)"
                   />
                 </div>
                 <div
@@ -1073,9 +1079,8 @@ function compareTileSrc(photo: Photo, width?: number): string {
                   KI-Pick
                 </div>
                 <div
-                  v-if="hasClosedEyes(photoId)"
-                  class="eyes-closed-badge"
-                  :class="{ 'eyes-closed-badge--standout': isClosedEyesStandout(photoId) }"
+                  v-if="hasClosedEyesVsPartner(photoId)"
+                  class="eyes-closed-badge eyes-closed-badge--standout"
                   v-tooltip.top="eyesClosedTooltip(photoId)"
                 >
                   <i class="pi pi-eye-slash" style="font-size: 0.7rem" />
@@ -1246,9 +1251,9 @@ function compareTileSrc(photo: Photo, width?: number): string {
                   KI-Pick
                 </div>
                 <div
-                  v-if="hasClosedEyes(photo.id)"
+                  v-if="hasClosedEyesInGroup(photo.id)"
                   class="review-eyes-closed"
-                  v-tooltip.right="`Augen wirken geschlossen (${Math.round((eyesOpenScore(photo.id) ?? 0) * 100)}%)`"
+                  v-tooltip.right="`Augen wirken geschlossen (${Math.round((eyesOpenScore(photo.id) ?? 0) * 100)}%) — deutlich weniger offen als das beste Foto der Gruppe.`"
                 >
                   <i class="pi pi-eye-slash" style="font-size: 0.6rem" />
                   Augen zu
