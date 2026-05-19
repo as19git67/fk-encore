@@ -128,6 +128,41 @@ same UI logic:
 - The button **"Edit groups (N open)"** jumps to the first unreviewed group
   via `handleStartGroupReview`.
 
+### Compare-view zoom helpers (Track N)
+
+Inside `PhotoCompareView` the user can inspect a specific face without
+leaving the side-by-side layout:
+
+- **Double-click / double-tap** on a photo zooms in on the face nearest
+  the click position. With multiple people in the frame the gesture
+  decides the target (`pickBboxAtPoint` in `utils/compareZoom.ts`) — the
+  face whose bbox contains the click wins, ties broken by the tightest
+  bbox; otherwise the nearest face within ~15% of the image diagonal;
+  otherwise the global "primary" bbox.
+- **Sync-Zoom toggle** in the header mirrors the zoom to the other
+  photo. When the clicked face has a `person_id`, the counterpart on
+  the other photo zooms to that same person via `findFaceForPerson`;
+  otherwise the other photo's primary bbox is used. Both photos are
+  equalised to the same on-screen face size by `computeSyncBboxZoom`,
+  letterbox-aware via `containedRect`.
+- Zoom resets on **ESC**, on Sync-Zoom toggle, on pair change, and on
+  window resize.
+- Faces (and landmarks when no face is detected) are fetched lazily on
+  first double-click and cached per photo.
+
+### Eyes-closed hint (Track N / #81)
+
+`ai_quality_details.eyes_open` already drives the global auto-pick
+weighting (see `docs/ai-auto-pick.md`). The compare and review tiles
+surface low scores directly:
+
+- Each photo with `eyes_open < 0.5` shows a red "Augen zu" pill in the
+  bottom-right.
+- In the compare phase, the pill is intensified (stronger red + glow)
+  when the OTHER photo of the pair has open eyes — that's the
+  actionable "pick the other one" case.
+- The review-grid tiles render the same pill in a compact variant.
+
 ### Album-specific restriction
 
 In the album view, groups are additionally constrained to album members
