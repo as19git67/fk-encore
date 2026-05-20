@@ -154,8 +154,13 @@ import {
 import { repairMojibake } from "./text-encoding";
 import { computePhotoTransformSuggestions } from "./photo-transforms.service";
 // HEIC decoding moved out of this module — see heic-convert.service.ts.
-// Re-exported so existing imports of these names from `photo.service`
-// (most notably `service.convertHeicToJpeg` in photo.ts) keep working.
+// `convertHeicToJpeg` is used locally below, so it must be imported (a
+// bare `export … from` re-export does NOT create a local binding and
+// the local uses would throw `ReferenceError` at runtime). The
+// re-export is kept so existing imports of these names from
+// `photo.service` (most notably `service.convertHeicToJpeg` in
+// photo.ts) keep working.
+import { convertHeicToJpeg } from "./heic-convert.service";
 export { convertHeicToJpeg, isHeicBuffer } from "./heic-convert.service";
 
 console.log("[boot] photo/photo.service.ts: all imports resolved");
