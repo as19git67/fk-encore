@@ -2076,6 +2076,28 @@ function mergeKeywordSets(existing: string[], incoming: string[]): string[] {
   return merged;
 }
 
+/**
+ * Hash-sync metadata that the iOS client supplies as upload headers
+ * (X-Image-Data-Hash, X-Full-Hash, X-Description) — see issue #432.
+ */
+export interface UploadSyncMeta {
+  /** SHA-256 of the image pixel data only. Persisted as `image_data_hash`. */
+  imageDataHash?: string | null;
+  /**
+   * The client's full identity hash, covering pixels *and* every syncable
+   * property (caption, favourite, capture date). The client computes it
+   * itself — it is not a hash of the uploaded bytes, because iOS keeps
+   * caption/favourite outside the file. Persisted as `hash` so the
+   * /photos/sync/check lookup recognises the photo on the next sync.
+   */
+  fullHash?: string | null;
+  /**
+   * `undefined` falls back to the description embedded in the file's IPTC;
+   * a string (incl. "") is used verbatim — the device is authoritative.
+   */
+  description?: string;
+}
+
 export async function uploadPhotoStream(
   userId: number,
   stream: IncomingMessage,
@@ -2083,10 +2105,9 @@ export async function uploadPhotoStream(
   mimeType: string,
   isFavorite: boolean = false,
   clientCapturedAt: string | null = null,
-  // SHA-256 of the image pixel data only (X-Image-Data-Hash). Persisted so a
-  // later metadata-only re-upload is recognised as the same photo (issue #432).
-  imageDataHash: string | null = null,
+  sync: UploadSyncMeta = {},
 ): Promise<Photo> {
+  const { imageDataHash = null, fullHash = null } = sync;
   if (!SUPPORTED_MIME_TYPES.has(mimeType.toLowerCase().split(";")[0].trim())) {
     throw new Error("UNSUPPORTED_FILE_TYPE");
   }
@@ -2140,7 +2161,11 @@ export async function uploadPhotoStream(
   // this user, update that existing record instead of creating a second one.
   // Guard: skip when the new upload has NO new metadata so that burst photos
   // (same taken_at, different content, no description) each keep their own record.
-  const descriptionValueEarly = combineDescription(exifMeta);
+  // The device is authoritative when it sends X-Description; otherwise fall
+  // back to the description embedded in the file's IPTC block.
+  const descriptionValueEarly = sync.description !== undefined
+    ? (sync.description.trim() || null)
+    : combineDescription(exifMeta);
   const hasNewMetadata = isFavorite || !!descriptionValueEarly || (exifMeta.rating !== null && exifMeta.rating >= 4);
   if (exifMeta.takenAt && hasNewMetadata) {
     const takenAtDup = await dbFirst<{ id: number }>(
@@ -2172,7 +2197,10 @@ export async function uploadPhotoStream(
       original_name: originalName,
       mime_type: mimeType,
       size: size,
-      hash: digest,
+      // Prefer the client's identity hash so the next /photos/sync/check
+      // recognises this photo; fall back to the body digest for legacy
+      // clients that send no X-Full-Hash header.
+      hash: fullHash ?? digest,
       image_data_hash: imageDataHash,
       taken_at: exifMeta.takenAt,
       latitude: exifMeta.latitude,

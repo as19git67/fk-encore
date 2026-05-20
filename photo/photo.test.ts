@@ -265,9 +265,9 @@ describe("Photo Module", () => {
       // of the exact wire format (T vs space, optional millis/zone suffix).
       const wall = (v: unknown): string => String(v).replace("T", " ").slice(0, 19);
 
-      async function uploadWithImageHash(name: string, body: string, hash: string) {
+      async function uploadWithSync(name: string, body: string, sync: service.UploadSyncMeta) {
         const stream = Readable.from(Buffer.from(body)) as any;
-        return service.uploadPhotoStream(user1.id, stream, name, "image/jpeg", false, null, hash);
+        return service.uploadPhotoStream(user1.id, stream, name, "image/jpeg", false, null, sync);
       }
 
       it("normalizeClientCapturedAt keeps the local wall-clock time", () => {
@@ -291,19 +291,37 @@ describe("Photo Module", () => {
         expect(service.normalizeClientCapturedAt("3000-01-01T00:00:00Z")).toBeNull();
       });
 
-      it("uploadPhotoStream persists the image-data hash", async () => {
-        const photo = await uploadWithImageHash("idh.jpg", "idh-pixels", imgHash);
-        const row = await dbFirst<{ image_data_hash: string | null }>(
-          db.select({ image_data_hash: photos.image_data_hash })
-            .from(photos).where(eq(photos.id, photo.id))
+      it("uploadPhotoStream persists the sync hashes and a header description", async () => {
+        const photo = await uploadWithSync("idh.jpg", "idh-pixels", {
+          imageDataHash: imgHash,
+          fullHash: fullHashA,
+          description: "Header-Beschreibung",
+        });
+        const row = await dbFirst<typeof photos.$inferSelect>(
+          db.select().from(photos).where(eq(photos.id, photo.id))
         );
         expect(row?.image_data_hash).toBe(imgHash);
+        // The client's identity hash is stored, not the uploaded-body digest.
+        expect(row?.hash).toBe(fullHashA);
+        // The X-Description header wins over (here: absent) file IPTC.
+        expect(row?.description).toBe("Header-Beschreibung");
+        fs.unlinkSync(path.join(UPLOAD_DIR, photo.filename));
+      });
+
+      it("uploadPhotoStream falls back to the body digest without X-Full-Hash", async () => {
+        const photo = await uploadWithSync("legacy.jpg", "legacy-pixels", { imageDataHash: imgHash });
+        expect(photo.hash).toMatch(/^[a-f0-9]{64}$/);
+        expect(photo.hash).not.toBe(fullHashA);
         fs.unlinkSync(path.join(UPLOAD_DIR, photo.filename));
       });
 
       it("checkPhotoFullHashesLogic returns the subset that exists, scoped per user", async () => {
-        const photo = await uploadWithImageHash("batch.jpg", "batch-pixels", imgHash);
+        const photo = await uploadWithSync("batch.jpg", "batch-pixels", {
+          imageDataHash: imgHash,
+          fullHash: fullHashA,
+        });
         const fullHash = photo.hash!;
+        expect(fullHash).toBe(fullHashA);
         const unknown = "d4".repeat(32);
 
         const res = await service.checkPhotoFullHashesLogic(user1.id, [fullHash, unknown, "bad"]);
@@ -321,7 +339,7 @@ describe("Photo Module", () => {
       });
 
       it("tryMetadataOnlySync updates metadata in place and refreshes the hashes", async () => {
-        const photo = await uploadWithImageHash("meta.jpg", "meta-pixels", imgHash);
+        const photo = await uploadWithSync("meta.jpg", "meta-pixels", { imageDataHash: imgHash });
 
         // First sync: set description, favourite and capture date.
         const r1 = await service.tryMetadataOnlySync(user1.id, {

@@ -234,7 +234,11 @@ export const uploadPhoto = api.raw(
     }
 
     try {
-      const photo = await service.uploadPhotoStream(userId, req, fileName, mimeType, isFavorite, clientCapturedAt, imageDataHash);
+      const photo = await service.uploadPhotoStream(userId, req, fileName, mimeType, isFavorite, clientCapturedAt, {
+        imageDataHash,
+        fullHash,
+        description: hasDescriptionHeader ? description : undefined,
+      });
 
       res.statusCode = 201;
       res.setHeader("Content-Type", "application/json");
