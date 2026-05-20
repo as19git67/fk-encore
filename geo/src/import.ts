@@ -38,7 +38,6 @@ const __dirname = dirname(__filename);
 
 const DATA_DIR = process.env.GEO_DATA_DIR ?? "/data";
 const PBF_DIR = path.join(DATA_DIR, "pbf");
-const FLAT_NODE_DIR = path.join(DATA_DIR, "work");
 const LUA_STYLE = path.join(__dirname, "osm2pgsql.lua");
 
 export interface ImportRequest {
@@ -156,7 +155,6 @@ interface RunResult {
 
 async function runImport(req: ImportRequest): Promise<RunResult> {
   await mkdir(PBF_DIR, { recursive: true });
-  await mkdir(FLAT_NODE_DIR, { recursive: true });
 
   const startedAt = Date.now();
   const pbfPath = path.join(PBF_DIR, `${slugToFile(req.slug)}.pbf`);
@@ -167,11 +165,7 @@ async function runImport(req: ImportRequest): Promise<RunResult> {
   await ensureDatabase(req.postgresDb);
   await ensurePostgisAndSchema(req.postgresDb);
 
-  // Flat-node file is keyed by postgresDb (not the raw slug): the
-  // replication updater only knows the postgresDb and must point
-  // osm2pgsql --append at the exact same flat-node file the import
-  // used, so the two derivations have to agree.
-  await runOsm2pgsql(req.postgresDb, pbfPath, flatNodePathFor(req.postgresDb));
+  await runOsm2pgsql(req.postgresDb, pbfPath);
 
   await postImportIndexes(req.postgresDb);
   await runAnalyze(req.postgresDb);
@@ -270,7 +264,6 @@ async function ensurePostgisAndSchema(database: string): Promise<void> {
 async function runOsm2pgsql(
   database: string,
   pbfPath: string,
-  flatNodePath: string,
 ): Promise<void> {
   const conn = connectionInfo();
   // NB: `--slim` WITHOUT `--drop`. `--drop` discards the slim middle
@@ -278,10 +271,17 @@ async function runOsm2pgsql(
   // database non-updatable — `osm2pgsql-replication update` (i.e.
   // `osm2pgsql --append`) needs those tables and exits 1 without
   // them. Keeping them is the price of supporting hourly replication.
+  //
+  // NB: no `--flat-nodes`. That file is pre-sized to the *global* OSM
+  // node-ID space (~100 GB) no matter how small the region is, so one
+  // file per region explodes disk usage. Without it `--slim` keeps the
+  // node coordinates in the `planet_osm_nodes` middle table, which
+  // scales with the region's actual node count. The replication append
+  // must omit `--flat-nodes` too so it reads nodes from the same place
+  // (see replication.ts).
   const args = [
     "--create",
     "--slim",
-    "--flat-nodes", flatNodePath,
     "--output", "flex",
     "--style", LUA_STYLE,
     "--database", database,
@@ -338,15 +338,5 @@ function quoteIdent(name: string): string {
 
 function slugToFile(slug: string): string {
   return slug.replace(/[\\/]+/g, "_");
-}
-
-/**
- * Absolute path to a region's osm2pgsql flat-node file. Keyed by the
- * postgresDb name (`nom_…`) so the import and the replication updater
- * derive the identical path — osm2pgsql --append must reuse the exact
- * flat-node file the import wrote.
- */
-export function flatNodePathFor(postgresDb: string): string {
-  return path.join(FLAT_NODE_DIR, `${postgresDb}.flat`);
 }
 
