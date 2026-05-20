@@ -13,10 +13,18 @@
  *     in the filtered+sorted result and returns a window centered on it
  *     so the gallery can `scrollToOffset` directly without a guess.
  */
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbFirst } from "../db/adapter";
-import { photos, photoCuration, photoGroupMembers, photoGroups } from "../db/schema";
+import {
+  photos,
+  photoCuration,
+  photoGroupMembers,
+  photoGroups,
+  albums,
+  albumPhotos,
+  albumShares,
+} from "../db/schema";
 import {
   buildPhotoFilterConditions,
   type PhotoFilterParams,
@@ -90,6 +98,34 @@ function orderByClauses(field: GallerySortField, dir: GallerySortDir) {
 }
 
 /**
+ * SQL scope predicate for the grid's main WHERE clause.
+ *
+ * - Library grid (no `albumScopeId`): photos owned by the viewer.
+ * - Album-detail grid (`albumScopeId` set): photos belonging to that
+ *   album regardless of who owns them — but only when the viewer can
+ *   actually see the album (its owner, or a share row for them). The
+ *   access check is baked into the subquery, so a request for an album
+ *   the viewer cannot access simply matches no rows instead of leaking
+ *   another user's photos.
+ */
+function galleryScopeCondition(
+  userId: number,
+  albumScopeId: number | undefined,
+): SQL {
+  if (albumScopeId === undefined) {
+    return eq(photos.user_id, userId);
+  }
+  return sql`${photos.id} IN (
+    SELECT ap.photo_id
+    FROM ${albumPhotos} ap
+    JOIN ${albums} a ON a.id = ap.album_id
+    LEFT JOIN ${albumShares} s ON s.album_id = a.id AND s.user_id = ${userId}
+    WHERE ap.album_id = ${albumScopeId}
+      AND (a.user_id = ${userId} OR s.user_id IS NOT NULL)
+  )`;
+}
+
+/**
  * Locate a single photo's position (0-based) in the user's filtered+sorted
  * gallery. Returns `null` if the photo does not exist or is filtered out.
  *
@@ -106,16 +142,17 @@ export async function locateGalleryPhotoPosition(
   sortBy: GallerySortField,
   sortDir: GallerySortDir,
 ): Promise<number | null> {
+  const scopeCond = galleryScopeCondition(userId, filter.albumScopeId);
   const targetRow = await dbFirst<{ id: number; sort_key: string | number | null }>(
     db
       .select({ id: photos.id, sort_key: sortKeyExpr(sortBy) })
       .from(photos)
-      .where(and(eq(photos.id, photoId), eq(photos.user_id, userId))),
+      .where(and(eq(photos.id, photoId), scopeCond)),
   );
   if (!targetRow) return null;
 
   const filterConds = buildPhotoFilterConditions(userId, filter);
-  const baseWhere = and(eq(photos.user_id, userId), ...filterConds);
+  const baseWhere = and(scopeCond, ...filterConds);
 
   const targetKey = targetRow.sort_key;
   const sortKey = sortKeyExpr(sortBy);
@@ -187,7 +224,7 @@ export async function listGalleryGridLogic(
     ? inArray(photos.id, pagination.photoIds)
     : undefined;
   const whereClause = and(
-    eq(photos.user_id, userId),
+    galleryScopeCondition(userId, filter.albumScopeId),
     ...filterConds,
     ...(photoIdFilter ? [photoIdFilter] : []),
   );

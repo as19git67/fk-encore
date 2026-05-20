@@ -173,9 +173,13 @@ function onRemoveFilterKey(keys: Array<keyof typeof filter.value>) {
 }
 
 // Server-side filter for VirtualGallery: user's filter + album scope.
+// `albumScopeId` (not `albumIds`) tells the grid endpoint this is the
+// album-detail view, so it scopes to album membership with an access
+// check instead of the caller's own photos — otherwise a non-owner
+// viewing a shared album gets an empty grid.
 const albumGridFilter = computed<PhotoFilter>(() => ({
   ...filter.value,
-  albumIds: [albumId.value],
+  albumScopeId: albumId.value,
 }))
 const sortByForGallery = computed<GallerySortField>(() => sort.value.field as GallerySortField)
 const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as GallerySortDir)

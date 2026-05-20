@@ -53,6 +53,14 @@ type GalleryGridQueryParams = {
   showAiHidden?: Query<boolean>;
   aiHiddenMode?: Query<string>;
 
+  /**
+   * Album-detail context. When set, the grid is scoped to this album's
+   * photos (subject to an access check) instead of the caller's own
+   * library — this is what lets a shared album render in the grid for a
+   * non-owner viewer.
+   */
+  albumScopeId?: Query<number>;
+
   // — pagination —
   /** Required. Number of rows to return. Server caps at MAX_LIMIT. */
   limit?: Query<number>;
@@ -108,6 +116,7 @@ function toFilterQuery(p: GalleryGridQueryParams): PhotoFilterQuery {
     sizeMax: p.sizeMax,
     showAiHidden: p.showAiHidden,
     aiHiddenMode: p.aiHiddenMode,
+    albumScopeId: p.albumScopeId,
   };
 }
 
