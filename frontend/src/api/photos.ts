@@ -392,6 +392,27 @@ export function getScanQueueStatus() {
   return apiFetch<ScanQueueStatus>('/photos/scan-queue/status')
 }
 
+export interface FailedJobGroup {
+  /** The shared error message, or "(no message)" when null in the DB. */
+  errorMsg: string
+  /** Number of failed jobs carrying this exact message. */
+  count: number
+  /** Up to 10 representative photo ids (most-recently-failed first). */
+  samplePhotoIds: number[]
+  /** ISO timestamp of the most recent failure in this group. */
+  lastFailedAt: string | null
+}
+
+/**
+ * Failed scan-queue jobs for one service, grouped by error message.
+ * `service` is one of the ScanQueueServiceStatus['service'] values.
+ */
+export function getScanQueueFailures(service: string) {
+  return apiFetch<{ groups: FailedJobGroup[] }>(
+    `/photos/scan-queue/failures?service=${encodeURIComponent(service)}`,
+  )
+}
+
 export function getPhotosNeedingGpsRescan() {
   return apiFetch<{ ids: number[] }>('/photos/needs-gps-rescan')
 }

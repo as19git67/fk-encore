@@ -1488,7 +1488,8 @@ export const getExternalServiceHealth = api(
 
 // ========== Scan Queue ==========
 
-import type { QueueStatus } from "./scan-queue";
+import type { QueueStatus, FailedJobGroup } from "./scan-queue";
+import { isScanService } from "./scan-queue";
 
 export const getScanQueueStatus = api(
   { expose: true, method: "GET", path: "/photos/scan-queue/status", auth: true },
@@ -1498,6 +1499,28 @@ export const getScanQueueStatus = api(
     const authData = getAuthData()!;
     requirePermission(authData, "data.manage");
     return await service.getScanQueueStatusLogic(userId);
+  }
+);
+
+interface ScanQueueFailuresParams {
+  /** Which scan service to break down. Validated against the enum. */
+  service: Query<string>;
+}
+
+interface ScanQueueFailuresResponse {
+  groups: FailedJobGroup[];
+}
+
+export const getScanQueueFailures = api(
+  { expose: true, method: "GET", path: "/photos/scan-queue/failures", auth: true },
+  async ({ service: svc }: ScanQueueFailuresParams): Promise<ScanQueueFailuresResponse> => {
+    checkModule();
+    const userId = getUserId();
+    requirePermission(getAuthData()!, "data.manage");
+    if (!isScanService(svc)) {
+      throw APIError.invalidArgument(`unknown scan service: ${svc}`);
+    }
+    return await service.getScanQueueFailuresLogic(userId, svc);
   }
 );
 
