@@ -2,9 +2,9 @@ import { Readable } from "stream";
 import { describe, it, expect, beforeEach, afterAll, vi } from "vitest";
 import fs from "fs";
 import path from "path";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, and } from "drizzle-orm";
 import db from "../db/database";
-import { photos, faces, userFaceAssignments, persons, albums, albumPhotos, albumShares, users, roles, permissions, rolePermissions, userRoles } from "../db/schema";
+import { photos, photoCuration, faces, userFaceAssignments, persons, albums, albumPhotos, albumShares, users, roles, permissions, rolePermissions, userRoles } from "../db/schema";
 import { dbInsertReturning, dbExec, dbFirst } from "../db/adapter";
 import { UPLOAD_DIR, computeFaceCompositionScore } from "./photo.service";
 import * as service from "./photo.service";
@@ -254,6 +254,121 @@ describe("Photo Module", () => {
       const unknownHash = "0".repeat(64);
       const missing = await service.checkPhotoHashLogic(user1.id, unknownHash);
       expect(missing).toEqual({ exists: false });
+    });
+
+    describe("Hash-based sync (issue #432)", () => {
+      const imgHash = "a1".repeat(32);
+      const fullHashA = "b2".repeat(32);
+      const fullHashB = "c3".repeat(32);
+
+      // Normalises a DB timestamp string to "YYYY-MM-DD HH:MM:SS" regardless
+      // of the exact wire format (T vs space, optional millis/zone suffix).
+      const wall = (v: unknown): string => String(v).replace("T", " ").slice(0, 19);
+
+      async function uploadWithImageHash(name: string, body: string, hash: string) {
+        const stream = Readable.from(Buffer.from(body)) as any;
+        return service.uploadPhotoStream(user1.id, stream, name, "image/jpeg", false, null, hash);
+      }
+
+      it("normalizeClientCapturedAt keeps the local wall-clock time", () => {
+        // Offset-aware input: the offset is discarded, 15:00 stays 15:00.
+        expect(service.normalizeClientCapturedAt("2026-05-20T15:00:00+02:00"))
+          .toBe("2026-05-20T15:00:00.000Z");
+        expect(service.normalizeClientCapturedAt("2026-05-20T15:00:00-05:00"))
+          .toBe("2026-05-20T15:00:00.000Z");
+        // Naive and Z inputs are taken literally too.
+        expect(service.normalizeClientCapturedAt("2026-05-20T15:00:00"))
+          .toBe("2026-05-20T15:00:00.000Z");
+        expect(service.normalizeClientCapturedAt("2026-05-20T15:00:00Z"))
+          .toBe("2026-05-20T15:00:00.000Z");
+        // Fractional seconds are dropped.
+        expect(service.normalizeClientCapturedAt("2026-05-20T15:00:00.123+02:00"))
+          .toBe("2026-05-20T15:00:00.000Z");
+        // Garbage and implausible values are rejected.
+        expect(service.normalizeClientCapturedAt("not-a-date")).toBeNull();
+        expect(service.normalizeClientCapturedAt("")).toBeNull();
+        expect(service.normalizeClientCapturedAt(null)).toBeNull();
+        expect(service.normalizeClientCapturedAt("3000-01-01T00:00:00Z")).toBeNull();
+      });
+
+      it("uploadPhotoStream persists the image-data hash", async () => {
+        const photo = await uploadWithImageHash("idh.jpg", "idh-pixels", imgHash);
+        const row = await dbFirst<{ image_data_hash: string | null }>(
+          db.select({ image_data_hash: photos.image_data_hash })
+            .from(photos).where(eq(photos.id, photo.id))
+        );
+        expect(row?.image_data_hash).toBe(imgHash);
+        fs.unlinkSync(path.join(UPLOAD_DIR, photo.filename));
+      });
+
+      it("checkPhotoFullHashesLogic returns the subset that exists, scoped per user", async () => {
+        const photo = await uploadWithImageHash("batch.jpg", "batch-pixels", imgHash);
+        const fullHash = photo.hash!;
+        const unknown = "d4".repeat(32);
+
+        const res = await service.checkPhotoFullHashesLogic(user1.id, [fullHash, unknown, "bad"]);
+        expect(res.existing).toEqual([fullHash]);
+
+        const other = await service.checkPhotoFullHashesLogic(user2.id, [fullHash]);
+        expect(other.existing).toEqual([]);
+
+        fs.unlinkSync(path.join(UPLOAD_DIR, photo.filename));
+      });
+
+      it("tryMetadataOnlySync returns null when the image-data hash is unknown", async () => {
+        const res = await service.tryMetadataOnlySync(user1.id, { imageDataHash: "e5".repeat(32) });
+        expect(res).toBeNull();
+      });
+
+      it("tryMetadataOnlySync updates metadata in place and refreshes the hashes", async () => {
+        const photo = await uploadWithImageHash("meta.jpg", "meta-pixels", imgHash);
+
+        // First sync: set description, favourite and capture date.
+        const r1 = await service.tryMetadataOnlySync(user1.id, {
+          imageDataHash: imgHash,
+          fullHash: fullHashA,
+          description: "Strandtag",
+          isFavorite: true,
+          capturedAt: "2026-03-10T14:30:00+02:00",
+        });
+        expect(r1).toEqual({ photoId: photo.id });
+
+        let row = await dbFirst<typeof photos.$inferSelect>(
+          db.select().from(photos).where(eq(photos.id, photo.id))
+        );
+        expect(row?.description).toBe("Strandtag");
+        // Wall-clock preserved: +02:00 offset discarded, 14:30 stays 14:30.
+        expect(wall(row?.taken_at)).toBe("2026-03-10 14:30:00");
+        expect(row?.hash).toBe(fullHashA);
+
+        const fav = await dbFirst<{ status: string }>(
+          db.select({ status: photoCuration.status }).from(photoCuration)
+            .where(and(eq(photoCuration.user_id, user1.id), eq(photoCuration.photo_id, photo.id)))
+        );
+        expect(fav?.status).toBe("favorite");
+
+        // Second sync: description is overwritten (device authoritative), the
+        // favourite is removed, and the full hash is refreshed again.
+        await service.tryMetadataOnlySync(user1.id, {
+          imageDataHash: imgHash,
+          fullHash: fullHashB,
+          description: "Geänderter Text",
+          isFavorite: false,
+        });
+        row = await dbFirst<typeof photos.$inferSelect>(
+          db.select().from(photos).where(eq(photos.id, photo.id))
+        );
+        expect(row?.description).toBe("Geänderter Text");
+        expect(row?.hash).toBe(fullHashB);
+
+        const favAfter = await dbFirst(
+          db.select().from(photoCuration)
+            .where(and(eq(photoCuration.user_id, user1.id), eq(photoCuration.photo_id, photo.id)))
+        );
+        expect(favAfter).toBeUndefined();
+
+        fs.unlinkSync(path.join(UPLOAD_DIR, photo.filename));
+      });
     });
 
     it("should not allow duplicate uploads for the same user", async () => {

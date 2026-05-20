@@ -161,6 +161,12 @@ export const photos = pgTable("photos", {
   mime_type: text("mime_type").notNull(),
   size: integer("size").notNull(),
   hash: text("hash"),
+  // SHA-256 over the decoded image pixel data only (no embedded EXIF/IPTC/XMP
+  // metadata). Sent by the iOS client as the X-Image-Data-Hash header so a
+  // re-upload that only changed metadata is recognised as the same photo and
+  // updated in place instead of creating a duplicate (issue #432). NULL for
+  // rows uploaded before this protocol existed and for library-scanned files.
+  image_data_hash: text("image_data_hash"),
   taken_at: timestamp("taken_at", { mode: "string" }),
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
   // Maintained by a DB trigger (see migration 0034) on every photo UPDATE

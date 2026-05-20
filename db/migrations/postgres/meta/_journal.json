@@ -617,6 +617,13 @@
       "when": 1779001426000,
       "tag": "0087_photo_poi_matches",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1779001427000,
+      "tag": "0088_photo_image_data_hash",
+      "breakpoints": true
     }
   ]
 }

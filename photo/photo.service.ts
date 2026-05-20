@@ -1099,17 +1099,47 @@ export function parseIptcDate(date: unknown, time: unknown): string | null {
 }
 
 // Validates a client-supplied capture timestamp (e.g. iOS' PHAsset.creationDate
-// forwarded as X-Captured-At). Rejects unparseable or implausible values
-// (before 1900, more than a day in the future) so a buggy client can't poison
-// the photo timeline.
+// forwarded as X-Captured-At) and reduces it to the photo's *local wall-clock*
+// time, stored as a "Z"-suffixed ISO-8601 string.
+//
+// The wall-clock — not the absolute UTC instant — is what we persist, so that
+// `taken_at` matches the EXIF DateTimeOriginal path (which carries no zone and
+// is likewise treated as wall-clock) and the time the user sees in the iOS
+// Photos app. Storing the UTC instant instead shifted every auto-uploaded
+// photo by the device's UTC offset (issue #432, point 1: "date taken is
+// shifted by two hours, which is the timezone to utc difference").
+//
+// The iOS client therefore sends an offset-aware ISO-8601 string
+// (e.g. `2026-05-20T15:00:00+02:00`); we deliberately keep the literal
+// 15:00:00 and discard the offset. A naive string (no offset) is taken as-is.
+// Implausible values (before 1900, far in the future) are rejected so a buggy
+// client cannot poison the photo timeline.
 export function normalizeClientCapturedAt(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const trimmed = String(raw).trim();
   if (!trimmed) return null;
+
+  // Extract the literal Y-M-D H:M:S components, ignoring trailing fractional
+  // seconds and any UTC offset — discarding the offset is what preserves the
+  // wall-clock time.
+  const m = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})[Tt ](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (m) {
+    const [, y, mo, d, h, mi, s] = m;
+    const iso = `${y}-${mo}-${d}T${h}:${mi}:${s ?? "00"}.000Z`;
+    const parsed = new Date(iso);
+    if (Number.isNaN(parsed.getTime())) return null;
+    if (parsed.getUTCFullYear() < 1900) return null;
+    // A wall-clock can legitimately run ahead of the server's UTC clock by up
+    // to the largest real-world offset (~+14h); 24h leaves comfortable margin.
+    if (parsed.getTime() > Date.now() + 24 * 60 * 60 * 1000) return null;
+    return iso;
+  }
+
+  // Fallback for non-ISO inputs: parse as an absolute instant (legacy
+  // behaviour) so an unusual format still yields a sane value.
   const d = new Date(trimmed);
   if (Number.isNaN(d.getTime())) return null;
-  const year = d.getUTCFullYear();
-  if (year < 1900) return null;
+  if (d.getUTCFullYear() < 1900) return null;
   if (d.getTime() > Date.now() + 24 * 60 * 60 * 1000) return null;
   return d.toISOString();
 }
@@ -1777,6 +1807,36 @@ export async function checkPhotoHashLogic(
 }
 
 /**
+ * Batch variant of {@link checkPhotoHashLogic}: given a list of full-file
+ * SHA-256 hashes (metadata + pixel data), returns the subset the user already
+ * has. The iOS sync compares every photo in the library against the server, so
+ * one batched round-trip replaces thousands of individual /photos/check-hash
+ * calls (issue #432). Hashes are normalised and de-duplicated; malformed
+ * entries are silently dropped.
+ */
+export async function checkPhotoFullHashesLogic(
+  userId: number,
+  hashes: string[],
+): Promise<{ existing: string[] }> {
+  const normalized = Array.from(new Set(
+    (hashes ?? [])
+      .map((h) => (h ?? "").trim().toLowerCase())
+      .filter((h) => /^[a-f0-9]{64}$/.test(h)),
+  ));
+  if (normalized.length === 0) return { existing: [] };
+
+  const rows = await dbAll<{ hash: string | null }>(
+    db.select({ hash: photos.hash })
+      .from(photos)
+      .where(and(eq(photos.user_id, userId), inArray(photos.hash, normalized))),
+  );
+  const found = new Set(
+    rows.map((r) => r.hash).filter((h): h is string => !!h),
+  );
+  return { existing: normalized.filter((h) => found.has(h)) };
+}
+
+/**
  * Thrown by the upload routines when the user already has a photo with the
  * same SHA-256 content hash. Carries the existing photo's id so callers can
  * still operate on the duplicate (e.g. add it to a target album).
@@ -1816,6 +1876,7 @@ export async function mergeUploadMetadataIntoExisting(
   existingPhotoId: number,
   exifMeta: ExifMetadata,
   isFavorite: boolean,
+  imageDataHash: string | null = null,
 ): Promise<void> {
   const existing = await dbFirst<typeof photos.$inferSelect>(
     db.select().from(photos).where(eq(photos.id, existingPhotoId))
@@ -1823,6 +1884,13 @@ export async function mergeUploadMetadataIntoExisting(
   if (!existing) return;
 
   const updates: Partial<typeof photos.$inferInsert> = {};
+
+  // Backfill the image-data hash on rows uploaded before the hash-sync
+  // protocol existed, so future metadata-only syncs (issue #432) can find
+  // this photo by its pixel-data hash.
+  if (imageDataHash && !existing.image_data_hash) {
+    updates.image_data_hash = imageDataHash;
+  }
 
   if (!existing.taken_at && exifMeta.takenAt) {
     updates.taken_at = exifMeta.takenAt;
@@ -1873,6 +1941,122 @@ export async function mergeUploadMetadataIntoExisting(
   }
 }
 
+/** Metadata carried by a hash-based metadata-only sync (issue #432). */
+export interface MetadataSyncInput {
+  /** SHA-256 of the image pixel data only — identifies the existing photo. */
+  imageDataHash: string;
+  /**
+   * SHA-256 of the complete file (metadata + pixel data) as it now exists on
+   * the device. Stored as `hash` so the next full-hash lookup recognises the
+   * file and the client stops re-uploading it. Should always be supplied
+   * alongside a metadata change.
+   */
+  fullHash?: string | null;
+  /**
+   * `undefined` leaves the description untouched; a string (including "")
+   * overwrites it — the device is authoritative on this path.
+   */
+  description?: string | null;
+  /**
+   * `undefined` leaves the favourite flag untouched; a boolean sets it — the
+   * device is authoritative and may also un-favourite the photo.
+   */
+  isFavorite?: boolean;
+  /** Offset-aware capture timestamp; reduced to wall-clock before storing. */
+  capturedAt?: string | null;
+}
+
+/**
+ * Hash-based metadata-only sync (issue #432).
+ *
+ * When the iOS client re-uploads a photo whose pixel data the server already
+ * has — only the EXIF/IPTC metadata changed — it sends the X-Image-Data-Hash
+ * header. We look the photo up by that hash and, when found, apply the new
+ * metadata in place instead of storing a second copy. The caller can then
+ * answer the request before the (unchanged, possibly large) image body is
+ * transferred, sparing the client's bandwidth.
+ *
+ * The device is authoritative: a present `description` / `isFavorite` /
+ * `capturedAt` overwrites the server value (favourites may also be removed).
+ * Absent fields are left untouched.
+ *
+ * Returns the matched photo id, or `null` when no photo with that image-data
+ * hash exists for the user — the caller should then fall back to a full upload.
+ */
+export async function tryMetadataOnlySync(
+  userId: number,
+  input: MetadataSyncInput,
+): Promise<{ photoId: number } | null> {
+  const existing = await dbFirst<typeof photos.$inferSelect>(
+    db.select().from(photos).where(and(
+      eq(photos.user_id, userId),
+      eq(photos.image_data_hash, input.imageDataHash),
+    )),
+  );
+  if (!existing) return null;
+
+  // Apply each field through its dedicated update path so EXIF write-back and
+  // realtime fan-out stay consistent with a normal edit. Each step is
+  // best-effort: a write-back hiccup on one field must not abort the others or
+  // fail the whole sync (the client would otherwise retry the full upload).
+  if (input.capturedAt != null) {
+    const normalized = normalizeClientCapturedAt(input.capturedAt);
+    if (normalized && normalized !== existing.taken_at) {
+      try {
+        await updatePhotoDateLogic(userId, existing.id, normalized);
+      } catch (err) {
+        console.error(`Metadata sync: date update failed for photo ${existing.id}:`, err);
+      }
+    }
+  }
+
+  if (input.description !== undefined) {
+    const incoming = input.description?.trim() || null;
+    if (incoming !== (existing.description ?? null)) {
+      try {
+        await updatePhotoDescriptionLogic(userId, existing.id, incoming);
+      } catch (err) {
+        console.error(`Metadata sync: description update failed for photo ${existing.id}:`, err);
+      }
+    }
+  }
+
+  if (input.isFavorite !== undefined) {
+    const cur = await dbFirst<{ status: CurationStatus }>(
+      db.select({ status: photoCuration.status }).from(photoCuration).where(and(
+        eq(photoCuration.user_id, userId),
+        eq(photoCuration.photo_id, existing.id),
+      )),
+    );
+    const curStatus: CurationStatus = cur?.status ?? "visible";
+    // Only touch the favourite axis — never clobber a "hidden" curation just
+    // because the device reports the photo as not-favourited.
+    try {
+      if (input.isFavorite && curStatus !== "favorite") {
+        await updatePhotoCurationLogic(userId, existing.id, "favorite");
+      } else if (!input.isFavorite && curStatus === "favorite") {
+        await updatePhotoCurationLogic(userId, existing.id, "visible");
+      }
+    } catch (err) {
+      console.error(`Metadata sync: favorite update failed for photo ${existing.id}:`, err);
+    }
+  }
+
+  // Refresh the stored hashes so the next full-hash lookup recognises the file.
+  const hashUpdates: Partial<typeof photos.$inferInsert> = {};
+  if (input.fullHash && input.fullHash !== existing.hash) {
+    hashUpdates.hash = input.fullHash;
+  }
+  if (!existing.image_data_hash) {
+    hashUpdates.image_data_hash = input.imageDataHash;
+  }
+  if (Object.keys(hashUpdates).length > 0) {
+    await dbExec(db.update(photos).set(hashUpdates).where(eq(photos.id, existing.id)));
+  }
+
+  return { photoId: existing.id };
+}
+
 /**
  * Returns the union of two keyword arrays preserving the order of the
  * existing array (so server-side ordering edits survive a re-upload) and
@@ -1898,7 +2082,10 @@ export async function uploadPhotoStream(
   originalName: string,
   mimeType: string,
   isFavorite: boolean = false,
-  clientCapturedAt: string | null = null
+  clientCapturedAt: string | null = null,
+  // SHA-256 of the image pixel data only (X-Image-Data-Hash). Persisted so a
+  // later metadata-only re-upload is recognised as the same photo (issue #432).
+  imageDataHash: string | null = null,
 ): Promise<Photo> {
   if (!SUPPORTED_MIME_TYPES.has(mimeType.toLowerCase().split(";")[0].trim())) {
     throw new Error("UNSUPPORTED_FILE_TYPE");
@@ -1938,7 +2125,7 @@ export async function uploadPhotoStream(
   );
 
   if (existing) {
-    await mergeUploadMetadataIntoExisting(userId, existing.id, exifMeta, isFavorite);
+    await mergeUploadMetadataIntoExisting(userId, existing.id, exifMeta, isFavorite, imageDataHash);
     if (fs.existsSync(tempPath)) {
       fs.unlinkSync(tempPath);
     }
@@ -1962,7 +2149,7 @@ export async function uploadPhotoStream(
         .where(and(eq(photos.user_id, userId), eq(photos.taken_at, exifMeta.takenAt)))
     );
     if (takenAtDup) {
-      await mergeUploadMetadataIntoExisting(userId, takenAtDup.id, exifMeta, isFavorite);
+      await mergeUploadMetadataIntoExisting(userId, takenAtDup.id, exifMeta, isFavorite, imageDataHash);
       if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
       throw new PhotoAlreadyExistsError(takenAtDup.id);
     }
@@ -1986,6 +2173,7 @@ export async function uploadPhotoStream(
       mime_type: mimeType,
       size: size,
       hash: digest,
+      image_data_hash: imageDataHash,
       taken_at: exifMeta.takenAt,
       latitude: exifMeta.latitude,
       longitude: exifMeta.longitude,
