@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import db from "../db/database";
 import { osmRegionImports } from "../db/schema";
-import { InMemoryDockerDriver } from "./docker-driver";
+import { InMemoryGeoClient } from "./geo-client.test-helper";
 import { refreshRegion } from "./refresh";
 
 async function seedRegion(opts: {
@@ -26,85 +26,90 @@ beforeEach(async () => {
 });
 
 describe("refreshRegion", () => {
-  it("runs `nominatim replication --once` in the container and persists the new sequence", async () => {
+  it("calls geo.refresh for a ready_running region and persists the new sequence", async () => {
     await seedRegion({ slug: "europe/germany/bayern" });
-    const driver = new InMemoryDockerDriver();
-    // Simulate the container being up.
-    await driver.ensureRunning({ name: "nominatim-europe-germany-bayern", image: "i" });
-    driver.execResult = {
-      exitCode: 0,
-      stdout: "Updating to sequence 4775\nDone.",
-      stderr: "",
-    };
-
-    const r = await refreshRegion("europe/germany/bayern", { driver });
-    expect(r).toMatchObject({ slug: "europe/germany/bayern", ok: true, replicationSeq: "4775" });
-
-    const exec = driver.events.find((e) => e.op === "exec");
-    expect(exec).toMatchObject({
-      op: "exec",
-      name: "nominatim-europe-germany-bayern",
-      cmd: ["sudo", "-u", "nominatim", "nominatim", "replication", "--once"],
+    const geo = new InMemoryGeoClient();
+    geo.setRefreshResult("nom_europe_germany_bayern", {
+      postgresDb: "nom_europe_germany_bayern",
+      appliedDiffs: 7,
+      sequence: 4775,
+      timestamp: "2026-05-16T11:00:00Z",
     });
+    const fixed = new Date("2026-05-16T12:00:00Z");
+
+    const r = await refreshRegion("europe/germany/bayern", { geo, now: () => fixed });
+    expect(r.ok).toBe(true);
+    expect(r.replicationSeq).toBe("4775");
+    expect(r.detail).toContain("applied 7");
+    expect(geo.getRefreshCalls()).toEqual(["nom_europe_germany_bayern"]);
 
     const row = (
-      await db.select().from(osmRegionImports).where(eq(osmRegionImports.slug, "europe/germany/bayern"))
+      await db.select().from(osmRegionImports)
+        .where(eq(osmRegionImports.slug, "europe/germany/bayern"))
     )[0];
     expect(row.replication_seq).toBe("4775");
     expect(row.last_error).toBeNull();
-    expect(row.last_used_at).not.toBeNull();
+    expect(row.last_used_at).toBe("2026-05-16 12:00:00+00");
   });
 
-  it("records ok=true even when the output has no sequence id (warm replication, no new diffs)", async () => {
+  it("returns ok=true with the existing seq when geo reports no diffs", async () => {
     await seedRegion({ slug: "europe/germany/bayern" });
-    const driver = new InMemoryDockerDriver();
-    await driver.ensureRunning({ name: "nominatim-europe-germany-bayern", image: "i" });
-    driver.execResult = { exitCode: 0, stdout: "Nothing to do.\n", stderr: "" };
+    await db
+      .update(osmRegionImports)
+      .set({ replication_seq: "4700" })
+      .where(eq(osmRegionImports.slug, "europe/germany/bayern"));
+    const geo = new InMemoryGeoClient();
+    geo.setRefreshResult("nom_europe_germany_bayern", {
+      postgresDb: "nom_europe_germany_bayern",
+      appliedDiffs: 0,
+      sequence: 4700,
+      timestamp: "2026-05-16T11:00:00Z",
+    });
 
-    const r = await refreshRegion("europe/germany/bayern", { driver });
+    const r = await refreshRegion("europe/germany/bayern", { geo });
     expect(r.ok).toBe(true);
-    expect(r.replicationSeq).toBeUndefined();
+    expect(r.replicationSeq).toBe("4700");
+    expect(r.detail).toBe("already up to date");
   });
 
-  it("returns ok=false and records last_error when the command exits non-zero", async () => {
-    await seedRegion({ slug: "europe/germany/bayern" });
-    const driver = new InMemoryDockerDriver();
-    await driver.ensureRunning({ name: "nominatim-europe-germany-bayern", image: "i" });
-    driver.execResult = {
-      exitCode: 1,
-      stdout: "",
-      stderr: "ERROR: could not download diff",
-    };
+  it("works for a ready_stopped region (no cold-start needed anymore)", async () => {
+    await seedRegion({ slug: "europe/germany/bayern", status: "ready_stopped" });
+    const geo = new InMemoryGeoClient();
+    geo.setRefreshResult("nom_europe_germany_bayern", {
+      postgresDb: "nom_europe_germany_bayern",
+      appliedDiffs: 0,
+      sequence: null,
+      timestamp: null,
+    });
+    const r = await refreshRegion("europe/germany/bayern", { geo });
+    expect(r.ok).toBe(true);
+  });
 
-    const r = await refreshRegion("europe/germany/bayern", { driver });
+  it("returns ok=false and records last_error on geo failure", async () => {
+    await seedRegion({ slug: "europe/germany/bayern" });
+    const geo = new InMemoryGeoClient();
+    geo.refresh = async () => {
+      throw new Error("osm2pgsql-replication update exited with code 1");
+    };
+    const r = await refreshRegion("europe/germany/bayern", { geo });
     expect(r.ok).toBe(false);
-    expect(r.detail).toContain("could not download diff");
+    expect(r.detail).toContain("exited with code 1");
 
     const row = (
-      await db.select().from(osmRegionImports).where(eq(osmRegionImports.slug, "europe/germany/bayern"))
+      await db.select().from(osmRegionImports)
+        .where(eq(osmRegionImports.slug, "europe/germany/bayern"))
     )[0];
-    expect(row.last_error).toContain("replication exit=1");
-  });
-
-  it("throws when the container is not currently running", async () => {
-    await seedRegion({ slug: "europe/germany/bayern", status: "ready_stopped" });
-    const driver = new InMemoryDockerDriver();
-    // Note: container not started → inspect returns 'missing'.
-    await expect(
-      refreshRegion("europe/germany/bayern", { driver }),
-    ).rejects.toThrow(/start the region before refreshing/);
+    expect(row.last_error).toContain("replication: osm2pgsql-replication update exited");
   });
 
   it("throws on unknown slug", async () => {
-    const driver = new InMemoryDockerDriver();
-    await expect(refreshRegion("not/here", { driver })).rejects.toThrow(/unknown region/);
+    await expect(refreshRegion("not/here")).rejects.toThrow(/unknown region/);
   });
 
   it("refuses to refresh a region that's currently importing", async () => {
     await seedRegion({ slug: "europe/germany/bayern", status: "importing" });
-    const driver = new InMemoryDockerDriver();
     await expect(
-      refreshRegion("europe/germany/bayern", { driver }),
+      refreshRegion("europe/germany/bayern"),
     ).rejects.toThrow(/can only refresh when ready_/);
   });
 });

@@ -209,11 +209,9 @@ export interface RefreshRegionRequest {
 }
 
 /**
- * Pull replication diffs into a ready region's Nominatim shard.
- * Runs `nominatim replication --once` inside the container via
- * dockerode exec. Returns the new sequence id when the command
- * surfaced one. Overpass updates happen continuously via the image's
- * own supervisord and don't need a separate trigger.
+ * Pull replication diffs into a ready region's PostGIS database.
+ * Currently a stub — see osm-admin/refresh.ts. Real wiring lands when
+ * the geo service grows an osm2pgsql --append worker.
  */
 export const refreshRegionEndpoint = api(
   { expose: true, auth: true, method: "POST", path: "/osm/regions/refresh" },
