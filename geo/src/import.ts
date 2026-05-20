@@ -167,8 +167,11 @@ async function runImport(req: ImportRequest): Promise<RunResult> {
   await ensureDatabase(req.postgresDb);
   await ensurePostgisAndSchema(req.postgresDb);
 
-  const flatNode = path.join(FLAT_NODE_DIR, `${slugToFile(req.slug)}.flat`);
-  await runOsm2pgsql(req.postgresDb, pbfPath, flatNode);
+  // Flat-node file is keyed by postgresDb (not the raw slug): the
+  // replication updater only knows the postgresDb and must point
+  // osm2pgsql --append at the exact same flat-node file the import
+  // used, so the two derivations have to agree.
+  await runOsm2pgsql(req.postgresDb, pbfPath, flatNodePathFor(req.postgresDb));
 
   await postImportIndexes(req.postgresDb);
   await runAnalyze(req.postgresDb);
@@ -270,10 +273,14 @@ async function runOsm2pgsql(
   flatNodePath: string,
 ): Promise<void> {
   const conn = connectionInfo();
+  // NB: `--slim` WITHOUT `--drop`. `--drop` discards the slim middle
+  // tables once the import finishes, which saves disk but makes the
+  // database non-updatable — `osm2pgsql-replication update` (i.e.
+  // `osm2pgsql --append`) needs those tables and exits 1 without
+  // them. Keeping them is the price of supporting hourly replication.
   const args = [
     "--create",
     "--slim",
-    "--drop",
     "--flat-nodes", flatNodePath,
     "--output", "flex",
     "--style", LUA_STYLE,
@@ -331,5 +338,15 @@ function quoteIdent(name: string): string {
 
 function slugToFile(slug: string): string {
   return slug.replace(/[\\/]+/g, "_");
+}
+
+/**
+ * Absolute path to a region's osm2pgsql flat-node file. Keyed by the
+ * postgresDb name (`nom_…`) so the import and the replication updater
+ * derive the identical path — osm2pgsql --append must reuse the exact
+ * flat-node file the import wrote.
+ */
+export function flatNodePathFor(postgresDb: string): string {
+  return path.join(FLAT_NODE_DIR, `${postgresDb}.flat`);
 }
 
