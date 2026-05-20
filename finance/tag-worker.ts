@@ -19,6 +19,7 @@ import {
 import { suggestTagsForTransaction } from "./tag-suggester";
 import { LlmServiceUnavailableError, isLlmServiceHealthy } from "./llm-client";
 import { withAiSlot, AiSlotTimeoutError } from "../ai-queue/slot-helper";
+import { isTransientConnectionError } from "../db/database";
 
 console.log("[boot] finance/tag-worker.ts: all imports resolved");
 
@@ -47,7 +48,19 @@ class FinanceTagWorker {
         })
         .catch((err) => {
           this.running--;
-          console.error("[finance.tag-worker] tick error:", err);
+          // A bouncing database (restart, crash recovery, out-of-disk)
+          // makes every query throw until it comes back. Log a one-line
+          // warning and let the poll timer retry, instead of dumping a
+          // multi-page FATAL stack trace on every tick.
+          if (isTransientConnectionError(err)) {
+            console.warn(
+              `[finance.tag-worker] database unavailable — backing off until next poll: ${
+                err?.message ?? err
+              }`,
+            );
+          } else {
+            console.error("[finance.tag-worker] tick error:", err);
+          }
         });
     }
   }
@@ -65,7 +78,12 @@ class FinanceTagWorker {
       );
       await markTagJobDone(job.id);
     } catch (err: any) {
-      if (err instanceof DeferTagJobError || err instanceof LlmServiceUnavailableError || err instanceof AiSlotTimeoutError) {
+      if (
+        err instanceof DeferTagJobError ||
+        err instanceof LlmServiceUnavailableError ||
+        err instanceof AiSlotTimeoutError ||
+        isTransientConnectionError(err)
+      ) {
         console.log(
           `[finance.tag-worker] deferring job ${job.id}: ${err.message}`,
         );
