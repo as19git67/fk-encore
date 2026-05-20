@@ -5030,7 +5030,15 @@ export async function rescanPhotoGpsLogic(
 
 // ── Scan Queue API helpers ───────────────────────────────────────────────────
 
-import { getQueueStatus, requeueFailed, requeueForRescan, cancelPendingScans } from "./scan-queue";
+import {
+  getQueueStatus,
+  requeueFailed,
+  requeueForRescan,
+  cancelPendingScans,
+  getFailedJobsGrouped,
+  type FailedJobGroup,
+  type ScanService,
+} from "./scan-queue";
 import {
   requeueFailedLibraryScans,
   cancelPendingLibraryScans,
@@ -5038,6 +5046,13 @@ import {
 
 export async function getScanQueueStatusLogic(userId: number) {
   return getQueueStatus(userId);
+}
+
+export async function getScanQueueFailuresLogic(
+  userId: number,
+  service: ScanService,
+): Promise<{ groups: FailedJobGroup[] }> {
+  return { groups: await getFailedJobsGrouped(userId, service) };
 }
 
 export async function rescanPhotosLogic(userId: number, force: boolean): Promise<{ queued: number }> {

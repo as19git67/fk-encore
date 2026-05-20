@@ -9,6 +9,7 @@ import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import {
   getScanQueueStatus, rescanPhotos, retryFailedScans, cancelPendingScans,
+  getScanQueueFailures,
   findPhotoGroups,
   recomputeAiPicks,
   getAiPickCalibration,
@@ -23,6 +24,7 @@ import {
   type ScanQueueStatus,
   type PurgeResult,
 } from '../api/photos'
+import QueueErrorsDialog from '../components/QueueErrorsDialog.vue'
 import {
   getFinanceTagQueueStatus, retryFailedFinanceTagJobs,
   cancelPendingFinanceTagJobs, reenqueueAllFinanceTagJobs,
@@ -61,6 +63,27 @@ const serviceLabels: Record<string, string> = {
   quality: 'Qualität',
   geocoding: 'Geocoding',
   thumbnail: 'Vorschaubilder',
+}
+
+// ── Failed-jobs detail dialog ─────────────────────────────────────────────────
+// Clicking a service's "Fehler" count opens a grouped breakdown of the
+// failed jobs (error message · count · last failure · sample photo ids).
+const failuresDialogVisible = ref(false)
+const failuresService = ref<string | null>(null)
+
+const failuresTitle = computed(() =>
+  failuresService.value
+    ? `Fehler — ${serviceLabels[failuresService.value] ?? failuresService.value}`
+    : 'Fehler',
+)
+const failuresLoader = computed(() => {
+  const svc = failuresService.value
+  return svc ? () => getScanQueueFailures(svc).then((r) => r.groups) : null
+})
+
+function openFailures(service: string) {
+  failuresService.value = service
+  failuresDialogVisible.value = true
 }
 
 const totalPending = computed(() =>
@@ -709,7 +732,13 @@ onBeforeUnmount(() => {
                 <span v-else class="text-secondary">—</span>
               </td>
               <td>
-                <span v-if="svc.failed > 0" class="badge badge-failed">{{ svc.failed }}</span>
+                <button
+                  v-if="svc.failed > 0"
+                  type="button"
+                  class="badge badge-failed badge-button"
+                  :title="`Fehlerdetails für ${serviceLabels[svc.service] ?? svc.service} anzeigen`"
+                  @click="openFailures(svc.service)"
+                >{{ svc.failed }}</button>
                 <span v-else class="text-secondary">—</span>
               </td>
               <td class="text-secondary">{{ svc.done }}</td>
@@ -741,7 +770,13 @@ onBeforeUnmount(() => {
             </div>
             <div class="queue-card__stat">
               <span class="queue-card__label">Fehler</span>
-              <span v-if="svc.failed > 0" class="badge badge-failed">{{ svc.failed }}</span>
+              <button
+                v-if="svc.failed > 0"
+                type="button"
+                class="badge badge-failed badge-button"
+                :title="`Fehlerdetails für ${serviceLabels[svc.service] ?? svc.service} anzeigen`"
+                @click="openFailures(svc.service)"
+              >{{ svc.failed }}</button>
               <span v-else class="text-secondary">—</span>
             </div>
             <div class="queue-card__stat">
@@ -1484,6 +1519,13 @@ onBeforeUnmount(() => {
         </template>
       </template>
     </Dialog>
+
+    <!-- Failed-jobs detail dialog (opened from a "Fehler" count) -->
+    <QueueErrorsDialog
+      v-model:visible="failuresDialogVisible"
+      :title="failuresTitle"
+      :loader="failuresLoader"
+    />
   </div>
 </template>
 
@@ -1651,6 +1693,22 @@ onBeforeUnmount(() => {
 .badge-pending  { background: var(--blue-100);   color: var(--blue-700); }
 .badge-processing { background: var(--yellow-100); color: var(--yellow-700); }
 .badge-failed   { background: var(--red-100);    color: var(--red-700); }
+
+/* A badge rendered as a <button> — clickable "Fehler" count that
+   opens the failed-jobs detail dialog. */
+.badge-button {
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition: filter 0.12s ease;
+}
+.badge-button:hover {
+  filter: brightness(0.92);
+}
+.badge-button:focus-visible {
+  outline: 2px solid var(--p-primary-color);
+  outline-offset: 1px;
+}
 
 /* Danger Zone */
 .osm-form {
