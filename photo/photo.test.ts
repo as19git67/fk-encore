@@ -315,6 +315,24 @@ describe("Photo Module", () => {
         fs.unlinkSync(path.join(UPLOAD_DIR, photo.filename));
       });
 
+      it("re-uploading a pre-protocol photo adopts the identity hash (no re-upload loop)", async () => {
+        // Legacy upload: no X-Full-Hash, so `hash` is stored as the body digest.
+        const legacy = await uploadWithSync("old.jpg", "old-body", {});
+        expect(legacy.hash).not.toBe(fullHashA);
+
+        // The hash-sync client re-uploads the same bytes with its composite hash.
+        await expect(
+          uploadWithSync("old.jpg", "old-body", { imageDataHash: imgHash, fullHash: fullHashA })
+        ).rejects.toThrow("PHOTO_ALREADY_EXISTS");
+
+        const row = await dbFirst<typeof photos.$inferSelect>(
+          db.select().from(photos).where(eq(photos.id, legacy.id))
+        );
+        expect(row?.hash).toBe(fullHashA);          // adopted → next sync/check matches
+        expect(row?.image_data_hash).toBe(imgHash); // backfilled
+        fs.unlinkSync(path.join(UPLOAD_DIR, legacy.filename));
+      });
+
       it("checkPhotoFullHashesLogic returns the subset that exists, scoped per user", async () => {
         const photo = await uploadWithSync("batch.jpg", "batch-pixels", {
           imageDataHash: imgHash,

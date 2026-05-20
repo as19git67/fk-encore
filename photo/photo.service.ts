@@ -1877,6 +1877,7 @@ export async function mergeUploadMetadataIntoExisting(
   exifMeta: ExifMetadata,
   isFavorite: boolean,
   imageDataHash: string | null = null,
+  fullHash: string | null = null,
 ): Promise<void> {
   const existing = await dbFirst<typeof photos.$inferSelect>(
     db.select().from(photos).where(eq(photos.id, existingPhotoId))
@@ -1890,6 +1891,15 @@ export async function mergeUploadMetadataIntoExisting(
   // this photo by its pixel-data hash.
   if (imageDataHash && !existing.image_data_hash) {
     updates.image_data_hash = imageDataHash;
+  }
+
+  // Adopt the client's identity hash so the next /photos/sync/check
+  // recognises the photo. Without this a pre-protocol row keeps its body
+  // digest as `hash`, never matches the client's composite hash, and gets
+  // re-uploaded on every sync. Only the exact hash-match dedup path passes
+  // fullHash — the fuzzy taken_at path leaves it null.
+  if (fullHash && fullHash !== existing.hash) {
+    updates.hash = fullHash;
   }
 
   if (!existing.taken_at && exifMeta.takenAt) {
@@ -2146,7 +2156,7 @@ export async function uploadPhotoStream(
   );
 
   if (existing) {
-    await mergeUploadMetadataIntoExisting(userId, existing.id, exifMeta, isFavorite, imageDataHash);
+    await mergeUploadMetadataIntoExisting(userId, existing.id, exifMeta, isFavorite, imageDataHash, fullHash);
     if (fs.existsSync(tempPath)) {
       fs.unlinkSync(tempPath);
     }
@@ -2167,7 +2177,11 @@ export async function uploadPhotoStream(
     ? (sync.description.trim() || null)
     : combineDescription(exifMeta);
   const hasNewMetadata = isFavorite || !!descriptionValueEarly || (exifMeta.rating !== null && exifMeta.rating >= 4);
-  if (exifMeta.takenAt && hasNewMetadata) {
+  // The fuzzy taken_at fallback only serves legacy clients. A hash-sync client
+  // (one that sent X-Image-Data-Hash) has already been matched precisely by
+  // the metadata-only sync path, so reaching here means genuinely new pixels —
+  // running the fuzzy dedup could then wrongly merge same-second photos.
+  if (exifMeta.takenAt && hasNewMetadata && !imageDataHash) {
     const takenAtDup = await dbFirst<{ id: number }>(
       db.select({ id: photos.id })
         .from(photos)
