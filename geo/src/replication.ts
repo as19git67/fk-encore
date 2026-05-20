@@ -30,7 +30,6 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { adminPool, connectionInfo } from "./db.ts";
-import { flatNodePathFor } from "./import.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -101,8 +100,9 @@ export async function runReplicationUpdate(
   //   psycopg2.OperationalError: local user with ID 568 does not exist
   //
   // The forwarded osm2pgsql flags must still match the import: same
-  // flex style, slim mode, and the same --flat-nodes file (the append
-  // resolves node coordinates from it).
+  // flex style and slim mode. No `--flat-nodes` — node coordinates are
+  // read from the `planet_osm_nodes` middle table (see import.ts for
+  // why the flat-node file is deliberately not used).
   await execCommand("osm2pgsql-replication", [
     "update",
     ...pgArgs(postgresDb),
@@ -110,7 +110,6 @@ export async function runReplicationUpdate(
     "--output", "flex",
     "--style", LUA_STYLE,
     "--slim",
-    "--flat-nodes", flatNodePathFor(postgresDb),
     "--cache", String(parseInt(process.env.GEO_OSM2PGSQL_CACHE_MB ?? "2000", 10)),
     "--number-processes", String(parseInt(process.env.GEO_OSM2PGSQL_PROCS ?? "2", 10)),
   ]);

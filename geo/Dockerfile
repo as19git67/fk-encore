@@ -23,9 +23,9 @@ COPY tsconfig.json ./
 COPY src ./src
 
 # Non-root runtime to match the rest of the stack (UID 568 = TrueNAS
-# SCALE apps user). PBF cache + osm2pgsql flat-node file live under
-# /data which is bind/volume-mounted by compose.
-RUN mkdir -p /data/pbf /data/work \
+# SCALE apps user). The PBF cache lives under /data which is
+# bind/volume-mounted by compose.
+RUN mkdir -p /data/pbf \
  && chown -R 568:568 /app /data
 USER 568:568
 

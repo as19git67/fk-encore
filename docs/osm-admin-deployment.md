@@ -111,7 +111,7 @@ Read by the geo service unless noted:
 | `GEO_DB_HOST` / `GEO_DB_PORT` / `GEO_DB_USER` / `GEO_DB_PASSWORD` | Connection to `geo-db`. The container's default `postgres / postgres` is fine when the database isn't reachable from outside compose. | `geo-db` / `5432` / `postgres` / `postgres` |
 | `GEO_DB_ADMIN_DB` | DB used for `CREATE DATABASE`. | `postgres` |
 | `GEO_PORT` | HTTP listen port inside the container. | `8080` |
-| `GEO_DATA_DIR` | Volume mount that holds the PBF cache (`pbf/`) and osm2pgsql flat-node files (`work/`). | `/data` |
+| `GEO_DATA_DIR` | Volume mount that holds the PBF cache (`pbf/`). | `/data` |
 | `GEO_SHARED_SECRET` | Optional bearer token enforced on every endpoint except `/health`. | _(empty)_ |
 | `GEO_OSM2PGSQL_CACHE_MB` | `osm2pgsql --cache`. Raise to roughly the PBF size for fastest imports. | `2000` |
 | `GEO_OSM2PGSQL_PROCS` | `osm2pgsql --number-processes`. | `2` |
