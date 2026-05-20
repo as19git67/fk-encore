@@ -129,6 +129,45 @@ describe("matchPhotoToPois", () => {
     expect(r.matches.every((m) => m.ambiguous)).toBe(true);
   });
 
+  it("collapses candidates that share a qid into a single match", () => {
+    const sameVec = new Array(768).fill(0.5);
+    // The Hohenzollern Bridge case: one Wikidata POI mapped as several
+    // OSM ways, all carrying wikidata=Q696762.
+    const r = matchPhotoToPois({
+      photoEmbedding: sameVec,
+      photoHeadingDeg: null,
+      photoLat: 48.137,
+      photoLon: 11.575,
+      candidates: [
+        candidate({ qid: "Q696762", osmRef: "way:268661322", poiEmbedding: sameVec, distanceM: 40 }),
+        candidate({ qid: "Q696762", osmRef: "way:268130024", poiEmbedding: sameVec, distanceM: 42 }),
+        candidate({ qid: "Q696762", osmRef: "way:999", poiEmbedding: sameVec, distanceM: 44 }),
+      ],
+    });
+    // All three are the same POI — exactly one row, no duplicate that
+    // would violate the (photo_id, COALESCE(qid, osm_ref)) unique index.
+    expect(r.matches).toHaveLength(1);
+    expect(r.matches[0].qid).toBe("Q696762");
+    // The kept entry is the highest-scoring one (closest → best proximity).
+    expect(r.matches[0].osmRef).toBe("way:268661322");
+  });
+
+  it("keeps qid-less candidates distinct by osm_ref", () => {
+    const sameVec = new Array(768).fill(0.5);
+    const r = matchPhotoToPois({
+      photoEmbedding: sameVec,
+      photoHeadingDeg: null,
+      photoLat: 48.137,
+      photoLon: 11.575,
+      candidates: [
+        candidate({ qid: null, osmRef: "node:1", poiEmbedding: sameVec, distanceM: 40 }),
+        candidate({ qid: null, osmRef: "node:2", poiEmbedding: sameVec, distanceM: 42 }),
+      ],
+    });
+    // Different osm elements, no qid → two distinct targets.
+    expect(r.matches.length).toBe(2);
+  });
+
   it("returns empty matches when the top score is below threshold", () => {
     // Photo and POI orthogonal in 768D: similarity = 0.5.
     // Worst-case proximity (200 m): proximity ≈ 0.2. heading not set

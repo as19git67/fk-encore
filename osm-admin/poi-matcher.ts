@@ -105,17 +105,36 @@ export function matchPhotoToPois(input: MatchInput): MatchResult {
   }
 
   scored.sort((a, b) => b.matchScore - a.matchScore);
-  const top = scored[0];
+
+  // Collapse candidates that point at the same POI before ranking.
+  // OSM frequently splits one place across several elements — e.g. the
+  // Hohenzollern Bridge is mapped as multiple `way`s, each carrying
+  // the same `wikidata` tag. They are the same POI: they must not
+  // compete with each other for the ambiguity margin, and persisting
+  // both would violate the photo_poi_matches
+  // (photo_id, COALESCE(qid, osm_ref)) unique index. Keep the
+  // highest-scoring entry per target — the list is already sorted by
+  // score desc, so the first occurrence of each target wins.
+  const ranked: ScoredMatch[] = [];
+  const seenTargets = new Set<string>();
+  for (const m of scored) {
+    const target = m.qid ?? m.osmRef;
+    if (seenTargets.has(target)) continue;
+    seenTargets.add(target);
+    ranked.push(m);
+  }
+
+  const top = ranked[0];
   if (top.matchScore < POI_MIN_MATCH_SCORE) {
     return { matches: [], reason: "below_threshold" };
   }
 
-  const margin = scored[1] ? top.matchScore - scored[1].matchScore : Infinity;
+  const margin = ranked[1] ? top.matchScore - ranked[1].matchScore : Infinity;
   if (margin < POI_AMBIGUITY_MARGIN) {
     // Top-1 ties with top-2 within the margin → keep up to 3 with
     // ambiguous=true so the UI shows alternatives.
     return {
-      matches: scored.slice(0, 3).map((m) => ({ ...m, ambiguous: true })),
+      matches: ranked.slice(0, 3).map((m) => ({ ...m, ambiguous: true })),
     };
   }
   return { matches: [top] };
