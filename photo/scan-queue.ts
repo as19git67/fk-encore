@@ -24,6 +24,17 @@ import { notifyScanQueueChanged } from "./scan-queue-events";
 export type ScanService = "embedding" | "face_detection" | "face_assignment" | "landmark" | "quality" | "geocoding" | "thumbnail" | "poi_detection";
 export type ScanStatus = "pending" | "processing" | "failed" | "done";
 
+/** Every value of the `scan_service` enum, for runtime validation of
+ *  untrusted input (e.g. a `service` query parameter). */
+export const ALL_SCAN_SERVICES: readonly ScanService[] = [
+  "embedding", "face_detection", "face_assignment", "landmark",
+  "quality", "geocoding", "thumbnail", "poi_detection",
+];
+
+export function isScanService(value: string): value is ScanService {
+  return (ALL_SCAN_SERVICES as readonly string[]).includes(value);
+}
+
 export type QueueServiceId = ScanService;
 
 /** Services that run once per photo (no user_id in queue). */
@@ -285,6 +296,64 @@ export async function getQueueStatus(userId: number): Promise<QueueStatus> {
   }
 
   return { services: Array.from(map.values()) };
+}
+
+/** One row of the failed-jobs breakdown: identical error messages
+ *  collapsed into a single group. */
+export interface FailedJobGroup {
+  /** The shared `error_msg`, or "(no message)" when the column is null. */
+  errorMsg: string;
+  /** Number of failed jobs that carry this exact message. */
+  count: number;
+  /** Up to 10 representative photo ids (most-recently-failed first). */
+  samplePhotoIds: number[];
+  /** Timestamp of the most recent failure in this group (ISO string). */
+  lastFailedAt: string | null;
+}
+
+/**
+ * Failed jobs for one service, grouped by error message.
+ *
+ * Applies the same user-scoping rule as `getQueueStatus`: global
+ * services are counted over `user_id IS NULL`, the per-user
+ * `face_assignment` service over `user_id = userId`. Without that
+ * split an admin would see other users' face_assignment failures (or
+ * miss their own).
+ */
+export async function getFailedJobsGrouped(
+  userId: number,
+  service: ScanService,
+): Promise<FailedJobGroup[]> {
+  const userScope = isGlobalService(service)
+    ? sql`${photoScanQueue.user_id} IS NULL`
+    : sql`${photoScanQueue.user_id} = ${userId}`;
+
+  const rows = await db.execute<{
+    error_msg: string;
+    count: number;
+    sample_photo_ids: number[];
+    last_failed_at: string | null;
+  }>(sql`
+    SELECT
+      COALESCE(error_msg, '(no message)')                       AS error_msg,
+      COUNT(*)::int                                             AS count,
+      (array_agg(photo_id ORDER BY finished_at DESC NULLS LAST))[1:10]
+                                                                AS sample_photo_ids,
+      MAX(finished_at)                                          AS last_failed_at
+    FROM photo_scan_queue
+    WHERE service = ${service}
+      AND status = 'failed'
+      AND ${userScope}
+    GROUP BY COALESCE(error_msg, '(no message)')
+    ORDER BY count DESC
+  `);
+
+  return rows.rows.map((r) => ({
+    errorMsg: r.error_msg,
+    count: Number(r.count),
+    samplePhotoIds: (r.sample_photo_ids ?? []).map(Number),
+    lastFailedAt: r.last_failed_at,
+  }));
 }
 
 /**
