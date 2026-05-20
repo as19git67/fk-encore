@@ -30,6 +30,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { adminPool, connectionInfo } from "./db.ts";
+import { flatNodePathFor } from "./import.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -87,12 +88,18 @@ export async function runReplicationUpdate(
   // `osm2pgsql-replication update` prints summary lines we parse for
   // metrics. Capture stdout/stderr instead of inheriting.
   const before = await readState(postgresDb);
+  // Everything after `--` is forwarded to osm2pgsql for the append.
+  // These flags must match the import: same flex style, slim mode,
+  // and — critically — the same --flat-nodes file. osm2pgsql --append
+  // resolves node coordinates from that file; omitting it makes the
+  // update exit 1.
   await execCommand("osm2pgsql-replication", [
     "update",
     "--",
     "--output", "flex",
     "--style", LUA_STYLE,
     "--slim",
+    "--flat-nodes", flatNodePathFor(postgresDb),
     "--cache", String(parseInt(process.env.GEO_OSM2PGSQL_CACHE_MB ?? "2000", 10)),
     "--number-processes", String(parseInt(process.env.GEO_OSM2PGSQL_PROCS ?? "2", 10)),
     ...pgArgs(postgresDb),
