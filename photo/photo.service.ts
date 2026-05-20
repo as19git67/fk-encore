@@ -12,7 +12,7 @@ import { ENABLE_LOCAL_FACES, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL
 export { ENABLE_LOCAL_FACES, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
 import db from "../db/database";
 import { realtime, feed, sharedalbum } from "~encore/clients";
-import { pickRegion } from "../osm-admin/region-router";
+import { markUsed, pickRegion } from "../osm-admin/region-router";
 import { getGeoClient } from "../osm-admin/geo-client";
 
 /**
@@ -1602,6 +1602,9 @@ async function reverseGeocode(lat: number, lon: number): Promise<GeocodeResult> 
     const match = await pickRegion(lat, lon);
     if (match) {
       const result = await getGeoClient().reverse(match.postgresDb, lat, lon);
+      // Record the region as used (diagnostic last_used_at column).
+      // Best-effort — a failed bump must not fail the geocoding.
+      await markUsed(match.slug).catch(() => {});
       return assembleGeocodeResult(result.address, result.display_name);
     }
   } catch (err) {
