@@ -95,6 +95,7 @@ function buildFilterParams(filter: PhotoFilter | undefined, sp: URLSearchParams)
   if (filter.sizeMin !== undefined) add('sizeMin', filter.sizeMin)
   if (filter.sizeMax !== undefined) add('sizeMax', filter.sizeMax)
   if (filter.showAiHidden) add('showAiHidden', true)
+  if (filter.albumScopeId !== undefined) add('albumScopeId', filter.albumScopeId)
 }
 
 export function getGalleryGrid(
