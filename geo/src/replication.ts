@@ -88,13 +88,24 @@ export async function runReplicationUpdate(
   // `osm2pgsql-replication update` prints summary lines we parse for
   // metrics. Capture stdout/stderr instead of inheriting.
   const before = await readState(postgresDb);
-  // Everything after `--` is forwarded to osm2pgsql for the append.
-  // These flags must match the import: same flex style, slim mode,
-  // and — critically — the same --flat-nodes file. osm2pgsql --append
-  // resolves node coordinates from that file; omitting it makes the
-  // update exit 1.
+  // Argument order matters. The DB connection flags (--database,
+  // --host, --port, --username) must come BEFORE the `--` so they
+  // configure osm2pgsql-replication's own Postgres connection (it
+  // reads/writes the replication-status table). Everything AFTER the
+  // `--` is forwarded verbatim to the osm2pgsql append subprocess.
+  //
+  // Putting the connection flags after `--` leaves osm2pgsql-
+  // replication itself with no host/user, so it falls back to a local
+  // socket connection as the OS user — which in this container is the
+  // unmapped UID 568, giving
+  //   psycopg2.OperationalError: local user with ID 568 does not exist
+  //
+  // The forwarded osm2pgsql flags must still match the import: same
+  // flex style, slim mode, and the same --flat-nodes file (the append
+  // resolves node coordinates from it).
   await execCommand("osm2pgsql-replication", [
     "update",
+    ...pgArgs(postgresDb),
     "--",
     "--output", "flex",
     "--style", LUA_STYLE,
@@ -102,7 +113,6 @@ export async function runReplicationUpdate(
     "--flat-nodes", flatNodePathFor(postgresDb),
     "--cache", String(parseInt(process.env.GEO_OSM2PGSQL_CACHE_MB ?? "2000", 10)),
     "--number-processes", String(parseInt(process.env.GEO_OSM2PGSQL_PROCS ?? "2", 10)),
-    ...pgArgs(postgresDb),
   ]);
   const after = await readState(postgresDb);
 
