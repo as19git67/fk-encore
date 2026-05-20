@@ -2,8 +2,8 @@
  * End-to-end POI detection pipeline for one photo (Epic #383).
  *
  *   1. Fetch the photo row (lat/lon/heading + DINOv2 embedding).
- *   2. Pick the regional Overpass shard (via region-router) and
- *      run a POI radius query.
+ *   2. Pick the regional PostGIS database (via region-router) and
+ *      ask the geo service's /pois endpoint for radius candidates.
  *   3. Enrich each candidate's wikidata QID through
  *      `poi-reference-cache` (label, image URL, Wikipedia link).
  *   4. Ensure the DINOv2 reference embeddings are populated (lazily
@@ -14,14 +14,14 @@
  *
  * The function is the public entry-point of the `poi_detection` scan
  * worker. It treats every external dependency as soft: an unreachable
- * Overpass / Wikidata / embedding service produces an empty match
- * list with a diagnostic reason rather than throwing.
+ * geo / Wikidata / embedding service produces an empty match list
+ * with a diagnostic reason rather than throwing.
  */
 
 import { eq, sql } from "drizzle-orm";
 import dbDefault from "../db/database";
 import { photos, photoPoiMatches } from "../db/schema";
-import { fetchPoiCandidates, type OverpassCandidate } from "./overpass-client";
+import { getGeoClient, type GeoClient, type GeoPoiCandidate } from "./geo-client";
 import { ensurePoiEmbeddings } from "./poi-embedder";
 import { ensurePoiReferences } from "./poi-reference-cache";
 import { matchPhotoToPois, type MatchCandidate, type ScoredMatch } from "./poi-matcher";
@@ -30,6 +30,7 @@ import { pickRegion } from "./region-router";
 export interface DetectionDeps {
   db?: typeof dbDefault;
   fetcher?: typeof fetch;
+  geo?: GeoClient;
   /** Override the embedding-service URL (defaults to env). */
   embeddingServiceUrl?: string;
 }
@@ -56,32 +57,30 @@ export async function detectPoisForPhoto(
   const region = await pickRegion(photo.latitude, photo.longitude, { db });
   if (!region) return { matches: [], reason: "no_region" };
 
-  // 1. Overpass candidates ───────────────────────────────────────────
-  const overpassUrl = `http://${region.overpassHost}/api/interpreter`;
+  // 1. POI candidates via geo service ────────────────────────────────
+  const geo = deps.geo ?? getGeoClient();
   const fetcher = deps.fetcher ?? fetch;
-  let overpassCandidates: OverpassCandidate[];
+  let candidates: GeoPoiCandidate[];
   try {
-    const r = await fetchPoiCandidates(
-      overpassUrl,
+    candidates = await geo.findPois(
+      region.postgresDb,
       photo.latitude,
       photo.longitude,
-      { fetcher },
     );
-    overpassCandidates = r.candidates;
   } catch (err) {
     return {
       matches: [],
-      reason: `overpass:${(err as Error).message ?? String(err)}`,
+      reason: `geo:${(err as Error).message ?? String(err)}`,
     };
   }
-  if (overpassCandidates.length === 0) {
-    return { matches: [], reason: "no_overpass_candidates" };
+  if (candidates.length === 0) {
+    return { matches: [], reason: "no_poi_candidates" };
   }
 
   // 2. Wikidata enrichment for any OSM candidates that carry a QID ──
   const wikidataQids = [
     ...new Set(
-      overpassCandidates
+      candidates
         .map((c) => c.wikidataQid)
         .filter((q): q is string => q !== null && /^Q\d+$/.test(q)),
     ),
@@ -118,7 +117,7 @@ export async function detectPoisForPhoto(
     ? new Map<string, { embedding: number[] | null; nameDe: string | null; name: string }>()
     : await loadPoiReferenceEmbeddings(db, wikidataQids);
 
-  const candidates: MatchCandidate[] = overpassCandidates.map((c) => {
+  const matchCandidates: MatchCandidate[] = candidates.map((c) => {
     const ref = c.wikidataQid ? refs.get(c.wikidataQid) : undefined;
     return {
       qid: c.wikidataQid,
@@ -139,7 +138,7 @@ export async function detectPoisForPhoto(
     photoHeadingDeg: null, // EXIF heading not yet read; see followup
     photoLat: photo.latitude,
     photoLon: photo.longitude,
-    candidates,
+    candidates: matchCandidates,
   });
 
   // 6. Persist ────────────────────────────────────────────────────────

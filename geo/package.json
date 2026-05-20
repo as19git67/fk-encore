@@ -1,0 +1,22 @@
+{
+  "name": "fk-encore-geo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PostGIS-backed reverse geocoding and POI lookup for fk-encore.",
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "express": "^4.21.1",
+    "pg": "^8.13.1",
+    "tsx": "^4.19.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.17.6",
+    "@types/pg": "^8.11.10",
+    "typescript": "^5.6.3"
+  }
+}

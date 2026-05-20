@@ -17,7 +17,7 @@ export const ENABLE_LOCAL_FACES = process.env.ENABLE_LOCAL_FACES === "true";
 export const ENABLE_LANDMARKS = false;
 /**
  * Enable per-photo POI detection (Epic #383): for each geotagged
- * upload, query the local Overpass shard for nearby POIs, score the
+ * upload, query the local geo service for nearby POIs, score the
  * candidates against cached DINOv2 reference embeddings, and persist
  * the top match(es) in photo_poi_matches.
  *

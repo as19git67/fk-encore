@@ -32,8 +32,9 @@ decomposition.
 ### AI / machine learning
 - **Face recognition & clustering** – InsightFace (`buffalo_l`) with distance-based
   clustering, named people, merging, and per-face ignore
-- **POI detection** – self-hosted Nominatim + Overpass shards per
-  region (managed by the `osm-admin` service), matched against the
+- **POI detection** – self-hosted PostGIS database per OSM region
+  (one DB inside the `geo-db` container, populated by `osm2pgsql` from
+  Geofabrik PBFs and refreshed hourly), matched against the
   photo's DINOv2 embedding to identify concrete points of interest
   (Brandenburger Tor, Marienplatz, …) with a Wikipedia link and a
   Wikimedia Commons reference image. Replaces the earlier
@@ -81,7 +82,8 @@ decomposition.
 | `frontend`           | Vue 3 + PrimeVue + Pinia SPA (served under `/app/`) |
 | `insightface-service` | Python – face detection & embeddings            |
 | `embedding_service`  | Python – CLIP and DINOv2 embeddings              |
-| `osm-admin` (in `app`) | Self-hosted Nominatim + Overpass shards per OSM region, lifecycle managed via dockerode (POI detection — see [`docs/osm-admin-deployment.md`](./docs/osm-admin-deployment.md)) |
+| `geo`                | Node HTTP service that owns `osm2pgsql` + `osm2pgsql-replication` and serves reverse-geocoding + POI lookups (see [`docs/osm-admin-deployment.md`](./docs/osm-admin-deployment.md)) |
+| `geo-db`             | PostGIS 16 — one database per imported OSM region |
 | `embedding_postgres` | PostgreSQL + pgvector for vector search          |
 
 See [`FEATURE_COMPARISON.md`](./FEATURE_COMPARISON.md) for a detailed
@@ -106,7 +108,7 @@ Run the full stack (backend + frontend + ML services) via Docker Compose:
 ```bash
 cp docker-compose.env.example .env
 # edit .env – at minimum set ADMIN_PASSWORD, WATCHTOWER_TOKEN,
-# NOMINATIM_PASSWORD, and DEPLOY_DATA_ROOT
+# and DEPLOY_DATA_ROOT
 docker compose up -d
 ```
 
@@ -124,9 +126,10 @@ cp docker-compose.env.test.example .env.test
 docker compose --env-file .env.test up -d
 ```
 
-That stack uses port 18080 by default, image tag `:test`, container
-names with a `-test` suffix, and a separate `test-osm-net` network
-so its per-region POI containers can't collide with production's.
+That stack uses port 18080 by default, image tag `:test`, and
+container names with a `-test` suffix. The `geo` + `geo-db` pair is
+scoped through compose's project namespace, so the test stack's
+PostGIS databases live in a separate volume from production's.
 See [`DEPLOYMENT.md`](./DEPLOYMENT.md) for the full env reference.
 
 For active backend development, use the Encore CLI directly from the project

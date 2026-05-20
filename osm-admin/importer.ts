@@ -1,42 +1,35 @@
 /**
- * Region importer — single-tick worker that drives `importing` rows to
- * either `ready_running` (when both per-region containers report healthy),
- * `blocked_disk` (preflight failure), or `failed` (anything else).
+ * Region importer — single-tick worker that drives `importing` rows
+ * toward `ready_running`.
  *
- * Architecture: self-contained per-region containers. mediagis/nominatim
- * and wiktorn/overpass-api bundle their own data store, so each region
- * gets two long-running containers backed by named Docker volumes. The
- * containers run their own import on first start (empty volume + a
- * PBF_URL env var). We deliberately do not maintain a shared Postgres
- * for all regions — that would require patching the upstream images.
+ * Architecture: a single long-lived geo service (see /geo) owns one
+ * PostGIS database per region and runs the actual osm2pgsql work. The
+ * importer here is a thin orchestrator that:
  *
- * Why ticks instead of a single long-running call: a full Nominatim
- * import takes 30 min – 3 h. We don't want to block a single HTTP
- * request for that long, and we want the tick to be safe to interrupt
- * (container restart). So each tick is short:
+ *   1. Picks the oldest `importing` row whose `updated_at` has expired
+ *      its cooldown.
+ *   2. HEAD-probes the PBF size and disk-prechecks the host volume.
+ *   3. Asks the geo service for the current import status of the
+ *      region's database. If none is known, kicks off a new import via
+ *      `POST /import` (which queues an in-process background osm2pgsql
+ *      run and returns immediately).
+ *   4. On `running`, leaves the row as `importing` and bumps
+ *      `updated_at` to schedule the next poll.
+ *   5. On `ready`, transitions the row to `ready_running` and
+ *      backfills POI detection for any photo inside the region's bbox.
+ *   6. On `failed`, transitions to `failed` with the geo service's
+ *      error detail.
  *
- *   1. Pick the oldest `importing` row whose `updated_at` is older
- *      than `TICK_COOLDOWN_MS`.
- *   2. HEAD-probe PBF size if we don't have it yet, persist it.
- *   3. Disk pre-check (best effort): refuse if free < `pbfSize × 10`.
- *   4. ensureRunning both containers — idempotent, so subsequent ticks
- *      no-op on this step.
- *   5. waitHealthy with a single attempt. If both pass → ready_running.
- *      Otherwise bump `updated_at` (cooldown gate) and stay `importing`;
- *      the next tick re-probes.
+ * Why ticks: an import for a German Bundesland still takes 10–30 min;
+ * the geo service runs it asynchronously and the tick polls.
  */
 
 import { and, asc, eq, lt, or, isNull } from "drizzle-orm";
 import dbDefault from "../db/database";
 import { osmRegionImports } from "../db/schema";
-import {
-  getDockerDriver,
-  type ContainerDescriptor,
-  type DockerDriver,
-} from "./docker-driver";
+import { getGeoClient, type GeoClient } from "./geo-client";
 import { probePbfSizeMb } from "./pbf-probe";
 import { freeDiskMb as defaultFreeDiskMb } from "./disk-probe";
-import { containerName, volumeName } from "./naming";
 import { enqueuePoiDetectionForRegion } from "../photo/scan-queue";
 import { ENABLE_POI_DETECTION } from "../photo/scan-config";
 import { assertTransition, isRegionStatus, type RegionStatus } from "./state-machine";
@@ -48,17 +41,12 @@ const TICK_COOLDOWN_MS = 30_000;
 
 export interface ImporterDeps {
   db?: typeof dbDefault;
-  driver?: DockerDriver;
+  geo?: GeoClient;
   /** Probe PBF size; override in tests to return a deterministic value. */
   probeSize?: (url: string) => Promise<number | null>;
   /** Free disk space in MB at the storage volume. Tests inject a value. */
   freeDiskMb?: () => Promise<number | null>;
   now?: () => Date;
-  /** Container image tags. Defaults match the recommended self-host stack. */
-  images?: {
-    nominatim?: string;
-    overpass?: string;
-  };
   /**
    * Whether to backfill the poi_detection queue when a region
    * transitions to `ready_running`. Defaults to the module-load env
@@ -72,9 +60,9 @@ export interface TickOutcome {
   /** Slug picked this tick, or null if nothing to do. */
   slug: string | null;
   /** Resulting status — "noop" when no row was picked, "waiting" when
-   *  the containers are up but not yet healthy (row stays `importing`). */
+   *  the geo service is still importing (row stays `importing`). */
   result: RegionStatus | "noop" | "waiting";
-  /** Optional human-readable detail, e.g. the disk shortfall. */
+  /** Optional human-readable detail. */
   detail?: string;
 }
 
@@ -83,12 +71,10 @@ export interface TickOutcome {
  */
 export async function tickImporter(deps: ImporterDeps = {}): Promise<TickOutcome> {
   const db = deps.db ?? dbDefault;
-  const driver = deps.driver ?? getDockerDriver();
+  const geo = deps.geo ?? getGeoClient();
   const probe = deps.probeSize ?? probePbfSizeMb;
   const freeDisk = deps.freeDiskMb ?? (() => defaultFreeDiskMb());
   const now = deps.now ?? (() => new Date());
-  const nominatimImage = deps.images?.nominatim ?? "mediagis/nominatim:5.0";
-  const overpassImage = deps.images?.overpass ?? "wiktorn/overpass-api:latest";
 
   const cooldownCutoff = new Date(now().getTime() - TICK_COOLDOWN_MS).toISOString();
 
@@ -110,7 +96,6 @@ export async function tickImporter(deps: ImporterDeps = {}): Promise<TickOutcome
   if (!row) return { slug: null, result: "noop" };
 
   const slug = row.slug;
-  const slugSafe = slugToContainerSuffix(slug);
 
   try {
     // Step 1: probe size (only if we don't already have one cached).
@@ -125,8 +110,7 @@ export async function tickImporter(deps: ImporterDeps = {}): Promise<TickOutcome
       }
     }
 
-    // Step 2: disk pre-check (best effort — skipped when callers can't
-    // measure free space).
+    // Step 2: disk pre-check (best effort).
     const free = await freeDisk();
     if (free !== null && sizeMb !== null) {
       const need = sizeMb * POSTGRES_EXPANSION_FACTOR;
@@ -137,45 +121,50 @@ export async function tickImporter(deps: ImporterDeps = {}): Promise<TickOutcome
       }
     }
 
-    // Step 3: persistent containers. Both are self-contained — the
-    // image does its own import on first start with the PBF_URL env.
-    // ensureRunning is idempotent: a no-op once the container is up.
-    await driver.ensureRunning(nominatimDescriptor(slug, slugSafe, row.geofabrik_url, nominatimImage));
-    await driver.ensureRunning(overpassDescriptor(slugSafe, row.geofabrik_url, overpassImage));
+    // Step 3: ask the geo service what state this database is in.
+    const status = await geo.getImportStatus(row.postgres_db);
 
-    // Step 4: probe health once. Long imports take many ticks; we don't
-    // block on a giant timeout, we re-poll on the next tick.
-    const nomHealthy = await driver.waitHealthy(
-      `http://${containerName("nominatim", slugSafe)}:8080/status`,
-      { maxAttempts: 1 },
-    );
-    const ovHealthy = await driver.waitHealthy(
-      overpassHealthcheckUrl(slugSafe),
-      { maxAttempts: 1 },
-    );
-    if (!nomHealthy || !ovHealthy) {
-      // Stay in `importing`. Bump updated_at so the cooldown gates the
-      // next tick (we don't want to probe more than once every 30 s).
+    if (!status) {
+      // Nothing started yet — kick it off and return waiting.
+      await geo.startImport({
+        slug: row.slug,
+        postgresDb: row.postgres_db,
+        pbfUrl: row.geofabrik_url,
+      });
       await db
         .update(osmRegionImports)
         .set({ updated_at: now().toISOString() })
         .where(eq(osmRegionImports.slug, slug));
-      const detail = `nominatim_healthy=${nomHealthy} overpass_healthy=${ovHealthy}`;
-      return { slug, result: "waiting", detail };
+      return { slug, result: "waiting", detail: "geo import queued" };
     }
 
-    // Step 5: mark ready.
+    if (status.state === "running") {
+      await db
+        .update(osmRegionImports)
+        .set({ updated_at: now().toISOString() })
+        .where(eq(osmRegionImports.slug, slug));
+      return { slug, result: "waiting", detail: `geo state=${status.state}` };
+    }
+
+    if (status.state === "failed") {
+      await transition(
+        db,
+        slug,
+        "importing",
+        "failed",
+        status.error ?? "geo import failed",
+        now,
+      );
+      return { slug, result: "failed", detail: status.error };
+    }
+
+    // status.state === "ready"
     await transition(db, slug, "importing", "ready_running", null, now, {
-      imported_at: now().toISOString(),
+      imported_at: status.importedAt ?? now().toISOString(),
       last_error: null,
     });
 
-    // Step 6: backfill poi_detection for any photo whose GPS falls
-    // inside this region's bbox. Photos that earlier got `no_region`
-    // (because the regional shard wasn't imported yet) and photos
-    // that were never scanned both get a fresh `pending` queue row.
-    // Skipped when the feature flag is off — there's no point queuing
-    // jobs the worker won't pick.
+    // Step 4: backfill poi_detection.
     const poiEnabled = deps.poiDetectionEnabled ?? ENABLE_POI_DETECTION;
     if (poiEnabled) {
       const enqueued = await enqueuePoiDetectionForRegion({
@@ -200,94 +189,6 @@ export async function tickImporter(deps: ImporterDeps = {}): Promise<TickOutcome
   }
 }
 
-/**
- * Container descriptor for the long-running Nominatim instance. The
- * named volume holds the bundled Postgres data dir; on first start
- * with an empty volume the image's init script downloads the PBF and
- * imports it. On subsequent starts the existing DB is reused.
- */
-export function nominatimDescriptor(
-  slug: string,
-  slugSafe: string,
-  pbfUrl: string,
-  image: string,
-): ContainerDescriptor {
-  return {
-    name: containerName("nominatim", slugSafe),
-    image,
-    env: {
-      PBF_URL: pbfUrl,
-      NOMINATIM_PASSWORD: process.env.NOMINATIM_PASSWORD ?? "changeme",
-      IMPORT_STYLE: process.env.NOMINATIM_IMPORT_STYLE ?? "address",
-      // Replication URL used by the upcoming refresh endpoint; ignored
-      // by the initial import. The mediagis image accepts it via env.
-      REPLICATION_URL: replicationUrlFor(pbfUrl),
-      REGION_SLUG: slug,
-    },
-    volumes: [
-      // Named docker volume: docker auto-creates it on first run.
-      // Path inside the container is the bundled pg16 data dir.
-      {
-        hostPath: volumeName("nominatim", slugSafe),
-        containerPath: "/var/lib/postgresql/16/main",
-      },
-    ],
-  };
-}
-
-/**
- * Container descriptor for the long-running Overpass instance. Same
- * import-on-empty-volume pattern as Nominatim.
- */
-export function overpassDescriptor(
-  slugSafe: string,
-  pbfUrl: string,
-  image: string,
-): ContainerDescriptor {
-  // wiktorn/overpass-api downloads the planet to /db/planet.osm.bz2
-  // regardless of the actual format, then `eval`s
-  // $OVERPASS_PLANET_PREPROCESS (no stdin redirect, no args). After
-  // the preprocess, `init_osm3s.sh /db/planet.osm.bz2 …` consumes the
-  // file expecting bz2-compressed OSM XML.
-  //
-  // For Geofabrik PBFs (which is what we always use — Geofabrik does
-  // not publish .osm.bz2 for sub-regional extracts), we use the
-  // `osmium-tool` binary that ships with the upstream image to
-  // convert PBF → OSM XML bz2 in place. The staging file is renamed
-  // to `.pbf` so osmium auto-detects the input format; `-f osm.bz2`
-  // pins the output format despite the target's `.bz2` extension
-  // being ambiguous on its own.
-  const planet = "/db/planet.osm.bz2";
-  const stage = "/db/planet.input.pbf";
-  const preprocess =
-    `mv ${planet} ${stage} && ` +
-    `osmium cat -O -f osm.bz2 -o ${planet} ${stage} && ` +
-    `rm ${stage}`;
-  return {
-    name: containerName("overpass", slugSafe),
-    image,
-    env: {
-      OVERPASS_META: "yes",
-      OVERPASS_MODE: "init",
-      OVERPASS_PLANET_URL: pbfUrl,
-      OVERPASS_PLANET_PREPROCESS: preprocess,
-      OVERPASS_DIFF_URL: replicationUrlFor(pbfUrl),
-    },
-    volumes: [
-      { hostPath: volumeName("overpass", slugSafe), containerPath: "/db" },
-    ],
-  };
-}
-
-/**
- * Turn `…/bayern-latest.osm.pbf` into `…/bayern-updates/`. Geofabrik
- * publishes minutely-diff streams under that path; the refresh worker
- * (next slice) consumes them.
- */
-function replicationUrlFor(pbfUrl: string): string {
-  return pbfUrl.replace(/-latest\.osm\.pbf$/, "-updates/");
-}
-
 async function transition(
   db: typeof dbDefault,
   slug: string,
@@ -307,35 +208,4 @@ async function transition(
       ...extra,
     })
     .where(eq(osmRegionImports.slug, slug));
-}
-
-/**
- * Lightweight healthcheck URL for the per-region Overpass container.
- * We intentionally hit `/api/interpreter` with a trivial `out count;`
- * query rather than `/api/status` — the latter throws an unhandled
- * `std::out_of_range` C++ exception in the upstream wiktorn image
- * (the dispatcher status reporter has a bug) which surfaces as a 502
- * to the caller. The interpreter endpoint is the one we'll actually
- * use in production for POI queries anyway, so the healthcheck doubles
- * as an end-to-end smoke test.
- */
-export function overpassHealthcheckUrl(slugSafe: string): string {
-  // The encoded query is `[out:json];out count;` — minimal, returns
-  // a small JSON body with element counts.
-  return (
-    `http://${containerName("overpass", slugSafe)}/api/interpreter` +
-    `?data=%5Bout%3Ajson%5D%3Bout+count%3B`
-  );
-}
-
-/**
- * Replace anything outside `[a-z0-9-]` with `-`. The container name
- * cannot contain `/` (Geofabrik slug) or unprintables.
- */
-export function slugToContainerSuffix(slug: string): string {
-  return slug
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
 }

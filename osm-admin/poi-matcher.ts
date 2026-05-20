@@ -26,7 +26,7 @@ export interface MatchCandidate {
   osmRef: string;
   name: string;
   nameDe: string | null;
-  /** Centroid coordinates from Overpass (`out tags center`). */
+  /** Centroid coordinates from the geo /pois endpoint. */
   lat: number;
   lon: number;
   distanceM: number;
@@ -145,7 +145,7 @@ export function cosineSimilarity(a: number[], b: number[]): number {
 /**
  * Proximity weight: 1 at the POI centroid, 0.5 at 50 m, → 0 in the
  * far-field. Function: 1 / (1 + d/50). This dampens the influence of
- * distance once you're inside the radius the Overpass query already
+ * distance once you're inside the radius the geo /pois query already
  * filtered by, but still discriminates against the 200 m edge.
  */
 export function proximityFactor(distanceM: number): number {

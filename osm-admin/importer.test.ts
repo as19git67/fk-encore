@@ -1,15 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import db from "../db/database";
 import { osmRegionImports, photoScanQueue, photos, users } from "../db/schema";
-import { InMemoryDockerDriver } from "./docker-driver";
-import {
-  nominatimDescriptor,
-  overpassDescriptor,
-  overpassHealthcheckUrl,
-  slugToContainerSuffix,
-  tickImporter,
-} from "./importer";
+import { InMemoryGeoClient } from "./geo-client.test-helper";
+import { tickImporter } from "./importer";
 
 async function seedImporting(slug: string, geofabrikUrl = "https://example.com/x-latest.osm.pbf") {
   await db.insert(osmRegionImports).values({
@@ -21,7 +15,6 @@ async function seedImporting(slug: string, geofabrikUrl = "https://example.com/x
     bbox_max_lat: 50.5,
     bbox_max_lon: 13.5,
     status: "importing",
-    // Place updated_at well before the cooldown so the row is pickable.
     updated_at: new Date(Date.now() - 60_000).toISOString(),
   });
 }
@@ -60,78 +53,110 @@ async function seedUser(): Promise<number> {
 describe("tickImporter", () => {
   it("is a no-op when no rows are importing", async () => {
     const out = await tickImporter({
-      driver: new InMemoryDockerDriver(),
+      geo: new InMemoryGeoClient(),
       probeSize: async () => null,
     });
     expect(out).toEqual({ slug: null, result: "noop" });
   });
 
-  it("advances importing → ready_running when both containers are healthy", async () => {
+  it("kicks off the geo import on the first tick and reports waiting", async () => {
     await seedImporting("europe/germany/bayern");
-    const driver = new InMemoryDockerDriver();
+    const geo = new InMemoryGeoClient();
     const out = await tickImporter({
-      driver,
+      geo,
       probeSize: async () => 600,
       freeDiskMb: async () => 100_000,
     });
     expect(out.slug).toBe("europe/germany/bayern");
-    expect(out.result).toBe("ready_running");
+    expect(out.result).toBe("waiting");
+
+    // The importer asked the geo service to start the work.
+    expect(geo.getStartImportCalls()).toEqual([{
+      slug: "europe/germany/bayern",
+      postgresDb: "nom_europe_germany_bayern",
+      pbfUrl: "https://example.com/x-latest.osm.pbf",
+    }]);
 
     const row = (
-      await db
-        .select()
-        .from(osmRegionImports)
+      await db.select().from(osmRegionImports)
         .where(eq(osmRegionImports.slug, "europe/germany/bayern"))
     )[0];
-    expect(row.status).toBe("ready_running");
+    expect(row.status).toBe("importing");
     expect(row.pbf_size_mb).toBe(600);
-    expect(row.imported_at).not.toBeNull();
-    expect(row.last_error).toBeNull();
-
-    // Driver was asked to start exactly the two long-running containers
-    // and to probe both healthchecks.
-    expect(driver.events.map((e) => e.op)).toEqual([
-      "ensureRunning",
-      "ensureRunning",
-      "waitHealthy",
-      "waitHealthy",
-    ]);
-    const containerNames = driver.events
-      .filter((e) => e.op === "ensureRunning")
-      .map((e) => e.name);
-    expect(containerNames).toEqual([
-      "nominatim-europe-germany-bayern",
-      "overpass-europe-germany-bayern",
-    ]);
   });
 
-  it("stays in `importing` and reports `waiting` when health is not yet up", async () => {
+  it("stays in `importing` and reports waiting while the geo state is running", async () => {
     await seedImporting("europe/germany/bayern");
-    const driver = new InMemoryDockerDriver();
-    driver.healthyByDefault = false;
+    const geo = new InMemoryGeoClient();
+    geo.setImportState("nom_europe_germany_bayern", "running");
+
     const out = await tickImporter({
-      driver,
+      geo,
       probeSize: async () => 600,
       freeDiskMb: async () => 100_000,
     });
     expect(out.result).toBe("waiting");
-    expect(out.detail).toContain("nominatim_healthy=false");
-    expect(out.detail).toContain("overpass_healthy=false");
+    // No second startImport — the existing run is in progress.
+    expect(geo.getStartImportCalls()).toEqual([]);
 
     const row = (
-      await db
-        .select()
-        .from(osmRegionImports)
+      await db.select().from(osmRegionImports)
         .where(eq(osmRegionImports.slug, "europe/germany/bayern"))
     )[0];
     expect(row.status).toBe("importing");
   });
 
+  it("advances importing → ready_running once the geo state is ready", async () => {
+    await seedImporting("europe/germany/bayern");
+    const geo = new InMemoryGeoClient();
+    geo.setImportState("nom_europe_germany_bayern", "ready", {
+      importedAt: "2026-05-16T12:00:00Z",
+    });
+
+    const out = await tickImporter({
+      geo,
+      probeSize: async () => 600,
+      freeDiskMb: async () => 100_000,
+    });
+    expect(out.result).toBe("ready_running");
+
+    const row = (
+      await db.select().from(osmRegionImports)
+        .where(eq(osmRegionImports.slug, "europe/germany/bayern"))
+    )[0];
+    expect(row.status).toBe("ready_running");
+    expect(row.imported_at).toBe("2026-05-16 12:00:00+00");
+    expect(row.last_error).toBeNull();
+  });
+
+  it("transitions to failed when the geo state is failed", async () => {
+    await seedImporting("europe/germany/bayern");
+    const geo = new InMemoryGeoClient();
+    geo.setImportState("nom_europe_germany_bayern", "failed", {
+      error: "osm2pgsql exited with code 1",
+    });
+
+    const out = await tickImporter({
+      geo,
+      probeSize: async () => 600,
+      freeDiskMb: async () => 100_000,
+    });
+    expect(out.result).toBe("failed");
+    expect(out.detail).toContain("osm2pgsql exited");
+
+    const row = (
+      await db.select().from(osmRegionImports)
+        .where(eq(osmRegionImports.slug, "europe/germany/bayern"))
+    )[0];
+    expect(row.status).toBe("failed");
+    expect(row.last_error).toContain("osm2pgsql exited");
+  });
+
   it("transitions to blocked_disk when free space is below the threshold", async () => {
     await seedImporting("europe/germany/bayern");
-    const driver = new InMemoryDockerDriver();
+    const geo = new InMemoryGeoClient();
     const out = await tickImporter({
-      driver,
+      geo,
       probeSize: async () => 600,
       freeDiskMb: async () => 1_000, // way too little (need 6 000)
     });
@@ -140,29 +165,27 @@ describe("tickImporter", () => {
     expect(out.detail).toContain("need=6000MB");
 
     const row = (
-      await db
-        .select()
-        .from(osmRegionImports)
+      await db.select().from(osmRegionImports)
         .where(eq(osmRegionImports.slug, "europe/germany/bayern"))
     )[0];
     expect(row.status).toBe("blocked_disk");
-    // Critical: no docker work happened.
-    expect(driver.events).toEqual([]);
+    // Critical: no geo work happened.
+    expect(geo.getStartImportCalls()).toEqual([]);
   });
 
-  it("transitions to failed on driver exception", async () => {
+  it("transitions to failed when the geo client throws", async () => {
     await seedImporting("europe/germany/bayern");
-    const driver = new InMemoryDockerDriver();
-    driver.ensureRunning = async () => {
-      throw new Error("docker socket gone");
+    const geo = new InMemoryGeoClient();
+    geo.startImport = async () => {
+      throw new Error("geo socket gone");
     };
     const out = await tickImporter({
-      driver,
+      geo,
       probeSize: async () => 600,
       freeDiskMb: async () => 100_000,
     });
     expect(out.result).toBe("failed");
-    expect(out.detail).toContain("docker socket gone");
+    expect(out.detail).toContain("geo socket gone");
   });
 
   it("does not re-pick a row within the cooldown window", async () => {
@@ -178,7 +201,7 @@ describe("tickImporter", () => {
       updated_at: new Date().toISOString(), // very recent
     });
     const out = await tickImporter({
-      driver: new InMemoryDockerDriver(),
+      geo: new InMemoryGeoClient(),
       probeSize: async () => null,
     });
     expect(out).toEqual({ slug: null, result: "noop" });
@@ -192,7 +215,7 @@ describe("tickImporter", () => {
       .where(eq(osmRegionImports.slug, "europe/germany/bayern"));
     let probeCalls = 0;
     await tickImporter({
-      driver: new InMemoryDockerDriver(),
+      geo: new InMemoryGeoClient(),
       probeSize: async () => {
         probeCalls++;
         return 600;
@@ -204,16 +227,20 @@ describe("tickImporter", () => {
 });
 
 describe("tickImporter — poi_detection backfill on ready_running", () => {
+  function readyGeo(postgresDb: string): InMemoryGeoClient {
+    const geo = new InMemoryGeoClient();
+    geo.setImportState(postgresDb, "ready");
+    return geo;
+  }
+
   it("enqueues poi_detection for photos inside the new region's bbox when enabled", async () => {
     await seedImporting("europe/germany/bayern");
     const userId = await seedUser();
-    // Photo in Bayern (covered by bbox above)
     const munichId = await seedPhotoAt(48.137, 11.575, 1, userId);
-    // Photo far outside — should not be enqueued
     await seedPhotoAt(52.5, 13.4, 2, userId);
 
     const out = await tickImporter({
-      driver: new InMemoryDockerDriver(),
+      geo: readyGeo("nom_europe_germany_bayern"),
       probeSize: async () => 600,
       freeDiskMb: async () => 100_000,
       poiDetectionEnabled: true,
@@ -235,7 +262,7 @@ describe("tickImporter — poi_detection backfill on ready_running", () => {
     await seedPhotoAt(48.137, 11.575, 1, userId);
 
     await tickImporter({
-      driver: new InMemoryDockerDriver(),
+      geo: readyGeo("nom_europe_germany_bayern"),
       probeSize: async () => 600,
       freeDiskMb: async () => 100_000,
       poiDetectionEnabled: false,
@@ -252,8 +279,6 @@ describe("tickImporter — poi_detection backfill on ready_running", () => {
     await seedImporting("europe/germany/bayern");
     const userId = await seedUser();
     const munichId = await seedPhotoAt(48.137, 11.575, 1, userId);
-    // Simulate a previously-completed scan that produced no match
-    // because the region wasn't imported yet.
     await db.insert(photoScanQueue).values({
       photo_id: munichId,
       user_id: null,
@@ -263,7 +288,7 @@ describe("tickImporter — poi_detection backfill on ready_running", () => {
     });
 
     await tickImporter({
-      driver: new InMemoryDockerDriver(),
+      geo: readyGeo("nom_europe_germany_bayern"),
       probeSize: async () => 600,
       freeDiskMb: async () => 100_000,
       poiDetectionEnabled: true,
@@ -290,7 +315,7 @@ describe("tickImporter — poi_detection backfill on ready_running", () => {
     });
 
     await tickImporter({
-      driver: new InMemoryDockerDriver(),
+      geo: readyGeo("nom_europe_germany_bayern"),
       probeSize: async () => 600,
       freeDiskMb: async () => 100_000,
       poiDetectionEnabled: true,
@@ -301,122 +326,5 @@ describe("tickImporter — poi_detection backfill on ready_running", () => {
       .from(photoScanQueue)
       .where(eq(photoScanQueue.service, "poi_detection"));
     expect(queueRows).toHaveLength(1);
-  });
-});
-
-describe("descriptor builders", () => {
-  it("nominatimDescriptor wires PBF_URL + named volume + replication URL", () => {
-    const d = nominatimDescriptor(
-      "europe/germany/bayern",
-      "europe-germany-bayern",
-      "https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf",
-      "mediagis/nominatim:5.0",
-    );
-    expect(d.name).toBe("nominatim-europe-germany-bayern");
-    expect(d.env?.PBF_URL).toMatch(/bayern-latest\.osm\.pbf$/);
-    expect(d.env?.REPLICATION_URL).toBe(
-      "https://download.geofabrik.de/europe/germany/bayern-updates/",
-    );
-    expect(d.volumes).toEqual([
-      {
-        hostPath: "fk-encore-osm-nominatim-europe-germany-bayern",
-        containerPath: "/var/lib/postgresql/16/main",
-      },
-    ]);
-  });
-
-  it("overpassDescriptor wires PBF URL + osmium-based preprocess + DIFF_URL + named volume", () => {
-    const d = overpassDescriptor(
-      "europe-germany-bayern",
-      "https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf",
-      "wiktorn/overpass-api:latest",
-    );
-    expect(d.env?.OVERPASS_PLANET_URL).toBe(
-      "https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf",
-    );
-    // Preprocess uses osmium (bundled in the upstream image — see line
-    // 95 of wiktorn's docker-entrypoint.sh) to convert PBF → bz2 OSM
-    // XML in place. init_osm3s.sh then consumes /db/planet.osm.bz2
-    // unchanged.
-    expect(d.env?.OVERPASS_PLANET_PREPROCESS).toContain("osmium cat");
-    expect(d.env?.OVERPASS_PLANET_PREPROCESS).toContain("-f osm.bz2");
-    expect(d.env?.OVERPASS_PLANET_PREPROCESS).toContain("/db/planet.osm.bz2");
-    expect(d.env?.OVERPASS_PLANET_PREPROCESS).toContain("/db/planet.input.pbf");
-    expect(d.env?.OVERPASS_DIFF_URL).toBe(
-      "https://download.geofabrik.de/europe/germany/bayern-updates/",
-    );
-    expect(d.volumes).toEqual([
-      {
-        hostPath: "fk-encore-osm-overpass-europe-germany-bayern",
-        containerPath: "/db",
-      },
-    ]);
-  });
-});
-
-describe("overpassHealthcheckUrl", () => {
-  it("hits /api/interpreter with a trivial out-count query", () => {
-    const url = overpassHealthcheckUrl("europe-germany-bayern");
-    // Critical: NOT /api/status — the wiktorn image's status reporter
-    // throws std::out_of_range under load and returns 502, making the
-    // container appear unhealthy when it's actually serving fine.
-    expect(url).toBe(
-      "http://overpass-europe-germany-bayern/api/interpreter" +
-        "?data=%5Bout%3Ajson%5D%3Bout+count%3B",
-    );
-    // The encoded query decodes to "[out:json];out count;"
-    const u = new URL(url);
-    expect(u.searchParams.get("data")).toBe("[out:json];out count;");
-  });
-});
-
-describe("slugToContainerSuffix", () => {
-  it("flattens slashes and lowercases", () => {
-    expect(slugToContainerSuffix("europe/germany/bayern")).toBe(
-      "europe-germany-bayern",
-    );
-  });
-
-  it("collapses repeated separators and trims edges", () => {
-    expect(slugToContainerSuffix("/a//b/")).toBe("a-b");
-  });
-});
-
-describe("OSM_ADMIN_NAME_PREFIX flows through descriptor builders", () => {
-  const original = process.env.OSM_ADMIN_NAME_PREFIX;
-  afterEach(() => {
-    if (original === undefined) delete process.env.OSM_ADMIN_NAME_PREFIX;
-    else process.env.OSM_ADMIN_NAME_PREFIX = original;
-  });
-
-  it("scopes nominatim container and volume names", () => {
-    process.env.OSM_ADMIN_NAME_PREFIX = "test-";
-    const d = nominatimDescriptor(
-      "europe/germany/bayern",
-      "europe-germany-bayern",
-      "https://example.com/x.pbf",
-      "mediagis/nominatim:5.0",
-    );
-    expect(d.name).toBe("test-nominatim-europe-germany-bayern");
-    expect(d.volumes?.[0].hostPath).toBe(
-      "test-fk-encore-osm-nominatim-europe-germany-bayern",
-    );
-  });
-
-  it("scopes overpass container, volume, and the healthcheck URL", () => {
-    process.env.OSM_ADMIN_NAME_PREFIX = "test-";
-    const d = overpassDescriptor(
-      "europe-germany-bayern",
-      "https://example.com/x.pbf",
-      "wiktorn/overpass-api:latest",
-    );
-    expect(d.name).toBe("test-overpass-europe-germany-bayern");
-    expect(d.volumes?.[0].hostPath).toBe(
-      "test-fk-encore-osm-overpass-europe-germany-bayern",
-    );
-    expect(overpassHealthcheckUrl("europe-germany-bayern")).toBe(
-      "http://test-overpass-europe-germany-bayern/api/interpreter" +
-        "?data=%5Bout%3Ajson%5D%3Bout+count%3B",
-    );
   });
 });

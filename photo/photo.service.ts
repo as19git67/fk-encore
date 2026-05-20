@@ -12,6 +12,8 @@ import { ENABLE_LOCAL_FACES, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL
 export { ENABLE_LOCAL_FACES, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
 import db from "../db/database";
 import { realtime, feed, sharedalbum } from "~encore/clients";
+import { pickRegion } from "../osm-admin/region-router";
+import { getGeoClient } from "../osm-admin/geo-client";
 
 /**
  * Fire-and-forget realtime notification. Publisher-side errors must not
@@ -1575,28 +1577,68 @@ function buildLocationName(addr: Record<string, any>): { displayName: string; sh
   return { displayName, shortName };
 }
 
+/**
+ * Reverse-geocode `(lat, lon)` into a display-ready GeocodeResult.
+ *
+ * Two-tier lookup:
+ *   1. Local geo service if its PostGIS database covers the point.
+ *      No network egress, no rate limit, sub-millisecond ST_DWithin
+ *      query against the in-cluster Postgres.
+ *   2. Public Nominatim as a fallback when (a) no region covers the
+ *      coordinate, or (b) the geo call fails. The fallback inherits
+ *      the historical 1 req/s budget enforced by the geocoding
+ *      scan-worker's concurrency=1 setting.
+ */
 async function reverseGeocode(lat: number, lon: number): Promise<GeocodeResult> {
+  const empty: GeocodeResult = { displayName: "", shortName: null, city: null, country: null };
+
+  // 1) Local geo service.
+  try {
+    const match = await pickRegion(lat, lon);
+    if (match) {
+      const result = await getGeoClient().reverse(match.postgresDb, lat, lon);
+      return assembleGeocodeResult(result.address, result.display_name);
+    }
+  } catch (err) {
+    console.warn(
+      `[photo] geo reverse-geocode failed for (${lat}, ${lon}); falling back to public Nominatim:`,
+      (err as Error).message ?? err,
+    );
+  }
+
+  // 2) Public Nominatim fallback.
   try {
     const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&accept-language=de,en,local`;
     const res = await fetch(url, {
       headers: { "User-Agent": "fk-encore-photo-app/1.0" },
     });
-    if (!res.ok) return { displayName: "", shortName: null, city: null, country: null };
+    if (!res.ok) return empty;
     const data = await res.json() as Record<string, any>;
-    const addr = data.address ?? {};
-    const city = addr.city ?? addr.town ?? addr.village ?? addr.municipality ?? null;
-    const country = addr.country ?? null;
-    const { displayName, shortName } = buildLocationName(addr);
-    return {
-      displayName: displayName || city || data.display_name || "",
-      shortName,
-      city,
-      country,
-    };
+    return assembleGeocodeResult(data.address ?? {}, data.display_name);
   } catch (err) {
     console.error("Nominatim reverse geocoding failed:", err);
-    return { displayName: "", shortName: null, city: null, country: null };
+    return empty;
   }
+}
+
+/**
+ * Turn an address object (Nominatim-shaped, whether it came from the
+ * geo service or public Nominatim) plus the upstream display_name into
+ * the canonical GeocodeResult.
+ */
+function assembleGeocodeResult(
+  addr: Record<string, any>,
+  upstreamDisplayName: string | undefined,
+): GeocodeResult {
+  const city = addr.city ?? addr.town ?? addr.village ?? addr.municipality ?? null;
+  const country = addr.country ?? null;
+  const { displayName, shortName } = buildLocationName(addr);
+  return {
+    displayName: displayName || city || upstreamDisplayName || "",
+    shortName,
+    city,
+    country,
+  };
 }
 
 async function geocodePhotoLocation(photoId: number, lat: number, lon: number): Promise<void> {

@@ -1,19 +1,17 @@
 /**
- * Service boot for the OSM admin module (Epic #383).
+ * Service boot for the OSM admin module.
  *
- * The osm-admin service owns the lifecycle of per-region Nominatim and
- * Overpass containers used for POI detection. Boot order:
+ * Owns the lifecycle of region imports against the geo service. Boot
+ * order:
  *
- *   1. Register the admin HTTP endpoints (side-effect import).
- *   2. Schedule the importer tick — every 30 s the worker advances at
- *      most one `importing` row toward `ready_running`. The job is
- *      naturally idle when no rows are in `importing`.
+ *   1. Register the admin HTTP endpoints (side-effect imports).
+ *   2. Schedule the importer tick — every 30 s the worker polls the
+ *      geo service for the next import's progress and advances at most
+ *      one `importing` row toward `ready_running`.
  *   3. Arm the local-cron scheduler (idempotent across services).
  *
- * The active docker driver defaults to `InMemoryDockerDriver` so this
- * file is safe to import in environments without a Docker socket. The
- * real dockerode-backed driver registers itself via `setDockerDriver`
- * in a follow-up slice; nothing here changes when it lands.
+ * The geo service itself runs in its own container (see /geo); this
+ * module only speaks to it over HTTP via `geo-client`.
  */
 
 import { Service } from "encore.dev/service";
@@ -21,38 +19,11 @@ import { everyMs, schedule, startLocalCron } from "../lib/local-cron";
 
 console.log("[boot] osm-admin/encore.service.ts: begin");
 
-// Side-effect import: registers the admin endpoints on the service.
+// Side-effect imports: register the admin endpoints on the service.
 import "./regions";
-// Side-effect import: registers the per-region proxy endpoints.
 import "./proxy";
 
 import { tickImporter } from "./importer";
-import { tickIdleStop } from "./idle-stop";
-import { getDockerDriver } from "./docker-driver";
-import { registerDockerodeDriverIfEnabled } from "./docker-driver.dockerode";
-
-// Activate the dockerode driver iff explicitly requested via env. The
-// default stays InMemoryDockerDriver so CI/test environments without
-// a Docker socket keep working.
-const dockerodeActive = registerDockerodeDriverIfEnabled({
-  defaultNetwork: process.env.OSM_ADMIN_DOCKER_NETWORK,
-});
-
-// osm-admin owns the OSM bridge network rather than declaring it in
-// docker-compose.yml. That decouples the network's lifecycle from
-// `docker compose down` — the per-region containers that osm-admin
-// spawns at runtime would otherwise keep it busy and the down would
-// fail with "Resource is still in use". Bootstrap fire-and-forget so
-// a slow daemon doesn't block startup; failures are logged loudly.
-const osmNet = process.env.OSM_ADMIN_DOCKER_NETWORK;
-if (dockerodeActive && osmNet) {
-  getDockerDriver()
-    .ensureNetwork(osmNet)
-    .then(() => console.log(`[osm-admin] network '${osmNet}' ready, self attached`))
-    .catch((err) =>
-      console.error(`[osm-admin] failed to ensure network '${osmNet}':`, err),
-    );
-}
 
 schedule({
   name: "osm-admin-importer",
@@ -66,24 +37,6 @@ schedule({
       console.log(
         `[osm-admin] importer tick: slug=${outcome.slug} ` +
           `result=${outcome.result}${outcome.detail ? ` (${outcome.detail})` : ""}`,
-      );
-    }
-  },
-});
-
-schedule({
-  name: "osm-admin-idle-stop",
-  description: "Stop region containers idle longer than POI_REGION_IDLE_STOP_MINUTES.",
-  service: "osm-admin",
-  scheduleLabel: "every 5m",
-  nextFire: everyMs(5 * 60_000),
-  run: async () => {
-    const outcome = await tickIdleStop();
-    if (outcome.stopped.length > 0 || outcome.failed.length > 0) {
-      console.log(
-        `[osm-admin] idle-stop tick: stopped=${outcome.stopped.length}` +
-          ` failed=${outcome.failed.length}` +
-          (outcome.stopped.length > 0 ? ` — ${outcome.stopped.join(", ")}` : ""),
       );
     }
   },

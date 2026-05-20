@@ -31,6 +31,10 @@ export default defineConfig({
       "node_modules/**",
       "encore.gen/**",
       "frontend/**",
+      // /geo is a standalone Node package shipped in its own container.
+      // Its tests need a PostGIS instance the encore sandbox does not
+      // have; run them inside the geo image instead.
+      "geo/**",
     ],
     setupFiles: ["./vitest.setup.ts"],
     // Run test files sequentially to avoid DB data races (shared Postgres instance)
@@ -43,6 +47,7 @@ export default defineConfig({
         "node_modules/**",
         "encore.gen/**",
         "frontend/**",
+        "geo/**",
         "**/*.config.ts",
         "**/encore.service.ts",
         "db/seed.ts",

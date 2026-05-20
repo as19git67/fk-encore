@@ -817,15 +817,18 @@ export const taxSectionHintOverrides = pgTable("tax_section_hint_overrides", {
 
 // ========== POI Detection (Epic #383) ==========
 //
-// `osm_region_imports` tracks per-region Geofabrik extracts imported into
-// dockerised Nominatim + Overpass instances managed by the osm-admin
-// service. The bbox columns are used by the request router to map a
-// photo's GPS coordinates to the right region container.
+// `osm_region_imports` tracks per-region Geofabrik extracts imported
+// into the geo service's PostGIS database (one db per region). The
+// bbox columns are used by the request router to map a photo's GPS
+// coordinates to the right region database.
 //
 // Status values (kept as TEXT, not an enum, so the lifecycle can evolve
 // without migrations):
-//   pending_approval | importing | ready_running | ready_stopped
-//   | blocked_disk   | failed
+//   pending_approval | importing | ready_running | failed
+//
+// `ready_stopped` and `blocked_disk` are legacy values left over from
+// the docker-driven era — pickRegion still accepts ready_stopped as a
+// synonym for ready_running so existing rows stay readable.
 
 export const osmRegionImports = pgTable("osm_region_imports", {
   slug: text("slug").primaryKey(),

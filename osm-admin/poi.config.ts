@@ -9,7 +9,7 @@
 /** Radius (m) around a photo's GPS to scan for POI candidates. */
 export const POI_RADIUS_M = parseIntEnv("POI_DETECTION_RADIUS_M", 200);
 
-/** Maximum number of Overpass candidates kept per photo before scoring. */
+/** Maximum number of POI candidates kept per photo before scoring. */
 export const POI_MAX_CANDIDATES = parseIntEnv("POI_DETECTION_MAX_CANDIDATES", 25);
 
 /** Score margin between top-1 and top-2 needed to declare an unambiguous winner. */
@@ -19,23 +19,23 @@ export const POI_AMBIGUITY_MARGIN = parseFloatEnv("POI_MATCH_AMBIGUITY_MARGIN", 
 export const POI_MIN_MATCH_SCORE = parseFloatEnv("POI_MATCH_MIN_SCORE", 0.55);
 
 /**
- * OSM tag filters used in the Overpass radius query. The combined
- * filter is `nwr(around:R, lat, lon)[tag~"value-pattern"]`. The set
- * is chosen to cover what humans typically photograph as a
+ * OSM tag filters consumed by the geo service's `/pois` endpoint. The
+ * set is chosen to cover what humans typically photograph as a
  * "Sehenswürdigkeit" without dragging in every road sign or bench.
  *
- * Each entry produces a separate `nwr[...]` clause inside a single
- * Overpass union — the union's deduplication picks the right element
- * when the same node carries multiple tag families.
+ * Must stay in sync with the matches_poi() table in
+ * geo/src/osm2pgsql.lua — the Lua filter decides at import time which
+ * OSM elements end up in `osm_pois`, and this list decides at query
+ * time which of those qualify as candidates.
  */
-export interface OverpassTagFilter {
+export interface PoiTagFilter {
   /** OSM key, e.g. `tourism`. */
   key: string;
   /** OR-list of acceptable values, or `"*"` to match any value. */
   values: readonly string[] | "*";
 }
 
-export const POI_TAG_FILTERS: readonly OverpassTagFilter[] = [
+export const POI_TAG_FILTERS: readonly PoiTagFilter[] = [
   {
     key: "tourism",
     values: ["attraction", "museum", "artwork", "viewpoint", "gallery", "monument"],
