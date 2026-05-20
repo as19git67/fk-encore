@@ -1863,6 +1863,19 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
     position: sticky;
     bottom: 0;
     z-index: 10;
+    /* Pad clear of the iOS home indicator so the bottom row of buttons
+       isn't cramped against the screen edge (#373). */
+    padding: 0.7rem 0.85rem calc(0.7rem + env(safe-area-inset-bottom, 0px));
+    gap: 0.5rem;
+  }
+  /* Action buttons fill the bar width and get a 44px-tall touch target
+     each — the small-size buttons were hard to tap on phones (#373). */
+  .select-actions {
+    width: 100%;
+  }
+  .select-actions :deep(.p-button) {
+    flex: 1 1 7rem;
+    min-height: 2.75rem;
   }
 }
 </style>
