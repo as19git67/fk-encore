@@ -18,9 +18,9 @@
  * with a diagnostic reason rather than throwing.
  */
 
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import dbDefault from "../db/database";
-import { photos, photoPoiMatches } from "../db/schema";
+import { photos, photoPoiMatches, poiReferences } from "../db/schema";
 import { getGeoClient, type GeoClient, type GeoPoiCandidate } from "./geo-client";
 import { ensurePoiEmbeddings } from "./poi-embedder";
 import { ensurePoiReferences } from "./poi-reference-cache";
@@ -178,24 +178,31 @@ async function fetchPhotoDinoEmbedding(
   }
 }
 
-async function loadPoiReferenceEmbeddings(
+/** Exported for tests — see poi-detection.test.ts. */
+export async function loadPoiReferenceEmbeddings(
   db: typeof dbDefault,
   qids: string[],
 ): Promise<Map<string, { embedding: number[] | null; nameDe: string | null; name: string }>> {
   if (qids.length === 0) return new Map();
-  // pgvector::text returns `[v1,v2,…]` which we parse back to numbers.
-  const rows = await db.execute<{
-    qid: string;
-    name: string;
-    name_de: string | null;
-    embedding_text: string | null;
-  }>(sql`
-    SELECT qid, name, name_de, embedding::text AS embedding_text
-    FROM poi_references
-    WHERE qid = ANY(${qids})
-  `);
+  // Use the Drizzle query builder with `inArray` for the qid filter —
+  // interpolating a JS array into a raw `sql` template does not bind a
+  // proper Postgres array (it threw "malformed array literal" for one
+  // qid and "operator does not exist: text = record" for several).
+  // `embedding` lives outside the typed schema (raw pgvector column),
+  // so it is selected as a `sql` fragment cast to text; pgvector::text
+  // returns `[v1,v2,…]` which parsePgvector turns back into numbers.
+  const rows = await db
+    .select({
+      qid: poiReferences.qid,
+      name: poiReferences.name,
+      name_de: poiReferences.name_de,
+      embedding_text: sql<string | null>`embedding::text`,
+    })
+    .from(poiReferences)
+    .where(inArray(poiReferences.qid, qids));
+
   const out = new Map<string, { embedding: number[] | null; nameDe: string | null; name: string }>();
-  for (const r of rows.rows) {
+  for (const r of rows) {
     out.set(r.qid, {
       embedding: parsePgvector(r.embedding_text),
       nameDe: r.name_de,
