@@ -49,6 +49,14 @@ export interface PhotoFilterParams {
   //   "only"              — only photos the AI hid. Used by the "show
   //                         KI-ausgeblendete anzeigen" filter toggle.
   aiHiddenMode?: HiddenMode;
+  /**
+   * Album-detail grid scope. NOT a filter — `buildPhotoFilterConditions`
+   * deliberately ignores it. When set, the gallery-grid logic scopes the
+   * result to this album's photos (with an access check) instead of the
+   * caller's own photos, so a shared album also renders in the grid for
+   * non-owner viewers.
+   */
+  albumScopeId?: number;
 }
 
 export interface PhotoFilterQuery {
@@ -78,6 +86,7 @@ export interface PhotoFilterQuery {
   sizeMax?: number;
   showAiHidden?: boolean;
   aiHiddenMode?: string;
+  albumScopeId?: number;
 }
 
 function parseIntArray(s: string): number[] {
@@ -128,6 +137,9 @@ export function parsePhotoFilterQuery(q: PhotoFilterQuery): PhotoFilterParams {
     f.aiHiddenMode = q.aiHiddenMode;
   } else if (q.showAiHidden === true) {
     f.aiHiddenMode = "include";
+  }
+  if (q.albumScopeId !== undefined && Number(q.albumScopeId) > 0) {
+    f.albumScopeId = Number(q.albumScopeId);
   }
   return f;
 }

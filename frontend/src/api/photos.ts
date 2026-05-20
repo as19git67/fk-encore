@@ -99,6 +99,10 @@ export interface PhotoFilter {
   // photos are excluded from the grid; true → they are shown alongside
   // the AI picks. Maps to the backend `aiHiddenMode=include` query.
   showAiHidden?: boolean
+  // Album-detail grid scope. When set, the gallery grid shows that
+  // album's photos (with an access check) instead of the caller's own
+  // library — so a shared album also renders for non-owner viewers.
+  albumScopeId?: number
 }
 
 function buildPhotoFilterQuery(filter: PhotoFilter | boolean | undefined): string {
