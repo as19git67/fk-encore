@@ -104,18 +104,35 @@ async function createDb(): Promise<DbInstance> {
 const DB_RETRY_INITIAL_DELAY_MS = 2_000;
 const DB_RETRY_MAX_DELAY_MS = 30_000;
 
-// Only these errors are treated as transient and retried. Anything else
-// (failed migration, missing extension, bad credentials, syntax error…)
-// is a programming/environment problem and should crash the process
-// immediately rather than spin forever in the reconnect loop.
-function isTransientConnectionError(err: any): boolean {
-  const code = err?.code;
-  if (code === "ECONNREFUSED" || code === "ETIMEDOUT" || code === "ENOTFOUND") {
-    return true;
-  }
-  // Postgres SQLSTATE class 08 (connection_exception) + 57P03 (cannot_connect_now)
-  if (typeof code === "string" && (code.startsWith("08") || code === "57P03")) {
-    return true;
+// Only these errors are treated as transient. Anything else (failed
+// migration, missing extension, bad credentials, syntax error…) is a
+// programming/environment problem and should surface immediately rather
+// than be retried.
+//
+// The error is unwrapped along its `cause` chain: query-layer wrappers
+// such as Drizzle's DrizzleQueryError bury the driver's pg error — and
+// its SQLSTATE `code` — one or more levels deep.
+export function isTransientConnectionError(err: unknown): boolean {
+  let cur: any = err;
+  for (let depth = 0; cur && depth < 5; depth++, cur = cur.cause) {
+    const code = cur.code;
+    if (code === "ECONNREFUSED" || code === "ETIMEDOUT" || code === "ENOTFOUND") {
+      return true;
+    }
+    // Postgres SQLSTATE class 08 (connection_exception) and the
+    // operator-intervention codes 57P01 (admin shutdown), 57P02 (crash
+    // shutdown) and 57P03 (cannot_connect_now — "the database system is
+    // in recovery mode" / "is starting up"). All mean the cluster is
+    // bouncing and the call should be retried, not failed.
+    if (
+      typeof code === "string" &&
+      (code.startsWith("08") ||
+        code === "57P01" ||
+        code === "57P02" ||
+        code === "57P03")
+    ) {
+      return true;
+    }
   }
   return false;
 }
