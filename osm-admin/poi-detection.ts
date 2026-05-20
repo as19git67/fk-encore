@@ -25,7 +25,7 @@ import { getGeoClient, type GeoClient, type GeoPoiCandidate } from "./geo-client
 import { ensurePoiEmbeddings } from "./poi-embedder";
 import { ensurePoiReferences } from "./poi-reference-cache";
 import { matchPhotoToPois, type MatchCandidate, type ScoredMatch } from "./poi-matcher";
-import { pickRegion } from "./region-router";
+import { markUsed, pickRegion } from "./region-router";
 
 export interface DetectionDeps {
   db?: typeof dbDefault;
@@ -73,6 +73,10 @@ export async function detectPoisForPhoto(
       reason: `geo:${(err as Error).message ?? String(err)}`,
     };
   }
+  // The region's PostGIS database was successfully queried — record it
+  // as used (diagnostic `last_used_at` column). Best-effort: a failed
+  // bump must not fail the detection job.
+  await markUsed(region.slug, { db }).catch(() => {});
   if (candidates.length === 0) {
     return { matches: [], reason: "no_poi_candidates" };
   }
