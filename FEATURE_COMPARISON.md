@@ -88,7 +88,7 @@ Status: April 2026 (updated)
 | Birthday & age at time of photo | ✅ | ❌ |
 | Hide people | ✅ | ✅ (ignore faces) |
 | Object / scene detection | ✅ Auto-tagging | ❌ |
-| POI detection | ❌ | ⚡ Self-hosted OSM (Nominatim + Overpass) + DINOv2 match against Wikimedia Commons reference images, with Wikipedia link out |
+| POI detection | ❌ | ⚡ Self-hosted PostGIS (osm2pgsql-imported Geofabrik regions) + DINOv2 match against Wikimedia Commons reference images, with Wikipedia link out |
 | Photo quality scoring | ❌ | ⚡ AI score for every photo |
 | Intelligent focus point | ❌ | ⚡ Face / landmark-based |
 | GPU acceleration | ✅ CUDA, OpenVINO, VAAPI, ARM-NN, ROCm | ❌ |
@@ -235,7 +235,7 @@ Status: April 2026 (updated)
 
 - **Collaborative album curation** – consensus view, anonymous voting, multiple view modes
 - **AI as album participant** – quality-based voting
-- **POI detection** – self-hosted OSM (Nominatim + Overpass) + DINOv2 match against Commons reference images, with Wikipedia link out
+- **POI detection** – self-hosted PostGIS (osm2pgsql-imported Geofabrik regions) + DINOv2 match against Commons reference images, with Wikipedia link out
 - **AI quality scoring** – score for every photo
 - **Intelligent auto-crop** – focus point based on faces / landmarks
 - **Hybrid search** – CLIP + DINOv2 fusion

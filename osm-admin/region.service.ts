@@ -1,7 +1,7 @@
 /**
- * Region orchestration for self-hosted Nominatim/Overpass shards.
+ * Region orchestration for the geo service.
  *
- * This module owns the business logic for the per-region lifecycle:
+ * Owns the business logic for the per-region lifecycle:
  *
  *   - suggestForCoord:  Given a photo's GPS, return the Geofabrik
  *                       extract that covers it (used by the photo POI
@@ -11,25 +11,17 @@
  *                       (or `importing` when under the auto-approve
  *                       size threshold). Idempotent on slug.
  *
- *   - approve:          Move a `pending_approval` row through
- *                       `importing` to `ready_running`. The actual
- *                       dockerode-driven container provisioning lands
- *                       in the next slice — for now the function only
- *                       persists the state transitions so the admin UI
- *                       can be wired against the final contract.
+ *   - approve:          Move a `pending_approval` row to `importing`
+ *                       so the importer worker can pick it up.
  *
- *   - remove:           Drop a region row. The real implementation
- *                       will tear down the associated containers and
- *                       volumes; until then it just deletes the row.
- *
- * Each entry point accepts an injectable dependency bag so tests can
- * replace the DB, geofabrik loader, and clock.
+ *   - remove:           Drop a region row and ask the geo service to
+ *                       drop the corresponding PostGIS database.
  */
 
 import { eq } from "drizzle-orm";
 import dbDefault from "../db/database";
 import { osmRegionImports } from "../db/schema";
-import { getDockerDriver, type DockerDriver } from "./docker-driver";
+import { getGeoClient, type GeoClient } from "./geo-client";
 import {
   loadGeofabrikIndex,
   pickSmallestMatchingRegion,
@@ -37,8 +29,6 @@ import {
   type GeofabrikRegion,
   type LoadOptions,
 } from "./geofabrik-index";
-import { slugToContainerSuffix } from "./importer";
-import { containerName, volumeName } from "./naming";
 import {
   assertTransition,
   isRegionStatus,
@@ -50,7 +40,7 @@ export const DEFAULT_AUTO_APPROVE_MAX_PBF_MB = 1500;
 
 export interface RegionDeps {
   db?: typeof dbDefault;
-  driver?: DockerDriver;
+  geo?: GeoClient;
   /** Override the Geofabrik index loader. Tests inject a synthetic one. */
   loadIndex?: (opts?: LoadOptions) => Promise<GeofabrikIndex>;
   /** PBF-size cutoff for auto-approve (MB). Defaults to 1500. */
@@ -80,14 +70,6 @@ export interface RegionSuggestion {
   autoApprove: boolean;
 }
 
-/**
- * Look up the smallest Geofabrik region covering `(lat, lon)` and
- * report whether it's already tracked in the DB.
- *
- * Returns null when the point is outside every Geofabrik polygon
- * (e.g. open ocean) — the caller should surface that as "no region
- * available" so the photo can be tagged accordingly.
- */
 export async function suggestForCoord(
   lat: number,
   lon: number,
@@ -132,9 +114,6 @@ function regionToSuggestion(
     pbfSizeMb,
     existing: existingStatus !== null,
     existingStatus,
-    // Without a published size we conservatively require approval.
-    // The importer (next slice) measures the PBF after HEAD and may
-    // auto-promote at that point if it's under the threshold.
     autoApprove: pbfSizeMb !== null && pbfSizeMb <= autoApproveMaxPbfMb,
   };
 }
@@ -145,14 +124,6 @@ export interface CreatePendingResult {
   created: boolean;
 }
 
-/**
- * Persist a new region row. Idempotent: when the slug already exists
- * the row is returned untouched.
- *
- * Status starts as `pending_approval` unless `autoApprove === true`,
- * in which case it skips straight to `importing` (the importer worker
- * will pick it up).
- */
 export async function createPending(
   slug: string,
   deps: RegionDeps = {},
@@ -198,15 +169,6 @@ export async function createPending(
   return { slug: region.id, status: initialStatus, created: true };
 }
 
-/**
- * Approve a region that's sitting in `pending_approval`. Currently
- * just flips the state to `importing` so the upcoming importer worker
- * (dockerode-driven) can pick it up. The actual container provisioning
- * is intentionally not wired here yet — keeping the state-machine
- * contract real lets the admin UI be developed in parallel.
- *
- * Idempotent for already-importing rows; throws on illegal transitions.
- */
 export async function approve(
   slug: string,
   deps: RegionDeps = {},
@@ -234,37 +196,35 @@ export async function approve(
 }
 
 /**
- * Drop a region: stop+remove the two per-region containers, remove
- * the two named Docker volumes, then delete the DB row.
- *
- * Each docker operation is tolerated independently — a stop on a
- * missing container is fine, a removeVolume against a volume in use
- * propagates the error so the admin can intervene. Container removal
- * happens before volume removal so Docker doesn't reject the volume
- * delete with "in use".
- *
- * The DB row is deleted only after the docker side succeeded; if the
- * driver throws, the row stays so the admin can retry.
+ * Drop a region: ask the geo service to drop the PostGIS database,
+ * then delete the DB row. The geo-side drop is best-effort tolerated
+ * — a 404 (database doesn't exist there) is treated as success so the
+ * admin can clean up stuck rows even after a manual purge.
  */
 export async function remove(
   slug: string,
   deps: RegionDeps = {},
 ): Promise<boolean> {
   const db = deps.db ?? dbDefault;
-  const driver = deps.driver ?? getDockerDriver();
+  const geo = deps.geo ?? getGeoClient();
 
-  const suffix = slugToContainerSuffix(slug);
-  const nominatim = containerName("nominatim", suffix);
-  const overpass = containerName("overpass", suffix);
-  const nominatimVolume = volumeName("nominatim", suffix);
-  const overpassVolume = volumeName("overpass", suffix);
+  const rows = await db
+    .select({ postgres_db: osmRegionImports.postgres_db })
+    .from(osmRegionImports)
+    .where(eq(osmRegionImports.slug, slug));
+  if (rows.length === 0) return false;
 
-  await driver.stop(nominatim);
-  await driver.stop(overpass);
-  await driver.remove(nominatim);
-  await driver.remove(overpass);
-  await driver.removeVolume(nominatimVolume);
-  await driver.removeVolume(overpassVolume);
+  try {
+    await geo.dropRegion(rows[0].postgres_db);
+  } catch (err) {
+    // If the geo side fails we still drop the DB row — the admin can
+    // re-import later and the geo service's /import endpoint is
+    // idempotent against existing databases.
+    console.warn(
+      `[osm-admin] geo dropRegion failed for ${slug}:`,
+      (err as Error).message ?? err,
+    );
+  }
 
   const result = await db
     .delete(osmRegionImports)

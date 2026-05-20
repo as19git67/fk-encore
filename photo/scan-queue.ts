@@ -292,7 +292,7 @@ export async function getQueueStatus(userId: number): Promise<QueueStatus> {
  * the given bounding box. Used by the osm-admin importer when a
  * region transitions to `ready_running`, so photos that were
  * previously dropped with `no_region` get a fresh shot at being
- * matched against the newly-available regional Overpass shard.
+ * matched against the newly-available regional PostGIS database.
  *
  * Steps:
  *   1. Delete any `done`/`failed` poi_detection rows for those

@@ -1,11 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import db from "../db/database";
 import { osmRegionImports } from "../db/schema";
-import { InMemoryDockerDriver } from "./docker-driver";
 import {
   clearRouterCache,
-  ensureReady,
   geohash7,
   markUsed,
   pickRegion,
@@ -40,13 +38,12 @@ describe("pickRegion", () => {
     expect(m).toBeNull();
   });
 
-  it("returns the matching ready_running region with deterministic container hosts", async () => {
+  it("returns the matching ready_running region with its postgres database name", async () => {
     await seed({ slug: "europe/germany/bayern", status: "ready_running" });
     const m = await pickRegion(48.137, 11.575);
     expect(m).not.toBeNull();
     expect(m!.slug).toBe("europe/germany/bayern");
-    expect(m!.nominatimHost).toBe("nominatim-europe-germany-bayern");
-    expect(m!.overpassHost).toBe("overpass-europe-germany-bayern");
+    expect(m!.postgresDb).toBe("nom_europe_germany_bayern");
   });
 
   it("ignores regions that are not in a ready_* status", async () => {
@@ -72,6 +69,8 @@ describe("pickRegion", () => {
   });
 
   it("includes ready_stopped regions in the candidate set", async () => {
+    // ready_stopped is a leftover status from the docker-driven era;
+    // the geo service treats it the same as ready_running.
     await seed({ slug: "europe/germany/bayern", status: "ready_stopped" });
     const m = await pickRegion(48.137, 11.575);
     expect(m).not.toBeNull();
@@ -85,7 +84,6 @@ describe("pickRegion", () => {
     await seed({ slug: "europe/germany/bayern", status: "ready_running" });
     const m2 = await pickRegion(48.137, 11.575);
     expect(m2).toBeNull();
-    // Same geohash-7 cell so the cache key matches.
   });
 
   it("does not let a stale cache entry leak across regions", async () => {
@@ -95,86 +93,6 @@ describe("pickRegion", () => {
     // A point far away must miss the cache and hit the DB cleanly.
     const m2 = await pickRegion(35.5, -2);
     expect(m2).toBeNull();
-  });
-});
-
-describe("ensureReady", () => {
-  it("is a no-op for already-running regions", async () => {
-    await seed({ slug: "europe/germany/bayern", status: "ready_running" });
-    const driver = new InMemoryDockerDriver();
-    await ensureReady("europe/germany/bayern", { driver });
-    expect(driver.events).toEqual([]);
-  });
-
-  it("starts both containers and flips status from ready_stopped → ready_running", async () => {
-    await seed({ slug: "europe/germany/bayern", status: "ready_stopped" });
-    const driver = new InMemoryDockerDriver();
-    await ensureReady("europe/germany/bayern", { driver });
-
-    // Two ensureRunning calls (nominatim + overpass) followed by two
-    // waitHealthy probes against their respective status URLs.
-    expect(driver.events.map((e) => e.op)).toEqual([
-      "ensureRunning",
-      "ensureRunning",
-      "waitHealthy",
-      "waitHealthy",
-    ]);
-    const ensured = driver.events.filter((e) => e.op === "ensureRunning");
-    expect(ensured.map((e) => e.name)).toEqual([
-      "nominatim-europe-germany-bayern",
-      "overpass-europe-germany-bayern",
-    ]);
-
-    const row = (
-      await db
-        .select()
-        .from(osmRegionImports)
-        .where(eq(osmRegionImports.slug, "europe/germany/bayern"))
-    )[0];
-    expect(row.status).toBe("ready_running");
-    expect(row.last_used_at).not.toBeNull();
-  });
-
-  it("throws when the cold-start healthcheck fails", async () => {
-    await seed({ slug: "europe/germany/bayern", status: "ready_stopped" });
-    const driver = new InMemoryDockerDriver();
-    driver.healthyByDefault = false;
-    await expect(
-      ensureReady("europe/germany/bayern", { driver }),
-    ).rejects.toThrow(/cold-start healthcheck failed/);
-
-    // Status must stay ready_stopped — we do not "promote" a region
-    // whose containers won't even answer their status URL.
-    const row = (
-      await db
-        .select()
-        .from(osmRegionImports)
-        .where(eq(osmRegionImports.slug, "europe/germany/bayern"))
-    )[0];
-    expect(row.status).toBe("ready_stopped");
-  });
-
-  it("refuses to start regions that aren't in a ready_* status", async () => {
-    await seed({ slug: "europe/germany/bayern", status: "importing" });
-    await expect(
-      ensureReady("europe/germany/bayern", { driver: new InMemoryDockerDriver() }),
-    ).rejects.toThrow(/cannot ensure ready/);
-  });
-
-  it("throws for an unknown slug", async () => {
-    await expect(
-      ensureReady("nope", { driver: new InMemoryDockerDriver() }),
-    ).rejects.toThrow(/unknown region: nope/);
-  });
-
-  it("invalidates the router cache for the slug after a cold start", async () => {
-    await seed({ slug: "europe/germany/bayern", status: "ready_stopped" });
-    const before = await pickRegion(48.137, 11.575);
-    expect(before!.status).toBe("ready_stopped");
-
-    await ensureReady("europe/germany/bayern", { driver: new InMemoryDockerDriver() });
-    const after = await pickRegion(48.137, 11.575);
-    expect(after!.status).toBe("ready_running");
   });
 });
 
@@ -190,23 +108,6 @@ describe("markUsed", () => {
         .where(eq(osmRegionImports.slug, "europe/germany/bayern"))
     )[0];
     expect(row.last_used_at).toBe("2026-05-16 12:00:00+00");
-  });
-});
-
-describe("OSM_ADMIN_NAME_PREFIX scopes router host names", () => {
-  const original = process.env.OSM_ADMIN_NAME_PREFIX;
-  afterEach(() => {
-    if (original === undefined) delete process.env.OSM_ADMIN_NAME_PREFIX;
-    else process.env.OSM_ADMIN_NAME_PREFIX = original;
-  });
-
-  it("pickRegion returns prefix-scoped Docker DNS hosts", async () => {
-    process.env.OSM_ADMIN_NAME_PREFIX = "test-";
-    await seed({ slug: "europe/germany/bayern", status: "ready_running" });
-    const m = await pickRegion(48.137, 11.575);
-    expect(m).not.toBeNull();
-    expect(m!.nominatimHost).toBe("test-nominatim-europe-germany-bayern");
-    expect(m!.overpassHost).toBe("test-overpass-europe-germany-bayern");
   });
 });
 

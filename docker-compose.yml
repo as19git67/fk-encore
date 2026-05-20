@@ -15,7 +15,7 @@
 # variable still produces the prod default. The variables you'd
 # typically override per deployment all share the `DEPLOY_` prefix
 # (compose-only) — application-level env vars (POSTGRES_PASSWORD,
-# SMTP_*, VAPID_*, BACKUP_*, FINANCE_*, NOMINATIM_PASSWORD, …) keep
+# SMTP_*, VAPID_*, BACKUP_*, FINANCE_*, GEO_DB_PASSWORD, …) keep
 # their normal names so they can be reused unchanged across stacks.
 #
 # See `DEPLOYMENT.md` for the full reference.
@@ -40,7 +40,7 @@ services:
     # chown files dropped later by other host users — for the finance
     # dropbox the operator needs to land files as 568:568 (or g+r with
     # the apps group set as primary on the dataset).
-    command: ["sh", "-c", "chown -R 568:568 /mnt/documents /mnt/documents-inbox /mnt/models /mnt/embedding-models /mnt/finance-import /mnt/finance-export /mnt/backup"]
+    command: ["sh", "-c", "chown -R 568:568 /mnt/documents /mnt/documents-inbox /mnt/models /mnt/embedding-models /mnt/finance-import /mnt/finance-export /mnt/backup /mnt/geo"]
     volumes:
       - documents:/mnt/documents
       - documents_inbox:/mnt/documents-inbox
@@ -49,6 +49,7 @@ services:
       - finance_import:/mnt/finance-import
       - finance_export:/mnt/finance-export
       - backup:/mnt/backup
+      - geo_data:/mnt/geo
 
   # ── Main Encore.ts Application ─────────────────────────────────────────────
   app:
@@ -56,12 +57,8 @@ services:
     container_name: fk-encore-app${DEPLOY_NAME_SUFFIX:-}
     restart: unless-stopped
     # Run as the TrueNAS SCALE "apps" user (UID/GID 568). Ensure the bind-
-    # mounted host directories are owned by 568:568. Set DEPLOY_HOST_DOCKER_GID
-    # in `.env` to your host's docker group GID so the user can also reach
-    # /var/run/docker.sock (needed for the osm-admin POI service).
+    # mounted host directories are owned by 568:568.
     user: "568:568"
-    group_add:
-      - "${DEPLOY_HOST_DOCKER_GID:-999}"
     labels:
       com.centurylinklabs.watchtower.scope: ${DEPLOY_WATCHTOWER_SCOPE:-fkprod}
     depends_on:
@@ -109,13 +106,11 @@ services:
       LLM_SERVICE_URL: http://llm_service:8000
       # ENABLE_LANDMARKS retired (Epic #383) — use ENABLE_POI_DETECTION instead.
       ENABLE_POI_DETECTION: ${ENABLE_POI_DETECTION:-false}
-      # OSM admin (Epic #383). `OSM_ADMIN_NAME_PREFIX` scopes the per-region
-      # Docker container + volume names so two deployments on the same host
-      # don't collide on `nominatim-europe-germany-bayern` etc.
-      OSM_ADMIN_DOCKER_DRIVER: ${OSM_ADMIN_DOCKER_DRIVER:-dockerode}
-      OSM_ADMIN_DOCKER_NETWORK: ${DEPLOY_OSM_NETWORK:-osm-net}
-      OSM_ADMIN_NAME_PREFIX: ${DEPLOY_OSM_NAME_PREFIX:-}
-      NOMINATIM_PASSWORD: ${NOMINATIM_PASSWORD:-changeme}
+      # Geo service (reverse geocoding + POI lookup). Talks to the geo
+      # container over the compose default network. GEO_SHARED_SECRET is
+      # optional but recommended in shared-host deployments.
+      GEO_SERVICE_URL: ${GEO_SERVICE_URL:-http://geo:8080}
+      GEO_SHARED_SECRET: ${GEO_SHARED_SECRET:-}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
@@ -136,12 +131,10 @@ services:
       FINANCE_IMPORT_DIR: /mnt/data/finance-import
       FINANCE_EXPORT_DIR: /mnt/data/finance-export
       FINANCE_EXPORT_KEEP: ${FINANCE_EXPORT_KEEP:-30}
-    # No explicit `networks:` block — the app is on compose's `default`
-    # network and attaches itself to the OSM bridge network at startup
-    # (see osm-admin/encore.service.ts → DockerDriver.ensureNetwork).
-    # That way the OSM network's lifecycle is owned by osm-admin and
-    # `docker compose down` never races the runtime-spawned per-region
-    # Nominatim/Overpass containers attached to it.
+    # The app uses compose's `default` network to reach the geo service.
+    # The legacy Docker socket mount + OSM bridge network attachment is
+    # gone: geo replaces the runtime-spawned per-region Nominatim/Overpass
+    # containers, so the app no longer needs Docker daemon access.
     volumes:
       - photos:/mnt/data/photos
       - thumbnails:/mnt/data/thumbnails
@@ -150,7 +143,6 @@ services:
       - finance_import:/mnt/data/finance-import
       - finance_export:/mnt/data/finance-export
       - backup:/mnt/backup
-      - /var/run/docker.sock:/var/run/docker.sock
 
   # ── InsightFace Service (Face Detection) ───────────────────────────────────
   insightface:
@@ -218,8 +210,9 @@ services:
       start_period: ${DEPLOY_EMBEDDING_START_PERIOD:-600s}
 
   # The Grounding-DINO `landmark` service was removed in Epic #383.
-  # POI detection now runs through osm-admin's per-region Nominatim +
-  # Overpass shards. Remove the leftover container/image after upgrade:
+  # POI detection now runs through the geo service (see below) backed
+  # by per-region PostGIS databases. Remove the leftover container /
+  # image after upgrade:
   #   docker rm -f fk-encore-landmark
   #   docker rmi ghcr.io/as19git67/fk-encore-landmark:latest
 
@@ -282,6 +275,62 @@ services:
       timeout: 5s
       retries: 10
 
+  # ── Geo database (PostgreSQL + PostGIS, per-region OSM data) ───────────────
+  # Backs the geo service below. One DB per imported region
+  # (nom_europe_germany_bayern, …) — created by the geo service's
+  # /import endpoint, not declared statically here.
+  geo-db:
+    image: postgis/postgis:16-3.4
+    container_name: fk-encore-geo-db${DEPLOY_NAME_SUFFIX:-}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${GEO_DB_PASSWORD:-postgres}
+      POSTGRES_DB: postgres
+    volumes:
+      - geo_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Geo service (reverse geocoding + POI lookup) ───────────────────────────
+  # Node HTTP service that owns osm2pgsql + osmium and talks to geo-db.
+  # Replaces the per-region Nominatim/Overpass Docker containers that
+  # osm-admin used to spawn at runtime. Image is built and published by
+  # .github/workflows/docker-image-geo.yml; the server only pulls.
+  geo:
+    image: ghcr.io/as19git67/fk-encore-geo:${DEPLOY_IMAGE_TAG:-latest}
+    container_name: fk-encore-geo${DEPLOY_NAME_SUFFIX:-}
+    restart: unless-stopped
+    user: "568:568"
+    labels:
+      com.centurylinklabs.watchtower.scope: ${DEPLOY_WATCHTOWER_SCOPE:-fkprod}
+    depends_on:
+      chown-init:
+        condition: service_completed_successfully
+      geo-db:
+        condition: service_healthy
+    environment:
+      GEO_PORT: "8080"
+      GEO_DB_HOST: geo-db
+      GEO_DB_PORT: "5432"
+      GEO_DB_USER: postgres
+      GEO_DB_PASSWORD: ${GEO_DB_PASSWORD:-postgres}
+      GEO_DB_ADMIN_DB: postgres
+      GEO_SHARED_SECRET: ${GEO_SHARED_SECRET:-}
+      GEO_OSM2PGSQL_CACHE_MB: ${GEO_OSM2PGSQL_CACHE_MB:-2000}
+      GEO_OSM2PGSQL_PROCS: ${GEO_OSM2PGSQL_PROCS:-2}
+    volumes:
+      - geo_data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   # ── Watchtower ────────────────────────────────────────────────────────────
   # Observes only containers carrying the configured scope label so two
   # deployments on the same host stay independent.
@@ -303,15 +352,13 @@ services:
       fk-encore-insightface${DEPLOY_NAME_SUFFIX:-}
       fk-encore-embedding${DEPLOY_NAME_SUFFIX:-}
       fk-encore-llm${DEPLOY_NAME_SUFFIX:-}
+      fk-encore-geo${DEPLOY_NAME_SUFFIX:-}
     ports:
       - "${DEPLOY_HOST_PORT_WATCHTOWER:-9000}:8080"
 
 # ── Networks ──────────────────────────────────────────────────────────────────
-# Only the implicit compose `default` bridge network is managed here.
-# The OSM bridge network (used by the per-region Nominatim/Overpass
-# containers + the app) is created and owned by osm-admin at runtime —
-# see osm-admin/encore.service.ts → DockerDriver.ensureNetwork. Its name
-# is configured via DEPLOY_OSM_NETWORK so two deployments stay isolated.
+# Only the implicit compose `default` bridge network is needed; the geo
+# service is reached over it by service name.
 
 # ── Volumes ───────────────────────────────────────────────────────────────────
 # Every persisted volume binds into ${DEPLOY_DATA_ROOT}/<subdir>. Override
@@ -378,3 +425,15 @@ volumes:
       type: none
       o: bind
       device: ${DEPLOY_DATA_ROOT:-./data}/finance-export
+  geo_db_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DEPLOY_DATA_ROOT:-./data}/geo-db
+  geo_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DEPLOY_DATA_ROOT:-./data}/geo
