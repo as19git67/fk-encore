@@ -219,12 +219,21 @@ export async function listGalleryGridLogic(
     photoIds?: number[];
   },
 ): Promise<GalleryGridResponse> {
-  const filterConds = buildPhotoFilterConditions(userId, filter);
+  // In album-detail context the grid shows the album's curated contents,
+  // so the AI auto-pick auto-hide is switched off: otherwise the viewer's
+  // own similar-photo groups would silently drop album photos, and the
+  // grid would disagree with the album map view (getAlbumLogic never
+  // applies it). The viewer's own manual hides still apply.
+  const effectiveFilter: PhotoFilterParams =
+    filter.albumScopeId !== undefined
+      ? { ...filter, aiHiddenMode: "include" }
+      : filter;
+  const filterConds = buildPhotoFilterConditions(userId, effectiveFilter);
   const photoIdFilter = pagination.photoIds && pagination.photoIds.length > 0
     ? inArray(photos.id, pagination.photoIds)
     : undefined;
   const whereClause = and(
-    galleryScopeCondition(userId, filter.albumScopeId),
+    galleryScopeCondition(userId, effectiveFilter.albumScopeId),
     ...filterConds,
     ...(photoIdFilter ? [photoIdFilter] : []),
   );
@@ -269,7 +278,7 @@ export async function listGalleryGridLogic(
     } else {
       pos = await locateGalleryPhotoPosition(
         userId,
-        filter,
+        effectiveFilter,
         pagination.aroundPhotoId,
         pagination.sortBy,
         pagination.sortDir,
