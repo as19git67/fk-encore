@@ -169,7 +169,6 @@ export const uploadPhoto = api.raw(
       fileName = rawFileName;
     }
     const mimeType = (req.headers["content-type"] as string) || "image/jpeg";
-    const isFavoriteHeaderPresent = req.headers["x-is-favorite"] !== undefined;
     const isFavorite = req.headers["x-is-favorite"] === "true";
     // Optional fallback when the file's EXIF carries no DateTimeOriginal —
     // the iOS client forwards PHAsset.creationDate here.
@@ -192,39 +191,12 @@ export const uploadPhoto = api.raw(
     const rawAssetId = req.headers["x-asset-id"];
     const deviceAssetId = typeof rawAssetId === "string" ? rawAssetId : null;
 
-    // Fast path: when the client identifies the photo (image-data hash or
-    // device asset id) and the server already has it, update the metadata in
-    // place and respond before the (unchanged) body is transferred.
-    if (imageDataHash || deviceAssetId) {
-      let syncResult: { photoId: number } | null = null;
-      try {
-        syncResult = await service.tryMetadataOnlySync(userId, {
-          imageDataHash,
-          deviceAssetId,
-          fullHash,
-          description: hasDescriptionHeader ? description : undefined,
-          isFavorite: isFavoriteHeaderPresent ? isFavorite : undefined,
-          capturedAt: clientCapturedAt,
-        });
-      } catch (err: any) {
-        console.error("Metadata-only sync error:", err);
-        req.on("error", () => {});
-        res.statusCode = 500;
-        res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ error: err?.message || "Internal Server Error", message: "Interner Server-Fehler" }));
-        req.resume();
-        return;
-      }
-      if (syncResult) {
-        req.on("error", () => {});
-        res.statusCode = 200;
-        res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ updated: true, photoId: syncResult.photoId }));
-        req.resume();
-        return;
-      }
-    }
-
+    // A pure metadata edit (pixels unchanged) is NOT handled here: the client
+    // detects it locally and calls the body-less POST /photos/sync/metadata
+    // instead. POST /photos therefore always reads the full body — answering
+    // before the body is consumed broke through Cloudflare (early response to
+    // an in-flight upload surfaced as 502). This endpoint only ever creates a
+    // new photo or replaces an existing one's content (an in-app edit).
     try {
       const { photo, replaced } = await service.uploadPhotoStream(userId, req, fileName, mimeType, isFavorite, clientCapturedAt, {
         imageDataHash,
@@ -305,6 +277,56 @@ export const checkPhotoHashes = api(
       throw APIError.invalidArgument("at most 5000 hashes per request");
     }
     return await service.checkPhotoFullHashesLogic(userId, hashes);
+  }
+);
+
+interface SyncMetadataRequest {
+  /** SHA-256 of the image pixel data only — the primary lookup key. */
+  imageDataHash?: string;
+  /** iOS PHAsset.localIdentifier — fallback lookup key. */
+  deviceAssetId?: string;
+  /** The client's composite identity hash; stored so the next sync/check matches. */
+  fullHash?: string;
+  /** Caption: omit to leave untouched, "" to clear, a string to overwrite. */
+  description?: string;
+  /** Favourite flag: omit to leave untouched. */
+  isFavorite?: boolean;
+  /** Offset-aware capture timestamp. */
+  capturedAt?: string;
+}
+
+interface SyncMetadataResponse {
+  /** true when an existing photo was updated; false when none matched. */
+  updated: boolean;
+  /** The matched photo id (only when updated). */
+  photoId?: number;
+}
+
+/**
+ * Body-less metadata-only sync (issue #432). The iOS client calls this — not
+ * POST /photos — when it detects that only a photo's metadata changed (the
+ * pixels are unchanged). No image body is transferred at all, so there is no
+ * early-response-to-an-in-flight-upload that a proxy (Cloudflare) could turn
+ * into a 502. When no photo matches, the client falls back to POST /photos.
+ */
+export const syncPhotoMetadata = api(
+  { expose: true, method: "POST", path: "/photos/sync/metadata", auth: true },
+  async (req: SyncMetadataRequest): Promise<SyncMetadataResponse> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.upload");
+
+    const result = await service.tryMetadataOnlySync(userId, {
+      imageDataHash: normalizeHashHeader(req.imageDataHash),
+      deviceAssetId: req.deviceAssetId ?? null,
+      fullHash: normalizeHashHeader(req.fullHash),
+      description: req.description,
+      isFavorite: req.isFavorite,
+      capturedAt: req.capturedAt ?? null,
+    });
+
+    return result ? { updated: true, photoId: result.photoId } : { updated: false };
   }
 );
 
