@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import ImageIO
 import Photos
 
 struct PhotoHashResult {
@@ -89,7 +90,9 @@ actor PhotoHasher {
         }
     }
 
-    /// Reads original PHAssetResource bytes and computes SHA-256 of the raw file data.
+    /// Reads original PHAssetResource bytes and computes SHA-256 of the image data without metadata.
+    /// Strips EXIF/IPTC/XMP via CGImageDestination before hashing so caption, favorite, and date
+    /// changes don't affect the hash — only pixel data changes do.
     private func computeImageDataHash(for asset: PHAsset) async -> String? {
         // Prefer the original resource; fall back to fullSizePhoto for assets that only have an edited version.
         guard let resource = PHAssetResource.assetResources(for: asset)
@@ -107,10 +110,28 @@ actor PhotoHasher {
             } completionHandler: { error in
                 guard error == nil else { continuation.resume(returning: nil); return }
                 let combined = chunks.reduce(Data(), +)
-                let hash = SHA256.hash(data: combined).map { String(format: "%02x", $0) }.joined()
+                // Strip metadata before hashing. CGImageDestination preserves the compressed
+                // image bitstream verbatim and only replaces the metadata container, so the
+                // result is stable across caption/EXIF edits. Fall back to raw bytes if stripping fails.
+                let hashInput = Self.imageDataStrippingMetadata(from: combined) ?? combined
+                let hash = SHA256.hash(data: hashInput).map { String(format: "%02x", $0) }.joined()
                 continuation.resume(returning: hash)
             }
         }
+    }
+
+    /// Returns the compressed image bitstream with all EXIF/IPTC/XMP metadata removed.
+    /// CGImageDestinationAddImageFromSource copies the compressed data verbatim when
+    /// kCGImageDestinationMetadata replaces the metadata container, so no re-encoding occurs.
+    private static func imageDataStrippingMetadata(from data: Data) -> Data? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let uti = CGImageSourceGetType(source) else { return nil }
+        let output = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(output as CFMutableData, uti, 1, nil) else { return nil }
+        let options: [CFString: Any] = [kCGImageDestinationMetadata: CGImageMetadataCreateMutable()]
+        CGImageDestinationAddImageFromSource(dest, source, 0, options as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { return nil }
+        return output as Data
     }
 
     private static func formatCapturedAt(_ date: Date?, timezone: TimeZone) -> String {

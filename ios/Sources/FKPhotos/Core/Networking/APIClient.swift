@@ -158,6 +158,15 @@ actor APIClient {
         request.setValue(assetLocalId, forHTTPHeaderField: "X-Asset-Id")
         request.httpBody = data
         applyAuth(&request)
+        print("""
+        [Upload] \(filename)
+          assetId:       \(assetLocalId)
+          imageDataHash: \(imageDataHash)
+          fullHash:      \(fullHash)
+          caption:       \"\(caption)\"
+          isFavorite:    \(isFavorite)
+          capturedAt:    \(capturedAtString)
+        """)
 
         var (responseData, response) = try await URLSession.shared.data(for: request)
         if let http = response as? HTTPURLResponse, http.statusCode == 401, let manager = authManager {
@@ -171,16 +180,21 @@ actor APIClient {
             }
         }
         guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        print("[Upload] \(filename) → HTTP \(http.statusCode)")
         switch http.statusCode {
         case 200:
             // Server had the photo already; only metadata was updated. Body: {updated:true, photoId}.
             let body = (try? JSONDecoder().decode(MetadataUpdateBody.self, from: responseData))
             let photoId = body?.photoId ?? 0
+            print("[Upload] \(filename) → metadata-only update, photoId=\(photoId)")
             return .updated(photoId: photoId)
         case 201:
-            return .created(try decoder.decode(Photo.self, from: responseData))
+            let photo = try decoder.decode(Photo.self, from: responseData)
+            print("[Upload] \(filename) → NEW photo created, id=\(photo.id)")
+            return .created(photo)
         case 409:
             let photoId = (try? JSONDecoder().decode(DuplicatePhotoBody.self, from: responseData))?.photoId
+            print("[Upload] \(filename) → duplicate (409), existingId=\(photoId as Any)")
             throw APIError.duplicatePhoto(photoId: photoId)
         case 401:
             authManager?.handleUnauthorized()
