@@ -226,16 +226,18 @@ export const uploadPhoto = api.raw(
     }
 
     try {
-      const photo = await service.uploadPhotoStream(userId, req, fileName, mimeType, isFavorite, clientCapturedAt, {
+      const { photo, replaced } = await service.uploadPhotoStream(userId, req, fileName, mimeType, isFavorite, clientCapturedAt, {
         imageDataHash,
         fullHash,
         description: hasDescriptionHeader ? description : undefined,
         deviceAssetId,
       });
 
-      res.statusCode = 201;
+      // `replaced` → a device_asset_id match updated an existing photo's file
+      // in place (an in-app edit); otherwise a new photo was created.
+      res.statusCode = replaced ? 200 : 201;
       res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify(photo));
+      res.end(JSON.stringify(replaced ? { updated: true, photoId: photo.id } : photo));
     } catch (err: any) {
       if (err instanceof service.PhotoAlreadyExistsError || err?.message === "PHOTO_ALREADY_EXISTS") {
         res.statusCode = 409;
