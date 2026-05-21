@@ -1,11 +1,18 @@
-import CryptoKit
 import Foundation
-import ImageIO
-import Photos
 import Network
+import Photos
 
 /// Executes a photo sync cycle: reads from the iOS Photos library and
 /// uploads assets to the server according to the current preferences.
+///
+/// Algorithm (hash-based sync pipeline, issue #432):
+///  1. Enumerate all image-type PHAssets (videos explicitly excluded).
+///  2. Compute X-Full-Hash for each asset via PhotoHasher (cached by modificationDate).
+///  3. POST /photos/sync/check with up to 5000 hashes per batch to get the server's
+///     existing set.
+///  4. Upload every asset whose full-hash is NOT in the existing set.
+///  5. A pure metadata change (caption, favorite, date) flips the full-hash and runs
+///     through the same upload path — no separate PATCH sweep needed.
 actor PhotoSyncService {
     static let shared = PhotoSyncService()
 
@@ -45,511 +52,73 @@ actor PhotoSyncService {
             guard isNetworkAvailable else { return }
         }
 
-        // Don't prompt here – auth should be requested from the Settings UI
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         guard status == .authorized || status == .limited else { return }
 
         let assets = await fetchAssets()
+        guard !assets.isEmpty else {
+            PhotoSyncPreferences.lastSyncDate = Date()
+            return
+        }
 
-        // Local cache avoids loading image data for assets already known to be uploaded.
-        // The server is the authoritative source: a 409 response means the photo exists
-        // server-side (e.g. uploaded from another device) and is treated as success.
-        var uploadedIds = PhotoSyncPreferences.loadUploadedIds()
-        var syncedFavoriteIds = PhotoSyncPreferences.syncedFavoriteLocalIds
-        var syncedTakenAt = PhotoSyncPreferences.loadSyncedTakenAt()
-        var syncedModDate = PhotoSyncPreferences.loadSyncedModificationDate()
-
+        // Step 2: Compute full-hash for each asset (PhotoHasher caches by modificationDate).
+        var hashPairs: [(asset: PHAsset, filename: String, sourceAlbumId: String?, hashResult: PhotoHashResult)] = []
         for (asset, filename, sourceAlbumId) in assets {
-            guard !uploadedIds.contains(asset.localIdentifier) else { continue }
+            guard let result = await PhotoHasher.shared.hashes(for: asset) else { continue }
+            hashPairs.append((asset, filename, sourceAlbumId, result))
+        }
+
+        // Step 3: Batch sync-check to find which full-hashes the server already has.
+        let allFullHashes = hashPairs.map { $0.hashResult.fullHash }
+        var existingHashes: Set<String> = []
+        let batchSize = 5000
+        for batchStart in stride(from: 0, to: allFullHashes.count, by: batchSize) {
+            let slice = Array(allFullHashes[batchStart..<min(batchStart + batchSize, allFullHashes.count)])
+            let serverHas = (try? await APIClient.shared.syncCheck(hashes: slice)) ?? []
+            existingHashes.formUnion(serverHas)
+        }
+
+        // Step 4: Upload assets whose full-hash the server doesn't have.
+        for item in hashPairs {
+            guard !existingHashes.contains(item.hashResult.fullHash) else { continue }
+
+            let caption = PhotoHasher.shared.captionFromAsset(item.asset) ?? ""
 
             do {
-                let (data, mimeType) = try await loadAssetData(asset, filename: filename)
-                // PHAssetResource.originalFilename keeps the .HEIC extension even
-                // when the asset was edited and PhotoKit re-renders the bytes as
-                // JPEG (issue #333). Realign the extension with the mimeType the
-                // server actually receives so downstream callers don't try to run
-                // heic-convert on JPEG bytes.
-                let uploadFilename = filenameMatchingMime(filename, mimeType: mimeType)
-                let uploaded = try await APIClient.shared.uploadPhoto(data: data, filename: uploadFilename, mimeType: mimeType, isFavorite: asset.isFavorite, capturedAt: asset.creationDate)
-                uploadedIds.insert(asset.localIdentifier)
-                PhotoSyncPreferences.saveUploadedIds(uploadedIds)
-                PhotoSyncPreferences.recordUploadedPhoto(serverPhotoId: uploaded.id, localIdentifier: asset.localIdentifier)
-                await patchCaptionIfAvailable(asset: asset, serverPhotoId: uploaded.id)
-                // Persist the SHA-256 of these bytes as the Option-3 baseline so
-                // future metadata-only edits can skip the full re-upload.
-                var uploadHashMap = PhotoSyncPreferences.loadSyncedUploadHash()
-                uploadHashMap[asset.localIdentifier] = sha256Hex(data)
-                PhotoSyncPreferences.saveSyncedUploadHash(uploadHashMap)
-                // Track the favourite state that was sent with this upload so that
-                // syncFavoriteChanges() can detect future changes.
-                if asset.isFavorite {
-                    syncedFavoriteIds.insert(asset.localIdentifier)
-                } else {
-                    syncedFavoriteIds.remove(asset.localIdentifier)
-                }
-                PhotoSyncPreferences.syncedFavoriteLocalIds = syncedFavoriteIds
-                rememberSyncedMetadata(
-                    asset: asset,
-                    syncedTakenAt: &syncedTakenAt,
-                    syncedModDate: &syncedModDate
-                )
-                await addToTargetAlbum(photoId: uploaded.id, sourceAlbumId: sourceAlbumId)
-            } catch APIError.duplicatePhoto(let existingPhotoId) {
-                // Server already has this photo (same SHA256 hash). Still attach
-                // the existing record to the target album so the user gets the
-                // expected sync outcome, then mark locally to skip next cycle.
-                // We don't need to chase metadata here — the bytes we just sent
-                // were extracted by the server's Phase-1 merge already, and the
-                // baselines below seed the sweep so future edits are detected.
-                uploadedIds.insert(asset.localIdentifier)
-                PhotoSyncPreferences.saveUploadedIds(uploadedIds)
-                if let existingPhotoId {
-                    PhotoSyncPreferences.recordUploadedPhoto(serverPhotoId: existingPhotoId, localIdentifier: asset.localIdentifier)
-                    await addToTargetAlbum(photoId: existingPhotoId, sourceAlbumId: sourceAlbumId)
-                }
-                rememberSyncedMetadata(
-                    asset: asset,
-                    syncedTakenAt: &syncedTakenAt,
-                    syncedModDate: &syncedModDate
-                )
-            } catch {
-                // Transient error – asset will be retried on the next sync cycle.
-            }
-        }
-
-        PhotoSyncPreferences.saveSyncedTakenAt(syncedTakenAt)
-        PhotoSyncPreferences.saveSyncedModificationDate(syncedModDate)
-
-        // Propagate favourite-status changes for photos that were already uploaded
-        // in a previous sync cycle. Since uploaded photos are skipped above, this is
-        // the only mechanism that keeps the server in sync with late iOS favourite
-        // changes (user marks/unmarks a photo as favourite after it was uploaded).
-        await syncFavoriteChanges()
-
-        // Propagate creationDate / modificationDate edits made in iOS Photos.app
-        // after the photo was already uploaded. Walks the full set of known
-        // local→server mappings, not just the newly fetched assets, because
-        // `onlyNew` filters by creationDate and would skip historical photos
-        // the user edited later (issue #303).
-        await syncMetadataChanges()
-
-        PhotoSyncPreferences.lastSyncDate = Date()
-    }
-
-    // MARK: - Metadata change propagation (issue #303)
-
-    /// Look up the server photo ID for a local PHAsset identifier, if known.
-    private func serverIdFor(localIdentifier: String) -> Int? {
-        let map = PhotoSyncPreferences.loadServerPhotoMap()
-        for (serverIdStr, localId) in map where localId == localIdentifier {
-            if let id = Int(serverIdStr) { return id }
-        }
-        return nil
-    }
-
-    /// Compares the current iOS metadata of an already-uploaded asset against
-    /// the values last sent to the server. When something moved we PATCH the
-    /// server with the diff. Three signals trigger a check:
-    ///   - creationDate changed → PATCH /photos/:id/date
-    ///   - isFavorite flipped → PATCH /photos/:id/curation (handled by
-    ///     syncFavoriteChanges later in the run; we just record state here)
-    ///   - modificationDate moved past the last-recorded value but neither
-    ///     creationDate nor isFavorite explain it → most likely a Caption /
-    ///     description edit in iOS Photos.app, which is only stored in the
-    ///     embedded IPTC and not exposed on PHAsset. We re-upload the bytes
-    ///     so the server's Phase-1 merge can pick up the new metadata; the
-    ///     hash-match path keeps the existing record id.
-    private func propagateMetadataChanges(
-        asset: PHAsset,
-        serverId: Int,
-        currentFavorite: Bool,
-        prevFavorite: Bool,
-        syncedTakenAt: inout [String: String],
-        syncedModDate: inout [String: String]
-    ) async {
-        let localId = asset.localIdentifier
-        let prevTakenAt = syncedTakenAt[localId]
-
-        // creationDate diff (cheap, idempotent PATCH)
-        var dateChanged = false
-        if let creation = asset.creationDate {
-            let isoCreation = ISO8601DateFormatter().string(from: creation)
-            if prevTakenAt != isoCreation {
-                dateChanged = true
-                struct DateBody: Encodable { let taken_at: String }
-                struct DateResponse: Decodable { let success: Bool }
-                do {
-                    _ = try await APIClient.shared.patch(
-                        "/photos/\(serverId)/date",
-                        body: DateBody(taken_at: isoCreation)
-                    ) as DateResponse
-                    syncedTakenAt[localId] = isoCreation
-                } catch {
-                    // Skip individual failures; will be retried next cycle.
-                }
-            }
-        }
-
-        // When modificationDate moved without a date or favourite delta, the
-        // user most likely edited the Caption / Description (which lives only
-        // in IPTC) or a similarly EXIF-embedded field. Re-upload so the Phase 1
-        // server merge propagates whatever the new bytes carry. Skipped when
-        // favourite or date moved alone — those have dedicated PATCH paths
-        // and a re-upload would only waste bandwidth.
-        let favoriteChanged = currentFavorite != prevFavorite
-        if !dateChanged && !favoriteChanged {
-            await reuploadAssetForMetadataMerge(asset: asset, expectedServerId: serverId)
-        }
-
-        // Bookkeeping: remember the modificationDate so a subsequent change
-        // can be detected even when creationDate didn't move (e.g. user only
-        // changed the description).
-        if let mod = asset.modificationDate {
-            syncedModDate[localId] = ISO8601DateFormatter().string(from: mod)
-        }
-    }
-
-    /// Option-3 hybrid metadata propagation:
-    ///   1. Load asset bytes and compute SHA-256.
-    ///   2a. No stored baseline or hash unchanged → pixels are the same → extract
-    ///       IPTC caption via ImageIO and PATCH /photos/:id/description (if caption
-    ///       is present; never send nil to avoid clearing a server description).
-    ///   2b. Hash changed → pixels differ → full re-upload so Phase-1 server
-    ///       merge picks up new pixels + new IPTC in one round-trip.
-    ///   3. On success update the stored hash baseline.
-    private func reuploadAssetForMetadataMerge(
-        asset: PHAsset,
-        expectedServerId: Int
-    ) async {
-        let filename: String = await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let name = PHAssetResource.assetResources(for: asset).first?.originalFilename
-                    ?? "photo_\(asset.localIdentifier.prefix(8)).jpg"
-                continuation.resume(returning: name)
-            }
-        }
-
-        guard let (data, mimeType) = try? await loadAssetData(asset, filename: filename) else { return }
-
-        let currentHash = sha256Hex(data)
-        var uploadHashMap = PhotoSyncPreferences.loadSyncedUploadHash()
-        let storedHash = uploadHashMap[asset.localIdentifier]
-
-        if storedHash == nil || storedHash == currentHash {
-            // Pixels unchanged — only metadata moved.
-            // PHAsset.descriptionProperties.assetDescription holds the Photos.app
-            // caption; fall back to IPTC/XMP embedded in the image bytes.
-            let caption = captionFromAsset(asset) ?? extractCaptionFromData(data)
-
-            if let caption {
-                struct DescBody: Encodable { let description: String }
-                struct DescResponse: Decodable { let success: Bool }
-                do {
-                    _ = try await APIClient.shared.patch(
-                        "/photos/\(expectedServerId)/description",
-                        body: DescBody(description: caption)
-                    ) as DescResponse
-                } catch {
-                    return  // Transient; syncedModDate not advanced → retry next cycle.
-                }
-            }
-            // Seed/refresh hash baseline so future runs use the fast comparison.
-            uploadHashMap[asset.localIdentifier] = currentHash
-            PhotoSyncPreferences.saveSyncedUploadHash(uploadHashMap)
-        } else {
-            // Hash changed → pixels differ → full re-upload.
-            let uploadFilename = filenameMatchingMime(filename, mimeType: mimeType)
-            do {
-                _ = try await APIClient.shared.uploadPhoto(
+                let (data, mimeType) = try await loadAssetData(item.asset, filename: item.filename)
+                let uploadFilename = filenameMatchingMime(item.filename, mimeType: mimeType)
+                let result = try await APIClient.shared.uploadPhoto(
                     data: data,
                     filename: uploadFilename,
                     mimeType: mimeType,
-                    isFavorite: asset.isFavorite,
-                    capturedAt: asset.creationDate
+                    imageDataHash: item.hashResult.imageDataHash,
+                    fullHash: item.hashResult.fullHash,
+                    caption: caption,
+                    isFavorite: item.asset.isFavorite,
+                    capturedAtString: item.hashResult.capturedAtString,
+                    assetLocalId: item.asset.localIdentifier
                 )
-            } catch APIError.duplicatePhoto {
-                // Server merged IPTC onto existing record — expected success.
+                PhotoSyncPreferences.recordUploadedPhoto(
+                    serverPhotoId: result.photoId,
+                    localIdentifier: item.asset.localIdentifier
+                )
+                await addToTargetAlbum(photoId: result.photoId, sourceAlbumId: item.sourceAlbumId)
+            } catch APIError.duplicatePhoto(let existingPhotoId) {
+                // Server already has this photo (hash adoption from a pre-hash legacy record).
+                // Treat as success; record the mapping so album association works.
+                if let existingPhotoId {
+                    PhotoSyncPreferences.recordUploadedPhoto(
+                        serverPhotoId: existingPhotoId,
+                        localIdentifier: item.asset.localIdentifier
+                    )
+                    await addToTargetAlbum(photoId: existingPhotoId, sourceAlbumId: item.sourceAlbumId)
+                }
             } catch {
-                return  // Transient; retry next cycle.
-            }
-            // Update hash whether upload was new (200) or deduplicated (409)
-            // so the next sync run can detect further changes without re-uploading.
-            uploadHashMap[asset.localIdentifier] = currentHash
-            PhotoSyncPreferences.saveSyncedUploadHash(uploadHashMap)
-        }
-    }
-
-    /// Returns the SHA-256 digest of *data* as a lowercase hex string.
-    nonisolated private func sha256Hex(_ data: Data) -> String {
-        let digest = SHA256.hash(data: data)
-        return digest.map { String(format: "%02x", $0) }.joined()
-    }
-
-    /// Extracts a user-entered caption / description from image data.
-    /// Checks IPTC, TIFF, EXIF properties first, then XMP metadata
-    /// (dc:description) via CGImageMetadata — a separate API that may
-    /// expose fields the properties dictionary does not.
-    nonisolated private func extractCaptionFromData(_ imageData: Data) -> String? {
-        guard let source = CGImageSourceCreateWithData(imageData as CFData, nil) else {
-            return nil
-        }
-        return extractCaptionFromSource(source)
-    }
-
-    /// Extracts caption from a CGImageSource, trying properties first
-    /// then the XMP metadata API.
-    nonisolated private func extractCaptionFromSource(_ source: CGImageSource) -> String? {
-        // 1. IPTC / TIFF / EXIF via properties dictionary
-        if let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
-            if let caption = extractCaptionFromProperties(props) { return caption }
-        }
-        // 2. XMP via CGImageMetadata (separate API that may include fields
-        //    the properties dictionary omits, such as dc:description).
-        if let caption = extractCaptionFromXMP(source) { return caption }
-        return nil
-    }
-
-    /// Walks IPTC, TIFF, and EXIF dictionaries looking for the first
-    /// non-empty caption-like string.
-    nonisolated private func extractCaptionFromProperties(_ props: [CFString: Any]) -> String? {
-        if let iptc = props[kCGImagePropertyIPTCDictionary] as? [CFString: Any] {
-            if let s = iptc[kCGImagePropertyIPTCCaptionAbstract] as? String, !s.isEmpty { return s }
-            if let s = iptc[kCGImagePropertyIPTCHeadline] as? String, !s.isEmpty { return s }
-        }
-        if let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any] {
-            if let s = tiff[kCGImagePropertyTIFFImageDescription] as? String, !s.isEmpty { return s }
-        }
-        if let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] {
-            if let s = exif[kCGImagePropertyExifUserComment] as? String, !s.isEmpty { return s }
-        }
-        return nil
-    }
-
-    /// Reads dc:description and photoshop:Headline from the XMP metadata
-    /// block. CGImageMetadataRef exposes structured XMP tags that are not
-    /// surfaced by CGImageSourceCopyPropertiesAtIndex.
-    nonisolated private func extractCaptionFromXMP(_ source: CGImageSource) -> String? {
-        guard let metadata = CGImageSourceCopyMetadataAtIndex(source, 0, nil) else { return nil }
-
-        // dc:description (Dublin Core — primary caption field)
-        if let tag = CGImageMetadataCopyTagWithPath(metadata, nil, "dc:description" as CFString) {
-            if let caption = xmpTagStringValue(tag), !caption.isEmpty { return caption }
-        }
-        // photoshop:Headline (Photoshop namespace — secondary)
-        if let tag = CGImageMetadataCopyTagWithPath(metadata, nil, "photoshop:Headline" as CFString) {
-            if let caption = xmpTagStringValue(tag), !caption.isEmpty { return caption }
-        }
-        return nil
-    }
-
-    /// Resolves the string value of an XMP tag. Handles XMP Language
-    /// Alternatives (ordered array of localized strings) and plain strings.
-    nonisolated private func xmpTagStringValue(_ tag: CGImageMetadataTag) -> String? {
-        guard let value = CGImageMetadataTagCopyValue(tag) else { return nil }
-        // Plain string
-        if let str = value as? String { return str }
-        // XMP Language Alternative: array of localized strings
-        if let arr = value as? [Any] {
-            for item in arr {
-                if let str = item as? String, !str.isEmpty { return str }
-            }
-        }
-        return nil
-    }
-
-    // MARK: - PHAsset caption via KVC
-
-    /// Reads the Photos.app caption from `PHAsset.descriptionProperties.assetDescription`.
-    /// Falls back to IPTC/XMP extraction from image bytes when called with data.
-    nonisolated private func captionFromAsset(_ asset: PHAsset) -> String? {
-        guard (asset as AnyObject).responds(to: NSSelectorFromString("descriptionProperties")),
-              let descProps = (asset as NSObject).value(forKey: "descriptionProperties") as? NSObject,
-              (descProps as AnyObject).responds(to: NSSelectorFromString("assetDescription")),
-              let caption = descProps.value(forKey: "assetDescription") as? String,
-              !caption.isEmpty else {
-            return nil
-        }
-        return caption
-    }
-
-    /// Sends PATCH /photos/:id/description when the asset has a Photos.app caption
-    /// that the image bytes don't carry (PHImageManager omits it).
-    private func patchCaptionIfAvailable(asset: PHAsset, serverPhotoId: Int) async {
-        guard let caption = captionFromAsset(asset) else { return }
-        struct DescBody: Encodable { let description: String }
-        struct DescResponse: Decodable { let success: Bool }
-        _ = try? await APIClient.shared.patch(
-            "/photos/\(serverPhotoId)/description",
-            body: DescBody(description: caption)
-        ) as DescResponse
-    }
-
-    /// Records the sync-state baseline for an asset that was just uploaded
-    /// (or where we just discovered the server already has it).
-    private func rememberSyncedMetadata(
-        asset: PHAsset,
-        syncedTakenAt: inout [String: String],
-        syncedModDate: inout [String: String]
-    ) {
-        let localId = asset.localIdentifier
-        if let creation = asset.creationDate {
-            syncedTakenAt[localId] = ISO8601DateFormatter().string(from: creation)
-        }
-        if let mod = asset.modificationDate {
-            syncedModDate[localId] = ISO8601DateFormatter().string(from: mod)
-        }
-    }
-
-    /// Walk every locally-tracked uploaded asset, look at its current PHAsset
-    /// metadata and PATCH the server when something moved since we last
-    /// synced. Covers creationDate (taken_at) and description (via
-    /// PHAssetDescriptionProperties.assetDescription KVC).
-    private func syncMetadataChanges() async {
-        let serverPhotoMap = PhotoSyncPreferences.loadServerPhotoMap()
-        guard !serverPhotoMap.isEmpty else { return }
-
-        var localToServerId: [String: Int] = [:]
-        for (serverIdStr, localId) in serverPhotoMap {
-            if let serverId = Int(serverIdStr) {
-                localToServerId[localId] = serverId
-            }
-        }
-        guard !localToServerId.isEmpty else { return }
-
-        let localIds = Array(localToServerId.keys)
-        let assetsByLocalId: [String: PHAsset] = await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                var result: [String: PHAsset] = [:]
-                PHAsset.fetchAssets(withLocalIdentifiers: localIds, options: nil)
-                    .enumerateObjects { asset, _, _ in
-                        result[asset.localIdentifier] = asset
-                    }
-                continuation.resume(returning: result)
+                // Transient error — asset will be retried on the next sync cycle.
             }
         }
 
-        var syncedTakenAt = PhotoSyncPreferences.loadSyncedTakenAt()
-        var syncedModDate = PhotoSyncPreferences.loadSyncedModificationDate()
-        let syncedFavoriteIds = PhotoSyncPreferences.syncedFavoriteLocalIds
-        var changed = false
-
-        for (localId, serverId) in localToServerId {
-            guard let asset = assetsByLocalId[localId] else { continue }
-
-            let prevModIso = syncedModDate[localId]
-            let currentModIso = asset.modificationDate.map { ISO8601DateFormatter().string(from: $0) }
-            // No modification baseline yet → run propagation once to catch
-            // description or date edits that happened before this tracking was
-            // introduced (e.g. user added caption while the feature was not yet
-            // deployed). propagateMetadataChanges seeds syncedModDate at the end,
-            // so subsequent runs will use the fast modDate comparison.
-            if prevModIso == nil {
-                await propagateMetadataChanges(
-                    asset: asset,
-                    serverId: serverId,
-                    currentFavorite: asset.isFavorite,
-                    prevFavorite: syncedFavoriteIds.contains(localId),
-                    syncedTakenAt: &syncedTakenAt,
-                    syncedModDate: &syncedModDate
-                )
-                changed = true
-                continue
-            }
-
-            // Optimisation: when modificationDate hasn't moved we know nothing
-            // could have changed in iOS Photos (the system bumps it on any edit
-            // including metadata-only ones).
-            if currentModIso == prevModIso { continue }
-
-            await propagateMetadataChanges(
-                asset: asset,
-                serverId: serverId,
-                currentFavorite: asset.isFavorite,
-                prevFavorite: syncedFavoriteIds.contains(localId),
-                syncedTakenAt: &syncedTakenAt,
-                syncedModDate: &syncedModDate
-            )
-            changed = true
-        }
-
-        if changed {
-            PhotoSyncPreferences.saveSyncedTakenAt(syncedTakenAt)
-            PhotoSyncPreferences.saveSyncedModificationDate(syncedModDate)
-        }
-    }
-
-    // MARK: - Favourite change propagation
-
-    /// Compares the current iOS favourite state of all previously-uploaded photos
-    /// against the last-known server state and sends PATCH /photos/:id/curation
-    /// for every photo whose state has changed.
-    private func syncFavoriteChanges() async {
-        // serverPhotoMap: serverPhotoId(String) → localIdentifier(String)
-        let serverPhotoMap = PhotoSyncPreferences.loadServerPhotoMap()
-        guard !serverPhotoMap.isEmpty else { return }
-
-        // Build the reverse index: localIdentifier → serverPhotoId
-        var localToServerId: [String: Int] = [:]
-        for (serverIdStr, localId) in serverPhotoMap {
-            if let serverId = Int(serverIdStr) {
-                localToServerId[localId] = serverId
-            }
-        }
-        guard !localToServerId.isEmpty else { return }
-
-        // Fetch the current iOS favourite flag for all uploaded assets in one pass.
-        let localIds = Array(localToServerId.keys)
-        let currentFavorites: [String: Bool] = await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                var result: [String: Bool] = [:]
-                PHAsset.fetchAssets(withLocalIdentifiers: localIds, options: nil)
-                    .enumerateObjects { asset, _, _ in
-                        result[asset.localIdentifier] = asset.isFavorite
-                    }
-                continuation.resume(returning: result)
-            }
-        }
-
-        var syncedFavoriteIds = PhotoSyncPreferences.syncedFavoriteLocalIds
-        var changed = false
-
-        struct CurationBody: Encodable { let status: String }
-        struct CurationResponse: Decodable { let success: Bool }
-
-        for (localId, serverId) in localToServerId {
-            guard let currentFav = currentFavorites[localId] else { continue }
-            let wasSynced = syncedFavoriteIds.contains(localId)
-
-            if currentFav && !wasSynced {
-                // Newly marked as favourite in iOS → update server
-                do {
-                    _ = try await APIClient.shared.patch(
-                        "/photos/\(serverId)/curation",
-                        body: CurationBody(status: "favorite")
-                    ) as CurationResponse
-                    syncedFavoriteIds.insert(localId)
-                    changed = true
-                } catch {
-                    // Skip individual failures; will be retried on the next sync cycle.
-                }
-            } else if !currentFav && wasSynced {
-                // Favourite removed in iOS → revert to visible on server
-                do {
-                    _ = try await APIClient.shared.patch(
-                        "/photos/\(serverId)/curation",
-                        body: CurationBody(status: "visible")
-                    ) as CurationResponse
-                    syncedFavoriteIds.remove(localId)
-                    changed = true
-                } catch {
-                    // Skip individual failures; will be retried on the next sync cycle.
-                }
-            }
-        }
-
-        if changed {
-            PhotoSyncPreferences.syncedFavoriteLocalIds = syncedFavoriteIds
-        }
+        PhotoSyncPreferences.lastSyncDate = Date()
     }
 
     // MARK: - Asset fetching
@@ -574,7 +143,13 @@ actor PhotoSyncService {
 
         var predicates: [NSPredicate] = []
         if PhotoSyncPreferences.onlyNew, let lastSync = PhotoSyncPreferences.lastSyncDate {
-            predicates.append(NSPredicate(format: "creationDate > %@", lastSync as NSDate))
+            // Include assets created OR modified since the last sync so that metadata
+            // changes (favorite toggle, caption edit) are picked up even for photos
+            // whose creationDate predates the last sync run.
+            predicates.append(NSCompoundPredicate(orPredicateWithSubpredicates: [
+                NSPredicate(format: "creationDate > %@", lastSync as NSDate),
+                NSPredicate(format: "modificationDate > %@", lastSync as NSDate)
+            ]))
         }
         if PhotoSyncPreferences.excludeScreenshots {
             predicates.append(NSPredicate(format: "NOT ((mediaSubtype & %d) != 0)",
@@ -586,9 +161,10 @@ actor PhotoSyncService {
                 : NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
         }
 
-        var pairs: [(PHAsset, String?)] = []  // (asset, source iOS album ID)
+        var pairs: [(PHAsset, String?)] = []
         switch PhotoSyncPreferences.albumMode {
         case .all:
+            // fetchAssets(with: .image) already limits to image-type assets (no videos).
             PHAsset.fetchAssets(with: .image, options: options)
                 .enumerateObjects { asset, _, _ in pairs.append((asset, nil)) }
 
@@ -601,6 +177,8 @@ actor PhotoSyncService {
                 .enumerateObjects { collection, _, _ in
                     PHAsset.fetchAssets(in: collection, options: options)
                         .enumerateObjects { asset, _, _ in
+                            // Explicitly skip videos and non-image assets (#432).
+                            guard asset.mediaType == .image else { return }
                             if seen.insert(asset.localIdentifier).inserted {
                                 pairs.append((asset, collection.localIdentifier))
                             }
@@ -637,39 +215,43 @@ actor PhotoSyncService {
 
     // MARK: - Asset data loading
 
+    /// Loads the original PHAssetResource bytes for uploading. Using the original resource
+    /// (not PHImageManager-rendered bytes) ensures the uploaded content matches the
+    /// imageDataHash and that caption/favorite edits don't cause re-uploads.
     private func loadAssetData(_ asset: PHAsset, filename: String) async throws -> (Data, String) {
-        try await withCheckedThrowingContinuation { continuation in
-            let options = PHImageRequestOptions()
-            options.isNetworkAccessAllowed = true   // Allow iCloud download
-            options.deliveryMode = .highQualityFormat
-            options.version = .current  // include edits; unedited HEIC stays HEIC, edited renders as JPEG
-            options.isSynchronous = false
+        guard let resource = PHAssetResource.assetResources(for: asset)
+            .first(where: { $0.type == .photo })
+            ?? PHAssetResource.assetResources(for: asset).first(where: { $0.type == .fullSizePhoto })
+        else {
+            throw SyncError.noImageData
+        }
 
-            PHImageManager.default().requestImageDataAndOrientation(
-                for: asset, options: options
-            ) { data, uti, _, info in
-                if let error = info?[PHImageErrorKey] as? Error {
+        let options = PHAssetResourceRequestOptions()
+        options.isNetworkAccessAllowed = true
+
+        return try await withCheckedThrowingContinuation { continuation in
+            var chunks: [Data] = []
+            PHAssetResourceManager.default().requestData(for: resource, options: options) { chunk in
+                chunks.append(chunk)
+            } completionHandler: { error in
+                if let error {
                     continuation.resume(throwing: error)
                     return
                 }
-                guard let data else {
-                    continuation.resume(throwing: SyncError.noImageData)
-                    return
-                }
-
-                let mimeType: String
-                if let uti {
-                    if uti.contains("heic") || uti.contains("heif") { mimeType = "image/heic" }
-                    else if uti.contains("png")                      { mimeType = "image/png" }
-                    else if uti.contains("tiff")                     { mimeType = "image/tiff" }
-                    else                                             { mimeType = "image/jpeg" }
-                } else {
-                    mimeType = "image/jpeg"
-                }
-
+                let data = chunks.reduce(Data(), +)
+                let mimeType = Self.mimeType(for: resource.uniformTypeIdentifier)
                 continuation.resume(returning: (data, mimeType))
             }
         }
+    }
+
+    private static func mimeType(for uniformTypeIdentifier: String) -> String {
+        let lower = uniformTypeIdentifier.lowercased()
+        if lower.contains("heic") || lower.contains("heif") { return "image/heic" }
+        if lower.contains("png")  { return "image/png" }
+        if lower.contains("tiff") { return "image/tiff" }
+        if lower.contains("webp") { return "image/webp" }
+        return "image/jpeg"
     }
 
     /// Replace the filename's extension with one that matches *mimeType* when
@@ -684,7 +266,7 @@ actor PhotoSyncService {
         case "image/tiff":               expectedExt = "tiff"
         case "image/gif":                expectedExt = "gif"
         case "image/webp":               expectedExt = "webp"
-        default:                         expectedExt = "jpg"  // image/jpeg + Fallback
+        default:                         expectedExt = "jpg"
         }
         let ns = filename as NSString
         let currentExt = ns.pathExtension.lowercased()

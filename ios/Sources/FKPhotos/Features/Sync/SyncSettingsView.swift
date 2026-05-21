@@ -164,6 +164,7 @@ struct SyncSettingsView: View {
                             }
                         }
                     }
+                    .buttonStyle(.borderless)
                     .disabled(isSyncing)
 
                     if let error = syncError {

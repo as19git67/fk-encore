@@ -405,6 +405,70 @@ describe("Photo Module", () => {
 
         fs.unlinkSync(path.join(UPLOAD_DIR, photo.filename));
       });
+
+      it("uploadPhotoStream persists device_asset_id and tryMetadataOnlySync matches by it", async () => {
+        const deviceId = "DEV-A-001/L0/001";
+        const photo = await uploadWithSync("dev.jpg", "dev-pixels", {
+          imageDataHash: imgHash,
+          deviceAssetId: deviceId,
+        });
+
+        // No imageDataHash supplied → the lookup must fall back to device_asset_id.
+        const r = await service.tryMetadataOnlySync(user1.id, {
+          deviceAssetId: deviceId,
+          fullHash: fullHashA,
+          description: "Per Asset-Id",
+        });
+        expect(r).toEqual({ photoId: photo.id });
+
+        const row = await dbFirst<typeof photos.$inferSelect>(
+          db.select().from(photos).where(eq(photos.id, photo.id))
+        );
+        expect(row?.device_asset_id).toBe(deviceId);
+        expect(row?.description).toBe("Per Asset-Id");
+        expect(row?.hash).toBe(fullHashA);
+        fs.unlinkSync(path.join(UPLOAD_DIR, photo.filename));
+      });
+
+      it("tryMetadataOnlySync ignores a device_asset_id match when the pixels changed", async () => {
+        const deviceId = "DEV-B-002/L0/001";
+        const photo = await uploadWithSync("edit.jpg", "edit-pixels", {
+          imageDataHash: imgHash,
+          deviceAssetId: deviceId,
+        });
+
+        // Same asset id, but a different image-data hash → the photo was edited
+        // and must NOT be treated as a metadata-only sync.
+        const r = await service.tryMetadataOnlySync(user1.id, {
+          imageDataHash: "f6".repeat(32),
+          deviceAssetId: deviceId,
+        });
+        expect(r).toBeNull();
+        fs.unlinkSync(path.join(UPLOAD_DIR, photo.filename));
+      });
+
+      it("tryMetadataOnlySync backfills image_data_hash via a device_asset_id match", async () => {
+        const deviceId = "DEV-C-003/L0/001";
+        // Stored with a device asset id but no image-data hash.
+        const photo = await uploadWithSync("bf.jpg", "bf-pixels", { deviceAssetId: deviceId });
+        let row = await dbFirst<typeof photos.$inferSelect>(
+          db.select().from(photos).where(eq(photos.id, photo.id))
+        );
+        expect(row?.image_data_hash).toBeNull();
+
+        const r = await service.tryMetadataOnlySync(user1.id, {
+          imageDataHash: imgHash,
+          deviceAssetId: deviceId,
+          fullHash: fullHashA,
+        });
+        expect(r).toEqual({ photoId: photo.id });
+
+        row = await dbFirst<typeof photos.$inferSelect>(
+          db.select().from(photos).where(eq(photos.id, photo.id))
+        );
+        expect(row?.image_data_hash).toBe(imgHash);
+        fs.unlinkSync(path.join(UPLOAD_DIR, photo.filename));
+      });
     });
 
     it("should not allow duplicate uploads for the same user", async () => {

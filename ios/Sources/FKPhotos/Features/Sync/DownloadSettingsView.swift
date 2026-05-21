@@ -107,6 +107,7 @@ struct DownloadSettingsView: View {
                             if isSyncing { ProgressView() }
                         }
                     }
+                    .buttonStyle(.borderless)
                     .disabled(isSyncing || selectedAlbumIds.isEmpty)
 
                     if let error = syncError {

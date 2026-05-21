@@ -196,6 +196,10 @@ export const photos = pgTable("photos", {
   // Absolute filesystem path for `link`-imported photos. NULL for uploads and
   // for `move`-imported photos (which live under UPLOAD_DIR like uploads do).
   external_path: text("external_path"),
+  // iOS PHAsset.localIdentifier (X-Asset-Id header). A stable per-device key
+  // used as a fast-path dedup lookup on re-upload — gated on image_data_hash
+  // equality so an actual content edit is still stored as a new photo (#432).
+  device_asset_id: text("device_asset_id"),
 });
 
 // ========== Persons ==========
