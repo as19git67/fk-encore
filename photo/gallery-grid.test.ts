@@ -1,6 +1,14 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import db from "../db/database";
-import { photos, albums, albumPhotos, albumShares, users } from "../db/schema";
+import {
+  photos,
+  albums,
+  albumPhotos,
+  albumShares,
+  users,
+  photoGroups,
+  photoGroupMembers,
+} from "../db/schema";
 import { dbInsertReturning } from "../db/adapter";
 import { createUserLogic } from "../user/user.service";
 import * as service from "./photo.service";
@@ -18,6 +26,8 @@ describe("Gallery grid – album scope", () => {
   let stranger: any;
 
   beforeEach(async () => {
+    await db.delete(photoGroupMembers);
+    await db.delete(photoGroups);
     await db.delete(albumPhotos);
     await db.delete(albumShares);
     await db.delete(albums);
@@ -82,5 +92,42 @@ describe("Gallery grid – album scope", () => {
 
     const ownerLibrary = await listGalleryGridLogic(owner.id, {}, opts);
     expect(ownerLibrary.total).toBe(1);
+  });
+
+  it("album grid keeps AI auto-pick duplicates visible (library grid hides them)", async () => {
+    const album = await service.createAlbumLogic(owner.id, { name: "Burst" });
+    const pick = await makePhoto(owner.id, "pick.jpg");
+    const dup = await makePhoto(owner.id, "dup.jpg");
+    await service.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: pick });
+    await service.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: dup });
+
+    // A high-confidence, unreviewed AI-picked similar-photo group: `dup`
+    // is a non-pick member, so the AI auto-pick hides it from the grid.
+    const group = await dbInsertReturning<{ id: number }>(
+      db
+        .insert(photoGroups)
+        .values({
+          user_id: owner.id,
+          cover_photo_id: pick,
+          ai_picked_photo_ids: [pick],
+          ai_picked_at: new Date().toISOString(),
+          ai_picked_confidence: "high",
+        })
+        .returning({ id: photoGroups.id }),
+    );
+    await db.insert(photoGroupMembers).values([
+      { group_id: group!.id, photo_id: pick, similarity_rank: 0 },
+      { group_id: group!.id, photo_id: dup, similarity_rank: 1 },
+    ]);
+
+    // Library grid: the AI auto-pick hides the duplicate.
+    const library = await listGalleryGridLogic(owner.id, {}, opts);
+    expect(library.photos.map((p) => p.id)).toEqual([pick]);
+
+    // Album-detail grid: an album is a curated collection — every album
+    // photo is shown, the AI auto-hide does not apply.
+    const albumGrid = await listGalleryGridLogic(owner.id, { albumScopeId: album.id }, opts);
+    expect(albumGrid.total).toBe(2);
+    expect(albumGrid.photos.map((p) => p.id).sort()).toEqual([dup, pick].sort());
   });
 });
