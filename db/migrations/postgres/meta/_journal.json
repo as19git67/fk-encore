@@ -629,7 +629,7 @@
       "idx": 89,
       "version": "7",
       "when": 1779001428000,
-      "tag": "0089_photo_sync_extra_columns",
+      "tag": "0089_photo_device_asset_id",
       "breakpoints": true
     }
   ]

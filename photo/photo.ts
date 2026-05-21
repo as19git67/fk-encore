@@ -192,13 +192,15 @@ export const uploadPhoto = api.raw(
     const rawAssetId = req.headers["x-asset-id"];
     const deviceAssetId = typeof rawAssetId === "string" ? rawAssetId : null;
 
-    // Fast path: if the client knows the image-data hash and the server already
-    // has this photo, update metadata in place and respond before the body arrives.
-    if (imageDataHash) {
+    // Fast path: when the client identifies the photo (image-data hash or
+    // device asset id) and the server already has it, update the metadata in
+    // place and respond before the (unchanged) body is transferred.
+    if (imageDataHash || deviceAssetId) {
       let syncResult: { photoId: number } | null = null;
       try {
         syncResult = await service.tryMetadataOnlySync(userId, {
           imageDataHash,
+          deviceAssetId,
           fullHash,
           description: hasDescriptionHeader ? description : undefined,
           isFavorite: isFavoriteHeaderPresent ? isFavorite : undefined,
@@ -224,24 +226,16 @@ export const uploadPhoto = api.raw(
     }
 
     try {
-      const result = await service.uploadPhotoStream(userId, req, fileName, mimeType, isFavorite, clientCapturedAt, {
+      const photo = await service.uploadPhotoStream(userId, req, fileName, mimeType, isFavorite, clientCapturedAt, {
         imageDataHash,
         fullHash,
         description: hasDescriptionHeader ? description : undefined,
         deviceAssetId,
       });
 
-      // device_asset_id match — metadata updated, file not stored again.
-      if (result instanceof service.PhotoSyncUpdateResult) {
-        res.statusCode = 200;
-        res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ updated: true, photoId: result.photoId }));
-        return;
-      }
-
       res.statusCode = 201;
       res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify(result));
+      res.end(JSON.stringify(photo));
     } catch (err: any) {
       if (err instanceof service.PhotoAlreadyExistsError || err?.message === "PHOTO_ALREADY_EXISTS") {
         res.statusCode = 409;
