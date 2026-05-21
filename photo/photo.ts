@@ -124,6 +124,16 @@ function checkModule() {
 }
 
 /**
+ * Normalise a SHA-256 hex value carried in an HTTP header (lower-cased,
+ * trimmed). Returns null when the header is absent or malformed.
+ */
+function normalizeHashHeader(raw: string | string[] | undefined): string | null {
+  if (typeof raw !== "string") return null;
+  const v = raw.trim().toLowerCase();
+  return /^[a-f0-9]{64}$/.test(v) ? v : null;
+}
+
+/**
  * Upload a photo.
  * Expects the raw image data in the request body.
  * Filename should be provided in X-File-Name header.
@@ -159,14 +169,76 @@ export const uploadPhoto = api.raw(
       fileName = rawFileName;
     }
     const mimeType = (req.headers["content-type"] as string) || "image/jpeg";
+    const isFavoriteHeaderPresent = req.headers["x-is-favorite"] !== undefined;
     const isFavorite = req.headers["x-is-favorite"] === "true";
     // Optional fallback when the file's EXIF carries no DateTimeOriginal —
     // the iOS client forwards PHAsset.creationDate here.
     const capturedAtHeader = req.headers["x-captured-at"];
     const clientCapturedAt = typeof capturedAtHeader === "string" ? capturedAtHeader : null;
 
+    // Hash-based sync protocol (issue #432). The iOS client computes two
+    // SHA-256 digests per photo: X-Full-Hash over the whole file (metadata +
+    // pixels) and X-Image-Data-Hash over the pixel data only. The image-data
+    // hash identifies the photo across metadata-only edits.
+    const imageDataHash = normalizeHashHeader(req.headers["x-image-data-hash"]);
+    const fullHash = normalizeHashHeader(req.headers["x-full-hash"]);
+    // Description for the metadata-only path travels in a header (the body is
+    // not read on that path). Percent-encoded like X-File-Name.
+    const descriptionHeader = req.headers["x-description"];
+    const hasDescriptionHeader = typeof descriptionHeader === "string";
+    let description: string | undefined;
+    if (hasDescriptionHeader) {
+      try {
+        description = decodeURIComponent(descriptionHeader as string);
+      } catch {
+        description = descriptionHeader as string;
+      }
+    }
+
+    // When the client knows the image-data hash, try a metadata-only sync
+    // first: if we already have that photo we update its metadata in place and
+    // answer immediately, so the unchanged image body need not be transferred.
+    if (imageDataHash) {
+      let syncResult: { photoId: number } | null = null;
+      try {
+        syncResult = await service.tryMetadataOnlySync(userId, {
+          imageDataHash,
+          fullHash,
+          description: hasDescriptionHeader ? description : undefined,
+          isFavorite: isFavoriteHeaderPresent ? isFavorite : undefined,
+          capturedAt: clientCapturedAt,
+        });
+      } catch (err: any) {
+        console.error("Metadata-only sync error:", err);
+        // Absorb the connection reset that follows the client's cancellation.
+        req.on("error", () => {});
+        res.statusCode = 500;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: err?.message || "Internal Server Error", message: "Interner Server-Fehler" }));
+        req.resume();
+        return;
+      }
+      if (syncResult) {
+        // The client cancels the upload once it sees this response, surfacing
+        // as a connection-reset error on the request stream — absorb it.
+        req.on("error", () => {});
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ updated: true, photoId: syncResult.photoId }));
+        // We have everything we need from the headers; drain (rather than
+        // store) any image bytes still in flight before the client cancels.
+        req.resume();
+        return;
+      }
+      // syncResult === null → genuinely new pixel data: fall through to upload.
+    }
+
     try {
-      const photo = await service.uploadPhotoStream(userId, req, fileName, mimeType, isFavorite, clientCapturedAt);
+      const photo = await service.uploadPhotoStream(userId, req, fileName, mimeType, isFavorite, clientCapturedAt, {
+        imageDataHash,
+        fullHash,
+        description: hasDescriptionHeader ? description : undefined,
+      });
 
       res.statusCode = 201;
       res.setHeader("Content-Type", "application/json");
@@ -217,6 +289,27 @@ export const checkPhotoHash = api(
     }
 
     return await service.checkPhotoHashLogic(userId, normalized);
+  }
+);
+
+/**
+ * Batch existence check for full-file SHA-256 hashes (issue #432). The iOS
+ * sync sends the full-file hash of every photo in the device library in a few
+ * batched calls and uploads only the ones the server reports as missing —
+ * replacing thousands of individual /photos/check-hash round-trips.
+ */
+export const checkPhotoHashes = api(
+  { expose: true, method: "POST", path: "/photos/sync/check", auth: true },
+  async ({ hashes }: { hashes: string[] }): Promise<{ existing: string[] }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.upload");
+
+    if (hashes.length > 5000) {
+      throw APIError.invalidArgument("at most 5000 hashes per request");
+    }
+    return await service.checkPhotoFullHashesLogic(userId, hashes);
   }
 );
 
