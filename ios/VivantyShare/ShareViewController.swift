@@ -61,6 +61,7 @@ struct ShareUploadView: View {
     @State private var uploadProgress = 0
     @State private var totalToUpload = 0
     @State private var errorMessage: String?
+    @State private var prevItemErrorMessage: String?
     @State private var isDone = false
     @State private var uploadTask: Task<Void, Never>? = nil
     @State private var previousPendingItems: [ShareUploadQueueWriter.PendingItem] = []
@@ -71,21 +72,30 @@ struct ShareUploadView: View {
                 if isLoadingAlbums {
                     ProgressView("Alben laden…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if isUploading {
+                } else if isUploading || isDone {
                     uploadProgressView
-                } else if isDone {
-                    VStack(spacing: 16) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 56))
-                            .foregroundStyle(.green)
-                        Text(totalToUpload == 1
-                             ? "1 Foto hochgeladen"
-                             : "\(totalToUpload) Fotos hochgeladen")
-                            .font(.headline)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     Form {
+                        if !previousPendingItems.isEmpty {
+                            Section {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "clock.badge.exclamationmark")
+                                        .foregroundStyle(.orange)
+                                    Text("\(previousPendingItems.count) ausstehende Foto(s) aus vorherigem Upload werden mit hochgeladen.")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                    Button("Leeren") {
+                                        for item in previousPendingItems {
+                                            ShareUploadQueueWriter.markFailed(id: item.id)
+                                        }
+                                        previousPendingItems = []
+                                    }
+                                    .font(.footnote)
+                                    .foregroundStyle(.red)
+                                }
+                            }
+                        }
                         Section {
                             if albums.isEmpty {
                                 Text("Keine Alben gefunden")
@@ -120,11 +130,7 @@ struct ShareUploadView: View {
                         } header: {
                             Text("Album (optional)")
                         } footer: {
-                            if !previousPendingItems.isEmpty {
-                                Text("\(previousPendingItems.count) Foto(s) aus vorherigem Upload noch ausstehend – werden mit hochgeladen.")
-                            } else {
-                                Text("Wenn kein Album gewählt, werden die Fotos ohne Album-Zuordnung hochgeladen.")
-                            }
+                            Text("Wenn kein Album gewählt, werden die Fotos ohne Album-Zuordnung hochgeladen.")
                         }
 
                         if let error = errorMessage {
@@ -187,7 +193,7 @@ struct ShareUploadView: View {
         .onChange(of: isDone) { _, done in
             guard done else { return }
             Task {
-                try? await Task.sleep(for: .seconds(1))
+                try? await Task.sleep(for: .seconds(0.8))
                 extensionContext.completeRequest(returningItems: nil)
             }
         }
@@ -198,18 +204,36 @@ struct ShareUploadView: View {
     private var uploadProgressView: some View {
         VStack(spacing: 20) {
             Spacer()
-            ProgressView(value: Double(uploadProgress), total: Double(max(1, totalToUpload)))
-                .padding(.horizontal, 32)
-            Text("\(uploadProgress) von \(totalToUpload) hochgeladen")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-            if let error = errorMessage {
-                Text(error)
-                    .foregroundStyle(.orange)
-                    .font(.caption)
-                    .padding(.horizontal)
-                    .multilineTextAlignment(.center)
+            if isDone {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 56))
+                    .foregroundStyle(.green)
+                Text(totalToUpload == 1
+                     ? "1 Foto hochgeladen"
+                     : "\(totalToUpload) Fotos hochgeladen")
+                    .font(.headline)
+            } else {
+                ProgressView(value: Double(uploadProgress), total: Double(max(1, totalToUpload)))
+                    .padding(.horizontal, 32)
+                Text("\(uploadProgress) von \(totalToUpload) hochgeladen")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                if let error = errorMessage {
+                    Text(error)
+                        .foregroundStyle(.orange)
+                        .font(.caption)
+                        .padding(.horizontal)
+                        .multilineTextAlignment(.center)
+                }
+                if let prevErr = prevItemErrorMessage, errorMessage == nil {
+                    Text("Ältere ausstehende Fotos konnten nicht übertragen werden – die Hauptapp holt sie nach.")
+                        .foregroundStyle(.secondary)
+                        .font(.caption2)
+                        .padding(.horizontal)
+                        .multilineTextAlignment(.center)
+                    let _ = prevErr // suppress unused warning
+                }
             }
             Spacer()
         }
@@ -303,6 +327,10 @@ struct ShareUploadView: View {
         let targetAlbumIds = Array(selectedAlbumIds)
 
         var uploadedIds: [Int] = []
+        // Tracks imageDataHashes that were successfully uploaded via prevItems so that
+        // the same photo appearing in newItems (same session, queue not yet cleared) is
+        // not uploaded a second time.
+        var uploadedPrevHashes = Set<String>()
 
         // 1. Upload previously queued items (surviving from a prior extension session).
         for prev in prevItems {
@@ -321,15 +349,18 @@ struct ShareUploadView: View {
             do {
                 let photoId = try await ShareAPIClient.uploadPhoto(item: item)
                 uploadedIds.append(photoId)
+                uploadedPrevHashes.insert(prev.imageDataHash)
                 ShareUploadQueueWriter.markDone(id: prev.id)
                 for albumId in prev.targetAlbumIds {
                     try? await ShareAPIClient.addPhotoToAlbum(photoId: photoId, albumId: albumId)
                 }
             } catch ShareAPIError.duplicate(let existingId) {
                 if let id = existingId { uploadedIds.append(id) }
+                uploadedPrevHashes.insert(prev.imageDataHash)
                 ShareUploadQueueWriter.markDone(id: prev.id)
             } catch {
-                errorMessage = error.localizedDescription
+                // Failures on prev items don't block auto-close — the main app retries them.
+                prevItemErrorMessage = error.localizedDescription
                 ShareUploadQueueWriter.markFailed(id: prev.id)
             }
             uploadProgress += 1
@@ -346,6 +377,15 @@ struct ShareUploadView: View {
         // 3. Upload new items.
         for (index, item) in newItems.enumerated() {
             guard !Task.isCancelled else { break }
+            // Skip if the same photo was already uploaded via prevItems in this session.
+            if uploadedPrevHashes.contains(item.imageDataHash) {
+                print("[Share Upload] skipping duplicate new item \(item.filename) (already uploaded via prevItems)")
+                if index < queueEntries.count {
+                    ShareUploadQueueWriter.markDone(id: queueEntries[index].id)
+                }
+                uploadProgress += 1
+                continue
+            }
             do {
                 let photoId = try await ShareAPIClient.uploadPhoto(item: item)
                 uploadedIds.append(photoId)
@@ -370,6 +410,8 @@ struct ShareUploadView: View {
             }
         }
 
+        // Auto-close only depends on new items succeeding; prev-item failures are
+        // non-blocking (the main app's background sync will retry them).
         if errorMessage == nil && !Task.isCancelled { isDone = true }
         isUploading = false
     }
@@ -461,10 +503,13 @@ struct ShareUploadView: View {
                     let imageDataHash = ShareHasher.sha256Hex(data)
                     let caption = ShareHasher.extractIPTCCaption(from: data) ?? ""
                     let capturedAtString = ShareHasher.capturedAtStringFromData(capturedAt: capturedAt, imageData: data)
+                    // When no PHAsset is available, read the favorite flag from XMP Rating in the
+                    // image bytes (Photos.app writes Rating=5 for favorites on export).
+                    let effectiveIsFavorite = isFavorite || ShareHasher.isFavoriteFromXMP(data)
                     let fullHash = ShareHasher.fullHash(
                         imageDataHash: imageDataHash,
                         caption: caption,
-                        isFavorite: isFavorite,
+                        isFavorite: effectiveIsFavorite,
                         capturedAtString: capturedAtString
                     )
                     cont.resume(returning: SharePhotoItem(
@@ -474,7 +519,7 @@ struct ShareUploadView: View {
                         imageDataHash: imageDataHash,
                         fullHash: fullHash,
                         caption: caption,
-                        isFavorite: isFavorite,
+                        isFavorite: effectiveIsFavorite,
                         capturedAtString: capturedAtString,
                         assetLocalIdentifier: assetId
                     ))
@@ -491,15 +536,24 @@ struct ShareUploadView: View {
             let localId: String? = await withCheckedContinuation { cont in
                 provider.loadItem(forTypeIdentifier: uti, options: nil) { item, _ in
                     if let url = item as? URL, url.scheme == "phasset" {
+                        // phasset://<localIdentifier>
                         cont.resume(returning: url.host)
                     } else if let ids = item as? [String], let id = ids.first {
+                        // Array of identifier strings
+                        cont.resume(returning: id)
+                    } else if let id = item as? String, !id.isEmpty {
+                        // Plain string (simulator and some iOS versions)
                         cont.resume(returning: id)
                     } else {
+                        print("[Share] loadAssetIdentifier: UTI=\(uti) returned unexpected type=\(type(of: item)), value=\(String(describing: item))")
                         cont.resume(returning: nil)
                     }
                 }
             }
-            if let localId { return localId }
+            if let localId {
+                print("[Share] loadAssetIdentifier: resolved assetId=\(localId) via \(uti)")
+                return localId
+            }
         }
         return nil
     }
@@ -570,6 +624,25 @@ enum ShareHasher {
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         f.timeZone = timezone
         return f.string(from: date)
+    }
+
+    /// Returns true when the image bytes carry an XMP Rating >= 4 (Photos.app writes Rating=5 for favorites).
+    /// Used as fallback when no PHAsset is available (e.g. share from non-Photos context or simulator).
+    static func isFavoriteFromXMP(_ data: Data) -> Bool {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let metadata = CGImageSourceCopyMetadataAtIndex(source, 0, nil) else { return false }
+        guard let tag = CGImageMetadataCopyTagWithPath(metadata, nil, "xmp:Rating" as CFString),
+              let value = CGImageMetadataTagCopyValue(tag) else { return false }
+        let rating: Int
+        if let n = value as? NSNumber {
+            rating = n.intValue
+        } else if let s = value as? String, let n = Int(s) {
+            rating = n
+        } else {
+            return false
+        }
+        print("[Share] XMP Rating=\(rating) → isFavorite=\(rating >= 4)")
+        return rating >= 4
     }
 
     /// Extracts user-entered caption from image bytes.
@@ -795,12 +868,22 @@ enum ShareAPIClient {
             request.setValue(assetId, forHTTPHeaderField: "X-Asset-Id")
         }
         request.httpBody = item.data
+        print("""
+        [Share Upload] \(item.filename)
+          assetId:       \(item.assetLocalIdentifier ?? "nil")
+          imageDataHash: \(item.imageDataHash)
+          fullHash:      \(item.fullHash)
+          caption:       "\(item.caption)"
+          isFavorite:    \(item.isFavorite)
+        """)
 
         let (responseData, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw ShareAPIError.httpError(0) }
+        print("[Share Upload] \(item.filename) → HTTP \(http.statusCode)")
         if http.statusCode == 409 {
             struct Body: Decodable { let photoId: Int? }
             let existing = try? JSONDecoder().decode(Body.self, from: responseData)
+            print("[Share Upload] \(item.filename) → duplicate (409), existingId=\(existing?.photoId as Any)")
             throw ShareAPIError.duplicate(existing?.photoId)
         }
         guard (200...299).contains(http.statusCode) else {
@@ -810,9 +893,13 @@ enum ShareAPIClient {
         // 200 = metadata update: body is {updated:true, photoId:Int}
         struct UpdateBody: Decodable { let photoId: Int? }
         if http.statusCode == 200 {
-            return (try? JSONDecoder().decode(UpdateBody.self, from: responseData))?.photoId ?? 0
+            let photoId = (try? JSONDecoder().decode(UpdateBody.self, from: responseData))?.photoId ?? 0
+            print("[Share Upload] \(item.filename) → metadata-only update, photoId=\(photoId)")
+            return photoId
         }
-        return (try? JSONDecoder().decode(Photo.self, from: responseData))?.id ?? 0
+        let photoId = (try? JSONDecoder().decode(Photo.self, from: responseData))?.id ?? 0
+        print("[Share Upload] \(item.filename) → NEW photo created, id=\(photoId)")
+        return photoId
     }
 
     static func createAlbum(name: String) async throws -> ShareAlbum {
