@@ -142,7 +142,8 @@ public final class BackgroundSyncManager {
                     fullHash: item.fullHash,
                     caption: item.caption,
                     isFavorite: item.isFavorite,
-                    capturedAtString: item.capturedAtString
+                    capturedAtString: item.capturedAtString,
+                    assetLocalId: item.assetLocalIdentifier ?? ""
                 )
                 PhotoSyncPreferences.recordUploadedPhoto(
                     serverPhotoId: result.photoId,
