@@ -176,14 +176,9 @@ export const uploadPhoto = api.raw(
     const capturedAtHeader = req.headers["x-captured-at"];
     const clientCapturedAt = typeof capturedAtHeader === "string" ? capturedAtHeader : null;
 
-    // Hash-based sync protocol (issue #432). The iOS client computes two
-    // SHA-256 digests per photo: X-Full-Hash over the whole file (metadata +
-    // pixels) and X-Image-Data-Hash over the pixel data only. The image-data
-    // hash identifies the photo across metadata-only edits.
+    // Hash-based sync protocol (issue #432).
     const imageDataHash = normalizeHashHeader(req.headers["x-image-data-hash"]);
     const fullHash = normalizeHashHeader(req.headers["x-full-hash"]);
-    // Description for the metadata-only path travels in a header (the body is
-    // not read on that path). Percent-encoded like X-File-Name.
     const descriptionHeader = req.headers["x-description"];
     const hasDescriptionHeader = typeof descriptionHeader === "string";
     let description: string | undefined;
@@ -194,10 +189,11 @@ export const uploadPhoto = api.raw(
         description = descriptionHeader as string;
       }
     }
+    const rawAssetId = req.headers["x-asset-id"];
+    const deviceAssetId = typeof rawAssetId === "string" ? rawAssetId : null;
 
-    // When the client knows the image-data hash, try a metadata-only sync
-    // first: if we already have that photo we update its metadata in place and
-    // answer immediately, so the unchanged image body need not be transferred.
+    // Fast path: if the client knows the image-data hash and the server already
+    // has this photo, update metadata in place and respond before the body arrives.
     if (imageDataHash) {
       let syncResult: { photoId: number } | null = null;
       try {
@@ -210,7 +206,6 @@ export const uploadPhoto = api.raw(
         });
       } catch (err: any) {
         console.error("Metadata-only sync error:", err);
-        // Absorb the connection reset that follows the client's cancellation.
         req.on("error", () => {});
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json");
@@ -219,30 +214,34 @@ export const uploadPhoto = api.raw(
         return;
       }
       if (syncResult) {
-        // The client cancels the upload once it sees this response, surfacing
-        // as a connection-reset error on the request stream — absorb it.
         req.on("error", () => {});
         res.statusCode = 200;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ updated: true, photoId: syncResult.photoId }));
-        // We have everything we need from the headers; drain (rather than
-        // store) any image bytes still in flight before the client cancels.
         req.resume();
         return;
       }
-      // syncResult === null → genuinely new pixel data: fall through to upload.
     }
 
     try {
-      const photo = await service.uploadPhotoStream(userId, req, fileName, mimeType, isFavorite, clientCapturedAt, {
+      const result = await service.uploadPhotoStream(userId, req, fileName, mimeType, isFavorite, clientCapturedAt, {
         imageDataHash,
         fullHash,
         description: hasDescriptionHeader ? description : undefined,
+        deviceAssetId,
       });
+
+      // device_asset_id match — metadata updated, file not stored again.
+      if (result instanceof service.PhotoSyncUpdateResult) {
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ updated: true, photoId: result.photoId }));
+        return;
+      }
 
       res.statusCode = 201;
       res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify(photo));
+      res.end(JSON.stringify(result));
     } catch (err: any) {
       if (err instanceof service.PhotoAlreadyExistsError || err?.message === "PHOTO_ALREADY_EXISTS") {
         res.statusCode = 409;

@@ -100,28 +100,65 @@ actor APIClient {
         return try await performWithRefresh(request)
     }
 
-    // MARK: - Raw Upload (matching web frontend pattern: raw body + X-File-Name header)
+    // MARK: - Batch sync-check
 
-    func uploadPhoto(data: Data, filename: String, mimeType: String, isFavorite: Bool = false, capturedAt: Date? = nil) async throws -> Photo {
-        var request = URLRequest(url: buildURL(path: "/photos"))
+    /// Asks the server which of the given full-hashes it already has.
+    /// Returns the subset that exists server-side; everything NOT returned must be uploaded.
+    func syncCheck(hashes: [String]) async throws -> Set<String> {
+        struct Body: Encodable { let hashes: [String] }
+        struct Response: Decodable { let existing: [String] }
+        let response: Response = try await post("/photos/sync/check", body: Body(hashes: hashes))
+        return Set(response.existing)
+    }
+
+    // MARK: - Raw Upload
+
+    /// Result of a photo upload.
+    /// - `created`: 201 — server stored a new photo record.
+    /// - `updated`: 200 — server already had the photo (hash match); only metadata was updated.
+    enum UploadResult {
+        case created(Photo)
+        case updated(photoId: Int)
+
+        var photoId: Int {
+            switch self {
+            case .created(let p): return p.id
+            case .updated(let id): return id
+            }
+        }
+    }
+
+    /// Uploads the raw image bytes to POST /photos using all headers required by the
+    /// hash-based sync protocol. Never embeds caption or favorite into the file body —
+    /// metadata travels exclusively as headers.
+    ///
+    /// - Returns `.created` (201) for a newly stored photo or `.updated` (200) when the
+    ///   server already had this full-hash and only updated metadata.
+    /// - Throws `APIError.duplicatePhoto` on 409.
+    func uploadPhoto(
+        data: Data,
+        filename: String,
+        mimeType: String,
+        imageDataHash: String,
+        fullHash: String,
+        caption: String,
+        isFavorite: Bool,
+        capturedAtString: String,
+        assetLocalId: String
+    ) async throws -> UploadResult {
+        var request = URLRequest(url: buildURL(path: "/photos"), timeoutInterval: 120)
         request.httpMethod = "POST"
         request.setValue(mimeType, forHTTPHeaderField: "Content-Type")
-        request.setValue(filename, forHTTPHeaderField: "X-File-Name")
-        if isFavorite {
-            request.setValue("true", forHTTPHeaderField: "X-Is-Favorite")
-        }
-        // PHImageManager-rendered HEIC/JPEG often loses EXIF DateTimeOriginal,
-        // so we forward PHAsset.creationDate. The server uses it only when
-        // the file itself carries no capture timestamp.
-        if let capturedAt {
-            request.setValue(Self.iso8601Formatter.string(from: capturedAt), forHTTPHeaderField: "X-Captured-At")
-        }
+        request.setValue(percentEncodeHeaderValue(filename), forHTTPHeaderField: "X-File-Name")
+        request.setValue(imageDataHash, forHTTPHeaderField: "X-Image-Data-Hash")
+        request.setValue(fullHash, forHTTPHeaderField: "X-Full-Hash")
+        request.setValue(percentEncodeHeaderValue(caption), forHTTPHeaderField: "X-Description")
+        request.setValue(isFavorite ? "true" : "false", forHTTPHeaderField: "X-Is-Favorite")
+        request.setValue(capturedAtString, forHTTPHeaderField: "X-Captured-At")
+        request.setValue(assetLocalId, forHTTPHeaderField: "X-Asset-Id")
         request.httpBody = data
         applyAuth(&request)
 
-        // Custom request flow because we need to surface the existing photo's
-        // id from a 409 response so callers can still attach it to a target
-        // album. Mirrors performWithRefresh' 401 → refresh → retry behavior.
         var (responseData, response) = try await URLSession.shared.data(for: request)
         if let http = response as? HTTPURLResponse, http.statusCode == 401, let manager = authManager {
             let refreshed = await refreshOnce(manager: manager)
@@ -134,26 +171,36 @@ actor APIClient {
             }
         }
         guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
-        if http.statusCode == 409 {
+        switch http.statusCode {
+        case 200:
+            // Server had the photo already; only metadata was updated. Body: {updated:true, photoId}.
+            let body = (try? JSONDecoder().decode(MetadataUpdateBody.self, from: responseData))
+            let photoId = body?.photoId ?? 0
+            return .updated(photoId: photoId)
+        case 201:
+            return .created(try decoder.decode(Photo.self, from: responseData))
+        case 409:
             let photoId = (try? JSONDecoder().decode(DuplicatePhotoBody.self, from: responseData))?.photoId
             throw APIError.duplicatePhoto(photoId: photoId)
+        case 401:
+            authManager?.handleUnauthorized()
+            throw APIError.httpError(401, parseErrorMessage(responseData))
+        default:
+            guard (200...299).contains(http.statusCode) else {
+                throw APIError.httpError(http.statusCode, parseErrorMessage(responseData))
+            }
+            return .created(try decoder.decode(Photo.self, from: responseData))
         }
-        guard (200...299).contains(http.statusCode) else {
-            if http.statusCode == 401 { authManager?.handleUnauthorized() }
-            throw APIError.httpError(http.statusCode, parseErrorMessage(responseData))
-        }
-        return try decoder.decode(Photo.self, from: responseData)
     }
 
     private struct DuplicatePhotoBody: Decodable {
         let photoId: Int?
     }
 
-    private static let iso8601Formatter: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
+    private struct MetadataUpdateBody: Decodable {
+        let updated: Bool?
+        let photoId: Int?
+    }
 
     // MARK: - Download (for photos/thumbnails)
 
@@ -245,6 +292,14 @@ actor APIClient {
         if let token {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
+    }
+
+    /// Percent-encodes a string for use in a custom HTTP header value.
+    /// Encodes non-ASCII, spaces, and other characters that could break header parsing.
+    private func percentEncodeHeaderValue(_ value: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.formUnion(.init(charactersIn: "-_.~!*'()"))
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 
     private func perform<T: Decodable>(_ request: URLRequest) async throws -> T {

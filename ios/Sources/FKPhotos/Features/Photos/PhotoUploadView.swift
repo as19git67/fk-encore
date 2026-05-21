@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import Photos
+import CryptoKit
 
 struct PhotoUploadView: View {
     @Environment(\.dismiss) private var dismiss
@@ -131,19 +132,46 @@ struct PhotoUploadView: View {
                 }
                 let filename = "photo_\(Date().timeIntervalSince1970).\(ext)"
 
+                // Compute hashes and metadata for the upload headers.
+                let imageDataHash = CryptoKit.SHA256.hash(data: data)
+                    .map { String(format: "%02x", $0) }.joined()
+                let caption: String
+                if let localId = item.itemIdentifier,
+                   let asset = PHAsset.fetchAssets(withLocalIdentifiers: [localId], options: nil).firstObject {
+                    let desc = (asset as AnyObject).responds(to: NSSelectorFromString("descriptionProperties"))
+                        ? ((asset as NSObject).value(forKey: "descriptionProperties") as? NSObject)
+                            .flatMap { ($0 as NSObject).value(forKey: "assetDescription") as? String }
+                        : nil
+                    caption = (desc.flatMap { $0.isEmpty ? nil : $0 }) ?? ""
+                } else {
+                    caption = ""
+                }
+                let f = ISO8601DateFormatter()
+                f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                f.timeZone = TimeZone.current
+                let capturedAtString = capturedAt.map { f.string(from: $0) } ?? ""
+                let compositeInput = imageDataHash + "\n" + caption + "\n" + (isFavorite ? "1" : "0") + "\n" + capturedAtString
+                let fullHash = CryptoKit.SHA256.hash(data: Data(compositeInput.utf8))
+                    .map { String(format: "%02x", $0) }.joined()
+
                 // Resolve target photo id: prefer the freshly-uploaded one,
                 // fall back to the existing id surfaced by a 409 duplicate so
                 // the user-intended album insertion still happens.
                 let targetPhotoId: Int
                 do {
+                    let assetId = item.itemIdentifier ?? ""
                     let uploaded = try await APIClient.shared.uploadPhoto(
                         data: data,
                         filename: filename,
                         mimeType: mimeType,
+                        imageDataHash: imageDataHash,
+                        fullHash: fullHash,
+                        caption: caption,
                         isFavorite: isFavorite,
-                        capturedAt: capturedAt
+                        capturedAtString: capturedAtString,
+                        assetLocalId: assetId
                     )
-                    targetPhotoId = uploaded.id
+                    targetPhotoId = uploaded.photoId
                 } catch APIError.duplicatePhoto(let existingPhotoId) {
                     guard let existingPhotoId else {
                         await MainActor.run { failedCount += 1 }
