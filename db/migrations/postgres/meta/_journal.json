@@ -624,6 +624,13 @@
       "when": 1779001427000,
       "tag": "0088_photo_image_data_hash",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1779001428000,
+      "tag": "0089_photo_sync_extra_columns",
+      "breakpoints": true
     }
   ]
 }
