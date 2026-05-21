@@ -21,26 +21,14 @@ struct PhotoSyncPreferences {
     private static let onlyNewKey          = "sync.onlyNew"
     private static let wifiOnlyKey         = "sync.wifiOnly"
     private static let lastSyncDateKey     = "sync.lastSyncDate"
-    private static let uploadedIdsKey      = "sync.uploadedIds"
     private static let allPhotosAlbumIdKey = "sync.allPhotosAlbumId"
     private static let albumMappingsKey    = "sync.albumMappings"
-    private static let serverPhotoMapKey    = "sync.serverPhotoMap"
+    private static let serverPhotoMapKey   = "sync.serverPhotoMap"
     private static let excludeScreenshotsKey = "sync.excludeScreenshots"
-    private static let syncedFavoriteIdsKey = "sync.syncedFavoriteIds"
-    // Tracks the last value we PATCHed to the server for each uploaded asset.
-    // Used to detect post-upload metadata edits (issue #303). Stored as
-    // [localIdentifier: ISO-8601 string] in UserDefaults.
-    private static let syncedTakenAtKey     = "sync.syncedTakenAt"
-    // Tracks PHAsset.modificationDate at the time of the last sync for each
-    // uploaded asset. When iOS bumps modificationDate (the user edited the
-    // photo or its metadata in Photos.app) we re-evaluate the asset on the
-    // next sync run. Stored as [localIdentifier: ISO-8601 string].
-    private static let syncedModDateKey     = "sync.syncedModificationDate"
-    // SHA-256 hex digest of the bytes last sent to the server for each asset.
-    // Used by Option-3 hybrid caption sync: if the hash hasn't changed since
-    // the last upload the photo pixels are identical and only the embedded
-    // IPTC/EXIF metadata (e.g. Caption) needs a PATCH; otherwise we re-upload.
-    private static let syncedUploadHashKey  = "sync.syncedUploadHash"
+    // Hash cache: [localIdentifier: HashCacheEntry] stored as JSON Data.
+    // Replaces the old uploadedIds / syncedFavoriteIds / syncedTakenAt / syncedModDate / syncedUploadHash fields.
+    // v2: switched capturedAtString from EXIF timezone to TimeZone.current (fixes UTC drift for downloaded photos)
+    private static let hashCacheKey        = "sync.hashCache.v2"
 
     // MARK: - Settings
 
@@ -110,54 +98,13 @@ struct PhotoSyncPreferences {
         set { UserDefaults.standard.set(newValue, forKey: albumMappingsKey) }
     }
 
-    // MARK: - Uploaded asset tracking
-
-    /// Load the set of already-uploaded local asset identifiers.
-    static func loadUploadedIds() -> Set<String> {
-        Set(UserDefaults.standard.stringArray(forKey: uploadedIdsKey) ?? [])
-    }
-
-    /// Persist the given set of uploaded identifiers.
-    static func saveUploadedIds(_ ids: Set<String>) {
-        UserDefaults.standard.set(Array(ids), forKey: uploadedIdsKey)
-    }
-
-    /// Clears the uploaded-asset history and resets the last sync date so all
-    /// photos are considered unseen on the next sync run.
-    static func resetUploadHistory() {
-        UserDefaults.standard.removeObject(forKey: uploadedIdsKey)
-        UserDefaults.standard.removeObject(forKey: lastSyncDateKey)
-        UserDefaults.standard.removeObject(forKey: syncedFavoriteIdsKey)
-        UserDefaults.standard.removeObject(forKey: syncedTakenAtKey)
-        UserDefaults.standard.removeObject(forKey: syncedModDateKey)
-        UserDefaults.standard.removeObject(forKey: syncedUploadHashKey)
-    }
-
-    /// Number of photos successfully uploaded so far.
-    static var uploadedCount: Int {
-        (UserDefaults.standard.stringArray(forKey: uploadedIdsKey) ?? []).count
-    }
-
-    // MARK: - Favourite sync tracking
-    //
-    // Tracks which local asset identifiers have been confirmed as "favourite"
-    // on the server. On each sync run the service compares the current iOS
-    // favourite state against this set and sends a PATCH /photos/:id/curation
-    // request for any photo whose state has changed (marked or un-marked).
-
-    static var syncedFavoriteLocalIds: Set<String> {
-        get { Set(UserDefaults.standard.stringArray(forKey: syncedFavoriteIdsKey) ?? []) }
-        set { UserDefaults.standard.set(Array(newValue), forKey: syncedFavoriteIdsKey) }
-    }
-
-    // MARK: - Server photo → local asset reverse mapping
+    // MARK: - Server photo ↔ local asset mapping
     //
     // Maps server photo ID (String) → iOS localIdentifier (String).
     // Built during upload; used by the download service to avoid round-tripping
     // photos that already exist locally on this device.
-    // This mapping is intentionally NOT cleared by resetUploadHistory() because
-    // it reflects structural knowledge ("this server photo IS this local asset")
-    // that remains valid regardless of upload-history resets.
+    // Not cleared by resetUploadHistory() because the mapping reflects structural
+    // knowledge that remains valid regardless of upload-history resets.
 
     static func loadServerPhotoMap() -> [String: String] {
         UserDefaults.standard.dictionary(forKey: serverPhotoMapKey) as? [String: String] ?? [:]
@@ -173,35 +120,58 @@ struct PhotoSyncPreferences {
         saveServerPhotoMap(map)
     }
 
-    // MARK: - Metadata sync tracking
+    // MARK: - Upload count (derived from serverPhotoMap for UI display)
+
+    /// Number of photos successfully uploaded and tracked in the server photo map.
+    static var uploadedCount: Int {
+        loadServerPhotoMap().count
+    }
+
+    // MARK: - Hash cache (replaces uploadedIds / syncedTakenAt / syncedModDate / syncedUploadHash)
     //
-    // Persists what we last sent to the server per local asset, so the next
-    // sync run can detect post-upload edits (date, modification timestamp).
-    // Issue #303.
+    // Stores per-asset (modificationDate, imageDataHash, fullHash, capturedAtString) so that
+    // PhotoHasher can skip re-hashing assets whose modificationDate hasn't moved.
 
-    static func loadSyncedTakenAt() -> [String: String] {
-        UserDefaults.standard.dictionary(forKey: syncedTakenAtKey) as? [String: String] ?? [:]
+    struct HashCacheEntry: Codable {
+        let modDateISO: String
+        let imageDataHash: String
+        let fullHash: String
+        let capturedAtString: String
     }
 
-    static func saveSyncedTakenAt(_ map: [String: String]) {
-        UserDefaults.standard.set(map, forKey: syncedTakenAtKey)
+    static func loadHashCache() -> [String: HashCacheEntry] {
+        guard let data = UserDefaults.standard.data(forKey: hashCacheKey),
+              let cache = try? JSONDecoder().decode([String: HashCacheEntry].self, from: data) else {
+            return [:]
+        }
+        return cache
     }
 
-    static func loadSyncedModificationDate() -> [String: String] {
-        UserDefaults.standard.dictionary(forKey: syncedModDateKey) as? [String: String] ?? [:]
+    static func saveHashCacheEntry(localId: String, entry: HashCacheEntry) {
+        var cache = loadHashCache()
+        cache[localId] = entry
+        if let data = try? JSONEncoder().encode(cache) {
+            UserDefaults.standard.set(data, forKey: hashCacheKey)
+        }
     }
 
-    static func saveSyncedModificationDate(_ map: [String: String]) {
-        UserDefaults.standard.set(map, forKey: syncedModDateKey)
+    static func removeHashCacheEntry(localId: String) {
+        var cache = loadHashCache()
+        cache.removeValue(forKey: localId)
+        if let data = try? JSONEncoder().encode(cache) {
+            UserDefaults.standard.set(data, forKey: hashCacheKey)
+        }
     }
 
-    // MARK: - Upload hash tracking (Option-3 hybrid caption sync)
-
-    static func loadSyncedUploadHash() -> [String: String] {
-        UserDefaults.standard.dictionary(forKey: syncedUploadHashKey) as? [String: String] ?? [:]
-    }
-
-    static func saveSyncedUploadHash(_ map: [String: String]) {
-        UserDefaults.standard.set(map, forKey: syncedUploadHashKey)
+    /// Resets upload history so all photos are re-evaluated on the next sync run.
+    /// Does NOT clear the server photo map (structural mapping remains valid).
+    static func resetUploadHistory() {
+        UserDefaults.standard.removeObject(forKey: hashCacheKey)
+        UserDefaults.standard.removeObject(forKey: lastSyncDateKey)
+        // Remove legacy keys from previous sync implementation
+        for key in ["sync.uploadedIds", "sync.syncedFavoriteIds",
+                    "sync.syncedTakenAt", "sync.syncedModificationDate", "sync.syncedUploadHash"] {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
     }
 }

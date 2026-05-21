@@ -196,6 +196,13 @@ export const photos = pgTable("photos", {
   // Absolute filesystem path for `link`-imported photos. NULL for uploads and
   // for `move`-imported photos (which live under UPLOAD_DIR like uploads do).
   external_path: text("external_path"),
+  // iOS hash-based sync protocol (issue #432).
+  // image_data_hash: SHA-256 of PHAssetResource.photo bytes (X-Image-Data-Hash header).
+  // full_hash:       SHA-256(imageDataHash+caption+isFavorite+capturedAt) (X-Full-Hash).
+  // device_asset_id: iOS PHAsset.localIdentifier (X-Asset-Id) — stable dedup key.
+  image_data_hash: text("image_data_hash"),
+  full_hash: text("full_hash"),
+  device_asset_id: text("device_asset_id"),
 });
 
 // ========== Persons ==========
