@@ -1953,8 +1953,14 @@ export async function mergeUploadMetadataIntoExisting(
 
 /** Metadata carried by a hash-based metadata-only sync (issue #432). */
 export interface MetadataSyncInput {
-  /** SHA-256 of the image pixel data only — identifies the existing photo. */
-  imageDataHash: string;
+  /** SHA-256 of the image pixel data only — the primary lookup key. */
+  imageDataHash?: string | null;
+  /**
+   * iOS PHAsset.localIdentifier (X-Asset-Id) — a fallback lookup key used when
+   * the image-data hash misses. Only accepted as a metadata-only match when the
+   * candidate photo's pixels are unchanged (see tryMetadataOnlySync).
+   */
+  deviceAssetId?: string | null;
   /**
    * SHA-256 of the complete file (metadata + pixel data) as it now exists on
    * the device. Stored as `hash` so the next full-hash lookup recognises the
@@ -1981,28 +1987,56 @@ export interface MetadataSyncInput {
  *
  * When the iOS client re-uploads a photo whose pixel data the server already
  * has — only the EXIF/IPTC metadata changed — it sends the X-Image-Data-Hash
- * header. We look the photo up by that hash and, when found, apply the new
+ * header (and X-Asset-Id). We look the photo up and, when found, apply the new
  * metadata in place instead of storing a second copy. The caller can then
  * answer the request before the (unchanged, possibly large) image body is
  * transferred, sparing the client's bandwidth.
+ *
+ * Lookup order: image_data_hash (pixel identity) first, then device_asset_id
+ * as a fallback — the latter only when the candidate's pixels are unchanged, so
+ * an actual photo edit is still stored as a new file.
  *
  * The device is authoritative: a present `description` / `isFavorite` /
  * `capturedAt` overwrites the server value (favourites may also be removed).
  * Absent fields are left untouched.
  *
- * Returns the matched photo id, or `null` when no photo with that image-data
- * hash exists for the user — the caller should then fall back to a full upload.
+ * Returns the matched photo id, or `null` when no existing photo matches — the
+ * caller should then fall back to a full upload.
  */
 export async function tryMetadataOnlySync(
   userId: number,
   input: MetadataSyncInput,
 ): Promise<{ photoId: number } | null> {
-  const existing = await dbFirst<typeof photos.$inferSelect>(
-    db.select().from(photos).where(and(
-      eq(photos.user_id, userId),
-      eq(photos.image_data_hash, input.imageDataHash),
-    )),
-  );
+  // Primary lookup: the image-data hash identifies the pixel content.
+  let existing = input.imageDataHash
+    ? await dbFirst<typeof photos.$inferSelect>(
+        db.select().from(photos).where(and(
+          eq(photos.user_id, userId),
+          eq(photos.image_data_hash, input.imageDataHash),
+        )),
+      )
+    : undefined;
+
+  // Fallback lookup: device_asset_id (PHAsset.localIdentifier). Only accepted
+  // as a metadata-only match when the pixels are unchanged — a candidate that
+  // carries a different image_data_hash was edited and must be stored as a new
+  // file, so we return null and let the caller upload it.
+  if (!existing && input.deviceAssetId) {
+    const candidate = await dbFirst<typeof photos.$inferSelect>(
+      db.select().from(photos).where(and(
+        eq(photos.user_id, userId),
+        eq(photos.device_asset_id, input.deviceAssetId),
+      )),
+    );
+    if (candidate) {
+      const pixelsChanged =
+        !!input.imageDataHash &&
+        !!candidate.image_data_hash &&
+        candidate.image_data_hash !== input.imageDataHash;
+      if (!pixelsChanged) existing = candidate;
+    }
+  }
+
   if (!existing) return null;
 
   // Apply each field through its dedicated update path so EXIF write-back and
@@ -2052,13 +2086,17 @@ export async function tryMetadataOnlySync(
     }
   }
 
-  // Refresh the stored hashes so the next full-hash lookup recognises the file.
+  // Refresh the stored keys so the next sync/check recognises the photo and a
+  // later device_asset_id lookup keeps working.
   const hashUpdates: Partial<typeof photos.$inferInsert> = {};
   if (input.fullHash && input.fullHash !== existing.hash) {
     hashUpdates.hash = input.fullHash;
   }
-  if (!existing.image_data_hash) {
+  if (!existing.image_data_hash && input.imageDataHash) {
     hashUpdates.image_data_hash = input.imageDataHash;
+  }
+  if (!existing.device_asset_id && input.deviceAssetId) {
+    hashUpdates.device_asset_id = input.deviceAssetId;
   }
   if (Object.keys(hashUpdates).length > 0) {
     await dbExec(db.update(photos).set(hashUpdates).where(eq(photos.id, existing.id)));
@@ -2106,6 +2144,8 @@ export interface UploadSyncMeta {
    * a string (incl. "") is used verbatim — the device is authoritative.
    */
   description?: string;
+  /** iOS PHAsset.localIdentifier — stable dedup key independent of byte content. */
+  deviceAssetId?: string | null;
 }
 
 export async function uploadPhotoStream(
@@ -2117,7 +2157,7 @@ export async function uploadPhotoStream(
   clientCapturedAt: string | null = null,
   sync: UploadSyncMeta = {},
 ): Promise<Photo> {
-  const { imageDataHash = null, fullHash = null } = sync;
+  const { imageDataHash = null, fullHash = null, deviceAssetId = null } = sync;
   if (!SUPPORTED_MIME_TYPES.has(mimeType.toLowerCase().split(";")[0].trim())) {
     throw new Error("UNSUPPORTED_FILE_TYPE");
   }
@@ -2150,7 +2190,11 @@ export async function uploadPhotoStream(
     if (parsed) exifMeta.takenAt = parsed;
   }
 
-  // Check for duplicate for this user
+  // Check for duplicate by content hash. A hash-protocol client has already
+  // been matched precisely by tryMetadataOnlySync (image_data_hash /
+  // device_asset_id) in the endpoint before the body was read, so reaching here
+  // means genuinely new content; this exact-digest check still catches
+  // byte-identical re-uploads (notably legacy clients and pre-protocol rows).
   const existing = await dbFirst<typeof photos.$inferSelect>(
     db.select().from(photos).where(and(eq(photos.user_id, userId), eq(photos.hash, digest)))
   );
@@ -2171,16 +2215,14 @@ export async function uploadPhotoStream(
   // this user, update that existing record instead of creating a second one.
   // Guard: skip when the new upload has NO new metadata so that burst photos
   // (same taken_at, different content, no description) each keep their own record.
-  // The device is authoritative when it sends X-Description; otherwise fall
-  // back to the description embedded in the file's IPTC block.
+  // Device is authoritative for description when it sends X-Description header.
   const descriptionValueEarly = sync.description !== undefined
     ? (sync.description.trim() || null)
     : combineDescription(exifMeta);
   const hasNewMetadata = isFavorite || !!descriptionValueEarly || (exifMeta.rating !== null && exifMeta.rating >= 4);
-  // The fuzzy taken_at fallback only serves legacy clients. A hash-sync client
-  // (one that sent X-Image-Data-Hash) has already been matched precisely by
-  // the metadata-only sync path, so reaching here means genuinely new pixels —
-  // running the fuzzy dedup could then wrongly merge same-second photos.
+  // Skip takenAt fallback when imageDataHash is present: a hash-protocol client
+  // reaching here means genuinely new pixels — fuzzy dedup could wrongly merge
+  // same-second burst photos.
   if (exifMeta.takenAt && hasNewMetadata && !imageDataHash) {
     const takenAtDup = await dbFirst<{ id: number }>(
       db.select({ id: photos.id })
@@ -2199,6 +2241,7 @@ export async function uploadPhotoStream(
   const { absPath: filePath, relPath: filename } = await reserveStoragePath(storageTs, ext);
   await fs.promises.rename(tempPath, filePath);
 
+  // descriptionValueEarly already prefers X-Description over the file's IPTC.
   const descriptionValue = descriptionValueEarly;
   // Pre-fill location from IPTC when present, sparing us a Nominatim call.
   const iptcLoc = iptcLocationUpdate(exifMeta);
@@ -2216,6 +2259,7 @@ export async function uploadPhotoStream(
       // clients that send no X-Full-Hash header.
       hash: fullHash ?? digest,
       image_data_hash: imageDataHash,
+      device_asset_id: deviceAssetId,
       taken_at: exifMeta.takenAt,
       latitude: exifMeta.latitude,
       longitude: exifMeta.longitude,
