@@ -1,5 +1,6 @@
 import BackgroundTasks
 import Foundation
+import ImageIO
 import Photos
 
 /// Manages registration and scheduling of the background photo-sync processing task,
@@ -165,6 +166,94 @@ public final class BackgroundSyncManager {
         )
     }
 
+    // MARK: - Asset identifier recovery
+
+    /// iOS hands a share extension only file bytes, never a `PHAsset`, so an
+    /// item enqueued by the extension frequently has no `assetLocalIdentifier`.
+    /// Without it the favourite flag can never be read, and the upload carries
+    /// no `X-Asset-Id` so the server stores no `device_asset_id` — a later
+    /// library auto-sync of the same photo then cannot deduplicate by asset id.
+    ///
+    /// The main app has full Photos access and can match the photo back to the
+    /// library. Returns the item unchanged when it already has an identifier or
+    /// no match is found.
+    private func recoverAssetIdentifierIfMissing(_ item: UploadQueueItem) async -> UploadQueueItem {
+        guard (item.assetLocalIdentifier ?? "").isEmpty else { return item }
+        guard let recovered = await recoverAssetIdentifier(for: item) else { return item }
+        print("[BGSync] Recovered asset id for queued item \(item.id)")
+        return item.withAssetLocalIdentifier(recovered)
+    }
+
+    /// Matches a queued photo back to a library `PHAsset` and returns its
+    /// `localIdentifier`, or nil when no exact match is found.
+    ///
+    /// The capture date narrows the search to a handful of candidates via the
+    /// indexed `creationDate` — then the metadata-independent `imageDataHash`
+    /// confirms the exact asset. The hash is byte-identical to the one the
+    /// Share Extension stored, so a burst shot sharing the same capture second
+    /// cannot produce a false positive.
+    private func recoverAssetIdentifier(for item: UploadQueueItem) async -> String? {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard status == .authorized || status == .limited else { return nil }
+        guard let capturedAt = Self.captureDate(for: item) else { return nil }
+
+        let tolerance: TimeInterval = 120
+        let options = PHFetchOptions()
+        options.predicate = NSPredicate(
+            format: "mediaType == %d AND creationDate >= %@ AND creationDate <= %@",
+            PHAssetMediaType.image.rawValue,
+            capturedAt.addingTimeInterval(-tolerance) as NSDate,
+            capturedAt.addingTimeInterval(tolerance) as NSDate
+        )
+        let fetch = PHAsset.fetchAssets(with: options)
+        guard fetch.count > 0 else { return nil }
+
+        var candidates: [PHAsset] = []
+        fetch.enumerateObjects { asset, _, _ in candidates.append(asset) }
+
+        for asset in candidates {
+            if let hashes = await PhotoHasher.shared.hashes(for: asset),
+               hashes.imageDataHash == item.imageDataHash {
+                return asset.localIdentifier
+            }
+        }
+        return nil
+    }
+
+    /// Reads the EXIF `DateTimeOriginal` of the shared file — the capture date
+    /// used to narrow the library search. The Share Extension cannot resolve a
+    /// PHAsset for these items, so its `capturedAtString` is empty; the file's
+    /// own EXIF is the only capture date available.
+    private static func captureDate(for item: UploadQueueItem) -> Date? {
+        guard let source = CGImageSourceCreateWithURL(item.tempFileURL as CFURL, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any],
+              let original = exif[kCGImagePropertyExifDateTimeOriginal] as? String
+        else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
+        // The EXIF 2.31 offset tag pins the absolute instant when present;
+        // otherwise assume the photo was taken in the device's current zone.
+        if let offset = exif[kCGImagePropertyExifOffsetTimeOriginal] as? String,
+           let zone = Self.timeZone(fromExifOffset: offset) {
+            formatter.timeZone = zone
+        } else {
+            formatter.timeZone = TimeZone.current
+        }
+        return formatter.date(from: original)
+    }
+
+    /// Parses an EXIF offset string such as "+02:00" into a `TimeZone`.
+    private static func timeZone(fromExifOffset offset: String) -> TimeZone? {
+        let trimmed = offset.trimmingCharacters(in: .whitespaces)
+        guard trimmed.count == 6,
+              let hours = Int(trimmed.dropFirst().prefix(2)),
+              let minutes = Int(trimmed.suffix(2)) else { return nil }
+        let sign = trimmed.hasPrefix("-") ? -1 : 1
+        return TimeZone(secondsFromGMT: sign * (hours * 3600 + minutes * 60))
+    }
+
     // MARK: - Foreground queue drain (iOS < 26.1 / BGProcessingTask fallback)
 
     /// Drains pending UploadQueue items using the main app's network stack.
@@ -175,11 +264,14 @@ public final class BackgroundSyncManager {
         guard !pending.isEmpty else { return }
 
         for item in pending {
-            // The Share Extension uploads with isFavorite = false (it cannot
-            // resolve a PHAsset). Re-read the favourite/caption from the photo
-            // library here, where the main app has full access; skipped when
-            // the photo is not in the library (shared from another app).
-            let item = refreshMetadataFromLibrary(item)
+            // The Share Extension uploads with isFavorite = false and often
+            // without a PHAsset identifier (iOS hands it only file bytes).
+            // Recover the identifier by matching the photo back to the library,
+            // then re-read the favourite/caption — both need the main app's
+            // full Photos access. Skipped when the photo is not in the library
+            // (shared from another app).
+            let identified = await recoverAssetIdentifierIfMissing(item)
+            let item = refreshMetadataFromLibrary(identified)
             let localId = item.assetLocalIdentifier ?? ""
 
             // Metadata-only fast path: if we have a synced state entry with the same

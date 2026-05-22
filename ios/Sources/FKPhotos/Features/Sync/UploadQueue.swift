@@ -55,6 +55,27 @@ public struct UploadQueueItem: Codable, Identifiable, Sendable {
         self.status = status
         self.retryCount = retryCount
     }
+
+    /// Returns a copy with the asset identifier replaced. Used when the main
+    /// app recovers the `PHAsset` identifier of a Share-Extension item that was
+    /// enqueued without one.
+    public func withAssetLocalIdentifier(_ identifier: String) -> UploadQueueItem {
+        UploadQueueItem(
+            id: id,
+            assetLocalIdentifier: identifier,
+            tempFileURL: tempFileURL,
+            filename: filename,
+            mimeType: mimeType,
+            imageDataHash: imageDataHash,
+            fullHash: fullHash,
+            caption: caption,
+            isFavorite: isFavorite,
+            capturedAtString: capturedAtString,
+            targetAlbumIds: targetAlbumIds,
+            status: status,
+            retryCount: retryCount
+        )
+    }
 }
 
 /// Persistent upload queue shared between the main app and the Share Extension via the App Group container.
