@@ -14,6 +14,9 @@ struct AlbumDetailView: View {
     @State private var fullscreenIndex: Int = 0
     @State private var isFullscreenPresented = false
     @State private var filterSort = FilterSortViewModel()
+    @State private var isSelecting = false
+    @State private var selectedIds: Set<Int> = []
+    @State private var shareManager = PhotoShareManager()
     @Environment(\.dismiss) private var dismiss
 
     private var displayedPhotos: [PhotoWithCuration] {
@@ -43,19 +46,34 @@ struct AlbumDetailView: View {
             } else {
                 LazyVGrid(columns: columns, spacing: 2) {
                     ForEach(displayedPhotos) { photo in
-                        Button {
-                            fullscreenIndex = displayedPhotos.firstIndex(where: { $0.id == photo.id }) ?? 0
-                            isFullscreenPresented = true
-                        } label: {
-                            PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop)
-                        }
-                        .buttonStyle(.plain)
+                        PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop)
+                            .overlay(alignment: .topLeading) {
+                                if isSelecting {
+                                    SelectionCheckmark(isSelected: selectedIds.contains(photo.id))
+                                        .padding(4)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                if isSelecting {
+                                    toggleSelection(photo.id)
+                                } else {
+                                    fullscreenIndex = displayedPhotos.firstIndex(where: { $0.id == photo.id }) ?? 0
+                                    isFullscreenPresented = true
+                                }
+                            }
+                            .onLongPressGesture {
+                                if !isSelecting {
+                                    isSelecting = true
+                                    selectedIds = [photo.id]
+                                }
+                            }
                     }
                 }
                 .padding(.horizontal, 2)
             }
         }
-        .navigationTitle(album?.name ?? "Album")
+        .navigationTitle(isSelecting ? "\(selectedIds.count) ausgewählt" : (album?.name ?? "Album"))
         .navigationBarTitleDisplayMode(.large)
         .navigationDestination(isPresented: $isFullscreenPresented) {
             PhotoFullscreenView(photos: displayedPhotos, currentIndex: $fullscreenIndex)
@@ -65,29 +83,54 @@ struct AlbumDetailView: View {
                 .presentationDetents([.medium, .large])
         }
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                FilterSortButton(viewModel: filterSort)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showUpload = true
-                } label: {
-                    Image(systemName: "photo.badge.plus")
-                }
-            }
-            if userRole == "owner" || userRole == "admin" {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        showShareSheet = true
-                    } label: {
-                        Image(systemName: "person.crop.circle.badge.plus")
+            if isSelecting {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") {
+                        isSelecting = false
+                        selectedIds = []
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button(role: .destructive) {
-                        showDeleteConfirm = true
+                    Button {
+                        let filenames = displayedPhotos.filter { selectedIds.contains($0.id) }.map(\.filename)
+                        Task { await shareManager.share(filenames: filenames) }
                     } label: {
-                        Image(systemName: "trash")
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .disabled(selectedIds.isEmpty || shareManager.isLoading)
+                }
+            } else {
+                ToolbarItem(placement: .topBarLeading) {
+                    FilterSortButton(viewModel: filterSort)
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        isSelecting = true
+                    } label: {
+                        Image(systemName: "checkmark.circle")
+                    }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showUpload = true
+                    } label: {
+                        Image(systemName: "photo.badge.plus")
+                    }
+                }
+                if userRole == "owner" || userRole == "admin" {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            showShareSheet = true
+                        } label: {
+                            Image(systemName: "person.crop.circle.badge.plus")
+                        }
+                    }
+                    ToolbarItem(placement: .primaryAction) {
+                        Button(role: .destructive) {
+                            showDeleteConfirm = true
+                        } label: {
+                            Image(systemName: "trash")
+                        }
                     }
                 }
             }
@@ -108,8 +151,30 @@ struct AlbumDetailView: View {
         .sheet(isPresented: $showShareSheet) {
             AlbumShareView(albumId: albumId)
         }
+        .sheet(isPresented: $shareManager.isPresented) {
+            ActivityView(images: shareManager.images)
+        }
+        .overlay {
+            if shareManager.isLoading {
+                ZStack {
+                    Color.black.opacity(0.3).ignoresSafeArea()
+                    ProgressView("Fotos laden…")
+                        .padding()
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+        }
         .task {
             await loadAlbum()
+        }
+    }
+
+    private func toggleSelection(_ id: Int) {
+        if selectedIds.contains(id) {
+            selectedIds.remove(id)
+            if selectedIds.isEmpty { isSelecting = false }
+        } else {
+            selectedIds.insert(id)
         }
     }
 
