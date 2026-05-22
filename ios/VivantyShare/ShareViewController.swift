@@ -634,31 +634,52 @@ enum ShareHasher {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
-    /// SHA-256 of the image's pixel bitstream with all EXIF/IPTC/XMP metadata
-    /// removed. The Photos app re-exports a shared photo with its current
-    /// caption/date embedded in the file, so hashing the raw bytes is unstable
-    /// across metadata edits — a caption change alone would change the hash and
-    /// defeat the server's image_data_hash dedup, creating a duplicate.
-    /// Stripping the metadata container first (CGImageDestination copies the
-    /// compressed bitstream verbatim, no re-encoding) yields a hash that only
-    /// changes when the pixels change. Mirrors PhotoHasher.computeImageDataHash
-    /// in the main app so both upload paths produce the same image_data_hash.
-    /// Falls back to hashing the raw bytes when stripping fails.
+    /// SHA-256 of the image's *decoded pixel data*, independent of any
+    /// EXIF/IPTC/XMP metadata in the file container.
+    ///
+    /// The Photos app re-exports a shared photo with its current caption
+    /// embedded, so hashing the file bytes is unstable across caption edits.
+    /// Re-wrapping the file with CGImageDestination does NOT help: it *merges*
+    /// the source metadata rather than dropping it (and may fail outright for
+    /// HEIC), so the caption survives. Decoding the image to pixels and hashing
+    /// those is metadata-proof — only an actual pixel change moves the hash.
+    ///
+    /// The image is decoded at a bounded size so a large photo cannot exhaust
+    /// the Share Extension's tight (~120 MB) memory budget. Falls back to
+    /// hashing the raw bytes only when the image cannot be decoded at all.
     static func imageDataHash(_ data: Data) -> String {
-        sha256Hex(imageDataStrippingMetadata(data) ?? data)
+        sha256Hex(decodedPixelData(data) ?? data)
     }
 
-    /// Returns the compressed image bitstream with all metadata removed, or nil
-    /// when the data cannot be re-encoded.
-    private static func imageDataStrippingMetadata(_ data: Data) -> Data? {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-              let uti = CGImageSourceGetType(source) else { return nil }
-        let output = NSMutableData()
-        guard let dest = CGImageDestinationCreateWithData(output as CFMutableData, uti, 1, nil) else { return nil }
-        let options: [CFString: Any] = [kCGImageDestinationMetadata: CGImageMetadataCreateMutable()]
-        CGImageDestinationAddImageFromSource(dest, source, 0, options as CFDictionary)
-        guard CGImageDestinationFinalize(dest) else { return nil }
-        return output as Data
+    /// Decodes the image to a bounded-size bitmap and returns its raw pixel
+    /// bytes in a fixed RGBA layout — deterministic for identical pixels and
+    /// free of any container metadata. Returns nil when the data cannot be
+    /// decoded.
+    private static func decodedPixelData(_ data: Data) -> Data? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: 1024,
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+        let width = image.width
+        let height = image.height
+        guard width > 0, height > 0 else { return nil }
+        let bytesPerRow = width * 4
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let pixels = context.data else { return nil }
+        return Data(bytes: pixels, count: height * bytesPerRow)
     }
 
     static func fullHash(imageDataHash: String, caption: String, isFavorite: Bool, capturedAtString: String) -> String {
