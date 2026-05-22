@@ -1952,6 +1952,34 @@ export async function mergeUploadMetadataIntoExisting(
 }
 
 /** Metadata carried by a hash-based metadata-only sync (issue #432). */
+/**
+ * Applies the device's favourite state to a photo on a hash-sync re-upload.
+ * Promotes to / demotes from "favorite" but never clobbers a "hidden"
+ * curation. Best-effort: a write-back hiccup must not fail the sync.
+ */
+async function applySyncFavorite(
+  userId: number,
+  photoId: number,
+  isFavorite: boolean,
+): Promise<void> {
+  const cur = await dbFirst<{ status: CurationStatus }>(
+    db.select({ status: photoCuration.status }).from(photoCuration).where(and(
+      eq(photoCuration.user_id, userId),
+      eq(photoCuration.photo_id, photoId),
+    )),
+  );
+  const curStatus: CurationStatus = cur?.status ?? "visible";
+  try {
+    if (isFavorite && curStatus !== "favorite") {
+      await updatePhotoCurationLogic(userId, photoId, "favorite");
+    } else if (!isFavorite && curStatus === "favorite") {
+      await updatePhotoCurationLogic(userId, photoId, "visible");
+    }
+  } catch (err) {
+    console.error(`Sync favorite update failed for photo ${photoId}:`, err);
+  }
+}
+
 export interface MetadataSyncInput {
   /** SHA-256 of the image pixel data only — the primary lookup key. */
   imageDataHash?: string | null;
@@ -2066,24 +2094,7 @@ export async function tryMetadataOnlySync(
   }
 
   if (input.isFavorite !== undefined) {
-    const cur = await dbFirst<{ status: CurationStatus }>(
-      db.select({ status: photoCuration.status }).from(photoCuration).where(and(
-        eq(photoCuration.user_id, userId),
-        eq(photoCuration.photo_id, existing.id),
-      )),
-    );
-    const curStatus: CurationStatus = cur?.status ?? "visible";
-    // Only touch the favourite axis — never clobber a "hidden" curation just
-    // because the device reports the photo as not-favourited.
-    try {
-      if (input.isFavorite && curStatus !== "favorite") {
-        await updatePhotoCurationLogic(userId, existing.id, "favorite");
-      } else if (!input.isFavorite && curStatus === "favorite") {
-        await updatePhotoCurationLogic(userId, existing.id, "visible");
-      }
-    } catch (err) {
-      console.error(`Metadata sync: favorite update failed for photo ${existing.id}:`, err);
-    }
+    await applySyncFavorite(userId, existing.id, input.isFavorite);
   }
 
   // Refresh the stored keys so the next sync/check recognises the photo and a
@@ -2148,6 +2159,97 @@ export interface UploadSyncMeta {
   deviceAssetId?: string | null;
 }
 
+/**
+ * Replaces the stored file of an existing photo with freshly uploaded bytes,
+ * matched by device_asset_id (issue #432). Used when the iOS client re-uploads
+ * an asset whose pixels changed (an in-app edit) under the same
+ * PHAsset.localIdentifier — the photo record is updated in place instead of a
+ * duplicate being created. `tempPath` is consumed (moved into storage).
+ */
+async function replacePhotoContent(
+  userId: number,
+  existing: typeof photos.$inferSelect,
+  opts: {
+    tempPath: string;
+    ext: string;
+    mimeType: string;
+    originalName: string;
+    size: number;
+    digest: string;
+    exifMeta: ExifMetadata;
+    imageDataHash: string | null;
+    fullHash: string | null;
+    isFavorite: boolean;
+    description?: string;
+  },
+): Promise<Photo> {
+  // Move the new bytes into a fresh storage slot (a new name also busts any
+  // path-keyed thumbnail cache).
+  const storageTs = pickStorageTimestamp(opts.exifMeta.takenAt ?? existing.taken_at);
+  const { absPath: newAbsPath, relPath: newFilename } = await reserveStoragePath(storageTs, opts.ext);
+  await fs.promises.rename(opts.tempPath, newAbsPath);
+
+  const oldFilename = existing.filename;
+
+  // The device is authoritative for the caption on a sync re-upload.
+  const description = opts.description !== undefined
+    ? (opts.description.trim() || null)
+    : (combineDescription(opts.exifMeta) ?? existing.description ?? null);
+
+  await dbExec(db.update(photos).set({
+    filename: newFilename,
+    original_name: opts.originalName,
+    mime_type: opts.mimeType,
+    size: opts.size,
+    hash: opts.fullHash ?? opts.digest,
+    image_data_hash: opts.imageDataHash,
+    taken_at: opts.exifMeta.takenAt ?? existing.taken_at,
+    description,
+    // These describe the superseded pixels — null them so the re-scan
+    // recomputes them for the new content.
+    width: null,
+    height: null,
+    ai_quality_score: null,
+    ai_quality_details: null,
+    auto_crop: null,
+  }).where(eq(photos.id, existing.id)));
+
+  // Drop the superseded file and its cached thumbnails.
+  const oldAbsPath = path.join(UPLOAD_DIR, oldFilename);
+  if (oldAbsPath !== newAbsPath && fs.existsSync(oldAbsPath)) {
+    await fs.promises.unlink(oldAbsPath).catch(() => {});
+  }
+  await deleteCachedThumbnails(oldFilename);
+
+  // Favourite is authoritative on a hash-sync re-upload (the client always
+  // sends X-Is-Favorite alongside X-Asset-Id).
+  await applySyncFavorite(userId, existing.id, opts.isFavorite);
+
+  // Re-scan: faces, quality and dimensions all changed with the new pixels.
+  enqueuePhotoScan(existing.id, userId).then(() => triggerWorkers()).catch(err => {
+    console.error("Replace re-scan enqueue error:", err);
+  });
+
+  const row = await dbFirst<typeof photos.$inferSelect>(
+    db.select().from(photos).where(eq(photos.id, existing.id)),
+  );
+  return {
+    id: row!.id,
+    user_id: row!.user_id,
+    filename: row!.filename,
+    original_name: row!.original_name,
+    mime_type: row!.mime_type,
+    size: row!.size,
+    hash: row!.hash ?? undefined,
+    taken_at: row!.taken_at ?? undefined,
+    created_at: row!.created_at ?? "",
+    latitude: row!.latitude ?? undefined,
+    longitude: row!.longitude ?? undefined,
+    description: row!.description ?? undefined,
+    keywords: row!.keywords ?? [],
+  };
+}
+
 export async function uploadPhotoStream(
   userId: number,
   stream: IncomingMessage,
@@ -2156,7 +2258,7 @@ export async function uploadPhotoStream(
   isFavorite: boolean = false,
   clientCapturedAt: string | null = null,
   sync: UploadSyncMeta = {},
-): Promise<Photo> {
+): Promise<{ photo: Photo; replaced: boolean }> {
   const { imageDataHash = null, fullHash = null, deviceAssetId = null } = sync;
   if (!SUPPORTED_MIME_TYPES.has(mimeType.toLowerCase().split(";")[0].trim())) {
     throw new Error("UNSUPPORTED_FILE_TYPE");
@@ -2188,6 +2290,27 @@ export async function uploadPhotoStream(
   if (!exifMeta.takenAt && clientCapturedAt) {
     const parsed = normalizeClientCapturedAt(clientCapturedAt);
     if (parsed) exifMeta.takenAt = parsed;
+  }
+
+  // device_asset_id replace (issue #432): the client re-uploaded an asset we
+  // already have under the same PHAsset.localIdentifier. A pure metadata edit
+  // was already handled before the body was read (tryMetadataOnlySync's
+  // pixels-unchanged fast path); reaching here with an asset-id match means the
+  // pixels changed — replace the stored file in place instead of duplicating.
+  if (deviceAssetId) {
+    const assetMatch = await dbFirst<typeof photos.$inferSelect>(
+      db.select().from(photos).where(and(
+        eq(photos.user_id, userId),
+        eq(photos.device_asset_id, deviceAssetId),
+      )),
+    );
+    if (assetMatch && !assetMatch.external_path) {
+      const photo = await replacePhotoContent(userId, assetMatch, {
+        tempPath, ext, mimeType, originalName, size, digest, exifMeta,
+        imageDataHash, fullHash, isFavorite, description: sync.description,
+      });
+      return { photo, replaced: true };
+    }
   }
 
   // Check for duplicate by content hash. A hash-protocol client has already
@@ -2296,19 +2419,22 @@ export async function uploadPhotoStream(
   }
 
   return {
-    id: row!.id,
-    user_id: row!.user_id,
-    filename: row!.filename,
-    original_name: row!.original_name,
-    mime_type: row!.mime_type,
-    size: row!.size,
-    hash: row!.hash ?? undefined,
-    taken_at: row!.taken_at ?? undefined,
-    created_at: row!.created_at ?? "",
-    latitude: row!.latitude ?? undefined,
-    longitude: row!.longitude ?? undefined,
-    description: row!.description ?? undefined,
-    keywords: row!.keywords ?? [],
+    photo: {
+      id: row!.id,
+      user_id: row!.user_id,
+      filename: row!.filename,
+      original_name: row!.original_name,
+      mime_type: row!.mime_type,
+      size: row!.size,
+      hash: row!.hash ?? undefined,
+      taken_at: row!.taken_at ?? undefined,
+      created_at: row!.created_at ?? "",
+      latitude: row!.latitude ?? undefined,
+      longitude: row!.longitude ?? undefined,
+      description: row!.description ?? undefined,
+      keywords: row!.keywords ?? [],
+    },
+    replaced: false,
   };
 }
 
