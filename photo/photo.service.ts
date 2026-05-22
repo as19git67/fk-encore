@@ -1865,8 +1865,12 @@ export class PhotoAlreadyExistsError extends Error {
  * Backfill rules — never overwrite user data on the server with an empty value:
  *   - taken_at:     fill if existing is NULL (a precise EXIF-derived timestamp
  *                   is always better than the server's NULL).
- *   - description:  fill if existing is empty/NULL (server-side edits win
- *                   over re-uploaded EXIF; only fill when there is nothing).
+ *   - description:  the device is authoritative when it sends an explicit
+ *                   caption (`deviceDescription`) — a re-share with an edited
+ *                   caption overwrites the stored value, mirroring the
+ *                   metadata-only sync path. Without that header we only
+ *                   backfill from re-uploaded EXIF when the existing record
+ *                   has none, so a server-side edit is never clobbered.
  *   - keywords:     union with existing — never lose tags the user added on
  *                   the server.
  *   - lat/lon:      backfill when existing has none.
@@ -1889,6 +1893,7 @@ export async function mergeUploadMetadataIntoExisting(
   imageDataHash: string | null = null,
   fullHash: string | null = null,
   deviceAssetId: string | null = null,
+  deviceDescription?: string,
 ): Promise<void> {
   const existing = await dbFirst<typeof photos.$inferSelect>(
     db.select().from(photos).where(eq(photos.id, existingPhotoId))
@@ -1923,9 +1928,23 @@ export async function mergeUploadMetadataIntoExisting(
     updates.taken_at = exifMeta.takenAt;
   }
 
-  const incomingDescription = combineDescription(exifMeta);
-  if (incomingDescription && !(existing.description ?? "").trim()) {
-    updates.description = incomingDescription;
+  // Description. When the device sent an explicit X-Description header
+  // (`deviceDescription` is a string, possibly empty) it is authoritative — a
+  // re-share with an edited caption overwrites the stored value. Without the
+  // header we only backfill from the file's EXIF/IPTC, so a server-side edit
+  // is never clobbered. The authoritative change is applied after the batch
+  // update via updatePhotoDescriptionLogic (EXIF write-back + realtime).
+  let pendingDescription: string | null | undefined;
+  if (deviceDescription !== undefined) {
+    const incoming = deviceDescription.trim() || null;
+    if (incoming !== (existing.description ?? null)) {
+      pendingDescription = incoming;
+    }
+  } else {
+    const incomingDescription = combineDescription(exifMeta);
+    if (incomingDescription && !(existing.description ?? "").trim()) {
+      updates.description = incomingDescription;
+    }
   }
 
   const incomingKeywords = mergeRatingKeyword(exifMeta.keywords, exifMeta.rating);
@@ -1954,6 +1973,17 @@ export async function mergeUploadMetadataIntoExisting(
     await dbExec(
       db.update(photos).set(updates).where(eq(photos.id, existingPhotoId))
     );
+  }
+
+  // Device-authoritative caption change: route through the dedicated logic so
+  // the EXIF write-back and realtime fan-out match a normal edit. Best-effort —
+  // a hiccup here must not fail the duplicate response.
+  if (pendingDescription !== undefined) {
+    try {
+      await updatePhotoDescriptionLogic(userId, existingPhotoId, pendingDescription);
+    } catch (err) {
+      console.error(`Duplicate upload: description update failed for photo ${existingPhotoId}:`, err);
+    }
   }
 
   if (isFavorite || (exifMeta.rating !== null && exifMeta.rating >= 4)) {
@@ -2329,7 +2359,7 @@ export async function uploadPhotoStream(
     );
     if (dataHashDup) {
       await mergeUploadMetadataIntoExisting(
-        userId, dataHashDup.id, exifMeta, isFavorite, imageDataHash, fullHash, deviceAssetId,
+        userId, dataHashDup.id, exifMeta, isFavorite, imageDataHash, fullHash, deviceAssetId, sync.description,
       );
       if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
       throw new PhotoAlreadyExistsError(dataHashDup.id);
@@ -2369,7 +2399,7 @@ export async function uploadPhotoStream(
 
   if (existing) {
     await mergeUploadMetadataIntoExisting(
-      userId, existing.id, exifMeta, isFavorite, imageDataHash, fullHash, deviceAssetId,
+      userId, existing.id, exifMeta, isFavorite, imageDataHash, fullHash, deviceAssetId, sync.description,
     );
     if (fs.existsSync(tempPath)) {
       fs.unlinkSync(tempPath);
@@ -2400,7 +2430,7 @@ export async function uploadPhotoStream(
         .where(and(eq(photos.user_id, userId), eq(photos.taken_at, exifMeta.takenAt)))
     );
     if (takenAtDup) {
-      await mergeUploadMetadataIntoExisting(userId, takenAtDup.id, exifMeta, isFavorite, imageDataHash);
+      await mergeUploadMetadataIntoExisting(userId, takenAtDup.id, exifMeta, isFavorite, imageDataHash, null, null, sync.description);
       if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
       throw new PhotoAlreadyExistsError(takenAtDup.id);
     }

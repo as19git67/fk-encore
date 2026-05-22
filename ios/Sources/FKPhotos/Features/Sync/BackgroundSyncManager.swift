@@ -72,6 +72,7 @@ public final class BackgroundSyncManager {
     ///
     /// - Parameter item: A fully prepared UploadQueueItem (temp file + all metadata).
     public func enqueueForBackgroundUpload(_ item: UploadQueueItem) {
+        let item = refreshMetadataFromLibrary(item)
         if #available(iOS 26.1, *) {
             enqueuePHBackgroundJob(item)
         } else {
@@ -119,6 +120,51 @@ public final class BackgroundSyncManager {
         }
     }
 
+    // MARK: - Library metadata refresh
+
+    /// Re-reads the favourite flag and caption from the Photos library for a
+    /// queued item just before it is uploaded. The Share Extension cannot
+    /// resolve a `PHAsset`, so it uploads with whatever it could read from the
+    /// file alone — notably `isFavorite` is always `false`. The main app, which
+    /// runs this code, does have full Photos access.
+    ///
+    /// Returns the item unchanged when it has no asset identifier, or when the
+    /// asset is not in the Photos library — a photo shared into the app from
+    /// another app, or when Photos access is unavailable. In that case only the
+    /// metadata already captured at share time is used; there is no favourite
+    /// to read. When the favourite/caption did change, `fullHash` is recomputed
+    /// so the server still receives a consistent identity hash.
+    private func refreshMetadataFromLibrary(_ item: UploadQueueItem) -> UploadQueueItem {
+        guard let localId = item.assetLocalIdentifier, !localId.isEmpty,
+              let asset = PHAsset.fetchAssets(withLocalIdentifiers: [localId], options: nil).firstObject
+        else {
+            return item
+        }
+        let isFavorite = asset.isFavorite
+        let caption = PhotoHasher.shared.captionFromAsset(asset) ?? item.caption
+        guard isFavorite != item.isFavorite || caption != item.caption else { return item }
+        return UploadQueueItem(
+            id: item.id,
+            assetLocalIdentifier: item.assetLocalIdentifier,
+            tempFileURL: item.tempFileURL,
+            filename: item.filename,
+            mimeType: item.mimeType,
+            imageDataHash: item.imageDataHash,
+            fullHash: PhotoHasher.fullHash(
+                imageDataHash: item.imageDataHash,
+                caption: caption,
+                isFavorite: isFavorite,
+                capturedAtString: item.capturedAtString
+            ),
+            caption: caption,
+            isFavorite: isFavorite,
+            capturedAtString: item.capturedAtString,
+            targetAlbumIds: item.targetAlbumIds,
+            status: item.status,
+            retryCount: item.retryCount
+        )
+    }
+
     // MARK: - Foreground queue drain (iOS < 26.1 / BGProcessingTask fallback)
 
     /// Drains pending UploadQueue items using the main app's network stack.
@@ -129,6 +175,11 @@ public final class BackgroundSyncManager {
         guard !pending.isEmpty else { return }
 
         for item in pending {
+            // The Share Extension uploads with isFavorite = false (it cannot
+            // resolve a PHAsset). Re-read the favourite/caption from the photo
+            // library here, where the main app has full access; skipped when
+            // the photo is not in the library (shared from another app).
+            let item = refreshMetadataFromLibrary(item)
             let localId = item.assetLocalIdentifier ?? ""
 
             // Metadata-only fast path: if we have a synced state entry with the same

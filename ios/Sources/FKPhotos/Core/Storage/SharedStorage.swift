@@ -8,6 +8,7 @@ import Foundation
 enum SharedStorage {
     static let appGroupID        = "group.dev.fk-encore.VivantyPhotos"
     static let tokenKey          = "shared.auth_token"
+    static let refreshTokenKey   = "shared.refresh_token"
     static let serverURLKey      = "shared.serverURL"
     static let recentAlbumIdsKey = "shared.recentAlbumIds"
 
