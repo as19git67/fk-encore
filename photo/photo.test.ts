@@ -511,6 +511,46 @@ describe("Photo Module", () => {
         expect(fs.existsSync(originalFile)).toBe(false);
         fs.unlinkSync(path.join(UPLOAD_DIR, row!.filename));
       });
+
+      it("uploadPhotoStream dedups a re-upload by image_data_hash instead of duplicating", async () => {
+        // First upload: no device_asset_id (e.g. a pre-asset-id-protocol row).
+        const first = await uploadWithSync("dup-a.jpg", "dup-pixels", {
+          imageDataHash: imgHash,
+          fullHash: fullHashA,
+        });
+        expect(fs.existsSync(path.join(UPLOAD_DIR, first.filename))).toBe(true);
+
+        // Re-upload the same photo: identical image_data_hash, different file
+        // bytes (so the body digest differs), now carrying a device_asset_id
+        // and the favourite flag. Must NOT create a second row — the image-data
+        // hash identifies it as the same photo.
+        const deviceId = "DEV-DUP-001/L0/001";
+        const stream = Readable.from(Buffer.from("dup-pixels-reshared")) as any;
+        await expect(
+          service.uploadPhotoStream(user1.id, stream, "dup-b.jpg", "image/jpeg", true, null, {
+            imageDataHash: imgHash,
+            fullHash: fullHashB,
+            deviceAssetId: deviceId,
+          }),
+        ).rejects.toThrow("PHOTO_ALREADY_EXISTS");
+
+        const rows = await db.select().from(photos).where(eq(photos.image_data_hash, imgHash));
+        expect(rows.length).toBe(1);
+        expect(rows[0]!.id).toBe(first.id);
+        // The re-upload's identity hash is adopted and the device asset id is
+        // backfilled so the next sync dedups via the fast asset-id path.
+        expect(rows[0]!.hash).toBe(fullHashB);
+        expect(rows[0]!.device_asset_id).toBe(deviceId);
+
+        // The favourite flag carried by the re-upload is applied in place.
+        const fav = await dbFirst<{ status: string }>(
+          db.select({ status: photoCuration.status }).from(photoCuration)
+            .where(and(eq(photoCuration.user_id, user1.id), eq(photoCuration.photo_id, first.id)))
+        );
+        expect(fav?.status).toBe("favorite");
+
+        fs.unlinkSync(path.join(UPLOAD_DIR, first.filename));
+      });
     });
 
     it("should not allow duplicate uploads for the same user", async () => {
