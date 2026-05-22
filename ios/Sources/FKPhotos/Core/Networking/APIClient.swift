@@ -111,6 +111,57 @@ actor APIClient {
         return Set(response.existing)
     }
 
+    // MARK: - Metadata-only sync
+
+    /// Result of a metadata-only sync call to POST /photos/sync/metadata.
+    enum MetadataSyncResult {
+        case updated(photoId: Int)
+        case notFound
+    }
+
+    /// Sends a body-less metadata sync when only caption/favorite/date changed
+    /// but the pixel data is identical. Returns `.notFound` when the server
+    /// doesn't recognise the photo — caller should fall back to a full upload.
+    func syncPhotoMetadata(
+        imageDataHash: String,
+        fullHash: String,
+        caption: String,
+        isFavorite: Bool,
+        capturedAtString: String,
+        assetLocalId: String
+    ) async throws -> MetadataSyncResult {
+        struct Body: Encodable {
+            let imageDataHash: String
+            let deviceAssetId: String
+            let fullHash: String
+            let description: String
+            let isFavorite: Bool
+            let capturedAt: String
+        }
+        struct Response: Decodable {
+            let updated: Bool
+            let photoId: Int
+        }
+        do {
+            let response: Response = try await post("/photos/sync/metadata", body: Body(
+                imageDataHash: imageDataHash,
+                deviceAssetId: assetLocalId,
+                fullHash: fullHash,
+                description: caption,
+                isFavorite: isFavorite,
+                capturedAt: capturedAtString
+            ))
+            print("[MetadataSync] success, photoId=\(response.photoId)")
+            return .updated(photoId: response.photoId)
+        } catch let error as APIError {
+            if case .httpError(404, _) = error {
+                print("[MetadataSync] not found — falling back to full upload")
+                return .notFound
+            }
+            throw error
+        }
+    }
+
     // MARK: - Raw Upload
 
     /// Result of a photo upload.

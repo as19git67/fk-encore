@@ -374,10 +374,9 @@ struct ShareUploadView: View {
             }
         }
 
-        // 3. Upload new items.
+        // 3. Upload new items. Try metadata-only sync when pixels are unchanged.
         for (index, item) in newItems.enumerated() {
             guard !Task.isCancelled else { break }
-            // Skip if the same photo was already uploaded via prevItems in this session.
             if uploadedPrevHashes.contains(item.imageDataHash) {
                 print("[Share Upload] skipping duplicate new item \(item.filename) (already uploaded via prevItems)")
                 if index < queueEntries.count {
@@ -386,19 +385,44 @@ struct ShareUploadView: View {
                 uploadProgress += 1
                 continue
             }
-            do {
-                let photoId = try await ShareAPIClient.uploadPhoto(item: item)
-                uploadedIds.append(photoId)
-                if index < queueEntries.count {
-                    ShareUploadQueueWriter.markDone(id: queueEntries[index].id)
+
+            // Metadata-only fast path: pixels unchanged since last sync.
+            var metadataSynced = false
+            if let localId = item.assetLocalIdentifier, !localId.isEmpty {
+                let syncedEntry = ShareSyncedState.loadEntry(localId: localId)
+                if let syncedEntry, syncedEntry.imageDataHash == item.imageDataHash {
+                    if let photoId = try? await ShareAPIClient.syncPhotoMetadata(item: item) {
+                        uploadedIds.append(photoId)
+                        ShareSyncedState.saveEntry(localId: localId, imageDataHash: item.imageDataHash, fullHash: item.fullHash)
+                        if index < queueEntries.count {
+                            ShareUploadQueueWriter.markDone(id: queueEntries[index].id)
+                        }
+                        metadataSynced = true
+                    }
                 }
-            } catch ShareAPIError.duplicate(let existingId) {
-                if let id = existingId { uploadedIds.append(id) }
-                if index < queueEntries.count {
-                    ShareUploadQueueWriter.markDone(id: queueEntries[index].id)
+            }
+
+            if !metadataSynced {
+                do {
+                    let photoId = try await ShareAPIClient.uploadPhoto(item: item)
+                    uploadedIds.append(photoId)
+                    if let localId = item.assetLocalIdentifier, !localId.isEmpty {
+                        ShareSyncedState.saveEntry(localId: localId, imageDataHash: item.imageDataHash, fullHash: item.fullHash)
+                    }
+                    if index < queueEntries.count {
+                        ShareUploadQueueWriter.markDone(id: queueEntries[index].id)
+                    }
+                } catch ShareAPIError.duplicate(let existingId) {
+                    if let id = existingId { uploadedIds.append(id) }
+                    if let localId = item.assetLocalIdentifier, !localId.isEmpty {
+                        ShareSyncedState.saveEntry(localId: localId, imageDataHash: item.imageDataHash, fullHash: item.fullHash)
+                    }
+                    if index < queueEntries.count {
+                        ShareUploadQueueWriter.markDone(id: queueEntries[index].id)
+                    }
+                } catch {
+                    errorMessage = error.localizedDescription
                 }
-            } catch {
-                errorMessage = error.localizedDescription
             }
             uploadProgress += 1
         }
@@ -799,6 +823,35 @@ enum ShareUploadQueueWriter {
     }
 }
 
+// MARK: - Synced state (shared with main app via App Group)
+
+enum ShareSyncedState {
+    private static let syncedStateKey = "sync.syncedState"
+
+    struct Entry: Codable {
+        let imageDataHash: String
+        let fullHash: String
+    }
+
+    static func loadEntry(localId: String) -> Entry? {
+        guard let data = ShareConfig.defaults.data(forKey: syncedStateKey),
+              let cache = try? JSONDecoder().decode([String: Entry].self, from: data) else { return nil }
+        return cache[localId]
+    }
+
+    static func saveEntry(localId: String, imageDataHash: String, fullHash: String) {
+        var cache: [String: Entry] = [:]
+        if let data = ShareConfig.defaults.data(forKey: syncedStateKey),
+           let existing = try? JSONDecoder().decode([String: Entry].self, from: data) {
+            cache = existing
+        }
+        cache[localId] = Entry(imageDataHash: imageDataHash, fullHash: fullHash)
+        if let data = try? JSONEncoder().encode(cache) {
+            ShareConfig.defaults.set(data, forKey: syncedStateKey)
+        }
+    }
+}
+
 // MARK: - Shared configuration
 
 enum ShareConfig {
@@ -915,6 +968,45 @@ enum ShareAPIClient {
         }
         let decoded = try JSONDecoder().decode(Response.self, from: data)
         return ShareAlbum(id: decoded.id, name: decoded.name, photoCount: decoded.photo_count)
+    }
+
+    /// Metadata-only sync: sends JSON to POST /photos/sync/metadata (no image body).
+    /// Returns the photo id on success, or nil if the server doesn't recognise the photo.
+    static func syncPhotoMetadata(item: SharePhotoItem) async throws -> Int? {
+        var request = try makeRequest(method: "POST", path: "/photos/sync/metadata")
+        request.timeoutInterval = 30
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        struct Body: Encodable {
+            let imageDataHash: String
+            let deviceAssetId: String
+            let fullHash: String
+            let description: String
+            let isFavorite: Bool
+            let capturedAt: String
+        }
+        request.httpBody = try JSONEncoder().encode(Body(
+            imageDataHash: item.imageDataHash,
+            deviceAssetId: item.assetLocalIdentifier ?? "",
+            fullHash: item.fullHash,
+            description: item.caption,
+            isFavorite: item.isFavorite,
+            capturedAt: item.capturedAtString
+        ))
+        print("[Share MetadataSync] \(item.filename) imageDataHash=\(item.imageDataHash)")
+
+        let (responseData, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw ShareAPIError.httpError(0) }
+        if http.statusCode == 404 {
+            print("[Share MetadataSync] \(item.filename) → not found, falling back to full upload")
+            return nil
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw ShareAPIError.httpError(http.statusCode)
+        }
+        struct Response: Decodable { let photoId: Int }
+        let photoId = (try? JSONDecoder().decode(Response.self, from: responseData))?.photoId ?? 0
+        print("[Share MetadataSync] \(item.filename) → updated, photoId=\(photoId)")
+        return photoId
     }
 
     static func addPhotoToAlbum(photoId: Int, albumId: Int) async throws {

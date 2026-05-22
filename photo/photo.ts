@@ -307,6 +307,44 @@ export const checkPhotoHashes = api(
 );
 
 /**
+ * Body-less metadata sync (issue #432). The iOS client calls this when a
+ * photo's caption, favourite flag, or date changed but the pixel data is
+ * identical — avoids re-uploading the full image. Returns the matched photo
+ * id or 404 when the server doesn't recognise the photo.
+ */
+export const syncPhotoMetadata = api(
+  { expose: true, method: "POST", path: "/photos/sync/metadata", auth: true },
+  async (req: {
+    imageDataHash: string;
+    deviceAssetId: string;
+    fullHash: string;
+    description: string;
+    isFavorite: boolean;
+    capturedAt: string;
+  }): Promise<{ updated: boolean; photoId: number }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.upload");
+
+    const result = await service.tryMetadataOnlySync(userId, {
+      imageDataHash: req.imageDataHash || undefined,
+      deviceAssetId: req.deviceAssetId || undefined,
+      fullHash: req.fullHash || undefined,
+      description: req.description,
+      isFavorite: req.isFavorite,
+      capturedAt: req.capturedAt || undefined,
+    });
+
+    if (!result) {
+      throw APIError.notFound("No matching photo found for metadata sync");
+    }
+
+    return { updated: true, photoId: result.photoId };
+  }
+);
+
+/**
  * List all photos owned by the user.
  */
 export const listPhotos = api(
