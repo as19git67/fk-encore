@@ -1126,7 +1126,7 @@ describe("Photo Module", () => {
 
       await expect(
         service.addPhotoToAlbumLogic(user1.id, { albumId: album.id, photoId: photo.id })
-      ).rejects.toThrow("Photo not found or not owned by user");
+      ).rejects.toThrow("Photo not found or not accessible to user");
     });
 
     it("should be idempotent when the same photo is added to the same album twice (#303)", async () => {
@@ -1321,6 +1321,117 @@ describe("Photo Module", () => {
 
       // user2 has no share at all -> should NOT be able to hide
       await expect(service.updatePhotoCurationLogic(user2.id, photo.id, 'hidden')).rejects.toThrow("Photo not found or unauthorized");
+    });
+
+    it("should let an album owner reuse a participant's photo in another album", async () => {
+      // user2 contributes their own photo to user1's shared album.
+      const shared = await service.createAlbumLogic(user1.id, { name: "Family trip" });
+      await service.shareAlbumLogic(user1.id, { albumId: shared.id, userId: user2.id, accessLevel: "write" });
+      const photo = await service.uploadPhotoLogic(user2.id, {
+        data: Buffer.from([7, 7, 7]),
+        name: "u2_contrib.jpg",
+        mimeType: "image/jpeg",
+      });
+      await service.addPhotoToAlbumLogic(user2.id, { albumId: shared.id, photoId: photo.id });
+
+      // The owner of that album may pull the contributed photo into one of
+      // their own albums even though they don't own the photo.
+      const ownAlbum = await service.createAlbumLogic(user1.id, { name: "Best of" });
+      await service.addPhotoToAlbumLogic(user1.id, { albumId: ownAlbum.id, photoId: photo.id });
+
+      const details = await service.getAlbumLogic(user1.id, ownAlbum.id);
+      expect(details.photos.map(p => p.id)).toContain(photo.id);
+    });
+
+    it("should let a write_share participant reuse a photo from the shared album", async () => {
+      const shared = await service.createAlbumLogic(user1.id, { name: "Delegated reuse" });
+      await service.shareAlbumLogic(user1.id, { albumId: shared.id, userId: user2.id, accessLevel: "write_share" });
+      const photo = await service.uploadPhotoLogic(user1.id, {
+        data: Buffer.from([8, 8, 8]),
+        name: "u1_photo.jpg",
+        mimeType: "image/jpeg",
+      });
+      await service.addPhotoToAlbumLogic(user1.id, { albumId: shared.id, photoId: photo.id });
+
+      // The write_share participant copies the owner's photo into their own album.
+      const ownAlbum = await service.createAlbumLogic(user2.id, { name: "U2 collection" });
+      await service.addPhotoToAlbumLogic(user2.id, { albumId: ownAlbum.id, photoId: photo.id });
+
+      const details = await service.getAlbumLogic(user2.id, ownAlbum.id);
+      expect(details.photos.map(p => p.id)).toContain(photo.id);
+    });
+
+    it("should not let a plain write participant reuse another user's photo", async () => {
+      const shared = await service.createAlbumLogic(user1.id, { name: "Write only" });
+      await service.shareAlbumLogic(user1.id, { albumId: shared.id, userId: user2.id, accessLevel: "write" });
+      const photo = await service.uploadPhotoLogic(user1.id, {
+        data: Buffer.from([9, 9, 9]),
+        name: "u1_locked.jpg",
+        mimeType: "image/jpeg",
+      });
+      await service.addPhotoToAlbumLogic(user1.id, { albumId: shared.id, photoId: photo.id });
+
+      // Plain write access does not grant the right to take the photo elsewhere.
+      const ownAlbum = await service.createAlbumLogic(user2.id, { name: "U2 attempt" });
+      await expect(
+        service.addPhotoToAlbumLogic(user2.id, { albumId: ownAlbum.id, photoId: photo.id })
+      ).rejects.toThrow("Photo not found or not accessible to user");
+    });
+
+    it("should keep a reused photo after the source share is revoked (snapshot)", async () => {
+      const shared = await service.createAlbumLogic(user1.id, { name: "Snapshot source" });
+      await service.shareAlbumLogic(user1.id, { albumId: shared.id, userId: user2.id, accessLevel: "write_share" });
+      const photo = await service.uploadPhotoLogic(user1.id, {
+        data: Buffer.from([1, 0, 1]),
+        name: "snap.jpg",
+        mimeType: "image/jpeg",
+      });
+      await service.addPhotoToAlbumLogic(user1.id, { albumId: shared.id, photoId: photo.id });
+
+      const ownAlbum = await service.createAlbumLogic(user2.id, { name: "Snapshot target" });
+      await service.addPhotoToAlbumLogic(user2.id, { albumId: ownAlbum.id, photoId: photo.id });
+
+      // Revoking the share must not retroactively remove already-copied photos.
+      await service.removeAlbumShareLogic(user1.id, { albumId: shared.id, userId: user2.id });
+
+      const details = await service.getAlbumLogic(user2.id, ownAlbum.id);
+      expect(details.photos.map(p => p.id)).toContain(photo.id);
+    });
+
+    it("should let a write_share participant batch-add a photo from the shared album", async () => {
+      const shared = await service.createAlbumLogic(user1.id, { name: "Batch source" });
+      await service.shareAlbumLogic(user1.id, { albumId: shared.id, userId: user2.id, accessLevel: "write_share" });
+      const photo = await service.uploadPhotoLogic(user1.id, {
+        data: Buffer.from([2, 2, 2]),
+        name: "batch.jpg",
+        mimeType: "image/jpeg",
+      });
+      await service.addPhotoToAlbumLogic(user1.id, { albumId: shared.id, photoId: photo.id });
+
+      const ownAlbum = await service.createAlbumLogic(user2.id, { name: "Batch target" });
+      await service.batchUpdateAlbumPhotosLogic(user2.id, {
+        albumIds: [ownAlbum.id],
+        photoIds: [photo.id],
+        action: "add",
+      });
+
+      const details = await service.getAlbumLogic(user2.id, ownAlbum.id);
+      expect(details.photos.map(p => p.id)).toContain(photo.id);
+    });
+
+    it("should let an album owner curate a participant's photo in their album", async () => {
+      const shared = await service.createAlbumLogic(user1.id, { name: "Curate foreign" });
+      await service.shareAlbumLogic(user1.id, { albumId: shared.id, userId: user2.id, accessLevel: "write" });
+      const photo = await service.uploadPhotoLogic(user2.id, {
+        data: Buffer.from([3, 3, 3]),
+        name: "u2_curate.jpg",
+        mimeType: "image/jpeg",
+      });
+      await service.addPhotoToAlbumLogic(user2.id, { albumId: shared.id, photoId: photo.id });
+
+      // The album owner can favorite a contributed photo they do not own.
+      const res = await service.updatePhotoCurationLogic(user1.id, photo.id, 'favorite');
+      expect(res.success).toBe(true);
     });
   });
 });
