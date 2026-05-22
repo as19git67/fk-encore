@@ -95,8 +95,9 @@ describe("Photo Module", () => {
       const fileData = Buffer.from("streaming-image-data");
       const stream = Readable.from(fileData) as any;
 
-      const result = await service.uploadPhotoStream(user1.id, stream, "stream.jpg", "image/jpeg");
+      const { photo: result, replaced } = await service.uploadPhotoStream(user1.id, stream, "stream.jpg", "image/jpeg");
 
+      expect(replaced).toBe(false);
       expect(result.user_id).toBe(user1.id);
       expect(result.original_name).toBe("stream.jpg");
       expect(result.size).toBe(fileData.length);
@@ -267,7 +268,8 @@ describe("Photo Module", () => {
 
       async function uploadWithSync(name: string, body: string, sync: service.UploadSyncMeta) {
         const stream = Readable.from(Buffer.from(body)) as any;
-        return service.uploadPhotoStream(user1.id, stream, name, "image/jpeg", false, null, sync);
+        const { photo } = await service.uploadPhotoStream(user1.id, stream, name, "image/jpeg", false, null, sync);
+        return photo;
       }
 
       it("normalizeClientCapturedAt keeps the local wall-clock time", () => {
@@ -468,6 +470,46 @@ describe("Photo Module", () => {
         );
         expect(row?.image_data_hash).toBe(imgHash);
         fs.unlinkSync(path.join(UPLOAD_DIR, photo.filename));
+      });
+
+      it("uploadPhotoStream replaces the stored file for an edited photo (same device_asset_id)", async () => {
+        const deviceId = "DEV-EDIT-001/L0/001";
+        const original = await uploadWithSync("orig.jpg", "original-pixels", {
+          imageDataHash: imgHash,
+          fullHash: fullHashA,
+          deviceAssetId: deviceId,
+        });
+        const originalFile = path.join(UPLOAD_DIR, original.filename);
+        expect(fs.existsSync(originalFile)).toBe(true);
+
+        // Re-upload the SAME asset with different pixels — an in-app edit.
+        const editedHash = "f7".repeat(32);
+        const editedBody = "edited-pixels-which-are-longer";
+        const stream = Readable.from(Buffer.from(editedBody)) as any;
+        const { photo, replaced } = await service.uploadPhotoStream(
+          user1.id, stream, "orig.jpg", "image/jpeg", false, null,
+          { imageDataHash: editedHash, fullHash: fullHashB, deviceAssetId: deviceId, description: "Bearbeitet" },
+        );
+
+        // Same record, no duplicate, signalled as a replace.
+        expect(replaced).toBe(true);
+        expect(photo.id).toBe(original.id);
+        const rows = await db.select().from(photos).where(eq(photos.device_asset_id, deviceId));
+        expect(rows.length).toBe(1);
+
+        const row = await dbFirst<typeof photos.$inferSelect>(
+          db.select().from(photos).where(eq(photos.id, original.id))
+        );
+        expect(row?.image_data_hash).toBe(editedHash);
+        expect(row?.hash).toBe(fullHashB);
+        expect(row?.description).toBe("Bearbeitet");
+        expect(row?.size).toBe(Buffer.byteLength(editedBody));
+        expect(row?.filename).not.toBe(original.filename);
+
+        // New file is on disk; the superseded file is gone.
+        expect(fs.existsSync(path.join(UPLOAD_DIR, row!.filename))).toBe(true);
+        expect(fs.existsSync(originalFile)).toBe(false);
+        fs.unlinkSync(path.join(UPLOAD_DIR, row!.filename));
       });
     });
 
