@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// A single item waiting to be uploaded to the server.
 public struct UploadQueueItem: Codable, Identifiable, Sendable {
@@ -97,6 +98,7 @@ actor UploadQueue {
         guard let data = try? Data(contentsOf: queueFileURL),
               let loaded = try? JSONDecoder().decode([UploadQueueItem].self, from: data) else { return }
         items = loaded
+        notifyObservers()
     }
 
     func enqueue(_ item: UploadQueueItem) {
@@ -141,6 +143,24 @@ actor UploadQueue {
         persist()
     }
 
+    func cancelPending() {
+        let toRemove = items.filter { $0.status == .pending || $0.status == .uploading }
+        for item in toRemove {
+            try? FileManager.default.removeItem(at: item.tempFileURL)
+        }
+        items.removeAll { $0.status == .pending || $0.status == .uploading }
+        persist()
+    }
+
+    func removeAllFailed() {
+        let toRemove = items.filter { $0.status == .failed }
+        for item in toRemove {
+            try? FileManager.default.removeItem(at: item.tempFileURL)
+        }
+        items.removeAll { $0.status == .failed }
+        persist()
+    }
+
     /// Resets uploading items back to pending (call on app launch after a crash).
     func resetStaleUploading() {
         var changed = false
@@ -155,11 +175,37 @@ actor UploadQueue {
         items.filter { $0.status == .pending }.count
     }
 
+    // MARK: - Observation
+
+    private var continuations: [UUID: AsyncStream<[UploadQueueItem]>.Continuation] = [:]
+
+    func observeChanges() -> AsyncStream<[UploadQueueItem]> {
+        let (stream, continuation) = AsyncStream.makeStream(of: [UploadQueueItem].self)
+        let id = UUID()
+        continuations[id] = continuation
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.removeContinuation(id: id) }
+        }
+        continuation.yield(items)
+        return stream
+    }
+
+    private func removeContinuation(id: UUID) {
+        continuations.removeValue(forKey: id)
+    }
+
+    private func notifyObservers() {
+        for continuation in continuations.values {
+            continuation.yield(items)
+        }
+    }
+
     // MARK: - Persistence
 
     private func persist() {
         guard let data = try? JSONEncoder().encode(items) else { return }
         try? data.write(to: queueFileURL, options: .atomic)
+        notifyObservers()
     }
 
     // MARK: - Temp file helpers
@@ -169,5 +215,52 @@ actor UploadQueue {
         let dest = tempDirectory.appendingPathComponent("\(UUID().uuidString)_\(filename)")
         try data.write(to: dest, options: .atomic)
         return dest
+    }
+}
+
+// MARK: - Observable wrapper for SwiftUI
+
+@Observable @MainActor
+final class UploadQueueObserver {
+    private(set) var items: [UploadQueueItem] = []
+    private var observeTask: Task<Void, Never>?
+
+    var pendingItems: [UploadQueueItem] {
+        items.filter { $0.status == .pending || $0.status == .uploading }
+    }
+
+    var failedItems: [UploadQueueItem] {
+        items.filter { $0.status == .failed }
+    }
+
+    var hasVisibleItems: Bool {
+        !pendingItems.isEmpty || !failedItems.isEmpty
+    }
+
+    func startObserving() {
+        guard observeTask == nil else { return }
+        observeTask = Task {
+            let stream = await UploadQueue.shared.observeChanges()
+            for await snapshot in stream {
+                self.items = snapshot
+            }
+        }
+    }
+
+    func stopObserving() {
+        observeTask?.cancel()
+        observeTask = nil
+    }
+
+    func cancelPending() {
+        Task { await UploadQueue.shared.cancelPending() }
+    }
+
+    func removeAllFailed() {
+        Task { await UploadQueue.shared.removeAllFailed() }
+    }
+
+    func remove(id: UUID) {
+        Task { await UploadQueue.shared.remove(id: id) }
     }
 }
