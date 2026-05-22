@@ -933,6 +933,7 @@ enum ShareSyncedState {
 enum ShareConfig {
     static let appGroupID        = "group.dev.fk-encore.VivantyPhotos"
     static let tokenKey          = "shared.auth_token"
+    static let refreshTokenKey   = "shared.refresh_token"
     static let serverURLKey      = "shared.serverURL"
     static let recentAlbumIdsKey = "shared.recentAlbumIds"
 
@@ -973,9 +974,9 @@ enum ShareAPIError: Error, LocalizedError {
 
 enum ShareAPIClient {
     static func get(path: String) async throws -> Data {
-        let request = try makeRequest(method: "GET", path: path)
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw ShareAPIError.httpError(0) }
+        let (data, http) = try await performWithRefresh {
+            try makeRequest(method: "GET", path: path)
+        }
         guard (200...299).contains(http.statusCode) else {
             throw ShareAPIError.httpError(http.statusCode)
         }
@@ -984,19 +985,6 @@ enum ShareAPIClient {
 
     /// Uploads a photo using all headers required by the hash-based sync protocol.
     static func uploadPhoto(item: SharePhotoItem) async throws -> Int {
-        var request = try makeRequest(method: "POST", path: "/photos")
-        request.timeoutInterval = 120
-        request.setValue(item.mimeType, forHTTPHeaderField: "Content-Type")
-        request.setValue(percentEncode(item.filename), forHTTPHeaderField: "X-File-Name")
-        request.setValue(item.imageDataHash, forHTTPHeaderField: "X-Image-Data-Hash")
-        request.setValue(item.fullHash, forHTTPHeaderField: "X-Full-Hash")
-        request.setValue(percentEncode(item.caption), forHTTPHeaderField: "X-Description")
-        request.setValue(item.isFavorite ? "true" : "false", forHTTPHeaderField: "X-Is-Favorite")
-        request.setValue(item.capturedAtString, forHTTPHeaderField: "X-Captured-At")
-        if let assetId = item.assetLocalIdentifier {
-            request.setValue(assetId, forHTTPHeaderField: "X-Asset-Id")
-        }
-        request.httpBody = item.data
         print("""
         [Share Upload] \(item.filename)
           assetId:       \(item.assetLocalIdentifier ?? "nil")
@@ -1006,8 +994,22 @@ enum ShareAPIClient {
           isFavorite:    \(item.isFavorite)
         """)
 
-        let (responseData, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw ShareAPIError.httpError(0) }
+        let (responseData, http) = try await performWithRefresh {
+            var request = try makeRequest(method: "POST", path: "/photos")
+            request.timeoutInterval = 120
+            request.setValue(item.mimeType, forHTTPHeaderField: "Content-Type")
+            request.setValue(percentEncode(item.filename), forHTTPHeaderField: "X-File-Name")
+            request.setValue(item.imageDataHash, forHTTPHeaderField: "X-Image-Data-Hash")
+            request.setValue(item.fullHash, forHTTPHeaderField: "X-Full-Hash")
+            request.setValue(percentEncode(item.caption), forHTTPHeaderField: "X-Description")
+            request.setValue(item.isFavorite ? "true" : "false", forHTTPHeaderField: "X-Is-Favorite")
+            request.setValue(item.capturedAtString, forHTTPHeaderField: "X-Captured-At")
+            if let assetId = item.assetLocalIdentifier {
+                request.setValue(assetId, forHTTPHeaderField: "X-Asset-Id")
+            }
+            request.httpBody = item.data
+            return request
+        }
         print("[Share Upload] \(item.filename) → HTTP \(http.statusCode)")
         if http.statusCode == 409 {
             struct Body: Decodable { let photoId: Int? }
@@ -1032,15 +1034,16 @@ enum ShareAPIClient {
     }
 
     static func createAlbum(name: String) async throws -> ShareAlbum {
-        var request = try makeRequest(method: "POST", path: "/albums")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         struct Body: Encodable { let name: String }
         struct Response: Decodable { let id: Int; let name: String; let photo_count: Int }
-        request.httpBody = try JSONEncoder().encode(Body(name: name))
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse,
-              (200...299).contains(http.statusCode) else {
-            throw ShareAPIError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0)
+        let (data, http) = try await performWithRefresh {
+            var request = try makeRequest(method: "POST", path: "/albums")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(Body(name: name))
+            return request
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw ShareAPIError.httpError(http.statusCode)
         }
         let decoded = try JSONDecoder().decode(Response.self, from: data)
         return ShareAlbum(id: decoded.id, name: decoded.name, photoCount: decoded.photo_count)
@@ -1049,9 +1052,6 @@ enum ShareAPIClient {
     /// Metadata-only sync: sends JSON to POST /photos/sync/metadata (no image body).
     /// Returns the photo id on success, or nil if the server doesn't recognise the photo.
     static func syncPhotoMetadata(item: SharePhotoItem) async throws -> Int? {
-        var request = try makeRequest(method: "POST", path: "/photos/sync/metadata")
-        request.timeoutInterval = 30
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         struct Body: Encodable {
             let imageDataHash: String
             let deviceAssetId: String
@@ -1060,18 +1060,21 @@ enum ShareAPIClient {
             let isFavorite: Bool
             let capturedAt: String
         }
-        request.httpBody = try JSONEncoder().encode(Body(
-            imageDataHash: item.imageDataHash,
-            deviceAssetId: item.assetLocalIdentifier ?? "",
-            fullHash: item.fullHash,
-            description: item.caption,
-            isFavorite: item.isFavorite,
-            capturedAt: item.capturedAtString
-        ))
         print("[Share MetadataSync] \(item.filename) imageDataHash=\(item.imageDataHash)")
-
-        let (responseData, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw ShareAPIError.httpError(0) }
+        let (responseData, http) = try await performWithRefresh {
+            var request = try makeRequest(method: "POST", path: "/photos/sync/metadata")
+            request.timeoutInterval = 30
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(Body(
+                imageDataHash: item.imageDataHash,
+                deviceAssetId: item.assetLocalIdentifier ?? "",
+                fullHash: item.fullHash,
+                description: item.caption,
+                isFavorite: item.isFavorite,
+                capturedAt: item.capturedAtString
+            ))
+            return request
+        }
         if http.statusCode == 404 {
             print("[Share MetadataSync] \(item.filename) → not found, falling back to full upload")
             return nil
@@ -1086,11 +1089,61 @@ enum ShareAPIClient {
     }
 
     static func addPhotoToAlbum(photoId: Int, albumId: Int) async throws {
-        var request = try makeRequest(method: "POST", path: "/albums/photos")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         struct Body: Encodable { let albumId: Int; let photoId: Int }
-        request.httpBody = try JSONEncoder().encode(Body(albumId: albumId, photoId: photoId))
-        _ = try await URLSession.shared.data(for: request)
+        _ = try await performWithRefresh {
+            var request = try makeRequest(method: "POST", path: "/albums/photos")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(Body(albumId: albumId, photoId: photoId))
+            return request
+        }
+    }
+
+    /// Performs the built request; on HTTP 401 it refreshes the shared access
+    /// token once and retries. The request is rebuilt for the retry so it picks
+    /// up the fresh token (and re-sends the body).
+    private static func performWithRefresh(
+        _ build: () throws -> URLRequest
+    ) async throws -> (Data, HTTPURLResponse) {
+        let (data, response) = try await URLSession.shared.data(for: build())
+        guard let http = response as? HTTPURLResponse else { throw ShareAPIError.httpError(0) }
+        if http.statusCode != 401 { return (data, http) }
+        guard await refreshSharedToken() else { return (data, http) }
+        let (retryData, retryResponse) = try await URLSession.shared.data(for: build())
+        guard let retryHttp = retryResponse as? HTTPURLResponse else { throw ShareAPIError.httpError(0) }
+        return (retryData, retryHttp)
+    }
+
+    /// Refreshes the shared access token using the refresh token from the App
+    /// Group, writing the rotated tokens back so the next request — and the
+    /// main app — pick them up. Returns false when there is no refresh token or
+    /// the refresh failed; the user must then reopen the app and sign in.
+    private static func refreshSharedToken() async -> Bool {
+        guard let serverURL = ShareConfig.defaults.string(forKey: ShareConfig.serverURLKey),
+              let base = URL(string: serverURL),
+              let refreshToken = ShareConfig.defaults.string(forKey: ShareConfig.refreshTokenKey),
+              !refreshToken.isEmpty
+        else { return false }
+
+        var request = URLRequest(url: base.appendingPathComponent("/auth/refresh"), timeoutInterval: 30)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        struct Body: Encodable { let refreshToken: String }
+        struct TokenResponse: Decodable { let token: String; let refreshToken: String }
+        guard let httpBody = try? JSONEncoder().encode(Body(refreshToken: refreshToken)) else { return false }
+        request.httpBody = httpBody
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode),
+              let decoded = try? JSONDecoder().decode(TokenResponse.self, from: data)
+        else {
+            print("[Share Auth] token refresh failed — extension needs a fresh login via the app")
+            return false
+        }
+        ShareConfig.defaults.set(decoded.token, forKey: ShareConfig.tokenKey)
+        ShareConfig.defaults.set(decoded.refreshToken, forKey: ShareConfig.refreshTokenKey)
+        print("[Share Auth] access token refreshed")
+        return true
     }
 
     private static func percentEncode(_ value: String) -> String {
