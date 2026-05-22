@@ -280,56 +280,6 @@ export const checkPhotoHashes = api(
   }
 );
 
-interface SyncMetadataRequest {
-  /** SHA-256 of the image pixel data only — the primary lookup key. */
-  imageDataHash?: string;
-  /** iOS PHAsset.localIdentifier — fallback lookup key. */
-  deviceAssetId?: string;
-  /** The client's composite identity hash; stored so the next sync/check matches. */
-  fullHash?: string;
-  /** Caption: omit to leave untouched, "" to clear, a string to overwrite. */
-  description?: string;
-  /** Favourite flag: omit to leave untouched. */
-  isFavorite?: boolean;
-  /** Offset-aware capture timestamp. */
-  capturedAt?: string;
-}
-
-interface SyncMetadataResponse {
-  /** true when an existing photo was updated; false when none matched. */
-  updated: boolean;
-  /** The matched photo id (only when updated). */
-  photoId?: number;
-}
-
-/**
- * Body-less metadata-only sync (issue #432). The iOS client calls this — not
- * POST /photos — when it detects that only a photo's metadata changed (the
- * pixels are unchanged). No image body is transferred at all, so there is no
- * early-response-to-an-in-flight-upload that a proxy (Cloudflare) could turn
- * into a 502. When no photo matches, the client falls back to POST /photos.
- */
-export const syncPhotoMetadata = api(
-  { expose: true, method: "POST", path: "/photos/sync/metadata", auth: true },
-  async (req: SyncMetadataRequest): Promise<SyncMetadataResponse> => {
-    checkModule();
-    const userId = getUserId();
-    const authData = getAuthData()!;
-    requirePermission(authData, "photos.upload");
-
-    const result = await service.tryMetadataOnlySync(userId, {
-      imageDataHash: normalizeHashHeader(req.imageDataHash),
-      deviceAssetId: req.deviceAssetId ?? null,
-      fullHash: normalizeHashHeader(req.fullHash),
-      description: req.description,
-      isFavorite: req.isFavorite,
-      capturedAt: req.capturedAt ?? null,
-    });
-
-    return result ? { updated: true, photoId: result.photoId } : { updated: false };
-  }
-);
-
 /**
  * Body-less metadata sync (issue #432). The iOS client calls this when a
  * photo's caption, favourite flag, or date changed but the pixel data is
