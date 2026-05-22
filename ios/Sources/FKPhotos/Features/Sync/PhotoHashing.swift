@@ -1,10 +1,11 @@
+import CoreGraphics
 import CryptoKit
 import Foundation
 import ImageIO
 import Photos
 
 struct PhotoHashResult {
-    /// SHA-256 of the original PHAssetResource bytes (stable across caption/favorite/date edits).
+    /// SHA-256 of the decoded image pixels (stable across caption/favorite/date edits).
     let imageDataHash: String
     /// SHA-256 over imageDataHash + caption + isFavorite + capturedAtString (changes on any sync-relevant edit).
     let fullHash: String
@@ -94,9 +95,21 @@ actor PhotoHasher {
         }
     }
 
-    /// Reads original PHAssetResource bytes and computes SHA-256 of the image data without metadata.
-    /// Strips EXIF/IPTC/XMP via CGImageDestination before hashing so caption, favorite, and date
-    /// changes don't affect the hash — only pixel data changes do.
+    /// Reads original PHAssetResource bytes and computes SHA-256 of the *decoded
+    /// pixel data*, independent of any EXIF/IPTC/XMP metadata in the file.
+    ///
+    /// Hashing the file bytes is unstable across caption edits because the
+    /// Photos app re-embeds the caption when it hands a shared photo to the
+    /// share extension; re-wrapping via CGImageDestination does not help either
+    /// (it merges metadata rather than dropping it, and can fail for HEIC).
+    /// Decoding to pixels and hashing those is metadata-proof — only an actual
+    /// pixel change moves the hash.
+    ///
+    /// This MUST stay byte-identical to `ShareHasher.imageDataHash` in the share
+    /// extension (VivantyShare/ShareViewController.swift): a photo first
+    /// uploaded via the share extension and later re-sent by the library
+    /// auto-sync only deduplicates server-side when both paths derive the same
+    /// `image_data_hash`.
     private func computeImageDataHash(for asset: PHAsset) async -> String? {
         // Prefer the original resource; fall back to fullSizePhoto for assets that only have an edited version.
         guard let resource = PHAssetResource.assetResources(for: asset)
@@ -114,28 +127,50 @@ actor PhotoHasher {
             } completionHandler: { error in
                 guard error == nil else { continuation.resume(returning: nil); return }
                 let combined = chunks.reduce(Data(), +)
-                // Strip metadata before hashing. CGImageDestination preserves the compressed
-                // image bitstream verbatim and only replaces the metadata container, so the
-                // result is stable across caption/EXIF edits. Fall back to raw bytes if stripping fails.
-                let hashInput = Self.imageDataStrippingMetadata(from: combined) ?? combined
+                // Hash the decoded pixels, not the file bytes — metadata in the
+                // container (caption/EXIF/XMP) must not move the hash. Falls
+                // back to the raw bytes only when the image cannot be decoded.
+                let hashInput = Self.decodedPixelData(combined) ?? combined
                 let hash = SHA256.hash(data: hashInput).map { String(format: "%02x", $0) }.joined()
                 continuation.resume(returning: hash)
             }
         }
     }
 
-    /// Returns the compressed image bitstream with all EXIF/IPTC/XMP metadata removed.
-    /// CGImageDestinationAddImageFromSource copies the compressed data verbatim when
-    /// kCGImageDestinationMetadata replaces the metadata container, so no re-encoding occurs.
-    private static func imageDataStrippingMetadata(from data: Data) -> Data? {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-              let uti = CGImageSourceGetType(source) else { return nil }
-        let output = NSMutableData()
-        guard let dest = CGImageDestinationCreateWithData(output as CFMutableData, uti, 1, nil) else { return nil }
-        let options: [CFString: Any] = [kCGImageDestinationMetadata: CGImageMetadataCreateMutable()]
-        CGImageDestinationAddImageFromSource(dest, source, 0, options as CFDictionary)
-        guard CGImageDestinationFinalize(dest) else { return nil }
-        return output as Data
+    /// Decodes the image to a bounded-size bitmap and returns its raw pixel
+    /// bytes in a fixed RGBA layout — deterministic for identical pixels and
+    /// free of any container metadata. Returns nil when the data cannot be
+    /// decoded.
+    ///
+    /// The image is decoded at a bounded size (1024px) so a large photo cannot
+    /// exhaust memory. This MUST stay byte-identical to
+    /// `ShareHasher.decodedPixelData` in the share extension so both upload
+    /// paths produce the same `image_data_hash`.
+    private static func decodedPixelData(_ data: Data) -> Data? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: 1024,
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+        let width = image.width
+        let height = image.height
+        guard width > 0, height > 0 else { return nil }
+        let bytesPerRow = width * 4
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let pixels = context.data else { return nil }
+        return Data(bytes: pixels, count: height * bytesPerRow)
     }
 
     private static func formatCapturedAt(_ date: Date?, timezone: TimeZone) -> String {
