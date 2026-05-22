@@ -551,6 +551,65 @@ describe("Photo Module", () => {
 
         fs.unlinkSync(path.join(UPLOAD_DIR, first.filename));
       });
+
+      it("uploadPhotoStream overwrites the caption when an image_data_hash duplicate is re-shared with an edited X-Description", async () => {
+        // First share with an initial caption.
+        const first = await uploadWithSync("cap-a.jpg", "caption-pixels", {
+          imageDataHash: imgHash,
+          fullHash: fullHashA,
+          description: "Pacsafe",
+        });
+        let row = await dbFirst<typeof photos.$inferSelect>(
+          db.select().from(photos).where(eq(photos.id, first.id))
+        );
+        expect(row?.description).toBe("Pacsafe");
+
+        // Re-share the very same image (identical image_data_hash, different
+        // file bytes) with an edited caption. The server reports a duplicate
+        // and must overwrite the stored caption — the device is authoritative.
+        const stream = Readable.from(Buffer.from("caption-pixels-reshared")) as any;
+        await expect(
+          service.uploadPhotoStream(user1.id, stream, "cap-b.jpg", "image/jpeg", false, null, {
+            imageDataHash: imgHash,
+            fullHash: fullHashB,
+            description: "Pacsafe ist gut",
+          }),
+        ).rejects.toThrow("PHOTO_ALREADY_EXISTS");
+
+        const rows = await db.select().from(photos).where(eq(photos.image_data_hash, imgHash));
+        expect(rows.length).toBe(1);
+        expect(rows[0]!.id).toBe(first.id);
+        expect(rows[0]!.description).toBe("Pacsafe ist gut");
+
+        fs.unlinkSync(path.join(UPLOAD_DIR, first.filename));
+      });
+
+      it("uploadPhotoStream keeps a server-side caption when a duplicate carries no X-Description", async () => {
+        const first = await uploadWithSync("cap-keep.jpg", "keep-pixels", {
+          imageDataHash: imgHash,
+          fullHash: fullHashA,
+        });
+        const serverCaption = "Vom Nutzer im Web bearbeitet";
+        await dbExec(
+          db.update(photos).set({ description: serverCaption }).where(eq(photos.id, first.id))
+        );
+
+        // Re-upload without an X-Description header → the server-side edit wins.
+        const stream = Readable.from(Buffer.from("keep-pixels-reshared")) as any;
+        await expect(
+          service.uploadPhotoStream(user1.id, stream, "cap-keep-b.jpg", "image/jpeg", false, null, {
+            imageDataHash: imgHash,
+            fullHash: fullHashB,
+          }),
+        ).rejects.toThrow("PHOTO_ALREADY_EXISTS");
+
+        const row = await dbFirst<typeof photos.$inferSelect>(
+          db.select().from(photos).where(eq(photos.id, first.id))
+        );
+        expect(row?.description).toBe(serverCaption);
+
+        fs.unlinkSync(path.join(UPLOAD_DIR, first.filename));
+      });
     });
 
     it("should not allow duplicate uploads for the same user", async () => {

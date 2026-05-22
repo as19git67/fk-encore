@@ -55,8 +55,12 @@ actor PhotoHasher {
         let caption = captionFromAsset(asset) ?? ""
         let isFavorite = asset.isFavorite
 
-        let composite = imageDataHash + "\n" + caption + "\n" + (isFavorite ? "1" : "0") + "\n" + capturedAtString
-        let fullHash = sha256Hex(Data(composite.utf8))
+        let fullHash = Self.fullHash(
+            imageDataHash: imageDataHash,
+            caption: caption,
+            isFavorite: isFavorite,
+            capturedAtString: capturedAtString
+        )
         let result = PhotoHashResult(imageDataHash: imageDataHash, fullHash: fullHash, capturedAtString: capturedAtString)
 
         cache[localId] = CacheEntry(modificationDate: modDate, result: result)
@@ -142,8 +146,18 @@ actor PhotoHasher {
         return f.string(from: date)
     }
 
-    nonisolated private func sha256Hex(_ data: Data) -> String {
-        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    /// Composite identity hash: the pixel hash plus every syncable metadata
+    /// field (caption, favourite, capture date). Must stay byte-identical to
+    /// the formula the Share Extension and the server contract rely on, so it
+    /// lives in one place and is reused wherever a full hash is (re)computed.
+    nonisolated static func fullHash(
+        imageDataHash: String,
+        caption: String,
+        isFavorite: Bool,
+        capturedAtString: String
+    ) -> String {
+        let composite = imageDataHash + "\n" + caption + "\n" + (isFavorite ? "1" : "0") + "\n" + capturedAtString
+        return SHA256.hash(data: Data(composite.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     /// Reads the Photos.app caption via private KVC. Returns nil when no caption is set.
