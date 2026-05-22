@@ -8,6 +8,7 @@ struct AlbumsListView: View {
     @State private var newAlbumName = ""
     @State private var newAlbumDescription = ""
     @State private var searchText = ""
+    @State private var pinnedAlbumIds: Set<Int> = AlbumPinPreferences.pinnedIds
 
     private var filteredAlbums: [Album] {
         let filtered = viewModel.albums.filter { filterSort.appliedFilter.matches($0) }
@@ -16,6 +17,14 @@ struct AlbumsListView: View {
             : filtered.sorted(by: filterSort.appliedSort.comparator)
         guard !searchText.isEmpty else { return sorted }
         return sorted.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+    }
+
+    private var pinnedAlbums: [Album] {
+        filteredAlbums.filter { pinnedAlbumIds.contains($0.id) }
+    }
+
+    private var unpinnedAlbums: [Album] {
+        filteredAlbums.filter { !pinnedAlbumIds.contains($0.id) }
     }
 
     var body: some View {
@@ -40,15 +49,47 @@ struct AlbumsListView: View {
                 }
                 .listRowSeparator(.hidden)
             } else {
-                ForEach(filteredAlbums) { album in
-                    NavigationLink(value: album.id) {
-                        AlbumRowView(album: album)
+                if !pinnedAlbums.isEmpty {
+                    Section {
+                        ForEach(pinnedAlbums) { album in
+                            NavigationLink(value: album.id) {
+                                AlbumRowView(album: album)
+                            }
+                            .swipeActions(edge: .leading) {
+                                Button { togglePin(album.id) } label: {
+                                    Label("Lösen", systemImage: "pin.slash")
+                                }
+                                .tint(.orange)
+                            }
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    Task { await viewModel.deleteAlbum(id: album.id) }
+                                } label: {
+                                    Label("Löschen", systemImage: "trash")
+                                }
+                            }
+                        }
+                    } header: {
+                        Label("Angepinnt", systemImage: "pin.fill")
                     }
                 }
-                .onDelete { indexSet in
-                    Task {
-                        for index in indexSet {
-                            await viewModel.deleteAlbum(id: filteredAlbums[index].id)
+                Section {
+                    ForEach(unpinnedAlbums) { album in
+                        NavigationLink(value: album.id) {
+                            AlbumRowView(album: album)
+                        }
+                        .swipeActions(edge: .leading) {
+                            Button { togglePin(album.id) } label: {
+                                Label("Anpinnen", systemImage: "pin")
+                            }
+                            .tint(.orange)
+                        }
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                Task { await viewModel.deleteAlbum(id: album.id) }
+                            } label: {
+                                Label("Löschen", systemImage: "trash")
+                            }
                         }
                     }
                 }
@@ -104,6 +145,9 @@ struct AlbumsListView: View {
                 newAlbumDescription = ""
             }
         }
+        .onAppear {
+            pinnedAlbumIds = AlbumPinPreferences.pinnedIds
+        }
         .alert("Fehler", isPresented: $showErrorAlert) {
             Button("OK", role: .cancel) {
                 viewModel.errorMessage = nil
@@ -111,6 +155,15 @@ struct AlbumsListView: View {
         } message: {
             Text(viewModel.errorMessage ?? "")
         }
+    }
+
+    private func togglePin(_ albumId: Int) {
+        if pinnedAlbumIds.contains(albumId) {
+            pinnedAlbumIds.remove(albumId)
+        } else {
+            pinnedAlbumIds.insert(albumId)
+        }
+        AlbumPinPreferences.pinnedIds = pinnedAlbumIds
     }
 }
 
