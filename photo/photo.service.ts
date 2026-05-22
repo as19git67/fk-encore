@@ -703,7 +703,8 @@ export async function getPhotoOwnerId(photoId: number): Promise<number | undefin
 /**
  * Find all users who have access to a photo:
  *   1. The photo owner
- *   2. Users who have the photo in a shared album
+ *   2. Owners of albums that contain the photo
+ *   3. Users who have the photo in a shared album
  * Returns unique user IDs.
  */
 export async function getUsersWithPhotoAccess(photoId: number): Promise<number[]> {
@@ -711,6 +712,12 @@ export async function getUsersWithPhotoAccess(photoId: number): Promise<number[]
     SELECT DISTINCT u.user_id FROM (
       -- Photo owner
       SELECT user_id FROM photos WHERE id = ${photoId}
+      UNION
+      -- Owners of albums that contain the photo
+      SELECT a.user_id
+      FROM albums a
+      INNER JOIN album_photos ap ON ap.album_id = a.id
+      WHERE ap.photo_id = ${photoId}
       UNION
       -- Users with album access (album shared with them and photo is in that album)
       SELECT asr.user_id
@@ -3055,21 +3062,24 @@ export async function updatePhotoCurationLogic(
   }
 
   // If the requester is not the owner, allow the action only when the photo
-  // is part of an album that has been shared with the requester (any access level).
-  // Curation (favorites/hiding) is user-specific and does not affect other users,
-  // so both "read" and "write" shares are permitted.
+  // is part of an album they own or that has been shared with them (any
+  // access level). Curation (favorites/hiding) is user-specific and does not
+  // affect other users, so both "read" and "write" shares are permitted.
   if (photo.user_id !== userId) {
-    const shared = await dbFirst(
+    const accessible = await dbFirst(
       db
         .select({ album_id: albumPhotos.album_id })
         .from(albumPhotos)
-        .innerJoin(albumShares, eq(albumShares.album_id, albumPhotos.album_id))
+        .innerJoin(albums, eq(albums.id, albumPhotos.album_id))
         .where(and(
           eq(albumPhotos.photo_id, photoId),
-          eq(albumShares.user_id, userId)
+          or(
+            eq(albums.user_id, userId),
+            sql`EXISTS (SELECT 1 FROM ${albumShares} WHERE ${albumShares.album_id} = ${albums.id} AND ${albumShares.user_id} = ${userId})`
+          )
         ))
     );
-    if (!shared) {
+    if (!accessible) {
       throw new Error("Photo not found or unauthorized");
     }
   }
@@ -4146,13 +4156,32 @@ export async function addPhotoToAlbumLogic(userId: number, req: AddPhotoToAlbumR
     throw new Error("Unauthorized to add photos to album");
   }
 
-  // Photo must be accessible to user (either owner or album is shared - wait, photo ownership is separate)
-  // For now, let's say user can only add their OWN photos to albums they have write access to.
+  // The caller may add a photo they don't own when it already lives in an
+  // album they own or co-manage with write_share access — those roles are
+  // trusted to re-use participants' photos. Plain read/write participants
+  // can still only add their own photos.
   const photo = await dbFirst<typeof photos.$inferSelect>(
     db.select().from(photos).where(eq(photos.id, req.photoId))
   );
-  if (!photo || photo.user_id !== userId) {
-    throw new Error("Photo not found or not owned by user");
+  if (!photo) {
+    throw new Error("Photo not found");
+  }
+  if (photo.user_id !== userId) {
+    const reusable = await dbFirst<{ ok: number }>(
+      db.select({ ok: sql<number>`1` })
+        .from(albumPhotos)
+        .innerJoin(albums, eq(albums.id, albumPhotos.album_id))
+        .where(and(
+          eq(albumPhotos.photo_id, req.photoId),
+          or(
+            eq(albums.user_id, userId),
+            sql`EXISTS (SELECT 1 FROM ${albumShares} WHERE ${albumShares.album_id} = ${albums.id} AND ${albumShares.user_id} = ${userId} AND ${albumShares.access_level} = 'write_share')`
+          )
+        )).limit(1)
+    );
+    if (!reusable) {
+      throw new Error("Photo not found or not accessible to user");
+    }
   }
 
   // Idempotent insert: when an iOS sync re-uploads a photo whose pixels match
@@ -4366,14 +4395,24 @@ export async function batchUpdateAlbumPhotosLogic(userId: number, req: BatchAlbu
     }
   }
 
-  // Check photo ownership
-  const ownedPhotos = await dbAll<{ id: number }>(
-    db.select({ id: photos.id })
+  // Verify the caller may use every photo: either they own it, or it already
+  // lives in an album they own or co-manage with write_share access.
+  const accessiblePhotos = await dbAll<{ id: number }>(
+    db.selectDistinct({ id: photos.id })
       .from(photos)
-      .where(and(inArray(photos.id, photoIds), eq(photos.user_id, userId)))
+      .leftJoin(albumPhotos, eq(albumPhotos.photo_id, photos.id))
+      .leftJoin(albums, eq(albums.id, albumPhotos.album_id))
+      .where(and(
+        inArray(photos.id, photoIds),
+        or(
+          eq(photos.user_id, userId),
+          eq(albums.user_id, userId),
+          sql`EXISTS (SELECT 1 FROM ${albumShares} WHERE ${albumShares.album_id} = ${albums.id} AND ${albumShares.user_id} = ${userId} AND ${albumShares.access_level} = 'write_share')`
+        )
+      ))
   );
-  if (ownedPhotos.length !== photoIds.length) {
-    throw new Error("One or more photos not found or not owned by user");
+  if (accessiblePhotos.length !== photoIds.length) {
+    throw new Error("One or more photos not found or not accessible to user");
   }
 
   if (action === "add") {
@@ -4720,6 +4759,12 @@ async function cleanupAfterUnshare(sharedUserId: number, albumPhotoIds: number[]
     SELECT DISTINCT photo_id FROM (
       -- Photos owned by the user
       SELECT id AS photo_id FROM photos WHERE user_id = ${sharedUserId} AND id IN (${sql.join(albumPhotoIds.map(id => sql`${id}`), sql`, `)})
+      UNION
+      -- Photos in albums owned by the user
+      SELECT ap.photo_id
+      FROM album_photos ap
+      INNER JOIN albums a ON a.id = ap.album_id AND a.user_id = ${sharedUserId}
+      WHERE ap.photo_id IN (${sql.join(albumPhotoIds.map(id => sql`${id}`), sql`, `)})
       UNION
       -- Photos accessible through other shared albums
       SELECT ap.photo_id
