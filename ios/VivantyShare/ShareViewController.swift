@@ -157,15 +157,16 @@ struct ShareUploadView: View {
                         }
                     }
                 }
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        newAlbumName = ""
-                        showNewAlbum = true
-                    } label: {
-                        Image(systemName: "folder.badge.plus")
+                if !isUploading && !isDone {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            newAlbumName = ""
+                            showNewAlbum = true
+                        } label: {
+                            Image(systemName: "folder.badge.plus")
+                        }
+                        .disabled(isLoadingAlbums)
                     }
-                    .disabled(isUploading || isLoadingAlbums)
-                    .opacity(isUploading ? 0 : 1)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     if isUploading {
@@ -305,31 +306,20 @@ struct ShareUploadView: View {
         isUploading = true
         errorMessage = nil
 
-        // Load new items from providers.
-        var newItems: [SharePhotoItem] = []
-        for provider in itemProviders {
-            if let item = await loadPhotoItem(from: provider) {
-                newItems.append(item)
-            }
-        }
-
         let prevItems = previousPendingItems
-        guard !newItems.isEmpty || !prevItems.isEmpty else {
+        totalToUpload = prevItems.count + itemProviders.count
+        uploadProgress = 0
+
+        guard totalToUpload > 0 else {
             errorMessage = "Kein unterstütztes Bild gefunden."
             isUploading = false
             return
         }
 
-        totalToUpload = prevItems.count + newItems.count
-        uploadProgress = 0
-
         ShareConfig.saveRecentAlbumIds(Array(selectedAlbumIds))
         let targetAlbumIds = Array(selectedAlbumIds)
 
         var uploadedIds: [Int] = []
-        // Tracks imageDataHashes that were successfully uploaded via prevItems so that
-        // the same photo appearing in newItems (same session, queue not yet cleared) is
-        // not uploaded a second time.
         var uploadedPrevHashes = Set<String>()
 
         // 1. Upload previously queued items (surviving from a prior extension session).
@@ -359,29 +349,26 @@ struct ShareUploadView: View {
                 uploadedPrevHashes.insert(prev.imageDataHash)
                 ShareUploadQueueWriter.markDone(id: prev.id)
             } catch {
-                // Failures on prev items don't block auto-close — the main app retries them.
                 prevItemErrorMessage = error.localizedDescription
                 ShareUploadQueueWriter.markFailed(id: prev.id)
             }
             uploadProgress += 1
         }
 
-        // 2. Enqueue new items so they survive if extension is closed mid-upload.
-        var queueEntries: [ShareQueueEntry] = []
-        for item in newItems {
-            if let entry = ShareUploadQueueWriter.enqueue(item, albumIds: targetAlbumIds) {
-                queueEntries.append(entry)
-            }
-        }
-
-        // 3. Upload new items. Try metadata-only sync when pixels are unchanged.
-        for (index, item) in newItems.enumerated() {
+        // 2. Process new items one at a time — load, enqueue to disk, upload, release.
+        //    Only one photo's bytes are in RAM at a time (Share Extensions have ~120 MB).
+        var newItemCount = 0
+        for provider in itemProviders {
             guard !Task.isCancelled else { break }
+
+            guard let item = await loadPhotoItem(from: provider) else {
+                uploadProgress += 1
+                continue
+            }
+            newItemCount += 1
+
             if uploadedPrevHashes.contains(item.imageDataHash) {
-                print("[Share Upload] skipping duplicate new item \(item.filename) (already uploaded via prevItems)")
-                if index < queueEntries.count {
-                    ShareUploadQueueWriter.markDone(id: queueEntries[index].id)
-                }
+                print("[Share Upload] skipping duplicate \(item.filename) (already uploaded via prevItems)")
                 uploadProgress += 1
                 continue
             }
@@ -394,48 +381,50 @@ struct ShareUploadView: View {
                     if let photoId = try? await ShareAPIClient.syncPhotoMetadata(item: item) {
                         uploadedIds.append(photoId)
                         ShareSyncedState.saveEntry(localId: localId, imageDataHash: item.imageDataHash, fullHash: item.fullHash)
-                        if index < queueEntries.count {
-                            ShareUploadQueueWriter.markDone(id: queueEntries[index].id)
-                        }
                         metadataSynced = true
                     }
                 }
             }
 
             if !metadataSynced {
+                // Enqueue to persistent queue first so the main app can retry if the
+                // extension is killed before the upload finishes.
+                let entry = ShareUploadQueueWriter.enqueue(item, albumIds: targetAlbumIds)
+
                 do {
                     let photoId = try await ShareAPIClient.uploadPhoto(item: item)
                     uploadedIds.append(photoId)
                     if let localId = item.assetLocalIdentifier, !localId.isEmpty {
                         ShareSyncedState.saveEntry(localId: localId, imageDataHash: item.imageDataHash, fullHash: item.fullHash)
                     }
-                    if index < queueEntries.count {
-                        ShareUploadQueueWriter.markDone(id: queueEntries[index].id)
-                    }
+                    if let entry { ShareUploadQueueWriter.markDone(id: entry.id) }
                 } catch ShareAPIError.duplicate(let existingId) {
                     if let id = existingId { uploadedIds.append(id) }
                     if let localId = item.assetLocalIdentifier, !localId.isEmpty {
                         ShareSyncedState.saveEntry(localId: localId, imageDataHash: item.imageDataHash, fullHash: item.fullHash)
                     }
-                    if index < queueEntries.count {
-                        ShareUploadQueueWriter.markDone(id: queueEntries[index].id)
-                    }
+                    if let entry { ShareUploadQueueWriter.markDone(id: entry.id) }
                 } catch {
                     errorMessage = error.localizedDescription
                 }
             }
+            // item goes out of scope here → image data freed from RAM
             uploadProgress += 1
         }
 
-        // 4. Add all uploaded photos to currently selected albums.
+        if newItemCount == 0 && prevItems.isEmpty {
+            errorMessage = "Kein unterstütztes Bild gefunden."
+            isUploading = false
+            return
+        }
+
+        // 3. Add all uploaded photos to currently selected albums.
         for albumId in selectedAlbumIds {
             for photoId in uploadedIds {
                 try? await ShareAPIClient.addPhotoToAlbum(photoId: photoId, albumId: albumId)
             }
         }
 
-        // Auto-close only depends on new items succeeding; prev-item failures are
-        // non-blocking (the main app's background sync will retry them).
         if errorMessage == nil && !Task.isCancelled { isDone = true }
         isUploading = false
     }
