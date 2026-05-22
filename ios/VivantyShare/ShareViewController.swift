@@ -157,15 +157,16 @@ struct ShareUploadView: View {
                         }
                     }
                 }
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        newAlbumName = ""
-                        showNewAlbum = true
-                    } label: {
-                        Image(systemName: "folder.badge.plus")
+                if !isUploading && !isDone {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            newAlbumName = ""
+                            showNewAlbum = true
+                        } label: {
+                            Image(systemName: "folder.badge.plus")
+                        }
+                        .disabled(isLoadingAlbums)
                     }
-                    .disabled(isUploading || isLoadingAlbums)
-                    .opacity(isUploading ? 0 : 1)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     if isUploading {
@@ -305,31 +306,20 @@ struct ShareUploadView: View {
         isUploading = true
         errorMessage = nil
 
-        // Load new items from providers.
-        var newItems: [SharePhotoItem] = []
-        for provider in itemProviders {
-            if let item = await loadPhotoItem(from: provider) {
-                newItems.append(item)
-            }
-        }
-
         let prevItems = previousPendingItems
-        guard !newItems.isEmpty || !prevItems.isEmpty else {
+        totalToUpload = prevItems.count + itemProviders.count
+        uploadProgress = 0
+
+        guard totalToUpload > 0 else {
             errorMessage = "Kein unterstütztes Bild gefunden."
             isUploading = false
             return
         }
 
-        totalToUpload = prevItems.count + newItems.count
-        uploadProgress = 0
-
         ShareConfig.saveRecentAlbumIds(Array(selectedAlbumIds))
         let targetAlbumIds = Array(selectedAlbumIds)
 
         var uploadedIds: [Int] = []
-        // Tracks imageDataHashes that were successfully uploaded via prevItems so that
-        // the same photo appearing in newItems (same session, queue not yet cleared) is
-        // not uploaded a second time.
         var uploadedPrevHashes = Set<String>()
 
         // 1. Upload previously queued items (surviving from a prior extension session).
@@ -359,59 +349,82 @@ struct ShareUploadView: View {
                 uploadedPrevHashes.insert(prev.imageDataHash)
                 ShareUploadQueueWriter.markDone(id: prev.id)
             } catch {
-                // Failures on prev items don't block auto-close — the main app retries them.
                 prevItemErrorMessage = error.localizedDescription
                 ShareUploadQueueWriter.markFailed(id: prev.id)
             }
             uploadProgress += 1
         }
 
-        // 2. Enqueue new items so they survive if extension is closed mid-upload.
-        var queueEntries: [ShareQueueEntry] = []
-        for item in newItems {
-            if let entry = ShareUploadQueueWriter.enqueue(item, albumIds: targetAlbumIds) {
-                queueEntries.append(entry)
-            }
-        }
-
-        // 3. Upload new items.
-        for (index, item) in newItems.enumerated() {
+        // 2. Process new items one at a time — load, enqueue to disk, upload, release.
+        //    Only one photo's bytes are in RAM at a time (Share Extensions have ~120 MB).
+        var newItemCount = 0
+        for provider in itemProviders {
             guard !Task.isCancelled else { break }
-            // Skip if the same photo was already uploaded via prevItems in this session.
-            if uploadedPrevHashes.contains(item.imageDataHash) {
-                print("[Share Upload] skipping duplicate new item \(item.filename) (already uploaded via prevItems)")
-                if index < queueEntries.count {
-                    ShareUploadQueueWriter.markDone(id: queueEntries[index].id)
-                }
+
+            guard let item = await loadPhotoItem(from: provider) else {
                 uploadProgress += 1
                 continue
             }
-            do {
-                let photoId = try await ShareAPIClient.uploadPhoto(item: item)
-                uploadedIds.append(photoId)
-                if index < queueEntries.count {
-                    ShareUploadQueueWriter.markDone(id: queueEntries[index].id)
-                }
-            } catch ShareAPIError.duplicate(let existingId) {
-                if let id = existingId { uploadedIds.append(id) }
-                if index < queueEntries.count {
-                    ShareUploadQueueWriter.markDone(id: queueEntries[index].id)
-                }
-            } catch {
-                errorMessage = error.localizedDescription
+            newItemCount += 1
+
+            if uploadedPrevHashes.contains(item.imageDataHash) {
+                print("[Share Upload] skipping duplicate \(item.filename) (already uploaded via prevItems)")
+                uploadProgress += 1
+                continue
             }
+
+            // Metadata-only fast path: pixels unchanged since last sync.
+            var metadataSynced = false
+            if let localId = item.assetLocalIdentifier, !localId.isEmpty {
+                let syncedEntry = ShareSyncedState.loadEntry(localId: localId)
+                if let syncedEntry, syncedEntry.imageDataHash == item.imageDataHash {
+                    if let photoId = try? await ShareAPIClient.syncPhotoMetadata(item: item) {
+                        uploadedIds.append(photoId)
+                        ShareSyncedState.saveEntry(localId: localId, imageDataHash: item.imageDataHash, fullHash: item.fullHash)
+                        metadataSynced = true
+                    }
+                }
+            }
+
+            if !metadataSynced {
+                // Enqueue to persistent queue first so the main app can retry if the
+                // extension is killed before the upload finishes.
+                let entry = ShareUploadQueueWriter.enqueue(item, albumIds: targetAlbumIds)
+
+                do {
+                    let photoId = try await ShareAPIClient.uploadPhoto(item: item)
+                    uploadedIds.append(photoId)
+                    if let localId = item.assetLocalIdentifier, !localId.isEmpty {
+                        ShareSyncedState.saveEntry(localId: localId, imageDataHash: item.imageDataHash, fullHash: item.fullHash)
+                    }
+                    if let entry { ShareUploadQueueWriter.markDone(id: entry.id) }
+                } catch ShareAPIError.duplicate(let existingId) {
+                    if let id = existingId { uploadedIds.append(id) }
+                    if let localId = item.assetLocalIdentifier, !localId.isEmpty {
+                        ShareSyncedState.saveEntry(localId: localId, imageDataHash: item.imageDataHash, fullHash: item.fullHash)
+                    }
+                    if let entry { ShareUploadQueueWriter.markDone(id: entry.id) }
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
+            }
+            // item goes out of scope here → image data freed from RAM
             uploadProgress += 1
         }
 
-        // 4. Add all uploaded photos to currently selected albums.
+        if newItemCount == 0 && prevItems.isEmpty {
+            errorMessage = "Kein unterstütztes Bild gefunden."
+            isUploading = false
+            return
+        }
+
+        // 3. Add all uploaded photos to currently selected albums.
         for albumId in selectedAlbumIds {
             for photoId in uploadedIds {
                 try? await ShareAPIClient.addPhotoToAlbum(photoId: photoId, albumId: albumId)
             }
         }
 
-        // Auto-close only depends on new items succeeding; prev-item failures are
-        // non-blocking (the main app's background sync will retry them).
         if errorMessage == nil && !Task.isCancelled { isDone = true }
         isUploading = false
     }
@@ -799,6 +812,35 @@ enum ShareUploadQueueWriter {
     }
 }
 
+// MARK: - Synced state (shared with main app via App Group)
+
+enum ShareSyncedState {
+    private static let syncedStateKey = "sync.syncedState"
+
+    struct Entry: Codable {
+        let imageDataHash: String
+        let fullHash: String
+    }
+
+    static func loadEntry(localId: String) -> Entry? {
+        guard let data = ShareConfig.defaults.data(forKey: syncedStateKey),
+              let cache = try? JSONDecoder().decode([String: Entry].self, from: data) else { return nil }
+        return cache[localId]
+    }
+
+    static func saveEntry(localId: String, imageDataHash: String, fullHash: String) {
+        var cache: [String: Entry] = [:]
+        if let data = ShareConfig.defaults.data(forKey: syncedStateKey),
+           let existing = try? JSONDecoder().decode([String: Entry].self, from: data) {
+            cache = existing
+        }
+        cache[localId] = Entry(imageDataHash: imageDataHash, fullHash: fullHash)
+        if let data = try? JSONEncoder().encode(cache) {
+            ShareConfig.defaults.set(data, forKey: syncedStateKey)
+        }
+    }
+}
+
 // MARK: - Shared configuration
 
 enum ShareConfig {
@@ -915,6 +957,45 @@ enum ShareAPIClient {
         }
         let decoded = try JSONDecoder().decode(Response.self, from: data)
         return ShareAlbum(id: decoded.id, name: decoded.name, photoCount: decoded.photo_count)
+    }
+
+    /// Metadata-only sync: sends JSON to POST /photos/sync/metadata (no image body).
+    /// Returns the photo id on success, or nil if the server doesn't recognise the photo.
+    static func syncPhotoMetadata(item: SharePhotoItem) async throws -> Int? {
+        var request = try makeRequest(method: "POST", path: "/photos/sync/metadata")
+        request.timeoutInterval = 30
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        struct Body: Encodable {
+            let imageDataHash: String
+            let deviceAssetId: String
+            let fullHash: String
+            let description: String
+            let isFavorite: Bool
+            let capturedAt: String
+        }
+        request.httpBody = try JSONEncoder().encode(Body(
+            imageDataHash: item.imageDataHash,
+            deviceAssetId: item.assetLocalIdentifier ?? "",
+            fullHash: item.fullHash,
+            description: item.caption,
+            isFavorite: item.isFavorite,
+            capturedAt: item.capturedAtString
+        ))
+        print("[Share MetadataSync] \(item.filename) imageDataHash=\(item.imageDataHash)")
+
+        let (responseData, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw ShareAPIError.httpError(0) }
+        if http.statusCode == 404 {
+            print("[Share MetadataSync] \(item.filename) → not found, falling back to full upload")
+            return nil
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw ShareAPIError.httpError(http.statusCode)
+        }
+        struct Response: Decodable { let photoId: Int }
+        let photoId = (try? JSONDecoder().decode(Response.self, from: responseData))?.photoId ?? 0
+        print("[Share MetadataSync] \(item.filename) → updated, photoId=\(photoId)")
+        return photoId
     }
 
     static func addPhotoToAlbum(photoId: Int, albumId: Int) async throws {
