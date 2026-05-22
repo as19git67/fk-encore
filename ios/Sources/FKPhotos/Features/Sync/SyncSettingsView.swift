@@ -228,11 +228,13 @@ struct SyncSettingsView: View {
                             }
                         }
                     }
-                    if queueObserver.failedItems.count > 1 {
+                    if !queueObserver.failedItems.isEmpty {
                         Button(role: .destructive) {
                             queueObserver.removeAllFailed()
                         } label: {
-                            Text("Alle fehlgeschlagenen löschen")
+                            Text(queueObserver.failedItems.count == 1
+                                 ? "Fehlgeschlagenes Foto löschen"
+                                 : "Alle fehlgeschlagenen löschen")
                         }
                     }
                 } header: {
