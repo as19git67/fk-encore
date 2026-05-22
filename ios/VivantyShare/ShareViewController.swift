@@ -500,8 +500,14 @@ struct ShareUploadView: View {
         guard let (data, mimeType) = result else { return nil }
 
         let imageDataHash = ShareHasher.sha256Hex(data)
-        let caption = ShareHasher.captionFromAsset(asset) ?? ""
-        let isFavorite = asset.isFavorite
+        // The Photos-app caption / favourite flag take precedence, but fall
+        // back to the file's own IPTC/XMP metadata so an embedded caption or
+        // xmp:Rating still reaches the server when the Photos database carries
+        // none — loadFromItemProvider already mines the same fields.
+        let caption = ShareHasher.captionFromAsset(asset)
+            ?? ShareHasher.extractIPTCCaption(from: data)
+            ?? ""
+        let isFavorite = asset.isFavorite || ShareHasher.isFavoriteFromXMP(data)
         let capturedAtString = ShareHasher.capturedAtString(for: asset, from: data)
         let fullHash = ShareHasher.fullHash(
             imageDataHash: imageDataHash,
@@ -668,8 +674,12 @@ enum ShareHasher {
         return f.string(from: date)
     }
 
-    /// Returns true when the image bytes carry an XMP Rating >= 4 (Photos.app writes Rating=5 for favorites).
-    /// Used as fallback when no PHAsset is available (e.g. share from non-Photos context or simulator).
+    /// Returns true when the image bytes carry an XMP Rating >= 4.
+    /// Used as a fallback for the favourite flag whenever the Photos database
+    /// has none — both when no PHAsset is available (share from a non-Photos
+    /// context or the simulator) and when asset.isFavorite is false but the
+    /// file itself carries a rating (e.g. rated in Lightroom, or a photo
+    /// previously downloaded from the server, which writes xmp:Rating).
     static func isFavoriteFromXMP(_ data: Data) -> Bool {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               let metadata = CGImageSourceCopyMetadataAtIndex(source, 0, nil) else { return false }
