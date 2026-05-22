@@ -302,16 +302,24 @@ struct ShareUploadView: View {
 
     // MARK: - Upload
 
-    /// Requests Photos-library read access so the extension can resolve each
-    /// shared item to its `PHAsset`. Without it `PHAsset.fetchAssets` returns
-    /// nothing inside an extension, so `loadFromPhotoAsset` never runs: the
-    /// favourite flag falls back to `false` (favourites are lost on the server)
-    /// and the `localIdentifier` used as the `device_asset_id` dedup key is
-    /// missing, which makes re-shared photos upload as duplicates.
+    /// When the share originates from the Photos app, requests Photos-library
+    /// read access so each item can be resolved to its `PHAsset`. The favourite
+    /// flag is the reason: Photos keeps it in its database, never in the shared
+    /// file, so `asset.isFavorite` is the only way to read it — without access
+    /// `PHAsset.fetchAssets` returns nothing inside an extension and the
+    /// favourite is lost.
     ///
-    /// A denied prompt is harmless — the loader still falls back to the raw
-    /// item-provider bytes.
+    /// The prompt is skipped entirely when no item carries a Photos asset
+    /// identifier (i.e. the share came from another app) — those uploads need
+    /// no PHAsset and go through the raw item-provider path. A denied prompt is
+    /// harmless too: the loader falls back to the item-provider bytes.
     private func ensurePhotoLibraryAccess() async {
+        let sharedFromPhotosApp = itemProviders.contains { provider in
+            provider.hasItemConformingToTypeIdentifier("com.apple.photos.asset")
+                || provider.hasItemConformingToTypeIdentifier("com.apple.photos.asset-identifiers")
+        }
+        guard sharedFromPhotosApp else { return }
+
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         if status == .notDetermined {
             _ = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
@@ -323,7 +331,8 @@ struct ShareUploadView: View {
         errorMessage = nil
 
         // Resolve Photos access before any item is loaded so the PHAsset path
-        // (authoritative favourite flag + stable asset id) is available.
+        // (authoritative favourite flag) is available when the share came from
+        // the Photos app. Shares from other apps skip the prompt entirely.
         await ensurePhotoLibraryAccess()
 
         let prevItems = previousPendingItems
