@@ -18,6 +18,7 @@ struct SyncSettingsView: View {
     @State private var showResetConfirm = false
     @State private var isSyncing     = false
     @State private var syncError: String?
+    @State private var queueObserver = UploadQueueObserver()
 
     private var lastSyncDate:   Date? { PhotoSyncPreferences.lastSyncDate }
     private var uploadedCount:  Int   { PhotoSyncPreferences.uploadedCount }
@@ -189,6 +190,56 @@ struct SyncSettingsView: View {
             }
             #endif
 
+            // ── Upload queue ──────────────────────────────────────────
+            if queueObserver.hasVisibleItems {
+                Section {
+                    if !queueObserver.pendingItems.isEmpty {
+                        HStack(spacing: 12) {
+                            Image(systemName: "clock.badge.exclamationmark")
+                                .foregroundStyle(.orange)
+                            Text("\(queueObserver.pendingItems.count) Foto\(queueObserver.pendingItems.count == 1 ? "" : "s") ausstehend")
+                                .font(.footnote)
+                            Spacer()
+                            Button("Abbrechen") {
+                                queueObserver.cancelPending()
+                            }
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                        }
+                    }
+                    ForEach(queueObserver.failedItems) { item in
+                        HStack(spacing: 12) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.red)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.filename)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Text("Fehlgeschlagen\(item.retryCount > 1 ? " (\(item.retryCount)×)" : "")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                queueObserver.remove(id: item.id)
+                            } label: {
+                                Label("Löschen", systemImage: "trash")
+                            }
+                        }
+                    }
+                    if queueObserver.failedItems.count > 1 {
+                        Button(role: .destructive) {
+                            queueObserver.removeAllFailed()
+                        } label: {
+                            Text("Alle fehlgeschlagenen löschen")
+                        }
+                    }
+                } header: {
+                    Text("Upload-Warteschlange")
+                }
+            }
+
             // ── Status ─────────────────────────────────────────────────
             Section("Status") {
                 LabeledContent("Letzter Upload") {
@@ -232,6 +283,10 @@ struct SyncSettingsView: View {
             albumServerMappings = PhotoSyncPreferences.albumMappings
             allPhotosAlbumId = PhotoSyncPreferences.allPhotosTargetAlbumId
             refreshTick += 1
+            queueObserver.startObserving()
+        }
+        .onDisappear {
+            queueObserver.stopObserving()
         }
         .task {
             await loadServerAlbums()
