@@ -12,6 +12,9 @@ struct PhotoMonthGridView: View {
     @State private var isFullscreenPresented = false
     @State private var scrollTarget: Int?
     @State private var showUpload = false
+    @State private var isSelecting = false
+    @State private var selectedIds: Set<Int> = []
+    @State private var shareManager = PhotoShareManager()
 
     private let columns = [
         GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 2)
@@ -58,12 +61,15 @@ struct PhotoMonthGridView: View {
                         ForEach(photos.indices, id: \.self) { index in
                             let photo = photos[index]
                             let isFav = (curationOverrides[photo.id] ?? photo.curation_status) == .favorite
-                            Button {
-                                selectedIndex = index
-                                isFullscreenPresented = true
-                            } label: {
-                                PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop)
-                                    .overlay(alignment: .bottomTrailing) {
+                            PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop)
+                                .overlay(alignment: .topLeading) {
+                                    if isSelecting {
+                                        SelectionCheckmark(isSelected: selectedIds.contains(photo.id))
+                                            .padding(4)
+                                    }
+                                }
+                                .overlay(alignment: .bottomTrailing) {
+                                    if !isSelecting {
                                         Button {
                                             toggleFavorite(photo)
                                         } label: {
@@ -75,9 +81,23 @@ struct PhotoMonthGridView: View {
                                         }
                                         .buttonStyle(.plain)
                                     }
-                            }
-                            .buttonStyle(.plain)
-                            .id(photo.id)
+                                }
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    if isSelecting {
+                                        toggleSelection(photo.id)
+                                    } else {
+                                        selectedIndex = index
+                                        isFullscreenPresented = true
+                                    }
+                                }
+                                .onLongPressGesture {
+                                    if !isSelecting {
+                                        isSelecting = true
+                                        selectedIds = [photo.id]
+                                    }
+                                }
+                                .id(photo.id)
                         }
                     }
                     .padding(.horizontal, 2)
@@ -89,12 +109,35 @@ struct PhotoMonthGridView: View {
                 scrollTarget = nil
             }
         }
-        .navigationTitle(title)
+        .navigationTitle(isSelecting ? "\(selectedIds.count) ausgewählt" : title)
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button { showUpload = true } label: {
-                    Image(systemName: "photo.badge.plus")
+            if isSelecting {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") {
+                        isSelecting = false
+                        selectedIds = []
+                    }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        let filenames = photos.filter { selectedIds.contains($0.id) }.map(\.filename)
+                        Task { await shareManager.share(filenames: filenames) }
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .disabled(selectedIds.isEmpty || shareManager.isLoading)
+                }
+            } else {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { isSelecting = true } label: {
+                        Image(systemName: "checkmark.circle")
+                    }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button { showUpload = true } label: {
+                        Image(systemName: "photo.badge.plus")
+                    }
                 }
             }
         }
@@ -116,6 +159,28 @@ struct PhotoMonthGridView: View {
         }
         .refreshable { await loadPhotos() }
         .task { await loadPhotos() }
+        .sheet(isPresented: $shareManager.isPresented) {
+            ActivityView(images: shareManager.images)
+        }
+        .overlay {
+            if shareManager.isLoading {
+                ZStack {
+                    Color.black.opacity(0.3).ignoresSafeArea()
+                    ProgressView("Fotos laden…")
+                        .padding()
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+        }
+    }
+
+    private func toggleSelection(_ id: Int) {
+        if selectedIds.contains(id) {
+            selectedIds.remove(id)
+            if selectedIds.isEmpty { isSelecting = false }
+        } else {
+            selectedIds.insert(id)
+        }
     }
 
     private func toggleFavorite(_ photo: PhotoWithCuration) {
