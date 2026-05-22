@@ -7,6 +7,9 @@ struct PhotoGridView: View {
     @State private var selectedIndex  = 0
     @State private var scrollTarget: Int?
     @State private var showUpload     = false
+    @State private var isSelecting    = false
+    @State private var selectedIds: Set<Int> = []
+    @State private var shareManager   = PhotoShareManager()
 
     private let columns = [
         GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 2)
@@ -37,14 +40,29 @@ struct PhotoGridView: View {
                 } else {
                     LazyVGrid(columns: columns, spacing: 2) {
                         ForEach(viewModel.photos) { photo in
-                            Button {
-                                selectedIndex = viewModel.photos.firstIndex(where: { $0.id == photo.id }) ?? 0
-                                isFullscreenPresented = true
-                            } label: {
-                                PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop)
-                            }
-                            .buttonStyle(.plain)
-                            .id(photo.id)
+                            PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop)
+                                .overlay(alignment: .topLeading) {
+                                    if isSelecting {
+                                        SelectionCheckmark(isSelected: selectedIds.contains(photo.id))
+                                            .padding(4)
+                                    }
+                                }
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    if isSelecting {
+                                        toggleSelection(photo.id)
+                                    } else {
+                                        selectedIndex = viewModel.photos.firstIndex(where: { $0.id == photo.id }) ?? 0
+                                        isFullscreenPresented = true
+                                    }
+                                }
+                                .onLongPressGesture {
+                                    if !isSelecting {
+                                        isSelecting = true
+                                        selectedIds = [photo.id]
+                                    }
+                                }
+                                .id(photo.id)
                         }
                     }
                     .padding(.horizontal, 2)
@@ -58,17 +76,42 @@ struct PhotoGridView: View {
                 scrollTarget = nil
             }
         }
-        .navigationTitle("Fotos")
+        .navigationTitle(isSelecting ? "\(selectedIds.count) ausgewählt" : "Fotos")
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showUpload = true
-                } label: {
-                    Image(systemName: "photo.badge.plus")
+            if isSelecting {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") {
+                        isSelecting = false
+                        selectedIds = []
+                    }
                 }
-            }
-            ToolbarItem(placement: .topBarLeading) {
-                FilterSortButton(viewModel: filterSort)
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        let filenames = viewModel.photos.filter { selectedIds.contains($0.id) }.map(\.filename)
+                        Task { await shareManager.share(filenames: filenames) }
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .disabled(selectedIds.isEmpty || shareManager.isLoading)
+                }
+            } else {
+                ToolbarItem(placement: .topBarLeading) {
+                    FilterSortButton(viewModel: filterSort)
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        isSelecting = true
+                    } label: {
+                        Image(systemName: "checkmark.circle")
+                    }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showUpload = true
+                    } label: {
+                        Image(systemName: "photo.badge.plus")
+                    }
+                }
             }
         }
         .sheet(isPresented: $showUpload) {
@@ -99,6 +142,28 @@ struct PhotoGridView: View {
         }
         .task(id: filterSort.applyToken) {
             await viewModel.loadPhotos(filter: filterSort.appliedFilter, sort: filterSort.appliedSort)
+        }
+        .sheet(isPresented: $shareManager.isPresented) {
+            ActivityView(images: shareManager.images)
+        }
+        .overlay {
+            if shareManager.isLoading {
+                ZStack {
+                    Color.black.opacity(0.3).ignoresSafeArea()
+                    ProgressView("Fotos laden…")
+                        .padding()
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+        }
+    }
+
+    private func toggleSelection(_ id: Int) {
+        if selectedIds.contains(id) {
+            selectedIds.remove(id)
+            if selectedIds.isEmpty { isSelecting = false }
+        } else {
+            selectedIds.insert(id)
         }
     }
 }
