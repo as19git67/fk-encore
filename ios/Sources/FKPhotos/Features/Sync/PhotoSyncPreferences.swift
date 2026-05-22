@@ -29,6 +29,10 @@ struct PhotoSyncPreferences {
     // Replaces the old uploadedIds / syncedFavoriteIds / syncedTakenAt / syncedModDate / syncedUploadHash fields.
     // v2: switched capturedAtString from EXIF timezone to TimeZone.current (fixes UTC drift for downloaded photos)
     private static let hashCacheKey        = "sync.hashCache.v2"
+    // Synced state: [localIdentifier: SyncedStateEntry] in App Group (shared with Share Extension).
+    // Records the last imageDataHash + fullHash successfully synced to the server per asset,
+    // so the client can detect pixel-only vs metadata-only changes.
+    private static let syncedStateKey      = "sync.syncedState"
 
     // MARK: - Settings
 
@@ -168,10 +172,41 @@ struct PhotoSyncPreferences {
     static func resetUploadHistory() {
         UserDefaults.standard.removeObject(forKey: hashCacheKey)
         UserDefaults.standard.removeObject(forKey: lastSyncDateKey)
+        SharedStorage.defaults.removeObject(forKey: syncedStateKey)
         // Remove legacy keys from previous sync implementation
         for key in ["sync.uploadedIds", "sync.syncedFavoriteIds",
                     "sync.syncedTakenAt", "sync.syncedModificationDate", "sync.syncedUploadHash"] {
             UserDefaults.standard.removeObject(forKey: key)
+        }
+    }
+
+    // MARK: - Synced state (App Group, shared with Share Extension)
+    //
+    // Tracks the last imageDataHash + fullHash that was successfully synced to the server
+    // for each asset. Used to decide: metadata-only sync (pixels unchanged) vs full upload.
+
+    struct SyncedStateEntry: Codable {
+        let imageDataHash: String
+        let fullHash: String
+    }
+
+    static func loadSyncedState() -> [String: SyncedStateEntry] {
+        guard let data = SharedStorage.defaults.data(forKey: syncedStateKey),
+              let cache = try? JSONDecoder().decode([String: SyncedStateEntry].self, from: data) else {
+            return [:]
+        }
+        return cache
+    }
+
+    static func loadSyncedEntry(localId: String) -> SyncedStateEntry? {
+        loadSyncedState()[localId]
+    }
+
+    static func saveSyncedStateEntry(localId: String, imageDataHash: String, fullHash: String) {
+        var cache = loadSyncedState()
+        cache[localId] = SyncedStateEntry(imageDataHash: imageDataHash, fullHash: fullHash)
+        if let data = try? JSONEncoder().encode(cache) {
+            SharedStorage.defaults.set(data, forKey: syncedStateKey)
         }
     }
 }
