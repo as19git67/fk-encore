@@ -499,7 +499,7 @@ struct ShareUploadView: View {
 
         guard let (data, mimeType) = result else { return nil }
 
-        let imageDataHash = ShareHasher.sha256Hex(data)
+        let imageDataHash = ShareHasher.imageDataHash(data)
         // The Photos-app caption / favourite flag take precedence, but fall
         // back to the file's own IPTC/XMP metadata so an embedded caption or
         // xmp:Rating still reaches the server when the Photos database carries
@@ -548,7 +548,7 @@ struct ShareUploadView: View {
             let result: SharePhotoItem? = await withCheckedContinuation { cont in
                 provider.loadDataRepresentation(forTypeIdentifier: uti) { data, _ in
                     guard let data else { cont.resume(returning: nil); return }
-                    let imageDataHash = ShareHasher.sha256Hex(data)
+                    let imageDataHash = ShareHasher.imageDataHash(data)
                     let caption = ShareHasher.extractIPTCCaption(from: data) ?? ""
                     let capturedAtString = ShareHasher.capturedAtStringFromData(capturedAt: capturedAt, imageData: data)
                     // When no PHAsset is available, read the favorite flag from XMP Rating in the
@@ -632,6 +632,33 @@ struct ShareAlbum: Identifiable {
 enum ShareHasher {
     static func sha256Hex(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// SHA-256 of the image's pixel bitstream with all EXIF/IPTC/XMP metadata
+    /// removed. The Photos app re-exports a shared photo with its current
+    /// caption/date embedded in the file, so hashing the raw bytes is unstable
+    /// across metadata edits — a caption change alone would change the hash and
+    /// defeat the server's image_data_hash dedup, creating a duplicate.
+    /// Stripping the metadata container first (CGImageDestination copies the
+    /// compressed bitstream verbatim, no re-encoding) yields a hash that only
+    /// changes when the pixels change. Mirrors PhotoHasher.computeImageDataHash
+    /// in the main app so both upload paths produce the same image_data_hash.
+    /// Falls back to hashing the raw bytes when stripping fails.
+    static func imageDataHash(_ data: Data) -> String {
+        sha256Hex(imageDataStrippingMetadata(data) ?? data)
+    }
+
+    /// Returns the compressed image bitstream with all metadata removed, or nil
+    /// when the data cannot be re-encoded.
+    private static func imageDataStrippingMetadata(_ data: Data) -> Data? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let uti = CGImageSourceGetType(source) else { return nil }
+        let output = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(output as CFMutableData, uti, 1, nil) else { return nil }
+        let options: [CFString: Any] = [kCGImageDestinationMetadata: CGImageMetadataCreateMutable()]
+        CGImageDestinationAddImageFromSource(dest, source, 0, options as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { return nil }
+        return output as Data
     }
 
     static func fullHash(imageDataHash: String, caption: String, isFavorite: Bool, capturedAtString: String) -> String {
