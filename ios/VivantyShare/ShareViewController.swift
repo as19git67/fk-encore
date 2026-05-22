@@ -302,9 +302,29 @@ struct ShareUploadView: View {
 
     // MARK: - Upload
 
+    /// Requests Photos-library read access so the extension can resolve each
+    /// shared item to its `PHAsset`. Without it `PHAsset.fetchAssets` returns
+    /// nothing inside an extension, so `loadFromPhotoAsset` never runs: the
+    /// favourite flag falls back to `false` (favourites are lost on the server)
+    /// and the `localIdentifier` used as the `device_asset_id` dedup key is
+    /// missing, which makes re-shared photos upload as duplicates.
+    ///
+    /// A denied prompt is harmless — the loader still falls back to the raw
+    /// item-provider bytes.
+    private func ensurePhotoLibraryAccess() async {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        if status == .notDetermined {
+            _ = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+        }
+    }
+
     private func performUpload() async {
         isUploading = true
         errorMessage = nil
+
+        // Resolve Photos access before any item is loaded so the PHAsset path
+        // (authoritative favourite flag + stable asset id) is available.
+        await ensurePhotoLibraryAccess()
 
         let prevItems = previousPendingItems
         totalToUpload = prevItems.count + itemProviders.count

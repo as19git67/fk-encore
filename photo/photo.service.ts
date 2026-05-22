@@ -1870,6 +1870,9 @@ export class PhotoAlreadyExistsError extends Error {
  *                   propagates via the dedicated PATCH /photos/:id/curation
  *                   path so it can also work for photos that were never
  *                   re-uploaded.
+ *   - device_asset_id: backfilled when the existing row has none, so the next
+ *                   re-upload of the same asset dedups via the fast asset-id
+ *                   path instead of relying on the content hashes.
  */
 export async function mergeUploadMetadataIntoExisting(
   userId: number,
@@ -1878,6 +1881,7 @@ export async function mergeUploadMetadataIntoExisting(
   isFavorite: boolean,
   imageDataHash: string | null = null,
   fullHash: string | null = null,
+  deviceAssetId: string | null = null,
 ): Promise<void> {
   const existing = await dbFirst<typeof photos.$inferSelect>(
     db.select().from(photos).where(eq(photos.id, existingPhotoId))
@@ -1900,6 +1904,12 @@ export async function mergeUploadMetadataIntoExisting(
   // fullHash — the fuzzy taken_at path leaves it null.
   if (fullHash && fullHash !== existing.hash) {
     updates.hash = fullHash;
+  }
+
+  // Backfill the device asset id on rows that predate the asset-id protocol so
+  // the next re-upload of this asset dedups via the fast device_asset_id path.
+  if (deviceAssetId && !existing.device_asset_id) {
+    updates.device_asset_id = deviceAssetId;
   }
 
   if (!existing.taken_at && exifMeta.takenAt) {
@@ -2292,11 +2302,39 @@ export async function uploadPhotoStream(
     if (parsed) exifMeta.takenAt = parsed;
   }
 
+  // image-data-hash dedup (issue #432): a photo with byte-identical pixel data
+  // already exists. A hash-sync client always sends X-Image-Data-Hash, so when
+  // it matches we have the very same image and only the metadata (favourite,
+  // caption, date) may differ — merge that in place and report a duplicate
+  // instead of storing a second copy. This is the dedup that survives a missing
+  // or mismatched device_asset_id: a photo first uploaded before the asset-id
+  // protocol, or re-shared from the Photos-app extension, would otherwise slip
+  // past the body-digest check below (which never matches a hash-sync client,
+  // since `hash` holds the composite identity hash, not the body digest) and
+  // get duplicated. Checking it before the device_asset_id branch also spares
+  // an unnecessary file replacement when the pixels are in fact unchanged.
+  if (imageDataHash) {
+    const dataHashDup = await dbFirst<typeof photos.$inferSelect>(
+      db.select().from(photos).where(and(
+        eq(photos.user_id, userId),
+        eq(photos.image_data_hash, imageDataHash),
+      )),
+    );
+    if (dataHashDup) {
+      await mergeUploadMetadataIntoExisting(
+        userId, dataHashDup.id, exifMeta, isFavorite, imageDataHash, fullHash, deviceAssetId,
+      );
+      if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+      throw new PhotoAlreadyExistsError(dataHashDup.id);
+    }
+  }
+
   // device_asset_id replace (issue #432): the client re-uploaded an asset we
   // already have under the same PHAsset.localIdentifier. A pure metadata edit
   // was already handled before the body was read (tryMetadataOnlySync's
-  // pixels-unchanged fast path); reaching here with an asset-id match means the
-  // pixels changed — replace the stored file in place instead of duplicating.
+  // pixels-unchanged fast path) or by the image-data-hash dedup above; reaching
+  // here with an asset-id match means the pixels changed — replace the stored
+  // file in place instead of duplicating.
   if (deviceAssetId) {
     const assetMatch = await dbFirst<typeof photos.$inferSelect>(
       db.select().from(photos).where(and(
@@ -2323,7 +2361,9 @@ export async function uploadPhotoStream(
   );
 
   if (existing) {
-    await mergeUploadMetadataIntoExisting(userId, existing.id, exifMeta, isFavorite, imageDataHash, fullHash);
+    await mergeUploadMetadataIntoExisting(
+      userId, existing.id, exifMeta, isFavorite, imageDataHash, fullHash, deviceAssetId,
+    );
     if (fs.existsSync(tempPath)) {
       fs.unlinkSync(tempPath);
     }
