@@ -78,12 +78,45 @@ actor PhotoSyncService {
             existingHashes.formUnion(serverHas)
         }
 
-        // Step 4: Upload assets whose full-hash the server doesn't have.
+        // Step 4: Sync assets whose full-hash the server doesn't have.
+        // If the pixel data (imageDataHash) hasn't changed since the last successful
+        // sync, use the body-less POST /photos/sync/metadata endpoint. Otherwise
+        // fall back to a full upload via POST /photos.
         for item in hashPairs {
             guard !existingHashes.contains(item.hashResult.fullHash) else { continue }
 
+            let localId = item.asset.localIdentifier
             let caption = PhotoHasher.shared.captionFromAsset(item.asset) ?? ""
 
+            // Metadata-only fast path: pixels unchanged since last sync.
+            let syncedEntry = PhotoSyncPreferences.loadSyncedEntry(localId: localId)
+            if let syncedEntry, syncedEntry.imageDataHash == item.hashResult.imageDataHash {
+                do {
+                    let result = try await APIClient.shared.syncPhotoMetadata(
+                        imageDataHash: item.hashResult.imageDataHash,
+                        fullHash: item.hashResult.fullHash,
+                        caption: caption,
+                        isFavorite: item.asset.isFavorite,
+                        capturedAtString: item.hashResult.capturedAtString,
+                        assetLocalId: localId
+                    )
+                    if case .updated(let photoId) = result {
+                        PhotoSyncPreferences.saveSyncedStateEntry(
+                            localId: localId,
+                            imageDataHash: item.hashResult.imageDataHash,
+                            fullHash: item.hashResult.fullHash
+                        )
+                        PhotoSyncPreferences.recordUploadedPhoto(serverPhotoId: photoId, localIdentifier: localId)
+                        await addToTargetAlbum(photoId: photoId, sourceAlbumId: item.sourceAlbumId)
+                        continue
+                    }
+                    // .notFound → fall through to full upload
+                } catch {
+                    // Error → fall through to full upload
+                }
+            }
+
+            // Full upload (first sync, pixel change, or metadata sync failed).
             do {
                 let (data, mimeType) = try await loadAssetData(item.asset, filename: item.filename)
                 let uploadFilename = filenameMatchingMime(item.filename, mimeType: mimeType)
@@ -96,20 +129,28 @@ actor PhotoSyncService {
                     caption: caption,
                     isFavorite: item.asset.isFavorite,
                     capturedAtString: item.hashResult.capturedAtString,
-                    assetLocalId: item.asset.localIdentifier
+                    assetLocalId: localId
+                )
+                PhotoSyncPreferences.saveSyncedStateEntry(
+                    localId: localId,
+                    imageDataHash: item.hashResult.imageDataHash,
+                    fullHash: item.hashResult.fullHash
                 )
                 PhotoSyncPreferences.recordUploadedPhoto(
                     serverPhotoId: result.photoId,
-                    localIdentifier: item.asset.localIdentifier
+                    localIdentifier: localId
                 )
                 await addToTargetAlbum(photoId: result.photoId, sourceAlbumId: item.sourceAlbumId)
             } catch APIError.duplicatePhoto(let existingPhotoId) {
-                // Server already has this photo (hash adoption from a pre-hash legacy record).
-                // Treat as success; record the mapping so album association works.
                 if let existingPhotoId {
+                    PhotoSyncPreferences.saveSyncedStateEntry(
+                        localId: localId,
+                        imageDataHash: item.hashResult.imageDataHash,
+                        fullHash: item.hashResult.fullHash
+                    )
                     PhotoSyncPreferences.recordUploadedPhoto(
                         serverPhotoId: existingPhotoId,
-                        localIdentifier: item.asset.localIdentifier
+                        localIdentifier: localId
                     )
                     await addToTargetAlbum(photoId: existingPhotoId, sourceAlbumId: item.sourceAlbumId)
                 }

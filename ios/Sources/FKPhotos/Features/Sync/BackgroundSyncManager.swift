@@ -129,6 +129,43 @@ public final class BackgroundSyncManager {
         guard !pending.isEmpty else { return }
 
         for item in pending {
+            let localId = item.assetLocalIdentifier ?? ""
+
+            // Metadata-only fast path: if we have a synced state entry with the same
+            // imageDataHash, the pixels haven't changed — skip re-uploading the bytes.
+            if !localId.isEmpty {
+                let syncedEntry = PhotoSyncPreferences.loadSyncedEntry(localId: localId)
+                if let syncedEntry, syncedEntry.imageDataHash == item.imageDataHash {
+                    do {
+                        let result = try await APIClient.shared.syncPhotoMetadata(
+                            imageDataHash: item.imageDataHash,
+                            fullHash: item.fullHash,
+                            caption: item.caption,
+                            isFavorite: item.isFavorite,
+                            capturedAtString: item.capturedAtString,
+                            assetLocalId: localId
+                        )
+                        if case .updated(let photoId) = result {
+                            PhotoSyncPreferences.saveSyncedStateEntry(
+                                localId: localId,
+                                imageDataHash: item.imageDataHash,
+                                fullHash: item.fullHash
+                            )
+                            PhotoSyncPreferences.recordUploadedPhoto(serverPhotoId: photoId, localIdentifier: localId)
+                            for albumId in item.targetAlbumIds {
+                                struct Body: Encodable { let albumId: Int; let photoId: Int }
+                                struct Resp: Decodable { let success: Bool }
+                                _ = try? await APIClient.shared.post("/albums/photos", body: Body(albumId: albumId, photoId: photoId)) as Resp
+                            }
+                            await UploadQueue.shared.markDone(id: item.id)
+                            continue
+                        }
+                    } catch {
+                        // Fall through to full upload
+                    }
+                }
+            }
+
             guard let data = try? Data(contentsOf: item.tempFileURL) else {
                 await UploadQueue.shared.markFailed(id: item.id)
                 continue
@@ -143,13 +180,17 @@ public final class BackgroundSyncManager {
                     caption: item.caption,
                     isFavorite: item.isFavorite,
                     capturedAtString: item.capturedAtString,
-                    assetLocalId: item.assetLocalIdentifier ?? ""
+                    assetLocalId: localId
+                )
+                PhotoSyncPreferences.saveSyncedStateEntry(
+                    localId: localId,
+                    imageDataHash: item.imageDataHash,
+                    fullHash: item.fullHash
                 )
                 PhotoSyncPreferences.recordUploadedPhoto(
                     serverPhotoId: result.photoId,
-                    localIdentifier: item.assetLocalIdentifier ?? ""
+                    localIdentifier: localId
                 )
-                // Attach to target albums.
                 for albumId in item.targetAlbumIds {
                     struct Body: Encodable { let albumId: Int; let photoId: Int }
                     struct Resp: Decodable { let success: Bool }
@@ -161,9 +202,14 @@ public final class BackgroundSyncManager {
                 await UploadQueue.shared.markDone(id: item.id)
             } catch APIError.duplicatePhoto(let existingId) {
                 if let existingId {
+                    PhotoSyncPreferences.saveSyncedStateEntry(
+                        localId: localId,
+                        imageDataHash: item.imageDataHash,
+                        fullHash: item.fullHash
+                    )
                     PhotoSyncPreferences.recordUploadedPhoto(
                         serverPhotoId: existingId,
-                        localIdentifier: item.assetLocalIdentifier ?? ""
+                        localIdentifier: localId
                     )
                 }
                 await UploadQueue.shared.markDone(id: item.id)
