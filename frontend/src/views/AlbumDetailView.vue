@@ -1472,6 +1472,8 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
             v-if="canManageData && unreviewedGroupCount > 0 && viewMode !== 'map'"
             :label="`Gruppen bearbeiten (${unreviewedGroupCount} offen)`"
             icon="pi pi-images" severity="success" size="small"
+            class="header__group-review-btn"
+            v-tooltip.bottom="`Gruppen bearbeiten (${unreviewedGroupCount} offen)`"
             @click="handleStartGroupReview"
           />
           <Button v-if="effectiveCoverPhotoId && viewMode !== 'map'" icon="pi pi-image" size="small" text v-tooltip="'Cover fokussieren'" @click="scrollToCover" />
@@ -2169,6 +2171,12 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
      remain so the icons are still discoverable. */
   .header__filter-btn :deep(.p-button-label) { display: none; }
   .header__filter-btn :deep(.p-button-icon) { margin-right: 0; }
+
+  /* "Gruppen bearbeiten" collapses to a green icon-only button on phones;
+     the unreviewed-count stays in the tooltip. */
+  .header__group-review-btn :deep(.p-button-label) { display: none; }
+  .header__group-review-btn :deep(.p-button-icon) { margin-right: 0; }
+  .header__group-review-btn { padding: 0.5rem; min-width: 2.25rem; }
 
   /* Selection action bar — clear of the iOS home indicator and with
      44px-tall touch targets so the buttons are easy to tap (#373). */
