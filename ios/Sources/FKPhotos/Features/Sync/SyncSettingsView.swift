@@ -495,29 +495,30 @@ struct AlbumPickerView: View {
     }
 
     private func loadAlbums() async -> [(collection: PHAssetCollection, count: Int)] {
-        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        var status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        if status == .notDetermined {
+            status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+        }
         guard status == .authorized || status == .limited else { return [] }
 
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 var result: [(PHAssetCollection, Int)] = []
                 var seenIds = Set<String>()
-                var seenNames = Set<String>()
 
                 let skipSubtypes: Set<PHAssetCollectionSubtype> = [
                     .smartAlbumVideos, .smartAlbumAllHidden, .smartAlbumSlomoVideos,
                     .smartAlbumTimelapses, .smartAlbumAnimated
                 ]
 
+                let imageFilter = PHFetchOptions()
+                imageFilter.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
+
                 func addCollections(from fetchResult: PHFetchResult<PHAssetCollection>) {
                     fetchResult.enumerateObjects { collection, _, _ in
                         if skipSubtypes.contains(collection.assetCollectionSubtype) { return }
                         guard seenIds.insert(collection.localIdentifier).inserted else { return }
-                        let name = collection.localizedTitle ?? ""
-                        guard seenNames.insert(name.lowercased()).inserted else { return }
-                        let imageOptions = PHFetchOptions()
-                        imageOptions.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
-                        let count = PHAsset.fetchAssets(in: collection, options: imageOptions).count
+                        let count = PHAsset.fetchAssets(in: collection, options: imageFilter).count
                         if count > 0 { result.append((collection, count)) }
                     }
                 }
