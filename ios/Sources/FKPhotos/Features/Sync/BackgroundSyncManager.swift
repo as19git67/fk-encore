@@ -225,7 +225,8 @@ public final class BackgroundSyncManager {
     /// PHAsset for these items, so its `capturedAtString` is empty; the file's
     /// own EXIF is the only capture date available.
     private static func captureDate(for item: UploadQueueItem) -> Date? {
-        guard let source = CGImageSourceCreateWithURL(item.tempFileURL as CFURL, nil),
+        guard let fileURL = item.tempFileURL,
+              let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil),
               let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any],
               let original = exif[kCGImagePropertyExifDateTimeOriginal] as? String
@@ -309,7 +310,17 @@ public final class BackgroundSyncManager {
                 }
             }
 
-            guard let data = try? Data(contentsOf: item.tempFileURL) else {
+            let data: Data
+            let mimeType: String
+            if let tempURL = item.tempFileURL, let tempData = try? Data(contentsOf: tempURL) {
+                data = tempData
+                mimeType = item.mimeType
+            } else if let localId = item.assetLocalIdentifier, !localId.isEmpty,
+                      let asset = PHAsset.fetchAssets(withLocalIdentifiers: [localId], options: nil).firstObject,
+                      let (assetData, assetMime) = try? await PhotoSyncService.loadAssetData(asset) {
+                data = assetData
+                mimeType = assetMime
+            } else {
                 await UploadQueue.shared.markFailed(id: item.id)
                 continue
             }
@@ -317,7 +328,7 @@ public final class BackgroundSyncManager {
                 let result = try await APIClient.shared.uploadPhoto(
                     data: data,
                     filename: item.filename,
-                    mimeType: item.mimeType,
+                    mimeType: mimeType,
                     imageDataHash: item.imageDataHash,
                     fullHash: item.fullHash,
                     caption: item.caption,
@@ -360,6 +371,7 @@ public final class BackgroundSyncManager {
                 await UploadQueue.shared.markFailed(id: item.id)
             }
         }
+        await UploadQueue.shared.purgeDone()
     }
 
     // MARK: - Task handler
@@ -370,8 +382,9 @@ public final class BackgroundSyncManager {
 
         let work = Task {
             do {
-                // Drain the upload queue first (items from Share Extension, etc.)
+                // Drain share-extension leftovers before sync enqueues new items.
                 await drainUploadQueue()
+                // sync() enqueues library items and drains in batches of 50.
                 try await PhotoSyncService.shared.sync()
                 try await PhotoDownloadService.shared.sync()
                 task.setTaskCompleted(success: true)
