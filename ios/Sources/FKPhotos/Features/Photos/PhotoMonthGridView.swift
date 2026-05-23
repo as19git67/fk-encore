@@ -15,6 +15,8 @@ struct PhotoMonthGridView: View {
     @State private var isSelecting = false
     @State private var selectedIds: Set<Int> = []
     @State private var shareManager = PhotoShareManager()
+    @State private var addToAlbum = AddToAlbumManager()
+    @State private var itemFrames: [Int: CGRect] = [:]
 
     private let columns = [
         GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 2)
@@ -97,10 +99,14 @@ struct PhotoMonthGridView: View {
                                         selectedIds = [photo.id]
                                     }
                                 }
+                                .reportPhotoFrame(id: photo.id, space: "monthGrid")
                                 .id(photo.id)
                         }
                     }
                     .padding(.horizontal, 2)
+                    .coordinateSpace(name: "monthGrid")
+                    .onPreferenceChange(PhotoFramePreference.self) { itemFrames = $0 }
+                    .simultaneousGesture(isSelecting ? dragSelectGesture : nil)
                 }
             }
             .onChange(of: scrollTarget) { _, id in
@@ -119,7 +125,13 @@ struct PhotoMonthGridView: View {
                         selectedIds = []
                     }
                 }
-                ToolbarItem(placement: .primaryAction) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        addToAlbum.present(photoIds: selectedIds)
+                    } label: {
+                        Image(systemName: "rectangle.stack.badge.plus")
+                    }
+                    .disabled(selectedIds.isEmpty)
                     Button {
                         let filenames = photos.filter { selectedIds.contains($0.id) }.map(\.filename)
                         Task { await shareManager.share(filenames: filenames) }
@@ -162,6 +174,10 @@ struct PhotoMonthGridView: View {
         .sheet(isPresented: $shareManager.isPresented) {
             ActivityView(images: shareManager.images)
         }
+        .sheet(isPresented: $addToAlbum.isPresented) {
+            AddToAlbumPickerView(manager: addToAlbum)
+                .presentationDetents([.medium, .large])
+        }
         .overlay {
             if shareManager.isLoading {
                 ZStack {
@@ -172,6 +188,22 @@ struct PhotoMonthGridView: View {
                 }
             }
         }
+        .onChange(of: addToAlbum.resultMessage) { _, message in
+            guard message != nil else { return }
+            isSelecting = false
+            selectedIds = []
+            addToAlbum.resultMessage = nil
+        }
+    }
+
+    private var dragSelectGesture: some Gesture {
+        DragGesture(minimumDistance: 10, coordinateSpace: .named("monthGrid"))
+            .onChanged { value in
+                let point = value.location
+                for (id, frame) in itemFrames where frame.contains(point) {
+                    selectedIds.insert(id)
+                }
+            }
     }
 
     private func toggleSelection(_ id: Int) {

@@ -124,9 +124,16 @@ struct AddToAlbumPickerView: View {
     @Environment(\.dismiss) private var dismiss
 
     private var filteredAlbums: [Album] {
-        searchText.isEmpty
+        let base = searchText.isEmpty
             ? albums
             : albums.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+        let pinned = AlbumPinPreferences.pinnedIds
+        return base.sorted { a, b in
+            let aPinned = pinned.contains(a.id)
+            let bPinned = pinned.contains(b.id)
+            if aPinned != bPinned { return aPinned }
+            return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+        }
     }
 
     var body: some View {
@@ -145,8 +152,16 @@ struct AddToAlbumPickerView: View {
                         Button {
                             Task { await manager.addToAlbum(album.id) }
                         } label: {
-                            Text(album.name)
-                                .foregroundStyle(.primary)
+                            HStack {
+                                Text(album.name)
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                if AlbumPinPreferences.pinnedIds.contains(album.id) {
+                                    Image(systemName: "pin.fill")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                         }
                         .disabled(manager.isAdding)
                     }
