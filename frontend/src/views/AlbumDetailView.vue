@@ -25,6 +25,7 @@ import { useSort, type SortField, type SortState } from '../composables/useSort'
 import { matchesPhotoFilter, type PhotoFilterContext } from '../utils/photoFilter'
 import {
   type GalleryGridEntry,
+  type GalleryGridGroup,
   type GallerySortDir,
   type GallerySortField,
 } from '../api/gallery'
@@ -135,6 +136,10 @@ const galleryAnchorPhotoId = ref<number | null>(null)
 const cursorPhoto = ref<Photo | null>(null)
 const cursorPrev = ref<Photo | null>(null)
 const cursorNext = ref<Photo | null>(null)
+// Similar-photo-group context for the cursor cell, mirrored into
+// FullscreenOverlay so the `+N` Track-I badge shows up in the album's
+// fullscreen view too (it was previously only wired up in GalleryView).
+const cursorGroup = ref<GalleryGridGroup | null>(null)
 let hydrateToken = 0
 let curationVersion = 0
 
@@ -508,6 +513,7 @@ async function hydrateCursor(index: number): Promise<void> {
   cursorPhoto.value = entryToMinimalPhoto(curEntry)
   cursorPrev.value = prevEntry ? entryToMinimalPhoto(prevEntry) : null
   cursorNext.value = nextEntry ? entryToMinimalPhoto(nextEntry) : null
+  cursorGroup.value = curEntry.group ?? null
 
   saveLastPhotoForAlbum(albumId.value, curEntry.id)
   photoNav.selectPhotoInAlbum(curEntry.id, albumId.value)
@@ -1181,6 +1187,20 @@ function handleGridStackClick(entry: GalleryGridEntry) {
   activeGroup.value = found
 }
 
+/** Opening the review from the fullscreen `+N` badge (Track-I) — mirrors
+ *  GalleryView's flow, but anchors the post-review restore on the
+ *  fullscreen photo so closing the review puts the user back where they
+ *  came from (#374). */
+function onFullscreenOpenGroupReview() {
+  const g = cursorGroup.value
+  if (!g) return
+  const found = photoGroupsList.value.find((row) => row.id === g.id) ?? null
+  if (!found) return
+  preReviewPhotoId.value = cursorPhoto.value?.id ?? null
+  closeGridFullscreen()
+  activeGroup.value = found
+}
+
 async function onGalleryLoaded() {
   if (!galleryRef.value) return
   // galleryAnchorPhotoId was set before this mount (initial load or map→grid
@@ -1317,6 +1337,7 @@ watch(albumId, (id) => {
   cursorPhoto.value = null
   cursorPrev.value = null
   cursorNext.value = null
+  cursorGroup.value = null
   activeGroup.value = null
   detectedFaces.value = []
   detectedLandmarks.value = []
@@ -1670,6 +1691,7 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
       :autoAdvanceMs="10000"
       :currentIndex="(cursorIndex ?? 0) + 1"
       :totalCount="albumPhotos.length"
+      :group="cursorGroup"
       @close="closeGridFullscreen"
       @prev="gridGoPrev"
       @next="gridGoNext"
@@ -1678,6 +1700,7 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
       @restore="handleRestorePhoto"
       @show-details="fullscreenDetailsOpen = !fullscreenDetailsOpen"
       @toggle-cover="handleSetMapCover"
+      @open-group-review="onFullscreenOpenGroupReview"
     >
       <template #actions-before>
         <Button
