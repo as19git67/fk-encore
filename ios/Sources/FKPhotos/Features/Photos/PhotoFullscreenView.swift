@@ -10,7 +10,7 @@ struct PhotoFullscreenView: View {
     @Binding private var currentIndex: Int
     @Environment(\.dismiss) private var dismiss
     @State private var showDetails = false
-    @State private var currentCurationStatus: CurationStatus
+    @State private var curationOverrides: [Int: CurationStatus] = [:]
 
     // Person context (when navigated from PersonDetailView)
     private let personId: Int?
@@ -28,7 +28,6 @@ struct PhotoFullscreenView: View {
         self.photos = [photo]
         self.bboxes = [faceBBox]
         _currentIndex = .constant(0)
-        _currentCurationStatus = State(initialValue: photo.curation_status)
         self.personId = personId
         _personName = State(initialValue: initialPersonName)
         self.onPersonRenamed = onPersonRenamed
@@ -40,8 +39,6 @@ struct PhotoFullscreenView: View {
         self.photos = photos
         self.bboxes = Array(repeating: nil, count: photos.count)
         _currentIndex = currentIndex
-        let idx = currentIndex.wrappedValue
-        _currentCurationStatus = State(initialValue: photos.indices.contains(idx) ? photos[idx].curation_status : .visible)
         self.personId = nil
         self.onPersonRenamed = nil
         self.onPersonMerged = nil
@@ -52,8 +49,6 @@ struct PhotoFullscreenView: View {
         self.photos = photos
         self.bboxes = bboxes.count == photos.count ? bboxes : Array(repeating: nil, count: photos.count)
         _currentIndex = currentIndex
-        let idx = currentIndex.wrappedValue
-        _currentCurationStatus = State(initialValue: photos.indices.contains(idx) ? photos[idx].curation_status : .visible)
         self.personId = personId
         _personName = State(initialValue: initialPersonName)
         self.onPersonRenamed = onPersonRenamed
@@ -64,6 +59,18 @@ struct PhotoFullscreenView: View {
         photos.indices.contains(currentIndex) ? photos[currentIndex] : nil
     }
 
+    private var currentCuration: CurationStatus {
+        guard let photo = currentPhoto else { return .visible }
+        return curationOverrides[photo.id] ?? photo.curation_status
+    }
+
+    private func curationBinding(for photo: PhotoWithCuration) -> Binding<CurationStatus> {
+        Binding(
+            get: { curationOverrides[photo.id] ?? photo.curation_status },
+            set: { curationOverrides[photo.id] = $0 }
+        )
+    }
+
     var body: some View {
         TabView(selection: $currentIndex) {
             ForEach(photos.indices, id: \.self) { index in
@@ -71,9 +78,7 @@ struct PhotoFullscreenView: View {
                     photo: photos[index],
                     faceBBox: index < bboxes.count ? bboxes[index] : nil,
                     showDetails: $showDetails,
-                    curationStatus: index == currentIndex
-                        ? $currentCurationStatus
-                        : .constant(photos[index].curation_status)
+                    curationStatus: curationBinding(for: photos[index])
                 )
                 .tag(index)
             }
@@ -83,11 +88,6 @@ struct PhotoFullscreenView: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .tabBar)
-        .onChange(of: currentIndex) { _, newIndex in
-            if photos.indices.contains(newIndex) {
-                currentCurationStatus = photos[newIndex].curation_status
-            }
-        }
         .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { dismiss() } label: {
@@ -113,18 +113,18 @@ struct PhotoFullscreenView: View {
                     Button {
                         Task {
                             guard let photo = currentPhoto else { return }
-                            let next: CurationStatus = currentCurationStatus == .hidden ? .visible : .hidden
+                            let next: CurationStatus = currentCuration == .hidden ? .visible : .hidden
                             struct Body: Codable { let status: CurationStatus }
                             struct Response: Codable { let success: Bool }
                             _ = try? await APIClient.shared.patch(
                                 "/photos/\(photo.id)/curation",
                                 body: Body(status: next)
                             ) as Response
-                            currentCurationStatus = next
+                            curationOverrides[photo.id] = next
                         }
                     } label: {
-                        Image(systemName: currentCurationStatus == .hidden ? "eye.slash" : "eye")
-                            .foregroundStyle(currentCurationStatus == .hidden ? Color.red : Color.accentColor)
+                        Image(systemName: currentCuration == .hidden ? "eye.slash" : "eye")
+                            .foregroundStyle(currentCuration == .hidden ? Color.red : Color.accentColor)
                     }
                 }
                 ToolbarItem(placement: .principal) {
@@ -165,19 +165,19 @@ struct PhotoFullscreenView: View {
                         Button {
                             Task {
                                 guard let photo = currentPhoto else { return }
-                                let next: CurationStatus = currentCurationStatus == .favorite ? .visible : .favorite
+                                let next: CurationStatus = currentCuration == .favorite ? .visible : .favorite
                                 struct Body: Codable { let status: CurationStatus }
                                 struct Response: Codable { let success: Bool }
                                 _ = try? await APIClient.shared.patch(
                                     "/photos/\(photo.id)/curation",
                                     body: Body(status: next)
                                 ) as Response
-                                currentCurationStatus = next
+                                curationOverrides[photo.id] = next
                             }
                         } label: {
-                            Image(systemName: currentCurationStatus == .favorite ? "heart.fill" : "heart")
+                            Image(systemName: currentCuration == .favorite ? "heart.fill" : "heart")
                                 .font(.title2)
-                                .foregroundStyle(currentCurationStatus == .favorite ? Color.red : .primary)
+                                .foregroundStyle(currentCuration == .favorite ? Color.red : .primary)
                         }
 
                         Button {
