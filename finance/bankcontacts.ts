@@ -45,9 +45,13 @@ interface TanMethodCacheEntry {
 interface BankcontactView {
   id: number;
   name: string;
-  blz: string;
-  login: string;
-  server_url: string;
+  // FinTS-Pflichtfelder. Mit Issue #427 (PayPal) nullable, weil PayPal-
+  // Bankkontakte diese Felder nicht setzen. Bestehende FinTS-Zeilen
+  // liefern unverändert Strings — die Discriminator-Validierung greift
+  // erst in Etappe 5 (PayPal-OAuth-Endpoints).
+  blz: string | null;
+  login: string | null;
+  server_url: string | null;
   tan_method: string | null;
   credentials_set: boolean;
   last_sync_at: string | null;

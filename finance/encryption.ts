@@ -93,3 +93,106 @@ export function encryptCredentials(plain: string): string {
 export function decryptCredentials(blob: string): string {
   return decryptWithKey(getActiveKey(), blob);
 }
+
+// ---------------------------------------------------------------------------
+// Credential bundle — discriminated union for FinTS PIN + PayPal OAuth
+// tokens. Introduced with Issue #427 so the same encrypted column can
+// carry different credential shapes depending on `finance_bankcontact.
+// access_type`. Legacy FinTS rows still store a plain PIN string; the
+// decode path treats those as `{ kind: "fints", pin }` so no data rewrite
+// is needed for the migration.
+// ---------------------------------------------------------------------------
+
+/**
+ * Plaintext credentials for a FinTS bankcontact. Held in memory only —
+ * the wrapper encrypts on store and decrypts on use, never logging it.
+ */
+export interface FintsCredentials {
+  kind: "fints";
+  pin: string;
+}
+
+/**
+ * Plaintext credentials for a PayPal bankcontact. `refreshToken` is
+ * the user-bound long-lived token returned by the OAuth callback
+ * (Etappe 5). `accessToken` + `accessTokenExpiresAt` are an optional
+ * in-blob cache so the connector can skip the refresh round-trip
+ * across short bursts of sync activity. Both expire and are refreshed
+ * by `paypal-client.ts` as needed.
+ */
+export interface PaypalCredentials {
+  kind: "paypal";
+  refreshToken?: string;
+  accessToken?: string;
+  /** ISO-8601 timestamp at which `accessToken` is no longer valid. */
+  accessTokenExpiresAt?: string;
+}
+
+export type CredentialBundle = FintsCredentials | PaypalCredentials;
+
+/**
+ * Encrypts a credential bundle for storage in
+ * `finance_bankcontact.credentials_encrypted`. The shape is encoded as
+ * JSON before encryption so the column can carry either FinTS or
+ * PayPal credentials with a single decode path.
+ */
+export function encryptCredentialBundle(bundle: CredentialBundle): string {
+  return encryptCredentials(JSON.stringify(bundle));
+}
+
+/**
+ * Decrypts a credential blob and returns the typed bundle.
+ *
+ * Legacy compatibility: rows written before Issue #427 stored the
+ * FinTS PIN as a plain string — when the decoded payload is not valid
+ * JSON we wrap it as `{ kind: "fints", pin: <string> }`. New writes
+ * always go through `encryptCredentialBundle` so the JSON branch wins
+ * on every subsequent read.
+ */
+export function decryptCredentialBundle(blob: string): CredentialBundle {
+  const plain = decryptCredentials(blob);
+
+  // Legacy fast-path: if the payload doesn't look like JSON, treat it
+  // as the historical FinTS PIN string. JSON parsing would throw a
+  // SyntaxError on those, which would leak as a 500 to the caller.
+  if (plain.length === 0 || plain[0] !== "{") {
+    return { kind: "fints", pin: plain };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(plain);
+  } catch {
+    // Decryptable but not JSON — also legacy data, same fallback.
+    return { kind: "fints", pin: plain };
+  }
+
+  if (
+    typeof parsed !== "object"
+    || parsed === null
+    || !("kind" in parsed)
+  ) {
+    throw new Error("decrypted credentials are not a valid bundle");
+  }
+  const kind = (parsed as { kind: unknown }).kind;
+  if (kind === "fints") {
+    const pin = (parsed as { pin?: unknown }).pin;
+    if (typeof pin !== "string") {
+      throw new Error("fints credentials missing string `pin`");
+    }
+    return { kind: "fints", pin };
+  }
+  if (kind === "paypal") {
+    const obj = parsed as Record<string, unknown>;
+    return {
+      kind: "paypal",
+      refreshToken: typeof obj.refreshToken === "string" ? obj.refreshToken : undefined,
+      accessToken: typeof obj.accessToken === "string" ? obj.accessToken : undefined,
+      accessTokenExpiresAt:
+        typeof obj.accessTokenExpiresAt === "string"
+          ? obj.accessTokenExpiresAt
+          : undefined,
+    };
+  }
+  throw new Error(`unknown credential bundle kind: ${String(kind)}`);
+}

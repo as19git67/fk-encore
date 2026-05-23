@@ -1284,9 +1284,13 @@ export interface FinanceSyncSlot {
 export const financeBankcontact = pgTable("finance_bankcontact", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
-  blz: text("blz").notNull(),
-  login: text("login").notNull(),
-  server_url: text("server_url").notNull(),
+  // FinTS-Pflichtfelder. Mit der Einführung von PayPal (access_type =
+  // "paypal", Etappe 1 von Issue #427) sind diese drei Spalten nullable
+  // geworden — die Anwendungsschicht (bankcontacts.ts) prüft je nach
+  // access_type, ob sie gesetzt sein müssen.
+  blz: text("blz"),
+  login: text("login"),
+  server_url: text("server_url"),
   tan_method: text("tan_method"),
   credentials_encrypted: text("credentials_encrypted"), // AES-GCM blob, base64
   // Last bank-advertised list of TAN methods, cached here so the UI's
@@ -1314,6 +1318,23 @@ export const financeBankcontact = pgTable("finance_bankcontact", {
   created_at: timestamp("created_at", { mode: "string", withTimezone: true })
     .notNull()
     .defaultNow(),
+  // Diskriminator: "fints" (Default) oder "paypal". Steuert, welcher
+  // Connector die Sync-Pipeline bedient. Validierung pro access_type
+  // lebt in bankcontacts.ts (FinTS verlangt blz/login/server_url,
+  // PayPal verlangt paypal_environment + verbundene OAuth-Tokens).
+  access_type: text("access_type").notNull().default("fints"),
+  // PayPal-spezifische Spalten. NULL für FinTS-Zugänge.
+  //   paypal_environment  — "sandbox" | "live", per Bankkontakt
+  //                         umschaltbar (Test- vs. Produktivkonto).
+  //   paypal_client_id    — öffentliche PayPal-seitige Kennung des
+  //                         verbundenen Kontos (z. B. payer_id), wird
+  //                         vom OAuth-Callback (Etappe 5) befüllt.
+  //                         Bewusst getrennt vom verschlüsselten Blob.
+  //   paypal_merchant_id  — getrennt vorgesehen für die Webhook-
+  //                         Zuordnung in Phase 2 (Event → Bankkontakt).
+  paypal_environment: text("paypal_environment"),
+  paypal_client_id: text("paypal_client_id"),
+  paypal_merchant_id: text("paypal_merchant_id"),
 });
 
 export const financeAccount = pgTable(

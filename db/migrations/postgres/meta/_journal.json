@@ -743,6 +743,13 @@
       "when": 1779001444000,
       "tag": "0105_finance_anomaly_missing",
       "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1779001445000,
+      "tag": "0106_finance_paypal_support",
+      "breakpoints": true
     }
   ]
 }

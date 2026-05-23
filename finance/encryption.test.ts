@@ -1,7 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { randomBytes } from "node:crypto";
 
-import { encryptWithKey, decryptWithKey } from "./encryption";
+import {
+  decryptCredentialBundle,
+  encryptCredentialBundle,
+  encryptCredentials,
+  encryptWithKey,
+  decryptWithKey,
+} from "./encryption";
 
 const KEY = () => randomBytes(32);
 
@@ -81,5 +87,64 @@ describe("finance/encryption — key validation", () => {
 
   it("rejects a non-32-byte key on decrypt", () => {
     expect(() => decryptWithKey(Buffer.alloc(16), "AAAA")).toThrow();
+  });
+});
+
+describe("finance/encryption — credential bundle (Issue #427)", () => {
+  it("round-trips a FinTS bundle", () => {
+    const blob = encryptCredentialBundle({ kind: "fints", pin: "hunter2" });
+    expect(decryptCredentialBundle(blob)).toEqual({
+      kind: "fints",
+      pin: "hunter2",
+    });
+  });
+
+  it("round-trips a PayPal bundle with all optional fields", () => {
+    const bundle = {
+      kind: "paypal" as const,
+      refreshToken: "rt-abc",
+      accessToken: "at-xyz",
+      accessTokenExpiresAt: "2026-06-01T12:00:00.000Z",
+    };
+    const blob = encryptCredentialBundle(bundle);
+    expect(decryptCredentialBundle(blob)).toEqual(bundle);
+  });
+
+  it("round-trips a PayPal bundle with only the refresh token", () => {
+    const blob = encryptCredentialBundle({
+      kind: "paypal",
+      refreshToken: "rt-only",
+    });
+    expect(decryptCredentialBundle(blob)).toEqual({
+      kind: "paypal",
+      refreshToken: "rt-only",
+      accessToken: undefined,
+      accessTokenExpiresAt: undefined,
+    });
+  });
+
+  it("decrypts legacy plain-PIN blobs as a FinTS bundle", () => {
+    // Old rows stored the raw PIN. New decode path must keep working
+    // without touching the data.
+    const legacy = encryptCredentials("legacy-pin-1234");
+    expect(decryptCredentialBundle(legacy)).toEqual({
+      kind: "fints",
+      pin: "legacy-pin-1234",
+    });
+  });
+
+  it("rejects a bundle with an unknown kind", () => {
+    const blob = encryptCredentials(JSON.stringify({ kind: "klarna" }));
+    expect(() => decryptCredentialBundle(blob)).toThrow(/unknown credential bundle/i);
+  });
+
+  it("rejects a FinTS bundle without a pin", () => {
+    const blob = encryptCredentials(JSON.stringify({ kind: "fints" }));
+    expect(() => decryptCredentialBundle(blob)).toThrow(/missing string `pin`/i);
+  });
+
+  it("rejects a JSON object without a kind discriminator", () => {
+    const blob = encryptCredentials(JSON.stringify({ pin: "no-kind" }));
+    expect(() => decryptCredentialBundle(blob)).toThrow();
   });
 });

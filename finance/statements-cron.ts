@@ -91,6 +91,11 @@ export const syncStatements = api(
     let errored = 0;
 
     for (const bc of bankcontacts) {
+      // PayPal-Routing folgt in Etappe 6 von Issue #427. Solange das
+      // nicht implementiert ist, überspringt die Cron paypal-Zugänge,
+      // damit der FinTS-Client nicht mit nullable blz/login/server_url
+      // aufgerufen wird.
+      if (bc.access_type !== "fints") continue;
       const slots = Array.isArray(bc.sync_times)
         ? (bc.sync_times as FinanceSyncSlot[])
         : [];

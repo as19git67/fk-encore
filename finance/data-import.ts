@@ -255,8 +255,15 @@ export async function runImport(req: ImportRequest): Promise<ImportResponse> {
 // Helpers: natural keys
 // -----------------------------------------------------------------------
 
-function bankcontactKey(blz: string, login: string): string {
-  return `${blz}::${login}`;
+function bankcontactKey(
+  blz: string | null,
+  login: string | null,
+): string {
+  // PayPal bankcontacts (Issue #427) leave both fields NULL — the
+  // legacy Finanzkraft import only deals with FinTS rows, but the
+  // dedupe map iterates over every contact regardless. Stable string
+  // representation keeps the lookup well-defined.
+  return `${blz ?? ""}::${login ?? ""}`;
 }
 
 function accountKey(bc: string, accountNumber: string): string {

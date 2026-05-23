@@ -500,7 +500,7 @@ export async function runSynchronize(
  * Throws on transport errors so the caller can fall back to cold init.
  */
 async function runWarmSync(
-  bankcontact: typeof financeBankcontact.$inferSelect,
+  bankcontact: FintsBankcontactRow,
   pin: string,
   cachedBi: Record<string, unknown>,
   tanMethodId: number,
@@ -1717,9 +1717,20 @@ function toAmountString(n: number): string {
 // Internals
 // -----------------------------------------------------------------------
 
-async function loadBankcontact(
-  id: number,
-): Promise<typeof financeBankcontact.$inferSelect> {
+/**
+ * FinTS-specific narrowing of the bankcontact row. With the PayPal
+ * connector (Issue #427) the columns `blz`, `login`, `server_url` are
+ * nullable at the DB level — they only carry values for FinTS rows.
+ * Every code path in this file expects them to be present, so we
+ * assert once at load time and treat them as strings from there on.
+ */
+type FintsBankcontactRow = typeof financeBankcontact.$inferSelect & {
+  blz: string;
+  login: string;
+  server_url: string;
+};
+
+async function loadBankcontact(id: number): Promise<FintsBankcontactRow> {
   const rows = await db
     .select()
     .from(financeBankcontact)
@@ -1729,7 +1740,19 @@ async function loadBankcontact(
   if (!row) {
     throw new Error(`finance_bankcontact ${id} not found`);
   }
-  return row;
+  if (row.access_type !== "fints") {
+    throw new Error(
+      `bankcontact ${id} has access_type="${row.access_type}", ` +
+        `expected "fints" — wrong connector for this contact`,
+    );
+  }
+  if (!row.blz || !row.login || !row.server_url) {
+    throw new Error(
+      `bankcontact ${id} is FinTS but is missing one or more of ` +
+        `(blz, login, server_url)`,
+    );
+  }
+  return row as FintsBankcontactRow;
 }
 
 /**

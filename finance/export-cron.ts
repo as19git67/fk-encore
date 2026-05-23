@@ -123,10 +123,13 @@ interface Snapshot {
   generated_at: string;
   currencies: Array<{ code: string; symbol: string; decimals: number }>;
   bankcontacts: Array<{
-    blz: string;
-    login: string;
+    // FinTS-Felder. Mit Issue #427 (PayPal) sind sie nullable, weil
+    // PayPal-Bankkontakte sie nicht setzen — der Importer (data-import.ts)
+    // toleriert null bereits.
+    blz: string | null;
+    login: string | null;
     name: string;
-    server_url: string;
+    server_url: string | null;
     tan_method: string | null;
   }>;
   accounts: Array<{
