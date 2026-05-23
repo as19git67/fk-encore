@@ -1,0 +1,104 @@
+name: Docker Image CI - Playwright E2E Runner
+
+# Builds and pushes the pre-baked Playwright runner image used by the E2E
+# pipeline (Track AB / Issue #421). The image carries Node 24 + Playwright +
+# chromium + Encore CLI so the per-run setup time in
+# .github/workflows/playwright-e2e.yml drops from minutes to seconds.
+#
+# Trigger model:
+#   - pushes to main that touch the Dockerfile or the workflow itself;
+#   - pull_request previews of those same files (tagged `:test`);
+#   - frontend/package*.json so a Playwright version bump rebuilds the
+#     image automatically — chromium ships with each Playwright release
+#     and stale image + new client = bad time;
+#   - manual workflow_dispatch for one-off rebuilds.
+
+on:
+  push:
+    branches: [ "main" ]
+    tags:
+      - '*'
+    paths:
+      - 'docker/Dockerfile.playwright-e2e'
+      - '.github/workflows/docker-image-playwright-e2e.yml'
+      - 'frontend/package.json'
+      - 'frontend/package-lock.json'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'docker/Dockerfile.playwright-e2e'
+      - '.github/workflows/docker-image-playwright-e2e.yml'
+      - 'frontend/package.json'
+      - 'frontend/package-lock.json'
+  workflow_dispatch: {}
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}-playwright-e2e
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      # Read the Playwright version straight from frontend/package-lock.json
+      # so the baked-in chromium matches what `npx playwright test` will
+      # later run. A drift between the two would surface as
+      # "browser executable doesn't exist" at runtime.
+      - name: Resolve Playwright version from lockfile
+        id: pw
+        run: |
+          version=$(node -p "require('./frontend/package-lock.json').packages['node_modules/@playwright/test'].version")
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Resolved Playwright version: ${version}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # `latest`     -> main only
+          # `pw-<x.y.z>` -> persistent per-Playwright-version tag so a
+          #                 rollback can pin to a known good combo
+          # `test`       -> PRs only, so playwright-e2e.yml can probe
+          #                 the candidate image before merging
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+            type=raw,value=pw-${{ steps.pw.outputs.version }},enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+            type=raw,value=test,enable=${{ github.event_name == 'pull_request' }}
+            type=semver,pattern={{version}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.playwright-e2e
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            PLAYWRIGHT_VERSION=${{ steps.pw.outputs.version }}
+          # Cache to GHA so consecutive builds (e.g. PR rebases) re-use
+          # the apt and chromium-download layers. The cache is keyed on
+          # the build context so a bare Dockerfile edit hits it, but a
+          # Playwright-version bump (different build-arg) busts it —
+          # which is exactly what we want.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

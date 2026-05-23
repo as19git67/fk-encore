@@ -40,6 +40,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
+    # Pre-baked runner image (built by docker-image-playwright-e2e.yml,
+    # Track AB / Issue #421). Carries Node 24 + Playwright + chromium +
+    # OS deps + Encore CLI, so cold runs skip ~2-3 min of installs and
+    # boot straight into `npm install` + `encore run`.
+    #
+    # Pinned to `:latest`; the per-version `pw-<x.y.z>` tag is available
+    # for emergency rollback. PRs that change the Dockerfile push a
+    # `:test` tag — switch this line to `:test` in the same PR to probe
+    # the candidate image without flipping production.
+    container:
+      image: ghcr.io/as19git67/fk-encore-playwright-e2e:latest
+
     services:
       postgres:
         # Mirror the docker-image.yml choice: pgvector/pgvector:pg18 is required
@@ -59,8 +71,11 @@ jobs:
           - 5432:5432
 
     env:
-      # Backend / DB
-      POSTGRES_HOST: localhost
+      # Backend / DB. When the job runs inside the `container:` above,
+      # `localhost` resolves to the container itself, not the runner —
+      # GitHub maps the postgres service onto the bridge network under
+      # the hostname `postgres`. Use that instead of localhost.
+      POSTGRES_HOST: postgres
       POSTGRES_PORT: '5432'
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -70,6 +85,11 @@ jobs:
       ADMIN_EMAIL: admin@example.com
       ADMIN_PASSWORD: admin
       ADMIN_NAME: Admin
+      # Demo-data seed switch (Issue #401). Tells db/seed-demo.ts to
+      # lay down 3 photos, 1 document and 1 finance account+transactions
+      # before Playwright starts, so specs that previously skipped on
+      # empty stacks now exercise the real UI paths.
+      E2E_SEED_DEMO: '1'
       # WebAuthn / Passkey relying-party config. user/startupValidation.ts
       # throws at module-load if either is missing, so they MUST be present
       # even though no E2E test exercises the passkey flow yet. HTTP is fine
@@ -85,6 +105,10 @@ jobs:
       E2E_API_URL: http://localhost:4000
       E2E_ADMIN_EMAIL: admin@example.com
       E2E_ADMIN_PASSWORD: admin
+      # The pre-baked image ships chromium under /ms-playwright; make
+      # sure the project-local @playwright/test installed by `npm install`
+      # uses the same cache instead of trying to download its own copy.
+      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
       # Filesystem paths — since #144 the in-code defaults point at the
       # production container mounts (/mnt/data/photos etc.), which the
       # GitHub runner cannot mkdir. Pin them at workspace-relative dirs so
@@ -92,23 +116,27 @@ jobs:
       PHOTO_UPLOAD_DIR: ${{ github.workspace }}/e2e-data/photos
       PHOTO_THUMBNAIL_DIR: ${{ github.workspace }}/e2e-data/thumbnails
       PHOTO_LIBRARIES_ROOT: ${{ github.workspace }}/e2e-data/libraries
+      DOCUMENTS_DIR: ${{ github.workspace }}/e2e-data/documents
+      DOCUMENTS_INBOX_DIR: ${{ github.workspace }}/e2e-data/documents-inbox
       BACKUP_DIR: ${{ github.workspace }}/e2e-data/backup
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Setup Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            frontend/package-lock.json
+      # Node, Playwright (incl. chromium + OS deps) and Encore CLI are
+      # already in the container image — no setup-node, no playwright
+      # install, no Encore install step needed. We do still need to run
+      # `npm install` for the project's own dependencies because lockfile
+      # drift makes baking them into the image too brittle (same trade-off
+      # as docker-image.yml).
+      - name: Verify pre-installed tooling
+        run: |
+          node --version
+          npm --version
+          encore version
+          playwright --version
 
-      # docker-image.yml uses `npm install` (not `ci`) because lockfiles drift
-      # across dev platforms. Same trade-off here.
       - name: Install backend dependencies
         run: npm install
 
@@ -121,43 +149,6 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm --prefix frontend install --legacy-peer-deps
-
-      # Pull the resolved version straight from the installed module —
-      # robust against lockfile-shape differences across npm versions.
-      - name: Resolve Playwright version
-        id: pw
-        run: |
-          version=$(node -p "require('./frontend/node_modules/@playwright/test/package.json').version")
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
-      - name: Cache Playwright browsers
-        id: pw-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: pw-${{ runner.os }}-${{ steps.pw.outputs.version }}
-
-      # On cache-hit we still need the OS packages (libgbm, libxkbcommon …);
-      # `install-deps` is cheap and idempotent. On miss, install browsers
-      # without --with-deps to avoid double-installing OS packages.
-      - name: Install Playwright browsers
-        if: steps.pw-cache.outputs.cache-hit != 'true'
-        working-directory: frontend
-        run: npx playwright install chromium
-
-      - name: Install Playwright system deps
-        working-directory: frontend
-        run: npx playwright install-deps chromium
-
-      - name: Install Encore CLI
-        run: |
-          curl -fsSL --retry 3 --retry-delay 5 -o install.sh https://encore.dev/install.sh
-          bash install.sh
-          rm -f install.sh
-          echo "${HOME}/.encore/bin" >> "${GITHUB_PATH}"
-
-      - name: Verify Encore CLI
-        run: encore version
 
       # Boot the backend in the background.
       # --watch=false:    chokidar / inotify churn delays the ready signal
