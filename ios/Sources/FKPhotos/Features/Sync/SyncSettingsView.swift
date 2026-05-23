@@ -193,48 +193,28 @@ struct SyncSettingsView: View {
             // ── Upload queue ──────────────────────────────────────────
             if queueObserver.hasVisibleItems {
                 Section {
-                    if !queueObserver.pendingItems.isEmpty {
+                    NavigationLink {
+                        UploadQueueDetailView(observer: queueObserver)
+                    } label: {
                         HStack(spacing: 12) {
-                            Image(systemName: "clock.badge.exclamationmark")
-                                .foregroundStyle(.orange)
-                            Text("\(queueObserver.pendingItems.count) Foto\(queueObserver.pendingItems.count == 1 ? "" : "s") ausstehend")
-                                .font(.footnote)
-                            Spacer()
-                            Button("Abbrechen") {
-                                queueObserver.cancelPending()
+                            if !queueObserver.failedItems.isEmpty {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.red)
+                            } else {
+                                Image(systemName: "arrow.up.circle")
+                                    .foregroundStyle(.orange)
                             }
-                            .font(.footnote)
-                            .foregroundStyle(.red)
-                        }
-                    }
-                    ForEach(queueObserver.failedItems) { item in
-                        HStack(spacing: 12) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.red)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(item.filename)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                Text("Fehlgeschlagen\(item.retryCount > 1 ? " (\(item.retryCount)×)" : "")")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                if !queueObserver.pendingItems.isEmpty {
+                                    Text("\(queueObserver.pendingItems.count) ausstehend")
+                                        .font(.subheadline)
+                                }
+                                if !queueObserver.failedItems.isEmpty {
+                                    Text("\(queueObserver.failedItems.count) fehlgeschlagen")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.red)
+                                }
                             }
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) {
-                                queueObserver.remove(id: item.id)
-                            } label: {
-                                Label("Löschen", systemImage: "trash")
-                            }
-                        }
-                    }
-                    if !queueObserver.failedItems.isEmpty {
-                        Button(role: .destructive) {
-                            queueObserver.removeAllFailed()
-                        } label: {
-                            Text(queueObserver.failedItems.count == 1
-                                 ? "Fehlgeschlagenes Foto löschen"
-                                 : "Alle fehlgeschlagenen löschen")
                         }
                     }
                 } header: {
@@ -513,5 +493,89 @@ struct AlbumPickerView: View {
                 continuation.resume(returning: result.sorted { ($0.0.localizedTitle ?? "") < ($1.0.localizedTitle ?? "") })
             }
         }
+    }
+}
+
+// MARK: - Upload Queue Detail
+
+struct UploadQueueDetailView: View {
+    @Bindable var observer: UploadQueueObserver
+
+    var body: some View {
+        List {
+            if !observer.pendingItems.isEmpty {
+                Section {
+                    ForEach(observer.pendingItems) { item in
+                        HStack(spacing: 12) {
+                            Image(systemName: "arrow.up.circle")
+                                .foregroundStyle(.orange)
+                            Text(item.filename)
+                                .font(.subheadline)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                } header: {
+                    HStack {
+                        Text("Ausstehend (\(observer.pendingItems.count))")
+                        Spacer()
+                        Button("Abbrechen") {
+                            observer.cancelPending()
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                    }
+                }
+            }
+
+            if !observer.failedItems.isEmpty {
+                Section {
+                    ForEach(observer.failedItems) { item in
+                        HStack(spacing: 12) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.red)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.filename)
+                                    .font(.subheadline)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Text("Fehlgeschlagen\(item.retryCount > 1 ? " (\(item.retryCount)×)" : "")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                observer.remove(id: item.id)
+                            } label: {
+                                Label("Löschen", systemImage: "trash")
+                            }
+                        }
+                    }
+                } header: {
+                    HStack {
+                        Text("Fehlgeschlagen (\(observer.failedItems.count))")
+                        Spacer()
+                        Button(role: .destructive) {
+                            observer.removeAllFailed()
+                        } label: {
+                            Text("Alle löschen")
+                                .font(.caption)
+                        }
+                    }
+                }
+            }
+
+            if observer.pendingItems.isEmpty && observer.failedItems.isEmpty {
+                ContentUnavailableView {
+                    Label("Keine Einträge", systemImage: "checkmark.circle")
+                } description: {
+                    Text("Die Upload-Warteschlange ist leer.")
+                }
+                .listRowSeparator(.hidden)
+            }
+        }
+        .navigationTitle("Upload-Warteschlange")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
