@@ -377,9 +377,14 @@ struct AlbumPickerView: View {
     @State private var searchText = ""
 
     private var filteredAlbums: [(collection: PHAssetCollection, count: Int)] {
-        guard !searchText.isEmpty else { return albums }
-        return albums.filter {
-            ($0.collection.localizedTitle ?? "").localizedCaseInsensitiveContains(searchText)
+        let base = searchText.isEmpty
+            ? albums
+            : albums.filter { ($0.collection.localizedTitle ?? "").localizedCaseInsensitiveContains(searchText) }
+        return base.sorted { a, b in
+            let aSelected = selectedIds.contains(a.collection.localIdentifier)
+            let bSelected = selectedIds.contains(b.collection.localIdentifier)
+            if aSelected != bSelected { return aSelected }
+            return (a.collection.localizedTitle ?? "") < (b.collection.localizedTitle ?? "")
         }
     }
 
