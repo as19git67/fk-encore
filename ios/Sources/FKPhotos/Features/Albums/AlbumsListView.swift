@@ -53,7 +53,7 @@ struct AlbumsListView: View {
                     Section {
                         ForEach(pinnedAlbums) { album in
                             NavigationLink(value: album.id) {
-                                AlbumRowView(album: album)
+                                AlbumRowView(album: album, isPinned: true)
                             }
                             .swipeActions(edge: .leading) {
                                 Button { togglePin(album.id) } label: {
@@ -62,6 +62,16 @@ struct AlbumsListView: View {
                                 .tint(.orange)
                             }
                             .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    Task { await viewModel.deleteAlbum(id: album.id) }
+                                } label: {
+                                    Label("Löschen", systemImage: "trash")
+                                }
+                            }
+                            .contextMenu {
+                                Button { togglePin(album.id) } label: {
+                                    Label("Lösen", systemImage: "pin.slash")
+                                }
                                 Button(role: .destructive) {
                                     Task { await viewModel.deleteAlbum(id: album.id) }
                                 } label: {
@@ -85,6 +95,16 @@ struct AlbumsListView: View {
                             .tint(.orange)
                         }
                         .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                Task { await viewModel.deleteAlbum(id: album.id) }
+                            } label: {
+                                Label("Löschen", systemImage: "trash")
+                            }
+                        }
+                        .contextMenu {
+                            Button { togglePin(album.id) } label: {
+                                Label("Anpinnen", systemImage: "pin")
+                            }
                             Button(role: .destructive) {
                                 Task { await viewModel.deleteAlbum(id: album.id) }
                             } label: {
@@ -169,10 +189,10 @@ struct AlbumsListView: View {
 
 struct AlbumRowView: View {
     let album: Album
+    var isPinned: Bool = false
 
     var body: some View {
         HStack(spacing: 12) {
-            // Album cover thumbnail
             if let coverFilename = album.cover_filename {
                 PhotoThumbnailView(filename: coverFilename)
                     .frame(width: 60, height: 60)
@@ -188,8 +208,15 @@ struct AlbumRowView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(album.name)
-                    .font(.headline)
+                HStack(spacing: 4) {
+                    Text(album.name)
+                        .font(.headline)
+                    if isPinned {
+                        Image(systemName: "pin.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
+                }
                 HStack {
                     Text("\(album.photo_count) Fotos")
                         .font(.caption)
