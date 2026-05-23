@@ -17,6 +17,8 @@ struct AlbumDetailView: View {
     @State private var isSelecting = false
     @State private var selectedIds: Set<Int> = []
     @State private var shareManager = PhotoShareManager()
+    @State private var addToAlbum = AddToAlbumManager()
+    @State private var itemFrames: [Int: CGRect] = [:]
     @Environment(\.dismiss) private var dismiss
 
     private var displayedPhotos: [PhotoWithCuration] {
@@ -68,9 +70,13 @@ struct AlbumDetailView: View {
                                     selectedIds = [photo.id]
                                 }
                             }
+                            .reportPhotoFrame(id: photo.id, space: "albumGrid")
                     }
                 }
                 .padding(.horizontal, 2)
+                .coordinateSpace(name: "albumGrid")
+                .onPreferenceChange(PhotoFramePreference.self) { itemFrames = $0 }
+                .simultaneousGesture(isSelecting ? dragSelectGesture : nil)
             }
         }
         .navigationTitle(isSelecting ? "\(selectedIds.count) ausgewählt" : (album?.name ?? "Album"))
@@ -89,6 +95,14 @@ struct AlbumDetailView: View {
                         isSelecting = false
                         selectedIds = []
                     }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        addToAlbum.present(photoIds: selectedIds)
+                    } label: {
+                        Image(systemName: "rectangle.stack.badge.plus")
+                    }
+                    .disabled(selectedIds.isEmpty)
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
@@ -154,6 +168,10 @@ struct AlbumDetailView: View {
         .sheet(isPresented: $shareManager.isPresented) {
             ActivityView(images: shareManager.images)
         }
+        .sheet(isPresented: $addToAlbum.isPresented) {
+            AddToAlbumPickerView(manager: addToAlbum)
+                .presentationDetents([.medium, .large])
+        }
         .overlay {
             if shareManager.isLoading {
                 ZStack {
@@ -163,6 +181,12 @@ struct AlbumDetailView: View {
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
                 }
             }
+        }
+        .onChange(of: addToAlbum.resultMessage) { _, message in
+            guard message != nil else { return }
+            isSelecting = false
+            selectedIds = []
+            addToAlbum.resultMessage = nil
         }
         .task {
             await loadAlbum()
@@ -176,6 +200,16 @@ struct AlbumDetailView: View {
         } else {
             selectedIds.insert(id)
         }
+    }
+
+    private var dragSelectGesture: some Gesture {
+        DragGesture(minimumDistance: 10, coordinateSpace: .named("albumGrid"))
+            .onChanged { value in
+                let point = value.location
+                for (id, frame) in itemFrames where frame.contains(point) {
+                    selectedIds.insert(id)
+                }
+            }
     }
 
     private func deleteAlbum() async {
