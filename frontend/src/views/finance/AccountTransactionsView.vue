@@ -8,11 +8,12 @@
  * Logik folgt später, derzeit Dummy).
  */
 
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useScrollRestore } from '../../composables/useScrollRestore'
 import { useModuleBack } from '../../composables/useModuleBack'
 import Button from 'primevue/button'
+import Chart from 'primevue/chart'
 import Message from 'primevue/message'
 import InputText from 'primevue/inputtext'
 import MultiSelect from 'primevue/multiselect'
@@ -26,12 +27,14 @@ import { useTxFiltersStore } from '../../stores/finance/txFilters'
 import DateRangePresets from '../../components/DateRangePresets.vue'
 import type {
   Holding,
+  HoldingsHistoryPosition,
+  HoldingsHistoryResponse,
   ListTransactionsQuery,
   OverviewAccount,
   OverviewSection,
   Transaction,
 } from '../../api/finance'
-import { listHoldings } from '../../api/finance'
+import { getHoldingsHistory, listHoldings } from '../../api/finance'
 
 const route = useRoute()
 const router = useRouter()
@@ -349,6 +352,173 @@ watch(
   () => mode.value && mode.value.kind === 'account' ? mode.value.accountId : null,
   () => { if (isDepot.value) void loadHoldings() },
 )
+
+// ── Depot value history (Phase 1 of #439 / #428) ─────────────────────
+//
+// Pulls /finance/accounts/:id/holdings/history once we know it's a
+// depot account. The endpoint returns:
+//   - totals[]:    per-as_of SUM(value)  → main line chart
+//   - positions[]: per-position points[] → per-position sparkline
+//
+// We render the main chart unconditionally for depots that have ≥ 2
+// snapshots. The per-position sparkline is opt-in: clicking a row in
+// the positions table toggles a small chart underneath.
+
+const darkMQ = window.matchMedia('(prefers-color-scheme: dark)')
+const isDark = ref(darkMQ.matches)
+function onDarkChange(e: MediaQueryListEvent) {
+  isDark.value = e.matches
+}
+onMounted(() => darkMQ.addEventListener('change', onDarkChange))
+onUnmounted(() => darkMQ.removeEventListener('change', onDarkChange))
+
+const history = ref<HoldingsHistoryResponse | null>(null)
+const historyLoading = ref(false)
+const expandedPositionKey = ref<string | null>(null)
+
+async function loadHistory() {
+  if (!isDepot.value || !mode.value || mode.value.kind !== 'account') {
+    history.value = null
+    return
+  }
+  historyLoading.value = true
+  try {
+    history.value = await getHoldingsHistory(mode.value.accountId)
+  } catch {
+    history.value = null
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+watch(isDepot, (v) => { if (v) void loadHistory() }, { immediate: true })
+watch(
+  () => mode.value && mode.value.kind === 'account' ? mode.value.accountId : null,
+  () => { if (isDepot.value) { expandedPositionKey.value = null; void loadHistory() } },
+)
+
+function togglePositionHistory(h: Holding) {
+  // Same identity as the API uses (COALESCE(isin, wkn, name)).
+  const key = h.isin || h.wkn || h.name || ''
+  if (!key) return
+  expandedPositionKey.value = expandedPositionKey.value === key ? null : key
+}
+
+function positionSeries(h: Holding): HoldingsHistoryPosition | null {
+  if (!history.value) return null
+  const key = h.isin || h.wkn || h.name || ''
+  return history.value.positions.find((p) => p.key === key) ?? null
+}
+
+function chartAxisColors() {
+  return {
+    tick: isDark.value ? '#94a3b8' : '#64748b',
+    grid: isDark.value ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
+  }
+}
+
+const totalChartData = computed(() => {
+  if (!history.value || history.value.totals.length < 2) return null
+  return {
+    labels: history.value.totals.map((p) => p.as_of),
+    datasets: [
+      {
+        label: 'Depot-Gesamtwert',
+        data: history.value.totals.map((p) => Number(p.total_value)),
+        borderColor: isDark.value ? '#fbbf24' : '#2563eb',
+        backgroundColor: isDark.value ? 'rgba(251,191,36,0.15)' : 'rgba(37,99,235,0.15)',
+        fill: true,
+        tension: 0.25,
+        pointRadius: 2,
+      },
+    ],
+  }
+})
+
+const totalChartOptions = computed(() => {
+  const { tick, grid } = chartAxisColors()
+  const currency = history.value?.totals.find((t) => t.currency)?.currency || 'EUR'
+  const fmt = new Intl.NumberFormat('de-DE', { style: 'currency', currency })
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label: (ctx: { parsed: { y: number } }) => fmt.format(ctx.parsed.y),
+        },
+      },
+    },
+    scales: {
+      x: { ticks: { color: tick, maxRotation: 0, autoSkip: true }, grid: { color: grid } },
+      y: {
+        ticks: {
+          color: tick,
+          callback: (val: number | string) =>
+            fmt.format(typeof val === 'number' ? val : Number(val)),
+        },
+        grid: { color: grid },
+      },
+    },
+  }
+})
+
+type SparklineMetric = 'value' | 'price'
+const sparklineMetric = ref<SparklineMetric>('value')
+
+function sparklineData(series: HoldingsHistoryPosition | null) {
+  if (!series || series.points.length < 2) return null
+  const metric = sparklineMetric.value
+  const data = series.points.map((p) => {
+    const raw = metric === 'value' ? p.value : p.price
+    return raw === null ? null : Number(raw)
+  })
+  return {
+    labels: series.points.map((p) => p.as_of),
+    datasets: [
+      {
+        label: metric === 'value' ? 'Wert' : 'Kurs',
+        data,
+        borderColor: isDark.value ? '#fbbf24' : '#2563eb',
+        backgroundColor: 'transparent',
+        fill: false,
+        tension: 0.25,
+        pointRadius: 0,
+        spanGaps: false,
+      },
+    ],
+  }
+}
+
+function sparklineOptions(series: HoldingsHistoryPosition | null) {
+  const { tick, grid } = chartAxisColors()
+  const currency = series?.currency || 'EUR'
+  const fmt = new Intl.NumberFormat('de-DE', { style: 'currency', currency })
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label: (ctx: { parsed: { y: number } }) => fmt.format(ctx.parsed.y),
+        },
+      },
+    },
+    scales: {
+      x: { ticks: { color: tick, maxRotation: 0, autoSkip: true }, grid: { color: grid } },
+      y: {
+        ticks: {
+          color: tick,
+          callback: (val: number | string) =>
+            fmt.format(typeof val === 'number' ? val : Number(val)),
+        },
+        grid: { color: grid },
+      },
+    },
+  }
+}
 
 // ── Transaction grouping (by booking_date) ───────────────────────────
 
@@ -719,6 +889,24 @@ function goBack() {
         </span>
       </h2>
 
+      <!-- Depot value over time -->
+      <div v-if="historyLoading" class="tx-loading">Lädt Wertverlauf …</div>
+      <div v-else-if="totalChartData" class="depot-history-wrap">
+        <Chart
+          type="line"
+          :data="totalChartData"
+          :options="totalChartOptions"
+          class="depot-history-chart"
+        />
+      </div>
+      <p
+        v-else-if="history && history.totals.length < 2"
+        class="depot-history-hint"
+      >
+        Wertverlauf wird verfügbar, sobald mindestens zwei Tages-Snapshots
+        vorliegen.
+      </p>
+
       <div v-if="holdingsLoading" class="tx-loading">Lädt Positionen …</div>
       <div v-else-if="holdings.length === 0" class="tx-empty">Keine Positionen vorhanden.</div>
       <div v-else class="holdings-table-wrap">
@@ -733,16 +921,63 @@ function goBack() {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="h in holdings" :key="h.id">
-              <td class="holdings-col-name">
-                <span class="holdings-name">{{ h.name || '–' }}</span>
-                <span class="holdings-isin">{{ h.isin || h.wkn || '' }}</span>
-              </td>
-              <td class="holdings-col-num">{{ formatAmount(h.amount) }}</td>
-              <td class="holdings-col-num">{{ formatCurrency(h.price, h.currency ?? undefined) }}</td>
-              <td class="holdings-col-num holdings-value">{{ formatCurrency(h.value, h.currency ?? undefined) }}</td>
-              <td class="holdings-col-num">{{ holdingShare(h) }}</td>
-            </tr>
+            <template v-for="h in holdings" :key="h.id">
+              <tr
+                class="holdings-row"
+                :class="{
+                  'holdings-row-expanded':
+                    expandedPositionKey === (h.isin || h.wkn || h.name || ''),
+                }"
+                @click="togglePositionHistory(h)"
+              >
+                <td class="holdings-col-name">
+                  <span class="holdings-name">{{ h.name || '–' }}</span>
+                  <span class="holdings-isin">{{ h.isin || h.wkn || '' }}</span>
+                </td>
+                <td class="holdings-col-num">{{ formatAmount(h.amount) }}</td>
+                <td class="holdings-col-num">{{ formatCurrency(h.price, h.currency ?? undefined) }}</td>
+                <td class="holdings-col-num holdings-value">{{ formatCurrency(h.value, h.currency ?? undefined) }}</td>
+                <td class="holdings-col-num">{{ holdingShare(h) }}</td>
+              </tr>
+              <tr
+                v-if="expandedPositionKey === (h.isin || h.wkn || h.name || '')"
+                class="holdings-history-row"
+              >
+                <td colspan="5">
+                  <div class="holdings-history-head">
+                    <span class="holdings-history-label">Verlauf</span>
+                    <div class="holdings-history-toggle">
+                      <Button
+                        :label="sparklineMetric === 'value' ? 'Wert' : 'Kurs'"
+                        size="small"
+                        text
+                        @click.stop="
+                          sparklineMetric =
+                            sparklineMetric === 'value' ? 'price' : 'value'
+                        "
+                      />
+                    </div>
+                  </div>
+                  <div
+                    v-if="
+                      sparklineData(positionSeries(h)) &&
+                      positionSeries(h)!.points.length >= 2
+                    "
+                    class="holdings-sparkline-wrap"
+                  >
+                    <Chart
+                      type="line"
+                      :data="sparklineData(positionSeries(h))!"
+                      :options="sparklineOptions(positionSeries(h))"
+                      class="holdings-sparkline"
+                    />
+                  </div>
+                  <p v-else class="holdings-history-empty">
+                    Noch keine Verlaufs-Datenpunkte für diese Position.
+                  </p>
+                </td>
+              </tr>
+            </template>
           </tbody>
           <tfoot>
             <tr>
@@ -1227,5 +1462,57 @@ function goBack() {
 }
 .holdings-value {
   font-weight: 600;
+}
+.holdings-row {
+  cursor: pointer;
+}
+.holdings-row:hover {
+  background: var(--p-content-hover-background);
+}
+.holdings-row-expanded {
+  background: var(--p-content-hover-background);
+}
+.holdings-history-row td {
+  background: var(--p-content-hover-background);
+  padding: 0.5rem 0.6rem 0.75rem;
+}
+.holdings-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+.holdings-history-label {
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.holdings-sparkline-wrap {
+  height: 7rem;
+}
+.holdings-sparkline {
+  height: 100%;
+}
+.holdings-history-empty {
+  margin: 0.25rem 0 0;
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
+}
+
+/* Depot value-over-time chart */
+.depot-history-wrap {
+  height: 14rem;
+  margin-bottom: 1rem;
+}
+.depot-history-chart {
+  height: 100%;
+}
+.depot-history-hint {
+  margin: 0 0 1rem;
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
+  font-style: italic;
 }
 </style>
