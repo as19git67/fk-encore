@@ -211,9 +211,14 @@ final class PhotoMetadataViewModel {
     @MainActor
     func updatePhotoDate(_ date: Date) async {
         struct Body: Codable { let taken_at: String }
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime]
-        let dateStr = iso.string(from: date)
+        // Wall-clock string in the device's local time (issue #433). The
+        // server stores `taken_at` as `timestamp without time zone`, so
+        // sending a UTC ISO would shift the value by the user's offset.
+        let fmt = DateFormatter()
+        fmt.calendar = Calendar(identifier: .iso8601)
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        let dateStr = fmt.string(from: date)
         do {
             let result: DateResponse = try await APIClient.shared.patch(
                 "/photos/\(photo.id)/date",

@@ -100,6 +100,7 @@ import {
   type LandmarkItem,
   type PoiMatchItem,
 } from '../api/photos'
+import { toLocalIsoDateTime } from '../utils/dateFormat'
 
 const auth = useAuthStore()
 const serviceHealth = useServiceHealthStore()
@@ -938,11 +939,11 @@ async function onSidebarUpdateDate() {
   if (!photo || !editDate.value) return
   updatingDate.value = true
   try {
-    const takenAt = editDate.value.toISOString()
+    // Wall-clock string: photo timestamps are stored without timezone, so
+    // `.toISOString()` would convert local time to UTC and shift the value
+    // by the user's offset on the next round-trip (issue #433).
+    const takenAt = toLocalIsoDateTime(editDate.value)
     await updatePhotoDate(photo.id, takenAt)
-    // Mutate the displayed photo so the topbar's date label reflects the new
-    // value immediately. The sort order in the grid may now be stale; that's
-    // acceptable until the next reload (filter / sort / search change).
     cursorPhoto.value = { ...photo, taken_at: takenAt }
     isEditingDate.value = false
   } catch (err: any) {

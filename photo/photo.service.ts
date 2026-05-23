@@ -3828,6 +3828,7 @@ export async function listAlbumsLogic(userId: number): Promise<ListAlbumsRespons
         ) OR EXISTS (
           SELECT 1 FROM ${albumPublicLinks}
           WHERE ${albumPublicLinks.album_id} = ${albums.id}
+            AND ${albumPublicLinks.disabled_at} IS NULL
             AND (${albumPublicLinks.expires_at} IS NULL OR ${albumPublicLinks.expires_at} > NOW())
         )`,
         cover_filename: sql<string>`COALESCE(
@@ -3968,6 +3969,7 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
       .where(
         and(
           eq(albumPublicLinks.album_id, albumId),
+          isNull(albumPublicLinks.disabled_at),
           or(
             isNull(albumPublicLinks.expires_at),
             gt(albumPublicLinks.expires_at, sql`NOW()`)
@@ -4745,8 +4747,14 @@ export async function getAlbumSharesLogic(userId: number, albumId: number): Prom
     .where(eq(albumShares.album_id, albumId))
   );
 
+  // Disabled links (issue #435) stay in the DB so a re-create returns the
+  // same token, but they should look "gone" to the owner UI until they
+  // re-enable the link.
   const publicLink = await dbFirst<typeof albumPublicLinks.$inferSelect>(
-    db.select().from(albumPublicLinks).where(eq(albumPublicLinks.album_id, albumId))
+    db.select().from(albumPublicLinks).where(and(
+      eq(albumPublicLinks.album_id, albumId),
+      isNull(albumPublicLinks.disabled_at),
+    ))
   );
 
   return {
@@ -5006,19 +5014,34 @@ export async function createAlbumPublicLinkLogic(userId: number, albumId: number
     }
   }
 
-  // Check if a link already exists
-  const existing = await dbFirst<typeof albumPublicLinks.$inferSelect>(
-    db.select().from(albumPublicLinks).where(eq(albumPublicLinks.album_id, albumId))
-  );
-  if (existing) {
-    return toPublicLinkResponse(existing);
-  }
-
-  const token = crypto.randomBytes(32).toString("base64url");
   const expiresAt = expiresIn && EXPIRES_IN_MS[expiresIn]
     ? new Date(Date.now() + EXPIRES_IN_MS[expiresIn]).toISOString()
     : undefined;
 
+  // Issue #435 — the row is kept across delete + re-create so external URLs
+  // remain stable. If a (possibly disabled) link exists, clear the soft-
+  // delete marker and refresh the expiry; only insert a new token when
+  // no row has ever existed for this album.
+  const existing = await dbFirst<typeof albumPublicLinks.$inferSelect>(
+    db.select().from(albumPublicLinks).where(eq(albumPublicLinks.album_id, albumId))
+  );
+  if (existing) {
+    if (existing.disabled_at || (expiresIn && EXPIRES_IN_MS[expiresIn])) {
+      const updated = await dbInsertReturning<typeof albumPublicLinks.$inferSelect>(
+        db.update(albumPublicLinks)
+          .set({
+            disabled_at: null,
+            ...(expiresIn && EXPIRES_IN_MS[expiresIn] ? { expires_at: expiresAt } : {}),
+          })
+          .where(eq(albumPublicLinks.id, existing.id))
+          .returning()
+      );
+      return toPublicLinkResponse(updated);
+    }
+    return toPublicLinkResponse(existing);
+  }
+
+  const token = crypto.randomBytes(32).toString("base64url");
   const row = await dbInsertReturning<typeof albumPublicLinks.$inferSelect>(
     db.insert(albumPublicLinks).values({
       album_id: albumId,
@@ -5045,8 +5068,16 @@ export async function deleteAlbumPublicLinkLogic(userId: number, albumId: number
     }
   }
 
+  // Soft-delete (issue #435): mark disabled so a future create returns the
+  // same token instead of minting a fresh one. The public-token lookup in
+  // getPublicAlbumLogic / getAlbumSharesLogic skips disabled rows.
   await dbExec(
-    db.delete(albumPublicLinks).where(eq(albumPublicLinks.album_id, albumId))
+    db.update(albumPublicLinks)
+      .set({ disabled_at: new Date().toISOString() })
+      .where(and(
+        eq(albumPublicLinks.album_id, albumId),
+        isNull(albumPublicLinks.disabled_at),
+      ))
   );
   return { success: true };
 }
@@ -5056,6 +5087,7 @@ export async function getPublicAlbumLogic(token: string): Promise<PublicAlbumRes
     db.select().from(albumPublicLinks).where(eq(albumPublicLinks.token, token))
   );
   if (!link) throw APIError.notFound("Dieser Link ist ungültig oder existiert nicht mehr.");
+  if (link.disabled_at) throw APIError.notFound("Dieser Link ist ungültig oder existiert nicht mehr.");
 
   // Check expiration
   if (link.expires_at && new Date(link.expires_at) < new Date()) {

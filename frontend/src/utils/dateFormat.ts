@@ -17,6 +17,25 @@ export function parseLocalDate(s: string): Date {
   return new Date(y!, m! - 1, d)
 }
 
+/**
+ * Serialise a Date as `YYYY-MM-DDTHH:MM:SS` using the local wall-clock,
+ * with no timezone offset. The backend's `taken_at` column is stored as
+ * a wall-clock literal (timestamp without time zone), so sending the
+ * user's local time as wall-clock keeps the displayed value stable
+ * across the round-trip. `d.toISOString()` would convert the local time
+ * to UTC first, which then gets stored as wall-clock — silently
+ * shifting the time by the user's UTC offset (issue #433).
+ */
+export function toLocalIsoDateTime(d: Date): string {
+  const y = d.getFullYear()
+  const mo = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  const h = String(d.getHours()).padStart(2, '0')
+  const mi = String(d.getMinutes()).padStart(2, '0')
+  const s = String(d.getSeconds()).padStart(2, '0')
+  return `${y}-${mo}-${day}T${h}:${mi}:${s}`
+}
+
 /** Compact location label: name + city, country only as fallback */
 export function formatLocationLabel(loc: { location_name?: string; location_city?: string; location_country?: string }): string {
   const parts: string[] = []

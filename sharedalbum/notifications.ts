@@ -59,6 +59,7 @@ async function runFanoutAlbum(req: FanoutAlbumInput): Promise<void> {
       INNER JOIN guest_link_access gla ON gla.guest_id = g.id
       INNER JOIN album_public_links apl ON apl.id = gla.public_link_id
       WHERE apl.album_id = ${req.albumId}
+        AND apl.disabled_at IS NULL
         AND (apl.expires_at IS NULL OR apl.expires_at > NOW())
         AND g.notify_opt_in = TRUE
         AND g.verified_at IS NOT NULL
@@ -74,6 +75,7 @@ async function runFanoutAlbum(req: FanoutAlbumInput): Promise<void> {
         INNER JOIN guest_link_access gla ON gla.public_link_id = apl.id
         WHERE apl.album_id = ins.album_id
           AND gla.guest_id = ins.guest_id
+          AND apl.disabled_at IS NULL
           AND (apl.expires_at IS NULL OR apl.expires_at > NOW())
         ORDER BY gla.first_seen_at ASC
         LIMIT 1
@@ -126,6 +128,7 @@ export const fanoutPhoto = api(
         INNER JOIN album_photos ap ON ap.album_id = apl.album_id
         WHERE ap.photo_id = ${req.photoId}
           AND (${albumId}::int IS NULL OR apl.album_id = ${albumId}::int)
+          AND apl.disabled_at IS NULL
           AND (apl.expires_at IS NULL OR apl.expires_at > NOW())
           AND g.notify_opt_in = TRUE
           AND g.verified_at IS NOT NULL
@@ -141,6 +144,7 @@ export const fanoutPhoto = api(
           INNER JOIN guest_link_access gla ON gla.public_link_id = apl.id
           WHERE apl.album_id = ins.album_id
             AND gla.guest_id = ins.guest_id
+            AND apl.disabled_at IS NULL
             AND (apl.expires_at IS NULL OR apl.expires_at > NOW())
           ORDER BY gla.first_seen_at ASC
           LIMIT 1
