@@ -1,11 +1,5 @@
 import Foundation
 
-/// Possible album source modes for the photo sync.
-enum SyncAlbumMode: String {
-    case all = "all"
-    case selected = "selected"
-}
-
 /// Namespace for all sync-related UserDefaults keys and typed accessors.
 /// Thread-safe through UserDefaults's own serialization.
 struct PhotoSyncPreferences {
@@ -16,13 +10,11 @@ struct PhotoSyncPreferences {
     // MARK: - Keys
 
     private static let enabledKey          = "sync.enabled"
-    private static let albumModeKey        = "sync.albumMode"
     private static let selectedAlbumsKey   = "sync.selectedAlbumIds"
-    private static let onlyNewKey          = "sync.onlyNew"
     private static let wifiOnlyKey         = "sync.wifiOnly"
     private static let lastSyncDateKey     = "sync.lastSyncDate"
-    private static let allPhotosAlbumIdKey = "sync.allPhotosAlbumId"
     private static let albumMappingsKey    = "sync.albumMappings"
+    private static let albumSyncDatesKey  = "sync.albumSyncDates"
     private static let serverPhotoMapKey   = "sync.serverPhotoMap"
     private static let excludeScreenshotsKey = "sync.excludeScreenshots"
     // Hash cache: [localIdentifier: HashCacheEntry] stored as JSON Data.
@@ -41,23 +33,9 @@ struct PhotoSyncPreferences {
         set { UserDefaults.standard.set(newValue, forKey: enabledKey) }
     }
 
-    static var albumMode: SyncAlbumMode {
-        get {
-            let raw = UserDefaults.standard.string(forKey: albumModeKey) ?? "all"
-            return SyncAlbumMode(rawValue: raw) ?? .all
-        }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: albumModeKey) }
-    }
-
     static var selectedAlbumIds: Set<String> {
         get { Set(UserDefaults.standard.stringArray(forKey: selectedAlbumsKey) ?? []) }
         set { UserDefaults.standard.set(Array(newValue), forKey: selectedAlbumsKey) }
-    }
-
-    /// Upload only photos taken after the last sync date. Default: true.
-    static var onlyNew: Bool {
-        get { (UserDefaults.standard.object(forKey: onlyNewKey) as? Bool) ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: onlyNewKey) }
     }
 
     /// Exclude screenshots from uploads. Default: true.
@@ -81,25 +59,32 @@ struct PhotoSyncPreferences {
 
     // MARK: - Album mapping
 
-    /// Server album ID used when albumMode is .all. nil = no album association.
-    static var allPhotosTargetAlbumId: Int? {
-        get {
-            let v = UserDefaults.standard.integer(forKey: allPhotosAlbumIdKey)
-            return v == 0 ? nil : v
-        }
-        set {
-            if let v = newValue {
-                UserDefaults.standard.set(v, forKey: allPhotosAlbumIdKey)
-            } else {
-                UserDefaults.standard.removeObject(forKey: allPhotosAlbumIdKey)
-            }
-        }
-    }
-
-    /// Maps iOS album localIdentifier → server album ID (used when albumMode is .selected).
+    /// Maps iOS album localIdentifier → server album ID.
     static var albumMappings: [String: Int] {
         get { UserDefaults.standard.dictionary(forKey: albumMappingsKey) as? [String: Int] ?? [:] }
         set { UserDefaults.standard.set(newValue, forKey: albumMappingsKey) }
+    }
+
+    // MARK: - Per-album sync dates
+
+    private static func loadAlbumSyncDates() -> [String: Date] {
+        UserDefaults.standard.dictionary(forKey: albumSyncDatesKey) as? [String: Date] ?? [:]
+    }
+
+    static func albumSyncDate(for albumId: String) -> Date? {
+        loadAlbumSyncDates()[albumId]
+    }
+
+    static func setAlbumSyncDate(_ date: Date, for albumId: String) {
+        var dates = loadAlbumSyncDates()
+        dates[albumId] = date
+        UserDefaults.standard.set(dates, forKey: albumSyncDatesKey)
+    }
+
+    static func resetAlbumSyncDate(for albumId: String) {
+        var dates = loadAlbumSyncDates()
+        dates.removeValue(forKey: albumId)
+        UserDefaults.standard.set(dates, forKey: albumSyncDatesKey)
     }
 
     // MARK: - Server photo ↔ local asset mapping
@@ -172,6 +157,7 @@ struct PhotoSyncPreferences {
     static func resetUploadHistory() {
         UserDefaults.standard.removeObject(forKey: hashCacheKey)
         UserDefaults.standard.removeObject(forKey: lastSyncDateKey)
+        UserDefaults.standard.removeObject(forKey: albumSyncDatesKey)
         SharedStorage.defaults.removeObject(forKey: syncedStateKey)
         // Remove legacy keys from previous sync implementation
         for key in ["sync.uploadedIds", "sync.syncedFavoriteIds",
