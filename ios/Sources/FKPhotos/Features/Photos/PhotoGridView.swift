@@ -91,15 +91,13 @@ struct PhotoGridView: View {
                         selectedIds = []
                     }
                 }
-                ToolbarItem(placement: .primaryAction) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
                         addToAlbum.present(photoIds: selectedIds)
                     } label: {
                         Image(systemName: "rectangle.stack.badge.plus")
                     }
                     .disabled(selectedIds.isEmpty)
-                }
-                ToolbarItem(placement: .primaryAction) {
                     Button {
                         let filenames = viewModel.photos.filter { selectedIds.contains($0.id) }.map(\.filename)
                         Task { await shareManager.share(filenames: filenames) }
