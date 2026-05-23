@@ -9,11 +9,13 @@ import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import Select from 'primevue/select'
 import SelectButton from 'primevue/selectbutton'
+import { useConfirm } from 'primevue/useconfirm'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import VirtualGallery from '../components/VirtualGallery.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
+import PhotoAlbumDialog from '../components/PhotoAlbumDialog.vue'
 import NaturalSearchBar from '../components/NaturalSearchBar.vue'
 import FilterMenu from '../components/FilterMenu.vue'
 import FilterChips from '../components/FilterChips.vue'
@@ -33,7 +35,10 @@ import {
   type AlbumPublicLink,
   type AlbumShareWithUser,
   type AlbumWithPhotos,
+  type BatchDeleteSkippedPhoto,
   type PublicLinkExpiry,
+  batchDeletePhotos,
+  batchUpdateAlbumPhotos,
   createAlbumPublicLink,
   deleteAlbum,
   deleteAlbumPublicLink,
@@ -267,6 +272,124 @@ const activeGroup = ref<PhotoGroup | null>(null)
 // review restores it instead of snapping to the first album photo (#374).
 const preReviewPhotoId = ref<number | null>(null)
 
+// ── Multi-select (mirrors GalleryView; album-context adds "Aus Album entfernen") ──
+const confirm = useConfirm()
+const selectMode = ref(false)
+const selectedIds = ref<Set<number>>(new Set())
+const selectedCount = computed(() => selectedIds.value.size)
+const curationBusy = ref(false)
+const removeBusy = ref(false)
+const deleteBusy = ref(false)
+const deleteSkipped = ref<BatchDeleteSkippedPhoto[]>([])
+const showDeleteSkippedDialog = ref(false)
+const albumDialogVisible = ref(false)
+const albumDialogPhotoIds = computed(() => Array.from(selectedIds.value))
+
+function enterSelectMode() {
+  selectMode.value = true
+  selectedIds.value = new Set()
+}
+function exitSelectMode() {
+  selectMode.value = false
+  selectedIds.value = new Set()
+}
+function clearSelection() {
+  selectedIds.value = new Set()
+}
+function onToggleSelect(entry: GalleryGridEntry) {
+  // Replace the Set so reactivity fires (Set internal mutations are not
+  // tracked unless the ref reference itself changes).
+  const next = new Set(selectedIds.value)
+  if (next.has(entry.id)) next.delete(entry.id)
+  else next.add(entry.id)
+  selectedIds.value = next
+}
+function openAlbumDialog() {
+  if (selectedIds.value.size === 0) return
+  albumDialogVisible.value = true
+}
+
+async function applyCurationToSelection(target: CurationStatus) {
+  const ids = Array.from(selectedIds.value)
+  if (ids.length === 0) return
+  curationBusy.value = true
+  try {
+    for (const id of ids) {
+      galleryRef.value?.updateEntry(id, { curation: target })
+      try {
+        await updatePhotoCuration(id, target)
+      } catch {
+        await galleryRef.value?.reload()
+        break
+      }
+    }
+  } finally {
+    curationBusy.value = false
+    exitSelectMode()
+  }
+}
+
+function deleteFromSelection() {
+  const ids = Array.from(selectedIds.value)
+  if (ids.length === 0) return
+  confirm.require({
+    message: `${ids.length} ${ids.length === 1 ? 'Foto' : 'Fotos'} endgültig löschen? Diese Aktion kann nicht rückgängig gemacht werden.`,
+    header: 'Fotos löschen',
+    icon: 'pi pi-exclamation-triangle',
+    rejectLabel: 'Abbrechen',
+    acceptLabel: 'Endgültig löschen',
+    acceptClass: 'p-button-danger',
+    accept: () => void performBatchDelete(ids),
+  })
+}
+
+async function performBatchDelete(ids: number[]) {
+  deleteBusy.value = true
+  try {
+    const result = await batchDeletePhotos(ids)
+    if (result.skipped.length > 0) {
+      deleteSkipped.value = result.skipped
+      showDeleteSkippedDialog.value = true
+    }
+    if (result.deleted.length > 0) {
+      await loadData()
+      await galleryRef.value?.reload()
+    }
+  } catch (err: any) {
+    error.value = err?.message ?? 'Fehler beim Löschen der Fotos.'
+  } finally {
+    deleteBusy.value = false
+    exitSelectMode()
+  }
+}
+
+function removeFromAlbumSelection() {
+  const ids = Array.from(selectedIds.value)
+  if (ids.length === 0) return
+  confirm.require({
+    message: `${ids.length} ${ids.length === 1 ? 'Foto' : 'Fotos'} aus diesem Album entfernen? Die Fotos bleiben in der Bibliothek erhalten.`,
+    header: 'Aus Album entfernen',
+    icon: 'pi pi-info-circle',
+    rejectLabel: 'Abbrechen',
+    acceptLabel: 'Entfernen',
+    accept: () => void performRemoveFromAlbum(ids),
+  })
+}
+
+async function performRemoveFromAlbum(ids: number[]) {
+  removeBusy.value = true
+  try {
+    await batchUpdateAlbumPhotos([albumId.value], ids, 'remove')
+    await loadData()
+    await galleryRef.value?.reload()
+  } catch (err: any) {
+    error.value = err?.message ?? 'Fehler beim Entfernen aus dem Album.'
+  } finally {
+    removeBusy.value = false
+    exitSelectMode()
+  }
+}
+
 const albumPhotoIds = computed(() => new Set(rawAlbumPhotos.value.map(p => p.id)))
 
 // Groups scoped to this album: only include groups where at least 2 photos
@@ -464,19 +587,29 @@ function moveCursor(delta: number, byRow: boolean) {
   void hydrateCursor(next)
 }
 
+async function activateCursor() {
+  if (cursorIndex.value === null || !galleryRef.value) return
+  if (selectMode.value) {
+    // In select mode Space/Enter toggles selection of the cursor cell
+    // instead of opening fullscreen — mirrors GalleryView's behaviour.
+    const entry = await galleryRef.value.loadEntryAt(cursorIndex.value)
+    if (entry) onToggleSelect(entry)
+    return
+  }
+  await openGridFullscreenAt(cursorIndex.value)
+}
+
 useGalleryKeyboard({
   isBlocked: () => !!activeGroup.value || isFullscreen.value,
   onLeft: () => moveCursor(-1, false),
   onRight: () => moveCursor(+1, false),
   onUp: () => moveCursor(-1, true),
   onDown: () => moveCursor(+1, true),
-  onSpace: () => {
-    if (cursorIndex.value !== null) void openGridFullscreenAt(cursorIndex.value)
-  },
+  onSpace: () => { void activateCursor() },
   onExtra(e) {
     if (e.key === 'Enter' && cursorIndex.value !== null) {
       e.preventDefault()
-      void openGridFullscreenAt(cursorIndex.value)
+      void activateCursor()
     }
   },
 })
@@ -508,6 +641,11 @@ const viewModeOptions: Array<{ label: string; value: 'grid' | 'map'; icon: strin
   { label: 'Raster', value: 'grid', icon: 'pi pi-th-large' },
   { label: 'Karte', value: 'map', icon: 'pi pi-map' },
 ]
+
+// Selection only applies to the grid view — leaving grid mode cancels it.
+watch(viewMode, (mode) => {
+  if (mode !== 'grid' && selectMode.value) exitSelectMode()
+})
 
 // ── Map fullscreen ───────────────────────────────────────────────────────────
 const tripMapRef = ref<{ selectStopByPhotoId: (id: number) => boolean } | null>(null)
@@ -1246,6 +1384,16 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
         <!-- 5. Filter -->
         <div class="header__filter">
           <Button
+            v-if="viewMode !== 'map'"
+            :icon="selectMode ? 'pi pi-times' : 'pi pi-check-square'"
+            :label="selectMode ? 'Auswahl beenden' : 'Auswählen'"
+            size="small"
+            :severity="selectMode ? 'danger' : 'secondary'"
+            :outlined="!selectMode"
+            class="header__filter-btn"
+            @click="selectMode ? exitSelectMode() : enterSelectMode()"
+          />
+          <Button
             :icon="activeCount > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'"
             :label="activeCount > 0 ? `Filter (${activeCount})` : 'Filter'"
             size="small"
@@ -1373,9 +1521,12 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
           :sort-by="sortByForGallery"
           :sort-dir="sortDirForGallery"
           :search-photo-ids="searchPhotoIds"
+          :select-mode="selectMode"
+          :selected-ids="selectedIds"
           :cursor-index="cursorIndex"
           @photo-click="handleGridPhotoClick"
           @stack-click="handleGridStackClick"
+          @toggle-select="onToggleSelect"
           @loaded="onGalleryLoaded"
         />
       </div>
@@ -1422,6 +1573,81 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
     </div>
 
     <div v-else-if="album" class="info-text">Keine Fotos in dieser Ansicht.</div>
+
+    <!-- Selection action bar (grid mode only). Mirrors GalleryView but adds
+         "Aus Album entfernen" as the album-context primary action. -->
+    <div v-if="selectMode && viewMode === 'grid'" class="select-bar">
+      <span class="select-count">
+        <i class="pi pi-check-square" />
+        {{
+          selectedCount > 0
+            ? `${selectedCount} ausgewählt`
+            : 'Fotos antippen zum Auswählen'
+        }}
+      </span>
+      <div class="select-actions">
+        <Button
+          v-if="selectedCount > 0 && canUploadPhotos"
+          label="Alben"
+          icon="pi pi-book"
+          size="small"
+          severity="secondary"
+          @click="openAlbumDialog"
+        />
+        <Button
+          v-if="selectedCount > 0 && (canDeletePhotos || canWrite)"
+          label="Favorit"
+          icon="pi pi-heart"
+          size="small"
+          :disabled="curationBusy"
+          @click="applyCurationToSelection('favorite')"
+        />
+        <Button
+          v-if="selectedCount > 0 && (canDeletePhotos || canWrite)"
+          label="Ausblenden"
+          icon="pi pi-eye-slash"
+          size="small"
+          severity="warn"
+          :disabled="curationBusy"
+          @click="applyCurationToSelection('hidden')"
+        />
+        <Button
+          v-if="selectedCount > 0 && canWrite"
+          label="Aus Album"
+          icon="pi pi-minus-circle"
+          size="small"
+          severity="warn"
+          :disabled="removeBusy"
+          @click="removeFromAlbumSelection"
+        />
+        <Button
+          v-if="selectedCount > 0 && canManageData"
+          label="Löschen"
+          icon="pi pi-trash"
+          size="small"
+          severity="danger"
+          :disabled="deleteBusy || curationBusy"
+          @click="deleteFromSelection"
+        />
+        <Button
+          v-if="selectedCount > 0"
+          label="Auswahl aufheben"
+          icon="pi pi-replay"
+          size="small"
+          severity="secondary"
+          outlined
+          @click="clearSelection"
+        />
+        <Button
+          label="Beenden"
+          icon="pi pi-times"
+          size="small"
+          severity="secondary"
+          outlined
+          @click="exitSelectMode"
+        />
+      </div>
+    </div>
 
     <!-- Mobile: Backdrop zum Schließen von Drawern -->
     <div
@@ -1682,6 +1908,44 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
       </template>
     </Dialog>
 
+    <!-- Add selected photos to other albums (reuses the same dialog as the
+         main gallery's select-bar). -->
+    <PhotoAlbumDialog
+      v-model:visible="albumDialogVisible"
+      :photo-ids="albumDialogPhotoIds"
+    />
+
+    <!-- Warning dialog when a batch delete skipped some photos -->
+    <Dialog
+      v-model:visible="showDeleteSkippedDialog"
+      :modal="true"
+      header="Einige Fotos wurden übersprungen"
+      :style="{ width: '26rem' }"
+      :closable="true"
+    >
+      <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+        <p
+          v-if="deleteSkipped.filter(s => s.reason === 'not_owner').length > 0"
+          style="margin: 0"
+        >
+          <i class="pi pi-info-circle" style="margin-right: 0.4rem;" />
+          {{ deleteSkipped.filter(s => s.reason === 'not_owner').length }}
+          Foto(s) übersprungen – du bist nicht der Eigentümer.
+        </p>
+        <p
+          v-if="deleteSkipped.filter(s => s.reason === 'readonly').length > 0"
+          style="margin: 0"
+        >
+          <i class="pi pi-info-circle" style="margin-right: 0.4rem;" />
+          {{ deleteSkipped.filter(s => s.reason === 'readonly').length }}
+          Foto(s) übersprungen – Dateiquelle ist schreibgeschützt (Bibliotheks-Import).
+        </p>
+      </div>
+      <template #footer>
+        <Button label="OK" @click="showDeleteSkippedDialog = false" />
+      </template>
+    </Dialog>
+
   </div>
 </template>
 
@@ -1882,6 +2146,53 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
      remain so the icons are still discoverable. */
   .header__filter-btn :deep(.p-button-label) { display: none; }
   .header__filter-btn :deep(.p-button-icon) { margin-right: 0; }
+
+  /* Selection action bar — clear of the iOS home indicator and with
+     44px-tall touch targets so the buttons are easy to tap (#373). */
+  .select-bar {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    padding: 0.7rem 0.85rem calc(0.7rem + env(safe-area-inset-bottom, 0px));
+    gap: 0.5rem;
+  }
+  .select-actions { width: 100%; }
+  .select-actions :deep(.p-button) {
+    flex: 1 1 7rem;
+    min-height: 2.75rem;
+  }
+}
+
+/* ── Selection action bar (desktop + mobile base) ────────────────────────── */
+.select-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 1rem;
+  background: var(--p-primary-50, #eff6ff);
+  border-top: 1px solid var(--p-primary-200, #bfdbfe);
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.select-count {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--p-primary-700, #1d4ed8);
+}
+.select-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.p-dark .select-bar {
+  background: var(--p-primary-900, #1e3a8a);
+  border-top-color: var(--p-primary-700);
+}
+.p-dark .select-count {
+  color: var(--p-primary-200, #bfdbfe);
 }
 
 /* ── Delete / settings dialog ───────────────────────────────────────────── */
