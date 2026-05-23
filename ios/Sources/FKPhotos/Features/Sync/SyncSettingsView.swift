@@ -503,15 +503,28 @@ struct AlbumPickerView: View {
                 var result: [(PHAssetCollection, Int)] = []
                 var seenIds = Set<String>()
                 var seenNames = Set<String>()
-                PHAssetCollection
-                    .fetchAssetCollections(with: .album, subtype: .any, options: nil)
-                    .enumerateObjects { collection, _, _ in
+
+                let skipSubtypes: Set<PHAssetCollectionSubtype> = [
+                    .smartAlbumVideos, .smartAlbumAllHidden, .smartAlbumSlomoVideos,
+                    .smartAlbumTimelapses, .smartAlbumAnimated
+                ]
+
+                func addCollections(from fetchResult: PHFetchResult<PHAssetCollection>) {
+                    fetchResult.enumerateObjects { collection, _, _ in
+                        if skipSubtypes.contains(collection.assetCollectionSubtype) { return }
                         guard seenIds.insert(collection.localIdentifier).inserted else { return }
                         let name = collection.localizedTitle ?? ""
                         guard seenNames.insert(name.lowercased()).inserted else { return }
-                        let count = PHAsset.fetchAssets(in: collection, options: nil).count
+                        let imageOptions = PHFetchOptions()
+                        imageOptions.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
+                        let count = PHAsset.fetchAssets(in: collection, options: imageOptions).count
                         if count > 0 { result.append((collection, count)) }
                     }
+                }
+
+                addCollections(from: PHAssetCollection.fetchAssetCollections(with: .smartAlbum, subtype: .any, options: nil))
+                addCollections(from: PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: nil))
+
                 continuation.resume(returning: result.sorted { ($0.0.localizedTitle ?? "") < ($1.0.localizedTitle ?? "") })
             }
         }
