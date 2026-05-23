@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 
 test.describe('Finance-Modul (DataTable + Tastatur)', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('finance/umsaetze')
+    await page.goto('finanzen/umsaetze')
     // Page-Header rendert immer; auf DataTable warten wir nur, wenn Daten
     // geladen wurden. Permission-Schutz lassen wir defensiv durch.
     if ((await page.getByRole('heading', { name: 'Umsätze' }).count()) === 0) {
