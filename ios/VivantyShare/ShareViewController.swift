@@ -797,7 +797,7 @@ enum ShareUploadQueueWriter {
     private struct QueueItem: Codable {
         var id: UUID
         var assetLocalIdentifier: String?
-        var tempFileURL: URL
+        var tempFileURL: URL?
         var filename: String
         var mimeType: String
         var imageDataHash: String
@@ -826,12 +826,15 @@ enum ShareUploadQueueWriter {
     static func pendingItems() -> [PendingItem] {
         loadAll()
             .filter { $0.status == "pending" || $0.status == "uploading" }
-            .map { PendingItem(
-                id: $0.id, tempFileURL: $0.tempFileURL, filename: $0.filename,
-                mimeType: $0.mimeType, imageDataHash: $0.imageDataHash,
-                fullHash: $0.fullHash, caption: $0.caption, isFavorite: $0.isFavorite,
-                capturedAtString: $0.capturedAtString, targetAlbumIds: $0.targetAlbumIds
-            )}
+            .compactMap { item in
+                guard let url = item.tempFileURL else { return nil }
+                return PendingItem(
+                    id: item.id, tempFileURL: url, filename: item.filename,
+                    mimeType: item.mimeType, imageDataHash: item.imageDataHash,
+                    fullHash: item.fullHash, caption: item.caption, isFavorite: item.isFavorite,
+                    capturedAtString: item.capturedAtString, targetAlbumIds: item.targetAlbumIds
+                )
+            }
     }
 
     static func markFailed(id: UUID) {
@@ -872,16 +875,17 @@ enum ShareUploadQueueWriter {
     static func markDone(id: UUID) {
         var all = loadAll()
         guard let idx = all.firstIndex(where: { $0.id == id }) else { return }
-        let fileURL = all[idx].tempFileURL
+        if let fileURL = all[idx].tempFileURL {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
         all[idx].status = "done"
         save(all)
-        try? FileManager.default.removeItem(at: fileURL)
     }
 
     static func cancelAll() {
         let all = loadAll()
         for item in all where item.status == "pending" {
-            try? FileManager.default.removeItem(at: item.tempFileURL)
+            if let url = item.tempFileURL { try? FileManager.default.removeItem(at: url) }
         }
         let remaining = all.filter { $0.status != "pending" }
         save(remaining)
