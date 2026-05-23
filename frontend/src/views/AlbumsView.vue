@@ -49,6 +49,10 @@ const loading = ref(true)
 const error = ref('')
 const auth = useAuthStore()
 const photoNav = usePhotoNavStore()
+// Creating an album hits POST /albums which the backend gates on
+// `albums.manage`. Hide the entry button when the user is missing that
+// permission so they don't get a 403 after clicking.
+const canManageAlbums = computed(() => auth.hasPermission('albums.manage'))
 
 // Shared with AlbumDetailView: when the user opens an album we remember it
 // here, so navigating back from the detail view restores focus and scroll
@@ -443,7 +447,7 @@ onMounted(async () => {
     <div class="subheader">
       <div class="header">
         <h1 class="title">Meine Alben</h1>
-        <Button label="Neues Album" icon="pi pi-plus" @click="showCreateDialog = true"/>
+        <Button v-if="canManageAlbums" label="Neues Album" icon="pi pi-plus" @click="showCreateDialog = true"/>
       </div>
       <div v-if="!loading && albums.length > 0" class="filter-row">
         <span class="p-input-icon-left filter-input-wrapper">

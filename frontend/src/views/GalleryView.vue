@@ -437,6 +437,20 @@ async function onStackClick(entry: GalleryGridEntry) {
   }
 }
 
+// Opens the review on the first unreviewed group — entry point for the
+// "Gruppen bearbeiten" header button, mirrors AlbumDetailView's flow.
+async function onStartGroupReview() {
+  if (stackBusy.value) return
+  stackBusy.value = true
+  try {
+    const groups = await ensureGroupCache()
+    const first = groups.find((g) => !g.reviewed_at) ?? null
+    if (first) activeGroup.value = first
+  } finally {
+    stackBusy.value = false
+  }
+}
+
 function applyLocalGroupReviewed(groupId: number) {
   // Optimistic local update — the server already marked the group reviewed
   // (handleDone in PhotoCompareView calls reviewPhotoGroup before emitting
@@ -1150,6 +1164,15 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
             :severity="isSortDefault ? 'secondary' : 'primary'"
             :outlined="isSortDefault"
             @click="openSortMenu"
+          />
+          <Button
+            v-if="canManageData && totalUnreviewed > 0"
+            :label="`Gruppen bearbeiten (${totalUnreviewed} offen)`"
+            icon="pi pi-images"
+            severity="success"
+            size="small"
+            v-tooltip.bottom="`Gruppen bearbeiten (${totalUnreviewed} offen)`"
+            @click="onStartGroupReview"
           />
           <Button
             v-if="jumpButton"

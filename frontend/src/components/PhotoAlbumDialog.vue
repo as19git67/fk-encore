@@ -8,6 +8,7 @@ import {
 } from '../api/photos'
 import { getAlbumCheckState as calculateAlbumCheckState } from '../utils/albumSelection'
 import { useReferenceData } from '../composables/useReferenceData'
+import { useAuthStore } from '../stores/auth'
 
 /**
  * Self-contained album-multi-select dialog driven by a list of photo IDs.
@@ -31,6 +32,10 @@ const emit = defineEmits<{
 }>()
 
 const { albums, albumsLoaded, fetchAlbums, invalidateAlbums } = useReferenceData()
+// `createAlbum` is gated by `albums.manage` on the server. Hide the inline
+// create input when the user lacks it so they don't get a 403 mid-flow.
+const auth = useAuthStore()
+const canCreateAlbums = computed(() => auth.hasPermission('albums.manage'))
 /** Combined loading flag: true while EITHER the album list OR the
  *  per-photo album map is in flight. The downstream MultiSelectDialog
  *  watches this transition to refresh its tristate baseline once the
@@ -136,7 +141,7 @@ async function onCreate(name: string) {
     :subject-label="photoIds.length === 1 ? 'Foto' : 'Fotos'"
     :loading="loading"
     :saving="saving"
-    allow-create
+    :allow-create="canCreateAlbums"
     create-label="Neues Album"
     create-placeholder="Albumname…"
     empty-message="Keine Alben vorhanden"

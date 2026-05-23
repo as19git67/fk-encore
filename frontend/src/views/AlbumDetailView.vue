@@ -25,6 +25,7 @@ import { useSort, type SortField, type SortState } from '../composables/useSort'
 import { matchesPhotoFilter, type PhotoFilterContext } from '../utils/photoFilter'
 import {
   type GalleryGridEntry,
+  type GalleryGridGroup,
   type GallerySortDir,
   type GallerySortField,
 } from '../api/gallery'
@@ -135,6 +136,10 @@ const galleryAnchorPhotoId = ref<number | null>(null)
 const cursorPhoto = ref<Photo | null>(null)
 const cursorPrev = ref<Photo | null>(null)
 const cursorNext = ref<Photo | null>(null)
+// Similar-photo-group context for the cursor cell, mirrored into
+// FullscreenOverlay so the `+N` Track-I badge shows up in the album's
+// fullscreen view too (it was previously only wired up in GalleryView).
+const cursorGroup = ref<GalleryGridGroup | null>(null)
 let hydrateToken = 0
 let curationVersion = 0
 
@@ -508,6 +513,7 @@ async function hydrateCursor(index: number): Promise<void> {
   cursorPhoto.value = entryToMinimalPhoto(curEntry)
   cursorPrev.value = prevEntry ? entryToMinimalPhoto(prevEntry) : null
   cursorNext.value = nextEntry ? entryToMinimalPhoto(nextEntry) : null
+  cursorGroup.value = curEntry.group ?? null
 
   saveLastPhotoForAlbum(albumId.value, curEntry.id)
   photoNav.selectPhotoInAlbum(curEntry.id, albumId.value)
@@ -621,6 +627,14 @@ const canDeletePhotos = computed(() => auth.hasPermission('photos.delete'))
 const canUploadPhotos = computed(() => auth.hasPermission('photos.upload'))
 const canManageData = computed(() => auth.hasPermission('data.manage'))
 const showPersons = computed(() => auth.hasPermission('people.view'))
+// Adding photos from THIS album to OTHER albums is gated server-side on the
+// caller owning the source photos OR having `write_share` on a containing
+// album (photo.service.ts batchUpdateAlbumPhotosLogic). Mirror that rule so
+// the "Alben" select-bar button is hidden for read-only viewers and plain
+// contributors who'd just hit a 403.
+const canReuseAlbumPhotos = computed(() =>
+  isOwner.value || album.value?.my_access_level === 'write_share'
+)
 
 // ── Display mode ─────────────────────────────────────────────────────────────
 // `album.display_mode` is the album-level setting: 'map' = map enabled,
@@ -1181,6 +1195,20 @@ function handleGridStackClick(entry: GalleryGridEntry) {
   activeGroup.value = found
 }
 
+/** Opening the review from the fullscreen `+N` badge (Track-I) — mirrors
+ *  GalleryView's flow, but anchors the post-review restore on the
+ *  fullscreen photo so closing the review puts the user back where they
+ *  came from (#374). */
+function onFullscreenOpenGroupReview() {
+  const g = cursorGroup.value
+  if (!g) return
+  const found = photoGroupsList.value.find((row) => row.id === g.id) ?? null
+  if (!found) return
+  preReviewPhotoId.value = cursorPhoto.value?.id ?? null
+  closeGridFullscreen()
+  activeGroup.value = found
+}
+
 async function onGalleryLoaded() {
   if (!galleryRef.value) return
   // galleryAnchorPhotoId was set before this mount (initial load or map→grid
@@ -1317,6 +1345,7 @@ watch(albumId, (id) => {
   cursorPhoto.value = null
   cursorPrev.value = null
   cursorNext.value = null
+  cursorGroup.value = null
   activeGroup.value = null
   detectedFaces.value = []
   detectedLandmarks.value = []
@@ -1451,6 +1480,8 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
             v-if="canManageData && unreviewedGroupCount > 0 && viewMode !== 'map'"
             :label="`Gruppen bearbeiten (${unreviewedGroupCount} offen)`"
             icon="pi pi-images" severity="success" size="small"
+            class="header__group-review-btn"
+            v-tooltip.bottom="`Gruppen bearbeiten (${unreviewedGroupCount} offen)`"
             @click="handleStartGroupReview"
           />
           <Button v-if="effectiveCoverPhotoId && viewMode !== 'map'" icon="pi pi-image" size="small" text v-tooltip="'Cover fokussieren'" @click="scrollToCover" />
@@ -1587,7 +1618,7 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
       </span>
       <div class="select-actions">
         <Button
-          v-if="selectedCount > 0 && canUploadPhotos"
+          v-if="selectedCount > 0 && canUploadPhotos && canReuseAlbumPhotos"
           label="Alben"
           icon="pi pi-book"
           size="small"
@@ -1670,6 +1701,7 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
       :autoAdvanceMs="10000"
       :currentIndex="(cursorIndex ?? 0) + 1"
       :totalCount="albumPhotos.length"
+      :group="cursorGroup"
       @close="closeGridFullscreen"
       @prev="gridGoPrev"
       @next="gridGoNext"
@@ -1678,6 +1710,7 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
       @restore="handleRestorePhoto"
       @show-details="fullscreenDetailsOpen = !fullscreenDetailsOpen"
       @toggle-cover="handleSetMapCover"
+      @open-group-review="onFullscreenOpenGroupReview"
     >
       <template #actions-before>
         <Button
@@ -2146,6 +2179,12 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
      remain so the icons are still discoverable. */
   .header__filter-btn :deep(.p-button-label) { display: none; }
   .header__filter-btn :deep(.p-button-icon) { margin-right: 0; }
+
+  /* "Gruppen bearbeiten" collapses to a green icon-only button on phones;
+     the unreviewed-count stays in the tooltip. */
+  .header__group-review-btn :deep(.p-button-label) { display: none; }
+  .header__group-review-btn :deep(.p-button-icon) { margin-right: 0; }
+  .header__group-review-btn { padding: 0.5rem; min-width: 2.25rem; }
 
   /* Selection action bar — clear of the iOS home indicator and with
      44px-tall touch targets so the buttons are easy to tap (#373). */
