@@ -4,12 +4,10 @@ import Photos
 struct SyncSettingsView: View {
     @AppStorage("sync.enabled")            private var syncEnabled        = false
     @AppStorage("sync.wifiOnly")           private var wifiOnly           = true
-    @AppStorage("sync.albumMode")          private var albumMode          = "all"
     @AppStorage("sync.excludeScreenshots") private var excludeScreenshots = true
 
     @State private var selectedAlbumIds: Set<String> = PhotoSyncPreferences.selectedAlbumIds
     @State private var albumServerMappings: [String: Int] = PhotoSyncPreferences.albumMappings
-    @State private var allPhotosAlbumId: Int? = PhotoSyncPreferences.allPhotosTargetAlbumId
     @State private var serverAlbums: [Album] = []
     @State private var iosAlbumNames: [String: String] = [:]
     @State private var showAuthAlert = false
@@ -34,65 +32,38 @@ struct SyncSettingsView: View {
             // ── What to upload ─────────────────────────────────────────
             if syncEnabled {
                 Section {
-                    Picker("Quelle", selection: $albumMode) {
-                        Text("Alle Fotos").tag("all")
-                        Text("Ausgewählte Alben").tag("selected")
-                    }
-                    .pickerStyle(.menu)
-
-                    if albumMode == "selected" {
-                        NavigationLink {
-                            AlbumPickerView(selectedIds: $selectedAlbumIds)
-                                .onChange(of: selectedAlbumIds) { _, newValue in
-                                    PhotoSyncPreferences.selectedAlbumIds = newValue
-                                    // Remove server mappings for deselected albums
-                                    let removed = albumServerMappings.keys.filter { !newValue.contains($0) }
-                                    if !removed.isEmpty {
-                                        for id in removed { albumServerMappings.removeValue(forKey: id) }
-                                        PhotoSyncPreferences.albumMappings = albumServerMappings
-                                    }
-                                    Task { await loadIosAlbumNames() }
+                    NavigationLink {
+                        AlbumPickerView(selectedIds: $selectedAlbumIds)
+                            .onChange(of: selectedAlbumIds) { oldValue, newValue in
+                                PhotoSyncPreferences.selectedAlbumIds = newValue
+                                let added = newValue.subtracting(oldValue)
+                                let now = Date()
+                                for id in added {
+                                    PhotoSyncPreferences.setAlbumSyncDate(now, for: id)
                                 }
-                        } label: {
-                            HStack {
-                                Text("Alben auswählen")
-                                Spacer()
-                                Text(selectedAlbumIds.isEmpty
-                                     ? "Keine gewählt"
-                                     : "\(selectedAlbumIds.count) gewählt")
-                                    .foregroundStyle(.secondary)
+                                let removed = albumServerMappings.keys.filter { !newValue.contains($0) }
+                                if !removed.isEmpty {
+                                    for id in removed { albumServerMappings.removeValue(forKey: id) }
+                                    PhotoSyncPreferences.albumMappings = albumServerMappings
+                                }
+                                Task { await loadIosAlbumNames() }
                             }
+                    } label: {
+                        HStack {
+                            Text("Alben auswählen")
+                            Spacer()
+                            Text(selectedAlbumIds.isEmpty
+                                 ? "Keine gewählt"
+                                 : "\(selectedAlbumIds.count) gewählt")
+                                .foregroundStyle(.secondary)
                         }
                     }
-
                 } header: {
                     Text("Fotos")
                 }
 
-                // ── Server album for "Alle Fotos" ──────────────────────
-                if albumMode == "all" {
-                    Section {
-                        NavigationLink {
-                            ServerAlbumPickerView(
-                                title: "Ziel-Album",
-                                selectedAlbumId: allPhotosAlbumBinding,
-                                disabledIds: DownloadSyncPreferences.selectedServerAlbumIds
-                            )
-                        } label: {
-                            HStack {
-                                Text("Server Album")
-                                Spacer()
-                                Text(serverAlbumName(for: allPhotosAlbumId) ?? "Kein Album")
-                                    .foregroundStyle(allPhotosAlbumId != nil ? .secondary : .tertiary)
-                            }
-                        }
-                    } footer: {
-                        Text("Alle hochgeladenen Fotos werden diesem Server-Album hinzugefügt.")
-                    }
-                }
-
-                // ── Per-album server mapping for "Ausgewählte Alben" ───
-                if albumMode == "selected" && !selectedAlbumIds.isEmpty {
+                // ── Per-album server mapping ──────────────────────────
+                if !selectedAlbumIds.isEmpty {
                     Section {
                         ForEach(sortedSelectedAlbumIds, id: \.self) { iosId in
                             NavigationLink {
@@ -131,11 +102,20 @@ struct SyncSettingsView: View {
                                     .tint(.orange)
                                 }
                             }
+                            .swipeActions(edge: .leading) {
+                                Button {
+                                    PhotoSyncPreferences.setAlbumSyncDate(Date(), for: iosId)
+                                    refreshTick += 1
+                                } label: {
+                                    Label("Nur neue Fotos", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90")
+                                }
+                                .tint(.blue)
+                            }
                         }
                     } header: {
                         Text("Album Zuordnungen")
                     } footer: {
-                        Text("Nach links wischen, um alle Fotos eines Albums erneut zu synchronisieren.")
+                        Text("Nach links wischen → alle Fotos erneut synchronisieren. Nach rechts wischen → nur zukünftige Fotos synchronisieren.")
                     }
                 }
 
@@ -241,7 +221,7 @@ struct SyncSettingsView: View {
             }
 
             // ── Status ─────────────────────────────────────────────────
-            Section("Status") {
+            Section {
                 LabeledContent("Letzter Upload") {
                     if let date = lastSyncDate {
                         Text(date, style: .relative)
@@ -260,6 +240,10 @@ struct SyncSettingsView: View {
                 } label: {
                     Text("Upload-Verlauf zurücksetzen")
                 }
+            } header: {
+                Text("Status")
+            } footer: {
+                Text("Beim Zurücksetzen werden alle Fotos beim nächsten Sync erneut mit dem Server abgeglichen. Bereits hochgeladene Fotos werden nicht doppelt angelegt.")
             }
             .id(refreshTick)  // Force re-render when tick changes
             .confirmationDialog(
@@ -281,12 +265,8 @@ struct SyncSettingsView: View {
         .onAppear {
             selectedAlbumIds = PhotoSyncPreferences.selectedAlbumIds
             albumServerMappings = PhotoSyncPreferences.albumMappings
-            allPhotosAlbumId = PhotoSyncPreferences.allPhotosTargetAlbumId
             refreshTick += 1
             queueObserver.startObserving()
-        }
-        .onDisappear {
-            queueObserver.stopObserving()
         }
         .task {
             await loadServerAlbums()
@@ -344,17 +324,6 @@ struct SyncSettingsView: View {
     private func serverAlbumName(for albumId: Int?) -> String? {
         guard let albumId else { return nil }
         return serverAlbums.first { $0.id == albumId }?.name
-    }
-
-    private var allPhotosAlbumBinding: Binding<Int?> {
-        Binding(
-            get: { allPhotosAlbumId },
-            set: {
-                allPhotosAlbumId = $0
-                PhotoSyncPreferences.allPhotosTargetAlbumId = $0
-                Task { await loadServerAlbums() }
-            }
-        )
     }
 
     private func serverAlbumBinding(for iosId: String) -> Binding<Int?> {
@@ -571,6 +540,12 @@ struct UploadQueueDetailView: View {
                                     .font(.subheadline)
                                     .lineLimit(1)
                                     .truncationMode(.middle)
+                                if let error = item.lastError {
+                                    Text(error)
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                        .lineLimit(2)
+                                }
                                 Text("Fehlgeschlagen\(item.retryCount > 1 ? " (\(item.retryCount)×)" : "")")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)

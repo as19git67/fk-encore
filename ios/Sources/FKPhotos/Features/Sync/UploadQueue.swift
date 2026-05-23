@@ -19,6 +19,7 @@ public struct UploadQueueItem: Codable, Identifiable, Sendable {
     public let targetAlbumIds: [Int]
     public var status: Status
     public var retryCount: Int
+    public var lastError: String?
 
     public enum Status: String, Codable {
         case pending
@@ -40,7 +41,8 @@ public struct UploadQueueItem: Codable, Identifiable, Sendable {
         capturedAtString: String,
         targetAlbumIds: [Int] = [],
         status: Status = .pending,
-        retryCount: Int = 0
+        retryCount: Int = 0,
+        lastError: String? = nil
     ) {
         self.id = id
         self.assetLocalIdentifier = assetLocalIdentifier
@@ -55,6 +57,7 @@ public struct UploadQueueItem: Codable, Identifiable, Sendable {
         self.targetAlbumIds = targetAlbumIds
         self.status = status
         self.retryCount = retryCount
+        self.lastError = lastError
     }
 
     /// Returns a copy with the asset identifier replaced. Used when the main
@@ -141,10 +144,11 @@ actor UploadQueue {
         persist()
     }
 
-    func markFailed(id: UUID) {
+    func markFailed(id: UUID, error: String? = nil) {
         guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
         items[idx].status = .failed
         items[idx].retryCount += 1
+        items[idx].lastError = error
         persist()
     }
 
@@ -253,7 +257,9 @@ actor UploadQueue {
 @Observable @MainActor
 final class UploadQueueObserver {
     private(set) var items: [UploadQueueItem] = []
-    private var observeTask: Task<Void, Never>?
+    nonisolated(unsafe) private var observeTask: Task<Void, Never>?
+
+    deinit { observeTask?.cancel() }
 
     var pendingItems: [UploadQueueItem] {
         items.filter { $0.status == .pending || $0.status == .uploading }

@@ -1,11 +1,5 @@
 import Foundation
 
-/// Possible album source modes for the photo sync.
-enum SyncAlbumMode: String {
-    case all = "all"
-    case selected = "selected"
-}
-
 /// Namespace for all sync-related UserDefaults keys and typed accessors.
 /// Thread-safe through UserDefaults's own serialization.
 struct PhotoSyncPreferences {
@@ -16,11 +10,9 @@ struct PhotoSyncPreferences {
     // MARK: - Keys
 
     private static let enabledKey          = "sync.enabled"
-    private static let albumModeKey        = "sync.albumMode"
     private static let selectedAlbumsKey   = "sync.selectedAlbumIds"
     private static let wifiOnlyKey         = "sync.wifiOnly"
     private static let lastSyncDateKey     = "sync.lastSyncDate"
-    private static let allPhotosAlbumIdKey = "sync.allPhotosAlbumId"
     private static let albumMappingsKey    = "sync.albumMappings"
     private static let albumSyncDatesKey  = "sync.albumSyncDates"
     private static let serverPhotoMapKey   = "sync.serverPhotoMap"
@@ -39,14 +31,6 @@ struct PhotoSyncPreferences {
     static var syncEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: enabledKey) }
         set { UserDefaults.standard.set(newValue, forKey: enabledKey) }
-    }
-
-    static var albumMode: SyncAlbumMode {
-        get {
-            let raw = UserDefaults.standard.string(forKey: albumModeKey) ?? "all"
-            return SyncAlbumMode(rawValue: raw) ?? .all
-        }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: albumModeKey) }
     }
 
     static var selectedAlbumIds: Set<String> {
@@ -75,22 +59,7 @@ struct PhotoSyncPreferences {
 
     // MARK: - Album mapping
 
-    /// Server album ID used when albumMode is .all. nil = no album association.
-    static var allPhotosTargetAlbumId: Int? {
-        get {
-            let v = UserDefaults.standard.integer(forKey: allPhotosAlbumIdKey)
-            return v == 0 ? nil : v
-        }
-        set {
-            if let v = newValue {
-                UserDefaults.standard.set(v, forKey: allPhotosAlbumIdKey)
-            } else {
-                UserDefaults.standard.removeObject(forKey: allPhotosAlbumIdKey)
-            }
-        }
-    }
-
-    /// Maps iOS album localIdentifier → server album ID (used when albumMode is .selected).
+    /// Maps iOS album localIdentifier → server album ID.
     static var albumMappings: [String: Int] {
         get { UserDefaults.standard.dictionary(forKey: albumMappingsKey) as? [String: Int] ?? [:] }
         set { UserDefaults.standard.set(newValue, forKey: albumMappingsKey) }
