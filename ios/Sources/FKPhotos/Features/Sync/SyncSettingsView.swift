@@ -4,13 +4,10 @@ import Photos
 struct SyncSettingsView: View {
     @AppStorage("sync.enabled")            private var syncEnabled        = false
     @AppStorage("sync.wifiOnly")           private var wifiOnly           = true
-    @AppStorage("sync.onlyNew")            private var onlyNew            = true
-    @AppStorage("sync.albumMode")          private var albumMode          = "all"
     @AppStorage("sync.excludeScreenshots") private var excludeScreenshots = true
 
     @State private var selectedAlbumIds: Set<String> = PhotoSyncPreferences.selectedAlbumIds
     @State private var albumServerMappings: [String: Int] = PhotoSyncPreferences.albumMappings
-    @State private var allPhotosAlbumId: Int? = PhotoSyncPreferences.allPhotosTargetAlbumId
     @State private var serverAlbums: [Album] = []
     @State private var iosAlbumNames: [String: String] = [:]
     @State private var showAuthAlert = false
@@ -35,69 +32,39 @@ struct SyncSettingsView: View {
             // ── What to upload ─────────────────────────────────────────
             if syncEnabled {
                 Section {
-                    Picker("Quelle", selection: $albumMode) {
-                        Text("Alle Fotos").tag("all")
-                        Text("Ausgewählte Alben").tag("selected")
-                    }
-                    .pickerStyle(.menu)
-
-                    if albumMode == "selected" {
-                        NavigationLink {
-                            AlbumPickerView(selectedIds: $selectedAlbumIds)
-                                .onChange(of: selectedAlbumIds) { _, newValue in
-                                    PhotoSyncPreferences.selectedAlbumIds = newValue
-                                    // Remove server mappings for deselected albums
-                                    let removed = albumServerMappings.keys.filter { !newValue.contains($0) }
-                                    if !removed.isEmpty {
-                                        for id in removed { albumServerMappings.removeValue(forKey: id) }
-                                        PhotoSyncPreferences.albumMappings = albumServerMappings
-                                    }
-                                    Task { await loadIosAlbumNames() }
+                    NavigationLink {
+                        AlbumPickerView(selectedIds: $selectedAlbumIds)
+                            .onChange(of: selectedAlbumIds) { oldValue, newValue in
+                                PhotoSyncPreferences.selectedAlbumIds = newValue
+                                let added = newValue.subtracting(oldValue)
+                                let now = Date()
+                                for id in added {
+                                    PhotoSyncPreferences.setAlbumSyncDate(now, for: id)
                                 }
-                        } label: {
-                            HStack {
-                                Text("Alben auswählen")
-                                Spacer()
-                                Text(selectedAlbumIds.isEmpty
-                                     ? "Keine gewählt"
-                                     : "\(selectedAlbumIds.count) gewählt")
-                                    .foregroundStyle(.secondary)
+                                let removed = albumServerMappings.keys.filter { !newValue.contains($0) }
+                                if !removed.isEmpty {
+                                    for id in removed { albumServerMappings.removeValue(forKey: id) }
+                                    PhotoSyncPreferences.albumMappings = albumServerMappings
+                                }
+                                Task { await loadIosAlbumNames() }
                             }
+                    } label: {
+                        HStack {
+                            Text("Alben auswählen")
+                            Spacer()
+                            Text(selectedAlbumIds.isEmpty
+                                 ? "Keine gewählt"
+                                 : "\(selectedAlbumIds.count) gewählt")
+                                .foregroundStyle(.secondary)
                         }
                     }
-
-                    Toggle("Nur neue Fotos", isOn: $onlyNew)
                 } header: {
                     Text("Fotos")
-                } footer: {
-                    Text("Mit 'Nur neue Fotos' werden ausschliesslich Bilder hochgeladen, die seit dem letzten Sync aufgenommen wurden.")
                 }
 
-                // ── Server album for "Alle Fotos" ──────────────────────
-                if albumMode == "all" {
+                // ── Per-album server mapping ──────────────────────────
+                if !selectedAlbumIds.isEmpty {
                     Section {
-                        NavigationLink {
-                            ServerAlbumPickerView(
-                                title: "Ziel-Album",
-                                selectedAlbumId: allPhotosAlbumBinding,
-                                disabledIds: DownloadSyncPreferences.selectedServerAlbumIds
-                            )
-                        } label: {
-                            HStack {
-                                Text("Server Album")
-                                Spacer()
-                                Text(serverAlbumName(for: allPhotosAlbumId) ?? "Kein Album")
-                                    .foregroundStyle(allPhotosAlbumId != nil ? .secondary : .tertiary)
-                            }
-                        }
-                    } footer: {
-                        Text("Alle hochgeladenen Fotos werden diesem Server-Album hinzugefügt.")
-                    }
-                }
-
-                // ── Per-album server mapping for "Ausgewählte Alben" ───
-                if albumMode == "selected" && !selectedAlbumIds.isEmpty {
-                    Section("Album Zuordnungen") {
                         ForEach(sortedSelectedAlbumIds, id: \.self) { iosId in
                             NavigationLink {
                                 ServerAlbumPickerView(
@@ -106,14 +73,49 @@ struct SyncSettingsView: View {
                                     disabledIds: cycleDisabledIds(forIosAlbum: iosId)
                                 )
                             } label: {
-                                HStack {
-                                    Text(iosAlbumNames[iosId] ?? iosId)
-                                    Spacer()
-                                    Text(serverAlbumName(for: albumServerMappings[iosId]) ?? "Kein Album")
-                                        .foregroundStyle(albumServerMappings[iosId] != nil ? .secondary : .tertiary)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text(iosAlbumNames[iosId] ?? iosId)
+                                        Spacer()
+                                        Text(serverAlbumName(for: albumServerMappings[iosId]) ?? "Kein Album")
+                                            .foregroundStyle(albumServerMappings[iosId] != nil ? .secondary : .tertiary)
+                                    }
+                                    if let syncDate = PhotoSyncPreferences.albumSyncDate(for: iosId) {
+                                        Text("Letzter Sync: \(syncDate, style: .relative)")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    } else {
+                                        Text("Noch nicht synchronisiert")
+                                            .font(.caption)
+                                            .foregroundStyle(.tertiary)
+                                    }
                                 }
                             }
+                            .swipeActions(edge: .trailing) {
+                                if PhotoSyncPreferences.albumSyncDate(for: iosId) != nil {
+                                    Button {
+                                        PhotoSyncPreferences.resetAlbumSyncDate(for: iosId)
+                                        refreshTick += 1
+                                    } label: {
+                                        Label("Erneut syncen", systemImage: "arrow.counterclockwise")
+                                    }
+                                    .tint(.orange)
+                                }
+                            }
+                            .swipeActions(edge: .leading) {
+                                Button {
+                                    PhotoSyncPreferences.setAlbumSyncDate(Date(), for: iosId)
+                                    refreshTick += 1
+                                } label: {
+                                    Label("Nur neue Fotos", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90")
+                                }
+                                .tint(.blue)
+                            }
                         }
+                    } header: {
+                        Text("Album Zuordnungen")
+                    } footer: {
+                        Text("Nach links wischen → alle Fotos erneut synchronisieren. Nach rechts wischen → nur zukünftige Fotos synchronisieren.")
                     }
                 }
 
@@ -179,10 +181,6 @@ struct SyncSettingsView: View {
             // ── Debug ──────────────────────────────────────────────────
             #if DEBUG
             Section("Debug") {
-                Button("Jetzt synchronisieren") {
-                    Task { try? await PhotoSyncService.shared.sync() }
-                }
-                .foregroundStyle(Color.accentColor)
                 Button("Hintergrund-Task einplanen") {
                     BackgroundSyncManager.shared.scheduleNextSyncIfNeeded()
                 }
@@ -193,48 +191,28 @@ struct SyncSettingsView: View {
             // ── Upload queue ──────────────────────────────────────────
             if queueObserver.hasVisibleItems {
                 Section {
-                    if !queueObserver.pendingItems.isEmpty {
+                    NavigationLink {
+                        UploadQueueDetailView(observer: queueObserver)
+                    } label: {
                         HStack(spacing: 12) {
-                            Image(systemName: "clock.badge.exclamationmark")
-                                .foregroundStyle(.orange)
-                            Text("\(queueObserver.pendingItems.count) Foto\(queueObserver.pendingItems.count == 1 ? "" : "s") ausstehend")
-                                .font(.footnote)
-                            Spacer()
-                            Button("Abbrechen") {
-                                queueObserver.cancelPending()
+                            if !queueObserver.failedItems.isEmpty {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.red)
+                            } else {
+                                Image(systemName: "arrow.up.circle")
+                                    .foregroundStyle(.orange)
                             }
-                            .font(.footnote)
-                            .foregroundStyle(.red)
-                        }
-                    }
-                    ForEach(queueObserver.failedItems) { item in
-                        HStack(spacing: 12) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.red)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(item.filename)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                Text("Fehlgeschlagen\(item.retryCount > 1 ? " (\(item.retryCount)×)" : "")")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                if !queueObserver.pendingItems.isEmpty {
+                                    Text("\(queueObserver.pendingItems.count) ausstehend")
+                                        .font(.subheadline)
+                                }
+                                if !queueObserver.failedItems.isEmpty {
+                                    Text("\(queueObserver.failedItems.count) fehlgeschlagen")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.red)
+                                }
                             }
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) {
-                                queueObserver.remove(id: item.id)
-                            } label: {
-                                Label("Löschen", systemImage: "trash")
-                            }
-                        }
-                    }
-                    if !queueObserver.failedItems.isEmpty {
-                        Button(role: .destructive) {
-                            queueObserver.removeAllFailed()
-                        } label: {
-                            Text(queueObserver.failedItems.count == 1
-                                 ? "Fehlgeschlagenes Foto löschen"
-                                 : "Alle fehlgeschlagenen löschen")
                         }
                     }
                 } header: {
@@ -243,7 +221,7 @@ struct SyncSettingsView: View {
             }
 
             // ── Status ─────────────────────────────────────────────────
-            Section("Status") {
+            Section {
                 LabeledContent("Letzter Upload") {
                     if let date = lastSyncDate {
                         Text(date, style: .relative)
@@ -262,6 +240,10 @@ struct SyncSettingsView: View {
                 } label: {
                     Text("Upload-Verlauf zurücksetzen")
                 }
+            } header: {
+                Text("Status")
+            } footer: {
+                Text("Beim Zurücksetzen werden alle Fotos beim nächsten Sync erneut mit dem Server abgeglichen. Bereits hochgeladene Fotos werden nicht doppelt angelegt.")
             }
             .id(refreshTick)  // Force re-render when tick changes
             .confirmationDialog(
@@ -283,12 +265,8 @@ struct SyncSettingsView: View {
         .onAppear {
             selectedAlbumIds = PhotoSyncPreferences.selectedAlbumIds
             albumServerMappings = PhotoSyncPreferences.albumMappings
-            allPhotosAlbumId = PhotoSyncPreferences.allPhotosTargetAlbumId
             refreshTick += 1
             queueObserver.startObserving()
-        }
-        .onDisappear {
-            queueObserver.stopObserving()
         }
         .task {
             await loadServerAlbums()
@@ -346,17 +324,6 @@ struct SyncSettingsView: View {
     private func serverAlbumName(for albumId: Int?) -> String? {
         guard let albumId else { return nil }
         return serverAlbums.first { $0.id == albumId }?.name
-    }
-
-    private var allPhotosAlbumBinding: Binding<Int?> {
-        Binding(
-            get: { allPhotosAlbumId },
-            set: {
-                allPhotosAlbumId = $0
-                PhotoSyncPreferences.allPhotosTargetAlbumId = $0
-                Task { await loadServerAlbums() }
-            }
-        )
     }
 
     private func serverAlbumBinding(for iosId: String) -> Binding<Int?> {
@@ -493,25 +460,129 @@ struct AlbumPickerView: View {
     }
 
     private func loadAlbums() async -> [(collection: PHAssetCollection, count: Int)] {
-        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        var status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        if status == .notDetermined {
+            status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+        }
         guard status == .authorized || status == .limited else { return [] }
 
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 var result: [(PHAssetCollection, Int)] = []
                 var seenIds = Set<String>()
-                var seenNames = Set<String>()
-                PHAssetCollection
-                    .fetchAssetCollections(with: .album, subtype: .any, options: nil)
-                    .enumerateObjects { collection, _, _ in
+
+                let skipSubtypes: Set<PHAssetCollectionSubtype> = [
+                    .smartAlbumVideos, .smartAlbumAllHidden, .smartAlbumSlomoVideos,
+                    .smartAlbumTimelapses, .smartAlbumAnimated
+                ]
+
+                let imageFilter = PHFetchOptions()
+                imageFilter.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
+
+                func addCollections(from fetchResult: PHFetchResult<PHAssetCollection>) {
+                    fetchResult.enumerateObjects { collection, _, _ in
+                        if skipSubtypes.contains(collection.assetCollectionSubtype) { return }
                         guard seenIds.insert(collection.localIdentifier).inserted else { return }
-                        let name = collection.localizedTitle ?? ""
-                        guard seenNames.insert(name.lowercased()).inserted else { return }
-                        let count = PHAsset.fetchAssets(in: collection, options: nil).count
+                        let count = PHAsset.fetchAssets(in: collection, options: imageFilter).count
                         if count > 0 { result.append((collection, count)) }
                     }
+                }
+
+                addCollections(from: PHAssetCollection.fetchAssetCollections(with: .smartAlbum, subtype: .any, options: nil))
+                addCollections(from: PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: nil))
+
                 continuation.resume(returning: result.sorted { ($0.0.localizedTitle ?? "") < ($1.0.localizedTitle ?? "") })
             }
         }
+    }
+}
+
+// MARK: - Upload Queue Detail
+
+struct UploadQueueDetailView: View {
+    @Bindable var observer: UploadQueueObserver
+
+    var body: some View {
+        List {
+            if !observer.pendingItems.isEmpty {
+                Section {
+                    ForEach(observer.pendingItems) { item in
+                        HStack(spacing: 12) {
+                            Image(systemName: "arrow.up.circle")
+                                .foregroundStyle(.orange)
+                            Text(item.filename)
+                                .font(.subheadline)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                } header: {
+                    HStack {
+                        Text("Ausstehend (\(observer.pendingItems.count))")
+                        Spacer()
+                        Button("Abbrechen") {
+                            observer.cancelPending()
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                    }
+                }
+            }
+
+            if !observer.failedItems.isEmpty {
+                Section {
+                    ForEach(observer.failedItems) { item in
+                        HStack(spacing: 12) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.red)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.filename)
+                                    .font(.subheadline)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                if let error = item.lastError {
+                                    Text(error)
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                        .lineLimit(2)
+                                }
+                                Text("Fehlgeschlagen\(item.retryCount > 1 ? " (\(item.retryCount)×)" : "")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                observer.remove(id: item.id)
+                            } label: {
+                                Label("Löschen", systemImage: "trash")
+                            }
+                        }
+                    }
+                } header: {
+                    HStack {
+                        Text("Fehlgeschlagen (\(observer.failedItems.count))")
+                        Spacer()
+                        Button(role: .destructive) {
+                            observer.removeAllFailed()
+                        } label: {
+                            Text("Alle löschen")
+                                .font(.caption)
+                        }
+                    }
+                }
+            }
+
+            if observer.pendingItems.isEmpty && observer.failedItems.isEmpty {
+                ContentUnavailableView {
+                    Label("Keine Einträge", systemImage: "checkmark.circle")
+                } description: {
+                    Text("Die Upload-Warteschlange ist leer.")
+                }
+                .listRowSeparator(.hidden)
+            }
+        }
+        .navigationTitle("Upload-Warteschlange")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

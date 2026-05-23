@@ -489,7 +489,7 @@ enum ShareUploadQueueWriter {
     private struct QueueItem: Codable {
         var id: UUID
         var assetLocalIdentifier: String?
-        var tempFileURL: URL
+        var tempFileURL: URL?
         var filename: String
         var mimeType: String
         var imageDataHash: String
@@ -522,16 +522,17 @@ enum ShareUploadQueueWriter {
     static func markDone(id: UUID) {
         var all = loadAll()
         guard let idx = all.firstIndex(where: { $0.id == id }) else { return }
-        let fileURL = all[idx].tempFileURL
+        if let fileURL = all[idx].tempFileURL {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
         all[idx].status = "done"
         save(all)
-        try? FileManager.default.removeItem(at: fileURL)
     }
 
     static func cancelAll() {
         let all = loadAll()
         for item in all where item.status == "pending" {
-            try? FileManager.default.removeItem(at: item.tempFileURL)
+            if let url = item.tempFileURL { try? FileManager.default.removeItem(at: url) }
         }
         save(all.filter { $0.status != "pending" })
     }
