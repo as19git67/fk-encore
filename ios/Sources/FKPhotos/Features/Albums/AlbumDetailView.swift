@@ -17,6 +17,7 @@ struct AlbumDetailView: View {
     @State private var isSelecting = false
     @State private var selectedIds: Set<Int> = []
     @State private var shareManager = PhotoShareManager()
+    @State private var addToAlbum = AddToAlbumManager()
     @Environment(\.dismiss) private var dismiss
 
     private var displayedPhotos: [PhotoWithCuration] {
@@ -92,6 +93,14 @@ struct AlbumDetailView: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
+                        addToAlbum.present(photoIds: selectedIds)
+                    } label: {
+                        Image(systemName: "rectangle.stack.badge.plus")
+                    }
+                    .disabled(selectedIds.isEmpty)
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
                         let filenames = displayedPhotos.filter { selectedIds.contains($0.id) }.map(\.filename)
                         Task { await shareManager.share(filenames: filenames) }
                     } label: {
@@ -154,6 +163,10 @@ struct AlbumDetailView: View {
         .sheet(isPresented: $shareManager.isPresented) {
             ActivityView(images: shareManager.images)
         }
+        .sheet(isPresented: $addToAlbum.isPresented) {
+            AddToAlbumPickerView(manager: addToAlbum)
+                .presentationDetents([.medium, .large])
+        }
         .overlay {
             if shareManager.isLoading {
                 ZStack {
@@ -163,6 +176,12 @@ struct AlbumDetailView: View {
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
                 }
             }
+        }
+        .onChange(of: addToAlbum.resultMessage) { _, message in
+            guard message != nil else { return }
+            isSelecting = false
+            selectedIds = []
+            addToAlbum.resultMessage = nil
         }
         .task {
             await loadAlbum()
