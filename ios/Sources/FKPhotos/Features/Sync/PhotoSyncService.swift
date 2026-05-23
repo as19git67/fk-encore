@@ -78,50 +78,30 @@ actor PhotoSyncService {
             existingHashes.formUnion(serverHas)
         }
 
-        // Step 4: Sync assets whose full-hash the server doesn't have.
-        // If the pixel data (imageDataHash) hasn't changed since the last successful
-        // sync, use the body-less POST /photos/sync/metadata endpoint. Otherwise
-        // fall back to a full upload via POST /photos.
-        for item in hashPairs {
-            guard !existingHashes.contains(item.hashResult.fullHash) else { continue }
+        // Step 4: Enqueue assets whose full-hash the server doesn't have into
+        // the UploadQueue. Skip items already queued to avoid duplicates.
+        let alreadyQueued = Set(await UploadQueue.shared.pendingItems().map(\.fullHash))
 
-            let localId = item.asset.localIdentifier
-            let caption = PhotoHasher.shared.captionFromAsset(item.asset) ?? ""
+        let missing = hashPairs.filter {
+            !existingHashes.contains($0.hashResult.fullHash)
+            && !alreadyQueued.contains($0.hashResult.fullHash)
+        }
 
-            // Metadata-only fast path: pixels unchanged since last sync.
-            let syncedEntry = PhotoSyncPreferences.loadSyncedEntry(localId: localId)
-            if let syncedEntry, syncedEntry.imageDataHash == item.hashResult.imageDataHash {
-                do {
-                    let result = try await APIClient.shared.syncPhotoMetadata(
-                        imageDataHash: item.hashResult.imageDataHash,
-                        fullHash: item.hashResult.fullHash,
-                        caption: caption,
-                        isFavorite: item.asset.isFavorite,
-                        capturedAtString: item.hashResult.capturedAtString,
-                        assetLocalId: localId
-                    )
-                    if case .updated(let photoId) = result {
-                        PhotoSyncPreferences.saveSyncedStateEntry(
-                            localId: localId,
-                            imageDataHash: item.hashResult.imageDataHash,
-                            fullHash: item.hashResult.fullHash
-                        )
-                        PhotoSyncPreferences.recordUploadedPhoto(serverPhotoId: photoId, localIdentifier: localId)
-                        await addToTargetAlbum(photoId: photoId, sourceAlbumId: item.sourceAlbumId)
-                        continue
-                    }
-                    // .notFound → fall through to full upload
-                } catch {
-                    // Error → fall through to full upload
-                }
-            }
-
-            // Full upload (first sync, pixel change, or metadata sync failed).
-            do {
-                let (data, mimeType) = try await loadAssetData(item.asset, filename: item.filename)
+        let batchLimit = 50
+        for batchStart in stride(from: 0, to: missing.count, by: batchLimit) {
+            let batch = missing[batchStart..<min(batchStart + batchLimit, missing.count)]
+            for item in batch {
+                let localId = item.asset.localIdentifier
+                let caption = PhotoHasher.shared.captionFromAsset(item.asset) ?? ""
+                let targetAlbumIds = resolveTargetAlbumIds(sourceAlbumId: item.sourceAlbumId)
+                let resource = PHAssetResource.assetResources(for: item.asset)
+                    .first(where: { $0.type == .photo })
+                    ?? PHAssetResource.assetResources(for: item.asset).first(where: { $0.type == .fullSizePhoto })
+                let mimeType = resource.map { Self.mimeType(for: $0.uniformTypeIdentifier) } ?? "image/jpeg"
                 let uploadFilename = filenameMatchingMime(item.filename, mimeType: mimeType)
-                let result = try await APIClient.shared.uploadPhoto(
-                    data: data,
+
+                let queueItem = UploadQueueItem(
+                    assetLocalIdentifier: localId,
                     filename: uploadFilename,
                     mimeType: mimeType,
                     imageDataHash: item.hashResult.imageDataHash,
@@ -129,37 +109,23 @@ actor PhotoSyncService {
                     caption: caption,
                     isFavorite: item.asset.isFavorite,
                     capturedAtString: item.hashResult.capturedAtString,
-                    assetLocalId: localId
+                    targetAlbumIds: targetAlbumIds
                 )
-                PhotoSyncPreferences.saveSyncedStateEntry(
-                    localId: localId,
-                    imageDataHash: item.hashResult.imageDataHash,
-                    fullHash: item.hashResult.fullHash
-                )
-                PhotoSyncPreferences.recordUploadedPhoto(
-                    serverPhotoId: result.photoId,
-                    localIdentifier: localId
-                )
-                await addToTargetAlbum(photoId: result.photoId, sourceAlbumId: item.sourceAlbumId)
-            } catch APIError.duplicatePhoto(let existingPhotoId) {
-                if let existingPhotoId {
-                    PhotoSyncPreferences.saveSyncedStateEntry(
-                        localId: localId,
-                        imageDataHash: item.hashResult.imageDataHash,
-                        fullHash: item.hashResult.fullHash
-                    )
-                    PhotoSyncPreferences.recordUploadedPhoto(
-                        serverPhotoId: existingPhotoId,
-                        localIdentifier: localId
-                    )
-                    await addToTargetAlbum(photoId: existingPhotoId, sourceAlbumId: item.sourceAlbumId)
-                }
-            } catch {
-                // Transient error — asset will be retried on the next sync cycle.
+                await UploadQueue.shared.enqueue(queueItem)
             }
+            await BackgroundSyncManager.shared.drainUploadQueue()
         }
 
         PhotoSyncPreferences.lastSyncDate = Date()
+    }
+
+    private func resolveTargetAlbumIds(sourceAlbumId: String?) -> [Int] {
+        switch PhotoSyncPreferences.albumMode {
+        case .all:
+            return PhotoSyncPreferences.allPhotosTargetAlbumId.map { [$0] } ?? []
+        case .selected:
+            return sourceAlbumId.flatMap { PhotoSyncPreferences.albumMappings[$0] }.map { [$0] } ?? []
+        }
     }
 
     // MARK: - Asset fetching
@@ -237,29 +203,12 @@ actor PhotoSyncService {
         }
     }
 
-    // MARK: - Album association
-
-    private func addToTargetAlbum(photoId: Int, sourceAlbumId: String?) async {
-        let targetAlbumId: Int?
-        switch PhotoSyncPreferences.albumMode {
-        case .all:
-            targetAlbumId = PhotoSyncPreferences.allPhotosTargetAlbumId
-        case .selected:
-            targetAlbumId = sourceAlbumId.flatMap { PhotoSyncPreferences.albumMappings[$0] }
-        }
-        guard let albumId = targetAlbumId else { return }
-
-        struct Body: Encodable { let albumId: Int; let photoId: Int }
-        struct Response: Decodable { let success: Bool }
-        _ = try? await APIClient.shared.post("/albums/photos", body: Body(albumId: albumId, photoId: photoId)) as Response
-    }
-
     // MARK: - Asset data loading
 
     /// Loads the original PHAssetResource bytes for uploading. Using the original resource
     /// (not PHImageManager-rendered bytes) ensures the uploaded content matches the
     /// imageDataHash and that caption/favorite edits don't cause re-uploads.
-    private func loadAssetData(_ asset: PHAsset, filename: String) async throws -> (Data, String) {
+    static func loadAssetData(_ asset: PHAsset) async throws -> (Data, String) {
         guard let resource = PHAssetResource.assetResources(for: asset)
             .first(where: { $0.type == .photo })
             ?? PHAssetResource.assetResources(for: asset).first(where: { $0.type == .fullSizePhoto })
@@ -286,7 +235,7 @@ actor PhotoSyncService {
         }
     }
 
-    private static func mimeType(for uniformTypeIdentifier: String) -> String {
+    static func mimeType(for uniformTypeIdentifier: String) -> String {
         let lower = uniformTypeIdentifier.lowercased()
         if lower.contains("heic") || lower.contains("heif") { return "image/heic" }
         if lower.contains("png")  { return "image/png" }

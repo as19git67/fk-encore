@@ -7,7 +7,8 @@ public struct UploadQueueItem: Codable, Identifiable, Sendable {
     /// The local PHAsset identifier (if the item came from the Photos library).
     public let assetLocalIdentifier: String?
     /// Path to the temporary image file inside the App Group container.
-    public let tempFileURL: URL
+    /// Nil for library-sync items that load directly from PHAsset.
+    public let tempFileURL: URL?
     public let filename: String
     public let mimeType: String
     public let imageDataHash: String
@@ -29,7 +30,7 @@ public struct UploadQueueItem: Codable, Identifiable, Sendable {
     public init(
         id: UUID = UUID(),
         assetLocalIdentifier: String? = nil,
-        tempFileURL: URL,
+        tempFileURL: URL? = nil,
         filename: String,
         mimeType: String,
         imageDataHash: String,
@@ -133,10 +134,11 @@ actor UploadQueue {
 
     func markDone(id: UUID) {
         guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
-        let fileURL = items[idx].tempFileURL
+        if let fileURL = items[idx].tempFileURL {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
         items[idx].status = .done
         persist()
-        try? FileManager.default.removeItem(at: fileURL)
     }
 
     func markFailed(id: UUID) {
@@ -148,17 +150,18 @@ actor UploadQueue {
 
     func remove(id: UUID) {
         guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
-        let fileURL = items[idx].tempFileURL
+        if let fileURL = items[idx].tempFileURL {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
         items.remove(at: idx)
         persist()
-        try? FileManager.default.removeItem(at: fileURL)
     }
 
     /// Removes all pending/failed items and their temp files.
     func cancelAll() {
         let toRemove = items.filter { $0.status == .pending || $0.status == .failed }
         for item in toRemove {
-            try? FileManager.default.removeItem(at: item.tempFileURL)
+            if let url = item.tempFileURL { try? FileManager.default.removeItem(at: url) }
         }
         items.removeAll { $0.status == .pending || $0.status == .failed }
         persist()
@@ -167,7 +170,7 @@ actor UploadQueue {
     func cancelPending() {
         let toRemove = items.filter { $0.status == .pending || $0.status == .uploading }
         for item in toRemove {
-            try? FileManager.default.removeItem(at: item.tempFileURL)
+            if let url = item.tempFileURL { try? FileManager.default.removeItem(at: url) }
         }
         items.removeAll { $0.status == .pending || $0.status == .uploading }
         persist()
@@ -176,10 +179,16 @@ actor UploadQueue {
     func removeAllFailed() {
         let toRemove = items.filter { $0.status == .failed }
         for item in toRemove {
-            try? FileManager.default.removeItem(at: item.tempFileURL)
+            if let url = item.tempFileURL { try? FileManager.default.removeItem(at: url) }
         }
         items.removeAll { $0.status == .failed }
         persist()
+    }
+
+    func purgeDone() {
+        let before = items.count
+        items.removeAll { $0.status == .done }
+        if items.count != before { persist() }
     }
 
     /// Resets uploading items back to pending (call on app launch after a crash).
