@@ -263,6 +263,9 @@ const curationStatsMap = computed(() => {
 // Load all user's groups; filter to those with 2+ members in this album.
 const photoGroupsList = ref<PhotoGroup[]>([])
 const activeGroup = ref<PhotoGroup | null>(null)
+// Photo the user had selected before a group review started. Closing the
+// review restores it instead of snapping to the first album photo (#374).
+const preReviewPhotoId = ref<number | null>(null)
 
 const albumPhotoIds = computed(() => new Set(rawAlbumPhotos.value.map(p => p.id)))
 
@@ -1036,6 +1039,7 @@ function handleGridStackClick(entry: GalleryGridEntry) {
   if (!entry.group) return
   const groups = photoGroupsList.value
   const found = groups.find((g) => g.id === entry.group!.id) ?? null
+  preReviewPhotoId.value = cursorPhoto.value?.id ?? null
   activeGroup.value = found
 }
 
@@ -1064,22 +1068,36 @@ async function onGalleryLoaded() {
   }
 }
 
+function selectGridIndex(idx: number) {
+  cursorIndex.value = idx
+  galleryRef.value?.scrollToIndex(idx)
+  void hydrateCursor(idx)
+}
+
 function selectAfterGroup(group: PhotoGroup | null) {
   if (!galleryRef.value) return
-  if (!group) return
-  const coverId = group.cover_photo_id
-  if (coverId) {
-    const idx = galleryRef.value.findLoadedIndexById(coverId)
+  // Prefer the photo the user had selected before entering the review: if it
+  // survived (wasn't hidden) restore it so the grid position is kept (#374).
+  const beforeId = preReviewPhotoId.value
+  preReviewPhotoId.value = null
+  if (beforeId !== null) {
+    const idx = galleryRef.value.findLoadedIndexById(beforeId)
     if (idx !== null) {
-      cursorIndex.value = idx
-      galleryRef.value.scrollToIndex(idx)
-      void hydrateCursor(idx)
+      selectGridIndex(idx)
       return
     }
   }
-  cursorIndex.value = 0
-  galleryRef.value.scrollToIndex(0)
-  void hydrateCursor(0)
+  // Original photo was hidden during the review (or none was selected):
+  // fall back to the group's kept cover photo, then to the first photo.
+  const coverId = group?.cover_photo_id
+  if (coverId) {
+    const idx = galleryRef.value.findLoadedIndexById(coverId)
+    if (idx !== null) {
+      selectGridIndex(idx)
+      return
+    }
+  }
+  selectGridIndex(0)
 }
 
 async function handleGroupClose() {
@@ -1106,7 +1124,10 @@ async function handleGroupNext(reviewedGroupId: number) {
 
 function handleStartGroupReview() {
   const first = albumPhotoGroups.value.find(g => !g.reviewed_at)
-  if (first) activeGroup.value = first
+  if (first) {
+    preReviewPhotoId.value = cursorPhoto.value?.id ?? null
+    activeGroup.value = first
+  }
 }
 
 // ── Album cover ───────────────────────────────────────────────────────────────

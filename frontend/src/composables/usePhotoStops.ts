@@ -47,6 +47,20 @@ const MIN_CLUSTER_SEPARATION_METERS = 600
 /** In overview mode, stops whose centroids are closer than this get merged. */
 const OVERVIEW_MERGE_METERS = 8000
 
+/**
+ * A day whose photos span at least this distance uses the full
+ * CLUSTER_INCLUDE_METERS / MIN_CLUSTER_SEPARATION_METERS radii. Days packed
+ * into a smaller area (e.g. a whole day spent in one city) scale the radii
+ * down proportionally so they still break into several stops instead of
+ * collapsing into a single pin (#375).
+ */
+const RADIUS_REFERENCE_SPAN_METERS = 20000
+/**
+ * Lower bound for the day-radius scale. Keeps a tight cluster of photos
+ * taken at one spot from shattering into dozens of single-photo stops.
+ */
+const MIN_RADIUS_SCALE = 0.25
+
 const DAY_COLORS = [
   '#4285F4', '#EA4335', '#34A853', '#FBBC05', '#9C27B0',
   '#FF6D00', '#00ACC1', '#C62828', '#2E7D32', '#F06292',
@@ -102,6 +116,39 @@ function isGeoPhoto(p: Photo): p is GeoPhoto {
   return p.latitude != null && p.longitude != null
 }
 
+/** Diagonal extent (in meters) of the bounding box around a day's photos. */
+function daySpanMeters(photos: GeoPhoto[]): number {
+  let minLat = Infinity
+  let maxLat = -Infinity
+  let minLng = Infinity
+  let maxLng = -Infinity
+  for (const p of photos) {
+    if (p.latitude < minLat) minLat = p.latitude
+    if (p.latitude > maxLat) maxLat = p.latitude
+    if (p.longitude < minLng) minLng = p.longitude
+    if (p.longitude > maxLng) maxLng = p.longitude
+  }
+  if (minLat === Infinity) return 0
+  return haversineDistance(minLat, minLng, maxLat, maxLng)
+}
+
+/**
+ * Cluster radii for a single day, scaled down when the day's photos are
+ * packed into a small area so a city day still splits into several stops
+ * instead of one pin (#375). Days that cover a large area keep the
+ * default radii.
+ */
+function radiiForDaySpan(spanMeters: number): { include: number; separation: number } {
+  const scale = Math.min(
+    1,
+    Math.max(MIN_RADIUS_SCALE, spanMeters / RADIUS_REFERENCE_SPAN_METERS),
+  )
+  return {
+    include: CLUSTER_INCLUDE_METERS * scale,
+    separation: MIN_CLUSTER_SEPARATION_METERS * scale,
+  }
+}
+
 interface Centroid {
   lat: number
   lng: number
@@ -118,13 +165,19 @@ function mergeCentroidsInPlace(a: Centroid, b: Centroid) {
 
 /**
  * Greedy single-day clustering: every photo joins its nearest existing
- * cluster if within `CLUSTER_INCLUDE_METERS`, otherwise it seeds a new
- * cluster. A finalisation pass then merges any two clusters whose
- * centroids ended up closer than `MIN_CLUSTER_SEPARATION_METERS`, so the
- * result satisfies the "minimum cluster distance" requirement. Every
- * photo always ends up in exactly one cluster — none is left over.
+ * cluster if within `includeMeters`, otherwise it seeds a new cluster. A
+ * finalisation pass then merges any two clusters whose centroids ended up
+ * closer than `separationMeters`, so the result satisfies the "minimum
+ * cluster distance" requirement. Every photo always ends up in exactly one
+ * cluster — none is left over. The radii are passed in (rather than read
+ * from the module constants) so a day packed into a small area can use
+ * tighter values and still split into several stops (#375).
  */
-function clusterDayPhotos(photos: GeoPhoto[]): Centroid[] {
+function clusterDayPhotos(
+  photos: GeoPhoto[],
+  includeMeters: number,
+  separationMeters: number,
+): Centroid[] {
   if (photos.length === 0) return []
   const sorted = [...photos].sort(
     (a, b) => getPhotoDate(a).getTime() - getPhotoDate(b).getTime(),
@@ -141,7 +194,7 @@ function clusterDayPhotos(photos: GeoPhoto[]): Centroid[] {
         bestIdx = i
       }
     }
-    if (bestIdx >= 0 && bestDist <= CLUSTER_INCLUDE_METERS) {
+    if (bestIdx >= 0 && bestDist <= includeMeters) {
       const c = clusters[bestIdx]!
       const n = c.photos.length + 1
       c.lat = c.lat + (p.latitude - c.lat) / n
@@ -170,7 +223,7 @@ function clusterDayPhotos(photos: GeoPhoto[]): Centroid[] {
         }
       }
     }
-    if (bestDist < MIN_CLUSTER_SEPARATION_METERS && bestI >= 0) {
+    if (bestDist < separationMeters && bestI >= 0) {
       mergeCentroidsInPlace(clusters[bestI]!, clusters[bestJ]!)
       clusters.splice(bestJ, 1)
       changed = true
@@ -224,7 +277,8 @@ export function usePhotoStops(photos: Ref<Photo[]>) {
 
     for (const day of days) {
       const dayPhotos = byDay.get(day)!
-      const dayClusters = clusterDayPhotos(dayPhotos)
+      const { include, separation } = radiiForDaySpan(daySpanMeters(dayPhotos))
+      const dayClusters = clusterDayPhotos(dayPhotos, include, separation)
       // Order clusters within the day by their earliest photo time so that
       // the day-path polyline traces the chronological movement.
       dayClusters.sort((a, b) => {

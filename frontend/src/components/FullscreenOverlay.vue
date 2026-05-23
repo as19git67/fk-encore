@@ -154,6 +154,12 @@ function onCurrentImageLoad() {
   currentLoaded.value = true
 }
 
+function onCurrentImageError() {
+  // Stop waiting on a failed image so the overlay reveals whatever the
+  // <img> ended up with instead of hanging on the spinner forever.
+  currentLoaded.value = true
+}
+
 // ── Pinch-to-zoom & Touch-Swipe ─────────────────────────────────────────────
 const zoomLevel = ref(1)
 const panX = ref(0)
@@ -615,12 +621,22 @@ onUnmounted(() => {
       @touchcancel="handleTouchCancel"
     >
       <!-- Zoom wrapper: CSS transform applied here so the face box (in the
-           HeicImage slot) scales together with the image. -->
-      <div class="fs-zoom-wrapper" :style="zoomTransformStyle">
+           HeicImage slot) scales together with the image. Hidden until the
+           current photo has decoded so the previously shown image doesn't
+           linger on screen during navigation (#371). -->
+      <div
+        class="fs-zoom-wrapper"
+        :class="{ 'fs-zoom-wrapper--loading': !currentLoaded }"
+        :style="zoomTransformStyle"
+      >
         <svg v-if="userSvgMarkup && !userRecipe" width="0" height="0" style="position: absolute; pointer-events: none">
           <defs v-html="userSvgMarkup"></defs>
         </svg>
-        <div @load.capture="onCurrentImageLoad" style="display: contents">
+        <div
+          @load.capture="onCurrentImageLoad"
+          @error.capture="onCurrentImageError"
+          style="display: contents"
+        >
           <HeicImage
             :src="fsImageSrc"
             :alt="photo.original_name"
@@ -632,6 +648,11 @@ onUnmounted(() => {
             <slot />
           </HeicImage>
         </div>
+      </div>
+
+      <!-- Loading spinner shown while the current photo decodes (#371). -->
+      <div v-if="!currentLoaded" class="fs-loading" aria-hidden="true">
+        <i class="pi pi-spin pi-spinner" />
       </div>
 
       <!-- Group marker (Track I): shown when the current photo is part
@@ -872,6 +893,28 @@ onUnmounted(() => {
   /* transform applied via :style binding */
   transform-origin: center center;
   will-change: transform;
+  /* Fades in once the photo has loaded; see .fs-zoom-wrapper--loading. */
+  transition: opacity 0.2s ease;
+}
+
+/* While the current photo decodes the wrapper is hidden instantly (no
+   transition on the way out) so the stale image never flashes; the
+   fade-in transition above runs only when the loading class is removed. */
+.fs-zoom-wrapper--loading {
+  opacity: 0;
+  transition: none;
+}
+
+.fs-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+  color: #fff;
+  font-size: 2.5rem;
+  pointer-events: none;
 }
 
 /* ── Top bar ────────────────────────────────────────────────────────────── */

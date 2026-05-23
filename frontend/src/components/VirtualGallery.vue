@@ -663,10 +663,18 @@ defineExpose({
   font-size: 0.7rem;
 }
 
-.vg-cell--selected,
-.vg-cell--cursor {
-  outline: 3px solid var(--p-focus-ring-color);
-  outline-offset: -3px;
+/* Selection / cursor frame. Drawn as a pseudo-element border that sits
+   flush with the tile edge (an actual outline of the grid cell) and above
+   the cover <img>, so it can't be hidden behind the thumbnail or clipped
+   like a negatively-offset outline (#372). */
+.vg-cell--selected::after,
+.vg-cell--cursor::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 3px solid var(--p-focus-ring-color);
+  border-radius: 4px;
+  pointer-events: none;
 }
 
 .vg-cell--selected .vg-thumb {
