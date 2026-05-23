@@ -4,7 +4,6 @@ import Photos
 struct SyncSettingsView: View {
     @AppStorage("sync.enabled")            private var syncEnabled        = false
     @AppStorage("sync.wifiOnly")           private var wifiOnly           = true
-    @AppStorage("sync.onlyNew")            private var onlyNew            = true
     @AppStorage("sync.albumMode")          private var albumMode          = "all"
     @AppStorage("sync.excludeScreenshots") private var excludeScreenshots = true
 
@@ -66,11 +65,8 @@ struct SyncSettingsView: View {
                         }
                     }
 
-                    Toggle("Nur neue Fotos", isOn: $onlyNew)
                 } header: {
                     Text("Fotos")
-                } footer: {
-                    Text("Mit 'Nur neue Fotos' werden ausschliesslich Bilder hochgeladen, die seit dem letzten Sync aufgenommen wurden.")
                 }
 
                 // ── Server album for "Alle Fotos" ──────────────────────
@@ -97,7 +93,7 @@ struct SyncSettingsView: View {
 
                 // ── Per-album server mapping for "Ausgewählte Alben" ───
                 if albumMode == "selected" && !selectedAlbumIds.isEmpty {
-                    Section("Album Zuordnungen") {
+                    Section {
                         ForEach(sortedSelectedAlbumIds, id: \.self) { iosId in
                             NavigationLink {
                                 ServerAlbumPickerView(
@@ -106,14 +102,40 @@ struct SyncSettingsView: View {
                                     disabledIds: cycleDisabledIds(forIosAlbum: iosId)
                                 )
                             } label: {
-                                HStack {
-                                    Text(iosAlbumNames[iosId] ?? iosId)
-                                    Spacer()
-                                    Text(serverAlbumName(for: albumServerMappings[iosId]) ?? "Kein Album")
-                                        .foregroundStyle(albumServerMappings[iosId] != nil ? .secondary : .tertiary)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text(iosAlbumNames[iosId] ?? iosId)
+                                        Spacer()
+                                        Text(serverAlbumName(for: albumServerMappings[iosId]) ?? "Kein Album")
+                                            .foregroundStyle(albumServerMappings[iosId] != nil ? .secondary : .tertiary)
+                                    }
+                                    if let syncDate = PhotoSyncPreferences.albumSyncDate(for: iosId) {
+                                        Text("Letzter Sync: \(syncDate, style: .relative)")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    } else {
+                                        Text("Noch nicht synchronisiert")
+                                            .font(.caption)
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                }
+                            }
+                            .swipeActions(edge: .trailing) {
+                                if PhotoSyncPreferences.albumSyncDate(for: iosId) != nil {
+                                    Button {
+                                        PhotoSyncPreferences.resetAlbumSyncDate(for: iosId)
+                                        refreshTick += 1
+                                    } label: {
+                                        Label("Erneut syncen", systemImage: "arrow.counterclockwise")
+                                    }
+                                    .tint(.orange)
                                 }
                             }
                         }
+                    } header: {
+                        Text("Album Zuordnungen")
+                    } footer: {
+                        Text("Nach links wischen, um alle Fotos eines Albums erneut zu synchronisieren.")
                     }
                 }
 

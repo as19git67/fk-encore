@@ -55,9 +55,11 @@ actor PhotoSyncService {
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         guard status == .authorized || status == .limited else { return }
 
+        let syncStartDate = Date()
+
         let assets = await fetchAssets()
         guard !assets.isEmpty else {
-            PhotoSyncPreferences.lastSyncDate = Date()
+            updateSyncDates(syncStartDate, syncedAlbumIds: [])
             return
         }
 
@@ -116,7 +118,19 @@ actor PhotoSyncService {
             await BackgroundSyncManager.shared.drainUploadQueue()
         }
 
-        PhotoSyncPreferences.lastSyncDate = Date()
+        let syncedAlbumIds = Set(assets.compactMap { $0.2 })
+        updateSyncDates(syncStartDate, syncedAlbumIds: syncedAlbumIds)
+    }
+
+    private func updateSyncDates(_ date: Date, syncedAlbumIds: Set<String>) {
+        switch PhotoSyncPreferences.albumMode {
+        case .all:
+            PhotoSyncPreferences.lastSyncDate = date
+        case .selected:
+            for albumId in syncedAlbumIds {
+                PhotoSyncPreferences.setAlbumSyncDate(date, for: albumId)
+            }
+        }
     }
 
     private func resolveTargetAlbumIds(sourceAlbumId: String?) -> [Int] {
@@ -144,34 +158,11 @@ actor PhotoSyncService {
     }
 
     private static func fetchAssetsSync() -> [(PHAsset, String, String?)] {
-        let options = PHFetchOptions()
-        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
-        options.includeHiddenAssets = false
-
-        var predicates: [NSPredicate] = []
-        if PhotoSyncPreferences.onlyNew, let lastSync = PhotoSyncPreferences.lastSyncDate {
-            // Include assets created OR modified since the last sync so that metadata
-            // changes (favorite toggle, caption edit) are picked up even for photos
-            // whose creationDate predates the last sync run.
-            predicates.append(NSCompoundPredicate(orPredicateWithSubpredicates: [
-                NSPredicate(format: "creationDate > %@", lastSync as NSDate),
-                NSPredicate(format: "modificationDate > %@", lastSync as NSDate)
-            ]))
-        }
-        if PhotoSyncPreferences.excludeScreenshots {
-            predicates.append(NSPredicate(format: "NOT ((mediaSubtype & %d) != 0)",
-                                          PHAssetMediaSubtype.photoScreenshot.rawValue))
-        }
-        if !predicates.isEmpty {
-            options.predicate = predicates.count == 1
-                ? predicates[0]
-                : NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
-        }
-
         var pairs: [(PHAsset, String?)] = []
+
         switch PhotoSyncPreferences.albumMode {
         case .all:
-            // fetchAssets(with: .image) already limits to image-type assets (no videos).
+            let options = buildFetchOptions(lastSync: PhotoSyncPreferences.lastSyncDate)
             PHAsset.fetchAssets(with: .image, options: options)
                 .enumerateObjects { asset, _, _ in pairs.append((asset, nil)) }
 
@@ -182,9 +173,10 @@ actor PhotoSyncService {
             PHAssetCollection
                 .fetchAssetCollections(withLocalIdentifiers: Array(albumIds), options: nil)
                 .enumerateObjects { collection, _, _ in
+                    let albumLastSync = PhotoSyncPreferences.albumSyncDate(for: collection.localIdentifier)
+                    let options = buildFetchOptions(lastSync: albumLastSync)
                     PHAsset.fetchAssets(in: collection, options: options)
                         .enumerateObjects { asset, _, _ in
-                            // Explicitly skip videos and non-image assets (#432).
                             guard asset.mediaType == .image else { return }
                             if seen.insert(asset.localIdentifier).inserted {
                                 pairs.append((asset, collection.localIdentifier))
@@ -201,6 +193,29 @@ actor PhotoSyncService {
                 ?? "photo_\(asset.localIdentifier.prefix(8)).jpg"
             return (asset, filename, sourceAlbumId)
         }
+    }
+
+    private static func buildFetchOptions(lastSync: Date?) -> PHFetchOptions {
+        let options = PHFetchOptions()
+        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
+        options.includeHiddenAssets = false
+        var predicates: [NSPredicate] = []
+        if let lastSync {
+            predicates.append(NSCompoundPredicate(orPredicateWithSubpredicates: [
+                NSPredicate(format: "creationDate > %@", lastSync as NSDate),
+                NSPredicate(format: "modificationDate > %@", lastSync as NSDate)
+            ]))
+        }
+        if PhotoSyncPreferences.excludeScreenshots {
+            predicates.append(NSPredicate(format: "NOT ((mediaSubtype & %d) != 0)",
+                                          PHAssetMediaSubtype.photoScreenshot.rawValue))
+        }
+        if !predicates.isEmpty {
+            options.predicate = predicates.count == 1
+                ? predicates[0]
+                : NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
+        }
+        return options
     }
 
     // MARK: - Asset data loading
