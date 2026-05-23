@@ -201,10 +201,6 @@ struct SyncSettingsView: View {
             // ── Debug ──────────────────────────────────────────────────
             #if DEBUG
             Section("Debug") {
-                Button("Jetzt synchronisieren") {
-                    Task { try? await PhotoSyncService.shared.sync() }
-                }
-                .foregroundStyle(Color.accentColor)
                 Button("Hintergrund-Task einplanen") {
                     BackgroundSyncManager.shared.scheduleNextSyncIfNeeded()
                 }
