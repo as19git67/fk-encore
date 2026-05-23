@@ -121,12 +121,11 @@ actor PhotoHasher {
         options.isNetworkAccessAllowed = true
 
         return await withCheckedContinuation { continuation in
-            var chunks: [Data] = []
+            var combined = Data()
             PHAssetResourceManager.default().requestData(for: resource, options: options) { chunk in
-                chunks.append(chunk)
+                combined.append(chunk)
             } completionHandler: { error in
                 guard error == nil else { continuation.resume(returning: nil); return }
-                let combined = chunks.reduce(Data(), +)
                 // Hash the decoded pixels, not the file bytes — metadata in the
                 // container (caption/EXIF/XMP) must not move the hash. Falls
                 // back to the raw bytes only when the image cannot be decoded.

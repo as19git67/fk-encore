@@ -55,7 +55,7 @@ public final class BackgroundSyncManager {
         let request = BGProcessingTaskRequest(identifier: PhotoSyncPreferences.taskIdentifier)
         request.requiresNetworkConnectivity = true
         request.requiresExternalPower = false
-        request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 5 * 60)
 
         do {
             try BGTaskScheduler.shared.submit(request)
@@ -264,6 +264,7 @@ public final class BackgroundSyncManager {
         let pending = await UploadQueue.shared.pendingItems()
         guard !pending.isEmpty else { return }
 
+        var doneCount = 0
         for item in pending {
             // The Share Extension uploads with isFavorite = false and often
             // without a PHAsset identifier (iOS hands it only file bytes).
@@ -302,6 +303,8 @@ public final class BackgroundSyncManager {
                                 _ = try? await APIClient.shared.post("/albums/photos", body: Body(albumId: albumId, photoId: photoId)) as Resp
                             }
                             await UploadQueue.shared.markDone(id: item.id)
+                            doneCount += 1
+                            if doneCount % 10 == 0 { await UploadQueue.shared.purgeDone() }
                             continue
                         }
                     } catch {
@@ -321,7 +324,7 @@ public final class BackgroundSyncManager {
                 data = assetData
                 mimeType = assetMime
             } else {
-                await UploadQueue.shared.markFailed(id: item.id)
+                await UploadQueue.shared.markFailed(id: item.id, error: "Bilddaten nicht ladbar (Asset nicht in Mediathek?)")
                 continue
             }
             do {
@@ -354,6 +357,7 @@ public final class BackgroundSyncManager {
                     ) as Resp
                 }
                 await UploadQueue.shared.markDone(id: item.id)
+                doneCount += 1
             } catch APIError.duplicatePhoto(let existingId) {
                 if let existingId {
                     PhotoSyncPreferences.saveSyncedStateEntry(
@@ -367,9 +371,11 @@ public final class BackgroundSyncManager {
                     )
                 }
                 await UploadQueue.shared.markDone(id: item.id)
+                doneCount += 1
             } catch {
-                await UploadQueue.shared.markFailed(id: item.id)
+                await UploadQueue.shared.markFailed(id: item.id, error: error.localizedDescription)
             }
+            if doneCount % 10 == 0 && doneCount > 0 { await UploadQueue.shared.purgeDone() }
         }
         await UploadQueue.shared.purgeDone()
     }
@@ -378,23 +384,22 @@ public final class BackgroundSyncManager {
 
     private func handle(_ task: BGProcessingTask) {
         print("[BGSync] Task handler invoked")
-        scheduleNextSyncIfNeeded()
 
         let work = Task {
             do {
-                // Drain share-extension leftovers before sync enqueues new items.
                 await drainUploadQueue()
-                // sync() enqueues library items and drains in batches of 50.
                 try await PhotoSyncService.shared.sync()
                 try await PhotoDownloadService.shared.sync()
                 task.setTaskCompleted(success: true)
             } catch {
                 task.setTaskCompleted(success: false)
             }
+            scheduleNextSyncIfNeeded()
         }
 
         task.expirationHandler = {
             work.cancel()
+            self.scheduleNextSyncIfNeeded()
             task.setTaskCompleted(success: false)
         }
     }
