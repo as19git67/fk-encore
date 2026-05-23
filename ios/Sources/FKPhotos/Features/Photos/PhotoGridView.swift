@@ -10,6 +10,7 @@ struct PhotoGridView: View {
     @State private var isSelecting    = false
     @State private var selectedIds: Set<Int> = []
     @State private var shareManager   = PhotoShareManager()
+    @State private var addToAlbum     = AddToAlbumManager()
 
     private let columns = [
         GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 2)
@@ -87,6 +88,14 @@ struct PhotoGridView: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
+                        addToAlbum.present(photoIds: selectedIds)
+                    } label: {
+                        Image(systemName: "rectangle.stack.badge.plus")
+                    }
+                    .disabled(selectedIds.isEmpty)
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
                         let filenames = viewModel.photos.filter { selectedIds.contains($0.id) }.map(\.filename)
                         Task { await shareManager.share(filenames: filenames) }
                     } label: {
@@ -146,6 +155,10 @@ struct PhotoGridView: View {
         .sheet(isPresented: $shareManager.isPresented) {
             ActivityView(images: shareManager.images)
         }
+        .sheet(isPresented: $addToAlbum.isPresented) {
+            AddToAlbumPickerView(manager: addToAlbum)
+                .presentationDetents([.medium, .large])
+        }
         .overlay {
             if shareManager.isLoading {
                 ZStack {
@@ -155,6 +168,12 @@ struct PhotoGridView: View {
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
                 }
             }
+        }
+        .onChange(of: addToAlbum.resultMessage) { _, message in
+            guard message != nil else { return }
+            isSelecting = false
+            selectedIds = []
+            addToAlbum.resultMessage = nil
         }
     }
 
