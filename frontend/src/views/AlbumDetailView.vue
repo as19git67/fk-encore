@@ -627,6 +627,14 @@ const canDeletePhotos = computed(() => auth.hasPermission('photos.delete'))
 const canUploadPhotos = computed(() => auth.hasPermission('photos.upload'))
 const canManageData = computed(() => auth.hasPermission('data.manage'))
 const showPersons = computed(() => auth.hasPermission('people.view'))
+// Adding photos from THIS album to OTHER albums is gated server-side on the
+// caller owning the source photos OR having `write_share` on a containing
+// album (photo.service.ts batchUpdateAlbumPhotosLogic). Mirror that rule so
+// the "Alben" select-bar button is hidden for read-only viewers and plain
+// contributors who'd just hit a 403.
+const canReuseAlbumPhotos = computed(() =>
+  isOwner.value || album.value?.my_access_level === 'write_share'
+)
 
 // ── Display mode ─────────────────────────────────────────────────────────────
 // `album.display_mode` is the album-level setting: 'map' = map enabled,
@@ -1610,7 +1618,7 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
       </span>
       <div class="select-actions">
         <Button
-          v-if="selectedCount > 0 && canUploadPhotos"
+          v-if="selectedCount > 0 && canUploadPhotos && canReuseAlbumPhotos"
           label="Alben"
           icon="pi pi-book"
           size="small"
