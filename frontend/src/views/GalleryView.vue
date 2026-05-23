@@ -1518,7 +1518,10 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
 .gallery-view {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - var(--menubar-height, 3.5rem));
+  /* `100dvh` follows the dynamic viewport (URL bar collapse/expand on iOS
+     Safari); `100vh` returned the large viewport size and pushed the
+     sticky bottom select-bar off-screen until the page itself scrolled. */
+  height: calc(100dvh - var(--menubar-height, 3.5rem));
   overflow: hidden;
 }
 
