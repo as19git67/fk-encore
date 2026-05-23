@@ -1,5 +1,23 @@
 import SwiftUI
 
+// MARK: - Drag-to-select support
+
+struct PhotoFramePreference: PreferenceKey {
+    static var defaultValue: [Int: CGRect] = [:]
+    static func reduce(value: inout [Int: CGRect], nextValue: () -> [Int: CGRect]) {
+        value.merge(nextValue()) { $1 }
+    }
+}
+
+extension View {
+    func reportPhotoFrame(id: Int, space: String) -> some View {
+        background(GeometryReader { geo in
+            Color.clear.preference(key: PhotoFramePreference.self,
+                                   value: [id: geo.frame(in: .named(space))])
+        })
+    }
+}
+
 // MARK: - Selection checkmark overlay
 
 struct SelectionCheckmark: View {

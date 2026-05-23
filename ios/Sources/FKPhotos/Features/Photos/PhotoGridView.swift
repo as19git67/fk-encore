@@ -11,6 +11,7 @@ struct PhotoGridView: View {
     @State private var selectedIds: Set<Int> = []
     @State private var shareManager   = PhotoShareManager()
     @State private var addToAlbum     = AddToAlbumManager()
+    @State private var itemFrames: [Int: CGRect] = [:]
 
     private let columns = [
         GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 2)
@@ -63,10 +64,14 @@ struct PhotoGridView: View {
                                         selectedIds = [photo.id]
                                     }
                                 }
+                                .reportPhotoFrame(id: photo.id, space: "photoGrid")
                                 .id(photo.id)
                         }
                     }
                     .padding(.horizontal, 2)
+                    .coordinateSpace(name: "photoGrid")
+                    .onPreferenceChange(PhotoFramePreference.self) { itemFrames = $0 }
+                    .simultaneousGesture(isSelecting ? dragSelectGesture : nil)
                 }
             }
             .onChange(of: scrollTarget) { _, id in
@@ -184,6 +189,16 @@ struct PhotoGridView: View {
         } else {
             selectedIds.insert(id)
         }
+    }
+
+    private var dragSelectGesture: some Gesture {
+        DragGesture(minimumDistance: 10, coordinateSpace: .named("photoGrid"))
+            .onChanged { value in
+                let point = value.location
+                for (id, frame) in itemFrames where frame.contains(point) {
+                    selectedIds.insert(id)
+                }
+            }
     }
 }
 
