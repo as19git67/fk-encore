@@ -1151,6 +1151,10 @@ export function normalizeClientCapturedAt(raw: string | null | undefined): strin
   return d.toISOString();
 }
 
+function finiteOrNull(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
 function asString(v: unknown): string | null {
   // Unwrap XMP Language Alternatives — exifr returns dc:title / dc:description
   // as `{ lang: "x-default", value: "..." }` (single) or an array of such
@@ -1552,8 +1556,8 @@ export async function getExifMetadata(filePath: string, originalFilename?: strin
     const rating = parseXmpRating(data?.Rating ?? data?.rating);
     return {
       takenAt,
-      latitude: data?.latitude ?? null,
-      longitude: data?.longitude ?? null,
+      latitude: finiteOrNull(data?.latitude),
+      longitude: finiteOrNull(data?.longitude),
       description,
       keywords,
       rating,
@@ -2290,8 +2294,8 @@ async function replacePhotoContent(
     hash: row!.hash ?? undefined,
     taken_at: row!.taken_at ?? undefined,
     created_at: row!.created_at ?? "",
-    latitude: row!.latitude ?? undefined,
-    longitude: row!.longitude ?? undefined,
+    latitude: finiteOrNull(row!.latitude) ?? undefined,
+    longitude: finiteOrNull(row!.longitude) ?? undefined,
     description: row!.description ?? undefined,
     keywords: row!.keywords ?? [],
   };
@@ -2506,8 +2510,8 @@ export async function uploadPhotoStream(
       hash: row!.hash ?? undefined,
       taken_at: row!.taken_at ?? undefined,
       created_at: row!.created_at ?? "",
-      latitude: row!.latitude ?? undefined,
-      longitude: row!.longitude ?? undefined,
+      latitude: finiteOrNull(row!.latitude) ?? undefined,
+      longitude: finiteOrNull(row!.longitude) ?? undefined,
       description: row!.description ?? undefined,
       keywords: row!.keywords ?? [],
     },
@@ -2633,8 +2637,8 @@ export async function uploadPhotoLogic(
     hash: row2!.hash ?? undefined,
     taken_at: row2!.taken_at ?? undefined,
     created_at: row2!.created_at ?? "",
-    latitude: row2!.latitude ?? undefined,
-    longitude: row2!.longitude ?? undefined,
+    latitude: finiteOrNull(row2!.latitude) ?? undefined,
+    longitude: finiteOrNull(row2!.longitude) ?? undefined,
     description: row2!.description ?? undefined,
     keywords: row2!.keywords ?? [],
   };
@@ -2705,8 +2709,8 @@ export async function listPhotosLogic(
       taken_at: r.taken_at ?? undefined,
       created_at: r.created_at ?? "",
       curation_status: (r.curation_status as CurationStatus) ?? "visible",
-      latitude: r.latitude ?? undefined,
-      longitude: r.longitude ?? undefined,
+      latitude: finiteOrNull(r.latitude) ?? undefined,
+      longitude: finiteOrNull(r.longitude) ?? undefined,
       location_name: r.location_name ?? undefined,
       location_city: r.location_city ?? undefined,
       location_country: r.location_country ?? undefined,
@@ -2937,8 +2941,8 @@ export async function getPhotoDetailsBatchLogic(
       taken_at: r.taken_at ?? undefined,
       created_at: r.created_at ?? "",
       curation_status: (r.curation_status as CurationStatus) ?? "visible",
-      latitude: r.latitude ?? undefined,
-      longitude: r.longitude ?? undefined,
+      latitude: finiteOrNull(r.latitude) ?? undefined,
+      longitude: finiteOrNull(r.longitude) ?? undefined,
       location_name: r.location_name ?? undefined,
       location_city: r.location_city ?? undefined,
       location_country: r.location_country ?? undefined,
@@ -4010,8 +4014,8 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
       added_by_user_id: r.added_by_user_id ?? undefined,
       added_at: r.added_at ?? "",
       auto_crop: r.auto_crop ?? undefined,
-      latitude: r.latitude != null ? Number(r.latitude) : undefined,
-      longitude: r.longitude != null ? Number(r.longitude) : undefined,
+      latitude: finiteOrNull(r.latitude) ?? undefined,
+      longitude: finiteOrNull(r.longitude) ?? undefined,
       location_name: r.location_name ?? undefined,
       location_city: r.location_city ?? undefined,
       location_country: r.location_country ?? undefined,
@@ -4982,8 +4986,8 @@ export async function getPublicAlbumLogic(token: string): Promise<PublicAlbumRes
       size: r.size,
       taken_at: r.taken_at ?? undefined,
       created_at: r.created_at ?? "",
-      latitude: r.latitude != null ? Number(r.latitude) : undefined,
-      longitude: r.longitude != null ? Number(r.longitude) : undefined,
+      latitude: finiteOrNull(r.latitude) ?? undefined,
+      longitude: finiteOrNull(r.longitude) ?? undefined,
       location_name: r.location_name ?? undefined,
       location_city: r.location_city ?? undefined,
       location_country: r.location_country ?? undefined,
@@ -6263,7 +6267,7 @@ export async function searchPhotosLogic(
         mime_type: r.mime_type, size: r.size, hash: r.hash ?? undefined,
         taken_at: r.taken_at ?? undefined, created_at: r.created_at ?? "",
         curation_status: (r.curation_status as CurationStatus) ?? "visible",
-        latitude: r.latitude ?? undefined, longitude: r.longitude ?? undefined,
+        latitude: finiteOrNull(r.latitude) ?? undefined, longitude: finiteOrNull(r.longitude) ?? undefined,
         location_city: r.location_city ?? undefined, location_country: r.location_country ?? undefined,
         location_name: r.location_name ?? undefined, location_short: r.location_short ?? undefined,
         auto_crop: r.auto_crop ?? undefined,
@@ -6341,7 +6345,7 @@ export async function searchPhotosLogic(
       mime_type: row.mime_type, size: row.size, hash: row.hash ?? undefined,
       taken_at: row.taken_at ?? undefined, created_at: row.created_at ?? "",
       curation_status: (row.curation_status as CurationStatus) ?? "visible",
-      latitude: row.latitude ?? undefined, longitude: row.longitude ?? undefined,
+      latitude: finiteOrNull(row.latitude) ?? undefined, longitude: finiteOrNull(row.longitude) ?? undefined,
       location_city: row.location_city ?? undefined, location_country: row.location_country ?? undefined,
       location_name: row.location_name ?? undefined, location_short: row.location_short ?? undefined,
       auto_crop: row.auto_crop ?? undefined,
@@ -6483,7 +6487,7 @@ export async function searchByDateRangeLogic(
       mime_type: r.mime_type, size: r.size, hash: r.hash ?? undefined,
       taken_at: r.taken_at ?? undefined, created_at: r.created_at ?? "",
       curation_status: (r.curation_status as CurationStatus) ?? "visible",
-      latitude: r.latitude ?? undefined, longitude: r.longitude ?? undefined,
+      latitude: finiteOrNull(r.latitude) ?? undefined, longitude: finiteOrNull(r.longitude) ?? undefined,
       location_city: r.location_city ?? undefined, location_country: r.location_country ?? undefined,
       location_name: r.location_name ?? undefined, location_short: r.location_short ?? undefined, auto_crop: r.auto_crop ?? undefined,
     })),
@@ -6547,7 +6551,7 @@ export async function searchByLocationLogic(
       mime_type: r.mime_type, size: r.size, hash: r.hash ?? undefined,
       taken_at: r.taken_at ?? undefined, created_at: r.created_at ?? "",
       curation_status: (r.curation_status as CurationStatus) ?? "visible",
-      latitude: r.latitude ?? undefined, longitude: r.longitude ?? undefined,
+      latitude: finiteOrNull(r.latitude) ?? undefined, longitude: finiteOrNull(r.longitude) ?? undefined,
       location_city: r.location_city ?? undefined, location_country: r.location_country ?? undefined,
       location_name: r.location_name ?? undefined, location_short: r.location_short ?? undefined, auto_crop: r.auto_crop ?? undefined,
     })),
