@@ -344,8 +344,8 @@ export async function emitFeedItems(input: EmitFeedInput): Promise<void> {
 // single feed_items row per recipient (with photoIds in payload) and
 // therefore a single Web Push reading "N Fotos hinzugefügt" instead of
 // N "ein Foto" pushes.
-const FEED_PHOTO_QUIET_MS = 60_000;
-const FEED_PHOTO_MAX_WAIT_MS = 10 * 60_000;
+const FEED_PHOTO_QUIET_MS = 5 * 60_000;
+const FEED_PHOTO_MAX_WAIT_MS = 30 * 60_000;
 
 interface PendingFeedFanout {
   albumId: number;

@@ -708,6 +708,16 @@ export function getAlbumShares(albumId: number) {
   return apiFetch<{ shares: AlbumShareWithUser[]; publicLink?: AlbumPublicLink }>(`/albums/${albumId}/shares`)
 }
 
+export interface ShareableUser {
+  id: number
+  name: string
+  email: string
+}
+
+export function getAlbumShareableUsers(albumId: number) {
+  return apiFetch<{ users: ShareableUser[] }>(`/albums/${albumId}/shareable-users`)
+}
+
 export function removeAlbumShare(albumId: number, userId: number) {
   return apiFetch<{ success: boolean }>(`/albums/${albumId}/shares/${userId}`, {
     method: 'DELETE'

@@ -539,6 +539,16 @@ export interface GetAlbumSharesResponse {
   publicLink?: AlbumPublicLink;
 }
 
+export interface ShareableUser {
+  id: number;
+  name: string;
+  email: string;
+}
+
+export interface GetAlbumShareableUsersResponse {
+  users: ShareableUser[];
+}
+
 export interface AlbumPublicLink {
   id: number;
   album_id: number;
