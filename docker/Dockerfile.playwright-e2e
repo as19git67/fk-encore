@@ -62,9 +62,19 @@ ENV PATH=/root/.encore/bin:$PATH
 # pre-installed chromium instead of attempting its own download.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
+# The MS base ships chromium + OS deps but does NOT add a `playwright`
+# CLI to PATH (users are expected to install it through their own
+# project). Add a global install so `playwright --version` works as a
+# sanity probe in the workflow without dragging in npx's on-demand
+# download behaviour. Pinned to the same PLAYWRIGHT_VERSION so the
+# CLI and the pre-installed chromium agree on the protocol version.
+RUN set -eux; \
+    npm install -g "playwright@${PLAYWRIGHT_VERSION}"; \
+    rm -rf /root/.npm
+
 # Sanity check: fail the image build if any piece is missing.
 RUN set -eux; \
     node --version; \
     npm --version; \
     encore version; \
-    npx --yes playwright --version
+    playwright --version
