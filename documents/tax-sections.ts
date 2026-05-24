@@ -125,7 +125,7 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     slug: "vorsorgeaufwand",
     group: "abzuege",
     name: "Anlage Vorsorgeaufwand",
-    hint: "Beitragsbescheinigungen zu Kranken-, Pflege-, Haftpflicht-, Unfall-, Risikolebens- und Rürup-/Basisrenten-Versicherung; nicht: Riester (anlage-av) oder Krankheitsrechnungen (aussergewoehnliche).",
+    hint: "Beitragsbescheinigungen zu Personenversicherungen: Kranken-, Pflege-, Haftpflicht-, Unfall-, Risikolebens- und Rürup-/Basisrenten-Versicherung; nicht: Sachversicherungen (Wohngebäude-, Hausrat-, Kfz-Kasko, Rechtsschutz), Riester (anlage-av) oder Krankheitsrechnungen (aussergewoehnliche).",
   },
   {
     slug: "anlage-av",
