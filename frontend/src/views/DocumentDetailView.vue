@@ -727,9 +727,13 @@ onBeforeUnmount(() => {
 .meta-form { display: flex; flex-direction: column; gap: 0.75rem; }
 .meta-form label { display: flex; flex-direction: column; gap: 0.25rem; }
 .meta-form-row {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
-  grid-template-columns: 1fr 1fr;
+}
+.meta-form-row > label {
+  flex: 1 1 12rem;
+  min-width: 0;
 }
 .label { font-size: 0.85rem; color: var(--p-text-muted-color); }
 
