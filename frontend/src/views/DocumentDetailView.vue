@@ -9,6 +9,7 @@ import Message from 'primevue/message'
 import Select from 'primevue/select'
 import Tag from 'primevue/tag'
 import Chip from 'primevue/chip'
+import Popover from 'primevue/popover'
 import {
   deleteDocument,
   fetchDocumentBytes,
@@ -50,6 +51,11 @@ const error = ref('')
 const info = ref('')
 const pdfData = ref<Uint8Array | null>(null)
 const pdfError = ref('')
+const helpPopover = ref<InstanceType<typeof Popover> | null>(null)
+
+function toggleHelp(event: Event) {
+  helpPopover.value?.toggle(event)
+}
 
 const form = ref({
   title: '' as string,
@@ -368,6 +374,48 @@ onBeforeUnmount(() => {
           aria-label="Löschen"
           @click="onDelete"
         />
+        <Button
+          icon="pi pi-question-circle"
+          aria-label="Hilfe zu den Aktionen"
+          text
+          class="help-trigger"
+          @click="toggleHelp"
+        />
+        <Popover ref="helpPopover">
+          <div class="help-flyout">
+            <h3 class="help-flyout__title">Aktionen</h3>
+            <ul class="help-flyout__list">
+              <li>
+                <i class="pi pi-arrow-left" aria-hidden="true" />
+                <div>
+                  <strong>Zurück</strong>
+                  <span>Zur Dokumentenliste zurückkehren.</span>
+                </div>
+              </li>
+              <li v-if="auth.hasPermission('documents.edit')">
+                <i class="pi pi-refresh" aria-hidden="true" />
+                <div>
+                  <strong>Neu klassifizieren</strong>
+                  <span>KI analysiert Kategorie, Datum, Absender und Zusammenfassung erneut.</span>
+                </div>
+              </li>
+              <li v-if="auth.hasPermission('documents.edit')">
+                <i class="pi pi-eye" aria-hidden="true" />
+                <div>
+                  <strong>OCR erzwingen</strong>
+                  <span>Text-Layer der PDF ignorieren und komplett per OCR neu einlesen — hilft bei Scans mit fehlenden Leerzeichen.</span>
+                </div>
+              </li>
+              <li v-if="auth.hasPermission('documents.delete')">
+                <i class="pi pi-trash" aria-hidden="true" />
+                <div>
+                  <strong>Löschen</strong>
+                  <span>Dokument dauerhaft entfernen.</span>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </Popover>
       </div>
     </div>
 
@@ -649,6 +697,48 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 .header-actions { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+
+.help-flyout {
+  max-width: min(22rem, 90vw);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.help-flyout__title {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--p-text-color);
+}
+.help-flyout__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.help-flyout__list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+.help-flyout__list i {
+  color: var(--p-primary-color);
+  flex-shrink: 0;
+  width: 1.1rem;
+  text-align: center;
+  margin-top: 0.15rem;
+}
+.help-flyout__list strong {
+  display: block;
+  color: var(--p-text-color);
+  font-size: 0.9rem;
+}
+.help-flyout__list span {
+  color: var(--p-text-muted-color);
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
 
 /* On phones the four labelled buttons (Zurück / Neu klassifizieren /
    OCR erzwingen / Löschen) overflow the viewport. Hide the labels and
