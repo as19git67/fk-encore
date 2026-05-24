@@ -1,14 +1,13 @@
 name: GHCR Cleanup
 
 # Keeps the container packages on ghcr.io/as19git67/* tidy:
-#   * fk-encore              (Encore backend, built by docker-image.yml)
-#   * fk-encore-embedding    (built by docker-image-embedding.yml)
-#   * fk-encore-insightface  (built by docker-image-insightface.yml)
-#   * fk-encore-llm          (built by docker-image-llm.yml)
-#
-# fk-encore-landmark was retired in Epic #383 — its workflow has been
-# removed but the cleanup job still runs against the package so any
-# remaining tags age out via the retention policy.
+#   * fk-encore                 (Encore backend, built by docker-image.yml)
+#   * fk-encore-embedding       (built by docker-image-embedding.yml)
+#   * fk-encore-geo             (built by docker-image-geo.yml)
+#   * fk-encore-insightface     (built by docker-image-insightface.yml)
+#   * fk-encore-llm             (built by docker-image-llm.yml)
+#   * fk-encore-playwright-e2e  (built by docker-image-playwright-e2e.yml,
+#                                Track AB / Issue #421)
 #
 # Policy (applied per package):
 #   1. Delete every UNTAGGED version immediately.
@@ -19,16 +18,18 @@ name: GHCR Cleanup
 #      delete older ones — UNLESS the tag matches one of:
 #        - a semver release tag (e.g. `1.2.3` or `v1.2.3`)
 #        - `latest`
-#      Release tags are permanent markers; `latest` is the current
-#      production pointer. Both are never deleted.
+#        - `pw-<x.y.z>` — per-Playwright-version pinpoint on the
+#          playwright-e2e runner image, kept as a permanent rollback
+#          marker the way semver tags are on the application images.
+#      Tags matching any protected pattern are never deleted.
 #
 # PR builds push the `test` tag (see the metadata step in each build
 # workflow). Because the `test` tag is moved on every new PR build, the
 # previous `test`-tagged version becomes untagged and is removed by
 # step 1 on the next cleanup run.
 #
-# Runs weekly on Sundays at 03:00 UTC, and can be triggered manually
-# via the Actions tab (workflow_dispatch).
+# Runs daily at 06:00 UTC, and can be triggered manually via the
+# Actions tab (workflow_dispatch).
 
 on:
   schedule:
@@ -46,10 +47,11 @@ jobs:
       matrix:
         package:
           - fk-encore
-          - fk-encore-landmark
           - fk-encore-embedding
+          - fk-encore-geo
           - fk-encore-insightface
           - fk-encore-llm
+          - fk-encore-playwright-e2e
     steps:
       # Step 1 — purge all untagged versions.
       # Uses the GitHub REST API directly (gh cli) to avoid dependency on
@@ -88,10 +90,11 @@ jobs:
           echo "Deleted ${DELETED} untagged version(s)."
 
       # Step 2 — trim old tagged versions.
-      # Protected tags: `latest` and semver patterns (`1.2.3` / `v1.2.3`).
-      # Any version whose tags include at least one protected pattern is kept.
-      # Of the remaining tagged versions, the 10 most recent are kept and
-      # older ones are deleted.
+      # Protected tags: `latest`, semver (`1.2.3` / `v1.2.3`), and the
+      # `pw-<x.y.z>` per-Playwright-version pinpoints on the playwright-e2e
+      # runner image. Any version whose tags include at least one protected
+      # pattern is kept. Of the remaining tagged versions, the 10 most
+      # recent are kept and older ones are deleted.
       - name: Prune old tagged versions of ${{ matrix.package }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -124,7 +127,7 @@ jobs:
               select(.metadata.container.tags | length > 0) |
               select(
                 .metadata.container.tags |
-                map(test("^(latest|v?[0-9]+\\.[0-9]+\\.[0-9]+)$")) |
+                map(test("^(latest|v?[0-9]+\\.[0-9]+\\.[0-9]+|pw-[0-9]+\\.[0-9]+\\.[0-9]+)$")) |
                 any | not
               )
             ] |
