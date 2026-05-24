@@ -20,6 +20,7 @@ if (fs.existsSync(envPath)) {
 
 import * as schema from "./schema";
 import { seed } from "./seed";
+import { seedDemo } from "./seed-demo";
 
 type DbInstance = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -150,6 +151,13 @@ export async function initializeDb(): Promise<DbInstance> {
     try {
       const db = await createDb();
       await seed(db);
+      // Optional E2E demo data (Issue #401). Runs after the main seed so
+      // the admin user, roles and document categories are guaranteed to
+      // exist by the time we start inserting demo rows. Gated by
+      // E2E_SEED_DEMO and a no-op under NODE_ENV=test / VITEST.
+      if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
+        await seedDemo(db);
+      }
       // Run backup-related startup housekeeping exactly once. The only
       // piece that blocks boot here is the pending-restore check — if a
       // `restore-*.dump` trigger sits in $BACKUP_DIR the cluster will be

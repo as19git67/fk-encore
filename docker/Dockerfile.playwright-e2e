@@ -1,0 +1,70 @@
+# syntax=docker/dockerfile:1.7
+#
+# Pre-built runner image for the Playwright E2E workflow (Track AB / Issue
+# #421). Layers Encore CLI + postgresql-client on top of Microsoft's
+# official Playwright image, which ships Node + chromium + all OS deps
+# pre-installed.
+#
+# Earlier revisions of this Dockerfile installed Playwright themselves via
+# `playwright install --with-deps chromium` on top of node:24-bookworm.
+# That worked locally but hung indefinitely in BuildKit on GHA after the
+# chromium ZIP download reached 100% (no TTY, no progress on the post-
+# download steps — see workflow run 26361857325). Microsoft's image
+# bakes those steps into a known-good cached layer, so the failure mode
+# disappears entirely and our build only has to add ~50 MB on top.
+#
+# Re-build (and re-push) this image when:
+#   - frontend/package-lock.json moves to a Playwright version whose
+#     matching `mcr.microsoft.com/playwright:vX.Y.Z-noble` tag exists,
+#   - the Dockerfile gains a new system dependency the workflow needs.
+#
+# Inputs:
+#   PLAYWRIGHT_VERSION  - npm version of @playwright/test (e.g. 1.58.2).
+#                         Selects the matching MS base-image tag.
+
+ARG PLAYWRIGHT_VERSION=1.58.2
+FROM mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble
+
+USER root
+
+# Suppress every interactive apt prompt for the duration of the build.
+# Belt-and-braces: the base image already sets these, but a downstream
+# layer that doesn't would block on tzdata's debconf prompt the same
+# way a `node:24-bookworm`-based image does.
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=UTC
+
+# postgresql-client lets a developer `psql $POSTGRES_*` from inside the
+# runner when a seed or migration fails. curl is needed for the Encore
+# install script below. ca-certificates rounds it off — the MS image
+# ships it but reinstalling is a no-op.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        postgresql-client; \
+    rm -rf /var/lib/apt/lists/*
+
+# Encore CLI. The workflow calls `encore run` / `encore daemon stop`,
+# so the binary needs to be on PATH for whichever user GHA's
+# `container:` runs as (root by default; the symlink covers any
+# non-root variants).
+RUN set -eux; \
+    curl -fsSL --retry 3 --retry-delay 5 -o /tmp/install.sh https://encore.dev/install.sh; \
+    bash /tmp/install.sh; \
+    rm /tmp/install.sh; \
+    ln -s /root/.encore/bin/encore /usr/local/bin/encore
+ENV PATH=/root/.encore/bin:$PATH
+
+# Affirm the cache path the MS image uses, so the project-local
+# @playwright/test from `npm --prefix frontend install` shares the
+# pre-installed chromium instead of attempting its own download.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+# Sanity check: fail the image build if any piece is missing.
+RUN set -eux; \
+    node --version; \
+    npm --version; \
+    encore version; \
+    npx --yes playwright --version
