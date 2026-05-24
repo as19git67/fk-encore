@@ -44,6 +44,7 @@ import {
   deleteAlbum,
   deleteAlbumPublicLink,
   getAlbum,
+  getAlbumShareableUsers,
   getAlbumShares,
   getPhotoDetailsBatch,
   getPhotoFaces,
@@ -60,12 +61,12 @@ import {
   type Photo,
   type PhotoFilter,
   type PhotoGroup,
+  type ShareableUser,
   updateAlbum,
   updateAlbumUserSettings,
   updatePhotoCuration,
   updatePhotoDate,
 } from '../api/photos'
-import { listUsers, type UserWithRoles } from '../api/users'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
 import { usePhotoNavStore } from '../stores/photoNav'
@@ -1015,7 +1016,7 @@ const canShareAlbum = computed(() => {
 
 const showShareDialog = ref(false)
 const albumSharesList = ref<AlbumShareWithUser[]>([])
-const allShareUsers = ref<UserWithRoles[]>([])
+const allShareUsers = ref<ShareableUser[]>([])
 const shareUserId = ref<number | null>(null)
 const shareAccessLevel = ref<AlbumAccessLevel>('read')
 const sharing = ref(false)
@@ -1063,7 +1064,7 @@ async function openShareDialogLocal() {
   try {
     const [sharesRes, usersRes] = await Promise.all([
       getAlbumShares(albumId.value),
-      auth.hasPermission('users.list') ? listUsers() : Promise.resolve({ users: [] }),
+      getAlbumShareableUsers(albumId.value),
     ])
     albumSharesList.value = sharesRes.shares
     publicLink.value = sharesRes.publicLink ?? null
@@ -1903,10 +1904,12 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
         <div class="share-section">
           <h4 class="share-section-title">Benutzer hinzufügen</h4>
           <div class="share-add-form">
-            <Select v-if="allShareUsers.length > 0" v-model="shareUserId" :options="usersNotShared" optionLabel="name" optionValue="id" placeholder="Benutzer auswählen…" class="share-user-select" />
-            <input v-else v-model.number="shareUserId" type="number" placeholder="Benutzer-ID" class="p-inputtext share-userid-input" />
-            <SelectButton v-model="shareAccessLevel" :options="shareAccessLevelOptions" optionLabel="label" optionValue="value" :allowEmpty="false" />
-            <Button label="Freigeben" icon="pi pi-check" :loading="sharing" :disabled="!shareUserId" @click="handleShareAlbum" />
+            <template v-if="usersNotShared.length > 0">
+              <Select v-model="shareUserId" :options="usersNotShared" optionLabel="name" optionValue="id" placeholder="Benutzer auswählen…" class="share-user-select" />
+              <SelectButton v-model="shareAccessLevel" :options="shareAccessLevelOptions" optionLabel="label" optionValue="value" :allowEmpty="false" />
+              <Button label="Freigeben" icon="pi pi-check" :loading="sharing" :disabled="!shareUserId" @click="handleShareAlbum" />
+            </template>
+            <div v-else class="share-empty-hint">Keine weiteren Benutzer zum Freigeben verfügbar.</div>
           </div>
           <div class="share-access-explanation">
             <div class="share-access-explanation-row"><span class="share-badge share-badge--read">Nur lesen</span><span>Ansehen – keine Änderungen möglich.</span></div>
@@ -2256,7 +2259,7 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
 .share-badge--write { background: var(--p-green-100); color: var(--p-green-700); }
 .share-add-form { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
 .share-user-select { flex: 1; min-width: 180px; }
-.share-userid-input { width: 120px; }
+.share-empty-hint { font-size: 0.875rem; color: var(--p-text-muted-color); font-style: italic; }
 .share-hint { font-size: 0.8rem; color: var(--p-text-muted-color); margin-top: 0.4rem; display: block; }
 .share-access-explanation { margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.8rem; color: var(--p-text-muted-color); }
 .share-access-explanation-row { display: flex; align-items: flex-start; gap: 0.5rem; line-height: 1.3; }
