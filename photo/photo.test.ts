@@ -1353,6 +1353,7 @@ describe("Photo Module", () => {
     it("should expose shareable users to write_share delegates without users.list", async () => {
       const user3 = await createUserLogic({ email: "u3@shareable.com", name: "Charlie", password: "pw" });
       const user4 = await createUserLogic({ email: "u4@shareable.com", name: "Dora", password: "pw" });
+      const aiUser = await createUserLogic({ email: "ai@system.local", name: "KI-Bewertung", password: "pw" });
       const album = await service.createAlbumLogic(user1.id, { name: "Shareable list" });
 
       // user2 has write_share, user3 is already shared, user4 is invitable.
@@ -1361,10 +1362,11 @@ describe("Photo Module", () => {
 
       const asDelegate = await service.getAlbumShareableUsersLogic(user2.id, album.id);
       const ids = asDelegate.users.map(u => u.id);
-      // Excludes owner, the caller themselves, and existing shares.
+      // Excludes owner, the caller themselves, existing shares, and the AI system user.
       expect(ids).not.toContain(user1.id);
       expect(ids).not.toContain(user2.id);
       expect(ids).not.toContain(user3.id);
+      expect(ids).not.toContain(aiUser.id);
       expect(ids).toContain(user4.id);
 
       // Read-only participants must not enumerate users via this endpoint.

@@ -4712,8 +4712,15 @@ export async function getAlbumShareableUsersLogic(
 
   const excluded = new Set<number>([album.user_id, userId, ...existingShareUserIds]);
 
+  // The AI system user (KI-Bewertung) is a real users-row used to attribute
+  // virtual curation votes, but must never appear as an invitable account.
+  // Link-invited recipients without an account live in the separate `guests`
+  // table and therefore can't leak in via this query.
   const rows = await dbAll<{ id: number; name: string; email: string }>(
-    db.select({ id: users.id, name: users.name, email: users.email }).from(users).orderBy(users.name)
+    db.select({ id: users.id, name: users.name, email: users.email })
+      .from(users)
+      .where(sql`${users.email} <> ${AI_USER_EMAIL}`)
+      .orderBy(users.name)
   );
 
   return {
