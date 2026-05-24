@@ -135,14 +135,7 @@ jobs:
           node --version
           npm --version
           encore version
-          # The MS Playwright base image installs the playwright CLI
-          # somewhere npx can find it but not in /usr/local/bin, so a
-          # plain `playwright --version` fails inside the GHA-managed
-          # container shell. The actual test run uses the project-local
-          # playwright from frontend/node_modules/.bin (via `npm run e2e`)
-          # and doesn't depend on a global binary; we just need to prove
-          # the runtime is wired up.
-          npx --no-install playwright --version
+          playwright --version
 
       - name: Install backend dependencies
         run: npm install
