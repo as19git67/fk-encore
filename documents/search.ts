@@ -94,14 +94,25 @@ export async function searchDocuments(params: SearchParams): Promise<SearchHit[]
   return reciprocalRankFusion([fts, semantic], RRF_K).slice(0, limit);
 }
 
-/** Raw SQL fragment matching every document visible to the caller. */
-function visibilityClause(userId: number, groupIds: number[]) {
+/**
+ * Raw SQL fragment matching every document visible to the caller.
+ * Exported for unit tests — the array-binding shape is subtle and the
+ * regression test in `documents.test.ts` renders this fragment to
+ * verify it stays valid Postgres.
+ */
+export function visibilityClause(userId: number, groupIds: number[]) {
   if (groupIds.length === 0) {
     return sql`(visibility = 'private' AND user_id = ${userId})`;
   }
+  // Drizzle's sql template spreads a JS array via `${arr}` into
+  // comma-separated parameters wrapped in parens, which Postgres then
+  // parses as a row constructor — invalid input for ANY. Build an
+  // explicit ARRAY[...] literal instead so each element is its own
+  // bind parameter and the result is a real int[] on the server.
+  const groupIdArray = sql`ARRAY[${sql.join(groupIds.map((g) => sql`${g}`), sql`, `)}]::int[]`;
   return sql`(
     (visibility = 'private' AND user_id = ${userId})
-    OR (visibility = 'group' AND group_id = ANY(${groupIds}))
+    OR (visibility = 'group' AND group_id = ANY(${groupIdArray}))
   )`;
 }
 
@@ -144,12 +155,16 @@ async function runSemantic(
   const literal = `[${vec.join(",")}]`;
 
   // The visibility clause references columns aliased as `d` in this query.
+  // See visibilityClause() for why the array is wrapped in ARRAY[...]::int[].
   const visibility = groupIds.length === 0
     ? sql`(d.visibility = 'private' AND d.user_id = ${userId})`
-    : sql`(
-        (d.visibility = 'private' AND d.user_id = ${userId})
-        OR (d.visibility = 'group' AND d.group_id = ANY(${groupIds}))
-      )`;
+    : (() => {
+        const groupIdArray = sql`ARRAY[${sql.join(groupIds.map((g) => sql`${g}`), sql`, `)}]::int[]`;
+        return sql`(
+          (d.visibility = 'private' AND d.user_id = ${userId})
+          OR (d.visibility = 'group' AND d.group_id = ANY(${groupIdArray}))
+        )`;
+      })();
 
   // Aggregate at the document level by summing similarity over the top-N
   // closest chunks. The previous `MIN(distance)` scoring only cared about
