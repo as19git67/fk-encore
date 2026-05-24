@@ -22,7 +22,8 @@ import { flattenTaxonomy, categoryTaxonomy } from "./taxonomy";
 import { DOCUMENT_SERVICES } from "./scan-queue";
 import { DuplicateDocumentError } from "./import";
 import { SUPPORTED_EXTENSIONS } from "./documents.service";
-import { reciprocalRankFusion, type SearchHit } from "./search";
+import { reciprocalRankFusion, visibilityClause, type SearchHit } from "./search";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { chunkText } from "./document-ops";
 import { hasPoorSpacing, looksLikeBrokenXref } from "./text-extract";
 
@@ -352,6 +353,34 @@ describe("documents.text-extract looksLikeBrokenXref", () => {
     expect(
       looksLikeBrokenXref("pdftoppm exited 137: out of memory"),
     ).toBe(false);
+  });
+});
+
+describe("documents.search visibilityClause", () => {
+  const dialect = new PgDialect();
+
+  it("renders the group branch as a proper int[] array (not a row tuple)", () => {
+    // Regression: drizzle's sql template spreads a JS array into
+    // comma-separated parameters surrounded by parens, which Postgres
+    // parses as a record. `group_id = ANY((1, 2))` then fails with
+    // `op ANY/ALL (array) requires array on right side`. The fix wraps
+    // the elements in an explicit ARRAY[...]::int[] literal.
+    const { sql: rendered, params } = dialect.sqlToQuery(
+      visibilityClause(1, [10, 20]),
+    );
+    expect(rendered).toContain("ARRAY[");
+    expect(rendered).toContain("]::int[]");
+    expect(rendered).toMatch(/ANY\(ARRAY\[/);
+    expect(rendered).not.toMatch(/ANY\(\(\$\d+,\s*\$\d+\)\)/);
+    // Each group id is its own bind parameter alongside the userId.
+    expect(params).toEqual([1, 10, 20]);
+  });
+
+  it("omits the group branch entirely when the caller has no groups", () => {
+    const { sql: rendered, params } = dialect.sqlToQuery(visibilityClause(7, []));
+    expect(rendered).not.toContain("group_id");
+    expect(rendered).not.toContain("ARRAY[");
+    expect(params).toEqual([7]);
   });
 });
 

@@ -9,6 +9,7 @@ import Message from 'primevue/message'
 import Select from 'primevue/select'
 import Tag from 'primevue/tag'
 import Chip from 'primevue/chip'
+import Popover from 'primevue/popover'
 import {
   deleteDocument,
   fetchDocumentBytes,
@@ -50,6 +51,11 @@ const error = ref('')
 const info = ref('')
 const pdfData = ref<Uint8Array | null>(null)
 const pdfError = ref('')
+const helpPopover = ref<InstanceType<typeof Popover> | null>(null)
+
+function toggleHelp(event: Event) {
+  helpPopover.value?.toggle(event)
+}
 
 const form = ref({
   title: '' as string,
@@ -338,12 +344,13 @@ onBeforeUnmount(() => {
 <template>
   <div class="document-detail-view">
     <div class="header">
-      <Button icon="pi pi-arrow-left" label="Zurück" text @click="goBack" />
+      <Button icon="pi pi-arrow-left" label="Zurück" aria-label="Zurück" text @click="goBack" />
       <div class="header-actions">
         <Button
           v-if="auth.hasPermission('documents.edit') && doc"
           icon="pi pi-refresh"
           label="Neu klassifizieren"
+          aria-label="Neu klassifizieren"
           text
           :loading="saving"
           @click="onReclassify()"
@@ -352,6 +359,7 @@ onBeforeUnmount(() => {
           v-if="auth.hasPermission('documents.edit') && doc"
           icon="pi pi-eye"
           label="OCR erzwingen"
+          aria-label="OCR erzwingen"
           text
           :loading="saving"
           title="Text-Layer der PDF ignorieren und komplett per OCR neu einlesen (hilft bei Scans mit fehlenden Leerzeichen)."
@@ -363,8 +371,51 @@ onBeforeUnmount(() => {
           severity="danger"
           text
           label="Löschen"
+          aria-label="Löschen"
           @click="onDelete"
         />
+        <Button
+          icon="pi pi-question-circle"
+          aria-label="Hilfe zu den Aktionen"
+          text
+          class="help-trigger"
+          @click="toggleHelp"
+        />
+        <Popover ref="helpPopover">
+          <div class="help-flyout">
+            <h3 class="help-flyout__title">Aktionen</h3>
+            <ul class="help-flyout__list">
+              <li>
+                <i class="pi pi-arrow-left" aria-hidden="true" />
+                <div>
+                  <strong>Zurück</strong>
+                  <span>Zur Dokumentenliste zurückkehren.</span>
+                </div>
+              </li>
+              <li v-if="auth.hasPermission('documents.edit')">
+                <i class="pi pi-refresh" aria-hidden="true" />
+                <div>
+                  <strong>Neu klassifizieren</strong>
+                  <span>KI analysiert Kategorie, Datum, Absender und Zusammenfassung erneut.</span>
+                </div>
+              </li>
+              <li v-if="auth.hasPermission('documents.edit')">
+                <i class="pi pi-eye" aria-hidden="true" />
+                <div>
+                  <strong>OCR erzwingen</strong>
+                  <span>Text-Layer der PDF ignorieren und komplett per OCR neu einlesen — hilft bei Scans mit fehlenden Leerzeichen.</span>
+                </div>
+              </li>
+              <li v-if="auth.hasPermission('documents.delete')">
+                <i class="pi pi-trash" aria-hidden="true" />
+                <div>
+                  <strong>Löschen</strong>
+                  <span>Dokument dauerhaft entfernen.</span>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </Popover>
       </div>
     </div>
 
@@ -624,70 +675,124 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 1rem;
   width: 100%;
+  /* Without this any min-content blowout inside (long filename in
+     extra-info, unbreakable text in the preview) can push the page
+     past 100vw and produce horizontal scroll on the whole app. */
+  max-width: 100%;
+  min-width: 0;
   padding-inline: 0.5em;
+  box-sizing: border-box;
 }
-/* On wide viewports the form sits next to the PDF, so we constrain the
-   view to the viewport and let each pane scroll independently. On narrow
-   viewports the panes stack vertically — a fixed-height container would
-   leave the form fighting the PDF for a few hundred pixels at the bottom,
-   so we fall back to natural page flow there. */
-@media (min-width: 1000px) {
-  .document-detail-view {
-    height: calc(100vh - var(--menubar-height, 3.5rem));
-  }
-}
+/* The whole page is the only scroll container: neither the PDF
+   preview nor the metadata pane has its own scrollbar. On wide
+   viewports the panes still sit side by side via the grid below,
+   they just grow with their content and the page scrolls if needed. */
 @media (min-width: 800px) { .document-detail-view { padding-inline: 1em; } }
 
 .header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
-.header-actions { display: flex; gap: 0.25rem; }
+.header-actions { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+
+.help-flyout {
+  max-width: min(22rem, 90vw);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.help-flyout__title {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--p-text-color);
+}
+.help-flyout__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.help-flyout__list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+.help-flyout__list i {
+  color: var(--p-primary-color);
+  flex-shrink: 0;
+  width: 1.1rem;
+  text-align: center;
+  margin-top: 0.15rem;
+}
+.help-flyout__list strong {
+  display: block;
+  color: var(--p-text-color);
+  font-size: 0.9rem;
+}
+.help-flyout__list span {
+  color: var(--p-text-muted-color);
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+/* On phones the four labelled buttons (Zurück / Neu klassifizieren /
+   OCR erzwingen / Löschen) overflow the viewport. Hide the labels and
+   tighten padding so the row stays icon-only and fits comfortably. */
+@media (max-width: 640px) {
+  .header :deep(.p-button-label) {
+    display: none;
+  }
+  .header :deep(.p-button) {
+    padding: 0.45rem 0.55rem;
+  }
+}
 
 .info-text { text-align: center; margin-top: 4rem; color: var(--p-text-muted-color); }
 
 .detail-grid {
   display: grid;
-  grid-template-columns: 1fr;
+  /* `minmax(0, …)` instead of plain `1fr` so a grid item with wide
+     min-content (e.g. an unbroken filename) cannot blow the track out
+     past the container's width. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 1rem;
   flex: 1;
+  min-width: 0;
   min-height: 0;
 }
 
 @media (min-width: 1000px) {
-  .detail-grid { grid-template-columns: 1.4fr 1fr; }
+  .detail-grid { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); }
 }
 
 .pdf-panel {
   background: var(--p-surface-card);
   border: 1px solid var(--p-content-border-color);
   border-radius: 8px;
+  /* Defensive clip in case the canvas computes a sub-pixel wider than
+     the column on some zoom levels — combined with the wrapper's
+     overflow: hidden this guarantees no scrollbars on the preview. */
   overflow: hidden;
   display: flex;
-  /* Mobile: keep the preview in view but cap it so the form below stays
-     reachable. Desktop overrides this below. */
-  height: 60dvh;
-  min-height: 320px;
-}
-
-@media (min-width: 1000px) {
-  .pdf-panel {
-    height: auto;
-    min-height: 500px;
-  }
+  min-width: 0;
+  /* Grows with the rendered PDF page; the surrounding page is the
+     scroll container, not this panel. */
 }
 
 .meta-panel {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  /* Prevent intrinsic min-content of children (long filename,
+     unbroken text in extra-info / text-preview) from pushing the
+     grid track wider than the container. */
+  min-width: 0;
   padding-right: 0.25rem;
-}
-
-@media (min-width: 1000px) {
-  /* Inner-scroll only when the page is constrained to the viewport. */
-  .meta-panel { overflow-y: auto; }
 }
 
 .meta-top {
@@ -712,9 +817,13 @@ onBeforeUnmount(() => {
 .meta-form { display: flex; flex-direction: column; gap: 0.75rem; }
 .meta-form label { display: flex; flex-direction: column; gap: 0.25rem; }
 .meta-form-row {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
-  grid-template-columns: 1fr 1fr;
+}
+.meta-form-row > label {
+  flex: 1 1 12rem;
+  min-width: 0;
 }
 .label { font-size: 0.85rem; color: var(--p-text-muted-color); }
 
@@ -766,6 +875,8 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 0.5rem;
   margin-top: 0.5rem;
+  /* Long unbroken filenames must wrap, not push the column wider. */
+  overflow-wrap: anywhere;
 }
 .text-preview p {
   margin: 0.25rem 0 0;
@@ -776,6 +887,7 @@ onBeforeUnmount(() => {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.8rem;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   max-height: 180px;
   overflow-y: auto;
 }
