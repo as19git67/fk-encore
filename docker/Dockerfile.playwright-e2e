@@ -25,6 +25,11 @@
 ARG PLAYWRIGHT_VERSION=1.58.2
 FROM mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble
 
+# Re-declare the ARG inside the build stage so it is reachable from
+# the RUN steps below — ARGs declared before FROM are only in scope
+# for the FROM line itself.
+ARG PLAYWRIGHT_VERSION
+
 USER root
 
 # Suppress every interactive apt prompt for the duration of the build.
