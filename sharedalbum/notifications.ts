@@ -183,8 +183,8 @@ async function fanoutPushBestEffort(rows: EnrichedInsertRow[]): Promise<void> {
 // resets on every new photo within the quiet window; a hard cap keeps
 // notifications from being delayed indefinitely during a continuous
 // upload (e.g. an iCloud sync streaming hundreds of photos).
-const PHOTO_FANOUT_QUIET_MS = 60_000;
-const PHOTO_FANOUT_MAX_WAIT_MS = 10 * 60_000;
+const PHOTO_FANOUT_QUIET_MS = 5 * 60_000;
+const PHOTO_FANOUT_MAX_WAIT_MS = 30 * 60_000;
 
 interface PendingPhotoFanout {
   albumId: number;

@@ -124,6 +124,7 @@ import type {
   ListPhotoAlbumsResponse,
   ShareAlbumRequest,
   GetAlbumSharesResponse,
+  GetAlbumShareableUsersResponse,
   RemoveAlbumShareRequest,
   AlbumPublicLink,
   PublicAlbumResponse,
@@ -4677,6 +4678,55 @@ export async function getAlbumSharesLogic(userId: number, albumId: number): Prom
       user_email: r.email,
     })),
     publicLink: publicLink ? toPublicLinkResponse(publicLink) : undefined,
+  };
+}
+
+/**
+ * Return users that the caller may invite to share an album. Available to
+ * owners and write_share delegates so the share dialog can populate its
+ * user dropdown without requiring the global `users.list` permission.
+ * Excludes the album owner, the caller, and already-invited users.
+ */
+export async function getAlbumShareableUsersLogic(
+  userId: number,
+  albumId: number
+): Promise<GetAlbumShareableUsersResponse> {
+  const album = await dbFirst<typeof albums.$inferSelect>(
+    db.select().from(albums).where(eq(albums.id, albumId))
+  );
+  if (!album) throw APIError.notFound("Album not found");
+
+  const isOwner = album.user_id === userId;
+  if (!isOwner) {
+    const callerShare = await dbFirst<typeof albumShares.$inferSelect>(
+      db.select().from(albumShares).where(and(eq(albumShares.album_id, albumId), eq(albumShares.user_id, userId)))
+    );
+    if (callerShare?.access_level !== "write_share") {
+      throw APIError.permissionDenied("Unauthorized to list shareable users");
+    }
+  }
+
+  const existingShareUserIds = (await dbAll<{ user_id: number }>(
+    db.select({ user_id: albumShares.user_id }).from(albumShares).where(eq(albumShares.album_id, albumId))
+  )).map(r => r.user_id);
+
+  const excluded = new Set<number>([album.user_id, userId, ...existingShareUserIds]);
+
+  // The AI system user (KI-Bewertung) is a real users-row used to attribute
+  // virtual curation votes, but must never appear as an invitable account.
+  // Link-invited recipients without an account live in the separate `guests`
+  // table and therefore can't leak in via this query.
+  const rows = await dbAll<{ id: number; name: string; email: string }>(
+    db.select({ id: users.id, name: users.name, email: users.email })
+      .from(users)
+      .where(sql`${users.email} <> ${AI_USER_EMAIL}`)
+      .orderBy(users.name)
+  );
+
+  return {
+    users: rows
+      .filter(r => !excluded.has(r.id))
+      .map(r => ({ id: r.id, name: r.name, email: r.email })),
   };
 }
 
