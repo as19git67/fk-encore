@@ -269,8 +269,9 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   width: 100%;
-  height: 100%;
-  min-height: 0;
+  /* No fixed/inherited height — the viewer grows with the rendered
+     canvas so the surrounding page is the only thing that scrolls. */
+  min-width: 0;
 }
 
 .toolbar {
@@ -329,9 +330,10 @@ onBeforeUnmount(() => {
 
 .canvas-wrapper {
   position: relative;
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
+  /* No scrollbars on the preview itself — clip anything that would
+     overflow (e.g. when the user zooms past fit-width) and let the
+     outer page scroll instead. */
+  overflow: hidden;
   display: flex;
   justify-content: center;
   align-items: flex-start;
