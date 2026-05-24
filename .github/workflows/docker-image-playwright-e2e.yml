@@ -90,8 +90,16 @@ jobs:
             type=raw,value=test,enable=${{ github.event_name == 'pull_request' }}
             type=semver,pattern={{version}}
 
-      - name: Build and push Docker image
+      # docker/build-push-action does not retry on its own, and MCR
+      # (mcr.microsoft.com) hands out pre-signed Azure-blob URLs that
+      # intermittently return 403 — we hit one on run 26364805275. A
+      # single 30-second wait + one fresh attempt is plenty in practice;
+      # if the second pull still fails the issue is no longer transient
+      # and should surface.
+      - name: Build and push Docker image (attempt 1)
+        id: build1
         uses: docker/build-push-action@v6
+        continue-on-error: true
         with:
           context: .
           file: docker/Dockerfile.playwright-e2e
@@ -105,5 +113,25 @@ jobs:
           # the build context so a bare Dockerfile edit hits it, but a
           # Playwright-version bump (different build-arg) busts it —
           # which is exactly what we want.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Wait before retry
+        if: steps.build1.outcome == 'failure'
+        run: |
+          echo "First build attempt failed (likely a transient MCR 403); waiting 30s before retry."
+          sleep 30
+
+      - name: Build and push Docker image (attempt 2)
+        if: steps.build1.outcome == 'failure'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.playwright-e2e
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            PLAYWRIGHT_VERSION=${{ steps.pw.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
