@@ -29,6 +29,7 @@ const typeOptions = [
   { label: 'Betragsänderung', value: 'amount_change' },
   { label: 'Möglicherweise doppelt', value: 'duplicate' },
   { label: 'Neues Lastschriftmandat', value: 'new_mandate' },
+  { label: 'Erwartete Buchung fehlt', value: 'missing_transaction' },
 ]
 
 const filtered = computed(() =>
@@ -129,6 +130,7 @@ function iconFor(type: string): string {
     case 'amount_change': return 'pi pi-arrow-right-arrow-left'
     case 'duplicate': return 'pi pi-clone'
     case 'new_mandate': return 'pi pi-bell'
+    case 'missing_transaction': return 'pi pi-calendar-times'
     default: return 'pi pi-exclamation-triangle'
   }
 }
@@ -138,6 +140,7 @@ function severityClass(type: string): string {
     case 'amount_change': return 'sev-warn'
     case 'duplicate': return 'sev-danger'
     case 'new_mandate': return 'sev-info'
+    case 'missing_transaction': return 'sev-warn'
     default: return 'sev-default'
   }
 }
@@ -147,6 +150,7 @@ function typeLabel(type: string): string {
     case 'amount_change': return 'Betragsänderung'
     case 'duplicate': return 'Mögliches Duplikat'
     case 'new_mandate': return 'Neue Lastschrift'
+    case 'missing_transaction': return 'Erwartete Buchung fehlt'
     default: return type
   }
 }
@@ -222,7 +226,7 @@ function formatAmountChange(item: AnomalyItem): string | null {
           </div>
 
           <div
-            v-if="(item.type === 'amount_change' || item.type === 'new_mandate') && item.mandate_id"
+            v-if="(item.type === 'amount_change' || item.type === 'new_mandate' || item.type === 'missing_transaction') && item.mandate_id"
             class="history-section"
           >
             <button
