@@ -5,9 +5,13 @@
  *   1. Find all transactions not yet processed for anomaly detection.
  *   2. Match each to an existing mandate or create a new one.
  *   3. Emit anomalies:
- *      - amount_change: mandate's typical amount changed by > AMOUNT_CHANGE_THRESHOLD
- *      - duplicate:     same mandate_ref + amount within DUPLICATE_WINDOW_DAYS
- *      - new_mandate:   first time a mandate appears with amount > NEW_MANDATE_ALERT_AMOUNT
+ *      - amount_change:       mandate's typical amount changed by > AMOUNT_CHANGE_THRESHOLD
+ *      - duplicate:           same mandate_ref + amount within DUPLICATE_WINDOW_DAYS
+ *      - new_mandate:         first time a mandate appears with amount > NEW_MANDATE_ALERT_AMOUNT
+ *      - missing_transaction: a regular mandate's expected next booking is
+ *                             overdue past MISSING_GRACE_DAYS.  Emitted in a
+ *                             second pass after every account's transactions
+ *                             have been processed.
  */
 
 import { api, APIError } from "encore.dev/api";
@@ -57,6 +61,48 @@ const ANOMALY_RECENCY_DAYS = 60;
 const STABILITY_MAX_CV = 0.10;
 /** How many recent prior amounts to sample when computing stability. */
 const STABILITY_SAMPLE_SIZE = 18;
+
+// ----- missing_transaction tunables -----
+
+/**
+ * Mandate intervals we consider eligible for "missing booking" alerts.
+ * Lower bound (25 d) skips weekly / very short cadences where day-to-day
+ * jitter makes overdue calls unreliable. Upper bound (400 d) covers
+ * annual mandates with some headroom for "around the same time next
+ * year" drift.
+ */
+const MISSING_MIN_INTERVAL_DAYS = 25;
+const MISSING_MAX_INTERVAL_DAYS = 400;
+/**
+ * Days the expected booking may be late before we flag it. Roughly one
+ * week absorbs weekends, public holidays and bank-side processing
+ * delays at month-end.
+ */
+const MISSING_GRACE_DAYS = 7;
+/**
+ * Minimum prior bookings before we trust an interval as "regular"
+ * enough to predict the next one. Same gate as amount-change baselines.
+ */
+const MISSING_MIN_OCCURRENCES = BASELINE_MIN_TRANSACTIONS;
+/**
+ * Maximum coefficient of variation of recent inter-arrival intervals
+ * for a mandate to count as "regular". Intervals are noisier than
+ * amounts (month lengths, weekends, manual transfers) so we allow more
+ * spread than the amount-stability gate. 0.30 ≈ stddev up to 30 % of
+ * the mean interval.
+ */
+const MISSING_INTERVAL_MAX_CV = 0.30;
+/**
+ * Sample window for the interval-stability check: look at up to this
+ * many recent transactions of the mandate to compute inter-arrival CV.
+ */
+const MISSING_INTERVAL_SAMPLE_SIZE = 12;
+/**
+ * Hard ceiling for how long ago a mandate's last booking may be before
+ * we stop emitting missing alerts. Mandates that haven't fired in over
+ * a year are almost certainly cancelled, not "missing".
+ */
+const MISSING_MAX_LAST_SEEN_AGE_DAYS = 365 * 2;
 
 // -----------------------------------------------------------------------
 // Mandate key helpers
@@ -140,7 +186,31 @@ export async function runAnomalyDetection(
     result.anomalies_created += r.anomalies;
   }
 
+  // Missing-transaction pass: run AFTER processAccount has updated
+  // every mandate's last_seen / typical_interval_days for the current
+  // batch. This pass scans mandates rather than transactions, so it
+  // must also visit accounts that produced zero new transactions in
+  // this run (those are exactly the ones most likely to be "silent").
+  const missingAccountIds = await collectMissingPassAccountIds(accountIds);
+  for (const accountId of missingAccountIds) {
+    result.anomalies_created += await detectMissingForAccount(accountId);
+  }
+
   return result;
+}
+
+async function collectMissingPassAccountIds(
+  filter: number[] | undefined,
+): Promise<number[]> {
+  const rows = filter && filter.length > 0
+    ? await db
+        .selectDistinct({ id: financeRecurringMandate.account_id })
+        .from(financeRecurringMandate)
+        .where(inArray(financeRecurringMandate.account_id, filter))
+    : await db
+        .selectDistinct({ id: financeRecurringMandate.account_id })
+        .from(financeRecurringMandate);
+  return rows.map((r) => r.id);
 }
 
 async function processAccount(
@@ -493,6 +563,174 @@ async function findDuplicate(
     LIMIT 1
   `);
   return rows.rows[0] ?? undefined;
+}
+
+// -----------------------------------------------------------------------
+// Missing-transaction pass
+// -----------------------------------------------------------------------
+
+/**
+ * For one account: scan every recurring mandate and emit a
+ * missing_transaction anomaly when the next expected booking is
+ * overdue past MISSING_GRACE_DAYS with no matching transaction.
+ *
+ * One anomaly per mandate per cron run, gated by the partial unique
+ * index on (mandate_id, details->>'expected_date'). When a mandate is
+ * silent for multiple periods we only emit the OLDEST missed slot
+ * (closest to last_seen) — once the user acknowledges or the mandate
+ * resumes, follow-up slots can fire on the next run.
+ */
+async function detectMissingForAccount(accountId: number): Promise<number> {
+  // Use today (local server clock) as the reference. The cron job runs
+  // daily, so this is the most current view available.
+  const today = new Date();
+  const todayStr = toIsoDate(today);
+
+  const mandates = await db
+    .select()
+    .from(financeRecurringMandate)
+    .where(eq(financeRecurringMandate.account_id, accountId));
+
+  let inserted = 0;
+
+  for (const mandate of mandates) {
+    if (mandate.transaction_count < MISSING_MIN_OCCURRENCES) continue;
+    if (mandate.typical_interval_days === null) continue;
+    if (mandate.typical_interval_days < MISSING_MIN_INTERVAL_DAYS) continue;
+    if (mandate.typical_interval_days > MISSING_MAX_INTERVAL_DAYS) continue;
+    if (!mandate.last_seen) continue;
+
+    // Cancellation guard: stop alerting on mandates that have been
+    // silent for so long they are almost certainly no longer active.
+    const daysSinceLastSeen = dateDiffDays(mandate.last_seen, todayStr);
+    if (daysSinceLastSeen > MISSING_MAX_LAST_SEEN_AGE_DAYS) continue;
+
+    const expectedDate = shiftDate(mandate.last_seen, mandate.typical_interval_days);
+    const dueDate = shiftDate(expectedDate, MISSING_GRACE_DAYS);
+    // Not yet overdue past the grace window — nothing to flag.
+    if (todayStr < dueDate) continue;
+
+    // Interval stability: if the historical intervals between bookings
+    // already vary a lot, a single skipped period is unreliable signal.
+    const intervalCv = await getMandateIntervalCV(mandate.id);
+    if (intervalCv === null || intervalCv > MISSING_INTERVAL_MAX_CV) continue;
+
+    const detailsPayload = {
+      expected_date: expectedDate,
+      last_seen: mandate.last_seen,
+      interval_days: mandate.typical_interval_days,
+      expected_amount: mandate.typical_amount,
+      days_overdue: dateDiffDays(expectedDate, todayStr),
+    };
+    const created = await insertMissingAnomalyIfAbsent({
+      account_id: accountId,
+      mandate_id: mandate.id,
+      type: "missing_transaction",
+      score: scoreForMissing(dateDiffDays(expectedDate, todayStr), mandate.typical_interval_days),
+      details: detailsPayload,
+    });
+    if (created) inserted++;
+  }
+
+  return inserted;
+}
+
+/**
+ * Coefficient of variation of inter-arrival intervals for the most
+ * recent bookings of a mandate. Returns null when there are too few
+ * samples (we need MISSING_MIN_OCCURRENCES dates → MISSING_MIN_OCCURRENCES-1 intervals).
+ */
+async function getMandateIntervalCV(mandateId: number): Promise<number | null> {
+  const rows = await db.execute<{ booking_date: string }>(sql`
+    SELECT ft.booking_date
+    FROM finance_transaction ft
+    JOIN finance_recurring_mandate frm ON frm.id = ${mandateId}
+    WHERE ft.account_id = frm.account_id
+      AND (
+        (frm.mandate_ref IS NOT NULL AND ft.mandate_ref = frm.mandate_ref)
+        OR (frm.mandate_ref IS NULL AND frm.counterparty_iban IS NOT NULL AND ft.counterparty_iban = frm.counterparty_iban)
+        OR (frm.mandate_ref IS NULL AND frm.counterparty_iban IS NULL AND ft.counterparty = frm.counterparty)
+      )
+    ORDER BY ft.booking_date DESC
+    LIMIT ${MISSING_INTERVAL_SAMPLE_SIZE}
+  `);
+  const dates = rows.rows.map((r) => r.booking_date.slice(0, 10)).sort();
+  if (dates.length < MISSING_MIN_OCCURRENCES) return null;
+  const intervals: number[] = [];
+  for (let i = 1; i < dates.length; i++) {
+    intervals.push(dateDiffDays(dates[i - 1], dates[i]));
+  }
+  if (intervals.length === 0) return null;
+  const mean = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+  if (mean === 0) return null;
+  const variance =
+    intervals.reduce((sum, v) => sum + (v - mean) ** 2, 0) / intervals.length;
+  return Math.sqrt(variance) / Math.abs(mean);
+}
+
+/**
+ * Severity 0..1 — grows with how late the booking is relative to the
+ * mandate's own period. Pinned to 0.95 max so it sorts below true
+ * duplicates (0.9) only when very stale; capped at 0.95.
+ */
+function scoreForMissing(daysOverdue: number, intervalDays: number): string {
+  // Days late as a fraction of one full period; 1.0 means "an entire
+  // period has passed since the booking was due".
+  const ratio = intervalDays > 0 ? daysOverdue / intervalDays : 1;
+  const clamped = Math.max(0.5, Math.min(0.95, 0.5 + ratio * 0.5));
+  return clamped.toFixed(4);
+}
+
+async function insertMissingAnomalyIfAbsent(values: {
+  account_id: number;
+  mandate_id: number;
+  type: string;
+  score: string;
+  details: Record<string, unknown>;
+}): Promise<boolean> {
+  // Cannot use Drizzle's onConflictDoNothing here: the target index is
+  // a partial expression index, not a column constraint, and Drizzle
+  // refuses to infer the conflict target. Pre-check by expected_date.
+  const existing = await db
+    .select({ id: financeAnomaly.id })
+    .from(financeAnomaly)
+    .where(
+      and(
+        eq(financeAnomaly.mandate_id, values.mandate_id),
+        eq(financeAnomaly.type, values.type),
+        isNull(financeAnomaly.transaction_id),
+        sql`(${financeAnomaly.details} ->> 'expected_date') = ${String(values.details.expected_date)}`,
+      ),
+    )
+    .limit(1);
+  if (existing.length > 0) return false;
+
+  try {
+    const result = await db
+      .insert(financeAnomaly)
+      .values(values)
+      .returning({ id: financeAnomaly.id });
+    return result.length > 0;
+  } catch (err) {
+    // Race: another concurrent run beat us to the unique index. Treat
+    // as "already inserted" rather than surfacing the error.
+    if (isUniqueViolation(err)) return false;
+    throw err;
+  }
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  return typeof err === "object"
+    && err !== null
+    && "code" in err
+    && (err as { code?: string }).code === "23505";
+}
+
+function toIsoDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 // -----------------------------------------------------------------------
@@ -1039,7 +1277,28 @@ function buildMessage(
       const kind = isCredit ? "Gutschrift" : "Lastschrift";
       return `Neue regelmäßige ${kind} von ${name} über ${fmtEur(amount)}.`;
     }
+    case "missing_transaction": {
+      const expectedAmount = details.expected_amount !== undefined
+        ? Math.abs(Number(details.expected_amount))
+        : null;
+      const isCredit = expectedAmount !== null && Number(details.expected_amount) > 0;
+      const kind = isCredit ? "Gutschrift" : "Lastschrift";
+      const expectedDate = typeof details.expected_date === "string"
+        ? formatGermanDate(details.expected_date)
+        : "—";
+      const daysOverdue = Math.max(0, Math.round(Number(details.days_overdue ?? 0)));
+      const amountStr = expectedAmount !== null && Number.isFinite(expectedAmount)
+        ? ` über ca. ${fmtEur(expectedAmount)}`
+        : "";
+      return `Erwartete ${kind} von ${name}${amountStr} ist seit ${expectedDate} (${daysOverdue} Tage überfällig) ausgeblieben.`;
+    }
     default:
       return `Unbekannte Anomalie (${type}).`;
   }
+}
+
+function formatGermanDate(isoDate: string): string {
+  const [y, m, d] = isoDate.slice(0, 10).split("-");
+  if (!y || !m || !d) return isoDate;
+  return `${d}.${m}.${y}`;
 }

@@ -927,7 +927,7 @@ export interface DuplicateTransactionInfo {
 
 export interface AnomalyItem {
   id: number
-  type: 'amount_change' | 'duplicate' | 'new_mandate' | string
+  type: 'amount_change' | 'duplicate' | 'new_mandate' | 'missing_transaction' | string
   score: number
   details: Record<string, unknown>
   created_at: string
