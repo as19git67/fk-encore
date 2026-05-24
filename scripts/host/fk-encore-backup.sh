@@ -49,6 +49,22 @@
 #                           left alone. A prune failure is logged as WARN
 #                           but does not fail the backup (the snapshot
 #                           itself was taken successfully).
+#   DUMP_DIR                host-side directory holding the pg_dump files
+#                           (`encore-daily-*.dump`). Default: the parent of
+#                           this script's directory, which matches the layout
+#                           install-backup-hook.sh sets up (dumps live next
+#                           to host-scripts/ on the backup volume). The dump
+#                           itself is written by the app into $BACKUP_DIR
+#                           (container path) before the snapshot is taken;
+#                           this variable is only used for retention.
+#   DUMP_RETENTION_DAYS     age in days above which `encore-daily-*.dump`
+#                           files in $DUMP_DIR are deleted after a successful
+#                           run. Default: same as SNAPSHOT_RETENTION_DAYS,
+#                           so a single override tunes both. Set to 0 to
+#                           disable. Other dumps (`pre-restore-*.dump`,
+#                           `restored-*.dump`, operator-named files) are
+#                           never touched. A prune failure is logged as WARN
+#                           but does not fail the backup.
 #
 # Designed for bash 4+. Use `set -euo pipefail` so the trap-based /stop
 # always runs on failure.
@@ -65,10 +81,18 @@ CURL_TIMEOUT="${CURL_TIMEOUT:-60}"
 READY_TIMEOUT_SEC="${READY_TIMEOUT_SEC:-7200}"
 READY_POLL_INTERVAL_SEC="${READY_POLL_INTERVAL_SEC:-10}"
 SNAPSHOT_RETENTION_DAYS="${SNAPSHOT_RETENTION_DAYS:-30}"
+DUMP_DIR="${DUMP_DIR:-$(dirname "$SCRIPT_DIR")}"
+DUMP_RETENTION_DAYS="${DUMP_RETENTION_DAYS:-$SNAPSHOT_RETENTION_DAYS}"
 
 if ! [[ "$SNAPSHOT_RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
   printf '[fk-encore-backup] FATAL: SNAPSHOT_RETENTION_DAYS must be a non-negative integer, got %q\n' \
     "$SNAPSHOT_RETENTION_DAYS" >&2
+  exit 1
+fi
+
+if ! [[ "$DUMP_RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
+  printf '[fk-encore-backup] FATAL: DUMP_RETENTION_DAYS must be a non-negative integer, got %q\n' \
+    "$DUMP_RETENTION_DAYS" >&2
   exit 1
 fi
 
@@ -247,6 +271,58 @@ prune_old_snapshots() {
   (( failed == 0 ))
 }
 
+prune_old_dumps() {
+  # Delete `encore-daily-*.dump` files in $DUMP_DIR older than N days.
+  # The app writes a fresh dump into BACKUP_DIR on every successful run;
+  # without this sweep the directory (and every future ZFS snapshot that
+  # inherits it) grows without bound. Only files matching the daily-* name
+  # this script's LABEL produces are eligible — `pre-restore-*.dump`,
+  # `restored-*.dump` and operator-named ad-hoc dumps are left alone.
+  local retention_days="$1"
+  local dir="$2"
+  if (( retention_days == 0 )); then
+    log "dump retention disabled (DUMP_RETENTION_DAYS=0)"
+    return 0
+  fi
+  if [[ ! -d "$dir" ]]; then
+    log "WARN: dump dir $dir does not exist, skipping dump prune"
+    return 1
+  fi
+
+  local now_epoch cutoff_epoch
+  now_epoch="$(date -u +%s)"
+  cutoff_epoch=$(( now_epoch - retention_days * 86400 ))
+  log "pruning encore-daily-*.dump files in $dir older than ${retention_days}d (modified before $(date -u -d "@$cutoff_epoch" +%FT%TZ))"
+
+  local file mtime deleted=0 failed=0
+  # find -print0 / read -d '' to survive any path the operator might pick.
+  # -maxdepth 1 keeps us out of subdirectories like host-scripts/ that may
+  # also live under DUMP_DIR.
+  while IFS= read -r -d '' file; do
+    # Never delete the dump we just took this run, even if a misconfigured
+    # clock somehow placed its mtime in the past. The cutoff already
+    # protects us in any sane configuration; this is belt-and-suspenders.
+    [[ "$(basename "$file")" == "encore-${LABEL}.dump" ]] && continue
+    if ! mtime="$(stat -c %Y -- "$file" 2>/dev/null)"; then
+      log "WARN: stat failed for $file"
+      failed=$(( failed + 1 ))
+      continue
+    fi
+    if (( mtime < cutoff_epoch )); then
+      log "deleting $file (modified $(date -u -d "@$mtime" +%FT%TZ))"
+      if rm -- "$file"; then
+        deleted=$(( deleted + 1 ))
+      else
+        log "WARN: rm $file failed"
+        failed=$(( failed + 1 ))
+      fi
+    fi
+  done < <(find "$dir" -maxdepth 1 -type f -name 'encore-daily-*.dump' -print0 2>/dev/null)
+
+  log "dump prune summary: deleted=$deleted failed=$failed"
+  (( failed == 0 ))
+}
+
 # Trap: on ANY exit (success or failure after /start), try to /stop.
 # The app's safety timer is a last-resort backstop if this also fails.
 trap 'rc=$?; if [[ "${STARTED:-0}" == "1" ]]; then stop_backup || true; fi; exit $rc' EXIT
@@ -289,7 +365,8 @@ fi
 STARTED=0
 log "backup complete label=$LABEL"
 
-# -- 4. retention -------------------------------------------------------
+# -- 5. retention -------------------------------------------------------
 # Prune best-effort: the backup itself already succeeded, a prune failure
 # must not flip the overall exit code.
 prune_old_snapshots "$SNAPSHOT_RETENTION_DAYS" || true
+prune_old_dumps "$DUMP_RETENTION_DAYS" "$DUMP_DIR" || true

@@ -159,6 +159,11 @@ Next steps — finish the install by:
        SNAPSHOT_RETENTION_DAYS=14 ZFS_DATASET=$DATASET $DRIVER_SCRIPT
        SNAPSHOT_RETENTION_DAYS=0  ZFS_DATASET=$DATASET $DRIVER_SCRIPT
 
+     Dump retention (encore-daily-*.dump files in the backup directory)
+     defaults to the same value as SNAPSHOT_RETENTION_DAYS, so overriding
+     the snapshot value tunes both. Override DUMP_RETENTION_DAYS=<n> to
+     decouple them, or DUMP_DIR=<path> to point at a non-default location.
+
   3. Verify end-to-end (run as root on the host):
 
        ZFS_DATASET=$DATASET $DRIVER_SCRIPT

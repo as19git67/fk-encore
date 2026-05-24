@@ -79,6 +79,13 @@ prune_disabled=0
 prune_destroyed_count=""
 prune_failed_count=""
 destroyed_lines=()      # "ts|name|created"
+dump_prune_started=0
+dump_prune_cutoff=""
+dump_prune_dir=""
+dump_prune_disabled=0
+dump_prune_deleted_count=""
+dump_prune_failed_count=""
+dump_deleted_lines=()   # "ts|file|modified"
 warnings=()             # "ts  message"
 fatals=()               # "ts  message"
 other_steps=()          # "ts|description"
@@ -129,6 +136,17 @@ while IFS= read -r line; do
   elif [[ "$msg" =~ ^prune\ summary:\ destroyed=([0-9]+)\ failed=([0-9]+) ]]; then
     prune_destroyed_count="${BASH_REMATCH[1]}"
     prune_failed_count="${BASH_REMATCH[2]}"
+  elif [[ "$msg" =~ ^pruning\ encore-daily-\*\.dump\ files\ in\ (.+)\ older\ than\ .*modified\ before\ ([0-9T:Z.+-]+)\) ]]; then
+    dump_prune_started=1
+    dump_prune_dir="${BASH_REMATCH[1]}"
+    dump_prune_cutoff="${BASH_REMATCH[2]}"
+  elif [[ "$msg" == "dump retention disabled"* ]]; then
+    dump_prune_disabled=1
+  elif [[ "$msg" =~ ^deleting\ (.+)\ \(modified\ ([0-9T:Z.+-]+)\) ]]; then
+    dump_deleted_lines+=("$ts|${BASH_REMATCH[1]}|${BASH_REMATCH[2]}")
+  elif [[ "$msg" =~ ^dump\ prune\ summary:\ deleted=([0-9]+)\ failed=([0-9]+) ]]; then
+    dump_prune_deleted_count="${BASH_REMATCH[1]}"
+    dump_prune_failed_count="${BASH_REMATCH[2]}"
   fi
 done <<< "$raw"
 
@@ -229,6 +247,26 @@ SEP="================================================================"
     echo
   elif (( prune_disabled == 1 )); then
     echo "Snapshot-Pruning: deaktiviert (SNAPSHOT_RETENTION_DAYS=0)"
+    echo
+  fi
+
+  if (( dump_prune_started == 1 )) || [[ -n "$dump_prune_deleted_count" ]]; then
+    echo "Dump-Pruning:"
+    [[ -n "$dump_prune_dir"    ]] && printf '  Verzeichnis: %s\n' "$dump_prune_dir"
+    [[ -n "$dump_prune_cutoff" ]] && printf '  Schwelle:    älter als %s\n' "$(pretty_ts "$dump_prune_cutoff")"
+    if (( ${#dump_deleted_lines[@]} > 0 )); then
+      echo "  Gelöscht:"
+      for entry in "${dump_deleted_lines[@]}"; do
+        IFS='|' read -r _ file modified <<< "$entry"
+        printf '    - %s  (geändert %s)\n' "$file" "$(pretty_ts "$modified")"
+      done
+    fi
+    if [[ -n "$dump_prune_deleted_count" || -n "$dump_prune_failed_count" ]]; then
+      printf '  Summary:     deleted=%s failed=%s\n' "${dump_prune_deleted_count:-?}" "${dump_prune_failed_count:-?}"
+    fi
+    echo
+  elif (( dump_prune_disabled == 1 )); then
+    echo "Dump-Pruning: deaktiviert (DUMP_RETENTION_DAYS=0)"
     echo
   fi
 
