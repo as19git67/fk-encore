@@ -29,6 +29,15 @@
 ARG NODE_IMAGE=node:24-bookworm
 FROM ${NODE_IMAGE}
 
+# Suppress every interactive apt prompt for the whole build. `playwright
+# install --with-deps` below shells out to `apt-get install` for a long
+# list of OS libraries; some of them (tzdata, locales, …) configure
+# themselves via debconf and hang forever in a non-TTY Docker build
+# without this. TZ=UTC removes the one remaining interactive question
+# tzdata can still ask even with frontend=noninteractive.
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=UTC
+
 # postgresql-client is small and helps when debugging a failed seed or
 # migration from inside the runner (`psql $POSTGRES_*`). curl is needed
 # for the Encore install script below. ca-certificates is needed by both
