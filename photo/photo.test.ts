@@ -1350,6 +1350,29 @@ describe("Photo Module", () => {
       expect(share3?.access_level).toBe("write");
     });
 
+    it("should expose shareable users to write_share delegates without users.list", async () => {
+      const user3 = await createUserLogic({ email: "u3@shareable.com", name: "Charlie", password: "pw" });
+      const user4 = await createUserLogic({ email: "u4@shareable.com", name: "Dora", password: "pw" });
+      const album = await service.createAlbumLogic(user1.id, { name: "Shareable list" });
+
+      // user2 has write_share, user3 is already shared, user4 is invitable.
+      await service.shareAlbumLogic(user1.id, { albumId: album.id, userId: user2.id, accessLevel: "write_share" });
+      await service.shareAlbumLogic(user1.id, { albumId: album.id, userId: user3.id, accessLevel: "read" });
+
+      const asDelegate = await service.getAlbumShareableUsersLogic(user2.id, album.id);
+      const ids = asDelegate.users.map(u => u.id);
+      // Excludes owner, the caller themselves, and existing shares.
+      expect(ids).not.toContain(user1.id);
+      expect(ids).not.toContain(user2.id);
+      expect(ids).not.toContain(user3.id);
+      expect(ids).toContain(user4.id);
+
+      // Read-only participants must not enumerate users via this endpoint.
+      const user5 = await createUserLogic({ email: "u5@shareable.com", name: "Eve", password: "pw" });
+      await service.shareAlbumLogic(user1.id, { albumId: album.id, userId: user5.id, accessLevel: "read" });
+      await expect(service.getAlbumShareableUsersLogic(user5.id, album.id)).rejects.toThrow();
+    });
+
     it("should let write_share remove only their own invitations", async () => {
       const user3 = await createUserLogic({ email: "u3@rm.com", name: "User 3", password: "pw" });
       const user4 = await createUserLogic({ email: "u4@rm.com", name: "User 4", password: "pw" });

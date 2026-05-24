@@ -44,6 +44,7 @@ import {
   deleteAlbum,
   deleteAlbumPublicLink,
   getAlbum,
+  getAlbumShareableUsers,
   getAlbumShares,
   getPhotoDetailsBatch,
   getPhotoFaces,
@@ -60,12 +61,12 @@ import {
   type Photo,
   type PhotoFilter,
   type PhotoGroup,
+  type ShareableUser,
   updateAlbum,
   updateAlbumUserSettings,
   updatePhotoCuration,
   updatePhotoDate,
 } from '../api/photos'
-import { listUsers, type UserWithRoles } from '../api/users'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
 import { usePhotoNavStore } from '../stores/photoNav'
@@ -1015,7 +1016,7 @@ const canShareAlbum = computed(() => {
 
 const showShareDialog = ref(false)
 const albumSharesList = ref<AlbumShareWithUser[]>([])
-const allShareUsers = ref<UserWithRoles[]>([])
+const allShareUsers = ref<ShareableUser[]>([])
 const shareUserId = ref<number | null>(null)
 const shareAccessLevel = ref<AlbumAccessLevel>('read')
 const sharing = ref(false)
@@ -1063,7 +1064,7 @@ async function openShareDialogLocal() {
   try {
     const [sharesRes, usersRes] = await Promise.all([
       getAlbumShares(albumId.value),
-      auth.hasPermission('users.list') ? listUsers() : Promise.resolve({ users: [] }),
+      getAlbumShareableUsers(albumId.value),
     ])
     albumSharesList.value = sharesRes.shares
     publicLink.value = sharesRes.publicLink ?? null

@@ -24,6 +24,7 @@ import type {
   ListPhotoAlbumsResponse,
   ShareAlbumRequest,
   GetAlbumSharesResponse,
+  GetAlbumShareableUsersResponse,
   RemoveAlbumShareRequest,
   ListAlbumsResponse,
   ListPhotosResponse,
@@ -1367,6 +1368,20 @@ export const getAlbumShares = api(
     checkModule();
     const userId = getUserId();
     return await service.getAlbumSharesLogic(userId, id);
+  }
+);
+
+/**
+ * List users that the caller can invite to share an album. Available to
+ * the album owner and write_share delegates — does not require the
+ * global users.list permission.
+ */
+export const getAlbumShareableUsers = api(
+  { expose: true, method: "GET", path: "/albums/:id/shareable-users", auth: true },
+  async ({ id }: { id: number }): Promise<GetAlbumShareableUsersResponse> => {
+    checkModule();
+    const userId = getUserId();
+    return await service.getAlbumShareableUsersLogic(userId, id);
   }
 );
 
