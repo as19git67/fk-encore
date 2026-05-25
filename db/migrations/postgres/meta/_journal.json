@@ -631,6 +631,13 @@
       "when": 1779001428000,
       "tag": "0089_photo_device_asset_id",
       "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1779001429000,
+      "tag": "0090_documents_tags_in_fts",
+      "breakpoints": true
     }
   ]
 }
