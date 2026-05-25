@@ -99,6 +99,11 @@ function enabledServices(): ScanService[] {
  * Per-user services use the provided userId.
  * Uses ON CONFLICT DO NOTHING so a photo already pending/processing is not duplicated.
  * If force=true the existing pending row is updated to set force=true.
+ *
+ * Priority convention (lower wins, see dequeueNextJob ORDER BY):
+ *   1 — fresh user-driven uploads / interactive re-scans
+ *   2 — default background work (library imports, share fan-out)
+ *   3 — failed / requeued / bulk backfills
  */
 export async function enqueuePhotoScan(
   photoId: number,
