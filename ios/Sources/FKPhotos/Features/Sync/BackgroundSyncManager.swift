@@ -18,6 +18,26 @@ public final class BackgroundSyncManager {
 
     private init() {}
 
+    /// Serialises drain calls. Two concurrent drains used to pick up the same
+    /// pending items and re-upload them; that race accounted for the ~10 %
+    /// server-side duplicates because the dedup queries ran *before* either
+    /// insert had committed. Combined with per-item `.uploading` claiming in
+    /// `UploadQueue`, this guarantees each item is uploaded at most once per
+    /// drain pass.
+    private let drainLock = DrainLock()
+
+    private actor DrainLock {
+        private var draining = false
+        /// Returns true when the caller has the lock; false when another drain
+        /// is already in progress (caller should bail out).
+        func tryAcquire() -> Bool {
+            if draining { return false }
+            draining = true
+            return true
+        }
+        func release() { draining = false }
+    }
+
     // MARK: - Registration (call once at launch)
 
     public func register() {
@@ -259,79 +279,128 @@ public final class BackgroundSyncManager {
 
     /// Drains pending UploadQueue items using the main app's network stack.
     /// Called from the BGProcessingTask handler and from the app foreground.
+    ///
+    /// Concurrency model:
+    ///   * `drainLock` blocks a second concurrent drain (e.g. foreground tap
+    ///     while a BG task is already running).
+    ///   * `claimNextPending` atomically transitions one item from `.pending`
+    ///     to `.uploading` so even the rare case of two drains in different
+    ///     processes (main app + share extension) can't grab the same item.
     public func drainUploadQueue() async {
-        await UploadQueue.shared.load()
-        let pending = await UploadQueue.shared.pendingItems()
-        guard !pending.isEmpty else { return }
+        guard await drainLock.tryAcquire() else {
+            print("[BGSync] drainUploadQueue: another drain already running, skipping")
+            return
+        }
+        await drainLoop()
+        await drainLock.release()
+    }
 
-        var doneCount = 0
-        for item in pending {
+    /// Called when the app returns to the foreground. Items that were aborted
+    /// mid-upload by background suspension show up as `.failed` with a
+    /// transient `URLError` message; we requeue those and immediately drain so
+    /// the user doesn't see ghost failures on every app re-open. Exposed as a
+    /// public wrapper because `UploadQueue` is internal to this module.
+    public func handleForegroundResume() {
+        Task {
+            await UploadQueue.shared.requeueTransientFailures()
+            await drainUploadQueue()
+        }
+    }
+
+    /// The inner work of `drainUploadQueue`, factored out so the lock can be
+    /// released exactly once at the call site (no defer-with-Task indirection).
+    private func drainLoop() async {
+        await UploadQueue.shared.load()
+
+        // Process items one at a time via claim → upload → mark. The claim
+        // step is the concurrency boundary; from this point on the item is
+        // invisible to other `pendingItems()` callers.
+        while let claimed = await UploadQueue.shared.claimNextPending() {
+            // Cooperate with task cancellation (app suspension, BG-task
+            // expiry). Put the item back so the next foreground wake-up
+            // retries it instead of marking it as failed.
+            if Task.isCancelled {
+                await UploadQueue.shared.markPending(id: claimed.id)
+                break
+            }
+
             // The Share Extension uploads with isFavorite = false and often
             // without a PHAsset identifier (iOS hands it only file bytes).
             // Recover the identifier by matching the photo back to the library,
             // then re-read the favourite/caption — both need the main app's
             // full Photos access. Skipped when the photo is not in the library
             // (shared from another app).
-            let identified = await recoverAssetIdentifierIfMissing(item)
+            let identified = await recoverAssetIdentifierIfMissing(claimed)
             let item = refreshMetadataFromLibrary(identified)
             let localId = item.assetLocalIdentifier ?? ""
 
-            // Metadata-only fast path: if we have a synced state entry with the same
-            // imageDataHash, the pixels haven't changed — skip re-uploading the bytes.
-            if !localId.isEmpty {
-                let syncedEntry = PhotoSyncPreferences.loadSyncedEntry(localId: localId)
-                if let syncedEntry, syncedEntry.imageDataHash == item.imageDataHash {
-                    do {
-                        let result = try await APIClient.shared.syncPhotoMetadata(
-                            imageDataHash: item.imageDataHash,
-                            fullHash: item.fullHash,
-                            caption: item.caption,
-                            isFavorite: item.isFavorite,
-                            capturedAtString: item.capturedAtString,
-                            assetLocalId: localId
-                        )
-                        if case .updated(let photoId) = result {
-                            PhotoSyncPreferences.saveSyncedStateEntry(
-                                localId: localId,
-                                imageDataHash: item.imageDataHash,
-                                fullHash: item.fullHash
-                            )
-                            PhotoSyncPreferences.recordUploadedPhoto(serverPhotoId: photoId, localIdentifier: localId)
-                            for albumId in item.targetAlbumIds {
-                                struct Body: Encodable { let albumId: Int; let photoId: Int }
-                                struct Resp: Decodable { let success: Bool }
-                                _ = try? await APIClient.shared.post("/albums/photos", body: Body(albumId: albumId, photoId: photoId)) as Resp
-                            }
-                            await UploadQueue.shared.markDone(id: item.id)
-                            doneCount += 1
-                            if doneCount % 10 == 0 { await UploadQueue.shared.purgeDone() }
-                            continue
-                        }
-                    } catch {
-                        // Fall through to full upload
-                    }
+            let outcome = await uploadSingleItem(item, localId: localId)
+            switch outcome {
+            case .succeeded(let photoId):
+                if !localId.isEmpty {
+                    PhotoSyncPreferences.saveSyncedStateEntry(
+                        localId: localId,
+                        imageDataHash: item.imageDataHash,
+                        fullHash: item.fullHash
+                    )
+                    PhotoSyncPreferences.recordUploadedPhoto(
+                        serverPhotoId: photoId,
+                        localIdentifier: localId
+                    )
                 }
-            }
+                for albumId in item.targetAlbumIds {
+                    struct Body: Encodable { let albumId: Int; let photoId: Int }
+                    struct Resp: Decodable { let success: Bool }
+                    _ = try? await APIClient.shared.post(
+                        "/albums/photos",
+                        body: Body(albumId: albumId, photoId: photoId)
+                    ) as Resp
+                }
+                await UploadQueue.shared.markDone(id: item.id)
+                recordSuccessfulUpload(for: item)
 
-            let data: Data
-            let mimeType: String
-            if let tempURL = item.tempFileURL, let tempData = try? Data(contentsOf: tempURL) {
-                data = tempData
-                mimeType = item.mimeType
-            } else if let localId = item.assetLocalIdentifier, !localId.isEmpty,
-                      let asset = PHAsset.fetchAssets(withLocalIdentifiers: [localId], options: nil).firstObject,
-                      let (assetData, assetMime) = try? await PhotoSyncService.loadAssetData(asset) {
-                data = assetData
-                mimeType = assetMime
-            } else {
-                await UploadQueue.shared.markFailed(id: item.id, error: "Bilddaten nicht ladbar (Asset nicht in Mediathek?)")
-                continue
+            case .cancelled:
+                await UploadQueue.shared.markPending(id: item.id)
+                return  // Stop the whole drain; foreground re-entry will resume.
+
+            case .failed(let error):
+                await UploadQueue.shared.markFailed(id: item.id, error: error)
             }
+        }
+        await UploadQueue.shared.purgeDone()
+    }
+
+    /// Outcome of uploading a single queue item. `cancelled` is distinct from
+    /// `failed` so the drain loop can pause cleanly when the app is suspended
+    /// without marking valid items as permanently failed.
+    private enum UploadOutcome {
+        case succeeded(photoId: Int)
+        case cancelled
+        case failed(String)
+    }
+
+    /// Updates the user-visible "Letzter Upload" timestamp and advances the
+    /// source iOS album watermark whenever a queue item is successfully
+    /// uploaded — covering both the auto-sync path and Share-Extension items
+    /// that the main app later drains.
+    private func recordSuccessfulUpload(for item: UploadQueueItem) {
+        PhotoSyncPreferences.lastSyncDate = Date()
+        if let albumId = item.sourceIosAlbumId, !albumId.isEmpty {
+            PhotoSyncPreferences.advanceAlbumSyncDate(Date(), for: albumId)
+        }
+    }
+
+    /// Performs the actual HTTP upload for one queue item, returning a
+    /// classified outcome. The metadata-only fast path is tried first when the
+    /// pixels are known to be unchanged.
+    private func uploadSingleItem(_ item: UploadQueueItem, localId: String) async -> UploadOutcome {
+        // Metadata-only fast path: if we have a synced state entry with the same
+        // imageDataHash, the pixels haven't changed — skip re-uploading the bytes.
+        if !localId.isEmpty,
+           let syncedEntry = PhotoSyncPreferences.loadSyncedEntry(localId: localId),
+           syncedEntry.imageDataHash == item.imageDataHash {
             do {
-                let result = try await APIClient.shared.uploadPhoto(
-                    data: data,
-                    filename: item.filename,
-                    mimeType: mimeType,
+                let result = try await APIClient.shared.syncPhotoMetadata(
                     imageDataHash: item.imageDataHash,
                     fullHash: item.fullHash,
                     caption: item.caption,
@@ -339,45 +408,71 @@ public final class BackgroundSyncManager {
                     capturedAtString: item.capturedAtString,
                     assetLocalId: localId
                 )
-                PhotoSyncPreferences.saveSyncedStateEntry(
-                    localId: localId,
-                    imageDataHash: item.imageDataHash,
-                    fullHash: item.fullHash
-                )
-                PhotoSyncPreferences.recordUploadedPhoto(
-                    serverPhotoId: result.photoId,
-                    localIdentifier: localId
-                )
-                for albumId in item.targetAlbumIds {
-                    struct Body: Encodable { let albumId: Int; let photoId: Int }
-                    struct Resp: Decodable { let success: Bool }
-                    _ = try? await APIClient.shared.post(
-                        "/albums/photos",
-                        body: Body(albumId: albumId, photoId: result.photoId)
-                    ) as Resp
+                if case .updated(let photoId) = result {
+                    return .succeeded(photoId: photoId)
                 }
-                await UploadQueue.shared.markDone(id: item.id)
-                doneCount += 1
-            } catch APIError.duplicatePhoto(let existingId) {
-                if let existingId {
-                    PhotoSyncPreferences.saveSyncedStateEntry(
-                        localId: localId,
-                        imageDataHash: item.imageDataHash,
-                        fullHash: item.fullHash
-                    )
-                    PhotoSyncPreferences.recordUploadedPhoto(
-                        serverPhotoId: existingId,
-                        localIdentifier: localId
-                    )
-                }
-                await UploadQueue.shared.markDone(id: item.id)
-                doneCount += 1
+                // .notFound → server doesn't recognise the photo; fall through.
             } catch {
-                await UploadQueue.shared.markFailed(id: item.id, error: error.localizedDescription)
+                if Self.isCancellationError(error) { return .cancelled }
+                // Other errors → fall through to full upload below.
             }
-            if doneCount % 10 == 0 && doneCount > 0 { await UploadQueue.shared.purgeDone() }
         }
-        await UploadQueue.shared.purgeDone()
+
+        let data: Data
+        let mimeType: String
+        if let tempURL = item.tempFileURL, let tempData = try? Data(contentsOf: tempURL) {
+            data = tempData
+            mimeType = item.mimeType
+        } else if !localId.isEmpty,
+                  let asset = PHAsset.fetchAssets(withLocalIdentifiers: [localId], options: nil).firstObject,
+                  let (assetData, assetMime) = try? await PhotoSyncService.loadAssetData(asset) {
+            data = assetData
+            mimeType = assetMime
+        } else {
+            return .failed("Bilddaten nicht ladbar (Asset nicht in Mediathek?)")
+        }
+
+        do {
+            let result = try await APIClient.shared.uploadPhoto(
+                data: data,
+                filename: item.filename,
+                mimeType: mimeType,
+                imageDataHash: item.imageDataHash,
+                fullHash: item.fullHash,
+                caption: item.caption,
+                isFavorite: item.isFavorite,
+                capturedAtString: item.capturedAtString,
+                assetLocalId: localId
+            )
+            return .succeeded(photoId: result.photoId)
+        } catch APIError.duplicatePhoto(let existingId) {
+            // Server reports duplicate. Treat as success so we don't keep
+            // retrying — the dedup outcome is the same as a fresh insert.
+            return .succeeded(photoId: existingId ?? 0)
+        } catch {
+            if Self.isCancellationError(error) { return .cancelled }
+            return .failed(error.localizedDescription)
+        }
+    }
+
+    /// Recognises `URLSession`/`Task` cancellations and offline-network errors
+    /// so we can re-queue instead of mark-as-failed when the app is suspended
+    /// or the network briefly drops.
+    private static func isCancellationError(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        let ns = error as NSError
+        if ns.domain == NSURLErrorDomain {
+            switch ns.code {
+            case NSURLErrorCancelled,
+                 NSURLErrorNetworkConnectionLost,
+                 NSURLErrorNotConnectedToInternet,
+                 NSURLErrorTimedOut:
+                return true
+            default:
+                return false
+            }
+        }
+        return false
     }
 
     // MARK: - Task handler
