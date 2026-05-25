@@ -18,7 +18,7 @@ import {
   slugifyUserLogin,
   type DocumentLocationContext,
 } from "./documents.service";
-import { flattenTaxonomy, categoryTaxonomy } from "./taxonomy";
+import { flattenTaxonomy, categoryTaxonomy, type CategorySeed } from "./taxonomy";
 import { DOCUMENT_SERVICES } from "./scan-queue";
 import { DuplicateDocumentError } from "./import";
 import { SUPPORTED_EXTENSIONS } from "./documents.service";
@@ -353,6 +353,44 @@ describe("documents.text-extract looksLikeBrokenXref", () => {
     expect(
       looksLikeBrokenXref("pdftoppm exited 137: out of memory"),
     ).toBe(false);
+  });
+});
+
+describe("documents.taxonomy seed shape", () => {
+  function findBySlug(nodes: CategorySeed[], slug: string): CategorySeed | undefined {
+    for (const n of nodes) {
+      if (n.slug === slug) return n;
+      const child = n.children && findBySlug(n.children, slug);
+      if (child) return child;
+    }
+    return undefined;
+  }
+
+  it("includes the new Gesundheit subcategories for Pflege", () => {
+    const gesundheit = findBySlug(categoryTaxonomy, "gesundheit");
+    expect(gesundheit?.children?.map((c) => c.slug)).toEqual(
+      expect.arrayContaining(["gesundheit-pflege", "gesundheit-pflegekasse"]),
+    );
+  });
+
+  it("includes the new top-level Betreuung branch with its sections", () => {
+    const betreuung = findBySlug(categoryTaxonomy, "betreuung");
+    expect(betreuung?.icon).toBe("pi-id-card");
+    expect(betreuung?.children?.map((c) => c.slug)).toEqual([
+      "betreuung-bestellung",
+      "betreuung-rechenschaftsbericht",
+      "betreuung-vermoegensverzeichnis",
+      "betreuung-genehmigung",
+      "betreuung-korrespondenz",
+    ]);
+  });
+
+  it("flattens every new node with the right parent_slug", () => {
+    const rows = flattenTaxonomy();
+    const bySlug = new Map(rows.map((r) => [r.slug, r]));
+    expect(bySlug.get("gesundheit-pflege")?.parent_slug).toBe("gesundheit");
+    expect(bySlug.get("betreuung-rechenschaftsbericht")?.parent_slug).toBe("betreuung");
+    expect(bySlug.get("betreuung")?.parent_slug).toBeNull();
   });
 });
 

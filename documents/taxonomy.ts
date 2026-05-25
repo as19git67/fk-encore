@@ -84,6 +84,8 @@ export const categoryTaxonomy: CategorySeed[] = [
       { slug: "gesundheit-arzt", name: "Arztrechnungen" },
       { slug: "gesundheit-rezepte", name: "Rezepte" },
       { slug: "gesundheit-kasse", name: "Krankenkasse" },
+      { slug: "gesundheit-pflege", name: "Pflegeleistungen (Sozialstation)" },
+      { slug: "gesundheit-pflegekasse", name: "Pflegekasse" },
     ],
   },
   {
@@ -133,6 +135,18 @@ export const categoryTaxonomy: CategorySeed[] = [
     children: [
       { slug: "behoerden-bescheide", name: "Bescheide" },
       { slug: "behoerden-steuerbescheid", name: "Steuerbescheide" },
+    ],
+  },
+  {
+    slug: "betreuung",
+    name: "Rechtliche Betreuung",
+    icon: "pi-id-card",
+    children: [
+      { slug: "betreuung-bestellung", name: "Bestellungsurkunde / Betreuerausweis" },
+      { slug: "betreuung-rechenschaftsbericht", name: "Rechenschaftsbericht" },
+      { slug: "betreuung-vermoegensverzeichnis", name: "Vermögensverzeichnis" },
+      { slug: "betreuung-genehmigung", name: "Gerichtliche Genehmigung" },
+      { slug: "betreuung-korrespondenz", name: "Korrespondenz Betreuungsgericht" },
     ],
   },
   {
