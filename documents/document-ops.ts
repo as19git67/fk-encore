@@ -275,6 +275,13 @@ async function replaceAiTaxSections(
  * Slices the extracted text into ~1500-char chunks, embeds each via
  * the LLM service, and upserts into `document_embeddings`. Skips
  * documents with no text (embeddings on an empty string are useless).
+ *
+ * The first chunk is prefixed with a `Tags: …` line whenever the
+ * document has any tags. This gives semantic search a hit on
+ * subject-person tags like `mutter` even though those words do not
+ * appear in the OCR text. Tag changes after the initial embed do not
+ * automatically re-embed — re-classify the document if a tag-based
+ * search query should pick it up.
  */
 export async function runEmbed(documentId: number): Promise<{ chunks: number } | { deferred: true }> {
   const row = await getDocumentOrThrow(documentId);
@@ -284,6 +291,11 @@ export async function runEmbed(documentId: number): Promise<{ chunks: number } |
   const chunks = chunkText(text, EMBED_CHUNK_CHARS, EMBED_CHUNK_OVERLAP_CHARS)
     .slice(0, EMBED_MAX_CHUNKS);
   if (chunks.length === 0) return { chunks: 0 };
+
+  const tagNames = await loadDocumentTagNames(documentId);
+  if (tagNames.length > 0) {
+    chunks[0] = `Tags: ${tagNames.join(", ")}\n\n${chunks[0]}`;
+  }
 
   // `kind: "passage"` is the default but spelt out so the asymmetric
   // contract with the search-side `embedTexts(_, "query")` call is
@@ -371,6 +383,16 @@ async function loadTaxonomyForClassifier(): Promise<TaxonomyEntry[]> {
     name: r.name,
     parent_slug: r.parent_id != null ? byId.get(r.parent_id)?.slug ?? null : null,
   }));
+}
+
+async function loadDocumentTagNames(documentId: number): Promise<string[]> {
+  const rows = await db
+    .select({ name: documentTags.name })
+    .from(documentTagLinks)
+    .innerJoin(documentTags, eq(documentTags.id, documentTagLinks.tag_id))
+    .where(eq(documentTagLinks.document_id, documentId))
+    .orderBy(documentTags.name);
+  return rows.map((r) => r.name);
 }
 
 async function replaceTagLinks(documentId: number, tagNames: readonly string[]): Promise<void> {
