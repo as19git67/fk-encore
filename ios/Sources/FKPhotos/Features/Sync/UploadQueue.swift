@@ -17,6 +17,10 @@ public struct UploadQueueItem: Codable, Identifiable, Sendable {
     public let isFavorite: Bool
     public let capturedAtString: String
     public let targetAlbumIds: [Int]
+    /// The iOS PHAssetCollection.localIdentifier this item was enqueued from.
+    /// Used to advance per-album sync watermarks on successful upload. Nil for
+    /// Share-Extension items and the "entire library" sentinel.
+    public let sourceIosAlbumId: String?
     public var status: Status
     public var retryCount: Int
     public var lastError: String?
@@ -40,6 +44,7 @@ public struct UploadQueueItem: Codable, Identifiable, Sendable {
         isFavorite: Bool,
         capturedAtString: String,
         targetAlbumIds: [Int] = [],
+        sourceIosAlbumId: String? = nil,
         status: Status = .pending,
         retryCount: Int = 0,
         lastError: String? = nil
@@ -55,6 +60,7 @@ public struct UploadQueueItem: Codable, Identifiable, Sendable {
         self.isFavorite = isFavorite
         self.capturedAtString = capturedAtString
         self.targetAlbumIds = targetAlbumIds
+        self.sourceIosAlbumId = sourceIosAlbumId
         self.status = status
         self.retryCount = retryCount
         self.lastError = lastError
@@ -76,8 +82,10 @@ public struct UploadQueueItem: Codable, Identifiable, Sendable {
             isFavorite: isFavorite,
             capturedAtString: capturedAtString,
             targetAlbumIds: targetAlbumIds,
+            sourceIosAlbumId: sourceIosAlbumId,
             status: status,
-            retryCount: retryCount
+            retryCount: retryCount,
+            lastError: lastError
         )
     }
 }
@@ -131,8 +139,65 @@ actor UploadQueue {
         persist()
     }
 
+    /// Pending items not yet claimed by a drain run. Items in `.uploading`
+    /// are intentionally excluded so two concurrent drains don't pick up the
+    /// same work — exactly the race that caused duplicate server-side photos.
     func pendingItems() -> [UploadQueueItem] {
-        items.filter { $0.status == .pending || $0.status == .uploading }
+        items.filter { $0.status == .pending }
+    }
+
+    /// Counts items still waiting or currently being uploaded. Used by the UI
+    /// to decide whether to show the "in progress" affordance.
+    func inFlightCount() -> Int {
+        items.filter { $0.status == .pending || $0.status == .uploading }.count
+    }
+
+    /// Atomically transitions the next `.pending` item to `.uploading` and
+    /// returns it. Returns nil when nothing is left to claim. The claim is the
+    /// concurrency boundary — once an item is `.uploading`, other drain runs
+    /// can't see it via `pendingItems()`.
+    func claimNextPending() -> UploadQueueItem? {
+        guard let idx = items.firstIndex(where: { $0.status == .pending }) else { return nil }
+        items[idx].status = .uploading
+        persist()
+        return items[idx]
+    }
+
+    /// Reverts an item from `.uploading` back to `.pending`. Used when an
+    /// upload was cancelled (app suspended mid-flight) so the next drain run
+    /// picks it up instead of marking it as a permanent failure.
+    func markPending(id: UUID) {
+        guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
+        items[idx].status = .pending
+        items[idx].lastError = nil
+        persist()
+    }
+
+    /// Resets every `.failed` item whose last error looks transient (cancelled,
+    /// timed out, offline) back to `.pending`. Called when the app returns to
+    /// the foreground so background-suspension failures retry automatically
+    /// instead of accumulating in the UI as "failed".
+    func requeueTransientFailures() {
+        var changed = false
+        for idx in items.indices where items[idx].status == .failed {
+            if Self.isTransientErrorMessage(items[idx].lastError) {
+                items[idx].status = .pending
+                items[idx].lastError = nil
+                changed = true
+            }
+        }
+        if changed { persist() }
+    }
+
+    /// Pattern-matches the localised `URLError` / `CancellationError` text so
+    /// we don't need to thread typed errors through the persistence layer. The
+    /// list is intentionally lenient — a false positive merely retries an upload.
+    private static func isTransientErrorMessage(_ message: String?) -> Bool {
+        guard let m = message?.lowercased(), !m.isEmpty else { return true }
+        return m.contains("cancelled") || m.contains("canceled")
+            || m.contains("offline") || m.contains("network connection was lost")
+            || m.contains("timed out") || m.contains("timeout")
+            || m.contains("could not connect") || m.contains("internet connection")
     }
 
     func markDone(id: UUID) {
@@ -271,6 +336,13 @@ final class UploadQueueObserver {
 
     var hasVisibleItems: Bool {
         !pendingItems.isEmpty || !failedItems.isEmpty
+    }
+
+    /// True when at least one item is currently being uploaded by a drain run.
+    /// Used to show "wird hochgeladen" affordances even if the queue display
+    /// otherwise hides claimed items.
+    var hasActiveUpload: Bool {
+        items.contains { $0.status == .uploading }
     }
 
     func startObserving() {

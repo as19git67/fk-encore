@@ -20,6 +20,14 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         // Schedule the next sync whenever the app moves to the background.
         BackgroundSyncManager.shared.scheduleNextSyncIfNeeded()
     }
+
+    func applicationWillEnterForeground(_ application: UIApplication) {
+        // Items the system aborted mid-upload (background suspension cancels
+        // the URLSession task) get marked as failed with a transient error
+        // message. Reset those back to `.pending` and kick off another drain
+        // so the user doesn't see ghost failures on every app re-open.
+        BackgroundSyncManager.shared.handleForegroundResume()
+    }
 }
 
 // MARK: - App Entry Point
