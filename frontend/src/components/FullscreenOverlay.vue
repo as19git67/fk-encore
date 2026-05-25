@@ -429,6 +429,9 @@ function scheduleIdleAdvance() {
   // timer resumes from a watcher when the overlay closes.
   if (transformEditorVisible.value) return
   if (props.detailsActive) return
+  // Wait until the current photo has finished loading; the watcher on
+  // `currentLoaded` reschedules once decoding is done.
+  if (!currentLoaded.value) return
   idleTimer = setTimeout(() => {
     idleTimer = null
     if (props.nextPhoto) emit('next')
@@ -446,6 +449,8 @@ watch(() => props.nextPhoto, () => scheduleIdleAdvance())
 // Reschedule (or pause) when the editor / details overlay toggles.
 watch(transformEditorVisible, () => scheduleIdleAdvance())
 watch(() => props.detailsActive, () => scheduleIdleAdvance())
+// Start the countdown only once the current photo is fully loaded.
+watch(currentLoaded, () => scheduleIdleAdvance())
 
 onMounted(() => {
   scheduleIdleAdvance()
