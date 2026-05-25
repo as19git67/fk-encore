@@ -256,8 +256,10 @@ class ScanWorker {
       if (this.service === "face_detection") {
         hasFacesForPhoto(job.photo_id).then((has) => {
           if (!has) return;
-          // quality is a global service — userId=0 is ignored for global enqueue
-          return enqueuePhotoScan(job.photo_id, 0, ["quality"]).then(() => {
+          // quality is a global service — userId=0 is ignored for global enqueue.
+          // Inherit the originating job's priority so a fresh upload's follow-up
+          // quality pass does not get demoted behind older background work.
+          return enqueuePhotoScan(job.photo_id, 0, ["quality"], false, job.priority).then(() => {
             qualityWorker.tick();
           });
         }).catch((err) =>
