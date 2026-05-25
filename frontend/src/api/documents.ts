@@ -370,6 +370,43 @@ export function reclassifyTaxSection(slug: string, includeReviewed = false) {
   )
 }
 
+// ─── Subject persons (Bezugspersonen) ────────────────────────────────────
+
+export interface SubjectPerson {
+  id: number
+  full_name: string
+  relation_tag: string
+  created_at: string
+  updated_at: string
+}
+
+export function listSubjectPersons() {
+  return apiFetch<{ items: SubjectPerson[] }>('/documents/subject-persons')
+}
+
+export function createSubjectPerson(input: { full_name: string; relation_tag: string }) {
+  return apiFetch<SubjectPerson>('/documents/subject-persons', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export function updateSubjectPerson(
+  id: number,
+  patch: { full_name?: string; relation_tag?: string },
+) {
+  return apiFetch<SubjectPerson>(`/documents/subject-persons/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ id, ...patch }),
+  })
+}
+
+export function deleteSubjectPerson(id: number) {
+  return apiFetch<{ success: boolean }>(`/documents/subject-persons/${id}`, {
+    method: 'DELETE',
+  })
+}
+
 // ─── Groups ──────────────────────────────────────────────────────────────
 
 export interface GroupSummary {

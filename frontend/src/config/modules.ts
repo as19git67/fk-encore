@@ -122,6 +122,12 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'documents.manage_taxonomy' },
       },
       {
+        path: 'bezugspersonen',
+        name: 'dokumente-bezugspersonen',
+        component: () => import('../views/SubjectPersonsView.vue'),
+        meta: { permission: 'documents.view' },
+      },
+      {
         path: 'hilfe',
         name: 'dokumente-hilfe',
         component: () => import('../views/DocumentsHelpView.vue'),
@@ -146,6 +152,7 @@ export const modules: ModuleConfig[] = [
       { label: 'Steuer-Hints', icon: 'pi pi-sparkles', routeName: 'dokumente-steuer-hints', permission: 'documents.manage_taxonomy' },
       { label: 'Hochladen', icon: 'pi pi-upload', routeName: 'dokumente-upload', permission: 'documents.upload' },
       { label: 'Kategorie-Vorschläge', icon: 'pi pi-folder-open', routeName: 'dokumente-kategorie-vorschlaege', permission: 'documents.manage_taxonomy' },
+      { label: 'Bezugspersonen', icon: 'pi pi-id-card', routeName: 'dokumente-bezugspersonen', permission: 'documents.view' },
       { label: 'Gruppen', icon: 'pi pi-users', routeName: 'dokumente-gruppen', permission: 'groups.view' },
       { label: 'Hilfe', icon: 'pi pi-question-circle', routeName: 'dokumente-hilfe', permission: 'documents.view' },
     ],
