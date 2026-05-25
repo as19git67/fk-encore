@@ -742,9 +742,15 @@ export const documents = pgTable("documents", {
   // cleared whenever the document re-enters the pipeline (reclassify) so a
   // stale error never lingers on a healthy document.
   last_error: text("last_error"),
+  // Cached, lowercase, space-separated list of the document's tag names.
+  // Kept in sync by triggers on document_tag_links and document_tags
+  // (migration 0090) so the generated text_tsv column can fold tags
+  // into the full-text index without referencing other tables.
+  tags_text: text("tags_text").notNull().default(""),
   // NOTE: the generated `text_tsv tsvector` column and its GIN index are
-  // added by migration 0025 and accessed only via raw SQL (drizzle-orm has
-  // no first-class tsvector support).
+  // (re)defined by migration 0090 over title || sender || tags_text ||
+  // extracted_text and accessed only via raw SQL (drizzle-orm has no
+  // first-class tsvector support).
 });
 
 // N:M mapping of a document to one or more German tax-return sections
