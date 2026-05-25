@@ -6,6 +6,12 @@ struct ServerAlbumPickerView: View {
     let title: String
     @Binding var selectedAlbumId: Int?
     var disabledIds: Set<Int> = []
+    /// Called immediately after a new album is created and before the view
+    /// dismisses, so the parent can append it to its own `serverAlbums` state.
+    /// Without this the parent's name lookup falls back to "Kein Album" for
+    /// the new id until the parent's next /albums refresh — which made the
+    /// just-created album appear unassigned in the settings list.
+    var onAlbumCreated: (Album) -> Void = { _ in }
 
     @Environment(\.dismiss) private var dismiss
 
@@ -136,11 +142,40 @@ struct ServerAlbumPickerView: View {
 
     private func createAndSelect(name: String) async {
         struct Body: Encodable { let name: String; let description: String? }
-        // POST /albums returns only DB row fields (no is_shared, newest_photo_at etc.),
-        // so decode only the id we actually need rather than the full Album type.
-        struct CreatedAlbum: Decodable { let id: Int }
+        // POST /albums returns the DB row without aggregate columns
+        // (is_shared, newest_photo_at, photo_count, etc.). Decode the
+        // populated fields and synthesise the rest so we can construct a
+        // full Album object for the parent's lookup state.
+        struct CreatedAlbum: Decodable {
+            let id: Int
+            let user_id: Int
+            let name: String
+            let description: String?
+            let display_mode: String?
+            let created_at: String?
+            let updated_at: String?
+        }
         do {
             let created: CreatedAlbum = try await APIClient.shared.post("/albums", body: Body(name: name, description: nil))
+            // Append to our local list and notify the parent so name lookups
+            // succeed before the next /albums round-trip completes.
+            let album = Album(
+                id: created.id,
+                user_id: created.user_id,
+                name: created.name,
+                description: created.description,
+                cover_photo_id: nil,
+                cover_filename: nil,
+                display_mode: created.display_mode ?? "grid",
+                newest_photo_at: nil,
+                oldest_photo_at: nil,
+                photo_count: 0,
+                is_shared: false,
+                created_at: created.created_at ?? "",
+                updated_at: created.updated_at ?? ""
+            )
+            albums.append(album)
+            onAlbumCreated(album)
             // Setting pendingAlbumId triggers .onChange which calls dismiss() on the main render cycle
             pendingAlbumId = created.id
         } catch {
