@@ -66,12 +66,22 @@ export interface Classification {
   tax_sections: TaxAssignment[];
 }
 
+export interface SubjectPersonRequestEntry {
+  full_name: string;
+  relation_tag: string;
+}
+
 export interface ClassifyRequest {
   text: string;
   taxonomy: TaxonomyEntry[];
   // When provided, the classifier additionally decides tax-relevance,
   // tax year, and a list of matching sections. Omit/empty to disable.
   tax_sections?: TaxSectionRequestEntry[];
+  // Per-user "Bezugspersonen" — name → relationship tag mappings.
+  // When the OCR text mentions one of these names the classifier is
+  // instructed to add the corresponding relation_tag to its `tags`
+  // output. Omit/empty to disable that behaviour entirely.
+  subject_persons?: SubjectPersonRequestEntry[];
 }
 
 /**

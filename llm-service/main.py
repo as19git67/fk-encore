@@ -374,6 +374,16 @@ class TaxSectionEntry(BaseModel):
     hint: str | None = None
 
 
+class SubjectPersonEntry(BaseModel):
+    """Per-user mapping of a literal name as it appears on documents to
+    the user's relationship tag (e.g. "Erika Mustermann" → "mutter").
+    When the OCR text mentions ``full_name`` the classifier is asked
+    to append ``relation_tag`` to its ``tags`` output."""
+
+    full_name: str
+    relation_tag: str
+
+
 class ClassifyRequest(BaseModel):
     text: str = Field(..., min_length=1)
     taxonomy: list[TaxonomyNode] = Field(..., min_length=1)
@@ -381,6 +391,10 @@ class ClassifyRequest(BaseModel):
     # whether the document is relevant for the German income-tax return and
     # which section(s) it belongs to. Empty list = tax detection disabled.
     tax_sections: list[TaxSectionEntry] = Field(default_factory=list)
+    # Per-user "Bezugspersonen" — populates `subject_persons` block in
+    # the prompt so address/recipient matches auto-tag the document.
+    # Empty list = no Bezugsperson hints; prompt section is omitted.
+    subject_persons: list[SubjectPersonEntry] = Field(default_factory=list)
     # Optional hints: sender hint from OCR, upload filename, user locale.
     locale: str = "de"
     max_tags: int = 6
@@ -427,6 +441,25 @@ Felder:
 
 Halluziniere keine Daten, Beträge oder Absender. Bei Unsicherheit: null bzw.
 niedrige confidence."""
+
+
+_SUBJECT_PERSONS_SYSTEM_PROMPT = """
+
+BEZUGSPERSONEN (nur wenn dir unten eine Liste von Bezugspersonen gezeigt wird)
+Der Nutzer verwaltet Dokumente, die ihn selbst oder ihm nahestehende
+Personen (Eltern, Kinder, Betreute) betreffen. Du bekommst eine Liste
+`Bezugspersonen` mit Name → Beziehungs-Tag.
+
+Wenn das Dokument eine der genannten Personen klar adressiert oder
+inhaltlich betrifft (Patient, Versicherte, Mieter, Empfänger, Betreuter),
+ergänze das passende Beziehungs-Tag in `tags`. Nur wenn der Name
+tatsächlich auf dem Dokument steht — keine Vermutungen.
+
+Adressmatching ist tolerant: Vor- und Nachname in beliebiger Reihenfolge,
+mit oder ohne Anrede ("Frau Erika Mustermann", "Mustermann, Erika"),
+zählt als Treffer. Reine Teiltreffer ("nur ein Vorname Erika") nur dann,
+wenn aus dem Kontext zweifelsfrei dieselbe Person gemeint ist.
+"""
 
 
 _TAX_SYSTEM_PROMPT = """
@@ -481,6 +514,14 @@ _TAX_GROUP_LABELS: dict[str, str] = {
     "rahmen": "Rahmen / Stammdaten",
 }
 _TAX_GROUP_ORDER: tuple[str, ...] = ("einkuenfte", "abzuege", "bescheid", "rahmen")
+
+
+def _subject_persons_outline(entries: list[SubjectPersonEntry]) -> str:
+    """Render the Bezugspersonen list. Empty input yields '' so the
+    caller can omit the prompt section entirely."""
+    if not entries:
+        return ""
+    return "\n".join(f"- {e.full_name} → {e.relation_tag}" for e in entries)
 
 
 def _tax_sections_outline(entries: list[TaxSectionEntry]) -> str:
@@ -569,7 +610,12 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
     text = req.text[:6000]
 
     tax_active = bool(req.tax_sections)
-    system_prompt = _SYSTEM_PROMPT + (_TAX_SYSTEM_PROMPT if tax_active else "")
+    subjects_active = bool(req.subject_persons)
+    system_prompt = (
+        _SYSTEM_PROMPT
+        + (_TAX_SYSTEM_PROMPT if tax_active else "")
+        + (_SUBJECT_PERSONS_SYSTEM_PROMPT if subjects_active else "")
+    )
 
     tax_block = (
         f"\n\nSteuer-Sektionen (slug: Name — Hinweis):\n{_tax_sections_outline(req.tax_sections)}"
@@ -577,9 +623,16 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
         else ""
     )
 
+    subjects_block = (
+        f"\n\nBezugspersonen (Name → Beziehungs-Tag):\n{_subject_persons_outline(req.subject_persons)}"
+        if subjects_active
+        else ""
+    )
+
     def _build_user_prompt(body: str) -> str:
         return (
-            f"Taxonomie (slug: Name):\n{_taxonomy_outline(req.taxonomy)}{tax_block}\n\n"
+            f"Taxonomie (slug: Name):\n{_taxonomy_outline(req.taxonomy)}"
+            f"{tax_block}{subjects_block}\n\n"
             f"Max. Tags: {req.max_tags}\n\n"
             f"Dokumenttext:\n---\n{body}\n---"
         )
