@@ -824,8 +824,11 @@ enum ShareUploadQueueWriter {
     }
 
     static func pendingItems() -> [PendingItem] {
+        // Exclude "uploading" so we don't pick up an item the main app is
+        // currently in the middle of uploading — that race was one of the
+        // sources of duplicate server-side photos.
         loadAll()
-            .filter { $0.status == "pending" || $0.status == "uploading" }
+            .filter { $0.status == "pending" }
             .compactMap { item in
                 guard let url = item.tempFileURL else { return nil }
                 return PendingItem(

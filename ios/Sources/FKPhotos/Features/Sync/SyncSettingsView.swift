@@ -10,12 +10,30 @@ struct SyncSettingsView: View {
     @State private var albumServerMappings: [String: Int] = PhotoSyncPreferences.albumMappings
     @State private var serverAlbums: [Album] = []
     @State private var iosAlbumNames: [String: String] = [:]
+    @State private var iosAlbumAssetCounts: [String: Int] = [:]
     @State private var showAuthAlert = false
     @State private var refreshTick   = 0  // Bump to re-read status values
     @State private var showResetConfirm = false
     @State private var isSyncing     = false
     @State private var syncError: String?
     @State private var queueObserver = UploadQueueObserver()
+    @State private var progress = SyncProgress.shared
+    /// Newly added iOS albums waiting for the user's "Alle Fotos hochladen"
+    /// vs. "Nur neue ab jetzt" decision (issue: previously the watermark was
+    /// set to NOW unconditionally, so users never got a full first-time sync
+    /// without manually swiping-to-reset on every album). One album is shown
+    /// at a time in the confirmation dialog; the rest queue up here.
+    @State private var pendingInitialSyncQueue: [PendingInitialSync] = []
+    /// The album currently shown in the confirmation dialog, if any. Driving
+    /// the dialog off an Optional (rather than `!queue.isEmpty`) lets SwiftUI
+    /// correctly re-present the dialog for each subsequent album.
+    @State private var currentInitialSync: PendingInitialSync? = nil
+
+    struct PendingInitialSync: Identifiable, Equatable {
+        let id: String  // iOS album localIdentifier
+        let displayName: String
+        let assetCount: Int
+    }
 
     private var lastSyncDate:   Date? { PhotoSyncPreferences.lastSyncDate }
     private var uploadedCount:  Int   { PhotoSyncPreferences.uploadedCount }
@@ -37,9 +55,12 @@ struct SyncSettingsView: View {
                             .onChange(of: selectedAlbumIds) { oldValue, newValue in
                                 PhotoSyncPreferences.selectedAlbumIds = newValue
                                 let added = newValue.subtracting(oldValue)
-                                let now = Date()
-                                for id in added {
-                                    PhotoSyncPreferences.setAlbumSyncDate(now, for: id)
+                                if !added.isEmpty {
+                                    // Surface the "full sync vs. only new"
+                                    // decision via the confirmation dialog
+                                    // instead of silently locking the user
+                                    // into "only new" — see issue #N.
+                                    enqueueInitialSyncDecisions(for: added)
                                 }
                                 let removed = albumServerMappings.keys.filter { !newValue.contains($0) }
                                 if !removed.isEmpty {
@@ -68,14 +89,22 @@ struct SyncSettingsView: View {
                         ForEach(sortedSelectedAlbumIds, id: \.self) { iosId in
                             NavigationLink {
                                 ServerAlbumPickerView(
-                                    title: iosAlbumNames[iosId] ?? "Album",
+                                    title: displayName(for: iosId),
                                     selectedAlbumId: serverAlbumBinding(for: iosId),
-                                    disabledIds: cycleDisabledIds(forIosAlbum: iosId)
+                                    disabledIds: cycleDisabledIds(forIosAlbum: iosId),
+                                    onAlbumCreated: { album in
+                                        // Append immediately so the parent's
+                                        // name lookup succeeds before the
+                                        // next /albums refresh completes.
+                                        if !serverAlbums.contains(where: { $0.id == album.id }) {
+                                            serverAlbums.append(album)
+                                        }
+                                    }
                                 )
                             } label: {
                                 VStack(alignment: .leading, spacing: 4) {
                                     HStack {
-                                        Text(iosAlbumNames[iosId] ?? iosId)
+                                        Text(displayName(for: iosId))
                                         Spacer()
                                         Text(serverAlbumName(for: albumServerMappings[iosId]) ?? "Kein Album")
                                             .foregroundStyle(albumServerMappings[iosId] != nil ? .secondary : .tertiary)
@@ -162,13 +191,19 @@ struct SyncSettingsView: View {
                         HStack {
                             Text("Jetzt synchronisieren")
                             Spacer()
-                            if isSyncing {
+                            if isSyncing || progress.isActive {
                                 ProgressView()
                             }
                         }
                     }
                     .buttonStyle(.borderless)
                     .disabled(isSyncing)
+
+                    if progress.isActive, !progress.label.isEmpty {
+                        Text(progress.label)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
 
                     if let error = syncError {
                         Text(error)
@@ -301,6 +336,32 @@ struct SyncSettingsView: View {
                 BackgroundSyncManager.shared.scheduleNextSyncIfNeeded()  // cancels when disabled
             }
         }
+        .confirmationDialog(
+            initialSyncDialogTitle,
+            isPresented: Binding(
+                get: { currentInitialSync != nil },
+                // SwiftUI auto-sets this to false after any button tap or
+                // swipe-down dismiss. Whichever way it happens, advance to
+                // the next pending album (or clear the dialog).
+                set: { isShown in if !isShown { advanceInitialSyncDialog() } }
+            ),
+            titleVisibility: .visible,
+            presenting: currentInitialSync
+        ) { item in
+            Button("Alle Fotos hochladen") {
+                // Just record the decision; the binding's `set(false)` from
+                // SwiftUI's auto-dismiss is what advances to the next album.
+                PhotoSyncPreferences.resetAlbumSyncDate(for: item.id)
+            }
+            Button("Nur neue ab jetzt") {
+                // No-op: the watermark is already pre-set to NOW.
+            }
+            Button("Abbrechen", role: .cancel) {
+                // Same as "Nur neue ab jetzt" — keep the safe default.
+            }
+        } message: { item in
+            Text(initialSyncDialogMessage(for: item))
+        }
     }
 
     // MARK: - Helpers
@@ -316,8 +377,80 @@ struct SyncSettingsView: View {
     }
 
     private var sortedSelectedAlbumIds: [String] {
+        // "Gesamte Mediathek" sentinel always sorts to the top.
         Array(selectedAlbumIds).sorted { id1, id2 in
-            (iosAlbumNames[id1] ?? id1) < (iosAlbumNames[id2] ?? id2)
+            if id1 == PhotoSyncPreferences.allLibrarySentinel { return true }
+            if id2 == PhotoSyncPreferences.allLibrarySentinel { return false }
+            return displayName(for: id1) < displayName(for: id2)
+        }
+    }
+
+    /// The visible label for a selected album row. Uses the iOS album title
+    /// when known, falls back to the localIdentifier, and special-cases the
+    /// "all library" sentinel.
+    private func displayName(for iosId: String) -> String {
+        if iosId == PhotoSyncPreferences.allLibrarySentinel {
+            return "Gesamte Mediathek"
+        }
+        return iosAlbumNames[iosId] ?? iosId
+    }
+
+    // MARK: - Initial-sync decision
+
+    /// Captures the per-album choice and switches the watermark accordingly.
+    ///
+    /// We pre-set the watermark to NOW (the safe "nur neue" default) so any
+    /// path that bypasses the dialog — user dismisses it, or the app exits
+    /// before deciding — doesn't accidentally trigger a full-library upload.
+    /// The user explicitly choosing "Alle Fotos hochladen" then clears the
+    /// watermark to enumerate the full history.
+    private func enqueueInitialSyncDecisions(for ids: Set<String>) {
+        let now = Date()
+        for id in ids {
+            PhotoSyncPreferences.setAlbumSyncDate(now, for: id)
+        }
+        Task {
+            // Pre-fetch counts so the dialog can tell the user how many photos
+            // a "full sync" would actually mean.
+            await loadIosAlbumNames()
+            let pending = ids.map { id in
+                PendingInitialSync(
+                    id: id,
+                    displayName: displayName(for: id),
+                    assetCount: iosAlbumAssetCounts[id] ?? 0
+                )
+            }
+            await MainActor.run {
+                pendingInitialSyncQueue.append(contentsOf: pending)
+                if currentInitialSync == nil {
+                    advanceInitialSyncDialog()
+                }
+            }
+        }
+    }
+
+    private var initialSyncDialogTitle: String {
+        guard let item = currentInitialSync else { return "" }
+        return "Album \"\(item.displayName)\""
+    }
+
+    private func initialSyncDialogMessage(for item: PendingInitialSync) -> String {
+        if item.id == PhotoSyncPreferences.allLibrarySentinel {
+            return "Sollen alle Fotos der Mediathek hochgeladen werden oder nur neue ab jetzt?"
+        }
+        if item.assetCount > 0 {
+            return "Sollen alle \(item.assetCount) Fotos dieses Albums hochgeladen werden oder nur neue ab jetzt?"
+        }
+        return "Sollen alle bisherigen Fotos hochgeladen werden oder nur neue ab jetzt?"
+    }
+
+    /// Pops the next pending album into `currentInitialSync`, or sets it nil
+    /// when the queue is drained. The dialog binding observes the Optional.
+    private func advanceInitialSyncDialog() {
+        if pendingInitialSyncQueue.isEmpty {
+            currentInitialSync = nil
+        } else {
+            currentInitialSync = pendingInitialSyncQueue.removeFirst()
         }
     }
 
@@ -349,21 +482,34 @@ struct SyncSettingsView: View {
     }
 
     private func loadIosAlbumNames() async {
-        let ids = Array(selectedAlbumIds)
-        guard !ids.isEmpty else { return }
-        iosAlbumNames = await withCheckedContinuation { continuation in
+        let ids = Array(selectedAlbumIds).filter { $0 != PhotoSyncPreferences.allLibrarySentinel }
+        let needsSentinelCount = selectedAlbumIds.contains(PhotoSyncPreferences.allLibrarySentinel)
+
+        let loaded: (names: [String: String], counts: [String: Int]) = await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
-                var result: [String: String] = [:]
-                PHAssetCollection
-                    .fetchAssetCollections(withLocalIdentifiers: ids, options: nil)
-                    .enumerateObjects { collection, _, _ in
-                        if let title = collection.localizedTitle {
-                            result[collection.localIdentifier] = title
+                var names: [String: String] = [:]
+                var counts: [String: Int] = [:]
+                let imageFilter = PHFetchOptions()
+                imageFilter.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
+
+                if !ids.isEmpty {
+                    PHAssetCollection
+                        .fetchAssetCollections(withLocalIdentifiers: ids, options: nil)
+                        .enumerateObjects { collection, _, _ in
+                            if let title = collection.localizedTitle {
+                                names[collection.localIdentifier] = title
+                            }
+                            counts[collection.localIdentifier] = PHAsset.fetchAssets(in: collection, options: imageFilter).count
                         }
-                    }
-                continuation.resume(returning: result)
+                }
+                if needsSentinelCount {
+                    counts[PhotoSyncPreferences.allLibrarySentinel] = PHAsset.fetchAssets(with: .image, options: nil).count
+                }
+                continuation.resume(returning: (names, counts))
             }
         }
+        iosAlbumNames = loaded.names
+        iosAlbumAssetCounts = loaded.counts
     }
 }
 
@@ -372,19 +518,37 @@ struct SyncSettingsView: View {
 struct AlbumPickerView: View {
     @Binding var selectedIds: Set<String>
 
-    @State private var albums: [(collection: PHAssetCollection, count: Int)] = []
+    /// One row in the picker. `id` is the sentinel for the synthetic "all
+    /// library" entry; otherwise it equals `collection.localIdentifier`.
+    struct PickerEntry: Identifiable, Equatable {
+        let id: String
+        let collection: PHAssetCollection?  // nil for the all-library row
+        let title: String
+        let count: Int
+        /// Disambiguates name collisions in the UI (e.g. "Aufnahmen (Smart)").
+        let suffix: String?
+        var displayTitle: String {
+            suffix.map { "\(title) (\($0))" } ?? title
+        }
+        static func == (lhs: PickerEntry, rhs: PickerEntry) -> Bool { lhs.id == rhs.id }
+    }
+
+    @State private var entries: [PickerEntry] = []
     @State private var isLoading = true
     @State private var searchText = ""
 
-    private var filteredAlbums: [(collection: PHAssetCollection, count: Int)] {
+    private var filteredEntries: [PickerEntry] {
         let base = searchText.isEmpty
-            ? albums
-            : albums.filter { ($0.collection.localizedTitle ?? "").localizedCaseInsensitiveContains(searchText) }
+            ? entries
+            : entries.filter { $0.displayTitle.localizedCaseInsensitiveContains(searchText) }
         return base.sorted { a, b in
-            let aSelected = selectedIds.contains(a.collection.localIdentifier)
-            let bSelected = selectedIds.contains(b.collection.localIdentifier)
+            // Selected first; then the all-library sentinel; then alphabetical.
+            let aSelected = selectedIds.contains(a.id)
+            let bSelected = selectedIds.contains(b.id)
             if aSelected != bSelected { return aSelected }
-            return (a.collection.localizedTitle ?? "") < (b.collection.localizedTitle ?? "")
+            if a.collection == nil { return true }
+            if b.collection == nil { return false }
+            return a.displayTitle.localizedCaseInsensitiveCompare(b.displayTitle) == .orderedAscending
         }
     }
 
@@ -413,38 +577,37 @@ struct AlbumPickerView: View {
                     ProgressView("Alben laden…")
                         .frame(maxWidth: .infinity)
                         .padding()
-                } else if albums.isEmpty {
+                } else if entries.isEmpty {
                     ContentUnavailableView {
                         Label("Keine Alben", systemImage: "photo.on.rectangle.angled")
                     } description: {
                         Text("Es wurden keine Alben mit Fotos gefunden.")
                     }
-                } else if filteredAlbums.isEmpty {
+                } else if filteredEntries.isEmpty {
                     ContentUnavailableView {
                         Label("Keine Treffer", systemImage: "magnifyingglass")
                     } description: {
                         Text("Kein Album entspricht \"\(searchText)\".")
                     }
                 } else {
-                    ForEach(filteredAlbums, id: \.collection.localIdentifier) { item in
+                    ForEach(filteredEntries) { entry in
                         Button {
-                            let id = item.collection.localIdentifier
-                            if selectedIds.contains(id) {
-                                selectedIds.remove(id)
-                            } else {
-                                selectedIds.insert(id)
-                            }
+                            toggle(entry)
                         } label: {
                             HStack {
+                                if entry.collection == nil {
+                                    Image(systemName: "photo.stack")
+                                        .foregroundStyle(Color.accentColor)
+                                }
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(item.collection.localizedTitle ?? "Unbekannt")
+                                    Text(entry.displayTitle)
                                         .foregroundStyle(.primary)
-                                    Text("\(item.count) Foto\(item.count == 1 ? "" : "s")")
+                                    Text("\(entry.count) Foto\(entry.count == 1 ? "" : "s")")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
                                 Spacer()
-                                if selectedIds.contains(item.collection.localIdentifier) {
+                                if selectedIds.contains(entry.id) {
                                     Image(systemName: "checkmark")
                                         .foregroundStyle(Color.accentColor)
                                         .fontWeight(.semibold)
@@ -459,12 +622,34 @@ struct AlbumPickerView: View {
         .navigationTitle("Alben auswählen")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            albums = await loadAlbums()
+            entries = await loadEntries()
             isLoading = false
         }
     }
 
-    private func loadAlbums() async -> [(collection: PHAssetCollection, count: Int)] {
+    /// Picking the "Gesamte Mediathek" sentinel is mutually exclusive with
+    /// regular album selection — otherwise the same asset would be enumerated
+    /// twice (once via collection, once via the full-library path), and the
+    /// per-album watermark for "all" would race with per-album watermarks.
+    private func toggle(_ entry: PickerEntry) {
+        if entry.id == PhotoSyncPreferences.allLibrarySentinel {
+            if selectedIds.contains(entry.id) {
+                selectedIds.remove(entry.id)
+            } else {
+                selectedIds = [entry.id]
+            }
+            return
+        }
+        if selectedIds.contains(entry.id) {
+            selectedIds.remove(entry.id)
+        } else {
+            // Selecting any regular album cancels the all-library sentinel.
+            selectedIds.remove(PhotoSyncPreferences.allLibrarySentinel)
+            selectedIds.insert(entry.id)
+        }
+    }
+
+    private func loadEntries() async -> [PickerEntry] {
         var status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         if status == .notDetermined {
             status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
@@ -473,30 +658,77 @@ struct AlbumPickerView: View {
 
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
-                var result: [(PHAssetCollection, Int)] = []
-                var seenIds = Set<String>()
-
-                let skipSubtypes: Set<PHAssetCollectionSubtype> = [
-                    .smartAlbumVideos, .smartAlbumAllHidden, .smartAlbumSlomoVideos,
-                    .smartAlbumTimelapses, .smartAlbumAnimated
-                ]
-
+                // Synthetic top row for the "upload everything, sort it out on
+                // the server" workflow. Count is the full library size.
                 let imageFilter = PHFetchOptions()
                 imageFilter.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
+                let libraryCount = PHAsset.fetchAssets(with: .image, options: nil).count
 
-                func addCollections(from fetchResult: PHFetchResult<PHAssetCollection>) {
+                var result: [PickerEntry] = [
+                    PickerEntry(
+                        id: PhotoSyncPreferences.allLibrarySentinel,
+                        collection: nil,
+                        title: "Gesamte Mediathek",
+                        count: libraryCount,
+                        suffix: nil
+                    )
+                ]
+                var seenIds = Set<String>()
+
+                // Subtypes that show up in the user's picker as semantic
+                // duplicates of regular albums or as content the user almost
+                // never wants to sync as a unit. The list is intentionally
+                // generous — the user can still pick "Gesamte Mediathek" to
+                // capture everything.
+                let skipSubtypes: Set<PHAssetCollectionSubtype> = [
+                    .smartAlbumVideos, .smartAlbumAllHidden, .smartAlbumSlomoVideos,
+                    .smartAlbumTimelapses, .smartAlbumAnimated,
+                    .smartAlbumGeneric, .smartAlbumSelfPortraits,
+                    .smartAlbumLongExposures, .smartAlbumDepthEffect,
+                    .smartAlbumLivePhotos, .smartAlbumBursts,
+                    .smartAlbumScreenshots, .smartAlbumPanoramas,
+                ]
+
+                // Collect smart + user albums into a flat list, tagged with
+                // their origin so we can suffix-disambiguate name collisions.
+                struct RawAlbum {
+                    let collection: PHAssetCollection
+                    let title: String
+                    let count: Int
+                    let isSmart: Bool
+                }
+                var raw: [RawAlbum] = []
+                func collect(from fetchResult: PHFetchResult<PHAssetCollection>, isSmart: Bool) {
                     fetchResult.enumerateObjects { collection, _, _ in
                         if skipSubtypes.contains(collection.assetCollectionSubtype) { return }
                         guard seenIds.insert(collection.localIdentifier).inserted else { return }
                         let count = PHAsset.fetchAssets(in: collection, options: imageFilter).count
-                        if count > 0 { result.append((collection, count)) }
+                        guard count > 0 else { return }
+                        let title = collection.localizedTitle ?? "Unbekannt"
+                        raw.append(RawAlbum(collection: collection, title: title, count: count, isSmart: isSmart))
                     }
                 }
+                collect(from: PHAssetCollection.fetchAssetCollections(with: .smartAlbum, subtype: .any, options: nil), isSmart: true)
+                collect(from: PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: nil), isSmart: false)
 
-                addCollections(from: PHAssetCollection.fetchAssetCollections(with: .smartAlbum, subtype: .any, options: nil))
-                addCollections(from: PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: nil))
+                // Build a name-occurrence map so we only suffix-disambiguate
+                // when there's an actual collision. A unique title stays
+                // untouched.
+                var titleCounts: [String: Int] = [:]
+                for r in raw { titleCounts[r.title.lowercased(), default: 0] += 1 }
 
-                continuation.resume(returning: result.sorted { ($0.0.localizedTitle ?? "") < ($1.0.localizedTitle ?? "") })
+                for r in raw {
+                    let needsSuffix = (titleCounts[r.title.lowercased()] ?? 0) > 1
+                    let suffix: String? = needsSuffix ? (r.isSmart ? "Smart" : "Eigenes") : nil
+                    result.append(PickerEntry(
+                        id: r.collection.localIdentifier,
+                        collection: r.collection,
+                        title: r.title,
+                        count: r.count,
+                        suffix: suffix
+                    ))
+                }
+                continuation.resume(returning: result)
             }
         }
     }

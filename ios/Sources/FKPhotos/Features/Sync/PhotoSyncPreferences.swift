@@ -7,6 +7,11 @@ struct PhotoSyncPreferences {
 
     static let taskIdentifier = "dev.fk-encore.VivantyPhotos.photoSync"
 
+    /// Sentinel id stored in `selectedAlbumIds` when the user picked the
+    /// synthetic "Gesamte Mediathek" entry. `PhotoSyncService` treats it as
+    /// "enumerate every image asset, not bound to any PHAssetCollection".
+    static let allLibrarySentinel = "__all_photos__"
+
     // MARK: - Keys
 
     private static let enabledKey          = "sync.enabled"
@@ -84,6 +89,17 @@ struct PhotoSyncPreferences {
     static func resetAlbumSyncDate(for albumId: String) {
         var dates = loadAlbumSyncDates()
         dates.removeValue(forKey: albumId)
+        UserDefaults.standard.set(dates, forKey: albumSyncDatesKey)
+    }
+
+    /// Monotonic-advance variant: only writes when `date` is strictly newer than
+    /// the stored value. Used by the per-batch watermark so an out-of-order
+    /// upload completion can't roll the watermark backwards and re-enumerate
+    /// already-processed assets on the next run.
+    static func advanceAlbumSyncDate(_ date: Date, for albumId: String) {
+        var dates = loadAlbumSyncDates()
+        if let current = dates[albumId], current >= date { return }
+        dates[albumId] = date
         UserDefaults.standard.set(dates, forKey: albumSyncDatesKey)
     }
 
