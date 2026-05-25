@@ -2288,7 +2288,8 @@ async function replacePhotoContent(
   await applySyncFavorite(userId, existing.id, opts.isFavorite);
 
   // Re-scan: faces, quality and dimensions all changed with the new pixels.
-  enqueuePhotoScan(existing.id, userId).then(() => triggerWorkers()).catch(err => {
+  // Priority 1 so fresh user-driven uploads jump ahead of background work.
+  enqueuePhotoScan(existing.id, userId, undefined, false, 1).then(() => triggerWorkers()).catch(err => {
     console.error("Replace re-scan enqueue error:", err);
   });
 
@@ -2563,8 +2564,10 @@ export async function uploadPhotoStream(
     );
   }
 
-  // Add to scan queue and wake workers — upload returns immediately
-  enqueuePhotoScan(row!.id, userId).then(() => triggerWorkers()).catch(err => {
+  // Add to scan queue and wake workers — upload returns immediately.
+  // Priority 1 so fresh user-driven uploads jump ahead of background scans
+  // (library imports, bulk rescans) that run at the default priority 2.
+  enqueuePhotoScan(row!.id, userId, undefined, false, 1).then(() => triggerWorkers()).catch(err => {
     console.error("Enqueue error:", err);
   });
 
@@ -2692,8 +2695,9 @@ export async function uploadPhotoLogic(
     );
   }
 
-  // Add to scan queue and wake workers — upload returns immediately
-  enqueuePhotoScan(row2!.id, userId).then(() => triggerWorkers()).catch(err => {
+  // Add to scan queue and wake workers — upload returns immediately.
+  // Priority 1 keeps interactive uploads ahead of background scans.
+  enqueuePhotoScan(row2!.id, userId, undefined, false, 1).then(() => triggerWorkers()).catch(err => {
     console.error("Enqueue error:", err);
   });
 
@@ -5656,8 +5660,9 @@ export async function rescanPhotoGpsLogic(
         db.update(photos).set({ latitude: lat, longitude: lon }).where(eq(photos.id, photoId))
       );
       gpsFound = true;
-      // EXIF parsing previously failed → re-queue all scan services
-      await enqueuePhotoScan(photoId, userId);
+      // EXIF parsing previously failed → re-queue all scan services.
+      // User-triggered recovery, so use upload priority (1).
+      await enqueuePhotoScan(photoId, userId, undefined, false, 1);
       triggerWorkers();
       scansQueued = true;
     }
