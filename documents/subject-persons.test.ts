@@ -1,0 +1,175 @@
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { sql } from "drizzle-orm";
+import { APIError } from "encore.dev/api";
+
+import db from "../db/database";
+import {
+  createSubjectPerson,
+  deleteSubjectPerson,
+  listSubjectPersons,
+  loadSubjectPersonHints,
+  normaliseRelationTag,
+  updateSubjectPerson,
+} from "./subject-persons";
+
+const TEST_USER_ID = 92_001;
+const OTHER_USER_ID = 92_002;
+
+async function ensureUser(id: number): Promise<void> {
+  await db.execute(sql`
+    INSERT INTO users (id, email, name, password_hash)
+    VALUES (${id}, ${`u${id}@subject-persons.test`}, ${`User ${id}`}, 'x')
+    ON CONFLICT (id) DO NOTHING
+  `);
+}
+
+async function cleanup(): Promise<void> {
+  await db.execute(
+    sql`DELETE FROM user_subject_persons WHERE user_id IN (${TEST_USER_ID}, ${OTHER_USER_ID})`,
+  );
+  await db.execute(
+    sql`DELETE FROM users WHERE id IN (${TEST_USER_ID}, ${OTHER_USER_ID})`,
+  );
+}
+
+describe("documents.subject-persons normaliseRelationTag", () => {
+  it("lowercases and replaces inner whitespace with a single hyphen", () => {
+    expect(normaliseRelationTag("Mutter")).toBe("mutter");
+    expect(normaliseRelationTag("  Schwieger   Vater  ")).toBe("schwieger-vater");
+  });
+
+  it("preserves German umlauts and ß and drops other punctuation", () => {
+    expect(normaliseRelationTag("Mütter & Söhne!")).toBe("mütter-söhne");
+    expect(normaliseRelationTag("eltern-fuß")).toBe("eltern-fuß");
+  });
+
+  it("caps the result at 40 characters", () => {
+    const long = "a".repeat(80);
+    expect(normaliseRelationTag(long).length).toBe(40);
+  });
+
+  it("returns an empty string when nothing usable remains", () => {
+    expect(normaliseRelationTag("   ")).toBe("");
+    expect(normaliseRelationTag("###")).toBe("");
+  });
+});
+
+describe("documents.subject-persons CRUD", () => {
+  beforeEach(async () => {
+    await cleanup();
+    await ensureUser(TEST_USER_ID);
+    await ensureUser(OTHER_USER_ID);
+  });
+
+  afterAll(async () => {
+    await cleanup();
+  });
+
+  it("creates a subject person and lists it back for the same user", async () => {
+    const created = await createSubjectPerson(TEST_USER_ID, {
+      full_name: "Erika Mustermann",
+      relation_tag: "Mutter",
+    });
+    expect(created.full_name).toBe("Erika Mustermann");
+    // relation_tag is normalised to lowercase on the way in.
+    expect(created.relation_tag).toBe("mutter");
+
+    const items = await listSubjectPersons(TEST_USER_ID);
+    expect(items.map((i) => i.id)).toContain(created.id);
+  });
+
+  it("scopes the list to the calling user", async () => {
+    await createSubjectPerson(TEST_USER_ID, {
+      full_name: "Erika Mustermann",
+      relation_tag: "mutter",
+    });
+    await createSubjectPerson(OTHER_USER_ID, {
+      full_name: "Jemand Anders",
+      relation_tag: "fremd",
+    });
+
+    const mine = await listSubjectPersons(TEST_USER_ID);
+    expect(mine.map((i) => i.full_name)).toEqual(["Erika Mustermann"]);
+
+    const hints = await loadSubjectPersonHints(TEST_USER_ID);
+    expect(hints).toEqual([{ full_name: "Erika Mustermann", relation_tag: "mutter" }]);
+  });
+
+  it("rejects duplicate names for the same user (case-insensitive)", async () => {
+    await createSubjectPerson(TEST_USER_ID, {
+      full_name: "Erika Mustermann",
+      relation_tag: "mutter",
+    });
+    await expect(
+      createSubjectPerson(TEST_USER_ID, {
+        full_name: "erika mustermann",
+        relation_tag: "mama",
+      }),
+    ).rejects.toThrow(/already exists/i);
+  });
+
+  it("allows the same name across different users", async () => {
+    await createSubjectPerson(TEST_USER_ID, {
+      full_name: "Erika Mustermann",
+      relation_tag: "mutter",
+    });
+    const other = await createSubjectPerson(OTHER_USER_ID, {
+      full_name: "Erika Mustermann",
+      relation_tag: "tante",
+    });
+    expect(other.relation_tag).toBe("tante");
+  });
+
+  it("rejects empty full_name", async () => {
+    await expect(
+      createSubjectPerson(TEST_USER_ID, { full_name: "  ", relation_tag: "mutter" }),
+    ).rejects.toThrow(/must not be empty/);
+  });
+
+  it("rejects a relation_tag that has no usable characters", async () => {
+    await expect(
+      createSubjectPerson(TEST_USER_ID, { full_name: "X", relation_tag: "###" }),
+    ).rejects.toThrow(/at least one usable character/);
+  });
+
+  it("updates an existing entry and refuses to update someone else's", async () => {
+    const own = await createSubjectPerson(TEST_USER_ID, {
+      full_name: "Erika Mustermann",
+      relation_tag: "mutter",
+    });
+    const other = await createSubjectPerson(OTHER_USER_ID, {
+      full_name: "Jemand Anders",
+      relation_tag: "fremd",
+    });
+
+    const patched = await updateSubjectPerson(TEST_USER_ID, own.id, {
+      relation_tag: "mama",
+    });
+    expect(patched.relation_tag).toBe("mama");
+
+    await expect(
+      updateSubjectPerson(TEST_USER_ID, other.id, { relation_tag: "egal" }),
+    ).rejects.toBeInstanceOf(APIError);
+  });
+
+  it("deletes only the caller's entry", async () => {
+    const own = await createSubjectPerson(TEST_USER_ID, {
+      full_name: "Erika Mustermann",
+      relation_tag: "mutter",
+    });
+    const other = await createSubjectPerson(OTHER_USER_ID, {
+      full_name: "Jemand Anders",
+      relation_tag: "fremd",
+    });
+
+    await deleteSubjectPerson(TEST_USER_ID, own.id);
+    expect((await listSubjectPersons(TEST_USER_ID)).length).toBe(0);
+
+    await expect(
+      deleteSubjectPerson(TEST_USER_ID, other.id),
+    ).rejects.toBeInstanceOf(APIError);
+
+    // The other user's row is still there.
+    expect((await listSubjectPersons(OTHER_USER_ID)).length).toBe(1);
+  });
+});
