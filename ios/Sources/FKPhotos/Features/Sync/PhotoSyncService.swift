@@ -18,112 +18,174 @@ actor PhotoSyncService {
 
     private let monitor = NWPathMonitor()
     private let monitorQueue = DispatchQueue(label: "dev.fk-encore.NetworkMonitor")
-    private var currentPath: NWPath?
 
     private init() {
-        monitor.pathUpdateHandler = { [weak self] path in
-            guard let self else { return }
-            Task { await self.updatePath(path) }
-        }
+        // No path-update handler needed: `monitor.currentPath` is non-optional
+        // and reflects the live state after `start`. The previous cached `var
+        // currentPath: NWPath?` was nil until the first async update arrived,
+        // which made the first "Jetzt synchronisieren" tap silently no-op
+        // (issue: user had to tap twice).
         monitor.start(queue: monitorQueue)
     }
 
-    private func updatePath(_ path: NWPath) {
-        currentPath = path
-    }
-
+    /// True while connected via WiFi. Reads `monitor.currentPath` directly so
+    /// the value is correct on the very first call after launch.
     var isWifiConnected: Bool {
-        currentPath?.usesInterfaceType(.wifi) ?? false
+        monitor.currentPath.usesInterfaceType(.wifi)
     }
 
     private var isNetworkAvailable: Bool {
-        currentPath?.status == .satisfied
+        monitor.currentPath.status == .satisfied
     }
 
     // MARK: - Public sync entry point
 
-    /// Run one sync cycle. Returns silently if preconditions (enabled, auth, network) aren't met.
+    /// Run one sync cycle. Returns silently if preconditions (enabled, auth,
+    /// network) aren't met.
+    ///
+    /// Pipeline:
+    ///  1. Drain whatever is already in the UploadQueue (Share-Extension items,
+    ///     queue leftovers from a prior interrupted run) so the user sees
+    ///     progress immediately instead of waiting through library scan.
+    ///  2. Enumerate the configured iOS albums (or the entire library when the
+    ///     `__all_photos__` sentinel is selected).
+    ///  3. For each 500-asset batch: compute hashes (cached by modificationDate),
+    ///     ask the server which full-hashes it already has, enqueue the rest.
+    ///  4. After each batch advance the per-album watermark to the batch's
+    ///     newest `creationDate`. An interruption mid-run loses at most one
+    ///     batch on resume instead of the whole enumeration.
     func sync() async throws {
         guard PhotoSyncPreferences.syncEnabled else { return }
 
+        await SyncProgress.shared.update(.waitingForNetwork)
         if PhotoSyncPreferences.wifiOnly {
-            guard isWifiConnected else { return }
+            guard isWifiConnected else { await SyncProgress.shared.reset(); return }
         } else {
-            guard isNetworkAvailable else { return }
+            guard isNetworkAvailable else { await SyncProgress.shared.reset(); return }
         }
 
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-        guard status == .authorized || status == .limited else { return }
+        guard status == .authorized || status == .limited else {
+            await SyncProgress.shared.reset()
+            return
+        }
 
+        // Step 1: Drain whatever's already queued — Share-Extension items, or
+        // pending items from a prior interrupted sync. This used to happen only
+        // AFTER the (potentially minute-long) library scan, so the user stared
+        // at a spinner thinking nothing was happening.
+        await drainQueueWithProgress()
+
+        await SyncProgress.shared.update(.scanningLibrary)
         let syncStartDate = Date()
-
         let assets = await fetchAssets()
+        await SyncProgress.shared.setTotalAssets(assets.count)
+
         guard !assets.isEmpty else {
-            updateSyncDates(syncStartDate, syncedAlbumIds: [])
+            PhotoSyncPreferences.lastSyncDate = syncStartDate
+            await SyncProgress.shared.reset()
             return
         }
 
         let processingBatchSize = 500
+        var processedCount = 0
         for batchStart in stride(from: 0, to: assets.count, by: processingBatchSize) {
+            try Task.checkCancellation()
             let assetBatch = assets[batchStart..<min(batchStart + processingBatchSize, assets.count)]
 
             // Step 2: Compute full-hash for each asset (PhotoHasher caches by modificationDate).
+            await SyncProgress.shared.update(.hashingBatch(done: processedCount, total: assets.count))
             var hashPairs: [(asset: PHAsset, filename: String, sourceAlbumId: String?, hashResult: PhotoHashResult)] = []
             for (asset, filename, sourceAlbumId) in assetBatch {
                 guard let result = await PhotoHasher.shared.hashes(for: asset) else { continue }
                 hashPairs.append((asset, filename, sourceAlbumId, result))
             }
-            guard !hashPairs.isEmpty else { continue }
 
-            // Step 3: Sync-check to find which full-hashes the server already has.
-            let batchHashes = hashPairs.map { $0.hashResult.fullHash }
-            let serverHas = Set((try? await APIClient.shared.syncCheck(hashes: batchHashes)) ?? [])
+            if !hashPairs.isEmpty {
+                // Step 3: Sync-check to find which full-hashes the server already has.
+                await SyncProgress.shared.update(.checkingServer(batchSize: hashPairs.count))
+                let batchHashes = hashPairs.map { $0.hashResult.fullHash }
+                let serverHas = Set((try? await APIClient.shared.syncCheck(hashes: batchHashes)) ?? [])
 
-            // Step 4: Enqueue assets whose full-hash the server doesn't have.
-            let alreadyQueued = Set(await UploadQueue.shared.pendingItems().map(\.fullHash))
+                // Step 4: Enqueue assets whose full-hash the server doesn't have.
+                let alreadyQueued = Set(await UploadQueue.shared.pendingItems().map(\.fullHash))
 
-            let missing = hashPairs.filter {
-                !serverHas.contains($0.hashResult.fullHash)
-                && !alreadyQueued.contains($0.hashResult.fullHash)
+                let missing = hashPairs.filter {
+                    !serverHas.contains($0.hashResult.fullHash)
+                    && !alreadyQueued.contains($0.hashResult.fullHash)
+                }
+
+                for item in missing {
+                    let localId = item.asset.localIdentifier
+                    let caption = PhotoHasher.shared.captionFromAsset(item.asset) ?? ""
+                    let targetAlbumIds = resolveTargetAlbumIds(sourceAlbumId: item.sourceAlbumId)
+                    let resource = PHAssetResource.assetResources(for: item.asset)
+                        .first(where: { $0.type == .photo })
+                        ?? PHAssetResource.assetResources(for: item.asset).first(where: { $0.type == .fullSizePhoto })
+                    let mimeType = resource.map { Self.mimeType(for: $0.uniformTypeIdentifier) } ?? "image/jpeg"
+                    let uploadFilename = filenameMatchingMime(item.filename, mimeType: mimeType)
+
+                    let queueItem = UploadQueueItem(
+                        assetLocalIdentifier: localId,
+                        filename: uploadFilename,
+                        mimeType: mimeType,
+                        imageDataHash: item.hashResult.imageDataHash,
+                        fullHash: item.hashResult.fullHash,
+                        caption: caption,
+                        isFavorite: item.asset.isFavorite,
+                        capturedAtString: item.hashResult.capturedAtString,
+                        targetAlbumIds: targetAlbumIds,
+                        sourceIosAlbumId: item.sourceAlbumId
+                    )
+                    await UploadQueue.shared.enqueue(queueItem)
+                }
+                if !missing.isEmpty {
+                    await drainQueueWithProgress()
+                }
             }
 
-            for item in missing {
-                let localId = item.asset.localIdentifier
-                let caption = PhotoHasher.shared.captionFromAsset(item.asset) ?? ""
-                let targetAlbumIds = resolveTargetAlbumIds(sourceAlbumId: item.sourceAlbumId)
-                let resource = PHAssetResource.assetResources(for: item.asset)
-                    .first(where: { $0.type == .photo })
-                    ?? PHAssetResource.assetResources(for: item.asset).first(where: { $0.type == .fullSizePhoto })
-                let mimeType = resource.map { Self.mimeType(for: $0.uniformTypeIdentifier) } ?? "image/jpeg"
-                let uploadFilename = filenameMatchingMime(item.filename, mimeType: mimeType)
-
-                let queueItem = UploadQueueItem(
-                    assetLocalIdentifier: localId,
-                    filename: uploadFilename,
-                    mimeType: mimeType,
-                    imageDataHash: item.hashResult.imageDataHash,
-                    fullHash: item.hashResult.fullHash,
-                    caption: caption,
-                    isFavorite: item.asset.isFavorite,
-                    capturedAtString: item.hashResult.capturedAtString,
-                    targetAlbumIds: targetAlbumIds
-                )
-                await UploadQueue.shared.enqueue(queueItem)
-            }
-            if !missing.isEmpty {
-                await BackgroundSyncManager.shared.drainUploadQueue()
-            }
+            // Step 5: Advance the per-album watermark to the newest
+            // creationDate among assets we successfully processed (hash
+            // computed). We deliberately exclude assets whose hash failed
+            // (typically because iCloud bytes weren't available) so they get
+            // retried on the next run instead of being silently skipped.
+            advanceWatermarksForProcessed(hashPairs)
+            processedCount += assetBatch.count
         }
 
-        let syncedAlbumIds = Set(assets.compactMap { $0.2 })
-        updateSyncDates(syncStartDate, syncedAlbumIds: syncedAlbumIds)
+        // Final pass: drain anything still pending plus mark the overall sync
+        // timestamp. The per-album watermarks were already advanced above.
+        await drainQueueWithProgress()
+        PhotoSyncPreferences.lastSyncDate = syncStartDate
+        await SyncProgress.shared.reset()
     }
 
-    private func updateSyncDates(_ date: Date, syncedAlbumIds: Set<String>) {
-        for albumId in syncedAlbumIds {
-            PhotoSyncPreferences.setAlbumSyncDate(date, for: albumId)
+    /// Wraps `BackgroundSyncManager.drainUploadQueue` so the progress observer
+    /// always reflects what the queue is doing right now.
+    private func drainQueueWithProgress() async {
+        let remaining = await UploadQueue.shared.inFlightCount()
+        guard remaining > 0 else { return }
+        await SyncProgress.shared.update(.drainingQueue(remaining: remaining))
+        await BackgroundSyncManager.shared.drainUploadQueue()
+    }
+
+    /// Stores the newest creationDate per source album over the assets we
+    /// successfully processed in this batch. The `advanceAlbumSyncDate` helper
+    /// only writes when strictly newer, so out-of-order completions never
+    /// roll the watermark backwards.
+    private func advanceWatermarksForProcessed(
+        _ pairs: [(asset: PHAsset, filename: String, sourceAlbumId: String?, hashResult: PhotoHashResult)]
+    ) {
+        var perAlbumMax: [String: Date] = [:]
+        for pair in pairs {
+            guard let sourceAlbumId = pair.sourceAlbumId,
+                  let created = pair.asset.creationDate else { continue }
+            if let existing = perAlbumMax[sourceAlbumId], existing >= created { continue }
+            perAlbumMax[sourceAlbumId] = created
         }
-        PhotoSyncPreferences.lastSyncDate = date
+        for (albumId, date) in perAlbumMax {
+            PhotoSyncPreferences.advanceAlbumSyncDate(date, for: albumId)
+        }
     }
 
     private func resolveTargetAlbumIds(sourceAlbumId: String?) -> [Int] {
@@ -151,19 +213,34 @@ actor PhotoSyncService {
 
         var pairs: [(PHAsset, String?)] = []
         var seen = Set<String>()
-        PHAssetCollection
-            .fetchAssetCollections(withLocalIdentifiers: Array(albumIds), options: nil)
-            .enumerateObjects { collection, _, _ in
-                let albumLastSync = PhotoSyncPreferences.albumSyncDate(for: collection.localIdentifier)
-                let options = buildFetchOptions(lastSync: albumLastSync)
-                PHAsset.fetchAssets(in: collection, options: options)
-                    .enumerateObjects { asset, _, _ in
-                        guard asset.mediaType == .image else { return }
-                        if seen.insert(asset.localIdentifier).inserted {
-                            pairs.append((asset, collection.localIdentifier))
-                        }
+
+        // "Gesamte Mediathek" sentinel: enumerate every image asset directly,
+        // bypassing per-album collections. Other selections are ignored when
+        // the sentinel is present so the user can't accidentally double-sync.
+        if albumIds.contains(PhotoSyncPreferences.allLibrarySentinel) {
+            let lastSync = PhotoSyncPreferences.albumSyncDate(for: PhotoSyncPreferences.allLibrarySentinel)
+            let options = buildFetchOptions(lastSync: lastSync)
+            PHAsset.fetchAssets(with: .image, options: options)
+                .enumerateObjects { asset, _, _ in
+                    if seen.insert(asset.localIdentifier).inserted {
+                        pairs.append((asset, PhotoSyncPreferences.allLibrarySentinel))
                     }
-            }
+                }
+        } else {
+            PHAssetCollection
+                .fetchAssetCollections(withLocalIdentifiers: Array(albumIds), options: nil)
+                .enumerateObjects { collection, _, _ in
+                    let albumLastSync = PhotoSyncPreferences.albumSyncDate(for: collection.localIdentifier)
+                    let options = buildFetchOptions(lastSync: albumLastSync)
+                    PHAsset.fetchAssets(in: collection, options: options)
+                        .enumerateObjects { asset, _, _ in
+                            guard asset.mediaType == .image else { return }
+                            if seen.insert(asset.localIdentifier).inserted {
+                                pairs.append((asset, collection.localIdentifier))
+                            }
+                        }
+                }
+        }
 
         return pairs.map { (asset, sourceAlbumId) in
             let filename = PHAssetResource.assetResources(for: asset)
