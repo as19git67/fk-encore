@@ -2336,6 +2336,24 @@ export async function uploadPhotoStream(
   // Extraction of EXIF data (date + GPS) after the file is saved
   const exifMeta = await getExifMetadata(tempPath, originalName);
 
+  // Diagnostic log: trace whether the uploaded bytes carry GPS coordinates and
+  // which dedup/replace branch the upload takes. Lets us tell apart the case
+  // "iOS handed us GPS-less bytes" from "GPS is in the bytes but the server
+  // path doesn't persist it" without device instrumentation.
+  console.log("[uploadPhotoStream]", JSON.stringify({
+    filename: originalName,
+    mimeType,
+    size,
+    deviceAssetId,
+    imageDataHashPrefix: imageDataHash ? imageDataHash.slice(0, 12) : null,
+    fullHashPrefix: fullHash ? fullHash.slice(0, 12) : null,
+    hasGps: exifMeta.latitude !== null && exifMeta.longitude !== null,
+    latitude: exifMeta.latitude,
+    longitude: exifMeta.longitude,
+    takenAt: exifMeta.takenAt,
+    clientCapturedAt,
+  }));
+
   // iOS' PHImageManager strips EXIF DateTimeOriginal from rendered HEIC/JPEG. The
   // client therefore forwards PHAsset.creationDate via X-Captured-At so we can
   // recover the real capture time when the file itself no longer carries it.
@@ -2363,6 +2381,11 @@ export async function uploadPhotoStream(
       )),
     );
     if (dataHashDup) {
+      console.log("[uploadPhotoStream] branch=merge-by-image-data-hash", JSON.stringify({
+        photoId: dataHashDup.id,
+        existingHasGps: dataHashDup.latitude !== null && dataHashDup.longitude !== null,
+        newHasGps: exifMeta.latitude !== null && exifMeta.longitude !== null,
+      }));
       await mergeUploadMetadataIntoExisting(
         userId, dataHashDup.id, exifMeta, isFavorite, imageDataHash, fullHash, deviceAssetId, sync.description,
       );
@@ -2385,6 +2408,11 @@ export async function uploadPhotoStream(
       )),
     );
     if (assetMatch && !assetMatch.external_path) {
+      console.log("[uploadPhotoStream] branch=replace-by-device-asset-id", JSON.stringify({
+        photoId: assetMatch.id,
+        existingHasGps: assetMatch.latitude !== null && assetMatch.longitude !== null,
+        newHasGps: exifMeta.latitude !== null && exifMeta.longitude !== null,
+      }));
       const photo = await replacePhotoContent(userId, assetMatch, {
         tempPath, ext, mimeType, originalName, size, digest, exifMeta,
         imageDataHash, fullHash, isFavorite, description: sync.description,
@@ -2403,6 +2431,11 @@ export async function uploadPhotoStream(
   );
 
   if (existing) {
+    console.log("[uploadPhotoStream] branch=merge-by-digest", JSON.stringify({
+      photoId: existing.id,
+      existingHasGps: existing.latitude !== null && existing.longitude !== null,
+      newHasGps: exifMeta.latitude !== null && exifMeta.longitude !== null,
+    }));
     await mergeUploadMetadataIntoExisting(
       userId, existing.id, exifMeta, isFavorite, imageDataHash, fullHash, deviceAssetId, sync.description,
     );
@@ -2435,6 +2468,10 @@ export async function uploadPhotoStream(
         .where(and(eq(photos.user_id, userId), eq(photos.taken_at, exifMeta.takenAt)))
     );
     if (takenAtDup) {
+      console.log("[uploadPhotoStream] branch=merge-by-taken-at", JSON.stringify({
+        photoId: takenAtDup.id,
+        newHasGps: exifMeta.latitude !== null && exifMeta.longitude !== null,
+      }));
       await mergeUploadMetadataIntoExisting(userId, takenAtDup.id, exifMeta, isFavorite, imageDataHash, null, null, sync.description);
       if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
       throw new PhotoAlreadyExistsError(takenAtDup.id);
@@ -2452,6 +2489,13 @@ export async function uploadPhotoStream(
   const iptcLoc = iptcLocationUpdate(exifMeta);
   const uploadKeywords = mergeRatingKeyword(exifMeta.keywords, exifMeta.rating);
 
+  console.log("[uploadPhotoStream] branch=fresh-insert", JSON.stringify({
+    filename,
+    deviceAssetId,
+    newHasGps: exifMeta.latitude !== null && exifMeta.longitude !== null,
+    latitude: exifMeta.latitude,
+    longitude: exifMeta.longitude,
+  }));
   const row = await dbInsertReturning<typeof photos.$inferSelect>(
     db.insert(photos).values({
       user_id: userId,
