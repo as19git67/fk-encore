@@ -777,6 +777,21 @@ export const documentTags = pgTable("document_tags", {
   color: text("color"),
 });
 
+// Per-user "Bezugspersonen" — maps a literal name as it appears on
+// documents to a relationship tag (mutter, vater, …). The classify
+// step forwards this list to the LLM so address/recipient matches
+// auto-tag the document. Added by migration 0091.
+export const userSubjectPersons = pgTable("user_subject_persons", {
+  id: serial("id").primaryKey(),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  full_name: text("full_name").notNull(),
+  relation_tag: text("relation_tag").notNull(),
+  created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+  updated_at: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
+});
+
 export const documentTagLinks = pgTable(
   "document_tag_links",
   {
