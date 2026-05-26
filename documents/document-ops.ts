@@ -30,6 +30,7 @@ import {
   type TaxonomyEntry,
 } from "./llm-client";
 import { loadEffectiveTaxSections } from "./tax-hint-overrides";
+import { loadSubjectPersonHints } from "./subject-persons";
 import { flattenTaxonomy } from "./taxonomy";
 import { realtime, push } from "~encore/clients";
 
@@ -167,7 +168,13 @@ export async function runClassify(documentId: number): Promise<{ classification:
     group: s.group,
     hint: s.hint,
   }));
-  const classification = await classifyDocument({ text: clipped, taxonomy, tax_sections });
+  const subject_persons = await loadSubjectPersonHints(row.user_id);
+  const classification = await classifyDocument({
+    text: clipped,
+    taxonomy,
+    tax_sections,
+    subject_persons,
+  });
 
   const catSlug = classification.category_slug;
   const cat = await dbFirst<{ id: number }>(
