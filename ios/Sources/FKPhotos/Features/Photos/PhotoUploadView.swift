@@ -101,12 +101,18 @@ struct PhotoUploadView: View {
                 let mimeType: String
                 let isFavorite: Bool
                 let capturedAt: Date?
+                // PHImageManager-rendered bytes drop EXIF GPS; read PHAsset.location
+                // separately so the upload can carry it via X-GPS-* headers.
+                let assetLatitude: Double?
+                let assetLongitude: Double?
 
                 if let localId = item.itemIdentifier,
                    let asset = PHAsset.fetchAssets(withLocalIdentifiers: [localId], options: nil).firstObject {
                     (data, mimeType) = try await loadCurrentVersion(of: asset)
                     isFavorite = asset.isFavorite
                     capturedAt = asset.creationDate
+                    assetLatitude = asset.location?.coordinate.latitude
+                    assetLongitude = asset.location?.coordinate.longitude
                 } else {
                     guard let raw = try await item.loadTransferable(type: Data.self) else {
                         await MainActor.run { failedCount += 1 }
@@ -116,6 +122,8 @@ struct PhotoUploadView: View {
                     mimeType = "image/jpeg"
                     isFavorite = false
                     capturedAt = nil
+                    assetLatitude = nil
+                    assetLongitude = nil
                 }
 
                 // Keep the extension aligned with the mimeType the server actually
@@ -169,7 +177,9 @@ struct PhotoUploadView: View {
                         caption: caption,
                         isFavorite: isFavorite,
                         capturedAtString: capturedAtString,
-                        assetLocalId: assetId
+                        assetLocalId: assetId,
+                        latitude: assetLatitude,
+                        longitude: assetLongitude
                     )
                     targetPhotoId = uploaded.photoId
                 } catch APIError.duplicatePhoto(let existingPhotoId) {

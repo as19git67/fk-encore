@@ -195,7 +195,9 @@ actor APIClient {
         caption: String,
         isFavorite: Bool,
         capturedAtString: String,
-        assetLocalId: String
+        assetLocalId: String,
+        latitude: Double? = nil,
+        longitude: Double? = nil
     ) async throws -> UploadResult {
         var request = URLRequest(url: buildURL(path: "/photos"), timeoutInterval: 120)
         request.httpMethod = "POST"
@@ -207,6 +209,16 @@ actor APIClient {
         request.setValue(isFavorite ? "true" : "false", forHTTPHeaderField: "X-Is-Favorite")
         request.setValue(capturedAtString, forHTTPHeaderField: "X-Captured-At")
         request.setValue(assetLocalId, forHTTPHeaderField: "X-Asset-Id")
+        // GPS fallback — iOS's PHAssetResource bytes were observed to come back
+        // with their EXIF stripped (no GPS, no DateTimeOriginal). PHAsset.location
+        // is read separately by the caller and forwarded here; the server uses
+        // these headers only when the file's own EXIF carries no coordinates.
+        if let latitude, latitude.isFinite {
+            request.setValue(String(latitude), forHTTPHeaderField: "X-GPS-Lat")
+        }
+        if let longitude, longitude.isFinite {
+            request.setValue(String(longitude), forHTTPHeaderField: "X-GPS-Lng")
+        }
         request.httpBody = data
         applyAuth(&request)
         print("""
@@ -217,6 +229,7 @@ actor APIClient {
           caption:       \"\(caption)\"
           isFavorite:    \(isFavorite)
           capturedAt:    \(capturedAtString)
+          gps:           \(latitude.map { String($0) } ?? "nil"),\(longitude.map { String($0) } ?? "nil")
         """)
 
         var (responseData, response) = try await URLSession.shared.data(for: request)
