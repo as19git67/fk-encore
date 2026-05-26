@@ -1,4 +1,5 @@
 import BackgroundTasks
+import CoreLocation
 import Foundation
 import ImageIO
 import Photos
@@ -181,6 +182,8 @@ public final class BackgroundSyncManager {
             isFavorite: isFavorite,
             capturedAtString: item.capturedAtString,
             targetAlbumIds: item.targetAlbumIds,
+            latitude: item.latitude,
+            longitude: item.longitude,
             status: item.status,
             retryCount: item.retryCount
         )
@@ -420,6 +423,19 @@ public final class BackgroundSyncManager {
 
         let data: Data
         let mimeType: String
+        // PhotoKit stores the GPS coordinate on the PHAsset itself, separate
+        // from the file's EXIF. Reading it here (instead of relying on the
+        // resource bytes carrying it) works around iOS returning EXIF-stripped
+        // bytes for background `PHAssetResource.requestData` calls — GPS still
+        // reaches the server via the X-GPS-Lat/Lng headers below. Falls back to
+        // the persisted item values (set by the Share Extension) when no
+        // PHAsset is reachable, e.g. for a photo shared from another app.
+        let liveLocation: CLLocation? = !localId.isEmpty
+            ? PHAsset.fetchAssets(withLocalIdentifiers: [localId], options: nil).firstObject?.location
+            : nil
+        let uploadLatitude = liveLocation?.coordinate.latitude ?? item.latitude
+        let uploadLongitude = liveLocation?.coordinate.longitude ?? item.longitude
+
         if let tempURL = item.tempFileURL, let tempData = try? Data(contentsOf: tempURL) {
             data = tempData
             mimeType = item.mimeType
@@ -442,7 +458,9 @@ public final class BackgroundSyncManager {
                 caption: item.caption,
                 isFavorite: item.isFavorite,
                 capturedAtString: item.capturedAtString,
-                assetLocalId: localId
+                assetLocalId: localId,
+                latitude: uploadLatitude,
+                longitude: uploadLongitude
             )
             return .succeeded(photoId: result.photoId)
         } catch APIError.duplicatePhoto(let existingId) {

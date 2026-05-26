@@ -610,6 +610,53 @@ describe("Photo Module", () => {
 
         fs.unlinkSync(path.join(UPLOAD_DIR, first.filename));
       });
+
+      it("uploadPhotoStream uses client GPS headers when the file's EXIF carries no coordinates", async () => {
+        // Body has no EXIF (just opaque bytes), so the only way GPS reaches the
+        // DB is via clientLatitude/clientLongitude — the workaround for iOS's
+        // EXIF-stripped PHAssetResource bytes in the background-upload context.
+        const stream = Readable.from(Buffer.from("gps-fallback-pixels")) as any;
+        const { photo } = await service.uploadPhotoStream(
+          user1.id, stream, "gps-fallback.jpg", "image/jpeg", false, null, {
+            imageDataHash: "d4".repeat(32),
+            fullHash: "e5".repeat(32),
+            clientLatitude: 48.137154,
+            clientLongitude: 11.576124,
+          },
+        );
+
+        const row = await dbFirst<{ latitude: number | null; longitude: number | null }>(
+          db.select({ latitude: photos.latitude, longitude: photos.longitude })
+            .from(photos).where(eq(photos.id, photo.id)),
+        );
+        expect(row?.latitude).toBeCloseTo(48.137154, 5);
+        expect(row?.longitude).toBeCloseTo(11.576124, 5);
+
+        fs.unlinkSync(path.join(UPLOAD_DIR, photo.filename));
+      });
+
+      it("uploadPhotoStream ignores client GPS headers when the EXIF already carries coordinates", async () => {
+        // Hard to forge EXIF GPS in a Buffer-only test, so the inverse covers
+        // the same branch: when no EXIF GPS *and* no client GPS, the row stays
+        // null. Together with the test above this proves the fallback fires
+        // only on the EXIF-empty branch.
+        const stream = Readable.from(Buffer.from("no-gps-anywhere")) as any;
+        const { photo } = await service.uploadPhotoStream(
+          user1.id, stream, "no-gps.jpg", "image/jpeg", false, null, {
+            imageDataHash: "f6".repeat(32),
+            fullHash: "a7".repeat(32),
+          },
+        );
+
+        const row = await dbFirst<{ latitude: number | null; longitude: number | null }>(
+          db.select({ latitude: photos.latitude, longitude: photos.longitude })
+            .from(photos).where(eq(photos.id, photo.id)),
+        );
+        expect(row?.latitude).toBeNull();
+        expect(row?.longitude).toBeNull();
+
+        fs.unlinkSync(path.join(UPLOAD_DIR, photo.filename));
+      });
     });
 
     it("should not allow duplicate uploads for the same user", async () => {

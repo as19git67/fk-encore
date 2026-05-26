@@ -2209,6 +2209,16 @@ export interface UploadSyncMeta {
   description?: string;
   /** iOS PHAsset.localIdentifier — stable dedup key independent of byte content. */
   deviceAssetId?: string | null;
+  /**
+   * Client-supplied GPS fallback. iOS's `PHAssetResource.requestData` for the
+   * `.photo` type was observed to return EXIF-stripped bytes in the background-
+   * upload context — no GPS, no DateTimeOriginal. The client reads
+   * `PHAsset.location` separately (PhotoKit keeps it in its own database) and
+   * forwards it as `X-GPS-Lat` / `X-GPS-Lng` headers; the server uses these
+   * only when the file's EXIF carries none.
+   */
+  clientLatitude?: number | null;
+  clientLongitude?: number | null;
 }
 
 /**
@@ -2311,7 +2321,13 @@ export async function uploadPhotoStream(
   clientCapturedAt: string | null = null,
   sync: UploadSyncMeta = {},
 ): Promise<{ photo: Photo; replaced: boolean }> {
-  const { imageDataHash = null, fullHash = null, deviceAssetId = null } = sync;
+  const {
+    imageDataHash = null,
+    fullHash = null,
+    deviceAssetId = null,
+    clientLatitude = null,
+    clientLongitude = null,
+  } = sync;
   if (!SUPPORTED_MIME_TYPES.has(mimeType.toLowerCase().split(";")[0].trim())) {
     throw new Error("UNSUPPORTED_FILE_TYPE");
   }
@@ -2360,6 +2376,23 @@ export async function uploadPhotoStream(
   if (!exifMeta.takenAt && clientCapturedAt) {
     const parsed = normalizeClientCapturedAt(clientCapturedAt);
     if (parsed) exifMeta.takenAt = parsed;
+  }
+
+  // GPS fallback — same pattern as X-Captured-At. iOS's PHAssetResource bytes
+  // were observed to come back stripped of GPS (and DateTimeOriginal) in the
+  // background-upload context; the client reads PHAsset.location from the
+  // PhotoKit database and forwards it as X-GPS-* headers. Only used when the
+  // file's EXIF carries no coordinates, so a future format that does preserve
+  // EXIF GPS continues to win.
+  if (exifMeta.latitude === null && exifMeta.longitude === null
+      && clientLatitude !== null && clientLongitude !== null) {
+    exifMeta.latitude = clientLatitude;
+    exifMeta.longitude = clientLongitude;
+    console.log("[uploadPhotoStream] applied client GPS fallback", JSON.stringify({
+      filename: originalName,
+      latitude: clientLatitude,
+      longitude: clientLongitude,
+    }));
   }
 
   // image-data-hash dedup (issue #432): a photo with byte-identical pixel data
