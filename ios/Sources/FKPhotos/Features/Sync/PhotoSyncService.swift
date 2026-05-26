@@ -135,7 +135,9 @@ actor PhotoSyncService {
                         isFavorite: item.asset.isFavorite,
                         capturedAtString: item.hashResult.capturedAtString,
                         targetAlbumIds: targetAlbumIds,
-                        sourceIosAlbumId: item.sourceAlbumId
+                        sourceIosAlbumId: item.sourceAlbumId,
+                        latitude: item.asset.location?.coordinate.latitude,
+                        longitude: item.asset.location?.coordinate.longitude
                     )
                     await UploadQueue.shared.enqueue(queueItem)
                 }

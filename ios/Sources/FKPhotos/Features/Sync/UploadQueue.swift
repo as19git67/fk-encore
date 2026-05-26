@@ -21,6 +21,13 @@ public struct UploadQueueItem: Codable, Identifiable, Sendable {
     /// Used to advance per-album sync watermarks on successful upload. Nil for
     /// Share-Extension items and the "entire library" sentinel.
     public let sourceIosAlbumId: String?
+    /// PHAsset.location coordinates, persisted so a Share-Extension session
+    /// that drains its own previously-queued items (without access to the
+    /// original PHAsset) can still forward GPS via X-GPS-* headers.
+    /// Optional: most main-app library-sync items leave it nil and re-fetch
+    /// PHAsset.location at upload time.
+    public let latitude: Double?
+    public let longitude: Double?
     public var status: Status
     public var retryCount: Int
     public var lastError: String?
@@ -45,6 +52,8 @@ public struct UploadQueueItem: Codable, Identifiable, Sendable {
         capturedAtString: String,
         targetAlbumIds: [Int] = [],
         sourceIosAlbumId: String? = nil,
+        latitude: Double? = nil,
+        longitude: Double? = nil,
         status: Status = .pending,
         retryCount: Int = 0,
         lastError: String? = nil
@@ -61,6 +70,8 @@ public struct UploadQueueItem: Codable, Identifiable, Sendable {
         self.capturedAtString = capturedAtString
         self.targetAlbumIds = targetAlbumIds
         self.sourceIosAlbumId = sourceIosAlbumId
+        self.latitude = latitude
+        self.longitude = longitude
         self.status = status
         self.retryCount = retryCount
         self.lastError = lastError
@@ -83,6 +94,8 @@ public struct UploadQueueItem: Codable, Identifiable, Sendable {
             capturedAtString: capturedAtString,
             targetAlbumIds: targetAlbumIds,
             sourceIosAlbumId: sourceIosAlbumId,
+            latitude: latitude,
+            longitude: longitude,
             status: status,
             retryCount: retryCount,
             lastError: lastError
