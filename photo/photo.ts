@@ -135,6 +135,16 @@ function normalizeHashHeader(raw: string | string[] | undefined): string | null 
 }
 
 /**
+ * Parse a finite floating-point GPS value (lat / lng / altitude) from an HTTP
+ * header. Returns null when the header is absent, non-numeric, or NaN/∞.
+ */
+function parseGpsHeader(raw: string | string[] | undefined): number | null {
+  if (typeof raw !== "string") return null;
+  const v = parseFloat(raw.trim());
+  return Number.isFinite(v) ? v : null;
+}
+
+/**
  * Upload a photo.
  * Expects the raw image data in the request body.
  * Filename should be provided in X-File-Name header.
@@ -192,6 +202,14 @@ export const uploadPhoto = api.raw(
     const rawAssetId = req.headers["x-asset-id"];
     const deviceAssetId = typeof rawAssetId === "string" ? rawAssetId : null;
 
+    // Optional GPS fallback. iOS's PHAssetResource bytes can come back with
+    // their EXIF stripped (observed for HEIC originals fetched in the
+    // background-upload context), so the client reads `PHAsset.location`
+    // separately and forwards it here when present. Same pattern as
+    // X-Captured-At for the missing DateTimeOriginal.
+    const clientLatitude = parseGpsHeader(req.headers["x-gps-lat"]);
+    const clientLongitude = parseGpsHeader(req.headers["x-gps-lng"]);
+
     // A pure metadata edit (pixels unchanged) is NOT handled here: the client
     // detects it locally and calls the body-less POST /photos/sync/metadata
     // instead. POST /photos therefore always reads the full body — answering
@@ -204,6 +222,8 @@ export const uploadPhoto = api.raw(
         fullHash,
         description: hasDescriptionHeader ? description : undefined,
         deviceAssetId,
+        clientLatitude,
+        clientLongitude,
       });
 
       // `replaced` → a device_asset_id match updated an existing photo's file

@@ -363,7 +363,8 @@ struct ShareUploadView: View {
                 data: data, filename: prev.filename, mimeType: prev.mimeType,
                 imageDataHash: prev.imageDataHash, fullHash: prev.fullHash,
                 caption: prev.caption, isFavorite: prev.isFavorite,
-                capturedAtString: prev.capturedAtString, assetLocalIdentifier: nil
+                capturedAtString: prev.capturedAtString, assetLocalIdentifier: nil,
+                latitude: prev.latitude, longitude: prev.longitude
             )
             do {
                 let photoId = try await ShareAPIClient.uploadPhoto(item: item)
@@ -471,9 +472,17 @@ struct ShareUploadView: View {
         }
 
         // Fall back to NSItemProvider bytes.
-        let isFavorite = assetId.flatMap { PHAsset.fetchAssets(withLocalIdentifiers: [$0], options: nil).firstObject }?.isFavorite ?? false
-        let capturedAt = assetId.flatMap { PHAsset.fetchAssets(withLocalIdentifiers: [$0], options: nil).firstObject }?.creationDate
-        return await loadFromItemProvider(provider, isFavorite: isFavorite, capturedAt: capturedAt, assetId: assetId)
+        let asset = assetId.flatMap { PHAsset.fetchAssets(withLocalIdentifiers: [$0], options: nil).firstObject }
+        let isFavorite = asset?.isFavorite ?? false
+        let capturedAt = asset?.creationDate
+        return await loadFromItemProvider(
+            provider,
+            isFavorite: isFavorite,
+            capturedAt: capturedAt,
+            latitude: asset?.location?.coordinate.latitude,
+            longitude: asset?.location?.coordinate.longitude,
+            assetId: assetId
+        )
     }
 
     private func loadFromPhotoAsset(_ asset: PHAsset) async -> SharePhotoItem? {
@@ -526,7 +535,9 @@ struct ShareUploadView: View {
             caption: caption,
             isFavorite: isFavorite,
             capturedAtString: capturedAtString,
-            assetLocalIdentifier: asset.localIdentifier
+            assetLocalIdentifier: asset.localIdentifier,
+            latitude: asset.location?.coordinate.latitude,
+            longitude: asset.location?.coordinate.longitude
         )
     }
 
@@ -534,6 +545,8 @@ struct ShareUploadView: View {
         _ provider: NSItemProvider,
         isFavorite: Bool,
         capturedAt: Date?,
+        latitude: Double?,
+        longitude: Double?,
         assetId: String?
     ) async -> SharePhotoItem? {
         let candidates: [(String, String, String)] = [
@@ -569,7 +582,9 @@ struct ShareUploadView: View {
                         caption: caption,
                         isFavorite: effectiveIsFavorite,
                         capturedAtString: capturedAtString,
-                        assetLocalIdentifier: assetId
+                        assetLocalIdentifier: assetId,
+                        latitude: latitude,
+                        longitude: longitude
                     ))
                 }
             }
@@ -619,6 +634,12 @@ struct SharePhotoItem {
     let isFavorite: Bool
     let capturedAtString: String
     let assetLocalIdentifier: String?
+    /// PHAsset.location coordinates, read from PhotoKit's own database.
+    /// Forwarded to the server via X-GPS-* headers so a missing-EXIF-GPS
+    /// situation (observed for HEIC originals fetched via PHAssetResource)
+    /// doesn't drop the location.
+    let latitude: Double?
+    let longitude: Double?
 }
 
 struct ShareAlbum: Identifiable {
@@ -808,6 +829,10 @@ enum ShareUploadQueueWriter {
         var targetAlbumIds: [Int]
         var status: String  // "pending" | "uploading" | "done" | "failed"
         var retryCount: Int
+        /// PHAsset.location coordinates persisted so a later session (without
+        /// a usable PHAsset) can still forward GPS via X-GPS-* headers.
+        var latitude: Double?
+        var longitude: Double?
     }
 
     struct PendingItem {
@@ -821,6 +846,8 @@ enum ShareUploadQueueWriter {
         let isFavorite: Bool
         let capturedAtString: String
         let targetAlbumIds: [Int]
+        let latitude: Double?
+        let longitude: Double?
     }
 
     static func pendingItems() -> [PendingItem] {
@@ -835,7 +862,8 @@ enum ShareUploadQueueWriter {
                     id: item.id, tempFileURL: url, filename: item.filename,
                     mimeType: item.mimeType, imageDataHash: item.imageDataHash,
                     fullHash: item.fullHash, caption: item.caption, isFavorite: item.isFavorite,
-                    capturedAtString: item.capturedAtString, targetAlbumIds: item.targetAlbumIds
+                    capturedAtString: item.capturedAtString, targetAlbumIds: item.targetAlbumIds,
+                    latitude: item.latitude, longitude: item.longitude
                 )
             }
     }
@@ -867,7 +895,9 @@ enum ShareUploadQueueWriter {
             capturedAtString: item.capturedAtString,
             targetAlbumIds: albumIds,
             status: "pending",
-            retryCount: 0
+            retryCount: 0,
+            latitude: item.latitude,
+            longitude: item.longitude
         )
         var all = loadAll()
         all.append(entry)
@@ -999,6 +1029,7 @@ enum ShareAPIClient {
           fullHash:      \(item.fullHash)
           caption:       "\(item.caption)"
           isFavorite:    \(item.isFavorite)
+          gps:           \(item.latitude.map { String($0) } ?? "nil"),\(item.longitude.map { String($0) } ?? "nil")
         """)
 
         let (responseData, http) = try await performWithRefresh {
@@ -1013,6 +1044,13 @@ enum ShareAPIClient {
             request.setValue(item.capturedAtString, forHTTPHeaderField: "X-Captured-At")
             if let assetId = item.assetLocalIdentifier {
                 request.setValue(assetId, forHTTPHeaderField: "X-Asset-Id")
+            }
+            // GPS fallback — see SharePhotoItem.latitude/longitude.
+            if let lat = item.latitude, lat.isFinite {
+                request.setValue(String(lat), forHTTPHeaderField: "X-GPS-Lat")
+            }
+            if let lng = item.longitude, lng.isFinite {
+                request.setValue(String(lng), forHTTPHeaderField: "X-GPS-Lng")
             }
             request.httpBody = item.data
             return request
