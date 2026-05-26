@@ -42,6 +42,12 @@ import {
   upsertTaxHintOverride,
   type TaxHintEntry,
 } from "./tax-hint-overrides";
+import {
+  createSubjectPerson,
+  deleteSubjectPerson,
+  listSubjectPersons,
+  updateSubjectPerson,
+} from "./subject-persons";
 import { dropTaxLinks, relocateDocument } from "./relocate";
 import {
   assertGroupMember,
@@ -1919,6 +1925,82 @@ export const rejectCategorySuggestion = api(
     if ((updated as any)?.rowCount === 0) {
       throw APIError.failedPrecondition("suggestion is not open");
     }
+    return { success: true };
+  },
+);
+
+// ─── Subject persons (Bezugspersonen) ──────────────────────────────────────
+
+export interface SubjectPersonDTO {
+  id: number;
+  full_name: string;
+  relation_tag: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SubjectPersonListResponse {
+  items: SubjectPersonDTO[];
+}
+
+export interface CreateSubjectPersonRequest {
+  full_name: string;
+  relation_tag: string;
+}
+
+export interface UpdateSubjectPersonRequest {
+  id: number;
+  full_name?: string;
+  relation_tag?: string;
+}
+
+export interface DeleteSubjectPersonRequest {
+  id: number;
+}
+
+/**
+ * List the caller's "Bezugspersonen" — the mapping of names that
+ * appear on documents (e.g. "Erika Mustermann") to relationship tags
+ * (e.g. "mutter") that the classifier should add as document tags
+ * whenever it encounters the corresponding name on a page.
+ */
+export const listSubjectPersonsEndpoint = api(
+  { expose: true, method: "GET", path: "/documents/subject-persons", auth: true },
+  async (): Promise<SubjectPersonListResponse> => {
+    checkModule();
+    const userId = getUserId();
+    const items = await listSubjectPersons(userId);
+    return { items };
+  },
+);
+
+export const createSubjectPersonEndpoint = api(
+  { expose: true, method: "POST", path: "/documents/subject-persons", auth: true },
+  async (req: CreateSubjectPersonRequest): Promise<SubjectPersonDTO> => {
+    checkModule();
+    const userId = getUserId();
+    return await createSubjectPerson(userId, req);
+  },
+);
+
+export const updateSubjectPersonEndpoint = api(
+  { expose: true, method: "PATCH", path: "/documents/subject-persons/:id", auth: true },
+  async (req: UpdateSubjectPersonRequest): Promise<SubjectPersonDTO> => {
+    checkModule();
+    const userId = getUserId();
+    return await updateSubjectPerson(userId, req.id, {
+      full_name: req.full_name,
+      relation_tag: req.relation_tag,
+    });
+  },
+);
+
+export const deleteSubjectPersonEndpoint = api(
+  { expose: true, method: "DELETE", path: "/documents/subject-persons/:id", auth: true },
+  async (req: DeleteSubjectPersonRequest): Promise<{ success: boolean }> => {
+    checkModule();
+    const userId = getUserId();
+    await deleteSubjectPerson(userId, req.id);
     return { success: true };
   },
 );
