@@ -78,6 +78,10 @@ export function createPushNotifications(api: PushApi) {
   const status = ref<PushStatus>('unsubscribed')
   const busy = ref(false)
   const error = ref<string | null>(null)
+  // Endpoint of the local PushSubscription, if any. Exposed so views
+  // that show a server-side list of subscriptions across devices can
+  // mark which entry belongs to this browser.
+  const currentEndpoint = ref<string | null>(null)
 
   const canToggle = computed(
     () =>
@@ -114,9 +118,11 @@ export function createPushNotifications(api: PushApi) {
     try {
       const reg = await navigator.serviceWorker.getRegistration(SW_URL)
       const sub = (await reg?.pushManager.getSubscription()) ?? null
+      currentEndpoint.value = sub?.endpoint ?? null
       status.value = sub ? 'subscribed' : 'unsubscribed'
     } catch (err: unknown) {
       error.value = (err as Error)?.message ?? 'Status unbekannt'
+      currentEndpoint.value = null
       status.value = 'unsubscribed'
     }
   }
@@ -160,6 +166,7 @@ export function createPushNotifications(api: PushApi) {
         keys: { p256dh, auth: authKey },
         userAgent: navigator.userAgent,
       })
+      currentEndpoint.value = sub.endpoint
       status.value = 'subscribed'
     } catch (err: unknown) {
       error.value = (err as Error)?.message ?? 'Aktivierung fehlgeschlagen'
@@ -179,6 +186,7 @@ export function createPushNotifications(api: PushApi) {
         await api.unsubscribe(sub.endpoint).catch(() => undefined)
         await sub.unsubscribe()
       }
+      currentEndpoint.value = null
       status.value = 'unsubscribed'
     } catch (err: unknown) {
       error.value = (err as Error)?.message ?? 'Deaktivierung fehlgeschlagen'
@@ -192,6 +200,7 @@ export function createPushNotifications(api: PushApi) {
     busy,
     error,
     canToggle,
+    currentEndpoint,
     refreshState,
     subscribe,
     unsubscribe,

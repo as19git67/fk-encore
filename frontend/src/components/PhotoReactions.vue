@@ -19,6 +19,10 @@ import PhotoCommentThread from './PhotoCommentThread.vue'
 
 const props = defineProps<{
   photoId: number
+  // Album in whose detail view this thread is open. Forwarded to the
+  // create-comment call so guest notifications stay scoped to that
+  // album when the photo also appears in other shared albums.
+  albumId?: number
 }>()
 
 const auth = useAuthStore()
@@ -50,7 +54,7 @@ async function onSubmit(body: string) {
   submitting.value = true
   error.value = ''
   try {
-    const created = await createComment(props.photoId, body)
+    const created = await createComment(props.photoId, body, props.albumId)
     comments.value.push(created)
   } catch (err: unknown) {
     error.value = (err as Error)?.message || 'Kommentar fehlgeschlagen'
