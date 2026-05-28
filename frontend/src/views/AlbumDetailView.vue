@@ -1217,17 +1217,25 @@ async function onGalleryLoaded() {
   // will find it. Consume the anchor so subsequent reloads don't re-apply it.
   const anchor = galleryAnchorPhotoId.value
   galleryAnchorPhotoId.value = null
+  // A `photoId` query parameter is only ever set by a push-notification
+  // deep-link. When present, open that photo straight in fullscreen
+  // (e.g. a comment notification) instead of merely centering it.
+  const deepLinkPhotoId = Number(route.query.photoId) || null
   const targetId = anchor
-    || Number(route.query.photoId)
+    || deepLinkPhotoId
     || loadLastPhotoMap()[String(albumId.value)]
     || photoNav.selectedPhotoId
     || null
   if (targetId) {
     const idx = galleryRef.value.findLoadedIndexById(targetId)
     if (idx !== null) {
-      cursorIndex.value = idx
-      galleryRef.value.scrollToIndex(idx)
-      void hydrateCursor(idx)
+      if (deepLinkPhotoId && targetId === deepLinkPhotoId) {
+        void openGridFullscreenAt(idx)
+      } else {
+        cursorIndex.value = idx
+        galleryRef.value.scrollToIndex(idx)
+        void hydrateCursor(idx)
+      }
     }
   }
   if (route.query.photoId) {
