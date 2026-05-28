@@ -10,10 +10,13 @@ name: GHCR Cleanup
 #                                Track AB / Issue #421)
 #
 # Policy (applied per package):
-#   1. Delete every UNTAGGED version immediately.
-#      Those are the orphaned layers left behind when `latest`, `test`
-#      or a semver tag is moved to a newer build. They are pure clutter
-#      and make up the bulk of the registry storage over time.
+#   1. Delete ORPHANED untagged versions — those left behind when `latest`,
+#      `test` or a semver tag moves to a newer build. CRITICAL: untagged
+#      versions that are still child manifests of a tagged image (per-arch
+#      manifests of a multi-arch index, or buildx provenance attestations)
+#      are NOT deleted. Deleting them used to leave the tagged index
+#      dangling, so `docker pull …:latest` failed with `manifest unknown`
+#      until the next rebuild — see the step below for the full rationale.
 #   2. Of the remaining TAGGED versions, keep the 10 most recent and
 #      delete older ones — UNLESS the tag matches one of:
 #        - a semver release tag (e.g. `1.2.3` or `v1.2.3`)
@@ -53,10 +56,25 @@ jobs:
           - fk-encore-llm
           - fk-encore-playwright-e2e
     steps:
-      # Step 1 — purge all untagged versions.
-      # Uses the GitHub REST API directly (gh cli) to avoid dependency on
-      # actions/delete-package-versions which currently runs on Node.js 20.
-      - name: Delete untagged versions of ${{ matrix.package }}
+      # Step 1 — purge untagged versions that are NOT child manifests of a
+      # still-tagged image.
+      #
+      # Why the extra care: our images are pushed with
+      # docker/build-push-action@v6, which (a) builds several of them
+      # multi-arch (linux/amd64,linux/arm64) and (b) attaches provenance
+      # attestations. Both produce an OCI *image index* under the tag
+      # (e.g. `latest`) that references several UNTAGGED child manifests —
+      # one per platform plus the attestation. Blindly deleting every
+      # untagged version (the old behaviour) removed those children and
+      # left the tagged index dangling, so `docker pull …:latest` failed
+      # with `manifest unknown` until the next rebuild. That is exactly the
+      # "image was there yesterday, gone today" symptom.
+      #
+      # Fix: inspect every TAGGED version's manifest, collect the digests
+      # it references, and skip those when purging untagged versions. Truly
+      # orphaned layers (left behind when a tag moves to a new build) have
+      # no referencing index and are still deleted.
+      - name: Delete orphaned untagged versions of ${{ matrix.package }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -75,19 +93,53 @@ jobs:
           VERSIONS=$(gh api --paginate "${API_BASE}" --jq '.' 2>/dev/null \
             | jq -s 'add // []' || echo '[]')
 
+          # Registry pull token for manifest inspection. GITHUB_TOKEN has
+          # pull access to this repo's own packages.
+          REG_TOKEN=$(curl -fsSL -u "${{ github.actor }}:${GH_TOKEN}" \
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:${OWNER}/${PACKAGE}:pull" \
+            | jq -r '.token // empty')
+
+          # Collect the digests referenced by every TAGGED manifest index.
+          # A version's `.name` is its manifest digest (sha256:…). Plain
+          # single-arch manifests have no `.manifests` array and contribute
+          # nothing. We accept both OCI-index and Docker manifest-list types.
+          REFERENCED="$(mktemp)"
+          if [ -n "${REG_TOKEN}" ]; then
+            while IFS= read -r digest; do
+              [ -z "$digest" ] && continue
+              curl -fsSL \
+                -H "Authorization: Bearer ${REG_TOKEN}" \
+                -H "Accept: application/vnd.oci.image.index.v1+json" \
+                -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" \
+                "https://ghcr.io/v2/${OWNER}/${PACKAGE}/manifests/${digest}" 2>/dev/null \
+                | jq -r '.manifests[]?.digest // empty' 2>/dev/null || true
+            done < <(echo "${VERSIONS}" \
+              | jq -r '.[] | select(.metadata.container.tags | length > 0) | .name') \
+              | sort -u > "${REFERENCED}"
+          else
+            echo "::warning::Could not obtain a registry token; falling back to deleting all untagged versions."
+          fi
+          echo "Referenced child manifests to preserve: $(wc -l < "${REFERENCED}")"
+
           DELETED=0
-          while IFS= read -r id; do
+          SKIPPED=0
+          while IFS=$'\t' read -r id digest; do
             [ -z "$id" ] && continue
+            if [ -s "${REFERENCED}" ] && grep -qxF "$digest" "${REFERENCED}"; then
+              echo "Skipping untagged child manifest ${digest} (referenced by a tagged image)"
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
             if gh api --method DELETE "${API_BASE}/${id}"; then
-              echo "Deleted untagged version ${id}"
+              echo "Deleted orphaned untagged version ${id} (${digest})"
               DELETED=$((DELETED + 1))
             else
               echo "Failed to delete version ${id}" >&2
             fi
           done < <(echo "${VERSIONS}" \
-            | jq -r '.[] | select(.metadata.container.tags | length == 0) | .id')
+            | jq -r '.[] | select(.metadata.container.tags | length == 0) | "\(.id)\t\(.name)"')
 
-          echo "Deleted ${DELETED} untagged version(s)."
+          echo "Deleted ${DELETED} orphaned untagged version(s); preserved ${SKIPPED} referenced child manifest(s)."
 
       # Step 2 — trim old tagged versions.
       # Protected tags: `latest`, semver (`1.2.3` / `v1.2.3`), and the
