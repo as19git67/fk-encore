@@ -1209,6 +1209,16 @@ function onBeforeUnload(e: BeforeUnloadEvent) {
 onMounted(() => window.addEventListener('beforeunload', onBeforeUnload))
 onUnmounted(() => window.removeEventListener('beforeunload', onBeforeUnload))
 
+// Re-init the album grid centred on the just-added photo and move the cursor
+// focus to it, so each upload becomes visible and the view ends on the most
+// recently uploaded photo. No-op in map mode (the grid isn't mounted there).
+async function refreshAlbumGridFocused(photoId: number) {
+  if (!galleryRef.value) return
+  await galleryRef.value.reload({ aroundPhotoId: photoId })
+  const idx = galleryRef.value.findLoadedIndexById(photoId)
+  if (idx !== null) selectGridIndex(idx)
+}
+
 async function handleUpload(filesIn: FileList | File[]) {
   if (!canUpload.value || !album.value) return
   const files = Array.from(filesIn)
@@ -1252,6 +1262,7 @@ async function handleUpload(filesIn: FileList | File[]) {
               if (photoId) {
                 await addPhotoToAlbum(targetAlbumId, photoId)
                 uploadAddedCount.value++
+                await refreshAlbumGridFocused(photoId)
               } else {
                 duplicates.push(file.name)
               }
@@ -1268,6 +1279,7 @@ async function handleUpload(filesIn: FileList | File[]) {
         })
         await addPhotoToAlbum(targetAlbumId, photo.id)
         uploadAddedCount.value++
+        await refreshAlbumGridFocused(photo.id)
       } catch (err: any) {
         if (abort.signal.aborted) break
         if (err.message?.includes('bereits hochgeladen')) duplicates.push(file.name)
@@ -1276,9 +1288,9 @@ async function handleUpload(filesIn: FileList | File[]) {
       }
     }
 
-    // Refresh album metadata + grid so the new photos appear.
+    // The grid was refreshed per photo; just reconcile album metadata
+    // (photo count, date range) and the cached albums list.
     await loadData()
-    await galleryRef.value?.reload()
     invalidateAlbums()
 
     if (abort.signal.aborted) {
