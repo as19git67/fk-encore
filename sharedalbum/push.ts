@@ -297,12 +297,24 @@ export function buildGuestNotification(input: {
     title = "Neuer Kommentar";
     body = excerpt ? `${actor}: ${excerpt}` : `${actor} hat kommentiert in „${album}"`;
   }
-  const url = `/app/albums/shared/${encodeURIComponent(input.albumLinkToken)}`;
+  // Deep-link straight to the commented photo when we know which one it
+  // was, so clicking the notification opens the album *and* the photo in
+  // fullscreen. SharedAlbumView reads the `photoId` query parameter.
+  const photoId =
+    typeof input.payload.photoId === "number" ? input.payload.photoId : undefined;
+  let url = `/app/albums/shared/${encodeURIComponent(input.albumLinkToken)}`;
+  if (input.kind === "comment_added" && photoId !== undefined) {
+    url += `?photoId=${photoId}`;
+  }
   return {
     title,
     body,
     url,
     tag: `${input.kind}:${input.albumLinkToken}`,
-    data: { kind: input.kind, albumLinkToken: input.albumLinkToken },
+    data: {
+      kind: input.kind,
+      albumLinkToken: input.albumLinkToken,
+      ...(photoId !== undefined ? { photoId } : {}),
+    },
   };
 }
