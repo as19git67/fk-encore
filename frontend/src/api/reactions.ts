@@ -27,10 +27,10 @@ export function listComments(photoId: number) {
   return apiFetch<{ comments: PhotoComment[] }>(`/photos/${photoId}/comments`)
 }
 
-export function createComment(photoId: number, body: string) {
+export function createComment(photoId: number, body: string, albumId?: number) {
   return apiFetch<PhotoComment>(`/photos/${photoId}/comments`, {
     method: 'POST',
-    body: JSON.stringify({ body }),
+    body: JSON.stringify(albumId != null ? { body, albumId } : { body }),
   })
 }
 

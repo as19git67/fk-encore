@@ -85,14 +85,24 @@ async function runFanoutAlbum(req: FanoutAlbumInput): Promise<void> {
 }
 
 /**
- * Fan-out for a photo-scoped event — typically a new comment. One
- * row per (guest, album) pair: if the same photo is in two public-
- * linked albums a guest has access to, they get one notification per
- * album (different subject lines / mail groupings).
+ * Fan-out for a photo-scoped event — typically a new comment. The
+ * `albumId` is the album in whose context the action took place: a
+ * guest commenting via a share-link knows their album from the link,
+ * and the user-app passes it from the open photo view. Only guests
+ * who reached the photo through a public link of *that* album are
+ * notified — without this scope the same comment would notify every
+ * guest of every other album that happens to contain the photo too.
+ *
+ * If no `albumId` is provided we fall back to the legacy behavior of
+ * notifying every public-link guest who can see the photo through any
+ * album. This is kept as a safety net for callers that genuinely have
+ * no album context.
  */
 interface FanoutPhotoInput {
   photoId: number;
   kind: "comment_added";
+  /** Album in whose context the action happened. Scopes the fan-out. */
+  albumId?: number;
   payload?: Record<string, unknown>;
   excludeGuestId?: number;
 }
@@ -102,6 +112,7 @@ export const fanoutPhoto = api(
   async (req: FanoutPhotoInput): Promise<void> => {
     const payloadJson = JSON.stringify(req.payload ?? {});
     const exclude = req.excludeGuestId ?? null;
+    const albumId = req.albumId ?? null;
     const result = await db.execute<EnrichedInsertRow>(sql`
       WITH ins AS (
         INSERT INTO guest_notifications (guest_id, album_id, kind, payload)
@@ -111,6 +122,7 @@ export const fanoutPhoto = api(
         INNER JOIN album_public_links apl ON apl.id = gla.public_link_id
         INNER JOIN album_photos ap ON ap.album_id = apl.album_id
         WHERE ap.photo_id = ${req.photoId}
+          AND (${albumId}::int IS NULL OR apl.album_id = ${albumId}::int)
           AND (apl.expires_at IS NULL OR apl.expires_at > NOW())
           AND g.notify_opt_in = TRUE
           AND g.verified_at IS NOT NULL

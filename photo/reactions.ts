@@ -31,6 +31,12 @@ function requirePhotosView() {
 
 interface CreateCommentRequest {
   body: string;
+  /**
+   * Optional album the comment was authored from. Forwarded to the
+   * shared-album fan-out so guest notifications stay scoped to that
+   * album when the same photo also exists in other shared albums.
+   */
+  albumId?: number;
 }
 
 export const listComments = api(
@@ -45,10 +51,10 @@ export const listComments = api(
 export const createComment = api(
   { expose: true, method: "POST", path: "/photos/:id/comments", auth: true },
   async (
-    { id, body }: CreateCommentRequest & { id: number },
+    { id, body, albumId }: CreateCommentRequest & { id: number },
   ): Promise<svc.PhotoComment> => {
     requirePhotosView();
-    return await svc.createComment(getUserId(), id, body);
+    return await svc.createComment(getUserId(), id, body, albumId);
   },
 );
 

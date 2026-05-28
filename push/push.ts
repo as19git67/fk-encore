@@ -85,6 +85,41 @@ export const unsubscribe = api(
   },
 );
 
+interface ListSubscriptionsResponse {
+  subscriptions: svc.SubscriptionSummary[];
+}
+
+// Profile view: server-side source of truth for which devices have an
+// active subscription. The frontend can't derive this from the browser
+// alone — `pushManager.getSubscription()` only sees the current
+// browser. Without this list, a user who subscribed on their phone
+// sees "not active" in the desktop profile but still receives pushes
+// on the phone.
+export const listSubscriptions = api(
+  { expose: true, method: "GET", path: "/push/subscriptions", auth: true },
+  async (): Promise<ListSubscriptionsResponse> => {
+    const userId = requireUserId();
+    const subscriptions = await svc.listUserSubscriptionsForProfile(userId);
+    return { subscriptions };
+  },
+);
+
+export const removeSubscription = api(
+  { expose: true, method: "DELETE", path: "/push/subscriptions/:id", auth: true },
+  async ({ id }: { id: number }): Promise<{ removed: number }> => {
+    const userId = requireUserId();
+    return await svc.removeSubscriptionById(userId, id);
+  },
+);
+
+export const removeAllSubscriptions = api(
+  { expose: true, method: "DELETE", path: "/push/subscriptions", auth: true },
+  async (): Promise<{ removed: number }> => {
+    const userId = requireUserId();
+    return await svc.removeAllSubscriptionsForUser(userId);
+  },
+);
+
 // ---------- Notification preferences ----------
 
 interface NotificationPrefsResponse {

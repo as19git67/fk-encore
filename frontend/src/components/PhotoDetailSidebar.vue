@@ -355,7 +355,7 @@ watch(() => props.photo.id, () => {
       <div class="sidebar-divider" />
       <div class="sidebar-section">
         <div class="section-label"><i class="pi pi-comments" /> Reaktionen</div>
-        <PhotoReactions :photo-id="photo.id" />
+        <PhotoReactions :photo-id="photo.id" :album-id="albumId" />
       </div>
 
       <!-- Curation opinions (shared albums only) -->
