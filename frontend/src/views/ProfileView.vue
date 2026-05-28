@@ -26,8 +26,12 @@ import { usePushNotifications } from '../composables/usePushNotifications'
 import {
   getPushPreferences,
   updatePushPreferences,
+  listPushSubscriptions,
+  deletePushSubscription,
+  deleteAllPushSubscriptions,
   type NotificationKind,
   type NotificationPrefs,
+  type PushSubscriptionSummary,
 } from '../api/push'
 
 const auth = useAuthStore()
@@ -136,6 +140,12 @@ const pushLabel = computed(() => {
       return 'Push-Nachrichten sind auf diesem Gerät aktiv.'
     case 'unsubscribed':
     default:
+      if (otherDeviceSubscriptions.value.length > 0) {
+        const n = otherDeviceSubscriptions.value.length
+        return n === 1
+          ? 'Push-Nachrichten sind auf diesem Gerät nicht aktiv, aber auf einem anderen Gerät weiterhin eingerichtet.'
+          : `Push-Nachrichten sind auf diesem Gerät nicht aktiv, aber auf ${n} weiteren Geräten weiterhin eingerichtet.`
+      }
       return 'Push-Nachrichten sind auf diesem Gerät nicht aktiv.'
   }
 })
@@ -145,6 +155,86 @@ async function togglePush() {
     await push.unsubscribe()
   } else {
     await push.subscribe()
+  }
+  await loadServerSubscriptions()
+}
+
+// ── Server-side subscriptions (across devices) ─────────────────────────────
+//
+// The push.status above reflects only the *local* browser. Without this
+// list a user who subscribed on another device sees "not active" on
+// the current device and is confused why notifications still arrive.
+const serverSubscriptions = ref<PushSubscriptionSummary[]>([])
+const serverSubsLoading = ref(false)
+const serverSubsError = ref('')
+const removingSubId = ref<number | null>(null)
+const removingAllSubs = ref(false)
+
+const otherDeviceSubscriptions = computed(() =>
+  serverSubscriptions.value.filter((s) => s.endpoint !== push.currentEndpoint.value),
+)
+
+const hasServerSubs = computed(() => serverSubscriptions.value.length > 0)
+
+function describeUserAgent(ua: string | null): string {
+  if (!ua) return 'Unbekanntes Gerät'
+  const lower = ua.toLowerCase()
+  let browser = 'Browser'
+  if (lower.includes('edg/')) browser = 'Edge'
+  else if (lower.includes('firefox/')) browser = 'Firefox'
+  else if (lower.includes('chrome/')) browser = 'Chrome'
+  else if (lower.includes('safari/')) browser = 'Safari'
+  let platform = ''
+  if (lower.includes('android')) platform = 'Android'
+  else if (lower.includes('iphone') || lower.includes('ipad') || lower.includes('ios')) platform = 'iOS'
+  else if (lower.includes('mac os')) platform = 'macOS'
+  else if (lower.includes('windows')) platform = 'Windows'
+  else if (lower.includes('linux')) platform = 'Linux'
+  return platform ? `${browser} auf ${platform}` : browser
+}
+
+async function loadServerSubscriptions() {
+  serverSubsLoading.value = true
+  serverSubsError.value = ''
+  try {
+    const res = await listPushSubscriptions()
+    serverSubscriptions.value = res.subscriptions
+  } catch (err: any) {
+    serverSubsError.value = err?.message || 'Geräteliste konnte nicht geladen werden.'
+  } finally {
+    serverSubsLoading.value = false
+  }
+}
+
+async function removeServerSub(id: number) {
+  removingSubId.value = id
+  serverSubsError.value = ''
+  try {
+    await deletePushSubscription(id)
+    serverSubscriptions.value = serverSubscriptions.value.filter((s) => s.id !== id)
+  } catch (err: any) {
+    serverSubsError.value = err?.message || 'Abmelden fehlgeschlagen.'
+  } finally {
+    removingSubId.value = null
+  }
+}
+
+async function removeAllServerSubs() {
+  removingAllSubs.value = true
+  serverSubsError.value = ''
+  try {
+    await deleteAllPushSubscriptions()
+    serverSubscriptions.value = []
+    // The local browser also had a sub (if it was on the current
+    // device). Unsubscribe locally so the OS-level permission state
+    // matches the backend state.
+    if (push.status.value === 'subscribed') {
+      await push.unsubscribe()
+    }
+  } catch (err: any) {
+    serverSubsError.value = err?.message || 'Abmelden fehlgeschlagen.'
+  } finally {
+    removingAllSubs.value = false
   }
 }
 
@@ -200,6 +290,7 @@ onMounted(async () => {
   await loadPasskeys()
   await push.refreshState()
   await loadNotifPrefs()
+  await loadServerSubscriptions()
 })
 </script>
 
@@ -282,6 +373,53 @@ onMounted(async () => {
             :severity="push.status.value === 'subscribed' ? 'secondary' : 'primary'"
             @click="togglePush"
           />
+        </div>
+
+        <Message v-if="serverSubsError" severity="error" :closable="false" class="mb">
+          {{ serverSubsError }}
+        </Message>
+        <div v-if="hasServerSubs" class="device-list">
+          <div class="device-list-header">
+            <span class="device-list-title">Aktive Geräte</span>
+            <Button
+              label="Alle abmelden"
+              icon="pi pi-bell-slash"
+              size="small"
+              severity="secondary"
+              text
+              :loading="removingAllSubs"
+              @click="removeAllServerSubs"
+            />
+          </div>
+          <div class="device-list-items">
+            <div
+              v-for="sub in serverSubscriptions"
+              :key="sub.id"
+              class="device-row"
+            >
+              <div class="device-info">
+                <span class="device-name">
+                  {{ describeUserAgent(sub.userAgent) }}
+                  <span
+                    v-if="sub.endpoint === push.currentEndpoint.value"
+                    class="device-current"
+                  >· dieses Gerät</span>
+                </span>
+                <span class="device-meta">Eingerichtet am {{ formatDateShort(sub.createdAt) }}</span>
+              </div>
+              <Button
+                icon="pi pi-times"
+                severity="secondary"
+                text
+                rounded
+                size="small"
+                aria-label="Gerät abmelden"
+                v-tooltip="'Gerät abmelden'"
+                :loading="removingSubId === sub.id"
+                @click="removeServerSub(sub.id)"
+              />
+            </div>
+          </div>
         </div>
 
         <template v-if="push.status.value === 'subscribed' || push.status.value === 'unsubscribed'">
@@ -502,6 +640,67 @@ onMounted(async () => {
 }
 
 .notif-type-desc {
+  font-size: 0.78rem;
+  color: var(--p-text-muted-color);
+}
+
+.device-list {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--p-content-border-color);
+}
+
+.device-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.device-list-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.device-list-items {
+  display: flex;
+  flex-direction: column;
+}
+
+.device-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--p-content-border-color);
+}
+
+.device-row:last-child {
+  border-bottom: none;
+}
+
+.device-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.device-name {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.device-current {
+  margin-left: 0.35rem;
+  font-weight: 400;
+  font-size: 0.78rem;
+  color: var(--p-primary-color);
+}
+
+.device-meta {
   font-size: 0.78rem;
   color: var(--p-text-muted-color);
 }

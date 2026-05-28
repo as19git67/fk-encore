@@ -70,6 +70,7 @@ export const createGuestComment = api.raw(
         photoId,
         body.body,
         resolved.publicLink.id,
+        resolved.publicLink.album_id,
       );
       writeJson(res, 200, comment);
     } catch (err) {

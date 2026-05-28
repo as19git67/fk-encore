@@ -206,6 +206,7 @@ export async function createComment(
   userId: number,
   photoId: number,
   rawBody: string,
+  albumId?: number,
 ): Promise<PhotoComment> {
   const audience = await assertPhotoAccess(userId, photoId);
   const body = normalizeCommentBody(rawBody);
@@ -262,12 +263,14 @@ export async function createComment(
       excerpt: comment.body.slice(0, 140),
     },
   });
-  // Fan out to guests subscribed to any public-linked album that
-  // contains this photo. The actor is a user, not a guest, so no
-  // guest is excluded.
+  // Fan out to guests of the album whose view the comment was made
+  // from. `albumId` is set when the comment originated from an album
+  // detail page; without it (e.g. comment from a generic photo grid)
+  // we still notify every public-link guest who can see the photo.
   await sharedalbum
     .fanoutPhoto({
       photoId,
+      albumId,
       kind: "comment_added",
       payload: {
         commentId: comment.id,
@@ -300,6 +303,7 @@ export async function createCommentAsGuest(
   photoId: number,
   rawBody: string,
   publicLinkId: number,
+  albumId: number,
 ): Promise<PhotoComment> {
   await assertPhotoInPublicLink(photoId, publicLinkId);
   const body = normalizeCommentBody(rawBody);
@@ -366,10 +370,13 @@ export async function createCommentAsGuest(
       `[reactions] guest feed emit failed photo=${photoId}: ${(err as Error).message}`,
     );
   }
-  // Notify other guests on the same album(s), excluding the author.
+  // Notify only guests of the album whose share-link the author used —
+  // a photo shared via several album links must not leak comments
+  // across the audiences of those albums.
   await sharedalbum
     .fanoutPhoto({
       photoId,
+      albumId,
       kind: "comment_added",
       excludeGuestId: guestId,
       payload: {
