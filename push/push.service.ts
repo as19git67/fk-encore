@@ -149,6 +149,65 @@ async function deleteSubscriptionById(id: number): Promise<void> {
   );
 }
 
+export interface SubscriptionSummary {
+  id: number;
+  endpoint: string;
+  userAgent: string | null;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+/**
+ * List a user's active push subscriptions for display in the profile.
+ * The profile uses this to surface subscriptions on devices the user
+ * isn't currently looking at — without it, the toggle reflects only
+ * the local browser's PushManager and a user with subs on other
+ * devices wrongly sees "not active".
+ *
+ * `endpoint` is returned so the frontend can match the entry that
+ * belongs to the current browser (PushSubscription.endpoint). The
+ * VAPID keys are deliberately omitted.
+ */
+export async function listUserSubscriptionsForProfile(
+  userId: number,
+): Promise<SubscriptionSummary[]> {
+  return await dbAll<SubscriptionSummary>(
+    db
+      .select({
+        id: pushSubscriptions.id,
+        endpoint: pushSubscriptions.endpoint,
+        userAgent: pushSubscriptions.user_agent,
+        createdAt: pushSubscriptions.created_at,
+        lastUsedAt: pushSubscriptions.last_used_at,
+      })
+      .from(pushSubscriptions)
+      .where(eq(pushSubscriptions.user_id, userId)),
+  );
+}
+
+export async function removeSubscriptionById(
+  userId: number,
+  id: number,
+): Promise<{ removed: number }> {
+  const { changes } = await dbExec(
+    db
+      .delete(pushSubscriptions)
+      .where(
+        and(eq(pushSubscriptions.user_id, userId), eq(pushSubscriptions.id, id)),
+      ),
+  );
+  return { removed: changes };
+}
+
+export async function removeAllSubscriptionsForUser(
+  userId: number,
+): Promise<{ removed: number }> {
+  const { changes } = await dbExec(
+    db.delete(pushSubscriptions).where(eq(pushSubscriptions.user_id, userId)),
+  );
+  return { removed: changes };
+}
+
 // ---------- Send ----------
 
 export interface PushPayload {
