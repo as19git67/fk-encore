@@ -784,7 +784,26 @@ function selectStopByPhotoId(photoId: number): boolean {
   return true
 }
 
-defineExpose({ selectStopByPhotoId })
+/**
+ * Select the stop containing the photo AND open the day-scoped
+ * fullscreen overlay at that photo. Used for notification deep-links so
+ * the visitor lands directly on the commented photo rather than only on
+ * its map stop.
+ */
+function openFullscreenByPhotoId(photoId: number): boolean {
+  const stop = stops.value.find((s) => s.photos.some((p) => p.id === photoId))
+  if (!stop) return false
+  activePhotoId.value = photoId
+  applySelection(stop.day, stop.id, { silent: true })
+  nextTick(() => scrollItemIntoCenter(stop.id))
+  const dayPhotos = dayPhotosFor(stop.day)
+  const startIndex = Math.max(0, dayPhotos.findIndex((p) => p.id === photoId))
+  activePhotoId.value = null
+  emit('open-fullscreen', dayPhotos, startIndex, stop.day)
+  return true
+}
+
+defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
 </script>
 
 <template>
