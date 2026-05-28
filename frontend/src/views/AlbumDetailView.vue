@@ -38,8 +38,12 @@ import {
   type AlbumWithPhotos,
   type BatchDeleteSkippedPhoto,
   type PublicLinkExpiry,
+  addPhotoToAlbum,
   batchDeletePhotos,
   batchUpdateAlbumPhotos,
+  checkPhotoHash,
+  computeFileHash,
+  uploadPhotoWithProgress,
   createAlbumPublicLink,
   deleteAlbum,
   deleteAlbumPublicLink,
@@ -73,7 +77,7 @@ import { usePhotoNavStore } from '../stores/photoNav'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 import { useNaturalSearch } from '../composables/useNaturalSearch'
 import { useReferenceData } from '../composables/useReferenceData'
-import { onUnmounted } from 'vue'
+import { onMounted, onUnmounted } from 'vue'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import {
   albumsViewQueryFromStorage,
@@ -1160,6 +1164,195 @@ async function handleDeleteAlbum() {
   }
 }
 
+function openDeleteFromSettings() {
+  showAlbumSettingsDialog.value = false
+  showDeleteDialog.value = true
+}
+
+// ── Photo upload (mirrors GalleryView; uploaded photos join this album) ───────
+const uploading = ref(false)
+const uploadAbortController = ref<AbortController | null>(null)
+const uploadCurrent = ref(0)
+const uploadTotal = ref(0)
+const uploadProgress = ref(0)
+const uploadAddedCount = ref(0)
+const uploadResultMessage = ref('')
+const uploadErrors = ref<string[]>([])
+const showErrorFlyout = ref(false)
+const isDragging = ref(false)
+let dragCounter = 0
+let uploadResultTimeout: ReturnType<typeof setTimeout> | undefined
+
+// Upload requires the global photos.upload permission AND write access to this
+// album — the same rule the backend enforces in addPhotoToAlbumLogic.
+const canUpload = computed(() => canUploadPhotos.value && canWrite.value)
+
+let wakeLock: WakeLockSentinel | null = null
+async function acquireWakeLock() {
+  if (!('wakeLock' in navigator)) return
+  try {
+    wakeLock = await (navigator as any).wakeLock.request('screen')
+  } catch {
+    // Permission denied or not available — upload continues without it.
+  }
+}
+function releaseWakeLock() {
+  wakeLock?.release().catch(() => {})
+  wakeLock = null
+}
+
+function onBeforeUnload(e: BeforeUnloadEvent) {
+  if (!uploading.value) return
+  e.preventDefault()
+  return ''
+}
+onMounted(() => window.addEventListener('beforeunload', onBeforeUnload))
+onUnmounted(() => window.removeEventListener('beforeunload', onBeforeUnload))
+
+async function handleUpload(filesIn: FileList | File[]) {
+  if (!canUpload.value || !album.value) return
+  const files = Array.from(filesIn)
+  if (!files.length) return
+
+  const abort = new AbortController()
+  uploadAbortController.value = abort
+  uploading.value = true
+  error.value = ''
+  uploadCurrent.value = 0
+  uploadTotal.value = files.length
+  uploadProgress.value = 0
+  uploadAddedCount.value = 0
+  uploadResultMessage.value = ''
+  uploadErrors.value = []
+  if (uploadResultTimeout) {
+    clearTimeout(uploadResultTimeout)
+    uploadResultTimeout = undefined
+  }
+
+  await acquireWakeLock()
+
+  const targetAlbumId = albumId.value
+  const duplicates: string[] = []
+  const unsupported: string[] = []
+  const errors: string[] = []
+
+  try {
+    for (let i = 0; i < files.length; i++) {
+      if (abort.signal.aborted) break
+      const file = files[i]!
+      uploadCurrent.value = i + 1
+      try {
+        // Local SHA-256 + server check skips re-uploading bytes that already
+        // exist in the library — but the photo still needs to join this album.
+        const fileHash = await computeFileHash(file)
+        if (fileHash && !abort.signal.aborted) {
+          try {
+            const { exists, photoId } = await checkPhotoHash(fileHash)
+            if (exists) {
+              if (photoId) {
+                await addPhotoToAlbum(targetAlbumId, photoId)
+                uploadAddedCount.value++
+              } else {
+                duplicates.push(file.name)
+              }
+              uploadProgress.value = Math.round(((i + 1) / files.length) * 100)
+              continue
+            }
+          } catch {
+            // Pre-check failure is non-fatal — fall through to actual upload.
+          }
+        }
+        const photo = await uploadPhotoWithProgress(file, abort.signal, (loaded, total) => {
+          const filePct = loaded / total
+          uploadProgress.value = Math.round(((i + filePct) / files.length) * 100)
+        })
+        await addPhotoToAlbum(targetAlbumId, photo.id)
+        uploadAddedCount.value++
+      } catch (err: any) {
+        if (abort.signal.aborted) break
+        if (err.message?.includes('bereits hochgeladen')) duplicates.push(file.name)
+        else if (err.message?.includes('nicht unterstützt')) unsupported.push(file.name)
+        else errors.push(`${file.name}: ${err.message}`)
+      }
+    }
+
+    // Refresh album metadata + grid so the new photos appear.
+    await loadData()
+    await galleryRef.value?.reload()
+    invalidateAlbums()
+
+    if (abort.signal.aborted) {
+      error.value = 'Hochladen wurde abgebrochen.'
+    } else if (duplicates.length || unsupported.length || errors.length) {
+      const all: string[] = [
+        ...duplicates.map((f) => `Bereits vorhanden: ${f}`),
+        ...unsupported.map((f) => `Nicht unterstützt: ${f}`),
+        ...errors.map((e) => `Fehler: ${e}`),
+      ]
+      if (all.length > 3) {
+        uploadErrors.value = all
+        error.value = `${all.length} Dateien konnten nicht hochgeladen werden.`
+      } else {
+        error.value = all.join(' ')
+      }
+    }
+    const count = uploadAddedCount.value
+    if (count > 0 && !abort.signal.aborted) {
+      uploadResultMessage.value =
+        count === 1 ? '1 Foto zum Album hinzugefügt' : `${count} Fotos zum Album hinzugefügt`
+      uploadResultTimeout = setTimeout(() => {
+        uploadResultMessage.value = ''
+      }, 8000)
+    }
+  } finally {
+    uploading.value = false
+    uploadAbortController.value = null
+    releaseWakeLock()
+  }
+}
+
+function cancelUpload() {
+  uploadAbortController.value?.abort()
+}
+
+function onFileInputChange(ev: Event) {
+  const input = ev.target as HTMLInputElement
+  if (input.files && input.files.length > 0) {
+    void handleUpload(input.files)
+    // Reset so the same file can be picked again.
+    input.value = ''
+  }
+}
+
+function onDragEnter(e: DragEvent) {
+  if (!canUpload.value || uploading.value) return
+  e.preventDefault()
+  dragCounter++
+  isDragging.value = true
+}
+function onDragLeave(e: DragEvent) {
+  if (!canUpload.value) return
+  e.preventDefault()
+  dragCounter--
+  if (dragCounter <= 0) {
+    dragCounter = 0
+    isDragging.value = false
+  }
+}
+function onDragOver(e: DragEvent) {
+  if (!canUpload.value || uploading.value) return
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+}
+function onDrop(e: DragEvent) {
+  if (!canUpload.value || uploading.value) return
+  e.preventDefault()
+  isDragging.value = false
+  dragCounter = 0
+  const files = e.dataTransfer?.files
+  if (files && files.length > 0) void handleUpload(files)
+}
+
 // ── Leave album share ────────────────────────────────────────────────────────
 const showLeaveDialog = ref(false)
 const leavingAlbum = ref(false)
@@ -1382,7 +1575,21 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
 </script>
 
 <template>
-  <div class="album-detail-view">
+  <div
+    class="album-detail-view"
+    @dragenter="onDragEnter"
+    @dragover="onDragOver"
+    @dragleave="onDragLeave"
+    @drop="onDrop"
+  >
+    <!-- Drag overlay -->
+    <div v-if="isDragging" class="drag-overlay">
+      <div class="drag-message">
+        <i class="pi pi-upload" />
+        <span>Fotos zum Hochladen hier ablegen</span>
+      </div>
+    </div>
+
     <ServiceStatusBar />
 
     <div v-if="album" class="subheader">
@@ -1488,7 +1695,28 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
           <Button v-if="effectiveCoverPhotoId && viewMode !== 'map'" icon="pi pi-image" size="small" text v-tooltip="'Cover fokussieren'" @click="scrollToCover" />
           <Button v-if="canShareAlbum" icon="pi pi-share-alt" size="small" text v-tooltip="'Freigeben'" @click="openShareDialogLocal" />
           <Button v-if="canWrite" icon="pi pi-cog" size="small" text v-tooltip="'Album-Einstellungen'" @click="openAlbumSettingsDialog" />
-          <Button v-if="isOwner" icon="pi pi-trash" size="small" text severity="danger" v-tooltip="'Album löschen'" @click="showDeleteDialog = true" />
+          <template v-if="canUpload">
+            <Button
+              v-if="uploading"
+              label="Abbrechen"
+              icon="pi pi-times"
+              size="small"
+              severity="danger"
+              class="header__upload-btn"
+              v-tooltip="'Hochladen abbrechen'"
+              @click="cancelUpload"
+            />
+            <label v-else class="header__upload-btn upload-button-label" v-tooltip="'Fotos hochladen'">
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                class="upload-input-hidden"
+                @change="onFileInputChange"
+              />
+              <Button label="Hochladen" icon="pi pi-upload" size="small" as="span" />
+            </label>
+          </template>
           <Button v-if="!isOwner" icon="pi pi-sign-out" size="small" text severity="danger" v-tooltip="'Freigabe verlassen'" @click="showLeaveDialog = true" />
         </div>
       </div>
@@ -1525,7 +1753,53 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
       @reset="onResetSort"
     />
 
-    <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
+    <Message v-if="error" severity="error" @close="error = ''; uploadErrors = []">
+      {{ error }}
+      <button
+        v-if="uploadErrors.length > 3"
+        class="error-flyout-btn"
+        @click="showErrorFlyout = !showErrorFlyout"
+      >
+        <i class="pi pi-list" /> Details anzeigen
+      </button>
+    </Message>
+
+    <!-- Error flyout -->
+    <div
+      v-if="showErrorFlyout && uploadErrors.length > 0"
+      class="error-flyout-overlay"
+      @click.self="showErrorFlyout = false"
+    >
+      <div class="error-flyout">
+        <div class="error-flyout-header">
+          <span>{{ uploadErrors.length }} Fehler beim Hochladen</span>
+          <button class="error-flyout-close" @click="showErrorFlyout = false">
+            <i class="pi pi-times" />
+          </button>
+        </div>
+        <ul class="error-flyout-list">
+          <li v-for="(err, i) in uploadErrors" :key="i">{{ err }}</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Upload progress bar — sticky so it stays visible while scrolling on iOS -->
+    <div v-if="uploading" class="upload-progress-bar">
+      <div class="upload-progress-bar__info">
+        <i class="pi pi-upload" />
+        <span>{{ uploadCurrent }} von {{ uploadTotal }} Fotos werden hochgeladen…</span>
+        <span class="upload-progress-bar__pct">{{ uploadProgress }}%</span>
+      </div>
+      <div class="upload-progress-bar__track">
+        <div class="upload-progress-bar__fill" :style="{ width: uploadProgress + '%' }" />
+      </div>
+    </div>
+
+    <!-- Upload success message -->
+    <div v-if="uploadResultMessage && !uploading" class="upload-result-bar">
+      <i class="pi pi-check-circle" />
+      <span>{{ uploadResultMessage }}</span>
+    </div>
 
     <div v-if="loading && !album" class="info-text">
       <i class="pi pi-spin pi-spinner" /> Album wird geladen…
@@ -1851,8 +2125,19 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
         </div>
       </div>
       <template #footer>
-        <Button label="Abbrechen" text @click="showAlbumSettingsDialog = false" />
-        <Button label="Speichern" :disabled="!albumSettingsName.trim()" :loading="albumSettingsUpdating" @click="handleSaveAlbumSettings" />
+        <div class="settings-footer">
+          <Button
+            v-if="isOwner"
+            label="Album löschen"
+            icon="pi pi-trash"
+            severity="danger"
+            text
+            @click="openDeleteFromSettings"
+          />
+          <span class="settings-footer__spacer" />
+          <Button label="Abbrechen" text @click="showAlbumSettingsDialog = false" />
+          <Button label="Speichern" :disabled="!albumSettingsName.trim()" :loading="albumSettingsUpdating" @click="handleSaveAlbumSettings" />
+        </div>
       </template>
     </Dialog>
 
@@ -2027,6 +2312,175 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
   .view-mode-switch__label { display: inline; }
 }
 
+/* ── Upload (mirrors GalleryView) ─────────────────────────────────────────── */
+.upload-button-label { display: inline-flex; cursor: pointer; }
+.upload-input-hidden { display: none; }
+
+.drag-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 119, 255, 0.15);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  pointer-events: none;
+  border: 4px dashed var(--p-primary-color);
+  margin: 10px;
+  width: calc(100% - 20px);
+  height: calc(100% - 20px);
+  border-radius: 16px;
+}
+.drag-message {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  color: var(--p-primary-color);
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+.drag-message .pi { font-size: 3rem; }
+
+.upload-progress-bar {
+  padding: 0.5rem 1rem;
+  background: var(--p-blue-50);
+  border-bottom: 1px solid var(--p-blue-200);
+  /* Sticky so the bar remains visible when the album is scrolled on iOS */
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+.upload-progress-bar__info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--p-blue-700);
+  margin-bottom: 0.35rem;
+}
+.upload-progress-bar__pct { margin-left: auto; font-variant-numeric: tabular-nums; }
+.upload-progress-bar__track {
+  height: 4px;
+  background: var(--p-blue-100);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.upload-progress-bar__fill {
+  height: 100%;
+  background: var(--p-blue-500);
+  border-radius: 2px;
+  transition: width 0.15s ease;
+}
+
+.upload-result-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: var(--p-green-50);
+  border-bottom: 1px solid var(--p-green-200);
+  color: var(--p-green-700);
+  font-size: 0.875rem;
+}
+.upload-result-bar .pi-check-circle { color: var(--p-green-500); }
+
+@media (prefers-color-scheme: dark) {
+  .upload-progress-bar {
+    background: var(--p-blue-900);
+    border-color: var(--p-blue-700);
+  }
+  .upload-progress-bar__info { color: var(--p-blue-200); }
+  .upload-progress-bar__track { background: var(--p-blue-800); }
+  .upload-progress-bar__fill  { background: var(--p-blue-400); }
+  .upload-result-bar {
+    background: var(--p-green-900);
+    border-color: var(--p-green-700);
+    color: var(--p-green-200);
+  }
+  .upload-result-bar .pi-check-circle { color: var(--p-green-400); }
+}
+
+/* ── Error flyout ─────────────────────────────────────────────────────────── */
+.error-flyout-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: 0.75rem;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.error-flyout-btn:hover { background: rgba(255, 255, 255, 0.3); }
+
+.error-flyout-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 8rem;
+  background: rgba(0, 0, 0, 0.3);
+}
+.error-flyout {
+  background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  width: 90%;
+  max-width: 500px;
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+}
+.error-flyout-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  border-bottom: 1px solid var(--p-content-border-color);
+  flex-shrink: 0;
+}
+.error-flyout-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--p-text-muted-color);
+  padding: 0.25rem;
+  border-radius: 4px;
+}
+.error-flyout-close:hover {
+  color: var(--p-text-color);
+  background: var(--p-content-hover-background);
+}
+.error-flyout-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+.error-flyout-list li {
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  border-bottom: 1px solid var(--p-content-hover-background);
+}
+.error-flyout-list li:last-child { border-bottom: none; }
+
+/* Settings dialog footer: delete on the left, save/cancel on the right. */
+.settings-footer { display: flex; align-items: center; gap: 0.5rem; width: 100%; }
+.settings-footer__spacer { flex: 1; }
+
 .header__title-group {
   display: flex;
   align-items: center;
@@ -2188,6 +2642,10 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
   .header__group-review-btn :deep(.p-button-label) { display: none; }
   .header__group-review-btn :deep(.p-button-icon) { margin-right: 0; }
   .header__group-review-btn { padding: 0.5rem; min-width: 2.25rem; }
+
+  /* Upload button is icon-only on phones; the label stays in the tooltip. */
+  .header__upload-btn :deep(.p-button-label) { display: none; }
+  .header__upload-btn :deep(.p-button-icon) { margin-right: 0; }
 
   /* Selection action bar — clear of the iOS home indicator and with
      44px-tall touch targets so the buttons are easy to tap (#373). */
