@@ -32,6 +32,30 @@ export function unsubscribePush(endpoint: string) {
   })
 }
 
+export interface PushSubscriptionSummary {
+  id: number
+  endpoint: string
+  userAgent: string | null
+  createdAt: string
+  lastUsedAt: string | null
+}
+
+export function listPushSubscriptions() {
+  return apiFetch<{ subscriptions: PushSubscriptionSummary[] }>('/push/subscriptions')
+}
+
+export function deletePushSubscription(id: number) {
+  return apiFetch<{ removed: number }>(`/push/subscriptions/${id}`, {
+    method: 'DELETE',
+  })
+}
+
+export function deleteAllPushSubscriptions() {
+  return apiFetch<{ removed: number }>('/push/subscriptions', {
+    method: 'DELETE',
+  })
+}
+
 export type NotificationKind =
   | 'photo_added'
   | 'album_shared'
