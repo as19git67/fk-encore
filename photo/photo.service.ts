@@ -1809,13 +1809,13 @@ export async function indexPhotoGeocoding(photoId: number, force = false): Promi
 export async function checkPhotoHashLogic(
   userId: number,
   hash: string
-): Promise<{ exists: boolean }> {
+): Promise<{ exists: boolean; photoId?: number }> {
   const existing = await dbFirst<{ id: number }>(
     db.select({ id: photos.id })
       .from(photos)
       .where(and(eq(photos.user_id, userId), eq(photos.hash, hash)))
   );
-  return { exists: !!existing };
+  return existing ? { exists: true, photoId: existing.id } : { exists: false };
 }
 
 /**

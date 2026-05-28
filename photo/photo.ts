@@ -265,7 +265,7 @@ export const uploadPhoto = api.raw(
  */
 export const checkPhotoHash = api(
   { expose: true, method: "GET", path: "/photos/check-hash/:hash", auth: true },
-  async ({ hash }: { hash: string }): Promise<{ exists: boolean }> => {
+  async ({ hash }: { hash: string }): Promise<{ exists: boolean; photoId?: number }> => {
     checkModule();
     const userId = getUserId();
     const authData = getAuthData()!;
