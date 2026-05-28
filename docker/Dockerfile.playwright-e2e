@@ -18,6 +18,11 @@
 #     matching `mcr.microsoft.com/playwright:vX.Y.Z-noble` tag exists,
 #   - the Dockerfile gains a new system dependency the workflow needs.
 #
+# Rebuild forced 2026-05-26: the daily GHCR cleanup had been deleting the
+# untagged per-arch / attestation child manifests of the `:latest` index,
+# leaving it dangling (`manifest unknown` on pull). ghcr-cleanup.yml now
+# preserves referenced children; this touch re-pushes a healthy `:latest`.
+#
 # Inputs:
 #   PLAYWRIGHT_VERSION  - npm version of @playwright/test (e.g. 1.58.2).
 #                         Selects the matching MS base-image tag.
