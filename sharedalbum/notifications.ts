@@ -110,7 +110,10 @@ interface FanoutPhotoInput {
 export const fanoutPhoto = api(
   { expose: false },
   async (req: FanoutPhotoInput): Promise<void> => {
-    const payloadJson = JSON.stringify(req.payload ?? {});
+    // Persist the photo id alongside the event payload so the push
+    // builder and digest mail can deep-link straight to the commented
+    // photo rather than just the album.
+    const payloadJson = JSON.stringify({ ...(req.payload ?? {}), photoId: req.photoId });
     const exclude = req.excludeGuestId ?? null;
     const albumId = req.albumId ?? null;
     const result = await db.execute<EnrichedInsertRow>(sql`
