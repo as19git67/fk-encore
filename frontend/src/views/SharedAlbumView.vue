@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import Message from 'primevue/message'
 import HeicImage from '../components/HeicImage.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
@@ -19,6 +19,7 @@ import { useGuestPushNotifications } from '../composables/useGuestPushNotificati
 const TripMap = defineAsyncComponent(() => import('../components/TripMap.vue'))
 
 const route = useRoute()
+const router = useRouter()
 const album = ref<PublicAlbumResponse | null>(null)
 const loading = ref(true)
 const error = ref('')
@@ -261,6 +262,27 @@ function openFullscreen(photo: Photo) {
   isFullscreen.value = true
 }
 
+/**
+ * Open the photo named in the `?photoId=<id>` query parameter (set by the
+ * comment push-notification deep-link) in fullscreen, with the comment
+ * thread already expanded so the visitor lands directly on the comment
+ * that triggered the notification. No-op when the parameter is absent or
+ * the photo isn't part of this album. The parameter is consumed once
+ * opened so a later notification for the same photo re-triggers.
+ */
+function openPhotoFromQuery() {
+  const raw = route.query.photoId
+  const idStr = Array.isArray(raw) ? raw[0] : raw
+  if (!idStr) return
+  const id = Number(idStr)
+  if (!Number.isFinite(id)) return
+  const photo = albumPhotosAsPhoto.value.find((p) => p.id === id)
+  if (!photo) return
+  openFullscreen(photo)
+  showInfo.value = true
+  void router.replace({ query: { ...route.query, photoId: undefined } })
+}
+
 function handleMapFullscreen(dayPhotos: Photo[], startIndex: number, _day: string) {
   // Scope navigation to the photos of the day TripMap currently has
   // selected. The user can only step through the day's photos in
@@ -364,6 +386,16 @@ function formatDate(photo: Photo): string {
 
 // ── Lifecycle ───────────────────────────────────────────────────────────────
 
+// A notification click on an already-open tab navigates the existing
+// route (same component, only the query changes), so onMounted won't
+// re-run — react to the query change here as well.
+watch(
+  () => route.query.photoId,
+  () => {
+    if (album.value) openPhotoFromQuery()
+  },
+)
+
 onMounted(async () => {
   document.addEventListener('keydown', handleKeydown)
   const token = route.params.token as string
@@ -401,6 +433,9 @@ onMounted(async () => {
     filter.value = { ...initial }
     filterDraft.value = { ...initial }
     persistFilter(filter.value)
+    // Deep-link from a comment notification: open the referenced photo
+    // once the album content is available.
+    openPhotoFromQuery()
   }
   // Guest state loads in parallel — failures don't block the album
   // view; the banner just shows the anonymous CTA.
