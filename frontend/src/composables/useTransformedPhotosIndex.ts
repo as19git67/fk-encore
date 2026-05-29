@@ -20,6 +20,12 @@ let loadPromise: Promise<void> | null = null
 
 function load(): Promise<void> {
   if (photoIds.value) return Promise.resolve()
+  // Anonymous viewers (e.g. public shared-album guests) have no personal
+  // transforms; skip the user-scoped fetch so it can't 401.
+  if (!localStorage.getItem('auth_token')) {
+    photoIds.value = new Set()
+    return Promise.resolve()
+  }
   if (!loadPromise) {
     loadPromise = getMyTransformedPhotoIds()
       .then((res) => {

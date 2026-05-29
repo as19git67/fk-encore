@@ -55,6 +55,12 @@ export function useUserPhotoTransform(photoIdRef: Ref<number | null | undefined>
   const recipe = ref<PhotoTransformRow | null>(null)
 
   async function load(id: number) {
+    // Anonymous viewers (e.g. public shared-album guests) have no
+    // personal transforms; skip the user-scoped fetch so it can't 401.
+    if (!localStorage.getItem('auth_token')) {
+      recipe.value = null
+      return
+    }
     if (cache.has(id)) {
       recipe.value = cache.get(id) ?? null
       return
