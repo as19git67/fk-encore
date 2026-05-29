@@ -137,7 +137,7 @@ function aggregate(rows: RawRow[]): GuestDigestGroup[] {
 
     let newPhotos = 0;
     const photoIds: number[] = [];
-    const newComments: Array<{ authorName: string; excerpt: string }> = [];
+    const newComments: Array<{ authorName: string; excerpt: string; photoId?: number }> = [];
     for (const r of albumRows) {
       if (r.kind === "photo_added") {
         const ids = Array.isArray(r.payload?.photoIds) ? (r.payload!.photoIds as unknown[]) : [];
@@ -146,9 +146,11 @@ function aggregate(rows: RawRow[]): GuestDigestGroup[] {
           if (typeof id === "number") photoIds.push(id);
         }
       } else if (r.kind === "comment_added") {
+        const photoId = typeof r.payload?.photoId === "number" ? r.payload.photoId : undefined;
         newComments.push({
           authorName: pickString(r.payload?.authorName) ?? "Jemand",
           excerpt: pickString(r.payload?.excerpt) ?? "",
+          photoId,
         });
       }
     }
