@@ -207,7 +207,7 @@ export async function computeFileHash(file: File | Blob): Promise<string | null>
  * transferring the file over the network (saves time + mobile data).
  */
 export function checkPhotoHash(hash: string) {
-  return apiFetch<{ exists: boolean }>(`/photos/check-hash/${hash}`)
+  return apiFetch<{ exists: boolean; photoId?: number }>(`/photos/check-hash/${hash}`)
 }
 
 export async function uploadPhoto(file: File, signal?: AbortSignal) {

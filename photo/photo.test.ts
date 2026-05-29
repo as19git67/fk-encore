@@ -247,7 +247,7 @@ describe("Photo Module", () => {
       expect(digest).toMatch(/^[a-f0-9]{64}$/);
 
       const sameUser = await service.checkPhotoHashLogic(user1.id, digest);
-      expect(sameUser).toEqual({ exists: true });
+      expect(sameUser).toEqual({ exists: true, photoId: uploaded.id });
 
       const otherUser = await service.checkPhotoHashLogic(user2.id, digest);
       expect(otherUser).toEqual({ exists: false });
