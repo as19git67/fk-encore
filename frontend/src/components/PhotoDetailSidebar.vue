@@ -12,6 +12,7 @@ import { getAlbumCheckState as calculateAlbumCheckState } from '../utils/albumSe
 import type { Photo, Face, LandmarkItem, PoiMatchItem, Person, CurationStatus } from '../api/photos'
 import { useReferenceData } from '../composables/useReferenceData'
 import { useUserPhotoTransform } from '../composables/useUserPhotoTransform'
+import { useAuthStore } from '../stores/auth'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { formatPhotoDateCompact } from '../utils/dateFormat'
@@ -58,6 +59,8 @@ const props = defineProps<{
 }>()
 
 const editDate = defineModel<Date | null>('editDate', { default: null })
+
+const auth = useAuthStore()
 
 const { albums, albumsLoaded, fetchAlbums } = useReferenceData()
 const loadingAlbums = ref(false)
@@ -219,13 +222,13 @@ function formatPhotoDateDisplay(photo: Photo) {
   return formatPhotoDateCompact(photo.taken_at || photo.created_at)
 }
 
-// Editing a photo's date/description writes to the shared photo, so it
-// needs album write access. Album viewers (read-only share) see the
-// values read-only. Outside an album context (personal gallery — no
-// albumRole) the global upload permission alone governs.
+// The date/description PATCH endpoints only authorize the photo's owner
+// (photos.user_id === userId), so only show the edit pencil when the
+// current user could actually persist the change server-side. Everyone
+// else (album viewers, contributors who didn't upload this photo) sees
+// the values read-only.
 const canEditPhotoMeta = computed(() =>
-  props.canUpload &&
-  (!props.albumRole || props.albumRole === 'owner' || props.albumRole === 'contributor'),
+  auth.user?.id != null && props.photo.user_id === auth.user.id,
 )
 
 function getPersonName(personId?: number) {
