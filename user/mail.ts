@@ -135,7 +135,7 @@ export interface GuestDigestGroup {
   /** Public-link token the mail recipient has access to. */
   albumLinkToken: string;
   newPhotos: number;
-  newComments: Array<{ authorName: string; excerpt: string }>;
+  newComments: Array<{ authorName: string; excerpt: string; photoId?: number }>;
 }
 
 export interface GuestDigestMailParams {
@@ -193,10 +193,14 @@ function renderGuestDigestHtml(params: GuestDigestMailParams, unsubUrl: string):
       if (g.newComments.length > 0) {
         const commentItems = g.newComments
           .slice(0, 5)
-          .map(
-            (c) =>
-              `<li><strong>${escapeHtml(c.authorName)}:</strong> ${escapeHtml(c.excerpt)}</li>`,
-          )
+          .map((c) => {
+            const label = `<strong>${escapeHtml(c.authorName)}:</strong> ${escapeHtml(c.excerpt)}`;
+            // Deep-link each comment to its photo so clicking opens the
+            // fullscreen view (same as the push notification). Falls back
+            // to the album when the photo id is unknown.
+            const url = c.photoId != null ? `${albumUrl}?photoId=${c.photoId}` : albumUrl;
+            return `<li><a href="${url}" style="color: #4f46e5; text-decoration: none;">${label}</a></li>`;
+          })
           .join("");
         const more =
           g.newComments.length > 5
@@ -236,18 +240,21 @@ function renderGuestDigestText(params: GuestDigestMailParams, unsubUrl: string):
     if (g.newPhotos > 0) {
       lines.push(`  ${g.newPhotos} neue${g.newPhotos === 1 ? "s Foto" : " Fotos"}`);
     }
+    const albumBase = `${APP_URL}/app/albums/shared/${encodeURIComponent(g.albumLinkToken)}`;
     if (g.newComments.length > 0) {
       lines.push(
         `  ${g.newComments.length} neue${g.newComments.length === 1 ? "r Kommentar" : " Kommentare"}:`,
       );
       for (const c of g.newComments.slice(0, 5)) {
         lines.push(`    - ${c.authorName}: ${c.excerpt}`);
+        // Deep-link each comment to its photo's fullscreen view.
+        lines.push(`      ${c.photoId != null ? `${albumBase}?photoId=${c.photoId}` : albumBase}`);
       }
       if (g.newComments.length > 5) {
         lines.push(`    …und ${g.newComments.length - 5} weitere`);
       }
     }
-    lines.push(`  Album öffnen: ${APP_URL}/app/albums/shared/${encodeURIComponent(g.albumLinkToken)}`);
+    lines.push(`  Album öffnen: ${albumBase}`);
     lines.push("");
   }
   lines.push(`Abmelden: ${unsubUrl}`);

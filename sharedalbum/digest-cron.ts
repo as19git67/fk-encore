@@ -34,6 +34,13 @@ interface RawRow extends Record<string, unknown> {
 export const sendGuestDigests = api(
   { expose: false, method: "POST", path: "/internal/sharedalbum/digest" },
   async (): Promise<{ guests: number; mails: number }> => {
+    // Atomically CLAIM every deliverable notification (set delivered_at)
+    // in the same statement that reads it, then send. The previous
+    // read-then-mark-after-send sequence left a window where the same
+    // rows were emailed more than once — when the cron overlapped itself,
+    // ran on multiple replicas, or the send succeeded but the follow-up
+    // mark failed and the rows were retried on the next tick. Claiming
+    // up front makes each notification mail at-most-once.
     const result = await db.execute<RawRow>(sql`
       WITH eligible AS (
         SELECT guest_id
@@ -41,35 +48,40 @@ export const sendGuestDigests = api(
         WHERE delivered_at IS NULL
         GROUP BY guest_id
         HAVING MAX(created_at) <= NOW() - INTERVAL '30 minutes'
+      ),
+      claimed AS (
+        UPDATE guest_notifications
+        SET delivered_at = NOW()
+        WHERE delivered_at IS NULL
+          AND guest_id IN (SELECT guest_id FROM eligible)
+        RETURNING id AS notif_id, guest_id, album_id, kind, payload, created_at
       )
       SELECT
-        g.id AS guest_id,
+        c.guest_id,
         g.email,
         g.display_name,
         g.unsubscribe_token,
         g.notify_opt_in,
-        gn.id AS notif_id,
-        gn.album_id,
-        gn.kind,
-        gn.payload,
-        gn.created_at,
+        c.notif_id,
+        c.album_id,
+        c.kind,
+        c.payload,
+        c.created_at,
         a.name AS album_name,
         (
           SELECT apl.token
           FROM album_public_links apl
           INNER JOIN guest_link_access gla ON gla.public_link_id = apl.id
-          WHERE apl.album_id = a.id
-            AND gla.guest_id = g.id
+          WHERE apl.album_id = c.album_id
+            AND gla.guest_id = c.guest_id
             AND (apl.expires_at IS NULL OR apl.expires_at > NOW())
           ORDER BY gla.first_seen_at ASC
           LIMIT 1
         ) AS link_token
-      FROM eligible eg
-      INNER JOIN guests g ON g.id = eg.guest_id
-      INNER JOIN guest_notifications gn
-        ON gn.guest_id = g.id AND gn.delivered_at IS NULL
-      INNER JOIN albums a ON a.id = gn.album_id
-      ORDER BY g.id, gn.album_id, gn.created_at
+      FROM claimed c
+      INNER JOIN guests g ON g.id = c.guest_id
+      INNER JOIN albums a ON a.id = c.album_id
+      ORDER BY c.guest_id, c.album_id, c.created_at
     `);
     const rows = (result as any).rows as RawRow[];
     if (rows.length === 0) return { guests: 0, mails: 0 };
@@ -83,30 +95,24 @@ export const sendGuestDigests = api(
 
     let mailsSent = 0;
     for (const [guestId, guestRows] of byGuest) {
+      // Rows are already claimed (delivered_at set) above, so a send
+      // failure here drops that digest rather than risking a duplicate
+      // on the next tick — consistent with best-effort Web Push.
       try {
         const first = guestRows[0];
-        if (first.notify_opt_in) {
-          const groups = aggregate(guestRows);
-          if (groups.length > 0) {
-            await sendGuestDigestEmail({
-              to: first.email,
-              displayName: first.display_name,
-              unsubscribeToken: first.unsubscribe_token,
-              groups,
-            });
-            mailsSent += 1;
-          }
+        // Opted-out guests had their rows claimed too (so they don't
+        // accumulate forever) but receive no mail.
+        if (!first.notify_opt_in) continue;
+        const groups = aggregate(guestRows);
+        if (groups.length > 0) {
+          await sendGuestDigestEmail({
+            to: first.email,
+            displayName: first.display_name,
+            unsubscribeToken: first.unsubscribe_token,
+            groups,
+          });
+          mailsSent += 1;
         }
-        // Mark the specific rows we read as delivered — a notification
-        // row inserted after this SELECT won't match the id list and
-        // waits for the next cron tick. Also runs when notify_opt_in
-        // is false so opted-out guests don't accumulate pending rows.
-        const ids = guestRows.map((r) => r.notif_id);
-        await db.execute(sql`
-          UPDATE guest_notifications
-          SET delivered_at = NOW()
-          WHERE id = ANY(${ids}::bigint[])
-        `);
       } catch (err) {
         log.error(err as any, "sharedalbum.digest.guest_failed");
         console.warn(
@@ -137,7 +143,7 @@ function aggregate(rows: RawRow[]): GuestDigestGroup[] {
 
     let newPhotos = 0;
     const photoIds: number[] = [];
-    const newComments: Array<{ authorName: string; excerpt: string }> = [];
+    const newComments: Array<{ authorName: string; excerpt: string; photoId?: number }> = [];
     for (const r of albumRows) {
       if (r.kind === "photo_added") {
         const ids = Array.isArray(r.payload?.photoIds) ? (r.payload!.photoIds as unknown[]) : [];
@@ -146,9 +152,11 @@ function aggregate(rows: RawRow[]): GuestDigestGroup[] {
           if (typeof id === "number") photoIds.push(id);
         }
       } else if (r.kind === "comment_added") {
+        const photoId = typeof r.payload?.photoId === "number" ? r.payload.photoId : undefined;
         newComments.push({
           authorName: pickString(r.payload?.authorName) ?? "Jemand",
           excerpt: pickString(r.payload?.excerpt) ?? "",
+          photoId,
         });
       }
     }
