@@ -148,11 +148,13 @@ const pushTooltip = computed<string | null>(() => {
 </template>
 
 <style scoped>
-/* The three banner states map onto PrimeVue Aura's dedicated
-   Message severity tokens. Each one bundles a mode-adaptive
-   background + text + border colour tuned for alert-style UI, so the
-   banner stays legible whether the viewer sits on a light or a dark
-   surface without any manual colour-mix or hardcoded values. */
+/* The three banner states map onto PrimeVue Aura's dedicated Message
+   severity tokens for the tinted background + border, which adapt to
+   light/dark on their own. The text and icons, however, use the neutral
+   `--p-text-color`: the severity *color* token (e.g. blue.500 for info)
+   only clears ~4:1 contrast on the dark-mode tint and reads poorly, so
+   we keep the colour on the background and let the high-contrast content
+   text token carry the legibility in both modes. */
 .guest-banner {
   display: flex;
   align-items: center;
@@ -163,19 +165,17 @@ const pushTooltip = computed<string | null>(() => {
   font-size: 0.9em;
   border-bottom: 1px solid var(--p-message-secondary-border-color);
   background: var(--p-message-secondary-background);
-  color: var(--p-message-secondary-color);
+  color: var(--p-text-color);
 }
 
 .guest-banner--anonymous {
   border-bottom-color: var(--p-message-info-border-color);
   background: var(--p-message-info-background);
-  color: var(--p-message-info-color);
 }
 
 .guest-banner--pending {
   border-bottom-color: var(--p-message-warn-border-color);
   background: var(--p-message-warn-background);
-  color: var(--p-message-warn-color);
 }
 
 .guest-banner__text {
