@@ -255,6 +255,7 @@ export async function createComment(
     body: comment.body,
   });
   await emitFeedItem(recipients, userId, "photo_commented", {
+    albumId,
     photoId,
     payload: {
       commentId: comment.id,
@@ -356,7 +357,9 @@ export async function createCommentAsGuest(
       recipients: audience,
       actorUserId: null,
       kind: "photo_commented",
-      albumId: null,
+      // Deep-link the household member's notification to the album the
+      // guest commented from, so it opens the photo rather than the feed.
+      albumId,
       photoId,
       payload: {
         commentId: comment.id,

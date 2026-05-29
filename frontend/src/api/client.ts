@@ -110,13 +110,18 @@ export async function apiFetch<T>(
     }
 
     if (response.status === 401 && path !== '/auth/login') {
-      // Token expired mid-session — kick to login. The /auth/login path
-      // itself is excluded so wrong-password attempts can surface their
-      // error in the form instead of triggering a page reload.
-      localStorage.removeItem('auth_token')
-      localStorage.removeItem('refresh_token')
-      localStorage.removeItem('auth_user')
-      window.location.href = `${import.meta.env.BASE_URL}login`
+      // A 401 *after* we had a token means the session expired mid-use —
+      // clear it and bounce to login. With no token the caller is
+      // browsing anonymously (e.g. a public shared album), so surface the
+      // error for the caller to handle instead of yanking the guest to
+      // the login screen. Route protection for logged-in areas is handled
+      // by the router guard, not here.
+      if (token) {
+        localStorage.removeItem('auth_token')
+        localStorage.removeItem('refresh_token')
+        localStorage.removeItem('auth_user')
+        window.location.href = `${import.meta.env.BASE_URL}login`
+      }
       throw new Error('Unauthorized')
     }
 

@@ -724,7 +724,10 @@ onUnmounted(() => {
   flex-direction: column;
   height: 100dvh;
   overflow: hidden;
-  background: var(--p-surface-ground, #f8f9fa);
+  /* --p-surface-ground/-card don't exist in Aura v4, so the old values
+     fell back to hardcoded light colours and never followed the theme.
+     --p-content-background is the semantic surface and adapts to dark. */
+  background: var(--p-content-background);
 }
 
 .shared-header {
@@ -737,8 +740,8 @@ onUnmounted(() => {
   align-items: baseline;
   gap: 0.5rem 0.75rem;
   padding: 0.4rem 0.75rem;
-  background: var(--p-surface-card, #fff);
-  border-bottom: 1px solid var(--p-content-border-color, #dee2e6);
+  background: var(--p-content-background);
+  border-bottom: 1px solid var(--p-content-border-color);
   flex-shrink: 0;
 }
 
