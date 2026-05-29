@@ -663,7 +663,10 @@ watch(viewMode, (mode) => {
 })
 
 // ── Map fullscreen ───────────────────────────────────────────────────────────
-const tripMapRef = ref<{ selectStopByPhotoId: (id: number) => boolean } | null>(null)
+const tripMapRef = ref<{
+  selectStopByPhotoId: (id: number) => boolean
+  openFullscreenByPhotoId: (id: number) => boolean
+} | null>(null)
 const mapFullscreenPhotos = ref<Photo[]>([])
 const mapFullscreenIndex = ref(0)
 const isMapFullscreen = ref(false)
@@ -674,6 +677,9 @@ const isMapFullscreen = ref(false)
 // changes, covering both "TripMap mounts after photo is resolved" and the
 // rarer case where the photo id is resolved after TripMap is already mounted.
 const pendingMapSelectPhotoId = ref<number | null>(null)
+// Same mechanism, but for notification deep-links: instead of only
+// selecting the stop, open the photo directly in the map fullscreen.
+const pendingMapFullscreenPhotoId = ref<number | null>(null)
 
 watchEffect(() => {
   const mapRef = tripMapRef.value
@@ -681,6 +687,15 @@ watchEffect(() => {
   if (mapRef && photoId !== null) {
     mapRef.selectStopByPhotoId(photoId)
     pendingMapSelectPhotoId.value = null
+  }
+})
+
+watchEffect(() => {
+  const mapRef = tripMapRef.value
+  const photoId = pendingMapFullscreenPhotoId.value
+  if (mapRef && photoId !== null) {
+    mapRef.openFullscreenByPhotoId(photoId)
+    pendingMapFullscreenPhotoId.value = null
   }
 })
 
@@ -790,8 +805,14 @@ async function loadData() {
       ?? photoNav.selectedPhotoId
       ?? null
     if (albumRes.display_mode === 'map') {
-      if (queryPhotoId) router.replace({ query: { ...route.query, photoId: undefined } })
-      if (storedPhotoId) pendingMapSelectPhotoId.value = storedPhotoId
+      if (queryPhotoId) {
+        // Notification deep-link: open the photo straight in the map
+        // fullscreen rather than only selecting its stop.
+        router.replace({ query: { ...route.query, photoId: undefined } })
+        pendingMapFullscreenPhotoId.value = queryPhotoId
+      } else if (storedPhotoId) {
+        pendingMapSelectPhotoId.value = storedPhotoId
+      }
     } else {
       // Grid mode: tell VirtualGallery which photo to center on when it mounts.
       galleryAnchorPhotoId.value = storedPhotoId
@@ -1217,17 +1238,25 @@ async function onGalleryLoaded() {
   // will find it. Consume the anchor so subsequent reloads don't re-apply it.
   const anchor = galleryAnchorPhotoId.value
   galleryAnchorPhotoId.value = null
+  // A `photoId` query parameter is only ever set by a push-notification
+  // deep-link. When present, open that photo straight in fullscreen
+  // (e.g. a comment notification) instead of merely centering it.
+  const deepLinkPhotoId = Number(route.query.photoId) || null
   const targetId = anchor
-    || Number(route.query.photoId)
+    || deepLinkPhotoId
     || loadLastPhotoMap()[String(albumId.value)]
     || photoNav.selectedPhotoId
     || null
   if (targetId) {
     const idx = galleryRef.value.findLoadedIndexById(targetId)
     if (idx !== null) {
-      cursorIndex.value = idx
-      galleryRef.value.scrollToIndex(idx)
-      void hydrateCursor(idx)
+      if (deepLinkPhotoId && targetId === deepLinkPhotoId) {
+        void openGridFullscreenAt(idx)
+      } else {
+        cursorIndex.value = idx
+        galleryRef.value.scrollToIndex(idx)
+        void hydrateCursor(idx)
+      }
     }
   }
   if (route.query.photoId) {
