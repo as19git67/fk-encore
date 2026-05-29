@@ -219,6 +219,15 @@ function formatPhotoDateDisplay(photo: Photo) {
   return formatPhotoDateCompact(photo.taken_at || photo.created_at)
 }
 
+// Editing a photo's date/description writes to the shared photo, so it
+// needs album write access. Album viewers (read-only share) see the
+// values read-only. Outside an album context (personal gallery — no
+// albumRole) the global upload permission alone governs.
+const canEditPhotoMeta = computed(() =>
+  props.canUpload &&
+  (!props.albumRole || props.albumRole === 'owner' || props.albumRole === 'contributor'),
+)
+
 function getPersonName(personId?: number) {
   if (!personId) return 'Unbekannt'
   const person = props.persons.find(p => p.id === personId)
@@ -395,7 +404,7 @@ watch(() => props.photo.id, () => {
         <div class="meta-row">
           <i class="pi pi-calendar meta-icon" />
           <span class="meta-value date-value">{{ formatPhotoDateDisplay(photo) }}</span>
-          <Button v-if="canUpload && !isEditingDate" icon="pi pi-pencil" text rounded size="small" @click="emit('start-edit-date')" class="edit-btn" />
+          <Button v-if="canEditPhotoMeta && !isEditingDate" icon="pi pi-pencil" text rounded size="small" @click="emit('start-edit-date')" class="edit-btn" />
         </div>
         <div v-if="isEditingDate" class="date-editor">
           <DatePicker v-model="editDate" showTime hourFormat="24" fluid />
@@ -422,12 +431,12 @@ watch(() => props.photo.id, () => {
         <div v-else-if="photo.description" class="description-text">
           <i class="pi pi-align-left meta-icon description-icon" />
           <span class="description-body">{{ photo.description }}</span>
-          <Button v-if="canUpload" icon="pi pi-pencil" text rounded size="small" @click="startEditDescription" class="edit-btn" />
+          <Button v-if="canEditPhotoMeta" icon="pi pi-pencil" text rounded size="small" @click="startEditDescription" class="edit-btn" />
         </div>
         <div v-else class="empty-description">
           <i class="pi pi-align-left meta-icon description-icon" />
           <span class="empty-description-text">Keine Beschreibung</span>
-          <Button v-if="canUpload" icon="pi pi-pencil" text rounded size="small" @click="startEditDescription" class="edit-btn" />
+          <Button v-if="canEditPhotoMeta" icon="pi pi-pencil" text rounded size="small" @click="startEditDescription" class="edit-btn" />
         </div>
       </div>
 
