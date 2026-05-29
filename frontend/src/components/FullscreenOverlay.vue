@@ -64,6 +64,44 @@ const hasActionBar = computed(() => {
   return fullscreenSupported.value
 })
 
+// ── Mobile split-detail layout (Track AF / #434) ────────────────────────────
+// On phones the details no longer overlay the photo. When the details are
+// active we split the screen instead:
+//   • portrait  → photo on the upper half (object-fit: contain) with the
+//                 metadata flowing below it; the whole pane scrolls as one,
+//                 so scrolling pushes the photo off-screen to reveal more.
+//   • landscape → photo on the left half (contain), metadata on the right
+//                 half scrolling independently of the image.
+// Desktop keeps the slide-in flyout (see `.fs-details-flyout`).
+const isMobile = ref(false)
+const isPortrait = ref(true)
+let mobileMql: MediaQueryList | null = null
+let portraitMql: MediaQueryList | null = null
+
+function updateViewport() {
+  isMobile.value = mobileMql?.matches ?? false
+  isPortrait.value = portraitMql?.matches ?? true
+}
+
+onMounted(() => {
+  mobileMql = window.matchMedia('(max-width: 768px)')
+  portraitMql = window.matchMedia('(orientation: portrait)')
+  updateViewport()
+  mobileMql.addEventListener('change', updateViewport)
+  portraitMql.addEventListener('change', updateViewport)
+})
+onUnmounted(() => {
+  mobileMql?.removeEventListener('change', updateViewport)
+  portraitMql?.removeEventListener('change', updateViewport)
+})
+
+// Split mode is only engaged when there is a details panel to show, the
+// caller has toggled it open, and we're on a phone-sized viewport.
+const hasDetailsSlot = computed(() => Boolean(slots['details-flyout']))
+const splitMode = computed(
+  () => isMobile.value && props.detailsActive && hasDetailsSlot.value,
+)
+
 const emit = defineEmits<{
   'close': []
   'prev': []
@@ -213,6 +251,9 @@ watch(() => props.photo.id, resetZoom)
 const contentRef = ref<HTMLElement | null>(null)
 
 function handleTouchStart(e: TouchEvent) {
+  // In split mode the photo lives in its own pane and the panes scroll
+  // natively — don't engage swipe-nav / pinch-zoom on the photo.
+  if (splitMode.value) return
   if (e.touches.length === 1) {
     const t = e.touches[0]!
     touchStartX.value = t.clientX
@@ -251,6 +292,8 @@ function handleTouchStart(e: TouchEvent) {
 }
 
 function handleTouchMove(e: TouchEvent) {
+  // Let native scrolling run inside the split panes (don't preventDefault).
+  if (splitMode.value) return
   // Always prevent default so iOS Safari doesn't re-acquire the gesture.
   // The listener is registered { passive: false } so this call is permitted.
   // Without it, a 1-finger swipe at zoom=1 fires touchcancel instead of touchend.
@@ -285,6 +328,7 @@ function handleTouchMove(e: TouchEvent) {
 }
 
 function handleTouchEnd(e: TouchEvent) {
+  if (splitMode.value) return
   // Don't swipe / tap-navigate between photos when zoomed in
   if (zoomLevel.value > 1) return
   if (!e.changedTouches.length) return
@@ -324,6 +368,7 @@ function handleTouchEnd(e: TouchEvent) {
 let suppressNextClickUntil = 0
 
 function handleContentClick(e: MouseEvent) {
+  if (splitMode.value) return
   if (zoomLevel.value > 1) return
   if (performance.now() < suppressNextClickUntil) return
   const target = e.target as HTMLElement | null
@@ -620,16 +665,50 @@ onUnmounted(() => {
     <div
       ref="contentRef"
       class="fullscreen-content"
+      :class="{
+        'fullscreen-content--split': splitMode,
+        'fullscreen-content--split-landscape': splitMode && !isPortrait,
+      }"
       @click.stop="handleContentClick"
       @touchstart="handleTouchStart"
       @touchend="handleTouchEnd"
       @touchcancel="handleTouchCancel"
     >
+      <!-- Mobile split layout (Track AF / #434): photo + metadata side by
+           side (landscape) or stacked (portrait), no overlay. -->
+      <div v-if="splitMode" class="fs-split">
+        <div class="fs-split-photo">
+          <svg v-if="userSvgMarkup && !userRecipe" width="0" height="0" style="position: absolute; pointer-events: none">
+            <defs v-html="userSvgMarkup"></defs>
+          </svg>
+          <HeicImage
+            :src="fsImageSrc"
+            :alt="photo.original_name"
+            objectFit="contain"
+            :staticSlot="false"
+            :imageStyle="fsImageStyle"
+          >
+            <slot />
+          </HeicImage>
+        </div>
+        <div
+          class="fs-split-details"
+          @click.stop
+          @touchstart.stop
+          @touchend.stop
+          @touchmove.stop
+          @wheel.stop
+        >
+          <slot name="details-flyout" />
+        </div>
+      </div>
+
       <!-- Zoom wrapper: CSS transform applied here so the face box (in the
            HeicImage slot) scales together with the image. Hidden until the
            current photo has decoded so the previously shown image doesn't
            linger on screen during navigation (#371). -->
       <div
+        v-if="!splitMode"
         class="fs-zoom-wrapper"
         :class="{ 'fs-zoom-wrapper--loading': !currentLoaded }"
         :style="zoomTransformStyle"
@@ -656,7 +735,7 @@ onUnmounted(() => {
       </div>
 
       <!-- Loading spinner shown while the current photo decodes (#371). -->
-      <div v-if="!currentLoaded" class="fs-loading" aria-hidden="true">
+      <div v-if="!currentLoaded && !splitMode" class="fs-loading" aria-hidden="true">
         <i class="pi pi-spin pi-spinner" />
       </div>
 
@@ -706,7 +785,7 @@ onUnmounted(() => {
            only the data reactively updates. Leaves room for the right nav
            arrow so it remains clickable while the flyout is open. -->
       <div
-        v-if="$slots['details-flyout']"
+        v-if="$slots['details-flyout'] && !splitMode"
         class="fs-details-flyout"
         :class="{ 'fs-details-flyout--open': props.detailsActive }"
         @click.stop
@@ -848,6 +927,79 @@ onUnmounted(() => {
   /* Prevent the iOS long-press image context menu which cancels touch sequences. */
   -webkit-touch-callout: none;
   user-select: none;
+}
+
+/* ── Mobile split-detail layout (Track AF / #434) ───────────────────────── */
+/* Re-enable native scrolling/selection: the split panes scroll and the
+   metadata contains editable fields, so the overlay's touch lock is lifted. */
+.fullscreen-content--split {
+  touch-action: auto;
+  -webkit-touch-callout: default;
+  user-select: auto;
+}
+
+.fs-split {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  /* Portrait: the whole pane scrolls as one so the photo can be pushed
+     off-screen to reveal more metadata (#434). */
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  background: var(--p-content-background);
+}
+
+.fs-split-photo {
+  flex: 0 0 50vh;
+  height: 50vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  /* Keep the image clear of the overlaid topbar. */
+  padding-top: 2.75em;
+  box-sizing: border-box;
+}
+
+/* Make HeicImage's contain box fill the photo pane. */
+.fs-split-photo :deep(.heic-image-container),
+.fs-split-photo :deep(.image-wrapper) {
+  width: 100%;
+  height: 100%;
+}
+.fs-split-photo :deep(.image-content-wrapper) {
+  max-height: 100%;
+}
+
+.fs-split-details {
+  flex: 1 0 auto;
+  background: var(--p-content-background);
+  color: var(--p-text-color);
+  /* Clear the floating action bar pinned to the bottom of the overlay. */
+  padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
+}
+
+/* Landscape: photo on the left half, metadata scrolls independently on the
+   right half. */
+.fullscreen-content--split-landscape .fs-split {
+  flex-direction: row;
+  overflow: hidden;
+}
+.fullscreen-content--split-landscape .fs-split-photo {
+  flex: 0 0 50%;
+  width: 50%;
+  height: 100%;
+  padding-top: 2.75em;
+}
+.fullscreen-content--split-landscape .fs-split-details {
+  flex: 1 1 50%;
+  height: 100%;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  /* Clear the overlaid topbar that spans the full width. */
+  padding-top: 2.75em;
 }
 
 /* ── Group marker (Track I) ───────────────────────────────────────────── */
