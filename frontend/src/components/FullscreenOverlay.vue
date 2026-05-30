@@ -772,9 +772,12 @@ onUnmounted(() => {
       </div>
 
       <!-- Group marker (Track I): shown when the current photo is part
-           of a similar-photo group. Tap → open review dialog. -->
+           of a similar-photo group that the user hasn't reviewed yet.
+           Once the group is reviewed the marker disappears — mirrors
+           VirtualGallery's `slot.group && !slot.group.reviewed` gate.
+           Tap → open review dialog. -->
       <button
-        v-if="group"
+        v-if="group && !group.reviewed"
         class="fs-stack-badge"
         :class="{
           'fs-stack-badge--ai-medium': group.ai_confidence === 'medium',
