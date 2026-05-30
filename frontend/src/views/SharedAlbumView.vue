@@ -9,6 +9,7 @@ import GuestStatusBanner from '../components/GuestStatusBanner.vue'
 import GuestRegisterDialog from '../components/GuestRegisterDialog.vue'
 import GuestAccountDialog from '../components/GuestAccountDialog.vue'
 import GuestPhotoReactions from '../components/GuestPhotoReactions.vue'
+import PhotoMiniMap from '../components/PhotoMiniMap.vue'
 import { getPublicAlbum, getPhotoUrl, type PhotoFilter, type PublicAlbumResponse, type PublicAlbumPhoto, type Photo } from '../api/photos'
 import { matchesPhotoFilter } from '../utils/photoFilter'
 import { countActiveFilters } from '../composables/useFilter'
@@ -305,7 +306,9 @@ function closeFullscreen() {
   fullscreenFromMap.value = false
 }
 
-// ── Info panel (slides up from bottom, photo shrinks to 60%) ────────────────
+// ── Details panel. Drives FullscreenOverlay's `detailsActive`, which the
+//    overlay renders as the shared split-screen layout (photo + metadata
+//    side-by-side in landscape, stacked in portrait). ─────────────────────
 
 const showInfo = ref(false)
 function toggleInfo() {
@@ -655,40 +658,48 @@ onUnmounted(() => {
           </div>
         </div>
       </template>
-      <template #bottom-bar>
-        <div
-          class="shared-album-info-panel"
-          :class="{ 'is-open': showInfo }"
-          @click.stop
-          @touchstart.stop
-          @touchend.stop
-          @touchmove.stop
-        >
-          <div v-if="currentPhoto" class="info-panel-content">
-            <div class="info-row info-date">
-              <i class="pi pi-calendar" />
-              <span>{{ formatDate(currentPhoto) }}</span>
-            </div>
-            <div v-if="formatSharedLocation(currentPhoto)" class="info-row info-location">
-              <i class="pi pi-map-marker" />
-              <a v-if="currentMapUrl" :href="currentMapUrl" target="_blank" rel="noopener" class="info-location-link">
-                {{ formatSharedLocation(currentPhoto) }}
-              </a>
-              <span v-else>{{ formatSharedLocation(currentPhoto) }}</span>
-            </div>
-            <div v-if="currentDescription" class="info-row info-description">
-              <i class="pi pi-align-left" />
-              <p>{{ currentDescription }}</p>
-            </div>
-            <div v-if="currentPhoto" class="info-row info-comments">
-              <GuestPhotoReactions
-                :share-token="shareToken"
-                :photo-id="currentPhoto.id"
-                :guest="guestSession.guest.value"
-                @request-register="openRegisterDialog"
-                @request-verify="handleResendVerifyMail"
-              />
-            </div>
+      <!-- Photo details. Rendered in the shared FullscreenOverlay
+           `#details-flyout` slot so the guest view reuses the exact same
+           split-screen layout (photo + metadata side-by-side in landscape,
+           stacked in portrait) as the signed-in AlbumDetailView. The
+           auth-bound PhotoDetailSidebar is NOT reused — guests get this
+           read-only panel (date, location, map, description, comments)
+           instead, but the surrounding split layout is shared. -->
+      <template #details-flyout>
+        <div v-if="currentPhoto" class="guest-photo-details">
+          <div class="info-row info-date">
+            <i class="pi pi-calendar" />
+            <span>{{ formatDate(currentPhoto) }}</span>
+          </div>
+          <div v-if="formatSharedLocation(currentPhoto)" class="info-row info-location">
+            <i class="pi pi-map-marker" />
+            <a v-if="currentMapUrl" :href="currentMapUrl" target="_blank" rel="noopener" class="info-location-link">
+              {{ formatSharedLocation(currentPhoto) }}
+            </a>
+            <span v-else>{{ formatSharedLocation(currentPhoto) }}</span>
+          </div>
+          <div
+            v-if="currentPhoto.latitude != null && currentPhoto.longitude != null"
+            class="info-row info-map"
+          >
+            <PhotoMiniMap
+              :latitude="currentPhoto.latitude"
+              :longitude="currentPhoto.longitude"
+              :label="formatSharedLocation(currentPhoto) || undefined"
+            />
+          </div>
+          <div v-if="currentDescription" class="info-row info-description">
+            <i class="pi pi-align-left" />
+            <p>{{ currentDescription }}</p>
+          </div>
+          <div class="info-row info-comments">
+            <GuestPhotoReactions
+              :share-token="shareToken"
+              :photo-id="currentPhoto.id"
+              :guest="guestSession.guest.value"
+              @request-register="openRegisterDialog"
+              @request-verify="handleResendVerifyMail"
+            />
           </div>
         </div>
       </template>
@@ -1039,35 +1050,17 @@ onUnmounted(() => {
 
 /* ── Info panel (slides up from bottom, 40% height) ──────────────────────── */
 
-.shared-album-info-panel {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 40dvh;
-  background: rgba(18, 18, 18, 0.96);
-  backdrop-filter: blur(12px);
-  color: rgba(255, 255, 255, 0.92);
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  transform: translateY(100%);
-  transition: transform 0.3s ease;
-  z-index: 11;
-  overflow-y: auto;
-  padding: 1.25rem 1.5rem;
-  padding-bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px));
-  box-sizing: border-box;
-}
-
-.shared-album-info-panel.is-open {
-  transform: translateY(0);
-}
-
-.info-panel-content {
+/* Guest photo-details panel. Rendered inside FullscreenOverlay's
+   `#details-flyout` slot, so the overlay owns all positioning (split
+   panes in landscape, stacked in portrait). This block only styles the
+   inner content. The split panes use the themed `--p-content-background`,
+   so text uses the themed tokens — no hardcoded white as in the old
+   dark slide-up panel. */
+.guest-photo-details {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  max-width: 48rem;
-  margin: 0 auto;
+  padding: 1.25rem 1.5rem;
 }
 
 .info-row {
@@ -1076,6 +1069,7 @@ onUnmounted(() => {
   gap: 0.75rem;
   font-size: 0.95rem;
   line-height: 1.4;
+  color: var(--p-text-color);
 }
 
 .info-row .pi {
@@ -1093,16 +1087,15 @@ onUnmounted(() => {
 }
 
 .info-date {
-  color: rgba(255, 255, 255, 0.95);
   font-weight: 500;
 }
 
 .info-location {
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--p-text-muted-color);
 }
 
 .info-location-link {
-  color: rgba(120, 180, 255, 0.95);
+  color: var(--p-primary-color);
   text-decoration: none;
 }
 
@@ -1111,54 +1104,31 @@ onUnmounted(() => {
 }
 
 .info-description {
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--p-text-muted-color);
   white-space: pre-wrap;
 }
 
-/* Comment thread inside the slide-up panel. The panel forces a dark
-   backdrop regardless of the active app theme, so the shared
-   PhotoCommentThread would pick up the light-mode `--p-text-color`
-   and render its bubble text as dark-on-dark. Override the tokens
-   the base reads (text, muted, border) with values from Aura's
-   absolute surface palette so everything inside stays legible
-   without any hardcoded colours. */
+/* The mini-map spans the full panel width — no leading icon column, so
+   override the flex row layout the other info-rows use. */
+.info-map {
+  display: block;
+}
+
 .info-comments {
   display: block;
   margin-top: 0.5rem;
   padding-top: 0.75rem;
-  border-top: 1px solid color-mix(in srgb, var(--p-surface-0) 12%, transparent);
-  --p-text-color: var(--p-surface-0);
-  --p-text-muted-color: var(--p-surface-300);
-  --p-surface-border-color: color-mix(in srgb, var(--p-surface-0) 18%, transparent);
+  border-top: 1px solid var(--p-content-border-color);
 }
 
 @media (max-width: 768px) {
-  .shared-album-info-panel {
-    padding: 1rem 1rem;
-    padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
-  }
-
-  .info-panel-content {
+  .guest-photo-details {
+    padding: 1rem;
     gap: 0.75rem;
   }
 
   .info-row {
     font-size: 0.9rem;
   }
-}
-
-/* ── Photo shrink + nav hide when info panel is open ─────────────────────── */
-
-.fullscreen-content:has(> .shared-album-info-panel.is-open) {
-  padding-top: 3.5rem;
-  padding-bottom: 40dvh;
-  transition: padding 0.3s ease;
-}
-
-/* Hide nav buttons while info panel is open to avoid overlap */
-.fullscreen-overlay:has(.shared-album-info-panel.is-open) .fs-nav {
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.2s ease;
 }
 </style>

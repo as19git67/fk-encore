@@ -226,6 +226,20 @@ function isAiPicked(photoId: number): boolean {
 }
 
 /**
+ * Whether to render the "KI-Pick" badge on a tile.
+ *
+ * The auto-pick is computed at the group level: when a member photo has
+ * no quality signals (its `ai_quality_score` is null and the % rating
+ * renders as "?"), the scorer falls back to a neutral 0.5 for every
+ * signal, so any "pick" there is meaningless. Surfacing "KI-Pick" next
+ * to a "?" rating reads as a contradiction, so we hide the badge until a
+ * real score exists for the photo.
+ */
+function showAiPickBadge(photoId: number): boolean {
+  return isAiPicked(photoId) && getAiScore(photoId) !== null
+}
+
+/**
  * Pre-populate comparison scores from AI quality so the user can skip the
  * manual pairwise phase and jump straight to the review grid.
  *
@@ -1077,7 +1091,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
                   {{ aiScoreLabel(photoId) }}
                 </div>
                 <div
-                  v-if="isAiPicked(photoId)"
+                  v-if="showAiPickBadge(photoId)"
                   class="ai-pick-badge"
                   v-tooltip.top="'Dieses Foto würde die KI behalten'"
                 >
@@ -1249,7 +1263,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
                   {{ aiScoreLabel(photo.id) }}
                 </div>
                 <div
-                  v-if="isAiPicked(photo.id)"
+                  v-if="showAiPickBadge(photo.id)"
                   class="review-ai-pick"
                   v-tooltip.right="'Dieses Foto würde die KI behalten'"
                 >

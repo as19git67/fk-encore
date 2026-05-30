@@ -928,6 +928,8 @@ export interface ReviewQueuePhoto {
   taken_at: string | null
   curation: 'visible' | 'hidden' | 'favorite'
   ai_picked: boolean
+  /** AI quality score (0..1), or null when the photo hasn't been scored yet. */
+  ai_quality_score: number | null
   /**
    * Aggregated curation status from other album-peers (Phase 1). Only
    * explicit `hidden` and `favorite` rows are counted; `visible` is
