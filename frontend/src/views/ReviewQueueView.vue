@@ -32,6 +32,7 @@ import {
   acceptPeerConsensus,
   bulkAcceptHighConfidenceAiPicks,
   type ReviewQueueGroup,
+  type ReviewQueuePhoto,
   type ReviewQueueUserCalibration,
   type PhotoGroup,
 } from '../api/photos'
@@ -409,6 +410,22 @@ function confidenceClass(c: ReviewQueueGroup['ai_picked_confidence']): string {
   return 'rq-conf rq-conf--unknown'
 }
 
+/** Per-photo AI quality rating as a percentage, or null when unscored. */
+function qualityLabel(photo: ReviewQueuePhoto): string | null {
+  const s = photo.ai_quality_score
+  if (s === null || s === undefined) return null
+  return `${Math.round(s * 100)}%`
+}
+
+/** Colour class for the quality chip: green / yellow / red. */
+function qualityClass(photo: ReviewQueuePhoto): string {
+  const s = photo.ai_quality_score
+  if (s === null || s === undefined) return ''
+  if (s >= 0.65) return 'rq-quality--good'
+  if (s >= 0.4) return 'rq-quality--medium'
+  return 'rq-quality--poor'
+}
+
 function backToGallery() {
   void router.push({ name: 'fotos-gallery' })
 }
@@ -546,6 +563,15 @@ onMounted(() => {
               decoding="async"
             />
             <i v-if="photo.ai_picked" class="pi pi-check rq-oneclick-check" />
+            <span
+              v-if="qualityLabel(photo)"
+              class="rq-quality"
+              :class="qualityClass(photo)"
+              v-tooltip.top="'KI-Qualität'"
+            >
+              <i class="pi pi-sparkles" />
+              {{ qualityLabel(photo) }}
+            </span>
           </button>
         </div>
 
@@ -606,6 +632,14 @@ onMounted(() => {
                 decoding="async"
               />
               <i v-if="photo.ai_picked" class="pi pi-check rq-thumb-check" />
+              <span
+                v-if="qualityLabel(photo)"
+                class="rq-quality rq-quality--strip"
+                :class="qualityClass(photo)"
+                v-tooltip.top="'KI-Qualität'"
+              >
+                {{ qualityLabel(photo) }}
+              </span>
               <span
                 v-if="photo.peer_curation.hidden > 0"
                 class="rq-peer-dot rq-peer-dot--hidden"
@@ -1113,6 +1147,32 @@ onMounted(() => {
   justify-content: center;
   font-size: 0.7rem;
 }
+
+/* AI quality rating chip. Top-left so it clears the pick-check (top-right)
+   and the peer-signal dots (bottom corners). Hidden entirely when the
+   photo has no score yet — no "?" placeholder on the cards. */
+.rq-quality {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 9px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.6);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+.rq-quality--strip {
+  font-size: 0.6rem;
+  padding: 0 4px;
+}
+.rq-quality--good { color: #4ade80; }
+.rq-quality--medium { color: #fde047; }
+.rq-quality--poor { color: #f87171; }
 
 .rq-card-actions {
   display: flex;
