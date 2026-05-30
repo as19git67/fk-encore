@@ -804,6 +804,70 @@ onUnmounted(() => {
           </slot>
         </div>
 
+        <!-- Action bar: an iOS-style icon row. By default it floats centered
+             at the bottom of the overlay (position: fixed). In landscape
+             split mode it instead flows inline here in the topbar — only the
+             buttons, dropping its own pill so the topbar background shows
+             through (see `.fs-actions-bar` styles). Hidden when there are no
+             actions to show (e.g. unauthenticated shared album). -->
+        <div
+          v-if="hasActionBar"
+          class="fs-actions-bar"
+          @click.stop
+        >
+          <!-- Slot for extra action buttons placed before the default ones
+               (e.g. "set as cover" in the map-mode fullscreen). -->
+          <slot name="actions-before" />
+          <slot name="actions">
+            <Button
+              v-if="props.showDetailsButton !== false"
+              icon="pi pi-info-circle"
+              rounded text
+              :severity="props.detailsActive ? 'primary' : 'secondary'"
+              :class="{ 'fs-toolbar-btn--active': props.detailsActive }"
+              @click="emit('show-details')"
+              v-tooltip.top="(props.detailsActive ? 'Details schließen' : 'Details') + ' (I)'"
+            />
+            <Button
+              v-if="canDelete"
+              :icon="photo.curation_status === 'hidden' ? 'pi pi-eye-slash' : 'pi pi-eye'"
+              rounded text
+              :severity="photo.curation_status === 'hidden' ? 'danger' : 'secondary'"
+              @click="photo.curation_status === 'hidden' ? emit('restore', photo.id) : emit('hide', photo.id)"
+              v-tooltip.top="(photo.curation_status === 'hidden' ? 'Wiederherstellen' : 'Ausblenden') + ' (X)'"
+            />
+            <Button
+              v-if="canDelete"
+              :icon="photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
+              rounded text
+              :severity="photo.curation_status === 'favorite' ? 'warn' : 'secondary'"
+              @click="emit('toggle-favorite', photo.id, photo.curation_status)"
+              v-tooltip.top="(photo.curation_status === 'favorite' ? 'Favorit entfernen' : 'Als Favorit markieren') + ' (F)'"
+            />
+            <Button
+              v-if="canEditTransform"
+              icon="pi pi-sliders-h"
+              rounded text
+              severity="secondary"
+              @click="transformEditorVisible = true"
+              v-tooltip.top="'Schnitt &amp; Belichtung bearbeiten'"
+            />
+          </slot>
+          <!-- Real browser fullscreen toggle (Track N / #80). Sits outside
+               the `actions` slot so caller overrides still get it. -->
+          <Button
+            v-if="fullscreenSupported"
+            :icon="isRealFullscreen ? 'pi pi-window-minimize' : 'pi pi-window-maximize'"
+            rounded text
+            severity="secondary"
+            :class="{ 'fs-toolbar-btn--active': isRealFullscreen }"
+            :aria-pressed="isRealFullscreen"
+            :aria-label="isRealFullscreen ? 'Vollbild beenden' : 'Vollbild'"
+            @click="toggleRealFullscreen"
+            v-tooltip.top="isRealFullscreen ? 'Vollbild beenden (ESC)' : 'Vollbild'"
+          />
+        </div>
+
         <div class="fs-topbar-right">
           <span v-if="showCounter" class="fs-counter" aria-live="polite">
             {{ currentIndex }} / {{ totalCount }}
@@ -845,67 +909,6 @@ onUnmounted(() => {
         rounded text
         @click.stop="emit('next')"
       />
-
-      <!-- Bottom action bar: iOS-style centered icon row. Hidden when
-           there are no actions to show (e.g. unauthenticated shared
-           album with showDetailsButton=false). -->
-      <div
-        v-if="hasActionBar"
-        class="fs-actions-bar"
-        @click.stop
-      >
-        <!-- Slot for extra action buttons placed before the default ones
-             (e.g. "set as cover" in the map-mode fullscreen). -->
-        <slot name="actions-before" />
-        <slot name="actions">
-          <Button
-            v-if="props.showDetailsButton !== false"
-            icon="pi pi-info-circle"
-            rounded text
-            :severity="props.detailsActive ? 'primary' : 'secondary'"
-            :class="{ 'fs-toolbar-btn--active': props.detailsActive }"
-            @click="emit('show-details')"
-            v-tooltip.top="(props.detailsActive ? 'Details schließen' : 'Details') + ' (I)'"
-          />
-          <Button
-            v-if="canDelete"
-            :icon="photo.curation_status === 'hidden' ? 'pi pi-eye-slash' : 'pi pi-eye'"
-            rounded text
-            :severity="photo.curation_status === 'hidden' ? 'danger' : 'secondary'"
-            @click="photo.curation_status === 'hidden' ? emit('restore', photo.id) : emit('hide', photo.id)"
-            v-tooltip.top="(photo.curation_status === 'hidden' ? 'Wiederherstellen' : 'Ausblenden') + ' (X)'"
-          />
-          <Button
-            v-if="canDelete"
-            :icon="photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
-            rounded text
-            :severity="photo.curation_status === 'favorite' ? 'warn' : 'secondary'"
-            @click="emit('toggle-favorite', photo.id, photo.curation_status)"
-            v-tooltip.top="(photo.curation_status === 'favorite' ? 'Favorit entfernen' : 'Als Favorit markieren') + ' (F)'"
-          />
-          <Button
-            v-if="canEditTransform"
-            icon="pi pi-sliders-h"
-            rounded text
-            severity="secondary"
-            @click="transformEditorVisible = true"
-            v-tooltip.top="'Schnitt &amp; Belichtung bearbeiten'"
-          />
-        </slot>
-        <!-- Real browser fullscreen toggle (Track N / #80). Sits outside
-             the `actions` slot so caller overrides still get it. -->
-        <Button
-          v-if="fullscreenSupported"
-          :icon="isRealFullscreen ? 'pi pi-window-minimize' : 'pi pi-window-maximize'"
-          rounded text
-          severity="secondary"
-          :class="{ 'fs-toolbar-btn--active': isRealFullscreen }"
-          :aria-pressed="isRealFullscreen"
-          :aria-label="isRealFullscreen ? 'Vollbild beenden' : 'Vollbild'"
-          @click="toggleRealFullscreen"
-          v-tooltip.top="isRealFullscreen ? 'Vollbild beenden (ESC)' : 'Vollbild'"
-        />
-      </div>
 
       <!-- Optional bottom bar slot (e.g. location info in shared albums) -->
       <slot name="bottom-bar" />
@@ -1056,13 +1059,29 @@ onUnmounted(() => {
     /* Clear the overlaid topbar that spans the full width. */
     padding-top: 2.75em;
   }
-  /* Center the bottom action bar over the photo (left) pane instead of the
-     whole overlay. The metadata column is min(50vw, 402px) wide (see above),
-     so the photo spans the remaining width and its center sits at
-     (100vw − detailsWidth) / 2. */
+  /* Move the action buttons up into the topbar: drop the floating pill and
+     flow them inline as a flex item between the date (center) and the counter
+     (right). The topbar already supplies a background, so only the buttons
+     move — matching the rest of the topbar. */
   .fullscreen-content--split .fs-actions-bar {
-    left: calc((100vw - min(50vw, 402px)) / 2);
-    max-width: calc(100vw - min(50vw, 402px) - 2rem);
+    position: static;
+    transform: none;
+    flex: 0 0 auto;
+    padding: 0;
+    background: none;
+    backdrop-filter: none;
+    border-radius: 0;
+    max-width: none;
+    overflow: visible;
+  }
+  /* The pill-icon colour is white for the dark floating bar; on the (light in
+     light theme) topbar background that would be invisible, so fall back to
+     the themed text colour like the back button. */
+  .fullscreen-content--split .fs-actions-bar :deep(.p-button-rounded) {
+    color: var(--p-text-color);
+  }
+  .fullscreen-content--split .fs-actions-bar :deep(.fs-toolbar-btn--active) {
+    background: var(--p-content-hover-background);
   }
 }
 
@@ -1305,7 +1324,12 @@ onUnmounted(() => {
 
 /* ── Bottom action bar (iOS-style) ──────────────────────────────────────── */
 .fs-actions-bar {
-  position: absolute;
+  /* Fixed (not absolute) so it stays pinned to the bottom of the viewport
+     even though it now lives inside the topbar in the DOM. The overlay is
+     teleported to <body> with no transformed ancestors, so fixed resolves
+     against the viewport. In landscape split mode this is overridden to flow
+     inline within the topbar. */
+  position: fixed;
   left: 50%;
   bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
