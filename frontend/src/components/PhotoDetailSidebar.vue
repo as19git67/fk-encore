@@ -363,6 +363,29 @@ watch(() => props.photo.id, () => {
         />
       </div>
 
+      <!-- Description first (#434): the most useful metadata leads the
+           details view. Editor when editing, the text itself when set,
+           otherwise a muted italic "Keine Beschreibung" placeholder. -->
+      <div class="sidebar-section">
+        <div v-if="isEditingDescription" class="description-editor">
+          <textarea v-model="descriptionText" class="p-inputtext description-textarea" rows="3" placeholder="Beschreibung eingeben…" @keydown.escape="cancelEditDescription" />
+          <div class="edit-actions">
+            <Button icon="pi pi-check" severity="success" text rounded @click="saveDescription" :loading="savingDescription" />
+            <Button icon="pi pi-times" severity="danger" text rounded @click="cancelEditDescription" :disabled="savingDescription" />
+          </div>
+        </div>
+        <div v-else-if="photo.description" class="description-text">
+          <i class="pi pi-align-left meta-icon description-icon" />
+          <span class="description-body">{{ photo.description }}</span>
+          <Button v-if="canEditPhotoMeta" icon="pi pi-pencil" text rounded size="small" @click="startEditDescription" class="edit-btn" />
+        </div>
+        <div v-else class="empty-description">
+          <i class="pi pi-align-left meta-icon description-icon" />
+          <span class="empty-description-text">Keine Beschreibung</span>
+          <Button v-if="canEditPhotoMeta" icon="pi pi-pencil" text rounded size="small" @click="startEditDescription" class="edit-btn" />
+        </div>
+      </div>
+
       <!-- Likes and comments (visible to everyone with photo access). -->
       <div class="sidebar-divider" />
       <div class="sidebar-section">
@@ -415,31 +438,6 @@ watch(() => props.photo.id, () => {
             <Button icon="pi pi-check" severity="success" text rounded @click="emit('update-date')" :loading="updatingDate" />
             <Button icon="pi pi-times" severity="danger" text rounded @click="emit('cancel-edit-date')" :disabled="updatingDate" />
           </div>
-        </div>
-      </div>
-
-      <div class="sidebar-divider" />
-
-      <div class="sidebar-section">
-        <!-- Editor when editing, the text itself when set, otherwise a
-             muted italic "Keine Beschreibung" placeholder. The edit pencil
-             is always inline with the content (center-aligned). -->
-        <div v-if="isEditingDescription" class="description-editor">
-          <textarea v-model="descriptionText" class="p-inputtext description-textarea" rows="3" placeholder="Beschreibung eingeben…" @keydown.escape="cancelEditDescription" />
-          <div class="edit-actions">
-            <Button icon="pi pi-check" severity="success" text rounded @click="saveDescription" :loading="savingDescription" />
-            <Button icon="pi pi-times" severity="danger" text rounded @click="cancelEditDescription" :disabled="savingDescription" />
-          </div>
-        </div>
-        <div v-else-if="photo.description" class="description-text">
-          <i class="pi pi-align-left meta-icon description-icon" />
-          <span class="description-body">{{ photo.description }}</span>
-          <Button v-if="canEditPhotoMeta" icon="pi pi-pencil" text rounded size="small" @click="startEditDescription" class="edit-btn" />
-        </div>
-        <div v-else class="empty-description">
-          <i class="pi pi-align-left meta-icon description-icon" />
-          <span class="empty-description-text">Keine Beschreibung</span>
-          <Button v-if="canEditPhotoMeta" icon="pi pi-pencil" text rounded size="small" @click="startEditDescription" class="edit-btn" />
         </div>
       </div>
 

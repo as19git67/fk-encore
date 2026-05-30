@@ -64,6 +64,73 @@ const hasActionBar = computed(() => {
   return fullscreenSupported.value
 })
 
+// ── Split-detail layout (Track AF / #434) ───────────────────────────────────
+// The details never overlay the photo. Whenever a details panel is provided
+// and toggled open we split the screen — in every orientation and on every
+// device, no desktop/phone distinction:
+//   • portrait  → photo on the upper half (object-fit: contain) with the
+//                 metadata flowing below it; the whole pane scrolls as one.
+//   • landscape → photo on the left, metadata on the right (width capped at
+//                 ~an iPhone 16 Pro screen) scrolling independently.
+// Portrait vs. landscape is handled entirely in CSS via the size-independent
+// `(orientation: …)` media query, so no JS viewport tracking is needed.
+const hasDetailsSlot = computed(() => Boolean(slots['details-flyout']))
+const splitMode = computed(() => props.detailsActive && hasDetailsSlot.value)
+
+// Touch navigation inside the split photo pane. A horizontal swipe or a tap
+// on the left/right half of the image navigates to the prev/next photo;
+// vertical gestures fall through so the pane keeps scrolling natively.
+const photoTouchStartX = ref(0)
+const photoTouchStartY = ref(0)
+
+function handlePhotoTouchStart(e: TouchEvent) {
+  if (e.touches.length !== 1) return
+  photoTouchStartX.value = e.touches[0]!.clientX
+  photoTouchStartY.value = e.touches[0]!.clientY
+}
+
+function handlePhotoTouchEnd(e: TouchEvent) {
+  if (!e.changedTouches.length) return
+  const t = e.changedTouches[0]!
+  const dx = t.clientX - photoTouchStartX.value
+  const dy = t.clientY - photoTouchStartY.value
+  const movement = Math.hypot(dx, dy)
+
+  // Tap (no real movement): use the half of the photo pane the user
+  // touched — left half = previous, right half = next.
+  if (movement < 10) {
+    // Suppress the synthetic click the browser fires for this tap so the
+    // pane's @click handler (for mouse users) doesn't navigate twice.
+    suppressNextClickUntil = performance.now() + 500
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    if (t.clientX < rect.left + rect.width / 2) {
+      if (props.prevPhoto) emit('prev')
+    } else {
+      if (props.nextPhoto) emit('next')
+    }
+    return
+  }
+
+  // Horizontal-dominant swipe of at least 40 px → prev/next.
+  if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40) {
+    if (dx > 0 && props.prevPhoto) emit('prev')
+    else if (dx < 0 && props.nextPhoto) emit('next')
+  }
+}
+
+// Mouse click on the split photo pane (desktop): navigate by the touched
+// half, mirroring the touch behaviour. Touch taps are filtered out via the
+// suppression window set in handlePhotoTouchEnd.
+function handlePhotoClick(e: MouseEvent) {
+  if (performance.now() < suppressNextClickUntil) return
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  if (e.clientX < rect.left + rect.width / 2) {
+    if (props.prevPhoto) emit('prev')
+  } else {
+    if (props.nextPhoto) emit('next')
+  }
+}
+
 const emit = defineEmits<{
   'close': []
   'prev': []
@@ -213,6 +280,9 @@ watch(() => props.photo.id, resetZoom)
 const contentRef = ref<HTMLElement | null>(null)
 
 function handleTouchStart(e: TouchEvent) {
+  // In split mode the photo lives in its own pane and the panes scroll
+  // natively — don't engage swipe-nav / pinch-zoom on the photo.
+  if (splitMode.value) return
   if (e.touches.length === 1) {
     const t = e.touches[0]!
     touchStartX.value = t.clientX
@@ -251,6 +321,8 @@ function handleTouchStart(e: TouchEvent) {
 }
 
 function handleTouchMove(e: TouchEvent) {
+  // Let native scrolling run inside the split panes (don't preventDefault).
+  if (splitMode.value) return
   // Always prevent default so iOS Safari doesn't re-acquire the gesture.
   // The listener is registered { passive: false } so this call is permitted.
   // Without it, a 1-finger swipe at zoom=1 fires touchcancel instead of touchend.
@@ -285,6 +357,7 @@ function handleTouchMove(e: TouchEvent) {
 }
 
 function handleTouchEnd(e: TouchEvent) {
+  if (splitMode.value) return
   // Don't swipe / tap-navigate between photos when zoomed in
   if (zoomLevel.value > 1) return
   if (!e.changedTouches.length) return
@@ -324,6 +397,7 @@ function handleTouchEnd(e: TouchEvent) {
 let suppressNextClickUntil = 0
 
 function handleContentClick(e: MouseEvent) {
+  if (splitMode.value) return
   if (zoomLevel.value > 1) return
   if (performance.now() < suppressNextClickUntil) return
   const target = e.target as HTMLElement | null
@@ -620,16 +694,52 @@ onUnmounted(() => {
     <div
       ref="contentRef"
       class="fullscreen-content"
+      :class="{ 'fullscreen-content--split': splitMode }"
       @click.stop="handleContentClick"
       @touchstart="handleTouchStart"
       @touchend="handleTouchEnd"
       @touchcancel="handleTouchCancel"
     >
+      <!-- Mobile split layout (Track AF / #434): photo + metadata side by
+           side (landscape) or stacked (portrait), no overlay. -->
+      <div v-if="splitMode" class="fs-split">
+        <div
+          class="fs-split-photo"
+          @touchstart="handlePhotoTouchStart"
+          @touchend="handlePhotoTouchEnd"
+          @click="handlePhotoClick"
+        >
+          <svg v-if="userSvgMarkup && !userRecipe" width="0" height="0" style="position: absolute; pointer-events: none">
+            <defs v-html="userSvgMarkup"></defs>
+          </svg>
+          <HeicImage
+            :src="fsImageSrc"
+            :alt="photo.original_name"
+            objectFit="contain"
+            :staticSlot="false"
+            :imageStyle="fsImageStyle"
+          >
+            <slot />
+          </HeicImage>
+        </div>
+        <div
+          class="fs-split-details"
+          @click.stop
+          @touchstart.stop
+          @touchend.stop
+          @touchmove.stop
+          @wheel.stop
+        >
+          <slot name="details-flyout" />
+        </div>
+      </div>
+
       <!-- Zoom wrapper: CSS transform applied here so the face box (in the
            HeicImage slot) scales together with the image. Hidden until the
            current photo has decoded so the previously shown image doesn't
            linger on screen during navigation (#371). -->
       <div
+        v-if="!splitMode"
         class="fs-zoom-wrapper"
         :class="{ 'fs-zoom-wrapper--loading': !currentLoaded }"
         :style="zoomTransformStyle"
@@ -656,7 +766,7 @@ onUnmounted(() => {
       </div>
 
       <!-- Loading spinner shown while the current photo decodes (#371). -->
-      <div v-if="!currentLoaded" class="fs-loading" aria-hidden="true">
+      <div v-if="!currentLoaded && !splitMode" class="fs-loading" aria-hidden="true">
         <i class="pi pi-spin pi-spinner" />
       </div>
 
@@ -694,6 +804,70 @@ onUnmounted(() => {
           </slot>
         </div>
 
+        <!-- Action bar: an iOS-style icon row. By default it floats centered
+             at the bottom of the overlay (position: fixed). In landscape
+             split mode it instead flows inline here in the topbar — only the
+             buttons, dropping its own pill so the topbar background shows
+             through (see `.fs-actions-bar` styles). Hidden when there are no
+             actions to show (e.g. unauthenticated shared album). -->
+        <div
+          v-if="hasActionBar"
+          class="fs-actions-bar"
+          @click.stop
+        >
+          <!-- Slot for extra action buttons placed before the default ones
+               (e.g. "set as cover" in the map-mode fullscreen). -->
+          <slot name="actions-before" />
+          <slot name="actions">
+            <Button
+              v-if="props.showDetailsButton !== false"
+              icon="pi pi-info-circle"
+              rounded text
+              :severity="props.detailsActive ? 'primary' : 'secondary'"
+              :class="{ 'fs-toolbar-btn--active': props.detailsActive }"
+              @click="emit('show-details')"
+              v-tooltip.top="(props.detailsActive ? 'Details schließen' : 'Details') + ' (I)'"
+            />
+            <Button
+              v-if="canDelete"
+              :icon="photo.curation_status === 'hidden' ? 'pi pi-eye-slash' : 'pi pi-eye'"
+              rounded text
+              :severity="photo.curation_status === 'hidden' ? 'danger' : 'secondary'"
+              @click="photo.curation_status === 'hidden' ? emit('restore', photo.id) : emit('hide', photo.id)"
+              v-tooltip.top="(photo.curation_status === 'hidden' ? 'Wiederherstellen' : 'Ausblenden') + ' (X)'"
+            />
+            <Button
+              v-if="canDelete"
+              :icon="photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
+              rounded text
+              :severity="photo.curation_status === 'favorite' ? 'warn' : 'secondary'"
+              @click="emit('toggle-favorite', photo.id, photo.curation_status)"
+              v-tooltip.top="(photo.curation_status === 'favorite' ? 'Favorit entfernen' : 'Als Favorit markieren') + ' (F)'"
+            />
+            <Button
+              v-if="canEditTransform"
+              icon="pi pi-sliders-h"
+              rounded text
+              severity="secondary"
+              @click="transformEditorVisible = true"
+              v-tooltip.top="'Schnitt &amp; Belichtung bearbeiten'"
+            />
+          </slot>
+          <!-- Real browser fullscreen toggle (Track N / #80). Sits outside
+               the `actions` slot so caller overrides still get it. -->
+          <Button
+            v-if="fullscreenSupported"
+            :icon="isRealFullscreen ? 'pi pi-window-minimize' : 'pi pi-window-maximize'"
+            rounded text
+            severity="secondary"
+            :class="{ 'fs-toolbar-btn--active': isRealFullscreen }"
+            :aria-pressed="isRealFullscreen"
+            :aria-label="isRealFullscreen ? 'Vollbild beenden' : 'Vollbild'"
+            @click="toggleRealFullscreen"
+            v-tooltip.top="isRealFullscreen ? 'Vollbild beenden (ESC)' : 'Vollbild'"
+          />
+        </div>
+
         <div class="fs-topbar-right">
           <span v-if="showCounter" class="fs-counter" aria-live="polite">
             {{ currentIndex }} / {{ totalCount }}
@@ -706,7 +880,7 @@ onUnmounted(() => {
            only the data reactively updates. Leaves room for the right nav
            arrow so it remains clickable while the flyout is open. -->
       <div
-        v-if="$slots['details-flyout']"
+        v-if="$slots['details-flyout'] && !splitMode"
         class="fs-details-flyout"
         :class="{ 'fs-details-flyout--open': props.detailsActive }"
         @click.stop
@@ -735,67 +909,6 @@ onUnmounted(() => {
         rounded text
         @click.stop="emit('next')"
       />
-
-      <!-- Bottom action bar: iOS-style centered icon row. Hidden when
-           there are no actions to show (e.g. unauthenticated shared
-           album with showDetailsButton=false). -->
-      <div
-        v-if="hasActionBar"
-        class="fs-actions-bar"
-        @click.stop
-      >
-        <!-- Slot for extra action buttons placed before the default ones
-             (e.g. "set as cover" in the map-mode fullscreen). -->
-        <slot name="actions-before" />
-        <slot name="actions">
-          <Button
-            v-if="props.showDetailsButton !== false"
-            icon="pi pi-info-circle"
-            rounded text
-            :severity="props.detailsActive ? 'primary' : 'secondary'"
-            :class="{ 'fs-toolbar-btn--active': props.detailsActive }"
-            @click="emit('show-details')"
-            v-tooltip.top="(props.detailsActive ? 'Details schließen' : 'Details') + ' (I)'"
-          />
-          <Button
-            v-if="canDelete"
-            :icon="photo.curation_status === 'hidden' ? 'pi pi-eye-slash' : 'pi pi-eye'"
-            rounded text
-            :severity="photo.curation_status === 'hidden' ? 'danger' : 'secondary'"
-            @click="photo.curation_status === 'hidden' ? emit('restore', photo.id) : emit('hide', photo.id)"
-            v-tooltip.top="(photo.curation_status === 'hidden' ? 'Wiederherstellen' : 'Ausblenden') + ' (X)'"
-          />
-          <Button
-            v-if="canDelete"
-            :icon="photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
-            rounded text
-            :severity="photo.curation_status === 'favorite' ? 'warn' : 'secondary'"
-            @click="emit('toggle-favorite', photo.id, photo.curation_status)"
-            v-tooltip.top="(photo.curation_status === 'favorite' ? 'Favorit entfernen' : 'Als Favorit markieren') + ' (F)'"
-          />
-          <Button
-            v-if="canEditTransform"
-            icon="pi pi-sliders-h"
-            rounded text
-            severity="secondary"
-            @click="transformEditorVisible = true"
-            v-tooltip.top="'Schnitt &amp; Belichtung bearbeiten'"
-          />
-        </slot>
-        <!-- Real browser fullscreen toggle (Track N / #80). Sits outside
-             the `actions` slot so caller overrides still get it. -->
-        <Button
-          v-if="fullscreenSupported"
-          :icon="isRealFullscreen ? 'pi pi-window-minimize' : 'pi pi-window-maximize'"
-          rounded text
-          severity="secondary"
-          :class="{ 'fs-toolbar-btn--active': isRealFullscreen }"
-          :aria-pressed="isRealFullscreen"
-          :aria-label="isRealFullscreen ? 'Vollbild beenden' : 'Vollbild'"
-          @click="toggleRealFullscreen"
-          v-tooltip.top="isRealFullscreen ? 'Vollbild beenden (ESC)' : 'Vollbild'"
-        />
-      </div>
 
       <!-- Optional bottom bar slot (e.g. location info in shared albums) -->
       <slot name="bottom-bar" />
@@ -848,6 +961,128 @@ onUnmounted(() => {
   /* Prevent the iOS long-press image context menu which cancels touch sequences. */
   -webkit-touch-callout: none;
   user-select: none;
+}
+
+/* ── Mobile split-detail layout (Track AF / #434) ───────────────────────── */
+/* Re-enable native scrolling/selection: the split panes scroll and the
+   metadata contains editable fields, so the overlay's touch lock is lifted. */
+.fullscreen-content--split {
+  touch-action: auto;
+  -webkit-touch-callout: default;
+  user-select: auto;
+}
+
+.fs-split {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  /* Portrait: the whole pane scrolls as one so the photo can be pushed
+     off-screen to reveal more metadata (#434). */
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  background: var(--p-content-background);
+  /* Stop mobile WebKit/Blink "text auto-inflation": in a tall scroll
+     container it otherwise scales up individual text blocks (description
+     placeholder, location label, filename/size) to inconsistent sizes. */
+  text-size-adjust: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
+.fs-split-photo {
+  flex: 0 0 50vh;
+  height: 50vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  /* Keep the image clear of the overlaid topbar. */
+  padding-top: 2.75em;
+  box-sizing: border-box;
+  /* Let vertical scrolling fall through to the pane while we capture
+     horizontal swipes for prev/next navigation. Suppress the iOS
+     long-press image menu and text selection so taps/swipes stay clean. */
+  touch-action: pan-y;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Make HeicImage's contain box fill the photo pane. */
+.fs-split-photo :deep(.heic-image-container),
+.fs-split-photo :deep(.image-wrapper) {
+  width: 100%;
+  height: 100%;
+}
+.fs-split-photo :deep(.image-content-wrapper) {
+  max-height: 100%;
+}
+
+.fs-split-details {
+  flex: 1 0 auto;
+  background: var(--p-content-background);
+  color: var(--p-text-color);
+  /* Clear the floating action bar pinned to the bottom of the overlay. */
+  padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
+}
+
+/* Navigation in split mode is via swipe / tap-half (touch) or the keyboard
+   arrows (desktop), so hide the on-screen prev/next chevrons that would
+   otherwise overlap the metadata column. */
+.fullscreen-content--split .fs-nav {
+  display: none;
+}
+
+/* Landscape (size-independent): photo on the left, metadata scrolls
+   independently on the right with a capped width. */
+@media (orientation: landscape) {
+  .fullscreen-content--split .fs-split {
+    flex-direction: row;
+    overflow: hidden;
+  }
+  .fullscreen-content--split .fs-split-photo {
+    flex: 1 1 0;
+    width: auto;
+    height: 100%;
+    min-width: 0;
+  }
+  .fullscreen-content--split .fs-split-details {
+    flex: 1 1 0;
+    /* Cap the metadata column at roughly an iPhone 16 Pro screen width so it
+       doesn't sprawl on wide/desktop landscape viewports; the photo absorbs
+       the freed space. */
+    max-width: 402px;
+    height: 100%;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    /* Clear the overlaid topbar that spans the full width. */
+    padding-top: 2.75em;
+  }
+  /* Move the action buttons up into the topbar: drop the floating pill and
+     flow them inline as a flex item between the date (center) and the counter
+     (right). The topbar already supplies a background, so only the buttons
+     move — matching the rest of the topbar. */
+  .fullscreen-content--split .fs-actions-bar {
+    position: static;
+    transform: none;
+    flex: 0 0 auto;
+    padding: 0;
+    background: none;
+    backdrop-filter: none;
+    border-radius: 0;
+    max-width: none;
+    overflow: visible;
+  }
+  /* The pill-icon colour is white for the dark floating bar; on the (light in
+     light theme) topbar background that would be invisible, so fall back to
+     the themed text colour like the back button. */
+  .fullscreen-content--split .fs-actions-bar :deep(.p-button-rounded) {
+    color: var(--p-text-color);
+  }
+  .fullscreen-content--split .fs-actions-bar :deep(.fs-toolbar-btn--active) {
+    background: var(--p-content-hover-background);
+  }
 }
 
 /* ── Group marker (Track I) ───────────────────────────────────────────── */
@@ -932,7 +1167,12 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-inline: 1rem;
+  /* Keep the back button / counter clear of rounded corners, the notch and
+     the Dynamic Island. In landscape iOS reports a non-zero left/right safe
+     area; max() keeps the default 1rem everywhere else. Requires
+     viewport-fit=cover (set in index.html). */
+  padding-left: max(1rem, env(safe-area-inset-left, 0px));
+  padding-right: max(1rem, env(safe-area-inset-right, 0px));
   background: var(--p-dialog-background);
   z-index: 10;
   gap: 0.5rem;
@@ -1084,7 +1324,12 @@ onUnmounted(() => {
 
 /* ── Bottom action bar (iOS-style) ──────────────────────────────────────── */
 .fs-actions-bar {
-  position: absolute;
+  /* Fixed (not absolute) so it stays pinned to the bottom of the viewport
+     even though it now lives inside the topbar in the DOM. The overlay is
+     teleported to <body> with no transformed ancestors, so fixed resolves
+     against the viewport. In landscape split mode this is overridden to flow
+     inline within the topbar. */
+  position: fixed;
   left: 50%;
   bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);

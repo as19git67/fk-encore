@@ -1030,6 +1030,27 @@ Der Testlauf (`npm run test`) erstellt die `encore_test`-Datenbank automatisch, 
 
 Bei Umbenennung oder Neuerstellung von Migrationsdateien muss **immer** auch `db/migrations/postgres/meta/_journal.json` aktualisiert werden. Fehlende Einträge im Journal führen dazu, dass Drizzle die Migrationen überspringt und die CI-Tests schlagen fehl.
 
+### Storybook-Screenshots (Layout-Verifikation)
+
+UI-Komponenten lassen sich über Storybook verifizieren:
+
+```bash
+cd frontend
+npm run storybook        # interaktiv unter http://localhost:6006
+npm run screenshot       # Vollbild-Screenshots aller Stories → frontend/screenshots/
+```
+
+`npm run screenshot` (test-runner) benötigt einen Playwright-Chromium. **In Web-Sessions** schlägt der Browser-Download fehl, wenn die Netzwerk-Policy der Umgebung den Playwright-CDN nicht erlaubt:
+
+```
+Error: Download failed: server returned code 403 body 'Host not in allowlist'.
+URL: https://cdn.playwright.dev/builds/...
+```
+
+Damit der Screenshot-Lauf in Web-Sessions funktioniert, muss **`cdn.playwright.dev`** in der Allowlist der Environment-Netzwerk-Policy stehen (alternativ eine Policy mit weiterem/„trusted"-Zugriff wählen). Konfiguriert wird das beim Anlegen der Umgebung in der Claude-Code-Web-UI; siehe https://code.claude.com/docs/en/claude-code-on-the-web. Ohne diesen Host bleibt nur die interaktive Variante bzw. die Ausführung lokal/in CI.
+
+Orientierungsabhängige Layouts (z. B. der Fullscreen-Split) können pro Story über den `testViewport`-Parameter (`.storybook/test-runner.ts`) eine feste Viewport-Größe erzwingen, damit Portrait/Landscape im Screenshot korrekt erscheinen.
+
 ## Date-only values in the frontend
 
 For date-only values (no time component), always use the helpers from `frontend/src/utils/dateFormat.ts`:
