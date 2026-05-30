@@ -83,6 +83,7 @@ import {
   albumsViewQueryFromStorage,
   rememberFocusedAlbumId,
 } from '../utils/albumsViewState'
+import { toLocalIsoDateTime } from '../utils/dateFormat'
 
 const route = useRoute()
 const router = useRouter()
@@ -931,7 +932,8 @@ async function handleUpdateDate() {
   if (!editDate.value || !photo || !album.value) return
   updatingDate.value = true
   try {
-    const takenAt = editDate.value.toISOString()
+    // Wall-clock string: see toLocalIsoDateTime comment and issue #433.
+    const takenAt = toLocalIsoDateTime(editDate.value)
     await updatePhotoDate(photo.id, takenAt)
     album.value.photos = album.value.photos.map(p => p.id === photo.id ? { ...p, taken_at: takenAt } : p)
     isEditingDate.value = false
