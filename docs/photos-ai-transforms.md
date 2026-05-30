@@ -183,8 +183,8 @@ All seven planned phases have landed:
    `PhotoCropper.vue` (drag handles, ROT overlay, keyboard
    shortcuts), sliders for exposure / contrast / gamma / BP / WP,
    90° rotation buttons, Auto-Levels, Before/After hold-toggle.
-   Triggers live in both `PhotoDetailSidebar` (desktop) and
-   `FullscreenOverlay` (mobile).
+   Triggers live in both the `PhotoDetailSidebar` quick-actions row and
+   the `FullscreenOverlay` action bar.
 6. **Adopt flow** — bundle response includes other users' recipes;
    one click on a chip in the editor materialises via
    `POST /photos/:id/transforms/adopt`.
