@@ -652,6 +652,13 @@
       "when": 1779001431000,
       "tag": "0092_album_public_link_disabled_at",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1779001432000,
+      "tag": "0093_album_scoped_comments",
+      "breakpoints": true
     }
   ]
 }
