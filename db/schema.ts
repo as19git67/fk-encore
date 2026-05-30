@@ -421,6 +421,10 @@ export const albumPublicLinks = pgTable("album_public_links", {
     .references(() => users.id, { onDelete: "cascade" }),
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
   expires_at: timestamp("expires_at", { mode: "string" }),
+  // Soft-delete marker — see migration 0092 / issue #435. Keeping the row
+  // (and its token) lets a previously-shared URL come back to life when
+  // the owner re-creates the link, instead of issuing a fresh token.
+  disabled_at: timestamp("disabled_at", { mode: "string" }),
 });
 
 // ========== Album Shares ==========
