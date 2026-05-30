@@ -74,6 +74,7 @@ export const sendGuestDigests = api(
           INNER JOIN guest_link_access gla ON gla.public_link_id = apl.id
           WHERE apl.album_id = c.album_id
             AND gla.guest_id = c.guest_id
+            AND apl.disabled_at IS NULL
             AND (apl.expires_at IS NULL OR apl.expires_at > NOW())
           ORDER BY gla.first_seen_at ASC
           LIMIT 1

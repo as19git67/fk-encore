@@ -900,6 +900,66 @@ describe("Photo Module", () => {
       // Cleanup
       fs.unlinkSync(path.join(UPLOAD_DIR, photo.filename));
     });
+
+    describe("updatePhotoDateLogic (issue #433)", () => {
+      const wall = (v: unknown): string => String(v).replace("T", " ").slice(0, 19);
+
+      it("persists a wall-clock string verbatim, including the time-of-day", async () => {
+        const photo = await service.uploadPhotoLogic(user1.id, {
+          data: Buffer.from("date-edit-wall"),
+          name: "edit-wall.jpg",
+          mimeType: "image/jpeg",
+        });
+
+        await service.updatePhotoDateLogic(user1.id, photo.id, "2026-03-10T14:30:00");
+
+        const row = await dbFirst<{ taken_at: string | null }>(
+          db.select({ taken_at: photos.taken_at }).from(photos).where(eq(photos.id, photo.id))
+        );
+        expect(wall(row?.taken_at)).toBe("2026-03-10 14:30:00");
+
+        fs.unlinkSync(path.join(UPLOAD_DIR, photo.filename));
+      });
+
+      it("changes only the time when only the time portion changes", async () => {
+        const photo = await service.uploadPhotoLogic(user1.id, {
+          data: Buffer.from("date-edit-time"),
+          name: "edit-time.jpg",
+          mimeType: "image/jpeg",
+        });
+
+        // Seed an initial taken_at, then change the hour from 09 to 17 — date
+        // stays the same. The reported bug (web client `.toISOString()`) was
+        // that the hour silently rolled back to the original wall-clock value
+        // because the local→UTC conversion cancelled the user's edit.
+        await service.updatePhotoDateLogic(user1.id, photo.id, "2026-05-20T09:15:00");
+        await service.updatePhotoDateLogic(user1.id, photo.id, "2026-05-20T17:15:00");
+
+        const row = await dbFirst<{ taken_at: string | null }>(
+          db.select({ taken_at: photos.taken_at }).from(photos).where(eq(photos.id, photo.id))
+        );
+        expect(wall(row?.taken_at)).toBe("2026-05-20 17:15:00");
+
+        fs.unlinkSync(path.join(UPLOAD_DIR, photo.filename));
+      });
+
+      it("treats an ISO-with-Z input as wall-clock (offset is discarded)", async () => {
+        const photo = await service.uploadPhotoLogic(user1.id, {
+          data: Buffer.from("date-edit-z"),
+          name: "edit-z.jpg",
+          mimeType: "image/jpeg",
+        });
+
+        await service.updatePhotoDateLogic(user1.id, photo.id, "2026-03-10T14:30:00.000Z");
+
+        const row = await dbFirst<{ taken_at: string | null }>(
+          db.select({ taken_at: photos.taken_at }).from(photos).where(eq(photos.id, photo.id))
+        );
+        expect(wall(row?.taken_at)).toBe("2026-03-10 14:30:00");
+
+        fs.unlinkSync(path.join(UPLOAD_DIR, photo.filename));
+      });
+    });
   });
 
   describe("Faces", () => {
@@ -1375,6 +1435,54 @@ describe("Photo Module", () => {
       await expect(service.getAlbumSharesLogic(user2.id, album.id)).rejects.toThrow("Unauthorized");
       await expect(service.createAlbumPublicLinkLogic(user2.id, album.id)).rejects.toThrow("Unauthorized");
       await expect(service.deleteAlbumPublicLinkLogic(user2.id, album.id)).rejects.toThrow("Unauthorized");
+    });
+
+    describe("public link persistence (issue #435)", () => {
+      it("re-uses the same token when a deleted link is re-created", async () => {
+        const album = await service.createAlbumLogic(user1.id, { name: "Sticky link" });
+
+        const first = await service.createAlbumPublicLinkLogic(user1.id, album.id);
+        expect(first.token).toBeTruthy();
+
+        // Delete (soft) — the row stays so the token survives.
+        await service.deleteAlbumPublicLinkLogic(user1.id, album.id);
+
+        // Owner UI must report the link as gone once disabled.
+        const sharesAfterDelete = await service.getAlbumSharesLogic(user1.id, album.id);
+        expect(sharesAfterDelete.publicLink).toBeUndefined();
+
+        // Public-token lookup must refuse the disabled link.
+        await expect(service.getPublicAlbumLogic(first.token))
+          .rejects.toThrow("Dieser Link ist ungültig");
+
+        // Re-create returns the SAME token (the headline guarantee).
+        const second = await service.createAlbumPublicLinkLogic(user1.id, album.id);
+        expect(second.token).toBe(first.token);
+        expect(second.id).toBe(first.id);
+
+        // Token resolves again now that the link is re-enabled.
+        const publicView = await service.getPublicAlbumLogic(second.token);
+        expect(publicView.id).toBe(album.id);
+
+        // And the owner UI sees it again.
+        const sharesAfterReenable = await service.getAlbumSharesLogic(user1.id, album.id);
+        expect(sharesAfterReenable.publicLink?.token).toBe(first.token);
+      });
+
+      it("re-enabling refreshes the expires_at when an expiresIn is passed", async () => {
+        const album = await service.createAlbumLogic(user1.id, { name: "Refresh expiry" });
+
+        const first = await service.createAlbumPublicLinkLogic(user1.id, album.id);
+        expect(first.expires_at).toBeUndefined();
+
+        await service.deleteAlbumPublicLinkLogic(user1.id, album.id);
+
+        const reEnabled = await service.createAlbumPublicLinkLogic(user1.id, album.id, "7d");
+        expect(reEnabled.token).toBe(first.token);
+        expect(reEnabled.expires_at).toBeTruthy();
+        // Expiry is in the future.
+        expect(new Date(reEnabled.expires_at!).getTime()).toBeGreaterThan(Date.now());
+      });
     });
 
     it("should let write_share participants invite users but not escalate to write_share", async () => {

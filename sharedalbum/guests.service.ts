@@ -54,6 +54,11 @@ export async function loadActiveLink(token: string): Promise<AlbumPublicLink> {
   if (!link) {
     throw APIError.notFound("Dieser Link ist ungültig oder existiert nicht mehr.");
   }
+  // Soft-deleted links (issue #435) keep their token in the DB but should
+  // not authenticate any guest until the owner re-enables them.
+  if (link.disabled_at) {
+    throw APIError.notFound("Dieser Link ist ungültig oder existiert nicht mehr.");
+  }
   if (link.expires_at && new Date(link.expires_at) < new Date()) {
     throw APIError.notFound("Dieser Link ist abgelaufen.");
   }
@@ -96,6 +101,7 @@ export async function resolveGuest(
         and(
           eq(guestSessions.id, token),
           gt(guestSessions.expires_at, sql`NOW()`),
+          isNull(albumPublicLinks.disabled_at),
           or(
             isNull(albumPublicLinks.expires_at),
             gt(albumPublicLinks.expires_at, sql`NOW()`)
