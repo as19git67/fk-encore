@@ -5,6 +5,8 @@ export type CommentAuthorKind = 'user' | 'guest'
 export interface PhotoComment {
   id: number
   photoId: number
+  /** Album the comment was written in. Comments are album-scoped. */
+  albumId: number
   author: {
     id: number
     name: string | null
@@ -23,14 +25,16 @@ export interface PhotoComment {
 
 // ---------- Comments ----------
 
-export function listComments(photoId: number) {
-  return apiFetch<{ comments: PhotoComment[] }>(`/photos/${photoId}/comments`)
+export function listComments(photoId: number, albumId: number) {
+  return apiFetch<{ comments: PhotoComment[] }>(
+    `/photos/${photoId}/comments?albumId=${albumId}`,
+  )
 }
 
-export function createComment(photoId: number, body: string, albumId?: number) {
+export function createComment(photoId: number, body: string, albumId: number) {
   return apiFetch<PhotoComment>(`/photos/${photoId}/comments`, {
     method: 'POST',
-    body: JSON.stringify(albumId != null ? { body, albumId } : { body }),
+    body: JSON.stringify({ body, albumId }),
   })
 }
 
