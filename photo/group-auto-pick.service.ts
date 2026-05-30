@@ -748,6 +748,10 @@ export interface ReviewQueuePhoto {
   taken_at: string | null;
   curation: "visible" | "hidden" | "favorite";
   ai_picked: boolean;
+  // AI quality score (0..1), or null when the `quality` scan hasn't run
+  // for this photo yet. Surfaced so the review-queue cards can show the
+  // % rating directly instead of only inside the compare modal.
+  ai_quality_score: number | null;
   // Aggregated curation status from *other* users who share at least one
   // album containing this photo. Only explicit decisions are counted —
   // `visible` is the implicit default and produces no row, so we cannot
@@ -965,6 +969,7 @@ export async function listReviewQueueLogic(
     filename: string;
     taken_at: string | null;
     curation: string | null;
+    ai_quality_score: number | null;
   }>(
     db.select({
       group_id: photoGroupMembers.group_id,
@@ -972,6 +977,7 @@ export async function listReviewQueueLogic(
       filename: photos.filename,
       taken_at: photos.taken_at,
       curation: photoCuration.status,
+      ai_quality_score: photos.ai_quality_score,
     })
       .from(photoGroupMembers)
       .innerJoin(photos, eq(photos.id, photoGroupMembers.photo_id))
@@ -1063,6 +1069,7 @@ export async function listReviewQueueLogic(
             ? m.curation
             : "visible",
         ai_picked: pickedSet.has(m.photo_id),
+        ai_quality_score: m.ai_quality_score ?? null,
         peer_curation: peerByPhotoId.get(m.photo_id) ?? { hidden: 0, favorite: 0 },
       })),
     };
