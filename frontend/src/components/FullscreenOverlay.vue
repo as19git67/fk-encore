@@ -1140,7 +1140,12 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-inline: 1rem;
+  /* Keep the back button / counter clear of rounded corners, the notch and
+     the Dynamic Island. In landscape iOS reports a non-zero left/right safe
+     area; max() keeps the default 1rem everywhere else. Requires
+     viewport-fit=cover (set in index.html). */
+  padding-left: max(1rem, env(safe-area-inset-left, 0px));
+  padding-right: max(1rem, env(safe-area-inset-right, 0px));
   background: var(--p-dialog-background);
   z-index: 10;
   gap: 0.5rem;
