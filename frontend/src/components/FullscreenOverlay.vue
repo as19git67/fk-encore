@@ -1056,6 +1056,14 @@ onUnmounted(() => {
     /* Clear the overlaid topbar that spans the full width. */
     padding-top: 2.75em;
   }
+  /* Center the bottom action bar over the photo (left) pane instead of the
+     whole overlay. The metadata column is min(50vw, 402px) wide (see above),
+     so the photo spans the remaining width and its center sits at
+     (100vw − detailsWidth) / 2. */
+  .fullscreen-content--split .fs-actions-bar {
+    left: calc((100vw - min(50vw, 402px)) / 2);
+    max-width: calc(100vw - min(50vw, 402px) - 2rem);
+  }
 }
 
 /* ── Group marker (Track I) ───────────────────────────────────────────── */
