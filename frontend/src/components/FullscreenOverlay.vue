@@ -700,8 +700,9 @@ onUnmounted(() => {
       @touchend="handleTouchEnd"
       @touchcancel="handleTouchCancel"
     >
-      <!-- Mobile split layout (Track AF / #434): photo + metadata side by
-           side (landscape) or stacked (portrait), no overlay. -->
+      <!-- Split layout (Track AF / #434): photo + metadata side by
+           side (landscape) or stacked (portrait), no overlay. Used on every
+           device when the details are open. -->
       <div v-if="splitMode" class="fs-split">
         <div
           class="fs-split-photo"
@@ -963,7 +964,7 @@ onUnmounted(() => {
   user-select: none;
 }
 
-/* ── Mobile split-detail layout (Track AF / #434) ───────────────────────── */
+/* ── Split-detail layout (Track AF / #434) ──────────────────────────────── */
 /* Re-enable native scrolling/selection: the split panes scroll and the
    metadata contains editable fields, so the overlay's touch lock is lifted. */
 .fullscreen-content--split {
