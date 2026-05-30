@@ -1,10 +1,16 @@
 /**
- * Photo comments.
+ * Photo comments — scoped to an album.
  *
- * Audience rules mirror photo access: anyone who can see the photo
- * (owner + users with album access via `getUsersWithPhotoAccess`) can
- * comment. Each new comment fans out a realtime `photos/…` event and a
- * feed entry to the full audience minus the actor.
+ * A photo can live in several albums (album_photos M:N). Comments are
+ * bound to the album they were written in, so a comment is only visible
+ * (and only fans out) within that album and never leaks into another
+ * album that happens to contain the same photo.
+ *
+ * Audience for an album-scoped comment is everyone who can see the
+ * photo *through that album* — the album owner, anyone the album is
+ * shared with, and the photo owner (see `getUsersWithAlbumPhotoAccess`).
+ * Each comment fans out a realtime `photos/…` event (carrying the
+ * albumId) and a feed entry to that audience minus the actor.
  *
  * The former "Like" feature has been consolidated into the existing
  * Favorite curation flow — `updatePhotoCurationLogic` emits the
@@ -25,7 +31,7 @@ import {
   users,
 } from "../db/schema";
 import { feed, realtime, sharedalbum } from "~encore/clients";
-import { getUsersWithPhotoAccess, emitFeedItem } from "./photo.service";
+import { emitFeedItem } from "./photo.service";
 
 const MAX_COMMENT_LENGTH = 2000;
 
@@ -34,6 +40,7 @@ export type CommentAuthorKind = "user" | "guest";
 export interface PhotoComment {
   id: number;
   photoId: number;
+  albumId: number;
   author: {
     id: number;
     name: string | null;
@@ -44,18 +51,57 @@ export interface PhotoComment {
   editedAt: string | null;
 }
 
-async function assertPhotoAccess(
-  userId: number,
+/**
+ * Users who can see a given photo *within a specific album* — i.e. the
+ * audience for an album-scoped comment. This is the album owner, anyone
+ * the album is shared with, and the photo owner. Unlike
+ * `getUsersWithPhotoAccess`, it does not pull in members of *other*
+ * albums that happen to contain the same photo: comments are bound to
+ * one album and must not fan out across albums.
+ */
+async function getUsersWithAlbumPhotoAccess(
+  albumId: number,
   photoId: number,
 ): Promise<number[]> {
-  const photo = await dbFirst<{ id: number }>(
-    db.select({ id: photos.id }).from(photos).where(eq(photos.id, photoId)),
-  );
-  if (!photo) throw APIError.notFound("photo not found");
+  const rows = await db.execute<{ user_id: number }>(sql`
+    SELECT DISTINCT u.user_id FROM (
+      -- Photo owner
+      SELECT user_id FROM photos WHERE id = ${photoId}
+      UNION
+      -- Owner of the album the comment lives in
+      SELECT a.user_id FROM albums a WHERE a.id = ${albumId}
+      UNION
+      -- Users the album is shared with
+      SELECT asr.user_id FROM album_shares asr WHERE asr.album_id = ${albumId}
+    ) u
+  `);
+  return rows.rows.map((r) => r.user_id);
+}
 
-  const audience = await getUsersWithPhotoAccess(photoId);
+/**
+ * Authorize a user to read/write comments on `photoId` within
+ * `albumId`. The photo must actually belong to the album and the user
+ * must have access to that album (own it, have it shared with them, or
+ * own the photo). Returns the album-scoped audience for fan-out.
+ */
+async function assertAlbumPhotoAccess(
+  userId: number,
+  photoId: number,
+  albumId: number,
+): Promise<number[]> {
+  const inAlbum = await dbFirst<{ photo_id: number }>(
+    db
+      .select({ photo_id: albumPhotos.photo_id })
+      .from(albumPhotos)
+      .where(and(eq(albumPhotos.photo_id, photoId), eq(albumPhotos.album_id, albumId)))
+      .limit(1),
+  );
+  // Same response as "doesn't exist" so we don't leak whether a photo
+  // or album exists.
+  if (!inAlbum) throw APIError.notFound("photo not found");
+
+  const audience = await getUsersWithAlbumPhotoAccess(albumId, photoId);
   if (!audience.includes(userId)) {
-    // Same response as "doesn't exist" so we don't leak IDs.
     throw APIError.notFound("photo not found");
   }
   return audience;
@@ -90,6 +136,7 @@ function recipientsExcludingActor(audience: number[], actorUserId: number): numb
 interface CommentRow {
   id: number;
   photo_id: number;
+  album_id: number;
   user_id: number | null;
   guest_id: number | null;
   user_name: string | null;
@@ -104,6 +151,7 @@ function toPhotoComment(r: CommentRow): PhotoComment {
     return {
       id: r.id,
       photoId: r.photo_id,
+      albumId: r.album_id,
       author: { id: r.guest_id, name: r.guest_name, kind: "guest" },
       body: r.body,
       createdAt: r.created_at,
@@ -113,6 +161,7 @@ function toPhotoComment(r: CommentRow): PhotoComment {
   return {
     id: r.id,
     photoId: r.photo_id,
+    albumId: r.album_id,
     author: { id: r.user_id ?? 0, name: r.user_name, kind: "user" },
     body: r.body,
     createdAt: r.created_at,
@@ -121,15 +170,20 @@ function toPhotoComment(r: CommentRow): PhotoComment {
 }
 
 /**
- * Raw listing by photo id. Does no access check — callers must assert
- * access themselves (user audience check, or guest-link check).
+ * Raw listing of a photo's comments *within one album*. Does no access
+ * check — callers must assert access themselves (user audience check,
+ * or guest-link check). Comments from other albums are never returned.
  */
-export async function fetchCommentsForPhoto(photoId: number): Promise<PhotoComment[]> {
+export async function fetchCommentsForPhoto(
+  photoId: number,
+  albumId: number,
+): Promise<PhotoComment[]> {
   const rows = await dbAll<CommentRow>(
     db
       .select({
         id: photoComments.id,
         photo_id: photoComments.photo_id,
+        album_id: photoComments.album_id,
         user_id: photoComments.user_id,
         guest_id: photoComments.guest_id,
         user_name: users.name,
@@ -141,7 +195,12 @@ export async function fetchCommentsForPhoto(photoId: number): Promise<PhotoComme
       .from(photoComments)
       .leftJoin(users, eq(users.id, photoComments.user_id))
       .leftJoin(guests, eq(guests.id, photoComments.guest_id))
-      .where(eq(photoComments.photo_id, photoId))
+      .where(
+        and(
+          eq(photoComments.photo_id, photoId),
+          eq(photoComments.album_id, albumId),
+        ),
+      )
       .orderBy(asc(photoComments.created_at), asc(photoComments.id)),
   );
   return rows.map(toPhotoComment);
@@ -150,43 +209,47 @@ export async function fetchCommentsForPhoto(photoId: number): Promise<PhotoComme
 export async function listComments(
   userId: number,
   photoId: number,
+  albumId: number,
 ): Promise<PhotoComment[]> {
-  await assertPhotoAccess(userId, photoId);
-  return fetchCommentsForPhoto(photoId);
+  await assertAlbumPhotoAccess(userId, photoId, albumId);
+  return fetchCommentsForPhoto(photoId, albumId);
 }
 
 /**
  * Assert that the photo is reachable via the given public link (i.e.
  * it belongs to the album that link points to). Used by guest-facing
  * endpoints to authorize comment read/write without leaking info about
- * photos in other albums.
+ * photos in other albums. Returns the album id the link points to so
+ * callers can scope comments to it.
  */
 export async function assertPhotoInPublicLink(
   photoId: number,
   publicLinkId: number,
-): Promise<void> {
-  const hit = await dbFirst<{ photo_id: number }>(
+): Promise<number> {
+  const hit = await dbFirst<{ album_id: number }>(
     db
-      .select({ photo_id: albumPhotos.photo_id })
+      .select({ album_id: albumPhotos.album_id })
       .from(albumPhotos)
       .innerJoin(albumPublicLinks, eq(albumPublicLinks.album_id, albumPhotos.album_id))
       .where(and(eq(albumPhotos.photo_id, photoId), eq(albumPublicLinks.id, publicLinkId)))
       .limit(1),
   );
   if (!hit) throw APIError.notFound("photo not found");
+  return hit.album_id;
 }
 
 /**
  * List comments on a photo via a public-link (guest) path. Access is
  * authorized by the caller-supplied publicLinkId, which resolveGuest
- * (sharedalbum) scopes to the guest's current session.
+ * (sharedalbum) scopes to the guest's current session. Only comments
+ * written in the link's album are returned.
  */
 export async function listCommentsForGuest(
   publicLinkId: number,
   photoId: number,
 ): Promise<PhotoComment[]> {
-  await assertPhotoInPublicLink(photoId, publicLinkId);
-  return fetchCommentsForPhoto(photoId);
+  const albumId = await assertPhotoInPublicLink(photoId, publicLinkId);
+  return fetchCommentsForPhoto(photoId, albumId);
 }
 
 function normalizeCommentBody(raw: string): string {
@@ -206,14 +269,15 @@ export async function createComment(
   userId: number,
   photoId: number,
   rawBody: string,
-  albumId?: number,
+  albumId: number,
 ): Promise<PhotoComment> {
-  const audience = await assertPhotoAccess(userId, photoId);
+  const audience = await assertAlbumPhotoAccess(userId, photoId, albumId);
   const body = normalizeCommentBody(rawBody);
 
   const inserted = await dbAll<{
     id: number;
     photo_id: number;
+    album_id: number;
     user_id: number;
     body: string;
     created_at: string;
@@ -221,10 +285,11 @@ export async function createComment(
   }>(
     db
       .insert(photoComments)
-      .values({ photo_id: photoId, user_id: userId, body })
+      .values({ photo_id: photoId, album_id: albumId, user_id: userId, body })
       .returning({
         id: photoComments.id,
         photo_id: photoComments.photo_id,
+        album_id: photoComments.album_id,
         user_id: photoComments.user_id,
         body: photoComments.body,
         created_at: photoComments.created_at,
@@ -242,6 +307,7 @@ export async function createComment(
   const comment: PhotoComment = {
     id: row.id,
     photoId: row.photo_id,
+    albumId: row.album_id,
     author: { id: row.user_id, name: author?.name ?? null, kind: "user" },
     body: row.body,
     createdAt: row.created_at,
@@ -249,8 +315,11 @@ export async function createComment(
   };
 
   const recipients = recipientsExcludingActor(audience, userId);
+  // `albumId` rides along so open photo views only react to the comment
+  // when they're showing the photo in the matching album.
   await publishPhotoEvent(recipients, "commented", photoId, {
     commentId: comment.id,
+    albumId,
     userId,
     body: comment.body,
   });
@@ -264,10 +333,9 @@ export async function createComment(
       excerpt: comment.body.slice(0, 140),
     },
   });
-  // Fan out to guests of the album whose view the comment was made
-  // from. `albumId` is set when the comment originated from an album
-  // detail page; without it (e.g. comment from a generic photo grid)
-  // we still notify every public-link guest who can see the photo.
+  // Fan out to guests of the album the comment was written in. The same
+  // photo shared via several album links must not leak the comment
+  // across the audiences of those albums.
   await sharedalbum
     .fanoutPhoto({
       photoId,
@@ -312,6 +380,7 @@ export async function createCommentAsGuest(
   const inserted = await dbAll<{
     id: number;
     photo_id: number;
+    album_id: number;
     guest_id: number | null;
     body: string;
     created_at: string;
@@ -319,10 +388,11 @@ export async function createCommentAsGuest(
   }>(
     db
       .insert(photoComments)
-      .values({ photo_id: photoId, guest_id: guestId, body })
+      .values({ photo_id: photoId, album_id: albumId, guest_id: guestId, body })
       .returning({
         id: photoComments.id,
         photo_id: photoComments.photo_id,
+        album_id: photoComments.album_id,
         guest_id: photoComments.guest_id,
         body: photoComments.body,
         created_at: photoComments.created_at,
@@ -339,15 +409,19 @@ export async function createCommentAsGuest(
   const comment: PhotoComment = {
     id: row.id,
     photoId: row.photo_id,
+    albumId: row.album_id,
     author: { id: guestId, name: guestName, kind: "guest" },
     body: row.body,
     createdAt: row.created_at,
     editedAt: row.edited_at,
   };
 
-  const audience = await getUsersWithPhotoAccess(photoId);
+  // Notify only the audience of the album the comment was written in —
+  // not members of other albums that also contain the photo.
+  const audience = await getUsersWithAlbumPhotoAccess(albumId, photoId);
   await publishPhotoEvent(audience, "commented", photoId, {
     commentId: comment.id,
+    albumId,
     guestId,
     guestName,
     body: comment.body,
@@ -398,12 +472,19 @@ export async function createCommentAsGuest(
 }
 
 async function getCommentForEdit(commentId: number): Promise<
-  | { id: number; photo_id: number; user_id: number | null; guest_id: number | null }
+  | {
+      id: number;
+      photo_id: number;
+      album_id: number;
+      user_id: number | null;
+      guest_id: number | null;
+    }
   | undefined
 > {
   return await dbFirst<{
     id: number;
     photo_id: number;
+    album_id: number;
     user_id: number | null;
     guest_id: number | null;
   }>(
@@ -411,6 +492,7 @@ async function getCommentForEdit(commentId: number): Promise<
       .select({
         id: photoComments.id,
         photo_id: photoComments.photo_id,
+        album_id: photoComments.album_id,
         user_id: photoComments.user_id,
         guest_id: photoComments.guest_id,
       })
@@ -434,6 +516,7 @@ export async function updateComment(
   const updated = await dbAll<{
     id: number;
     photo_id: number;
+    album_id: number;
     user_id: number | null;
     body: string;
     created_at: string;
@@ -446,6 +529,7 @@ export async function updateComment(
       .returning({
         id: photoComments.id,
         photo_id: photoComments.photo_id,
+        album_id: photoComments.album_id,
         user_id: photoComments.user_id,
         body: photoComments.body,
         created_at: photoComments.created_at,
@@ -460,16 +544,18 @@ export async function updateComment(
   const comment: PhotoComment = {
     id: row.id,
     photoId: row.photo_id,
+    albumId: row.album_id,
     author: { id: row.user_id ?? userId, name: author?.name ?? null, kind: "user" },
     body: row.body,
     createdAt: row.created_at,
     editedAt: row.edited_at,
   };
 
-  const audience = await getUsersWithPhotoAccess(existing.photo_id);
+  const audience = await getUsersWithAlbumPhotoAccess(existing.album_id, existing.photo_id);
   const recipients = recipientsExcludingActor(audience, userId);
   await publishPhotoEvent(recipients, "comment_updated", existing.photo_id, {
     commentId: comment.id,
+    albumId: existing.album_id,
     userId,
     body: comment.body,
   });
@@ -494,6 +580,7 @@ export async function updateCommentAsGuest(
   const updated = await dbAll<{
     id: number;
     photo_id: number;
+    album_id: number;
     guest_id: number | null;
     body: string;
     created_at: string;
@@ -506,6 +593,7 @@ export async function updateCommentAsGuest(
       .returning({
         id: photoComments.id,
         photo_id: photoComments.photo_id,
+        album_id: photoComments.album_id,
         guest_id: photoComments.guest_id,
         body: photoComments.body,
         created_at: photoComments.created_at,
@@ -521,15 +609,17 @@ export async function updateCommentAsGuest(
   const comment: PhotoComment = {
     id: row.id,
     photoId: row.photo_id,
+    albumId: row.album_id,
     author: { id: guestId, name: guest?.display_name ?? null, kind: "guest" },
     body: row.body,
     createdAt: row.created_at,
     editedAt: row.edited_at,
   };
 
-  const audience = await getUsersWithPhotoAccess(existing.photo_id);
+  const audience = await getUsersWithAlbumPhotoAccess(existing.album_id, existing.photo_id);
   await publishPhotoEvent(audience, "comment_updated", existing.photo_id, {
     commentId: comment.id,
+    albumId: existing.album_id,
     guestId,
     body: comment.body,
   });
@@ -564,10 +654,11 @@ export async function deleteComment(
 
   await dbExec(db.delete(photoComments).where(eq(photoComments.id, commentId)));
 
-  const audience = await getUsersWithPhotoAccess(existing.photo_id);
+  const audience = await getUsersWithAlbumPhotoAccess(existing.album_id, existing.photo_id);
   const recipients = recipientsExcludingActor(audience, userId);
   await publishPhotoEvent(recipients, "comment_deleted", existing.photo_id, {
     commentId,
+    albumId: existing.album_id,
     userId,
   });
 
@@ -588,9 +679,10 @@ export async function deleteCommentAsGuest(
 
   await dbExec(db.delete(photoComments).where(eq(photoComments.id, commentId)));
 
-  const audience = await getUsersWithPhotoAccess(existing.photo_id);
+  const audience = await getUsersWithAlbumPhotoAccess(existing.album_id, existing.photo_id);
   await publishPhotoEvent(audience, "comment_deleted", existing.photo_id, {
     commentId,
+    albumId: existing.album_id,
     guestId,
   });
 

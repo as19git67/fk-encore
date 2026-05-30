@@ -1051,6 +1051,12 @@ export const photoComments = pgTable("photo_comments", {
   photo_id: integer("photo_id")
     .notNull()
     .references(() => photos.id, { onDelete: "cascade" }),
+  // Album the comment was written in (migration 0093). A photo can live
+  // in several albums; comments are bound to one album so they only
+  // appear in that album's view and don't leak across shared albums.
+  album_id: integer("album_id")
+    .notNull()
+    .references(() => albums.id, { onDelete: "cascade" }),
   // Author: exactly one of user_id or guest_id is set (CHECK constraint
   // photo_comments_author_chk, migration 0043).
   user_id: integer("user_id").references(() => users.id, { onDelete: "cascade" }),
