@@ -9,6 +9,7 @@ import GuestStatusBanner from '../components/GuestStatusBanner.vue'
 import GuestRegisterDialog from '../components/GuestRegisterDialog.vue'
 import GuestAccountDialog from '../components/GuestAccountDialog.vue'
 import GuestPhotoReactions from '../components/GuestPhotoReactions.vue'
+import PhotoMiniMap from '../components/PhotoMiniMap.vue'
 import { getPublicAlbum, getPhotoUrl, type PhotoFilter, type PublicAlbumResponse, type PublicAlbumPhoto, type Photo } from '../api/photos'
 import { matchesPhotoFilter } from '../utils/photoFilter'
 import { countActiveFilters } from '../composables/useFilter'
@@ -676,6 +677,16 @@ onUnmounted(() => {
               </a>
               <span v-else>{{ formatSharedLocation(currentPhoto) }}</span>
             </div>
+            <div
+              v-if="currentPhoto.latitude != null && currentPhoto.longitude != null"
+              class="info-row info-map"
+            >
+              <PhotoMiniMap
+                :latitude="currentPhoto.latitude"
+                :longitude="currentPhoto.longitude"
+                :label="formatSharedLocation(currentPhoto) || undefined"
+              />
+            </div>
             <div v-if="currentDescription" class="info-row info-description">
               <i class="pi pi-align-left" />
               <p>{{ currentDescription }}</p>
@@ -1113,6 +1124,12 @@ onUnmounted(() => {
 .info-description {
   color: rgba(255, 255, 255, 0.75);
   white-space: pre-wrap;
+}
+
+/* The mini-map spans the full panel width — no leading icon column, so
+   override the flex row layout the other info-rows use. */
+.info-map {
+  display: block;
 }
 
 /* Comment thread inside the slide-up panel. The panel forces a dark
