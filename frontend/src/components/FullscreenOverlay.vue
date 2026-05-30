@@ -64,49 +64,18 @@ const hasActionBar = computed(() => {
   return fullscreenSupported.value
 })
 
-// ── Mobile split-detail layout (Track AF / #434) ────────────────────────────
-// On phones the details no longer overlay the photo. When the details are
-// active we split the screen instead:
+// ── Split-detail layout (Track AF / #434) ───────────────────────────────────
+// The details never overlay the photo. Whenever a details panel is provided
+// and toggled open we split the screen — in every orientation and on every
+// device, no desktop/phone distinction:
 //   • portrait  → photo on the upper half (object-fit: contain) with the
-//                 metadata flowing below it; the whole pane scrolls as one,
-//                 so scrolling pushes the photo off-screen to reveal more.
-//   • landscape → photo on the left half (contain), metadata on the right
-//                 half scrolling independently of the image.
-// Desktop keeps the slide-in flyout (see `.fs-details-flyout`).
-const isMobile = ref(false)
-const isPortrait = ref(true)
-let mobileMql: MediaQueryList | null = null
-let portraitMql: MediaQueryList | null = null
-
-function updateViewport() {
-  isMobile.value = mobileMql?.matches ?? false
-  isPortrait.value = portraitMql?.matches ?? true
-}
-
-onMounted(() => {
-  // A phone counts as "mobile" in both orientations: portrait phones match
-  // on width, landscape phones match on the short side (height) — their
-  // width often exceeds 768px (e.g. 844×390), which would otherwise fall
-  // back to the desktop flyout overlaying the photo.
-  mobileMql = window.matchMedia(
-    '(max-width: 768px), (max-height: 600px) and (orientation: landscape)',
-  )
-  portraitMql = window.matchMedia('(orientation: portrait)')
-  updateViewport()
-  mobileMql.addEventListener('change', updateViewport)
-  portraitMql.addEventListener('change', updateViewport)
-})
-onUnmounted(() => {
-  mobileMql?.removeEventListener('change', updateViewport)
-  portraitMql?.removeEventListener('change', updateViewport)
-})
-
-// Split mode is only engaged when there is a details panel to show, the
-// caller has toggled it open, and we're on a phone-sized viewport.
+//                 metadata flowing below it; the whole pane scrolls as one.
+//   • landscape → photo on the left, metadata on the right (width capped at
+//                 ~an iPhone 16 Pro screen) scrolling independently.
+// Portrait vs. landscape is handled entirely in CSS via the size-independent
+// `(orientation: …)` media query, so no JS viewport tracking is needed.
 const hasDetailsSlot = computed(() => Boolean(slots['details-flyout']))
-const splitMode = computed(
-  () => isMobile.value && props.detailsActive && hasDetailsSlot.value,
-)
+const splitMode = computed(() => props.detailsActive && hasDetailsSlot.value)
 
 // Touch navigation inside the split photo pane. A horizontal swipe or a tap
 // on the left/right half of the image navigates to the prev/next photo;
@@ -130,6 +99,9 @@ function handlePhotoTouchEnd(e: TouchEvent) {
   // Tap (no real movement): use the half of the photo pane the user
   // touched — left half = previous, right half = next.
   if (movement < 10) {
+    // Suppress the synthetic click the browser fires for this tap so the
+    // pane's @click handler (for mouse users) doesn't navigate twice.
+    suppressNextClickUntil = performance.now() + 500
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     if (t.clientX < rect.left + rect.width / 2) {
       if (props.prevPhoto) emit('prev')
@@ -143,6 +115,19 @@ function handlePhotoTouchEnd(e: TouchEvent) {
   if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40) {
     if (dx > 0 && props.prevPhoto) emit('prev')
     else if (dx < 0 && props.nextPhoto) emit('next')
+  }
+}
+
+// Mouse click on the split photo pane (desktop): navigate by the touched
+// half, mirroring the touch behaviour. Touch taps are filtered out via the
+// suppression window set in handlePhotoTouchEnd.
+function handlePhotoClick(e: MouseEvent) {
+  if (performance.now() < suppressNextClickUntil) return
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  if (e.clientX < rect.left + rect.width / 2) {
+    if (props.prevPhoto) emit('prev')
+  } else {
+    if (props.nextPhoto) emit('next')
   }
 }
 
@@ -709,10 +694,7 @@ onUnmounted(() => {
     <div
       ref="contentRef"
       class="fullscreen-content"
-      :class="{
-        'fullscreen-content--split': splitMode,
-        'fullscreen-content--split-landscape': splitMode && !isPortrait,
-      }"
+      :class="{ 'fullscreen-content--split': splitMode }"
       @click.stop="handleContentClick"
       @touchstart="handleTouchStart"
       @touchend="handleTouchEnd"
@@ -725,6 +707,7 @@ onUnmounted(() => {
           class="fs-split-photo"
           @touchstart="handlePhotoTouchStart"
           @touchend="handlePhotoTouchEnd"
+          @click="handlePhotoClick"
         >
           <svg v-if="userSvgMarkup && !userRecipe" width="0" height="0" style="position: absolute; pointer-events: none">
             <defs v-html="userSvgMarkup"></defs>
@@ -1041,25 +1024,38 @@ onUnmounted(() => {
   padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
 }
 
-/* Landscape: photo on the left half, metadata scrolls independently on the
-   right half. */
-.fullscreen-content--split-landscape .fs-split {
-  flex-direction: row;
-  overflow: hidden;
+/* Navigation in split mode is via swipe / tap-half (touch) or the keyboard
+   arrows (desktop), so hide the on-screen prev/next chevrons that would
+   otherwise overlap the metadata column. */
+.fullscreen-content--split .fs-nav {
+  display: none;
 }
-.fullscreen-content--split-landscape .fs-split-photo {
-  flex: 0 0 50%;
-  width: 50%;
-  height: 100%;
-  padding-top: 2.75em;
-}
-.fullscreen-content--split-landscape .fs-split-details {
-  flex: 1 1 50%;
-  height: 100%;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  /* Clear the overlaid topbar that spans the full width. */
-  padding-top: 2.75em;
+
+/* Landscape (size-independent): photo on the left, metadata scrolls
+   independently on the right with a capped width. */
+@media (orientation: landscape) {
+  .fullscreen-content--split .fs-split {
+    flex-direction: row;
+    overflow: hidden;
+  }
+  .fullscreen-content--split .fs-split-photo {
+    flex: 1 1 0;
+    width: auto;
+    height: 100%;
+    min-width: 0;
+  }
+  .fullscreen-content--split .fs-split-details {
+    flex: 1 1 0;
+    /* Cap the metadata column at roughly an iPhone 16 Pro screen width so it
+       doesn't sprawl on wide/desktop landscape viewports; the photo absorbs
+       the freed space. */
+    max-width: 402px;
+    height: 100%;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    /* Clear the overlaid topbar that spans the full width. */
+    padding-top: 2.75em;
+  }
 }
 
 /* ── Group marker (Track I) ───────────────────────────────────────────── */
