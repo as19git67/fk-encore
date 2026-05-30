@@ -102,6 +102,44 @@ const splitMode = computed(
   () => isMobile.value && props.detailsActive && hasDetailsSlot.value,
 )
 
+// Touch navigation inside the split photo pane. A horizontal swipe or a tap
+// on the left/right half of the image navigates to the prev/next photo;
+// vertical gestures fall through so the pane keeps scrolling natively.
+const photoTouchStartX = ref(0)
+const photoTouchStartY = ref(0)
+
+function handlePhotoTouchStart(e: TouchEvent) {
+  if (e.touches.length !== 1) return
+  photoTouchStartX.value = e.touches[0]!.clientX
+  photoTouchStartY.value = e.touches[0]!.clientY
+}
+
+function handlePhotoTouchEnd(e: TouchEvent) {
+  if (!e.changedTouches.length) return
+  const t = e.changedTouches[0]!
+  const dx = t.clientX - photoTouchStartX.value
+  const dy = t.clientY - photoTouchStartY.value
+  const movement = Math.hypot(dx, dy)
+
+  // Tap (no real movement): use the half of the photo pane the user
+  // touched — left half = previous, right half = next.
+  if (movement < 10) {
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    if (t.clientX < rect.left + rect.width / 2) {
+      if (props.prevPhoto) emit('prev')
+    } else {
+      if (props.nextPhoto) emit('next')
+    }
+    return
+  }
+
+  // Horizontal-dominant swipe of at least 40 px → prev/next.
+  if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40) {
+    if (dx > 0 && props.prevPhoto) emit('prev')
+    else if (dx < 0 && props.nextPhoto) emit('next')
+  }
+}
+
 const emit = defineEmits<{
   'close': []
   'prev': []
@@ -677,7 +715,11 @@ onUnmounted(() => {
       <!-- Mobile split layout (Track AF / #434): photo + metadata side by
            side (landscape) or stacked (portrait), no overlay. -->
       <div v-if="splitMode" class="fs-split">
-        <div class="fs-split-photo">
+        <div
+          class="fs-split-photo"
+          @touchstart="handlePhotoTouchStart"
+          @touchend="handlePhotoTouchEnd"
+        >
           <svg v-if="userSvgMarkup && !userRecipe" width="0" height="0" style="position: absolute; pointer-events: none">
             <defs v-html="userSvgMarkup"></defs>
           </svg>
@@ -961,6 +1003,13 @@ onUnmounted(() => {
   /* Keep the image clear of the overlaid topbar. */
   padding-top: 2.75em;
   box-sizing: border-box;
+  /* Let vertical scrolling fall through to the pane while we capture
+     horizontal swipes for prev/next navigation. Suppress the iOS
+     long-press image menu and text selection so taps/swipes stay clean. */
+  touch-action: pan-y;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* Make HeicImage's contain box fill the photo pane. */
