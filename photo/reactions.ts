@@ -10,7 +10,7 @@
  * `/photos/:id/curation` endpoint with `status=favorite` instead.
  */
 
-import { api, APIError } from "encore.dev/api";
+import { api, APIError, Query } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import * as svc from "./reactions.service";
@@ -32,18 +32,20 @@ function requirePhotosView() {
 interface CreateCommentRequest {
   body: string;
   /**
-   * Optional album the comment was authored from. Forwarded to the
-   * shared-album fan-out so guest notifications stay scoped to that
-   * album when the same photo also exists in other shared albums.
+   * Album the comment is written in. Comments are album-scoped: the
+   * same photo can live in several albums, and a comment is only
+   * visible (and only fans out) within the album it was authored in.
    */
-  albumId?: number;
+  albumId: number;
 }
 
 export const listComments = api(
   { expose: true, method: "GET", path: "/photos/:id/comments", auth: true },
-  async ({ id }: { id: number }): Promise<{ comments: svc.PhotoComment[] }> => {
+  async (
+    { id, albumId }: { id: number; albumId: Query<number> },
+  ): Promise<{ comments: svc.PhotoComment[] }> => {
     requirePhotosView();
-    const comments = await svc.listComments(getUserId(), id);
+    const comments = await svc.listComments(getUserId(), id, albumId);
     return { comments };
   },
 );

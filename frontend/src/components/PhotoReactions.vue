@@ -19,10 +19,10 @@ import PhotoCommentThread from './PhotoCommentThread.vue'
 
 const props = defineProps<{
   photoId: number
-  // Album in whose detail view this thread is open. Forwarded to the
-  // create-comment call so guest notifications stay scoped to that
-  // album when the photo also appears in other shared albums.
-  albumId?: number
+  // Album in whose detail view this thread is open. Comments are
+  // album-scoped: listing, creating and the realtime sync all key off
+  // this album so a comment written here stays in this album only.
+  albumId: number
 }>()
 
 const auth = useAuthStore()
@@ -37,11 +37,11 @@ const error = ref('')
 const submitting = ref(false)
 
 async function load() {
-  if (!props.photoId) return
+  if (!props.photoId || props.albumId == null) return
   loading.value = true
   error.value = ''
   try {
-    const c = await listComments(props.photoId)
+    const c = await listComments(props.photoId, props.albumId)
     comments.value = c.comments
   } catch (err: unknown) {
     error.value = (err as Error)?.message || 'Fehler beim Laden'
@@ -82,15 +82,20 @@ async function onDelete(commentId: number) {
   }
 }
 
-// Live updates: react to events on the `photos` channel for this
-// photo. useRealtimeEvent self-manages its mount/unmount lifecycle.
-function matchesPhoto(resourceId: string | number): boolean {
-  return Number(resourceId) === props.photoId
+// Live updates: react to events on the `photos` channel for this photo
+// *and* this album. Comments are album-scoped, so an event for the same
+// photo in a different album must not touch this thread. The album id
+// rides along in the event payload. useRealtimeEvent self-manages its
+// mount/unmount lifecycle.
+function matchesPhotoAlbum(ev: { resourceId: string | number; payload?: Record<string, unknown> }): boolean {
+  if (Number(ev.resourceId) !== props.photoId) return false
+  const evAlbumId = Number(ev.payload?.albumId)
+  return Number.isFinite(evAlbumId) && evAlbumId === props.albumId
 }
 
 async function refreshComments() {
   try {
-    const c = await listComments(props.photoId)
+    const c = await listComments(props.photoId, props.albumId)
     comments.value = c.comments
   } catch {
     // Ignore — next open will re-sync.
@@ -98,13 +103,13 @@ async function refreshComments() {
 }
 
 useRealtimeEvent('photos', 'commented', (ev) => {
-  if (matchesPhoto(ev.resourceId)) void refreshComments()
+  if (matchesPhotoAlbum(ev)) void refreshComments()
 })
 useRealtimeEvent('photos', 'comment_updated', (ev) => {
-  if (matchesPhoto(ev.resourceId)) void refreshComments()
+  if (matchesPhotoAlbum(ev)) void refreshComments()
 })
 useRealtimeEvent('photos', 'comment_deleted', (ev) => {
-  if (!matchesPhoto(ev.resourceId)) return
+  if (!matchesPhotoAlbum(ev)) return
   const commentId = Number(ev.payload?.commentId)
   if (Number.isFinite(commentId)) {
     comments.value = comments.value.filter((x) => x.id !== commentId)
@@ -112,7 +117,7 @@ useRealtimeEvent('photos', 'comment_deleted', (ev) => {
 })
 
 watch(
-  () => props.photoId,
+  () => [props.photoId, props.albumId],
   () => {
     void nextTick(load)
   },

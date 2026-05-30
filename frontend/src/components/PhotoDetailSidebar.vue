@@ -386,12 +386,17 @@ watch(() => props.photo.id, () => {
         </div>
       </div>
 
-      <!-- Likes and comments (visible to everyone with photo access). -->
-      <div class="sidebar-divider" />
-      <div class="sidebar-section">
-        <div class="section-label"><i class="pi pi-comments" /> Reaktionen</div>
-        <PhotoReactions :photo-id="photo.id" :album-id="albumId" />
-      </div>
+      <!-- Comments, scoped to the album this photo is viewed in. Only
+           shown inside an album context (album detail / shared album):
+           outside an album there is no scope to attach a comment to, so
+           commenting is unavailable in the gallery and persons views. -->
+      <template v-if="albumId != null">
+        <div class="sidebar-divider" />
+        <div class="sidebar-section">
+          <div class="section-label"><i class="pi pi-comments" /> Reaktionen</div>
+          <PhotoReactions :photo-id="photo.id" :album-id="albumId" />
+        </div>
+      </template>
 
       <!-- Curation opinions (shared albums only) -->
       <template v-if="(photo as any).curation_stats && (photo as any).curation_stats.member_count > 1">
