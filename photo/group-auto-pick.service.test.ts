@@ -36,6 +36,7 @@ async function makeUser(email: string): Promise<number> {
 
 interface PhotoSeed {
   details?: Record<string, number>;
+  score?: number;
   faces?: number;
   bboxWH?: [number, number][];
   width?: number;
@@ -50,6 +51,7 @@ async function makePhoto(userId: number, seed: PhotoSeed = {}): Promise<number> 
       original_name: "p.jpg",
       mime_type: "image/jpeg",
       size: 1000,
+      ai_quality_score: seed.score ?? null,
       ai_quality_details: seed.details ?? null,
       width: seed.width ?? null,
       height: seed.height ?? null,
@@ -846,6 +848,23 @@ describe("listReviewQueueLogic — peer_curation aggregate (Phase 1)", () => {
     const photoX = res.groups[0].photos.find((p) => p.id === px)!;
     // Owner can't see peer's private album → no signal leaks through.
     expect(photoX.peer_curation).toEqual({ hidden: 0, favorite: 0 });
+  });
+
+  it("surfaces ai_quality_score per photo, null when unscored", async () => {
+    // The card UI shows the % rating straight from the queue, so the
+    // endpoint must echo each photo's ai_quality_score — and pass null
+    // through unchanged for photos the quality scan hasn't reached yet.
+    const owner = await makeUser("owner-score@test.com");
+    const scored = await makePhoto(owner, { score: 0.83, details: { sharpness: 0.83 } });
+    const unscored = await makePhoto(owner, { details: { sharpness: 0.50 } });
+    await makeGroup(owner, scored, [scored, unscored]);
+
+    const res = await listReviewQueueLogic(owner);
+    const group = res.groups[0];
+    const a = group.photos.find((p) => p.id === scored)!;
+    const b = group.photos.find((p) => p.id === unscored)!;
+    expect(a.ai_quality_score).toBeCloseTo(0.83, 5);
+    expect(b.ai_quality_score).toBeNull();
   });
 
   it("excludes the requester's own curation from the peer count", async () => {
