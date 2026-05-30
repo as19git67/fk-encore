@@ -84,7 +84,13 @@ function updateViewport() {
 }
 
 onMounted(() => {
-  mobileMql = window.matchMedia('(max-width: 768px)')
+  // A phone counts as "mobile" in both orientations: portrait phones match
+  // on width, landscape phones match on the short side (height) — their
+  // width often exceeds 768px (e.g. 844×390), which would otherwise fall
+  // back to the desktop flyout overlaying the photo.
+  mobileMql = window.matchMedia(
+    '(max-width: 768px), (max-height: 600px) and (orientation: landscape)',
+  )
   portraitMql = window.matchMedia('(orientation: portrait)')
   updateViewport()
   mobileMql.addEventListener('change', updateViewport)
@@ -991,6 +997,11 @@ onUnmounted(() => {
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   background: var(--p-content-background);
+  /* Stop mobile WebKit/Blink "text auto-inflation": in a tall scroll
+     container it otherwise scales up individual text blocks (description
+     placeholder, location label, filename/size) to inconsistent sizes. */
+  text-size-adjust: 100%;
+  -webkit-text-size-adjust: 100%;
 }
 
 .fs-split-photo {
