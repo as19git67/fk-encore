@@ -1511,7 +1511,35 @@ async function handleGroupClose() {
   selectAfterGroup(group)
 }
 
+/**
+ * Fired by PhotoCompareView after the server accepted the review (the
+ * "Fertig" / "KI-Pick übernehmen" actions), BEFORE the `close` that tears
+ * the overlay down. Mirrors GalleryView.applyLocalGroupReviewed: flip the
+ * badge off immediately on every loaded cell of the group and in the local
+ * group cache, so it disappears at once instead of lingering until the
+ * post-close reload streams back (or, when an overlapping group exists,
+ * never clearing visually at all). `close` still runs its reload to pick
+ * up the per-photo curation changes from the review.
+ *
+ * Only fires on an actual review — dismissing via X / Esc emits `close`
+ * alone, leaving the group unreviewed both server- and client-side.
+ */
+function handleGroupReviewed() {
+  const reviewedGroupId = activeGroup.value?.id
+  if (reviewedGroupId === undefined) return
+  photoGroupsList.value = photoGroupsList.value.map((g) =>
+    g.id === reviewedGroupId
+      ? { ...g, reviewed_at: g.reviewed_at ?? new Date().toISOString() }
+      : g,
+  )
+  galleryRef.value?.markGroupReviewed(reviewedGroupId)
+}
+
 async function handleGroupNext(reviewedGroupId: number) {
+  // Review-and-next emits `next` (not `reviewed`), so flip the just-
+  // reviewed group's badge off here before the reload — same optimistic
+  // update as handleGroupReviewed.
+  galleryRef.value?.markGroupReviewed(reviewedGroupId)
   const candidateId = albumPhotoGroups.value.find(g => !g.reviewed_at && g.id !== reviewedGroupId)?.id
   await loadData()
   await galleryRef.value?.reload()
@@ -2147,6 +2175,7 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
       :group="activeGroup"
       :allPhotos="albumPhotos"
       :totalUnreviewed="unreviewedGroupCount"
+      @reviewed="handleGroupReviewed"
       @close="handleGroupClose"
       @next="handleGroupNext"
     />
