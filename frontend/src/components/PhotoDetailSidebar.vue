@@ -540,7 +540,19 @@ watch(() => props.photo.id, () => {
       </template>
 
       <div class="sidebar-section">
-        <div class="section-label"><i class="pi pi-book" /> Alben</div>
+        <div class="section-label section-label--with-action">
+          <span><i class="pi pi-book" /> Alben</span>
+          <!-- Jump to the gallery / other albums holding this photo. Lives
+               in the quick-actions row in the docked sidebar, but that row
+               is hidden in the flyout (split view) — surface it here so the
+               "Foto anzeigen in…" navigation stays reachable there too. -->
+          <PhotoLocationMenu
+            v-if="inFlyout"
+            :photo-id="photo.id"
+            :exclude-all-photos="locationMenuExcludeAllPhotos"
+            :exclude-album-id="albumId"
+          />
+        </div>
         <div v-if="loadingAlbums" class="loading-row">
           <i class="pi pi-spin pi-spinner" /> Lade Alben…
         </div>
@@ -734,6 +746,16 @@ watch(() => props.photo.id, () => {
   gap: 0.4rem;
 }
 .section-label .pi { font-size: 0.75rem; }
+/* Label on the left, an inline action (e.g. the jump-to menu) on the
+   right. The action button keeps its own normal-case styling. */
+.section-label--with-action {
+  justify-content: space-between;
+}
+.section-label--with-action > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
 
 .meta-list {
   padding: 0.75rem 1rem;

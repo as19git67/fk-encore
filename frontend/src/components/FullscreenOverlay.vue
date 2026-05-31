@@ -40,6 +40,12 @@ const props = withDefaults(defineProps<{
    * slideshow behaviour entirely.
    */
   autoAdvanceMs?: number
+  /**
+   * Set by the shared-album guest view. Keeps the action toolbar as the
+   * floating bottom pill in landscape instead of flowing it into the
+   * topbar — the in-header layout is reserved for the signed-in app.
+   */
+  guest?: boolean
 }>(), {
   // Vue 3 coerces a Boolean prop that the parent didn't pass to `false`
   // (NOT `undefined`), which collapses `props.showDetailsButton !== false`
@@ -694,7 +700,7 @@ onUnmounted(() => {
     <div
       ref="contentRef"
       class="fullscreen-content"
-      :class="{ 'fullscreen-content--split': splitMode }"
+      :class="{ 'fullscreen-content--split': splitMode, 'fullscreen-content--guest': guest }"
       @click.stop="handleContentClick"
       @touchstart="handleTouchStart"
       @touchend="handleTouchEnd"
@@ -808,12 +814,13 @@ onUnmounted(() => {
           </slot>
         </div>
 
-        <!-- Action bar: an iOS-style icon row. By default it floats centered
-             at the bottom of the overlay (position: fixed). In landscape
-             split mode it instead flows inline here in the topbar — only the
-             buttons, dropping its own pill so the topbar background shows
-             through (see `.fs-actions-bar` styles). Hidden when there are no
-             actions to show (e.g. unauthenticated shared album). -->
+        <!-- Action bar: an iOS-style icon row. In portrait it floats
+             centered at the bottom of the overlay (position: fixed). In
+             landscape (split or normal) it instead flows inline here in the
+             topbar — only the buttons, dropping its own pill so the topbar
+             background shows through (see `.fs-actions-bar` styles). Hidden
+             when there are no actions to show (e.g. unauthenticated shared
+             album). -->
         <div
           v-if="hasActionBar"
           class="fs-actions-bar"
@@ -1066,8 +1073,17 @@ onUnmounted(() => {
   /* Move the action buttons up into the topbar: drop the floating pill and
      flow them inline as a flex item between the date (center) and the counter
      (right). The topbar already supplies a background, so only the buttons
-     move — matching the rest of the topbar. */
-  .fullscreen-content--split .fs-actions-bar {
+     move — matching the rest of the topbar.
+
+     Applies in landscape to the split view (details open) for everyone, and
+     to the normal fullscreen view for the signed-in app only: the floating
+     bottom pill wastes horizontal space and overlaps wide landscape photos,
+     whereas the topbar has room to spare. The shared-album guest view keeps
+     the floating pill in its normal fullscreen (`--guest`). Portrait keeps
+     the floating pill everywhere — the selector is scoped to
+     `(orientation: landscape)` by the enclosing media query. */
+  .fullscreen-content--split .fs-actions-bar,
+  .fullscreen-content:not(.fullscreen-content--guest) .fs-actions-bar {
     position: static;
     transform: none;
     flex: 0 0 auto;
@@ -1081,10 +1097,12 @@ onUnmounted(() => {
   /* The pill-icon colour is white for the dark floating bar; on the (light in
      light theme) topbar background that would be invisible, so fall back to
      the themed text colour like the back button. */
-  .fullscreen-content--split .fs-actions-bar :deep(.p-button-rounded) {
+  .fullscreen-content--split .fs-actions-bar :deep(.p-button-rounded),
+  .fullscreen-content:not(.fullscreen-content--guest) .fs-actions-bar :deep(.p-button-rounded) {
     color: var(--p-text-color);
   }
-  .fullscreen-content--split .fs-actions-bar :deep(.fs-toolbar-btn--active) {
+  .fullscreen-content--split .fs-actions-bar :deep(.fs-toolbar-btn--active),
+  .fullscreen-content:not(.fullscreen-content--guest) .fs-actions-bar :deep(.fs-toolbar-btn--active) {
     background: var(--p-content-hover-background);
   }
 }
