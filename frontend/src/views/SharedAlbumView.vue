@@ -639,6 +639,7 @@ onUnmounted(() => {
       :prevPhoto="prevPhoto"
       :nextPhoto="nextPhoto"
       :canDelete="false"
+      :guest="true"
       :showDetailsButton="showInfoButton"
       :detailsActive="showInfo"
       :autoAdvanceMs="10000"
