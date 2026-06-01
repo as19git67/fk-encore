@@ -7,6 +7,7 @@ import { exiftool } from "exiftool-vendored";
 import { eq, and, or, sql, inArray, ilike, isNull, isNotNull, desc, gt } from "drizzle-orm";
 import { APIError } from "encore.dev/api";
 import { enqueuePhotoScan, enqueuePhotoScanBulkPerUser, DeferJobError } from "./scan-queue";
+import { notifyUserPhotosScanned } from "./scan-refresh-events";
 import { isUnderPressure } from "./event-loop-pressure";
 import { ENABLE_LOCAL_FACES, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
 export { ENABLE_LOCAL_FACES, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
@@ -5948,6 +5949,9 @@ export function scheduleRegroup(userId: number): Promise<void> {
           await new Promise((r) => setTimeout(r, REGROUP_DEBOUNCE_MS));
         }
       } while (groupingPending.has(userId));
+      // Groups may have changed — tell the user's open views to refresh so new
+      // review badges become tappable without a remount.
+      notifyUserPhotosScanned(userId);
     } finally {
       groupingRunning.delete(userId);
     }

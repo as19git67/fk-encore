@@ -1729,6 +1729,31 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
   }
   void loadData()
 })
+
+// New similar-photo groups and quality scores are produced asynchronously
+// after upload. The backend emits `photos/scan.updated` once those scans
+// settle; refresh the cached group list + album photos (so review badges
+// become tappable and "?%" quality fills in) and re-anchor the grid so new
+// badges appear — all without the user having to leave and re-enter the
+// album. Debounced because a bulk upload settles in bursts.
+let scanRefreshTimer: ReturnType<typeof setTimeout> | null = null
+useRealtimeEvent('photos', 'scan.updated', () => {
+  if (scanRefreshTimer) return
+  scanRefreshTimer = setTimeout(() => {
+    scanRefreshTimer = null
+    void (async () => {
+      await refreshGroupsAndPhotos()
+      // Surface freshly-grouped photos' badges in the grid, anchored on the
+      // current position so the view doesn't jump. Skip while a review or
+      // fullscreen overlay is open to avoid disturbing it.
+      if (viewMode.value === 'grid' && !activeGroup.value && !isFullscreen.value && !isMapFullscreen.value) {
+        const anchor = cursorPhoto.value?.id ?? galleryAnchorPhotoId.value ?? undefined
+        await galleryRef.value?.reload(anchor != null ? { aroundPhotoId: anchor } : undefined)
+      }
+    })()
+  }, 1000)
+})
+onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 </script>
 
 <template>
