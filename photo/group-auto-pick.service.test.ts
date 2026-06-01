@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { and, eq, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbExec, dbInsertReturning } from "../db/adapter";
@@ -1038,5 +1040,32 @@ describe("groups shrink below two visible members", () => {
     const after = await listReviewQueueLogic(owner);
     expect(after.groups.some((x) => x.id === g)).toBe(false);
     expect(after.total).toBe(0);
+  });
+
+  it("backfill migration 0094 resolves lingering shrunk groups but leaves healthy ones", async () => {
+    const owner = await makeUser("owner-backfill@test.com");
+    // Shrunk group: one member hidden via a direct curation row (no
+    // auto-resolve), so reviewed_at was never set — exactly the legacy state
+    // the backfill targets.
+    const a = await makePhoto(owner);
+    const b = await makePhoto(owner);
+    const shrunk = await makeGroup(owner, a, [a, b]);
+    await setCuration(owner, b, "hidden");
+    // Healthy group: two visible members — must stay reviewable.
+    const c = await makePhoto(owner);
+    const d = await makePhoto(owner);
+    const healthy = await makeGroup(owner, c, [c, d]);
+
+    // Run the real migration SQL (not a copy) against the current data.
+    const migrationSql = readFileSync(
+      join(process.cwd(), "db/migrations/postgres/0094_resolve_shrunk_photo_groups.sql"),
+      "utf8",
+    );
+    await db.execute(sql.raw(migrationSql));
+
+    const [shrunkRow] = await db.select().from(photoGroups).where(eq(photoGroups.id, shrunk));
+    const [healthyRow] = await db.select().from(photoGroups).where(eq(photoGroups.id, healthy));
+    expect(shrunkRow.reviewed_at).not.toBeNull();
+    expect(healthyRow.reviewed_at).toBeNull();
   });
 });

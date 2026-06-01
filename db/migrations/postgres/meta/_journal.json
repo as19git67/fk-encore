@@ -659,6 +659,13 @@
       "when": 1779001432000,
       "tag": "0093_album_scoped_comments",
       "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1779001433000,
+      "tag": "0094_resolve_shrunk_photo_groups",
+      "breakpoints": true
     }
   ]
 }
