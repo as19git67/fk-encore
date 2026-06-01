@@ -227,9 +227,10 @@ class ScanWorker {
       await markJobDone(job.id);
 
       // After face_detection completes, enqueue face_assignment for ALL users
-      // who have access to the photo (owner + shared album members).
+      // who have access to the photo (owner + shared album members). Inherit the
+      // detection job's priority so a fresh upload's fan-out stays high-priority.
       if (this.service === "face_detection") {
-        enqueueFaceAssignmentForAllUsers(job.photo_id).catch((err) =>
+        enqueueFaceAssignmentForAllUsers(job.photo_id, job.priority).catch((err) =>
           console.error(`[scan-worker] face_assignment enqueue error after face_detection job ${job.id}:`, err),
         );
       }

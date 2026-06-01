@@ -733,15 +733,19 @@ export async function getUsersWithPhotoAccess(photoId: number): Promise<number[]
 /**
  * Enqueue face_assignment for all users who have access to a photo.
  * Called after face_detection completes to ensure every user gets face assignments.
+ * `priority` inherits the originating face_detection job's priority so a fresh
+ * upload's follow-up fan-out jumps ahead of background work (e.g. shared-album
+ * members get face assignments at upload priority too), matching how the
+ * quality re-enqueue propagates priority.
  */
-export async function enqueueFaceAssignmentForAllUsers(photoId: number): Promise<void> {
+export async function enqueueFaceAssignmentForAllUsers(photoId: number, priority = 2): Promise<void> {
   if (!ENABLE_LOCAL_FACES) return;
   const userIds = await getUsersWithPhotoAccess(photoId);
   if (userIds.length === 0) return;
   // Single bulk insert instead of N sequential enqueuePhotoScan() calls.
   // For albums shared with many users this is the difference between
   // one DB round-trip and hundreds.
-  await enqueuePhotoScanBulkPerUser(photoId, userIds, "face_assignment");
+  await enqueuePhotoScanBulkPerUser(photoId, userIds, "face_assignment", false, priority);
   triggerWorkers();
 }
 
