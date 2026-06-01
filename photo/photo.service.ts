@@ -3293,8 +3293,11 @@ export async function updatePhotoCurationLogic(
     }
   }
 
-  // After hiding a photo, check if it belongs to an unreviewed group where all
-  // remaining members are now hidden. If so, mark the group as reviewed.
+  // After hiding a photo, check whether it belongs to an unreviewed group that
+  // now has fewer than two visible members. Such a group has nothing left to
+  // compare (you can't review a single photo against itself), so mark it
+  // reviewed — otherwise it would linger as unreviewed forever, with no badge
+  // to ever re-open it.
   if (status === "hidden") {
     const memberOfGroups = await dbAll<{ group_id: number }>(
       db.select({ group_id: photoGroupMembers.group_id })
@@ -3325,8 +3328,8 @@ export async function updatePhotoCurationLogic(
           ))
       );
 
-      if (visibleMembers.length === 0) {
-        // All members are hidden – mark group as reviewed
+      if (visibleMembers.length < 2) {
+        // Fewer than two members are still visible – nothing left to review.
         await dbExec(
           db.update(photoGroups)
             .set({ reviewed_at: new Date().toISOString() })

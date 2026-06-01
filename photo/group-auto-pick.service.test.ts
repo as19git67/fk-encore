@@ -22,6 +22,7 @@ import {
   recomputeAiPicksForAllUsers,
   recomputeAiPicksForGroups,
 } from "./group-auto-pick.service";
+import { updatePhotoCurationLogic } from "./photo.service";
 
 async function makeUser(email: string): Promise<number> {
   const row = await dbInsertReturning<{ id: number }>(
@@ -836,7 +837,10 @@ describe("listReviewQueueLogic — peer_curation aggregate (Phase 1)", () => {
     const peer = await makeUser("peer-private@test.com");
 
     const px = await makePhoto(owner, { details: { sharpness: 0.50 } });
-    await makeGroup(owner, px, [px]);
+    // Second visible member so the group still has >= 2 reviewable members
+    // and therefore appears in the queue (single-member groups are skipped).
+    const py = await makePhoto(owner, { details: { sharpness: 0.50 } });
+    await makeGroup(owner, px, [px, py]);
 
     // Peer's private album that the photo is also in, but not shared
     // with owner.
@@ -876,8 +880,10 @@ describe("listReviewQueueLogic — peer_curation aggregate (Phase 1)", () => {
     await shareAlbum(album, peer);
 
     const px = await makePhoto(owner, { details: { sharpness: 0.50 } });
+    // Second visible member so the group stays reviewable (>= 2 members).
+    const py = await makePhoto(owner, { details: { sharpness: 0.50 } });
     await addPhotoToAlbum(album, px);
-    await makeGroup(owner, px, [px]);
+    await makeGroup(owner, px, [px, py]);
 
     await setCuration(owner, px, "favorite"); // own → must be excluded
     await setCuration(peer, px, "hidden");    // peer → counts
@@ -997,5 +1003,40 @@ describe("acceptPeerConsensusLogic (Phase 2)", () => {
 
     const [grp] = await db.select().from(photoGroups).where(eq(photoGroups.id, g));
     expect(grp.reviewed_at).not.toBeNull();
+  });
+});
+
+describe("groups shrink below two visible members", () => {
+  it("auto-marks a group reviewed when hiding leaves only one visible member", async () => {
+    const owner = await makeUser("owner-shrink@test.com");
+    const a = await makePhoto(owner, { details: { sharpness: 0.5 } });
+    const b = await makePhoto(owner, { details: { sharpness: 0.5 } });
+    const g = await makeGroup(owner, a, [a, b]);
+
+    // Hide one member through the curation endpoint: only one visible member
+    // remains, so there is nothing left to compare and the group is resolved.
+    await updatePhotoCurationLogic(owner, b, "hidden");
+
+    const [grp] = await db.select().from(photoGroups).where(eq(photoGroups.id, g));
+    expect(grp.reviewed_at).not.toBeNull();
+  });
+
+  it("keeps the review queue free of groups with fewer than two visible members", async () => {
+    const owner = await makeUser("owner-queue-skip@test.com");
+    const a = await makePhoto(owner, { details: { sharpness: 0.5 } });
+    const b = await makePhoto(owner, { details: { sharpness: 0.5 } });
+    const g = await makeGroup(owner, a, [a, b]);
+
+    // Both visible → the group is queued for review.
+    const before = await listReviewQueueLogic(owner);
+    expect(before.groups.some((x) => x.id === g)).toBe(true);
+
+    // Hide one member directly (no auto-resolve): the queue must still skip it
+    // because only one visible member is left — covers legacy / hard-delete
+    // rows that were never explicitly marked reviewed.
+    await setCuration(owner, b, "hidden");
+    const after = await listReviewQueueLogic(owner);
+    expect(after.groups.some((x) => x.id === g)).toBe(false);
+    expect(after.total).toBe(0);
   });
 });
