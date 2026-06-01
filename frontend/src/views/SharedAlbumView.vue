@@ -36,11 +36,43 @@ const shareToken = computed(() => (route.params.token as string) ?? '')
 const mapEnabled = computed(() => album.value?.display_mode === 'map')
 const viewMode = ref<'grid' | 'map'>('grid')
 
+// Persist the visitor's raster/map choice per share token (works for
+// anonymous visitors too — no account needed), so reopening the link
+// restores the last view instead of always snapping to the album default.
+const VIEW_MODE_STORAGE_KEY = computed(() => `sharedAlbumViewMode:${shareToken.value}`)
+
+function loadPersistedViewMode(): 'grid' | 'map' | null {
+  if (!shareToken.value) return null
+  try {
+    const v = localStorage.getItem(VIEW_MODE_STORAGE_KEY.value)
+    return v === 'grid' || v === 'map' ? v : null
+  } catch {
+    return null
+  }
+}
+
+function persistViewMode(mode: 'grid' | 'map') {
+  if (!shareToken.value) return
+  try { localStorage.setItem(VIEW_MODE_STORAGE_KEY.value, mode) } catch { /* quota / private-mode — ignore */ }
+}
+
+let viewModeInitialized = false
+
 watch(album, (a) => {
   if (!a) return
-  // Map-enabled albums open in map view (the curated experience).
-  viewMode.value = a.display_mode === 'map' ? 'map' : 'grid'
+  if (viewModeInitialized) return
+  viewModeInitialized = true
+  // Map disabled → lock to grid. Map enabled → restore the visitor's last
+  // choice for this share, falling back to map view (the curated experience).
+  viewMode.value = a.display_mode === 'map'
+    ? (loadPersistedViewMode() ?? 'map')
+    : 'grid'
 }, { immediate: true })
+
+// Persist the choice per share token (map-enabled albums only).
+watch(viewMode, (mode) => {
+  if (mapEnabled.value) persistViewMode(mode)
+})
 
 /**
  * True for any map-view rendering. The map crowds the viewport, so

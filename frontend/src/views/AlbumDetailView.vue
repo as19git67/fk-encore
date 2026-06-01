@@ -130,6 +130,29 @@ function saveLastPhotoForAlbum(id: number, photoId: number) {
   localStorage.setItem(LAST_PHOTO_MAP_KEY, JSON.stringify(map))
 }
 
+// Per-album persisted view mode (raster vs map) for map-enabled albums, so
+// reopening an album restores the user's last chosen view instead of always
+// snapping back to the album default. Mirrors the last-photo persistence above.
+const VIEW_MODE_MAP_KEY = 'albums_view_mode_by_album'
+
+function loadViewModeMap(): Record<string, 'grid' | 'map'> {
+  try {
+    const raw = localStorage.getItem(VIEW_MODE_MAP_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch { return {} }
+}
+
+function loadViewModeForAlbum(id: number): 'grid' | 'map' | null {
+  const v = loadViewModeMap()[String(id)]
+  return v === 'grid' || v === 'map' ? v : null
+}
+
+function saveViewModeForAlbum(id: number, mode: 'grid' | 'map') {
+  const map = loadViewModeMap()
+  map[String(id)] = mode
+  try { localStorage.setItem(VIEW_MODE_MAP_KEY, JSON.stringify(map)) } catch { /* quota / private-mode — ignore */ }
+}
+
 const isFullscreen = ref(false)
 
 // ── VirtualGallery grid + cursor state (#304) ───────────────────────────────
@@ -654,7 +677,11 @@ watch(album, (a) => {
   if (!a) return
   if (viewModeInitialized) return
   viewModeInitialized = true
-  viewMode.value = a.display_mode === 'map' ? 'map' : 'grid'
+  // Map disabled → always grid. Map enabled → restore the user's last choice
+  // for this album, falling back to map view as the curated default.
+  viewMode.value = a.display_mode === 'map'
+    ? (loadViewModeForAlbum(a.id) ?? 'map')
+    : 'grid'
 }, { immediate: true })
 
 const viewModeOptions: Array<{ label: string; value: 'grid' | 'map'; icon: string }> = [
@@ -665,6 +692,8 @@ const viewModeOptions: Array<{ label: string; value: 'grid' | 'map'; icon: strin
 // Selection only applies to the grid view — leaving grid mode cancels it.
 watch(viewMode, (mode) => {
   if (mode !== 'grid' && selectMode.value) exitSelectMode()
+  // Persist the choice per album (map-enabled only) so reopening restores it.
+  if (mapEnabled.value && album.value) saveViewModeForAlbum(album.value.id, mode)
 })
 
 // ── Map fullscreen ───────────────────────────────────────────────────────────
