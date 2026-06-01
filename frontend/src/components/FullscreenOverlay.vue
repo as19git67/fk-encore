@@ -1048,16 +1048,6 @@ onUnmounted(() => {
 /* Landscape (size-independent): photo on the left, metadata scrolls
    independently on the right with a capped width. */
 @media (orientation: landscape) {
-  /* Normal (non-split) fullscreen: the opaque topbar spans the full width and
-     would otherwise cover the top of the photo, which in landscape fills the
-     full height (a landscape photo is height-constrained, pillarboxed at the
-     sides). Offset the image area below the topbar so the photo stays fully
-     visible — mirrors the split view's `padding-top: 2.75em`. `top` (rather
-     than padding) keeps the offset fixed when the wrapper is zoom-scaled. */
-  .fullscreen-content:not(.fullscreen-content--split) .fs-zoom-wrapper {
-    top: 2.75em;
-  }
-
   .fullscreen-content--split .fs-split {
     flex-direction: row;
     overflow: hidden;
@@ -1158,7 +1148,16 @@ onUnmounted(() => {
 /* ── Zoom wrapper ───────────────────────────────────────────────────────── */
 .fs-zoom-wrapper {
   position: absolute;
-  inset: 0;
+  /* Offset below the opaque topbar (height 2.75em) so it never covers the
+     photo — the wrapper otherwise spans the full viewport (inset: 0) and the
+     top of the image disappears behind the bar. Especially visible in
+     landscape where the photo fills the full height. Mirrors the split view's
+     `padding-top: 2.75em`; using `top` (not padding) keeps the offset fixed
+     while the wrapper is zoom-scaled. */
+  top: 2.75em;
+  right: 0;
+  bottom: 0;
+  left: 0;
   display: flex;
   align-items: center;
   justify-content: center;
