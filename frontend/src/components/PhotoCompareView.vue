@@ -843,6 +843,70 @@ function onPhotoMouseDblClick(photoId: number, evt: MouseEvent) {
   })
 }
 
+// ── Swipe-to-discard (fling a photo off-screen) ──────────────────────────
+// Touch alternative to the "ausblenden (1)/(2)" buttons: flick a photo away
+// to mark it the loser (same as chooseHide). Any direction works except the
+// one pointing at the partner photo — swiping the two together is ambiguous.
+const SWIPE_MIN_TRAVEL = 64 // px — a decisive fling, not a stray drag
+let swipeStartX = 0
+let swipeStartY = 0
+// The photo currently animating off-screen and the translate that flings it
+// out; drives `flingStyle` so the tile slides away before the pair advances.
+const flingOut = ref<{ id: number; tx: string; ty: string } | null>(null)
+
+function onPhotoTouchStart(_photoId: number, evt: TouchEvent) {
+  if (evt.touches.length !== 1) return
+  const t = evt.touches[0]!
+  swipeStartX = t.clientX
+  swipeStartY = t.clientY
+}
+
+// The one direction a fling must NOT go: toward the partner photo. Depends on
+// the layout — side-by-side in landscape, stacked in portrait — with
+// currentPair[0] = left/top and currentPair[1] = right/bottom.
+function towardPartnerDir(photoId: number): 'left' | 'right' | 'up' | 'down' | null {
+  const pair = currentPair.value
+  if (!pair) return null
+  const idx = pair.indexOf(photoId)
+  if (idx < 0) return null
+  if (isPortrait.value) return idx === 0 ? 'down' : 'up'
+  return idx === 0 ? 'right' : 'left'
+}
+
+// Returns true when the gesture was a valid discard fling (and kicks off the
+// off-screen animation + chooseHide); false otherwise so the caller can fall
+// back to tap/double-tap handling.
+function tryFlingHide(photoId: number, dx: number, dy: number): boolean {
+  if (flingOut.value) return false // one tile is already animating out
+  if (isZoomed(photoId)) return false // zoomed in: leave the gesture to zoom
+  const absX = Math.abs(dx)
+  const absY = Math.abs(dy)
+  if (Math.max(absX, absY) < SWIPE_MIN_TRAVEL) return false
+  const dir: 'left' | 'right' | 'up' | 'down' =
+    absX >= absY ? (dx < 0 ? 'left' : 'right') : dy < 0 ? 'up' : 'down'
+  if (dir === towardPartnerDir(photoId)) return false // never toward the partner
+  flingOut.value = {
+    id: photoId,
+    tx: dir === 'left' ? '-110vw' : dir === 'right' ? '110vw' : '0',
+    ty: dir === 'up' ? '-110vh' : dir === 'down' ? '110vh' : '0',
+  }
+  window.setTimeout(() => {
+    flingOut.value = null
+    chooseHide(photoId)
+  }, 200)
+  return true
+}
+
+function flingStyle(photoId: number): Record<string, string> {
+  const f = flingOut.value
+  if (!f || f.id !== photoId) return {}
+  return {
+    transform: `translate(${f.tx}, ${f.ty})`,
+    opacity: '0',
+    transition: 'transform 0.2s ease-in, opacity 0.2s ease-in',
+  }
+}
+
 // Touch double-tap detection mirrors the FullscreenOverlay pattern: two
 // taps within 300ms and 40px count as a double-tap.
 let lastTapPhotoId: number | null = null
@@ -852,6 +916,11 @@ let lastTapY = 0
 function onPhotoTouchEnd(photoId: number, evt: TouchEvent) {
   const t = evt.changedTouches[0]
   if (!t) return
+  // A discard fling takes precedence over tap/double-tap zoom.
+  if (tryFlingHide(photoId, t.clientX - swipeStartX, t.clientY - swipeStartY)) {
+    lastTapTime = 0 // a fling is not the first half of a double-tap
+    return
+  }
   const now = performance.now()
   if (
     lastTapPhotoId === photoId &&
@@ -1013,6 +1082,11 @@ function compareTileSrc(photo: Photo, width?: number): string {
                       <td class="help-desc">Das rechte Foto erhält einen schlechteren Score und wird als Kandidat zum Ausblenden markiert.</td>
                     </tr>
                     <tr>
+                      <td>Wischen</td>
+                      <td><strong>Foto wegwischen = ausblenden</strong></td>
+                      <td class="help-desc">Auf dem Touchscreen ein Foto vom anderen weg aus dem Bild wischen (alle Richtungen außer zum Partnerfoto hin) – blendet es aus wie der jeweilige Ausblenden-Button.</td>
+                    </tr>
+                    <tr>
                       <td><kbd>U</kbd> oder <kbd>Leertaste</kbd></td>
                       <td><strong>Unentschieden</strong></td>
                       <td class="help-desc">Beide Fotos sind gleichwertig. Kein Score ändert sich, das Paar gilt als verglichen.</td>
@@ -1071,7 +1145,9 @@ function compareTileSrc(photo: Photo, width?: number): string {
               <div
                 class="side-by-side-image"
                 :ref="(el) => recordViewport(photoId, el as HTMLElement | null)"
+                :style="flingStyle(photoId)"
                 @dblclick="(evt: MouseEvent) => onPhotoMouseDblClick(photoId, evt)"
+                @touchstart="(evt: TouchEvent) => onPhotoTouchStart(photoId, evt)"
                 @touchend="(evt: TouchEvent) => onPhotoTouchEnd(photoId, evt)"
               >
                 <div class="compare-zoom-wrapper" :style="zoomStyle(photoId)">
