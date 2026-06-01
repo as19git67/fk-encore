@@ -39,6 +39,14 @@ const isVeryNarrow = computed(() => windowWidth.value < 500)
 /** True when height > width (portrait orientation — stack photos top/bottom). */
 const isPortrait = computed(() => windowHeight.value > windowWidth.value)
 
+// On touch devices the first tap on a button with a hover tooltip only shows
+// the tooltip (hover emulation) and a second tap is needed to actually click.
+// Disable the toolbar tooltips on no-hover / coarse-pointer devices; desktop
+// keeps them on real hover.
+const hoverlessMql = window.matchMedia('(hover: none), (pointer: coarse)')
+const isTouch = ref(hoverlessMql.matches)
+function onHoverCapabilityChange(e: MediaQueryListEvent) { isTouch.value = e.matches }
+
 const props = defineProps<{
   group: PhotoGroup
   allPhotos: Photo[]
@@ -963,6 +971,7 @@ onMounted(() => {
   document.body.style.overflow = 'hidden'
   window.addEventListener('keydown', handleKeydown)
   window.addEventListener('resize', onResize)
+  hoverlessMql.addEventListener('change', onHoverCapabilityChange)
   loadMissingMembers().then(() => initScores())
 })
 
@@ -970,6 +979,7 @@ onUnmounted(() => {
   document.body.style.overflow = ''
   window.removeEventListener('keydown', handleKeydown)
   window.removeEventListener('resize', onResize)
+  hoverlessMql.removeEventListener('change', onHoverCapabilityChange)
 })
 
 watch(() => props.group.id, () => {
@@ -1011,7 +1021,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
             <Button
               icon="pi pi-eye-slash"
               :label="isVeryNarrow ? undefined : isNarrow ? '1' : 'ausblenden (1)'"
-              v-tooltip.bottom="isVeryNarrow ? 'Linkes ausblenden (1)' : undefined"
+              v-tooltip.bottom="{ value: isVeryNarrow ? 'Linkes ausblenden (1)' : undefined, disabled: isTouch }"
               severity="warn"
               size="small"
               @click="chooseHide(currentPair[0])"
@@ -1021,7 +1031,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
             <Button
               icon="pi pi-equals"
               :label="isVeryNarrow ? undefined : isNarrow ? 'U' : 'Unentschieden (U, Leertaste)'"
-              v-tooltip.bottom="isVeryNarrow ? 'Unentschieden (U)' : undefined"
+              v-tooltip.bottom="{ value: isVeryNarrow ? 'Unentschieden (U)' : undefined, disabled: isTouch }"
               severity="info"
               size="small"
               @click="chooseDraw"
@@ -1029,7 +1039,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
             <Button
               icon="pi pi-forward"
               :label="isVeryNarrow ? undefined : isNarrow ? 'S' : 'Überspringen (S)'"
-              v-tooltip.bottom="isVeryNarrow ? 'Überspringen (S)' : undefined"
+              v-tooltip.bottom="{ value: isVeryNarrow ? 'Überspringen (S)' : undefined, disabled: isTouch }"
               severity="info"
               size="small"
               @click="skipPair"
@@ -1039,7 +1049,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
               :label="isVeryNarrow ? undefined : isNarrow ? 'KI' : 'KI-Vorauswahl'"
               severity="warn"
               size="small"
-              v-tooltip.bottom="'Vergleich überspringen und Fotos nach KI-Qualitätsbewertung vorauswählen'"
+              v-tooltip.bottom="{ value: 'Vergleich überspringen und Fotos nach KI-Qualitätsbewertung vorauswählen', disabled: isTouch }"
               @click="applyAiPreselection"
             />
             <Button
@@ -1049,11 +1059,12 @@ function compareTileSrc(photo: Photo, width?: number): string {
               :outlined="!syncZoomEnabled"
               size="small"
               :aria-pressed="syncZoomEnabled"
-              v-tooltip.bottom="
-                syncZoomEnabled
+              v-tooltip.bottom="{
+                value: syncZoomEnabled
                   ? 'Doppelklick zoomt beide Fotos auf das Gesicht (gleiche Größe)'
-                  : 'Doppelklick zoomt nur das angeklickte Foto — anklicken zum Synchronisieren'
-              "
+                  : 'Doppelklick zoomt nur das angeklickte Foto — anklicken zum Synchronisieren',
+                disabled: isTouch,
+              }"
               @click="onSyncToggleClick"
             />
             <Button
@@ -1115,7 +1126,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
             <Button
               icon="pi pi-eye-slash"
               :label="isVeryNarrow ? undefined : isNarrow ? '2' : 'ausblenden (2)'"
-              v-tooltip.bottom="isVeryNarrow ? 'Rechtes ausblenden (2)' : undefined"
+              v-tooltip.bottom="{ value: isVeryNarrow ? 'Rechtes ausblenden (2)' : undefined, disabled: isTouch }"
               severity="warn"
               size="small"
               @click="chooseHide(currentPair[1])"
@@ -1126,7 +1137,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
               rounded
               severity="secondary"
               size="small"
-              v-tooltip.bottom="'Schließen'"
+              v-tooltip.bottom="{ value: 'Schließen', disabled: isTouch }"
               @click="$emit('close')"
               aria-label="Schließen"
             />
@@ -1211,7 +1222,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
               v-if="hasNextPair"
               icon="pi pi-arrow-left"
               :label="isVeryNarrow ? undefined : isNarrow ? 'Vergleichen' : 'Weiter vergleichen'"
-              v-tooltip.bottom="isVeryNarrow ? 'Weiter vergleichen' : undefined"
+              v-tooltip.bottom="{ value: isVeryNarrow ? 'Weiter vergleichen' : undefined, disabled: isTouch }"
               text
               size="small"
               @click="goBackToCompare"
@@ -1236,7 +1247,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
               v-if="hasAiPick && !reviewDecided"
               :label="isVeryNarrow ? undefined : isNarrow ? 'KI' : 'KI-Vorschlag übernehmen'"
               icon="pi pi-sparkles"
-              v-tooltip.bottom="isVeryNarrow ? 'KI-Vorschlag übernehmen' : 'Behält die KI-Auswahl und blendet die übrigen aus'"
+              v-tooltip.bottom="{ value: isVeryNarrow ? 'KI-Vorschlag übernehmen' : 'Behält die KI-Auswahl und blendet die übrigen aus', disabled: isTouch }"
               severity="success"
               outlined
               size="small"
@@ -1248,7 +1259,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
                 <Button
                   :label="isVeryNarrow ? undefined : isNarrow ? 'OK' : 'Vorschlag übernehmen'"
                   icon="pi pi-check"
-                  v-tooltip.bottom="isVeryNarrow ? 'Vorschlag übernehmen' : undefined"
+                  v-tooltip.bottom="{ value: isVeryNarrow ? 'Vorschlag übernehmen' : undefined, disabled: isTouch }"
                   severity="warn"
                   size="small"
                   @click="applySuggestions"
@@ -1256,7 +1267,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
                 <Button
                   :label="isVeryNarrow ? undefined : isNarrow ? 'Nein' : 'Vorschlag ablehnen'"
                   icon="pi pi-times"
-                  v-tooltip.bottom="isVeryNarrow ? 'Vorschlag ablehnen' : undefined"
+                  v-tooltip.bottom="{ value: isVeryNarrow ? 'Vorschlag ablehnen' : undefined, disabled: isTouch }"
                   severity="secondary"
                   outlined
                   size="small"
@@ -1268,7 +1279,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
                 <Button
                   :label="isVeryNarrow ? undefined : 'Fertig'"
                   icon="pi pi-check"
-                  v-tooltip.bottom="isVeryNarrow ? 'Fertig' : undefined"
+                  v-tooltip.bottom="{ value: isVeryNarrow ? 'Fertig' : undefined, disabled: isTouch }"
                   @click="handleDone"
                   severity="success"
                   size="small"
@@ -1278,7 +1289,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
                   :label="isVeryNarrow ? undefined : isNarrow ? 'Weiter' : 'Fertig + Weiter'"
                   icon="pi pi-arrow-right"
                   iconPos="right"
-                  v-tooltip.bottom="isVeryNarrow ? 'Fertig + Weiter' : undefined"
+                  v-tooltip.bottom="{ value: isVeryNarrow ? 'Fertig + Weiter' : undefined, disabled: isTouch }"
                   @click="handleDoneAndNext"
                   severity="success"
                   outlined
@@ -1290,7 +1301,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
               <Button
                 :label="isVeryNarrow ? undefined : 'Fertig'"
                 icon="pi pi-check"
-                v-tooltip.bottom="isVeryNarrow ? 'Fertig' : undefined"
+                v-tooltip.bottom="{ value: isVeryNarrow ? 'Fertig' : undefined, disabled: isTouch }"
                 @click="handleDone"
                 severity="success"
                 size="small"
@@ -1300,14 +1311,14 @@ function compareTileSrc(photo: Photo, width?: number): string {
                 :label="isVeryNarrow ? undefined : isNarrow ? 'Weiter' : 'Fertig + Weiter'"
                 icon="pi pi-arrow-right"
                 iconPos="right"
-                v-tooltip.bottom="isVeryNarrow ? 'Fertig + Weiter' : undefined"
+                v-tooltip.bottom="{ value: isVeryNarrow ? 'Fertig + Weiter' : undefined, disabled: isTouch }"
                 @click="handleDoneAndNext"
                 severity="success"
                 outlined
                 size="small"
               />
             </template>
-            <Button icon="pi pi-times" @click="$emit('close')" text rounded severity="secondary" v-tooltip.bottom="'Schließen'" />
+            <Button icon="pi pi-times" @click="$emit('close')" text rounded severity="secondary" v-tooltip.bottom="{ value: 'Schließen', disabled: isTouch }" />
           </div>
         </div>
 
