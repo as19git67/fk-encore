@@ -870,6 +870,22 @@ async function loadPersons() {
   try { await fetchPersons() } catch { /* ignore */ }
 }
 
+// Lightweight refresh of the group list and album photos (incl. fresh quality
+// scores) without the full-screen loading state or the scroll-anchor reset that
+// loadData() does. Used when a grid stack badge is tapped before the
+// post-upload scans (grouping, quality) have streamed back into our cached
+// data — so the first tap works and the compare opens with real scores.
+async function refreshGroupsAndPhotos() {
+  try {
+    const [albumRes, groupsRes] = await Promise.all([
+      getAlbum(albumId.value),
+      listPhotoGroups().catch(() => ({ groups: [] })),
+    ])
+    album.value = albumRes
+    photoGroupsList.value = groupsRes.groups
+  } catch { /* keep current data on failure */ }
+}
+
 async function loadSidebarData(photoId: number) {
   loadingFaces.value = true
   loadingLandmarks.value = true
@@ -1453,10 +1469,18 @@ function handleGridPhotoClick(entry: GalleryGridEntry) {
   if (window.innerWidth <= 768) void openGridFullscreenAt(idx)
 }
 
-function handleGridStackClick(entry: GalleryGridEntry) {
+async function handleGridStackClick(entry: GalleryGridEntry) {
   if (!entry.group) return
-  const groups = photoGroupsList.value
-  const found = groups.find((g) => g.id === entry.group!.id) ?? null
+  let found = photoGroupsList.value.find((g) => g.id === entry.group!.id) ?? null
+  if (!found) {
+    // The badge can appear (the backend already grouped the upload) before our
+    // cached group list caught up — without this the first tap was a silent
+    // no-op until the album was re-entered. Refresh once (also picks up fresh
+    // quality scores so the compare shows real %, not "?%"), then retry.
+    await refreshGroupsAndPhotos()
+    found = photoGroupsList.value.find((g) => g.id === entry.group!.id) ?? null
+  }
+  if (!found) return
   preReviewPhotoId.value = cursorPhoto.value?.id ?? null
   activeGroup.value = found
 }
@@ -1465,10 +1489,15 @@ function handleGridStackClick(entry: GalleryGridEntry) {
  *  GalleryView's flow, but anchors the post-review restore on the
  *  fullscreen photo so closing the review puts the user back where they
  *  came from (#374). */
-function onFullscreenOpenGroupReview() {
+async function onFullscreenOpenGroupReview() {
   const g = cursorGroup.value
   if (!g) return
-  const found = photoGroupsList.value.find((row) => row.id === g.id) ?? null
+  let found = photoGroupsList.value.find((row) => row.id === g.id) ?? null
+  if (!found) {
+    // Same staleness guard as handleGridStackClick (post-upload race).
+    await refreshGroupsAndPhotos()
+    found = photoGroupsList.value.find((row) => row.id === g.id) ?? null
+  }
   if (!found) return
   preReviewPhotoId.value = cursorPhoto.value?.id ?? null
   closeGridFullscreen()
