@@ -64,9 +64,10 @@ const emit = defineEmits<{
   next: [groupId: number]
 }>()
 
-// Members that are hidden (curation_status='hidden') are filtered out of
-// props.allPhotos when "Ausgeblendete" is off. Fetch any missing members
-// directly so the compare view always sees the full group.
+// Members not in props.allPhotos (e.g. excluded by the album's active filter)
+// are fetched directly so the compare view sees every still-visible member.
+// Photos that were ALREADY hidden before opening are deliberately left out —
+// there is nothing to re-decide about a photo the user has already deselected.
 const fetchedMembers = ref(new Map<number, Photo>())
 
 async function loadMissingMembers() {
@@ -77,18 +78,24 @@ async function loadMissingMembers() {
   try {
     const res = await getPhotoDetailsBatch(missing)
     const next = new Map(fetchedMembers.value)
-    for (const p of res.photos) next.set(p.id, p)
+    // Skip members that were already hidden — don't resurface them.
+    for (const p of res.photos) {
+      if (p.curation_status === 'hidden') continue
+      next.set(p.id, p)
+    }
     fetchedMembers.value = next
     syncCuration()
   } catch (err) {
-    console.warn('[PhotoCompareView] failed to load hidden group members', err)
+    console.warn('[PhotoCompareView] failed to load missing group members', err)
   }
 }
 
 const groupPhotos = computed(() => {
   return props.group.photo_ids
     .map((id) => props.allPhotos.find((p) => p.id === id) ?? fetchedMembers.value.get(id))
-    .filter((p): p is Photo => !!p)
+    // Exclude members that were already hidden when the review opened (an
+    // in-session hide keeps its tile via localCuration, so undo still works).
+    .filter((p): p is Photo => !!p && p.curation_status !== 'hidden')
 })
 
 // ── Local curation state ──

@@ -412,6 +412,10 @@ async function loadGroupInfoForPhotos(
   if (chosen.length === 0) return out;
 
   const groupIds = Array.from(new Set(chosen.map((c) => c.group_id)));
+  // Count only members that are still visible for this user. A member hidden
+  // via photo_curation no longer needs reviewing, so it must not inflate the
+  // badge count; and a group with fewer than two visible members has nothing
+  // left to compare and gets no badge at all (the `< 2` skip below).
   const counts = await dbAll<{ group_id: number; member_count: number }>(
     db
       .select({
@@ -419,17 +423,34 @@ async function loadGroupInfoForPhotos(
         member_count: sql<number>`COUNT(*)::int`,
       })
       .from(photoGroupMembers)
-      .where(inArray(photoGroupMembers.group_id, groupIds))
+      .leftJoin(
+        photoCuration,
+        and(
+          eq(photoCuration.photo_id, photoGroupMembers.photo_id),
+          eq(photoCuration.user_id, userId),
+        ),
+      )
+      .where(
+        and(
+          inArray(photoGroupMembers.group_id, groupIds),
+          // NULL (no curation row) counts as visible.
+          sql`${photoCuration.status} IS DISTINCT FROM 'hidden'`,
+        ),
+      )
       .groupBy(photoGroupMembers.group_id),
   );
   const memberCountByGroupId = new Map<number, number>();
   for (const c of counts) memberCountByGroupId.set(c.group_id, c.member_count);
 
   for (const c of chosen) {
+    const visibleMembers = memberCountByGroupId.get(c.group_id) ?? 0;
+    // Once all but one member is hidden there is nothing left to compare, so
+    // suppress the group badge entirely.
+    if (visibleMembers < 2) continue;
     const entry: GalleryGridGroup = {
       id: c.group_id,
       is_cover: c.is_cover,
-      member_count: memberCountByGroupId.get(c.group_id) ?? 0,
+      member_count: visibleMembers,
       reviewed: c.reviewed,
     };
     if (c.ai_picked_photo_ids && c.ai_picked_photo_ids.length > 0) {

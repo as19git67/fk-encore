@@ -426,15 +426,23 @@ async function performRemoveFromAlbum(ids: number[]) {
 
 const albumPhotoIds = computed(() => new Set(rawAlbumPhotos.value.map(p => p.id)))
 
-// Groups scoped to this album: only include groups where at least 2 photos
-// are in the album. Trim each group's member list to the album members and
-// choose an album-internal cover photo.
+// Album photos that are still visible (not hidden via curation). A group whose
+// members have mostly been hidden is no longer reviewable, so groups are scoped
+// to these rather than to every album photo.
+const visibleAlbumPhotoIds = computed(
+  () => new Set(rawAlbumPhotos.value.filter(p => p.curation_status !== 'hidden').map(p => p.id)),
+)
+
+// Groups scoped to this album: only include groups where at least 2 *visible*
+// (non-hidden) photos are in the album — once a near-duplicate has been
+// deselected there is nothing left to compare. Trim each group's member list to
+// the visible album members and choose a visible cover photo.
 const albumPhotoGroups = computed<PhotoGroup[]>(() => {
   const result: PhotoGroup[] = []
   for (const g of photoGroupsList.value) {
-    const membersInAlbum = g.photo_ids.filter(id => albumPhotoIds.value.has(id))
+    const membersInAlbum = g.photo_ids.filter(id => visibleAlbumPhotoIds.value.has(id))
     if (membersInAlbum.length < 2) continue
-    const coverInAlbum = g.cover_photo_id && albumPhotoIds.value.has(g.cover_photo_id)
+    const coverInAlbum = g.cover_photo_id && visibleAlbumPhotoIds.value.has(g.cover_photo_id)
       ? g.cover_photo_id
       : membersInAlbum[0]
     result.push({
