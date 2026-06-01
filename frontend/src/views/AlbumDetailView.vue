@@ -1508,22 +1508,13 @@ function selectGridIndex(idx: number) {
 
 function selectAfterGroup(group: PhotoGroup | null) {
   if (!galleryRef.value) return
-  // Prefer the photo the user had selected before entering the review: if it
-  // survived (wasn't hidden) restore it so the grid position is kept (#374).
-  const beforeId = preReviewPhotoId.value
+  // Focus a photo that is still in the grid after the review hid the rejected
+  // ones. Anchoring on a now-hidden photo made the grid briefly land on it and
+  // then snap to the first album image once the hidden ones were removed.
+  const anchorId = postReviewAnchorId(group)
   preReviewPhotoId.value = null
-  if (beforeId !== null) {
-    const idx = galleryRef.value.findLoadedIndexById(beforeId)
-    if (idx !== null) {
-      selectGridIndex(idx)
-      return
-    }
-  }
-  // Original photo was hidden during the review (or none was selected):
-  // fall back to the group's kept cover photo, then to the first photo.
-  const coverId = group?.cover_photo_id
-  if (coverId) {
-    const idx = galleryRef.value.findLoadedIndexById(coverId)
+  if (anchorId !== null) {
+    const idx = galleryRef.value.findLoadedIndexById(anchorId)
     if (idx !== null) {
       selectGridIndex(idx)
       return
@@ -1532,11 +1523,37 @@ function selectAfterGroup(group: PhotoGroup | null) {
   selectGridIndex(0)
 }
 
+// True when `id` is still present in the (filter-aware) album photo list — i.e.
+// it survived the review and is safe to focus.
+function isAlbumPhotoVisible(id: number | null | undefined): boolean {
+  return id != null && albumPhotos.value.some((p) => p.id === id)
+}
+
+// Pick a still-visible photo to focus after a review. Preference order:
+// the user's pre-review photo if it wasn't hidden, then the group's kept AI
+// pick, then any surviving group member, then its cover. Returns null when
+// nothing from the group survived so callers fall back to the first photo.
+function postReviewAnchorId(group: PhotoGroup | null): number | null {
+  if (isAlbumPhotoVisible(preReviewPhotoId.value)) return preReviewPhotoId.value
+  for (const id of group?.ai_picked_photo_ids ?? []) {
+    if (isAlbumPhotoVisible(id)) return id
+  }
+  for (const id of group?.photo_ids ?? []) {
+    if (isAlbumPhotoVisible(id)) return id
+  }
+  if (isAlbumPhotoVisible(group?.cover_photo_id ?? null)) return group!.cover_photo_id!
+  return null
+}
+
 async function handleGroupClose() {
   const group = activeGroup.value
   activeGroup.value = null
   await loadData()
-  await galleryRef.value?.reload()
+  // Reload the grid centred on a still-visible photo so the just-hidden ones
+  // being removed can't leave the anchor pointing at nothing (which snapped
+  // the grid to the first image).
+  const anchorId = postReviewAnchorId(group)
+  await galleryRef.value?.reload(anchorId !== null ? { aroundPhotoId: anchorId } : undefined)
   selectAfterGroup(group)
 }
 
@@ -1571,7 +1588,10 @@ async function handleGroupNext(reviewedGroupId: number) {
   galleryRef.value?.markGroupReviewed(reviewedGroupId)
   const candidateId = albumPhotoGroups.value.find(g => !g.reviewed_at && g.id !== reviewedGroupId)?.id
   await loadData()
-  await galleryRef.value?.reload()
+  // Anchor on a still-visible photo of the just-reviewed group (see
+  // handleGroupClose); harmless when we immediately open the next group.
+  const anchorId = postReviewAnchorId(activeGroup.value)
+  await galleryRef.value?.reload(anchorId !== null ? { aroundPhotoId: anchorId } : undefined)
   if (candidateId !== undefined) {
     const refreshed = albumPhotoGroups.value.find(g => g.id === candidateId && !g.reviewed_at)
     activeGroup.value = refreshed ?? null
