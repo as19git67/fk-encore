@@ -378,13 +378,11 @@ describe("suggestion compute — pure math", () => {
   });
 
   describe("computeSuggestionCrops", () => {
-    it("returns centred crops for every fitting ratio when no hull", () => {
+    it("returns no crops when there is no face hull to align to", () => {
+      // Crops are only suggested when a subject (face) hull exists — a blind
+      // centred crop has no compositional value.
       const crops = computeSuggestionCrops(null, 4000, 3000); // 4:3 image
-      // 1:1 fits, 4:3 fits, 16:9 fits, 4:5 fits (taller-than-image collapses
-      // to a narrower-than-image crop), etc.
-      expect(crops["1:1"]).toBeTruthy();
-      expect(crops["4:3"]).toBeTruthy();
-      expect(crops["16:9"]).toBeTruthy();
+      expect(Object.keys(crops)).toHaveLength(0);
     });
     it("produces crops for ratios that fit the hull", () => {
       // 4000×3000 image (4:3), small face hull in the centre.
@@ -531,14 +529,12 @@ describe("computePhotoTransformSuggestions", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("falls back to a centred crop when no faces or landmarks exist", async () => {
+  it("produces no crop suggestions when no faces or landmarks exist", async () => {
     const payload = await computePhotoTransformSuggestions(photoId);
+    // The payload is still stored (exposure/contrast are face-independent),
+    // but crops are only suggested when there is a face to align to.
     expect(payload).not.toBeNull();
-    // For a 2:1 landscape image, a 1:1 centred crop should be at x ≈ 0.25.
-    const oneByOne = payload!.crops["1:1"];
-    expect(oneByOne).toBeTruthy();
-    expect(oneByOne!.x).toBeCloseTo(0.25, 2);
-    expect(oneByOne!.y).toBeCloseTo(0, 2);
+    expect(Object.keys(payload!.crops)).toHaveLength(0);
   });
 });
 
