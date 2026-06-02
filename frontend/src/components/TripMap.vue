@@ -13,10 +13,11 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  /** Day-scoped photos for fullscreen viewing. The user can only step
-   *  through photos of the currently selected day. `day` is the day key
-   *  the scope was built from. */
-  'open-fullscreen': [dayPhotos: Photo[], startIndex: number, day: string]
+  /** Photos for fullscreen viewing — the entire trip in chronological
+   *  order (across all days and stops) so paging and the idle slideshow
+   *  run continuously without stopping at a day/stop boundary. `day` is
+   *  the day key of the stop the overlay was opened from. */
+  'open-fullscreen': [photos: Photo[], startIndex: number, day: string]
   /** Fired when the user actively selects a stop (click or keyboard).
    *  Carries the cover photo id of the chosen stop so the parent can
    *  keep its grid selection in sync when the user flips back to gallery
@@ -391,31 +392,36 @@ function handleOverviewPinClick(c: OverviewCluster) {
 function handleStopPinClick(stop: Stop) {
   applySelection(stop.day, stop.id)
   nextTick(() => scrollItemIntoCenter(stop.id))
-  // Open fullscreen with the entire selected day's photos so the user
-  // can browse within the day. If we have a pre-selected photo (deep
-  // link, last-viewed restore) AND this stop contains it, start at
-  // THAT photo instead of the stop's first. Then consume the hint —
-  // subsequent clicks default to first-photo behaviour again.
-  const dayPhotos = dayPhotosFor(stop.day)
+  // Open fullscreen with the entire trip's photos so paging and the idle
+  // slideshow run continuously across day/stop boundaries. If we have a
+  // pre-selected photo (deep link, last-viewed restore) AND this stop
+  // contains it, start at THAT photo instead of the stop's first. Then
+  // consume the hint — subsequent clicks default to first-photo behaviour.
+  const allPhotos = allStopPhotos.value
   const startId = activePhotoId.value != null
       && stop.photos.some(p => p.id === activePhotoId.value)
     ? activePhotoId.value
     : stop.photos[0]?.id
   const startIndex = startId != null
-    ? Math.max(0, dayPhotos.findIndex(p => p.id === startId))
+    ? Math.max(0, allPhotos.findIndex(p => p.id === startId))
     : 0
   activePhotoId.value = null
-  emit('open-fullscreen', dayPhotos, startIndex, stop.day)
+  emit('open-fullscreen', allPhotos, startIndex, stop.day)
 }
 
-function dayPhotosFor(day: string): Photo[] {
-  const dayStops = stopsByDay.value.get(day) ?? []
+/**
+ * Every photo across the whole trip in the timeline's chronological order
+ * (days ascending, stops within a day by time, photos within a stop by
+ * time). Used as the fullscreen scope so the slideshow flows through the
+ * entire trip rather than stopping at the end of a single day.
+ */
+const allStopPhotos = computed<Photo[]>(() => {
   const out: Photo[] = []
-  for (const s of dayStops) {
+  for (const s of stops.value) {
     for (const p of s.photos) out.push(p)
   }
   return out
-}
+})
 
 interface DrawablePin {
   lat: number
@@ -754,10 +760,10 @@ function selectStopByPhotoId(photoId: number): boolean {
 }
 
 /**
- * Select the stop containing the photo AND open the day-scoped
- * fullscreen overlay at that photo. Used for notification deep-links so
- * the visitor lands directly on the commented photo rather than only on
- * its map stop.
+ * Select the stop containing the photo AND open the fullscreen overlay at
+ * that photo (scoped to the whole trip, like a pin click). Used for
+ * notification deep-links so the visitor lands directly on the commented
+ * photo rather than only on its map stop.
  */
 function openFullscreenByPhotoId(photoId: number): boolean {
   const stop = stops.value.find((s) => s.photos.some((p) => p.id === photoId))
@@ -765,10 +771,10 @@ function openFullscreenByPhotoId(photoId: number): boolean {
   activePhotoId.value = photoId
   applySelection(stop.day, stop.id, { silent: true })
   nextTick(() => scrollItemIntoCenter(stop.id))
-  const dayPhotos = dayPhotosFor(stop.day)
-  const startIndex = Math.max(0, dayPhotos.findIndex((p) => p.id === photoId))
+  const allPhotos = allStopPhotos.value
+  const startIndex = Math.max(0, allPhotos.findIndex((p) => p.id === photoId))
   activePhotoId.value = null
-  emit('open-fullscreen', dayPhotos, startIndex, stop.day)
+  emit('open-fullscreen', allPhotos, startIndex, stop.day)
   return true
 }
 
