@@ -24,6 +24,12 @@ const emit = defineEmits<{
   'stop-selected': [coverPhotoId: number]
 }>()
 
+// Cluster radius in meters, derived from the map's live zoom (see
+// updateClusterRadius). Drives usePhotoStops so timeline stops and day-mode map
+// pins share one clustering pass and stay 1:1 in sync at every zoom level.
+// Null until the map has a view (then the day-span heuristic is used).
+const clusterRadiusMeters = ref<number | null>(null)
+
 const {
   stops,
   stopsByDay,
@@ -33,7 +39,7 @@ const {
   bounds,
   overviewClusters,
   boundsForDay,
-} = usePhotoStops(toRef(props, 'photos'))
+} = usePhotoStops(toRef(props, 'photos'), clusterRadiusMeters)
 
 const mapContainer = ref<HTMLElement | null>(null)
 const timelineContainer = ref<HTMLElement | null>(null)
@@ -50,6 +56,10 @@ const selectedDay = ref<DaySelection>(OVERVIEW)
 /** Highlighted stop within the selected day. Only meaningful when a
  *  specific day is selected; null in overview mode. */
 const selectedStopId = ref<number | null>(null)
+/** Cover-photo id of the selected stop. Stop ids are reassigned whenever the
+ *  zoom-driven clustering recomputes, so we re-resolve the selection by this
+ *  stable photo id instead of losing it on every zoom (see watch on `stops`). */
+const selectedAnchorPhotoId = ref<number | null>(null)
 /** A specific pre-selected photo (deep link, last-viewed restore).
  *  When set, clicking the pin of the containing stop opens fullscreen
  *  at THIS photo instead of the stop's first photo. Cleared as soon
@@ -112,6 +122,11 @@ function applySelection(
   }
   selectedDay.value = day
   selectedStopId.value = stopId
+  // Remember the stop's cover photo so the selection survives a zoom-driven
+  // re-clustering (which reassigns stop ids).
+  selectedAnchorPhotoId.value = stopId != null
+    ? (stops.value.find(s => s.id === stopId)?.coverPhoto.id ?? null)
+    : null
   renderContent()
   if (dayChanged) fitMapToSelection()
   if (!opts.silent && stopId != null) {
@@ -289,120 +304,16 @@ function handleStopTap(stop: Stop) {
 }
 
 /**
- * At a given zoom level, simulate the pin merger over the target stop
- * plus its neighbours and return true if the target ends up in its own
- * single-member group. Checking only pairwise distance against each
- * neighbour individually is not enough: neighbours can merge among
- * themselves first, and the resulting centroid can sit close enough to
- * pull the target into the merged group too.
- *
- * IMPORTANT: this must match `mergeOverlappingPins` exactly. That
- * algorithm weights the merged centroid by *photo count*, not by
- * "number of merged stops". When the day has stops with very
- * different photo counts, equal-weight averaging here would predict
- * an unmerged target at a zoom where the renderer (using
- * count-weighting) actually still merges it.
- */
-function isTargetSingleAtZoom(target: Stop, others: Stop[], zoom: number): boolean {
-  if (!map) return true
-  interface W {
-    lat: number
-    lng: number
-    /** Photo-count weight for centroid averaging (mirrors the renderer). */
-    weight: number
-    /** Stops folded into this group so far. Target is "alone" iff this is 1. */
-    members: number
-    hasTarget: boolean
-  }
-  const work: W[] = [
-    { lat: target.lat, lng: target.lng, weight: target.photos.length, members: 1, hasTarget: true },
-    ...others.map(o => ({
-      lat: o.lat,
-      lng: o.lng,
-      weight: o.photos.length,
-      members: 1,
-      hasTarget: false,
-    } as W)),
-  ]
-  let changed = true
-  while (changed && work.length > 1) {
-    changed = false
-    let bestI = -1
-    let bestJ = -1
-    let bestDist = Infinity
-    for (let i = 0; i < work.length; i++) {
-      const pi = map.project([work[i]!.lat, work[i]!.lng], zoom)
-      for (let j = i + 1; j < work.length; j++) {
-        const pj = map.project([work[j]!.lat, work[j]!.lng], zoom)
-        const d = pi.distanceTo(pj)
-        if (d < bestDist) {
-          bestDist = d
-          bestI = i
-          bestJ = j
-        }
-      }
-    }
-    if (bestDist < PIN_OVERLAP_PX && bestI >= 0) {
-      const a = work[bestI]!
-      const b = work[bestJ]!
-      const total = a.weight + b.weight
-      a.lat = (a.lat * a.weight + b.lat * b.weight) / total
-      a.lng = (a.lng * a.weight + b.lng * b.weight) / total
-      a.weight = total
-      a.members += b.members
-      a.hasTarget = a.hasTarget || b.hasTarget
-      work.splice(bestJ, 1)
-      changed = true
-    }
-  }
-  const targetGroup = work.find(w => w.hasTarget)
-  return targetGroup ? targetGroup.members === 1 : true
-}
-
-/**
- * Find the smallest zoom level at which the target stop ends up as its
- * own pin once the merger has run, then snap the map to it. Used when
- * the user keyboard-activates a card to "drill in" to that specific
- * cluster. The setView is instantaneous (animate:false) and we force
- * an immediate renderContent: a default smooth animation would leave
- * the still-merged pins on screen for ~250 ms and the user reads that
- * as "zoom didn't unmerge".
- */
-function zoomToUnmergeStop(stop: Stop) {
-  if (!map) return
-  const others = (stopsByDay.value.get(stop.day) ?? []).filter(s => s.id !== stop.id)
-  const maxZoom = 19
-  // Round up the current zoom: if the map is at fractional zoom 13.7,
-  // start the search at integer 14 — the simulator and the renderer
-  // both apply the merger at the projected pixel coords for that
-  // integer step, so probing fractional zooms in between wastes a
-  // round-trip when zoomSnap is the default 1.
-  let z = Math.ceil(map.getZoom())
-  if (others.length > 0) {
-    while (z < maxZoom && !isTargetSingleAtZoom(stop, others, z)) {
-      z++
-    }
-  }
-  map.setView([stop.lat, stop.lng], z, { animate: false })
-  // The zoomend listener also schedules a renderContent, but it can
-  // fire AFTER the user's eye has already registered the still-merged
-  // pre-setView state. Calling renderContent synchronously here makes
-  // the unmerged pin pop into existence in the same frame as the
-  // zoom change.
-  renderContent()
-}
-
-/**
- * Activation (Enter / Space on a focused stop card): select the stop
- * AND zoom the map until the stop's pin is no longer merged with any
- * neighbour. The user can then click the now-distinct pin to open
- * fullscreen at the stop's first photo.
+ * Activation (Enter / Space on a focused stop card): select the stop and
+ * centre the map on it. In day mode every stop is already its own pin (the
+ * zoom-driven clustering keeps pins and stops 1:1), so there is nothing to
+ * "unmerge" — we just pan to the stop so its pin is in view.
  */
 function handleStopActivate(stop: Stop) {
   applySelection(stop.day, stop.id)
   nextTick(() => {
     scrollItemIntoCenter(stop.id)
-    zoomToUnmergeStop(stop)
+    if (map) map.panTo([stop.lat, stop.lng], { animate: false })
   })
 }
 
@@ -641,17 +552,34 @@ function initMap() {
     maxZoom: 19,
   }).addTo(map)
 
-  // Establish the initial view BEFORE the first render so pixel-based
-  // pin merging projects against a real zoom level rather than failing
-  // (and falling back to no-merge) on the first paint.
+  // Establish the initial view BEFORE deriving the cluster radius / first
+  // render so projections and zoom-to-meters run against a real zoom level.
   fitMapToSelection()
+  updateClusterRadius()
   renderContent()
 
-  // Pixel-space merging depends on the current zoom: zooming in spreads
-  // pins apart and reveals previously-merged stops, zooming out merges
-  // more aggressively. Re-render the markers after every zoom change so
-  // the visible pins always reflect what fits on screen.
-  map.on('zoomend', () => renderContent())
+  // Day mode: the zoom drives the cluster radius, so stops (pins AND timeline)
+  // re-cluster on zoom — recompute the radius and let the `stops` watcher
+  // re-render. Overview mode keeps the pixel-space pin merge, so just re-render.
+  map.on('zoomend', () => {
+    if (selectedDay.value === OVERVIEW) renderContent()
+    else updateClusterRadius()
+  })
+}
+
+/**
+ * Project the map's "pins closer than PIN_OVERLAP_PX overlap" threshold into a
+ * cluster radius in meters at the current zoom + latitude, and feed it to
+ * usePhotoStops. metersPerPixel = 156543.03 · cos(lat) / 2^zoom (Web Mercator).
+ * Setting this re-clusters the stops, keeping day-mode pins and the timeline
+ * 1:1 at every zoom level.
+ */
+function updateClusterRadius() {
+  if (!map) return
+  const zoom = map.getZoom()
+  const lat = map.getCenter().lat
+  const metersPerPixel = (156543.03392 * Math.cos((lat * Math.PI) / 180)) / Math.pow(2, zoom)
+  clusterRadiusMeters.value = metersPerPixel * PIN_OVERLAP_PX
 }
 
 function clearContent() {
@@ -683,7 +611,13 @@ function renderContent() {
     polylines.push(line)
   }
 
-  for (const pin of mergeOverlappingPins(visiblePins.value)) {
+  // Day mode: one marker per stop (zoom-driven clustering already de-clutters,
+  // so pins match the timeline 1:1). Overview mode (no timeline) keeps the
+  // pixel-space merge to avoid a wall of overlapping thumbnails.
+  const drawables = day === OVERVIEW
+    ? mergeOverlappingPins(visiblePins.value)
+    : visiblePins.value
+  for (const pin of drawables) {
     const marker = L.marker([pin.lat, pin.lng], { icon: createPinIcon(pin) }).addTo(map)
     marker.on('click', pin.onClick)
     markers.push(marker)
@@ -753,10 +687,26 @@ onUnmounted(() => {
 watch(() => props.photos, () => {
   selectedDay.value = OVERVIEW
   selectedStopId.value = null
+  selectedAnchorPhotoId.value = null
   renderContent()
   fitMapToSelection()
   nextTick(() => scrollItemIntoCenter(OVERVIEW))
 }, { deep: true })
+
+// The zoom-driven clustering reassigns stop ids on every recompute, so a held
+// selection must be re-resolved by its (stable) cover photo — otherwise the
+// id would silently point at a different cluster after a zoom. Resolves within
+// the selected day; clears the selection if the photo no longer exists.
+watch(stops, () => {
+  const anchor = selectedAnchorPhotoId.value
+  if (anchor == null) { selectedStopId.value = null; return }
+  const next = stops.value.find(
+    s => s.day === selectedDay.value && s.photos.some(p => p.id === anchor),
+  )
+  selectedStopId.value = next ? next.id : null
+  if (next) selectedAnchorPhotoId.value = next.coverPhoto.id
+  else selectedAnchorPhotoId.value = null
+})
 
 // Re-render when selection or the underlying clustering changes.
 watch(visiblePins, () => {
