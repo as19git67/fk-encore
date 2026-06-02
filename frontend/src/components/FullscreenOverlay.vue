@@ -74,6 +74,7 @@ const hasActionBar = computed(() => {
   if (props.showDetailsButton !== false) return true
   if (props.canDelete) return true
   if (canEditTransform.value) return true
+  if (canSlideshow.value) return true
   return fullscreenSupported.value
 })
 
@@ -494,11 +495,16 @@ function handleKeydown(e: KeyboardEvent) {
 onMounted(() => window.addEventListener('keydown', handleKeydown, true))
 onUnmounted(() => window.removeEventListener('keydown', handleKeydown, true))
 
-// ── Idle auto-advance (slideshow) ───────────────────────────────────────────
-// When `autoAdvanceMs` > 0 the overlay auto-emits `next` after the user
-// has been idle for that long. Any pointer or keyboard interaction
-// resets the timer.
+// ── Slideshow (play / pause) ────────────────────────────────────────────────
+// The slideshow never auto-starts. The user toggles it with the toolbar
+// play/pause button (shown whenever `autoAdvanceMs` > 0). While `playing`, the
+// overlay emits `next` every `autoAdvanceMs`; any pointer or keyboard
+// interaction resets the interval (so it advances once the user is idle
+// again), and it stops automatically once the last photo is reached.
 let idleTimer: ReturnType<typeof setTimeout> | null = null
+const playing = ref(false)
+/** True when the slideshow can be offered at all (interval configured). */
+const canSlideshow = computed(() => (props.autoAdvanceMs ?? 0) > 0)
 
 function clearIdleTimer() {
   if (idleTimer !== null) {
@@ -509,8 +515,11 @@ function clearIdleTimer() {
 
 function scheduleIdleAdvance() {
   clearIdleTimer()
-  if (!props.autoAdvanceMs || props.autoAdvanceMs <= 0) return
-  if (!props.nextPhoto) return
+  // Only run while the user has explicitly started the slideshow.
+  if (!playing.value) return
+  if (!canSlideshow.value) return
+  // No more photos ahead → stop and flip the button back to "play".
+  if (!props.nextPhoto) { playing.value = false; return }
   // Pause auto-advance whenever any modal / details overlay is on top
   // of the photo — the user is reading or editing, not consuming. The
   // timer resumes from a watcher when the overlay closes.
@@ -525,11 +534,16 @@ function scheduleIdleAdvance() {
   }, props.autoAdvanceMs)
 }
 
+function togglePlay() {
+  playing.value = !playing.value
+}
+
 function bumpIdleTimer() {
   if (!props.autoAdvanceMs || props.autoAdvanceMs <= 0) return
   scheduleIdleAdvance()
 }
 
+watch(playing, () => scheduleIdleAdvance())
 watch(() => props.photo.id, () => scheduleIdleAdvance())
 watch(() => props.autoAdvanceMs, () => scheduleIdleAdvance())
 watch(() => props.nextPhoto, () => scheduleIdleAdvance())
@@ -919,6 +933,20 @@ onUnmounted(() => {
               v-tooltip.top="'Schnitt &amp; Belichtung bearbeiten'"
             />
           </slot>
+          <!-- Slideshow play/pause. Outside the `actions` slot so caller
+               overrides still get it. The icon always shows what the click
+               does: ▶ to start, ⏸ while running. Never auto-starts. -->
+          <Button
+            v-if="canSlideshow"
+            :icon="playing ? 'pi pi-pause' : 'pi pi-play'"
+            rounded text
+            :severity="playing ? 'primary' : 'secondary'"
+            :class="{ 'fs-toolbar-btn--active': playing }"
+            :aria-pressed="playing"
+            :aria-label="playing ? 'Diashow pausieren' : 'Diashow starten'"
+            @click="togglePlay"
+            v-tooltip.top="playing ? 'Diashow pausieren' : 'Diashow starten'"
+          />
           <!-- Real browser fullscreen toggle (Track N / #80). Sits outside
                the `actions` slot so caller overrides still get it. -->
           <Button
