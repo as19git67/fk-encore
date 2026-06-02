@@ -9,6 +9,7 @@ import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
 import { useAuthStore } from '../stores/auth'
 import type { GalleryGridGroup } from '../api/gallery'
 import { formatPhotoDateCompact, formatLocationLabel, toLocalIsoDate } from '../utils/dateFormat'
+import { shouldArmSlideshow, slideshowReachedEnd, isDayChange, type SlideshowState } from '../utils/slideshow'
 
 const props = withDefaults(defineProps<{
   photo: Photo
@@ -515,19 +516,17 @@ function clearIdleTimer() {
 
 function scheduleIdleAdvance() {
   clearIdleTimer()
-  // Only run while the user has explicitly started the slideshow.
-  if (!playing.value) return
-  if (!canSlideshow.value) return
+  const state: SlideshowState = {
+    playing: playing.value,
+    autoAdvanceMs: props.autoAdvanceMs ?? 0,
+    hasNext: props.nextPhoto != null,
+    editorOpen: transformEditorVisible.value,
+    detailsActive: props.detailsActive ?? false,
+    currentLoaded: currentLoaded.value,
+  }
   // No more photos ahead → stop and flip the button back to "play".
-  if (!props.nextPhoto) { playing.value = false; return }
-  // Pause auto-advance whenever any modal / details overlay is on top
-  // of the photo — the user is reading or editing, not consuming. The
-  // timer resumes from a watcher when the overlay closes.
-  if (transformEditorVisible.value) return
-  if (props.detailsActive) return
-  // Wait until the current photo has finished loading; the watcher on
-  // `currentLoaded` reschedules once decoding is done.
-  if (!currentLoaded.value) return
+  if (slideshowReachedEnd(state)) { playing.value = false; return }
+  if (!shouldArmSlideshow(state)) return
   idleTimer = setTimeout(() => {
     idleTimer = null
     if (props.nextPhoto) emit('next')
@@ -598,7 +597,7 @@ watch(() => props.photo.id, () => {
   if (!props.markDayChanges) return
   const key = dayKeyOf(props.photo)
   // Announce only a *change* — never the photo the overlay opened on.
-  if (lastDayKey !== null && key !== lastDayKey) showDayBanner(props.photo)
+  if (isDayChange(lastDayKey, key)) showDayBanner(props.photo)
   lastDayKey = key
 })
 
