@@ -299,21 +299,40 @@ function handleOverviewTap() {
 }
 
 function handleStopTap(stop: Stop) {
-  applySelection(stop.day, stop.id)
-  nextTick(() => scrollItemIntoCenter(stop.id))
-}
-
-/**
- * Activation (Enter / Space on a focused stop card): select the stop and
- * centre the map on it. In day mode every stop is already its own pin (the
- * zoom-driven clustering keeps pins and stops 1:1), so there is nothing to
- * "unmerge" — we just pan to the stop so its pin is in view.
- */
-function handleStopActivate(stop: Stop) {
+  const dayChanged = selectedDay.value !== stop.day
   applySelection(stop.day, stop.id)
   nextTick(() => {
     scrollItemIntoCenter(stop.id)
-    if (map) map.panTo([stop.lat, stop.lng], { animate: false })
+    // A day change already reframed the map to the whole day (pin in view).
+    // Within the same day, recentre only if the pin scrolled off screen.
+    if (!dayChanged) ensureStopPinVisible(stop)
+  })
+}
+
+/**
+ * Pan the map so the stop's pin is centred — but only when it currently sits
+ * outside the visible map area. Tapping a stop whose pin is already on screen
+ * leaves the view untouched (no needless jump).
+ */
+function ensureStopPinVisible(stop: Stop) {
+  if (!map) return
+  const latlng: [number, number] = [stop.lat, stop.lng]
+  if (map.getBounds().contains(latlng)) return
+  map.panTo(latlng)
+}
+
+/**
+ * Activation (Enter / Space on a focused stop card): select the stop and, if
+ * its pin is off screen, centre the map on it. In day mode every stop is
+ * already its own pin (zoom-driven clustering keeps pins and stops 1:1), so
+ * there is nothing to "unmerge".
+ */
+function handleStopActivate(stop: Stop) {
+  const dayChanged = selectedDay.value !== stop.day
+  applySelection(stop.day, stop.id)
+  nextTick(() => {
+    scrollItemIntoCenter(stop.id)
+    if (!dayChanged) ensureStopPinVisible(stop)
   })
 }
 
