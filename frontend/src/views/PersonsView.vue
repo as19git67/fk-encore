@@ -938,7 +938,9 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
 .persons-view {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - var(--menubar-height, 3.5rem));
+  /* `100dvh` (not `100vh`) so the view matches the visible viewport on mobile;
+     `100vh` is the large viewport and made the page scroll under the navbar. */
+  height: calc(100dvh - var(--menubar-height, 3.5rem));
   overflow: hidden;
 }
 
