@@ -76,6 +76,12 @@ Store denselben Wert nicht doppelt führen.
 | `albums_last_focused_album_id` | letzte Album-ID | `rememberFocusedAlbumId()`, `photoNav.selectPhotoInAlbum()` | `AlbumsView` (`readRememberedAlbumId()`), `photoNav` Store (Init) |
 | `albums_last_photo_by_album` | Map `albumId → photoId` | `AlbumDetailView.saveLastPhotoForAlbum()` | `AlbumDetailView.loadData()` |
 | `albums_view_state` | Filter/Sortierung/Suche | `AlbumsView.saveAlbumsStateToStorage()` | `AlbumsView` (onMounted), `AlbumDetailView.navigateBackToAlbums()` |
+| `albums_view_mode_by_album` | Map `albumId → 'grid' \| 'map'` | `AlbumDetailView.saveViewModeForAlbum()` | `AlbumDetailView` (beim Laden eines map-fähigen Albums) |
+| `sharedAlbumViewMode:<token>` | `'grid' \| 'map'` pro Share-Token | `SharedAlbumView.persistViewMode()` | `SharedAlbumView` (beim Laden, auch für anonyme Besucher) |
+
+Die letzten beiden merken pro (map-fähigem) Album bzw. pro Share-Link, ob der
+Nutzer zuletzt Raster oder Karte gewählt hat; ohne gespeicherte Wahl öffnet ein
+map-fähiges Album in der Kartenansicht.
 
 ### 2. Pinia (RAM, wird bei Refresh zurückgesetzt)
 
