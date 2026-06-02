@@ -113,6 +113,36 @@ const album = ref<AlbumWithPhotos | null>(null)
 const loading = ref(true)
 const error = ref('')
 
+// On a phone in portrait the header runs out of width, so the metadata wraps
+// onto a second line. There we compact it: drop the "Fotos" unit word (CSS) and
+// shorten the date range (start without year, end with a 2-digit year), e.g.
+// "484 • 1.1. – 1.6.26" instead of "484 Fotos • 1.1.2026 – 1.6.2026".
+const compactHeader = ref(false)
+const headerMql = typeof window !== 'undefined'
+  ? window.matchMedia('(max-width: 768px) and (orientation: portrait)')
+  : null
+function syncCompactHeader() {
+  compactHeader.value = headerMql?.matches ?? false
+}
+syncCompactHeader()
+onMounted(() => headerMql?.addEventListener('change', syncCompactHeader))
+onUnmounted(() => headerMql?.removeEventListener('change', syncCompactHeader))
+
+const headerDateRange = computed(() => {
+  const o = album.value?.oldest_photo_at
+  const n = album.value?.newest_photo_at
+  if (!o || !n) return ''
+  const od = new Date(o)
+  const nd = new Date(n)
+  if (compactHeader.value) {
+    const start = `${od.getDate()}.${od.getMonth() + 1}.`
+    const yy = String(nd.getFullYear() % 100).padStart(2, '0')
+    const end = `${nd.getDate()}.${nd.getMonth() + 1}.${yy}`
+    return `${start} – ${end}`
+  }
+  return `${od.toLocaleDateString()} – ${nd.toLocaleDateString()}`
+})
+
 // Per-album map of the last photo the user had selected, so reopening an
 // album restores the scroll/selection position rather than snapping to top.
 const LAST_PHOTO_MAP_KEY = 'albums_last_photo_by_album'
@@ -1794,9 +1824,9 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 
         <!-- 2. Metadata -->
         <div class="header__meta">
-          {{ album.photo_count }} {{ album.photo_count === 1 ? 'Foto' : 'Fotos' }}
+          {{ album.photo_count }}<span class="header__meta-unit"> {{ album.photo_count === 1 ? 'Foto' : 'Fotos' }}</span>
           <template v-if="album.oldest_photo_at && album.newest_photo_at">
-            &bull; {{ new Date(album.oldest_photo_at).toLocaleDateString() }} – {{ new Date(album.newest_photo_at).toLocaleDateString() }}
+            &bull; {{ headerDateRange }}
           </template>
         </div>
 
@@ -2749,6 +2779,15 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 }
 
 /* ── Mobile Breakpoint ───────────────────────────────────────────────────── */
+/* Phone + portrait: compact the header metadata so it stops wrapping onto a
+   second line. The "Fotos" unit word is dropped here (the count alone is
+   clear) and the role badge shrinks; the date range is shortened in
+   `headerDateRange` (kept in sync with this same media query). */
+@media (max-width: 768px) and (orientation: portrait) {
+  .header__badge { font-size: 0.6em; }
+  .header__meta-unit { display: none; }
+}
+
 @media (max-width: 768px) {
   .mobile-backdrop { display: block; }
 
