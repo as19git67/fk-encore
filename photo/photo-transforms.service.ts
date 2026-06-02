@@ -221,32 +221,22 @@ export function computeSuggestionCrops(
   imageWidth: number,
   imageHeight: number,
 ): Partial<Record<PhotoTransformAspectRatio, PhotoTransformCrop>> {
-  const imageAR = imageWidth / imageHeight;
   const crops: Partial<Record<PhotoTransformAspectRatio, PhotoTransformCrop>> = {};
+  // Crop suggestions are only made when there is a subject (face) hull the
+  // crop can be composed around. Without a hull we deliberately produce no
+  // crops — a blind centred crop has no compositional value and would just
+  // clutter the editor.
+  if (!hull) return crops;
+
+  const imageAR = imageWidth / imageHeight;
+  const padded = padBbox(hull, SUBJECT_PADDING);
 
   for (const [name, cropAR] of Object.entries(PHOTO_TRANSFORM_ASPECT_RATIOS) as [
     PhotoTransformAspectRatio,
     number,
   ][]) {
-    if (hull) {
-      const padded = padBbox(hull, SUBJECT_PADDING);
-      const fit = fitCropToAspect(padded, cropAR, imageAR);
-      if (fit) crops[name] = fit;
-    } else {
-      // Centred crop of the requested ratio. Same math as fitCropToAspect
-      // but no hull constraint.
-      const ratio = cropAR / imageAR;
-      const hn = Math.min(1, 1 / Math.max(ratio, 1));
-      const wn = Math.min(1, ratio * hn);
-      if (wn <= 1 + EPS && hn <= 1 + EPS) {
-        crops[name] = {
-          x: (1 - wn) / 2,
-          y: (1 - hn) / 2,
-          w: wn,
-          h: hn,
-        };
-      }
-    }
+    const fit = fitCropToAspect(padded, cropAR, imageAR);
+    if (fit) crops[name] = fit;
   }
   return crops;
 }
