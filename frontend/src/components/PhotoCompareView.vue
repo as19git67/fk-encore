@@ -18,6 +18,7 @@ import {
 } from '../api/photos'
 import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
 import { useAuthStore } from '../stores/auth'
+import { discardFlingDirection, flingOffscreenTranslate } from '../utils/compareSwipe'
 import {
   computeBboxZoom,
   computeSyncBboxZoom,
@@ -876,35 +877,24 @@ function onPhotoTouchStart(_photoId: number, evt: TouchEvent) {
   swipeStartY = t.clientY
 }
 
-// The one direction a fling must NOT go: toward the partner photo. Depends on
-// the layout — side-by-side in landscape, stacked in portrait — with
-// currentPair[0] = left/top and currentPair[1] = right/bottom.
-function towardPartnerDir(photoId: number): 'left' | 'right' | 'up' | 'down' | null {
-  const pair = currentPair.value
-  if (!pair) return null
-  const idx = pair.indexOf(photoId)
-  if (idx < 0) return null
-  if (isPortrait.value) return idx === 0 ? 'down' : 'up'
-  return idx === 0 ? 'right' : 'left'
-}
-
 // Returns true when the gesture was a valid discard fling (and kicks off the
 // off-screen animation + chooseHide); false otherwise so the caller can fall
-// back to tap/double-tap handling.
+// back to tap/double-tap handling. Direction logic (incl. the "never toward
+// the partner photo" rule) lives in utils/compareSwipe for unit testing.
 function tryFlingHide(photoId: number, dx: number, dy: number): boolean {
   if (flingOut.value) return false // one tile is already animating out
   if (isZoomed(photoId)) return false // zoomed in: leave the gesture to zoom
-  const absX = Math.abs(dx)
-  const absY = Math.abs(dy)
-  if (Math.max(absX, absY) < SWIPE_MIN_TRAVEL) return false
-  const dir: 'left' | 'right' | 'up' | 'down' =
-    absX >= absY ? (dx < 0 ? 'left' : 'right') : dy < 0 ? 'up' : 'down'
-  if (dir === towardPartnerDir(photoId)) return false // never toward the partner
-  flingOut.value = {
-    id: photoId,
-    tx: dir === 'left' ? '-110vw' : dir === 'right' ? '110vw' : '0',
-    ty: dir === 'up' ? '-110vh' : dir === 'down' ? '110vh' : '0',
-  }
+  const idx = currentPair.value?.indexOf(photoId) ?? -1
+  if (idx < 0) return false
+  const dir = discardFlingDirection({
+    indexInPair: idx,
+    isPortrait: isPortrait.value,
+    dx,
+    dy,
+    minTravel: SWIPE_MIN_TRAVEL,
+  })
+  if (!dir) return false
+  flingOut.value = { id: photoId, ...flingOffscreenTranslate(dir) }
   window.setTimeout(() => {
     flingOut.value = null
     chooseHide(photoId)
