@@ -51,3 +51,17 @@ export function shouldArmSlideshow(s: SlideshowState): boolean {
 export function isDayChange(prevDayKey: string | null, nextDayKey: string): boolean {
   return prevDayKey !== null && nextDayKey !== prevDayKey
 }
+
+/**
+ * Whether the slideshow description caption should be shown: only while the
+ * slideshow is running, not while the details split-view is open (the
+ * description is already in the sidebar there), and only when the photo has a
+ * non-empty description.
+ */
+export function shouldShowCaption(
+  playing: boolean,
+  splitView: boolean,
+  description: string | null | undefined,
+): boolean {
+  return playing && !splitView && (description ?? '').trim().length > 0
+}
