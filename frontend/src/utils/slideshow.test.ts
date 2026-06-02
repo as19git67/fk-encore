@@ -12,15 +12,13 @@ function state(overrides: Partial<SlideshowState> = {}): SlideshowState {
     playing: true,
     autoAdvanceMs: 10000,
     hasNext: true,
-    editorOpen: false,
-    detailsActive: false,
     currentLoaded: true,
     ...overrides,
   }
 }
 
 describe('shouldArmSlideshow', () => {
-  it('arms when playing, configured, has next, idle and loaded', () => {
+  it('arms when playing, configured, has next and loaded', () => {
     expect(shouldArmSlideshow(state())).toBe(true)
   })
 
@@ -34,14 +32,6 @@ describe('shouldArmSlideshow', () => {
 
   it('does not arm at the last photo', () => {
     expect(shouldArmSlideshow(state({ hasNext: false }))).toBe(false)
-  })
-
-  it('pauses while the transform editor is open', () => {
-    expect(shouldArmSlideshow(state({ editorOpen: true }))).toBe(false)
-  })
-
-  it('pauses while the details flyout is active', () => {
-    expect(shouldArmSlideshow(state({ detailsActive: true }))).toBe(false)
   })
 
   it('waits until the current photo has loaded', () => {
