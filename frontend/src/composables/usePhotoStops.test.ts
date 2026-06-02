@@ -65,3 +65,49 @@ describe('usePhotoStops — adaptive day clustering (#375)', () => {
     expect(stops.value.length).toBe(2)
   })
 })
+
+describe('usePhotoStops — zoom-driven cluster radius (map ↔ timeline sync)', () => {
+  // Three spots 1 km apart, two photos ~10 m apart at each.
+  function threeSpots(): Photo[] {
+    const photos: Photo[] = []
+    let id = 1
+    for (let spot = 0; spot < 3; spot++) {
+      photos.push(photoAt(id++, spot * 1000, 0, 9 + spot))
+      photos.push(photoAt(id++, spot * 1000 + 10, 0, 9 + spot))
+    }
+    return photos
+  }
+
+  it('merges everything into one stop at a large (zoomed-out) radius', () => {
+    const { stops } = usePhotoStops(ref(threeSpots()), ref(5000))
+    expect(stops.value.length).toBe(1)
+  })
+
+  it('splits into one stop per spot at a small (zoomed-in) radius', () => {
+    const { stops } = usePhotoStops(ref(threeSpots()), ref(300))
+    expect(stops.value.length).toBe(3)
+  })
+
+  it('recomputes reactively when the radius changes (single source of truth)', () => {
+    const radius = ref<number | null>(5000)
+    const { stops } = usePhotoStops(ref(threeSpots()), radius)
+    expect(stops.value.length).toBe(1) // zoomed out → merged
+    radius.value = 300 // user zooms in
+    expect(stops.value.length).toBe(3) // splits — pins & timeline both follow
+  })
+
+  it('floors the radius so extreme zoom-in does not shatter a tight burst', () => {
+    // One spot, three photos within ~20 m. A near-zero radius would split them
+    // into three single-photo stops without the floor.
+    const burst = [photoAt(1, 0, 0, 9), photoAt(2, 10, 0, 10), photoAt(3, 20, 0, 11)]
+    const { stops } = usePhotoStops(ref(burst), ref(1))
+    expect(stops.value.length).toBe(1)
+  })
+
+  it('falls back to the day-span heuristic when no radius is supplied (null)', () => {
+    const photos = threeSpots()
+    const withNull = usePhotoStops(ref(photos), ref(null))
+    const without = usePhotoStops(ref(photos))
+    expect(withNull.stops.value.length).toBe(without.stops.value.length)
+  })
+})

@@ -61,6 +61,13 @@ const RADIUS_REFERENCE_SPAN_METERS = 20000
  */
 const MIN_RADIUS_SCALE = 0.25
 
+/**
+ * Floor for the zoom-driven cluster radius (see `radiiForZoomRadius`). Keeps a
+ * burst of photos taken at one spot (GPS jitter ~5–10 m) from shattering into
+ * single-photo stops when the map is zoomed all the way in.
+ */
+const MIN_ZOOM_CLUSTER_RADIUS_METERS = 25
+
 const DAY_COLORS = [
   '#4285F4', '#EA4335', '#34A853', '#FBBC05', '#9C27B0',
   '#FF6D00', '#00ACC1', '#C62828', '#2E7D32', '#F06292',
@@ -146,6 +153,22 @@ function radiiForDaySpan(spanMeters: number): { include: number; separation: num
   return {
     include: CLUSTER_INCLUDE_METERS * scale,
     separation: MIN_CLUSTER_SEPARATION_METERS * scale,
+  }
+}
+
+/**
+ * Cluster radii derived from a caller-supplied radius in meters (e.g. the map's
+ * current "pins closer than N px overlap" threshold projected to meters at the
+ * live zoom). This makes the timeline stops and the map pins share one
+ * clustering pass — zooming the map in splits stops, zooming out merges them,
+ * and both views stay in sync. The include/separation ratio mirrors the static
+ * defaults (400/600). Floored so extreme zoom-in doesn't over-split.
+ */
+function radiiForZoomRadius(radiusMeters: number): { include: number; separation: number } {
+  const separation = Math.max(MIN_ZOOM_CLUSTER_RADIUS_METERS, radiusMeters)
+  return {
+    include: separation * (CLUSTER_INCLUDE_METERS / MIN_CLUSTER_SEPARATION_METERS),
+    separation,
   }
 }
 
@@ -254,11 +277,21 @@ function computeBounds(points: Array<{ lat: number; lng: number }>): LatLngBound
 
 // ── Composable ───────────────────────────────────────────────────────────────
 
-export function usePhotoStops(photos: Ref<Photo[]>) {
+export function usePhotoStops(
+  photos: Ref<Photo[]>,
+  /**
+   * Optional reactive cluster radius in meters. When provided (non-null), it
+   * drives the per-day clustering instead of the day-span heuristic — used by
+   * the map to keep pins and timeline stops in sync at the current zoom. When
+   * omitted/null, the day-span-adaptive radii are used (default behaviour).
+   */
+  clusterRadiusMeters?: Ref<number | null>,
+) {
   const geoPhotos = computed<GeoPhoto[]>(() => photos.value.filter(isGeoPhoto))
 
   const stops = computed<Stop[]>(() => {
     if (geoPhotos.value.length === 0) return []
+    const zoomRadius = clusterRadiusMeters?.value ?? null
 
     const byDay = new Map<string, GeoPhoto[]>()
     for (const p of geoPhotos.value) {
@@ -277,7 +310,9 @@ export function usePhotoStops(photos: Ref<Photo[]>) {
 
     for (const day of days) {
       const dayPhotos = byDay.get(day)!
-      const { include, separation } = radiiForDaySpan(daySpanMeters(dayPhotos))
+      const { include, separation } = zoomRadius != null
+        ? radiiForZoomRadius(zoomRadius)
+        : radiiForDaySpan(daySpanMeters(dayPhotos))
       const dayClusters = clusterDayPhotos(dayPhotos, include, separation)
       // Order clusters within the day by their earliest photo time so that
       // the day-path polyline traces the chronological movement.
