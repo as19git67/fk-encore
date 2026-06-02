@@ -1148,7 +1148,16 @@ onUnmounted(() => {
 /* ── Zoom wrapper ───────────────────────────────────────────────────────── */
 .fs-zoom-wrapper {
   position: absolute;
-  inset: 0;
+  /* Offset below the opaque topbar (height 2.75em) so it never covers the
+     photo — the wrapper otherwise spans the full viewport (inset: 0) and the
+     top of the image disappears behind the bar. Especially visible in
+     landscape where the photo fills the full height. Mirrors the split view's
+     `padding-top: 2.75em`; using `top` (not padding) keeps the offset fixed
+     while the wrapper is zoom-scaled. */
+  top: 2.75em;
+  right: 0;
+  bottom: 0;
+  left: 0;
   display: flex;
   align-items: center;
   justify-content: center;

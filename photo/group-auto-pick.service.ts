@@ -835,6 +835,18 @@ export async function listReviewQueueLogic(
   if (opts.confidence) {
     baseConds.push(eq(photoGroups.ai_picked_confidence, opts.confidence));
   }
+  // A group is only worth reviewing while at least two of its members are still
+  // visible (not hidden via curation). Once hiding or a hard-delete drops it
+  // below that, there is nothing left to compare — keep it out of the queue
+  // even if it was never explicitly marked reviewed (legacy / edge cases).
+  const hasTwoVisibleMembers = sql`(
+    SELECT COUNT(*) FROM ${photoGroupMembers} m
+    LEFT JOIN ${photoCuration} c
+      ON c.photo_id = m.photo_id AND c.user_id = ${userId}
+    WHERE m.group_id = ${photoGroups.id}
+      AND c.status IS DISTINCT FROM 'hidden'
+  ) >= 2`;
+  baseConds.push(hasTwoVisibleMembers);
 
   const totalRow = await dbFirst<{ c: number }>(
     db.select({ c: sql<number>`COUNT(*)::int` })
@@ -855,6 +867,7 @@ export async function listReviewQueueLogic(
         eq(photoGroups.user_id, userId),
         isNull(photoGroups.reviewed_at),
         eq(photoGroups.ai_picked_confidence, "high"),
+        hasTwoVisibleMembers,
       )),
   );
   const highConfidenceTotal = highRow?.c ?? 0;

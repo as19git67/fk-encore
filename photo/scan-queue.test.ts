@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { eq } from "drizzle-orm";
 import db from "../db/database";
 import { photos, photoScanQueue, users } from "../db/schema";
-import { getFailedJobsGrouped, isScanService } from "./scan-queue";
+import { enqueuePhotoScanBulkPerUser, getFailedJobsGrouped, isScanService } from "./scan-queue";
 
 async function seedUser(email: string): Promise<number> {
   const [u] = await db
@@ -139,5 +140,39 @@ describe("getFailedJobsGrouped", () => {
     expect(groupsA).toHaveLength(1);
     expect(groupsA[0].count).toBe(1);
     expect(groupsA[0].samplePhotoIds).toEqual([p1]);
+  });
+});
+
+describe("enqueuePhotoScanBulkPerUser priority", () => {
+  it("writes the given priority onto the per-user face_assignment rows", async () => {
+    // A fresh upload's face_detection runs at priority 1; the follow-up
+    // face_assignment fan-out must inherit that so shared-album members get
+    // assignments ahead of background work.
+    const u1 = await seedUser("fa-prio1@test.com");
+    const u2 = await seedUser("fa-prio2@test.com");
+    const photoId = await seedPhoto(u1, 1);
+
+    await enqueuePhotoScanBulkPerUser(photoId, [u1, u2], "face_assignment", false, 1);
+
+    const rows = await db
+      .select()
+      .from(photoScanQueue)
+      .where(eq(photoScanQueue.photo_id, photoId));
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.service === "face_assignment")).toBe(true);
+    expect(rows.every((r) => r.priority === 1)).toBe(true);
+  });
+
+  it("defaults to background priority 2", async () => {
+    const u1 = await seedUser("fa-prio-default@test.com");
+    const photoId = await seedPhoto(u1, 1);
+
+    await enqueuePhotoScanBulkPerUser(photoId, [u1], "face_assignment");
+
+    const [row] = await db
+      .select()
+      .from(photoScanQueue)
+      .where(eq(photoScanQueue.photo_id, photoId));
+    expect(row.priority).toBe(2);
   });
 });

@@ -7,6 +7,7 @@ import { exiftool } from "exiftool-vendored";
 import { eq, and, or, sql, inArray, ilike, isNull, isNotNull, desc, gt } from "drizzle-orm";
 import { APIError } from "encore.dev/api";
 import { enqueuePhotoScan, enqueuePhotoScanBulkPerUser, DeferJobError } from "./scan-queue";
+import { notifyUserPhotosScanned } from "./scan-refresh-events";
 import { isUnderPressure } from "./event-loop-pressure";
 import { ENABLE_LOCAL_FACES, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
 export { ENABLE_LOCAL_FACES, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
@@ -733,15 +734,19 @@ export async function getUsersWithPhotoAccess(photoId: number): Promise<number[]
 /**
  * Enqueue face_assignment for all users who have access to a photo.
  * Called after face_detection completes to ensure every user gets face assignments.
+ * `priority` inherits the originating face_detection job's priority so a fresh
+ * upload's follow-up fan-out jumps ahead of background work (e.g. shared-album
+ * members get face assignments at upload priority too), matching how the
+ * quality re-enqueue propagates priority.
  */
-export async function enqueueFaceAssignmentForAllUsers(photoId: number): Promise<void> {
+export async function enqueueFaceAssignmentForAllUsers(photoId: number, priority = 2): Promise<void> {
   if (!ENABLE_LOCAL_FACES) return;
   const userIds = await getUsersWithPhotoAccess(photoId);
   if (userIds.length === 0) return;
   // Single bulk insert instead of N sequential enqueuePhotoScan() calls.
   // For albums shared with many users this is the difference between
   // one DB round-trip and hundreds.
-  await enqueuePhotoScanBulkPerUser(photoId, userIds, "face_assignment");
+  await enqueuePhotoScanBulkPerUser(photoId, userIds, "face_assignment", false, priority);
   triggerWorkers();
 }
 
@@ -3293,8 +3298,11 @@ export async function updatePhotoCurationLogic(
     }
   }
 
-  // After hiding a photo, check if it belongs to an unreviewed group where all
-  // remaining members are now hidden. If so, mark the group as reviewed.
+  // After hiding a photo, check whether it belongs to an unreviewed group that
+  // now has fewer than two visible members. Such a group has nothing left to
+  // compare (you can't review a single photo against itself), so mark it
+  // reviewed — otherwise it would linger as unreviewed forever, with no badge
+  // to ever re-open it.
   if (status === "hidden") {
     const memberOfGroups = await dbAll<{ group_id: number }>(
       db.select({ group_id: photoGroupMembers.group_id })
@@ -3325,8 +3333,8 @@ export async function updatePhotoCurationLogic(
           ))
       );
 
-      if (visibleMembers.length === 0) {
-        // All members are hidden – mark group as reviewed
+      if (visibleMembers.length < 2) {
+        // Fewer than two members are still visible – nothing left to review.
         await dbExec(
           db.update(photoGroups)
             .set({ reviewed_at: new Date().toISOString() })
@@ -5941,6 +5949,9 @@ export function scheduleRegroup(userId: number): Promise<void> {
           await new Promise((r) => setTimeout(r, REGROUP_DEBOUNCE_MS));
         }
       } while (groupingPending.has(userId));
+      // Groups may have changed — tell the user's open views to refresh so new
+      // review badges become tappable without a remount.
+      notifyUserPhotosScanned(userId);
     } finally {
       groupingRunning.delete(userId);
     }

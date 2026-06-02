@@ -47,6 +47,7 @@ import {
   getUsersWithPhotoAccess,
 } from "./photo.service";
 import { scheduleRecapsRebuild } from "./recaps.service";
+import { notifyUserPhotosScanned } from "./scan-refresh-events";
 
 // Scan services whose completion can invalidate recaps for every user that
 // can see the photo (global services have no user_id on the job itself).
@@ -227,9 +228,10 @@ class ScanWorker {
       await markJobDone(job.id);
 
       // After face_detection completes, enqueue face_assignment for ALL users
-      // who have access to the photo (owner + shared album members).
+      // who have access to the photo (owner + shared album members). Inherit the
+      // detection job's priority so a fresh upload's fan-out stays high-priority.
       if (this.service === "face_detection") {
-        enqueueFaceAssignmentForAllUsers(job.photo_id).catch((err) =>
+        enqueueFaceAssignmentForAllUsers(job.photo_id, job.priority).catch((err) =>
           console.error(`[scan-worker] face_assignment enqueue error after face_detection job ${job.id}:`, err),
         );
       }
@@ -289,6 +291,10 @@ class ScanWorker {
             scheduleRecapsRebuild(uid).catch((err) =>
               console.error(`[scan-worker] recaps rebuild error for user ${uid} after ${this.service} job ${job.id}:`, err),
             );
+            // Quality just produced a new ai_quality_score — tell viewers so the
+            // compare view's "?%" fills in live instead of after a remount.
+            // (Reuses this block's access lookup; grouping fires its own event.)
+            if (this.service === "quality") notifyUserPhotosScanned(uid);
           }
         }).catch((err) =>
           console.error(`[scan-worker] recaps rebuild lookup error after ${this.service} job ${job.id}:`, err),

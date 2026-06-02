@@ -8,6 +8,7 @@ import {
   users,
   photoGroups,
   photoGroupMembers,
+  photoCuration,
 } from "../db/schema";
 import { dbInsertReturning } from "../db/adapter";
 import { createUserLogic } from "../user/user.service";
@@ -28,6 +29,7 @@ describe("Gallery grid – album scope", () => {
   beforeEach(async () => {
     await db.delete(photoGroupMembers);
     await db.delete(photoGroups);
+    await db.delete(photoCuration);
     await db.delete(albumPhotos);
     await db.delete(albumShares);
     await db.delete(albums);
@@ -129,5 +131,35 @@ describe("Gallery grid – album scope", () => {
     const albumGrid = await listGalleryGridLogic(owner.id, { albumScopeId: album.id }, opts);
     expect(albumGrid.total).toBe(2);
     expect(albumGrid.photos.map((p) => p.id).sort()).toEqual([dup, pick].sort());
+  });
+
+  it("drops the group badge once only one member is still visible", async () => {
+    const album = await service.createAlbumLogic(owner.id, { name: "Dupes" });
+    const pick = await makePhoto(owner.id, "keep.jpg");
+    const dup = await makePhoto(owner.id, "dup.jpg");
+    await service.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: pick });
+    await service.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: dup });
+
+    const group = await dbInsertReturning<{ id: number }>(
+      db
+        .insert(photoGroups)
+        .values({ user_id: owner.id, cover_photo_id: pick })
+        .returning({ id: photoGroups.id }),
+    );
+    await db.insert(photoGroupMembers).values([
+      { group_id: group!.id, photo_id: pick, similarity_rank: 0 },
+      { group_id: group!.id, photo_id: dup, similarity_rank: 1 },
+    ]);
+
+    // Both members visible → the cover carries a badge counting 2 members.
+    const before = await listGalleryGridLogic(owner.id, { albumScopeId: album.id }, opts);
+    expect(before.photos.find((p) => p.id === pick)?.group?.member_count).toBe(2);
+
+    // Hide one member: only one visible member remains, so there is nothing
+    // left to compare — no cell of the group gets a badge anymore.
+    await db.insert(photoCuration).values({ user_id: owner.id, photo_id: dup, status: "hidden" });
+    const after = await listGalleryGridLogic(owner.id, { albumScopeId: album.id }, opts);
+    expect(after.photos.find((p) => p.id === pick)?.group).toBeUndefined();
+    expect(after.photos.find((p) => p.id === dup)?.group).toBeUndefined();
   });
 });

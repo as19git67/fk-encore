@@ -620,7 +620,9 @@ onMounted(async () => {
 .albums-view {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - var(--menubar-height, 3.5rem));
+  /* `100dvh` (not `100vh`) so the view matches the visible viewport on mobile;
+     `100vh` is the large viewport and made the page scroll under the navbar. */
+  height: calc(100dvh - var(--menubar-height, 3.5rem));
   /* The VirtualAlbumGrid is the scroll container — keep this one static so
      the subheader stays pinned to the top without sticky-positioning hacks. */
   overflow: hidden;

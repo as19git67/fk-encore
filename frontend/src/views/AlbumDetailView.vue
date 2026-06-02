@@ -426,15 +426,23 @@ async function performRemoveFromAlbum(ids: number[]) {
 
 const albumPhotoIds = computed(() => new Set(rawAlbumPhotos.value.map(p => p.id)))
 
-// Groups scoped to this album: only include groups where at least 2 photos
-// are in the album. Trim each group's member list to the album members and
-// choose an album-internal cover photo.
+// Album photos that are still visible (not hidden via curation). A group whose
+// members have mostly been hidden is no longer reviewable, so groups are scoped
+// to these rather than to every album photo.
+const visibleAlbumPhotoIds = computed(
+  () => new Set(rawAlbumPhotos.value.filter(p => p.curation_status !== 'hidden').map(p => p.id)),
+)
+
+// Groups scoped to this album: only include groups where at least 2 *visible*
+// (non-hidden) photos are in the album — once a near-duplicate has been
+// deselected there is nothing left to compare. Trim each group's member list to
+// the visible album members and choose a visible cover photo.
 const albumPhotoGroups = computed<PhotoGroup[]>(() => {
   const result: PhotoGroup[] = []
   for (const g of photoGroupsList.value) {
-    const membersInAlbum = g.photo_ids.filter(id => albumPhotoIds.value.has(id))
+    const membersInAlbum = g.photo_ids.filter(id => visibleAlbumPhotoIds.value.has(id))
     if (membersInAlbum.length < 2) continue
-    const coverInAlbum = g.cover_photo_id && albumPhotoIds.value.has(g.cover_photo_id)
+    const coverInAlbum = g.cover_photo_id && visibleAlbumPhotoIds.value.has(g.cover_photo_id)
       ? g.cover_photo_id
       : membersInAlbum[0]
     result.push({
@@ -860,6 +868,22 @@ async function loadData() {
 
 async function loadPersons() {
   try { await fetchPersons() } catch { /* ignore */ }
+}
+
+// Lightweight refresh of the group list and album photos (incl. fresh quality
+// scores) without the full-screen loading state or the scroll-anchor reset that
+// loadData() does. Used when a grid stack badge is tapped before the
+// post-upload scans (grouping, quality) have streamed back into our cached
+// data — so the first tap works and the compare opens with real scores.
+async function refreshGroupsAndPhotos() {
+  try {
+    const [albumRes, groupsRes] = await Promise.all([
+      getAlbum(albumId.value),
+      listPhotoGroups().catch(() => ({ groups: [] })),
+    ])
+    album.value = albumRes
+    photoGroupsList.value = groupsRes.groups
+  } catch { /* keep current data on failure */ }
 }
 
 async function loadSidebarData(photoId: number) {
@@ -1445,10 +1469,18 @@ function handleGridPhotoClick(entry: GalleryGridEntry) {
   if (window.innerWidth <= 768) void openGridFullscreenAt(idx)
 }
 
-function handleGridStackClick(entry: GalleryGridEntry) {
+async function handleGridStackClick(entry: GalleryGridEntry) {
   if (!entry.group) return
-  const groups = photoGroupsList.value
-  const found = groups.find((g) => g.id === entry.group!.id) ?? null
+  let found = photoGroupsList.value.find((g) => g.id === entry.group!.id) ?? null
+  if (!found) {
+    // The badge can appear (the backend already grouped the upload) before our
+    // cached group list caught up — without this the first tap was a silent
+    // no-op until the album was re-entered. Refresh once (also picks up fresh
+    // quality scores so the compare shows real %, not "?%"), then retry.
+    await refreshGroupsAndPhotos()
+    found = photoGroupsList.value.find((g) => g.id === entry.group!.id) ?? null
+  }
+  if (!found) return
   preReviewPhotoId.value = cursorPhoto.value?.id ?? null
   activeGroup.value = found
 }
@@ -1457,10 +1489,15 @@ function handleGridStackClick(entry: GalleryGridEntry) {
  *  GalleryView's flow, but anchors the post-review restore on the
  *  fullscreen photo so closing the review puts the user back where they
  *  came from (#374). */
-function onFullscreenOpenGroupReview() {
+async function onFullscreenOpenGroupReview() {
   const g = cursorGroup.value
   if (!g) return
-  const found = photoGroupsList.value.find((row) => row.id === g.id) ?? null
+  let found = photoGroupsList.value.find((row) => row.id === g.id) ?? null
+  if (!found) {
+    // Same staleness guard as handleGridStackClick (post-upload race).
+    await refreshGroupsAndPhotos()
+    found = photoGroupsList.value.find((row) => row.id === g.id) ?? null
+  }
   if (!found) return
   preReviewPhotoId.value = cursorPhoto.value?.id ?? null
   closeGridFullscreen()
@@ -1508,22 +1545,13 @@ function selectGridIndex(idx: number) {
 
 function selectAfterGroup(group: PhotoGroup | null) {
   if (!galleryRef.value) return
-  // Prefer the photo the user had selected before entering the review: if it
-  // survived (wasn't hidden) restore it so the grid position is kept (#374).
-  const beforeId = preReviewPhotoId.value
+  // Focus a photo that is still in the grid after the review hid the rejected
+  // ones. Anchoring on a now-hidden photo made the grid briefly land on it and
+  // then snap to the first album image once the hidden ones were removed.
+  const anchorId = postReviewAnchorId(group)
   preReviewPhotoId.value = null
-  if (beforeId !== null) {
-    const idx = galleryRef.value.findLoadedIndexById(beforeId)
-    if (idx !== null) {
-      selectGridIndex(idx)
-      return
-    }
-  }
-  // Original photo was hidden during the review (or none was selected):
-  // fall back to the group's kept cover photo, then to the first photo.
-  const coverId = group?.cover_photo_id
-  if (coverId) {
-    const idx = galleryRef.value.findLoadedIndexById(coverId)
+  if (anchorId !== null) {
+    const idx = galleryRef.value.findLoadedIndexById(anchorId)
     if (idx !== null) {
       selectGridIndex(idx)
       return
@@ -1532,11 +1560,37 @@ function selectAfterGroup(group: PhotoGroup | null) {
   selectGridIndex(0)
 }
 
+// True when `id` is still present in the (filter-aware) album photo list — i.e.
+// it survived the review and is safe to focus.
+function isAlbumPhotoVisible(id: number | null | undefined): boolean {
+  return id != null && albumPhotos.value.some((p) => p.id === id)
+}
+
+// Pick a still-visible photo to focus after a review. Preference order:
+// the user's pre-review photo if it wasn't hidden, then the group's kept AI
+// pick, then any surviving group member, then its cover. Returns null when
+// nothing from the group survived so callers fall back to the first photo.
+function postReviewAnchorId(group: PhotoGroup | null): number | null {
+  if (isAlbumPhotoVisible(preReviewPhotoId.value)) return preReviewPhotoId.value
+  for (const id of group?.ai_picked_photo_ids ?? []) {
+    if (isAlbumPhotoVisible(id)) return id
+  }
+  for (const id of group?.photo_ids ?? []) {
+    if (isAlbumPhotoVisible(id)) return id
+  }
+  if (isAlbumPhotoVisible(group?.cover_photo_id ?? null)) return group!.cover_photo_id!
+  return null
+}
+
 async function handleGroupClose() {
   const group = activeGroup.value
   activeGroup.value = null
   await loadData()
-  await galleryRef.value?.reload()
+  // Reload the grid centred on a still-visible photo so the just-hidden ones
+  // being removed can't leave the anchor pointing at nothing (which snapped
+  // the grid to the first image).
+  const anchorId = postReviewAnchorId(group)
+  await galleryRef.value?.reload(anchorId !== null ? { aroundPhotoId: anchorId } : undefined)
   selectAfterGroup(group)
 }
 
@@ -1571,7 +1625,10 @@ async function handleGroupNext(reviewedGroupId: number) {
   galleryRef.value?.markGroupReviewed(reviewedGroupId)
   const candidateId = albumPhotoGroups.value.find(g => !g.reviewed_at && g.id !== reviewedGroupId)?.id
   await loadData()
-  await galleryRef.value?.reload()
+  // Anchor on a still-visible photo of the just-reviewed group (see
+  // handleGroupClose); harmless when we immediately open the next group.
+  const anchorId = postReviewAnchorId(activeGroup.value)
+  await galleryRef.value?.reload(anchorId !== null ? { aroundPhotoId: anchorId } : undefined)
   if (candidateId !== undefined) {
     const refreshed = albumPhotoGroups.value.find(g => g.id === candidateId && !g.reviewed_at)
     activeGroup.value = refreshed ?? null
@@ -1672,6 +1729,31 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
   }
   void loadData()
 })
+
+// New similar-photo groups and quality scores are produced asynchronously
+// after upload. The backend emits `photos/scan.updated` once those scans
+// settle; refresh the cached group list + album photos (so review badges
+// become tappable and "?%" quality fills in) and re-anchor the grid so new
+// badges appear — all without the user having to leave and re-enter the
+// album. Debounced because a bulk upload settles in bursts.
+let scanRefreshTimer: ReturnType<typeof setTimeout> | null = null
+useRealtimeEvent('photos', 'scan.updated', () => {
+  if (scanRefreshTimer) return
+  scanRefreshTimer = setTimeout(() => {
+    scanRefreshTimer = null
+    void (async () => {
+      await refreshGroupsAndPhotos()
+      // Surface freshly-grouped photos' badges in the grid, anchored on the
+      // current position so the view doesn't jump. Skip while a review or
+      // fullscreen overlay is open to avoid disturbing it.
+      if (viewMode.value === 'grid' && !activeGroup.value && !isFullscreen.value && !isMapFullscreen.value) {
+        const anchor = cursorPhoto.value?.id ?? galleryAnchorPhotoId.value ?? undefined
+        await galleryRef.value?.reload(anchor != null ? { aroundPhotoId: anchor } : undefined)
+      }
+    })()
+  }, 1000)
+})
+onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 </script>
 
 <template>

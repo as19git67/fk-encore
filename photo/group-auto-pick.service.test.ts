@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { and, eq, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbExec, dbInsertReturning } from "../db/adapter";
@@ -22,6 +24,7 @@ import {
   recomputeAiPicksForAllUsers,
   recomputeAiPicksForGroups,
 } from "./group-auto-pick.service";
+import { updatePhotoCurationLogic } from "./photo.service";
 
 async function makeUser(email: string): Promise<number> {
   const row = await dbInsertReturning<{ id: number }>(
@@ -836,7 +839,10 @@ describe("listReviewQueueLogic — peer_curation aggregate (Phase 1)", () => {
     const peer = await makeUser("peer-private@test.com");
 
     const px = await makePhoto(owner, { details: { sharpness: 0.50 } });
-    await makeGroup(owner, px, [px]);
+    // Second visible member so the group still has >= 2 reviewable members
+    // and therefore appears in the queue (single-member groups are skipped).
+    const py = await makePhoto(owner, { details: { sharpness: 0.50 } });
+    await makeGroup(owner, px, [px, py]);
 
     // Peer's private album that the photo is also in, but not shared
     // with owner.
@@ -876,8 +882,10 @@ describe("listReviewQueueLogic — peer_curation aggregate (Phase 1)", () => {
     await shareAlbum(album, peer);
 
     const px = await makePhoto(owner, { details: { sharpness: 0.50 } });
+    // Second visible member so the group stays reviewable (>= 2 members).
+    const py = await makePhoto(owner, { details: { sharpness: 0.50 } });
     await addPhotoToAlbum(album, px);
-    await makeGroup(owner, px, [px]);
+    await makeGroup(owner, px, [px, py]);
 
     await setCuration(owner, px, "favorite"); // own → must be excluded
     await setCuration(peer, px, "hidden");    // peer → counts
@@ -997,5 +1005,67 @@ describe("acceptPeerConsensusLogic (Phase 2)", () => {
 
     const [grp] = await db.select().from(photoGroups).where(eq(photoGroups.id, g));
     expect(grp.reviewed_at).not.toBeNull();
+  });
+});
+
+describe("groups shrink below two visible members", () => {
+  it("auto-marks a group reviewed when hiding leaves only one visible member", async () => {
+    const owner = await makeUser("owner-shrink@test.com");
+    const a = await makePhoto(owner, { details: { sharpness: 0.5 } });
+    const b = await makePhoto(owner, { details: { sharpness: 0.5 } });
+    const g = await makeGroup(owner, a, [a, b]);
+
+    // Hide one member through the curation endpoint: only one visible member
+    // remains, so there is nothing left to compare and the group is resolved.
+    await updatePhotoCurationLogic(owner, b, "hidden");
+
+    const [grp] = await db.select().from(photoGroups).where(eq(photoGroups.id, g));
+    expect(grp.reviewed_at).not.toBeNull();
+  });
+
+  it("keeps the review queue free of groups with fewer than two visible members", async () => {
+    const owner = await makeUser("owner-queue-skip@test.com");
+    const a = await makePhoto(owner, { details: { sharpness: 0.5 } });
+    const b = await makePhoto(owner, { details: { sharpness: 0.5 } });
+    const g = await makeGroup(owner, a, [a, b]);
+
+    // Both visible → the group is queued for review.
+    const before = await listReviewQueueLogic(owner);
+    expect(before.groups.some((x) => x.id === g)).toBe(true);
+
+    // Hide one member directly (no auto-resolve): the queue must still skip it
+    // because only one visible member is left — covers legacy / hard-delete
+    // rows that were never explicitly marked reviewed.
+    await setCuration(owner, b, "hidden");
+    const after = await listReviewQueueLogic(owner);
+    expect(after.groups.some((x) => x.id === g)).toBe(false);
+    expect(after.total).toBe(0);
+  });
+
+  it("backfill migration 0094 resolves lingering shrunk groups but leaves healthy ones", async () => {
+    const owner = await makeUser("owner-backfill@test.com");
+    // Shrunk group: one member hidden via a direct curation row (no
+    // auto-resolve), so reviewed_at was never set — exactly the legacy state
+    // the backfill targets.
+    const a = await makePhoto(owner);
+    const b = await makePhoto(owner);
+    const shrunk = await makeGroup(owner, a, [a, b]);
+    await setCuration(owner, b, "hidden");
+    // Healthy group: two visible members — must stay reviewable.
+    const c = await makePhoto(owner);
+    const d = await makePhoto(owner);
+    const healthy = await makeGroup(owner, c, [c, d]);
+
+    // Run the real migration SQL (not a copy) against the current data.
+    const migrationSql = readFileSync(
+      join(process.cwd(), "db/migrations/postgres/0094_resolve_shrunk_photo_groups.sql"),
+      "utf8",
+    );
+    await db.execute(sql.raw(migrationSql));
+
+    const [shrunkRow] = await db.select().from(photoGroups).where(eq(photoGroups.id, shrunk));
+    const [healthyRow] = await db.select().from(photoGroups).where(eq(photoGroups.id, healthy));
+    expect(shrunkRow.reviewed_at).not.toBeNull();
+    expect(healthyRow.reviewed_at).toBeNull();
   });
 });
