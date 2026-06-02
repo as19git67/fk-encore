@@ -771,12 +771,13 @@ watchEffect(() => {
   }
 })
 
-function handleMapFullscreen(dayPhotos: Photo[], startIndex: number, _day: string) {
-  // Scope fullscreen navigation to the photos of the day TripMap has
-  // selected. The user steps through the day in the overlay; switching
-  // to another day happens via the timeline.
-  mapFullscreenPhotos.value = dayPhotos
-  mapFullscreenIndex.value = Math.max(0, Math.min(startIndex, dayPhotos.length - 1))
+function handleMapFullscreen(photos: Photo[], startIndex: number, _day: string) {
+  // TripMap hands us the whole trip's photos in chronological order so the
+  // overlay (paging and the idle slideshow) runs continuously across day and
+  // stop boundaries. On close we sync the map's selected stop to the photo
+  // the user ended on (see closeMapFullscreen).
+  mapFullscreenPhotos.value = photos
+  mapFullscreenIndex.value = Math.max(0, Math.min(startIndex, photos.length - 1))
   isMapFullscreen.value = true
 }
 
