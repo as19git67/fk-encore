@@ -9,7 +9,7 @@ import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
 import { useAuthStore } from '../stores/auth'
 import type { GalleryGridGroup } from '../api/gallery'
 import { formatPhotoDateCompact, formatLocationLabel, toLocalIsoDate } from '../utils/dateFormat'
-import { shouldArmSlideshow, slideshowReachedEnd, isDayChange, type SlideshowState } from '../utils/slideshow'
+import { shouldArmSlideshow, slideshowReachedEnd, isDayChange, shouldShowCaption, type SlideshowState } from '../utils/slideshow'
 
 const props = withDefaults(defineProps<{
   photo: Photo
@@ -614,6 +614,9 @@ function formatDate(photo: Photo) {
   return formatPhotoDateCompact(photo.taken_at || photo.created_at)
 }
 
+/** The photo's description, trimmed — shown as the slideshow caption. */
+const descriptionText = computed(() => (props.photo.description ?? '').trim())
+
 function locationLabel(photo: Photo) {
   return formatLocationLabel(photo)
 }
@@ -757,13 +760,25 @@ onUnmounted(() => {
       <HeicImage v-if="nextPhoto" :src="neighbourPreloadSrc(nextPhoto)" />
     </div>
 
-    <!-- Day-change banner: slides in for ~2.5 s when the slideshow crosses
-         into a new day (map mode), then slides back out. -->
-    <Transition name="fs-day-banner">
-      <div v-if="markDayChanges && dayBannerVisible" class="fs-day-banner" aria-live="polite">
-        {{ dayBannerText }}
-      </div>
-    </Transition>
+    <!-- Top-centre overlay stack, above the image: the (transient) day-change
+         banner and, while the slideshow runs, the photo's description as a
+         single ellipsised line. Stacked so they never overlap. -->
+    <div class="fs-top-overlays">
+      <Transition name="fs-top-overlay">
+        <div v-if="markDayChanges && dayBannerVisible" class="fs-day-banner" aria-live="polite">
+          {{ dayBannerText }}
+        </div>
+      </Transition>
+      <Transition name="fs-top-overlay">
+        <div
+          v-if="shouldShowCaption(playing, splitMode, photo.description)"
+          class="fs-caption"
+          :title="descriptionText"
+        >
+          {{ descriptionText }}
+        </div>
+      </Transition>
+    </div>
 
     <div
       ref="contentRef"
@@ -1334,36 +1349,49 @@ onUnmounted(() => {
   height: 2em;
 }
 
-/* Day-change banner (map slideshow). Sits just under the topbar, centred,
-   non-interactive so it never blocks taps. */
-.fs-day-banner {
+/* Top-centre overlay stack, just under the topbar, over the image. Holds the
+   day-change banner and the slideshow description caption, centred and
+   stacked so they never overlap. Non-interactive so it never blocks taps. */
+.fs-top-overlays {
   position: absolute;
   top: 4.25em;
   left: 50%;
   transform: translateX(-50%);
   z-index: 9;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5em;
   max-width: calc(100vw - 2em);
+  pointer-events: none;
+}
+
+/* Shared pill look for both top overlays. Single line, ellipsised — the
+   translucent backdrop keeps the text readable over any photo. */
+.fs-day-banner,
+.fs-caption {
+  max-width: 100%;
   padding: 0.5em 1.1em;
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(8px);
   color: #fff;
-  font-size: 1em;
-  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
-  pointer-events: none;
 }
-.fs-day-banner-enter-active,
-.fs-day-banner-leave-active {
-  transition: opacity 0.35s ease, transform 0.35s ease;
+.fs-day-banner { font-size: 1em; font-weight: 600; }
+.fs-caption { font-size: 0.95em; }
+
+.fs-top-overlay-enter-active,
+.fs-top-overlay-leave-active {
+  transition: opacity 0.3s ease, transform 0.3s ease;
 }
-.fs-day-banner-enter-from,
-.fs-day-banner-leave-to {
+.fs-top-overlay-enter-from,
+.fs-top-overlay-leave-to {
   opacity: 0;
-  transform: translateX(-50%) translateY(-0.8em);
+  transform: translateY(-0.6em);
 }
 
 /* Right side of the topbar — holds the counter pill (or nothing). The

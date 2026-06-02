@@ -61,12 +61,31 @@ dezentes Datums-Label ein, sobald die Navigation in einen neuen Tag wechselt:
 - Aktiv in der Album-Kartenansicht (immer) und im geteilten Album nur, wenn das
   Vollbild aus der Karte geöffnet wurde (`fullscreenFromMap`), nicht im Raster.
 
+## Beschreibungs-Caption
+
+Während die Diashow läuft, wird – **falls vorhanden** – die Foto-Beschreibung
+(`photo.description`) oben zentriert über dem Bild eingeblendet:
+
+- **Einzeilig**, mit `text-overflow: ellipsis` abgeschnitten (`white-space:
+  nowrap`); der volle Text steht im `title`-Tooltip.
+- **Lesbarkeit** über einen dezent transluzenten, leicht geblurrten Hintergrund
+  (`rgba(0,0,0,0.6)`), unabhängig von den Bildfarben.
+- Gezeigt nur, wenn die Diashow läuft, kein Details-Split offen ist und eine
+  nicht-leere Beschreibung existiert (`shouldShowCaption`).
+- Caption und Datums-Banner teilen sich einen zentrierten Top-Stack
+  (`.fs-top-overlays`), sodass sie sich nie überlappen; beide sind
+  `pointer-events: none`.
+
+Die Beschreibung ist in den Slideshow-Fotos verfügbar: Der Grid-Pfad
+hydratisiert das aktuelle Foto per `getPhotoDetailsBatch`, und die
+Album-/Karten-Fotos (`getAlbumLogic`) liefern `description` direkt mit.
+
 ## Betroffene Dateien
 
 | Datei | Rolle |
 |---|---|
-| `frontend/src/components/FullscreenOverlay.vue` | Play/Pause-Button, Auto-Advance-Timer, Datums-Banner, `markDayChanges`-Prop |
-| `frontend/src/utils/slideshow.ts` | Reine Logik: `shouldArmSlideshow`, `slideshowReachedEnd`, `isDayChange` |
+| `frontend/src/components/FullscreenOverlay.vue` | Play/Pause-Button, Auto-Advance-Timer, Datums-Banner, Beschreibungs-Caption, `markDayChanges`-Prop |
+| `frontend/src/utils/slideshow.ts` | Reine Logik: `shouldArmSlideshow`, `slideshowReachedEnd`, `isDayChange`, `shouldShowCaption` |
 | `frontend/src/utils/slideshow.test.ts` | Unit-Tests der Logik |
 | `frontend/src/components/TripMap.vue` | `allStopPhotos`: ganzer Trip als Vollbild-Scope (`open-fullscreen`) |
 | `frontend/src/views/AlbumDetailView.vue` | Map-Overlay: `:markDayChanges="true"`, Stopp-Sync beim Schließen |
