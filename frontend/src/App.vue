@@ -147,7 +147,13 @@ body {
 }
 
 .app-container {
-  min-height: 100vh;
+  /* `100dvh` follows the dynamic viewport (mobile URL bar collapse/expand).
+     `100vh` resolves to the *large* viewport height, so on mobile it forced
+     the container taller than the visible area — the whole document then
+     scrolled a little, dragging each view's subheader up under the sticky
+     navbar. Views that need to scroll their own content use min-height as a
+     floor and grow beyond the viewport as before. */
+  min-height: 100dvh;
   --menubar-height: 3.5rem;
 }
 
