@@ -3,6 +3,7 @@ import {
   shouldArmSlideshow,
   slideshowReachedEnd,
   isDayChange,
+  shouldShowCaption,
   type SlideshowState,
 } from './slideshow'
 
@@ -73,5 +74,28 @@ describe('isDayChange', () => {
 
   it('does not fire within the same day', () => {
     expect(isDayChange('2026-01-14', '2026-01-14')).toBe(false)
+  })
+})
+
+describe('shouldShowCaption', () => {
+  it('shows while playing with a description and no split-view', () => {
+    expect(shouldShowCaption(true, false, 'Sonnenuntergang am Strand')).toBe(true)
+  })
+
+  it('hides when the slideshow is not running', () => {
+    expect(shouldShowCaption(false, false, 'Sonnenuntergang')).toBe(false)
+  })
+
+  it('hides while the details split-view is open', () => {
+    expect(shouldShowCaption(true, true, 'Sonnenuntergang')).toBe(false)
+  })
+
+  it('hides when there is no description', () => {
+    expect(shouldShowCaption(true, false, null)).toBe(false)
+    expect(shouldShowCaption(true, false, undefined)).toBe(false)
+  })
+
+  it('treats a whitespace-only description as empty', () => {
+    expect(shouldShowCaption(true, false, '   ')).toBe(false)
   })
 })
