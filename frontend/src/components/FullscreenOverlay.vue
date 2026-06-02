@@ -491,6 +491,14 @@ function handleKeydown(e: KeyboardEvent) {
     e.stopImmediatePropagation()
     e.preventDefault()
     emit('toggle-cover', props.photo.id)
+  } else if (e.key === 's' || e.key === 'S') {
+    // Start / pause the slideshow (only where one is available).
+    if (!canSlideshow.value) return
+    const tag = (document.activeElement as HTMLElement | null)?.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return
+    e.stopImmediatePropagation()
+    e.preventDefault()
+    togglePlay()
   }
 }
 onMounted(() => window.addEventListener('keydown', handleKeydown, true))
@@ -520,8 +528,6 @@ function scheduleIdleAdvance() {
     playing: playing.value,
     autoAdvanceMs: props.autoAdvanceMs ?? 0,
     hasNext: props.nextPhoto != null,
-    editorOpen: transformEditorVisible.value,
-    detailsActive: props.detailsActive ?? false,
     currentLoaded: currentLoaded.value,
   }
   // No more photos ahead → stop and flip the button back to "play".
@@ -546,9 +552,10 @@ watch(playing, () => scheduleIdleAdvance())
 watch(() => props.photo.id, () => scheduleIdleAdvance())
 watch(() => props.autoAdvanceMs, () => scheduleIdleAdvance())
 watch(() => props.nextPhoto, () => scheduleIdleAdvance())
-// Reschedule (or pause) when the editor / details overlay toggles.
-watch(transformEditorVisible, () => scheduleIdleAdvance())
-watch(() => props.detailsActive, () => scheduleIdleAdvance())
+// Editing a photo stops the slideshow (so the play/pause icon stays correct);
+// the user restarts it after closing the editor. The details flyout, by
+// contrast, lets the slideshow keep running.
+watch(transformEditorVisible, (open) => { if (open) playing.value = false })
 // Start the countdown only once the current photo is fully loaded.
 watch(currentLoaded, () => scheduleIdleAdvance())
 
@@ -957,9 +964,9 @@ onUnmounted(() => {
             :severity="playing ? 'primary' : 'secondary'"
             :class="{ 'fs-toolbar-btn--active': playing }"
             :aria-pressed="playing"
-            :aria-label="playing ? 'Diashow pausieren' : 'Diashow starten'"
+            :aria-label="(playing ? 'Diashow pausieren' : 'Diashow starten') + ' (S)'"
             @click="togglePlay"
-            v-tooltip.top="playing ? 'Diashow pausieren' : 'Diashow starten'"
+            v-tooltip.top="(playing ? 'Diashow pausieren' : 'Diashow starten') + ' (S)'"
           />
           <!-- Real browser fullscreen toggle (Track N / #80). Sits outside
                the `actions` slot so caller overrides still get it. -->
