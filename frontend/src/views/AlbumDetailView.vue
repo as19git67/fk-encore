@@ -53,6 +53,7 @@ import {
   getPhotoDetailsBatch,
   getPhotoFaces,
   getPhotoLandmarks,
+  getPhotoPoiMatches,
   ignoreFace,
   leaveAlbum,
   listPhotoGroups,
@@ -62,6 +63,7 @@ import {
   type CurationStatus,
   type Face,
   type LandmarkItem,
+  type PoiMatchItem,
   type Photo,
   type PhotoFilter,
   type PhotoGroup,
@@ -824,6 +826,8 @@ const detectedFaces = ref<Face[]>([])
 const loadingFaces = ref(false)
 const detectedLandmarks = ref<LandmarkItem[]>([])
 const loadingLandmarks = ref(false)
+const detectedPoiMatches = ref<PoiMatchItem[]>([])
+const loadingPoiMatches = ref(false)
 const reindexingPhoto = ref(false)
 const { persons, fetchPersons, invalidateAlbums } = useReferenceData()
 
@@ -920,12 +924,29 @@ async function refreshGroupsAndPhotos() {
 async function loadSidebarData(photoId: number) {
   loadingFaces.value = true
   loadingLandmarks.value = true
+  loadingPoiMatches.value = true
   try {
-    const [facesRes, landmarksRes] = await Promise.all([getPhotoFaces(photoId), getPhotoLandmarks(photoId)])
-    detectedFaces.value = facesRes.faces
-    detectedLandmarks.value = landmarksRes.landmarks
-  } catch { detectedFaces.value = []; detectedLandmarks.value = [] }
-  finally { loadingFaces.value = false; loadingLandmarks.value = false }
+    // POI matches load alongside faces + landmarks. Each call falls back to
+    // an empty result on error (e.g. osm-admin down) so the rest of the
+    // sidebar still renders. Previously POIs weren't loaded here at all, so
+    // they never showed in the album detail / split-screen sidebar.
+    const [facesRes, landmarksRes, poisRes] = await Promise.all([
+      getPhotoFaces(photoId).catch(() => ({ faces: [] })),
+      getPhotoLandmarks(photoId).catch(() => ({ landmarks: [] })),
+      getPhotoPoiMatches(photoId).catch(() => ({ matches: [] })),
+    ])
+    detectedFaces.value = facesRes.faces ?? []
+    detectedLandmarks.value = landmarksRes.landmarks ?? []
+    detectedPoiMatches.value = poisRes.matches ?? []
+  } catch {
+    detectedFaces.value = []
+    detectedLandmarks.value = []
+    detectedPoiMatches.value = []
+  } finally {
+    loadingFaces.value = false
+    loadingLandmarks.value = false
+    loadingPoiMatches.value = false
+  }
 }
 
 // ── Curation ──────────────────────────────────────────────────────────────────
@@ -2068,6 +2089,8 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           :landmarks="detectedLandmarks"
           :loading-faces="loadingFaces"
           :loading-landmarks="loadingLandmarks"
+          :poi-matches="detectedPoiMatches"
+          :loading-poi-matches="loadingPoiMatches"
           :persons="persons"
           :reindexing-photo="reindexingPhoto"
           :updating-date="updatingDate"
@@ -2222,6 +2245,8 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           :landmarks="detectedLandmarks"
           :loading-faces="loadingFaces"
           :loading-landmarks="loadingLandmarks"
+          :poi-matches="detectedPoiMatches"
+          :loading-poi-matches="loadingPoiMatches"
           :persons="persons"
           :reindexing-photo="reindexingPhoto"
           :updating-date="updatingDate"
@@ -2290,6 +2315,8 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           :landmarks="detectedLandmarks"
           :loading-faces="loadingFaces"
           :loading-landmarks="loadingLandmarks"
+          :poi-matches="detectedPoiMatches"
+          :loading-poi-matches="loadingPoiMatches"
           :persons="persons"
           :reindexing-photo="reindexingPhoto"
           :updating-date="updatingDate"

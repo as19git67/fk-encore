@@ -19,10 +19,11 @@
  *     drags adjust both dims; edge drags adjust the other dim
  *     proportionally and re-centre around the opposite edge.
  */
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { CSSProperties } from 'vue'
 import type { PhotoTransformCrop } from '../utils/photoTransformRecipe'
 import { computeNextCrop, type CropHandle } from '../utils/photoCropDrag'
+import { containFit, cropToWrapper } from '../utils/cropperFit'
 
 const props = defineProps<{
   src: string
@@ -42,6 +43,33 @@ const emit = defineEmits<{
 const wrapper = ref<HTMLDivElement | null>(null)
 const dragging = ref(false)
 
+// Measured wrapper size. The image is `object-fit: contain` inside the
+// wrapper; when the wrapper's aspect doesn't match the image's (e.g. a
+// portrait image in a wider cell, where `width: 100%` makes the wrapper wider
+// than the image), the image is letterboxed/pillarboxed. We map the crop
+// overlay onto the *rendered image* rect so it never spills into those bars.
+const wrapperW = ref(0)
+const wrapperH = ref(0)
+let resizeObserver: ResizeObserver | null = null
+
+function measureWrapper() {
+  const el = wrapper.value
+  if (!el) return
+  wrapperW.value = el.clientWidth
+  wrapperH.value = el.clientHeight
+}
+
+/** Rendered image rect inside the wrapper, as fractions of the wrapper. */
+const fit = computed(() => containFit(wrapperW.value, wrapperH.value, props.imageAspect))
+
+onMounted(() => {
+  measureWrapper()
+  if (typeof ResizeObserver !== 'undefined' && wrapper.value) {
+    resizeObserver = new ResizeObserver(measureWrapper)
+    resizeObserver.observe(wrapper.value)
+  }
+})
+
 // Pointer-state for the active drag.
 interface DragState {
   handle: CropHandle
@@ -55,30 +83,37 @@ let active: DragState | null = null
 
 const handleList: Exclude<CropHandle, 'body'>[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
 
+// Crop rect mapped from image coords onto the rendered-image rect inside the
+// wrapper (accounts for letterbox/pillarbox).
+const rectFrac = computed(() => cropToWrapper(props.crop, fit.value))
+
 const rectStyle = computed<CSSProperties>(() => ({
-  left: `${props.crop.x * 100}%`,
-  top: `${props.crop.y * 100}%`,
-  width: `${props.crop.w * 100}%`,
-  height: `${props.crop.h * 100}%`,
+  left: `${rectFrac.value.left * 100}%`,
+  top: `${rectFrac.value.top * 100}%`,
+  width: `${rectFrac.value.width * 100}%`,
+  height: `${rectFrac.value.height * 100}%`,
 }))
 
-// Dim overlay — four absolutely-positioned strips around the crop rect.
+// Dim overlay — four absolutely-positioned strips around the crop rect. Uses
+// the mapped rect so the dimming (and the bright crop window) align with the
+// visible image; the inert letterbox bars get dimmed too, which is invisible
+// against the dark background.
 const dimStyles = computed(() => {
-  const { x, y, w, h } = props.crop
+  const { left, top, width, height } = rectFrac.value
   return {
-    top: { top: 0, left: 0, right: 0, height: `${y * 100}%` },
-    bottom: { left: 0, right: 0, bottom: 0, top: `${(y + h) * 100}%` },
+    top: { top: 0, left: 0, right: 0, height: `${top * 100}%` },
+    bottom: { left: 0, right: 0, bottom: 0, top: `${(top + height) * 100}%` },
     left: {
-      top: `${y * 100}%`,
-      bottom: `${(1 - y - h) * 100}%`,
+      top: `${top * 100}%`,
+      bottom: `${(1 - top - height) * 100}%`,
       left: 0,
-      width: `${x * 100}%`,
+      width: `${left * 100}%`,
     },
     right: {
-      top: `${y * 100}%`,
-      bottom: `${(1 - y - h) * 100}%`,
+      top: `${top * 100}%`,
+      bottom: `${(1 - top - height) * 100}%`,
       right: 0,
-      width: `${(1 - x - w) * 100}%`,
+      width: `${(1 - left - width) * 100}%`,
     },
   } as Record<'top' | 'bottom' | 'left' | 'right', Record<string, string | number>>
 })
@@ -175,16 +210,28 @@ function onKeydown(ev: KeyboardEvent) {
 }
 
 /**
- * The rendered image's pixel rectangle inside the wrapper. Because the
- * wrapper has aspect-ratio: imageAspect, the image fills the wrapper
- * 1:1 — `getBoundingClientRect` on the wrapper itself is correct.
+ * The rendered image's pixel rectangle inside the wrapper. The image is
+ * `object-fit: contain`, so when the wrapper aspect differs from the image
+ * aspect the image is letterboxed/pillarboxed — derive the real image rect
+ * from the wrapper rect and the contained-fit fractions. Used to convert drag
+ * deltas (screen px) into normalised image units.
  */
 function renderedImageRect(): DOMRect | null {
-  return wrapper.value?.getBoundingClientRect() ?? null
+  const r = wrapper.value?.getBoundingClientRect()
+  if (!r) return null
+  const f = fit.value
+  return new DOMRect(
+    r.left + f.ox * r.width,
+    r.top + f.oy * r.height,
+    f.ow * r.width,
+    f.oh * r.height,
+  )
 }
 
 onBeforeUnmount(() => {
   active = null
+  resizeObserver?.disconnect()
+  resizeObserver = null
 })
 </script>
 
