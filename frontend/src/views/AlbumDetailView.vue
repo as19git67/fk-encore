@@ -2256,6 +2256,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       :showDetailsButton="true"
       :detailsActive="fullscreenDetailsOpen"
       :autoAdvanceMs="10000"
+      :markDayChanges="true"
       :currentIndex="mapFullscreenIndex + 1"
       :totalCount="mapFullscreenPhotos.length"
       @close="closeMapFullscreen(); fullscreenDetailsOpen = false"

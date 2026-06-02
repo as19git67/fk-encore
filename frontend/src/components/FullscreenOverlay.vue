@@ -8,7 +8,7 @@ import { useUserPhotoTransform, invalidateUserTransform } from '../composables/u
 import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
 import { useAuthStore } from '../stores/auth'
 import type { GalleryGridGroup } from '../api/gallery'
-import { formatPhotoDateCompact, formatLocationLabel } from '../utils/dateFormat'
+import { formatPhotoDateCompact, formatLocationLabel, toLocalIsoDate } from '../utils/dateFormat'
 
 const props = withDefaults(defineProps<{
   photo: Photo
@@ -19,6 +19,12 @@ const props = withDefaults(defineProps<{
   showDetailsButton?: boolean
   /** When true the details icon switches to a close icon (✕). Default: false. */
   detailsActive?: boolean
+  /**
+   * When true, briefly slide in a date banner whenever navigation crosses
+   * into a different day (e.g. the map slideshow running through a whole
+   * trip), so the day change is recognisable. Default: false.
+   */
+  markDayChanges?: boolean
   /** 1-based index of the current photo in the navigated set. When
    *  provided together with `totalCount > 0`, the overlay renders an
    *  "X / N" pill between the prev/next nav buttons. */
@@ -57,6 +63,7 @@ const props = withDefaults(defineProps<{
   autoAdvanceMs: 0,
   currentIndex: 0,
   totalCount: 0,
+  markDayChanges: false,
 })
 
 const showCounter = computed(() => props.totalCount > 0 && props.currentIndex > 0)
@@ -548,6 +555,46 @@ onUnmounted(() => {
   window.removeEventListener('wheel', bumpIdleTimer, true)
 })
 
+// ── Day-change banner (map slideshow) ───────────────────────────────────────
+// When `markDayChanges` is set, briefly slide a date label in whenever
+// navigation moves into a different day, so a slideshow running across a whole
+// trip makes the day boundary recognisable — without pausing the playback.
+const dayBannerText = ref('')
+const dayBannerVisible = ref(false)
+let dayBannerTimer: ReturnType<typeof setTimeout> | null = null
+let lastDayKey: string | null = null
+
+function dayKeyOf(photo: Photo): string {
+  return toLocalIsoDate(new Date(photo.taken_at || photo.created_at))
+}
+
+function showDayBanner(photo: Photo) {
+  dayBannerText.value = new Date(photo.taken_at || photo.created_at).toLocaleDateString('de-DE', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+  })
+  dayBannerVisible.value = true
+  if (dayBannerTimer !== null) clearTimeout(dayBannerTimer)
+  dayBannerTimer = setTimeout(() => {
+    dayBannerVisible.value = false
+    dayBannerTimer = null
+  }, 2500)
+}
+
+watch(() => props.photo.id, () => {
+  if (!props.markDayChanges) return
+  const key = dayKeyOf(props.photo)
+  // Announce only a *change* — never the photo the overlay opened on.
+  if (lastDayKey !== null && key !== lastDayKey) showDayBanner(props.photo)
+  lastDayKey = key
+})
+
+onMounted(() => {
+  if (props.markDayChanges) lastDayKey = dayKeyOf(props.photo)
+})
+onUnmounted(() => {
+  if (dayBannerTimer !== null) clearTimeout(dayBannerTimer)
+})
+
 function formatDate(photo: Photo) {
   // Same compact format the detail sidebar uses (e.g. "14.01.2026, 09:38")
   // — the long-weekday form was overflowing the topbar on narrow viewports.
@@ -696,6 +743,14 @@ onUnmounted(() => {
       <HeicImage v-if="prevPhoto" :src="neighbourPreloadSrc(prevPhoto)" />
       <HeicImage v-if="nextPhoto" :src="neighbourPreloadSrc(nextPhoto)" />
     </div>
+
+    <!-- Day-change banner: slides in for ~2.5 s when the slideshow crosses
+         into a new day (map mode), then slides back out. -->
+    <Transition name="fs-day-banner">
+      <div v-if="markDayChanges && dayBannerVisible" class="fs-day-banner" aria-live="polite">
+        {{ dayBannerText }}
+      </div>
+    </Transition>
 
     <div
       ref="contentRef"
@@ -1250,6 +1305,38 @@ onUnmounted(() => {
 .fs-topbar :deep(.p-button-rounded) {
   width: 2em;
   height: 2em;
+}
+
+/* Day-change banner (map slideshow). Sits just under the topbar, centred,
+   non-interactive so it never blocks taps. */
+.fs-day-banner {
+  position: absolute;
+  top: 4.25em;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9;
+  max-width: calc(100vw - 2em);
+  padding: 0.5em 1.1em;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  color: #fff;
+  font-size: 1em;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+.fs-day-banner-enter-active,
+.fs-day-banner-leave-active {
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+.fs-day-banner-enter-from,
+.fs-day-banner-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-0.8em);
 }
 
 /* Right side of the topbar — holds the counter pill (or nothing). The

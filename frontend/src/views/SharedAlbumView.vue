@@ -675,6 +675,7 @@ onUnmounted(() => {
       :showDetailsButton="showInfoButton"
       :detailsActive="showInfo"
       :autoAdvanceMs="10000"
+      :markDayChanges="fullscreenFromMap"
       :currentIndex="fullscreenIndex + 1"
       :totalCount="fullscreenPhotos.length"
       @close="closeFullscreen"
