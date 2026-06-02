@@ -24,18 +24,25 @@ Eine Diashow existiert genau dann, wenn der `FullscreenOverlay` mit
 - **Toolbar-Button:** In der Action-Bar des Overlays (außerhalb des
   `actions`-Slots, damit Slot-Overrides ihn nicht verdrängen). Sichtbar, sobald
   `autoAdvanceMs > 0`.
+- **Tastatur:** `S` startet/pausiert die Diashow (überall, wo sie verfügbar
+  ist; nicht beim Tippen in Eingabefeldern).
 - **Icon = Klick-Aktion:** Das Icon zeigt immer, was der Klick auslöst – ▶
-  (`pi-play`) wenn gestoppt, ⏸ (`pi-pause`) während sie läuft.
+  (`pi-play`) wenn gestoppt, ⏸ (`pi-pause`) während sie läuft. Jeder echte
+  Stopp setzt `playing = false`, sodass das Icon stets stimmt.
 - **Intervall & Idle-Reset:** Während des Laufs wird alle `autoAdvanceMs` zum
   nächsten Foto weitergeschaltet. Jede Interaktion (Pointer/Tastatur/Wheel)
   setzt das Intervall zurück, sodass erst nach kurzer Ruhe weitergeschaltet
-  wird. Geöffneter Transform-Editor oder Details-Flyout pausieren ebenfalls.
-- **Automatischer Stopp am Ende:** Gibt es kein nächstes Foto mehr, stoppt die
-  Diashow und das Icon springt zurück auf ▶ (kein Wrap-around).
+  wird. Zwischen zwei Fotos wird gewartet, bis das nächste Bild geladen ist
+  (`playing` bleibt dabei `true`).
+- **Details-Flyout pausiert nicht:** Bei geöffneter Detail-Ansicht läuft die
+  Diashow weiter (die Beschreibung steht dort ohnehin in der Seitenleiste).
+- **Stopps (Icon → ▶):** letztes Foto erreicht (kein Wrap-around), Öffnen des
+  Transform-Editors (Bearbeiten), und das Schließen des Vollbilds.
 
 Die reine Entscheidungslogik ist in `frontend/src/utils/slideshow.ts`
 ausgelagert (`shouldArmSlideshow`, `slideshowReachedEnd`) und unit-getestet; die
-Komponente besitzt nur Timer und `playing`-State.
+Komponente besitzt nur Timer und `playing`-State und setzt `playing = false` bei
+echten Stopps (Listenende, Editor öffnen).
 
 ## Durchlaufen ohne Tages-/Stopp-Grenze (Kartenansicht)
 

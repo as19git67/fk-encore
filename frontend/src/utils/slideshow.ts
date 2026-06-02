@@ -10,10 +10,6 @@ export interface SlideshowState {
   autoAdvanceMs: number
   /** A photo exists after the current one. */
   hasNext: boolean
-  /** The transform editor overlay is open (reading/editing — pause). */
-  editorOpen: boolean
-  /** The details flyout is active (reading — pause). */
-  detailsActive: boolean
   /** The current photo has finished loading/decoding. */
   currentLoaded: boolean
 }
@@ -29,18 +25,15 @@ export function slideshowReachedEnd(s: Pick<SlideshowState, 'playing' | 'hasNext
 /**
  * Whether the auto-advance timer should be (re)armed right now. The slideshow
  * runs only while the user started it, an interval is configured, there's a
- * next photo, nothing is being read/edited on top, and the current photo has
- * finished loading.
+ * next photo, and the current photo has finished loading.
+ *
+ * Things that *stop* the slideshow (reaching the end, opening the transform
+ * editor) clear `playing` directly so the play/pause icon stays correct; they
+ * are intentionally not modelled here as silent pauses. The details flyout no
+ * longer pauses playback at all.
  */
 export function shouldArmSlideshow(s: SlideshowState): boolean {
-  return (
-    s.playing &&
-    s.autoAdvanceMs > 0 &&
-    s.hasNext &&
-    !s.editorOpen &&
-    !s.detailsActive &&
-    s.currentLoaded
-  )
+  return s.playing && s.autoAdvanceMs > 0 && s.hasNext && s.currentLoaded
 }
 
 /**
