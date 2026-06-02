@@ -165,15 +165,16 @@ surface low scores directly:
 
 ### Album-specific restriction
 
-In the album view, groups are additionally constrained to album members
-(`albumPhotoGroups` in `AlbumDetailView.vue`):
+In the album view, groups are additionally constrained to album members that
+are still **visible** (not hidden via curation). The scope set is
+`visibleAlbumPhotoIds` (album photos whose `curation_status !== 'hidden'`):
 
 ```ts
 // Simplified sketch
 for (const g of photoGroupsList.value) {
-  const membersInAlbum = g.photo_ids.filter(id => albumPhotoIds.has(id))
-  if (membersInAlbum.length < 2) continue           // not relevant
-  const coverInAlbum = albumPhotoIds.has(g.cover_photo_id)
+  const membersInAlbum = g.photo_ids.filter(id => visibleAlbumPhotoIds.has(id))
+  if (membersInAlbum.length < 2) continue           // nothing left to compare
+  const coverInAlbum = visibleAlbumPhotoIds.has(g.cover_photo_id)
     ? g.cover_photo_id
     : membersInAlbum[0]                              // fallback
   result.push({ ...g, photo_ids: membersInAlbum, cover_photo_id: coverInAlbum })
@@ -182,8 +183,9 @@ for (const g of photoGroupsList.value) {
 
 This means:
 
-- Only groups with **≥ 2 members in the current album** appear.
-- Members outside the album are filtered out of the group view.
+- Only groups with **≥ 2 visible members in the current album** appear.
+- Members outside the album — or already hidden — are filtered out of the
+  group view (see "Hidden members and group resolution" below).
 - If the original cover is not in the album, an in-album member is used as
   the cover.
 
@@ -194,6 +196,53 @@ group for the same photo (e.g. right after adding a photo to a shared
 album, before the cleanup logic has run). The map-building logic therefore
 iterates **reviewed first, then unreviewed** – the unreviewed one wins
 and drives the stack icon and click behavior.
+
+## Hidden members and group resolution
+
+Hiding a photo writes a per-user `photo_curation` row (`status = 'hidden'`); it
+does **not** remove the photo from `photo_group_members`. A group is only worth
+reviewing while at least **two of its members are still visible**, so visibility
+is taken into account in three places:
+
+- **Grid badge** (`gallery-grid.service.ts`, `loadGroupInfoForPhotos`): the
+  member count joins `photo_curation` and counts only non-hidden members; a
+  group with fewer than two visible members gets **no badge** (nothing left to
+  compare). The count drives the `+N` badge.
+- **Compare view** (`PhotoCompareView.vue`, `groupPhotos`): members that were
+  already hidden when the review opened are excluded — they are not re-fetched
+  and not shown. An in-session hide keeps its tile (via `localCuration`) so
+  undo still works.
+- **Review queue** (`group-auto-pick.service.ts`, `listReviewQueueLogic`):
+  groups with fewer than two visible members are excluded from the queue and
+  its counts (including the high-confidence backlog).
+
+### Auto-resolve
+
+When hiding a photo drops its group below two visible members, there is nothing
+left to compare. `updatePhotoCurationLogic` (`photo.service.ts`) detects this
+and marks the group `reviewed_at`, so it leaves the unreviewed set instead of
+lingering forever with a suppressed badge.
+
+The one-off migration `db/migrations/postgres/0094_resolve_shrunk_photo_groups.sql`
+backfills this for groups that shrank (hides or hard-deleted members) before the
+auto-resolve existed: every unreviewed group with `< 2` visible members (counted
+per group owner) is marked reviewed at startup. It is idempotent
+(`reviewed_at IS NULL` guard).
+
+## Live refresh after async scans
+
+Grouping and quality scoring run asynchronously after upload, so the album view
+would otherwise show stale data until a remount (badges not yet tappable, `?%`
+quality). The backend emits a coalesced per-user realtime event
+`photos/scan.updated` (`photo/scan-refresh-events.ts`) when:
+
+- re-grouping completes (`scheduleRegroup`), and
+- a quality job completes (in `scan-worker.ts`, reusing the recap access lookup).
+
+`AlbumDetailView` subscribes and, debounced, refreshes the cached group list and
+album photos (badges become tappable, quality fills in) and re-anchors the grid
+so new badges appear. As a fallback, tapping a badge whose group isn't cached
+yet also triggers the same refresh on demand.
 
 ## Scenario: review in a partial album
 
@@ -225,8 +274,16 @@ Flow:
   - `addPhotoToAlbumLogic`, `shareAlbumLogic`, `removeAlbumShareLogic`
     (trigger re-grouping for the affected users)
 - `photo/scan-worker.ts` – triggers re-grouping for all users with access
-  when an embedding job finishes.
-- `db/schema.ts` – `photoGroups`, `photoGroupMembers`.
+  when an embedding job finishes; emits `photos/scan.updated` after quality.
+- `photo/gallery-grid.service.ts` – `loadGroupInfoForPhotos` (grid badge,
+  visible-member count + suppression).
+- `photo/group-auto-pick.service.ts` – `listReviewQueueLogic` (review queue,
+  excludes groups with < 2 visible members).
+- `photo/scan-refresh-events.ts` – coalesced `photos/scan.updated` realtime
+  fan-out so open views refresh after async scans.
+- `db/migrations/postgres/0094_resolve_shrunk_photo_groups.sql` – backfill that
+  resolves groups already shrunk below two visible members.
+- `db/schema.ts` – `photoGroups`, `photoGroupMembers`, `photoCuration`.
 - `frontend/src/views/PhotosView.vue` – global view.
 - `frontend/src/views/AlbumDetailView.vue` – album-scoped view.
 - `frontend/src/components/PhotoCompareView.vue` – review / compare overlay.
