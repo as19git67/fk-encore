@@ -53,8 +53,14 @@ runs once per photo:
 Target ratios (both orientations each): **1:1, 4:5, 5:4, 3:4, 4:3, 16:9,
 9:16**.
 
-Photos with neither faces nor landmarks fall back to a centered crop
-matching the requested aspect ratio.
+Crop suggestions are only produced when there is a subject hull (a face) the
+crop can be composed around. Photos with no detected face get **no** crop
+suggestions — a blind centred crop has no compositional value. (Exposure /
+contrast suggestions are independent of faces.) On the upload path this is
+already the case: `assignFacesForUser` returns early for face-less photos
+before the suggestion hook runs; `computeSuggestionCrops` additionally returns
+an empty set for a null hull so the rule also holds for the manual
+`recompute-transform-suggestions` backfill.
 
 ### Storage
 
