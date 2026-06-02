@@ -316,12 +316,12 @@ function openPhotoFromQuery() {
   void router.replace({ query: { ...route.query, photoId: undefined } })
 }
 
-function handleMapFullscreen(dayPhotos: Photo[], startIndex: number, _day: string) {
-  // Scope navigation to the photos of the day TripMap currently has
-  // selected. The user can only step through the day's photos in
-  // fullscreen — other days are reached via the timeline.
-  fullscreenPhotos.value = dayPhotos
-  fullscreenIndex.value = Math.max(0, Math.min(startIndex, dayPhotos.length - 1))
+function handleMapFullscreen(photos: Photo[], startIndex: number, _day: string) {
+  // TripMap hands us the whole trip's photos in chronological order so the
+  // overlay (paging and the idle slideshow) runs continuously across day and
+  // stop boundaries rather than stopping at the end of a single day.
+  fullscreenPhotos.value = photos
+  fullscreenIndex.value = Math.max(0, Math.min(startIndex, photos.length - 1))
   fullscreenFromMap.value = true
   isFullscreen.value = true
 }
@@ -675,6 +675,7 @@ onUnmounted(() => {
       :showDetailsButton="showInfoButton"
       :detailsActive="showInfo"
       :autoAdvanceMs="10000"
+      :markDayChanges="fullscreenFromMap"
       :currentIndex="fullscreenIndex + 1"
       :totalCount="fullscreenPhotos.length"
       @close="closeFullscreen"

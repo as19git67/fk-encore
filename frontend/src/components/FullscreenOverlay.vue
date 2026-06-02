@@ -8,7 +8,8 @@ import { useUserPhotoTransform, invalidateUserTransform } from '../composables/u
 import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
 import { useAuthStore } from '../stores/auth'
 import type { GalleryGridGroup } from '../api/gallery'
-import { formatPhotoDateCompact, formatLocationLabel } from '../utils/dateFormat'
+import { formatPhotoDateCompact, formatLocationLabel, toLocalIsoDate } from '../utils/dateFormat'
+import { shouldArmSlideshow, slideshowReachedEnd, isDayChange, type SlideshowState } from '../utils/slideshow'
 
 const props = withDefaults(defineProps<{
   photo: Photo
@@ -19,6 +20,12 @@ const props = withDefaults(defineProps<{
   showDetailsButton?: boolean
   /** When true the details icon switches to a close icon (✕). Default: false. */
   detailsActive?: boolean
+  /**
+   * When true, briefly slide in a date banner whenever navigation crosses
+   * into a different day (e.g. the map slideshow running through a whole
+   * trip), so the day change is recognisable. Default: false.
+   */
+  markDayChanges?: boolean
   /** 1-based index of the current photo in the navigated set. When
    *  provided together with `totalCount > 0`, the overlay renders an
    *  "X / N" pill between the prev/next nav buttons. */
@@ -57,6 +64,7 @@ const props = withDefaults(defineProps<{
   autoAdvanceMs: 0,
   currentIndex: 0,
   totalCount: 0,
+  markDayChanges: false,
 })
 
 const showCounter = computed(() => props.totalCount > 0 && props.currentIndex > 0)
@@ -67,6 +75,7 @@ const hasActionBar = computed(() => {
   if (props.showDetailsButton !== false) return true
   if (props.canDelete) return true
   if (canEditTransform.value) return true
+  if (canSlideshow.value) return true
   return fullscreenSupported.value
 })
 
@@ -487,11 +496,16 @@ function handleKeydown(e: KeyboardEvent) {
 onMounted(() => window.addEventListener('keydown', handleKeydown, true))
 onUnmounted(() => window.removeEventListener('keydown', handleKeydown, true))
 
-// ── Idle auto-advance (slideshow) ───────────────────────────────────────────
-// When `autoAdvanceMs` > 0 the overlay auto-emits `next` after the user
-// has been idle for that long. Any pointer or keyboard interaction
-// resets the timer.
+// ── Slideshow (play / pause) ────────────────────────────────────────────────
+// The slideshow never auto-starts. The user toggles it with the toolbar
+// play/pause button (shown whenever `autoAdvanceMs` > 0). While `playing`, the
+// overlay emits `next` every `autoAdvanceMs`; any pointer or keyboard
+// interaction resets the interval (so it advances once the user is idle
+// again), and it stops automatically once the last photo is reached.
 let idleTimer: ReturnType<typeof setTimeout> | null = null
+const playing = ref(false)
+/** True when the slideshow can be offered at all (interval configured). */
+const canSlideshow = computed(() => (props.autoAdvanceMs ?? 0) > 0)
 
 function clearIdleTimer() {
   if (idleTimer !== null) {
@@ -502,20 +516,25 @@ function clearIdleTimer() {
 
 function scheduleIdleAdvance() {
   clearIdleTimer()
-  if (!props.autoAdvanceMs || props.autoAdvanceMs <= 0) return
-  if (!props.nextPhoto) return
-  // Pause auto-advance whenever any modal / details overlay is on top
-  // of the photo — the user is reading or editing, not consuming. The
-  // timer resumes from a watcher when the overlay closes.
-  if (transformEditorVisible.value) return
-  if (props.detailsActive) return
-  // Wait until the current photo has finished loading; the watcher on
-  // `currentLoaded` reschedules once decoding is done.
-  if (!currentLoaded.value) return
+  const state: SlideshowState = {
+    playing: playing.value,
+    autoAdvanceMs: props.autoAdvanceMs ?? 0,
+    hasNext: props.nextPhoto != null,
+    editorOpen: transformEditorVisible.value,
+    detailsActive: props.detailsActive ?? false,
+    currentLoaded: currentLoaded.value,
+  }
+  // No more photos ahead → stop and flip the button back to "play".
+  if (slideshowReachedEnd(state)) { playing.value = false; return }
+  if (!shouldArmSlideshow(state)) return
   idleTimer = setTimeout(() => {
     idleTimer = null
     if (props.nextPhoto) emit('next')
   }, props.autoAdvanceMs)
+}
+
+function togglePlay() {
+  playing.value = !playing.value
 }
 
 function bumpIdleTimer() {
@@ -523,6 +542,7 @@ function bumpIdleTimer() {
   scheduleIdleAdvance()
 }
 
+watch(playing, () => scheduleIdleAdvance())
 watch(() => props.photo.id, () => scheduleIdleAdvance())
 watch(() => props.autoAdvanceMs, () => scheduleIdleAdvance())
 watch(() => props.nextPhoto, () => scheduleIdleAdvance())
@@ -546,6 +566,46 @@ onUnmounted(() => {
   window.removeEventListener('pointermove', bumpIdleTimer, true)
   window.removeEventListener('keydown', bumpIdleTimer, true)
   window.removeEventListener('wheel', bumpIdleTimer, true)
+})
+
+// ── Day-change banner (map slideshow) ───────────────────────────────────────
+// When `markDayChanges` is set, briefly slide a date label in whenever
+// navigation moves into a different day, so a slideshow running across a whole
+// trip makes the day boundary recognisable — without pausing the playback.
+const dayBannerText = ref('')
+const dayBannerVisible = ref(false)
+let dayBannerTimer: ReturnType<typeof setTimeout> | null = null
+let lastDayKey: string | null = null
+
+function dayKeyOf(photo: Photo): string {
+  return toLocalIsoDate(new Date(photo.taken_at || photo.created_at))
+}
+
+function showDayBanner(photo: Photo) {
+  dayBannerText.value = new Date(photo.taken_at || photo.created_at).toLocaleDateString('de-DE', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+  })
+  dayBannerVisible.value = true
+  if (dayBannerTimer !== null) clearTimeout(dayBannerTimer)
+  dayBannerTimer = setTimeout(() => {
+    dayBannerVisible.value = false
+    dayBannerTimer = null
+  }, 2500)
+}
+
+watch(() => props.photo.id, () => {
+  if (!props.markDayChanges) return
+  const key = dayKeyOf(props.photo)
+  // Announce only a *change* — never the photo the overlay opened on.
+  if (isDayChange(lastDayKey, key)) showDayBanner(props.photo)
+  lastDayKey = key
+})
+
+onMounted(() => {
+  if (props.markDayChanges) lastDayKey = dayKeyOf(props.photo)
+})
+onUnmounted(() => {
+  if (dayBannerTimer !== null) clearTimeout(dayBannerTimer)
 })
 
 function formatDate(photo: Photo) {
@@ -696,6 +756,14 @@ onUnmounted(() => {
       <HeicImage v-if="prevPhoto" :src="neighbourPreloadSrc(prevPhoto)" />
       <HeicImage v-if="nextPhoto" :src="neighbourPreloadSrc(nextPhoto)" />
     </div>
+
+    <!-- Day-change banner: slides in for ~2.5 s when the slideshow crosses
+         into a new day (map mode), then slides back out. -->
+    <Transition name="fs-day-banner">
+      <div v-if="markDayChanges && dayBannerVisible" class="fs-day-banner" aria-live="polite">
+        {{ dayBannerText }}
+      </div>
+    </Transition>
 
     <div
       ref="contentRef"
@@ -864,6 +932,20 @@ onUnmounted(() => {
               v-tooltip.top="'Schnitt &amp; Belichtung bearbeiten'"
             />
           </slot>
+          <!-- Slideshow play/pause. Outside the `actions` slot so caller
+               overrides still get it. The icon always shows what the click
+               does: ▶ to start, ⏸ while running. Never auto-starts. -->
+          <Button
+            v-if="canSlideshow"
+            :icon="playing ? 'pi pi-pause' : 'pi pi-play'"
+            rounded text
+            :severity="playing ? 'primary' : 'secondary'"
+            :class="{ 'fs-toolbar-btn--active': playing }"
+            :aria-pressed="playing"
+            :aria-label="playing ? 'Diashow pausieren' : 'Diashow starten'"
+            @click="togglePlay"
+            v-tooltip.top="playing ? 'Diashow pausieren' : 'Diashow starten'"
+          />
           <!-- Real browser fullscreen toggle (Track N / #80). Sits outside
                the `actions` slot so caller overrides still get it. -->
           <Button
@@ -1250,6 +1332,38 @@ onUnmounted(() => {
 .fs-topbar :deep(.p-button-rounded) {
   width: 2em;
   height: 2em;
+}
+
+/* Day-change banner (map slideshow). Sits just under the topbar, centred,
+   non-interactive so it never blocks taps. */
+.fs-day-banner {
+  position: absolute;
+  top: 4.25em;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9;
+  max-width: calc(100vw - 2em);
+  padding: 0.5em 1.1em;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  color: #fff;
+  font-size: 1em;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+.fs-day-banner-enter-active,
+.fs-day-banner-leave-active {
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+.fs-day-banner-enter-from,
+.fs-day-banner-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-0.8em);
 }
 
 /* Right side of the topbar — holds the counter pill (or nothing). The

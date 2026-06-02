@@ -95,7 +95,7 @@ map-fähiges Album in der Kartenansicht.
 | Parameter | Ansicht | Verhalten |
 |---|---|---|
 | `?photoId=<id>` | GalleryView | öffnet das Foto direkt in der Vollbildansicht |
-| `?photoId=<id>` | AlbumDetailView | Im Rastermodus: selektiert und scrollt zum Foto. Im Kartenmodus: klappt den zugehörigen Tag in der Timeline auf, markiert den Cluster und scrollt die Timeline mittig auf den Stop. Klickt der Nutzer anschließend den Pin, startet die Vollbildansicht direkt mit *genau diesem* Foto (nicht dem ersten Foto des Clusters). |
+| `?photoId=<id>` | AlbumDetailView | Im Rastermodus: selektiert und scrollt zum Foto. Im Kartenmodus: klappt den zugehörigen Tag in der Timeline auf, markiert den Cluster und scrollt die Timeline mittig auf den Stop. Klickt der Nutzer anschließend den Pin, startet die Vollbildansicht direkt mit *genau diesem* Foto (nicht dem ersten Foto des Clusters). Die Vollbild-Liste umfasst dabei **den ganzen Trip** in chronologischer Reihenfolge (alle Tage/Stopps), damit Blättern und Diashow ohne Tagesgrenze durchlaufen – siehe [`docs/photo-slideshow.md`](./photo-slideshow.md). |
 | `?q`, `?owner`, `?sortBy`, … | AlbumsView | stellt Filter/Sortierung wieder her (für Deep-Links und Tab-Sync) |
 
 URL-Parameter werden nach dem Einlesen sofort per `router.replace()` entfernt,
