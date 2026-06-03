@@ -11,6 +11,7 @@ import Chip from 'primevue/chip'
 import Tag from 'primevue/tag'
 import MultiSelectDialog from '../components/MultiSelectDialog.vue'
 import DocumentBatchVisibilityDialog from '../components/DocumentBatchVisibilityDialog.vue'
+import DocumentBatchReprocessDialog from '../components/DocumentBatchReprocessDialog.vue'
 import DocumentUploadDefaultsDialog from '../components/DocumentUploadDefaultsDialog.vue'
 import {
   listDocuments,
@@ -46,6 +47,7 @@ const info = ref('')
 const selectedIds = ref<Set<number>>(new Set())
 const tagsDialogVisible = ref(false)
 const visibilityDialogVisible = ref(false)
+const reprocessDialogVisible = ref(false)
 const defaultsDialogVisible = ref(false)
 const savingBatchTags = ref(false)
 
@@ -141,6 +143,14 @@ function handleBatchVisibilityDone(payload: { affected: number; skipped: number 
   } else {
     info.value = `Sichtbarkeit für ${payload.affected} Dokument(e) geändert.`
   }
+  load()
+}
+
+function handleBatchReprocessDone(payload: { affected: number }) {
+  info.value = `OCR & KI für ${payload.affected} Dokument(e) neu gestartet.`
+  clearSelection()
+  // Re-runs reset documents to "pending"; reload so the status badges
+  // reflect that the pipeline is running again.
   load()
 }
 
@@ -373,6 +383,15 @@ onMounted(async () => {
           @click="visibilityDialogVisible = true"
         />
         <Button
+          v-if="auth.hasPermission('documents.edit')"
+          label="OCR & KI neu…"
+          icon="pi pi-refresh"
+          size="small"
+          severity="secondary"
+          v-tooltip.bottom="'Text-Extraktion (OCR) und KI-Analyse für die Auswahl erneut starten'"
+          @click="reprocessDialogVisible = true"
+        />
+        <Button
           label="Auswahl aufheben"
           icon="pi pi-times"
           size="small"
@@ -515,6 +534,12 @@ onMounted(async () => {
       :documents="selectedDocs"
       :groups="groups"
       @done="handleBatchVisibilityDone"
+    />
+
+    <DocumentBatchReprocessDialog
+      v-model:visible="reprocessDialogVisible"
+      :document-ids="[...selectedIds]"
+      @done="handleBatchReprocessDone"
     />
 
     <DocumentUploadDefaultsDialog

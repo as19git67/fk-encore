@@ -724,10 +724,9 @@ watch(album, (a) => {
     : 'grid'
 }, { immediate: true })
 
-const viewModeOptions: Array<{ label: string; value: 'grid' | 'map'; icon: string }> = [
-  { label: 'Raster', value: 'grid', icon: 'pi pi-th-large' },
-  { label: 'Karte', value: 'map', icon: 'pi pi-map' },
-]
+function toggleViewMode() {
+  viewMode.value = viewMode.value === 'map' ? 'grid' : 'map'
+}
 
 // Selection only applies to the grid view — leaving grid mode cancels it.
 watch(viewMode, (mode) => {
@@ -1903,21 +1902,6 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 
         <!-- 6. Action buttons -->
         <div class="header__actions">
-          <SelectButton
-            v-if="mapEnabled"
-            v-model="viewMode"
-            :options="viewModeOptions"
-            optionLabel="label"
-            optionValue="value"
-            :allowEmpty="false"
-            class="view-mode-switch"
-            aria-label="Ansicht umschalten"
-          >
-            <template #option="slotProps">
-              <i :class="slotProps.option.icon" v-tooltip.bottom="slotProps.option.label" />
-              <span class="view-mode-switch__label">{{ slotProps.option.label }}</span>
-            </template>
-          </SelectButton>
           <Button
             v-if="canManageData && unreviewedGroupCount > 0 && viewMode !== 'map'"
             :label="`Gruppen bearbeiten (${unreviewedGroupCount} offen)`"
@@ -1925,6 +1909,16 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
             class="header__group-review-btn"
             v-tooltip.bottom="`Gruppen bearbeiten (${unreviewedGroupCount} offen)`"
             @click="handleStartGroupReview"
+          />
+          <Button
+            v-if="mapEnabled"
+            :icon="viewMode === 'map' ? 'pi pi-th-large' : 'pi pi-map'"
+            size="small"
+            text
+            class="view-mode-switch"
+            :aria-label="viewMode === 'map' ? 'Rasteransicht anzeigen' : 'Kartenansicht anzeigen'"
+            v-tooltip.bottom="viewMode === 'map' ? 'Rasteransicht anzeigen' : 'Kartenansicht anzeigen'"
+            @click="toggleViewMode"
           />
           <Button v-if="effectiveCoverPhotoId && viewMode !== 'map'" icon="pi pi-image" size="small" text v-tooltip="'Cover fokussieren'" @click="scrollToCover" />
           <Button v-if="canShareAlbum" icon="pi pi-share-alt" size="small" text v-tooltip="'Freigeben'" @click="openShareDialogLocal" />
@@ -2542,17 +2536,9 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 
 .header__actions { display: flex; align-items: center; gap: 0.25em; flex-wrap: wrap; }
 
-/* Compact icon-first toggle: shows just the icon on narrow screens and adds
-   the label next to it once there's room. PrimeVue's SelectButton renders
-   each option as a button, so we lean on the slot to control content. */
-.view-mode-switch :deep(.p-togglebutton) {
-  padding: 0.25rem 0.5rem;
-  min-width: 2rem;
-}
-.view-mode-switch__label { display: none; margin-left: 0.35em; }
-@media (min-width: 600px) {
-  .view-mode-switch__label { display: inline; }
-}
+/* Single icon button that flips between grid and map view. The icon shows
+   the *target* mode (map icon while in grid, grid icon while in map). */
+.view-mode-switch { min-width: 2.25rem; }
 
 /* ── Upload (mirrors GalleryView) ─────────────────────────────────────────── */
 .upload-button-label { display: inline-flex; cursor: pointer; }

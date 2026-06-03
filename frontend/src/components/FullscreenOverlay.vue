@@ -241,15 +241,41 @@ const groupBadgeTitle = computed(() => {
 
 // ── Preload erst nach Laden des aktuellen Bildes ────────────────────────────
 const currentLoaded = ref(false)
-watch(() => props.photo.id, () => { currentLoaded.value = false })
+
+// Safety net for the occasional black-screen bug: if the <img> `load` event
+// is missed (cached-image race on fast navigation, HEIC decode quirks) the
+// fade-in wrapper would stay at opacity 0 forever and the photo never
+// appears. Arm a fallback on every photo change that reveals the image after
+// a short grace period regardless, so the overlay never gets stuck black.
+const LOAD_FALLBACK_MS = 2500
+let loadFallbackTimer: ReturnType<typeof setTimeout> | null = null
+function clearLoadFallback() {
+  if (loadFallbackTimer !== null) { clearTimeout(loadFallbackTimer); loadFallbackTimer = null }
+}
+function armLoadFallback() {
+  clearLoadFallback()
+  loadFallbackTimer = setTimeout(() => {
+    loadFallbackTimer = null
+    currentLoaded.value = true
+  }, LOAD_FALLBACK_MS)
+}
+
+watch(() => props.photo.id, () => {
+  currentLoaded.value = false
+  armLoadFallback()
+})
+onMounted(armLoadFallback)
+onUnmounted(clearLoadFallback)
 
 function onCurrentImageLoad() {
+  clearLoadFallback()
   currentLoaded.value = true
 }
 
 function onCurrentImageError() {
   // Stop waiting on a failed image so the overlay reveals whatever the
   // <img> ended up with instead of hanging on the spinner forever.
+  clearLoadFallback()
   currentLoaded.value = true
 }
 
@@ -541,11 +567,19 @@ const intervalOptions = SLIDESHOW_INTERVAL_OPTIONS_MS.map((ms) => ({
 // Only surfaced in the tooltip / aria-label — the value isn't shown inline.
 const intervalLabel = computed(() => formatSlideshowIntervalLabel(intervalMs.value))
 
+// True while the auto-advance timer is actually counting down towards the
+// next photo. Drives the countdown progress ring around the play/pause
+// button; `slideshowCycle` bumps on each (re)arm so the ring animation
+// restarts from empty.
+const slideshowArmed = ref(false)
+const slideshowCycle = ref(0)
+
 function clearIdleTimer() {
   if (idleTimer !== null) {
     clearTimeout(idleTimer)
     idleTimer = null
   }
+  slideshowArmed.value = false
 }
 
 function scheduleIdleAdvance() {
@@ -559,8 +593,11 @@ function scheduleIdleAdvance() {
   // No more photos ahead → stop and flip the button back to "play".
   if (slideshowReachedEnd(state)) { playing.value = false; return }
   if (!shouldArmSlideshow(state)) return
+  slideshowArmed.value = true
+  slideshowCycle.value++
   idleTimer = setTimeout(() => {
     idleTimer = null
+    slideshowArmed.value = false
     if (props.nextPhoto) emit('next')
   }, intervalMs.value)
 }
@@ -932,6 +969,7 @@ onUnmounted(() => {
             objectFit="contain"
             :staticSlot="false"
             :imageStyle="fsImageStyle"
+            @load="onCurrentImageLoad"
           >
             <slot />
           </HeicImage>
@@ -1088,25 +1126,44 @@ onUnmounted(() => {
           <!-- Slideshow play/pause. Outside the `actions` slot so caller
                overrides still get it. The icon always shows what the click
                does: ▶ to start, ⏸ while running. Never auto-starts. On touch
-               a long-press opens the interval menu (instead of the caret). -->
-          <Button
-            v-if="canSlideshow"
-            ref="playBtnRef"
-            :icon="playing ? 'pi pi-pause' : 'pi pi-play'"
-            rounded text
-            :severity="playing ? 'primary' : 'secondary'"
-            :class="{ 'fs-toolbar-btn--active': playing }"
-            class="fs-play-btn"
-            :aria-pressed="playing"
-            :aria-label="(playing ? 'Diashow pausieren' : 'Diashow starten') + ' (S)'"
-            @click="onPlayClick"
-            @pointerdown="onPlayPointerDown"
-            @pointerup="onPlayPointerUp"
-            @pointercancel="onPlayPointerUp"
-            @pointermove="onPlayPointerMove"
-            @contextmenu.prevent
-            v-tooltip.top="(playing ? 'Diashow pausieren' : 'Diashow starten') + ' (S)'"
-          />
+               a long-press opens the interval menu (instead of the caret).
+               While running, a progress ring around the button counts down
+               the pause until the next photo. -->
+          <span v-if="canSlideshow" class="fs-play-wrap">
+            <Button
+              ref="playBtnRef"
+              :icon="playing ? 'pi pi-pause' : 'pi pi-play'"
+              rounded text
+              :severity="playing ? 'primary' : 'secondary'"
+              :class="{ 'fs-toolbar-btn--active': playing }"
+              class="fs-play-btn"
+              :aria-pressed="playing"
+              :aria-label="(playing ? 'Diashow pausieren' : 'Diashow starten') + ' (S)'"
+              @click="onPlayClick"
+              @pointerdown="onPlayPointerDown"
+              @pointerup="onPlayPointerUp"
+              @pointercancel="onPlayPointerUp"
+              @pointermove="onPlayPointerMove"
+              @contextmenu.prevent
+              v-tooltip.top="(playing ? 'Diashow pausieren' : 'Diashow starten') + ' (S)'"
+            />
+            <svg
+              v-if="playing && slideshowArmed"
+              :key="slideshowCycle"
+              class="fs-play-progress"
+              viewBox="0 0 36 36"
+              aria-hidden="true"
+            >
+              <circle class="fs-play-progress__track" cx="18" cy="18" r="16" />
+              <circle
+                class="fs-play-progress__bar"
+                cx="18"
+                cy="18"
+                r="16"
+                :style="{ animationDuration: intervalMs + 'ms' }"
+              />
+            </svg>
+          </span>
           <!-- Long-press target for the interval picker on touch devices. -->
           <Menu
             v-if="canSlideshow"
@@ -1617,6 +1674,47 @@ onUnmounted(() => {
   -webkit-touch-callout: none;
   user-select: none;
   touch-action: manipulation;
+}
+
+/* Countdown progress ring overlaid on the play/pause button. Fills up over
+   the configured slideshow interval, showing how long until the next photo.
+   Purely decorative, so it never intercepts pointer events on the button. */
+.fs-play-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.fs-play-progress {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  /* Start the arc at 12 o'clock and sweep clockwise. */
+  transform: rotate(-90deg);
+}
+.fs-play-progress__track {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.25);
+  stroke-width: 2;
+}
+.fs-play-progress__bar {
+  fill: none;
+  stroke: var(--p-primary-color, #fff);
+  stroke-width: 2;
+  stroke-linecap: round;
+  /* r=16 → circumference = 2·π·16 ≈ 100.53 */
+  stroke-dasharray: 100.53;
+  animation-name: fs-play-progress-fill;
+  animation-timing-function: linear;
+  animation-iteration-count: 1;
+  animation-fill-mode: forwards;
+}
+@keyframes fs-play-progress-fill {
+  from { stroke-dashoffset: 100.53; } /* empty */
+  to   { stroke-dashoffset: 0; }      /* full */
+}
+@media (prefers-reduced-motion: reduce) {
+  .fs-play-progress { display: none; }
 }
 
 /* Slideshow interval: caret-only dropdown that sits next to the play button.

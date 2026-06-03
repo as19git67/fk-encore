@@ -6,7 +6,7 @@ import Menu from 'primevue/menu'
 import ConfirmDialog from 'primevue/confirmdialog'
 import { useAuthStore } from './stores/auth'
 import { useAnomalyStore } from './stores/finance/anomalies'
-import { modules, detectModule } from './config/modules'
+import { modules, detectModule, moduleEntryPath } from './config/modules'
 import type { ModuleConfig } from './config/modules'
 
 const auth = useAuthStore()
@@ -45,7 +45,7 @@ const moduleMenuItems = computed(() =>
       label: mod.label,
       icon: mod.icon,
       class: activeModule.value?.id === mod.id ? 'active-module-item' : '',
-      command: () => router.push(mod.basePath),
+      command: () => router.push(moduleEntryPath(mod)),
     }))
 )
 

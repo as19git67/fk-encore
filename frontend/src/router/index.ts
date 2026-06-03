@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
-import { modules } from '../config/modules'
+import { modules, detectModule, MODULE_ROUTE_KEY_PREFIX } from '../config/modules'
 import LoginView from '../views/LoginView.vue'
 import RegisterView from '../views/RegisterView.vue'
 import ForgotPasswordView from '../views/ForgotPasswordView.vue'
@@ -97,6 +97,11 @@ router.afterEach((to) => {
   if (PUBLIC_ROUTE_NAMES.has(to.name as string)) return
   if (to.path === '/') return
   localStorage.setItem(LAST_ROUTE_KEY, to.fullPath)
+  // Remember the last route per module so the main menu can restore it.
+  const mod = detectModule(to.path)
+  if (mod) {
+    localStorage.setItem(MODULE_ROUTE_KEY_PREFIX + mod.id, to.fullPath)
+  }
 })
 
 export default router
