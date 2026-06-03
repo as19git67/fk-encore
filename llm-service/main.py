@@ -360,6 +360,8 @@ class TaxonomyNode(BaseModel):
     slug: str
     name: str
     parent_slug: str | None = None
+    # Optional disambiguation hint, rendered as "slug: Name — Hinweis".
+    hint: str | None = None
 
 
 class TaxSectionEntry(BaseModel):
@@ -500,7 +502,8 @@ def _taxonomy_outline(nodes: list[TaxonomyNode]) -> str:
         lines: list[str] = []
         for n in by_parent.get(parent, []):
             indent = "  " * depth
-            lines.append(f"{indent}- {n.slug}: {n.name}")
+            hint = f" — {n.hint}" if n.hint else ""
+            lines.append(f"{indent}- {n.slug}: {n.name}{hint}")
             lines.extend(render(n.slug, depth + 1))
         return lines
 
@@ -631,7 +634,7 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
 
     def _build_user_prompt(body: str) -> str:
         return (
-            f"Taxonomie (slug: Name):\n{_taxonomy_outline(req.taxonomy)}"
+            f"Taxonomie (slug: Name — Hinweis):\n{_taxonomy_outline(req.taxonomy)}"
             f"{tax_block}{subjects_block}\n\n"
             f"Max. Tags: {req.max_tags}\n\n"
             f"Dokumenttext:\n---\n{body}\n---"

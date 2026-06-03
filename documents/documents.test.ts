@@ -18,7 +18,7 @@ import {
   slugifyUserLogin,
   type DocumentLocationContext,
 } from "./documents.service";
-import { flattenTaxonomy, categoryTaxonomy, type CategorySeed } from "./taxonomy";
+import { flattenTaxonomy, taxonomyHints, categoryTaxonomy, type CategorySeed } from "./taxonomy";
 import { DOCUMENT_SERVICES } from "./scan-queue";
 import { DuplicateDocumentError } from "./import";
 import { SUPPORTED_EXTENSIONS } from "./documents.service";
@@ -371,6 +371,29 @@ describe("documents.taxonomy seed shape", () => {
     expect(gesundheit?.children?.map((c) => c.slug)).toEqual(
       expect.arrayContaining(["gesundheit-pflege", "gesundheit-pflegekasse"]),
     );
+  });
+
+  it("includes a dedicated Finanzen subcategory for securities & dividends", () => {
+    const finanzen = findBySlug(categoryTaxonomy, "finanzen");
+    expect(finanzen?.children?.map((c) => c.slug)).toEqual(
+      expect.arrayContaining(["finanzen-wertpapiere"]),
+    );
+    const wertpapiere = findBySlug(categoryTaxonomy, "finanzen-wertpapiere");
+    expect(wertpapiere?.name).toBe("Wertpapiere & Dividenden");
+    // Hint steers dividend tax statements here rather than into finanzen-steuern.
+    expect(wertpapiere?.hint).toMatch(/Steuermitteilungen/);
+  });
+
+  it("exposes category hints via flattenTaxonomy and taxonomyHints", () => {
+    const flat = flattenTaxonomy();
+    const wertpapiere = flat.find((r) => r.slug === "finanzen-wertpapiere");
+    expect(wertpapiere?.hint).toMatch(/Dividendengutschriften/);
+    // Un-hinted leaves carry null, not undefined.
+    expect(flat.find((r) => r.slug === "finanzen-kontoauszuege")?.hint).toBeNull();
+
+    const hints = taxonomyHints();
+    expect(hints.get("finanzen-wertpapiere")).toMatch(/Dividendengutschriften/);
+    expect(hints.has("finanzen-kontoauszuege")).toBe(false);
   });
 
   it("includes the new top-level Betreuung branch with its sections", () => {

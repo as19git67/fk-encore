@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, computed, watch } from 'vue'
+import { onMounted, ref, computed, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
@@ -26,6 +26,12 @@ import {
 } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
 import { useRealtimeEvent } from '../composables/useRealtime'
+
+// Remembers the document the user last opened so returning from the
+// detail view (which re-mounts this list — there is no keep-alive) can
+// scroll back to it instead of snapping to the top. Module-scoped so it
+// survives the unmount/remount; the lazy-loaded module stays in memory.
+let lastOpenedDocId: number | null = null
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -222,7 +228,20 @@ watch([q, selectedCategory, selectedStatus, needsReviewOnly, searchMode], () => 
 })
 
 function openDocument(doc: DocumentSummary) {
+  lastOpenedDocId = doc.id
   router.push({ name: 'dokumente-detail', params: { id: doc.id } })
+}
+
+// After the list is rendered, bring the previously opened document back
+// into view. Runs once on mount; clears the marker so later visits start
+// at the top. No-op when the document is filtered out of the current list.
+async function restoreScrollToLastOpened() {
+  const id = lastOpenedDocId
+  lastOpenedDocId = null
+  if (id == null) return
+  await nextTick()
+  const el = document.querySelector<HTMLElement>(`[data-doc-id="${id}"]`)
+  el?.scrollIntoView({ block: 'center' })
 }
 
 function statusSeverity(status: DocumentStatus): 'success' | 'info' | 'warn' | 'danger' | 'secondary' {
@@ -295,6 +314,7 @@ async function loadGroups() {
 
 onMounted(async () => {
   await Promise.all([loadCategories(), loadGroups(), load()])
+  await restoreScrollToLastOpened()
 })
 </script>
 
@@ -427,6 +447,7 @@ onMounted(async () => {
       <div
         v-for="doc in items"
         :key="doc.id"
+        :data-doc-id="doc.id"
         class="document-card"
         :class="{ 'document-card--selected': isSelected(doc.id) }"
         tabindex="0"

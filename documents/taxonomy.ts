@@ -7,6 +7,10 @@ export interface CategorySeed {
   slug: string;
   name: string;
   icon?: string;
+  // Optional one-line hint sent to the LLM classifier alongside slug + name
+  // to disambiguate borderline documents (e.g. a dividend tax statement that
+  // is heavy on tax vocabulary but belongs with the securities documents).
+  hint?: string;
   children?: CategorySeed[];
 }
 
@@ -19,7 +23,16 @@ export const categoryTaxonomy: CategorySeed[] = [
       { slug: "finanzen-kontoauszuege", name: "Kontoauszüge" },
       { slug: "finanzen-gehalt", name: "Gehaltsabrechnungen" },
       { slug: "finanzen-rechnungen", name: "Rechnungen" },
-      { slug: "finanzen-steuern", name: "Steuern" },
+      {
+        slug: "finanzen-wertpapiere",
+        name: "Wertpapiere & Dividenden",
+        hint: "Dividendengutschriften, Steuermitteilungen / steuerliche Behandlung zu Wertpapieren (auch 'KEINE STEUERBESCHEINIGUNG'), Erträgnisaufstellungen, Depot- und Wertpapierabrechnungen (Kauf/Verkauf) von Bank oder Broker.",
+      },
+      {
+        slug: "finanzen-steuern",
+        name: "Steuern",
+        hint: "Allgemeine Steuerunterlagen: Steuererklärung, Korrespondenz mit dem Finanzamt, Lohnsteuerbescheinigung. NICHT für Wertpapier-/Dividenden-Steuermitteilungen (siehe finanzen-wertpapiere) oder Steuerbescheide (siehe behoerden-steuerbescheid).",
+      },
     ],
   },
   {
@@ -168,13 +181,14 @@ export const categoryTaxonomy: CategorySeed[] = [
 export function flattenTaxonomy(
   nodes: CategorySeed[] = categoryTaxonomy,
   parentSlug: string | null = null,
-): Array<{ slug: string; name: string; icon: string | null; parent_slug: string | null; sort_order: number }> {
-  const out: Array<{ slug: string; name: string; icon: string | null; parent_slug: string | null; sort_order: number }> = [];
+): Array<{ slug: string; name: string; icon: string | null; hint: string | null; parent_slug: string | null; sort_order: number }> {
+  const out: Array<{ slug: string; name: string; icon: string | null; hint: string | null; parent_slug: string | null; sort_order: number }> = [];
   nodes.forEach((node, idx) => {
     out.push({
       slug: node.slug,
       name: node.name,
       icon: node.icon ?? null,
+      hint: node.hint ?? null,
       parent_slug: parentSlug,
       sort_order: idx,
     });
@@ -182,5 +196,20 @@ export function flattenTaxonomy(
       out.push(...flattenTaxonomy(node.children, node.slug));
     }
   });
+  return out;
+}
+
+/** Slug → classifier hint, derived from the seed taxonomy. Used to enrich
+ *  the DB-loaded category list at classify time without a DB column. */
+export function taxonomyHints(
+  nodes: CategorySeed[] = categoryTaxonomy,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const node of nodes) {
+    if (node.hint) out.set(node.slug, node.hint);
+    if (node.children?.length) {
+      for (const [slug, hint] of taxonomyHints(node.children)) out.set(slug, hint);
+    }
+  }
   return out;
 }

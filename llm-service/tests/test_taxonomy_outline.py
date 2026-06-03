@@ -59,6 +59,27 @@ def test_orphan_nodes_skipped():
     assert "finanzen" in out
 
 
+def test_hint_rendered_when_present():
+    nodes = [
+        TaxonomyNode(slug="finanzen", name="Finanzen"),
+        TaxonomyNode(
+            slug="wertpapiere",
+            name="Wertpapiere & Dividenden",
+            parent_slug="finanzen",
+            hint="Dividendengutschriften und Steuermitteilungen zu Wertpapieren.",
+        ),
+        TaxonomyNode(slug="rechnungen", name="Rechnungen", parent_slug="finanzen"),
+    ]
+    out = _taxonomy_outline(nodes)
+    lines = out.splitlines()
+    # Hinted node renders "slug: Name — Hinweis"; un-hinted node stays plain.
+    assert lines[1] == (
+        "  - wertpapiere: Wertpapiere & Dividenden "
+        "— Dividendengutschriften und Steuermitteilungen zu Wertpapieren."
+    )
+    assert lines[2] == "  - rechnungen: Rechnungen"
+
+
 def test_multiple_roots_preserved():
     nodes = [
         TaxonomyNode(slug="a", name="A"),

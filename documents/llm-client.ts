@@ -35,6 +35,9 @@ export interface TaxonomyEntry {
   slug: string;
   name: string;
   parent_slug: string | null;
+  // Optional disambiguation hint rendered into the classifier prompt as
+  // "slug: Name — Hinweis". Omit when the category name speaks for itself.
+  hint?: string;
 }
 
 export interface TaxSectionRequestEntry {
