@@ -881,6 +881,72 @@ export const batchUpdateVisibility = api(
   },
 );
 
+export interface BatchReclassifyRequest {
+  document_ids: number[];
+  /**
+   * When true, persist `force_ocr=true` on every document before
+   * re-queueing so the text-extract worker skips the PDF text layer and
+   * runs OCR — mirrors the single-document `force_ocr` option.
+   */
+  force_ocr?: boolean;
+}
+
+export interface BatchReclassifyResponse {
+  affected_documents: number;
+}
+
+/**
+ * Re-run the OCR / classification / embedding pipeline for multiple
+ * documents at once. Documents the caller cannot see are silently
+ * skipped — same visibility pattern as `batchUpdateTags`. Workers are
+ * triggered once after all rows are re-queued so a large selection does
+ * not fan out into one wake-up per document.
+ */
+export const batchReclassify = api(
+  { expose: true, method: "POST", path: "/documents/batch/reclassify", auth: true },
+  async (req: BatchReclassifyRequest): Promise<BatchReclassifyResponse> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.edit");
+    const userId = getUserId();
+
+    if (!Array.isArray(req.document_ids) || req.document_ids.length === 0) {
+      throw APIError.invalidArgument("document_ids required");
+    }
+
+    const groupIds = await loadUserGroupIds(userId);
+    const visibleRows = await dbAll<{ id: number }>(
+      db
+        .select({ id: documents.id })
+        .from(documents)
+        .where(
+          and(
+            inArray(documents.id, req.document_ids),
+            visibleDocumentsWhere(userId, groupIds),
+          ),
+        ),
+    );
+    const docIds = visibleRows.map((r) => r.id);
+    if (docIds.length === 0) {
+      return { affected_documents: 0 };
+    }
+
+    const patch: Partial<typeof documents.$inferInsert> = {
+      status: "pending",
+      last_error: null,
+    };
+    if (req.force_ocr !== undefined) patch.force_ocr = req.force_ocr;
+    await db.update(documents).set(patch).where(inArray(documents.id, docIds));
+
+    for (const id of docIds) {
+      await requeueDocument(id);
+    }
+    triggerWorkers();
+
+    return { affected_documents: docIds.length };
+  },
+);
+
 // ─── Upload defaults (per-user preference) ─────────────────────────────────
 
 export interface UploadDefaultsResponse {
