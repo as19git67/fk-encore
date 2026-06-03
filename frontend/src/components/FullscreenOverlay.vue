@@ -10,6 +10,13 @@ import { useAuthStore } from '../stores/auth'
 import type { GalleryGridGroup } from '../api/gallery'
 import { formatPhotoDateCompact, formatLocationLabel, toLocalIsoDate } from '../utils/dateFormat'
 import { shouldArmSlideshow, slideshowReachedEnd, isDayChange, shouldShowCaption, type SlideshowState } from '../utils/slideshow'
+import {
+  loadSlideshowIntervalMs,
+  saveSlideshowIntervalMs,
+  nextSlideshowIntervalMs,
+  formatSlideshowIntervalLabel,
+  DEFAULT_SLIDESHOW_INTERVAL_MS,
+} from '../utils/slideshowInterval'
 
 const props = withDefaults(defineProps<{
   photo: Photo
@@ -41,10 +48,10 @@ const props = withDefaults(defineProps<{
   group?: GalleryGridGroup | null
   /** Optional slot content rendered inside the fullscreen image (e.g. face box) */
   /**
-   * When > 0, auto-advance to the next photo this many milliseconds
-   * after the last user interaction. Any touch, click, mouse move, or
-   * key press resets the timer. Setting to 0 (default) disables the
-   * slideshow behaviour entirely.
+   * When > 0, the slideshow is available (play/pause button + `S` shortcut).
+   * The value is the *default* interval; the actual gap between photos is the
+   * user's per-browser setting, adjustable via the toolbar interval button
+   * (see utils/slideshowInterval). 0 (default) disables the slideshow.
    */
   autoAdvanceMs?: number
   /**
@@ -512,8 +519,17 @@ onUnmounted(() => window.removeEventListener('keydown', handleKeydown, true))
 // again), and it stops automatically once the last photo is reached.
 let idleTimer: ReturnType<typeof setTimeout> | null = null
 const playing = ref(false)
-/** True when the slideshow can be offered at all (interval configured). */
+/** True when the slideshow can be offered at all (caller enabled it). */
 const canSlideshow = computed(() => (props.autoAdvanceMs ?? 0) > 0)
+// User-specific interval between photos (localStorage, default 5 s). The
+// `autoAdvanceMs` prop only switches the slideshow on; the actual delay is
+// this stored value, adjustable via the toolbar.
+const intervalMs = ref(
+  loadSlideshowIntervalMs(
+    (props.autoAdvanceMs ?? 0) > 0 ? props.autoAdvanceMs : DEFAULT_SLIDESHOW_INTERVAL_MS,
+  ),
+)
+const intervalLabel = computed(() => formatSlideshowIntervalLabel(intervalMs.value))
 
 function clearIdleTimer() {
   if (idleTimer !== null) {
@@ -526,7 +542,7 @@ function scheduleIdleAdvance() {
   clearIdleTimer()
   const state: SlideshowState = {
     playing: playing.value,
-    autoAdvanceMs: props.autoAdvanceMs ?? 0,
+    autoAdvanceMs: canSlideshow.value ? intervalMs.value : 0,
     hasNext: props.nextPhoto != null,
     currentLoaded: currentLoaded.value,
   }
@@ -536,18 +552,25 @@ function scheduleIdleAdvance() {
   idleTimer = setTimeout(() => {
     idleTimer = null
     if (props.nextPhoto) emit('next')
-  }, props.autoAdvanceMs)
+  }, intervalMs.value)
 }
 
 function togglePlay() {
   playing.value = !playing.value
 }
 
+/** Cycle the slideshow interval to the next step and persist it (per browser). */
+function cycleInterval() {
+  intervalMs.value = nextSlideshowIntervalMs(intervalMs.value)
+  saveSlideshowIntervalMs(intervalMs.value)
+}
+
 function bumpIdleTimer() {
-  if (!props.autoAdvanceMs || props.autoAdvanceMs <= 0) return
+  if (!canSlideshow.value) return
   scheduleIdleAdvance()
 }
 
+watch(intervalMs, () => scheduleIdleAdvance())
 watch(playing, () => scheduleIdleAdvance())
 watch(() => props.photo.id, () => scheduleIdleAdvance())
 watch(() => props.autoAdvanceMs, () => scheduleIdleAdvance())
@@ -954,6 +977,19 @@ onUnmounted(() => {
               v-tooltip.top="'Schnitt &amp; Belichtung bearbeiten'"
             />
           </slot>
+          <!-- Slideshow interval (per-browser). Cycles 3 → 5 → 10 → 15 → 20 →
+               30 s; the label shows the current value. -->
+          <Button
+            v-if="canSlideshow"
+            :label="intervalLabel"
+            icon="pi pi-clock"
+            text
+            severity="secondary"
+            class="fs-interval-btn"
+            :aria-label="`Diashow-Intervall: ${intervalLabel} (Klick: nächster Wert)`"
+            @click="cycleInterval"
+            v-tooltip.top="`Diashow-Intervall: ${intervalLabel} — Klick wählt den nächsten Wert`"
+          />
           <!-- Slideshow play/pause. Outside the `actions` slot so caller
                overrides still get it. The icon always shows what the click
                does: ▶ to start, ⏸ while running. Never auto-starts. -->
@@ -1419,6 +1455,22 @@ onUnmounted(() => {
   padding: 0.2em 0.65em;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* Slideshow interval button: icon + compact "5s" label, sits among the
+   icon-only toolbar buttons. */
+.fs-interval-btn {
+  width: auto;
+  padding: 0.25em 0.55em;
+  border-radius: 999px;
+}
+.fs-interval-btn :deep(.p-button-label) {
+  font-size: 0.8em;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  margin-left: 0.25em;
+  flex: 0 0 auto;
+  width: auto;
 }
 
 /* ── Details flyout ─────────────────────────────────────────────────────── */
