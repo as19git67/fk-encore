@@ -331,6 +331,42 @@ export function detectModule(path: string): ModuleConfig | null {
   return modules.find((m) => path === m.basePath || path.startsWith(m.basePath + '/')) ?? null
 }
 
+// Per-module last-route persistence. Switching modules via the main menu
+// should return to whichever sub-menu item (or detail page) the user last
+// had open in that module, not snap back to the module default. One entry
+// per module is stored under this prefix, keyed by module id. The router's
+// `afterEach` writes the entries; `moduleEntryPath` reads them.
+export const MODULE_ROUTE_KEY_PREFIX = 'app_module_last_route:'
+
+function isRestorableAppPath(raw: string | null): raw is string {
+  if (!raw) return false
+  // Must be an in-app path, not the root (would loop) or a public auth route.
+  if (
+    !raw.startsWith('/') ||
+    raw === '/' ||
+    raw.startsWith('/login') ||
+    raw.startsWith('/register') ||
+    raw.startsWith('/forgot-password')
+  ) {
+    return false
+  }
+  return true
+}
+
+/**
+ * The path to navigate to when the user picks a module from the main menu:
+ * the last route they had open in that module, falling back to the module's
+ * base path the first time around. Guards against stale entries that point
+ * at a different module or a public route.
+ */
+export function moduleEntryPath(mod: ModuleConfig): string {
+  const raw = localStorage.getItem(MODULE_ROUTE_KEY_PREFIX + mod.id)
+  if (isRestorableAppPath(raw) && detectModule(raw)?.id === mod.id) {
+    return raw
+  }
+  return mod.basePath
+}
+
 /**
  * Get the default route name for a module.
  */

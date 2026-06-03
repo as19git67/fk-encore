@@ -213,6 +213,22 @@ export function batchUpdateDocumentVisibility(payload: BatchUpdateVisibilityPayl
   })
 }
 
+export interface BatchReclassifyPayload {
+  document_ids: number[]
+  force_ocr?: boolean
+}
+
+export interface BatchReclassifyResponse {
+  affected_documents: number
+}
+
+export function batchReclassifyDocuments(payload: BatchReclassifyPayload) {
+  return apiFetch<BatchReclassifyResponse>(`/documents/batch/reclassify`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export interface UploadDefaults {
   group_id: number | null
 }
