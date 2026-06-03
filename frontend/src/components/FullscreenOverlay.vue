@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, useSlots } from 'vue'
 import Button from 'primevue/button'
+import Select from 'primevue/select'
+import Menu from 'primevue/menu'
 import HeicImage from './HeicImage.vue'
 import PhotoTransformEditor from './PhotoTransformEditor.vue'
 import { getPhotoUrl, type Photo, type CurationStatus } from '../api/photos'
@@ -10,6 +12,15 @@ import { useAuthStore } from '../stores/auth'
 import type { GalleryGridGroup } from '../api/gallery'
 import { formatPhotoDateCompact, formatLocationLabel, toLocalIsoDate } from '../utils/dateFormat'
 import { shouldArmSlideshow, slideshowReachedEnd, isDayChange, shouldShowCaption, type SlideshowState } from '../utils/slideshow'
+import {
+  SLIDESHOW_INTERVAL_OPTIONS_MS,
+  loadSlideshowIntervalMs,
+  saveSlideshowIntervalMs,
+  formatSlideshowIntervalLabel,
+  hasSeenSlideshowLongPressHint,
+  markSlideshowLongPressHintSeen,
+  DEFAULT_SLIDESHOW_INTERVAL_MS,
+} from '../utils/slideshowInterval'
 
 const props = withDefaults(defineProps<{
   photo: Photo
@@ -41,10 +52,10 @@ const props = withDefaults(defineProps<{
   group?: GalleryGridGroup | null
   /** Optional slot content rendered inside the fullscreen image (e.g. face box) */
   /**
-   * When > 0, auto-advance to the next photo this many milliseconds
-   * after the last user interaction. Any touch, click, mouse move, or
-   * key press resets the timer. Setting to 0 (default) disables the
-   * slideshow behaviour entirely.
+   * When > 0, the slideshow is available (play/pause button + `S` shortcut).
+   * The value is the *default* interval; the actual gap between photos is the
+   * user's per-browser setting, adjustable via the toolbar interval button
+   * (see utils/slideshowInterval). 0 (default) disables the slideshow.
    */
   autoAdvanceMs?: number
   /**
@@ -512,8 +523,23 @@ onUnmounted(() => window.removeEventListener('keydown', handleKeydown, true))
 // again), and it stops automatically once the last photo is reached.
 let idleTimer: ReturnType<typeof setTimeout> | null = null
 const playing = ref(false)
-/** True when the slideshow can be offered at all (interval configured). */
+/** True when the slideshow can be offered at all (caller enabled it). */
 const canSlideshow = computed(() => (props.autoAdvanceMs ?? 0) > 0)
+// User-specific interval between photos (localStorage, default 5 s). The
+// `autoAdvanceMs` prop only switches the slideshow on; the actual delay is
+// this stored value, adjustable via the toolbar.
+const intervalMs = ref(
+  loadSlideshowIntervalMs(
+    (props.autoAdvanceMs ?? 0) > 0 ? props.autoAdvanceMs : DEFAULT_SLIDESHOW_INTERVAL_MS,
+  ),
+)
+/** Dropdown options: [{ label: '5s', value: 5000 }, …]. */
+const intervalOptions = SLIDESHOW_INTERVAL_OPTIONS_MS.map((ms) => ({
+  label: formatSlideshowIntervalLabel(ms),
+  value: ms,
+}))
+// Only surfaced in the tooltip / aria-label — the value isn't shown inline.
+const intervalLabel = computed(() => formatSlideshowIntervalLabel(intervalMs.value))
 
 function clearIdleTimer() {
   if (idleTimer !== null) {
@@ -526,7 +552,7 @@ function scheduleIdleAdvance() {
   clearIdleTimer()
   const state: SlideshowState = {
     playing: playing.value,
-    autoAdvanceMs: props.autoAdvanceMs ?? 0,
+    autoAdvanceMs: canSlideshow.value ? intervalMs.value : 0,
     hasNext: props.nextPhoto != null,
     currentLoaded: currentLoaded.value,
   }
@@ -536,18 +562,109 @@ function scheduleIdleAdvance() {
   idleTimer = setTimeout(() => {
     idleTimer = null
     if (props.nextPhoto) emit('next')
-  }, props.autoAdvanceMs)
+  }, intervalMs.value)
 }
 
 function togglePlay() {
   playing.value = !playing.value
 }
 
+/** Apply a chosen slideshow interval and persist it (per browser). */
+function selectInterval(ms: number) {
+  intervalMs.value = ms
+  saveSlideshowIntervalMs(ms)
+}
+
+// On touch / no-hover devices the inline caret dropdown is dropped; instead a
+// long-press on the play button opens the interval menu (a kurzer Tap toggles
+// play as usual). On desktop the caret stays and long-press is inactive.
+const isCoarsePointer = ref(
+  typeof window !== 'undefined' &&
+    window.matchMedia('(hover: none), (pointer: coarse)').matches,
+)
+let pointerMql: MediaQueryList | null = null
+function onPointerMqlChange(e: MediaQueryListEvent) { isCoarsePointer.value = e.matches }
+onMounted(() => {
+  pointerMql = window.matchMedia('(hover: none), (pointer: coarse)')
+  isCoarsePointer.value = pointerMql.matches
+  pointerMql.addEventListener('change', onPointerMqlChange)
+})
+onUnmounted(() => pointerMql?.removeEventListener('change', onPointerMqlChange))
+
+const playBtnRef = ref<{ $el?: HTMLElement } | null>(null)
+const intervalMenu = ref<{ show: (e: unknown, target?: HTMLElement) => void } | null>(null)
+/** Menu items for the long-press interval picker; the current value is ticked. */
+const intervalMenuItems = computed(() =>
+  intervalOptions.map((o) => ({
+    label: o.label,
+    icon: o.value === intervalMs.value ? 'pi pi-check' : undefined,
+    command: () => selectInterval(o.value),
+  })),
+)
+
+const LONG_PRESS_MS = 450
+const LONG_PRESS_MOVE_TOLERANCE = 10
+let longPressTimer: number | null = null
+let longPressStart: { x: number; y: number } | null = null
+const longPressFired = ref(false)
+
+function clearLongPress() {
+  if (longPressTimer !== null) { clearTimeout(longPressTimer); longPressTimer = null }
+  longPressStart = null
+}
+function onPlayPointerDown(e: PointerEvent) {
+  if (!isCoarsePointer.value) return
+  dismissLongPressHint()
+  longPressFired.value = false
+  longPressStart = { x: e.clientX, y: e.clientY }
+  clearLongPress()
+  const anchor = playBtnRef.value?.$el ?? (e.currentTarget as HTMLElement)
+  longPressTimer = window.setTimeout(() => {
+    longPressTimer = null
+    longPressFired.value = true
+    intervalMenu.value?.show({ currentTarget: anchor, preventDefault() {} }, anchor)
+  }, LONG_PRESS_MS)
+}
+function onPlayPointerMove(e: PointerEvent) {
+  if (longPressStart === null) return
+  if (
+    Math.abs(e.clientX - longPressStart.x) > LONG_PRESS_MOVE_TOLERANCE ||
+    Math.abs(e.clientY - longPressStart.y) > LONG_PRESS_MOVE_TOLERANCE
+  ) {
+    clearLongPress()
+  }
+}
+function onPlayPointerUp() { clearLongPress() }
+/** Tap toggles play; a fired long-press is swallowed so it doesn't also toggle. */
+function onPlayClick() {
+  if (longPressFired.value) { longPressFired.value = false; return }
+  togglePlay()
+}
+
+// One-time hint: long-press is invisible, so on touch the first time the
+// slideshow is available we surface a dismissible bubble explaining it.
+const showLongPressHint = ref(false)
+let hintTimer: number | null = null
+function dismissLongPressHint() {
+  if (!showLongPressHint.value) return
+  showLongPressHint.value = false
+  if (hintTimer !== null) { clearTimeout(hintTimer); hintTimer = null }
+}
+onMounted(() => {
+  if (canSlideshow.value && isCoarsePointer.value && !hasSeenSlideshowLongPressHint()) {
+    showLongPressHint.value = true
+    markSlideshowLongPressHintSeen()
+    hintTimer = window.setTimeout(dismissLongPressHint, 5000)
+  }
+})
+onUnmounted(() => { if (hintTimer !== null) clearTimeout(hintTimer) })
+
 function bumpIdleTimer() {
-  if (!props.autoAdvanceMs || props.autoAdvanceMs <= 0) return
+  if (!canSlideshow.value) return
   scheduleIdleAdvance()
 }
 
+watch(intervalMs, () => scheduleIdleAdvance())
 watch(playing, () => scheduleIdleAdvance())
 watch(() => props.photo.id, () => scheduleIdleAdvance())
 watch(() => props.autoAdvanceMs, () => scheduleIdleAdvance())
@@ -954,20 +1071,59 @@ onUnmounted(() => {
               v-tooltip.top="'Schnitt &amp; Belichtung bearbeiten'"
             />
           </slot>
+          <!-- Slideshow interval (per-browser): caret-only dropdown of 3–30 s.
+               The chosen value shows in the tooltip / open menu, not inline.
+               Desktop only — on touch the long-press on play replaces it. -->
+          <Select
+            v-if="canSlideshow && !isCoarsePointer"
+            :model-value="intervalMs"
+            :options="intervalOptions"
+            option-label="label"
+            option-value="value"
+            class="fs-interval-select"
+            :aria-label="`Diashow-Intervall: ${intervalLabel}`"
+            v-tooltip.top="`Diashow-Intervall: ${intervalLabel}`"
+            @update:model-value="selectInterval"
+          />
           <!-- Slideshow play/pause. Outside the `actions` slot so caller
                overrides still get it. The icon always shows what the click
-               does: ▶ to start, ⏸ while running. Never auto-starts. -->
+               does: ▶ to start, ⏸ while running. Never auto-starts. On touch
+               a long-press opens the interval menu (instead of the caret). -->
           <Button
             v-if="canSlideshow"
+            ref="playBtnRef"
             :icon="playing ? 'pi pi-pause' : 'pi pi-play'"
             rounded text
             :severity="playing ? 'primary' : 'secondary'"
             :class="{ 'fs-toolbar-btn--active': playing }"
+            class="fs-play-btn"
             :aria-pressed="playing"
             :aria-label="(playing ? 'Diashow pausieren' : 'Diashow starten') + ' (S)'"
-            @click="togglePlay"
+            @click="onPlayClick"
+            @pointerdown="onPlayPointerDown"
+            @pointerup="onPlayPointerUp"
+            @pointercancel="onPlayPointerUp"
+            @pointermove="onPlayPointerMove"
+            @contextmenu.prevent
             v-tooltip.top="(playing ? 'Diashow pausieren' : 'Diashow starten') + ' (S)'"
           />
+          <!-- Long-press target for the interval picker on touch devices. -->
+          <Menu
+            v-if="canSlideshow"
+            ref="intervalMenu"
+            :model="intervalMenuItems"
+            :popup="true"
+          />
+          <!-- One-time hint (touch only): explains the otherwise invisible
+               long-press gesture for choosing the slideshow interval. -->
+          <div
+            v-if="showLongPressHint"
+            class="fs-longpress-hint"
+            role="status"
+            @click="dismissLongPressHint"
+          >
+            Play lange drücken, um das Diashow-Intervall zu wählen
+          </div>
           <!-- Real browser fullscreen toggle (Track N / #80). Sits outside
                the `actions` slot so caller overrides still get it. -->
           <Button
@@ -1419,6 +1575,64 @@ onUnmounted(() => {
   padding: 0.2em 0.65em;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* One-time long-press hint bubble, centred just above the bottom action bar. */
+.fs-longpress-hint {
+  position: fixed;
+  left: 50%;
+  bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px) + 3.5em);
+  transform: translateX(-50%);
+  max-width: min(20rem, calc(100vw - 2rem));
+  padding: 0.5em 0.8em;
+  background: rgba(0, 0, 0, 0.82);
+  color: #fff;
+  font-size: 0.85em;
+  line-height: 1.3;
+  text-align: center;
+  border-radius: 0.6em;
+  z-index: 11;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  animation: fs-hint-in 0.2s ease-out;
+}
+.fs-longpress-hint::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -0.4em;
+  transform: translateX(-50%);
+  border: 0.4em solid transparent;
+  border-bottom: 0;
+  border-top-color: rgba(0, 0, 0, 0.82);
+}
+@keyframes fs-hint-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(0.4em); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* Play button: long-press (touch) opens the interval menu, so suppress the
+   OS text-callout / double-tap zoom that a sustained press would trigger. */
+.fs-play-btn {
+  -webkit-touch-callout: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+/* Slideshow interval: caret-only dropdown that sits next to the play button.
+   The selected value isn't shown inline — only the caret. */
+.fs-interval-select {
+  width: 2.25em;
+  background: rgba(0, 0, 0, 0.35);
+  border: none;
+  border-radius: 999px;
+}
+.fs-interval-select :deep(.p-select-label) {
+  display: none;
+}
+.fs-interval-select :deep(.p-select-dropdown) {
+  width: 100%;
+  color: var(--p-text-color, #fff);
 }
 
 /* ── Details flyout ─────────────────────────────────────────────────────── */
