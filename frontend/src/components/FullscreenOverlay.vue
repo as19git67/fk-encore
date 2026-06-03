@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted, onUnmounted, useSlots } from 'vue'
 import Button from 'primevue/button'
 import Select from 'primevue/select'
+import Menu from 'primevue/menu'
 import HeicImage from './HeicImage.vue'
 import PhotoTransformEditor from './PhotoTransformEditor.vue'
 import { getPhotoUrl, type Photo, type CurationStatus } from '../api/photos'
@@ -572,6 +573,71 @@ function selectInterval(ms: number) {
   saveSlideshowIntervalMs(ms)
 }
 
+// On touch / no-hover devices the inline caret dropdown is dropped; instead a
+// long-press on the play button opens the interval menu (a kurzer Tap toggles
+// play as usual). On desktop the caret stays and long-press is inactive.
+const isCoarsePointer = ref(
+  typeof window !== 'undefined' &&
+    window.matchMedia('(hover: none), (pointer: coarse)').matches,
+)
+let pointerMql: MediaQueryList | null = null
+function onPointerMqlChange(e: MediaQueryListEvent) { isCoarsePointer.value = e.matches }
+onMounted(() => {
+  pointerMql = window.matchMedia('(hover: none), (pointer: coarse)')
+  isCoarsePointer.value = pointerMql.matches
+  pointerMql.addEventListener('change', onPointerMqlChange)
+})
+onUnmounted(() => pointerMql?.removeEventListener('change', onPointerMqlChange))
+
+const playBtnRef = ref<{ $el?: HTMLElement } | null>(null)
+const intervalMenu = ref<{ show: (e: unknown, target?: HTMLElement) => void } | null>(null)
+/** Menu items for the long-press interval picker; the current value is ticked. */
+const intervalMenuItems = computed(() =>
+  intervalOptions.map((o) => ({
+    label: o.label,
+    icon: o.value === intervalMs.value ? 'pi pi-check' : undefined,
+    command: () => selectInterval(o.value),
+  })),
+)
+
+const LONG_PRESS_MS = 450
+const LONG_PRESS_MOVE_TOLERANCE = 10
+let longPressTimer: number | null = null
+let longPressStart: { x: number; y: number } | null = null
+const longPressFired = ref(false)
+
+function clearLongPress() {
+  if (longPressTimer !== null) { clearTimeout(longPressTimer); longPressTimer = null }
+  longPressStart = null
+}
+function onPlayPointerDown(e: PointerEvent) {
+  if (!isCoarsePointer.value) return
+  longPressFired.value = false
+  longPressStart = { x: e.clientX, y: e.clientY }
+  clearLongPress()
+  const anchor = playBtnRef.value?.$el ?? (e.currentTarget as HTMLElement)
+  longPressTimer = window.setTimeout(() => {
+    longPressTimer = null
+    longPressFired.value = true
+    intervalMenu.value?.show({ currentTarget: anchor, preventDefault() {} }, anchor)
+  }, LONG_PRESS_MS)
+}
+function onPlayPointerMove(e: PointerEvent) {
+  if (longPressStart === null) return
+  if (
+    Math.abs(e.clientX - longPressStart.x) > LONG_PRESS_MOVE_TOLERANCE ||
+    Math.abs(e.clientY - longPressStart.y) > LONG_PRESS_MOVE_TOLERANCE
+  ) {
+    clearLongPress()
+  }
+}
+function onPlayPointerUp() { clearLongPress() }
+/** Tap toggles play; a fired long-press is swallowed so it doesn't also toggle. */
+function onPlayClick() {
+  if (longPressFired.value) { longPressFired.value = false; return }
+  togglePlay()
+}
+
 function bumpIdleTimer() {
   if (!canSlideshow.value) return
   scheduleIdleAdvance()
@@ -985,9 +1051,10 @@ onUnmounted(() => {
             />
           </slot>
           <!-- Slideshow interval (per-browser): caret-only dropdown of 3–30 s.
-               The chosen value shows in the tooltip / open menu, not inline. -->
+               The chosen value shows in the tooltip / open menu, not inline.
+               Desktop only — on touch the long-press on play replaces it. -->
           <Select
-            v-if="canSlideshow"
+            v-if="canSlideshow && !isCoarsePointer"
             :model-value="intervalMs"
             :options="intervalOptions"
             option-label="label"
@@ -999,17 +1066,32 @@ onUnmounted(() => {
           />
           <!-- Slideshow play/pause. Outside the `actions` slot so caller
                overrides still get it. The icon always shows what the click
-               does: ▶ to start, ⏸ while running. Never auto-starts. -->
+               does: ▶ to start, ⏸ while running. Never auto-starts. On touch
+               a long-press opens the interval menu (instead of the caret). -->
           <Button
             v-if="canSlideshow"
+            ref="playBtnRef"
             :icon="playing ? 'pi pi-pause' : 'pi pi-play'"
             rounded text
             :severity="playing ? 'primary' : 'secondary'"
             :class="{ 'fs-toolbar-btn--active': playing }"
+            class="fs-play-btn"
             :aria-pressed="playing"
             :aria-label="(playing ? 'Diashow pausieren' : 'Diashow starten') + ' (S)'"
-            @click="togglePlay"
+            @click="onPlayClick"
+            @pointerdown="onPlayPointerDown"
+            @pointerup="onPlayPointerUp"
+            @pointercancel="onPlayPointerUp"
+            @pointermove="onPlayPointerMove"
+            @contextmenu.prevent
             v-tooltip.top="(playing ? 'Diashow pausieren' : 'Diashow starten') + ' (S)'"
+          />
+          <!-- Long-press target for the interval picker on touch devices. -->
+          <Menu
+            v-if="canSlideshow"
+            ref="intervalMenu"
+            :model="intervalMenuItems"
+            :popup="true"
           />
           <!-- Real browser fullscreen toggle (Track N / #80). Sits outside
                the `actions` slot so caller overrides still get it. -->
@@ -1462,6 +1544,14 @@ onUnmounted(() => {
   padding: 0.2em 0.65em;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* Play button: long-press (touch) opens the interval menu, so suppress the
+   OS text-callout / double-tap zoom that a sustained press would trigger. */
+.fs-play-btn {
+  -webkit-touch-callout: none;
+  user-select: none;
+  touch-action: manipulation;
 }
 
 /* Slideshow interval: caret-only dropdown that sits next to the play button.
