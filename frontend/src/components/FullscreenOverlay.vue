@@ -1461,21 +1461,26 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-/* Slideshow interval: compact dropdown that sits among the toolbar buttons. */
+/* Slideshow interval: compact dropdown that sits among the toolbar buttons.
+   Value sits on the left, the caret on the right edge (close to the play
+   button) with a gap between the two. */
 .fs-interval-select {
+  width: 4.25em;
   background: rgba(0, 0, 0, 0.35);
   border: none;
   border-radius: 999px;
 }
 .fs-interval-select :deep(.p-select-label) {
-  padding: 0.2em 0 0.2em 0.65em;
+  flex: 1 1 auto;
+  padding: 0.2em 0 0.2em 0.7em;
   font-size: 0.8em;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--p-text-color, #fff);
 }
 .fs-interval-select :deep(.p-select-dropdown) {
-  width: 1.6em;
+  width: auto;
+  padding: 0 0.35em 0 0;
   color: var(--p-text-color, #fff);
 }
 
