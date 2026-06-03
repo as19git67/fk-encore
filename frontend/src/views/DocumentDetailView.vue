@@ -774,9 +774,9 @@ onBeforeUnmount(() => {
   background: var(--p-surface-card);
   border: 1px solid var(--p-content-border-color);
   border-radius: 8px;
-  /* Defensive clip in case the canvas computes a sub-pixel wider than
-     the column on some zoom levels — combined with the wrapper's
-     overflow: hidden this guarantees no scrollbars on the preview. */
+  /* Clip the panel to its grid track so a wide (zoomed) page can't blow
+     the column out past the container — the horizontal overflow is
+     scrolled inside the viewer's canvas-wrapper instead. */
   overflow: hidden;
   display: flex;
   min-width: 0;

@@ -330,19 +330,23 @@ onBeforeUnmount(() => {
 
 .canvas-wrapper {
   position: relative;
-  /* No scrollbars on the preview itself — clip anything that would
-     overflow (e.g. when the user zooms past fit-width) and let the
-     outer page scroll instead. */
-  overflow: hidden;
+  /* Allow scrolling the preview when the user zooms the page past the
+     available width — horizontal in particular, so the cut-off sides
+     stay reachable. The wrapper grows with the page height, so vertical
+     overflow still falls through to the page scroll as before. */
+  overflow: auto;
   display: flex;
-  justify-content: center;
-  align-items: flex-start;
   padding: 0.5rem;
   background: var(--p-surface-ground, #2a2a2a);
 }
 
 .pdf-canvas {
   display: block;
+  /* `margin: auto` centers the page while it fits the wrapper, but
+     collapses to 0 once the page is wider than the wrapper so the left
+     edge stays reachable by scrolling. A plain `justify-content: center`
+     would push the overflow off the left, out of reach. */
+  margin: auto;
   background: white;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
 }
