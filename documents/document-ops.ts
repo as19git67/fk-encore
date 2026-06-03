@@ -31,7 +31,7 @@ import {
 } from "./llm-client";
 import { loadEffectiveTaxSections } from "./tax-hint-overrides";
 import { loadSubjectPersonHints } from "./subject-persons";
-import { flattenTaxonomy } from "./taxonomy";
+import { flattenTaxonomy, taxonomyHints } from "./taxonomy";
 import { realtime, push } from "~encore/clients";
 
 console.log("[boot] documents/document-ops.ts: all imports resolved");
@@ -385,10 +385,15 @@ async function loadTaxonomyForClassifier(): Promise<TaxonomyEntry[]> {
   const byId = new Map<number, { slug: string; name: string }>();
   for (const r of rows) byId.set(r.id, { slug: r.slug, name: r.name });
 
+  // Hints live in the seed taxonomy (prompt-only, no DB column) and are
+  // merged in by slug so borderline documents land in the right bucket.
+  const hints = taxonomyHints();
+
   return rows.map((r) => ({
     slug: r.slug,
     name: r.name,
     parent_slug: r.parent_id != null ? byId.get(r.parent_id)?.slug ?? null : null,
+    hint: hints.get(r.slug),
   }));
 }
 
