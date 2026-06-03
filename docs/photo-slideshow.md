@@ -29,13 +29,12 @@ Eine Diashow existiert genau dann, wenn der `FullscreenOverlay` mit
 - **Icon = Klick-Aktion:** Das Icon zeigt immer, was der Klick auslöst – ▶
   (`pi-play`) wenn gestoppt, ⏸ (`pi-pause`) während sie läuft. Jeder echte
   Stopp setzt `playing = false`, sodass das Icon stets stimmt.
-- **Einstellbarer Abstand (user-spezifisch):** Ein zweiter Toolbar-Button
-  (`pi-clock`, Label z. B. „5s") schaltet den Abstand zwischen den Fotos
-  schrittweise weiter: **3 → 5 → 10 → 15 → 20 → 30 s** (Default **5 s**). Der
-  Wert wird **pro Browser** in `localStorage` (`slideshow_interval_ms`)
-  gespeichert; Logik in `frontend/src/utils/slideshowInterval.ts`. Die
-  `autoAdvanceMs`-Prop schaltet die Diashow nur **ein** (Wert > 0) und dient
-  als Fallback-Default.
+- **Einstellbarer Abstand (user-spezifisch):** Ein kompaktes Dropdown
+  (`Select`) neben dem Play-Button bietet den Abstand zwischen den Fotos zur
+  Auswahl: **3 / 5 / 10 / 15 / 20 / 30 s** (Default **5 s**). Der Wert wird
+  **pro Browser** in `localStorage` (`slideshow_interval_ms`) gespeichert;
+  Logik in `frontend/src/utils/slideshowInterval.ts`. Die `autoAdvanceMs`-Prop
+  schaltet die Diashow nur **ein** (Wert > 0) und dient als Fallback-Default.
 - **Intervall & Idle-Reset:** Während des Laufs wird alle (eingestellten)
   Sekunden zum nächsten Foto weitergeschaltet. Jede Interaktion
   (Pointer/Tastatur/Wheel) setzt das Intervall zurück, sodass erst nach kurzer

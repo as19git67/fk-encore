@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, useSlots } from 'vue'
 import Button from 'primevue/button'
+import Select from 'primevue/select'
 import HeicImage from './HeicImage.vue'
 import PhotoTransformEditor from './PhotoTransformEditor.vue'
 import { getPhotoUrl, type Photo, type CurationStatus } from '../api/photos'
@@ -11,9 +12,9 @@ import type { GalleryGridGroup } from '../api/gallery'
 import { formatPhotoDateCompact, formatLocationLabel, toLocalIsoDate } from '../utils/dateFormat'
 import { shouldArmSlideshow, slideshowReachedEnd, isDayChange, shouldShowCaption, type SlideshowState } from '../utils/slideshow'
 import {
+  SLIDESHOW_INTERVAL_OPTIONS_MS,
   loadSlideshowIntervalMs,
   saveSlideshowIntervalMs,
-  nextSlideshowIntervalMs,
   formatSlideshowIntervalLabel,
   DEFAULT_SLIDESHOW_INTERVAL_MS,
 } from '../utils/slideshowInterval'
@@ -529,7 +530,11 @@ const intervalMs = ref(
     (props.autoAdvanceMs ?? 0) > 0 ? props.autoAdvanceMs : DEFAULT_SLIDESHOW_INTERVAL_MS,
   ),
 )
-const intervalLabel = computed(() => formatSlideshowIntervalLabel(intervalMs.value))
+/** Dropdown options: [{ label: '5s', value: 5000 }, …]. */
+const intervalOptions = SLIDESHOW_INTERVAL_OPTIONS_MS.map((ms) => ({
+  label: formatSlideshowIntervalLabel(ms),
+  value: ms,
+}))
 
 function clearIdleTimer() {
   if (idleTimer !== null) {
@@ -559,10 +564,10 @@ function togglePlay() {
   playing.value = !playing.value
 }
 
-/** Cycle the slideshow interval to the next step and persist it (per browser). */
-function cycleInterval() {
-  intervalMs.value = nextSlideshowIntervalMs(intervalMs.value)
-  saveSlideshowIntervalMs(intervalMs.value)
+/** Apply a chosen slideshow interval and persist it (per browser). */
+function selectInterval(ms: number) {
+  intervalMs.value = ms
+  saveSlideshowIntervalMs(ms)
 }
 
 function bumpIdleTimer() {
@@ -977,18 +982,17 @@ onUnmounted(() => {
               v-tooltip.top="'Schnitt &amp; Belichtung bearbeiten'"
             />
           </slot>
-          <!-- Slideshow interval (per-browser). Cycles 3 → 5 → 10 → 15 → 20 →
-               30 s; the label shows the current value. -->
-          <Button
+          <!-- Slideshow interval (per-browser): compact dropdown of 3–30 s. -->
+          <Select
             v-if="canSlideshow"
-            :label="intervalLabel"
-            icon="pi pi-clock"
-            text
-            severity="secondary"
-            class="fs-interval-btn"
-            :aria-label="`Diashow-Intervall: ${intervalLabel} (Klick: nächster Wert)`"
-            @click="cycleInterval"
-            v-tooltip.top="`Diashow-Intervall: ${intervalLabel} — Klick wählt den nächsten Wert`"
+            :model-value="intervalMs"
+            :options="intervalOptions"
+            option-label="label"
+            option-value="value"
+            class="fs-interval-select"
+            :aria-label="'Diashow-Intervall'"
+            v-tooltip.top="'Diashow-Intervall'"
+            @update:model-value="selectInterval"
           />
           <!-- Slideshow play/pause. Outside the `actions` slot so caller
                overrides still get it. The icon always shows what the click
@@ -1457,20 +1461,22 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-/* Slideshow interval button: icon + compact "5s" label, sits among the
-   icon-only toolbar buttons. */
-.fs-interval-btn {
-  width: auto;
-  padding: 0.25em 0.55em;
+/* Slideshow interval: compact dropdown that sits among the toolbar buttons. */
+.fs-interval-select {
+  background: rgba(0, 0, 0, 0.35);
+  border: none;
   border-radius: 999px;
 }
-.fs-interval-btn :deep(.p-button-label) {
+.fs-interval-select :deep(.p-select-label) {
+  padding: 0.2em 0 0.2em 0.65em;
   font-size: 0.8em;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  margin-left: 0.25em;
-  flex: 0 0 auto;
-  width: auto;
+  color: var(--p-text-color, #fff);
+}
+.fs-interval-select :deep(.p-select-dropdown) {
+  width: 1.6em;
+  color: var(--p-text-color, #fff);
 }
 
 /* ── Details flyout ─────────────────────────────────────────────────────── */
