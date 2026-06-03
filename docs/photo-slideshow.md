@@ -29,11 +29,32 @@ Eine Diashow existiert genau dann, wenn der `FullscreenOverlay` mit
 - **Icon = Klick-Aktion:** Das Icon zeigt immer, was der Klick auslöst – ▶
   (`pi-play`) wenn gestoppt, ⏸ (`pi-pause`) während sie läuft. Jeder echte
   Stopp setzt `playing = false`, sodass das Icon stets stimmt.
-- **Intervall & Idle-Reset:** Während des Laufs wird alle `autoAdvanceMs` zum
-  nächsten Foto weitergeschaltet. Jede Interaktion (Pointer/Tastatur/Wheel)
-  setzt das Intervall zurück, sodass erst nach kurzer Ruhe weitergeschaltet
-  wird. Zwischen zwei Fotos wird gewartet, bis das nächste Bild geladen ist
-  (`playing` bleibt dabei `true`).
+- **Einstellbarer Abstand (user-spezifisch):** Auswahl zwischen
+  **3 / 5 / 10 / 15 / 20 / 30 s** (Default **5 s**). Die Bedienung ist
+  eingabeabhängig:
+  - **Desktop / Maus (hover-fähig):** ein reines Caret-Dropdown (`Select`, nur
+    der Pfeil) neben dem Play-Button. Der gewählte Wert wird nicht inline
+    angezeigt, sondern erscheint im Tooltip bzw. im aufgeklappten Menü.
+  - **Touch / Mobile (`(hover: none), (pointer: coarse)`):** der Caret entfällt;
+    stattdessen öffnet ein **Long-Press (~450 ms) auf den Play-Button** ein
+    Popup-Menü (`Menu`) mit den Zeitoptionen (aktueller Wert mit Häkchen). Ein
+    kurzer Tap startet/pausiert wie gewohnt; der ausgelöste Long-Press wird vom
+    folgenden Klick „verschluckt", sodass er nicht zusätzlich togglet. Da die
+    Geste unsichtbar ist, erscheint **beim ersten Mal** ein einmaliger Hinweis
+    („Play lange drücken, um das Diashow-Intervall zu wählen") als Sprechblase
+    über der Action-Bar; er verschwindet nach 5 s, bei Antippen oder sobald der
+    Play-Button gedrückt wird. Die „gesehen"-Flag liegt in `localStorage`
+    (`slideshow_longpress_hint_seen`).
+
+  Der Wert wird **pro Browser** in `localStorage` (`slideshow_interval_ms`)
+  gespeichert; Logik in `frontend/src/utils/slideshowInterval.ts`. Die
+  `autoAdvanceMs`-Prop schaltet die Diashow nur **ein** (Wert > 0) und dient als
+  Fallback-Default.
+- **Intervall & Idle-Reset:** Während des Laufs wird alle (eingestellten)
+  Sekunden zum nächsten Foto weitergeschaltet. Jede Interaktion
+  (Pointer/Tastatur/Wheel) setzt das Intervall zurück, sodass erst nach kurzer
+  Ruhe weitergeschaltet wird. Zwischen zwei Fotos wird gewartet, bis das
+  nächste Bild geladen ist (`playing` bleibt dabei `true`).
 - **Details-Flyout pausiert nicht:** Bei geöffneter Detail-Ansicht läuft die
   Diashow weiter (die Beschreibung steht dort ohnehin in der Seitenleiste).
 - **Stopps (Icon → ▶):** letztes Foto erreicht (kein Wrap-around), Öffnen des
