@@ -39,7 +39,12 @@ Eine Diashow existiert genau dann, wenn der `FullscreenOverlay` mit
     stattdessen öffnet ein **Long-Press (~450 ms) auf den Play-Button** ein
     Popup-Menü (`Menu`) mit den Zeitoptionen (aktueller Wert mit Häkchen). Ein
     kurzer Tap startet/pausiert wie gewohnt; der ausgelöste Long-Press wird vom
-    folgenden Klick „verschluckt", sodass er nicht zusätzlich togglet.
+    folgenden Klick „verschluckt", sodass er nicht zusätzlich togglet. Da die
+    Geste unsichtbar ist, erscheint **beim ersten Mal** ein einmaliger Hinweis
+    („Play lange drücken, um das Diashow-Intervall zu wählen") als Sprechblase
+    über der Action-Bar; er verschwindet nach 5 s, bei Antippen oder sobald der
+    Play-Button gedrückt wird. Die „gesehen"-Flag liegt in `localStorage`
+    (`slideshow_longpress_hint_seen`).
 
   Der Wert wird **pro Browser** in `localStorage` (`slideshow_interval_ms`)
   gespeichert; Logik in `frontend/src/utils/slideshowInterval.ts`. Die

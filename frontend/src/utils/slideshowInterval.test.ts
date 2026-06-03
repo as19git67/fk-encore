@@ -6,6 +6,8 @@ import {
   saveSlideshowIntervalMs,
   nextSlideshowIntervalMs,
   formatSlideshowIntervalLabel,
+  hasSeenSlideshowLongPressHint,
+  markSlideshowLongPressHintSeen,
 } from './slideshowInterval'
 
 function fakeLocalStorage(): Storage {
@@ -69,5 +71,13 @@ describe('formatSlideshowIntervalLabel', () => {
   it('renders compact seconds', () => {
     expect(formatSlideshowIntervalLabel(5000)).toBe('5s')
     expect(formatSlideshowIntervalLabel(30000)).toBe('30s')
+  })
+})
+
+describe('long-press hint seen flag', () => {
+  it('is unseen by default and becomes seen after marking', () => {
+    expect(hasSeenSlideshowLongPressHint()).toBe(false)
+    markSlideshowLongPressHintSeen()
+    expect(hasSeenSlideshowLongPressHint()).toBe(true)
   })
 })

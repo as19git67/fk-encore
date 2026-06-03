@@ -49,3 +49,25 @@ export function nextSlideshowIntervalMs(current: number): number {
 export function formatSlideshowIntervalLabel(ms: number): string {
   return `${Math.round(ms / 1000)}s`
 }
+
+// One-time hint: on touch devices the interval is chosen by long-pressing the
+// play button (no visible caret), so we show a dismissible hint the first time.
+const HINT_SEEN_KEY = 'slideshow_longpress_hint_seen'
+
+/** True once the long-press hint has been shown (and thus shouldn't repeat). */
+export function hasSeenSlideshowLongPressHint(): boolean {
+  try {
+    return localStorage.getItem(HINT_SEEN_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+/** Remember that the long-press hint has been shown. */
+export function markSlideshowLongPressHintSeen(): void {
+  try {
+    localStorage.setItem(HINT_SEEN_KEY, '1')
+  } catch {
+    // ignore (private mode / storage disabled)
+  }
+}

@@ -17,6 +17,8 @@ import {
   loadSlideshowIntervalMs,
   saveSlideshowIntervalMs,
   formatSlideshowIntervalLabel,
+  hasSeenSlideshowLongPressHint,
+  markSlideshowLongPressHintSeen,
   DEFAULT_SLIDESHOW_INTERVAL_MS,
 } from '../utils/slideshowInterval'
 
@@ -612,6 +614,7 @@ function clearLongPress() {
 }
 function onPlayPointerDown(e: PointerEvent) {
   if (!isCoarsePointer.value) return
+  dismissLongPressHint()
   longPressFired.value = false
   longPressStart = { x: e.clientX, y: e.clientY }
   clearLongPress()
@@ -637,6 +640,24 @@ function onPlayClick() {
   if (longPressFired.value) { longPressFired.value = false; return }
   togglePlay()
 }
+
+// One-time hint: long-press is invisible, so on touch the first time the
+// slideshow is available we surface a dismissible bubble explaining it.
+const showLongPressHint = ref(false)
+let hintTimer: number | null = null
+function dismissLongPressHint() {
+  if (!showLongPressHint.value) return
+  showLongPressHint.value = false
+  if (hintTimer !== null) { clearTimeout(hintTimer); hintTimer = null }
+}
+onMounted(() => {
+  if (canSlideshow.value && isCoarsePointer.value && !hasSeenSlideshowLongPressHint()) {
+    showLongPressHint.value = true
+    markSlideshowLongPressHintSeen()
+    hintTimer = window.setTimeout(dismissLongPressHint, 5000)
+  }
+})
+onUnmounted(() => { if (hintTimer !== null) clearTimeout(hintTimer) })
 
 function bumpIdleTimer() {
   if (!canSlideshow.value) return
@@ -1093,6 +1114,16 @@ onUnmounted(() => {
             :model="intervalMenuItems"
             :popup="true"
           />
+          <!-- One-time hint (touch only): explains the otherwise invisible
+               long-press gesture for choosing the slideshow interval. -->
+          <div
+            v-if="showLongPressHint"
+            class="fs-longpress-hint"
+            role="status"
+            @click="dismissLongPressHint"
+          >
+            Play lange drücken, um das Diashow-Intervall zu wählen
+          </div>
           <!-- Real browser fullscreen toggle (Track N / #80). Sits outside
                the `actions` slot so caller overrides still get it. -->
           <Button
@@ -1544,6 +1575,40 @@ onUnmounted(() => {
   padding: 0.2em 0.65em;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* One-time long-press hint bubble, centred just above the bottom action bar. */
+.fs-longpress-hint {
+  position: fixed;
+  left: 50%;
+  bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px) + 3.5em);
+  transform: translateX(-50%);
+  max-width: min(20rem, calc(100vw - 2rem));
+  padding: 0.5em 0.8em;
+  background: rgba(0, 0, 0, 0.82);
+  color: #fff;
+  font-size: 0.85em;
+  line-height: 1.3;
+  text-align: center;
+  border-radius: 0.6em;
+  z-index: 11;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  animation: fs-hint-in 0.2s ease-out;
+}
+.fs-longpress-hint::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -0.4em;
+  transform: translateX(-50%);
+  border: 0.4em solid transparent;
+  border-bottom: 0;
+  border-top-color: rgba(0, 0, 0, 0.82);
+}
+@keyframes fs-hint-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(0.4em); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
 /* Play button: long-press (touch) opens the interval menu, so suppress the
