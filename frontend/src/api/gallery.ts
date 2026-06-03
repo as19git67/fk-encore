@@ -43,6 +43,12 @@ export interface GalleryGridEntry {
   curation: GalleryCuration
   auto_crop?: { x: number; y: number }
   group?: GalleryGridGroup
+  /**
+   * Comments on this photo within the current album. Only set when the grid
+   * is album-scoped (comments are album-bound); absent in the global gallery.
+   * Drives the album-only "has comments" badge.
+   */
+  comment_count?: number
 }
 
 export interface GalleryGridResponse {

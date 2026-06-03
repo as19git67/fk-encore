@@ -24,6 +24,7 @@ import {
   albums,
   albumPhotos,
   albumShares,
+  photoComments,
 } from "../db/schema";
 import {
   buildPhotoFilterConditions,
@@ -336,6 +337,13 @@ export async function listGalleryGridLogic(
   // ordering and is enforced by the DISTINCT ON sort key.
   const photoIds = rows.map((r) => r.id);
   const groupByPhotoId = await loadGroupInfoForPhotos(userId, photoIds);
+  // Comments are album-bound, so the "has comments" badge only exists when
+  // the grid is scoped to an album. Skip the lookup entirely in the global
+  // gallery to keep that hot path free of the extra query.
+  const commentCountByPhotoId =
+    effectiveFilter.albumScopeId !== undefined
+      ? await loadCommentCountsForPhotos(effectiveFilter.albumScopeId, photoIds)
+      : null;
 
   const result: GalleryGridEntry[] = rows.map((r) => {
     const entry: GalleryGridEntry = {
@@ -346,10 +354,45 @@ export async function listGalleryGridLogic(
     if (r.auto_crop) entry.auto_crop = r.auto_crop;
     const g = groupByPhotoId.get(r.id);
     if (g) entry.group = g;
+    const c = commentCountByPhotoId?.get(r.id);
+    if (c) entry.comment_count = c;
     return entry;
   });
 
   return { total, offset: resolvedOffset, photos: result };
+}
+
+/**
+ * For a given page of photo ids, return the number of comments each photo has
+ * within `albumId`. Comments are bound to the album they were written in, so
+ * this count is album-scoped and never leaks across albums. Photos with no
+ * comments are simply absent from the map. Returns an empty map for an empty
+ * page.
+ */
+async function loadCommentCountsForPhotos(
+  albumId: number,
+  photoIds: number[],
+): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  if (photoIds.length === 0) return out;
+
+  const rows = await dbAll<{ photo_id: number; c: number }>(
+    db
+      .select({
+        photo_id: photoComments.photo_id,
+        c: sql<number>`COUNT(*)::int`,
+      })
+      .from(photoComments)
+      .where(
+        and(
+          eq(photoComments.album_id, albumId),
+          inArray(photoComments.photo_id, photoIds),
+        ),
+      )
+      .groupBy(photoComments.photo_id),
+  );
+  for (const r of rows) out.set(r.photo_id, Number(r.c));
+  return out;
 }
 
 /**
