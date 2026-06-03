@@ -19,6 +19,7 @@ export const categoryTaxonomy: CategorySeed[] = [
       { slug: "finanzen-kontoauszuege", name: "Kontoauszüge" },
       { slug: "finanzen-gehalt", name: "Gehaltsabrechnungen" },
       { slug: "finanzen-rechnungen", name: "Rechnungen" },
+      { slug: "finanzen-wertpapiere", name: "Wertpapiere & Dividenden" },
       { slug: "finanzen-steuern", name: "Steuern" },
     ],
   },

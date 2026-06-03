@@ -373,6 +373,15 @@ describe("documents.taxonomy seed shape", () => {
     );
   });
 
+  it("includes a dedicated Finanzen subcategory for securities & dividends", () => {
+    const finanzen = findBySlug(categoryTaxonomy, "finanzen");
+    expect(finanzen?.children?.map((c) => c.slug)).toEqual(
+      expect.arrayContaining(["finanzen-wertpapiere"]),
+    );
+    const wertpapiere = findBySlug(categoryTaxonomy, "finanzen-wertpapiere");
+    expect(wertpapiere?.name).toBe("Wertpapiere & Dividenden");
+  });
+
   it("includes the new top-level Betreuung branch with its sections", () => {
     const betreuung = findBySlug(categoryTaxonomy, "betreuung");
     expect(betreuung?.icon).toBe("pi-id-card");
