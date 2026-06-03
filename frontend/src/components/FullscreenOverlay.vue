@@ -535,6 +535,8 @@ const intervalOptions = SLIDESHOW_INTERVAL_OPTIONS_MS.map((ms) => ({
   label: formatSlideshowIntervalLabel(ms),
   value: ms,
 }))
+// Only surfaced in the tooltip / aria-label — the value isn't shown inline.
+const intervalLabel = computed(() => formatSlideshowIntervalLabel(intervalMs.value))
 
 function clearIdleTimer() {
   if (idleTimer !== null) {
@@ -982,7 +984,8 @@ onUnmounted(() => {
               v-tooltip.top="'Schnitt &amp; Belichtung bearbeiten'"
             />
           </slot>
-          <!-- Slideshow interval (per-browser): compact dropdown of 3–30 s. -->
+          <!-- Slideshow interval (per-browser): caret-only dropdown of 3–30 s.
+               The chosen value shows in the tooltip / open menu, not inline. -->
           <Select
             v-if="canSlideshow"
             :model-value="intervalMs"
@@ -990,8 +993,8 @@ onUnmounted(() => {
             option-label="label"
             option-value="value"
             class="fs-interval-select"
-            :aria-label="'Diashow-Intervall'"
-            v-tooltip.top="'Diashow-Intervall'"
+            :aria-label="`Diashow-Intervall: ${intervalLabel}`"
+            v-tooltip.top="`Diashow-Intervall: ${intervalLabel}`"
             @update:model-value="selectInterval"
           />
           <!-- Slideshow play/pause. Outside the `actions` slot so caller
@@ -1461,26 +1464,19 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-/* Slideshow interval: compact dropdown that sits among the toolbar buttons.
-   Value sits on the left, the caret on the right edge (close to the play
-   button) with a gap between the two. */
+/* Slideshow interval: caret-only dropdown that sits next to the play button.
+   The selected value isn't shown inline — only the caret. */
 .fs-interval-select {
-  width: 4.25em;
+  width: 2.25em;
   background: rgba(0, 0, 0, 0.35);
   border: none;
   border-radius: 999px;
 }
 .fs-interval-select :deep(.p-select-label) {
-  flex: 1 1 auto;
-  padding: 0.2em 0 0.2em 0.7em;
-  font-size: 0.8em;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: var(--p-text-color, #fff);
+  display: none;
 }
 .fs-interval-select :deep(.p-select-dropdown) {
-  width: auto;
-  padding: 0 0.35em 0 0;
+  width: 100%;
   color: var(--p-text-color, #fff);
 }
 
