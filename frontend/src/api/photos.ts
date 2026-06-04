@@ -314,6 +314,8 @@ export interface Face {
   photo_id: number
   bbox: FaceBBox
   person_id?: number
+  /** Assigned person's name, resolved server-side (undefined when unassigned). */
+  person_name?: string
   quality?: number
   ignored: boolean
   created_at: string

@@ -5572,7 +5572,7 @@ export async function getPhotoFacesLogic(
 ): Promise<{ faces: Face[] }> {
   const rows = await dbAll<{
     id: number; user_id: number; photo_id: number; bbox: string; embedding: string;
-    person_id: number | null; quality: number | null; ignored: boolean;
+    person_id: number | null; person_name: string | null; quality: number | null; ignored: boolean;
     created_at: string | null;
   }>(
     db.select({
@@ -5582,6 +5582,9 @@ export async function getPhotoFacesLogic(
       bbox: faces.bbox,
       embedding: faces.embedding,
       person_id: userFaceAssignments.person_id,
+      // Resolve the person name here so the sidebar can label the face
+      // without relying on a separately-loaded persons list.
+      person_name: persons.name,
       quality: faces.quality,
       ignored: userFaceAssignments.ignored,
       created_at: faces.created_at,
@@ -5591,6 +5594,7 @@ export async function getPhotoFacesLogic(
       eq(userFaceAssignments.face_id, faces.id),
       eq(userFaceAssignments.user_id, userId)
     ))
+    .leftJoin(persons, eq(persons.id, userFaceAssignments.person_id))
     .where(eq(faces.photo_id, photoId))
   );
 
@@ -5602,6 +5606,7 @@ export async function getPhotoFacesLogic(
       bbox: JSON.parse(r.bbox),
       embedding: JSON.parse(r.embedding),
       person_id: r.person_id ?? undefined,
+      person_name: r.person_name ?? undefined,
       quality: r.quality ?? undefined,
       ignored: !!r.ignored,
       created_at: r.created_at ?? "",

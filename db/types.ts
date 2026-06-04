@@ -343,6 +343,12 @@ export interface Face {
   bbox: FaceBBox; // relativ (0..1)
   embedding: number[]; // Float32-Werte
   person_id?: number;
+  /**
+   * Name of the assigned person (from `persons.name`), resolved server-side
+   * so the photo-detail sidebar can label the face without depending on a
+   * separately-loaded persons list. Undefined when the face is unassigned.
+   */
+  person_name?: string;
   quality?: number;
   ignored: boolean;
   created_at: string;
