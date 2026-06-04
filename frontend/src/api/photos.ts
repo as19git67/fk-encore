@@ -442,6 +442,14 @@ export function retryFailedScans() {
   })
 }
 
+// Targeted POI recovery (#558): re-run poi_detection only for photos that have
+// GPS + a finished embedding but no POI matches yet.
+export function redetectMissingPois() {
+  return apiFetch<{ queued: number }>('/photos/poi-redetect', {
+    method: 'POST'
+  })
+}
+
 export function cancelPendingScans() {
   return apiFetch<{ cancelled: number }>('/photos/scan-queue/cancel', {
     method: 'POST'
