@@ -1571,20 +1571,27 @@ async function onGalleryLoaded() {
     || loadLastPhotoMap()[String(albumId.value)]
     || photoNav.selectedPhotoId
     || null
-  if (targetId) {
-    const idx = galleryRef.value.findLoadedIndexById(targetId)
-    if (idx !== null) {
-      if (deepLinkPhotoId && targetId === deepLinkPhotoId) {
-        void openGridFullscreenAt(idx)
-      } else {
-        cursorIndex.value = idx
-        galleryRef.value.scrollToIndex(idx)
-        void hydrateCursor(idx)
-      }
-    }
-  }
   if (route.query.photoId) {
     router.replace({ query: { ...route.query, photoId: undefined } })
+  }
+  if (!targetId) return
+  let idx = galleryRef.value.findLoadedIndexById(targetId)
+  if (idx === null) {
+    // The target wasn't in the initial window. The `around-photo-id` prop
+    // can race the gallery's mount, so the first load sometimes centres on
+    // the newest page instead of the stored photo — which left the user on
+    // the wrong page with blank leading cells. Re-anchor on the target so we
+    // can scroll to it and its neighbours load.
+    await galleryRef.value.reload({ aroundPhotoId: targetId })
+    idx = galleryRef.value.findLoadedIndexById(targetId)
+  }
+  if (idx === null) return
+  if (deepLinkPhotoId && targetId === deepLinkPhotoId) {
+    void openGridFullscreenAt(idx)
+  } else {
+    cursorIndex.value = idx
+    galleryRef.value.scrollToIndex(idx)
+    void hydrateCursor(idx)
   }
 }
 
