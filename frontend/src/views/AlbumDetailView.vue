@@ -331,6 +331,17 @@ const curationStatsMap = computed(() => {
   return m
 })
 
+// Curation opinions (fav/hide across album participants) for the photo the
+// fullscreen/split cursor currently shows. The cursor photo is hydrated from
+// the grid + photo-details batch and doesn't carry this album-only data, so we
+// resolve it from album.photos here and feed it to the detail sidebar. Reactive
+// so it lights up once the (lazy-loaded) album photo array arrives.
+const cursorCurationStats = computed(() => {
+  const id = cursorPhoto.value?.id
+  if (id == null) return undefined
+  return album.value?.photos.find((p) => p.id === id)?.curation_stats
+})
+
 // ── Similar-photo groups (stacks) ─────────────────────────────────────────────
 // Load all user's groups; filter to those with 2+ members in this album.
 const photoGroupsList = ref<PhotoGroup[]>([])
@@ -2129,6 +2140,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
         <PhotoDetailSidebar
           v-if="cursorPhoto"
           :photo="cursorPhoto"
+          :curation-stats="cursorCurationStats"
           :can-delete="canDeletePhotos || canWrite"
           :can-upload="canUploadPhotos"
           :faces="detectedFaces"
@@ -2286,6 +2298,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
         <PhotoDetailSidebar
           :in-flyout="true"
           :photo="cursorPhoto"
+          :curation-stats="cursorCurationStats"
           :can-delete="canDeletePhotos || canWrite"
           :can-upload="canUploadPhotos"
           :faces="detectedFaces"

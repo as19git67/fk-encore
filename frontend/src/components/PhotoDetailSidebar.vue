@@ -16,6 +16,7 @@ import { useAuthStore } from '../stores/auth'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { formatPhotoDateCompact } from '../utils/dateFormat'
+import { resolveCurationOpinions } from '../utils/curationOpinions'
 
 const props = defineProps<{
   photo: Photo
@@ -56,6 +57,11 @@ const props = defineProps<{
    *  (the user already sees the photo in the fullscreen view), and a
    *  small map with a pin is shown under the location section. */
   inFlyout?: boolean
+  /** Album-scoped curation opinions (fav/hide across album participants).
+   *  Supplied by the album views because the fullscreen/split cursor photo —
+   *  hydrated from the grid + photo-details batch — doesn't carry this
+   *  album-only data. Falls back to photo.curation_stats when omitted. */
+  curationStats?: { fav_count: number; hide_count: number; member_count: number }
 }>()
 
 const editDate = defineModel<Date | null>('editDate', { default: null })
@@ -73,6 +79,13 @@ const transformEditorVisible = ref(false)
 // requiring an editor visit. Crop is NOT shown here (would require
 // invasive layout changes inside HeicImage); for the full transformed
 // view the user opens the editor or downloads the export.
+// Album-scoped curation opinions: prefer the explicitly supplied stats (album
+// views pass these for the fullscreen/split cursor photo), else the photo's
+// own. Null when there's nothing meaningful to show (no stats / one member).
+const effectiveCurationStats = computed(
+  () => resolveCurationOpinions(props.curationStats, (props.photo as any).curation_stats),
+)
+
 const previewPhotoId = computed(() => props.photo?.id ?? null)
 const {
   recipe: userRecipe,
@@ -392,6 +405,39 @@ watch(() => props.photo.id, () => {
         </div>
       </div>
 
+      <!-- Curation opinions (shared albums only): how many participants
+           favorited / hid this photo. Placed between description and comments
+           so the split-view detail pane mirrors the legacy sidebar. -->
+      <template v-if="effectiveCurationStats">
+        <div class="sidebar-divider" />
+        <div class="sidebar-section">
+          <div class="section-label"><i class="pi pi-users" /> Meinungen ({{ effectiveCurationStats.member_count }} Teilnehmer)</div>
+          <div class="curation-opinion-bars">
+            <div class="opinion-row">
+              <span class="opinion-label"><i class="pi pi-heart-fill opinion-icon opinion-icon--fav" /> Favorit</span>
+              <div class="opinion-bar-track">
+                <div class="opinion-bar-fill opinion-bar-fill--fav" :style="{ width: `${(effectiveCurationStats.fav_count / effectiveCurationStats.member_count) * 100}%` }" />
+              </div>
+              <span class="opinion-count">{{ effectiveCurationStats.fav_count }} von {{ effectiveCurationStats.member_count }}</span>
+            </div>
+            <div v-if="effectiveCurationStats.hide_count > 0" class="opinion-row">
+              <span class="opinion-label"><i class="pi pi-eye-slash opinion-icon opinion-icon--hide" /> Ausgeblendet</span>
+              <div class="opinion-bar-track">
+                <div class="opinion-bar-fill opinion-bar-fill--hide" :style="{ width: `${(effectiveCurationStats.hide_count / effectiveCurationStats.member_count) * 100}%` }" />
+              </div>
+              <span class="opinion-count">{{ effectiveCurationStats.hide_count }} von {{ effectiveCurationStats.member_count }}</span>
+            </div>
+            <div v-if="photo.ai_quality_score != null" class="opinion-row">
+              <span class="opinion-label"><i class="pi pi-star-fill opinion-icon opinion-icon--ai" /> KI-Bewertung</span>
+              <div class="opinion-bar-track">
+                <div class="opinion-bar-fill opinion-bar-fill--ai" :style="{ width: `${photo.ai_quality_score * 100}%` }" />
+              </div>
+              <span class="opinion-count">{{ (photo.ai_quality_score * 100).toFixed(0) }}%</span>
+            </div>
+          </div>
+        </div>
+      </template>
+
       <!-- Comments, scoped to the album this photo is viewed in. Only
            shown inside an album context (album detail / shared album):
            outside an album there is no scope to attach a comment to, so
@@ -405,37 +451,6 @@ watch(() => props.photo.id, () => {
             :album-id="albumId"
             @comment-count-change="emit('comment-count-change', $event)"
           />
-        </div>
-      </template>
-
-      <!-- Curation opinions (shared albums only) -->
-      <template v-if="(photo as any).curation_stats && (photo as any).curation_stats.member_count > 1">
-        <div class="sidebar-divider" />
-        <div class="sidebar-section">
-          <div class="section-label"><i class="pi pi-users" /> Meinungen ({{ (photo as any).curation_stats.member_count }} Teilnehmer)</div>
-          <div class="curation-opinion-bars">
-            <div class="opinion-row">
-              <span class="opinion-label"><i class="pi pi-heart-fill opinion-icon opinion-icon--fav" /> Favorit</span>
-              <div class="opinion-bar-track">
-                <div class="opinion-bar-fill opinion-bar-fill--fav" :style="{ width: `${((photo as any).curation_stats.fav_count / (photo as any).curation_stats.member_count) * 100}%` }" />
-              </div>
-              <span class="opinion-count">{{ (photo as any).curation_stats.fav_count }} von {{ (photo as any).curation_stats.member_count }}</span>
-            </div>
-            <div v-if="(photo as any).curation_stats.hide_count > 0" class="opinion-row">
-              <span class="opinion-label"><i class="pi pi-eye-slash opinion-icon opinion-icon--hide" /> Ausgeblendet</span>
-              <div class="opinion-bar-track">
-                <div class="opinion-bar-fill opinion-bar-fill--hide" :style="{ width: `${((photo as any).curation_stats.hide_count / (photo as any).curation_stats.member_count) * 100}%` }" />
-              </div>
-              <span class="opinion-count">{{ (photo as any).curation_stats.hide_count }} von {{ (photo as any).curation_stats.member_count }}</span>
-            </div>
-            <div v-if="photo.ai_quality_score != null" class="opinion-row">
-              <span class="opinion-label"><i class="pi pi-star-fill opinion-icon opinion-icon--ai" /> KI-Bewertung</span>
-              <div class="opinion-bar-track">
-                <div class="opinion-bar-fill opinion-bar-fill--ai" :style="{ width: `${photo.ai_quality_score * 100}%` }" />
-              </div>
-              <span class="opinion-count">{{ (photo.ai_quality_score * 100).toFixed(0) }}%</span>
-            </div>
-          </div>
         </div>
       </template>
 
