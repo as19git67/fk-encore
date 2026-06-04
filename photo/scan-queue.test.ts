@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { eq } from "drizzle-orm";
 import db from "../db/database";
 import { photos, photoScanQueue, users } from "../db/schema";
-import { enqueuePhotoScanBulkPerUser, getFailedJobsGrouped, isScanService } from "./scan-queue";
+import { enqueuePhotoScanBulkPerUser, getFailedJobsGrouped, hasActiveEmbeddingJob, isScanService } from "./scan-queue";
 
 async function seedUser(email: string): Promise<number> {
   const [u] = await db
@@ -140,6 +140,37 @@ describe("getFailedJobsGrouped", () => {
     expect(groupsA).toHaveLength(1);
     expect(groupsA[0].count).toBe(1);
     expect(groupsA[0].samplePhotoIds).toEqual([p1]);
+  });
+});
+
+describe("hasActiveEmbeddingJob", () => {
+  it("is true while an embedding job is pending or processing", async () => {
+    const u = await seedUser("emb@test.com");
+    const p = await seedPhoto(u, 1);
+    await db.insert(photoScanQueue).values({
+      photo_id: p, user_id: null, service: "embedding", status: "pending", priority: 1,
+    });
+    expect(await hasActiveEmbeddingJob(p)).toBe(true);
+
+    await db.update(photoScanQueue)
+      .set({ status: "processing" })
+      .where(eq(photoScanQueue.photo_id, p));
+    expect(await hasActiveEmbeddingJob(p)).toBe(true);
+  });
+
+  it("is false once the embedding job is done or failed, and for unrelated services", async () => {
+    const u = await seedUser("emb2@test.com");
+    const p = await seedPhoto(u, 2);
+    // A done embedding job and an active poi_detection job must not count.
+    await seedQueueRow({ photoId: p, userId: null, service: "embedding", status: "done" });
+    await db.insert(photoScanQueue).values({
+      photo_id: p, user_id: null, service: "poi_detection", status: "pending", priority: 1,
+    });
+    expect(await hasActiveEmbeddingJob(p)).toBe(false);
+
+    const p3 = await seedPhoto(u, 3);
+    await seedQueueRow({ photoId: p3, userId: null, service: "embedding", status: "failed" });
+    expect(await hasActiveEmbeddingJob(p3)).toBe(false);
   });
 });
 

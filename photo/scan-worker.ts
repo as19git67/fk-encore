@@ -21,6 +21,7 @@ import {
   markJobFailed,
   resetStuckJobs,
   enqueuePhotoScan,
+  hasActiveEmbeddingJob,
   DeferJobError,
   type ScanService,
 } from "./scan-queue";
@@ -367,12 +368,21 @@ class ScanWorker {
       case "poi_detection": {
         const { detectPoisForPhoto } = await import("../osm-admin/poi-detection");
         const outcome = await detectPoisForPhoto(job.photo_id);
+        if (outcome.reason === "photo_embedding_missing" && (await hasActiveEmbeddingJob(job.photo_id))) {
+          // POI scoring needs the photo's DINO embedding. On a fresh manual
+          // upload, embedding and poi_detection are enqueued at the same
+          // priority, so poi_detection can run first and find no embedding
+          // yet — which previously marked the job `done` and lost POI
+          // matches forever. Defer instead so it retries once the still-
+          // queued embedding job lands. (Library imports dodge this because
+          // poi_detection is backfilled only after embedding is done.)
+          throw new DeferJobError(`embedding not ready for photo ${job.photo_id}`);
+        }
         if (outcome.reason && outcome.matches.length === 0) {
           // No fatal error — the photo simply produced no match this
-          // tick (missing region, no candidates, photo not embedded
-          // yet, …). Log for diagnostics but mark the job `done` so
-          // the queue doesn't retry endlessly. A re-scan can be
-          // forced explicitly from the admin UI.
+          // tick (missing region, no candidates, no GPS, …). Log for
+          // diagnostics but mark the job `done` so the queue doesn't retry
+          // endlessly. A re-scan can be forced explicitly from the admin UI.
           console.log(
             `[scan-worker] poi_detection photo=${job.photo_id}: ${outcome.reason}`,
           );

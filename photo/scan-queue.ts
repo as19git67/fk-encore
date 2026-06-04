@@ -246,6 +246,29 @@ export async function markJobDone(id: number): Promise<void> {
 }
 
 /**
+ * True when an `embedding` job for this photo is still pending or processing.
+ * `poi_detection` needs the photo's embedding; on a fresh manual upload both
+ * are enqueued at the same priority, so poi_detection can dequeue first and
+ * find no embedding yet. The worker uses this to decide whether to DEFER
+ * poi_detection (retry once embedding lands) or give up — deferring forever
+ * would livelock if the embedding had permanently failed.
+ */
+export async function hasActiveEmbeddingJob(photoId: number): Promise<boolean> {
+  const rows = await db
+    .select({ id: photoScanQueue.id })
+    .from(photoScanQueue)
+    .where(
+      and(
+        eq(photoScanQueue.photo_id, photoId),
+        eq(photoScanQueue.service, "embedding"),
+        inArray(photoScanQueue.status, ["pending", "processing"]),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
+/**
  * Reset a processing job back to pending without incrementing the attempt
  * counter.  Used when a job cannot run yet because a prerequisite scan has
  * not finished — the job will be retried on the next worker poll cycle.
