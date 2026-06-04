@@ -298,27 +298,33 @@ async function loadAndScroll(anchor: number | null | undefined) {
   // new total before we ask it to scroll.
   await new Promise<void>((r) => requestAnimationFrame(() => r()))
   if (cols.value > 0 && totalRows > 0) {
-    // If we loaded around a specific anchor photo, find its exact index in
-    // the loaded window and scroll there. Falling back to initialOffset
-    // (start of the loaded window) would land ~250 photos before the target.
-    let targetRow = Math.floor(initialOffset / cols.value)
-    if (anchor) {
-      const exactIdx = findLoadedIndexById(anchor)
-      if (exactIdx !== null) targetRow = Math.floor(exactIdx / cols.value)
+    // Anchor resolved → centre the viewport on it. Otherwise the backend
+    // returned the newest page (offset = total - limit); land on the newest
+    // photo (the END of that window) instead of centring the window's FIRST
+    // row — the latter left every row above it as a permanent blank
+    // skeleton and put the user in the wrong place.
+    const exactIdx = anchor != null ? findLoadedIndexById(anchor) : null
+    if (exactIdx !== null) {
+      virtualizer.value.scrollToIndex(Math.floor(exactIdx / cols.value), { align: 'center' })
+    } else {
+      virtualizer.value.scrollToIndex(Math.floor((totalRows - 1) / cols.value), { align: 'end' })
     }
-    virtualizer.value.scrollToIndex(targetRow, { align: 'center' })
-  } else if (totalRows > 0) {
-    virtualizer.value.scrollToIndex(0, { align: 'start' })
   }
   // After the post-init scroll settles, refresh the at-start / at-end
   // state so the parent's "jump to newest / oldest" toolbar button
   // labels itself correctly without waiting for the user's first scroll.
   await new Promise<void>((r) => requestAnimationFrame(() => r()))
   updateScrollEnds()
-  
+
   // Allow prefetches to start after initial positioning is done.
   await new Promise<void>((r) => setTimeout(r, 200))
   isInitialLoading.value = false
+  // The prefetch watcher is gated while isInitialLoading is true, so the
+  // scroll that positioned the initial viewport never fired a fetch for it.
+  // Run one now so any cells outside the init window (e.g. rows the scroll
+  // brought into view that the 150-wide window didn't cover) load instead of
+  // staying blank skeletons.
+  runPrefetch()
 }
 
 onMounted(() => {
