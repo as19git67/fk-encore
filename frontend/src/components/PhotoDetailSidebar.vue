@@ -232,17 +232,22 @@ const canEditPhotoMeta = computed(() =>
   auth.user?.id != null && props.photo.user_id === auth.user.id,
 )
 
-function getPersonName(personId?: number) {
-  if (!personId) return 'Unbekannt'
-  const person = props.persons.find(p => p.id === personId)
-  return person ? person.name : 'Unbekannt'
+// Resolve the display name for an assigned face. Prefer the name the backend
+// already joined onto the face (person_name); only fall back to the
+// separately-loaded persons list. Relying on that list alone left the
+// "Personen" section empty whenever it hadn't loaded — the bug where a photo
+// matched the "with assigned person" filter yet showed no names here.
+function faceDisplayName(f: { person_id?: number; person_name?: string }): string {
+  const fromFace = f.person_name?.trim()
+  if (fromFace) return fromFace
+  if (f.person_id == null) return ''
+  return props.persons.find(p => p.id === f.person_id)?.name?.trim() ?? ''
 }
 
 const namedFaces = computed(() =>
   props.faces.filter(f => {
     if (f.ignored || !f.person_id) return false
-    const person = props.persons.find(p => p.id === f.person_id)
-    const name = person?.name?.trim()
+    const name = faceDisplayName(f)
     return !!name && name.toLowerCase() !== 'unbenannt'
   })
 )
@@ -536,7 +541,7 @@ watch(() => props.photo.id, () => {
           <div v-else class="person-list">
             <div v-for="face in namedFaces" :key="face.id" class="person-row">
               <i class="pi pi-user person-icon" />
-              <span class="person-name">{{ getPersonName(face.person_id) }}</span>
+              <span class="person-name">{{ faceDisplayName(face) }}</span>
               <Button icon="pi pi-times" severity="secondary" text rounded size="small" @click="emit('ignore-face', face.id)" v-tooltip="'Entfernen'" />
             </div>
           </div>
