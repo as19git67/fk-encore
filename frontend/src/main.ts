@@ -9,6 +9,7 @@ import App from './App.vue'
 import router from './router'
 import './style.css'
 import Tooltip from 'primevue/tooltip'
+import { deviceSupportsHoverTooltips } from './utils/tooltips'
 
 const app = createApp(App)
 
@@ -50,6 +51,10 @@ app.use(PrimeVue, {
   },
 })
 app.use(ConfirmationService)
-app.directive('tooltip', Tooltip)
+// On touch / hover-less devices (iOS Safari especially) a hover tooltip makes
+// the first tap a no-op — it only shows the tooltip; the click needs a second
+// or third tap. Register the tooltip directive as a no-op there so the first
+// tap always clicks. Desktop / trackpad devices keep real tooltips.
+app.directive('tooltip', deviceSupportsHoverTooltips() ? Tooltip : {})
 
 app.mount('#app')
