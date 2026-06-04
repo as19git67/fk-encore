@@ -3922,7 +3922,11 @@ function resolveViewConfig(activeView: string, viewConfig: ViewConfig | null | u
   return { hideFilter: hideMode === "all" ? "consensus" : "mine", favFilter: "all", hideConsensusMin: 1 };
 }
 
-export async function getAlbumLogic(userId: number, albumId: number): Promise<AlbumWithPhotos> {
+export async function getAlbumLogic(
+  userId: number,
+  albumId: number,
+  opts?: { includePhotos?: boolean },
+): Promise<AlbumWithPhotos> {
   const album = await dbFirst<typeof albums.$inferSelect>(
     db.select().from(albums).where(eq(albums.id, albumId))
   );
@@ -3986,7 +3990,122 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
       )
   );
 
-  // Use raw SQL for the aggregated query with curation stats
+  // Album counts as shared if it has other participants or an active public link.
+  const isShared = memberCount > 1 || !!activePublicLink;
+
+  // The participant aggregate (the second photo_curation join + GROUP BY) is
+  // only needed when a consensus/any/others view filter is active, or when we
+  // surface per-photo curation_stats (shared albums only). For a plain own
+  // album with the default "all"/"mine" view we skip it entirely — that is the
+  // dominant cost of this query on large own albums.
+  const needsParticipantAggregate =
+    viewConfig.hideFilter === "consensus" ||
+    viewConfig.favFilter === "any" ||
+    viewConfig.favFilter === "consensus" ||
+    viewConfig.favFilter === "others-not-mine";
+  const includeAllPc = isShared || needsParticipantAggregate;
+
+  // Cover: prefer the user-specific cover, then the album-level cover. Falls
+  // back to the newest visible photo (resolved per path below).
+  const coverPhotoIdToUse: number | null = (settings as any).cover_photo_id ?? album.cover_photo_id ?? null;
+  async function resolveExplicitCover(): Promise<string | undefined> {
+    if (!coverPhotoIdToUse) return undefined;
+    const cp = await dbFirst<any>(
+      db.select({ filename: photos.filename }).from(photos).where(eq(photos.id, coverPhotoIdToUse))
+    );
+    return cp?.filename;
+  }
+
+  const commonMeta = {
+    id: album.id,
+    user_id: album.user_id,
+    name: album.name,
+    description: album.description ?? undefined,
+    cover_photo_id: album.cover_photo_id ?? undefined,
+    display_mode: (album.display_mode as "grid" | "map") ?? "grid",
+    is_shared: isShared,
+    created_at: album.created_at ?? "",
+    updated_at: album.updated_at ?? "",
+    role,
+    my_access_level: myAccessLevel,
+    settings: {
+      album_id: settings.album_id,
+      user_id: settings.user_id,
+      hide_mode: settings.hide_mode as "mine" | "all",
+      active_view: settings.active_view as ActiveView,
+      view_config: settings.view_config as ViewConfig | null,
+      cover_photo_id: settings.cover_photo_id ?? undefined,
+    },
+  };
+
+  // ── Fast meta path ──────────────────────────────────────────────────────
+  // The album-detail grid and map fetch the actual photos through dedicated
+  // endpoints, so the view can ask for metadata only (includePhotos: false).
+  // When no participant aggregate is required the filtered count / date span /
+  // cover collapse to a single index-friendly aggregate instead of
+  // materialising and serialising every row of the album.
+  if (opts?.includePhotos === false && !needsParticipantAggregate) {
+    const hideCond = viewConfig.hideFilter === "mine"
+      ? sql` AND my_pc.status IS DISTINCT FROM 'hidden'`
+      : sql``;
+    const favCond = viewConfig.favFilter === "mine"
+      ? sql` AND my_pc.status = 'favorite'`
+      : sql``;
+    const aggRow = (await db.execute(sql`
+      SELECT
+        COUNT(*)::int AS cnt,
+        MIN(COALESCE(p.taken_at, p.created_at))::text AS oldest,
+        MAX(COALESCE(p.taken_at, p.created_at))::text AS newest
+      FROM photos p
+      INNER JOIN album_photos ap ON ap.photo_id = p.id AND ap.album_id = ${albumId}
+      LEFT JOIN photo_curation my_pc ON my_pc.photo_id = p.id AND my_pc.user_id = ${userId}
+      WHERE TRUE${hideCond}${favCond}
+    `)).rows[0] as any;
+    let coverFilename = await resolveExplicitCover();
+    if (!coverFilename) {
+      const covRow = (await db.execute(sql`
+        SELECT p.filename
+        FROM photos p
+        INNER JOIN album_photos ap ON ap.photo_id = p.id AND ap.album_id = ${albumId}
+        LEFT JOIN photo_curation my_pc ON my_pc.photo_id = p.id AND my_pc.user_id = ${userId}
+        WHERE TRUE${hideCond}${favCond}
+        ORDER BY COALESCE(p.taken_at, p.created_at) DESC NULLS LAST, p.id DESC
+        LIMIT 1
+      `)).rows[0] as any;
+      coverFilename = covRow?.filename;
+    }
+    return {
+      ...commonMeta,
+      cover_filename: coverFilename,
+      newest_photo_at: aggRow?.newest ?? undefined,
+      oldest_photo_at: aggRow?.oldest ?? undefined,
+      photo_count: Number(aggRow?.cnt ?? 0),
+      photos: [],
+    };
+  }
+
+  // ── Full path: load every album photo with curation status ────────────────
+  // `all_pc` (the participant aggregate) and the matching GROUP BY are only
+  // emitted when actually needed (see includeAllPc); otherwise the query is a
+  // single LEFT JOIN against the caller's own curation rows.
+  const allPcJoin = includeAllPc
+    ? sql`
+    LEFT JOIN photo_curation all_pc ON all_pc.photo_id = p.id AND all_pc.user_id = ANY(ARRAY[${sql.join(participantIds.map(id => sql`${id}`), sql`, `)}]::int[])`
+    : sql``;
+  const favHideSelect = includeAllPc
+    ? sql`,
+      COALESCE(SUM(CASE WHEN all_pc.status = 'favorite' THEN 1 ELSE 0 END), 0)::int AS fav_count,
+      COALESCE(SUM(CASE WHEN all_pc.status = 'hidden' THEN 1 ELSE 0 END), 0)::int AS hide_count`
+    : sql``;
+  const groupByClause = includeAllPc
+    ? sql`
+    GROUP BY p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash,
+             p.taken_at, p.created_at, p.updated_at,
+             p.ai_quality_score, p.auto_crop, p.description,
+             p.latitude, p.longitude,
+             p.location_name, p.location_city, p.location_country, p.location_short,
+             ap.added_by_user_id, ap.added_at, my_pc.status`
+    : sql``;
   const photoRows = (await db.execute(sql`
     SELECT
       p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash,
@@ -3995,29 +4114,23 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
       p.latitude, p.longitude,
       p.location_name, p.location_city, p.location_country, p.location_short,
       ap.added_by_user_id, ap.added_at,
-      my_pc.status AS curation_status,
-      COALESCE(SUM(CASE WHEN all_pc.status = 'favorite' THEN 1 ELSE 0 END), 0)::int AS fav_count,
-      COALESCE(SUM(CASE WHEN all_pc.status = 'hidden' THEN 1 ELSE 0 END), 0)::int AS hide_count
+      my_pc.status AS curation_status${favHideSelect}
     FROM photos p
     INNER JOIN album_photos ap ON ap.photo_id = p.id AND ap.album_id = ${albumId}
-    LEFT JOIN photo_curation my_pc ON my_pc.photo_id = p.id AND my_pc.user_id = ${userId}
-    LEFT JOIN photo_curation all_pc ON all_pc.photo_id = p.id AND all_pc.user_id = ANY(ARRAY[${sql.join(participantIds.map(id => sql`${id}`), sql`, `)}]::int[])
-    GROUP BY p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash,
-             p.taken_at, p.created_at, p.updated_at,
-             p.ai_quality_score, p.auto_crop, p.description,
-             p.latitude, p.longitude,
-             p.location_name, p.location_city, p.location_country, p.location_short,
-             ap.added_by_user_id, ap.added_at, my_pc.status
+    LEFT JOIN photo_curation my_pc ON my_pc.photo_id = p.id AND my_pc.user_id = ${userId}${allPcJoin}${groupByClause}
   `)).rows;
 
-  // Apply view filters in JS (cleaner than building dynamic HAVING clauses)
+  // Apply view filters in JS (cleaner than building dynamic HAVING clauses).
+  // fav_count / hide_count only exist when the participant aggregate ran; the
+  // consensus/any/others filters that read them imply includeAllPc, so the
+  // `?? 0` fallbacks below are only ever hit by the no-op "all"/"mine" case.
   const filteredPhotos = photoRows.filter((r: any) => {
     // ── Hide filter ──
     if (viewConfig.hideFilter === "mine") {
       if (r.curation_status === "hidden") return false;
     } else if (viewConfig.hideFilter === "consensus") {
       const min = viewConfig.hideConsensusMin ?? 1;
-      if (r.hide_count >= min) return false;
+      if ((r.hide_count ?? 0) >= min) return false;
     }
     // hideFilter === "none" → no filtering
 
@@ -4025,13 +4138,13 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     if (viewConfig.favFilter === "mine") {
       if (r.curation_status !== "favorite") return false;
     } else if (viewConfig.favFilter === "any") {
-      if (r.fav_count < 1) return false;
+      if ((r.fav_count ?? 0) < 1) return false;
     } else if (viewConfig.favFilter === "consensus") {
       const min = viewConfig.favConsensusMin ?? 2;
-      if (r.fav_count < min) return false;
+      if ((r.fav_count ?? 0) < min) return false;
     } else if (viewConfig.favFilter === "others-not-mine") {
       // Show photos favorited by at least one other participant but not by the current user
-      if (r.fav_count < 1 || r.curation_status === "favorite") return false;
+      if ((r.fav_count ?? 0) < 1 || r.curation_status === "favorite") return false;
     }
     // favFilter === "all" → no filtering
 
@@ -4051,46 +4164,15 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
     }
   }
 
-  // Determine cover photo: prefer user-specific cover, then album's cover, then newest visible in album
-  let coverFilename: string | undefined = undefined;
-  let coverPhotoIdToUse: number | null | undefined = (settings as any).cover_photo_id;
-  if (!coverPhotoIdToUse) {
-    coverPhotoIdToUse = album.cover_photo_id ?? null;
-  }
-  if (coverPhotoIdToUse) {
-    const cp = await dbFirst<any>(db.select({ filename: photos.filename }).from(photos).where(eq(photos.id, coverPhotoIdToUse)));
-    coverFilename = cp?.filename;
-  } else {
-    coverFilename = newestFilteredFilename;
-  }
-
-  // Check if album is shared (has other participants or an active public link)
-  const isShared = memberCount > 1 || !!activePublicLink;
+  let coverFilename = await resolveExplicitCover();
+  if (!coverFilename) coverFilename = newestFilteredFilename;
 
   return {
-    id: album.id,
-    user_id: album.user_id,
-    name: album.name,
-    description: album.description ?? undefined,
-    cover_photo_id: album.cover_photo_id ?? undefined,
+    ...commonMeta,
     cover_filename: coverFilename,
-    display_mode: (album.display_mode as "grid" | "map") ?? "grid",
     newest_photo_at: filteredNewest,
     oldest_photo_at: filteredOldest,
     photo_count: filteredCount,
-    is_shared: isShared,
-    created_at: album.created_at ?? "",
-    updated_at: album.updated_at ?? "",
-    role,
-    my_access_level: myAccessLevel,
-    settings: {
-      album_id: settings.album_id,
-      user_id: settings.user_id,
-      hide_mode: settings.hide_mode as "mine" | "all",
-      active_view: settings.active_view as ActiveView,
-      view_config: settings.view_config as ViewConfig | null,
-      cover_photo_id: settings.cover_photo_id ?? undefined,
-    },
     photos: filteredPhotos.map((r: any) => ({
       id: r.id,
       user_id: r.user_id,
@@ -4120,6 +4202,19 @@ export async function getAlbumLogic(userId: number, albumId: number): Promise<Al
       } : undefined,
     })),
   };
+}
+
+/**
+ * Album photos only — the heavy per-photo payload split out of getAlbumLogic
+ * so the album-detail view can render its (windowed) grid from album metadata
+ * first and hydrate stacks / map / curation-context in the background.
+ */
+export async function getAlbumPhotosLogic(
+  userId: number,
+  albumId: number,
+): Promise<{ photos: AlbumPhotoWithMeta[] }> {
+  const full = await getAlbumLogic(userId, albumId, { includePhotos: true });
+  return { photos: full.photos };
 }
 
 export async function updateAlbumUserSettingsLogic(userId: number, req: UpdateAlbumUserSettingsRequest): Promise<AlbumUserSettings> {
