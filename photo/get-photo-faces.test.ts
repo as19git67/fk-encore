@@ -57,6 +57,9 @@ describe("getPhotoFacesLogic", () => {
     const { faces: out } = await getPhotoFacesLogic(owner.id, photoId);
     expect(out).toHaveLength(1);
     expect(out[0]!.person_id).toBe(person!.id);
+    // The person name is resolved server-side so the sidebar doesn't depend
+    // on a separately-loaded persons list.
+    expect(out[0]!.person_name).toBe("Alice");
     expect(out[0]!.ignored).toBe(false);
   });
 
