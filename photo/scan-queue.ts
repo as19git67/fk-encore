@@ -434,6 +434,56 @@ export async function enqueuePoiDetectionForRegion(bbox: {
   return enqueued;
 }
 
+/**
+ * Re-enqueue `poi_detection` for a user's photos that have GPS and a finished
+ * embedding but no POI matches yet. This is the targeted recovery for the
+ * race fixed in #558: on a manual upload poi_detection could run before the
+ * embedding landed, get marked `done` with zero matches, and never retry.
+ * Those photos now have an embedding, so a fresh poi_detection pass can match.
+ *
+ * Far cheaper than a force-rescan: it touches only `poi_detection` and only
+ * photos that can actually gain matches (GPS present, embedding done, no
+ * matches yet). Photos with no nearby POI simply come back empty again.
+ *
+ * Returns the number of pending rows inserted.
+ */
+export async function enqueuePoiDetectionForMissingMatches(userId: number): Promise<number> {
+  // The candidate set, shared by the DELETE and INSERT below: owned by the
+  // user, geotagged, embedding finished, and no POI match rows.
+  const candidateFilter = sql`
+    p.user_id = ${userId}
+    AND p.latitude IS NOT NULL AND p.longitude IS NOT NULL
+    AND EXISTS (
+      SELECT 1 FROM photo_scan_queue q
+      WHERE q.photo_id = p.id AND q.service = 'embedding' AND q.status = 'done'
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM photo_poi_matches m WHERE m.photo_id = p.id
+    )`;
+
+  // Drop terminal poi rows for the candidates so the partial unique index lets
+  // us insert fresh `pending` ones.
+  await db.execute(sql`
+    DELETE FROM photo_scan_queue
+    WHERE service = 'poi_detection'
+      AND status IN ('done', 'failed')
+      AND user_id IS NULL
+      AND photo_id IN (SELECT p.id FROM photos p WHERE ${candidateFilter})
+  `);
+
+  const insertResult = await db.execute(sql`
+    INSERT INTO photo_scan_queue (photo_id, user_id, service, status, priority, force)
+    SELECT p.id, NULL, 'poi_detection', 'pending', 3, false
+    FROM photos p
+    WHERE ${candidateFilter}
+    ON CONFLICT DO NOTHING
+  `);
+
+  const enqueued = (insertResult as { rowCount?: number }).rowCount ?? 0;
+  if (enqueued > 0) notifyScanQueueChanged();
+  return enqueued;
+}
+
 /** Reset all failed jobs for a user back to pending (low priority). */
 export async function requeueFailed(userId: number): Promise<number> {
   // Reset per-user failed jobs

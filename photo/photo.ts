@@ -1708,6 +1708,22 @@ export const rescanPhotos = api(
   }
 );
 
+/**
+ * Targeted POI recovery (#558): re-enqueue poi_detection only for photos that
+ * have GPS + a finished embedding but no POI matches yet. Lightweight
+ * alternative to the full force-rescan.
+ */
+export const redetectMissingPois = api(
+  { expose: true, method: "POST", path: "/photos/poi-redetect", auth: true },
+  async (): Promise<{ queued: number }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "data.manage");
+    return await service.redetectMissingPoisLogic(userId);
+  }
+);
+
 export const retryFailedScans = api(
   { expose: true, method: "POST", path: "/photos/scan-queue/retry-failed", auth: true },
   async (): Promise<{ retried: number }> => {
