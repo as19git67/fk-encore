@@ -436,29 +436,44 @@ export async function enqueuePoiDetectionForRegion(bbox: {
 
 /**
  * Re-enqueue `poi_detection` for a user's photos that have GPS and a finished
- * embedding but no POI matches yet. This is the targeted recovery for the
- * race fixed in #558: on a manual upload poi_detection could run before the
- * embedding landed, get marked `done` with zero matches, and never retry.
- * Those photos now have an embedding, so a fresh poi_detection pass can match.
+ * embedding but were never POI-processed *with that embedding present*. This is
+ * the targeted recovery for the race fixed in #558: on a manual upload
+ * poi_detection could run before the embedding landed, get marked `done` with
+ * zero matches, and never retry.
  *
- * Far cheaper than a force-rescan: it touches only `poi_detection` and only
- * photos that can actually gain matches (GPS present, embedding done, no
- * matches yet). Photos with no nearby POI simply come back empty again.
+ * Idempotent by design: a photo is skipped once it has a `poi_detection` done
+ * row whose `finished_at` is at/after the embedding finished — i.e. it was
+ * already processed correctly, even if that produced no matches (no POI nearby
+ * / no osm-admin region). Without this guard, photos that legitimately have no
+ * POI would be re-enqueued on every run and never drop out of the queue.
+ *
+ * Far cheaper than a force-rescan: it touches only `poi_detection`.
  *
  * Returns the number of pending rows inserted.
  */
 export async function enqueuePoiDetectionForMissingMatches(userId: number): Promise<number> {
   // The candidate set, shared by the DELETE and INSERT below: owned by the
-  // user, geotagged, embedding finished, and no POI match rows.
+  // user, geotagged, embedding finished, and NOT yet POI-processed since that
+  // embedding completed. `'-infinity'` keeps photos with an unknown embedding
+  // finish time out of an endless re-enqueue loop once any poi run exists.
   const candidateFilter = sql`
     p.user_id = ${userId}
     AND p.latitude IS NOT NULL AND p.longitude IS NOT NULL
     AND EXISTS (
-      SELECT 1 FROM photo_scan_queue q
-      WHERE q.photo_id = p.id AND q.service = 'embedding' AND q.status = 'done'
+      SELECT 1 FROM photo_scan_queue emb
+      WHERE emb.photo_id = p.id AND emb.service = 'embedding' AND emb.status = 'done'
     )
     AND NOT EXISTS (
-      SELECT 1 FROM photo_poi_matches m WHERE m.photo_id = p.id
+      SELECT 1 FROM photo_scan_queue poi
+      WHERE poi.photo_id = p.id AND poi.service = 'poi_detection' AND poi.status = 'done'
+        AND poi.finished_at IS NOT NULL
+        AND poi.finished_at >= COALESCE(
+          (
+            SELECT MAX(emb2.finished_at) FROM photo_scan_queue emb2
+            WHERE emb2.photo_id = p.id AND emb2.service = 'embedding' AND emb2.status = 'done'
+          ),
+          '-infinity'::timestamp
+        )
     )`;
 
   // Drop terminal poi rows for the candidates so the partial unique index lets
