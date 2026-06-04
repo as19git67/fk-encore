@@ -25,6 +25,13 @@ const props = defineProps<{
   albumId: number
 }>()
 
+const emit = defineEmits<{
+  // The local user added (+1) or removed (-1) a comment. Lets the album
+  // grid update the "has comments" badge for this photo immediately — the
+  // realtime fan-out excludes the actor, so this covers their own change.
+  (e: 'comment-count-change', payload: { photoId: number; delta: number }): void
+}>()
+
 const auth = useAuthStore()
 const currentAuthor = computed(() => {
   const id = auth.user?.id ?? null
@@ -56,6 +63,7 @@ async function onSubmit(body: string) {
   try {
     const created = await createComment(props.photoId, body, props.albumId)
     comments.value.push(created)
+    emit('comment-count-change', { photoId: props.photoId, delta: 1 })
   } catch (err: unknown) {
     error.value = (err as Error)?.message || 'Kommentar fehlgeschlagen'
   } finally {
@@ -77,6 +85,7 @@ async function onDelete(commentId: number) {
   try {
     await deleteComment(commentId)
     comments.value = comments.value.filter((x) => x.id !== commentId)
+    emit('comment-count-change', { photoId: props.photoId, delta: -1 })
   } catch (err: unknown) {
     error.value = (err as Error)?.message || 'Löschen fehlgeschlagen'
   }

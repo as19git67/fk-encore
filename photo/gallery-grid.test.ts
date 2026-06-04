@@ -9,6 +9,7 @@ import {
   photoGroups,
   photoGroupMembers,
   photoCuration,
+  photoComments,
 } from "../db/schema";
 import { dbInsertReturning } from "../db/adapter";
 import { createUserLogic } from "../user/user.service";
@@ -27,6 +28,7 @@ describe("Gallery grid – album scope", () => {
   let stranger: any;
 
   beforeEach(async () => {
+    await db.delete(photoComments);
     await db.delete(photoGroupMembers);
     await db.delete(photoGroups);
     await db.delete(photoCuration);
@@ -94,6 +96,38 @@ describe("Gallery grid – album scope", () => {
 
     const ownerLibrary = await listGalleryGridLogic(owner.id, {}, opts);
     expect(ownerLibrary.total).toBe(1);
+  });
+
+  it("reports album-scoped comment counts on grid entries (badge data)", async () => {
+    const albumA = await service.createAlbumLogic(owner.id, { name: "A" });
+    const albumB = await service.createAlbumLogic(owner.id, { name: "B" });
+    const p1 = await makePhoto(owner.id, "c1.jpg");
+    const p2 = await makePhoto(owner.id, "c2.jpg");
+    for (const albumId of [albumA.id, albumB.id]) {
+      await service.addPhotoToAlbumLogic(owner.id, { albumId, photoId: p1 });
+      await service.addPhotoToAlbumLogic(owner.id, { albumId, photoId: p2 });
+    }
+    // Two comments on p1 in album A, one comment on p1 in album B, none on p2.
+    await db.insert(photoComments).values([
+      { photo_id: p1, album_id: albumA.id, user_id: owner.id, body: "hi" },
+      { photo_id: p1, album_id: albumA.id, user_id: owner.id, body: "again" },
+      { photo_id: p1, album_id: albumB.id, user_id: owner.id, body: "other album" },
+    ]);
+
+    const gridA = await listGalleryGridLogic(owner.id, { albumScopeId: albumA.id }, opts);
+    const a1 = gridA.photos.find((p) => p.id === p1)!;
+    const a2 = gridA.photos.find((p) => p.id === p2)!;
+    expect(a1.comment_count).toBe(2);
+    // Photos without comments carry no count (badge stays off).
+    expect(a2.comment_count).toBeUndefined();
+
+    // Comments are album-scoped: album B only sees its own single comment.
+    const gridB = await listGalleryGridLogic(owner.id, { albumScopeId: albumB.id }, opts);
+    expect(gridB.photos.find((p) => p.id === p1)!.comment_count).toBe(1);
+
+    // The library grid (no album scope) never carries comment counts.
+    const library = await listGalleryGridLogic(owner.id, {}, opts);
+    expect(library.photos.every((p) => p.comment_count === undefined)).toBe(true);
   });
 
   it("album grid keeps AI auto-pick duplicates visible (library grid hides them)", async () => {
