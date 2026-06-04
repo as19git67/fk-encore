@@ -9,6 +9,7 @@ import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import {
   getScanQueueStatus, rescanPhotos, retryFailedScans, cancelPendingScans,
+  redetectMissingPois,
   getScanQueueFailures,
   findPhotoGroups,
   recomputeAiPicks,
@@ -53,6 +54,8 @@ const rescanLoading = ref(false)
 const retryLoading = ref(false)
 const cancelLoading = ref(false)
 const cancelledPending = ref(false)  // true after cancel until queue settles
+const poiRedetectLoading = ref(false)
+const poiRedetectResult = ref<number | null>(null)  // queued count after a run
 
 const serviceLabels: Record<string, string> = {
   embedding: 'Ähnlichkeitsanalyse',
@@ -138,6 +141,20 @@ async function handleRetry() {
     queueError.value = err.message || 'Fehler beim Wiederholen'
   } finally {
     retryLoading.value = false
+  }
+}
+
+async function handlePoiRedetect() {
+  queueError.value = ''
+  poiRedetectResult.value = null
+  poiRedetectLoading.value = true
+  try {
+    const { queued } = await redetectMissingPois()
+    poiRedetectResult.value = queued
+  } catch (err: any) {
+    queueError.value = err.message || 'Fehler beim Nachholen der POI-Erkennung'
+  } finally {
+    poiRedetectLoading.value = false
   }
 }
 
@@ -837,7 +854,22 @@ onBeforeUnmount(() => {
           :disabled="rescanLoading || retryLoading"
           @click="handleRetry"
         />
+        <Button
+          icon="pi pi-map-marker"
+          label="POI für Altbilder nachholen"
+          severity="secondary"
+          outlined
+          :loading="poiRedetectLoading"
+          :disabled="rescanLoading || retryLoading || poiRedetectLoading"
+          v-tooltip.bottom="'Nur poi_detection für Fotos mit GPS und fertigem Embedding, aber ohne POI-Treffer (Fix #558) – ohne kompletten Rescan.'"
+          @click="handlePoiRedetect"
+        />
       </div>
+      <p v-if="poiRedetectResult !== null" class="poi-redetect-result">
+        {{ poiRedetectResult > 0
+          ? `${poiRedetectResult} Foto(s) für die POI-Erkennung neu eingereiht.`
+          : 'Keine passenden Altbilder gefunden – nichts neu einzureihen.' }}
+      </p>
     </div>
 
     <!-- Finance KI-Tag-Queue -->
@@ -1535,6 +1567,12 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   padding-inline: 0.25em;
+}
+
+.poi-redetect-result {
+  margin: 0.5rem 0 0;
+  font-size: 0.875rem;
+  color: var(--p-text-muted-color);
 }
 
 @media (min-width: 800px) {

@@ -6,10 +6,10 @@ import exifr from "exifr";
 import { exiftool } from "exiftool-vendored";
 import { eq, and, or, sql, inArray, ilike, isNull, isNotNull, desc, gt } from "drizzle-orm";
 import { APIError } from "encore.dev/api";
-import { enqueuePhotoScan, enqueuePhotoScanBulkPerUser, DeferJobError } from "./scan-queue";
+import { enqueuePhotoScan, enqueuePhotoScanBulkPerUser, enqueuePoiDetectionForMissingMatches, DeferJobError } from "./scan-queue";
 import { notifyUserPhotosScanned } from "./scan-refresh-events";
 import { isUnderPressure } from "./event-loop-pressure";
-import { ENABLE_LOCAL_FACES, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
+import { ENABLE_LOCAL_FACES, ENABLE_POI_DETECTION, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
 export { ENABLE_LOCAL_FACES, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
 import db from "../db/database";
 import { realtime, feed, sharedalbum } from "~encore/clients";
@@ -5857,6 +5857,19 @@ export async function getScanQueueFailuresLogic(
 export async function rescanPhotosLogic(userId: number, force: boolean): Promise<{ queued: number }> {
   const queued = await requeueForRescan(userId, force);
   triggerWorkers();
+  return { queued };
+}
+
+/**
+ * Targeted recovery for #558: re-run `poi_detection` only for the user's
+ * photos that have GPS and a finished embedding but still no POI matches.
+ * Much lighter than a full force-rescan (which re-runs every service for
+ * every photo).
+ */
+export async function redetectMissingPoisLogic(userId: number): Promise<{ queued: number }> {
+  if (!ENABLE_POI_DETECTION) return { queued: 0 };
+  const queued = await enqueuePoiDetectionForMissingMatches(userId);
+  if (queued > 0) triggerWorkers();
   return { queued };
 }
 
