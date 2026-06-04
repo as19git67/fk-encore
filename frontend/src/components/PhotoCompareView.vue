@@ -19,6 +19,7 @@ import {
 import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
 import { useAuthStore } from '../stores/auth'
 import { discardFlingDirection, flingOffscreenTranslate } from '../utils/compareSwipe'
+import { mergeFreshScore, type FreshScore } from '../utils/comparePhotoScore'
 import {
   computeBboxZoom,
   computeSyncBboxZoom,
@@ -70,30 +71,40 @@ const emit = defineEmits<{
 // Photos that were ALREADY hidden before opening are deliberately left out —
 // there is nothing to re-decide about a photo the user has already deselected.
 const fetchedMembers = ref(new Map<number, Photo>())
+// Freshly fetched AI-quality per member, overlaid on the (possibly stale,
+// lazily-cached) album photos so the rating shows the current score instead of
+// "?" once scoring has finished. Visibility/curation is NOT taken from here.
+const freshScores = ref(new Map<number, FreshScore>())
 
 async function loadMissingMembers() {
-  const missing = props.group.photo_ids.filter(
-    (id) => !props.allPhotos.some((p) => p.id === id) && !fetchedMembers.value.has(id)
-  )
-  if (missing.length === 0) return
+  // Fetch every member: missing ones to render them at all, present ones to
+  // refresh their AI-quality (the album cache can predate the quality scan).
   try {
-    const res = await getPhotoDetailsBatch(missing)
-    const next = new Map(fetchedMembers.value)
-    // Skip members that were already hidden — don't resurface them.
+    const res = await getPhotoDetailsBatch(props.group.photo_ids)
+    const nextMembers = new Map(fetchedMembers.value)
+    const nextScores = new Map<number, FreshScore>()
     for (const p of res.photos) {
-      if (p.curation_status === 'hidden') continue
-      next.set(p.id, p)
+      nextScores.set(p.id, { ai_quality_score: p.ai_quality_score ?? null, ai_quality_details: p.ai_quality_details ?? null })
+      // Only backfill members not already in allPhotos, and skip ones that were
+      // already hidden — don't resurface a photo the user deselected.
+      if (!props.allPhotos.some((a) => a.id === p.id) && p.curation_status !== 'hidden') {
+        nextMembers.set(p.id, p)
+      }
     }
-    fetchedMembers.value = next
+    fetchedMembers.value = nextMembers
+    freshScores.value = nextScores
     syncCuration()
   } catch (err) {
-    console.warn('[PhotoCompareView] failed to load missing group members', err)
+    console.warn('[PhotoCompareView] failed to load group members', err)
   }
 }
 
 const groupPhotos = computed(() => {
   return props.group.photo_ids
-    .map((id) => props.allPhotos.find((p) => p.id === id) ?? fetchedMembers.value.get(id))
+    .map((id) => {
+      const base = props.allPhotos.find((p) => p.id === id) ?? fetchedMembers.value.get(id)
+      return base ? mergeFreshScore(base, freshScores.value.get(id)) : undefined
+    })
     // Exclude members that were already hidden when the review opened (an
     // in-session hide keeps its tile via localCuration, so undo still works).
     .filter((p): p is Photo => !!p && p.curation_status !== 'hidden')
@@ -986,7 +997,8 @@ watch(() => props.group.id, () => {
 })
 
 function getPhotoById(id: number): Photo | undefined {
-  return props.allPhotos.find(p => p.id === id) ?? fetchedMembers.value.get(id)
+  const base = props.allPhotos.find(p => p.id === id) ?? fetchedMembers.value.get(id)
+  return base ? mergeFreshScore(base, freshScores.value.get(id)) : undefined
 }
 
 const auth = useAuthStore()
