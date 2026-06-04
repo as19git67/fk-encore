@@ -666,6 +666,13 @@
       "when": 1779001433000,
       "tag": "0094_resolve_shrunk_photo_groups",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1779001434000,
+      "tag": "0095_album_load_indexes",
+      "breakpoints": true
     }
   ]
 }
