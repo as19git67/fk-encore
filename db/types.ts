@@ -694,6 +694,12 @@ export interface GalleryGridEntry {
   auto_crop?: { x: number; y: number };
   /** Group info if the photo participates in a similar-photo group. */
   group?: GalleryGridGroup;
+  /**
+   * Number of comments on this photo within the current album. Only set
+   * when the grid is scoped to an album (comments are album-bound); absent
+   * / 0 in the global gallery. Drives the album-only "has comments" badge.
+   */
+  comment_count?: number;
 }
 
 /**

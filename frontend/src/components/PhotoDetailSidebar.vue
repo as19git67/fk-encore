@@ -216,6 +216,7 @@ const emit = defineEmits<{
   hide: [id: number]
   restore: [id: number]
   'navigate-to-photo': [id: number]
+  'comment-count-change': [payload: { photoId: number; delta: number }]
 }>()
 
 function formatPhotoDateDisplay(photo: Photo) {
@@ -394,7 +395,11 @@ watch(() => props.photo.id, () => {
         <div class="sidebar-divider" />
         <div class="sidebar-section">
           <div class="section-label"><i class="pi pi-comments" /> Reaktionen</div>
-          <PhotoReactions :photo-id="photo.id" :album-id="albumId" />
+          <PhotoReactions
+            :photo-id="photo.id"
+            :album-id="albumId"
+            @comment-count-change="emit('comment-count-change', $event)"
+          />
         </div>
       </template>
 

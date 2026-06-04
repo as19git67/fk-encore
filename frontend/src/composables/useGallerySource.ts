@@ -98,6 +98,12 @@ export interface GallerySource {
    */
   markGroupReviewed(groupId: number): void
   /**
+   * Adjust the album-scoped comment count on the loaded entry for `photoId`
+   * by `delta` (clamped at 0). Used to keep the "has comments" badge live as
+   * comments are added/removed elsewhere. No-op if the photo isn't loaded.
+   */
+  bumpCommentCount(photoId: number, delta: number): void
+  /**
    * Resolve the entry at a given absolute index. If the slot is already
    * populated, resolves synchronously with that entry. Otherwise, fires a
    * page fetch (deduped via the same in-flight tracking that `ensureRange`
@@ -350,6 +356,19 @@ export function useGallerySource(): GallerySource {
     }
   }
 
+  function bumpCommentCount(photoId: number, delta: number) {
+    const arr = entries.value
+    for (let i = 0; i < arr.length; i++) {
+      const e = arr[i]
+      if (e && e.id === photoId) {
+        const next = Math.max(0, (e.comment_count ?? 0) + delta)
+        arr[i] = { ...e, comment_count: next }
+        triggerRef(entries)
+        return
+      }
+    }
+  }
+
   function markGroupReviewed(groupId: number) {
     const arr = entries.value
     let changed = false
@@ -381,6 +400,7 @@ export function useGallerySource(): GallerySource {
     reload,
     updateEntry,
     markGroupReviewed,
+    bumpCommentCount,
     loadEntryAt,
     cancelOutside,
     cancel,

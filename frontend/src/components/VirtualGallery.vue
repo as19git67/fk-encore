@@ -421,6 +421,7 @@ function scrollToIndex(index: number, align: 'start' | 'center' | 'end' | 'auto'
 defineExpose({
   updateEntry: source.updateEntry,
   markGroupReviewed: source.markGroupReviewed,
+  bumpCommentCount: source.bumpCommentCount,
   reload: source.reload,
   loadEntryAt: source.loadEntryAt,
   findLoadedIndexById,
@@ -505,6 +506,17 @@ defineExpose({
               v-if="slot.curation === 'hidden'"
               class="pi pi-eye-slash vg-hidden-icon"
             />
+            <!-- Album-only marker: the photo has comments in this album.
+                 Comments are album-bound, so comment_count is only set when
+                 the grid is album-scoped. Icon-only (mirrors the favorite
+                 marker); the count is surfaced via the title tooltip. -->
+            <span
+              v-if="slot.comment_count"
+              class="vg-comment-badge"
+              :title="slot.comment_count === 1 ? '1 Kommentar' : `${slot.comment_count} Kommentare`"
+            >
+              <i class="pi pi-comment vg-comment-icon" />
+            </span>
             <i
               v-if="selectMode"
               class="pi vg-select-icon"
@@ -679,6 +691,23 @@ defineExpose({
 
 .vg-cell--selected .vg-thumb {
   opacity: 0.8;
+}
+
+/* Album-only "has comments" marker, bottom-left so it clears the favorite/
+   hidden (top-right), stack (top-left) and select (bottom-right) badges.
+   Decorative only — taps fall through to open the photo. */
+.vg-comment-badge {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  display: inline-flex;
+  align-items: center;
+  pointer-events: none;
+}
+.vg-comment-icon {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.95);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
 }
 
 .vg-select-icon {

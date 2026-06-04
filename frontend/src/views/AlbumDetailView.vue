@@ -1781,6 +1781,30 @@ useRealtimeEvent('photos', 'curation.changed', (ev) => {
   void loadData()
 })
 
+// "Has comments" thumbnail badge — kept live. Comments are album-scoped, so
+// every update funnels through bumpCommentCount(photoId, delta):
+//   - The local user's own add/remove arrives via PhotoReactions
+//     (onCommentCountChange) — the realtime fan-out excludes the actor.
+//   - Other participants' add/remove arrive via the realtime events below.
+// These two sources never overlap, so the count can't be double-applied.
+function onCommentCountChange(payload: { photoId: number; delta: number }) {
+  galleryRef.value?.bumpCommentCount(payload.photoId, payload.delta)
+}
+
+useRealtimeEvent('photos', 'commented', (ev) => {
+  const photoId = Number(ev.resourceId)
+  if (!Number.isFinite(photoId)) return
+  if (Number(ev.payload?.albumId) !== albumId.value) return
+  galleryRef.value?.bumpCommentCount(photoId, 1)
+})
+
+useRealtimeEvent('photos', 'comment_deleted', (ev) => {
+  const photoId = Number(ev.resourceId)
+  if (!Number.isFinite(photoId)) return
+  if (Number(ev.payload?.albumId) !== albumId.value) return
+  galleryRef.value?.bumpCommentCount(photoId, -1)
+})
+
 // New similar-photo groups and quality scores are produced asynchronously
 // after upload. The backend emits `photos/scan.updated` once those scans
 // settle; refresh the cached group list + album photos (so review badges
@@ -2097,6 +2121,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           @update:cover-photo-id="handleCoverPhotoIdUpdate"
           @fullscreen="cursorIndex !== null && openGridFullscreenAt(cursorIndex)"
           @toggle-favorite="handleToggleFavorite"
+          @comment-count-change="onCommentCountChange"
           @hide="handleHidePhoto"
           @restore="handleRestorePhoto"
           @start-edit-date="startEditingDate"
@@ -2252,6 +2277,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           :face-service-available="serviceHealth.faceServiceAvailable"
           @update:cover-photo-id="handleCoverPhotoIdUpdate"
           @toggle-favorite="handleToggleFavorite"
+          @comment-count-change="onCommentCountChange"
           @hide="handleHidePhoto"
           @restore="handleRestorePhoto"
           @start-edit-date="startEditingDate"
@@ -2322,6 +2348,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           :face-service-available="serviceHealth.faceServiceAvailable"
           @update:cover-photo-id="handleCoverPhotoIdUpdate"
           @toggle-favorite="handleToggleFavorite"
+          @comment-count-change="onCommentCountChange"
           @hide="handleHidePhoto"
           @restore="handleRestorePhoto"
           @start-edit-date="startEditingDate"
