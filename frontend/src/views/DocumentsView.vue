@@ -469,32 +469,36 @@ onMounted(async () => {
         :data-doc-id="doc.id"
         class="document-card"
         :class="{ 'document-card--selected': isSelected(doc.id) }"
-        tabindex="0"
-        @click="openDocument(doc)"
-        @keydown.enter="openDocument(doc)"
       >
-        <div class="document-checkbox" @click.stop>
-          <Checkbox
-            :modelValue="isSelected(doc.id)"
-            :binary="true"
-            :inputId="`doc-sel-${doc.id}`"
-            :aria-label="`Dokument ${doc.title || doc.original_filename} auswählen`"
-            @update:modelValue="(val: boolean) => toggleSelected(doc.id, val)"
-          />
-        </div>
-        <div class="document-icon"><i class="pi pi-file-pdf" /></div>
-        <div class="document-body">
-          <div class="document-title-row">
-            <span class="document-title">{{ doc.title || doc.original_filename }}</span>
-            <Tag :severity="statusSeverity(doc.status)" :value="statusLabel(doc.status)" />
-            <Tag
-              v-if="isLowConfidence(doc)"
-              severity="warn"
-              icon="pi pi-exclamation-triangle"
-              :value="`Prüfen · ${Math.round((doc.classification_confidence ?? 0) * 100)}%`"
-              v-tooltip.bottom="'Niedrige KI-Konfidenz — Kategorie und Felder bitte prüfen.'"
+        <div class="document-header">
+          <div class="document-checkbox" @click.stop>
+            <Checkbox
+              :modelValue="isSelected(doc.id)"
+              :binary="true"
+              :inputId="`doc-sel-${doc.id}`"
+              :aria-label="`Dokument ${doc.title || doc.original_filename} auswählen`"
+              @update:modelValue="(val: boolean) => toggleSelected(doc.id, val)"
             />
           </div>
+          <div class="document-icon"><i class="pi pi-file-pdf" /></div>
+          <button
+            type="button"
+            class="document-title"
+            v-tooltip.bottom="'Dokument öffnen'"
+            @click="openDocument(doc)"
+          >
+            {{ doc.title || doc.original_filename }}
+          </button>
+          <Tag :severity="statusSeverity(doc.status)" :value="statusLabel(doc.status)" />
+          <Tag
+            v-if="isLowConfidence(doc)"
+            severity="warn"
+            icon="pi pi-exclamation-triangle"
+            :value="`Prüfen · ${Math.round((doc.classification_confidence ?? 0) * 100)}%`"
+            v-tooltip.bottom="'Niedrige KI-Konfidenz — Kategorie und Felder bitte prüfen.'"
+          />
+        </div>
+        <div class="document-details">
           <div class="document-meta">
             <span v-if="doc.category_slug" class="document-category">
               <i class="pi pi-folder" /> {{ doc.category_slug }}
@@ -632,21 +636,16 @@ onMounted(async () => {
 
 .document-card {
   display: flex;
-  gap: 1rem;
+  flex-direction: column;
+  gap: 0.5rem;
   padding: 0.75rem 1rem;
   background: var(--p-surface-card);
   border: 1px solid var(--p-content-border-color);
   border-radius: 8px;
-  cursor: pointer;
-  transition: transform 0.1s, box-shadow 0.1s;
-  align-items: flex-start;
+  transition: box-shadow 0.1s;
 }
-.document-card:hover,
-.document-card:focus-visible {
-  transform: translateY(-1px);
+.document-card:hover {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
-  outline: 2px solid var(--p-primary-color);
-  outline-offset: 2px;
 }
 .document-card--selected {
   outline: 2px solid var(--p-primary-color);
@@ -654,11 +653,19 @@ onMounted(async () => {
   background: color-mix(in srgb, var(--p-primary-color) 6%, var(--p-surface-card));
 }
 
+/* Top row: checkbox, MIME-type icon and the (clickable) document name,
+   all vertically centered against each other. */
+.document-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
 .document-checkbox {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  padding-top: 0.4rem;
 }
 
 .batch-bar {
@@ -688,32 +695,43 @@ onMounted(async () => {
 
 .document-icon {
   font-size: 2rem;
+  line-height: 1;
   color: var(--p-primary-color);
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
 }
 
-.document-body {
-  flex: 1;
-  min-width: 0;
+.document-details {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
 }
 
-.document-title-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
+/* The document name is the only tap target that opens the document. Styled
+   as an inline button so it stays keyboard-accessible (Enter/Space) while
+   reading like the surrounding text. */
 .document-title {
+  appearance: none;
+  background: none;
+  border: none;
+  margin: 0;
+  padding: 0;
+  font: inherit;
   font-weight: 600;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
   min-width: 0;
+}
+.document-title:hover,
+.document-title:focus-visible {
+  text-decoration: underline;
+  color: var(--p-primary-color);
 }
 
 .document-meta {
