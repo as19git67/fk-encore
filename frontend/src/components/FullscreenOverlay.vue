@@ -11,6 +11,7 @@ import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
 import { useAuthStore } from '../stores/auth'
 import type { GalleryGridGroup } from '../api/gallery'
 import { formatPhotoDateCompact, formatLocationLabel, toLocalIsoDate } from '../utils/dateFormat'
+import { isFullscreenInteractiveTarget } from '../utils/fullscreenInteractive'
 import { shouldArmSlideshow, slideshowReachedEnd, isDayChange, shouldShowCaption, type SlideshowState } from '../utils/slideshow'
 import {
   SLIDESHOW_INTERVAL_OPTIONS_MS,
@@ -375,6 +376,12 @@ function handleTouchStart(e: TouchEvent) {
 function handleTouchMove(e: TouchEvent) {
   // Let native scrolling run inside the split panes (don't preventDefault).
   if (splitMode.value) return
+  // Don't hijack gestures that started on an interactive control (toolbar
+  // buttons, action bar, group badge). preventDefault() below cancels the
+  // synthetic click, which made those buttons need a second or third tap —
+  // most visibly in landscape, where the bars sit over the photo pane and the
+  // tiniest finger movement during a tap reaches this handler.
+  if (isFullscreenInteractiveTarget(e.target)) return
   // Always prevent default so iOS Safari doesn't re-acquire the gesture.
   // The listener is registered { passive: false } so this call is permitted.
   // Without it, a 1-finger swipe at zoom=1 fires touchcancel instead of touchend.
@@ -424,8 +431,7 @@ function handleTouchEnd(e: TouchEvent) {
   // emit when the target is interactive (button / link / topbar) so
   // toolbar taps don't double up as navigation.
   if (movement < 10) {
-    const target = e.target as HTMLElement | null
-    if (target && target.closest('button, a, input, textarea, .fs-stack-badge, .fs-details-flyout, .fs-topbar, .fs-actions-bar')) return
+    if (isFullscreenInteractiveTarget(e.target)) return
     if (touch.clientX < window.innerWidth / 2) {
       if (props.prevPhoto) emit('prev')
     } else {
@@ -452,10 +458,9 @@ function handleContentClick(e: MouseEvent) {
   if (splitMode.value) return
   if (zoomLevel.value > 1) return
   if (performance.now() < suppressNextClickUntil) return
-  const target = e.target as HTMLElement | null
   // Skip the navigation when the click landed on an interactive
   // element — its own @click handler should take precedence.
-  if (target && target.closest('button, a, input, textarea, .fs-stack-badge, .fs-details-flyout, .fs-topbar, .fs-actions-bar')) return
+  if (isFullscreenInteractiveTarget(e.target)) return
   if (e.clientX < window.innerWidth / 2) {
     if (props.prevPhoto) emit('prev')
   } else {
