@@ -102,6 +102,7 @@ import {
 } from '../api/photos'
 import { toLocalIsoDateTime } from '../utils/dateFormat'
 import { findOrReanchorIndex } from '../utils/galleryAnchor'
+import { jumpTargetIndex } from '../utils/galleryJump'
 
 const auth = useAuthStore()
 const serviceHealth = useServiceHealthStore()
@@ -273,11 +274,7 @@ function onJumpEnd() {
   if (!galleryRef.value || !jumpButton.value) return
   const total = galleryRef.value.getTotal()
   if (total === 0) return
-  const ascending = sort.value.direction === 'asc'
-  const goNewest = jumpButton.value.target === 'newest'
-  // Newest:  ASC → last,  DESC → first.
-  // Oldest:  ASC → first, DESC → last.
-  const targetIdx = (goNewest === ascending) ? total - 1 : 0
+  const targetIdx = jumpTargetIndex(jumpButton.value.target, total, sort.value.direction as 'asc' | 'desc')
   galleryRef.value.scrollToIndex(targetIdx, 'start')
   cursorIndex.value = targetIdx
   void hydrateCursor(targetIdx)
