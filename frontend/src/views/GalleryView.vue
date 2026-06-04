@@ -101,6 +101,7 @@ import {
   type PoiMatchItem,
 } from '../api/photos'
 import { toLocalIsoDateTime } from '../utils/dateFormat'
+import { findOrReanchorIndex } from '../utils/galleryAnchor'
 
 const auth = useAuthStore()
 const serviceHealth = useServiceHealthStore()
@@ -1076,7 +1077,7 @@ async function onGalleryLoaded() {
     return
   }
   if (initialAnchor.value !== null) {
-    const idx = galleryRef.value.findLoadedIndexById(initialAnchor.value)
+    const idx = await findOrReanchorIndex(galleryRef.value, initialAnchor.value)
     if (idx !== null) {
       cursorIndex.value = idx
       // Mirror the goNext / goPrev pattern: hydrate first, then scroll.
