@@ -622,8 +622,16 @@ export function listAlbums() {
   return apiFetch<{ albums: Album[] }>('/albums')
 }
 
-export function getAlbum(id: number) {
-  return apiFetch<AlbumWithPhotos>(`/albums/${id}`)
+export function getAlbum(id: number, includePhotos = true) {
+  // Pass includePhotos=false to fetch album metadata only (count, date span,
+  // cover, settings). The heavy per-photo array is then loaded separately via
+  // getAlbumPhotos so the grid can paint without waiting on the full payload.
+  const suffix = includePhotos ? '' : '?includePhotos=false'
+  return apiFetch<AlbumWithPhotos>(`/albums/${id}${suffix}`)
+}
+
+export function getAlbumPhotos(id: number) {
+  return apiFetch<{ photos: AlbumPhoto[] }>(`/albums/${id}/photos`)
 }
 
 export function createAlbum(name: string, description?: string, displayMode?: 'grid' | 'map') {

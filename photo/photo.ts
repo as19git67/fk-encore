@@ -15,6 +15,7 @@ import { photos as photosTable } from "../db/schema";
 import type {
   Album,
   AlbumWithPhotos,
+  AlbumPhotoWithMeta,
   AlbumUserSettings,
   UpdateAlbumUserSettingsRequest,
   CreateAlbumRequest,
@@ -1285,10 +1286,27 @@ export const listAlbums = api(
  */
 export const getAlbum = api(
   { expose: true, method: "GET", path: "/albums/:id", auth: true },
-  async ({ id }: { id: number }): Promise<AlbumWithPhotos> => {
+  async ({ id, includePhotos }: { id: number; includePhotos?: Query<boolean> }): Promise<AlbumWithPhotos> => {
     checkModule();
     const userId = getUserId();
-    return await service.getAlbumLogic(userId, id);
+    // Default: include the full photo list (backwards compatible). The album
+    // detail view passes includePhotos=false to render the grid from metadata
+    // first and hydrate photos via /albums/:id/photos in the background.
+    return await service.getAlbumLogic(userId, id, { includePhotos: includePhotos !== false });
+  }
+);
+
+/**
+ * Get only an album's photos (the heavy per-photo payload). Split from
+ * getAlbum so the detail view can fetch metadata first and lazily hydrate the
+ * photo array used by stacks, the map view and the curation-stats overlay.
+ */
+export const getAlbumPhotos = api(
+  { expose: true, method: "GET", path: "/albums/:id/photos", auth: true },
+  async ({ id }: { id: number }): Promise<{ photos: AlbumPhotoWithMeta[] }> => {
+    checkModule();
+    const userId = getUserId();
+    return await service.getAlbumPhotosLogic(userId, id);
   }
 );
 

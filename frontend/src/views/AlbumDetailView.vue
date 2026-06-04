@@ -48,6 +48,7 @@ import {
   deleteAlbum,
   deleteAlbumPublicLink,
   getAlbum,
+  getAlbumPhotos,
   getAlbumShareableUsers,
   getAlbumShares,
   getPhotoDetailsBatch,
@@ -853,8 +854,12 @@ watch(activeDetailPhoto, (photo) => {
 async function loadData() {
   loading.value = true
   try {
+    // Metadata only — the grid renders from this (album id + settings) without
+    // waiting on the full per-photo payload. The photos array (used by stacks,
+    // the map view and the curation-stats overlay) is hydrated in the
+    // background by hydrateAlbumPhotos() once the view is interactive.
     const [albumRes, groupsRes] = await Promise.all([
-      getAlbum(albumId.value),
+      getAlbum(albumId.value, /* includePhotos */ false),
       listPhotoGroups().catch(() => ({ groups: [] })),
     ])
     album.value = albumRes
@@ -868,10 +873,15 @@ async function loadData() {
       try {
         await updateAlbumUserSettings(albumId.value, { active_view: 'all' })
         album.value.settings.active_view = 'all'
-        const reloaded = await getAlbum(albumId.value)
+        const reloaded = await getAlbum(albumId.value, /* includePhotos */ false)
         album.value = reloaded
       } catch { /* ignore – filter still narrows the returned set */ }
     }
+
+    // Kick off the (potentially large) photo-array hydration without blocking
+    // the loading state: the grid is already usable, and stacks / map / filter
+    // context light up as soon as it resolves.
+    void hydrateAlbumPhotos()
 
     // Resolve the anchor photo: prefer URL param, then album-specific storage,
     // then the shared nav store.
@@ -898,6 +908,19 @@ async function loadData() {
   } finally {
     loading.value = false
   }
+}
+
+// Background hydration of the album's photo array (split from getAlbum so the
+// grid can paint from metadata first). Merges the photos into the already-set
+// album object; guarded so a stale response for a previous album is dropped.
+async function hydrateAlbumPhotos() {
+  const targetId = albumId.value
+  try {
+    const { photos } = await getAlbumPhotos(targetId)
+    if (album.value && album.value.id === targetId) {
+      album.value = { ...album.value, photos }
+    }
+  } catch { /* grid stays usable; stacks/map just won't populate */ }
 }
 
 async function loadPersons() {
