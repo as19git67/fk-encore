@@ -87,6 +87,7 @@ import {
   rememberFocusedAlbumId,
 } from '../utils/albumsViewState'
 import { toLocalIsoDateTime } from '../utils/dateFormat'
+import { newestIndex, jumpTargetIndex } from '../utils/galleryJump'
 
 const route = useRoute()
 const router = useRouter()
@@ -291,6 +292,36 @@ function onResetSort() {
 const sortChipLabel = computed(() =>
   `Sortierung: ${sortFieldLabel.value} ${sort.value.direction === 'asc' ? '↑' : '↓'}`
 )
+
+// ── Jump to newest / oldest (mirrors GalleryView) ────────────────────────────
+// "Newest / oldest" only has a meaningful semantic for date sorts.
+const isDateSort = computed(
+  () => sort.value.field === 'taken_at' || sort.value.field === 'created_at',
+)
+const scrollEnds = ref({ atStart: true, atEnd: false })
+function onGridEndsChanged(ends: { atStart: boolean; atEnd: boolean }) {
+  scrollEnds.value = ends
+}
+const jumpButton = computed(() => {
+  if (!isDateSort.value) return null
+  const ascending = sort.value.direction === 'asc'
+  // Newest sits at the end for asc, at the start for desc; the icon points the
+  // way the scroll has to go.
+  const atNewest = ascending ? scrollEnds.value.atEnd : scrollEnds.value.atStart
+  if (atNewest) {
+    return { label: 'Zum ältesten', icon: ascending ? 'pi pi-angle-double-up' : 'pi pi-angle-double-down', target: 'oldest' as const }
+  }
+  return { label: 'Zum neuesten', icon: ascending ? 'pi pi-angle-double-down' : 'pi pi-angle-double-up', target: 'newest' as const }
+})
+function onJumpEnd() {
+  if (!galleryRef.value || !jumpButton.value) return
+  const total = galleryRef.value.getTotal()
+  if (total === 0) return
+  const targetIdx = jumpTargetIndex(jumpButton.value.target, total, sort.value.direction as GallerySortDir)
+  galleryRef.value.scrollToIndex(targetIdx, 'start')
+  cursorIndex.value = targetIdx
+  void hydrateCursor(targetIdx)
+}
 
 function comparePhotos(a: Photo, b: Photo): number {
   const { field, direction } = sort.value
@@ -1608,7 +1639,12 @@ async function onGalleryLoaded() {
   if (route.query.photoId) {
     router.replace({ query: { ...route.query, photoId: undefined } })
   }
-  if (!targetId) return
+  if (!targetId) {
+    // No remembered photo for this album — default to the newest one in the
+    // current list instead of leaving nothing selected.
+    selectGridIndex(newestGridIndex())
+    return
+  }
   let idx = galleryRef.value.findLoadedIndexById(targetId)
   if (idx === null) {
     // The target wasn't in the initial window. The `around-photo-id` prop
@@ -1649,13 +1685,27 @@ function selectAfterGroup(group: PhotoGroup | null) {
       return
     }
   }
-  selectGridIndex(0)
+  // Nothing from the group survived — fall back to the newest photo in the
+  // current list (not the oldest, which index 0 is in the default asc sort).
+  selectGridIndex(newestGridIndex())
+}
+
+/** Grid index of the newest photo in the current sort. */
+function newestGridIndex(): number {
+  const total = galleryRef.value?.getTotal() ?? 0
+  return newestIndex(total, sortDirForGallery.value)
 }
 
 // True when `id` is still present in the (filter-aware) album photo list — i.e.
 // it survived the review and is safe to focus.
 function isAlbumPhotoVisible(id: number | null | undefined): boolean {
-  return id != null && albumPhotos.value.some((p) => p.id === id)
+  if (id == null) return false
+  if (albumPhotos.value.some((p) => p.id === id)) return true
+  // album.photos is loaded lazily (#561) and can be empty right after
+  // loadData(); the grid is the authoritative "currently shown" source, so a
+  // post-review anchor isn't dropped just because the photo array hasn't
+  // hydrated yet (which previously snapped the grid to the oldest photo).
+  return galleryRef.value?.findLoadedIndexById(id) != null
 }
 
 // Pick a still-visible photo to focus after a review. Preference order:
@@ -1985,6 +2035,15 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
             v-tooltip.bottom="viewMode === 'map' ? 'Rasteransicht anzeigen' : 'Kartenansicht anzeigen'"
             @click="toggleViewMode"
           />
+          <Button
+            v-if="jumpButton && viewMode !== 'map'"
+            :icon="jumpButton.icon"
+            size="small"
+            text
+            :aria-label="jumpButton.label"
+            v-tooltip.bottom="jumpButton.label"
+            @click="onJumpEnd"
+          />
           <Button v-if="effectiveCoverPhotoId && viewMode !== 'map'" icon="pi pi-image" size="small" text v-tooltip="'Cover fokussieren'" @click="scrollToCover" />
           <Button v-if="canShareAlbum" icon="pi pi-share-alt" size="small" text v-tooltip="'Freigeben'" @click="openShareDialogLocal" />
           <Button v-if="canWrite" icon="pi pi-cog" size="small" text v-tooltip="'Album-Einstellungen'" @click="openAlbumSettingsDialog" />
@@ -2127,6 +2186,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           @stack-click="handleGridStackClick"
           @toggle-select="onToggleSelect"
           @loaded="onGalleryLoaded"
+          @ends-changed="onGridEndsChanged"
         />
       </div>
 
