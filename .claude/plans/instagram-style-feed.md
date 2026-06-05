@@ -1,6 +1,15 @@
 # Instagram-artiger Content-Feed (chronologisch, betrachter-genau)
 
-Status: **Plan** · Branch: `claude/instagram-style-feed-nnjJ2`
+Status: **Umgesetzt** (Etappen 1–4) · Branch: `claude/instagram-style-feed-nnjJ2`
+
+## Umsetzungsstand
+
+- ✅ **Etappe 1 — Datenschicht**: Migration `0096_photo_feed_entries` + Index + Backfill, Drizzle-Schema, Journal.
+- ✅ **Etappe 2 — Fan-out/Reconcile**: `feed/content-feed.service.ts`, eingehängt an add/batch/share/unshare/leave/delete/metadata/comment; 11 Tests.
+- ✅ **Etappe 3 — Lese-Endpoint**: `GET /feed/photos` (Keyset-Cursor), Like-/Kommentar-Anreicherung, Hidden-Ausschluss, Realtime-Signal; 6 Tests.
+- ✅ **Etappe 4 — Frontend**: `PhotoFeedView` (Menüpunkt „Stream"), `PhotoFeedCard`, Endlos-Scroll, Doppeltipp-Like (= Favorit), Inline-Kommentare, Realtime-Refresh, Storybook-Story.
+
+Tests: Backend 67 Dateien / 1020 grün, Frontend 19 / 202 grün.
 
 ## Ziel
 
