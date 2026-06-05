@@ -146,9 +146,10 @@ Bei Familienarchiv-Größe (wenige Teilnehmer/Album) ist der Fan-out unkritisch.
 - Storybook-Story für Karte; Layout-Verifikation soweit möglich.
 - `npm run test` grün → pushen.
 
+## Entschiedene Punkte
+- **Like-Zähler-Scope: global pro Foto** (`count(*)` aller `favorite`-Zeilen).
+- **Eigener Menüpunkt** für den Content-Feed; der bestehende `/fotos/feed`
+  (Benachrichtigungen) bleibt unverändert erhalten.
+
 ## Offene Punkte
-- Like-Zähler-Scope: global pro Foto (`count` aller Favorit-Zeilen) vs. nur
-  Teilnehmer der für mich sichtbaren Alben — Vorschlag: global pro Foto (einfach, konsistent).
-- Soll der Content-Feed den bestehenden `/fotos/feed` ersetzen oder als eigener
-  Menüpunkt danebenstehen? Vorschlag: eigener Punkt; Benachrichtigungs-Tab bleibt.
 - Carousel für Mehrbild-Posts (`payload.photoIds`) — optionale spätere Etappe.
