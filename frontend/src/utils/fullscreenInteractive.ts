@@ -15,3 +15,20 @@ export const FULLSCREEN_INTERACTIVE_SELECTOR =
 export function isFullscreenInteractiveTarget(el: EventTarget | null): boolean {
   return el instanceof Element && el.closest(FULLSCREEN_INTERACTIVE_SELECTOR) !== null
 }
+
+/**
+ * Selector for just the toolbar layers (top bar + bottom action bar) — NOT the
+ * details flyout or the photo.
+ *
+ * Used to decide which taps must NOT restart the slideshow countdown: tapping a
+ * toolbar action that operates on the current photo (details toggle, favorite,
+ * hide) should let the slideshow keep running uninterrupted. A tap inside the
+ * open details flyout (e.g. typing a comment) is deliberately excluded so the
+ * countdown still resets there and the slideshow doesn't advance while typing.
+ * (Editing pauses the slideshow via its own mechanism.)
+ */
+export const FULLSCREEN_TOOLBAR_SELECTOR = '.fs-topbar, .fs-actions-bar'
+
+export function isFullscreenToolbarTarget(el: EventTarget | null): boolean {
+  return el instanceof Element && el.closest(FULLSCREEN_TOOLBAR_SELECTOR) !== null
+}

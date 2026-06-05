@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { isFullscreenInteractiveTarget } from './fullscreenInteractive'
+import { isFullscreenInteractiveTarget, isFullscreenToolbarTarget } from './fullscreenInteractive'
 
 describe('isFullscreenInteractiveTarget', () => {
   afterEach(() => { document.body.innerHTML = '' })
@@ -31,5 +31,35 @@ describe('isFullscreenInteractiveTarget', () => {
   it('returns false for null / non-element targets', () => {
     expect(isFullscreenInteractiveTarget(null)).toBe(false)
     expect(isFullscreenInteractiveTarget(document)).toBe(false)
+  })
+})
+
+describe('isFullscreenToolbarTarget (slideshow idle-reset exclusion)', () => {
+  afterEach(() => { document.body.innerHTML = '' })
+  function mount(html: string): HTMLElement {
+    const root = document.createElement('div')
+    root.innerHTML = html
+    document.body.appendChild(root)
+    return root
+  }
+
+  it('matches toolbar action buttons (details / favorite / hide → keep slideshow running)', () => {
+    const root = mount('<div class="fs-actions-bar"><button><i id="i"></i></button></div>')
+    expect(isFullscreenToolbarTarget(root.querySelector('#i'))).toBe(true)
+  })
+
+  it('matches the top bar', () => {
+    const root = mount('<div class="fs-topbar"><button id="b"></button></div>')
+    expect(isFullscreenToolbarTarget(root.querySelector('#b'))).toBe(true)
+  })
+
+  it('does NOT match the details flyout — typing there should still reset the timer', () => {
+    const root = mount('<div class="fs-details-flyout"><textarea id="t"></textarea></div>')
+    expect(isFullscreenToolbarTarget(root.querySelector('#t'))).toBe(false)
+  })
+
+  it('does NOT match the bare photo pane', () => {
+    const root = mount('<div class="fs-split-photo"><img id="img" /></div>')
+    expect(isFullscreenToolbarTarget(root.querySelector('#img'))).toBe(false)
   })
 })

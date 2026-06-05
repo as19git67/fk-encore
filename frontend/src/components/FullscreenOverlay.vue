@@ -11,7 +11,7 @@ import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
 import { useAuthStore } from '../stores/auth'
 import type { GalleryGridGroup } from '../api/gallery'
 import { formatPhotoDateCompact, formatLocationLabel, toLocalIsoDate } from '../utils/dateFormat'
-import { isFullscreenInteractiveTarget } from '../utils/fullscreenInteractive'
+import { isFullscreenInteractiveTarget, isFullscreenToolbarTarget } from '../utils/fullscreenInteractive'
 import { shouldArmSlideshow, slideshowReachedEnd, isDayChange, shouldShowCaption, type SlideshowState } from '../utils/slideshow'
 import {
   SLIDESHOW_INTERVAL_OPTIONS_MS,
@@ -701,8 +701,14 @@ onMounted(() => {
 })
 onUnmounted(() => { if (hintTimer !== null) clearTimeout(hintTimer) })
 
-function bumpIdleTimer() {
+function bumpIdleTimer(e?: Event) {
   if (!canSlideshow.value) return
+  // Taps on the toolbar action controls (details toggle, favorite, hide, …)
+  // should NOT restart the countdown — the user is acting on the current photo
+  // and the slideshow should keep running uninterrupted. Editing pauses via its
+  // own watch on `transformEditorVisible`. Taps inside the open details flyout,
+  // keyboard and wheel still count as activity and reset the timer.
+  if ((e?.type === 'pointerdown' || e?.type === 'pointermove') && isFullscreenToolbarTarget(e.target)) return
   scheduleIdleAdvance()
 }
 
