@@ -1659,16 +1659,20 @@ async function onGalleryLoaded() {
   if (deepLinkPhotoId && targetId === deepLinkPhotoId) {
     void openGridFullscreenAt(idx)
   } else {
-    cursorIndex.value = idx
-    galleryRef.value.scrollToIndex(idx)
-    void hydrateCursor(idx)
+    void selectGridIndex(idx)
   }
 }
 
-function selectGridIndex(idx: number) {
+async function selectGridIndex(idx: number) {
   cursorIndex.value = idx
+  // Hydrate first, then scroll. On a fresh album mount the virtualizer hasn't
+  // measured its scroll element yet, so scrolling right after the gallery's
+  // 'loaded' emit silently no-ops — the photo gets the cursor but isn't
+  // scrolled into view (the regression when jumping from the gallery into an
+  // album that contains the photo). Awaiting the hydrate gives the virtualizer
+  // the frames it needs before we scroll — same fix as GalleryView.
+  await hydrateCursor(idx)
   galleryRef.value?.scrollToIndex(idx)
-  void hydrateCursor(idx)
 }
 
 function selectAfterGroup(group: PhotoGroup | null) {
