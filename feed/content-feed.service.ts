@@ -80,11 +80,13 @@ async function bumpUsers(userIds: number[], photoId: number, ts: string): Promis
 
   // Live signal so open content-feed views refresh their first page. Best-
   // effort — a realtime outage must not break the photo/album operation.
+  // Reuses the existing "feed" channel with a distinct type so no new
+  // realtime channel has to be registered on the client.
   try {
     await realtime.publishEvent({
       userIds: unique.map(String),
-      channel: "photo-feed",
-      type: "changed",
+      channel: "feed",
+      type: "photo.changed",
       resourceId: String(photoId),
       payload: { photoId },
     });
