@@ -17,6 +17,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { formatPhotoDateCompact } from '../utils/dateFormat'
 import { resolveCurationOpinions } from '../utils/curationOpinions'
+import { detailPanelEditable } from '../utils/detailPanelEditable'
 
 const props = defineProps<{
   photo: Photo
@@ -62,6 +63,10 @@ const props = defineProps<{
    *  hydrated from the grid + photo-details batch — doesn't carry this
    *  album-only data. Falls back to photo.curation_stats when omitted. */
   curationStats?: { fav_count: number; hide_count: number; member_count: number }
+  /** View-only mode: hide every edit affordance (description, date, comments,
+   *  album, face actions). Driven by a running fullscreen slideshow — paused
+   *  slideshow makes the panel editable again. */
+  readOnly?: boolean
 }>()
 
 const editDate = defineModel<Date | null>('editDate', { default: null })
@@ -242,7 +247,7 @@ function formatPhotoDateDisplay(photo: Photo) {
 // else (album viewers, contributors who didn't upload this photo) sees
 // the values read-only.
 const canEditPhotoMeta = computed(() =>
-  auth.user?.id != null && props.photo.user_id === auth.user.id,
+  detailPanelEditable(auth.user?.id != null && props.photo.user_id === auth.user.id, props.readOnly),
 )
 
 // Resolve the display name for an assigned face. Prefer the name the backend
@@ -296,6 +301,14 @@ async function saveDescription() {
 watch(() => props.photo.id, () => {
   isEditingDescription.value = false
 })
+
+// Turning read-only (e.g. starting the slideshow while a field was open) closes
+// any open editor so it can't linger over a non-editable panel.
+watch(() => props.readOnly, (ro) => {
+  if (!ro) return
+  isEditingDescription.value = false
+  if (props.isEditingDate) emit('cancel-edit-date')
+})
 </script>
 
 <template>
@@ -331,6 +344,7 @@ watch(() => props.photo.id, () => {
             </span>
           </div>
           <Button
+            v-if="!readOnly"
             label="Alben bearbeiten"
             icon="pi pi-pencil"
             size="small"
@@ -449,6 +463,7 @@ watch(() => props.photo.id, () => {
           <PhotoReactions
             :photo-id="photo.id"
             :album-id="albumId"
+            :read-only="readOnly"
             @comment-count-change="emit('comment-count-change', $event)"
           />
         </div>
@@ -557,10 +572,10 @@ watch(() => props.photo.id, () => {
             <div v-for="face in namedFaces" :key="face.id" class="person-row">
               <i class="pi pi-user person-icon" />
               <span class="person-name">{{ faceDisplayName(face) }}</span>
-              <Button icon="pi pi-times" severity="secondary" text rounded size="small" @click="emit('ignore-face', face.id)" v-tooltip="'Entfernen'" />
+              <Button v-if="!readOnly" icon="pi pi-times" severity="secondary" text rounded size="small" @click="emit('ignore-face', face.id)" v-tooltip="'Entfernen'" />
             </div>
           </div>
-          <Button label="Neu erkennen" icon="pi pi-refresh" @click="emit('reindex')" :loading="reindexingPhoto" :disabled="faceServiceAvailable === false" class="reindex-btn" severity="secondary" outlined size="small" :title="faceServiceAvailable === false ? 'Gesichtserkennungs-Dienst nicht verfügbar' : undefined" />
+          <Button v-if="!readOnly" label="Neu erkennen" icon="pi pi-refresh" @click="emit('reindex')" :loading="reindexingPhoto" :disabled="faceServiceAvailable === false" class="reindex-btn" severity="secondary" outlined size="small" :title="faceServiceAvailable === false ? 'Gesichtserkennungs-Dienst nicht verfügbar' : undefined" />
         </div>
       </template>
 
@@ -608,6 +623,7 @@ watch(() => props.photo.id, () => {
             </span>
           </div>
           <Button
+            v-if="!readOnly"
             label="Alben bearbeiten"
             icon="pi pi-pencil"
             size="small"
