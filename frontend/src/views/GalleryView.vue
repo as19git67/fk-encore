@@ -1396,8 +1396,9 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
       @show-details="onShowDetails"
       @open-group-review="onFullscreenOpenGroupReview"
     >
-      <template #details-flyout>
+      <template #details-flyout="{ readOnly }">
         <PhotoDetailSidebar
+          :read-only="readOnly"
           :photo="cursorPhoto"
           :faces="detectedFaces"
           :loading-faces="loadingFaces"

@@ -23,6 +23,9 @@ const props = defineProps<{
   // album-scoped: listing, creating and the realtime sync all key off
   // this album so a comment written here stays in this album only.
   albumId: number
+  // When true, the thread is view-only: no compose box, no edit/delete.
+  // Used while a fullscreen slideshow is running.
+  readOnly?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -140,7 +143,7 @@ watch(
     :loading="loading"
     :error-message="error"
     :current-author="currentAuthor"
-    :can-write="currentAuthor !== null"
+    :can-write="currentAuthor !== null && !readOnly"
     :submitting="submitting"
     @submit="onSubmit"
     @update="onUpdate"
