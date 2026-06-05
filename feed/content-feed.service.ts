@@ -19,6 +19,7 @@
 import db from "../db/database";
 import { sql, and, eq, inArray } from "drizzle-orm";
 import { photoFeedEntries } from "../db/schema";
+import { realtime } from "~encore/clients";
 
 const TAG = "[content-feed]";
 
@@ -76,6 +77,20 @@ async function bumpUsers(userIds: number[], photoId: number, ts: string): Promis
     DO UPDATE SET last_activity_at =
       GREATEST(photo_feed_entries.last_activity_at, EXCLUDED.last_activity_at)
   `);
+
+  // Live signal so open content-feed views refresh their first page. Best-
+  // effort — a realtime outage must not break the photo/album operation.
+  try {
+    await realtime.publishEvent({
+      userIds: unique.map(String),
+      channel: "photo-feed",
+      type: "changed",
+      resourceId: String(photoId),
+      payload: { photoId },
+    });
+  } catch {
+    // ignore — the next manual load will pick the entry up
+  }
 }
 
 /** A photo was added to an album → bump that album's participants. */
