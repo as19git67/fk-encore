@@ -305,13 +305,13 @@ function onGridEndsChanged(ends: { atStart: boolean; atEnd: boolean }) {
 const jumpButton = computed(() => {
   if (!isDateSort.value) return null
   const ascending = sort.value.direction === 'asc'
-  // Newest sits at the end for asc, at the start for desc; the icon points the
-  // way the scroll has to go.
+  // Newest sits at the end for asc, at the start for desc; the icon points at
+  // the list edge the jump lands on (fast-backward = start, fast-forward = end).
   const atNewest = ascending ? scrollEnds.value.atEnd : scrollEnds.value.atStart
   if (atNewest) {
-    return { label: 'Zum ältesten', icon: ascending ? 'pi pi-angle-double-up' : 'pi pi-angle-double-down', target: 'oldest' as const }
+    return { label: 'Zum ältesten', icon: ascending ? 'pi pi-fast-backward' : 'pi pi-fast-forward', target: 'oldest' as const }
   }
-  return { label: 'Zum neuesten', icon: ascending ? 'pi pi-angle-double-down' : 'pi pi-angle-double-up', target: 'newest' as const }
+  return { label: 'Zum neuesten', icon: ascending ? 'pi pi-fast-forward' : 'pi pi-fast-backward', target: 'newest' as const }
 })
 function onJumpEnd() {
   if (!galleryRef.value || !jumpButton.value) return
@@ -2000,6 +2000,16 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
             class="header__filter-btn"
             @click="openSortMenu"
           />
+          <Button
+            v-if="jumpButton && viewMode !== 'map'"
+            :icon="jumpButton.icon"
+            :label="jumpButton.label"
+            size="small"
+            severity="secondary"
+            outlined
+            class="header__filter-btn"
+            @click="onJumpEnd"
+          />
         </div>
 
         <!-- Natural-language search: global search, results filtered to this album -->
@@ -2038,15 +2048,6 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
             :aria-label="viewMode === 'map' ? 'Rasteransicht anzeigen' : 'Kartenansicht anzeigen'"
             v-tooltip.bottom="viewMode === 'map' ? 'Rasteransicht anzeigen' : 'Kartenansicht anzeigen'"
             @click="toggleViewMode"
-          />
-          <Button
-            v-if="jumpButton && viewMode !== 'map'"
-            :icon="jumpButton.icon"
-            size="small"
-            text
-            :aria-label="jumpButton.label"
-            v-tooltip.bottom="jumpButton.label"
-            @click="onJumpEnd"
           />
           <Button v-if="effectiveCoverPhotoId && viewMode !== 'map'" icon="pi pi-image" size="small" text v-tooltip="'Cover fokussieren'" @click="scrollToCover" />
           <Button v-if="canShareAlbum" icon="pi pi-share-alt" size="small" text v-tooltip="'Freigeben'" @click="openShareDialogLocal" />

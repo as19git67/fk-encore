@@ -253,19 +253,19 @@ const jumpButton = computed(() => {
   if (!isDateSort.value) return null
   const ascending = sort.value.direction === 'asc'
   // With ASC sort: oldest at top (index 0), newest at bottom (last index).
-  // With DESC: oldest at bottom, newest at top. The label is semantic,
-  // not directional — the icon points the way the scroll has to go.
+  // With DESC: oldest at bottom, newest at top. The icon points at the list
+  // edge the jump lands on — fast-backward = to the start, fast-forward = end.
   const atNewest = ascending ? scrollEnds.value.atEnd : scrollEnds.value.atStart
   if (atNewest) {
     return {
       label: 'Zum ältesten',
-      icon: ascending ? 'pi pi-angle-double-up' : 'pi pi-angle-double-down',
+      icon: ascending ? 'pi pi-fast-backward' : 'pi pi-fast-forward',
       target: 'oldest' as const,
     }
   }
   return {
     label: 'Zum neuesten',
-    icon: ascending ? 'pi pi-angle-double-down' : 'pi pi-angle-double-up',
+    icon: ascending ? 'pi pi-fast-forward' : 'pi pi-fast-backward',
     target: 'newest' as const,
   }
 })
@@ -1165,15 +1165,6 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
             @click="openSortMenu"
           />
           <Button
-            v-if="canManageData && totalUnreviewed > 0"
-            :label="`Gruppen bearbeiten (${totalUnreviewed} offen)`"
-            icon="pi pi-images"
-            severity="success"
-            size="small"
-            v-tooltip.bottom="`Gruppen bearbeiten (${totalUnreviewed} offen)`"
-            @click="onStartGroupReview"
-          />
-          <Button
             v-if="jumpButton"
             :icon="jumpButton.icon"
             :label="jumpButton.label"
@@ -1181,6 +1172,15 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
             severity="secondary"
             outlined
             @click="onJumpEnd"
+          />
+          <Button
+            v-if="canManageData && totalUnreviewed > 0"
+            :label="`Gruppen bearbeiten (${totalUnreviewed} offen)`"
+            icon="pi pi-images"
+            severity="success"
+            size="small"
+            v-tooltip.bottom="`Gruppen bearbeiten (${totalUnreviewed} offen)`"
+            @click="onStartGroupReview"
           />
           <template v-if="canUpload">
             <Button
