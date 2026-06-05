@@ -8,6 +8,7 @@ import type { FeedPhotoItem } from '../api/photoFeed'
 const props = defineProps<{ item: FeedPhotoItem }>()
 const emit = defineEmits<{
   (e: 'like', item: FeedPhotoItem): void
+  (e: 'hide', item: FeedPhotoItem): void
   (e: 'open', item: FeedPhotoItem): void
   (e: 'comment', item: FeedPhotoItem, body: string): void
 }>()
@@ -92,27 +93,25 @@ function submitComment() {
         @click="emit('like', item)"
       >
         <i :class="item.likedByMe ? 'pi pi-heart-fill' : 'pi pi-heart'" />
+        <span class="count">{{ item.likeCount }}</span>
+      </button>
+      <button
+        class="icon-btn"
+        title="Ausblenden"
+        aria-label="Ausblenden"
+        @click="emit('hide', item)"
+      >
+        <i class="pi pi-thumbs-down" />
       </button>
       <button class="icon-btn" title="Kommentare" @click="emit('open', item)">
         <i class="pi pi-comment" />
+        <span class="count">{{ item.commentCount }}</span>
       </button>
-    </div>
-
-    <div v-if="item.likeCount > 0" class="likes">
-      {{ item.likeCount }} {{ item.likeCount === 1 ? 'Gefällt-mir' : 'Gefällt-mir-Angaben' }}
     </div>
 
     <p v-if="item.description" class="caption">
       <span class="owner-inline">{{ ownerName }}</span> {{ item.description }}
     </p>
-
-    <button
-      v-if="item.commentCount > 0"
-      class="view-comments"
-      @click="emit('open', item)"
-    >
-      Alle {{ item.commentCount }} Kommentare ansehen
-    </button>
 
     <p v-if="item.latestComment" class="comment-preview">
       <span class="owner-inline">{{ item.latestComment.author ?? 'Gast' }}</span>
@@ -210,26 +209,29 @@ function submitComment() {
 .actions {
   display: flex;
   gap: 0.25rem;
-  padding: 0.3rem 0.5rem 0;
+  padding: 0.35rem 0.5rem 0.1rem;
 }
 .icon-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   background: none;
   border: none;
   cursor: pointer;
-  padding: 0.4rem;
+  padding: 0.35rem 0.6rem;
   font-size: 1.4rem;
   line-height: 1;
   color: var(--p-text-color);
-  border-radius: 50%;
+  border-radius: 999px;
 }
 .icon-btn:hover { background: var(--p-content-hover-background); }
 .icon-btn.liked { color: var(--p-red-500, #e0245e); }
-
-.likes {
+.icon-btn .count {
+  font-size: 0.9rem;
   font-weight: 600;
-  font-size: 0.88rem;
-  padding: 0.1rem 0.8rem;
+  min-width: 0.6em;
 }
+
 .caption {
   margin: 0.15rem 0;
   padding: 0 0.8rem;
@@ -238,15 +240,6 @@ function submitComment() {
 }
 .owner-inline { font-weight: 600; margin-right: 0.3rem; }
 
-.view-comments {
-  background: none;
-  border: none;
-  padding: 0.1rem 0.8rem;
-  color: var(--p-text-muted-color);
-  font-size: 0.85rem;
-  cursor: pointer;
-  text-align: left;
-}
 .comment-preview {
   margin: 0.1rem 0;
   padding: 0 0.8rem;

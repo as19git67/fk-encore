@@ -73,6 +73,22 @@ async function onLike(item: FeedPhotoItem) {
   }
 }
 
+async function onHide(item: FeedPhotoItem) {
+  // Thumbs-down hides the photo for this user (curation = 'hidden'); the feed
+  // read query then excludes it. Optimistically drop it from the list and
+  // re-insert on failure.
+  const idx = items.value.findIndex((i) => i.photoId === item.photoId)
+  if (idx === -1) return
+  const [removed] = items.value.splice(idx, 1)
+  if (!removed) return
+  try {
+    await updatePhotoCuration(item.photoId, 'hidden')
+  } catch {
+    items.value.splice(idx, 0, removed)
+    error.value = 'Ausblenden fehlgeschlagen'
+  }
+}
+
 async function onComment(item: FeedPhotoItem, body: string) {
   if (!item.album) return
   try {
@@ -187,6 +203,7 @@ onBeforeUnmount(() => {
         :key="item.photoId"
         :item="item"
         @like="onLike"
+        @hide="onHide"
         @open="onOpen"
         @comment="onComment"
       />
