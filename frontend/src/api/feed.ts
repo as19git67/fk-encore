@@ -20,6 +20,7 @@ export interface FeedAlbumRef {
 export interface FeedPhotoRef {
   id: number
   filename: string
+  description: string | null
 }
 
 export interface FeedItem {

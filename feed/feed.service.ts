@@ -38,6 +38,7 @@ export interface FeedItem {
   photo: {
     id: number;
     filename: string;
+    description: string | null;
   } | null;
   payload: Record<string, unknown>;
   seen_at: string | null;
@@ -76,6 +77,7 @@ interface FeedRow {
   album_name: string | null;
   photo_id: number | null;
   photo_filename: string | null;
+  photo_description: string | null;
   payload: Record<string, unknown>;
   seen_at: string | null;
   created_at: string;
@@ -103,6 +105,7 @@ export async function listFeedForUser(
         album_name: albums.name,
         photo_id: feedItems.photo_id,
         photo_filename: photos.filename,
+        photo_description: photos.description,
         payload: feedItems.payload,
         seen_at: feedItems.seen_at,
         created_at: feedItems.created_at,
@@ -136,6 +139,7 @@ export async function listFeedForUser(
         ? {
             id: r.photo_id,
             filename: r.photo_filename ?? "",
+            description: r.photo_description,
           }
         : null,
     payload: r.payload,
