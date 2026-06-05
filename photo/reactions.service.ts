@@ -32,6 +32,7 @@ import {
 } from "../db/schema";
 import { feed, realtime, sharedalbum } from "~encore/clients";
 import { emitFeedItem } from "./photo.service";
+import * as contentFeed from "../feed/content-feed.service";
 
 const MAX_COMMENT_LENGTH = 2000;
 
@@ -333,6 +334,8 @@ export async function createComment(
       excerpt: comment.body.slice(0, 140),
     },
   });
+  // Content feed: a comment bumps the photo for the album's participants.
+  await contentFeed.onComment(photoId, albumId);
   // Fan out to guests of the album the comment was written in. The same
   // photo shared via several album links must not leak the comment
   // across the audiences of those albums.
@@ -467,6 +470,9 @@ export async function createCommentAsGuest(
         `[reactions] guest-to-guest fanout failed photo=${photoId}: ${(err as Error).message}`,
       );
     });
+  // Content feed: a guest comment still bumps the photo for the album's
+  // registered participants.
+  await contentFeed.onComment(photoId, albumId);
 
   return comment;
 }
@@ -559,6 +565,8 @@ export async function updateComment(
     userId,
     body: comment.body,
   });
+  // Content feed: editing a comment bumps the photo for the album's participants.
+  await contentFeed.onComment(existing.photo_id, existing.album_id);
 
   return comment;
 }
@@ -623,6 +631,9 @@ export async function updateCommentAsGuest(
     guestId,
     body: comment.body,
   });
+  // Content feed: a guest comment edit bumps the photo for the album's
+  // registered participants.
+  await contentFeed.onComment(existing.photo_id, existing.album_id);
 
   return comment;
 }
