@@ -69,6 +69,12 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'photos.view' },
       },
       {
+        path: 'stream',
+        name: 'fotos-stream',
+        component: () => import('../views/PhotoFeedView.vue'),
+        meta: { permission: 'photos.view' },
+      },
+      {
         path: 'review-queue',
         name: 'fotos-review-queue',
         component: () => import('../views/ReviewQueueView.vue'),
@@ -78,6 +84,7 @@ export const modules: ModuleConfig[] = [
     menuItems: [
       { label: 'Galerie', icon: 'pi pi-images', routeName: 'fotos-gallery', permission: 'photos.view' },
       { label: 'Alben', icon: 'pi pi-folder-open', routeName: 'fotos-albums', permission: 'photos.view' },
+      { label: 'Stream', icon: 'pi pi-th-large', routeName: 'fotos-stream', permission: 'photos.view' },
       { label: 'Feed', icon: 'pi pi-bell', routeName: 'fotos-feed', permission: 'photos.view' },
       { label: 'Rückblicke', icon: 'pi pi-history', routeName: 'fotos-recaps', permission: 'photos.view' },
       { label: 'Personen', icon: 'pi pi-users', routeName: 'fotos-people', permission: 'people.view' },
