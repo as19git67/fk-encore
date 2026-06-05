@@ -556,6 +556,9 @@ let idleTimer: ReturnType<typeof setTimeout> | null = null
 const playing = ref(false)
 /** True when the slideshow can be offered at all (caller enabled it). */
 const canSlideshow = computed(() => (props.autoAdvanceMs ?? 0) > 0)
+/** True while a slideshow is actually running — the details flyout is rendered
+ *  read-only in this state (editing resumes once the user pauses). */
+const slideshowActive = computed(() => canSlideshow.value && playing.value)
 // User-specific interval between photos (localStorage, default 5 s). The
 // `autoAdvanceMs` prop only switches the slideshow on; the actual delay is
 // this stored value, adjustable via the toolbar.
@@ -993,7 +996,7 @@ onUnmounted(() => {
           @touchmove.stop
           @wheel.stop
         >
-          <slot name="details-flyout" />
+          <slot name="details-flyout" :read-only="slideshowActive" />
         </div>
       </div>
 
@@ -1228,7 +1231,7 @@ onUnmounted(() => {
         @touchmove.stop
         @wheel.stop
       >
-        <slot name="details-flyout" />
+        <slot name="details-flyout" :read-only="slideshowActive" />
       </div>
 
       <!-- Vertical-centered prev/next arrows. Hidden on touch-only
