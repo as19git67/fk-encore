@@ -2354,9 +2354,10 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           @click="handleSetMapCover(cursorPhoto.id)"
         />
       </template>
-      <template #details-flyout>
+      <template #details-flyout="{ readOnly }">
         <PhotoDetailSidebar
           :in-flyout="true"
+          :read-only="readOnly"
           :photo="cursorPhoto"
           :curation-stats="cursorCurationStats"
           :can-delete="canDeletePhotos || canWrite"
@@ -2426,9 +2427,10 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           @click="handleSetMapCover(mapSelectedPhoto.id)"
         />
       </template>
-      <template #details-flyout>
+      <template #details-flyout="{ readOnly }">
         <PhotoDetailSidebar
           :in-flyout="true"
+          :read-only="readOnly"
           :photo="mapSelectedPhoto"
           :can-delete="canDeletePhotos || canWrite"
           :can-upload="canUploadPhotos"
