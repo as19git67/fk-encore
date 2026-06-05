@@ -40,6 +40,26 @@ export const listFeed = api(
   },
 );
 
+/**
+ * Instagram-style content feed: a scrollable, strictly chronological stream
+ * of photos the user can see, ordered by last relevant activity. Keyset
+ * pagination via `cursorTs` + `cursorId` from the previous `nextCursor`;
+ * a null `nextCursor` marks the end.
+ */
+export const listPhotoFeed = api(
+  { expose: true, method: "GET", path: "/feed/photos", auth: true },
+  async (
+    { cursorTs, cursorId, limit }: {
+      cursorTs?: Query<string>;
+      cursorId?: Query<number>;
+      limit?: Query<number>;
+    },
+  ): Promise<feedService.ListPhotoFeedResponse> => {
+    const userId = requireUserId();
+    return feedService.listPhotoFeedForUser(userId, { cursorTs, cursorId, limit });
+  },
+);
+
 interface UnreadCountResponse {
   count: number;
 }

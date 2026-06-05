@@ -1009,6 +1009,35 @@ export const feedItems = pgTable("feed_items", {
     .defaultNow(),
 });
 
+// ========== Photo Feed Entries (content feed) ==========
+//
+// Materialized, per-viewer index for the Instagram-style content feed (see
+// migration 0096). One row per (user, photo); `last_activity_at` is the
+// monotonic "last relevant activity" sort key, fanned out on write so the
+// ordering stays viewer-accurate and keyset-paginatable. Distinct from
+// feed_items, which remains the notification/activity feed.
+
+export const photoFeedEntries = pgTable(
+  "photo_feed_entries",
+  {
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    photo_id: integer("photo_id")
+      .notNull()
+      .references(() => photos.id, { onDelete: "cascade" }),
+    last_activity_at: timestamp("last_activity_at", { mode: "string", withTimezone: true }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.user_id, table.photo_id] }),
+    index("idx_photo_feed_entries_timeline").on(
+      table.user_id,
+      table.last_activity_at,
+      table.photo_id,
+    ),
+  ]
+);
+
 // ========== Photo Comments ==========
 //
 // Audience for a comment is everyone with access to the photo — owner
