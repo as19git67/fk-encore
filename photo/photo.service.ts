@@ -84,6 +84,7 @@ function triggerWorkers(): void {
     .catch((err) => console.error("[photo.service] triggerWorkers failed:", err));
 }
 import { dbFirst, dbAll, dbExec, dbInsertReturning } from '../db/adapter';
+import * as contentFeed from "../feed/content-feed.service";
 import type { IncomingMessage } from "http";
 import { pipeline } from "stream/promises";
 import {
@@ -3476,6 +3477,9 @@ export async function updatePhotoDateLogic(
   // 1. Update database
   await dbExec(db.update(photos).set({ taken_at: takenAt }).where(eq(photos.id, photoId)));
 
+  // Content feed: a metadata edit bumps the photo for everyone who sees it.
+  await contentFeed.onPhotoMetadataEdited(photoId);
+
   // 2. Update file metadata
   try {
     if (!XMP_WRITE_BACK_ENABLED) {
@@ -3550,6 +3554,9 @@ export async function updatePhotoDescriptionLogic(
 
   // 1. Update database
   await dbExec(db.update(photos).set({ description: trimmed }).where(eq(photos.id, photoId)));
+
+  // Content feed: a metadata edit bumps the photo for everyone who sees it.
+  await contentFeed.onPhotoMetadataEdited(photoId);
 
   // 2. Write description into EXIF, IPTC and XMP. Keeping the three kept in
   //    sync makes the description survive third-party tooling that only reads
@@ -4357,7 +4364,14 @@ export async function deleteAlbumLogic(userId: number, albumId: number): Promise
     throw new Error("Only owner can delete album");
   }
 
+  // Capture membership before the cascade wipes album_photos so the content
+  // feed can drop entries for viewers who lose access along with the album.
+  const albumPhotoIds = (await dbAll<{ photo_id: number }>(
+    db.select({ photo_id: albumPhotos.photo_id }).from(albumPhotos).where(eq(albumPhotos.album_id, albumId))
+  )).map((r) => r.photo_id);
+
   await dbExec(db.delete(albums).where(eq(albums.id, albumId)));
+  await contentFeed.reconcilePhotoViewers(albumPhotoIds);
   return { success: true, message: "Album deleted" };
 }
 
@@ -4468,6 +4482,9 @@ export async function addPhotoToAlbumLogic(userId: number, req: AddPhotoToAlbumR
     albumId: req.albumId,
     photoId: req.photoId,
   });
+  // Content feed: bump for every album participant (incl. the actor — you
+  // see your own photos in the content stream, unlike the notification feed).
+  await contentFeed.onPhotoAddedToAlbum(req.photoId, req.albumId);
   // Fan out to guests who have accessed a public link of this album.
   await sharedalbum
     .fanoutAlbum({
@@ -4662,6 +4679,11 @@ export async function batchUpdateAlbumPhotosLogic(userId: number, req: BatchAlbu
         }
       }
 
+      // Content feed: bump every album participant (incl. the actor) for the
+      // newly-added photos. Runs regardless of sharing so owner-only albums
+      // still populate the owner's content stream.
+      await contentFeed.onPhotosAddedToAlbum(addedPhotoIds, albumId);
+
       // Enqueue face_assignment for all shared users of this album
       if (ENABLE_LOCAL_FACES) {
         const sharedUsers = await dbAll<{ user_id: number }>(
@@ -4729,6 +4751,9 @@ export async function batchUpdateAlbumPhotosLogic(userId: number, req: BatchAlbu
         inArray(albumPhotos.photo_id, photoIds)
       ))
     );
+    // Content feed: drop entries for viewers who no longer see these photos
+    // via any album they still participate in.
+    await contentFeed.reconcilePhotoViewers(photoIds);
   }
 
   return { success: true };
@@ -4795,6 +4820,8 @@ export async function shareAlbumLogic(userId: number, req: ShareAlbumRequest): P
     albumId: req.albumId,
     payload: { accessLevel: req.accessLevel },
   });
+  // Content feed: the new participant gains every photo in the album.
+  await contentFeed.onAlbumShared(req.albumId, req.userId);
 
   return { success: true };
 }
@@ -4964,6 +4991,9 @@ export async function removeAlbumShareLogic(userId: number, req: RemoveAlbumShar
     cleanupAfterUnshare(req.userId, albumPhotoIds).catch(err => {
       console.error(`Error cleaning up after unshare of album ${req.albumId}:`, err);
     });
+    // Content feed: drop the unshared user's entries for photos they can no
+    // longer see via another album.
+    await contentFeed.reconcileUserPhotos(req.userId, albumPhotoIds);
   }
 
   // Re-run grouping so removed shared photos are no longer in groups.
@@ -5006,6 +5036,9 @@ export async function leaveAlbumLogic(userId: number, albumId: number): Promise<
     cleanupAfterUnshare(userId, albumPhotoIds).catch(err => {
       console.error(`Error cleaning up after leaving album ${albumId}:`, err);
     });
+    // Content feed: drop the leaving user's entries for photos they can no
+    // longer see via another album.
+    await contentFeed.reconcileUserPhotos(userId, albumPhotoIds);
   }
 
   scheduleRegroup(userId);

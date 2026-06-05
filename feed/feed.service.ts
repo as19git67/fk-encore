@@ -152,6 +152,167 @@ export async function listFeedForUser(
   };
 }
 
+// ========== Content feed (Instagram-style photo stream) ==========
+//
+// A second, distinct feed: a scrollable stream of *photos* (one per viewer
+// per photo), ordered strictly by the materialized `last_activity_at` sort
+// key from `photo_feed_entries`. No ranking. Reads are a keyset-paginated
+// SELECT enriched with album context, like count and a comment preview.
+
+export interface PhotoFeedCursor {
+  ts: string;
+  id: number;
+}
+
+export interface FeedPhotoItem {
+  photoId: number;
+  filename: string;
+  width: number | null;
+  height: number | null;
+  description: string | null;
+  takenAt: string | null;
+  lastActivityAt: string;
+  /** A representative album the viewer shares with the photo (newest membership). */
+  album: { id: number; name: string } | null;
+  owner: { id: number | null; name: string | null };
+  /** Global favorite count for the photo (likes == favorites). */
+  likeCount: number;
+  likedByMe: boolean;
+  /** Comments visible to the viewer (in albums they participate in). */
+  commentCount: number;
+  latestComment: { author: string | null; excerpt: string } | null;
+}
+
+export interface ListPhotoFeedRequest {
+  cursorTs?: string;
+  cursorId?: number;
+  limit?: number;
+}
+
+export interface ListPhotoFeedResponse {
+  items: FeedPhotoItem[];
+  /** Keyset cursor for the next page; `null` marks the end. */
+  nextCursor: PhotoFeedCursor | null;
+}
+
+interface PhotoFeedRow {
+  photo_id: number;
+  last_activity_at: string;
+  filename: string;
+  width: number | null;
+  height: number | null;
+  description: string | null;
+  taken_at: string | null;
+  owner_id: number | null;
+  owner_name: string | null;
+  album_id: number | null;
+  album_name: string | null;
+  like_count: number;
+  liked_by_me: boolean;
+  comment_count: number;
+  latest_comment_body: string | null;
+  latest_comment_author: string | null;
+}
+
+export async function listPhotoFeedForUser(
+  userId: number,
+  req: ListPhotoFeedRequest,
+): Promise<ListPhotoFeedResponse> {
+  const limit = clampLimit(req.limit);
+  const hasCursor =
+    typeof req.cursorTs === "string" && req.cursorTs.length > 0 &&
+    typeof req.cursorId === "number" && Number.isFinite(req.cursorId);
+  // Keyset on (last_activity_at DESC, photo_id DESC) — stable across inserts.
+  const cursorCond = hasCursor
+    ? sql`AND (fe.last_activity_at < ${req.cursorTs}::timestamptz
+              OR (fe.last_activity_at = ${req.cursorTs}::timestamptz AND fe.photo_id < ${req.cursorId}))`
+    : sql``;
+
+  const res = await db.execute<PhotoFeedRow>(sql`
+    WITH viewer_albums AS (
+      SELECT a.id AS album_id, a.name AS album_name, ap.photo_id, ap.added_at
+      FROM album_photos ap
+      JOIN albums a ON a.id = ap.album_id
+      WHERE a.user_id = ${userId}
+         OR EXISTS (SELECT 1 FROM album_shares s WHERE s.album_id = a.id AND s.user_id = ${userId})
+    )
+    SELECT
+      fe.photo_id,
+      fe.last_activity_at,
+      p.filename, p.width, p.height, p.description, p.taken_at,
+      p.user_id AS owner_id,
+      ou.name AS owner_name,
+      ra.album_id, ra.album_name,
+      (SELECT count(*)::int FROM photo_curation pc
+        WHERE pc.photo_id = fe.photo_id AND pc.status = 'favorite') AS like_count,
+      EXISTS (SELECT 1 FROM photo_curation pc
+        WHERE pc.photo_id = fe.photo_id AND pc.user_id = ${userId} AND pc.status = 'favorite') AS liked_by_me,
+      (SELECT count(*)::int FROM photo_comments c
+        WHERE c.photo_id = fe.photo_id
+          AND c.album_id IN (SELECT va.album_id FROM viewer_albums va WHERE va.photo_id = fe.photo_id)) AS comment_count,
+      lc.body AS latest_comment_body,
+      lc.author_name AS latest_comment_author
+    FROM photo_feed_entries fe
+    JOIN photos p ON p.id = fe.photo_id
+    LEFT JOIN users ou ON ou.id = p.user_id
+    LEFT JOIN LATERAL (
+      SELECT va.album_id, va.album_name
+      FROM viewer_albums va
+      WHERE va.photo_id = fe.photo_id
+      ORDER BY va.added_at DESC NULLS LAST, va.album_id DESC
+      LIMIT 1
+    ) ra ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT c.body, COALESCE(u.name, g.display_name) AS author_name
+      FROM photo_comments c
+      LEFT JOIN users u ON u.id = c.user_id
+      LEFT JOIN guests g ON g.id = c.guest_id
+      WHERE c.photo_id = fe.photo_id
+        AND c.album_id IN (SELECT va.album_id FROM viewer_albums va WHERE va.photo_id = fe.photo_id)
+      ORDER BY c.created_at DESC, c.id DESC
+      LIMIT 1
+    ) lc ON TRUE
+    WHERE fe.user_id = ${userId}
+      -- Respect the viewer's own "hidden" curation: hidden photos stay out.
+      AND NOT EXISTS (
+        SELECT 1 FROM photo_curation pc
+        WHERE pc.photo_id = fe.photo_id AND pc.user_id = ${userId} AND pc.status = 'hidden'
+      )
+      ${cursorCond}
+    ORDER BY fe.last_activity_at DESC, fe.photo_id DESC
+    LIMIT ${limit + 1}
+  `);
+
+  const rows = res.rows;
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+
+  const items: FeedPhotoItem[] = page.map((r) => ({
+    photoId: r.photo_id,
+    filename: r.filename,
+    width: r.width,
+    height: r.height,
+    description: r.description,
+    takenAt: r.taken_at,
+    lastActivityAt: r.last_activity_at,
+    album: r.album_id != null ? { id: r.album_id, name: r.album_name ?? "" } : null,
+    owner: { id: r.owner_id, name: r.owner_name },
+    likeCount: r.like_count,
+    likedByMe: r.liked_by_me,
+    commentCount: r.comment_count,
+    latestComment:
+      r.latest_comment_body != null
+        ? { author: r.latest_comment_author, excerpt: r.latest_comment_body.slice(0, 140) }
+        : null,
+  }));
+
+  const last = page[page.length - 1];
+  return {
+    items,
+    nextCursor: hasMore && last ? { ts: last.last_activity_at, id: last.photo_id } : null,
+  };
+}
+
 export async function countUnread(userId: number): Promise<number> {
   const row = await dbFirst<{ n: number }>(
     db
