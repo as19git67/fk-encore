@@ -57,6 +57,21 @@ const feedHandlers = [
     HttpResponse.json({ items: MOCK_ITEMS, nextCursor: null }),
   ),
   http.patch('/api/photos/:id/curation', () => HttpResponse.json({ success: true })),
+  http.patch('/api/photos/:id/description', async ({ request }) => {
+    const body = (await request.json()) as { description: string | null }
+    return HttpResponse.json({ success: true, description: body.description })
+  }),
+  http.get('/api/photos/:id/locations', ({ params }) =>
+    HttpResponse.json({
+      photoId: Number(params.id),
+      albums: [
+        { id: 7, name: 'Urlaub 2026' },
+        { id: 9, name: 'Lottas Geburtstag' },
+      ],
+      persons: [],
+      hasGps: false,
+    }),
+  ),
   http.post('/api/photos/:id/comments', () =>
     HttpResponse.json({
       id: 99,

@@ -2,10 +2,15 @@
 import { ref, computed } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
-import { getPhotoUrl } from '../api/photos'
+import PhotoLocationMenu from './PhotoLocationMenu.vue'
+import { getPhotoUrl, updatePhotoDescription } from '../api/photos'
 import type { FeedPhotoItem } from '../api/photoFeed'
 
-const props = defineProps<{ item: FeedPhotoItem }>()
+const props = defineProps<{
+  item: FeedPhotoItem
+  /** Current user id — only the photo's owner may edit its description. */
+  currentUserId?: number | null
+}>()
 const emit = defineEmits<{
   (e: 'like', item: FeedPhotoItem): void
   (e: 'hide', item: FeedPhotoItem): void
@@ -15,6 +20,39 @@ const emit = defineEmits<{
 
 const draft = ref('')
 const burst = ref(false)
+
+// Only the photo owner may edit the description (matches the backend).
+const canEdit = computed(
+  () => props.currentUserId != null && props.currentUserId === props.item.owner.id,
+)
+
+// Inline description editor — mirrors the gallery/album detail view.
+const editingDesc = ref(false)
+const descDraft = ref('')
+const savingDesc = ref(false)
+
+function startEditDescription() {
+  descDraft.value = props.item.description ?? ''
+  editingDesc.value = true
+}
+function cancelEditDescription() {
+  editingDesc.value = false
+}
+async function saveDescription() {
+  savingDesc.value = true
+  try {
+    const value = descDraft.value.trim() || null
+    const res = await updatePhotoDescription(props.item.photoId, value)
+    // Mutating the item is intentional here (same pattern as the detail
+    // sidebar) so the card reflects the new caption immediately.
+    props.item.description = res.description
+    editingDesc.value = false
+  } catch {
+    // keep the editor open so the user can retry
+  } finally {
+    savingDesc.value = false
+  }
+}
 
 // Aspect ratio of the image box. The server only fills width/height after a
 // background scan, so a freshly uploaded photo has none yet — we then fall
@@ -93,7 +131,7 @@ function submitComment() {
       </div>
     </header>
 
-    <div class="media" :class="{ 'media--hidden': item.hiddenByMe }" :style="{ aspectRatio }" @dblclick="onDoubleTap" @click="emit('open', item)">
+    <div class="media" :class="{ 'media--hidden': item.hiddenByMe }" :style="{ aspectRatio }" @dblclick="onDoubleTap">
       <img :src="getPhotoUrl(item.filename, 1280)" :alt="item.description ?? item.filename" loading="lazy" @load="onImageLoad" />
       <i v-if="burst" class="pi pi-heart-fill burst" aria-hidden="true" />
       <i v-if="item.hiddenByMe" class="pi pi-eye-slash hidden-badge" aria-hidden="true" />
@@ -124,10 +162,47 @@ function submitComment() {
         <i class="pi pi-comment" />
         <span v-if="item.commentCount > 0" class="count">{{ item.commentCount }}</span>
       </button>
+      <PhotoLocationMenu
+        :photo-id="item.photoId"
+        select-in-grid
+        :extra-query="{ from: 'stream' }"
+      />
+      <button
+        v-if="canEdit && !item.description && !editingDesc"
+        class="icon-btn"
+        title="Beschreibung hinzufügen"
+        aria-label="Beschreibung hinzufügen"
+        @click="startEditDescription"
+      >
+        <i class="pi pi-pencil" />
+      </button>
     </div>
 
-    <p v-if="item.description" class="caption">
-      <span class="owner-inline">{{ ownerName }}</span> {{ item.description }}
+    <div v-if="editingDesc" class="desc-editor">
+      <InputText
+        v-model="descDraft"
+        placeholder="Beschreibung…"
+        class="desc-input"
+        @keydown.escape="cancelEditDescription"
+        @keyup.enter="saveDescription"
+      />
+      <button class="icon-btn small" :disabled="savingDesc" title="Speichern" @click="saveDescription">
+        <i :class="savingDesc ? 'pi pi-spin pi-spinner' : 'pi pi-check'" />
+      </button>
+      <button class="icon-btn small" :disabled="savingDesc" title="Abbrechen" @click="cancelEditDescription">
+        <i class="pi pi-times" />
+      </button>
+    </div>
+    <p v-else-if="item.description" class="caption">
+      <span class="owner-inline">{{ ownerName }}</span>{{ item.description }}
+      <button
+        v-if="canEdit"
+        class="icon-btn small caption-edit"
+        title="Beschreibung bearbeiten"
+        @click="startEditDescription"
+      >
+        <i class="pi pi-pencil" />
+      </button>
     </p>
 
     <p v-if="item.latestComment" class="comment-preview">
@@ -262,6 +337,37 @@ function submitComment() {
   font-weight: 600;
   min-width: 0.6em;
 }
+.icon-btn.small {
+  font-size: 1.05rem;
+  padding: 0.3rem 0.4rem;
+}
+.icon-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The open-in button (PhotoLocationMenu / PrimeVue Button) blends into the
+   custom action bar. */
+.actions :deep(.p-button) {
+  color: var(--p-text-color);
+  width: auto;
+  height: auto;
+  padding: 0.35rem 0.6rem;
+}
+.actions :deep(.p-button .p-button-icon) {
+  font-size: 1.4rem;
+}
+
+.desc-editor {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.6rem;
+}
+.desc-input {
+  flex: 1;
+  min-width: 0;
+}
 
 .caption {
   margin: 0.15rem 0;
@@ -270,6 +376,7 @@ function submitComment() {
   line-height: 1.35;
 }
 .owner-inline { font-weight: 600; margin-right: 0.3rem; }
+.caption-edit { vertical-align: -0.25em; }
 
 .comment-preview {
   margin: 0.1rem 0;
