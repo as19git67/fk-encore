@@ -4,7 +4,7 @@ import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
 import InputText from 'primevue/inputtext'
-import { filterAlbums, type UploadAlbum } from '../utils/feedUpload'
+import { filterAlbums, sortAlbumsForDialog, type UploadAlbum } from '../utils/feedUpload'
 
 const props = defineProps<{
   visible: boolean
@@ -30,9 +30,12 @@ watch(
   },
 )
 
-// Search filters what's shown; the selection is by id, so it survives
-// filtering (a checked album stays selected even when filtered out of view).
-const visibleAlbums = computed(() => filterAlbums(props.albums, query.value))
+// Pre-selected albums first (then alphabetical), with the search applied on
+// top. Ordering uses the initial pre-selection so rows don't jump while the
+// user toggles checkboxes. Selection is by id, so it survives filtering.
+const visibleAlbums = computed(() =>
+  filterAlbums(sortAlbumsForDialog(props.albums, props.initial), query.value),
+)
 
 // At least one album is mandatory.
 const canConfirm = computed(() => selected.value.length > 0)

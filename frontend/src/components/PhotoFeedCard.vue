@@ -16,14 +16,28 @@ const emit = defineEmits<{
 const draft = ref('')
 const burst = ref(false)
 
-// Reserve the image box at the photo's aspect ratio so the stream doesn't
-// reflow as images load. Falls back to a 4:3 box when dimensions are unknown.
+// Aspect ratio of the image box. The server only fills width/height after a
+// background scan, so a freshly uploaded photo has none yet — we then fall
+// back to the natural dimensions read from the <img> once it loads, so a
+// portrait isn't squeezed into a landscape box and cropped. A floor keeps
+// extreme verticals (e.g. long screenshots) from making an absurdly tall card.
+const MIN_WIDTH_OVER_HEIGHT = 0.5 // card height at most 2× its width
+const naturalRatio = ref<number | null>(null)
+
 const aspectRatio = computed(() => {
   const w = props.item.width
   const h = props.item.height
-  if (w && h && w > 0 && h > 0) return `${w} / ${h}`
-  return '4 / 3'
+  const ratio = w && h && w > 0 && h > 0 ? w / h : naturalRatio.value
+  if (ratio == null) return '4 / 3'
+  return String(Math.max(ratio, MIN_WIDTH_OVER_HEIGHT))
 })
+
+function onImageLoad(e: Event) {
+  const img = e.target as HTMLImageElement
+  if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+    naturalRatio.value = img.naturalWidth / img.naturalHeight
+  }
+}
 
 const ownerName = computed(() => props.item.owner.name ?? 'Jemand')
 
@@ -80,7 +94,7 @@ function submitComment() {
     </header>
 
     <div class="media" :class="{ 'media--hidden': item.hiddenByMe }" :style="{ aspectRatio }" @dblclick="onDoubleTap" @click="emit('open', item)">
-      <img :src="getPhotoUrl(item.filename, 1280)" :alt="item.description ?? item.filename" loading="lazy" />
+      <img :src="getPhotoUrl(item.filename, 1280)" :alt="item.description ?? item.filename" loading="lazy" @load="onImageLoad" />
       <i v-if="burst" class="pi pi-heart-fill burst" aria-hidden="true" />
       <i v-if="item.hiddenByMe" class="pi pi-eye-slash hidden-badge" aria-hidden="true" />
     </div>
@@ -179,7 +193,9 @@ function submitComment() {
 .media {
   position: relative;
   width: 100%;
-  max-height: 80vh;
+  /* Height follows aspect-ratio (set inline). No fixed max-height clamp — a
+     clamp shorter than the aspect ratio would make object-fit: cover crop
+     portraits top/bottom. Extreme verticals are bounded in JS instead. */
   background: var(--p-content-hover-background);
   cursor: pointer;
   overflow: hidden;
