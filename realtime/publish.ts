@@ -97,3 +97,27 @@ export const publishEvent = api(
     );
   },
 );
+
+export interface ConnectionStatusRequest {
+  /** User id to check, as a string (matches the realtime session key). */
+  userId: string;
+}
+
+export interface ConnectionStatusResponse {
+  /** True if the user has at least one live WebSocket session on this instance. */
+  connected: boolean;
+}
+
+/**
+ * Internal presence probe used by the push layer to decide whether a
+ * recipient is currently in the app. When connected, the user already
+ * receives the realtime event live, so the Web Push can be suppressed.
+ *
+ * Process-local (single-instance assumption, see session-manager).
+ */
+export const connectionStatus = api(
+  { expose: false },
+  async (req: ConnectionStatusRequest): Promise<ConnectionStatusResponse> => {
+    return { connected: sessionManager.isConnected(req.userId) };
+  },
+);
