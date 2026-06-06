@@ -104,6 +104,7 @@ const allPhotosDest = () => destinations.value.find((d): d is Extract<Destinatio
 </script>
 
 <template>
+  <slot name="trigger" :open="handleClick" :loading="loading">
   <Button
     :icon="loading ? 'pi pi-spin pi-spinner' : 'pi pi-external-link'"
     severity="secondary"
@@ -114,6 +115,7 @@ const allPhotosDest = () => destinations.value.find((d): d is Extract<Destinatio
     aria-label="Foto anzeigen in…"
     @click="handleClick"
   />
+  </slot>
   <Dialog
     v-model:visible="dialogVisible"
     modal

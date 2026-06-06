@@ -166,7 +166,19 @@ function submitComment() {
         :photo-id="item.photoId"
         select-in-grid
         :extra-query="{ from: 'stream' }"
-      />
+      >
+        <template #trigger="{ open, loading }">
+          <button
+            class="icon-btn"
+            :disabled="loading"
+            title="Öffnen in…"
+            aria-label="Öffnen in…"
+            @click="open"
+          >
+            <i :class="loading ? 'pi pi-spin pi-spinner' : 'pi pi-external-link'" />
+          </button>
+        </template>
+      </PhotoLocationMenu>
       <button
         v-if="canEdit && !item.description && !editingDesc"
         class="icon-btn"
@@ -197,7 +209,7 @@ function submitComment() {
       <span class="owner-inline">{{ ownerName }}</span>{{ item.description }}
       <button
         v-if="canEdit"
-        class="icon-btn small caption-edit"
+        class="icon-btn caption-edit"
         title="Beschreibung bearbeiten"
         @click="startEditDescription"
       >
@@ -346,18 +358,6 @@ function submitComment() {
   cursor: default;
 }
 
-/* The open-in button (PhotoLocationMenu / PrimeVue Button) blends into the
-   custom action bar. */
-.actions :deep(.p-button) {
-  color: var(--p-text-color);
-  width: auto;
-  height: auto;
-  padding: 0.35rem 0.6rem;
-}
-.actions :deep(.p-button .p-button-icon) {
-  font-size: 1.4rem;
-}
-
 .desc-editor {
   display: flex;
   align-items: center;
@@ -376,7 +376,12 @@ function submitComment() {
   line-height: 1.35;
 }
 .owner-inline { font-weight: 600; margin-right: 0.3rem; }
-.caption-edit { vertical-align: -0.25em; }
+/* Edit pencil sized to the caption text and vertically centered with it. */
+.icon-btn.caption-edit {
+  font-size: 0.8rem;
+  padding: 0.1rem 0.3rem;
+  vertical-align: middle;
+}
 
 .comment-preview {
   margin: 0.1rem 0;
