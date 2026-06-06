@@ -22,6 +22,12 @@ export interface FeedPhotoItem {
   /** Comments visible to the viewer. */
   commentCount: number
   latestComment: { author: string | null; excerpt: string } | null
+  /**
+   * Client-only: the viewer toggled "hide" on this card. The server never
+   * returns hidden photos, so this starts falsy; hiding keeps the card in
+   * place (dimmed) until the feed is reloaded, when it drops out.
+   */
+  hiddenByMe?: boolean
 }
 
 export interface ListPhotoFeedResponse {
