@@ -21,6 +21,21 @@ export function filterAlbums(albums: UploadAlbum[], query: string): UploadAlbum[
   return albums.filter((a) => a.name.toLowerCase().includes(q))
 }
 
+/**
+ * Dialog ordering: the pre-selected albums first, the rest after — each group
+ * alphabetical. Sorting by the *initial* pre-selection (not the live checkbox
+ * state) keeps the list stable while the user toggles.
+ */
+export function sortAlbumsForDialog(albums: UploadAlbum[], preselected: number[]): UploadAlbum[] {
+  const pre = new Set(preselected)
+  return [...albums].sort((a, b) => {
+    const ap = pre.has(a.id) ? 0 : 1
+    const bp = pre.has(b.id) ? 0 : 1
+    if (ap !== bp) return ap - bp
+    return a.name.localeCompare(b.name, 'de', { sensitivity: 'base' })
+  })
+}
+
 const LAST_SELECTION_KEY = 'feed_upload_last_albums'
 
 export function loadLastAlbumSelection(): number[] {
