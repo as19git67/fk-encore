@@ -4,9 +4,16 @@ import { useRouter, onBeforeRouteLeave } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import PhotoFeedCard from '../components/PhotoFeedCard.vue'
+import FeedUploadAlbumDialog from '../components/FeedUploadAlbumDialog.vue'
 import { listPhotoFeed, type FeedPhotoItem, type PhotoFeedCursor } from '../api/photoFeed'
-import { updatePhotoCuration } from '../api/photos'
+import { updatePhotoCuration, listAlbums, uploadPhoto, batchUpdateAlbumPhotos } from '../api/photos'
 import { createComment } from '../api/reactions'
+import {
+  writableAlbums,
+  initialAlbumSelection,
+  saveLastAlbumSelection,
+  type UploadAlbum,
+} from '../utils/feedUpload'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import { useAuthStore } from '../stores/auth'
 import { usePhotoFeedStore } from '../stores/photoFeed'
@@ -23,6 +30,99 @@ const loadingMore = ref(false)
 const error = ref('')
 const nextCursor = ref<PhotoFeedCursor | null>(null)
 const hasNew = ref(false)
+
+// ── Upload ──────────────────────────────────────────────────────────────────
+const fileInput = ref<HTMLInputElement | null>(null)
+const uploading = ref(false)
+const dialogVisible = ref(false)
+const dialogAlbums = ref<UploadAlbum[]>([])
+const dialogInitial = ref<number[]>([])
+const pendingFileCount = ref(0)
+let pendingFiles: File[] = []
+
+function pickFiles() {
+  fileInput.value?.click()
+}
+
+function onFilesSelected(e: Event) {
+  const input = e.target as HTMLInputElement
+  const files = input.files ? Array.from(input.files) : []
+  // Reset so picking the same file again re-fires change.
+  input.value = ''
+  if (files.length === 0) return
+  void startUpload(files)
+}
+
+async function startUpload(files: File[]) {
+  error.value = ''
+  let albums: UploadAlbum[]
+  try {
+    const res = await listAlbums()
+    albums = writableAlbums(res.albums)
+  } catch {
+    error.value = 'Alben konnten nicht geladen werden'
+    return
+  }
+  if (albums.length === 0) {
+    error.value = 'Du brauchst mindestens ein Album mit Schreibrechten, um Fotos in den Feed hochzuladen.'
+    return
+  }
+  pendingFiles = files
+  pendingFileCount.value = files.length
+  if (albums.length === 1) {
+    // Only one possible target — skip the dialog.
+    await doUpload([albums[0]!.id])
+    return
+  }
+  dialogAlbums.value = albums
+  dialogInitial.value = initialAlbumSelection(albums)
+  dialogVisible.value = true
+}
+
+function onDialogConfirm(albumIds: number[]) {
+  saveLastAlbumSelection(albumIds)
+  dialogVisible.value = false
+  void doUpload(albumIds)
+}
+
+function onDialogCancel() {
+  pendingFiles = []
+}
+
+async function doUpload(albumIds: number[]) {
+  const files = pendingFiles
+  pendingFiles = []
+  if (files.length === 0 || albumIds.length === 0) return
+  uploading.value = true
+  error.value = ''
+  const photoIds: number[] = []
+  let failed = 0
+  for (const file of files) {
+    try {
+      const photo = await uploadPhoto(file)
+      photoIds.push(photo.id)
+    } catch {
+      // Duplicates (409) and other per-file errors are skipped — the
+      // response carries no usable photo id here.
+      failed += 1
+    }
+  }
+  try {
+    if (photoIds.length > 0) {
+      await batchUpdateAlbumPhotos(albumIds, photoIds, 'add')
+    }
+  } catch {
+    error.value = 'Fotos konnten den Alben nicht hinzugefügt werden'
+  }
+  uploading.value = false
+  if (failed > 0) {
+    error.value = `${failed} von ${files.length} Fotos konnten nicht hochgeladen werden (evtl. Duplikate).`
+  }
+  if (photoIds.length > 0) {
+    // The new photos bump our own feed server-side; reload to show them on top.
+    await refresh()
+  }
+}
 
 const sentinel = ref<HTMLElement | null>(null)
 let observer: IntersectionObserver | null = null
@@ -176,14 +276,32 @@ onBeforeUnmount(() => {
   <div class="photo-feed">
     <div class="header">
       <h1 class="title">Feed</h1>
-      <Button
-        v-if="hasNew"
-        label="Neue Aktivität"
-        icon="pi pi-arrow-up"
-        size="small"
-        rounded
-        @click="refresh"
-      />
+      <div class="header-actions">
+        <Button
+          v-if="hasNew"
+          label="Neue Aktivität"
+          icon="pi pi-arrow-up"
+          size="small"
+          rounded
+          @click="refresh"
+        />
+        <input
+          ref="fileInput"
+          type="file"
+          accept="image/*"
+          multiple
+          class="upload-input-hidden"
+          @change="onFilesSelected"
+        />
+        <Button
+          icon="pi pi-upload"
+          :label="uploading ? 'Lädt…' : 'Hochladen'"
+          size="small"
+          :loading="uploading"
+          :disabled="uploading"
+          @click="pickFiles"
+        />
+      </div>
     </div>
 
     <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
@@ -212,6 +330,16 @@ onBeforeUnmount(() => {
     <div v-if="loadingMore" class="info-text">
       <i class="pi pi-spin pi-spinner" /> Weitere Beiträge…
     </div>
+
+    <FeedUploadAlbumDialog
+      :visible="dialogVisible"
+      :albums="dialogAlbums"
+      :initial="dialogInitial"
+      :fileCount="pendingFileCount"
+      @update:visible="(v) => (dialogVisible = v)"
+      @confirm="onDialogConfirm"
+      @cancel="onDialogCancel"
+    />
   </div>
 </template>
 
@@ -237,6 +365,14 @@ onBeforeUnmount(() => {
   font-size: 1.5em;
   font-weight: 600;
   margin-block: 0.25em;
+}
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.upload-input-hidden {
+  display: none;
 }
 
 .info-text {
