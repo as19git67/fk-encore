@@ -78,13 +78,20 @@ async function bumpUsers(userIds: number[], photoId: number, ts: string): Promis
       GREATEST(photo_feed_entries.last_activity_at, EXCLUDED.last_activity_at)
   `);
 
-  // Live signal so open content-feed views refresh their first page. Best-
-  // effort — a realtime outage must not break the photo/album operation.
-  // Reuses the existing "feed" channel with a distinct type so no new
-  // realtime channel has to be registered on the client.
+  await publishFeedChange(unique, photoId);
+}
+
+/**
+ * Live signal so open content-feed views refresh their first page. Best-effort
+ * — a realtime outage must not break the photo/album operation. Reuses the
+ * existing "feed" channel with a distinct type so no new realtime channel has
+ * to be registered on the client.
+ */
+async function publishFeedChange(userIds: number[], photoId: number): Promise<void> {
+  if (userIds.length === 0) return;
   try {
     await realtime.publishEvent({
-      userIds: unique.map(String),
+      userIds: userIds.map(String),
       channel: "feed",
       type: "photo.changed",
       resourceId: String(photoId),
@@ -93,6 +100,26 @@ async function bumpUsers(userIds: number[], photoId: number, ts: string): Promis
   } catch {
     // ignore — the next manual load will pick the entry up
   }
+}
+
+/**
+ * Order photo ids by capture time ascending (oldest first), falling back to
+ * upload time. `taken_at` is set synchronously on upload, so a multi-photo
+ * upload can be ordered by when the shots were actually taken.
+ */
+async function orderPhotoIdsByCapture(photoIds: number[]): Promise<number[]> {
+  if (photoIds.length <= 1) return photoIds;
+  const res = await db.execute<{ id: number }>(sql`
+    SELECT p.id
+    FROM photos p
+    WHERE p.id IN (${sql.join(photoIds.map((id) => sql`${id}`), sql`, `)})
+    ORDER BY COALESCE(p.taken_at, p.created_at) ASC, p.id ASC
+  `);
+  const ordered = res.rows.map((r) => r.id);
+  // Guard: keep any ids the query didn't return (shouldn't happen), in input order.
+  const seen = new Set(ordered);
+  for (const id of photoIds) if (!seen.has(id)) ordered.push(id);
+  return ordered;
 }
 
 /** A photo was added to an album → bump that album's participants. */
@@ -109,19 +136,38 @@ export async function onPhotoAddedToAlbum(
   }
 }
 
-/** Several photos added to one album in a batch → bump participants once. */
+/**
+ * Several photos added to one album in a batch. Orders the batch by capture
+ * time and assigns staggered `last_activity_at` values anchored at "now", so
+ * the upload appears at the top of the feed but internally sorted by
+ * Aufnahmezeit (newest capture first), regardless of arbitrary file/upload
+ * order. One realtime nudge for the whole batch.
+ */
 export async function onPhotosAddedToAlbum(
   photoIds: number[],
   albumId: number,
-  ts: string = nowIso(),
 ): Promise<void> {
   if (photoIds.length === 0) return;
   try {
     const users = await albumParticipants(albumId);
     if (users.length === 0) return;
-    for (const photoId of photoIds) {
-      await bumpUsers(users, photoId, ts);
-    }
+    const ordered = await orderPhotoIdsByCapture(photoIds); // oldest first
+    const base = Date.now();
+    // Oldest capture gets the lowest stamp, newest the highest → newest shows
+    // first under the feed's `last_activity_at DESC` ordering. 1ms steps keep
+    // the whole batch clustered at "now".
+    const rows = ordered.flatMap((photoId, i) => {
+      const ts = new Date(base + i).toISOString();
+      return users.map((uid) => sql`(${uid}, ${photoId}, ${ts}::timestamptz)`);
+    });
+    await db.execute(sql`
+      INSERT INTO photo_feed_entries (user_id, photo_id, last_activity_at)
+      VALUES ${sql.join(rows, sql`, `)}
+      ON CONFLICT (user_id, photo_id)
+      DO UPDATE SET last_activity_at =
+        GREATEST(photo_feed_entries.last_activity_at, EXCLUDED.last_activity_at)
+    `);
+    await publishFeedChange(users, ordered[ordered.length - 1] ?? ordered[0]!);
   } catch (err) {
     console.warn(`${TAG} onPhotosAddedToAlbum failed album=${albumId}: ${(err as Error).message}`);
   }
