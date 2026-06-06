@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import { getPhotoLocations } from '../api/photos'
+import { usePhotoNavStore } from '../stores/photoNav'
 
 type Destination =
   | { kind: 'all-photos' }
@@ -16,18 +17,38 @@ const props = defineProps<{
   excludeAllPhotos?: boolean
   /** Hide the entry for this album (we're already viewing it). */
   excludeAlbumId?: number
+  /**
+   * When true, navigate so the target view *selects the photo in its grid*
+   * (via the photoNav store) instead of deep-linking it open in fullscreen.
+   * Used by the feed, where tapping "open in" should land on the grid with
+   * the photo highlighted.
+   */
+  selectInGrid?: boolean
+  /** Extra query params merged into the navigation (e.g. { from: 'stream' }). */
+  extraQuery?: Record<string, string>
 }>()
 
 const router = useRouter()
+const photoNav = usePhotoNavStore()
 const loading = ref(false)
 const dialogVisible = ref(false)
 const destinations = ref<Destination[]>([])
 
 function goToAllPhotos() {
-  router.push({ name: 'fotos-gallery', query: { photoId: String(props.photoId) } })
+  if (props.selectInGrid) {
+    photoNav.selectPhoto(props.photoId)
+    router.push({ name: 'fotos-gallery', query: { ...(props.extraQuery ?? {}) } })
+    return
+  }
+  router.push({ name: 'fotos-gallery', query: { photoId: String(props.photoId), ...(props.extraQuery ?? {}) } })
 }
 function goToAlbum(albumId: number) {
-  router.push({ name: 'fotos-album-detail', params: { id: String(albumId) }, query: { photoId: String(props.photoId) } })
+  if (props.selectInGrid) {
+    photoNav.selectPhotoInAlbum(props.photoId, albumId)
+    router.push({ name: 'fotos-album-detail', params: { id: String(albumId) }, query: { ...(props.extraQuery ?? {}) } })
+    return
+  }
+  router.push({ name: 'fotos-album-detail', params: { id: String(albumId) }, query: { photoId: String(props.photoId), ...(props.extraQuery ?? {}) } })
 }
 
 function goTo(dest: Destination) {
