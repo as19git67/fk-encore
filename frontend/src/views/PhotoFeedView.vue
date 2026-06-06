@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, nextTick, ref } from 'vue'
-import { useRouter, onBeforeRouteLeave } from 'vue-router'
+import { onBeforeRouteLeave } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import PhotoFeedCard from '../components/PhotoFeedCard.vue'
@@ -18,7 +18,6 @@ import { useRealtimeEvent } from '../composables/useRealtime'
 import { useAuthStore } from '../stores/auth'
 import { usePhotoFeedStore } from '../stores/photoFeed'
 
-const router = useRouter()
 const auth = useAuthStore()
 const feedCache = usePhotoFeedStore()
 
@@ -228,20 +227,6 @@ async function refresh() {
   window.scrollTo({ top: 0 })
 }
 
-function onOpen(item: FeedPhotoItem) {
-  // `from: 'stream'` lets the album's back button return here instead of the
-  // album list. onBeforeRouteLeave snapshots our scroll position first.
-  if (item.album) {
-    router.push({
-      name: 'fotos-album-detail',
-      params: { id: item.album.id },
-      query: { photoId: item.photoId, from: 'stream' },
-    })
-  } else {
-    router.push({ name: 'fotos-gallery', query: { photoId: item.photoId } })
-  }
-}
-
 // Live activity: a bump elsewhere may reorder the feed. Rather than yanking
 // the user's scroll position, surface a "neue Aktivität" pill they can tap to
 // refresh — but only once they're not already at the very top.
@@ -339,7 +324,6 @@ onBeforeUnmount(() => {
         :current-user-id="auth.user?.id ?? null"
         @like="onLike"
         @hide="onHide"
-        @open="onOpen"
         @comment="onComment"
       />
     </div>

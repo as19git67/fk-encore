@@ -14,12 +14,19 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'like', item: FeedPhotoItem): void
   (e: 'hide', item: FeedPhotoItem): void
-  (e: 'open', item: FeedPhotoItem): void
   (e: 'comment', item: FeedPhotoItem, body: string): void
 }>()
 
 const draft = ref('')
 const burst = ref(false)
+const commentInput = ref<InstanceType<typeof InputText> | null>(null)
+
+/** Focus the inline comment field — the comment icon must not navigate away. */
+function focusComment() {
+  const el = (commentInput.value as unknown as { $el?: HTMLElement } | null)?.$el
+  el?.focus()
+  el?.scrollIntoView({ block: 'nearest' })
+}
 
 // Only the photo owner may edit the description (matches the backend).
 const canEdit = computed(
@@ -158,7 +165,7 @@ function submitComment() {
       >
         <i :class="item.hiddenByMe ? 'pi pi-thumbs-down-fill' : 'pi pi-thumbs-down'" />
       </button>
-      <button class="icon-btn" title="Kommentare" @click="emit('open', item)">
+      <button class="icon-btn" title="Kommentieren" @click="focusComment">
         <i class="pi pi-comment" />
         <span v-if="item.commentCount > 0" class="count">{{ item.commentCount }}</span>
       </button>
@@ -223,7 +230,7 @@ function submitComment() {
     </p>
 
     <form v-if="item.album" class="add-comment" @submit.prevent="submitComment">
-      <InputText v-model="draft" placeholder="Kommentieren…" class="comment-input" />
+      <InputText ref="commentInput" v-model="draft" placeholder="Kommentieren…" class="comment-input" />
       <Button
         type="submit"
         label="Senden"
