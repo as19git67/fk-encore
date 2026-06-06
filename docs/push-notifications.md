@@ -37,14 +37,39 @@ the push leg entirely.
 ```
 user action (upload/like/comment/share)
    → feed.emitFeedItems
-       → INSERT feed_items (one row per recipient)
-       → realtime.publishEvent  (WebSocket fan-out for open feed views)
+       → INSERT feed_items (one row per recipient)        ← always immediate
+       → realtime.publishEvent  (WebSocket fan-out)        ← always immediate
        → for each recipient: push.fanoutFeed
-            → buildFeedNotification (title/body/url/tag)
-            → sendToUser
-                 → web-push.sendNotification per subscription
-                 → prune 404/410 subscriptions
+            → check notification_prefs (skip disabled kind)
+            → scheduleFeedPush (per-recipient debounce + online-suppression)
+                 … (quiet window, then) …
+                 → buildFeedNotification | buildFeedDigest (title/body/url/tag)
+                 → sendToUser
+                      → web-push.sendNotification per subscription
+                      → prune 404/410 subscriptions
 ```
+
+### Push debounce & online-suppression
+
+The in-app feed row and the realtime event are always written immediately, but
+the **Web Push** is debounced per recipient (`push/feed-push-debounce.ts`):
+
+- **Online-suppression** — if the recipient currently has a live realtime
+  (WebSocket) session, the push is skipped entirely. They already see the
+  `feed/item.added` event live; pinging them would be redundant. Presence is
+  probed via `realtime.connectionStatus` (process-local session registry).
+- **Debounce** — otherwise the event is buffered per user with a 10-minute
+  quiet window (reset on each new event) and a 30-minute hard cap. On flush a
+  single notification is sent: the lone event verbatim, or a coalesced digest
+  ("3 neue Favoriten, 1 neuer Kommentar") when several accumulated. Re-checks
+  presence at flush time and drops the push if the user has returned.
+
+Only the social feed path (`fanoutFeed`) is debounced. Operational pushes
+(finance statements, document review) call `sendToUser` directly and stay
+immediate — they have no live realtime equivalent, so suppressing them while
+the user is "online" would drop them. The buffer is in-memory and
+process-local (like the `photo_added` feed debounce); a restart drops pending
+pushes, but the durable `feed_items` rows are still shown on next app open.
 
 ### Notification content
 

@@ -16,6 +16,7 @@ import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import * as svc from "./push.service";
+import { scheduleFeedPush } from "./feed-push-debounce";
 import type { FeedItemKind } from "../feed/feed.service";
 
 function requireUserId(): number {
@@ -166,21 +167,24 @@ interface FanoutFeedResponse {
 }
 
 /**
- * Called by `feed.service` after it fans out a feed_items row. The
- * feed already does dedup/filtering of the recipient list, so we
- * trust it here and just deliver. Errors are swallowed by the caller
- * — push must never break the primary write.
+ * Called by `feed.service` after it fans out a feed_items row. The feed
+ * already does dedup/filtering of the recipient list, so we trust it here.
+ *
+ * Delivery is debounced per recipient and suppressed while the user is
+ * online (see feed-push-debounce): the actual Web Push goes out later, so
+ * `sent` is always 0 here — the response is kept for backward compatibility
+ * and the caller swallows it anyway (push must never break the primary write).
  */
 export const fanoutFeed = api(
   { expose: false },
   async (req: FanoutFeedRequest): Promise<FanoutFeedResponse> => {
-    // Respect per-user notification preferences: skip send if the user
-    // has explicitly disabled this notification kind.
+    // Respect per-user notification preferences: skip if the user has
+    // explicitly disabled this notification kind (don't even buffer it).
     const prefs = await svc.getNotificationPrefs(req.userId);
     if (!svc.isKindEnabled(prefs, req.kind as svc.NotificationKind)) {
       return { sent: 0, pruned: 0 };
     }
-    const notification = svc.buildFeedNotification({
+    await scheduleFeedPush(req.userId, {
       kind: req.kind,
       actorName: req.actorName,
       albumName: req.albumName,
@@ -188,7 +192,7 @@ export const fanoutFeed = api(
       photoId: req.photoId,
       payload: req.payload,
     });
-    return await svc.sendToUser(req.userId, notification);
+    return { sent: 0, pruned: 0 };
   },
 );
 

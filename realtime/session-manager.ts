@@ -120,6 +120,17 @@ class SessionManager {
     for (const set of this.sessionsByUser.values()) n += set.size;
     return n;
   }
+
+  /**
+   * Whether the given user has at least one live WebSocket session on
+   * this instance. Used by the push layer to suppress Web Push for users
+   * who are currently in the app (they receive the realtime event live).
+   * Process-local, consistent with the single-instance assumption above.
+   */
+  isConnected(userId: string): boolean {
+    const set = this.sessionsByUser.get(userId);
+    return !!set && set.size > 0;
+  }
 }
 
 export const sessionManager = new SessionManager();
