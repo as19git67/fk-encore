@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { onMounted, onBeforeUnmount, nextTick, ref } from 'vue'
+import { useRouter, onBeforeRouteLeave } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import PhotoFeedCard from '../components/PhotoFeedCard.vue'
@@ -9,9 +9,11 @@ import { updatePhotoCuration } from '../api/photos'
 import { createComment } from '../api/reactions'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import { useAuthStore } from '../stores/auth'
+import { usePhotoFeedStore } from '../stores/photoFeed'
 
 const router = useRouter()
 const auth = useAuthStore()
+const feedCache = usePhotoFeedStore()
 
 const PAGE_SIZE = 12
 
@@ -71,6 +73,21 @@ async function onLike(item: FeedPhotoItem) {
   }
 }
 
+async function onHide(item: FeedPhotoItem) {
+  // Thumbs-down toggles the viewer's "hidden" curation. The card stays in
+  // place (dimmed) so it can be un-hidden; hidden photos only drop out when
+  // the feed is reloaded (the read query excludes them). Optimistic, reverts
+  // on failure.
+  const wasHidden = !!item.hiddenByMe
+  item.hiddenByMe = !wasHidden
+  try {
+    await updatePhotoCuration(item.photoId, wasHidden ? 'visible' : 'hidden')
+  } catch {
+    item.hiddenByMe = wasHidden
+    error.value = 'Ausblenden fehlgeschlagen'
+  }
+}
+
 async function onComment(item: FeedPhotoItem, body: string) {
   if (!item.album) return
   try {
@@ -85,12 +102,23 @@ async function onComment(item: FeedPhotoItem, body: string) {
   }
 }
 
+// Discard the cached page and reload from the top (the "neue Aktivität" pill
+// and any forced refresh). Without clearing, restore-on-mount would bring the
+// stale page back.
+async function refresh() {
+  feedCache.clear()
+  await loadInitial()
+  window.scrollTo({ top: 0 })
+}
+
 function onOpen(item: FeedPhotoItem) {
+  // `from: 'stream'` lets the album's back button return here instead of the
+  // album list. onBeforeRouteLeave snapshots our scroll position first.
   if (item.album) {
     router.push({
       name: 'fotos-album-detail',
       params: { id: item.album.id },
-      query: { photoId: item.photoId },
+      query: { photoId: item.photoId, from: 'stream' },
     })
   } else {
     router.push({ name: 'fotos-gallery', query: { photoId: item.photoId } })
@@ -102,14 +130,23 @@ function onOpen(item: FeedPhotoItem) {
 // refresh — but only once they're not already at the very top.
 useRealtimeEvent('feed', 'photo.changed', () => {
   if (window.scrollY < 200) {
-    void loadInitial()
+    void refresh()
   } else {
     hasNew.value = true
   }
 })
 
-onMounted(() => {
-  void loadInitial()
+onMounted(async () => {
+  if (feedCache.hasCache) {
+    // Returning from an album: restore the exact list + scroll position.
+    items.value = feedCache.items
+    nextCursor.value = feedCache.nextCursor
+    loading.value = false
+    await nextTick()
+    window.scrollTo({ top: feedCache.scrollY })
+  } else {
+    await loadInitial()
+  }
   observer = new IntersectionObserver(
     (entries) => {
       if (entries.some((e) => e.isIntersecting)) void loadMore()
@@ -117,6 +154,16 @@ onMounted(() => {
     { rootMargin: '600px 0px' },
   )
   if (sentinel.value) observer.observe(sentinel.value)
+})
+
+// Snapshot the current list + scroll offset on every navigation away so a
+// later return restores the user's place.
+onBeforeRouteLeave(() => {
+  feedCache.save({
+    items: items.value,
+    nextCursor: nextCursor.value,
+    scrollY: window.scrollY,
+  })
 })
 
 onBeforeUnmount(() => {
@@ -135,7 +182,7 @@ onBeforeUnmount(() => {
         icon="pi pi-arrow-up"
         size="small"
         rounded
-        @click="loadInitial"
+        @click="refresh"
       />
     </div>
 
@@ -155,6 +202,7 @@ onBeforeUnmount(() => {
         :key="item.photoId"
         :item="item"
         @like="onLike"
+        @hide="onHide"
         @open="onOpen"
         @comment="onComment"
       />

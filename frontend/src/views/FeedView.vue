@@ -169,6 +169,9 @@ onMounted(() => {
 
         <div class="feed-body">
           <div class="feed-text">{{ kindLabel(item) }}</div>
+          <div v-if="item.photo?.description" class="feed-description">
+            „{{ item.photo.description }}"
+          </div>
           <div class="feed-meta">{{ formatDate(item.created_at) }}</div>
         </div>
       </div>
@@ -288,6 +291,17 @@ onMounted(() => {
 
 .feed-text {
   font-size: 0.95rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.feed-description {
+  font-size: 0.85rem;
+  color: var(--p-text-color);
+  font-style: italic;
   overflow: hidden;
   text-overflow: ellipsis;
   display: -webkit-box;

@@ -105,8 +105,18 @@ const rememberFocusedAlbum = rememberFocusedAlbumId
 // from the very first paint of the list view. Without this, leaving an
 // album lands on `/fotos/alben` (no query) and the user briefly sees an
 // unfiltered list before AlbumsView re-applies state from localStorage.
+// True when we arrived here from the content feed (it links with
+// `?from=stream`). The back button then returns to the feed — which restores
+// its scroll position — instead of the album list.
+const cameFromFeed = computed(() => route.query.from === 'stream')
+
 function navigateBackToAlbums() {
   rememberFocusedAlbum(albumId.value)
+  if (cameFromFeed.value) {
+    // The feed view restores its cached list + scroll position on mount.
+    router.push({ name: 'fotos-stream' })
+    return
+  }
   // Prevent AlbumsView from jumping back into this album when it mounts.
   photoNav.consumeAlbumJump()
   router.push({ name: 'fotos-albums', query: albumsViewQueryFromStorage() })
@@ -1954,8 +1964,8 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
             text
             rounded
             class="header__back"
-            aria-label="Zurück zur Albumübersicht"
-            v-tooltip="'Zurück zur Albumübersicht'"
+            :aria-label="cameFromFeed ? 'Zurück zum Feed' : 'Zurück zur Albumübersicht'"
+            v-tooltip="cameFromFeed ? 'Zurück zum Feed' : 'Zurück zur Albumübersicht'"
             @click="navigateBackToAlbums"
           />
           <h1 class="header__title">{{ album.name }}</h1>
