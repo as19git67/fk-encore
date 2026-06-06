@@ -6,9 +6,12 @@ import { LAST_FOCUSED_ALBUM_KEY } from '../utils/albumsViewState'
  * Shared photo navigation state across gallery, album, and persons views.
  *
  * Rules:
- * - `selectedPhotoId` is the single source of truth for "which photo the user
- *   last looked at". Views use this on mount to pre-select / scroll to a photo
- *   when no explicit ?photoId= deeplink is present.
+ * - `selectedPhotoId` is THE single source of truth for "which photo the user
+ *   last focused". It is persisted to localStorage so it survives refreshes.
+ *   Every view uses it on mount to select / scroll the photo into view (unless
+ *   an explicit ?photoId= deeplink opens a photo straight in fullscreen).
+ *   There is exactly one writer — `selectPhoto` — and the per-view "last photo"
+ *   caches that used to shadow it have been removed.
  * - `selectedAlbumId` mirrors the same idea for albums — initialized from
  *   localStorage on first use so it survives page refreshes.
  * - `scrollPositions` stores the last scroll offset per view key. These are
@@ -19,6 +22,8 @@ import { LAST_FOCUSED_ALBUM_KEY } from '../utils/albumsViewState'
  *   view saves its own position so coming back lands in the same spot.
  */
 
+const LAST_FOCUSED_PHOTO_KEY = 'last_focused_photo_id'
+
 function readStoredAlbumId(): number | null {
   try {
     const raw = localStorage.getItem(LAST_FOCUSED_ALBUM_KEY)
@@ -28,8 +33,18 @@ function readStoredAlbumId(): number | null {
   } catch { return null }
 }
 
+function readStoredPhotoId(): number | null {
+  try {
+    const raw = localStorage.getItem(LAST_FOCUSED_PHOTO_KEY)
+    if (!raw) return null
+    const id = Number(raw)
+    return Number.isFinite(id) && id > 0 ? id : null
+  } catch { return null }
+}
+
 export const usePhotoNavStore = defineStore('photoNav', () => {
-  const selectedPhotoId = ref<number | null>(null)
+  /** The single "last focused photo" id. Survives page refresh. */
+  const selectedPhotoId = ref<number | null>(readStoredPhotoId())
   // view key → scroll offset (px)
   const scrollPositions = ref<Record<string, number>>({})
 
@@ -44,13 +59,14 @@ export const usePhotoNavStore = defineStore('photoNav', () => {
    */
   const jumpIntoAlbum = ref<boolean>(false)
 
-  /** Called when the user actively selects a photo (click or arrow key). */
+  /** Called when the user actively focuses a photo (click, arrow key, fullscreen). */
   function selectPhoto(id: number) {
     if (selectedPhotoId.value !== id) {
       selectedPhotoId.value = id
       // Clear saved scroll positions so every view scrolls to the new photo.
       scrollPositions.value = {}
     }
+    try { localStorage.setItem(LAST_FOCUSED_PHOTO_KEY, String(id)) } catch { /* storage off */ }
   }
 
   /**

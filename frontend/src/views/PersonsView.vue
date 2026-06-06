@@ -270,9 +270,10 @@ const filteredPersons = computed(() => {
   })
 })
 
-// Remember the most recently opened person across reloads, plus a per-person
-// map of the last photo the user had selected, so reopening a person restores
-// the previous scroll/selection position instead of snapping back to the top.
+// Remember the most recently opened person across reloads so reopening the
+// persons grid restores the previous scroll position. The last *photo* focused
+// for a person is no longer tracked separately — the shared photoNav store is
+// the single source of truth for that.
 const LAST_PERSON_KEY = 'persons_last_selected_id'
 const personsGridRef = ref<InstanceType<typeof PersonsGrid> | null>(null)
 // ID of the last person the user opened — drives scroll restoration when
@@ -280,20 +281,6 @@ const personsGridRef = ref<InstanceType<typeof PersonsGrid> | null>(null)
 const rememberedPersonId = ref<number | null>(
   Number(localStorage.getItem(LAST_PERSON_KEY)) || null
 )
-const LAST_PHOTO_MAP_KEY = 'persons_last_photo_by_person'
-
-function loadLastPhotoMap(): Record<string, number> {
-  try {
-    const raw = localStorage.getItem(LAST_PHOTO_MAP_KEY)
-    return raw ? JSON.parse(raw) : {}
-  } catch { return {} }
-}
-
-function saveLastPhotoForPerson(personId: number, photoId: number) {
-  const map = loadLastPhotoMap()
-  map[String(personId)] = photoId
-  localStorage.setItem(LAST_PHOTO_MAP_KEY, JSON.stringify(map))
-}
 
 // ── Person face / photo items ─────────────────────────────────────────────────
 const personFaceItems = computed(() => {
@@ -374,7 +361,6 @@ async function loadSidebarData(photoId: number) {
 watch(selectedPhoto, (photo) => {
   if (photo) {
     loadSidebarData(photo.id)
-    if (selectedPerson.value) saveLastPhotoForPerson(selectedPerson.value.id, photo.id)
     photoNav.selectPhoto(photo.id)
   } else { detectedFaces.value = []; detectedLandmarks.value = [] }
 })
@@ -526,13 +512,14 @@ async function selectPersonItem(person: Person, focusPhotoId?: number) {
       loadingDetails.value = false
     }
   }
-  // Jump to a specific photo if requested, otherwise restore the previously
-  // selected photo for this person (if any), falling back to the first.
+  // Jump to a specific photo if requested, otherwise focus the shared
+  // "last focused photo" (photoNav) when it belongs to this person, falling
+  // back to the first.
   if (focusPhotoId) {
     const idx = uniquePhotoFaceItems.value.findIndex(i => i.photo.id === focusPhotoId)
     selectedIndex.value = idx >= 0 ? idx : (uniquePhotoFaceItems.value.length > 0 ? 0 : -1)
   } else if (!alreadyLoaded) {
-    const storedPhotoId = loadLastPhotoMap()[String(person.id)]
+    const storedPhotoId = photoNav.selectedPhotoId
     const restoredIdx = storedPhotoId
       ? uniquePhotoFaceItems.value.findIndex(i => i.photo.id === storedPhotoId)
       : -1

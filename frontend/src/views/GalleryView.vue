@@ -118,15 +118,10 @@ const canDelete = computed(() => auth.hasPermission('photos.delete'))
 const canManageData = computed(() => auth.hasPermission('data.manage'))
 const showPersons = computed(() => auth.hasPermission('people.view'))
 
-// Kept for backwards-compatible session restore on first app load (before
-// the store has been populated by any user interaction in this session).
-const LAST_PHOTO_KEY = 'photos_last_selected_id'
-
 // ── Initial anchor (resolved once) ──────────────────────────────────────────
 // Priority order:
 //   1. Explicit ?photoId= deeplink → also auto-opens fullscreen.
-//   2. photoNavStore.selectedPhotoId set by a previous view this session.
-//   3. localStorage fallback for cross-session restore.
+//   2. photoNav.selectedPhotoId — the shared, persisted "last focused photo".
 const initialAnchor = ref<number | null>(null)
 const pendingFullscreenId = ref<number | null>(null)
 {
@@ -136,9 +131,6 @@ const pendingFullscreenId = ref<number | null>(null)
     pendingFullscreenId.value = q
   } else if (photoNav.selectedPhotoId !== null) {
     initialAnchor.value = photoNav.selectedPhotoId
-  } else {
-    const stored = Number(localStorage.getItem(LAST_PHOTO_KEY))
-    if (Number.isFinite(stored) && stored > 0) initialAnchor.value = stored
   }
 }
 if (route.query.photoId !== undefined) {
@@ -809,9 +801,8 @@ async function hydrateCursor(index: number, options?: { skipNeighbors?: boolean 
     closeFullscreen()
     return
   }
-  // Update shared navigation store and persist for cross-session restore.
+  // Update the shared "last focused photo" (photoNav persists it itself).
   photoNav.selectPhoto(curEntry.id)
-  try { localStorage.setItem(LAST_PHOTO_KEY, String(curEntry.id)) } catch { /* storage off */ }
 
   // Provisional render from the grid entry while the details call resolves.
   // Without this the overlay flashes empty for the network round-trip.
