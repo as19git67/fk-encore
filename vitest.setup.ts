@@ -88,6 +88,7 @@ vi.mock("encore.dev/config", () => ({
 vi.mock("~encore/clients", () => ({
   realtime: {
     publishEvent: vi.fn(() => Promise.resolve()),
+    connectionStatus: vi.fn(() => Promise.resolve({ connected: false })),
   },
   feed: {
     emitFeed: vi.fn(() => Promise.resolve()),
