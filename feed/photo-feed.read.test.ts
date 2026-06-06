@@ -140,6 +140,28 @@ describe("content feed: listPhotoFeedForUser", () => {
     expect(page2.nextCursor).toBeNull();
   });
 
+  it("orders a multi-photo upload by capture time (newest capture first)", async () => {
+    const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    const p1 = await uploadPhoto(owner.id, "1.jpg");
+    const p2 = await uploadPhoto(owner.id, "2.jpg");
+    const p3 = await uploadPhoto(owner.id, "3.jpg");
+    // Capture order deliberately differs from upload/id order.
+    await db.update(photos).set({ taken_at: "2020-01-01 10:00:00" }).where(eq(photos.id, p1.id));
+    await db.update(photos).set({ taken_at: "2022-01-01 10:00:00" }).where(eq(photos.id, p2.id));
+    await db.update(photos).set({ taken_at: "2021-01-01 10:00:00" }).where(eq(photos.id, p3.id));
+
+    // Batch add (as the feed upload does) staggers last_activity_at by capture.
+    await photo.batchUpdateAlbumPhotosLogic(owner.id, {
+      albumIds: [album.id],
+      photoIds: [p1.id, p2.id, p3.id],
+      action: "add",
+    });
+
+    const res = await listPhotoFeedForUser(owner.id, {});
+    // Newest capture first: p2 (2022) → p3 (2021) → p1 (2020).
+    expect(res.items.map((i) => i.photoId)).toEqual([p2.id, p3.id, p1.id]);
+  });
+
   it("excludes photos the viewer has hidden", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
     const p1 = await uploadPhoto(owner.id, "1.jpg");
