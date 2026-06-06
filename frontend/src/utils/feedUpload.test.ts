@@ -6,6 +6,7 @@ import {
   saveLastAlbumSelection,
   loadLastAlbumSelection,
   filterAlbums,
+  sortAlbumsForDialog,
 } from './feedUpload'
 
 function album(id: number, name: string, level?: Album['my_access_level']): Album {
@@ -59,5 +60,30 @@ describe('feedUpload helpers', () => {
     expect(filterAlbums(albums, 'urlaub').map((a) => a.id)).toEqual([1, 3])
     expect(filterAlbums(albums, '  ').map((a) => a.id)).toEqual([1, 2, 3])
     expect(filterAlbums(albums, 'xyz')).toEqual([])
+  })
+
+  it('orders pre-selected albums first, then the rest, each alphabetical', () => {
+    const albums = [
+      { id: 1, name: 'Zoo' },
+      { id: 2, name: 'Alpen' },
+      { id: 3, name: 'Berge' },
+      { id: 4, name: 'Akropolis' },
+    ]
+    // Pre-selected: Zoo (1) and Berge (3) → those first (alphabetical: Berge, Zoo),
+    // then the rest alphabetical (Akropolis, Alpen).
+    expect(sortAlbumsForDialog(albums, [1, 3]).map((a) => a.name)).toEqual([
+      'Berge',
+      'Zoo',
+      'Akropolis',
+      'Alpen',
+    ])
+  })
+
+  it('sorts purely alphabetically when nothing is pre-selected', () => {
+    const albums = [
+      { id: 1, name: 'Zoo' },
+      { id: 2, name: 'Alpen' },
+    ]
+    expect(sortAlbumsForDialog(albums, []).map((a) => a.name)).toEqual(['Alpen', 'Zoo'])
   })
 })
