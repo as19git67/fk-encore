@@ -14,6 +14,13 @@ export function writableAlbums(albums: Album[]): UploadAlbum[] {
     .map((a) => ({ id: a.id, name: a.name }))
 }
 
+/** Case-insensitive substring filter over album names (for the dialog search). */
+export function filterAlbums(albums: UploadAlbum[], query: string): UploadAlbum[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return albums
+  return albums.filter((a) => a.name.toLowerCase().includes(q))
+}
+
 const LAST_SELECTION_KEY = 'feed_upload_last_albums'
 
 export function loadLastAlbumSelection(): number[] {

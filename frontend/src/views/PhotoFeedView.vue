@@ -6,7 +6,7 @@ import Message from 'primevue/message'
 import PhotoFeedCard from '../components/PhotoFeedCard.vue'
 import FeedUploadAlbumDialog from '../components/FeedUploadAlbumDialog.vue'
 import { listPhotoFeed, type FeedPhotoItem, type PhotoFeedCursor } from '../api/photoFeed'
-import { updatePhotoCuration, listAlbums, uploadPhoto, batchUpdateAlbumPhotos } from '../api/photos'
+import { updatePhotoCuration, listAlbums, uploadPhoto, batchUpdateAlbumPhotos, computeFileHash, checkPhotoHash } from '../api/photos'
 import { createComment } from '../api/reactions'
 import {
   writableAlbums,
@@ -99,16 +99,33 @@ async function doUpload(albumIds: number[]) {
   let failed = 0
   for (const file of files) {
     try {
+      // Dedup: if the exact bytes already exist in the library, reuse that
+      // photo instead of re-uploading — it only needs to join the chosen
+      // albums. Mirrors the album-upload flow.
+      const hash = await computeFileHash(file)
+      if (hash) {
+        try {
+          const { exists, photoId } = await checkPhotoHash(hash)
+          if (exists) {
+            if (photoId) photoIds.push(photoId)
+            else failed += 1
+            continue
+          }
+        } catch {
+          // Pre-check failure is non-fatal — fall through to a real upload.
+        }
+      }
       const photo = await uploadPhoto(file)
       photoIds.push(photo.id)
     } catch {
-      // Duplicates (409) and other per-file errors are skipped — the
-      // response carries no usable photo id here.
+      // Per-file errors (unsupported type, network, an un-resolvable
+      // duplicate) are skipped and reported as a count.
       failed += 1
     }
   }
   try {
     if (photoIds.length > 0) {
+      // Idempotent: photos already in a target album are left untouched.
       await batchUpdateAlbumPhotos(albumIds, photoIds, 'add')
     }
   } catch {
@@ -116,10 +133,10 @@ async function doUpload(albumIds: number[]) {
   }
   uploading.value = false
   if (failed > 0) {
-    error.value = `${failed} von ${files.length} Fotos konnten nicht hochgeladen werden (evtl. Duplikate).`
+    error.value = `${failed} von ${files.length} Foto(s) konnten nicht verarbeitet werden.`
   }
   if (photoIds.length > 0) {
-    // The new photos bump our own feed server-side; reload to show them on top.
+    // The added photos bump our own feed server-side; reload to show them on top.
     await refresh()
   }
 }

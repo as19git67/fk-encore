@@ -3,7 +3,8 @@ import { ref, watch, computed } from 'vue'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
-import type { UploadAlbum } from '../utils/feedUpload'
+import InputText from 'primevue/inputtext'
+import { filterAlbums, type UploadAlbum } from '../utils/feedUpload'
 
 const props = defineProps<{
   visible: boolean
@@ -18,12 +19,20 @@ const emit = defineEmits<{
 }>()
 
 const selected = ref<number[]>([])
+const query = ref('')
 watch(
   () => props.visible,
   (v) => {
-    if (v) selected.value = [...props.initial]
+    if (v) {
+      selected.value = [...props.initial]
+      query.value = ''
+    }
   },
 )
+
+// Search filters what's shown; the selection is by id, so it survives
+// filtering (a checked album stays selected even when filtered out of view).
+const visibleAlbums = computed(() => filterAlbums(props.albums, query.value))
 
 // At least one album is mandatory.
 const canConfirm = computed(() => selected.value.length > 0)
@@ -45,17 +54,23 @@ function cancel() {
     modal
     header="In welche Alben aufnehmen?"
     :style="{ width: '28rem' }"
+    :breakpoints="{ '640px': '92vw' }"
     :dismissableMask="true"
     @update:visible="(v) => emit('update:visible', v)"
   >
     <p class="hint">
       {{ fileCount }} {{ fileCount === 1 ? 'Foto' : 'Fotos' }} hochladen — wähle mindestens ein Album.
     </p>
+    <span class="search">
+      <i class="pi pi-search" />
+      <InputText v-model="query" placeholder="Album suchen…" class="search-input" />
+    </span>
     <div class="album-list">
-      <label v-for="a in albums" :key="a.id" class="album-row">
+      <label v-for="a in visibleAlbums" :key="a.id" class="album-row">
         <Checkbox v-model="selected" :value="a.id" />
         <span class="album-name">{{ a.name }}</span>
       </label>
+      <p v-if="visibleAlbums.length === 0" class="no-match">Keine Alben gefunden.</p>
     </div>
     <template #footer>
       <Button label="Abbrechen" text severity="secondary" @click="cancel" />
@@ -66,9 +81,25 @@ function cancel() {
 
 <style scoped>
 .hint {
-  margin: 0 0 0.75rem;
+  margin: 0 0 0.6rem;
   color: var(--p-text-muted-color);
   font-size: 0.9rem;
+}
+.search {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+  color: var(--p-text-muted-color);
+}
+.search-input {
+  flex: 1;
+  min-width: 0;
+}
+.no-match {
+  color: var(--p-text-muted-color);
+  font-size: 0.9rem;
+  padding: 0.5rem 0.4rem;
 }
 .album-list {
   display: flex;

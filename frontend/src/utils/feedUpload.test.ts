@@ -5,6 +5,7 @@ import {
   initialAlbumSelection,
   saveLastAlbumSelection,
   loadLastAlbumSelection,
+  filterAlbums,
 } from './feedUpload'
 
 function album(id: number, name: string, level?: Album['my_access_level']): Album {
@@ -47,5 +48,16 @@ describe('feedUpload helpers', () => {
 
   it('pre-selects nothing on first use', () => {
     expect(initialAlbumSelection([{ id: 1, name: 'A' }])).toEqual([])
+  })
+
+  it('filters albums by name, case-insensitively', () => {
+    const albums = [
+      { id: 1, name: 'Urlaub 2026' },
+      { id: 2, name: 'Geburtstag' },
+      { id: 3, name: 'Urlaub 2025' },
+    ]
+    expect(filterAlbums(albums, 'urlaub').map((a) => a.id)).toEqual([1, 3])
+    expect(filterAlbums(albums, '  ').map((a) => a.id)).toEqual([1, 2, 3])
+    expect(filterAlbums(albums, 'xyz')).toEqual([])
   })
 })
