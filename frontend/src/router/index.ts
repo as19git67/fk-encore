@@ -40,12 +40,12 @@ const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     // Default: restore the most recently open view, falling back to the
-    // new virtualized gallery for first-time visitors. Older accounts
-    // already have a saved last-route in localStorage so they keep
-    // landing on whatever they had open before this default flipped.
+    // content feed (the app "home") for first-time visitors. Older accounts
+    // already have a saved last-route in localStorage so they keep landing
+    // on whatever they had open before this default flipped.
     {
       path: '/',
-      redirect: () => readLastRoute() ?? '/fotos/galerie',
+      redirect: () => readLastRoute() ?? '/fotos/stream',
     },
 
     // Public routes

@@ -26,11 +26,9 @@ export const modules: ModuleConfig[] = [
     permission: 'photos.view',
     routes: [
       {
-        // The bare module path lands on the virtualized gallery so that
-        // module-switcher buttons and any plain `/fotos` link end up on
-        // the new implementation.
+        // The bare module path lands on the content feed (the app "home").
         path: '',
-        redirect: { name: 'fotos-gallery' },
+        redirect: { name: 'fotos-stream' },
       },
       {
         path: 'galerie',
@@ -82,10 +80,10 @@ export const modules: ModuleConfig[] = [
       },
     ],
     menuItems: [
+      { label: 'Feed', icon: 'pi pi-home', routeName: 'fotos-stream', permission: 'photos.view' },
       { label: 'Galerie', icon: 'pi pi-images', routeName: 'fotos-gallery', permission: 'photos.view' },
       { label: 'Alben', icon: 'pi pi-folder-open', routeName: 'fotos-albums', permission: 'photos.view' },
-      { label: 'Stream', icon: 'pi pi-th-large', routeName: 'fotos-stream', permission: 'photos.view' },
-      { label: 'Feed', icon: 'pi pi-bell', routeName: 'fotos-feed', permission: 'photos.view' },
+      { label: 'Aktivität', icon: 'pi pi-bell', routeName: 'fotos-feed', permission: 'photos.view' },
       { label: 'Rückblicke', icon: 'pi pi-history', routeName: 'fotos-recaps', permission: 'photos.view' },
       { label: 'Personen', icon: 'pi pi-users', routeName: 'fotos-people', permission: 'people.view' },
       { label: 'Gruppen-Review', icon: 'pi pi-bolt', routeName: 'fotos-review-queue', permission: 'photos.view' },
