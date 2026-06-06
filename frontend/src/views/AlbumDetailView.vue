@@ -157,23 +157,6 @@ const headerDateRange = computed(() => {
   return `${od.toLocaleDateString()} – ${nd.toLocaleDateString()}`
 })
 
-// Per-album map of the last photo the user had selected, so reopening an
-// album restores the scroll/selection position rather than snapping to top.
-const LAST_PHOTO_MAP_KEY = 'albums_last_photo_by_album'
-
-function loadLastPhotoMap(): Record<string, number> {
-  try {
-    const raw = localStorage.getItem(LAST_PHOTO_MAP_KEY)
-    return raw ? JSON.parse(raw) : {}
-  } catch { return {} }
-}
-
-function saveLastPhotoForAlbum(id: number, photoId: number) {
-  const map = loadLastPhotoMap()
-  map[String(id)] = photoId
-  localStorage.setItem(LAST_PHOTO_MAP_KEY, JSON.stringify(map))
-}
-
 // Per-album persisted view mode (raster vs map) for map-enabled albums, so
 // reopening an album restores the user's last chosen view instead of always
 // snapping back to the album default. Mirrors the last-photo persistence above.
@@ -637,7 +620,6 @@ async function hydrateCursor(index: number): Promise<void> {
   cursorNext.value = nextEntry ? entryToMinimalPhoto(nextEntry) : null
   cursorGroup.value = curEntry.group ?? null
 
-  saveLastPhotoForAlbum(albumId.value, curEntry.id)
   photoNav.selectPhotoInAlbum(curEntry.id, albumId.value)
 
   void loadSidebarData(curEntry.id)
@@ -843,11 +825,10 @@ function closeMapFullscreen() {
   if (ended && tripMapRef.value) {
     tripMapRef.value.selectStopByPhotoId(ended.id)
   }
-  // Remember the photo the user ended on: update all three tracking mechanisms
-  // so that switching to gallery view scrolls there via galleryAnchorPhotoId.
+  // Remember the photo the user ended on so switching to gallery view scrolls
+  // there via galleryAnchorPhotoId and the shared nav store.
   if (ended) {
     galleryAnchorPhotoId.value = ended.id
-    saveLastPhotoForAlbum(albumId.value, ended.id)
     photoNav.selectPhotoInAlbum(ended.id, albumId.value)
   }
   isMapFullscreen.value = false
@@ -858,7 +839,6 @@ function closeMapFullscreen() {
 // the next map → grid switch.
 function handleMapStopSelected(coverPhotoId: number) {
   galleryAnchorPhotoId.value = coverPhotoId
-  saveLastPhotoForAlbum(albumId.value, coverPhotoId)
   photoNav.selectPhotoInAlbum(coverPhotoId, albumId.value)
 }
 
@@ -935,11 +915,12 @@ async function loadData() {
     // context light up as soon as it resolves.
     void hydrateAlbumPhotos()
 
-    // Resolve the anchor photo: prefer URL param, then album-specific storage,
-    // then the shared nav store.
+    // Resolve the anchor photo. Priority: deep-link `photoId` (opens fullscreen,
+    // e.g. a notification) → the shared "last focused photo" (photoNav, the
+    // single source of truth). Opening a photo from the feed sets photoNav, so
+    // it is focused here too.
     const queryPhotoId = Number(route.query.photoId) || null
     const storedPhotoId = queryPhotoId
-      ?? loadLastPhotoMap()[String(albumId.value)]
       ?? photoNav.selectedPhotoId
       ?? null
     if (albumRes.display_mode === 'map') {
@@ -1643,7 +1624,6 @@ async function onGalleryLoaded() {
   const deepLinkPhotoId = Number(route.query.photoId) || null
   const targetId = anchor
     || deepLinkPhotoId
-    || loadLastPhotoMap()[String(albumId.value)]
     || photoNav.selectedPhotoId
     || null
   if (route.query.photoId) {
@@ -1665,7 +1645,13 @@ async function onGalleryLoaded() {
     await galleryRef.value.reload({ aroundPhotoId: targetId })
     idx = galleryRef.value.findLoadedIndexById(targetId)
   }
-  if (idx === null) return
+  if (idx === null) {
+    // The shared "last focused photo" isn't part of this album (e.g. it was
+    // focused in another album/the gallery). Fall back to the newest photo so
+    // the grid always lands on a sensible selection rather than nothing.
+    selectGridIndex(newestGridIndex())
+    return
+  }
   if (deepLinkPhotoId && targetId === deepLinkPhotoId) {
     void openGridFullscreenAt(idx)
   } else {
