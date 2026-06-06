@@ -74,17 +74,16 @@ async function onLike(item: FeedPhotoItem) {
 }
 
 async function onHide(item: FeedPhotoItem) {
-  // Thumbs-down hides the photo for this user (curation = 'hidden'); the feed
-  // read query then excludes it. Optimistically drop it from the list and
-  // re-insert on failure.
-  const idx = items.value.findIndex((i) => i.photoId === item.photoId)
-  if (idx === -1) return
-  const [removed] = items.value.splice(idx, 1)
-  if (!removed) return
+  // Thumbs-down toggles the viewer's "hidden" curation. The card stays in
+  // place (dimmed) so it can be un-hidden; hidden photos only drop out when
+  // the feed is reloaded (the read query excludes them). Optimistic, reverts
+  // on failure.
+  const wasHidden = !!item.hiddenByMe
+  item.hiddenByMe = !wasHidden
   try {
-    await updatePhotoCuration(item.photoId, 'hidden')
+    await updatePhotoCuration(item.photoId, wasHidden ? 'visible' : 'hidden')
   } catch {
-    items.value.splice(idx, 0, removed)
+    item.hiddenByMe = wasHidden
     error.value = 'Ausblenden fehlgeschlagen'
   }
 }

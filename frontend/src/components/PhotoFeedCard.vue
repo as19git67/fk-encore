@@ -79,9 +79,10 @@ function submitComment() {
       </div>
     </header>
 
-    <div class="media" :style="{ aspectRatio }" @dblclick="onDoubleTap" @click="emit('open', item)">
+    <div class="media" :class="{ 'media--hidden': item.hiddenByMe }" :style="{ aspectRatio }" @dblclick="onDoubleTap" @click="emit('open', item)">
       <img :src="getPhotoUrl(item.filename, 1280)" :alt="item.description ?? item.filename" loading="lazy" />
       <i v-if="burst" class="pi pi-heart-fill burst" aria-hidden="true" />
+      <i v-if="item.hiddenByMe" class="pi pi-eye-slash hidden-badge" aria-hidden="true" />
     </div>
 
     <div class="actions">
@@ -93,19 +94,21 @@ function submitComment() {
         @click="emit('like', item)"
       >
         <i :class="item.likedByMe ? 'pi pi-heart-fill' : 'pi pi-heart'" />
-        <span class="count">{{ item.likeCount }}</span>
+        <span v-if="item.likeCount > 0" class="count">{{ item.likeCount }}</span>
       </button>
       <button
         class="icon-btn"
-        title="Ausblenden"
-        aria-label="Ausblenden"
+        :class="{ hidden: item.hiddenByMe }"
+        :aria-pressed="item.hiddenByMe"
+        :title="item.hiddenByMe ? 'Ausblenden aufheben' : 'Ausblenden'"
+        :aria-label="item.hiddenByMe ? 'Ausblenden aufheben' : 'Ausblenden'"
         @click="emit('hide', item)"
       >
-        <i class="pi pi-thumbs-down" />
+        <i :class="item.hiddenByMe ? 'pi pi-thumbs-down-fill' : 'pi pi-thumbs-down'" />
       </button>
       <button class="icon-btn" title="Kommentare" @click="emit('open', item)">
         <i class="pi pi-comment" />
-        <span class="count">{{ item.commentCount }}</span>
+        <span v-if="item.commentCount > 0" class="count">{{ item.commentCount }}</span>
       </button>
     </div>
 
@@ -187,6 +190,17 @@ function submitComment() {
   object-fit: cover;
   display: block;
 }
+/* Mirrors the gallery/album look for a viewer-hidden photo. */
+.media--hidden img { opacity: 0.35; }
+.hidden-badge {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  font-size: 1.4rem;
+  color: #fff;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
 .burst {
   position: absolute;
   inset: 0;
@@ -226,6 +240,7 @@ function submitComment() {
 }
 .icon-btn:hover { background: var(--p-content-hover-background); }
 .icon-btn.liked { color: var(--p-red-500, #e0245e); }
+.icon-btn.hidden { color: var(--p-primary-color); }
 .icon-btn .count {
   font-size: 0.9rem;
   font-weight: 600;
