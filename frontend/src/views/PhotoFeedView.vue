@@ -336,6 +336,7 @@ onBeforeUnmount(() => {
         v-for="item in items"
         :key="item.photoId"
         :item="item"
+        :current-user-id="auth.user?.id ?? null"
         @like="onLike"
         @hide="onHide"
         @open="onOpen"
