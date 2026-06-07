@@ -7,7 +7,6 @@ import PhotoFeedCard from '../components/PhotoFeedCard.vue'
 import FeedUploadAlbumDialog from '../components/FeedUploadAlbumDialog.vue'
 import { listPhotoFeed, type FeedPhotoItem, type PhotoFeedCursor } from '../api/photoFeed'
 import { updatePhotoCuration, listAlbums, uploadPhoto, batchUpdateAlbumPhotos, computeFileHash, checkPhotoHash } from '../api/photos'
-import { createComment } from '../api/reactions'
 import {
   writableAlbums,
   initialAlbumSelection,
@@ -204,20 +203,6 @@ async function onHide(item: FeedPhotoItem) {
   }
 }
 
-async function onComment(item: FeedPhotoItem, body: string) {
-  if (!item.album) return
-  try {
-    await createComment(item.photoId, body, item.album.id)
-    item.commentCount += 1
-    item.latestComment = {
-      author: auth.user?.name ?? 'Du',
-      excerpt: body.slice(0, 140),
-    }
-  } catch (err: any) {
-    error.value = err.message || 'Kommentar konnte nicht gespeichert werden'
-  }
-}
-
 // Discard the cached page and reload from the top (the "neue Aktivität" pill
 // and any forced refresh). Without clearing, restore-on-mount would bring the
 // stale page back.
@@ -324,7 +309,6 @@ onBeforeUnmount(() => {
         :current-user-id="auth.user?.id ?? null"
         @like="onLike"
         @hide="onHide"
-        @comment="onComment"
       />
     </div>
 

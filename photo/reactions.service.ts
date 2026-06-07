@@ -18,7 +18,7 @@
  * photo in a shared album.
  */
 
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, lt, sql } from "drizzle-orm";
 import { APIError } from "encore.dev/api";
 import db from "../db/database";
 import { dbAll, dbExec, dbFirst } from "../db/adapter";
@@ -214,6 +214,58 @@ export async function listComments(
 ): Promise<PhotoComment[]> {
   await assertAlbumPhotoAccess(userId, photoId, albumId);
   return fetchCommentsForPhoto(photoId, albumId);
+}
+
+/** Hard ceiling on a single comments page. */
+export const COMMENTS_PAGE_MAX = 100;
+
+/**
+ * Paginated listing of a photo's comments within one album, newest first.
+ * Cursor is the `id` of the oldest comment already loaded (ids are a
+ * monotonic BIGSERIAL, so id order matches chronological order). Fetches
+ * one extra row to determine `nextCursor` without a separate COUNT.
+ */
+export async function listCommentsPage(
+  userId: number,
+  photoId: number,
+  albumId: number,
+  limit: number,
+  beforeId: number | null,
+): Promise<{ comments: PhotoComment[]; nextCursor: number | null }> {
+  await assertAlbumPhotoAccess(userId, photoId, albumId);
+  const capped = Math.min(Math.max(Math.trunc(limit) || COMMENTS_PAGE_MAX, 1), COMMENTS_PAGE_MAX);
+  const rows = await dbAll<CommentRow>(
+    db
+      .select({
+        id: photoComments.id,
+        photo_id: photoComments.photo_id,
+        album_id: photoComments.album_id,
+        user_id: photoComments.user_id,
+        guest_id: photoComments.guest_id,
+        user_name: users.name,
+        guest_name: guests.display_name,
+        body: photoComments.body,
+        created_at: photoComments.created_at,
+        edited_at: photoComments.edited_at,
+      })
+      .from(photoComments)
+      .leftJoin(users, eq(users.id, photoComments.user_id))
+      .leftJoin(guests, eq(guests.id, photoComments.guest_id))
+      .where(
+        and(
+          eq(photoComments.photo_id, photoId),
+          eq(photoComments.album_id, albumId),
+          beforeId != null ? lt(photoComments.id, beforeId) : undefined,
+        ),
+      )
+      .orderBy(desc(photoComments.id))
+      .limit(capped + 1),
+  );
+  const hasMore = rows.length > capped;
+  const page = hasMore ? rows.slice(0, capped) : rows;
+  const comments = page.map(toPhotoComment);
+  const nextCursor = hasMore ? page[page.length - 1]!.id : null;
+  return { comments, nextCursor };
 }
 
 /**
