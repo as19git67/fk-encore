@@ -710,12 +710,15 @@ export interface AnalysisAst {
   op: 'AND' | 'OR'
   timespan?: { from: string; to: string }
   amountRange?: { min?: number; max?: number }
+  /** "event" = bounded one-off (a trip); "ongoing" = recurring spending. */
+  kind?: 'event' | 'ongoing'
 }
 
 export interface AnalysisResult {
   ast: AnalysisAst
   total: { sum: string; count: number; avg: string }
   byMonth: Array<{ month: string; sum: string; count: number }>
+  byTag: Array<{ tag: string; sum: string; count: number }>
   topCounterparties: Array<{ name: string; sum: string; count: number }>
 }
 
