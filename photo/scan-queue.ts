@@ -544,6 +544,78 @@ export async function enqueuePoiDetectionForMissingMatches(userId: number): Prom
   return enqueued;
 }
 
+/**
+ * One-shot recovery for the race window NOT covered by
+ * enqueuePoiDetectionForMissingMatches: a poi_detection run that read the
+ * embedding service in the brief moment before the embedding row was committed,
+ * then saw the embedding job flip to `done` before the defer check, gets marked
+ * `done` with zero matches *after* the embedding finished. Its
+ * `finished_at >= embedding.finished_at`, so the idempotent recovery treats it
+ * as "correctly processed" and skips it — yet it actually never scored against
+ * the embedding and has no `photo_poi_matches` row.
+ *
+ * This recovery re-enqueues poi_detection for every GPS photo with a finished
+ * embedding that has a terminal poi_detection run but *zero* match rows. Once
+ * the worker-side fix (re-enqueue poi after embedding) is deployed it only
+ * matters for the pre-fix backlog, so it is intentionally a manual, one-shot
+ * action rather than an idempotent one: it WILL also re-run photos that simply
+ * have no POI nearby (they end up with zero matches again). That is the price of
+ * recovering the race victims, which are indistinguishable from legitimately
+ * empty photos once the run is marked `done` without a recorded reason.
+ *
+ * Still far cheaper than a force-rescan: it touches only `poi_detection`, only
+ * GPS photos, and only those that ended up without a match.
+ *
+ * Returns the number of pending rows inserted.
+ */
+export async function enqueuePoiDetectionForEmptyMatches(userId: number): Promise<number> {
+  // Owned by the user, geotagged, embedding finished, no in-flight poi run, and
+  // no surviving match. We deliberately do NOT require an existing terminal poi
+  // row: the DELETE below removes those, so a positive EXISTS check would no
+  // longer hold when the INSERT re-evaluates this filter. Excluding only the
+  // `pending`/`processing` rows keeps the filter stable across the delete and
+  // leaves any in-flight run alone (the partial unique index would collapse the
+  // insert anyway). Photos that never ran poi at all are a harmless superset —
+  // they also lack a match and should be scored.
+  const candidateFilter = sql`
+    p.user_id = ${userId}
+    AND p.latitude IS NOT NULL AND p.longitude IS NOT NULL
+    AND EXISTS (
+      SELECT 1 FROM photo_scan_queue emb
+      WHERE emb.photo_id = p.id AND emb.service = 'embedding' AND emb.status = 'done'
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM photo_scan_queue poi2
+      WHERE poi2.photo_id = p.id AND poi2.service = 'poi_detection'
+        AND poi2.status IN ('pending', 'processing')
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM photo_poi_matches m WHERE m.photo_id = p.id
+    )`;
+
+  // Drop terminal poi rows for the candidates so the partial unique index lets
+  // us insert fresh `pending` ones.
+  await db.execute(sql`
+    DELETE FROM photo_scan_queue
+    WHERE service = 'poi_detection'
+      AND status IN ('done', 'failed')
+      AND user_id IS NULL
+      AND photo_id IN (SELECT p.id FROM photos p WHERE ${candidateFilter})
+  `);
+
+  const insertResult = await db.execute(sql`
+    INSERT INTO photo_scan_queue (photo_id, user_id, service, status, priority, force)
+    SELECT p.id, NULL, 'poi_detection', 'pending', 3, false
+    FROM photos p
+    WHERE ${candidateFilter}
+    ON CONFLICT DO NOTHING
+  `);
+
+  const enqueued = (insertResult as { rowCount?: number }).rowCount ?? 0;
+  if (enqueued > 0) notifyScanQueueChanged();
+  return enqueued;
+}
+
 /** Reset all failed jobs for a user back to pending (low priority). */
 export async function requeueFailed(userId: number): Promise<number> {
   // Reset per-user failed jobs
