@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import db from "../db/database";
 import { photos, photoScanQueue, users } from "../db/schema";
-import { enqueuePhotoScanBulkPerUser, getFailedJobsGrouped, hasActiveEmbeddingJob, isScanService } from "./scan-queue";
+import { enqueuePhotoScanBulkPerUser, enqueuePoiDetectionAfterEmbedding, getFailedJobsGrouped, hasActiveEmbeddingJob, isScanService } from "./scan-queue";
 
 async function seedUser(email: string): Promise<number> {
   const [u] = await db
@@ -171,6 +171,76 @@ describe("hasActiveEmbeddingJob", () => {
     const p3 = await seedPhoto(u, 3);
     await seedQueueRow({ photoId: p3, userId: null, service: "embedding", status: "failed" });
     expect(await hasActiveEmbeddingJob(p3)).toBe(false);
+  });
+});
+
+describe("enqueuePoiDetectionAfterEmbedding", () => {
+  async function seedGpsPhoto(userId: number, idx: number, gps: boolean): Promise<number> {
+    const [p] = await db
+      .insert(photos)
+      .values({
+        user_id: userId,
+        filename: `g${idx}.jpg`,
+        original_name: `g${idx}.jpg`,
+        mime_type: "image/jpeg",
+        size: 1,
+        latitude: gps ? 48.1 : null,
+        longitude: gps ? 11.5 : null,
+      })
+      .returning({ id: photos.id });
+    return p.id;
+  }
+
+  async function countPoi(photoId: number, status: "pending" | "done"): Promise<number> {
+    const rows = await db
+      .select({ id: photoScanQueue.id })
+      .from(photoScanQueue)
+      .where(and(
+        eq(photoScanQueue.photo_id, photoId),
+        eq(photoScanQueue.service, "poi_detection"),
+        eq(photoScanQueue.status, status),
+      ));
+    return rows.length;
+  }
+
+  it("inserts a fresh pending poi row when the prior poi run already terminated (race victim)", async () => {
+    const u = await seedUser("poi-after-emb@test.com");
+    const p = await seedGpsPhoto(u, 1, true);
+    // The race: poi_detection ran before the embedding landed and was marked done.
+    await seedQueueRow({ photoId: p, userId: null, service: "embedding", status: "done" });
+    await db.insert(photoScanQueue).values({
+      photo_id: p, user_id: null, service: "poi_detection", status: "done", priority: 1,
+    });
+
+    const inserted = await enqueuePoiDetectionAfterEmbedding(p, 1);
+
+    expect(inserted).toBe(true);
+    expect(await countPoi(p, "pending")).toBe(1);
+    expect(await countPoi(p, "done")).toBe(1); // the stale done row is left in place
+  });
+
+  it("is a no-op while a poi row is still queued (happy path is never double-scanned)", async () => {
+    const u = await seedUser("poi-after-emb2@test.com");
+    const p = await seedGpsPhoto(u, 1, true);
+    // poi_detection has not run yet — it is still pending alongside embedding.
+    await db.insert(photoScanQueue).values({
+      photo_id: p, user_id: null, service: "poi_detection", status: "pending", priority: 1,
+    });
+
+    const inserted = await enqueuePoiDetectionAfterEmbedding(p, 1);
+
+    expect(inserted).toBe(false);
+    expect(await countPoi(p, "pending")).toBe(1); // still exactly one, not duplicated
+  });
+
+  it("skips photos without GPS", async () => {
+    const u = await seedUser("poi-after-emb3@test.com");
+    const p = await seedGpsPhoto(u, 1, false);
+
+    const inserted = await enqueuePoiDetectionAfterEmbedding(p, 1);
+
+    expect(inserted).toBe(false);
+    expect(await countPoi(p, "pending")).toBe(0);
   });
 });
 

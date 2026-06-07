@@ -269,6 +269,51 @@ export async function hasActiveEmbeddingJob(photoId: number): Promise<boolean> {
 }
 
 /**
+ * Re-enqueue `poi_detection` for a photo once its `embedding` job has just
+ * finished. POI scoring needs the photo's DINOv2 embedding; on a fresh manual
+ * upload poi_detection is enqueued alongside embedding (same priority) and can
+ * dequeue first. The worker defers while the embedding job is still
+ * pending/processing, but a poi run that reads the embedding service in the
+ * brief window before the embedding row is committed — and then sees the
+ * embedding job flip to `done` before the `hasActiveEmbeddingJob` defer check —
+ * gets marked `done` with zero matches and never retries, so the POI is lost.
+ *
+ * Calling this from the embedding worker's completion handler closes that race:
+ *   - The partial unique index `uq_active_scan_global` (photo_id, service WHERE
+ *     status IN ('pending','processing') AND user_id IS NULL) makes the insert a
+ *     no-op while a poi row is still queued — the happy path (embedding finishes
+ *     before poi runs) is never double-scanned.
+ *   - It only inserts a fresh `pending` row when the prior poi run already
+ *     terminated (the race victim / #558 footprint), giving it one guaranteed
+ *     shot with the embedding definitely present.
+ *
+ * Skips photos without GPS — poi_detection would only return `no_gps`.
+ * The ENABLE_POI_DETECTION feature flag is checked by the caller (the embedding
+ * worker), mirroring enqueuePoiDetectionForRegion.
+ * Returns true when a fresh poi_detection row was actually inserted.
+ */
+export async function enqueuePoiDetectionAfterEmbedding(
+  photoId: number,
+  priority = 2,
+): Promise<boolean> {
+  const photo = await db
+    .select({ lat: photos.latitude })
+    .from(photos)
+    .where(eq(photos.id, photoId))
+    .limit(1);
+  if (photo.length === 0 || photo[0].lat === null) return false;
+
+  const result = await db
+    .insert(photoScanQueue)
+    .values({ photo_id: photoId, user_id: null, service: "poi_detection", force: false, priority })
+    .onConflictDoNothing()
+    .returning({ id: photoScanQueue.id });
+
+  if (result.length > 0) notifyScanQueueChanged();
+  return result.length > 0;
+}
+
+/**
  * Reset a processing job back to pending without incrementing the attempt
  * counter.  Used when a job cannot run yet because a prerequisite scan has
  * not finished — the job will be retried on the next worker poll cycle.

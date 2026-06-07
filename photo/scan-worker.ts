@@ -21,6 +21,7 @@ import {
   markJobFailed,
   resetStuckJobs,
   enqueuePhotoScan,
+  enqueuePoiDetectionAfterEmbedding,
   hasActiveEmbeddingJob,
   DeferJobError,
   type ScanService,
@@ -49,6 +50,7 @@ import {
 } from "./photo.service";
 import { scheduleRecapsRebuild } from "./recaps.service";
 import { notifyUserPhotosScanned } from "./scan-refresh-events";
+import { ENABLE_POI_DETECTION } from "./scan-config";
 
 // Scan services whose completion can invalidate recaps for every user that
 // can see the photo (global services have no user_id on the job itself).
@@ -249,6 +251,22 @@ class ScanWorker {
         }).catch((err) =>
           console.error(`[scan-worker] grouping lookup error after embedding job ${job.id}:`, err),
         );
+
+        // poi_detection needs this photo's DINO embedding. On a fresh upload it
+        // is enqueued alongside embedding and can run first; a race at the
+        // embedding pending→done transition can mark poi_detection `done` with
+        // zero matches and never retry (the cause of #558-style missing POIs on
+        // new uploads). Now that the embedding is definitively stored, re-enqueue
+        // poi_detection — idempotent against any still-queued poi row, so the
+        // happy path is never double-scanned. Inherit the job's priority so a
+        // fresh upload's POI pass stays ahead of background backfills.
+        if (ENABLE_POI_DETECTION) {
+          enqueuePoiDetectionAfterEmbedding(job.photo_id, job.priority).then((enqueued) => {
+            if (enqueued) poiDetectionWorker.tick();
+          }).catch((err) =>
+            console.error(`[scan-worker] poi re-enqueue after embedding job ${job.id}:`, err),
+          );
+        }
       }
 
       // After face detection completes, re-enqueue quality so it can
