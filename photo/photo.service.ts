@@ -6,7 +6,7 @@ import exifr from "exifr";
 import { exiftool } from "exiftool-vendored";
 import { eq, and, or, sql, inArray, ilike, isNull, isNotNull, desc, gt } from "drizzle-orm";
 import { APIError } from "encore.dev/api";
-import { enqueuePhotoScan, enqueuePhotoScanBulkPerUser, enqueuePoiDetectionForMissingMatches, DeferJobError } from "./scan-queue";
+import { enqueuePhotoScan, enqueuePhotoScanBulkPerUser, enqueuePoiDetectionForMissingMatches, enqueuePoiDetectionForEmptyMatches, DeferJobError } from "./scan-queue";
 import { notifyUserPhotosScanned } from "./scan-refresh-events";
 import { isUnderPressure } from "./event-loop-pressure";
 import { ENABLE_LOCAL_FACES, ENABLE_POI_DETECTION, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
@@ -5902,6 +5902,22 @@ export async function rescanPhotosLogic(userId: number, force: boolean): Promise
 export async function redetectMissingPoisLogic(userId: number): Promise<{ queued: number }> {
   if (!ENABLE_POI_DETECTION) return { queued: 0 };
   const queued = await enqueuePoiDetectionForMissingMatches(userId);
+  if (queued > 0) triggerWorkers();
+  return { queued };
+}
+
+/**
+ * One-shot recovery for poi_detection race victims that the idempotent
+ * `redetectMissingPoisLogic` cannot reach: photos whose poi run finished after
+ * the embedding (so they look "correctly processed") but never actually scored
+ * against it and have no `photo_poi_matches` row. Re-runs poi_detection for
+ * every GPS photo with a finished embedding and no surviving match — heavier
+ * than the idempotent variant (it also re-runs photos that legitimately have no
+ * POI nearby), so it is a deliberate manual action, not a routine one.
+ */
+export async function redetectEmptyPoisLogic(userId: number): Promise<{ queued: number }> {
+  if (!ENABLE_POI_DETECTION) return { queued: 0 };
+  const queued = await enqueuePoiDetectionForEmptyMatches(userId);
   if (queued > 0) triggerWorkers();
   return { queued };
 }

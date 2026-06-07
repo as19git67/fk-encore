@@ -450,6 +450,15 @@ export function redetectMissingPois() {
   })
 }
 
+// One-shot POI recovery: re-run poi_detection for every GPS photo with a
+// finished embedding but no POI match — also catches race victims that
+// redetectMissingPois() skips. Heavier (re-scores legitimately empty photos).
+export function redetectEmptyPois() {
+  return apiFetch<{ queued: number }>('/photos/poi-redetect-empty', {
+    method: 'POST'
+  })
+}
+
 export function cancelPendingScans() {
   return apiFetch<{ cancelled: number }>('/photos/scan-queue/cancel', {
     method: 'POST'

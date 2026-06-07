@@ -1724,6 +1724,24 @@ export const redetectMissingPois = api(
   }
 );
 
+/**
+ * One-shot POI recovery: re-run poi_detection for every GPS photo with a
+ * finished embedding but no POI match — including race victims that the
+ * idempotent `/photos/poi-redetect` skips because their run finished after the
+ * embedding. Heavier than that variant (also re-scores legitimately empty
+ * photos), so it is a separate, explicit action.
+ */
+export const redetectEmptyPois = api(
+  { expose: true, method: "POST", path: "/photos/poi-redetect-empty", auth: true },
+  async (): Promise<{ queued: number }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "data.manage");
+    return await service.redetectEmptyPoisLogic(userId);
+  }
+);
+
 export const retryFailedScans = api(
   { expose: true, method: "POST", path: "/photos/scan-queue/retry-failed", auth: true },
   async (): Promise<{ retried: number }> => {

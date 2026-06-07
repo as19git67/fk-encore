@@ -10,6 +10,7 @@ import InputText from 'primevue/inputtext'
 import {
   getScanQueueStatus, rescanPhotos, retryFailedScans, cancelPendingScans,
   redetectMissingPois,
+  redetectEmptyPois,
   getScanQueueFailures,
   findPhotoGroups,
   recomputeAiPicks,
@@ -56,6 +57,8 @@ const cancelLoading = ref(false)
 const cancelledPending = ref(false)  // true after cancel until queue settles
 const poiRedetectLoading = ref(false)
 const poiRedetectResult = ref<number | null>(null)  // queued count after a run
+const poiRedetectEmptyLoading = ref(false)
+const poiRedetectEmptyResult = ref<number | null>(null)  // queued count after a run
 
 const serviceLabels: Record<string, string> = {
   embedding: 'Ähnlichkeitsanalyse',
@@ -155,6 +158,20 @@ async function handlePoiRedetect() {
     queueError.value = err.message || 'Fehler beim Nachholen der POI-Erkennung'
   } finally {
     poiRedetectLoading.value = false
+  }
+}
+
+async function handlePoiRedetectEmpty() {
+  queueError.value = ''
+  poiRedetectEmptyResult.value = null
+  poiRedetectEmptyLoading.value = true
+  try {
+    const { queued } = await redetectEmptyPois()
+    poiRedetectEmptyResult.value = queued
+  } catch (err: any) {
+    queueError.value = err.message || 'Fehler beim erneuten Prüfen der POI-Erkennung'
+  } finally {
+    poiRedetectEmptyLoading.value = false
   }
 }
 
@@ -860,15 +877,30 @@ onBeforeUnmount(() => {
           severity="secondary"
           outlined
           :loading="poiRedetectLoading"
-          :disabled="rescanLoading || retryLoading || poiRedetectLoading"
-          v-tooltip.bottom="'Nur poi_detection für Fotos mit GPS und fertigem Embedding, aber ohne POI-Treffer (Fix #558) – ohne kompletten Rescan.'"
+          :disabled="rescanLoading || retryLoading || poiRedetectLoading || poiRedetectEmptyLoading"
+          v-tooltip.bottom="'Nur poi_detection für Fotos mit GPS und fertigem Embedding, die noch nie korrekt verarbeitet wurden (Fix #558) – idempotent, ohne kompletten Rescan.'"
           @click="handlePoiRedetect"
+        />
+        <Button
+          icon="pi pi-replay"
+          label="POI für trefferlose Fotos erneut prüfen"
+          severity="secondary"
+          outlined
+          :loading="poiRedetectEmptyLoading"
+          :disabled="rescanLoading || retryLoading || poiRedetectLoading || poiRedetectEmptyLoading"
+          v-tooltip.bottom="'Einmalige Aktion: poi_detection für ALLE Fotos mit GPS und fertigem Embedding, die keinen POI-Treffer haben. Fängt auch Race-Opfer ein, die der Button links überspringt – läuft aber auch über Fotos, die zu Recht keinen POI in der Nähe haben.'"
+          @click="handlePoiRedetectEmpty"
         />
       </div>
       <p v-if="poiRedetectResult !== null" class="poi-redetect-result">
         {{ poiRedetectResult > 0
           ? `${poiRedetectResult} Foto(s) für die POI-Erkennung neu eingereiht.`
           : 'Keine passenden Altbilder gefunden – nichts neu einzureihen.' }}
+      </p>
+      <p v-if="poiRedetectEmptyResult !== null" class="poi-redetect-result">
+        {{ poiRedetectEmptyResult > 0
+          ? `${poiRedetectEmptyResult} trefferlose(s) Foto(s) für die POI-Erkennung erneut eingereiht.`
+          : 'Keine trefferlosen Fotos mit fertigem Embedding gefunden.' }}
       </p>
     </div>
 
