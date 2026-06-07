@@ -716,6 +716,7 @@ export interface AnalysisResult {
   ast: AnalysisAst
   total: { sum: string; count: number; avg: string }
   byMonth: Array<{ month: string; sum: string; count: number }>
+  byTag: Array<{ tag: string; sum: string; count: number }>
   topCounterparties: Array<{ name: string; sum: string; count: number }>
 }
 

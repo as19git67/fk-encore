@@ -239,6 +239,48 @@ describe("finance/analysis — aggregate (top counterparties)", () => {
   });
 });
 
+describe("finance/analysis — aggregate (byTag breakdown)", () => {
+  it("breaks the unfiltered set down by every user tag, ordered by ABS(sum) desc", async () => {
+    await seedFixture();
+    await grantAdmin();
+
+    const result = await aggregate({
+      ast: { tags: [], op: "AND" },
+    });
+
+    const byName = Object.fromEntries(result.byTag.map((r) => [r.tag, r]));
+    // urlaub & italien-2024 each on the two Aug rows: -340 + -89.50
+    expect(byName["urlaub"]).toMatchObject({ count: 2 });
+    expect(Number(byName["urlaub"].sum)).toBeCloseTo(-429.5, 2);
+    expect(byName["italien-2024"]).toMatchObject({ count: 2 });
+    expect(Number(byName["italien-2024"].sum)).toBeCloseTo(-429.5, 2);
+    expect(byName["alltag"]).toMatchObject({ count: 2 });
+    expect(Number(byName["alltag"].sum)).toBeCloseTo(-99.5, 2);
+    expect(byName["gehalt"]).toMatchObject({ count: 1 });
+    expect(Number(byName["gehalt"].sum)).toBeCloseTo(3800, 2);
+
+    // |gehalt 3800| is the largest, so it leads.
+    expect(result.byTag[0].tag).toBe("gehalt");
+  });
+
+  it("excludes the filter tags from the breakdown but surfaces co-occurring tags", async () => {
+    await seedFixture();
+    await grantAdmin();
+
+    const result = await aggregate({
+      ast: { tags: ["urlaub"], op: "AND" },
+    });
+
+    const names = result.byTag.map((r) => r.tag);
+    expect(names).not.toContain("urlaub");
+    // The two urlaub rows also carry italien-2024 → it shows through.
+    expect(names).toContain("italien-2024");
+    const italien = result.byTag.find((r) => r.tag === "italien-2024")!;
+    expect(italien.count).toBe(2);
+    expect(Number(italien.sum)).toBeCloseTo(-429.5, 2);
+  });
+});
+
 describe("finance/analysis — aggregate (ACL)", () => {
   it("non-admin sees only transactions on accessible accounts", async () => {
     const { accountAId } = await seedFixture();

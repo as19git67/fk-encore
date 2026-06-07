@@ -141,6 +141,35 @@ const chartOptions = computed(() => {
     },
   }
 })
+
+const tagChartData = computed(() => {
+  if (!result.value || result.value.byTag.length === 0) return null
+  return {
+    labels: result.value.byTag.map((t) => t.tag),
+    datasets: [
+      {
+        label: 'Summe',
+        data: result.value.byTag.map((t) => Number(t.sum)),
+        backgroundColor: isDark.value ? 'rgba(52, 211, 153, 0.7)' : 'rgba(16, 185, 129, 0.6)',
+      },
+    ],
+  }
+})
+
+const tagChartOptions = computed(() => {
+  const tickColor = isDark.value ? '#94a3b8' : '#64748b'
+  const gridColor = isDark.value ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'
+  return {
+    indexAxis: 'y' as const,
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { ticks: { color: tickColor }, grid: { color: gridColor } },
+      y: { ticks: { color: tickColor }, grid: { color: gridColor } },
+    },
+  }
+})
 </script>
 
 <template>
@@ -232,6 +261,28 @@ const chartOptions = computed(() => {
         <Chart type="bar" :data="chartData" :options="chartOptions" />
       </div>
       <p v-else class="hint">Keine Buchungen im gewählten Zeitraum.</p>
+    </section>
+
+    <section v-if="result && result.byTag.length > 0" class="card">
+      <h2>Aufschlüsselung nach Tag</h2>
+      <p class="hint">
+        Jede gefilterte Buchung zählt in jeden Tag, den sie trägt. Tags aus dem Filter
+        sind ausgeblendet.
+      </p>
+      <div
+        v-if="tagChartData"
+        class="chart-wrap"
+        :style="{ height: `${Math.max(8, result.byTag.length * 2)}rem` }"
+      >
+        <Chart type="bar" :data="tagChartData" :options="tagChartOptions" />
+      </div>
+      <DataTable :value="result.byTag" stripedRows>
+        <Column field="tag" header="Tag" />
+        <Column header="Summe">
+          <template #body="{ data }">{{ formatCurrency(data.sum) }}</template>
+        </Column>
+        <Column field="count" header="Anzahl" />
+      </DataTable>
     </section>
 
     <section v-if="result && result.topCounterparties.length > 0" class="card">

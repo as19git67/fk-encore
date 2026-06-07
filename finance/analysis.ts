@@ -49,6 +49,7 @@ export interface AnalysisResult {
   ast: AnalysisAst;
   total: { sum: string; count: number; avg: string };
   byMonth: Array<{ month: string; sum: string; count: number }>;
+  byTag: Array<{ tag: string; sum: string; count: number }>;
   topCounterparties: Array<{ name: string; sum: string; count: number }>;
 }
 
@@ -194,6 +195,34 @@ async function runAggregate(
     ORDER BY month
   `)).rows as Array<{ month: string; sum: string | number; count: number }>;
 
+  // Breakdown by tag — groups the filtered rows by every user-tag they
+  // carry. A transaction with multiple tags counts toward each of them
+  // (this is an overview per tag, not a strict partition). The tags that
+  // are part of the filter itself are excluded, since every matching row
+  // carries them and they'd dominate the breakdown uninformatively. This
+  // is what powers "of my Japan trip, X went to transport, Y to food…".
+  let tagExclusion = sql``;
+  if (ast.tags.length > 0) {
+    const excludeList = sql.join(
+      ast.tags.map((t) => sql`${t}`),
+      sql`, `,
+    );
+    tagExclusion = sql` AND tg.name NOT IN (${excludeList})`;
+  }
+  const byTagRows = (await db.execute(sql`
+    SELECT
+      tg.name AS tag,
+      COALESCE(SUM(t.amount), 0) AS sum,
+      COUNT(*)::int AS count
+    FROM finance_transaction t
+    JOIN finance_tag_transaction tt ON tt.transaction_id = t.id
+    JOIN finance_tag tg ON tg.id = tt.tag_id AND tg.source = 'user'
+    WHERE ${filter}${tagExclusion}
+    GROUP BY tg.name
+    ORDER BY ABS(SUM(t.amount)) DESC
+    LIMIT 50
+  `)).rows as Array<{ tag: string; sum: string | number; count: number }>;
+
   const topRows = (await db.execute(sql`
     SELECT
       COALESCE(counterparty, '(ohne Gegenseite)') AS name,
@@ -214,6 +243,11 @@ async function runAggregate(
     },
     byMonth: byMonthRows.map((r) => ({
       month: r.month,
+      sum: String(r.sum),
+      count: r.count,
+    })),
+    byTag: byTagRows.map((r) => ({
+      tag: r.tag,
       sum: String(r.sum),
       count: r.count,
     })),
