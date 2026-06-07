@@ -142,6 +142,9 @@ function validateAst(raw: unknown): AnalysisAst {
     : [];
   const op = o.op === "OR" ? "OR" : "AND";
   const result: AnalysisAst = { tags, op };
+  if (o.kind === "event" || o.kind === "ongoing") {
+    result.kind = o.kind;
+  }
   if (
     o.timespan &&
     typeof o.timespan === "object" &&

@@ -266,6 +266,14 @@ export interface AnalysisAst {
   timespan?: { from: string; to: string };
   /** Signed amount range; omitted ⇒ no amount filter. */
   amountRange?: { min?: number; max?: number };
+  /**
+   * Whether the question is about a single bounded occasion ("event",
+   * e.g. one specific trip) or recurring/ongoing spending over time
+   * ("ongoing"). Purely presentational: the monthly breakdown is only
+   * meaningful for "ongoing" analyses and is hidden for events.
+   * Omitted ⇒ treated as "ongoing".
+   */
+  kind?: "event" | "ongoing";
 }
 
 export interface ParseAnalysisOptions {
@@ -292,6 +300,7 @@ export async function parseAnalysisQuery(
       op?: unknown;
       timespan?: unknown;
       amountRange?: unknown;
+      kind?: unknown;
     }
   >("/json-prompt", { prompt });
 
@@ -335,7 +344,9 @@ export async function parseAnalysisQuery(
     }
   }
 
-  const result: AnalysisAst = { tags: uniqueTags, op };
+  const kind: AnalysisAst["kind"] = resp.kind === "event" ? "event" : "ongoing";
+
+  const result: AnalysisAst = { tags: uniqueTags, op, kind };
   if (timespan) result.timespan = timespan;
   if (amountRange) result.amountRange = amountRange;
   return result;
@@ -361,6 +372,7 @@ Strikte Regeln:
 - 'op' ist "AND" wenn die Frage nach einer Schnittmenge mehrerer Konzepte fragt (z. B. "Urlaub in Italien 2024"), "OR" wenn sie nach einer Vereinigung fragt (z. B. "alle Miete oder Nebenkosten").
 - 'timespan' ist ein inklusiver ISO-Datum-Bereich { from, to } in YYYY-MM-DD-Format. Lasse das Feld weg, wenn die Frage keinen Zeitraum nennt.
 - 'amountRange' { min, max } als Zahlen (negative Zahlen = Ausgaben, positive = Einnahmen). Lasse das Feld weg, wenn die Frage keine Grenze nennt.
+- 'kind' ist "event" wenn sich die Frage auf einen einzelnen, zeitlich begrenzten Anlass bezieht (z. B. eine bestimmte Reise wie "Reise 2026 Japan", eine Feier, ein Umzug, eine größere Anschaffung). "ongoing" wenn es um laufende oder wiederkehrende Ausgaben über die Zeit geht (z. B. "Lebensmittel letztes Jahr", "monatliche Fixkosten", "ÖPNV insgesamt"). Im Zweifel "ongoing".
 - Antwort als JSON, kein Freitext drumherum.
 
 Verfügbare Tags (Vokabular):

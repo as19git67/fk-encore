@@ -710,6 +710,8 @@ export interface AnalysisAst {
   op: 'AND' | 'OR'
   timespan?: { from: string; to: string }
   amountRange?: { min?: number; max?: number }
+  /** "event" = bounded one-off (a trip); "ongoing" = recurring spending. */
+  kind?: 'event' | 'ongoing'
 }
 
 export interface AnalysisResult {

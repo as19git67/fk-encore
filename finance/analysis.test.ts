@@ -281,6 +281,28 @@ describe("finance/analysis — aggregate (byTag breakdown)", () => {
   });
 });
 
+describe("finance/analysis — aggregate (kind round-trip)", () => {
+  it("echoes a valid kind back in the result AST", async () => {
+    await seedFixture();
+    await grantAdmin();
+
+    const result = await aggregate({
+      ast: { tags: ["urlaub"], op: "AND", kind: "event" },
+    });
+    expect(result.ast.kind).toBe("event");
+  });
+
+  it("drops an invalid kind instead of forwarding it", async () => {
+    await seedFixture();
+    await grantAdmin();
+
+    const result = await aggregate({
+      ast: { tags: [], op: "AND", kind: "nonsense" as any },
+    });
+    expect(result.ast.kind).toBeUndefined();
+  });
+});
+
 describe("finance/analysis — aggregate (ACL)", () => {
   it("non-admin sees only transactions on accessible accounts", async () => {
     const { accountAId } = await seedFixture();
@@ -372,6 +394,20 @@ describe("finance/analysis — query (LLM parse + aggregate)", () => {
 
     expect(result.ast.tags).toEqual(["urlaub", "italien-2024"]);
     expect(result.total.count).toBe(2);
+  });
+
+  it("forwards the AI-detected event/ongoing kind into the result", async () => {
+    await seedFixture();
+    await grantAdmin();
+
+    vi.mocked(llmClient.parseAnalysisQuery).mockResolvedValue({
+      tags: ["urlaub", "italien-2024"],
+      op: "AND",
+      kind: "event",
+    });
+
+    const result = await query({ question: "Was hat der Italien-Urlaub gekostet?" });
+    expect(result.ast.kind).toBe("event");
   });
 
   it("returns 503 when llm-service is unavailable", async () => {
