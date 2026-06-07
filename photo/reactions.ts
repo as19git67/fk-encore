@@ -42,11 +42,28 @@ interface CreateCommentRequest {
 export const listComments = api(
   { expose: true, method: "GET", path: "/photos/:id/comments", auth: true },
   async (
-    { id, albumId }: { id: number; albumId: Query<number> },
-  ): Promise<{ comments: svc.PhotoComment[] }> => {
+    {
+      id,
+      albumId,
+      limit,
+      before,
+    }: {
+      id: number;
+      albumId: Query<number>;
+      /** When set, return a newest-first page of this size (≤100) with a cursor. */
+      limit?: Query<number>;
+      /** Cursor: id of the oldest comment already loaded (for older pages). */
+      before?: Query<number>;
+    },
+  ): Promise<{ comments: svc.PhotoComment[]; nextCursor: number | null }> => {
     requirePhotosView();
-    const comments = await svc.listComments(getUserId(), id, albumId);
-    return { comments };
+    const userId = getUserId();
+    if (limit != null) {
+      return await svc.listCommentsPage(userId, id, albumId, limit, before ?? null);
+    }
+    // Legacy mode: full list, oldest first (used by the detail thread view).
+    const comments = await svc.listComments(userId, id, albumId);
+    return { comments, nextCursor: null };
   },
 );
 

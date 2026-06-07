@@ -4,6 +4,7 @@ import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import PhotoLocationMenu from './PhotoLocationMenu.vue'
 import { getPhotoUrl, updatePhotoDescription } from '../api/photos'
+import { listCommentsPage, createComment, type PhotoComment } from '../api/reactions'
 import type { FeedPhotoItem } from '../api/photoFeed'
 
 const props = defineProps<{
@@ -14,18 +15,65 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'like', item: FeedPhotoItem): void
   (e: 'hide', item: FeedPhotoItem): void
-  (e: 'comment', item: FeedPhotoItem, body: string): void
 }>()
 
 const draft = ref('')
 const burst = ref(false)
-const commentInput = ref<InstanceType<typeof InputText> | null>(null)
 
-/** Focus the inline comment field — the comment icon must not navigate away. */
-function focusComment() {
-  const el = (commentInput.value as unknown as { $el?: HTMLElement } | null)?.$el
-  el?.focus()
-  el?.scrollIntoView({ block: 'nearest' })
+// ── Comment section (toggled by the comment-bubble button) ──────────────────
+const COMMENT_PAGE = 100
+const commentsExpanded = ref(false)
+const comments = ref<PhotoComment[]>([])
+const nextCursor = ref<number | null>(null)
+const loadingComments = ref(false)
+const loadingMore = ref(false)
+const loadedOnce = ref(false)
+const commentError = ref('')
+
+function toggleComments() {
+  commentsExpanded.value = !commentsExpanded.value
+  if (commentsExpanded.value && !loadedOnce.value) void loadComments()
+}
+
+async function loadComments() {
+  if (!props.item.album) return
+  loadingComments.value = true
+  commentError.value = ''
+  try {
+    const res = await listCommentsPage(props.item.photoId, props.item.album.id, {
+      limit: COMMENT_PAGE,
+    })
+    comments.value = res.comments
+    nextCursor.value = res.nextCursor
+    loadedOnce.value = true
+  } catch (err) {
+    commentError.value = (err as Error)?.message || 'Kommentare konnten nicht geladen werden'
+  } finally {
+    loadingComments.value = false
+  }
+}
+
+async function loadMoreComments() {
+  if (!props.item.album || loadingMore.value || nextCursor.value == null) return
+  loadingMore.value = true
+  try {
+    const res = await listCommentsPage(props.item.photoId, props.item.album.id, {
+      limit: COMMENT_PAGE,
+      before: nextCursor.value,
+    })
+    comments.value.push(...res.comments)
+    nextCursor.value = res.nextCursor
+  } catch {
+    // keep what we have; a later scroll retries
+  } finally {
+    loadingMore.value = false
+  }
+}
+
+// Newest is at the top; scrolling toward the bottom pages in older comments.
+function onCommentScroll(e: Event) {
+  const el = e.target as HTMLElement
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 80) void loadMoreComments()
 }
 
 // Only the photo owner may edit the description (matches the backend).
@@ -116,11 +164,25 @@ function onDoubleTap() {
   }
 }
 
-function submitComment() {
+async function submitComment() {
   const body = draft.value.trim()
-  if (!body) return
-  emit('comment', props.item, body)
-  draft.value = ''
+  if (!body || !props.item.album) return
+  commentError.value = ''
+  try {
+    const created = await createComment(props.item.photoId, body, props.item.album.id)
+    draft.value = ''
+    // Prepend to the loaded list (newest first) and keep the card counters /
+    // collapsed preview in sync. Mutating props.item matches the description
+    // editor and keeps the feed cache (same object reference) consistent.
+    if (loadedOnce.value) comments.value.unshift(created)
+    props.item.commentCount += 1
+    props.item.latestComment = {
+      author: created.author.name ?? 'Du',
+      excerpt: created.body.slice(0, 140),
+    }
+  } catch (err) {
+    commentError.value = (err as Error)?.message || 'Kommentar konnte nicht gespeichert werden'
+  }
 }
 </script>
 
@@ -165,7 +227,14 @@ function submitComment() {
       >
         <i :class="item.hiddenByMe ? 'pi pi-thumbs-down-fill' : 'pi pi-thumbs-down'" />
       </button>
-      <button class="icon-btn" title="Kommentieren" @click="focusComment">
+      <button
+        class="icon-btn"
+        :class="{ active: commentsExpanded }"
+        :aria-pressed="commentsExpanded"
+        :aria-expanded="commentsExpanded"
+        title="Kommentare"
+        @click="toggleComments"
+      >
         <i class="pi pi-comment" />
         <span v-if="item.commentCount > 0" class="count">{{ item.commentCount }}</span>
       </button>
@@ -224,21 +293,41 @@ function submitComment() {
       </button>
     </p>
 
-    <p v-if="item.latestComment" class="comment-preview">
+    <!-- Collapsed: only the newest comment as a teaser. -->
+    <p v-if="!commentsExpanded && item.latestComment" class="comment-preview">
       <span class="owner-inline">{{ item.latestComment.author ?? 'Gast' }}</span>
       {{ item.latestComment.excerpt }}
     </p>
 
-    <form v-if="item.album" class="add-comment" @submit.prevent="submitComment">
-      <InputText ref="commentInput" v-model="draft" placeholder="Kommentieren…" class="comment-input" />
-      <Button
-        type="submit"
-        label="Senden"
-        text
-        size="small"
-        :disabled="draft.trim().length === 0"
-      />
-    </form>
+    <!-- Expanded: scrollable list (50vh), newest first, older paged in at the bottom. -->
+    <div v-if="commentsExpanded" class="comment-section">
+      <div class="comment-list" @scroll="onCommentScroll">
+        <div v-if="loadingComments" class="comment-info">
+          <i class="pi pi-spin pi-spinner" /> Kommentare werden geladen…
+        </div>
+        <template v-else>
+          <p v-if="comments.length === 0" class="comment-info">Noch keine Kommentare.</p>
+          <p v-for="c in comments" :key="c.id" class="comment-row">
+            <span class="owner-inline">{{ c.author.name ?? 'Gast' }}</span>{{ c.body }}
+          </p>
+          <div v-if="loadingMore" class="comment-info">
+            <i class="pi pi-spin pi-spinner" /> Ältere Kommentare…
+          </div>
+        </template>
+      </div>
+
+      <form v-if="item.album" class="add-comment" @submit.prevent="submitComment">
+        <InputText v-model="draft" placeholder="Kommentieren…" class="comment-input" />
+        <Button
+          type="submit"
+          label="Senden"
+          text
+          size="small"
+          :disabled="draft.trim().length === 0"
+        />
+      </form>
+      <p v-if="commentError" class="comment-error">{{ commentError }}</p>
+    </div>
   </article>
 </template>
 
@@ -404,4 +493,38 @@ function submitComment() {
   margin-top: 0.4rem;
 }
 .comment-input { flex: 1; }
+
+/* Comment-bubble toggle is highlighted while the section is open. */
+.icon-btn.active { color: var(--p-primary-color); }
+
+.comment-section {
+  display: flex;
+  flex-direction: column;
+}
+.comment-list {
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: 0.2rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.comment-row {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.comment-info {
+  padding: 0.4rem 0;
+  font-size: 0.85rem;
+  color: var(--p-text-muted-color);
+  text-align: center;
+}
+.comment-error {
+  margin: 0;
+  padding: 0 0.8rem 0.6rem;
+  font-size: 0.85rem;
+  color: var(--p-red-500, #e0245e);
+}
 </style>
