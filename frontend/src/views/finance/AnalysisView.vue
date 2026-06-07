@@ -34,9 +34,14 @@ const result = ref<AnalysisResult | null>(null)
 
 const tagSuggestions = ref<string[]>([])
 
-const astEditable = ref<AnalysisAst>({ tags: [], op: 'AND' })
+const astEditable = ref<AnalysisAst>({ tags: [], op: 'AND', kind: 'ongoing' })
 const fromDate = ref<Date | null>(null)
 const toDate = ref<Date | null>(null)
+
+// Monthly bars only make sense for ongoing/recurring spending. For a
+// bounded event (a single trip) they add no insight, so we hide them —
+// driven by the AI-detected `kind`, which the user can still override.
+const showMonthly = computed(() => astEditable.value.kind !== 'event')
 
 onMounted(async () => {
   if (tagsStore.items.length === 0) await tagsStore.refresh('user')
@@ -84,6 +89,7 @@ async function reaggregate() {
     const ast: AnalysisAst = {
       tags: [...astEditable.value.tags],
       op: astEditable.value.op,
+      kind: astEditable.value.kind,
     }
     const from = toIso(fromDate.value)
     const to = toIso(toDate.value)
@@ -102,6 +108,7 @@ function applyResult(r: AnalysisResult) {
   astEditable.value = {
     tags: [...r.ast.tags],
     op: r.ast.op,
+    kind: r.ast.kind ?? 'ongoing',
   }
   fromDate.value = fromIso(r.ast.timespan?.from)
   toDate.value = fromIso(r.ast.timespan?.to)
@@ -132,6 +139,35 @@ const chartOptions = computed(() => {
   const tickColor = isDark.value ? '#94a3b8' : '#64748b'
   const gridColor = isDark.value ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'
   return {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { ticks: { color: tickColor }, grid: { color: gridColor } },
+      y: { ticks: { color: tickColor }, grid: { color: gridColor } },
+    },
+  }
+})
+
+const tagChartData = computed(() => {
+  if (!result.value || result.value.byTag.length === 0) return null
+  return {
+    labels: result.value.byTag.map((t) => t.tag),
+    datasets: [
+      {
+        label: 'Summe',
+        data: result.value.byTag.map((t) => Number(t.sum)),
+        backgroundColor: isDark.value ? 'rgba(52, 211, 153, 0.7)' : 'rgba(16, 185, 129, 0.6)',
+      },
+    ],
+  }
+})
+
+const tagChartOptions = computed(() => {
+  const tickColor = isDark.value ? '#94a3b8' : '#64748b'
+  const gridColor = isDark.value ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'
+  return {
+    indexAxis: 'y' as const,
     responsive: true,
     maintainAspectRatio: false,
     plugins: { legend: { display: false } },
@@ -201,6 +237,20 @@ const chartOptions = computed(() => {
       </div>
 
       <div class="ast-row">
+        <span class="ast-label">Art</span>
+        <div class="op-options">
+          <div class="op-option">
+            <RadioButton v-model="astEditable.kind" inputId="kind-ongoing" value="ongoing" />
+            <label for="kind-ongoing">Fortlaufend</label>
+          </div>
+          <div class="op-option">
+            <RadioButton v-model="astEditable.kind" inputId="kind-event" value="event" />
+            <label for="kind-event">Ereignis</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="ast-row">
         <span class="ast-label">Zeitraum</span>
         <DatePicker v-model="fromDate" date-format="yy-mm-dd" placeholder="Von" show-button-bar />
         <DatePicker v-model="toDate" date-format="yy-mm-dd" placeholder="Bis" show-button-bar />
@@ -228,10 +278,35 @@ const chartOptions = computed(() => {
         </div>
       </div>
 
-      <div v-if="chartData && result.byMonth.length > 0" class="chart-wrap">
-        <Chart type="bar" :data="chartData" :options="chartOptions" />
+      <template v-if="showMonthly">
+        <h3 class="subhead">Monatsverlauf</h3>
+        <div v-if="chartData && result.byMonth.length > 0" class="chart-wrap">
+          <Chart type="bar" :data="chartData" :options="chartOptions" />
+        </div>
+        <p v-else class="hint">Keine Buchungen im gewählten Zeitraum.</p>
+      </template>
+    </section>
+
+    <section v-if="result && result.byTag.length > 0" class="card">
+      <h2>Aufschlüsselung nach Tag</h2>
+      <p class="hint">
+        Jede gefilterte Buchung zählt in jeden Tag, den sie trägt. Tags aus dem Filter
+        sind ausgeblendet.
+      </p>
+      <div
+        v-if="tagChartData"
+        class="chart-wrap"
+        :style="{ height: `${Math.max(8, result.byTag.length * 2)}rem` }"
+      >
+        <Chart type="bar" :data="tagChartData" :options="tagChartOptions" />
       </div>
-      <p v-else class="hint">Keine Buchungen im gewählten Zeitraum.</p>
+      <DataTable :value="result.byTag" stripedRows>
+        <Column field="tag" header="Tag" />
+        <Column header="Summe">
+          <template #body="{ data }">{{ formatCurrency(data.sum) }}</template>
+        </Column>
+        <Column field="count" header="Anzahl" />
+      </DataTable>
     </section>
 
     <section v-if="result && result.topCounterparties.length > 0" class="card">
@@ -278,6 +353,12 @@ const chartOptions = computed(() => {
 .card h2 {
   margin: 0;
   font-size: 1rem;
+}
+.subhead {
+  margin: 0.25rem 0 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--p-text-muted-color);
 }
 .card label {
   display: flex;
