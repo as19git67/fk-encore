@@ -375,6 +375,19 @@ Strikte Regeln:
 - 'kind' ist "event" wenn sich die Frage auf einen einzelnen, zeitlich begrenzten Anlass bezieht (z. B. eine bestimmte Reise wie "Reise 2026 Japan", eine Feier, ein Umzug, eine größere Anschaffung). "ongoing" wenn es um laufende oder wiederkehrende Ausgaben über die Zeit geht (z. B. "Lebensmittel letztes Jahr", "monatliche Fixkosten", "ÖPNV insgesamt"). Im Zweifel "ongoing".
 - Antwort als JSON, kein Freitext drumherum.
 
+Beispiele für 'kind':
+- "Was hat mein Japan-Urlaub gekostet?" → "event"
+- "Wie viel habe ich auf der Reise 2026 Japan ausgegeben?" → "event"
+- "Ausgaben für die Hochzeit von Anna" → "event"
+- "Was hat der Umzug nach Berlin gekostet?" → "event"
+- "Wie teuer war die neue Waschmaschine inkl. Anschluss?" → "event"
+- "Was habe ich auf der Konferenz in München ausgegeben?" → "event"
+- "Wie viel gebe ich monatlich für Lebensmittel aus?" → "ongoing"
+- "Meine Restaurant-Ausgaben im letzten Jahr" → "ongoing"
+- "Wie viel zahle ich insgesamt für ÖPNV?" → "ongoing"
+- "Entwicklung meiner Fixkosten über die Zeit" → "ongoing"
+- "Alle Ausgaben für Mobilität & Transport 2025" → "ongoing"
+
 Verfügbare Tags (Vokabular):
 ${vocabBlock}
 ${hintBlock}
