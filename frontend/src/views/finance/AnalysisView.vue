@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import InputText from 'primevue/inputtext'
 import Button from 'primevue/button'
 import DatePicker from 'primevue/datepicker'
 import RadioButton from 'primevue/radiobutton'
+import Select from 'primevue/select'
+import InputNumber from 'primevue/inputnumber'
 import AutoComplete from 'primevue/autocomplete'
 import Message from 'primevue/message'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Chart from 'primevue/chart'
 import Dialog from 'primevue/dialog'
+import Tag from 'primevue/tag'
 import ProgressSpinner from 'primevue/progressspinner'
 import { toLocalIsoDate, parseLocalDate } from '../../utils/dateFormat'
 import {
@@ -25,6 +28,7 @@ import {
   type AnalysisAst,
   type AnalysisResult,
   type AnalysisTransaction,
+  type RelativeTimespan,
   type SavedAnalysisItem,
 } from '../../api/finance'
 import { useTagsStore } from '../../stores/finance/tags'
@@ -45,11 +49,128 @@ const result = ref<AnalysisResult | null>(null)
 
 const tagSuggestions = ref<string[]>([])
 
-const astEditable = ref<AnalysisAst>({ tags: [], op: 'AND', kind: 'ongoing' })
+// --- Tag groups (replaces flat tags + op) ---
+interface EditableTagGroup {
+  tags: string[]
+  op: 'AND' | 'OR'
+}
+const tagGroups = ref<EditableTagGroup[]>([{ tags: [], op: 'AND' }])
+const groupOp = ref<'AND' | 'OR'>('AND')
+
+function addGroup() {
+  tagGroups.value.push({ tags: [], op: 'OR' })
+}
+
+function removeGroup(index: number) {
+  tagGroups.value.splice(index, 1)
+  if (tagGroups.value.length === 0) tagGroups.value.push({ tags: [], op: 'AND' })
+}
+
+function toggleGroupOp(index: number) {
+  const g = tagGroups.value[index]
+  if (g) g.op = g.op === 'AND' ? 'OR' : 'AND'
+}
+
+// --- Kind / Interval ---
+const editableKind = ref<'ongoing' | 'event'>('ongoing')
+const editableInterval = ref<'month' | 'year'>('month')
+const showMonthly = computed(() => editableKind.value !== 'event')
+
+// --- Timespan (manual relative) ---
+const timespanMode = ref<string>('custom')
+const relativeN = ref(6)
 const fromDate = ref<Date | null>(null)
 const toDate = ref<Date | null>(null)
 
-const showMonthly = computed(() => astEditable.value.kind !== 'event')
+const timespanOptions = [
+  { label: 'Benutzerdefiniert', value: 'custom' },
+  { label: 'Dieser Monat', value: 'this_month' },
+  { label: 'Letzter Monat', value: 'last_month' },
+  { label: 'Dieses Jahr', value: 'this_year' },
+  { label: 'Letztes Jahr', value: 'last_year' },
+  { label: 'Letzte N Monate', value: 'last_n_months' },
+  { label: 'Letzte N Jahre', value: 'last_n_years' },
+]
+
+function resolveRelativeLocal(rt: RelativeTimespan): { from: string; to: string } {
+  const now = new Date()
+  const y = now.getFullYear()
+  const m = now.getMonth()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const iso = (yr: number, mo: number, day: number) => `${yr}-${pad(mo)}-${pad(day)}`
+  const lastDay = (yr: number, mo: number) => new Date(yr, mo, 0).getDate()
+  switch (rt.type) {
+    case 'this_year': return { from: iso(y, 1, 1), to: iso(y, 12, 31) }
+    case 'last_year': return { from: iso(y - 1, 1, 1), to: iso(y - 1, 12, 31) }
+    case 'last_n_years': { const n = rt.n ?? 1; return { from: iso(y - n, 1, 1), to: iso(y, 12, 31) } }
+    case 'last_n_months': {
+      const n = rt.n ?? 1
+      const d = new Date(y, m - n, 1)
+      return { from: iso(d.getFullYear(), d.getMonth() + 1, 1), to: iso(y, m + 1, lastDay(y, m + 1)) }
+    }
+    case 'this_month': return { from: iso(y, m + 1, 1), to: iso(y, m + 1, lastDay(y, m + 1)) }
+    case 'last_month': {
+      const d = new Date(y, m - 1, 1)
+      const mo = d.getMonth() + 1
+      const yr = d.getFullYear()
+      return { from: iso(yr, mo, 1), to: iso(yr, mo, lastDay(yr, mo)) }
+    }
+    default: return { from: iso(y, 1, 1), to: iso(y, 12, 31) }
+  }
+}
+
+function buildRelativeTimespan(): RelativeTimespan | undefined {
+  if (timespanMode.value === 'custom') return undefined
+  const t = timespanMode.value as RelativeTimespan['type']
+  if (t === 'last_n_months' || t === 'last_n_years') {
+    return { type: t, n: relativeN.value }
+  }
+  return { type: t }
+}
+
+const activeRelativeTimespan = computed(() => buildRelativeTimespan())
+
+const resolvedTimespanText = computed(() => {
+  const rt = activeRelativeTimespan.value
+  if (!rt) return ''
+  const { from, to } = resolveRelativeLocal(rt)
+  return `${parseLocalDate(from).toLocaleDateString('de-DE')} – ${parseLocalDate(to).toLocaleDateString('de-DE')}`
+})
+
+const activeRelativeLabel = computed(() => {
+  const rt = activeRelativeTimespan.value
+  return rt ? relativeTimespanLabel(rt) : ''
+})
+
+function onTimespanModeChange() {
+  if (timespanMode.value !== 'custom') {
+    const rt = buildRelativeTimespan()
+    if (rt) {
+      const { from, to } = resolveRelativeLocal(rt)
+      fromDate.value = parseLocalDate(from)
+      toDate.value = parseLocalDate(to)
+    }
+  }
+}
+
+watch(timespanMode, onTimespanModeChange)
+watch(relativeN, () => {
+  if (timespanMode.value === 'last_n_months' || timespanMode.value === 'last_n_years') {
+    onTimespanModeChange()
+  }
+})
+
+function relativeTimespanLabel(rt: RelativeTimespan): string {
+  switch (rt.type) {
+    case 'this_year': return 'Dieses Jahr'
+    case 'last_year': return 'Letztes Jahr'
+    case 'this_month': return 'Dieser Monat'
+    case 'last_month': return 'Letzter Monat'
+    case 'last_n_years': return `Letzte ${rt.n} Jahre`
+    case 'last_n_months': return `Letzte ${rt.n} Monate`
+    default: return String(rt.type)
+  }
+}
 
 // --- Saved analyses (Rückblicke) ---
 const savedItems = ref<SavedAnalysisItem[]>([])
@@ -137,13 +258,11 @@ async function runSavedItem(item: SavedAnalysisItem) {
     const resp = await analysisAggregate({ ast: item.ast })
     applyResult(resp)
     question.value = item.question || item.name
-    // Update the cached summary
     await updateSavedAnalysis({ id: item.id, summary: resp.total }).catch(() => {})
     const idx = savedItems.value.findIndex((s) => s.id === item.id)
     if (idx >= 0) {
       savedItems.value[idx] = Object.assign({}, savedItems.value[idx], { summary: resp.total })
     }
-    // Mark AI items as seen
     if (item.source === 'ai' && !item.seenAt) {
       await markSavedAnalysesSeen([item.id]).catch(() => {})
       if (idx >= 0) {
@@ -198,20 +317,47 @@ async function submitQuestion() {
   }
 }
 
+function buildAstFromEditor(): AnalysisAst {
+  const ast: AnalysisAst = {
+    tags: [],
+    op: 'AND',
+    kind: editableKind.value,
+  }
+  if (editableKind.value === 'ongoing' && editableInterval.value) {
+    ast.interval = editableInterval.value
+  }
+
+  // Tag groups
+  const nonEmpty = tagGroups.value.filter((g) => g.tags.length > 0)
+  const firstGroup = nonEmpty[0]
+  if (nonEmpty.length === 1 && firstGroup) {
+    ast.tags = [...firstGroup.tags]
+    ast.op = firstGroup.op
+  } else if (nonEmpty.length > 1) {
+    ast.tagGroups = nonEmpty.map((g) => ({ tags: [...g.tags], op: g.op }))
+    ast.groupOp = groupOp.value
+    ast.tags = nonEmpty.flatMap((g) => g.tags)
+    ast.op = groupOp.value
+  }
+
+  // Timespan
+  const rt = buildRelativeTimespan()
+  if (rt) {
+    ast.relativeTimespan = rt
+  } else {
+    const from = toIso(fromDate.value)
+    const to = toIso(toDate.value)
+    if (from && to) ast.timespan = { from, to }
+  }
+
+  return ast
+}
+
 async function reaggregate() {
   aggregating.value = true
   error.value = null
   try {
-    const ast: AnalysisAst = {
-      tags: [...astEditable.value.tags],
-      op: astEditable.value.op,
-      kind: astEditable.value.kind,
-    }
-    if (astEditable.value.interval) ast.interval = astEditable.value.interval
-    if (astEditable.value.relativeTimespan) ast.relativeTimespan = astEditable.value.relativeTimespan
-    const from = toIso(fromDate.value)
-    const to = toIso(toDate.value)
-    if (from && to) ast.timespan = { from, to }
+    const ast = buildAstFromEditor()
     const resp = await analysisAggregate({ ast })
     applyResult(resp)
   } catch (err) {
@@ -223,12 +369,24 @@ async function reaggregate() {
 
 function applyResult(r: AnalysisResult) {
   result.value = r
-  astEditable.value = {
-    tags: [...r.ast.tags],
-    op: r.ast.op,
-    kind: r.ast.kind ?? 'ongoing',
-    interval: r.ast.interval,
-    relativeTimespan: r.ast.relativeTimespan,
+  editableKind.value = r.ast.kind ?? 'ongoing'
+  editableInterval.value = r.ast.interval ?? 'month'
+
+  // Tag groups
+  if (r.ast.tagGroups && r.ast.tagGroups.length > 0) {
+    tagGroups.value = r.ast.tagGroups.map((g) => ({ tags: [...g.tags], op: g.op }))
+    groupOp.value = r.ast.groupOp ?? 'AND'
+  } else {
+    tagGroups.value = [{ tags: [...r.ast.tags], op: r.ast.op }]
+    groupOp.value = 'AND'
+  }
+
+  // Timespan
+  if (r.ast.relativeTimespan) {
+    timespanMode.value = r.ast.relativeTimespan.type
+    if (r.ast.relativeTimespan.n) relativeN.value = r.ast.relativeTimespan.n
+  } else {
+    timespanMode.value = 'custom'
   }
   fromDate.value = fromIso(r.ast.timespan?.from)
   toDate.value = fromIso(r.ast.timespan?.to)
@@ -313,8 +471,7 @@ function onPeriodRowClick(event: { data: { period: string } }) {
 }
 
 const periodLabel = computed(() => {
-  const interval = astEditable.value.interval
-  return interval === 'year' ? 'Jahresverlauf' : 'Monatsverlauf'
+  return editableInterval.value === 'year' ? 'Jahresverlauf' : 'Monatsverlauf'
 })
 
 const chartData = computed(() => {
@@ -492,28 +649,56 @@ const tagChartOptions = computed(() => {
         />
       </div>
 
-      <div class="ast-row">
-        <span class="ast-label">Tags</span>
-        <AutoComplete
-          v-model="astEditable.tags"
-          :suggestions="tagSuggestions"
-          @complete="searchTags"
-          multiple
-          typeahead
-          class="flex-1"
-        />
-      </div>
-
-      <div class="ast-row">
-        <span class="ast-label">Operator</span>
-        <div class="op-options">
-          <div class="op-option">
-            <RadioButton v-model="astEditable.op" inputId="op-and" value="AND" />
-            <label for="op-and">AND</label>
+      <!-- Tag groups -->
+      <div class="tag-groups">
+        <div v-for="(group, gi) in tagGroups" :key="gi" class="tag-group-row">
+          <div v-if="gi > 0" class="group-connector">
+            <span class="connector-op">{{ groupOp }}</span>
           </div>
-          <div class="op-option">
-            <RadioButton v-model="astEditable.op" inputId="op-or" value="OR" />
-            <label for="op-or">OR</label>
+          <div class="tag-group-content">
+            <AutoComplete
+              v-model="group.tags"
+              :suggestions="tagSuggestions"
+              @complete="searchTags"
+              multiple
+              typeahead
+              class="flex-1"
+              :placeholder="gi === 0 ? 'Tags auswählen…' : 'Weitere Tags…'"
+            />
+            <Button
+              v-if="group.tags.length > 1"
+              :label="group.op"
+              size="small"
+              :outlined="true"
+              :severity="group.op === 'OR' ? 'warn' : 'info'"
+              class="group-op-btn"
+              @click="toggleGroupOp(gi)"
+            />
+            <Button
+              v-if="tagGroups.length > 1"
+              icon="pi pi-times"
+              text
+              rounded
+              size="small"
+              severity="secondary"
+              @click="removeGroup(gi)"
+            />
+          </div>
+        </div>
+        <div class="tag-group-actions">
+          <Button label="+ Gruppe" text size="small" icon="pi pi-plus" @click="addGroup" />
+          <div v-if="tagGroups.length > 1" class="group-op-toggle">
+            <span class="group-op-label">Verknüpfung:</span>
+            <div class="op-options">
+              <div class="op-option">
+                <RadioButton v-model="groupOp" inputId="gop-and" value="AND" />
+                <label for="gop-and">AND</label>
+              </div>
+              <div class="op-option">
+                <RadioButton v-model="groupOp" inputId="gop-or" value="OR" />
+                <label for="gop-or">OR</label>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -522,25 +707,25 @@ const tagChartOptions = computed(() => {
         <span class="ast-label">Art</span>
         <div class="op-options">
           <div class="op-option">
-            <RadioButton v-model="astEditable.kind" inputId="kind-ongoing" value="ongoing" />
+            <RadioButton v-model="editableKind" inputId="kind-ongoing" value="ongoing" />
             <label for="kind-ongoing">Fortlaufend</label>
           </div>
           <div class="op-option">
-            <RadioButton v-model="astEditable.kind" inputId="kind-event" value="event" />
+            <RadioButton v-model="editableKind" inputId="kind-event" value="event" />
             <label for="kind-event">Ereignis</label>
           </div>
         </div>
       </div>
 
-      <div v-if="astEditable.kind === 'ongoing'" class="ast-row">
+      <div v-if="editableKind === 'ongoing'" class="ast-row">
         <span class="ast-label">Intervall</span>
         <div class="op-options">
           <div class="op-option">
-            <RadioButton v-model="astEditable.interval" inputId="interval-month" value="month" />
+            <RadioButton v-model="editableInterval" inputId="interval-month" value="month" />
             <label for="interval-month">Monatlich</label>
           </div>
           <div class="op-option">
-            <RadioButton v-model="astEditable.interval" inputId="interval-year" value="year" />
+            <RadioButton v-model="editableInterval" inputId="interval-year" value="year" />
             <label for="interval-year">Jährlich</label>
           </div>
         </div>
@@ -548,8 +733,32 @@ const tagChartOptions = computed(() => {
 
       <div class="ast-row">
         <span class="ast-label">Zeitraum</span>
+        <Select
+          v-model="timespanMode"
+          :options="timespanOptions"
+          optionLabel="label"
+          optionValue="value"
+          class="timespan-select"
+        />
+      </div>
+      <div v-if="timespanMode === 'last_n_months' || timespanMode === 'last_n_years'" class="ast-row">
+        <span class="ast-label"></span>
+        <InputNumber v-model="relativeN" :min="1" :max="120" showButtons class="n-input" />
+        <span class="relative-hint">{{ timespanMode === 'last_n_months' ? 'Monate' : 'Jahre' }}</span>
+      </div>
+      <div v-if="timespanMode === 'custom'" class="ast-row">
+        <span class="ast-label"></span>
         <DatePicker v-model="fromDate" date-format="yy-mm-dd" placeholder="Von" show-button-bar />
         <DatePicker v-model="toDate" date-format="yy-mm-dd" placeholder="Bis" show-button-bar />
+      </div>
+      <div v-else class="ast-row">
+        <span class="ast-label"></span>
+        <Tag
+          :value="activeRelativeLabel"
+          icon="pi pi-sync"
+          severity="info"
+        />
+        <span class="relative-hint">{{ resolvedTimespanText }}</span>
       </div>
 
       <div class="actions">
@@ -870,6 +1079,11 @@ const tagChartOptions = computed(() => {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+.relative-hint {
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
+  font-style: italic;
+}
 .clickable-rows :deep(tbody tr) {
   cursor: pointer;
 }
@@ -884,6 +1098,60 @@ const tagChartOptions = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* --- Tag groups --- */
+.tag-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.tag-group-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.tag-group-content {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.group-connector {
+  display: flex;
+  justify-content: center;
+  padding: 0.125rem 0;
+}
+.connector-op {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--p-primary-color);
+  letter-spacing: 0.05em;
+}
+.group-op-btn {
+  min-width: 3.5rem;
+  font-size: 0.75rem;
+}
+.tag-group-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 0.25rem;
+}
+.group-op-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.group-op-label {
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
+}
+.timespan-select {
+  min-width: 14rem;
+}
+.n-input {
+  max-width: 8rem;
 }
 
 /* --- Saved analyses / Rückblicke --- */
