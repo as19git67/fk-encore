@@ -77,13 +77,29 @@ export interface BulkRegionSuggestion {
 /**
  * A tracked region whose entire photo footprint is already served by
  * smaller imported sub-regions — no POI data from this region is
- * exclusively needed. Safe to delete (Lösch-Kandidat).
+ * exclusively needed.
+ *
+ * Whether deleting it actually saves disk depends on the PBF sizes:
+ * keeping one larger extract can be cheaper than several overlapping
+ * sub-regions. `recommendation` weighs that:
+ *   - "delete_parent": the sub-regions together are ≤ the parent, so
+ *     dropping the parent frees space.
+ *   - "keep_parent": the sub-regions together cost MORE than the parent
+ *     — the single larger extract is the space-efficient choice, so
+ *     keep it (and consider dropping the redundant sub-regions instead).
+ *   - "unknown": at least one PBF size is missing, no verdict possible.
  */
 export interface RedundantRegion {
   slug: string;
   status: RegionStatus;
   /** Tracked child-region slugs that collectively cover this region's photos. */
   coveringChildren: string[];
+  /** PBF download size of the larger (redundant) region in MB, if known. */
+  parentSizeMb: number | null;
+  /** Summed PBF size of the covering sub-regions in MB, if all are known. */
+  childrenSizeMb: number | null;
+  /** Disk-aware verdict; see interface docs. */
+  recommendation: "delete_parent" | "keep_parent" | "unknown";
 }
 
 export interface BulkSuggestResult {
@@ -135,9 +151,16 @@ export async function suggestRegionsFromPhotos(
   // and to suppress redundant sub-region proposals for areas an
   // imported (or in-progress) region already covers.
   const trackedRows = await db
-    .select({ slug: osmRegionImports.slug, status: osmRegionImports.status })
+    .select({
+      slug: osmRegionImports.slug,
+      status: osmRegionImports.status,
+      pbfSizeMb: osmRegionImports.pbf_size_mb,
+    })
     .from(osmRegionImports);
   const statusBySlug = new Map(trackedRows.map((t) => [t.slug, t.status]));
+  // Slug → PBF download size (MB). Drives the disk-aware delete/keep
+  // verdict for redundant regions.
+  const sizeBySlug = new Map(trackedRows.map((t) => [t.slug, t.pbfSizeMb]));
   const coveringSlugs = new Set(
     trackedRows
       .filter(
@@ -235,7 +258,31 @@ export async function suggestRegionsFromPhotos(
     if (coveringChildren.length === 0) continue; // no photos in territory at all
     const rawStatus = statusBySlug.get(slug);
     if (!rawStatus || !isRegionStatus(rawStatus)) continue;
-    redundantRegions.push({ slug, status: rawStatus as RegionStatus, coveringChildren });
+
+    // Disk-aware verdict: compare the parent's PBF size against the sum
+    // of its covering sub-regions. Only emit a delete/keep verdict when
+    // every size is known; a single missing value makes the comparison
+    // meaningless, so we fall back to "unknown".
+    const parentSizeMb = sizeBySlug.get(slug) ?? null;
+    const childSizes = coveringChildren.map((c) => sizeBySlug.get(c) ?? null);
+    const allChildSizesKnown = childSizes.every((s) => s !== null);
+    const childrenSizeMb = allChildSizesKnown
+      ? childSizes.reduce((sum, s) => sum + (s as number), 0)
+      : null;
+    let recommendation: RedundantRegion["recommendation"] = "unknown";
+    if (parentSizeMb !== null && childrenSizeMb !== null) {
+      recommendation =
+        childrenSizeMb <= parentSizeMb ? "delete_parent" : "keep_parent";
+    }
+
+    redundantRegions.push({
+      slug,
+      status: rawStatus as RegionStatus,
+      coveringChildren,
+      parentSizeMb,
+      childrenSizeMb,
+      recommendation,
+    });
   }
 
   return {

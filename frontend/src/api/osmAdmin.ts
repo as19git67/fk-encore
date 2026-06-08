@@ -129,6 +129,17 @@ export interface RedundantRegion {
   status: RegionStatus
   /** Child region slugs that collectively cover this region's photos. */
   coveringChildren: string[]
+  /** PBF size of the larger (redundant) region in MB, if known. */
+  parentSizeMb: number | null
+  /** Summed PBF size of the covering sub-regions in MB, if all known. */
+  childrenSizeMb: number | null
+  /**
+   * Disk-aware verdict:
+   * - `delete_parent`: sub-regions are ≤ the parent → dropping it frees space.
+   * - `keep_parent`: sub-regions cost MORE → the larger extract is cheaper.
+   * - `unknown`: a PBF size is missing, no verdict.
+   */
+  recommendation: 'delete_parent' | 'keep_parent' | 'unknown'
 }
 
 export interface BulkSuggestResult {
