@@ -58,13 +58,31 @@ jobs:
         # the package becomes the only project context.
         run: mv FKPhotos.xcodeproj "$RUNNER_TEMP/FKPhotos.xcodeproj"
 
-      - name: Resolve Swift package dependencies
-        run: xcodebuild -resolvePackageDependencies -scheme FKPhotos-Package
+      - name: Discover the package test scheme
+        # With only Package.swift present, xcodebuild treats the directory as an
+        # implicit workspace; the aggregate scheme's exact name is not stable
+        # across Xcode versions (it is NOT necessarily "FKPhotos-Package"). So
+        # discover it: prefer the "-Package" aggregate, else the first scheme.
+        # `xcodebuild test` resolves package dependencies on its own, so no
+        # separate resolve step is needed.
+        run: |
+          xcodebuild -list || true
+          SCHEME=$(xcodebuild -list -json 2>/dev/null | python3 -c '
+import sys, json
+raw = sys.stdin.read()
+data = json.loads(raw[raw.find("{"):])
+c = data.get("workspace") or data.get("project") or {}
+s = c.get("schemes", [])
+pkg = [x for x in s if x.endswith("-Package")]
+print(pkg[0] if pkg else (s[0] if s else ""))
+')
+          echo "Selected scheme: $SCHEME"
+          echo "IOS_SCHEME=$SCHEME" >> "$GITHUB_ENV"
 
       - name: Run unit tests (iOS Simulator)
         run: |
           xcodebuild test \
-            -scheme FKPhotos-Package \
+            -scheme "$IOS_SCHEME" \
             -destination 'platform=iOS Simulator,name=iPhone 16' \
             -skipPackagePluginValidation \
             -resultBundlePath TestResults.xcresult \
