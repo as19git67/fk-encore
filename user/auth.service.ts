@@ -28,6 +28,7 @@ const nowSql = sql`NOW()`
 
 const ACCESS_TOKEN_TTL = 15 * 60 * 1000;          // 15 minutes
 const REFRESH_TOKEN_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
+const REFRESH_GRACE_PERIOD = 30 * 1000;            // 30 s — old refresh token stays valid to absorb multi-tab races
 
 // ---------- Helpers ----------
 
@@ -132,8 +133,15 @@ export async function refreshTokenLogic(req: RefreshRequest): Promise<RefreshRes
     throw new Error("invalid or expired refresh token");
   }
 
-  // Rotate: delete old refresh token
-  await dbExec(db.delete(refreshTokens).where(eq(refreshTokens.token, req.refreshToken)));
+  // Rotate: expire the old refresh token after a short grace period
+  // instead of deleting it immediately. This absorbs race conditions
+  // when multiple browser tabs hit 401 at the same time and both try
+  // to refresh with the same token.
+  await dbExec(
+    db.update(refreshTokens)
+      .set({ expires_at: new Date(Date.now() + REFRESH_GRACE_PERIOD).toISOString() })
+      .where(eq(refreshTokens.token, req.refreshToken))
+  );
 
   // Create new token pair
   const { token, refreshToken } = await createSessionTokens(row.user_id);

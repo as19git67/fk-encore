@@ -35,6 +35,31 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  // Cross-tab sync: pick up token changes made by another tab
+  // (refresh rotation, login, or logout) so this tab never works
+  // with a stale token.
+  if (typeof window !== 'undefined') {
+    window.addEventListener('storage', (e) => {
+      if (e.key === 'auth_token') {
+        if (!e.newValue) {
+          // Another tab logged out
+          token.value = null
+          user.value = null
+          realtimeBus.disconnect()
+          window.location.href = `${import.meta.env.BASE_URL}login`
+        } else if (e.newValue !== token.value) {
+          // Another tab refreshed the token
+          token.value = e.newValue
+          const storedUser = localStorage.getItem('auth_user')
+          if (storedUser) {
+            try { user.value = JSON.parse(storedUser) } catch { /* keep existing */ }
+          }
+          connectRealtime()
+        }
+      }
+    })
+  }
+
   function setSession(responseToken: string, responseRefreshToken: string, responseUser: UserWithRoles) {
     token.value = responseToken
     user.value = responseUser
