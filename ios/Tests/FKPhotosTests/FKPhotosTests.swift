@@ -1,5 +1,5 @@
 import XCTest
-@testable import FKPhotos
+@testable import FKPhotosLib
 
 final class FKPhotosTests: XCTestCase {
 
