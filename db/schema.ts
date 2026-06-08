@@ -145,6 +145,7 @@ export const photoLibraries = pgTable("photo_libraries", {
   // Minimum XMP:Rating (1..5) at which a newly imported photo is marked as
   // favourite for the library owner. 0 disables the auto-favourite behaviour.
   favorite_rating_threshold: integer("favorite_rating_threshold").notNull().default(0),
+  excluded_dirs: text("excluded_dirs").array().notNull().default(sql`'{}'::text[]`),
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
   last_scan_at: timestamp("last_scan_at", { mode: "string" }),
 });
