@@ -861,7 +861,6 @@ export async function updateSavedAnalysis(params: {
 export async function deleteSavedAnalysis(id: number): Promise<void> {
   return apiFetch(`/finance/saved-analysis/${id}`, {
     method: 'DELETE',
-    body: '{}',
   })
 }
 
