@@ -168,21 +168,62 @@ describe("matchPhotoToPois", () => {
     expect(r.matches.length).toBe(2);
   });
 
-  it("returns empty matches when the top score is below threshold", () => {
-    // Photo and POI orthogonal in 768D: similarity = 0.5.
-    // Worst-case proximity (200 m): proximity ≈ 0.2. heading not set
-    // → 0.5. Score: 0.6 · 0.5 + 0.2 · 0.5 + 0.2 · 0.2 = 0.44 < 0.55.
+  it("drops a visually dissimilar candidate via the similarity gate", () => {
+    // Photo and POI orthogonal in 768D: raw cosine = 0, well below the
+    // 0.5 gate. Proximity (right at the POI) and the heading fallback
+    // would otherwise lift the composite score, but the gate rejects it
+    // before scoring — geography must not carry an unrelated image.
     const photo = new Array(768).fill(0);
     photo[0] = 1;
     const poi = new Array(768).fill(0);
-    poi[1] = 1; // orthogonal
+    poi[1] = 1; // orthogonal → raw cosine 0
     const r = matchPhotoToPois({
       photoEmbedding: photo,
       photoHeadingDeg: null,
       photoLat: 48.137,
       photoLon: 11.575,
       candidates: [
-        candidate({ qid: "Q1", poiEmbedding: poi, distanceM: 200 }),
+        candidate({ qid: "Q1", poiEmbedding: poi, distanceM: 0 }),
+      ],
+    });
+    expect(r.matches).toEqual([]);
+    expect(r.reason).toBe("below_similarity_gate");
+  });
+
+  it("keeps a candidate whose raw cosine clears the gate even if it then falls below the score threshold", () => {
+    // Raw cosine ≈ 0.5 (just at the gate) → passes the gate, gets scored.
+    // similarity mapped = 0.75 → 0.6·0.75 = 0.45; far field (1000 m)
+    // proximity ≈ 0.05 → 0.2·0.05 = 0.01; heading fallback 0.2·0.5 = 0.1.
+    // Composite ≈ 0.56 — actually persists. Use a vector pair giving
+    // raw cosine just above 0.5 and a far distance to keep it tight.
+    const photo = [1, 0];
+    const poi = [1, 1]; // raw cosine = 1/√2 ≈ 0.707, clears the gate
+    const r = matchPhotoToPois({
+      photoEmbedding: photo,
+      photoHeadingDeg: null,
+      photoLat: 48.137,
+      photoLon: 11.575,
+      candidates: [candidate({ qid: "Q1", poiEmbedding: poi, distanceM: 30 })],
+    });
+    // Gate passed and the composite score is high enough → one match.
+    expect(r.matches).toHaveLength(1);
+    expect(r.matches[0].qid).toBe("Q1");
+  });
+
+  it("returns below_threshold when a gated-in candidate is sunk by opposing heading + distance", () => {
+    // Raw cosine 0.707 clears the gate (mapped 0.853 → 0.6·0.853 = 0.512),
+    // but the photo points due-west while the POI is due-east (heading
+    // match 0) and it's 1 km away (proximity ≈ 0.048). Composite ≈ 0.52,
+    // below the 0.55 score threshold.
+    const photo = [1, 0];
+    const poi = [1, 1];
+    const r = matchPhotoToPois({
+      photoEmbedding: photo,
+      photoHeadingDeg: 270, // due west
+      photoLat: 48.0,
+      photoLon: 11.0,
+      candidates: [
+        candidate({ qid: "Q1", lat: 48.0, lon: 11.01, poiEmbedding: poi, distanceM: 1000 }),
       ],
     });
     expect(r.matches).toEqual([]);

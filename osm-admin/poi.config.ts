@@ -19,6 +19,23 @@ export const POI_AMBIGUITY_MARGIN = parseFloatEnv("POI_MATCH_AMBIGUITY_MARGIN", 
 export const POI_MIN_MATCH_SCORE = parseFloatEnv("POI_MATCH_MIN_SCORE", 0.55);
 
 /**
+ * Hard image-similarity gate: the minimum RAW cosine similarity
+ * (photo embedding vs. POI reference embedding, in [-1, 1]) a candidate
+ * must reach to be eligible at all.
+ *
+ * Without this gate, proximity (0.2 weight) plus the heading fallback
+ * (0.2 · 0.5) plus the inflated similarity floor — the composite score
+ * remaps raw cosine [-1,1] → [0,1], so an unrelated image still scores
+ * ~0.7 there — let a POI clear `POI_MIN_MATCH_SCORE` on geography alone,
+ * even when its reference picture looks nothing like the photo. The gate
+ * is applied to the *raw* cosine before any remapping, so it directly
+ * reflects visual resemblance. Candidates below it are dropped before
+ * scoring entirely. Lower it (e.g. 0.45) if true matches with strong
+ * viewpoint/lighting differences start getting rejected.
+ */
+export const POI_MIN_SIMILARITY = parseFloatEnv("POI_MATCH_MIN_SIMILARITY", 0.5);
+
+/**
  * OSM tag filters consumed by the geo service's `/pois` endpoint. The
  * set is chosen to cover what humans typically photograph as a
  * "Sehenswürdigkeit" without dragging in every road sign or bench.

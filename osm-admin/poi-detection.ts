@@ -78,6 +78,10 @@ export async function detectPoisForPhoto(
   // bump must not fail the detection job.
   await markUsed(region.slug, { db }).catch(() => {});
   if (candidates.length === 0) {
+    console.warn(
+      `[poi-detection] photo=${photoId}: 0 candidates from geo region=${region.slug} ` +
+        `(db=${region.postgresDb}) — region may be empty or missing data`,
+    );
     return { matches: [], reason: "no_poi_candidates" };
   }
 
@@ -144,6 +148,23 @@ export async function detectPoisForPhoto(
     photoLon: photo.longitude,
     candidates: matchCandidates,
   });
+
+  if (matchResult.reason === "no_embeddings_for_candidates") {
+    const withQid = matchCandidates.filter((c) => c.qid !== null).length;
+    const withEmb = matchCandidates.filter((c) => c.poiEmbedding !== null).length;
+    console.warn(
+      `[poi-detection] photo=${photoId}: no_embeddings_for_candidates ` +
+        `region=${region.slug} total=${matchCandidates.length} withQid=${withQid} withEmb=${withEmb}`,
+    );
+  } else if (matchResult.reason === "below_similarity_gate") {
+    // Candidates with embeddings were present but none visually resembled
+    // the photo — the image-similarity gate dropped them all.
+    const withEmb = matchCandidates.filter((c) => c.poiEmbedding !== null).length;
+    console.warn(
+      `[poi-detection] photo=${photoId}: below_similarity_gate ` +
+        `region=${region.slug} total=${matchCandidates.length} withEmb=${withEmb}`,
+    );
+  }
 
   // 6. Persist ────────────────────────────────────────────────────────
   if (matchResult.matches.length > 0) {

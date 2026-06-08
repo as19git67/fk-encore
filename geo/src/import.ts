@@ -98,6 +98,15 @@ export async function reconcileImportStatus(
           AND c.relname IN ('osm_highways', 'osm_pois', 'osm_admin')`,
     );
     if (tables.rowCount === 3) {
+      const poiCount = await pool.query<{ count: string }>(
+        `SELECT count(*) AS count FROM osm_pois`,
+      );
+      if (parseInt(poiCount.rows[0]?.count ?? "0", 10) === 0) {
+        console.warn(
+          `[geo] reconcile: ${postgresDb} has tables but osm_pois is empty — not marking as ready`,
+        );
+        return null;
+      }
       const status: ImportStatus = {
         slug: postgresDb.replace(/^nom_/, "").replace(/_/g, "/"),
         postgresDb,
@@ -169,6 +178,7 @@ async function runImport(req: ImportRequest): Promise<RunResult> {
 
   await postImportIndexes(req.postgresDb);
   await runAnalyze(req.postgresDb);
+  await verifyImportData(req.postgresDb);
 
   // Wire the replication tracker so subsequent /refresh calls and the
   // background loop know where to resume. Errors are non-fatal: a
@@ -334,6 +344,21 @@ function quoteIdent(name: string): string {
     throw new Error(`refusing to quote unsafe identifier '${name}'`);
   }
   return `"${name}"`;
+}
+
+async function verifyImportData(database: string): Promise<void> {
+  const pool = poolFor(database);
+  const res = await pool.query<{ count: string }>(
+    `SELECT count(*) AS count FROM osm_pois`,
+  );
+  const count = parseInt(res.rows[0]?.count ?? "0", 10);
+  if (count === 0) {
+    throw new Error(
+      `import produced an empty osm_pois table (0 rows) — ` +
+        `PBF may be corrupt or region contains no POIs matching the Lua filter`,
+    );
+  }
+  console.log(`[geo] import verified: osm_pois has ${count} rows`);
 }
 
 function slugToFile(slug: string): string {
