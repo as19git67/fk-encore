@@ -36,7 +36,10 @@ let package = Package(
         .testTarget(
             name: "FKPhotosTests",
             dependencies: ["FKPhotosLib"],
-            path: "Tests/FKPhotosTests"
+            path: "Tests/FKPhotosTests",
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+            ]
         ),
     ]
 )

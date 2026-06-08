@@ -1,0 +1,89 @@
+name: iOS Unit Tests
+
+# Runs the FKPhotos Swift package unit tests on an iOS simulator. These guard
+# the photo upload dedup contract (image_data_hash / full_hash), the
+# filename/mime helpers and the UploadQueue claim invariants (issue #591).
+#
+# The app code is iOS-only (UIKit / PhotosUI), so the tests cannot run with
+# `swift test` on Linux/macOS — they build for an iOS Simulator via xcodebuild
+# against the SwiftPM package's auto-generated `FKPhotos-Package` scheme. No
+# changes to the app .xcodeproj are required.
+#
+# IMPORTANT: `ios/` contains BOTH `Package.swift` and an app `FKPhotos.xcodeproj`.
+# When both sit side by side, xcodebuild auto-selects the .xcodeproj — which has
+# no `FKPhotos-Package` scheme and does not include the `FKPhotosTests` target —
+# and fails with "does not contain a scheme named FKPhotos-Package". The unit
+# tests live only in the SwiftPM package, so we move the app project aside for
+# the duration of the run to force xcodebuild into the package context.
+#
+# NOTE: the app references iOS 26.1 PhotoKit APIs, so the runner must provide a
+# matching iOS SDK / Xcode. If the build can't find the SDK or the simulator
+# name, adjust `runs-on`, the Xcode selection, and the destination below.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios-tests.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select latest Xcode
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+
+      - name: Print toolchain / available simulators (debug aid)
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i ios || true
+          xcrun simctl list devices available | grep -i iphone || true
+
+      - name: Use the SwiftPM package context (hide the app .xcodeproj)
+        # xcodebuild prefers an .xcodeproj over Package.swift when both are
+        # present, which hides the package's FKPhotos-Package scheme (and the
+        # FKPhotosTests target). Move the app project out of the working dir so
+        # the package becomes the only project context.
+        run: mv FKPhotos.xcodeproj "$RUNNER_TEMP/FKPhotos.xcodeproj"
+
+      - name: Discover the package test scheme
+        # With only Package.swift present, xcodebuild treats the directory as an
+        # implicit workspace; the aggregate scheme's exact name is not stable
+        # across Xcode versions (it is NOT necessarily "FKPhotos-Package"). So
+        # discover it: prefer the "-Package" aggregate, else the first scheme.
+        # `xcodebuild test` resolves package dependencies on its own, so no
+        # separate resolve step is needed.
+        run: |
+          xcodebuild -list || true
+          SCHEME=$(xcodebuild -list -json 2>/dev/null | python3 -c "import sys, json; r = sys.stdin.read(); d = json.loads(r[r.find('{'):]); c = d.get('workspace') or d.get('project') or {}; s = c.get('schemes', []); p = [x for x in s if x.endswith('-Package')]; print(p[0] if p else (s[0] if s else ''))")
+          echo "Selected scheme: $SCHEME"
+          echo "IOS_SCHEME=$SCHEME" >> "$GITHUB_ENV"
+
+      - name: Run unit tests (iOS Simulator)
+        run: |
+          xcodebuild test \
+            -scheme "$IOS_SCHEME" \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -skipPackagePluginValidation \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-test-results
+          path: ios/TestResults.xcresult
+          if-no-files-found: ignore

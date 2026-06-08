@@ -1,0 +1,107 @@
+import Foundation
+import Photos
+
+/// Single shared implementation of "grab a PHAsset and turn it into an
+/// `UploadQueueItem`" used by **both** upload paths (issue #591):
+///
+///  * Part A — the manual album upload (`PhotoUploadView`), and
+///  * Part B — the automatic library/folder sync (`PhotoSyncService`).
+///
+/// Centralising it guarantees the two paths derive the *same* `image_data_hash`
+/// and `full_hash` for the same photo, so server-side dedup (and the
+/// device-asset-id "replace on edit" branch) behaves identically no matter how
+/// the photo was enqueued. Before this existed, `PhotoUploadView` hashed the
+/// PHImageManager-rendered JPEG bytes while the sync path hashed the decoded
+/// pixels of the original resource — the two never matched and dedup silently
+/// failed across the two paths.
+enum AssetUploadEnqueuer {
+    /// The resource whose bytes we hash and upload. The **edited** render
+    /// (`.fullSizePhoto`) is preferred so crops and adjustments reach the
+    /// server at full quality (issue #591); we fall back to the untouched
+    /// original (`.photo`) for assets that have never been edited.
+    ///
+    /// This MUST be the single source of truth for resource selection so the
+    /// hash (`PhotoHasher`), the uploaded bytes (`PhotoSyncService.loadAssetData`)
+    /// and any background-job resource all refer to identical pixels.
+    static func bestResource(for asset: PHAsset) -> PHAssetResource? {
+        let resources = PHAssetResource.assetResources(for: asset)
+        return resources.first(where: { $0.type == .fullSizePhoto })
+            ?? resources.first(where: { $0.type == .photo })
+    }
+
+    /// Builds a fully-populated `UploadQueueItem` for *asset*, computing the
+    /// hash/metadata via the shared `PhotoHasher` pipeline (caption, favourite,
+    /// capture date) and carrying `PHAsset.location` for the GPS-fallback
+    /// headers. Returns nil when the asset's bytes can't be hashed (e.g. iCloud
+    /// data is unavailable) so the caller can retry it later.
+    ///
+    /// - Parameters:
+    ///   - precomputedHash: reuse a `PhotoHashResult` already computed by the
+    ///     caller (the sync pipeline hashes in batches) to avoid re-reading the
+    ///     asset bytes twice.
+    ///   - filenameHint: original filename pre-fetched off the main queue by the
+    ///     sync pipeline; falls back to the resource's `originalFilename`.
+    static func makeQueueItem(
+        for asset: PHAsset,
+        precomputedHash: PhotoHashResult? = nil,
+        filenameHint: String? = nil,
+        targetAlbumIds: [Int] = [],
+        sourceIosAlbumId: String? = nil
+    ) async -> UploadQueueItem? {
+        let hashResult: PhotoHashResult
+        if let precomputedHash {
+            hashResult = precomputedHash
+        } else if let computed = await PhotoHasher.shared.hashes(for: asset) {
+            hashResult = computed
+        } else {
+            return nil
+        }
+
+        let resource = bestResource(for: asset)
+        let mimeType = resource.map { PhotoSyncService.mimeType(for: $0.uniformTypeIdentifier) } ?? "image/jpeg"
+        let baseName = filenameHint
+            ?? resource?.originalFilename
+            ?? "photo_\(asset.localIdentifier.prefix(8)).jpg"
+        let filename = filenameMatchingMime(baseName, mimeType: mimeType)
+        let caption = PhotoHasher.shared.captionFromAsset(asset) ?? ""
+
+        return UploadQueueItem(
+            assetLocalIdentifier: asset.localIdentifier,
+            filename: filename,
+            mimeType: mimeType,
+            imageDataHash: hashResult.imageDataHash,
+            fullHash: hashResult.fullHash,
+            caption: caption,
+            isFavorite: asset.isFavorite,
+            capturedAtString: hashResult.capturedAtString,
+            targetAlbumIds: targetAlbumIds,
+            sourceIosAlbumId: sourceIosAlbumId,
+            latitude: asset.location?.coordinate.latitude,
+            longitude: asset.location?.coordinate.longitude
+        )
+    }
+
+    /// Replaces the filename's extension with one matching *mimeType* when the
+    /// two disagree. Equivalent extensions (heic ↔ heif, jpg ↔ jpeg) are treated
+    /// as matching so user-recognisable names aren't churned needlessly.
+    static func filenameMatchingMime(_ filename: String, mimeType: String) -> String {
+        let expectedExt: String
+        switch mimeType.lowercased() {
+        case "image/heic", "image/heif": expectedExt = "heic"
+        case "image/png":                expectedExt = "png"
+        case "image/tiff":               expectedExt = "tiff"
+        case "image/gif":                expectedExt = "gif"
+        case "image/webp":               expectedExt = "webp"
+        default:                         expectedExt = "jpg"
+        }
+        let ns = filename as NSString
+        let currentExt = ns.pathExtension.lowercased()
+        if currentExt == expectedExt { return filename }
+        let heicLike: Set<String> = ["heic", "heif"]
+        if expectedExt == "heic" && heicLike.contains(currentExt) { return filename }
+        let jpegLike: Set<String> = ["jpg", "jpeg"]
+        if expectedExt == "jpg" && jpegLike.contains(currentExt) { return filename }
+        let stem = ns.deletingPathExtension
+        return stem.isEmpty ? "photo.\(expectedExt)" : "\(stem).\(expectedExt)"
+    }
+}

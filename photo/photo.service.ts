@@ -2228,6 +2228,105 @@ export interface UploadSyncMeta {
 }
 
 /**
+ * Result of parsing the `POST /photos` upload request headers — the contract
+ * the iOS client (`APIClient.uploadPhoto`) and Share Extension speak.
+ */
+export interface ParsedUploadHeaders {
+  fileName: string;
+  mimeType: string;
+  isFavorite: boolean;
+  clientCapturedAt: string | null;
+  /** True when an `X-Description` header was present at all (incl. ""), which
+   * makes the device authoritative over the file's embedded IPTC caption. */
+  hasDescriptionHeader: boolean;
+  sync: UploadSyncMeta;
+}
+
+/**
+ * Normalises a SHA-256 hash header to lowercase hex (only when it is exactly 64
+ * hex chars, trimmed). Returns null when the header is absent or malformed.
+ */
+export function normalizeHashHeader(raw: string | string[] | undefined): string | null {
+  if (typeof raw !== "string") return null;
+  const v = raw.trim().toLowerCase();
+  return /^[a-f0-9]{64}$/.test(v) ? v : null;
+}
+
+/**
+ * Parse a finite floating-point GPS value (lat / lng / altitude) from an HTTP
+ * header. Returns null when the header is absent, non-numeric, or NaN/∞.
+ */
+export function parseGpsHeader(raw: string | string[] | undefined): number | null {
+  if (typeof raw !== "string") return null;
+  const v = parseFloat(raw.trim());
+  return Number.isFinite(v) ? v : null;
+}
+
+/**
+ * Translates the raw `X-*` upload headers into the typed options the upload
+ * pipeline consumes. Extracted from the `POST /photos` raw endpoint so the
+ * client↔server header contract (header names, percent-decoding, the
+ * `"true"`-favourite check, GPS string parsing, hash normalisation) can be
+ * exercised by tests with the real production code — the endpoint calls this
+ * exact function, so a test feeding it the iOS client's headers covers the
+ * same parsing that runs in production.
+ */
+export function parseUploadHeaders(
+  headers: Record<string, string | string[] | undefined>,
+): ParsedUploadHeaders {
+  const rawFileName = (headers["x-file-name"] as string) || "photo.jpg";
+  // Client percent-encodes the filename to stay within ISO-8859-1 header limits.
+  let fileName = rawFileName;
+  try {
+    fileName = decodeURIComponent(rawFileName);
+  } catch {
+    fileName = rawFileName;
+  }
+
+  const mimeType = (headers["content-type"] as string) || "image/jpeg";
+  const isFavorite = headers["x-is-favorite"] === "true";
+
+  const capturedAtHeader = headers["x-captured-at"];
+  const clientCapturedAt = typeof capturedAtHeader === "string" ? capturedAtHeader : null;
+
+  const imageDataHash = normalizeHashHeader(headers["x-image-data-hash"]);
+  const fullHash = normalizeHashHeader(headers["x-full-hash"]);
+
+  const descriptionHeader = headers["x-description"];
+  const hasDescriptionHeader = typeof descriptionHeader === "string";
+  let description: string | undefined;
+  if (hasDescriptionHeader) {
+    try {
+      description = decodeURIComponent(descriptionHeader as string);
+    } catch {
+      description = descriptionHeader as string;
+    }
+  }
+
+  const rawAssetId = headers["x-asset-id"];
+  const deviceAssetId = typeof rawAssetId === "string" ? rawAssetId : null;
+
+  const clientLatitude = parseGpsHeader(headers["x-gps-lat"]);
+  const clientLongitude = parseGpsHeader(headers["x-gps-lng"]);
+
+  return {
+    fileName,
+    mimeType,
+    isFavorite,
+    clientCapturedAt,
+    hasDescriptionHeader,
+    sync: {
+      imageDataHash,
+      fullHash,
+      description: hasDescriptionHeader ? description : undefined,
+      deviceAssetId,
+      clientLatitude,
+      clientLongitude,
+    },
+  };
+}
+
+/**
  * Replaces the stored file of an existing photo with freshly uploaded bytes,
  * matched by device_asset_id (issue #432). Used when the iOS client re-uploads
  * an asset whose pixels changed (an in-app edit) under the same

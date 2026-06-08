@@ -1673,6 +1673,172 @@ describe("Photo Module", () => {
       expect(res.success).toBe(true);
     });
   });
+
+  // The iOS client (APIClient.uploadPhoto) and the server agree on a set of
+  // X-* upload headers. These tests run the REAL header parser
+  // (service.parseUploadHeaders — the same function the POST /photos endpoint
+  // calls) and then drive the REAL dedup/metadata pipeline
+  // (service.uploadPhotoStream) with the parsed result, so the whole
+  // header-contract → dedup/metadata path is exercised with production code.
+  describe("iOS upload header contract (#591)", () => {
+    const hashUpperA = "AB".repeat(32);
+    const hashLowerA = "ab".repeat(32);
+    const fullUpperA = "CD".repeat(32);
+    const fullLowerA = "cd".repeat(32);
+
+    // Mirrors what APIClient.uploadPhoto sends on the wire.
+    function iosHeaders(over: Record<string, string> = {}): Record<string, string> {
+      return { "content-type": "image/jpeg", ...over };
+    }
+
+    async function uploadViaHeaders(body: string, headers: Record<string, string>) {
+      const parsed = service.parseUploadHeaders(headers);
+      const stream = Readable.from(Buffer.from(body)) as any;
+      return service.uploadPhotoStream(
+        user1.id, stream, parsed.fileName, parsed.mimeType,
+        parsed.isFavorite, parsed.clientCapturedAt, parsed.sync,
+      );
+    }
+
+    function cleanup(filename: string) {
+      const p = path.join(UPLOAD_DIR, filename);
+      if (fs.existsSync(p)) fs.unlinkSync(p);
+    }
+
+    // MARK: - Pure parsing of the wire contract
+
+    it("parses the full iOS header set the client sends", () => {
+      const parsed = service.parseUploadHeaders({
+        "content-type": "image/heic",
+        "x-file-name": "IMG%201.heic",                     // percent-encoded space
+        "x-is-favorite": "true",
+        "x-captured-at": "2026-05-20T15:00:00+02:00",
+        "x-image-data-hash": hashUpperA,                    // server lower-cases
+        "x-full-hash": fullUpperA,
+        "x-description": "F%C3%B6hr%20Strand",              // "Föhr Strand"
+        "x-asset-id": "DEV-1/L0/001",
+        "x-gps-lat": "48.137154",
+        "x-gps-lng": "11.576124",
+      });
+
+      expect(parsed.fileName).toBe("IMG 1.heic");
+      expect(parsed.mimeType).toBe("image/heic");
+      expect(parsed.isFavorite).toBe(true);
+      expect(parsed.clientCapturedAt).toBe("2026-05-20T15:00:00+02:00");
+      expect(parsed.hasDescriptionHeader).toBe(true);
+      expect(parsed.sync.imageDataHash).toBe(hashLowerA);
+      expect(parsed.sync.fullHash).toBe(fullLowerA);
+      expect(parsed.sync.description).toBe("Föhr Strand");
+      expect(parsed.sync.deviceAssetId).toBe("DEV-1/L0/001");
+      expect(parsed.sync.clientLatitude).toBeCloseTo(48.137154, 5);
+      expect(parsed.sync.clientLongitude).toBeCloseTo(11.576124, 5);
+    });
+
+    it("treats only the literal \"true\" as favourite", () => {
+      expect(service.parseUploadHeaders(iosHeaders({ "x-is-favorite": "true" })).isFavorite).toBe(true);
+      expect(service.parseUploadHeaders(iosHeaders({ "x-is-favorite": "TRUE" })).isFavorite).toBe(false);
+      expect(service.parseUploadHeaders(iosHeaders({ "x-is-favorite": "1" })).isFavorite).toBe(false);
+      expect(service.parseUploadHeaders(iosHeaders()).isFavorite).toBe(false);
+    });
+
+    it("defaults everything when the optional headers are absent", () => {
+      const parsed = service.parseUploadHeaders({});
+      expect(parsed.fileName).toBe("photo.jpg");
+      expect(parsed.mimeType).toBe("image/jpeg");
+      expect(parsed.isFavorite).toBe(false);
+      expect(parsed.clientCapturedAt).toBeNull();
+      expect(parsed.hasDescriptionHeader).toBe(false);
+      expect(parsed.sync.imageDataHash).toBeNull();
+      expect(parsed.sync.fullHash).toBeNull();
+      expect(parsed.sync.description).toBeUndefined();
+      expect(parsed.sync.deviceAssetId).toBeNull();
+      expect(parsed.sync.clientLatitude).toBeNull();
+      expect(parsed.sync.clientLongitude).toBeNull();
+    });
+
+    it("honours an empty X-Description (device is authoritative over the file caption)", () => {
+      const parsed = service.parseUploadHeaders(iosHeaders({ "x-description": "" }));
+      expect(parsed.hasDescriptionHeader).toBe(true);
+      expect(parsed.sync.description).toBe("");
+    });
+
+    it("rejects a malformed hash header instead of forwarding garbage", () => {
+      const parsed = service.parseUploadHeaders(iosHeaders({ "x-image-data-hash": "not-a-real-hash" }));
+      expect(parsed.sync.imageDataHash).toBeNull();
+    });
+
+    // MARK: - Contract flowing into the real dedup/metadata pipeline
+
+    it("stores description, GPS, asset id and filename from the headers", async () => {
+      const { photo } = await uploadViaHeaders("gps-and-meta-pixels", iosHeaders({
+        "x-file-name": "IMG%201.jpg",
+        "x-description": "F%C3%B6hr%20Strand",
+        "x-image-data-hash": hashUpperA,
+        "x-full-hash": fullUpperA,
+        "x-asset-id": "DEV-E2E/L0/1",
+        "x-gps-lat": "48.137154",
+        "x-gps-lng": "11.576124",
+      }));
+
+      const row = await dbFirst<typeof photos.$inferSelect>(
+        db.select().from(photos).where(eq(photos.id, photo.id)),
+      );
+      expect(row?.original_name).toBe("IMG 1.jpg");
+      expect(row?.description).toBe("Föhr Strand");
+      expect(row?.image_data_hash).toBe(hashLowerA);   // normalised to lowercase
+      expect(row?.hash).toBe(fullLowerA);
+      expect(row?.device_asset_id).toBe("DEV-E2E/L0/1");
+      expect(row?.latitude).toBeCloseTo(48.137154, 5); // client GPS fallback applied
+      expect(row?.longitude).toBeCloseTo(11.576124, 5);
+      cleanup(row!.filename);
+    });
+
+    it("replaces the existing photo when the same asset is re-uploaded edited (#591)", async () => {
+      const deviceId = "DEV-EDIT/L0/9";
+      const { photo: original } = await uploadViaHeaders("original-pixels", iosHeaders({
+        "x-image-data-hash": hashUpperA,
+        "x-full-hash": fullUpperA,
+        "x-asset-id": deviceId,
+      }));
+
+      // Same asset id, different pixels (an in-app crop) → server replaces in place.
+      const editedHash = "ef".repeat(32);
+      const { photo: edited, replaced } = await uploadViaHeaders("edited-pixels-longer", iosHeaders({
+        "x-image-data-hash": editedHash,
+        "x-full-hash": "ba".repeat(32),
+        "x-asset-id": deviceId,
+        "x-description": "Bearbeitet",
+      }));
+
+      expect(replaced).toBe(true);
+      expect(edited.id).toBe(original.id);
+      const rows = await db.select().from(photos).where(eq(photos.device_asset_id, deviceId));
+      expect(rows.length).toBe(1); // no duplicate
+      const row = await dbFirst<typeof photos.$inferSelect>(
+        db.select().from(photos).where(eq(photos.id, original.id)),
+      );
+      expect(row?.image_data_hash).toBe(editedHash);
+      expect(row?.description).toBe("Bearbeitet");
+      cleanup(row!.filename);
+    });
+
+    it("does not create a duplicate when the identical photo is re-uploaded (#591)", async () => {
+      const headers = iosHeaders({
+        "x-image-data-hash": hashUpperA,
+        "x-full-hash": fullUpperA,
+        "x-asset-id": "DEV-DUP/L0/1",
+      });
+      const { photo: first } = await uploadViaHeaders("same-pixels", headers);
+
+      // Same pixels again → image_data_hash dedup, signalled as a duplicate.
+      await expect(uploadViaHeaders("same-pixels", headers))
+        .rejects.toBeInstanceOf(service.PhotoAlreadyExistsError);
+
+      const rows = await db.select().from(photos).where(eq(photos.image_data_hash, hashLowerA));
+      expect(rows.length).toBe(1);
+      cleanup(first.filename);
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

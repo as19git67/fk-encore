@@ -111,10 +111,11 @@ actor PhotoHasher {
     /// auto-sync only deduplicates server-side when both paths derive the same
     /// `image_data_hash`.
     private func computeImageDataHash(for asset: PHAsset) async -> String? {
-        // Prefer the original resource; fall back to fullSizePhoto for assets that only have an edited version.
-        guard let resource = PHAssetResource.assetResources(for: asset)
-            .first(where: { $0.type == .photo })
-            ?? PHAssetResource.assetResources(for: asset).first(where: { $0.type == .fullSizePhoto })
+        // Prefer the *edited* render (.fullSizePhoto) so crops/adjustments move
+        // the pixel hash and get re-uploaded; fall back to the original (.photo)
+        // for never-edited assets. Shared with the upload-bytes selection so the
+        // hash always describes exactly the bytes we send (issue #591).
+        guard let resource = AssetUploadEnqueuer.bestResource(for: asset)
         else { return nil }
 
         let options = PHAssetResourceRequestOptions()
@@ -170,6 +171,15 @@ actor PhotoHasher {
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
         guard let pixels = context.data else { return nil }
         return Data(bytes: pixels, count: height * bytesPerRow)
+    }
+
+    /// Pixel-stable image hash for raw file bytes when no `PHAsset` is
+    /// available — the PhotosPicker fallback path (Part A) where the system
+    /// hands us only `Data`. Hashes the decoded pixels (metadata-proof, matching
+    /// `computeImageDataHash`), falling back to the raw bytes when undecodable.
+    nonisolated static func imageDataHash(from data: Data) -> String {
+        let input = decodedPixelData(data) ?? data
+        return SHA256.hash(data: input).map { String(format: "%02x", $0) }.joined()
     }
 
     private static func formatCapturedAt(_ date: Date?, timezone: TimeZone) -> String {
