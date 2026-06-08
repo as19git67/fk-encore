@@ -13,7 +13,7 @@ import {
   financeTransaction,
   users,
 } from "../db/schema";
-import { aggregate, query, transactions } from "./analysis";
+import { aggregate, query, transactions, periodTransactions } from "./analysis";
 import * as llmClient from "./llm-client";
 import { __resetRateLimiterForTests } from "../user/rateLimiter";
 
@@ -165,9 +165,9 @@ describe("finance/analysis — aggregate (AND semantics)", () => {
     expect(result.total.count).toBe(2);
     // -340 + -89.50 = -429.50
     expect(Number(result.total.sum)).toBeCloseTo(-429.5, 2);
-    expect(result.byMonth).toHaveLength(1);
-    expect(result.byMonth[0]).toMatchObject({
-      month: "2024-08",
+    expect(result.byPeriod).toHaveLength(1);
+    expect(result.byPeriod[0]).toMatchObject({
+      period: "2024-08",
       count: 2,
     });
   });
@@ -489,5 +489,161 @@ describe("finance/analysis — query (LLM parse + aggregate)", () => {
     await expect(
       query({ question: "" }),
     ).rejects.toThrow(/non-empty/);
+  });
+});
+
+// ======================================================================
+// /aggregate — interval (yearly grouping)
+// ======================================================================
+
+describe("finance/analysis — aggregate (interval)", () => {
+  it("groups by year when interval is 'year'", async () => {
+    await seedFixture();
+    await grantAdmin();
+
+    const result = await aggregate({
+      ast: { tags: [], op: "AND", interval: "year" },
+    });
+
+    expect(result.byPeriod.length).toBeGreaterThan(0);
+    expect(result.byPeriod[0].period).toMatch(/^\d{4}$/);
+    expect(result.ast.interval).toBe("year");
+  });
+
+  it("groups by month by default", async () => {
+    await seedFixture();
+    await grantAdmin();
+
+    const result = await aggregate({
+      ast: { tags: [], op: "AND" },
+    });
+
+    expect(result.byPeriod.length).toBeGreaterThan(0);
+    expect(result.byPeriod[0].period).toMatch(/^\d{4}-\d{2}$/);
+  });
+
+  it("echoes the interval field back in the result AST", async () => {
+    await seedFixture();
+    await grantAdmin();
+
+    const result = await aggregate({
+      ast: { tags: [], op: "AND", interval: "month" },
+    });
+    expect(result.ast.interval).toBe("month");
+  });
+});
+
+// ======================================================================
+// /aggregate — relativeTimespan
+// ======================================================================
+
+describe("finance/analysis — aggregate (relativeTimespan)", () => {
+  it("resolves relativeTimespan and sets concrete timespan", async () => {
+    await seedFixture();
+    await grantAdmin();
+
+    const result = await aggregate({
+      ast: {
+        tags: [],
+        op: "AND",
+        relativeTimespan: { type: "this_year" },
+      },
+    });
+
+    expect(result.ast.relativeTimespan).toEqual({ type: "this_year" });
+    expect(result.ast.timespan).toBeDefined();
+    expect(result.ast.timespan!.from).toMatch(/^\d{4}-01-01$/);
+  });
+
+  it("strips invalid relativeTimespan types", async () => {
+    await seedFixture();
+    await grantAdmin();
+
+    const result = await aggregate({
+      ast: {
+        tags: [],
+        op: "AND",
+        relativeTimespan: { type: "bogus" as any },
+      },
+    });
+
+    expect(result.ast.relativeTimespan).toBeUndefined();
+  });
+});
+
+// ======================================================================
+// /period-transactions
+// ======================================================================
+
+describe("finance/analysis — periodTransactions", () => {
+  it("lists the transactions within a month period", async () => {
+    await seedFixture();
+    await grantAdmin();
+
+    const { transactions: rows } = await periodTransactions({
+      ast: { tags: [], op: "AND" },
+      period: "2024-08",
+    });
+
+    expect(rows).toHaveLength(3);
+    expect(rows.every((r) => r.bookingDate.startsWith("2024-08"))).toBe(true);
+  });
+
+  it("lists the transactions within a year period", async () => {
+    await seedFixture();
+    await grantAdmin();
+
+    const { transactions: rows } = await periodTransactions({
+      ast: { tags: [], op: "AND", interval: "year" },
+      period: "2024",
+    });
+
+    expect(rows).toHaveLength(6);
+  });
+
+  it("honours AST tag filters", async () => {
+    await seedFixture();
+    await grantAdmin();
+
+    const { transactions: rows } = await periodTransactions({
+      ast: { tags: ["urlaub"], op: "AND" },
+      period: "2024-08",
+    });
+
+    // Only the 2 urlaub-tagged rows in Aug (Hotel + Trenitalia), not gehalt
+    expect(rows).toHaveLength(2);
+  });
+
+  it("rejects an empty period", async () => {
+    await grantAdmin();
+    await expect(
+      periodTransactions({ ast: { tags: [], op: "AND" }, period: "  " }),
+    ).rejects.toThrow(/period/);
+  });
+
+  it("requires finance.view", async () => {
+    setAuth("1", []);
+    await expect(
+      periodTransactions({ ast: { tags: [], op: "AND" }, period: "2024-08" }),
+    ).rejects.toThrow(/permission/);
+  });
+
+  it("scopes to accessible accounts for non-admins", async () => {
+    const { accountAId } = await seedFixture();
+    await ensureUser(7);
+    await db.insert(financeAccountAccess).values({
+      account_id: accountAId,
+      user_id: 7,
+      level: "read",
+    });
+    setAuth("7", ["finance.view"]);
+
+    const { transactions: rows } = await periodTransactions({
+      ast: { tags: [], op: "AND" },
+      period: "2024-08",
+    });
+
+    // Only accA transactions in Aug: Hotel + Trenitalia = 2 (gehalt is on accB)
+    expect(rows).toHaveLength(2);
   });
 });

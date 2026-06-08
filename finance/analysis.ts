@@ -23,6 +23,7 @@ import db from "../db/database";
 import { financeAccountAccess, financeTag } from "../db/schema";
 import {
   parseAnalysisQuery,
+  resolveRelativeTimespan,
   LlmServiceUnavailableError,
   type AnalysisAst,
 } from "./llm-client";
@@ -48,7 +49,7 @@ interface AggregateRequest {
 export interface AnalysisResult {
   ast: AnalysisAst;
   total: { sum: string; count: number; avg: string };
-  byMonth: Array<{ month: string; sum: string; count: number }>;
+  byPeriod: Array<{ period: string; sum: string; count: number }>;
   byTag: Array<{ tag: string; sum: string; count: number }>;
   topCounterparties: Array<{ name: string; sum: string; count: number }>;
 }
@@ -122,7 +123,7 @@ export const aggregate = api(
     const auth = getAuthData()!;
     requirePermission(auth, "finance.view");
 
-    const ast = validateAst(req.ast);
+    const ast = resolveAstTimespan(validateAst(req.ast));
     const aggregates = await runAggregate(ast, auth, req.accountIds);
     return { ast, ...aggregates };
   },
@@ -219,6 +220,79 @@ export const transactions = api(
 );
 
 // -----------------------------------------------------------------------
+// /period-transactions — drill into the rows behind one period row
+// -----------------------------------------------------------------------
+
+interface PeriodTransactionsRequest {
+  ast: AnalysisAst;
+  period: string;
+  accountIds?: number[];
+  limit?: number;
+}
+
+export const periodTransactions = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/finance/analysis/period-transactions",
+    auth: true,
+  },
+  async (req: PeriodTransactionsRequest): Promise<TransactionsResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+
+    if (typeof req.period !== "string" || req.period.trim().length === 0) {
+      throw APIError.invalidArgument("period must be a non-empty string");
+    }
+    const period = req.period.trim();
+    const ast = resolveAstTimespan(validateAst(req.ast));
+    const limit =
+      typeof req.limit === "number" && Number.isFinite(req.limit) && req.limit > 0
+        ? Math.min(Math.floor(req.limit), 500)
+        : 200;
+
+    const filter = await buildFilter(ast, auth, req.accountIds);
+
+    // Determine the date range for this period
+    const isYear = /^\d{4}$/.test(period);
+    const periodFormat = isYear ? "YYYY" : "YYYY-MM";
+
+    const rows = (await db.execute(sql`
+      SELECT
+        t.id,
+        TO_CHAR(t.booking_date, 'YYYY-MM-DD') AS booking_date,
+        t.amount,
+        t.currency_code,
+        t.counterparty,
+        t.purpose
+      FROM finance_transaction t
+      WHERE ${filter}
+        AND TO_CHAR(t.booking_date, ${periodFormat}) = ${period}
+      ORDER BY t.booking_date DESC, t.id DESC
+      LIMIT ${limit}
+    `)).rows as Array<{
+      id: number | string;
+      booking_date: string;
+      amount: string | number;
+      currency_code: string;
+      counterparty: string | null;
+      purpose: string | null;
+    }>;
+
+    return {
+      transactions: rows.map((r) => ({
+        id: Number(r.id),
+        bookingDate: r.booking_date,
+        amount: String(r.amount),
+        currency: r.currency_code,
+        counterparty: r.counterparty,
+        purpose: r.purpose,
+      })),
+    };
+  },
+);
+
+// -----------------------------------------------------------------------
 // Internals
 // -----------------------------------------------------------------------
 
@@ -234,6 +308,9 @@ function validateAst(raw: unknown): AnalysisAst {
   const result: AnalysisAst = { tags, op };
   if (o.kind === "event" || o.kind === "ongoing") {
     result.kind = o.kind;
+  }
+  if (o.interval === "year" || o.interval === "month") {
+    result.interval = o.interval;
   }
   if (
     o.timespan &&
@@ -258,7 +335,31 @@ function validateAst(raw: unknown): AnalysisAst {
       result.amountRange = amountRange;
     }
   }
+  if (
+    o.relativeTimespan &&
+    typeof o.relativeTimespan === "object" &&
+    !Array.isArray(o.relativeTimespan)
+  ) {
+    const rt = o.relativeTimespan as Record<string, unknown>;
+    const validTypes = new Set([
+      "this_year", "last_year", "last_n_years", "last_n_months",
+      "this_month", "last_month",
+    ]);
+    if (typeof rt.type === "string" && validTypes.has(rt.type)) {
+      result.relativeTimespan = { type: rt.type as any };
+      if (typeof rt.n === "number" && Number.isFinite(rt.n) && rt.n > 0) {
+        result.relativeTimespan.n = Math.floor(rt.n);
+      }
+    }
+  }
   return result;
+}
+
+function resolveAstTimespan(ast: AnalysisAst): AnalysisAst {
+  if (ast.relativeTimespan) {
+    return { ...ast, timespan: resolveRelativeTimespan(ast.relativeTimespan) };
+  }
+  return ast;
 }
 
 async function runAggregate(
@@ -277,16 +378,20 @@ async function runAggregate(
     WHERE ${filter}
   `)).rows as Array<{ sum: string | number; count: number; avg: string | number }>;
 
-  const byMonthRows = (await db.execute(sql`
+  const useYearly = ast.interval === "year";
+  const truncUnit = useYearly ? sql`'year'` : sql`'month'`;
+  const formatStr = useYearly ? "YYYY" : "YYYY-MM";
+
+  const byPeriodRows = (await db.execute(sql`
     SELECT
-      TO_CHAR(date_trunc('month', booking_date), 'YYYY-MM') AS month,
+      TO_CHAR(date_trunc(${truncUnit}, booking_date), ${formatStr}) AS period,
       COALESCE(SUM(amount), 0) AS sum,
       COUNT(*)::int AS count
     FROM finance_transaction t
     WHERE ${filter}
-    GROUP BY month
-    ORDER BY month
-  `)).rows as Array<{ month: string; sum: string | number; count: number }>;
+    GROUP BY period
+    ORDER BY period
+  `)).rows as Array<{ period: string; sum: string | number; count: number }>;
 
   // Breakdown by tag — groups the filtered rows by every user-tag they
   // carry. A transaction with multiple tags counts toward each of them
@@ -334,8 +439,8 @@ async function runAggregate(
       count: totalRow?.count ?? 0,
       avg: String(totalRow?.avg ?? "0"),
     },
-    byMonth: byMonthRows.map((r) => ({
-      month: r.month,
+    byPeriod: byPeriodRows.map((r) => ({
+      period: r.period,
       sum: String(r.sum),
       count: r.count,
     })),

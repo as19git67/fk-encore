@@ -16,6 +16,7 @@ import {
   analysisAggregate,
   analysisQuery,
   analysisTransactions,
+  analysisPeriodTransactions,
   listSavedAnalyses,
   saveAnalysis,
   deleteSavedAnalysis,
@@ -206,6 +207,8 @@ async function reaggregate() {
       op: astEditable.value.op,
       kind: astEditable.value.kind,
     }
+    if (astEditable.value.interval) ast.interval = astEditable.value.interval
+    if (astEditable.value.relativeTimespan) ast.relativeTimespan = astEditable.value.relativeTimespan
     const from = toIso(fromDate.value)
     const to = toIso(toDate.value)
     if (from && to) ast.timespan = { from, to }
@@ -224,6 +227,8 @@ function applyResult(r: AnalysisResult) {
     tags: [...r.ast.tags],
     op: r.ast.op,
     kind: r.ast.kind ?? 'ongoing',
+    interval: r.ast.interval,
+    relativeTimespan: r.ast.relativeTimespan,
   }
   fromDate.value = fromIso(r.ast.timespan?.from)
   toDate.value = fromIso(r.ast.timespan?.to)
@@ -279,14 +284,47 @@ function onTagRowClick(event: { data: { tag: string } }) {
   openTagDetails(event.data.tag)
 }
 
+// --- Drill-down: transactions behind a single period row ---
+const periodDetailVisible = ref(false)
+const periodDetailLabel = ref('')
+const periodDetailLoading = ref(false)
+const periodDetailError = ref<string | null>(null)
+const periodDetailRows = ref<AnalysisTransaction[]>([])
+
+async function openPeriodDetails(period: string) {
+  if (!result.value) return
+  periodDetailLabel.value = period
+  periodDetailVisible.value = true
+  periodDetailLoading.value = true
+  periodDetailError.value = null
+  periodDetailRows.value = []
+  try {
+    const resp = await analysisPeriodTransactions({ ast: result.value.ast, period })
+    periodDetailRows.value = resp.transactions
+  } catch (err) {
+    periodDetailError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    periodDetailLoading.value = false
+  }
+}
+
+function onPeriodRowClick(event: { data: { period: string } }) {
+  openPeriodDetails(event.data.period)
+}
+
+const periodLabel = computed(() => {
+  const interval = astEditable.value.interval
+  return interval === 'year' ? 'Jahresverlauf' : 'Monatsverlauf'
+})
+
 const chartData = computed(() => {
   if (!result.value) return null
   return {
-    labels: result.value.byMonth.map((m) => m.month),
+    labels: result.value.byPeriod.map((p) => p.period),
     datasets: [
       {
         label: 'Summe',
-        data: result.value.byMonth.map((m) => Number(m.sum)),
+        data: result.value.byPeriod.map((p) => Number(p.sum)),
         backgroundColor: isDark.value ? 'rgba(251, 191, 36, 0.7)' : 'rgba(59, 130, 246, 0.6)',
       },
     ],
@@ -494,6 +532,20 @@ const tagChartOptions = computed(() => {
         </div>
       </div>
 
+      <div v-if="astEditable.kind === 'ongoing'" class="ast-row">
+        <span class="ast-label">Intervall</span>
+        <div class="op-options">
+          <div class="op-option">
+            <RadioButton v-model="astEditable.interval" inputId="interval-month" value="month" />
+            <label for="interval-month">Monatlich</label>
+          </div>
+          <div class="op-option">
+            <RadioButton v-model="astEditable.interval" inputId="interval-year" value="year" />
+            <label for="interval-year">Jährlich</label>
+          </div>
+        </div>
+      </div>
+
       <div class="ast-row">
         <span class="ast-label">Zeitraum</span>
         <DatePicker v-model="fromDate" date-format="yy-mm-dd" placeholder="Von" show-button-bar />
@@ -523,11 +575,40 @@ const tagChartOptions = computed(() => {
       </div>
 
       <template v-if="showMonthly">
-        <h3 class="subhead">Monatsverlauf</h3>
-        <div v-if="chartData && result.byMonth.length > 0" class="chart-wrap">
+        <h3 class="subhead">{{ periodLabel }}</h3>
+        <div v-if="chartData && result.byPeriod.length > 0" class="chart-wrap">
           <Chart type="bar" :data="chartData" :options="chartOptions" />
         </div>
         <p v-else class="hint">Keine Buchungen im gewählten Zeitraum.</p>
+        <DataTable
+          v-if="result.byPeriod.length > 0"
+          :value="result.byPeriod"
+          stripedRows
+          rowHover
+          class="clickable-rows"
+          @row-click="onPeriodRowClick"
+        >
+          <Column field="period" header="Zeitraum" />
+          <Column
+            header="Summe"
+            headerStyle="text-align:right"
+            bodyStyle="text-align:right"
+          >
+            <template #body="{ data }">
+              <span class="num">{{ formatCurrency(data.sum) }}</span>
+            </template>
+          </Column>
+          <Column
+            field="count"
+            header="Anzahl"
+            headerStyle="text-align:right"
+            bodyStyle="text-align:right"
+          >
+            <template #body="{ data }">
+              <span class="num">{{ data.count }}</span>
+            </template>
+          </Column>
+        </DataTable>
       </template>
     </section>
 
@@ -595,6 +676,45 @@ const tagChartOptions = computed(() => {
       <Message v-else-if="detailError" severity="error">{{ detailError }}</Message>
       <p v-else-if="detailRows.length === 0" class="hint">Keine Buchungen.</p>
       <DataTable v-else :value="detailRows" stripedRows scrollable scrollHeight="60vh">
+        <Column header="Datum">
+          <template #body="{ data }">
+            <span class="num">{{ formatDate(data.bookingDate) }}</span>
+          </template>
+        </Column>
+        <Column field="counterparty" header="Gegenseite">
+          <template #body="{ data }">{{ data.counterparty || '—' }}</template>
+        </Column>
+        <Column field="purpose" header="Verwendung">
+          <template #body="{ data }">
+            <span class="purpose">{{ data.purpose || '—' }}</span>
+          </template>
+        </Column>
+        <Column
+          header="Betrag"
+          headerStyle="text-align:right"
+          bodyStyle="text-align:right"
+        >
+          <template #body="{ data }">
+            <span class="num">{{ formatCurrency(data.amount) }}</span>
+          </template>
+        </Column>
+      </DataTable>
+    </Dialog>
+
+    <!-- Period drill-down dialog -->
+    <Dialog
+      v-model:visible="periodDetailVisible"
+      modal
+      dismissableMask
+      :header="`Buchungen · ${periodDetailLabel}`"
+      :style="{ width: '46rem', maxWidth: '95vw' }"
+    >
+      <div v-if="periodDetailLoading" class="detail-loading">
+        <ProgressSpinner style="width: 2.5rem; height: 2.5rem" />
+      </div>
+      <Message v-else-if="periodDetailError" severity="error">{{ periodDetailError }}</Message>
+      <p v-else-if="periodDetailRows.length === 0" class="hint">Keine Buchungen.</p>
+      <DataTable v-else :value="periodDetailRows" stripedRows scrollable scrollHeight="60vh">
         <Column header="Datum">
           <template #body="{ data }">
             <span class="num">{{ formatDate(data.bookingDate) }}</span>

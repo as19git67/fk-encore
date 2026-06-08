@@ -257,6 +257,11 @@ ${examples}`;
 // /json-prompt (analysis — natural-language → AST)
 // -----------------------------------------------------------------------
 
+export interface RelativeTimespan {
+  type: "this_year" | "last_year" | "last_n_years" | "last_n_months" | "this_month" | "last_month";
+  n?: number;
+}
+
 export interface AnalysisAst {
   /** User-tag names, always drawn from the available vocabulary. */
   tags: string[];
@@ -274,6 +279,10 @@ export interface AnalysisAst {
    * Omitted ⇒ treated as "ongoing".
    */
   kind?: "event" | "ongoing";
+  /** Aggregation granularity for ongoing analyses: monthly or yearly. */
+  interval?: "month" | "year";
+  /** Relative time reference for saved queries that auto-adjust over time. */
+  relativeTimespan?: RelativeTimespan;
 }
 
 export interface ParseAnalysisOptions {
@@ -301,6 +310,8 @@ export async function parseAnalysisQuery(
       timespan?: unknown;
       amountRange?: unknown;
       kind?: unknown;
+      interval?: unknown;
+      relativeTimespan?: unknown;
     }
   >("/json-prompt", { prompt });
 
@@ -345,11 +356,87 @@ export async function parseAnalysisQuery(
   }
 
   const kind: AnalysisAst["kind"] = resp.kind === "event" ? "event" : "ongoing";
+  const interval: AnalysisAst["interval"] =
+    resp.interval === "year" ? "year" : "month";
 
-  const result: AnalysisAst = { tags: uniqueTags, op, kind };
+  let relativeTimespan: AnalysisAst["relativeTimespan"];
+  if (
+    resp.relativeTimespan &&
+    typeof resp.relativeTimespan === "object" &&
+    !Array.isArray(resp.relativeTimespan)
+  ) {
+    const rt = resp.relativeTimespan as Record<string, unknown>;
+    const validTypes = new Set([
+      "this_year", "last_year", "last_n_years", "last_n_months",
+      "this_month", "last_month",
+    ]);
+    if (typeof rt.type === "string" && validTypes.has(rt.type)) {
+      relativeTimespan = { type: rt.type as RelativeTimespan["type"] };
+      if (typeof rt.n === "number" && Number.isFinite(rt.n) && rt.n > 0) {
+        relativeTimespan.n = Math.floor(rt.n);
+      }
+    }
+  }
+
+  // When the LLM returns a relativeTimespan, resolve it to a concrete
+  // timespan so the initial query runs correctly.
+  if (relativeTimespan && !timespan) {
+    timespan = resolveRelativeTimespan(relativeTimespan);
+  }
+
+  const result: AnalysisAst = { tags: uniqueTags, op, kind, interval };
   if (timespan) result.timespan = timespan;
   if (amountRange) result.amountRange = amountRange;
+  if (relativeTimespan) result.relativeTimespan = relativeTimespan;
   return result;
+}
+
+export function resolveRelativeTimespan(
+  rel: RelativeTimespan,
+  now: Date = new Date(),
+): { from: string; to: string } {
+  const y = now.getFullYear();
+  const m = now.getMonth(); // 0-based
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const isoDate = (yr: number, mo: number, day: number) =>
+    `${yr}-${pad(mo)}-${pad(day)}`;
+  const lastDay = (yr: number, mo: number) =>
+    new Date(yr, mo, 0).getDate();
+
+  switch (rel.type) {
+    case "this_year":
+      return { from: isoDate(y, 1, 1), to: isoDate(y, 12, 31) };
+    case "last_year":
+      return { from: isoDate(y - 1, 1, 1), to: isoDate(y - 1, 12, 31) };
+    case "last_n_years": {
+      const n = rel.n ?? 1;
+      return { from: isoDate(y - n, 1, 1), to: isoDate(y, 12, 31) };
+    }
+    case "last_n_months": {
+      const n = rel.n ?? 1;
+      const d = new Date(y, m - n, 1);
+      return {
+        from: isoDate(d.getFullYear(), d.getMonth() + 1, 1),
+        to: isoDate(y, m + 1, lastDay(y, m + 1)),
+      };
+    }
+    case "this_month":
+      return {
+        from: isoDate(y, m + 1, 1),
+        to: isoDate(y, m + 1, lastDay(y, m + 1)),
+      };
+    case "last_month": {
+      const d = new Date(y, m - 1, 1);
+      const mo = d.getMonth() + 1;
+      const yr = d.getFullYear();
+      return {
+        from: isoDate(yr, mo, 1),
+        to: isoDate(yr, mo, lastDay(yr, mo)),
+      };
+    }
+    default:
+      return { from: isoDate(y, 1, 1), to: isoDate(y, 12, 31) };
+  }
 }
 
 function buildAnalysisPrompt(
@@ -365,14 +452,20 @@ function buildAnalysisPrompt(
     ? `\nZeitraum-Hinweis vom Nutzer: "${timespanHint}".`
     : "";
 
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
   return `Du übersetzt eine deutsche Frage zu Finanz-Transaktionen in einen strukturierten Filter (AST).
+Heutiges Datum: ${todayStr}
 
 Strikte Regeln:
 - 'tags' darf NUR Tags enthalten, die exakt in der Vokabel-Liste unten vorkommen. Erfinde KEINE neuen Tags.
 - 'op' ist "AND" wenn die Frage nach einer Schnittmenge mehrerer Konzepte fragt (z. B. "Urlaub in Italien 2024"), "OR" wenn sie nach einer Vereinigung fragt (z. B. "alle Miete oder Nebenkosten").
-- 'timespan' ist ein inklusiver ISO-Datum-Bereich { from, to } in YYYY-MM-DD-Format. Lasse das Feld weg, wenn die Frage keinen Zeitraum nennt.
+- 'timespan' ist ein inklusiver ISO-Datum-Bereich { from, to } in YYYY-MM-DD-Format. Lasse das Feld weg, wenn die Frage keinen Zeitraum nennt. Berechne konkrete Daten basierend auf dem heutigen Datum.
+- 'relativeTimespan' setze zusätzlich zu 'timespan', wenn die Frage einen relativen Zeitbezug enthält (z. B. "dieses Jahr", "letztes Jahr", "letzte 3 Jahre"). Möglich: { type: "this_year" }, { type: "last_year" }, { type: "last_n_years", n: 3 }, { type: "last_n_months", n: 6 }, { type: "this_month" }, { type: "last_month" }. Lasse weg bei absoluten Zeitangaben wie "2024" oder "August 2024".
 - 'amountRange' { min, max } als Zahlen (negative Zahlen = Ausgaben, positive = Einnahmen). Lasse das Feld weg, wenn die Frage keine Grenze nennt.
 - 'kind' ist "event" wenn sich die Frage auf einen einzelnen, zeitlich begrenzten Anlass bezieht (z. B. eine bestimmte Reise wie "Reise 2026 Japan", eine Feier, ein Umzug, eine größere Anschaffung). "ongoing" wenn es um laufende oder wiederkehrende Ausgaben über die Zeit geht (z. B. "Lebensmittel letztes Jahr", "monatliche Fixkosten", "ÖPNV insgesamt"). Im Zweifel "ongoing".
+- 'interval' ist "year" wenn der Zeitraum mehrere Jahre umfasst oder ein Jahresvergleich gewünscht ist (z. B. "letzte 3 Jahre", "über die Jahre"). "month" bei kürzerem Zeitraum oder wenn monatliche Aufschlüsselung sinnvoller ist. Standard: "month".
 - Antwort als JSON, kein Freitext drumherum.
 
 Beispiele für 'kind':
@@ -387,6 +480,13 @@ Beispiele für 'kind':
 - "Wie viel zahle ich insgesamt für ÖPNV?" → "ongoing"
 - "Entwicklung meiner Fixkosten über die Zeit" → "ongoing"
 - "Alle Ausgaben für Mobilität & Transport 2025" → "ongoing"
+
+Beispiele für 'relativeTimespan':
+- "Lebensmittel dieses Jahr" → relativeTimespan: { type: "this_year" }, interval: "month"
+- "Ausgaben letztes Jahr" → relativeTimespan: { type: "last_year" }, interval: "month"
+- "Entwicklung über die letzten 3 Jahre" → relativeTimespan: { type: "last_n_years", n: 3 }, interval: "year"
+- "Fixkosten letzte 6 Monate" → relativeTimespan: { type: "last_n_months", n: 6 }, interval: "month"
+- "Ausgaben 2024" → KEIN relativeTimespan (absolutes Jahr), interval: "month"
 
 Verfügbare Tags (Vokabular):
 ${vocabBlock}

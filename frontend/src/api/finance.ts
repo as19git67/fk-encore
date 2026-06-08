@@ -705,6 +705,11 @@ export async function importFinanceData(
 // Analysis (Etappe 9)
 // ----------------------------------------------------------------------
 
+export interface RelativeTimespan {
+  type: 'this_year' | 'last_year' | 'last_n_years' | 'last_n_months' | 'this_month' | 'last_month'
+  n?: number
+}
+
 export interface AnalysisAst {
   tags: string[]
   op: 'AND' | 'OR'
@@ -712,12 +717,16 @@ export interface AnalysisAst {
   amountRange?: { min?: number; max?: number }
   /** "event" = bounded one-off (a trip); "ongoing" = recurring spending. */
   kind?: 'event' | 'ongoing'
+  /** Aggregation granularity for ongoing analyses. */
+  interval?: 'month' | 'year'
+  /** Relative time reference for saved queries that auto-adjust over time. */
+  relativeTimespan?: RelativeTimespan
 }
 
 export interface AnalysisResult {
   ast: AnalysisAst
   total: { sum: string; count: number; avg: string }
-  byMonth: Array<{ month: string; sum: string; count: number }>
+  byPeriod: Array<{ period: string; sum: string; count: number }>
   byTag: Array<{ tag: string; sum: string; count: number }>
   topCounterparties: Array<{ name: string; sum: string; count: number }>
 }
@@ -762,6 +771,18 @@ export async function analysisTransactions(params: {
   limit?: number
 }): Promise<{ transactions: AnalysisTransaction[] }> {
   return apiFetch('/finance/analysis/transactions', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+}
+
+export async function analysisPeriodTransactions(params: {
+  ast: AnalysisAst
+  period: string
+  accountIds?: number[]
+  limit?: number
+}): Promise<{ transactions: AnalysisTransaction[] }> {
+  return apiFetch('/finance/analysis/period-transactions', {
     method: 'POST',
     body: JSON.stringify(params),
   })
