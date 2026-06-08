@@ -85,7 +85,12 @@ function fixtureWithParent(): GeofabrikIndex {
   return parseIndex(raw, new Date("2026-01-01T00:00:00Z"));
 }
 
-async function seedRegion(slug: string, status: string, postgresDb = "nom_x") {
+async function seedRegion(
+  slug: string,
+  status: string,
+  postgresDb = "nom_x",
+  pbfSizeMb?: number,
+) {
   await db.insert(osmRegionImports).values({
     slug,
     geofabrik_url: "https://example.com/x.osm.pbf",
@@ -95,6 +100,7 @@ async function seedRegion(slug: string, status: string, postgresDb = "nom_x") {
     bbox_max_lat: 0,
     bbox_max_lon: 0,
     status,
+    pbf_size_mb: pbfSizeMb ?? null,
   });
 }
 
@@ -262,6 +268,41 @@ describe("suggestRegionsFromPhotos", () => {
     expect(r.redundantRegions[0].slug).toBe("europe/germany");
     expect(r.redundantRegions[0].status).toBe("ready_running");
     expect(r.redundantRegions[0].coveringChildren).toContain("europe/germany/bayern");
+    // No PBF sizes seeded → disk verdict can't be computed.
+    expect(r.redundantRegions[0].parentSizeMb).toBeNull();
+    expect(r.redundantRegions[0].childrenSizeMb).toBeNull();
+    expect(r.redundantRegions[0].recommendation).toBe("unknown");
+  });
+
+  it("recommends deleting the parent when the sub-regions are smaller on disk", async () => {
+    const u = await seedUser();
+    await seedPhoto(u, 48.137, 11.575, 1); // Munich → Bayern
+    await seedPhoto(u, 49.453, 11.077, 2); // Nuremberg → Bayern
+    await seedRegion("europe/germany", "ready_running", "nom_germany", 3600);
+    await seedRegion("europe/germany/bayern", "ready_running", "nom_bayern", 600);
+
+    const r = await suggestRegionsFromPhotos({ loadIndex: fixtureWithParent });
+    expect(r.redundantRegions).toHaveLength(1);
+    const rr = r.redundantRegions[0];
+    expect(rr.parentSizeMb).toBe(3600);
+    expect(rr.childrenSizeMb).toBe(600);
+    expect(rr.recommendation).toBe("delete_parent");
+  });
+
+  it("recommends keeping the parent when the sub-regions cost more on disk", async () => {
+    const u = await seedUser();
+    await seedPhoto(u, 48.137, 11.575, 1); // Munich → Bayern
+    // The single Germany extract is smaller than the (hypothetically
+    // bloated) Bayern sub-region — keep the larger, cheaper extract.
+    await seedRegion("europe/germany", "ready_running", "nom_germany", 500);
+    await seedRegion("europe/germany/bayern", "ready_running", "nom_bayern", 900);
+
+    const r = await suggestRegionsFromPhotos({ loadIndex: fixtureWithParent });
+    expect(r.redundantRegions).toHaveLength(1);
+    const rr = r.redundantRegions[0];
+    expect(rr.parentSizeMb).toBe(500);
+    expect(rr.childrenSizeMb).toBe(900);
+    expect(rr.recommendation).toBe("keep_parent");
   });
 
   it("does not flag a parent as redundant when it still has directly-attributed photos", async () => {
