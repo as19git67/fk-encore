@@ -553,6 +553,17 @@ const redundantSlugSet = computed<Set<string>>(() => {
   return new Set(bulkSuggestResult.value.redundantRegions.map((r: RedundantRegion) => r.slug))
 })
 
+function redundantVerdictLabel(rr: RedundantRegion): string {
+  switch (rr.recommendation) {
+    case 'delete_parent':
+      return 'große Region löschen spart Platz'
+    case 'keep_parent':
+      return 'große Region behalten — Subregionen brauchen mehr Platz'
+    default:
+      return 'Größe unbekannt — bitte prüfen'
+  }
+}
+
 const osmStatusLabels: Record<string, string> = {
   pending_approval: 'Wartet auf Freigabe',
   importing: 'Wird importiert',
@@ -1345,16 +1356,31 @@ onBeforeUnmount(() => {
             <p class="osm-redundant__desc">
               Diese importierten Regionen sind vollständig durch Subregionen abgedeckt.
               Alle Fotos in ihrem Gebiet werden bereits durch die aufgelisteten Unterregionen
-              versorgt — sie können entfernt werden, um Speicherplatz freizugeben.
+              versorgt. Ob ein Entfernen Speicherplatz spart, hängt von den PBF-Größen ab —
+              die Empfehlung berücksichtigt das.
             </p>
             <ul class="osm-redundant__list">
               <li v-for="rr in bulkSuggestResult.redundantRegions" :key="rr.slug">
-                <code>{{ rr.slug }}</code>
-                <span class="osm-status osm-status--ready_running" style="margin-left:0.4rem">
-                  {{ osmStatusLabels[rr.status] ?? rr.status }}
-                </span>
+                <div class="osm-redundant__head">
+                  <code>{{ rr.slug }}</code>
+                  <span class="osm-status osm-status--ready_running">
+                    {{ osmStatusLabels[rr.status] ?? rr.status }}
+                  </span>
+                  <span
+                    class="osm-redundant__verdict"
+                    :class="`osm-redundant__verdict--${rr.recommendation}`"
+                  >{{ redundantVerdictLabel(rr) }}</span>
+                </div>
                 <span class="osm-redundant__children">
                   abgedeckt durch: {{ rr.coveringChildren.join(', ') }}
+                </span>
+                <span
+                  v-if="rr.parentSizeMb !== null || rr.childrenSizeMb !== null"
+                  class="osm-redundant__sizes"
+                >
+                  große Region: {{ rr.parentSizeMb !== null ? `${rr.parentSizeMb} MB` : '?' }}
+                  · Subregionen zusammen:
+                  {{ rr.childrenSizeMb !== null ? `${rr.childrenSizeMb} MB` : '?' }}
                 </span>
               </li>
             </ul>
@@ -1921,10 +1947,37 @@ onBeforeUnmount(() => {
 }
 .osm-redundant__list li {
   display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 0.35rem;
+  flex-direction: column;
+  gap: 0.2rem;
   font-size: 0.9rem;
+}
+.osm-redundant__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.osm-redundant__verdict {
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.05rem 0.45rem;
+  border-radius: 4px;
+}
+.osm-redundant__verdict--delete_parent {
+  background: var(--p-tag-success-background, rgba(0,128,0,0.12));
+  color: var(--p-tag-success-color);
+}
+.osm-redundant__verdict--keep_parent {
+  background: var(--p-tag-warn-background, rgba(255,160,0,0.18));
+  color: var(--p-tag-warn-color);
+}
+.osm-redundant__verdict--unknown {
+  background: var(--p-content-hover-background);
+  color: var(--p-text-muted-color);
+}
+.osm-redundant__sizes {
+  font-size: 0.78rem;
+  color: var(--p-text-muted-color);
 }
 .osm-redundant__children {
   font-size: 0.8rem;
