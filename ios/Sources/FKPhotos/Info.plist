@@ -27,6 +27,10 @@
 	<dict/>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Zum Hochladen von Fotos in Vivanty Photos</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Zum Speichern aufgenommener Fotos in deiner Mediathek</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Zum direkten Aufnehmen von Fotos für den Upload</string>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

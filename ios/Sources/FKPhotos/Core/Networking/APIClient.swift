@@ -7,6 +7,11 @@ actor APIClient {
     // Default to localhost for development. Override via Admin → Server settings.
     var baseURL: URL
 
+    /// The session every request runs through. Defaults to `.shared`;
+    /// injectable so upload-contract tests can drive a `MockURLProtocol`
+    /// session and assert exactly what the client sends to the server.
+    private let session: URLSession
+
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
         return d
@@ -21,7 +26,8 @@ actor APIClient {
     private var isRefreshing = false
     private var pendingRefreshContinuations: [CheckedContinuation<Bool, Never>] = []
 
-    init() {
+    init(session: URLSession = .shared) {
+        self.session = session
         // Prefer the App Group suite (readable by the Share Extension) with a
         // migration fallback to the old standard UserDefaults location.
         let stored = SharedStorage.defaults.string(forKey: SharedStorage.serverURLKey)
@@ -232,12 +238,12 @@ actor APIClient {
           gps:           \(latitude.map { String($0) } ?? "nil"),\(longitude.map { String($0) } ?? "nil")
         """)
 
-        var (responseData, response) = try await URLSession.shared.data(for: request)
+        var (responseData, response) = try await session.data(for: request)
         if let http = response as? HTTPURLResponse, http.statusCode == 401, let manager = authManager {
             let refreshed = await refreshOnce(manager: manager)
             if refreshed {
                 applyAuth(&request)
-                (responseData, response) = try await URLSession.shared.data(for: request)
+                (responseData, response) = try await session.data(for: request)
             } else {
                 manager.handleUnauthorized()
                 throw APIError.httpError(401, parseErrorMessage(responseData))
@@ -298,11 +304,11 @@ actor APIClient {
         if let ifNoneMatch { request.setValue(ifNoneMatch, forHTTPHeaderField: "If-None-Match") }
         applyAuth(&request)
 
-        var (data, response) = try await URLSession.shared.data(for: request)
+        var (data, response) = try await session.data(for: request)
         if let http = response as? HTTPURLResponse, http.statusCode == 401, let manager = authManager {
             if await refreshOnce(manager: manager) {
                 applyAuth(&request)
-                (data, response) = try await URLSession.shared.data(for: request)
+                (data, response) = try await session.data(for: request)
             } else {
                 manager.handleUnauthorized()
                 throw APIError.httpError(401, parseErrorMessage(data))
@@ -325,7 +331,7 @@ actor APIClient {
         request.httpMethod = "GET"
         applyAuth(&request)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
         }
@@ -333,7 +339,7 @@ actor APIClient {
         if httpResponse.statusCode == 401 {
             if let manager = authManager, await refreshOnce(manager: manager) {
                 applyAuth(&request)
-                let (retryData, retryResponse) = try await URLSession.shared.data(for: request)
+                let (retryData, retryResponse) = try await session.data(for: request)
                 guard let retryHttp = retryResponse as? HTTPURLResponse else {
                     throw APIError.invalidResponse
                 }
@@ -381,7 +387,7 @@ actor APIClient {
     }
 
     private func perform<T: Decodable>(_ request: URLRequest) async throws -> T {
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
@@ -400,7 +406,7 @@ actor APIClient {
     /// Performs request; on 401, attempts a token refresh and retries once.
     /// Concurrent 401s all wait for a single refresh to avoid token rotation conflicts.
     private func performWithRefresh<T: Decodable>(_ request: URLRequest) async throws -> T {
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
