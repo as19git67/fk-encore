@@ -80,10 +80,36 @@ export async function initReplication(
  * Pull and apply any new diffs. Returns a summary describing what
  * happened. Caller surfaces non-zero exit codes as failures; an exit
  * of 0 with appliedDiffs === 0 means "nothing new yet".
+ *
+ * Self-healing: a region whose `osm2pgsql_replication_status` table is
+ * missing was imported but never had replication initialised (e.g. the
+ * non-fatal `initReplication` at import time failed, or it predates
+ * replication support). Running `osm2pgsql-replication update` against
+ * such a DB crashes inside the tool (`'NoneType' has no attribute
+ * 'sequence'`). When a `pbfUrl` is supplied we run `init` first to heal
+ * it; without one (the background loop has no URL) we skip gracefully
+ * so a single uninitialised region doesn't spam the log with crashes.
  */
 export async function runReplicationUpdate(
   postgresDb: string,
+  pbfUrl?: string,
 ): Promise<ReplicationResult> {
+  if (!(await isReplicationInitialized(postgresDb))) {
+    if (!pbfUrl) {
+      console.warn(
+        `[geo] replication ${postgresDb}: not initialised (no ` +
+          `osm2pgsql_replication_status table) and no pbfUrl available — ` +
+          `skipping. Trigger a manual refresh to heal it.`,
+      );
+      return { postgresDb, appliedDiffs: 0, sequence: null, timestamp: null };
+    }
+    console.warn(
+      `[geo] replication ${postgresDb}: not initialised — running ` +
+        `osm2pgsql-replication init before the first update.`,
+    );
+    await initReplication(postgresDb, pbfUrl);
+  }
+
   // `osm2pgsql-replication update` prints summary lines we parse for
   // metrics. Capture stdout/stderr instead of inheriting.
   const before = await readState(postgresDb);
@@ -121,6 +147,25 @@ export async function runReplicationUpdate(
     sequence: after.sequence,
     timestamp: after.timestamp,
   };
+}
+
+/**
+ * Whether replication has been initialised for a region — i.e. the
+ * `osm2pgsql_replication_status` table exists. Uses `to_regclass`,
+ * which returns NULL (no error, no noisy server log) for a missing
+ * relation. Returns false on any connection error too.
+ */
+async function isReplicationInitialized(postgresDb: string): Promise<boolean> {
+  const { poolFor } = await import("./db.ts");
+  const pool = poolFor(postgresDb);
+  try {
+    const res = await pool.query<{ ok: boolean }>(
+      `SELECT to_regclass('public.osm2pgsql_replication_status') IS NOT NULL AS ok`,
+    );
+    return res.rows[0]?.ok === true;
+  } catch {
+    return false;
+  }
 }
 
 interface ReplicationStateRow {

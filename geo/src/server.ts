@@ -147,7 +147,10 @@ app.post("/refresh", async (req, res, next) => {
     if (!/^[a-z0-9_]+$/.test(postgresDb)) {
       throw new HttpError(400, `postgresDb must match [a-z0-9_]+, got '${postgresDb}'`);
     }
-    const result = await runReplicationUpdate(postgresDb);
+    // Optional: the PBF URL lets the updater auto-initialise replication
+    // if the region's status table is missing (see runReplicationUpdate).
+    const pbfUrl = typeof body.pbfUrl === "string" ? body.pbfUrl : undefined;
+    const result = await runReplicationUpdate(postgresDb, pbfUrl);
     res.json(result);
   } catch (err) {
     next(err);

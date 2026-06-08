@@ -51,7 +51,10 @@ export async function refreshRegion(
   }
 
   try {
-    const result = await geo.refresh(row.postgres_db);
+    // Forward the PBF URL so the geo service can auto-initialise
+    // replication if this region's status table is missing (imported
+    // but never `init`-ed — otherwise the update subprocess crashes).
+    const result = await geo.refresh(row.postgres_db, row.geofabrik_url);
     const replicationSeq =
       result.sequence !== null && result.sequence !== undefined
         ? String(result.sequence)
