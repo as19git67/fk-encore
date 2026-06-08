@@ -89,7 +89,12 @@ export interface GeoClient {
     lon: number,
     opts?: GeoPoiQueryOptions,
   ): Promise<GeoPoiCandidate[]>;
-  refresh(postgresDb: string): Promise<GeoRefreshResult>;
+  /**
+   * Apply replication diffs. `pbfUrl` is optional but lets the geo
+   * service auto-initialise replication for a region whose status table
+   * is missing (imported but never `init`-ed).
+   */
+  refresh(postgresDb: string, pbfUrl?: string): Promise<GeoRefreshResult>;
   dropRegion(postgresDb: string): Promise<boolean>;
 }
 
@@ -166,8 +171,8 @@ class HttpGeoClient implements GeoClient {
     return body.candidates;
   }
 
-  async refresh(postgresDb: string): Promise<GeoRefreshResult> {
-    return await this.postJson<GeoRefreshResult>("/refresh", { postgresDb });
+  async refresh(postgresDb: string, pbfUrl?: string): Promise<GeoRefreshResult> {
+    return await this.postJson<GeoRefreshResult>("/refresh", { postgresDb, pbfUrl });
   }
 
   async dropRegion(postgresDb: string): Promise<boolean> {
